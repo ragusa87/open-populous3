@@ -81,6 +81,7 @@ pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraRig>()
+            .init_resource::<CursorConfined>()
             .add_systems(Startup, spawn_camera)
             .add_systems(Update, frame_new_map.run_if(resource_changed::<crate::world::LevelList>))
             .add_systems(Update, (camera_input, apply_rig, sky_color).chain())
@@ -98,23 +99,35 @@ fn spawn_camera(mut commands: Commands) {
     ));
 }
 
-/// Keep the cursor inside the window so it can be pushed against the borders.
+/// Whether the cursor should stay inside the window (Esc toggles).
+#[derive(Resource)]
+pub struct CursorConfined(pub bool);
+
+impl Default for CursorConfined {
+    fn default() -> Self {
+        CursorConfined(true)
+    }
+}
+
+/// Esc toggles confinement; regaining focus re-applies it (compositors drop the
+/// constraint on focus loss, and a change made before the window exists is lost).
 fn toggle_cursor_confine(
     keys: Res<ButtonInput<KeyCode>>,
-    mut started: Local<bool>,
+    mut focus: MessageReader<bevy::window::WindowFocused>,
+    mut confined: ResMut<CursorConfined>,
     mut cursors: Query<&mut CursorOptions>,
 ) {
-    if *started && !keys.just_pressed(KeyCode::Escape) {
+    let refocused = focus.read().any(|f| f.focused);
+    if keys.just_pressed(KeyCode::Escape) {
+        confined.0 = !confined.0;
+    } else if !refocused {
         return;
     }
+    let mode = if confined.0 { CursorGrabMode::Confined } else { CursorGrabMode::None };
     for mut c in &mut cursors {
-        c.grab_mode = if *started && c.grab_mode == CursorGrabMode::Confined {
-            CursorGrabMode::None
-        } else {
-            CursorGrabMode::Confined
-        };
+        c.grab_mode = mode;
+        c.set_changed();
     }
-    *started = true;
 }
 
 fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {

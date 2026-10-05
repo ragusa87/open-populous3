@@ -28,6 +28,10 @@ fn main() {
                 mode: if fullscreen { WindowMode::BorderlessFullscreen(MonitorSelection::Current) } else { WindowMode::Windowed },
                 ..default()
             }),
+            primary_cursor_options: Some(bevy::window::CursorOptions {
+                grab_mode: bevy::window::CursorGrabMode::Confined,
+                ..default()
+            }),
             ..default()
         }));
     }
