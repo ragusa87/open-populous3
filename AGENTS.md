@@ -13,6 +13,7 @@ Guidance for coding agents working on this repo (Rust + Bevy 0.19 Populous-like 
 - `just test` (or `cargo test --workspace`): must pass before committing.
 - `just run [levl.dat|dir]`: windowed game. Avoid it as an agent: it opens a window and steals focus.
 - `just shot out.png [level]` / `AERIAL=1 just shot out.png`: headless offscreen render, then exits. Use this to check visuals.
+- `just run-generated` / `--no-original`: no original files read at all (use for anything shippable).
 - `just level-info file.dat`: dump parsed level.
 - Original levels: `$POP3_LEVELS` or the Wine install path in `world.rs` (`DEFAULT_LEVELS_DIR`). Read-only, never modify or ship them.
 

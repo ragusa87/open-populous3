@@ -24,7 +24,6 @@ impl Default for CurveParams {
 pub struct TerrainGeometry {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
-    pub colors: Vec<[f32; 4]>,
     /// Absolute map coordinates / map size: tiles with a repeating sampler.
     pub uvs: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
@@ -46,7 +45,6 @@ pub fn build(map: &Heightmap, focus: (f32, f32), params: &CurveParams) -> Terrai
     let (fx, fz) = (focus.0 - bx as f32, focus.1 - bz as f32);
     let mut g = TerrainGeometry {
         positions: Vec::with_capacity(n * n),
-        colors: Vec::with_capacity(n * n),
         ..Default::default()
     };
     for j in -r..=r {
@@ -55,7 +53,6 @@ pub fn build(map: &Heightmap, focus: (f32, f32), params: &CurveParams) -> Terrai
             let h = map.get(bx + i, bz + j);
             let y = h as f32 * params.height_scale - drop_at(params, dx, dz);
             g.positions.push([dx, y, dz]);
-            g.colors.push(color_for(h, bx + i, bz + j));
             let size = map.size() as f32;
             g.uvs.push([(bx + i) as f32 / size, (bz + j) as f32 / size]);
         }
@@ -96,32 +93,6 @@ fn grid_normals(p: &[[f32; 3]], n: usize) -> Vec<[f32; 3]> {
     out
 }
 
-/// Height-banded palette (sRGB values converted to linear vertex colors).
-/// Grass darkens with altitude and every vertex gets a small stable jitter,
-/// a cheap stand-in for textures that makes gentle relief readable.
-pub fn color_for(h: u16, x: i32, z: i32) -> [f32; 4] {
-    let t = h as f32 / 450.0;
-    let base: [f32; 3] = match h {
-        0 => [0.10, 0.25, 0.55],
-        1..=40 => [0.85, 0.78, 0.50],
-        41..=450 => [0.42 - 0.20 * t, 0.62 - 0.22 * t, 0.24 - 0.08 * t],
-        451..=800 => [0.45, 0.40, 0.30],
-        _ => [0.90, 0.90, 0.92],
-    };
-    let shade = if h > 0 { 0.9 + 0.1 * jitter(x, z) } else { 1.0 };
-    let lin = |c: f32| (c * shade).powf(2.2);
-    [lin(base[0]), lin(base[1]), lin(base[2]), 1.0]
-}
-
-/// Deterministic 0..1 noise per (wrapped) cell.
-fn jitter(x: i32, z: i32) -> f32 {
-    let (x, z) = (x.rem_euclid(128) as u32, z.rem_euclid(128) as u32);
-    let mut v = x.wrapping_mul(0x9E37_79B1) ^ z.wrapping_mul(0x85EB_CA77);
-    v ^= v >> 15;
-    v = v.wrapping_mul(0x2C1B_3C6D);
-    (v >> 24) as f32 / 255.0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,12 +107,6 @@ mod tests {
         let centre = g.positions[40];
         assert_eq!(centre, [0.0, 0.0, 0.0]);
         assert!(g.positions[0][1] < -0.3, "corners bend below the horizon");
-    }
-
-    #[test]
-    fn colors_are_linear() {
-        assert!(color_for(41, 1, 0)[1] < 0.62 * 0.62);
-        assert_eq!(color_for(100, 3, 4), color_for(100, 131, 4), "jitter wraps");
     }
 
     #[test]

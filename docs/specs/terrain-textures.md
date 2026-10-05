@@ -22,7 +22,9 @@ Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cel
 
 Unverified guesses to tune against the real game: the height -> row scale (1:1 now; level 1, all
 below height 100, comes out sandy), how `disp` is applied, the brightness curve.
-Fallback when no original data is found: height-banded vertex colours (`terrain_mesh::color_for`).
+Fallback (no data, or `--no-original`): `procedural_theme::generate(seed)` builds a palette
+(8 bands x 32 brightness), a jittered bigfade and tileable value-noise disp with the same
+shapes as the original files, so the same bake is used in both modes.
 
 ## Next
 - Re-bake only the dirty rect after edits (now the whole 1024² texture is re-baked).

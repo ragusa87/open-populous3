@@ -4,6 +4,10 @@ levels := env_var_or_default("POP3_LEVELS", "")
 run *args:
     cargo run -p game-client -- {{args}}
 
+# Never read the original game files: generated maps + generated theme
+run-generated *args:
+    cargo run -p game-client -- --no-original {{args}}
+
 fullscreen *args:
     FULLSCREEN=1 cargo run -p game-client -- {{args}}
 

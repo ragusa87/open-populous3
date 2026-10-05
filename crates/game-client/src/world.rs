@@ -37,6 +37,11 @@ struct TerrainMesh;
 struct TerrainMaterial(Handle<StandardMaterial>);
 
 impl LevelList {
+    /// No original data at all: maps and themes are generated, PgUp/PgDn change the seed.
+    pub fn generated_only() -> Self {
+        LevelList::default()
+    }
+
     /// `arg` may be a level file, a levels directory, or nothing (default dir / $POP3_LEVELS).
     pub fn discover(arg: Option<&str>) -> Self {
         let env = std::env::var("POP3_LEVELS").ok();
@@ -77,11 +82,17 @@ pub fn list_levels(dir: &Path) -> Vec<PathBuf> {
 
 pub struct WorldPlugin {
     pub level_arg: Option<String>,
+    /// false = never read the original game files (`--no-original`).
+    pub use_original: bool,
 }
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
-        let levels = LevelList::discover(self.level_arg.as_deref());
+        let levels = if self.use_original {
+            LevelList::discover(self.level_arg.as_deref())
+        } else {
+            LevelList::generated_only()
+        };
         let map = levels.load_current();
         app.insert_resource(CurrentMap(map))
             .insert_resource(levels)
@@ -105,17 +116,26 @@ fn switch_level(
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<TerrainDirty>,
 ) {
-    let n = levels.files.len().max(1);
-    let step = if keys.just_pressed(KeyCode::PageDown) {
-        1
+    let forward = if keys.just_pressed(KeyCode::PageDown) {
+        true
     } else if keys.just_pressed(KeyCode::PageUp) {
-        n - 1
+        false
     } else {
         return;
     };
-    levels.index = (levels.index + step) % n;
+    levels.index = next_index(levels.index, levels.files.len(), forward);
     map.0 = levels.load_current();
     dirty.0 = true;
+}
+
+/// Wraps through original files; with none, walks generated seeds (never below 0).
+pub fn next_index(index: usize, files: usize, forward: bool) -> usize {
+    match (files, forward) {
+        (0, true) => index + 1,
+        (0, false) => index.saturating_sub(1),
+        (n, true) => (index + 1) % n,
+        (n, false) => (index + n - 1) % n,
+    }
 }
 
 fn rebuild_terrain(
@@ -126,7 +146,6 @@ fn rebuild_terrain(
     mut last_focus: Local<Option<Vec2>>,
     levels: Res<LevelList>,
     material: Res<TerrainMaterial>,
-    mut textured: Local<bool>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -136,14 +155,14 @@ fn rebuild_terrain(
         return;
     }
     if dirty.0 {
-        let theme = map.0.theme.and_then(|t| {
+        let original = map.0.theme.and_then(|t| {
             Theme::load(&levels.data_dir, t).map_err(|e| warn!("theme {t}: {e}")).ok()
         });
-        let image = theme.map(|t| images.add(theme_image(&map.0, &t, params.0.height_scale)));
-        *textured = image.is_some();
+        let theme = original.unwrap_or_else(|| crate::procedural_theme::generate(levels.index as u32 + 1));
+        let image = images.add(theme_image(&map.0, &theme, params.0.height_scale));
         if let Some(mut m) = mats.get_mut(&material.0) {
-            m.unlit = image.is_some();
-            m.base_color_texture = image;
+            m.unlit = true;
+            m.base_color_texture = Some(image);
         }
     }
     dirty.0 = false;
@@ -154,11 +173,6 @@ fn rebuild_terrain(
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, g.positions.clone());
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, g.normals.clone());
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, g.uvs.clone());
-            if *textured {
-                mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
-            } else {
-                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, g.colors.clone());
-            }
             mesh.insert_indices(Indices::U32(g.indices.clone()));
         }
     }
@@ -181,4 +195,22 @@ fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32) -> Image {
         ..default()
     });
     image
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn level_cycling() {
+        assert_eq!(next_index(2, 3, true), 0);
+        assert_eq!(next_index(0, 3, false), 2);
+        assert_eq!(next_index(4, 0, true), 5, "generated seeds keep going");
+        assert_eq!(next_index(0, 0, false), 0);
+    }
+
+    #[test]
+    fn generated_only_lists_nothing() {
+        assert!(LevelList::generated_only().files.is_empty());
+    }
 }
