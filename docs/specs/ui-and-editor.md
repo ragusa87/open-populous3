@@ -2,7 +2,10 @@
 
 ## Camera (`camera.rs`)
 `CameraRig { focus, yaw, pitch, distance, aerial }`. Focus is in cell units, wrapped in `[0,128)`.
-Like the original: mouse toward a screen edge scrolls (outer 40% of each half-screen, speed ramps up to the border), Left/Right rotate, Up/Down move
+Like the original: scrolling happens only with the cursor pressed against the window border; speed
+comes from how hard the mouse keeps pushing outward (raw motion while stuck at the edge, `edge_push.rs`),
+slows down while holding still, stops when leaving the edge. The cursor is confined to the window
+(Esc toggles). The panel does not block it, Left/Right rotate, Up/Down move
 forward/back like the mouse, middle-drag rotates, Enter toggles
 aerial (pitch 1.35, distance 115) and restores the previous ground view (default pitch 0.32, distance 11,
 close to the original). Clear color fades from sky blue to space when zooming out. Changing level frames a
@@ -11,7 +14,7 @@ low inland cell (`Heightmap::lowland_cell`).
 ## Left panel (`hud/`)
 Fixed 204 px panel on the left, like the original: minimap placeholder, 3 tabs
 (Spells / Build / Stats, `ActiveTab`), one content node per tab (`TabContent(n)`), info line under
-the grid. Edge scrolling is measured on the 3D view only (`ViewportInset`), never over the panel.
+the grid.
 
 ### Spells tab (`hud/spells.rs`)
 Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`, demo loadout for now).

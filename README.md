@@ -11,7 +11,7 @@ just shot /tmp/x.png          # headless screenshot (no window, no focus steal)
 just test
 ```
 
-Controls: mouse at screen edge scrolls, Left/Right rotate, Up/Down move, middle-drag rotate, **Enter** aerial view,
+Controls: push the mouse against the window edges to scroll (Esc frees the cursor), Left/Right rotate, Up/Down move, middle-drag rotate, **Enter** aerial view,
 PgUp/PgDn change level, Tab editor mode (R/F/T/M/B brushes), F11 fullscreen.
 
 Without original data (or with `--no-original` / `POP3_NO_ORIGINAL=1`) maps and the ground

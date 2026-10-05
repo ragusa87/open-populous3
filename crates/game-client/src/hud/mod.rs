@@ -17,8 +17,7 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(crate::camera::ViewportInset { left: PANEL_WIDTH })
-            .add_plugins((panel::PanelPlugin, spells::SpellsPlugin))
+        app.add_plugins((panel::PanelPlugin, spells::SpellsPlugin))
             .add_systems(Startup, spawn_info)
             .add_systems(Update, update_info);
     }
@@ -47,7 +46,7 @@ fn update_info(
     let mode = if editor.active { "EDITOR  R raise  F lower  T flatten  M mark  B bridge" } else { "" };
     let s = format!(
         "{} ({level})  focus {:.0},{:.0}{}\n\
-         Mouse to edges / Up-Down move | Left-Right rotate | Enter aerial | PgUp/PgDn level | C cast selected spell | Tab editor | F11 fullscreen\n{mode}",
+         Push mouse on window edges / Up-Down move | Left-Right rotate | Enter aerial | PgUp/PgDn level | C cast selected spell | Tab editor | Esc free cursor | F11 fullscreen\n{mode}",
         map.0.name,
         rig.focus.x,
         rig.focus.y,

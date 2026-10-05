@@ -3,6 +3,7 @@
 
 mod camera;
 mod dev;
+mod edge_push;
 mod editor;
 mod hud;
 mod procedural_theme;

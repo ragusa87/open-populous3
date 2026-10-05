@@ -1,17 +1,18 @@
-//! Orbit camera around a wrapping focus point. Mouse toward the edges / Up-Down move,
-//! Left-Right and middle-drag rotate, Enter toggles the aerial (planet) view.
+//! Orbit camera around a wrapping focus point. Pushing the mouse against the window
+//! border or Up-Down move, Left-Right and middle-drag rotate, Enter toggles the aerial view.
+//! The cursor is confined to the window (Esc releases/re-confines it).
 
+use crate::edge_push::EdgePush;
 use crate::terrain_mesh::{focus_height, CurveParams};
 use crate::world::CurrentMap;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
+use bevy::window::{CursorGrabMode, CursorOptions};
 
 const MAP: f32 = pop3_format::MAP_SIZE as f32;
 /// (pitch, distance) of the default ground view: low and close, like the original.
 pub const GROUND_VIEW: (f32, f32) = (0.32, 11.0);
-/// Fraction of the half-screen (from the centre) where the mouse does not scroll.
-pub const EDGE_DEAD_ZONE: f32 = 0.6;
-/// Scroll speeds in camera-distances per second (mouse = speed at the very border).
+/// Scroll speeds in camera-distances per second (mouse = at full push).
 pub const MOUSE_SPEED: f32 = 2.2;
 pub const KEY_SPEED: f32 = 3.0;
 const SKY: Color = Color::srgb(0.45, 0.65, 0.92);
@@ -82,7 +83,8 @@ impl Plugin for CameraPlugin {
         app.init_resource::<CameraRig>()
             .add_systems(Startup, spawn_camera)
             .add_systems(Update, frame_new_map.run_if(resource_changed::<crate::world::LevelList>))
-            .add_systems(Update, (camera_input, apply_rig, sky_color).chain());
+            .add_systems(Update, (camera_input, apply_rig, sky_color).chain())
+            .add_systems(Update, toggle_cursor_confine);
     }
 }
 
@@ -96,19 +98,27 @@ fn spawn_camera(mut commands: Commands) {
     ));
 }
 
-fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {
-    rig.look_at_cell(map.0.terrain.lowland_cell());
+/// Keep the cursor inside the window so it can be pushed against the borders.
+fn toggle_cursor_confine(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut started: Local<bool>,
+    mut cursors: Query<&mut CursorOptions>,
+) {
+    if *started && !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    for mut c in &mut cursors {
+        c.grab_mode = if *started && c.grab_mode == CursorGrabMode::Confined {
+            CursorGrabMode::None
+        } else {
+            CursorGrabMode::Confined
+        };
+    }
+    *started = true;
 }
 
-/// Screen-edge scrolling like the original, returning (forward, right) in -1..1.
-/// Per axis, the cursor offset from the centre is normalised to -1..1; inside `dead`
-/// nothing moves, then speed ramps linearly up to full speed at the border.
-pub fn edge_scroll(cursor: Vec2, size: Vec2, dead: f32) -> Vec2 {
-    let ramp = |pos: f32, len: f32| {
-        let t = ((pos - len / 2.0) / (len / 2.0)).clamp(-1.0, 1.0);
-        t.signum() * ((t.abs() - dead) / (1.0 - dead)).max(0.0)
-    };
-    Vec2::new(-ramp(cursor.y, size.y), ramp(cursor.x, size.x))
+fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {
+    rig.look_at_cell(map.0.terrain.lowland_cell());
 }
 
 fn camera_input(
@@ -116,7 +126,7 @@ fn camera_input(
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     windows: Query<&Window>,
-    inset: Option<Res<ViewportInset>>,
+    mut push: Local<EdgePush>,
     time: Res<Time>,
     mut rig: ResMut<CameraRig>,
 ) {
@@ -126,8 +136,8 @@ fn camera_input(
 
     let edge = windows
         .iter()
-        .find_map(|w| w.cursor_position().map(|c| view_edge_scroll(c, w.size(), inset.as_deref().copied().unwrap_or_default())))
-        .unwrap_or(Vec2::ZERO);
+        .next()
+        .map_or(Vec2::ZERO, |w| push.update(w.cursor_position(), w.size(), motion.delta, dt));
     let keys_fwd = axis(KeyCode::ArrowUp, KeyCode::ArrowDown) * KEY_SPEED;
     let forward = (edge.x * MOUSE_SPEED + keys_fwd).clamp(-KEY_SPEED, KEY_SPEED);
     let scale = rig.distance.max(10.0) * dt;
@@ -169,21 +179,6 @@ fn sky_color(rig: Res<CameraRig>, mut clear: ResMut<ClearColor>) {
     clear.0 = sky_for_distance(rig.distance);
 }
 
-/// Screen area covered by UI on the left: edge scrolling is measured on the 3D view only.
-#[derive(Resource, Default, Clone, Copy)]
-pub struct ViewportInset {
-    pub left: f32,
-}
-
-/// Edge scroll for a cursor in window pixels, ignoring the inset; None over the UI.
-pub fn view_edge_scroll(cursor: Vec2, window: Vec2, inset: ViewportInset) -> Vec2 {
-    if cursor.x < inset.left {
-        return Vec2::ZERO;
-    }
-    let offset = Vec2::new(inset.left, 0.0);
-    edge_scroll(cursor - offset, window - offset, EDGE_DEAD_ZONE)
-}
-
 #[derive(Resource, Default)]
 pub struct CurveParamsRes(pub CurveParams);
 
@@ -198,26 +193,6 @@ mod tests {
         assert!((rig.focus.y - 125.5).abs() < 1e-4);
         rig.move_by(-5.0, 0.0);
         assert!((rig.focus.y - 2.5).abs() < 1e-4);
-    }
-
-    #[test]
-    fn edge_scroll_is_proportional() {
-        let size = Vec2::new(800.0, 600.0);
-        let at = |x, y| edge_scroll(Vec2::new(x, y), size, 0.6);
-        assert_eq!(at(400.0, 300.0), Vec2::ZERO);
-        assert_eq!(at(600.0, 300.0), Vec2::ZERO, "inside dead zone");
-        assert_eq!(at(800.0, 0.0), Vec2::new(1.0, 1.0), "full speed at the border");
-        let half = at(720.0, 300.0).y;
-        assert!((half - 0.5).abs() < 1e-5, "halfway through the ramp, got {half}");
-        assert!(at(0.0, 600.0).x < 0.0 && at(0.0, 600.0).y < 0.0);
-    }
-
-    #[test]
-    fn no_edge_scroll_over_the_panel() {
-        let inset = ViewportInset { left: 200.0 };
-        let win = Vec2::new(1000.0, 600.0);
-        assert_eq!(view_edge_scroll(Vec2::new(5.0, 300.0), win, inset), Vec2::ZERO);
-        assert!(view_edge_scroll(Vec2::new(201.0, 300.0), win, inset).y < -0.9, "left edge of the view");
     }
 
     #[test]
