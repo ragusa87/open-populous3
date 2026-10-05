@@ -55,6 +55,12 @@ impl Heightmap {
         self.get(x, z) == SEA_LEVEL
     }
 
+    /// Highest cell (first one in row-major order on ties); handy to frame a level.
+    pub fn highest_cell(&self) -> (i32, i32) {
+        let (i, _) = self.heights.iter().enumerate().fold((0, 0), |best, (i, &h)| if h > best.1 { (i, h) } else { best });
+        ((i % self.size) as i32, (i / self.size) as i32)
+    }
+
     /// Bilinear height for rendering (float use is fine outside the simulation).
     pub fn sample(&self, x: f32, z: f32) -> f32 {
         let (x0, z0) = (x.floor(), z.floor());
@@ -170,6 +176,13 @@ mod tests {
             assert!(!m.is_water(x, 2), "cell {x} should be land");
         }
         assert!(m.is_water(8, 2), "bridge goes the short way round");
+    }
+
+    #[test]
+    fn highest_cell_finds_peak() {
+        let mut m = Heightmap::new(8);
+        m.set(3, 6, 9);
+        assert_eq!(m.highest_cell(), (3, 6));
     }
 
     #[test]
