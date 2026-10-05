@@ -7,6 +7,10 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 
 const MAP: f32 = pop3_format::MAP_SIZE as f32;
+/// (pitch, distance) of the default ground view: low and close, like the original.
+pub const GROUND_VIEW: (f32, f32) = (0.32, 11.0);
+const SKY: Color = Color::srgb(0.45, 0.65, 0.92);
+const SPACE: Color = Color::srgb(0.02, 0.02, 0.06);
 
 #[derive(Resource, Clone, Debug)]
 pub struct CameraRig {
@@ -25,10 +29,10 @@ impl Default for CameraRig {
         CameraRig {
             focus: Vec2::splat(MAP / 2.0),
             yaw: 0.0,
-            pitch: 0.7,
-            distance: 30.0,
+            pitch: GROUND_VIEW.0,
+            distance: GROUND_VIEW.1,
             aerial: false,
-            saved: (0.7, 30.0),
+            saved: GROUND_VIEW,
         }
     }
 }
@@ -73,13 +77,13 @@ impl Plugin for CameraPlugin {
         app.init_resource::<CameraRig>()
             .add_systems(Startup, spawn_camera)
             .add_systems(Update, frame_new_map.run_if(resource_changed::<crate::world::LevelList>))
-            .add_systems(Update, (camera_input, apply_rig).chain());
+            .add_systems(Update, (camera_input, apply_rig, sky_color).chain());
     }
 }
 
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((Camera3d::default(), Transform::default()));
-    commands.insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.06)));
+    commands.insert_resource(ClearColor(SKY));
     commands.insert_resource(GlobalAmbientLight { brightness: 250.0, ..default() });
     commands.spawn((
         DirectionalLight { illuminance: 6000.0, ..default() },
@@ -88,7 +92,7 @@ fn spawn_camera(mut commands: Commands) {
 }
 
 fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {
-    rig.look_at_cell(map.0.terrain.highest_cell());
+    rig.look_at_cell(map.0.terrain.lowland_cell());
 }
 
 fn camera_input(
@@ -108,14 +112,14 @@ fn camera_input(
 
     if mouse.pressed(MouseButton::Right) {
         rig.yaw -= motion.delta.x * 0.005;
-        rig.pitch = (rig.pitch + motion.delta.y * 0.005).clamp(0.15, 1.5);
+        rig.pitch = (rig.pitch + motion.delta.y * 0.005).clamp(0.08, 1.5);
     }
     if mouse.pressed(MouseButton::Middle) || mouse.pressed(MouseButton::Left) {
         let k = rig.distance * 0.002;
         rig.move_by(motion.delta.y * k, -motion.delta.x * k);
     }
     if scroll.delta.y != 0.0 {
-        rig.distance = (rig.distance * (1.0 - scroll.delta.y * 0.1)).clamp(6.0, 220.0);
+        rig.distance = (rig.distance * (1.0 - scroll.delta.y * 0.1)).clamp(3.0, 220.0);
     }
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) {
         rig.toggle_aerial();
@@ -139,6 +143,16 @@ fn apply_rig(
     }
 }
 
+/// Blue sky near the ground, black space when zoomed out to the planet.
+pub fn sky_for_distance(distance: f32) -> Color {
+    let t = ((distance - 30.0) / 60.0).clamp(0.0, 1.0);
+    SKY.mix(&SPACE, t)
+}
+
+fn sky_color(rig: Res<CameraRig>, mut clear: ResMut<ClearColor>) {
+    clear.0 = sky_for_distance(rig.distance);
+}
+
 #[derive(Resource, Default)]
 pub struct CurveParamsRes(pub CurveParams);
 
@@ -153,6 +167,12 @@ mod tests {
         assert!((rig.focus.y - 125.5).abs() < 1e-4);
         rig.move_by(-5.0, 0.0);
         assert!((rig.focus.y - 2.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn sky_fades_to_space() {
+        assert_eq!(sky_for_distance(GROUND_VIEW.1), SKY);
+        assert_eq!(sky_for_distance(200.0), SPACE);
     }
 
     #[test]

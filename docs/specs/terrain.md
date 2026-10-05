@@ -7,7 +7,7 @@
 
 ## Planet illusion
 The world is flat; vertices are bent down with distance from the camera focus:
-`y = h * height_scale - k * (dx² + dz²)` (`terrain_mesh::build`, k = 0.012, scale = 1/320).
+`y = h * height_scale - k * (dx² + dz²)` (`terrain_mesh::build`, k = 0.012, scale = 1/512, i.e. max height 1024 = 2 cells like the original).
 The mesh is a (2R+1)² grid (R = 64, clipped to a disc) centred on the focus; the focus is the render
 origin, so wrapping is free. Aerial view = the same mesh seen from far away -> a globe.
 

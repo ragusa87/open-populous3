@@ -16,7 +16,7 @@ pub struct CurveParams {
 
 impl Default for CurveParams {
     fn default() -> Self {
-        CurveParams { radius: 64, height_scale: 1.0 / 320.0, curvature: 0.012 }
+        CurveParams { radius: 64, height_scale: 1.0 / 512.0, curvature: 0.012 }
     }
 }
 
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn wraps_across_map_edge() {
         let mut map = Heightmap::new(128);
-        map.set(0, 0, 640);
+        map.set(0, 0, 1024);
         let p = CurveParams { radius: 1, curvature: 0.0, ..Default::default() };
         let g = build(&map, (127.0, 127.0), &p);
         assert_eq!(g.positions[8][1], 2.0, "cell (128,128) is cell (0,0)");

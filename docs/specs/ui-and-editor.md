@@ -3,8 +3,9 @@
 ## Camera (`camera.rs`)
 `CameraRig { focus, yaw, pitch, distance, aerial }`. Focus is in cell units, wrapped in `[0,128)`.
 Arrows move along yaw, Q/E or right-drag rotate, left/middle-drag pan, wheel zoom, Enter toggles
-aerial (pitch 1.35, distance 115) and restores the previous ground view. Changing level frames the
-highest cell.
+aerial (pitch 1.35, distance 115) and restores the previous ground view (default pitch 0.32, distance 11,
+close to the original). Clear color fades from sky blue to space when zooming out. Changing level frames a
+low inland cell (`Heightmap::lowland_cell`).
 
 ## Control tabs (`hud.rs`)
 Bottom bar: Spells / Buildings / Followers (placeholders, `ActiveTab` resource). Next: icon grid per

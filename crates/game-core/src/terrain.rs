@@ -55,10 +55,17 @@ impl Heightmap {
         self.get(x, z) == SEA_LEVEL
     }
 
-    /// Highest cell (first one in row-major order on ties); handy to frame a level.
-    pub fn highest_cell(&self) -> (i32, i32) {
-        let (i, _) = self.heights.iter().enumerate().fold((0, 0), |best, (i, &h)| if h > best.1 { (i, h) } else { best });
-        ((i % self.size) as i32, (i / self.size) as i32)
+    /// A low, inland cell (land all around, below a third of the peak) to frame a level;
+    /// falls back to the highest cell on maps without such ground.
+    pub fn lowland_cell(&self) -> (i32, i32) {
+        let peak = self.heights.iter().copied().max().unwrap_or(0);
+        let cell = |i: usize| ((i % self.size) as i32, (i / self.size) as i32);
+        let inland = |(x, z): (i32, i32)| (-2..=2).all(|dz| (-2..=2).all(|dx| !self.is_water(x + dx, z + dz)));
+        (0..self.heights.len())
+            .find(|&i| self.heights[i] <= peak / 3 && inland(cell(i)))
+            .or_else(|| self.heights.iter().position(|&h| h == peak))
+            .map(cell)
+            .unwrap_or((0, 0))
     }
 
     /// Bilinear height for rendering (float use is fine outside the simulation).
@@ -179,10 +186,13 @@ mod tests {
     }
 
     #[test]
-    fn highest_cell_finds_peak() {
-        let mut m = Heightmap::new(8);
-        m.set(3, 6, 9);
-        assert_eq!(m.highest_cell(), (3, 6));
+    fn lowland_cell_prefers_inland_low_ground() {
+        let mut m = Heightmap::new(16);
+        m.raise((8, 8), 6, 300);
+        m.set(8, 8, 1000);
+        let (x, z) = m.lowland_cell();
+        assert!(m.get(x, z) <= 333 && !m.is_water(x, z));
+        assert_eq!(Heightmap::new(4).lowland_cell(), (0, 0));
     }
 
     #[test]
