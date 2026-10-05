@@ -1,4 +1,4 @@
-//! Left panel frame: minimap placeholder, tab buttons, one content node per tab.
+//! Left panel frame: shaman preview (placeholder), tab buttons, one content node per tab.
 
 use bevy::prelude::*;
 
@@ -60,7 +60,7 @@ fn spawn_panel(mut commands: Commands) {
                     BackgroundColor(Color::srgb(0.08, 0.16, 0.30)),
                     BorderColor::all(DARK_BROWN),
                 ))
-                .with_child((Text::new("minimap"), TextFont { font_size: FontSize::Px(12.0), ..default() }));
+                .with_child((Text::new("shaman preview"), TextFont { font_size: FontSize::Px(12.0), ..default() }));
             panel.spawn(Node { column_gap: px(4), ..default() }).with_children(|row| {
                 for (i, label) in TABS.iter().enumerate() {
                     row.spawn((

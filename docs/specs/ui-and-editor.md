@@ -12,7 +12,8 @@ close to the original). Clear color fades from sky blue to space when zooming ou
 low inland cell (`Heightmap::lowland_cell`).
 
 ## Left panel (`hud/`)
-Fixed 204 px panel on the left, like the original: minimap placeholder, 3 tabs
+Fixed 204 px panel on the left, like the original: shaman preview at the top (live mini-view of the
+main character, placeholder for now), 3 tabs
 (Spells / Build / Stats, `ActiveTab`), one content node per tab (`TabContent(n)`), info line under
 the grid.
 
@@ -30,7 +31,7 @@ Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 Hover shows the tile's description, click selects (white border), `C` casts the selected spell (demo:
 only consumes a charge). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
 Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build/Stats tabs,
-real minimap.
+live shaman preview (render-to-texture camera following the shaman).
 
 ## World editor (`editor.rs`)
 Tab toggles edit mode. Brushes at the camera focus: R raise, F lower (Erode), T flatten,
