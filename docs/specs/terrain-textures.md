@@ -20,7 +20,8 @@ Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cel
 - brightness column from baked Lambert lighting of the heightmap slope (`SUN`), material is unlit.
 - colour = `palette[bigfade[row][column]]`.
 
-Unverified guesses to tune against the real game: the height -> row scale (1:1 now; level 1, all
+Unverified guesses to tune against the real game: the height -> row scale (`POP3_ROW_SCALE`, default 1.0;
+x3-x4 turns level 1 olive/green but washes level 5 peaks out; level 1, all
 below height 100, comes out sandy), how `disp` is applied, the brightness curve.
 Fallback (no data, or `--no-original`): `procedural_theme::generate(seed)` builds a palette
 (8 bands x 32 brightness), a jittered bigfade and tileable value-noise disp with the same

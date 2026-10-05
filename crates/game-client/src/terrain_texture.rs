@@ -11,7 +11,8 @@ pub const PX_PER_CELL: usize = 8;
 pub const SUN: [f32; 3] = [0.6, 0.65, 0.45];
 
 /// Returns RGBA8 pixels, `(size * PX_PER_CELL)²`, tiling seamlessly like the map.
-pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32) -> (usize, Vec<u8>) {
+/// `row_scale` multiplies height before picking the bigfade row (1.0 = 1:1, unverified).
+pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32) -> (usize, Vec<u8>) {
     let side = map.size() * PX_PER_CELL;
     let len = (SUN[0] * SUN[0] + SUN[1] * SUN[1] + SUN[2] * SUN[2]).sqrt();
     let sun = SUN.map(|c| c / len);
@@ -25,7 +26,7 @@ pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32) -> (usize, Vec<u8
             let row = if h < 1.0 {
                 (disp / 2) as usize
             } else {
-                (BIGFADE_LAND_ROW as i32 + h as i32 + (disp - 128) / 2).max(BIGFADE_LAND_ROW as i32) as usize
+                (BIGFADE_LAND_ROW as i32 + (h * row_scale) as i32 + (disp - 128) / 2).max(BIGFADE_LAND_ROW as i32) as usize
             };
             let gx = (map.sample(x + 0.5, z) - map.sample(x - 0.5, z)) * height_scale;
             let gz = (map.sample(x, z + 0.5) - map.sample(x, z - 0.5)) * height_scale;
@@ -58,7 +59,7 @@ mod tests {
     fn water_and_land_use_their_rows() {
         let mut m = Heightmap::new(4);
         m.set(2, 2, 500);
-        let (side, px) = bake(&m, &test_theme(), 1.0 / 384.0);
+        let (side, px) = bake(&m, &test_theme(), 1.0 / 384.0, 1.0);
         assert_eq!(side, 4 * PX_PER_CELL);
         assert_eq!(&px[0..3], &[0, 0, 200], "cell (0,0) is water");
         let i = (2 * PX_PER_CELL * side + 2 * PX_PER_CELL) * 4;

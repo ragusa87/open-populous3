@@ -179,7 +179,8 @@ fn rebuild_terrain(
 }
 
 fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32) -> Image {
-    let (side, pixels) = crate::terrain_texture::bake(&map.terrain, theme, height_scale);
+    let row_scale = std::env::var("POP3_ROW_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+    let (side, pixels) = crate::terrain_texture::bake(&map.terrain, theme, height_scale, row_scale);
     let mut image = Image::new(
         Extent3d { width: side as u32, height: side as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
