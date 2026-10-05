@@ -11,6 +11,9 @@ const MAP: f32 = pop3_format::MAP_SIZE as f32;
 pub const GROUND_VIEW: (f32, f32) = (0.32, 11.0);
 /// Fraction of the half-screen (from the centre) where the mouse does not scroll.
 pub const EDGE_DEAD_ZONE: f32 = 0.6;
+/// Scroll speeds in camera-distances per second (mouse = speed at the very border).
+pub const MOUSE_SPEED: f32 = 2.2;
+pub const KEY_SPEED: f32 = 3.0;
 const SKY: Color = Color::srgb(0.45, 0.65, 0.92);
 const SPACE: Color = Color::srgb(0.02, 0.02, 0.06);
 
@@ -125,9 +128,10 @@ fn camera_input(
         .iter()
         .find_map(|w| w.cursor_position().map(|c| edge_scroll(c, w.size(), EDGE_DEAD_ZONE)))
         .unwrap_or(Vec2::ZERO);
-    let forward = (edge.x + axis(KeyCode::ArrowUp, KeyCode::ArrowDown)).clamp(-1.0, 1.0);
-    let speed = rig.distance.max(10.0) * 0.8 * dt;
-    rig.move_by(forward * speed, edge.y * speed);
+    let keys_fwd = axis(KeyCode::ArrowUp, KeyCode::ArrowDown) * KEY_SPEED;
+    let forward = (edge.x * MOUSE_SPEED + keys_fwd).clamp(-KEY_SPEED, KEY_SPEED);
+    let scale = rig.distance.max(10.0) * dt;
+    rig.move_by(forward * scale, edge.y * MOUSE_SPEED * scale);
 
     if mouse.pressed(MouseButton::Middle) {
         rig.yaw -= motion.delta.x * 0.005;
