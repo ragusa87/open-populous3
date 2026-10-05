@@ -116,6 +116,10 @@ fn switch_level(
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<TerrainDirty>,
 ) {
+    let modified = [KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight];
+    if keys.any_pressed(modified) {
+        return;
+    }
     let forward = if keys.just_pressed(KeyCode::PageDown) {
         true
     } else if keys.just_pressed(KeyCode::PageUp) {

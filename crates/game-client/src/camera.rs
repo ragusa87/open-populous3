@@ -15,6 +15,14 @@ pub const GROUND_VIEW: (f32, f32) = (0.32, 11.0);
 /// Scroll speeds in camera-distances per second (mouse = at full push).
 pub const MOUSE_SPEED: f32 = 2.2;
 pub const KEY_SPEED: f32 = 3.0;
+/// Tilt in radians/s and zoom as fraction of distance per second.
+pub const TILT_SPEED: f32 = 0.6;
+pub const ZOOM_SPEED: f32 = 1.2;
+pub const DEFAULT_FOV: f32 = std::f32::consts::FRAC_PI_4;
+pub const FOV_RANGE: (f32, f32) = (0.3, 2.2);
+pub const FOV_SPEED: f32 = 0.6;
+pub const PITCH_RANGE: (f32, f32) = (0.05, 1.5);
+pub const DISTANCE_RANGE: (f32, f32) = (3.0, 220.0);
 const SKY: Color = Color::srgb(0.45, 0.65, 0.92);
 const SPACE: Color = Color::srgb(0.02, 0.02, 0.06);
 
@@ -26,6 +34,8 @@ pub struct CameraRig {
     pub pitch: f32,
     pub distance: f32,
     pub aerial: bool,
+    /// Vertical field of view in radians (lens width: wider = stronger perspective).
+    pub fov: f32,
     /// Ground-level settings restored when leaving the aerial view.
     saved: (f32, f32),
 }
@@ -38,6 +48,7 @@ impl Default for CameraRig {
             pitch: GROUND_VIEW.0,
             distance: GROUND_VIEW.1,
             aerial: false,
+            fov: DEFAULT_FOV,
             saved: GROUND_VIEW,
         }
     }
@@ -63,6 +74,12 @@ impl CameraRig {
         } else {
             (self.pitch, self.distance) = self.saved;
         }
+    }
+
+    /// Tilt (radians, positive = look more downward) and zoom (positive = closer, fraction).
+    pub fn adjust_view(&mut self, tilt: f32, zoom: f32) {
+        self.pitch = (self.pitch + tilt).clamp(PITCH_RANGE.0, PITCH_RANGE.1);
+        self.distance = (self.distance * (1.0 - zoom)).clamp(DISTANCE_RANGE.0, DISTANCE_RANGE.1);
     }
 
     pub fn look_at_cell(&mut self, cell: (i32, i32)) {
@@ -146,6 +163,15 @@ fn camera_input(
     let dt = time.delta_secs();
     let axis = |a: KeyCode, b: KeyCode| keys.pressed(a) as i32 as f32 - keys.pressed(b) as i32 as f32;
     rig.yaw += axis(KeyCode::ArrowLeft, KeyCode::ArrowRight) * 1.8 * dt;
+    let pressed_any = |ks: &[KeyCode]| keys.any_pressed(ks.iter().copied()) as i32 as f32;
+    let tilt = pressed_any(&[KeyCode::Home]) - pressed_any(&[KeyCode::End]);
+    let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let page = pressed_any(&[KeyCode::PageUp]) - pressed_any(&[KeyCode::PageDown]);
+    let zoom = if ctrl { page } else { 0.0 };
+    rig.adjust_view(tilt * TILT_SPEED * dt, zoom * ZOOM_SPEED * dt);
+    let widen = if shift && !ctrl { page } else { 0.0 };
+    rig.fov = (rig.fov + widen * FOV_SPEED * dt).clamp(FOV_RANGE.0, FOV_RANGE.1);
 
     let edge = windows
         .iter()
@@ -158,7 +184,7 @@ fn camera_input(
 
     if mouse.pressed(MouseButton::Middle) {
         rig.yaw -= motion.delta.x * 0.005;
-        rig.pitch = (rig.pitch + motion.delta.y * 0.005).clamp(0.08, 1.5);
+        rig.pitch = (rig.pitch + motion.delta.y * 0.005).clamp(PITCH_RANGE.0, PITCH_RANGE.1);
     }
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) {
         rig.toggle_aerial();
@@ -169,10 +195,15 @@ fn apply_rig(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
     params: Res<CurveParamsRes>,
-    mut cam: Query<&mut Transform, With<Camera3d>>,
+    mut cam: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
     let target = Vec3::Y * focus_height(&map.0.terrain, (rig.focus.x, rig.focus.y), &params.0);
-    for mut t in &mut cam {
+    for (mut t, mut projection) in &mut cam {
+        if let Projection::Perspective(p) = projection.as_mut() {
+            if p.fov != rig.fov {
+                p.fov = rig.fov;
+            }
+        }
         let wanted = Transform::from_translation(target + rig.eye_offset()).looking_at(target, Vec3::Y);
         *t = Transform {
             translation: t.translation.lerp(wanted.translation, 0.25),
@@ -206,6 +237,16 @@ mod tests {
         assert!((rig.focus.y - 125.5).abs() < 1e-4);
         rig.move_by(-5.0, 0.0);
         assert!((rig.focus.y - 2.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn adjust_view_tilts_zooms_and_clamps() {
+        let mut rig = CameraRig::default();
+        rig.adjust_view(0.1, 0.5);
+        assert!((rig.pitch - (GROUND_VIEW.0 + 0.1)).abs() < 1e-6);
+        assert!((rig.distance - GROUND_VIEW.1 * 0.5).abs() < 1e-6);
+        rig.adjust_view(10.0, 0.99);
+        assert_eq!((rig.pitch, rig.distance), (PITCH_RANGE.1, DISTANCE_RANGE.0));
     }
 
     #[test]

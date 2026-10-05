@@ -45,11 +45,14 @@ fn update_info(
     };
     let mode = if editor.active { "EDITOR  R raise  F lower  T flatten  M mark  B bridge" } else { "" };
     let s = format!(
-        "{} ({level})  focus {:.0},{:.0}{}\n\
-         Push mouse on window edges / Up-Down move | Left-Right rotate | Enter aerial | PgUp/PgDn level | C cast selected spell | Tab editor | Esc free cursor | F11 fullscreen\n{mode}",
+        "{} ({level})  focus {:.0},{:.0}  tilt {:.0}deg  distance {:.1}  fov {:.0}deg{}\n\
+         Push mouse on window edges / Up-Down move | Left-Right rotate | Home/End tilt | Ctrl+PgUp/PgDn zoom | Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | C cast selected spell | Tab editor | Esc free cursor | F11 fullscreen\n{mode}",
         map.0.name,
         rig.focus.x,
         rig.focus.y,
+        rig.pitch.to_degrees(),
+        rig.distance,
+        rig.fov.to_degrees(),
         if rig.aerial { "  [aerial]" } else { "" },
     );
     for mut t in &mut q {

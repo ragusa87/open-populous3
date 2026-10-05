@@ -6,7 +6,7 @@ Like the original: scrolling happens only with the cursor pressed against the wi
 comes from how hard the mouse keeps pushing outward (raw motion while stuck at the edge, `edge_push.rs`),
 slows down while holding still, stops when leaving the edge. The cursor is confined to the window
 (Esc toggles). The panel does not block it, Left/Right rotate, Up/Down move
-forward/back like the mouse, middle-drag rotates, Enter toggles
+forward/back like the mouse, middle-drag rotates, Home/End tilt, Ctrl+PgUp/PgDn zoom, Shift+PgUp/PgDn field of view (values shown in the HUD), Enter toggles
 aerial (pitch 1.35, distance 115) and restores the previous ground view (default pitch 0.32, distance 11,
 close to the original). Clear color fades from sky blue to space when zooming out. Changing level frames a
 low inland cell (`Heightmap::lowland_cell`).
