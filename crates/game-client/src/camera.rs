@@ -84,10 +84,10 @@ impl Plugin for CameraPlugin {
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((Camera3d::default(), Transform::default()));
     commands.insert_resource(ClearColor(SKY));
-    commands.insert_resource(GlobalAmbientLight { brightness: 250.0, ..default() });
+    commands.insert_resource(GlobalAmbientLight { brightness: 60.0, ..default() });
     commands.spawn((
-        DirectionalLight { illuminance: 6000.0, ..default() },
-        Transform::from_xyz(30.0, 60.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
+        DirectionalLight { illuminance: 9000.0, ..default() },
+        Transform::from_xyz(40.0, 22.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
 
@@ -95,28 +95,38 @@ fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {
     rig.look_at_cell(map.0.terrain.lowland_cell());
 }
 
+/// Screen-edge scrolling like the original: returns (forward, right) in -1..1
+/// when the cursor is within `margin` pixels of a window border.
+pub fn edge_scroll(cursor: Vec2, size: Vec2, margin: f32) -> Vec2 {
+    let right = (cursor.x >= size.x - margin) as i32 - (cursor.x <= margin) as i32;
+    let forward = (cursor.y <= margin) as i32 - (cursor.y >= size.y - margin) as i32;
+    Vec2::new(forward as f32, right as f32)
+}
+
 fn camera_input(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
+    windows: Query<&Window>,
     time: Res<Time>,
     mut rig: ResMut<CameraRig>,
 ) {
-    let speed = rig.distance.max(10.0) * 0.8 * time.delta_secs();
+    let dt = time.delta_secs();
     let axis = |a: KeyCode, b: KeyCode| keys.pressed(a) as i32 as f32 - keys.pressed(b) as i32 as f32;
-    let fwd = axis(KeyCode::ArrowUp, KeyCode::ArrowDown);
-    let right = axis(KeyCode::ArrowRight, KeyCode::ArrowLeft);
-    rig.move_by(fwd * speed, right * speed);
-    rig.yaw += axis(KeyCode::KeyQ, KeyCode::KeyE) * 1.5 * time.delta_secs();
+    rig.yaw += axis(KeyCode::ArrowLeft, KeyCode::ArrowRight) * 1.8 * dt;
+    rig.pitch = (rig.pitch + axis(KeyCode::ArrowUp, KeyCode::ArrowDown) * 0.8 * dt).clamp(0.08, 1.5);
 
-    if mouse.pressed(MouseButton::Right) {
+    let edge = windows
+        .iter()
+        .find_map(|w| w.cursor_position().map(|c| edge_scroll(c, w.size(), 12.0)))
+        .unwrap_or(Vec2::ZERO);
+    let speed = rig.distance.max(10.0) * 0.8 * dt;
+    rig.move_by(edge.x * speed, edge.y * speed);
+
+    if mouse.pressed(MouseButton::Middle) {
         rig.yaw -= motion.delta.x * 0.005;
         rig.pitch = (rig.pitch + motion.delta.y * 0.005).clamp(0.08, 1.5);
-    }
-    if mouse.pressed(MouseButton::Middle) || mouse.pressed(MouseButton::Left) {
-        let k = rig.distance * 0.002;
-        rig.move_by(motion.delta.y * k, -motion.delta.x * k);
     }
     if scroll.delta.y != 0.0 {
         rig.distance = (rig.distance * (1.0 - scroll.delta.y * 0.1)).clamp(3.0, 220.0);
@@ -167,6 +177,14 @@ mod tests {
         assert!((rig.focus.y - 125.5).abs() < 1e-4);
         rig.move_by(-5.0, 0.0);
         assert!((rig.focus.y - 2.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn edge_scroll_directions() {
+        let size = Vec2::new(800.0, 600.0);
+        assert_eq!(edge_scroll(Vec2::new(400.0, 300.0), size, 10.0), Vec2::ZERO);
+        assert_eq!(edge_scroll(Vec2::new(400.0, 2.0), size, 10.0), Vec2::new(1.0, 0.0));
+        assert_eq!(edge_scroll(Vec2::new(799.0, 599.0), size, 10.0), Vec2::new(-1.0, 1.0));
     }
 
     #[test]

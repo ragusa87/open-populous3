@@ -16,7 +16,7 @@ pub struct CurveParams {
 
 impl Default for CurveParams {
     fn default() -> Self {
-        CurveParams { radius: 64, height_scale: 1.0 / 512.0, curvature: 0.012 }
+        CurveParams { radius: 64, height_scale: 1.0 / 384.0, curvature: 0.012 }
     }
 }
 
@@ -92,18 +92,30 @@ fn grid_normals(p: &[[f32; 3]], n: usize) -> Vec<[f32; 3]> {
     out
 }
 
-/// Height-banded palette (sRGB values converted to linear vertex colors) with a light per-cell checker to show the grid.
+/// Height-banded palette (sRGB values converted to linear vertex colors).
+/// Grass darkens with altitude and every vertex gets a small stable jitter,
+/// a cheap stand-in for textures that makes gentle relief readable.
 pub fn color_for(h: u16, x: i32, z: i32) -> [f32; 4] {
+    let t = h as f32 / 450.0;
     let base: [f32; 3] = match h {
         0 => [0.10, 0.25, 0.55],
         1..=40 => [0.85, 0.78, 0.50],
-        41..=450 => [0.30, 0.55, 0.20],
+        41..=450 => [0.42 - 0.20 * t, 0.62 - 0.22 * t, 0.24 - 0.08 * t],
         451..=800 => [0.45, 0.40, 0.30],
         _ => [0.90, 0.90, 0.92],
     };
-    let shade = if h > 0 && (x + z).rem_euclid(2) == 0 { 0.94 } else { 1.0 };
+    let shade = if h > 0 { 0.9 + 0.1 * jitter(x, z) } else { 1.0 };
     let lin = |c: f32| (c * shade).powf(2.2);
     [lin(base[0]), lin(base[1]), lin(base[2]), 1.0]
+}
+
+/// Deterministic 0..1 noise per (wrapped) cell.
+fn jitter(x: i32, z: i32) -> f32 {
+    let (x, z) = (x.rem_euclid(128) as u32, z.rem_euclid(128) as u32);
+    let mut v = x.wrapping_mul(0x9E37_79B1) ^ z.wrapping_mul(0x85EB_CA77);
+    v ^= v >> 15;
+    v = v.wrapping_mul(0x2C1B_3C6D);
+    (v >> 24) as f32 / 255.0
 }
 
 #[cfg(test)]
@@ -124,13 +136,14 @@ mod tests {
 
     #[test]
     fn colors_are_linear() {
-        assert!(color_for(41, 1, 0)[1] < 0.55 * 0.55);
+        assert!(color_for(41, 1, 0)[1] < 0.62 * 0.62);
+        assert_eq!(color_for(100, 3, 4), color_for(100, 131, 4), "jitter wraps");
     }
 
     #[test]
     fn wraps_across_map_edge() {
         let mut map = Heightmap::new(128);
-        map.set(0, 0, 1024);
+        map.set(0, 0, 768);
         let p = CurveParams { radius: 1, curvature: 0.0, ..Default::default() };
         let g = build(&map, (127.0, 127.0), &p);
         assert_eq!(g.positions[8][1], 2.0, "cell (128,128) is cell (0,0)");

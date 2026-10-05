@@ -68,7 +68,7 @@ fn update_info(
     let mode = if editor.active { "EDITOR  R raise  F lower  T flatten  M mark  B bridge" } else { "" };
     let s = format!(
         "{} ({level})  focus {:.0},{:.0}{}\n\
-         Arrows move | Q/E or right-drag rotate | left-drag pan | wheel zoom | Enter aerial | PgUp/PgDn level | Tab editor | F11 fullscreen\n{mode}",
+         Mouse at screen edge scroll | Arrows rotate/tilt | middle-drag rotate | wheel zoom | Enter aerial | PgUp/PgDn level | Tab editor | F11 fullscreen\n{mode}",
         map.0.name,
         rig.focus.x,
         rig.focus.y,
