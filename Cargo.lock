@@ -2660,6 +2660,9 @@ dependencies = [
 [[package]]
 name = "game-net"
 version = "0.1.0"
+dependencies = [
+ "game-core",
+]
 
 [[package]]
 name = "gethostname"

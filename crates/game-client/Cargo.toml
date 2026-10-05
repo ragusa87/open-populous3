@@ -1,0 +1,10 @@
+[package]
+name = "game-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = "0.19"
+game-core = { version = "0.1.0", path = "../game-core" }
+game-net = { version = "0.1.0", path = "../game-net" }
+pop3-format = { version = "0.1.0", path = "../pop3-format" }
