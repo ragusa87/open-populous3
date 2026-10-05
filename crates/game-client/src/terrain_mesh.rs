@@ -25,6 +25,8 @@ pub struct TerrainGeometry {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub colors: Vec<[f32; 4]>,
+    /// Absolute map coordinates / map size: tiles with a repeating sampler.
+    pub uvs: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
 }
 
@@ -54,6 +56,8 @@ pub fn build(map: &Heightmap, focus: (f32, f32), params: &CurveParams) -> Terrai
             let y = h as f32 * params.height_scale - drop_at(params, dx, dz);
             g.positions.push([dx, y, dz]);
             g.colors.push(color_for(h, bx + i, bz + j));
+            let size = map.size() as f32;
+            g.uvs.push([(bx + i) as f32 / size, (bz + j) as f32 / size]);
         }
     }
     g.normals = grid_normals(&g.positions, n);

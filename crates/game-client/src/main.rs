@@ -5,6 +5,7 @@ mod dev;
 mod editor;
 mod hud;
 mod terrain_mesh;
+mod terrain_texture;
 mod world;
 
 use bevy::prelude::*;

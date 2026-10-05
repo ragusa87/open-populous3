@@ -3,9 +3,12 @@
 use crate::camera::{CameraRig, CurveParamsRes};
 use crate::terrain_mesh;
 use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use game_core::map::GameMap;
+use pop3_format::Theme;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_LEVELS_DIR: &str =
@@ -17,6 +20,8 @@ pub struct CurrentMap(pub GameMap);
 /// Original `levl*.dat` files found on disk, PageUp/PageDown cycles through them.
 #[derive(Resource, Default)]
 pub struct LevelList {
+    /// Original `data/` dir (themes), `$POP3_DATA` or `<levels>/../data`.
+    pub data_dir: PathBuf,
     pub files: Vec<PathBuf>,
     pub index: usize,
 }
@@ -27,6 +32,9 @@ pub struct TerrainDirty(pub bool);
 
 #[derive(Component)]
 struct TerrainMesh;
+
+#[derive(Resource)]
+struct TerrainMaterial(Handle<StandardMaterial>);
 
 impl LevelList {
     /// `arg` may be a level file, a levels directory, or nothing (default dir / $POP3_LEVELS).
@@ -40,7 +48,8 @@ impl LevelList {
         };
         let files = list_levels(&dir);
         let index = selected.and_then(|s| files.iter().position(|f| *f == s)).unwrap_or(0);
-        LevelList { files, index }
+        let data_dir = std::env::var("POP3_DATA").map(PathBuf::from).unwrap_or_else(|_| dir.join("../data"));
+        LevelList { data_dir, files, index }
     }
 
     pub fn load_current(&self) -> GameMap {
@@ -85,12 +94,9 @@ impl Plugin for WorldPlugin {
 
 fn spawn_terrain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    commands.spawn((
-        TerrainMesh,
-        Mesh3d(meshes.add(mesh)),
-        MeshMaterial3d(mats.add(StandardMaterial { perceptual_roughness: 0.95, ..default() })),
-        Transform::default(),
-    ));
+    let material = mats.add(StandardMaterial { perceptual_roughness: 0.95, ..default() });
+    commands.insert_resource(TerrainMaterial(material.clone()));
+    commands.spawn((TerrainMesh, Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
 }
 
 fn switch_level(
@@ -118,11 +124,27 @@ fn rebuild_terrain(
     params: Res<CurveParamsRes>,
     mut dirty: ResMut<TerrainDirty>,
     mut last_focus: Local<Option<Vec2>>,
+    levels: Res<LevelList>,
+    material: Res<TerrainMaterial>,
+    mut textured: Local<bool>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     q: Query<&Mesh3d, With<TerrainMesh>>,
 ) {
     if !dirty.0 && *last_focus == Some(rig.focus) {
         return;
+    }
+    if dirty.0 {
+        let theme = map.0.theme.and_then(|t| {
+            Theme::load(&levels.data_dir, t).map_err(|e| warn!("theme {t}: {e}")).ok()
+        });
+        let image = theme.map(|t| images.add(theme_image(&map.0, &t, params.0.height_scale)));
+        *textured = image.is_some();
+        if let Some(mut m) = mats.get_mut(&material.0) {
+            m.unlit = image.is_some();
+            m.base_color_texture = image;
+        }
     }
     dirty.0 = false;
     *last_focus = Some(rig.focus);
@@ -131,8 +153,32 @@ fn rebuild_terrain(
         if let Some(mut mesh) = meshes.get_mut(&handle.0) {
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, g.positions.clone());
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, g.normals.clone());
-            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, g.colors.clone());
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, g.uvs.clone());
+            if *textured {
+                mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
+            } else {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, g.colors.clone());
+            }
             mesh.insert_indices(Indices::U32(g.indices.clone()));
         }
     }
+}
+
+fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32) -> Image {
+    let (side, pixels) = crate::terrain_texture::bake(&map.terrain, theme, height_scale);
+    let mut image = Image::new(
+        Extent3d { width: side as u32, height: side as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        pixels,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        ..default()
+    });
+    image
 }

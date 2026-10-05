@@ -7,13 +7,16 @@ use std::path::Path;
 #[derive(Clone, Debug)]
 pub struct GameMap {
     pub name: String,
+    /// Original landscape theme index (`pop3_format::theme_char`), None for generated maps.
+    pub theme: Option<u8>,
     pub terrain: Heightmap,
 }
 
 impl GameMap {
-    pub fn from_level(level: &Level, name: impl Into<String>) -> Self {
+    pub fn from_level(level: &Level, name: impl Into<String>, theme: Option<u8>) -> Self {
         GameMap {
             name: name.into(),
+            theme,
             terrain: Heightmap::from_heights(MAP_SIZE, level.heights.clone()),
         }
     }
@@ -21,12 +24,13 @@ impl GameMap {
     /// Load `levlXXXX.dat`, picking the name from the sibling `.hdr` if present.
     pub fn load_original(dat: &Path) -> Result<Self, pop3_format::LevelError> {
         let level = Level::load(dat)?;
-        let name = LevelHeader::load(dat.with_extension("hdr"))
-            .map(|h| h.name)
-            .ok()
+        let header = LevelHeader::load(dat.with_extension("hdr")).ok();
+        let name = header
+            .as_ref()
+            .map(|h| h.name.clone())
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| dat.file_stem().unwrap_or_default().to_string_lossy().into_owned());
-        Ok(Self::from_level(&level, name))
+        Ok(Self::from_level(&level, name, header.map(|h| h.theme)))
     }
 
     /// Deterministic island map from a seed (fallback when no original data exists).
@@ -44,7 +48,7 @@ impl GameMap {
             let v = terrain.get(x, z).saturating_sub(120).min(MAX_HEIGHT);
             terrain.set(x, z, v);
         }
-        GameMap { name: format!("Generated #{seed}"), terrain }
+        GameMap { name: format!("Generated #{seed}"), theme: None, terrain }
     }
 }
 

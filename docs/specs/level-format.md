@@ -32,6 +32,8 @@ Axis order (`x` vs `z`) is unverified; a mirrored map would still look right.
 
 ## `.hdr` (616 bytes)
 - offset 56, 32 bytes: NUL-terminated level name ("Level 1").
+- offset 88: number of tribes (2-4); 89..91: computer player script ids (tentative); 92..95: allies bitmasks.
+- offset 96: landscape theme index, 0-35 -> files `*0-X.dat` with X in `0-9a-z` (see terrain-textures.md).
 - rest: unknown (spells/buildings availability, tribe count, sky/palette...).
 
 ## Code
