@@ -5,5 +5,6 @@
 pub mod command;
 pub mod map;
 pub mod spell;
+pub mod spell_book;
 pub mod terrain;
 pub mod unit;
