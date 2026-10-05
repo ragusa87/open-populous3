@@ -1,0 +1,7 @@
+[package]
+name = "game-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pop3-format = { version = "0.1.0", path = "../pop3-format" }
