@@ -11,14 +11,14 @@ use bevy::window::{CursorGrabMode, CursorOptions};
 
 const MAP: f32 = pop3_format::MAP_SIZE as f32;
 /// (pitch, distance) of the default ground view: low and close, like the original.
-pub const GROUND_VIEW: (f32, f32) = (0.32, 11.0);
+pub const GROUND_VIEW: (f32, f32) = (3.0 * std::f32::consts::PI / 180.0, 20.0);
 /// Scroll speeds in camera-distances per second (mouse = at full push).
 pub const MOUSE_SPEED: f32 = 2.2;
 pub const KEY_SPEED: f32 = 3.0;
 /// Tilt in radians/s and zoom as fraction of distance per second.
 pub const TILT_SPEED: f32 = 0.6;
 pub const ZOOM_SPEED: f32 = 1.2;
-pub const DEFAULT_FOV: f32 = std::f32::consts::FRAC_PI_4;
+pub const DEFAULT_FOV: f32 = std::f32::consts::FRAC_PI_3;
 pub const FOV_RANGE: (f32, f32) = (0.3, 2.2);
 pub const FOV_SPEED: f32 = 0.6;
 pub const PITCH_RANGE: (f32, f32) = (0.05, 1.5);

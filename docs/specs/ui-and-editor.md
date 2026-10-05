@@ -7,8 +7,8 @@ comes from how hard the mouse keeps pushing outward (raw motion while stuck at t
 slows down while holding still, stops when leaving the edge. The cursor is confined to the window
 (Esc toggles). The panel does not block it, Left/Right rotate, Up/Down move
 forward/back like the mouse, middle-drag rotates, Home/End tilt, Ctrl+PgUp/PgDn zoom, Shift+PgUp/PgDn field of view (values shown in the HUD), Enter toggles
-aerial (pitch 1.35, distance 115) and restores the previous ground view (default pitch 0.32, distance 11,
-close to the original). Clear color fades from sky blue to space when zooming out. Changing level frames a
+aerial (pitch 1.35, distance 115) and restores the previous ground view (default tilt 3 deg, distance 20,
+fov 60 deg, tuned by eye against the original). Clear color fades from sky blue to space when zooming out. Changing level frames a
 low inland cell (`Heightmap::lowland_cell`).
 
 ## Left panel (`hud/`)
