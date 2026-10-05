@@ -22,6 +22,7 @@ pub const MAX_THINGS: usize = 2000;
 
 const HDR_NAME_OFFSET: usize = 56;
 const HDR_NAME_LEN: usize = 32;
+const HDR_THEME_OFFSET: usize = 96;
 
 #[derive(Debug)]
 pub enum LevelError {
@@ -124,10 +125,12 @@ impl Level {
     }
 }
 
-/// Parsed `.hdr` file (616 bytes). Only the level name is decoded for now.
+/// Parsed `.hdr` file (616 bytes). Only name and landscape theme are decoded for now.
 #[derive(Clone, Debug, Default)]
 pub struct LevelHeader {
     pub name: String,
+    /// Landscape theme index, see `theme::theme_char`.
+    pub theme: u8,
     pub raw: Vec<u8>,
 }
 
@@ -140,7 +143,8 @@ impl LevelHeader {
                 String::from_utf8_lossy(&b[..end]).into_owned()
             })
             .unwrap_or_default();
-        LevelHeader { name, raw: data.to_vec() }
+        let theme = data.get(HDR_THEME_OFFSET).copied().unwrap_or(0);
+        LevelHeader { name, theme, raw: data.to_vec() }
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, LevelError> {
@@ -180,6 +184,8 @@ mod tests {
     fn header_name() {
         let mut h = vec![0u8; 616];
         h[HDR_NAME_OFFSET..HDR_NAME_OFFSET + 7].copy_from_slice(b"Level 1");
-        assert_eq!(LevelHeader::parse(&h).name, "Level 1");
+        h[HDR_THEME_OFFSET] = 12;
+        let hdr = LevelHeader::parse(&h);
+        assert_eq!((hdr.name.as_str(), hdr.theme), ("Level 1", 12));
     }
 }
