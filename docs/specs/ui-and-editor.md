@@ -2,8 +2,8 @@
 
 ## Camera (`camera.rs`)
 `CameraRig { focus, yaw, pitch, distance, aerial }`. Focus is in cell units, wrapped in `[0,128)`.
-Like the original: mouse at a screen edge scrolls (4 directions), arrows rotate (left/right) and tilt
-(up/down), middle-drag rotates, wheel zooms, Enter toggles
+Like the original: mouse at a screen edge scrolls (4 directions), Left/Right rotate, Up/Down move
+forward/back like the mouse, middle-drag rotates, wheel zooms, Enter toggles
 aerial (pitch 1.35, distance 115) and restores the previous ground view (default pitch 0.32, distance 11,
 close to the original). Clear color fades from sky blue to space when zooming out. Changing level frames a
 low inland cell (`Heightmap::lowland_cell`).

@@ -115,14 +115,14 @@ fn camera_input(
     let dt = time.delta_secs();
     let axis = |a: KeyCode, b: KeyCode| keys.pressed(a) as i32 as f32 - keys.pressed(b) as i32 as f32;
     rig.yaw += axis(KeyCode::ArrowLeft, KeyCode::ArrowRight) * 1.8 * dt;
-    rig.pitch = (rig.pitch + axis(KeyCode::ArrowUp, KeyCode::ArrowDown) * 0.8 * dt).clamp(0.08, 1.5);
 
     let edge = windows
         .iter()
         .find_map(|w| w.cursor_position().map(|c| edge_scroll(c, w.size(), 48.0)))
         .unwrap_or(Vec2::ZERO);
+    let forward = (edge.x + axis(KeyCode::ArrowUp, KeyCode::ArrowDown)).clamp(-1.0, 1.0);
     let speed = rig.distance.max(10.0) * 0.8 * dt;
-    rig.move_by(edge.x * speed, edge.y * speed);
+    rig.move_by(forward * speed, edge.y * speed);
 
     if mouse.pressed(MouseButton::Middle) {
         rig.yaw -= motion.delta.x * 0.005;
