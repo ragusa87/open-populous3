@@ -119,7 +119,7 @@ fn camera_input(
 
     let edge = windows
         .iter()
-        .find_map(|w| w.cursor_position().map(|c| edge_scroll(c, w.size(), 12.0)))
+        .find_map(|w| w.cursor_position().map(|c| edge_scroll(c, w.size(), 48.0)))
         .unwrap_or(Vec2::ZERO);
     let speed = rig.distance.max(10.0) * 0.8 * dt;
     rig.move_by(edge.x * speed, edge.y * speed);
