@@ -10,7 +10,7 @@ just shot /tmp/x.png          # headless screenshot (no window, no focus steal)
 just test
 ```
 
-Controls: mouse at screen edge scrolls, Left/Right rotate, Up/Down move, middle-drag rotate, wheel zoom, **Enter** aerial view,
+Controls: mouse at screen edge scrolls, Left/Right rotate, Up/Down move, middle-drag rotate, **Enter** aerial view,
 PgUp/PgDn change level, Tab editor mode (R/F/T/M/B brushes), F11 fullscreen.
 
 Without original data a deterministic island map is generated.

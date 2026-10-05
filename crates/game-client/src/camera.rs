@@ -1,9 +1,9 @@
-//! Orbit camera around a wrapping focus point. Arrows move, right-drag rotates,
-//! wheel zooms, Enter toggles the aerial (planet) view.
+//! Orbit camera around a wrapping focus point. Mouse toward the edges / Up-Down move,
+//! Left-Right and middle-drag rotate, Enter toggles the aerial (planet) view.
 
 use crate::terrain_mesh::{focus_height, CurveParams};
 use crate::world::CurrentMap;
-use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
+use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 
 const MAP: f32 = pop3_format::MAP_SIZE as f32;
@@ -115,7 +115,6 @@ fn camera_input(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
-    scroll: Res<AccumulatedMouseScroll>,
     windows: Query<&Window>,
     time: Res<Time>,
     mut rig: ResMut<CameraRig>,
@@ -136,9 +135,6 @@ fn camera_input(
     if mouse.pressed(MouseButton::Middle) {
         rig.yaw -= motion.delta.x * 0.005;
         rig.pitch = (rig.pitch + motion.delta.y * 0.005).clamp(0.08, 1.5);
-    }
-    if scroll.delta.y != 0.0 {
-        rig.distance = (rig.distance * (1.0 - scroll.delta.y * 0.1)).clamp(3.0, 220.0);
     }
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) {
         rig.toggle_aerial();
