@@ -8,9 +8,26 @@ aerial (pitch 1.35, distance 115) and restores the previous ground view (default
 close to the original). Clear color fades from sky blue to space when zooming out. Changing level frames a
 low inland cell (`Heightmap::lowland_cell`).
 
-## Control tabs (`hud.rs`)
-Bottom bar: Spells / Buildings / Followers (placeholders, `ActiveTab` resource). Next: icon grid per
-tab, mana bar, minimap (render the heightmap to a texture).
+## Left panel (`hud/`)
+Fixed 204 px panel on the left, like the original: minimap placeholder, 3 tabs
+(Spells / Build / Stats, `ActiveTab`), one content node per tab (`TabContent(n)`), info line under
+the grid. Edge scrolling is measured on the 3D view only (`ViewportInset`), never over the panel.
+
+### Spells tab (`hud/spells.rs`)
+Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`, demo loadout for now).
+Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
+
+| Availability | Tile |
+|---|---|
+| Hidden | empty faint slot (keeps the grid stable) |
+| Discoverable | dark tile with "?", cannot be selected for casting until discovered |
+| Provided { shots } | gray tile, badge `xN`, no recharge, disappears when used up |
+| Known | gold tile, 1-4 charge pips (max depends on the spell), blue recharge bar while not full; dimmed at 0 charges |
+
+Hover shows the tile's description, click selects (white border), `C` casts the selected spell (demo:
+only consumes a charge). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
+Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build/Stats tabs,
+real minimap.
 
 ## World editor (`editor.rs`)
 Tab toggles edit mode. Brushes at the camera focus: R raise, F lower (Erode), T flatten,

@@ -116,6 +116,7 @@ fn camera_input(
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     windows: Query<&Window>,
+    inset: Option<Res<ViewportInset>>,
     time: Res<Time>,
     mut rig: ResMut<CameraRig>,
 ) {
@@ -125,7 +126,7 @@ fn camera_input(
 
     let edge = windows
         .iter()
-        .find_map(|w| w.cursor_position().map(|c| edge_scroll(c, w.size(), EDGE_DEAD_ZONE)))
+        .find_map(|w| w.cursor_position().map(|c| view_edge_scroll(c, w.size(), inset.as_deref().copied().unwrap_or_default())))
         .unwrap_or(Vec2::ZERO);
     let keys_fwd = axis(KeyCode::ArrowUp, KeyCode::ArrowDown) * KEY_SPEED;
     let forward = (edge.x * MOUSE_SPEED + keys_fwd).clamp(-KEY_SPEED, KEY_SPEED);
@@ -168,6 +169,21 @@ fn sky_color(rig: Res<CameraRig>, mut clear: ResMut<ClearColor>) {
     clear.0 = sky_for_distance(rig.distance);
 }
 
+/// Screen area covered by UI on the left: edge scrolling is measured on the 3D view only.
+#[derive(Resource, Default, Clone, Copy)]
+pub struct ViewportInset {
+    pub left: f32,
+}
+
+/// Edge scroll for a cursor in window pixels, ignoring the inset; None over the UI.
+pub fn view_edge_scroll(cursor: Vec2, window: Vec2, inset: ViewportInset) -> Vec2 {
+    if cursor.x < inset.left {
+        return Vec2::ZERO;
+    }
+    let offset = Vec2::new(inset.left, 0.0);
+    edge_scroll(cursor - offset, window - offset, EDGE_DEAD_ZONE)
+}
+
 #[derive(Resource, Default)]
 pub struct CurveParamsRes(pub CurveParams);
 
@@ -194,6 +210,14 @@ mod tests {
         let half = at(720.0, 300.0).y;
         assert!((half - 0.5).abs() < 1e-5, "halfway through the ramp, got {half}");
         assert!(at(0.0, 600.0).x < 0.0 && at(0.0, 600.0).y < 0.0);
+    }
+
+    #[test]
+    fn no_edge_scroll_over_the_panel() {
+        let inset = ViewportInset { left: 200.0 };
+        let win = Vec2::new(1000.0, 600.0);
+        assert_eq!(view_edge_scroll(Vec2::new(5.0, 300.0), win, inset), Vec2::ZERO);
+        assert!(view_edge_scroll(Vec2::new(201.0, 300.0), win, inset).y < -0.9, "left edge of the view");
     }
 
     #[test]

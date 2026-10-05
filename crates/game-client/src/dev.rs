@@ -39,7 +39,7 @@ struct OffscreenTarget(Handle<Image>);
 fn render_to_image(mut commands: Commands, mut images: ResMut<Assets<Image>>, cams: Query<Entity, With<Camera3d>>) {
     let image = images.add(Image::new_target_texture(1280, 720, TextureFormat::Rgba8UnormSrgb, None));
     for cam in &cams {
-        commands.entity(cam).insert(RenderTarget::Image(image.clone().into()));
+        commands.entity(cam).insert((RenderTarget::Image(image.clone().into()), IsDefaultUiCamera));
     }
     commands.insert_resource(OffscreenTarget(image));
 }
