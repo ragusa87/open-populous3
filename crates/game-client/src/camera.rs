@@ -9,6 +9,8 @@ use bevy::prelude::*;
 const MAP: f32 = pop3_format::MAP_SIZE as f32;
 /// (pitch, distance) of the default ground view: low and close, like the original.
 pub const GROUND_VIEW: (f32, f32) = (0.32, 11.0);
+/// Fraction of the half-screen (from the centre) where the mouse does not scroll.
+pub const EDGE_DEAD_ZONE: f32 = 0.6;
 const SKY: Color = Color::srgb(0.45, 0.65, 0.92);
 const SPACE: Color = Color::srgb(0.02, 0.02, 0.06);
 
@@ -95,12 +97,15 @@ fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {
     rig.look_at_cell(map.0.terrain.lowland_cell());
 }
 
-/// Screen-edge scrolling like the original: returns (forward, right) in -1..1
-/// when the cursor is within `margin` pixels of a window border.
-pub fn edge_scroll(cursor: Vec2, size: Vec2, margin: f32) -> Vec2 {
-    let right = (cursor.x >= size.x - margin) as i32 - (cursor.x <= margin) as i32;
-    let forward = (cursor.y <= margin) as i32 - (cursor.y >= size.y - margin) as i32;
-    Vec2::new(forward as f32, right as f32)
+/// Screen-edge scrolling like the original, returning (forward, right) in -1..1.
+/// Per axis, the cursor offset from the centre is normalised to -1..1; inside `dead`
+/// nothing moves, then speed ramps linearly up to full speed at the border.
+pub fn edge_scroll(cursor: Vec2, size: Vec2, dead: f32) -> Vec2 {
+    let ramp = |pos: f32, len: f32| {
+        let t = ((pos - len / 2.0) / (len / 2.0)).clamp(-1.0, 1.0);
+        t.signum() * ((t.abs() - dead) / (1.0 - dead)).max(0.0)
+    };
+    Vec2::new(-ramp(cursor.y, size.y), ramp(cursor.x, size.x))
 }
 
 fn camera_input(
@@ -118,7 +123,7 @@ fn camera_input(
 
     let edge = windows
         .iter()
-        .find_map(|w| w.cursor_position().map(|c| edge_scroll(c, w.size(), 48.0)))
+        .find_map(|w| w.cursor_position().map(|c| edge_scroll(c, w.size(), EDGE_DEAD_ZONE)))
         .unwrap_or(Vec2::ZERO);
     let forward = (edge.x + axis(KeyCode::ArrowUp, KeyCode::ArrowDown)).clamp(-1.0, 1.0);
     let speed = rig.distance.max(10.0) * 0.8 * dt;
@@ -180,11 +185,15 @@ mod tests {
     }
 
     #[test]
-    fn edge_scroll_directions() {
+    fn edge_scroll_is_proportional() {
         let size = Vec2::new(800.0, 600.0);
-        assert_eq!(edge_scroll(Vec2::new(400.0, 300.0), size, 10.0), Vec2::ZERO);
-        assert_eq!(edge_scroll(Vec2::new(400.0, 2.0), size, 10.0), Vec2::new(1.0, 0.0));
-        assert_eq!(edge_scroll(Vec2::new(799.0, 599.0), size, 10.0), Vec2::new(-1.0, 1.0));
+        let at = |x, y| edge_scroll(Vec2::new(x, y), size, 0.6);
+        assert_eq!(at(400.0, 300.0), Vec2::ZERO);
+        assert_eq!(at(600.0, 300.0), Vec2::ZERO, "inside dead zone");
+        assert_eq!(at(800.0, 0.0), Vec2::new(1.0, 1.0), "full speed at the border");
+        let half = at(720.0, 300.0).y;
+        assert!((half - 0.5).abs() < 1e-5, "halfway through the ramp, got {half}");
+        assert!(at(0.0, 600.0).x < 0.0 && at(0.0, 600.0).y < 0.0);
     }
 
     #[test]
