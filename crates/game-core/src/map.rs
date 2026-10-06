@@ -23,6 +23,15 @@ impl GameMap {
             terrain: Heightmap::from_heights(MAP_SIZE, level.heights.clone()),
             sites: sites_from_level(level),
         }
+        .with_spawn_ground()
+    }
+
+    /// Shamans spawn at game start: each site levels its ground (see `flatten_for_spawn`).
+    fn with_spawn_ground(mut self) -> Self {
+        for site in &self.sites {
+            site.flatten_for_spawn(&mut self.terrain);
+        }
+        self
     }
 
     /// Load `levlXXXX.dat`, picking the name from the sibling `.hdr` if present.
@@ -53,7 +62,7 @@ impl GameMap {
             terrain.set(x, z, v);
         }
         let sites = generated_sites(&terrain);
-        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites }
+        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites }.with_spawn_ground()
     }
 }
 
@@ -86,5 +95,8 @@ mod tests {
         assert!(hs.iter().any(|&h| h > 100));
         assert_eq!(a.sites, GameMap::generate(42).sites);
         assert!(a.site_of(0).is_some());
+        for s in &a.sites {
+            assert!(!a.terrain.is_water(s.cell().0, s.cell().1), "spawn ground is land");
+        }
     }
 }

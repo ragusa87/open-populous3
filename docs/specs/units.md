@@ -13,6 +13,10 @@
 - Original levels: built at the tribe's shaman thing (person model 7). Tribes without a shaman get no site
   (some campaign AI tribes; levl2025 has none for the player).
 - Generated maps: tribe 0 on low inland ground, tribe 1 on the land cell farthest away on the torus.
+- Spawn ground: when a shaman spawns (map load = first spawn; respawns once units exist),
+  `flatten_for_spawn` levels the terrain: height points within 3 cells of the centre take their
+  average height (at least `MIN_SPAWN_HEIGHT` = 32, so a flooded site becomes land again), a ring out
+  to 4 cells is blended halfway. Integer-only, applied in owner order (deterministic).
 - Fixed and indestructible: no `Command` moves or removes it. `spawn_point()` is where the shaman
   appears at start and after death (to wire once units are simulated).
 - Rendered as a ring of 8 stones; the camera starts on the player's (tribe 0) site.

@@ -1,7 +1,7 @@
 //! Reincarnation sites: where each tribe's shaman spawns and respawns.
 //! Fixed for the whole game and indestructible: no command removes or moves them.
 
-use crate::terrain::Heightmap;
+use crate::terrain::{DirtyRect, Heightmap};
 use pop3_format::{Level, WORLD_UNITS_PER_CELL};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,6 +26,43 @@ impl ReincarnationSite {
     /// Where the shaman appears, at game start and after each death.
     pub fn spawn_point(&self) -> (u16, u16) {
         (self.x, self.z)
+    }
+}
+
+/// Ground made flat around a site when its shaman spawns. The stones stand 1.3 cells out and are
+/// ~0.5 wide; the triangles under them have corners up to ~2.9 cells from the centre.
+pub const SPAWN_FLAT_RADIUS: i32 = 3;
+/// Ring around it pulled halfway towards the flat height, so the platform has no cliff.
+pub const SPAWN_BLEND_RADIUS: i32 = 4;
+/// The flattened ground is never lower than this: a flooded site comes back as land.
+pub const MIN_SPAWN_HEIGHT: u16 = 32;
+
+impl ReincarnationSite {
+    /// Height points (cell corners) within `radius` cells of the site centre (the middle of its cell),
+    /// with their squared distance in quarter cells (integer, deterministic).
+    fn corners_within(&self, radius: i32) -> impl Iterator<Item = ((i32, i32), i32)> {
+        let (cx, cz) = self.cell();
+        let r = radius + 1;
+        (-r..=r + 1).flat_map(move |dz| (-r..=r + 1).map(move |dx| (dx, dz))).filter_map(move |(dx, dz)| {
+            let d2 = (2 * dx - 1).pow(2) + (2 * dz - 1).pow(2);
+            (d2 <= (2 * radius).pow(2)).then_some(((cx + dx, cz + dz), d2))
+        })
+    }
+
+    /// Level the ground for a spawning shaman: the inner disc takes its average height (at least
+    /// `MIN_SPAWN_HEIGHT`, so never water), the ring around is blended halfway.
+    pub fn flatten_for_spawn(&self, terrain: &mut Heightmap) -> DirtyRect {
+        let inner: Vec<(i32, i32)> = self.corners_within(SPAWN_FLAT_RADIUS).map(|(c, _)| c).collect();
+        let sum: u32 = inner.iter().map(|&(x, z)| terrain.get(x, z) as u32).sum();
+        let target = ((sum / inner.len().max(1) as u32) as u16).max(MIN_SPAWN_HEIGHT);
+        let flat_d2 = (2 * SPAWN_FLAT_RADIUS).pow(2);
+        for ((x, z), d2) in self.corners_within(SPAWN_BLEND_RADIUS) {
+            let h = if d2 <= flat_d2 { target } else { ((terrain.get(x, z) as u32 + target as u32) / 2) as u16 };
+            terrain.set(x, z, h);
+        }
+        let (cx, cz) = self.cell();
+        let r = SPAWN_BLEND_RADIUS + 1;
+        DirtyRect { min: (cx - r, cz - r), max: (cx + r + 1, cz + r + 1) }
     }
 }
 
@@ -98,6 +135,34 @@ mod tests {
         assert_eq!((s.x, s.z), (127 * 512 + 256, 3 * 512 + 256));
         assert_eq!(s.cell(), (127, 3));
         assert_eq!(s.spawn_point(), (s.x, s.z));
+    }
+
+    #[test]
+    fn spawn_flattens_the_ring_to_its_average() {
+        let mut t = Heightmap::new(32);
+        let site = ReincarnationSite::at_cell(0, (10, 10));
+        t.raise((10, 10), 6, 400);
+        let before = t.clone();
+        site.flatten_for_spawn(&mut t);
+        let inner: Vec<_> = site.corners_within(SPAWN_FLAT_RADIUS).map(|(c, _)| c).collect();
+        let h = t.get(10, 10);
+        assert!(inner.iter().all(|&(x, z)| t.get(x, z) == h), "inner disc is flat");
+        assert!(inner.contains(&(8, 10)) && inner.contains(&(12, 12)), "covers the stone ring");
+        assert!(!inner.contains(&(7, 10)));
+        let edge = before.get(7, 10);
+        assert_eq!(t.get(7, 10), (edge + h) / 2, "blend ring");
+        assert_eq!(t.get(2, 2), before.get(2, 2), "far ground untouched");
+    }
+
+    #[test]
+    fn flooded_site_becomes_land_across_the_map_edge() {
+        let mut t = Heightmap::new(32);
+        let site = ReincarnationSite::at_cell(1, (0, 31));
+        site.flatten_for_spawn(&mut t);
+        for (x, z) in [(0, 31), (1, 0), (31, 30), (2, 1)] {
+            assert_eq!(t.get(x, z), MIN_SPAWN_HEIGHT, "({x},{z}) wraps and is land");
+        }
+        assert!(!t.is_water(0, 0));
     }
 
     #[test]
