@@ -4,6 +4,10 @@ levels := env_var_or_default("POP3_LEVELS", "")
 run *args:
     cargo run -p game-client -- {{args}}
 
+# Render a rigged glTF model into unit sprite sheets: just render-sprites assets/models/witch.gltf assets/units/shaman
+render-sprites model out *args:
+    cargo run --release -p game-client --example render_sprites -- {{model}} {{out}} {{args}}
+
 # Never read the original game files: generated maps + generated theme
 run-generated *args:
     cargo run -p game-client -- --no-original {{args}}
