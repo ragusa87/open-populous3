@@ -49,7 +49,7 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | 20 | stone prayer totem |
 | 30 | reincarnation site stone (tribe-coloured) |
 | 31, 32 | book, shield |
-| 60-71 | trees |
+| 60-71 | trees, 0.9-1.8 cells tall (drawn by `nature.rs`, one per tree variant) |
 | 82 | stone head; 83, 84 untextured |
 | 94 | prison (shaman locked until freed, some levels) |
 | 117-120 | drum tower, blue / red / yellow / green |
