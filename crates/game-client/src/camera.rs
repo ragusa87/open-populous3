@@ -76,6 +76,14 @@ impl CameraRig {
         }
     }
 
+    /// New ground view (leaves the aerial view): pitch in radians, distance in cells.
+    pub fn set_ground_view(&mut self, pitch: f32, distance: f32) {
+        self.aerial = false;
+        self.pitch = pitch.clamp(PITCH_RANGE.0, PITCH_RANGE.1);
+        self.distance = distance.clamp(DISTANCE_RANGE.0, DISTANCE_RANGE.1);
+        self.saved = (self.pitch, self.distance);
+    }
+
     /// Tilt (radians, positive = look more downward) and zoom (positive = closer, fraction).
     pub fn adjust_view(&mut self, tilt: f32, zoom: f32) {
         self.pitch = (self.pitch + tilt).clamp(PITCH_RANGE.0, PITCH_RANGE.1);
@@ -242,6 +250,18 @@ pub fn ground_view(get: impl Fn(&str) -> Option<String>) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_ground_view_leaves_aerial() {
+        let mut rig = CameraRig::default();
+        rig.toggle_aerial();
+        rig.set_ground_view(0.2, 10.0);
+        assert!(!rig.aerial);
+        assert_eq!((rig.pitch, rig.distance), (0.2, 10.0));
+        rig.toggle_aerial();
+        rig.toggle_aerial();
+        assert_eq!((rig.pitch, rig.distance), (0.2, 10.0), "aerial round trip restores it");
+    }
 
     #[test]
     fn view_tuning_overrides() {

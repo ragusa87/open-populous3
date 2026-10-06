@@ -2,6 +2,7 @@
 
 mod panel;
 mod spells;
+mod view_menu;
 
 use crate::camera::CameraRig;
 use crate::editor::EditorState;
@@ -17,7 +18,7 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((panel::PanelPlugin, spells::SpellsPlugin))
+        app.add_plugins((panel::PanelPlugin, spells::SpellsPlugin, view_menu::ViewMenuPlugin))
             .add_systems(Startup, spawn_info)
             .add_systems(Update, update_info);
     }
@@ -46,7 +47,7 @@ fn update_info(
     let mode = if editor.active { "EDITOR  R raise  F lower  T flatten  M mark  B bridge" } else { "" };
     let s = format!(
         "{} ({level})  focus {:.0},{:.0}  tilt {:.0}deg  distance {:.1}  fov {:.0}deg{}\n\
-         Push mouse on window edges / Up-Down / WASD move | Left-Right rotate | Home/End tilt | Ctrl+PgUp/PgDn zoom | Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | C cast selected spell | Tab editor | Esc free cursor | F11 fullscreen\n{mode}",
+         Push mouse on window edges / Up-Down / WASD move | Left-Right rotate | Home/End tilt | Ctrl+PgUp/PgDn zoom | Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | C cast selected spell | Tab editor | F2 view presets | Esc free cursor | F11 fullscreen\n{mode}",
         map.0.name,
         rig.focus.x,
         rig.focus.y,
