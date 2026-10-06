@@ -8,6 +8,7 @@ Guidance for coding agents working on this repo (Rust + Bevy 0.19 Populous-like 
 - `crates/game-net`: lockstep wire codec over TCP. Depends on game-core only.
 - `crates/game-client`: Bevy app, one plugin per concern (world, camera, hud, editor, dev).
 - `docs/`: architecture, roadmap, `docs/specs/*`. Update the matching spec when behaviour changes.
+- `TODO.md`: what is left to implement. Tick/remove items in the commit that does them, add what you leave undone or discover.
 
 ## Commands
 - `just test` (or `cargo test --workspace`): must pass before committing.

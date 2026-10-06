@@ -1,7 +1,7 @@
 # Documentation
 
 - [architecture.md](architecture.md): crates, boundaries, data flow.
-- [roadmap.md](roadmap.md): done / next.
+- [roadmap.md](roadmap.md): what is done; what is left is in [TODO.md](../TODO.md).
 - specs/
   - [level-format.md](specs/level-format.md): original `.dat`/`.hdr` layout (what we know).
   - [terrain.md](specs/terrain.md): heightmap, wrapping, curvature rendering, brushes.
