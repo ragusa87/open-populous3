@@ -22,6 +22,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
 - [ ] Dead units other than the shaman lie where they fell forever: remove them after a while (views are indexed by unit position: give them stable ids first).
 - [ ] Wildmen (neutral "gaia" braves, spawned from the levels, standing still today): wander around, drink, eat fruit from trees; the Convert spell turns them into the caster's braves. Their original anims beyond walk/stand/sit/flung (2 gesture, 4 crouching) are unused.
+- [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation.
 - [ ] Low health: a star/crown spinning over the head of units low on health (original art to find); health bars only show on selected units.
 - [ ] Selection of vehicles and buildings (without the people inside), and of units inside them once they exist (`selection::selectable`).
 - [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
