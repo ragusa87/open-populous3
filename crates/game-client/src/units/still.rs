@@ -1,7 +1,8 @@
-//! Open-source unit art from a single still picture (docs/specs/unit-art.md, "Still"): a 256 x 256
-//! RGBA image at 4 pixels per base pixel, feet at (128, 232), tribe-coloured parts in magenta. Every
-//! pose is made by moving the still around its feet (walk bob, cast jump, fall, sinking...), each
-//! tribe by swapping the magenta hue for its colour. Left-hand views are mirrored.
+//! Open-source unit art from still pictures (docs/specs/unit-art.md, "Still"): a front still (facing
+//! down-right) and optionally a back one (facing up-left), each 256 x 256 RGBA at 4 pixels per base
+//! pixel, feet at (128, 232), tribe-coloured parts in magenta. Every pose is made by moving a still
+//! around its feet (walk bob, cast jump, fall, sinking...), each tribe by swapping the magenta hue for
+//! its colour, the other directions by mirroring (`view`).
 
 use super::art::{Frame, Pose, TribeArt, DIRS};
 use super::procedural::{frame_count, tribe_rgb};
@@ -22,12 +23,31 @@ const MAGENTA_HUE: f32 = 300.0;
 const WATER: [u8; 4] = [170, 210, 255, 255];
 
 static SHAMAN: &[u8] = include_bytes!("../../../../assets/units/shaman/still.png");
+static SHAMAN_BACK: &[u8] = include_bytes!("../../../../assets/units/shaman/still-back.png");
 
-/// The bundled still of a kind, if any.
-pub fn bundled(kind: UnitKind) -> Option<&'static [u8]> {
+/// The bundled front and back stills (PNG) of a kind, if any.
+pub fn bundled(kind: UnitKind) -> Option<(&'static [u8], Option<&'static [u8]>)> {
     match kind {
-        UnitKind::Shaman => Some(SHAMAN),
+        UnitKind::Shaman => Some((SHAMAN, Some(SHAMAN_BACK))),
         _ => None,
+    }
+}
+
+/// A kind's stills, decoded (and recoloured for a tribe).
+#[derive(Clone, Debug)]
+pub struct Stills {
+    pub front: Frame,
+    pub back: Option<Frame>,
+}
+
+/// Which still shows direction `dir` (see `art::sprite_dir`), and whether mirrored. The front still
+/// faces down-right: 0-2 as is, 6-7 mirrored. The back one faces up-left: 4-5 as is, 3 mirrored.
+/// Without a back still the front one stands in (3-4 as is, 5 mirrored).
+pub fn view(dir: usize, has_back: bool) -> (bool, bool) {
+    match (dir % DIRS, has_back) {
+        (3, true) => (true, true),
+        (4 | 5, true) => (true, false),
+        (d, _) => (false, d >= 5),
     }
 }
 
@@ -132,20 +152,23 @@ fn crop(rgba: &[u8], mirrored: bool) -> Frame {
     Frame { width: w, height: h, origin: (if mirrored { w - ox } else { ox }, feet.1 - y0), rgba: out, scale: SCALE }
 }
 
-/// The frame loop of `pose` seen from `dir`: the still faces down-right, so directions 0-4 show it
-/// as is and 5-7 mirrored.
-pub fn frames(still: &Frame, pose: Pose, dir: usize) -> Vec<Frame> {
+/// The frame loop of `pose` seen from `dir` (still picked by `view`).
+pub fn frames(stills: &Stills, pose: Pose, dir: usize) -> Vec<Frame> {
+    let (back, mirrored) = view(dir, stills.back.is_some());
+    let still = if back { stills.back.as_ref().unwrap_or(&stills.front) } else { &stills.front };
     let n = frame_count(pose);
-    (0..n).map(|f| place(still, placement(pose, f, n), dir % DIRS >= 5)).collect()
+    (0..n).map(|f| place(still, placement(pose, f, n), mirrored)).collect()
 }
 
-/// Every tribe's art for a kind from its bundled still; None if it has none (or it does not decode).
+/// Every tribe's art for a kind from its bundled stills; None if it has none (or they do not decode).
 pub fn still_art(kind: UnitKind) -> Option<Vec<TribeArt>> {
-    let still = decode(bundled(kind)?)?;
+    let (front, back) = bundled(kind)?;
+    let stills = Stills { front: decode(front)?, back: back.and_then(decode) };
     Some(
         (0..TRIBES)
             .map(|tribe| {
-                let coloured = recolour(&still, tribe_rgb(tribe));
+                let rgb = tribe_rgb(tribe);
+                let coloured = Stills { front: recolour(&stills.front, rgb), back: stills.back.as_ref().map(|b| recolour(b, rgb)) };
                 TribeArt { poses: Pose::ALL.iter().map(|&pose| (0..DIRS).map(|dir| frames(&coloured, pose, dir)).collect()).collect() }
             })
             .collect(),
@@ -156,8 +179,8 @@ pub fn still_art(kind: UnitKind) -> Option<Vec<TribeArt>> {
 mod tests {
     use super::*;
 
-    fn shaman() -> Frame {
-        decode(SHAMAN).expect("bundled still decodes")
+    fn shaman() -> Stills {
+        Stills { front: decode(SHAMAN).expect("bundled still decodes"), back: None }
     }
 
     fn opaque(f: &Frame) -> usize {
@@ -165,13 +188,26 @@ mod tests {
     }
 
     #[test]
-    fn bundled_still_is_normalised() {
-        let s = shaman();
-        assert_eq!((s.width, s.height, s.origin, s.scale), (256, 256, (128, 232), SCALE));
-        assert!(s.rgba.chunks_exact(4).all(|p| p[3] == 0 || p[3] == 255), "hard edges");
-        let magenta = s.rgba.chunks_exact(4).filter(|p| p[3] != 0 && p[0] as u16 > p[1] as u16 + 60 && p[2] as u16 > p[1] as u16 + 60).count();
-        assert!(magenta > 1000, "tribe-coloured robe: {magenta} px");
+    fn bundled_stills_are_normalised() {
+        for png in [SHAMAN, SHAMAN_BACK] {
+            let s = decode(png).unwrap();
+            assert_eq!((s.width, s.height, s.origin, s.scale), (256, 256, (128, 232), SCALE));
+            assert!(s.rgba.chunks_exact(4).all(|p| p[3] == 0 || p[3] == 255), "hard edges");
+            let magenta = s.rgba.chunks_exact(4).filter(|p| p[3] != 0 && p[0] as u16 > p[1] as u16 + 60 && p[2] as u16 > p[1] as u16 + 60).count();
+            assert!(magenta > 1000, "tribe-coloured robe: {magenta} px");
+        }
         assert!(bundled(UnitKind::Brave).is_none());
+    }
+
+    #[test]
+    fn back_still_for_the_back_views() {
+        let front: Vec<_> = (0..8).map(|d| view(d, true)).collect();
+        assert_eq!(front, [(false, false), (false, false), (false, false), (true, true), (true, false), (true, false), (false, true), (false, true)]);
+        let only_front: Vec<_> = (0..8).map(|d| view(d, false)).collect();
+        assert!(only_front.iter().all(|&(back, _)| !back));
+        assert_eq!(only_front.iter().filter(|v| v.1).count(), 3, "5-7 mirrored");
+        let art = still_art(UnitKind::Shaman).unwrap();
+        assert_ne!(art[0].frames(Pose::Idle, 0)[0].rgba, art[0].frames(Pose::Idle, 4)[0].rgba, "her back seen from behind");
     }
 
     #[test]
@@ -186,7 +222,7 @@ mod tests {
     fn poses_move_the_still_around_its_feet() {
         let s = shaman();
         let idle = &frames(&s, Pose::Idle, 1)[0];
-        assert_eq!(opaque(idle), opaque(&s), "idle is the still");
+        assert_eq!(opaque(idle), opaque(&s.front), "idle is the still");
         let cast = frames(&s, Pose::Cast, 1);
         assert!(cast[6].origin.1 > idle.origin.1 + 40, "jumps up: feet {} px under the top", cast[6].origin.1);
         let fall = frames(&s, Pose::Fall, 1);

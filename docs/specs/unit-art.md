@@ -87,18 +87,21 @@ Use no other magenta anywhere in the art. Skin, hair, wood, metal and the spy's 
   `assets/CREDITS.md`; for generated art, the tool and model too.
 
 ## Still (minimum delivery, loaded today)
-One detailed picture per kind, facing down-right (direction 1), at any resolution: `tools/normalize_still.py`
-turns it into `assets/units/<kind>/still.png` (256 x 256, 4 pixels per base pixel, feet at (128, 232), hard
+One detailed picture per kind, facing down-right (direction 1), at any resolution, and optionally one from
+behind facing up-left (direction 5): `tools/normalize_still.py` turns them into `assets/units/<kind>/still.png`
+and `still-back.png` (256 x 256, 4 pixels per base pixel, feet at (128, 232), hard
 edges, tribe colour turned magenta), given the feet point and the source pixels per base pixel (head top to
-feet = 34 base px). Keep the source next to it as `source.png`. The game embeds the still (`units/still.rs`),
+feet = 34 base px). Keep the sources next to them as `source.png` and `source-back.png`. The game embeds the still (`units/still.rs`),
 swaps the magenta hue for each tribe's (shading kept) and builds every pose by moving it around the feet:
 idle as is, walk bobbing and swaying, pray squashed and bowed, cast jumping 12 base px, fall turning onto its
-back, drown sunk 10 base px under a ripple line. Directions 0-4 show it as is (no back view yet), 5-7 mirrored.
+back, drown sunk 10 base px under a ripple line. Directions: front still for 0-2, mirrored for 6-7; back still
+for 4-5, mirrored for 3 (without a back still, the front one stands in: 3-4 as is, 5 mirrored).
 Detailed art (more than 1 pixel per base pixel) is drawn as is, without the pixel-art upscaling.
 
 The shaman's still is used whenever the original files are not (`--no-original`, no install):
 
   uvx --with pillow python tools/normalize_still.py assets/units/shaman/source.png assets/units/shaman/still.png --feet 206,700 --px-per-base 17
+  uvx --with pillow python tools/normalize_still.py assets/units/shaman/source-back.png assets/units/shaman/still-back.png --feet 180,718 --px-per-base 17
 
 ## Generating with an image model
 Models do not keep a fixed grid or anchor reliably: generate one direction or pose at a time, larger, then
