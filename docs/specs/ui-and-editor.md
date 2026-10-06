@@ -49,3 +49,5 @@ compositor take focus (auto-hide panel), which drops any pointer constraint. Hen
 (`virtual_cursor.rs`): the system cursor is locked and hidden, ours moves from raw motion and stops at
 the window border, and is re-sent as `CursorMoved` so UI picking works. Esc releases it;
 `POP3_CURSOR_SPEED` scales it (default 1.5; raw motion is unaccelerated).
+Pointer image: original arrow (`POINT0-0.DAT` sprite 14, see sprites.md, drawn x2, click point at its tip)
+when original files are allowed, else a generated black-and-white arrow.

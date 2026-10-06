@@ -3,14 +3,42 @@
 //! reaches the screen edge, so compositor edge features (auto-hide panels on COSMIC) cannot steal
 //! focus while the player pushes against the border to scroll. Its moves are re-sent as
 //! `CursorMoved` window events so Bevy UI hover/click keeps working. Esc releases the capture.
+//! Drawn with the original arrow pointer (`POINT0-0.DAT` sprite 14) when the original files are
+//! allowed and present, else a generated arrow.
 
+use crate::world::LevelList;
+use bevy::asset::RenderAssetUsages;
+use bevy::image::ImageSampler;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::{CursorGrabMode, CursorMoved, CursorOptions, PrimaryWindow, WindowEvent, WindowFocused};
 
 /// Multiplier on raw mouse motion (raw motion is unaccelerated); `POP3_CURSOR_SPEED` overrides.
 pub const DEFAULT_SPEED: f32 = 1.5;
-const SIZE: f32 = 14.0;
+/// Screen pixels per sprite pixel.
+const SCALE: f32 = 2.0;
+
+/// Fallback arrow: `#` outline, `.` fill, tip at (0, 0).
+const ARROW: [&str; 17] = [
+    "#",
+    "##",
+    "#.#",
+    "#..#",
+    "#...#",
+    "#....#",
+    "#.....#",
+    "#......#",
+    "#.......#",
+    "#........#",
+    "#.....#####",
+    "#..#..#",
+    "#.# #..#",
+    "##  #..#",
+    "#    #..#",
+    "     #..#",
+    "      ##",
+];
 
 /// Whether the mouse is captured by the game (Esc toggles), and the in-game cursor position.
 #[derive(Resource, Debug, Clone, PartialEq)]
@@ -49,8 +77,61 @@ pub fn cursor_options(captured: bool) -> (CursorGrabMode, bool) {
     if captured { (CursorGrabMode::Locked, false) } else { (CursorGrabMode::None, true) }
 }
 
+/// RGBA image of a pointer and the pixel that is the click point.
+#[derive(Debug, PartialEq)]
+pub struct PointerImage {
+    pub width: usize,
+    pub height: usize,
+    pub rgba: Vec<u8>,
+    pub tip: (usize, usize),
+}
+
+/// Original pointer sprite in the given palette (transparent where the sprite has no pixel).
+pub fn sprite_pointer(sprite: &pop3_format::Sprite, palette: &[[u8; 3]]) -> PointerImage {
+    let rgba = sprite
+        .pixels
+        .iter()
+        .flat_map(|p| match p.and_then(|i| palette.get(i as usize)) {
+            Some(c) => [c[0], c[1], c[2], 255],
+            None => [0, 0, 0, 0],
+        })
+        .collect();
+    PointerImage { width: sprite.width, height: sprite.height, rgba, tip: sprite.tip().unwrap_or((0, 0)) }
+}
+
+/// Generated black-and-white arrow (no original data).
+pub fn fallback_pointer() -> PointerImage {
+    let width = ARROW.iter().map(|r| r.len()).max().unwrap_or(1);
+    let rgba = ARROW
+        .iter()
+        .flat_map(|row| (0..width).map(move |x| row.as_bytes().get(x).copied().unwrap_or(b' ')))
+        .flat_map(|c| match c {
+            b'#' => [0, 0, 0, 255],
+            b'.' => [255, 255, 255, 255],
+            _ => [0, 0, 0, 0],
+        })
+        .collect();
+    PointerImage { width, height: ARROW.len(), rgba, tip: (0, 0) }
+}
+
+fn original_pointer(levels: &LevelList) -> Option<PointerImage> {
+    if !levels.original {
+        return None;
+    }
+    let load = || -> Result<_, pop3_format::LevelError> {
+        let bank = pop3_format::SpriteBank::load(&levels.data_dir, pop3_format::sprites::POINTER_FILE)?;
+        Ok((bank, pop3_format::Theme::load(&levels.data_dir, 0)?))
+    };
+    let (bank, theme) = load().map_err(|e| warn!("original pointer: {e}")).ok()?;
+    let sprite = bank.sprites.get(pop3_format::sprites::POINTER_ARROW)?;
+    Some(sprite_pointer(sprite, &theme.palette))
+}
+
 #[derive(Component)]
-struct CursorSprite;
+struct CursorSprite {
+    /// Click point offset in screen pixels.
+    tip: Vec2,
+}
 
 pub struct VirtualCursorPlugin;
 
@@ -62,19 +143,25 @@ impl Plugin for VirtualCursorPlugin {
     }
 }
 
-fn spawn_sprite(mut commands: Commands) {
+fn spawn_sprite(mut commands: Commands, levels: Res<LevelList>, mut images: ResMut<Assets<Image>>) {
+    let pointer = original_pointer(&levels).unwrap_or_else(fallback_pointer);
+    let mut image = Image::new(
+        Extent3d { width: pointer.width as u32, height: pointer.height as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        pointer.rgba,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.sampler = ImageSampler::nearest();
     commands.spawn((
-        CursorSprite,
+        CursorSprite { tip: Vec2::new(pointer.tip.0 as f32, pointer.tip.1 as f32) * SCALE },
+        ImageNode::new(images.add(image)),
         Node {
             position_type: PositionType::Absolute,
-            width: Val::Px(SIZE),
-            height: Val::Px(SIZE),
-            border: UiRect::all(Val::Px(2.0)),
-            border_radius: BorderRadius::MAX,
+            width: Val::Px(pointer.width as f32 * SCALE),
+            height: Val::Px(pointer.height as f32 * SCALE),
             ..default()
         },
-        BackgroundColor(Color::WHITE),
-        BorderColor::all(Color::BLACK),
         GlobalZIndex(i32::MAX),
         Pickable::IGNORE,
         Visibility::Hidden,
@@ -126,12 +213,12 @@ fn move_cursor(
     }
 }
 
-fn draw_sprite(cursor: Res<VirtualCursor>, mut q: Query<(&mut Node, &mut Visibility), With<CursorSprite>>) {
-    for (mut node, mut vis) in &mut q {
+fn draw_sprite(cursor: Res<VirtualCursor>, mut q: Query<(&CursorSprite, &mut Node, &mut Visibility)>) {
+    for (sprite, mut node, mut vis) in &mut q {
         match cursor.position.filter(|_| cursor.captured) {
             Some(p) => {
-                node.left = Val::Px(p.x - SIZE / 2.0);
-                node.top = Val::Px(p.y - SIZE / 2.0);
+                node.left = Val::Px(p.x - sprite.tip.x);
+                node.top = Val::Px(p.y - sprite.tip.y);
                 *vis = Visibility::Inherited;
             }
             None => *vis = Visibility::Hidden,
@@ -167,6 +254,23 @@ mod tests {
     fn speed_scales_motion() {
         let mut c = VirtualCursor { position: Some(Vec2::new(100.0, 100.0)), speed: 2.0, ..cursor() };
         assert_eq!(c.apply(Vec2::new(10.0, 0.0), Vec2::new(800.0, 600.0)), Vec2::new(120.0, 100.0));
+    }
+
+    #[test]
+    fn fallback_is_an_arrow_with_tip_at_origin() {
+        let p = fallback_pointer();
+        assert_eq!(p.rgba.len(), p.width * p.height * 4);
+        assert_eq!(&p.rgba[..4], &[0, 0, 0, 255], "tip pixel is opaque");
+        assert_eq!(p.rgba[(p.width - 1) * 4 + 3], 0, "top right is transparent");
+        assert_eq!(p.tip, (0, 0));
+    }
+
+    #[test]
+    fn sprite_pointer_uses_palette_and_transparency() {
+        let sprite = pop3_format::Sprite { width: 2, height: 1, pixels: vec![None, Some(1)] };
+        let p = sprite_pointer(&sprite, &[[0; 3], [10, 20, 30]]);
+        assert_eq!(p.rgba, vec![0, 0, 0, 0, 10, 20, 30, 255]);
+        assert_eq!(p.tip, (1, 0));
     }
 
     #[test]
