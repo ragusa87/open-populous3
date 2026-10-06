@@ -4,10 +4,13 @@
 //! textured from the level theme's atlas; otherwise (or with `--no-original`) plain generated
 //! blocks tinted with the tribe colour.
 
+use crate::camera::CameraRig;
 use crate::grounded::Grounded;
 use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects};
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
+use crate::units::PLAYER;
+use game_core::map::GameMap;
 use game_core::site::ReincarnationSite;
 use pop3_format::catalog::REINCARNATION_STONE;
 use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
@@ -31,7 +34,21 @@ pub struct SitesPlugin;
 
 impl Plugin for SitesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, respawn_markers);
+        app.add_systems(Update, respawn_markers).add_systems(Update, look_at_site.in_set(crate::menu::Gameplay));
+    }
+}
+
+/// Where the player's reincarnation site is (cells), if the map has one.
+pub fn player_site_cell(map: &GameMap) -> Option<Vec2> {
+    map.site_of(PLAYER).map(site_cell_pos)
+}
+
+/// H brings the camera to the player's reincarnation site.
+fn look_at_site(keys: Res<ButtonInput<KeyCode>>, mut rig: ResMut<CameraRig>, map: Res<CurrentMap>) {
+    if keys.just_pressed(KeyCode::KeyH) {
+        if let Some(cell) = player_site_cell(&map.0) {
+            rig.focus = cell;
+        }
     }
 }
 
@@ -134,6 +151,14 @@ fn respawn_markers(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn h_finds_the_players_site_if_any() {
+        let mut map = GameMap::sandbox_walk();
+        assert_eq!(player_site_cell(&map), Some(Vec2::new(64.5, 64.5)));
+        map.sites.clear();
+        assert_eq!(player_site_cell(&map), None, "no site: the camera stays");
+    }
 
     #[test]
     fn site_centre_is_cell_centre() {
