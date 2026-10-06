@@ -2,7 +2,7 @@
 //! removes it), left drag draws a box that selects your units inside it (Ctrl adds them), right
 //! click clears the selection. The shaman is a unit like the others here; clicking her panel preview
 //! selects her alone (`select_only`). Left click on the ground sends
-//! the selection there; P prays, X stops. Only selected units show their health bar, and the
+//! the selection there, each unit to a free cell of its own (`GameMap::dispatch`); P prays, X stops. Only selected units show their health bar, and the
 //! cursor shows how many units are selected when more than one. While a spell is aimed the mouse
 //! belongs to it (`hud::spells`): clicks neither select nor send units.
 
@@ -240,6 +240,7 @@ pub(super) fn select_and_order(
         None => None,
     };
     let mut orders = Vec::new();
+    let mut moves = Vec::new();
     if let Some(cam) = gesture.and_then(|_| cams.iter().next()) {
         let units = on_screen(&map.0.units, &views, cam);
         match gesture {
@@ -249,8 +250,7 @@ pub(super) fn select_and_order(
                 None if !selection.units.is_empty() => {
                     let ray = cam.0.viewport_to_world(cam.1, c).ok();
                     if let Some(cell) = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)) {
-                        let (x, z) = world_units(cell);
-                        orders.push(Order::MoveTo { x, z });
+                        moves = map.0.dispatch(PLAYER, &selection.units, world_units(cell));
                     }
                 }
                 None => {}
@@ -264,10 +264,9 @@ pub(super) fn select_and_order(
     if keys.just_pressed(KeyCode::KeyX) {
         orders.push(Order::Stop);
     }
-    for order in orders {
-        for command in selection.commands(order) {
-            map.bypass_change_detection().0.apply(&command);
-        }
+    let commands = orders.into_iter().flat_map(|order| selection.commands(order));
+    for command in moves.into_iter().chain(commands) {
+        map.bypass_change_detection().0.apply(&command);
     }
 }
 

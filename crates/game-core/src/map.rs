@@ -2,11 +2,13 @@
 
 use crate::command::Command;
 use crate::path::Mobility;
+use crate::slots;
 use crate::spell::Spell;
+use std::collections::BTreeSet;
 use crate::tree::{scatter, Tree};
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
-use crate::unit::{Order, Unit, UnitEvent, UnitKind};
+use crate::unit::{Action, Order, Unit, UnitEvent, UnitKind};
 use pop3_format::{Level, LevelHeader, MAP_SIZE};
 use std::path::Path;
 
@@ -205,14 +207,52 @@ impl GameMap {
         }
     }
 
+    /// Cells a unit cannot stop on: visible trees, and every living unit but `except`'s slot (where
+    /// it stands, or where it is going).
+    pub fn taken_cells(&self, except: &[u32]) -> BTreeSet<(i32, i32)> {
+        let trees = self.trees.iter().filter(|t| t.is_visible()).map(Tree::cell);
+        let units = self.units.iter().filter(|u| u.is_alive() && !except.contains(&u.id)).map(|u| match u.action {
+            Action::Walking { to } | Action::Stranded { to } => slots::cell_of(to),
+            _ => u.cell(),
+        });
+        trees.chain(units).collect()
+    }
+
+    /// Orders sending the player's living `units` to `to`, each to a free cell of its own around it
+    /// (`slots::dispatch`).
+    pub fn dispatch(&self, player: u8, units: &[u32], to: (u16, u16)) -> Vec<Command> {
+        let movers: Vec<(u32, (u16, u16))> =
+            self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id)).map(|u| (u.id, (u.x, u.z))).collect();
+        let ids: Vec<u32> = movers.iter().map(|m| m.0).collect();
+        slots::dispatch(&self.terrain, &movers, to, &self.taken_cells(&ids))
+            .into_iter()
+            .map(|(unit, (x, z))| Command::OrderUnit { player, unit, order: Order::MoveTo { x, z } })
+            .collect()
+    }
+
     /// One simulation tick for every unit, in order; returns the ground levelled by reincarnations.
+    /// A unit that arrives (walking, or landing from a teleport) on a taken cell moves on to the
+    /// nearest free one.
     pub fn tick(&mut self) -> Vec<DirtyRect> {
         let mut dirty = Vec::new();
         self.trees.iter_mut().for_each(Tree::tick);
+        let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing { .. })).collect();
         for unit in &mut self.units {
             let site = self.sites.iter().find(|s| s.owner == unit.owner);
             if unit.tick(&self.terrain, site) == Some(UnitEvent::Reincarnated) {
                 dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain)));
+            }
+        }
+        for i in 0..self.units.len() {
+            if arriving[i] && self.units[i].action == Action::Idle {
+                let u = &self.units[i];
+                let taken = self.taken_cells(&[u.id]);
+                if taken.contains(&u.cell()) {
+                    if let Some(&free) = slots::free_cells_near(&self.terrain, u.cell(), &taken, 1).first() {
+                        let (x, z) = slots::cell_centre(free);
+                        self.units[i].order(Order::MoveTo { x, z });
+                    }
+                }
             }
         }
         dirty
@@ -374,6 +414,58 @@ mod tests {
             m.tick();
         }
         assert_eq!(m.trees[small].size, before + 1);
+    }
+
+    #[test]
+    fn a_group_sent_to_one_spot_ends_on_different_cells() {
+        let mut m = GameMap::sandbox_units();
+        m.trees.clear();
+        let c = MAP_SIZE as i32 / 2;
+        let to = slots::cell_centre((c + 2, c + 6));
+        let group: Vec<u32> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
+        for cmd in m.dispatch(0, &group, to) {
+            m.apply(&cmd);
+        }
+        for _ in 0..600 {
+            m.tick();
+        }
+        let cells: Vec<_> = m.units.iter().filter(|u| u.owner == 0).map(Unit::cell).collect();
+        assert!(m.units.iter().filter(|u| u.owner == 0).all(|u| u.action == Action::Idle), "all arrived");
+        let distinct: BTreeSet<_> = cells.iter().collect();
+        assert_eq!(distinct.len(), cells.len(), "one cell each: {cells:?}");
+        assert!(cells.iter().all(|&(x, z)| (x - c - 2).abs() <= 3 && (z - c - 6).abs() <= 3), "packed around the target");
+    }
+
+    #[test]
+    fn never_stops_on_a_tree_or_another_unit() {
+        let mut m = GameMap::sandbox_walk();
+        let c = MAP_SIZE as i32 / 2;
+        m.trees = vec![Tree::new((c + 5, c), 0, 3)];
+        let shaman = m.units[0].id;
+        m.units.push(Unit::new(99, 0, UnitKind::Brave, slots::cell_centre((c + 6, c))));
+        for target in [(c + 5, c), (c + 6, c)] {
+            m.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::MoveTo { x: slots::cell_centre(target).0, z: slots::cell_centre(target).1 } });
+            for _ in 0..300 {
+                m.tick();
+            }
+            let u = &m.units[0];
+            assert_eq!(u.action, Action::Idle);
+            assert!(u.cell() != (c + 5, c) && u.cell() != (c + 6, c), "moved off the taken cell {target:?}: {:?}", u.cell());
+            assert!((u.cell().0 - target.0).abs() <= 1 && (u.cell().1 - target.1).abs() <= 1, "right next to it");
+        }
+    }
+
+    #[test]
+    fn teleporting_onto_a_tree_steps_off_it() {
+        let mut m = GameMap::sandbox_walk();
+        let c = MAP_SIZE as i32 / 2;
+        m.trees = vec![Tree::new((c + 4, c), 0, 4)];
+        m.apply(&Command::Cast { player: 0, spell: Spell::Teleport { to: slots::cell_centre((c + 4, c)) } });
+        for _ in 0..100 {
+            m.tick();
+        }
+        assert_ne!(m.units[0].cell(), (c + 4, c));
+        assert_eq!(m.units[0].action, Action::Idle);
     }
 
     #[test]

@@ -43,6 +43,16 @@ Every kind walks, prays, heals, drowns and dies like the shaman; only the shaman
 shaman, three of each other kind in columns to the west, one of each for tribe 1 (red) in a row to the east (all in
 view of the starting camera), a pond to the north.
 
+## Standing slots (done: `game_core::slots`)
+- A unit never stops on a cell taken by a visible tree or another living unit (its current cell, or the cell it
+  is walking to): `GameMap::taken_cells`.
+- Moving one unit or a group (`GameMap::dispatch`, used for left clicks on the ground): the free cells around the
+  target that a walker reaches from it (no crossing water or cliffs, within 12 cells) are taken nearest first,
+  each by the closest unit not yet placed (ties by id); the unit on the target cell goes exactly where clicked,
+  the others to their cell centre. One `Command::OrderUnit` per unit, so lockstep peers get the same orders.
+- Arriving (end of a walk, or landing from a teleport) on a cell taken meanwhile: the unit walks on to the
+  nearest free cell (`GameMap::tick`).
+
 ## Pathfinding (done: `game_core::path`)
 - `path::Mobility`: Walk (land, not open sea = cell with 4 water corners, not a cliff = a cell edge
   rising more than `MAX_CLIMB` 300; ~5.5% of the original levels' land), Sail (open sea only, boats),
