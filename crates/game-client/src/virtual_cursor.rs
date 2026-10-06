@@ -198,10 +198,10 @@ fn toggle_capture(
 fn move_cursor(
     motion: Res<AccumulatedMouseMotion>,
     mut cursor: ResMut<VirtualCursor>,
-    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
+    mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut events: MessageWriter<WindowEvent>,
 ) {
-    let Ok((entity, window)) = windows.single() else { return };
+    let Ok((entity, mut window)) = windows.single_mut() else { return };
     if !cursor.captured || !window.focused {
         return;
     }
@@ -210,6 +210,11 @@ fn move_cursor(
     if before != Some(after) {
         let delta = before.map(|b| after - b);
         events.write(WindowEvent::CursorMoved(CursorMoved { window: entity, position: after, delta }));
+    }
+    // bevy_ui `Interaction` reads the window's cursor position, frozen while the system cursor is
+    // locked (and reset by winit on enter/focus): keep it on ours.
+    if window.cursor_position() != Some(after) {
+        window.set_cursor_position(Some(after));
     }
 }
 
