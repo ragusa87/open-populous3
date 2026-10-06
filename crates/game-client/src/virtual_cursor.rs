@@ -169,7 +169,7 @@ fn spawn_sprite(mut commands: Commands, levels: Res<LevelList>, mut images: ResM
 }
 
 /// Esc toggles; regaining focus re-applies (compositors drop the lock on focus loss).
-fn toggle_capture(
+pub(crate) fn toggle_capture(
     keys: Res<ButtonInput<KeyCode>>,
     mut focus: MessageReader<WindowFocused>,
     mut cursor: ResMut<VirtualCursor>,

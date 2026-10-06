@@ -16,18 +16,21 @@ pub struct ViewPreset {
     pub pitch_deg: f32,
 }
 
-pub const PRESETS: [ViewPreset; 6] = [
-    ViewPreset { name: "A  previous default", relief: 1.0, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
-    ViewPreset { name: "B  relief x2", relief: 2.0, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
-    ViewPreset { name: "C  closer", relief: 1.0, curvature: 0.012, distance: 10.0, pitch_deg: 3.0 },
-    ViewPreset { name: "D  closer, relief x2", relief: 2.0, curvature: 0.012, distance: 10.0, pitch_deg: 3.0 },
-    ViewPreset { name: "E  D + flatter planet", relief: 2.0, curvature: 0.006, distance: 10.0, pitch_deg: 3.0 },
-    ViewPreset { name: "F  3/4 view", relief: 1.5, curvature: 0.006, distance: 10.0, pitch_deg: 12.0 },
+/// First entry is the default view; the others vary one or two settings around it.
+pub const PRESETS: [ViewPreset; 8] = [
+    ViewPreset { name: "Default", relief: 2.0, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
+    ViewPreset { name: "Closer", relief: 2.0, curvature: 0.012, distance: 14.0, pitch_deg: 3.0 },
+    ViewPreset { name: "Close, ground level", relief: 2.0, curvature: 0.012, distance: 10.0, pitch_deg: 3.0 },
+    ViewPreset { name: "Close, flatter planet", relief: 2.0, curvature: 0.006, distance: 10.0, pitch_deg: 3.0 },
+    ViewPreset { name: "3/4 view", relief: 2.0, curvature: 0.008, distance: 14.0, pitch_deg: 15.0 },
+    ViewPreset { name: "High 3/4 view", relief: 2.0, curvature: 0.012, distance: 22.0, pitch_deg: 28.0 },
+    ViewPreset { name: "Dramatic relief x3", relief: 3.0, curvature: 0.008, distance: 14.0, pitch_deg: 6.0 },
+    ViewPreset { name: "Gentle relief x1.5", relief: 1.5, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
 ];
 
 impl ViewPreset {
     pub fn curve(&self, base: CurveParams) -> CurveParams {
-        CurveParams { height_scale: CurveParams::default().height_scale * self.relief, curvature: self.curvature, ..base }
+        CurveParams { curvature: self.curvature, ..base.with_relief(self.relief) }
     }
 
     /// One line describing the preset values, for the menu and to report a choice.
@@ -61,7 +64,8 @@ impl Plugin for ViewMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ViewMenu>()
             .add_systems(Startup, spawn_menu)
-            .add_systems(Update, (toggle_menu, preset_clicks, menu_visuals).chain());
+            .add_systems(Update, (toggle_menu, preset_clicks, menu_visuals).chain())
+            .add_systems(Update, close_on_escape.before(crate::virtual_cursor::toggle_capture));
     }
 }
 
@@ -86,7 +90,7 @@ fn spawn_menu(mut commands: Commands) {
             GlobalZIndex(10),
         ))
         .with_children(|menu| {
-            menu.spawn(text("View presets (F2 closes)", 15.0));
+            menu.spawn(text("View presets (F2 / Esc close)", 15.0));
             for (i, p) in PRESETS.iter().enumerate() {
                 menu.spawn((
                     PresetButton(i),
@@ -107,6 +111,13 @@ fn spawn_menu(mut commands: Commands) {
 fn toggle_menu(keys: Res<ButtonInput<KeyCode>>, mut menu: ResMut<ViewMenu>) {
     if keys.just_pressed(KeyCode::F2) {
         menu.open = !menu.open;
+    }
+}
+
+/// Esc closes the menu and is consumed; with the menu closed it keeps its usual role (mouse capture).
+fn close_on_escape(mut keys: ResMut<ButtonInput<KeyCode>>, mut menu: ResMut<ViewMenu>) {
+    if menu.open && keys.clear_just_pressed(KeyCode::Escape) {
+        menu.open = false;
     }
 }
 
@@ -151,7 +162,7 @@ fn menu_visuals(
             _ => PARCHMENT,
         };
     }
-    let relief = params.0.height_scale / CurveParams::default().height_scale;
+    let relief = params.0.relief();
     let line = format!(
         "Now: relief x{relief:.2}  curvature {}  distance {:.1}  tilt {:.0}deg",
         params.0.curvature,
@@ -170,20 +181,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_preset_is_the_previous_default() {
+    fn first_preset_is_the_default_view() {
         let base = CurveParams::default();
-        let a = PRESETS[0];
-        assert_eq!(a.curve(base).height_scale, base.height_scale);
-        assert_eq!(a.curve(base).curvature, base.curvature);
-        assert!((a.pitch_deg.to_radians() - crate::camera::GROUND_VIEW.0).abs() < 1e-6);
-        assert_eq!(a.distance, crate::camera::GROUND_VIEW.1);
+        let d = PRESETS[0].curve(base);
+        assert_eq!((d.height_scale, d.curvature), (base.height_scale, base.curvature));
+        assert!((PRESETS[0].pitch_deg.to_radians() - crate::camera::GROUND_VIEW.0).abs() < 1e-6);
+        assert_eq!(PRESETS[0].distance, crate::camera::GROUND_VIEW.1);
     }
 
     #[test]
-    fn presets_keep_the_draw_radius() {
+    fn presets_keep_the_draw_radius_and_set_relief() {
         let base = CurveParams { radius: 7, ..CurveParams::default() };
-        let f = PRESETS[5].curve(base);
-        assert_eq!(f.radius, 7);
-        assert_eq!(f.height_scale, CurveParams::default().height_scale * 1.5);
+        let p = PRESETS[6].curve(base);
+        assert_eq!((p.radius, p.relief()), (7, 3.0));
+    }
+
+    #[test]
+    fn escape_closes_an_open_menu_and_is_consumed() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>().insert_resource(ViewMenu { open: true, active: None });
+        app.add_systems(Update, close_on_escape);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
+        app.update();
+        assert!(!app.world().resource::<ViewMenu>().open);
+        assert!(!app.world().resource::<ButtonInput<KeyCode>>().just_pressed(KeyCode::Escape), "consumed");
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().release(KeyCode::Escape);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
+        app.update();
+        assert!(app.world().resource::<ButtonInput<KeyCode>>().just_pressed(KeyCode::Escape), "closed menu leaves Esc alone");
     }
 }

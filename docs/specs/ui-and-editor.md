@@ -54,5 +54,6 @@ Pointer image: original arrow (`POINT0-0.DAT` sprite 14, see sprites.md, drawn x
 when original files are allowed, else a generated black-and-white arrow.
 
 View presets: F2 opens a menu (`hud/view_menu.rs`) of camera/terrain presets applied live (distance, tilt,
-relief, curvature; the terrain is rebuilt); the chosen values are logged. View tuning (dev, read at start): `POP3_RELIEF` (terrain height scale multiplier), `POP3_CURVATURE`
+relief, curvature; the terrain is rebuilt); the chosen values are logged. Esc closes it when open (and is
+consumed), otherwise Esc releases/captures the mouse. View tuning (dev, read at start): `POP3_RELIEF` (relief vs the original height ratio, default 2), `POP3_CURVATURE`
 (planet bend, default 0.012), `POP3_VIEW_DISTANCE` (cells, default 20), `POP3_VIEW_PITCH` (degrees, default 3).
