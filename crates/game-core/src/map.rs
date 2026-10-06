@@ -207,31 +207,31 @@ impl GameMap {
         }
     }
 
-    /// Cells a unit cannot stop on: visible trees, and every living unit but `except`'s slot (where
-    /// it stands, or where it is going).
-    pub fn taken_cells(&self, except: &[u32]) -> BTreeSet<(i32, i32)> {
-        let trees = self.trees.iter().filter(|t| t.is_visible()).map(Tree::cell);
+    /// Spots a unit cannot stop on: every spot of a visible tree's cell, and every living unit's but
+    /// `except`'s (where it stands, or where it is going).
+    pub fn taken_spots(&self, except: &[u32]) -> BTreeSet<slots::Spot> {
+        let trees = self.trees.iter().filter(|t| t.is_visible()).flat_map(|t| slots::cell_spots(t.cell()));
         let units = self.units.iter().filter(|u| u.is_alive() && !except.contains(&u.id)).map(|u| match u.action {
-            Action::Walking { to } | Action::Stranded { to } => slots::cell_of(to),
-            _ => u.cell(),
+            Action::Walking { to } | Action::Stranded { to } => slots::spot_of(to),
+            _ => slots::spot_of((u.x, u.z)),
         });
         trees.chain(units).collect()
     }
 
-    /// Orders sending the player's living `units` to `to`, each to a free cell of its own around it
+    /// Orders sending the player's living `units` to `to`, each to a free spot of its own around it
     /// (`slots::dispatch`).
     pub fn dispatch(&self, player: u8, units: &[u32], to: (u16, u16)) -> Vec<Command> {
         let movers: Vec<(u32, (u16, u16))> =
             self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id)).map(|u| (u.id, (u.x, u.z))).collect();
         let ids: Vec<u32> = movers.iter().map(|m| m.0).collect();
-        slots::dispatch(&self.terrain, &movers, to, &self.taken_cells(&ids))
+        slots::dispatch(&self.terrain, &movers, to, &self.taken_spots(&ids))
             .into_iter()
             .map(|(unit, (x, z))| Command::OrderUnit { player, unit, order: Order::MoveTo { x, z } })
             .collect()
     }
 
     /// One simulation tick for every unit, in order; returns the ground levelled by reincarnations.
-    /// A unit that arrives (walking, or landing from a teleport) on a taken cell moves on to the
+    /// A unit that arrives (walking, or landing from a teleport) on a taken spot moves on to the
     /// nearest free one.
     pub fn tick(&mut self) -> Vec<DirtyRect> {
         let mut dirty = Vec::new();
@@ -246,10 +246,10 @@ impl GameMap {
         for i in 0..self.units.len() {
             if arriving[i] && self.units[i].action == Action::Idle {
                 let u = &self.units[i];
-                let taken = self.taken_cells(&[u.id]);
-                if taken.contains(&u.cell()) {
-                    if let Some(&free) = slots::free_cells_near(&self.terrain, u.cell(), &taken, 1).first() {
-                        let (x, z) = slots::cell_centre(free);
+                let (taken, spot) = (self.taken_spots(&[u.id]), slots::spot_of((u.x, u.z)));
+                if taken.contains(&spot) {
+                    if let Some(&free) = slots::free_spots_near(&self.terrain, spot, &taken, 1).first() {
+                        let (x, z) = slots::spot_centre(free);
                         self.units[i].order(Order::MoveTo { x, z });
                     }
                 }
@@ -417,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn a_group_sent_to_one_spot_ends_on_different_cells() {
+    fn a_group_sent_to_one_spot_stands_packed_on_different_spots() {
         let mut m = GameMap::sandbox_units();
         m.trees.clear();
         let c = MAP_SIZE as i32 / 2;
@@ -429,11 +429,12 @@ mod tests {
         for _ in 0..600 {
             m.tick();
         }
-        let cells: Vec<_> = m.units.iter().filter(|u| u.owner == 0).map(Unit::cell).collect();
+        let spots: Vec<_> = m.units.iter().filter(|u| u.owner == 0).map(|u| slots::spot_of((u.x, u.z))).collect();
         assert!(m.units.iter().filter(|u| u.owner == 0).all(|u| u.action == Action::Idle), "all arrived");
-        let distinct: BTreeSet<_> = cells.iter().collect();
-        assert_eq!(distinct.len(), cells.len(), "one cell each: {cells:?}");
-        assert!(cells.iter().all(|&(x, z)| (x - c - 2).abs() <= 3 && (z - c - 6).abs() <= 3), "packed around the target");
+        let distinct: BTreeSet<_> = spots.iter().collect();
+        assert_eq!(distinct.len(), spots.len(), "one spot each: {spots:?}");
+        let cells: Vec<_> = m.units.iter().filter(|u| u.owner == 0).map(Unit::cell).collect();
+        assert!(cells.iter().all(|&(x, z)| (x - c - 2).abs() <= 2 && (z - c - 6).abs() <= 2), "16 units within 2 cells: {cells:?}");
     }
 
     #[test]
@@ -444,13 +445,15 @@ mod tests {
         let shaman = m.units[0].id;
         m.units.push(Unit::new(99, 0, UnitKind::Brave, slots::cell_centre((c + 6, c))));
         for target in [(c + 5, c), (c + 6, c)] {
-            m.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::MoveTo { x: slots::cell_centre(target).0, z: slots::cell_centre(target).1 } });
+            let to = slots::cell_centre(target);
+            m.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::MoveTo { x: to.0, z: to.1 } });
             for _ in 0..300 {
                 m.tick();
             }
             let u = &m.units[0];
             assert_eq!(u.action, Action::Idle);
-            assert!(u.cell() != (c + 5, c) && u.cell() != (c + 6, c), "moved off the taken cell {target:?}: {:?}", u.cell());
+            assert_ne!(u.cell(), (c + 5, c), "never under the tree");
+            assert_ne!(slots::spot_of((u.x, u.z)), slots::spot_of((m.units[1].x, m.units[1].z)), "never on the brave's spot");
             assert!((u.cell().0 - target.0).abs() <= 1 && (u.cell().1 - target.1).abs() <= 1, "right next to it");
         }
     }

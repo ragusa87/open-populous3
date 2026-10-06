@@ -44,14 +44,16 @@ shaman, three of each other kind in columns to the west, one of each for tribe 1
 view of the starting camera), a pond to the north.
 
 ## Standing slots (done: `game_core::slots`)
-- A unit never stops on a cell taken by a visible tree or another living unit (its current cell, or the cell it
-  is walking to): `GameMap::taken_cells`.
-- Moving one unit or a group (`GameMap::dispatch`, used for left clicks on the ground): the free cells around the
+- Each cell holds 3 x 3 standing spots (`PER_CELL`, about a third of a cell apart: a unit's width).
+- A unit never stops on a spot taken by another living unit (where it stands, or where it is walking to) nor
+  in a visible tree's cell (a tree takes all its spots): `GameMap::taken_spots`.
+- Moving one unit or a group (`GameMap::dispatch`, used for left clicks on the ground): the free spots around the
   target that a walker reaches from it (no crossing water or cliffs, within 12 cells) are taken nearest first,
-  each by the closest unit not yet placed (ties by id); the unit on the target cell goes exactly where clicked,
-  the others to their cell centre. One `Command::OrderUnit` per unit, so lockstep peers get the same orders.
-- Arriving (end of a walk, or landing from a teleport) on a cell taken meanwhile: the unit walks on to the
-  nearest free cell (`GameMap::tick`).
+  each by the closest unit not yet placed (ties by id); the unit on the target spot goes exactly where clicked,
+  the others to their spot's centre: a group stands packed shoulder to shoulder. One `Command::OrderUnit` per
+  unit, so lockstep peers get the same orders.
+- Arriving (end of a walk, or landing from a teleport) on a spot taken meanwhile: the unit walks on to the
+  nearest free spot (`GameMap::tick`).
 
 ## Pathfinding (done: `game_core::path`)
 - `path::Mobility`: Walk (land, not open sea = cell with 4 water corners, not a cliff = a cell edge
