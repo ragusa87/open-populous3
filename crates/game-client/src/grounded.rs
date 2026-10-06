@@ -58,6 +58,41 @@ pub fn render_pos(map: &Heightmap, g: &Grounded, focus: Vec2, params: &CurvePara
     Some(Vec3::new(dx, y, dz))
 }
 
+/// Render-space ground height at offset `(dx, dz)` from the focus, as the mesh draws it.
+pub fn ground_y(map: &Heightmap, focus: Vec2, params: &CurveParams, dx: f32, dz: f32) -> f32 {
+    mesh_height(map, focus.x + dx, focus.y + dz) * params.height_scale - drop_at(params, dx, dz)
+}
+
+/// Map position (cells, wrapped) of the first ground point hit by a render-space ray, None if it
+/// leaves the drawn disc first. Marches in small steps, then bisects the crossing.
+pub fn pick_ground(map: &Heightmap, focus: Vec2, params: &CurveParams, origin: Vec3, dir: Vec3) -> Option<Vec2> {
+    const STEP: f32 = 0.05;
+    const MAX_T: f32 = 600.0;
+    let r = params.radius as f32 - 1.0;
+    let below = |t: f32| {
+        let p = origin + dir * t;
+        p.y <= ground_y(map, focus, params, p.x, p.z)
+    };
+    let mut t = 0.0;
+    while !below(t + STEP) {
+        t += STEP;
+        if t > MAX_T {
+            return None;
+        }
+    }
+    let (mut lo, mut hi) = (t, t + STEP);
+    for _ in 0..16 {
+        let mid = (lo + hi) / 2.0;
+        if below(mid) { hi = mid } else { lo = mid }
+    }
+    let p = origin + dir * hi;
+    if p.x * p.x + p.z * p.z > r * r {
+        return None;
+    }
+    let size = map.size() as f32;
+    Some((focus + Vec2::new(p.x, p.z)).rem_euclid(Vec2::splat(size)))
+}
+
 fn place_grounded(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
@@ -123,6 +158,18 @@ mod tests {
         assert_eq!(render_pos(&map, &point(at), at, &p).unwrap().y, 50.0);
         let wide = Grounded { at, half: 0.5 };
         assert_eq!(render_pos(&map, &wide, at, &p).unwrap().y, 45.0);
+    }
+
+    #[test]
+    fn picks_the_ground_under_a_ray_and_wraps() {
+        let mut map = Heightmap::new(128);
+        map.set(3, 0, 10);
+        let p = flat_params();
+        let hit = pick_ground(&map, Vec2::new(126.0, 1.0), &p, Vec3::new(-2.0, 10.0, 0.0), Vec3::NEG_Y).unwrap();
+        assert!((hit - Vec2::new(124.0, 1.0)).length() < 1e-3, "{hit:?}");
+        let slanted = pick_ground(&map, Vec2::ZERO, &p, Vec3::new(0.0, 5.0, 0.0), Vec3::new(1.0, -1.0, 0.0).normalize()).unwrap();
+        assert!((slanted.x - 25.0 / 11.0).abs() < 1e-3 && slanted.y.abs() < 1e-3, "hits the slope up to (3,0): {slanted:?}");
+        assert!(pick_ground(&map, Vec2::ZERO, &p, Vec3::new(0.0, 5.0, 0.0), Vec3::Y).is_none(), "looking at the sky");
     }
 
     #[test]
