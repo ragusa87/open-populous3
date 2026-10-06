@@ -45,17 +45,24 @@ pub fn encode(msg: &Message) -> Vec<u8> {
     b
 }
 
-/// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells`, for an order `order tag u8 [+ u16 x, z]`,
+/// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
 /// for a unit order `u32 unit id` then the order.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
             b.extend([0, *player]);
+            if let Spell::Teleport { to } = spell {
+                b.push(4);
+                b.extend(to.0.to_le_bytes());
+                b.extend(to.1.to_le_bytes());
+                return;
+            }
             let (tag, cells): (u8, &[(i32, i32)]) = match spell {
                 Spell::LandBridge { from, to } => (0, &[*from, *to]),
                 Spell::Flatten { at } => (1, std::slice::from_ref(at)),
                 Spell::Erode { at } => (2, std::slice::from_ref(at)),
                 Spell::Raise { at } => (3, std::slice::from_ref(at)),
+                Spell::Teleport { .. } => unreachable!("encoded above"),
             };
             b.push(tag);
             for (x, z) in cells {
@@ -97,6 +104,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
                 1 => Spell::Flatten { at: c.cell()? },
                 2 => Spell::Erode { at: c.cell()? },
                 3 => Spell::Raise { at: c.cell()? },
+                4 => Spell::Teleport { to: (c.u16()?, c.u16()?) },
                 _ => return None,
             };
             Some(Command::Cast { player, spell })
@@ -173,6 +181,7 @@ mod tests {
             commands: vec![
                 Command::Cast { player: 1, spell: Spell::LandBridge { from: (1, 2), to: (120, -3) } },
                 Command::Cast { player: 0, spell: Spell::Flatten { at: (5, 6) } },
+                Command::Cast { player: 0, spell: Spell::Teleport { to: (65535, 7) } },
                 Command::Order { player: 2, order: Order::MoveTo { x: 65535, z: 300 } },
                 Command::Order { player: 0, order: Order::Pray },
                 Command::Order { player: 1, order: Order::Stop },

@@ -1,6 +1,6 @@
 //! Spells tab: a grid of tiles mirroring the player's `SpellBook`.
 //! Tile states: empty (hidden), "?" (discoverable), gray with uses left (provided),
-//! gold with charge pips + recharge bar (known). Click selects, C casts (demo: uses a charge, the shaman jumps).
+//! gold with charge pips + recharge bar (known), gold marked "free" (unlimited, sandbox). Click selects, C casts (demo: uses a charge, the shaman jumps).
 
 use super::panel::{TabContent, DARK_BROWN, INK};
 use crate::units::PLAYER;
@@ -48,6 +48,7 @@ pub fn tile_view(slot: &SpellSlot) -> TileView {
         Availability::Provided { shots } => {
             TileView { style: TileStyle::Provided, label, badge: Some(format!("x{shots}")), ..base }
         }
+        Availability::Unlimited => TileView { style: TileStyle::Ready, label, badge: Some("free".into()), ..base },
         Availability::Known => TileView {
             style: if slot.charges > 0 { TileStyle::Ready } else { TileStyle::Depleted },
             label,
@@ -67,6 +68,7 @@ pub fn describe(slot: &SpellSlot) -> String {
         Availability::Provided { shots } => {
             format!("{name}\nProvided: {shots} use{} left, no recharge.", if shots == 1 { "" } else { "s" })
         }
+        Availability::Unlimited => format!("{name}\nUnlimited uses."),
         Availability::Known => {
             let max = slot.kind.max_charges();
             let state = if slot.is_recharging() {
@@ -97,6 +99,7 @@ pub fn short_label(kind: SpellKind) -> &'static str {
         SpellKind::AngelOfDeath => "Angel",
         SpellKind::Volcano => "Volcano",
         SpellKind::Armageddon => "Armag.",
+        SpellKind::Teleport => "Teleport",
     }
 }
 
@@ -318,6 +321,13 @@ mod tests {
         assert_eq!((unknown.style, unknown.label), (TileStyle::Unknown, "?"));
         let provided = tile_view(&slot(SpellKind::Volcano, Availability::Provided { shots: 2 }));
         assert_eq!((provided.style, provided.badge.as_deref(), provided.progress), (TileStyle::Provided, Some("x2"), None));
+    }
+
+    #[test]
+    fn unlimited_is_ready_and_free() {
+        let v = tile_view(&slot(SpellKind::Teleport, Availability::Unlimited));
+        assert_eq!((v.style, v.label, v.badge.as_deref(), v.pips, v.progress), (TileStyle::Ready, "Teleport", Some("free"), (0, 0), None));
+        assert!(describe(&slot(SpellKind::Teleport, Availability::Unlimited)).contains("Unlimited"));
     }
 
     #[test]

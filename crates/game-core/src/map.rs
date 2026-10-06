@@ -1,6 +1,8 @@
 //! A playable map: terrain + metadata, built from an original level or generated.
 
 use crate::command::Command;
+use crate::path::Mobility;
+use crate::spell::Spell;
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::unit::{Order, Unit, UnitEvent};
@@ -108,13 +110,34 @@ impl GameMap {
         self.units.iter().find(|u| u.owner == owner)
     }
 
-    /// Apply a player's command; returns the terrain region it changed, if any.
-    /// Casting a spell also makes the caster's shaman do her cast jump.
+    /// Whether `player` can cast `spell` here and now: Teleport needs a living shaman and ground
+    /// she can walk at the target; other spells always apply.
+    pub fn can_cast(&self, player: u8, spell: &Spell) -> bool {
+        match *spell {
+            Spell::Teleport { to } => {
+                let cell = ((to.0 as u32 / 512) as i32, (to.1 as u32 / 512) as i32);
+                self.shaman_of(player).is_some_and(Unit::is_alive) && Mobility::Walk.passable(&self.terrain, cell)
+            }
+            _ => true,
+        }
+    }
+
+    /// Apply a player's command; returns the terrain region it changed, if any. Casting a spell
+    /// makes the caster's shaman do her cast jump (after a teleport: where she lands); a spell
+    /// that cannot be cast (`can_cast`) does nothing.
     pub fn apply(&mut self, command: &Command) -> Option<DirtyRect> {
         match *command {
+            Command::Cast { player, spell } if !self.can_cast(player, &spell) => None,
+            Command::Cast { player, spell: Spell::Teleport { to } } => {
+                if let Some(u) = self.units.iter_mut().find(|u| u.owner == player) {
+                    u.teleport(to);
+                }
+                self.order(player, Order::Cast);
+                None
+            }
             Command::Cast { player, spell } => {
                 self.order(player, Order::Cast);
-                Some(spell.cast(&mut self.terrain))
+                spell.cast(&mut self.terrain)
             }
             Command::Order { player, order } => {
                 self.order(player, order);
@@ -234,6 +257,24 @@ mod tests {
         let over: Vec<_> = (5..=17).map(|d| at(-d)).collect();
         let (straight, _) = ticks(&over);
         assert!(fastest < straight, "around {fastest} ticks, over the top {straight}");
+    }
+
+    #[test]
+    fn teleport_only_onto_walkable_ground() {
+        let mut m = GameMap::sandbox_walk();
+        let c = MAP_SIZE as i32 / 2;
+        let at = |dx: i32, dz: i32| ((c + dx) as u16 * 512 + 256, (c + dz) as u16 * 512 + 256);
+        let cast = |to| Command::Cast { player: 0, spell: Spell::Teleport { to } };
+        for (to, why) in [(at(-9, 0), "lake"), (at(30, 0), "sea"), (at(8, 7), "cliff of the mesa")] {
+            assert!(!m.can_cast(0, &Spell::Teleport { to }), "{why}");
+            m.apply(&cast(to));
+            assert_ne!((m.units[0].x, m.units[0].z), to, "{why}");
+        }
+        assert!(!m.can_cast(1, &Spell::Teleport { to: at(0, 3) }), "no shaman for player 1");
+        let to = at(0, -10);
+        assert_eq!(m.apply(&cast(to)), None, "no terrain change");
+        assert_eq!((m.units[0].x, m.units[0].z), to, "hill top");
+        assert!(matches!(m.units[0].action, crate::unit::Action::Casting { .. }), "lands with the cast jump");
     }
 
     #[test]

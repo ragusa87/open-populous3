@@ -12,7 +12,7 @@ The original game used lockstep: peers exchange inputs only and run the same sim
 Frame: `u32 LE` length + payload. Payload tag byte:
 - `0 Hello { player: u8 }`
 - `1 Turn { turn: u32, n: u8, n x Command }`, Command = `kind u8, player u8`, then
-  - kind 0 `Cast`: `spell tag u8`, cells as i16 x/z pairs;
+  - kind 0 `Cast`: `spell tag u8`, cells as i16 x/z pairs (tag 4 Teleport: `u16` x, z in world units);
   - kind 1 `Order` (to the shaman): `order tag u8` (0 MoveTo + `u16` x, z in world units, 1 Pray, 2 Cast, 3 Stop);
   - kind 2 `OrderUnit` (to one of the player's units): `u32` unit id, then the order as in kind 1.
 

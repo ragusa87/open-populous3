@@ -21,10 +21,12 @@ pub enum SpellKind {
     AngelOfDeath,
     Volcano,
     Armageddon,
+    /// Sandbox spell (not in the original): moves the shaman to any walkable spot.
+    Teleport,
 }
 
 impl SpellKind {
-    pub const ALL: [SpellKind; 16] = [
+    pub const ALL: [SpellKind; 17] = [
         SpellKind::Blast,
         SpellKind::Convert,
         SpellKind::Swarm,
@@ -41,6 +43,7 @@ impl SpellKind {
         SpellKind::AngelOfDeath,
         SpellKind::Volcano,
         SpellKind::Armageddon,
+        SpellKind::Teleport,
     ];
 
     pub fn name(self) -> &'static str {
@@ -61,12 +64,14 @@ impl SpellKind {
             SpellKind::AngelOfDeath => "Angel of Death",
             SpellKind::Volcano => "Volcano",
             SpellKind::Armageddon => "Armageddon",
+            SpellKind::Teleport => "Teleportation",
         }
     }
 
     /// Mana needed to regain one charge.
     pub fn cost(self) -> u32 {
         match self {
+            SpellKind::Teleport => 1,
             SpellKind::Blast | SpellKind::Convert => 40,
             SpellKind::Swarm | SpellKind::Invisibility | SpellKind::LandBridge => 120,
             SpellKind::Hypnotism | SpellKind::Whirlwind | SpellKind::Lightning | SpellKind::Flatten => 200,
@@ -97,6 +102,8 @@ pub enum Availability {
     Provided { shots: u8 },
     /// Known spell: charges refill with mana.
     Known,
+    /// Cast at will, nothing used up (sandbox spells).
+    Unlimited,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,6 +124,7 @@ impl SpellSlot {
         match self.availability {
             Availability::Known => self.charges > 0,
             Availability::Provided { shots } => shots > 0,
+            Availability::Unlimited => true,
             _ => false,
         }
     }
@@ -175,6 +183,7 @@ impl SpellBook {
             Availability::Provided { shots } if shots > 0 => {
                 s.availability = if shots == 1 { Availability::Hidden } else { Availability::Provided { shots: shots - 1 } };
             }
+            Availability::Unlimited => {}
             _ => return false,
         }
         true
@@ -224,6 +233,16 @@ mod tests {
         b.discover(SpellKind::Flatten);
         b.tick(200);
         assert!(b.cast(SpellKind::Flatten));
+    }
+
+    #[test]
+    fn unlimited_spells_never_run_out() {
+        let mut b = SpellBook::new();
+        b.set(SpellKind::Teleport, Availability::Unlimited);
+        for _ in 0..100 {
+            assert!(b.cast(SpellKind::Teleport));
+        }
+        assert!(!b.slot(SpellKind::Teleport).unwrap().is_recharging());
     }
 
     #[test]

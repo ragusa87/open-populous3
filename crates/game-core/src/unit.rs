@@ -158,6 +158,13 @@ impl Unit {
         (cell_of(self.x), cell_of(self.z))
     }
 
+    /// Moved there at once (Teleport), standing still.
+    pub fn teleport(&mut self, (x, z): (u16, u16)) {
+        (self.x, self.z) = (x, z);
+        (self.route, self.planned_on) = (Vec::new(), None);
+        self.action = Action::Idle;
+    }
+
     /// Ignored while drowning, dying or dead.
     pub fn order(&mut self, order: Order) {
         if !self.action.can_take_orders() {

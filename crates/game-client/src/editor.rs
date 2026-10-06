@@ -50,8 +50,7 @@ fn editor_input(
     }
     for key in keys.get_just_pressed() {
         if let Some(spell) = spell_for_key(*key, at, state.mark) {
-            spell.cast(&mut map.0.terrain);
-            dirty.0 = true;
+            dirty.0 |= spell.cast(&mut map.0.terrain).is_some();
         }
     }
 }
