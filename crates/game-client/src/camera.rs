@@ -41,14 +41,15 @@ pub struct CameraRig {
 
 impl Default for CameraRig {
     fn default() -> Self {
+        let view = ground_view(env_var);
         CameraRig {
             focus: Vec2::splat(MAP / 2.0),
             yaw: 0.0,
-            pitch: GROUND_VIEW.0,
-            distance: GROUND_VIEW.1,
+            pitch: view.0,
+            distance: view.1,
             aerial: false,
             fov: DEFAULT_FOV,
-            saved: GROUND_VIEW,
+            saved: view,
         }
     }
 }
@@ -206,12 +207,58 @@ fn sky_color(rig: Res<CameraRig>, mut clear: ResMut<ClearColor>) {
     clear.0 = sky_for_distance(rig.distance);
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct CurveParamsRes(pub CurveParams);
+
+impl Default for CurveParamsRes {
+    fn default() -> Self {
+        CurveParamsRes(curve_overrides(CurveParams::default(), env_var))
+    }
+}
+
+fn env_var(key: &str) -> Option<String> {
+    std::env::var(key).ok()
+}
+
+fn parsed(get: &impl Fn(&str) -> Option<String>, key: &str) -> Option<f32> {
+    get(key).and_then(|v| v.parse().ok())
+}
+
+/// Dev tuning: `POP3_RELIEF` multiplies the terrain height scale, `POP3_CURVATURE` replaces it.
+pub fn curve_overrides(mut p: CurveParams, get: impl Fn(&str) -> Option<String>) -> CurveParams {
+    p.height_scale *= parsed(&get, "POP3_RELIEF").unwrap_or(1.0);
+    p.curvature = parsed(&get, "POP3_CURVATURE").unwrap_or(p.curvature);
+    p
+}
+
+/// Ground view (pitch rad, distance cells), `POP3_VIEW_PITCH` (degrees) / `POP3_VIEW_DISTANCE` override.
+pub fn ground_view(get: impl Fn(&str) -> Option<String>) -> (f32, f32) {
+    (
+        parsed(&get, "POP3_VIEW_PITCH").map_or(GROUND_VIEW.0, f32::to_radians),
+        parsed(&get, "POP3_VIEW_DISTANCE").unwrap_or(GROUND_VIEW.1),
+    )
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn view_tuning_overrides() {
+        let get = |k: &str| match k {
+            "POP3_RELIEF" => Some("2".to_string()),
+            "POP3_VIEW_PITCH" => Some("90".to_string()),
+            "POP3_CURVATURE" => Some("oops".to_string()),
+            _ => None,
+        };
+        let base = CurveParams::default();
+        let p = curve_overrides(base, get);
+        assert_eq!((p.height_scale, p.curvature), (base.height_scale * 2.0, base.curvature), "bad value ignored");
+        let (pitch, distance) = ground_view(get);
+        assert!((pitch - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!(distance, GROUND_VIEW.1);
+        assert_eq!(ground_view(|_| None), GROUND_VIEW);
+    }
 
     #[test]
     fn starts_on_player_site() {

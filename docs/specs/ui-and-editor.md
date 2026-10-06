@@ -52,3 +52,6 @@ the window border, is re-sent as `CursorMoved` (picking) and written to `Window:
 `POP3_CURSOR_SPEED` scales it (default 1.5; raw motion is unaccelerated).
 Pointer image: original arrow (`POINT0-0.DAT` sprite 14, see sprites.md, drawn x2, click point at its tip)
 when original files are allowed, else a generated black-and-white arrow.
+
+View tuning (dev, read at start): `POP3_RELIEF` (terrain height scale multiplier), `POP3_CURVATURE`
+(planet bend, default 0.012), `POP3_VIEW_DISTANCE` (cells, default 20), `POP3_VIEW_PITCH` (degrees, default 3).
