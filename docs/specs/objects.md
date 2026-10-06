@@ -49,7 +49,7 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | 20 | stone prayer totem |
 | 30 | reincarnation site stone (tribe-coloured) |
 | 31, 32 | book, shield |
-| 60-71 | trees, 0.9-1.8 cells tall (drawn by `nature.rs`, one per tree variant) |
+| 60-71 | trees, 0.9-1.8 cells tall (drawn by `nature.rs`, one per tree variant); 71 is a palm whose fronds are a cut-out texture |
 | 82 | stone head; 83, 84 untextured |
 | 94 | prison (shaman locked until freed, some levels) |
 | 117-120 | drum tower, blue / red / yellow / green |
@@ -66,6 +66,9 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 
 Unidentified: 13-18 (trees?), 75-81 (stone pillars, standing stones, arch), 89-93,
 190 (looks like the pyramid of knowledge).
+
+Atlas texels of palette index 0 are see-through in the game (e.g. the palm's fronds): `atlas_rgba` gives them
+alpha 0 and materials that need it cut them out (`AlphaMode::Mask`, trees); flat palette colours stay opaque.
 
 ### Tribe colours
 Objects are stored in blue. Tribe-coloured atlas tiles have their red, yellow and green versions right after

@@ -77,8 +77,9 @@ pub fn face_uv(tile: Option<u16>, colour: u8, (u, v): (i32, i32)) -> [f32; 2] {
     }
 }
 
-/// RGBA pixels of the atlas followed by the palette rows (index 0 is transparent black in the game,
-/// kept opaque here).
+/// RGBA pixels of the atlas followed by the palette rows. Texels of index 0 are see-through, as in
+/// the game (palm leaves, cut-out shapes): only materials with an alpha mask show it; the palette
+/// rows (flat colours) stay opaque.
 pub fn atlas_rgba(atlas: &Atlas, palette: &[[u8; 3]]) -> Vec<u8> {
     let rgba = |i: u8| {
         let c = palette.get(i as usize).copied().unwrap_or([255, 0, 255]);
@@ -88,7 +89,7 @@ pub fn atlas_rgba(atlas: &Atlas, palette: &[[u8; 3]]) -> Vec<u8> {
     atlas
         .pixels
         .iter()
-        .flat_map(|&i| rgba(i))
+        .flat_map(|&i| if i == 0 { [0; 4] } else { rgba(i) })
         .chain(std::iter::repeat_n(palette_row, PALETTE_ROWS).flatten())
         .collect()
 }
@@ -165,5 +166,15 @@ mod tests {
         assert_eq!(&px[..4], &[10, 20, 30, 255]);
         let row = ATLAS_HEIGHT * ATLAS_WIDTH * 4;
         assert_eq!(&px[row + 4..row + 8], &[10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn index_0_texels_are_see_through_but_not_flat_colour_0() {
+        let mut atlas = Atlas { pixels: vec![1; ATLAS_WIDTH * ATLAS_HEIGHT] };
+        atlas.pixels[0] = 0;
+        let px = atlas_rgba(&atlas, &vec![[5u8; 3]; 256]);
+        assert_eq!(&px[..4], &[0, 0, 0, 0]);
+        let row = ATLAS_HEIGHT * ATLAS_WIDTH * 4;
+        assert_eq!(&px[row..row + 4], &[5, 5, 5, 255], "palette row: opaque");
     }
 }

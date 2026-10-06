@@ -116,7 +116,15 @@ fn original_trees(
             Some((meshes.add(to_mesh(object_mesh(obj, 0))), height))
         })
         .collect::<Option<Vec<_>>>()?;
-    let material = StandardMaterial { base_color_texture: Some(images.add(atlas_image(&atlas, &palette.palette))), perceptual_roughness: 0.95, double_sided: true, cull_mode: None, ..default() };
+    // Index-0 texels are see-through (palm leaves): cut them out.
+    let material = StandardMaterial {
+        base_color_texture: Some(images.add(atlas_image(&atlas, &palette.palette))),
+        alpha_mode: AlphaMode::Mask(0.5),
+        perceptual_roughness: 0.95,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    };
     Some((trees, mats.add(material)))
 }
 
