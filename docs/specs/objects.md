@@ -46,6 +46,7 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | 1 | totem; 2, 4 untextured copies; 3 animation frame (rotating rocks) |
 | 7, 100, 107 | "mort ailée" (winged death, probably Angel of Death): front, back, wings rotated; 8-11, 101-106, 108-116 untextured |
 | 19, 21 | totem of the winged death, and the bird perched on it |
+| 20 | stone prayer totem |
 | 30 | reincarnation site stone (tribe-coloured) |
 | 31, 32 | book, shield |
 | 60-71 | trees |
@@ -63,7 +64,7 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | 187, 188, 189 | totem poles |
 | 191 | pyramid of knowledge (unlocks a spell or building); 192, 193 door animation frames |
 
-Unidentified: 13-18 (trees?), 20, 75-81 (stone pillars, standing stones, arch), 89-93,
+Unidentified: 13-18 (trees?), 75-81 (stone pillars, standing stones, arch), 89-93,
 190 (looks like the pyramid of knowledge).
 
 ### Tribe colours

@@ -17,6 +17,8 @@ pub const WINGED_DEATH_ALT: usize = 107;
 /// Totem of the winged death, and the bird perched on top of it.
 pub const WINGED_DEATH_TOTEM: usize = 19;
 pub const WINGED_DEATH_PERCHED: usize = 21;
+/// Stone prayer totem.
+pub const PRAYER_TOTEM: usize = 20;
 /// Stone placed around a reincarnation site (tribe-coloured, blue in the file).
 pub const REINCARNATION_STONE: usize = 30;
 pub const BOOK: usize = 31;
