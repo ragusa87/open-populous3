@@ -121,6 +121,10 @@ pub fn sprite_quad(width: u32, height: u32, origin: UVec2) -> Mesh {
         .with_inserted_indices(Indices::U32(vec![0, 2, 1, 0, 3, 2]))
 }
 
+/// Mouse selection and orders to units: spell aiming runs after it (it may put the spell away).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnitInput;
+
 pub struct UnitsPlugin;
 
 impl Plugin for UnitsPlugin {
@@ -129,7 +133,7 @@ impl Plugin for UnitsPlugin {
             .init_resource::<ShamanSprites>()
             .add_plugins(selection::SelectionPlugin)
             .add_systems(Startup, load_sprites)
-            .add_systems(Update, (selection::select_and_order, look_at_shaman, run_ticks, respawn_views, animate_views).chain().in_set(crate::menu::Gameplay))
+            .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks, respawn_views, animate_views).chain().in_set(crate::menu::Gameplay))
             .add_systems(PostUpdate, pull_to_eye.before(TransformSystems::Propagate));
     }
 }

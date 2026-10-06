@@ -8,6 +8,7 @@
 //! `POP3_START=menu|game|sandbox-walk` picks where to start (screenshots start in the game).
 
 use crate::camera::{GameCamera, OverlayCamera};
+use crate::hud::spells::{demo_book, sandbox_book, PlayerSpells, SelectedSpell};
 use crate::units::selection::Selection;
 use crate::virtual_cursor::VirtualCursor;
 use crate::world::{CurrentMap, LevelList, TerrainDirty};
@@ -281,15 +282,18 @@ struct GameSetup<'w> {
     dirty: ResMut<'w, TerrainDirty>,
     selection: ResMut<'w, Selection>,
     cursor: ResMut<'w, VirtualCursor>,
+    spells: ResMut<'w, PlayerSpells>,
+    selected_spell: ResMut<'w, SelectedSpell>,
 }
 
 impl GameSetup<'_> {
     /// Loads the map a game starts on; the camera frames it (`LevelList` change).
     fn begin(&mut self, start: Start) {
-        self.map.0 = match start {
-            Start::NewGame => self.levels.load_current(),
-            Start::SandboxWalk => GameMap::sandbox_walk(),
+        (self.map.0, self.spells.0) = match start {
+            Start::NewGame => (self.levels.load_current(), demo_book()),
+            Start::SandboxWalk => (GameMap::sandbox_walk(), sandbox_book()),
         };
+        self.selected_spell.0 = None;
         self.dirty.0 = true;
         self.selection.clear();
         self.levels.set_changed();

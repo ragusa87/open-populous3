@@ -49,7 +49,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## Spells ([spells.md](docs/specs/spells.md))
 - [ ] Spell effects with their own animations/visuals (lightning, swarm, whirlwind...); casting (C) only uses a charge and makes the shaman jump.
-- [ ] Target picking on the terrain and cast range from the shaman.
+- [ ] Aim the other spells on the terrain like Teleport (`hud::spells::ground_spell`), with cast range from the shaman.
+- [ ] Spell cursors: map each spell to its gold icon in `POINT0-0.DAT` (38-66) in `virtual_cursor::spell_sprite`.
 - [ ] Level-defined spell books instead of `demo_book`.
 
 ## Mana

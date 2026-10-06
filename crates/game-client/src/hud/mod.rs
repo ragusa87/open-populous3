@@ -2,7 +2,7 @@
 
 mod panel;
 mod shaman;
-mod spells;
+pub mod spells;
 mod view_menu;
 
 use crate::camera::CameraRig;

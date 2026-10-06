@@ -19,7 +19,8 @@ health bar with `hp/max`; clicking it looks at her), 3 tabs
 the grid.
 
 ### Spells tab (`hud/spells.rs`)
-Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`, demo loadout for now).
+Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`, demo loadout for now; the walk sandbox
+adds Teleport, unlimited: `sandbox_book`).
 Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 
 | Availability | Tile |
@@ -28,9 +29,13 @@ Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 | Discoverable | dark tile with "?", cannot be selected for casting until discovered |
 | Provided { shots } | gray tile, badge `xN`, no recharge, disappears when used up |
 | Known | gold tile, 1-4 charge pips (max depends on the spell), blue recharge bar while not full; dimmed at 0 charges |
+| Unlimited | gold tile, badge `free` |
 
-Hover shows the tile's description, click selects (white border), `C` casts the selected spell (demo:
-consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
+Hover shows the tile's description, click selects (white border). Spells cast on a spot (`ground_spell`: Teleport
+for now) are aimed with the mouse while selected: over the map the cursor becomes the spell's icon, grayed out
+where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground), left click casts it there (the
+spell stays selected), right click puts it away; meanwhile clicks do not select or move units. The others: `C`
+casts the selected spell (demo: consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
 Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build/Stats tabs.
 
 ## Main menu (`menu.rs`)
@@ -67,7 +72,9 @@ the window border, is re-sent as `CursorMoved` (picking) and written to `Window:
 `Interaction` reads it; on Wayland it is also the unlock position hint). Esc releases it (Esc again recaptures); the window gaining focus always recaptures;
 `POP3_CURSOR_SPEED` scales it (default 1.5; raw motion is unaccelerated).
 Pointer image: original arrow (`POINT0-0.DAT` sprite 14, see sprites.md, drawn x2, click point at its tip)
-when original files are allowed, else a generated black-and-white arrow.
+when original files are allowed, else a generated black-and-white arrow. `CursorLook` picks it each frame: while
+a spell is aimed, its gold icon (Teleport: the spiral, sprite 47; others the gold arrow 30 until mapped), click
+point at the centre, or a generated gold ring; grayed and see-through (`dimmed`) where the spell cannot apply.
 
 View presets: F2 opens a menu (`hud/view_menu.rs`) of camera/terrain presets applied live (distance, tilt,
 relief, curvature; the terrain is rebuilt); the chosen values are logged. Esc closes it when open (and is

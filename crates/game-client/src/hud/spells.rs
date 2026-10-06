@@ -1,12 +1,19 @@
 //! Spells tab: a grid of tiles mirroring the player's `SpellBook`.
 //! Tile states: empty (hidden), "?" (discoverable), gray with uses left (provided),
-//! gold with charge pips + recharge bar (known), gold marked "free" (unlimited, sandbox). Click selects, C casts (demo: uses a charge, the shaman jumps).
+//! gold with charge pips + recharge bar (known), gold marked "free" (unlimited, sandbox). Click selects.
+//! Spells cast on a spot (`ground_spell`, Teleport) are aimed with the mouse: the cursor shows the
+//! spell, grayed where it cannot apply; left click casts, right click puts the spell away. The other
+//! spells are cast with C (demo: uses a charge, the shaman jumps).
 
-use super::panel::{TabContent, DARK_BROWN, INK};
-use crate::units::PLAYER;
-use crate::world::CurrentMap;
+use super::panel::{TabContent, DARK_BROWN, INK, PANEL_WIDTH};
+use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
+use crate::grounded::pick_ground;
+use crate::units::{world_units, PLAYER};
+use crate::virtual_cursor::CursorLook;
+use crate::world::{CurrentMap, TerrainDirty};
 use bevy::prelude::*;
 use game_core::command::Command;
+use game_core::spell::Spell;
 use game_core::unit::Order;
 use game_core::spell_book::{Availability, SpellBook, SpellKind, SpellSlot, MAX_CHARGES};
 
@@ -103,6 +110,22 @@ pub fn short_label(kind: SpellKind) -> &'static str {
     }
 }
 
+/// The spell to cast when `kind` is aimed at `at` (world units); None for spells not cast on a
+/// spot (yet): those go with C.
+pub fn ground_spell(kind: SpellKind, at: (u16, u16)) -> Option<Spell> {
+    match kind {
+        SpellKind::Teleport => Some(Spell::Teleport { to: at }),
+        _ => None,
+    }
+}
+
+/// Walk sandbox: the demo loadout plus Teleport, free.
+pub fn sandbox_book() -> SpellBook {
+    let mut b = demo_book();
+    b.set(SpellKind::Teleport, Availability::Unlimited);
+    b
+}
+
 /// Sandbox loadout showing every tile state until levels provide their own.
 pub fn demo_book() -> SpellBook {
     let mut b = SpellBook::new();
@@ -139,7 +162,16 @@ impl Plugin for SpellsPlugin {
         app.insert_resource(PlayerSpells(demo_book()))
             .init_resource::<SelectedSpell>()
             .add_systems(Startup, spawn_tab)
-            .add_systems(Update, ((recharge, tile_clicks, cast_selected).in_set(crate::menu::Gameplay), update_tiles, update_info).chain());
+            .add_systems(
+                Update,
+                (
+                    (recharge, tile_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput)).chain().in_set(crate::menu::Gameplay),
+                    update_tiles,
+                    update_info,
+                )
+                    .chain(),
+            )
+            .add_systems(OnExit(crate::menu::AppState::Playing), arrow_cursor);
     }
 }
 
@@ -234,7 +266,7 @@ fn tile_clicks(
     }
 }
 
-/// Casting makes the shaman jump (the spell effects come later).
+/// Spells not cast on a spot: C makes the shaman jump (the spell effects come later).
 fn cast_selected(
     keys: Res<ButtonInput<KeyCode>>,
     mut book: ResMut<PlayerSpells>,
@@ -242,10 +274,58 @@ fn cast_selected(
     mut map: ResMut<CurrentMap>,
 ) {
     if let (true, Some(kind)) = (keys.just_pressed(KeyCode::KeyC), selected.0) {
-        if book.0.cast(kind) {
+        if ground_spell(kind, (0, 0)).is_none() && book.0.cast(kind) {
             map.bypass_change_detection().0.apply(&Command::Order { player: PLAYER, order: Order::Cast });
         }
     }
+}
+
+/// Spell aimed on the map: cursor look under the mouse, left click casts it there when it
+/// applies, right click puts the spell away (the selection of units is left alone).
+#[allow(clippy::too_many_arguments)]
+fn aim_and_cast(
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    ui: Query<&Interaction>,
+    cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
+    params: Res<CurveParamsRes>,
+    rig: Res<CameraRig>,
+    mut map: ResMut<CurrentMap>,
+    mut dirty: ResMut<TerrainDirty>,
+    mut book: ResMut<PlayerSpells>,
+    mut selected: ResMut<SelectedSpell>,
+    mut look: ResMut<CursorLook>,
+) {
+    let cursor = windows.iter().next().and_then(Window::cursor_position);
+    let over_ui = ui.iter().any(|i| *i != Interaction::None);
+    let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui);
+    let (Some(kind), Some(c)) = (selected.0, on_map) else {
+        look.set_if_neq(CursorLook::Arrow);
+        return;
+    };
+    if mouse.just_pressed(MouseButton::Right) {
+        selected.0 = None;
+        look.set_if_neq(CursorLook::Arrow);
+        return;
+    }
+    let ground = cams.iter().next().and_then(|cam| {
+        let ray = cam.0.viewport_to_world(cam.1, c).ok()?;
+        pick_ground(&map.0.terrain, rig.focus, &params.0, ray.origin, *ray.direction)
+    });
+    let spell = ground.and_then(|cell| ground_spell(kind, world_units(cell)));
+    let ready = book.0.slot(kind).is_some_and(|s| s.can_cast());
+    let valid = spell.filter(|s| ready && map.0.can_cast(PLAYER, s));
+    look.set_if_neq(CursorLook::Spell { kind, valid: valid.is_some() });
+    if let (true, Some(spell)) = (mouse.just_pressed(MouseButton::Left), valid) {
+        if book.0.cast(kind) {
+            dirty.0 |= map.bypass_change_detection().0.apply(&Command::Cast { player: PLAYER, spell }).is_some();
+        }
+    }
+}
+
+/// Back in the menus: plain arrow.
+fn arrow_cursor(mut look: ResMut<CursorLook>) {
+    *look = CursorLook::Arrow;
 }
 
 fn update_tiles(
@@ -347,6 +427,15 @@ mod tests {
     fn describe_mentions_state() {
         assert!(describe(&slot(SpellKind::Flatten, Availability::Discoverable)).contains("Discover"));
         assert!(describe(&slot(SpellKind::Volcano, Availability::Provided { shots: 1 })).contains("1 use left"));
+    }
+
+    #[test]
+    fn only_spot_spells_are_aimed() {
+        assert_eq!(ground_spell(SpellKind::Teleport, (5, 6)), Some(Spell::Teleport { to: (5, 6) }));
+        assert_eq!(ground_spell(SpellKind::Blast, (5, 6)), None);
+        let teleport = sandbox_book().slot(SpellKind::Teleport).cloned().unwrap();
+        assert!(teleport.can_cast() && teleport.availability == Availability::Unlimited);
+        assert_eq!(demo_book().slot(SpellKind::Teleport).unwrap().availability, Availability::Hidden, "sandbox only");
     }
 
     #[test]

@@ -3,7 +3,8 @@
 //! click clears the selection. The shaman is a unit like the others here; clicking her panel preview
 //! selects her alone (`select_only`). Left click on the ground sends
 //! the selection there; P prays, X stops. Only selected units show their health bar, and the
-//! cursor shows how many units are selected when more than one.
+//! cursor shows how many units are selected when more than one. While a spell is aimed the mouse
+//! belongs to it (`hud::spells`): clicks neither select nor send units.
 
 use super::{world_units, UnitView, PLAYER};
 use crate::camera::{CameraRig, CurveParamsRes};
@@ -217,11 +218,12 @@ pub(super) fn select_and_order(
     mut map: ResMut<CurrentMap>,
     mut selection: ResMut<Selection>,
     mut drag: ResMut<Drag>,
+    spell: Res<crate::hud::spells::SelectedSpell>,
 ) {
     selection.retain(&map.0.units);
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
-    let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui);
+    let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && spell.0.is_none());
     let add = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     if mouse.just_pressed(MouseButton::Right) && on_map.is_some() {
         selection.clear();

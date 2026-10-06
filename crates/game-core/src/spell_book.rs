@@ -3,7 +3,7 @@
 
 pub const MAX_CHARGES: u8 = 4;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SpellKind {
     Blast,
     Convert,

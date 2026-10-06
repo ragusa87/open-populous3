@@ -10,6 +10,10 @@ const MAGIC: &[u8; 4] = b"PSFB";
 pub const POINTER_FILE: &str = "point0-0.dat";
 /// Standard arrow pointer.
 pub const POINTER_ARROW: usize = 14;
+/// Gold arrow (spell targeting?).
+pub const POINTER_GOLD_ARROW: usize = 30;
+/// Gold spiral icon (38-66 are gold spell icons, click point at their centre).
+pub const POINTER_SPIRAL: usize = 47;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sprite {
