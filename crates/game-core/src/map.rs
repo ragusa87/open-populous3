@@ -1,5 +1,6 @@
 //! A playable map: terrain + metadata, built from an original level or generated.
 
+use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{Heightmap, MAX_HEIGHT};
 use pop3_format::{Level, LevelHeader, MAP_SIZE};
 use std::path::Path;
@@ -10,6 +11,8 @@ pub struct GameMap {
     /// Original landscape theme index (`pop3_format::theme_char`), None for generated maps.
     pub theme: Option<u8>,
     pub terrain: Heightmap,
+    /// One per tribe, sorted by owner.
+    pub sites: Vec<ReincarnationSite>,
 }
 
 impl GameMap {
@@ -18,6 +21,7 @@ impl GameMap {
             name: name.into(),
             theme,
             terrain: Heightmap::from_heights(MAP_SIZE, level.heights.clone()),
+            sites: sites_from_level(level),
         }
     }
 
@@ -48,7 +52,14 @@ impl GameMap {
             let v = terrain.get(x, z).saturating_sub(120).min(MAX_HEIGHT);
             terrain.set(x, z, v);
         }
-        GameMap { name: format!("Generated #{seed}"), theme: None, terrain }
+        let sites = generated_sites(&terrain);
+        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites }
+    }
+}
+
+impl GameMap {
+    pub fn site_of(&self, owner: u8) -> Option<&ReincarnationSite> {
+        self.sites.iter().find(|s| s.owner == owner)
     }
 }
 
@@ -73,5 +84,7 @@ mod tests {
         let hs = a.terrain.heights();
         assert!(hs.iter().any(|&h| h == 0));
         assert!(hs.iter().any(|&h| h > 100));
+        assert_eq!(a.sites, GameMap::generate(42).sites);
+        assert!(a.site_of(0).is_some());
     }
 }

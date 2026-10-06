@@ -4,6 +4,7 @@
 
 pub mod command;
 pub mod map;
+pub mod site;
 pub mod spell;
 pub mod spell_book;
 pub mod terrain;

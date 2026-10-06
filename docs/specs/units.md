@@ -7,3 +7,12 @@
 - Spawn from level things (`kind` 1 = person, model = brave/warrior/...) once the record is decoded.
 - Rendering: Bevy entities mirroring sim units, positioned on the curved surface using the same
   `drop_at` formula as the terrain.
+
+## Reincarnation site (done: data + rendering)
+- `game_core::site::ReincarnationSite { owner, x, z }`, stored in `GameMap::sites` (one per tribe, sorted by owner).
+- Original levels: built at the tribe's shaman thing (person model 7). Tribes without a shaman get no site
+  (some campaign AI tribes; levl2025 has none for the player).
+- Generated maps: tribe 0 on low inland ground, tribe 1 on the land cell farthest away on the torus.
+- Fixed and indestructible: no `Command` moves or removes it. `spawn_point()` is where the shaman
+  appears at start and after death (to wire once units are simulated).
+- Rendered as a stone ring with a tribe-coloured totem; the camera starts on the player's (tribe 0) site.
