@@ -70,6 +70,12 @@ impl BuildingKind {
     }
 }
 
+/// Ground levelled under a building when the map loads (cells): flat disc, and blended ring.
+pub const FLAT_RADIUS: i32 = 2;
+pub const BLEND_RADIUS: i32 = 3;
+/// The levelled ground is never lower than this: a building placed on the shore stands on land.
+pub const MIN_GROUND: u16 = 64;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Building {
     pub kind: BuildingKind,
@@ -80,6 +86,13 @@ pub struct Building {
     pub z: u16,
     /// Eighths of a turn (`Thing::facing`).
     pub facing: u8,
+}
+
+impl Building {
+    /// Levels its ground above the sea (`Heightmap::level_around`).
+    pub fn flatten(&self, terrain: &mut crate::terrain::Heightmap) -> crate::terrain::DirtyRect {
+        terrain.level_around((self.x, self.z), FLAT_RADIUS, BLEND_RADIUS, MIN_GROUND)
+    }
 }
 
 /// The level's buildings, in thing order.

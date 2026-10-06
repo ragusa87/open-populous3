@@ -40,6 +40,7 @@ pub const MIN_SPAWN_HEIGHT: u16 = 32;
 impl ReincarnationSite {
     /// Height points (cell corners) within `radius` cells of the site centre (the middle of its cell),
     /// with their squared distance in quarter cells (integer, deterministic).
+    #[cfg(test)]
     fn corners_within(&self, radius: i32) -> impl Iterator<Item = ((i32, i32), i32)> {
         let (cx, cz) = self.cell();
         let r = radius + 1;
@@ -52,17 +53,7 @@ impl ReincarnationSite {
     /// Level the ground for a spawning shaman: the inner disc takes its average height (at least
     /// `MIN_SPAWN_HEIGHT`, so never water), the ring around is blended halfway.
     pub fn flatten_for_spawn(&self, terrain: &mut Heightmap) -> DirtyRect {
-        let inner: Vec<(i32, i32)> = self.corners_within(SPAWN_FLAT_RADIUS).map(|(c, _)| c).collect();
-        let sum: u32 = inner.iter().map(|&(x, z)| terrain.get(x, z) as u32).sum();
-        let target = ((sum / inner.len().max(1) as u32) as u16).max(MIN_SPAWN_HEIGHT);
-        let flat_d2 = (2 * SPAWN_FLAT_RADIUS).pow(2);
-        for ((x, z), d2) in self.corners_within(SPAWN_BLEND_RADIUS) {
-            let h = if d2 <= flat_d2 { target } else { ((terrain.get(x, z) as u32 + target as u32) / 2) as u16 };
-            terrain.set(x, z, h);
-        }
-        let (cx, cz) = self.cell();
-        let r = SPAWN_BLEND_RADIUS + 1;
-        DirtyRect { min: (cx - r, cz - r), max: (cx + r + 1, cz + r + 1) }
+        terrain.level_around(self.spawn_point(), SPAWN_FLAT_RADIUS, SPAWN_BLEND_RADIUS, MIN_SPAWN_HEIGHT)
     }
 }
 

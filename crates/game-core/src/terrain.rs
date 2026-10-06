@@ -144,6 +144,31 @@ impl Heightmap {
         self.apply_brush(center, radius, |_, _| target)
     }
 
+    /// Level the ground around `centre` (world units, 512 per cell): height points within `flat`
+    /// cells take their average height (at least `min`, so never sea), those out to `blend` cells
+    /// are pulled halfway towards it, so the platform has no cliff. Integer, deterministic.
+    pub fn level_around(&mut self, centre: (u16, u16), flat: i32, blend: i32, min: u16) -> DirtyRect {
+        const UNIT: i64 = 512;
+        let (cx, cz) = ((centre.0 as i64 / UNIT) as i32, (centre.1 as i64 / UNIT) as i32);
+        let r = blend + 1;
+        let corners: Vec<((i32, i32), i64)> = (-r..=r + 1)
+            .flat_map(|dz| (-r..=r + 1).map(move |dx| (cx + dx, cz + dz)))
+            .map(|(x, z)| {
+                let (dx, dz) = (x as i64 * UNIT - centre.0 as i64, z as i64 * UNIT - centre.1 as i64);
+                ((x, z), dx * dx + dz * dz)
+            })
+            .collect();
+        let within = |radius: i32| (radius as i64 * UNIT).pow(2);
+        let inner: Vec<(i32, i32)> = corners.iter().filter(|c| c.1 <= within(flat)).map(|c| c.0).collect();
+        let sum: u32 = inner.iter().map(|&(x, z)| self.get(x, z) as u32).sum();
+        let target = ((sum / inner.len().max(1) as u32) as u16).max(min);
+        for &((x, z), d2) in corners.iter().filter(|c| c.1 <= within(blend)) {
+            let h = if d2 <= within(flat) { target } else { ((self.get(x, z) as u32 + target as u32) / 2) as u16 };
+            self.set(x, z, h);
+        }
+        DirtyRect { min: (cx - r, cz - r), max: (cx + r + 1, cz + r + 1) }
+    }
+
     /// Raise a walkable strip between two cells, interpolating heights (Land Bridge).
     /// Walks the shortest way around the torus.
     pub fn land_bridge(&mut self, a: (i32, i32), b: (i32, i32), min_height: u16) -> DirtyRect {
@@ -240,6 +265,17 @@ mod tests {
         m.set(1, 1, 0);
         assert_ne!(m.revision(), r);
         assert_eq!(m, Heightmap::new(4));
+    }
+
+    #[test]
+    fn levelling_lifts_sunken_ground_above_the_sea() {
+        let mut m = Heightmap::new(32);
+        m.set(10, 10, 300);
+        m.level_around((10 * 512, 10 * 512), 2, 3, 32);
+        assert!(!m.is_water(10, 10) && !m.is_water(8, 10) && !m.is_water(12, 10), "flat disc out of the water");
+        assert_eq!(m.get(9, 10), m.get(11, 11), "flat");
+        assert_eq!(m.get(10, 7), m.get(10, 10) / 2, "ring: halfway from the sea");
+        assert!(m.is_water(10, 6), "beyond: untouched");
     }
 
     #[test]

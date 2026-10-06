@@ -30,6 +30,8 @@ pub struct GameMap {
 }
 
 impl GameMap {
+    /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
+    /// above the sea first, then the sites theirs (`with_shamans`).
     pub fn from_level(level: &Level, name: impl Into<String>, theme: Option<u8>) -> Self {
         GameMap {
             name: name.into(),
@@ -44,7 +46,15 @@ impl GameMap {
                 .collect(),
             buildings: buildings_from_level(level),
         }
+        .with_building_ground()
         .with_shamans()
+    }
+
+    fn with_building_ground(mut self) -> Self {
+        for b in &self.buildings {
+            b.flatten(&mut self.terrain);
+        }
+        self
     }
 
     /// Shamans spawn at game start: each site levels its ground (see `flatten_for_spawn`).
@@ -526,6 +536,19 @@ mod tests {
         for b in &m.buildings {
             assert!(!m.terrain.is_water((b.x / 512) as i32, (b.z / 512) as i32));
         }
+    }
+
+    #[test]
+    fn a_building_on_the_water_gets_land_under_it() {
+        use pop3_format::level::{DAT_SIZE, KIND_BUILDING};
+        let mut d = vec![0u8; DAT_SIZE];
+        let base = d.len() - 95 - 2000 * 55;
+        d[base..base + 7].copy_from_slice(&[3, KIND_BUILDING, 1, 0x00, 0x0a, 0x00, 0x14]);
+        let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None);
+        for (x, z) in [(5, 10), (4, 9), (6, 11), (4, 11)] {
+            assert!(!m.terrain.is_water(x, z), "({x}, {z}) under the hut at cell (5, 10)");
+        }
+        assert!(Mobility::Walk.passable(&m.terrain, (5, 10)));
     }
 
     #[test]
