@@ -48,7 +48,7 @@ enter/leave and edge contact. On COSMIC, pushing the system cursor against the s
 compositor take focus (auto-hide panel), which drops any pointer constraint. Hence the in-game cursor
 (`virtual_cursor.rs`): the system cursor is locked and hidden, ours moves from raw motion and stops at
 the window border, is re-sent as `CursorMoved` (picking) and written to `Window::set_cursor_position` (bevy_ui
-`Interaction` reads it; on Wayland it is also the unlock position hint). Esc releases it;
+`Interaction` reads it; on Wayland it is also the unlock position hint). Esc releases it (Esc again recaptures); the window gaining focus always recaptures;
 `POP3_CURSOR_SPEED` scales it (default 1.5; raw motion is unaccelerated).
 Pointer image: original arrow (`POINT0-0.DAT` sprite 14, see sprites.md, drawn x2, click point at its tip)
 when original files are allowed, else a generated black-and-white arrow.

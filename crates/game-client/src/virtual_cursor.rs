@@ -168,7 +168,19 @@ fn spawn_sprite(mut commands: Commands, levels: Res<LevelList>, mut images: ResM
     ));
 }
 
-/// Esc toggles; regaining focus re-applies (compositors drop the lock on focus loss).
+/// Capture state after this frame's input: gaining focus always captures (even after Esc released
+/// the mouse); otherwise Esc toggles.
+pub fn next_captured(captured: bool, escape: bool, refocused: bool) -> bool {
+    if refocused {
+        true
+    } else if escape {
+        !captured
+    } else {
+        captured
+    }
+}
+
+/// Applies `next_captured`; also re-applies the lock on refocus (compositors drop it on focus loss).
 pub(crate) fn toggle_capture(
     keys: Res<ButtonInput<KeyCode>>,
     mut focus: MessageReader<WindowFocused>,
@@ -177,16 +189,15 @@ pub(crate) fn toggle_capture(
     mut started: Local<bool>,
 ) {
     let refocused = focus.read().any(|f| f.focused);
-    let toggled = keys.just_pressed(KeyCode::Escape);
-    if !toggled && !refocused && *started {
+    let escape = keys.just_pressed(KeyCode::Escape);
+    if !escape && !refocused && *started {
         return;
     }
     let Ok((window, mut options)) = windows.single_mut() else { return };
     *started = true;
-    if toggled {
-        cursor.captured = !cursor.captured;
-    }
-    if cursor.captured && (toggled || cursor.position.is_none()) {
+    let was = cursor.captured;
+    cursor.captured = next_captured(was, escape, refocused);
+    if cursor.captured && (!was || cursor.position.is_none()) {
         cursor.position = window.cursor_position().or(cursor.position);
     }
     let (grab, visible) = cursor_options(cursor.captured);
@@ -276,6 +287,15 @@ mod tests {
         let p = sprite_pointer(&sprite, &[[0; 3], [10, 20, 30]]);
         assert_eq!(p.rgba, vec![0, 0, 0, 0, 10, 20, 30, 255]);
         assert_eq!(p.tip, (1, 0));
+    }
+
+    #[test]
+    fn focus_recaptures_after_escape() {
+        assert!(!next_captured(true, true, false), "Esc releases");
+        assert!(next_captured(false, true, false), "Esc again captures");
+        assert!(next_captured(false, false, true), "regaining focus captures");
+        assert!(next_captured(false, true, true), "focus wins over a same-frame Esc");
+        assert!(!next_captured(false, false, false));
     }
 
     #[test]
