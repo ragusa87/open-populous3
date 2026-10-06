@@ -349,7 +349,7 @@ mod tests {
         };
         let base = CurveParams::default();
         let p = curve_overrides(base, get);
-        assert_eq!((p.relief(), p.curvature), (3.0, base.curvature), "bad value ignored");
+        assert_eq!((p.relief(), p.curvature), (3.0, base.curvature), "relief from the env, bad curvature ignored");
         let (pitch, distance) = ground_view(get);
         assert!((pitch - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
         assert_eq!(distance, GROUND_VIEW.1);

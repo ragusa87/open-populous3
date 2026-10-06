@@ -85,6 +85,6 @@ point at the centre, or a generated gold ring; grayed and see-through (`dimmed`)
 
 View presets: F2 opens a menu (`hud/view_menu.rs`) of camera/terrain presets applied live (distance, tilt,
 relief, curvature; the terrain is rebuilt); the chosen values are logged. Esc closes it when open (and is
-consumed), otherwise Esc releases/captures the mouse. View tuning (dev, read at start): `POP3_RELIEF` (relief vs the original height ratio, default 3), `POP3_CURVATURE`
+consumed), otherwise Esc releases/captures the mouse. View tuning (dev, read at start): `POP3_RELIEF` (relief vs the original height ratio, default 1.5; F2 presets x1 original, x3 dramatic), `POP3_CURVATURE`
 (planet bend, default 0.008), `POP3_VIEW_DISTANCE` (cells, default 14), `POP3_VIEW_PITCH` (degrees, default 6).
 The previous default (relief x2, curvature 0.012, distance 20, tilt 3) is a menu preset.

@@ -16,8 +16,8 @@ pub struct CurveParams {
 
 /// Height units per render unit at relief x1 (the original height-to-cell ratio).
 pub const BASE_HEIGHT_SCALE: f32 = 1.0 / 384.0;
-/// Default relief: hills drawn three times as tall as the original ratio, so the ground view does not feel flat.
-pub const DEFAULT_RELIEF: f32 = 3.0;
+/// Default relief: hills drawn 1.5 times as tall as the original ratio (3 looked too high).
+pub const DEFAULT_RELIEF: f32 = 1.5;
 /// Default planet bend (`drop = curvature * distance²`).
 pub const DEFAULT_CURVATURE: f32 = 0.008;
 
