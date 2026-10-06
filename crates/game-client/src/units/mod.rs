@@ -155,16 +155,16 @@ fn load_sprites(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
-    let original = levels.original.then(|| art::original_art(&levels.data_dir).map_err(|e| warn!("original shaman sprites: {e}")).ok());
-    let mut shaman = original.flatten().or_else(|| {
-        info!("shaman: open-source sheets");
-        sheets::sheet_art(UnitKind::Shaman)
-    });
+    // Original animations when allowed, else the open-source sheets, else generated figures.
+    let originals = levels.original.then(|| art::Originals::load(&levels.data_dir).map_err(|e| warn!("original unit sprites: {e}")).ok()).flatten();
     let art: Vec<Vec<TribeArt>> = UnitKind::ALL
         .iter()
-        .map(|&kind| match kind {
-            UnitKind::Shaman => shaman.take().unwrap_or_else(|| art::generated_art(kind)),
-            _ => art::generated_art(kind),
+        .map(|&kind| {
+            let original = originals.as_ref().and_then(|o| o.art(kind).map_err(|e| warn!("original {kind:?} sprites: {e}")).ok());
+            original.or_else(|| sheets::sheet_art(kind)).unwrap_or_else(|| {
+                info!("{kind:?}: generated sprites");
+                art::generated_art(kind)
+            })
         })
         .collect();
     let mut upload = |f: &Frame| {

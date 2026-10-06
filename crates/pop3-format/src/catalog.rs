@@ -1,6 +1,8 @@
 //! What the bank 0 objects are (identified by hand, see docs/specs/objects.md), and how the
 //! tribe-coloured variants are laid out. Tribe order: 0 blue, 1 red, 2 yellow, 3 green.
 
+use crate::anim::Outfit;
+
 pub const TRIBES: u8 = 4;
 
 /// Camp fire (probably): wood at the base, a flat board the flames are drawn on.
@@ -123,6 +125,68 @@ impl ShamanAnim {
 
     pub fn anim(self, tribe: u8) -> usize {
         self.blue() + (tribe % TRIBES) as usize
+    }
+}
+
+/// Braves, warriors, firewarriors and spies share one tribesman body, drawn blue (tribe 0) with
+/// tribe colour layers and an outfit layer per unit type (`anim::Outfit`), identified by eye.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PersonAnim {
+    /// Standing, breathing (6 frames).
+    Stand,
+    /// Walking (4 frames).
+    Walk,
+    /// Kneeling, arms raised (6 frames): used for praying.
+    Kneel,
+    /// Struck down onto its back (8 frames, the last lying).
+    Fall,
+    /// Arms flailing (4 frames): used for drowning.
+    Flail,
+}
+
+impl PersonAnim {
+    pub fn anim(self) -> usize {
+        match self {
+            PersonAnim::Stand => 6,
+            PersonAnim::Walk => 5,
+            PersonAnim::Kneel => 8,
+            PersonAnim::Fall => 38,
+            PersonAnim::Flail => 52,
+        }
+    }
+}
+
+/// Outfits over the tribesman body: braves wear none. Firewarrior: horned skull helmet, fire in the
+/// hands. Warrior: grey pointed helmet and armour (its own attack anims 20-24 have it built in).
+/// Spy: long dark hair or hood (by elimination, unsure). `0x20 / 2` (headband, grey tool) is unknown.
+pub const OUTFIT_FIREWARRIOR: Outfit = Outfit { flags: 0x20, bits: 1 };
+pub const OUTFIT_WARRIOR: Outfit = Outfit { flags: 0x30, bits: 1 };
+pub const OUTFIT_SPY: Outfit = Outfit { flags: 0x20, bits: 3 };
+
+/// The preacher's own body (anims 26-46: blue headdress, staff; tribe colour layers on the gear).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreacherAnim {
+    /// Standing with the staff (first frame of a 3-frame gesture).
+    Stand,
+    /// Walking (8 frames).
+    Walk,
+    /// Preaching, purple magic around (24 frames): used for praying.
+    Preach,
+    /// Struck down onto his back (8 frames, the last lying).
+    Fall,
+    /// Kicking, flailing (5 frames): used for drowning (unsure).
+    Flail,
+}
+
+impl PreacherAnim {
+    pub fn anim(self) -> usize {
+        match self {
+            PreacherAnim::Stand => 41,
+            PreacherAnim::Walk => 27,
+            PreacherAnim::Preach => 28,
+            PreacherAnim::Fall => 43,
+            PreacherAnim::Flail => 42,
+        }
     }
 }
 

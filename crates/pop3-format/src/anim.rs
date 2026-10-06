@@ -18,8 +18,33 @@ const MAX_FRAMES: usize = 64;
 pub const FLAG_FLIP: u16 = 0x0001;
 /// Element flag: ground shadow under the person.
 pub const FLAG_SHADOW: u16 = 0x0004;
-/// Element flag: tribe colour layer (tribe in bits 9-10, mapping unverified).
+/// Element flag: tribe colour layer, tribe 1-3 in bits 9-10 (the body itself is tribe 0, blue).
 pub const FLAG_TRIBE_LAYER: u16 = 0x0010;
+/// Element flag: outfit layer, the unit type's gear over the shared tribesman body (see `Outfit`).
+pub const FLAG_OUTFIT: u16 = 0x0020;
+
+/// An outfit layer: elements with `FLAG_OUTFIT`, these `0x10 | 0x20` flag bits and this value in
+/// bits 9-10 (identified by eye in `catalog`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Outfit {
+    pub flags: u16,
+    pub bits: u16,
+}
+
+/// Whether an element is drawn for a person of `tribe` wearing `outfit`: never shadows; outfit
+/// layers only for that outfit; tribe layers only for that tribe; everything else always.
+pub fn element_shown(flags: u16, tribe: u8, outfit: Option<Outfit>) -> bool {
+    let bits = (flags >> 9) & 3;
+    if flags & FLAG_SHADOW != 0 {
+        false
+    } else if flags & FLAG_OUTFIT != 0 {
+        outfit == Some(Outfit { flags: flags & (FLAG_TRIBE_LAYER | FLAG_OUTFIT), bits })
+    } else if flags & FLAG_TRIBE_LAYER != 0 {
+        bits == tribe as u16
+    } else {
+        true
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Start {
@@ -127,10 +152,15 @@ impl AnimBank {
 
     /// The person itself: elements without shadow or tribe layers, mirrored if asked.
     pub fn compose(&self, sprites: &SpriteBank, frame: u16, mirrored: bool) -> Picture {
+        self.compose_as(sprites, frame, mirrored, 0, None)
+    }
+
+    /// The person as a unit of `tribe` wearing `outfit` (see `element_shown`), mirrored if asked.
+    pub fn compose_as(&self, sprites: &SpriteBank, frame: u16, mirrored: bool, tribe: u8, outfit: Option<Outfit>) -> Picture {
         let parts: Vec<(Element, &Sprite)> = self
             .frame_elements(frame)
             .into_iter()
-            .filter(|e| e.flags & (FLAG_SHADOW | FLAG_TRIBE_LAYER) == 0)
+            .filter(|e| element_shown(e.flags, tribe, outfit))
             .filter_map(|e| Some((e, sprites.sprites.get(e.sprite?)?)))
             .collect();
         compose_parts(&parts, mirrored)
@@ -170,6 +200,17 @@ fn compose_parts(parts: &[(Element, &Sprite)], mirrored: bool) -> Picture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layers_shown_per_tribe_and_outfit() {
+        let fire = Outfit { flags: 0x20, bits: 1 };
+        let warrior = Outfit { flags: 0x30, bits: 1 };
+        assert!(element_shown(0x0000, 2, None), "the body");
+        assert!(!element_shown(0x0204, 1, None), "shadow");
+        assert!(element_shown(0x0410, 2, None) && !element_shown(0x0410, 1, None) && !element_shown(0x0410, 0, None), "yellow loincloth for tribe 2 only");
+        assert!(element_shown(0x0220, 0, Some(fire)) && !element_shown(0x0220, 0, Some(warrior)) && !element_shown(0x0220, 0, None));
+        assert!(element_shown(0x0230, 3, Some(warrior)) && !element_shown(0x0230, 1, Some(fire)), "warrior helmet whatever the tribe");
+    }
 
     fn le(v: &[u16]) -> Vec<u8> {
         v.iter().flat_map(|x| x.to_le_bytes()).collect()

@@ -3,8 +3,8 @@
 //! everything else generated (`procedural`). Which frame to show is decided here from the simulated action.
 
 use game_core::unit::{Action, UnitKind, CAST_TICKS, DYING_TICKS};
-use pop3_format::anim::{AnimBank, SPRITE_FILE};
-use pop3_format::catalog::{ShamanAnim, TRIBES};
+use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
+use pop3_format::catalog::{PersonAnim, PreacherAnim, ShamanAnim, OUTFIT_FIREWARRIOR, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
 use pop3_format::{LevelError, Picture, SpriteBank, Theme};
 use std::f32::consts::FRAC_PI_4;
 use std::path::Path;
@@ -165,31 +165,83 @@ pub fn picture_frame(p: &Picture, palette: &[[u8; 3]]) -> Frame {
     Frame { width: p.sprite.width, height: p.sprite.height, origin: p.origin, rgba, scale: 1 }
 }
 
-/// Every tribe's shaman from the original animations (sprites in palette `pal0-0`).
-pub fn original_art(data_dir: &Path) -> Result<Vec<TribeArt>, String> {
-    let err = |e: LevelError| e.to_string();
-    let bank = AnimBank::load(data_dir).map_err(err)?;
-    let sprites = SpriteBank::load(data_dir, SPRITE_FILE).map_err(err)?;
-    let palette = Theme::load(data_dir, 0).map_err(err)?.palette;
-    let art = (0..TRIBES)
-        .map(|tribe| TribeArt {
-            poses: Pose::ALL
-                .iter()
-                .map(|pose| {
-                    let anim = pose.original().anim(tribe);
-                    (0..DIRS)
-                        .map(|dir| {
-                            let mirrored = bank.start(anim, dir).is_some_and(|s| s.mirrored);
-                            let frames = bank.frame_loop(anim, dir);
-                            frames.iter().map(|&f| picture_frame(&bank.compose(&sprites, f, mirrored), &palette)).collect()
-                        })
-                        .collect()
-                })
-                .collect(),
+/// Which original animation shows `kind` in `pose` for `tribe`, with which outfit layer, and
+/// whether only its first frame (a gesture standing in for a still pose). The shaman has an
+/// animation per tribe; the others are coloured by layers (docs/specs/animations.md).
+pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Outfit>, bool) {
+    match kind {
+        UnitKind::Shaman => (pose.original().anim(tribe), None, false),
+        UnitKind::Preacher => {
+            let anim = match pose {
+                Pose::Idle | Pose::Cast => PreacherAnim::Stand,
+                Pose::Walk => PreacherAnim::Walk,
+                Pose::Pray => PreacherAnim::Preach,
+                Pose::Fall => PreacherAnim::Fall,
+                Pose::Drown => PreacherAnim::Flail,
+            };
+            (anim.anim(), None, anim == PreacherAnim::Stand)
+        }
+        _ => {
+            let outfit = match kind {
+                UnitKind::Warrior => Some(OUTFIT_WARRIOR),
+                UnitKind::Firewarrior => Some(OUTFIT_FIREWARRIOR),
+                UnitKind::Spy => Some(OUTFIT_SPY),
+                _ => None,
+            };
+            let anim = match pose {
+                Pose::Idle | Pose::Cast => PersonAnim::Stand,
+                Pose::Walk => PersonAnim::Walk,
+                Pose::Pray => PersonAnim::Kneel,
+                Pose::Fall => PersonAnim::Fall,
+                Pose::Drown => PersonAnim::Flail,
+            };
+            (anim.anim(), outfit, false)
+        }
+    }
+}
+
+/// The original person animations and sprites (palette `pal0-0`), loaded once.
+pub struct Originals {
+    bank: AnimBank,
+    sprites: SpriteBank,
+    palette: Vec<[u8; 3]>,
+}
+
+impl Originals {
+    pub fn load(data_dir: &Path) -> Result<Self, String> {
+        let err = |e: LevelError| e.to_string();
+        Ok(Originals {
+            bank: AnimBank::load(data_dir).map_err(err)?,
+            sprites: SpriteBank::load(data_dir, SPRITE_FILE).map_err(err)?,
+            palette: Theme::load(data_dir, 0).map_err(err)?.palette,
         })
-        .collect::<Vec<_>>();
-    let complete = art.iter().all(|t| Pose::ALL.iter().all(|&p| (0..DIRS).all(|d| !t.frames(p, d).is_empty())));
-    if complete { Ok(art) } else { Err(format!("shaman animations missing ({} in the file)", bank.starts.len())) }
+    }
+
+    /// Every tribe's art for a unit kind.
+    pub fn art(&self, kind: UnitKind) -> Result<Vec<TribeArt>, String> {
+        let bank = &self.bank;
+        let art = (0..TRIBES)
+            .map(|tribe| TribeArt {
+                poses: Pose::ALL
+                    .iter()
+                    .map(|&pose| {
+                        let (anim, outfit, first_only) = original_anim(kind, pose, tribe);
+                        let layer_tribe = if kind == UnitKind::Shaman { 0 } else { tribe };
+                        (0..DIRS)
+                            .map(|dir| {
+                                let mirrored = bank.start(anim, dir).is_some_and(|s| s.mirrored);
+                                let frames = bank.frame_loop(anim, dir);
+                                let frames = if first_only { &frames[..frames.len().min(1)] } else { &frames[..] };
+                                frames.iter().map(|&f| picture_frame(&bank.compose_as(&self.sprites, f, mirrored, layer_tribe, outfit), &self.palette)).collect()
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        let complete = art.iter().all(|t| Pose::ALL.iter().all(|&p| (0..DIRS).all(|d| !t.frames(p, d).is_empty())));
+        if complete { Ok(art) } else { Err(format!("{kind:?} animations missing ({} in the file)", bank.starts.len())) }
+    }
 }
 
 pub fn generated_art(kind: UnitKind) -> Vec<TribeArt> {

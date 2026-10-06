@@ -81,8 +81,9 @@ view of the starting camera), a pond to the north.
 - Art: with the original files, the shaman animations of `VSTART/VFRA/VELE` + `HSPR0-0.DAT` (see animations.md),
   per tribe; otherwise (or `--no-original`) the open-source witch (Quaternius, CC0) rendered into
   `assets/units/shaman/*.png` sheets, loaded by `units/sheets.rs` (see unit-art.md); `units/procedural.rs` can still draw a ~34 px pixel-art shaman in the tribe colour
-  (feather headdress, staff) for every pose and direction (front / side / back, left ones mirrored). The other kinds
-  are always generated (`UnitSprites`, per kind and tribe), told apart by headgear, held item and clothes: brave
+  (feather headdress, staff) for every pose and direction (front / side / back, left ones mirrored). With the original files the other kinds
+  use their original animations too (`art::Originals`, `original_anim`: tribesman body + outfit layer, the preacher's
+  own body, see animations.md); otherwise they are generated (`UnitSprites`, per kind and tribe), told apart by headgear, held item and clothes: brave
   (bare chest, hair tuft, empty hands), warrior (horned helmet, club), preacher (pointed hood, long robe, book), spy
   (dark cloak and cowl, dagger), firewarrior (red cone hat, flame in hand).
 - Selection (`units/selection.rs`, player 0's living units): left click on a unit selects it, Ctrl+click adds or
