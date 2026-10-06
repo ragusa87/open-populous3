@@ -19,6 +19,7 @@ const STAFF: [u8; 3] = [120, 78, 36];
 const SPARK: [u8; 3] = [240, 120, 255];
 const WATER: [u8; 3] = [170, 210, 255];
 const CLOAK: [u8; 3] = [58, 56, 66];
+const HIDE: [u8; 3] = [150, 112, 70];
 const STEEL: [u8; 3] = [170, 176, 186];
 const HORN: [u8; 3] = [236, 226, 196];
 const PAGE: [u8; 3] = [240, 234, 210];
@@ -156,6 +157,8 @@ enum Head {
     Hood,
     Cowl,
     FireHat,
+    /// Long wild hair down the shoulders.
+    Mane,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -176,6 +179,7 @@ fn look(kind: UnitKind) -> (Head, Held) {
         UnitKind::Preacher => (Head::Hood, Held::Book),
         UnitKind::Spy => (Head::Cowl, Held::Dagger),
         UnitKind::Firewarrior => (Head::FireHat, Held::Flame),
+        UnitKind::Wildman => (Head::Mane, Held::Nothing),
     }
 }
 
@@ -183,9 +187,14 @@ fn shapes(b: &Body, view: View, tribe: u8, kind: UnitKind) -> Vec<Shape> {
     let (head, held) = look(kind);
     let tribe_col = tribe_rgb(tribe);
     // Spies wear a dark cloak (tribe colour only on the belt); braves are bare-chested.
-    let robe = if kind == UnitKind::Spy { CLOAK } else { tribe_col };
-    let dark = tribe_col.map(|c| (c as u16 * 3 / 5) as u8);
-    let torso = if kind == UnitKind::Brave { SKIN } else { robe };
+    // Spies wear a dark cloak, wildmen a hide (no tribe colour).
+    let robe = match kind {
+        UnitKind::Spy => CLOAK,
+        UnitKind::Wildman => HIDE,
+        _ => tribe_col,
+    };
+    let dark = if kind == UnitKind::Wildman { HIDE.map(|c| (c as u16 * 3 / 5) as u8) } else { tribe_col.map(|c| (c as u16 * 3 / 5) as u8) };
+    let torso = if matches!(kind, UnitKind::Brave | UnitKind::Wildman) { SKIN } else { robe };
     let side = view == View::Side;
     let mut s = Vec::new();
     let hand = b.hands[1];
@@ -267,6 +276,12 @@ fn shapes(b: &Body, view: View, tribe: u8, kind: UnitKind) -> Vec<Shape> {
         }
         Head::Feathers => {}
         Head::Tuft => s.push(Shape::Line((hx - 2.5, hy + 2.0), (hx + 2.0, hy + 2.5), 2.0, HAIR)),
+        Head::Mane => {
+            s.push(Shape::Line((hx - 3.0, hy + 2.5), (hx + 3.0, hy + 2.5), 2.5, HAIR));
+            for side_x in [-1.0, 1.0] {
+                s.push(Shape::Line((hx + 3.0 * side_x, hy + 2.0), (hx + 3.5 * side_x, hy - 5.0), 1.5, HAIR));
+            }
+        }
         Head::Horns => {
             s.push(Shape::Line((hx - 3.0, hy + 1.5), (hx + 3.0, hy + 1.5), 2.5, STEEL));
             for side_x in [-1.0, 1.0] {

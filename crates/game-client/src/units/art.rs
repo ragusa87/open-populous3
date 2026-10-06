@@ -4,7 +4,7 @@
 
 use game_core::unit::{Action, UnitKind, CAST_TICKS, DYING_TICKS};
 use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
-use pop3_format::catalog::{PersonAnim, PreacherAnim, ShamanAnim, OUTFIT_FIREWARRIOR, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
+use pop3_format::catalog::{PersonAnim, PreacherAnim, ShamanAnim, WildmanAnim, OUTFIT_FIREWARRIOR, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
 use pop3_format::{LevelError, Picture, SpriteBank, Theme};
 use std::f32::consts::FRAC_PI_4;
 use std::path::Path;
@@ -171,6 +171,16 @@ pub fn picture_frame(p: &Picture, palette: &[[u8; 3]]) -> Frame {
 pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Outfit>, bool) {
     match kind {
         UnitKind::Shaman => (pose.original().anim(tribe), None, false),
+        UnitKind::Wildman => {
+            let anim = match pose {
+                Pose::Idle | Pose::Cast => WildmanAnim::Stand,
+                Pose::Walk => WildmanAnim::Walk,
+                Pose::Pray => WildmanAnim::Sit,
+                Pose::Fall => WildmanAnim::Down,
+                Pose::Drown => WildmanAnim::Flung,
+            };
+            (anim.anim(), None, false)
+        }
         UnitKind::Preacher => {
             let anim = match pose {
                 Pose::Idle | Pose::Cast => PreacherAnim::Stand,
@@ -226,7 +236,7 @@ impl Originals {
                     .iter()
                     .map(|&pose| {
                         let (anim, outfit, first_only) = original_anim(kind, pose, tribe);
-                        let layer_tribe = if kind == UnitKind::Shaman { 0 } else { tribe };
+                        let layer_tribe = if matches!(kind, UnitKind::Shaman | UnitKind::Wildman) { 0 } else { tribe };
                         (0..DIRS)
                             .map(|dir| {
                                 let mirrored = bank.start(anim, dir).is_some_and(|s| s.mirrored);

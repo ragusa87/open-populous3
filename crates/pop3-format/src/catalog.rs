@@ -177,6 +177,33 @@ pub const OUTFIT_FIREWARRIOR: Outfit = Outfit { flags: 0x20, bits: 1 };
 pub const OUTFIT_WARRIOR: Outfit = Outfit { flags: 0x30, bits: 1 };
 pub const OUTFIT_SPY: Outfit = Outfit { flags: 0x20, bits: 3 };
 
+/// Wildmen (neutral, no layers): their own small set of animations, identified by eye.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WildmanAnim {
+    /// Standing (1 frame).
+    Stand,
+    /// Walking (4 frames).
+    Walk,
+    /// Sitting on the ground (1 frame): used for praying.
+    Sit,
+    /// Tumbling in the air (4 frames): used for drowning.
+    Flung,
+    /// Thrown down, lying (4 frames): used for dying.
+    Down,
+}
+
+impl WildmanAnim {
+    pub fn anim(self) -> usize {
+        match self {
+            WildmanAnim::Stand => 1,
+            WildmanAnim::Walk => 0,
+            WildmanAnim::Sit => 3,
+            WildmanAnim::Flung => 31,
+            WildmanAnim::Down => 47,
+        }
+    }
+}
+
 /// The preacher's own body (anims 26-46: blue headdress, staff; tribe colour layers on the gear).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreacherAnim {

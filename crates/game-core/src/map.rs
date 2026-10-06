@@ -48,6 +48,18 @@ impl GameMap {
         }
         .with_building_ground()
         .with_shamans()
+        .with_people(level)
+    }
+
+    /// The level's people other than shamans (who spawn at their sites), where they are placed.
+    fn with_people(mut self, level: &Level) -> Self {
+        let people = level.things.iter().filter(|t| t.kind == pop3_format::level::KIND_PERSON && !t.is_shaman());
+        for t in people {
+            let Some(kind) = UnitKind::from_person_model(t.model) else { continue };
+            let id = self.units.len() as u32 + 1;
+            self.units.push(Unit::new(id, t.owner, kind, (t.x, t.z)));
+        }
+        self
     }
 
     fn with_building_ground(mut self) -> Self {
@@ -178,7 +190,7 @@ impl GameMap {
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
         let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new() }.with_shamans().with_trees(2, 150);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
-        for (row, &kind) in UnitKind::ALL[1..].iter().enumerate() {
+        for (row, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
             let row = row as i32;
             for n in 0..3 {
                 let id = map.units.len() as u32 + 1;
@@ -420,7 +432,7 @@ mod tests {
         let count = |owner: u8, kind: UnitKind| m.units.iter().filter(|u| u.owner == owner && u.kind == kind).count();
         assert_eq!(count(0, UnitKind::Shaman), 1);
         assert_eq!(count(1, UnitKind::Shaman), 0);
-        for kind in &UnitKind::ALL[1..] {
+        for kind in &UnitKind::FOLLOWERS {
             assert_eq!((count(0, *kind), count(1, *kind)), (3, 1), "{kind:?}");
         }
         let mut ids: Vec<u32> = m.units.iter().map(|u| u.id).collect();
@@ -549,6 +561,21 @@ mod tests {
             assert!(!m.terrain.is_water(x, z), "({x}, {z}) under the hut at cell (5, 10)");
         }
         assert!(Mobility::Walk.passable(&m.terrain, (5, 10)));
+    }
+
+    #[test]
+    fn a_levels_people_spawn_where_placed_shamans_at_their_site() {
+        use pop3_format::level::{DAT_SIZE, KIND_PERSON, PERSON_SHAMAN};
+        let mut d = vec![0u8; DAT_SIZE];
+        let base = d.len() - 95 - 2000 * 55;
+        let things: [[u8; 7]; 3] = [[PERSON_SHAMAN, KIND_PERSON, 0, 0x00, 0x0a, 0x00, 0x14], [3, KIND_PERSON, 0, 0x00, 0x0b, 0x00, 0x14], [1, KIND_PERSON, 255, 0x00, 0x30, 0x00, 0x30]];
+        for (i, t) in things.iter().enumerate() {
+            d[base + i * 55..base + i * 55 + 7].copy_from_slice(t);
+        }
+        let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None);
+        let kinds: Vec<_> = m.units.iter().map(|u| (u.id, u.owner, u.kind, u.x, u.z)).collect();
+        assert_eq!(kinds[0].2, UnitKind::Shaman);
+        assert_eq!(kinds[1..], [(2, 0, UnitKind::Warrior, 0x0b00, 0x1400), (3, 255, UnitKind::Wildman, 0x3000, 0x3000)]);
     }
 
     #[test]

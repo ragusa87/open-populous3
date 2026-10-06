@@ -115,7 +115,9 @@ impl UnitSprites {
     pub fn frame_for(&self, unit: &Unit, yaw: f32, clock: &SimClock) -> Option<&FrameAsset> {
         let pose = pose_for(&unit.action);
         let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
-        let frames = self.kinds.get(kind)?.get(unit.owner as usize)?.get(pose as usize)?.get(sprite_dir(unit.facing, yaw))?;
+        // Wildmen have no tribe (owner 255): one look for all.
+        let tribe = if unit.kind == UnitKind::Wildman { 0 } else { unit.owner as usize };
+        let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(sprite_dir(unit.facing, yaw))?;
         frames.get(frame_index(pose, frames.len(), &unit.action, clock.anim_secs, clock.alpha()))
     }
 }

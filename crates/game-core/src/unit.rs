@@ -40,10 +40,29 @@ pub enum UnitKind {
     Preacher,
     Spy,
     Firewarrior,
+    /// Neutral wild people (no tribe, owner 255 in the levels): the Convert spell makes braves of them.
+    Wildman,
 }
 
 impl UnitKind {
-    pub const ALL: [UnitKind; 6] = [UnitKind::Shaman, UnitKind::Brave, UnitKind::Warrior, UnitKind::Preacher, UnitKind::Spy, UnitKind::Firewarrior];
+    pub const ALL: [UnitKind; 7] =
+        [UnitKind::Shaman, UnitKind::Brave, UnitKind::Warrior, UnitKind::Preacher, UnitKind::Spy, UnitKind::Firewarrior, UnitKind::Wildman];
+    /// The kinds a tribe trains (not the shaman, not wildmen).
+    pub const FOLLOWERS: [UnitKind; 5] = [UnitKind::Brave, UnitKind::Warrior, UnitKind::Preacher, UnitKind::Spy, UnitKind::Firewarrior];
+
+    /// The kind of a level's person thing (model 1-7), None for others.
+    pub fn from_person_model(model: u8) -> Option<Self> {
+        Some(match model {
+            1 => UnitKind::Wildman,
+            2 => UnitKind::Brave,
+            3 => UnitKind::Warrior,
+            4 => UnitKind::Preacher,
+            5 => UnitKind::Spy,
+            6 => UnitKind::Firewarrior,
+            7 => UnitKind::Shaman,
+            _ => return None,
+        })
+    }
 
     pub fn name(self) -> &'static str {
         match self {
@@ -53,6 +72,7 @@ impl UnitKind {
             UnitKind::Preacher => "Preacher",
             UnitKind::Spy => "Spy",
             UnitKind::Firewarrior => "Firewarrior",
+            UnitKind::Wildman => "Wildman",
         }
     }
 
@@ -60,7 +80,7 @@ impl UnitKind {
     pub fn max_health(self) -> u16 {
         match self {
             UnitKind::Shaman => SHAMAN_MAX_HEALTH,
-            UnitKind::Brave | UnitKind::Spy => 60,
+            UnitKind::Brave | UnitKind::Spy | UnitKind::Wildman => 60,
             UnitKind::Preacher => 70,
             UnitKind::Firewarrior => 80,
             UnitKind::Warrior => 120,
@@ -73,7 +93,7 @@ impl UnitKind {
             UnitKind::Shaman | UnitKind::Brave => SHAMAN_SPEED,
             UnitKind::Spy => 72,
             UnitKind::Firewarrior => 60,
-            UnitKind::Warrior | UnitKind::Preacher => 56,
+            UnitKind::Warrior | UnitKind::Preacher | UnitKind::Wildman => 56,
         }
     }
 }

@@ -24,6 +24,14 @@
 
 Health: 100. Orders are ignored while drowning, dying or dead.
 
+## From the levels (done)
+`GameMap::from_level` spawns every person thing (kind 1) where it is placed, model = kind
+(`UnitKind::from_person_model`: 1 wildman, 2 brave, 3 warrior, 4 preacher, 5 spy, 6 firewarrior, 7 shaman), owner =
+tribe (255 = none: wildmen). Shamans spawn at their reincarnation site instead (one per site, ids first). Level 10:
+5 braves, 4 warriors, 4 preachers for the player, 5 warriors, 2 preachers, 4 firewarriors for green, 20 wildmen.
+Wildmen are neutral (not selectable), drawn with their original anims (0 walk, 1 stand, 3 sit, 31 flung, 47 down)
+or else a generated figure in a hide with a mane, or the brave's rendered sheets in a hide colour.
+
 ## Unit kinds (simulation: walking only)
 `UnitKind::ALL`: Shaman, Brave, Warrior, Preacher, Spy, Firewarrior, built with `Unit::new(id, owner, kind, pos)`.
 Placeholder balance until combat (`max_health`, flat-ground `speed` in world units per tick):
@@ -107,7 +115,6 @@ view of the starting camera), a pond to the north.
   (`grounded::pick_ground`), P prays, X stops. C (cast selected spell) makes the player's shaman jump,
   Space looks at her.
 - Dev: `SHAMAN=walk|pray|cast|drown|teleport [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose.
-- Spawn from level things (`kind` 1 = person, model = brave/warrior/...) once the record is decoded.
 
 ## Reincarnation site (done: data + rendering)
 - `game_core::site::ReincarnationSite { owner, x, z }`, stored in `GameMap::sites` (one per tribe, sorted by owner).

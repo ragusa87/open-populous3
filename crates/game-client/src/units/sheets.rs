@@ -17,6 +17,8 @@ pub const SCALE: usize = 4;
 pub const CELL: (usize, usize) = (320, 288);
 const FEET: (usize, usize) = (160, 256);
 const MAGENTA_HUE: f32 = 300.0;
+/// Wildmen wear the brave's clothes in this colour (no tribe).
+const WILD_HIDE: [u8; 3] = [150, 112, 70];
 
 macro_rules! sheet {
     ($kind:literal, $pose:literal) => {
@@ -46,6 +48,8 @@ pub fn bundled(kind: UnitKind, pose: Pose) -> Option<&'static [u8]> {
         UnitKind::Preacher => poses!("preacher", pose),
         UnitKind::Spy => poses!("spy", pose),
         UnitKind::Firewarrior => poses!("firewarrior", pose),
+        // No model of their own: the brave's, in a neutral hide colour (`sheet_art`).
+        UnitKind::Wildman => poses!("brave", pose),
     })
 }
 
@@ -106,7 +110,7 @@ pub fn sheet_art(kind: UnitKind) -> Option<Vec<TribeArt>> {
     Some(
         (0..TRIBES)
             .map(|tribe| {
-                let rgb = tribe_rgb(tribe);
+                let rgb = if kind == UnitKind::Wildman { WILD_HIDE } else { tribe_rgb(tribe) };
                 TribeArt { poses: poses.iter().map(|dirs| dirs.iter().map(|frames| frames.iter().map(|f| recolour(f, rgb)).collect()).collect()).collect() }
             })
             .collect(),
