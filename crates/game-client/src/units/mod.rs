@@ -18,7 +18,7 @@ use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use game_core::unit::{Unit, TICKS_PER_SECOND};
+use game_core::unit::{Action, Unit, LANDING_TICKS, TICKS_PER_SECOND};
 use selection::Selection;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
@@ -32,6 +32,8 @@ const UPSCALE_STEPS: usize = 2;
 const TICK_SECS: f32 = 1.0 / TICKS_PER_SECOND as f32;
 const BAR_HEIGHT: f32 = 0.5;
 const BAR_SIZE: Vec2 = Vec2::new(0.36, 0.045);
+/// How high (cells) she floats when she appears after a teleport.
+const LANDING_HEIGHT: f32 = 0.2;
 /// How far (cells) sprites are pulled towards the camera: ground rising less than this in front
 /// of the feet does not cut them.
 const PULL_TO_EYE: f32 = 0.6;
@@ -295,21 +297,31 @@ pub fn toward_eye(feet: Vec3, eye: Vec3, pull: f32) -> (Vec3, f32) {
     ((eye - feet) / dist * pull, (dist - pull) / dist)
 }
 
+/// Height above the ground (cells) while landing after a teleport: from `LANDING_HEIGHT` down to
+/// 0, slowing as she touches down. `alpha` is the fraction of the current tick.
+pub fn landing_lift(action: &Action, alpha: f32) -> f32 {
+    let Action::Landing { left } = *action else { return 0.0 };
+    let t = ((left as f32 - alpha) / LANDING_TICKS as f32).clamp(0.0, 1.0);
+    LANDING_HEIGHT * t * t
+}
+
 /// Pulls each unit's sprite and health bar towards the camera (see `toward_eye`), in the view's
-/// own (camera-facing) space.
+/// own (camera-facing) space, and lifts them while landing (`landing_lift`).
 fn pull_to_eye(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     params: Res<CurveParamsRes>,
+    clock: Res<SimClock>,
     eye: Query<&Transform, (With<GameCamera>, Without<UnitView>)>,
-    views: Query<(&Grounded, &Transform, &Children), With<UnitView>>,
+    views: Query<(&UnitView, &Grounded, &Transform, &Children)>,
     mut parts: Query<(&mut Transform, Has<HealthBar>), (Or<(With<UnitSprite>, With<HealthBar>)>, Without<UnitView>, Without<GameCamera>)>,
 ) {
     let Ok(eye) = eye.single() else { return };
-    for (ground, view, children) in &views {
+    for (unit, ground, view, children) in &views {
         let Some(feet) = render_pos(&map.0.terrain, ground, rig.focus, &params.0) else { continue };
         let (offset, scale) = toward_eye(feet, eye.translation, PULL_TO_EYE);
-        let local = view.rotation.inverse() * offset;
+        let lift = map.0.units.get(unit.0).map_or(0.0, |u| landing_lift(&u.action, clock.alpha()));
+        let local = view.rotation.inverse() * offset + Vec3::Y * lift * scale;
         for &child in children {
             if let Ok((mut t, bar)) = parts.get_mut(child) {
                 t.translation = local + if bar { Vec3::Y * BAR_HEIGHT * scale } else { Vec3::ZERO };
@@ -322,6 +334,17 @@ fn pull_to_eye(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floats_down_when_landing() {
+        let landing = |left| Action::Landing { left };
+        assert_eq!(landing_lift(&landing(LANDING_TICKS), 0.0), LANDING_HEIGHT, "appears up in the air");
+        let (high, low) = (landing_lift(&landing(4), 0.0), landing_lift(&landing(2), 0.0));
+        assert!(LANDING_HEIGHT > high && high > low && low > 0.0);
+        assert!(high - low > low - landing_lift(&landing(1), 0.99), "slows down as she touches down");
+        assert_eq!(landing_lift(&landing(1), 1.0), 0.0);
+        assert_eq!(landing_lift(&Action::Idle, 0.5), 0.0);
+    }
 
     #[test]
     fn pulled_towards_the_eye_looks_the_same() {

@@ -27,6 +27,8 @@ pub const REGEN_EVERY: u8 = 5;
 pub const STRANDED_HURT_EVERY: u8 = 3;
 /// Length of the cast jump, the fall when dying, and the wait before reincarnation.
 pub const CAST_TICKS: u16 = 12;
+/// After a teleport she floats down onto the ground for this long.
+pub const LANDING_TICKS: u16 = 6;
 pub const DYING_TICKS: u16 = 8;
 pub const RESPAWN_TICKS: u16 = 30;
 
@@ -51,6 +53,8 @@ pub enum Action {
     Praying,
     /// Jumping with the spell in her hands, `left` ticks to go.
     Casting { left: u16 },
+    /// Just teleported: floating down onto the ground, `left` ticks to go.
+    Landing { left: u16 },
     /// The ground under her is sea: loses health until dead or the land comes back.
     Drowning,
     Dying { left: u16 },
@@ -66,6 +70,7 @@ impl Action {
             Action::Stranded { .. } => "Stranded",
             Action::Praying => "Praying",
             Action::Casting { .. } => "Casting",
+            Action::Landing { .. } => "Landing",
             Action::Drowning => "Drowning",
             Action::Dying { .. } => "Dying",
             Action::Dead { .. } => "Dead",
@@ -76,6 +81,7 @@ impl Action {
     pub fn elapsed(&self) -> Option<u16> {
         match *self {
             Action::Casting { left } => Some(CAST_TICKS - left.min(CAST_TICKS)),
+            Action::Landing { left } => Some(LANDING_TICKS - left.min(LANDING_TICKS)),
             Action::Dying { left } => Some(DYING_TICKS - left.min(DYING_TICKS)),
             Action::Dead { left } => Some(RESPAWN_TICKS - left.min(RESPAWN_TICKS)),
             _ => None,
@@ -213,8 +219,10 @@ impl Unit {
                 self.action = Action::Idle;
                 if let Some(to) = self.teleport_to.take().filter(|&to| self.mobility().passable(terrain, (cell_of(to.0), cell_of(to.1)))) {
                     (self.x, self.z) = to;
+                    self.action = Action::Landing { left: LANDING_TICKS };
                 }
             }
+            Action::Landing { left } => self.action = if left > 1 { Action::Landing { left: left - 1 } } else { Action::Idle },
             Action::Drowning => {
                 self.health = self.health.saturating_sub(DROWN_DAMAGE);
                 if self.health == 0 {
@@ -606,7 +614,9 @@ mod tests {
         run(&mut u, &t, &site, CAST_TICKS as usize - 1);
         assert_eq!((u.x, u.z, u.action), (start.0, start.1, Action::Casting { left: 1 }), "still jumping where she was");
         run(&mut u, &t, &site, 1);
-        assert_eq!((u.x, u.z, u.action), (to.0, to.1, Action::Idle), "lands at the target");
+        assert_eq!((u.x, u.z, u.action), (to.0, to.1, Action::Landing { left: LANDING_TICKS }), "at the target, floating down");
+        run(&mut u, &t, &site, LANDING_TICKS as usize);
+        assert_eq!(u.action, Action::Idle, "landed");
         sea_cell(&mut t, (5, 5));
         u.cast_teleport((5 * 512, 5 * 512));
         run(&mut u, &t, &site, CAST_TICKS as usize);

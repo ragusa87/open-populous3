@@ -16,7 +16,8 @@
 | Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 64 units/tick on flat ground (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
 | Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -1 HP every 3 ticks until the terrain opens a path (walks again) or it dies |
 | Praying | `Order::Pray` | until another order; heals |
-| Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle (Teleport: then at the target) |
+| Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle (Teleport: then at the target, Landing) |
+| Landing { left } | arriving from a teleport | 6 ticks, then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out) |
 | Drowning | ground under her becomes open sea | -4 HP per tick, no orders; back to Idle if land returns |
 | Dying { left } | health reaches 0 | 8 ticks |
 | Dead { left } | after dying | 30 ticks, then reincarnates at her site at full health; the site levels its ground again |
@@ -67,7 +68,7 @@ Health: 100. Orders are ignored while drowning, dying or dead.
 - Orders go to each selected unit as `Command::OrderUnit`: left click on the ground walks there
   (`grounded::pick_ground`), P prays, X stops. C (cast selected spell) makes the player's shaman jump,
   Space looks at her.
-- Dev: `SHAMAN=walk|pray|cast|drown [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose.
+- Dev: `SHAMAN=walk|pray|cast|drown|teleport [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose.
 - Spawn from level things (`kind` 1 = person, model = brave/warrior/...) once the record is decoded.
 
 ## Reincarnation site (done: data + rendering)
