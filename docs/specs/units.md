@@ -21,11 +21,23 @@
 | Dead { left } | after dying | 30 ticks, then reincarnates at her site at full health; the site levels its ground again |
 
 Health: 100. Orders are ignored while drowning, dying or dead.
+
+## Shaman on screen (client, `units/`)
+- `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks.
+- Each unit is a `Grounded` sprite quad (1 px = 1/30 cell, feet at the anchor) turned to face the camera,
+  with a health bar over the head (green -> yellow -> red, hidden once dead).
+- Pose from the action: Idle, Walk, Pray, Cast (jump), Drown (tumbling), Fall (dying, then lies still while dead).
+  Timed actions (cast, dying) play once in step with the simulation, others loop.
+- View direction: `facing * 45deg - camera yaw`, rounded to the 8 drawn directions (0 front, 2 screen right, 4 back).
+- Art: with the original files, the shaman animations of `VSTART/VFRA/VELE` + `HSPR0-0.DAT` (see animations.md),
+  per tribe; otherwise (or `--no-original`) `units/procedural.rs` draws a ~34 px pixel-art figure in the tribe colour
+  (feather headdress, staff) for every pose and direction (front / side / back, left ones mirrored).
+- Orders (player 0): right click on the ground walks there (`grounded::pick_ground`), P prays, X stops,
+  C (cast selected spell) makes her jump, Space or a click on the panel preview looks at her.
+- Dev: `SHAMAN=walk|pray|cast|drown [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose.
 - Pathfinding: A* or flow fields on the 128² grid with modulo neighbours; blocked by water and slope
   above a threshold. Recompute only regions touched by a `DirtyRect`.
 - Spawn from level things (`kind` 1 = person, model = brave/warrior/...) once the record is decoded.
-- Rendering: Bevy entities mirroring sim units, positioned on the curved surface using the same
-  `drop_at` formula as the terrain.
 
 ## Reincarnation site (done: data + rendering)
 - `game_core::site::ReincarnationSite { owner, x, z }`, stored in `GameMap::sites` (one per tribe, sorted by owner).

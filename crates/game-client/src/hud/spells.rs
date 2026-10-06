@@ -1,9 +1,13 @@
 //! Spells tab: a grid of tiles mirroring the player's `SpellBook`.
 //! Tile states: empty (hidden), "?" (discoverable), gray with uses left (provided),
-//! gold with charge pips + recharge bar (known). Click selects, C casts (demo).
+//! gold with charge pips + recharge bar (known). Click selects, C casts (demo: uses a charge, the shaman jumps).
 
 use super::panel::{TabContent, DARK_BROWN, INK};
+use crate::units::PLAYER;
+use crate::world::CurrentMap;
 use bevy::prelude::*;
+use game_core::command::Command;
+use game_core::unit::Order;
 use game_core::spell_book::{Availability, SpellBook, SpellKind, SpellSlot, MAX_CHARGES};
 
 /// Mana given to every recharging spell per tick, and tick length.
@@ -227,9 +231,17 @@ fn tile_clicks(
     }
 }
 
-fn cast_selected(keys: Res<ButtonInput<KeyCode>>, mut book: ResMut<PlayerSpells>, selected: Res<SelectedSpell>) {
+/// Casting makes the shaman jump (the spell effects come later).
+fn cast_selected(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut book: ResMut<PlayerSpells>,
+    selected: Res<SelectedSpell>,
+    mut map: ResMut<CurrentMap>,
+) {
     if let (true, Some(kind)) = (keys.just_pressed(KeyCode::KeyC), selected.0) {
-        book.0.cast(kind);
+        if book.0.cast(kind) {
+            map.bypass_change_detection().0.apply(&Command::Order { player: PLAYER, order: Order::Cast });
+        }
     }
 }
 

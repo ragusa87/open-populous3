@@ -12,9 +12,10 @@ crates/
                   grounded.rs     parts set on the curved terrain under them (sites, buildings...)
                   original_models.rs original 3D objects -> meshes + theme atlas (optional)
                   sites.rs        reincarnation site markers on the curved surface
+                  units/          sim clock, unit sprites (original or generated art), health bars, orders
                   virtual_cursor.rs in-game cursor (system cursor locked), drives edge scroll + UI picking
                   camera.rs       CameraRig (focus wraps on the torus), input, aerial toggle
-                  hud.rs          info text + control tabs (Spells/Buildings/Followers)
+                  hud/            info text, shaman preview, control tabs (Spells/Build/Stats), view menu
                   editor.rs       edit mode: spells as brushes at camera focus
                   dev.rs          HEADLESS / SCREENSHOT / AERIAL env helpers
 ```

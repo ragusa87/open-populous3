@@ -13,6 +13,7 @@ mod procedural_theme;
 mod sites;
 mod terrain_mesh;
 mod terrain_texture;
+mod units;
 mod virtual_cursor;
 mod world;
 
@@ -48,6 +49,7 @@ fn main() {
             virtual_cursor::VirtualCursorPlugin,
             grounded::GroundedPlugin,
             sites::SitesPlugin,
+            units::UnitsPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,
             dev::DevPlugin,
