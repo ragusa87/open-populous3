@@ -18,7 +18,7 @@
 - Rendered as a ring of 8 stones; the camera starts on the player's (tribe 0) site.
   With the original files: the reincarnation stone (object 30) in the owner's tribe colour, textured from the
   level theme's `bl320` atlas (see objects.md), no totem. Without them or with `--no-original`: plain blocks
-  around a tribe-coloured totem. The ring layout (count, radius, facing) is ours, not checked against the game.
+  around a tribe-coloured totem. Stones face the centre (glyph side inward, as in the game); count and radius are ours.
 
 ## Standing on the ground (client)
 Anything placed on the map (site stones, buildings, trees, units) is made of `grounded::Grounded`

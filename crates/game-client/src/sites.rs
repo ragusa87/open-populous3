@@ -59,6 +59,12 @@ pub fn site_cell_pos(site: &ReincarnationSite) -> Vec2 {
     Vec2::new(site.x as f32, site.z as f32) / WORLD_UNITS_PER_CELL as f32
 }
 
+/// Yaw turning the stone's front (-Z: the glyph side, which it also leans towards) to the
+/// centre, for a stone placed at angle `a` on the ring (offset `(cos a, sin a)` in x/z).
+pub fn face_centre_yaw(a: f32) -> f32 {
+    std::f32::consts::FRAC_PI_2 - a
+}
+
 /// Totem at the centre, then a ring of stones facing it, each with its own ground position.
 pub fn site_parts(site: &ReincarnationSite) -> Vec<SitePart> {
     let centre = site_cell_pos(site);
@@ -66,7 +72,7 @@ pub fn site_parts(site: &ReincarnationSite) -> Vec<SitePart> {
     let stones = (0..STONES).map(|i| {
         let a = i as f32 * std::f32::consts::TAU / STONES as f32;
         let at = centre + Vec2::new(a.cos(), a.sin()) * RING_RADIUS;
-        SitePart { kind: PartKind::Stone, ground: Grounded { at, half: STONE_HALF }, yaw: -a }
+        SitePart { kind: PartKind::Stone, ground: Grounded { at, half: STONE_HALF }, yaw: face_centre_yaw(a) }
     });
     std::iter::once(totem).chain(stones).collect()
 }
@@ -146,6 +152,18 @@ mod tests {
     fn site_centre_is_cell_centre() {
         let s = ReincarnationSite::at_cell(0, (8, 107));
         assert_eq!(site_cell_pos(&s), Vec2::new(8.5, 107.5));
+    }
+
+    #[test]
+    fn stones_face_the_centre() {
+        let s = ReincarnationSite::at_cell(0, (10, 20));
+        let parts = site_parts(&s);
+        let centre = parts[0].ground.at;
+        for p in &parts[1..] {
+            let front = Quat::from_rotation_y(p.yaw) * Vec3::NEG_Z;
+            let to_centre = (centre - p.ground.at).normalize();
+            assert!(front.xz().distance(to_centre) < 1e-5, "{front:?} vs {to_centre:?}");
+        }
     }
 
     #[test]
