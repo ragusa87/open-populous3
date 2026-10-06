@@ -3,6 +3,7 @@
 //! Pure parsing, no engine dependency: reusable by the game, the editor or CLI tools.
 //! See `docs/specs/level-format.md` for the byte layout.
 
+pub mod catalog;
 pub mod level;
 pub mod objects;
 pub mod theme;
