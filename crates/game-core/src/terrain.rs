@@ -4,11 +4,22 @@ pub const SEA_LEVEL: u16 = 0;
 pub const MAX_HEIGHT: u16 = 1024;
 
 /// Wrapping square heightmap. Integer-only so lockstep peers stay in sync.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Heightmap {
     size: usize,
     heights: Vec<u16>,
+    /// Bumped on every write: walkers replan when it changed since their last plan.
+    revision: u32,
 }
+
+/// Same ground, whatever the edit history.
+impl PartialEq for Heightmap {
+    fn eq(&self, other: &Self) -> bool {
+        self.size == other.size && self.heights == other.heights
+    }
+}
+
+impl Eq for Heightmap {}
 
 /// Inclusive cell rectangle touched by an edit, in unwrapped coordinates
 /// (may extend past the edges; consumers wrap with `rem_euclid`).
@@ -20,16 +31,20 @@ pub struct DirtyRect {
 
 impl Heightmap {
     pub fn new(size: usize) -> Self {
-        Heightmap { size, heights: vec![SEA_LEVEL; size * size] }
+        Heightmap { size, heights: vec![SEA_LEVEL; size * size], revision: 0 }
     }
 
     pub fn from_heights(size: usize, heights: Vec<u16>) -> Self {
         assert_eq!(heights.len(), size * size, "heightmap must be size*size");
-        Heightmap { size, heights }
+        Heightmap { size, heights, revision: 0 }
     }
 
     pub fn size(&self) -> usize {
         self.size
+    }
+
+    pub fn revision(&self) -> u32 {
+        self.revision
     }
 
     pub fn heights(&self) -> &[u16] {
@@ -49,6 +64,7 @@ impl Heightmap {
     pub fn set(&mut self, x: i32, z: i32, h: u16) {
         let i = self.index(x, z);
         self.heights[i] = h.min(MAX_HEIGHT);
+        self.revision = self.revision.wrapping_add(1);
     }
 
     /// Ground height under a fixed-point position (`unit` world units per cell), bilinear between
@@ -215,6 +231,15 @@ mod tests {
         let (x, z) = m.lowland_cell();
         assert!(m.get(x, z) <= 333 && !m.is_water(x, z));
         assert_eq!(Heightmap::new(4).lowland_cell(), (0, 0));
+    }
+
+    #[test]
+    fn every_write_bumps_the_revision_but_not_equality() {
+        let mut m = Heightmap::new(4);
+        let r = m.revision();
+        m.set(1, 1, 0);
+        assert_ne!(m.revision(), r);
+        assert_eq!(m, Heightmap::new(4));
     }
 
     #[test]
