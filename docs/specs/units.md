@@ -13,7 +13,8 @@
 | Action | Entered by | Behaviour |
 |---|---|---|
 | Idle | default, arrival, Stop | heals 1 HP every 5 ticks |
-| Walking { to } | `Order::MoveTo` | 64 units/tick on flat ground straight to the target (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`), shortest way around the torus; stops at open sea (cell with 4 water corners) |
+| Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 64 units/tick on flat ground (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
+| Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -1 HP every 3 ticks until the terrain opens a path (walks again) or it dies |
 | Praying | `Order::Pray` | until another order; heals |
 | Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle |
 | Drowning | ground under her becomes open sea | -4 HP per tick, no orders; back to Idle if land returns |
@@ -21,6 +22,17 @@
 | Dead { left } | after dying | 30 ticks, then reincarnates at her site at full health; the site levels its ground again |
 
 Health: 100. Orders are ignored while drowning, dying or dead.
+
+## Pathfinding (done: `game_core::path`)
+- Walkable cell: not open sea (cell with 4 water corners). A* on the 128² torus, 8 neighbours (10/14),
+  no diagonal past an unwalkable side cell, ties broken by cell index (deterministic).
+- The cell path is straightened into legs (start, turning points, exact target): a leg is kept when every
+  cell it crosses is walkable (exact grid traversal, both side cells where it passes through a corner)
+  and it is at most 24 cells long.
+- `Heightmap::revision` is bumped on every write; a walking (or stranded) unit replans on the next tick
+  when it changed (spells, editor, site levelling). A step that would still end in the sea replans cell
+  by cell through cell centres.
+- `path::nearest_reachable`: the reachable cell closest to a goal (for boarding vehicles, to come).
 
 ## Shaman on screen (client, `units/`)
 - `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks.
@@ -44,8 +56,6 @@ Health: 100. Orders are ignored while drowning, dying or dead.
   (`grounded::pick_ground`), P prays, X stops. C (cast selected spell) makes the player's shaman jump,
   Space looks at her.
 - Dev: `SHAMAN=walk|pray|cast|drown [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose.
-- Pathfinding: A* or flow fields on the 128² grid with modulo neighbours; blocked by water and slope
-  above a threshold. Recompute only regions touched by a `DirtyRect`.
 - Spawn from level things (`kind` 1 = person, model = brave/warrior/...) once the record is decoded.
 
 ## Reincarnation site (done: data + rendering)

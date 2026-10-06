@@ -51,6 +51,7 @@ pub fn pose_for(action: &Action) -> Pose {
     match action {
         Action::Idle => Pose::Idle,
         Action::Walking { .. } => Pose::Walk,
+        Action::Stranded { .. } => Pose::Idle,
         Action::Praying => Pose::Pray,
         Action::Casting { .. } => Pose::Cast,
         Action::Drowning => Pose::Drown,

@@ -2,6 +2,7 @@
 //! Positions are fixed-point (1 cell = 512 units, like the original), wrapping at 65536: plain
 //! `u16` wrapping arithmetic walks around the torus.
 
+use crate::path;
 use crate::site::ReincarnationSite;
 use crate::terrain::Heightmap;
 use pop3_format::WORLD_UNITS_PER_CELL;
@@ -22,6 +23,8 @@ pub const SLOPE_FACTOR_RANGE: (i32, i32) = (32, 384);
 pub const DROWN_DAMAGE: u16 = 4;
 /// Ticks between two health points regained on land.
 pub const REGEN_EVERY: u8 = 5;
+/// Ticks between two health points lost while stranded (100 health points last 30 s).
+pub const STRANDED_HURT_EVERY: u8 = 3;
 /// Length of the cast jump, the fall when dying, and the wait before reincarnation.
 pub const CAST_TICKS: u16 = 12;
 pub const DYING_TICKS: u16 = 8;
@@ -40,7 +43,11 @@ pub enum UnitKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Idle,
+    /// Following a path to `to` (replanned whenever the terrain changes).
     Walking { to: (u16, u16) },
+    /// `to` cannot be reached (never the shaman, she stays idle): arms up, loses health until a
+    /// path opens or the unit dies.
+    Stranded { to: (u16, u16) },
     Praying,
     /// Jumping with the spell in her hands, `left` ticks to go.
     Casting { left: u16 },
@@ -56,6 +63,7 @@ impl Action {
         match self {
             Action::Idle => "Idle",
             Action::Walking { .. } => "Walking",
+            Action::Stranded { .. } => "Stranded",
             Action::Praying => "Praying",
             Action::Casting { .. } => "Casting",
             Action::Drowning => "Drowning",
@@ -106,7 +114,12 @@ pub struct Unit {
     pub facing: u8,
     pub health: u16,
     pub action: Action,
+    /// Ticks counted towards the next health point gained (or lost while stranded).
     regen: u8,
+    /// Waypoints left on the way to `Walking::to`, next one last.
+    route: Vec<(u16, u16)>,
+    /// Terrain revision the route was planned on; None = plan on the next tick.
+    planned_on: Option<u32>,
 }
 
 impl Unit {
@@ -122,6 +135,8 @@ impl Unit {
             health: SHAMAN_MAX_HEALTH,
             action: Action::Idle,
             regen: 0,
+            route: Vec::new(),
+            planned_on: None,
         }
     }
 
@@ -143,6 +158,7 @@ impl Unit {
         if !self.action.can_take_orders() {
             return;
         }
+        (self.route, self.planned_on) = (Vec::new(), None);
         self.action = match order {
             Order::MoveTo { x, z } => Action::Walking { to: (x, z) },
             Order::Pray => Action::Praying,
@@ -158,9 +174,16 @@ impl Unit {
         }
         match self.action {
             Action::Idle | Action::Praying => self.heal(),
-            Action::Walking { to } => {
-                self.heal();
-                self.step_towards(to, terrain);
+            Action::Walking { to } | Action::Stranded { to } => {
+                if self.planned_on != Some(terrain.revision()) {
+                    self.plan(to, terrain, true);
+                }
+                if let Action::Walking { .. } = self.action {
+                    self.heal();
+                    self.follow_route(to, terrain);
+                } else if self.hurt() {
+                    return Some(UnitEvent::Died);
+                }
             }
             Action::Casting { left } => {
                 self.action = if left > 1 { Action::Casting { left: left - 1 } } else { Action::Idle };
@@ -168,7 +191,7 @@ impl Unit {
             Action::Drowning => {
                 self.health = self.health.saturating_sub(DROWN_DAMAGE);
                 if self.health == 0 {
-                    self.action = Action::Dying { left: DYING_TICKS };
+                    self.die();
                     return Some(UnitEvent::Died);
                 }
                 if !is_sea(terrain, self.cell()) {
@@ -200,12 +223,64 @@ impl Unit {
         }
     }
 
-    /// Straight line, shortest way around the torus; stops at the shore or on arrival.
-    fn step_towards(&mut self, to: (u16, u16), terrain: &Heightmap) {
-        let (dx, dz) = (torus_delta(self.x, to.0), torus_delta(self.z, to.1));
-        if dx == 0 && dz == 0 {
+    /// Stranded: one health point lost every few ticks; true when that kills her.
+    fn hurt(&mut self) -> bool {
+        self.regen += 1;
+        if self.regen >= STRANDED_HURT_EVERY {
+            self.regen = 0;
+            self.health = self.health.saturating_sub(1);
+        }
+        if self.health == 0 {
+            self.die();
+        }
+        self.health == 0
+    }
+
+    fn die(&mut self) {
+        (self.route, self.planned_on) = (Vec::new(), None);
+        self.action = Action::Dying { left: DYING_TICKS };
+    }
+
+    /// Path to `to` on the current terrain: walking if there is one, else stranded (the shaman
+    /// just stays idle).
+    fn plan(&mut self, to: (u16, u16), terrain: &Heightmap, straighten: bool) {
+        let route = path::route(terrain, (self.x, self.z), to, straighten);
+        if route.is_none() && matches!(self.action, Action::Walking { .. }) {
+            self.regen = 0;
+        }
+        self.action = match route {
+            Some(_) => Action::Walking { to },
+            None if self.kind == UnitKind::Shaman => Action::Idle,
+            None => Action::Stranded { to },
+        };
+        self.route = route.map(|r| r.into_iter().rev().collect()).unwrap_or_default();
+        self.planned_on = Some(terrain.revision());
+    }
+
+    /// One step along the route; idle once at `to`. A step that would end in the sea (a straight
+    /// leg grazing a sea corner) replans cell by cell from the current cell centre.
+    fn follow_route(&mut self, to: (u16, u16), terrain: &Heightmap) {
+        let Some(&next) = self.route.last() else {
             self.action = Action::Idle;
             return;
+        };
+        match self.step_towards(next, terrain) {
+            Step::Moved => {}
+            Step::Arrived => {
+                self.route.pop();
+                if self.route.is_empty() {
+                    self.action = Action::Idle;
+                }
+            }
+            Step::Blocked => self.plan(to, terrain, false),
+        }
+    }
+
+    /// Straight towards `to`, shortest way around the torus, never into the sea.
+    fn step_towards(&mut self, to: (u16, u16), terrain: &Heightmap) -> Step {
+        let (dx, dz) = (torus_delta(self.x, to.0), torus_delta(self.z, to.1));
+        if dx == 0 && dz == 0 {
+            return Step::Arrived;
         }
         self.facing = octant(dx, dz);
         let dist = isqrt((dx * dx + dz * dz) as u32) as i32;
@@ -213,13 +288,10 @@ impl Unit {
         let (sx, sz) = if dist <= speed { (dx, dz) } else { (dx * speed / dist, dz * speed / dist) };
         let (nx, nz) = (self.x.wrapping_add(sx as u16), self.z.wrapping_add(sz as u16));
         if is_sea(terrain, (cell_of(nx), cell_of(nz))) {
-            self.action = Action::Idle;
-            return;
+            return Step::Blocked;
         }
         (self.x, self.z) = (nx, nz);
-        if (nx, nz) == to {
-            self.action = Action::Idle;
-        }
+        if (nx, nz) == to { Step::Arrived } else { Step::Moved }
     }
 
     /// Slope (height per cell, positive uphill) over one flat-ground step towards `(dx, dz)`.
@@ -228,6 +300,12 @@ impl Unit {
         let h = |x: u16, z: u16| terrain.height_at(x as u32, z as u32, WORLD_UNITS_PER_CELL);
         (h(px, pz) - h(self.x, self.z)) * WORLD_UNITS_PER_CELL as i32 / SHAMAN_SPEED
     }
+}
+
+enum Step {
+    Moved,
+    Arrived,
+    Blocked,
 }
 
 /// Walking speed on a slope (height per cell, positive uphill): slower up, faster down, clamped.
@@ -363,19 +441,98 @@ mod tests {
         assert!(down < flat && flat < up, "down {down} < flat {flat} < up {up}");
     }
 
+    fn sea_cell(t: &mut Heightmap, (x, z): (i32, i32)) {
+        for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            t.set(x + dx, z + dz, 0);
+        }
+    }
+
+    /// Ticks until idle at `to` (None if not within `max`), asserting she never stands in the sea.
+    fn walk(u: &mut Unit, t: &Heightmap, site: &ReincarnationSite, to: (u16, u16), max: usize) -> Option<usize> {
+        u.order(Order::MoveTo { x: to.0, z: to.1 });
+        (1..=max).find(|_| {
+            u.tick(t, Some(site));
+            assert!(!is_sea(t, u.cell()), "in the sea at {:?}", u.cell());
+            u.action == Action::Idle
+        })
+    }
+
     #[test]
-    fn stops_at_the_shore() {
+    fn walks_around_a_lake() {
         let mut t = land();
-        for z in 0..128 {
-            for x in 13..20 {
-                t.set(x, z, 0);
+        for z in 6..15 {
+            for x in 13..17 {
+                sea_cell(&mut t, (x, z));
             }
         }
         let (mut u, site) = shaman_at((10, 10));
-        u.order(Order::MoveTo { x: 16 * 512, z: u.z });
-        run(&mut u, &t, &site, 100);
-        assert_eq!(u.action, Action::Idle);
-        assert_eq!(u.cell().0, 12, "last land cell");
+        let to = (20 * 512 + 256, u.z);
+        let ticks = walk(&mut u, &t, &site, to, 300).expect("arrives");
+        assert_eq!((u.x, u.z), to);
+        assert!(ticks > 10 * 8, "longer than straight across: {ticks}");
+    }
+
+    #[test]
+    fn replans_when_the_terrain_changes_on_the_way() {
+        let mut t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        let to = (30 * 512 + 256, u.z);
+        u.order(Order::MoveTo { x: to.0, z: to.1 });
+        run(&mut u, &t, &site, 20);
+        for z in 0..20 {
+            sea_cell(&mut t, (22, z));
+        }
+        assert!(walk(&mut u, &t, &site, to, 600).is_some());
+        assert_eq!((u.x, u.z), to);
+    }
+
+    #[test]
+    fn unreachable_target_strands_her_until_a_path_opens() {
+        let mut t = land();
+        for z in 0..128 {
+            sea_cell(&mut t, (15, z));
+            sea_cell(&mut t, (5, z));
+        }
+        let (u, site) = shaman_at((10, 10));
+        let mut u = Unit { kind: UnitKind::Brave, ..u };
+        let start = (u.x, u.z);
+        let to = (20 * 512 + 256, u.z);
+        u.order(Order::MoveTo { x: to.0, z: to.1 });
+        run(&mut u, &t, &site, 3 * STRANDED_HURT_EVERY as usize);
+        assert_eq!((u.action, u.x, u.z), (Action::Stranded { to }, start.0, start.1), "arms up, not moving");
+        assert_eq!(u.health, SHAMAN_MAX_HEALTH - 3);
+        for z in 0..128 {
+            for x in 15..17 {
+                t.set(x, z, 100);
+            }
+        }
+        assert!(walk(&mut u, &t, &site, to, 200).is_some(), "bridge built: walks over");
+    }
+
+    #[test]
+    fn stranded_until_dead_unless_ordered_otherwise() {
+        let mut t = land();
+        sea_cell(&mut t, (20, 10));
+        let (u, site) = shaman_at((10, 10));
+        let mut u = Unit { kind: UnitKind::Brave, ..u };
+        u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
+        run(&mut u, &t, &site, 1);
+        u.order(Order::Stop);
+        assert_eq!(u.action, Action::Idle, "orders still work");
+        u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
+        let events = run(&mut u, &t, &site, STRANDED_HURT_EVERY as usize * SHAMAN_MAX_HEALTH as usize);
+        assert_eq!((events, u.health, u.is_alive()), (vec![UnitEvent::Died], 0, false));
+    }
+
+    #[test]
+    fn the_shaman_does_not_move_towards_an_unreachable_target() {
+        let mut t = land();
+        sea_cell(&mut t, (20, 10));
+        let (mut u, site) = shaman_at((10, 10));
+        let start = (u.x, u.z);
+        u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
+        run(&mut u, &t, &site, 10);
+        assert_eq!((u.action, u.x, u.z, u.health), (Action::Idle, start.0, start.1, SHAMAN_MAX_HEALTH));
     }
 
     #[test]

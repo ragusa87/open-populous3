@@ -189,6 +189,26 @@ mod tests {
     }
 
     #[test]
+    fn sandbox_walk_shaman_walks_around_the_lake() {
+        let mut m = GameMap::sandbox_walk();
+        let c = MAP_SIZE as i32 / 2;
+        let at = |dx: i32| ((c + dx) as u16 * 512 + 256, c as u16 * 512 + 256);
+        let order = |m: &mut GameMap, to: (u16, u16)| {
+            let unit = m.units[0].id;
+            m.apply(&Command::OrderUnit { player: 0, unit, order: Order::MoveTo { x: to.0, z: to.1 } });
+        };
+        let walk = |m: &mut GameMap| (0..400).find(|_| {
+            m.tick();
+            m.units[0].action == crate::unit::Action::Idle
+        });
+        order(&mut m, at(-14));
+        assert!(walk(&mut m).is_some());
+        order(&mut m, at(-4));
+        assert!(walk(&mut m).is_some(), "goes around the lake");
+        assert_eq!((m.units[0].x, m.units[0].z), at(-4));
+    }
+
+    #[test]
     fn a_shaman_stands_on_each_site() {
         let m = GameMap::generate(7);
         assert_eq!(m.units.len(), m.sites.len());
