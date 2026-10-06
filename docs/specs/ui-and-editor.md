@@ -33,8 +33,8 @@ Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 
 Hover shows the tile's description, click selects (white border). Spells cast on a spot (`ground_spell`: Teleport
 for now) are aimed with the mouse while selected: over the map the cursor becomes the spell's icon, grayed out
-where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground), left click casts it there (the
-spell stays selected), right click puts it away; meanwhile clicks do not select or move units. The others: `C`
+where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground), left click casts it there and puts
+the spell away (arrow cursor, clicks go back to the units' selection), right click puts it away without casting; meanwhile clicks do not select or move units. The others: `C`
 casts the selected spell (demo: consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
 Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build/Stats tabs.
 

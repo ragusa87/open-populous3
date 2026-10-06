@@ -2,7 +2,8 @@
 //! Tile states: empty (hidden), "?" (discoverable), gray with uses left (provided),
 //! gold with charge pips + recharge bar (known), gold marked "free" (unlimited, sandbox). Click selects.
 //! Spells cast on a spot (`ground_spell`, Teleport) are aimed with the mouse: the cursor shows the
-//! spell, grayed where it cannot apply; left click casts, right click puts the spell away. The other
+//! spell, grayed where it cannot apply; left click casts and puts the spell away (back to the arrow
+//! and the units' selection), right click puts it away without casting. The other
 //! spells are cast with C (demo: uses a charge, the shaman jumps).
 
 use super::panel::{TabContent, DARK_BROWN, INK, PANEL_WIDTH};
@@ -281,7 +282,7 @@ fn cast_selected(
 }
 
 /// Spell aimed on the map: cursor look under the mouse, left click casts it there when it
-/// applies, right click puts the spell away (the selection of units is left alone).
+/// applies, then puts the spell away; right click puts it away. The selection of units is kept.
 #[allow(clippy::too_many_arguments)]
 fn aim_and_cast(
     mouse: Res<ButtonInput<MouseButton>>,
@@ -319,6 +320,8 @@ fn aim_and_cast(
     if let (true, Some(spell)) = (mouse.just_pressed(MouseButton::Left), valid) {
         if book.0.cast(kind) {
             dirty.0 |= map.bypass_change_detection().0.apply(&Command::Cast { player: PLAYER, spell }).is_some();
+            selected.0 = None;
+            look.set_if_neq(CursorLook::Arrow);
         }
     }
 }
