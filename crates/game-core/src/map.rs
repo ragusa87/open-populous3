@@ -1,5 +1,6 @@
 //! A playable map: terrain + metadata, built from an original level or generated.
 
+use crate::building::{buildings_from_level, Building};
 use crate::command::Command;
 use crate::path::Mobility;
 use crate::slots;
@@ -24,6 +25,8 @@ pub struct GameMap {
     pub units: Vec<Unit>,
     /// Wood on the map: an original level's scenery trees, or groves on generated maps and sandboxes.
     pub trees: Vec<Tree>,
+    /// An original level's buildings (none on generated maps and sandboxes yet).
+    pub buildings: Vec<Building>,
 }
 
 impl GameMap {
@@ -39,6 +42,7 @@ impl GameMap {
                 .iter()
                 .filter_map(|t| Some(Tree::new(((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32), t.tree_type()?, crate::tree::MAX_SIZE)))
                 .collect(),
+            buildings: buildings_from_level(level),
         }
         .with_shamans()
     }
@@ -87,7 +91,7 @@ impl GameMap {
             terrain.set(x, z, v);
         }
         let sites = generated_sites(&terrain);
-        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new() }.with_shamans().with_trees(seed, 60)
+        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new() }.with_shamans().with_trees(seed, 60)
     }
 
     /// Test ground for walking: a small flat island around the player's site at the centre, a gentle
@@ -114,7 +118,34 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new() }.with_shamans().with_trees(1, 150)
+        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new() }.with_shamans().with_trees(1, 150)
+    }
+
+    /// Test ground for buildings: a flat island with the player's site, one building of every known
+    /// model (1-19) for the player in rows south of the site (in view of the starting camera), facing
+    /// each quarter turn in turn, and a few for tribe 1 (red) to compare colours.
+    pub fn sandbox_buildings() -> Self {
+        const C: i32 = MAP_SIZE as i32 / 2;
+        let mut terrain = Heightmap::new(MAP_SIZE);
+        for z in 0..MAP_SIZE as i32 {
+            for x in 0..MAP_SIZE as i32 {
+                if (x - C) * (x - C) + (z - C) * (z - C) <= 26 * 26 {
+                    terrain.set(x, z, 64);
+                }
+            }
+        }
+        let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
+        let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new() }.with_shamans();
+        let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
+        let place = |owner: u8, model: u8, (x, z): (u16, u16), facing: u8| Building { kind: crate::building::BuildingKind::from_model(model), owner, x, z, facing };
+        for model in 1..=19u8 {
+            let i = model as i32 - 1;
+            map.buildings.push(place(0, model, at(-12 + (i % 7) * 4, 6 + (i / 7) * 4), (i % 4) as u8 * 2));
+        }
+        for (i, model) in [1u8, 3, 4, 7].iter().enumerate() {
+            map.buildings.push(place(1, *model, at(-6 + i as i32 * 4, 19), 0));
+        }
+        map
     }
 
     /// Test ground for units: a flat island with the player's site and shaman at the centre, three
@@ -135,7 +166,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new() }.with_shamans().with_trees(2, 150);
+        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new() }.with_shamans().with_trees(2, 150);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         for (row, &kind) in UnitKind::ALL[1..].iter().enumerate() {
             let row = row as i32;
@@ -485,6 +516,16 @@ mod tests {
         let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None);
         assert_eq!(m.trees.len(), 1, "a tree, not the plant");
         assert_eq!((m.trees[0].cell(), m.trees[0].variant, m.trees[0].size), ((5, 10), 1, crate::tree::MAX_SIZE));
+    }
+
+    #[test]
+    fn sandbox_buildings_has_every_model_on_land() {
+        let m = GameMap::sandbox_buildings();
+        assert_eq!(m.buildings.iter().filter(|b| b.owner == 0).count(), 19);
+        assert!(m.buildings.iter().any(|b| b.owner == 1));
+        for b in &m.buildings {
+            assert!(!m.terrain.is_water((b.x / 512) as i32, (b.z / 512) as i32));
+        }
     }
 
     #[test]

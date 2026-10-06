@@ -92,6 +92,12 @@ impl Thing {
         self.kind == KIND_PERSON && self.model == PERSON_SHAMAN
     }
 
+    /// Facing in eighths of a turn (byte 8): buildings only use 0, 2, 4, 6 (quarter turns); which
+    /// way is 0 is not checked against the game yet.
+    pub fn facing(&self) -> u8 {
+        self.raw[8] % 8
+    }
+
     /// The tree type (0-5, scenery model 1-6) if this is a tree.
     pub fn tree_type(&self) -> Option<u8> {
         (self.kind == KIND_SCENERY && SCENERY_TREES.contains(&self.model)).then(|| self.model - 1)

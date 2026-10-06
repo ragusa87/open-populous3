@@ -5,7 +5,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## Menu and sandboxes ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Sandbox Spells: test ground to cast every spell freely (no mana, no charges).
-- [ ] Sandbox Buildings: test ground to place and build every building.
+- [ ] Sandbox Buildings: placing and constructing buildings there (today it shows one of each).
 - [ ] More sandboxes as features come (combat, vehicles, praying...).
 - [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
 
@@ -70,7 +70,11 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Decode the `.hdr` beyond name/theme (spells/buildings availability, tribe count, sky).
 - [ ] Verify the x/z axis order of level data.
 
-## Buildings
+## Buildings ([buildings.md](docs/specs/buildings.md))
+- [ ] Open-source building models (e.g. CC0 Quaternius Medieval Village / Fantasy kits) instead of the labelled boxes when the original files are not used; generated maps and sandboxes have buildings only in Sandbox > Buildings.
+- [ ] Identify the original objects of reconversion, wall, gate, guard post (stand-in boxes even with the original files); check temple = prayer hut object.
+- [ ] Villager hut style (3 styles in the objects, style 0 always drawn): find what picks it.
+- [ ] Check the facing against the game (which way 0 is), and the building footprints (flattened ground, cells taken: units should not stand or walk through them).
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
 - [ ] Placement on flat enough ground (Build tab), footprint, destruction on uneven/flooded ground.
 - [ ] Construction: each building costs wood; braves carry it and build over time, it finishes once all its wood is in.

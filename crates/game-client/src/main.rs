@@ -1,6 +1,7 @@
 //! Populous-like sandbox. Usage: `game-client [--no-original] [levlXXXX.dat | levels_dir]`.
 //! `--no-original` (or `POP3_NO_ORIGINAL=1`) never reads the original game files.
 
+mod buildings;
 mod camera;
 mod cursor_debug;
 mod dev;
@@ -52,6 +53,7 @@ fn main() {
             grounded::GroundedPlugin,
             sites::SitesPlugin,
             nature::NaturePlugin,
+            buildings::BuildingsPlugin,
             units::UnitsPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,

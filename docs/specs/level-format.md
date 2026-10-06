@@ -26,7 +26,8 @@ Thing record (55 bytes), known part:
 | 2 | owner tribe (255 = neutral) |
 | 3..5 | x, `u16`, world units (512 per cell, odd multiples of 256 = cell centre) |
 | 5..7 | z, `u16` |
-| 7..55 | unknown (kept raw in `Thing::raw`) |
+| 8 | facing in eighths of a turn (buildings: 0, 2, 4, 6; `Thing::facing`) |
+| 7, 9..55 | unknown (kept raw in `Thing::raw`) |
 
 Person models: 1 wild, 2 brave, 3 warrior, 4 preacher, 5 spy, 6 firewarrior, 7 shaman.
 Each tribe has exactly one shaman thing; its position is the tribe's reincarnation site

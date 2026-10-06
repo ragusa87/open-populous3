@@ -14,7 +14,7 @@ Guidance for coding agents working on this repo (Rust + Bevy 0.19 Populous-like 
 - `just test` (or `cargo test --workspace`): must pass before committing.
 - `just run [levl.dat|dir]`: windowed game. Avoid it as an agent: it opens a window and steals focus.
 - `just shot out.png [level]` / `AERIAL=1 just shot out.png`: headless offscreen render, then exits. Use this to check visuals.
-- `POP3_START=menu|game|sandbox-walk|sandbox-units`: skip the main menu or open it (`just shot` starts in the game by default).
+- `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings`: skip the main menu or open it (`just shot` starts in the game by default).
 - `just run-generated` / `--no-original`: no original files read at all (use for anything shippable).
 - `just level-info file.dat`: dump parsed level.
 - Original files: `$POP3_INSTALL`, else auto-detected (Wine prefixes, `C:\Program Files*\Bullfrog\*`) by `pop3_format::install`; `--no-original` skips it. Read-only, never modify or ship them.
