@@ -24,3 +24,7 @@ level-info file:
 # Standalone page to map original 3D models to game items (embeds original art: stays in target/)
 model-mapping:
     uvx --with pillow python tools/model_mapping.py
+
+# Windowed run logging cursor confinement (focus, enter/leave, edge pushes)
+cursor-debug *args:
+    POP3_CURSOR_DEBUG=1 cargo run -q -p game-client -- {{args}} 2>&1 | grep --line-buffered cursor-debug
