@@ -4,7 +4,6 @@ What is left to implement. Tick or remove an item in the commit that does it, ad
 come up. Details live in the linked specs; done work is summarised in [docs/roadmap.md](docs/roadmap.md).
 
 ## Menu and sandboxes ([ui-and-editor.md](docs/specs/ui-and-editor.md))
-- [ ] In-game menu to get back to the main menu (and leave a sandbox).
 - [ ] Sandbox Spells: test ground to cast every spell freely (no mana, no charges).
 - [ ] Sandbox Buildings: test ground to place and build every building.
 - [ ] More sandboxes as features come (combat, vehicles, praying...).

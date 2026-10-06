@@ -37,7 +37,10 @@ Next: icons (Kenney game-icons), casting on the terrain, mana from followers, to
 Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list),
 Sandbox > Walk (`GameMap::sandbox_walk`: flat island, gentle ramp east, steep hill north, lake west), Quit.
 Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
-`AppState::Menu | Playing`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
+Esc in the game (once an open view-presets menu is closed) pauses: the mouse is released (`VirtualCursor::request`)
+and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Main menu > "Leave this game?" No / Yes.
+Resuming or starting a game captures the mouse again.
+`AppState::Menu | Playing | Paused`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
 while playing. Behind the menu the game camera is off (no terrain, units or HUD drawn); the menu and the cursor
 are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk` picks the start; screenshots start in the game by default.
 

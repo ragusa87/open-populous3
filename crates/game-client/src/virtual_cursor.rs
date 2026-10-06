@@ -40,10 +40,12 @@ const ARROW: [&str; 17] = [
     "      ##",
 ];
 
-/// Whether the mouse is captured by the game (Esc toggles), and the in-game cursor position.
+/// Whether the mouse is captured by the game (Esc toggles outside the game), and the in-game cursor position.
 #[derive(Resource, Debug, Clone, PartialEq)]
 pub struct VirtualCursor {
     pub captured: bool,
+    /// Capture (true) or release (false) on the next frame, e.g. when pausing or resuming.
+    pub request: Option<bool>,
     /// Logical pixels inside the window, None until first placed.
     pub position: Option<Vec2>,
     pub speed: f32,
@@ -52,7 +54,7 @@ pub struct VirtualCursor {
 impl Default for VirtualCursor {
     fn default() -> Self {
         let speed = std::env::var("POP3_CURSOR_SPEED").ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_SPEED);
-        VirtualCursor { captured: true, position: None, speed }
+        VirtualCursor { captured: true, request: None, position: None, speed }
     }
 }
 
@@ -175,10 +177,12 @@ fn spawn_sprite(
 }
 
 /// Capture state after this frame's input: gaining focus always captures (even after Esc released
-/// the mouse); otherwise Esc toggles.
-pub fn next_captured(captured: bool, escape: bool, refocused: bool) -> bool {
+/// the mouse); then an explicit request; otherwise Esc toggles.
+pub fn next_captured(captured: bool, escape: bool, refocused: bool, request: Option<bool>) -> bool {
     if refocused {
         true
+    } else if let Some(r) = request {
+        r
     } else if escape {
         !captured
     } else {
@@ -196,13 +200,14 @@ pub(crate) fn toggle_capture(
 ) {
     let refocused = focus.read().any(|f| f.focused);
     let escape = keys.just_pressed(KeyCode::Escape);
-    if !escape && !refocused && *started {
+    let request = cursor.request.take();
+    if !escape && !refocused && request.is_none() && *started {
         return;
     }
     let Ok((window, mut options)) = windows.single_mut() else { return };
     *started = true;
     let was = cursor.captured;
-    cursor.captured = next_captured(was, escape, refocused);
+    cursor.captured = next_captured(was, escape, refocused, request);
     if cursor.captured && (!was || cursor.position.is_none()) {
         cursor.position = window.cursor_position().or(cursor.position);
     }
@@ -253,7 +258,7 @@ mod tests {
     use super::*;
 
     fn cursor() -> VirtualCursor {
-        VirtualCursor { captured: true, position: None, speed: 1.0 }
+        VirtualCursor { captured: true, request: None, position: None, speed: 1.0 }
     }
 
     #[test]
@@ -297,11 +302,13 @@ mod tests {
 
     #[test]
     fn focus_recaptures_after_escape() {
-        assert!(!next_captured(true, true, false), "Esc releases");
-        assert!(next_captured(false, true, false), "Esc again captures");
-        assert!(next_captured(false, false, true), "regaining focus captures");
-        assert!(next_captured(false, true, true), "focus wins over a same-frame Esc");
-        assert!(!next_captured(false, false, false));
+        assert!(!next_captured(true, true, false, None), "Esc releases");
+        assert!(next_captured(false, true, false, None), "Esc again captures");
+        assert!(next_captured(false, false, true, None), "regaining focus captures");
+        assert!(next_captured(false, true, true, None), "focus wins over a same-frame Esc");
+        assert!(!next_captured(false, false, false, None));
+        assert!(!next_captured(true, true, false, Some(false)), "pausing releases whatever Esc says");
+        assert!(next_captured(false, false, false, Some(true)), "resuming captures");
     }
 
     #[test]

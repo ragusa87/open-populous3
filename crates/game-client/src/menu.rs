@@ -3,15 +3,21 @@
 //! their Back entry; arrows (or W/S) move, Enter/Space picks, the mouse hovers and clicks.
 //! Gameplay systems are in the `Gameplay` set, which only runs while `Playing`. Behind the menu the
 //! game camera is off: no world, units or HUD are drawn, the menu has its own overlay camera.
+//! Esc in the game pauses: the mouse is released and the pause menu (Resume, Main menu with a
+//! confirmation) shows over the frozen game; Esc on it resumes.
 //! `POP3_START=menu|game|sandbox-walk` picks where to start (screenshots start in the game).
 
 use crate::camera::{GameCamera, OverlayCamera};
 use crate::units::selection::Selection;
+use crate::virtual_cursor::VirtualCursor;
 use crate::world::{CurrentMap, LevelList, TerrainDirty};
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use game_core::map::GameMap;
 
 const BACKDROP: Color = Color::srgb(0.06, 0.04, 0.02);
+/// Over the frozen game while paused (the main menu is drawn on `BACKDROP`).
+const DIM: Color = Color::srgba(0.0, 0.0, 0.0, 0.55);
 const TEXT: Color = Color::srgb(0.95, 0.85, 0.6);
 const HIGHLIGHT: Color = Color::srgb(0.80, 0.56, 0.20);
 const ITEM: Color = Color::srgba(0.30, 0.18, 0.06, 0.9);
@@ -21,6 +27,7 @@ pub enum AppState {
     #[default]
     Menu,
     Playing,
+    Paused,
 }
 
 /// Systems that only run in the game (input, simulation, HUD actions), not behind the menu.
@@ -31,6 +38,8 @@ pub struct Gameplay;
 pub enum Page {
     Main,
     Sandbox,
+    Paused,
+    ConfirmLeave,
 }
 
 /// What a game starts on.
@@ -45,6 +54,8 @@ pub enum Action {
     Start(Start),
     Open(Page),
     Back,
+    Resume,
+    Leave,
     Quit,
 }
 
@@ -52,6 +63,9 @@ pub enum Action {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
     Start(Start),
+    Resume,
+    /// Leave the game for the main menu.
+    Leave,
     Quit,
 }
 
@@ -59,6 +73,8 @@ pub fn title(page: Page) -> &'static str {
     match page {
         Page::Main => "Open Populous",
         Page::Sandbox => "Sandbox",
+        Page::Paused => "Paused",
+        Page::ConfirmLeave => "Leave this game?",
     }
 }
 
@@ -66,6 +82,8 @@ pub fn items(page: Page) -> &'static [(&'static str, Action)] {
     match page {
         Page::Main => &[("New game", Action::Start(Start::NewGame)), ("Sandbox", Action::Open(Page::Sandbox)), ("Quit", Action::Quit)],
         Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Back", Action::Back)],
+        Page::Paused => &[("Resume", Action::Resume), ("Main menu", Action::Open(Page::ConfirmLeave))],
+        Page::ConfirmLeave => &[("No, keep playing", Action::Back), ("Yes, back to the main menu", Action::Leave)],
     }
 }
 
@@ -82,6 +100,11 @@ impl Default for MenuNav {
 }
 
 impl MenuNav {
+    /// Navigation starting on `page`, first entry highlighted.
+    pub fn at(page: Page) -> Self {
+        MenuNav { stack: vec![(page, 0)] }
+    }
+
     pub fn page(&self) -> Page {
         self.stack.last().map_or(Page::Main, |s| s.0)
     }
@@ -107,6 +130,8 @@ impl MenuNav {
     pub fn activate(&mut self) -> Option<Outcome> {
         match items(self.page())[self.cursor()].1 {
             Action::Start(s) => Some(Outcome::Start(s)),
+            Action::Resume => Some(Outcome::Resume),
+            Action::Leave => Some(Outcome::Leave),
             Action::Quit => Some(Outcome::Quit),
             Action::Open(p) => {
                 self.stack.push((p, 0));
@@ -162,22 +187,33 @@ impl Plugin for MenuPlugin {
             .init_resource::<MenuNav>()
             .configure_sets(Update, Gameplay.run_if(in_state(AppState::Playing)))
             .add_systems(Startup, (spawn_menu, initial_start))
+            .add_systems(Update, pause_on_escape.before(crate::virtual_cursor::toggle_capture).in_set(Gameplay))
             .add_systems(
                 Update,
                 (menu_keys.before(crate::virtual_cursor::toggle_capture), menu_mouse, rebuild_items, item_visuals)
                     .chain()
-                    .run_if(in_state(AppState::Menu)),
+                    .run_if(not(in_state(AppState::Playing))),
             )
             .add_systems(Update, show_state.run_if(state_changed::<AppState>));
     }
 }
 
-/// What is drawn in a state: whether the game camera renders (world and HUD), and the color the
-/// overlay camera clears the window with (None: it draws over the game).
-pub fn view(state: AppState) -> (bool, Option<Color>) {
+/// What is drawn in a state.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct View {
+    /// The game camera renders (world, units, HUD).
+    pub game: bool,
+    /// Color the overlay camera clears the window with; None draws over the game.
+    pub clear: Option<Color>,
+    /// Menu shown, over this backdrop.
+    pub menu: Option<Color>,
+}
+
+pub fn view(state: AppState) -> View {
     match state {
-        AppState::Menu => (false, Some(BACKDROP)),
-        AppState::Playing => (true, None),
+        AppState::Menu => View { game: false, clear: Some(BACKDROP), menu: Some(Color::NONE) },
+        AppState::Playing => View { game: true, clear: None, menu: None },
+        AppState::Paused => View { game: true, clear: None, menu: Some(DIM) },
     }
 }
 
@@ -185,17 +221,18 @@ fn show_state(
     state: Res<State<AppState>>,
     mut game: Query<&mut Camera, (With<GameCamera>, Without<OverlayCamera>)>,
     mut overlay: Query<&mut Camera, (With<OverlayCamera>, Without<GameCamera>)>,
-    mut menu: Query<&mut Visibility, With<MenuRoot>>,
+    mut menu: Query<(&mut Visibility, &mut BackgroundColor), With<MenuRoot>>,
 ) {
-    let (game_on, clear) = view(*state.get());
+    let v = view(*state.get());
     for mut cam in &mut game {
-        cam.is_active = game_on;
+        cam.is_active = v.game;
     }
     for mut cam in &mut overlay {
-        cam.clear_color = clear.map_or(ClearColorConfig::None, ClearColorConfig::Custom);
+        cam.clear_color = v.clear.map_or(ClearColorConfig::None, ClearColorConfig::Custom);
     }
-    for mut v in &mut menu {
-        *v = if *state.get() == AppState::Playing { Visibility::Hidden } else { Visibility::Inherited };
+    for (mut vis, mut bg) in &mut menu {
+        *vis = if v.menu.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+        bg.0 = v.menu.unwrap_or(Color::NONE);
     }
 }
 
@@ -213,6 +250,7 @@ fn spawn_menu(mut commands: Commands, overlay: Single<Entity, With<OverlayCamera
                 row_gap: px(14),
                 ..default()
             },
+            BackgroundColor(DIM),
             GlobalZIndex(i32::MAX - 10),
             UiTargetCamera(*overlay),
             Visibility::Hidden,
@@ -229,43 +267,64 @@ fn spawn_menu(mut commands: Commands, overlay: Single<Entity, With<OverlayCamera
         });
 }
 
-fn initial_start(
-    initial: Res<InitialStart>,
-    mut levels: ResMut<LevelList>,
-    mut map: ResMut<CurrentMap>,
-    mut dirty: ResMut<TerrainDirty>,
-    mut selection: ResMut<Selection>,
-) {
+fn initial_start(initial: Res<InitialStart>, mut game: GameSetup) {
     if let Some(start) = initial.0 {
-        begin(start, &mut levels, &mut map, &mut dirty, &mut selection);
+        game.begin(start);
     }
 }
 
-/// Loads the map a game starts on; the camera frames it (`LevelList` change).
-fn begin(start: Start, levels: &mut ResMut<LevelList>, map: &mut CurrentMap, dirty: &mut TerrainDirty, selection: &mut Selection) {
-    map.0 = match start {
-        Start::NewGame => levels.load_current(),
-        Start::SandboxWalk => GameMap::sandbox_walk(),
-    };
-    dirty.0 = true;
-    selection.clear();
-    levels.set_changed();
+/// What starting, pausing and leaving a game touch.
+#[derive(SystemParam)]
+struct GameSetup<'w> {
+    levels: ResMut<'w, LevelList>,
+    map: ResMut<'w, CurrentMap>,
+    dirty: ResMut<'w, TerrainDirty>,
+    selection: ResMut<'w, Selection>,
+    cursor: ResMut<'w, VirtualCursor>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn apply(
-    outcome: Option<Outcome>,
-    levels: &mut ResMut<LevelList>,
-    map: &mut CurrentMap,
-    dirty: &mut TerrainDirty,
-    selection: &mut Selection,
-    state: &mut NextState<AppState>,
-    exit: &mut MessageWriter<AppExit>,
+impl GameSetup<'_> {
+    /// Loads the map a game starts on; the camera frames it (`LevelList` change).
+    fn begin(&mut self, start: Start) {
+        self.map.0 = match start {
+            Start::NewGame => self.levels.load_current(),
+            Start::SandboxWalk => GameMap::sandbox_walk(),
+        };
+        self.dirty.0 = true;
+        self.selection.clear();
+        self.levels.set_changed();
+    }
+}
+
+/// Esc in the game (not taken by an open HUD menu): pause and free the mouse.
+pub(crate) fn pause_on_escape(
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut nav: ResMut<MenuNav>,
+    mut cursor: ResMut<VirtualCursor>,
+    mut state: ResMut<NextState<AppState>>,
 ) {
+    if keys.clear_just_pressed(KeyCode::Escape) {
+        *nav = MenuNav::at(Page::Paused);
+        cursor.request = Some(false);
+        state.set(AppState::Paused);
+    }
+}
+
+fn apply(outcome: Option<Outcome>, game: &mut GameSetup, nav: &mut MenuNav, state: &mut NextState<AppState>, exit: &mut MessageWriter<AppExit>) {
     match outcome {
         Some(Outcome::Start(s)) => {
-            begin(s, levels, map, dirty, selection);
+            game.begin(s);
+            game.cursor.request = Some(true);
             state.set(AppState::Playing);
+        }
+        Some(Outcome::Resume) => {
+            game.cursor.request = Some(true);
+            state.set(AppState::Playing);
+        }
+        Some(Outcome::Leave) => {
+            *nav = MenuNav::default();
+            game.selection.clear();
+            state.set(AppState::Menu);
         }
         Some(Outcome::Quit) => {
             exit.write(AppExit::Success);
@@ -274,14 +333,15 @@ fn apply(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Esc on the root page: resumes a paused game (the main menu leaves it to free the mouse).
+fn escape_outcome(page: Page) -> Option<Outcome> {
+    (page == Page::Paused).then_some(Outcome::Resume)
+}
+
 fn menu_keys(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut nav: ResMut<MenuNav>,
-    mut levels: ResMut<LevelList>,
-    mut map: ResMut<CurrentMap>,
-    mut dirty: ResMut<TerrainDirty>,
-    mut selection: ResMut<Selection>,
+    mut game: GameSetup,
     mut state: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -292,23 +352,24 @@ fn menu_keys(
         nav.step(1);
     }
     let escape = keys.just_pressed(KeyCode::Escape);
-    if (escape || keys.just_pressed(KeyCode::Backspace)) && nav.back() && escape {
-        keys.clear_just_pressed(KeyCode::Escape);
+    if escape || keys.just_pressed(KeyCode::Backspace) {
+        let went_back = nav.back();
+        let outcome = if went_back || !escape { None } else { escape_outcome(nav.page()) };
+        if escape && (went_back || outcome.is_some()) {
+            keys.clear_just_pressed(KeyCode::Escape);
+        }
+        apply(outcome, &mut game, &mut nav, &mut state, &mut exit);
     }
     if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space]) {
         let outcome = nav.activate();
-        apply(outcome, &mut levels, &mut map, &mut dirty, &mut selection, &mut state, &mut exit);
+        apply(outcome, &mut game, &mut nav, &mut state, &mut exit);
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn menu_mouse(
     q: Query<(&Interaction, &MenuItem), Changed<Interaction>>,
     mut nav: ResMut<MenuNav>,
-    mut levels: ResMut<LevelList>,
-    mut map: ResMut<CurrentMap>,
-    mut dirty: ResMut<TerrainDirty>,
-    mut selection: ResMut<Selection>,
+    mut game: GameSetup,
     mut state: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -318,7 +379,7 @@ fn menu_mouse(
             Interaction::Pressed => {
                 nav.set_cursor(item.0);
                 let outcome = nav.activate();
-                apply(outcome, &mut levels, &mut map, &mut dirty, &mut selection, &mut state, &mut exit);
+                apply(outcome, &mut game, &mut nav, &mut state, &mut exit);
                 return;
             }
             Interaction::None => {}
@@ -398,9 +459,30 @@ mod tests {
     }
 
     #[test]
-    fn menu_draws_no_game() {
-        assert_eq!(view(AppState::Menu), (false, Some(BACKDROP)));
-        assert_eq!(view(AppState::Playing), (true, None), "the overlay does not clear the game");
+    fn menu_draws_no_game_pause_draws_over_it() {
+        assert_eq!(view(AppState::Menu), View { game: false, clear: Some(BACKDROP), menu: Some(Color::NONE) });
+        assert_eq!(view(AppState::Playing), View { game: true, clear: None, menu: None }, "the overlay does not clear the game");
+        assert_eq!(view(AppState::Paused), View { game: true, clear: None, menu: Some(DIM) }, "frozen game under a dimmed menu");
+    }
+
+    #[test]
+    fn leaving_a_paused_game_asks_first() {
+        let mut nav = MenuNav::at(Page::Paused);
+        assert_eq!(nav.activate(), Some(Outcome::Resume), "Resume is first");
+        nav.step(1);
+        assert_eq!(nav.activate(), None, "Main menu opens the confirmation");
+        assert_eq!((nav.page(), nav.cursor()), (Page::ConfirmLeave, 0));
+        assert_eq!(nav.activate(), None, "No (highlighted first) goes back");
+        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 1));
+        nav.activate();
+        nav.step(1);
+        assert_eq!(nav.activate(), Some(Outcome::Leave));
+    }
+
+    #[test]
+    fn escape_on_a_root_page() {
+        assert_eq!(escape_outcome(Page::Paused), Some(Outcome::Resume));
+        assert_eq!(escape_outcome(Page::Main), None, "left to free the mouse");
     }
 
     #[test]
