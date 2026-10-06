@@ -28,6 +28,8 @@ pub const DISTANCE_RANGE: (f32, f32) = (3.0, 220.0);
 /// The eye never goes lower than the map's highest ground plus this (cells), like the original's
 /// fixed camera elevation: low ground near the sea cannot hide it behind a cliff.
 pub const EYE_CLEARANCE: f32 = 1.5;
+/// Seconds a flight to a place (H, Space) takes.
+pub const FLIGHT_SECS: f32 = 0.4;
 const SKY: Color = Color::srgb(0.45, 0.65, 0.92);
 const SPACE: Color = Color::srgb(0.02, 0.02, 0.06);
 
@@ -43,6 +45,25 @@ pub struct CameraRig {
     pub fov: f32,
     /// Ground-level settings restored when leaving the aerial view.
     saved: (f32, f32),
+    /// A quick flight of the focus to a place under way (`fly_to`).
+    flight: Option<Flight>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Flight {
+    from: Vec2,
+    to: Vec2,
+    elapsed: f32,
+}
+
+/// Focus `t` (0..1) of the way from `from` to `to`, the short way around the torus, easing in and
+/// out (smoothstep).
+pub fn flight_point(from: Vec2, to: Vec2, t: f32) -> Vec2 {
+    let t = t.clamp(0.0, 1.0);
+    let eased = t * t * (3.0 - 2.0 * t);
+    let wrap = |d: f32| (d + MAP / 2.0).rem_euclid(MAP) - MAP / 2.0;
+    let delta = Vec2::new(wrap(to.x - from.x), wrap(to.y - from.y));
+    (from + delta * eased).rem_euclid(Vec2::splat(MAP))
 }
 
 impl Default for CameraRig {
@@ -56,6 +77,7 @@ impl Default for CameraRig {
             aerial: false,
             fov: DEFAULT_FOV,
             saved: view,
+            flight: None,
         }
     }
 }
@@ -66,7 +88,11 @@ impl CameraRig {
         Vec2::new(-self.yaw.sin(), -self.yaw.cos())
     }
 
+    /// Moving by hand cancels a flight under way.
     pub fn move_by(&mut self, forward: f32, right: f32) {
+        if forward != 0.0 || right != 0.0 {
+            self.flight = None;
+        }
         let f = self.forward();
         let r = Vec2::new(-f.y, f.x);
         self.focus = (self.focus + f * forward + r * right).rem_euclid(Vec2::splat(MAP));
@@ -96,6 +122,19 @@ impl CameraRig {
         self.distance = (self.distance * (1.0 - zoom)).clamp(DISTANCE_RANGE.0, DISTANCE_RANGE.1);
     }
 
+    /// Flies the focus to `to` (cells) in `FLIGHT_SECS`, instead of jumping there.
+    pub fn fly_to(&mut self, to: Vec2) {
+        self.flight = Some(Flight { from: self.focus, to: to.rem_euclid(Vec2::splat(MAP)), elapsed: 0.0 });
+    }
+
+    /// Moves a flight under way on by `dt` seconds.
+    pub fn advance_flight(&mut self, dt: f32) {
+        let Some(mut f) = self.flight else { return };
+        f.elapsed += dt;
+        self.focus = flight_point(f.from, f.to, f.elapsed / FLIGHT_SECS);
+        self.flight = (f.elapsed < FLIGHT_SECS).then_some(f);
+    }
+
     pub fn look_at_cell(&mut self, cell: (i32, i32)) {
         self.focus = Vec2::new(cell.0 as f32, cell.1 as f32).rem_euclid(Vec2::splat(MAP));
     }
@@ -114,7 +153,7 @@ impl Plugin for CameraPlugin {
         app.init_resource::<CameraRig>()
             .add_systems(PreStartup, spawn_camera)
             .add_systems(Update, frame_new_map.run_if(resource_changed::<crate::world::LevelList>))
-            .add_systems(Update, (camera_input.in_set(crate::menu::Gameplay), apply_rig, sky_color).chain());
+            .add_systems(Update, ((camera_input, fly).in_set(crate::menu::Gameplay), apply_rig, sky_color).chain());
     }
 }
 
@@ -145,6 +184,12 @@ fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {
 /// The player's (tribe 0) reincarnation site, else some low inland ground.
 pub fn start_cell(map: &game_core::map::GameMap) -> (i32, i32) {
     map.site_of(0).map_or_else(|| map.terrain.lowland_cell(), |s| s.cell())
+}
+
+fn fly(time: Res<Time>, mut rig: ResMut<CameraRig>) {
+    if rig.flight.is_some() {
+        rig.advance_flight(time.delta_secs());
+    }
 }
 
 fn camera_input(
@@ -309,6 +354,24 @@ mod tests {
         assert!((pitch - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
         assert_eq!(distance, GROUND_VIEW.1);
         assert_eq!(ground_view(|_| None), GROUND_VIEW);
+    }
+
+    #[test]
+    fn flights_ease_the_short_way_and_land_on_time() {
+        let (from, to) = (Vec2::new(120.0, 10.0), Vec2::new(4.0, 10.0));
+        assert_eq!(flight_point(from, to, 0.0), from);
+        assert_eq!(flight_point(from, to, 1.0), to);
+        assert_eq!(flight_point(from, to, 0.5), Vec2::new(126.0, 10.0), "12 cells across the map edge, not back across the map");
+        assert!(flight_point(from, to, 0.1).x - from.x < 0.1 * 12.0, "starts slow");
+        let mut rig = CameraRig::default();
+        rig.fly_to(Vec2::new(20.0, 30.0));
+        rig.advance_flight(FLIGHT_SECS / 2.0);
+        assert!(rig.focus != Vec2::new(20.0, 30.0) && rig.flight.is_some(), "on the way");
+        rig.advance_flight(FLIGHT_SECS);
+        assert_eq!((rig.focus, rig.flight), (Vec2::new(20.0, 30.0), None), "landed");
+        rig.fly_to(Vec2::new(50.0, 50.0));
+        rig.move_by(1.0, 0.0);
+        assert_eq!(rig.flight, None, "pushing the camera cancels the flight");
     }
 
     #[test]

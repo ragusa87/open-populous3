@@ -13,7 +13,9 @@ low inland cell (`Heightmap::lowland_cell`).
 The eye orbits the ground point at the focus, but never goes lower than the map's highest ground plus 1.5 cells
 (`eye_position`, `EYE_CLEARANCE`), like the original's fixed camera elevation: over low ground (by the sea) it
 stays up there and looks down more steeply, so cliffs between it and the focus never hide it inside the land.
-H brings the camera to the player's reincarnation site (nothing on maps without one); Space to the shaman.
+H flies the camera to the player's reincarnation site (nothing on maps without one), Space (or a click on her
+preview) to the shaman: a quick 0.4 s flight (`CameraRig::fly_to`, eased, the short way around the torus) rather
+than a jump; pushing the camera by hand cancels it.
 
 ## Left panel (`hud/`)
 Fixed 204 px panel on the left, like the original: shaman preview at the top (`hud/shaman.rs`: her current

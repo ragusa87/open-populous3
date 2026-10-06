@@ -43,11 +43,11 @@ pub fn player_site_cell(map: &GameMap) -> Option<Vec2> {
     map.site_of(PLAYER).map(site_cell_pos)
 }
 
-/// H brings the camera to the player's reincarnation site.
+/// H flies the camera to the player's reincarnation site.
 fn look_at_site(keys: Res<ButtonInput<KeyCode>>, mut rig: ResMut<CameraRig>, map: Res<CurrentMap>) {
     if keys.just_pressed(KeyCode::KeyH) {
         if let Some(cell) = player_site_cell(&map.0) {
-            rig.focus = cell;
+            rig.fly_to(cell);
         }
     }
 }

@@ -132,7 +132,7 @@ fn preview_click(
         selection.select_only(u.id);
     }
     if let Some(cell) = player_shaman_cell(&map.0, &clock) {
-        rig.focus = cell;
+        rig.fly_to(cell);
     }
 }
 
