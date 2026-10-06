@@ -5,7 +5,7 @@ use crate::path::Mobility;
 use crate::spell::Spell;
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
-use crate::unit::{Order, Unit, UnitEvent};
+use crate::unit::{Order, Unit, UnitEvent, UnitKind};
 use pop3_format::{Level, LevelHeader, MAP_SIZE};
 use std::path::Path;
 
@@ -99,6 +99,37 @@ impl GameMap {
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
         GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new() }.with_shamans()
     }
+
+    /// Test ground for units: a flat island with the player's site and shaman at the centre, three
+    /// of every other kind for the player in rows to the north (one row per kind), one of each for
+    /// tribe 1 (red, no shaman) in a column to the east, and a pond to the west to walk around.
+    pub fn sandbox_units() -> Self {
+        const C: i32 = MAP_SIZE as i32 / 2;
+        const ISLAND: i32 = 24;
+        let mut terrain = Heightmap::new(MAP_SIZE);
+        for z in 0..MAP_SIZE as i32 {
+            for x in 0..MAP_SIZE as i32 {
+                let (dx, dz) = (x - C, z - C);
+                let pond = (dx + 10) * (dx + 10) + (dz - 4) * (dz - 4) <= 9;
+                if dx * dx + dz * dz <= ISLAND * ISLAND && !pond {
+                    terrain.set(x, z, 64);
+                }
+            }
+        }
+        let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
+        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new() }.with_shamans();
+        let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
+        for (row, &kind) in UnitKind::ALL[1..].iter().enumerate() {
+            let row = row as i32;
+            for n in 0..3 {
+                let id = map.units.len() as u32 + 1;
+                map.units.push(Unit::new(id, 0, kind, at(2 * n - 2, -6 - 2 * row)));
+            }
+            let id = map.units.len() as u32 + 1;
+            map.units.push(Unit::new(id, 1, kind, at(10, 2 * row - 4)));
+        }
+        map
+    }
 }
 
 impl GameMap {
@@ -107,7 +138,11 @@ impl GameMap {
     }
 
     pub fn shaman_of(&self, owner: u8) -> Option<&Unit> {
-        self.units.iter().find(|u| u.owner == owner)
+        self.units.iter().find(|u| u.owner == owner && u.kind == UnitKind::Shaman)
+    }
+
+    fn shaman_mut(&mut self, owner: u8) -> Option<&mut Unit> {
+        self.units.iter_mut().find(|u| u.owner == owner && u.kind == UnitKind::Shaman)
     }
 
     /// Whether `player` can cast `spell` here and now: Teleport needs a living shaman and ground
@@ -129,7 +164,7 @@ impl GameMap {
         match *command {
             Command::Cast { player, spell } if !self.can_cast(player, &spell) => None,
             Command::Cast { player, spell: Spell::Teleport { to } } => {
-                if let Some(u) = self.units.iter_mut().find(|u| u.owner == player) {
+                if let Some(u) = self.shaman_mut(player) {
                     u.cast_teleport(to);
                 }
                 None
@@ -151,8 +186,9 @@ impl GameMap {
         }
     }
 
+    /// An order to the player's shaman.
     fn order(&mut self, player: u8, order: Order) {
-        if let Some(u) = self.units.iter_mut().find(|u| u.owner == player) {
+        if let Some(u) = self.shaman_mut(player) {
             u.order(order);
         }
     }
@@ -278,6 +314,34 @@ mod tests {
             m.tick();
         }
         assert_eq!((m.units[0].x, m.units[0].z), to, "then on the hill top");
+    }
+
+    #[test]
+    fn sandbox_units_has_every_kind_on_land() {
+        let m = GameMap::sandbox_units();
+        let count = |owner: u8, kind: UnitKind| m.units.iter().filter(|u| u.owner == owner && u.kind == kind).count();
+        assert_eq!(count(0, UnitKind::Shaman), 1);
+        assert_eq!(count(1, UnitKind::Shaman), 0);
+        for kind in &UnitKind::ALL[1..] {
+            assert_eq!((count(0, *kind), count(1, *kind)), (3, 1), "{kind:?}");
+        }
+        let mut ids: Vec<u32> = m.units.iter().map(|u| u.id).collect();
+        ids.dedup();
+        assert_eq!(ids.len(), m.units.len(), "unique ids");
+        for u in &m.units {
+            assert!(Mobility::Walk.passable(&m.terrain, u.cell()), "{:?} on walkable land", u.kind);
+        }
+        let c = MAP_SIZE as i32 / 2;
+        assert!(m.terrain.is_water(c - 10, c + 4), "pond");
+    }
+
+    #[test]
+    fn orders_and_casts_go_to_the_shaman_not_the_first_unit() {
+        let mut m = GameMap::sandbox_units();
+        m.units.rotate_left(1);
+        m.apply(&Command::Order { player: 0, order: Order::Pray });
+        assert_eq!(m.shaman_of(0).unwrap().action, crate::unit::Action::Praying);
+        assert!(m.units.iter().filter(|u| u.kind != UnitKind::Shaman).all(|u| u.action == crate::unit::Action::Idle));
     }
 
     #[test]

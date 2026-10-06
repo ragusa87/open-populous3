@@ -24,6 +24,24 @@
 
 Health: 100. Orders are ignored while drowning, dying or dead.
 
+## Unit kinds (simulation: walking only)
+`UnitKind::ALL`: Shaman, Brave, Warrior, Preacher, Spy, Firewarrior, built with `Unit::new(id, owner, kind, pos)`.
+Placeholder balance until combat (`max_health`, flat-ground `speed` in world units per tick):
+
+| Kind | Health | Speed |
+|---|---|---|
+| Shaman | 100 | 64 |
+| Brave | 60 | 64 |
+| Warrior | 120 | 56 |
+| Preacher | 70 | 56 |
+| Spy | 60 | 72 |
+| Firewarrior | 80 | 60 |
+
+Every kind walks, prays, heals, drowns and dies like the shaman; only the shaman reincarnates (the others stay
+`Dead`, lying where they fell). `Command::Order` and spells go to the player's shaman (`GameMap::shaman_of`),
+`Command::OrderUnit` to any unit. Sandbox > Units (`GameMap::sandbox_units`): flat island, the player's site and
+shaman, three of each other kind in rows to the north, one of each for tribe 1 (red) to the east, a pond to the west.
+
 ## Pathfinding (done: `game_core::path`)
 - `path::Mobility`: Walk (land, not open sea = cell with 4 water corners, not a cliff = a cell edge
   rising more than `MAX_CLIMB` 300; ~5.5% of the original levels' land), Sail (open sea only, boats),

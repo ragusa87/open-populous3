@@ -32,7 +32,7 @@ pub const LANDING_TICKS: u16 = 6;
 pub const DYING_TICKS: u16 = 8;
 pub const RESPAWN_TICKS: u16 = 30;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnitKind {
     Shaman,
     Brave,
@@ -40,6 +40,42 @@ pub enum UnitKind {
     Preacher,
     Spy,
     Firewarrior,
+}
+
+impl UnitKind {
+    pub const ALL: [UnitKind; 6] = [UnitKind::Shaman, UnitKind::Brave, UnitKind::Warrior, UnitKind::Preacher, UnitKind::Spy, UnitKind::Firewarrior];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            UnitKind::Shaman => "Shaman",
+            UnitKind::Brave => "Brave",
+            UnitKind::Warrior => "Warrior",
+            UnitKind::Preacher => "Preacher",
+            UnitKind::Spy => "Spy",
+            UnitKind::Firewarrior => "Firewarrior",
+        }
+    }
+
+    /// Placeholder balance until combat: braves are the frailest, warriors the toughest.
+    pub fn max_health(self) -> u16 {
+        match self {
+            UnitKind::Shaman => SHAMAN_MAX_HEALTH,
+            UnitKind::Brave | UnitKind::Spy => 60,
+            UnitKind::Preacher => 70,
+            UnitKind::Firewarrior => 80,
+            UnitKind::Warrior => 120,
+        }
+    }
+
+    /// World units per tick on flat ground: spies are the quickest, warriors and preachers the slowest.
+    pub fn speed(self) -> i32 {
+        match self {
+            UnitKind::Shaman | UnitKind::Brave => SHAMAN_SPEED,
+            UnitKind::Spy => 72,
+            UnitKind::Firewarrior => 60,
+            UnitKind::Warrior | UnitKind::Preacher => 56,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,15 +168,19 @@ pub struct Unit {
 
 impl Unit {
     pub fn shaman(id: u32, site: &ReincarnationSite) -> Self {
-        let (x, z) = site.spawn_point();
+        Unit::new(id, site.owner, UnitKind::Shaman, site.spawn_point())
+    }
+
+    /// A unit standing idle at `(x, z)` (world units), at full health.
+    pub fn new(id: u32, owner: u8, kind: UnitKind, (x, z): (u16, u16)) -> Self {
         Unit {
             id,
-            owner: site.owner,
-            kind: UnitKind::Shaman,
+            owner,
+            kind,
             x,
             z,
             facing: 0,
-            health: SHAMAN_MAX_HEALTH,
+            health: kind.max_health(),
             action: Action::Idle,
             regen: 0,
             route: Vec::new(),
@@ -150,7 +190,7 @@ impl Unit {
     }
 
     pub fn max_health(&self) -> u16 {
-        SHAMAN_MAX_HEALTH
+        self.kind.max_health()
     }
 
     /// Every person walks (vehicles will sail or fly).
@@ -236,6 +276,7 @@ impl Unit {
             Action::Dying { left } => {
                 self.action = if left > 1 { Action::Dying { left: left - 1 } } else { Action::Dead { left: RESPAWN_TICKS } };
             }
+            Action::Dead { .. } if self.kind != UnitKind::Shaman => {}
             Action::Dead { left } if left > 1 => self.action = Action::Dead { left: left - 1 },
             Action::Dead { .. } => {
                 let site = site?;
@@ -319,7 +360,7 @@ impl Unit {
         }
         self.facing = octant(dx, dz);
         let dist = isqrt((dx * dx + dz * dz) as u32) as i32;
-        let speed = slope_speed(SHAMAN_SPEED, self.grade_ahead((dx, dz), dist, terrain));
+        let speed = slope_speed(self.kind.speed(), self.grade_ahead((dx, dz), dist, terrain));
         let (sx, sz) = if dist <= speed { (dx, dz) } else { (dx * speed / dist, dz * speed / dist) };
         let (nx, nz) = (self.x.wrapping_add(sx as u16), self.z.wrapping_add(sz as u16));
         let next = (cell_of(nx), cell_of(nz));
@@ -646,6 +687,29 @@ mod tests {
         let events = run(&mut u, &t, &site, (DYING_TICKS + RESPAWN_TICKS) as usize);
         assert_eq!(events, vec![UnitEvent::Reincarnated]);
         assert_eq!((u.x, u.z, u.health, u.action), (site.x, site.z, SHAMAN_MAX_HEALTH, Action::Idle));
+    }
+
+    #[test]
+    fn only_the_shaman_reincarnates() {
+        let mut t = land();
+        let (shaman, site) = shaman_at((10, 10));
+        let mut brave = Unit::new(7, 0, UnitKind::Brave, (shaman.x + 20 * 512, shaman.z));
+        assert_eq!(brave.health, UnitKind::Brave.max_health());
+        sea_cell(&mut t, brave.cell());
+        let events = run(&mut brave, &t, &site, 200);
+        assert_eq!(events, vec![UnitEvent::Died], "no reincarnation");
+        assert!(matches!(brave.action, Action::Dead { .. }) && brave.kind == UnitKind::Brave);
+    }
+
+    #[test]
+    fn kinds_walk_at_their_own_speed() {
+        let t = land();
+        let ticks = |kind: UnitKind| {
+            let (s, site) = shaman_at((10, 10));
+            let mut u = Unit::new(2, 0, kind, (s.x, s.z));
+            walk(&mut u, &t, &site, (s.x + 10 * 512, s.z), 500).unwrap()
+        };
+        assert!(ticks(UnitKind::Spy) < ticks(UnitKind::Brave) && ticks(UnitKind::Brave) < ticks(UnitKind::Warrior));
     }
 
     #[test]
