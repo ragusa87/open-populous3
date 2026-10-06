@@ -173,7 +173,7 @@ impl Unit {
             }
             Action::Dead { left } if left > 1 => self.action = Action::Dead { left: left - 1 },
             Action::Dead { .. } => {
-                let Some(site) = site else { return None };
+                let site = site?;
                 *self = Unit { facing: self.facing, ..Unit::shaman(self.id, site) };
                 return Some(UnitEvent::Reincarnated);
             }
