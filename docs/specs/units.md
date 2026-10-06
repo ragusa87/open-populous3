@@ -13,7 +13,7 @@
 | Action | Entered by | Behaviour |
 |---|---|---|
 | Idle | default, arrival, Stop | heals 1 HP every 5 ticks |
-| Walking { to } | `Order::MoveTo` | 64 units/tick on flat ground straight to the target (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*128/100` clamped to 64..384, grade = height per cell: half speed up the sandbox hill, 1.5x down it, ground height bilinear `Heightmap::height_at`), shortest way around the torus; stops at open sea (cell with 4 water corners) |
+| Walking { to } | `Order::MoveTo` | 64 units/tick on flat ground straight to the target (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`), shortest way around the torus; stops at open sea (cell with 4 water corners) |
 | Praying | `Order::Pray` | until another order; heals |
 | Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle |
 | Drowning | ground under her becomes open sea | -4 HP per tick, no orders; back to Idle if land returns |

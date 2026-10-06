@@ -11,11 +11,13 @@ pub const TICKS_PER_SECOND: u32 = 10;
 pub const SHAMAN_MAX_HEALTH: u16 = 100;
 /// World units per tick on flat ground (1.25 cells per second).
 pub const SHAMAN_SPEED: i32 = 64;
-/// Walking speed factor in 1/256 per unit of slope (height per cell): the sandbox ramp (30 per
-/// cell) is ~15% slower, the steep hill (100 per cell) half speed; downhill is as much faster.
-pub const SLOPE_SLOWDOWN: i32 = 128;
+/// Walking speed factor change in 1/256 per 100 of slope (height per cell). Uphill: the sandbox
+/// ramp (30 per cell) is ~22% slower, the steep hill (100 per cell) quarter speed. Downhill: the
+/// steep hill is 1.5x faster.
+pub const SLOPE_SLOWDOWN_UP: i32 = 192;
+pub const SLOPE_SPEEDUP_DOWN: i32 = 128;
 /// Walking speed factor bounds in 1/256 (steep climbs crawl, steep descents are capped).
-pub const SLOPE_FACTOR_RANGE: (i32, i32) = (64, 384);
+pub const SLOPE_FACTOR_RANGE: (i32, i32) = (32, 384);
 /// Health lost per tick while in the sea.
 pub const DROWN_DAMAGE: u16 = 4;
 /// Ticks between two health points regained on land.
@@ -230,7 +232,8 @@ impl Unit {
 
 /// Walking speed on a slope (height per cell, positive uphill): slower up, faster down, clamped.
 pub fn slope_speed(flat: i32, grade: i32) -> i32 {
-    let factor = (256 - grade * SLOPE_SLOWDOWN / 100).clamp(SLOPE_FACTOR_RANGE.0, SLOPE_FACTOR_RANGE.1);
+    let per_100 = if grade > 0 { SLOPE_SLOWDOWN_UP } else { SLOPE_SPEEDUP_DOWN };
+    let factor = (256 - grade * per_100 / 100).clamp(SLOPE_FACTOR_RANGE.0, SLOPE_FACTOR_RANGE.1);
     (flat * factor / 256).max(1)
 }
 
@@ -328,10 +331,11 @@ mod tests {
     #[test]
     fn slower_uphill_faster_downhill() {
         assert_eq!(slope_speed(SHAMAN_SPEED, 0), SHAMAN_SPEED);
-        assert_eq!(slope_speed(SHAMAN_SPEED, 100), SHAMAN_SPEED / 2, "steep hill: half speed");
+        assert_eq!(slope_speed(SHAMAN_SPEED, 100), SHAMAN_SPEED / 4, "steep hill: quarter speed");
+        assert_eq!(slope_speed(SHAMAN_SPEED, 30), 49, "gentle ramp: ~22% slower");
         assert_eq!(slope_speed(SHAMAN_SPEED, -100), SHAMAN_SPEED * 3 / 2, "steep descent: 1.5x");
         assert!(slope_speed(SHAMAN_SPEED, 30) < SHAMAN_SPEED && slope_speed(SHAMAN_SPEED, -30) > SHAMAN_SPEED, "gentle ramp");
-        assert_eq!(slope_speed(SHAMAN_SPEED, 1000), SHAMAN_SPEED / 4, "cliffs: clamped, never stuck");
+        assert_eq!(slope_speed(SHAMAN_SPEED, 1000), SHAMAN_SPEED / 8, "cliffs: clamped, never stuck");
         assert_eq!(slope_speed(SHAMAN_SPEED, -1000), SHAMAN_SPEED * 3 / 2);
     }
 
