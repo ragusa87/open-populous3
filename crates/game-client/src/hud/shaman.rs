@@ -1,8 +1,9 @@
 //! Shaman preview at the top of the panel: her current sprite (same pose and view as on the
-//! map, drawn x2), what she is doing and her health. Clicking it looks at her.
+//! map, drawn x2), what she is doing and her health. Clicking it selects her alone and looks at her.
 
 use super::panel::{ShamanPreview, INK};
 use crate::camera::CameraRig;
+use crate::units::selection::{selectable, Selection};
 use crate::units::{health_color, player_shaman_cell, ShamanSprites, SimClock, PLAYER};
 use crate::world::CurrentMap;
 use bevy::prelude::*;
@@ -122,9 +123,13 @@ fn preview_click(
     map: Res<CurrentMap>,
     clock: Res<SimClock>,
     mut rig: ResMut<CameraRig>,
+    mut selection: ResMut<Selection>,
 ) {
     if !q.iter().any(|i| *i == Interaction::Pressed) {
         return;
+    }
+    if let Some(u) = map.0.shaman_of(PLAYER).filter(|u| selectable(u)) {
+        selection.select_only(u.id);
     }
     if let Some(cell) = player_shaman_cell(&map.0, &clock) {
         rig.focus = cell;

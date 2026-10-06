@@ -37,12 +37,12 @@ Health: 100. Orders are ignored while drowning, dying or dead.
   (feather headdress, staff) for every pose and direction (front / side / back, left ones mirrored).
 - Selection (`units/selection.rs`, player 0's living units): left click on a unit selects it, Ctrl+click adds or
   removes it; a left drag (over 6 px) draws a whitish box and selects the units whose middle is inside (Ctrl adds);
-  right click clears. The shaman is always selected alone: selecting her drops the others, adding a unit drops her,
-  a box only takes her when she is alone in it. Selecting a vehicle or building will not select the people inside.
+  right click clears. On the map the shaman is selected like any unit (click, Ctrl, box); clicking her panel
+  preview selects her alone (and looks at her). Selecting a vehicle or building will not select the people inside.
   The cursor shows the selected count when more than one. Dead units leave the selection.
 - Orders go to each selected unit as `Command::OrderUnit`: left click on the ground walks there
   (`grounded::pick_ground`), P prays, X stops. C (cast selected spell) makes the player's shaman jump,
-  Space or a click on the panel preview looks at her.
+  Space looks at her.
 - Dev: `SHAMAN=walk|pray|cast|drown [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose.
 - Pathfinding: A* or flow fields on the 128² grid with modulo neighbours; blocked by water and slope
   above a threshold. Recompute only regions touched by a `DirtyRect`.

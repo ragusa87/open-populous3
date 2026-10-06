@@ -35,7 +35,7 @@ Next: icons (Kenney game-icons), casting on the terrain, mana from followers, to
 
 ## Selection and orders
 Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect;
-the shaman is always selected alone. Left click on the ground sends the selection there, P pray, X stop, Space
+the shaman is selected like any unit on the map, clicking her panel preview selects her alone. Left click on the ground sends the selection there, P pray, X stop, Space
 looks at the shaman. Selected units show a health bar; the cursor shows the count when more than one (see units.md).
 
 ## World editor (`editor.rs`)

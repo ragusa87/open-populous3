@@ -1,6 +1,7 @@
 //! Unit selection, as in the original: left click on one of your units selects it (Ctrl adds or
 //! removes it), left drag draws a box that selects your units inside it (Ctrl adds them), right
-//! click clears the selection. The shaman is always selected alone. Left click on the ground sends
+//! click clears the selection. The shaman is a unit like the others here; clicking her panel preview
+//! selects her alone (`select_only`). Left click on the ground sends
 //! the selection there; P prays, X stops. Only selected units show their health bar, and the
 //! cursor shows how many units are selected when more than one.
 
@@ -11,7 +12,7 @@ use crate::hud::PANEL_WIDTH;
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::command::Command;
-use game_core::unit::{Order, Unit, UnitKind};
+use game_core::unit::{Order, Unit};
 
 /// Cursor travel (screen pixels) before a press becomes a box drag.
 pub const DRAG_PX: f32 = 6.0;
@@ -26,15 +27,12 @@ const BOX_FILL: Color = Color::srgba(1.0, 1.0, 0.95, 0.08);
 #[derive(Resource, Default, Debug, Clone, PartialEq)]
 pub struct Selection {
     pub units: Vec<u32>,
-    /// The selection is the shaman: she is never grouped with other units.
-    shaman: bool,
 }
 
 /// A unit the player could select, as seen on screen.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OnScreen {
     pub id: u32,
-    pub shaman: bool,
     pub feet: Vec2,
     pub head: Vec2,
 }
@@ -46,14 +44,16 @@ impl Selection {
 
     pub fn clear(&mut self) {
         self.units.clear();
-        self.shaman = false;
     }
 
-    /// Click on a unit. `add` (Ctrl) toggles it in the group instead of replacing the selection.
-    pub fn click(&mut self, id: u32, shaman: bool, add: bool) {
-        if shaman || !add || self.shaman {
-            self.units = vec![id];
-            self.shaman = shaman;
+    pub fn select_only(&mut self, id: u32) {
+        self.units = vec![id];
+    }
+
+    /// Click on a unit. `add` (Ctrl) toggles it in the selection instead of replacing it.
+    pub fn click(&mut self, id: u32, add: bool) {
+        if !add {
+            self.select_only(id);
         } else if let Some(i) = self.units.iter().position(|&u| u == id) {
             self.units.remove(i);
         } else {
@@ -61,24 +61,14 @@ impl Selection {
         }
     }
 
-    /// Box over `hits`. The shaman is only taken when she is alone in the box; `add` (Ctrl) keeps
-    /// the current group. An empty box clears the selection unless adding.
+    /// Box over `hits`; `add` (Ctrl) keeps the current selection. An empty box clears it unless adding.
     pub fn select_box(&mut self, hits: &[OnScreen], add: bool) {
-        let group: Vec<u32> = hits.iter().filter(|h| !h.shaman).map(|h| h.id).collect();
-        if group.is_empty() {
-            match hits.first() {
-                Some(h) => self.click(h.id, true, add),
-                None if !add => self.clear(),
-                None => {}
-            }
-            return;
-        }
-        if !add || self.shaman {
+        if !add {
             self.clear();
         }
-        for id in group {
-            if !self.contains(id) {
-                self.units.push(id);
+        for h in hits {
+            if !self.contains(h.id) {
+                self.units.push(h.id);
             }
         }
     }
@@ -86,9 +76,6 @@ impl Selection {
     /// Drops units that can no longer be selected (dead, gone, inside something).
     pub fn retain(&mut self, units: &[Unit]) {
         self.units.retain(|&id| units.iter().any(|u| u.id == id && selectable(u)));
-        if self.units.is_empty() {
-            self.shaman = false;
-        }
     }
 
     /// One order per selected unit.
@@ -211,7 +198,7 @@ fn on_screen(
             let u = units.get(view.0).filter(|u| selectable(u))?;
             let feet = cam.0.world_to_viewport(cam.1, gt.translation()).ok()?;
             let head = cam.0.world_to_viewport(cam.1, gt.translation() + gt.up() * UNIT_HEIGHT).ok()?;
-            Some(OnScreen { id: u.id, shaman: u.kind == UnitKind::Shaman, feet, head })
+            Some(OnScreen { id: u.id, feet, head })
         })
         .collect()
 }
@@ -256,7 +243,7 @@ pub(super) fn select_and_order(
         match gesture {
             Some(Gesture::Box(a, b)) => selection.select_box(&in_box(a, b, &units), add),
             Some(Gesture::Click(c)) => match unit_at(c, &units) {
-                Some(u) => selection.click(u.id, u.shaman, add),
+                Some(u) => selection.click(u.id, add),
                 None if !selection.units.is_empty() => {
                     let ray = cam.0.viewport_to_world(cam.1, c).ok();
                     if let Some(cell) = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)) {
@@ -319,49 +306,39 @@ fn draw_overlays(
 mod tests {
     use super::*;
 
-    fn at(id: u32, shaman: bool, x: f32) -> OnScreen {
-        OnScreen { id, shaman, feet: Vec2::new(x, 100.0), head: Vec2::new(x, 70.0) }
+    fn at(id: u32, x: f32) -> OnScreen {
+        OnScreen { id, feet: Vec2::new(x, 100.0), head: Vec2::new(x, 70.0) }
     }
 
     fn sel(units: &[u32]) -> Selection {
-        Selection { units: units.to_vec(), shaman: false }
+        Selection { units: units.to_vec() }
     }
 
     #[test]
     fn click_replaces_and_ctrl_toggles() {
         let mut s = sel(&[1, 2]);
-        s.click(3, false, false);
+        s.click(3, false);
         assert_eq!(s.units, [3]);
-        s.click(4, false, true);
+        s.click(4, true);
         assert_eq!(s.units, [3, 4]);
-        s.click(3, false, true);
+        s.click(3, true);
         assert_eq!(s.units, [4], "ctrl click on a selected unit removes it");
-    }
-
-    #[test]
-    fn the_shaman_is_always_alone() {
-        let mut s = sel(&[1, 2]);
-        s.click(9, true, true);
-        assert_eq!(s.units, [9], "selecting her deselects the others, even with ctrl");
-        s.click(2, false, true);
-        assert_eq!(s.units, [2], "adding a unit drops her");
-        s.select_box(&[at(9, true, 0.0), at(5, false, 10.0)], false);
-        assert_eq!(s.units, [5], "a box with others leaves her out");
-        s.select_box(&[at(9, true, 0.0)], true);
-        assert_eq!(s.units, [9], "a box with only her selects her alone");
     }
 
     #[test]
     fn box_replaces_or_adds_and_empty_clears() {
         let mut s = sel(&[1]);
-        s.select_box(&[at(2, false, 0.0), at(3, false, 0.0)], false);
+        s.select_box(&[at(2, 0.0), at(3, 0.0)], false);
         assert_eq!(s.units, [2, 3]);
-        s.select_box(&[at(3, false, 0.0), at(4, false, 0.0)], true);
+        s.select_box(&[at(3, 0.0), at(4, 0.0)], true);
         assert_eq!(s.units, [2, 3, 4]);
         s.select_box(&[], true);
         assert_eq!(s.units, [2, 3, 4]);
         s.select_box(&[], false);
         assert!(s.units.is_empty());
+        s.select_box(&[at(2, 0.0)], false);
+        s.select_only(9);
+        assert_eq!(s.units, [9], "the panel preview selects the shaman alone");
     }
 
     #[test]
@@ -385,7 +362,7 @@ mod tests {
 
     #[test]
     fn picks_the_nearest_unit_line() {
-        let units = [at(1, false, 100.0), at(2, false, 108.0)];
+        let units = [at(1, 100.0), at(2, 108.0)];
         assert_eq!(unit_at(Vec2::new(105.0, 85.0), &units).map(|u| u.id), Some(2));
         assert_eq!(unit_at(Vec2::new(98.0, 63.0), &units).map(|u| u.id), Some(1), "just over the head");
         assert_eq!(unit_at(Vec2::new(150.0, 85.0), &units), None);
@@ -393,7 +370,7 @@ mod tests {
 
     #[test]
     fn box_takes_units_whose_middle_is_inside() {
-        let units = [at(1, false, 100.0), at(2, false, 200.0)];
+        let units = [at(1, 100.0), at(2, 200.0)];
         let ids = |v: Vec<OnScreen>| v.iter().map(|u| u.id).collect::<Vec<_>>();
         assert_eq!(ids(in_box(Vec2::new(150.0, 50.0), Vec2::new(90.0, 90.0), &units)), [1]);
         assert_eq!(ids(in_box(Vec2::new(0.0, 0.0), Vec2::new(300.0, 80.0), &units)), Vec::<u32>::new(), "middle at y=85");
