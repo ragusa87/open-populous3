@@ -9,8 +9,13 @@ use pop3_format::WORLD_UNITS_PER_CELL;
 /// Simulation ticks per second (the client runs them at a fixed rate).
 pub const TICKS_PER_SECOND: u32 = 10;
 pub const SHAMAN_MAX_HEALTH: u16 = 100;
-/// World units per tick (1.25 cells per second).
+/// World units per tick on flat ground (1.25 cells per second).
 pub const SHAMAN_SPEED: i32 = 64;
+/// Walking speed factor in 1/256 per unit of slope (height per cell): the sandbox ramp (30 per
+/// cell) is ~15% slower, the steep hill (100 per cell) half speed; downhill is as much faster.
+pub const SLOPE_SLOWDOWN: i32 = 128;
+/// Walking speed factor bounds in 1/256 (steep climbs crawl, steep descents are capped).
+pub const SLOPE_FACTOR_RANGE: (i32, i32) = (64, 384);
 /// Health lost per tick while in the sea.
 pub const DROWN_DAMAGE: u16 = 4;
 /// Ticks between two health points regained on land.
@@ -202,7 +207,8 @@ impl Unit {
         }
         self.facing = octant(dx, dz);
         let dist = isqrt((dx * dx + dz * dz) as u32) as i32;
-        let (sx, sz) = if dist <= SHAMAN_SPEED { (dx, dz) } else { (dx * SHAMAN_SPEED / dist, dz * SHAMAN_SPEED / dist) };
+        let speed = slope_speed(SHAMAN_SPEED, self.grade_ahead((dx, dz), dist, terrain));
+        let (sx, sz) = if dist <= speed { (dx, dz) } else { (dx * speed / dist, dz * speed / dist) };
         let (nx, nz) = (self.x.wrapping_add(sx as u16), self.z.wrapping_add(sz as u16));
         if is_sea(terrain, (cell_of(nx), cell_of(nz))) {
             self.action = Action::Idle;
@@ -213,6 +219,19 @@ impl Unit {
             self.action = Action::Idle;
         }
     }
+
+    /// Slope (height per cell, positive uphill) over one flat-ground step towards `(dx, dz)`.
+    fn grade_ahead(&self, (dx, dz): (i32, i32), dist: i32, terrain: &Heightmap) -> i32 {
+        let (px, pz) = (self.x.wrapping_add((dx * SHAMAN_SPEED / dist) as u16), self.z.wrapping_add((dz * SHAMAN_SPEED / dist) as u16));
+        let h = |x: u16, z: u16| terrain.height_at(x as u32, z as u32, WORLD_UNITS_PER_CELL);
+        (h(px, pz) - h(self.x, self.z)) * WORLD_UNITS_PER_CELL as i32 / SHAMAN_SPEED
+    }
+}
+
+/// Walking speed on a slope (height per cell, positive uphill): slower up, faster down, clamped.
+pub fn slope_speed(flat: i32, grade: i32) -> i32 {
+    let factor = (256 - grade * SLOPE_SLOWDOWN / 100).clamp(SLOPE_FACTOR_RANGE.0, SLOPE_FACTOR_RANGE.1);
+    (flat * factor / 256).max(1)
 }
 
 fn cell_of(v: u16) -> i32 {
@@ -304,6 +323,40 @@ mod tests {
         u.tick(&t, Some(&site));
         assert_eq!(u.x, 127 * 512 + 256 + SHAMAN_SPEED as u16);
         assert_eq!(u.facing, 2);
+    }
+
+    #[test]
+    fn slower_uphill_faster_downhill() {
+        assert_eq!(slope_speed(SHAMAN_SPEED, 0), SHAMAN_SPEED);
+        assert_eq!(slope_speed(SHAMAN_SPEED, 100), SHAMAN_SPEED / 2, "steep hill: half speed");
+        assert_eq!(slope_speed(SHAMAN_SPEED, -100), SHAMAN_SPEED * 3 / 2, "steep descent: 1.5x");
+        assert!(slope_speed(SHAMAN_SPEED, 30) < SHAMAN_SPEED && slope_speed(SHAMAN_SPEED, -30) > SHAMAN_SPEED, "gentle ramp");
+        assert_eq!(slope_speed(SHAMAN_SPEED, 1000), SHAMAN_SPEED / 4, "cliffs: clamped, never stuck");
+        assert_eq!(slope_speed(SHAMAN_SPEED, -1000), SHAMAN_SPEED * 3 / 2);
+    }
+
+    #[test]
+    fn climbing_a_ramp_takes_longer_than_coming_down() {
+        let mut t = land();
+        for z in 0..128 {
+            for x in 10..=20 {
+                t.set(x, z, 100 + (x as u16 - 10) * 50);
+            }
+            for x in 21..30 {
+                t.set(x, z, 600);
+            }
+        }
+        let ticks_to = |from: (i32, i32), to_cell: i32| {
+            let (mut u, site) = shaman_at(from);
+            let to = (to_cell as u16 * 512 + 256, u.z);
+            u.order(Order::MoveTo { x: to.0, z: to.1 });
+            (1..500).find(|_| {
+                u.tick(&t, Some(&site));
+                u.action == Action::Idle
+            })
+        };
+        let (up, down, flat) = (ticks_to((10, 5), 20).unwrap(), ticks_to((20, 5), 10).unwrap(), ticks_to((40, 5), 50).unwrap());
+        assert!(down < flat && flat < up, "down {down} < flat {flat} < up {up}");
     }
 
     #[test]

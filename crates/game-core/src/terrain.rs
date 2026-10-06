@@ -51,6 +51,17 @@ impl Heightmap {
         self.heights[i] = h.min(MAX_HEIGHT);
     }
 
+    /// Ground height under a fixed-point position (`unit` world units per cell), bilinear between
+    /// the four corners of its cell, integers only.
+    pub fn height_at(&self, x: u32, z: u32, unit: u32) -> i32 {
+        let (cx, cz) = ((x / unit) as i32, (z / unit) as i32);
+        let (fx, fz) = ((x % unit) as i64, (z % unit) as i64);
+        let u = unit as i64;
+        let h = |dx, dz| self.get(cx + dx, cz + dz) as i64;
+        let sum = h(0, 0) * (u - fx) * (u - fz) + h(1, 0) * fx * (u - fz) + h(0, 1) * (u - fx) * fz + h(1, 1) * fx * fz;
+        (sum / (u * u)) as i32
+    }
+
     pub fn is_water(&self, x: i32, z: i32) -> bool {
         self.get(x, z) == SEA_LEVEL
     }
@@ -144,6 +155,17 @@ impl Heightmap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn height_at_blends_the_cell_corners() {
+        let mut m = Heightmap::new(4);
+        m.set(1, 0, 100);
+        m.set(1, 1, 100);
+        assert_eq!(m.height_at(0, 0, 512), 0);
+        assert_eq!(m.height_at(256, 100, 512), 50, "halfway along x");
+        assert_eq!(m.height_at(512, 0, 512), 100);
+        assert_eq!(m.height_at(3 * 512 + 256, 0, 512), 0, "wraps: the last cell blends into cell 0");
+    }
 
     #[test]
     fn wraps_both_axes() {
