@@ -8,7 +8,7 @@
 pub mod art;
 mod dust;
 mod procedural;
-mod still;
+mod sheets;
 pub mod selection;
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
@@ -157,8 +157,8 @@ fn load_sprites(
 ) {
     let original = levels.original.then(|| art::original_art(&levels.data_dir).map_err(|e| warn!("original shaman sprites: {e}")).ok());
     let mut shaman = original.flatten().or_else(|| {
-        info!("shaman: open-source still");
-        still::still_art(UnitKind::Shaman)
+        info!("shaman: open-source sheets");
+        sheets::sheet_art(UnitKind::Shaman)
     });
     let art: Vec<Vec<TribeArt>> = UnitKind::ALL
         .iter()

@@ -1,8 +1,8 @@
 # Unit artwork (open-source sprites)
 
 Brief for drawing or generating free unit sprites to replace the generated figures (`units/procedural.rs`)
-and to ship instead of the original art (copyrighted, never shipped). Loaded today: a single still per kind
-(see "Still"); the full sheets described under "Delivery" are to be loaded once the first ones exist.
+and to ship instead of the original art (copyrighted, never shipped). Loaded today: sheets rendered from a 3D
+model (see "Rendered sheets"); hand-drawn sheets as described under "Delivery" are to be loaded once some exist.
 
 ## Style
 - Pixel art, hard edges: every pixel is fully opaque or fully transparent (the engine cuts alpha at 50%:
@@ -86,22 +86,22 @@ Use no other magenta anywhere in the art. Skin, hair, wood, metal and the spy's 
 - Licence: CC0 preferred (CC-BY 4.0 accepted). List author, licence and source of every sheet in
   `assets/CREDITS.md`; for generated art, the tool and model too.
 
-## Still (minimum delivery, loaded today)
-One detailed picture per kind, facing down-right (direction 1), at any resolution, and optionally one from
-behind facing up-left (direction 5): `tools/normalize_still.py` turns them into `assets/units/<kind>/still.png`
-and `still-back.png` (256 x 256, 4 pixels per base pixel, feet at (128, 232), hard
-edges, tribe colour turned magenta), given the feet point and the source pixels per base pixel (head top to
-feet = 34 base px). Keep the sources next to them as `source.png` and `source-back.png`. The game embeds the still (`units/still.rs`),
-swaps the magenta hue for each tribe's (shading kept) and builds every pose by moving it around the feet:
-idle as is, walk bobbing and swaying, pray squashed and bowed, cast jumping 12 base px, fall turning onto its
-back, drown sunk 10 base px under a ripple line. Directions: front still for 0-2, mirrored for 6-7; back still
-for 4-5, mirrored for 3 (without a back still, the front one stands in: 3-4 as is, 5 mirrored).
-Detailed art (more than 1 pixel per base pixel) is drawn as is, without the pixel-art upscaling.
+## Rendered sheets (loaded today)
+A rigged, animated 3D model (glTF) can be rendered into sheets by the `render_sprites` example:
 
-The shaman's still is used whenever the original files are not (`--no-original`, no install):
+  just render-sprites assets/models/witch.gltf assets/units/shaman
 
-  uvx --with pillow python tools/normalize_still.py assets/units/shaman/source.png assets/units/shaman/still.png --feet 206,700 --px-per-base 17
-  uvx --with pillow python tools/normalize_still.py assets/units/shaman/source-back.png assets/units/shaman/still-back.png --feet 180,718 --px-per-base 17
+One PNG per pose (`idle`, `walk`, `pray`, `cast`, `fall`, `drown`), 8 rows (directions 0-7, all rendered:
+no mirroring) of 320 x 288 cells, 4 pixels per base pixel, feet at (160, 256) (bigger than a drawn cell: a
+lying body and the cast jump must fit), orthographic, seen from 30 deg above, hard edges, 2 px dark outline.
+The model's tribe materials (default `Clothes,Hat`) are rendered in the magenta key. Pose to clip: idle Idle
+(8 frames over the loop), walk Walk (12), pray SitDown (its last moment), cast Jump (12), fall Death (8, the
+last two lying), drown RecieveHit (4, sunk 45% under a ripple line). Scale: the head top (default 3.1 model
+units) is 34 base px above the feet.
+
+The game embeds the sheets (`units/sheets.rs`), crops every cell around the feet and swaps the magenta hue for
+each tribe's. The shaman uses them whenever the original files are not (`--no-original`, no install); kinds
+without sheets keep their generated figure.
 
 ## Generating with an image model
 Models do not keep a fixed grid or anchor reliably: generate one direction or pose at a time, larger, then
