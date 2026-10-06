@@ -44,5 +44,8 @@ Windowed 1280x720 for dev, F11 toggles borderless fullscreen, `FULLSCREEN=1` sta
 
 
 Cursor confinement debugging: `POP3_CURSOR_DEBUG=1 just run` logs the display backend, focus,
-enter/leave and edge contact. A "cursor LEFT the window" warning while focused means the compositor
-is not applying the confinement (Bevy falls back to no grab silently).
+enter/leave and edge contact. On COSMIC, pushing the system cursor against the screen edge made the
+compositor take focus (auto-hide panel), which drops any pointer constraint. Hence the in-game cursor
+(`virtual_cursor.rs`): the system cursor is locked and hidden, ours moves from raw motion and stops at
+the window border, and is re-sent as `CursorMoved` so UI picking works. Esc releases it;
+`POP3_CURSOR_SPEED` scales it (raw motion is unaccelerated).

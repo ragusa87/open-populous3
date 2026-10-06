@@ -1,13 +1,12 @@
 //! Orbit camera around a wrapping focus point. Pushing the mouse against the window
 //! border, Up-Down or WASD move, Left-Right and middle-drag rotate, Enter toggles the aerial view.
-//! The cursor is confined to the window (Esc releases/re-confines it).
+//! The mouse is captured by the in-game cursor (`virtual_cursor`, Esc releases it).
 
 use crate::edge_push::EdgePush;
 use crate::terrain_mesh::{focus_height, CurveParams};
 use crate::world::CurrentMap;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, CursorOptions};
 
 const MAP: f32 = pop3_format::MAP_SIZE as f32;
 /// (pitch, distance) of the default ground view: low and close, like the original.
@@ -98,11 +97,9 @@ pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraRig>()
-            .init_resource::<CursorConfined>()
             .add_systems(Startup, spawn_camera)
             .add_systems(Update, frame_new_map.run_if(resource_changed::<crate::world::LevelList>))
-            .add_systems(Update, (camera_input, apply_rig, sky_color).chain())
-            .add_systems(Update, toggle_cursor_confine);
+            .add_systems(Update, (camera_input, apply_rig, sky_color).chain());
     }
 }
 
@@ -114,37 +111,6 @@ fn spawn_camera(mut commands: Commands) {
         DirectionalLight { illuminance: 9000.0, ..default() },
         Transform::from_xyz(40.0, 22.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
-}
-
-/// Whether the cursor should stay inside the window (Esc toggles).
-#[derive(Resource)]
-pub struct CursorConfined(pub bool);
-
-impl Default for CursorConfined {
-    fn default() -> Self {
-        CursorConfined(true)
-    }
-}
-
-/// Esc toggles confinement; regaining focus re-applies it (compositors drop the
-/// constraint on focus loss, and a change made before the window exists is lost).
-fn toggle_cursor_confine(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut focus: MessageReader<bevy::window::WindowFocused>,
-    mut confined: ResMut<CursorConfined>,
-    mut cursors: Query<&mut CursorOptions>,
-) {
-    let refocused = focus.read().any(|f| f.focused);
-    if keys.just_pressed(KeyCode::Escape) {
-        confined.0 = !confined.0;
-    } else if !refocused {
-        return;
-    }
-    let mode = if confined.0 { CursorGrabMode::Confined } else { CursorGrabMode::None };
-    for mut c in &mut cursors {
-        c.grab_mode = mode;
-        c.set_changed();
-    }
 }
 
 fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {
@@ -161,6 +127,7 @@ fn camera_input(
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     windows: Query<&Window>,
+    cursor: Res<crate::virtual_cursor::VirtualCursor>,
     mut push: Local<EdgePush>,
     time: Res<Time>,
     mut rig: ResMut<CameraRig>,
@@ -181,7 +148,7 @@ fn camera_input(
     let edge = windows
         .iter()
         .next()
-        .map_or(Vec2::ZERO, |w| push.update(w.cursor_position(), w.size(), motion.delta, dt));
+        .map_or(Vec2::ZERO, |w| push.update(cursor.effective(w.cursor_position()), w.size(), motion.delta, dt));
     let keys_move = key_move(|k| keys.pressed(k)) * KEY_SPEED;
     let speed = (edge * MOUSE_SPEED + keys_move).clamp(Vec2::splat(-KEY_SPEED), Vec2::splat(KEY_SPEED));
     let scale = rig.distance.max(10.0) * dt;

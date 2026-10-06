@@ -13,6 +13,7 @@ mod procedural_theme;
 mod sites;
 mod terrain_mesh;
 mod terrain_texture;
+mod virtual_cursor;
 mod world;
 
 use bevy::prelude::*;
@@ -33,7 +34,8 @@ fn main() {
                 ..default()
             }),
             primary_cursor_options: Some(bevy::window::CursorOptions {
-                grab_mode: bevy::window::CursorGrabMode::Confined,
+                grab_mode: bevy::window::CursorGrabMode::Locked,
+                visible: false,
                 ..default()
             }),
             ..default()
@@ -43,6 +45,7 @@ fn main() {
         .add_plugins((
             world::WorldPlugin { level_arg: opts.level_arg, use_original: opts.use_original },
             camera::CameraPlugin,
+            virtual_cursor::VirtualCursorPlugin,
             grounded::GroundedPlugin,
             sites::SitesPlugin,
             editor::EditorPlugin,

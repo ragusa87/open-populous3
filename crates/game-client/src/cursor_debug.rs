@@ -1,5 +1,5 @@
 //! `POP3_CURSOR_DEBUG=1`: logs what the cursor confinement actually does (display backend,
-//! focus, enter/leave, grab mode, edge contact). Bevy silently falls back to no grab when the
+//! focus, enter/leave, grab mode, edge contact of the in-game cursor). Bevy silently falls back to no grab when the
 //! compositor refuses `Confined`, so this is the only way to see it from the game.
 
 use bevy::input::mouse::AccumulatedMouseMotion;
@@ -29,6 +29,7 @@ fn log_cursor(
     mut entered: MessageReader<CursorEntered>,
     mut left: MessageReader<CursorLeft>,
     motion: Res<AccumulatedMouseMotion>,
+    cursor: Res<crate::virtual_cursor::VirtualCursor>,
     time: Res<Time>,
     mut backend_logged: Local<bool>,
     mut last_edge_log: Local<f32>,
@@ -50,10 +51,10 @@ fn log_cursor(
         info!("cursor-debug: cursor entered window");
     }
     for _ in left.read() {
-        warn!("cursor-debug: cursor LEFT the window (grab {:?}): confinement is not active", options.grab_mode);
+        warn!("cursor-debug: system cursor LEFT the window (grab {:?}, focused {})", options.grab_mode, window.focused);
     }
     let now = time.elapsed_secs();
-    if let Some(c) = window.cursor_position() {
+    if let Some(c) = cursor.effective(window.cursor_position()) {
         let size = window.size();
         if crate::edge_push::on_edge(c, size) && motion.delta != Vec2::ZERO && now - *last_edge_log > 0.5 {
             info!("cursor-debug: on edge at {c:?} of {size:?}, pushing {:?}", motion.delta);
