@@ -48,4 +48,4 @@ enter/leave and edge contact. On COSMIC, pushing the system cursor against the s
 compositor take focus (auto-hide panel), which drops any pointer constraint. Hence the in-game cursor
 (`virtual_cursor.rs`): the system cursor is locked and hidden, ours moves from raw motion and stops at
 the window border, and is re-sent as `CursorMoved` so UI picking works. Esc releases it;
-`POP3_CURSOR_SPEED` scales it (raw motion is unaccelerated).
+`POP3_CURSOR_SPEED` scales it (default 1.5; raw motion is unaccelerated).

@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorMoved, CursorOptions, PrimaryWindow, WindowEvent, WindowFocused};
 
 /// Multiplier on raw mouse motion (raw motion is unaccelerated); `POP3_CURSOR_SPEED` overrides.
-pub const DEFAULT_SPEED: f32 = 1.0;
+pub const DEFAULT_SPEED: f32 = 1.5;
 const SIZE: f32 = 14.0;
 
 /// Whether the mouse is captured by the game (Esc toggles), and the in-game cursor position.
