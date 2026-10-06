@@ -2,6 +2,7 @@
 //! `--no-original` (or `POP3_NO_ORIGINAL=1`) never reads the original game files.
 
 mod camera;
+mod cursor_debug;
 mod dev;
 mod edge_push;
 mod editor;
@@ -47,6 +48,7 @@ fn main() {
             editor::EditorPlugin,
             hud::HudPlugin,
             dev::DevPlugin,
+            cursor_debug::CursorDebugPlugin,
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();

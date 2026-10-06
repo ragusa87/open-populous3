@@ -41,3 +41,8 @@ object placement, saving back to `.dat` (inverse of `pop3-format`).
 ## Window
 Windowed 1280x720 for dev, F11 toggles borderless fullscreen, `FULLSCREEN=1` starts fullscreen.
 `HEADLESS=1 SCREENSHOT=out.png [AERIAL=1]` renders offscreen and exits (UI text not captured yet).
+
+
+Cursor confinement debugging: `POP3_CURSOR_DEBUG=1 just run` logs the display backend, focus,
+enter/leave and edge contact. A "cursor LEFT the window" warning while focused means the compositor
+is not applying the confinement (Bevy falls back to no grab silently).
