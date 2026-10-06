@@ -4,7 +4,9 @@
 //! See `docs/specs/level-format.md` for the byte layout.
 
 pub mod level;
+pub mod objects;
 pub mod theme;
 
 pub use level::{Level, LevelError, LevelHeader, Thing, MAP_CELLS, MAP_SIZE, WORLD_UNITS_PER_CELL};
+pub use objects::{find_file, Atlas, Face, Object, ObjectBank};
 pub use theme::{theme_char, Theme};
