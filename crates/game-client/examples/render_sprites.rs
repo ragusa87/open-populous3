@@ -3,10 +3,13 @@
 //! base pixel, feet at (160, 256), seen from 30 deg above. Tribe-coloured materials are rendered magenta
 //! (the game swaps the hue per tribe), a dark outline is added, edges are hard.
 //!
-//!   cargo run -p game-client --release --example render_sprites -- MODEL.gltf OUT_DIR [HEAD_HEIGHT] [TRIBE_MATERIALS]
+//!   cargo run -p game-client --release --example render_sprites -- MODEL.gltf OUT_DIR [--head 3.1]
+//!       [--tribe Clothes,Hat] [--skin d29a6e]
 //!
-//! HEAD_HEIGHT: model units from the feet to the top of the head (34 base px), default 3.1.
-//! TRIBE_MATERIALS: comma-separated material names drawn in the tribe colour, default "Clothes,Hat".
+//! --head: model units from the feet to the top of the head (34 base px).
+//! --tribe: comma-separated material names drawn in the tribe colour.
+//! --skin: sRGB hex colour for the material named "Skin" ("none" keeps the model's; the Quaternius
+//! characters ship a near-black skin).
 
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::asset::RenderAssetUsages;
@@ -83,6 +86,7 @@ struct Render {
     out: PathBuf,
     head: f32,
     tribe_materials: Vec<String>,
+    skin: Option<Color>,
     target: Handle<Image>,
     jobs: Vec<Job>,
     next: usize,
@@ -96,10 +100,16 @@ struct Render {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let model = PathBuf::from(args.get(1).expect("usage: render_sprites MODEL.gltf OUT_DIR [HEAD_HEIGHT] [TRIBE_MATERIALS]"));
+    let option = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    let model = PathBuf::from(args.get(1).expect("usage: render_sprites MODEL.gltf OUT_DIR [--head 3.1] [--tribe Clothes,Hat] [--skin d29a6e]"));
     let out = PathBuf::from(args.get(2).expect("OUT_DIR"));
-    let head: f32 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(3.1);
-    let tribe_materials: Vec<String> = args.get(4).map_or("Clothes,Hat", String::as_str).split(',').map(String::from).collect();
+    let head: f32 = option("--head").and_then(|v| v.parse().ok()).unwrap_or(3.1);
+    let tribe_materials: Vec<String> = option("--tribe").unwrap_or_else(|| "Clothes,Hat".into()).split(',').map(String::from).collect();
+    let skin = match option("--skin").as_deref() {
+        Some("none") => None,
+        Some(hex) => Some(Color::Srgba(Srgba::hex(hex).expect("--skin: hex colour"))),
+        None => Some(Color::Srgba(Srgba::hex("d29a6e").unwrap())),
+    };
     let dir = model.parent().map(|p| p.canonicalize().expect("model folder")).unwrap_or_default();
     let file = model.file_name().expect("model file").to_string_lossy().into_owned();
     App::new()
@@ -121,6 +131,7 @@ fn main() {
                 out: out.clone(),
                 head,
                 tribe_materials: tribe_materials.clone(),
+                skin,
                 target,
                 jobs,
                 next: 0,
@@ -162,8 +173,15 @@ fn spawn_model(
                   mut render: ResMut<Render>| {
             for e in children.iter_descendants(ready.entity) {
                 if let Ok((name, mat)) = meshes.get(e) {
-                    if render.tribe_materials.iter().any(|n| *n == name.0) {
-                        let keyed = materials.get(&mat.0).map(|m| StandardMaterial { base_color: KEY, ..m.clone() });
+                    let colour = if render.tribe_materials.iter().any(|n| *n == name.0) {
+                        Some(KEY)
+                    } else if name.0 == "Skin" {
+                        render.skin
+                    } else {
+                        None
+                    };
+                    if let Some(colour) = colour {
+                        let keyed = materials.get(&mat.0).map(|m| StandardMaterial { base_color: colour, ..m.clone() });
                         if let Some(keyed) = keyed {
                             commands.entity(e).insert(MeshMaterial3d(materials.add(keyed)));
                         }
