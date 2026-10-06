@@ -82,6 +82,47 @@ pub fn tribe_tile(tile: u16, tribe: u8) -> u16 {
     if BLUE_TILES.contains(&tile) { tile + (tribe % TRIBES) as u16 } else { tile }
 }
 
+/// Shaman animations in `VSTART-0.ANI`, identified by eye: 4 consecutive ones per action,
+/// one per tribe (the shaman's colours are drawn in, not layered).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShamanAnim {
+    /// Standing, breathing (5 frames).
+    Idle,
+    /// Staff swing (4 frames).
+    Strike,
+    /// Sitting, arms spread, bowing (4 frames).
+    Pray,
+    /// Jumps up with lightning in the hands (12 frames).
+    Cast,
+    /// Kick (5 frames).
+    Kick,
+    /// Tumbling in the air (4 frames).
+    Flung,
+    /// Walking (8 frames).
+    Walk,
+    /// Knocked down flat on her back (8 frames).
+    Fall,
+}
+
+impl ShamanAnim {
+    fn blue(self) -> usize {
+        match self {
+            ShamanAnim::Idle => 53,
+            ShamanAnim::Strike => 57,
+            ShamanAnim::Pray => 61,
+            ShamanAnim::Cast => 65,
+            ShamanAnim::Kick => 69,
+            ShamanAnim::Flung => 73,
+            ShamanAnim::Walk => 77,
+            ShamanAnim::Fall => 85,
+        }
+    }
+
+    pub fn anim(self, tribe: u8) -> usize {
+        self.blue() + (tribe % TRIBES) as usize
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +147,14 @@ mod tests {
         assert_eq!(villager_hut(1, 3, 1), 166);
         assert_eq!(villager_hut(2, 0, 1), 169);
         assert_eq!(villager_hut(2, 3, 3), 180);
+    }
+
+    #[test]
+    fn shaman_anims_follow_tribe_order() {
+        assert_eq!(ShamanAnim::Idle.anim(0), 53);
+        assert_eq!(ShamanAnim::Idle.anim(3), 56);
+        assert_eq!(ShamanAnim::Walk.anim(1), 78);
+        assert_eq!(ShamanAnim::Fall.anim(2), 87);
     }
 
     #[test]
