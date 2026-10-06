@@ -15,11 +15,21 @@ pub struct Grounded {
     pub half: f32,
 }
 
+/// A grounded part that leans with the ground under it (large objects: buildings), turned by `yaw`
+/// about its own up: its up follows the ground normal as drawn (slopes and the planet's curve), so
+/// no side sinks in.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct Tilted {
+    /// Half size (cells) of the square the slope is measured over.
+    pub half: f32,
+    pub yaw: f32,
+}
+
 pub struct GroundedPlugin;
 
 impl Plugin for GroundedPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostUpdate, place_grounded.before(TransformSystems::Propagate));
+        app.add_systems(PostUpdate, (place_grounded, tilt_grounded).chain().before(TransformSystems::Propagate));
     }
 }
 
@@ -93,6 +103,31 @@ pub fn pick_ground(map: &Heightmap, focus: Vec2, params: &CurveParams, origin: V
     Some((focus + Vec2::new(p.x, p.z)).rem_euclid(Vec2::splat(size)))
 }
 
+/// Ground normal (render space) at offset `(dx, dz)` from the focus, from the drawn heights `half`
+/// cells either side along x and z.
+pub fn ground_normal(map: &Heightmap, focus: Vec2, params: &CurveParams, dx: f32, dz: f32, half: f32) -> Vec3 {
+    let y = |ox: f32, oz: f32| ground_y(map, focus, params, dx + ox, dz + oz);
+    let slope_x = (y(half, 0.0) - y(-half, 0.0)) / (2.0 * half);
+    let slope_z = (y(0.0, half) - y(0.0, -half)) / (2.0 * half);
+    Vec3::new(-slope_x, 1.0, -slope_z).normalize()
+}
+
+/// Leans `Tilted` parts with the ground under them (after `place_grounded` put them there).
+fn tilt_grounded(
+    rig: Res<CameraRig>,
+    map: Res<CurrentMap>,
+    params: Res<CurveParamsRes>,
+    mut q: Query<(&Grounded, &Tilted, &mut Transform)>,
+) {
+    let size = map.0.terrain.size() as f32;
+    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
+    for (g, tilt, mut t) in &mut q {
+        let (dx, dz) = (wrap(g.at.x - rig.focus.x), wrap(g.at.y - rig.focus.y));
+        let normal = ground_normal(&map.0.terrain, rig.focus, &params.0, dx, dz, tilt.half);
+        t.rotation = Quat::from_rotation_arc(Vec3::Y, normal) * Quat::from_rotation_y(tilt.yaw);
+    }
+}
+
 fn place_grounded(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
@@ -113,6 +148,24 @@ fn place_grounded(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ground_normal_follows_slopes_and_the_planet_curve() {
+        let flat = CurveParams { radius: 10, curvature: 0.0, height_scale: 1.0 };
+        let level = Heightmap::new(32);
+        assert!(ground_normal(&level, Vec2::splat(16.0), &flat, 3.0, 0.0, 1.0).distance(Vec3::Y) < 1e-6, "flat ground: up");
+        let curved = CurveParams { curvature: 0.01, ..flat };
+        let n = ground_normal(&level, Vec2::splat(16.0), &curved, 5.0, 0.0, 1.0);
+        assert!(n.x > 0.05 && n.z.abs() < 1e-6, "away from the focus the ground bends down: leans outward {n:?}");
+        let mut ramp = Heightmap::new(32);
+        for z in 0..32 {
+            for x in 0..32 {
+                ramp.set(x, z, (x * 10) as u16);
+            }
+        }
+        let n = ground_normal(&ramp, Vec2::splat(16.0), &flat, 0.0, 0.0, 1.0);
+        assert!(n.x < -0.1, "rising towards +x: leans back {n:?}");
+    }
 
     fn flat_params() -> CurveParams {
         CurveParams { radius: 10, curvature: 0.0, height_scale: 1.0 }

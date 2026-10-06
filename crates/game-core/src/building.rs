@@ -70,9 +70,10 @@ impl BuildingKind {
     }
 }
 
-/// Ground levelled under a building when the map loads (cells): flat disc, and blended ring.
-pub const FLAT_RADIUS: i32 = 2;
-pub const BLEND_RADIUS: i32 = 3;
+/// Ground levelled under a building when the map loads (cells): flat disc, and blended ring. The
+/// biggest objects reach ~2.7 cells from their centre at their corners (temple).
+pub const FLAT_RADIUS: i32 = 3;
+pub const BLEND_RADIUS: i32 = 4;
 /// The levelled ground is never lower than this: a building placed on the shore stands on land.
 pub const MIN_GROUND: u16 = 64;
 

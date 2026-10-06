@@ -1,10 +1,10 @@
 //! Buildings on the map: the original 3D objects in their tribe's colours (textured from the
 //! level's theme atlas) when the original files are allowed and the building is identified;
 //! otherwise a box in the tribe colour with the building's name over it (no open-source models
-//! yet). Turned by their facing.
+//! yet). Turned by their facing, centred on the ground and leaning with it (`Tilted`).
 
 use crate::camera::GameCamera;
-use crate::grounded::Grounded;
+use crate::grounded::{Grounded, Tilted};
 use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects};
 use crate::sites::tribe_color;
 use crate::world::{CurrentMap, LevelList};
@@ -13,8 +13,8 @@ use game_core::building::{Building, BuildingKind};
 use pop3_format::catalog::{self, villager_hut, Building as Object};
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 
-/// Footprint half size (cells): the building rests on the lowest ground under it.
-const FOOTPRINT_HALF: f32 = 0.8;
+/// Half size (cells) of the square the ground slope under a building is measured over.
+const FOOTPRINT_HALF: f32 = 1.0;
 /// Stand-in box (cells) when there is no model.
 const BOX: Vec3 = Vec3::new(1.6, 0.8, 1.6);
 /// Theme whose atlas textures buildings on maps without one.
@@ -103,7 +103,14 @@ fn respawn_buildings(
     for b in &map.0.buildings {
         let Building { kind, owner, x, z, facing } = *b;
         let at = Vec2::new(x as f32 / cell, z as f32 / cell);
-        let mut view = commands.spawn((BuildingView, Grounded { at, half: FOOTPRINT_HALF }, Transform::from_rotation(Quat::from_rotation_y(facing_yaw(facing))), Visibility::Hidden));
+        let yaw = facing_yaw(facing);
+        let mut view = commands.spawn((
+            BuildingView,
+            Grounded { at, half: 0.0 },
+            Tilted { half: FOOTPRINT_HALF, yaw },
+            Transform::from_rotation(Quat::from_rotation_y(yaw)),
+            Visibility::Hidden,
+        ));
         let original = bank.zip(material.as_ref()).and_then(|(bank, mat)| Some((bank.get(building_object(kind, owner)?)?, mat)));
         match original {
             Some((obj, mat)) => {
