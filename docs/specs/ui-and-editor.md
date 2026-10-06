@@ -10,6 +10,9 @@ forward/back like the mouse, middle-drag rotates, Home/End tilt, Ctrl+PgUp/PgDn 
 aerial (pitch 1.35, distance 115) and restores the previous ground view (default tilt 3 deg, distance 20,
 fov 60 deg, tuned by eye against the original). Clear color fades from sky blue to space when zooming out. Changing level frames a
 low inland cell (`Heightmap::lowland_cell`).
+The eye orbits the ground point at the focus, but never goes lower than the map's highest ground plus 1.5 cells
+(`eye_position`, `EYE_CLEARANCE`), like the original's fixed camera elevation: over low ground (by the sea) it
+stays up there and looks down more steeply, so cliffs between it and the focus never hide it inside the land.
 
 ## Left panel (`hud/`)
 Fixed 204 px panel on the left, like the original: shaman preview at the top (`hud/shaman.rs`: her current

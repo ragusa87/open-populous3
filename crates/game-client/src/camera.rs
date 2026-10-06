@@ -25,6 +25,9 @@ pub const FOV_RANGE: (f32, f32) = (0.3, 2.2);
 pub const FOV_SPEED: f32 = 0.6;
 pub const PITCH_RANGE: (f32, f32) = (0.05, 1.5);
 pub const DISTANCE_RANGE: (f32, f32) = (3.0, 220.0);
+/// The eye never goes lower than the map's highest ground plus this (cells), like the original's
+/// fixed camera elevation: low ground near the sea cannot hide it behind a cliff.
+pub const EYE_CLEARANCE: f32 = 1.5;
 const SKY: Color = Color::srgb(0.45, 0.65, 0.92);
 const SPACE: Color = Color::srgb(0.02, 0.02, 0.06);
 
@@ -196,20 +199,33 @@ pub fn key_move(pressed: impl Fn(KeyCode) -> bool) -> Vec2 {
     )
 }
 
+/// Where the eye goes: `offset` from the target, but never lower than `top` (the map's highest
+/// ground, render units) plus `EYE_CLEARANCE`; it keeps looking at the target.
+pub fn eye_position(target: Vec3, offset: Vec3, top: f32) -> Vec3 {
+    let eye = target + offset;
+    Vec3::new(eye.x, eye.y.max(top + EYE_CLEARANCE), eye.z)
+}
+
 fn apply_rig(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
     params: Res<CurveParamsRes>,
     mut cam: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+    mut top: Local<Option<(u32, u16)>>,
 ) {
-    let target = Vec3::Y * focus_height(&map.0.terrain, (rig.focus.x, rig.focus.y), &params.0);
+    let terrain = &map.0.terrain;
+    if top.is_none_or(|(revision, _)| revision != terrain.revision()) {
+        *top = Some((terrain.revision(), terrain.heights().iter().copied().max().unwrap_or(0)));
+    }
+    let top = top.map_or(0, |t| t.1) as f32 * params.0.height_scale;
+    let target = Vec3::Y * focus_height(terrain, (rig.focus.x, rig.focus.y), &params.0);
     for (mut t, mut projection) in &mut cam {
         if let Projection::Perspective(p) = projection.as_mut() {
             if p.fov != rig.fov {
                 p.fov = rig.fov;
             }
         }
-        let wanted = Transform::from_translation(target + rig.eye_offset()).looking_at(target, Vec3::Y);
+        let wanted = Transform::from_translation(eye_position(target, rig.eye_offset(), top)).looking_at(target, Vec3::Y);
         *t = Transform {
             translation: t.translation.lerp(wanted.translation, 0.25),
             rotation: t.rotation.slerp(wanted.rotation, 0.25),
@@ -293,6 +309,16 @@ mod tests {
         assert!((pitch - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
         assert_eq!(distance, GROUND_VIEW.1);
         assert_eq!(ground_view(|_| None), GROUND_VIEW);
+    }
+
+    #[test]
+    fn eye_stays_above_the_highest_ground() {
+        let offset = Vec3::new(0.0, 1.5, 14.0);
+        let low = eye_position(Vec3::ZERO, offset, 6.0);
+        assert_eq!(low, Vec3::new(0.0, 6.0 + EYE_CLEARANCE, 14.0), "by the sea: up at the fixed elevation");
+        let high = eye_position(Vec3::Y * 6.0, offset, 6.0);
+        assert_eq!(high, Vec3::new(0.0, 7.5, 14.0), "on the highest ground: the usual offset");
+        assert_eq!(eye_position(Vec3::ZERO, Vec3::new(0.0, 100.0, 5.0), 6.0).y, 100.0, "aerial: unchanged");
     }
 
     #[test]
