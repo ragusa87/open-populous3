@@ -9,7 +9,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Braves, warriors, preachers, spies, firewarriors: simulate them and map their animations (0-52, 89-92) in `ShamanAnim`-like catalogs.
 - [ ] Wildmen (neutral "gaia" braves): wander around, drink, eat fruit from trees; the Convert spell turns them into the caster's braves.
 - [ ] Spawn units from the level things (person records) instead of one shaman per site.
-- [ ] Selection: click a unit to select it, orders to the selection (today right click always moves the player's shaman).
+- [ ] Low health: a star/crown spinning over the head of units low on health (original art to find); health bars only show on selected units.
+- [ ] Selection of vehicles and buildings (without the people inside), and of units inside them once they exist (`selection::selectable`).
 - [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
 - [ ] Flying: units thrown by Whirlwind / Blast / explosions follow a ballistic or carried path (flying 61, tumbling 73 anims), land with damage, drown if they land in the sea.
 - [ ] Vehicles (boats, airships from their huts): board, carry units over water/land, unload.

@@ -48,7 +48,7 @@ fn update_info(
     let mode = if editor.active { "EDITOR  R raise  F lower  T flatten  M mark  B bridge" } else { "" };
     let s = format!(
         "{} ({level})  focus {:.0},{:.0}  tilt {:.0}deg  distance {:.1}  fov {:.0}deg{}\n\
-         Push mouse on window edges / Up-Down / WASD move | Left-Right rotate | Home/End tilt | Ctrl+PgUp/PgDn zoom | Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | Right click: shaman walks there | P pray | X stop | Space / click preview: look at her | C cast selected spell | Tab editor | F2 view presets | Esc free cursor | F11 fullscreen\n{mode}",
+         Push mouse on window edges / Up-Down / WASD move | Left-Right rotate | Home/End tilt | Ctrl+PgUp/PgDn zoom | Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | Left click unit: select (Ctrl add) | Left drag: box select | Left click ground: selection walks there | Right click: deselect | P pray | X stop | Space / click preview: look at her | C cast selected spell | Tab editor | F2 view presets | Esc free cursor | F11 fullscreen\n{mode}",
         map.0.name,
         rig.focus.x,
         rig.focus.y,

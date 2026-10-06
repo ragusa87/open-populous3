@@ -26,15 +26,23 @@ Health: 100. Orders are ignored while drowning, dying or dead.
 - `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks.
 - Each unit is a `Grounded` sprite quad (1 px = 1/56 cell: standing ~0.6 cell, 3/4 of a site stone; feet at the
   anchor) turned to face the camera, uploaded Scale2x-upscaled x4 and filtered linearly (no blocky pixels),
-  with a health bar over the head (green -> yellow -> red, hidden once dead).
+  with a health bar over the head (green -> yellow -> red) shown only while the unit is selected and alive.
+  The original has no health bar: low-health units get a spinning star/crown over the head (to do). The panel
+  preview always shows the shaman's health.
 - Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (tumbling), Fall (dying, then lies still while dead).
   Timed actions (cast, dying) play once in step with the simulation, others loop.
 - View direction: `facing * 45deg - camera yaw`, rounded to the 8 drawn directions (0 front, 2 screen right, 4 back).
 - Art: with the original files, the shaman animations of `VSTART/VFRA/VELE` + `HSPR0-0.DAT` (see animations.md),
   per tribe; otherwise (or `--no-original`) `units/procedural.rs` draws a ~34 px pixel-art figure in the tribe colour
   (feather headdress, staff) for every pose and direction (front / side / back, left ones mirrored).
-- Orders (player 0): right click on the ground walks there (`grounded::pick_ground`), P prays, X stops,
-  C (cast selected spell) makes her jump, Space or a click on the panel preview looks at her.
+- Selection (`units/selection.rs`, player 0's living units): left click on a unit selects it, Ctrl+click adds or
+  removes it; a left drag (over 6 px) draws a whitish box and selects the units whose middle is inside (Ctrl adds);
+  right click clears. The shaman is always selected alone: selecting her drops the others, adding a unit drops her,
+  a box only takes her when she is alone in it. Selecting a vehicle or building will not select the people inside.
+  The cursor shows the selected count when more than one. Dead units leave the selection.
+- Orders go to each selected unit as `Command::OrderUnit`: left click on the ground walks there
+  (`grounded::pick_ground`), P prays, X stops. C (cast selected spell) makes the player's shaman jump,
+  Space or a click on the panel preview looks at her.
 - Dev: `SHAMAN=walk|pray|cast|drown [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose.
 - Pathfinding: A* or flow fields on the 128² grid with modulo neighbours; blocked by water and slope
   above a threshold. Recompute only regions touched by a `DirtyRect`.

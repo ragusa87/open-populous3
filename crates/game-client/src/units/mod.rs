@@ -1,15 +1,14 @@
 //! Units on the map. Runs the simulation clock (`GameMap::tick` at `TICKS_PER_SECOND`), draws each
-//! unit as a camera-facing sprite on the ground with a health bar over its head, and turns the
-//! player's input into orders for their shaman: right click walks there, P prays, X stops,
-//! Space looks at her. The sprites come from the original animations when allowed (`art`),
-//! else they are generated (`procedural`).
+//! unit as a camera-facing sprite on the ground, with a health bar over the head of selected units.
+//! Mouse selection and orders live in `selection`; Space looks at the player's shaman. The sprites
+//! come from the original animations when allowed (`art`), else they are generated (`procedural`).
 
 pub mod art;
 mod procedural;
+pub mod selection;
 
-use crate::camera::{CameraRig, CurveParamsRes};
-use crate::grounded::{pick_ground, Grounded};
-use crate::hud::PANEL_WIDTH;
+use crate::camera::CameraRig;
+use crate::grounded::Grounded;
 use crate::world::{CurrentMap, LevelList, TerrainDirty};
 use art::{frame_index, pose_for, sprite_dir, Frame, TribeArt};
 use bevy::asset::RenderAssetUsages;
@@ -17,8 +16,8 @@ use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use game_core::command::Command;
-use game_core::unit::{Order, Unit, TICKS_PER_SECOND};
+use game_core::unit::{Unit, TICKS_PER_SECOND};
+use selection::Selection;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// The local player's tribe.
@@ -125,8 +124,9 @@ impl Plugin for UnitsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SimClock>()
             .init_resource::<ShamanSprites>()
+            .add_plugins(selection::SelectionPlugin)
             .add_systems(Startup, load_sprites)
-            .add_systems(Update, (orders, run_ticks, respawn_views, animate_views).chain());
+            .add_systems(Update, (selection::select_and_order, look_at_shaman, run_ticks, respawn_views, animate_views).chain());
     }
 }
 
@@ -187,35 +187,7 @@ fn run_ticks(time: Res<Time>, mut clock: ResMut<SimClock>, mut map: ResMut<Curre
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn orders(
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
-    cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    params: Res<CurveParamsRes>,
-    mut rig: ResMut<CameraRig>,
-    mut map: ResMut<CurrentMap>,
-    clock: Res<SimClock>,
-) {
-    let mut issued = Vec::new();
-    if keys.just_pressed(KeyCode::KeyP) {
-        issued.push(Order::Pray);
-    }
-    if keys.just_pressed(KeyCode::KeyX) {
-        issued.push(Order::Stop);
-    }
-    if mouse.just_pressed(MouseButton::Right) {
-        let cursor = windows.iter().next().and_then(Window::cursor_position).filter(|c| c.x > PANEL_WIDTH);
-        let ray = cursor.and_then(|c| cams.iter().next().and_then(|(cam, gt)| cam.viewport_to_world(gt, c).ok()));
-        if let Some(cell) = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)) {
-            let (x, z) = world_units(cell);
-            issued.push(Order::MoveTo { x, z });
-        }
-    }
-    for order in issued {
-        map.bypass_change_detection().0.apply(&Command::Order { player: PLAYER, order });
-    }
+fn look_at_shaman(keys: Res<ButtonInput<KeyCode>>, mut rig: ResMut<CameraRig>, map: Res<CurrentMap>, clock: Res<SimClock>) {
     if keys.just_pressed(KeyCode::Space) {
         if let Some(cell) = player_shaman_cell(&map.0, &clock) {
             rig.focus = cell;
@@ -252,7 +224,7 @@ fn respawn_views(
     for (i, _) in map.0.units.iter().enumerate() {
         commands.spawn((UnitView(i), Grounded { at: Vec2::ZERO, half: FOOT_HALF }, Transform::default(), Visibility::Hidden)).with_children(|v| {
             v.spawn((UnitSprite(i), Mesh3d::default(), MeshMaterial3d::<StandardMaterial>::default(), Transform::default()));
-            v.spawn((HealthBar, Mesh3d(bar.clone()), MeshMaterial3d(back.clone()), Transform::from_xyz(0.0, BAR_HEIGHT, 0.0), Visibility::Inherited))
+            v.spawn((HealthBar, Mesh3d(bar.clone()), MeshMaterial3d(back.clone()), Transform::from_xyz(0.0, BAR_HEIGHT, 0.0), Visibility::Hidden))
                 .with_child((HealthFill(i), Mesh3d(fill.clone()), MeshMaterial3d(mats.add(flat(health_color(1.0)))), Transform::from_xyz(0.0, 0.0, 0.005)));
         });
     }
@@ -269,6 +241,7 @@ fn animate_views(
     mut bars: Query<(&ChildOf, &mut Visibility), With<HealthBar>>,
     mut fills: Query<(&HealthFill, &mut Transform, &MeshMaterial3d<StandardMaterial>), Without<UnitView>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    selection: Res<Selection>,
 ) {
     let units = &map.0.units;
     let facing_camera = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
@@ -286,8 +259,9 @@ fn animate_views(
         }
     }
     for (parent, mut vis) in &mut bars {
-        let alive = views.get(parent.parent()).ok().and_then(|(v, ..)| units.get(v.0)).is_some_and(Unit::is_alive);
-        *vis = if alive { Visibility::Inherited } else { Visibility::Hidden };
+        let unit = views.get(parent.parent()).ok().and_then(|(v, ..)| units.get(v.0));
+        let shown = unit.is_some_and(|u| u.is_alive() && selection.contains(u.id));
+        *vis = if shown { Visibility::Inherited } else { Visibility::Hidden };
     }
     for (fill, mut t, mat) in &mut fills {
         let Some(u) = units.get(fill.0) else { continue };

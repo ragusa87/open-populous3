@@ -33,8 +33,10 @@ Hover shows the tile's description, click selects (white border), `C` casts the 
 consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
 Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build/Stats tabs.
 
-## Shaman orders
-Right click on the ground: walk there. P pray, X stop, Space look at her (see units.md).
+## Selection and orders
+Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect;
+the shaman is always selected alone. Left click on the ground sends the selection there, P pray, X stop, Space
+looks at the shaman. Selected units show a health bar; the cursor shows the count when more than one (see units.md).
 
 ## World editor (`editor.rs`)
 Tab toggles edit mode. Brushes at the camera focus: R raise, F lower (Erode), T flatten,
