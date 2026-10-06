@@ -1,8 +1,10 @@
-//! Generated shaman sprites (no original files): a small pixel-art figure in the tribe colour,
-//! posed per frame and drawn from a few thick lines and discs with a dark outline.
+//! Generated unit sprites (shaman without original files, the other kinds always): a small
+//! pixel-art figure in the tribe colour, posed per frame and drawn from a few thick lines and discs
+//! with a dark outline. Kinds differ by headgear, what they hold and their clothes (`look`).
 //! Figure space: x to the right, y up, feet at (0, 0), about 34 px tall like the original.
 
 use super::art::{Frame, Pose};
+use game_core::unit::UnitKind;
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 const W: usize = 72;
@@ -16,6 +18,13 @@ const FEATHER: [u8; 3] = [236, 222, 180];
 const STAFF: [u8; 3] = [120, 78, 36];
 const SPARK: [u8; 3] = [240, 120, 255];
 const WATER: [u8; 3] = [170, 210, 255];
+const CLOAK: [u8; 3] = [58, 56, 66];
+const STEEL: [u8; 3] = [170, 176, 186];
+const HORN: [u8; 3] = [236, 226, 196];
+const PAGE: [u8; 3] = [240, 234, 210];
+const FIRE: [u8; 3] = [255, 130, 30];
+const FIRE_CORE: [u8; 3] = [255, 236, 130];
+const FIRE_HAT: [u8; 3] = [200, 40, 20];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum View {
@@ -138,28 +147,77 @@ enum Shape {
     Dot((f32, f32), [u8; 3]),
 }
 
-fn shapes(b: &Body, view: View, tribe: u8) -> Vec<Shape> {
-    let robe = tribe_rgb(tribe);
-    let dark = robe.map(|c| (c as u16 * 3 / 5) as u8);
+/// What tells the kinds apart: headgear, what the staff hand holds, and the body colours.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Head {
+    Feathers,
+    Tuft,
+    Horns,
+    Hood,
+    Cowl,
+    FireHat,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Held {
+    Staff,
+    Nothing,
+    Club,
+    Book,
+    Dagger,
+    Flame,
+}
+
+fn look(kind: UnitKind) -> (Head, Held) {
+    match kind {
+        UnitKind::Shaman => (Head::Feathers, Held::Staff),
+        UnitKind::Brave => (Head::Tuft, Held::Nothing),
+        UnitKind::Warrior => (Head::Horns, Held::Club),
+        UnitKind::Preacher => (Head::Hood, Held::Book),
+        UnitKind::Spy => (Head::Cowl, Held::Dagger),
+        UnitKind::Firewarrior => (Head::FireHat, Held::Flame),
+    }
+}
+
+fn shapes(b: &Body, view: View, tribe: u8, kind: UnitKind) -> Vec<Shape> {
+    let (head, held) = look(kind);
+    let tribe_col = tribe_rgb(tribe);
+    // Spies wear a dark cloak (tribe colour only on the belt); braves are bare-chested.
+    let robe = if kind == UnitKind::Spy { CLOAK } else { tribe_col };
+    let dark = tribe_col.map(|c| (c as u16 * 3 / 5) as u8);
+    let torso = if kind == UnitKind::Brave { SKIN } else { robe };
     let side = view == View::Side;
     let mut s = Vec::new();
-    let staff_hand = b.hands[1];
-    let staff = |s: &mut Vec<Shape>| {
-        s.push(Shape::Line((staff_hand.0, staff_hand.1 - 11.0), (staff_hand.0, staff_hand.1 + 15.0), 1.0, STAFF));
-        s.push(Shape::Disc((staff_hand.0, staff_hand.1 + 16.0), 1.5, robe));
+    let hand = b.hands[1];
+    let holding = |s: &mut Vec<Shape>| match held {
+        Held::Staff => {
+            s.push(Shape::Line((hand.0, hand.1 - 11.0), (hand.0, hand.1 + 15.0), 1.0, STAFF));
+            s.push(Shape::Disc((hand.0, hand.1 + 16.0), 1.5, robe));
+        }
+        Held::Nothing => {}
+        Held::Club => {
+            s.push(Shape::Line(hand, (hand.0 + 2.0, hand.1 + 8.0), 2.0, STAFF));
+            s.push(Shape::Disc((hand.0 + 2.0, hand.1 + 9.0), 2.0, STAFF));
+        }
+        Held::Book => s.push(Shape::Line((hand.0 - 1.0, hand.1 + 1.0), (hand.0 + 1.0, hand.1 + 1.0), 3.0, PAGE)),
+        Held::Dagger => s.push(Shape::Line((hand.0, hand.1 + 1.0), (hand.0 + 1.0, hand.1 + 6.0), 1.0, STEEL)),
+        Held::Flame => {
+            s.push(Shape::Disc((hand.0, hand.1 + 2.5), 2.2, FIRE));
+            s.push(Shape::Dot((hand.0, hand.1 + 3.0), FIRE_CORE));
+        }
     };
-    let headdress = |s: &mut Vec<Shape>| {
+    let feathers = |s: &mut Vec<Shape>| {
         for k in 0..7 {
             let a = PI * (0.15 + 0.7 * k as f32 / 6.0);
             let tip = (b.head.0 + a.cos() * 8.0, b.head.1 + a.sin() * 8.0);
             s.push(Shape::Line(b.head, tip, 1.5, if k % 2 == 0 { FEATHER } else { robe }));
         }
     };
-    if view == View::Back {
-        headdress(&mut s);
+    if view == View::Back && head == Head::Feathers {
+        feathers(&mut s);
     }
     if !side {
-        staff(&mut s);
+        holding(&mut s);
     }
     for foot in b.feet {
         let kneeling = if b.hip < 8.0 { foot.0.signum() * 2.0 } else { 0.0 };
@@ -167,32 +225,60 @@ fn shapes(b: &Body, view: View, tribe: u8) -> Vec<Shape> {
         s.push(Shape::Line((foot.0.signum() * 1.5, b.hip), knee, 2.0, SKIN));
         s.push(Shape::Line(knee, foot, 2.0, SKIN));
     }
-    s.push(Shape::Line((0.0, b.hip), (0.0, b.shoulder), if side { 5.0 } else { 7.0 }, robe));
+    if kind == UnitKind::Preacher {
+        // Long robe down to the ankles.
+        s.push(Shape::Line((0.0, b.hip), ((b.feet[0].0 + b.feet[1].0) / 2.0, b.hip / 3.0), if side { 6.0 } else { 9.0 }, robe));
+    }
+    s.push(Shape::Line((0.0, b.hip), (0.0, b.shoulder), if side { 5.0 } else { 7.0 }, torso));
     s.push(Shape::Line((0.0, b.hip + 1.0), (0.0, b.hip - 1.0), if side { 6.0 } else { 8.0 }, dark));
     let shoulders: [(f32, f32); 2] = if side { [(0.5, b.shoulder), (0.5, b.shoulder)] } else { [(-3.5, b.shoulder), (3.5, b.shoulder)] };
     for (sh, hand) in shoulders.iter().zip(b.hands) {
         s.push(Shape::Line(*sh, hand, 2.0, SKIN));
     }
     if side {
-        staff(&mut s);
+        holding(&mut s);
     }
-    s.push(Shape::Disc(b.head, 3.2, if view == View::Back { HAIR } else { SKIN }));
+    let (hx, hy) = b.head;
+    if matches!(head, Head::Hood | Head::Cowl) {
+        // Behind the face: a ring of cloth around it.
+        s.push(Shape::Disc(b.head, 4.0, robe));
+    }
+    let face = if view == View::Back { if matches!(head, Head::Hood | Head::Cowl) { robe } else { HAIR } } else { SKIN };
+    s.push(Shape::Disc(b.head, 3.2, face));
     match view {
         View::Front => {
-            s.push(Shape::Dot((b.head.0 - 1.0, b.head.1 + 0.5), HAIR));
-            s.push(Shape::Dot((b.head.0 + 1.0, b.head.1 + 0.5), HAIR));
-            headdress(&mut s);
+            s.push(Shape::Dot((hx - 1.0, hy + 0.5), HAIR));
+            s.push(Shape::Dot((hx + 1.0, hy + 0.5), HAIR));
         }
         View::Side => {
-            s.push(Shape::Dot((b.head.0 + 3.5, b.head.1), SKIN));
-            s.push(Shape::Dot((b.head.0 + 1.5, b.head.1 + 0.5), HAIR));
-            for k in 0..4 {
-                let a = PI * (0.5 + 0.12 * k as f32);
-                let tip = (b.head.0 - 1.0 + a.cos() * 8.0, b.head.1 + a.sin() * 8.0);
-                s.push(Shape::Line((b.head.0 - 1.0, b.head.1), tip, 1.5, if k % 2 == 0 { FEATHER } else { robe }));
-            }
+            s.push(Shape::Dot((hx + 3.5, hy), SKIN));
+            s.push(Shape::Dot((hx + 1.5, hy + 0.5), HAIR));
         }
         View::Back => {}
+    }
+    match head {
+        Head::Feathers if view == View::Front => feathers(&mut s),
+        Head::Feathers if side => {
+            for k in 0..4 {
+                let a = PI * (0.5 + 0.12 * k as f32);
+                let tip = (hx - 1.0 + a.cos() * 8.0, hy + a.sin() * 8.0);
+                s.push(Shape::Line((hx - 1.0, hy), tip, 1.5, if k % 2 == 0 { FEATHER } else { robe }));
+            }
+        }
+        Head::Feathers => {}
+        Head::Tuft => s.push(Shape::Line((hx - 2.5, hy + 2.0), (hx + 2.0, hy + 2.5), 2.0, HAIR)),
+        Head::Horns => {
+            s.push(Shape::Line((hx - 3.0, hy + 1.5), (hx + 3.0, hy + 1.5), 2.5, STEEL));
+            for side_x in [-1.0, 1.0] {
+                s.push(Shape::Line((hx + 3.0 * side_x, hy + 2.0), (hx + 6.0 * side_x, hy + 6.0), 1.5, HORN));
+            }
+        }
+        Head::Hood => s.push(Shape::Line((hx, hy + 3.0), (hx, hy + 7.0), 3.0, robe)),
+        Head::Cowl => s.push(Shape::Line((hx - 3.0, hy + 0.5), (hx + 3.0, hy + 0.5), 1.0, OUTLINE)),
+        Head::FireHat => {
+            s.push(Shape::Line((hx - 3.0, hy + 2.0), (hx + 3.0, hy + 2.0), 2.0, FIRE_HAT));
+            s.push(Shape::Line((hx, hy + 2.5), (hx, hy + 8.0), 2.5, FIRE_HAT));
+        }
     }
     if b.sparks {
         for (i, hand) in b.hands.iter().enumerate() {
@@ -282,13 +368,13 @@ fn cropped(rgba: &[u8], mirrored: bool) -> Frame {
     Frame { width: w, height: h, origin: (if mirrored { w - ox } else { ox }, ORIGIN.1 - y0), rgba: out }
 }
 
-/// The frame loop of a pose seen from `dir`, in the tribe's colour.
-pub fn frames(tribe: u8, pose: Pose, dir: usize) -> Vec<Frame> {
+/// The frame loop of a unit kind's pose seen from `dir`, in the tribe's colour.
+pub fn frames(kind: UnitKind, tribe: u8, pose: Pose, dir: usize) -> Vec<Frame> {
     let (view, mirrored) = view(dir);
     (0..frame_count(pose))
         .map(|f| {
             let b = body(pose, view, f);
-            let list = shapes(&b, view, tribe);
+            let list = shapes(&b, view, tribe, kind);
             let mut c = Canvas { rgba: vec![0; W * H * 4] };
             for s in &list {
                 rasterise(&mut c, &b, s, 1.0, Some(OUTLINE));
@@ -316,7 +402,7 @@ mod tests {
 
     #[test]
     fn standing_figure_is_about_original_height() {
-        let f = &frames(0, Pose::Idle, 0)[0];
+        let f = &frames(UnitKind::Shaman, 0, Pose::Idle, 0)[0];
         assert!((30..=40).contains(&f.origin.1), "feet at the bottom, {} px tall", f.origin.1);
         assert_eq!(f.height, f.origin.1 + 1, "outline row under the feet");
         assert!(opaque_rows(f) > 30);
@@ -324,22 +410,33 @@ mod tests {
 
     #[test]
     fn cast_jumps_and_fall_ends_lying() {
-        let cast = frames(1, Pose::Cast, 0);
+        let cast = frames(UnitKind::Shaman, 1, Pose::Cast, 0);
         let top = cast[5].origin.1 as i32 - cast[0].origin.1 as i32;
         assert!(top > 8, "mid-jump is higher: {top}");
-        let fall = frames(1, Pose::Fall, 0);
+        let fall = frames(UnitKind::Shaman, 1, Pose::Fall, 0);
         let lying = &fall[6];
         assert!(lying.width > lying.height, "{}x{}", lying.width, lying.height);
     }
 
     #[test]
     fn left_views_mirror_right_views() {
-        let (r, l) = (&frames(2, Pose::Walk, 2)[3], &frames(2, Pose::Walk, 6)[3]);
+        let (r, l) = (&frames(UnitKind::Shaman, 2, Pose::Walk, 2)[3], &frames(UnitKind::Shaman, 2, Pose::Walk, 6)[3]);
         assert_eq!((r.width, r.height), (l.width, l.height));
         assert_eq!(r.origin.0, l.width - l.origin.0);
         let row = |f: &Frame, y: usize| f.rgba[y * f.width * 4..(y + 1) * f.width * 4].to_vec();
         let flipped: Vec<u8> = row(r, 10).chunks_exact(4).rev().flatten().copied().collect();
         assert_eq!(row(l, 10), flipped);
+    }
+
+    #[test]
+    fn every_kind_looks_different() {
+        let idle: Vec<Frame> = UnitKind::ALL.iter().map(|&k| frames(k, 0, Pose::Idle, 0)[0].clone()).collect();
+        for (i, a) in idle.iter().enumerate() {
+            assert!((25..=45).contains(&a.origin.1), "{:?} about a shaman tall", UnitKind::ALL[i]);
+            for b in &idle[i + 1..] {
+                assert_ne!(a.rgba, b.rgba);
+            }
+        }
     }
 
     /// Pixels between the feet and the lowest robe pixel.
@@ -351,8 +448,8 @@ mod tests {
 
     #[test]
     fn drowning_sinks_below_the_water_line() {
-        let idle = robe_height(&frames(0, Pose::Idle, 0)[0]);
-        let drown = robe_height(&frames(0, Pose::Drown, 0)[0]);
+        let idle = robe_height(&frames(UnitKind::Shaman, 0, Pose::Idle, 0)[0]);
+        let drown = robe_height(&frames(UnitKind::Shaman, 0, Pose::Drown, 0)[0]);
         assert!(drown + 6 < idle, "robe {drown} px above water vs {idle} standing");
     }
 }

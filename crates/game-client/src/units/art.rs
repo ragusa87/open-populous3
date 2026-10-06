@@ -1,8 +1,8 @@
-//! Shaman sprite art: per tribe, pose and view direction, a loop of RGBA frames anchored at the
-//! feet. From the original animations when allowed (see docs/specs/animations.md), else generated
-//! (`procedural`). Which frame to show is decided here from the simulated action.
+//! Unit sprite art: per kind, tribe, pose and view direction, a loop of RGBA frames anchored at
+//! the feet. The shaman from the original animations when allowed (see docs/specs/animations.md),
+//! everything else generated (`procedural`). Which frame to show is decided here from the simulated action.
 
-use game_core::unit::{Action, CAST_TICKS, DYING_TICKS};
+use game_core::unit::{Action, UnitKind, CAST_TICKS, DYING_TICKS};
 use pop3_format::anim::{AnimBank, SPRITE_FILE};
 use pop3_format::catalog::{ShamanAnim, TRIBES};
 use pop3_format::{LevelError, Picture, SpriteBank, Theme};
@@ -190,12 +190,12 @@ pub fn original_art(data_dir: &Path) -> Result<Vec<TribeArt>, String> {
     if complete { Ok(art) } else { Err(format!("shaman animations missing ({} in the file)", bank.starts.len())) }
 }
 
-pub fn generated_art() -> Vec<TribeArt> {
+pub fn generated_art(kind: UnitKind) -> Vec<TribeArt> {
     (0..TRIBES)
         .map(|tribe| TribeArt {
             poses: Pose::ALL
                 .iter()
-                .map(|&pose| (0..DIRS).map(|dir| super::procedural::frames(tribe, pose, dir)).collect())
+                .map(|&pose| (0..DIRS).map(|dir| super::procedural::frames(kind, tribe, pose, dir)).collect())
                 .collect(),
         })
         .collect()
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn generated_art_covers_every_pose_and_direction() {
-        let art = generated_art();
+        let art = generated_art(UnitKind::Warrior);
         assert_eq!(art.len(), TRIBES as usize);
         for pose in Pose::ALL {
             for dir in 0..DIRS {

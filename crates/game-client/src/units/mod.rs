@@ -19,7 +19,7 @@ use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use game_core::unit::{Action, Unit, LANDING_TICKS, TICKS_PER_SECOND};
+use game_core::unit::{Action, Unit, UnitKind, LANDING_TICKS, TICKS_PER_SECOND};
 use selection::Selection;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
@@ -101,17 +101,19 @@ pub struct FrameAsset {
     pub origin: UVec2,
 }
 
-/// Every tribe's shaman frames, uploaded once: `tribes[tribe].poses[pose][dir][frame]`.
+/// Every kind's and tribe's frames, uploaded once: `kinds[kind][tribe][pose][dir][frame]`, kinds in
+/// `UnitKind::ALL` order.
 #[derive(Resource, Default)]
-pub struct ShamanSprites {
-    tribes: Vec<Vec<Vec<Vec<FrameAsset>>>>,
+pub struct UnitSprites {
+    kinds: Vec<Vec<Vec<Vec<Vec<FrameAsset>>>>>,
 }
 
-impl ShamanSprites {
+impl UnitSprites {
     /// The frame showing `unit` from a camera at `yaw`.
     pub fn frame_for(&self, unit: &Unit, yaw: f32, clock: &SimClock) -> Option<&FrameAsset> {
         let pose = pose_for(&unit.action);
-        let frames = self.tribes.get(unit.owner as usize)?.get(pose as usize)?.get(sprite_dir(unit.facing, yaw))?;
+        let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
+        let frames = self.kinds.get(kind)?.get(unit.owner as usize)?.get(pose as usize)?.get(sprite_dir(unit.facing, yaw))?;
         frames.get(frame_index(pose, frames.len(), &unit.action, clock.anim_secs, clock.alpha()))
     }
 }
@@ -136,7 +138,7 @@ pub struct UnitsPlugin;
 impl Plugin for UnitsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SimClock>()
-            .init_resource::<ShamanSprites>()
+            .init_resource::<UnitSprites>()
             .add_plugins((selection::SelectionPlugin, dust::DustPlugin))
             .add_systems(Startup, load_sprites)
             .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks, respawn_views, animate_views).chain().in_set(crate::menu::Gameplay))
@@ -146,16 +148,23 @@ impl Plugin for UnitsPlugin {
 
 fn load_sprites(
     levels: Res<LevelList>,
-    mut sprites: ResMut<ShamanSprites>,
+    mut sprites: ResMut<UnitSprites>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
     let original = levels.original.then(|| art::original_art(&levels.data_dir).map_err(|e| warn!("original shaman sprites: {e}")).ok());
-    let art: Vec<TribeArt> = original.flatten().unwrap_or_else(|| {
+    let mut shaman = original.flatten();
+    if shaman.is_none() {
         info!("shaman: generated sprites");
-        art::generated_art()
-    });
+    }
+    let art: Vec<Vec<TribeArt>> = UnitKind::ALL
+        .iter()
+        .map(|&kind| match kind {
+            UnitKind::Shaman => shaman.take().unwrap_or_else(|| art::generated_art(kind)),
+            _ => art::generated_art(kind),
+        })
+        .collect();
     let mut upload = |f: &Frame| {
         let mut big = (0..UPSCALE_STEPS).fold(f.clone(), |g, _| art::scale2x(&g));
         art::bleed_edges(&mut big);
@@ -179,9 +188,14 @@ fn load_sprites(
         });
         FrameAsset { image, mesh: meshes.add(sprite_quad(size.x, size.y, origin)), material, size, origin }
     };
-    sprites.tribes = art
+    sprites.kinds = art
         .iter()
-        .map(|t| t.poses.iter().map(|dirs| dirs.iter().map(|frames| frames.iter().map(&mut upload).collect()).collect()).collect())
+        .map(|tribes| {
+            tribes
+                .iter()
+                .map(|t| t.poses.iter().map(|dirs| dirs.iter().map(|frames| frames.iter().map(&mut upload).collect()).collect()).collect())
+                .collect()
+        })
         .collect();
 }
 
@@ -249,7 +263,7 @@ fn animate_views(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     clock: Res<SimClock>,
-    sprites: Res<ShamanSprites>,
+    sprites: Res<UnitSprites>,
     mut views: Query<(&UnitView, &mut Grounded, &mut Transform), (Without<UnitSprite>, Without<HealthFill>)>,
     mut bodies: Query<(&UnitSprite, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>), Without<HealthFill>>,
     mut bars: Query<(&ChildOf, &mut Visibility), With<HealthBar>>,

@@ -4,7 +4,7 @@
 use super::panel::{ShamanPreview, INK};
 use crate::camera::CameraRig;
 use crate::units::selection::{selectable, Selection};
-use crate::units::{health_color, player_shaman_cell, ShamanSprites, SimClock, PLAYER};
+use crate::units::{health_color, player_shaman_cell, SimClock, UnitSprites, PLAYER};
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::unit::{Action, Unit, TICKS_PER_SECOND};
@@ -83,7 +83,7 @@ fn update_preview(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     clock: Res<SimClock>,
-    sprites: Res<ShamanSprites>,
+    sprites: Res<UnitSprites>,
     boxes: Query<&ComputedNode, With<ShamanPreview>>,
     mut sprite: Query<(&mut ImageNode, &mut Node, &mut Visibility), With<PreviewSprite>>,
     mut title: Query<&mut Text, (With<PreviewTitle>, Without<PreviewHealth>)>,

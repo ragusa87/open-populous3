@@ -1,11 +1,11 @@
 //! Main menu shown before the game: New game (the level from the command line / PgUp-PgDn list),
-//! Sandbox (test grounds: Walk), Quit. Sub-pages open on Enter and go back with Esc/Backspace or
+//! Sandbox (test grounds: Walk, Units), Quit. Sub-pages open on Enter and go back with Esc/Backspace or
 //! their Back entry; arrows (or W/S) move, Enter/Space picks, the mouse hovers and clicks.
 //! Gameplay systems are in the `Gameplay` set, which only runs while `Playing`. Behind the menu the
 //! game camera is off: no world, units or HUD are drawn, the menu has its own overlay camera.
 //! Esc in the game pauses: the mouse is released and the pause menu (Resume, Main menu with a
 //! confirmation) shows over the frozen game; Esc on it resumes.
-//! `POP3_START=menu|game|sandbox-walk` picks where to start (screenshots start in the game).
+//! `POP3_START=menu|game|sandbox-walk|sandbox-units` picks where to start (screenshots start in the game).
 
 use crate::camera::{GameCamera, OverlayCamera};
 use crate::hud::spells::{demo_book, sandbox_book, PlayerSpells, SelectedSpell};
@@ -48,6 +48,7 @@ pub enum Page {
 pub enum Start {
     NewGame,
     SandboxWalk,
+    SandboxUnits,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,7 +83,7 @@ pub fn title(page: Page) -> &'static str {
 pub fn items(page: Page) -> &'static [(&'static str, Action)] {
     match page {
         Page::Main => &[("New game", Action::Start(Start::NewGame)), ("Sandbox", Action::Open(Page::Sandbox)), ("Quit", Action::Quit)],
-        Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Back", Action::Back)],
+        Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Units", Action::Start(Start::SandboxUnits)), ("Back", Action::Back)],
         Page::Paused => &[("Resume", Action::Resume), ("Main menu", Action::Open(Page::ConfirmLeave))],
         Page::ConfirmLeave => &[("No, keep playing", Action::Back), ("Yes, back to the main menu", Action::Leave)],
     }
@@ -161,6 +162,7 @@ pub fn start_from_env(start: Option<&str>, screenshot: bool) -> Option<Start> {
         Some("menu") => None,
         Some("game") => Some(Start::NewGame),
         Some("sandbox-walk") => Some(Start::SandboxWalk),
+        Some("sandbox-units") => Some(Start::SandboxUnits),
         _ if screenshot => Some(Start::NewGame),
         _ => None,
     }
@@ -292,6 +294,7 @@ impl GameSetup<'_> {
         (self.map.0, self.spells.0) = match start {
             Start::NewGame => (self.levels.load_current(), demo_book()),
             Start::SandboxWalk => (GameMap::sandbox_walk(), sandbox_book()),
+            Start::SandboxUnits => (GameMap::sandbox_units(), sandbox_book()),
         };
         self.selected_spell.0 = None;
         self.dirty.0 = true;
@@ -455,6 +458,8 @@ mod tests {
         nav.set_cursor(1);
         nav.activate();
         assert_eq!(nav.activate(), Some(Outcome::Start(Start::SandboxWalk)));
+        nav.set_cursor(1);
+        assert_eq!(nav.activate(), Some(Outcome::Start(Start::SandboxUnits)));
         nav.set_cursor(99);
         assert_eq!(nav.activate(), None, "Back entry, clamped cursor");
         assert_eq!(nav.page(), Page::Main);
@@ -495,5 +500,6 @@ mod tests {
         assert_eq!(start_from_env(None, true), Some(Start::NewGame), "screenshots skip the menu");
         assert_eq!(start_from_env(Some("menu"), true), None);
         assert_eq!(start_from_env(Some("sandbox-walk"), false), Some(Start::SandboxWalk));
+        assert_eq!(start_from_env(Some("sandbox-units"), false), Some(Start::SandboxUnits));
     }
 }

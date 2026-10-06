@@ -101,8 +101,9 @@ impl GameMap {
     }
 
     /// Test ground for units: a flat island with the player's site and shaman at the centre, three
-    /// of every other kind for the player in rows to the north (one row per kind), one of each for
-    /// tribe 1 (red, no shaman) in a column to the east, and a pond to the west to walk around.
+    /// of every other kind for the player in columns to the west (one column per kind), one of each
+    /// for tribe 1 (red, no shaman) in a row to the east, all in view of the starting camera (south
+    /// of the site), and a pond to the north to walk around.
     pub fn sandbox_units() -> Self {
         const C: i32 = MAP_SIZE as i32 / 2;
         const ISLAND: i32 = 24;
@@ -110,7 +111,7 @@ impl GameMap {
         for z in 0..MAP_SIZE as i32 {
             for x in 0..MAP_SIZE as i32 {
                 let (dx, dz) = (x - C, z - C);
-                let pond = (dx + 10) * (dx + 10) + (dz - 4) * (dz - 4) <= 9;
+                let pond = dx * dx + (dz + 9) * (dz + 9) <= 9;
                 if dx * dx + dz * dz <= ISLAND * ISLAND && !pond {
                     terrain.set(x, z, 64);
                 }
@@ -123,10 +124,10 @@ impl GameMap {
             let row = row as i32;
             for n in 0..3 {
                 let id = map.units.len() as u32 + 1;
-                map.units.push(Unit::new(id, 0, kind, at(2 * n - 2, -6 - 2 * row)));
+                map.units.push(Unit::new(id, 0, kind, at(-5 - 2 * row, 2 * n - 2)));
             }
             let id = map.units.len() as u32 + 1;
-            map.units.push(Unit::new(id, 1, kind, at(10, 2 * row - 4)));
+            map.units.push(Unit::new(id, 1, kind, at(6 + 2 * row, 0)));
         }
         map
     }
@@ -332,7 +333,7 @@ mod tests {
             assert!(Mobility::Walk.passable(&m.terrain, u.cell()), "{:?} on walkable land", u.kind);
         }
         let c = MAP_SIZE as i32 / 2;
-        assert!(m.terrain.is_water(c - 10, c + 4), "pond");
+        assert!(m.terrain.is_water(c, c - 9), "pond");
     }
 
     #[test]

@@ -40,7 +40,8 @@ Placeholder balance until combat (`max_health`, flat-ground `speed` in world uni
 Every kind walks, prays, heals, drowns and dies like the shaman; only the shaman reincarnates (the others stay
 `Dead`, lying where they fell). `Command::Order` and spells go to the player's shaman (`GameMap::shaman_of`),
 `Command::OrderUnit` to any unit. Sandbox > Units (`GameMap::sandbox_units`): flat island, the player's site and
-shaman, three of each other kind in rows to the north, one of each for tribe 1 (red) to the east, a pond to the west.
+shaman, three of each other kind in columns to the west, one of each for tribe 1 (red) in a row to the east (all in
+view of the starting camera), a pond to the north.
 
 ## Pathfinding (done: `game_core::path`)
 - `path::Mobility`: Walk (land, not open sea = cell with 4 water corners, not a cliff = a cell edge
@@ -79,7 +80,10 @@ shaman, three of each other kind in rows to the north, one of each for tribe 1 (
 - View direction: `facing * 45deg - camera yaw`, rounded to the 8 drawn directions (0 front, 2 screen right, 4 back).
 - Art: with the original files, the shaman animations of `VSTART/VFRA/VELE` + `HSPR0-0.DAT` (see animations.md),
   per tribe; otherwise (or `--no-original`) `units/procedural.rs` draws a ~34 px pixel-art figure in the tribe colour
-  (feather headdress, staff) for every pose and direction (front / side / back, left ones mirrored).
+  (feather headdress, staff) for every pose and direction (front / side / back, left ones mirrored). The other kinds
+  are always generated (`UnitSprites`, per kind and tribe), told apart by headgear, held item and clothes: brave
+  (bare chest, hair tuft, empty hands), warrior (horned helmet, club), preacher (pointed hood, long robe, book), spy
+  (dark cloak and cowl, dagger), firewarrior (red cone hat, flame in hand).
 - Selection (`units/selection.rs`, player 0's living units): left click on a unit selects it, Ctrl+click adds or
   removes it; a left drag (over 6 px) draws a whitish box and selects the units whose middle is inside (Ctrl adds);
   right click clears. On the map the shaman is selected like any unit (click, Ctrl, box); clicking her panel

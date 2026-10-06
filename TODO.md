@@ -16,7 +16,9 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Replanning: every walker replans on any terrain write; only replan when the change touches its route (`DirtyRect`) once there are many units. Group moves could share a flow field.
 - [ ] Stranded units (not the shaman): arms-up animation for braves and others (the action exists in the simulation, shown as Idle).
 - [ ] Boarding vehicles: walk to `path::nearest_reachable` next to the boat/balloon, then board when it is within reach. Boats path with `Mobility::Sail`, balloons with `Mobility::Fly`.
-- [ ] Braves, warriors, preachers, spies, firewarriors: simulate them and map their animations (0-52, 89-92) in `ShamanAnim`-like catalogs.
+- [ ] Braves, warriors, preachers, spies, firewarriors: map their original animations (0-52, 89-92) in `ShamanAnim`-like catalogs (they walk with generated art for now). Anims 0-52 are per action with layered body parts and tribe colours, not one block per kind.
+- [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
+- [ ] Dead units other than the shaman lie where they fell forever: remove them after a while (views are indexed by unit position: give them stable ids first).
 - [ ] Wildmen (neutral "gaia" braves): wander around, drink, eat fruit from trees; the Convert spell turns them into the caster's braves.
 - [ ] Spawn units from the level things (person records) instead of one shaman per site.
 - [ ] Low health: a star/crown spinning over the head of units low on health (original art to find); health bars only show on selected units.
