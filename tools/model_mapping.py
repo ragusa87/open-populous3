@@ -14,10 +14,33 @@ import sys
 
 from PIL import Image, ImageDraw
 
-INSTALL = sys.argv[1] if len(sys.argv) > 1 else os.environ.get(
-    "POP3_INSTALL",
-    os.path.expanduser("~/.wine/drive_c/Program Files (x86)/Bullfrog/Populous - A l'aube de la création"),
-)
+def find_install():
+    """Same lookup as pop3_format::install: $POP3_INSTALL, else Wine prefixes / C:\\ Program Files."""
+    if os.environ.get("POP3_INSTALL"):
+        return os.environ["POP3_INSTALL"]
+    if os.name == "nt":
+        drives = ["C:\\"]
+    else:
+        drives = [os.path.join(p, "drive_c") for p in (os.environ.get("WINEPREFIX"), os.path.expanduser("~/.wine")) if p]
+    bases = []
+    for drive in drives:
+        bases += [os.path.join(drive, pf, "Bullfrog") for pf in ("Program Files (x86)", "Program Files")]
+        bases.append(os.path.join(drive, "GOG Games"))
+
+    def is_install(d):
+        return os.path.isdir(d) and any(f.lower() == "levels" and os.path.isdir(os.path.join(d, f)) for f in os.listdir(d))
+
+    for base in bases:
+        if is_install(base):
+            return base
+        if os.path.isdir(base):
+            for sub in sorted(os.listdir(base)):
+                if is_install(os.path.join(base, sub)):
+                    return os.path.join(base, sub)
+    sys.exit("no original install found: set POP3_INSTALL or pass the install dir")
+
+
+INSTALL = sys.argv[1] if len(sys.argv) > 1 else find_install()
 OUT = sys.argv[2] if len(sys.argv) > 2 else "target/model-mapping.html"
 THUMB = 160
 

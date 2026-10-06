@@ -11,18 +11,15 @@ use game_core::map::GameMap;
 use pop3_format::Theme;
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_LEVELS_DIR: &str =
-    "/home/laurent/.wine/drive_c/Program Files (x86)/Bullfrog/Populous - A l'aube de la création/levels";
-
 #[derive(Resource)]
 pub struct CurrentMap(pub GameMap);
 
 /// Original `levl*.dat` files found on disk, PageUp/PageDown cycles through them.
 #[derive(Resource, Default)]
 pub struct LevelList {
-    /// Original `data/` dir (themes), `$POP3_DATA` or `<levels>/../data`.
+    /// Original `data/` dir (themes, sprites), `$POP3_DATA` or the levels dir's sibling `data`.
     pub data_dir: PathBuf,
-    /// Original `objects/` dir (3D models), `$POP3_OBJECTS` or `<levels>/../objects`.
+    /// Original `objects/` dir (3D models), `$POP3_OBJECTS` or the levels dir's sibling `objects`.
     pub objects_dir: PathBuf,
     /// false with `--no-original`: never read any original file.
     pub original: bool,
@@ -46,19 +43,29 @@ impl LevelList {
         LevelList::default()
     }
 
-    /// `arg` may be a level file, a levels directory, or nothing (default dir / $POP3_LEVELS).
+    /// `arg` may be a level file, a levels directory, or nothing: then `$POP3_LEVELS`, else the
+    /// `levels/` of the install (`$POP3_INSTALL` or the usual Wine / `C:\` locations). Nothing
+    /// found: fully generated, like `--no-original`.
     pub fn discover(arg: Option<&str>) -> Self {
-        let env = std::env::var("POP3_LEVELS").ok();
-        let path = PathBuf::from(arg.or(env.as_deref()).unwrap_or(DEFAULT_LEVELS_DIR));
+        let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+        let path = arg.map(PathBuf::from).or_else(|| env("POP3_LEVELS")).or_else(|| {
+            pop3_format::install::find_install().map(|i| pop3_format::install::subdir(&i, "levels"))
+        });
+        let Some(path) = path else {
+            info!("no original install found (set POP3_INSTALL): using generated maps and art");
+            return LevelList::generated_only();
+        };
         let (dir, selected) = if path.is_file() {
             (path.parent().map(Path::to_path_buf).unwrap_or_default(), Some(path.clone()))
         } else {
             (path, None)
         };
+        info!("original levels: {}", dir.display());
         let files = list_levels(&dir);
         let index = selected.and_then(|s| files.iter().position(|f| *f == s)).unwrap_or(0);
-        let data_dir = std::env::var("POP3_DATA").map(PathBuf::from).unwrap_or_else(|_| dir.join("../data"));
-        let objects_dir = std::env::var("POP3_OBJECTS").map(PathBuf::from).unwrap_or_else(|_| dir.join("../objects"));
+        let (data_sibling, objects_sibling) = sibling_dirs(&dir);
+        let data_dir = env("POP3_DATA").unwrap_or(data_sibling);
+        let objects_dir = env("POP3_OBJECTS").unwrap_or(objects_sibling);
         LevelList { data_dir, objects_dir, original: true, files, index }
     }
 
@@ -68,6 +75,12 @@ impl LevelList {
             .and_then(|p| GameMap::load_original(p).map_err(|e| warn!("{}: {e}", p.display())).ok())
             .unwrap_or_else(|| GameMap::generate(self.index as u32 + 1))
     }
+}
+
+/// `data/` and `objects/` next to a levels directory (any case).
+pub fn sibling_dirs(levels_dir: &Path) -> (PathBuf, PathBuf) {
+    let install = levels_dir.parent().unwrap_or(levels_dir);
+    (pop3_format::install::subdir(install, "data"), pop3_format::install::subdir(install, "objects"))
 }
 
 pub fn list_levels(dir: &Path) -> Vec<PathBuf> {
@@ -223,6 +236,12 @@ mod tests {
         assert_eq!(next_index(0, 3, false), 2);
         assert_eq!(next_index(4, 0, true), 5, "generated seeds keep going");
         assert_eq!(next_index(0, 0, false), 0);
+    }
+
+    #[test]
+    fn data_and_objects_sit_next_to_levels() {
+        let (data, objects) = sibling_dirs(Path::new("/nowhere/Populous/levels"));
+        assert_eq!((data, objects), (PathBuf::from("/nowhere/Populous/data"), PathBuf::from("/nowhere/Populous/objects")));
     }
 
     #[test]

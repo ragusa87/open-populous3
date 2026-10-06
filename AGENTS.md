@@ -15,7 +15,7 @@ Guidance for coding agents working on this repo (Rust + Bevy 0.19 Populous-like 
 - `just shot out.png [level]` / `AERIAL=1 just shot out.png`: headless offscreen render, then exits. Use this to check visuals.
 - `just run-generated` / `--no-original`: no original files read at all (use for anything shippable).
 - `just level-info file.dat`: dump parsed level.
-- Original levels: `$POP3_LEVELS` or the Wine install path in `world.rs` (`DEFAULT_LEVELS_DIR`). Read-only, never modify or ship them.
+- Original files: `$POP3_INSTALL`, else auto-detected (Wine prefixes, `C:\Program Files*\Bullfrog\*`) by `pop3_format::install`; `--no-original` skips it. Read-only, never modify or ship them.
 
 ## Rules
 - Keep logic in small pure functions with unit tests next to them; Bevy systems stay thin.
