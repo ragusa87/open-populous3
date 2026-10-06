@@ -59,8 +59,11 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | 141-144 | warrior training hut, per tribe |
 | 145-180 | villager huts: 3 styles x 4 tribes x 3 sizes, `145 + style*12 + tribe*3 + size-1` |
 | 181, 182 | boat (blue), airship (balloon) |
+| 187, 188, 189 | totem poles |
+| 191 | pyramid of knowledge (unlocks a spell or building); 192, 193 door animation frames |
 
-Unidentified: 0, 12 (wooden board), 13-18 (trees?), 20, 75-81 (stone pillars, standing stones, arch), 89-93.
+Unidentified: 0, 12 (wooden board), 13-18 (trees?), 20, 75-81 (stone pillars, standing stones, arch), 89-93,
+190 (looks like the pyramid of knowledge).
 
 ### Tribe colours
 Objects are stored in blue. Tribe-coloured atlas tiles have their red, yellow and green versions right after

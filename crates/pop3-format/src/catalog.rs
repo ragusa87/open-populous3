@@ -24,6 +24,11 @@ pub const TREES: std::ops::RangeInclusive<usize> = 60..=71;
 pub const STONE_HEAD: usize = 82;
 /// Prison holding the shaman until freed (some levels).
 pub const PRISON: usize = 94;
+/// Totem poles (three variants).
+pub const TOTEM_POLES: [usize; 3] = [187, 188, 189];
+/// Pyramid of knowledge: unlocks a spell or a building. 192-193 are door animation frames.
+pub const KNOWLEDGE_PYRAMID: usize = 191;
+pub const KNOWLEDGE_PYRAMID_DOOR: std::ops::RangeInclusive<usize> = 192..=193;
 /// Boat (blue) and airship.
 pub const BOAT: usize = 181;
 pub const AIRSHIP: usize = 182;
