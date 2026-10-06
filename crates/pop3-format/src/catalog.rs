@@ -3,6 +3,9 @@
 
 pub const TRIBES: u8 = 4;
 
+/// Camp fire (probably): wood at the base, a flat board the flames are drawn on.
+/// 12 looks identical but smaller (another frame or size, unconfirmed).
+pub const CAMP_FIRE: usize = 0;
 /// Totem (textured; 2 and 4 are untextured copies, 3 the rock-rotation animation frame).
 pub const TOTEM: usize = 1;
 pub const TOTEM_ANIMATED: usize = 3;
