@@ -10,6 +10,7 @@ crates/
                   world.rs        CurrentMap, LevelList, terrain entity rebuild
                   terrain_mesh.rs pure mesh builder (curvature, colors, normals), unit-tested
                   grounded.rs     parts set on the curved terrain under them (sites, buildings...)
+                  original_models.rs original 3D objects -> meshes + theme atlas (optional)
                   sites.rs        reincarnation site markers on the curved surface
                   camera.rs       CameraRig (focus wraps on the torus), input, aerial toggle
                   hud.rs          info text + control tabs (Spells/Buildings/Followers)

@@ -7,6 +7,7 @@ mod edge_push;
 mod editor;
 mod grounded;
 mod hud;
+mod original_models;
 mod procedural_theme;
 mod sites;
 mod terrain_mesh;

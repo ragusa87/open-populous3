@@ -22,6 +22,10 @@ pub struct CurrentMap(pub GameMap);
 pub struct LevelList {
     /// Original `data/` dir (themes), `$POP3_DATA` or `<levels>/../data`.
     pub data_dir: PathBuf,
+    /// Original `objects/` dir (3D models), `$POP3_OBJECTS` or `<levels>/../objects`.
+    pub objects_dir: PathBuf,
+    /// false with `--no-original`: never read any original file.
+    pub original: bool,
     pub files: Vec<PathBuf>,
     pub index: usize,
 }
@@ -54,7 +58,8 @@ impl LevelList {
         let files = list_levels(&dir);
         let index = selected.and_then(|s| files.iter().position(|f| *f == s)).unwrap_or(0);
         let data_dir = std::env::var("POP3_DATA").map(PathBuf::from).unwrap_or_else(|_| dir.join("../data"));
-        LevelList { data_dir, files, index }
+        let objects_dir = std::env::var("POP3_OBJECTS").map(PathBuf::from).unwrap_or_else(|_| dir.join("../objects"));
+        LevelList { data_dir, objects_dir, original: true, files, index }
     }
 
     pub fn load_current(&self) -> GameMap {
@@ -94,7 +99,13 @@ impl Plugin for WorldPlugin {
             LevelList::generated_only()
         };
         let map = levels.load_current();
+        let objects = if levels.original {
+            crate::original_models::OriginalObjects::load(&levels.objects_dir)
+        } else {
+            crate::original_models::OriginalObjects::default()
+        };
         app.insert_resource(CurrentMap(map))
+            .insert_resource(objects)
             .insert_resource(levels)
             .insert_resource(TerrainDirty(true))
             .init_resource::<CurveParamsRes>()
@@ -216,6 +227,7 @@ mod tests {
 
     #[test]
     fn generated_only_lists_nothing() {
-        assert!(LevelList::generated_only().files.is_empty());
+        let l = LevelList::generated_only();
+        assert!(l.files.is_empty() && !l.original);
     }
 }
