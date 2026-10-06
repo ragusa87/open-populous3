@@ -22,14 +22,14 @@ use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// The local player's tribe.
 pub const PLAYER: u8 = 0;
-/// Cells per sprite pixel: the ~34 px shaman stands about 0.6 cell tall, three quarters of a
-/// reincarnation stone (400 units, 0.78 cell).
-pub const PIXEL: f32 = 1.0 / 56.0;
+/// Cells per sprite pixel: the ~34 px shaman stands about 0.39 cell tall, half a reincarnation
+/// stone (400 units, 0.78 cell).
+pub const PIXEL: f32 = 1.0 / 88.0;
 /// Sprites are uploaded upscaled (Scale2x twice) and filtered linearly instead of shown as blocks.
 const UPSCALE_STEPS: usize = 2;
 const TICK_SECS: f32 = 1.0 / TICKS_PER_SECOND as f32;
-const BAR_HEIGHT: f32 = 0.75;
-const BAR_SIZE: Vec2 = Vec2::new(0.5, 0.06);
+const BAR_HEIGHT: f32 = 0.5;
+const BAR_SIZE: Vec2 = Vec2::new(0.36, 0.045);
 /// Footprint half size: the sprite rests on the lowest ground under it.
 const FOOT_HALF: f32 = 0.15;
 
@@ -266,8 +266,8 @@ fn animate_views(
     for (fill, mut t, mat) in &mut fills {
         let Some(u) = units.get(fill.0) else { continue };
         let f = u.health as f32 / u.max_health() as f32;
-        t.scale.x = (BAR_SIZE.x - 0.04) * f;
-        t.translation.x = -(BAR_SIZE.x - 0.04) * (1.0 - f) / 2.0;
+        t.scale.x = (BAR_SIZE.x - 0.03) * f;
+        t.translation.x = -(BAR_SIZE.x - 0.03) * (1.0 - f) / 2.0;
         if let Some(mut m) = mats.get_mut(&mat.0) {
             m.base_color = health_color(f);
         }

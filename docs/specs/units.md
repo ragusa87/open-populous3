@@ -45,7 +45,7 @@ Health: 100. Orders are ignored while drowning, dying or dead.
 
 ## Shaman on screen (client, `units/`)
 - `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks.
-- Each unit is a `Grounded` sprite quad (1 px = 1/56 cell: standing ~0.6 cell, 3/4 of a site stone; feet at the
+- Each unit is a `Grounded` sprite quad (1 px = 1/88 cell: standing ~0.39 cell, half a site stone; feet at the
   anchor) turned to face the camera, uploaded Scale2x-upscaled x4 and filtered linearly (no blocky pixels),
   with a health bar over the head (green -> yellow -> red) shown only while the unit is selected and alive.
   The original has no health bar: low-health units get a spinning star/crown over the head (to do). The panel

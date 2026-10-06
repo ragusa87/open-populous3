@@ -18,8 +18,8 @@ use game_core::unit::{Order, Unit};
 pub const DRAG_PX: f32 = 6.0;
 /// A click hits a unit within this many pixels of its feet-to-head line.
 pub const HIT_PX: f32 = 10.0;
-/// Height of a unit's hit line, in cells (the shaman sprite is ~0.6 cell tall).
-const UNIT_HEIGHT: f32 = 0.6;
+/// Height of a unit's hit line, in cells (the shaman sprite is ~0.39 cell tall).
+const UNIT_HEIGHT: f32 = 0.4;
 const BOX_BORDER: Color = Color::srgba(1.0, 1.0, 0.95, 0.85);
 const BOX_FILL: Color = Color::srgba(1.0, 1.0, 0.95, 0.08);
 
