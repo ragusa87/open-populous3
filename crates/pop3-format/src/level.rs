@@ -20,6 +20,14 @@ const THINGS_OFFSET: usize = MISC_OFFSET + MISC_SIZE;
 pub const THING_SIZE: usize = 55;
 pub const MAX_THINGS: usize = 2000;
 
+/// `Thing::kind` values (subset, see docs/specs/level-format.md).
+pub const KIND_PERSON: u8 = 1;
+pub const KIND_BUILDING: u8 = 2;
+pub const KIND_SCENERY: u8 = 5;
+pub const KIND_GENERAL: u8 = 6;
+/// `Thing::model` of a person that is the tribe's shaman.
+pub const PERSON_SHAMAN: u8 = 7;
+
 const HDR_NAME_OFFSET: usize = 56;
 const HDR_NAME_LEN: usize = 32;
 const HDR_THEME_OFFSET: usize = 96;
@@ -76,6 +84,10 @@ impl Thing {
 
     pub fn is_empty(&self) -> bool {
         self.kind == 0
+    }
+
+    pub fn is_shaman(&self) -> bool {
+        self.kind == KIND_PERSON && self.model == PERSON_SHAMAN
     }
 }
 
@@ -173,6 +185,17 @@ mod tests {
         assert_eq!(lvl.things.len(), 1);
         let t = &lvl.things[0];
         assert_eq!((t.model, t.kind, t.x, t.z), (1, 2, 0x0300, 0xfb00));
+    }
+
+    #[test]
+    fn shaman_is_person_model_7() {
+        let mut d = synthetic();
+        let t = THINGS_OFFSET + THING_SIZE * 5;
+        d[t..t + 3].copy_from_slice(&[PERSON_SHAMAN, KIND_PERSON, 1]);
+        let lvl = Level::parse(&d).unwrap();
+        let shamans: Vec<_> = lvl.things.iter().filter(|t| t.is_shaman()).collect();
+        assert_eq!(shamans.len(), 1);
+        assert_eq!(shamans[0].owner, 1);
     }
 
     #[test]

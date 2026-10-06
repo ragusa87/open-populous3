@@ -22,11 +22,15 @@ Thing record (55 bytes), known part:
 | Byte | Field |
 |---|---|
 | 0 | model (subtype, e.g. tree variant) |
-| 1 | kind (observed: 5 = scenery, 6 = general/marker; 1 person, 2 building expected) |
+| 1 | kind: 1 person, 2 building, 4 vehicle, 5 scenery, 6 general/marker, 7 effect |
 | 2 | owner tribe (255 = neutral) |
 | 3..5 | x, `u16`, world units (512 per cell, odd multiples of 256 = cell centre) |
 | 5..7 | z, `u16` |
 | 7..55 | unknown (kept raw in `Thing::raw`) |
+
+Person models: 1 wild, 2 brave, 3 warrior, 4 preacher, 5 spy, 6 firewarrior, 7 shaman.
+Each tribe has exactly one shaman thing; its position is the tribe's reincarnation site
+(the original game builds the site there, it is not a separate thing in the file).
 
 Axis order (`x` vs `z`) is unverified; a mirrored map would still look right.
 

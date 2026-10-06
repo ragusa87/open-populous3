@@ -6,5 +6,5 @@
 pub mod level;
 pub mod theme;
 
-pub use level::{Level, LevelError, LevelHeader, Thing, MAP_CELLS, MAP_SIZE};
+pub use level::{Level, LevelError, LevelHeader, Thing, MAP_CELLS, MAP_SIZE, WORLD_UNITS_PER_CELL};
 pub use theme::{theme_char, Theme};
