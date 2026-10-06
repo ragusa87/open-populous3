@@ -16,3 +16,9 @@
 - Fixed and indestructible: no `Command` moves or removes it. `spawn_point()` is where the shaman
   appears at start and after death (to wire once units are simulated).
 - Rendered as a stone ring with a tribe-coloured totem; the camera starts on the player's (tribe 0) site.
+
+## Standing on the ground (client)
+Anything placed on the map (site stones, buildings, trees, units) is made of `grounded::Grounded`
+parts: each part has its own cell position and footprint, and is set on the terrain exactly as the
+mesh draws it (same triangle split, same `drop_at` curve), resting on its lowest footprint corner so
+it never floats. Multi-part objects (a building's walls/corners) follow slopes instead of staying flat.

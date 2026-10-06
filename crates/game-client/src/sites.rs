@@ -1,25 +1,38 @@
-//! Reincarnation sites: a stone ring with a tribe-coloured totem, placed on the curved
-//! terrain around the camera focus (same `drop_at` bend as the ground mesh).
+//! Reincarnation sites: a stone ring with a tribe-coloured totem. Every stone is its own
+//! `Grounded` part, so the ring follows slopes and the planet curve instead of staying flat.
 
-use crate::camera::{CameraRig, CurveParamsRes};
-use crate::terrain_mesh::{drop_at, CurveParams};
+use crate::grounded::Grounded;
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::site::ReincarnationSite;
-use game_core::terrain::Heightmap;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 const STONES: usize = 8;
 const RING_RADIUS: f32 = 1.3;
+const STONE: Vec3 = Vec3::new(0.22, 0.6, 0.22);
+const TOTEM: (f32, f32) = (0.16, 1.4);
 
 #[derive(Component)]
-struct SiteMarker(ReincarnationSite);
+struct SiteMarker;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PartKind {
+    Totem,
+    Stone,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SitePart {
+    pub kind: PartKind,
+    pub ground: Grounded,
+    pub yaw: f32,
+}
 
 pub struct SitesPlugin;
 
 impl Plugin for SitesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (respawn_markers, place_markers).chain());
+        app.add_systems(Update, respawn_markers);
     }
 }
 
@@ -39,18 +52,16 @@ pub fn site_cell_pos(site: &ReincarnationSite) -> Vec2 {
     Vec2::new(site.x as f32, site.z as f32) / WORLD_UNITS_PER_CELL as f32
 }
 
-/// Render-space position of a cell point for a camera-centred, curved terrain, taking the
-/// shortest way around the torus. None when outside the drawn disc.
-pub fn render_pos(map: &Heightmap, at: Vec2, focus: Vec2, params: &CurveParams) -> Option<Vec3> {
-    let size = map.size() as f32;
-    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
-    let (dx, dz) = (wrap(at.x - focus.x), wrap(at.y - focus.y));
-    let r = params.radius as f32 - 1.0;
-    if dx * dx + dz * dz > r * r {
-        return None;
-    }
-    let y = map.sample(at.x, at.y) * params.height_scale - drop_at(params, dx, dz);
-    Some(Vec3::new(dx, y, dz))
+/// Totem at the centre, then a ring of stones facing it, each with its own ground position.
+pub fn site_parts(site: &ReincarnationSite) -> Vec<SitePart> {
+    let centre = site_cell_pos(site);
+    let totem = SitePart { kind: PartKind::Totem, ground: Grounded { at: centre, half: TOTEM.0 }, yaw: 0.0 };
+    let stones = (0..STONES).map(|i| {
+        let a = i as f32 * std::f32::consts::TAU / STONES as f32;
+        let at = centre + Vec2::new(a.cos(), a.sin()) * RING_RADIUS;
+        SitePart { kind: PartKind::Stone, ground: Grounded { at, half: STONE.x / 2.0 }, yaw: -a }
+    });
+    std::iter::once(totem).chain(stones).collect()
 }
 
 fn respawn_markers(
@@ -66,41 +77,24 @@ fn respawn_markers(
     for e in &existing {
         commands.entity(e).despawn();
     }
-    let stone_mesh = meshes.add(Cuboid::new(0.22, 0.6, 0.22));
-    let totem_mesh = meshes.add(Cylinder::new(0.16, 1.4));
+    let stone_mesh = meshes.add(Cuboid::from_size(STONE));
+    let totem_mesh = meshes.add(Cylinder::new(TOTEM.0, TOTEM.1));
     let stone = mats.add(StandardMaterial { base_color: Color::srgb(0.55, 0.52, 0.48), perceptual_roughness: 0.9, ..default() });
     for site in &map.0.sites {
         let totem = mats.add(StandardMaterial { base_color: tribe_color(site.owner), ..default() });
-        commands
-            .spawn((SiteMarker(*site), Transform::default(), Visibility::Hidden))
-            .with_children(|p| {
-                p.spawn((Mesh3d(totem_mesh.clone()), MeshMaterial3d(totem), Transform::from_xyz(0.0, 0.7, 0.0)));
-                for i in 0..STONES {
-                    let a = i as f32 * std::f32::consts::TAU / STONES as f32;
-                    p.spawn((
-                        Mesh3d(stone_mesh.clone()),
-                        MeshMaterial3d(stone.clone()),
-                        Transform::from_xyz(a.cos() * RING_RADIUS, 0.3, a.sin() * RING_RADIUS)
-                            .with_rotation(Quat::from_rotation_y(-a)),
-                    ));
-                }
-            });
-    }
-}
-
-fn place_markers(
-    rig: Res<CameraRig>,
-    map: Res<CurrentMap>,
-    params: Res<CurveParamsRes>,
-    mut q: Query<(&SiteMarker, &mut Transform, &mut Visibility)>,
-) {
-    for (marker, mut t, mut vis) in &mut q {
-        match render_pos(&map.0.terrain, site_cell_pos(&marker.0), rig.focus, &params.0) {
-            Some(p) => {
-                t.translation = p;
-                *vis = Visibility::Inherited;
-            }
-            None => *vis = Visibility::Hidden,
+        for part in site_parts(site) {
+            let (mesh, mat, height) = match part.kind {
+                PartKind::Totem => (totem_mesh.clone(), totem.clone(), TOTEM.1),
+                PartKind::Stone => (stone_mesh.clone(), stone.clone(), STONE.y),
+            };
+            commands
+                .spawn((
+                    SiteMarker,
+                    part.ground,
+                    Transform::from_rotation(Quat::from_rotation_y(part.yaw)),
+                    Visibility::Hidden,
+                ))
+                .with_child((Mesh3d(mesh), MeshMaterial3d(mat), Transform::from_xyz(0.0, height / 2.0, 0.0)));
         }
     }
 }
@@ -109,10 +103,6 @@ fn place_markers(
 mod tests {
     use super::*;
 
-    fn flat() -> (Heightmap, CurveParams) {
-        (Heightmap::new(128), CurveParams { radius: 10, curvature: 0.0, ..Default::default() })
-    }
-
     #[test]
     fn site_centre_is_cell_centre() {
         let s = ReincarnationSite::at_cell(0, (8, 107));
@@ -120,18 +110,15 @@ mod tests {
     }
 
     #[test]
-    fn render_pos_wraps_around_the_torus() {
-        let (map, p) = flat();
-        let pos = render_pos(&map, Vec2::new(1.0, 1.0), Vec2::new(126.0, 127.0), &p).unwrap();
-        assert_eq!((pos.x, pos.z), (3.0, 2.0));
-    }
-
-    #[test]
-    fn render_pos_hidden_outside_disc_and_follows_height() {
-        let (mut map, p) = flat();
-        assert!(render_pos(&map, Vec2::new(40.0, 40.0), Vec2::ZERO, &p).is_none());
-        map.set(5, 5, 768);
-        let pos = render_pos(&map, Vec2::new(5.0, 5.0), Vec2::new(3.0, 3.0), &p).unwrap();
-        assert_eq!(pos.y, 2.0);
+    fn stones_ring_the_totem_each_on_its_own_ground() {
+        let s = ReincarnationSite::at_cell(1, (10, 20));
+        let parts = site_parts(&s);
+        assert_eq!(parts.len(), 1 + STONES);
+        assert_eq!(parts[0].kind, PartKind::Totem);
+        assert_eq!(parts[0].ground.at, Vec2::new(10.5, 20.5));
+        for p in &parts[1..] {
+            let d = p.ground.at.distance(parts[0].ground.at);
+            assert!((d - RING_RADIUS).abs() < 1e-5);
+        }
     }
 }

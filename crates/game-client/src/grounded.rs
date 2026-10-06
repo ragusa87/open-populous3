@@ -1,0 +1,135 @@
+//! Things standing on the ground (site stones, later buildings, trees, units): each part has
+//! its own map position and is set on the curved terrain under it, so footprints follow slopes.
+
+use crate::camera::{CameraRig, CurveParamsRes};
+use crate::terrain_mesh::{drop_at, CurveParams};
+use crate::world::CurrentMap;
+use bevy::prelude::*;
+use game_core::terrain::Heightmap;
+
+/// A part standing on the ground at `at` (cell coordinates, wraps).
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct Grounded {
+    pub at: Vec2,
+    /// Half size of the square footprint: the part rests on its lowest corner so it never floats.
+    pub half: f32,
+}
+
+pub struct GroundedPlugin;
+
+impl Plugin for GroundedPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(PostUpdate, place_grounded.before(TransformSystems::Propagate));
+    }
+}
+
+/// Unscaled ground height exactly as the terrain mesh draws it: two triangles per cell,
+/// split along the (1,0)-(0,1) diagonal.
+pub fn mesh_height(map: &Heightmap, x: f32, z: f32) -> f32 {
+    let (x0, z0) = (x.floor(), z.floor());
+    let (fx, fz) = (x - x0, z - z0);
+    let (x0, z0) = (x0 as i32, z0 as i32);
+    let h = |dx, dz| map.get(x0 + dx, z0 + dz) as f32;
+    if fx + fz <= 1.0 {
+        h(0, 0) + (h(1, 0) - h(0, 0)) * fx + (h(0, 1) - h(0, 0)) * fz
+    } else {
+        h(1, 1) + (h(0, 1) - h(1, 1)) * (1.0 - fx) + (h(1, 0) - h(1, 1)) * (1.0 - fz)
+    }
+}
+
+/// Render-space position of a grounded part around the camera focus, taking the shortest way
+/// around the torus. None when outside the drawn disc.
+pub fn render_pos(map: &Heightmap, g: &Grounded, focus: Vec2, params: &CurveParams) -> Option<Vec3> {
+    let size = map.size() as f32;
+    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
+    let (dx, dz) = (wrap(g.at.x - focus.x), wrap(g.at.y - focus.y));
+    let r = params.radius as f32 - 1.0;
+    if dx * dx + dz * dz > r * r {
+        return None;
+    }
+    let corners = [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0), (0.0, 0.0)];
+    let y = corners
+        .iter()
+        .map(|&(cx, cz)| {
+            let (ox, oz) = (cx * g.half, cz * g.half);
+            mesh_height(map, g.at.x + ox, g.at.y + oz) * params.height_scale - drop_at(params, dx + ox, dz + oz)
+        })
+        .fold(f32::INFINITY, f32::min);
+    Some(Vec3::new(dx, y, dz))
+}
+
+fn place_grounded(
+    rig: Res<CameraRig>,
+    map: Res<CurrentMap>,
+    params: Res<CurveParamsRes>,
+    mut q: Query<(&Grounded, &mut Transform, &mut Visibility)>,
+) {
+    for (g, mut t, mut vis) in &mut q {
+        match render_pos(&map.0.terrain, g, rig.focus, &params.0) {
+            Some(p) => {
+                t.translation = p;
+                *vis = Visibility::Inherited;
+            }
+            None => *vis = Visibility::Hidden,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flat_params() -> CurveParams {
+        CurveParams { radius: 10, curvature: 0.0, height_scale: 1.0 }
+    }
+
+    fn point(at: Vec2) -> Grounded {
+        Grounded { at, half: 0.0 }
+    }
+
+    #[test]
+    fn mesh_height_matches_triangle_split() {
+        let mut map = Heightmap::new(8);
+        map.set(1, 1, 100);
+        assert_eq!(mesh_height(&map, 0.5, 0.5), 0.0, "on the diagonal, (1,1) does not count");
+        assert_eq!(mesh_height(&map, 0.75, 0.75), 50.0);
+        assert_eq!(mesh_height(&map, 1.0, 1.0), 100.0);
+        assert_eq!(mesh_height(&map, -7.0, -7.0), 100.0, "wraps");
+    }
+
+    #[test]
+    fn render_pos_wraps_around_the_torus() {
+        let map = Heightmap::new(128);
+        let pos = render_pos(&map, &point(Vec2::new(1.0, 1.0)), Vec2::new(126.0, 127.0), &flat_params()).unwrap();
+        assert_eq!((pos.x, pos.z), (3.0, 2.0));
+    }
+
+    #[test]
+    fn hidden_outside_the_disc() {
+        let map = Heightmap::new(128);
+        assert!(render_pos(&map, &point(Vec2::new(40.0, 40.0)), Vec2::ZERO, &flat_params()).is_none());
+    }
+
+    #[test]
+    fn rests_on_lowest_corner_of_a_slope() {
+        let mut map = Heightmap::new(16);
+        for z in 0..16 {
+            for x in 0..16 {
+                map.set(x, z, (x * 10) as u16);
+            }
+        }
+        let p = flat_params();
+        let at = Vec2::new(5.0, 5.0);
+        assert_eq!(render_pos(&map, &point(at), at, &p).unwrap().y, 50.0);
+        let wide = Grounded { at, half: 0.5 };
+        assert_eq!(render_pos(&map, &wide, at, &p).unwrap().y, 45.0);
+    }
+
+    #[test]
+    fn follows_the_planet_curve() {
+        let map = Heightmap::new(128);
+        let p = CurveParams { curvature: 0.01, ..flat_params() };
+        let y = render_pos(&map, &point(Vec2::new(5.0, 0.0)), Vec2::ZERO, &p).unwrap().y;
+        assert!((y + 0.25).abs() < 1e-6);
+    }
+}

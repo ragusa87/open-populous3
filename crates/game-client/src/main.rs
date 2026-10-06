@@ -5,6 +5,7 @@ mod camera;
 mod dev;
 mod edge_push;
 mod editor;
+mod grounded;
 mod hud;
 mod procedural_theme;
 mod sites;
@@ -40,6 +41,7 @@ fn main() {
         .add_plugins((
             world::WorldPlugin { level_arg: opts.level_arg, use_original: opts.use_original },
             camera::CameraPlugin,
+            grounded::GroundedPlugin,
             sites::SitesPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,
