@@ -123,16 +123,15 @@ impl GameMap {
     }
 
     /// Apply a player's command; returns the terrain region it changed, if any. Casting a spell
-    /// makes the caster's shaman do her cast jump (after a teleport: where she lands); a spell
-    /// that cannot be cast (`can_cast`) does nothing.
+    /// makes the caster's shaman do her cast jump (Teleport: she moves when it ends); a spell that
+    /// cannot be cast (`can_cast`) does nothing.
     pub fn apply(&mut self, command: &Command) -> Option<DirtyRect> {
         match *command {
             Command::Cast { player, spell } if !self.can_cast(player, &spell) => None,
             Command::Cast { player, spell: Spell::Teleport { to } } => {
                 if let Some(u) = self.units.iter_mut().find(|u| u.owner == player) {
-                    u.teleport(to);
+                    u.cast_teleport(to);
                 }
-                self.order(player, Order::Cast);
                 None
             }
             Command::Cast { player, spell } => {
@@ -273,8 +272,12 @@ mod tests {
         assert!(!m.can_cast(1, &Spell::Teleport { to: at(0, 3) }), "no shaman for player 1");
         let to = at(0, -10);
         assert_eq!(m.apply(&cast(to)), None, "no terrain change");
-        assert_eq!((m.units[0].x, m.units[0].z), to, "hill top");
-        assert!(matches!(m.units[0].action, crate::unit::Action::Casting { .. }), "lands with the cast jump");
+        assert!(matches!(m.units[0].action, crate::unit::Action::Casting { .. }), "the cast jump first");
+        assert_eq!(m.units[0].teleport_target(), Some(to));
+        for _ in 0..crate::unit::CAST_TICKS {
+            m.tick();
+        }
+        assert_eq!((m.units[0].x, m.units[0].z), to, "then on the hill top");
     }
 
     #[test]

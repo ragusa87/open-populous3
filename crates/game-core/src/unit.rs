@@ -120,6 +120,8 @@ pub struct Unit {
     route: Vec<(u16, u16)>,
     /// Terrain revision the route was planned on; None = plan on the next tick.
     planned_on: Option<u32>,
+    /// Where the current cast jump takes her when it ends (Teleport).
+    teleport_to: Option<(u16, u16)>,
 }
 
 impl Unit {
@@ -137,6 +139,7 @@ impl Unit {
             regen: 0,
             route: Vec::new(),
             planned_on: None,
+            teleport_to: None,
         }
     }
 
@@ -158,11 +161,18 @@ impl Unit {
         (cell_of(self.x), cell_of(self.z))
     }
 
-    /// Moved there at once (Teleport), standing still.
-    pub fn teleport(&mut self, (x, z): (u16, u16)) {
-        (self.x, self.z) = (x, z);
-        (self.route, self.planned_on) = (Vec::new(), None);
-        self.action = Action::Idle;
+    /// Teleport: the cast jump, then she is at `to` (if she can still stand there by then).
+    /// Ignored while drowning, dying or dead; another order before the jump ends cancels it.
+    pub fn cast_teleport(&mut self, to: (u16, u16)) {
+        if self.action.can_take_orders() {
+            self.order(Order::Cast);
+            self.teleport_to = Some(to);
+        }
+    }
+
+    /// Where the current cast jump takes her, if anywhere.
+    pub fn teleport_target(&self) -> Option<(u16, u16)> {
+        self.teleport_to
     }
 
     /// Ignored while drowning, dying or dead.
@@ -170,7 +180,7 @@ impl Unit {
         if !self.action.can_take_orders() {
             return;
         }
-        (self.route, self.planned_on) = (Vec::new(), None);
+        (self.route, self.planned_on, self.teleport_to) = (Vec::new(), None, None);
         self.action = match order {
             Order::MoveTo { x, z } => Action::Walking { to: (x, z) },
             Order::Pray => Action::Praying,
@@ -183,6 +193,7 @@ impl Unit {
     pub fn tick(&mut self, terrain: &Heightmap, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
         if self.is_alive() && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
+            self.teleport_to = None;
         }
         match self.action {
             Action::Idle | Action::Praying => self.heal(),
@@ -197,8 +208,12 @@ impl Unit {
                     return Some(UnitEvent::Died);
                 }
             }
-            Action::Casting { left } => {
-                self.action = if left > 1 { Action::Casting { left: left - 1 } } else { Action::Idle };
+            Action::Casting { left } if left > 1 => self.action = Action::Casting { left: left - 1 },
+            Action::Casting { .. } => {
+                self.action = Action::Idle;
+                if let Some(to) = self.teleport_to.take().filter(|&to| self.mobility().passable(terrain, (cell_of(to.0), cell_of(to.1)))) {
+                    (self.x, self.z) = to;
+                }
             }
             Action::Drowning => {
                 self.health = self.health.saturating_sub(DROWN_DAMAGE);
@@ -249,7 +264,7 @@ impl Unit {
     }
 
     fn die(&mut self) {
-        (self.route, self.planned_on) = (Vec::new(), None);
+        (self.route, self.planned_on, self.teleport_to) = (Vec::new(), None, None);
         self.action = Action::Dying { left: DYING_TICKS };
     }
 
@@ -580,6 +595,26 @@ mod tests {
         assert_eq!(u.action, Action::Casting { left: 1 });
         run(&mut u, &t, &site, 1);
         assert_eq!(u.action, Action::Idle);
+    }
+
+    #[test]
+    fn teleport_jumps_first_then_moves() {
+        let mut t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        let (start, to) = ((u.x, u.z), (30 * 512 + 100, 40 * 512 + 7));
+        u.cast_teleport(to);
+        run(&mut u, &t, &site, CAST_TICKS as usize - 1);
+        assert_eq!((u.x, u.z, u.action), (start.0, start.1, Action::Casting { left: 1 }), "still jumping where she was");
+        run(&mut u, &t, &site, 1);
+        assert_eq!((u.x, u.z, u.action), (to.0, to.1, Action::Idle), "lands at the target");
+        sea_cell(&mut t, (5, 5));
+        u.cast_teleport((5 * 512, 5 * 512));
+        run(&mut u, &t, &site, CAST_TICKS as usize);
+        assert_eq!((u.x, u.z), to, "the target became sea meanwhile: stays");
+        u.cast_teleport(start);
+        u.order(Order::Stop);
+        run(&mut u, &t, &site, CAST_TICKS as usize);
+        assert_eq!((u.x, u.z), to, "an order cancels it");
     }
 
     #[test]

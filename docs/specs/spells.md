@@ -9,7 +9,7 @@ says whether a spell applies at its target; `GameMap::apply` ignores a cast that
 | Flatten | radius 4 set to center height |
 | Erode | radius 4 lowered by 120 (falloff) |
 | Raise | editor brush, radius 3 +64 |
-| Teleport | sandbox only (not in the original): the caster's living shaman moves to the target at once and does her cast jump there; only onto ground she can walk (`Mobility::Walk`: no sea, no cliff) |
+| Teleport | sandbox only (not in the original): the caster's living shaman does her cast jump, then is at the target (`Unit::cast_teleport`); only onto ground she can walk (`Mobility::Walk`: no sea, no cliff), checked when cast and again when she lands (she stays if it no longer is); another order during the jump cancels it |
 
 To do: Swamp (surface type), Earthquake (seeded noise along a line - use `map::Lcg`, never `rand`),
 Volcano (cone + lava layer), Angel of Death, Firestorm... Mana cost, charges, cast range from shaman.

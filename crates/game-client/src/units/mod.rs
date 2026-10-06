@@ -64,8 +64,11 @@ pub fn player_shaman_cell(map: &game_core::map::GameMap, clock: &SimClock) -> Op
     map.units.iter().enumerate().find(|(_, u)| u.owner == PLAYER).map(|(i, u)| clock.cell_pos(i, u))
 }
 
-/// Position `alpha` of the way from `a` to `b` (world units, shortest way around the torus), in cells.
+/// Position `alpha` of the way from `a` to `b` (world units, shortest way around the torus), in
+/// cells. Jumps of more than a cell in one tick (teleport, reincarnation) are not glided: at `b`.
 pub fn glide(a: (u16, u16), b: (u16, u16), alpha: f32) -> Vec2 {
+    let far = |a: u16, b: u16| game_core::unit::torus_delta(a, b).unsigned_abs() > WORLD_UNITS_PER_CELL;
+    let alpha = if far(a.0, b.0) || far(a.1, b.1) { 1.0 } else { alpha };
     let lerp = |a: u16, b: u16| {
         let d = game_core::unit::torus_delta(a, b) as f32;
         (a as f32 + d * alpha).rem_euclid(65536.0) / WORLD_UNITS_PER_CELL as f32
@@ -340,6 +343,7 @@ mod tests {
         assert!(p.x.abs() < 1e-4 || (p.x - 128.0).abs() < 1e-4, "{p:?}");
         assert_eq!(p.y, 1.0);
         assert_eq!(glide((0, 0), (512, 1024), 1.0), Vec2::new(1.0, 2.0));
+        assert_eq!(glide((0, 0), (20 * 512, 0), 0.1), Vec2::new(20.0, 0.0), "teleported: no slide across the map");
     }
 
     #[test]

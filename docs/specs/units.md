@@ -16,7 +16,7 @@
 | Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 64 units/tick on flat ground (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
 | Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -1 HP every 3 ticks until the terrain opens a path (walks again) or it dies |
 | Praying | `Order::Pray` | until another order; heals |
-| Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle |
+| Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle (Teleport: then at the target) |
 | Drowning | ground under her becomes open sea | -4 HP per tick, no orders; back to Idle if land returns |
 | Dying { left } | health reaches 0 | 8 ticks |
 | Dead { left } | after dying | 30 ticks, then reincarnates at her site at full health; the site levels its ground again |
@@ -44,7 +44,7 @@ Health: 100. Orders are ignored while drowning, dying or dead.
   boats unloading at a shore; vehicles to come).
 
 ## Shaman on screen (client, `units/`)
-- `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks.
+- `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks (moves over a cell in one tick, teleport or reincarnation, are not glided).
 - Each unit is a `Grounded` sprite quad (1 px = 1/88 cell: standing ~0.39 cell, half a site stone; feet at the
   anchor) turned to face the camera, uploaded Scale2x-upscaled x4 and filtered linearly (no blocky pixels),
   with a health bar over the head (green -> yellow -> red) shown only while the unit is selected and alive.
