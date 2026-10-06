@@ -20,9 +20,15 @@ pub fn headless() -> bool {
     std::env::var("HEADLESS").is_ok_and(|v| v == "1")
 }
 
+/// Assets (models) come from the repository's `assets/` folder.
+pub fn asset_plugin() -> AssetPlugin {
+    AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").into(), ..default() }
+}
+
 /// DefaultPlugins without winit/window: the camera renders into an offscreen image.
 pub fn headless_plugins() -> impl PluginGroup {
     DefaultPlugins
+        .set(asset_plugin())
         .set(WindowPlugin { primary_window: None, exit_condition: bevy::window::ExitCondition::DontExit, ..default() })
         .disable::<WinitPlugin>()
 }

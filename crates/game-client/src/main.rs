@@ -9,6 +9,7 @@ mod editor;
 mod grounded;
 mod hud;
 mod menu;
+mod nature;
 mod original_models;
 mod procedural_theme;
 mod sites;
@@ -28,7 +29,7 @@ fn main() {
     if dev::headless() {
         app.add_plugins(dev::headless_plugins());
     } else {
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        app.add_plugins(DefaultPlugins.set(dev::asset_plugin()).set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Open Populous".into(),
                 resolution: (1280, 720).into(),
@@ -50,6 +51,7 @@ fn main() {
             virtual_cursor::VirtualCursorPlugin,
             grounded::GroundedPlugin,
             sites::SitesPlugin,
+            nature::NaturePlugin,
             units::UnitsPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,

@@ -11,7 +11,10 @@
   sea around their small islands). Original levels: none until the level things are decoded.
 - Trees do not block walking yet.
 
-## On screen (client)
-Drawn as 3D models standing on the terrain, like the original's 3D trees (bank 0 objects 60-71): the original
-models when the original files are allowed, else the CC0 Quaternius Stylized Nature MegaKit. Scaled with the
-tree's size, hidden at size 0.
+## On screen (client, `nature.rs`)
+Drawn as 3D models standing on the terrain (`Grounded`, trunk footprint 0.15 cell), like the original's 3D trees
+(bank 0 objects 60-71): the CC0 Quaternius Stylized Nature MegaKit (`assets/models/nature`, variants 0-4 common
+trees, 5-9 pines), turned by a fixed per-tree angle (`tree_yaw`), scaled with the size (`tree_scale`: 40% at
+size 1 to 1.6 cells tall at size 4), hidden at size 0. Models load through Bevy's asset server from the
+repository's `assets/` (`dev::asset_plugin`). The original tree objects need a theme atlas: to use once trees
+come from original levels.
