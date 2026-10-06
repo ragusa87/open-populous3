@@ -93,6 +93,12 @@ impl GameMap {
                 self.order(player, order);
                 None
             }
+            Command::OrderUnit { player, unit, order } => {
+                if let Some(u) = self.units.iter_mut().find(|u| u.id == unit && u.owner == player) {
+                    u.order(order);
+                }
+                None
+            }
         }
     }
 
@@ -171,5 +177,16 @@ mod tests {
         assert_eq!(a.units, b.units);
         assert_eq!(a.units[0].action, Action::Praying);
         assert!(a.units[0].x != a.sites[0].x, "she moved");
+    }
+
+    #[test]
+    fn unit_orders_only_reach_the_owners_units() {
+        use crate::unit::Action;
+        let mut m = GameMap::generate(7);
+        let (mine, theirs) = (m.units[0].id, m.units[1].id);
+        m.apply(&Command::OrderUnit { player: 0, unit: theirs, order: Order::Pray });
+        assert_eq!(m.units[1].action, Action::Idle);
+        m.apply(&Command::OrderUnit { player: 0, unit: mine, order: Order::Pray });
+        assert_eq!(m.units[0].action, Action::Praying);
     }
 }

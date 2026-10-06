@@ -45,7 +45,8 @@ pub fn encode(msg: &Message) -> Vec<u8> {
     b
 }
 
-/// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells`, for an order `order tag u8 [+ u16 x, z]`.
+/// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells`, for an order `order tag u8 [+ u16 x, z]`,
+/// for a unit order `u32 unit id` then the order.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -64,17 +65,26 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         }
         Command::Order { player, order } => {
             b.extend([1, *player]);
-            match order {
-                Order::MoveTo { x, z } => {
-                    b.push(0);
-                    b.extend(x.to_le_bytes());
-                    b.extend(z.to_le_bytes());
-                }
-                Order::Pray => b.push(1),
-                Order::Cast => b.push(2),
-                Order::Stop => b.push(3),
-            }
+            encode_order(b, order);
         }
+        Command::OrderUnit { player, unit, order } => {
+            b.extend([2, *player]);
+            b.extend(unit.to_le_bytes());
+            encode_order(b, order);
+        }
+    }
+}
+
+fn encode_order(b: &mut Vec<u8>, order: &Order) {
+    match order {
+        Order::MoveTo { x, z } => {
+            b.push(0);
+            b.extend(x.to_le_bytes());
+            b.extend(z.to_le_bytes());
+        }
+        Order::Pray => b.push(1),
+        Order::Cast => b.push(2),
+        Order::Stop => b.push(3),
     }
 }
 
@@ -91,18 +101,20 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
             };
             Some(Command::Cast { player, spell })
         }
-        1 => {
-            let order = match c.u8()? {
-                0 => Order::MoveTo { x: c.u16()?, z: c.u16()? },
-                1 => Order::Pray,
-                2 => Order::Cast,
-                3 => Order::Stop,
-                _ => return None,
-            };
-            Some(Command::Order { player, order })
-        }
+        1 => Some(Command::Order { player, order: decode_order(c)? }),
+        2 => Some(Command::OrderUnit { player, unit: c.u32()?, order: decode_order(c)? }),
         _ => None,
     }
+}
+
+fn decode_order(c: &mut Cursor) -> Option<Order> {
+    Some(match c.u8()? {
+        0 => Order::MoveTo { x: c.u16()?, z: c.u16()? },
+        1 => Order::Pray,
+        2 => Order::Cast,
+        3 => Order::Stop,
+        _ => return None,
+    })
 }
 
 pub fn decode(b: &[u8]) -> Option<Message> {
@@ -136,6 +148,9 @@ impl<'a> Cursor<'a> {
     fn u8(&mut self) -> Option<u8> {
         self.take(1).map(|b| b[0])
     }
+    fn u32(&mut self) -> Option<u32> {
+        Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
+    }
     fn u16(&mut self) -> Option<u16> {
         self.take(2).map(|b| u16::from_le_bytes([b[0], b[1]]))
     }
@@ -161,6 +176,7 @@ mod tests {
                 Command::Order { player: 2, order: Order::MoveTo { x: 65535, z: 300 } },
                 Command::Order { player: 0, order: Order::Pray },
                 Command::Order { player: 1, order: Order::Stop },
+                Command::OrderUnit { player: 1, unit: 70_000, order: Order::MoveTo { x: 3, z: 4 } },
             ],
         }
     }
