@@ -59,13 +59,15 @@ pub fn pose_for(action: &Action) -> Pose {
     }
 }
 
-/// RGBA pixels with the feet at `origin` (pixels from the top-left corner).
+/// RGBA pixels with the feet at `origin` (pixels from the top-left corner), `scale` pixels per base
+/// pixel (1 for pixel art, upscaled when uploaded; more for detailed art, drawn as is).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
     pub width: usize,
     pub height: usize,
     pub origin: (usize, usize),
     pub rgba: Vec<u8>,
+    pub scale: usize,
 }
 
 /// `poses[pose as usize][dir]`: the frame loop for that pose seen from that direction.
@@ -128,7 +130,7 @@ pub fn scale2x(f: &Frame) -> Frame {
             }
         }
     }
-    Frame { width: w2, height: h2, origin: (f.origin.0 * 2, f.origin.1 * 2), rgba }
+    Frame { width: w2, height: h2, origin: (f.origin.0 * 2, f.origin.1 * 2), rgba, scale: f.scale * 2 }
 }
 
 /// Give transparent pixels the colour of an opaque neighbour (alpha stays 0), so linear
@@ -160,7 +162,7 @@ pub fn picture_frame(p: &Picture, palette: &[[u8; 3]]) -> Frame {
             None => [0, 0, 0, 0],
         })
         .collect();
-    Frame { width: p.sprite.width, height: p.sprite.height, origin: p.origin, rgba }
+    Frame { width: p.sprite.width, height: p.sprite.height, origin: p.origin, rgba, scale: 1 }
 }
 
 /// Every tribe's shaman from the original animations (sprites in palette `pal0-0`).
@@ -251,7 +253,7 @@ mod tests {
         for &(x, y) in on {
             rgba[(y * w + x) * 4..][..4].copy_from_slice(&[255, 255, 255, 255]);
         }
-        Frame { width: w, height: h, origin: (1, 2), rgba }
+        Frame { width: w, height: h, origin: (1, 2), rgba, scale: 1 }
     }
 
     #[test]

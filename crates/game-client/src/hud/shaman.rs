@@ -97,10 +97,10 @@ fn update_preview(
         match unit.and_then(|u| sprites.frame_for(u, rig.yaw, &clock)) {
             Some(f) => {
                 image.image = f.image.clone();
-                node.width = px(f.size.x as f32 * SCALE);
-                node.height = px(f.size.y as f32 * SCALE);
-                node.left = px(width / 2.0 - f.origin.x as f32 * SCALE);
-                node.top = px(BASELINE - f.origin.y as f32 * SCALE);
+                node.width = px(f.size.x * SCALE);
+                node.height = px(f.size.y * SCALE);
+                node.left = px(width / 2.0 - f.origin.x * SCALE);
+                node.top = px(BASELINE - f.origin.y * SCALE);
                 *vis = Visibility::Inherited;
             }
             None => *vis = Visibility::Hidden,

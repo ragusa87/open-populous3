@@ -365,7 +365,7 @@ fn cropped(rgba: &[u8], mirrored: bool) -> Frame {
         }
     }
     let ox = ORIGIN.0 - x0;
-    Frame { width: w, height: h, origin: (if mirrored { w - ox } else { ox }, ORIGIN.1 - y0), rgba: out }
+    Frame { width: w, height: h, origin: (if mirrored { w - ox } else { ox }, ORIGIN.1 - y0), rgba: out, scale: 1 }
 }
 
 /// The frame loop of a unit kind's pose seen from `dir`, in the tribe's colour.

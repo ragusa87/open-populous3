@@ -8,6 +8,7 @@
 pub mod art;
 mod dust;
 mod procedural;
+mod still;
 pub mod selection;
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
@@ -97,8 +98,9 @@ pub struct FrameAsset {
     pub image: Handle<Image>,
     pub mesh: Handle<Mesh>,
     pub material: Handle<StandardMaterial>,
-    pub size: UVec2,
-    pub origin: UVec2,
+    /// Size and feet in base pixels (fractional for detailed art).
+    pub size: Vec2,
+    pub origin: Vec2,
 }
 
 /// Every kind's and tribe's frames, uploaded once: `kinds[kind][tribe][pose][dir][frame]`, kinds in
@@ -118,10 +120,10 @@ impl UnitSprites {
     }
 }
 
-/// Quad in the sprite's pixel rectangle, feet at the local origin, facing +Z.
-pub fn sprite_quad(width: u32, height: u32, origin: UVec2) -> Mesh {
-    let (l, r) = (-(origin.x as f32) * PIXEL, (width as f32 - origin.x as f32) * PIXEL);
-    let (t, b) = (origin.y as f32 * PIXEL, (origin.y as f32 - height as f32) * PIXEL);
+/// Quad in the sprite's rectangle (base pixels), feet at the local origin, facing +Z.
+pub fn sprite_quad(size: Vec2, origin: Vec2) -> Mesh {
+    let (l, r) = (-origin.x * PIXEL, (size.x - origin.x) * PIXEL);
+    let (t, b) = (origin.y * PIXEL, (origin.y - size.y) * PIXEL);
     Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[l, t, 0.0], [r, t, 0.0], [r, b, 0.0], [l, b, 0.0]])
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 4])
@@ -154,10 +156,10 @@ fn load_sprites(
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
     let original = levels.original.then(|| art::original_art(&levels.data_dir).map_err(|e| warn!("original shaman sprites: {e}")).ok());
-    let mut shaman = original.flatten();
-    if shaman.is_none() {
-        info!("shaman: generated sprites");
-    }
+    let mut shaman = original.flatten().or_else(|| {
+        info!("shaman: open-source still");
+        still::still_art(UnitKind::Shaman)
+    });
     let art: Vec<Vec<TribeArt>> = UnitKind::ALL
         .iter()
         .map(|&kind| match kind {
@@ -166,7 +168,8 @@ fn load_sprites(
         })
         .collect();
     let mut upload = |f: &Frame| {
-        let mut big = (0..UPSCALE_STEPS).fold(f.clone(), |g, _| art::scale2x(&g));
+        let steps = if f.scale == 1 { UPSCALE_STEPS } else { 0 };
+        let mut big = (0..steps).fold(f.clone(), |g, _| art::scale2x(&g));
         art::bleed_edges(&mut big);
         let mut image = Image::new(
             Extent3d { width: big.width as u32, height: big.height as u32, depth_or_array_layers: 1 },
@@ -177,7 +180,8 @@ fn load_sprites(
         );
         image.sampler = ImageSampler::linear();
         let image = images.add(image);
-        let (size, origin) = (UVec2::new(f.width as u32, f.height as u32), UVec2::new(f.origin.0 as u32, f.origin.1 as u32));
+        let s = f.scale as f32;
+        let (size, origin) = (Vec2::new(f.width as f32, f.height as f32) / s, Vec2::new(f.origin.0 as f32, f.origin.1 as f32) / s);
         let material = mats.add(StandardMaterial {
             base_color_texture: Some(image.clone()),
             alpha_mode: AlphaMode::Mask(0.5),
@@ -186,7 +190,7 @@ fn load_sprites(
             double_sided: true,
             ..default()
         });
-        FrameAsset { image, mesh: meshes.add(sprite_quad(size.x, size.y, origin)), material, size, origin }
+        FrameAsset { image, mesh: meshes.add(sprite_quad(size, origin)), material, size, origin }
     };
     sprites.kinds = art
         .iter()
@@ -399,7 +403,7 @@ mod tests {
 
     #[test]
     fn quad_hangs_from_the_feet() {
-        let m = sprite_quad(30, 40, UVec2::new(15, 38));
+        let m = sprite_quad(Vec2::new(30.0, 40.0), Vec2::new(15.0, 38.0));
         let pos = m.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
         assert_eq!(pos[0], [-15.0 * PIXEL, 38.0 * PIXEL, 0.0]);
         assert!((pos[2][1] + 2.0 * PIXEL).abs() < 1e-6, "2 px under the feet");

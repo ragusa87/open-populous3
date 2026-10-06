@@ -1,8 +1,8 @@
 # Unit artwork (open-source sprites)
 
 Brief for drawing or generating free unit sprites to replace the generated figures (`units/procedural.rs`)
-and to ship instead of the original art (copyrighted, never shipped). Not loaded yet: the PNG loader
-described under "Delivery" is to be written once the first sheets exist.
+and to ship instead of the original art (copyrighted, never shipped). Loaded today: a single still per kind
+(see "Still"); the full sheets described under "Delivery" are to be loaded once the first ones exist.
 
 ## Style
 - Pixel art, hard edges: every pixel is fully opaque or fully transparent (the engine cuts alpha at 50%:
@@ -85,6 +85,20 @@ Use no other magenta anywhere in the art. Skin, hair, wood, metal and the spy's 
 - A missing sheet falls back to the generated figure for that kind and pose, so art can arrive one pose at a time.
 - Licence: CC0 preferred (CC-BY 4.0 accepted). List author, licence and source of every sheet in
   `assets/CREDITS.md`; for generated art, the tool and model too.
+
+## Still (minimum delivery, loaded today)
+One detailed picture per kind, facing down-right (direction 1), at any resolution: `tools/normalize_still.py`
+turns it into `assets/units/<kind>/still.png` (256 x 256, 4 pixels per base pixel, feet at (128, 232), hard
+edges, tribe colour turned magenta), given the feet point and the source pixels per base pixel (head top to
+feet = 34 base px). Keep the source next to it as `source.png`. The game embeds the still (`units/still.rs`),
+swaps the magenta hue for each tribe's (shading kept) and builds every pose by moving it around the feet:
+idle as is, walk bobbing and swaying, pray squashed and bowed, cast jumping 12 base px, fall turning onto its
+back, drown sunk 10 base px under a ripple line. Directions 0-4 show it as is (no back view yet), 5-7 mirrored.
+Detailed art (more than 1 pixel per base pixel) is drawn as is, without the pixel-art upscaling.
+
+The shaman's still is used whenever the original files are not (`--no-original`, no install):
+
+  uvx --with pillow python tools/normalize_still.py assets/units/shaman/source.png assets/units/shaman/still.png --feet 206,700 --px-per-base 17
 
 ## Generating with an image model
 Models do not keep a fixed grid or anchor reliably: generate one direction or pose at a time, larger, then

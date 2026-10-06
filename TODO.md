@@ -16,6 +16,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Replanning: every walker replans on any terrain write; only replan when the change touches its route (`DirtyRect`) once there are many units. Group moves could share a flow field.
 - [ ] Stranded units (not the shaman): arms-up animation for braves and others (the action exists in the simulation, shown as Idle).
 - [ ] Boarding vehicles: walk to `path::nearest_reachable` next to the boat/balloon, then board when it is within reach. Boats path with `Mobility::Sail`, balloons with `Mobility::Fly`.
+- [ ] Open-source shaman: a back view (directions 3-4 show her front today) and real walk/cast/fall frames instead of the moved still; licence of `assets/units/shaman/source.png` to confirm in `assets/CREDITS.md`.
 - [ ] Load open-source unit sheets (`assets/units/<kind>/<pose>.png`, see [unit-art.md](docs/specs/unit-art.md)): 64x64 cells, feet at (32, 58), 5 directions mirrored to 8, magenta key ramp swapped per tribe; fall back to the generated figure per missing sheet.
 - [ ] Braves, warriors, preachers, spies, firewarriors: map their original animations (0-52, 89-92) in `ShamanAnim`-like catalogs (they walk with generated art for now). Anims 0-52 are per action with layered body parts and tribe colours, not one block per kind.
 - [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
