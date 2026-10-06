@@ -5,6 +5,7 @@
 
 use game_core::command::Command;
 use game_core::spell::Spell;
+use game_core::unit::Order;
 use std::io::{self, Read, Write};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,23 +37,72 @@ pub fn encode(msg: &Message) -> Vec<u8> {
             b.push(1);
             b.extend(turn.to_le_bytes());
             b.push(commands.len() as u8);
-            for Command::Cast { player, spell } in commands {
-                b.push(*player);
-                let (tag, cells): (u8, &[(i32, i32)]) = match spell {
-                    Spell::LandBridge { from, to } => (0, &[*from, *to]),
-                    Spell::Flatten { at } => (1, std::slice::from_ref(at)),
-                    Spell::Erode { at } => (2, std::slice::from_ref(at)),
-                    Spell::Raise { at } => (3, std::slice::from_ref(at)),
-                };
-                b.push(tag);
-                for (x, z) in cells {
-                    b.extend((*x as i16).to_le_bytes());
-                    b.extend((*z as i16).to_le_bytes());
-                }
+            for command in commands {
+                encode_command(&mut b, command);
             }
         }
     }
     b
+}
+
+/// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells`, for an order `order tag u8 [+ u16 x, z]`.
+fn encode_command(b: &mut Vec<u8>, command: &Command) {
+    match command {
+        Command::Cast { player, spell } => {
+            b.extend([0, *player]);
+            let (tag, cells): (u8, &[(i32, i32)]) = match spell {
+                Spell::LandBridge { from, to } => (0, &[*from, *to]),
+                Spell::Flatten { at } => (1, std::slice::from_ref(at)),
+                Spell::Erode { at } => (2, std::slice::from_ref(at)),
+                Spell::Raise { at } => (3, std::slice::from_ref(at)),
+            };
+            b.push(tag);
+            for (x, z) in cells {
+                b.extend((*x as i16).to_le_bytes());
+                b.extend((*z as i16).to_le_bytes());
+            }
+        }
+        Command::Order { player, order } => {
+            b.extend([1, *player]);
+            match order {
+                Order::MoveTo { x, z } => {
+                    b.push(0);
+                    b.extend(x.to_le_bytes());
+                    b.extend(z.to_le_bytes());
+                }
+                Order::Pray => b.push(1),
+                Order::Cast => b.push(2),
+                Order::Stop => b.push(3),
+            }
+        }
+    }
+}
+
+fn decode_command(c: &mut Cursor) -> Option<Command> {
+    let (kind, player) = (c.u8()?, c.u8()?);
+    match kind {
+        0 => {
+            let spell = match c.u8()? {
+                0 => Spell::LandBridge { from: c.cell()?, to: c.cell()? },
+                1 => Spell::Flatten { at: c.cell()? },
+                2 => Spell::Erode { at: c.cell()? },
+                3 => Spell::Raise { at: c.cell()? },
+                _ => return None,
+            };
+            Some(Command::Cast { player, spell })
+        }
+        1 => {
+            let order = match c.u8()? {
+                0 => Order::MoveTo { x: c.u16()?, z: c.u16()? },
+                1 => Order::Pray,
+                2 => Order::Cast,
+                3 => Order::Stop,
+                _ => return None,
+            };
+            Some(Command::Order { player, order })
+        }
+        _ => None,
+    }
 }
 
 pub fn decode(b: &[u8]) -> Option<Message> {
@@ -64,15 +114,7 @@ pub fn decode(b: &[u8]) -> Option<Message> {
             let n = c.u8()?;
             let mut commands = Vec::with_capacity(n as usize);
             for _ in 0..n {
-                let player = c.u8()?;
-                let spell = match c.u8()? {
-                    0 => Spell::LandBridge { from: c.cell()?, to: c.cell()? },
-                    1 => Spell::Flatten { at: c.cell()? },
-                    2 => Spell::Erode { at: c.cell()? },
-                    3 => Spell::Raise { at: c.cell()? },
-                    _ => return None,
-                };
-                commands.push(Command::Cast { player, spell });
+                commands.push(decode_command(&mut c)?);
             }
             Some(Message::Turn { turn, commands })
         }
@@ -94,6 +136,9 @@ impl<'a> Cursor<'a> {
     fn u8(&mut self) -> Option<u8> {
         self.take(1).map(|b| b[0])
     }
+    fn u16(&mut self) -> Option<u16> {
+        self.take(2).map(|b| u16::from_le_bytes([b[0], b[1]]))
+    }
     fn i16(&mut self) -> Option<i32> {
         self.take(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as i32)
     }
@@ -113,6 +158,9 @@ mod tests {
             commands: vec![
                 Command::Cast { player: 1, spell: Spell::LandBridge { from: (1, 2), to: (120, -3) } },
                 Command::Cast { player: 0, spell: Spell::Flatten { at: (5, 6) } },
+                Command::Order { player: 2, order: Order::MoveTo { x: 65535, z: 300 } },
+                Command::Order { player: 0, order: Order::Pray },
+                Command::Order { player: 1, order: Order::Stop },
             ],
         }
     }
