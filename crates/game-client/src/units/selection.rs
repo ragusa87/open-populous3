@@ -219,13 +219,15 @@ pub(super) fn select_and_order(
     mut selection: ResMut<Selection>,
     mut drag: ResMut<Drag>,
     spell: Res<crate::hud::spells::SelectedSpell>,
+    tree: Res<crate::nature::HoveredTree>,
 ) {
     selection.retain(&map.0.units);
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
     let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && spell.0.is_none());
     let add = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
-    if mouse.just_pressed(MouseButton::Right) && on_map.is_some() {
+    // A right click on a tree shows its wood (`nature`) and keeps the selection.
+    if mouse.just_pressed(MouseButton::Right) && on_map.is_some() && tree.tree.is_none() {
         selection.clear();
     }
     if let (true, Some(c)) = (mouse.just_pressed(MouseButton::Left), on_map) {

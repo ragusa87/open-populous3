@@ -2,7 +2,7 @@
 //! textured from the theme atlas) when the original files are allowed, else the CC0 Quaternius
 //! Stylized Nature MegaKit (see assets/CREDITS.md). The tree's variant picks the model, its size
 //! scales it, size 0 hides it. Each tree keeps its own turn so groves do not look copied.
-//! Resting the cursor on a tree for `HOVER_SECS` shows how much wood it holds.
+//! Resting the cursor on a tree for `HOVER_SECS`, or right-clicking it, shows how much wood it holds.
 
 use crate::camera::GameCamera;
 use crate::grounded::Grounded;
@@ -130,11 +130,28 @@ fn original_trees(
 #[derive(Component)]
 struct WoodTooltip;
 
-/// The tree under the cursor and since when (seconds).
-#[derive(Default)]
-struct Hover {
-    tree: Option<usize>,
-    since: f32,
+/// The tree under the cursor (index in `GameMap::trees`), since when (seconds), and whether it was
+/// right-clicked; read by the selection so a right click on a tree does not deselect.
+#[derive(Resource, Default, Debug, Clone, PartialEq)]
+pub struct HoveredTree {
+    pub tree: Option<usize>,
+    pub since: f32,
+    pub clicked: bool,
+}
+
+impl HoveredTree {
+    /// The cursor is on `tree` at `now`: a new tree restarts the wait and forgets the click.
+    pub fn update(&mut self, tree: Option<usize>, now: f32, right_click: bool) {
+        if tree != self.tree {
+            *self = HoveredTree { tree, since: now, clicked: false };
+        }
+        self.clicked |= right_click && tree.is_some();
+    }
+
+    /// The tree whose wood shows: rested on long enough, or right-clicked.
+    pub fn shown(&self, now: f32) -> Option<usize> {
+        self.tree.filter(|_| self.clicked || now - self.since >= HOVER_SECS)
+    }
 }
 
 pub struct NaturePlugin;
@@ -143,7 +160,8 @@ impl Plugin for NaturePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (load_models, spawn_tooltip))
             .add_systems(Update, (respawn_trees, grow_trees).chain())
-            .add_systems(Update, wood_tooltip.in_set(crate::menu::Gameplay));
+            .init_resource::<HoveredTree>()
+            .add_systems(Update, (hover_tree.before(crate::units::UnitInput), wood_tooltip).chain().in_set(crate::menu::Gameplay));
     }
 }
 
@@ -219,11 +237,12 @@ fn spawn_tooltip(mut commands: Commands) {
     ));
 }
 
-/// Shows the wood of the tree the cursor has rested on for `HOVER_SECS` (not over the panel, nor
-/// while a spell is aimed).
+/// Which tree is under the cursor (not over the panel, nor while a spell is aimed), and whether it
+/// was right-clicked.
 #[allow(clippy::too_many_arguments)]
-fn wood_tooltip(
+fn hover_tree(
     time: Res<Time>,
+    mouse: Res<ButtonInput<MouseButton>>,
     map: Res<CurrentMap>,
     windows: Query<&Window>,
     ui: Query<&Interaction>,
@@ -231,10 +250,8 @@ fn wood_tooltip(
     cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     views: Query<(&TreeView, &GlobalTransform, &Visibility, &Children)>,
     models: Query<&TreeModel>,
-    mut tooltip: Query<(&mut Text, &mut Node, &mut Visibility), (With<WoodTooltip>, Without<TreeView>)>,
-    mut hover: Local<Hover>,
+    mut hover: ResMut<HoveredTree>,
 ) {
-    let Ok((mut text, mut node, mut vis)) = tooltip.single_mut() else { return };
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
     let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && spell.0.is_none());
@@ -252,12 +269,21 @@ fn wood_tooltip(
             .collect();
         tree_at(c, &on_screen)
     });
-    let now = time.elapsed_secs();
-    if tree != hover.tree {
-        *hover = Hover { tree, since: now };
-    }
-    match (tree, on_map) {
-        (Some(i), Some(c)) if now - hover.since >= HOVER_SECS => {
+    hover.update(tree, time.elapsed_secs(), mouse.just_pressed(MouseButton::Right));
+}
+
+/// Shows the wood of the hovered tree once rested on for `HOVER_SECS`, or at once when right-clicked.
+fn wood_tooltip(
+    time: Res<Time>,
+    map: Res<CurrentMap>,
+    windows: Query<&Window>,
+    hover: Res<HoveredTree>,
+    mut tooltip: Query<(&mut Text, &mut Node, &mut Visibility), With<WoodTooltip>>,
+) {
+    let Ok((mut text, mut node, mut vis)) = tooltip.single_mut() else { return };
+    let cursor = windows.iter().next().and_then(Window::cursor_position);
+    match (hover.shown(time.elapsed_secs()).filter(|&i| i < map.0.trees.len()), cursor) {
+        (Some(i), Some(c)) => {
             text.0 = wood_label(map.0.trees[i].size);
             (node.left, node.top) = (px(c.x + 16.0), px(c.y + 18.0));
             vis.set_if_neq(Visibility::Inherited);
@@ -280,6 +306,23 @@ mod tests {
         assert_eq!(tree_at(Vec2::new(100.0, 110.0), &[far, near]), Some(1), "only the far crown there");
         assert_eq!(tree_at(Vec2::new(140.0, 150.0), &[far]), None, "beside it");
         assert_eq!(tree_at(Vec2::new(100.0, 90.0), &[far]), None, "above it");
+    }
+
+    #[test]
+    fn wood_shows_after_a_rest_or_at_once_on_right_click() {
+        let mut h = HoveredTree::default();
+        h.update(Some(3), 10.0, false);
+        assert_eq!(h.shown(10.0 + HOVER_SECS / 2.0), None, "not yet");
+        assert_eq!(h.shown(10.0 + HOVER_SECS), Some(3));
+        h.update(Some(4), 12.0, true);
+        assert_eq!(h.shown(12.0), Some(4), "right click: at once");
+        h.update(Some(4), 12.1, false);
+        assert_eq!(h.shown(12.1), Some(4), "stays while on it");
+        h.update(None, 12.2, false);
+        h.update(Some(4), 12.3, false);
+        assert_eq!(h.shown(12.3), None, "left and came back: the wait again");
+        h.update(None, 13.0, true);
+        assert!(!h.clicked, "a right click on no tree");
     }
 
     #[test]
