@@ -1,5 +1,5 @@
 //! Orbit camera around a wrapping focus point. Pushing the mouse against the window
-//! border or Up-Down move, Left-Right and middle-drag rotate, Enter toggles the aerial view.
+//! border, Up-Down or WASD move, Left-Right and middle-drag rotate, Enter toggles the aerial view.
 //! The cursor is confined to the window (Esc releases/re-confines it).
 
 use crate::edge_push::EdgePush;
@@ -182,10 +182,10 @@ fn camera_input(
         .iter()
         .next()
         .map_or(Vec2::ZERO, |w| push.update(w.cursor_position(), w.size(), motion.delta, dt));
-    let keys_fwd = axis(KeyCode::ArrowUp, KeyCode::ArrowDown) * KEY_SPEED;
-    let forward = (edge.x * MOUSE_SPEED + keys_fwd).clamp(-KEY_SPEED, KEY_SPEED);
+    let keys_move = key_move(|k| keys.pressed(k)) * KEY_SPEED;
+    let speed = (edge * MOUSE_SPEED + keys_move).clamp(Vec2::splat(-KEY_SPEED), Vec2::splat(KEY_SPEED));
     let scale = rig.distance.max(10.0) * dt;
-    rig.move_by(forward * scale, edge.y * MOUSE_SPEED * scale);
+    rig.move_by(speed.x * scale, speed.y * scale);
 
     if mouse.pressed(MouseButton::Middle) {
         rig.yaw -= motion.delta.x * 0.005;
@@ -194,6 +194,17 @@ fn camera_input(
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) {
         rig.toggle_aerial();
     }
+}
+
+/// Keyboard scroll as (forward, right) in -1..1: Up/Down or W/S, A/D strafe.
+pub fn key_move(pressed: impl Fn(KeyCode) -> bool) -> Vec2 {
+    let axis = |plus: &[KeyCode], minus: &[KeyCode]| {
+        plus.iter().any(|&k| pressed(k)) as i32 as f32 - minus.iter().any(|&k| pressed(k)) as i32 as f32
+    };
+    Vec2::new(
+        axis(&[KeyCode::ArrowUp, KeyCode::KeyW], &[KeyCode::ArrowDown, KeyCode::KeyS]),
+        axis(&[KeyCode::KeyD], &[KeyCode::KeyA]),
+    )
 }
 
 fn apply_rig(
@@ -242,6 +253,16 @@ mod tests {
         assert_eq!(start_cell(&map), (9, 99));
         map.sites.clear();
         assert_eq!(start_cell(&map), map.terrain.lowland_cell());
+    }
+
+    #[test]
+    fn wasd_moves_like_arrows_and_strafes() {
+        let only = |ks: &'static [KeyCode]| move |k| ks.contains(&k);
+        assert_eq!(key_move(only(&[KeyCode::KeyW])), Vec2::new(1.0, 0.0));
+        assert_eq!(key_move(only(&[KeyCode::KeyW, KeyCode::ArrowUp])), Vec2::new(1.0, 0.0), "no double speed");
+        assert_eq!(key_move(only(&[KeyCode::KeyS, KeyCode::KeyA])), Vec2::new(-1.0, -1.0));
+        assert_eq!(key_move(only(&[KeyCode::KeyD])), Vec2::new(0.0, 1.0));
+        assert_eq!(key_move(only(&[KeyCode::KeyW, KeyCode::ArrowDown])), Vec2::ZERO);
     }
 
     #[test]
