@@ -18,3 +18,7 @@ trees, 5-9 pines), turned by a fixed per-tree angle (`tree_yaw`), scaled with th
 size 1 to 1.6 cells tall at size 4), hidden at size 0. Models load through Bevy's asset server from the
 repository's `assets/` (`dev::asset_plugin`). The original tree objects need a theme atlas: to use once trees
 come from original levels.
+Resting the cursor on a visible tree for 1.5 s (`HOVER_SECS`) shows a tooltip by the cursor: "Tree: 3/4 wood"
+(pieces left / most it can hold). The tree under the cursor is the one whose screen box (trunk base to top,
+30% of its height either side) holds it, the nearest one when several overlap (`tree_at`). Not over the panel,
+nor while a spell is aimed.
