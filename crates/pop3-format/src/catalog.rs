@@ -90,8 +90,8 @@ pub enum ShamanAnim {
     Idle,
     /// Staff swing (4 frames).
     Strike,
-    /// Sitting, arms spread, bowing (4 frames).
-    Pray,
+    /// Flying horizontally, arms spread, as when blown by a whirlwind (4 frames).
+    Flying,
     /// Jumps up with lightning in the hands (12 frames).
     Cast,
     /// Kick (5 frames).
@@ -102,6 +102,8 @@ pub enum ShamanAnim {
     Walk,
     /// Knocked down flat on her back (8 frames).
     Fall,
+    /// Kneeling on one knee (1 frame): used for praying. Its back view is broken, see `source_dir`.
+    Kneel,
 }
 
 impl ShamanAnim {
@@ -109,17 +111,24 @@ impl ShamanAnim {
         match self {
             ShamanAnim::Idle => 53,
             ShamanAnim::Strike => 57,
-            ShamanAnim::Pray => 61,
+            ShamanAnim::Flying => 61,
             ShamanAnim::Cast => 65,
             ShamanAnim::Kick => 69,
             ShamanAnim::Flung => 73,
             ShamanAnim::Walk => 77,
             ShamanAnim::Fall => 85,
+            ShamanAnim::Kneel => 93,
         }
     }
 
     pub fn anim(self, tribe: u8) -> usize {
         self.blue() + (tribe % TRIBES) as usize
+    }
+
+    /// Direction to read for `dir`: the kneeling back view (4) holds the next tribe's front
+    /// frame, so the back-diagonal (3) stands in for it.
+    pub fn source_dir(self, dir: usize) -> usize {
+        if self == ShamanAnim::Kneel && dir == 4 { 3 } else { dir }
     }
 }
 
@@ -155,6 +164,14 @@ mod tests {
         assert_eq!(ShamanAnim::Idle.anim(3), 56);
         assert_eq!(ShamanAnim::Walk.anim(1), 78);
         assert_eq!(ShamanAnim::Fall.anim(2), 87);
+        assert_eq!(ShamanAnim::Kneel.anim(3), 96);
+    }
+
+    #[test]
+    fn kneeling_back_view_uses_the_diagonal() {
+        assert_eq!(ShamanAnim::Kneel.source_dir(4), 3);
+        assert_eq!(ShamanAnim::Kneel.source_dir(2), 2);
+        assert_eq!(ShamanAnim::Walk.source_dir(4), 4);
     }
 
     #[test]

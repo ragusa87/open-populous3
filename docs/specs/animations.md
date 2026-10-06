@@ -35,10 +35,15 @@ action, one per tribe (blue, red, yellow, green), colours drawn in:
 |---|---|---|
 | 53 | idle | 5 |
 | 57 | staff strike | 4 |
-| 61 | pray (sitting, arms spread, bowing) | 4 |
+| 61 | flying horizontally, arms spread (blown by a whirlwind) | 4 |
 | 65 | cast (jumps, lightning in the hands) | 12 |
 | 69 | kick | 5 |
 | 73 | tumbling in the air | 4 |
 | 77 | walk | 8 |
 | 85 | knocked down | 8 |
-| 81, 93 | single standing / crouching frame | 1 |
+| 81 | standing still | 1 |
+| 93 | kneeling on one knee (used for praying) | 1 |
+
+81-84 and 93-96: direction 4 (back) holds the next tribe's front frame (blue shows red, green a black
+silhouette), so it is unusable; `ShamanAnim::source_dir` shows direction 3 instead.
+No animated shaman prayer was found (90/91 look like braves bowing to the ground, unconfirmed).

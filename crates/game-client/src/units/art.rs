@@ -39,7 +39,7 @@ impl Pose {
         match self {
             Pose::Idle => ShamanAnim::Idle,
             Pose::Walk => ShamanAnim::Walk,
-            Pose::Pray => ShamanAnim::Pray,
+            Pose::Pray => ShamanAnim::Kneel,
             Pose::Cast => ShamanAnim::Cast,
             Pose::Fall => ShamanAnim::Fall,
             Pose::Drown => ShamanAnim::Flung,
@@ -126,8 +126,10 @@ pub fn original_art(data_dir: &Path) -> Result<Vec<TribeArt>, String> {
             poses: Pose::ALL
                 .iter()
                 .map(|pose| {
-                    let anim = pose.original().anim(tribe);
+                    let original = pose.original();
+                    let anim = original.anim(tribe);
                     (0..DIRS)
+                        .map(|dir| original.source_dir(dir))
                         .map(|dir| {
                             let mirrored = bank.start(anim, dir).is_some_and(|s| s.mirrored);
                             let frames = bank.frame_loop(anim, dir);

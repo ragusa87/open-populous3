@@ -26,7 +26,7 @@ Health: 100. Orders are ignored while drowning, dying or dead.
 - `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks.
 - Each unit is a `Grounded` sprite quad (1 px = 1/30 cell, feet at the anchor) turned to face the camera,
   with a health bar over the head (green -> yellow -> red, hidden once dead).
-- Pose from the action: Idle, Walk, Pray, Cast (jump), Drown (tumbling), Fall (dying, then lies still while dead).
+- Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (tumbling), Fall (dying, then lies still while dead).
   Timed actions (cast, dying) play once in step with the simulation, others loop.
 - View direction: `facing * 45deg - camera yaw`, rounded to the 8 drawn directions (0 front, 2 screen right, 4 back).
 - Art: with the original files, the shaman animations of `VSTART/VFRA/VELE` + `HSPR0-0.DAT` (see animations.md),
