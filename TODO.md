@@ -23,6 +23,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Dead units other than the shaman lie where they fell forever: remove them after a while (views are indexed by unit position: give them stable ids first).
 - [ ] Wildmen (neutral "gaia" braves, spawned from the levels, standing still today): wander around, drink, eat fruit from trees; the Convert spell turns them into the caster's braves. Their original anims beyond walk/stand/sit/flung (2 gesture, 4 crouching) are unused.
 - [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation.
+- [ ] Animate the wildmen: idle loops and gestures (original anims 2 gesture, 4 crouching) and wandering around their spot, instead of standing still.
 - [ ] Low health: a star/crown spinning over the head of units low on health (original art to find); health bars only show on selected units.
 - [ ] Selection of vehicles and buildings (without the people inside), and of units inside them once they exist (`selection::selectable`).
 - [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
@@ -100,6 +101,9 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spell icons, tooltips; Build and Stats tabs (still "Coming soon").
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
 - [ ] Editor: save back to the original `.dat` format.
+
+## Computer players (AI)
+- [ ] AI for the computer-controlled tribes: their shaman and followers act on their own through `Command`s (deterministic, like a player's input): gather wood, build and grow the village, train units, pray, cast spells, attack and defend.
 
 ## Multiplayer ([multiplayer.md](docs/specs/multiplayer.md))
 - [ ] Turn scheduler with 2-3 turns input delay; local input goes through it instead of `GameMap::apply` directly.
