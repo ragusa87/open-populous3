@@ -56,7 +56,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spell effects with their own animations/visuals (lightning, swarm, whirlwind...); casting (C) only uses a charge and makes the shaman jump.
 - [ ] Aim the other spells on the terrain like Teleport (`hud::spells::ground_spell`), with cast range from the shaman.
 - [ ] Spell cursors: map each spell to its gold icon in `POINT0-0.DAT` (38-66) in `virtual_cursor::spell_sprite`.
-- [ ] Level-defined spell books instead of `demo_book`.
+- [ ] Load the list of enabled spells from the level (`.hdr`: available / discoverable / charges per tribe) into each tribe's `SpellBook`, instead of `demo_book`.
 
 ## Mana
 - [ ] Mana per tribe in the simulation (integer, deterministic), shown in the HUD.
@@ -70,6 +70,12 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Decode the 55-byte thing record fully; spawn trees, buildings, totems from the level.
 - [ ] Decode the `.hdr` beyond name/theme (spells/buildings availability, tribe count, sky).
 - [ ] Verify the x/z axis order of level data.
+
+## Level scripting (triggers)
+- [ ] Analyse the original scripting mechanism: trigger things in the `.dat`, what links them to other things, their conditions (units in range, worship done, time...) and what they fire.
+- [ ] Praying totems, stone heads, vault of knowledge, totem poles: which object triggers what (discover a spell, one-shot spell cast, unlock a building, raise land, reveal hidden things...), and whether it fires once or repeatedly.
+- [ ] Check what the `cpscr*`/`cpatr*` files hold (computer player scripts/attributes) and how they relate to the level triggers.
+- [ ] Document the findings in a spec and implement the triggers as deterministic simulation (through `Command`/state, no floats).
 
 ## Buildings ([buildings.md](docs/specs/buildings.md))
 - [ ] Open-source building models (e.g. CC0 Quaternius Medieval Village / Fantasy kits) instead of the labelled boxes when the original files are not used; generated maps and sandboxes have buildings only in Sandbox > Buildings.
