@@ -20,3 +20,7 @@ test:
 
 level-info file:
     cargo run -p pop3-format --example level_info -- {{file}}
+
+# Standalone page to map original 3D models to game items (embeds original art: stays in target/)
+model-mapping:
+    uvx --with pillow python tools/model_mapping.py

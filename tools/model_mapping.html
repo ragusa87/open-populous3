@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model Mapping</title>
+<style>
+:root {
+  --bg: #f4f2ee; --panel: #ffffff; --text: #1f1d1a; --muted: #6b665e; --line: #ddd8cf;
+  --accent: #b5651d; --guess: #8a6d00; --guess-bg: #fff4c2; --error: #b3261e; --error-bg: #fde7e5;
+  --ok: #2e7d32; --thumb: #222430;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17181c; --panel: #212228; --text: #ece9e3; --muted: #9a958c; --line: #34353d;
+    --accent: #e0914a; --guess: #f0cf5a; --guess-bg: #3b3420; --error: #ff8a80; --error-bg: #42201e;
+    --ok: #81c784;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17181c; --panel: #212228; --text: #ece9e3; --muted: #9a958c; --line: #34353d;
+  --accent: #e0914a; --guess: #f0cf5a; --guess-bg: #3b3420; --error: #ff8a80; --error-bg: #42201e;
+  --ok: #81c784;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 12px 16px; }
+h1 { margin: 0 0 4px; font-size: 18px; }
+p.help { margin: 0 0 8px; color: var(--muted); max-width: 70em; }
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bar label { color: var(--muted); }
+.stats { margin-left: auto; color: var(--muted); }
+#toast { min-height: 1.4em; margin-top: 6px; color: var(--error); font-weight: 600; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; padding: 16px; }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+#grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; align-content: start; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.card.mapped { border-color: var(--ok); }
+.card.guess { border-color: var(--guess); background: var(--guess-bg); }
+.card img { width: 100%; aspect-ratio: 1; background: var(--thumb); border-radius: 4px; image-rendering: auto; cursor: zoom-in; }
+.meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.confirm { font-size: 12px; padding: 3px 6px; }
+.badge { font-size: 11px; font-weight: 600; color: var(--guess); }
+select, button, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+select { width: 100%; padding: 4px; }
+button { padding: 5px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+aside { position: sticky; top: 120px; align-self: start; display: flex; flex-direction: column; gap: 8px; }
+textarea { width: 100%; min-height: 360px; padding: 8px; font: 12px/1.35 ui-monospace, monospace; }
+#import { min-height: 80px; }
+aside h2 { margin: 4px 0 0; font-size: 15px; }
+dialog { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); padding: 8px; }
+dialog img { width: min(80vw, 480px); background: var(--thumb); display: block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Original models → game items</h1>
+  <p class="help">Pick the game item each original 3D model (bank 0) represents. Yellow cards are Claude's
+  prefilled guesses: change them, or press ✓ to confirm. Each item can be used by one
+  model only. For tribe-coloured buildings, map the blue (tribe 0) variant. The JSON on the right updates live; copy it back to Claude.</p>
+  <div class="bar">
+    <label for="filter">Show</label>
+    <select id="filter" style="width:auto">
+      <option value="all">all models</option>
+      <option value="unmapped">unmapped</option>
+      <option value="guess">unconfirmed guesses</option>
+      <option value="mapped">mapped</option>
+    </select>
+    <button id="clear-guesses">Clear unconfirmed guesses</button>
+    <button id="reset">Reset to guesses</button>
+    <span class="stats" id="stats"></span>
+  </div>
+  <div id="toast" role="status"></div>
+</header>
+<main>
+  <section id="grid"></section>
+  <aside>
+    <h2>Result</h2>
+    <textarea id="out" readonly></textarea>
+    <button id="copy">Copy JSON</button>
+    <h2>Import</h2>
+    <textarea id="import" placeholder="Paste a previous result here"></textarea>
+    <button id="load">Load</button>
+  </aside>
+</main>
+<dialog id="zoom"><img alt=""></dialog>
+<script>
+/*DATA*/
+const STORE = "pop3-model-mapping";
+const itemByKey = Object.fromEntries(ITEMS.map(i => [i.key, i]));
+const state = {};
+
+function initialState() {
+  for (const m of MODELS) state[m.object] = { key: m.guess, guess: !!m.guess };
+}
+
+function save() {
+  try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) {}
+}
+
+function restore() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE) || "null");
+    if (saved) for (const [o, v] of Object.entries(saved)) if (o in state && (!v.key || itemByKey[v.key])) state[o] = v;
+  } catch (e) {}
+}
+
+function owner(key, except) {
+  for (const [o, v] of Object.entries(state)) if (v.key === key && String(o) !== String(except)) return o;
+  return null;
+}
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.textContent = "", 4000);
+}
+
+function buildSelect(object) {
+  const sel = document.createElement("select");
+  sel.dataset.object = object;
+  sel.add(new Option("— not mapped —", ""));
+  const groups = {};
+  for (const it of ITEMS) {
+    if (!groups[it.group]) { groups[it.group] = document.createElement("optgroup"); groups[it.group].label = it.group; sel.append(groups[it.group]); }
+    groups[it.group].append(new Option(`${it.name} (${it.kind}:${it.model})`, it.key));
+  }
+  sel.addEventListener("change", () => choose(object, sel.value, sel));
+  return sel;
+}
+
+function choose(object, key, sel) {
+  const taken = key && owner(key, object);
+  if (taken) {
+    toast(`"${itemByKey[key].name}" is already mapped to model #${taken}. Unmap it there first.`);
+    sel.value = state[object].key;
+    return;
+  }
+  state[object] = { key, guess: false };
+  save();
+  render();
+}
+
+function render() {
+  const filter = document.getElementById("filter").value;
+  for (const card of document.querySelectorAll(".card")) {
+    const o = card.dataset.object, v = state[o];
+    const sel = card.querySelector("select");
+    sel.value = v.key;
+    for (const opt of sel.querySelectorAll("option[value]")) {
+      if (!opt.value) continue;
+      const by = owner(opt.value, o);
+      opt.disabled = !!by;
+      opt.textContent = `${itemByKey[opt.value].name} (${opt.value})${by ? ` → #${by}` : ""}`;
+    }
+    card.classList.toggle("mapped", !!v.key && !v.guess);
+    card.classList.toggle("guess", !!v.key && v.guess);
+    card.querySelector(".badge").textContent = v.key && v.guess ? "guess" : "";
+    card.querySelector(".confirm").hidden = !(v.key && v.guess);
+    const show = filter === "all" || (filter === "unmapped" && !v.key) || (filter === "guess" && v.key && v.guess)
+      || (filter === "mapped" && v.key && !v.guess);
+    card.hidden = !show;
+  }
+  const mapped = Object.entries(state).filter(([, v]) => v.key);
+  const out = mapped
+    .map(([o, v]) => ({ ...itemByKey[v.key], object: Number(o), guess: v.guess }))
+    .sort((a, b) => a.kind - b.kind || a.model - b.model)
+    .map(({ kind, model, name, object, guess }) => ({ kind, model, name, object, ...(guess ? { guess: true } : {}) }));
+  document.getElementById("out").value = JSON.stringify(out, null, 1);
+  const guesses = mapped.filter(([, v]) => v.guess).length;
+  document.getElementById("stats").textContent =
+    `${mapped.length - guesses} confirmed, ${guesses} guesses, ${ITEMS.length - mapped.length} items left, ${MODELS.length} models`;
+}
+
+function buildGrid() {
+  const grid = document.getElementById("grid");
+  for (const m of MODELS) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.dataset.object = m.object;
+    const img = new Image();
+    img.src = `data:image/png;base64,${m.png}`;
+    img.alt = `model ${m.object}`;
+    img.addEventListener("click", () => {
+      const d = document.getElementById("zoom");
+      d.querySelector("img").src = img.src;
+      d.showModal();
+    });
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.innerHTML = `<strong>#${m.object}</strong><span class="badge"></span><span>${m.faces} faces</span>`;
+    const confirmBtn = document.createElement("button");
+    confirmBtn.className = "confirm";
+    confirmBtn.textContent = "✓ confirm guess";
+    confirmBtn.addEventListener("click", () => { state[m.object].guess = false; save(); render(); });
+    card.append(img, meta, buildSelect(m.object), confirmBtn);
+    grid.append(card);
+  }
+}
+
+document.getElementById("zoom").addEventListener("click", e => e.currentTarget.close());
+document.getElementById("filter").addEventListener("change", render);
+document.getElementById("copy").addEventListener("click", async () => {
+  const text = document.getElementById("out").value;
+  try { await navigator.clipboard.writeText(text); toast("Copied."); }
+  catch (e) { document.getElementById("out").select(); document.execCommand("copy"); toast("Copied."); }
+});
+document.getElementById("clear-guesses").addEventListener("click", () => {
+  for (const v of Object.values(state)) if (v.guess) { v.key = ""; v.guess = false; }
+  save(); render();
+});
+document.getElementById("reset").addEventListener("click", () => {
+  if (!confirm("Discard your mapping and go back to the guesses?")) return;
+  initialState(); save(); render();
+});
+document.getElementById("load").addEventListener("click", () => {
+  let rows;
+  try { rows = JSON.parse(document.getElementById("import").value); } catch (e) { toast("Not valid JSON."); return; }
+  if (!Array.isArray(rows)) { toast("Expected a JSON array."); return; }
+  const next = Object.fromEntries(MODELS.map(m => [m.object, { key: "", guess: false }]));
+  const used = new Set();
+  for (const r of rows) {
+    const key = `${r.kind}:${r.model}`;
+    if (!itemByKey[key] || !(r.object in next)) { toast(`Unknown item or model in row ${JSON.stringify(r)}.`); return; }
+    if (used.has(key) || next[r.object].key) { toast(`Duplicate in row ${JSON.stringify(r)}.`); return; }
+    used.add(key);
+    next[r.object] = { key, guess: !!r.guess };
+  }
+  Object.assign(state, next); save(); render(); toast(`Loaded ${rows.length} mappings.`);
+});
+
+initialState();
+restore();
+buildGrid();
+render();
+</script>
+</body>
+</html>

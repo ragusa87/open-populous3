@@ -42,3 +42,8 @@ File names mix case (`OBJS0-0.DAT`, `objs0-1.dat`): match case-insensitively.
 "RS pillar", our choice), 77 short pillar; 78-80 standing stones; 81 stone arch; 82 stone head;
 121-180 buildings (huts, towers...), 100-116 creatures/vehicles, 182 balloon.
 The thing (kind, model) -> object index table lives in the game executable and is not decoded yet.
+
+## Mapping tool
+`just model-mapping` writes `target/model-mapping.html`: every bank 0 model as a textured thumbnail with a
+select of game items (prefilled with guesses, each item usable once). The JSON it outputs is the input for the
+(kind, model) -> object table. The page embeds original art: never commit or publish it.
