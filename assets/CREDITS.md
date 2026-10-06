@@ -2,5 +2,5 @@
 
 | File | Author | Licence | Notes |
 |---|---|---|---|
-| `models/witch.gltf` | [Quaternius](https://www.patreon.com/quaternius) (LowPoly Models) | CC0 1.0 | source: https://drive.google.com/drive/folders/1sNi1AfenfPRrvRt5yfaj5QMMd6KKcUJ5 |
-| `units/shaman/*.png` | rendered from `models/witch.gltf` by the `render_sprites` example | CC0 1.0 | open-source shaman |
+| `models/witch.gltf`, `worker_male.gltf`, `soldier_female.gltf`, `wizard.gltf`, `ninja_male_hair.gltf`, `cowboy_male.gltf` | [Quaternius](https://www.patreon.com/quaternius) (LowPoly Models, Ultimate Animated Characters) | CC0 1.0 | source: https://drive.google.com/drive/folders/1sNi1AfenfPRrvRt5yfaj5QMMd6KKcUJ5 |
+| `units/<kind>/*.png` | rendered from those models by the `render_sprites` example (`just render-units`) | CC0 1.0 | shaman = witch, brave = worker, warrior = soldier, preacher = wizard, spy = ninja, firewarrior = cowboy |

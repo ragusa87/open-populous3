@@ -1,7 +1,8 @@
 //! Open-source unit art from rendered sheets (docs/specs/unit-art.md, "Rendered sheets"): one PNG per
 //! pose, 8 rows (directions, see `art::sprite_dir`) of 320 x 288 cells at 4 pixels per base pixel, feet
 //! at (160, 256), tribe-coloured parts in magenta. Made from a rigged model by the `render_sprites`
-//! example. Each tribe swaps the magenta hue for its colour.
+//! example from CC0 Quaternius characters (see assets/CREDITS.md). Each tribe swaps the magenta hue
+//! for its colour.
 
 use super::art::{Frame, Pose, TribeArt, DIRS};
 use super::procedural::tribe_rgb;
@@ -23,19 +24,29 @@ macro_rules! sheet {
     };
 }
 
-/// The bundled sheet (PNG) of a kind's pose, if it has art.
+macro_rules! poses {
+    ($kind:literal, $pose:expr) => {
+        match $pose {
+            Pose::Idle => sheet!($kind, "idle"),
+            Pose::Walk => sheet!($kind, "walk"),
+            Pose::Pray => sheet!($kind, "pray"),
+            Pose::Cast => sheet!($kind, "cast"),
+            Pose::Fall => sheet!($kind, "fall"),
+            Pose::Drown => sheet!($kind, "drown"),
+        }
+    };
+}
+
+/// The bundled sheet (PNG) of a kind's pose (`assets/units/<kind>/<pose>.png`).
 pub fn bundled(kind: UnitKind, pose: Pose) -> Option<&'static [u8]> {
-    match kind {
-        UnitKind::Shaman => Some(match pose {
-            Pose::Idle => sheet!("shaman", "idle"),
-            Pose::Walk => sheet!("shaman", "walk"),
-            Pose::Pray => sheet!("shaman", "pray"),
-            Pose::Cast => sheet!("shaman", "cast"),
-            Pose::Fall => sheet!("shaman", "fall"),
-            Pose::Drown => sheet!("shaman", "drown"),
-        }),
-        _ => None,
-    }
+    Some(match kind {
+        UnitKind::Shaman => poses!("shaman", pose),
+        UnitKind::Brave => poses!("brave", pose),
+        UnitKind::Warrior => poses!("warrior", pose),
+        UnitKind::Preacher => poses!("preacher", pose),
+        UnitKind::Spy => poses!("spy", pose),
+        UnitKind::Firewarrior => poses!("firewarrior", pose),
+    })
 }
 
 /// PNG bytes to RGBA (width, height, pixels).
@@ -108,8 +119,8 @@ mod tests {
 
     #[test]
     fn bundled_sheets_are_8_rows_of_cells_with_feet_on_the_ground() {
-        for pose in Pose::ALL {
-            let dirs = split(bundled(UnitKind::Shaman, pose).unwrap()).unwrap_or_else(|| panic!("{pose:?} sheet"));
+        for (kind, pose) in UnitKind::ALL.iter().flat_map(|&k| Pose::ALL.iter().map(move |&p| (k, p))) {
+            let dirs = split(bundled(kind, pose).unwrap()).unwrap_or_else(|| panic!("{kind:?} {pose:?} sheet"));
             assert_eq!(dirs.len(), DIRS);
             for frames in &dirs {
                 assert!(!frames.is_empty());
@@ -119,10 +130,11 @@ mod tests {
                 }
             }
         }
-        let idle = &split(bundled(UnitKind::Shaman, Pose::Idle).unwrap()).unwrap()[0][0];
-        let height = idle.origin.1 as f32 / SCALE as f32;
-        assert!((40.0..=55.0).contains(&height), "standing, hat included: {height} base px");
-        assert!(bundled(UnitKind::Brave, Pose::Idle).is_none());
+        for kind in UnitKind::ALL {
+            let idle = &split(bundled(kind, Pose::Idle).unwrap()).unwrap()[0][0];
+            let height = idle.origin.1 as f32 / SCALE as f32;
+            assert!((30.0..=55.0).contains(&height), "{kind:?} standing, headgear included: {height} base px");
+        }
     }
 
     #[test]

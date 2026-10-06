@@ -89,19 +89,23 @@ Use no other magenta anywhere in the art. Skin, hair, wood, metal and the spy's 
 ## Rendered sheets (loaded today)
 A rigged, animated 3D model (glTF) can be rendered into sheets by the `render_sprites` example:
 
-  just render-sprites assets/models/witch.gltf assets/units/shaman
+  just render-sprites assets/models/witch.gltf assets/units/shaman [--head 3.1] [--tribe Clothes,Hat] [--skin d29a6e]
+  just render-units    # every kind, with its model and tribe materials
 
 One PNG per pose (`idle`, `walk`, `pray`, `cast`, `fall`, `drown`), 8 rows (directions 0-7, all rendered:
 no mirroring) of 320 x 288 cells, 4 pixels per base pixel, feet at (160, 256) (bigger than a drawn cell: a
 lying body and the cast jump must fit), orthographic, seen from 30 deg above, hard edges, 2 px dark outline.
-The model's tribe materials (default `Clothes,Hat`) are rendered in the magenta key. Pose to clip: idle Idle
+The model's tribe materials (`--tribe`, default `Clothes,Hat`) are rendered in the magenta key, the material
+named `Skin` in `--skin` (the Quaternius characters ship a near-black skin; default tan `d29a6e`). Pose to clip: idle Idle
 (8 frames over the loop), walk Walk (12), pray SitDown (its last moment), cast Jump (12), fall Death (8, the
 last two lying), drown RecieveHit (4, sunk 45% under a ripple line). Scale: the head top (default 3.1 model
 units) is 34 base px above the feet.
 
 The game embeds the sheets (`units/sheets.rs`), crops every cell around the feet and swaps the magenta hue for
-each tribe's. The shaman uses them whenever the original files are not (`--no-original`, no install); kinds
-without sheets keep their generated figure.
+each tribe's. Every kind uses them whenever the original files are not (`--no-original`, no install): shaman =
+witch (robe and hat in the tribe colour), brave = worker (shirt), warrior = soldier (top), preacher = wizard (robe;
+his hat stays dark so he is not mistaken for the shaman), spy = ninja (details), firewarrior = cowboy (jacket).
+A kind without sheets would fall back to its generated figure.
 
 ## Generating with an image model
 Models do not keep a fixed grid or anchor reliably: generate one direction or pose at a time, larger, then

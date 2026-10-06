@@ -83,7 +83,7 @@ view of the starting camera), a pond to the north.
   `assets/units/shaman/*.png` sheets, loaded by `units/sheets.rs` (see unit-art.md); `units/procedural.rs` can still draw a ~34 px pixel-art shaman in the tribe colour
   (feather headdress, staff) for every pose and direction (front / side / back, left ones mirrored). With the original files the other kinds
   use their original animations too (`art::Originals`, `original_anim`: tribesman body + outfit layer, the preacher's
-  own body, see animations.md); otherwise they are generated (`UnitSprites`, per kind and tribe), told apart by headgear, held item and clothes: brave
+  own body, see animations.md); otherwise they use rendered CC0 sheets (unit-art.md), else generated figures (`UnitSprites`, per kind and tribe), told apart by headgear, held item and clothes: brave
   (bare chest, hair tuft, empty hands), warrior (horned helmet, club), preacher (pointed hood, long robe, book), spy
   (dark cloak and cowl, dagger), firewarrior (red cone hat, flame in hand).
 - Selection (`units/selection.rs`, player 0's living units): left click on a unit selects it, Ctrl+click adds or

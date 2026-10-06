@@ -8,6 +8,15 @@ run *args:
 render-sprites model out *args:
     cargo run --release -p game-client --example render_sprites -- {{model}} {{out}} {{args}}
 
+# Re-render every unit kind's sheets from its CC0 model (see assets/CREDITS.md)
+render-units:
+    just render-sprites assets/models/witch.gltf assets/units/shaman --tribe Clothes,Hat
+    just render-sprites assets/models/worker_male.gltf assets/units/brave --tribe Shirt
+    just render-sprites assets/models/soldier_female.gltf assets/units/warrior --tribe Main
+    just render-sprites assets/models/wizard.gltf assets/units/preacher --tribe Clothes
+    just render-sprites assets/models/ninja_male_hair.gltf assets/units/spy --tribe Details
+    just render-sprites assets/models/cowboy_male.gltf assets/units/firewarrior --tribe Jacket
+
 # Never read the original game files: generated maps + generated theme
 run-generated *args:
     cargo run -p game-client -- --no-original {{args}}
