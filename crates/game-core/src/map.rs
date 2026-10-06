@@ -22,7 +22,7 @@ pub struct GameMap {
     pub sites: Vec<ReincarnationSite>,
     /// One shaman per site for now, in site order.
     pub units: Vec<Unit>,
-    /// Wood on the map (none on original levels until their things are decoded).
+    /// Wood on the map: an original level's scenery trees, or groves on generated maps and sandboxes.
     pub trees: Vec<Tree>,
 }
 
@@ -34,7 +34,11 @@ impl GameMap {
             terrain: Heightmap::from_heights(MAP_SIZE, level.heights.clone()),
             sites: sites_from_level(level),
             units: Vec::new(),
-            trees: Vec::new(),
+            trees: level
+                .things
+                .iter()
+                .filter_map(|t| Some(Tree::new(((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32), t.tree_type()?, crate::tree::MAX_SIZE)))
+                .collect(),
         }
         .with_shamans()
     }
@@ -469,6 +473,18 @@ mod tests {
         }
         assert_ne!(m.units[0].cell(), (c + 4, c));
         assert_eq!(m.units[0].action, Action::Idle);
+    }
+
+    #[test]
+    fn original_levels_get_their_scenery_trees() {
+        use pop3_format::level::{DAT_SIZE, KIND_SCENERY};
+        let mut d = vec![0u8; DAT_SIZE];
+        let base = d.len() - 95 - 2000 * 55;
+        d[base..base + 7].copy_from_slice(&[2, KIND_SCENERY, 0, 0x00, 0x0a, 0x00, 0x14]);
+        d[base + 55..base + 62].copy_from_slice(&[8, KIND_SCENERY, 0, 0x00, 0x0b, 0x00, 0x14]);
+        let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None);
+        assert_eq!(m.trees.len(), 1, "a tree, not the plant");
+        assert_eq!((m.trees[0].cell(), m.trees[0].variant, m.trees[0].size), ((5, 10), 1, crate::tree::MAX_SIZE));
     }
 
     #[test]

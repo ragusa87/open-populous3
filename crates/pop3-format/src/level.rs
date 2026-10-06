@@ -27,6 +27,8 @@ pub const KIND_SCENERY: u8 = 5;
 pub const KIND_GENERAL: u8 = 6;
 /// `Thing::model` of a person that is the tribe's shaman.
 pub const PERSON_SHAMAN: u8 = 7;
+/// Scenery models 1-6 are trees (level 19: 1 cone pines, 2 weeping trees, as seen in the game).
+pub const SCENERY_TREES: std::ops::RangeInclusive<u8> = 1..=6;
 
 const HDR_NAME_OFFSET: usize = 56;
 const HDR_NAME_LEN: usize = 32;
@@ -88,6 +90,11 @@ impl Thing {
 
     pub fn is_shaman(&self) -> bool {
         self.kind == KIND_PERSON && self.model == PERSON_SHAMAN
+    }
+
+    /// The tree type (0-5, scenery model 1-6) if this is a tree.
+    pub fn tree_type(&self) -> Option<u8> {
+        (self.kind == KIND_SCENERY && SCENERY_TREES.contains(&self.model)).then(|| self.model - 1)
     }
 }
 
@@ -196,6 +203,18 @@ mod tests {
         let shamans: Vec<_> = lvl.things.iter().filter(|t| t.is_shaman()).collect();
         assert_eq!(shamans.len(), 1);
         assert_eq!(shamans[0].owner, 1);
+    }
+
+    #[test]
+    fn scenery_models_1_to_6_are_trees() {
+        let mut d = synthetic();
+        for (i, model) in [1u8, 6, 7].iter().enumerate() {
+            let t = THINGS_OFFSET + THING_SIZE * (10 + i);
+            d[t..t + 2].copy_from_slice(&[*model, KIND_SCENERY]);
+        }
+        let lvl = Level::parse(&d).unwrap();
+        let types: Vec<_> = lvl.things.iter().map(Thing::tree_type).collect();
+        assert_eq!(types, vec![None, Some(0), Some(5), None], "the building first, then trees, then a plant");
     }
 
     #[test]

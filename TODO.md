@@ -81,7 +81,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Houses grow (small -> medium -> large: `villager_hut` sizes), holding more braves. Growing has several criteria; one of them is a piece of wood brought by a brave (other criteria to find out).
 
 ## Wood ([trees.md](docs/specs/trees.md))
-- [ ] Trees from the original levels' things (generated maps and sandboxes already have groves).
+- [ ] Trees from original levels: decode their size/growth from the thing record if stored (all full size today); find which landscape themes use the tree objects 60-71 instead of 13-18; scenery models 7-9 (plants? stone heads?).
 - [ ] A brave cuts one piece of wood at a time (`Tree::cut`): the tree shrinks by one, the brave carries the piece to a construction site or house.
 - [ ] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible) trees.
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.

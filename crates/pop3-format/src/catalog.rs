@@ -128,6 +128,20 @@ impl ShamanAnim {
     }
 }
 
+/// The 3D object a tree is drawn with: tree types 0-5 (scenery models 1-6) are objects 13-18
+/// (cone pine, weeping tree, big weeping tree, pine, then copies of 14 and 15), confirmed on level 19;
+/// the other tree objects, 60-71 (twisted bonsai-like trees, round, cone, palm), follow as types 6-17,
+/// probably other landscapes' trees (which theme uses which is unknown).
+pub fn tree_object(tree_type: u8) -> usize {
+    match tree_type {
+        0..=5 => 13 + tree_type as usize,
+        t => 60 + (t as usize - 6) % 12,
+    }
+}
+
+/// Tree types: 6 scenery models plus the 12 other tree objects.
+pub const TREE_TYPES: u8 = 18;
+
 /// Braves, warriors, firewarriors and spies share one tribesman body, drawn blue (tribe 0) with
 /// tribe colour layers and an outfit layer per unit type (`anim::Outfit`), identified by eye.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,6 +207,12 @@ impl PreacherAnim {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tree_types_to_objects() {
+        assert_eq!((tree_object(0), tree_object(1), tree_object(5)), (13, 14, 18));
+        assert_eq!((tree_object(6), tree_object(17)), (60, 71));
+    }
 
     #[test]
     fn buildings_follow_tribe_order() {

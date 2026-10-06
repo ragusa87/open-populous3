@@ -13,13 +13,12 @@ use bevy::gltf::GltfAssetLabel;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use game_core::tree::{MAX_SIZE, VARIANTS};
+use pop3_format::catalog::tree_object;
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 
 /// Open-source models (`assets/models/nature/<name>.gltf`), by variant modulo their count.
 const MODELS: [&str; 10] =
     ["CommonTree_1", "CommonTree_2", "CommonTree_3", "CommonTree_4", "CommonTree_5", "Pine_1", "Pine_2", "Pine_3", "Pine_4", "Pine_5"];
-/// Original tree object of variant 0 (bank 0); variant v is `FIRST_TREE_OBJECT + v`.
-const FIRST_TREE_OBJECT: usize = 60;
 /// Theme whose atlas textures the original trees on maps without one (generated, sandboxes).
 const DEFAULT_THEME: u8 = 0;
 /// The models are about this many units tall; a full-size tree stands `FULL_HEIGHT` cells.
@@ -111,7 +110,7 @@ fn original_trees(
     let (atlas, palette) = load().map_err(|e| warn!("tree atlas for theme {theme}: {e}")).ok()?;
     let trees = (0..VARIANTS as usize)
         .map(|v| {
-            let obj = bank.get(FIRST_TREE_OBJECT + v)?;
+            let obj = bank.get(tree_object(v as u8))?;
             let height = obj.points.iter().map(|p| p[1]).max().unwrap_or(0) as f32 / WORLD_UNITS_PER_CELL as f32;
             Some((meshes.add(to_mesh(object_mesh(obj, 0))), height))
         })

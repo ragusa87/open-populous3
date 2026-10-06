@@ -10,9 +10,9 @@ use pop3_format::WORLD_UNITS_PER_CELL;
 pub const MAX_SIZE: u8 = 4;
 /// Ticks to grow one size (a minute at 10 ticks per second).
 pub const GROW_TICKS: u16 = 600;
-/// Tree models to pick from: the 12 original tree objects (bank 0, 60-71); the client maps a
-/// variant to a model.
-pub const VARIANTS: u8 = 12;
+/// Tree types: 0-5 are the levels' scenery trees (models 1-6), 6-17 the other original tree objects
+/// (`pop3_format::catalog::tree_object`); the client maps a variant to a model.
+pub const VARIANTS: u8 = pop3_format::catalog::TREE_TYPES;
 /// No tree this close (cells) to a reincarnation site: its stones and spawn ground stay clear.
 pub const SITE_CLEARANCE: i32 = 7;
 

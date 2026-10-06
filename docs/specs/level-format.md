@@ -22,7 +22,7 @@ Thing record (55 bytes), known part:
 | Byte | Field |
 |---|---|
 | 0 | model (subtype, e.g. tree variant) |
-| 1 | kind: 1 person, 2 building, 4 vehicle, 5 scenery, 6 general/marker, 7 effect |
+| 1 | kind: 1 person, 2 building, 4 vehicle, 5 scenery (models 1-6 trees, 7-8 plants?), 6 general/marker, 7 effect |
 | 2 | owner tribe (255 = neutral) |
 | 3..5 | x, `u16`, world units (512 per cell, odd multiples of 256 = cell centre) |
 | 5..7 | z, `u16` |

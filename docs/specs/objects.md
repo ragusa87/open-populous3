@@ -49,7 +49,8 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | 20 | stone prayer totem |
 | 30 | reincarnation site stone (tribe-coloured) |
 | 31, 32 | book, shield |
-| 60-71 | trees, 0.9-1.8 cells tall (drawn by `nature.rs`, one per tree variant); 71 is a palm whose fronds are a cut-out texture |
+| 13-18 | trees of scenery models 1-6 (`catalog::tree_object`): 13 cone pine, 14 weeping tree, 15 big weeping tree, 16 pine, 17-18 copies of 14-15 (level 19 confirmed 1 = cone pine, 2 = weeping tree) |
+| 60-71 | trees, 0.9-1.8 cells tall: twisted bonsai-like (60-65), thin, round, tall cone, palm (71, fronds a cut-out texture); probably other landscapes' trees (which theme uses them is unknown); drawn for generated maps' tree types 6-17 |
 | 82 | stone head; 83, 84 untextured |
 | 94 | prison (shaman locked until freed, some levels) |
 | 117-120 | drum tower, blue / red / yellow / green |
@@ -64,7 +65,7 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | 187, 188, 189 | totem poles |
 | 191 | pyramid of knowledge (unlocks a spell or building); 192, 193 door animation frames |
 
-Unidentified: 13-18 (trees?), 75-81 (stone pillars, standing stones, arch), 89-93,
+Unidentified: 75-81 (stone pillars, standing stones, arch), 89-93,
 190 (looks like the pyramid of knowledge).
 
 Atlas texels of palette index 0 are see-through in the game (e.g. the palm's fronds): `atlas_rgba` gives them
