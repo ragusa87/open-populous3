@@ -148,7 +148,12 @@ fn toggle_cursor_confine(
 }
 
 fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {
-    rig.look_at_cell(map.0.terrain.lowland_cell());
+    rig.look_at_cell(start_cell(&map.0));
+}
+
+/// The player's (tribe 0) reincarnation site, else some low inland ground.
+pub fn start_cell(map: &game_core::map::GameMap) -> (i32, i32) {
+    map.site_of(0).map_or_else(|| map.terrain.lowland_cell(), |s| s.cell())
 }
 
 fn camera_input(
@@ -229,6 +234,15 @@ pub struct CurveParamsRes(pub CurveParams);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starts_on_player_site() {
+        let mut map = game_core::map::GameMap::generate(3);
+        map.sites = vec![game_core::site::ReincarnationSite::at_cell(0, (9, 99))];
+        assert_eq!(start_cell(&map), (9, 99));
+        map.sites.clear();
+        assert_eq!(start_cell(&map), map.terrain.lowland_cell());
+    }
 
     #[test]
     fn focus_wraps_around_the_torus() {

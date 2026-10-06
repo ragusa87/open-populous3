@@ -7,6 +7,7 @@ mod edge_push;
 mod editor;
 mod hud;
 mod procedural_theme;
+mod sites;
 mod terrain_mesh;
 mod terrain_texture;
 mod world;
@@ -39,6 +40,7 @@ fn main() {
         .add_plugins((
             world::WorldPlugin { level_arg: opts.level_arg, use_original: opts.use_original },
             camera::CameraPlugin,
+            sites::SitesPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,
             dev::DevPlugin,
