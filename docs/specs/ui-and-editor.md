@@ -12,8 +12,9 @@ fov 60 deg, tuned by eye against the original). Clear color fades from sky blue 
 low inland cell (`Heightmap::lowland_cell`).
 
 ## Left panel (`hud/`)
-Fixed 204 px panel on the left, like the original: shaman preview at the top (live mini-view of the
-main character, placeholder for now), 3 tabs
+Fixed 204 px panel on the left, like the original: shaman preview at the top (`hud/shaman.rs`: her current
+sprite x2, same pose and view as on the map, what she is doing, e.g. "Praying" / "Reincarnating in 2s", and a
+health bar with `hp/max`; clicking it looks at her), 3 tabs
 (Spells / Build / Stats, `ActiveTab`), one content node per tab (`TabContent(n)`), info line under
 the grid.
 
@@ -29,9 +30,11 @@ Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 | Known | gold tile, 1-4 charge pips (max depends on the spell), blue recharge bar while not full; dimmed at 0 charges |
 
 Hover shows the tile's description, click selects (white border), `C` casts the selected spell (demo:
-only consumes a charge). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
-Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build/Stats tabs,
-live shaman preview (render-to-texture camera following the shaman).
+consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
+Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build/Stats tabs.
+
+## Shaman orders
+Right click on the ground: walk there. P pray, X stop, Space look at her (see units.md).
 
 ## World editor (`editor.rs`)
 Tab toggles edit mode. Brushes at the camera focus: R raise, F lower (Erode), T flatten,

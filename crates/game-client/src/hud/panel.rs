@@ -1,4 +1,4 @@
-//! Left panel frame: shaman preview (placeholder), tab buttons, one content node per tab.
+//! Left panel frame: shaman preview box (filled by `shaman.rs`), tab buttons, one content node per tab.
 
 use bevy::prelude::*;
 
@@ -14,6 +14,10 @@ pub struct ActiveTab(pub usize);
 
 #[derive(Component)]
 struct TabButton(usize);
+
+/// The box at the top of the panel showing the player's shaman.
+#[derive(Component)]
+pub struct ShamanPreview;
 
 /// Content root of tab `n`; other plugins spawn their widgets inside it.
 #[derive(Component)]
@@ -48,19 +52,13 @@ fn spawn_panel(mut commands: Commands) {
             BorderColor::all(DARK_BROWN),
         ))
         .with_children(|panel| {
-            panel
-                .spawn((
-                    Node {
-                        height: px(120),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        border: UiRect::all(px(2)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.08, 0.16, 0.30)),
-                    BorderColor::all(DARK_BROWN),
-                ))
-                .with_child((Text::new("shaman preview"), TextFont { font_size: FontSize::Px(12.0), ..default() }));
+            panel.spawn((
+                ShamanPreview,
+                Button,
+                Node { height: px(120), border: UiRect::all(px(2)), overflow: Overflow::clip(), ..default() },
+                BackgroundColor(Color::srgb(0.08, 0.16, 0.30)),
+                BorderColor::all(DARK_BROWN),
+            ));
             panel.spawn(Node { column_gap: px(4), ..default() }).with_children(|row| {
                 for (i, label) in TABS.iter().enumerate() {
                     row.spawn((
