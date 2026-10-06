@@ -102,7 +102,7 @@ pub enum ShamanAnim {
     Walk,
     /// Knocked down flat on her back (8 frames).
     Fall,
-    /// Kneeling on one knee (1 frame): used for praying. Only 4 views, see `view`.
+    /// Kneeling on one knee (1 frame): used for praying.
     Kneel,
 }
 
@@ -123,18 +123,6 @@ impl ShamanAnim {
 
     pub fn anim(self, tribe: u8) -> usize {
         self.blue() + (tribe % TRIBES) as usize
-    }
-
-    /// Kneeling has only 4 views (front, side, back-diagonal, back) stored where the direction
-    /// table expects 5, so the table is one view off from direction 1 on and its direction 4 is
-    /// the next tribe's front. Returns the table direction holding the right view and whether to
-    /// mirror it; None when the table is right.
-    pub fn view(self, dir: usize) -> Option<(usize, bool)> {
-        (self == ShamanAnim::Kneel).then(|| {
-            let d = dir % 8;
-            let (base, mirrored) = if d <= 4 { (d, false) } else { (8 - d, true) };
-            ([0, 0, 1, 2, 3][base], mirrored)
-        })
     }
 }
 
@@ -171,14 +159,6 @@ mod tests {
         assert_eq!(ShamanAnim::Walk.anim(1), 78);
         assert_eq!(ShamanAnim::Fall.anim(2), 87);
         assert_eq!(ShamanAnim::Kneel.anim(3), 96);
-    }
-
-    #[test]
-    fn kneeling_views_are_remapped() {
-        let views: Vec<_> = (0..8).map(|d| ShamanAnim::Kneel.view(d).unwrap()).collect();
-        assert_eq!(views[..5], [(0, false), (0, false), (1, false), (2, false), (3, false)]);
-        assert_eq!(views[5..], [(2, true), (1, true), (0, true)]);
-        assert_eq!(ShamanAnim::Walk.view(4), None);
     }
 
     #[test]

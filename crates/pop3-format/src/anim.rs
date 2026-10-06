@@ -37,7 +37,8 @@ pub struct Frame {
 /// One sprite placed relative to the person's feet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Element {
-    pub sprite: usize,
+    /// Index in the `HSPR0-0.DAT` bank, None for an empty element.
+    pub sprite: Option<usize>,
     pub x: i16,
     pub y: i16,
     pub flags: u16,
@@ -65,7 +66,7 @@ fn u16_at(d: &[u8], o: usize) -> u16 {
 impl AnimBank {
     /// `VSTART`: per animation, 8 x (u16 frame, u16 mirror source, 0 = own frames).
     /// `VFRA`: 8 bytes (u16 first element, u8 w, u8 h, u16 flags, u16 next frame).
-    /// `VELE`: 10 bytes (u16 sprite x 6, i16 x, i16 y, u16 flags, u16 next element).
+    /// `VELE`: 10 bytes (u16 (sprite + 1) x 6, i16 x, i16 y, u16 flags, u16 next element).
     pub fn parse(start: &[u8], frames: &[u8], elements: &[u8]) -> Result<Self, LevelError> {
         let starts = start
             .chunks_exact(4 * DIRECTIONS)
@@ -75,7 +76,7 @@ impl AnimBank {
         let elements = elements
             .chunks_exact(10)
             .map(|e| Element {
-                sprite: u16_at(e, 0) as usize / 6,
+                sprite: (u16_at(e, 0) as usize / 6).checked_sub(1),
                 x: u16_at(e, 2) as i16,
                 y: u16_at(e, 4) as i16,
                 flags: u16_at(e, 6),
@@ -130,7 +131,7 @@ impl AnimBank {
             .frame_elements(frame)
             .into_iter()
             .filter(|e| e.flags & (FLAG_SHADOW | FLAG_TRIBE_LAYER) == 0)
-            .filter_map(|e| Some((e, sprites.sprites.get(e.sprite)?)))
+            .filter_map(|e| Some((e, sprites.sprites.get(e.sprite?)?)))
             .collect();
         compose_parts(&parts, mirrored)
     }
@@ -181,7 +182,7 @@ mod tests {
         start[10] = 2;
         start[11] = 3;
         let frames = le(&[0, 0, 0, 0, 1, 0x1515, 0, 2, 3, 0x1515, 0, 1]);
-        let elements = le(&[0, 0, 0, 0, 0, 6, (-1i16) as u16, (-2i16) as u16, 0, 2, 12, 0, 0, FLAG_SHADOW, 0, 6, 0, 0, FLAG_FLIP, 0]);
+        let elements = le(&[0, 0, 0, 0, 0, 12, (-1i16) as u16, (-2i16) as u16, 0, 2, 18, 0, 0, FLAG_SHADOW, 0, 12, 0, 0, FLAG_FLIP, 0]);
         AnimBank::parse(&le(&start), &frames, &elements).unwrap()
     }
 
@@ -195,7 +196,8 @@ mod tests {
         let b = bank();
         assert_eq!(b.start(0, 0), Some(Start { frame: 1, mirrored: false }));
         assert_eq!(b.start(0, 5), Some(Start { frame: 2, mirrored: true }));
-        assert_eq!(b.elements[1].sprite, 1, "sprite field is index x 6");
+        assert_eq!(b.elements[1].sprite, Some(1), "sprite field is (index + 1) x 6");
+        assert_eq!(b.elements[0].sprite, None);
         assert_eq!((b.elements[1].x, b.elements[1].y), (-1, -2));
     }
 

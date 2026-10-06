@@ -21,7 +21,7 @@ Record 0 is empty.
 ## `data/VELE-0.ANI`: elements, 10 bytes
 | Off | Type | Content |
 |---|---|---|
-| 0 | u16 | sprite index x 6 (offset in `HSPR0-0.TAB`, 6-byte entries) |
+| 0 | u16 | (sprite index + 1) x 6 (offset in `HSPR0-0.TAB`, 6-byte entries, entry 0 unused); 0 = no sprite |
 | 2, 4 | i16 | x, y of the sprite's top-left corner relative to the feet |
 | 6 | u16 | flags: 0x1 mirrored, 0x4 shadow, 0x10 tribe layer with tribe in bits 9-10 (mapping unverified) |
 | 8 | u16 | next element in the frame, 0 = last |
@@ -44,8 +44,6 @@ action, one per tribe (blue, red, yellow, green), colours drawn in:
 | 81 | standing still | 1 |
 | 93 | kneeling on one knee (used for praying) | 1 |
 
-93-96 (kneeling) have only 4 views per tribe (front, side facing right, back-diagonal, back) but the
-direction table points at 5 consecutive frames: from direction 1 on it is one view off, and direction 4
-lands on the next tribe's front (blue shows red, green a black silhouette). `ShamanAnim::view` remaps:
-directions 0-1 front, 2 side, 3 back-diagonal, 4 back, 5-7 mirror 3-1. 81-84 look the same (unchecked).
-No animated shaman prayer was found (90/91 look like braves bowing to the ground, unconfirmed).
+Reading the sprite as `field / 6` (no -1) looks almost right but shows the next view's sprite once per
+loop, and the next tribe's in the back view: the -1 is checked on every shaman pose and tribe.
+No animated shaman prayer was found; 90/91 are braves bowing to the ground (worship).
