@@ -1,8 +1,8 @@
-//! Reincarnation sites: a stone ring with a tribe-coloured totem. Every stone is its own
+//! Reincarnation sites: a stone ring around the shaman's spawn point. Every stone is its own
 //! `Grounded` part, so the ring follows slopes and the planet curve instead of staying flat.
 //! With the original files the stones are the game's reincarnation stones in the tribe's colour,
-//! textured from the level theme's atlas, and there is no totem; otherwise (or with `--no-original`)
-//! plain generated blocks around a tribe-coloured totem.
+//! textured from the level theme's atlas; otherwise (or with `--no-original`) plain generated
+//! blocks tinted with the tribe colour.
 
 use crate::grounded::Grounded;
 use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects};
@@ -15,7 +15,6 @@ use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
 const STONES: usize = 8;
 const RING_RADIUS: f32 = 1.3;
 const STONE: Vec3 = Vec3::new(0.22, 0.6, 0.22);
-const TOTEM: (f32, f32) = (0.16, 1.4);
 /// Footprint half size of a ring stone, wide enough for the original pillar (~0.47 cell).
 const STONE_HALF: f32 = 0.24;
 
@@ -23,14 +22,7 @@ const STONE_HALF: f32 = 0.24;
 struct SiteMarker;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum PartKind {
-    Totem,
-    Stone,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SitePart {
-    pub kind: PartKind,
     pub ground: Grounded,
     pub yaw: f32,
 }
@@ -65,16 +57,16 @@ pub fn face_centre_yaw(a: f32) -> f32 {
     std::f32::consts::FRAC_PI_2 - a
 }
 
-/// Totem at the centre, then a ring of stones facing it, each with its own ground position.
+/// A ring of stones facing the centre (where the shaman stands), each with its own ground position.
 pub fn site_parts(site: &ReincarnationSite) -> Vec<SitePart> {
     let centre = site_cell_pos(site);
-    let totem = SitePart { kind: PartKind::Totem, ground: Grounded { at: centre, half: TOTEM.0 }, yaw: 0.0 };
-    let stones = (0..STONES).map(|i| {
-        let a = i as f32 * std::f32::consts::TAU / STONES as f32;
-        let at = centre + Vec2::new(a.cos(), a.sin()) * RING_RADIUS;
-        SitePart { kind: PartKind::Stone, ground: Grounded { at, half: STONE_HALF }, yaw: face_centre_yaw(a) }
-    });
-    std::iter::once(totem).chain(stones).collect()
+    (0..STONES)
+        .map(|i| {
+            let a = i as f32 * std::f32::consts::TAU / STONES as f32;
+            let at = centre + Vec2::new(a.cos(), a.sin()) * RING_RADIUS;
+            SitePart { ground: Grounded { at, half: STONE_HALF }, yaw: face_centre_yaw(a) }
+        })
+        .collect()
 }
 
 /// Original stone and its theme atlas, None without original files or theme.
@@ -118,20 +110,15 @@ fn respawn_markers(
         (stone, mats.add(mat))
     });
     let block_mesh = meshes.add(Cuboid::from_size(STONE));
-    let block = mats.add(StandardMaterial { base_color: Color::srgb(0.55, 0.52, 0.48), perceptual_roughness: 0.9, ..default() });
-    let totem_mesh = meshes.add(Cylinder::new(TOTEM.0, TOTEM.1));
     for site in &map.0.sites {
-        let stone = match &original {
+        let (mesh, mat, lift) = match &original {
             Some((obj, mat)) => (meshes.add(to_mesh(object_mesh(obj, site.owner))), mat.clone(), 0.0),
-            None => (block_mesh.clone(), block.clone(), STONE.y / 2.0),
+            None => {
+                let tint = Color::srgb(0.55, 0.52, 0.48).mix(&tribe_color(site.owner), 0.35);
+                (block_mesh.clone(), mats.add(StandardMaterial { base_color: tint, perceptual_roughness: 0.9, ..default() }), STONE.y / 2.0)
+            }
         };
-        let totem = mats.add(StandardMaterial { base_color: tribe_color(site.owner), ..default() });
         for part in site_parts(site) {
-            let (mesh, mat, lift) = match part.kind {
-                PartKind::Totem if original.is_some() => continue,
-                PartKind::Totem => (totem_mesh.clone(), totem.clone(), TOTEM.1 / 2.0),
-                PartKind::Stone => stone.clone(),
-            };
             commands
                 .spawn((
                     SiteMarker,
@@ -139,7 +126,7 @@ fn respawn_markers(
                     Transform::from_rotation(Quat::from_rotation_y(part.yaw)),
                     Visibility::Hidden,
                 ))
-                .with_child((Mesh3d(mesh), MeshMaterial3d(mat), Transform::from_xyz(0.0, lift, 0.0)));
+                .with_child((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::from_xyz(0.0, lift, 0.0)));
         }
     }
 }
@@ -157,9 +144,8 @@ mod tests {
     #[test]
     fn stones_face_the_centre() {
         let s = ReincarnationSite::at_cell(0, (10, 20));
-        let parts = site_parts(&s);
-        let centre = parts[0].ground.at;
-        for p in &parts[1..] {
+        let centre = site_cell_pos(&s);
+        for p in &site_parts(&s) {
             let front = Quat::from_rotation_y(p.yaw) * Vec3::NEG_Z;
             let to_centre = (centre - p.ground.at).normalize();
             assert!(front.xz().distance(to_centre) < 1e-5, "{front:?} vs {to_centre:?}");
@@ -167,14 +153,12 @@ mod tests {
     }
 
     #[test]
-    fn stones_ring_the_totem_each_on_its_own_ground() {
+    fn stones_ring_the_centre_each_on_its_own_ground() {
         let s = ReincarnationSite::at_cell(1, (10, 20));
         let parts = site_parts(&s);
-        assert_eq!(parts.len(), 1 + STONES);
-        assert_eq!(parts[0].kind, PartKind::Totem);
-        assert_eq!(parts[0].ground.at, Vec2::new(10.5, 20.5));
-        for p in &parts[1..] {
-            let d = p.ground.at.distance(parts[0].ground.at);
+        assert_eq!(parts.len(), STONES);
+        for p in &parts {
+            let d = p.ground.at.distance(Vec2::new(10.5, 20.5));
             assert!((d - RING_RADIUS).abs() < 1e-5);
         }
     }
