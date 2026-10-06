@@ -1,14 +1,16 @@
 //! Reincarnation sites: a stone ring with a tribe-coloured totem. Every stone is its own
 //! `Grounded` part, so the ring follows slopes and the planet curve instead of staying flat.
-//! With the original files the stones are the game's capped pillars, textured from the level
-//! theme's atlas; otherwise (or with `--no-original`) plain generated blocks.
+//! With the original files the stones are the game's reincarnation stones in the tribe's colour,
+//! textured from the level theme's atlas, and there is no totem; otherwise (or with `--no-original`)
+//! plain generated blocks around a tribe-coloured totem.
 
 use crate::grounded::Grounded;
-use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects, RS_PILLAR};
+use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects};
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
 use game_core::site::ReincarnationSite;
-use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
+use pop3_format::catalog::REINCARNATION_STONE;
+use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
 
 const STONES: usize = 8;
 const RING_RADIUS: f32 = 1.3;
@@ -69,17 +71,17 @@ pub fn site_parts(site: &ReincarnationSite) -> Vec<SitePart> {
     std::iter::once(totem).chain(stones).collect()
 }
 
-/// Original pillar mesh and its theme atlas, None without original files or theme.
-fn original_pillar(levels: &LevelList, objects: &OriginalObjects, theme: Option<u8>) -> Option<(Mesh, Image)> {
+/// Original stone and its theme atlas, None without original files or theme.
+fn original_stone<'a>(levels: &LevelList, objects: &'a OriginalObjects, theme: Option<u8>) -> Option<(&'a Object, Image)> {
     if !levels.original {
         return None;
     }
-    let (theme, pillar) = (theme?, objects.0.as_ref()?.get(RS_PILLAR)?);
+    let (theme, stone) = (theme?, objects.0.as_ref()?.get(REINCARNATION_STONE)?);
     let load = || -> Result<_, pop3_format::LevelError> {
         Ok((Atlas::load(&levels.data_dir, theme)?, Theme::load(&levels.data_dir, theme)?))
     };
     let (atlas, palette) = load().map_err(|e| warn!("object atlas for theme {theme}: {e}")).ok()?;
-    Some((to_mesh(object_mesh(pillar)), atlas_image(&atlas, &palette.palette)))
+    Some((stone, atlas_image(&atlas, &palette.palette)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -99,29 +101,30 @@ fn respawn_markers(
     for e in &existing {
         commands.entity(e).despawn();
     }
-    let (stone_mesh, stone, stone_lift) = match original_pillar(&levels, &objects, map.0.theme) {
-        Some((mesh, image)) => {
-            let mat = StandardMaterial {
-                base_color_texture: Some(images.add(image)),
-                perceptual_roughness: 0.95,
-                double_sided: true,
-                cull_mode: None,
-                ..default()
-            };
-            (meshes.add(mesh), mats.add(mat), 0.0)
-        }
-        None => {
-            let mat = StandardMaterial { base_color: Color::srgb(0.55, 0.52, 0.48), perceptual_roughness: 0.9, ..default() };
-            (meshes.add(Cuboid::from_size(STONE)), mats.add(mat), STONE.y / 2.0)
-        }
-    };
+    let original = original_stone(&levels, &objects, map.0.theme).map(|(stone, image)| {
+        let mat = StandardMaterial {
+            base_color_texture: Some(images.add(image)),
+            perceptual_roughness: 0.95,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        };
+        (stone, mats.add(mat))
+    });
+    let block_mesh = meshes.add(Cuboid::from_size(STONE));
+    let block = mats.add(StandardMaterial { base_color: Color::srgb(0.55, 0.52, 0.48), perceptual_roughness: 0.9, ..default() });
     let totem_mesh = meshes.add(Cylinder::new(TOTEM.0, TOTEM.1));
     for site in &map.0.sites {
+        let stone = match &original {
+            Some((obj, mat)) => (meshes.add(to_mesh(object_mesh(obj, site.owner))), mat.clone(), 0.0),
+            None => (block_mesh.clone(), block.clone(), STONE.y / 2.0),
+        };
         let totem = mats.add(StandardMaterial { base_color: tribe_color(site.owner), ..default() });
         for part in site_parts(site) {
             let (mesh, mat, lift) = match part.kind {
+                PartKind::Totem if original.is_some() => continue,
                 PartKind::Totem => (totem_mesh.clone(), totem.clone(), TOTEM.1 / 2.0),
-                PartKind::Stone => (stone_mesh.clone(), stone.clone(), stone_lift),
+                PartKind::Stone => stone.clone(),
             };
             commands
                 .spawn((

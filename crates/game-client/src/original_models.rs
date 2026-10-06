@@ -7,14 +7,13 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use pop3_format::objects::{ATLAS_HEIGHT, ATLAS_WIDTH, TILE};
+use pop3_format::catalog::tribe_tile;
 use pop3_format::{Atlas, Object, ObjectBank, WORLD_UNITS_PER_CELL};
 use std::path::Path;
 
 /// Rows appended under the atlas holding the 256 palette colours, for untextured faces.
 const PALETTE_ROWS: usize = 8;
 pub const IMAGE_HEIGHT: usize = ATLAS_HEIGHT + PALETTE_ROWS;
-/// Capped stone pillar used around reincarnation sites (see docs/specs/objects.md).
-pub const RS_PILLAR: usize = 76;
 
 /// Bank 0 of the original objects, loaded once when original files are allowed.
 #[derive(Resource, Default)]
@@ -36,8 +35,9 @@ pub struct MeshData {
     pub indices: Vec<u32>,
 }
 
-/// Flat-shaded triangles (quads split 0-1-2, 0-2-3), in cells (1 cell = 512 units).
-pub fn object_mesh(obj: &Object) -> MeshData {
+/// Flat-shaded triangles (quads split 0-1-2, 0-2-3), in cells (1 cell = 512 units), with the
+/// tribe-coloured tiles of `tribe` (objects are stored in blue).
+pub fn object_mesh(obj: &Object, tribe: u8) -> MeshData {
     let scale = 1.0 / WORLD_UNITS_PER_CELL as f32;
     let mut m = MeshData::default();
     for face in &obj.faces {
@@ -47,7 +47,7 @@ pub fn object_mesh(obj: &Object) -> MeshData {
             .zip(&face.uv)
             .map(|(&i, &uv)| {
                 let p = obj.points[i as usize];
-                ([p[0] as f32 * scale, p[1] as f32 * scale, p[2] as f32 * scale], face_uv(face.tile, face.colour, uv))
+                ([p[0] as f32 * scale, p[1] as f32 * scale, p[2] as f32 * scale], face_uv(face.tile.map(|t| tribe_tile(t, tribe)), face.colour, uv))
             })
             .collect();
         for tri in [[0, 1, 2], [0, 2, 3]].iter().take(corners.len() - 2) {
@@ -131,10 +131,18 @@ mod tests {
 
     #[test]
     fn quad_becomes_two_triangles_in_cells() {
-        let m = object_mesh(&quad());
+        let m = object_mesh(&quad(), 0);
         assert_eq!(m.indices.len(), 6);
         assert_eq!(m.positions[2], [1.0, 1.0, 0.0]);
         assert_eq!(m.normals[0], [0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn tribe_recolours_blue_tiles() {
+        let mut obj = quad();
+        obj.faces[0].tile = Some(226);
+        let (blue, red) = (object_mesh(&obj, 0), object_mesh(&obj, 1));
+        assert_eq!(red.uvs[0][0] - blue.uvs[0][0], 32.0 / 256.0, "next tile to the right");
     }
 
     #[test]

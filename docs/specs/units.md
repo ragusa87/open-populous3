@@ -15,9 +15,10 @@
 - Generated maps: tribe 0 on low inland ground, tribe 1 on the land cell farthest away on the torus.
 - Fixed and indestructible: no `Command` moves or removes it. `spawn_point()` is where the shaman
   appears at start and after death (to wire once units are simulated).
-- Rendered as a ring of stones with a tribe-coloured totem; the camera starts on the player's (tribe 0) site.
-  Stones are the original capped pillar (object 76, bank 0, textured from the level theme's `bl320` atlas,
-  see objects.md) when the original files are present; plain generated blocks otherwise or with `--no-original`.
+- Rendered as a ring of 8 stones; the camera starts on the player's (tribe 0) site.
+  With the original files: the reincarnation stone (object 30) in the owner's tribe colour, textured from the
+  level theme's `bl320` atlas (see objects.md), no totem. Without them or with `--no-original`: plain blocks
+  around a tribe-coloured totem. The ring layout (count, radius, facing) is ours, not checked against the game.
 
 ## Standing on the ground (client)
 Anything placed on the map (site stones, buildings, trees, units) is made of `grounded::Grounded`
