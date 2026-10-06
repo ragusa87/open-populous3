@@ -4,6 +4,7 @@
 //! See `docs/specs/level-format.md` for the byte layout.
 
 pub mod catalog;
+pub mod install;
 pub mod level;
 pub mod objects;
 pub mod sprites;
