@@ -102,6 +102,53 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, anim_secs: f32, a
     }
 }
 
+/// Scale2x (EPX) pixel-art upscale: doubles the size, rounding diagonal staircases instead of
+/// making blocks. Origin doubles too.
+pub fn scale2x(f: &Frame) -> Frame {
+    let (w, h) = (f.width as i32, f.height as i32);
+    let px = |x: i32, y: i32| -> [u8; 4] {
+        if (0..w).contains(&x) && (0..h).contains(&y) {
+            let i = (y * w + x) as usize * 4;
+            [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2], f.rgba[i + 3]]
+        } else {
+            [0; 4]
+        }
+    };
+    let (w2, h2) = (f.width * 2, f.height * 2);
+    let mut rgba = vec![0u8; w2 * h2 * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let (p, a, b, c, d) = (px(x, y), px(x, y - 1), px(x + 1, y), px(x - 1, y), px(x, y + 1));
+            let pick = |n1: [u8; 4], n2: [u8; 4], o1: [u8; 4], o2: [u8; 4]| if n1 == n2 && n1 != o1 && n2 != o2 { n1 } else { p };
+            let out = [pick(c, a, d, b), pick(a, b, c, d), pick(d, c, b, a), pick(b, d, a, c)];
+            for (k, v) in out.iter().enumerate() {
+                let (ox, oy) = (x as usize * 2 + k % 2, y as usize * 2 + k / 2);
+                rgba[(oy * w2 + ox) * 4..][..4].copy_from_slice(v);
+            }
+        }
+    }
+    Frame { width: w2, height: h2, origin: (f.origin.0 * 2, f.origin.1 * 2), rgba }
+}
+
+/// Give transparent pixels the colour of an opaque neighbour (alpha stays 0), so linear
+/// filtering does not darken the edges.
+pub fn bleed_edges(f: &mut Frame) {
+    let (w, h) = (f.width, f.height);
+    let src = f.rgba.clone();
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            if src[i + 3] != 0 {
+                continue;
+            }
+            let near = [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)];
+            if let Some(j) = near.iter().filter(|&&(nx, ny)| nx < w && ny < h).map(|&(nx, ny)| (ny * w + nx) * 4).find(|&j| src[j + 3] != 0) {
+                f.rgba[i..i + 3].copy_from_slice(&src[j..j + 3]);
+            }
+        }
+    }
+}
+
 pub fn picture_frame(p: &Picture, palette: &[[u8; 3]]) -> Frame {
     let rgba = p
         .sprite
@@ -198,6 +245,34 @@ mod tests {
             }
         }
         assert_ne!(art[0].frames(Pose::Idle, 0)[0].rgba, art[1].frames(Pose::Idle, 0)[0].rgba, "tribe colour");
+    }
+
+    fn frame(w: usize, h: usize, on: &[(usize, usize)]) -> Frame {
+        let mut rgba = vec![0u8; w * h * 4];
+        for &(x, y) in on {
+            rgba[(y * w + x) * 4..][..4].copy_from_slice(&[255, 255, 255, 255]);
+        }
+        Frame { width: w, height: h, origin: (1, 2), rgba }
+    }
+
+    #[test]
+    fn scale2x_rounds_diagonals() {
+        let f = scale2x(&frame(2, 2, &[(0, 0), (1, 1)]));
+        assert_eq!((f.width, f.height, f.origin), (4, 4, (2, 4)));
+        let on = |x: usize, y: usize| f.rgba[(y * 4 + x) * 4 + 3] != 0;
+        assert!(on(0, 0) && on(1, 1) && on(2, 2) && on(3, 3));
+        assert!(on(2, 1) && on(1, 2), "the staircase gets filled in");
+        assert!(!on(3, 0) && !on(0, 3));
+        let single = scale2x(&frame(1, 1, &[(0, 0)]));
+        assert!(single.rgba.chunks(4).all(|p| p[3] == 255), "a lone pixel becomes a block");
+    }
+
+    #[test]
+    fn bleeding_colours_keeps_transparency() {
+        let mut f = frame(2, 1, &[(0, 0)]);
+        f.rgba[0..3].copy_from_slice(&[10, 20, 30]);
+        bleed_edges(&mut f);
+        assert_eq!(&f.rgba[4..8], &[10, 20, 30, 0]);
     }
 
     #[test]

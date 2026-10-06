@@ -24,7 +24,8 @@ Health: 100. Orders are ignored while drowning, dying or dead.
 
 ## Shaman on screen (client, `units/`)
 - `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks.
-- Each unit is a `Grounded` sprite quad (1 px = 1/30 cell, feet at the anchor) turned to face the camera,
+- Each unit is a `Grounded` sprite quad (1 px = 1/56 cell: standing ~0.6 cell, 3/4 of a site stone; feet at the
+  anchor) turned to face the camera, uploaded Scale2x-upscaled x4 and filtered linearly (no blocky pixels),
   with a health bar over the head (green -> yellow -> red, hidden once dead).
 - Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (tumbling), Fall (dying, then lies still while dead).
   Timed actions (cast, dying) play once in step with the simulation, others loop.

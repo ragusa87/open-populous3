@@ -23,11 +23,14 @@ use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// The local player's tribe.
 pub const PLAYER: u8 = 0;
-/// Cells per sprite pixel: the ~34 px shaman stands about 1.1 cells tall.
-pub const PIXEL: f32 = 1.0 / 30.0;
+/// Cells per sprite pixel: the ~34 px shaman stands about 0.6 cell tall, three quarters of a
+/// reincarnation stone (400 units, 0.78 cell).
+pub const PIXEL: f32 = 1.0 / 56.0;
+/// Sprites are uploaded upscaled (Scale2x twice) and filtered linearly instead of shown as blocks.
+const UPSCALE_STEPS: usize = 2;
 const TICK_SECS: f32 = 1.0 / TICKS_PER_SECOND as f32;
-const BAR_HEIGHT: f32 = 1.3;
-const BAR_SIZE: Vec2 = Vec2::new(0.8, 0.09);
+const BAR_HEIGHT: f32 = 0.75;
+const BAR_SIZE: Vec2 = Vec2::new(0.5, 0.06);
 /// Footprint half size: the sprite rests on the lowest ground under it.
 const FOOT_HALF: f32 = 0.15;
 
@@ -140,14 +143,16 @@ fn load_sprites(
         art::generated_art()
     });
     let mut upload = |f: &Frame| {
+        let mut big = (0..UPSCALE_STEPS).fold(f.clone(), |g, _| art::scale2x(&g));
+        art::bleed_edges(&mut big);
         let mut image = Image::new(
-            Extent3d { width: f.width as u32, height: f.height as u32, depth_or_array_layers: 1 },
+            Extent3d { width: big.width as u32, height: big.height as u32, depth_or_array_layers: 1 },
             TextureDimension::D2,
-            f.rgba.clone(),
+            big.rgba,
             TextureFormat::Rgba8UnormSrgb,
             RenderAssetUsages::default(),
         );
-        image.sampler = ImageSampler::nearest();
+        image.sampler = ImageSampler::linear();
         let image = images.add(image);
         let (size, origin) = (UVec2::new(f.width as u32, f.height as u32), UVec2::new(f.origin.0 as u32, f.origin.1 as u32));
         let material = mats.add(StandardMaterial {
@@ -324,7 +329,7 @@ mod tests {
     fn quad_hangs_from_the_feet() {
         let m = sprite_quad(30, 40, UVec2::new(15, 38));
         let pos = m.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
-        assert_eq!(pos[0], [-0.5, 38.0 * PIXEL, 0.0]);
+        assert_eq!(pos[0], [-15.0 * PIXEL, 38.0 * PIXEL, 0.0]);
         assert!((pos[2][1] + 2.0 * PIXEL).abs() < 1e-6, "2 px under the feet");
     }
 }
