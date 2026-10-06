@@ -83,8 +83,9 @@ pub fn sibling_dirs(levels_dir: &Path) -> (PathBuf, PathBuf) {
     (pop3_format::install::subdir(install, "data"), pop3_format::install::subdir(install, "objects"))
 }
 
+/// The original level files in a directory, in level order (`sort_levels`).
 pub fn list_levels(dir: &Path) -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+    let files: Vec<PathBuf> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
@@ -94,7 +95,18 @@ pub fn list_levels(dir: &Path) -> Vec<PathBuf> {
             name.starts_with("levl") && name.ends_with(".dat") && name[4..name.len() - 4].chars().all(|c| c.is_ascii_digit())
         })
         .collect();
-    files.sort();
+    sort_levels(files)
+}
+
+/// Level order, the same on every machine whatever the directory listing order or the file name
+/// case: by the number in `levlNNNN.dat`, then by lower-case name.
+pub fn sort_levels(mut files: Vec<PathBuf>) -> Vec<PathBuf> {
+    let key = |p: &PathBuf| {
+        let name = p.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+        let number = name.trim_start_matches("levl").trim_end_matches(".dat").parse::<u32>().unwrap_or(u32::MAX);
+        (number, name)
+    };
+    files.sort_by_cached_key(key);
     files
 }
 
@@ -229,6 +241,15 @@ fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32) -> Image {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn levels_in_number_order_whatever_the_listing_and_case() {
+        let files = ["levels/levl2080.dat", "levels/LEVL2002.DAT", "levels/levl2001.dat", "levels/Levl2025.dat"].map(PathBuf::from).to_vec();
+        let sorted = sort_levels(files.iter().rev().cloned().collect());
+        assert_eq!(sorted, sort_levels(files));
+        let names: Vec<_> = sorted.iter().map(|p| p.file_name().unwrap().to_string_lossy().to_lowercase()).collect();
+        assert_eq!(names, ["levl2001.dat", "levl2002.dat", "levl2025.dat", "levl2080.dat"]);
+    }
 
     #[test]
     fn level_cycling() {
