@@ -70,6 +70,31 @@ impl GameMap {
         let sites = generated_sites(&terrain);
         GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new() }.with_shamans()
     }
+
+    /// Test ground for walking: a flat island around the player's site at the centre, a gentle
+    /// ramp to the east (+x), a steep hill to the north (-z) and a lake to the west.
+    pub fn sandbox_walk() -> Self {
+        const C: i32 = MAP_SIZE as i32 / 2;
+        const ISLAND: i32 = 40;
+        const BASE: i32 = 64;
+        let mut terrain = Heightmap::new(MAP_SIZE);
+        for z in 0..MAP_SIZE as i32 {
+            for x in 0..MAP_SIZE as i32 {
+                let (dx, dz) = (x - C, z - C);
+                if dx * dx + dz * dz > ISLAND * ISLAND {
+                    continue;
+                }
+                let ramp = if (8..=18).contains(&dx) && dz.abs() <= 6 { (dx - 7) * 30 } else if (19..=24).contains(&dx) && dz.abs() <= 6 { 330 } else { 0 };
+                let peak = (dx * dx + (dz + 14) * (dz + 14)) as u32;
+                let hill = 500 - 100 * crate::unit::isqrt(peak) as i32;
+                let lake = (dx + 14) * (dx + 14) + dz * dz <= 16;
+                let h = if lake { 0 } else { BASE + ramp.max(hill).max(0) };
+                terrain.set(x, z, h as u16);
+            }
+        }
+        let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
+        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new() }.with_shamans()
+    }
 }
 
 impl GameMap {
@@ -147,6 +172,19 @@ mod tests {
         for s in &a.sites {
             assert!(!a.terrain.is_water(s.cell().0, s.cell().1), "spawn ground is land");
         }
+    }
+
+    #[test]
+    fn sandbox_walk_has_a_ramp_a_steep_hill_and_a_lake() {
+        let m = GameMap::sandbox_walk();
+        let c = MAP_SIZE as i32 / 2;
+        let h = |dx: i32, dz: i32| m.terrain.get(c + dx, c + dz) as i32;
+        assert_eq!(m.units.len(), 1);
+        assert!(m.units[0].owner == 0 && !m.terrain.is_water(c, c));
+        assert_eq!(h(10, 0) - h(9, 0), 30, "gentle ramp");
+        assert_eq!(h(0, -14) - h(0, -13), 100, "steep hill");
+        assert!(m.terrain.is_water(c - 14, c), "lake");
+        assert!(m.terrain.is_water(c + 50, c), "sea around the island");
     }
 
     #[test]
