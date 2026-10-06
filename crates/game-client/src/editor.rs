@@ -16,7 +16,7 @@ pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<EditorState>().add_systems(Update, editor_input);
+        app.init_resource::<EditorState>().add_systems(Update, editor_input.in_set(crate::menu::Gameplay));
     }
 }
 

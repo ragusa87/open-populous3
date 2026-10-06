@@ -126,7 +126,7 @@ impl Plugin for UnitsPlugin {
             .init_resource::<ShamanSprites>()
             .add_plugins(selection::SelectionPlugin)
             .add_systems(Startup, load_sprites)
-            .add_systems(Update, (selection::select_and_order, look_at_shaman, run_ticks, respawn_views, animate_views).chain());
+            .add_systems(Update, (selection::select_and_order, look_at_shaman, run_ticks, respawn_views, animate_views).chain().in_set(crate::menu::Gameplay));
     }
 }
 

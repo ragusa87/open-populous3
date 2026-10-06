@@ -136,7 +136,7 @@ impl Plugin for SpellsPlugin {
         app.insert_resource(PlayerSpells(demo_book()))
             .init_resource::<SelectedSpell>()
             .add_systems(Startup, spawn_tab)
-            .add_systems(Update, (recharge, tile_clicks, cast_selected, update_tiles, update_info).chain());
+            .add_systems(Update, ((recharge, tile_clicks, cast_selected).in_set(crate::menu::Gameplay), update_tiles, update_info).chain());
     }
 }
 

@@ -1,0 +1,379 @@
+//! Main menu shown before the game: New game (the level from the command line / PgUp-PgDn list),
+//! Sandbox (test grounds: Walk), Quit. Sub-pages open on Enter and go back with Esc/Backspace or
+//! their Back entry; arrows (or W/S) move, Enter/Space picks, the mouse hovers and clicks.
+//! Gameplay systems are in the `Gameplay` set, which only runs while `Playing`.
+//! `POP3_START=menu|game|sandbox-walk` picks where to start (screenshots start in the game).
+
+use crate::units::selection::Selection;
+use crate::world::{CurrentMap, LevelList, TerrainDirty};
+use bevy::prelude::*;
+use game_core::map::GameMap;
+
+const BACKDROP: Color = Color::srgba(0.06, 0.04, 0.02, 0.82);
+const TEXT: Color = Color::srgb(0.95, 0.85, 0.6);
+const HIGHLIGHT: Color = Color::srgb(0.80, 0.56, 0.20);
+const ITEM: Color = Color::srgba(0.30, 0.18, 0.06, 0.9);
+
+#[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AppState {
+    #[default]
+    Menu,
+    Playing,
+}
+
+/// Systems that only run in the game (input, simulation, HUD actions), not behind the menu.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Gameplay;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Page {
+    Main,
+    Sandbox,
+}
+
+/// What a game starts on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Start {
+    NewGame,
+    SandboxWalk,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    Start(Start),
+    Open(Page),
+    Back,
+    Quit,
+}
+
+/// What picking an entry leads to outside the menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Start(Start),
+    Quit,
+}
+
+pub fn title(page: Page) -> &'static str {
+    match page {
+        Page::Main => "Open Populous",
+        Page::Sandbox => "Sandbox",
+    }
+}
+
+pub fn items(page: Page) -> &'static [(&'static str, Action)] {
+    match page {
+        Page::Main => &[("New game", Action::Start(Start::NewGame)), ("Sandbox", Action::Open(Page::Sandbox)), ("Quit", Action::Quit)],
+        Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Back", Action::Back)],
+    }
+}
+
+/// Open pages, root first, each with its highlighted entry.
+#[derive(Resource, Debug, Clone, PartialEq)]
+pub struct MenuNav {
+    stack: Vec<(Page, usize)>,
+}
+
+impl Default for MenuNav {
+    fn default() -> Self {
+        MenuNav { stack: vec![(Page::Main, 0)] }
+    }
+}
+
+impl MenuNav {
+    pub fn page(&self) -> Page {
+        self.stack.last().map_or(Page::Main, |s| s.0)
+    }
+
+    pub fn cursor(&self) -> usize {
+        self.stack.last().map_or(0, |s| s.1)
+    }
+
+    pub fn set_cursor(&mut self, i: usize) {
+        let n = items(self.page()).len();
+        if let Some(top) = self.stack.last_mut() {
+            top.1 = i.min(n - 1);
+        }
+    }
+
+    /// Moves the highlight, wrapping at both ends.
+    pub fn step(&mut self, delta: i32) {
+        let n = items(self.page()).len() as i32;
+        self.set_cursor((self.cursor() as i32 + delta).rem_euclid(n) as usize);
+    }
+
+    /// Picks the highlighted entry: opens/closes pages here, returns what the app must do.
+    pub fn activate(&mut self) -> Option<Outcome> {
+        match items(self.page())[self.cursor()].1 {
+            Action::Start(s) => Some(Outcome::Start(s)),
+            Action::Quit => Some(Outcome::Quit),
+            Action::Open(p) => {
+                self.stack.push((p, 0));
+                None
+            }
+            Action::Back => {
+                self.back();
+                None
+            }
+        }
+    }
+
+    /// Back to the parent page (the entry that opened it stays highlighted); false on the root.
+    pub fn back(&mut self) -> bool {
+        if self.stack.len() <= 1 {
+            return false;
+        }
+        self.stack.pop();
+        true
+    }
+}
+
+/// `POP3_START` value (or screenshot mode) to the game to start right away; None shows the menu.
+pub fn start_from_env(start: Option<&str>, screenshot: bool) -> Option<Start> {
+    match start {
+        Some("menu") => None,
+        Some("game") => Some(Start::NewGame),
+        Some("sandbox-walk") => Some(Start::SandboxWalk),
+        _ if screenshot => Some(Start::NewGame),
+        _ => None,
+    }
+}
+
+#[derive(Resource)]
+struct InitialStart(Option<Start>);
+
+#[derive(Component)]
+struct MenuRoot;
+#[derive(Component)]
+struct MenuTitle;
+#[derive(Component)]
+struct MenuList;
+#[derive(Component)]
+struct MenuItem(usize);
+
+pub struct MenuPlugin;
+
+impl Plugin for MenuPlugin {
+    fn build(&self, app: &mut App) {
+        let start = start_from_env(std::env::var("POP3_START").ok().as_deref(), std::env::var("SCREENSHOT").is_ok());
+        app.insert_state(if start.is_some() { AppState::Playing } else { AppState::Menu })
+            .insert_resource(InitialStart(start))
+            .init_resource::<MenuNav>()
+            .configure_sets(Update, Gameplay.run_if(in_state(AppState::Playing)))
+            .add_systems(Startup, (spawn_menu, initial_start))
+            .add_systems(
+                Update,
+                (menu_keys.before(crate::virtual_cursor::toggle_capture), menu_mouse, rebuild_items, item_visuals)
+                    .chain()
+                    .run_if(in_state(AppState::Menu)),
+            )
+            .add_systems(OnEnter(AppState::Menu), |mut q: Query<&mut Visibility, With<MenuRoot>>| q.iter_mut().for_each(|mut v| *v = Visibility::Inherited))
+            .add_systems(OnExit(AppState::Menu), |mut q: Query<&mut Visibility, With<MenuRoot>>| q.iter_mut().for_each(|mut v| *v = Visibility::Hidden));
+    }
+}
+
+fn spawn_menu(mut commands: Commands, state: Res<State<AppState>>) {
+    commands
+        .spawn((
+            MenuRoot,
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: px(14),
+                ..default()
+            },
+            BackgroundColor(BACKDROP),
+            GlobalZIndex(i32::MAX - 10),
+            if *state.get() == AppState::Menu { Visibility::Inherited } else { Visibility::Hidden },
+        ))
+        .with_children(|root| {
+            root.spawn((MenuTitle, Text::new(""), TextFont { font_size: FontSize::Px(40.0), ..default() }, TextColor(TEXT)));
+            root.spawn((MenuList, Node { flex_direction: FlexDirection::Column, row_gap: px(8), margin: UiRect::top(px(12)), ..default() }));
+            root.spawn((
+                Text::new("Up/Down: move   Enter: select   Esc: back"),
+                TextFont { font_size: FontSize::Px(13.0), ..default() },
+                TextColor(TEXT.with_alpha(0.6)),
+                Node { margin: UiRect::top(px(20)), ..default() },
+            ));
+        });
+}
+
+fn initial_start(
+    initial: Res<InitialStart>,
+    mut levels: ResMut<LevelList>,
+    mut map: ResMut<CurrentMap>,
+    mut dirty: ResMut<TerrainDirty>,
+    mut selection: ResMut<Selection>,
+) {
+    if let Some(start) = initial.0 {
+        begin(start, &mut levels, &mut map, &mut dirty, &mut selection);
+    }
+}
+
+/// Loads the map a game starts on; the camera frames it (`LevelList` change).
+fn begin(start: Start, levels: &mut ResMut<LevelList>, map: &mut CurrentMap, dirty: &mut TerrainDirty, selection: &mut Selection) {
+    map.0 = match start {
+        Start::NewGame => levels.load_current(),
+        Start::SandboxWalk => GameMap::sandbox_walk(),
+    };
+    dirty.0 = true;
+    selection.clear();
+    levels.set_changed();
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply(
+    outcome: Option<Outcome>,
+    levels: &mut ResMut<LevelList>,
+    map: &mut CurrentMap,
+    dirty: &mut TerrainDirty,
+    selection: &mut Selection,
+    state: &mut NextState<AppState>,
+    exit: &mut MessageWriter<AppExit>,
+) {
+    match outcome {
+        Some(Outcome::Start(s)) => {
+            begin(s, levels, map, dirty, selection);
+            state.set(AppState::Playing);
+        }
+        Some(Outcome::Quit) => {
+            exit.write(AppExit::Success);
+        }
+        None => {}
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn menu_keys(
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut nav: ResMut<MenuNav>,
+    mut levels: ResMut<LevelList>,
+    mut map: ResMut<CurrentMap>,
+    mut dirty: ResMut<TerrainDirty>,
+    mut selection: ResMut<Selection>,
+    mut state: ResMut<NextState<AppState>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if keys.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) {
+        nav.step(-1);
+    }
+    if keys.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) {
+        nav.step(1);
+    }
+    let escape = keys.just_pressed(KeyCode::Escape);
+    if (escape || keys.just_pressed(KeyCode::Backspace)) && nav.back() && escape {
+        keys.clear_just_pressed(KeyCode::Escape);
+    }
+    if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space]) {
+        let outcome = nav.activate();
+        apply(outcome, &mut levels, &mut map, &mut dirty, &mut selection, &mut state, &mut exit);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn menu_mouse(
+    q: Query<(&Interaction, &MenuItem), Changed<Interaction>>,
+    mut nav: ResMut<MenuNav>,
+    mut levels: ResMut<LevelList>,
+    mut map: ResMut<CurrentMap>,
+    mut dirty: ResMut<TerrainDirty>,
+    mut selection: ResMut<Selection>,
+    mut state: ResMut<NextState<AppState>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    for (interaction, item) in &q {
+        match interaction {
+            Interaction::Hovered => nav.set_cursor(item.0),
+            Interaction::Pressed => {
+                nav.set_cursor(item.0);
+                let outcome = nav.activate();
+                apply(outcome, &mut levels, &mut map, &mut dirty, &mut selection, &mut state, &mut exit);
+                return;
+            }
+            Interaction::None => {}
+        }
+    }
+}
+
+/// Respawns the entries when the page changes.
+fn rebuild_items(
+    mut commands: Commands,
+    nav: Res<MenuNav>,
+    mut shown: Local<Option<Page>>,
+    lists: Query<Entity, With<MenuList>>,
+    mut titles: Query<&mut Text, With<MenuTitle>>,
+) {
+    let page = nav.page();
+    if *shown == Some(page) {
+        return;
+    }
+    *shown = Some(page);
+    for mut t in &mut titles {
+        t.0 = title(page).to_string();
+    }
+    for list in &lists {
+        commands.entity(list).despawn_children().with_children(|l| {
+            for (i, (label, _)) in items(page).iter().enumerate() {
+                l.spawn((
+                    MenuItem(i),
+                    Button,
+                    Node { width: px(260), padding: UiRect::axes(px(16), px(8)), justify_content: JustifyContent::Center, border: UiRect::all(px(2)), ..default() },
+                    BackgroundColor(ITEM),
+                    BorderColor::all(Color::NONE),
+                ))
+                .with_child((Text::new(*label), TextFont { font_size: FontSize::Px(20.0), ..default() }, TextColor(TEXT)));
+            }
+        });
+    }
+}
+
+fn item_visuals(nav: Res<MenuNav>, mut q: Query<(&MenuItem, &mut BorderColor)>) {
+    for (item, mut border) in &mut q {
+        *border = BorderColor::all(if item.0 == nav.cursor() { HIGHLIGHT } else { Color::NONE });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moves_wrap_and_sub_pages_go_back() {
+        let mut nav = MenuNav::default();
+        nav.step(-1);
+        assert_eq!(nav.cursor(), 2, "up from the first entry wraps to Quit");
+        nav.step(1);
+        nav.step(1);
+        assert_eq!(items(nav.page())[nav.cursor()].0, "Sandbox");
+        assert_eq!(nav.activate(), None);
+        assert_eq!((nav.page(), nav.cursor()), (Page::Sandbox, 0));
+        assert!(nav.back());
+        assert_eq!((nav.page(), nav.cursor()), (Page::Main, 1), "the entry that opened it stays highlighted");
+        assert!(!nav.back(), "nothing above the main page");
+    }
+
+    #[test]
+    fn entries_lead_to_games_or_quit() {
+        let mut nav = MenuNav::default();
+        assert_eq!(nav.activate(), Some(Outcome::Start(Start::NewGame)));
+        nav.set_cursor(1);
+        nav.activate();
+        assert_eq!(nav.activate(), Some(Outcome::Start(Start::SandboxWalk)));
+        nav.set_cursor(99);
+        assert_eq!(nav.activate(), None, "Back entry, clamped cursor");
+        assert_eq!(nav.page(), Page::Main);
+        nav.set_cursor(2);
+        assert_eq!(nav.activate(), Some(Outcome::Quit));
+    }
+
+    #[test]
+    fn start_picked_from_env() {
+        assert_eq!(start_from_env(None, false), None);
+        assert_eq!(start_from_env(None, true), Some(Start::NewGame), "screenshots skip the menu");
+        assert_eq!(start_from_env(Some("menu"), true), None);
+        assert_eq!(start_from_env(Some("sandbox-walk"), false), Some(Start::SandboxWalk));
+    }
+}

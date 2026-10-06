@@ -65,8 +65,8 @@ impl Plugin for ViewMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ViewMenu>()
             .add_systems(Startup, spawn_menu)
-            .add_systems(Update, (toggle_menu, preset_clicks, menu_visuals).chain())
-            .add_systems(Update, close_on_escape.before(crate::virtual_cursor::toggle_capture));
+            .add_systems(Update, (toggle_menu, preset_clicks, menu_visuals).chain().in_set(crate::menu::Gameplay))
+            .add_systems(Update, close_on_escape.before(crate::virtual_cursor::toggle_capture).in_set(crate::menu::Gameplay));
     }
 }
 

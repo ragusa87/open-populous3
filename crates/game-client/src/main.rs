@@ -8,6 +8,7 @@ mod edge_push;
 mod editor;
 mod grounded;
 mod hud;
+mod menu;
 mod original_models;
 mod procedural_theme;
 mod sites;
@@ -52,6 +53,7 @@ fn main() {
             units::UnitsPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,
+            menu::MenuPlugin,
             dev::DevPlugin,
             cursor_debug::CursorDebugPlugin,
         ))

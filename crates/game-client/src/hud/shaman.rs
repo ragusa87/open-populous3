@@ -50,7 +50,7 @@ pub struct ShamanPreviewPlugin;
 
 impl Plugin for ShamanPreviewPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_preview).add_systems(Update, (update_preview, preview_click));
+        app.add_systems(Startup, spawn_preview).add_systems(Update, (update_preview, preview_click.in_set(crate::menu::Gameplay)));
     }
 }
 

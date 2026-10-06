@@ -3,7 +3,16 @@
 What is left to implement. Tick or remove an item in the commit that does it, add new ones as they
 come up. Details live in the linked specs; done work is summarised in [docs/roadmap.md](docs/roadmap.md).
 
+## Menu and sandboxes ([ui-and-editor.md](docs/specs/ui-and-editor.md))
+- [ ] In-game menu to get back to the main menu (and leave a sandbox).
+- [ ] Sandbox Spells: test ground to cast every spell freely (no mana, no charges).
+- [ ] Sandbox Buildings: test ground to place and build every building.
+- [ ] More sandboxes as features come (combat, vehicles, praying...).
+- [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
+
 ## Units ([units.md](docs/specs/units.md))
+- [ ] Units follow the terrain elevation while walking, feet on the ground (today the sprite rests on the lowest corner of a 0.3-cell footprint and sinks into slopes; the hill in front can hide the feet). Same for vehicles.
+- [ ] Walking up a slope is slower (deterministic, integer: height difference over the step); downhill and flat at full speed. Vehicles are not slowed (flying ones ignore the ground, the sea is always at height 0).
 - [ ] Pathfinding: A* or flow field on the 128x128 torus (modulo neighbours); the shaman walks straight lines and stops at the shore.
 - [ ] Walkability: slope limit, recomputed on the dirty rect after terrain edits.
 - [ ] Braves, warriors, preachers, spies, firewarriors: simulate them and map their animations (0-52, 89-92) in `ShamanAnim`-like catalogs.

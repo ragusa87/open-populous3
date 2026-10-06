@@ -158,7 +158,7 @@ pub struct SelectionPlugin;
 
 impl Plugin for SelectionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Selection>().init_resource::<Drag>().add_systems(Startup, spawn_overlays).add_systems(Update, draw_overlays.after(select_and_order));
+        app.init_resource::<Selection>().init_resource::<Drag>().add_systems(Startup, spawn_overlays).add_systems(Update, draw_overlays.after(select_and_order).in_set(crate::menu::Gameplay));
     }
 }
 

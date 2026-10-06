@@ -33,6 +33,13 @@ Hover shows the tile's description, click selects (white border), `C` casts the 
 consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
 Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build/Stats tabs.
 
+## Main menu (`menu.rs`)
+Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list),
+Sandbox > Walk (`GameMap::sandbox_walk`: flat island, gentle ramp east, steep hill north, lake west), Quit.
+Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
+`AppState::Menu | Playing`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
+while playing. `POP3_START=menu|game|sandbox-walk` picks the start; screenshots start in the game by default.
+
 ## Selection and orders
 Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect;
 the shaman is selected like any unit on the map, clicking her panel preview selects her alone. Left click on the ground sends the selection there, P pray, X stop, Space

@@ -123,7 +123,7 @@ impl Plugin for WorldPlugin {
             .insert_resource(TerrainDirty(true))
             .init_resource::<CurveParamsRes>()
             .add_systems(Startup, spawn_terrain)
-            .add_systems(Update, (switch_level, rebuild_terrain).chain());
+            .add_systems(Update, (switch_level.in_set(crate::menu::Gameplay), rebuild_terrain).chain());
     }
 }
 
