@@ -17,7 +17,7 @@
 | Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -1 HP every 3 ticks until the terrain opens a path (walks again) or it dies |
 | Praying | `Order::Pray` | until another order; heals |
 | Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle (Teleport: then at the target, Landing) |
-| Landing { left } | arriving from a teleport | 6 ticks, then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out) |
+| Landing { left } | arriving from a teleport | 6 ticks, then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out); a puff of dust at touchdown (`units/dust.rs`) |
 | Drowning | ground under her becomes open sea | -4 HP per tick, no orders; back to Idle if land returns |
 | Dying { left } | health reaches 0 | 8 ticks |
 | Dead { left } | after dying | 30 ticks, then reincarnates at her site at full health; the site levels its ground again |
@@ -54,6 +54,8 @@ Health: 100. Orders are ignored while drowning, dying or dead.
   screen, but slopes and bumps around the feet no longer cut the legs; real hills in front still hide her.
   The original has no health bar: low-health units get a spinning star/crown over the head (to do). The panel
   preview always shows the shaman's health.
+- Dust (`units/dust.rs`, cosmetic, real-time): when a unit stops landing, 10 soft generated motes spread 0.4 cell
+  around its feet, rise 0.1, grow and fade over 0.8 s, facing the camera and pulled towards it like the sprites.
 - Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (tumbling), Fall (dying, then lies still while dead).
   Timed actions (cast, dying) play once in step with the simulation, others loop.
 - View direction: `facing * 45deg - camera yaw`, rounded to the 8 drawn directions (0 front, 2 screen right, 4 back).

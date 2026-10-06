@@ -6,6 +6,7 @@
 //! come from the original animations when allowed (`art`), else they are generated (`procedural`).
 
 pub mod art;
+mod dust;
 mod procedural;
 pub mod selection;
 
@@ -136,7 +137,7 @@ impl Plugin for UnitsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SimClock>()
             .init_resource::<ShamanSprites>()
-            .add_plugins(selection::SelectionPlugin)
+            .add_plugins((selection::SelectionPlugin, dust::DustPlugin))
             .add_systems(Startup, load_sprites)
             .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks, respawn_views, animate_views).chain().in_set(crate::menu::Gameplay))
             .add_systems(PostUpdate, pull_to_eye.before(TransformSystems::Propagate));
