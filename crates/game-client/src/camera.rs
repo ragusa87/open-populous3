@@ -9,8 +9,11 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 
 const MAP: f32 = pop3_format::MAP_SIZE as f32;
-/// (pitch, distance) of the default ground view: low and close, like the original.
-pub const GROUND_VIEW: (f32, f32) = (3.0 * std::f32::consts::PI / 180.0, 20.0);
+/// Default ground view tilt in degrees and distance in cells: low and close, like the original.
+pub const GROUND_PITCH_DEG: f32 = 6.0;
+pub const GROUND_DISTANCE: f32 = 14.0;
+/// (pitch radians, distance) of the default ground view.
+pub const GROUND_VIEW: (f32, f32) = (GROUND_PITCH_DEG * std::f32::consts::PI / 180.0, GROUND_DISTANCE);
 /// Scroll speeds in camera-distances per second (mouse = at full push).
 pub const MOUSE_SPEED: f32 = 2.2;
 pub const KEY_SPEED: f32 = 3.0;

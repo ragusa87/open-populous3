@@ -16,12 +16,14 @@ pub struct CurveParams {
 
 /// Height units per render unit at relief x1 (the original height-to-cell ratio).
 pub const BASE_HEIGHT_SCALE: f32 = 1.0 / 384.0;
-/// Default relief: hills drawn twice as tall as the original ratio, so the ground view does not feel flat.
-pub const DEFAULT_RELIEF: f32 = 2.0;
+/// Default relief: hills drawn three times as tall as the original ratio, so the ground view does not feel flat.
+pub const DEFAULT_RELIEF: f32 = 3.0;
+/// Default planet bend (`drop = curvature * distance²`).
+pub const DEFAULT_CURVATURE: f32 = 0.008;
 
 impl Default for CurveParams {
     fn default() -> Self {
-        CurveParams { radius: 64, height_scale: BASE_HEIGHT_SCALE * DEFAULT_RELIEF, curvature: 0.012 }
+        CurveParams { radius: 64, height_scale: BASE_HEIGHT_SCALE * DEFAULT_RELIEF, curvature: DEFAULT_CURVATURE }
     }
 }
 
@@ -116,7 +118,7 @@ mod tests {
     #[test]
     fn grid_is_centred_and_curves_down() {
         let map = Heightmap::new(128);
-        let p = CurveParams { radius: 4, ..Default::default() };
+        let p = CurveParams { radius: 4, curvature: 0.012, ..Default::default() };
         let g = build(&map, (10.0, 10.0), &p);
         assert_eq!(g.positions.len(), 81);
         assert!(g.indices.len() < 8 * 8 * 6, "clipped to a disc");

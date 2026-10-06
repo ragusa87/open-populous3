@@ -2,7 +2,8 @@
 
 use super::panel::{DARK_BROWN, INK, PANEL_WIDTH, PARCHMENT};
 use crate::camera::{CameraRig, CurveParamsRes};
-use crate::terrain_mesh::CurveParams;
+use crate::camera::{GROUND_DISTANCE, GROUND_PITCH_DEG};
+use crate::terrain_mesh::{CurveParams, DEFAULT_CURVATURE, DEFAULT_RELIEF};
 use crate::world::TerrainDirty;
 use bevy::prelude::*;
 
@@ -18,13 +19,13 @@ pub struct ViewPreset {
 
 /// First entry is the default view; the others vary one or two settings around it.
 pub const PRESETS: [ViewPreset; 8] = [
-    ViewPreset { name: "Default", relief: 2.0, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
+    ViewPreset { name: "Default (dramatic relief x3)", relief: DEFAULT_RELIEF, curvature: DEFAULT_CURVATURE, distance: GROUND_DISTANCE, pitch_deg: GROUND_PITCH_DEG },
+    ViewPreset { name: "Previous default (relief x2)", relief: 2.0, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
     ViewPreset { name: "Closer", relief: 2.0, curvature: 0.012, distance: 14.0, pitch_deg: 3.0 },
     ViewPreset { name: "Close, ground level", relief: 2.0, curvature: 0.012, distance: 10.0, pitch_deg: 3.0 },
     ViewPreset { name: "Close, flatter planet", relief: 2.0, curvature: 0.006, distance: 10.0, pitch_deg: 3.0 },
     ViewPreset { name: "3/4 view", relief: 2.0, curvature: 0.008, distance: 14.0, pitch_deg: 15.0 },
     ViewPreset { name: "High 3/4 view", relief: 2.0, curvature: 0.012, distance: 22.0, pitch_deg: 28.0 },
-    ViewPreset { name: "Dramatic relief x3", relief: 3.0, curvature: 0.008, distance: 14.0, pitch_deg: 6.0 },
     ViewPreset { name: "Gentle relief x1.5", relief: 1.5, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
 ];
 
@@ -192,8 +193,8 @@ mod tests {
     #[test]
     fn presets_keep_the_draw_radius_and_set_relief() {
         let base = CurveParams { radius: 7, ..CurveParams::default() };
-        let p = PRESETS[6].curve(base);
-        assert_eq!((p.radius, p.relief()), (7, 3.0));
+        let p = PRESETS[7].curve(base);
+        assert_eq!((p.radius, p.relief()), (7, 1.5));
     }
 
     #[test]
