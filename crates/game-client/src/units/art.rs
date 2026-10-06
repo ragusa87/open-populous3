@@ -176,10 +176,10 @@ pub fn original_art(data_dir: &Path) -> Result<Vec<TribeArt>, String> {
                     let original = pose.original();
                     let anim = original.anim(tribe);
                     (0..DIRS)
-                        .map(|dir| original.source_dir(dir))
                         .map(|dir| {
-                            let mirrored = bank.start(anim, dir).is_some_and(|s| s.mirrored);
-                            let frames = bank.frame_loop(anim, dir);
+                            let table_mirror = || bank.start(anim, dir).is_some_and(|s| s.mirrored);
+                            let (src, mirrored) = original.view(dir).unwrap_or_else(|| (dir, table_mirror()));
+                            let frames = bank.frame_loop(anim, src);
                             frames.iter().map(|&f| picture_frame(&bank.compose(&sprites, f, mirrored), &palette)).collect()
                         })
                         .collect()

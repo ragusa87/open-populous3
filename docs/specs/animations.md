@@ -44,6 +44,8 @@ action, one per tribe (blue, red, yellow, green), colours drawn in:
 | 81 | standing still | 1 |
 | 93 | kneeling on one knee (used for praying) | 1 |
 
-81-84 and 93-96: direction 4 (back) holds the next tribe's front frame (blue shows red, green a black
-silhouette), so it is unusable; `ShamanAnim::source_dir` shows direction 3 instead.
+93-96 (kneeling) have only 4 views per tribe (front, side facing right, back-diagonal, back) but the
+direction table points at 5 consecutive frames: from direction 1 on it is one view off, and direction 4
+lands on the next tribe's front (blue shows red, green a black silhouette). `ShamanAnim::view` remaps:
+directions 0-1 front, 2 side, 3 back-diagonal, 4 back, 5-7 mirror 3-1. 81-84 look the same (unchecked).
 No animated shaman prayer was found (90/91 look like braves bowing to the ground, unconfirmed).
