@@ -24,7 +24,9 @@
 Health: 100. Orders are ignored while drowning, dying or dead.
 
 ## Pathfinding (done: `game_core::path`)
-- Walkable cell: not open sea (cell with 4 water corners). A* on the 128² torus, 8 neighbours (10/14),
+- `path::Mobility`: Walk (land, not open sea = cell with 4 water corners, not a cliff = a cell edge
+  rising more than `MAX_CLIMB` 300; ~5.5% of the original levels' land), Sail (open sea only, boats),
+  Fly (anywhere, balloons). Every person walks. A* on the 128² torus, 8 neighbours (10/14),
   no diagonal past an unwalkable side cell, ties broken by cell index (deterministic).
 - The cell path is straightened into legs (start, turning points, exact target): a leg is kept when every
   cell it crosses is walkable (exact grid traversal, both side cells where it passes through a corner)
@@ -32,7 +34,9 @@ Health: 100. Orders are ignored while drowning, dying or dead.
 - `Heightmap::revision` is bumped on every write; a walking (or stranded) unit replans on the next tick
   when it changed (spells, editor, site levelling). A step that would still end in the sea replans cell
   by cell through cell centres.
-- `path::nearest_reachable`: the reachable cell closest to a goal (for boarding vehicles, to come).
+- The start cell may be impassable (ground raised into a cliff under her): she can step off it.
+- `path::nearest_reachable`: the cell a mobility reaches closest to a goal (walkers boarding a boat,
+  boats unloading at a shore; vehicles to come).
 
 ## Shaman on screen (client, `units/`)
 - `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks.

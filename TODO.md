@@ -13,10 +13,9 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Units follow the terrain elevation while walking, feet on the ground (today the sprite rests on the lowest corner of a 0.3-cell footprint and sinks into slopes; the hill in front can hide the feet). Same for vehicles.
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
 - [ ] Walk animation rate could follow the slope speed (slower steps uphill).
-- [ ] Walkability: slope limit (today only open sea blocks paths).
 - [ ] Replanning: every walker replans on any terrain write; only replan when the change touches its route (`DirtyRect`) once there are many units. Group moves could share a flow field.
 - [ ] Stranded units (not the shaman): arms-up animation for braves and others (the action exists in the simulation, shown as Idle).
-- [ ] Boarding vehicles: walk to `path::nearest_reachable` next to the boat/balloon, then board when it is within reach.
+- [ ] Boarding vehicles: walk to `path::nearest_reachable` next to the boat/balloon, then board when it is within reach. Boats path with `Mobility::Sail`, balloons with `Mobility::Fly`.
 - [ ] Braves, warriors, preachers, spies, firewarriors: simulate them and map their animations (0-52, 89-92) in `ShamanAnim`-like catalogs.
 - [ ] Wildmen (neutral "gaia" braves): wander around, drink, eat fruit from trees; the Convert spell turns them into the caster's braves.
 - [ ] Spawn units from the level things (person records) instead of one shaman per site.

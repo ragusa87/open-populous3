@@ -72,8 +72,8 @@ impl GameMap {
     }
 
     /// Test ground for walking: a small flat island around the player's site at the centre, a gentle
-    /// ramp to the east (+x), a steep hill to the north (-z) and a lake to the west, each a few
-    /// cells past the spawn platform so they are quick to reach.
+    /// ramp to the east (+x), a steep hill to the north (-z), a lake to the west and a mesa ringed by
+    /// cliffs to the south, each a few cells past the spawn platform so they are quick to reach.
     pub fn sandbox_walk() -> Self {
         const C: i32 = MAP_SIZE as i32 / 2;
         const ISLAND: i32 = 22;
@@ -89,7 +89,8 @@ impl GameMap {
                 let peak = (dx * dx + (dz + 10) * (dz + 10)) as u32;
                 let hill = 500 - 100 * crate::unit::isqrt(peak) as i32;
                 let lake = (dx + 9) * (dx + 9) + dz * dz <= 9;
-                let h = if lake { 0 } else { BASE + ramp.max(hill).max(0) };
+                let mesa = if (6..=10).contains(&dz) && dx.abs() <= 3 { 400 } else { 0 };
+                let h = if lake { 0 } else { BASE + ramp.max(hill).max(mesa).max(0) };
                 terrain.set(x, z, h as u16);
             }
         }
@@ -176,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_walk_has_a_ramp_a_steep_hill_and_a_lake() {
+    fn sandbox_walk_has_a_ramp_a_hill_a_lake_and_a_mesa() {
         let m = GameMap::sandbox_walk();
         let c = MAP_SIZE as i32 / 2;
         let h = |dx: i32, dz: i32| m.terrain.get(c + dx, c + dz) as i32;
@@ -185,6 +186,8 @@ mod tests {
         assert_eq!(h(8, 0) - h(7, 0), 30, "gentle ramp");
         assert_eq!(h(0, -8) - h(0, -7), 100, "steep hill");
         assert!(m.terrain.is_water(c - 9, c), "lake");
+        assert!(crate::path::is_cliff(&m.terrain, (c, c + 5)) && !crate::path::is_cliff(&m.terrain, (c, c + 8)), "mesa");
+        assert!(!(-14..0).any(|dz| crate::path::is_cliff(&m.terrain, (c, c + dz))), "the hill is no cliff");
         assert!(m.terrain.is_water(c + 25, c), "sea around the island");
     }
 

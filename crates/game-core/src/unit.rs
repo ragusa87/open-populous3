@@ -2,7 +2,7 @@
 //! Positions are fixed-point (1 cell = 512 units, like the original), wrapping at 65536: plain
 //! `u16` wrapping arithmetic walks around the torus.
 
-use crate::path;
+use crate::path::{self, Mobility};
 use crate::site::ReincarnationSite;
 use crate::terrain::Heightmap;
 use pop3_format::WORLD_UNITS_PER_CELL;
@@ -144,6 +144,11 @@ impl Unit {
         SHAMAN_MAX_HEALTH
     }
 
+    /// Every person walks (vehicles will sail or fly).
+    pub fn mobility(&self) -> Mobility {
+        Mobility::Walk
+    }
+
     pub fn is_alive(&self) -> bool {
         !matches!(self.action, Action::Dying { .. } | Action::Dead { .. })
     }
@@ -244,7 +249,7 @@ impl Unit {
     /// Path to `to` on the current terrain: walking if there is one, else stranded (the shaman
     /// just stays idle).
     fn plan(&mut self, to: (u16, u16), terrain: &Heightmap, straighten: bool) {
-        let route = path::route(terrain, (self.x, self.z), to, straighten);
+        let route = path::route(terrain, self.mobility(), (self.x, self.z), to, straighten);
         if route.is_none() && matches!(self.action, Action::Walking { .. }) {
             self.regen = 0;
         }
@@ -257,8 +262,8 @@ impl Unit {
         self.planned_on = Some(terrain.revision());
     }
 
-    /// One step along the route; idle once at `to`. A step that would end in the sea (a straight
-    /// leg grazing a sea corner) replans cell by cell from the current cell centre.
+    /// One step along the route; idle once at `to`. A step that would end in a cell she cannot
+    /// cross (a straight leg grazing its corner) replans cell by cell from the current cell centre.
     fn follow_route(&mut self, to: (u16, u16), terrain: &Heightmap) {
         let Some(&next) = self.route.last() else {
             self.action = Action::Idle;
@@ -276,7 +281,7 @@ impl Unit {
         }
     }
 
-    /// Straight towards `to`, shortest way around the torus, never into the sea.
+    /// Straight towards `to`, shortest way around the torus, never into a cell she cannot cross.
     fn step_towards(&mut self, to: (u16, u16), terrain: &Heightmap) -> Step {
         let (dx, dz) = (torus_delta(self.x, to.0), torus_delta(self.z, to.1));
         if dx == 0 && dz == 0 {
@@ -287,7 +292,8 @@ impl Unit {
         let speed = slope_speed(SHAMAN_SPEED, self.grade_ahead((dx, dz), dist, terrain));
         let (sx, sz) = if dist <= speed { (dx, dz) } else { (dx * speed / dist, dz * speed / dist) };
         let (nx, nz) = (self.x.wrapping_add(sx as u16), self.z.wrapping_add(sz as u16));
-        if is_sea(terrain, (cell_of(nx), cell_of(nz))) {
+        let next = (cell_of(nx), cell_of(nz));
+        if next != self.cell() && !self.mobility().passable(terrain, next) {
             return Step::Blocked;
         }
         (self.x, self.z) = (nx, nz);
@@ -470,6 +476,24 @@ mod tests {
         let ticks = walk(&mut u, &t, &site, to, 300).expect("arrives");
         assert_eq!((u.x, u.z), to);
         assert!(ticks > 10 * 8, "longer than straight across: {ticks}");
+    }
+
+    #[test]
+    fn walks_around_a_cliff() {
+        let mut t = land();
+        for z in 6..15 {
+            for x in 14..17 {
+                t.set(x, z, 500);
+            }
+        }
+        let (mut u, site) = shaman_at((10, 10));
+        let to = (20 * 512 + 256, u.z);
+        assert!(walk(&mut u, &t, &site, to, 300).is_some());
+        assert_eq!((u.x, u.z), to);
+        let (mut u, site) = shaman_at((10, 10));
+        let start = (u.x, u.z);
+        walk(&mut u, &t, &site, (15 * 512 + 256, start.1), 10);
+        assert_eq!((u.action, u.x, u.z), (Action::Idle, start.0, start.1), "top of the cliff: unreachable");
     }
 
     #[test]
