@@ -3,6 +3,7 @@
 use crate::command::Command;
 use crate::path::Mobility;
 use crate::spell::Spell;
+use crate::tree::{scatter, Tree};
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::unit::{Order, Unit, UnitEvent, UnitKind};
@@ -19,6 +20,8 @@ pub struct GameMap {
     pub sites: Vec<ReincarnationSite>,
     /// One shaman per site for now, in site order.
     pub units: Vec<Unit>,
+    /// Wood on the map (none on original levels until their things are decoded).
+    pub trees: Vec<Tree>,
 }
 
 impl GameMap {
@@ -29,6 +32,7 @@ impl GameMap {
             terrain: Heightmap::from_heights(MAP_SIZE, level.heights.clone()),
             sites: sites_from_level(level),
             units: Vec::new(),
+            trees: Vec::new(),
         }
         .with_shamans()
     }
@@ -39,6 +43,13 @@ impl GameMap {
             site.flatten_for_spawn(&mut self.terrain);
             self.units.push(Unit::shaman(i as u32 + 1, site));
         }
+        self
+    }
+
+    /// Groves of trees from `seed`, clear of the sites (after their ground is levelled).
+    fn with_trees(mut self, seed: u32, groves: usize) -> Self {
+        let sites: Vec<(i32, i32)> = self.sites.iter().map(|s| s.cell()).collect();
+        self.trees = scatter(&self.terrain, seed, &sites, groves);
         self
     }
 
@@ -70,7 +81,7 @@ impl GameMap {
             terrain.set(x, z, v);
         }
         let sites = generated_sites(&terrain);
-        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new() }.with_shamans()
+        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new() }.with_shamans().with_trees(seed, 60)
     }
 
     /// Test ground for walking: a small flat island around the player's site at the centre, a gentle
@@ -97,7 +108,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new() }.with_shamans()
+        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new() }.with_shamans().with_trees(1, 150)
     }
 
     /// Test ground for units: a flat island with the player's site and shaman at the centre, three
@@ -118,7 +129,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new() }.with_shamans();
+        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new() }.with_shamans().with_trees(2, 150);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         for (row, &kind) in UnitKind::ALL[1..].iter().enumerate() {
             let row = row as i32;
@@ -197,6 +208,7 @@ impl GameMap {
     /// One simulation tick for every unit, in order; returns the ground levelled by reincarnations.
     pub fn tick(&mut self) -> Vec<DirtyRect> {
         let mut dirty = Vec::new();
+        self.trees.iter_mut().for_each(Tree::tick);
         for unit in &mut self.units {
             let site = self.sites.iter().find(|s| s.owner == unit.owner);
             if unit.tick(&self.terrain, site) == Some(UnitEvent::Reincarnated) {
@@ -343,6 +355,25 @@ mod tests {
         m.apply(&Command::Order { player: 0, order: Order::Pray });
         assert_eq!(m.shaman_of(0).unwrap().action, crate::unit::Action::Praying);
         assert!(m.units.iter().filter(|u| u.kind != UnitKind::Shaman).all(|u| u.action == crate::unit::Action::Idle));
+    }
+
+    #[test]
+    fn generated_and_sandbox_maps_have_groves_that_grow() {
+        let mut m = GameMap::generate(42);
+        assert!(m.trees.len() > 30, "{} trees", m.trees.len());
+        assert_eq!(m.trees, GameMap::generate(42).trees, "deterministic");
+        for map in [GameMap::sandbox_walk(), GameMap::sandbox_units()] {
+            assert!(map.trees.len() > 10, "{}: {} trees", map.name, map.trees.len());
+            for t in &map.trees {
+                assert!(Mobility::Walk.passable(&map.terrain, t.cell()));
+            }
+        }
+        let small = m.trees.iter().position(|t| t.size < crate::tree::MAX_SIZE).unwrap();
+        let before = m.trees[small].size;
+        for _ in 0..crate::tree::GROW_TICKS {
+            m.tick();
+        }
+        assert_eq!(m.trees[small].size, before + 1);
     }
 
     #[test]

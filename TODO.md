@@ -80,12 +80,11 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Houses: hold a brave population, generate mana from the braves inside, spawn new braves over time.
 - [ ] Houses grow (small -> medium -> large: `villager_hut` sizes), holding more braves. Growing has several criteria; one of them is a piece of wood brought by a brave (other criteria to find out).
 
-## Wood
-- [ ] Trees on the map (from the level things or generated), each with a size 0-4 = the pieces of wood it can give.
-- [ ] Trees grow over time up to their max size (4); a tree at size 0 stays in place, invisible, and grows back.
-- [ ] A brave cuts one piece of wood at a time: the tree shrinks by one, the brave carries the piece to a construction site or house.
+## Wood ([trees.md](docs/specs/trees.md))
+- [ ] Trees from the original levels' things (generated maps and sandboxes already have groves).
+- [ ] A brave cuts one piece of wood at a time (`Tree::cut`): the tree shrinks by one, the brave carries the piece to a construction site or house.
 - [ ] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible) trees.
-- [ ] Deterministic growth timing (`map::Lcg`).
+- [ ] Trees as obstacles for walking (around full trees?), to check against the original.
 
 ## Terrain ([terrain.md](docs/specs/terrain.md), [terrain-textures.md](docs/specs/terrain-textures.md))
 - [ ] Curvature in a vertex shader sampling an R16 height texture (static grid).

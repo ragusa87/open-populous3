@@ -9,4 +9,5 @@ pub mod site;
 pub mod spell;
 pub mod spell_book;
 pub mod terrain;
+pub mod tree;
 pub mod unit;
