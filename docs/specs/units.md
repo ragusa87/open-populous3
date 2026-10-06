@@ -26,11 +26,16 @@ Health: 100. Orders are ignored while drowning, dying or dead.
 ## Pathfinding (done: `game_core::path`)
 - `path::Mobility`: Walk (land, not open sea = cell with 4 water corners, not a cliff = a cell edge
   rising more than `MAX_CLIMB` 300; ~5.5% of the original levels' land), Sail (open sea only, boats),
-  Fly (anywhere, balloons). Every person walks. A* on the 128² torus, 8 neighbours (10/14),
-  no diagonal past an unwalkable side cell, ties broken by cell index (deterministic).
+  Fly (anywhere, balloons). Every person walks. A* on the 128² torus, 8 neighbours, no diagonal past an
+  impassable side cell, ties broken by cell index (deterministic).
+- Fastest, not shortest: a step costs its walking time (100 straight, 141 diagonal on flat ground, divided
+  by `slope_factor` of the rise between the two cell centres, the same rule as walking), so a walker goes
+  around a hill or along its flank when climbing is slower (sandbox hill: around beats over). Vehicles
+  ignore slopes. Heuristic: distance at the top downhill speed (never overestimates).
 - The cell path is straightened into legs (start, turning points, exact target): a leg is kept when every
-  cell it crosses is walkable (exact grid traversal, both side cells where it passes through a corner)
-  and it is at most 24 cells long.
+  cell it crosses is passable (exact grid traversal, both side cells where it passes through a corner),
+  it is at most 24 cells long, and walking it (slope sampled every 64 units) is no slower than the cells
+  it skips (+5%).
 - `Heightmap::revision` is bumped on every write; a walking (or stranded) unit replans on the next tick
   when it changed (spells, editor, site levelling). A step that would still end in the sea replans cell
   by cell through cell centres.

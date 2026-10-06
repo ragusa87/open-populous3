@@ -316,9 +316,13 @@ enum Step {
 
 /// Walking speed on a slope (height per cell, positive uphill): slower up, faster down, clamped.
 pub fn slope_speed(flat: i32, grade: i32) -> i32 {
+    (flat * slope_factor(grade) / 256).max(1)
+}
+
+/// Walking speed factor in 1/256 on a slope (see `slope_speed`).
+pub fn slope_factor(grade: i32) -> i32 {
     let per_100 = if grade > 0 { SLOPE_SLOWDOWN_UP } else { SLOPE_SPEEDUP_DOWN };
-    let factor = (256 - grade * per_100 / 100).clamp(SLOPE_FACTOR_RANGE.0, SLOPE_FACTOR_RANGE.1);
-    (flat * factor / 256).max(1)
+    (256 - grade * per_100 / 100).clamp(SLOPE_FACTOR_RANGE.0, SLOPE_FACTOR_RANGE.1)
 }
 
 fn cell_of(v: u16) -> i32 {

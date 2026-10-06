@@ -212,6 +212,31 @@ mod tests {
     }
 
     #[test]
+    fn sandbox_walk_shaman_goes_around_the_hill_faster_than_over_it() {
+        let m = GameMap::sandbox_walk();
+        let c = MAP_SIZE as i32 / 2;
+        let at = |dz: i32| (c as u16 * 512 + 256, (c + dz) as u16 * 512 + 256);
+        let ticks = |hops: &[(u16, u16)]| {
+            let mut u = m.units[0].clone();
+            (u.x, u.z) = at(-4);
+            let mut ticks = 0;
+            for &(x, z) in hops {
+                u.order(Order::MoveTo { x, z });
+                while u.action != crate::unit::Action::Idle {
+                    u.tick(&m.terrain, None);
+                    ticks += 1;
+                }
+            }
+            (ticks, u)
+        };
+        let (fastest, u) = ticks(&[at(-17)]);
+        assert_eq!((u.x, u.z), at(-17));
+        let over: Vec<_> = (5..=17).map(|d| at(-d)).collect();
+        let (straight, _) = ticks(&over);
+        assert!(fastest < straight, "around {fastest} ticks, over the top {straight}");
+    }
+
+    #[test]
     fn a_shaman_stands_on_each_site() {
         let m = GameMap::generate(7);
         assert_eq!(m.units.len(), m.sites.len());

@@ -1,16 +1,20 @@
 //! Path finding on the cell grid (a torus): A* over the cells a mover can cross (land without
-//! cliffs on foot, open sea by boat, anywhere by balloon), then straightened into a few waypoints.
+//! cliffs on foot, open sea by boat, anywhere by balloon), fastest rather than shortest (walkers
+//! are slow uphill, so going around a hill can win), then straightened into a few waypoints.
 //! Integer-only and deterministic (ties broken by cell index).
 
 use crate::terrain::Heightmap;
-use crate::unit::is_sea;
+use crate::unit::{is_sea, isqrt, slope_factor, SLOPE_FACTOR_RANGE};
 use pop3_format::WORLD_UNITS_PER_CELL;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 
 const CELL: i32 = WORLD_UNITS_PER_CELL as i32;
-const STRAIGHT: u32 = 10;
-const DIAGONAL: u32 = 14;
+/// Time to cross a cell on flat ground, straight and diagonally (path costs are in these units).
+const STRAIGHT: u32 = 100;
+const DIAGONAL: u32 = 141;
+/// Straightened legs walk the slope sampled this often (world units, one flat-ground step).
+const LEG_SAMPLE: i32 = 64;
 /// Longest straightened leg, in cells: well under half the map, so the shortest way around the
 /// torus between two waypoints is the leg that was checked.
 const MAX_LEG_CELLS: i32 = 24;
@@ -39,6 +43,15 @@ impl Mobility {
             Mobility::Fly => true,
         }
     }
+
+    /// Time to cover `dist` (any length unit) climbing `rise` over it, `cell` being one cell in
+    /// that unit: walkers follow `slope_speed`, vehicles ignore slopes.
+    fn time(self, dist: i64, rise: i64, cell: i64) -> i64 {
+        match self {
+            Mobility::Walk if dist > 0 => dist * 256 / slope_factor((rise * cell / dist) as i32) as i64,
+            _ => dist,
+        }
+    }
 }
 
 /// A cell edge rises more than `MAX_CLIMB` between its two corners.
@@ -53,28 +66,35 @@ pub fn is_cliff(terrain: &Heightmap, (x, z): (i32, i32)) -> bool {
 /// the route goes through every cell centre, starting with the centre of the current cell
 /// (always safe, used when a straight leg was blocked).
 pub fn route(terrain: &Heightmap, mob: Mobility, from: (u16, u16), to: (u16, u16), straighten: bool) -> Option<Vec<(u16, u16)>> {
-    let cells = cell_path(terrain, mob, cell_of(from), cell_of(to))?;
+    let cells = timed_cell_path(terrain, mob, cell_of(from), cell_of(to))?;
     let size = terrain.size() as i32;
     let step = |a: i32, b: i32| (b - a + size / 2).rem_euclid(size) - size / 2;
-    // Unwrapped coordinates: the start, every cell centre one step at a time, then the target in
-    // the last cell. Legs between consecutive points are always passable.
+    // Unwrapped coordinates with the time to reach them: the start, every cell centre one step at
+    // a time, then the target in the last cell. Legs between consecutive points are passable.
     let start = (from.0 as i32, from.1 as i32);
     let mut cell = (start.0.div_euclid(CELL), start.1.div_euclid(CELL));
-    let mut points = vec![start, centre(cell)];
+    let mut points = vec![(start, 0), (centre(cell), 0)];
     for w in cells.windows(2) {
-        cell = (cell.0 + step(w[0].0, w[1].0), cell.1 + step(w[0].1, w[1].1));
-        points.push(centre(cell));
+        cell = (cell.0 + step(w[0].0 .0, w[1].0 .0), cell.1 + step(w[0].0 .1, w[1].0 .1));
+        points.push((centre(cell), w[1].1));
     }
-    points.push((cell.0 * CELL + to.0 as i32 % CELL, cell.1 * CELL + to.1 as i32 % CELL));
-    points.dedup();
-    let points = if straighten { straighten_legs(terrain, mob, &points) } else { points };
+    let end = (cell.0 * CELL + to.0 as i32 % CELL, cell.1 * CELL + to.1 as i32 % CELL);
+    points.push((end, points[points.len() - 1].1));
+    points.dedup_by_key(|p| p.0);
+    let points = if straighten { straighten_legs(terrain, mob, &points) } else { points.into_iter().map(|p| p.0).collect() };
     Some(points.into_iter().skip(1).map(|(x, z)| (x as u16, z as u16)).collect())
 }
 
 /// Cells from `from` to `to` (both included), 8-connected without cutting a corner past an
-/// impassable cell, shortest by 10/14 steps. None if `to` is impassable or out of reach. The
-/// start cell may be impassable (ground raised into a cliff under her): she can step off it.
+/// impassable cell, fastest for `mob` (see `step_time`). None if `to` is impassable or out of
+/// reach. The start cell may be impassable (ground raised into a cliff under her): she can step
+/// off it.
 pub fn cell_path(terrain: &Heightmap, mob: Mobility, from: (i32, i32), to: (i32, i32)) -> Option<Vec<(i32, i32)>> {
+    Some(timed_cell_path(terrain, mob, from, to)?.into_iter().map(|(c, _)| c).collect())
+}
+
+/// `cell_path` with the time to reach each cell.
+fn timed_cell_path(terrain: &Heightmap, mob: Mobility, from: (i32, i32), to: (i32, i32)) -> Option<Vec<((i32, i32), u32)>> {
     let size = terrain.size() as i32;
     let wrap = |(x, z): (i32, i32)| (x.rem_euclid(size), z.rem_euclid(size));
     let (from, to) = (wrap(from), wrap(to));
@@ -86,7 +106,8 @@ pub fn cell_path(terrain: &Heightmap, mob: Mobility, from: (i32, i32), to: (i32,
     let heuristic = |(x, z): (i32, i32)| {
         let d = |a: i32, b: i32| (a - b).rem_euclid(size).min((b - a).rem_euclid(size)) as u32;
         let (dx, dz) = (d(x, to.0), d(z, to.1));
-        STRAIGHT * dx.max(dz) + (DIAGONAL - STRAIGHT) * dx.min(dz)
+        // Never more than the real time: as if all downhill at the top speed.
+        (STRAIGHT * dx.max(dz) + (DIAGONAL - STRAIGHT) * dx.min(dz)) * 256 / SLOPE_FACTOR_RANGE.1 as u32
     };
     let n = (size * size) as usize;
     let mut cost = vec![u32::MAX; n];
@@ -97,11 +118,11 @@ pub fn cell_path(terrain: &Heightmap, mob: Mobility, from: (i32, i32), to: (i32,
     while let Some(Reverse((_, i))) = open.pop() {
         let cell = ((i as i32) % size, (i as i32) / size);
         if cell == to {
-            let mut path = vec![to];
+            let mut path = vec![(to, cost[i])];
             let mut i = i;
             while came_from[i] != usize::MAX {
                 i = came_from[i];
-                path.push(((i as i32) % size, (i as i32) / size));
+                path.push((((i as i32) % size, (i as i32) / size), cost[i]));
             }
             path.reverse();
             return Some(path);
@@ -112,7 +133,7 @@ pub fn cell_path(terrain: &Heightmap, mob: Mobility, from: (i32, i32), to: (i32,
             if !ok(next) || diagonal && !(ok(wrap((cell.0 + dx, cell.1))) && ok(wrap((cell.0, cell.1 + dz)))) {
                 continue;
             }
-            let c = cost[i] + if diagonal { DIAGONAL } else { STRAIGHT };
+            let c = cost[i] + step_time(terrain, mob, cell, next, if diagonal { DIAGONAL } else { STRAIGHT });
             let j = index(next);
             if c < cost[j] {
                 cost[j] = c;
@@ -156,17 +177,37 @@ pub fn nearest_reachable(terrain: &Heightmap, mob: Mobility, from: (i32, i32), g
     best.1
 }
 
+/// Time to step between two neighbour cells, `flat` on level ground, from their centre heights.
+fn step_time(terrain: &Heightmap, mob: Mobility, a: (i32, i32), b: (i32, i32), flat: u32) -> u32 {
+    let h = |(x, z): (i32, i32)| (0..4).map(|k| terrain.get(x + k % 2, z + k / 2) as i64).sum::<i64>() / 4;
+    mob.time(flat as i64, h(b) - h(a), STRAIGHT as i64) as u32
+}
+
+/// Time to walk a straight leg (unwrapped world units), its slope sampled every `LEG_SAMPLE`.
+fn leg_time(terrain: &Heightmap, mob: Mobility, a: (i32, i32), b: (i32, i32)) -> u32 {
+    let world = terrain.size() as i32 * CELL;
+    let h = |(x, z): (i32, i32)| terrain.height_at(x.rem_euclid(world) as u32, z.rem_euclid(world) as u32, CELL as u32) as i64;
+    let (dx, dz) = (b.0 - a.0, b.1 - a.1);
+    let len = isqrt((dx * dx + dz * dz) as u32) as i32;
+    let n = (len / LEG_SAMPLE).max(1);
+    let point = |k: i32| (a.0 + dx * k / n, a.1 + dz * k / n);
+    let time: i64 = (0..n).map(|k| mob.time((len / n) as i64, h(point(k + 1)) - h(point(k)), CELL as i64)).sum();
+    (time * STRAIGHT as i64 / CELL as i64) as u32
+}
+
 /// Keep only the turning points: from each kept point, jump to the farthest next point that a
-/// straight leg (checked cell by cell) reaches over passable cells.
-fn straighten_legs(terrain: &Heightmap, mob: Mobility, points: &[(i32, i32)]) -> Vec<(i32, i32)> {
-    let mut out = vec![points[0]];
+/// straight leg reaches over passable cells, no slower than the cells it skips (with a little
+/// slack: the cell path zigzags, its heights are cell averages).
+fn straighten_legs(terrain: &Heightmap, mob: Mobility, points: &[((i32, i32), u32)]) -> Vec<(i32, i32)> {
+    let no_slower = |a: &((i32, i32), u32), b: &((i32, i32), u32)| leg_time(terrain, mob, a.0, b.0) <= (b.1 - a.1) * 105 / 100 + STRAIGHT / 10;
+    let mut out = vec![points[0].0];
     let mut at = 0;
     while at + 1 < points.len() {
         let mut next = at + 1;
-        while next + 1 < points.len() && leg_is_clear(terrain, mob, points[at], points[next + 1]) {
+        while next + 1 < points.len() && leg_is_clear(terrain, mob, points[at].0, points[next + 1].0) && no_slower(&points[at], &points[next + 1]) {
             next += 1;
         }
-        out.push(points[next]);
+        out.push(points[next].0);
         at = next;
     }
     out
@@ -339,6 +380,34 @@ mod tests {
             }
         }
         assert!(cell_path(&t, Mobility::Walk, (8, 3), (21, 3)).is_some(), "steep but climbable ramp");
+    }
+
+    #[test]
+    fn walkers_go_around_a_hill_when_faster() {
+        let mut t = map(&[]);
+        t.raise((20, 20), 7, 700);
+        let height = |(x, z): (i32, i32)| t.get(x, z);
+        let cells = cell_path(&t, Mobility::Walk, (10, 20), (30, 20)).unwrap();
+        assert!(cells.iter().all(|&c| height(c) < 400), "skirts the top: {cells:?}");
+        let flying = cell_path(&t, Mobility::Fly, (10, 20), (30, 20)).unwrap();
+        assert!(flying.iter().any(|&c| height(c) > 600), "a balloon flies over");
+        let legs = route(&t, Mobility::Walk, at((10, 20)), at((30, 20)), true).unwrap();
+        let mut prev = centre((10, 20));
+        for &(x, z) in &legs {
+            let next = (x as i32, z as i32);
+            for k in 0..=16 {
+                let p = (prev.0 + (next.0 - prev.0) * k / 16, prev.1 + (next.1 - prev.1) * k / 16);
+                assert!(t.height_at(p.0 as u32, p.1 as u32, 512) < 450, "leg {prev:?} -> {next:?} cuts over the top");
+            }
+            prev = next;
+        }
+    }
+
+    #[test]
+    fn a_gentle_rise_is_still_crossed_straight() {
+        let mut t = map(&[]);
+        t.raise((20, 20), 7, 60);
+        assert_eq!(route(&t, Mobility::Walk, at((10, 20)), at((30, 20)), true), Some(vec![at((30, 20))]));
     }
 
     #[test]
