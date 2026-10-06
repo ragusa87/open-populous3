@@ -74,7 +74,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Open-source building models (e.g. CC0 Quaternius Medieval Village / Fantasy kits) instead of the labelled boxes when the original files are not used; generated maps and sandboxes have buildings only in Sandbox > Buildings.
 - [ ] Identify the original objects of reconversion, wall, gate, guard post (stand-in boxes even with the original files); check temple = prayer hut object.
 - [ ] Villager hut style (3 styles in the objects, style 0 always drawn): find what picks it.
-- [ ] Check the facing against the game (which way 0 is), and the building footprints (flattened ground, cells taken: units should not stand or walk through them).
+- [ ] Check the facing against the game (level 19's boat hut, facing 4, points its jetty into a low inlet: looks right), and the cells a footprint takes (units should not stand or walk through buildings).
+- [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold.
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
 - [ ] Placement on flat enough ground (Build tab), footprint, destruction on uneven/flooded ground.
 - [ ] Construction: each building costs wood; braves carry it and build over time, it finishes once all its wood is in.

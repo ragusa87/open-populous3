@@ -169,6 +169,49 @@ impl Heightmap {
         DirtyRect { min: (cx - r, cz - r), max: (cx + r + 1, cz + r + 1) }
     }
 
+    /// Level a building's footprint: a rectangle around `centre` (world units), `half` its half size and
+    /// `offset` its centre's shift (world units, x and z in the building's own frame), turned by
+    /// `quarter_turns` like the building (a turn takes its +z towards +x). Height points inside take
+    /// their average height (at least `min`); those within a cell around it are pulled halfway, except
+    /// sea, which stays sea (a boat hut's jetty keeps its water). Integer, deterministic.
+    pub fn level_rect(&mut self, centre: (u16, u16), half: (i32, i32), offset: (i32, i32), quarter_turns: u8, min: u16) -> DirtyRect {
+        const UNIT: i32 = 512;
+        let (cx, cz) = (centre.0 as i32 / UNIT, centre.1 as i32 / UNIT);
+        let r = (half.0.abs() + offset.0.abs()).max(half.1.abs() + offset.1.abs()) / UNIT + 2;
+        // World offset of a height point -> the building's own frame (inverse turn).
+        let local = |wx: i32, wz: i32| match quarter_turns % 4 {
+            0 => (wx, wz),
+            1 => (-wz, wx),
+            2 => (-wx, -wz),
+            _ => (wz, -wx),
+        };
+        let inside = |(lx, lz): (i32, i32), margin: i32| (lx - offset.0).abs() <= half.0 + margin && (lz - offset.1).abs() <= half.1 + margin;
+        let mut flat = Vec::new();
+        let mut ring = Vec::new();
+        for z in cz - r..=cz + r + 1 {
+            for x in cx - r..=cx + r + 1 {
+                let l = local(x * UNIT - centre.0 as i32, z * UNIT - centre.1 as i32);
+                if inside(l, 0) {
+                    flat.push((x, z));
+                } else if inside(l, UNIT) {
+                    ring.push((x, z));
+                }
+            }
+        }
+        let sum: u32 = flat.iter().map(|&(x, z)| self.get(x, z) as u32).sum();
+        let target = ((sum / flat.len().max(1) as u32) as u16).max(min);
+        for &(x, z) in &flat {
+            self.set(x, z, target);
+        }
+        for &(x, z) in &ring {
+            let h = self.get(x, z);
+            if h != SEA_LEVEL {
+                self.set(x, z, ((h as u32 + target as u32) / 2) as u16);
+            }
+        }
+        DirtyRect { min: (cx - r, cz - r), max: (cx + r + 1, cz + r + 1) }
+    }
+
     /// Raise a walkable strip between two cells, interpolating heights (Land Bridge).
     /// Walks the shortest way around the torus.
     pub fn land_bridge(&mut self, a: (i32, i32), b: (i32, i32), min_height: u16) -> DirtyRect {
@@ -276,6 +319,25 @@ mod tests {
         assert_eq!(m.get(9, 10), m.get(11, 11), "flat");
         assert_eq!(m.get(10, 7), m.get(10, 10) / 2, "ring: halfway from the sea");
         assert!(m.is_water(10, 6), "beyond: untouched");
+    }
+
+    #[test]
+    fn levelling_a_turned_rectangle_keeps_the_sea_beside_it() {
+        let mut m = Heightmap::new(32);
+        for z in 0..32 {
+            for x in 0..10 {
+                m.set(x, z, 200);
+            }
+        }
+        // Half 1 x 2 cells at (10, 10), shifted 1 cell along its own -z, turned once: its own z runs
+        // along world x (own -z = world -x), so it covers height points x 7..11, z 9..11.
+        m.level_rect((10 * 512, 10 * 512), (512, 1024), (0, -512), 1, 64);
+        let flat = m.get(10, 10);
+        assert_eq!(flat, (3 * 200) / 5, "average of the block (3 land, 2 sea points a row)");
+        assert!([(7, 9), (11, 11), (9, 10)].iter().all(|&(x, z)| m.get(x, z) == flat), "flat block");
+        assert_eq!(m.get(6, 10), (200 + flat) / 2, "land ring blended halfway");
+        assert!(m.is_water(12, 10), "sea beside it stays sea");
+        assert_eq!(m.get(10, 13), 0, "beyond the ring: untouched");
     }
 
     #[test]

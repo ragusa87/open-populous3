@@ -8,11 +8,13 @@ scripts: 1-3 villager hut size 1-3, 4 drum tower, 5 temple (preachers), 6 spy, 7
 9 reconversion, 10 wall, 11 gate, 13-14 boat hut, 15-16 airship hut, 17 guard post, 18 vault of knowledge,
 19 prison; others `Other(model)`. Level 19 (two tribes' villages of huts 3 and drum towers, a temple, training
 huts, a boat hut) and level 1 (a neutral model 18) fit it. When the map loads, each building levels its
-ground (`Building::flatten` = `Heightmap::level_around`: height points within 3 cells take their average height,
-at least 64 so never sea nor shore, the ring out to 4 cells is pulled halfway; the biggest objects reach ~2.7
-cells from their centre at their corners), before the reincarnation sites
-level theirs (same function, 3/4 cells, at least 32). Level 4 has a hut on a sea-level shore: it now stands on
-sand. No construction, health, people inside or footprint yet. Sandbox > Buildings (`GameMap::sandbox_buildings`): one of every model 1-19 for the player, a few red ones.
+footprint (`BuildingKind::footprint`: a rectangle measured from its original object, half size and shift in its own
+frame, world units; the boat hut's jetty left out), turned with its facing (`Building::flatten` =
+`Heightmap::level_rect`): height points inside take their average height (at least 64, so never sea nor shore),
+those within a cell around it are pulled halfway, except sea, which stays sea (a boat hut keeps its water on the
+jetty side). Then the reincarnation sites level their disc (`level_around`, 3/4 cells, at least 32). Level 4 has a
+hut on a sea-level shore: it now stands on sand; level 19's boat hut keeps the inlet its jetty points into.
+No construction, health, people inside or footprint yet. Sandbox > Buildings (`GameMap::sandbox_buildings`): one of every model 1-19 for the player, a few red ones.
 
 ## On screen (client, `buildings.rs`)
 Centred on the terrain (`Grounded`) and leaning with it (`grounded::Tilted`: its up follows the drawn ground

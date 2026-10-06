@@ -28,7 +28,36 @@ pub enum BuildingKind {
     Other(u8),
 }
 
+/// A building's footprint in its own frame (facing 0), world units: half size and centre shift
+/// along x and z. Measured from the original objects; a boat hut's jetty is left out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Footprint {
+    pub half: (i32, i32),
+    pub offset: (i32, i32),
+}
+
+const fn footprint(half: (i32, i32), offset: (i32, i32)) -> Footprint {
+    Footprint { half, offset }
+}
+
 impl BuildingKind {
+    /// The ground it stands on (levelled when the map loads).
+    pub fn footprint(self) -> Footprint {
+        match self {
+            BuildingKind::Hut { .. } => footprint((600, 600), (0, 0)),
+            BuildingKind::DrumTower => footprint((360, 360), (0, 0)),
+            BuildingKind::Temple => footprint((800, 950), (0, -146)),
+            BuildingKind::SpyTraining => footprint((370, 370), (0, 0)),
+            BuildingKind::WarriorTraining => footprint((600, 600), (44, 0)),
+            BuildingKind::FirewarriorTraining => footprint((795, 765), (0, 0)),
+            BuildingKind::BoatHut => footprint((600, 446), (0, -66)),
+            BuildingKind::AirshipHut => footprint((1037, 700), (358, 0)),
+            BuildingKind::Vault => footprint((540, 556), (0, 44)),
+            BuildingKind::Prison => footprint((560, 560), (30, 30)),
+            _ => footprint((410, 410), (0, 0)),
+        }
+    }
+
     pub fn from_model(model: u8) -> Self {
         match model {
             1..=3 => BuildingKind::Hut { size: model },
@@ -70,10 +99,6 @@ impl BuildingKind {
     }
 }
 
-/// Ground levelled under a building when the map loads (cells): flat disc, and blended ring. The
-/// biggest objects reach ~2.7 cells from their centre at their corners (temple).
-pub const FLAT_RADIUS: i32 = 3;
-pub const BLEND_RADIUS: i32 = 4;
 /// The levelled ground is never lower than this: a building placed on the shore stands on land.
 pub const MIN_GROUND: u16 = 64;
 
@@ -90,9 +115,10 @@ pub struct Building {
 }
 
 impl Building {
-    /// Levels its ground above the sea (`Heightmap::level_around`).
+    /// Levels its footprint above the sea (`Heightmap::level_rect`), turned with its facing.
     pub fn flatten(&self, terrain: &mut crate::terrain::Heightmap) -> crate::terrain::DirtyRect {
-        terrain.level_around((self.x, self.z), FLAT_RADIUS, BLEND_RADIUS, MIN_GROUND)
+        let f = self.kind.footprint();
+        terrain.level_rect((self.x, self.z), f.half, f.offset, self.facing / 2, MIN_GROUND)
     }
 }
 
