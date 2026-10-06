@@ -48,6 +48,9 @@ Health: 100. Orders are ignored while drowning, dying or dead.
 - Each unit is a `Grounded` sprite quad (1 px = 1/88 cell: standing ~0.39 cell, half a site stone; feet at the
   anchor) turned to face the camera, uploaded Scale2x-upscaled x4 and filtered linearly (no blocky pixels),
   with a health bar over the head (green -> yellow -> red) shown only while the unit is selected and alive.
+  Feet on the ground right under the unit (`Grounded` with no footprint). Sprite and bar are drawn pulled
+  0.6 cell towards the camera along the eye-feet line and shrunk to match (`toward_eye`): same picture on
+  screen, but slopes and bumps around the feet no longer cut the legs; real hills in front still hide her.
   The original has no health bar: low-health units get a spinning star/crown over the head (to do). The panel
   preview always shows the shaman's health.
 - Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (tumbling), Fall (dying, then lies still while dead).

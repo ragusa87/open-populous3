@@ -1,5 +1,7 @@
 //! Units on the map. Runs the simulation clock (`GameMap::tick` at `TICKS_PER_SECOND`), draws each
 //! unit as a camera-facing sprite on the ground, with a health bar over the head of selected units.
+//! Sprites are drawn pulled towards the camera along the eye-feet line (same picture on screen) so
+//! the ground right around the feet never hides them.
 //! Mouse selection and orders live in `selection`; Space looks at the player's shaman. The sprites
 //! come from the original animations when allowed (`art`), else they are generated (`procedural`).
 
@@ -7,8 +9,8 @@ pub mod art;
 mod procedural;
 pub mod selection;
 
-use crate::camera::CameraRig;
-use crate::grounded::Grounded;
+use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
+use crate::grounded::{render_pos, Grounded};
 use crate::world::{CurrentMap, LevelList, TerrainDirty};
 use art::{frame_index, pose_for, sprite_dir, Frame, TribeArt};
 use bevy::asset::RenderAssetUsages;
@@ -30,8 +32,9 @@ const UPSCALE_STEPS: usize = 2;
 const TICK_SECS: f32 = 1.0 / TICKS_PER_SECOND as f32;
 const BAR_HEIGHT: f32 = 0.5;
 const BAR_SIZE: Vec2 = Vec2::new(0.36, 0.045);
-/// Footprint half size: the sprite rests on the lowest ground under it.
-const FOOT_HALF: f32 = 0.15;
+/// How far (cells) sprites are pulled towards the camera: ground rising less than this in front
+/// of the feet does not cut them.
+const PULL_TO_EYE: f32 = 0.6;
 
 /// Fixed-step simulation clock, plus what the views need to draw between two ticks.
 #[derive(Resource, Default)]
@@ -126,7 +129,8 @@ impl Plugin for UnitsPlugin {
             .init_resource::<ShamanSprites>()
             .add_plugins(selection::SelectionPlugin)
             .add_systems(Startup, load_sprites)
-            .add_systems(Update, (selection::select_and_order, look_at_shaman, run_ticks, respawn_views, animate_views).chain().in_set(crate::menu::Gameplay));
+            .add_systems(Update, (selection::select_and_order, look_at_shaman, run_ticks, respawn_views, animate_views).chain().in_set(crate::menu::Gameplay))
+            .add_systems(PostUpdate, pull_to_eye.before(TransformSystems::Propagate));
     }
 }
 
@@ -222,7 +226,7 @@ fn respawn_views(
     let bar = meshes.add(Rectangle::from_size(BAR_SIZE));
     let fill = meshes.add(Rectangle::new(1.0, BAR_SIZE.y * 0.6));
     for (i, _) in map.0.units.iter().enumerate() {
-        commands.spawn((UnitView(i), Grounded { at: Vec2::ZERO, half: FOOT_HALF }, Transform::default(), Visibility::Hidden)).with_children(|v| {
+        commands.spawn((UnitView(i), Grounded { at: Vec2::ZERO, half: 0.0 }, Transform::default(), Visibility::Hidden)).with_children(|v| {
             v.spawn((UnitSprite(i), Mesh3d::default(), MeshMaterial3d::<StandardMaterial>::default(), Transform::default()));
             v.spawn((HealthBar, Mesh3d(bar.clone()), MeshMaterial3d(back.clone()), Transform::from_xyz(0.0, BAR_HEIGHT, 0.0), Visibility::Hidden))
                 .with_child((HealthFill(i), Mesh3d(fill.clone()), MeshMaterial3d(mats.add(flat(health_color(1.0)))), Transform::from_xyz(0.0, 0.0, 0.005)));
@@ -274,9 +278,57 @@ fn animate_views(
     }
 }
 
+/// Offset (render space) and scale that slide a sprite standing at `feet` towards `eye` by
+/// `pull` along their line, keeping its picture: every point moves along its own line of sight.
+pub fn toward_eye(feet: Vec3, eye: Vec3, pull: f32) -> (Vec3, f32) {
+    let dist = feet.distance(eye);
+    if dist <= pull * 2.0 {
+        return (Vec3::ZERO, 1.0);
+    }
+    ((eye - feet) / dist * pull, (dist - pull) / dist)
+}
+
+/// Pulls each unit's sprite and health bar towards the camera (see `toward_eye`), in the view's
+/// own (camera-facing) space.
+fn pull_to_eye(
+    map: Res<CurrentMap>,
+    rig: Res<CameraRig>,
+    params: Res<CurveParamsRes>,
+    eye: Query<&Transform, (With<GameCamera>, Without<UnitView>)>,
+    views: Query<(&Grounded, &Transform, &Children), With<UnitView>>,
+    mut parts: Query<(&mut Transform, Has<HealthBar>), (Or<(With<UnitSprite>, With<HealthBar>)>, Without<UnitView>, Without<GameCamera>)>,
+) {
+    let Ok(eye) = eye.single() else { return };
+    for (ground, view, children) in &views {
+        let Some(feet) = render_pos(&map.0.terrain, ground, rig.focus, &params.0) else { continue };
+        let (offset, scale) = toward_eye(feet, eye.translation, PULL_TO_EYE);
+        let local = view.rotation.inverse() * offset;
+        for &child in children {
+            if let Ok((mut t, bar)) = parts.get_mut(child) {
+                t.translation = local + if bar { Vec3::Y * BAR_HEIGHT * scale } else { Vec3::ZERO };
+                t.scale = Vec3::splat(scale);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pulled_towards_the_eye_looks_the_same() {
+        let (feet, eye) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 10.0, 15.0));
+        let (offset, scale) = toward_eye(feet, eye, 0.6);
+        assert!((offset.length() - 0.6).abs() < 1e-5);
+        let dir = (eye - feet).normalize();
+        assert!(offset.normalize().distance(dir) < 1e-5, "along the line of sight: the feet stay in place on screen");
+        let head = feet + Vec3::Y * 0.4;
+        let pulled_head = feet + offset + Vec3::Y * 0.4 * scale;
+        let (a, b) = ((head - eye).normalize(), (pulled_head - eye).normalize());
+        assert!(a.distance(b) < 1e-5, "the head too: same picture, just closer");
+        assert_eq!(toward_eye(feet, feet + Vec3::Y, 0.6), (Vec3::ZERO, 1.0), "camera right on top: left alone");
+    }
 
     #[test]
     fn glides_between_ticks_across_the_edge() {

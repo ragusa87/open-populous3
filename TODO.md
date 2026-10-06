@@ -10,7 +10,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
 
 ## Units ([units.md](docs/specs/units.md))
-- [ ] Units follow the terrain elevation while walking, feet on the ground (today the sprite rests on the lowest corner of a 0.3-cell footprint and sinks into slopes; the hill in front can hide the feet). Same for vehicles.
+- [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
 - [ ] Walk animation rate could follow the slope speed (slower steps uphill).
 - [ ] Replanning: every walker replans on any terrain write; only replan when the change touches its route (`DirtyRect`) once there are many units. Group moves could share a flow field.
