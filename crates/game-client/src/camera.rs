@@ -109,14 +109,24 @@ pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraRig>()
-            .add_systems(Startup, spawn_camera)
+            .add_systems(PreStartup, spawn_camera)
             .add_systems(Update, frame_new_map.run_if(resource_changed::<crate::world::LevelList>))
             .add_systems(Update, (camera_input.in_set(crate::menu::Gameplay), apply_rig, sky_color).chain());
     }
 }
 
-fn spawn_camera(mut commands: Commands) {
-    commands.spawn((Camera3d::default(), Transform::default()));
+/// Draws the world and the HUD; inactive behind the main menu.
+#[derive(Component)]
+pub struct GameCamera;
+
+/// Drawn after the game camera, without clearing it: the menus and the cursor. It clears the
+/// window itself while the game camera is off.
+#[derive(Component)]
+pub struct OverlayCamera;
+
+pub(crate) fn spawn_camera(mut commands: Commands) {
+    commands.spawn((GameCamera, Camera3d::default(), IsDefaultUiCamera, Transform::default()));
+    commands.spawn((OverlayCamera, Camera2d, Camera { order: 1, clear_color: ClearColorConfig::None, ..default() }));
     commands.insert_resource(ClearColor(SKY));
     commands.insert_resource(GlobalAmbientLight { brightness: 60.0, ..default() });
     commands.spawn((

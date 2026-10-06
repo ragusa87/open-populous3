@@ -42,10 +42,10 @@ impl Plugin for DevPlugin {
 #[derive(Resource)]
 struct OffscreenTarget(Handle<Image>);
 
-fn render_to_image(mut commands: Commands, mut images: ResMut<Assets<Image>>, cams: Query<Entity, With<Camera3d>>) {
+fn render_to_image(mut commands: Commands, mut images: ResMut<Assets<Image>>, cams: Query<Entity, With<Camera>>) {
     let image = images.add(Image::new_target_texture(1280, 720, TextureFormat::Rgba8UnormSrgb, None));
     for cam in &cams {
-        commands.entity(cam).insert((RenderTarget::Image(image.clone().into()), IsDefaultUiCamera));
+        commands.entity(cam).insert(RenderTarget::Image(image.clone().into()));
     }
     commands.insert_resource(OffscreenTarget(image));
 }

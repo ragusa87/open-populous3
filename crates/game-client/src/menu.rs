@@ -1,15 +1,17 @@
 //! Main menu shown before the game: New game (the level from the command line / PgUp-PgDn list),
 //! Sandbox (test grounds: Walk), Quit. Sub-pages open on Enter and go back with Esc/Backspace or
 //! their Back entry; arrows (or W/S) move, Enter/Space picks, the mouse hovers and clicks.
-//! Gameplay systems are in the `Gameplay` set, which only runs while `Playing`.
+//! Gameplay systems are in the `Gameplay` set, which only runs while `Playing`. Behind the menu the
+//! game camera is off: no world, units or HUD are drawn, the menu has its own overlay camera.
 //! `POP3_START=menu|game|sandbox-walk` picks where to start (screenshots start in the game).
 
+use crate::camera::{GameCamera, OverlayCamera};
 use crate::units::selection::Selection;
 use crate::world::{CurrentMap, LevelList, TerrainDirty};
 use bevy::prelude::*;
 use game_core::map::GameMap;
 
-const BACKDROP: Color = Color::srgba(0.06, 0.04, 0.02, 0.82);
+const BACKDROP: Color = Color::srgb(0.06, 0.04, 0.02);
 const TEXT: Color = Color::srgb(0.95, 0.85, 0.6);
 const HIGHLIGHT: Color = Color::srgb(0.80, 0.56, 0.20);
 const ITEM: Color = Color::srgba(0.30, 0.18, 0.06, 0.9);
@@ -166,12 +168,38 @@ impl Plugin for MenuPlugin {
                     .chain()
                     .run_if(in_state(AppState::Menu)),
             )
-            .add_systems(OnEnter(AppState::Menu), |mut q: Query<&mut Visibility, With<MenuRoot>>| q.iter_mut().for_each(|mut v| *v = Visibility::Inherited))
-            .add_systems(OnExit(AppState::Menu), |mut q: Query<&mut Visibility, With<MenuRoot>>| q.iter_mut().for_each(|mut v| *v = Visibility::Hidden));
+            .add_systems(Update, show_state.run_if(state_changed::<AppState>));
     }
 }
 
-fn spawn_menu(mut commands: Commands, state: Res<State<AppState>>) {
+/// What is drawn in a state: whether the game camera renders (world and HUD), and the color the
+/// overlay camera clears the window with (None: it draws over the game).
+pub fn view(state: AppState) -> (bool, Option<Color>) {
+    match state {
+        AppState::Menu => (false, Some(BACKDROP)),
+        AppState::Playing => (true, None),
+    }
+}
+
+fn show_state(
+    state: Res<State<AppState>>,
+    mut game: Query<&mut Camera, (With<GameCamera>, Without<OverlayCamera>)>,
+    mut overlay: Query<&mut Camera, (With<OverlayCamera>, Without<GameCamera>)>,
+    mut menu: Query<&mut Visibility, With<MenuRoot>>,
+) {
+    let (game_on, clear) = view(*state.get());
+    for mut cam in &mut game {
+        cam.is_active = game_on;
+    }
+    for mut cam in &mut overlay {
+        cam.clear_color = clear.map_or(ClearColorConfig::None, ClearColorConfig::Custom);
+    }
+    for mut v in &mut menu {
+        *v = if *state.get() == AppState::Playing { Visibility::Hidden } else { Visibility::Inherited };
+    }
+}
+
+fn spawn_menu(mut commands: Commands, overlay: Single<Entity, With<OverlayCamera>>) {
     commands
         .spawn((
             MenuRoot,
@@ -185,9 +213,9 @@ fn spawn_menu(mut commands: Commands, state: Res<State<AppState>>) {
                 row_gap: px(14),
                 ..default()
             },
-            BackgroundColor(BACKDROP),
             GlobalZIndex(i32::MAX - 10),
-            if *state.get() == AppState::Menu { Visibility::Inherited } else { Visibility::Hidden },
+            UiTargetCamera(*overlay),
+            Visibility::Hidden,
         ))
         .with_children(|root| {
             root.spawn((MenuTitle, Text::new(""), TextFont { font_size: FontSize::Px(40.0), ..default() }, TextColor(TEXT)));
@@ -367,6 +395,12 @@ mod tests {
         assert_eq!(nav.page(), Page::Main);
         nav.set_cursor(2);
         assert_eq!(nav.activate(), Some(Outcome::Quit));
+    }
+
+    #[test]
+    fn menu_draws_no_game() {
+        assert_eq!(view(AppState::Menu), (false, Some(BACKDROP)));
+        assert_eq!(view(AppState::Playing), (true, None), "the overlay does not clear the game");
     }
 
     #[test]

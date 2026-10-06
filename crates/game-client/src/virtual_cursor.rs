@@ -143,7 +143,12 @@ impl Plugin for VirtualCursorPlugin {
     }
 }
 
-fn spawn_sprite(mut commands: Commands, levels: Res<LevelList>, mut images: ResMut<Assets<Image>>) {
+fn spawn_sprite(
+    mut commands: Commands,
+    levels: Res<LevelList>,
+    mut images: ResMut<Assets<Image>>,
+    overlay: Single<Entity, With<crate::camera::OverlayCamera>>,
+) {
     let pointer = original_pointer(&levels).unwrap_or_else(fallback_pointer);
     let mut image = Image::new(
         Extent3d { width: pointer.width as u32, height: pointer.height as u32, depth_or_array_layers: 1 },
@@ -163,6 +168,7 @@ fn spawn_sprite(mut commands: Commands, levels: Res<LevelList>, mut images: ResM
             ..default()
         },
         GlobalZIndex(i32::MAX),
+        UiTargetCamera(*overlay),
         Pickable::IGNORE,
         Visibility::Hidden,
     ));

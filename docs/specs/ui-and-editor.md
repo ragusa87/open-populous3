@@ -38,7 +38,8 @@ Shown before the game over the first map: New game (the level from the command l
 Sandbox > Walk (`GameMap::sandbox_walk`: flat island, gentle ramp east, steep hill north, lake west), Quit.
 Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
 `AppState::Menu | Playing`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
-while playing. `POP3_START=menu|game|sandbox-walk` picks the start; screenshots start in the game by default.
+while playing. Behind the menu the game camera is off (no terrain, units or HUD drawn); the menu and the cursor
+are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk` picks the start; screenshots start in the game by default.
 
 ## Selection and orders
 Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect;
