@@ -96,6 +96,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Curvature in a vertex shader sampling an R16 height texture (static grid).
 - [ ] Dirty-rect re-bake of the texture/normals instead of full rebuilds.
 - [ ] Theme sky; check the height -> colour row scale against the real game.
+- [ ] Elevation rendering: low land is drawn like water. On original level 5 the reincarnation site looks like it stands in the sea, yet it is land units walk on. Fix the colour/water look of low ground so it matches what the simulation treats as sea (see also the sea-level item under Buildings).
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Spell icons, tooltips; Build and Stats tabs (still "Coming soon").
