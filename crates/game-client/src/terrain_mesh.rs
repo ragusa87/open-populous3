@@ -14,9 +14,25 @@ pub struct CurveParams {
     pub curvature: f32,
 }
 
+/// Height units per render unit at relief x1 (the original height-to-cell ratio).
+pub const BASE_HEIGHT_SCALE: f32 = 1.0 / 384.0;
+/// Default relief: hills drawn twice as tall as the original ratio, so the ground view does not feel flat.
+pub const DEFAULT_RELIEF: f32 = 2.0;
+
 impl Default for CurveParams {
     fn default() -> Self {
-        CurveParams { radius: 64, height_scale: 1.0 / 384.0, curvature: 0.012 }
+        CurveParams { radius: 64, height_scale: BASE_HEIGHT_SCALE * DEFAULT_RELIEF, curvature: 0.012 }
+    }
+}
+
+impl CurveParams {
+    /// Relief multiplier relative to the original height ratio.
+    pub fn relief(&self) -> f32 {
+        self.height_scale / BASE_HEIGHT_SCALE
+    }
+
+    pub fn with_relief(self, relief: f32) -> Self {
+        CurveParams { height_scale: BASE_HEIGHT_SCALE * relief, ..self }
     }
 }
 
@@ -113,9 +129,15 @@ mod tests {
     fn wraps_across_map_edge() {
         let mut map = Heightmap::new(128);
         map.set(0, 0, 768);
-        let p = CurveParams { radius: 1, curvature: 0.0, ..Default::default() };
+        let p = CurveParams { radius: 1, curvature: 0.0, ..Default::default() }.with_relief(1.0);
         let g = build(&map, (127.0, 127.0), &p);
         assert_eq!(g.positions[8][1], 2.0, "cell (128,128) is cell (0,0)");
+    }
+
+    #[test]
+    fn default_relief_is_twice_the_original_ratio() {
+        assert_eq!(CurveParams::default().relief(), DEFAULT_RELIEF);
+        assert_eq!(CurveParams::default().with_relief(1.0).height_scale, BASE_HEIGHT_SCALE);
     }
 
     #[test]

@@ -232,9 +232,11 @@ fn parsed(get: &impl Fn(&str) -> Option<String>, key: &str) -> Option<f32> {
     get(key).and_then(|v| v.parse().ok())
 }
 
-/// Dev tuning: `POP3_RELIEF` multiplies the terrain height scale, `POP3_CURVATURE` replaces it.
+/// Dev tuning: `POP3_RELIEF` sets the relief (x original height ratio), `POP3_CURVATURE` the bend.
 pub fn curve_overrides(mut p: CurveParams, get: impl Fn(&str) -> Option<String>) -> CurveParams {
-    p.height_scale *= parsed(&get, "POP3_RELIEF").unwrap_or(1.0);
+    if let Some(relief) = parsed(&get, "POP3_RELIEF") {
+        p = p.with_relief(relief);
+    }
     p.curvature = parsed(&get, "POP3_CURVATURE").unwrap_or(p.curvature);
     p
 }
@@ -266,14 +268,14 @@ mod tests {
     #[test]
     fn view_tuning_overrides() {
         let get = |k: &str| match k {
-            "POP3_RELIEF" => Some("2".to_string()),
+            "POP3_RELIEF" => Some("3".to_string()),
             "POP3_VIEW_PITCH" => Some("90".to_string()),
             "POP3_CURVATURE" => Some("oops".to_string()),
             _ => None,
         };
         let base = CurveParams::default();
         let p = curve_overrides(base, get);
-        assert_eq!((p.height_scale, p.curvature), (base.height_scale * 2.0, base.curvature), "bad value ignored");
+        assert_eq!((p.relief(), p.curvature), (3.0, base.curvature), "bad value ignored");
         let (pitch, distance) = ground_view(get);
         assert!((pitch - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
         assert_eq!(distance, GROUND_VIEW.1);
