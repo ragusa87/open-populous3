@@ -23,13 +23,20 @@ pub struct Tree {
     pub z: u16,
     pub variant: u8,
     pub size: u8,
+    /// Turn about the vertical axis, 2048ths (the level's scenery angle, else scattered by position).
+    pub angle: u16,
     growth: u16,
 }
 
 impl Tree {
     pub fn new((cx, cz): (i32, i32), variant: u8, size: u8) -> Self {
         let centre = |c: i32| (c.rem_euclid(128) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
-        Tree { x: centre(cx), z: centre(cz), variant: variant % VARIANTS, size: size.min(MAX_SIZE), growth: 0 }
+        let (x, z) = (centre(cx), centre(cz));
+        Tree { x, z, variant: variant % VARIANTS, size: size.min(MAX_SIZE), angle: scattered_angle(x, z), growth: 0 }
+    }
+
+    pub fn with_angle(self, angle: u16) -> Self {
+        Tree { angle: angle % pop3_format::level::FULL_TURN, ..self }
     }
 
     pub fn cell(&self) -> (i32, i32) {
@@ -62,6 +69,12 @@ impl Tree {
         self.growth = 0;
         true
     }
+}
+
+/// A fixed turn per position (2048ths) for trees without one, the same every run.
+pub fn scattered_angle(x: u16, z: u16) -> u16 {
+    let h = (x as u32).wrapping_mul(2_654_435_761) ^ (z as u32).wrapping_mul(40_503);
+    (h % pop3_format::level::FULL_TURN as u32) as u16
 }
 
 /// Groves of trees on ground units can walk, clear of `sites` (cells), at most one tree per cell:
@@ -103,6 +116,15 @@ mod tests {
             }
         }
         t
+    }
+
+    #[test]
+    fn angle_from_the_level_or_scattered() {
+        let t = Tree::new((5, 5), 0, 4);
+        assert_eq!(t.angle, Tree::new((5, 5), 1, 2).angle, "same cell, same turn");
+        assert_ne!(t.angle, Tree::new((6, 5), 0, 4).angle);
+        assert!(t.angle < 2048);
+        assert_eq!(t.with_angle(2048 + 512).angle, 512);
     }
 
     #[test]

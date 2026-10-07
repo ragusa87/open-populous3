@@ -44,10 +44,9 @@ pub fn tree_scale(size: u8) -> f32 {
     size_factor(size) * FULL_HEIGHT / MODEL_HEIGHT
 }
 
-/// A fixed turn per tree position (radians), scattered but the same every run.
-pub fn tree_yaw(x: u16, z: u16) -> f32 {
-    let h = (x as u32).wrapping_mul(2_654_435_761) ^ (z as u32).wrapping_mul(40_503);
-    (h % 360) as f32 * std::f32::consts::PI / 180.0
+/// A thing angle (2048ths of a turn) in radians.
+pub fn angle_yaw(angle: u16) -> f32 {
+    (angle % 2048) as f32 * std::f32::consts::TAU / 2048.0
 }
 
 /// A tree as seen on screen: its index, trunk base and top (pixels).
@@ -195,7 +194,7 @@ fn respawn_trees(
     let cell = WORLD_UNITS_PER_CELL as f32;
     for (i, tree) in map.0.trees.iter().enumerate() {
         let at = Vec2::new(tree.x as f32 / cell, tree.z as f32 / cell);
-        let mut view = commands.spawn((TreeView(i), Grounded { at, half: TRUNK_HALF }, Transform::from_rotation(Quat::from_rotation_y(tree_yaw(tree.x, tree.z))), Visibility::Hidden));
+        let mut view = commands.spawn((TreeView(i), Grounded { at, half: TRUNK_HALF }, Transform::from_rotation(Quat::from_rotation_y(angle_yaw(tree.angle))), Visibility::Hidden));
         match &original {
             Some((trees, material)) => {
                 let (mesh, height) = &trees[tree.variant as usize % trees.len()];
@@ -340,10 +339,10 @@ mod tests {
     }
 
     #[test]
-    fn each_tree_keeps_its_own_turn() {
-        assert_eq!(tree_yaw(1000, 2000), tree_yaw(1000, 2000));
-        assert_ne!(tree_yaw(1000, 2000), tree_yaw(1512, 2000));
-        assert!((0.0..std::f32::consts::TAU).contains(&tree_yaw(5, 7)));
+    fn thing_angles_in_radians() {
+        assert_eq!(angle_yaw(0), 0.0);
+        assert!((angle_yaw(512) - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!(angle_yaw(2048 + 512), angle_yaw(512));
     }
 
     #[test]

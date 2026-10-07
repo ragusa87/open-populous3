@@ -68,16 +68,12 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spells through `Command::Cast` from the UI (the editor brushes apply directly).
 
 ## Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
-- [ ] Angles from the thing union (2048ths of a turn): buildings `i32@7` instead of `Thing::facing()` (byte 8 % 8, right by luck); trees and scenery `i16@10` (lost today, `nature::tree_yaw` invents one).
-- [ ] Decode the thing unions (level-format.md): general model 2 discovery (type, model, availability, mana), model 6 trigger (type, radius, occurrences, `ThingIdxs` as **1-based slot indices**: keep the slot order, `Level::things` drops empty slots today), effects 24/17 target (`i32@7`, `i32@11`). Scenery portal/island fields are always 0: skip them.
-- [ ] Decode the `.hdr` into `LevelHeader` (layout in level-format.md): spell/building/vehicle masks (bit N = model N, non-model bits always set), tribe count, AI script per tribe (89-91 red/yellow/green, 99 blue), default allies, object bank (97), level flags, markers (low byte x * 2, high byte z * 2), start position and angle; show them in `level_info`.
 - [ ] Start camera from the header's start position (cell) and angle (2048ths) instead of looking at the shaman.
 - [ ] Level flags: fog of war (0x01, levels 9 and 18), shaman omni (0x02, level 25), no guest spells (0x10), no reincarnation time (0x20).
 - [ ] Default allies per tribe (`.hdr` 92): alliances in the simulation (no attacking allies), e.g. level 14's three tribes against blue.
 - [ ] `NoAccessSquares` (non-zero only in levl2002 and levl2079): probably cells nobody walks on; check them on the map and feed them to the `path` blocked mask.
 - [ ] Load the object bank the level header names (byte 97: 6 for levels 3, 5, 16, 22, 2120; 7 for 2110; 2 for 2127) instead of always bank 0 (`original_models`): either load bank N with the index table of objects.md, or stay on bank 0 and pick the trees by bank (60-71). Bank 6 levels show the wrong trees today.
 - [ ] Sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32/64): find whether it drives the terrain lighting. `LandBlocks` / `LandOrients` are identical stale data: ignore them.
-- [ ] `.ver` (author, date; checksum always 0): show in level info only.
 
 ## Level scripting (triggers)
 - [ ] Trigger semantics (layout and types known, level-format.md): what each type waits for (proximity, timed, player death, shaman proximity, library, shaman + angel of death), how `TriggerCount`, `NumOccurences`, `PrayTime` and `InactiveTime` play, and what activating a target does (discovery granted, effect fired, hidden thing revealed).

@@ -45,7 +45,7 @@ impl GameMap {
             trees: level
                 .things
                 .iter()
-                .filter_map(|t| Some(Tree::new(((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32), t.tree_type()?, crate::tree::MAX_SIZE)))
+                .filter_map(|t| Some(Tree::new(((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32), t.tree_type()?, crate::tree::MAX_SIZE).with_angle(t.angle()?)))
                 .collect(),
             buildings: buildings_from_level(level),
             wood: Vec::new(),

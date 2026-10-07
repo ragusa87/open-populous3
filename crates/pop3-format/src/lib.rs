@@ -5,13 +5,14 @@
 
 pub mod anim;
 pub mod catalog;
+pub mod header;
 pub mod install;
 pub mod level;
 pub mod objects;
 pub mod sprites;
 pub mod theme;
 
-pub use level::{Level, LevelError, LevelHeader, Thing, MAP_CELLS, MAP_SIZE, WORLD_UNITS_PER_CELL};
+pub use level::{Level, LevelError, LevelHeader, LevelVersion, Thing, ThingData, MAP_CELLS, MAP_SIZE, WORLD_UNITS_PER_CELL};
 pub use anim::{AnimBank, Picture};
 pub use objects::{find_file, Atlas, Face, Object, ObjectBank};
 pub use sprites::{Sprite, SpriteBank};

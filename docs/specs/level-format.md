@@ -233,10 +233,13 @@ Write v2 and:
 LandBlocks, LandOrients, start info and access info can be zero (the editor does it); keep the sunlight bytes.
 
 ## Code
-`crates/pop3-format/src/level.rs`, example: `just level-info path/to/levl2005.dat`. Things are read from 81 987;
-start info, sunlight and access info are decoded (`Level::start_info`, `sunlight`, `access`). To fix:
-- **`Thing::facing()`** reads byte 8 % 8. That is only right for buildings by luck (the high byte of `i32@7`) and
-  loses tree rotation (scenery `i16@10`).
-- **Undecoded unions**: discovery, trigger and effect target are not decoded.
-- **`LevelHeader`**: only the name and theme are decoded. Bank, flags, masks, allies, AI slots and markers are
-  missing.
+`crates/pop3-format/src/level.rs` and `header.rs`, example: `just level-info path/to/levl2005.dat [all]`.
+- Things are read from 81 987 with their 0-based `Thing::slot`; `Level::slot` resolves a 1-based trigger target.
+- Start info, sunlight and access info: `Level::start_info`, `sunlight`, `access`.
+- `Thing::angle()`: buildings `i32@7`, scenery `i16@10` (trees keep it, `Tree::angle`); `facing()` rounds it to
+  eighths.
+- `Thing::data()`: discovery, trigger and effect target unions.
+- `LevelHeader`: masks, tribes, AI scripts in owner order (blue from 99), allies, theme, bank, flags, markers,
+  start position and angle. `LevelVersion` for `.ver`.
+
+Not used by the game yet: header masks, flags, allies, bank, start camera, discoveries and triggers (TODO.md).
