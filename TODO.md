@@ -90,7 +90,9 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] At least one assigned brave is needed, up to the kind's maximum; more braves build faster (work shared).
 - [ ] Buildings and sites block walking (blocked-cell mask in `path` next to the terrain); not for flyers, not the reincarnation site; braves assigned to a site (or dismantling) may walk on its footprint. Replan walkers when the mask changes, push units off a new footprint.
 - [ ] `Command::PlaceBuilding` (with the selected braves) and `Command::Assign`; extra braves beyond the maximum walk to the site and idle unassigned.
-- [ ] Building stage (Site / Built / Dismantling) with wood needed / delivered / used; tooltip with braves assigned/max and wood, Dismantle toggle on built ones.
+- [ ] Orders: a new order to an assigned brave unassigns it (drops the wood it carries); braves working on the footprint cannot be selected on the map, only from the tooltip's brave icons (one at a time).
+- [ ] Shift + click on a site cancels it (`Command::Cancel`): its wood is dropped as pieces, its braves idle.
+- [ ] Building stage (Site / Built / Dismantling) with wood needed / delivered / used; tooltip with braves assigned/max (one icon each) and wood, Dismantle toggle on built ones.
 - [ ] Braves' build cycle: gather and watch, flatten the footprint by jumping point by point, fetch wood (ground piece or cut a tree) to a pile by the door, build one piece at a time.
 - [ ] Wood dispatch rule: a brave goes for wood only while delivered + claimed (fetched/carried by others) < needed, so at most needed - delivered braves are out; the others wait and build. Refine later.
 - [ ] Site visuals: blueprint, then a wooden frame of the building's shape growing with progress, then the full building.

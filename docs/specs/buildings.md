@@ -55,7 +55,20 @@ taken from the level (`.hdr`) and unlocked by triggers. Clicking an available ti
 
 ### Tooltip
 Hovering or right-clicking a site (as for trees): kind, braves assigned / maximum, wood delivered / needed. On a
-built building of a buildable kind: a "Dismantle" toggle (back to "Build" while dismantling).
+built building of a buildable kind: a "Dismantle" toggle (back to "Build" while dismantling). It also lists the
+assigned braves, one small icon each; clicking an icon selects that brave alone (one at a time), so it can be
+given an order.
+
+### Orders and selection
+- Any new order to an assigned brave (`Command::OrderUnit`: move, pray, stop...) unassigns it from the site,
+  inside the simulation, so replays match. It can be assigned again by hand (`Command::Assign`). A piece of wood it
+  was carrying is dropped where it stands, as a wood piece on the ground; its claim is freed for another brave.
+- Braves away from the site (gathering, watching, fetching or carrying wood) can be selected as usual (click, box).
+- Braves working on the footprint (flattening, building, dismantling) cannot be selected on the map: clicks and
+  boxes skip them, a click there hits the site (tooltip). The tooltip icons are the only way to pick one of them.
+- Shift + click on a site (not yet built) cancels it (`Command::Cancel { player, site }`): the site is removed, its
+  wood already used or piled by the door is dropped as wood pieces around it, its braves are unassigned and stand
+  idle, the ground keeps whatever flattening was done. Built buildings are not cancelled, they are dismantled.
 
 ### Building it (deterministic, integer state)
 1. Gather: assigned braves walk to the site edge and stand looking at it for a short while.
