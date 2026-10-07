@@ -67,8 +67,13 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spells through `Command::Cast` from the UI (the editor brushes apply directly).
 
 ## Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
-- [ ] Decode the 55-byte thing record fully; spawn trees, buildings, totems from the level.
-- [ ] Decode the `.hdr` beyond name/theme (spells/buildings availability, tribe count, sky).
+- [ ] **Bug**: `pop3_format::level` reads things from 82 042 instead of 81 987 (one record late): thing 0 is dropped in every level (levl2001: a red hut). Replace the 122-byte misc block by player start info (4 x 16 B), sunlight (3 B) and the 50 x 3 access info after the things.
+- [ ] Angles from the thing union (2048ths of a turn): buildings `i32@7` instead of `Thing::facing()` (byte 8 % 8, right by luck); trees and scenery `i16@10` (lost today, `nature::tree_yaw` invents one).
+- [ ] Decode the rest of the thing record: scenery (portal, island, bridge), general model 2 discovery (type, model, availability, mana), model 6 trigger (radius, occurrences, thing indices, pray time...), feeds the level scripting items below.
+- [ ] Decode the `.hdr` (layout in level-format.md): spell/building/vehicle availability masks, tribe count, computer player script ids, default allies, object bank (byte 97), level flags, markers, start position and angle (start camera). Bit meanings still to map.
+- [ ] Load the object bank the level header names (byte 97: 6 for levels 3, 5, 16, 22, 2120; 7 for 2110; 2 for 2127) instead of always bank 0 (`original_models`).
+- [ ] `LandBlocks` / `LandOrients` layers (`.dat` 32 768 / 49 152) and the sunlight block (ShadeStart, ShadeRange, Inclination): find what they drive (terrain texture? lighting?).
+- [ ] `.ver` (author, date, checksum): show in level info only.
 - [ ] Verify the x/z axis order of level data.
 
 ## Level scripting (triggers)
@@ -115,6 +120,10 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Curvature in a vertex shader sampling an R16 height texture (static grid).
 - [ ] Dirty-rect re-bake of the texture/normals instead of full rebuilds.
 - [ ] Theme sky; check the height -> colour row scale against the real game.
+- [ ] Sky: load `sky0-X.dat` as `pal[112 + v]` (a tiling cloud layer, 512 x 512), not raw indices.
+- [ ] `disp` is not centred on 128 (theme 1 averages 87, theme 5 161): `(d - 128) / 2` in `terrain_texture::bake` shifts every land row by a theme constant; subtract the file mean (or find the game's use).
+- [ ] Sea: the bake uses `disp / 2` as the sea row; the original has `watdisp.dat` (water displacement, one file for all themes), use it.
+- [ ] Cliffs: `cliff0-X.dat` turns land colours to rock by level (what picks the level: slope? damage?); `fade0-X.dat` palette light table (object/sprite shading, fog of war). Load both in `pop3_format::theme`.
 - [ ] Elevation rendering: low land is drawn like water. On original level 5 the reincarnation site looks like it stands in the sea, yet it is land units walk on. Fix the colour/water look of low ground so it matches what the simulation treats as sea (see also the sea-level item under Buildings).
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
@@ -129,6 +138,15 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Turn scheduler with 2-3 turns input delay; local input goes through it instead of `GameMap::apply` directly.
 - [ ] Host/join UI, lobby, reconnect.
 - [ ] Desync checksum of heightmap + units.
+
+## Original sprites and blending ([sprites.md](docs/specs/sprites.md))
+- [ ] Alpha sprites (`hfx0-0.dat` 1090-1499, 1538-1592, spell effects): their pixels are `tint << 4 | strength` rows of `al0-X.dat`, not palette colours; blend them over the background instead of drawing raw indices.
+- [ ] Ghost table `ghost0-X.dat` (66% mix) for see-through units (Invisibility).
+- [ ] `sprites` parser: test the empty (0 x 0) entries and the `0x7F` trailer seen in the real banks.
+
+## Sound ([sound.md](docs/specs/sound.md))
+- [ ] `pop3_format::sound`: SDT banks (count, offsets, 40-byte headers), signed 16-bit PCM mono/stereo, the 4 looping sounds, `0x80` placeholders skipped; music `PopDrones22.SDT` as MPEG Layer II.
+- [ ] Play SFX in the client (Bevy audio): spells, chopping, building, follower voices, ambiences; drums and music. Free sounds for `--no-original`.
 
 ## Art ([assets.md](docs/specs/assets.md))
 - [ ] CC0 low-poly packs (Kenney / Quaternius) for the `--no-original` mode.
