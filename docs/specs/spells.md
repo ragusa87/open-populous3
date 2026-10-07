@@ -25,8 +25,10 @@ Known / Unlimited: cast at will, used by sandbox spells), `charges` (max 4, fewe
 `SpellBook::from_level(header, level)`: the header's `SpellsAvailable` panel spells are Known with full charges
 (how charged the original starts them is not checked), the spell discoveries (`DiscoveryType 11`) not already
 known are Discoverable. Their availability (permanent / this level / once) is not kept yet. Stored as
-`GameMap::spell_book` for original levels, the same for every tribe. Armageddon (bit 18) is a special
-spell only some levels give (levels 1-3 among them); the panel keeps a tile for it.
+`GameMap::spell_book` for original levels, the same for every tribe. Armageddon (bit 18) is special: the
+campaign's last spell, discovered in levels 17 and 18 and in the masks from level 19 on, always with Convert (17).
+Levels 1 and 2 also set bit 18, among leftover bits (1 burn, 20 bloodlust, 21 teleport) and without Convert:
+`known_in_header` only takes Armageddon next to Convert. The panel keeps a tile for it.
 
 ## Original spells (levels and scripts)
 Spell model numbers, as used by discovery things, the level header masks and AI scripts (names from the ALACN

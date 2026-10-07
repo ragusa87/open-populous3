@@ -176,6 +176,15 @@ impl SpellSlot {
     }
 }
 
+/// Whether the header's `SpellsAvailable` gives `kind` from the start. Armageddon only counts next to
+/// Convert: it is the campaign's last spell (discovered in levels 17 and 18, in the masks from 19 on,
+/// always with Convert), while levels 1 and 2 carry bit 18 among leftover bits (burn, bloodlust,
+/// teleport) and no Convert.
+pub fn known_in_header(header: &LevelHeader, kind: SpellKind) -> bool {
+    let set = |k: SpellKind| header.spell_available(k.model());
+    set(kind) && (kind != SpellKind::Armageddon || set(SpellKind::Convert))
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SpellBook {
     pub slots: Vec<SpellSlot>,
@@ -187,9 +196,9 @@ impl SpellBook {
         SpellBook { slots: SpellKind::ALL.iter().map(|&k| SpellSlot::new(k, Availability::Hidden)).collect() }
     }
 
-    /// An original level's loadout: the header's `SpellsAvailable` spells are known, with full
-    /// charges (unverified: how charged they start); the spells of its discovery things that are
-    /// not known yet are "?".
+    /// An original level's loadout: the header's `SpellsAvailable` spells are known (`known_in_header`),
+    /// with full charges (unverified: how charged they start); the spells of its discovery things that
+    /// are not known yet are "?".
     pub fn from_level(header: &LevelHeader, level: &Level) -> Self {
         let mut book = SpellBook::new();
         let discoveries = level.things.iter().filter_map(|t| match t.data() {
@@ -200,7 +209,7 @@ impl SpellBook {
             book.set(kind, Availability::Discoverable);
         }
         for kind in SpellKind::ALL.iter().copied().filter(|k| SpellKind::from_model(k.model()) == Some(*k)) {
-            if header.spell_available(kind.model()) {
+            if known_in_header(header, kind) {
                 book.set(kind, Availability::Known);
             }
         }
@@ -316,6 +325,21 @@ mod tests {
         assert_eq!(avail(SpellKind::Teleport), Availability::Hidden, "model 21 is not the sandbox teleport");
         let known = book.slots.iter().filter(|s| s.availability == Availability::Known).count();
         assert_eq!(known, 2, "the always-set mask bits and bloodlust give nothing");
+    }
+
+    #[test]
+    fn armageddon_only_with_convert() {
+        let header = |models: &[u8]| {
+            let mask = models.iter().fold(0xffc0_0001u32, |m, &b| m | 1 << b);
+            let mut hdr = vec![0u8; 616];
+            hdr[0..4].copy_from_slice(&mask.to_le_bytes());
+            LevelHeader::parse(&hdr)
+        };
+        let level_1 = header(&[1, 2, 18, 20, 21]);
+        assert!(known_in_header(&level_1, SpellKind::Blast));
+        assert!(!known_in_header(&level_1, SpellKind::Armageddon), "leftover bit on level 1");
+        let level_19 = header(&[2, 17, 18]);
+        assert!(known_in_header(&level_19, SpellKind::Armageddon));
     }
 
     #[test]
