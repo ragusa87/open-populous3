@@ -132,6 +132,14 @@ impl Building {
         (self.x.wrapping_add(shift), self.z.wrapping_add(shift))
     }
 
+    /// Whether the world point `(x, z)` is on its footprint, grown by `margin` world units (wraps).
+    pub fn covers(&self, (x, z): (u16, u16), margin: i32) -> bool {
+        let (cx, cz) = self.centre();
+        let (lx, lz) = crate::terrain::to_local((crate::unit::torus_delta(cx, x), crate::unit::torus_delta(cz, z)), self.facing / 2);
+        let f = self.kind.footprint();
+        (lx - f.offset.0).abs() <= f.half.0 + margin && (lz - f.offset.1).abs() <= f.half.1 + margin
+    }
+
     /// Levels its footprint above the sea (`Heightmap::level_rect`) around its centre, turned with
     /// its facing.
     pub fn flatten(&self, terrain: &mut crate::terrain::Heightmap) -> crate::terrain::DirtyRect {
@@ -174,6 +182,16 @@ mod tests {
         d[base + 55..base + 62].copy_from_slice(&[2, KIND_PERSON, 0, 0x00, 0x01, 0x00, 0x01]);
         let b = buildings_from_level(&Level::parse(&d).unwrap());
         assert_eq!(b, vec![Building { kind: BuildingKind::DrumTower, owner: 2, x: 0x0a00, z: 0x1400, facing: 6 }]);
+    }
+
+    #[test]
+    fn covers_its_turned_footprint() {
+        let temple = |facing| Building { kind: BuildingKind::Temple, owner: 0, x: 20 * 512, z: 20 * 512, facing };
+        let (cx, cz) = temple(0).centre();
+        assert!(temple(0).covers((cx, cz), 0));
+        assert!(temple(0).covers((cx, cz + 700), 0) && !temple(0).covers((cx + 900, cz), 0), "longer along z (950 x 800)");
+        assert!(temple(2).covers((cx + 800, cz), 0) && !temple(2).covers((cx, cz + 900), 0), "a quarter turn swaps them");
+        assert!(temple(0).covers((cx + 900, cz), 200), "margin");
     }
 
     #[test]

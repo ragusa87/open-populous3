@@ -7,6 +7,7 @@ pub mod building;
 pub mod command;
 pub mod map;
 pub mod path;
+pub mod placement;
 pub mod site;
 pub mod slots;
 pub mod spell;

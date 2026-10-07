@@ -29,6 +29,17 @@ pub struct DirtyRect {
     pub max: (i32, i32),
 }
 
+/// A world offset (from a building's centre) in the building's own frame, turned by
+/// `quarter_turns` (the inverse of its turn).
+pub fn to_local((wx, wz): (i32, i32), quarter_turns: u8) -> (i32, i32) {
+    match quarter_turns % 4 {
+        0 => (wx, wz),
+        1 => (-wz, wx),
+        2 => (-wx, -wz),
+        _ => (wz, -wx),
+    }
+}
+
 impl Heightmap {
     pub fn new(size: usize) -> Self {
         Heightmap { size, heights: vec![SEA_LEVEL; size * size], revision: 0 }
@@ -76,6 +87,10 @@ impl Heightmap {
         let h = |dx, dz| self.get(cx + dx, cz + dz) as i64;
         let sum = h(0, 0) * (u - fx) * (u - fz) + h(1, 0) * fx * (u - fz) + h(0, 1) * (u - fx) * fz + h(1, 1) * fx * fz;
         (sum / (u * u)) as i32
+    }
+
+    pub fn is_water_at(&self, x: u16, z: u16) -> bool {
+        self.height_at(x as u32, z as u32, 512) < 1
     }
 
     pub fn is_water(&self, x: i32, z: i32) -> bool {
@@ -178,13 +193,7 @@ impl Heightmap {
         const UNIT: i32 = 512;
         let (cx, cz) = (centre.0 as i32 / UNIT, centre.1 as i32 / UNIT);
         let r = (half.0.abs() + offset.0.abs()).max(half.1.abs() + offset.1.abs()) / UNIT + 2;
-        // World offset of a height point -> the building's own frame (inverse turn).
-        let local = |wx: i32, wz: i32| match quarter_turns % 4 {
-            0 => (wx, wz),
-            1 => (-wz, wx),
-            2 => (-wx, -wz),
-            _ => (wz, -wx),
-        };
+        let local = |wx: i32, wz: i32| to_local((wx, wz), quarter_turns);
         let inside = |(lx, lz): (i32, i32), margin: i32| (lx - offset.0).abs() <= half.0 + margin && (lz - offset.1).abs() <= half.1 + margin;
         let mut flat = Vec::new();
         let mut ring = Vec::new();
