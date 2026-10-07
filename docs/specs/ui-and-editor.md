@@ -29,6 +29,8 @@ Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`). An origina
 (`level_book` = `GameMap::spell_book`, set on New game and PgUp/PgDn): the header's spells known and full, its
 spell discoveries as "?" (spells.md). Generated maps get the demo loadout (`demo_book`, every tile state); the
 sandboxes add Teleport, unlimited (`sandbox_book`). One tile per `SpellKind`, Hidden ones as empty slots.
+Armageddon is special (only some levels give it): it always has its own full-width tile under the grid
+(`is_special`, `tile_order`), empty when the level does not give it, so the panel never has to make room for it.
 Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 
 | Availability | Tile |

@@ -107,7 +107,7 @@ pub fn short_label(kind: SpellKind) -> &'static str {
         SpellKind::Firestorm => "Fire",
         SpellKind::AngelOfDeath => "Angel",
         SpellKind::Volcano => "Volcano",
-        SpellKind::Armageddon => "Armag.",
+        SpellKind::Armageddon => "Armageddon",
         SpellKind::GhostArmy => "Ghosts",
         SpellKind::MagicalShield => "Shield",
         SpellKind::Teleport => "Teleport",
@@ -121,6 +121,21 @@ pub fn ground_spell(kind: SpellKind, at: (u16, u16)) -> Option<Spell> {
         SpellKind::Teleport => Some(Spell::Teleport { to: at }),
         _ => None,
     }
+}
+
+/// Columns of the spell grid.
+pub const COLUMNS: usize = 3;
+
+/// The special spell with its own full-width tile under the grid, kept free even while hidden so
+/// the panel never has to make room for it.
+pub fn is_special(kind: SpellKind) -> bool {
+    kind == SpellKind::Armageddon
+}
+
+/// Slot indices in drawing order: every other spell in book order, the special one last.
+pub fn tile_order(slots: &[SpellSlot]) -> Vec<usize> {
+    let (special, others): (Vec<usize>, Vec<usize>) = (0..slots.len()).partition(|&i| is_special(slots[i].kind));
+    others.into_iter().chain(special).collect()
 }
 
 /// The player's spells on `map`: an original level's own loadout (`GameMap::spell_book`), else
@@ -188,7 +203,7 @@ impl Plugin for SpellsPlugin {
 fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, book: Res<PlayerSpells>) {
     for (entity, tab) in &tabs {
         commands.entity(entity).with_children(|c| match tab.0 {
-            0 => spawn_spells(c, book.0.slots.len()),
+            0 => spawn_spells(c, &book.0.slots),
             _ => {
                 c.spawn((Text::new("Coming soon"), TextFont { font_size: FontSize::Px(13.0), ..default() }, TextColor(INK)));
             }
@@ -196,20 +211,23 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, book: R
     }
 }
 
-fn spawn_spells(c: &mut ChildSpawnerCommands, count: usize) {
+fn spawn_spells(c: &mut ChildSpawnerCommands, slots: &[SpellSlot]) {
     c.spawn(Node {
         display: Display::Grid,
-        grid_template_columns: RepeatedGridTrack::flex(3, 1.0),
+        grid_template_columns: RepeatedGridTrack::flex(COLUMNS as u16, 1.0),
         row_gap: px(4),
         column_gap: px(4),
         ..default()
     })
     .with_children(|grid| {
-        for i in 0..count {
+        for i in tile_order(slots) {
+            // The special spell starts a row of its own, the whole width.
+            let grid_column = if is_special(slots[i].kind) { GridPlacement::start_span(1, COLUMNS as u16) } else { GridPlacement::DEFAULT };
             grid.spawn((
                 Tile(i),
                 Button,
                 Node {
+                    grid_column,
                     height: px(58),
                     flex_direction: FlexDirection::Column,
                     justify_content: JustifyContent::SpaceBetween,
@@ -458,6 +476,15 @@ mod tests {
         own.set(SpellKind::Blast, Availability::Known);
         map.spell_book = Some(own.clone());
         assert_eq!(level_book(&map), own);
+    }
+
+    #[test]
+    fn armageddon_has_the_last_tile_whatever_the_level() {
+        let book = SpellBook::new();
+        let order = tile_order(&book.slots);
+        assert_eq!(order.len(), book.slots.len());
+        assert_eq!(book.slots[*order.last().unwrap()].kind, SpellKind::Armageddon);
+        assert_eq!(order.iter().filter(|&&i| is_special(book.slots[i].kind)).count(), 1);
     }
 
     #[test]
