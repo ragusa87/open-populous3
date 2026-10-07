@@ -85,7 +85,6 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Identify the original objects of reconversion, wall, gate, guard post (stand-in boxes even with the original files); check temple = prayer hut object.
 - [ ] Villager hut style (3 styles in the objects, style 0 always drawn): find what picks it.
 - [ ] Check the facing against the game (level 19's boat hut, facing 4, points its jetty into a low inlet: looks right), and the cells a footprint takes (used by the walking mask).
-- [ ] Building centre: buildings are stored on a cell corner and the levels are flat over vertices -1..+2 (3 x 3 cells) for huts, temple and training huts, so the centre is (x + 256, z + 256). `Building::flatten` and the view centre the footprint on the corner: shift both, and check the drum tower / spy / boat hut (flat cell 0..+1) and vault / prison (-2..+2) cases (buildings.md).
 - [ ] General model 9 "building add-on" (one near each of 91 medium/large huts): find what it is (hut extension?) and draw it.
 - [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold.
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.

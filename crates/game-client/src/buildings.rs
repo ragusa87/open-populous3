@@ -101,7 +101,8 @@ fn respawn_buildings(
     let box_mesh = meshes.add(Cuboid::from_size(BOX));
     let cell = WORLD_UNITS_PER_CELL as f32;
     for b in &map.0.buildings {
-        let Building { kind, owner, x, z, facing } = *b;
+        let Building { kind, owner, facing, .. } = *b;
+        let (x, z) = b.centre();
         let at = Vec2::new(x as f32 / cell, z as f32 / cell);
         let yaw = facing_yaw(facing);
         let mut view = commands.spawn((

@@ -163,7 +163,7 @@ impl GameMap {
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
         let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new() }.with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
-        let place = |owner: u8, model: u8, (x, z): (u16, u16), facing: u8| Building { kind: crate::building::BuildingKind::from_model(model), owner, x, z, facing };
+        let place = |owner: u8, model: u8, (x, z): (u16, u16), facing: u8| Building { kind: crate::building::BuildingKind::from_model(model), owner, x: x - 256, z: z - 256, facing };
         for model in 1..=19u8 {
             let i = model as i32 - 1;
             map.buildings.push(place(0, model, at(-12 + (i % 7) * 4, 6 + (i / 7) * 4), (i % 4) as u8 * 2));
@@ -567,11 +567,11 @@ mod tests {
     fn a_building_on_the_water_gets_land_under_it() {
         use pop3_format::level::{DAT_SIZE, KIND_BUILDING};
         let mut d = vec![0u8; DAT_SIZE];
-        let base = d.len() - 95 - 2000 * 55;
+        let base = 81_987;
         d[base..base + 7].copy_from_slice(&[3, KIND_BUILDING, 1, 0x00, 0x0a, 0x00, 0x14]);
         let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None);
-        for (x, z) in [(5, 10), (4, 9), (6, 11), (4, 11)] {
-            assert!(!m.terrain.is_water(x, z), "({x}, {z}) under the hut at cell (5, 10)");
+        for (x, z) in [(5, 10), (6, 10), (5, 11), (6, 11)] {
+            assert!(!m.terrain.is_water(x, z), "({x}, {z}) under the hut centred on cell (5, 10)");
         }
         assert!(Mobility::Walk.passable(&m.terrain, (5, 10)));
     }

@@ -58,6 +58,17 @@ impl BuildingKind {
         }
     }
 
+    /// From its stored cell corner to its centre, world units on both axes, whatever the facing: the
+    /// levels are flat over vertices -1..+2 around huts, temple, training and airship huts, 0..+1
+    /// for drum towers and boat huts, -2..+3 for vault and prison (all half a cell off), and 0..+2
+    /// for the spy hut (a whole cell off).
+    pub fn centre_shift(self) -> u16 {
+        match self {
+            BuildingKind::SpyTraining => 512,
+            _ => 256,
+        }
+    }
+
     pub fn from_model(model: u8) -> Self {
         match model {
             1..=3 => BuildingKind::Hut { size: model },
@@ -107,7 +118,7 @@ pub struct Building {
     pub kind: BuildingKind,
     /// Tribe 0-3 (other values as found in the level).
     pub owner: u8,
-    /// World units, as placed in the level.
+    /// World units, as placed in the level: a cell corner (`centre` is where it stands).
     pub x: u16,
     pub z: u16,
     /// Eighths of a turn (`Thing::facing`).
@@ -115,10 +126,17 @@ pub struct Building {
 }
 
 impl Building {
-    /// Levels its footprint above the sea (`Heightmap::level_rect`), turned with its facing.
+    /// Its centre in world units (`BuildingKind::centre_shift` off the stored corner, wrapping).
+    pub fn centre(&self) -> (u16, u16) {
+        let shift = self.kind.centre_shift();
+        (self.x.wrapping_add(shift), self.z.wrapping_add(shift))
+    }
+
+    /// Levels its footprint above the sea (`Heightmap::level_rect`) around its centre, turned with
+    /// its facing.
     pub fn flatten(&self, terrain: &mut crate::terrain::Heightmap) -> crate::terrain::DirtyRect {
         let f = self.kind.footprint();
-        terrain.level_rect((self.x, self.z), f.half, f.offset, self.facing / 2, MIN_GROUND)
+        terrain.level_rect(self.centre(), f.half, f.offset, self.facing / 2, MIN_GROUND)
     }
 }
 
@@ -150,11 +168,37 @@ mod tests {
     #[test]
     fn only_building_things_become_buildings() {
         let mut d = vec![0u8; DAT_SIZE];
-        let base = d.len() - 95 - 2000 * 55;
+        let base = 81_987;
         d[base..base + 7].copy_from_slice(&[4, KIND_BUILDING, 2, 0x00, 0x0a, 0x00, 0x14]);
         d[base + 8] = 6;
         d[base + 55..base + 62].copy_from_slice(&[2, KIND_PERSON, 0, 0x00, 0x01, 0x00, 0x01]);
         let b = buildings_from_level(&Level::parse(&d).unwrap());
         assert_eq!(b, vec![Building { kind: BuildingKind::DrumTower, owner: 2, x: 0x0a00, z: 0x1400, facing: 6 }]);
+    }
+
+    #[test]
+    fn centre_is_off_the_stored_corner() {
+        let at = |kind, x, z| Building { kind, owner: 0, x, z, facing: 2 }.centre();
+        assert_eq!(at(BuildingKind::Hut { size: 3 }, 0x0a00, 0x1400), (0x0b00, 0x1500));
+        assert_eq!(at(BuildingKind::DrumTower, 0x0a00, 0x1400), (0x0b00, 0x1500));
+        assert_eq!(at(BuildingKind::SpyTraining, 0x0a00, 0x1400), (0x0c00, 0x1600));
+        assert_eq!(at(BuildingKind::Vault, 0xfe00, 0), (0xff00, 0x0100));
+        assert_eq!(at(BuildingKind::SpyTraining, 0xfe00, 0).0, 0, "wraps");
+    }
+
+    #[test]
+    fn flatten_levels_around_the_centre() {
+        let mut t = crate::terrain::Heightmap::new(128);
+        for z in 0..128 {
+            for x in 0..128 {
+                t.set(x, z, 100 + (x * 7 + z * 13) as u16 % 50);
+            }
+        }
+        Building { kind: BuildingKind::Hut { size: 1 }, owner: 0, x: 20 * 512, z: 30 * 512, facing: 0 }.flatten(&mut t);
+        let h = t.get(20, 30);
+        for (x, z) in [(21, 30), (20, 31), (21, 31)] {
+            assert_eq!(t.get(x, z), h, "the cell at the corner, centred");
+        }
+        assert_ne!(t.get(19, 29), h, "not centred on the corner");
     }
 }

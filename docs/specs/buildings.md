@@ -3,19 +3,20 @@
 ## Simulation (done: `game_core::building`, view only)
 `GameMap::buildings`: `Building { kind, owner, x, z, facing }` from an original level's things of kind 2
 (`buildings_from_level`): model = type, owner = tribe (255 = neutral), position in world units, facing in eighths
-of a turn (thing byte 8: only 0, 2, 4, 6 seen, `Thing::facing`). The real field is the building's `i32` angle at
-byte 7, 2048 = a full turn (only quarter turns in the files), so byte 8 gives the same result only by luck.
+of a turn (`Thing::facing`, from the `i32` angle at byte 7, 2048 = a full turn; only quarter turns in the files).
 In the files a building always sits **exactly on a cell corner** (x, z multiples of 512), unlike other things (cell
 centres). The levels are already flattened around them (equal heights over the vertices around that corner):
 
 | Buildings | Flat area |
 |---|---|
 | huts 1-3, temple, warrior, firewarrior training, airship hut | vertices -1..+2, i.e. 3 x 3 cells |
-| drum tower, spy hut, boat hut | only the cell at the corner (vertices 0..+1) |
-| vault, prison | -2..+2 |
+| drum tower, boat hut | only the cell at the corner (vertices 0..+1) |
+| spy hut | vertices 0..+2, 2 x 2 cells (17 of 17, every facing) |
+| vault, prison | vertices -2..+3, 5 x 5 cells (23 of 24) |
 
-So a 3 x 3 building's centre is half a cell off its stored corner (x + 256, z + 256, whatever the facing), while
-`Building::flatten` still centres the footprint on the corner (TODO).
+Whatever the facing, the centre is half a cell off the stored corner (x + 256, z + 256), a whole cell for the spy
+hut (`BuildingKind::centre_shift`, `Building::centre`). `Building::flatten` and the view centre the building
+there.
 
 The other bits seen in the files and the editor:
 - The editor rotates buildings by quarter turns.
