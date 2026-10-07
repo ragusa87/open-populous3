@@ -5,6 +5,8 @@ Read-only, never shipped (see assets.md).
 
 ## Banks: `objects/objs0-N.dat`, `pnts0-N.dat`, `facs0-N.dat`
 Bank 0 is the main one (194 slots). Banks 1-8 exist (2-7 look like variants), unused for now.
+The level header byte 97 (`ObjectsBankNum`, see level-format.md) picks the bank: 0 in 34 shipped levels,
+6 in levels 3, 5, 16, 22 and 2120, 7 in 2110, 2 in 2127.
 File names mix case (`OBJS0-0.DAT`, `objs0-1.dat`): match case-insensitively.
 
 `objs` record, 54 bytes, little endian:
@@ -34,8 +36,13 @@ File names mix case (`OBJS0-0.DAT`, `objs0-1.dat`): match case-insensitively.
 | 48..60 | | per-point shade (?) and flags, unknown |
 
 ## Atlas: `data/bl320-X.dat` (theme char X, upper case on disk)
-256 x 1024 palette indices (theme `pal0-X.dat`): 8 x 32 tiles of 32x32. Tribe-coloured variants
-(blue, red, yellow, green) sit side by side.
+256 x 1024 palette indices (theme `pal0-X.dat`): 8 x 32 tiles of 32x32, tile `i` at
+`(i % 8 * 32, i / 8 * 32)` (same as PopResourceEditor). Tribe-coloured variants (blue, red, yellow, green)
+sit side by side.
+- 35 of the 36 files are byte-identical, only `BL320-G` differs: the theme look comes from the palette.
+- 83 248 texels use indices < 128, i.e. theme land colours (0..111, none in the sky range): draw the atlas
+  with the level's theme palette, never a fixed one.
+- `BL160-0..2.DAT` (45 056 B) also exist, not analysed (low-res atlas?).
 
 ## Identified objects (bank 0)
 Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
@@ -70,6 +77,7 @@ Unidentified: 75-81 (stone pillars, standing stones, arch), 89-93,
 
 Atlas texels of palette index 0 are see-through in the game (e.g. the palm's fronds): `atlas_rgba` gives them
 alpha 0 and materials that need it cut them out (`AlphaMode::Mask`, trees); flat palette colours stay opaque.
+38 579 texels are 0, none are 255; PopResourceEditor also takes the last texel's index (0) as the key.
 
 ### Tribe colours
 Objects are stored in blue. Tribe-coloured atlas tiles have their red, yellow and green versions right after

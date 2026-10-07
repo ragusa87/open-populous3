@@ -1,7 +1,8 @@
 # Original sprite banks ("PSFB")
 
 `pop3_format::sprites`, example `sprite_info <file>`. Read-only, never shipped. Cross-checked with
-PopSpriteEditor 1.4.0 (Toksisitee, GPLv3) and a scan of `HSPR0-0.DAT`, `hfx0-0.dat` and `POINT0-0.DAT`.
+PopSpriteEditor 1.4.0 (Toksisitee, GPLv3), PopResourceEditor (MIT) and a scan of `HSPR0-0.DAT`,
+`hfx0-0.dat` and `POINT0-0.DAT`.
 
 | Off | Type | Content |
 |---|---|---|
@@ -61,7 +62,25 @@ wood on the ground: `catalog::WOOD_PILE_SPRITE`), 90-93 fire, 107-111 spell name
 1030-1089 spell and building glyphs, 1090-1600 spell effects (dust, explosions, swarm...).
 The 3D objects have no wood pile: objects 0 and 12 are a camp fire (logs and a flame board), see objects.md.
 
-Alpha sprites: 1090..1499 and 1538..1592 are blended. Their indices (including 1..127, 633k pixels) are rows
-of the alpha table `AL0-0.DAT` (65536 bytes, 256 x 256 palette indices), not colours. PopSpriteEditor
-previews them as `al[idx * 256 + 0]` (blended over colour 0, black); in game the lookup is probably
-`al[idx * 256 + background]` (unconfirmed). `pop3_format::sprites` returns the raw indices.
+Alpha sprites: 1090..1499 and 1538..1592 are blended (same ranges in PopResourceEditor). Their indices
+(including 1..127, 633k pixels) are rows of the alpha table, not colours. `pop3_format::sprites` returns
+the raw indices.
+
+## Blend tables (`data/`, one per theme, 65 536 bytes = 256 x 256 palette indices)
+Layouts from PopResourceEditor (Toksisitee, MIT, `140e389`), checked against the files.
+
+### Alpha, `al0-X.dat`
+`al[row * 256 + background]`, `row = tint * 16 + strength`, so an alpha sprite pixel is
+`tint << 4 | strength`:
+- strength 0 = background unchanged (the first row of each block is 98% identity), 15 = about the tint.
+- tints (theme 1, row 15): 0 red, 1 orange, 2 cream, 3 green, 4 blue, 5 yellow, 6 brown, 7 pale cyan,
+  8..15 black (darkening, shadows).
+- The table shape matches the guessed in-game lookup `al[idx * 256 + background]`; the game code itself was
+  not checked. PopSpriteEditor's preview `al[idx * 256 + 0]` is the blend over black.
+- `alpha.dat` (65 536), `alavaa.dat` and `awat.dat` (131 072) also exist, not analysed.
+
+### Ghost, `ghost0-X.dat`
+`ghost[a * 256 + b]` = nearest palette colour to `pal[a] + (pal[b] - pal[a]) * 0.66` (fitted on themes 0,
+1, 5, c, z: 0.66-0.67 everywhere; PopResourceEditor's generator also defaults to 66%). Diagonal is the
+identity, not symmetric. Which operand is the sprite and which the background is unknown. Used for
+transparency (ghost / see-through units).
