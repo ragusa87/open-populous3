@@ -41,7 +41,9 @@ Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 | Known | gold tile, 1-4 charge pips (max depends on the spell), blue recharge bar while not full; dimmed at 0 charges |
 | Unlimited | gold tile, badge `free` |
 
-Hover shows the tile's description, click selects (white border). Spells cast on a spot (`ground_spell`: Teleport
+Hover shows the tile's description, click selects (white border). Right click on a known spell pauses its recharge
+(`SpellBook::toggle_pause`, like the original's "toggle on/off"): it takes no mana, keeps its charges and can still
+be cast; badge "paused", grey frozen bar. Right click again resumes. Spells cast on a spot (`ground_spell`: Teleport
 for now) are aimed with the mouse while selected: over the map the cursor becomes the spell's icon, grayed out
 where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground), left click casts it there and puts
 the spell away (arrow cursor, clicks go back to the units' selection), right click puts it away without casting; meanwhile clicks do not select or move units. The others: `C`

@@ -19,7 +19,7 @@ Spells must only be cast through `Command::Cast` to stay deterministic.
 ## Spell book (`game_core::spell_book`)
 Per tribe: one `SpellSlot` per `SpellKind` with `Availability` (Hidden / Discoverable / Provided { shots } /
 Known / Unlimited: cast at will, used by sandbox spells), `charges` (max 4, fewer for big spells: `max_charges()` from `cost()`) and `recharge` mana.
-`tick(mana)` refills recharging spells, `cast(kind)` consumes a charge or a provided shot,
+`tick(mana)` refills recharging spells that are not paused (`paused`, `toggle_pause`), `cast(kind)` consumes a charge or a provided shot,
 `discover(kind)` turns "?" into Known. Integer only, deterministic. UI: see ui-and-editor.md.
 
 `SpellBook::from_level(header, level)`: the header's `SpellsAvailable` panel spells are Known with full charges

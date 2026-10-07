@@ -1,6 +1,7 @@
 //! Spells tab: a grid of tiles mirroring the player's `SpellBook`.
 //! Tile states: empty (hidden), "?" (discoverable), gray with uses left (provided),
-//! gold with charge pips + recharge bar (known), gold marked "free" (unlimited, sandbox). Click selects.
+//! gold with charge pips + recharge bar (known), gold marked "free" (unlimited, sandbox). Click selects,
+//! right click pauses / resumes a known spell's recharge (it then takes no mana).
 //! Spells cast on a spot (`ground_spell`, Teleport) are aimed with the mouse: the cursor shows the
 //! spell, grayed where it cannot apply; left click casts and puts the spell away (back to the arrow
 //! and the units' selection), right click puts it away without casting. The other
@@ -63,7 +64,7 @@ pub fn tile_view(slot: &SpellSlot) -> TileView {
             label,
             pips: (slot.charges, slot.kind.max_charges()),
             progress: slot.is_recharging().then(|| slot.recharge as f32 / slot.kind.cost() as f32),
-            badge: None,
+            badge: slot.paused.then(|| "paused".into()),
         },
     }
 }
@@ -80,10 +81,11 @@ pub fn describe(slot: &SpellSlot) -> String {
         Availability::Unlimited => format!("{name}\nUnlimited uses."),
         Availability::Known => {
             let max = slot.kind.max_charges();
-            let state = if slot.is_recharging() {
-                format!("recharging {:.0}%", 100.0 * slot.recharge as f32 / slot.kind.cost() as f32)
-            } else {
-                "full".into()
+            let percent = 100.0 * slot.recharge as f32 / slot.kind.cost() as f32;
+            let state = match (slot.paused, slot.is_recharging()) {
+                (true, _) => format!("paused at {percent:.0}% (right click to resume)"),
+                (false, true) => format!("recharging {percent:.0}% (right click to pause)"),
+                (false, false) => "full".into(),
             };
             format!("{name}\n{}/{max} charges, {state}. Cost {} mana.", slot.charges, slot.kind.cost())
         }
@@ -190,7 +192,7 @@ impl Plugin for SpellsPlugin {
             .add_systems(
                 Update,
                 (
-                    (recharge, tile_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput)).chain().in_set(crate::menu::Gameplay),
+                    (recharge, tile_clicks, pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput)).chain().in_set(crate::menu::Gameplay),
                     update_tiles,
                     update_info,
                 )
@@ -262,6 +264,7 @@ fn spawn_spells(c: &mut ChildSpawnerCommands, slots: &[SpellSlot]) {
 }
 
 const MANA_BLUE: Color = Color::srgb(0.25, 0.55, 1.0);
+const PAUSED_GREY: Color = Color::srgb(0.5, 0.5, 0.5);
 
 fn style_colors(style: TileStyle) -> (Color, Color) {
     match style {
@@ -291,6 +294,17 @@ fn tile_clicks(
         if *interaction == Interaction::Pressed && slot.availability != Availability::Hidden {
             selected.0 = Some(slot.kind);
         }
+    }
+}
+
+/// Right click on a known spell's tile pauses or resumes its recharge.
+fn pause_clicks(mouse: Res<ButtonInput<MouseButton>>, tiles: Query<(&Interaction, &Tile)>, mut book: ResMut<PlayerSpells>) {
+    if !mouse.just_pressed(MouseButton::Right) {
+        return;
+    }
+    if let Some((_, tile)) = tiles.iter().find(|(i, _)| **i == Interaction::Hovered) {
+        let kind = book.0.slots[tile.0].kind;
+        book.0.toggle_pause(kind);
     }
 }
 
@@ -366,7 +380,7 @@ fn update_tiles(
     mut badges: Query<(&TileBadge, &mut Text), Without<TileLabel>>,
     mut pips: Query<(&Pip, &mut BackgroundColor, &mut Node), (Without<Tile>, Without<RechargeFill>, Without<RechargeBar>)>,
     mut bars: Query<(&RechargeBar, &mut Node), (Without<Pip>, Without<RechargeFill>)>,
-    mut fills: Query<(&RechargeFill, &mut Node), (Without<Pip>, Without<RechargeBar>)>,
+    mut fills: Query<(&RechargeFill, &mut Node, &mut BackgroundColor), (Without<Pip>, Without<RechargeBar>, Without<Tile>)>,
 ) {
     let views: Vec<TileView> = book.0.slots.iter().map(tile_view).collect();
     for (tile, interaction, mut bg, mut border) in &mut tiles {
@@ -397,8 +411,9 @@ fn update_tiles(
     for (bar, mut node) in &mut bars {
         node.display = if views[bar.0].progress.is_some() { Display::Flex } else { Display::None };
     }
-    for (fill, mut node) in &mut fills {
+    for (fill, mut node, mut bg) in &mut fills {
         node.width = percent(views[fill.0].progress.unwrap_or(0.0) * 100.0);
+        bg.0 = if book.0.slots[fill.0].paused { PAUSED_GREY } else { MANA_BLUE };
     }
 }
 
@@ -451,6 +466,18 @@ mod tests {
         s.charges = 4;
         s.recharge = 0;
         assert_eq!(tile_view(&s).progress, None, "full spells hide the bar");
+    }
+
+    #[test]
+    fn paused_tiles_say_so() {
+        let mut s = slot(SpellKind::Blast, Availability::Known);
+        s.charges = 1;
+        s.paused = true;
+        let v = tile_view(&s);
+        assert_eq!((v.badge.as_deref(), v.progress), (Some("paused"), Some(0.0)), "the bar stays, frozen");
+        assert!(describe(&s).contains("paused"));
+        s.paused = false;
+        assert!(describe(&s).contains("right click to pause"));
     }
 
     #[test]

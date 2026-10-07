@@ -155,11 +155,13 @@ pub struct SpellSlot {
     pub charges: u8,
     /// Mana accumulated toward the next charge, `0..kind.cost()`.
     pub recharge: u32,
+    /// Switched off by the player: it takes no mana and keeps its charges (known spells only).
+    pub paused: bool,
 }
 
 impl SpellSlot {
     pub fn new(kind: SpellKind, availability: Availability) -> Self {
-        SpellSlot { kind, availability, charges: 0, recharge: 0 }
+        SpellSlot { kind, availability, charges: 0, recharge: 0, paused: false }
     }
 
     pub fn can_cast(&self) -> bool {
@@ -171,8 +173,13 @@ impl SpellSlot {
         }
     }
 
+    /// Known and not full: it would take mana, unless paused (`takes_mana`).
     pub fn is_recharging(&self) -> bool {
         self.availability == Availability::Known && self.charges < self.kind.max_charges()
+    }
+
+    pub fn takes_mana(&self) -> bool {
+        self.is_recharging() && !self.paused
     }
 }
 
@@ -235,15 +242,22 @@ impl SpellBook {
         }
     }
 
+    /// Switches a known spell's recharge off or on (the player's right click on its tile).
+    pub fn toggle_pause(&mut self, kind: SpellKind) {
+        if let Some(s) = self.slots.iter_mut().find(|s| s.kind == kind && s.availability == Availability::Known) {
+            s.paused = !s.paused;
+        }
+    }
+
     pub fn discover(&mut self, kind: SpellKind) {
         if self.slot(kind).is_some_and(|s| s.availability == Availability::Discoverable) {
             self.set(kind, Availability::Known);
         }
     }
 
-    /// Give `mana` to every recharging spell; full charges keep the rest at 0.
+    /// Give `mana` to every recharging spell that is not paused; full charges keep the rest at 0.
     pub fn tick(&mut self, mana: u32) {
-        for s in self.slots.iter_mut().filter(|s| s.is_recharging()) {
+        for s in self.slots.iter_mut().filter(|s| s.takes_mana()) {
             s.recharge += mana;
             while s.recharge >= s.kind.cost() && s.charges < s.kind.max_charges() {
                 s.recharge -= s.kind.cost();
@@ -340,6 +354,24 @@ mod tests {
         assert!(!known_in_header(&level_1, SpellKind::Armageddon), "leftover bit on level 1");
         let level_19 = header(&[2, 17, 18]);
         assert!(known_in_header(&level_19, SpellKind::Armageddon));
+    }
+
+    #[test]
+    fn paused_spells_take_no_mana_and_keep_their_charges() {
+        let mut b = SpellBook::new();
+        b.set(SpellKind::Blast, Availability::Known);
+        b.tick(40);
+        b.toggle_pause(SpellKind::Blast);
+        b.tick(1000);
+        let s = b.slot(SpellKind::Blast).unwrap();
+        assert_eq!((s.charges, s.recharge, s.paused), (1, 0, true));
+        assert!(b.cast(SpellKind::Blast), "a paused spell can still be cast");
+        b.toggle_pause(SpellKind::Blast);
+        b.tick(40);
+        assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 1, "recharging again");
+        b.set(SpellKind::Volcano, Availability::Provided { shots: 1 });
+        b.toggle_pause(SpellKind::Volcano);
+        assert!(!b.slot(SpellKind::Volcano).unwrap().paused, "only known spells recharge");
     }
 
     #[test]
