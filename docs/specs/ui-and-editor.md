@@ -50,6 +50,12 @@ the spell away (arrow cursor, clicks go back to the units' selection), right cli
 casts the selected spell (demo: consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
 Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build/Stats tabs.
 
+### Build tab (`hud/build.rs`)
+Mirrors `game_core::build_book::BuildBook` (resource `PlayerBuilds`, `level_builds`: the level's own, set with the
+spells on New game and PgUp/PgDn; generated maps and sandboxes: every kind). Same grid as the spells: a named tile
+per available kind (no icons yet), "?" for plans to discover, an empty slot for hidden ones; hover describes it.
+Nothing is placed yet (buildings.md "Construction").
+
 ## Main menu (`menu.rs`)
 Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list: the original
 `levlNNNN.dat` files in level-number order, any file name case, `world::sort_levels`),

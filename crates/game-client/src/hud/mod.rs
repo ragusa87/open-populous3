@@ -1,5 +1,6 @@
 //! HUD: left control panel (shaman preview, tabs: spells, buildings, stats) and the info line.
 
+pub mod build;
 mod panel;
 mod shaman;
 pub mod spells;
@@ -10,7 +11,7 @@ use crate::editor::EditorState;
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
 
-pub use panel::PANEL_WIDTH;
+pub use panel::{ActiveTab, PANEL_WIDTH, TABS};
 
 #[derive(Component)]
 struct InfoText;
@@ -19,7 +20,7 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((panel::PanelPlugin, shaman::ShamanPreviewPlugin, spells::SpellsPlugin, view_menu::ViewMenuPlugin))
+        app.add_plugins((panel::PanelPlugin, shaman::ShamanPreviewPlugin, spells::SpellsPlugin, build::BuildPlugin, view_menu::ViewMenuPlugin))
             .add_systems(Startup, spawn_info)
             .add_systems(Update, update_info);
     }

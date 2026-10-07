@@ -57,6 +57,16 @@ prison, vault/pyramid of knowledge and totems can never be built nor dismantled.
 Like the Spells tab: one tile per buildable kind, per tribe `Availability` (Hidden / Discoverable "?" / Available),
 taken from the level (`.hdr`) and unlocked by triggers. Clicking an available tile picks a blueprint.
 
+Done (no icons, no blueprint yet): `game_core::build_book::BuildBook`, the original panel's 8 kinds (`BUILDABLE`: hut,
+drum tower, temple, spy, warrior and firewarrior training, boat hut, airship hut). `BuildBook::from_level`: the
+header's `BuildingsAvailable` (hut = model 1, boat hut 13, airship hut 15) are Available, building discoveries
+(`DiscoveryType 2`, any hut size = the hut) not yet available are "?". Stored as `GameMap::build_book` (original
+levels; generated maps and sandboxes: all available). The campaign is consistent: each level discovers one kind that
+the next level's header has (warrior hut 1 -> 2, temple 3 -> 4, drum tower 4 -> 5, firewarrior 8 -> 9, boat hut
+9 -> 10, spy 12 -> 13, airship hut 13 -> 14). Models 12 ("curr OE slot") and 17 (guard post) are set in many
+masks but are not on the panel; 18 and 19 (vault, prison) are always set and never built. Client: `hud/build.rs`,
+tiles named (`panel_name`), "?" for discoverable, empty slot for hidden, hover describes.
+
 ### Blueprint
 - Follows the cursor as a white mark drawn on the ground, the building's footprint draped over the terrain
   heights, with an arrow showing the door side (the facing).

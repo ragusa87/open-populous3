@@ -8,6 +8,7 @@
 //! `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings` picks where to start (screenshots start in the game).
 
 use crate::camera::{GameCamera, OverlayCamera};
+use crate::hud::build::{level_builds, PlayerBuilds};
 use crate::hud::spells::{level_book, sandbox_book, PlayerSpells, SelectedSpell};
 use crate::units::selection::Selection;
 use crate::virtual_cursor::VirtualCursor;
@@ -287,6 +288,7 @@ struct GameSetup<'w> {
     selection: ResMut<'w, Selection>,
     cursor: ResMut<'w, VirtualCursor>,
     spells: ResMut<'w, PlayerSpells>,
+    builds: ResMut<'w, PlayerBuilds>,
     selected_spell: ResMut<'w, SelectedSpell>,
 }
 
@@ -303,6 +305,7 @@ impl GameSetup<'_> {
             Start::SandboxUnits => (GameMap::sandbox_units(), sandbox_book()),
             Start::SandboxBuildings => (GameMap::sandbox_buildings(), sandbox_book()),
         };
+        self.builds.0 = level_builds(&self.map.0);
         self.selected_spell.0 = None;
         self.dirty.0 = true;
         self.selection.clear();

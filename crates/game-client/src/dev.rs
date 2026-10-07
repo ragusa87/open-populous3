@@ -1,7 +1,8 @@
 //! Dev helpers driven by env vars, so screenshots can be taken without a window:
 //! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|pray|cast|drown|teleport] game-client [level]`.
 //! `SHAMAN` gives the player's shaman an order at start, to check each pose.
-//! `FOCUS=x,z` (cells), `DISTANCE=n`, `PITCH=deg`, `YAW=deg` place the camera for the shot.
+//! `FOCUS=x,z` (cells), `DISTANCE=n`, `PITCH=deg`, `YAW=deg` place the camera for the shot;
+//! `TAB=spells|build|stats` opens that panel tab.
 
 use crate::camera::CameraRig;
 use crate::units::PLAYER;
@@ -100,12 +101,18 @@ impl ShotCamera {
     }
 }
 
+/// Panel tab by name (any case).
+pub fn tab_index(name: &str) -> Option<usize> {
+    crate::hud::TABS.iter().position(|t| t.eq_ignore_ascii_case(name))
+}
+
 fn screenshot(
     mut commands: Commands,
     mut frame: Local<u32>,
     mut rig: ResMut<CameraRig>,
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<crate::world::TerrainDirty>,
+    mut tab: ResMut<crate::hud::ActiveTab>,
     target: Option<Res<OffscreenTarget>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -116,6 +123,9 @@ fn screenshot(
         rig.toggle_aerial();
     }
     if *frame == 1 {
+        if let Some(i) = std::env::var("TAB").ok().and_then(|t| tab_index(&t)) {
+            tab.0 = i;
+        }
         let demo = std::env::var("SHAMAN").unwrap_or_default();
         let cmds = map.0.shaman_of(PLAYER).map(|u| demo_commands(&demo, u)).unwrap_or_default();
         for c in &cmds {
@@ -140,6 +150,11 @@ fn screenshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tabs_by_name() {
+        assert_eq!((tab_index("build"), tab_index("Spells"), tab_index("nope")), (Some(1), Some(0), None));
+    }
 
     #[test]
     fn shot_camera_from_env() {

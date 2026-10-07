@@ -89,7 +89,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold.
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
 - [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
-- [ ] Build tab: buildable kinds per tribe with `Availability` (Hidden / "?" / Available), from the level `.hdr` `BuildingsAvailable` (bit N = model N) and discovery things (type 2).
+- [ ] Build tab: icons, clicking a tile picks a blueprint; build books per tribe in the simulation (today `GameMap::build_book` is shared), discoveries unlocking "?".
 - [ ] Blueprint: white footprint draped on the ground following the cursor, door arrow, Space turns it; red where sea, too steep, another building/site or a tree with wood; red blocks placement.
 - [ ] At least one assigned brave is needed, up to the kind's maximum; more braves build faster (work shared).
 - [ ] Buildings and sites block walking (blocked-cell mask in `path` next to the terrain); not for flyers, not the reincarnation site; braves assigned to a site (or dismantling) may walk on its footprint. Replan walkers when the mask changes, push units off a new footprint.
@@ -122,7 +122,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Cliffs: `cliff0-X.dat` turns land colours to rock by level (what picks the level: slope? damage?); `fade0-X.dat` palette light table (object/sprite shading, fog of war). Load both in `pop3_format::theme`.
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
-- [ ] Spell icons, tooltips; Build and Stats tabs (still "Coming soon").
+- [ ] Spell and building icons, tooltips; Stats tab (still "Coming soon").
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
 - [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).
 - [ ] Editor: smooth brush and the raise/lower levelling step of the ALACN editor (ui-and-editor.md).

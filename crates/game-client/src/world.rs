@@ -153,6 +153,7 @@ fn switch_level(
     mut dirty: ResMut<TerrainDirty>,
     mut spells: ResMut<crate::hud::spells::PlayerSpells>,
     mut selected: ResMut<crate::hud::spells::SelectedSpell>,
+    mut builds: ResMut<crate::hud::build::PlayerBuilds>,
 ) {
     let modified = [KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight];
     if keys.any_pressed(modified) {
@@ -169,6 +170,7 @@ fn switch_level(
     map.0 = levels.load_current();
     spells.0 = crate::hud::spells::level_book(&map.0);
     selected.0 = None;
+    builds.0 = crate::hud::build::level_builds(&map.0);
     dirty.0 = true;
 }
 

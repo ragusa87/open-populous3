@@ -2,6 +2,7 @@
 //!
 //! Everything here must give identical results on every lockstep peer.
 
+pub mod build_book;
 pub mod building;
 pub mod command;
 pub mod map;
