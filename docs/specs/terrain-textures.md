@@ -55,8 +55,8 @@ How the original maps it (scrolling backdrop?) is not checked. Generated maps ke
   tell signed from unsigned.
 - The ranges are narrow and differ per theme: theme 1 45..127 (mean 87), 5 130..193 (mean 161),
   7 150..170, c 73..106, 0/w/x/y/z 0..255. So the values are **not centred on 128**: `(d - 128) / 2`
-  shifts every row by a theme constant (about -20 rows for theme 1, +17 for theme 5). Subtracting the file
-  mean would keep only the detail; how the game uses it is unknown.
+  shifts every row by a theme constant (about -20 rows for theme 1, +17 for theme 5). Our bake subtracts the file
+  mean to keep only the detail; how the game uses it is unknown.
 
 ## fade
 `fade[level * 256 + colour]`. Row 32 is the identity, rows below darken (0: about 0.27x luminance,
@@ -73,7 +73,13 @@ dark land colours at row 63). PopResourceEditor: "damaged ground, lava and simil
 Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cell / 128):
 - `h` = bilinear height; `d` = `disp` texel.
 - row = water (`h < 1`): `watdisp * 128 / 256` (`sea_row`, the whole water band; `disp` when the file is
-  missing, generated noise in the procedural theme); land: `max(128, 128 + h + (d - 128) / 2)`.
+  missing, generated noise in the procedural theme); land: `land_row` =
+  `max(start, start + h + (d - mean(disp)) / 2)`. `start` = `Theme::land_start_row`, the first row from 128 up
+  where most columns are not water colours (colours of rows 0..127), at most 160: rows 128..~145 are still blue
+  in most themes (theme 1: 146, 5: 136, m: 137; theme g reuses water colours up to row 475, hence the cap).
+  So low ground (the simulation's land, height >= 1) never looks like the sea (level 5's reincarnation site
+  used to), and centring `disp` on the file's mean keeps the detail without shifting the bands by a theme
+  constant.
 - brightness column from baked Lambert lighting of the heightmap slope (`SUN`), material is unlit.
 - colour = `palette[bigfade[row][column]]`.
 
@@ -85,8 +91,8 @@ Fallback (no data, or `--no-original`): `procedural_theme::generate(seed)` build
 shapes as the original files, so the same bake is used in both modes.
 
 ## Next
-See TODO.md ("Terrain"): fade and cliff loading (`pop3_format::theme` loads pal,
-bigf and disp only), the `disp` offset.
+See TODO.md ("Terrain"): fade and cliff loading (`pop3_format::theme` loads pal, bigf, disp, watdisp and the
+sky).
 - Re-bake only the dirty rect after edits (now the whole 1024² texture is re-baked).
 - Mipmaps (distant aliasing), lava and swamp layers.
 - Free theme packs for redistribution (the original files must not be shipped). The community packs on

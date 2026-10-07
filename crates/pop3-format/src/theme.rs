@@ -10,6 +10,9 @@ pub const BIGFADE_WIDTH: usize = 256;
 pub const BIGFADE_ROWS: usize = 1152;
 /// Rows below this are water/shore; land starts here.
 pub const BIGFADE_LAND_ROW: usize = 128;
+/// The first rows above `BIGFADE_LAND_ROW` still look like water in most themes (`land_start_row`),
+/// never more than this many.
+pub const MAX_SHORE_ROWS: usize = 32;
 pub const DISP_SIZE: usize = 256;
 /// Water displacement, shared by every theme (same size as `disp`).
 pub const WATER_FILE: &str = "watdisp.dat";
@@ -77,6 +80,20 @@ impl Theme {
         self.disp[(y % DISP_SIZE) * DISP_SIZE + x % DISP_SIZE]
     }
 
+    /// Mean of the detail noise: the files are not centred on 128 (theme 1: 88, theme 5: 162).
+    pub fn disp_mean(&self) -> i32 {
+        (self.disp.iter().map(|&d| d as u64).sum::<u64>() / self.disp.len().max(1) as u64) as i32
+    }
+
+    /// The first row from `BIGFADE_LAND_ROW` up where most columns are not water colours (colours
+    /// of rows 0..127), at most `MAX_SHORE_ROWS` above it: the lowest ground drawn as land.
+    pub fn land_start_row(&self) -> usize {
+        let water: std::collections::BTreeSet<u8> = self.bigfade[..BIGFADE_LAND_ROW * BIGFADE_WIDTH].iter().copied().collect();
+        (BIGFADE_LAND_ROW..BIGFADE_LAND_ROW + MAX_SHORE_ROWS)
+            .find(|&r| self.bigfade[r * BIGFADE_WIDTH..(r + 1) * BIGFADE_WIDTH].iter().filter(|c| !water.contains(c)).count() > BIGFADE_WIDTH / 2)
+            .unwrap_or(BIGFADE_LAND_ROW + MAX_SHORE_ROWS)
+    }
+
     /// Sea noise, wraps.
     pub fn water(&self, x: usize, y: usize) -> u8 {
         self.water[(y % DISP_SIZE) * DISP_SIZE + x % DISP_SIZE]
@@ -120,6 +137,24 @@ mod tests {
         assert_eq!(theme_char(0), '0');
         assert_eq!(theme_char(12), 'c');
         assert_eq!(theme_char(35), 'z');
+    }
+
+    #[test]
+    fn land_starts_past_the_watery_rows() {
+        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
+        big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..].fill(1);
+        big[..BIGFADE_WIDTH].fill(5);
+        for r in BIGFADE_LAND_ROW..BIGFADE_LAND_ROW + 6 {
+            big[r * BIGFADE_WIDTH..r * BIGFADE_WIDTH + 200].fill(5);
+        }
+        let mut disp = vec![60u8; DISP_SIZE * DISP_SIZE];
+        disp[0] = 60 + 128;
+        let t = Theme::parse(&[0; 1024], &big, &disp).unwrap();
+        assert_eq!(t.land_start_row(), BIGFADE_LAND_ROW + 6);
+        assert_eq!(t.disp_mean(), 60);
+        big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..].fill(5);
+        let all_water = Theme::parse(&[0; 1024], &big, &disp).unwrap();
+        assert_eq!(all_water.land_start_row(), BIGFADE_LAND_ROW + MAX_SHORE_ROWS, "capped");
     }
 
     #[test]

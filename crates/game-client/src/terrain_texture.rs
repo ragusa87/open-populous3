@@ -1,6 +1,8 @@
 //! Bake the ground texture the way the original does it: per pixel, the (bilinear)
 //! height plus `disp` noise picks a `bigfade` row (the sea: `watdisp` noise over the water rows),
-//! slope lighting picks the brightness column, the palette gives the colour. Pure function, no Bevy.
+//! slope lighting picks the brightness column, the palette gives the colour. Land, however low,
+//! starts past the theme's watery shore rows (`land_row`) so it never looks like the sea the
+//! simulation does not see there. Pure function, no Bevy.
 
 use game_core::terrain::Heightmap;
 use pop3_format::theme::{Theme, BIGFADE_LAND_ROW};
@@ -15,6 +17,12 @@ pub fn sea_row(water: u8) -> usize {
     water as usize * BIGFADE_LAND_ROW / 256
 }
 
+/// The land row for height `h` (scaled) and a `disp` texel: from `land_start` up, the noise
+/// centred on the file's mean so it adds detail without shifting the bands.
+pub fn land_row(h: f32, disp: i32, disp_mean: i32, land_start: usize) -> usize {
+    (land_start as i32 + h as i32 + (disp - disp_mean) / 2).max(land_start as i32) as usize
+}
+
 /// Returns RGBA8 pixels, `(size * PX_PER_CELL)²`, tiling seamlessly like the map.
 /// `row_scale` multiplies height before picking the bigfade row (1.0 = 1:1, unverified).
 pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32) -> (usize, Vec<u8>) {
@@ -22,6 +30,7 @@ pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32) -
     let len = (SUN[0] * SUN[0] + SUN[1] * SUN[1] + SUN[2] * SUN[2]).sqrt();
     let sun = SUN.map(|c| c / len);
     let step = 1.0 / PX_PER_CELL as f32;
+    let (disp_mean, land_start) = (theme.disp_mean(), theme.land_start_row());
     let mut out = Vec::with_capacity(side * side * 4);
     for py in 0..side {
         for px in 0..side {
@@ -31,7 +40,7 @@ pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32) -
             let row = if h < 1.0 {
                 sea_row(theme.water(px, py))
             } else {
-                (BIGFADE_LAND_ROW as i32 + (h * row_scale) as i32 + (disp - 128) / 2).max(BIGFADE_LAND_ROW as i32) as usize
+                land_row(h * row_scale, disp, disp_mean, land_start)
             };
             let gx = (map.sample(x + 0.5, z) - map.sample(x - 0.5, z)) * height_scale;
             let gz = (map.sample(x, z + 0.5) - map.sample(x, z - 0.5)) * height_scale;
@@ -58,6 +67,14 @@ mod tests {
         let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
         big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..].fill(1);
         Theme::parse(&pal, &big, &vec![128; DISP_SIZE * DISP_SIZE]).unwrap()
+    }
+
+    #[test]
+    fn low_land_is_past_the_shore_rows_and_noise_is_centred() {
+        assert_eq!(land_row(1.0, 45, 88, 146), 146, "low ground on theme 1 stays land");
+        assert_eq!(land_row(100.0, 88, 88, 146), 246, "the mean adds nothing");
+        assert_eq!(land_row(100.0, 98, 88, 146), 251);
+        assert_eq!(land_row(100.0, 162, 162, 136), land_row(100.0, 128, 128, 136), "every theme centred alike");
     }
 
     #[test]
