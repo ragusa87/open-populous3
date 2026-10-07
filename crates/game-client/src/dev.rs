@@ -1,6 +1,7 @@
 //! Dev helpers driven by env vars, so screenshots can be taken without a window:
 //! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|pray|cast|drown|teleport] game-client [level]`.
 //! `SHAMAN` gives the player's shaman an order at start, to check each pose.
+//! `FOCUS=x,z` (cells), `DISTANCE=n`, `PITCH=deg`, `YAW=deg` place the camera for the shot.
 
 use crate::camera::CameraRig;
 use crate::units::PLAYER;
@@ -70,6 +71,35 @@ pub fn demo_commands(name: &str, shaman: &Unit) -> Vec<Command> {
     }
 }
 
+/// Camera overrides from `FOCUS=x,z`, `DISTANCE`, `PITCH` and `YAW` (degrees); bad values are ignored.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ShotCamera {
+    pub focus: Option<Vec2>,
+    pub distance: Option<f32>,
+    pub pitch: Option<f32>,
+    pub yaw: Option<f32>,
+}
+
+impl ShotCamera {
+    pub fn parse(get: impl Fn(&str) -> Option<String>) -> Self {
+        let num = |k: &str| get(k).and_then(|v| v.trim().parse::<f32>().ok());
+        let focus = get("FOCUS").and_then(|v| {
+            let (x, z) = v.split_once(',')?;
+            Some(Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?))
+        });
+        ShotCamera { focus, distance: num("DISTANCE"), pitch: num("PITCH").map(f32::to_radians), yaw: num("YAW").map(f32::to_radians) }
+    }
+
+    fn apply(&self, rig: &mut CameraRig) {
+        if let Some(f) = self.focus {
+            rig.focus = f;
+        }
+        rig.distance = self.distance.unwrap_or(rig.distance);
+        rig.pitch = self.pitch.unwrap_or(rig.pitch);
+        rig.yaw = self.yaw.unwrap_or(rig.yaw);
+    }
+}
+
 fn screenshot(
     mut commands: Commands,
     mut frame: Local<u32>,
@@ -92,6 +122,9 @@ fn screenshot(
             dirty.0 |= map.0.apply(c).is_some();
         }
     }
+    if *frame < shot {
+        ShotCamera::parse(|k| std::env::var(k).ok()).apply(&mut rig);
+    }
     if *frame == shot {
         let shot = match target {
             Some(t) => Screenshot::image(t.0.clone()),
@@ -101,5 +134,25 @@ fn screenshot(
     }
     if *frame == shot + 60 {
         exit.write(AppExit::Success);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shot_camera_from_env() {
+        let env = |k: &str| match k {
+            "FOCUS" => Some("22.5, 101".to_string()),
+            "PITCH" => Some("90".to_string()),
+            "DISTANCE" => Some("oops".to_string()),
+            _ => None,
+        };
+        let c = ShotCamera::parse(env);
+        assert_eq!(c.focus, Some(Vec2::new(22.5, 101.0)));
+        assert!((c.pitch.unwrap() - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!((c.distance, c.yaw), (None, None));
+        assert_eq!(ShotCamera::parse(|_| None), ShotCamera::default());
     }
 }
