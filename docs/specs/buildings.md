@@ -55,7 +55,8 @@ taken from the level (`.hdr`) and unlocked by triggers. Clicking an available ti
 
 ### Tooltip
 Hovering or right-clicking a site (as for trees): kind, braves assigned / maximum, wood delivered / needed. On a
-built building of a buildable kind: a "Dismantle" toggle (back to "Build" while dismantling). It also lists the
+building of a buildable kind with at least one piece of wood used (under construction or built): a "Dismantle"
+toggle (back to "Build" while dismantling). It also lists the
 assigned braves, one small icon each; clicking an icon selects that brave alone (one at a time), so it can be
 given an order.
 
@@ -66,9 +67,10 @@ given an order.
 - Braves away from the site (gathering, watching, fetching or carrying wood) can be selected as usual (click, box).
 - Braves working on the footprint (flattening, building, dismantling) cannot be selected on the map: clicks and
   boxes skip them, a click there hits the site (tooltip). The tooltip icons are the only way to pick one of them.
-- Shift + click on a site (not yet built) cancels it (`Command::Cancel { player, site }`): the site is removed, its
-  wood already used or piled by the door is dropped as wood pieces around it, its braves are unassigned and stand
-  idle, the ground keeps whatever flattening was done. Built buildings are not cancelled, they are dismantled.
+- Shift + click on a blueprint (a site with no wood used yet) cancels it (`Command::Cancel { player, site }`): the
+  site is removed, its braves are unassigned and stand idle, wood already piled by the door stays there as free
+  wood pieces, the ground keeps whatever flattening was done. Once a piece of wood is used it is a building under
+  construction: Shift + click does nothing, it can only be dismantled.
 
 ### Building it (deterministic, integer state)
 1. Gather: assigned braves walk to the site edge and stand looking at it for a short while.
@@ -91,7 +93,7 @@ same model in a plain wood material, or a scaffold sized from the footprint), wh
 progress; the full building once built.
 
 ### Dismantling
-With Dismantle on, braves assigned to the building take it apart: after a while it loses one piece of wood, which
+With Dismantle on (on a built building or one under construction), braves assigned to it take it apart: after a while it loses one piece of wood, which
 is dropped on the ground near the door as a wood piece (drawn as a small circle on the ground, `GameMap::wood`,
 usable by any construction). Once all its wood is out, the building is removed and its ground is free again (a
 covered tree grows back). Switching back to Build makes braves rebuild it with wood again.
