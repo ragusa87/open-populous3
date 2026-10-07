@@ -21,12 +21,15 @@ pub enum SpellKind {
     AngelOfDeath,
     Volcano,
     Armageddon,
-    /// Sandbox spell (not in the original): moves the shaman to any walkable spot.
+    GhostArmy,
+    MagicalShield,
+    /// Sandbox spell: moves the shaman to any walkable spot. The original has a spell model 21
+    /// teleport, never on the player's panel (`from_model` leaves it out).
     Teleport,
 }
 
 impl SpellKind {
-    pub const ALL: [SpellKind; 17] = [
+    pub const ALL: [SpellKind; 19] = [
         SpellKind::Blast,
         SpellKind::Convert,
         SpellKind::Swarm,
@@ -43,8 +46,41 @@ impl SpellKind {
         SpellKind::AngelOfDeath,
         SpellKind::Volcano,
         SpellKind::Armageddon,
+        SpellKind::GhostArmy,
+        SpellKind::MagicalShield,
         SpellKind::Teleport,
     ];
+
+    /// The original spell model number (level header masks, discovery things, AI scripts).
+    pub fn model(self) -> u8 {
+        match self {
+            SpellKind::Blast => 2,
+            SpellKind::Lightning => 3,
+            SpellKind::Whirlwind => 4,
+            SpellKind::Swarm => 5,
+            SpellKind::Invisibility => 6,
+            SpellKind::Hypnotism => 7,
+            SpellKind::Firestorm => 8,
+            SpellKind::GhostArmy => 9,
+            SpellKind::Erosion => 10,
+            SpellKind::Swamp => 11,
+            SpellKind::LandBridge => 12,
+            SpellKind::AngelOfDeath => 13,
+            SpellKind::Earthquake => 14,
+            SpellKind::Flatten => 15,
+            SpellKind::Volcano => 16,
+            SpellKind::Convert => 17,
+            SpellKind::Armageddon => 18,
+            SpellKind::MagicalShield => 19,
+            SpellKind::Teleport => 21,
+        }
+    }
+
+    /// The player's spell for an original model (2-19). Burn (1), bloodlust (20) and teleport (21)
+    /// are not on the original panel: None, like unknown models.
+    pub fn from_model(model: u8) -> Option<SpellKind> {
+        SpellKind::ALL.iter().copied().find(|k| k.model() == model && *k != SpellKind::Teleport)
+    }
 
     pub fn name(self) -> &'static str {
         match self {
@@ -64,6 +100,8 @@ impl SpellKind {
             SpellKind::AngelOfDeath => "Angel of Death",
             SpellKind::Volcano => "Volcano",
             SpellKind::Armageddon => "Armageddon",
+            SpellKind::GhostArmy => "Ghost Army",
+            SpellKind::MagicalShield => "Magical Shield",
             SpellKind::Teleport => "Teleportation",
         }
     }
@@ -73,7 +111,8 @@ impl SpellKind {
         match self {
             SpellKind::Teleport => 1,
             SpellKind::Blast | SpellKind::Convert => 40,
-            SpellKind::Swarm | SpellKind::Invisibility | SpellKind::LandBridge => 120,
+            SpellKind::Swarm | SpellKind::Invisibility | SpellKind::LandBridge | SpellKind::GhostArmy => 120,
+            SpellKind::MagicalShield => 200,
             SpellKind::Hypnotism | SpellKind::Whirlwind | SpellKind::Lightning | SpellKind::Flatten => 200,
             SpellKind::Erosion | SpellKind::Swamp => 300,
             SpellKind::Earthquake | SpellKind::Firestorm => 500,
@@ -205,6 +244,19 @@ mod tests {
         b.tick(10_000);
         let s = b.slot(SpellKind::Blast).unwrap();
         assert_eq!((s.charges, s.recharge), (MAX_CHARGES, 0));
+    }
+
+    #[test]
+    fn original_model_numbers() {
+        assert_eq!(SpellKind::from_model(2), Some(SpellKind::Blast));
+        assert_eq!(SpellKind::from_model(17), Some(SpellKind::Convert));
+        assert_eq!(SpellKind::from_model(19), Some(SpellKind::MagicalShield));
+        for model in [0, 1, 20, 21, 22] {
+            assert_eq!(SpellKind::from_model(model), None, "model {model} is not a panel spell");
+        }
+        for k in SpellKind::ALL.iter().filter(|&&k| k != SpellKind::Teleport) {
+            assert_eq!(SpellKind::from_model(k.model()), Some(*k));
+        }
     }
 
     #[test]

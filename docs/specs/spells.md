@@ -36,6 +36,10 @@ world editor, checked against the campaign's discoveries, see level-format.md):
 | 6 | invisibility | 13 | angel of death | 20 | bloodlust |
 | 7 | hypnotism | 14 | earthquake | 21 | teleport |
 
+`SpellKind::model()` / `SpellKind::from_model()` map them; `from_model` only returns the 18 spells of the
+original panel (2-19): burn, bloodlust and teleport are never on it (our `Teleport` is a sandbox spell that keeps
+model 21 for reference). Ghost Army and Magical Shield have placeholder costs.
+
 The editor also names models 23-30 (hill, rise, valley, dip, place tree, clear mapwho, place shaman, place
 wild) but can't place them: unverified.
 

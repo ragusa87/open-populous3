@@ -107,6 +107,8 @@ pub fn short_label(kind: SpellKind) -> &'static str {
         SpellKind::AngelOfDeath => "Angel",
         SpellKind::Volcano => "Volcano",
         SpellKind::Armageddon => "Armag.",
+        SpellKind::GhostArmy => "Ghosts",
+        SpellKind::MagicalShield => "Shield",
         SpellKind::Teleport => "Teleport",
     }
 }

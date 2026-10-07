@@ -55,7 +55,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spell effects with their own animations/visuals (lightning, swarm, whirlwind...); casting (C) only uses a charge and makes the shaman jump.
 - [ ] Aim the other spells on the terrain like Teleport (`hud::spells::ground_spell`), with cast range from the shaman.
 - [ ] Spell cursors: map each spell to its gold icon in `POINT0-0.DAT` (38-66) in `virtual_cursor::spell_sprite`.
-- [ ] Spell model numbers (spells.md table) on `SpellKind` (`from_model`); add the missing original spells: burn (1), ghost army (9), magical shield (19), bloodlust (20). The `SpellKind::Teleport` doc says "not in the original", but the original has a spell model 21 teleport.
+- [ ] Burn (1), bloodlust (20) and the original teleport (21): what they do and who casts them (never on the player panel).
 - [ ] Load the enabled spells from the level into each tribe's `SpellBook`, instead of `demo_book`: `.hdr` `SpellsAvailable` = known, discovery things (general model 2, type 11) = discoverable, with their availability (permanent / this level / one shot).
 
 ## Mana
