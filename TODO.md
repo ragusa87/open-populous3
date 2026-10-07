@@ -56,7 +56,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spell effects with their own animations/visuals (lightning, swarm, whirlwind...); casting (C) only uses a charge and makes the shaman jump.
 - [ ] Aim the other spells on the terrain like Teleport (`hud::spells::ground_spell`), with cast range from the shaman.
 - [ ] Spell cursors: map each spell to its gold icon in `POINT0-0.DAT` (38-66) in `virtual_cursor::spell_sprite`.
-- [ ] Load the list of enabled spells from the level (`.hdr`: available / discoverable / charges per tribe) into each tribe's `SpellBook`, instead of `demo_book`.
+- [ ] Spell model numbers (spells.md table) on `SpellKind` (`from_model`); add the missing original spells: burn (1), ghost army (9), magical shield (19), bloodlust (20). The `SpellKind::Teleport` doc says "not in the original", but the original has a spell model 21 teleport.
+- [ ] Load the enabled spells from the level into each tribe's `SpellBook`, instead of `demo_book`: `.hdr` `SpellsAvailable` = known, discovery things (general model 2, type 11) = discoverable, with their availability (permanent / this level / one shot).
 
 ## Mana
 - [ ] Mana per tribe in the simulation (integer, deterministic), shown in the HUD.
@@ -69,28 +70,32 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 ## Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
 - [ ] **Bug**: `pop3_format::level` reads things from 82 042 instead of 81 987 (one record late): thing 0 is dropped in every level (levl2001: a red hut). Replace the 122-byte misc block by player start info (4 x 16 B), sunlight (3 B) and the 50 x 3 access info after the things.
 - [ ] Angles from the thing union (2048ths of a turn): buildings `i32@7` instead of `Thing::facing()` (byte 8 % 8, right by luck); trees and scenery `i16@10` (lost today, `nature::tree_yaw` invents one).
-- [ ] Decode the rest of the thing record: scenery (portal, island, bridge), general model 2 discovery (type, model, availability, mana), model 6 trigger (radius, occurrences, thing indices, pray time...), feeds the level scripting items below.
-- [ ] Decode the `.hdr` (layout in level-format.md): spell/building/vehicle availability masks, tribe count, computer player script ids, default allies, object bank (byte 97), level flags, markers, start position and angle (start camera). Bit meanings still to map.
-- [ ] Load the object bank the level header names (byte 97: 6 for levels 3, 5, 16, 22, 2120; 7 for 2110; 2 for 2127) instead of always bank 0 (`original_models`).
-- [ ] `LandBlocks` / `LandOrients` layers (`.dat` 32 768 / 49 152) and the sunlight block (ShadeStart, ShadeRange, Inclination): find what they drive (terrain texture? lighting?).
-- [ ] `.ver` (author, date, checksum): show in level info only.
-- [ ] Verify the x/z axis order of level data.
+- [ ] Decode the thing unions (level-format.md): general model 2 discovery (type, model, availability, mana), model 6 trigger (type, radius, occurrences, `ThingIdxs` as **1-based slot indices**: keep the slot order, `Level::things` drops empty slots today), effects 24/17 target (`i32@7`, `i32@11`). Scenery portal/island fields are always 0: skip them.
+- [ ] Decode the `.hdr` into `LevelHeader` (layout in level-format.md): spell/building/vehicle masks (bit N = model N, non-model bits always set), tribe count, AI script per tribe (89-91 red/yellow/green, 99 blue), default allies, object bank (97), level flags, markers (low byte x * 2, high byte z * 2), start position and angle; show them in `level_info`.
+- [ ] Start camera from the header's start position (cell) and angle (2048ths) instead of looking at the shaman.
+- [ ] Level flags: fog of war (0x01, levels 9 and 18), shaman omni (0x02, level 25), no guest spells (0x10), no reincarnation time (0x20).
+- [ ] Default allies per tribe (`.hdr` 92): alliances in the simulation (no attacking allies), e.g. level 14's three tribes against blue.
+- [ ] `NoAccessSquares` (non-zero only in levl2002 and levl2079): probably cells nobody walks on; check them on the map and feed them to the `path` blocked mask.
+- [ ] Load the object bank the level header names (byte 97: 6 for levels 3, 5, 16, 22, 2120; 7 for 2110; 2 for 2127) instead of always bank 0 (`original_models`): either load bank N with the index table of objects.md, or stay on bank 0 and pick the trees by bank (60-71). Bank 6 levels show the wrong trees today.
+- [ ] Sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32/64): find whether it drives the terrain lighting. `LandBlocks` / `LandOrients` are identical stale data: ignore them.
+- [ ] `.ver` (author, date; checksum always 0): show in level info only.
 
 ## Level scripting (triggers)
-- [ ] Analyse the original scripting mechanism: trigger things in the `.dat`, what links them to other things, their conditions (units in range, worship done, time...) and what they fire.
-- [ ] Praying totems, stone heads, vault of knowledge, totem poles: which object triggers what (discover a spell, one-shot spell cast, unlock a building, raise land, reveal hidden things...), and whether it fires once or repeatedly.
-- [ ] Check what the `cpscr*`/`cpatr*` files hold (computer player scripts/attributes) and how they relate to the level triggers.
-- [ ] Document the findings in a spec and implement the triggers as deterministic simulation (through `Command`/state, no floats).
+- [ ] Trigger semantics (layout and types known, level-format.md): what each type waits for (proximity, timed, player death, shaman proximity, library, shaman + angel of death), how `TriggerCount`, `NumOccurences`, `PrayTime` and `InactiveTime` play, and what activating a target does (discovery granted, effect fired, hidden thing revealed).
+- [ ] Praying totems, stone heads (scenery 9), vault of knowledge: which trigger/discovery each uses, once or repeatedly.
+- [ ] Implement the triggers and discoveries as deterministic simulation (through `Command`/state, no floats); AI scripts can fire them too (`TRIGGER_THING`).
 
 ## Buildings ([buildings.md](docs/specs/buildings.md))
 - [ ] Open-source building models (e.g. CC0 Quaternius Medieval Village / Fantasy kits) instead of the labelled boxes when the original files are not used; generated maps and sandboxes have buildings only in Sandbox > Buildings.
 - [ ] Identify the original objects of reconversion, wall, gate, guard post (stand-in boxes even with the original files); check temple = prayer hut object.
 - [ ] Villager hut style (3 styles in the objects, style 0 always drawn): find what picks it.
 - [ ] Check the facing against the game (level 19's boat hut, facing 4, points its jetty into a low inlet: looks right), and the cells a footprint takes (used by the walking mask).
+- [ ] Building centre: buildings are stored on a cell corner and the levels are flat over vertices -1..+2 (3 x 3 cells) for huts, temple and training huts, so the centre is (x + 256, z + 256). `Building::flatten` and the view centre the footprint on the corner: shift both, and check the drum tower / spy / boat hut (flat cell 0..+1) and vault / prison (-2..+2) cases (buildings.md).
+- [ ] General model 9 "building add-on" (one near each of 91 medium/large huts): find what it is (hut extension?) and draw it.
 - [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold.
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
 - [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
-- [ ] Build tab: buildable kinds per tribe with `Availability` (Hidden / "?" / Available), from the level `.hdr` and triggers.
+- [ ] Build tab: buildable kinds per tribe with `Availability` (Hidden / "?" / Available), from the level `.hdr` `BuildingsAvailable` (bit N = model N) and discovery things (type 2).
 - [ ] Blueprint: white footprint draped on the ground following the cursor, door arrow, Space turns it; red where sea, too steep, another building/site or a tree with wood; red blocks placement.
 - [ ] At least one assigned brave is needed, up to the kind's maximum; more braves build faster (work shared).
 - [ ] Buildings and sites block walking (blocked-cell mask in `path` next to the terrain); not for flyers, not the reincarnation site; braves assigned to a site (or dismantling) may walk on its footprint. Replan walkers when the mask changes, push units off a new footprint.
@@ -111,7 +116,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Houses grow (small -> medium -> large: `villager_hut` sizes), holding more braves. Growing has several criteria; one of them is a piece of wood brought by a brave (other criteria to find out).
 
 ## Wood ([trees.md](docs/specs/trees.md))
-- [ ] Trees from original levels: decode their size/growth from the thing record if stored (all full size today); find which landscape themes use the tree objects 60-71 instead of 13-18; scenery models 7-9 (plants? stone heads?).
+- [ ] Original scenery models 7 plant 1, 8 plant 2, 9 stone head (98 in the levels): not drawn yet. Trees have no size in the thing record: full size is right.
 - [ ] A brave cuts one piece of wood at a time (`Tree::cut`): the tree shrinks by one, the brave carries the piece to a construction site or house.
 - [ ] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible) trees.
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.
@@ -129,10 +134,14 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Spell icons, tooltips; Build and Stats tabs (still "Coming soon").
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
-- [ ] Editor: save back to the original `.dat` format.
+- [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).
+- [ ] Editor: smooth brush and the raise/lower levelling step of the ALACN editor (ui-and-editor.md).
 
 ## Computer players (AI)
 - [ ] AI for the computer-controlled tribes: their shaman and followers act on their own through `Command`s (deterministic, like a player's input): gather wood, build and grow the village, train units, pray, cast spells, attack and defend.
+- [ ] `pop3_format::ai_script`: parse `cpscrNNN.dat` (12 552 B only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md), with a decompiled listing in an example; `cpatr` name and masks.
+- [ ] Script interpreter in `game-core`: user variables, internal variables read from the simulation, `EVERY` on the game turn (stored period - 1), DO commands mapped to AI states and `Command`s; start with the states, `ATTACK` and `SET_SPELL_ENTRY`. Levels 2100, 2110, 2131 name missing scripts: fall back to no script.
+- [ ] Script side effects outside the AI: messages, flybys, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`, `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
 
 ## Multiplayer ([multiplayer.md](docs/specs/multiplayer.md))
 - [ ] Turn scheduler with 2-3 turns input delay; local input goes through it instead of `GameMap::apply` directly.
