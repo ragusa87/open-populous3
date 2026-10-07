@@ -35,7 +35,10 @@ frame, world units; the boat hut's jetty left out), turned with its facing (`Bui
 those within a cell around it are pulled halfway, except sea, which stays sea (a boat hut keeps its water on the
 jetty side). Then the reincarnation sites level their disc (`level_around`, 3/4 cells, at least 32). Level 4 has a
 hut on a sea-level shore: it now stands on sand; level 19's boat hut keeps the inlet its jetty points into.
-No construction, health, people inside or footprint yet. Sandbox > Buildings (`GameMap::sandbox_buildings`): one of every model 1-19 for the player, a few red ones.
+Construction state (`Building`): `used` pieces of wood, `flat`, `dismantling`, `inside` (units in), `shaking`
+(ticks left after a hit); `Building::stage` works out Blueprint (not flat) / UnderConstruction / Built /
+Dismantling from them, and `BuildingKind::wood_cost` / `max_braves` hold the cost table below. Level buildings
+load as Built. Nothing changes the state over time yet, and there is no health. Sandbox > Buildings (`GameMap::sandbox_buildings`): one of every model 1-19 for the player, a few red ones.
 
 ## On screen (client, `buildings.rs`)
 Centred on the terrain (`Grounded`) and leaning with it (`grounded::Tilted`: its up follows the drawn ground

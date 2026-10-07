@@ -125,7 +125,7 @@ mod tests {
     use crate::tree::Tree;
 
     fn hut(cell: (u16, u16)) -> Building {
-        Building { kind: BuildingKind::Hut { size: 1 }, owner: 0, x: cell.0 * 512, z: cell.1 * 512, facing: 0 }
+        Building::new(BuildingKind::Hut { size: 1 }, 0, cell.0 * 512, cell.1 * 512, 0)
     }
 
     /// Flat land at height 100 except a sea strip x < 10; the site at the centre.

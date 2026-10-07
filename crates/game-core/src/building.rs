@@ -1,5 +1,6 @@
-//! Buildings standing on the map, loaded from the level things (kind 2). Only what they are, whose,
-//! and where for now: construction, health, people inside and footprints come later.
+//! Buildings standing on the map, loaded from the level things (kind 2), and their construction
+//! state (docs/specs/buildings.md "Construction"): wood used, footprint flattened, dismantling,
+//! people inside and being attacked. Nothing changes it over time yet (no braves at work).
 
 use pop3_format::level::KIND_BUILDING;
 use pop3_format::Level;
@@ -108,6 +109,42 @@ impl BuildingKind {
             BuildingKind::Other(m) => format!("Building {m}"),
         }
     }
+
+    /// Pieces of wood it takes to build, from the original game (any hut size: 3); 0 for kinds
+    /// never built (reincarnation site, vault, prison, unknown...).
+    pub fn wood_cost(self) -> u8 {
+        match self {
+            BuildingKind::Hut { .. } => 3,
+            BuildingKind::DrumTower | BuildingKind::BoatHut => 5,
+            BuildingKind::Temple | BuildingKind::SpyTraining | BuildingKind::WarriorTraining | BuildingKind::FirewarriorTraining => 8,
+            BuildingKind::AirshipHut => 11,
+            _ => 0,
+        }
+    }
+
+    /// Most braves that can work on it at once, from the original game (min is always 1).
+    pub fn max_braves(self) -> u8 {
+        match self {
+            BuildingKind::Hut { .. } => 6,
+            BuildingKind::DrumTower => 12,
+            BuildingKind::Temple => 20,
+            k if k.wood_cost() > 0 => 16,
+            _ => 0,
+        }
+    }
+}
+
+/// Where a building is in its life, worked out from its state (`Building::stage`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stage {
+    /// Placed, footprint not flat yet: drawn as a mark on the ground, can be cancelled.
+    Blueprint,
+    /// Flat: a wooden structure turning into the building, `used` of `of` pieces in (also a
+    /// damaged building being repaired).
+    UnderConstruction { used: u8, of: u8 },
+    Built,
+    /// Being taken apart, `used` of `of` pieces still in.
+    Dismantling { used: u8, of: u8 },
 }
 
 /// The levelled ground is never lower than this: a building placed on the shore stands on land.
@@ -123,9 +160,42 @@ pub struct Building {
     pub z: u16,
     /// Eighths of a turn (`Thing::facing`).
     pub facing: u8,
+    /// Pieces of wood built in, up to `BuildingKind::wood_cost`.
+    pub used: u8,
+    /// Footprint flattened: no longer a blueprint.
+    pub flat: bool,
+    pub dismantling: bool,
+    /// Units inside (a busy hut smokes).
+    pub inside: u8,
+    /// Ticks its walls still shake for, after being hit (0: not attacked).
+    pub shaking: u16,
 }
 
 impl Building {
+    /// A finished building, as the levels store them.
+    pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
+        Building { kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0 }
+    }
+
+    /// A blueprint just placed: nothing flattened nor built yet.
+    pub fn site(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
+        Building { used: 0, flat: false, ..Building::new(kind, owner, x, z, facing) }
+    }
+
+    pub fn stage(&self) -> Stage {
+        let of = self.kind.wood_cost();
+        let used = self.used.min(of);
+        if !self.flat {
+            Stage::Blueprint
+        } else if self.dismantling {
+            Stage::Dismantling { used, of }
+        } else if used < of {
+            Stage::UnderConstruction { used, of }
+        } else {
+            Stage::Built
+        }
+    }
+
     /// Its centre in world units (`BuildingKind::centre_shift` off the stored corner, wrapping).
     pub fn centre(&self) -> (u16, u16) {
         let shift = self.kind.centre_shift();
@@ -154,7 +224,7 @@ pub fn buildings_from_level(level: &Level) -> Vec<Building> {
         .things
         .iter()
         .filter(|t| t.kind == KIND_BUILDING)
-        .map(|t| Building { kind: BuildingKind::from_model(t.model), owner: t.owner, x: t.x, z: t.z, facing: t.facing() })
+        .map(|t| Building::new(BuildingKind::from_model(t.model), t.owner, t.x, t.z, t.facing()))
         .collect()
 }
 
@@ -181,12 +251,35 @@ mod tests {
         d[base + 8] = 6;
         d[base + 55..base + 62].copy_from_slice(&[2, KIND_PERSON, 0, 0x00, 0x01, 0x00, 0x01]);
         let b = buildings_from_level(&Level::parse(&d).unwrap());
-        assert_eq!(b, vec![Building { kind: BuildingKind::DrumTower, owner: 2, x: 0x0a00, z: 0x1400, facing: 6 }]);
+        assert_eq!(b, vec![Building::new(BuildingKind::DrumTower, 2, 0x0a00, 0x1400, 6)]);
+    }
+
+    #[test]
+    fn costs_from_the_original() {
+        let wood: Vec<u8> = crate::build_book::BUILDABLE.iter().map(|k| k.wood_cost()).collect();
+        assert_eq!(wood, [3, 5, 8, 8, 8, 8, 5, 11]);
+        let braves: Vec<u8> = crate::build_book::BUILDABLE.iter().map(|k| k.max_braves()).collect();
+        assert_eq!(braves, [6, 12, 20, 16, 16, 16, 16, 16]);
+        assert_eq!(BuildingKind::Hut { size: 3 }.wood_cost(), 3);
+        assert_eq!((BuildingKind::Vault.wood_cost(), BuildingKind::Vault.max_braves()), (0, 0), "never built");
+    }
+
+    #[test]
+    fn stage_follows_the_state() {
+        let site = Building::site(BuildingKind::DrumTower, 0, 0, 0, 0);
+        assert_eq!(site.stage(), Stage::Blueprint);
+        assert_eq!(Building { used: 1, ..site.clone() }.stage(), Stage::Blueprint, "wood brought while flattening");
+        let flat = Building { flat: true, ..site.clone() };
+        assert_eq!(flat.stage(), Stage::UnderConstruction { used: 0, of: 5 });
+        assert_eq!(Building { used: 5, ..flat.clone() }.stage(), Stage::Built);
+        assert_eq!(Building { used: 3, dismantling: true, ..flat.clone() }.stage(), Stage::Dismantling { used: 3, of: 5 });
+        assert_eq!(Building::new(BuildingKind::Hut { size: 2 }, 0, 0, 0, 0).stage(), Stage::Built);
+        assert_eq!(Building::new(BuildingKind::Vault, 0, 0, 0, 0).stage(), Stage::Built, "no wood cost");
     }
 
     #[test]
     fn covers_its_turned_footprint() {
-        let temple = |facing| Building { kind: BuildingKind::Temple, owner: 0, x: 20 * 512, z: 20 * 512, facing };
+        let temple = |facing| Building::new(BuildingKind::Temple, 0, 20 * 512, 20 * 512, facing);
         let (cx, cz) = temple(0).centre();
         assert!(temple(0).covers((cx, cz), 0));
         assert!(temple(0).covers((cx, cz + 700), 0) && !temple(0).covers((cx + 900, cz), 0), "longer along z (950 x 800)");
@@ -196,7 +289,7 @@ mod tests {
 
     #[test]
     fn centre_is_off_the_stored_corner() {
-        let at = |kind, x, z| Building { kind, owner: 0, x, z, facing: 2 }.centre();
+        let at = |kind, x, z| Building::new(kind, 0, x, z, 2).centre();
         assert_eq!(at(BuildingKind::Hut { size: 3 }, 0x0a00, 0x1400), (0x0b00, 0x1500));
         assert_eq!(at(BuildingKind::DrumTower, 0x0a00, 0x1400), (0x0b00, 0x1500));
         assert_eq!(at(BuildingKind::SpyTraining, 0x0a00, 0x1400), (0x0c00, 0x1600));
@@ -212,7 +305,7 @@ mod tests {
                 t.set(x, z, 100 + (x * 7 + z * 13) as u16 % 50);
             }
         }
-        Building { kind: BuildingKind::Hut { size: 1 }, owner: 0, x: 20 * 512, z: 30 * 512, facing: 0 }.flatten(&mut t);
+        Building::new(BuildingKind::Hut { size: 1 }, 0, 20 * 512, 30 * 512, 0).flatten(&mut t);
         let h = t.get(20, 30);
         for (x, z) in [(21, 30), (20, 31), (21, 31)] {
             assert_eq!(t.get(x, z), h, "the cell at the corner, centred");

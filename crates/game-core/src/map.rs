@@ -180,7 +180,7 @@ impl GameMap {
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
         let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None }.with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
-        let place = |owner: u8, model: u8, (x, z): (u16, u16), facing: u8| Building { kind: crate::building::BuildingKind::from_model(model), owner, x: x - 256, z: z - 256, facing };
+        let place = |owner: u8, model: u8, (x, z): (u16, u16), facing: u8| Building::new(crate::building::BuildingKind::from_model(model), owner, x - 256, z - 256, facing);
         for model in 1..=19u8 {
             let i = model as i32 - 1;
             map.buildings.push(place(0, model, at(-12 + (i % 7) * 4, 6 + (i / 7) * 4), (i % 4) as u8 * 2));

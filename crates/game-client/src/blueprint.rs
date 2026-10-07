@@ -60,7 +60,7 @@ impl Blueprint {
 /// cell corner, as the levels store buildings (`Building::centre` is half a cell off).
 pub fn blueprint_at(kind: BuildingKind, facing: u8, cell: Vec2) -> Building {
     let corner = |c: f32| ((c.round() as i32).rem_euclid(128) as u32 * WORLD_UNITS_PER_CELL) as u16;
-    Building { kind, owner: PLAYER, x: corner(cell.x), z: corner(cell.y), facing }
+    Building::site(kind, PLAYER, corner(cell.x), corner(cell.y), facing)
 }
 
 /// A point of the building's own frame (cells) turned by `facing` into map axes, the same way
