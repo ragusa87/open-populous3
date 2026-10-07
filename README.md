@@ -32,8 +32,12 @@ This project is currently licensed under the [MIT License](LICENSE).
 File formats are reverse-engineered from the original files; community tools are used to cross-check them
 (read only, no code copied, the files win when they disagree):
 - [Pop-World-Editor](https://github.com/PopRe/Pop-World-Editor) (PopRe, no licence stated; fork:
-  [ALACNPopWorldEditor](https://github.com/Toksisitee/ALACNPopWorldEditor)): origin of the v2 level structures
-  (`pop.h`), see [level-format.md](docs/specs/level-format.md).
+  [ALACNPopWorldEditor](https://github.com/Toksisitee/ALACNPopWorldEditor), checked at `3d02fa3`): origin of the
+  v2 level structures (`pop.h`), the thing and header field meanings, the computer-player script format
+  (`cpscr`/`cpatr`), spell and object model names, the object banks' tree styles and the editor tools worth
+  copying, all cross-checked on the original files, see [level-format.md](docs/specs/level-format.md),
+  [ai-scripts.md](docs/specs/ai-scripts.md), [objects.md](docs/specs/objects.md),
+  [spells.md](docs/specs/spells.md), [ui-and-editor.md](docs/specs/ui-and-editor.md).
 - The [Toksisitee](https://github.com/Toksisitee) Populous tools:
   - [PopResourceEditor](https://github.com/Toksisitee/PopResourceEditor) (MIT, checked at `140e389`): layouts of
     the theme files (palette, bigfade, sky, disp, fade, cliff, ghost, alpha), the `bl320` object atlas and the
@@ -46,4 +50,5 @@ File formats are reverse-engineered from the original files; community tools are
   - [PopLanguageEditor](https://github.com/Toksisitee/PopLanguageEditor) (GPLv3): language string files, not
     used yet.
 
-Only facts about the file formats are taken from the GPL tools, never their code, so the MIT licence is kept.
+Only facts about the file formats are taken from the GPL and unlicensed tools, never their code, so the MIT
+licence is kept.
