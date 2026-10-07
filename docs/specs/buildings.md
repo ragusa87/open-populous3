@@ -84,6 +84,18 @@ tiles named (`panel_name`), "?" for discoverable, empty slot for hidden, hover d
 - More braves than the site's maximum: the first ones (by unit id, deterministic) up to the maximum are assigned,
   the others walk to the site and stand idle, not assigned.
 
+Done (UX only, nothing is placed yet):
+- `game_core::placement`: `blocked_at(map, point)` (Sea: drawn height < 1; Building: `Building::covers` its turned
+  footprint; Site: within `SPAWN_FLAT_RADIUS` of a reincarnation site; Tree: a cell with a tree that has wood),
+  `too_steep` (height points under the footprint spread more than `STEEP_SPREAD` = 200, placeholder), `can_place`.
+- Client `blueprint.rs`: a click on an available Build tab tile picks it (white border; picking a spell puts it
+  away and the other way round). Over the map it snaps to the nearest cell corner like the levels' buildings and is
+  drawn centred as they are, a 12 x 12 grid draped on the drawn ground with a door arrow out of the local +z side
+  (door side unverified); vertices red where `blocked_at`, all red when `too_steep`, arrow red when any part is.
+  Space turns it (and no longer looks at the shaman meanwhile), right click on the map puts it away, left click
+  does nothing yet; units are not selected or ordered while it is out. Leaving the game or changing level puts it
+  away.
+
 ### Tooltip
 Hovering or right-clicking a site (as for trees): kind, braves assigned / maximum, wood delivered / needed. On a
 building of a buildable kind with at least one piece of wood used (under construction or built): a "Dismantle"

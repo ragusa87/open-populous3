@@ -154,6 +154,7 @@ fn switch_level(
     mut spells: ResMut<crate::hud::spells::PlayerSpells>,
     mut selected: ResMut<crate::hud::spells::SelectedSpell>,
     mut builds: ResMut<crate::hud::build::PlayerBuilds>,
+    mut blueprint: ResMut<crate::blueprint::Blueprint>,
 ) {
     let modified = [KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight];
     if keys.any_pressed(modified) {
@@ -171,6 +172,7 @@ fn switch_level(
     spells.0 = crate::hud::spells::level_book(&map.0);
     selected.0 = None;
     builds.0 = crate::hud::build::level_builds(&map.0);
+    blueprint.put_away();
     dirty.0 = true;
 }
 

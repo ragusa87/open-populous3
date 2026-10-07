@@ -1,6 +1,7 @@
 //! Build tab: a grid of tiles mirroring the player's `BuildBook`, one per building of the original
 //! panel, named (no icons yet). Tile states: empty (hidden), "?" (plans to discover), named (available).
-//! Hover describes it. Placing buildings comes later (docs/specs/buildings.md).
+//! Hover describes it, a click on an available one picks it as the blueprint (`crate::blueprint`,
+//! white border while picked). Placing buildings comes later (docs/specs/buildings.md).
 
 use super::panel::{TabContent, DARK_BROWN, INK};
 use bevy::prelude::*;
@@ -47,7 +48,7 @@ pub fn describe_build(slot: &BuildSlot) -> String {
     match slot.availability {
         BuildAvailability::Hidden => String::new(),
         BuildAvailability::Discoverable => "Unknown building\nFind its plans to build it.".into(),
-        BuildAvailability::Available => format!("{}\nAvailable (construction comes later).", panel_name(slot.kind)),
+        BuildAvailability::Available => format!("{}\nClick to place it: Space turns it, right click puts it away.", panel_name(slot.kind)),
     }
 }
 
@@ -70,7 +71,7 @@ impl Plugin for BuildPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PlayerBuilds(BuildBook::all(BuildAvailability::Available)))
             .add_systems(Startup, spawn_tab)
-            .add_systems(Update, (update_tiles, update_info));
+            .add_systems(Update, ((tile_clicks.in_set(crate::menu::Gameplay), update_tiles).chain(), update_info));
     }
 }
 
@@ -94,8 +95,25 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, book: R
     });
 }
 
+/// A click on an available building picks it as the blueprint (and puts any spell away).
+fn tile_clicks(
+    q: Query<(&Interaction, &BuildTile), Changed<Interaction>>,
+    book: Res<PlayerBuilds>,
+    mut blueprint: ResMut<crate::blueprint::Blueprint>,
+    mut spell: ResMut<crate::hud::spells::SelectedSpell>,
+) {
+    for (interaction, tile) in &q {
+        let Some(slot) = book.0.slots.get(tile.0) else { continue };
+        if *interaction == Interaction::Pressed && slot.availability == BuildAvailability::Available {
+            blueprint.pick(slot.kind);
+            spell.0 = None;
+        }
+    }
+}
+
 fn update_tiles(
     book: Res<PlayerBuilds>,
+    blueprint: Res<crate::blueprint::Blueprint>,
     mut tiles: Query<(&BuildTile, &Interaction, &mut BackgroundColor, &mut BorderColor)>,
     mut labels: Query<(&BuildLabel, &mut Text, &mut TextFont)>,
 ) {
@@ -108,7 +126,12 @@ fn update_tiles(
             (true, false) => (Color::srgb(1.0, 0.84, 0.48), DARK_BROWN),
         };
         bg.0 = fill;
-        *border = BorderColor::all(if v.shown && *interaction == Interaction::Hovered { Color::srgb(1.0, 0.95, 0.7) } else { edge });
+        let picked = blueprint.kind.is_some_and(|k| book.0.slots.get(tile.0).is_some_and(|s| s.kind == k));
+        *border = BorderColor::all(match (picked, v.shown && *interaction == Interaction::Hovered) {
+            (true, _) => Color::WHITE,
+            (_, true) => Color::srgb(1.0, 0.95, 0.7),
+            _ => edge,
+        });
     }
     for (label, mut text, mut font) in &mut labels {
         let Some(v) = views.get(label.0) else { continue };

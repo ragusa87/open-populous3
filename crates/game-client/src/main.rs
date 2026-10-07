@@ -1,6 +1,7 @@
 //! Populous-like sandbox. Usage: `game-client [--no-original] [levlXXXX.dat | levels_dir]`.
 //! `--no-original` (or `POP3_NO_ORIGINAL=1`) never reads the original game files.
 
+mod blueprint;
 mod buildings;
 mod camera;
 mod cursor_debug;
@@ -49,7 +50,7 @@ fn main() {
     }
     app
         .add_plugins((
-            world::WorldPlugin { level_arg: opts.level_arg, use_original: opts.use_original },
+            (world::WorldPlugin { level_arg: opts.level_arg, use_original: opts.use_original },
             camera::CameraPlugin,
             virtual_cursor::VirtualCursorPlugin,
             grounded::GroundedPlugin,
@@ -57,6 +58,7 @@ fn main() {
             sky::SkyPlugin,
             nature::NaturePlugin,
             buildings::BuildingsPlugin,
+            blueprint::BlueprintPlugin),
             units::UnitsPlugin,
             wood::WoodPlugin,
             editor::EditorPlugin,

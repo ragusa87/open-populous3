@@ -289,6 +289,7 @@ struct GameSetup<'w> {
     cursor: ResMut<'w, VirtualCursor>,
     spells: ResMut<'w, PlayerSpells>,
     builds: ResMut<'w, PlayerBuilds>,
+    blueprint: ResMut<'w, crate::blueprint::Blueprint>,
     selected_spell: ResMut<'w, SelectedSpell>,
 }
 
@@ -306,6 +307,7 @@ impl GameSetup<'_> {
             Start::SandboxBuildings => (GameMap::sandbox_buildings(), sandbox_book()),
         };
         self.builds.0 = level_builds(&self.map.0);
+        self.blueprint.put_away();
         self.selected_spell.0 = None;
         self.dirty.0 = true;
         self.selection.clear();

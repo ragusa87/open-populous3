@@ -90,7 +90,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
 - [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
 - [ ] Build tab: icons, clicking a tile picks a blueprint; build books per tribe in the simulation (today `GameMap::build_book` is shared), discoveries unlocking "?".
-- [ ] Blueprint: white footprint draped on the ground following the cursor, door arrow, Space turns it; red where sea, too steep, another building/site or a tree with wood; red blocks placement.
+- [ ] Blueprint: left click places it (`Command::PlaceBuilding`, `placement::can_place`); tune `STEEP_SPREAD`; check the door side against the original objects; construction sites block like buildings once they exist.
 - [ ] At least one assigned brave is needed, up to the kind's maximum; more braves build faster (work shared).
 - [ ] Buildings and sites block walking (blocked-cell mask in `path` next to the terrain); not for flyers, not the reincarnation site; braves assigned to a site (or dismantling) may walk on its footprint. Replan walkers when the mask changes, push units off a new footprint.
 - [ ] `Command::PlaceBuilding` (with the selected braves) and `Command::Assign`; extra braves beyond the maximum walk to the site and idle unassigned.

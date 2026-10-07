@@ -2,7 +2,8 @@
 //! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|pray|cast|drown|teleport] game-client [level]`.
 //! `SHAMAN` gives the player's shaman an order at start, to check each pose.
 //! `FOCUS=x,z` (cells), `DISTANCE=n`, `PITCH=deg`, `YAW=deg` place the camera for the shot;
-//! `TAB=spells|build|stats` opens that panel tab.
+//! `TAB=spells|build|stats` opens that panel tab; `BLUEPRINT=kind@x,z` (kind as in the Build tab,
+//! e.g. `temple@64,70`) shows that blueprint at map position x,z (cells).
 
 use crate::camera::CameraRig;
 use crate::units::PLAYER;
@@ -101,6 +102,16 @@ impl ShotCamera {
     }
 }
 
+/// `kind@x,z`: a Build tab kind by its panel name, spaces and dashes optional (`firewarriorhut`),
+/// and a map position in cells.
+pub fn parse_blueprint(v: &str) -> Option<(game_core::building::BuildingKind, Vec2)> {
+    let (name, at) = v.split_once('@')?;
+    let squash = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+    let kind = game_core::build_book::BUILDABLE.into_iter().find(|&k| squash(crate::hud::build::panel_name(k)).starts_with(&squash(name)))?;
+    let (x, z) = at.split_once(',')?;
+    Some((kind, Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?)))
+}
+
 /// Panel tab by name (any case).
 pub fn tab_index(name: &str) -> Option<usize> {
     crate::hud::TABS.iter().position(|t| t.eq_ignore_ascii_case(name))
@@ -113,6 +124,8 @@ fn screenshot(
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<crate::world::TerrainDirty>,
     mut tab: ResMut<crate::hud::ActiveTab>,
+    mut blueprint: ResMut<crate::blueprint::Blueprint>,
+    mut pinned: ResMut<crate::blueprint::PinnedAt>,
     target: Option<Res<OffscreenTarget>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -125,6 +138,10 @@ fn screenshot(
     if *frame == 1 {
         if let Some(i) = std::env::var("TAB").ok().and_then(|t| tab_index(&t)) {
             tab.0 = i;
+        }
+        if let Some((kind, at)) = std::env::var("BLUEPRINT").ok().and_then(|v| parse_blueprint(&v)) {
+            blueprint.pick(kind);
+            pinned.0 = Some(at);
         }
         let demo = std::env::var("SHAMAN").unwrap_or_default();
         let cmds = map.0.shaman_of(PLAYER).map(|u| demo_commands(&demo, u)).unwrap_or_default();
@@ -150,6 +167,14 @@ fn screenshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blueprint_by_name_and_position() {
+        use game_core::building::BuildingKind;
+        assert_eq!(parse_blueprint("temple@64,70.5"), Some((BuildingKind::Temple, Vec2::new(64.0, 70.5))));
+        assert_eq!(parse_blueprint("Fire-warrior@1,2").map(|b| b.0), Some(BuildingKind::FirewarriorTraining));
+        assert_eq!(parse_blueprint("hut"), None);
+    }
 
     #[test]
     fn tabs_by_name() {

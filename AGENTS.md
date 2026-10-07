@@ -14,7 +14,7 @@ Guidance for coding agents working on this repo (Rust + Bevy 0.19 Populous-like 
 - `just test` (or `cargo test --workspace`): must pass before committing.
 - `just run [levl.dat|dir]`: windowed game. Avoid it as an agent: it opens a window and steals focus.
 - `just shot out.png [level]` / `AERIAL=1 just shot out.png`: headless offscreen render, then exits. Use this to check visuals.
-  `FOCUS=x,z` (cells), `DISTANCE`, `PITCH`, `YAW` (degrees), `SHOT_FRAME`, `SHAMAN=walk|teleport|...`, `TAB=spells|build|stats` set up the shot.
+  `FOCUS=x,z` (cells), `DISTANCE`, `PITCH`, `YAW` (degrees), `SHOT_FRAME`, `SHAMAN=walk|teleport|...`, `TAB=spells|build|stats`, `BLUEPRINT=temple@64,70` set up the shot.
   Level paths with spaces or quotes break `just shot`: run `HEADLESS=1 SCREENSHOT=out.png cargo run -p game-client -- "<level>"`.
 - `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings`: skip the main menu or open it (`just shot` starts in the game by default).
 - `just run-generated` / `--no-original`: no original files read at all (use for anything shippable).

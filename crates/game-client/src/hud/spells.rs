@@ -289,11 +289,13 @@ fn tile_clicks(
     q: Query<(&Interaction, &Tile), Changed<Interaction>>,
     book: Res<PlayerSpells>,
     mut selected: ResMut<SelectedSpell>,
+    mut blueprint: ResMut<crate::blueprint::Blueprint>,
 ) {
     for (interaction, tile) in &q {
         let slot = &book.0.slots[tile.0];
         if *interaction == Interaction::Pressed && slot.availability != Availability::Hidden {
             selected.0 = Some(slot.kind);
+            blueprint.put_away();
         }
     }
 }
