@@ -165,6 +165,18 @@ pub fn picture_frame(p: &Picture, palette: &[[u8; 3]]) -> Frame {
     Frame { width: p.sprite.width, height: p.sprite.height, origin: p.origin, rgba, scale: 1 }
 }
 
+/// A blended sprite (`pop3_format::blend`): each pixel's RGBA from the theme's alpha table
+/// (`AlphaTable::rgba`), so it is blended over whatever is behind it instead of drawn as colours.
+pub fn alpha_picture_frame(p: &Picture, rgba: &[[u8; 4]; 256]) -> Frame {
+    let rgba = p.sprite.pixels.iter().flat_map(|px| px.map_or([0, 0, 0, 0], |i| rgba[i as usize])).collect();
+    Frame { width: p.sprite.width, height: p.sprite.height, origin: p.origin, rgba, scale: 1 }
+}
+
+/// Whether a frame has see-through pixels that are not fully transparent (drawn blended).
+pub fn has_partial_alpha(f: &Frame) -> bool {
+    f.rgba.chunks_exact(4).any(|px| px[3] != 0 && px[3] != 255)
+}
+
 /// Which original animation shows `kind` in `pose` for `tribe`, with which outfit layer, and
 /// whether only its first frame (a gesture standing in for a still pose). The shaman has an
 /// animation per tribe; the others are coloured by layers (docs/specs/animations.md).
@@ -268,6 +280,18 @@ pub fn generated_art(kind: UnitKind) -> Vec<TribeArt> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alpha_sprites_keep_their_strength() {
+        let mut lut = [[0u8; 4]; 256];
+        lut[0x18] = [10, 20, 30, 136];
+        let sprite = pop3_format::Sprite { width: 2, height: 1, pixels: vec![Some(0x18), None] };
+        let f = alpha_picture_frame(&Picture { sprite, origin: (1, 0) }, &lut);
+        assert_eq!(f.rgba, vec![10, 20, 30, 136, 0, 0, 0, 0]);
+        assert!(has_partial_alpha(&f));
+        let opaque = Frame { rgba: vec![1, 2, 3, 255, 0, 0, 0, 0], ..f };
+        assert!(!has_partial_alpha(&opaque));
+    }
     use std::f32::consts::PI;
 
     #[test]

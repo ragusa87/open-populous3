@@ -143,7 +143,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Desync checksum of heightmap + units.
 
 ## Original sprites and blending ([sprites.md](docs/specs/sprites.md))
-- [ ] Alpha sprites (`hfx0-0.dat` 1090-1499, 1538-1592, spell effects): their pixels are `tint << 4 | strength` rows of `al0-X.dat`, not palette colours; blend them over the background instead of drawing raw indices.
+- [ ] Spell effects from the alpha sprites (`hfx0-0.dat`, decoded by `blend::AlphaTable`, blended on the GPU): map each effect to its frames (sprites.md).
 - [ ] Ghost table `ghost0-X.dat` (66% mix) for see-through units (Invisibility).
 - [ ] `sprites` parser: test the empty (0 x 0) entries and the `0x7F` trailer seen in the real banks.
 

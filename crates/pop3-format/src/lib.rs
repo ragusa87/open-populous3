@@ -4,6 +4,7 @@
 //! See `docs/specs/level-format.md` for the byte layout.
 
 pub mod anim;
+pub mod blend;
 pub mod catalog;
 pub mod header;
 pub mod install;

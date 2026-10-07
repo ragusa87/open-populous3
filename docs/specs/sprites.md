@@ -62,9 +62,12 @@ wood on the ground: `catalog::WOOD_PILE_SPRITE`), 90-93 fire, 107-111 spell name
 1030-1089 spell and building glyphs, 1090-1600 spell effects (dust, explosions, swarm...).
 The 3D objects have no wood pile: objects 0 and 12 are a camp fire (logs and a flame board), see objects.md.
 
-Alpha sprites: 1090..1499 and 1538..1592 are blended (same ranges in PopResourceEditor). Their indices
-(including 1..127, 633k pixels) are rows of the alpha table, not colours. `pop3_format::sprites` returns
-the raw indices.
+Alpha sprites: 1090..1499 and 1538..1592 are blended (same ranges in PopResourceEditor,
+`blend::is_alpha_sprite`). Their indices (including 1..127, 633k pixels) are rows of the alpha table, not colours.
+`pop3_format::sprites` returns the raw indices; `blend::AlphaTable::rgba` turns them into RGBA (tint colour,
+opacity strength / 15) for GPU blending (`art::alpha_picture_frame`, uploaded with `AlphaMode::Blend`).
+Identified: 1225-1239 a cream dust cloud growing and fading (the teleport landing puff), 1210-1224 the same in
+grey, 1181-1209 fire clouds, 1241-1247 and 1265-1279 flashes, 1330-1345 smoke columns.
 
 ## Blend tables (`data/`, one per theme, 65 536 bytes = 256 x 256 palette indices)
 Layouts from PopResourceEditor (Toksisitee, MIT, `140e389`), checked against the files.
@@ -73,6 +76,8 @@ Layouts from PopResourceEditor (Toksisitee, MIT, `140e389`), checked against the
 `al[row * 256 + background]`, `row = tint * 16 + strength`, so an alpha sprite pixel is
 `tint << 4 | strength`:
 - strength 0 = background unchanged (the first row of each block is 98% identity), 15 = about the tint.
+  In between the blend is linear: fitted over all backgrounds, the mix is strength / 15 within a few percent
+  (themes 0, 1, c), so an alpha pixel is the RGBA (tint, strength * 17).
 - tints (theme 1, row 15): 0 red, 1 orange, 2 cream, 3 green, 4 blue, 5 yellow, 6 brown, 7 pale cyan,
   8..15 black (darkening, shadows).
 - The table shape matches the guessed in-game lookup `al[idx * 256 + background]`; the game code itself was

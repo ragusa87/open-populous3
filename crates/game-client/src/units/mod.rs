@@ -182,8 +182,10 @@ fn load_sprites(
 }
 
 /// Uploads a frame: pixel art (scale 1) upscaled with Scale2x and filtered linearly, edges bled so
-/// they do not darken; an unlit cut-out quad anchored at the feet.
+/// they do not darken; an unlit quad anchored at the feet, cut out, or blended when the frame has
+/// see-through pixels (alpha sprites, `art::alpha_picture_frame`).
 pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> FrameAsset {
+    let blended = art::has_partial_alpha(f);
     let steps = if f.scale == 1 { UPSCALE_STEPS } else { 0 };
     let mut big = (0..steps).fold(f.clone(), |g, _| art::scale2x(&g));
     art::bleed_edges(&mut big);
@@ -200,7 +202,7 @@ pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<M
     let (size, origin) = (Vec2::new(f.width as f32, f.height as f32) / s, Vec2::new(f.origin.0 as f32, f.origin.1 as f32) / s);
     let material = mats.add(StandardMaterial {
         base_color_texture: Some(image.clone()),
-        alpha_mode: AlphaMode::Mask(0.5),
+        alpha_mode: if blended { AlphaMode::Blend } else { AlphaMode::Mask(0.5) },
         unlit: true,
         cull_mode: None,
         double_sided: true,
