@@ -84,9 +84,18 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Check the facing against the game (level 19's boat hut, facing 4, points its jetty into a low inlet: looks right), and the cells a footprint takes (units should not stand or walk through buildings).
 - [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold.
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
-- [ ] Placement on flat enough ground (Build tab), footprint, destruction on uneven/flooded ground.
-- [ ] Construction: each building costs wood; braves carry it and build over time, it finishes once all its wood is in.
-- [ ] Deconstruction: braves dismantle a building and get its wood back.
+- [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
+- [ ] Build tab: buildable kinds per tribe with `Availability` (Hidden / "?" / Available), from the level `.hdr` and triggers.
+- [ ] Blueprint: white footprint draped on the ground following the cursor, door arrow, Space turns it; red where sea, too steep, another building/site or a tree with wood; red blocks placement.
+- [ ] `Command::PlaceBuilding` (with the selected braves) and `Command::Assign`; extra braves beyond the maximum walk to the site and idle unassigned.
+- [ ] Building stage (Site / Built / Dismantling) with wood needed / delivered / used; tooltip with braves assigned/max and wood, Dismantle toggle on built ones.
+- [ ] Braves' build cycle: gather and watch, flatten the footprint by jumping point by point, fetch wood (ground piece or cut a tree) to a pile by the door, build one piece at a time.
+- [ ] Wood dispatch rule: start with every assigned brave fetching while delivered + carried < needed; refine later.
+- [ ] Site visuals: blueprint, then a wooden frame of the building's shape growing with progress, then the full building.
+- [ ] Dismantling: braves remove one piece at a time, dropped as a wood piece (circle on the ground) near the door; the building disappears when empty and frees its ground.
+- [ ] Wood pieces lying on the ground (`GameMap::wood`): picked up by any construction, drawn as small circles.
+- [ ] Building costs: placeholder wood / max braves table in the spec; match the original values.
+- [ ] Destruction of buildings on uneven/flooded ground (spells, erosion).
 - [ ] Towers (drum tower): hold one unit, which gets a longer range from there: firewarriors throw farther, the shaman casts spells farther, a preacher converts enemies around the tower. No other tower effect.
 - [ ] Training huts: warrior, firewarrior, preacher, spy training turns a brave into that unit (time + mana).
 - [ ] Houses: hold a brave population, generate mana from the braves inside, spawn new braves over time.
