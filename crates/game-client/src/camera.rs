@@ -279,10 +279,14 @@ fn apply_rig(
     }
 }
 
+/// How far the view has gone from the sky to space (0 near the ground, 1 looking at the planet).
+pub fn space_fade(distance: f32) -> f32 {
+    ((distance - 30.0) / 60.0).clamp(0.0, 1.0)
+}
+
 /// Blue sky near the ground, black space when zoomed out to the planet.
 pub fn sky_for_distance(distance: f32) -> Color {
-    let t = ((distance - 30.0) / 60.0).clamp(0.0, 1.0);
-    SKY.mix(&SPACE, t)
+    SKY.mix(&SPACE, space_fade(distance))
 }
 
 fn sky_color(rig: Res<CameraRig>, mut clear: ResMut<ClearColor>) {

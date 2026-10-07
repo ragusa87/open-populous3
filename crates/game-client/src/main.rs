@@ -14,6 +14,7 @@ mod nature;
 mod original_models;
 mod procedural_theme;
 mod sites;
+mod sky;
 mod terrain_mesh;
 mod terrain_texture;
 mod units;
@@ -53,6 +54,7 @@ fn main() {
             virtual_cursor::VirtualCursorPlugin,
             grounded::GroundedPlugin,
             sites::SitesPlugin,
+            sky::SkyPlugin,
             nature::NaturePlugin,
             buildings::BuildingsPlugin,
             units::UnitsPlugin,

@@ -33,7 +33,12 @@ between themes (22 distinct disp files, 32 bigfade, 32 sky).
 ## Sky
 `pal[112 + v]`, not `pal[v]`: read as raw indices it hits the land colours (the "planet surface" look of
 theme `c`). Theme `c` is a light blue-grey cloud layer, flat across rows: a tiling cloud texture, not a
-vertical gradient. Not used yet.
+vertical gradient. Theme `m` (level 5) is a night sky: `pal[112]` is black there, not magenta.
+
+`pop3_format::theme::Sky` decodes it (theme 0: 640 x 480 raw indices). The client (`sky.rs`) draws it on a
+dome around the eye, projected like a flat ceiling of clouds (`dome_uv`: tiles shrink towards the horizon,
+mirrored below it), faded out with the plain sky colour when zooming out to the planet (`camera::space_fade`).
+How the original maps it (scrolling backdrop?) is not checked. Generated maps keep the plain colour.
 
 ## bigfade
 - Columns: brightness, 0 bright -> 255 dark (theme 1, row 600: luminance 186 -> 40).
@@ -79,10 +84,10 @@ Fallback (no data, or `--no-original`): `procedural_theme::generate(seed)` build
 shapes as the original files, so the same bake is used in both modes.
 
 ## Next
-See TODO.md ("Terrain"): sky (`+ 112`), fade, cliff and watdisp loading (`pop3_format::theme` loads pal,
+See TODO.md ("Terrain"): fade, cliff and watdisp loading (`pop3_format::theme` loads pal,
 bigf and disp only), the `disp` offset.
 - Re-bake only the dirty rect after edits (now the whole 1024² texture is re-baked).
-- Mipmaps (distant aliasing), theme sky colour / backdrop, lava and swamp layers.
+- Mipmaps (distant aliasing), lava and swamp layers.
 - Free theme packs for redistribution (the original files must not be shipped). The community packs on
   thebeginning.uk/textures have no licence (site: "All rights reserved") and keep Bullfrog data (palette
   128..255, some ship the original `BL320`): fine to load from the user's `data/`, not to bundle.
