@@ -1,6 +1,9 @@
 //! A tribe's spells: which ones it knows, their charges and mana recharge.
 //! Deterministic integer state, ticked by the simulation.
 
+use pop3_format::level::{ThingData, KIND_SPELL};
+use pop3_format::{Level, LevelHeader};
+
 pub const MAX_CHARGES: u8 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -184,6 +187,35 @@ impl SpellBook {
         SpellBook { slots: SpellKind::ALL.iter().map(|&k| SpellSlot::new(k, Availability::Hidden)).collect() }
     }
 
+    /// An original level's loadout: the header's `SpellsAvailable` spells are known, with full
+    /// charges (unverified: how charged they start); the spells of its discovery things that are
+    /// not known yet are "?".
+    pub fn from_level(header: &LevelHeader, level: &Level) -> Self {
+        let mut book = SpellBook::new();
+        let discoveries = level.things.iter().filter_map(|t| match t.data() {
+            ThingData::Discovery(d) if d.kind == KIND_SPELL => SpellKind::from_model(d.model),
+            _ => None,
+        });
+        for kind in discoveries {
+            book.set(kind, Availability::Discoverable);
+        }
+        for kind in SpellKind::ALL.iter().copied().filter(|k| SpellKind::from_model(k.model()) == Some(*k)) {
+            if header.spell_available(kind.model()) {
+                book.set(kind, Availability::Known);
+            }
+        }
+        book.fill();
+        book
+    }
+
+    /// Every known spell at full charges.
+    pub fn fill(&mut self) {
+        for s in self.slots.iter_mut().filter(|s| s.availability == Availability::Known) {
+            s.charges = s.kind.max_charges();
+            s.recharge = 0;
+        }
+    }
+
     pub fn slot(&self, kind: SpellKind) -> Option<&SpellSlot> {
         self.slots.iter().find(|s| s.kind == kind)
     }
@@ -257,6 +289,33 @@ mod tests {
         for k in SpellKind::ALL.iter().filter(|&&k| k != SpellKind::Teleport) {
             assert_eq!(SpellKind::from_model(k.model()), Some(*k));
         }
+    }
+
+    #[test]
+    fn level_loadout_from_header_and_discoveries() {
+        let mut hdr = vec![0u8; 616];
+        let mask: u32 = 0xffc0_0001 | 1 << 2 | 1 << 5 | 1 << 20 | 1 << 21;
+        hdr[0..4].copy_from_slice(&mask.to_le_bytes());
+        let header = LevelHeader::parse(&hdr);
+        let mut dat = vec![0u8; pop3_format::level::DAT_SIZE];
+        let thing = |dat: &mut Vec<u8>, slot: usize, kind: u8, model: u8| {
+            let t = 81_987 + slot * 55;
+            dat[t..t + 2].copy_from_slice(&[pop3_format::level::GENERAL_DISCOVERY, pop3_format::level::KIND_GENERAL]);
+            dat[t + 7..t + 10].copy_from_slice(&[kind, model, 3]);
+        };
+        thing(&mut dat, 0, KIND_SPELL, 17);
+        thing(&mut dat, 1, KIND_SPELL, 5);
+        thing(&mut dat, 2, 2, 4);
+        let book = SpellBook::from_level(&header, &Level::parse(&dat).unwrap());
+        let avail = |k| book.slot(k).unwrap().availability;
+        assert_eq!(avail(SpellKind::Blast), Availability::Known);
+        assert_eq!(book.slot(SpellKind::Blast).unwrap().charges, MAX_CHARGES, "starts charged");
+        assert_eq!(avail(SpellKind::Swarm), Availability::Known, "known wins over its discovery");
+        assert_eq!(avail(SpellKind::Convert), Availability::Discoverable);
+        assert_eq!(avail(SpellKind::Whirlwind), Availability::Hidden, "a building discovery");
+        assert_eq!(avail(SpellKind::Teleport), Availability::Hidden, "model 21 is not the sandbox teleport");
+        let known = book.slots.iter().filter(|s| s.availability == Availability::Known).count();
+        assert_eq!(known, 2, "the always-set mask bits and bloodlust give nothing");
     }
 
     #[test]

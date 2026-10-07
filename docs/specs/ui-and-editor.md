@@ -25,8 +25,10 @@ health bar with `hp/max`; clicking it looks at her), 3 tabs
 the grid.
 
 ### Spells tab (`hud/spells.rs`)
-Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`, demo loadout for now; the walk sandbox
-adds Teleport, unlimited: `sandbox_book`).
+Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`). An original level brings its own loadout
+(`level_book` = `GameMap::spell_book`, set on New game and PgUp/PgDn): the header's spells known and full, its
+spell discoveries as "?" (spells.md). Generated maps get the demo loadout (`demo_book`, every tile state); the
+sandboxes add Teleport, unlimited (`sandbox_book`). One tile per `SpellKind`, Hidden ones as empty slots.
 Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 
 | Availability | Tile |

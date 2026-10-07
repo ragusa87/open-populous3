@@ -151,6 +151,8 @@ fn switch_level(
     mut levels: ResMut<LevelList>,
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<TerrainDirty>,
+    mut spells: ResMut<crate::hud::spells::PlayerSpells>,
+    mut selected: ResMut<crate::hud::spells::SelectedSpell>,
 ) {
     let modified = [KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight];
     if keys.any_pressed(modified) {
@@ -165,6 +167,8 @@ fn switch_level(
     };
     levels.index = next_index(levels.index, levels.files.len(), forward);
     map.0 = levels.load_current();
+    spells.0 = crate::hud::spells::level_book(&map.0);
+    selected.0 = None;
     dirty.0 = true;
 }
 

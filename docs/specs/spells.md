@@ -22,6 +22,12 @@ Known / Unlimited: cast at will, used by sandbox spells), `charges` (max 4, fewe
 `tick(mana)` refills recharging spells, `cast(kind)` consumes a charge or a provided shot,
 `discover(kind)` turns "?" into Known. Integer only, deterministic. UI: see ui-and-editor.md.
 
+`SpellBook::from_level(header, level)`: the header's `SpellsAvailable` panel spells are Known with full charges
+(how charged the original starts them is not checked), the spell discoveries (`DiscoveryType 11`) not already
+known are Discoverable. Their availability (permanent / this level / once) is not kept yet. Stored as
+`GameMap::spell_book` for original levels, the same for every tribe. Note: levels 1-3 have bit 18 (Armageddon)
+set, with 20 and 21, which looks unlikely for the first levels: shown as the file says.
+
 ## Original spells (levels and scripts)
 Spell model numbers, as used by discovery things, the level header masks and AI scripts (names from the ALACN
 world editor, checked against the campaign's discoveries, see level-format.md):

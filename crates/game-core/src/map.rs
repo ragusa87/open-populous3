@@ -5,6 +5,7 @@ use crate::command::Command;
 use crate::path::Mobility;
 use crate::slots;
 use crate::spell::Spell;
+use crate::spell_book::SpellBook;
 use std::collections::BTreeSet;
 use crate::tree::{scatter, Tree};
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
@@ -30,6 +31,9 @@ pub struct GameMap {
     pub buildings: Vec<Building>,
     /// Pieces of wood lying on the ground (none in original levels).
     pub wood: Vec<WoodPiece>,
+    /// The spells an original level gives (`SpellBook::from_level`, the same for every tribe for
+    /// now); None for generated maps, sandboxes and levels without a header.
+    pub spell_book: Option<SpellBook>,
 }
 
 impl GameMap {
@@ -49,6 +53,7 @@ impl GameMap {
                 .collect(),
             buildings: buildings_from_level(level),
             wood: Vec::new(),
+            spell_book: None,
         }
         .with_building_ground()
         .with_shamans()
@@ -98,7 +103,8 @@ impl GameMap {
             .map(|h| h.name.clone())
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| dat.file_stem().unwrap_or_default().to_string_lossy().into_owned());
-        Ok(Self::from_level(&level, name, header.map(|h| h.theme)))
+        let spell_book = header.as_ref().map(|h| SpellBook::from_level(h, &level));
+        Ok(GameMap { spell_book, ..Self::from_level(&level, name, header.map(|h| h.theme)) })
     }
 
     /// Deterministic island map from a seed (fallback when no original data exists).
@@ -117,7 +123,7 @@ impl GameMap {
             terrain.set(x, z, v);
         }
         let sites = generated_sites(&terrain);
-        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new() }.with_shamans().with_trees(seed, 60)
+        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None }.with_shamans().with_trees(seed, 60)
     }
 
     /// Test ground for walking: a small flat island around the player's site at the centre, a gentle
@@ -144,7 +150,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new() }.with_shamans().with_trees(1, 150)
+        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None }.with_shamans().with_trees(1, 150)
     }
 
     /// Test ground for buildings: a flat island with the player's site, one building of every known
@@ -161,7 +167,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new() }.with_shamans();
+        let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None }.with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let place = |owner: u8, model: u8, (x, z): (u16, u16), facing: u8| Building { kind: crate::building::BuildingKind::from_model(model), owner, x: x - 256, z: z - 256, facing };
         for model in 1..=19u8 {
@@ -197,7 +203,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new() }.with_shamans().with_trees(2, 150);
+        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None }.with_shamans().with_trees(2, 150);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         for (row, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
             let row = row as i32;

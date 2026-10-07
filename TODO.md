@@ -56,7 +56,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Aim the other spells on the terrain like Teleport (`hud::spells::ground_spell`), with cast range from the shaman.
 - [ ] Spell cursors: map each spell to its gold icon in `POINT0-0.DAT` (38-66) in `virtual_cursor::spell_sprite`.
 - [ ] Burn (1), bloodlust (20) and the original teleport (21): what they do and who casts them (never on the player panel).
-- [ ] Load the enabled spells from the level into each tribe's `SpellBook`, instead of `demo_book`: `.hdr` `SpellsAvailable` = known, discovery things (general model 2, type 11) = discoverable, with their availability (permanent / this level / one shot).
+- [ ] Level spells per tribe in the simulation (today `GameMap::spell_book` is the player's loadout, shared): keep each discovery's availability (permanent / this level / one shot) for when it is discovered; `SpellsAvailableLevel` / `SpellsNotCharging` and `SpellsAvailableOnce`.
+- [ ] Levels 1-3 set Armageddon (bit 18) in `SpellsAvailable`: check in the game whether it is really on the panel (and where level 1's Convert comes from: not in the mask).
 
 ## Mana
 - [ ] Mana per tribe in the simulation (integer, deterministic), shown in the HUD.

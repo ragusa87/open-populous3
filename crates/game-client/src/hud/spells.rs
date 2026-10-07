@@ -14,6 +14,7 @@ use crate::virtual_cursor::CursorLook;
 use crate::world::{CurrentMap, TerrainDirty};
 use bevy::prelude::*;
 use game_core::command::Command;
+use game_core::map::GameMap;
 use game_core::spell::Spell;
 use game_core::unit::Order;
 use game_core::spell_book::{Availability, SpellBook, SpellKind, SpellSlot, MAX_CHARGES};
@@ -122,6 +123,12 @@ pub fn ground_spell(kind: SpellKind, at: (u16, u16)) -> Option<Spell> {
     }
 }
 
+/// The player's spells on `map`: an original level's own loadout (`GameMap::spell_book`), else
+/// the demo one (generated maps).
+pub fn level_book(map: &GameMap) -> SpellBook {
+    map.spell_book.clone().unwrap_or_else(demo_book)
+}
+
 /// Walk sandbox: the demo loadout plus Teleport, free.
 pub fn sandbox_book() -> SpellBook {
     let mut b = demo_book();
@@ -129,7 +136,7 @@ pub fn sandbox_book() -> SpellBook {
     b
 }
 
-/// Sandbox loadout showing every tile state until levels provide their own.
+/// Loadout showing every tile state, for maps without one of their own.
 pub fn demo_book() -> SpellBook {
     let mut b = SpellBook::new();
     for k in [SpellKind::Blast, SpellKind::Convert, SpellKind::Swarm, SpellKind::LandBridge, SpellKind::Erosion] {
@@ -441,6 +448,16 @@ mod tests {
         let teleport = sandbox_book().slot(SpellKind::Teleport).cloned().unwrap();
         assert!(teleport.can_cast() && teleport.availability == Availability::Unlimited);
         assert_eq!(demo_book().slot(SpellKind::Teleport).unwrap().availability, Availability::Hidden, "sandbox only");
+    }
+
+    #[test]
+    fn original_levels_bring_their_spells() {
+        let mut map = GameMap::generate(1);
+        assert_eq!(level_book(&map), demo_book(), "generated: demo loadout");
+        let mut own = SpellBook::new();
+        own.set(SpellKind::Blast, Availability::Known);
+        map.spell_book = Some(own.clone());
+        assert_eq!(level_book(&map), own);
     }
 
     #[test]

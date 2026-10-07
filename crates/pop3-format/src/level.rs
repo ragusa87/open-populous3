@@ -32,6 +32,7 @@ pub const KIND_BUILDING: u8 = 2;
 pub const KIND_SCENERY: u8 = 5;
 pub const KIND_GENERAL: u8 = 6;
 pub const KIND_EFFECT: u8 = 7;
+pub const KIND_SPELL: u8 = 11;
 /// General models with a decoded union.
 pub const GENERAL_DISCOVERY: u8 = 2;
 pub const GENERAL_TRIGGER: u8 = 6;
