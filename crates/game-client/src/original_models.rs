@@ -132,7 +132,7 @@ mod tests {
     fn quad() -> Object {
         Object {
             points: vec![[0, 0, 0], [512, 0, 0], [512, 512, 0], [0, 512, 0]],
-            faces: vec![Face { tile: Some(9), colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0); 4] }],
+            faces: vec![Face { tile: Some(9), colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0); 4], flags: 0 }],
         }
     }
 

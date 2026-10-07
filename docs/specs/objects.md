@@ -89,9 +89,18 @@ bank 0 and pick the trees by bank.
 | 0 | u8 | palette colour (flat faces) |
 | 2 | u16 | atlas tile, `0xffff` = untextured |
 | 6 | u8 | point count (3 or 4; others skipped) |
+| 7 | u8 | flags: `0x20` = blended (`FACE_ALPHA`, see below); 0, 3, 6, 7 elsewhere, meaning unknown |
 | 8 | 4 x (i32 u, i32 v) | texel inside the tile, 16.16 fixed point, 0..32 |
 | 40 | 4 x u16 | point indices, 0-based within the object |
 | 48..60 | | per-point shade (?) and flags, unknown |
+
+### Blended faces (flames)
+The 144 faces with flag `0x20` all use tile 92, and only they do: the flame boards of the camp fires (0, 12),
+objects 133-136 (large huts), the firewarrior training huts (137-140) and the guard posts (190-193). Tile 92 holds
+alpha pixels like the blended `hfx0-0.dat` sprites (sprites.md): `tint << 4 | strength` through the theme's
+`al0-X.dat`. The flame uses tints 0 (red), 1 (orange), 2 (white-hot) and 5 (yellow); the board around it is
+index 0 (nothing) and 1-3 (tint 0, strength 1-3: barely visible). Drawn with the palette it looks like a brown
+board. The game animates the camp fire's flame (how is not known: the tile has no neighbouring frames).
 
 ## Atlas: `data/bl320-X.dat` (theme char X, upper case on disk)
 256 x 1024 palette indices (theme `pal0-X.dat`): 8 x 32 tiles of 32x32, tile `i` at
@@ -107,7 +116,7 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 
 | Objects | What |
 |---|---|
-| 0 | camp fire (probably: wood at the base, a board for the flames); 12 looks the same, smaller |
+| 0 | camp fire: a cross of 4 charred logs (tile 137) and two crossed flame boards (blended, tile 92), 0.3 cell wide and high; 12 is the same with fresh logs (tile 136) |
 | 1 | totem; 2, 4 untextured copies; 3 animation frame (rotating rocks) |
 | 7, 100, 107 | "mort ailée" (winged death, probably Angel of Death): front, back, wings rotated; 8-11, 101-106, 108-116 untextured |
 | 19, 21 | totem of the winged death, and the bird perched on it |

@@ -191,8 +191,8 @@ mod tests {
         let obj = Object {
             points: vec![[0, 0, 0], [512, 0, 0], [512, 512, 0], [0, 512, 0], [0, 0, 512]],
             faces: vec![
-                Face { tile: None, colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0); 4] },
-                Face { tile: None, colour: 0, points: vec![0, 1, 4], uv: vec![(0, 0); 3] },
+                Face { tile: None, colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0); 4], flags: 0 },
+                Face { tile: None, colour: 0, points: vec![0, 1, 4], uv: vec![(0, 0); 3], flags: 0 },
             ],
         };
         let edges = object_edges(&obj);

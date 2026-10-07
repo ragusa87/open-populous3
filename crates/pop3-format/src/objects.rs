@@ -14,6 +14,10 @@ pub const TILE: usize = 32;
 pub const TILES_PER_ROW: usize = ATLAS_WIDTH / TILE;
 /// `Face::tile` value of an untextured face, drawn with `Face::colour`.
 const NO_TILE: u16 = 0xffff;
+/// `Face::flags` bit of a blended face: its texels are alpha pixels (`blend::AlphaTable`, tint and
+/// strength), not palette colours. Only the flame boards (tile 92) of the camp fires, the large
+/// huts, the firewarrior training huts and the guard posts have it.
+pub const FACE_ALPHA: u8 = 0x20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Face {
@@ -25,6 +29,15 @@ pub struct Face {
     pub points: Vec<u16>,
     /// Per point texel inside the tile, 16.16 fixed point (0..32).
     pub uv: Vec<(i32, i32)>,
+    /// Byte 7 of the record: render flags, mostly unknown (`FACE_ALPHA`).
+    pub flags: u8,
+}
+
+impl Face {
+    /// Whether the face is blended through the alpha table (`FACE_ALPHA`): a flame.
+    pub fn is_alpha(&self) -> bool {
+        self.flags & FACE_ALPHA != 0
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -64,6 +77,7 @@ fn parse_face(r: &[u8]) -> Option<Face> {
         colour: r[0],
         points: (0..n).map(|k| u16_at(r, 40 + k * 2)).collect(),
         uv: (0..n).map(|k| (i32_at(r, 8 + k * 8), i32_at(r, 12 + k * 8))).collect(),
+        flags: r[7],
     })
 }
 
@@ -198,6 +212,28 @@ mod tests {
         let facs = face_rec(1, &[0, 1, 7]);
         let bank = ObjectBank::parse(&object_rec((1, 2), (1, 4)), &pnts, &facs);
         assert!(bank.get(0).is_none());
+    }
+
+    #[test]
+    fn byte_7_flags_blended_faces() {
+        let pnts = vec![0u8; POINT_SIZE * 3];
+        let mut flame = face_rec(92, &[0, 1, 2]);
+        flame[7] = FACE_ALPHA;
+        let facs = [face_rec(1, &[0, 1, 2]), flame].concat();
+        let o = ObjectBank::parse(&object_rec((1, 3), (1, 4)), &pnts, &facs).objects.remove(0);
+        assert_eq!(o.faces.iter().map(Face::is_alpha).collect::<Vec<_>>(), [false, true]);
+    }
+
+    /// The camp fire's flame boards are its only blended faces (skipped without an install).
+    #[test]
+    fn the_camp_fire_flame_is_blended() {
+        let Some(dir) = crate::install::find_install().map(|i| crate::install::subdir(&i, "objects")) else { return };
+        let Ok(bank) = ObjectBank::load(&dir, 0) else { return };
+        let fire = bank.get(crate::catalog::CAMP_FIRE).unwrap();
+        let flame: Vec<_> = fire.faces.iter().filter(|f| f.is_alpha()).collect();
+        assert_eq!(flame.len(), 8, "two crossed boards, two halves, both sides");
+        assert!(flame.iter().all(|f| f.tile == Some(crate::catalog::FLAME_TILE)));
+        assert!(fire.faces.iter().filter(|f| f.tile == Some(crate::catalog::FLAME_TILE)).all(Face::is_alpha));
     }
 
     #[test]
