@@ -64,7 +64,28 @@ looks at the shaman. Selected units show a health bar; the cursor shows the coun
 ## World editor (`editor.rs`)
 Tab toggles edit mode. Brushes at the camera focus: R raise, F lower (Erode), T flatten,
 M mark + B land bridge from mark. Next: mouse picking on the curved surface, brush radius UI,
-object placement, saving back to `.dat` (inverse of `pop3-format`).
+object placement, saving back to `.dat` (inverse of `pop3-format`; what to write is in level-format.md).
+
+### Reference: the ALACN world editor (PopRe), tools worth copying
+Behaviour of the community editor (no licence, behaviour only, not checked against the game):
+- **Brush**: a square of `size + 1` vertices per side, centred on the picked cell. Size 0-128 on the mouse wheel,
+  speed 0-8. The height step is the elapsed time divided by a per-speed divisor (30000 down to 1000), so it is
+  frame-rate independent.
+- **Raise** (left button): when the area is uneven, only the vertices below its highest point rise, up to it.
+  Once flat, everything rises, capped at 1792 (the files never exceed 1024). **Lower** (right button) mirrors it
+  down to 0. A modifier skips the levelling step.
+- **Flatten**: every vertex moves by at most one step towards the height under the cursor.
+- **Smooth**: every vertex moves by at most one step towards the mean of itself and its 8 neighbours, counting
+  only neighbours above height 7, so sea and shore don't drag coasts under.
+- **Objects**: pick along the mouse ray, drag snaps to cells, the wheel rotates (buildings by quarter turns,
+  scenery by eighths), Del deletes, N duplicates. Land bridges have a second handle for their target. Triggers
+  link up to 10 things by clicking.
+- **Markers**: 256 slots, Ctrl+click puts the first free one (free = at cell 0,0), drag moves, Del frees.
+- **View**: 60 x 60 cells around the camera, curved by `-0.01 * d^2` (cells, only when the camera is low).
+  Heights are drawn exaggerated (1024 = 5 cells).
+- **Header dialogs**: name, players 1-4, AI script per tribe, allies matrix, flags (fog, god mode, no guest spells,
+  no reincarnation time), spell / building / vehicle availability, spells not charging, object bank (with a tree
+  preview), landscape type 0-35.
 
 ## Window
 Windowed 1280x720 for dev, F11 toggles borderless fullscreen, `FULLSCREEN=1` starts fullscreen.

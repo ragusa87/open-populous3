@@ -1,100 +1,243 @@
 # Original level format (Populous: The Beginning)
 
-Files in `levels/`: `levlNNNN.dat` (map + objects), `levlNNNN.hdr` (616 B, settings + name),
-`levlNNNN.inf`, `levlNNNN.ver` (68 B), plus `cpscr*`/`cpatr*` (AI scripts/attributes, not parsed).
-Layout ("v2") from PopResourceEditor's `Level.h` (Toksisitee, MIT, `140e389`), itself taken from the world
-editor ([PopRe/Pop-World-Editor](https://github.com/PopRe/Pop-World-Editor), `pop.h`); verified on the 41
-shipped levels. Fields marked "unverified" are names only.
+Files in `levels/`: `levlNNNN.dat` (map + objects), `levlNNNN.hdr` (616 B, settings + name), `levlNNNN.inf`,
+`levlNNNN.ver` (68 B), plus `cpscrNNN.dat` / `cpatrNNN.dat` (AI scripts and attributes, see ai-scripts.md).
 
-## `.dat` (192 137 bytes, little endian)
+Sources:
+- The "v2" structures of the ALACN Pop World Editor (`pop.h`, PopRe `3d02fa3`, no licence: facts only), also used
+  by PopResourceEditor (`Level.h`, MIT, `140e389`).
+- Field meanings from the editor's dialogs.
+
+Everything is checked on the 41 shipped levels. Tags:
+- **[files]**: verified on the files.
+- **[editor]**: from the editor only, can't be checked without the game.
+- **[contradicted]**: the editor disagrees with the files, which win.
+
+## `.dat` (192 137 bytes, little endian, packed)
 
 | Offset | Size | Content |
 |---|---|---|
-| 0 | 128*128*2 | `u16 GroundHeight`, row-major `z*128+x`. 0 = sea, observed max 1024 |
-| 32 768 | 16 384 | `u8 LandBlocks` (was "layer 2", meaning unverified) |
-| 49 152 | 16 384 | `u8 LandOrients` (was "layer 3", meaning unverified) |
-| 65 536 | 16 384 | `u8 NoAccessSquares` (all 0 in level 1) |
+| 0 | 128*128*2 | `u16 GroundHeight`, index `z*128 + x` (x = thing `PosX`). 0 = sea, max 1024 |
+| 32 768 | 16 384 | `u8 LandBlocks` |
+| 49 152 | 16 384 | `u8 LandOrients` |
+| 65 536 | 16 384 | `u8 NoAccessSquares` |
 | 81 920 | 4 x 16 | player start info: `i16 StartPosX, i16 StartPosY, i32 Future[3]` |
 | 81 984 | 3 | sunlight: `u8 ShadeStart, ShadeRange, Inclination` |
-| 81 987 | 2000 x 55 | things, `type == 0` means empty slot |
+| 81 987 | 2000 x 55 | things |
 | 191 987 | 50 x 3 | access info: `u8 Model, Type, Rights` |
 
-Observed: player start info is a placeholder in every level ((1,1), (2,2), (3,3), (4,4), futures 0);
-sunlight is always ShadeStart 28, ShadeRange 15, Inclination 32 or 64 (probably the terrain lighting
-input, see terrain-textures.md); access info is all zero.
+[files]:
+- **Axis order**: 95% of persons and buildings stand on land with `z*128 + x` and only 43% with the axes swapped.
+  Markers agree (see `.hdr`).
+- **Heights are per vertex**: one height per grid point, a cell is the quad (x, z)..(x+1, z+1). Max 1024 (27
+  levels reach it exactly). The editor allows up to 1792 [editor].
+- **LandBlocks and LandOrients are byte-identical to each other in all 41 levels.** Their non-zero cells are mostly
+  in the sea and often on even indices, so they look like stale data. Meaning unknown: ignore them.
+- NoAccessSquares: 0/1, non-zero only in levl2002 (40 cells) and levl2079 (174 cells).
+- Player start info is a placeholder in every level ((1,1), (2,2), (3,3), (4,4), futures 0). Access info is all
+  zero.
+- Sunlight is always ShadeStart 28, ShadeRange 15, Inclination 64 (29 levels) or 32 (12). Probably the terrain
+  lighting input (see terrain-textures.md); the editor doesn't use it.
 
-### Thing record (55 bytes)
+The editor rewrites LandBlocks, LandOrients, NoAccessSquares, start info, sunlight and access info as zeros when
+it saves [editor]. So the game probably doesn't need them, but keep the sunlight when writing.
+
+### Things
+[files]:
+- **Things are packed from slot 0 with no gaps; every empty slot is 55 zero bytes.**
+- `model == 0` exactly when `type == 0`.
+- Trigger links point at slots by 1-based index, so keep the slot order.
 
 | Off | Type | Field |
 |---|---|---|
-| 0 | u8 | model (subtype, e.g. tree variant) |
-| 1 | u8 | type: 1 person, 2 building, 3 creature, 4 vehicle, 5 scenery, 6 general, 7 effect |
-| 2 | i8 | owner tribe (-1 = 255 = neutral) |
-| 3 | u16 | x, world units (512 per cell, odd multiples of 256 = cell centre) |
+| 0 | u8 | model (subtype, per type below) |
+| 1 | u8 | type: 1 person, 2 building, 3 creature, 4 vehicle, 5 scenery, 6 general, 7 effect, 8 shot, 11 spell |
+| 2 | i8 | owner: -1 (255) neutral, 0 blue, 1 red, 2 yellow, 3 green (the editor also has 4 "hostbot", and writes -2 for a neutral prison) |
+| 3 | u16 | x, world units (512 per cell) |
 | 5 | u16 | z |
 | 7 | 48 B | union, by type (below) |
 
-Angles are in 2048ths of a turn (seen: 0, 512, 1024, 1536).
+**Positions [files]:**
+- **Buildings sit exactly on a cell corner** (`x % 512 == 0`, all 598).
+- Scenery, generals and effects sit at a cell centre (`x % 512 == 256`).
+- Persons: centre (4978) or anywhere (293).
 
-- Building (2): `i32 Angle` at 7.
-- Scenery (5): `u8 PortalStatus@7, PortalLevel@8, PortalType@9, i16 Angle@10, u8 UserId@12,
-  i16 IslandAlt@13, u8 IslandNum@15, BridgeNum@16`. Angle 0 / 512 / 1024 / 1536 seen 2899 / 357 / 764 /
-  536 times. Portal and island fields
-  always 0, UserId 1-3 a few times.
-- General (6), model 2 (discovery): `u8 DiscoveryType@7, DiscoveryModel@8, AvailabilityType@9,
-  TriggerType@10, i32 ManaAmt@11` (e.g. type 11, model 8..16, availability 3).
-- General (6), model 6 (trigger): `u8 TriggerType@7, CellRadius@8, RandomValue@9, i8 NumOccurences@10,
-  u16 TriggerCount@11, u16 ThingIdxs[10]@13, i16 PrayTime@33, u8 StartInactive@35,
-  CreatePlayerOwned@36, i16 InactiveTime@37`.
-- General (6), model 9: all zero.
-- Others: not decoded (kept raw in `Thing::raw`).
+The cell is `x >> 9` either way. The editor writes every thing at the corner [contradicted for non-buildings].
 
-Types/models seen in the shipped levels: person 1-7, building 1-8, 13, 15, 18, 19, vehicle 1 and 3,
-scenery 1-9 (1-6 trees, 7-8 plants?), general 2, 6, 9, effect (many models; 81, 85, 23 most common).
-Person models: 1 wild, 2 brave, 3 warrior, 4 preacher, 5 spy, 6 firewarrior, 7 shaman.
-Each tribe has exactly one shaman thing; its position is the tribe's reincarnation site
-(the original game builds the site there, it is not a separate thing in the file).
+**Angles**: 2048 = a full turn (0x100 = 45 degrees), rotation about the vertical axis. Only quarter turns are seen.
+The editor rotates buildings by quarter turns and scenery by eighths [editor].
 
-Axis order (`x` vs `z`) is unverified; a mirrored map would still look right.
+**Unions**:
+- **Building (2)**: `i32 Angle` at 7, seen 0, 512, 1024, 1536. Bytes 11-54 are 0.
+- **Scenery (5)**: `u8 PortalStatus@7, PortalLevel@8, PortalType@9, i16 Angle@10, u8 UserId@12,
+  i16 IslandAlt@13, u8 IslandNum@15, BridgeNum@16`, rest 0.
+  - Angles 0 / 512 / 1024 / 1536 seen 2899 / 357 / 764 / 536 times.
+  - Portal and island fields are always 0; UserId is 1-3 four times.
+  - The editor's scenery 18/19 ("top/sub level scenery") store the object to draw in `IslandNum@15` (39-44)
+    [editor]. No level has them.
+- **Person (1)** and **vehicle (4)**: bytes 7-54 always 0, no angle.
+- **General (6), model 2, discovery**:
+
+  | Off | Type | Field |
+  |---|---|---|
+  | 7 | u8 | DiscoveryType: a thing type, 11 spell, 2 building, 6 mana |
+  | 8 | u8 | DiscoveryModel: the spell or building model; 3 for mana |
+  | 9 | u8 | AvailabilityType: 1 permanent, 2 this level, 3 once |
+  | 10 | u8 | TriggerType: 0 normal, 1 immediate; always 1 in the files |
+  | 11 | i32 | ManaAmt |
+
+  Mana discoveries in the files: type 6, model 3, 50 000 mana. The editor writes model 5 [contradicted], and caps
+  ManaAmt at 1 000 000.
+- **General (6), model 6, trigger**:
+
+  | Off | Type | Field | Files (editor range) |
+  |---|---|---|---|
+  | 7 | u8 | TriggerType: 0 proximity, 1 timed, 2 player death, 3 shaman proximity, 4 library, 5 shaman + angel of death | 0 x124, 4 x23, 3 x21, 2, 5 |
+  | 8 | u8 | CellRadius | 1 (0, 2 rare) (0-4) |
+  | 9 | u8 | RandomValue | always 0 |
+  | 10 | i8 | NumOccurences | 0-5 (-1..120) |
+  | 11 | u16 | TriggerCount | 1-31 (0-32000) |
+  | 13 | u16[10] | ThingIdxs: things to activate, **1-based slot index**, 0 = none | |
+  | 33 | i16 | PrayTime | 0-1000 (0-1000) |
+  | 35 | u8 | StartInactive | always 0 |
+  | 36 | u8 | CreatePlayerOwned | 1 three times |
+  | 37 | i16 | InactiveTime | 1 or 768 (0-1000) |
+
+  ThingIdxs land on the discoveries, effects and things a trigger reveals (164 of 170 hit a non-empty slot; read
+  0-based they make no sense). levl2020 has 6 dangling indices (1708-1713, it has 470 things).
+- **General (6), model 9** ("building add-on"): all zero. Always within about 2 cells of a medium or large hut of
+  the same owner (91 of 91).
+- **Effect (7)**: rest zero, except:
+  - model 24 (land bridge) and 17 (lightning bolt) store a **target**: `i32@7` = target x, `i32@11` = target z,
+    each a u16 world coordinate sign-extended to 32 bits (`0xffffcb00` = 0xcb00). Land bridges point 8 cells away
+    along one axis; bolts often target their own position.
+
+### Types and models
+Names from the editor. Bracketed names exist in the game but the editor can't place them. Counts are things in
+the 41 levels.
+
+| Type | Models (count) |
+|---|---|
+| 1 person | 1 wild (3829), 2 brave (595), 3 warrior (290), 4 preacher (195), 5 spy (2), 6 firewarrior (242), 7 shaman (118), 8 angel of death (0) |
+| 2 building | 1-3 hut small/medium/large (11/75/204), 4 drum tower (164), 5 temple (29), 6 spy (17), 7 warrior (31), 8 firewarrior training (28), [9 reconversion, 10 wall piece, 11 gate, 12 curr OE slot], 13/14 boat hut (11/0), 15/16 airship hut (4/0), [17 guard post], 18 vault of knowledge (23), 19 prison (1) |
+| 3 creature | [1 bear, 2 buffalo, 3 wolf], 4 eagle, [5 rabbit, 6 beaver, 7 fish]: none in levels |
+| 4 vehicle | 1/2 boat (3/0), 3/4 airship (1/0) |
+| 5 scenery | 1-6 trees (2244/775/286/317/391/208), 7 plant 1 (187), 8 plant 2 (50), 9 stone head (98), 10 fire, 11 wood pile, 12 reincarnation-site pillar, 13 rock, [14 portal, 15 island, 16 bridge, 17 dormant tree], 18 top-level / 19 sub-level scenery |
+| 6 general | 1 light, 2 discovery (101), [3 debug static, 4 debug flying], 5 debug flag, 6 trigger (170), [7 vehicle construction, 8 mapwho thing], 9 building add-on (91), [10 discovery marker] |
+| 7 effect | 1-94, see below |
+| 8 shot | 1-3 standard, 4 fireball, 5 lightning, 6 super warrior, 7/8 volcano fireball: none in levels |
+| 11 spell | the spell models (spells.md): none in levels |
+
+The editor also lists, without being able to place them: type 9 shape and type 10 internal (models 1-19).
+
+Effects seen in the levels, mostly trigger targets: 5, 15, 17, 18, 19, 22, 23 (79), 24, 26, 30, 31, 39, 65, 75, 79,
+81 (204), 85 (103), 88-92. All effect names by model:
+- 1-10: simple blast, sprite circles, smoke, lightning element, burn cell obstacles, flatten land, move pillar,
+  prepare site land, sphere explode, fireball
+- 11-20: fire cloud, ghost army, invisibility, explode building partial, volcano, hypnotism, lightning bolt, swamp,
+  angel of death, whirlwind
+- 21-29: insect plague, firestorm, erosion, land bridge, wrath of god, earthquake, fly thingummy, sphere explode
+  and fire, big fire
+- 30-40: lightning, flatten, general, shape sparkle, lava flow, volcano explosions, purify land, unpurify land,
+  explosion 1, explosion 2, lava square
+- 41-50: whirlwind element, lightning strand, whirlwind dust, raise land, lower land, hill, valley, place tree,
+  rise, dip
+- 51-60: rock debris, clear mapwho, place shaman, place wild, building smoke, much simpler blast, tumbling branch,
+  conversion flash, hypnosis flash, sparkle
+- 61-70: small sparkle, explosion 3, rock explosion, lava gloop, splash, smoke cloud, smoke cloud constant,
+  fireball 2, ground shockwave, orbiter
+- 71-80: big sparkle, meteor, convert wild, building smoke full / partial / damaged, delete pillars, spell blast,
+  firestorm smoke, player dead
+- 81-90: reveal fog area, shield, boat hut repair, reedy grass, swamp mist, armageddon, bloodlust, teleport,
+  atlantis set, atlantis invoke
+- 91-94: statue to angel of death, fill one shots, fire roll element, armageddon arena
+
+Each tribe has exactly one shaman thing; its position is the tribe's reincarnation site (the game builds the site
+there, it is not a separate thing in the file).
 
 ## `.hdr` (616 bytes)
 
 | Off | Type | Field |
 |---|---|---|
-| 0 | u32 | SpellsAvailable (bitmask) |
-| 4 | u32 | BuildingsAvailable |
-| 8 | u32 | BuildingsAvailableLevel |
-| 12 | u32 | BuildingsAvailableOnce |
-| 16 | u32 | SpellsAvailableLevel (aka SpellsNotCharging) |
-| 20 | u8[32] | SpellsAvailableOnce |
-| 52 | u16 | VehiclesAvailable |
-| 54 | u8 | TrainingManaOff |
-| 55 | u8 | Flags |
+| 0 | u32 | SpellsAvailable: bit N = spell model N |
+| 4 | u32 | BuildingsAvailable: bit N = building model N |
+| 8 | u32 | BuildingsAvailableLevel (0 everywhere) |
+| 12 | u32 | BuildingsAvailableOnce (0 everywhere) |
+| 16 | u32 | SpellsAvailableLevel, aka SpellsNotCharging, same bits (0 everywhere) |
+| 20 | u8[32] | SpellsAvailableOnce (0 in the campaign, junk text in some multiplayer levels) |
+| 52 | u16 | VehiclesAvailable: bit N = vehicle model N |
+| 54 | u8 | TrainingManaOff (0) |
+| 55 | u8 | Flags (0) |
 | 56 | char[32] | level name, NUL-terminated ("Level 1") |
-| 88 | u8 | number of tribes (2-4) |
-| 89 | u8[3] | computer player script ids: mostly match `cpscrNNN.dat` (10, 74, 122...); 85, 100, 130 have no file; unused slots hold junk (4, 5) |
-| 92 | u8[4] | default allies, bitmasks (default 1, 2, 4, 8) |
+| 88 | u8 | number of tribes (2-4; editor 1-4) |
+| 89 | u8[3] | AI script number of red, yellow, green (`cpscrNNN.dat`, see ai-scripts.md), 0 = none; junk beyond the number of tribes |
+| 92 | u8[4] | DefaultAllies: per tribe, bitmask of allied tribes (1 blue, 2 red, 4 yellow, 8 green) |
 | 96 | u8 | landscape theme, 0-35 -> files `*0-X.dat` with X in `0-9a-z` (see terrain-textures.md) |
-| 97 | u8 | object bank (0, 2, 6, 7 used, see objects.md) |
-| 98 | u8 | level flags (0x1, 0x2, 0x10 seen) |
-| 99 | u8 | pad, always 0 |
+| 97 | u8 | object bank (0, 2, 6, 7 used; the editor offers 0, 2-7; see objects.md) |
+| 98 | u8 | level flags |
+| 99 | u8 | AI script number of blue (0 in every level) |
 | 100 | u16[256] | markers |
 | 612 | u16 | start position |
 | 614 | u16 | start angle (2048ths of a turn, e.g. 1144) |
 
-Bit meanings of the masks and flags are not mapped yet. Markers and start position look like packed cell
-positions: both bytes are always even (e.g. `0x1208`, `0xa62a`), i.e. one byte per axis = cell * 2.
-Which byte is x is unverified.
+[files]:
+- **Masks**: bit N = model N, confirmed by the campaign. A spell or building discovered in a level (discovery
+  things) is missing from that level's mask and present in later levels (e.g. level 4 discovers spells 3 and 17;
+  level 5 has 3, level 7 has 17). Bits that are not models are always set: bit 0 and 22-31 for spells, bit 0 and
+  17-31 for buildings, bit 0 and 5-15 for vehicles. So:
+  - vehicles 0xffe1 = none, 0xffe7 = both boats, 0xffeb = boat + airship 1, 0xffff = all;
+  - levels with boat or airship huts allow the matching vehicles.
+- **Allies**: own bit set by default. Level 14 `[1, e, e, e]` = red, yellow and green allied against blue. Level
+  19 `[5, 2, 5, 8]` = blue and yellow. Multiplayer levels: all 0.
+- **Level flags**:
+
+  | Bit | Meaning | Seen in |
+  |---|---|---|
+  | 0x01 | fog of war | levels 9 and 18 |
+  | 0x02 | "shaman omni", shown as "God mode" in the editor | level 25 |
+  | 0x04, 0x08 | force 640x480, level edit [editor] | |
+  | 0x10 | no guest spells | 2111, 2120, 2128, 2133 |
+  | 0x20 | no reincarnation time [editor] | |
+
+- **Markers and start position**: one byte per axis, **low byte = x * 2, high byte = z * 2** (both bytes always
+  even). An unused marker is 0 (cell 0, 0). Read lo = x, markers lie a median 3 cells from the nearest thing,
+  against 6.4 swapped. Level 3's start position `0xa62a` = (21, 83) is exactly the blue shaman's cell. Markers are
+  what AI scripts refer to by index.
 
 ## `.ver` (68 bytes)
-`i32 VersionNum` (11 in all 41 levels), `char CreatedBy[32]` (author, e.g. "acullum", "driley", sometimes
-empty), `char CreatedOn[28]` (date, e.g. "Sep 21 1998 17:09:26"), `i32 CheckSum`.
+`i32 VersionNum`, `char CreatedBy[32]`, `char CreatedOn[28]`, `i32 CheckSum`. [files]:
+- VersionNum is 11 in all 41 levels; the editor writes 11 too.
+- CreatedBy is the author, e.g. "acullum", "driley", sometimes empty.
+- CreatedOn is a date, e.g. "Sep 21 1998 17:09:26".
+- **CheckSum is 0 in every level**, so the game can't require it.
+
+## v3 (PopRe extension, not read by the original game) [editor]
+The editor's own format, starting with the magic `LEVL3`, with no `.hdr` or `.ver`:
+
+| Off | Size | Content |
+|---|---|---|
+| 0 | 5 | `"LEVL3"` |
+| 5 | 953 | the 616-byte header, then `u8 ComputerPlayerIndex[4]` (blue, red, yellow, green), `u8 Version` (1), `u32 MaxAltPoints` (16384), `u32 MaxNumObjects` (thing count), `u32 MaxNumPlayers` (4), `char Script2[10][32]` |
+| 958 | 32 768 | heights |
+| 33 726 | 16 384 | NoAccessSquares (no LandBlocks / LandOrients) |
+| 50 110 | 67 | start info, sunlight |
+| 50 177 | 55 x count | things, up to 66 535 |
+
+## Writing levels (for a future editor)
+Write v2 and:
+- pack things from slot 0 and zero-fill the rest;
+- renumber trigger ThingIdxs (1-based);
+- put buildings on corners and everything else on cell centres;
+- write `.hdr` and `.ver` (CheckSum 0).
+
+LandBlocks, LandOrients, start info and access info can be zero (the editor does it); keep the sunlight bytes.
 
 ## Code
-`crates/pop3-format/src/level.rs`, example: `just level-info path/to/levl2005.dat`.
-Known gaps (tracked in TODO.md, "Things and level data"):
-- Things are read from 82 042, one record too late: thing 0 is non-empty in all 41 levels and is dropped
-  (levl2001: a tribe-1 hut; levl2012: a wild man); the extra record read at the end is the zeroed access info.
-- `Thing::facing()` reads byte 8 % 8: for buildings it matches the quarter turns only because it is the high
-  byte of the `i32` angle; for scenery byte 8 is always 0, so tree turns are lost.
-- `LevelHeader` decodes only the name and the theme.
+`crates/pop3-format/src/level.rs`, example: `just level-info path/to/levl2005.dat`. To fix:
+- **The things offset**: the code reads from 82 042, one record too late, so thing 0 is dropped in every level
+  (levl2001: a tribe-1 hut; levl2012: a wild man). It should read from 81 987 (`MISC_SIZE` 67).
+- **`Thing::facing()`** reads byte 8 % 8. That is only right for buildings by luck (the high byte of `i32@7`) and
+  loses tree rotation (scenery `i16@10`).
+- **Undecoded unions**: discovery, trigger and effect target are not decoded.
+- **`LevelHeader`**: only the name and theme are decoded. Bank, flags, masks, allies, AI slots and markers are
+  missing.

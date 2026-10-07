@@ -3,7 +3,27 @@
 ## Simulation (done: `game_core::building`, view only)
 `GameMap::buildings`: `Building { kind, owner, x, z, facing }` from an original level's things of kind 2
 (`buildings_from_level`): model = type, owner = tribe (255 = neutral), position in world units, facing in eighths
-of a turn (thing byte 8: only 0, 2, 4, 6 seen, `Thing::facing`). Types by model, as numbered in the original's
+of a turn (thing byte 8: only 0, 2, 4, 6 seen, `Thing::facing`). The real field is the building's `i32` angle at
+byte 7, 2048 = a full turn (only quarter turns in the files), so byte 8 gives the same result only by luck.
+In the files a building always sits **exactly on a cell corner** (x, z multiples of 512), unlike other things (cell
+centres). The levels are already flattened around them (equal heights over the vertices around that corner):
+
+| Buildings | Flat area |
+|---|---|
+| huts 1-3, temple, warrior, firewarrior training, airship hut | vertices -1..+2, i.e. 3 x 3 cells |
+| drum tower, spy hut, boat hut | only the cell at the corner (vertices 0..+1) |
+| vault, prison | -2..+2 |
+
+So a 3 x 3 building's centre is half a cell off its stored corner (x + 256, z + 256, whatever the facing), while
+`Building::flatten` still centres the footprint on the corner (TODO).
+
+The other bits seen in the files and the editor:
+- The editor rotates buildings by quarter turns.
+- Each of the 91 general things of model 9 ("building add-on", no data) sits within about 2 cells of a medium or
+  large hut of the same owner: probably a hut extension (unverified).
+- The level header's `BuildingsAvailable` has bit N = building model N (see level-format.md).
+
+Types by model, as numbered in the original's
 scripts: 1-3 villager hut size 1-3, 4 drum tower, 5 temple (preachers), 6 spy, 7 warrior, 8 firewarrior training,
 9 reconversion, 10 wall, 11 gate, 13-14 boat hut, 15-16 airship hut, 17 guard post, 18 vault of knowledge,
 19 prison; others `Other(model)`. Level 19 (two tribes' villages of huts 3 and drum towers, a temple, training

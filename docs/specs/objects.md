@@ -4,11 +4,69 @@ Reverse-engineered from the files; `pop3_format::objects`, example `objects_info
 Read-only, never shipped (see assets.md).
 
 ## Banks: `objects/objs0-N.dat`, `pnts0-N.dat`, `facs0-N.dat`
-Bank 0 is the main one (194 slots). Banks 1-8 exist (2-7 look like variants), unused for now.
-The level header byte 97 (`ObjectsBankNum`, see level-format.md) picks the bank: 0 in 34 shipped levels,
-6 in levels 3, 5, 16, 22 and 2120, 7 in 2110, 2 in 2127.
-File names mix case (`OBJS0-0.DAT`, `objs0-1.dat`): match case-insensitively.
+The level header byte 97 (`ObjectsBankNum`, see level-format.md) picks the bank:
+- 0 in 34 shipped levels;
+- 6 in levels 3, 5, 16, 22 and 2120;
+- 7 in 2110;
+- 2 in 2127.
 
+The ALACN world editor offers banks 0 and 2-7, and ties the bank to a tree style. Its previews:
+- 0, 2, 7: cone pine and weeping trees;
+- 3: twisted "bonsai";
+- 4: mushroom-shaped;
+- 5: thin and tall;
+- 6: round, tall cone, palm.
+
+The client loads only bank 0 for now (`original_models.rs`). File names mix case (`OBJS0-0.DAT`, `objs0-1.dat`):
+match case-insensitively.
+
+### Bank layouts (compared by identical points and faces, verified)
+| Bank | Objects | Layout |
+|---|---|---|
+| 0 | 194 | the one catalogued below |
+| 1 | 51 | fragments of bank 0 (winged death, trees, stones) |
+| 2-7 | 158 each | **one common layout, different from bank 0**; the banks differ only in their trees (objects 13-18), and bank 7 has 0-5 empty |
+| 8 | 170 | older set, mostly unmatched (its 13 is bank 0's 16) |
+
+Banks 2-7 index -> bank 0 index:
+
+| Banks 2-7 | Bank 0 |
+|---|---|
+| 0-5 | 7-12 (winged death) |
+| 7-11 | 0-4 (camp fire, totems) |
+| 13-18 | trees, see below |
+| 19-21 | 19-21 |
+| 30-32 | 30-32 |
+| 39-44 | 75-80 |
+| 45-47 | 82-84 (stone head) |
+| 51, 52 | 90, 89 |
+| 53-56 | 91-94 |
+| 62-144 | **100-182 (+38)**: winged death back/wings, buildings 117-144, villager huts 145-180, boat 181, airship 182 |
+| 149-155 | 187-193 (totem poles, pyramid of knowledge and doors) |
+| 156 | 94 (prison) |
+| 157 | 19 |
+
+Empty in banks 2-7: 6, 12, 22-29, 33-38, 48-50, 57-61, 145-148.
+
+**Trees of scenery models 1-6**:
+- **Banks 2-7**: objects 13-18, where **16-18 are copies of 13-15** (tree 4 = 1, 5 = 2, 6 = 3).
+- **Bank 0's 60-71 are the trees of banks 3-6**, three per bank:
+
+  | Bank | Its 13-15 (and 16-18) = bank 0 objects |
+  |---|---|
+  | 2, 7 | 13, 14, 15 |
+  | 3 | 60, 61, 62 |
+  | 4 | 63, 64, 65 |
+  | 5 | 66, 67, 68 |
+  | 6 | 69, 70, 71 |
+
+- **Bank 0** itself: 13-15 like banks 2 and 7, 17-18 copies of 14-15, but 16 is a different pine.
+
+So the tree look follows the object bank, not the landscape theme. Which file the game loads for a bank-N level,
+and how it indexes it, is not verified (it needs the game). Either load bank N with the table above, or stay on
+bank 0 and pick the trees by bank.
+
+### Records
 `objs` record, 54 bytes, little endian:
 
 | Off | Type | Content |
@@ -57,7 +115,7 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | 30 | reincarnation site stone (tribe-coloured) |
 | 31, 32 | book, shield |
 | 13-18 | trees of scenery models 1-6 (`catalog::tree_object`): 13 cone pine, 14 weeping tree, 15 big weeping tree, 16 pine, 17-18 copies of 14-15 (level 19 confirmed 1 = cone pine, 2 = weeping tree) |
-| 60-71 | trees, 0.9-1.8 cells tall: twisted bonsai-like (60-65), thin, round, tall cone, palm (71, fronds a cut-out texture); probably other landscapes' trees (which theme uses them is unknown); drawn for generated maps' tree types 6-17 |
+| 60-71 | trees, 0.9-1.8 cells tall: twisted bonsai-like (60-65), thin, round, tall cone, palm (71, fronds a cut-out texture); the trees of object banks 3-6 (see above); drawn for generated maps' tree types 6-17 |
 | 82 | stone head; 83, 84 untextured |
 | 94 | prison (shaman locked until freed, some levels) |
 | 117-120 | drum tower, blue / red / yellow / green |

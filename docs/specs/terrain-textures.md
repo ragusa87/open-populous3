@@ -42,7 +42,8 @@ vertical gradient. Not used yet.
   column 64 as neutral light, +-16 for slope lighting, -16 on cliffs (|dh| > 10), and draws sea cells
   (height 0) as `bigfade[watdisp[x, y]]` (row 0).
 - Level `.dat` sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32 or 64, see level-format.md)
-  is probably the game's lighting input: unverified.
+  is probably the game's lighting input: unverified. The ALACN world editor doesn't use it: it colours land from
+  its own height ramp and zeroes the block when saving.
 
 ## disp
 - PopResourceEditor treats it as signed (shows `v + 128`). No file crosses 127/128, so the files can't

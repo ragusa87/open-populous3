@@ -26,9 +26,11 @@ Health: 100. Orders are ignored while drowning, dying or dead.
 
 ## From the levels (done)
 `GameMap::from_level` spawns every person thing (kind 1) where it is placed, model = kind
-(`UnitKind::from_person_model`: 1 wildman, 2 brave, 3 warrior, 4 preacher, 5 spy, 6 firewarrior, 7 shaman), owner =
+(`UnitKind::from_person_model`: 1 wildman, 2 brave, 3 warrior, 4 preacher, 5 spy, 6 firewarrior, 7 shaman; 8 is the
+angel of death, in no level; only 2 spies in all 41 levels), owner =
 tribe (255 = none: wildmen). Shamans spawn at their reincarnation site instead (one per site, ids first). Level 10:
 5 braves, 4 warriors, 4 preachers for the player, 5 warriors, 2 preachers, 4 firewarriors for green, 20 wildmen.
+In the files, persons stand at a cell centre (4978 of 5271) or anywhere, and carry no extra data (no angle).
 Wildmen are neutral (not selectable), drawn with their original anims (0 walk, 1 stand, 3 sit, 31 flung, 47 down)
 or else a generated figure in a hide with a mane, or the brave's rendered sheets in a hide colour.
 
