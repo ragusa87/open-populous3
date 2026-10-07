@@ -233,9 +233,8 @@ Write v2 and:
 LandBlocks, LandOrients, start info and access info can be zero (the editor does it); keep the sunlight bytes.
 
 ## Code
-`crates/pop3-format/src/level.rs`, example: `just level-info path/to/levl2005.dat`. To fix:
-- **The things offset**: the code reads from 82 042, one record too late, so thing 0 is dropped in every level
-  (levl2001: a tribe-1 hut; levl2012: a wild man). It should read from 81 987 (`MISC_SIZE` 67).
+`crates/pop3-format/src/level.rs`, example: `just level-info path/to/levl2005.dat`. Things are read from 81 987;
+start info, sunlight and access info are decoded (`Level::start_info`, `sunlight`, `access`). To fix:
 - **`Thing::facing()`** reads byte 8 % 8. That is only right for buildings by luck (the high byte of `i32@7`) and
   loses tree rotation (scenery `i16@10`).
 - **Undecoded unions**: discovery, trigger and effect target are not decoded.

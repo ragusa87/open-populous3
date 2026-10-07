@@ -14,11 +14,15 @@ const HEIGHTS_OFFSET: usize = 0;
 const LAYER2_OFFSET: usize = MAP_CELLS * 2;
 const LAYER3_OFFSET: usize = LAYER2_OFFSET + MAP_CELLS;
 const LAYER4_OFFSET: usize = LAYER3_OFFSET + MAP_CELLS;
-const MISC_OFFSET: usize = LAYER4_OFFSET + MAP_CELLS;
-const MISC_SIZE: usize = 122;
-const THINGS_OFFSET: usize = MISC_OFFSET + MISC_SIZE;
+const START_INFO_OFFSET: usize = LAYER4_OFFSET + MAP_CELLS;
+const START_INFO_SIZE: usize = 16;
+pub const PLAYERS: usize = 4;
+const SUNLIGHT_OFFSET: usize = START_INFO_OFFSET + START_INFO_SIZE * PLAYERS;
+const THINGS_OFFSET: usize = SUNLIGHT_OFFSET + 3;
 pub const THING_SIZE: usize = 55;
 pub const MAX_THINGS: usize = 2000;
+const ACCESS_OFFSET: usize = THINGS_OFFSET + THING_SIZE * MAX_THINGS;
+pub const ACCESS_ENTRIES: usize = 50;
 
 /// `Thing::kind` values (subset, see docs/specs/level-format.md).
 pub const KIND_PERSON: u8 = 1;
@@ -104,6 +108,37 @@ impl Thing {
     }
 }
 
+/// Per-player start info (a placeholder in every shipped level: (1, 1)..(4, 4), futures 0).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StartInfo {
+    pub x: i16,
+    pub z: i16,
+    pub future: [i32; 3],
+}
+
+impl StartInfo {
+    fn parse(b: &[u8]) -> Self {
+        let i32_at = |o: usize| i32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        StartInfo { x: i16::from_le_bytes([b[0], b[1]]), z: i16::from_le_bytes([b[2], b[3]]), future: [i32_at(4), i32_at(8), i32_at(12)] }
+    }
+}
+
+/// Sunlight block (always 28, 15, 64 or 32 in the shipped levels; meaning not confirmed).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Sunlight {
+    pub shade_start: u8,
+    pub shade_range: u8,
+    pub inclination: u8,
+}
+
+/// Access rights entry (all zero in the shipped levels).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AccessInfo {
+    pub model: u8,
+    pub kind: u8,
+    pub rights: u8,
+}
+
 /// Parsed `.dat` file. Cell `(x, z)` is at index `z * MAP_SIZE + x`.
 #[derive(Clone, Debug)]
 pub struct Level {
@@ -112,14 +147,16 @@ pub struct Level {
     pub layer2: Vec<u8>,
     pub layer3: Vec<u8>,
     pub no_access: Vec<u8>,
-    pub misc: Vec<u8>,
+    pub start_info: [StartInfo; PLAYERS],
+    pub sunlight: Sunlight,
     /// Non-empty things only.
     pub things: Vec<Thing>,
+    pub access: Vec<AccessInfo>,
 }
 
 impl Level {
     pub fn parse(data: &[u8]) -> Result<Self, LevelError> {
-        if data.len() < THINGS_OFFSET + THING_SIZE * MAX_THINGS {
+        if data.len() < DAT_SIZE {
             return Err(LevelError::BadSize { expected: DAT_SIZE, got: data.len() });
         }
         let heights = data[HEIGHTS_OFFSET..LAYER2_OFFSET]
@@ -135,9 +172,11 @@ impl Level {
             heights,
             layer2: data[LAYER2_OFFSET..LAYER3_OFFSET].to_vec(),
             layer3: data[LAYER3_OFFSET..LAYER4_OFFSET].to_vec(),
-            no_access: data[LAYER4_OFFSET..MISC_OFFSET].to_vec(),
-            misc: data[MISC_OFFSET..THINGS_OFFSET].to_vec(),
+            no_access: data[LAYER4_OFFSET..START_INFO_OFFSET].to_vec(),
+            start_info: std::array::from_fn(|i| StartInfo::parse(&data[START_INFO_OFFSET + i * START_INFO_SIZE..][..START_INFO_SIZE])),
+            sunlight: Sunlight { shade_start: data[SUNLIGHT_OFFSET], shade_range: data[SUNLIGHT_OFFSET + 1], inclination: data[SUNLIGHT_OFFSET + 2] },
             things,
+            access: data[ACCESS_OFFSET..ACCESS_OFFSET + ACCESS_ENTRIES * 3].chunks_exact(3).map(|c| AccessInfo { model: c[0], kind: c[1], rights: c[2] }).collect(),
         })
     }
 
@@ -221,6 +260,26 @@ mod tests {
         let lvl = Level::parse(&d).unwrap();
         let types: Vec<_> = lvl.things.iter().map(Thing::tree_type).collect();
         assert_eq!(types, vec![None, Some(0), Some(5), None], "the building first, then trees, then a plant");
+    }
+
+    #[test]
+    fn layout_matches_the_spec() {
+        assert_eq!((START_INFO_OFFSET, SUNLIGHT_OFFSET, THINGS_OFFSET, ACCESS_OFFSET), (81_920, 81_984, 81_987, 191_987));
+        assert_eq!(ACCESS_OFFSET + ACCESS_ENTRIES * 3, DAT_SIZE);
+    }
+
+    #[test]
+    fn thing_slot_0_and_blocks_around_things() {
+        let mut d = synthetic();
+        d[THINGS_OFFSET..THINGS_OFFSET + 2].copy_from_slice(&[2, KIND_BUILDING]);
+        d[START_INFO_OFFSET + 16..START_INFO_OFFSET + 20].copy_from_slice(&[2, 0, 3, 0]);
+        d[SUNLIGHT_OFFSET..SUNLIGHT_OFFSET + 3].copy_from_slice(&[28, 15, 64]);
+        d[ACCESS_OFFSET + 3..ACCESS_OFFSET + 6].copy_from_slice(&[4, 2, 1]);
+        let lvl = Level::parse(&d).unwrap();
+        assert_eq!((lvl.things[0].model, lvl.things[0].kind), (2, KIND_BUILDING), "slot 0 is kept");
+        assert_eq!((lvl.start_info[1].x, lvl.start_info[1].z), (2, 3));
+        assert_eq!(lvl.sunlight, Sunlight { shade_start: 28, shade_range: 15, inclination: 64 });
+        assert_eq!((lvl.access.len(), lvl.access[1]), (ACCESS_ENTRIES, AccessInfo { model: 4, kind: 2, rights: 1 }));
     }
 
     #[test]

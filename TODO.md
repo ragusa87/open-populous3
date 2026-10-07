@@ -68,7 +68,6 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spells through `Command::Cast` from the UI (the editor brushes apply directly).
 
 ## Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
-- [ ] **Bug**: `pop3_format::level` reads things from 82 042 instead of 81 987 (one record late): thing 0 is dropped in every level (levl2001: a red hut). Replace the 122-byte misc block by player start info (4 x 16 B), sunlight (3 B) and the 50 x 3 access info after the things.
 - [ ] Angles from the thing union (2048ths of a turn): buildings `i32@7` instead of `Thing::facing()` (byte 8 % 8, right by luck); trees and scenery `i16@10` (lost today, `nature::tree_yaw` invents one).
 - [ ] Decode the thing unions (level-format.md): general model 2 discovery (type, model, availability, mana), model 6 trigger (type, radius, occurrences, `ThingIdxs` as **1-based slot indices**: keep the slot order, `Level::things` drops empty slots today), effects 24/17 target (`i32@7`, `i32@11`). Scenery portal/island fields are always 0: skip them.
 - [ ] Decode the `.hdr` into `LevelHeader` (layout in level-format.md): spell/building/vehicle masks (bit N = model N, non-model bits always set), tribe count, AI script per tribe (89-91 red/yellow/green, 99 blue), default allies, object bank (97), level flags, markers (low byte x * 2, high byte z * 2), start position and angle; show them in `level_info`.
