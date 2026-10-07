@@ -87,11 +87,21 @@ tiles named (`panel_name`), "?" for discoverable, empty slot for hidden, hover d
 Done (UX only, nothing is placed yet):
 - `game_core::placement`: `blocked_at(map, point)` (Sea: drawn height < 1; Building: `Building::covers` its turned
   footprint; Site: within `SPAWN_FLAT_RADIUS` of a reincarnation site; Tree: a cell with a tree that has wood),
-  `too_steep` (height points under the footprint spread more than `STEEP_SPREAD` = 200, placeholder), `can_place`.
+  `too_steep` (height points under the footprint spread more than `STEEP_SPREAD` = 200, placeholder), `shore_ok`,
+  `can_place`.
+- Boat hut (`shore_ok`): its jetty is local +z, its door local -z (all 11 boat huts of the levels: only sea within
+  2.5 cells past +z, land past -z). A cell past the jetty side, the middle and at least one corner must be sea (a
+  loaded level's levelling lifts one corner of level 10's hut off the sea); a cell past the door side, no sea.
+  `best_facing` turns a boat hut blueprint to the first quarter turn from the player's that fits. Tests cover each
+  coast of an island, inland / at sea / a thin spit, other blockers, and every boat hut of the original levels
+  when an install is found.
 - Client `blueprint.rs`: a click on an available Build tab tile picks it (white border; picking a spell puts it
   away and the other way round). Over the map it snaps to the nearest cell corner like the levels' buildings and is
-  drawn centred as they are, a 12 x 12 grid draped on the drawn ground with a door arrow out of the local +z side
-  (door side unverified); vertices red where `blocked_at`, all red when `too_steep`, arrow red when any part is.
+  drawn centred as they are, on a grid through the terrain's cell lines every quarter cell, split along the cells'
+  own diagonal, so it lies exactly on the drawn triangles (no terrain poking through on hills), with a door arrow
+  out of the local -z side (the boat huts' land side; other kinds unverified); vertices red where `blocked_at`, all
+  red when `too_steep` or a boat hut is off the shore, arrow red when any part is. Boat huts turn themselves
+  (`best_facing`).
   Space turns it (and no longer looks at the shaman meanwhile), right click on the map puts it away, left click
   does nothing yet; units are not selected or ordered while it is out. Leaving the game or changing level puts it
   away.

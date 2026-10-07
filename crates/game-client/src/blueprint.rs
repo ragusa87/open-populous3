@@ -1,7 +1,9 @@
 //! Blueprint (UX only): a building picked in the Build tab follows the mouse as a white footprint
 //! draped on the ground, snapped to cell corners like the levels' buildings, with an arrow out of
-//! its door side; red where it cannot be built (`game_core::placement`: sea, another building, a
-//! site, a tree with wood; all of it when the ground is too steep). Space turns it a quarter turn, right click
+//! its door side (local -z, the land side of the levels' boat huts); red where it cannot be built
+//! (`game_core::placement`: sea, another building, a site, a tree with wood; all of it when the
+//! ground is too steep or a boat hut is not on the shore). A boat hut turns itself to put its
+//! jetty over the water when it can (`best_facing`). Space turns it a quarter turn, right click
 //! puts it away, left click will place it (`Command::PlaceBuilding`, not yet). Meanwhile clicks do
 //! not select or order units. See docs/specs/buildings.md "Blueprint".
 
@@ -15,12 +17,13 @@ use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use game_core::building::{Building, BuildingKind};
-use game_core::placement::{blocked_at, too_steep};
+use game_core::placement::{best_facing, blocked_at, shore_ok, too_steep};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
-/// Height above the ground (render units) and grid steps per footprint side.
-const LIFT: f32 = 0.03;
-const STEPS: usize = 12;
+/// Height above the ground (render units), and grid lines per cell: the mark's grid follows the
+/// terrain's cell lines so its triangles lie on the drawn ones (`grid_lines`).
+const LIFT: f32 = 0.02;
+const LINES_PER_CELL: f32 = 4.0;
 /// Door arrow: half width at its base and length (cells), and its gap from the footprint edge.
 const ARROW: (f32, f32, f32) = (0.3, 0.5, 0.1);
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 0.55];
@@ -80,13 +83,31 @@ pub fn footprint_rect(kind: BuildingKind) -> (Vec2, Vec2) {
     (centre - half, centre + half)
 }
 
-/// The door arrow in the building's own frame (cells): a triangle out of the +z side (door side,
-/// unverified), pointing away from the building.
+/// The door arrow in the building's own frame (cells): a triangle out of the -z side (the land
+/// side of the levels' boat huts, their jetty is +z; other kinds unverified), pointing away.
 pub fn door_arrow(kind: BuildingKind) -> [Vec2; 3] {
     let (min, max) = footprint_rect(kind);
     let x = (min.x + max.x) / 2.0;
-    let base = max.y + ARROW.2;
-    [Vec2::new(x - ARROW.0, base), Vec2::new(x + ARROW.0, base), Vec2::new(x, base + ARROW.1)]
+    let base = min.y - ARROW.2;
+    [Vec2::new(x - ARROW.0, base), Vec2::new(x + ARROW.0, base), Vec2::new(x, base - ARROW.1)]
+}
+
+/// The map rectangle (cells) a building's footprint covers: its turns are quarter turns, so it
+/// stays aligned with the map axes.
+pub fn world_rect(kind: BuildingKind, facing: u8, centre: Vec2) -> (Vec2, Vec2) {
+    let (min, max) = footprint_rect(kind);
+    let (a, b) = (turn_local(min, facing), turn_local(max, facing));
+    (centre + a.min(b), centre + a.max(b))
+}
+
+/// Coordinates from `lo` to `hi` (both kept) through every multiple of 1 / `LINES_PER_CELL` in
+/// between: with the terrain's cell lines among them, each grid quad lies in one terrain cell and its
+/// diagonal on the cell's own split, so the mark lies exactly on the drawn triangles.
+pub fn grid_lines(lo: f32, hi: f32) -> Vec<f32> {
+    let first = (lo * LINES_PER_CELL).floor() as i32 + 1;
+    let last = (hi * LINES_PER_CELL).ceil() as i32 - 1;
+    let inner = (first..=last).map(|k| k as f32 / LINES_PER_CELL).filter(|&v| v - lo > 1e-4 && hi - v > 1e-4);
+    std::iter::once(lo).chain(inner).chain(std::iter::once(hi)).collect()
 }
 
 /// Dev only (`BLUEPRINT=kind@x,z` screenshots): the map position used instead of the mouse.
@@ -177,35 +198,36 @@ fn draw_blueprint(
         return;
     };
     let b = blueprint_at(kind, blueprint.facing, cell);
+    let b = Building { facing: best_facing(&map.0, &b, blueprint.facing), ..b };
     let unit = WORLD_UNITS_PER_CELL as f32;
     let (cx, cz) = b.centre();
     let centre = Vec2::new(cx as f32, cz as f32) / unit;
     let size = map.0.terrain.size() as f32;
     let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
     let terrain = &map.0.terrain;
-    let steep = too_steep(&map.0, &b);
-    // A point of the building's frame (cells) -> render position and colour.
-    let vertex = |local: Vec2| {
-        let at = centre + turn_local(local, b.facing);
+    let all_red = too_steep(&map.0, &b) || !shore_ok(&map.0, &b);
+    // A map position (cells) -> render position and colour.
+    let vertex = |at: Vec2| {
         let (dx, dz) = (wrap(at.x - rig.focus.x), wrap(at.y - rig.focus.y));
-        let colour = if steep || blocked_at(&map.0, world_units(at)).is_some() { RED } else { WHITE };
+        let colour = if all_red || blocked_at(&map.0, world_units(at)).is_some() { RED } else { WHITE };
         ([dx, ground_y(terrain, rig.focus, &params.0, dx, dz) + LIFT, dz], colour)
     };
-    let (min, max) = footprint_rect(kind);
+    let (lo, hi) = world_rect(kind, b.facing, centre);
+    let (xs, zs) = (grid_lines(lo.x, hi.x), grid_lines(lo.y, hi.y));
     let mut positions = Vec::new();
     let mut colours = Vec::new();
     let mut indices = Vec::new();
-    for j in 0..=STEPS {
-        for i in 0..=STEPS {
-            let t = Vec2::new(i as f32, j as f32) / STEPS as f32;
-            let (p, c) = vertex(min + (max - min) * t);
+    for &z in &zs {
+        for &x in &xs {
+            let (p, c) = vertex(Vec2::new(x, z));
             positions.push(p);
             colours.push(c);
         }
     }
-    let row = STEPS as u32 + 1;
-    for j in 0..STEPS as u32 {
-        for i in 0..STEPS as u32 {
+    let row = xs.len() as u32;
+    for j in 0..zs.len() as u32 - 1 {
+        for i in 0..row - 1 {
+            // Split along (i + 1, j)-(i, j + 1), like the terrain's cells.
             let a = j * row + i;
             indices.extend([a, a + row, a + 1, a + 1, a + row, a + row + 1]);
         }
@@ -213,7 +235,7 @@ fn draw_blueprint(
     let first = positions.len() as u32;
     let arrow = if colours.contains(&RED) { RED } else { WHITE };
     for p in door_arrow(kind) {
-        let (p, _) = vertex(p);
+        let (p, _) = vertex(centre + turn_local(p, b.facing));
         positions.push(p);
         colours.push(arrow);
     }
@@ -254,8 +276,24 @@ mod tests {
         let (min, max) = footprint_rect(BuildingKind::Hut { size: 1 });
         assert!((max.x - 600.0 / 512.0).abs() < 1e-6 && (min.x + max.x).abs() < 1e-6);
         let arrow = door_arrow(BuildingKind::Hut { size: 1 });
-        assert!(arrow.iter().all(|p| p.y > max.y), "outside the door side");
-        assert!(arrow[2].y > arrow[0].y, "points away");
+        assert!(arrow.iter().all(|p| p.y < min.y), "outside the door side (-z)");
+        assert!(arrow[2].y < arrow[0].y, "points away");
+    }
+
+    #[test]
+    fn grid_follows_the_cell_lines() {
+        let lines = grid_lines(9.3, 10.6);
+        assert_eq!(lines, vec![9.3, 9.5, 9.75, 10.0, 10.25, 10.5, 10.6]);
+        assert_eq!(grid_lines(2.0, 2.5), vec![2.0, 2.25, 2.5], "ends on lines are not doubled");
+    }
+
+    #[test]
+    fn turned_footprints_stay_on_the_map_axes() {
+        let centre = Vec2::new(10.5, 20.5);
+        let (lo, hi) = world_rect(BuildingKind::Temple, 0, centre);
+        let (lo2, hi2) = world_rect(BuildingKind::Temple, 2, centre);
+        assert!(((hi - lo).x - (hi2 - lo2).y).abs() < 1e-5 && ((hi - lo).y - (hi2 - lo2).x).abs() < 1e-5, "a quarter turn swaps the sides");
+        assert!(lo.x < hi.x && lo2.y < hi2.y);
     }
 
     #[test]
