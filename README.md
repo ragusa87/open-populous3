@@ -21,3 +21,12 @@ Original install: `$POP3_INSTALL` (the folder holding `levels/`, `data/`, `objec
 `Bullfrog/<game>/` found under `$WINEPREFIX`, `~/.wine` (`drive_c/Program Files*`, `GOG Games`) or, on
 Windows, `C:\`. Overrides: `$POP3_LEVELS`, `$POP3_DATA`, `$POP3_OBJECTS`.
 See [docs/](docs/README.md) for architecture and specs.
+
+## References
+File formats are reverse-engineered from the original files; community tools are used to cross-check them
+(read only, no code copied, the files win when they disagree):
+- [PopResourceEditor](https://github.com/Toksisitee/PopResourceEditor) (Toksisitee, MIT, checked at `140e389`):
+  layouts of the theme files (palette, bigfade, sky, disp, fade, cliff, ghost, alpha), the `bl320` object atlas
+  and the v2 level format (`.dat`, `.hdr`, `.ver` structures).
+- PopSpriteEditor 1.4.0 (Toksisitee, GPLv3): PSFB sprite banks, see [sprites.md](docs/specs/sprites.md).
+- PopSoundEditor (Toksisitee, GPLv3): SDT sound banks, see [sound.md](docs/specs/sound.md).
