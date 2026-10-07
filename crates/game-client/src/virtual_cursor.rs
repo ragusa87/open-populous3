@@ -4,11 +4,15 @@
 //! focus while the player pushes against the border to scroll. Its moves are re-sent as
 //! `CursorMoved` window events so Bevy UI hover/click keeps working. Esc releases the capture.
 //! Drawn with the original arrow pointer (`POINT0-0.DAT` sprite 14) when the original files are
-//! allowed and present, else a generated arrow. While a spell is aimed (`CursorLook::Spell`) it
-//! shows the spell's gold icon (else a generated gold ring), grayed out where the spell cannot apply.
+//! allowed and present, else a generated arrow. In the menus it is the animated gold arrow
+//! (sprites 30-33). While a spell is aimed (`CursorLook::Spell`) the gold arrow carries the spell's
+//! gold icon on its right, while a blueprint is out the arrow carries the building's icon; the icon
+//! (else a generated gold ring) is grayed out where the spell or building cannot apply.
 
 use crate::world::LevelList;
+use game_core::building::BuildingKind;
 use game_core::spell_book::SpellKind;
+use pop3_format::sprites::POINTER_GOLD_ARROW;
 use std::collections::HashMap;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
@@ -21,6 +25,8 @@ use bevy::window::{CursorGrabMode, CursorMoved, CursorOptions, PrimaryWindow, Wi
 pub const DEFAULT_SPEED: f32 = 1.5;
 /// Screen pixels per sprite pixel.
 const SCALE: f32 = 2.0;
+/// Seconds per frame of the animated gold arrow.
+const GOLD_FRAME: f32 = 0.12;
 
 /// Fallback arrow: `#` outline, `.` fill, tip at (0, 0).
 const ARROW: [&str; 17] = [
@@ -48,8 +54,12 @@ const ARROW: [&str; 17] = [
 pub enum CursorLook {
     #[default]
     Arrow,
+    /// The menus' animated gold arrow.
+    Menu,
     /// Aiming `kind`; `valid` when it can be cast under the cursor.
     Spell { kind: SpellKind, valid: bool },
+    /// Placing a blueprint of `kind`; `valid` when it can stand under the cursor.
+    Building { kind: BuildingKind, valid: bool },
 }
 
 /// Whether the mouse is captured by the game (Esc toggles outside the game), and the in-game cursor position.
@@ -162,12 +172,68 @@ pub fn dimmed(p: &PointerImage) -> PointerImage {
     PointerImage { rgba, ..*p }
 }
 
-/// Original sprite shown while aiming a spell (the spiral for Teleport, else the gold arrow).
+/// Original gold icon shown while aiming a spell (`POINT0-0.DAT`, named by someone who knows the
+/// game; Armageddon and Ghost Army are the likeliest left, docs/specs/sprites.md).
 pub fn spell_sprite(kind: SpellKind) -> usize {
     match kind {
-        SpellKind::Teleport => pop3_format::sprites::POINTER_SPIRAL,
-        _ => pop3_format::sprites::POINTER_GOLD_ARROW,
+        SpellKind::MagicalShield => 39,
+        SpellKind::Armageddon => 40,
+        SpellKind::Blast => 41,
+        SpellKind::Convert => 42,
+        SpellKind::GhostArmy => 43,
+        SpellKind::Whirlwind => 44,
+        SpellKind::Invisibility => 45,
+        SpellKind::Swarm => 46,
+        SpellKind::Hypnotism => 47,
+        SpellKind::LandBridge => 48,
+        SpellKind::Lightning => 49,
+        SpellKind::Erosion => 50,
+        SpellKind::Flatten => 51,
+        SpellKind::Earthquake => 52,
+        SpellKind::Swamp => 53,
+        SpellKind::Firestorm => 54,
+        SpellKind::AngelOfDeath => 55,
+        SpellKind::Volcano => 56,
+        SpellKind::Teleport => 57,
     }
+}
+
+/// The pointer with `badge` beside it on the right, vertically centred on it: the click point stays
+/// the pointer's tip.
+pub fn with_badge(pointer: &PointerImage, badge: &PointerImage) -> PointerImage {
+    let (bx, by) = (pointer.width, pointer.height.saturating_sub(badge.height) / 2);
+    let shift = badge.height.saturating_sub(pointer.height) / 2;
+    let (width, height) = (bx + badge.width, pointer.height.max(badge.height));
+    let mut rgba = vec![0; width * height * 4];
+    let mut paint = |img: &PointerImage, ox: usize, oy: usize| {
+        for y in 0..img.height {
+            for x in 0..img.width {
+                let src = &img.rgba[(y * img.width + x) * 4..][..4];
+                if src[3] > 0 {
+                    rgba[((oy + y) * width + ox + x) * 4..][..4].copy_from_slice(src);
+                }
+            }
+        }
+    };
+    paint(pointer, 0, shift);
+    paint(badge, bx, by);
+    PointerImage { width, height, rgba, tip: (pointer.tip.0, pointer.tip.1 + shift) }
+}
+
+/// Original teal icon shown while placing a blueprint (`POINT0-0.DAT` 58-65, sprites.md); None for
+/// kinds that are never built.
+pub fn building_sprite(kind: BuildingKind) -> Option<usize> {
+    Some(match kind {
+        BuildingKind::Hut { .. } => 58,
+        BuildingKind::DrumTower => 59,
+        BuildingKind::WarriorTraining => 60,
+        BuildingKind::FirewarriorTraining => 61,
+        BuildingKind::Temple => 62,
+        BuildingKind::SpyTraining => 63,
+        BuildingKind::BoatHut => 64,
+        BuildingKind::AirshipHut => 65,
+        _ => return None,
+    })
 }
 
 /// The original pointer bank and its palette, when allowed and present.
@@ -195,21 +261,44 @@ impl PointerSource {
         Some(p)
     }
 
-    fn image(&self, look: CursorLook) -> PointerImage {
+    /// Frame `frame` of the animated gold arrow, the plain arrow without the original files.
+    fn gold(&self, frame: usize) -> PointerImage {
+        self.sprite(POINTER_GOLD_ARROW[frame % POINTER_GOLD_ARROW.len()], false).unwrap_or_else(fallback_pointer)
+    }
+
+    /// An icon cursor, centred, grey and see-through when `valid` is false.
+    fn icon(&self, sprite: Option<usize>, valid: bool) -> PointerImage {
+        let p = sprite.and_then(|s| self.sprite(s, true)).unwrap_or_else(fallback_spell_pointer);
+        if valid { p } else { dimmed(&p) }
+    }
+
+    fn image(&self, look: CursorLook, frame: usize) -> PointerImage {
+        let arrow = || self.sprite(pop3_format::sprites::POINTER_ARROW, false).unwrap_or_else(fallback_pointer);
         match look {
-            CursorLook::Arrow => self.sprite(pop3_format::sprites::POINTER_ARROW, false).unwrap_or_else(fallback_pointer),
-            CursorLook::Spell { kind, valid } => {
-                let sprite = spell_sprite(kind);
-                let p = self.sprite(sprite, sprite != pop3_format::sprites::POINTER_GOLD_ARROW).unwrap_or_else(fallback_spell_pointer);
-                if valid { p } else { dimmed(&p) }
-            }
+            CursorLook::Arrow => arrow(),
+            CursorLook::Menu => self.gold(frame),
+            CursorLook::Spell { kind, valid } => with_badge(&self.gold(frame), &self.icon(Some(spell_sprite(kind)), valid)),
+            CursorLook::Building { kind, valid } => with_badge(&arrow(), &self.icon(building_sprite(kind), valid)),
         }
     }
 }
 
-/// Uploaded cursor images: image, size and click point in screen pixels.
+/// Frames a look cycles through: the gold arrow's, else one.
+pub fn look_frames(look: CursorLook) -> usize {
+    match look {
+        CursorLook::Menu | CursorLook::Spell { .. } => POINTER_GOLD_ARROW.len(),
+        CursorLook::Arrow | CursorLook::Building { .. } => 1,
+    }
+}
+
+/// The frame shown `elapsed` seconds in, out of `frames`, looping.
+pub fn frame_at(elapsed: f32, frames: usize) -> usize {
+    (elapsed / GOLD_FRAME) as usize % frames.max(1)
+}
+
+/// Uploaded cursor images by look and frame: image, size and click point in screen pixels.
 #[derive(Resource, Default)]
-struct PointerImages(HashMap<CursorLook, (Handle<Image>, Vec2, Vec2)>);
+struct PointerImages(HashMap<(CursorLook, usize), (Handle<Image>, Vec2, Vec2)>);
 
 fn upload(images: &mut Assets<Image>, pointer: PointerImage) -> (Handle<Image>, Vec2, Vec2) {
     let size = Vec2::new(pointer.width as f32, pointer.height as f32) * SCALE;
@@ -228,6 +317,7 @@ fn upload(images: &mut Assets<Image>, pointer: PointerImage) -> (Handle<Image>, 
 #[derive(Component)]
 struct CursorSprite {
     look: CursorLook,
+    frame: usize,
     /// Click point offset in screen pixels.
     tip: Vec2,
 }
@@ -240,7 +330,7 @@ impl Plugin for VirtualCursorPlugin {
             .init_resource::<CursorLook>()
             .init_resource::<PointerImages>()
             .add_systems(Startup, spawn_sprite)
-            .add_systems(Update, (toggle_capture, move_cursor, draw_sprite).chain());
+            .add_systems(Update, (menu_cursor, toggle_capture, move_cursor, draw_sprite).chain());
     }
 }
 
@@ -251,10 +341,10 @@ fn spawn_sprite(
     overlay: Single<Entity, With<crate::camera::OverlayCamera>>,
 ) {
     let source = PointerSource::load(&levels);
-    let (image, size, tip) = upload(&mut images, source.image(CursorLook::Arrow));
+    let (image, size, tip) = upload(&mut images, source.image(CursorLook::Arrow, 0));
     commands.insert_resource(source);
     commands.spawn((
-        CursorSprite { look: CursorLook::Arrow, tip },
+        CursorSprite { look: CursorLook::Arrow, frame: 0, tip },
         ImageNode::new(image),
         Node { position_type: PositionType::Absolute, width: Val::Px(size.x), height: Val::Px(size.y), ..default() },
         GlobalZIndex(i32::MAX),
@@ -328,8 +418,19 @@ fn move_cursor(
     }
 }
 
+/// The gold arrow outside the game (menus, pause), the plain arrow back in it.
+fn menu_cursor(state: Res<State<crate::menu::AppState>>, mut look: ResMut<CursorLook>) {
+    let playing = *state.get() == crate::menu::AppState::Playing;
+    if !playing {
+        look.set_if_neq(CursorLook::Menu);
+    } else if *look == CursorLook::Menu {
+        look.set_if_neq(CursorLook::Arrow);
+    }
+}
+
 fn draw_sprite(
     cursor: Res<VirtualCursor>,
+    time: Res<Time>,
     look: Res<CursorLook>,
     source: Option<Res<PointerSource>>,
     mut uploaded: ResMut<PointerImages>,
@@ -337,12 +438,13 @@ fn draw_sprite(
     mut q: Query<(&mut CursorSprite, &mut ImageNode, &mut Node, &mut Visibility)>,
 ) {
     for (mut sprite, mut image, mut node, mut vis) in &mut q {
-        if sprite.look != *look {
+        let frame = frame_at(time.elapsed_secs(), look_frames(*look));
+        if (sprite.look, sprite.frame) != (*look, frame) {
             if let Some(source) = source.as_deref() {
-                let (handle, size, tip) = uploaded.0.entry(*look).or_insert_with(|| upload(&mut images, source.image(*look))).clone();
+                let (handle, size, tip) = uploaded.0.entry((*look, frame)).or_insert_with(|| upload(&mut images, source.image(*look, frame))).clone();
                 image.image = handle;
                 (node.width, node.height) = (Val::Px(size.x), Val::Px(size.y));
-                *sprite = CursorSprite { look: *look, tip };
+                *sprite = CursorSprite { look: *look, frame, tip };
             }
         }
         match cursor.position.filter(|_| cursor.captured) {
@@ -404,7 +506,52 @@ mod tests {
         let centre = &d.rgba[(8 * 17 + 8) * 4..][..4];
         assert!(centre[0] == centre[1] && centre[1] == centre[2] && centre[3] < 255, "grey, see-through: {centre:?}");
         assert_eq!(d.rgba[3], 0, "transparent stays transparent");
-        assert_eq!(spell_sprite(SpellKind::Teleport), pop3_format::sprites::POINTER_SPIRAL);
+    }
+
+    #[test]
+    fn every_spell_has_its_own_icon() {
+        let icons: std::collections::BTreeSet<usize> = SpellKind::ALL.iter().map(|&k| spell_sprite(k)).collect();
+        assert_eq!(icons.len(), SpellKind::ALL.len());
+        assert!(icons.iter().all(|i| pop3_format::sprites::POINTER_SPELL_ICONS.contains(i)));
+        assert!(!icons.contains(&38), "bloodlust is not on the panel");
+        assert_eq!((spell_sprite(SpellKind::Teleport), spell_sprite(SpellKind::Hypnotism)), (57, 47));
+    }
+
+    fn solid(width: usize, height: usize, c: [u8; 4], tip: (usize, usize)) -> PointerImage {
+        PointerImage { width, height, rgba: c.repeat(width * height), tip }
+    }
+
+    #[test]
+    fn gold_arrow_loops_through_its_frames() {
+        assert_eq!(look_frames(CursorLook::Menu), 4);
+        assert_eq!(look_frames(CursorLook::Spell { kind: SpellKind::Blast, valid: true }), 4);
+        assert_eq!(look_frames(CursorLook::Arrow), 1);
+        let frames: Vec<usize> = (0..10).map(|k| frame_at(k as f32 * GOLD_FRAME + 0.01, 4)).collect();
+        assert_eq!(frames, [0, 1, 2, 3, 0, 1, 2, 3, 0, 1]);
+        assert_eq!(frame_at(123.4, 1), 0);
+    }
+
+    #[test]
+    fn badge_on_the_right_tip_unchanged() {
+        let arrow = solid(10, 16, [255, 255, 255, 255], (0, 0));
+        let badge = solid(8, 8, [0, 0, 255, 255], (4, 4));
+        let c = with_badge(&arrow, &badge);
+        let px = |x: usize, y: usize| &c.rgba[(y * c.width + x) * 4..][..4];
+        assert_eq!((c.width, c.height, c.tip), (18, 16, (0, 0)));
+        assert_eq!(px(0, 0), &[255, 255, 255, 255], "the arrow at the click point");
+        assert_eq!(px(10, 4), &[0, 0, 255, 255], "badge right of it, centred");
+        assert_eq!(px(10, 3)[3], 0);
+        let tall = with_badge(&solid(4, 4, [255; 4], (1, 1)), &badge);
+        assert_eq!((tall.height, tall.tip), (8, (1, 3)), "a taller badge centres the arrow");
+    }
+
+    #[test]
+    fn every_buildable_kind_has_its_own_icon() {
+        let icons: std::collections::BTreeSet<usize> = game_core::build_book::BUILDABLE.iter().filter_map(|&k| building_sprite(k)).collect();
+        assert_eq!(icons.len(), game_core::build_book::BUILDABLE.len());
+        assert!(icons.iter().all(|i| pop3_format::sprites::POINTER_BUILDING_ICONS.contains(i)));
+        assert_eq!(building_sprite(BuildingKind::Hut { size: 3 }), Some(58));
+        assert_eq!(building_sprite(BuildingKind::Vault), None);
     }
 
     #[test]

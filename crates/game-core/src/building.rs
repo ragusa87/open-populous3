@@ -6,7 +6,7 @@ use pop3_format::level::KIND_BUILDING;
 use pop3_format::Level;
 
 /// Building types by thing model, as numbered in the original's scripts (`M_BUILDING_*`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuildingKind {
     /// Villager hut, size 1-3 (models 1-3).
     Hut { size: u8 },

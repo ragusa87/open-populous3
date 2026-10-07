@@ -44,7 +44,7 @@ Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 Hover shows the tile's description, click selects (white border). Right click on a known spell pauses its recharge
 (`SpellBook::toggle_pause`, like the original's "toggle on/off"): it takes no mana, keeps its charges and can still
 be cast; badge "paused", grey frozen bar. Right click again resumes. Spells cast on a spot (`ground_spell`: Teleport
-for now) are aimed with the mouse while selected: over the map the cursor becomes the spell's icon, grayed out
+for now) are aimed with the mouse while selected: over the map the cursor becomes the animated gold arrow with the spell's icon on its right, the icon grayed out
 where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground), left click casts it there and puts
 the spell away (arrow cursor, clicks go back to the units' selection), right click puts it away without casting; meanwhile clicks do not select or move units. The others: `C`
 casts the selected spell (demo: consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
@@ -115,7 +115,8 @@ the window border, is re-sent as `CursorMoved` (picking) and written to `Window:
 `POP3_CURSOR_SPEED` scales it (default 1.5; raw motion is unaccelerated).
 Pointer image: original arrow (`POINT0-0.DAT` sprite 14, see sprites.md, drawn x2, click point at its tip)
 when original files are allowed, else a generated black-and-white arrow. `CursorLook` picks it each frame: while
-a spell is aimed, its gold icon (Teleport: the spiral, sprite 47; others the gold arrow 30 until mapped), click
+a spell is aimed, its gold icon (`spell_sprite`, sprites 39-57, sprites.md; while a blueprint is out, the arrow with its building's teal icon at the
+same scale on its right, `building_sprite`, 58-65, grey when it cannot stand there), click
 point at the centre, or a generated gold ring; grayed and see-through (`dimmed`) where the spell cannot apply.
 
 View presets: F2 opens a menu (`hud/view_menu.rs`) of camera/terrain presets applied live (distance, tilt,

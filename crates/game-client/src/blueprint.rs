@@ -11,6 +11,7 @@ use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{ground_y, pick_ground};
 use crate::hud::PANEL_WIDTH;
 use crate::units::{world_units, PLAYER};
+use crate::virtual_cursor::CursorLook;
 use crate::world::CurrentMap;
 use bevy::asset::RenderAssetUsages;
 use bevy::light::NotShadowCaster;
@@ -182,6 +183,7 @@ fn draw_blueprint(
     pinned: Res<PinnedAt>,
     mut mark: Query<(&Mesh3d, &mut Visibility), With<BlueprintMark>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut look: ResMut<CursorLook>,
 ) {
     let Ok((mesh, mut vis)) = mark.single_mut() else { return };
     let playing = *state.get() == crate::menu::AppState::Playing;
@@ -194,6 +196,9 @@ fn draw_blueprint(
     let ground = blueprint.kind.filter(|_| playing).and_then(|kind| Some((kind, pinned.0.or_else(under_mouse)?)));
     let Some((kind, cell)) = ground else {
         *vis = Visibility::Hidden;
+        if matches!(*look, CursorLook::Building { .. }) {
+            look.set_if_neq(CursorLook::Arrow);
+        }
         return;
     };
     let b = blueprint_at(kind, blueprint.facing, cell);
@@ -211,8 +216,10 @@ fn draw_blueprint(
         let colour = if all_red || blocked_at(&map.0, world_units(at)).is_some() { RED } else { WHITE };
         ([dx, ground_y(terrain, rig.focus, &params.0, dx, dz) + LIFT, dz], colour)
     };
+    let mark = mark_mesh(kind, b.facing, centre, vertex);
+    look.set_if_neq(CursorLook::Building { kind, valid: !mark.colours.contains(&RED) });
     if let Some(mut m) = meshes.get_mut(&mesh.0) {
-        set_mark(&mut m, mark_mesh(kind, b.facing, centre, vertex));
+        set_mark(&mut m, mark);
     }
     *vis = Visibility::Inherited;
 }

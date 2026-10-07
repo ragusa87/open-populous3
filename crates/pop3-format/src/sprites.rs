@@ -10,10 +10,13 @@ const MAGIC: &[u8; 4] = b"PSFB";
 pub const POINTER_FILE: &str = "point0-0.dat";
 /// Standard arrow pointer.
 pub const POINTER_ARROW: usize = 14;
-/// Gold arrow (spell targeting?).
-pub const POINTER_GOLD_ARROW: usize = 30;
-/// Gold spiral icon (38-66 are gold spell icons, click point at their centre).
-pub const POINTER_SPIRAL: usize = 47;
+/// Animated gold arrow, in frame order: the menus' cursor, and the cursor while aiming a spell.
+pub const POINTER_GOLD_ARROW: [usize; 4] = [30, 31, 32, 33];
+/// Gold spell icons (38 bloodlust, then one per player spell, docs/specs/sprites.md), shown
+/// while aiming a spell with the click point at their centre.
+pub const POINTER_SPELL_ICONS: std::ops::RangeInclusive<usize> = 38..=57;
+/// Teal building icons.
+pub const POINTER_BUILDING_ICONS: std::ops::RangeInclusive<usize> = 58..=66;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sprite {

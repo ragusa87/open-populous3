@@ -197,8 +197,7 @@ impl Plugin for SpellsPlugin {
                     update_info,
                 )
                     .chain(),
-            )
-            .add_systems(OnExit(crate::menu::AppState::Playing), arrow_cursor);
+            );
     }
 }
 
@@ -345,7 +344,10 @@ fn aim_and_cast(
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
     let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui);
     let (Some(kind), Some(c)) = (selected.0, on_map) else {
-        look.set_if_neq(CursorLook::Arrow);
+        // Only its own look: a blueprint sets the cursor too.
+        if matches!(*look, CursorLook::Spell { .. }) {
+            look.set_if_neq(CursorLook::Arrow);
+        }
         return;
     };
     if mouse.just_pressed(MouseButton::Right) {
@@ -370,10 +372,6 @@ fn aim_and_cast(
     }
 }
 
-/// Back in the menus: plain arrow.
-fn arrow_cursor(mut look: ResMut<CursorLook>) {
-    *look = CursorLook::Arrow;
-}
 
 fn update_tiles(
     book: Res<PlayerSpells>,

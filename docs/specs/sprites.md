@@ -53,8 +53,23 @@ Not PSFB: `HSPR0-0.TAB`, `HSPR0-1.DAT`/`.TAB`, `HFX20-0.DAT`/`.TAB` (look like t
 
 ## `data/POINT0-0.DAT` (162 sprites)
 13 arrow + "?", 14 arrow (the standard pointer, tip at 0,0), 15-21 arrow + 2..8, 27 arrow + up/down,
-28 move cross, 29 rotate, 30 gold arrow, 31-33 gold arrow variants (spell targeting?),
-38-66 spell / building icons, 80-155 action pointers (build, plant, guard...), 156-161 small icons.
+28 move cross, 29 rotate, 30-33 gold arrow: the frames of an animated cursor, looping (0.12 s each, timing
+guessed): the menus' cursor and, with the spell's icon, the cursor while aiming a spell,
+38-57 gold spell icons, 58-66 teal building icons, 80-155 action pointers (build, plant,
+guard...), 156-161 small icons.
+
+Spell icons, named by someone who knows the game (`virtual_cursor::spell_sprite`), shown right of the gold arrow
+while aiming: 38 bloodlust (a skull, not on
+the player's panel), 39 magical shield (fist), 40 armageddon (scales, probably), 41 blast (flame), 42 convert
+(wildmen), 43 ghost army (a man with a shield: the only spell and icon left, unconfirmed), 44 whirlwind, 45
+invisibility (eye), 46 swarm (bees), 47 hypnotism (spiral, converts enemies), 48 land bridge, 49 lightning,
+50 erosion, 51 flatten, 52 earthquake, 53 swamp, 54 firestorm, 55 angel of death, 56 volcano, 57 teleport.
+
+Building icons, named the same way: 58 hut, 59 drum tower, 60 warrior training, 61 firewarrior training,
+62 temple (preachers), 63 spy training, 64 boat hut, 65 airship (balloon) hut, 66 camp fire. Like the spell icons
+they belong to the cursor, but added to it: while a blueprint is out the usual arrow stays and the building's icon,
+at the same scale, sits right of it (`virtual_cursor::building_sprite`, `with_badge`);
+the camp fire's when placing one (not done).
 
 ## `data/hfx0-0.dat` (1615 sprites: effects, map things, HUD art)
 Same palette. Identified: 2-3 dry plants, 22 a flat dark smear (shadow of 23?), 23 a pile of logs (17 x 11, a piece of
