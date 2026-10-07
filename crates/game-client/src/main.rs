@@ -18,6 +18,7 @@ mod terrain_mesh;
 mod terrain_texture;
 mod units;
 mod virtual_cursor;
+mod wood;
 mod world;
 
 use bevy::prelude::*;
@@ -55,6 +56,7 @@ fn main() {
             nature::NaturePlugin,
             buildings::BuildingsPlugin,
             units::UnitsPlugin,
+            wood::WoodPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,
             menu::MenuPlugin,

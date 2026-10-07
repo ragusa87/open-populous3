@@ -169,31 +169,7 @@ fn load_sprites(
             })
         })
         .collect();
-    let mut upload = |f: &Frame| {
-        let steps = if f.scale == 1 { UPSCALE_STEPS } else { 0 };
-        let mut big = (0..steps).fold(f.clone(), |g, _| art::scale2x(&g));
-        art::bleed_edges(&mut big);
-        let mut image = Image::new(
-            Extent3d { width: big.width as u32, height: big.height as u32, depth_or_array_layers: 1 },
-            TextureDimension::D2,
-            big.rgba,
-            TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::default(),
-        );
-        image.sampler = ImageSampler::linear();
-        let image = images.add(image);
-        let s = f.scale as f32;
-        let (size, origin) = (Vec2::new(f.width as f32, f.height as f32) / s, Vec2::new(f.origin.0 as f32, f.origin.1 as f32) / s);
-        let material = mats.add(StandardMaterial {
-            base_color_texture: Some(image.clone()),
-            alpha_mode: AlphaMode::Mask(0.5),
-            unlit: true,
-            cull_mode: None,
-            double_sided: true,
-            ..default()
-        });
-        FrameAsset { image, mesh: meshes.add(sprite_quad(size, origin)), material, size, origin }
-    };
+    let mut upload = |f: &Frame| upload_frame(f, &mut images, &mut meshes, &mut mats);
     sprites.kinds = art
         .iter()
         .map(|tribes| {
@@ -203,6 +179,34 @@ fn load_sprites(
                 .collect()
         })
         .collect();
+}
+
+/// Uploads a frame: pixel art (scale 1) upscaled with Scale2x and filtered linearly, edges bled so
+/// they do not darken; an unlit cut-out quad anchored at the feet.
+pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> FrameAsset {
+    let steps = if f.scale == 1 { UPSCALE_STEPS } else { 0 };
+    let mut big = (0..steps).fold(f.clone(), |g, _| art::scale2x(&g));
+    art::bleed_edges(&mut big);
+    let mut image = Image::new(
+        Extent3d { width: big.width as u32, height: big.height as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        big.rgba,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.sampler = ImageSampler::linear();
+    let image = images.add(image);
+    let s = f.scale as f32;
+    let (size, origin) = (Vec2::new(f.width as f32, f.height as f32) / s, Vec2::new(f.origin.0 as f32, f.origin.1 as f32) / s);
+    let material = mats.add(StandardMaterial {
+        base_color_texture: Some(image.clone()),
+        alpha_mode: AlphaMode::Mask(0.5),
+        unlit: true,
+        cull_mode: None,
+        double_sided: true,
+        ..default()
+    });
+    FrameAsset { image, mesh: meshes.add(sprite_quad(size, origin)), material, size, origin }
 }
 
 fn run_ticks(time: Res<Time>, mut clock: ResMut<SimClock>, mut map: ResMut<CurrentMap>, mut dirty: ResMut<TerrainDirty>) {

@@ -5,6 +5,12 @@ use crate::anim::Outfit;
 
 pub const TRIBES: u8 = 4;
 
+/// Effects and map sprites ("PSFB", palette `pal0-0.dat`): plants, wood, fire, spell effects, icons.
+pub const EFFECT_SPRITE_FILE: &str = "hfx0-0.dat";
+/// A pile of logs (17 x 11) in `EFFECT_SPRITE_FILE`: a piece of wood on the ground. 22 is a flat
+/// dark smear under it (its shadow, probably).
+pub const WOOD_PILE_SPRITE: usize = 23;
+
 /// Camp fire (probably): wood at the base, a flat board the flames are drawn on.
 /// 12 looks identical but smaller (another frame or size, unconfirmed).
 pub const CAMP_FIRE: usize = 0;

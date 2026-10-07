@@ -94,7 +94,7 @@ progress; the full building once built.
 
 ### Dismantling
 With Dismantle on (on a built building or one under construction), braves assigned to it take it apart: after a while it loses one piece of wood, which
-is dropped on the ground near the door as a wood piece (drawn as a small circle on the ground, `GameMap::wood`,
+is dropped on the ground near the door as a wood piece (a pile of logs on the ground, `GameMap::wood`, see trees.md,
 usable by any construction). Once all its wood is out, the building is removed and its ground is free again (a
 covered tree grows back). Switching back to Build makes braves rebuild it with wood again.
 
