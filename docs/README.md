@@ -11,3 +11,4 @@
   - [multiplayer.md](specs/multiplayer.md): deterministic lockstep over TCP.
   - [ui-and-editor.md](specs/ui-and-editor.md): camera, control tabs, world editor.
   - [assets.md](specs/assets.md): art sourcing plan.
+  - [sound.md](specs/sound.md): original `.SDT` sound, drum and music banks.
