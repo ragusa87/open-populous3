@@ -152,6 +152,24 @@ is dropped on the ground near the door as a wood piece (a pile of logs on the gr
 usable by any construction). Once all its wood is out, the building is removed and its ground is free again (a
 covered tree grows back). Switching back to Build makes braves rebuild it with wood again.
 
+### Damage and repair
+The level files store every building as a finished one (level-format.md, building union), but in level 10 the
+island that praying at the stone head brings back (effects 89 atlantis set / 90 atlantis invoke) shows its
+buildings as under construction. That state comes from the game itself: most likely the buildings are damaged when
+their ground sinks and rises, and a damaged building looks and works like one under construction, which braves
+repair with wood. Level 10 also places effect 83 "boat hut repair" on a boat hut, and the effect list has
+"building smoke full / partial / damaged" (74-76) and "explode building partial" (14), so damage is a state that
+exists while the game runs.
+
+Seen in the game once the island is up (wood in the building / wood needed): every hut 1/3, warrior training
+6/8, firewarrior training 7/8, temple 5/8, drum tower 4/5, boat hut 2/5. So they lose 1 to 3 pieces each, with no
+common percentage and no link with the island heights stored under them (huts at heights 30 to 90 all show 1/3):
+the rule is unknown (fixed per kind, random, or from how far the ground moved).
+
+Planned model: damage takes wood out of a Built building (its used count drops below the kind's wood cost, the
+pieces are lost, not dropped), its view goes back to the wooden frame, and assigned braves bring it back up like a
+construction. To check in the game: what sets the damage, and whether repairs need fetched wood.
+
 ### Walking around buildings
 Buildings and construction sites block walking over their footprint (`BuildingKind::footprint` turned with the
 facing, the cells it covers): `path::Mobility::Walk` gets a blocked-cell mask from `GameMap` besides the terrain,
@@ -164,10 +182,17 @@ so routes go around them, and a unit never stands inside one. Exceptions:
 Placing a site or finishing/removing a building changes the mask: walkers whose route crosses it replan (as for a
 terrain write). A unit already standing on a new site's footprint is moved to the nearest free cell.
 
-### Cost (placeholders to tune, then match the original)
+### Cost
+From the original game (tooltips on level 10's atlantis island, see "Damage and repair", and the game's
+construction limits).
+
 | Kind | Wood | Max braves (min is always 1) |
 |---|---|---|
-| Villager hut | 3 | 3 |
-| Drum tower | 4 | 3 |
-| Training huts | 5 | 4 |
-| Boat / airship hut | 6 | 5 |
+| Villager hut | 3 (large huts on the island show x/3) | 6 |
+| Drum tower | 5 | 12 |
+| Temple (preachers) | 8 | 20 |
+| Warrior training | 8 | 16 |
+| Firewarrior training | 8 | 16 |
+| Spy training | 8 | 16 |
+| Boat hut | 5 | 16 |
+| Airship hut | 11 | 16 |

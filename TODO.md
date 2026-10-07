@@ -102,8 +102,9 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Site visuals: blueprint, then a wooden frame of the building's shape growing with progress, then the full building.
 - [ ] Dismantling: braves remove one piece at a time, dropped as a wood piece (circle on the ground) near the door; the building disappears when empty and frees its ground.
 - [ ] Wood pieces lying on the ground (`GameMap::wood`, drawn): picked up by any construction; hovering one could show "Wood". Maybe draw the original's shadow under them (`hfx0-0.dat` 22, unconfirmed).
-- [ ] Building costs: placeholder wood / max braves table in the spec; match the original values.
 - [ ] Destruction of buildings on uneven/flooded ground (spells, erosion).
+- [ ] Damage from moving ground: check in the game what sets the damage (level 10's atlantis island comes back with its buildings missing 1 to 3 pieces of wood, no common percentage), and whether repairs need fetched wood ([buildings.md#damage-and-repair](docs/specs/buildings.md)).
+- [ ] Effects 89 atlantis set / 90 atlantis invoke (level 10): sink the island at start, raise it back when the stone head trigger fires; 83 boat hut repair.
 - [ ] Towers (drum tower): hold one unit, which gets a longer range from there: firewarriors throw farther, the shaman casts spells farther, a preacher converts enemies around the tower. No other tower effect.
 - [ ] Training huts: warrior, firewarrior, preacher, spy training turns a brave into that unit (time + mana).
 - [ ] Houses: hold a brave population, generate mana from the braves inside, spawn new braves over time.

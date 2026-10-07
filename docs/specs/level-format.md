@@ -68,7 +68,9 @@ The cell is `x >> 9` either way. The editor writes every thing at the corner [co
 The editor rotates buildings by quarter turns and scenery by eighths [editor].
 
 **Unions**:
-- **Building (2)**: `i32 Angle` at 7, seen 0, 512, 1024, 1536. Bytes 11-54 are 0.
+- **Building (2)**: `i32 Angle` at 7, seen 0, 512, 1024, 1536. Bytes 11-54 are 0: no construction progress,
+  damage or people inside. Every building in a level is stored as a finished one; a building that looks unfinished in
+  the game (level 10's raised island) gets that state while the game runs (buildings.md, "Damage and repair").
 - **Scenery (5)**: `u8 PortalStatus@7, PortalLevel@8, PortalType@9, i16 Angle@10, u8 UserId@12,
   i16 IslandAlt@13, u8 IslandNum@15, BridgeNum@16`, rest 0.
   - Angles 0 / 512 / 1024 / 1536 seen 2899 / 357 / 764 / 536 times.
@@ -131,7 +133,14 @@ the 41 levels.
 The editor also lists, without being able to place them: type 9 shape and type 10 internal (models 1-19).
 
 Effects seen in the levels, mostly trigger targets: 5, 15, 17, 18, 19, 22, 23 (79), 24, 26, 30, 31, 39, 65, 75, 79,
-81 (204), 85 (103), 88-92. All effect names by model:
+81 (204), 83, 85 (103), 88-92.
+- Level 10 is the only one with 83 (boat hut repair), 89 (atlantis set) and 90 (atlantis invoke):
+  - 89 (slot 144) stands in the middle of a low island (heights 15-145) around cell (64, 6) holding the player's
+    huts, drum tower, warrior and firewarrior huts, temple and 20 wildmen.
+  - 90 (slot 145) is fired by trigger 120 on the stone head at cell (18, 29), with pray time 64.
+  - 83 (slot 159) is on the same spot as boat hut 160.
+  - Likely meaning: "atlantis set" sinks the island at the start and "atlantis invoke" raises it back. Not checked
+    in the game. All effect names by model:
 - 1-10: simple blast, sprite circles, smoke, lightning element, burn cell obstacles, flatten land, move pillar,
   prepare site land, sphere explode, fireball
 - 11-20: fire cloud, ghost army, invisibility, explode building partial, volcano, hypnotism, lightning bolt, swamp,
