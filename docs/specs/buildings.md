@@ -48,6 +48,8 @@ taken from the level (`.hdr`) and unlocked by triggers. Clicking an available ti
   Dismantling) and its wood counts. A size-0 tree under it stays invisible and does not grow back while covered.
 - The braves selected when placing are assigned to it. Later, selecting braves and clicking the site assigns them
   (`Command::Assign { player, site, units }`).
+- A site needs at least one assigned brave to progress (none: it just waits); each kind has only a maximum. More
+  braves work faster: each flattens, fetches and builds on its own, so the work is shared between them.
 - More braves than the site's maximum: the first ones (by unit id, deterministic) up to the maximum are assigned,
   the others walk to the site and stand idle, not assigned.
 
@@ -81,8 +83,20 @@ is dropped on the ground near the door as a wood piece (drawn as a small circle 
 usable by any construction). Once all its wood is out, the building is removed and its ground is free again (a
 covered tree grows back). Switching back to Build makes braves rebuild it with wood again.
 
+### Walking around buildings
+Buildings and construction sites block walking over their footprint (`BuildingKind::footprint` turned with the
+facing, the cells it covers): `path::Mobility::Walk` gets a blocked-cell mask from `GameMap` besides the terrain,
+so routes go around them, and a unit never stands inside one. Exceptions:
+- Flying units and vehicles (`Mobility::Fly`) ignore it.
+- The reincarnation site is walked on (it is not in the mask).
+- Braves assigned to a site or to a building being dismantled may walk on that one footprint (their own path query
+  leaves it out of the mask), to flatten, build or take it apart.
+- A boat hut's jetty side stays open to boats (`Mobility::Sail`), to check with vehicles.
+Placing a site or finishing/removing a building changes the mask: walkers whose route crosses it replan (as for a
+terrain write). A unit already standing on a new site's footprint is moved to the nearest free cell.
+
 ### Cost (placeholders to tune, then match the original)
-| Kind | Wood | Max braves |
+| Kind | Wood | Max braves (min is always 1) |
 |---|---|---|
 | Villager hut | 3 | 3 |
 | Drum tower | 4 | 3 |
