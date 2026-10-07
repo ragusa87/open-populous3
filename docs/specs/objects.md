@@ -133,6 +133,25 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 Unidentified: 75-81 (stone pillars, standing stones, arch), 89-93,
 190 (looks like the pyramid of knowledge).
 
+### Unplaced buildings and leftover objects
+The level editor cannot place reconversion (9), wall piece (10), gate (11), curr OE slot (12) nor guard post (17),
+and no level has one: nothing ties them to an object, they keep the stand-in box. Bank 0 and the old bank 8 were
+looked through (thumbnails from `tools/model_mapping.py`'s renderer, which shows them from below), and checked by
+someone who knows the game; none of them is needed:
+- Bank 0 91 (92, 93 untextured copies, = bank 8's 70-72), a pit with a ring and a wooden frame with a lever: used
+  by the game when it draws a building under construction. Not used: our wooden structure (buildings.md) is
+  kept instead.
+- Bank 0 89: the spy hut, untextured. Bank 0 90: a wind propeller (windmill sail).
+- Bank 8 133: a water tower on four stilts; no known use. Bank 8 25: probably a piece of wood.
+- Bank 8 84: a stone arch with a portal in it (like an arc de triomphe).
+- Bank 8 101: a jail (old prison). Bank 8 139: a training hut (probably warriors); 140 and 141 training huts too,
+  yellow and blue.
+- Bank 8 100 (and the sets 106, 112, 118, 124 after it): parts of a pyramid of knowledge, probably for its
+  animation.
+- Bank 8 also holds older versions of known objects: huts in fenced yards in three sizes (130-132, 144-146, 162),
+  drum tower (30 = bank 0's 117), balloon (38), boat and airship huts (42, 43), pyramids of knowledge (73-75),
+  stone heads (1-5, 21-24), trees, and a winged creature (151-157, 169).
+
 Atlas texels of palette index 0 are see-through in the game (e.g. the palm's fronds): `atlas_rgba` gives them
 alpha 0 and materials that need it cut them out (`AlphaMode::Mask`, trees); flat palette colours stay opaque.
 38 579 texels are 0, none are 255; PopResourceEditor also takes the last texel's index (0) as the key.

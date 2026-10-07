@@ -82,7 +82,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## Buildings ([buildings.md](docs/specs/buildings.md))
 - [ ] Open-source building models (e.g. CC0 Quaternius Medieval Village / Fantasy kits) instead of the labelled boxes when the original files are not used; generated maps and sandboxes have buildings only in Sandbox > Buildings.
-- [ ] Identify the original objects of reconversion, wall, gate, guard post (stand-in boxes even with the original files); check temple = prayer hut object.
+- [ ] Check temple = prayer hut object. Reconversion, wall, gate, guard post have no object and no use in the levels: stand-in boxes are enough (objects.md).
 - [ ] Villager hut style (3 styles in the objects, style 0 always drawn): find what picks it.
 - [ ] Check the facing of the other kinds against the game (boat huts are settled: jetty local +z, door -z, from the 11 in the levels), and the cells a footprint takes (used by the walking mask).
 - [ ] General model 9 "building add-on" (one near each of 91 medium/large huts): find what it is (hut extension?) and draw it.
