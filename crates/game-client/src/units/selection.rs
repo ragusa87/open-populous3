@@ -2,7 +2,9 @@
 //! removes it), left drag draws a box that selects your units inside it (Ctrl adds them), right
 //! click clears the selection. The shaman is a unit like the others here; clicking her panel preview
 //! selects her alone (`select_only`). Left click on the ground sends
-//! the selection there, each unit to a free cell of its own (`GameMap::dispatch`); P prays, X stops. Only selected units show their health bar, and the
+//! the selection there, each unit to a free cell of its own (`GameMap::dispatch`), or round one of
+//! the player's camp fires when clicked on it (`ground_click`); Shift + right click on one of the
+//! player's camp fires puts it out and keeps the selection (`shift_right_click`); P prays, X stops. Only selected units show their health bar, and the
 //! cursor shows how many units are selected when more than one. While a spell is aimed the mouse
 //! belongs to it (`hud::spells`): clicks neither select nor send units.
 
@@ -227,9 +229,18 @@ pub(super) fn select_and_order(
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
     let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && spell.0.is_none() && !blueprint.is_active());
     let add = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
-    // A right click on a tree shows its wood (`nature`) and keeps the selection.
-    if mouse.just_pressed(MouseButton::Right) && on_map.is_some() && tree.tree.is_none() {
-        selection.clear();
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let mut moves = Vec::new();
+    // Shift + right click removes what is under the cursor (a camp fire) and keeps the selection; a
+    // right click on a tree shows its wood (`nature`) and keeps it too.
+    if let (true, Some(c)) = (mouse.just_pressed(MouseButton::Right), on_map) {
+        let ray = cams.iter().next().and_then(|cam| cam.0.viewport_to_world(cam.1, c).ok());
+        let ground = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction));
+        match ground.and_then(|cell| shift_right_click(&map.0, world_units(cell), shift)) {
+            Some(command) => moves.push(command),
+            None if tree.tree.is_none() => selection.clear(),
+            None => {}
+        }
     }
     if let (true, Some(c)) = (mouse.just_pressed(MouseButton::Left), on_map) {
         drag.press(c);
@@ -243,20 +254,18 @@ pub(super) fn select_and_order(
         None => None,
     };
     let mut orders = Vec::new();
-    let mut moves = Vec::new();
     if let Some(cam) = gesture.and_then(|_| cams.iter().next()) {
         let units = on_screen(&map.0.units, &views, cam);
         match gesture {
             Some(Gesture::Box(a, b)) => selection.select_box(&in_box(a, b, &units), add),
             Some(Gesture::Click(c)) => match unit_at(c, &units) {
                 Some(u) => selection.click(u.id, add),
-                None if !selection.units.is_empty() => {
+                None => {
                     let ray = cam.0.viewport_to_world(cam.1, c).ok();
                     if let Some(cell) = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)) {
-                        moves = map.0.dispatch(PLAYER, &selection.units, world_units(cell));
+                        moves = ground_click(&map.0, &selection.units, world_units(cell));
                     }
                 }
-                None => {}
             },
             None => {}
         }
@@ -271,6 +280,23 @@ pub(super) fn select_and_order(
     for command in moves.into_iter().chain(commands) {
         map.bypass_change_detection().0.apply(&command);
     }
+}
+
+/// Commands for a left click on the ground at `at` (world units) with `selected` units: they go
+/// round the player's camp fire there, else walk there.
+pub fn ground_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16, u16)) -> Vec<Command> {
+    match map.campfire_at(at).filter(|f| f.owner == PLAYER) {
+        _ if selected.is_empty() => Vec::new(),
+        Some(fire) => map.gather(PLAYER, selected, fire.id),
+        None => map.dispatch(PLAYER, selected, at),
+    }
+}
+
+/// The command of a right click on the ground at `at` (world units) with Shift held (`shift`):
+/// putting out the player's camp fire there. None otherwise (a plain right click deselects).
+pub fn shift_right_click(map: &game_core::map::GameMap, at: (u16, u16), shift: bool) -> Option<Command> {
+    let fire = map.campfire_at(at).filter(|f| shift && f.owner == PLAYER)?;
+    Some(Command::RemoveCampfire { player: PLAYER, at: fire.centre() })
 }
 
 /// Draws the drag box and the selected count next to the cursor.
@@ -316,6 +342,21 @@ mod tests {
 
     fn sel(units: &[u32]) -> Selection {
         Selection { units: units.to_vec() }
+    }
+
+    #[test]
+    fn ground_clicks_on_a_camp_fire() {
+        use game_core::unit::Order;
+        let map = game_core::map::GameMap::sandbox_buildings();
+        let fire = map.campfires[0].centre();
+        let brave = map.units.iter().find(|u| u.kind == game_core::unit::UnitKind::Brave && u.campfire().is_none()).unwrap().id;
+        assert!(matches!(ground_click(&map, &[brave], fire)[..], [Command::OrderUnit { order: Order::Campfire { .. }, .. }]), "go round it");
+        assert!(ground_click(&map, &[], fire).is_empty());
+        let away = (fire.0, fire.1.wrapping_add(5 * 512));
+        assert!(matches!(ground_click(&map, &[brave], away)[..], [Command::OrderUnit { order: Order::MoveTo { .. }, .. }]));
+        assert_eq!(shift_right_click(&map, (fire.0 + 100, fire.1), true), Some(Command::RemoveCampfire { player: PLAYER, at: fire }), "anywhere in its cell");
+        assert_eq!(shift_right_click(&map, fire, false), None, "without Shift: deselect");
+        assert_eq!(shift_right_click(&map, away, true), None, "no fire there");
     }
 
     #[test]

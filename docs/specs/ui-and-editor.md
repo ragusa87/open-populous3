@@ -71,7 +71,7 @@ while playing. Behind the menu the game camera is off (no terrain, units or HUD 
 are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk` picks the start; screenshots start in the game by default.
 
 ## Selection and orders
-Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect;
+Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect (Shift + right click puts out the player's camp fire under the cursor);
 the shaman is selected like any unit on the map, clicking her panel preview selects her alone. Left click on the ground sends the selection there, P pray, X stop, Space
 looks at the shaman. Selected units show a health bar; the cursor shows the count when more than one (see units.md).
 

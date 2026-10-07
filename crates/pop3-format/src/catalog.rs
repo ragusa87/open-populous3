@@ -11,10 +11,9 @@ pub const EFFECT_SPRITE_FILE: &str = "hfx0-0.dat";
 /// dark smear under it (its shadow, probably).
 pub const WOOD_PILE_SPRITE: usize = 23;
 
-/// Camp fire: a cross of four charred logs and two crossed flame boards (blended faces, tile 92).
-/// `CAMP_FIRE_FRESH` is the same with fresh logs (tile 136 instead of 137).
+/// Camp fire: a cross of four dark logs (tile 137) and two crossed flame boards (blended faces,
+/// tile 92). Object 12 is the same with logs of tile 136, a third of it see-through (unknown use).
 pub const CAMP_FIRE: usize = 0;
-pub const CAMP_FIRE_FRESH: usize = 12;
 /// Atlas tile of the flame boards: alpha pixels (`blend::AlphaTable`), drawn by `Face::is_alpha` faces.
 pub const FLAME_TILE: u16 = 92;
 /// Totem (textured; 2 and 4 are untextured copies, 3 the rock-rotation animation frame).

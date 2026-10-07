@@ -104,7 +104,8 @@ levels; generated maps and sandboxes: all available). The campaign is consistent
 the next level's header has (warrior hut 1 -> 2, temple 3 -> 4, drum tower 4 -> 5, firewarrior 8 -> 9, boat hut
 9 -> 10, spy 12 -> 13, airship hut 13 -> 14). Models 12 ("curr OE slot") and 17 (guard post) are set in many
 masks but are not on the panel; 18 and 19 (vault, prison) are always set and never built. Client: `hud/build.rs`,
-tiles named (`panel_name`), "?" for discoverable, empty slot for hidden, hover describes.
+tiles named (`panel_name`), "?" for discoverable, empty slot for hidden, hover describes. A last tile, always
+available, is the camp fire (see "Camp fire").
 
 ### Blueprint
 - Follows the cursor as a white mark drawn on the ground, the building's footprint draped over the terrain
@@ -252,3 +253,25 @@ construction limits).
 | Spy training | 8 | 16 |
 | Boat hut | 5 | 16 |
 | Airship hut | 11 | 16 |
+
+## Camp fire (done: `game_core::campfire`)
+Not a building: always on the Build tab (after the panel's buildings), lit in one click, no wood nor braves.
+Its blueprint is the cell under the mouse (white, red where it cannot be lit) with cursor icon 66; a left click
+lights it and puts the blueprint away. Clicking one of the player's fires with units selected sends them round
+it (instead of walking there).
+- Placed at a cell's centre (`Command::PlaceCampfire`, `GameMap::place_campfire`), only on flat free land
+  (`campfire::can_place`): no corner of the cell in the sea, corners within `FLAT_SPREAD` of each other, and no
+  building, site platform, tree with wood or other camp fire on it. It blocks buildings on its cell
+  (`placement::Blocked::Campfire`).
+- Units sent to it (`GameMap::gather`, `Order::Campfire`) walk to a point of its ring (`RING` world units out,
+  `RING_POINTS` points), spread evenly from the point nearest the first one, then go round it
+  (`Action::AroundFire`, half their walking speed, the walk animation).
+- A camp fire with nobody of its tribe going to it or round it for `ABANDON_TICKS` (60 s) goes out (removed).
+- Shift + right click on one of the player's fires (mouse over its cell, on the map) puts it out
+  (`Command::RemoveCampfire`, with or without a selection, which is kept): the units going to it or round it
+  stop, idle. The same gesture will remove a placed building plan.
+- Drawn (`campfire.rs`) with original object 0: its logs from the theme atlas, its flame boards (blended faces,
+  objects.md) through the theme's alpha table with the faint board around the flame left out, animated by
+  warping the picture (`flame.rs`: 8 frames at 10 fps, the tip sways with a wave climbing up, the flame stretches
+  and flickers; each fire starts at its own frame). Without the original files: four generated logs, two crossed
+  boards and a generated flame tile through the same steps.

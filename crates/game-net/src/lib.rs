@@ -46,7 +46,7 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 }
 
 /// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
-/// for a unit order `u32 unit id` then the order.
+/// for a unit order `u32 unit id` then the order, for lighting or putting out a camp fire `u16 x, z`.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -79,6 +79,16 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             b.extend(unit.to_le_bytes());
             encode_order(b, order);
         }
+        Command::PlaceCampfire { player, at } => {
+            b.extend([3, *player]);
+            b.extend(at.0.to_le_bytes());
+            b.extend(at.1.to_le_bytes());
+        }
+        Command::RemoveCampfire { player, at } => {
+            b.extend([4, *player]);
+            b.extend(at.0.to_le_bytes());
+            b.extend(at.1.to_le_bytes());
+        }
     }
 }
 
@@ -92,6 +102,12 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
         Order::Pray => b.push(1),
         Order::Cast => b.push(2),
         Order::Stop => b.push(3),
+        Order::Campfire { fire, point } => {
+            b.push(4);
+            b.extend(fire.0.to_le_bytes());
+            b.extend(fire.1.to_le_bytes());
+            b.push(*point);
+        }
     }
 }
 
@@ -111,6 +127,8 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         }
         1 => Some(Command::Order { player, order: decode_order(c)? }),
         2 => Some(Command::OrderUnit { player, unit: c.u32()?, order: decode_order(c)? }),
+        3 => Some(Command::PlaceCampfire { player, at: (c.u16()?, c.u16()?) }),
+        4 => Some(Command::RemoveCampfire { player, at: (c.u16()?, c.u16()?) }),
         _ => None,
     }
 }
@@ -121,6 +139,7 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         1 => Order::Pray,
         2 => Order::Cast,
         3 => Order::Stop,
+        4 => Order::Campfire { fire: (c.u16()?, c.u16()?), point: c.u8()? },
         _ => return None,
     })
 }
@@ -186,6 +205,9 @@ mod tests {
                 Command::Order { player: 0, order: Order::Pray },
                 Command::Order { player: 1, order: Order::Stop },
                 Command::OrderUnit { player: 1, unit: 70_000, order: Order::MoveTo { x: 3, z: 4 } },
+                Command::OrderUnit { player: 0, unit: 9, order: Order::Campfire { fire: (65535, 256), point: 15 } },
+                Command::PlaceCampfire { player: 3, at: (40_000, 7) },
+                Command::RemoveCampfire { player: 1, at: (8, 65535) },
             ],
         }
     }

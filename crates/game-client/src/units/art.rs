@@ -50,7 +50,7 @@ impl Pose {
 pub fn pose_for(action: &Action) -> Pose {
     match action {
         Action::Idle | Action::Landing { .. } => Pose::Idle,
-        Action::Walking { .. } => Pose::Walk,
+        Action::Walking { .. } | Action::AroundFire { .. } => Pose::Walk,
         Action::Stranded { .. } => Pose::Idle,
         Action::Praying => Pose::Pray,
         Action::Casting { .. } => Pose::Cast,

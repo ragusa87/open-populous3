@@ -6,6 +6,8 @@
 //! jetty over the water when it can (`best_facing`). Space turns it a quarter turn, right click
 //! puts it away, left click will place it (`Command::PlaceBuilding`, not yet). Meanwhile clicks do
 //! not select or order units. See docs/specs/buildings.md "Blueprint".
+//! A camp fire's blueprint is the cell under the mouse, red where it cannot be lit
+//! (`campfire::can_place`); a left click lights it (`Command::PlaceCampfire`) and puts it away.
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{ground_y, pick_ground};
@@ -18,6 +20,8 @@ use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use game_core::building::{Building, BuildingKind};
+use game_core::campfire;
+use game_core::command::Command;
 use game_core::placement::{best_facing, blocked_at, shore_ok, too_steep};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
@@ -30,21 +34,28 @@ const ARROW: (f32, f32, f32) = (0.3, 0.5, 0.1);
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 0.55];
 const RED: [f32; 4] = [1.0, 0.15, 0.1, 0.6];
 
-/// The building being placed, if any, and how it is turned (eighths of a turn, quarter steps).
+/// What a blueprint places.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Plan {
+    Building(BuildingKind),
+    Campfire,
+}
+
+/// What is being placed, if anything, and how it is turned (eighths of a turn, quarter steps).
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Blueprint {
-    pub kind: Option<BuildingKind>,
+    pub plan: Option<Plan>,
     pub facing: u8,
 }
 
 impl Blueprint {
-    /// Picks a building; the turn is kept from the previous one.
-    pub fn pick(&mut self, kind: BuildingKind) {
-        self.kind = Some(kind);
+    /// Picks what to place; the turn is kept from the previous one.
+    pub fn pick(&mut self, plan: Plan) {
+        self.plan = Some(plan);
     }
 
     pub fn put_away(&mut self) {
-        self.kind = None;
+        self.plan = None;
     }
 
     /// A quarter turn (Space).
@@ -53,8 +64,13 @@ impl Blueprint {
     }
 
     pub fn is_active(&self) -> bool {
-        self.kind.is_some()
+        self.plan.is_some()
     }
+}
+
+/// The cell (map corner, cells) a camp fire would take with the mouse over map position `at`.
+pub fn campfire_cell(at: Vec2) -> (i32, i32) {
+    campfire::cell_at(world_units(at))
 }
 
 /// The building the blueprint stands for with the mouse over map position `cell`: on the nearest
@@ -142,12 +158,33 @@ fn cursor_on_map(windows: &Query<&Window>, ui: &Query<&Interaction>) -> Option<V
     windows.iter().next().and_then(Window::cursor_position).filter(|c| c.x > PANEL_WIDTH && !over_ui)
 }
 
-/// Space turns it, right click on the map puts it away; left click on the map is kept for placing.
+/// The map position (cells) under the mouse, if it is over the map.
+fn ground_under_mouse(
+    windows: &Query<&Window>,
+    ui: &Query<&Interaction>,
+    cams: &Query<(&Camera, &GlobalTransform), With<GameCamera>>,
+    map: &CurrentMap,
+    rig: &CameraRig,
+    params: &CurveParamsRes,
+) -> Option<Vec2> {
+    let c = cursor_on_map(windows, ui)?;
+    let (cam, at) = cams.iter().next()?;
+    let ray = cam.viewport_to_world(at, c).ok()?;
+    pick_ground(&map.0.terrain, rig.focus, &params.0, ray.origin, *ray.direction)
+}
+
+/// Space turns it, right click on the map puts it away; left click on the map lights a camp fire
+/// (and puts it away), buildings are not placed yet.
+#[allow(clippy::too_many_arguments)]
 fn blueprint_input(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     ui: Query<&Interaction>,
+    cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
+    rig: Res<CameraRig>,
+    params: Res<CurveParamsRes>,
+    mut map: ResMut<CurrentMap>,
     mut blueprint: ResMut<Blueprint>,
 ) {
     if !blueprint.is_active() {
@@ -158,6 +195,14 @@ fn blueprint_input(
     }
     if mouse.just_pressed(MouseButton::Right) && cursor_on_map(&windows, &ui).is_some() {
         blueprint.put_away();
+    }
+    if blueprint.plan == Some(Plan::Campfire) && mouse.just_pressed(MouseButton::Left) {
+        let Some(cell) = ground_under_mouse(&windows, &ui, &cams, &map, &rig, &params).map(campfire_cell) else { return };
+        if campfire::can_place(&map.0, cell) {
+            let at = world_units(Vec2::new(cell.0 as f32 + 0.5, cell.1 as f32 + 0.5));
+            map.bypass_change_detection().0.apply(&Command::PlaceCampfire { player: PLAYER, at });
+            blueprint.put_away();
+        }
     }
 }
 
@@ -187,37 +232,48 @@ fn draw_blueprint(
 ) {
     let Ok((mesh, mut vis)) = mark.single_mut() else { return };
     let playing = *state.get() == crate::menu::AppState::Playing;
-    let under_mouse = || {
-        let c = cursor_on_map(&windows, &ui)?;
-        let (cam, at) = cams.iter().next()?;
-        let ray = cam.viewport_to_world(at, c).ok()?;
-        pick_ground(&map.0.terrain, rig.focus, &params.0, ray.origin, *ray.direction)
-    };
-    let ground = blueprint.kind.filter(|_| playing).and_then(|kind| Some((kind, pinned.0.or_else(under_mouse)?)));
-    let Some((kind, cell)) = ground else {
+    let under_mouse = || ground_under_mouse(&windows, &ui, &cams, &map, &rig, &params);
+    let ground = blueprint.plan.filter(|_| playing).and_then(|plan| Some((plan, pinned.0.or_else(under_mouse)?)));
+    let Some((plan, cell)) = ground else {
         *vis = Visibility::Hidden;
         if matches!(*look, CursorLook::Building { .. }) {
             look.set_if_neq(CursorLook::Arrow);
         }
         return;
     };
+    let size = map.0.terrain.size() as f32;
+    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
+    let terrain = &map.0.terrain;
+    // A map position (cells) -> render position on the ground.
+    let on_ground = |at: Vec2| {
+        let (dx, dz) = (wrap(at.x - rig.focus.x), wrap(at.y - rig.focus.y));
+        [dx, ground_y(terrain, rig.focus, &params.0, dx, dz) + LIFT, dz]
+    };
+    let kind = match plan {
+        Plan::Building(kind) => kind,
+        Plan::Campfire => {
+            let fire = campfire_cell(cell);
+            let colour = if campfire::can_place(&map.0, fire) { WHITE } else { RED };
+            let lo = Vec2::new(fire.0 as f32, fire.1 as f32);
+            let mark = grid_mark(lo, lo + Vec2::ONE, |at| (on_ground(at), colour));
+            look.set_if_neq(CursorLook::Building { plan, valid: colour == WHITE });
+            if let Some(mut m) = meshes.get_mut(&mesh.0) {
+                set_mark(&mut m, mark);
+            }
+            *vis = Visibility::Inherited;
+            return;
+        }
+    };
     let b = blueprint_at(kind, blueprint.facing, cell);
     let b = Building { facing: best_facing(&map.0, &b, blueprint.facing), ..b };
     let unit = WORLD_UNITS_PER_CELL as f32;
     let (cx, cz) = b.centre();
     let centre = Vec2::new(cx as f32, cz as f32) / unit;
-    let size = map.0.terrain.size() as f32;
-    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
-    let terrain = &map.0.terrain;
     let all_red = too_steep(&map.0, &b) || !shore_ok(&map.0, &b);
     // A map position (cells) -> render position and colour.
-    let vertex = |at: Vec2| {
-        let (dx, dz) = (wrap(at.x - rig.focus.x), wrap(at.y - rig.focus.y));
-        let colour = if all_red || blocked_at(&map.0, world_units(at)).is_some() { RED } else { WHITE };
-        ([dx, ground_y(terrain, rig.focus, &params.0, dx, dz) + LIFT, dz], colour)
-    };
+    let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at)).is_some() { RED } else { WHITE });
     let mark = mark_mesh(kind, b.facing, centre, vertex);
-    look.set_if_neq(CursorLook::Building { kind, valid: !mark.colours.contains(&RED) });
+    look.set_if_neq(CursorLook::Building { plan, valid: !mark.colours.contains(&RED) });
     if let Some(mut m) = meshes.get_mut(&mesh.0) {
         set_mark(&mut m, mark);
     }
@@ -229,6 +285,21 @@ fn draw_blueprint(
 /// turns a map position (cells) into a render position and colour.
 pub fn mark_mesh(kind: BuildingKind, facing: u8, centre: Vec2, vertex: impl Fn(Vec2) -> ([f32; 3], [f32; 4])) -> MarkMesh {
     let (lo, hi) = world_rect(kind, facing, centre);
+    let mut m = grid_mark(lo, hi, &vertex);
+    let first = m.positions.len() as u32;
+    let arrow = if m.colours.contains(&RED) { RED } else { WHITE };
+    for p in door_arrow(kind) {
+        let (p, _) = vertex(centre + turn_local(p, facing));
+        m.positions.push(p);
+        m.colours.push(arrow);
+    }
+    m.indices.extend([first, first + 1, first + 2]);
+    m
+}
+
+/// The map rectangle `lo`-`hi` (cells) as a grid through the terrain's cell lines, each grid quad
+/// split like the terrain's cells. `vertex` as in `mark_mesh`.
+pub fn grid_mark(lo: Vec2, hi: Vec2, vertex: impl Fn(Vec2) -> ([f32; 3], [f32; 4])) -> MarkMesh {
     let (xs, zs) = (grid_lines(lo.x, hi.x), grid_lines(lo.y, hi.y));
     let mut m = MarkMesh::default();
     for &z in &zs {
@@ -246,14 +317,6 @@ pub fn mark_mesh(kind: BuildingKind, facing: u8, centre: Vec2, vertex: impl Fn(V
             m.indices.extend([a, a + row, a + 1, a + 1, a + row, a + row + 1]);
         }
     }
-    let first = m.positions.len() as u32;
-    let arrow = if m.colours.contains(&RED) { RED } else { WHITE };
-    for p in door_arrow(kind) {
-        let (p, _) = vertex(centre + turn_local(p, facing));
-        m.positions.push(p);
-        m.colours.push(arrow);
-    }
-    m.indices.extend([first, first + 1, first + 2]);
     m
 }
 
@@ -308,6 +371,15 @@ mod tests {
     }
 
     #[test]
+    fn a_camp_fire_takes_the_cell_under_the_mouse() {
+        assert_eq!(campfire_cell(Vec2::new(10.9, 20.1)), (10, 20));
+        assert_eq!(campfire_cell(Vec2::new(127.99, 0.0)), (127, 0));
+        let m = grid_mark(Vec2::new(3.0, 4.0), Vec2::new(4.0, 5.0), |at| ([at.x, 0.0, at.y], WHITE));
+        assert_eq!(m.positions.len(), 25, "a 4 x 4 grid over the cell");
+        assert_eq!(m.indices.len(), 16 * 6);
+    }
+
+    #[test]
     fn grid_follows_the_cell_lines() {
         let lines = grid_lines(9.3, 10.6);
         assert_eq!(lines, vec![9.3, 9.5, 9.75, 10.0, 10.25, 10.5, 10.6]);
@@ -327,14 +399,14 @@ mod tests {
     fn picking_turning_and_putting_away() {
         let mut b = Blueprint::default();
         assert!(!b.is_active());
-        b.pick(BuildingKind::Temple);
+        b.pick(Plan::Building(BuildingKind::Temple));
         b.turn();
         b.turn();
         b.turn();
         b.turn();
-        assert_eq!((b.kind, b.facing), (Some(BuildingKind::Temple), 0));
+        assert_eq!((b.plan, b.facing), (Some(Plan::Building(BuildingKind::Temple)), 0));
         b.turn();
-        b.pick(BuildingKind::DrumTower);
+        b.pick(Plan::Campfire);
         assert_eq!(b.facing, 2, "the turn is kept");
         b.put_away();
         assert!(!b.is_active());

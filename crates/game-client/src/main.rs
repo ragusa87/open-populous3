@@ -3,12 +3,14 @@
 
 mod blueprint;
 mod buildings;
+mod campfire;
 mod camera;
 mod construction;
 mod cursor_debug;
 mod dev;
 mod edge_push;
 mod editor;
+mod flame;
 mod generated_buildings;
 mod grounded;
 mod hud;
@@ -60,6 +62,7 @@ fn main() {
             sky::SkyPlugin,
             nature::NaturePlugin,
             buildings::BuildingsPlugin,
+            campfire::CampfirePlugin,
             blueprint::BlueprintPlugin),
             units::UnitsPlugin,
             wood::WoodPlugin,

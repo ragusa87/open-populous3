@@ -1,6 +1,6 @@
 //! Where a new building may stand (the blueprint's red parts, later `Command::PlaceBuilding`):
-//! never on the sea, another building, a reincarnation site's platform or a tree that still has
-//! wood, nor on ground too steep (the braves level small unevenness). A boat hut also needs the sea
+//! never on the sea, another building, a reincarnation site's platform, a camp fire's cell or a
+//! tree that still has wood, nor on ground too steep (the braves level small unevenness). A boat hut also needs the sea
 //! a cell past its jetty side (local +z: the middle and a corner at least) and dry land at its door
 //! (local -z): in the levels, all 11 boat huts have only sea within 2.5 cells past their +z side
 //! and land past their -z side.
@@ -22,6 +22,7 @@ pub enum Blocked {
     Building,
     Site,
     Tree,
+    Campfire,
 }
 
 /// What blocks building on the world point `p`, if anything (the slope is checked per building,
@@ -40,6 +41,8 @@ pub fn blocked_at(map: &GameMap, p: (u16, u16)) -> Option<Blocked> {
         Some(Blocked::Site)
     } else if map.trees.iter().any(|t| t.is_visible() && t.cell() == cell) {
         Some(Blocked::Tree)
+    } else if map.campfires.iter().any(|f| f.cell() == cell) {
+        Some(Blocked::Campfire)
     } else {
         None
     }
@@ -162,6 +165,9 @@ mod tests {
         assert_eq!(blocked_at(&m, (50 * 512 + 100, 50 * 512 + 100)), Some(Blocked::Tree));
         m.trees[0] = Tree::new((50, 50), 0, 0);
         assert_eq!(blocked_at(&m, (50 * 512 + 100, 50 * 512 + 100)), None, "a cut down tree does not block");
+        m.campfires.push(crate::campfire::Campfire::new(1, 0, (60, 60)));
+        assert_eq!(blocked_at(&m, (60 * 512 + 10, 60 * 512 + 500)), Some(Blocked::Campfire));
+        assert!(!can_place(&m, &hut((60, 60))), "over a camp fire");
     }
 
     fn boat_hut(cell: (u16, u16), facing: u8) -> Building {

@@ -15,8 +15,9 @@ pub const POINTER_GOLD_ARROW: [usize; 4] = [30, 31, 32, 33];
 /// Gold spell icons (38 bloodlust, then one per player spell, docs/specs/sprites.md), shown
 /// while aiming a spell with the click point at their centre.
 pub const POINTER_SPELL_ICONS: std::ops::RangeInclusive<usize> = 38..=57;
-/// Teal building icons.
+/// Teal building icons, the camp fire's last.
 pub const POINTER_BUILDING_ICONS: std::ops::RangeInclusive<usize> = 58..=66;
+pub const POINTER_CAMP_FIRE: usize = 66;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sprite {

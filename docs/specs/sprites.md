@@ -69,7 +69,7 @@ Building icons, named the same way: 58 hut, 59 drum tower, 60 warrior training, 
 62 temple (preachers), 63 spy training, 64 boat hut, 65 airship (balloon) hut, 66 camp fire. Like the spell icons
 they belong to the cursor, but added to it: while a blueprint is out the usual arrow stays and the building's icon,
 at the same scale, sits right of it (`virtual_cursor::building_sprite`, `with_badge`);
-the camp fire's when placing one (not done).
+the camp fire's (66) while placing one (`plan_sprite`).
 
 ## `data/hfx0-0.dat` (1615 sprites: effects, map things, HUD art)
 Same palette. Identified: 2-3 dry plants, 22 a flat dark smear (shadow of 23?), 23 a pile of logs (17 x 11, a piece of

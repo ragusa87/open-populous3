@@ -1,6 +1,7 @@
 //! A playable map: terrain + metadata, built from an original level or generated.
 
 use crate::building::{buildings_from_level, Building, BuildingKind};
+use crate::campfire::{self, Campfire};
 use crate::command::Command;
 use crate::path::Mobility;
 use crate::slots;
@@ -38,6 +39,8 @@ pub struct GameMap {
     /// The buildings an original level lets the tribes build (`BuildBook::from_level`); None like
     /// `spell_book`.
     pub build_book: Option<BuildBook>,
+    /// Lit camp fires, in lighting order (none in original levels).
+    pub campfires: Vec<Campfire>,
 }
 
 impl GameMap {
@@ -59,6 +62,7 @@ impl GameMap {
             wood: Vec::new(),
             spell_book: None,
             build_book: None,
+            campfires: Vec::new(),
         }
         .with_building_ground()
         .with_shamans()
@@ -134,7 +138,7 @@ impl GameMap {
             terrain.set(x, z, v);
         }
         let sites = generated_sites(&terrain);
-        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None }.with_shamans().with_trees(seed, 60)
+        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new() }.with_shamans().with_trees(seed, 60)
     }
 
     /// Test ground for walking: a small flat island around the player's site at the centre, a gentle
@@ -161,7 +165,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None }.with_shamans().with_trees(1, 150)
+        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new() }.with_shamans().with_trees(1, 150)
     }
 
     /// Test ground for buildings: a flat island with the player's site at the centre.
@@ -170,7 +174,8 @@ impl GameMap {
     ///   colours, with some wood pieces between them and the site.
     /// - North: one row per buildable kind (`BUILDABLE` order) showing each `showcase_states`
     ///   column, west to east.
-    /// - East: free ground to build on, with braves, a pile of wood and a few trees.
+    /// - East: free ground to build on, with braves, a pile of wood and a few trees, and a camp
+    ///   fire three of the braves go round.
     pub fn sandbox_buildings() -> Self {
         const C: i32 = MAP_SIZE as i32 / 2;
         const ISLAND: i32 = 48;
@@ -183,7 +188,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None }.with_shamans();
+        let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new() }.with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let place = |owner: u8, kind: BuildingKind, (x, z): (u16, u16), facing: u8| Building::new(kind, owner, x - 256, z - 256, facing);
         for model in 1..=19u8 {
@@ -214,6 +219,12 @@ impl GameMap {
         for (i, (dx, dz)) in [(34, -8), (36, -5), (35, -1), (37, 3), (34, 9), (36, 12)].into_iter().enumerate() {
             map.trees.push(Tree::new((C + dx, C + dz), i as u8, crate::tree::MAX_SIZE));
         }
+        if let Some(fire) = map.place_campfire(0, (C + 21, C + 4)) {
+            let braves: Vec<u32> = map.units.iter().filter(|u| u.kind == UnitKind::Brave).take(3).map(|u| u.id).collect();
+            for c in map.gather(0, &braves, fire) {
+                map.apply(&c);
+            }
+        }
         map
     }
 
@@ -235,7 +246,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None }.with_shamans().with_trees(2, 150);
+        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new() }.with_shamans().with_trees(2, 150);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         for (row, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
             let row = row as i32;
@@ -301,7 +312,59 @@ impl GameMap {
                 }
                 None
             }
+            Command::PlaceCampfire { player, at } => {
+                self.place_campfire(player, campfire::cell_at(at));
+                None
+            }
+            Command::RemoveCampfire { player, at } => {
+                self.remove_campfire(player, at);
+                None
+            }
         }
+    }
+
+    /// Lights a camp fire for `player` in `cell` if it can be (`campfire::can_place`); its id.
+    pub fn place_campfire(&mut self, player: u8, cell: (i32, i32)) -> Option<u32> {
+        if !campfire::can_place(self, cell) {
+            return None;
+        }
+        let id = self.campfires.iter().map(|f| f.id).max().unwrap_or(0) + 1;
+        self.campfires.push(Campfire::new(id, player, cell));
+        Some(id)
+    }
+
+    /// Puts out `player`'s camp fire whose cell holds world point `p`, if any: the units going to it
+    /// or round it stop (idle).
+    pub fn remove_campfire(&mut self, player: u8, p: (u16, u16)) {
+        let Some(i) = self.campfires.iter().position(|f| f.owner == player && f.cell() == campfire::cell_at(p)) else { return };
+        let centre = self.campfires.remove(i).centre();
+        for u in self.units.iter_mut().filter(|u| u.owner == player && u.campfire() == Some(centre)) {
+            u.order(Order::Stop);
+        }
+    }
+
+    /// The camp fire whose cell holds world point `p`, if any.
+    pub fn campfire_at(&self, p: (u16, u16)) -> Option<&Campfire> {
+        let cell = campfire::cell_at(p);
+        self.campfires.iter().find(|f| f.cell() == cell)
+    }
+
+    /// Orders sending the player's living `units` round their own camp fire `fire`, spread evenly
+    /// over its ring from the point nearest the first of them; none if the fire is not theirs.
+    pub fn gather(&self, player: u8, units: &[u32], fire: u32) -> Vec<Command> {
+        let Some(f) = self.campfires.iter().find(|f| f.id == fire && f.owner == player) else { return Vec::new() };
+        let going: Vec<&Unit> = self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id)).collect();
+        let Some(first) = going.first() else { return Vec::new() };
+        let start = campfire::nearest_point(f.centre(), (first.x, first.z)) as usize;
+        let n = going.len();
+        going
+            .iter()
+            .enumerate()
+            .map(|(i, u)| {
+                let point = ((start + i * campfire::RING_POINTS as usize / n) % campfire::RING_POINTS as usize) as u8;
+                Command::OrderUnit { player, unit: u.id, order: Order::Campfire { fire: f.centre(), point } }
+            })
+            .collect()
     }
 
     /// An order to the player's shaman.
@@ -340,6 +403,7 @@ impl GameMap {
     pub fn tick(&mut self) -> Vec<DirtyRect> {
         let mut dirty = Vec::new();
         self.trees.iter_mut().for_each(Tree::tick);
+        self.tend_campfires();
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing { .. })).collect();
         for unit in &mut self.units {
             let site = self.sites.iter().find(|s| s.owner == unit.owner);
@@ -360,6 +424,18 @@ impl GameMap {
             }
         }
         dirty
+    }
+}
+
+impl GameMap {
+    /// Camp fires with someone of their tribe going to them or round them keep burning, the others
+    /// count towards going out; those out are removed.
+    fn tend_campfires(&mut self) {
+        for f in &mut self.campfires {
+            let tended = self.units.iter().any(|u| u.owner == f.owner && u.is_alive() && u.campfire() == Some(f.centre()));
+            f.unattended = if tended { 0 } else { f.unattended.saturating_add(1) };
+        }
+        self.campfires.retain(|f| !f.is_out());
     }
 }
 
@@ -628,6 +704,101 @@ mod tests {
         for t in &m.trees {
             assert!(!m.terrain.is_water(t.cell().0, t.cell().1));
         }
+    }
+
+    #[test]
+    fn the_buildings_sandbox_has_a_tended_camp_fire() {
+        let mut m = GameMap::sandbox_buildings();
+        assert_eq!(m.campfires.len(), 1);
+        let fire = m.campfires[0].centre();
+        assert_eq!(m.units.iter().filter(|u| u.campfire() == Some(fire)).count(), 3);
+        for _ in 0..crate::campfire::ABANDON_TICKS + 10 {
+            m.tick();
+        }
+        assert_eq!(m.campfires.len(), 1, "tended: still burning");
+        assert_eq!(m.units.iter().filter(|u| matches!(u.action, Action::AroundFire { .. })).count(), 3);
+    }
+
+    #[test]
+    fn camp_fires_are_lit_by_command_on_free_flat_ground_only() {
+        let mut m = GameMap::sandbox_buildings();
+        let at = |x: i32, z: i32| ((x * 512 + 100) as u16, (z * 512 + 400) as u16);
+        m.apply(&Command::PlaceCampfire { player: 0, at: at(84, 70) });
+        assert_eq!(m.campfires.last().map(|f| (f.cell(), f.owner)), Some(((84, 70), 0)));
+        let n = m.campfires.len();
+        m.apply(&Command::PlaceCampfire { player: 0, at: at(84, 70) });
+        m.apply(&Command::PlaceCampfire { player: 0, at: at(2, 2) });
+        assert_eq!(m.campfires.len(), n, "taken, then the sea");
+        assert_eq!(m.campfire_at(at(84, 70)).map(|f| f.id), m.campfires.last().map(|f| f.id));
+        let ids: Vec<u32> = m.campfires.iter().map(|f| f.id).collect();
+        assert!(ids.windows(2).all(|w| w[0] < w[1]), "unique ids");
+    }
+
+    #[test]
+    fn units_go_round_their_fire_spread_out_and_an_abandoned_fire_goes_out() {
+        use crate::campfire::{ring_point, ABANDON_TICKS, RING_POINTS};
+        let mut m = GameMap::sandbox_buildings();
+        m.campfires.clear();
+        let fire = m.place_campfire(0, (84, 70)).unwrap();
+        let braves: Vec<u32> = m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.campfire().is_none()).take(4).map(|u| u.id).collect();
+        let orders = m.gather(0, &braves, fire);
+        let points: Vec<u8> = orders.iter().map(|c| match c {
+            Command::OrderUnit { order: Order::Campfire { point, .. }, .. } => *point,
+            _ => panic!("{c:?}"),
+        }).collect();
+        assert_eq!(points.len(), 4);
+        for w in points.windows(2) {
+            assert_eq!((w[1] + RING_POINTS - w[0]) % RING_POINTS, RING_POINTS / 4, "a quarter of the ring apart");
+        }
+        assert!(m.gather(1, &braves, fire).is_empty(), "not red's fire");
+        for c in &orders {
+            m.apply(c);
+        }
+        let centre = m.campfires[0].centre();
+        let mut went_round = vec![0u32; braves.len()];
+        let mut last = vec![None; braves.len()];
+        for _ in 0..600 {
+            m.tick();
+            for (i, id) in braves.iter().enumerate() {
+                let u = m.units.iter().find(|u| u.id == *id).unwrap();
+                if let Action::AroundFire { point, .. } = u.action {
+                    if last[i].is_some_and(|p| p != point) {
+                        went_round[i] += 1;
+                    }
+                    last[i] = Some(point);
+                    let near = ring_point(centre, point);
+                    let d = (crate::unit::torus_delta(near.0, u.x).abs() + crate::unit::torus_delta(near.1, u.z).abs()) as i32;
+                    assert!(d <= 2 * crate::campfire::RING, "on the ring");
+                }
+            }
+        }
+        assert!(went_round.iter().all(|&n| n > RING_POINTS as u32), "each went round at least once: {went_round:?}");
+        for c in braves.iter().map(|&unit| Command::OrderUnit { player: 0, unit, order: Order::Stop }) {
+            m.apply(&c);
+        }
+        for _ in 0..ABANDON_TICKS - 1 {
+            m.tick();
+        }
+        assert_eq!(m.campfires.iter().filter(|f| f.id == fire).count(), 1, "not yet");
+        m.tick();
+        assert!(m.campfires.iter().all(|f| f.id != fire), "gone out");
+    }
+
+    #[test]
+    fn putting_a_camp_fire_out_leaves_its_people_idle() {
+        let mut m = GameMap::sandbox_buildings();
+        for _ in 0..100 {
+            m.tick();
+        }
+        let fire = m.campfires[0].centre();
+        let around: Vec<u32> = m.units.iter().filter(|u| u.campfire() == Some(fire)).map(|u| u.id).collect();
+        assert_eq!(around.len(), 3);
+        m.apply(&Command::RemoveCampfire { player: 1, at: fire });
+        assert_eq!(m.campfires.len(), 1, "not red's to put out");
+        m.apply(&Command::RemoveCampfire { player: 0, at: (fire.0 + 200, fire.1 - 200) });
+        assert!(m.campfires.is_empty(), "anywhere in its cell");
+        assert!(m.units.iter().filter(|u| around.contains(&u.id)).all(|u| u.action == Action::Idle));
+        m.apply(&Command::RemoveCampfire { player: 0, at: fire });
     }
 
     #[test]

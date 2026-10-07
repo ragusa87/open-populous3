@@ -2,6 +2,7 @@
 //! Positions are fixed-point (1 cell = 512 units, like the original), wrapping at 65536: plain
 //! `u16` wrapping arithmetic walks around the torus.
 
+use crate::campfire;
 use crate::path::{self, Mobility};
 use crate::site::ReincarnationSite;
 use crate::terrain::Heightmap;
@@ -31,6 +32,8 @@ pub const CAST_TICKS: u16 = 12;
 pub const LANDING_TICKS: u16 = 6;
 pub const DYING_TICKS: u16 = 8;
 pub const RESPAWN_TICKS: u16 = 30;
+/// Going round a camp fire: this fraction (numerator, denominator) of the walking speed.
+pub const AROUND_FIRE_PACE: (i32, i32) = (1, 2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnitKind {
@@ -116,6 +119,9 @@ pub enum Action {
     Dying { left: u16 },
     /// Waiting to reincarnate at her site.
     Dead { left: u16 },
+    /// Going round the camp fire at `fire` (its centre), last at its ring point `point`
+    /// (`campfire::ring_point`), at `AROUND_FIRE_PACE` of her walking speed.
+    AroundFire { fire: (u16, u16), point: u8 },
 }
 
 impl Action {
@@ -130,6 +136,7 @@ impl Action {
             Action::Drowning => "Drowning",
             Action::Dying { .. } => "Dying",
             Action::Dead { .. } => "Dead",
+            Action::AroundFire { .. } => "Around the fire",
         }
     }
 
@@ -153,6 +160,8 @@ impl Action {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Order {
     MoveTo { x: u16, z: u16 },
+    /// Walk to point `point` of the ring of the camp fire at `fire` (its centre), then go round it.
+    Campfire { fire: (u16, u16), point: u8 },
     Pray,
     Cast,
     Stop,
@@ -184,6 +193,8 @@ pub struct Unit {
     planned_on: Option<u32>,
     /// Where the current cast jump takes her when it ends (Teleport).
     teleport_to: Option<(u16, u16)>,
+    /// The camp fire (centre) and ring point she is walking to, to go round it once there.
+    to_fire: Option<((u16, u16), u8)>,
 }
 
 impl Unit {
@@ -206,6 +217,7 @@ impl Unit {
             route: Vec::new(),
             planned_on: None,
             teleport_to: None,
+            to_fire: None,
         }
     }
 
@@ -241,14 +253,27 @@ impl Unit {
         self.teleport_to
     }
 
+    /// The camp fire (centre) she is going round or walking to, if any.
+    pub fn campfire(&self) -> Option<(u16, u16)> {
+        match self.action {
+            Action::AroundFire { fire, .. } => Some(fire),
+            Action::Walking { .. } | Action::Stranded { .. } => self.to_fire.map(|(fire, _)| fire),
+            _ => None,
+        }
+    }
+
     /// Ignored while drowning, dying or dead.
     pub fn order(&mut self, order: Order) {
         if !self.action.can_take_orders() {
             return;
         }
-        (self.route, self.planned_on, self.teleport_to) = (Vec::new(), None, None);
+        (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
         self.action = match order {
             Order::MoveTo { x, z } => Action::Walking { to: (x, z) },
+            Order::Campfire { fire, point } => {
+                self.to_fire = Some((fire, point));
+                Action::Walking { to: campfire::ring_point(fire, point) }
+            }
             Order::Pray => Action::Praying,
             Order::Cast => Action::Casting { left: CAST_TICKS },
             Order::Stop => Action::Idle,
@@ -263,6 +288,15 @@ impl Unit {
         }
         match self.action {
             Action::Idle | Action::Praying => self.heal(),
+            Action::AroundFire { fire, point } => {
+                self.heal();
+                let next = (point + 1) % campfire::RING_POINTS;
+                let pace = self.kind.speed() * AROUND_FIRE_PACE.0 / AROUND_FIRE_PACE.1;
+                // Blocked (the sea or a cliff across the ring): aim for the point after.
+                if self.step_towards(campfire::ring_point(fire, next), terrain, pace) != Step::Moved {
+                    self.action = Action::AroundFire { fire, point: next };
+                }
+            }
             Action::Walking { to } | Action::Stranded { to } => {
                 if self.planned_on != Some(terrain.revision()) {
                     self.plan(to, terrain, true);
@@ -270,6 +304,11 @@ impl Unit {
                 if let Action::Walking { .. } = self.action {
                     self.heal();
                     self.follow_route(to, terrain);
+                    if self.action == Action::Idle {
+                        if let Some((fire, point)) = self.to_fire.take() {
+                            self.action = Action::AroundFire { fire, point };
+                        }
+                    }
                 } else if self.hurt() {
                     return Some(UnitEvent::Died);
                 }
@@ -333,7 +372,7 @@ impl Unit {
     }
 
     fn die(&mut self) {
-        (self.route, self.planned_on, self.teleport_to) = (Vec::new(), None, None);
+        (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
         self.action = Action::Dying { left: DYING_TICKS };
     }
 
@@ -360,7 +399,7 @@ impl Unit {
             self.action = Action::Idle;
             return;
         };
-        match self.step_towards(next, terrain) {
+        match self.step_towards(next, terrain, self.kind.speed()) {
             Step::Moved => {}
             Step::Arrived => {
                 self.route.pop();
@@ -372,15 +411,16 @@ impl Unit {
         }
     }
 
-    /// Straight towards `to`, shortest way around the torus, never into a cell she cannot cross.
-    fn step_towards(&mut self, to: (u16, u16), terrain: &Heightmap) -> Step {
+    /// Straight towards `to` at `flat_speed` (world units per tick on flat ground), shortest way
+    /// around the torus, never into a cell she cannot cross.
+    fn step_towards(&mut self, to: (u16, u16), terrain: &Heightmap, flat_speed: i32) -> Step {
         let (dx, dz) = (torus_delta(self.x, to.0), torus_delta(self.z, to.1));
         if dx == 0 && dz == 0 {
             return Step::Arrived;
         }
         self.facing = octant(dx, dz);
         let dist = isqrt((dx * dx + dz * dz) as u32) as i32;
-        let speed = slope_speed(self.kind.speed(), self.grade_ahead((dx, dz), dist, terrain));
+        let speed = slope_speed(flat_speed, self.grade_ahead((dx, dz), dist, terrain));
         let (sx, sz) = if dist <= speed { (dx, dz) } else { (dx * speed / dist, dz * speed / dist) };
         let (nx, nz) = (self.x.wrapping_add(sx as u16), self.z.wrapping_add(sz as u16));
         let next = (cell_of(nx), cell_of(nz));
@@ -399,6 +439,7 @@ impl Unit {
     }
 }
 
+#[derive(PartialEq, Eq)]
 enum Step {
     Moved,
     Arrived,

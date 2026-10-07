@@ -10,6 +10,7 @@
 //! (else a generated gold ring) is grayed out where the spell or building cannot apply.
 
 use crate::world::LevelList;
+use crate::blueprint::Plan;
 use game_core::building::BuildingKind;
 use game_core::spell_book::SpellKind;
 use pop3_format::sprites::POINTER_GOLD_ARROW;
@@ -58,8 +59,8 @@ pub enum CursorLook {
     Menu,
     /// Aiming `kind`; `valid` when it can be cast under the cursor.
     Spell { kind: SpellKind, valid: bool },
-    /// Placing a blueprint of `kind`; `valid` when it can stand under the cursor.
-    Building { kind: BuildingKind, valid: bool },
+    /// Placing `plan` (a building or a camp fire); `valid` when it can stand under the cursor.
+    Building { plan: Plan, valid: bool },
 }
 
 /// Whether the mouse is captured by the game (Esc toggles outside the game), and the in-game cursor position.
@@ -220,8 +221,16 @@ pub fn with_badge(pointer: &PointerImage, badge: &PointerImage) -> PointerImage 
     PointerImage { width, height, rgba, tip: (pointer.tip.0, pointer.tip.1 + shift) }
 }
 
-/// Original teal icon shown while placing a blueprint (`POINT0-0.DAT` 58-65, sprites.md); None for
-/// kinds that are never built.
+/// Original teal icon shown while placing a blueprint (`POINT0-0.DAT` 58-66, sprites.md): the
+/// building's, 66 for a camp fire.
+pub fn plan_sprite(plan: Plan) -> Option<usize> {
+    match plan {
+        Plan::Building(kind) => building_sprite(kind),
+        Plan::Campfire => Some(pop3_format::sprites::POINTER_CAMP_FIRE),
+    }
+}
+
+/// A building's teal icon (`POINT0-0.DAT` 58-65); None for kinds that are never built.
 pub fn building_sprite(kind: BuildingKind) -> Option<usize> {
     Some(match kind {
         BuildingKind::Hut { .. } => 58,
@@ -278,7 +287,7 @@ impl PointerSource {
             CursorLook::Arrow => arrow(),
             CursorLook::Menu => self.gold(frame),
             CursorLook::Spell { kind, valid } => with_badge(&self.gold(frame), &self.icon(Some(spell_sprite(kind)), valid)),
-            CursorLook::Building { kind, valid } => with_badge(&arrow(), &self.icon(building_sprite(kind), valid)),
+            CursorLook::Building { plan, valid } => with_badge(&arrow(), &self.icon(plan_sprite(plan), valid)),
         }
     }
 }
@@ -552,6 +561,8 @@ mod tests {
         assert!(icons.iter().all(|i| pop3_format::sprites::POINTER_BUILDING_ICONS.contains(i)));
         assert_eq!(building_sprite(BuildingKind::Hut { size: 3 }), Some(58));
         assert_eq!(building_sprite(BuildingKind::Vault), None);
+        assert_eq!(plan_sprite(Plan::Campfire), Some(66), "after the buildings' icons");
+        assert!(!icons.contains(&66));
     }
 
     #[test]

@@ -9,6 +9,12 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] More sandboxes as features come (combat, vehicles, praying...).
 - [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
 
+## Camp fire ([buildings.md](docs/specs/buildings.md) "Camp fire")
+- [ ] Animate the firewarrior huts' two torches (objects 137-140) with the camp fire's flame (`flame.rs`): their flame faces are the same blended tile 92, drawn today as brown boards. Same for the large huts (133-136) and guard posts (190-193).
+- [ ] Check in the game: what a camp fire is for (people gathering? mana?), its burn time when left alone (`ABANDON_TICKS`, 60 s guessed), the ring size, the flatness rule, and when object 12 (other logs) is used.
+- [ ] Shift + right click on a placed building plan (blueprint stage) removes it, like a camp fire (`units::selection::shift_right_click`), once buildings are placed.
+- [ ] Hover/selection of a camp fire (tooltip with who is around it), a hover cursor when units are selected over one.
+
 ## Units ([units.md](docs/specs/units.md))
 - [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).

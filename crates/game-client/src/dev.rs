@@ -102,14 +102,16 @@ impl ShotCamera {
     }
 }
 
-/// `kind@x,z`: a Build tab kind by its panel name, spaces and dashes optional (`firewarriorhut`),
-/// and a map position in cells.
-pub fn parse_blueprint(v: &str) -> Option<(game_core::building::BuildingKind, Vec2)> {
+/// `kind@x,z`: a Build tab kind by its panel name, spaces and dashes optional (`firewarriorhut`,
+/// `campfire`), and a map position in cells.
+pub fn parse_blueprint(v: &str) -> Option<(crate::blueprint::Plan, Vec2)> {
+    use crate::blueprint::Plan;
     let (name, at) = v.split_once('@')?;
     let squash = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
-    let kind = game_core::build_book::BUILDABLE.into_iter().find(|&k| squash(crate::hud::build::panel_name(k)).starts_with(&squash(name)))?;
+    let building = game_core::build_book::BUILDABLE.into_iter().find(|&k| squash(crate::hud::build::panel_name(k)).starts_with(&squash(name))).map(Plan::Building);
+    let plan = building.or_else(|| "campfire".starts_with(&squash(name)).then_some(Plan::Campfire).filter(|_| !name.is_empty()))?;
     let (x, z) = at.split_once(',')?;
-    Some((kind, Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?)))
+    Some((plan, Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?)))
 }
 
 /// Panel tab by name (any case).
@@ -171,8 +173,10 @@ mod tests {
     #[test]
     fn blueprint_by_name_and_position() {
         use game_core::building::BuildingKind;
-        assert_eq!(parse_blueprint("temple@64,70.5"), Some((BuildingKind::Temple, Vec2::new(64.0, 70.5))));
-        assert_eq!(parse_blueprint("Fire-warrior@1,2").map(|b| b.0), Some(BuildingKind::FirewarriorTraining));
+        use crate::blueprint::Plan;
+        assert_eq!(parse_blueprint("temple@64,70.5"), Some((Plan::Building(BuildingKind::Temple), Vec2::new(64.0, 70.5))));
+        assert_eq!(parse_blueprint("Fire-warrior@1,2").map(|b| b.0), Some(Plan::Building(BuildingKind::FirewarriorTraining)));
+        assert_eq!(parse_blueprint("camp fire@1,2").map(|b| b.0), Some(Plan::Campfire));
         assert_eq!(parse_blueprint("hut"), None);
     }
 
