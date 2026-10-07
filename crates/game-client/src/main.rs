@@ -9,6 +9,7 @@ mod cursor_debug;
 mod dev;
 mod edge_push;
 mod editor;
+mod generated_buildings;
 mod grounded;
 mod hud;
 mod menu;

@@ -81,8 +81,10 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Implement the triggers and discoveries as deterministic simulation (through `Command`/state, no floats); AI scripts can fire them too (`TRIGGER_THING`).
 
 ## Buildings ([buildings.md](docs/specs/buildings.md))
-- [ ] Open-source building models (e.g. CC0 Quaternius Medieval Village / Fantasy kits) instead of the labelled boxes when the original files are not used; generated maps and sandboxes have buildings only in Sandbox > Buildings.
-- [ ] Check temple = prayer hut object. Reconversion, wall, gate, guard post have no object and no use in the levels: stand-in boxes are enough (objects.md).
+- [x] Generated building kit (AI-written script) instead of labelled boxes for every named kind in generated mode: 16 reproducible GLBs, tribe accents, timber construction frames; see [kit workflow](assets/models/buildings/README.md). Unknown IDs remain labelled boxes; see Sandbox > Buildings.
+- [x] Generated procedural building textures: clay, timber grain, straw, stone and cloth; shared mipmapped atlas linked from every GLB, UVs preserved during construction.
+- [ ] Generated buildings: coherent part-by-part assembly instead of height-sorted triangles, damage/fire/rubble, working-production animation, hut style variants and building add-ons.
+- [ ] Check temple = prayer hut object. Reconversion, wall, gate, guard post have no object and no use in the levels: the generated models stand in even with the original files (objects.md).
 - [ ] Villager hut style (3 styles in the objects, style 0 always drawn): find what picks it.
 - [ ] Check the facing of the other kinds against the game (boat huts are settled: jetty local +z, door -z, from the 11 in the levels), and the cells a footprint takes (used by the walking mask).
 - [ ] General model 9 "building add-on" (one near each of 91 medium/large huts): find what it is (hut extension?) and draw it.
@@ -124,6 +126,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Cliffs: `cliff0-X.dat` turns land colours to rock by level (what picks the level: slope? damage?); `fade0-X.dat` palette light table (object/sprite shading, fog of war). Load both in `pop3_format::theme`.
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
+- [ ] Investigate Bevy 0.19.1 headless startup slab-allocator `Use-after-free` diagnostic on Intel/Mesa (reproduces on baseline `4e1533e` with box buildings too; captures complete; [verification](docs/specs/assets.md#verification-of-this-first-pass)).
 - [ ] Spell and building icons, tooltips; Stats tab (still "Coming soon").
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
 - [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).
@@ -150,4 +153,5 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Play SFX in the client (Bevy audio): spells, chopping, building, follower voices, ambiences; drums and music. Free sounds for `--no-original`.
 
 ## Art ([assets.md](docs/specs/assets.md))
-- [ ] CC0 low-poly packs (Kenney / Quaternius) for the `--no-original` mode.
+- [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).
+- [ ] Next open art: building/spell icons, ritual scenery/reincarnation stones, vehicles and worker action clips (inventory P1). CC0 trees/unit sheets and the generated building kit already ship.

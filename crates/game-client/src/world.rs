@@ -186,6 +186,11 @@ pub fn next_index(index: usize, files: usize, forward: bool) -> usize {
     }
 }
 
+/// The original theme to read, if any: never without original files, even if the map names one.
+pub fn original_theme(theme: Option<u8>, original: bool) -> Option<u8> {
+    theme.filter(|_| original)
+}
+
 fn rebuild_terrain(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
@@ -203,7 +208,7 @@ fn rebuild_terrain(
         return;
     }
     if dirty.0 {
-        let original = map.0.theme.and_then(|t| {
+        let original = original_theme(map.0.theme, levels.original).and_then(|t| {
             Theme::load(&levels.data_dir, t).map_err(|e| warn!("theme {t}: {e}")).ok()
         });
         let theme = original.unwrap_or_else(|| crate::procedural_theme::generate(levels.index as u32 + 1));
@@ -249,6 +254,13 @@ fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32) -> Image {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_theme_only_with_original_files() {
+        assert_eq!(original_theme(Some(3), true), Some(3));
+        assert_eq!(original_theme(Some(3), false), None);
+        assert_eq!(original_theme(None, true), None);
+    }
 
     #[test]
     fn levels_in_number_order_whatever_the_listing_and_case() {

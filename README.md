@@ -17,6 +17,11 @@ PgUp/PgDn change level, Tab editor mode (R/F/T/M/B brushes), F11 fullscreen.
 Without original data (or with `--no-original` / `POP3_NO_ORIGINAL=1`) maps and the ground
 theme are generated deterministically and objects (reincarnation site stones) use generated
 shapes; PgUp/PgDn then changes the seed.
+Without the original files, buildings use a generated low-poly kit: 16 models made by an AI-written script
+(procedural surface textures, tribe accents and construction frames).
+Preview them with `POP3_START=sandbox-buildings just run-generated`.
+See the [missing-asset inventory](docs/specs/assets.md) and
+[building generator / Blender workflow](assets/models/buildings/README.md).
 Original install: `$POP3_INSTALL` (the folder holding `levels/`, `data/`, `objects/`), else the first
 `Bullfrog/<game>/` found under `$WINEPREFIX`, `~/.wine` (`drive_c/Program Files*`, `GOG Games`) or, on
 Windows, `C:\`. Overrides: `$POP3_LEVELS`, `$POP3_DATA`, `$POP3_OBJECTS`.

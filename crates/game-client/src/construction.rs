@@ -30,6 +30,9 @@ pub fn built_part(mesh: &MeshData, used: u8, of: u8) -> MeshData {
             out.positions.push(mesh.positions[i]);
             out.normals.push(mesh.normals[i]);
             out.uvs.push(mesh.uvs[i]);
+            if !mesh.colors.is_empty() {
+                out.colors.push(mesh.colors[i]);
+            }
         }
     }
     out
@@ -40,9 +43,10 @@ pub const INNER_GAP: f32 = 0.006;
 
 /// Every triangle moved `by` along its own normal (away from the side its back is seen from). The
 /// inner side of a face is drawn from this copy: where the model has two faces back to back on one
-/// plane, the inner one then lies behind the textured one instead of fighting it.
+/// plane, the inner one then lies behind the textured one instead of fighting it. No vertex colours:
+/// the inner side is the plain tribe colour, not tinted by the generated kit's materials.
 pub fn pushed(mesh: &MeshData, by: f32) -> MeshData {
-    let mut out = MeshData { positions: Vec::with_capacity(mesh.positions.len()), ..mesh.clone() };
+    let mut out = MeshData { positions: Vec::with_capacity(mesh.positions.len()), colors: Vec::new(), ..mesh.clone() };
     for (p, n) in mesh.positions.iter().zip(&mesh.normals) {
         out.positions.push((Vec3::from(*p) + Vec3::from(*n) * by).into());
     }
@@ -230,8 +234,10 @@ mod tests {
 
     #[test]
     fn inner_side_pushed_behind_the_face() {
-        let m = layered_box(Vec3::ONE, 1);
+        let mut m = layered_box(Vec3::ONE, 1);
+        m.colors = vec![[0.5, 0.3, 0.2, 1.0]; m.positions.len()];
         let p = pushed(&m, 0.01);
+        assert!(p.colors.is_empty(), "inner side keeps the plain tribe colour");
         assert_eq!((p.indices.len(), p.normals.len()), (m.indices.len(), m.normals.len()));
         for ((a, b), n) in m.positions.iter().zip(&p.positions).zip(&m.normals) {
             let d = Vec3::from(*b) - Vec3::from(*a);

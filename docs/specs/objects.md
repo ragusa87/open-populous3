@@ -135,7 +135,8 @@ Unidentified: 75-81 (stone pillars, standing stones, arch), 89-93,
 
 ### Unplaced buildings and leftover objects
 The level editor cannot place reconversion (9), wall piece (10), gate (11), curr OE slot (12) nor guard post (17),
-and no level has one: nothing ties them to an object, they keep the stand-in box. Bank 0 and the old bank 8 were
+and no level has one: nothing ties them to an object, they use the generated building kit (buildings.md); only
+slot 12 keeps the stand-in box. Bank 0 and the old bank 8 were
 looked through (thumbnails from `tools/model_mapping.py`'s renderer, which shows them from below), and checked by
 someone who knows the game; none of them is needed:
 - Bank 0 91 (92, 93 untextured copies, = bank 8's 70-72), a pit with a ring and a wooden frame with a lever: used

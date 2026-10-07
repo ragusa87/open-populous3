@@ -33,6 +33,8 @@ pub struct MeshData {
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
+    /// Optional linear vertex colours (generated building materials). Empty for textured meshes.
+    pub colors: Vec<[f32; 4]>,
 }
 
 /// Flat-shaded triangles (quads split 0-1-2, 0-2-3), in cells (1 cell = 512 units), with the
@@ -95,11 +97,15 @@ pub fn atlas_rgba(atlas: &Atlas, palette: &[[u8; 3]]) -> Vec<u8> {
 }
 
 pub fn to_mesh(data: MeshData) -> Mesh {
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, data.positions)
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals)
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs)
-        .with_inserted_indices(Indices::U32(data.indices))
+        .with_inserted_indices(Indices::U32(data.indices));
+    if !data.colors.is_empty() {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, data.colors);
+    }
+    mesh
 }
 
 pub fn atlas_image(atlas: &Atlas, palette: &[[u8; 3]]) -> Image {

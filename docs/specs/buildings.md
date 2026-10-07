@@ -51,27 +51,39 @@ normal over 1 cell either side, slopes and the planet's curve, so no side sinks 
   tower, temple = prayer hut, spy/warrior/firewarrior training, boat and airship huts in the owner's colours,
   neutral ones blue; vault = pyramid of knowledge, prison), textured from the level's theme atlas (theme 0 on maps
   without one), cut-out texels see-through.
-- Otherwise, and for types without an identified object (reconversion, wall, gate, guard post, unknown): a box
-  1.6 x 0.8 x 1.6 cells in the tribe colour (grey when neutral) with the building's name over it on screen.
+- Otherwise, and for named types without an identified original object: the generated kit in
+  `assets/models/buildings/` (16 models: all named kinds, including hut sizes 1-3). Procedurally textured clay,
+  timber, thatch and stone with only the `Tribe` material recoloured (grey when neutral).
+  `generated_buildings.rs` reads embedded GLB Body/Scaffold meshes into the same `MeshData` stage path;
+  material colours become linear vertex colours, multiplied by a shared 512 x 512 grayscale surface atlas.
+  `TEXCOORD_0` supplies face-projected UVs; padded tiles and five mip levels keep surfaces readable at distance.
+  Each GLB links the atlas next to it, `surfaces.png`, for Blender. Geometry is already in cell units, entry local -z,
+  boat piers +z. See [asset inventory](assets.md) and [authoring contract](../../assets/models/buildings/README.md).
+- Only unknown model IDs (e.g. 12) or an invalid bundled model keep the labelled diagnostic box,
+  1.6 x 0.8 x 1.6 cells. Generated maps still show buildings only in Sandbox > Buildings.
 
 By stage (`Building::stage`, client `construction.rs`):
 - Blueprint: the same white mark as the Build tab's blueprint (`blueprint::mark_mesh`), draped on the ground and
   redrawn every frame, no model.
 - Under construction and dismantling: the wooden structure, the model's face edges as square brown beams
-  (`object_edges` + `beams`; the stand-in box: corner posts and a ring per piece of wood), with the built part of
+  (`object_edges` + `beams` for original objects; the generated kit has a separate authored timber scaffold;
+  the unknown-ID box: corner posts and a ring per piece of wood), with the built part of
   the real model inside it (`built_part`: its triangles sorted by height, the lowest `used / wood_cost` of them;
-  the stand-in box is stacked in one layer per piece). So it fills from the ground up, one band per piece. Its
-  faces show their outer side as usual and their inner side in the tribe colour, so the inside of the building
-  is not seen through the structure. The inner side is drawn from a copy pushed 0.006 cells along each face's
-  normal (`pushed`): where the model has two faces back to back on one plane, it stays behind the textured one
-  instead of flickering with it.
+  the unknown-ID box is stacked in one layer per piece). So it fills from the ground up, one band per piece.
+  Generated material colours and texture UVs survive the triangle selection; timber frames share the atlas.
+  Its faces show their outer side as usual and their inner side in the plain tribe colour, so the inside of the
+  building is not seen through the structure. The inner side is drawn from a copy pushed 0.006 cells along each
+  face's normal (`pushed`): where the model has two faces back to back on one plane, it stays behind the textured
+  one instead of flickering with it. Part-by-part assembly is still future work.
 - Built: the whole model.
 - Attacked (`shaking` > 0, someone inside damaging it): the model (not the structure) rocks about its base, the
   walls move and the base stays: a blow every 0.7 s tilts it by up to 0.012 rad, a quick wobble dying out before
   the next, in a new direction each time (`blow_tilt`).
 - A built hut with people inside (`inside` > 0): grey puffs rise from the middle of its highest points
-  (`chimney`, the top of the roof), growing and drifting, then shrinking away (`puff_at`). Other kinds show
+  (`chimney`, the top of the roof; the generated hut has a central raised smoke vent), growing and drifting, then shrinking away (`puff_at`). Other kinds show
   nothing for busy yet.
+Kit meshes are made the first time one shows and shared per kind and owner: the built model and the timber frame
+(a built building never paints its frame); the built part under construction is made per building.
 Views are rebuilt only when the map resource changes; once the simulation changes buildings during ticks they
 need stable ids and updates per building.
 

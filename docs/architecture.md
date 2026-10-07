@@ -11,6 +11,8 @@ crates/
                   terrain_mesh.rs pure mesh builder (curvature, colors, normals), unit-tested
                   grounded.rs     parts set on the curved terrain under them (sites, buildings...)
                   original_models.rs original 3D objects -> meshes + theme atlas (optional)
+                  generated_buildings.rs embedded generated GLBs -> cell-space coloured meshes + construction frames
+                  buildings.rs    model choice, construction stages, smoke and shaking
                   sites.rs        reincarnation site markers on the curved surface
                   units/          sim clock, unit sprites (original or generated art), health bars, orders
                   virtual_cursor.rs in-game cursor (system cursor locked), drives edge scroll + UI picking

@@ -1,7 +1,7 @@
 //! Buildings on the map: the original 3D objects in their tribe's colours (textured from the
 //! level's theme atlas) when the original files are allowed and the building is identified;
-//! otherwise a box in the tribe colour with the building's name over it (no open-source models
-//! yet). Turned by their facing, centred on the ground and leaning with it (`Tilted`).
+//! otherwise the generated building kit (unknown IDs keep a labelled box). Turned by their
+//! facing, centred on the ground and leaning with it (`Tilted`).
 //! By construction stage (`Building::stage`): a blueprint is a white mark on the ground; under
 //! construction or being dismantled, a wooden structure of its shape with the parts already built
 //! (`construction`); built, the whole model. An attacked building's walls shake, a hut with people
@@ -10,8 +10,9 @@
 use crate::blueprint::{mark_material, mark_mesh, set_mark};
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::construction::{beams, box_frame, built_part, chimney, layered_box, object_edges, pushed, BEAM, INNER_GAP};
+use crate::generated_buildings;
 use crate::grounded::{ground_y, Grounded, Tilted};
-use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects};
+use crate::original_models::{atlas_image, object_mesh, to_mesh, MeshData, OriginalObjects};
 use crate::sites::tribe_color;
 use crate::world::{CurrentMap, LevelList};
 use bevy::asset::RenderAssetUsages;
@@ -22,6 +23,7 @@ use bevy::prelude::*;
 use game_core::building::{Building, BuildingKind, Stage};
 use pop3_format::catalog::{self, villager_hut, Building as Object};
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
+use std::collections::HashMap;
 
 /// Half size (cells) of the square the ground slope under a building is measured over.
 const FOOTPRINT_HALF: f32 = 1.0;
@@ -118,6 +120,67 @@ fn original_material(levels: &LevelList, theme: u8, images: &mut Assets<Image>, 
     }))
 }
 
+/// The generated kit's shared surface atlas, made once the first generated building is shown.
+fn generated_skin(images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> Handle<StandardMaterial> {
+    mats.add(StandardMaterial {
+        base_color_texture: Some(images.add(crate::generated_buildings::surface_image())),
+        perceptual_roughness: 0.9,
+        ..default()
+    })
+}
+
+/// A building's meshes at its stage: the built part of its model (None when nothing is built yet),
+/// that part's inner side while open, the wooden structure while building, its chimney top.
+struct Staged {
+    shown: Option<Handle<Mesh>>,
+    inner: Option<Handle<Mesh>>,
+    frame: Option<Handle<Mesh>>,
+    top: Vec3,
+}
+
+/// `full` as shown with `pieces` (`used`, `of`) built, or whole when None (built), no frame.
+fn staged(full: &MeshData, pieces: Option<(u8, u8)>, meshes: &mut Assets<Mesh>) -> Staged {
+    let top = chimney(full);
+    let Some((used, of)) = pieces else {
+        return Staged { shown: Some(meshes.add(to_mesh(full.clone()))), inner: None, frame: None, top };
+    };
+    let part = built_part(full, used, of);
+    if part.indices.is_empty() {
+        return Staged { shown: None, inner: None, frame: None, top };
+    }
+    let inner = meshes.add(to_mesh(pushed(&part, INNER_GAP)));
+    Staged { shown: Some(meshes.add(to_mesh(part))), inner: Some(inner), frame: None, top }
+}
+
+/// Kit meshes shared by every building of one kind and owner, made the first time one shows:
+/// the built model with its chimney top, and the construction frame.
+#[derive(Default)]
+struct KitMeshes {
+    built: HashMap<(BuildingKind, u8), (Handle<Mesh>, Vec3)>,
+    frames: HashMap<(BuildingKind, u8), Handle<Mesh>>,
+}
+
+/// The kit's meshes of a building (see `staged`), None if the kit has no valid model for it.
+fn kit_staged(cache: &mut KitMeshes, kind: BuildingKind, owner: u8, pieces: Option<(u8, u8)>, meshes: &mut Assets<Mesh>) -> Option<Staged> {
+    let key = (kind, owner);
+    if pieces.is_none() {
+        if !cache.built.contains_key(&key) {
+            let full = generated_buildings::body(kind, owner)?;
+            let top = chimney(&full);
+            cache.built.insert(key, (meshes.add(to_mesh(full)), top));
+        }
+        let (mesh, top) = cache.built[&key].clone();
+        return Some(Staged { shown: Some(mesh), inner: None, frame: None, top });
+    }
+    let mut staged = staged(&generated_buildings::body(kind, owner)?, pieces, meshes);
+    if !cache.frames.contains_key(&key) {
+        let frame = meshes.add(to_mesh(generated_buildings::scaffold(kind, owner)?));
+        cache.frames.insert(key, frame);
+    }
+    staged.frame = cache.frames.get(&key).cloned();
+    Some(staged)
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn respawn_buildings(
     mut commands: Commands,
@@ -128,6 +191,8 @@ fn respawn_buildings(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    mut kit_skin: Local<Option<Handle<StandardMaterial>>>,
+    mut kit: Local<KitMeshes>,
 ) {
     if !map.is_changed() {
         return;
@@ -159,10 +224,27 @@ fn respawn_buildings(
         let tribe = if owner < catalog::TRIBES { owner } else { 0 };
         let original = bank.zip(material.as_ref()).and_then(|(bank, mat)| Some((bank.get(building_object(kind, owner)?)?, mat.clone())));
         let layers = kind.wood_cost().max(1);
-        let stand_in = original.is_none();
-        let (full, edges, skin) = match original {
-            Some((obj, mat)) => (object_mesh(obj, tribe), object_edges(obj), mat),
-            None => (layered_box(BOX, layers), box_frame(BOX, layers), mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, ..default() })),
+        let pieces = match stage {
+            Stage::UnderConstruction { used, of } | Stage::Dismantling { used, of } => Some((used, of)),
+            _ => None,
+        };
+        let generated = original.is_none().then(|| kit_staged(&mut kit, kind, owner, pieces, &mut meshes)).flatten();
+        let stand_in = original.is_none() && generated.is_none();
+        let (look, skin, frame_skin) = match (original, generated) {
+            (Some((obj, mat)), _) => {
+                let mut look = staged(&object_mesh(obj, tribe), pieces, &mut meshes);
+                look.frame = pieces.map(|_| meshes.add(to_mesh(beams(&object_edges(obj), BEAM))));
+                (look, mat, wood.clone())
+            }
+            (_, Some(look)) => {
+                let skin = kit_skin.get_or_insert_with(|| generated_skin(&mut images, &mut mats)).clone();
+                (look, skin.clone(), skin)
+            }
+            _ => {
+                let mut look = staged(&layered_box(BOX, layers), pieces, &mut meshes);
+                look.frame = pieces.map(|_| meshes.add(to_mesh(beams(&box_frame(BOX, layers), BEAM))));
+                (look, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, ..default() }), wood.clone())
+            }
         };
         let mut view = commands.spawn((
             BuildingView,
@@ -172,14 +254,9 @@ fn respawn_buildings(
             Visibility::Hidden,
         ));
         let id = view.id();
-        let top = chimney(&full);
-        let shown = match stage {
-            Stage::UnderConstruction { used, of } | Stage::Dismantling { used, of } => {
-                view.with_child((Mesh3d(meshes.add(to_mesh(beams(&edges, BEAM)))), MeshMaterial3d(wood.clone())));
-                built_part(&full, used, of)
-            }
-            _ => full,
-        };
+        if let Some(frame) = look.frame {
+            view.with_child((Mesh3d(frame), MeshMaterial3d(frame_skin)));
+        }
         // Open while under construction: its faces' outer side as usual, their inner side in the
         // tribe colour, so the inside of the building is not seen through the structure.
         let open = !matches!(stage, Stage::Built);
@@ -187,13 +264,14 @@ fn respawn_buildings(
             Some(m) => mats.add(StandardMaterial { cull_mode: Some(Face::Back), double_sided: false, ..m }),
             None => skin,
         };
-        let inner = open.then(|| mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, cull_mode: Some(Face::Front), double_sided: true, ..default() }));
+        let inner = look.inner.map(|mesh| (mesh, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, cull_mode: Some(Face::Front), double_sided: true, ..default() })));
+        let top = look.top;
         view.with_children(|v| {
             let mut body = v.spawn((Transform::default(), Visibility::Inherited));
-            if !shown.indices.is_empty() {
-                body.with_child((Mesh3d(meshes.add(to_mesh(shown.clone()))), MeshMaterial3d(skin)));
-                if let Some(inner) = inner {
-                    body.with_child((Mesh3d(meshes.add(to_mesh(pushed(&shown, INNER_GAP)))), MeshMaterial3d(inner)));
+            if let Some(shown) = look.shown {
+                body.with_child((Mesh3d(shown), MeshMaterial3d(skin)));
+                if let Some((mesh, inner)) = inner {
+                    body.with_child((Mesh3d(mesh), MeshMaterial3d(inner)));
                 }
             }
             if b.shaking > 0 {
@@ -314,6 +392,23 @@ mod tests {
         assert_eq!(building_object(BuildingKind::Vault, 255), Some(catalog::KNOWLEDGE_PYRAMID), "neutral");
         assert_eq!(building_object(BuildingKind::BoatHut, 255), Some(121), "neutral: the blue one");
         assert_eq!(building_object(BuildingKind::GuardPost, 0), None, "not identified: stand-in box");
+    }
+
+    #[test]
+    fn kit_meshes_are_shared_per_kind_and_owner_and_made_when_shown() {
+        let (mut cache, mut meshes) = (KitMeshes::default(), Assets::<Mesh>::default());
+        let temple = BuildingKind::Temple;
+        let built = kit_staged(&mut cache, temple, 1, None, &mut meshes).unwrap();
+        assert!(built.frame.is_none() && built.inner.is_none() && cache.frames.is_empty(), "no frame painted for a built one");
+        assert_eq!(kit_staged(&mut cache, temple, 1, None, &mut meshes).unwrap().shown, built.shown);
+        assert_ne!(kit_staged(&mut cache, temple, 2, None, &mut meshes).unwrap().shown, built.shown, "owners differ");
+        let a = kit_staged(&mut cache, temple, 1, Some((1, 3)), &mut meshes).unwrap();
+        let b = kit_staged(&mut cache, temple, 1, Some((2, 3)), &mut meshes).unwrap();
+        assert!(a.frame.is_some() && a.frame == b.frame, "one frame per kind and owner");
+        assert!(a.inner.is_some() && a.shown != b.shown, "built parts follow the pieces");
+        assert!(kit_staged(&mut cache, temple, 1, Some((0, 3)), &mut meshes).unwrap().shown.is_none());
+        assert_eq!(meshes.len(), 7);
+        assert!(kit_staged(&mut cache, BuildingKind::Other(12), 1, None, &mut meshes).is_none());
     }
 
     #[test]

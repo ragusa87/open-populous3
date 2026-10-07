@@ -7,6 +7,10 @@
 - Orbit camera, aerial view (Enter), level cycling, windowed + F11/`FULLSCREEN=1`.
 - Control-tab placeholders, editor brushes, lockstep message codec + TCP round-trip test.
 - Headless offscreen screenshots for CI / dev.
+- Original-data-free asset audit; 16 generated low-poly building GLBs from a reproducible, AI-written Python script,
+  optional Blender contact sheet, tribe accents and timber construction frames. All named building kinds covered.
+- Reproducible generated building surface textures (clay, wood, thatch, stone, cloth), one atlas linked from every GLB;
+  shared mipmapped atlas in the client, including partially constructed buildings and scaffolds.
 - Ground textured from the original theme files (palette + bigfade + disp), per level theme.
 - Shaman: simulated (walk, pray, cast jump, drowning, death, reincarnation at her site), drawn as a sprite
   from the original animations or generated art, health bar, panel preview, right-click orders.

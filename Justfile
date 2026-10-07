@@ -17,6 +17,14 @@ render-units:
     just render-sprites assets/models/ninja_male_hair.gltf assets/units/spy --tribe Details
     just render-sprites assets/models/cowboy_male.gltf assets/units/firewarrior --tribe Jacket
 
+# Rebuild the original CC0 building GLBs without Blender or original game data
+generate-buildings:
+    python3 tools/generate_buildings.py
+
+# Blender review sheet of the generated kit only (optional authoring tool)
+preview-buildings out:
+    blender --background --factory-startup --python tools/preview_buildings.py -- "{{out}}"
+
 # Never read the original game files: generated maps + generated theme
 run-generated *args:
     cargo run -p game-client -- --no-original {{args}}
@@ -30,6 +38,8 @@ shot out *args:
 
 test:
     cargo test --workspace
+    python3 -m unittest discover -s tools -q
+    python3 tools/generate_buildings.py --check > /dev/null
 
 level-info file:
     cargo run -p pop3-format --example level_info -- {{file}}

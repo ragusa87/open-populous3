@@ -2647,6 +2647,7 @@ dependencies = [
  "bevy",
  "game-core",
  "game-net",
+ "gltf",
  "pop3-format",
 ]
 
