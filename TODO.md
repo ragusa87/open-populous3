@@ -32,7 +32,6 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
 - [ ] The shaman can cast only some spells from a vehicle (list to define: fire-type probably yes, Land Bridge no).
 - [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
-- [ ] Unit shadows (shadow elements `0x4` are skipped; draw them flat on the ground).
 - [ ] Check the standing-still anims 81-84 and the tribe layer flag `0x10` mapping.
 
 ## Praying (worship)

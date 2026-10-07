@@ -28,6 +28,11 @@ Record 0 is empty.
 Elements are drawn in chain order (back to front). `AnimBank::compose_as(.., tribe, outfit)` draws the elements
 `anim::element_shown` keeps: no shadows, the tribe layer of that tribe only, the outfit layer of that outfit only.
 
+Shadow elements (flags `0x204`, 3289 of them) only use 4 sprites of `HSPR0-0.DAT`, all plain black (index 0)
+ellipses: 22 (21 x 4, 2767 elements), 68 (16 x 2), 69 (9 x 2), 70 (39 x 6), about 9 px left of the feet. The
+client draws its own shadow instead (`units/shadow.rs`): a soft black ellipse 21 px wide (0.24 cells), 60% dark,
+lying on the ground under every unit and leaning with the slope, hidden once dead or drowning.
+
 ## Identified animations
 Persons other than the shaman are layered: one body drawn blue (tribe 0), a tribe layer (0x10) per other tribe
 recolouring the cloth, and outfit layers (0x20) giving the unit type's gear over a shared body.

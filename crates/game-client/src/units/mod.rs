@@ -1,5 +1,6 @@
 //! Units on the map. Runs the simulation clock (`GameMap::tick` at `TICKS_PER_SECOND`), draws each
-//! unit as a camera-facing sprite on the ground, with a health bar over the head of selected units.
+//! unit as a camera-facing sprite on the ground (its shadow under it, `shadow`), with a health bar
+//! over the head of selected units.
 //! Sprites are drawn pulled towards the camera along the eye-feet line (same picture on screen) so
 //! the ground right around the feet never hides them.
 //! Mouse selection and orders live in `selection`; Space looks at the player's shaman. The sprites
@@ -8,6 +9,7 @@
 pub mod art;
 mod dust;
 mod procedural;
+mod shadow;
 pub mod sheets;
 pub mod selection;
 
@@ -143,7 +145,7 @@ impl Plugin for UnitsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SimClock>()
             .init_resource::<UnitSprites>()
-            .add_plugins((selection::SelectionPlugin, dust::DustPlugin))
+            .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin))
             .add_systems(Startup, load_sprites)
             .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks, respawn_views, animate_views).chain().in_set(crate::menu::Gameplay))
             .add_systems(PostUpdate, pull_to_eye.before(TransformSystems::Propagate));
