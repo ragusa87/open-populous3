@@ -92,14 +92,15 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Build tab: icons; build books per tribe in the simulation (today `GameMap::build_book` is shared), discoveries unlocking "?".
 - [ ] Blueprint: left click places it (`Command::PlaceBuilding`, `placement::can_place`); tune `STEEP_SPREAD`; check the door side of the other kinds against the original objects; construction sites block like buildings once they exist.
 - [ ] At least one assigned brave is needed, up to the kind's maximum; more braves build faster (work shared).
-- [ ] Buildings and sites block walking (blocked-cell mask in `path` next to the terrain); not for flyers, not the reincarnation site; braves assigned to a site (or dismantling) may walk on its footprint. Replan walkers when the mask changes, push units off a new footprint.
+- [ ] Buildings and sites block walking (blocked-cell mask in `path` next to the terrain); not for flyers, not the reincarnation site; braves assigned to a site (or dismantling) may walk on its footprint, to flatten it or work inside it. Replan walkers when the mask changes, push units off a new footprint.
 - [ ] `Command::PlaceBuilding` (with the selected braves) and `Command::Assign`; extra braves beyond the maximum walk to the site and idle unassigned.
-- [ ] Orders: a new order to an assigned brave unassigns it (drops the wood it carries); braves working on the footprint cannot be selected on the map, only from the tooltip's brave icons (one at a time).
-- [ ] Shift + click on a blueprint (no wood used yet) cancels it (`Command::Cancel`), its braves idle; once wood is used it can only be dismantled.
+- [ ] Orders: a new order to an assigned brave unassigns it (drops the wood it carries); assigned braves stay selectable on the map all along, the tooltip's brave icons also pick one (one at a time).
+- [ ] Doors: units enter a building by its door then walk to its centre, and leave from the centre to the door then on (from the wooden structure on, not on a blueprint: a brave inside ordered to move goes centre, door, then its route).
+- [ ] Shift + click on a blueprint (footprint not flat yet) cancels it (`Command::Cancel`), its braves idle, wood brought is lost; once flat it can only be dismantled.
 - [ ] Building stage (Site / Built / Dismantling) with wood needed / delivered / used; tooltip with braves assigned/max (one icon each) and wood, Dismantle toggle once wood is used (under construction or built).
 - [ ] Braves' build cycle: gather and watch, flatten the footprint by jumping point by point, fetch wood (ground piece or cut a tree) to a pile by the door, build one piece at a time.
 - [ ] Wood dispatch rule: a brave goes for wood only while delivered + claimed (fetched/carried by others) < needed, so at most needed - delivered braves are out; the others wait and build. Refine later.
-- [ ] Site visuals: blueprint, then a wooden frame of the building's shape growing with progress, then the full building.
+- [ ] Site visuals: blueprint while flattening, a wooden structure once flat, then part after part of the real model replacing the wood as pieces are used.
 - [ ] Dismantling: braves remove one piece at a time, dropped as a wood piece (circle on the ground) near the door; the building disappears when empty and frees its ground.
 - [ ] Wood pieces lying on the ground (`GameMap::wood`, drawn): picked up by any construction; hovering one could show "Wood". Maybe draw the original's shadow under them (`hfx0-0.dat` 22, unconfirmed).
 - [ ] Destruction of buildings on uneven/flooded ground (spells, erosion).
