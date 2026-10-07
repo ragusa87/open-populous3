@@ -132,8 +132,7 @@ impl Plugin for BlueprintPlugin {
 
 fn spawn_mark(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    let material = StandardMaterial { alpha_mode: AlphaMode::Blend, unlit: true, cull_mode: None, depth_bias: 20.0, ..default() };
-    commands.spawn((BlueprintMark, Mesh3d(meshes.add(mesh)), MeshMaterial3d(mats.add(material)), NotShadowCaster, Transform::default(), Visibility::Hidden));
+    commands.spawn((BlueprintMark, Mesh3d(meshes.add(mesh)), MeshMaterial3d(mats.add(mark_material())), NotShadowCaster, Transform::default(), Visibility::Hidden));
 }
 
 /// The mouse over the map (not the panel or a button), if any.
@@ -212,16 +211,24 @@ fn draw_blueprint(
         let colour = if all_red || blocked_at(&map.0, world_units(at)).is_some() { RED } else { WHITE };
         ([dx, ground_y(terrain, rig.focus, &params.0, dx, dz) + LIFT, dz], colour)
     };
-    let (lo, hi) = world_rect(kind, b.facing, centre);
+    if let Some(mut m) = meshes.get_mut(&mesh.0) {
+        set_mark(&mut m, mark_mesh(kind, b.facing, centre, vertex));
+    }
+    *vis = Visibility::Inherited;
+}
+
+/// A footprint mark's triangles: the footprint as a grid through the terrain's cell lines (each
+/// grid quad split like the terrain's cells) plus the door arrow, red when any vertex is. `vertex`
+/// turns a map position (cells) into a render position and colour.
+pub fn mark_mesh(kind: BuildingKind, facing: u8, centre: Vec2, vertex: impl Fn(Vec2) -> ([f32; 3], [f32; 4])) -> MarkMesh {
+    let (lo, hi) = world_rect(kind, facing, centre);
     let (xs, zs) = (grid_lines(lo.x, hi.x), grid_lines(lo.y, hi.y));
-    let mut positions = Vec::new();
-    let mut colours = Vec::new();
-    let mut indices = Vec::new();
+    let mut m = MarkMesh::default();
     for &z in &zs {
         for &x in &xs {
             let (p, c) = vertex(Vec2::new(x, z));
-            positions.push(p);
-            colours.push(c);
+            m.positions.push(p);
+            m.colours.push(c);
         }
     }
     let row = xs.len() as u32;
@@ -229,25 +236,38 @@ fn draw_blueprint(
         for i in 0..row - 1 {
             // Split along (i + 1, j)-(i, j + 1), like the terrain's cells.
             let a = j * row + i;
-            indices.extend([a, a + row, a + 1, a + 1, a + row, a + row + 1]);
+            m.indices.extend([a, a + row, a + 1, a + 1, a + row, a + row + 1]);
         }
     }
-    let first = positions.len() as u32;
-    let arrow = if colours.contains(&RED) { RED } else { WHITE };
+    let first = m.positions.len() as u32;
+    let arrow = if m.colours.contains(&RED) { RED } else { WHITE };
     for p in door_arrow(kind) {
-        let (p, _) = vertex(centre + turn_local(p, b.facing));
-        positions.push(p);
-        colours.push(arrow);
+        let (p, _) = vertex(centre + turn_local(p, facing));
+        m.positions.push(p);
+        m.colours.push(arrow);
     }
-    indices.extend([first, first + 1, first + 2]);
-    if let Some(mut m) = meshes.get_mut(&mesh.0) {
-        let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
-        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-        m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-        m.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
-        m.insert_indices(Indices::U32(indices));
-    }
-    *vis = Visibility::Inherited;
+    m.indices.extend([first, first + 1, first + 2]);
+    m
+}
+
+#[derive(Default)]
+pub struct MarkMesh {
+    pub positions: Vec<[f32; 3]>,
+    pub colours: Vec<[f32; 4]>,
+    pub indices: Vec<u32>,
+}
+
+pub fn set_mark(m: &mut Mesh, mark: MarkMesh) {
+    let normals = vec![[0.0, 1.0, 0.0]; mark.positions.len()];
+    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, mark.positions);
+    m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    m.insert_attribute(Mesh::ATTRIBUTE_COLOR, mark.colours);
+    m.insert_indices(Indices::U32(mark.indices));
+}
+
+/// The mark's material: vertex colours, see-through, drawn over the ground.
+pub fn mark_material() -> StandardMaterial {
+    StandardMaterial { alpha_mode: AlphaMode::Blend, unlit: true, cull_mode: None, depth_bias: 20.0, ..default() }
 }
 
 #[cfg(test)]

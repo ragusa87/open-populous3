@@ -2,14 +2,24 @@
 //! level's theme atlas) when the original files are allowed and the building is identified;
 //! otherwise a box in the tribe colour with the building's name over it (no open-source models
 //! yet). Turned by their facing, centred on the ground and leaning with it (`Tilted`).
+//! By construction stage (`Building::stage`): a blueprint is a white mark on the ground; under
+//! construction or being dismantled, a wooden structure of its shape with the parts already built
+//! (`construction`); built, the whole model. An attacked building's walls shake, a hut with people
+//! inside smokes from the top of its roof.
 
-use crate::camera::GameCamera;
-use crate::grounded::{Grounded, Tilted};
+use crate::blueprint::{mark_material, mark_mesh, set_mark};
+use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
+use crate::construction::{beams, box_frame, built_part, chimney, layered_box, object_edges, pushed, BEAM, INNER_GAP};
+use crate::grounded::{ground_y, Grounded, Tilted};
 use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects};
 use crate::sites::tribe_color;
 use crate::world::{CurrentMap, LevelList};
+use bevy::asset::RenderAssetUsages;
+use bevy::light::NotShadowCaster;
+use bevy::mesh::PrimitiveTopology;
+use bevy::render::render_resource::Face;
 use bevy::prelude::*;
-use game_core::building::{Building, BuildingKind};
+use game_core::building::{Building, BuildingKind, Stage};
 use pop3_format::catalog::{self, villager_hut, Building as Object};
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 
@@ -19,6 +29,19 @@ const FOOTPRINT_HALF: f32 = 1.0;
 const BOX: Vec3 = Vec3::new(1.6, 0.8, 1.6);
 /// Theme whose atlas textures buildings on maps without one.
 const DEFAULT_THEME: u8 = 0;
+/// Colour of the wooden structure.
+const WOOD: Color = Color::srgb(0.55, 0.37, 0.2);
+/// Attacked: the building tilts about its base by up to this much (radians) at each blow, one
+/// blow every `BLOW` seconds, the jolt dying out before the next.
+const SHAKE: f32 = 0.012;
+const BLOW: f32 = 0.7;
+/// Chimney smoke: puffs, seconds for one to rise, how high (cells) and how wide it gets.
+const PUFFS: usize = 5;
+const PUFF_LIFE: f32 = 2.5;
+const PUFF_RISE: f32 = 1.2;
+const PUFF_SIZE: f32 = 0.22;
+/// Height of the white mark of a blueprint above the ground (render units).
+const MARK_LIFT: f32 = 0.02;
 
 /// The original object drawing a building of `owner`, None if not identified (neutral buildings
 /// take the blue version).
@@ -47,6 +70,23 @@ pub fn facing_yaw(facing: u8) -> f32 {
 #[derive(Component)]
 struct BuildingView;
 
+/// The white mark of the building at this index of `GameMap::buildings`, a blueprint: redrawn
+/// over the ground every frame (it follows the planet's curve as the camera moves).
+#[derive(Component)]
+struct SiteMark(usize);
+
+/// The part of a view that shakes (the building is being attacked).
+#[derive(Component)]
+struct Shaking;
+
+/// One puff of smoke over a busy hut, out of `chimney` (building frame, cells), `phase` (0-1)
+/// apart from the others.
+#[derive(Component)]
+struct Puff {
+    chimney: Vec3,
+    phase: f32,
+}
+
 /// The name over a stand-in box, following its building on screen.
 #[derive(Component)]
 struct BuildingLabel(Entity);
@@ -55,7 +95,9 @@ pub struct BuildingsPlugin;
 
 impl Plugin for BuildingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (respawn_buildings, place_labels).chain());
+        app.add_systems(Update, (respawn_buildings, place_labels).chain())
+            .add_systems(Update, (shake_walls, rise_smoke))
+            .add_systems(PostUpdate, draw_site_marks);
     }
 }
 
@@ -76,13 +118,13 @@ fn original_material(levels: &LevelList, theme: u8, images: &mut Assets<Image>, 
     }))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn respawn_buildings(
     mut commands: Commands,
     map: Res<CurrentMap>,
     levels: Res<LevelList>,
     objects: Res<OriginalObjects>,
-    existing: Query<Entity, Or<(With<BuildingView>, With<BuildingLabel>)>>,
+    existing: Query<Entity, Or<(With<BuildingView>, With<BuildingLabel>, With<SiteMark>)>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
@@ -98,13 +140,30 @@ fn respawn_buildings(
     }
     let material = original_material(&levels, map.0.theme.unwrap_or(DEFAULT_THEME), &mut images, &mut mats);
     let bank = objects.0.as_ref().filter(|_| material.is_some());
-    let box_mesh = meshes.add(Cuboid::from_size(BOX));
+    let wood = mats.add(StandardMaterial { base_color: WOOD, perceptual_roughness: 0.9, ..default() });
+    let smoke = mats.add(StandardMaterial { base_color: Color::srgba(0.75, 0.75, 0.75, 0.55), alpha_mode: AlphaMode::Blend, unlit: true, ..default() });
+    let puff = meshes.add(Sphere::new(0.5).mesh().ico(1).unwrap());
+    let mark = mats.add(mark_material());
     let cell = WORLD_UNITS_PER_CELL as f32;
-    for b in &map.0.buildings {
+    for (i, b) in map.0.buildings.iter().enumerate() {
         let Building { kind, owner, facing, .. } = *b;
+        let stage = b.stage();
+        if stage == Stage::Blueprint {
+            let empty = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            commands.spawn((SiteMark(i), Mesh3d(meshes.add(empty)), MeshMaterial3d(mark.clone()), NotShadowCaster, Transform::default()));
+            continue;
+        }
         let (x, z) = b.centre();
         let at = Vec2::new(x as f32 / cell, z as f32 / cell);
         let yaw = facing_yaw(facing);
+        let tribe = if owner < catalog::TRIBES { owner } else { 0 };
+        let original = bank.zip(material.as_ref()).and_then(|(bank, mat)| Some((bank.get(building_object(kind, owner)?)?, mat.clone())));
+        let layers = kind.wood_cost().max(1);
+        let stand_in = original.is_none();
+        let (full, edges, skin) = match original {
+            Some((obj, mat)) => (object_mesh(obj, tribe), object_edges(obj), mat),
+            None => (layered_box(BOX, layers), box_frame(BOX, layers), mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, ..default() })),
+        };
         let mut view = commands.spawn((
             BuildingView,
             Grounded { at, half: 0.0 },
@@ -112,29 +171,114 @@ fn respawn_buildings(
             Transform::from_rotation(Quat::from_rotation_y(yaw)),
             Visibility::Hidden,
         ));
-        let original = bank.zip(material.as_ref()).and_then(|(bank, mat)| Some((bank.get(building_object(kind, owner)?)?, mat)));
-        match original {
-            Some((obj, mat)) => {
-                let tribe = if owner < catalog::TRIBES { owner } else { 0 };
-                view.with_child((Mesh3d(meshes.add(to_mesh(object_mesh(obj, tribe)))), MeshMaterial3d(mat.clone())));
+        let id = view.id();
+        let top = chimney(&full);
+        let shown = match stage {
+            Stage::UnderConstruction { used, of } | Stage::Dismantling { used, of } => {
+                view.with_child((Mesh3d(meshes.add(to_mesh(beams(&edges, BEAM)))), MeshMaterial3d(wood.clone())));
+                built_part(&full, used, of)
             }
-            None => {
-                let tint = StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, ..default() };
-                view.with_child((Mesh3d(box_mesh.clone()), MeshMaterial3d(mats.add(tint)), Transform::from_xyz(0.0, BOX.y / 2.0, 0.0)));
-                let id = view.id();
-                commands.spawn((
-                    BuildingLabel(id),
-                    Text::new(kind.name()),
-                    TextFont { font_size: FontSize::Px(12.0), ..default() },
-                    TextColor(Color::WHITE),
-                    TextShadow::default(),
-                    Node { position_type: PositionType::Absolute, ..default() },
-                    Pickable::IGNORE,
-                    Visibility::Hidden,
-                ));
+            _ => full,
+        };
+        // Open while under construction: its faces' outer side as usual, their inner side in the
+        // tribe colour, so the inside of the building is not seen through the structure.
+        let open = !matches!(stage, Stage::Built);
+        let skin = match mats.get(&skin).filter(|_| open).cloned() {
+            Some(m) => mats.add(StandardMaterial { cull_mode: Some(Face::Back), double_sided: false, ..m }),
+            None => skin,
+        };
+        let inner = open.then(|| mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, cull_mode: Some(Face::Front), double_sided: true, ..default() }));
+        view.with_children(|v| {
+            let mut body = v.spawn((Transform::default(), Visibility::Inherited));
+            if !shown.indices.is_empty() {
+                body.with_child((Mesh3d(meshes.add(to_mesh(shown.clone()))), MeshMaterial3d(skin)));
+                if let Some(inner) = inner {
+                    body.with_child((Mesh3d(meshes.add(to_mesh(pushed(&shown, INNER_GAP)))), MeshMaterial3d(inner)));
+                }
             }
+            if b.shaking > 0 {
+                body.insert(Shaking);
+            }
+            if stage == Stage::Built && b.inside > 0 && matches!(kind, BuildingKind::Hut { .. }) {
+                for k in 0..PUFFS {
+                    v.spawn((Puff { chimney: top, phase: k as f32 / PUFFS as f32 }, Mesh3d(puff.clone()), MeshMaterial3d(smoke.clone()), NotShadowCaster, Transform::from_translation(top)));
+                }
+            }
+        });
+        if stand_in {
+            commands.spawn((
+                BuildingLabel(id),
+                Text::new(kind.name()),
+                TextFont { font_size: FontSize::Px(12.0), ..default() },
+                TextColor(Color::WHITE),
+                TextShadow::default(),
+                Node { position_type: PositionType::Absolute, ..default() },
+                Pickable::IGNORE,
+                Visibility::Hidden,
+            ));
         }
     }
+}
+
+/// Redraws each blueprint's white mark draped over the ground as drawn around the camera.
+fn draw_site_marks(
+    map: Res<CurrentMap>,
+    params: Res<CurveParamsRes>,
+    rig: Res<CameraRig>,
+    marks: Query<(&SiteMark, &Mesh3d)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let terrain = &map.0.terrain;
+    let size = terrain.size() as f32;
+    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
+    let cell = WORLD_UNITS_PER_CELL as f32;
+    for (mark, mesh) in &marks {
+        let Some(b) = map.0.buildings.get(mark.0) else { continue };
+        let (cx, cz) = b.centre();
+        let vertex = |at: Vec2| {
+            let (dx, dz) = (wrap(at.x - rig.focus.x), wrap(at.y - rig.focus.y));
+            ([dx, ground_y(terrain, rig.focus, &params.0, dx, dz) + MARK_LIFT, dz], [1.0, 1.0, 1.0, 0.55])
+        };
+        if let Some(mut m) = meshes.get_mut(&mesh.0) {
+            set_mark(&mut m, mark_mesh(b.kind, b.facing, Vec2::new(cx as f32, cz as f32) / cell, vertex));
+        }
+    }
+}
+
+/// An attacked building rocks about its base (the walls move, the base stays): one blow every
+/// `BLOW` seconds, each building its own rhythm.
+fn shake_walls(time: Res<Time>, mut bodies: Query<(Entity, &mut Transform), With<Shaking>>) {
+    for (e, mut tf) in &mut bodies {
+        let o = (e.index_u32() % 7) as f32 * 0.13;
+        let (rx, rz) = blow_tilt((time.elapsed_secs() + o) / BLOW);
+        tf.rotation = Quat::from_rotation_x(rx * SHAKE) * Quat::from_rotation_z(rz * SHAKE);
+    }
+}
+
+/// Tilt (-1..1 on two axes) at `t` blows: a quick wobble right after each blow, dying out before
+/// the next, its direction changing from blow to blow.
+pub fn blow_tilt(t: f32) -> (f32, f32) {
+    let p = t.fract();
+    let fade = (1.0 - p).powi(3);
+    let wobble = (p * std::f32::consts::TAU * 4.0).sin() * fade;
+    let dir = t.floor() * 2.4;
+    (wobble * dir.cos(), wobble * dir.sin())
+}
+
+/// Puffs rise from the chimney, growing and drifting, then shrink away and start again.
+fn rise_smoke(time: Res<Time>, mut puffs: Query<(&Puff, &mut Transform)>) {
+    let t = time.elapsed_secs() / PUFF_LIFE;
+    for (puff, mut tf) in &mut puffs {
+        let (rise, drift, size) = puff_at((t + puff.phase).fract());
+        tf.translation = puff.chimney + Vec3::new(drift, rise, drift * 0.4);
+        tf.scale = Vec3::splat(size);
+    }
+}
+
+/// A puff at `phase` (0 just out, 1 gone): height above the chimney, sideways drift and size (cells).
+pub fn puff_at(phase: f32) -> (f32, f32, f32) {
+    let fade = if phase > 0.75 { (1.0 - phase) / 0.25 } else { 1.0 };
+    (phase * PUFF_RISE, phase * phase * 0.35, PUFF_SIZE * (0.4 + phase) * fade)
 }
 
 /// Each stand-in's name centred over its box on screen, hidden when the box is.
@@ -170,6 +314,30 @@ mod tests {
         assert_eq!(building_object(BuildingKind::Vault, 255), Some(catalog::KNOWLEDGE_PYRAMID), "neutral");
         assert_eq!(building_object(BuildingKind::BoatHut, 255), Some(121), "neutral: the blue one");
         assert_eq!(building_object(BuildingKind::GuardPost, 0), None, "not identified: stand-in box");
+    }
+
+    #[test]
+    fn smoke_rises_grows_then_fades() {
+        let (r0, _, s0) = puff_at(0.0);
+        let (r1, d1, s1) = puff_at(0.6);
+        let (_, _, end) = puff_at(0.999);
+        assert!(r0 == 0.0 && r1 > r0 && d1 > 0.0);
+        assert!(s1 > s0 && end < 0.01, "grows, then shrinks away before starting again");
+    }
+
+    #[test]
+    fn a_blow_wobbles_then_dies_out() {
+        for k in 0..200 {
+            let (x, z) = blow_tilt(k as f32 * 0.037);
+            assert!(x.abs() <= 1.0 && z.abs() <= 1.0);
+        }
+        let size = |t: f32| {
+            let (x, z) = blow_tilt(t);
+            (x * x + z * z).sqrt()
+        };
+        assert!(size(3.06) > 0.5, "right after a blow");
+        assert!(size(3.95) < 0.01, "still before the next");
+        assert_ne!(blow_tilt(3.06), blow_tilt(4.06), "another direction each blow");
     }
 
     #[test]

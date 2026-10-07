@@ -38,7 +38,7 @@ hut on a sea-level shore: it now stands on sand; level 19's boat hut keeps the i
 Construction state (`Building`): `used` pieces of wood, `flat`, `dismantling`, `inside` (units in), `shaking`
 (ticks left after a hit); `Building::stage` works out Blueprint (not flat) / UnderConstruction / Built /
 Dismantling from them, and `BuildingKind::wood_cost` / `max_braves` hold the cost table below. Level buildings
-load as Built. Nothing changes the state over time yet, and there is no health. Sandbox > Buildings (`GameMap::sandbox_buildings`, an island 48 cells across in radius): south, one of
+load as Built. Nothing changes the state over time yet, and there is no health. Sandbox > Buildings (`GameMap::sandbox_buildings`, an island of radius 48 cells): south, one of
 every model 1-19 for the player and a few red ones; north, one row per buildable kind in each `showcase_states`
 column (blueprint, under construction at 0, 1/3, 2/3 and all but one piece, built, dismantling at half, attacked,
 people inside); east, free ground with 8 braves, a pile of 12 wood pieces and 6 trees, to try construction on.
@@ -53,6 +53,27 @@ normal over 1 cell either side, slopes and the planet's curve, so no side sinks 
   without one), cut-out texels see-through.
 - Otherwise, and for types without an identified object (reconversion, wall, gate, guard post, unknown): a box
   1.6 x 0.8 x 1.6 cells in the tribe colour (grey when neutral) with the building's name over it on screen.
+
+By stage (`Building::stage`, client `construction.rs`):
+- Blueprint: the same white mark as the Build tab's blueprint (`blueprint::mark_mesh`), draped on the ground and
+  redrawn every frame, no model.
+- Under construction and dismantling: the wooden structure, the model's face edges as square brown beams
+  (`object_edges` + `beams`; the stand-in box: corner posts and a ring per piece of wood), with the built part of
+  the real model inside it (`built_part`: its triangles sorted by height, the lowest `used / wood_cost` of them;
+  the stand-in box is stacked in one layer per piece). So it fills from the ground up, one band per piece. Its
+  faces show their outer side as usual and their inner side in the tribe colour, so the inside of the building
+  is not seen through the structure. The inner side is drawn from a copy pushed 0.006 cells along each face's
+  normal (`pushed`): where the model has two faces back to back on one plane, it stays behind the textured one
+  instead of flickering with it.
+- Built: the whole model.
+- Attacked (`shaking` > 0, someone inside damaging it): the model (not the structure) rocks about its base, the
+  walls move and the base stays: a blow every 0.7 s tilts it by up to 0.012 rad, a quick wobble dying out before
+  the next, in a new direction each time (`blow_tilt`).
+- A built hut with people inside (`inside` > 0): grey puffs rise from the middle of its highest points
+  (`chimney`, the top of the roof), growing and drifting, then shrinking away (`puff_at`). Other kinds show
+  nothing for busy yet.
+Views are rebuilt only when the map resource changes; once the simulation changes buildings during ticks they
+need stable ids and updates per building.
 
 ## Construction (planned)
 Only these are built and taken apart by braves: villager hut (placed at size 1, it grows later), drum tower, the

@@ -100,7 +100,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Building stage (Site / Built / Dismantling) with wood needed / delivered / used; tooltip with braves assigned/max (one icon each) and wood, Dismantle toggle once wood is used (under construction or built).
 - [ ] Braves' build cycle: gather and watch, flatten the footprint by jumping point by point, fetch wood (ground piece or cut a tree) to a pile by the door, build one piece at a time.
 - [ ] Wood dispatch rule: a brave goes for wood only while delivered + claimed (fetched/carried by others) < needed, so at most needed - delivered braves are out; the others wait and build. Refine later.
-- [ ] Site visuals: blueprint while flattening, a wooden structure once flat, then part after part of the real model replacing the wood as pieces are used.
+- [ ] Site visuals are drawn from the state (blueprint mark, wooden structure + built part, shake, hut smoke): update views per building (stable ids) when ticks change them; compare the part order (from the ground up) and the structure with the original; chimney position per hut model; busy look for the other kinds.
 - [ ] Dismantling: braves remove one piece at a time, dropped as a wood piece (circle on the ground) near the door; the building disappears when empty and frees its ground.
 - [ ] Wood pieces lying on the ground (`GameMap::wood`, drawn): picked up by any construction; hovering one could show "Wood". Maybe draw the original's shadow under them (`hfx0-0.dat` 22, unconfirmed).
 - [ ] Destruction of buildings on uneven/flooded ground (spells, erosion).

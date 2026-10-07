@@ -4,6 +4,7 @@
 mod blueprint;
 mod buildings;
 mod camera;
+mod construction;
 mod cursor_debug;
 mod dev;
 mod edge_push;

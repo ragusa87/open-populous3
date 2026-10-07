@@ -27,7 +27,7 @@ impl OriginalObjects {
     }
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
