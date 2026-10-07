@@ -5,7 +5,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## Menu and sandboxes ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Sandbox Spells: test ground to cast every spell freely (no mana, no charges).
-- [ ] Sandbox Buildings: placing and constructing buildings there (today it shows one of each).
+- [ ] Sandbox Buildings: placing and constructing buildings on its free ground (braves, wood and trees are there; every model and every construction stage are shown).
 - [ ] More sandboxes as features come (combat, vehicles, praying...).
 - [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
 

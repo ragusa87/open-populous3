@@ -1,6 +1,6 @@
 //! A playable map: terrain + metadata, built from an original level or generated.
 
-use crate::building::{buildings_from_level, Building};
+use crate::building::{buildings_from_level, Building, BuildingKind};
 use crate::command::Command;
 use crate::path::Mobility;
 use crate::slots;
@@ -164,15 +164,20 @@ impl GameMap {
         GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None }.with_shamans().with_trees(1, 150)
     }
 
-    /// Test ground for buildings: a flat island with the player's site, one building of every known
-    /// model (1-19) for the player in rows south of the site (in view of the starting camera), facing
-    /// each quarter turn in turn, and a few for tribe 1 (red) to compare colours.
+    /// Test ground for buildings: a flat island with the player's site at the centre.
+    /// - South (in view of the starting camera): one building of every known model (1-19) for the
+    ///   player in rows, facing each quarter turn in turn, and a few for tribe 1 (red) to compare
+    ///   colours, with some wood pieces between them and the site.
+    /// - North: one row per buildable kind (`BUILDABLE` order) showing each `showcase_states`
+    ///   column, west to east.
+    /// - East: free ground to build on, with braves, a pile of wood and a few trees.
     pub fn sandbox_buildings() -> Self {
         const C: i32 = MAP_SIZE as i32 / 2;
+        const ISLAND: i32 = 48;
         let mut terrain = Heightmap::new(MAP_SIZE);
         for z in 0..MAP_SIZE as i32 {
             for x in 0..MAP_SIZE as i32 {
-                if (x - C) * (x - C) + (z - C) * (z - C) <= 26 * 26 {
+                if (x - C) * (x - C) + (z - C) * (z - C) <= ISLAND * ISLAND {
                     terrain.set(x, z, 64);
                 }
             }
@@ -180,18 +185,34 @@ impl GameMap {
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
         let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None }.with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
-        let place = |owner: u8, model: u8, (x, z): (u16, u16), facing: u8| Building::new(crate::building::BuildingKind::from_model(model), owner, x - 256, z - 256, facing);
+        let place = |owner: u8, kind: BuildingKind, (x, z): (u16, u16), facing: u8| Building::new(kind, owner, x - 256, z - 256, facing);
         for model in 1..=19u8 {
             let i = model as i32 - 1;
-            map.buildings.push(place(0, model, at(-12 + (i % 7) * 4, 6 + (i / 7) * 4), (i % 4) as u8 * 2));
+            map.buildings.push(place(0, BuildingKind::from_model(model), at(-12 + (i % 7) * 4, 6 + (i / 7) * 4), (i % 4) as u8 * 2));
         }
         for (i, model) in [1u8, 3, 4, 7].iter().enumerate() {
-            map.buildings.push(place(1, *model, at(-6 + i as i32 * 4, 19), 0));
+            map.buildings.push(place(1, BuildingKind::from_model(*model), at(-6 + i as i32 * 4, 19), 0));
         }
-        // A few pieces of wood between the site and the first row, a pile and loose ones.
         let (cx, cz) = at(0, 3);
         for (dx, dz) in [(0, 0), (90, 40), (-80, 60), (20, -70), (-600, 100), (700, -50)] {
             map.wood.push(WoodPiece::new((cx as i32 + dx) as u16, (cz as i32 + dz) as u16));
+        }
+        for (row, &kind) in crate::build_book::BUILDABLE.iter().enumerate() {
+            for (col, state) in showcase_states(kind).into_iter().enumerate() {
+                let (x, z) = at(-22 + 5 * col as i32, -7 - 5 * row as i32);
+                map.buildings.push(Building { x: x - 256, z: z - 256, ..state });
+            }
+        }
+        for n in 0..8 {
+            let id = map.units.len() as u32 + 1;
+            map.units.push(Unit::new(id, 0, UnitKind::Brave, at(20 + n % 4, -2 + 2 * (n / 4))));
+        }
+        let (px, pz) = at(27, 6);
+        for (dx, dz) in [(0, 0), (60, 30), (-50, 40), (30, -60), (-40, -30), (90, -20), (-90, 0), (0, 90), (120, 60), (-120, -70), (70, 110), (-30, -110)] {
+            map.wood.push(WoodPiece::new((px as i32 + dx) as u16, (pz as i32 + dz) as u16));
+        }
+        for (i, (dx, dz)) in [(34, -8), (36, -5), (35, -1), (37, 3), (34, 9), (36, 12)].into_iter().enumerate() {
+            map.trees.push(Tree::new((C + dx, C + dz), i as u8, crate::tree::MAX_SIZE));
         }
         map
     }
@@ -350,6 +371,26 @@ impl Lcg {
         self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         self.0 >> 8
     }
+}
+
+/// A buildable kind in each state worth seeing, for the buildings sandbox (owner 0, facing 0, at
+/// the origin): blueprint; under construction with none, a third, two thirds and all but one
+/// piece in; built; dismantling at half; built and attacked (shaking); built with people inside.
+pub fn showcase_states(kind: BuildingKind) -> Vec<Building> {
+    let built = Building::new(kind, 0, 0, 0, 0);
+    let of = kind.wood_cost();
+    let building = |used: u8| Building { used, ..built.clone() };
+    vec![
+        Building::site(kind, 0, 0, 0, 0),
+        building(0),
+        building(of / 3),
+        building(of * 2 / 3),
+        building(of - 1),
+        built.clone(),
+        Building { used: of / 2, dismantling: true, ..built.clone() },
+        Building { shaking: u16::MAX, ..built.clone() },
+        Building { inside: 3, ..built },
+    ]
 }
 
 #[cfg(test)]
@@ -569,7 +610,8 @@ mod tests {
     #[test]
     fn sandbox_buildings_has_every_model_on_land() {
         let m = GameMap::sandbox_buildings();
-        assert_eq!(m.buildings.iter().filter(|b| b.owner == 0).count(), 19);
+        let models = m.buildings.iter().filter(|b| b.owner == 0 && b.stage() == crate::building::Stage::Built && b.inside == 0 && b.shaking == 0);
+        assert_eq!(models.count(), 19 + crate::build_book::BUILDABLE.len());
         assert!(m.buildings.iter().any(|b| b.owner == 1));
         assert!(!m.wood.is_empty(), "some wood to look at");
         for w in &m.wood {
@@ -577,7 +619,32 @@ mod tests {
         }
         for b in &m.buildings {
             assert!(!m.terrain.is_water((b.x / 512) as i32, (b.z / 512) as i32));
+            for o in &m.buildings {
+                assert!(std::ptr::eq(b, o) || !b.covers(o.centre(), 0), "{:?} and {:?} overlap", b.kind, o.kind);
+            }
         }
+        let braves = m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == 0).count();
+        assert!(braves >= 4 && m.wood.len() >= 10 && m.trees.len() >= 4, "something to build with");
+        for t in &m.trees {
+            assert!(!m.terrain.is_water(t.cell().0, t.cell().1));
+        }
+    }
+
+    #[test]
+    fn showcase_covers_every_stage() {
+        use crate::building::Stage;
+        let states = showcase_states(BuildingKind::Temple);
+        let stages: Vec<Stage> = states.iter().map(Building::stage).collect();
+        assert_eq!(stages[..7], [
+            Stage::Blueprint,
+            Stage::UnderConstruction { used: 0, of: 8 },
+            Stage::UnderConstruction { used: 2, of: 8 },
+            Stage::UnderConstruction { used: 5, of: 8 },
+            Stage::UnderConstruction { used: 7, of: 8 },
+            Stage::Built,
+            Stage::Dismantling { used: 4, of: 8 },
+        ]);
+        assert!(states[7].shaking > 0 && states[8].inside > 0);
     }
 
     #[test]
