@@ -18,8 +18,9 @@
 building, to be picked up by constructions (see buildings.md). None in original levels (no level has the editor's
 "wood pile" scenery, model 11); Sandbox > Buildings has a few between the site and the buildings.
 Drawn like a unit: a camera-facing sprite standing on the ground (`Grounded`), pulled 0.3 cell towards the camera:
-the original pile of logs (`hfx0-0.dat` 23, see sprites.md, Scale2x-upscaled as unit sprites) when allowed, else a
-generated pile of three logs with light cut ends in the same 17 x 11 pixel size (`wood::generated_frame`).
+the original pile of logs (`hfx0-0.dat` 23, see sprites.md, Scale2x-upscaled as unit sprites) when allowed, else the
+bundled `assets/sprites/wood_pile.png`: three logs with light cut ends in the same 17 x 11 pixel size, upscaled
+the same way.
 
 ## On screen (client, `nature.rs`)
 Drawn as 3D models standing on the terrain (`Grounded`, trunk footprint 0.15 cell), turned by a fixed per-tree

@@ -8,7 +8,7 @@
 pub mod art;
 mod dust;
 mod procedural;
-mod sheets;
+pub mod sheets;
 pub mod selection;
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};

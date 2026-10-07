@@ -1,10 +1,11 @@
 //! Pieces of wood lying on the ground (`GameMap::wood`), drawn like units as a camera-facing sprite
 //! standing on the terrain: the original pile of logs (`hfx0-0.dat`, see docs/specs/sprites.md) when
-//! allowed, else a generated one in the same pixel-art size.
+//! allowed, else the bundled one (`assets/sprites/wood_pile.png`, same pixel-art size).
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{render_pos, Grounded};
 use crate::units::art::{picture_frame, Frame};
+use crate::units::sheets::decode;
 use crate::units::{toward_eye, upload_frame, FrameAsset};
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
@@ -12,17 +13,12 @@ use pop3_format::catalog::{EFFECT_SPRITE_FILE, WOOD_PILE_SPRITE};
 use pop3_format::{Picture, SpriteBank, Theme, WORLD_UNITS_PER_CELL};
 use std::path::Path;
 
-/// Generated pile size, as the original sprite (base pixels).
-const PILE: (usize, usize) = (17, 11);
+/// Open-source pile of logs (see assets/CREDITS.md), pixel art in the original sprite's size.
+const BUNDLED: &[u8] = include_bytes!("../../../assets/sprites/wood_pile.png");
 /// Footprint half size (cells): the pile rests on the lowest ground under it.
 const HALF: f32 = 0.1;
 /// How far (cells) the sprite is pulled towards the camera so nearby ground does not cut it.
 const PULL_TO_EYE: f32 = 0.3;
-
-const BARK: [u8; 4] = [86, 56, 30, 255];
-const BARK_DARK: [u8; 4] = [58, 36, 18, 255];
-const CUT: [u8; 4] = [196, 158, 104, 255];
-const RING: [u8; 4] = [150, 112, 66, 255];
 
 #[derive(Resource)]
 struct WoodSprite(FrameAsset);
@@ -53,35 +49,18 @@ fn original_frame(data_dir: &Path) -> Result<Frame, String> {
     Ok(picture_frame(&Picture { sprite: sprite.clone(), origin }, &palette))
 }
 
-/// A generated pile in the original's size: two logs side by side and one on top, bark along
-/// them and a light cut end (a round with a ring) facing the viewer.
-pub fn generated_frame() -> Frame {
-    let (w, h) = PILE;
-    let mut rgba = vec![0u8; w * h * 4];
-    let mut put = |x: usize, y: usize, c: [u8; 4]| {
-        if x < w && y < h {
-            rgba[(y * w + x) * 4..][..4].copy_from_slice(&c);
-        }
-    };
-    // (left, top) of each log, 8 x 4: bark on the left, the round cut end on the right.
-    for (lx, ty) in [(0, 6), (8, 7), (4, 2)] {
-        for dy in 0..4 {
-            for dx in 0..6 {
-                put(lx + dx, ty + dy, if dy == 0 || dy == 3 { BARK_DARK } else { BARK });
-            }
-            let (from, to) = if dy == 0 || dy == 3 { (6, 8) } else { (5, 9) };
-            for dx in from..to {
-                let ring = (dx == 6 || dx == 7) && (dy == 1 || dy == 2);
-                put(lx + dx, ty + dy, if ring { RING } else { CUT });
-            }
-        }
-    }
-    Frame { width: w, height: h, origin: (w / 2, h - 1), rgba, scale: 1 }
+/// The bundled pile, feet at its bottom centre; None if the PNG does not decode.
+pub fn bundled_frame() -> Option<Frame> {
+    let (width, height, rgba) = decode(BUNDLED)?;
+    Some(Frame { width, height, origin: (width / 2, height.saturating_sub(1)), rgba, scale: 1 })
 }
 
 fn load_sprite(levels: Res<LevelList>, mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     let original = levels.original.then(|| original_frame(&levels.data_dir).map_err(|e| warn!("original wood sprite: {e}")).ok()).flatten();
-    let frame = original.unwrap_or_else(generated_frame);
+    let Some(frame) = original.or_else(bundled_frame) else {
+        warn!("bundled wood sprite does not decode: no wood drawn");
+        return;
+    };
     commands.insert_resource(WoodSprite(upload_frame(&frame, &mut images, &mut meshes, &mut mats)));
 }
 
@@ -137,13 +116,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generated_pile_stands_on_its_bottom_centre() {
-        let f = generated_frame();
-        assert_eq!((f.width, f.height, f.scale), (PILE.0, PILE.1, 1));
-        assert_eq!(f.origin, (PILE.0 / 2, PILE.1 - 1));
+    fn bundled_pile_stands_on_its_bottom_centre() {
+        let f = bundled_frame().expect("assets/sprites/wood_pile.png decodes");
+        assert_eq!((f.width, f.height, f.scale), (17, 11, 1), "the original sprite's size");
+        assert_eq!(f.origin, (8, 10));
         let opaque = |x: usize, y: usize| f.rgba[(y * f.width + x) * 4 + 3] == 255;
         assert!((0..f.width).any(|x| opaque(x, f.height - 1)), "touches the ground");
         assert!((0..f.width).all(|x| !opaque(x, 0)), "room above the top log");
-        assert!(f.rgba.chunks(4).any(|p| p == CUT), "cut ends show");
     }
 }
