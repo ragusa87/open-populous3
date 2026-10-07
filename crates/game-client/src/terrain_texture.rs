@@ -1,6 +1,6 @@
 //! Bake the ground texture the way the original does it: per pixel, the (bilinear)
-//! height plus `disp` noise picks a `bigfade` row, slope lighting picks the brightness
-//! column, the palette gives the colour. Pure function, no Bevy.
+//! height plus `disp` noise picks a `bigfade` row (the sea: `watdisp` noise over the water rows),
+//! slope lighting picks the brightness column, the palette gives the colour. Pure function, no Bevy.
 
 use game_core::terrain::Heightmap;
 use pop3_format::theme::{Theme, BIGFADE_LAND_ROW};
@@ -9,6 +9,11 @@ pub const PX_PER_CELL: usize = 8;
 
 /// Light direction used for baked shading (normalised in `bake`).
 pub const SUN: [f32; 3] = [0.6, 0.65, 0.45];
+
+/// The water row (below `BIGFADE_LAND_ROW`) for a sea pixel's noise.
+pub fn sea_row(water: u8) -> usize {
+    water as usize * BIGFADE_LAND_ROW / 256
+}
 
 /// Returns RGBA8 pixels, `(size * PX_PER_CELL)²`, tiling seamlessly like the map.
 /// `row_scale` multiplies height before picking the bigfade row (1.0 = 1:1, unverified).
@@ -24,7 +29,7 @@ pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32) -
             let h = map.sample(x, z);
             let disp = theme.disp(px, py) as i32;
             let row = if h < 1.0 {
-                (disp / 2) as usize
+                sea_row(theme.water(px, py))
             } else {
                 (BIGFADE_LAND_ROW as i32 + (h * row_scale) as i32 + (disp - 128) / 2).max(BIGFADE_LAND_ROW as i32) as usize
             };
@@ -53,6 +58,22 @@ mod tests {
         let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
         big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..].fill(1);
         Theme::parse(&pal, &big, &vec![128; DISP_SIZE * DISP_SIZE]).unwrap()
+    }
+
+    #[test]
+    fn sea_rows_span_the_water_rows() {
+        assert_eq!((sea_row(0), sea_row(128), sea_row(255)), (0, 64, BIGFADE_LAND_ROW - 1));
+    }
+
+    #[test]
+    fn sea_takes_the_water_noise() {
+        let mut pal = vec![0u8; 1024];
+        pal[4 * 9..4 * 9 + 3].copy_from_slice(&[9, 9, 9]);
+        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
+        big[sea_row(250) * BIGFADE_WIDTH..(sea_row(250) + 1) * BIGFADE_WIDTH].fill(9);
+        let theme = Theme::parse(&pal, &big, &vec![0; DISP_SIZE * DISP_SIZE]).unwrap().with_water(&vec![250; DISP_SIZE * DISP_SIZE]).unwrap();
+        let (_, px) = bake(&Heightmap::new(4), &theme, 1.0 / 384.0, 1.0);
+        assert_eq!(&px[0..3], &[9, 9, 9], "watdisp picks the sea row, not disp");
     }
 
     #[test]

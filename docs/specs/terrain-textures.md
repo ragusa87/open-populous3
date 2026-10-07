@@ -72,7 +72,8 @@ dark land colours at row 63). PopResourceEditor: "damaged ground, lava and simil
 ## Our bake (`game-client/src/terrain_texture.rs`)
 Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cell / 128):
 - `h` = bilinear height; `d` = `disp` texel.
-- row = water (`h < 1`): `d / 2`; land: `max(128, 128 + h + (d - 128) / 2)`.
+- row = water (`h < 1`): `watdisp * 128 / 256` (`sea_row`, the whole water band; `disp` when the file is
+  missing, generated noise in the procedural theme); land: `max(128, 128 + h + (d - 128) / 2)`.
 - brightness column from baked Lambert lighting of the heightmap slope (`SUN`), material is unlit.
 - colour = `palette[bigfade[row][column]]`.
 
@@ -84,7 +85,7 @@ Fallback (no data, or `--no-original`): `procedural_theme::generate(seed)` build
 shapes as the original files, so the same bake is used in both modes.
 
 ## Next
-See TODO.md ("Terrain"): fade, cliff and watdisp loading (`pop3_format::theme` loads pal,
+See TODO.md ("Terrain"): fade and cliff loading (`pop3_format::theme` loads pal,
 bigf and disp only), the `disp` offset.
 - Re-bake only the dirty rect after edits (now the whole 1024² texture is re-baked).
 - Mipmaps (distant aliasing), lava and swamp layers.

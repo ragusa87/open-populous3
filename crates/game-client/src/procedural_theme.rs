@@ -1,5 +1,5 @@
 //! Fully generated landscape theme, same shape as the original files
-//! (palette + bigfade + disp), so the texture bake is identical with or
+//! (palette + bigfade + disp + water noise), so the texture bake is identical with or
 //! without the original game data.
 
 use pop3_format::theme::{Theme, BIGFADE_LAND_ROW, BIGFADE_ROWS, BIGFADE_WIDTH, DISP_SIZE};
@@ -35,7 +35,7 @@ pub fn generate(seed: u32) -> Theme {
             bigfade.push((band * LEVELS + col * LEVELS / BIGFADE_WIDTH) as u8);
         }
     }
-    Theme { palette, bigfade, disp: disp_noise(seed) }
+    Theme { palette, bigfade, disp: disp_noise(seed), water: disp_noise(seed ^ 0x5EA) }
 }
 
 /// Band for a (jittered) row; water and land never bleed into each other.

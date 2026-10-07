@@ -120,7 +120,6 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Dirty-rect re-bake of the texture/normals instead of full rebuilds.
 - [ ] Check the height -> colour row scale against the real game, and how the original maps its sky (backdrop scrolling with the camera?).
 - [ ] `disp` is not centred on 128 (theme 1 averages 87, theme 5 161): `(d - 128) / 2` in `terrain_texture::bake` shifts every land row by a theme constant; subtract the file mean (or find the game's use).
-- [ ] Sea: the bake uses `disp / 2` as the sea row; the original has `watdisp.dat` (water displacement, one file for all themes), use it.
 - [ ] Cliffs: `cliff0-X.dat` turns land colours to rock by level (what picks the level: slope? damage?); `fade0-X.dat` palette light table (object/sprite shading, fog of war). Load both in `pop3_format::theme`.
 - [ ] Elevation rendering: low land is drawn like water. On original level 5 the reincarnation site looks like it stands in the sea, yet it is land units walk on. Fix the colour/water look of low ground so it matches what the simulation treats as sea (see also the sea-level item under Buildings).
 
