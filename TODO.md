@@ -84,12 +84,12 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Open-source building models (e.g. CC0 Quaternius Medieval Village / Fantasy kits) instead of the labelled boxes when the original files are not used; generated maps and sandboxes have buildings only in Sandbox > Buildings.
 - [ ] Identify the original objects of reconversion, wall, gate, guard post (stand-in boxes even with the original files); check temple = prayer hut object.
 - [ ] Villager hut style (3 styles in the objects, style 0 always drawn): find what picks it.
-- [ ] Check the facing against the game (level 19's boat hut, facing 4, points its jetty into a low inlet: looks right), and the cells a footprint takes (used by the walking mask).
+- [ ] Check the facing of the other kinds against the game (boat huts are settled: jetty local +z, door -z, from the 11 in the levels), and the cells a footprint takes (used by the walking mask).
 - [ ] General model 9 "building add-on" (one near each of 91 medium/large huts): find what it is (hut extension?) and draw it.
 - [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold.
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
 - [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
-- [ ] Build tab: icons, clicking a tile picks a blueprint; build books per tribe in the simulation (today `GameMap::build_book` is shared), discoveries unlocking "?".
+- [ ] Build tab: icons; build books per tribe in the simulation (today `GameMap::build_book` is shared), discoveries unlocking "?".
 - [ ] Blueprint: left click places it (`Command::PlaceBuilding`, `placement::can_place`); tune `STEEP_SPREAD`; check the door side of the other kinds against the original objects; construction sites block like buildings once they exist.
 - [ ] At least one assigned brave is needed, up to the kind's maximum; more braves build faster (work shared).
 - [ ] Buildings and sites block walking (blocked-cell mask in `path` next to the terrain); not for flyers, not the reincarnation site; braves assigned to a site (or dismantling) may walk on its footprint. Replan walkers when the mask changes, push units off a new footprint.

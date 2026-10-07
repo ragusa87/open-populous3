@@ -57,7 +57,7 @@ prison, vault/pyramid of knowledge and totems can never be built nor dismantled.
 Like the Spells tab: one tile per buildable kind, per tribe `Availability` (Hidden / Discoverable "?" / Available),
 taken from the level (`.hdr`) and unlocked by triggers. Clicking an available tile picks a blueprint.
 
-Done (no icons, no blueprint yet): `game_core::build_book::BuildBook`, the original panel's 8 kinds (`BUILDABLE`: hut,
+Done (no icons; a click picks the blueprint, see below): `game_core::build_book::BuildBook`, the original panel's 8 kinds (`BUILDABLE`: hut,
 drum tower, temple, spy, warrior and firewarrior training, boat hut, airship hut). `BuildBook::from_level`: the
 header's `BuildingsAvailable` (hut = model 1, boat hut 13, airship hut 15) are Available, building discoveries
 (`DiscoveryType 2`, any hut size = the hut) not yet available are "?". Stored as `GameMap::build_book` (original
@@ -73,7 +73,8 @@ tiles named (`panel_name`), "?" for discoverable, empty slot for hidden, hover d
 - Space turns it a quarter turn (facing + 2).
 - Parts of the footprint that cannot be built on are drawn red: sea, ground too steep (height spread inside the
   footprint over a threshold to tune; smaller unevenness is fine, the braves flatten it), another building or
-  construction site, a tree that still has wood (size > 0). Any red part blocks placement.
+  construction site, a tree that still has wood (size > 0). Any red part blocks placement. A boat hut is also all
+  red unless its jetty side is over the sea and its door side on land; its blueprint turns itself to fit.
 - A left click on a valid spot places it (`Command::PlaceBuilding { player, kind, x, z, facing, braves }`): the
   blueprint stays drawn on the ground as a construction site, a `Building` with a `stage` (Site / Built /
   Dismantling) and its wood counts. A size-0 tree under it stays invisible and does not grow back while covered.

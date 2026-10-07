@@ -54,7 +54,9 @@ Next: icons (Kenney game-icons), casting on the terrain, mana from followers, to
 Mirrors `game_core::build_book::BuildBook` (resource `PlayerBuilds`, `level_builds`: the level's own, set with the
 spells on New game and PgUp/PgDn; generated maps and sandboxes: every kind). Same grid as the spells: a named tile
 per available kind (no icons yet), "?" for plans to discover, an empty slot for hidden ones; hover describes it.
-Nothing is placed yet (buildings.md "Construction").
+A click on an available tile picks its blueprint (white border, `blueprint.rs`): it follows the mouse on the map,
+red where it cannot stand, Space turns it, right click puts it away; left click will place it (not yet). Details in
+buildings.md "Blueprint".
 
 ## Main menu (`menu.rs`)
 Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list: the original
