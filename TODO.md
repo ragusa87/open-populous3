@@ -57,7 +57,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spell cursors: map each spell to its gold icon in `POINT0-0.DAT` (38-66) in `virtual_cursor::spell_sprite`.
 - [ ] Burn (1), bloodlust (20) and the original teleport (21): what they do and who casts them (never on the player panel).
 - [ ] Level spells per tribe in the simulation (today `GameMap::spell_book` is the player's loadout, shared): keep each discovery's availability (permanent / this level / one shot) for when it is discovered; `SpellsAvailableLevel` / `SpellsNotCharging` and `SpellsAvailableOnce`.
-- [ ] Level 1's Convert: not in its `SpellsAvailable` mask, find where it comes from (AI/level script?).
+- [ ] Convert in the campaign (files): not in levels 1-3 (level 1 has no wildmen; levels 2 and 3 have 8 and 44: check in the game whether the player can convert them), single-shot discoveries in levels 4 and 5, permanent discovery in 6, in the masks from 7. A "once" discovery should give a single shot (`Provided { shots: 1 }`) when found.
 
 ## Mana
 - [ ] Mana per tribe in the simulation (integer, deterministic), shown in the HUD.
