@@ -90,7 +90,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] `Command::PlaceBuilding` (with the selected braves) and `Command::Assign`; extra braves beyond the maximum walk to the site and idle unassigned.
 - [ ] Building stage (Site / Built / Dismantling) with wood needed / delivered / used; tooltip with braves assigned/max and wood, Dismantle toggle on built ones.
 - [ ] Braves' build cycle: gather and watch, flatten the footprint by jumping point by point, fetch wood (ground piece or cut a tree) to a pile by the door, build one piece at a time.
-- [ ] Wood dispatch rule: start with every assigned brave fetching while delivered + carried < needed; refine later.
+- [ ] Wood dispatch rule: a brave goes for wood only while delivered + claimed (fetched/carried by others) < needed, so at most needed - delivered braves are out; the others wait and build. Refine later.
 - [ ] Site visuals: blueprint, then a wooden frame of the building's shape growing with progress, then the full building.
 - [ ] Dismantling: braves remove one piece at a time, dropped as a wood piece (circle on the ground) near the door; the building disappears when empty and frees its ground.
 - [ ] Wood pieces lying on the ground (`GameMap::wood`): picked up by any construction, drawn as small circles.

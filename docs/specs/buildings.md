@@ -62,8 +62,11 @@ built building of a buildable kind: a "Dismantle" toggle (back to "Build" while 
    flat. Done when every point is at the target.
 3. Wood: each brave fetches one piece at a time: the nearest wood piece lying on the ground within range, else the
    nearest tree with size > 0, where it cuts one piece (`Tree::cut`, cutting takes a while). It drops the piece on
-   the ground next to the door. First dispatch rule: every assigned brave fetches wood while delivered + carried <
-   needed; to revisit (split gatherers/builders, nearest brave per piece).
+   the ground next to the door. First dispatch rule: a brave only goes for wood if delivered + claimed < needed, where
+   claimed = pieces being fetched or carried by other braves; so at most needed - delivered braves are out at once
+   (a hut needing 3 sends at most 3, one piece each). The others wait at the site and build from the pile. When a
+   piece is used, nothing changes (it counts as delivered). To revisit (nearest brave per piece, gatherers vs
+   builders).
 4. Build: a brave picks a piece up from the door pile, works on the site for a while, and progress grows by one
    piece. The tooltip shows wood provided (pile + used) and needed.
 5. Done when all the wood is used: the stage becomes Built, assigned braves are released (idle).
