@@ -31,6 +31,10 @@ angel of death, in no level; only 2 spies in all 41 levels), owner =
 tribe (255 = none: wildmen). Shamans spawn at their reincarnation site instead (one per site, ids first). Level 10:
 5 braves, 4 warriors, 4 preachers for the player, 5 warriors, 2 preachers, 4 firewarriors for green, 20 wildmen.
 In the files, persons stand at a cell centre (4978 of 5271) or anywhere, and carry no extra data (no angle).
+Wildmen placed in the ring of cells around a reincarnation site (`ReincarnationSite::welcomes`, 1 cell either
+axis) are that tribe's first followers: they start as its braves. In the original they are converted for free when
+the shaman appears, no Convert spell needed (level 2: the 8 around blue's site; most levels place 6 or 8 per
+tribe this way, level 3 has 12). The conversion animation is not drawn.
 Wildmen are neutral (not selectable), drawn with their original anims (0 walk, 1 stand, 3 sit, 31 flung, 47 down)
 or else a generated figure in a hide with a mane, or the brave's rendered sheets in a hide colour.
 

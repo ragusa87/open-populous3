@@ -61,12 +61,17 @@ impl GameMap {
     }
 
     /// The level's people other than shamans (who spawn at their sites), where they are placed.
+    /// Wildmen around a site (`ReincarnationSite::welcomes`) are that tribe's first followers: they
+    /// start as its braves (the original converts them when the shaman appears).
     fn with_people(mut self, level: &Level) -> Self {
         let people = level.things.iter().filter(|t| t.kind == pop3_format::level::KIND_PERSON && !t.is_shaman());
         for t in people {
             let Some(kind) = UnitKind::from_person_model(t.model) else { continue };
+            let cell = ((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32);
+            let welcomed = (kind == UnitKind::Wildman).then(|| self.sites.iter().find(|s| s.welcomes(cell))).flatten();
+            let (owner, kind) = welcomed.map_or((t.owner, kind), |s| (s.owner, UnitKind::Brave));
             let id = self.units.len() as u32 + 1;
-            self.units.push(Unit::new(id, t.owner, kind, (t.x, t.z)));
+            self.units.push(Unit::new(id, owner, kind, (t.x, t.z)));
         }
         self
     }
@@ -586,15 +591,24 @@ mod tests {
     fn a_levels_people_spawn_where_placed_shamans_at_their_site() {
         use pop3_format::level::{DAT_SIZE, KIND_PERSON, PERSON_SHAMAN};
         let mut d = vec![0u8; DAT_SIZE];
-        let base = d.len() - 95 - 2000 * 55;
-        let things: [[u8; 7]; 3] = [[PERSON_SHAMAN, KIND_PERSON, 0, 0x00, 0x0a, 0x00, 0x14], [3, KIND_PERSON, 0, 0x00, 0x0b, 0x00, 0x14], [1, KIND_PERSON, 255, 0x00, 0x30, 0x00, 0x30]];
+        let base = 81_987;
+        let things: [[u8; 7]; 4] = [
+            [PERSON_SHAMAN, KIND_PERSON, 0, 0x00, 0x0a, 0x00, 0x14],
+            [3, KIND_PERSON, 0, 0x00, 0x0b, 0x00, 0x14],
+            [1, KIND_PERSON, 255, 0x00, 0x30, 0x00, 0x30],
+            [1, KIND_PERSON, 255, 0x00, 0x0c, 0x00, 0x16],
+        ];
         for (i, t) in things.iter().enumerate() {
             d[base + i * 55..base + i * 55 + 7].copy_from_slice(t);
         }
         let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None);
         let kinds: Vec<_> = m.units.iter().map(|u| (u.id, u.owner, u.kind, u.x, u.z)).collect();
         assert_eq!(kinds[0].2, UnitKind::Shaman);
-        assert_eq!(kinds[1..], [(2, 0, UnitKind::Warrior, 0x0b00, 0x1400), (3, 255, UnitKind::Wildman, 0x3000, 0x3000)]);
+        assert_eq!(
+            kinds[1..],
+            [(2, 0, UnitKind::Warrior, 0x0b00, 0x1400), (3, 255, UnitKind::Wildman, 0x3000, 0x3000), (4, 0, UnitKind::Brave, 0x0c00, 0x1600)],
+            "the wildman next to the site (cell 6, 11 by 5, 10) joins blue as a brave"
+        );
     }
 
     #[test]

@@ -22,7 +22,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
 - [ ] Dead units other than the shaman lie where they fell forever: remove them after a while (views are indexed by unit position: give them stable ids first).
 - [ ] Wildmen (neutral "gaia" braves, spawned from the levels, standing still today): wander around, drink, eat fruit from trees; the Convert spell turns them into the caster's braves. Their original anims beyond walk/stand/sit/flung (2 gesture, 4 crouching) are unused.
-- [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation.
+- [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation. Done at level start without animation (`ReincarnationSite::welcomes`); check the range in the game (the levels only use the ring of 8 cells) and whether it happens on every reincarnation.
 - [ ] Animate the wildmen: idle loops and gestures (original anims 2 gesture, 4 crouching) and wandering around their spot, instead of standing still.
 - [ ] Low health: a star/crown spinning over the head of units low on health (original art to find); health bars only show on selected units.
 - [ ] Selection of vehicles and buildings (without the people inside), and of units inside them once they exist (`selection::selectable`).
@@ -57,7 +57,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spell cursors: map each spell to its gold icon in `POINT0-0.DAT` (38-66) in `virtual_cursor::spell_sprite`.
 - [ ] Burn (1), bloodlust (20) and the original teleport (21): what they do and who casts them (never on the player panel).
 - [ ] Level spells per tribe in the simulation (today `GameMap::spell_book` is the player's loadout, shared): keep each discovery's availability (permanent / this level / one shot) for when it is discovered; `SpellsAvailableLevel` / `SpellsNotCharging` and `SpellsAvailableOnce`.
-- [ ] Convert in the campaign (files): not in levels 1-3 (level 1 has no wildmen; levels 2 and 3 have 8 and 44: check in the game whether the player can convert them), single-shot discoveries in levels 4 and 5, permanent discovery in 6, in the masks from 7. A "once" discovery should give a single shot (`Provided { shots: 1 }`) when found.
+- [ ] A "once" spell discovery should give a single shot (`Provided { shots: 1 }`) when found (e.g. Convert in levels 4 and 5).
 
 ## Mana
 - [ ] Mana per tribe in the simulation (integer, deterministic), shown in the HUD.

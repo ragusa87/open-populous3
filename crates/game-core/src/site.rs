@@ -4,6 +4,9 @@
 use crate::terrain::{DirtyRect, Heightmap};
 use pop3_format::{Level, WORLD_UNITS_PER_CELL};
 
+/// Cells (around the site's own, either axis) whose wildmen join the tribe when its shaman appears.
+pub const WELCOME_RANGE: i32 = 1;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReincarnationSite {
     pub owner: u8,
@@ -19,6 +22,18 @@ impl ReincarnationSite {
     }
 
     /// Cell containing the site centre.
+    /// Whether a wildman standing on `cell` joins this site's tribe when its shaman appears: the
+    /// levels place a tribe's first followers as wildmen in the ring of cells around its site
+    /// (level 2: 8 around blue's), converted for free, no spell needed.
+    pub fn welcomes(&self, cell: (i32, i32)) -> bool {
+        let (sx, sz) = self.cell();
+        let torus = |a: i32, b: i32| {
+            let d = (a - b).rem_euclid(128);
+            d.min(128 - d)
+        };
+        torus(sx, cell.0).max(torus(sz, cell.1)) <= WELCOME_RANGE
+    }
+
     pub fn cell(&self) -> (i32, i32) {
         ((self.x as u32 / WORLD_UNITS_PER_CELL) as i32, (self.z as u32 / WORLD_UNITS_PER_CELL) as i32)
     }
@@ -90,6 +105,13 @@ pub fn generated_sites(terrain: &Heightmap) -> Vec<ReincarnationSite> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn welcomes_the_ring_around_it_across_the_edge() {
+        let site = ReincarnationSite::at_cell(0, (0, 46));
+        assert!(site.welcomes((0, 46)) && site.welcomes((127, 45)) && site.welcomes((1, 47)));
+        assert!(!site.welcomes((2, 46)) && !site.welcomes((0, 48)));
+    }
     use pop3_format::level::{DAT_SIZE, KIND_PERSON, PERSON_SHAMAN};
 
     fn level_with(things: &[[u8; 7]]) -> Level {

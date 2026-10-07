@@ -29,7 +29,8 @@ known are Discoverable. Their availability (permanent / this level / once) is no
 campaign's last spell, discovered in levels 17 and 18 and in the masks from level 19 on, always with Convert (17).
 Levels 1 and 2 also set bit 18, among leftover bits (1 burn, 20 bloodlust, 21 teleport) and without Convert:
 `known_in_header` only takes Armageddon next to Convert. The panel keeps a tile for it.
-Convert follows the same campaign path: absent from levels 1-3 (level 1 has no wildmen), single-shot discoveries
+Convert follows the same campaign path: absent from levels 1-3 (level 1 has no wildmen; levels 2 and 3 only have
+the wildmen around the player's site, converted for free, see units.md), single-shot discoveries
 in levels 4 and 5, a permanent one in level 6, in every mask from level 7 (except level 22, the shaman alone).
 
 ## Original spells (levels and scripts)
