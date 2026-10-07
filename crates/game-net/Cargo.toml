@@ -2,6 +2,7 @@
 name = "game-net"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 game-core = { version = "0.1.0", path = "../game-core" }

@@ -4,6 +4,7 @@ members = ["crates/*"]
 
 [workspace.package]
 edition = "2024"
+license = "MIT"
 version = "0.1.0"
 
 [profile.dev]

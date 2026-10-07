@@ -22,11 +22,28 @@ Original install: `$POP3_INSTALL` (the folder holding `levels/`, `data/`, `objec
 Windows, `C:\`. Overrides: `$POP3_LEVELS`, `$POP3_DATA`, `$POP3_OBJECTS`.
 See [docs/](docs/README.md) for architecture and specs.
 
+## License
+This project is currently licensed under the [MIT License](LICENSE).
+- Bundled art in `assets/` is CC0 (see [assets/CREDITS.md](assets/CREDITS.md)).
+- *Populous: The Beginning* and its files are Bullfrog / Electronic Arts property: they are never shipped
+  here, only read from your own install (and `--no-original` runs without them).
+
 ## References
 File formats are reverse-engineered from the original files; community tools are used to cross-check them
 (read only, no code copied, the files win when they disagree):
-- [PopResourceEditor](https://github.com/Toksisitee/PopResourceEditor) (Toksisitee, MIT, checked at `140e389`):
-  layouts of the theme files (palette, bigfade, sky, disp, fade, cliff, ghost, alpha), the `bl320` object atlas
-  and the v2 level format (`.dat`, `.hdr`, `.ver` structures).
-- PopSpriteEditor 1.4.0 (Toksisitee, GPLv3): PSFB sprite banks, see [sprites.md](docs/specs/sprites.md).
-- PopSoundEditor (Toksisitee, GPLv3): SDT sound banks, see [sound.md](docs/specs/sound.md).
+- [Pop-World-Editor](https://github.com/PopRe/Pop-World-Editor) (PopRe, no licence stated; fork:
+  [ALACNPopWorldEditor](https://github.com/Toksisitee/ALACNPopWorldEditor)): origin of the v2 level structures
+  (`pop.h`), see [level-format.md](docs/specs/level-format.md).
+- The [Toksisitee](https://github.com/Toksisitee) Populous tools:
+  - [PopResourceEditor](https://github.com/Toksisitee/PopResourceEditor) (MIT, checked at `140e389`): layouts of
+    the theme files (palette, bigfade, sky, disp, fade, cliff, ghost, alpha), the `bl320` object atlas and the
+    v2 level format (`.dat`, `.hdr`, `.ver`), see [terrain-textures.md](docs/specs/terrain-textures.md),
+    [objects.md](docs/specs/objects.md).
+  - [PopSpriteEditor](https://github.com/Toksisitee/PopSpriteEditor) 1.4.0 (GPLv3): PSFB sprite banks, see
+    [sprites.md](docs/specs/sprites.md).
+  - [PopSoundEditor](https://github.com/Toksisitee/PopSoundEditor) (GPLv3): SDT sound banks, see
+    [sound.md](docs/specs/sound.md).
+  - [PopLanguageEditor](https://github.com/Toksisitee/PopLanguageEditor) (GPLv3): language string files, not
+    used yet.
+
+Only facts about the file formats are taken from the GPL tools, never their code, so the MIT licence is kept.
