@@ -70,7 +70,7 @@ pub fn facing_yaw(facing: u8) -> f32 {
 }
 
 #[derive(Component)]
-struct BuildingView;
+pub struct BuildingView(pub usize);
 
 /// The white mark of the building at this index of `GameMap::buildings`, a blueprint: redrawn
 /// over the ground every frame (it follows the planet's curve as the camera moves).
@@ -247,12 +247,13 @@ fn respawn_buildings(
             }
         };
         let mut view = commands.spawn((
-            BuildingView,
+            BuildingView(i),
             Grounded { at, half: 0.0 },
             Tilted { half: FOOTPRINT_HALF, yaw },
             Transform::from_rotation(Quat::from_rotation_y(yaw)),
             Visibility::Hidden,
         ));
+        view.insert(crate::hover::Hoverable::default());
         let id = view.id();
         if let Some(frame) = look.frame {
             view.with_child((Mesh3d(frame), MeshMaterial3d(frame_skin)));
@@ -279,7 +280,7 @@ fn respawn_buildings(
             }
             if stage == Stage::Built && b.inside > 0 && matches!(kind, BuildingKind::Hut { .. }) {
                 for k in 0..PUFFS {
-                    v.spawn((Puff { chimney: top, phase: k as f32 / PUFFS as f32 }, Mesh3d(puff.clone()), MeshMaterial3d(smoke.clone()), NotShadowCaster, Transform::from_translation(top)));
+                    v.spawn((Puff { chimney: top, phase: k as f32 / PUFFS as f32 }, Mesh3d(puff.clone()), MeshMaterial3d(smoke.clone()), NotShadowCaster, crate::hover::NoOutline, Transform::from_translation(top)));
                 }
             }
         });

@@ -76,6 +76,20 @@ the shaman is selected like any unit on the map, clicking her panel preview sele
 the units' current ones, see units.md "Chained orders"), Space
 looks at the shaman. Selected units show a health bar; the cursor shows the count when more than one (see units.md).
 
+## Hover halo (`hover.rs`)
+The thing under the mouse gets a warm white outline (`Hovered`, picked each frame: a unit first, then a wood pile,
+a tree, a building). What can be hovered is a `Hoverable { health }` component put on the views when they are
+spawned, not a rule in the picking: every living unit not already selected (`health`: the player's own also show their health bar),
+wood pieces, trees and every building, any tribe or neutral (not plans still to flatten). The reincarnation site and the winged
+death's totem get none. Not over the panel, nor while a spell or a blueprint is out.
+- Sprites (units, wood pieces): a quad 2.5 px larger behind the sprite with `hover_outline.wgsl`, which draws only
+  the pixels within 1.5 px outside the sprite's alpha (16 samples), both sides.
+- 3D models (trees, buildings): an inverted hull, each mesh pushed out 0.03 cell along normals averaged per
+  position (no cracks at hard edges), front faces culled. Smoke puffs are left out (`NoOutline`).
+- Outline meshes are made once per source mesh and kept (`OutlineCache`).
+- Dev: `HOVER=unit:3` (or `wood`, `tree`, `building` and an index in its `GameMap` list) forces it for a shot.
+The hovered unit also shows its health bar (units.md). Other tooltips on hover (spies show a spy indicator instead of their disguise) are still to do.
+
 ## World editor (`editor.rs`)
 Tab toggles edit mode. Brushes at the camera focus: R raise, F lower (Erode), T flatten,
 M mark + B land bridge from mark. Next: mouse picking on the curved surface, brush radius UI,

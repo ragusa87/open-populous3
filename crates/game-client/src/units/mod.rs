@@ -141,6 +141,10 @@ pub fn sprite_quad(size: Vec2, origin: Vec2) -> Mesh {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnitInput;
 
+/// Unit sprites take this frame's picture: halos and overlays drawn from them come after.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnitViews;
+
 pub struct UnitsPlugin;
 
 impl Plugin for UnitsPlugin {
@@ -149,7 +153,7 @@ impl Plugin for UnitsPlugin {
             .init_resource::<UnitSprites>()
             .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin))
             .add_systems(Startup, load_sprites)
-            .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks, respawn_views, animate_views).chain().in_set(crate::menu::Gameplay))
+            .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks, respawn_views, animate_views.in_set(UnitViews)).chain().in_set(crate::menu::Gameplay))
             .add_systems(PostUpdate, pull_to_eye.before(TransformSystems::Propagate));
     }
 }
@@ -241,9 +245,9 @@ fn look_at_shaman(keys: Res<ButtonInput<KeyCode>>, mut rig: ResMut<CameraRig>, m
 }
 
 #[derive(Component)]
-struct UnitView(usize);
+pub struct UnitView(pub usize);
 #[derive(Component)]
-struct UnitSprite(usize);
+pub struct UnitSprite(pub usize);
 #[derive(Component)]
 struct HealthFill(usize);
 #[derive(Component)]
@@ -266,8 +270,9 @@ fn respawn_views(
     let back = mats.add(flat(Color::srgb(0.05, 0.05, 0.05)));
     let bar = meshes.add(Rectangle::from_size(BAR_SIZE));
     let fill = meshes.add(Rectangle::new(1.0, BAR_SIZE.y * 0.6));
-    for (i, _) in map.0.units.iter().enumerate() {
-        commands.spawn((UnitView(i), Grounded { at: Vec2::ZERO, half: 0.0 }, Transform::default(), Visibility::Hidden)).with_children(|v| {
+    for (i, u) in map.0.units.iter().enumerate() {
+        let hover = crate::hover::Hoverable { health: u.owner == PLAYER };
+        commands.spawn((UnitView(i), hover, Grounded { at: Vec2::ZERO, half: 0.0 }, Transform::default(), Visibility::Hidden)).with_children(|v| {
             v.spawn((UnitSprite(i), Mesh3d::default(), MeshMaterial3d::<StandardMaterial>::default(), Transform::default()));
             v.spawn((HealthBar, Mesh3d(bar.clone()), MeshMaterial3d(back.clone()), Transform::from_xyz(0.0, BAR_HEIGHT, 0.0), Visibility::Hidden))
                 .with_child((HealthFill(i), Mesh3d(fill.clone()), MeshMaterial3d(mats.add(flat(health_color(1.0)))), Transform::from_xyz(0.0, 0.0, 0.005)));
@@ -281,16 +286,17 @@ fn animate_views(
     rig: Res<CameraRig>,
     clock: Res<SimClock>,
     sprites: Res<UnitSprites>,
-    mut views: Query<(&UnitView, &mut Grounded, &mut Transform), (Without<UnitSprite>, Without<HealthFill>)>,
+    mut views: Query<(&UnitView, &mut Grounded, &mut Transform, &crate::hover::Hoverable), (Without<UnitSprite>, Without<HealthFill>)>,
     mut bodies: Query<(&UnitSprite, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>), Without<HealthFill>>,
     mut bars: Query<(&ChildOf, &mut Visibility), With<HealthBar>>,
     mut fills: Query<(&HealthFill, &mut Transform, &MeshMaterial3d<StandardMaterial>), Without<UnitView>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     selection: Res<Selection>,
+    hovered: Res<crate::hover::Hovered>,
 ) {
     let units = &map.0.units;
     let facing_camera = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
-    for (view, mut ground, mut t) in &mut views {
+    for (view, mut ground, mut t, _) in &mut views {
         let Some(u) = units.get(view.0) else { continue };
         ground.at = clock.cell_pos(view.0, u);
         t.rotation = facing_camera;
@@ -309,8 +315,12 @@ fn animate_views(
         }
     }
     for (parent, mut vis) in &mut bars {
-        let unit = views.get(parent.parent()).ok().and_then(|(v, ..)| units.get(v.0));
-        let shown = unit.is_some_and(|u| u.is_alive() && selection.contains(u.id));
+        let view = views.get(parent.parent()).ok();
+        let index = view.as_ref().map(|(v, ..)| v.0);
+        let unit = index.and_then(|i| units.get(i));
+        let health_on_hover = view.is_some_and(|(.., h)| h.health);
+        let under_mouse = health_on_hover && index.is_some_and(|i| hovered.0 == Some(crate::hover::HoverTarget::Unit(i)));
+        let shown = unit.is_some_and(|u| u.is_alive() && (selection.contains(u.id) || under_mouse));
         *vis = if shown { Visibility::Inherited } else { Visibility::Hidden };
     }
     for (fill, mut t, mat) in &mut fills {

@@ -141,7 +141,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Investigate Bevy 0.19.1 headless startup slab-allocator `Use-after-free` diagnostic on Intel/Mesa (reproduces on baseline `4e1533e` with box buildings too; captures complete; [verification](docs/specs/assets.md#verification-of-this-first-pass)).
 - [ ] Spell and building icons, tooltips; Stats tab (still "Coming soon").
-- [ ] Hover for everything (units, buildings, trees, wood, camp fires...): the hovered thing gets a halo around it and its tooltip shows (units: the health bar is their tooltip). Spies are the exception: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
+- [ ] Hover tooltips for everything (the halo is done for the player's units, wood, trees and the player's buildings, ui-and-editor.md "Hover halo"; units: the health bar is their tooltip). Spies are the exception: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
 - [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).
 - [ ] Editor: smooth brush and the raise/lower levelling step of the ALACN editor (ui-and-editor.md).

@@ -127,7 +127,8 @@ Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the 
 - `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks (moves over a cell in one tick, teleport or reincarnation, are not glided).
 - Each unit is a `Grounded` sprite quad (1 px = 1/88 cell: standing ~0.39 cell, half a site stone; feet at the
   anchor) turned to face the camera, uploaded Scale2x-upscaled x4 and filtered linearly (no blocky pixels),
-  with a health bar over the head (green -> yellow -> red) shown only while the unit is selected and alive.
+  with a health bar over the head (green -> yellow -> red) shown while the unit is alive and selected, or under the
+  mouse for the player's own units (`hover::Hoverable::health`).
   Feet on the ground right under the unit (`Grounded` with no footprint). Sprite and bar are drawn pulled
   0.6 cell towards the camera along the eye-feet line and shrunk to match (`toward_eye`): same picture on
   screen, but slopes and bumps around the feet no longer cut the legs; real hills in front still hide her.

@@ -13,6 +13,7 @@ mod editor;
 mod flame;
 mod generated_buildings;
 mod grounded;
+mod hover;
 mod hud;
 mod menu;
 mod nature;
@@ -66,6 +67,7 @@ fn main() {
             blueprint::BlueprintPlugin),
             units::UnitsPlugin,
             wood::WoodPlugin,
+            hover::HoverPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,
             menu::MenuPlugin,

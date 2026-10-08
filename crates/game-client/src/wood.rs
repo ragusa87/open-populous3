@@ -23,11 +23,12 @@ const PULL_TO_EYE: f32 = 0.3;
 #[derive(Resource)]
 struct WoodSprite(FrameAsset);
 
+/// A piece's view: its index in `GameMap::wood`.
 #[derive(Component)]
-struct WoodView;
+pub struct WoodView(pub usize);
 
 #[derive(Component)]
-struct WoodBody;
+pub struct WoodBody;
 
 pub struct WoodPlugin;
 
@@ -82,10 +83,10 @@ fn respawn_views(
         commands.entity(e).despawn();
     }
     let cell = WORLD_UNITS_PER_CELL as f32;
-    for piece in &map.0.wood {
+    for (i, piece) in map.0.wood.iter().enumerate() {
         let at = Vec2::new(piece.x as f32, piece.z as f32) / cell;
         commands
-            .spawn((WoodView, Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden))
+            .spawn((WoodView(i), crate::hover::Hoverable::default(), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden))
             .with_child((WoodBody, Mesh3d(sprite.0.mesh.clone()), MeshMaterial3d(sprite.0.material.clone()), Transform::default()));
     }
 }
