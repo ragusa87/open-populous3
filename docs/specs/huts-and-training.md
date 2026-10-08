@@ -64,9 +64,13 @@ entry order), `breed` (green bar) and `grow` (red bar) progress. The hut's toolt
       wood of its current size already in it;
    3. a few braves work on it (as a construction, buildings.md) while the others inside keep resting: the hut stays
       usable all along (people inside, breeding);
-   4. once built, it is the bigger hut: more wood in it and more room for people.
+   4. once built, it is the bigger hut: more wood in it and more room for people; `grow` restarts at 0.
    If the population is saturated (population = cap), the red bar stays at 100 % and blinks (client) until there
    is room.
+
+   Damage while growing [ours, unsure]: the growing part takes the damage first, like extra health on top of the
+   hut; once it is gone, the hut falls back to its size before growing (the growth is lost) and then takes damage
+   like any building.
 
    Wood held by size [ours, to check]: grows with the size, about +2 per size: small 3, medium 5, large 7
    (`BuildingKind::wood_cost` is 3 for every hut size today).
@@ -136,7 +140,7 @@ time to train one warrior and its mana, how fast the red bar fills.
 
 ## Open questions
 - Huts: what the population band is a percentage of (the tribe's cap assumed, or 199); whether people outside
-  huts make mana (assumed not); the red bar's speed and occupant bonus; the wood held per hut size; how many braves fetch and build when a hut grows (only those inside?); whether growth restarts the red bar at 0; what damage does to a growing hut; whether idle braves house
+  huts make mana (assumed not); the red bar's speed and occupant bonus; the wood held per hut size; how many braves fetch and build when a hut grows (only those inside?); what damage really does to a growing hut; whether idle braves house
   themselves, from how far, after how long.
 - Whether spell recharge and training take from the same mana pool (TODO "Mana").
 - Training: how mana is taken (assumed along the training), the real `CONV_*` meaning and the cost by specialist
