@@ -110,8 +110,9 @@ Reading the columns:
   - Firewarriors' shots use the same scaling (`ALT_BAND_x_SUPER_INCR`).
   - How heights map to the 8 bands is unknown. A guess is the height divided into 8 equal bands up to the map's
     maximum.
-  - Teleport's 65 536 (128 cells) is half the 256-cell torus. Along an axis it reaches anywhere; the diagonal
-    corners are further (181 cells) if the distance is Euclidean.
+  - Teleport's 65 536 (128 cells) is the farthest any point can be along one axis of the 256-cell torus, so it
+    reads as "no limit". Every other range is 6-16 cells. Unverified whether the original checks it; our
+    sandbox teleport has no range limit.
   - Convert has the longest real range (16 cells), and blast, angel of death and volcano the shortest (6).
 
 Effect constants:
