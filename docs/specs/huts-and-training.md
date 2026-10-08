@@ -48,21 +48,28 @@ entry order), `breed` (green bar) and `grow` (red bar) progress. The hut's toolt
 3. **Auto-housing** [ours]: an idle brave of the tribe with no order for `HOUSE_DELAY` (10 s) walks into the
    nearest built hut with room within 8 cells. Other kinds only enter when ordered.
 4. **Population**: every living unit of the tribe except the shaman, inside or out. Cap = sum of the supply of
-   its built huts, at most 199. Units over the cap (level start, conversions) stay; only breeding stops.
+   its built huts at their current size (a hut being grown counts its old size), at most 199. Units over the cap (level start, conversions) stay; only breeding stops.
 5. **Breeding** (green bar): each built hut, every update, adds `occupants + 1` to `breed` (half steps: 0 inside =
    0.5, 1 = 1.0, 2 = 1.5..., up to 3.0 for 5). At 100 % (`breed >= 2 * SPROG_TIME[level] * band / 100`, with
    `band` from the tribe's population as a % of its cap) a brave is born at the front door, idle, and `breed`
-   restarts at 0. At the cap, `breed` stays full and the brave comes as soon as there is room. A newly built hut
+   restarts at 0. At the cap (population full), `breed` stops at 100 % and the brave comes as soon as there is room. A newly built hut
    starts with `breed` full. Later: a small star animation where the brave appears (client).
-6. **Growing** (red bar, the need to grow): `grow` rises up to 100 %. At 100 %, if the tribe's population has room
-   (below its cap), the hut grows, as in the game:
-   1. some braves of the hut fetch wood and put it inside;
+6. **Growing** (red bar, the need to grow): `grow` rises with time, even when the hut is empty, a little faster
+   with people inside: every update `GROW_STEP` x (100 + `GROW_BONUS` x occupants) / 100 [ours: no constant for it
+   in `constant.dat`, maybe one of the "extended" constants of the executable, constants.md]. At 100 %, if the
+   tribe's population has room (below its cap), the hut grows, as in the game:
+   1. some braves of the hut fetch 3 pieces of wood and put them inside: 1 is the cost of growing (consumed), 2 go
+      into the hut (given back when it is dismantled);
    2. the hut becomes a construction site of the next size (if there is one: large huts do not grow), with the
       wood of its current size already in it;
    3. a few braves work on it (as a construction, buildings.md) while the others inside keep resting: the hut stays
       usable all along (people inside, breeding);
    4. once built, it is the bigger hut: more wood in it and more room for people.
-   If the population is saturated, the red bar stays at 100 % and blinks (client) until there is room.
+   If the population is saturated (population = cap), the red bar stays at 100 % and blinks (client) until there
+   is room.
+
+   Wood held by size [ours, to check]: grows with the size, about +2 per size: small 3, medium 5, large 7
+   (`BuildingKind::wood_cost` is 3 for every hut size today).
 7. **Mana** (every `MANA_UPDATE` = 16 turns), per tribe: sum over its people of `MANA_F[kind]` x activity %
    (inside a hut: `HOUSED` x `HUT_LEVEL[level]`; working on a building or fetching wood: `WORKING`; inside a
    training hut: `TRAINING`; otherwise [ours]: 0), then x `HUMAN_` or `COMPUTER_MANA_ADJUST`, added to the
@@ -129,7 +136,7 @@ time to train one warrior and its mana, how fast the red bar fills.
 
 ## Open questions
 - Huts: what the population band is a percentage of (the tribe's cap assumed, or 199); whether people outside
-  huts make mana (assumed not); what fills the red bar, how much wood growing takes; whether idle braves house
+  huts make mana (assumed not); the red bar's speed and occupant bonus; the wood held per hut size; how many braves fetch and build when a hut grows (only those inside?); whether growth restarts the red bar at 0; what damage does to a growing hut; whether idle braves house
   themselves, from how far, after how long.
 - Whether spell recharge and training take from the same mana pool (TODO "Mana").
 - Training: how mana is taken (assumed along the training), the real `CONV_*` meaning and the cost by specialist

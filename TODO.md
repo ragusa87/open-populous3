@@ -119,7 +119,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Training huts, see [huts-and-training.md](docs/specs/huts-and-training.md): queue around the door (folded snake), one follower inside at a time, transformed into the hut's kind, mana along the training, cancel by ordering it out.
 - [ ] Training: check in the game how mana is taken, the training time (`CONV_*` = 4000?) and the cost by specialist count (`TRAIN_MANA_BAND`).
 - [ ] Houses, see [huts-and-training.md](docs/specs/huts-and-training.md): green (birth) and red (grow) bars in the tooltip, a star animation at birth; capacity 3/4/5, supply 3/5/7 (cap 199), breeding by occupants and population band, mana from the people inside.
-- [ ] Houses grow (small -> medium -> large: `villager_hut` sizes): red bar to 100 %, then if the population has room braves fetch wood and the hut becomes a construction site of the next size, still usable (huts-and-training.md rule 6). Settle what fills the red bar and the wood per size before implementing.
+- [ ] Houses grow (small -> medium -> large: `villager_hut` sizes): red bar to 100 %, then if the population has room braves fetch wood and the hut becomes a construction site of the next size, still usable (huts-and-training.md rule 6). Growing takes 3 pieces (1 consumed, 2 added to the hut). Settle the red bar speed, the wood per size (3/5/7?) and who works on it before implementing.
 - [ ] `game_core::balance`: `Turns` (original game turns) converted to ticks, `Balance::ours()` defaults, later `Balance::from_constants`; every rule reads it from `GameMap` (huts-and-training.md "Balance and game turns").
 
 ## Wood ([trees.md](docs/specs/trees.md))
