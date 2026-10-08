@@ -59,8 +59,8 @@ pub fn tribe_rgb(tribe: u8) -> [u8; 3] {
 
 pub fn frame_count(pose: Pose) -> usize {
     match pose {
-        Pose::Idle | Pose::Pray | Pose::Drown | Pose::Stranded => 4,
-        Pose::Walk | Pose::Fall => 8,
+        Pose::Idle | Pose::Pray | Pose::Drown | Pose::Stranded | Pose::Chop | Pose::CarryIdle => 4,
+        Pose::Walk | Pose::Fall | Pose::CarryWalk => 8,
         Pose::Cast => 12,
     }
 }
@@ -95,11 +95,11 @@ fn body(pose: Pose, view: View, f: usize) -> Body {
         sparks: false,
     };
     match pose {
-        Pose::Idle => {
+        Pose::Idle | Pose::Chop | Pose::CarryIdle => {
             let breath = (f % 2) as f32 * 0.5;
             Body { shoulder: 21.0 + breath, head: (0.0, 25.5 + breath), ..base }
         }
-        Pose::Walk => {
+        Pose::Walk | Pose::CarryWalk => {
             let s = phase.sin();
             let feet = if side {
                 [(-4.0 * s, 0.0), (4.0 * s, 0.0)]

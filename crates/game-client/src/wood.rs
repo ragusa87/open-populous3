@@ -64,12 +64,20 @@ fn load_sprite(levels: Res<LevelList>, mut commands: Commands, mut images: ResMu
     commands.insert_resource(WoodSprite(upload_frame(&frame, &mut images, &mut meshes, &mut mats)));
 }
 
-/// One view per piece of a newly loaded map.
-fn respawn_views(mut commands: Commands, map: Res<CurrentMap>, sprite: Option<Res<WoodSprite>>, existing: Query<Entity, With<WoodView>>) {
+/// One view per piece, redone when a map loads or the pieces change (dropped, picked up: ticks change
+/// them without marking the map changed).
+fn respawn_views(
+    mut commands: Commands,
+    map: Res<CurrentMap>,
+    sprite: Option<Res<WoodSprite>>,
+    existing: Query<Entity, With<WoodView>>,
+    mut drawn: Local<Vec<game_core::wood::WoodPiece>>,
+) {
     let Some(sprite) = sprite else { return };
-    if !map.is_changed() && !sprite.is_added() {
+    if !map.is_changed() && !sprite.is_added() && *drawn == map.0.wood {
         return;
     }
+    drawn.clone_from(&map.0.wood);
     for e in &existing {
         commands.entity(e).despawn();
     }

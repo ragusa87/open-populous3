@@ -32,6 +32,10 @@ pub const CAST_TICKS: u16 = 12;
 pub const LANDING_TICKS: u16 = 6;
 pub const DYING_TICKS: u16 = 8;
 pub const RESPAWN_TICKS: u16 = 30;
+/// Chopping one piece of wood off a tree (6 s, to check against the original).
+pub const CHOP_TICKS: u16 = 60;
+/// With nothing more to do, a brave holds his piece of wood this long before putting it down (3 s).
+pub const HOLD_TICKS: u16 = 30;
 /// Going round a camp fire: this fraction (numerator, denominator) of the walking speed.
 pub const AROUND_FIRE_PACE: (i32, i32) = (1, 2);
 
@@ -122,6 +126,10 @@ pub enum Action {
     /// Going round the camp fire at `fire` (its centre), last at its ring point `point`
     /// (`campfire::ring_point`), at `AROUND_FIRE_PACE` of her walking speed.
     AroundFire { fire: (u16, u16), point: u8 },
+    /// A brave cutting one piece of wood off the tree at `tree` (its position), `left` ticks to go.
+    Chopping { tree: (u16, u16), left: u16 },
+    /// Standing with a piece of wood and nothing more to do: puts it down when `left` runs out.
+    Holding { left: u16 },
 }
 
 impl Action {
@@ -137,6 +145,8 @@ impl Action {
             Action::Dying { .. } => "Dying",
             Action::Dead { .. } => "Dead",
             Action::AroundFire { .. } => "Around the fire",
+            Action::Chopping { .. } => "Cutting wood",
+            Action::Holding { .. } => "Holding wood",
         }
     }
 
@@ -165,6 +175,13 @@ pub enum Order {
     Pray,
     Cast,
     Stop,
+    /// Braves: cut one piece of wood off the tree at `tree` (its position), or the nearest tree with
+    /// wood to spare if that one has none (`GameMap::start_order`).
+    CutTree { tree: (u16, u16) },
+    /// Braves: get one piece of wood from the nearest wood, a piece on the floor or a tree.
+    FetchWood,
+    /// Braves: pick up the piece of wood nearest to `at` (a pile clicked on), within `PICK_RADIUS`.
+    PickUp { at: (u16, u16) },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,6 +189,12 @@ pub enum UnitEvent {
     Died,
     /// Back at her site: the caller levels its ground.
     Reincarnated,
+    /// Done holding a piece of wood: the caller puts it down where she stands.
+    PutDown,
+    /// Done chopping the tree at `tree`: the caller cuts it and gives the piece.
+    Chopped { tree: (u16, u16) },
+    /// Arrived on the piece of wood at `at`: the caller picks it up.
+    PickedUp { at: (u16, u16) },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -185,6 +208,8 @@ pub struct Unit {
     pub facing: u8,
     pub health: u16,
     pub action: Action,
+    /// Pieces of wood carried (braves, 0 or 1).
+    pub carrying: u8,
     /// Ticks counted towards the next health point gained (or lost while stranded).
     regen: u8,
     /// Waypoints left on the way to `Walking::to`, next one last.
@@ -195,6 +220,10 @@ pub struct Unit {
     teleport_to: Option<(u16, u16)>,
     /// The camp fire (centre) and ring point she is walking to, to go round it once there.
     to_fire: Option<((u16, u16), u8)>,
+    /// The tree (position) she is walking to, to cut it once there.
+    to_tree: Option<(u16, u16)>,
+    /// The piece of wood (position) she is walking to, to pick it up once there.
+    to_wood: Option<(u16, u16)>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
 }
@@ -215,11 +244,14 @@ impl Unit {
             facing: 0,
             health: kind.max_health(),
             action: Action::Idle,
+            carrying: 0,
             regen: 0,
             route: Vec::new(),
             planned_on: None,
             teleport_to: None,
             to_fire: None,
+            to_tree: None,
+            to_wood: None,
             queue: Vec::new(),
         }
     }
@@ -274,6 +306,51 @@ impl Unit {
         self.start(order);
     }
 
+    /// The tree (position) she is cutting or walking to cut, if any.
+    pub fn cutting(&self) -> Option<(u16, u16)> {
+        match self.action {
+            Action::Chopping { tree, .. } => Some(tree),
+            Action::Walking { .. } | Action::Stranded { .. } => self.to_tree,
+            _ => None,
+        }
+    }
+
+    /// The piece of wood (position) she is walking to pick up, if any.
+    pub fn fetching(&self) -> Option<(u16, u16)> {
+        match self.action {
+            Action::Walking { .. } | Action::Stranded { .. } => self.to_wood,
+            _ => None,
+        }
+    }
+
+    /// Walks to `stand`, then cuts the tree at `tree`.
+    pub fn go_cut(&mut self, tree: (u16, u16), stand: (u16, u16)) {
+        self.start(Order::MoveTo { x: stand.0, z: stand.1 });
+        if self.action.can_take_orders() {
+            self.to_tree = Some(tree);
+        }
+    }
+
+    /// Walks onto the piece of wood at `at`, then picks it up.
+    pub fn go_pick(&mut self, at: (u16, u16)) {
+        self.start(Order::MoveTo { x: at.0, z: at.1 });
+        if self.action.can_take_orders() {
+            self.to_wood = Some(at);
+        }
+    }
+
+    /// Idle, or only holding a piece of wood before putting it down: free for the next order.
+    pub fn is_free(&self) -> bool {
+        matches!(self.action, Action::Idle | Action::Holding { .. })
+    }
+
+    /// Forgets the chained orders (a direct order replaces them).
+    pub fn clear_queue(&mut self) {
+        if self.action.can_take_orders() {
+            self.queue.clear();
+        }
+    }
+
     /// Chained orders still to come, next first.
     pub fn queued(&self) -> &[Order] {
         &self.queue
@@ -297,6 +374,7 @@ impl Unit {
             return;
         }
         (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
+        (self.to_tree, self.to_wood) = (None, None);
         self.action = match order {
             Order::MoveTo { x, z } => Action::Walking { to: (x, z) },
             Order::Campfire { fire, point } => {
@@ -305,7 +383,11 @@ impl Unit {
             }
             Order::Pray => Action::Praying,
             Order::Cast => Action::Casting { left: CAST_TICKS },
-            Order::Stop => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } => Action::Idle,
+            Order::CutTree { tree } => {
+                self.to_tree = Some(tree);
+                Action::Walking { to: tree }
+            }
         };
     }
 
@@ -336,11 +418,29 @@ impl Unit {
                     if self.action == Action::Idle {
                         if let Some((fire, point)) = self.to_fire.take() {
                             self.action = Action::AroundFire { fire, point };
+                        } else if let Some(tree) = self.to_tree.take() {
+                            let (dx, dz) = (torus_delta(self.x, tree.0), torus_delta(self.z, tree.1));
+                            if (dx, dz) != (0, 0) {
+                                self.facing = octant(dx, dz);
+                            }
+                            self.action = Action::Chopping { tree, left: CHOP_TICKS };
+                        } else if let Some(at) = self.to_wood.take() {
+                            return Some(UnitEvent::PickedUp { at });
                         }
                     }
                 } else if self.hurt() {
                     return Some(UnitEvent::Died);
                 }
+            }
+            Action::Holding { left } if left > 1 => self.action = Action::Holding { left: left - 1 },
+            Action::Holding { .. } => {
+                self.action = Action::Idle;
+                return Some(UnitEvent::PutDown);
+            }
+            Action::Chopping { tree, left } if left > 1 => self.action = Action::Chopping { tree, left: left - 1 },
+            Action::Chopping { tree, .. } => {
+                self.action = Action::Idle;
+                return Some(UnitEvent::Chopped { tree });
             }
             Action::Casting { left } if left > 1 => self.action = Action::Casting { left: left - 1 },
             Action::Casting { .. } => {
@@ -402,6 +502,7 @@ impl Unit {
 
     fn die(&mut self) {
         (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
+        (self.to_tree, self.to_wood) = (None, None);
         self.queue.clear();
         self.action = Action::Dying { left: DYING_TICKS };
     }

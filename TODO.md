@@ -24,9 +24,10 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Stranded units: find the game's anim (frame 1 of anim 12, the flattening jump, stands in today).
 - [ ] Boarding vehicles: walk to `path::nearest_reachable` next to the boat/balloon, then board when it is within reach. Boats path with `Mobility::Sail`, balloons with `Mobility::Fly`.
 - [ ] Open-source units: models closer to the original look (feathers and staff for the shaman, tribal outfits); a prayer clip (SitDown's end stands in) and a swim/drown clip (RecieveHit sunk stands in). CC0 poses to render as each action lands: [unit-art.md, Planned poses](docs/specs/unit-art.md#planned-poses-cc0-stand-ins).
+- [ ] CC0 sheets for the wood poses (`chop`, `carry_walk`, `carry_idle`: axe and log props, unit-art.md "Planned poses"); the braves show idle / walk meanwhile.
 - [ ] Load open-source unit sheets (`assets/units/<kind>/<pose>.png`, see [unit-art.md](docs/specs/unit-art.md)): 64x64 cells, feet at (32, 58), 5 directions mirrored to 8, magenta key ramp swapped per tribe; fall back to the generated figure per missing sheet.
 - [ ] `just bake-units` is not bit-reproducible: two bakes differ by 1-2 edge pixels in a few frames (GPU rasterisation), so there is no `--check` like the building kit's; render on the CPU or compare with a tolerance.
-- [ ] Original unit animations: who the pointed-helmet attacker of 20-24 is, and anim 13; use the fighting (14 hit, 15 punch, 25 kick, 50 dodge and punch), throw-fire (7), spy fire-setting (17), tornado tilt (16), pedalling (51), running from bees (52), cutting wood (11) and flattening (12) anims once those actions exist; idle for too long: braves scratch (89), warriors do push-ups (90/91).
+- [ ] Original unit animations: who the pointed-helmet attacker of 20-24 is, and anim 13; use the fighting (14 hit, 15 punch, 25 kick, 50 dodge and punch), throw-fire (7), spy fire-setting (17), tornado tilt (16), pedalling (51), running from bees (52) and flattening (12) anims once those actions exist; idle for too long: braves scratch (89), warriors do push-ups (90/91).
 - [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
 - [ ] Spies: the player can disguise one in another tribe's colour; it then walks through that tribe unnoticed, except when hovered (spy indicator) or when it passes by a spy of the tribe it imitates. Its attack on a building: it sets a fire (anim 17), walks away, the building then takes damage; the spy stays unnoticed and can attack again later.
 - [ ] Dead units other than the shaman lie where they fell forever: remove them after a while (views are indexed by unit position: give them stable ids first).
@@ -41,7 +42,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
 - [ ] The shaman can cast only some spells from a vehicle (list to define: fire-type probably yes, Land Bridge no).
 - [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
-- [ ] Use the shaman's wand gesture (81-84), the braves' wood-carrying anims (9-11) once they carry wood, the conversion sit (18), the spy's juggling idle (92), the carbonized brave (97) for lightning; check the tribe layer flag `0x10` mapping.
+- [ ] Use the shaman's wand gesture (81-84), the conversion sit (18), the spy's juggling idle (92), the carbonized brave (97) for lightning; check the tribe layer flag `0x10` mapping.
 
 ## Praying (worship)
 - [ ] Praying only happens at a totem or a pyramid of knowledge; today `Order::Pray` works anywhere: restrict it.
@@ -126,7 +127,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## Wood ([trees.md](docs/specs/trees.md))
 - [ ] Original scenery models 7 plant 1, 8 plant 2, 9 stone head (98 in the levels): not drawn yet. Trees have no size in the thing record: full size is right.
-- [ ] A brave cuts one piece of wood at a time (`Tree::cut`): the tree shrinks by one, the brave carries the piece to a construction site or house.
+- [ ] Wood for tasks: construction, repair and hut growth chain `FetchWood` then their own `Assign` to a brave; skip the assign when the task is done (`GameMap::still_valid`). Cutting, carrying and fetching are done (units.md "Wood").
+- [ ] Check in the game how long a brave chops one piece (`CHOP_TICKS`, 6 s guessed) and whether a brave ordered on a tree with no wood to spare goes to another one.
 - [ ] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible) trees.
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.
 

@@ -18,6 +18,8 @@
 | Praying | `Order::Pray` | until another order; heals |
 | Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle (Teleport: then at the target, Landing) |
 | Landing { left } | arriving from a teleport | 6 ticks, then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out); a puff of dust at touchdown (`units/dust.rs`) |
+| Chopping { tree, left } | `Order::CutTree`, `Order::FetchWood` (braves only) | walks to a free spot next to the tree, then `CHOP_TICKS` (60, 6 s, a guess) of chopping, then the tree loses one size and the brave carries the piece |
+| Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (30, 3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
 | Drowning | ground under her becomes open sea | -4 HP per tick, no orders; back to Idle if land returns |
 | Dying { left } | health reaches 0 | 8 ticks |
 | Dead { left } | after dying | 30 ticks, then reincarnates at her site at full health; the site levels its ground again |
@@ -66,6 +68,22 @@ direct order (`Command::OrderUnit`) replaces the chain; dying clears it. Open-en
 target: going round a camp fire is endless (a tended fire never goes out) until the player puts the fire out,
 then the chain goes on; praying will be at a totem and end when it is gone (today it never ends on its own).
 Internal moves (stepping off a taken spot on arrival, a fire put out) use `Unit::start`, which keeps the chain.
+
+## Wood (done: braves only)
+- A brave carries at most one piece of wood (`Unit::carrying`, 0 or 1).
+- `Order::CutTree { tree }` (left click on a tree with braves selected, `GameMap::cut_orders`; other kinds
+  sent along walk next to it): each tree takes as many braves as it has wood (`GameMap::tree_claims`: braves
+  chopping it or walking to it); one with no wood to spare sends the brave to the nearest tree that has within
+  `REFIND_CELLS` (8). The brave stands on the free spot by the tree nearest to him, chops, takes the piece.
+- `Order::PickUp { at }` (left click on a wood pile, `GameMap::wood_at` / `pick_orders`): each brave with empty
+  hands walks onto the nearest piece within `PICK_RADIUS` (3/4 cell) of the click that nobody else is fetching
+  and takes it; the others walk next to the pile.
+- `Order::FetchWood`: the nearest wood, a piece on the floor nobody is fetching (walk onto it, pick it up) or a
+  tree with wood to spare; the floor wins ties. Tasks will chain it before reassigning the brave to themselves
+  (huts-and-training.md, buildings.md); he then works with the piece he carries.
+- Wood is put down only when the brave is idle, where he stands, after holding it 3 s (`Action::Holding`, the
+  standing-with-wood pose): with nothing chained, a cut piece lands by its tree; chained after a move, at its end. Any order keeps the piece (no drop on a new order). A dead brave drops
+  it where he fell; carried into the sea it is lost. Already carrying, a brave ignores `CutTree` / `FetchWood`.
 
 ## Worshipping the shaman (decoration, done: `units/worship.rs`)
 Idle followers (braves, warriors, firewarriors, spies, preachers) whose shaman (same tribe) is within 3 cells on each axis (torus)
@@ -117,7 +135,7 @@ Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the 
   preview always shows the shaman's health.
 - Dust (`units/dust.rs`, cosmetic, real-time): when a unit stops landing, 10 soft generated motes spread 0.4 cell
   around its feet, rise 0.1, grow and fade over 0.8 s, facing the camera and pulled towards it like the sprites.
-- Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (original anim 40 for followers: the body lying, its spirit rising; tumbling otherwise), Fall (dying, then lies still while dead), Stranded (arms up: frame 1 of original anim 12 for every follower, a stand-in, the real anim is unknown; wildmen and the shaman show their idle; the CC0 sheets loop their own arms-up `stranded` sheet).
+- Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (original anim 40 for followers: the body lying, its spirit rising; tumbling otherwise), Fall (dying, then lies still while dead), Chop, CarryWalk, CarryIdle (braves cutting and carrying wood: original anims 11, 9, 10; other kinds, and the CC0 sheets and generated figures, which have no wood poses yet, show idle / walk instead, `Pose::fallback`), Stranded (arms up: frame 1 of original anim 12 for every follower, a stand-in, the real anim is unknown; wildmen and the shaman show their idle; the CC0 sheets loop their own arms-up `stranded` sheet).
   Timed actions (cast, dying) play once in step with the simulation, others loop.
 - View direction: `facing * 45deg - camera yaw`, rounded to the 8 drawn directions (0 front, 2 screen right, 4 back).
 - Art: with the original files, the shaman animations of `VSTART/VFRA/VELE` + `HSPR0-0.DAT` (see animations.md),

@@ -51,9 +51,9 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 6 | 6 | standing, breathing (idle, used) |
 | 7 | 5 | firewarrior throwing fire (attack), gear drawn in (no layers) |
 | 8 | 6 | kneeling, raising the arms up and down (praying; worshipping the shaman nearby; used) |
-| 9 | 4 | walking, carrying wood (brave only) |
-| 10 | 1 | standing still, holding wood (brave only) |
-| 11 | 4 | cutting wood (brave only) |
+| 9 | 4 | walking, carrying wood (brave only; used) |
+| 10 | 1 | standing still, holding wood (brave only; used) |
+| 11 | 4 | cutting wood with an axe (brave only; used) |
 | 12 | 4 | flattening the ground: crouch, arms up, jump (brave only; maybe also wrecking a construction site in an attack); frame 1 stands in for stranded units today |
 | 13 | 7 | punching (unchecked) |
 | 14 | 7 | receiving a punch |

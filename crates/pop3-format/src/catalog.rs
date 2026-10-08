@@ -167,6 +167,12 @@ pub enum PersonAnim {
     /// Crouch, both arms straight up (frame `ARMS_UP_FRAME`), leap, land (4 frames): its arms-up
     /// frame is held for stranded units.
     ArmsUp,
+    /// Brave cutting wood with an axe (4 frames).
+    Chop,
+    /// Brave walking with a piece of wood (4 frames).
+    CarryWalk,
+    /// Brave standing with a piece of wood (1 frame).
+    CarryStand,
 }
 
 /// The frame of `PersonAnim::ArmsUp` standing with both arms up.
@@ -181,6 +187,9 @@ impl PersonAnim {
             PersonAnim::Fall => 38,
             PersonAnim::Drown => 40,
             PersonAnim::ArmsUp => 12,
+            PersonAnim::Chop => 11,
+            PersonAnim::CarryWalk => 9,
+            PersonAnim::CarryStand => 10,
         }
     }
 }

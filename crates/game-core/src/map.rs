@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use crate::tree::{scatter, Tree};
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
-use crate::unit::{Action, Order, Unit, UnitEvent, UnitKind};
+use crate::unit::{torus_delta, Action, Order, Unit, UnitEvent, UnitKind};
 use crate::wood::WoodPiece;
 use pop3_format::{Level, LevelHeader, MAP_SIZE};
 use std::path::Path;
@@ -307,17 +307,18 @@ impl GameMap {
                 None
             }
             Command::OrderUnit { player, unit, order } => {
-                if let Some(u) = self.units.iter_mut().find(|u| u.id == unit && u.owner == player) {
-                    u.order(order);
+                if let Some(i) = self.units.iter().position(|u| u.id == unit && u.owner == player) {
+                    self.units[i].clear_queue();
+                    self.start_order(i, order);
                 }
                 None
             }
             Command::QueueOrder { player, unit, order } => {
-                if let Some(u) = self.units.iter_mut().find(|u| u.id == unit && u.owner == player) {
-                    if u.action == Action::Idle && u.queued().is_empty() {
-                        u.start(order);
+                if let Some(i) = self.units.iter().position(|u| u.id == unit && u.owner == player) {
+                    if self.units[i].is_free() && self.units[i].queued().is_empty() {
+                        self.start_order(i, order);
                     } else {
-                        u.enqueue(order);
+                        self.units[i].enqueue(order);
                     }
                 }
                 None
@@ -415,11 +416,17 @@ impl GameMap {
         self.trees.iter_mut().for_each(Tree::tick);
         self.tend_campfires();
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing { .. })).collect();
-        for unit in &mut self.units {
+        let mut events = Vec::new();
+        for (i, unit) in self.units.iter_mut().enumerate() {
             let site = self.sites.iter().find(|s| s.owner == unit.owner);
-            if unit.tick(&self.terrain, site) == Some(UnitEvent::Reincarnated) {
-                dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain)));
+            match unit.tick(&self.terrain, site) {
+                Some(UnitEvent::Reincarnated) => dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain))),
+                Some(event) => events.push((i, event)),
+                None => {}
             }
+        }
+        for (i, event) in events {
+            self.wood_event(i, event);
         }
         for i in 0..self.units.len() {
             if arriving[i] && self.units[i].action == Action::Idle {
@@ -434,6 +441,7 @@ impl GameMap {
             }
         }
         self.start_chained();
+        self.drop_wood();
         dirty
     }
 }
@@ -442,13 +450,174 @@ impl GameMap {
     /// Every living idle unit starts its next chained order that is still valid.
     fn start_chained(&mut self) {
         for i in 0..self.units.len() {
-            while self.units[i].action == Action::Idle {
+            while self.units[i].is_free() {
                 let Some(order) = self.units[i].pop_queued() else { break };
                 if self.still_valid(&order) {
-                    self.units[i].start(order);
+                    self.start_order(i, order);
                 }
             }
         }
+    }
+
+    /// Starts `order` for unit `i`, keeping its chained orders. Wood orders are for braves only (others
+    /// ignore them) and pick their tree or piece here, where the map is known.
+    fn start_order(&mut self, i: usize, order: Order) {
+        match order {
+            Order::CutTree { tree } => self.go_cut(i, tree),
+            Order::FetchWood => self.fetch_wood(i),
+            Order::PickUp { at } => self.pick_up(i, at),
+            order => self.units[i].start(order),
+        }
+    }
+
+    /// Braves that may take wood: living, not carrying any yet.
+    fn can_take_wood(u: &Unit) -> bool {
+        u.kind == UnitKind::Brave && u.is_alive() && u.carrying == 0
+    }
+
+    /// Unit `i` cuts the tree at `tree` if it has wood to spare, else the nearest tree that has within
+    /// `REFIND_CELLS` of it; stands on the free spot next to the tree nearest to her.
+    fn go_cut(&mut self, i: usize, tree: (u16, u16)) {
+        let u = &self.units[i];
+        if !Self::can_take_wood(u) {
+            return;
+        }
+        let id = u.id;
+        let spare = |t: &Tree| t.size as usize > self.tree_claims((t.x, t.z), id);
+        let chosen = match self.trees.iter().find(|t| (t.x, t.z) == tree).filter(|t| spare(t)) {
+            Some(t) => t,
+            None => match self.trees.iter().filter(|t| spare(t) && torus_cells(tree, (t.x, t.z)) <= REFIND_CELLS).min_by_key(|t| torus_dist2(tree, (t.x, t.z))) {
+                Some(t) => t,
+                None => return,
+            },
+        };
+        let tree = (chosen.x, chosen.z);
+        let taken = self.taken_spots(&[id]);
+        let me = (u.x, u.z);
+        let spots = slots::free_spots_near(&self.terrain, slots::spot_of(tree), &taken, 8);
+        if let Some(stand) = spots.iter().map(|&s| slots::spot_centre(s)).min_by_key(|&p| torus_dist2(me, p)) {
+            self.units[i].go_cut(tree, stand);
+        }
+    }
+
+    /// Unit `i` goes for the nearest wood: a piece on the floor nobody is fetching, or a tree with wood
+    /// to spare (`go_cut`); the floor wins ties.
+    fn fetch_wood(&mut self, i: usize) {
+        let u = &self.units[i];
+        if !Self::can_take_wood(u) {
+            return;
+        }
+        let (me, id) = ((u.x, u.z), u.id);
+        let piece = self
+            .wood
+            .iter()
+            .map(|w| (w.x, w.z))
+            .filter(|&p| self.units.iter().all(|o| o.id == id || o.fetching() != Some(p)))
+            .min_by_key(|&p| torus_dist2(me, p));
+        let tree = self.trees.iter().filter(|t| t.size as usize > self.tree_claims((t.x, t.z), id)).map(|t| (t.x, t.z)).min_by_key(|&p| torus_dist2(me, p));
+        match (piece, tree) {
+            (Some(p), Some(t)) if torus_dist2(me, t) < torus_dist2(me, p) => self.go_cut(i, t),
+            (Some(p), _) => self.units[i].go_pick(p),
+            (None, Some(t)) => self.go_cut(i, t),
+            (None, None) => {}
+        }
+    }
+
+    /// Unit `i` picks up the piece of wood nearest to `at` within `PICK_RADIUS` that nobody else is
+    /// fetching; none: it does nothing.
+    fn pick_up(&mut self, i: usize, at: (u16, u16)) {
+        let u = &self.units[i];
+        if !Self::can_take_wood(u) {
+            return;
+        }
+        let id = u.id;
+        let piece = self
+            .wood
+            .iter()
+            .map(|w| (w.x, w.z))
+            .filter(|&p| torus_dist2(at, p) <= PICK_RADIUS * PICK_RADIUS)
+            .filter(|&p| self.units.iter().all(|o| o.id == id || o.fetching() != Some(p)))
+            .min_by_key(|&p| torus_dist2(at, p));
+        if let Some(p) = piece {
+            self.units[i].go_pick(p);
+        }
+    }
+
+    /// The piece of wood nearest to `at` within `PICK_RADIUS`, if any (a click on a pile).
+    pub fn wood_at(&self, at: (u16, u16)) -> Option<(u16, u16)> {
+        self.wood.iter().map(|w| (w.x, w.z)).filter(|&p| torus_dist2(at, p) <= PICK_RADIUS * PICK_RADIUS).min_by_key(|&p| torus_dist2(at, p))
+    }
+
+    /// Orders sending the player's `units` to the wood pile at `at`: braves with empty hands pick up
+    /// a piece each, the others walk next to it.
+    pub fn pick_orders(&self, player: u8, units: &[u32], at: (u16, u16)) -> Vec<Command> {
+        let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
+        let takers: Vec<u32> = self.units.iter().filter(mine).filter(|u| Self::can_take_wood(u)).map(|u| u.id).collect();
+        let others: Vec<u32> = units.iter().copied().filter(|id| !takers.contains(id)).collect();
+        let pick = takers.iter().map(|&unit| Command::OrderUnit { player, unit, order: Order::PickUp { at } });
+        pick.chain(if others.is_empty() { Vec::new() } else { self.dispatch(player, &others, at) }).collect()
+    }
+
+    /// Living units other than `except` cutting the tree at `tree` or walking to cut it.
+    pub fn tree_claims(&self, tree: (u16, u16), except: u32) -> usize {
+        self.units.iter().filter(|u| u.id != except && u.is_alive() && u.cutting() == Some(tree)).count()
+    }
+
+    /// A chopped tree gives its piece (cut meanwhile to nothing: on to another tree); a piece reached
+    /// on the floor is picked up (taken meanwhile: fetch again).
+    fn wood_event(&mut self, i: usize, event: UnitEvent) {
+        match event {
+            UnitEvent::Chopped { tree } => {
+                if self.trees.iter_mut().find(|t| (t.x, t.z) == tree).is_some_and(Tree::cut) {
+                    self.units[i].carrying = 1;
+                } else {
+                    self.go_cut(i, tree);
+                }
+            }
+            UnitEvent::PutDown => {
+                let u = &mut self.units[i];
+                if u.carrying > 0 {
+                    u.carrying = 0;
+                    self.wood.push(WoodPiece::new(u.x, u.z));
+                }
+            }
+            UnitEvent::PickedUp { at } => match self.wood.iter().position(|w| (w.x, w.z) == at) {
+                Some(w) => {
+                    self.wood.remove(w);
+                    self.units[i].carrying = 1;
+                }
+                None => self.fetch_wood(i),
+            },
+            _ => {}
+        }
+    }
+
+    /// An idle unit with wood holds it for `HOLD_TICKS`, then puts it down where it stands
+    /// (`UnitEvent::PutDown`); a dead one drops it where it fell, and it is lost in the sea.
+    fn drop_wood(&mut self) {
+        for u in self.units.iter_mut().filter(|u| u.carrying > 0) {
+            let lost = crate::unit::is_sea(&self.terrain, u.cell());
+            if lost || !u.is_alive() {
+                if !lost {
+                    self.wood.push(WoodPiece::new(u.x, u.z));
+                }
+                u.carrying = 0;
+            } else if u.action == Action::Idle {
+                u.action = Action::Holding { left: crate::unit::HOLD_TICKS };
+            }
+        }
+    }
+
+    /// Orders sending the player's `units` to the tree `tree` (index in `trees`): braves cut it (or
+    /// a neighbour), the others walk next to it.
+    pub fn cut_orders(&self, player: u8, units: &[u32], tree: usize) -> Vec<Command> {
+        let Some(t) = self.trees.get(tree) else { return Vec::new() };
+        let at = (t.x, t.z);
+        let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
+        let braves: Vec<u32> = self.units.iter().filter(mine).filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
+        let others: Vec<u32> = units.iter().copied().filter(|id| !braves.contains(id)).collect();
+        let cut = braves.iter().map(|&unit| Command::OrderUnit { player, unit, order: Order::CutTree { tree: at } });
+        cut.chain(if others.is_empty() { Vec::new() } else { self.dispatch(player, &others, at) }).collect()
     }
 
     /// Whether a chained order still makes sense when its turn comes (every order today; tasks will
@@ -466,6 +635,22 @@ impl GameMap {
         }
         self.campfires.retain(|f| !f.is_out());
     }
+}
+
+/// How far (cells) from a tree with no wood to spare a brave looks for another one.
+pub const REFIND_CELLS: i32 = 8;
+/// How far (world units, 3/4 of a cell) from a click a piece of wood is picked up.
+pub const PICK_RADIUS: i64 = 384;
+
+/// Squared distance between two world points the short way around the torus.
+fn torus_dist2(a: (u16, u16), b: (u16, u16)) -> i64 {
+    let (dx, dz) = (torus_delta(a.0, b.0) as i64, torus_delta(a.1, b.1) as i64);
+    dx * dx + dz * dz
+}
+
+/// Cells between two world points along the farther axis, the short way around the torus.
+fn torus_cells(a: (u16, u16), b: (u16, u16)) -> i32 {
+    torus_delta(a.0, b.0).abs().max(torus_delta(a.1, b.1).abs()) / 512
 }
 
 /// Tiny deterministic PRNG, same sequence on every platform.
@@ -879,6 +1064,217 @@ mod tests {
             }
             run(&mut m, 300);
             m.units
+        };
+        assert_eq!(play(), play());
+    }
+
+    /// Sandbox walk with no trees but `trees`, and braves of tribe 0 at `braves` (cells); their ids.
+    fn woodland(trees: &[((i32, i32), u8)], braves: &[(i32, i32)]) -> (GameMap, Vec<u32>) {
+        let mut m = GameMap::sandbox_walk();
+        let c = MAP_SIZE as i32 / 2;
+        m.trees = trees.iter().map(|&((x, z), size)| Tree::new((c + x, c + z), 0, size)).collect();
+        let ids: Vec<u32> = (0..braves.len() as u32).map(|i| 100 + i).collect();
+        for (&id, &(x, z)) in ids.iter().zip(braves) {
+            m.units.push(Unit::new(id, 0, UnitKind::Brave, slots::cell_centre((c + x, c + z))));
+        }
+        (m, ids)
+    }
+
+    fn unit(m: &GameMap, id: u32) -> &Unit {
+        m.units.iter().find(|u| u.id == id).unwrap()
+    }
+
+    fn near(a: (u16, u16), b: (u16, u16), cells: i32) -> bool {
+        torus_cells(a, b) <= cells
+    }
+
+    fn tree_at(m: &GameMap, (x, z): (i32, i32)) -> (u16, u16) {
+        let c = MAP_SIZE as i32 / 2;
+        let t = m.trees.iter().find(|t| t.cell() == (c + x, c + z)).unwrap();
+        (t.x, t.z)
+    }
+
+    #[test]
+    fn a_brave_cuts_one_piece_and_drops_it_by_the_tree() {
+        let (mut m, ids) = woodland(&[((4, 0), 4)], &[(0, 0)]);
+        let tree = tree_at(&m, (4, 0));
+        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::CutTree { tree } });
+        let (mut chopped, mut held) = (0, 0);
+        for _ in 0..200 {
+            m.tick();
+            match unit(&m, ids[0]).action {
+                Action::Chopping { .. } => chopped += 1,
+                Action::Holding { .. } => {
+                    held += 1;
+                    assert_eq!((unit(&m, ids[0]).carrying, m.wood.len()), (1, 0), "holds it before putting it down");
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(chopped, crate::unit::CHOP_TICKS, "chopped for CHOP_TICKS");
+        assert_eq!(held, crate::unit::HOLD_TICKS, "then held it for HOLD_TICKS");
+        assert_eq!(m.trees[0].size, 3);
+        let b = unit(&m, ids[0]);
+        assert_eq!((b.action, b.carrying), (Action::Idle, 0));
+        assert_eq!(m.wood.len(), 1);
+        assert!(near((m.wood[0].x, m.wood[0].z), tree, 1) && near((b.x, b.z), tree, 1), "dropped right by the tree");
+    }
+
+    #[test]
+    fn only_braves_cut() {
+        let (mut m, _) = woodland(&[((4, 0), 4)], &[]);
+        let c = MAP_SIZE as i32 / 2;
+        m.units.push(Unit::new(200, 0, UnitKind::Warrior, slots::cell_centre((c, c))));
+        let tree = tree_at(&m, (4, 0));
+        m.apply(&Command::OrderUnit { player: 0, unit: 200, order: Order::CutTree { tree } });
+        run(&mut m, 200);
+        assert_eq!((m.trees[0].size, m.wood.len(), unit(&m, 200).action), (4, 0, Action::Idle));
+    }
+
+    #[test]
+    fn a_tree_takes_as_many_braves_as_it_has_wood_the_others_find_another() {
+        let (mut m, ids) = woodland(&[((4, 0), 2), ((4, 5), 4)], &[(0, 0), (0, 1), (0, -1)]);
+        let (small, big) = (tree_at(&m, (4, 0)), tree_at(&m, (4, 5)));
+        for cmd in m.cut_orders(0, &ids, 0) {
+            m.apply(&cmd);
+        }
+        let targets: Vec<_> = ids.iter().map(|&id| unit(&m, id).cutting()).collect();
+        assert_eq!(targets.iter().filter(|&&t| t == Some(small)).count(), 2);
+        assert_eq!(targets.iter().filter(|&&t| t == Some(big)).count(), 1);
+        run(&mut m, 300);
+        assert_eq!((m.trees[0].size, m.trees[1].size, m.wood.len()), (0, 3, 3));
+    }
+
+    #[test]
+    fn other_kinds_sent_to_a_tree_just_walk_next_to_it() {
+        let (m, ids) = woodland(&[((4, 0), 4)], &[(0, 0)]);
+        let shaman = m.units[0].id;
+        let cmds = m.cut_orders(0, &[ids[0], shaman], 0);
+        assert!(matches!(cmds[..], [Command::OrderUnit { order: Order::CutTree { .. }, .. }, Command::OrderUnit { order: Order::MoveTo { .. }, .. }]), "{cmds:?}");
+    }
+
+    #[test]
+    fn a_chained_order_carries_the_piece_and_drops_it_once_idle() {
+        let (mut m, ids) = woodland(&[((4, 0), 4)], &[(0, 0)]);
+        let c = MAP_SIZE as i32 / 2;
+        let tree = tree_at(&m, (4, 0));
+        let (p, q) = (slots::cell_centre((c - 3, c)), slots::cell_centre((c, c + 4)));
+        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::CutTree { tree } });
+        m.apply(&Command::QueueOrder { player: 0, unit: ids[0], order: Order::MoveTo { x: p.0, z: p.1 } });
+        let mut carried = false;
+        for _ in 0..300 {
+            m.tick();
+            carried |= unit(&m, ids[0]).carrying == 1 && matches!(unit(&m, ids[0]).action, Action::Walking { .. });
+        }
+        assert!(carried, "walked with it");
+        assert_eq!(m.wood.len(), 1);
+        assert!(near((m.wood[0].x, m.wood[0].z), p, 1), "dropped at P");
+        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::CutTree { tree } });
+        m.apply(&Command::QueueOrder { player: 0, unit: ids[0], order: Order::MoveTo { x: p.0, z: p.1 } });
+        while unit(&m, ids[0]).carrying == 0 {
+            m.tick();
+        }
+        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::MoveTo { x: q.0, z: q.1 } });
+        assert_eq!(unit(&m, ids[0]).carrying, 1, "a direct order keeps the piece");
+        run(&mut m, 300);
+        assert_eq!(m.wood.len(), 2);
+        assert!(near((m.wood[1].x, m.wood[1].z), q, 1), "dropped where the new order ended");
+    }
+
+    #[test]
+    fn a_brave_carrying_wood_cannot_cut_or_fetch_more() {
+        let (mut m, ids) = woodland(&[((4, 0), 4)], &[(0, 0)]);
+        let c = MAP_SIZE as i32 / 2;
+        let tree = tree_at(&m, (4, 0));
+        let i = m.units.iter().position(|u| u.id == ids[0]).unwrap();
+        let to = slots::cell_centre((c - 4, c));
+        m.units[i].carrying = 1;
+        m.units[i].order(Order::MoveTo { x: to.0, z: to.1 });
+        for order in [Order::CutTree { tree }, Order::FetchWood] {
+            m.apply(&Command::QueueOrder { player: 0, unit: ids[0], order });
+        }
+        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::CutTree { tree } });
+        assert_eq!((unit(&m, ids[0]).cutting(), unit(&m, ids[0]).action), (None, Action::Walking { to }), "ignored, still on its way");
+        run(&mut m, 200);
+        assert_eq!((m.trees[0].size, m.wood.len(), unit(&m, ids[0]).carrying), (4, 1, 0), "no cut; put down once idle");
+        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::CutTree { tree } });
+        run(&mut m, 200);
+        assert_eq!(m.trees[0].size, 3, "empty-handed again: cuts");
+    }
+
+    #[test]
+    fn fetching_takes_the_nearest_wood_and_never_the_same_piece_twice() {
+        let (mut m, ids) = woodland(&[((6, 0), 4)], &[(0, 0), (0, 1)]);
+        let c = MAP_SIZE as i32 / 2;
+        let piece = slots::cell_centre((c + 2, c));
+        m.wood.push(WoodPiece::new(piece.0, piece.1));
+        let p = slots::cell_centre((c - 4, c));
+        for &unit in &ids {
+            m.apply(&Command::OrderUnit { player: 0, unit, order: Order::FetchWood });
+            m.apply(&Command::QueueOrder { player: 0, unit, order: Order::MoveTo { x: p.0, z: p.1 } });
+        }
+        assert_eq!(unit(&m, ids[0]).fetching(), Some(piece), "the floor piece is nearer");
+        assert_eq!(unit(&m, ids[1]).cutting(), Some(tree_at(&m, (6, 0))), "taken: on to the tree");
+        run(&mut m, 400);
+        assert_eq!(m.trees[0].size, 3);
+        assert_eq!(m.wood.len(), 2);
+        assert!(m.wood.iter().all(|w| near((w.x, w.z), p, 1)), "both brought to P");
+        assert!(ids.iter().all(|&id| unit(&m, id).carrying == 0));
+    }
+
+    #[test]
+    fn braves_with_empty_hands_pick_up_a_piece_of_the_clicked_pile_each() {
+        let (mut m, ids) = woodland(&[], &[(0, 0), (0, 1), (1, 0)]);
+        let c = MAP_SIZE as i32 / 2;
+        let pile = slots::cell_centre((c + 4, c));
+        for dx in [0u16, 100] {
+            m.wood.push(WoodPiece::new(pile.0 + dx, pile.1));
+        }
+        let i = m.units.iter().position(|u| u.id == ids[2]).unwrap();
+        m.units[i].carrying = 1;
+        assert_eq!(m.wood_at((pile.0 + 50, pile.1 + 50)), Some(pile));
+        assert_eq!(m.wood_at(slots::cell_centre((c + 8, c))), None, "too far");
+        let cmds = m.pick_orders(0, &ids, (pile.0 + 50, pile.1));
+        assert!(matches!(cmds[..], [Command::OrderUnit { order: Order::PickUp { .. }, .. }, Command::OrderUnit { order: Order::PickUp { .. }, .. }, Command::OrderUnit { order: Order::MoveTo { .. }, .. }]), "{cmds:?}");
+        for c in &cmds {
+            m.apply(c);
+        }
+        assert_ne!(unit(&m, ids[0]).fetching(), unit(&m, ids[1]).fetching(), "a piece each");
+        let mut held = 0;
+        for _ in 0..60 {
+            m.tick();
+            held = held.max(m.units.iter().filter(|u| ids[..2].contains(&u.id) && u.carrying == 1).count());
+        }
+        assert_eq!(held, 2, "both picked one up");
+        assert!(m.units.iter().all(|u| !matches!(u.action, Action::Holding { .. }) || u.carrying == 1));
+    }
+
+    #[test]
+    fn wood_carried_into_the_sea_is_lost() {
+        let (mut m, ids) = woodland(&[], &[(0, 0)]);
+        let c = MAP_SIZE as i32 / 2;
+        let i = m.units.iter().position(|u| u.id == ids[0]).unwrap();
+        m.units[i].carrying = 1;
+        let to = slots::cell_centre((c + 3, c));
+        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::MoveTo { x: to.0, z: to.1 } });
+        for (x, z) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            m.terrain.set(c + x, c + z, 0);
+        }
+        run(&mut m, 2);
+        assert_eq!((unit(&m, ids[0]).carrying, m.wood.len()), (0, 0));
+    }
+
+    #[test]
+    fn cutting_replays_the_same() {
+        let play = || {
+            let (mut m, ids) = woodland(&[((4, 0), 2), ((4, 3), 3), ((-4, 2), 1)], &[(0, 0), (0, 1), (1, 0), (1, 1)]);
+            m.wood.push(WoodPiece::new(slots::cell_centre((70, 64)).0, slots::cell_centre((70, 64)).1));
+            for cmd in m.cut_orders(0, &ids[..3], 0) {
+                m.apply(&cmd);
+            }
+            m.apply(&Command::OrderUnit { player: 0, unit: ids[3], order: Order::FetchWood });
+            run(&mut m, 400);
+            (m.units, m.trees, m.wood)
         };
         assert_eq!(play(), play());
     }

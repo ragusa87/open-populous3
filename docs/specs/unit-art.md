@@ -146,8 +146,8 @@ SitDown, StandUp, SwordSlash, Victory, Walk, Walk_Carry), no props, and hand bon
 
 | Original anim | Action | Kinds | CC0 clip | Baker needs |
 |---|---|---|---|---|
-| 9 / 10 | walking / standing with wood | brave | Walk_Carry (loop) / its first moment | a log prop between `Fist.L` and `Fist.R` |
-| 11 | cutting wood | brave | SwordSlash (loop) | an axe prop in `Fist.R` |
+| 9 / 10 | walking / standing with wood (in the game: `carry_walk`, `carry_idle`, walk / idle stand in) | brave | Walk_Carry (loop) / its first moment | a log prop between `Fist.L` and `Fist.R` |
+| 11 | cutting wood (in the game: `chop`, idle stands in) | brave | SwordSlash (loop) | an axe prop in `Fist.R` |
 | 12 | flattening the ground | brave | Jump (loop over the hop) | none |
 | 14 | receiving a punch | all | RecieveHit (once) | none |
 | 15, 25, 50 | punch, kick, dodge and punch | fighters | Punch (loop); Roll for the dodge | none (no kick clip: Punch stands in) |

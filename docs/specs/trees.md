@@ -13,6 +13,8 @@
   only on ground units can walk (no sea, no cliff), never within 7 cells of a reincarnation site, one per cell,
   starting at size 1-4, of any type. Generated maps: 60 groves (seed = map seed); sandboxes: 150 attempts (most
   land in the sea around their small islands).
+- Braves cut them one piece at a time (`Order::CutTree`, `Order::FetchWood`, units.md "Wood"): a tree takes as
+  many braves as it has wood.
 - Trees do not block walking yet.
 
 ## Wood on the ground (`game_core::wood`, client `wood.rs`)
@@ -20,7 +22,8 @@
 building, to be picked up by constructions (see buildings.md). None in original levels (no level has the editor's
 "wood pile" scenery, model 11, nor fire 10, pillar 12 or rock 13); Sandbox > Buildings has a few between the site
 and the buildings.
-Drawn like a unit: a camera-facing sprite standing on the ground (`Grounded`), pulled 0.3 cell towards the camera:
+Drawn like a unit (views redone whenever the pieces change: dropped by a brave, picked up): a camera-facing
+sprite standing on the ground (`Grounded`), pulled 0.3 cell towards the camera:
 the original pile of logs (`hfx0-0.dat` 23, see sprites.md, Scale2x-upscaled as unit sprites) when allowed, else the
 bundled `assets/sprites/wood_pile.png`: three logs with light cut ends in the same 17 x 11 pixel size, upscaled
 the same way.

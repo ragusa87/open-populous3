@@ -3,7 +3,9 @@
 //! click clears the selection. The shaman is a unit like the others here; clicking her panel preview
 //! selects her alone (`select_only`). Left click on the ground sends
 //! the selection there, each unit to a free cell of its own (`GameMap::dispatch`), or round one of
-//! the player's camp fires when clicked on it (`ground_click`); Shift + right click on one of the
+//! the player's camp fires when clicked on it (`ground_click`); on a tree, braves cut it and the others
+//! walk next to it (`GameMap::cut_orders`); on a wood pile, braves with empty hands pick up a piece
+//! each (`GameMap::pick_orders`); Shift + right click on one of the
 //! player's camp fires puts it out and keeps the selection (`shift_right_click`); P prays, X stops.
 //! With Ctrl held, these orders are chained after the units' current ones (`chained`). Only selected units show their health bar, and the
 //! cursor shows how many units are selected when more than one. While a spell is aimed the mouse
@@ -262,12 +264,20 @@ pub(super) fn select_and_order(
             Some(Gesture::Click(c)) => match unit_at(c, &units) {
                 Some(u) => selection.click(u.id, add),
                 None => {
-                    let ray = cam.0.viewport_to_world(cam.1, c).ok();
-                    if let Some(cell) = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)) {
-                        moves = ground_click(&map.0, &selection.units, world_units(cell));
-                        if add {
-                            moves = chained(moves);
+                    if let Some(i) = tree.tree {
+                        moves = map.0.cut_orders(PLAYER, &selection.units, i);
+                    } else {
+                        let ray = cam.0.viewport_to_world(cam.1, c).ok();
+                        if let Some(cell) = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)) {
+                            let at = world_units(cell);
+                            moves = match map.0.wood_at(at) {
+                                Some(pile) => map.0.pick_orders(PLAYER, &selection.units, pile),
+                                None => ground_click(&map.0, &selection.units, at),
+                            };
                         }
+                    }
+                    if add {
+                        moves = chained(moves);
                     }
                 }
             },

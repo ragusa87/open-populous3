@@ -47,14 +47,19 @@ pub fn pose_name(pose: Pose) -> &'static str {
         Pose::Fall => "fall",
         Pose::Drown => "drown",
         Pose::Stranded => "stranded",
+        Pose::Chop => "chop",
+        Pose::CarryWalk => "carry_walk",
+        Pose::CarryIdle => "carry_idle",
     }
 }
 
-/// Whether a kind ever shows a pose: only the shaman casts, and she is never stranded.
+/// Whether a kind's sheets have a pose: only the shaman casts, and she is never stranded; the wood
+/// poses are not rendered yet (`Pose::fallback` stands in).
 pub fn plays(kind: UnitKind, pose: Pose) -> bool {
     match pose {
         Pose::Cast => kind == UnitKind::Shaman,
         Pose::Stranded => kind != UnitKind::Shaman,
+        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle => false,
         _ => true,
     }
 }
@@ -108,17 +113,17 @@ pub fn recolour(frame: &Frame, tribe: [u8; 3]) -> Frame {
 }
 
 /// Every tribe's art for a kind from its baked atlas; None if a pose it plays is missing (or the
-/// atlas is malformed). Poses it never plays show its idle loop.
+/// atlas is malformed). Poses it never plays show their fallback's loop (`Pose::fallback`), else its idle.
 pub fn sheet_art(kind: UnitKind) -> Option<Vec<TribeArt>> {
     let (png, index) = bundled(kind);
     let mut poses = frames(png, index).map_err(|e| bevy::log::warn!("{kind:?} atlas: {e}")).ok()?;
-    let idle = poses[Pose::Idle as usize].clone();
-    for (&pose, dirs) in Pose::ALL.iter().zip(&mut poses) {
-        if dirs.iter().any(Vec::is_empty) {
+    for &pose in &Pose::ALL {
+        if poses[pose as usize].iter().any(Vec::is_empty) {
             if plays(kind, pose) {
                 return None;
             }
-            *dirs = idle.clone();
+            let stand_in = if pose.fallback() != pose { pose.fallback() } else { Pose::Idle };
+            poses[pose as usize] = poses[stand_in as usize].clone();
         }
     }
     Some(

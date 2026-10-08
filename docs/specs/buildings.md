@@ -159,7 +159,7 @@ pick one besides selecting it on the map.
 ### Orders and selection
 - Any new order to an assigned brave (`Command::OrderUnit`: move, pray, stop...) unassigns it from the site,
   inside the simulation, so replays match. It can be assigned again by hand (`Command::Assign`). A piece of wood it
-  was carrying is dropped where it stands, as a wood piece on the ground; its claim is freed for another brave.
+  carries stays with it until it is idle, then it is put down where it stands (units.md "Wood").
 - Assigned braves can be selected all along, as usual (click, box), wherever they are: away fetching wood, around
   the site or inside the building.
 - A brave inside a building under construction given an order (move...) leaves through the door first (see "Doors" below), then goes on.

@@ -1,6 +1,7 @@
 //! Dev helpers driven by env vars, so screenshots can be taken without a window:
 //! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|pray|cast|drown|teleport] game-client [level]`.
-//! `SHAMAN` gives the player's shaman an order at start, to check each pose.
+//! `SHAMAN` gives the player's shaman an order at start, to check each pose; `BRAVES=cut|carry` sends
+//! the player's braves to cut their nearest tree (and, for `carry`, bring the piece back where they stood).
 //! `FOCUS=x,z` (cells), `DISTANCE=n`, `PITCH=deg`, `YAW=deg` place the camera for the shot;
 //! `TAB=spells|build|stats` opens that panel tab; `BLUEPRINT=kind@x,z` (kind as in the Build tab,
 //! e.g. `temple@64,70`) shows that blueprint at map position x,z (cells).
@@ -71,6 +72,25 @@ pub fn demo_commands(name: &str, shaman: &Unit) -> Vec<Command> {
         "drown" => vec![Command::Cast { player: PLAYER, spell: Spell::Erode { at: shaman.cell() } }; 6],
         _ => Vec::new(),
     }
+}
+
+/// Commands for a `BRAVES` demo: every brave of the player cuts the tree nearest to it; `carry` then
+/// brings the piece back where it stood.
+pub fn brave_commands(name: &str, map: &game_core::map::GameMap) -> Vec<Command> {
+    if !matches!(name, "cut" | "carry") {
+        return Vec::new();
+    }
+    let d = |a: u16, b: u16| (game_core::unit::torus_delta(a, b) as i64).pow(2);
+    let braves = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave);
+    braves
+        .flat_map(|u| {
+            let tree = map.trees.iter().filter(|t| t.size > 0).min_by_key(|t| d(t.x, u.x) + d(t.z, u.z));
+            let back = Command::QueueOrder { player: PLAYER, unit: u.id, order: Order::MoveTo { x: u.x, z: u.z } };
+            tree.map(|t| Command::OrderUnit { player: PLAYER, unit: u.id, order: Order::CutTree { tree: (t.x, t.z) } })
+                .into_iter()
+                .chain((name == "carry").then_some(back))
+        })
+        .collect()
 }
 
 /// Camera overrides from `FOCUS=x,z`, `DISTANCE`, `PITCH` and `YAW` (degrees); bad values are ignored.
@@ -146,7 +166,8 @@ fn screenshot(
             pinned.0 = Some(at);
         }
         let demo = std::env::var("SHAMAN").unwrap_or_default();
-        let cmds = map.0.shaman_of(PLAYER).map(|u| demo_commands(&demo, u)).unwrap_or_default();
+        let mut cmds = map.0.shaman_of(PLAYER).map(|u| demo_commands(&demo, u)).unwrap_or_default();
+        cmds.extend(brave_commands(&std::env::var("BRAVES").unwrap_or_default(), &map.0));
         for c in &cmds {
             dirty.0 |= map.0.apply(c).is_some();
         }
@@ -169,6 +190,23 @@ fn screenshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn brave_demo_sends_every_brave_to_cut_then_carry_back() {
+        let mut map = game_core::map::GameMap::sandbox_buildings();
+        let before: u32 = map.trees.iter().map(|t| t.size as u32).sum();
+        let cmds = brave_commands("carry", &map);
+        assert_eq!(cmds.len(), 16, "a cut and a way back for each of the 8 braves");
+        for c in &cmds {
+            map.apply(c);
+        }
+        for _ in 0..600 {
+            map.tick();
+        }
+        let after: u32 = map.trees.iter().map(|t| t.size as u32).sum();
+        assert_eq!(before - after, 8);
+        assert!(brave_commands("dance", &map).is_empty());
+    }
 
     #[test]
     fn blueprint_by_name_and_position() {

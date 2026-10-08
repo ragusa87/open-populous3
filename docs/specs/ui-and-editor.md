@@ -72,7 +72,7 @@ are on an overlay camera (`OverlayCamera`, order 1) that clears the window in th
 
 ## Selection and orders
 Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect (Shift + right click puts out the player's camp fire under the cursor);
-the shaman is selected like any unit on the map, clicking her panel preview selects her alone. Left click on the ground sends the selection there, P pray, X stop (with Ctrl held, these orders are chained after
+the shaman is selected like any unit on the map, clicking her panel preview selects her alone. Left click on the ground sends the selection there (on a tree: braves cut it; on a wood pile: braves with empty hands take a piece; units.md "Wood"), P pray, X stop (with Ctrl held, these orders are chained after
 the units' current ones, see units.md "Chained orders"), Space
 looks at the shaman. Selected units show a health bar; the cursor shows the count when more than one (see units.md).
 

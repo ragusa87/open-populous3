@@ -113,6 +113,17 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             b.extend(fire.1.to_le_bytes());
             b.push(*point);
         }
+        Order::CutTree { tree } => {
+            b.push(5);
+            b.extend(tree.0.to_le_bytes());
+            b.extend(tree.1.to_le_bytes());
+        }
+        Order::FetchWood => b.push(6),
+        Order::PickUp { at } => {
+            b.push(7);
+            b.extend(at.0.to_le_bytes());
+            b.extend(at.1.to_le_bytes());
+        }
     }
 }
 
@@ -146,6 +157,9 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         2 => Order::Cast,
         3 => Order::Stop,
         4 => Order::Campfire { fire: (c.u16()?, c.u16()?), point: c.u8()? },
+        5 => Order::CutTree { tree: (c.u16()?, c.u16()?) },
+        6 => Order::FetchWood,
+        7 => Order::PickUp { at: (c.u16()?, c.u16()?) },
         _ => return None,
     })
 }
@@ -215,6 +229,9 @@ mod tests {
                 Command::PlaceCampfire { player: 3, at: (40_000, 7) },
                 Command::RemoveCampfire { player: 1, at: (8, 65535) },
                 Command::QueueOrder { player: 2, unit: 12, order: Order::Pray },
+                Command::OrderUnit { player: 0, unit: 3, order: Order::CutTree { tree: (65535, 1) } },
+                Command::QueueOrder { player: 1, unit: 4, order: Order::FetchWood },
+                Command::OrderUnit { player: 2, unit: 5, order: Order::PickUp { at: (7, 65535) } },
             ],
         }
     }
