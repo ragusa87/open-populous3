@@ -33,15 +33,15 @@ relative to `crates/game-client/src/` unless prefixed with `assets/`.
 
 | Family | Current generated-mode coverage | Remaining art / integration | Priority |
 |---|---|---|---|
-| Buildings | **Usable**: generated kit for every named kind (`generated_buildings.rs`, `assets/models/buildings/`); unknown IDs stay labelled boxes | Icons, animation, coherent assembly chunks, damage/rubble, style variants, add-ons (see below). | P1 |
+| Buildings | **Usable**: generated kit for every named kind (`generated_buildings.rs`, `assets/3d/buildings/`); unknown IDs stay labelled boxes | Icons, animation, coherent assembly chunks, damage/rubble, style variants, add-ons (see below). | P1 |
 | Construction | **Usable**: blueprint grid, authored timber scaffold per kit model (unknown IDs keep the box scaffold), height-sorted build bands, shake, smoke (`construction.rs`) | Coherent part-by-part assembly, rubble, fire/damage and production animation. Actual construction simulation remains planned. | P0 / P1 |
 | Building UI | **Missing**: 8 named build tiles (`hud/build.rs`) | 8 clear icons, upgrade/dismantle/repair and occupancy indicators; building picking/tooltips are separate gameplay work. | P1 |
-| Followers | **Usable temporary style**: 6 CC0 Quaternius characters, 6 poses each, 8 directions (`units/sheets.rs`, `assets/units/`) | Original project-specific clothing/silhouettes; real prayer, swimming/drowning, stranded, chop/carry/build, melee, fire throw, preaching, disguise, boarding clips. See [unit-art.md](unit-art.md). | P1 |
-| Wildmen | **Placeholder**: brave sheets recoloured neutral (`units/sheets.rs`), procedural figure as backup | Distinct neutral character, idle/gesture, wandering/food/drink/conversion art and behaviours. | P2 |
+| Followers | **Usable temporary style**: 6 CC0 Quaternius characters, 6 poses each, 8 directions, baked into one atlas per kind by `unit-baker` (`units/sheets.rs`, `assets/units/`) | Original project-specific clothing/silhouettes; real prayer, swimming/drowning, stranded, chop/carry/build, melee, fire throw, preaching, disguise, boarding clips. See [unit-art.md](unit-art.md). | P1 |
+| Wildmen | **Placeholder**: brave atlas recoloured neutral (`units/sheets.rs`), procedural figure as backup | Distinct neutral character, idle/gesture, wandering/food/drink/conversion art and behaviours. | P2 |
 | Vehicles | **Missing** at this revision: no client vehicle renderer | Model/sprite sets for boat and balloon, passengers, paddling, launch/landing and destruction; vehicle entity/boarding integration. A boat-hut jetty or balloon-hut gantry is scenery, not a vehicle. | P1 |
 | Reincarnation site | **Placeholder**: 8 tinted cuboids (`sites.rs`) | Original carved-stone set, dormant/active/rebirth treatment. | P1 |
 | Ritual scenery | **Missing** | Totem, stone head, discovery marker, worship gauges and effects; trigger/worship integration. Vault building is covered by first kit. | P1 |
-| Trees | **Usable**: 10 CC0 tree models, scaled for 4 wood sizes (`nature.rs`, `assets/models/nature/`) | Palms/tropical/other biome variants; cut stump, cutting/falling/burning states, optional low-detail models. | P2 |
+| Trees | **Usable**: 10 CC0 tree models, scaled for 4 wood sizes (`nature.rs`, `assets/3d/nature/`) | Palms/tropical/other biome variants; cut stump, cutting/falling/burning states, optional low-detail models. | P2 |
 | Wood | **Usable**: CC0 log-pile sprite (`wood.rs`, `assets/sprites/wood_pile.png`) | Carried log and chopping chips, attachment to worker animation. | P1 |
 | Other scenery | **Missing** | Plants, shrubs, rocks, pillars, decorative fire and shoreline props; placement/rendering for these categories. | P2 |
 | Building add-ons / wildlife | **Missing**, roles not implemented | Hut extension props; optional eagle/fish/other wildlife models and animation if these unsupported creature kinds are adopted. | P2 |
@@ -76,7 +76,7 @@ compact dark spy lodge; crossed training poles; fire braziers; open boat shed wi
 wide balloon workshop with gantry; stone vault; barred prison. Reconversion/wall/gate/guard-post
 designs are project interpretations of known enum names, not claims about unused original content.
 
-A reproducible, procedurally textured glTF kit lives under `assets/models/buildings/`, generated from
+A reproducible, procedurally textured glTF kit lives under `assets/3d/buildings/`, generated from
 `tools/generate_buildings.py` and `tools/building_textures.py` (Python standard library). A shared 512 x 512
 grayscale atlas adds timber grain, straw, clay, masonry and woven cloth; pigment/tribe colours stay separate.
 Every GLB links the atlas next to it (`surfaces.png`); UVs and texture apply to construction frames/parts too.

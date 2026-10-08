@@ -1,0 +1,10 @@
+[package]
+name = "unit-baker"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+bevy = "0.19"
+png = "0.18"
+unit-atlas = { version = "0.1.0", path = "../unit-atlas" }

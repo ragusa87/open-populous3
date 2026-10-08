@@ -52,13 +52,13 @@ normal over 1 cell either side, slopes and the planet's curve, so no side sinks 
   neutral ones blue; vault = pyramid of knowledge, prison), textured from the level's theme atlas (theme 0 on maps
   without one), cut-out texels see-through.
 - Otherwise, and for named types without an identified original object: the generated kit in
-  `assets/models/buildings/` (16 models: all named kinds, including hut sizes 1-3). Procedurally textured clay,
+  `assets/3d/buildings/` (16 models: all named kinds, including hut sizes 1-3). Procedurally textured clay,
   timber, thatch and stone with only the `Tribe` material recoloured (grey when neutral).
   `generated_buildings.rs` reads embedded GLB Body/Scaffold meshes into the same `MeshData` stage path;
   material colours become linear vertex colours, multiplied by a shared 512 x 512 grayscale surface atlas.
   `TEXCOORD_0` supplies face-projected UVs; padded tiles and five mip levels keep surfaces readable at distance.
   Each GLB links the atlas next to it, `surfaces.png`, for Blender. Geometry is already in cell units, entry local -z,
-  boat piers +z. See [asset inventory](assets.md) and [authoring contract](../../assets/models/buildings/README.md).
+  boat piers +z. See [asset inventory](assets.md) and [authoring contract](../../assets/3d/buildings/README.md).
 - Only unknown model IDs (e.g. 12) or an invalid bundled model keep the labelled diagnostic box,
   1.6 x 0.8 x 1.6 cells. Generated maps still show buildings only in Sandbox > Buildings.
 

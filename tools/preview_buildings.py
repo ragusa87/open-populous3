@@ -27,7 +27,7 @@ def main():
     scene = bpy.context.scene
     for i, name in enumerate(NAMES):
         before = set(bpy.data.objects)
-        bpy.ops.import_scene.gltf(filepath=str(root / "assets/models/buildings" / f"{name}.glb"))
+        bpy.ops.import_scene.gltf(filepath=str(root / "assets/3d/buildings" / f"{name}.glb"))
         imported = set(bpy.data.objects) - before
         offset = Vector(((i % 4 - 1.5)*4.6, (1.5 - i//4)*4.8, 0))
         for obj in imported:

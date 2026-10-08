@@ -16,7 +16,7 @@ use game_core::tree::{MAX_SIZE, VARIANTS};
 use pop3_format::catalog::tree_object;
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 
-/// Open-source models (`assets/models/nature/<name>.gltf`), by variant modulo their count.
+/// Open-source models (`assets/3d/nature/<name>.gltf`), by variant modulo their count.
 const MODELS: [&str; 10] =
     ["CommonTree_1", "CommonTree_2", "CommonTree_3", "CommonTree_4", "CommonTree_5", "Pine_1", "Pine_2", "Pine_3", "Pine_4", "Pine_5"];
 /// Theme whose atlas textures the original trees on maps without one (generated, sandboxes).
@@ -165,7 +165,7 @@ impl Plugin for NaturePlugin {
 }
 
 fn load_models(mut commands: Commands, assets: Res<AssetServer>) {
-    let scenes = MODELS.iter().map(|m| assets.load(GltfAssetLabel::Scene(0).from_asset(format!("models/nature/{m}.gltf")))).collect();
+    let scenes = MODELS.iter().map(|m| assets.load(GltfAssetLabel::Scene(0).from_asset(format!("3d/nature/{m}.gltf")))).collect();
     commands.insert_resource(TreeModels(scenes));
 }
 
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn every_variant_has_a_bundled_model() {
         for m in MODELS {
-            let path = format!("{}/../../assets/models/nature/{m}.gltf", env!("CARGO_MANIFEST_DIR"));
+            let path = format!("{}/../../assets/3d/nature/{m}.gltf", env!("CARGO_MANIFEST_DIR"));
             assert!(std::path::Path::new(&path).exists(), "{path}");
         }
     }

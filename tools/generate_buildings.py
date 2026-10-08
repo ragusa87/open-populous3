@@ -370,7 +370,7 @@ def same_glb(a, b):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check",action="store_true",help="fail if checked-in atlas pixels or GLB contents differ (floats within 1e-5); write nothing")
-    parser.add_argument("--out",type=Path,default=Path(__file__).resolve().parents[1]/"assets/models/buildings")
+    parser.add_argument("--out",type=Path,default=Path(__file__).resolve().parents[1]/"assets/3d/buildings")
     args = parser.parse_args()
     if not args.check:
         args.out.mkdir(parents=True,exist_ok=True)

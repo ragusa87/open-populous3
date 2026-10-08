@@ -33,7 +33,7 @@ angle (`tree_yaw`), scaled with the size (`size_factor`: 40% at size 1 to full a
   object bank: in banks 2-7, trees 4-6 are copies of 1-3, and bank 3/4/5/6 levels use bank 0's 60-62 / 63-65 /
   66-68 / 69-71 (see objects.md). Not done yet: bank 6 levels (3, 5, 16, 22, 2120) show the wrong trees,
   and level 2127 (bank 2) draws its 4 model-4 trees as bank 0's pine 16 instead of a cone pine. Textured from the map's theme atlas (theme 0 on maps without one: generated, sandboxes), drawn at their own size.
-- Otherwise: the CC0 Quaternius Stylized Nature MegaKit (`assets/models/nature`, type modulo 10: 0-4 common
+- Otherwise: the CC0 Quaternius Stylized Nature MegaKit (`assets/3d/nature`, type modulo 10: 0-4 common
   trees, 5-9 pines), 1.6 cells tall at full size. Models load through Bevy's asset server from the repository's
   `assets/` (`dev::asset_plugin`).
 Resting the cursor on a visible tree for 1.5 s (`HOVER_SECS`), or right-clicking it, shows a tooltip by the

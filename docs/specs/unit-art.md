@@ -1,8 +1,8 @@
 # Unit artwork (open-source sprites)
 
 Brief for drawing or generating free unit sprites to replace the generated figures (`units/procedural.rs`)
-and to ship instead of the original art (copyrighted, never shipped). Loaded today: sheets rendered from a 3D
-model (see "Rendered sheets"); hand-drawn sheets as described under "Delivery" are to be loaded once some exist.
+and to ship instead of the original art (copyrighted, never shipped). Loaded today: atlases baked from a 3D
+model (see "Baked atlases"); hand-drawn sheets as described under "Delivery" are to be loaded once some exist.
 
 ## Style
 - Pixel art, hard edges: every pixel is fully opaque or fully transparent (the engine cuts alpha at 50%:
@@ -86,41 +86,65 @@ Use no other magenta anywhere in the art. Skin, hair, wood, metal and the spy's 
 - Licence: CC0 preferred (CC-BY 4.0 accepted). List author, licence and source of every sheet in
   `assets/CREDITS.md`; for generated art, the tool and model too.
 
-## Rendered sheets (loaded today)
-A rigged, animated 3D model (glTF) can be rendered into sheets by the `render_sprites` example:
+## Baked atlases (loaded today)
+The `unit-baker` binary (`crates/unit-baker`) renders the rigged, animated CC0 characters (glTF) into the unit
+art the game embeds:
 
-  just render-sprites assets/models/witch.gltf assets/units/shaman [--head 3.1] [--tribe Clothes,Hat] [--skin d29a6e]
-  just render-units    # every kind, with its model and tribe materials
+  just bake-units           # every kind
+  just bake-units shaman    # one kind
 
-One PNG per pose (`idle`, `walk`, `pray`, `cast`, `fall`, `drown`, `stranded`), 8 rows (directions 0-7, all rendered:
-no mirroring) of 320 x 288 cells, 4 pixels per base pixel, feet at (160, 256) (bigger than a drawn cell: a
-lying body and the cast jump must fit), orthographic, seen from 30 deg above, hard edges, 2 px dark outline.
-The model's tribe materials (`--tribe`, default `Clothes,Hat`) are rendered in the magenta key, the material
-named `Skin` in `--skin` (the Quaternius characters ship a near-black skin; default tan `d29a6e`). Pose to clip: idle Idle
-(8 frames over the loop), walk Walk (12), pray SitDown (its last moment), cast Jump (12), fall Death (8, the
-last two lying), drown RecieveHit (4, sunk 45% under a ripple line), stranded Victory (4, looping over 45-80% of the clip, see below). Scale: the head top (default 3.1 model
-units) is 34 base px above the feet.
+Inputs: `assets/3d/characters/*.gltf`, and the table in `unit-baker/src/kinds.rs` (per kind: model, head height,
+tribe materials, skin colour, poses). `assets/3d/characters/` holds sources for the baker only: the game never
+loads them, so a shipped game's `assets/` folder may leave it out.
 
-The game embeds the sheets (`units/sheets.rs`), crops every cell around the feet and swaps the magenta hue for
-each tribe's. Every kind uses them whenever the original files are not (`--no-original`, no install): shaman =
-witch (robe and hat in the tribe colour), brave = worker (shirt), warrior = soldier (top), preacher = wizard (robe;
-his hat stays dark so he is not mistaken for the shaman), spy = ninja (details), firewarrior = cowboy (jacket).
-A kind without sheets would fall back to its generated figure.
+Rendering: every pose, direction (0-7, all rendered: no mirroring) and frame in a 320 x 288 cell, 4 pixels per
+base pixel, feet at (160, 256) (bigger than a drawn cell: a lying body and the cast jump must fit), orthographic,
+seen from 30 deg above. The tribe materials are rendered in the magenta key, the material named `Skin` in the
+kind's skin colour (the Quaternius characters ship a near-black skin; tan `d29a6e`). Pose to clip (`shots.rs`):
+idle Idle (8 frames over the loop), walk Walk (12), pray SitDown (its last moment), cast Jump (12), fall Death (8,
+the last two lying), drown RecieveHit (4, sunk 45% under a ripple line), stranded Victory (4, looping over 45-80%
+of the clip, see below). Scale: the head top (3.1 model units) is 34 base px above the feet. Each cell then gets
+hard alpha, a 2 px dark outline and, sunk, ripples at the water line (`finish.rs`), and is cropped to its opaque
+pixels, the feet pixel kept inside.
+
+Only the poses a kind plays are baked: the shaman has no `stranded` (she idles instead), the followers no `cast`
+(only the shaman casts). Wildmen have no atlas: they reuse the brave's.
+
+Output, per kind (`atlas.rs`):
+- `assets/units/<kind>.png`: every cropped frame packed on shelves (tallest first) in an atlas 2048 px wide;
+  identical frames (the fall's last two) share one rectangle. Saved losslessly as small as possible: indexed when
+  it has under 256 colours, else RGB with black as the transparent colour (alpha is only 0 or 255 and no opaque
+  pixel is black), else RGBA; deflate level 9, the smallest of a few row filters.
+- `assets/units/<kind>.txt`: the index (`crates/unit-atlas`). A first line `unit-atlas 1`, then one line per frame
+  (lines starting with `#` are comments, the baker writes a few describing the columns):
+
+      pose dir frame x y width height feet_x feet_y
+      idle 0 0 1758 772 80 172 40 169
+
+  The rectangle's top-left corner and size in the atlas, then the feet in pixels from that corner. Frames of a
+  pose and direction come in play order, from 0.
+
+The game embeds both files per kind with `include_bytes!` / `include_str!` (`units/sheets.rs`): a missing one is a
+compile error. At startup it cuts each frame out by its index entry and swaps the magenta hue for each tribe's; a
+pose the kind never plays shows its idle loop. Every kind uses them whenever the original files are not
+(`--no-original`, no install): shaman = witch (robe and hat in the tribe colour), brave = worker (shirt), warrior =
+soldier (top), preacher = wizard (robe; his hat stays dark so he is not mistaken for the shaman), spy = ninja
+(details), firewarrior = cowboy (jacket).
 
 ### Stranded sheet
 The Quaternius characters have no "arms up" clip. Of the candidates, `Defeat` puts the hands on the head and
 `Victory` raises both arms and pumps them, so `Victory` stands in. Sampled over its length (worker, back view,
 where the stance reads best): 0-20% arms rising from the sides, 20-40% arms half up and spread, 45-80% both arms
 fully above the head, 80-100% coming back down. The sheet loops 4 frames over 45-80% (`Timing::Span`), at 4 fps;
-an earlier span (22-67%) showed the arms only shoulder high. Every model gets the sheet (the shaman's is unused:
-she is never stranded). With the original files the followers hold a frame of anim 12 instead (animations.md).
+an earlier span (22-67%) showed the arms only shoulder high. The baker shoots it for every follower, not the
+shaman (she is never stranded). With the original files the followers hold a frame of anim 12 instead (animations.md).
 
 ### Planned poses (CC0 stand-ins)
 The original animations identified in animations.md, and how the Quaternius models could stand in for them. Each
 model ships 17 clips (Death, Defeat, Idle, Jump, PickUp, Punch, RecieveHit, Roll, Run, Run_Carry, Shoot_OneHanded,
 SitDown, StandUp, SwordSlash, Victory, Walk, Walk_Carry), no props, and hand bones `Fist.L` / `Fist.R`.
 
-| Original anim | Action | Kinds | CC0 clip | Renderer needs |
+| Original anim | Action | Kinds | CC0 clip | Baker needs |
 |---|---|---|---|---|
 | 9 / 10 | walking / standing with wood | brave | Walk_Carry (loop) / its first moment | a log prop between `Fist.L` and `Fist.R` |
 | 11 | cutting wood | brave | SwordSlash (loop) | an axe prop in `Fist.R` |
@@ -137,10 +161,10 @@ SitDown, StandUp, SwordSlash, Victory, Walk, Walk_Carry), no props, and hand bon
 | 97 | carbonized by lightning | brave | Death or Idle frame | every material black in post (like the magenta key) |
 | 89, 90/91, 92, 48 | itching, push-ups, juggling, hiding the eyes | brave, warrior, spy | none | new clips authored in Blender |
 
-Three kinds of work, from easiest: a new `PoseShot` on an existing clip; a small renderer feature (a prop on a
+Three kinds of work, from easiest: a new `PoseShot` in the baker on an existing clip; a small baker feature (a prop on a
 hand bone, a per-frame model rotation, an all-black tint, a rising ghost copy); new clips, only for the idle
-fidgets, which can stay on the plain idle. Render a sheet only in the commit that adds its action, and only for the
-kinds that play it: the embedded sheets already weigh 28 MB, about 1 MB per kind and pose.
+fidgets, which can stay on the plain idle. Add a pose to a kind's `poses` in `kinds.rs` only in the commit that adds
+its action, and only for the kinds that play it: the embedded atlases weigh 14 MB, about 0.4 MB per kind and pose.
 
 ## Generating with an image model
 Models do not keep a fixed grid or anchor reliably: generate one direction or pose at a time, larger, then

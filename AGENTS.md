@@ -6,6 +6,7 @@ Guidance for coding agents working on this repo (Rust + Bevy 0.19 Populous-like 
 - `crates/pop3-format`: pure parsers of original game files. No Bevy, no game logic.
 - `crates/game-core`: deterministic simulation (terrain, map, spell, unit, command). No Bevy, no floats in state.
 - `crates/game-net`: lockstep wire codec over TCP. Depends on game-core only.
+- `crates/unit-baker`: renders `assets/3d/characters` into `assets/units` atlases (`just bake-units`); `crates/unit-atlas` is their index format.
 - `crates/game-client`: Bevy app, one plugin per concern (world, camera, hud, editor, dev).
 - `docs/`: architecture, roadmap, `docs/specs/*`. Update the matching spec when behaviour changes.
 - `TODO.md`: what is left to implement. Tick/remove items in the commit that does them, add what you leave undone or discover.

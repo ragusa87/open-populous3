@@ -4,18 +4,9 @@ levels := env_var_or_default("POP3_LEVELS", "")
 run *args:
     cargo run -p game-client -- {{args}}
 
-# Render a rigged glTF model into unit sprite sheets: just render-sprites assets/models/witch.gltf assets/units/shaman
-render-sprites model out *args:
-    cargo run --release -p game-client --example render_sprites -- {{model}} {{out}} {{args}}
-
-# Re-render every unit kind's sheets from its CC0 model (see assets/CREDITS.md)
-render-units:
-    just render-sprites assets/models/witch.gltf assets/units/shaman --tribe Clothes,Hat
-    just render-sprites assets/models/worker_male.gltf assets/units/brave --tribe Shirt
-    just render-sprites assets/models/soldier_female.gltf assets/units/warrior --tribe Main
-    just render-sprites assets/models/wizard.gltf assets/units/preacher --tribe Clothes
-    just render-sprites assets/models/ninja_male_hair.gltf assets/units/spy --tribe Details
-    just render-sprites assets/models/cowboy_male.gltf assets/units/firewarrior --tribe Jacket
+# Bake the unit sprites (assets/units) from the CC0 characters in assets/3d/characters: just bake-units [kind]
+bake-units *kind:
+    cargo run --release -p unit-baker -- {{kind}}
 
 # Rebuild the original CC0 building GLBs without Blender or original game data
 generate-buildings:

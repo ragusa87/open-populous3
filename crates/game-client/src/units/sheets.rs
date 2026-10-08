@@ -1,8 +1,7 @@
-//! Open-source unit art from rendered sheets (docs/specs/unit-art.md, "Rendered sheets"): one PNG per
-//! pose, 8 rows (directions, see `art::sprite_dir`) of 320 x 288 cells at 4 pixels per base pixel, feet
-//! at (160, 256), tribe-coloured parts in magenta. Made from a rigged model by the `render_sprites`
-//! example from CC0 Quaternius characters (see assets/CREDITS.md). Each tribe swaps the magenta hue
-//! for its colour.
+//! Open-source unit art baked by `unit-baker` (docs/specs/unit-art.md, "Baked atlases") from CC0
+//! Quaternius characters (see assets/CREDITS.md): per kind, an atlas PNG of frames cropped around
+//! their pixels at 4 pixels per base pixel, tribe-coloured parts in magenta, and its index (where
+//! each pose, direction and frame sits, and its feet). Each tribe swaps the magenta hue for its colour.
 
 use super::art::{Frame, Pose, TribeArt, DIRS};
 use super::procedural::tribe_rgb;
@@ -14,44 +13,50 @@ use pop3_format::catalog::TRIBES;
 
 /// Image pixels per base pixel (1 base pixel = 1/88 cell).
 pub const SCALE: usize = 4;
-pub const CELL: (usize, usize) = (320, 288);
-const FEET: (usize, usize) = (160, 256);
 const MAGENTA_HUE: f32 = 300.0;
 /// Wildmen wear the brave's clothes in this colour (no tribe).
 const WILD_HIDE: [u8; 3] = [150, 112, 70];
 
-macro_rules! sheet {
-    ($kind:literal, $pose:literal) => {
-        include_bytes!(concat!("../../../../assets/units/", $kind, "/", $pose, ".png")).as_slice()
+macro_rules! baked {
+    ($kind:literal) => {
+        (include_bytes!(concat!("../../../../assets/units/", $kind, ".png")).as_slice(), include_str!(concat!("../../../../assets/units/", $kind, ".txt")))
     };
 }
 
-macro_rules! poses {
-    ($kind:literal, $pose:expr) => {
-        match $pose {
-            Pose::Idle => sheet!($kind, "idle"),
-            Pose::Walk => sheet!($kind, "walk"),
-            Pose::Pray => sheet!($kind, "pray"),
-            Pose::Cast => sheet!($kind, "cast"),
-            Pose::Fall => sheet!($kind, "fall"),
-            Pose::Drown => sheet!($kind, "drown"),
-            Pose::Stranded => sheet!($kind, "stranded"),
-        }
-    };
-}
-
-/// The bundled sheet (PNG) of a kind's pose (`assets/units/<kind>/<pose>.png`).
-pub fn bundled(kind: UnitKind, pose: Pose) -> Option<&'static [u8]> {
-    Some(match kind {
-        UnitKind::Shaman => poses!("shaman", pose),
-        UnitKind::Brave => poses!("brave", pose),
-        UnitKind::Warrior => poses!("warrior", pose),
-        UnitKind::Preacher => poses!("preacher", pose),
-        UnitKind::Spy => poses!("spy", pose),
-        UnitKind::Firewarrior => poses!("firewarrior", pose),
+/// The baked atlas (PNG) and index of a kind (`assets/units/<kind>.png` and `.txt`).
+pub fn bundled(kind: UnitKind) -> (&'static [u8], &'static str) {
+    match kind {
+        UnitKind::Shaman => baked!("shaman"),
+        UnitKind::Brave => baked!("brave"),
+        UnitKind::Warrior => baked!("warrior"),
+        UnitKind::Preacher => baked!("preacher"),
+        UnitKind::Spy => baked!("spy"),
+        UnitKind::Firewarrior => baked!("firewarrior"),
         // No model of their own: the brave's, in a neutral hide colour (`sheet_art`).
-        UnitKind::Wildman => poses!("brave", pose),
-    })
+        UnitKind::Wildman => baked!("brave"),
+    }
+}
+
+/// Pose name in the index.
+pub fn pose_name(pose: Pose) -> &'static str {
+    match pose {
+        Pose::Idle => "idle",
+        Pose::Walk => "walk",
+        Pose::Pray => "pray",
+        Pose::Cast => "cast",
+        Pose::Fall => "fall",
+        Pose::Drown => "drown",
+        Pose::Stranded => "stranded",
+    }
+}
+
+/// Whether a kind ever shows a pose: only the shaman casts, and she is never stranded.
+pub fn plays(kind: UnitKind, pose: Pose) -> bool {
+    match pose {
+        Pose::Cast => kind == UnitKind::Shaman,
+        Pose::Stranded => kind != UnitKind::Shaman,
+        _ => true,
+    }
 }
 
 /// PNG bytes to RGBA (width, height, pixels).
@@ -61,33 +66,30 @@ pub fn decode(png: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
     Some((rgba.width() as usize, rgba.height() as usize, rgba.into_raw()))
 }
 
-/// Cell `(col, row)` of a sheet `width` pixels wide, cropped to its pixels (feet kept inside).
-pub fn cell(width: usize, rgba: &[u8], col: usize, row: usize) -> Frame {
-    let (x0, y0) = (col * CELL.0, row * CELL.1);
-    let opaque = |x: usize, y: usize| rgba[((y0 + y) * width + x0 + x) * 4 + 3] != 0;
-    let (mut l, mut t, mut r, mut b) = (FEET.0, FEET.1, FEET.0 + 1, FEET.1 + 1);
-    for y in 0..CELL.1 {
-        for x in 0..CELL.0 {
-            if opaque(x, y) {
-                (l, t, r, b) = (l.min(x), t.min(y), r.max(x + 1), b.max(y + 1));
-            }
-        }
-    }
-    let mut out = Vec::with_capacity((r - l) * (b - t) * 4);
-    for y in t..b {
-        let row = ((y0 + y) * width + x0) * 4;
-        out.extend_from_slice(&rgba[row + l * 4..row + r * 4]);
-    }
-    Frame { width: r - l, height: b - t, origin: (FEET.0 - l, FEET.1 - t), rgba: out, scale: SCALE }
-}
-
-/// Every direction's frame loop of a sheet: `[dir][frame]`; None if it is not 8 rows of cells.
-pub fn split(png: &[u8]) -> Option<Vec<Vec<Frame>>> {
-    let (w, h, rgba) = decode(png)?;
-    if h != CELL.1 * DIRS || w % CELL.0 != 0 || w == 0 {
+/// The frame an index entry points at in an atlas `width` x `height`; None if it lies outside.
+pub fn frame_at(width: usize, height: usize, rgba: &[u8], entry: &unit_atlas::Entry) -> Option<Frame> {
+    let [x, y, w, h] = entry.rect.map(|v| v as usize);
+    if w == 0 || h == 0 || x + w > width || y + h > height {
         return None;
     }
-    Some((0..DIRS).map(|dir| (0..w / CELL.0).map(|col| cell(w, &rgba, col, dir)).collect()).collect())
+    let pixels = (y..y + h).flat_map(|row| &rgba[(row * width + x) * 4..(row * width + x + w) * 4]).copied().collect();
+    Some(Frame { width: w, height: h, origin: (entry.origin.0 as usize, entry.origin.1 as usize), rgba: pixels, scale: SCALE })
+}
+
+/// Every pose's frame loops, `[pose][dir][frame]` in `Pose::ALL` order (empty if not baked); an error
+/// if the atlas does not decode, an entry falls outside it, or frames are missing or out of order.
+pub fn frames(png: &[u8], index: &str) -> Result<Vec<Vec<Vec<Frame>>>, String> {
+    let (width, height, rgba) = decode(png).ok_or("atlas does not decode")?;
+    let mut poses: Vec<Vec<Vec<Frame>>> = Pose::ALL.iter().map(|_| vec![Vec::new(); DIRS]).collect();
+    for e in unit_atlas::parse(index)? {
+        let pose = Pose::ALL.iter().position(|&p| pose_name(p) == e.pose).ok_or_else(|| format!("unknown pose {}", e.pose))?;
+        let loop_ = poses[pose].get_mut(e.dir).ok_or_else(|| format!("{} direction {}", e.pose, e.dir))?;
+        if e.frame != loop_.len() {
+            return Err(format!("{} direction {}: frame {} out of order", e.pose, e.dir, e.frame));
+        }
+        loop_.push(frame_at(width, height, &rgba, &e).ok_or_else(|| format!("{} {} {}: outside the atlas", e.pose, e.dir, e.frame))?);
+    }
+    Ok(poses)
 }
 
 /// Magenta parts take the tribe's hue (shading kept); everything else is untouched.
@@ -105,9 +107,20 @@ pub fn recolour(frame: &Frame, tribe: [u8; 3]) -> Frame {
     out
 }
 
-/// Every tribe's art for a kind from its bundled sheets; None if it has none (or one is malformed).
+/// Every tribe's art for a kind from its baked atlas; None if a pose it plays is missing (or the
+/// atlas is malformed). Poses it never plays show its idle loop.
 pub fn sheet_art(kind: UnitKind) -> Option<Vec<TribeArt>> {
-    let poses: Vec<Vec<Vec<Frame>>> = Pose::ALL.iter().map(|&pose| split(bundled(kind, pose)?)).collect::<Option<_>>()?;
+    let (png, index) = bundled(kind);
+    let mut poses = frames(png, index).map_err(|e| bevy::log::warn!("{kind:?} atlas: {e}")).ok()?;
+    let idle = poses[Pose::Idle as usize].clone();
+    for (&pose, dirs) in Pose::ALL.iter().zip(&mut poses) {
+        if dirs.iter().any(Vec::is_empty) {
+            if plays(kind, pose) {
+                return None;
+            }
+            *dirs = idle.clone();
+        }
+    }
     Some(
         (0..TRIBES)
             .map(|tribe| {
@@ -122,36 +135,59 @@ pub fn sheet_art(kind: UnitKind) -> Option<Vec<TribeArt>> {
 mod tests {
     use super::*;
 
+    fn baked(kind: UnitKind) -> Vec<Vec<Vec<Frame>>> {
+        let (png, index) = bundled(kind);
+        frames(png, index).unwrap_or_else(|e| panic!("{kind:?}: {e}"))
+    }
+
     #[test]
-    fn bundled_sheets_are_8_rows_of_cells_with_feet_on_the_ground() {
-        for (kind, pose) in UnitKind::ALL.iter().flat_map(|&k| Pose::ALL.iter().map(move |&p| (k, p))) {
-            let dirs = split(bundled(kind, pose).unwrap()).unwrap_or_else(|| panic!("{kind:?} {pose:?} sheet"));
-            assert_eq!(dirs.len(), DIRS);
-            for frames in &dirs {
-                assert!(!frames.is_empty());
-                for f in frames {
-                    assert_eq!(f.scale, SCALE);
-                    assert!(f.rgba.chunks_exact(4).all(|p| p[3] == 0 || p[3] == 255), "{pose:?}: hard edges");
+    fn every_kind_pose_and_direction_is_baked_with_hard_edges() {
+        for kind in UnitKind::ALL {
+            let poses = baked(kind);
+            for &pose in &Pose::ALL {
+                for frames in &poses[pose as usize] {
+                    assert_eq!(frames.is_empty(), !plays(kind, pose), "{kind:?} {pose:?}");
+                    for f in frames {
+                        assert_eq!(f.scale, SCALE);
+                        assert!(f.rgba.chunks_exact(4).all(|p| p[3] == 0 || p[3] == 255), "{kind:?} {pose:?}: hard edges");
+                    }
                 }
             }
-        }
-        for kind in UnitKind::ALL {
-            let idle = &split(bundled(kind, Pose::Idle).unwrap()).unwrap()[0][0];
-            let height = idle.origin.1 as f32 / SCALE as f32;
-            assert!((30.0..=55.0).contains(&height), "{kind:?} standing, headgear included: {height} base px");
         }
     }
 
     #[test]
-    fn cells_crop_around_the_feet() {
-        let mut rgba = vec![0u8; CELL.0 * 2 * CELL.1 * 4];
-        let w = CELL.0 * 2;
-        for (x, y) in [(CELL.0 + 150, 200), (CELL.0 + 170, 255)] {
-            rgba[(y * w + x) * 4 + 3] = 255;
+    fn feet_on_the_ground() {
+        for kind in UnitKind::ALL {
+            let poses = baked(kind);
+            for frames in &poses[Pose::Idle as usize] {
+                let f = &frames[0];
+                let height = f.origin.1 as f32 / SCALE as f32;
+                assert!((30.0..=55.0).contains(&height), "{kind:?} standing, headgear included: {height} base px");
+                let below = f.height - f.origin.1;
+                assert!(below <= 3 * SCALE, "{kind:?}: {below} px under the feet (outline and soles only)");
+                assert!(f.origin.0 < f.width);
+            }
         }
-        let f = cell(w, &rgba, 1, 0);
-        assert_eq!((f.width, f.height, f.origin), (21, 57, (10, 56)));
-        assert_eq!(cell(w, &rgba, 0, 0).origin, (0, 0), "empty cell: just the feet");
+    }
+
+    #[test]
+    fn bundled_index_round_trips() {
+        for kind in UnitKind::ALL {
+            let (_, index) = bundled(kind);
+            let entries = unit_atlas::parse(index).unwrap();
+            assert_eq!(unit_atlas::write(&entries), index, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn frames_are_cut_from_the_index() {
+        let rgba: Vec<u8> = (0..4 * 3).flat_map(|i| [i as u8, 0, 0, 255]).collect();
+        let entry = unit_atlas::Entry { pose: "idle".into(), dir: 0, frame: 0, rect: [1, 1, 2, 2], origin: (1, 1) };
+        let f = frame_at(4, 3, &rgba, &entry).unwrap();
+        assert_eq!((f.width, f.height, f.origin), (2, 2, (1, 1)));
+        assert_eq!(f.rgba.chunks(4).map(|p| p[0]).collect::<Vec<_>>(), [5, 6, 9, 10]);
+        assert!(frame_at(4, 3, &rgba, &unit_atlas::Entry { rect: [3, 0, 2, 1], ..entry }).is_none());
     }
 
     #[test]
@@ -164,9 +200,12 @@ mod tests {
 
     #[test]
     fn every_tribe_and_pose() {
+        for kind in UnitKind::ALL {
+            let art = sheet_art(kind).unwrap();
+            assert_eq!(art.len(), TRIBES as usize);
+            assert!(Pose::ALL.iter().all(|&p| (0..DIRS).all(|d| !art[2].frames(p, d).is_empty())), "{kind:?}");
+        }
         let art = sheet_art(UnitKind::Shaman).unwrap();
-        assert_eq!(art.len(), TRIBES as usize);
         assert_ne!(art[0].frames(Pose::Idle, 0)[0].rgba, art[1].frames(Pose::Idle, 0)[0].rgba);
-        assert!(Pose::ALL.iter().all(|&p| (0..DIRS).all(|d| !art[2].frames(p, d).is_empty())));
     }
 }

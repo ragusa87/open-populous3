@@ -6,6 +6,8 @@ crates/
   game-core     deterministic simulation: terrain (Heightmap), map, spell, unit, command.
                 Integers only in state. No Bevy.
   game-net      lockstep wire protocol (length-prefixed, hand-written binary) over std TCP.
+  unit-atlas    text index of baked unit frames (rectangle and feet per pose, direction, frame).
+  unit-baker    Bevy tool: renders the CC0 characters into assets/units atlases (just bake-units).
   game-client   Bevy app. One plugin per concern:
                   world.rs        CurrentMap, LevelList, terrain entity rebuild
                   terrain_mesh.rs pure mesh builder (curvature, colors, normals), unit-tested

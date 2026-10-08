@@ -12,7 +12,7 @@ use bevy::render::render_resource::TextureFormat;
 use game_core::building::BuildingKind;
 use std::sync::OnceLock;
 
-const ATLAS: &[u8] = include_bytes!("../../../assets/models/buildings/surfaces.png");
+const ATLAS: &[u8] = include_bytes!("../../../assets/3d/buildings/surfaces.png");
 
 /// One shared grayscale surface atlas, multiplied by each vertex's material/tribe pigment.
 /// Four reductions keep distant roofs stable; tile gutters still cover half a texel at mip 4.
@@ -88,7 +88,7 @@ pub const KINDS: [BuildingKind; 16] = [
 
 macro_rules! asset {
     ($name:literal) => {
-        include_bytes!(concat!("../../../assets/models/buildings/", $name, ".glb")) as &[u8]
+        include_bytes!(concat!("../../../assets/3d/buildings/", $name, ".glb")) as &[u8]
     };
 }
 
