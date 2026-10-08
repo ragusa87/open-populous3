@@ -115,6 +115,33 @@ fully above the head, 80-100% coming back down. The sheet loops 4 frames over 45
 an earlier span (22-67%) showed the arms only shoulder high. Every model gets the sheet (the shaman's is unused:
 she is never stranded). With the original files the followers hold a frame of anim 12 instead (animations.md).
 
+### Planned poses (CC0 stand-ins)
+The original animations identified in animations.md, and how the Quaternius models could stand in for them. Each
+model ships 17 clips (Death, Defeat, Idle, Jump, PickUp, Punch, RecieveHit, Roll, Run, Run_Carry, Shoot_OneHanded,
+SitDown, StandUp, SwordSlash, Victory, Walk, Walk_Carry), no props, and hand bones `Fist.L` / `Fist.R`.
+
+| Original anim | Action | Kinds | CC0 clip | Renderer needs |
+|---|---|---|---|---|
+| 9 / 10 | walking / standing with wood | brave | Walk_Carry (loop) / its first moment | a log prop between `Fist.L` and `Fist.R` |
+| 11 | cutting wood | brave | SwordSlash (loop) | an axe prop in `Fist.R` |
+| 12 | flattening the ground | brave | Jump (loop over the hop) | none |
+| 14 | receiving a punch | all | RecieveHit (once) | none |
+| 15, 25, 50 | punch, kick, dodge and punch | fighters | Punch (loop); Roll for the dodge | none (no kick clip: Punch stands in) |
+| 7 | firewarrior throwing fire | firewarrior | Shoot_OneHanded (once) | a fireball sprite at the hand, or the spell effect |
+| 17 | spy setting fire to a building | spy | PickUp (crouch moment, loop) | a torch prop (optional) |
+| 18 | sitting while being converted | brave | SitDown end (as pray) | none |
+| 51 | pedalling a vehicle | all | SitDown end, legs still | none (no pedalling clip) |
+| 52 | running from bees | all | Run (loop) | none |
+| 16 / 19, 37 | tilted in a tornado / tumbling | all | Idle or Death frame, turned by the renderer | rotate the model about its feet per frame |
+| 40 | drowning, spirit rising | all | Death last frame, sunk | a see-through copy rising, drawn in post (alpha sprite) |
+| 97 | carbonized by lightning | brave | Death or Idle frame | every material black in post (like the magenta key) |
+| 89, 90/91, 92, 48 | itching, push-ups, juggling, hiding the eyes | brave, warrior, spy | none | new clips authored in Blender |
+
+Three kinds of work, from easiest: a new `PoseShot` on an existing clip; a small renderer feature (a prop on a
+hand bone, a per-frame model rotation, an all-black tint, a rising ghost copy); new clips, only for the idle
+fidgets, which can stay on the plain idle. Render a sheet only in the commit that adds its action, and only for the
+kinds that play it: the embedded sheets already weigh 28 MB, about 1 MB per kind and pose.
+
 ## Generating with an image model
 Models do not keep a fixed grid or anchor reliably: generate one direction or pose at a time, larger, then
 clean up by hand. Downscale with nearest neighbour to the target size, redraw the outline, snap the
