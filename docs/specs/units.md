@@ -58,11 +58,10 @@ shaman, three of each other kind in columns to the west, one of each for tribe 1
 view of the starting camera), a pond to the north.
 
 ## Worshipping the shaman (decoration, done: `units/worship.rs`)
-Idle braves, warriors, firewarriors and spies whose shaman (same tribe) is within 3 cells on each axis (torus)
+Idle followers (braves, warriors, firewarriors, spies, preachers) whose shaman (same tribe) is within 3 cells on each axis (torus)
 and idle or walking pray facing her: the Pray pose (original anim 8, kneeling, arms going up and down; the CC0
 pray sheet), turned towards her (`octant`), following her as she walks by. Drawn only: in the simulation they stay
-Idle, selectable and orderable, nothing goes through `Command`. Preachers, wildmen and the shaman never do it
-(the original files have no pose for it); casting, praying, drowning or dying, she gets no worship.
+Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the shaman never do it; casting, praying, drowning or dying, she gets no worship.
 
 ## Standing slots (done: `game_core::slots`)
 - Each cell holds 3 x 3 standing spots (`PER_CELL`, about a third of a cell apart: a unit's width).
@@ -108,15 +107,15 @@ Idle, selectable and orderable, nothing goes through `Command`. Preachers, wildm
   preview always shows the shaman's health.
 - Dust (`units/dust.rs`, cosmetic, real-time): when a unit stops landing, 10 soft generated motes spread 0.4 cell
   around its feet, rise 0.1, grow and fade over 0.8 s, facing the camera and pulled towards it like the sprites.
-- Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (tumbling), Fall (dying, then lies still while dead), Stranded (arms up: frame 1 of original anim 12 for braves, warriors, firewarriors and spies; preachers, wildmen and the shaman show their idle; the CC0 sheets loop their own arms-up `stranded` sheet).
+- Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (original anim 40 for followers: the body lying, its spirit rising; tumbling otherwise), Fall (dying, then lies still while dead), Stranded (arms up: frame 1 of original anim 12 for every follower, a stand-in, the real anim is unknown; wildmen and the shaman show their idle; the CC0 sheets loop their own arms-up `stranded` sheet).
   Timed actions (cast, dying) play once in step with the simulation, others loop.
 - View direction: `facing * 45deg - camera yaw`, rounded to the 8 drawn directions (0 front, 2 screen right, 4 back).
 - Art: with the original files, the shaman animations of `VSTART/VFRA/VELE` + `HSPR0-0.DAT` (see animations.md),
   per tribe; otherwise (or `--no-original`) the open-source witch (Quaternius, CC0) rendered into
   `assets/units/shaman/*.png` sheets, loaded by `units/sheets.rs` (see unit-art.md); `units/procedural.rs` can still draw a ~34 px pixel-art shaman in the tribe colour
   (feather headdress, staff) for every pose and direction (front / side / back, left ones mirrored). With the original files the other kinds
-  use their original animations too (`art::Originals`, `original_anim`: tribesman body + outfit layer, the preacher's
-  own body, see animations.md); otherwise they use rendered CC0 sheets (unit-art.md), else generated figures (`UnitSprites`, per kind and tribe), told apart by headgear, held item and clothes: brave
+  use their original animations too (`art::Originals`, `original_anim`: tribesman body + outfit layer, the preacher too, see
+  animations.md); otherwise they use rendered CC0 sheets (unit-art.md), else generated figures (`UnitSprites`, per kind and tribe), told apart by headgear, held item and clothes: brave
   (bare chest, hair tuft, empty hands), warrior (horned helmet, club), preacher (pointed hood, long robe, book), spy
   (dark cloak and cowl, dagger), firewarrior (red cone hat, flame in hand).
 - Selection (`units/selection.rs`, player 0's living units): left click on a unit selects it, Ctrl+click adds or

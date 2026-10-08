@@ -37,52 +37,57 @@ lying on the ground under every unit and leaning with the slope, hidden once dea
 Persons other than the shaman are layered: one body drawn blue (tribe 0), a tribe layer (0x10) per other tribe
 recolouring the cloth, and outfit layers (0x20) giving the unit type's gear over a shared body.
 
-Tribesman body (braves, warriors, firewarriors, spies), outfits by `(flags & 0x30, bits 9-10)`: none = brave,
-`0x20/1` horned skull helmet and fire in the hands = firewarrior, `0x20/2` headband, grey vest and a grey item at
-the hip = warrior, `0x20/3` long dark hair = spy, `0x30/1` grey pointed helmet, armour and pink shoulder pads = the
-preacher (monk) on the tribesman body (confirmed in the game; it covers `0x20/2` when both are drawn). Preachers
-are drawn with their own body (26-46) instead; the club attacks 20-24 have the monk's pointed helmet drawn in. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
+Tribesman body (every follower: braves, warriors, firewarriors, spies, preachers), outfits by
+`(flags & 0x30, bits 9-10)`: none = brave, `0x20/1` horned skull helmet and fire in the hands = firewarrior,
+`0x20/2` headband, grey vest and a grey item at the hip = warrior, `0x20/3` long dark hair = spy, `0x30/1` grey
+pointed helmet, armour and pink shoulder pads = preacher (monk; it covers `0x20/2` when both are drawn). Outfits
+exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy's). All identified in the game.
+"Brave only" below: the other outfits have the frames but never play them.
 
 | Anim | Frames | Action |
 |---|---|---|
 | 5 | 4 | walk (used) |
-| 6 | 6 | standing, breathing (idle) |
+| 6 | 6 | standing, breathing (idle, used) |
 | 7 | 5 | firewarrior throwing fire (attack), gear drawn in (no layers) |
-| 8 | 6 | kneeling, raising the arms up and down (praying; also worshipping the shaman nearby) |
-| 9 | 4 | brave walking, carrying wood; 11 (4) carrying wood (variant) |
-| 10 | 1 | brave standing still, holding wood |
-| 12 | 4 | crouch, both arms straight up, leap with arms spread, land; frame 1 (arms up) held for stranded units (every outfit) |
-| 13-15 | 7 | punches; 16 (1) brave tilting (unknown) |
-| 17 | 12 | throwing fire (firewarrior) |
+| 8 | 6 | kneeling, raising the arms up and down (praying; worshipping the shaman nearby; used) |
+| 9 | 4 | walking, carrying wood (brave only) |
+| 10 | 1 | standing still, holding wood (brave only) |
+| 11 | 4 | cutting wood (brave only) |
+| 12 | 4 | flattening the ground: crouch, arms up, jump (brave only; maybe also wrecking a construction site in an attack); frame 1 stands in for stranded units today |
+| 13 | 7 | punching (unchecked) |
+| 14 | 7 | receiving a punch |
+| 15 | 7 | punching, left foot forward |
+| 16 | 1 | tilted, probably while carried by a tornado |
+| 17 | 12 | spy setting fire to a building: disguised as a brave (plain) or a firewarrior (`0x20/1`), or discovered (`0x20/3`) |
 | 18 | 6 | brave sitting down, being converted by a preacher |
-| 19, 37 | 4 | tumbling in the air |
+| 19, 37 | 4 | tumbling in the air; also falling down a slope |
 | 25 | 7 | fighting: kick |
 | 38 | 8 | struck down onto the back (death, last frame lying) |
-| 39 | 1 | lying dead; 40 (5) dying: the body lying, its spirit rising |
-| 48 | 8 | brave hiding its eyes (an idle gesture?); 49 (9) waving an arm: crawling, maybe while running away (unsure) |
-| 50 | 7 | fighting stance (brave) |
-| 51 | 4 | sitting, probably in a boat |
-| 52 | 4 | arms flailing (used for drowning) |
+| 39 | 1 | lying dead |
+| 40 | 5 | the body lying, its spirit rising: drowning in the water (used) |
+| 48 | 8 | brave hiding its eyes (an idle gesture?) |
+| 49 | 9 | waving an arm: crawling, maybe while running away (unsure) |
+| 50 | 7 | fighting: crouching to dodge a hit, then punching |
+| 51 | 4 | pedalling: moving a vehicle |
+| 52 | 4 | running away (bitten by a swarm of bees) |
 | 20-24 | 4-18 | attacks with a club, the monk's pointed helmet drawn in (whose attacks: to check) |
-| 89 | 12 | scratching itself: a brave idle for too long; 90 (14) push-ups (warriors idle for too long), firewarrior gear drawn in; 91 (14) push-ups, headband and grey tool (no layers in either); 92 (17) spy idle: juggling |
+| 89 | 12 | scratching itself: a brave idle for too long |
+| 90 | 14 | push-ups (warriors idle for too long), firewarrior gear drawn in; 91 (14) push-ups, warrior headband drawn in |
+| 92 | 17 | spy idle: juggling |
 | 97 | 4 | brave carbonized (struck by lightning); 98 (4) shaman carbonized (probably unused) |
 
 ### Stranded (arms up)
-A unit that cannot reach its target stands with both arms up. Found by rendering every anim's frames: only
-tribesman anim 12 has it, frame 1 (`catalog::ARMS_UP_FRAME`): standing, both arms straight up, drawn for every
-outfit (brave plain, warrior headband, firewarrior a flame in each hand, spy hair; the monk's pointed helmet too) and every tribe and direction; the
-side views (2, 6) overlap both arms into one. The client holds that frame (`PersonAnim::ArmsUp`). Whether the game
-plays the whole jump (crouch, arms up, leap, land) or holds the frame is not checked. The monk outfit's helmet
-floats above the head in the crouch frame 0.
-Ruled out: 48 (hands to the face, a possible "despair"), 49 (waving one arm), 89 (itching), the
-preacher's 33-36 (pointing/swinging the staff), 28 and 32 (arms up but with the purple magic), 30 and 31
-(preacher and wildman spread-eagle in the air). The preacher has no arms-up stance: stranded preachers stand idle.
+A unit that cannot reach its target stands with both arms up. The client holds frame 1 of anim 12
+(`catalog::ARMS_UP_FRAME`, `PersonAnim::ArmsUp`): standing, both arms straight up, drawn for every outfit, tribe and
+direction (the side views 2 and 6 overlap both arms into one). Anim 12 is the braves' flattening jump: the real
+stranded anim is still to find. Ruled out: 48 (hiding the eyes), 49 (waving an arm), 89 (itching).
 
-Preacher body (blue headdress, staff, tribe layers on the gear): 26 (5) and 27 (8) walk, 28 (24) preaching with
-purple magic (praying), 29 (4) staff swing, 30 (4) flung, 32 (14) converting, 33-36 gestures, 44 (1) lying
-dead, 45 dying (burning, spirit rising), no arms-up stance (stranded preachers stand idle), 41 (3) standing with the staff (first frame = idle), 42 (5) kicking
-(used for drowning, unsure), 43 (8) struck down onto the back, 46 (4) tumbling.
-Wildmen (no layers): 0 (4) walk, 1 (1) stand, 2 (3) eating fruit at a tree, 3 (1) sitting, 4 (3) drinking water,
+Old shaman body (anims 26-46, blue headdress, staff, tribe layers on the gear): unused by the game, which draws
+the shamans with 53-96. 26 (5) standing, 27 (8) walk, 28 (24) casting a spell (purple magic), 29 (4) punch, 30 (4)
+flying in a tornado, 32 (14) another spell, 33-36 and 41 staff gestures (fighting?), 42 (5) foot kick, 43 (8)
+falling down (death), 44 (1) lying dead, 45 dying (burning, spirit rising), 46 (4) tumbling.
+Wildmen (no layers): 0 (4) walk, 1 (1) stand, 2 (3) eating fruit at a tree, 3 (1) drinking water (still), 4 (3)
+drinking water (animated),
 31 (4) flung,
 47 (4) flying or rolling down.
 

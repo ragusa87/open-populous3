@@ -4,7 +4,7 @@
 
 use game_core::unit::{Action, UnitKind, CAST_TICKS, DYING_TICKS};
 use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
-use pop3_format::catalog::{PersonAnim, ARMS_UP_FRAME, PreacherAnim, ShamanAnim, WildmanAnim, OUTFIT_FIREWARRIOR, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
+use pop3_format::catalog::{PersonAnim, ARMS_UP_FRAME, ShamanAnim, WildmanAnim, OUTFIT_FIREWARRIOR, OUTFIT_PREACHER, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
 use pop3_format::{LevelError, Picture, SpriteBank, Theme};
 use std::f32::consts::FRAC_PI_4;
 use std::path::Path;
@@ -180,8 +180,8 @@ pub fn has_partial_alpha(f: &Frame) -> bool {
 }
 
 /// Which original animation shows `kind` in `pose` for `tribe`, with which outfit layer, and
-/// which single frame to hold if any (a gesture standing in for a still pose). The shaman has an
-/// animation per tribe; the others are coloured by layers (docs/specs/animations.md).
+/// which single frame to hold if any. The shaman has an animation per tribe; the others are
+/// coloured by layers (docs/specs/animations.md).
 pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Outfit>, Option<usize>) {
     match kind {
         UnitKind::Shaman => (pose.original().anim(tribe), None, None),
@@ -195,21 +195,12 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
             };
             (anim.anim(), None, None)
         }
-        UnitKind::Preacher => {
-            let anim = match pose {
-                Pose::Idle | Pose::Cast | Pose::Stranded => PreacherAnim::Stand,
-                Pose::Walk => PreacherAnim::Walk,
-                Pose::Pray => PreacherAnim::Preach,
-                Pose::Fall => PreacherAnim::Fall,
-                Pose::Drown => PreacherAnim::Flail,
-            };
-            (anim.anim(), None, (anim == PreacherAnim::Stand).then_some(0))
-        }
         _ => {
             let outfit = match kind {
                 UnitKind::Warrior => Some(OUTFIT_WARRIOR),
                 UnitKind::Firewarrior => Some(OUTFIT_FIREWARRIOR),
                 UnitKind::Spy => Some(OUTFIT_SPY),
+                UnitKind::Preacher => Some(OUTFIT_PREACHER),
                 _ => None,
             };
             let anim = match pose {
@@ -217,7 +208,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Walk => PersonAnim::Walk,
                 Pose::Pray => PersonAnim::Kneel,
                 Pose::Fall => PersonAnim::Fall,
-                Pose::Drown => PersonAnim::Flail,
+                Pose::Drown => PersonAnim::Drown,
                 Pose::Stranded => PersonAnim::ArmsUp,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
@@ -331,7 +322,8 @@ mod tests {
         assert_eq!(pose_for(&Action::Stranded { to: (0, 0) }), Pose::Stranded);
         assert_eq!(original_anim(UnitKind::Brave, Pose::Stranded, 2), (12, None, Some(ARMS_UP_FRAME)));
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Stranded, 0), (12, Some(OUTFIT_WARRIOR), Some(ARMS_UP_FRAME)));
-        assert_eq!(original_anim(UnitKind::Preacher, Pose::Stranded, 0), original_anim(UnitKind::Preacher, Pose::Idle, 0), "no arms-up anim");
+        assert_eq!(original_anim(UnitKind::Preacher, Pose::Pray, 1), (8, Some(OUTFIT_PREACHER), None), "the monk on the tribesman body");
+        assert_eq!(original_anim(UnitKind::Spy, Pose::Drown, 0), (40, Some(OUTFIT_SPY), None), "lying, spirit rising");
         assert_eq!(original_anim(UnitKind::Shaman, Pose::Stranded, 1), original_anim(UnitKind::Shaman, Pose::Idle, 1));
     }
 

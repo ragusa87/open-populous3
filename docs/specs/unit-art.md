@@ -113,7 +113,7 @@ The Quaternius characters have no "arms up" clip. Of the candidates, `Defeat` pu
 where the stance reads best): 0-20% arms rising from the sides, 20-40% arms half up and spread, 45-80% both arms
 fully above the head, 80-100% coming back down. The sheet loops 4 frames over 45-80% (`Timing::Span`), at 4 fps;
 an earlier span (22-67%) showed the arms only shoulder high. Every model gets the sheet (the shaman's is unused:
-she is never stranded). With the original files the tribesmen use anim 12 instead (animations.md).
+she is never stranded). With the original files the followers hold a frame of anim 12 instead (animations.md).
 
 ## Generating with an image model
 Models do not keep a fixed grid or anchor reliably: generate one direction or pose at a time, larger, then

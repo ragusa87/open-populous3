@@ -1,4 +1,4 @@
-//! Idle tribesmen near their shaman pray facing her. Drawn only: in the simulation they stay idle
+//! Idle followers near their shaman pray facing her. Drawn only: in the simulation they stay idle
 //! and take orders as usual (docs/specs/units.md, "Worshipping the shaman").
 
 use game_core::unit::{octant, torus_delta, Action, Unit, UnitKind};
@@ -19,11 +19,11 @@ pub fn shamans(units: &[Unit]) -> [Option<&Unit>; TRIBES as usize] {
     out
 }
 
-/// The facing (eighths of a turn) towards `shaman` when `unit` worships her: an idle brave,
-/// warrior, firewarrior or spy of her tribe, with her idle or walking within range.
+/// The facing (eighths of a turn) towards `shaman` when `unit` worships her: an idle follower
+/// of her tribe (not a wildman), with her idle or walking within range.
 pub fn worship_facing(unit: &Unit, shaman: Option<&Unit>) -> Option<u8> {
     let shaman = shaman?;
-    let worshipper = matches!(unit.kind, UnitKind::Brave | UnitKind::Warrior | UnitKind::Firewarrior | UnitKind::Spy);
+    let worshipper = UnitKind::FOLLOWERS.contains(&unit.kind);
     let present = matches!(shaman.action, Action::Idle | Action::Walking { .. });
     if !worshipper || unit.action != Action::Idle || !present || unit.owner != shaman.owner {
         return None;
@@ -64,7 +64,8 @@ mod tests {
         let mut her = unit(0, UnitKind::Shaman, (10, 10));
         let brave = unit(0, UnitKind::Brave, (9, 10));
         assert_eq!(worship_facing(&unit(1, UnitKind::Brave, (9, 10)), Some(&her)), None, "other tribe");
-        for kind in [UnitKind::Preacher, UnitKind::Wildman, UnitKind::Shaman] {
+        assert!(worship_facing(&unit(0, UnitKind::Preacher, (9, 10)), Some(&her)).is_some(), "preachers too");
+        for kind in [UnitKind::Wildman, UnitKind::Shaman] {
             assert_eq!(worship_facing(&unit(0, kind, (9, 10)), Some(&her)), None, "{kind:?}");
         }
         let mut busy = brave.clone();

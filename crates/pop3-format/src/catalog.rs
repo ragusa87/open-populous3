@@ -162,8 +162,8 @@ pub enum PersonAnim {
     Kneel,
     /// Struck down onto its back (8 frames, the last lying).
     Fall,
-    /// Arms flailing (4 frames): used for drowning.
-    Flail,
+    /// Lying, its spirit rising (5 frames): drowning.
+    Drown,
     /// Crouch, both arms straight up (frame `ARMS_UP_FRAME`), leap, land (4 frames): its arms-up
     /// frame is held for stranded units.
     ArmsUp,
@@ -179,7 +179,7 @@ impl PersonAnim {
             PersonAnim::Walk => 5,
             PersonAnim::Kneel => 8,
             PersonAnim::Fall => 38,
-            PersonAnim::Flail => 52,
+            PersonAnim::Drown => 40,
             PersonAnim::ArmsUp => 12,
         }
     }
@@ -187,7 +187,7 @@ impl PersonAnim {
 
 /// Outfits over the tribesman body: braves wear none. Firewarrior: horned skull helmet, fire in the
 /// hands. Warrior: headband, grey vest. Spy: long dark hair. Preacher (monk): grey pointed helmet,
-/// armour, pink shoulder pads (his own body, anims 26-46, is used instead).
+/// armour, pink shoulder pads.
 pub const OUTFIT_FIREWARRIOR: Outfit = Outfit { flags: 0x20, bits: 1 };
 pub const OUTFIT_WARRIOR: Outfit = Outfit { flags: 0x20, bits: 2 };
 pub const OUTFIT_SPY: Outfit = Outfit { flags: 0x20, bits: 3 };
@@ -216,33 +216,6 @@ impl WildmanAnim {
             WildmanAnim::Sit => 3,
             WildmanAnim::Flung => 31,
             WildmanAnim::Down => 47,
-        }
-    }
-}
-
-/// The preacher's own body (anims 26-46: blue headdress, staff; tribe colour layers on the gear).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PreacherAnim {
-    /// Standing with the staff (first frame of a 3-frame gesture).
-    Stand,
-    /// Walking (8 frames).
-    Walk,
-    /// Preaching, purple magic around (24 frames): used for praying.
-    Preach,
-    /// Struck down onto his back (8 frames, the last lying).
-    Fall,
-    /// Kicking, flailing (5 frames): used for drowning (unsure).
-    Flail,
-}
-
-impl PreacherAnim {
-    pub fn anim(self) -> usize {
-        match self {
-            PreacherAnim::Stand => 41,
-            PreacherAnim::Walk => 27,
-            PreacherAnim::Preach => 28,
-            PreacherAnim::Fall => 43,
-            PreacherAnim::Flail => 42,
         }
     }
 }
