@@ -38,31 +38,34 @@ Persons other than the shaman are layered: one body drawn blue (tribe 0), a trib
 recolouring the cloth, and outfit layers (0x20) giving the unit type's gear over a shared body.
 
 Tribesman body (braves, warriors, firewarriors, spies), outfits by `(flags & 0x30, bits 9-10)`: none = brave,
-`0x20/1` horned skull helmet and fire in the hands = firewarrior, `0x30/1` grey pointed helmet and armour =
-warrior, `0x20/3` long dark hair or hood = spy (by elimination, unsure), `0x20/2` headband and a grey tool =
-unknown. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
+`0x20/1` horned skull helmet and fire in the hands = firewarrior, `0x30/1` grey pointed helmet and armour with
+pink shoulder pads = warrior, `0x20/3` long dark hair = spy (confirmed in the game), `0x20/2` headband, grey vest
+and a grey item at the hip = a warrior look too (seen in the game, which one the warrior wears to check); both
+warrior layers together look like `0x30/1` alone. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
 
 | Anim | Frames | Action |
 |---|---|---|
 | 5 | 4 | walk (used) |
 | 6 | 6 | standing, breathing (idle) |
+| 7 | 5 | firewarrior throwing fire (attack), gear drawn in (no layers) |
 | 8 | 6 | kneeling, raising the arms up and down (praying; also worshipping the shaman nearby) |
-| 9, 11 | 4 | walk variants |
-| 10 | 1 | standing still |
+| 9 | 4 | brave walking, carrying wood; 11 (4) carrying wood (variant) |
+| 10 | 1 | brave standing still, holding wood |
 | 12 | 4 | crouch, both arms straight up, leap with arms spread, land; frame 1 (arms up) held for stranded units (every outfit) |
-| 13-15 | 7 | punches; 16 (1) staggering |
+| 13-15 | 7 | punches; 16 (1) brave tilting (unknown) |
 | 17 | 12 | throwing fire (firewarrior) |
-| 18 | 6 | sitting down |
+| 18 | 6 | brave sitting down, being converted by a preacher |
 | 19, 37 | 4 | tumbling in the air |
 | 25 | 7 | fighting: kick |
 | 38 | 8 | struck down onto the back (death, last frame lying) |
 | 39 | 1 | lying dead; 40 (5) dying: the body lying, its spirit rising |
-| 48 | 8 | hands to the face; 49 (9) waving an arm |
+| 48 | 8 | brave hiding its eyes (an idle gesture?); 49 (9) waving an arm: crawling, maybe while running away (unsure) |
 | 50 | 7 | fighting stance (brave) |
 | 51 | 4 | sitting, probably in a boat |
 | 52 | 4 | arms flailing (used for drowning) |
 | 20-24 | 4-18 | warrior with built-in helmet and club: attacks |
-| 89 | 12 | scratching itself: a brave idle for too long; 90 (14) push-ups (warriors idle for too long), firewarrior gear drawn in; 91 (14) push-ups, headband and grey tool (no layers in either); 92 (17) working |
+| 89 | 12 | scratching itself: a brave idle for too long; 90 (14) push-ups (warriors idle for too long), firewarrior gear drawn in; 91 (14) push-ups, headband and grey tool (no layers in either); 92 (17) spy idle: juggling |
+| 97 | 4 | brave carbonized (struck by lightning); 98 (4) shaman carbonized (probably unused) |
 
 ### Stranded (arms up)
 A unit that cannot reach its target stands with both arms up. Found by rendering every anim's frames: only
@@ -79,7 +82,8 @@ Preacher body (blue headdress, staff, tribe layers on the gear): 26 (5) and 27 (
 purple magic (praying), 29 (4) staff swing, 30 (4) flung, 32 (14) converting, 33-36 gestures, 44 (1) lying
 dead, 45 dying (burning, spirit rising), no arms-up stance (stranded preachers stand idle), 41 (3) standing with the staff (first frame = idle), 42 (5) kicking
 (used for drowning, unsure), 43 (8) struck down onto the back, 46 (4) tumbling.
-Wildmen (no layers): 0 (4) walk, 1 (1) stand, 2 (3) gesture, 3 (1) sitting, 4 (3) crouching, 31 (4) flung,
+Wildmen (no layers): 0 (4) walk, 1 (1) stand, 2 (3) eating fruit at a tree, 3 (1) sitting, 4 (3) drinking water,
+31 (4) flung,
 47 (4) flying or rolling down.
 
 Shamans: 4 consecutive animations per action, one per tribe (blue, red, yellow, green), colours drawn in:
@@ -94,7 +98,7 @@ Shamans: 4 consecutive animations per action, one per tribe (blue, red, yellow, 
 | 73 | tumbling in the air | 4 |
 | 77 | walk | 8 |
 | 85 | knocked down | 8 |
-| 81 | standing still | 1 |
+| 81 | moving the magic wand | 1 |
 | 93 | kneeling on one knee: praying (at the pyramid; 95 is the yellow one) | 1 |
 
 Reading the sprite as `field / 6` (no -1) looks almost right but shows the next view's sprite once per
