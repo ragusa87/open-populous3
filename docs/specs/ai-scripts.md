@@ -16,8 +16,9 @@ disagrees with the files, the files win.
 
 ## What PopScript is
 - Each computer tribe (red, yellow, green) runs one compiled script. Blue is the human player and never has one
-  (header byte 99 is always 0). The level header calls the language "Script2" (`char Script2[10][32]`, see
-  level-format.md). The community calls it PopScript, and Reincarnated calls its Lua successor "Script4" [lua].
+  (header byte 99 is always 0). The community calls it PopScript or "Script2" (PopRe's v3 level header has a
+  `char Script2[10][32]`, see level-format.md; the original header has no such field), and Reincarnated calls
+  its Lua successor "Script4" [lua].
 - A script does not move units itself. It steers the built-in computer-player AI in three ways:
   - it switches AI behaviours ("states") on and off: build, house, train, defend, preach, attack...
   - it tunes 48 AI attributes (`INT_ATTR_*`): how many of each unit to keep, attack force mix, boats...
@@ -956,6 +957,23 @@ Level header bytes 89, 90, 91 = script number for red, yellow, green, byte 99 = 
 - Multiplayer levels use the stubs (80, 82-84, 101, 112, 120, 122).
 - **Missing scripts in active slots**: levl2100 (100), levl2110 (85), levl2131 (130).
 - cpscr081 is never referenced; cpscr099 only by an inactive slot of levl2112.
+- **Every campaign level is scripted, with AI and level events mixed in the same script.** Decompiling the
+  scripts of 2001-2025 and 2079 shows:
+  - all 26 queue messages: `CREATE_MSG_NARRATIVE` in all but 2001, `CREATE_MSG_INFORMATION` in 12;
+  - 23 switch on `GIVE_UP_AND_SULK` (all but 2001, 2002 and 2079);
+  - 17 play a flyby;
+  - 16 watch stone heads (`GET_HEAD_TRIGGER_COUNT`), and 7 fire `TRIGGER_THING`;
+  - 4 end the level themselves: 2005 and 2079 are won, 2010 and 2015 are lost (2019 does both), the others end
+    by the normal victory rules;
+  - the tutorial 2079 (1 069 lines) drives the UI: flashing buttons, panels, the human's shaman.
+  When several tribes share a script, its level events run once per tribe. Level 2002, for instance, runs
+  cpscr074 for all three tribes: whether the messages repeat or the game only runs events for one tribe is
+  unknown.
+- The other files in `levels/` hold no scripts:
+  - `levlNNNN.inf` (26 B) is a designer note, e.g. "island 1 Access Level".
+  - `constant.dat` (11 712 B) is obfuscated.
+  - `objectiv.dat` (768 B, 16-byte records) and `levlspc2.dat` (924 B) are small binary tables. Their meaning is
+    unknown.
 - The wiki's level list gives the same numbers: 2100 uses 100, 2110 uses 085 and 2131 uses 130. It also
   shows the Undiscovered Worlds levels (`levluw/`) using 001, 002, 079, 085, 087, 098, 119, 124, 130 and 138. So
   the missing scripts probably ship with that add-on (no `levluw/` here to check). Unused slots of 2- and
