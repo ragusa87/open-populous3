@@ -34,8 +34,7 @@ client draws its own shadow instead (`units/shadow.rs`): a soft black ellipse 21
 lying on the ground under every unit and leaning with the slope, hidden once dead or drowning.
 
 ## Identified animations
-Numbers here are animation indices in `VSTART-0.ANI` (0-98, `AnimBank::start(anim, dir)`), never the cell numbers
-of a review page.
+Numbers here are animation indices in `VSTART-0.ANI` (0-98, `AnimBank::start(anim, dir)`).
 Persons other than the shaman are layered: one body drawn blue (tribe 0), a tribe layer (0x10) per other tribe
 recolouring the cloth, and outfit layers (0x20) giving the unit type's gear over a shared body.
 
