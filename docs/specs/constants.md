@@ -64,6 +64,6 @@ Units:
 - Read it from the original install when one is present, and never ship it. Generated mode needs its own
   defaults, written by us, not copied.
 - Our spell and unit placeholders (spells.md, units.md, buildings.md) can then be checked against the real
-  values.
+  values. The per-spell table (cost, charges, range, altitude bands, effects) is in spells.md "Original balance".
 - The spell costs here are the same numbers the AI scripts read through `INT_M_SPELL_*_COST` (ai-scripts.md).
   Whether those are adjusted, e.g. by `COMPUTER_MANA_ADJUST`, is unknown.
