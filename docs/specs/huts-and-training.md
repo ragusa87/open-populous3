@@ -38,7 +38,8 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
 
 ### Rules
 State on `Building` (huts only): `level` 1-3 (from the kind, `villager_hut` sizes), `occupants` (unit ids, in
-entry order), `breed` (green bar) and `grow` (red bar) progress. The hut's tooltip shows both bars.
+entry order), `breed` (green bar) and `grow` (red bar) progress. The hut's tooltip shows both bars; a large
+hut (max size) hides the red bar, it does not show it at 0.
 
 1. **Entering** (`Order::Enter { building }` through `Command::OrderUnit`): any follower of the owner (not the
    shaman, not wildmen) walks to the door, then in (buildings.md "Doors"), and becomes `Action::Inside`: off the
