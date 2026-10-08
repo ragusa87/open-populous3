@@ -186,11 +186,12 @@ impl PersonAnim {
 }
 
 /// Outfits over the tribesman body: braves wear none. Firewarrior: horned skull helmet, fire in the
-/// hands. Warrior: grey pointed helmet and armour (its own attack anims 20-24 have it built in).
-/// Spy: long dark hair or hood (by elimination, unsure). `0x20 / 2` (headband, grey tool) is unknown.
+/// hands. Warrior: headband, grey vest. Spy: long dark hair. Preacher (monk): grey pointed helmet,
+/// armour, pink shoulder pads (his own body, anims 26-46, is used instead).
 pub const OUTFIT_FIREWARRIOR: Outfit = Outfit { flags: 0x20, bits: 1 };
-pub const OUTFIT_WARRIOR: Outfit = Outfit { flags: 0x30, bits: 1 };
+pub const OUTFIT_WARRIOR: Outfit = Outfit { flags: 0x20, bits: 2 };
 pub const OUTFIT_SPY: Outfit = Outfit { flags: 0x20, bits: 3 };
+pub const OUTFIT_PREACHER: Outfit = Outfit { flags: 0x30, bits: 1 };
 
 /// Wildmen (neutral, no layers): their own small set of animations, identified by eye.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

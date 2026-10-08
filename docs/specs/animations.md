@@ -38,10 +38,10 @@ Persons other than the shaman are layered: one body drawn blue (tribe 0), a trib
 recolouring the cloth, and outfit layers (0x20) giving the unit type's gear over a shared body.
 
 Tribesman body (braves, warriors, firewarriors, spies), outfits by `(flags & 0x30, bits 9-10)`: none = brave,
-`0x20/1` horned skull helmet and fire in the hands = firewarrior, `0x30/1` grey pointed helmet and armour with
-pink shoulder pads = warrior, `0x20/3` long dark hair = spy (confirmed in the game), `0x20/2` headband, grey vest
-and a grey item at the hip = a warrior look too (seen in the game, which one the warrior wears to check); both
-warrior layers together look like `0x30/1` alone. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
+`0x20/1` horned skull helmet and fire in the hands = firewarrior, `0x20/2` headband, grey vest and a grey item at
+the hip = warrior, `0x20/3` long dark hair = spy, `0x30/1` grey pointed helmet, armour and pink shoulder pads = the
+preacher (monk) on the tribesman body (confirmed in the game; it covers `0x20/2` when both are drawn). Preachers
+are drawn with their own body (26-46) instead; the club attacks 20-24 have the monk's pointed helmet drawn in. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
 
 | Anim | Frames | Action |
 |---|---|---|
@@ -63,17 +63,17 @@ warrior layers together look like `0x30/1` alone. Outfits exist on 5, 6, 8-19, 2
 | 50 | 7 | fighting stance (brave) |
 | 51 | 4 | sitting, probably in a boat |
 | 52 | 4 | arms flailing (used for drowning) |
-| 20-24 | 4-18 | warrior with built-in helmet and club: attacks |
+| 20-24 | 4-18 | attacks with a club, the monk's pointed helmet drawn in (whose attacks: to check) |
 | 89 | 12 | scratching itself: a brave idle for too long; 90 (14) push-ups (warriors idle for too long), firewarrior gear drawn in; 91 (14) push-ups, headband and grey tool (no layers in either); 92 (17) spy idle: juggling |
 | 97 | 4 | brave carbonized (struck by lightning); 98 (4) shaman carbonized (probably unused) |
 
 ### Stranded (arms up)
 A unit that cannot reach its target stands with both arms up. Found by rendering every anim's frames: only
 tribesman anim 12 has it, frame 1 (`catalog::ARMS_UP_FRAME`): standing, both arms straight up, drawn for every
-outfit (brave plain, warrior helmet, firewarrior a flame in each hand, spy hair) and every tribe and direction; the
+outfit (brave plain, warrior headband, firewarrior a flame in each hand, spy hair; the monk's pointed helmet too) and every tribe and direction; the
 side views (2, 6) overlap both arms into one. The client holds that frame (`PersonAnim::ArmsUp`). Whether the game
-plays the whole jump (crouch, arms up, leap, land) or holds the frame is not checked. The warrior outfit's helmet
-floats above the head in the crouch frame 0 (original data or a wrong outfit mapping, unchecked).
+plays the whole jump (crouch, arms up, leap, land) or holds the frame is not checked. The monk outfit's helmet
+floats above the head in the crouch frame 0.
 Ruled out: 48 (hands to the face, a possible "despair"), 49 (waving one arm), 89 (itching), the
 preacher's 33-36 (pointing/swinging the staff), 28 and 32 (arms up but with the purple magic), 30 and 31
 (preacher and wildman spread-eagle in the air). The preacher has no arms-up stance: stranded preachers stand idle.

@@ -204,12 +204,12 @@ mod tests {
     #[test]
     fn layers_shown_per_tribe_and_outfit() {
         let fire = Outfit { flags: 0x20, bits: 1 };
-        let warrior = Outfit { flags: 0x30, bits: 1 };
+        let monk = Outfit { flags: 0x30, bits: 1 };
         assert!(element_shown(0x0000, 2, None), "the body");
         assert!(!element_shown(0x0204, 1, None), "shadow");
         assert!(element_shown(0x0410, 2, None) && !element_shown(0x0410, 1, None) && !element_shown(0x0410, 0, None), "yellow loincloth for tribe 2 only");
-        assert!(element_shown(0x0220, 0, Some(fire)) && !element_shown(0x0220, 0, Some(warrior)) && !element_shown(0x0220, 0, None));
-        assert!(element_shown(0x0230, 3, Some(warrior)) && !element_shown(0x0230, 1, Some(fire)), "warrior helmet whatever the tribe");
+        assert!(element_shown(0x0220, 0, Some(fire)) && !element_shown(0x0220, 0, Some(monk)) && !element_shown(0x0220, 0, None));
+        assert!(element_shown(0x0230, 3, Some(monk)) && !element_shown(0x0230, 1, Some(fire)), "monk helmet whatever the tribe");
     }
 
     fn le(v: &[u16]) -> Vec<u8> {
