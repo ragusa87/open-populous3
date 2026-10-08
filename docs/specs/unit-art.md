@@ -92,13 +92,13 @@ A rigged, animated 3D model (glTF) can be rendered into sheets by the `render_sp
   just render-sprites assets/models/witch.gltf assets/units/shaman [--head 3.1] [--tribe Clothes,Hat] [--skin d29a6e]
   just render-units    # every kind, with its model and tribe materials
 
-One PNG per pose (`idle`, `walk`, `pray`, `cast`, `fall`, `drown`), 8 rows (directions 0-7, all rendered:
+One PNG per pose (`idle`, `walk`, `pray`, `cast`, `fall`, `drown`, `stranded`), 8 rows (directions 0-7, all rendered:
 no mirroring) of 320 x 288 cells, 4 pixels per base pixel, feet at (160, 256) (bigger than a drawn cell: a
 lying body and the cast jump must fit), orthographic, seen from 30 deg above, hard edges, 2 px dark outline.
 The model's tribe materials (`--tribe`, default `Clothes,Hat`) are rendered in the magenta key, the material
 named `Skin` in `--skin` (the Quaternius characters ship a near-black skin; default tan `d29a6e`). Pose to clip: idle Idle
 (8 frames over the loop), walk Walk (12), pray SitDown (its last moment), cast Jump (12), fall Death (8, the
-last two lying), drown RecieveHit (4, sunk 45% under a ripple line). Scale: the head top (default 3.1 model
+last two lying), drown RecieveHit (4, sunk 45% under a ripple line), stranded Victory (4, looping over 22-67% of the clip: arms pumping up). Scale: the head top (default 3.1 model
 units) is 34 base px above the feet.
 
 The game embeds the sheets (`units/sheets.rs`), crops every cell around the feet and swaps the magenta hue for

@@ -42,7 +42,8 @@ struct PoseShot {
     clip: &'static str,
     frames: usize,
     /// Frame times: `Loop` spreads them over the clip, `Once` from start to end, `End` is the last
-    /// moment only (a held pose); a `fall` repeats its last frame (held while dead).
+    /// moment only (a held pose), `Span` loops over that fraction of the clip; a `fall` repeats its
+    /// last frame (held while dead).
     timing: Timing,
     /// Fraction of the head height under the water line (drowning).
     sink: f32,
@@ -53,6 +54,7 @@ enum Timing {
     Loop,
     Once,
     End,
+    Span(f32, f32),
 }
 
 const SHOTS: &[PoseShot] = &[
@@ -62,6 +64,7 @@ const SHOTS: &[PoseShot] = &[
     PoseShot { pose: "cast", clip: "Jump", frames: 12, timing: Timing::Once, sink: 0.0 },
     PoseShot { pose: "fall", clip: "Death", frames: 8, timing: Timing::Once, sink: 0.0 },
     PoseShot { pose: "drown", clip: "RecieveHit", frames: 4, timing: Timing::Loop, sink: 0.45 },
+    PoseShot { pose: "stranded", clip: "Victory", frames: 4, timing: Timing::Span(0.22, 0.67), sink: 0.0 },
 ];
 
 /// Time of frame `k` of `n` in a clip lasting `duration`.
@@ -69,6 +72,7 @@ fn frame_time(timing: Timing, k: usize, n: usize, duration: f32, pose: &str) -> 
     match timing {
         Timing::Loop => duration * k as f32 / n as f32,
         Timing::End => duration,
+        Timing::Span(from, to) => duration * (from + (to - from) * k as f32 / n as f32),
         Timing::Once if pose == "fall" => duration * (k as f32 / (n - 2) as f32).min(1.0),
         Timing::Once => duration * k as f32 / (n - 1).max(1) as f32,
     }

@@ -32,7 +32,7 @@ impl Pose {
         match self {
             Pose::Walk => 10.0,
             Pose::Drown => 8.0,
-            Pose::Pray => 4.0,
+            Pose::Pray | Pose::Stranded => 4.0,
             _ => 6.0,
         }
     }

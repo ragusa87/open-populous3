@@ -29,12 +29,13 @@ macro_rules! sheet {
 macro_rules! poses {
     ($kind:literal, $pose:expr) => {
         match $pose {
-            Pose::Idle | Pose::Stranded => sheet!($kind, "idle"),
+            Pose::Idle => sheet!($kind, "idle"),
             Pose::Walk => sheet!($kind, "walk"),
             Pose::Pray => sheet!($kind, "pray"),
             Pose::Cast => sheet!($kind, "cast"),
             Pose::Fall => sheet!($kind, "fall"),
             Pose::Drown => sheet!($kind, "drown"),
+            Pose::Stranded => sheet!($kind, "stranded"),
         }
     };
 }
