@@ -14,4 +14,5 @@
   - [assets.md](specs/assets.md): original-data-free path, missing-asset inventory and building kit brief.
   - [buildings.md](specs/buildings.md): building models, stages and planned construction.
   - [building kit](../assets/models/buildings/README.md): reproducible glTF generation, Blender preview and licence.
+  - [constants.md](specs/constants.md): balance values (`constant.dat`), its XOR encoding and text format.
   - [sound.md](specs/sound.md): original `.SDT` sound, drum and music banks.
