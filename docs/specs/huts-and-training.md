@@ -38,7 +38,7 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
 
 ### Rules
 State on `Building` (huts only): `level` 1-3 (from the kind, `villager_hut` sizes), `occupants` (unit ids, in
-entry order), `breed` progress, and the growing state (rule 6).
+entry order), `breed` (green bar) and `grow` (red bar) progress. The hut's tooltip shows both bars.
 
 1. **Entering** (`Order::Enter { building }` through `Command::OrderUnit`): any follower of the owner (not the
    shaman, not wildmen) walks to the door, then in (buildings.md "Doors"), and becomes `Action::Inside`: off the
@@ -49,15 +49,20 @@ entry order), `breed` progress, and the growing state (rule 6).
    nearest built hut with room within 8 cells. Other kinds only enter when ordered.
 4. **Population**: every living unit of the tribe except the shaman, inside or out. Cap = sum of the supply of
    its built huts, at most 199. Units over the cap (level start, conversions) stay; only breeding stops.
-5. **Breeding**: each built hut, every update, adds `occupants + 1` to `breed` (half steps: 0 inside = 0.5,
-   1 = 1.0, 2 = 1.5..., up to 3.0 for 5). A brave is born when `breed >= 2 * SPROG_TIME[level] * band / 100`,
-   with `band` from the tribe's population as a % of its cap. The brave appears at the door, idle, and `breed`
+5. **Breeding** (green bar): each built hut, every update, adds `occupants + 1` to `breed` (half steps: 0 inside =
+   0.5, 1 = 1.0, 2 = 1.5..., up to 3.0 for 5). At 100 % (`breed >= 2 * SPROG_TIME[level] * band / 100`, with
+   `band` from the tribe's population as a % of its cap) a brave is born at the front door, idle, and `breed`
    restarts at 0. At the cap, `breed` stays full and the brave comes as soon as there is room. A newly built hut
-   starts with `breed` full.
-6. **Growing** (not to implement yet, internals to settle): a small or medium hut gets flagged for an upgrade
-   (what flags it is unknown). Some of the villagers inside then fetch wood, much like a construction (wood
-   dispatch of buildings.md); once the wood is provided, the hut switches to the next size (same footprint).
-   Large huts do not grow.
+   starts with `breed` full. Later: a small star animation where the brave appears (client).
+6. **Growing** (red bar, the need to grow): `grow` rises up to 100 %. At 100 %, if the tribe's population has room
+   (below its cap), the hut grows, as in the game:
+   1. some braves of the hut fetch wood and put it inside;
+   2. the hut becomes a construction site of the next size (if there is one: large huts do not grow), with the
+      wood of its current size already in it;
+   3. a few braves work on it (as a construction, buildings.md) while the others inside keep resting: the hut stays
+      usable all along (people inside, breeding);
+   4. once built, it is the bigger hut: more wood in it and more room for people.
+   If the population is saturated, the red bar stays at 100 % and blinks (client) until there is room.
 7. **Mana** (every `MANA_UPDATE` = 16 turns), per tribe: sum over its people of `MANA_F[kind]` x activity %
    (inside a hut: `HOUSED` x `HUT_LEVEL[level]`; working on a building or fetching wood: `WORKING`; inside a
    training hut: `TRAINING`; otherwise [ours]: 0), then x `HUMAN_` or `COMPUTER_MANA_ADJUST`, added to the
@@ -110,7 +115,7 @@ Every number of these rules lives in one place, `game_core::balance`:
 
 With the default balance, a small hut with 1 brave inside at 0-4 % population breeds every 4000 x 30 % = 1200 ticks
 (2 min); 3 inside (gain 2.0), 1 min. To measure in the game: time between two braves of a small hut with 1 inside,
-time to train one warrior and its mana, what flags a hut for an upgrade.
+time to train one warrior and its mana, how fast the red bar fills.
 
 ## Simulation (to build)
 - `Building::id` (stable, given in load order then creation order): units point at it; the view needs it too
@@ -124,7 +129,7 @@ time to train one warrior and its mana, what flags a hut for an upgrade.
 
 ## Open questions
 - Huts: what the population band is a percentage of (the tribe's cap assumed, or 199); whether people outside
-  huts make mana (assumed not); what flags a hut for an upgrade and how much wood it takes; whether idle braves house
+  huts make mana (assumed not); what fills the red bar, how much wood growing takes; whether idle braves house
   themselves, from how far, after how long.
 - Whether spell recharge and training take from the same mana pool (TODO "Mana").
 - Training: how mana is taken (assumed along the training), the real `CONV_*` meaning and the cost by specialist

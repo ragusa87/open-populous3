@@ -118,8 +118,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Towers (drum tower): hold one unit, which gets a longer range from there: firewarriors throw farther, the shaman casts spells farther, a preacher converts enemies around the tower. No other tower effect.
 - [ ] Training huts, see [huts-and-training.md](docs/specs/huts-and-training.md): queue around the door (folded snake), one follower inside at a time, transformed into the hut's kind, mana along the training, cancel by ordering it out.
 - [ ] Training: check in the game how mana is taken, the training time (`CONV_*` = 4000?) and the cost by specialist count (`TRAIN_MANA_BAND`).
-- [ ] Houses, see [huts-and-training.md](docs/specs/huts-and-training.md): capacity 3/4/5, supply 3/5/7 (cap 199), breeding by occupants and population band, mana from the people inside.
-- [ ] Houses grow (small -> medium -> large: `villager_hut` sizes): flagged for an upgrade, villagers inside fetch the wood like a construction, then it switches size. Settle the internals (what flags it, how much wood) before implementing.
+- [ ] Houses, see [huts-and-training.md](docs/specs/huts-and-training.md): green (birth) and red (grow) bars in the tooltip, a star animation at birth; capacity 3/4/5, supply 3/5/7 (cap 199), breeding by occupants and population band, mana from the people inside.
+- [ ] Houses grow (small -> medium -> large: `villager_hut` sizes): red bar to 100 %, then if the population has room braves fetch wood and the hut becomes a construction site of the next size, still usable (huts-and-training.md rule 6). Settle what fills the red bar and the wood per size before implementing.
 - [ ] `game_core::balance`: `Turns` (original game turns) converted to ticks, `Balance::ours()` defaults, later `Balance::from_constants`; every rule reads it from `GameMap` (huts-and-training.md "Balance and game turns").
 
 ## Wood ([trees.md](docs/specs/trees.md))
