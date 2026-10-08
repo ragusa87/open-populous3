@@ -43,6 +43,7 @@ File formats are reverse-engineered from the original files; community tools are
   copying, all cross-checked on the original files, see [level-format.md](docs/specs/level-format.md),
   [ai-scripts.md](docs/specs/ai-scripts.md), [objects.md](docs/specs/objects.md),
   [spells.md](docs/specs/spells.md), [ui-and-editor.md](docs/specs/ui-and-editor.md).
+- [PopScript Tutorial](https://ts.popre.net/archive/Downloads/Docs/PopScript_Wiki_HTML_Help_File.htm)
 - The [Toksisitee](https://github.com/Toksisitee) Populous tools:
   - [PopResourceEditor](https://github.com/Toksisitee/PopResourceEditor) (MIT, checked at `140e389`): layouts of
     the theme files (palette, bigfade, sky, disp, fade, cliff, ghost, alpha), the `bl320` object atlas and the
@@ -54,6 +55,12 @@ File formats are reverse-engineered from the original files; community tools are
     [sound.md](docs/specs/sound.md).
   - [PopLanguageEditor](https://github.com/Toksisitee/PopLanguageEditor) (GPLv3): language string files, not
     used yet.
+  - [PopScript Upgrader](https://github.com/TylerTheFox/popscript-upgraderi) (MIT)
+- The [PopScript Wiki](https://ts.popre.net/archive/Downloads/Docs/PopScript_Wiki_HTML_Help_File.htm) (Megafont,
+  2006): the AI script language, its commands and attributes, see [ai-scripts.md](docs/specs/ai-scripts.md).
+- [popscript-upgrader](https://github.com/TylerTheFox/popscript-upgrader) (MIT, checked at
+  `f2bd401`): the mapping of PopScript to Populous: Reincarnated's Lua API, see
+  [ai-scripts.md](docs/specs/ai-scripts.md).
 
 Only facts about the file formats are taken from the GPL and unlicensed tools, never their code, so the MIT
 licence is kept.

@@ -5,8 +5,29 @@ Computer players run a compiled script ("PopScript"). Layout from the ALACN Pop 
 `levels/` folder: a decoder built from this spec reads every 12 552-byte file from start to `SCRIPT_END` with no
 word left over. Not parsed by `pop3-format` yet.
 
-Tags: **[files]** verified on the files, **[editor]** from the editor only, **[contradicted]** the editor disagrees,
-the files win.
+The language, how it runs and what the commands do come from the community's PopScript Wiki (Megafont, built
+2006-04-30, `ts.popre.net/archive/Downloads/Docs/PopScript_Wiki_HTML_Help_File.htm`) and from popscript-upgrader
+(TylerTheFox, MIT, `f2bd401`), a converter from the original language to the Lua scripts of the
+Populous: Reincarnated patch.
+
+Tags: **[files]** verified on the files, **[editor]** from the editor only, **[wiki]** from the wiki (players'
+experiments, not code), **[lua]** from the converter and its dump of the Lua API, **[contradicted]** a source
+disagrees with the files, the files win.
+
+## What PopScript is
+- Each computer tribe (red, yellow, green) runs one compiled script. Blue is the human player and never has one
+  (header byte 99 is always 0). The level header calls the language "Script2" (`char Script2[10][32]`, see
+  level-format.md). The community calls it PopScript, and Reincarnated calls its Lua successor "Script4" [lua].
+- A script does not move units itself. It steers the built-in computer-player AI in three ways:
+  - it switches AI behaviours ("states") on and off: build, house, train, defend, preach, attack...
+  - it tunes 48 AI attributes (`INT_ATTR_*`): how many of each unit to keep, attack force mix, boats...
+  - it gives high-level orders: attack a target, guard between markers, cast a spell at a marker, train now.
+- Campaign scripts also act as the level's event script: messages, camera flybys, the tutorial's UI locks and
+  flashing buttons, the countdown timer, `TRIGGER_THING`, `TRIGGER_LEVEL_WON/LOST`.
+- The source text is compiled offline. The game only reads the compiled `cpscrNNN.dat`, laid out below. The
+  community decompiles and recompiles scripts with the PopRe / ALACN world editor.
+- Populous: Reincarnated later added Lua scripts with full access to the engine (hooks, things, map, UI), see
+  "Lua successor". Classic PopScript is still what every original level uses.
 
 ## Files
 | File | Count | Size | Notes |
@@ -41,6 +62,99 @@ Smaller layouts (own observation, [files]): cpscr081 has `u16[2560]` code (field
 cpscr099's internal variable numbers don't match the table below (an older numbering). Neither is used by an
 active slot of a shipped level: a reader can accept 12 552 bytes only.
 
+## Source language [wiki]
+A computer player as written in the wiki's dialect (the shape every original script has, see below):
+
+```
+// line comment, /* block comment */
+{
+  IF ( INT_GAME_TURN == 0 )
+  {
+    DO STATE_CONSTRUCT_BUILDING ON
+    DO STATE_AUTO_ATTACK ON
+    SET INT_ATTR_MAX_ATTACKS 999
+    SET $attacks 0
+  }
+  ELSE
+  {
+    EVERY 256 12
+    {
+      IF ( INT_MY_NUM_PEOPLE > 30 && $attacks < 3 )
+      {
+        DO ATTACK BLUE 10 ATTACK_BUILDING INT_NO_SPECIFIC_BUILDING 500 INT_NO_SPECIFIC_SPELL INT_NO_SPECIFIC_SPELL INT_NO_SPECIFIC_SPELL ATTACK_NORMAL 0 5 -1 -1
+        INCREMENT $attacks 1
+      }
+      ENDIF
+    }
+  }
+  ENDIF
+}
+SCRIPT_END
+```
+
+- The script is a single `{ }` block followed by `SCRIPT_END`. Anything after `SCRIPT_END` is ignored.
+- Comments are `//` to the end of the line and `/* */`, which may span lines.
+- User variables:
+  - Written `$name`: up to 32 characters, no spaces, at most 64 per script.
+  - The compiler numbers them in order of first use. The names are not stored in the file.
+- Values are constants (negative ones too: markers use `-1` for "none"), `$variables`, or internal variables
+  (`INT_*`). Internal variables are either game state or identifiers of a model used as an argument, e.g.
+  `INT_TEMPLE`.
+- Assignments, each with a user variable or an `INT_ATTR_*` as destination:
+  - `SET d v`, `INCREMENT d v` and `DECREMENT d v`.
+  - `MULTIPLY d a b` and `DIVIDE d a b` store `d = a * b` and `d = a / b`. Rounding and division by zero are not
+    documented.
+- `IF ( c ) { } [ELSE { }] ENDIF`:
+  - Each condition `c` is a chain of comparisons (`== != > < >= <=`) joined with `&&` or `||`.
+  - Brackets inside a condition are not used. The files store at most 3 comparisons and nest left
+    (see "Code").
+  - `ENDIF` comes after the closing `}` and is mandatory.
+- `EVERY period [offset] { }`:
+  - The period is a constant power of two from 2 to 8192 game turns.
+  - The optional offset staggers blocks that share a period, see "How a script runs".
+  - Both operands must be constants.
+- `DO COMMAND args...` runs a command, with a fixed parameter list per command (tables below). Query commands
+  write their result into a user variable, always their last parameter.
+- A second dialect exists, from the converter's parser [lua]:
+  - It has a `COMPUTER_PLAYER n` header, `BEGIN`/`END` instead of braces and `USER_x` variables.
+  - It agrees with the token names 1003 `BEGIN` and 1024 `COMPUTER_PLAYER`. Those were probably Bullfrog's
+    spellings, and the wiki's braces are the editor's.
+  - That parser is case-sensitive, knows only `//` comments, cannot parse `||` and has grammar conflicts: do not
+    use it as a reference.
+
+## How a script runs
+Neither source describes the engine loop. What follows is what both of them and the files agree on.
+- **Every game turn, the whole script is evaluated once per computer player.**
+  - The original scripts' `IF (INT_GAME_TURN == 0) { setup } ELSE { EVERY ... }` shape only makes sense that
+    way.
+  - Reincarnated's converter puts the whole body in a per-turn `OnTurn` hook.
+  - Turn 0 runs the setup block. Every later turn runs the `ELSE` branch, where the `EVERY` blocks gate the work.
+- **`EVERY n m` fires on the turns where `(turn + m) % n == 0`**:
+  - The wiki's example: `EVERY 256 12` first fires at turn 244, then every 256 turns.
+  - `EVERY 128 28` first fires at turn 100.
+  - Offsets larger than the period (21 in the files) are then harmless.
+  - The stored operands are `n - 1` (a bit mask) and `m - 1`, so the engine probably tests
+    `(turn + stored_m + 1) & stored_n == 0`. The exact off-by-one is unverified.
+  - The converter adds the tribe index, `(turn + tribe + m) % n == 0`, so tribes sharing a script don't act on
+    the same turn [lua]. Whether the original does this is unknown.
+- **Turn rate**: the wiki says "about 8 game turns per second". Message timeouts and flyby times are also in
+  turns, but `SET_TIMER_GOING` takes seconds. The simulation here runs 10 ticks per second (units.md), so script
+  timings need a conversion.
+- **User variables keep their values between turns.** Counters such as `INCREMENT $n 1` depend on it. They start
+  at 0, the on-disk storage area.
+- Internal variables read the live game state when evaluated.
+  - Only `INT_ATTR_*` can be written. They are the computer player's attribute bytes: attribute `i` is internal
+    `1000 + i`, `READ/WRITE_CP_ATTRIB(pn, i)` in Lua.
+  - `M_` means this script's tribe. `INT_*_KILLED_BY_HUMAN` means killed by blue.
+- A command takes effect immediately, within the same pass. The wiki's timer tutorial needs `REMOVE_TIMER` in a
+  later `EVERY` block, because in the same block it wipes the timer before the message shows.
+- States, attributes, marker entries and spell entries are persistent AI settings. The setup block sets them,
+  and the periodic blocks adjust them and fire one-off orders.
+- Debugging: there is none in the original. The community shows a value through `SET_TIMER_GOING v` plus a
+  message that stops the timer [wiki].
+- Some commands "don't work in the initialisation section" [wiki], meaning the turn-0 block. Which ones is not
+  listed.
+
 ## Code
 A word `< 1000` is an operand (a field index, in practice < 512); a word `>= 1000` is a token. Tokens used in
 the files: 1000..1223.
@@ -62,10 +176,10 @@ F      := operand word
 
 - `ELSE` and `ENDIF` come after the closing `END` of the previous block.
 - Destinations (`Fdest`) are always a user variable or an `INT_ATTR_*` (internal 1000..1047) [files].
-  INCREMENT/DECREMENT add/subtract; MULTIPLY/DIVIDE are probably `dest = a op b` [editor].
+  INCREMENT/DECREMENT add/subtract; MULTIPLY/DIVIDE are `dest = a op b` [editor] [wiki].
 - **EVERY stores period - 1**: periods are powers of two 2..8192, so the stored value is a mask `2^k - 1`. The
-  optional second operand (a phase/offset?) is also stored minus 1 by the editor, but 21 of the 331 are larger
-  than the period: meaning unknown.
+  optional second operand, the offset, is also stored minus 1 by the editor. 21 of the 331 are larger than the
+  period, which is harmless under the modulo test (see "How a script runs").
 - Conditions with more than one AND/OR are **left-nested** in the files (cpscr057: `OR AND c1 c2 c3` =
   `(c1 && c2) || c3`). The editor writes them right-nested and prints them flat, so it does not round-trip
   [contradicted]. Every other AND/OR (845) joins two comparisons. At most 3 comparisons per IF, blocks nest up
@@ -133,8 +247,8 @@ Names are the editor's script spellings. Uses = total occurrences / files, over 
 | 1026 | `DIVIDE` | 16 / 11 |
 
 ### DO commands
-1028-1048 and 1050-1051 are the computer player's "states", switched ON/OFF; their order follows the game's
-internal state list [editor].
+1028-1048 and 1050-1051 are the computer player's "states", switched ON/OFF. Token `1028 + i` is internal state
+`i` [editor], confirmed by Reincarnated's `CP_AT_TYPE_*` numbering [lua]. Meanings: "What the commands do".
 
 | Value | Command | Parameters | Uses |
 |---|---|---|---|
@@ -342,6 +456,208 @@ internal state list [editor].
 | 1061 | `ATTACK_RED` |
 | 1062 | `ATTACK_YELLOW` |
 | 1063 | `ATTACK_GREEN` |
+
+## What the commands do [wiki]
+Shared conventions:
+- Positions are `x z` map cells (0..255), and radii are in cells.
+- Directions: the wiki gives 0 north, 500 east, 1000 south, 1500 west. Those look like approximate quarters of
+  the engine's 2048 per turn (level-format.md), but the scale is unverified.
+- Markers are indices into the level header's `Markers[256]`, and `-1` means none.
+- A team is a keyword or a number with blue 0, red 1, yellow 2, green 3. "Blue" always means the human player.
+- Text arguments are string indices into `language/lang00.dat`.
+- `?` marks what the wiki lists as unknown ("Incomplete Knowledge").
+
+### States (`DO STATE_x ON|OFF`)
+Internal names are Reincarnated's `CP_AT_TYPE_*` [lua]. States marked "-" have no description in the wiki, so
+their meaning only comes from their name.
+
+| Token | Internal | Effect when ON |
+|---|---|---|
+| 1028 | 0 `CONSTRUCT_BUILDING` | - (build the base: hut share `INT_ATTR_HOUSE_PERCENTAGE`, at most `MAX_BUILDINGS_ON_GO` at once) |
+| 1029 | 1 `FETCH_WOOD` | - |
+| 1030 | 2 `MED_MAN_GET_WILD_PEEPS` | shaman converts wildmen within `SET_BASE_RADIUS` of `SET_BASE_MARKER` (default: the reincarnation site, "we think") |
+| 1031 | 3 `HOUSE_A_PERSON` | - |
+| 1032 | 4 `SEND_GHOSTS` | - |
+| 1033 | 5 `BRING_NEW_PEOPLE_BACK` | - |
+| 1034 | 6 `TRAIN_PEOPLE` | - (train up to the `INT_ATTR_PREF_*_PEOPLE` counts, replacing losses) |
+| 1035 | 7 `POPULATE_DRUM_TOWER` | - |
+| 1036 | 8 `DEFEND` | every follower not at a marker or in a hut defends the shaman |
+| 1037 | 9 `DEFEND_BASE` | 8 warriors and firewarriors circle the reincarnation site, losses not replaced; needs 1043 ON and `INT_ATTR_USE_PREACHER_FOR_DEFENCE` != 0 |
+| 1038 | 10 `SPELL_DEFENCE` | `x z ON`: the shaman's home position, which she defends |
+| 1039 | 11 `PREACH` | needed by `PREACH_AT_MARKER` |
+| 1040-1042 | 12-14 `BUILD_WALLS`, `SABOTAGE`, `SPELL_OFFENSIVE` | unused or one use |
+| 1043 | 15 `SUPER_DEFEND` | spelled `FIREWARRIOR_DEFEND` in scripts, see 1037 |
+| 1044 | 16 `BUILD_VEHICLE` | braves build boats or balloons at their huts |
+| 1045-1047 | 17-19 `FETCH_LOST_PEOPLE`, `FETCH_LOST_VEHICLE`, `FETCH_FAR_VEHICLE` | - |
+| 1048 | 20 `AUTO_ATTACK` | `ATTACK` does nothing while this is OFF |
+| 1049 | 21 `MED_MAN_DEFEND` | spelled `STATE_SHAMAN_DEFEND`, refused by the compiler |
+| 1050, 1051 | 22 `FLATTEN_BASE`, 23 `BUILD_OUTER_DEFENCES` | - |
+
+Internal states 24-28 (`GUARD_AT_MARKER`, `SEND_ALL_TO_MARKER`, `PRAY_AT_HEAD`, `BOAT_PATROL`, `DEFEND_SHAMEN`)
+have no token. They are probably set by the DO commands of the same name (inference).
+
+Other ON/OFF switches:
+- `SET_REINCARNATION`: this AI gets a reincarnation site at the start. `SET_NO_BLUE_REINC` is the human
+  equivalent, so the shaman's death ends the game.
+- `GIVE_UP_AND_SULK`: everyone guards the shaman, who is sent to blue's reincarnation site.
+- `FLYBY_ALLOW_INTERRUPT`: the player can skip flybys.
+- No meaning in the wiki: `SET_BUCKET_USAGE`, `SET_AUTO_BUILD`, `SET_AUTO_HOUSE`, `AUTO_MESSAGES`,
+  `EXTRA_WOOD_COLLECTION` and `TURN_PUSH`.
+
+### Attacks and spells
+- `ATTACK team num target_type model damage spell1 spell2 spell3 attack_type bring_back m1 m2 m3`. Requires
+  `STATE_AUTO_ATTACK ON` and `INT_ATTR_MAX_ATTACKS` > 0 (0 ignores every attack; the tutorial uses 999).
+  - Who goes: up to `num` idle or housed followers (never guards or patrols), weighted by the
+    `INT_ATTR_AWAY_*` shares. The shaman joins only if `INT_ATTR_AWAY_SHAMAN` > 0. `num` 0 sends the shaman
+    alone.
+  - Sequence: the force gathers at the reincarnation site, or at the main drum tower if
+    `SET_DRUM_TOWER_POS` was used, unless `INT_ATTR_DONT_GROUP_AT_DT` is set. It leaves, regroups at `m1`
+    because units walk at different speeds, then attacks.
+  - `target_type`:
+    - `ATTACK_MARKER`: `model` is a marker index, and the force fights whatever is there.
+    - `ATTACK_BUILDING`: `model` is a building, or `INT_NO_SPECIFIC_BUILDING` for the nearest one. The force
+      fights the occupants, then dismantles the building.
+    - `ATTACK_PERSON`: in practice always the enemy shaman (`INT_TARGET_SHAMAN`).
+  - `damage` is 0..999: how much damage to deal before withdrawing. 999 means to the death.
+  - Spells: `spell1` is cast at `m1` toward `m2` when both are set, otherwise at the target. `spell2` and
+    `spell3` are cast at the target, each once. Use `INT_NO_SPECIFIC_SPELL` when the shaman is not involved.
+    Without charged spells she turns back at `m1`.
+  - `attack_type` is `ATTACK_NORMAL`, `ATTACK_BY_BOAT` or `ATTACK_BY_BALLOON` (check that the vehicles exist
+    first). `bring_back` (0/1) returns the vehicles. `m3` has no visible effect (?).
+  - In Lua, `ATTACK` returns a value [lua]. In scripts, `SET_ATTACK_VARIABLE $v` names a variable the AI may
+    update with the attack's outcome (?).
+- `NAV_CHECK team target_type model remember $v`: 1 if attackers can reach the target. `remember` is unknown
+  (?), and 0 in the examples. The tutorial recommends calling it before `ATTACK`.
+- `SPELL_ATTACK spell marker direction`: the shaman walks to the marker and casts.
+- `SET_SPELL_ENTRY entry spell mana frequency min_people base`: slot `entry` (from 0) of the shaman's
+  automatic spells.
+  - `mana` is normally `INT_M_SPELL_x_COST`.
+  - She casts when at least `min_people` enemies, shaman included, are in range.
+  - `base` 1 means only inside the base, 0 only outside. Lua names it `base_spell`.
+  - `frequency` is unknown (?).
+- `SET_BUCKET_COUNT_FOR_SPELL spell n` (1502 uses): unknown (?). Probably weights the mana spent per spell.
+- `IS_SHAMAN_AVAILABLE_FOR_ATTACK $v`: 1 if the shaman can cast.
+- `I_HAVE_ONE_SHOT SPELL_TYPE spell $v`: 1 if she holds a one-shot charge of the spell. The `BUILDING_TYPE` form
+  is unknown.
+- `GET_SPELLS_CAST team spell $v` and `GET_NUM_ONE_OFF_SPELLS team spell $v`: casts so far, and one-shot
+  charges held.
+- `DEFEND_SHAMEN n` sends `n` followers to guard the shaman, like the player's G key.
+  `SEND_SHAMEN_DEFENDERS_HOME` releases them.
+- The six `[DONT_]TARGET_*` commands showed no effect in testing (?).
+
+### Markers, guards and the base
+- `SET_MARKER_ENTRY entry m1 m2 braves warriors firewarriors preachers` defines a patrol group: it guards
+  between `m1` and `m2`, or circles `m1` when `m2` is -1.
+  - `MARKER_ENTRIES e1 e2 e3 e4` activates up to 4 groups, and `CLEAR_GUARDING_FROM e1..e4` deactivates them
+    (-1 = unused slot).
+  - `ONLY_STAND_AT_MARKERS` makes the groups stand still instead of circling.
+  - The wiki calls this pair Bullfrog's preferred method.
+- `GUARD_AT_MARKER m b w f p GUARD_NORMAL` and `GUARD_BETWEEN_MARKERS m1 m2 b w f p GUARD_NORMAL` are one-off
+  guard orders.
+- `VEHICLE_PATROL num m1 m2 m3 m4 BOAT_TYPE|BALLOON_TYPE`: a patrol in vehicles. How the markers are used is
+  unknown (?); the examples alternate two of them.
+- `SET_BASE_MARKER m` sets the centre of the base, and `SET_BASE_RADIUS r` its radius (for wildmen
+  conversion). Bullfrog always calls `RESET_BASE_MARKER` (?) just before `SET_BASE_MARKER`.
+  `SET_DEFENCE_RADIUS r` is unknown (?).
+- `COUNT_PEOPLE_IN_MARKER team|COUNT_WILD marker radius $v` (144 uses) and `IS_SHAMAN_IN_AREA team marker
+  radius $v`.
+- `GET_HEIGHT_AT_POS marker $v` gives the ground height. It is used to notice that the water at a marker has
+  been land-bridged.
+
+### People, buildings and orders
+- `TRAIN_PEOPLE_NOW n model` sends `n` braves to train, e.g. `5 INT_RELIGIOUS`.
+- `PRAY_AT_HEAD n marker`: `n` followers pray at the stone head on the marker until it fires. The level needs a
+  head, a trigger linked to the effect, and a marker on the same spot.
+- `PREACH_AT_MARKER m` sends one preacher. `CONVERT_AT_MARKER m` sends the shaman to convert wildmen.
+  `SEND_ALL_PEOPLE_TO_MARKER m` sends everyone, shaman included.
+- `SET_DRUM_TOWER_POS x z` sets the main drum tower, which is also the attack gathering point. If the spot is
+  unreachable, the nearest reachable one is used. The tower is built automatically unless
+  `DELAY_MAIN_DRUM_TOWER` was called (lifted by `BUILD_MAIN_DRUM_TOWER`).
+- `BUILD_DRUM_TOWER x z` places a tower plan. `BUILD_AT x z model ?` places any plan; the last parameter may be
+  the facing.
+- `PUT_PERSON_IN_DT model x z` puts a follower of that model in the tower at x z.
+- `SET_BUILDING_DIRECTION d` sets the facing of new buildings, random otherwise (?).
+- `IS_BUILDING_NEAR model x z team radius $v` and `IS_PRISON_ON_LEVEL $v`.
+- `PARTIAL_BUILDING_COUNT`: the `INT_x_BUILDING_*` counts then include unfinished and damaged buildings.
+- `KILL_TEAM_IN_AREA x z radius`: every follower and shaman in the area vanishes, with no death animation.
+  `FIX_WILD_IN_AREA`, `CLEAR_STANDING_PEOPLE`, `DELETE_SMOKE_STUFF`, `MARVELLOUS_HOUSE_DEATH` and
+  `SET_WOOD_COLLECTION_RADII` are unknown (?).
+
+### Level events (campaign scripts)
+- Gifts:
+  - `GIVE_MANA_TO_PLAYER team n`.
+  - `GIVE_ONE_SHOT spell team` (spell first).
+  - `GIVE_PLAYER_SPELL team spell`.
+  - `REMOVE_PLAYER_THING team spell|building`.
+  - Bloodlust, teleport and armageddon are only granted if the level can obtain them some other way.
+- `TRIGGER_THING marker` fires the trigger thing on the marker and everything linked to it (see objects.md).
+  `GET_HEAD_TRIGGER_COUNT x z $v` counts a head's activations, and `REMOVE_HEAD_AT_POS x z` sinks it.
+- `TRIGGER_LEVEL_WON` and `TRIGGER_LEVEL_LOST` end the level.
+- Timer:
+  - `SET_TIMER_GOING seconds` shows a countdown at the top right, starting one second short.
+  - `HAS_TIMER_REACHED_ZERO $v` and `REMOVE_TIMER`.
+- Messages:
+  - The tags queue on the left of the screen. `CREATE_MSG_INFORMATION idx` (the "i" tag) and
+    `CREATE_MSG_NARRATIVE idx` (the book tag) add one.
+  - `CREATE_MSG_INFORMATION_ZOOM idx x z angle` also zooms the camera while the message is open.
+  - `OPEN_DIALOG idx` shows a message without queueing it.
+  - The `SET_MSG_*` commands change the last message queued: `AUTO_OPEN_DLG` opens it and pauses,
+    `DELETE_ON_OK` deletes it when closed, `TIMEOUT turns` sets its expiry. `CLEAR_ALL_MSG` empties the queue.
+- Camera:
+  - `ZOOM_TO x z angle`, `TRACK_TO_MARKER m`, `TRACK_SHAMAN_TO_ANGLE a`.
+  - `CAMERA_ROTATION speed` rotates until `STOP_CAMERA_ROTATION`.
+- Flybys:
+  - `FLYBY_CREATE_NEW` starts one, then events timed in turns from the start:
+    - `FLYBY_SET_EVENT_POS x z start duration`
+    - `FLYBY_SET_EVENT_ANGLE angle start duration` (shortest way)
+    - `FLYBY_SET_EVENT_ZOOM z start duration`, with z from -100 (out) to 100 (in)
+    - `FLYBY_SET_EVENT_TOOLTIP x z idx start duration`
+  - `FLYBY_SET_END_TARGET` is unknown (?).
+  - `FLYBY_START` and `FLYBY_STOP`.
+- Tutorial UI:
+  - `DISABLE_USER_INPUTS` and `ENABLE_USER_INPUTS`.
+  - `TURN_PANEL_ON` 0 followers, 1 spells, 2 buildings.
+  - `FLASH_BUTTON idx ON|OFF` highlights a panel button:
+    - buildings 0-8: hut, tower, temple, spy, warrior, firewarrior, boat, balloon, guard post
+    - 13-16: the spells, buildings and followers tabs, then the shaman
+    - 18-35: the spells
+    - 38: the map
+  - The `BLUE`-named queries (`COUNT_BLUE_SHAPES`, `COUNT_BLUE_IN_HOUSES`, `IS_BLUE_SHAMAN_SELECTED`...) watch
+    what the human does. `MOVE_SHAMAN_TO_MARKER`, `SEND_BLUE_PEOPLE_TO_MARKER` and `DESELECT_ALL_BLUE_PEOPLE`
+    act on the human's units.
+
+### Attributes (`INT_ATTR_*`)
+| Attribute | Meaning, usual values |
+|---|---|
+| `EXPANSION` | ? |
+| `PREF_{SPY,RELIGIOUS,WARRIOR,FIREWARRIOR}_TRAINS` | number of each training building to have |
+| `PREF_{SPY,RELIGIOUS,WARRIOR,FIREWARRIOR}_PEOPLE` | number of each unit to keep, trained and replaced |
+| `MAX_BUILDINGS_ON_GO` | buildings under construction at once |
+| `HOUSE_PERCENTAGE` | how many huts the base gets |
+| `AWAY_{BRAVE,WARRIOR,RELIGIOUS,SPY,FIREWARRIOR}` | 0..100 relative share of the type in an attack force (>100 can exceed `num`) |
+| `AWAY_SHAMAN` | > 0: the shaman joins attacks |
+| `MAX_ATTACKS` | attack cap; 0 ignores `ATTACK` |
+| `DEFENSE_RAD_INCR`, `MAX_DEFENSIVE_ACTIONS`, `RETREAT_VALUE` | ? (0..15 for the first) |
+| `BASE_UNDER_ATTACK_RETREAT`, `DONT_USE_BOATS`, `RANDOM_BUILD_SIDE` | 0/1 |
+| `PEOPLE_PER_BOAT`, `PEOPLE_PER_BALLOON`, `PREF_BOAT_HUTS`, `PREF_BALLOON_HUTS`, `PREF_BOAT_DRIVERS`, `PREF_BALLOON_DRIVERS` | vehicle use |
+| `EMPTY_AT_WAYPOINT` | balloon attackers get out at the waypoint and walk |
+| `SHAMEN_BLAST` | the shaman's blast damage: 0, 32, 64, 128 seen; at 0 a shaman dies in 6-8 blasts, at 256 in 2-3 |
+| `USE_PREACHER_FOR_DEFENCE` | != 0 needed by `STATE_DEFEND_BASE` |
+| `DONT_GROUP_AT_DT` | > 0: no gathering before an attack |
+| `ENEMY_SPY_MAX_STAND`, `SPY_CHECK_FREQUENCY`, `SPY_DISCOVER_CHANCE`, `MAX_SPY_ATTACKS` | spy handling (128 or 255 for the first) |
+| `FIGHT_STOP_DISTANCE`, `GROUP_OPTION`, `COUNT_PREACH_DAMAGE`, `MAX_TRAIN_AT_ONCE` | ? (0/24/26, 0/2/3, 0/1, ?) |
+| `SPELL_DELAY`, `DONT_DELETE_USELESS_BOAT_HOUSE`, `BOAT_HOUSE_BROKEN`, `DONT_AUTO_TRAIN_PREACHERS`, `SPARE` | unused or rare |
+
+Other internal variables worth noting:
+- `INT_RANDOM_100` is a random 0..99. Here it must come from `map::Lcg`; Reincarnated separates a synced
+  `G_RANDOM` from a local `L_RANDOM` [lua].
+- `INT_CP_FREE_ENTRIES` is unknown (`FREE_ENTRIES(pn)` in Lua).
+- `INT_NUM_SHAMEN_DEFENDERS` counts the shaman's guards. `INT_CAMERA_*` is the human's camera.
+- Name pairs between the scripts and the engine [lua]:
+  - `SMALL_HUT` is `TEPEE`.
+  - `SHAMAN` is `MEDICINE_MAN`.
+  - firewarrior is `S_WARRIOR` (the `firewarriors` parameter of `SET_MARKER_ENTRY` is `s_warriors`).
+  - `WRATH_OF_GOD` is armageddon.
 
 ## Internal variables
 Field type 2 values: 0..14 and 1000..1246. 1000..1047 are the 48 computer-player attributes (`INT_ATTR_*`), the
@@ -640,7 +956,69 @@ Level header bytes 89, 90, 91 = script number for red, yellow, green, byte 99 = 
 - Multiplayer levels use the stubs (80, 82-84, 101, 112, 120, 122).
 - **Missing scripts in active slots**: levl2100 (100), levl2110 (85), levl2131 (130).
 - cpscr081 is never referenced; cpscr099 only by an inactive slot of levl2112.
+- The wiki's level list gives the same numbers: 2100 uses 100, 2110 uses 085 and 2131 uses 130. It also
+  shows the Undiscovered Worlds levels (`levluw/`) using 001, 002, 079, 085, 087, 098, 119, 124, 130 and 138. So
+  the missing scripts probably ship with that add-on (no `levluw/` here to check). Unused slots of 2- and
+  3-tribe campaign levels often hold 004/005 [wiki].
 
 ## Writing scripts the way the originals look
 Fields in first-use order, unique; user variables in first-use order; zero words after `SCRIPT_END`; unused fields
 filled with `0x03`; user variables and pointers 0; AND/OR chains left-nested; EVERY operands stored minus 1.
+
+## Lua successor (Populous: Reincarnated "Script4") [lua]
+The Reincarnated patch runs Lua scripts against the engine. popscript-upgrader turns a classic script into
+one. Its output, simplified, shows how the two models line up:
+
+```lua
+MY_TRIBE = TRIBE_RED                       -- the converter's --tribe; the script number is dropped
+SC2_USR_FLAG = 0                           -- user variables become globals, saved in OnSave/OnLoad
+computer_init_player(getPlayer(MY_TRIBE))
+function OnTurn()
+    if getTurn() == 0 then                 -- IF (INT_GAME_TURN == 0)
+        STATE_SET(MY_TRIBE, CP_AT_TYPE_TRAIN_PEOPLE, ON)
+        WRITE_CP_ATTRIB(MY_TRIBE, ATTR_EXPANSION, 24)
+    end
+    if ((getTurn() + MY_TRIBE + 7) % 256 == 0) then   -- EVERY 256 7
+        if MANA(MY_TRIBE) >= PLAYERS_SPELL_COST(MY_TRIBE, M_SPELL_BLAST) then
+            ATTK_RST = ATTACK(MY_TRIBE, TRIBE_BLUE, 10, ATTACK_BUILDING, M_BUILDING_HUT, 0,
+                              M_SPELL_BLAST, M_SPELL_NONE, M_SPELL_NONE, ATTACK_NORMAL, 0, -1, -1, -1)
+        end
+        SC2_USR_CNT = COUNT_PEOPLE_IN_MARKER(TRIBE_BLUE, 3, 4)   -- query output becomes a return value
+    end
+end
+```
+
+- The `Script4_Popscript` module exposes every classic command as a function taking the player first:
+  `ATTACK`, `SET_SPELL_ENTRY`, `SET_MARKER_ENTRY`, `MARKER_ENTRIES`, `STATE_SET`, `READ_CP_ATTRIB` and
+  `WRITE_CP_ATTRIB`, the message and flyby functions...
+  - Queries return their value instead of writing a variable.
+  - Its enums give the runtime values of the keywords: `ATTACK_MARKER/BUILDING/PERSON` = 0/1/2,
+    `ATTACK_NORMAL/BY_BOAT/BY_BALLOON` = 0/1/2, `GUARD_NORMAL/WITH_GHOSTS` = 0/1, tribes blue..green = 0..3.
+  - They also give the internal-variable numbers, which match the "Internal variables" table one for one
+    (`INT_GAME_TURN` 0 ... `INT_BLOODLUST` 1246, attributes 0..47).
+- Game state is read straight from the engine structures: `_gsi.Players[t].NumPeople`, `NumPeopleOfType[model]`,
+  `PLAYERS_BUILDING_OF_TYPE(t, model)`, `MANA(t)`, `getTurn()`.
+- Beyond PopScript, the API has about 30 modules (things, persons, map cells, spells, flybys, drawing, ImGui,
+  network, save data). It also has engine hooks: `OnTurn`, `OnCreateThing`, `OnDeleteThing`, `OnTrigger`,
+  `OnSpellCast`, `OnPlayerDeath`, `OnLevelInit`, `OnSave`/`OnLoad`, `OnKeyDown`, `OnChat`...
+  - The community uses those hooks for level logic that PopScript could not express.
+  - Lockstep safety is left to the script author: synced `G_RANDOM` versus local `L_RANDOM`.
+- The converter is best effort; trust the original scripts, not its output:
+  - Several argument orders differ from its own API dump: `STATE_SET`, `PLAYERS_SPELL_COST`, and spell versus
+    building in `GIVE_PLAYER_SPELL`.
+  - It does not handle `||` or arithmetic expressions.
+  - Its single-file mode is broken.
+
+## What this means here
+- Parse `cpscr` into the statement tree above, then interpret it in `game-core` once per turn and per computer
+  tribe.
+  - Use integers only. `INT_RANDOM_100` comes from `map::Lcg`.
+  - Effects go through `Command`, so lockstep replays match.
+- Keep the AI behaviours (states, attributes, marker and spell entries, attacks) as plain simulation data that
+  the script sets. A future native or Lua-like scripting layer can then drive the same data, the way Script4
+  wraps the original functions.
+- Open before implementing:
+  - the original turn rate (~8 per second?) against our 10 ticks per second
+  - the `EVERY` off-by-one and whether there is a per-tribe phase
+  - what `SET_ATTACK_VARIABLE` receives
+  - the unknown states and commands marked "-" or "?" above

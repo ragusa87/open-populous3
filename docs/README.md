@@ -4,7 +4,7 @@
 - [roadmap.md](roadmap.md): what is done; what is left is in [TODO.md](../TODO.md).
 - specs/
   - [level-format.md](specs/level-format.md): original `.dat`/`.hdr` layout (what we know).
-  - [ai-scripts.md](specs/ai-scripts.md): original computer-player scripts (`cpscr`/`cpatr`).
+  - [ai-scripts.md](specs/ai-scripts.md): PopScript, the original computer-player scripts (`cpscr`/`cpatr`): language, execution, commands, Lua successor.
   - [terrain.md](specs/terrain.md): heightmap, wrapping, curvature rendering, brushes.
   - [terrain-textures.md](specs/terrain-textures.md): original theme files and the texture bake.
   - [spells.md](specs/spells.md): terrain spells and what they must recompute.
