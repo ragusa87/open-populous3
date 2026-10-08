@@ -54,11 +54,15 @@ unknown. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
 | 17 | 12 | throwing fire (firewarrior) |
 | 18 | 6 | sitting down |
 | 19, 37 | 4 | tumbling in the air |
+| 25 | 7 | fighting: kick |
 | 38 | 8 | struck down onto the back (death, last frame lying) |
-| 48 | 8 | hands to the face; 49 (9) waving an arm; 50 (7) crouching; 51 (4) sitting |
+| 39 | 1 | lying dead; 40 (5) dying: the body lying, its spirit rising |
+| 48 | 8 | hands to the face; 49 (9) waving an arm |
+| 50 | 7 | fighting stance (brave) |
+| 51 | 4 | sitting, probably in a boat |
 | 52 | 4 | arms flailing (used for drowning) |
 | 20-24 | 4-18 | warrior with built-in helmet and club: attacks |
-| 89 | 12 | standing, gesturing; 90 (14) push-ups, firewarrior gear drawn in; 91 (14) push-ups, headband and grey tool (no layers in either); 92 (17) working |
+| 89 | 12 | scratching itself: a brave idle for too long; 90 (14) push-ups (warriors idle for too long), firewarrior gear drawn in; 91 (14) push-ups, headband and grey tool (no layers in either); 92 (17) working |
 
 ### Stranded (arms up)
 A unit that cannot reach its target stands with both arms up. Found by rendering every anim's frames: only
@@ -67,15 +71,16 @@ outfit (brave plain, warrior helmet, firewarrior a flame in each hand, spy hair)
 side views (2, 6) overlap both arms into one. The client holds that frame (`PersonAnim::ArmsUp`). Whether the game
 plays the whole jump (crouch, arms up, leap, land) or holds the frame is not checked. The warrior outfit's helmet
 floats above the head in the crouch frame 0 (original data or a wrong outfit mapping, unchecked).
-Ruled out: 48 (hands to the face, a possible "despair"), 49 (waving one arm), 89 (shifting weight), the
+Ruled out: 48 (hands to the face, a possible "despair"), 49 (waving one arm), 89 (itching), the
 preacher's 33-36 (pointing/swinging the staff), 28 and 32 (arms up but with the purple magic), 30 and 31
 (preacher and wildman spread-eagle in the air). The preacher has no arms-up stance: stranded preachers stand idle.
 
 Preacher body (blue headdress, staff, tribe layers on the gear): 26 (5) and 27 (8) walk, 28 (24) preaching with
-purple magic (praying), 29 (4) staff swing, 30 (4) flung, 32 (14) converting, 33-36 gestures, 39/44 (1) lying
-dead, 40/45 dying (burning, spirit rising), no arms-up stance (stranded preachers stand idle), 41 (3) standing with the staff (first frame = idle), 42 (5) kicking
+purple magic (praying), 29 (4) staff swing, 30 (4) flung, 32 (14) converting, 33-36 gestures, 44 (1) lying
+dead, 45 dying (burning, spirit rising), no arms-up stance (stranded preachers stand idle), 41 (3) standing with the staff (first frame = idle), 42 (5) kicking
 (used for drowning, unsure), 43 (8) struck down onto the back, 46 (4) tumbling.
-Wildmen (no layers): 0 (4) walk, 1 (1) stand, 2 (3) gesture, 3 (1) sitting, 4 (3) crouching, 31/47 (4) flung.
+Wildmen (no layers): 0 (4) walk, 1 (1) stand, 2 (3) gesture, 3 (1) sitting, 4 (3) crouching, 31 (4) flung,
+47 (4) flying or rolling down.
 
 Shamans: 4 consecutive animations per action, one per tribe (blue, red, yellow, green), colours drawn in:
 
@@ -90,7 +95,7 @@ Shamans: 4 consecutive animations per action, one per tribe (blue, red, yellow, 
 | 77 | walk | 8 |
 | 85 | knocked down | 8 |
 | 81 | standing still | 1 |
-| 93 | kneeling on one knee (used for praying) | 1 |
+| 93 | kneeling on one knee: praying (at the pyramid; 95 is the yellow one) | 1 |
 
 Reading the sprite as `field / 6` (no -1) looks almost right but shows the next view's sprite once per
 loop, and the next tribe's in the back view: the -1 is checked on every shaman pose and tribe.
