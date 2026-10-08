@@ -101,7 +101,7 @@ view of the starting camera), a pond to the north.
   preview always shows the shaman's health.
 - Dust (`units/dust.rs`, cosmetic, real-time): when a unit stops landing, 10 soft generated motes spread 0.4 cell
   around its feet, rise 0.1, grow and fade over 0.8 s, facing the camera and pulled towards it like the sprites.
-- Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (tumbling), Fall (dying, then lies still while dead).
+- Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (tumbling), Fall (dying, then lies still while dead), Stranded (arms up: frame 1 of original anim 12 for braves, warriors, firewarriors and spies; preachers, wildmen, the shaman and the CC0 sheets show their idle).
   Timed actions (cast, dying) play once in step with the simulation, others loop.
 - View direction: `facing * 45deg - camera yaw`, rounded to the 8 drawn directions (0 front, 2 screen right, 4 back).
 - Art: with the original files, the shaman animations of `VSTART/VFRA/VELE` + `HSPR0-0.DAT` (see animations.md),

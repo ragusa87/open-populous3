@@ -4,7 +4,7 @@
 
 use game_core::unit::{Action, UnitKind, CAST_TICKS, DYING_TICKS};
 use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
-use pop3_format::catalog::{PersonAnim, PreacherAnim, ShamanAnim, WildmanAnim, OUTFIT_FIREWARRIOR, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
+use pop3_format::catalog::{PersonAnim, ARMS_UP_FRAME, PreacherAnim, ShamanAnim, WildmanAnim, OUTFIT_FIREWARRIOR, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
 use pop3_format::{LevelError, Picture, SpriteBank, Theme};
 use std::f32::consts::FRAC_PI_4;
 use std::path::Path;
@@ -20,10 +20,12 @@ pub enum Pose {
     Cast,
     Fall,
     Drown,
+    /// Arms up, not moving: the target cannot be reached.
+    Stranded,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 6] = [Pose::Idle, Pose::Walk, Pose::Pray, Pose::Cast, Pose::Fall, Pose::Drown];
+    pub const ALL: [Pose; 7] = [Pose::Idle, Pose::Walk, Pose::Pray, Pose::Cast, Pose::Fall, Pose::Drown, Pose::Stranded];
 
     /// Frames per second of looping poses.
     fn fps(self) -> f32 {
@@ -37,7 +39,7 @@ impl Pose {
 
     fn original(self) -> ShamanAnim {
         match self {
-            Pose::Idle => ShamanAnim::Idle,
+            Pose::Idle | Pose::Stranded => ShamanAnim::Idle,
             Pose::Walk => ShamanAnim::Walk,
             Pose::Pray => ShamanAnim::Kneel,
             Pose::Cast => ShamanAnim::Cast,
@@ -51,7 +53,7 @@ pub fn pose_for(action: &Action) -> Pose {
     match action {
         Action::Idle | Action::Landing { .. } => Pose::Idle,
         Action::Walking { .. } | Action::AroundFire { .. } => Pose::Walk,
-        Action::Stranded { .. } => Pose::Idle,
+        Action::Stranded { .. } => Pose::Stranded,
         Action::Praying => Pose::Pray,
         Action::Casting { .. } => Pose::Cast,
         Action::Drowning => Pose::Drown,
@@ -178,30 +180,30 @@ pub fn has_partial_alpha(f: &Frame) -> bool {
 }
 
 /// Which original animation shows `kind` in `pose` for `tribe`, with which outfit layer, and
-/// whether only its first frame (a gesture standing in for a still pose). The shaman has an
+/// which single frame to hold if any (a gesture standing in for a still pose). The shaman has an
 /// animation per tribe; the others are coloured by layers (docs/specs/animations.md).
-pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Outfit>, bool) {
+pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Outfit>, Option<usize>) {
     match kind {
-        UnitKind::Shaman => (pose.original().anim(tribe), None, false),
+        UnitKind::Shaman => (pose.original().anim(tribe), None, None),
         UnitKind::Wildman => {
             let anim = match pose {
-                Pose::Idle | Pose::Cast => WildmanAnim::Stand,
+                Pose::Idle | Pose::Cast | Pose::Stranded => WildmanAnim::Stand,
                 Pose::Walk => WildmanAnim::Walk,
                 Pose::Pray => WildmanAnim::Sit,
                 Pose::Fall => WildmanAnim::Down,
                 Pose::Drown => WildmanAnim::Flung,
             };
-            (anim.anim(), None, false)
+            (anim.anim(), None, None)
         }
         UnitKind::Preacher => {
             let anim = match pose {
-                Pose::Idle | Pose::Cast => PreacherAnim::Stand,
+                Pose::Idle | Pose::Cast | Pose::Stranded => PreacherAnim::Stand,
                 Pose::Walk => PreacherAnim::Walk,
                 Pose::Pray => PreacherAnim::Preach,
                 Pose::Fall => PreacherAnim::Fall,
                 Pose::Drown => PreacherAnim::Flail,
             };
-            (anim.anim(), None, anim == PreacherAnim::Stand)
+            (anim.anim(), None, (anim == PreacherAnim::Stand).then_some(0))
         }
         _ => {
             let outfit = match kind {
@@ -216,8 +218,9 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Pray => PersonAnim::Kneel,
                 Pose::Fall => PersonAnim::Fall,
                 Pose::Drown => PersonAnim::Flail,
+                Pose::Stranded => PersonAnim::ArmsUp,
             };
-            (anim.anim(), outfit, false)
+            (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }
     }
 }
@@ -247,13 +250,16 @@ impl Originals {
                 poses: Pose::ALL
                     .iter()
                     .map(|&pose| {
-                        let (anim, outfit, first_only) = original_anim(kind, pose, tribe);
+                        let (anim, outfit, held) = original_anim(kind, pose, tribe);
                         let layer_tribe = if matches!(kind, UnitKind::Shaman | UnitKind::Wildman) { 0 } else { tribe };
                         (0..DIRS)
                             .map(|dir| {
                                 let mirrored = bank.start(anim, dir).is_some_and(|s| s.mirrored);
                                 let frames = bank.frame_loop(anim, dir);
-                                let frames = if first_only { &frames[..frames.len().min(1)] } else { &frames[..] };
+                                let frames = match held {
+                                    Some(i) => frames.get(i).map_or(&[][..], std::slice::from_ref),
+                                    None => &frames[..],
+                                };
                                 frames.iter().map(|&f| picture_frame(&bank.compose_as(&self.sprites, f, mirrored, layer_tribe, outfit), &self.palette)).collect()
                             })
                             .collect()
@@ -318,6 +324,15 @@ mod tests {
         assert_eq!(frame_index(Pose::Walk, 8, &Action::Walking { to: (0, 0) }, 0.95, 0.0), 1);
         assert_eq!(frame_index(Pose::Walk, 8, &Action::Walking { to: (0, 0) }, 1.0, 0.0), 2);
         assert_eq!(frame_index(Pose::Idle, 0, &Action::Idle, 1.0, 0.0), 0);
+    }
+
+    #[test]
+    fn stranded_tribesmen_hold_their_arms_up() {
+        assert_eq!(pose_for(&Action::Stranded { to: (0, 0) }), Pose::Stranded);
+        assert_eq!(original_anim(UnitKind::Brave, Pose::Stranded, 2), (12, None, Some(ARMS_UP_FRAME)));
+        assert_eq!(original_anim(UnitKind::Warrior, Pose::Stranded, 0), (12, Some(OUTFIT_WARRIOR), Some(ARMS_UP_FRAME)));
+        assert_eq!(original_anim(UnitKind::Preacher, Pose::Stranded, 0), original_anim(UnitKind::Preacher, Pose::Idle, 0), "no arms-up anim");
+        assert_eq!(original_anim(UnitKind::Shaman, Pose::Stranded, 1), original_anim(UnitKind::Shaman, Pose::Idle, 1));
     }
 
     #[test]

@@ -49,7 +49,7 @@ unknown. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
 | 8 | 6 | kneeling, arms raised (praying) |
 | 9, 11 | 4 | walk variants |
 | 10 | 1 | standing still |
-| 12 | 4 | crouch, leap, arms spread (flung?) |
+| 12 | 4 | crouch, both arms straight up, leap with arms spread, land; frame 1 (arms up) held for stranded units (every outfit) |
 | 13-15 | 7 | punches; 16 (1) staggering |
 | 17 | 12 | throwing fire (firewarrior) |
 | 18 | 6 | sitting down |
@@ -62,7 +62,7 @@ unknown. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
 
 Preacher body (blue headdress, staff, tribe layers on the gear): 26 (5) and 27 (8) walk, 28 (24) preaching with
 purple magic (praying), 29 (4) staff swing, 30 (4) flung, 32 (14) converting, 33-36 gestures, 39/44 (1) lying
-dead, 40/45 dying (burning, spirit rising), 41 (3) standing with the staff (first frame = idle), 42 (5) kicking
+dead, 40/45 dying (burning, spirit rising), no arms-up stance (stranded preachers stand idle), 41 (3) standing with the staff (first frame = idle), 42 (5) kicking
 (used for drowning, unsure), 43 (8) struck down onto the back, 46 (4) tumbling.
 Wildmen (no layers): 0 (4) walk, 1 (1) stand, 2 (3) gesture, 3 (1) sitting, 4 (3) crouching, 31/47 (4) flung.
 

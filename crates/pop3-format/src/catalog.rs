@@ -164,7 +164,13 @@ pub enum PersonAnim {
     Fall,
     /// Arms flailing (4 frames): used for drowning.
     Flail,
+    /// Crouch, both arms straight up (frame `ARMS_UP_FRAME`), leap, land (4 frames): its arms-up
+    /// frame is held for stranded units.
+    ArmsUp,
 }
+
+/// The frame of `PersonAnim::ArmsUp` standing with both arms up.
+pub const ARMS_UP_FRAME: usize = 1;
 
 impl PersonAnim {
     pub fn anim(self) -> usize {
@@ -174,6 +180,7 @@ impl PersonAnim {
             PersonAnim::Kneel => 8,
             PersonAnim::Fall => 38,
             PersonAnim::Flail => 52,
+            PersonAnim::ArmsUp => 12,
         }
     }
 }

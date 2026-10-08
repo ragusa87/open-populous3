@@ -59,7 +59,7 @@ pub fn tribe_rgb(tribe: u8) -> [u8; 3] {
 
 pub fn frame_count(pose: Pose) -> usize {
     match pose {
-        Pose::Idle | Pose::Pray | Pose::Drown => 4,
+        Pose::Idle | Pose::Pray | Pose::Drown | Pose::Stranded => 4,
         Pose::Walk | Pose::Fall => 8,
         Pose::Cast => 12,
     }
@@ -130,6 +130,10 @@ fn body(pose: Pose, view: View, f: usize) -> Body {
                 sparks: f > 1 && f < n - 1,
                 ..base
             }
+        }
+        Pose::Stranded => {
+            let up = 29.0 + (f % 2) as f32;
+            Body { hands: if side { [(1.0, up), (2.0, up)] } else { [(-5.0, up), (5.0, up)] }, ..base }
         }
         Pose::Fall => {
             let t = (f as f32 / (n - 2) as f32).min(1.0);
