@@ -116,9 +116,11 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Damage from moving ground: check in the game what sets the damage (level 10's atlantis island comes back with its buildings missing 1 to 3 pieces of wood, no common percentage), and whether repairs need fetched wood ([buildings.md#damage-and-repair](docs/specs/buildings.md)).
 - [ ] Effects 89 atlantis set / 90 atlantis invoke (level 10): sink the island at start, raise it back when the stone head trigger fires; 83 boat hut repair.
 - [ ] Towers (drum tower): hold one unit, which gets a longer range from there: firewarriors throw farther, the shaman casts spells farther, a preacher converts enemies around the tower. No other tower effect.
-- [ ] Training huts: warrior, firewarrior, preacher, spy training turns a brave into that unit (time + mana).
-- [ ] Houses: hold a brave population, generate mana from the braves inside, spawn new braves over time.
-- [ ] Houses grow (small -> medium -> large: `villager_hut` sizes), holding more braves. Growing has several criteria; one of them is a piece of wood brought by a brave (other criteria to find out).
+- [ ] Training huts, see [huts-and-training.md](docs/specs/huts-and-training.md): queue around the door (folded snake), one follower inside at a time, transformed into the hut's kind, mana along the training, cancel by ordering it out.
+- [ ] Training: check in the game how mana is taken, the training time (`CONV_*` = 4000?) and the cost by specialist count (`TRAIN_MANA_BAND`).
+- [ ] Houses, see [huts-and-training.md](docs/specs/huts-and-training.md): capacity 3/4/5, supply 3/5/7 (cap 199), breeding by occupants and population band, mana from the people inside.
+- [ ] Houses grow (small -> medium -> large: `villager_hut` sizes): confirm the rule in the spec (upgrade bar while occupied, 2 pieces of wood at the door) in the game.
+- [ ] `game_core::balance`: `Turns` (original game turns) converted to ticks, `Balance::ours()` defaults, later `Balance::from_constants`; every rule reads it from `GameMap` (huts-and-training.md "Balance and game turns").
 
 ## Wood ([trees.md](docs/specs/trees.md))
 - [ ] Original scenery models 7 plant 1, 8 plant 2, 9 stone head (98 in the levels): not drawn yet. Trees have no size in the thing record: full size is right.

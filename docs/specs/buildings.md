@@ -87,6 +87,8 @@ Kit meshes are made the first time one shows and shared per kind and owner: the 
 Views are rebuilt only when the map resource changes; once the simulation changes buildings during ticks they
 need stable ids and updates per building.
 
+What huts and training huts do once built: [huts-and-training.md](huts-and-training.md).
+
 ## Construction (planned)
 Only these are built and taken apart by braves: villager hut (placed at size 1, it grows later), drum tower, the
 training huts (warrior, firewarrior, temple = preachers, spy), boat hut and airship hut. The reincarnation site,
