@@ -64,7 +64,7 @@ const SHOTS: &[PoseShot] = &[
     PoseShot { pose: "cast", clip: "Jump", frames: 12, timing: Timing::Once, sink: 0.0 },
     PoseShot { pose: "fall", clip: "Death", frames: 8, timing: Timing::Once, sink: 0.0 },
     PoseShot { pose: "drown", clip: "RecieveHit", frames: 4, timing: Timing::Loop, sink: 0.45 },
-    PoseShot { pose: "stranded", clip: "Victory", frames: 4, timing: Timing::Span(0.22, 0.67), sink: 0.0 },
+    PoseShot { pose: "stranded", clip: "Victory", frames: 4, timing: Timing::Span(0.45, 0.8), sink: 0.0 },
 ];
 
 /// Time of frame `k` of `n` in a clip lasting `duration`.

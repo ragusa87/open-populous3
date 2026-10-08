@@ -60,6 +60,17 @@ unknown. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
 | 20-24 | 4-18 | warrior with built-in helmet and club: attacks |
 | 89 | 12 | standing, gesturing; 90-91 (14) bowing to the ground (worship); 92 (17) working |
 
+### Stranded (arms up)
+A unit that cannot reach its target stands with both arms up. Found by rendering every anim's frames: only
+tribesman anim 12 has it, frame 1 (`catalog::ARMS_UP_FRAME`): standing, both arms straight up, drawn for every
+outfit (brave plain, warrior helmet, firewarrior a flame in each hand, spy hair) and every tribe and direction; the
+side views (2, 6) overlap both arms into one. The client holds that frame (`PersonAnim::ArmsUp`). Whether the game
+plays the whole jump (crouch, arms up, leap, land) or holds the frame is not checked. The warrior outfit's helmet
+floats above the head in the crouch frame 0 (original data or a wrong outfit mapping, unchecked).
+Ruled out: 48 (hands to the face, a possible "despair"), 49 (waving one arm), 89 (shifting weight), the
+preacher's 33-36 (pointing/swinging the staff), 28 and 32 (arms up but with the purple magic), 30 and 31
+(preacher and wildman spread-eagle in the air). The preacher has no arms-up stance: stranded preachers stand idle.
+
 Preacher body (blue headdress, staff, tribe layers on the gear): 26 (5) and 27 (8) walk, 28 (24) preaching with
 purple magic (praying), 29 (4) staff swing, 30 (4) flung, 32 (14) converting, 33-36 gestures, 39/44 (1) lying
 dead, 40/45 dying (burning, spirit rising), no arms-up stance (stranded preachers stand idle), 41 (3) standing with the staff (first frame = idle), 42 (5) kicking

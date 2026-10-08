@@ -98,7 +98,7 @@ lying body and the cast jump must fit), orthographic, seen from 30 deg above, ha
 The model's tribe materials (`--tribe`, default `Clothes,Hat`) are rendered in the magenta key, the material
 named `Skin` in `--skin` (the Quaternius characters ship a near-black skin; default tan `d29a6e`). Pose to clip: idle Idle
 (8 frames over the loop), walk Walk (12), pray SitDown (its last moment), cast Jump (12), fall Death (8, the
-last two lying), drown RecieveHit (4, sunk 45% under a ripple line), stranded Victory (4, looping over 22-67% of the clip: arms pumping up). Scale: the head top (default 3.1 model
+last two lying), drown RecieveHit (4, sunk 45% under a ripple line), stranded Victory (4, looping over 45-80% of the clip, see below). Scale: the head top (default 3.1 model
 units) is 34 base px above the feet.
 
 The game embeds the sheets (`units/sheets.rs`), crops every cell around the feet and swaps the magenta hue for
@@ -106,6 +106,14 @@ each tribe's. Every kind uses them whenever the original files are not (`--no-or
 witch (robe and hat in the tribe colour), brave = worker (shirt), warrior = soldier (top), preacher = wizard (robe;
 his hat stays dark so he is not mistaken for the shaman), spy = ninja (details), firewarrior = cowboy (jacket).
 A kind without sheets would fall back to its generated figure.
+
+### Stranded sheet
+The Quaternius characters have no "arms up" clip. Of the candidates, `Defeat` puts the hands on the head and
+`Victory` raises both arms and pumps them, so `Victory` stands in. Sampled over its length (worker, back view,
+where the stance reads best): 0-20% arms rising from the sides, 20-40% arms half up and spread, 45-80% both arms
+fully above the head, 80-100% coming back down. The sheet loops 4 frames over 45-80% (`Timing::Span`), at 4 fps;
+an earlier span (22-67%) showed the arms only shoulder high. Every model gets the sheet (the shaman's is unused:
+she is never stranded). With the original files the tribesmen use anim 12 instead (animations.md).
 
 ## Generating with an image model
 Models do not keep a fixed grid or anchor reliably: generate one direction or pose at a time, larger, then
