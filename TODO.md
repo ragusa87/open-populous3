@@ -20,6 +20,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
 - [ ] Walk animation rate could follow the slope speed (slower steps uphill).
 - [ ] Replanning: every walker replans on any terrain write; only replan when the change touches its route (`DirtyRect`) once there are many units. Group moves could share a flow field.
+- [ ] Worshipping the shaman: check in the game the range (3 cells guessed) and the states she must be in (idle or walking today).
 - [ ] Stranded preachers: no arms-up anim found in their own body (26-46), they stand idle (the CC0 preacher has one).
 - [ ] Boarding vehicles: walk to `path::nearest_reachable` next to the boat/balloon, then board when it is within reach. Boats path with `Mobility::Sail`, balloons with `Mobility::Fly`.
 - [ ] Open-source units: models closer to the original look (feathers and staff for the shaman, tribal outfits); a prayer clip (SitDown's end stands in) and a swim/drown clip (RecieveHit sunk stands in).

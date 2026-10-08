@@ -46,7 +46,7 @@ unknown. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
 |---|---|---|
 | 5 | 4 | walk (used) |
 | 6 | 6 | standing, breathing (idle) |
-| 8 | 6 | kneeling, arms raised (praying) |
+| 8 | 6 | kneeling, raising the arms up and down (praying; also worshipping the shaman nearby) |
 | 9, 11 | 4 | walk variants |
 | 10 | 1 | standing still |
 | 12 | 4 | crouch, both arms straight up, leap with arms spread, land; frame 1 (arms up) held for stranded units (every outfit) |
@@ -58,7 +58,7 @@ unknown. Outfits exist on 5, 6, 8-19, 25, 37-40, 48-52.
 | 48 | 8 | hands to the face; 49 (9) waving an arm; 50 (7) crouching; 51 (4) sitting |
 | 52 | 4 | arms flailing (used for drowning) |
 | 20-24 | 4-18 | warrior with built-in helmet and club: attacks |
-| 89 | 12 | standing, gesturing; 90-91 (14) bowing to the ground (worship); 92 (17) working |
+| 89 | 12 | standing, gesturing; 90 (14) push-ups, firewarrior gear drawn in; 91 (14) push-ups, headband and grey tool (no layers in either); 92 (17) working |
 
 ### Stranded (arms up)
 A unit that cannot reach its target stands with both arms up. Found by rendering every anim's frames: only
@@ -94,4 +94,4 @@ Shamans: 4 consecutive animations per action, one per tribe (blue, red, yellow, 
 
 Reading the sprite as `field / 6` (no -1) looks almost right but shows the next view's sprite once per
 loop, and the next tribe's in the back view: the -1 is checked on every shaman pose and tribe.
-No animated shaman prayer was found; 90/91 are braves bowing to the ground (worship).
+No animated shaman prayer was found; 90/91 are push-ups (not worship, checked in the game).

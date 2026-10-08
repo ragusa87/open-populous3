@@ -12,11 +12,12 @@ mod procedural;
 mod shadow;
 pub mod sheets;
 pub mod selection;
+pub mod worship;
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{render_pos, Grounded};
 use crate::world::{CurrentMap, LevelList, TerrainDirty};
-use art::{frame_index, pose_for, sprite_dir, Frame, TribeArt};
+use art::{frame_index, pose_for, sprite_dir, Frame, Pose, TribeArt};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -113,13 +114,14 @@ pub struct UnitSprites {
 }
 
 impl UnitSprites {
-    /// The frame showing `unit` from a camera at `yaw`.
-    pub fn frame_for(&self, unit: &Unit, yaw: f32, clock: &SimClock) -> Option<&FrameAsset> {
-        let pose = pose_for(&unit.action);
+    /// The frame showing `unit` from a camera at `yaw`; praying towards `worship` when it
+    /// worships its shaman (`worship::worship_facing`).
+    pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, yaw: f32, clock: &SimClock) -> Option<&FrameAsset> {
+        let (pose, facing) = worship.map_or((pose_for(&unit.action), unit.facing), |f| (Pose::Pray, f));
         let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
         // Wildmen have no tribe (owner 255): one look for all.
         let tribe = if unit.kind == UnitKind::Wildman { 0 } else { unit.owner as usize };
-        let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(sprite_dir(unit.facing, yaw))?;
+        let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(sprite_dir(facing, yaw))?;
         frames.get(frame_index(pose, frames.len(), &unit.action, clock.anim_secs, clock.alpha()))
     }
 }
@@ -293,8 +295,13 @@ fn animate_views(
         ground.at = clock.cell_pos(view.0, u);
         t.rotation = facing_camera;
     }
+    let shamans = worship::shamans(units);
     for (body, mut mesh, mut mat) in &mut bodies {
-        if let Some(f) = units.get(body.0).and_then(|u| sprites.frame_for(u, rig.yaw, &clock)) {
+        let frame = units.get(body.0).and_then(|u| {
+            let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
+            sprites.frame_for(u, worship, rig.yaw, &clock)
+        });
+        if let Some(f) = frame {
             if mesh.0 != f.mesh {
                 mesh.0 = f.mesh.clone();
                 mat.0 = f.material.clone();

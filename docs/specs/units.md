@@ -57,6 +57,13 @@ Every kind walks, prays, heals, drowns and dies like the shaman; only the shaman
 shaman, three of each other kind in columns to the west, one of each for tribe 1 (red) in a row to the east (all in
 view of the starting camera), a pond to the north.
 
+## Worshipping the shaman (decoration, done: `units/worship.rs`)
+Idle braves, warriors, firewarriors and spies whose shaman (same tribe) is within 3 cells on each axis (torus)
+and idle or walking pray facing her: the Pray pose (original anim 8, kneeling, arms going up and down; the CC0
+pray sheet), turned towards her (`octant`), following her as she walks by. Drawn only: in the simulation they stay
+Idle, selectable and orderable, nothing goes through `Command`. Preachers, wildmen and the shaman never do it
+(the original files have no pose for it); casting, praying, drowning or dying, she gets no worship.
+
 ## Standing slots (done: `game_core::slots`)
 - Each cell holds 3 x 3 standing spots (`PER_CELL`, about a third of a cell apart: a unit's width).
 - A unit never stops on a spot taken by another living unit (where it stands, or where it is walking to) nor
