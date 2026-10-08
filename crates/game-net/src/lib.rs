@@ -89,6 +89,11 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
         }
+        Command::QueueOrder { player, unit, order } => {
+            b.extend([5, *player]);
+            b.extend(unit.to_le_bytes());
+            encode_order(b, order);
+        }
     }
 }
 
@@ -129,6 +134,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         2 => Some(Command::OrderUnit { player, unit: c.u32()?, order: decode_order(c)? }),
         3 => Some(Command::PlaceCampfire { player, at: (c.u16()?, c.u16()?) }),
         4 => Some(Command::RemoveCampfire { player, at: (c.u16()?, c.u16()?) }),
+        5 => Some(Command::QueueOrder { player, unit: c.u32()?, order: decode_order(c)? }),
         _ => None,
     }
 }
@@ -208,6 +214,7 @@ mod tests {
                 Command::OrderUnit { player: 0, unit: 9, order: Order::Campfire { fire: (65535, 256), point: 15 } },
                 Command::PlaceCampfire { player: 3, at: (40_000, 7) },
                 Command::RemoveCampfire { player: 1, at: (8, 65535) },
+                Command::QueueOrder { player: 2, unit: 12, order: Order::Pray },
             ],
         }
     }

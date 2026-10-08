@@ -195,6 +195,8 @@ pub struct Unit {
     teleport_to: Option<(u16, u16)>,
     /// The camp fire (centre) and ring point she is walking to, to go round it once there.
     to_fire: Option<((u16, u16), u8)>,
+    /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
+    queue: Vec<Order>,
 }
 
 impl Unit {
@@ -218,6 +220,7 @@ impl Unit {
             planned_on: None,
             teleport_to: None,
             to_fire: None,
+            queue: Vec::new(),
         }
     }
 
@@ -262,8 +265,34 @@ impl Unit {
         }
     }
 
-    /// Ignored while drowning, dying or dead.
+    /// A direct order: replaces the chained ones. Ignored while drowning, dying or dead.
     pub fn order(&mut self, order: Order) {
+        if !self.action.can_take_orders() {
+            return;
+        }
+        self.queue.clear();
+        self.start(order);
+    }
+
+    /// Chained orders still to come, next first.
+    pub fn queued(&self) -> &[Order] {
+        &self.queue
+    }
+
+    /// Chains `order` after the current action and the orders already chained.
+    pub fn enqueue(&mut self, order: Order) {
+        if self.action.can_take_orders() {
+            self.queue.push(order);
+        }
+    }
+
+    /// Takes the next chained order, if any.
+    pub fn pop_queued(&mut self) -> Option<Order> {
+        (!self.queue.is_empty()).then(|| self.queue.remove(0))
+    }
+
+    /// Starts `order` now, keeping the chained ones. Ignored while drowning, dying or dead.
+    pub fn start(&mut self, order: Order) {
         if !self.action.can_take_orders() {
             return;
         }
@@ -373,6 +402,7 @@ impl Unit {
 
     fn die(&mut self) {
         (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
+        self.queue.clear();
         self.action = Action::Dying { left: DYING_TICKS };
     }
 

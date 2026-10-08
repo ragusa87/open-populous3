@@ -4,7 +4,8 @@
 //! selects her alone (`select_only`). Left click on the ground sends
 //! the selection there, each unit to a free cell of its own (`GameMap::dispatch`), or round one of
 //! the player's camp fires when clicked on it (`ground_click`); Shift + right click on one of the
-//! player's camp fires puts it out and keeps the selection (`shift_right_click`); P prays, X stops. Only selected units show their health bar, and the
+//! player's camp fires puts it out and keeps the selection (`shift_right_click`); P prays, X stops.
+//! With Ctrl held, these orders are chained after the units' current ones (`chained`). Only selected units show their health bar, and the
 //! cursor shows how many units are selected when more than one. While a spell is aimed the mouse
 //! belongs to it (`hud::spells`): clicks neither select nor send units.
 
@@ -264,6 +265,9 @@ pub(super) fn select_and_order(
                     let ray = cam.0.viewport_to_world(cam.1, c).ok();
                     if let Some(cell) = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)) {
                         moves = ground_click(&map.0, &selection.units, world_units(cell));
+                        if add {
+                            moves = chained(moves);
+                        }
                     }
                 }
             },
@@ -277,6 +281,7 @@ pub(super) fn select_and_order(
         orders.push(Order::Stop);
     }
     let commands = orders.into_iter().flat_map(|order| selection.commands(order));
+    let commands: Vec<Command> = if add { chained(commands.collect()) } else { commands.collect() };
     for command in moves.into_iter().chain(commands) {
         map.bypass_change_detection().0.apply(&command);
     }
@@ -290,6 +295,17 @@ pub fn ground_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16, u
         Some(fire) => map.gather(PLAYER, selected, fire.id),
         None => map.dispatch(PLAYER, selected, at),
     }
+}
+
+/// The same orders, chained after each unit's current ones instead of replacing them (Ctrl).
+pub fn chained(commands: Vec<Command>) -> Vec<Command> {
+    commands
+        .into_iter()
+        .map(|c| match c {
+            Command::OrderUnit { player, unit, order } => Command::QueueOrder { player, unit, order },
+            other => other,
+        })
+        .collect()
 }
 
 /// The command of a right click on the ground at `at` (world units) with Shift held (`shift`):
@@ -357,6 +373,18 @@ mod tests {
         assert_eq!(shift_right_click(&map, (fire.0 + 100, fire.1), true), Some(Command::RemoveCampfire { player: PLAYER, at: fire }), "anywhere in its cell");
         assert_eq!(shift_right_click(&map, fire, false), None, "without Shift: deselect");
         assert_eq!(shift_right_click(&map, away, true), None, "no fire there");
+    }
+
+    #[test]
+    fn ctrl_chains_unit_orders_and_keeps_the_others() {
+        let cmds = vec![
+            Command::OrderUnit { player: PLAYER, unit: 4, order: Order::Pray },
+            Command::RemoveCampfire { player: PLAYER, at: (1, 2) },
+        ];
+        assert_eq!(
+            chained(cmds),
+            [Command::QueueOrder { player: PLAYER, unit: 4, order: Order::Pray }, Command::RemoveCampfire { player: PLAYER, at: (1, 2) }]
+        );
     }
 
     #[test]

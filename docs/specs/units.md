@@ -57,6 +57,16 @@ Every kind walks, prays, heals, drowns and dies like the shaman; only the shaman
 shaman, three of each other kind in columns to the west, one of each for tribe 1 (red) in a row to the east (all in
 view of the starting camera), a pond to the north.
 
+## Chained orders (done: `Unit::queue`, `Command::QueueOrder`)
+Any order to any unit can be chained after its current action and the orders already chained (Ctrl + click on the
+ground or a camp fire, Ctrl + P / X; later the game itself, for tasks). The queue advances when the unit is idle:
+each tick, an idle living unit starts its next chained order still valid (`GameMap::still_valid`: every order
+today; task orders will check their task). A unit idle with nothing chained starts a chained order at once. A
+direct order (`Command::OrderUnit`) replaces the chain; dying clears it. Open-ended actions end with their
+target: going round a camp fire is endless (a tended fire never goes out) until the player puts the fire out,
+then the chain goes on; praying will be at a totem and end when it is gone (today it never ends on its own).
+Internal moves (stepping off a taken spot on arrival, a fire put out) use `Unit::start`, which keeps the chain.
+
 ## Worshipping the shaman (decoration, done: `units/worship.rs`)
 Idle followers (braves, warriors, firewarriors, spies, preachers) whose shaman (same tribe) is within 3 cells on each axis (torus)
 and idle or walking pray facing her: the Pray pose (original anim 8, kneeling, arms going up and down; the CC0

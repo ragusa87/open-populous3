@@ -312,6 +312,16 @@ impl GameMap {
                 }
                 None
             }
+            Command::QueueOrder { player, unit, order } => {
+                if let Some(u) = self.units.iter_mut().find(|u| u.id == unit && u.owner == player) {
+                    if u.action == Action::Idle && u.queued().is_empty() {
+                        u.start(order);
+                    } else {
+                        u.enqueue(order);
+                    }
+                }
+                None
+            }
             Command::PlaceCampfire { player, at } => {
                 self.place_campfire(player, campfire::cell_at(at));
                 None
@@ -339,7 +349,7 @@ impl GameMap {
         let Some(i) = self.campfires.iter().position(|f| f.owner == player && f.cell() == campfire::cell_at(p)) else { return };
         let centre = self.campfires.remove(i).centre();
         for u in self.units.iter_mut().filter(|u| u.owner == player && u.campfire() == Some(centre)) {
-            u.order(Order::Stop);
+            u.start(Order::Stop);
         }
     }
 
@@ -418,16 +428,35 @@ impl GameMap {
                 if taken.contains(&spot) {
                     if let Some(&free) = slots::free_spots_near(&self.terrain, spot, &taken, 1).first() {
                         let (x, z) = slots::spot_centre(free);
-                        self.units[i].order(Order::MoveTo { x, z });
+                        self.units[i].start(Order::MoveTo { x, z });
                     }
                 }
             }
         }
+        self.start_chained();
         dirty
     }
 }
 
 impl GameMap {
+    /// Every living idle unit starts its next chained order that is still valid.
+    fn start_chained(&mut self) {
+        for i in 0..self.units.len() {
+            while self.units[i].action == Action::Idle {
+                let Some(order) = self.units[i].pop_queued() else { break };
+                if self.still_valid(&order) {
+                    self.units[i].start(order);
+                }
+            }
+        }
+    }
+
+    /// Whether a chained order still makes sense when its turn comes (every order today; tasks will
+    /// check they still need the unit).
+    fn still_valid(&self, _order: &Order) -> bool {
+        true
+    }
+
     /// Camp fires with someone of their tribe going to them or round them keep burning, the others
     /// count towards going out; those out are removed.
     fn tend_campfires(&mut self) {
@@ -782,6 +811,76 @@ mod tests {
         assert_eq!(m.campfires.iter().filter(|f| f.id == fire).count(), 1, "not yet");
         m.tick();
         assert!(m.campfires.iter().all(|f| f.id != fire), "gone out");
+    }
+
+    fn run(m: &mut GameMap, ticks: u32) {
+        for _ in 0..ticks {
+            m.tick();
+        }
+    }
+
+    #[test]
+    fn chained_orders_run_one_after_the_other_and_a_direct_order_drops_them() {
+        let mut m = GameMap::sandbox_walk();
+        let c = MAP_SIZE as i32 / 2;
+        m.trees.clear();
+        let id = m.units[0].id;
+        let (a, b) = (slots::cell_centre((c + 3, c)), slots::cell_centre((c + 3, c + 3)));
+        for order in [Order::MoveTo { x: a.0, z: a.1 }, Order::MoveTo { x: b.0, z: b.1 }, Order::Pray] {
+            m.apply(&Command::QueueOrder { player: 0, unit: id, order });
+        }
+        assert_eq!(m.units[0].action, Action::Walking { to: a }, "idle: the first one starts at once");
+        assert_eq!(m.units[0].queued().len(), 2);
+        let mut seen_a = false;
+        for _ in 0..200 {
+            m.tick();
+            seen_a |= m.units[0].cell() == (c + 3, c);
+        }
+        assert!(seen_a, "went by A");
+        assert_eq!((m.units[0].cell(), m.units[0].action), ((c + 3, c + 3), Action::Praying), "then B, then prays");
+        m.apply(&Command::QueueOrder { player: 0, unit: id, order: Order::MoveTo { x: a.0, z: a.1 } });
+        run(&mut m, 50);
+        assert_eq!(m.units[0].action, Action::Praying, "praying (no target yet) does not end on its own");
+        m.apply(&Command::OrderUnit { player: 0, unit: id, order: Order::Stop });
+        run(&mut m, 50);
+        assert_eq!((m.units[0].action, m.units[0].queued().len()), (Action::Idle, 0), "a direct order replaces the chain");
+        m.apply(&Command::QueueOrder { player: 1, unit: id, order: Order::Pray });
+        assert_eq!(m.units[0].action, Action::Idle, "not red's unit");
+    }
+
+    #[test]
+    fn putting_a_camp_fire_out_starts_the_chained_orders() {
+        let mut m = GameMap::sandbox_buildings();
+        run(&mut m, 100);
+        let fire = m.campfires[0].centre();
+        let id = m.units.iter().find(|u| u.campfire() == Some(fire)).unwrap().id;
+        let to = (fire.0.wrapping_sub(3 * 512), fire.1);
+        m.apply(&Command::QueueOrder { player: 0, unit: id, order: Order::MoveTo { x: to.0, z: to.1 } });
+        run(&mut m, 100);
+        let u = m.units.iter().find(|u| u.id == id).unwrap();
+        assert!(matches!(u.action, Action::AroundFire { .. }), "going round a tended fire never ends");
+        m.apply(&Command::RemoveCampfire { player: 0, at: fire });
+        run(&mut m, 100);
+        let u = m.units.iter().find(|u| u.id == id).unwrap();
+        assert_eq!(u.action, Action::Idle);
+        assert!(slots::spot_of((u.x, u.z)).0.abs_diff(slots::spot_of(to).0) <= 3, "went on to the chained spot");
+    }
+
+    #[test]
+    fn chained_orders_replay_the_same() {
+        let play = || {
+            let mut m = GameMap::sandbox_units();
+            let ids: Vec<u32> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
+            let c = MAP_SIZE as i32 / 2;
+            for (i, &unit) in ids.iter().enumerate() {
+                let to = slots::cell_centre((c + i as i32 % 4, c + 4));
+                m.apply(&Command::QueueOrder { player: 0, unit, order: Order::MoveTo { x: to.0, z: to.1 } });
+                m.apply(&Command::QueueOrder { player: 0, unit, order: Order::Pray });
+            }
+            run(&mut m, 300);
+            m.units
+        };
+        assert_eq!(play(), play());
     }
 
     #[test]

@@ -16,6 +16,7 @@ Frame: `u32 LE` length + payload. Payload tag byte:
   - kind 1 `Order` (to the shaman): `order tag u8` (0 MoveTo + `u16` x, z in world units, 1 Pray, 2 Cast, 3 Stop, 4 Campfire + `u16` x, z of the fire's centre + `u8` ring point);
   - kind 2 `OrderUnit` (to one of the player's units): `u32` unit id, then the order as in kind 1;
   - kind 3 `PlaceCampfire`: `u16` x, z in world units (the fire takes that cell);
-  - kind 4 `RemoveCampfire`: `u16` x, z in world units (the player's fire in that cell).
+  - kind 4 `RemoveCampfire`: `u16` x, z in world units (the player's fire in that cell);
+  - kind 5 `QueueOrder` (chained after the unit's current orders): `u32` unit id, then the order as in kind 1.
 
 Implemented: codec + TCP round trip test. To do: host/join, turn scheduler, reconnect, lobby UI.

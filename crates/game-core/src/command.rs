@@ -10,6 +10,9 @@ pub enum Command {
     Order { player: u8, order: Order },
     /// An order to one of the player's units (by `Unit::id`); ignored if the unit is not theirs.
     OrderUnit { player: u8, unit: u32, order: Order },
+    /// Chains `order` after the unit's current action and chained orders (Ctrl + click): it starts
+    /// once the unit is idle. Ignored if the unit is not theirs.
+    QueueOrder { player: u8, unit: u32, order: Order },
     /// Light a camp fire in the cell holding world point `at` (`campfire::can_place`).
     PlaceCampfire { player: u8, at: (u16, u16) },
     /// Put out the player's camp fire in the cell holding world point `at`; whoever went round it
