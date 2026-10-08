@@ -30,15 +30,15 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
 - A hut makes braves on its own, empty or not: empty at half speed, faster with more people inside (the
   `SPROG_TIME` comment above). The larger the hut, the faster.
 - A newly built hut starts with its breeding bar full: a brave comes out at once.
-- A hut grows twice (small, medium, large). Its upgrade bar fills while people are inside; wood is brought to its
-  door ("three pieces start the upgrade, only two are used"); a brave can also be ordered to drop wood there.
+- A hut grows twice (small, medium, large) with wood brought to its door ("three pieces start the upgrade, only
+  two are used"); a brave can also be ordered to drop wood there.
 - People inside make mana. The guide says a brave makes the same mana in any hut size, against
   `MANA_F_HUT_LEVEL` 100/110/120 %: the files win until checked in the game.
 - Firewarriors in a hut throw fire at enemies nearby, the shaman casts from inside one (later: combat, spells).
 
 ### Rules
 State on `Building` (huts only): `level` 1-3 (from the kind, `villager_hut` sizes), `occupants` (unit ids, in
-entry order), `breed` and `grow` progress, `wood` pieces left at its door for the upgrade.
+entry order), `breed` progress, and the growing state (rule 6).
 
 1. **Entering** (`Order::Enter { building }` through `Command::OrderUnit`): any follower of the owner (not the
    shaman, not wildmen) walks to the door, then in (buildings.md "Doors"), and becomes `Action::Inside`: off the
@@ -54,10 +54,9 @@ entry order), `breed` and `grow` progress, `wood` pieces left at its door for th
    with `band` from the tribe's population as a % of its cap. The brave appears at the door, idle, and `breed`
    restarts at 0. At the cap, `breed` stays full and the brave comes as soon as there is room. A newly built hut
    starts with `breed` full.
-6. **Growing** [ours, to check]: `grow` fills only while someone is inside (`occupants` per update) up to
-   `GROW_TIME`. Once full, the hut waits for 2 pieces of wood at its door: braves inside it fetch them (one piece
-   each, the wood dispatch rule of buildings.md), and any brave ordered to drop a carried piece there adds one.
-   With 2 pieces it uses them, `level` + 1 (kind becomes the next hut size, same footprint), `grow` restarts.
+6. **Growing** (not to implement yet, internals to settle): a small or medium hut gets flagged for an upgrade
+   (what flags it is unknown). Some of the villagers inside then fetch wood, much like a construction (wood
+   dispatch of buildings.md); once the wood is provided, the hut switches to the next size (same footprint).
    Large huts do not grow.
 7. **Mana** (every `MANA_UPDATE` = 16 turns), per tribe: sum over its people of `MANA_F[kind]` x activity %
    (inside a hut: `HOUSED` x `HUT_LEVEL[level]`; working on a building or fetching wood: `WORKING`; inside a
@@ -111,7 +110,7 @@ Every number of these rules lives in one place, `game_core::balance`:
 
 With the default balance, a small hut with 1 brave inside at 0-4 % population breeds every 4000 x 30 % = 1200 ticks
 (2 min); 3 inside (gain 2.0), 1 min. To measure in the game: time between two braves of a small hut with 1 inside,
-time to train one warrior and its mana, a medium hut's time to grow.
+time to train one warrior and its mana, what flags a hut for an upgrade.
 
 ## Simulation (to build)
 - `Building::id` (stable, given in load order then creation order): units point at it; the view needs it too
@@ -125,7 +124,7 @@ time to train one warrior and its mana, a medium hut's time to grow.
 
 ## Open questions
 - Huts: what the population band is a percentage of (the tribe's cap assumed, or 199); whether people outside
-  huts make mana (assumed not); what fills the upgrade bar and who brings the wood; whether idle braves house
+  huts make mana (assumed not); what flags a hut for an upgrade and how much wood it takes; whether idle braves house
   themselves, from how far, after how long.
 - Whether spell recharge and training take from the same mana pool (TODO "Mana").
 - Training: how mana is taken (assumed along the training), the real `CONV_*` meaning and the cost by specialist
