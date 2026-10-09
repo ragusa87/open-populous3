@@ -2,6 +2,18 @@
 
 Guidance for coding agents working on this repo (Rust + Bevy 0.19 Populous-like POC).
 
+## Licence and original data
+The project must stay MIT, open-sourcable as a whole. *Populous: The Beginning* belongs to Bullfrog / Electronic
+Arts: its files serve only to understand how the game works (formats, rules, numbers) and to be loaded at runtime
+from the user's own install.
+- Never commit original data or anything reproducing it: models, textures, palettes, sprites, sounds, level
+  dumps, renders or screenshots made with the original files, exported viewers. Keep such outputs in a scratch dir.
+- Never quote original texts (level names, briefings, messages, UI strings) in code, tests, docs, commits or
+  TODO: refer to them by their text number (docs/specs/language.md).
+- Do not look at screenshots or videos of the original game: our art (generated, CC0) must not be traced from it.
+- Facts from the community tools (README "References") yes, their code no.
+- Everything shippable works with `--no-original` (generated or CC0 content, our own texts).
+
 ## Before starting
 Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `roadmap.md`, then the `docs/specs/*` matching the task).
 
