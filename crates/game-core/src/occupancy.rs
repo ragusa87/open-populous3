@@ -40,7 +40,7 @@ pub fn room(kind: BuildingKind) -> u16 {
 impl GameMap {
     /// The people slots of `holder`, None when it holds nobody: a plan or site, its braves at work
     /// (`max_braves`); a built building with room, the people inside; a spent vault, none; a totem,
-    /// its `prayers` (nobody prays yet).
+    /// its `prayers`, filled by the first of its queue (those counted).
     pub fn people_slots(&self, holder: Holder) -> Option<People> {
         match holder {
             Holder::Building(i) => {
@@ -59,7 +59,7 @@ impl GameMap {
                 filled.truncate(capacity as usize);
                 (capacity > 0).then_some(People { capacity, filled })
             }
-            Holder::Totem(i) => self.totems.get(i).map(|t| People { capacity: t.prayers, filled: Vec::new() }),
+            Holder::Totem(i) => self.totems.get(i).map(|t| People { capacity: t.prayers, filled: t.queue.iter().take(t.prayers as usize).copied().collect() }),
             Holder::Tree(_) => None,
         }
     }

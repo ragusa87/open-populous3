@@ -221,8 +221,16 @@ pub struct Building {
 /// What a vault of knowledge teaches the tribe praying at it, from the level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Reward {
+    /// A spell, known from now on.
     Spell(SpellKind),
     Building(BuildingKind),
+    /// One cast of a spell (a "once" discovery).
+    OneShot(SpellKind),
+    /// Mana (no mana in the simulation yet: only logged).
+    Mana(u32),
+    /// A trigger target not handled yet (an effect, a revealed thing, a vehicle...): its thing kind
+    /// and model, only logged.
+    Unhandled { kind: u8, model: u8 },
 }
 
 impl Building {

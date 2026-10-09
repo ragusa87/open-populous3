@@ -33,8 +33,6 @@ const SPRITE_MARGIN_PX: f32 = 2.5;
 const HULL_WIDTH: f32 = 0.03;
 /// A click this close to a building's footprint (world units) is on it.
 const BUILDING_MARGIN: i32 = 128;
-/// The cursor on the ground this close to a totem's centre (world units, either axis) is on it.
-const TOTEM_MARGIN: i32 = 320;
 
 /// The hoverable views of buildings, trees and totems (one query: systems take at most 16 parameters).
 type HoverableViews<'w, 's> = Query<'w, 's, (Option<&'static BuildingView>, Option<&'static TreeView>, Option<&'static crate::totems::TotemView>), With<Hoverable>>;
@@ -144,11 +142,9 @@ pub fn pick(unit: Option<usize>, wood: Option<usize>, tree: Option<usize>, totem
         .or(building.map(HoverTarget::Building))
 }
 
-/// The totem standing within `TOTEM_MARGIN` of world point `at` (on the torus) that `hoverable`
-/// accepts (by index).
+/// The totem standing at world point `at` (`GameMap::totem_at`) if `hoverable` accepts it (by index).
 pub fn totem_at(map: &GameMap, at: (u16, u16), hoverable: impl Fn(usize) -> bool) -> Option<usize> {
-    let near = |a: u16, b: u16| (a.wrapping_sub(b) as i16).unsigned_abs() as i32 <= TOTEM_MARGIN;
-    map.totems.iter().enumerate().position(|(i, t)| near(t.x, at.0) && near(t.z, at.1) && hoverable(i))
+    map.totem_at(at).filter(|&i| hoverable(i))
 }
 
 /// The first building whose footprint holds world point `at` and that `hoverable` accepts (by
@@ -393,9 +389,9 @@ mod tests {
         use game_core::totem::{Totem, TotemKind};
         let mut map = GameMap::sandbox_worship();
         map.totems = vec![Totem::new(TotemKind::StoneHead, (100, 30000)), Totem::new(TotemKind::Totem, (40000, 40000))];
-        assert_eq!(totem_at(&map, (100 + TOTEM_MARGIN as u16, 30000), |_| true), Some(0));
+        assert_eq!(totem_at(&map, (100 + game_core::worship::TOTEM_MARGIN as u16, 30000), |_| true), Some(0));
         assert_eq!(totem_at(&map, (65500, 30100), |_| true), Some(0), "across the map's seam");
-        assert_eq!(totem_at(&map, (100 + TOTEM_MARGIN as u16 + 1, 30000), |_| true), None);
+        assert_eq!(totem_at(&map, (100 + game_core::worship::TOTEM_MARGIN as u16 + 1, 30000), |_| true), None);
         assert_eq!(totem_at(&map, (40000, 40000), |i| i != 1), None, "no view to hover");
     }
 

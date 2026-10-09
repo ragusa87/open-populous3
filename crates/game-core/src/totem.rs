@@ -3,7 +3,9 @@
 //! cell. Which original model the levels' totems use is not known: they are drawn as stone heads,
 //! and the Worship sandbox shows every candidate.
 
-use pop3_format::level::{Thing, Trigger, KIND_SCENERY};
+use crate::building::{BuildingKind, Reward};
+use crate::spell_book::SpellKind;
+use pop3_format::level::{Availability, Thing, Trigger, KIND_BUILDING, KIND_SCENERY, KIND_SPELL};
 use pop3_format::{Level, ThingData, WORLD_UNITS_PER_CELL};
 
 /// Scenery model of the levels' totems.
@@ -15,6 +17,10 @@ const TRIGGER_SHAMAN: u8 = 3;
 const TRIGGER_SHAMAN_ANGEL: u8 = 5;
 /// Gauge length of a totem without a trigger (sandboxes), in ticks of full-speed praying.
 pub const DEFAULT_PRAY_TIME: u16 = 100;
+/// Discovery kind of mana (`DiscoveryType` 6).
+const DISCOVERY_MANA: u8 = 6;
+/// Tribes with a gauge of their own on each totem.
+pub const TRIBES: usize = 4;
 
 /// The original objects that look like something to pray at (objects.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -44,7 +50,7 @@ impl TotemKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Totem {
     pub kind: TotemKind,
     /// Centre, world units (512 per cell).
@@ -58,16 +64,27 @@ pub struct Totem {
     pub summons_angel: bool,
     /// Gauge length (the trigger's `PrayTime`).
     pub pray_time: u16,
+    /// What it gives each time a tribe fills its gauge (the trigger's targets).
+    pub gifts: Vec<Reward>,
+    /// How many times it can give (the trigger's `NumOccurences`; 0: no limit, a guess), and how many
+    /// times it gave.
+    pub occurrences: u8,
+    pub given: u8,
+    /// Each tribe's gauge, in `gauge::STEP`s.
+    pub gauges: [u32; TRIBES],
+    /// The units praying at it, in the order they started: each tribe's first `prayers` count.
+    pub queue: Vec<u32>,
 }
 
 impl Totem {
     /// A totem any one unit fills in `DEFAULT_PRAY_TIME`.
     pub fn new(kind: TotemKind, (x, z): (u16, u16)) -> Self {
-        Totem { kind, x, z, prayers: 1, shaman_only: false, summons_angel: false, pray_time: DEFAULT_PRAY_TIME }
+        Totem { kind, x, z, prayers: 1, shaman_only: false, summons_angel: false, pray_time: DEFAULT_PRAY_TIME, gifts: Vec::new(), occurrences: 0, given: 0, gauges: [0; TRIBES], queue: Vec::new() }
     }
 
-    /// The totem of `thing` with what `trigger` asks for; the defaults of `new` without one.
-    pub fn from_trigger(thing: &Thing, trigger: Option<&Trigger>) -> Self {
+    /// The totem of `thing` with what `trigger` asks for and gives (its targets in `level`); the
+    /// defaults of `new` without one.
+    pub fn from_trigger(level: &Level, thing: &Thing, trigger: Option<&Trigger>) -> Self {
         let totem = Totem::new(TotemKind::StoneHead, (thing.x, thing.z));
         let Some(t) = trigger else { return totem };
         Totem {
@@ -75,8 +92,35 @@ impl Totem {
             shaman_only: matches!(t.trigger_type, TRIGGER_SHAMAN | TRIGGER_SHAMAN_ANGEL),
             summons_angel: t.trigger_type == TRIGGER_SHAMAN_ANGEL,
             pray_time: t.pray_time.max(1) as u16,
+            gifts: t.targets.iter().filter_map(|&slot| level.slot(slot)).map(gift).collect(),
+            occurrences: t.occurrences.max(0) as u8,
             ..totem
         }
+    }
+
+    /// Its gauge's steps when full.
+    pub fn full(&self) -> u32 {
+        self.pray_time as u32 * crate::gauge::STEP
+    }
+
+    /// It gave as many times as it can.
+    pub fn is_exhausted(&self) -> bool {
+        self.occurrences > 0 && self.given >= self.occurrences
+    }
+}
+
+/// What a trigger target gives: a discovered spell (one cast for a "once" discovery), building or
+/// mana; anything else is not handled yet.
+pub fn gift(target: &Thing) -> Reward {
+    match target.data() {
+        ThingData::Discovery(d) if d.kind == KIND_SPELL => match SpellKind::from_model(d.model) {
+            Some(kind) if d.availability == Availability::Once => Reward::OneShot(kind),
+            Some(kind) => Reward::Spell(kind),
+            None => Reward::Unhandled { kind: d.kind, model: d.model },
+        },
+        ThingData::Discovery(d) if d.kind == KIND_BUILDING => Reward::Building(BuildingKind::from_model(d.model)),
+        ThingData::Discovery(d) if d.kind == DISCOVERY_MANA => Reward::Mana(d.mana.max(0) as u32),
+        _ => Reward::Unhandled { kind: target.kind, model: target.model },
     }
 }
 
@@ -105,7 +149,7 @@ pub fn totems_from_level(level: &Level) -> Vec<Totem> {
         .map(|(i, t)| {
             let before = totems[..i].iter().filter(|o| (o.x / 512, o.z / 512) == (t.x / 512, t.z / 512)).count();
             let prayer = triggers_on_cell(level, t).into_iter().filter(|tr| matches!(tr.trigger_type, TRIGGER_UNITS | TRIGGER_SHAMAN | TRIGGER_SHAMAN_ANGEL)).nth(before);
-            Totem::from_trigger(t, prayer.as_ref())
+            Totem::from_trigger(level, t, prayer.as_ref())
         })
         .collect()
 }
@@ -158,6 +202,21 @@ mod tests {
         assert_eq!((t[0].prayers, t[0].pray_time), (6, 1000));
         assert_eq!((t[1].prayers, t[1].pray_time), (1, 100));
         assert_eq!((t[2].prayers, t[2].pray_time), (1, DEFAULT_PRAY_TIME), "its trigger is on the next cell");
+    }
+
+    #[test]
+    fn its_gifts_and_occurrences_come_from_the_trigger_targets() {
+        let mut trig = trigger((9, 9), 0, 4, 50);
+        trig[13..19].copy_from_slice(&[3, 0, 4, 0, 5, 0]);
+        trig[10] = 2;
+        let once = thing(2, KIND_GENERAL, (0, 0), &[KIND_SPELL, SpellKind::Swarm.model(), 3, 1]);
+        let mut mana = thing(2, KIND_GENERAL, (0, 0), &[DISCOVERY_MANA, 3, 3, 1]);
+        mana[11..15].copy_from_slice(&50_000i32.to_le_bytes());
+        let effect = thing(24, 7, (0, 0), &[]);
+        let level = level_with(&[totem((9, 9)), trig, once, mana, effect]);
+        let t = &totems_from_level(&level)[0];
+        assert_eq!(t.gifts, vec![Reward::OneShot(SpellKind::Swarm), Reward::Mana(50_000), Reward::Unhandled { kind: 7, model: 24 }]);
+        assert_eq!(t.occurrences, 2);
     }
 
     #[test]

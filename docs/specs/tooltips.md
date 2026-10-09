@@ -65,8 +65,8 @@ horizontal across its top (filling left to right):
 - Training hut: the training of the unit inside, horizontal, across the top.
 
 Done (`tooltip::Bar { kind, fill, blocked }`, `BarKind` giving the colour and the side, `spawn_bar`,
-`blink_bars`): the pyramid's prayer bar from its progress (gone once granted), the totem's empty until praying
-exists; the house and training bars wait for those features.
+`blink_bars`): the pyramid's prayer bar from its progress (gone once granted), the totem's from the player's gauge
+(gone once exhausted); the house and training bars wait for those features.
 
 A bar **blinks while blocked**: a house's birth bar when the tribe is at its population cap; its growth bar when
 the next size cannot be reached; a training bar without mana [player: blinking; ours: which causes count as

@@ -134,6 +134,9 @@ fn reward_name(reward: Reward) -> String {
     match reward {
         Reward::Spell(kind) => kind.name().to_string(),
         Reward::Building(kind) => kind.name(),
+        Reward::OneShot(kind) => format!("{} (one cast)", kind.name()),
+        Reward::Mana(n) => format!("{n} mana"),
+        Reward::Unhandled { .. } => "Something unknown".to_string(),
     }
 }
 
@@ -173,7 +176,8 @@ pub fn totem_model(map: &GameMap, i: usize, selected: &[u32]) -> Option<TooltipM
     let totem = map.totems.get(i)?;
     let placeholder = if totem.shaman_only { UnitKind::Shaman } else { UnitKind::Brave };
     let rows = map.people_slots(Holder::Totem(i)).map(|p| people_row(map, &p, placeholder, selected)).into_iter().collect();
-    let bars = vec![Bar { kind: BarKind::Prayer, fill: 0, blocked: false }];
+    let fill = (totem.gauges[crate::units::PLAYER as usize] as u64 * game_core::vault::FULL as u64 / totem.full().max(1) as u64) as u16;
+    let bars = if totem.is_exhausted() { Vec::new() } else { vec![Bar { kind: BarKind::Prayer, fill, blocked: false }] };
     Some(TooltipModel { lines: vec![totem.kind.name().to_string()], rows, bars })
 }
 

@@ -1,6 +1,7 @@
 //! Dev helpers driven by env vars, so screenshots can be taken without a window:
 //! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|pray|cast|drown|teleport|worship] game-client [level]`.
-//! `SHAMAN=worship` sends her to pray at the map's first vault of knowledge.
+//! `SHAMAN=worship` sends her to pray at the map's first vault of knowledge; `BRAVES=totem:N` sends
+//! every brave of the player to pray at totem N.
 //! `SHAMAN` gives the player's shaman an order at start, to check each pose; `BRAVES=cut|carry` sends
 //! the player's braves to cut their nearest tree (and, for `carry`, bring the piece back where they stood).
 //! `FOCUS=x,z` (cells), `DISTANCE=n`, `PITCH=deg`, `YAW=deg` place the camera for the shot;
@@ -80,6 +81,10 @@ pub fn demo_commands(name: &str, shaman: &Unit) -> Vec<Command> {
 /// Commands for a `BRAVES` demo: every brave of the player (not inside a building) cuts the tree nearest to it; `carry` then
 /// brings the piece back where it stood.
 pub fn brave_commands(name: &str, map: &game_core::map::GameMap) -> Vec<Command> {
+    if let Some(totem) = name.strip_prefix("totem:").and_then(|n| n.parse().ok()) {
+        let braves: Vec<u32> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave).map(|u| u.id).collect();
+        return map.totem_orders(PLAYER, &braves, totem);
+    }
     if !matches!(name, "cut" | "carry") {
         return Vec::new();
     }

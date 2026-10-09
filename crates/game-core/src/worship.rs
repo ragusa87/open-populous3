@@ -1,17 +1,24 @@
-//! The shaman at a vault of knowledge (docs/specs/worship.md): ordered there she walks to its door and
-//! prays (`Action::Worshipping`); its gauge fills while she prays or is inside and drains otherwise
-//! (`Vault::tick`). Full, she walks in to its middle, which grants its reward, then walks out; from
-//! going in until she is out no order reaches her (`GameMap::locked`).
+//! Praying for rewards (docs/specs/worship.md). At a vault of knowledge, the shaman: ordered there she
+//! walks to its door and prays (`Action::Worshipping`); its gauge fills while she prays or is inside
+//! and drains otherwise (`Vault::tick`). Full, she walks in to its middle, which grants its reward,
+//! then walks out; from going in until she is out no order reaches her (`GameMap::locked`).
+//! At a totem, the tribe's units (or only the shaman): each walks to a spot around it and prays; each
+//! tribe's first `Totem::prayers` count (`Totem::queue`), its gauge fills on the soft curve of how many
+//! count and drains linearly (`gauge::step`); full, its gifts go to the tribe, as many times as the
+//! totem allows. A vault is keyed by its stored corner, a totem by its centre: never the same point.
 
 use crate::building::{BuildingKind, Reward};
 use crate::build_book::BuildAvailability;
 use crate::command::Command;
 use crate::map::GameMap;
-use crate::spell_book::Availability;
+use crate::spell_book::{Availability, SpellBook, SpellKind};
+use crate::totem::TRIBES;
 use crate::unit::{torus_delta, Action, Inside, Order, UnitKind};
 
 /// Within this many world units of the vault's middle she has reached it.
 const MIDDLE: i32 = 64;
+/// The ground this close to a totem's centre (world units, either axis) is on it.
+pub const TOTEM_MARGIN: i32 = 320;
 
 impl GameMap {
     /// The vault of knowledge whose footprint (grown by `enter::ENTER_MARGIN`) holds `at`, if it still
@@ -28,14 +35,94 @@ impl GameMap {
         self.units.iter().filter(|u| u.owner == player && u.kind == UnitKind::Shaman && units.contains(&u.id)).map(|u| Command::OrderUnit { player, unit: u.id, order: Order::Worship { site } }).collect()
     }
 
-    /// Unit `i` takes `Order::Worship`: a living shaman walks to the vault's door to pray there.
+    /// The totem within `TOTEM_MARGIN` of world point `at` (on the torus).
+    pub fn totem_at(&self, at: (u16, u16)) -> Option<usize> {
+        self.totems.iter().position(|t| torus_delta(t.x, at.0).abs() <= TOTEM_MARGIN && torus_delta(t.z, at.1).abs() <= TOTEM_MARGIN)
+    }
+
+    /// Orders sending the player's units among `units` that may pray at totem `totem` (index) there:
+    /// the shaman only for a shaman-only totem, else the followers and the shaman; none at an
+    /// exhausted totem.
+    pub fn totem_orders(&self, player: u8, units: &[u32], totem: usize) -> Vec<Command> {
+        let Some(t) = self.totems.get(totem).filter(|t| !t.is_exhausted()) else { return Vec::new() };
+        let site = (t.x, t.z);
+        let may = |kind: UnitKind| if t.shaman_only { kind == UnitKind::Shaman } else { kind != UnitKind::Wildman };
+        self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id) && may(u.kind)).map(|u| Command::OrderUnit { player, unit: u.id, order: Order::Worship { site } }).collect()
+    }
+
+    /// Unit `i` takes `Order::Worship`: at a vault the living shaman walks to its door, at a totem a
+    /// unit allowed to pray there walks to a free spot around it, to pray there.
     pub(crate) fn go_worship(&mut self, i: usize, site: (u16, u16)) {
+        if let Some(t) = self.totems.iter().position(|t| (t.x, t.z) == site) {
+            self.go_pray_at_totem(i, t);
+            return;
+        }
         let Some(b) = self.building_at_corner(site).map(|k| &self.buildings[k]) else { return };
         if self.units[i].kind != UnitKind::Shaman || b.vault.is_none_or(|v| v.is_spent()) {
             return;
         }
         let door = b.door();
         self.units[i].go_worship(site, door);
+    }
+
+    fn go_pray_at_totem(&mut self, i: usize, totem: usize) {
+        let t = &self.totems[totem];
+        let u = &self.units[i];
+        let allowed = if t.shaman_only { u.kind == UnitKind::Shaman } else { u.kind != UnitKind::Wildman };
+        if !allowed || !u.is_alive() || t.is_exhausted() {
+            return;
+        }
+        let site = (t.x, t.z);
+        let (id, me) = (u.id, (u.x, u.z));
+        let taken = self.taken_spots(&[id]);
+        let spots = crate::slots::free_spots_near(&self.ground(), crate::slots::spot_of(site), &taken, t.prayers as usize + 8);
+        if let Some(stand) = spots.iter().map(|&s| crate::slots::spot_centre(s)).filter(|&p| p != site).min_by_key(|&p| crate::map::torus_dist2(me, p)) {
+            self.units[i].go_worship(site, stand);
+        }
+    }
+
+    /// Each tick, each totem: its queue keeps the units praying at it in the order they started;
+    /// each tribe's gauge fills with its first `prayers` of them on the soft curve, drains linearly
+    /// without any; full, the tribe gets the gifts, its gauge starts again, and an exhausted totem
+    /// sends its prayers away.
+    pub(crate) fn tend_totems(&mut self) {
+        for k in 0..self.totems.len() {
+            let site = (self.totems[k].x, self.totems[k].z);
+            let praying: Vec<u32> = self.units.iter().filter(|u| u.is_alive() && u.action == Action::Worshipping { site }).map(|u| u.id).collect();
+            let totem = &mut self.totems[k];
+            totem.queue.retain(|id| praying.contains(id));
+            for id in praying {
+                if !totem.queue.contains(&id) {
+                    totem.queue.push(id);
+                }
+            }
+            let mut full = Vec::new();
+            for tribe in 0..TRIBES {
+                let count = totem.queue.iter().filter(|id| self.units.iter().any(|u| u.id == **id && u.owner as usize == tribe)).count() as u16;
+                totem.gauges[tribe] = crate::gauge::step(totem.gauges[tribe], count, totem.prayers, totem.full());
+                if count > 0 && totem.gauges[tribe] == totem.full() {
+                    full.push(tribe as u8);
+                }
+            }
+            for tribe in full {
+                if self.totems[k].is_exhausted() {
+                    break;
+                }
+                let totem = &mut self.totems[k];
+                totem.gauges[tribe as usize] = 0;
+                totem.given += 1;
+                for gift in totem.gifts.clone() {
+                    self.give(tribe, gift);
+                }
+            }
+            if self.totems[k].is_exhausted() {
+                for id in std::mem::take(&mut self.totems[k].queue) {
+                    if let Some(u) = self.units.iter_mut().find(|u| u.id == id) {
+                        u.start(Order::Stop);
+                    }
+                }
+            }
+        }
     }
 
     /// Unit `i` is inside a vault (walking in, at its middle, walking out): no order reaches her.
@@ -92,8 +179,24 @@ impl GameMap {
                     book.set(kind, BuildAvailability::Available);
                 }
             }
+            Reward::OneShot(kind) => {
+                if let Some(book) = self.spell_book.as_mut() {
+                    one_more_shot(book, kind);
+                }
+            }
+            Reward::Mana(_) | Reward::Unhandled { .. } => {}
         }
     }
+}
+
+/// One more cast of `kind` in `book`, unless it is known already.
+pub fn one_more_shot(book: &mut SpellBook, kind: SpellKind) {
+    let shots = match book.slots.iter().find(|s| s.kind == kind).map(|s| s.availability) {
+        Some(Availability::Known | Availability::Unlimited) => return,
+        Some(Availability::Provided { shots }) => shots.saturating_add(1),
+        _ => 1,
+    };
+    book.set(kind, Availability::Provided { shots });
 }
 
 fn near(x: u16, z: u16, to: (u16, u16)) -> bool {
@@ -186,6 +289,117 @@ mod tests {
         map.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::Stop });
         map.apply(&Command::Order { player: 0, order: Order::Pray });
         assert_eq!(map.units[s].action, before, "ignored");
+    }
+
+    fn braves(map: &GameMap, n: usize) -> Vec<u32> {
+        map.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == 0).take(n).map(|u| u.id).collect()
+    }
+
+    fn pray_at(map: &mut GameMap, units: &[u32], totem: usize) {
+        for c in map.totem_orders(0, units, totem) {
+            map.apply(&c);
+        }
+    }
+
+    fn totem_of(map: &GameMap, prayers: u16, shaman_only: bool) -> usize {
+        map.totems.iter().position(|t| t.prayers == prayers && t.shaman_only == shaman_only).unwrap()
+    }
+
+    #[test]
+    fn eight_braves_fill_a_totem_of_eight_and_get_its_gift() {
+        let mut map = GameMap::sandbox_worship();
+        let head = totem_of(&map, 8, false);
+        let gift = map.totems[head].gifts[0];
+        let eight = braves(&map, 8);
+        pray_at(&mut map, &eight, head);
+        let done = (0..1500).find(|_| {
+            map.tick();
+            !map.granted.is_empty()
+        });
+        assert!(done.is_some(), "filled");
+        assert_eq!(map.granted, vec![(0, gift)]);
+        assert_eq!((map.totems[head].given, map.totems[head].gauges[0]), (1, 0), "given once, its gauge starts again");
+    }
+
+    #[test]
+    fn the_first_count_and_a_waiting_one_takes_a_leavers_place() {
+        let mut map = GameMap::sandbox_worship();
+        let pole = totem_of(&map, 2, false);
+        let all = braves(&map, 5);
+        pray_at(&mut map, &all, pole);
+        (0..600).find(|_| {
+            map.tick();
+            map.totems[pole].queue.len() == 5
+        });
+        let counted = map.people_slots(crate::occupancy::Holder::Totem(pole)).unwrap().filled;
+        assert_eq!(counted.len(), 2, "two of five count");
+        assert_eq!(counted, map.totems[pole].queue[..2].to_vec(), "the first to start");
+        let leaver = counted[0];
+        let u = map.units.iter().find(|u| u.id == leaver).unwrap();
+        let (x, z) = (u.x, u.z.wrapping_add(2048));
+        map.apply(&Command::OrderUnit { player: 0, unit: leaver, order: Order::MoveTo { x, z } });
+        map.tick();
+        let now = map.people_slots(crate::occupancy::Holder::Totem(pole)).unwrap().filled;
+        assert_eq!(now.len(), 2, "still two counted");
+        assert!(!now.contains(&leaver));
+    }
+
+    #[test]
+    fn a_lone_prayer_fills_slowly_and_nobody_drains_it() {
+        let mut map = GameMap::sandbox_worship();
+        let head = totem_of(&map, 8, false);
+        let one = braves(&map, 1);
+        pray_at(&mut map, &one, head);
+        (0..600).find(|_| {
+            map.tick();
+            !map.totems[head].queue.is_empty()
+        });
+        let before = map.totems[head].gauges[0];
+        map.tick();
+        assert_eq!(map.totems[head].gauges[0] - before, crate::gauge::gain(1, 8), "1 of 8: the soft curve");
+        let id = map.totems[head].queue[0];
+        map.apply(&Command::OrderUnit { player: 0, unit: id, order: Order::Stop });
+        let held = map.totems[head].gauges[0];
+        map.tick();
+        assert_eq!(map.totems[head].gauges[0], held.saturating_sub(crate::gauge::DRAIN));
+    }
+
+    #[test]
+    fn a_shaman_only_totem_takes_only_her() {
+        let map = GameMap::sandbox_worship();
+        let pole = totem_of(&map, 1, true);
+        let shaman = map.shaman_of(0).unwrap().id;
+        assert!(map.totem_orders(0, &braves(&map, 3), pole).is_empty());
+        assert_eq!(map.totem_orders(0, &[shaman], pole).len(), 1);
+        assert_eq!(map.totem_at((map.totems[pole].x + 100, map.totems[pole].z)), Some(pole));
+    }
+
+    #[test]
+    fn an_exhausted_totem_sends_its_prayers_away() {
+        let mut map = GameMap::sandbox_worship();
+        let first = totem_of(&map, 1, false);
+        map.totems[first].occurrences = 1;
+        let units = braves(&map, 3);
+        pray_at(&mut map, &units, first);
+        (0..1500).find(|_| {
+            map.tick();
+            !map.granted.is_empty()
+        });
+        assert!(map.totems[first].is_exhausted());
+        map.tick();
+        assert!(map.units.iter().filter(|u| units.contains(&u.id)).all(|u| !matches!(u.action, Action::Worshipping { .. })));
+        assert!(map.totem_orders(0, &units, first).is_empty(), "no more");
+    }
+
+    #[test]
+    fn a_one_shot_adds_a_cast_unless_known() {
+        let mut book = SpellBook::new();
+        one_more_shot(&mut book, SpellKind::Swarm);
+        one_more_shot(&mut book, SpellKind::Swarm);
+        assert_eq!(book.slots.iter().find(|s| s.kind == SpellKind::Swarm).unwrap().availability, Availability::Provided { shots: 2 });
+        book.set(SpellKind::Blast, Availability::Known);
+        one_more_shot(&mut book, SpellKind::Blast);
+        assert_eq!(book.slots.iter().find(|s| s.kind == SpellKind::Blast).unwrap().availability, Availability::Known);
     }
 
     #[test]

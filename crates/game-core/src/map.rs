@@ -55,6 +55,14 @@ pub struct GameMap {
 /// Death. One unit, the shaman with an Angel of Death, 6, 8, 2, the shaman, 4.
 const SANDBOX_TOTEMS: [(u16, bool, bool); 7] = [(1, false, false), (1, true, true), (6, false, false), (8, false, false), (2, false, false), (1, true, false), (4, false, false)];
 
+/// What each of the Worship sandbox's totems gives, in `TotemKind::ALL` order: one cast of a spell,
+/// mana, or (the winged death totem) the Angel of Death's effect, not handled yet.
+fn sandbox_gift(k: usize) -> crate::building::Reward {
+    use crate::building::Reward;
+    use crate::spell_book::SpellKind;
+    [Reward::OneShot(SpellKind::Blast), Reward::Unhandled { kind: 7, model: 91 }, Reward::OneShot(SpellKind::Swarm), Reward::OneShot(SpellKind::Lightning), Reward::Mana(50_000), Reward::OneShot(SpellKind::Invisibility), Reward::OneShot(SpellKind::Convert)][k]
+}
+
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
@@ -319,7 +327,7 @@ impl GameMap {
         map.buildings.push(vault);
         for (k, &kind) in TotemKind::ALL.iter().enumerate() {
             let (prayers, shaman_only, summons_angel) = SANDBOX_TOTEMS[k];
-            map.totems.push(Totem { prayers, shaman_only, summons_angel, ..Totem::new(kind, at(-12 + 4 * k as i32, -12)) });
+            map.totems.push(Totem { prayers, shaman_only, summons_angel, gifts: vec![sandbox_gift(k)], ..Totem::new(kind, at(-12 + 4 * k as i32, -12)) });
         }
         for n in 0..8 {
             let id = map.units.len() as u32 + 1;
@@ -500,6 +508,7 @@ impl GameMap {
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(Tree::tick);
         self.tend_campfires();
         self.tend_vaults();
+        self.tend_totems();
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing { .. })).collect();
         let mut events = Vec::new();
         for (i, unit) in self.units.iter_mut().enumerate() {

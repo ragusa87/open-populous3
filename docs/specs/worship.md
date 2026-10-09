@@ -1,4 +1,4 @@
-# Praying at vaults and totems (the vault is done: state, look, the shaman praying, the reward; totems to do)
+# Praying at vaults and totems (done; rewards beyond spells and buildings only logged)
 
 Pyramids of knowledge (vaults, building 18) and totems (scenery 9) give their tribe a reward once prayed at long
 enough. What each one gives, and how long, comes from the level's trigger on its cell (level-format.md "Vault of
@@ -31,10 +31,23 @@ flames, or a stone pillar without the original files. Each asks for something el
 Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`map::SANDBOX_TOTEMS`).
 
 ## Totems (scenery 9)
+- Praying (done: `game_core::worship`): a click on a totem sends the selected units that may pray there
+  (`GameMap::totem_orders`: the shaman only for a shaman-only totem, else the followers and the shaman; none
+  at an exhausted one). Each walks to a free spot around it and prays (`Action::Worshipping` with the totem's
+  centre, the prayer pose). `Totem::queue` keeps them in the order they started; each tribe's first
+  `prayers` count. Each tick (`GameMap::tend_totems`) each tribe's gauge (`Totem::gauges`) fills on the soft
+  curve with its counted prayers and drains linearly without any (`gauge::step`). Full, the tribe gets the
+  totem's gifts (`Totem::gifts`, logged in `GameMap::granted`), its gauge starts again; once it gave
+  `occurrences` times (0: no limit, a guess) its prayers are sent away (stop) and it takes no more.
+- Gifts (`totem::gift`, from the trigger's targets): a spell (`Reward::Spell`, a "once" discovery
+  `Reward::OneShot`: one more cast, `worship::one_more_shot`), a building, mana (`Reward::Mana`, only logged:
+  no mana yet), anything else `Reward::Unhandled { kind, model }` (effects, revealed things, the Angel of
+  Death), only logged. The Worship sandbox's totems give one cast of a spell, mana, or (the winged death
+  totem) an unhandled effect (`map::sandbox_gift`). Dev: `BRAVES=totem:N`.
 - Loaded (done: `totem::totems_from_level`): every scenery 9 of a level becomes a `Totem` with `prayers`
   (`TriggerCount`), `shaman_only` (types 3 and 5), `summons_angel` (type 5) and `pray_time` from the prayer trigger on
   its cell (`totem::triggers_on_cell`, shared with the vaults); drawn as the stone head (its real model is not
-  known). Not prayed at yet.
+  known).
 - Who may pray and how many are needed come from the level, per totem, from the trigger on its cell [player,
   files]: type 0 takes any of the tribe's units, followers and the shaman alike, each counting towards
   `TriggerCount`; type 3 takes only the shaman [player]. Type 5 takes only the shaman too, and when it fires an

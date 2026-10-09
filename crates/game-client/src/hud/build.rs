@@ -130,6 +130,8 @@ pub fn apply_rewards(granted: &[(u8, Reward)], seen: &mut usize, spells: &mut Sp
         match reward {
             Reward::Spell(kind) => spells.set(kind, game_core::spell_book::Availability::Known),
             Reward::Building(kind) => builds.set(kind, BuildAvailability::Available),
+            Reward::OneShot(kind) => game_core::worship::one_more_shot(spells, kind),
+            Reward::Mana(_) | Reward::Unhandled { .. } => {}
         }
     }
     *seen = granted.len();
