@@ -146,8 +146,7 @@ fn original_material(levels: &LevelList, theme: u8, images: &mut Assets<Image>, 
         base_color_texture: Some(images.add(atlas_image(&atlas, &palette.palette))),
         alpha_mode: AlphaMode::Mask(0.5),
         perceptual_roughness: 0.95,
-        double_sided: true,
-        cull_mode: None,
+        cull_mode: Some(Face::Back),
         ..default()
     }))
 }

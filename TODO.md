@@ -83,6 +83,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Default allies per tribe (`.hdr` 92): alliances in the simulation (no attacking allies), e.g. level 14's three tribes against blue.
 - [ ] `NoAccessSquares` (non-zero only in levl2002 and levl2079): probably cells nobody walks on; check them on the map and feed them to the `path` blocked mask.
 - [ ] Load the object bank the level header names (byte 97: 6 for levels 3, 5, 16, 22, 2120; 7 for 2110; 2 for 2127) instead of always bank 0 (`original_models`): either load bank N with the index table of objects.md, or stay on bank 0 and pick the trees by bank (60-71). Bank 6 levels show the wrong trees today.
+- [ ] Other original objects (trees, camp fire logs, reincarnation site stones) are still drawn from both sides: cull their back faces like buildings (objects.md "facs"), checking each for holes.
 - [ ] Sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32/64): find whether it drives the terrain lighting. `LandBlocks` / `LandOrients` are identical stale data: ignore them.
 
 ## Level scripting (triggers)

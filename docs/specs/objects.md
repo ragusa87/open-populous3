@@ -94,6 +94,14 @@ bank 0 and pick the trees by bank.
 | 40 | 4 x u16 | point indices, 0-based within the object |
 | 48..60 | | per-point shade (?) and flags, unknown |
 
+Faces are one-sided: a face is seen only from its front, where its points turn counter-clockwise (x, y up, z
+right-handed: the normal is `(p1 - p0) x (p2 - p0)`); from behind it is not drawn. A surface seen from both
+sides is two faces back to back with opposite windings (fences, flame boards). Seen from behind, inner faces
+show through openings: the boat huts' (121-124) inner roof and walls sample the black quarter of tile 160
+(index 184) and face inwards, so from the jetty side, drawn from both sides, they looked like a black wedge
+under the roof. Flags `3` (no `0x4`) only appear on the boat huts' inner faces, the guard posts and the winged
+death (100, 107, 181): they are not what hides those faces.
+
 ### Blended faces (flames)
 The 144 faces with flag `0x20` all use tile 92, and only they do: the flame boards of the camp fires (0, 12),
 the prayer huts (133-136), the firewarrior training huts (137-140) and the guard posts (190-193). The flames are
