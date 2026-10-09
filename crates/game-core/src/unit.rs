@@ -318,6 +318,12 @@ impl Unit {
         Mobility::Walk
     }
 
+    /// On a task: building, carrying wood, or on the way to a tree, wood, a door, a place to pray or
+    /// a camp fire.
+    pub fn busy(&self) -> bool {
+        self.work.is_some() || self.carrying > 0 || self.to_tree.is_some() || self.to_wood.is_some() || self.to_house.is_some() || self.to_shrine.is_some() || self.to_fire.is_some()
+    }
+
     pub fn is_alive(&self) -> bool {
         !matches!(self.action, Action::Dying { .. } | Action::Dead { .. })
     }

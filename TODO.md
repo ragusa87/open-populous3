@@ -144,7 +144,9 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Spell and building icons, tooltips.
-- [ ] Stats tab (still "Coming soon"): the unit matrix of ui-and-editor.md "Stats tab": Selected, Idle, Housed, Working, In boat, In balloon by kind, with totals; clicks add units to the selection (Shift: all).
+- [ ] Stats tab (still "Coming soon"): the unit matrix of ui-and-editor.md "Stats tab": Selected, Idle, Housed, Working, In boat, In balloon by kind, with totals; clicks add units to the selection (Shift: all). Counting and picking done in `game_core::headcount`.
+- [ ] Population strip and the Stats tab's huts box (ui-and-editor.md "Population"), from `GameMap::housing`.
+- [ ] Vehicles fill the In boat / In balloon rows (`headcount::State::InBoat`, `InBalloon`, always 0 for now).
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 
 ## Tooltips ([tooltips.md](docs/specs/tooltips.md))
@@ -162,7 +164,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] AI for the computer-controlled tribes: their shaman and followers act on their own through `Command`s (deterministic, like a player's input): gather wood, build and grow the village, train units, pray, cast spells, attack and defend.
 - [ ] `pop3_format::ai_script`: parse `cpscrNNN.dat` (12 552 B only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md) (grammar, token, parameter and internal variable tables are there), with a decompiled listing; `cpatr` name and masks. Then `just level-info` prints the scripts of the level's tribes decompiled next to its things, triggers and markers, so a level's events can be read in one place.
 - [ ] `pop3_format::constants`: decode `levels/constant.dat` (XOR key, 2-byte marker, `P3CONST_` lines, duplicate `CONV_SPY` kept in order) per [constants.md](docs/specs/constants.md); then use the real balance values (spell costs, charges and cast range scaled by altitude band, see spells.md; unit life, speed and damage, wood, hut breeding) when an install is present, with our own defaults in generated mode.
-- [ ] Script interpreter in `game-core`: user variables, internal variables read from the simulation, `EVERY n m` firing when `(turn + m) % n == 0` (stored minus 1), DO commands mapped to AI states and `Command`s; start with the states, `ATTACK` and `SET_SPELL_ENTRY`. Levels 2100, 2110, 2131 name missing scripts: fall back to no script.
+- [ ] Script interpreter in `game-core`: user variables, internal variables read from the simulation (`headcount`: units by state and kind, `housing`), `EVERY n m` firing when `(turn + m) % n == 0` (stored minus 1), DO commands mapped to AI states and `Command`s; start with the states, `ATTACK` and `SET_SPELL_ENTRY`. Levels 2100, 2110, 2131 name missing scripts: fall back to no script.
 - [ ] Script timing: measure the original turn rate (wiki: about 8 turns/s) against our 10 ticks/s, and whether `EVERY` adds a per-tribe phase, before porting script timings (see [ai-scripts.md](docs/specs/ai-scripts.md) "What this means here").
 - [ ] Script side effects outside the AI: messages, flybys, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`, `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
 

@@ -33,6 +33,8 @@ shaman, over the supply of its built huts, 3 / 5 / 7 by size, at most 200) [ours
 - on the Stats tab, a "Huts" box above the unit matrix (the strip stays above the tabs, not repeated): the total
   room, then three tiles, small / medium / large, each with how many built huts of that size the tribe has and the
   room they give (e.g. 3 small, +9).
+- Both read `GameMap::housing(tribe)` (`game_core::headcount::Housing`: built huts per size, population, `room()`,
+  `full()`), which the computer players read too.
 
 ### Spells tab (`hud/spells.rs`)
 Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`). An original level brings its own loadout
@@ -90,8 +92,12 @@ The player's units at a glance, as a matrix in the panel's width (204 px), and a
   - a row's total: one more unit of that row, kinds taken in column order (braves first, then warriors...);
     Shift + click: the whole row (e.g. every idle unit).
   The tiles do not show what is picked; the Selected row does. Hovering a tile or a total outlines it.
-- Counts read from the simulation each frame (pure functions over `GameMap` and the selection, tested); which unit
-  a click adds is decided the same way, in unit id order within a cell [ours].
+- Counts read from the simulation each frame: `game_core::headcount` (`GameMap::headcount`, `state_of`, `kinds_of`
+  for the Selected row), shared with the computer players; which unit a click adds is `GameMap::next_unit`, in unit
+  id order within a cell [ours]. Working: an action on a task (cutting, holding wood, flattening, building, entering,
+  hammering, praying, round a camp fire), or `Unit::busy` (a building to work on, wood carried, on the way to a tree,
+  wood, a door, a place to pray or a fire), or inside a building that is not a built hut. A unit walking on a plain
+  move, or out of a hut, is idle.
 
 ## Main menu (`menu.rs`)
 Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list: the original

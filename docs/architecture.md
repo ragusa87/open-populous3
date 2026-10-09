@@ -3,7 +3,8 @@
 ```
 crates/
   pop3-format   pure parsers for original files (no engine). Reusable by tools/editor.
-  game-core     deterministic simulation: terrain (Heightmap), map, spell, unit, command, vault.
+  game-core     deterministic simulation: terrain (Heightmap), map, spell, unit, command, vault; query layers
+                over the map (occupancy: who fills a building; headcount: units by state and kind, housing).
                 Integers only in state. No Bevy.
   game-net      lockstep wire protocol (length-prefixed, hand-written binary) over std TCP.
   unit-atlas    text index of baked unit frames (rectangle and feet per pose, direction, frame).
