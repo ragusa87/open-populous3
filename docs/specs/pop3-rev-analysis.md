@@ -1,7 +1,8 @@
 # Original engine internals (`pop3-rev` analysis)
 
-What the reverse engineering of the original executable says about game logic, spells, combat, mana and wood, laid out
-for implementation: the rules first, then what they change for us, then the addresses and layouts as reference.
+What the reverse engineering of the original executable says about game logic, spells, combat, mana and wood,
+laid out for implementation: the rules first, then what they change for us, then the addresses and layouts as
+reference.
 
 Sources:
 - [exe]: disassembly of `D3DPOPTB.EXE` (French release, 1998, Direct3D build) with `objdump`.
@@ -9,6 +10,8 @@ Sources:
   proposed renames.
 
 ## Takeaways for the implementation
+- **12 turns per second** [exe, measured]: a fixed timestep of 83 ms. Every "turns" value below converts at that
+  rate. Our simulation runs 10 ticks per second.
 - **Lockstep is the original design** [ghidra]. Orders are queued tribe commands applied on the network turn, with
   one global pseudo-random generator. Our `Command` + `map::Lcg` model (multiplayer.md) matches it.
 - **Everything is a unit** [ghidra]. People, buildings, scenery, shots, spells and invisible controllers share one
@@ -19,10 +22,28 @@ Sources:
   surplus banked, a delayed reservoir for gifts. See "Mana rules".
 - **Income is busy/idle per person**, from constants that `constant.dat` cannot change. It is not the
   `MANA_F_<PERSON>` × activity % model of huts-and-training.md. See "Impact on our specs".
-- **Chopping is a countdown, then one transfer** [exe]: 20 turns next to the tree, then a whole load (100 wood,
-  one of our pieces) moves at once. A wood pile takes 3 turns. See "Wood rules".
+- **Chopping is a countdown, then one transfer** [exe, measured]: 20 turns next to the tree, then a whole load
+  (100 wood, one of our pieces) moves at once. A wood pile takes 3 turns. See "Wood rules".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
+
+## Turns and timing [exe]
+```text
+step_ms = 1000 / turns_per_sec                    # 1000 / 12 = 83 (integer)
+loop:
+    if GetTickCount() > next_turn_time:
+        repeat 1 + extra_turns times: run one game turn (turn += 1)
+        next_turn_time += step_ms                 # at most 4 catch-up steps per frame
+    render
+```
+- `turns_per_sec` is 12 in a normal game. It is copied from a saved option, and one code path forces 14 for a
+  while (not traced).
+- `extra_turns` is 0 in a normal game. It is clamped to 0..4, or 0..32 with a flag set: probably a fast-forward or
+  cheat (unverified).
+- Measured under Wine by reading the turn counter from `/proc/<pid>/mem` once a second: +12 per second in a level,
+  `turns_per_sec` 12, `extra_turns` 0. Before the level ran normally (loading, intro), the counter moved 1-3 per
+  second.
+- A turn is therefore 1/12 s. 16 turns (one mana income) is 1.33 s, and 1000 turns is 83 s.
 
 ## Mana rules [exe]
 A tribe holds:
@@ -60,10 +81,11 @@ distribute(tribe)                                      # see Distribution
 - `incoming += gain`, `last_income = gain`.
 
 Example: 20 busy braves, 4 idle warriors and the shaman make 300 + 16 + 30 = 346, ×1.25 for a human = 432 mana every
-16 turns.
+16 turns (1.33 s), about 324 mana per second.
 
 ### Reservoir
-- `give_mana_delayed(tribe, amount)`: `reservoir += amount`, `delay = 1000` turns (50 with a global flag set).
+- `give_mana_delayed(tribe, amount)`: `reservoir += amount`, `delay = 1000` turns, 83 s (50 turns, 4 s, with a
+  global flag set).
 - While `delay` counts down, nothing is released. Then `reservoir` flows into `incoming` at `rate` per turn.
 - `rate` is set when the release starts, from the amount left:
 
@@ -127,6 +149,9 @@ every call:   if not within 0x70 world units of the tree on both axes: walk to i
                   transfer_wood(tree, person, WOOD_<PERSON>)
 ```
 - A full load moves at once, at the end of the countdown. Wood does not trickle in during it.
+- Measured live on 5 braves: the timer reads 19, 18, ..., 1 on consecutive turns (it is set to 20 and decremented
+  in the same turn), and `carried` jumps from 0 to 100 on the next turn. That is 20 turns per load with no
+  every-8th-turn gate.
 - A person already full skips the transfer.
 - `CHOP_TIME` is exe-only (not in the constant table): 20 for all six person types that can carry wood, 3 from a
   wood pile (scenery type 0x0B), so picking up is about 7× faster than cutting.
@@ -148,8 +173,10 @@ next to them; what it does is open.
 | `TREE1..6_WOOD_GROW` (per 16 turns) | 6 | 2 |
 | `TREE1..6_DORMANT_TIME` | 855 968 .. 1 183 648 | - |
 
-Example with the file's values: a full tree is 4 loads, 80 turns of chopping plus the walks. A small hut is 3
-loads. An emptied tree regrows one load in 800 turns and is full again after 3200.
+Example with the file's values, at 12 turns per second:
+- one load is 20 turns of chopping, 1.67 s (measured); a wood pickup is 3 turns, 0.25 s;
+- a full tree is 4 loads, 80 turns (6.7 s) of chopping plus the walks; a small hut is 3 loads;
+- an emptied tree regrows one load in 800 turns (67 s), and is full again after 3200 turns (4 min 27 s).
 
 ## Spells, effects and combat [ghidra]
 - A cast allocates a class 11 spell unit (`alloc_spell_unit`). It spawns class 7 effects, each with its own handler
@@ -180,10 +207,11 @@ loads. An emptied tree regrows one load in 800 turns and is full again after 320
   not traced.
 - Wood, mapped to ours: one load (100) is one piece, a tree's 400 is our size 4, a small hut's 300 is our
   `wood_cost` 3. Our model (one piece moved at the end of the chop) already matches the single transfer.
-- units.md `Chopping`: the original is `CHOP_TIME` 20 turns per load; our `CHOP_TICKS` is 60 ticks (6 s), a
-  guess. Picking up from a pile is 3 turns; ours is instant on arrival.
-- trees.md "Growth": ours regrow one piece every 600 ticks; the original regrows 2 wood per 16 turns, one piece
-  in 800 turns.
+- units.md `Chopping`: the original is 20 turns per load, 1.67 s; our `CHOP_TICKS` is 60 ticks (6 s), a guess,
+  so about 17 ticks would match. Picking up from a pile is 3 turns (0.25 s); ours is instant on arrival.
+- trees.md "Growth": ours regrow one piece every 600 ticks (60 s); the original regrows 2 wood per 16 turns, one
+  piece in 800 turns (67 s), so about 667 ticks.
+- Spell durations in turns convert the same way, e.g. `SHIELD_COUNT_X8` 180 is 1440 turns, 120 s.
 - Specialists cannot carry wood with the file's values, as in our braves-only rule.
 
 ## Open questions
@@ -194,9 +222,8 @@ loads. An emptied tree regrows one load in 800 turns and is full again after 320
 - Spell order and share inside the distribution loop.
 - Combat: how the fight controllers apply `FIGHT_DAMAGE_<P>` to `LIFE_<P>`.
 - What the per-building stored mana is.
-- The original turn rate (turns per second), needed to turn wood and mana timings into seconds.
-- Whether the person handler runs every turn, which decides whether chopping is 20 turns: the chop step has no
-  `class_counter & 7` gate, but a sibling step of the same handler has one.
+- What sets `turns_per_sec` to 14, and whether game options or multiplayer change it.
+- Which field holds the gather sub-state: +0xA8 stays 0 while chopping, so the handler's state byte is elsewhere.
 - What `TREE_DORMANT_TIME` does (maybe the time before a cut tree regrows or a new tree appears).
 
 ## Reference
@@ -230,6 +257,13 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4A79F0 | removes wood from a tree (tree, -amount, tribe) |
 | 0x495D70 | `FUN_00495d70`, a person's gather-wood state; chop step at 0x4960CC |
 | 0x4342BF | wood pile pickup: timer 3 (scenery type 0x0B) |
+| 0x4A5590 | main loop; `step_ms = 1000 / turns_per_sec` at 0x4A5595, fixed-step catch-up at 0x4A57B4 |
+| 0x4EC6F0 | one game turn: `turn += 1` at 0x4EC703 |
+| 0x43EC3C | changes `extra_turns` (clamped 0..4, or 0..32 with bit 7 of 0x89C662) |
+
+Timing globals: turn counter 0x89D188 (u32), `turns_per_sec` 0x89D161 (u8, copied from the option at 0x98F712),
+`next_turn_time` 0x5CD92C, `step_ms` 0x5CD930 (83 in the exe image), `extra_turns` 0x895DAC (i8). Under Wine the
+exe is mapped at its image base 0x400000, so these addresses can be read as they are.
 
 ### Unit record [ghidra]
 - `unit_struct`, 0xB3 bytes. Pool of 2000 (`unit_array` 0x8E0428), two free lists split at index 640
@@ -237,7 +271,8 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 - Fields: `unit_class` +0x2A, `unit_type` +0x2B, `state` +0x2C, `state_2` +0x2D, `tribe_index` +0x2F, `unit_obj`
   (model or sprite) +0x33, `pos` +0x3D, building stored value +0x98, last attacker's tribe +0xB0.
 - Wood fields: a person's state timer +0x70 and carried wood +0x78, a tree's wood left +0x84, a shape's wood +0x96,
-  a building's wood +0xA4. The person's gather sub-state is +0xA8.
+  a building's wood +0xA4. The gather handler switches on a byte read as +0xA8, but that field stays 0 while
+  chopping (measured), so the offset is unconfirmed.
 - Per-cell index `unit_land_array` (the original "mapwho"), filled by `insert_unit_into_land_tile`.
 - Global lists: `wild_units`, `fight_units`, `pre_fight_units`, `guard_control_units`, `boat_units`,
   `airship_units`, `trigger_units`, `head_units`, `swamp_effect_units`.
