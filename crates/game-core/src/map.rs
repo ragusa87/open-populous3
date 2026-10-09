@@ -423,6 +423,10 @@ impl GameMap {
                 self.cancel_building(player, at);
                 None
             }
+            Command::Dismantle { player, site, on } => {
+                self.set_dismantling(player, site, on);
+                None
+            }
         }
     }
 

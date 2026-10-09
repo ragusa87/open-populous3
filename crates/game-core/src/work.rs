@@ -64,6 +64,21 @@ impl GameMap {
         }
     }
 
+    /// Switches dismantling of `player`'s building at `site` (stored corner), flat and taking wood. On,
+    /// everyone inside walks out and its braves stop building it (taking it apart comes later); off, it
+    /// is built again: braves bring its missing wood back.
+    pub fn set_dismantling(&mut self, player: u8, site: (u16, u16), on: bool) {
+        let Some(b) = self.building_at_corner(site).filter(|&b| self.buildings[b].owner == player && self.buildings[b].flat && self.buildings[b].kind.wood_cost() > 0) else { return };
+        if self.buildings[b].dismantling == on {
+            return;
+        }
+        self.buildings[b].dismantling = on;
+        if on {
+            let door = self.buildings[b].door();
+            self.empty_building(site, door);
+        }
+    }
+
     /// Orders for the player's `units` clicked on the building `site` (index): braves work on it (in
     /// id order, the first ones up to its maximum are assigned), the others walk next to its door.
     pub fn build_orders(&self, player: u8, units: &[u32], site: usize) -> Vec<Command> {
@@ -170,6 +185,7 @@ impl GameMap {
                 continue;
             }
             match self.building_at_corner(site).filter(|&b| self.buildings[b].stage() != Stage::Built) {
+                Some(b) if self.buildings[b].dismantling => {}
                 Some(b) => dirty.extend(self.work_on(i, b)),
                 None => self.units[i].work = None,
             }
@@ -435,6 +451,40 @@ mod tests {
         map.apply(&Command::CancelBuilding { player: 0, at: centre });
         assert_eq!((map.buildings.len(), map.wood.len()), (n - 1, wood));
         assert!(map.units.iter().all(|u| u.work.is_none()));
+    }
+
+    #[test]
+    fn dismantling_empties_a_built_building_until_switched_back() {
+        let mut map = sandbox();
+        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
+        let site = (map.buildings[hut].x, map.buildings[hut].z);
+        let resting = braves(&map, 1)[0];
+        let k = map.units.iter().position(|u| u.id == resting).unwrap();
+        map.units[k].inside = Some(Inside { site, door: map.buildings[hut].door() });
+        map.apply(&Command::Dismantle { player: 1, site, on: true });
+        assert!(!map.buildings[hut].dismantling, "not theirs");
+        map.apply(&Command::Dismantle { player: 0, site, on: true });
+        assert_eq!(map.buildings[hut].stage(), Stage::Dismantling { used: 3, of: 3 });
+        assert!(matches!(map.units[k].action, Action::Walking { .. }), "walks out");
+        map.apply(&Command::Dismantle { player: 0, site, on: false });
+        assert_eq!(map.buildings[hut].stage(), Stage::Built);
+    }
+
+    #[test]
+    fn a_site_dismantled_is_left_alone_until_switched_back() {
+        let mut map = sandbox();
+        let units = braves(&map, 1);
+        let plan = place(&mut map, BuildingKind::Hut { size: 1 }, corner(24, 0), &units);
+        let b = &mut map.buildings[plan];
+        (b.flat, b.stock) = (true, 1);
+        let at = (b.x, b.z);
+        map.apply(&Command::Dismantle { player: 0, site: at, on: true });
+        for _ in 0..300 {
+            map.tick();
+        }
+        assert_eq!((map.buildings[plan].used, map.buildings[plan].stock), (0, 1), "nobody builds it");
+        map.apply(&Command::Dismantle { player: 0, site: at, on: false });
+        run_until(&mut map, 600, |m| m.buildings[plan].used > 0).expect("built again");
     }
 
     #[test]

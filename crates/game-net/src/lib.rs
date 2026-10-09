@@ -107,6 +107,12 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
         }
+        Command::Dismantle { player, site, on } => {
+            b.extend([8, *player]);
+            b.extend(site.0.to_le_bytes());
+            b.extend(site.1.to_le_bytes());
+            b.push(*on as u8);
+        }
     }
 }
 
@@ -175,6 +181,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         5 => Some(Command::QueueOrder { player, unit: c.u32()?, order: decode_order(c)? }),
         6 => Some(Command::PlaceBuilding { player, kind: BuildingKind::from_model(c.u8()?), at: (c.u16()?, c.u16()?), facing: c.u8()? }),
         7 => Some(Command::CancelBuilding { player, at: (c.u16()?, c.u16()?) }),
+        8 => Some(Command::Dismantle { player, site: (c.u16()?, c.u16()?), on: c.u8()? != 0 }),
         _ => None,
     }
 }
@@ -267,6 +274,8 @@ mod tests {
                 Command::PlaceBuilding { player: 0, kind: BuildingKind::Hut { size: 1 }, at: (0, 1024), facing: 0 },
                 Command::OrderUnit { player: 1, unit: 9, order: Order::Build { site: (512, 65024) } },
                 Command::CancelBuilding { player: 3, at: (1, 2) },
+                Command::Dismantle { player: 2, site: (65535, 512), on: true },
+                Command::Dismantle { player: 0, site: (1, 2), on: false },
                 Command::QueueOrder { player: 0, unit: 3, order: Order::Enter { site: (1024, 2048) } },
                 Command::OrderUnit { player: 0, unit: 1, order: Order::Worship { site: (32768, 36864) } },
             ],

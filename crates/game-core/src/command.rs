@@ -25,4 +25,8 @@ pub enum Command {
     /// Remove the player's building plan (not flattened yet) whose footprint holds world point
     /// `at`: its braves stop, the wood brought is lost.
     CancelBuilding { player: u8, at: (u16, u16) },
+    /// Switch dismantling of the player's building whose stored corner is `site` (built or under
+    /// construction, one that takes wood): on, the people inside walk out and nobody builds it; off,
+    /// it is built again (`GameMap::set_dismantling`).
+    Dismantle { player: u8, site: (u16, u16), on: bool },
 }
