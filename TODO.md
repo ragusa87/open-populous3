@@ -150,7 +150,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Rendered tooltip instead of text: name, slot rows with separators, bars on the left, toggle; one `SlotRow` model built by pure functions, one UI widget.
 - [ ] People rows: plans and sites (assigned braves), houses and drum towers (people inside), training huts (the trainee), pyramids (the shaman), totems (counted prayers), vehicles; clicking a filled slot selects that unit.
 - [ ] Wood rows: provided / cost on plans and sites, used on built buildings, plus the pieces still needed on a growing house; a tree's current wood only.
-- [ ] Long rows wrap onto even lines (16 -> 2 x 8, 20 -> 2 x 10); confirm the rule for other counts.
+- [ ] Long rows wrap after 10 slots, a row of 16 after 8.
+- [ ] Pyramid tooltip names its reward until granted.
 - [ ] Bars: prayer progress, house growth and birth, training; blinking while blocked.
 - [ ] Dismantle toggle on the player's buildings that take wood; right click shows a building's tooltip at once like trees.
 - [ ] Totems hoverable (`hover::Hovered`), with their tooltip.

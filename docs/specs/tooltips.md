@@ -20,9 +20,8 @@ Bars stand on the left side.
 One widget for every use: one slot per unit of capacity or need.
 - An empty slot shows a **placeholder**, the greyed shape of what fits there; a filled slot shows the **icon** of
   what is there. Written below as `O` and `X`: a site for 6 braves with one assigned shows `XOOOOO`.
-- A long row wraps onto lines of equal length: 16 slots show as 2 lines of 8, 20 slots as 2 lines of 10
-  [player]. Rule for other counts [ours, to confirm]: as few lines as possible with at most 10 slots each, the
-  slots split evenly (`ceil(n / lines)` per line). Slots fill first to last, line by line.
+- A long row wraps after 10 slots, except a row of 16, which wraps after 8 [player]: 16 slots show as 2 lines of
+  8, 20 as 2 lines of 10, 12 as 10 then 2. Slots fill first to last, line by line.
 
 ### People rows: selecting what is inside
 Clicking a filled slot selects that unit [player].
@@ -34,7 +33,7 @@ Clicking a filled slot selects that unit [player].
 | Drum tower | 1 | brave | the unit inside |
 | Training hut | 1 (one trainee at a time) | brave | the trainee, with its icon as it is now (e.g. a preacher being trained into a firewarrior) |
 | Pyramid of knowledge | 1 | shaman | the shaman assigned to it, praying at the door or inside |
-| Totem | `TriggerCount` (`Totem::prayers`), e.g. 8: `XOOOOOOO` | brave (shaman for shaman-only totems) | the counted prayers, each with the icon of its own kind |
+| Totem | `TriggerCount` (`Totem::prayers`), e.g. 8: `XOOOOOOO` | brave (shaman for shaman-only totems) | the counted prayers, each with the icon of its own kind; assigned units beyond the count do not show |
 | Vehicle | its seats | brave | the people aboard |
 
 ### Wood rows: display only
@@ -73,7 +72,7 @@ Toggled back while dismantling, it is built again.
 | House | people inside | used (+ needed while growing) | growth, birth | dismantle |
 | Drum tower | the unit inside | used | | dismantle |
 | Training hut | the trainee | used | training | dismantle |
-| Pyramid of knowledge | the shaman | | prayer | |
+| Pyramid of knowledge | the shaman; the name of its reward under its own name | | prayer | |
 | Totem | counted prayers | | prayer | |
 | Vehicle | people aboard | | | |
 | Tree | | current wood | | |
@@ -88,9 +87,9 @@ One `SlotRow { kind: People | Wood, slots, filled }` model, `filled` holding eac
 people, the unit id its click selects), built from the simulation each frame by pure, tested functions; one Bevy
 UI widget draws every row. Bars and the toggle the same way: a model from the simulation, one widget.
 
+A pyramid's tooltip names its reward (the spell or building it teaches) [player]; once granted, like the icon
+on its top, not any more [ours].
+
 ## Open
-- Whether assigned prayers beyond `TriggerCount` show anywhere (worship.md: they pray, uncounted).
-- Whether the pyramid's tooltip names its reward (an icon already stands on its top).
 - Slot icons and placeholder art: our own (generated or CC0); original sprites only loaded at runtime from the
   user's install.
-- Line breaks of long rows for counts other than 16 and 20.
