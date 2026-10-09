@@ -40,11 +40,6 @@ const WOOD: Color = Color::srgb(0.55, 0.37, 0.2);
 /// blow every `BLOW` seconds, the jolt dying out before the next.
 const SHAKE: f32 = 0.012;
 const BLOW: f32 = 0.7;
-/// Chimney smoke: puffs, seconds for one to rise, how high (cells) and how wide it gets.
-const PUFFS: usize = 5;
-const PUFF_LIFE: f32 = 2.5;
-const PUFF_RISE: f32 = 1.2;
-const PUFF_SIZE: f32 = 0.22;
 /// Colour of the generated pyramid's door slab.
 const SLAB_STONE: Color = Color::srgb(0.42, 0.4, 0.36);
 /// Height of the white mark of a blueprint above the ground (render units).
@@ -113,14 +108,6 @@ struct SiteMark(usize);
 #[derive(Component)]
 struct Shaking;
 
-/// One puff of smoke over a busy hut, out of `chimney` (building frame, cells), `phase` (0-1)
-/// apart from the others.
-#[derive(Component)]
-struct Puff {
-    chimney: Vec3,
-    phase: f32,
-}
-
 /// The name over a stand-in box, following its building on screen.
 #[derive(Component)]
 struct BuildingLabel(Entity);
@@ -135,7 +122,7 @@ impl Plugin for BuildingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ModelHeights>()
             .add_systems(Update, (respawn_buildings.in_set(RespawnBuildings), place_labels).chain())
-            .add_systems(Update, (shake_walls, rise_smoke))
+            .add_systems(Update, shake_walls)
             .add_systems(PostUpdate, draw_site_marks);
     }
 }
@@ -342,8 +329,8 @@ fn respawn_buildings(
                 body.insert(Shaking);
             }
             if stage == Stage::Built && b.inside > 0 && kind.capacity() > 0 {
-                for k in 0..PUFFS {
-                    v.spawn((Puff { chimney: top, phase: k as f32 / PUFFS as f32 }, Mesh3d(puff.clone()), MeshMaterial3d(smoke.clone()), NotShadowCaster, crate::hover::NoOutline, Transform::from_translation(top)));
+                for k in 0..crate::effects::CHIMNEY.count {
+                    v.spawn((crate::effects::Puff::new(crate::effects::CHIMNEY, k, top), Mesh3d(puff.clone()), MeshMaterial3d(smoke.clone()), NotShadowCaster, crate::hover::NoOutline, Transform::from_translation(top), Visibility::Hidden));
                 }
             }
         });
@@ -405,22 +392,6 @@ pub fn blow_tilt(t: f32) -> (f32, f32) {
     let wobble = (p * std::f32::consts::TAU * 4.0).sin() * fade;
     let dir = t.floor() * 2.4;
     (wobble * dir.cos(), wobble * dir.sin())
-}
-
-/// Puffs rise from the chimney, growing and drifting, then shrink away and start again.
-fn rise_smoke(time: Res<Time>, mut puffs: Query<(&Puff, &mut Transform)>) {
-    let t = time.elapsed_secs() / PUFF_LIFE;
-    for (puff, mut tf) in &mut puffs {
-        let (rise, drift, size) = puff_at((t + puff.phase).fract());
-        tf.translation = puff.chimney + Vec3::new(drift, rise, drift * 0.4);
-        tf.scale = Vec3::splat(size);
-    }
-}
-
-/// A puff at `phase` (0 just out, 1 gone): height above the chimney, sideways drift and size (cells).
-pub fn puff_at(phase: f32) -> (f32, f32, f32) {
-    let fade = if phase > 0.75 { (1.0 - phase) / 0.25 } else { 1.0 };
-    (phase * PUFF_RISE, phase * phase * 0.35, PUFF_SIZE * (0.4 + phase) * fade)
 }
 
 /// Each stand-in's name centred over its box on screen, hidden when the box is.
@@ -498,15 +469,6 @@ mod tests {
         assert!(kit_staged(&mut cache, temple, 1, Some((0, 3)), &mut meshes).unwrap().shown.is_none());
         assert_eq!(meshes.len(), 7);
         assert!(kit_staged(&mut cache, BuildingKind::Other(12), 1, None, &mut meshes).is_none());
-    }
-
-    #[test]
-    fn smoke_rises_grows_then_fades() {
-        let (r0, _, s0) = puff_at(0.0);
-        let (r1, d1, s1) = puff_at(0.6);
-        let (_, _, end) = puff_at(0.999);
-        assert!(r0 == 0.0 && r1 > r0 && d1 > 0.0);
-        assert!(s1 > s0 && end < 0.01, "grows, then shrinks away before starting again");
     }
 
     #[test]

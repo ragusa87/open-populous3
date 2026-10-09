@@ -1,7 +1,7 @@
 //! A puff of dust where a unit touches down after floating (teleport landing): the original
 //! blended dust cloud (`hfx0-0.dat` 1225-1239, through the alpha table) when allowed, else soft
-//! motes spreading out around the feet, rising a little, growing and fading. Cosmetic only, on the
-//! real-time clock.
+//! motes moving as `effects::DUST` (spreading around the feet, rising a little, growing, fading),
+//! facing the camera. Cosmetic only, on the real-time clock.
 
 use super::art::alpha_picture_frame;
 use super::{toward_eye, upload_frame, FrameAsset, UnitView, PULL_TO_EYE};
@@ -15,19 +15,14 @@ use game_core::unit::Action;
 use pop3_format::blend::AlphaTable;
 use pop3_format::catalog::EFFECT_SPRITE_FILE;
 use pop3_format::{Picture, SpriteBank, Theme};
-use std::f32::consts::TAU;
 use std::path::Path;
 
+use crate::effects::DUST;
+
 /// Seconds a puff lasts.
-pub const LIFE: f32 = 0.8;
-const MOTES: usize = 10;
-/// How far the motes spread from the feet, and how high they rise (cells).
-const SPREAD: f32 = 0.4;
-const RISE: f32 = 0.1;
-/// Mote size (cells) at birth and at the end.
-const SIZE: (f32, f32) = (0.12, 0.3);
-const START_ALPHA: f32 = 0.9;
-const DUST: [u8; 3] = [222, 206, 172];
+pub const LIFE: f32 = DUST.life;
+/// Colour of the generated motes.
+const DUST_COLOUR: [u8; 3] = [222, 206, 172];
 const TEXTURE: usize = 32;
 /// The original dust cloud, growing then fading (`hfx0-0.dat`, blended).
 const ORIGINAL_CLOUD: std::ops::RangeInclusive<usize> = 1225..=1239;
@@ -51,17 +46,6 @@ fn original_cloud(data_dir: &Path) -> Result<Vec<super::art::Frame>, String> {
         .collect()
 }
 
-/// One mote `k` of `n`, `age` seconds after touchdown: offset from the feet (world axes, cells),
-/// size (cells) and opacity. Motes spread evenly around, fast at first then slowing down.
-pub fn mote(k: usize, n: usize, age: f32) -> (Vec3, f32, f32) {
-    let t = (age / LIFE).clamp(0.0, 1.0);
-    let out = 1.0 - (1.0 - t) * (1.0 - t);
-    let angle = k as f32 / n as f32 * TAU + 0.3;
-    let r = 0.05 + (SPREAD - 0.05) * out;
-    let offset = Vec3::new(angle.cos() * r, 0.02 + RISE * out, angle.sin() * r);
-    (offset, SIZE.0 + (SIZE.1 - SIZE.0) * out, START_ALPHA * (1.0 - t))
-}
-
 /// Soft round dot, opaque in the middle and fading to the edge (RGBA, `size` x `size`).
 pub fn dust_texture(size: usize) -> Vec<u8> {
     let c = (size as f32 - 1.0) / 2.0;
@@ -69,7 +53,7 @@ pub fn dust_texture(size: usize) -> Vec<u8> {
         .flat_map(|i| {
             let (x, y) = ((i % size) as f32 - c, (i / size) as f32 - c);
             let r = ((x * x + y * y).sqrt() / c).min(1.0);
-            [DUST[0], DUST[1], DUST[2], ((1.0 - r) * (1.0 - r) * 255.0) as u8]
+            [DUST_COLOUR[0], DUST_COLOUR[1], DUST_COLOUR[2], ((1.0 - r) * (1.0 - r) * 255.0) as u8]
         })
         .collect()
 }
@@ -155,7 +139,7 @@ fn spawn_puffs(
             ..default()
         });
         commands.spawn(puff).with_children(|p| {
-            for k in 0..MOTES {
+            for k in 0..DUST.count {
                 p.spawn((Mote(k), Mesh3d(assets.quad.clone()), MeshMaterial3d(material.clone()), Transform::default()));
             }
         });
@@ -200,11 +184,11 @@ fn animate_puffs(
                 continue;
             }
             let Ok((m, mut mt, material)) = motes.get_mut(child) else { continue };
-            let (offset, size, alpha) = mote(m.0, MOTES, age);
-            mt.translation = facing.inverse() * (pull + offset * scale);
-            mt.scale = Vec3::splat(size * scale);
+            let Some(pose) = DUST.pose(m.0, age) else { continue };
+            mt.translation = facing.inverse() * (pull + pose.offset * scale);
+            mt.scale = Vec3::splat(pose.size * scale);
             if let Some(mut mat) = mats.get_mut(&material.0) {
-                mat.base_color = Color::srgba(1.0, 1.0, 1.0, alpha);
+                mat.base_color = Color::srgba(1.0, 1.0, 1.0, pose.opacity);
             }
         }
     }
@@ -213,21 +197,6 @@ fn animate_puffs(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn motes_spread_rise_grow_and_fade() {
-        let (start, s0, a0) = mote(0, 8, 0.0);
-        let (mid, s1, a1) = mote(0, 8, LIFE / 2.0);
-        let (end, s2, a2) = mote(0, 8, LIFE);
-        let flat = |v: Vec3| v.xz().length();
-        assert!(flat(start) < flat(mid) && flat(mid) < flat(end) && (flat(end) - SPREAD).abs() < 1e-5);
-        assert!(start.y < mid.y && mid.y <= end.y);
-        assert!(s0 < s1 && s1 < s2);
-        assert!(a0 > a1 && a1 > a2 && a2 == 0.0);
-        assert!(flat(mid) - flat(start) > flat(end) - flat(mid), "fast first, then slowing");
-        let around: Vec3 = (0..8).map(|k| mote(k, 8, LIFE).0).sum();
-        assert!(around.xz().length() < 1e-4, "evenly spread around the feet");
-    }
 
     #[test]
     fn cloud_plays_once_over_the_puff() {

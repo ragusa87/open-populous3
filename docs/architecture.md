@@ -17,6 +17,7 @@ crates/
                   buildings.rs    model choice, construction stages, smoke and shaking
                   vault.rs        pyramid of knowledge door and top, posed from its phase
                   tooltip.rs      rendered tooltips above buildings: slot rows of generated icons
+                  effects.rs      puffs of smoke and dust: one pattern each (chimney, landing dust, sinking totem)
                   sites.rs        reincarnation site markers on the curved surface
                   units/          sim clock, unit sprites (original or generated art), health bars, orders
                   virtual_cursor.rs in-game cursor (system cursor locked), drives edge scroll + UI picking

@@ -87,7 +87,7 @@ By stage (`Building::stage`, client `construction.rs`):
   the next, in a new direction each time (`blow_tilt`).
 - A built building people stay in (huts, drum towers: `BuildingKind::capacity`) with people inside (`inside` >
   0): grey puffs rise from the middle of its highest points
-  (`chimney`, the top of the roof; the generated hut has a central raised smoke vent), growing and drifting, then shrinking away (`puff_at`). Other kinds show
+  (`chimney`, the top of the roof; the generated hut has a central raised smoke vent), growing and drifting, then shrinking away (`effects::CHIMNEY`). Other kinds show
   nothing for busy yet.
 - Torches: a built building's flames burn, animated like the camp fire's (`flame.rs`, see "Camp fire"; each
   building starts at its own frame), and cast no shadow. Original objects: their blended faces (tile 92, see

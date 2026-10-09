@@ -10,6 +10,7 @@ mod cursor_debug;
 mod dev;
 mod edge_push;
 mod editor;
+mod effects;
 mod flame;
 mod generated_buildings;
 mod grounded;
@@ -73,6 +74,7 @@ fn main() {
             vault::VaultPlugin,
             totems::TotemsPlugin,
             tooltip::TooltipPlugin,
+            effects::EffectsPlugin,
             blueprint::BlueprintPlugin),
             units::UnitsPlugin,
             wood::WoodPlugin,

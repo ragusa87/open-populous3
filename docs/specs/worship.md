@@ -58,7 +58,7 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   Done: the timeline is in the simulation (`Totem::since_given`; `TURN_TICKS` 20, `HOLD_TICKS` 10, `SINK_TICKS`
   40; `Totem::is_gone`, then nothing finds it: `GameMap::totem_at`); the client poses the rings from objects 1
   and 3 (`totems::twisted`, `turn_fraction`, eased and smoothed between ticks), lowers the body
-  (`sink_fraction`) with puffs of smoke (`puff`) and hides it once gone. The generated stack of blocks turns its
+  (`sink_fraction`) with puffs of smoke (`effects::SINKING`) and hides it once gone. The generated stack of blocks turns its
   blocks above the base by the same amount.
 - While it turns and sinks (its slots all used: exhausted) no unit can be sent to it [player]: done, an
   exhausted totem takes no order (`GameMap::totem_orders` gives none, `Order::Worship` there does nothing) and

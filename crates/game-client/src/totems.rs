@@ -7,6 +7,7 @@
 //!
 //! The generated stand-ins do the same with blocks. Redrawn when the map changes.
 
+use crate::effects::{Puff, SINKING};
 use crate::flame::{self, Flame, FlameFrames};
 use crate::grounded::Grounded;
 use crate::original_models::{atlas_image, object_mesh, solid_part, to_mesh, OriginalObjects};
@@ -39,10 +40,6 @@ const TURNING: f32 = 0.05;
 const NECK: i16 = 324;
 const NOD_DEG: f32 = 6.0;
 const NOD_SECS: f32 = 1.6;
-/// Smoke while sinking: puffs, one every `PUFF_GAP` seconds, each living `PUFF_LIFE` seconds.
-const PUFFS: usize = 14;
-const PUFF_GAP: f32 = 0.25;
-const PUFF_LIFE: f32 = 1.4;
 
 /// The view of the totem at this index of `GameMap::totems`, and the height of its top (cells).
 #[derive(Component)]
@@ -69,15 +66,11 @@ struct RockBlock(usize);
 #[derive(Component)]
 struct NodPivot;
 
-/// A puff of smoke while the totem sinks, `seed` setting its place and start.
-#[derive(Component)]
-struct SmokePuff(usize);
-
 /// The queries of the parts `animate_totems` moves, kept apart (Bevy needs them disjoint).
-type Bodies<'w, 's> = Query<'w, 's, (&'static mut Transform, &'static mut Visibility), (With<TotemBody>, Without<SmokePuff>, Without<NodPivot>, Without<RockBlock>)>;
-type Blocks<'w, 's> = Query<'w, 's, (&'static RockBlock, &'static mut Transform), (Without<TotemBody>, Without<SmokePuff>, Without<NodPivot>)>;
-type Pivots<'w, 's> = Query<'w, 's, &'static mut Transform, (With<NodPivot>, Without<TotemBody>, Without<SmokePuff>)>;
-type Puffs<'w, 's> = Query<'w, 's, (&'static SmokePuff, &'static mut Transform, &'static mut Visibility, &'static MeshMaterial3d<StandardMaterial>), (Without<TotemBody>, Without<NodPivot>, Without<RockBlock>)>;
+type Bodies<'w, 's> = Query<'w, 's, (&'static mut Transform, &'static mut Visibility), (With<TotemBody>, Without<Puff>, Without<NodPivot>, Without<RockBlock>)>;
+type Blocks<'w, 's> = Query<'w, 's, (&'static RockBlock, &'static mut Transform), (Without<TotemBody>, Without<Puff>, Without<NodPivot>)>;
+type Pivots<'w, 's> = Query<'w, 's, &'static mut Transform, (With<NodPivot>, Without<TotemBody>, Without<Puff>)>;
+type Puffs<'w, 's> = Query<'w, 's, (&'static mut Puff, &'static mut Visibility), (Without<TotemBody>, Without<NodPivot>, Without<RockBlock>)>;
 
 pub struct TotemsPlugin;
 
@@ -156,19 +149,6 @@ pub fn nod_angle(secs: f32) -> f32 {
     NOD_DEG.to_radians() * (TAU * secs / NOD_SECS).sin()
 }
 
-/// Puff `seed` of the smoke `secs` into the sinking: where it is (cells, about the totem's foot), its
-/// size and its opacity; None when it is not out.
-pub fn puff(seed: usize, secs: f32) -> Option<(Vec3, f32, f32)> {
-    let since = secs - seed as f32 * PUFF_GAP;
-    if since < 0.0 || secs > SINK_TICKS as f32 / 10.0 + PUFF_LIFE / 2.0 {
-        return None;
-    }
-    let p = since.rem_euclid(PUFF_LIFE) / PUFF_LIFE;
-    let a = seed as f32 * 2.4;
-    let out = 0.45 + 0.12 * p;
-    Some((Vec3::new(a.cos() * out, 0.08 + 0.8 * p, a.sin() * out), 0.12 + 0.24 * p, 0.55 * (1.0 - p)))
-}
-
 /// The theme atlas as a front-faced material, None without original files.
 fn original_material(levels: &LevelList, theme: u8, images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> Option<Handle<StandardMaterial>> {
     if !levels.original {
@@ -220,8 +200,9 @@ fn respawn_totems(
         let mut view = commands.spawn((TotemView { index, top }, crate::hover::Hoverable::default(), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden));
         if t.kind == TotemKind::Totem {
             view.with_children(|v| {
-                for k in 0..PUFFS {
-                    v.spawn((SmokePuff(k), Mesh3d(ball.clone()), MeshMaterial3d(mats.add(smoke.clone())), NotShadowCaster, crate::hover::NoOutline, Transform::default(), Visibility::Hidden));
+                for k in 0..SINKING.count {
+                    let puff = Puff { driven: true, ..Puff::new(SINKING, k, Vec3::ZERO) };
+                    v.spawn((puff, Mesh3d(ball.clone()), MeshMaterial3d(mats.add(smoke.clone())), NotShadowCaster, crate::hover::NoOutline, Transform::default(), Visibility::Hidden));
                 }
             });
         }
@@ -307,7 +288,6 @@ fn animate_totems(
     mut blocks: Blocks,
     mut pivots: Pivots,
     mut puffs: Puffs,
-    mut mats: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let alpha = clock.alpha();
@@ -335,19 +315,10 @@ fn animate_totems(
             if let Ok(mut tf) = pivots.get_mut(e) {
                 tf.rotation = Quat::from_rotation_x(nod);
             }
-            if let Ok((p, mut tf, mut vis, mat)) = puffs.get_mut(e) {
-                match puff(p.0, sinking).filter(|_| t.is_exhausted() && !t.is_gone()) {
-                    Some((at, size, opacity)) => {
-                        (tf.translation, tf.scale) = (at, Vec3::splat(size));
-                        vis.set_if_neq(Visibility::Inherited);
-                        if let Some(mut m) = mats.get_mut(&mat.0) {
-                            m.base_color.set_alpha(opacity);
-                        }
-                    }
-                    None => {
-                        vis.set_if_neq(Visibility::Hidden);
-                    }
-                }
+            if let Ok((mut p, mut vis)) = puffs.get_mut(e) {
+                p.secs = sinking;
+                let out = t.is_exhausted() && !t.is_gone() && SINKING.pose(p.k, sinking).is_some();
+                vis.set_if_neq(if out { Visibility::Inherited } else { Visibility::Hidden });
             }
         }
     }
@@ -410,15 +381,5 @@ mod tests {
         assert_eq!(nod_angle(0.0), 0.0);
         assert!((nod_angle(NOD_SECS / 4.0) - NOD_DEG.to_radians()).abs() < 1e-5, "6° at most");
         assert!((nod_angle(NOD_SECS) - nod_angle(0.0)).abs() < 1e-5, "one nod every 1.6 s");
-    }
-
-    #[test]
-    fn smoke_rises_and_fades_while_it_sinks() {
-        assert!(puff(0, -0.1).is_none(), "not before the sinking");
-        assert!(puff(3, 0.5).is_none(), "puff 3 comes out at 0.75 s");
-        let (low, _, thick) = puff(0, 0.1).unwrap();
-        let (high, _, thin) = puff(0, 1.2).unwrap();
-        assert!(high.y > low.y && thin < thick);
-        assert!(puff(0, 10.0).is_none(), "over once sunk");
     }
 }
