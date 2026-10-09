@@ -54,7 +54,7 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 9 | 4 | walking, carrying wood (brave only; used) |
 | 10 | 1 | standing still, holding wood (brave only; used) |
 | 11 | 4 | cutting wood with an axe (brave only; used) |
-| 12 | 4 | flattening the ground: crouch, arms up, jump (brave only; maybe also wrecking a construction site in an attack); frame 1 stands in for stranded units today |
+| 12 | 4 | flattening the ground: crouch, arms up, jump (brave only; maybe also wrecking a construction site in an attack); played once per flattening jump (`Pose::Jump`); frame 1 stands in for stranded units today |
 | 13 | 7 | punching (unchecked) |
 | 14 | 7 | receiving a punch |
 | 15 | 7 | punching, left foot forward |

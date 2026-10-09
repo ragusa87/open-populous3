@@ -19,8 +19,9 @@
 | Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle (Teleport: then at the target, Landing) |
 | Landing { left } | arriving from a teleport | 6 ticks, then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out); a puff of dust at touchdown (`units/dust.rs`) |
 | Chopping { tree, left } | `Order::CutTree`, `Order::FetchWood` (braves only) | walks to a free spot next to the tree, then `CHOP_TICKS` (60, 6 s, a guess) of chopping, then the tree loses one size and the brave carries the piece |
-| Flattening { at, left } | assigned to a plan (`Order::Build`) | `JUMP_TICKS` jump on a footprint height point, which then moves towards the site's level (buildings.md "Construction") |
-| Building { left } | assigned to a site with wood on its pile | `BUILD_TICKS` building one piece in |
+| Flattening { at, left } | assigned to a plan (`Order::Build`) | `JUMP_TICKS` jump on a footprint height point, which then moves towards the site's level (buildings.md "Construction"); drawn with the jump pose (original anim 12; the CC0 sheets: arms up) |
+| Entering { to } | `Unit::enter` at a building's door | straight to `to` inside, through its walls, then Idle inside (`Unit::inside`) |
+| Building { left } | inside a site with wood on its pile | `BUILD_TICKS` building one piece in |
 | Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (30, 3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
 | Drowning | ground under her becomes open sea | -4 HP per tick, no orders; back to Idle if land returns |
 | Dying { left } | health reaches 0 | 8 ticks |
@@ -87,6 +88,11 @@ Internal moves (stepping off a taken spot on arrival, a fire put out) use `Unit:
   standing-with-wood pose): with nothing chained, a cut piece lands by its tree; chained after a move, at its end. Any order keeps the piece (no drop on a new order). A dead brave drops
   it where he fell; carried into the sea it is lost. Already carrying, a brave ignores `CutTree` / `FetchWood`.
 
+## Inside buildings (done: `Unit::inside`)
+A unit is inside a building when it walked in by the door (`Unit::enter`) or stood where the building's walls went
+up. Inside, it is not drawn while it stands there; any walk first takes it straight to the door, then on its
+route (units.md "Pathfinding", buildings.md "Walking around buildings"). A teleport takes it out.
+
 ## Worshipping the shaman (decoration, done: `units/worship.rs`)
 Idle followers (braves, warriors, firewarriors, spies, preachers) whose shaman (same tribe) is within 3 cells on each axis (torus)
 and idle or walking pray facing her: the Pray pose (original anim 8, kneeling, arms going up and down; the CC0
@@ -106,6 +112,7 @@ Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the 
   nearest free spot (`GameMap::tick`).
 
 ## Pathfinding (done: `game_core::path`)
+- Walls: walkers never cross a building's walled cells (`path::Ground`, buildings.md "Walking around buildings").
 - `path::Mobility`: Walk (land, not open sea = cell with 4 water corners, not a cliff = a cell edge
   rising more than `MAX_CLIMB` 300; ~5.5% of the original levels' land), Sail (open sea only, boats),
   Fly (anywhere, balloons). Every person walks. A* on the 128² torus, 8 neighbours, no diagonal past an

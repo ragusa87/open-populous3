@@ -154,6 +154,9 @@ Done:
   away.
 
 ### Tooltip
+Done (`buildings::building_label`, after resting the cursor `HOVER_SECS` on a building, plans included): the
+kind's name; for the player's buildings that take wood, `Braves: assigned/max` and `Wood: delivered/cost`, while
+a plan, under construction and built. Other tribes' buildings show their name only. To do:
 Hovering or right-clicking a site (as for trees): kind, braves assigned / maximum, wood delivered / needed. On a
 building of a buildable kind with at least one piece of wood used (under construction or built): a "Dismantle"
 toggle (back to "Build" while dismantling). It also lists the
@@ -187,13 +190,15 @@ pick one besides selecting it on the map.
   2. Plan (not flat): while wood is wanted (`wood_wanted`: 1 piece before flat, as in the game, then the rest of
      the cost) and fewer braves bring wood than missing pieces, fetches wood (`Order::FetchWood`'s rule). Else
      walks to the nearest footprint height point off the site's level that no other brave is on or going to,
-     and jumps on it (`Action::Flattening`, `JUMP_TICKS` 8, the cast jump pose): the point moves `JUMP_STEP` (32)
+     and jumps on it (`Action::Flattening`, `JUMP_TICKS` 8, the jump pose: original anim 12): the point moves `JUMP_STEP` (32)
      towards the level. With no point left, the plan is flat: the ring around is blended
-     (`Building::flatten`) and it is under construction. Ground already level is flat at once.
-  3. Under construction: with wood on the pile and standing around the building (out of the footprint, within
-     `AROUND` = 400), takes a piece and builds it in (`Action::Building`, `BUILD_TICKS` 50, the chop pose);
-     with no pile, fetches wood under the dispatch rule below; else walks to the free standing spot around the
-     building nearest to him and waits.
+     (`Building::flatten`) and it is under construction: walled (see "Walking around buildings"). Ground already
+     level is flat at once.
+  3. Under construction: with wood on the pile, walks to the door, in (`Unit::enter`, `Action::Entering`,
+     straight to a work point a third of a cell apart per brave around the centre) and builds the piece from
+     inside (`Action::Building`, `BUILD_TICKS` 50, the chop pose); with no pile, fetches wood under the dispatch
+     rule below (out by the door first); else waits, inside, or at the free standing spot around the building
+     nearest to him (within `AROUND` = 400 of the footprint).
   4. Built: released (idle, `work` cleared).
   Braves bringing wood (`wood_on_the_way`): carrying, fetching or cutting, or building a piece taken off the
   pile.
@@ -203,11 +208,12 @@ pick one besides selecting it on the map.
 - Client: a left click on one of the player's sites (within `AROUND`) with units selected sends braves to it
   (`selection::ground_click`); Shift + right click on a plan cancels it (`shift_right_click`, after the camp
   fires). Wood on a pile is drawn as wood pieces around the door (`Building::pile_point`, `wood::PileView`).
-  Building views are redone whenever a building changes. Dev: `BUILD=hut@90,62 BUILD_TICKS=150` places a plan
+  Building views are redone whenever a building changes. Units standing inside a building are not drawn
+  (`units::hidden_inside`), walking in or out they are. Dev: `BUILD=hut@90,62 BUILD_TICKS=150` places a plan
   with all the player's braves and runs that many ticks before the shot.
 
-Not done yet: the gathering look, building inside, doors, walking around sites, dismantling, the tooltip, wood
-claimed by braves of another site, and a jump per point being the game's rule (to check).
+Not done yet: the gathering look, dismantling, the tooltip's brave icons and Dismantle toggle, wood claimed by
+braves of another site, and a jump per point being the game's rule (to check).
 
 ### Building it (design, deterministic, integer state)
 1. Gather: assigned braves walk to the site edge and stand looking at it for a short while.
@@ -270,6 +276,14 @@ dismantling, braves go in and out by the door. Later the same holds for any buil
 training huts, towers, boat and airship huts).
 
 ### Walking around buildings
+Done (`path::Walls`, `GameMap::update_walls`, each tick): every building past its plan stage walls the cells whose
+centre its footprint covers (`Building::walled_cells`). `path::Ground` is what movers cross: bare terrain, or
+`Walled` (terrain + walls, as one unit sees it: the building it is `inside` does not stop it). Walkers never
+cross a wall (A*, straight legs, steps, standing spots, teleport landing), boats and balloons ignore walls, plans
+and the reincarnation site are not walled. A wall change bumps the walls' revision and walkers replan. A unit
+standing in a newly walled cell is inside that building (`Unit::inside`, with its door). A unit inside going
+anywhere first walks straight to the door, then plans its route. Into a building only `Unit::enter`: straight from
+the door. Design notes:
 Buildings and construction sites block walking over their footprint (`BuildingKind::footprint` turned with the
 facing, the cells it covers): `path::Mobility::Walk` gets a blocked-cell mask from `GameMap` besides the terrain,
 so routes go around them, and a unit never stands inside one. Exceptions:
