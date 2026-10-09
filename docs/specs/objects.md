@@ -141,7 +141,7 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | Objects | What |
 |---|---|
 | 0 | camp fire: a cross of 4 dark logs (tile 137) and two crossed flame boards (blended, tile 92), 0.3 cell wide and high; 12 is the same with logs of tile 136, a third of it index 0 (see-through), use unknown |
-| 1 | totem; 2, 4 untextured copies; 3 animation frame (rotating rocks) |
+| 1 | totem; 2, 4 untextured copies; 3 animation frame (rotating rocks): see "Totem rocks" |
 | 7, 100, 107 | "mort ailée" (winged death, probably Angel of Death): front, back, wings rotated; 8-11, 101-106, 108-116 untextured |
 | 19, 21 | totem of the winged death, and the bird perched on it |
 | 20 | stone prayer totem |
@@ -162,6 +162,12 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | 181, 182 | boat (blue), airship (balloon) |
 | 187, 188, 189 | totem poles |
 | 191 | pyramid of knowledge (unlocks a spell or building); 192, 193 door animation frames |
+
+Totem rocks (objects 1 and 3, measured): a stack of square rock slabs around the vertical axis through the
+origin, each a ring of 4 points: rings at heights 0, 160, 321, 509 and 670, an apex at 858; points 21-36 are
+each slab's bottom ring (just inside the ring of the slab under it). Object 3 holds the same points with every
+slab above the base turned about 20° about that axis (and a different face list, 52 faces against 29): one frame
+of the layers turning.
 
 Pyramid of knowledge frames (191-193, measured): the same 107 faces and 116 points in the same order, so one
 frame turns into another by moving points (heights also differ by 1-3 units everywhere: export noise). Two

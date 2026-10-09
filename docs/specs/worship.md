@@ -39,6 +39,10 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   curve with its counted prayers and drains linearly without any (`gauge::step`). Full, the tribe gets the
   totem's gifts (`Totem::gifts`, logged in `GameMap::granted`), its gauge starts again; once it gave
   `occurrences` times (0: no limit, a guess) its prayers are sent away (stop) and it takes no more.
+- Once a totem gave, it shows it [player]: the stone totem (object 1, "Totem rocks" in objects.md) turns its rock
+  layers about its centre axis, each layer its own way [ours: directions and speeds], for as long as the level
+  lasts. The generated stand-in of that totem is a stack of blocks turning the same way. The other looks do not
+  move (to check in the game).
 - Gifts (`totem::gift`, from the trigger's targets): a spell (`Reward::Spell`, a "once" discovery
   `Reward::OneShot`: one more cast, `worship::one_more_shot`), a building, mana (`Reward::Mana`, only logged:
   no mana yet), anything else `Reward::Unhandled { kind, model }` (effects, revealed things, the Angel of
