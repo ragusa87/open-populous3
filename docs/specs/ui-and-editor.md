@@ -30,9 +30,9 @@ shaman, over the supply of its built huts, 3 / 5 / 7 by size, at most 199) [ours
 - a strip between the shaman preview and the tabs, on every tab: a people icon, "population / room", and a bar
   filling with it; at the room or over it the bar turns red and blinks (like a hut's blocked growth bar) and the
   count turns red when over;
-- on the Stats tab, a box above the unit matrix: "Population" with the same count and bar, then three tiles,
-  small / medium / large huts, each with how many built huts of that size the tribe has and the room they give
-  (e.g. 3 small, +9).
+- on the Stats tab, a "Huts" box above the unit matrix (the strip stays above the tabs, not repeated): the total
+  room, then three tiles, small / medium / large, each with how many built huts of that size the tribe has and the
+  room they give (e.g. 3 small, +9).
 
 ### Spells tab (`hud/spells.rs`)
 Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`). An original level brings its own loadout
