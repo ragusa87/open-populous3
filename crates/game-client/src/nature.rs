@@ -222,8 +222,12 @@ fn grow_trees(map: Res<CurrentMap>, mut models: Query<(&TreeModel, &mut Transfor
 }
 
 fn spawn_tooltip(mut commands: Commands) {
-    commands.spawn((
-        WoodTooltip,
+    commands.spawn((WoodTooltip, tooltip()));
+}
+
+/// A tooltip by the cursor, hidden: text on a dark brown backing.
+pub fn tooltip() -> impl Bundle {
+    (
         Text::new(""),
         TextFont { font_size: FontSize::Px(14.0), ..default() },
         TextColor(Color::WHITE),
@@ -233,7 +237,7 @@ fn spawn_tooltip(mut commands: Commands) {
         GlobalZIndex(i32::MAX - 1),
         Pickable::IGNORE,
         Visibility::Hidden,
-    ));
+    )
 }
 
 /// Which tree is under the cursor (not over the panel, nor while a spell is aimed), and whether it

@@ -10,7 +10,7 @@ use crate::grounded::pick_ground;
 use crate::hud::PANEL_WIDTH;
 use crate::nature::{HoveredTree, TreeView};
 use crate::units::selection::{unit_at, OnScreen, UNIT_HEIGHT};
-use crate::units::{world_units, UnitInput, UnitSprite, UnitView};
+use crate::units::{world_units, UnitInput, UnitSprite, UnitView, PLAYER};
 use crate::wood::{WoodBody, WoodView};
 use crate::world::CurrentMap;
 use bevy::asset::{embedded_asset, RenderAssetUsages};
@@ -93,6 +93,10 @@ struct OutlineCache {
     hull_material: Option<Handle<StandardMaterial>>,
 }
 
+/// Picks what is hovered and outlines it: read its result after this.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HoverSystems;
+
 pub struct HoverPlugin;
 
 impl Plugin for HoverPlugin {
@@ -101,7 +105,7 @@ impl Plugin for HoverPlugin {
         app.add_plugins(MaterialPlugin::<SpriteOutline>::default())
             .init_resource::<Hovered>()
             .init_resource::<OutlineCache>()
-            .add_systems(Update, (detect, draw_halo).chain().after(UnitInput).after(crate::units::UnitViews).in_set(crate::menu::Gameplay));
+            .add_systems(Update, (detect, draw_halo).chain().after(UnitInput).after(crate::units::UnitViews).in_set(crate::menu::Gameplay).in_set(HoverSystems));
     }
 }
 
@@ -114,10 +118,10 @@ pub fn pick(unit: Option<usize>, wood: Option<usize>, tree: Option<usize>, build
         .or(building.map(HoverTarget::Building))
 }
 
-/// The first building (not a plan still to flatten) whose footprint holds world point `at` and that
-/// `hoverable` accepts (by index).
+/// The first building whose footprint holds world point `at` and that `hoverable` accepts (by
+/// index).
 pub fn building_at(map: &GameMap, at: (u16, u16), hoverable: impl Fn(usize) -> bool) -> Option<usize> {
-    map.buildings.iter().enumerate().position(|(i, b)| b.stage() != Stage::Blueprint && b.covers(at, BUILDING_MARGIN) && hoverable(i))
+    map.buildings.iter().enumerate().position(|(i, b)| b.covers(at, BUILDING_MARGIN) && hoverable(i))
 }
 
 /// Dev: `HOVER=unit:3` (or `wood`, `tree`, `building` and an index in its `GameMap` list) puts the
@@ -180,7 +184,9 @@ fn detect(
         let unit = unit_at(c, &people).map(|u| u.id as usize);
         let ground = cam.0.viewport_to_world(cam.1, c).ok().and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)).map(world_units);
         let wood = ground.and_then(|at| wood_index(&map.0, at)).filter(|&i| woods.iter().any(|w| w.0 == i));
-        let building = ground.and_then(|at| building_at(&map.0, at, |i| houses.iter().any(|b| b.0 == i)));
+        // Plans have no view to outline but are hovered for their tooltip.
+        let plan = |i: usize| map.0.buildings[i].owner == PLAYER && map.0.buildings[i].stage() == Stage::Blueprint;
+        let building = ground.and_then(|at| building_at(&map.0, at, |i| plan(i) || houses.iter().any(|b| b.0 == i)));
         let tree = tree.tree.filter(|&i| groves.iter().any(|t| t.0 == i));
         pick(unit, wood, tree, building)
     });
@@ -354,7 +360,7 @@ mod tests {
         assert_eq!(building_at(&map, map.buildings[mine].centre(), players), Some(mine));
         assert_eq!(building_at(&map, map.buildings[theirs].centre(), players), None, "not hoverable");
         assert_eq!(building_at(&map, map.buildings[theirs].centre(), |_| true), Some(theirs));
-        assert_ne!(building_at(&map, map.buildings[plan].centre(), |_| true), Some(plan), "a plan is not a building yet");
+        assert_eq!(building_at(&map, map.buildings[plan].centre(), |_| true), Some(plan), "a plan, for its tooltip");
     }
 
     #[test]
