@@ -117,7 +117,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Huts: auto-housing of idle braves, breeding, mana from people inside, Eject (huts-and-training.md rules).
 - [ ] Wood claimed across sites: two sites' braves can head for the same tree piece; braves of another task may take wood a site counts on. Refine the dispatch rule (nearest brave per piece, gatherers vs builders).
 - [ ] Site visuals: views are redone whenever any building changes; update them per building (stable ids) instead; compare the part order (from the ground up) and the structure with the original; chimney position per hut model; busy look for the other kinds; the pile by the door could be drawn as a stack rather than loose pieces.
-- [ ] Dismantling: braves remove one piece at a time, dropped as a wood piece (circle on the ground) near the door; the building disappears when empty and frees its ground.
+- [ ] Dismantling (switched by `Command::Dismantle`, which today only empties the building and stops its braves): braves remove one piece at a time, dropped as a wood piece (circle on the ground) near the door; the building disappears when empty and frees its ground.
 - [ ] Wood pieces lying on the ground (`GameMap::wood`, drawn): picked up by any construction; hovering one could show "Wood". Maybe draw the original's shadow under them (`hfx0-0.dat` 22, unconfirmed).
 - [ ] Destruction of buildings on uneven/flooded ground (spells, erosion).
 - [ ] Damage from moving ground: check in the game what sets the damage (level 10's atlantis island comes back with its buildings missing 1 to 3 pieces of wood, no common percentage), and whether repairs need fetched wood ([buildings.md#damage-and-repair](docs/specs/buildings.md)).
@@ -152,7 +152,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] People rows filled: totems' counted prayers (once praying exists), vehicles, the trainee (once training exists). Buildings, pyramids and totems' places are done, a click adds the unit to the selection.
 - [ ] Wood rows: the pieces still needed on a growing house (once growth exists). Plans, sites, built buildings and trees are done.
 - [ ] Bars fed by the simulation: totem prayer progress (once praying exists), house growth and birth, training (with their blocked state). The widget, its blinking and the pyramid's prayer bar are done.
-- [ ] Dismantle toggle on the player's buildings that take wood.
+- [ ] Unload button on a vehicle's tooltip (`catalog::UNLOAD_BUTTON`, same widget as the dismantle toggle, `tooltip::Toggle`), once vehicles exist.
 - [ ] Vehicles: an unload button in the toggle's place, everyone aboard gets off; disabled with no walkable ground to land on (balloon over water or steep ground, boat away from the shore).
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
 - [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).

@@ -18,6 +18,11 @@ pub const UNIT_FIGURES: std::ops::RangeInclusive<usize> = 75..=80;
 pub const STATS_ROW_ICONS: [usize; 6] = [1084, 1085, 1086, 1087, 655, 1088];
 /// Three people (24 x 16) in `EFFECT_SPRITE_FILE`, dark (681 the same light): the population.
 pub const PEOPLE_ICON: usize = 680;
+/// The tooltip's buttons in `EFFECT_SPRITE_FILE`, each normal, hovered, pressed: dismantle a building,
+/// build it again (undo the dismantling), get everyone off a vehicle.
+pub const DISMANTLE_BUTTON: [usize; 3] = [49, 51, 50];
+pub const REBUILD_BUTTON: [usize; 3] = [46, 48, 47];
+pub const UNLOAD_BUTTON: [usize; 3] = [60, 61, 62];
 
 /// Camp fire: a cross of four dark logs (tile 137) and two crossed flame boards (blended faces,
 /// tile 92). Object 12 is the same with logs of tile 136, a third of it see-through (unknown use).

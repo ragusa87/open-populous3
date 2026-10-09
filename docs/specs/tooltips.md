@@ -1,4 +1,4 @@
-# Tooltips (buildings, trees and totems done: name, slot rows, clicks, bars; the toggle and other targets to do)
+# Tooltips (buildings, trees and totems done: name, slot rows, clicks, bars, the dismantle toggle; other targets to do)
 
 What the game shows about the thing under the mouse. A tooltip **renders** things: rows of slots, bars and a
 toggle, not only text. Buildings, trees and totems use it (client `tooltip.rs`).
@@ -76,8 +76,12 @@ blocked].
 On the player's buildings that take wood. On a built building it marks it for dismantling: it stops working, the
 people inside walk out, braves take it apart, and its wood can be used again (buildings.md "Dismantling").
 Toggled back while dismantling, it is built again.
-With the original files (`hfx0-0.dat`, sprites.md): dismantle 49, 51 hovered, 50 on; undo (build it again) 46,
-48 hovered, 47 on.
+At the top right of the tooltip, on the name's line (`tooltip::Toggle`, on the player's flat buildings that take
+wood; a plan not flat yet is cancelled instead). Pressed, it sends `Command::Dismantle`. With the original files
+(`hfx0-0.dat`, sprites.md, `catalog::DISMANTLE_BUTTON`, `REBUILD_BUTTON`): dismantle 49, 51 hovered, 50 pressed;
+undo (build it again) 46, 48 hovered, 47 pressed. Without them, a small "Dismantle" / "Rebuild" text button.
+Today dismantling empties the building (people walk out) and its braves stop building it; taking it apart piece
+by piece is still to do (buildings.md "Dismantling").
 
 ## Unload button [player]
 A vehicle has no toggle but a button in the same place: pressed, everyone aboard gets off. It is disabled while

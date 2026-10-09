@@ -19,7 +19,7 @@ use game_core::building::Reward;
 use game_core::map::GameMap;
 use game_core::occupancy::{Holder, People, Wood};
 use game_core::unit::UnitKind;
-use pop3_format::catalog::{EFFECT_SPRITE_FILE, UNIT_FIGURES};
+use pop3_format::catalog::{DISMANTLE_BUTTON, EFFECT_SPRITE_FILE, REBUILD_BUTTON, UNIT_FIGURES};
 use pop3_format::{Sprite, SpriteBank};
 use std::collections::HashMap;
 
@@ -75,6 +75,28 @@ pub struct TooltipModel {
     pub lines: Vec<String>,
     pub rows: Vec<Vec<Slot>>,
     pub bars: Vec<Bar>,
+    /// The button at the top right.
+    pub toggle: Option<Toggle>,
+}
+
+/// A tooltip's button (tooltips.md "Dismantle toggle"): dismantle the building at `site` (stored
+/// corner), or build it again when `on`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Toggle {
+    pub site: (u16, u16),
+    pub on: bool,
+}
+
+impl Toggle {
+    /// What a click sends.
+    pub fn command(self) -> game_core::command::Command {
+        game_core::command::Command::Dismantle { player: crate::units::PLAYER, site: self.site, on: !self.on }
+    }
+
+    /// Its sprites (normal, hovered, pressed) and its text without the original files.
+    pub fn look(self) -> ([usize; 3], &'static str) {
+        if self.on { (REBUILD_BUTTON, "Rebuild") } else { (DISMANTLE_BUTTON, "Dismantle") }
+    }
 }
 
 /// What a bar measures; it sets its colour and where it stands.
@@ -167,6 +189,7 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[u32]) -> TooltipModel
     }
     model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Brave, selected)));
     model.rows.extend(map.wood_slots(holder).map(wood_row));
+    model.toggle = b.flat.then_some(Toggle { site: (b.x, b.z), on: b.dismantling });
     model
 }
 
@@ -183,7 +206,7 @@ pub fn totem_model(map: &GameMap, i: usize, selected: &[u32]) -> Option<TooltipM
     let rows = map.people_slots(Holder::Totem(i)).map(|p| people_row(map, &p, placeholder, selected)).into_iter().collect();
     let fill = (totem.gauges[crate::units::PLAYER as usize] as u64 * game_core::vault::FULL as u64 / totem.full().max(1) as u64) as u16;
     let bars = if totem.is_exhausted() { Vec::new() } else { vec![Bar { kind: BarKind::Prayer, fill, blocked: false }] };
-    Some(TooltipModel { lines: vec![totem.kind.name().to_string()], rows, bars })
+    Some(TooltipModel { lines: vec![totem.kind.name().to_string()], rows, bars, toggle: None })
 }
 
 /// What `target` shows; None when it has nothing to show.
@@ -411,7 +434,7 @@ impl Plugin for TooltipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IconImages>()
             .add_systems(Startup, (spawn_tooltip, load_sprites))
-            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, blink_bars).in_set(crate::menu::Gameplay));
+            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, press_toggle, blink_bars).in_set(crate::menu::Gameplay));
     }
 }
 
@@ -548,7 +571,18 @@ fn blink_bars(time: Res<Time>, mut fills: Query<(&BarFill, &mut BackgroundColor)
 /// The tooltip's text lines and slot rows.
 fn spawn_content(t: &mut ChildSpawnerCommands, model: &TooltipModel, icons: &mut IconImages, images: &mut Assets<Image>) {
     for (k, line) in model.lines.iter().enumerate() {
-        t.spawn((Text::new(line.clone()), TextFont { font_size: FontSize::Px(if k == 0 { 14.0 } else { 12.0 }), ..default() }, TextColor(Color::WHITE), TextShadow::default(), Pickable::IGNORE));
+        let text = (Text::new(line.clone()), TextFont { font_size: FontSize::Px(if k == 0 { 14.0 } else { 12.0 }), ..default() }, TextColor(Color::WHITE), TextShadow::default(), Pickable::IGNORE);
+        match model.toggle.filter(|_| k == 0) {
+            Some(toggle) => {
+                t.spawn((Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Start, column_gap: px(8), ..default() }, Pickable::IGNORE)).with_children(|top| {
+                    top.spawn(text);
+                    spawn_toggle(top, toggle, icons, images);
+                });
+            }
+            None => {
+                t.spawn(text);
+            }
+        }
     }
     for row in &model.rows {
         t.spawn((Node { height: px(1), margin: UiRect::vertical(px(1)), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)), Pickable::IGNORE));
@@ -576,6 +610,50 @@ fn spawn_content(t: &mut ChildSpawnerCommands, model: &TooltipModel, icons: &mut
                 }
             });
             start += len;
+        }
+    }
+}
+
+/// The tooltip's button, its sprites by state (normal, hovered, pressed) when the original files are there.
+#[derive(Component)]
+struct ToggleButton {
+    toggle: Toggle,
+    images: Option<[Handle<Image>; 3]>,
+}
+
+fn spawn_toggle(parent: &mut ChildSpawnerCommands, toggle: Toggle, icons: &mut IconImages, images: &mut Assets<Image>) {
+    let (sprites, label) = toggle.look();
+    let made: Option<Vec<(Handle<Image>, Vec2)>> = sprites.iter().map(|&i| icons.sprite(i, images)).collect();
+    match made {
+        Some(made) => {
+            let size = made[0].1;
+            let images = [made[0].0.clone(), made[1].0.clone(), made[2].0.clone()];
+            parent.spawn((ImageNode::new(images[0].clone()), Node { width: px(size.x), height: px(size.y), ..default() }, Interaction::default(), ToggleButton { toggle, images: Some(images) }));
+        }
+        None => {
+            parent
+                .spawn((Node { padding: UiRect::axes(px(4), px(1)), border: UiRect::all(px(1)), ..default() }, BackgroundColor(Color::srgb(0.62, 0.42, 0.14)), BorderColor::all(Color::srgb(1.0, 0.84, 0.48)), Interaction::default(), ToggleButton { toggle, images: None }))
+                .with_child((Text::new(label), TextFont { font_size: FontSize::Px(11.0), ..default() }, TextColor(Color::WHITE), Pickable::IGNORE));
+        }
+    }
+}
+
+/// The button shows its state; pressed, it sends its command.
+fn press_toggle(mut buttons: Query<(&Interaction, &ToggleButton, Option<&mut ImageNode>, Option<&mut BackgroundColor>), Changed<Interaction>>, mut map: ResMut<CurrentMap>) {
+    for (interaction, button, image, bg) in &mut buttons {
+        let state = match interaction {
+            Interaction::None => 0,
+            Interaction::Hovered => 1,
+            Interaction::Pressed => 2,
+        };
+        if let (Some(images), Some(mut image)) = (&button.images, image) {
+            image.image = images[state].clone();
+        }
+        if let Some(mut bg) = bg {
+            bg.0 = [Color::srgb(0.62, 0.42, 0.14), Color::srgb(0.75, 0.52, 0.18), Color::srgb(0.40, 0.25, 0.08)][state];
+        }
+        if *interaction == Interaction::Pressed {
+            map.bypass_change_detection().0.apply(&button.toggle.command());
         }
     }
 }
@@ -635,6 +713,23 @@ mod tests {
         assert_eq!(icons(&model.rows[1]), vec![Icon::Wood; 3], "the wood in it");
         let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();
         assert!(building_model(&map, red, &[]).rows.is_empty(), "not theirs: the name only");
+    }
+
+    #[test]
+    fn the_players_flat_buildings_have_the_dismantle_toggle() {
+        let mut map = GameMap::sandbox_buildings();
+        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
+        let site = (map.buildings[hut].x, map.buildings[hut].z);
+        let toggle = building_model(&map, hut, &[]).toggle.expect("built: dismantle");
+        assert_eq!(toggle, Toggle { site, on: false });
+        assert_eq!(toggle.look(), (DISMANTLE_BUTTON, "Dismantle"));
+        map.apply(&toggle.command());
+        let toggle = building_model(&map, hut, &[]).toggle.unwrap();
+        assert_eq!((toggle.on, toggle.look()), (true, (REBUILD_BUTTON, "Rebuild")));
+        let plan = map.buildings.iter().position(|b| b.owner == 0 && b.stage() == Stage::Blueprint).unwrap();
+        assert_eq!(building_model(&map, plan, &[]).toggle, None, "a plan is cancelled instead");
+        let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();
+        assert_eq!(building_model(&map, red, &[]).toggle, None);
     }
 
     #[test]
