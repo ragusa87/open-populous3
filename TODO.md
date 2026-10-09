@@ -143,7 +143,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Cliffs: `cliff0-X.dat` turns land colours to rock by level (what picks the level: slope? damage?); `fade0-X.dat` palette light table (object/sprite shading, fog of war). Load both in `pop3_format::theme`.
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
-- [ ] Spell and building icons, tooltips; Stats tab (still "Coming soon").
+- [ ] Spell and building icons, tooltips.
+- [ ] Stats tab (still "Coming soon"): the unit matrix of ui-and-editor.md "Stats tab": Selected, Idle, Housed, Working, In boat, In balloon by kind, with totals; clicks add units to the selection (Shift: all).
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 
 ## Tooltips ([tooltips.md](docs/specs/tooltips.md))

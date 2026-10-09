@@ -48,7 +48,7 @@ for now) are aimed with the mouse while selected: over the map the cursor become
 where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground), left click casts it there and puts
 the spell away (arrow cursor, clicks go back to the units' selection), right click puts it away without casting; meanwhile clicks do not select or move units. The others: `C`
 casts the selected spell (demo: consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
-Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build/Stats tabs.
+Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build tab icons, the Stats tab (see below).
 
 ### Build tab (`hud/build.rs`)
 Mirrors `game_core::build_book::BuildBook` (resource `PlayerBuilds`, `level_builds`: the level's own, set with the
@@ -57,6 +57,29 @@ per available kind (no icons yet), "?" for plans to discover, an empty slot for 
 A click on an available tile picks its blueprint (white border, `blueprint.rs`): it follows the mouse on the map,
 red where it cannot stand, Space turns it, right click puts it away; left click places it and sends the selected
 braves to build it. Details in buildings.md "Blueprint" and "Construction".
+
+### Stats tab (design, not implemented)
+The player's units at a glance, as a matrix in the panel's width (204 px), and a quick way to select them
+[player; picked from local HTML mockups, not kept].
+- Columns: the row's label; its total (the sum of the kind columns after it, headed "Σ"); then one per kind in
+  this order: brave, warrior, firewarrior, preacher, spy (not the shaman, not wildmen), headed by the tooltip's
+  unit icons (`tooltip::icon_pixels`, at the same 1.5× size, in the player's colour; hovering one names the kind).
+- Rows, in three groups set a little apart:
+  1. Selected: the player's units selected now.
+  2. Idle, Housed (inside a hut), Working (on any task: building, fetching or carrying wood, cutting, training,
+     praying at a totem or vault...) [ours: what counts as working].
+  3. In boat, In balloon: aboard a vehicle (once vehicles exist).
+- Look ("D1"): each number on a tile like the spell tiles (`PARCHMENT` panel, light tiles with a dark brown
+  border), the totals on dark brown tiles with light figures; the Selected row on brighter gold tiles, its label
+  in bold, its total darker; zeros dimmed. Labels never wrap.
+- Clicks (the Selected row is display only):
+  - a number: one more unit of that kind and row joins the selection (one not selected yet), so three clicks on a
+    3 select all three; Shift + click: all of them at once;
+  - a row's total: one more unit of that row, kinds taken in column order (braves first, then warriors...);
+    Shift + click: the whole row (e.g. every idle unit).
+  The tiles do not show what is picked; the Selected row does. Hovering a tile or a total outlines it.
+- Counts read from the simulation each frame (pure functions over `GameMap` and the selection, tested); which unit
+  a click adds is decided the same way, in unit id order within a cell [ours].
 
 ## Main menu (`menu.rs`)
 Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list: the original
