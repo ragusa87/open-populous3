@@ -48,7 +48,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Praying only happens at a totem or a pyramid of knowledge; today `Order::Pray` works anywhere: restrict it.
 - [ ] Prayer gauge per place and tribe, full at `PrayTime`, speed by `min(praying, TriggerCount)`, draining when nobody prays; the reward is granted when full.
 - [ ] Totems (scenery 9): assigned followers (or the shaman only, trigger type 3) all in the prayer pose, the first `TriggerCount` counted, a waiting one taking the place of one ordered away; rewards decoded as a list of trigger targets.
-- [ ] Pyramids: shaman only (capacity 1); door closed (object 192) at first; she prays at the door, the door slides up (192 -> 191), she walks to the middle (reward), walks out, the door closes, the vault is spent (capacity 0). Top petals open and close (193).
+- [ ] Pyramids: shaman only (capacity 1); door closed (object 192) at first; she prays at the door, the door slides up (192 -> 191), she walks to the middle (reward), walks out, then the door closes and the top folds in one animation (191 -> 193), the vault is spent (capacity 0).
 - [ ] Pyramids: draw the reward as an icon at the top (cursor sprites 38-57 spells, 58-65 buildings).
 - [ ] HUD: show the gauge over the totem/pyramid and who is praying.
 

@@ -34,12 +34,14 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
 - She prays (sits) at the door until its gauge is full [player].
 - The door then opens, sliding up (points 192 -> 191), for a short time; she walks in; reaching the middle grants
   the reward (permanent spell or building) [player]. She walks out, the door closes.
-- The top opens and closes too (petals, 192 spread, 193 folded) [player]: when, to settle (see below).
-- Then the vault is spent: nobody can go in any more (its capacity becomes 0) [player].
+- The top (petals) stays open the whole time, through the door opening for her [player].
+- Once she has the reward and is out, the door closes and the top folds at the same time, one animation
+  (191 -> 193: door down and petals folded together) [player]. The vault stays like that: spent, nobody can go in
+  any more (its capacity becomes 0) [player].
+- So: fresh 192 (door closed, top open); door opening 192 -> 191; spent 193 (door closed, top folded).
 - What it gives is drawn: an icon at its top, from the cursor icons (sprites.md: 38-57 spells, 58-65 buildings)
   [player].
 
 ## Open
-- When the top opens and closes, and what state a fresh and a spent vault show.
 - Whether a vault's gauge drains like a totem's when the shaman stops praying, or starts over.
 - `PrayTime`'s unit, the drain speed, and the speed with fewer than `TriggerCount` praying.
