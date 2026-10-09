@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use crate::tree::{scatter, Tree};
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
-use crate::totem::{Totem, TotemKind};
+use crate::totem::{totems_from_level, Totem, TotemKind};
 use crate::unit::{torus_delta, Action, Order, Unit, UnitEvent, UnitKind};
 use crate::wood::WoodPiece;
 use pop3_format::{Level, LevelHeader, MAP_SIZE};
@@ -32,7 +32,7 @@ pub struct GameMap {
     pub trees: Vec<Tree>,
     /// An original level's buildings (none on generated maps and sandboxes yet).
     pub buildings: Vec<Building>,
-    /// Places to pray at (only in the Worship sandbox for now).
+    /// Places to pray at: a level's scenery 9, the Worship sandbox's row.
     pub totems: Vec<Totem>,
     /// Pieces of wood lying on the ground (none in original levels).
     pub wood: Vec<WoodPiece>,
@@ -47,6 +47,10 @@ pub struct GameMap {
     /// The cells the buildings stand on, past their plan stage (`update_walls`).
     pub walls: Walls,
 }
+
+/// The Worship sandbox's totems, in `TotemKind::ALL` order: units counted, shaman only, Angel of
+/// Death. One unit, the shaman with an Angel of Death, 6, 8, 2, the shaman, 4.
+const SANDBOX_TOTEMS: [(u16, bool, bool); 7] = [(1, false, false), (1, true, true), (6, false, false), (8, false, false), (2, false, false), (1, true, false), (4, false, false)];
 
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
@@ -69,7 +73,7 @@ impl GameMap {
                 .filter_map(|t| Some(Tree::new(((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32), t.tree_type()?, crate::tree::MAX_SIZE).with_angle(t.angle()?)))
                 .collect(),
             buildings: buildings_from_level(level),
-            totems: Vec::new(),
+            totems: totems_from_level(level),
             wood: Vec::new(),
             spell_book: None,
             build_book: None,
@@ -290,8 +294,8 @@ impl GameMap {
     /// Test ground for praying: a flat island with the player's site at the centre.
     /// - South: a pyramid of knowledge (neutral, teaching the temple, as in level 3), its door facing
     ///   the site, for the shaman.
-    /// - North: one totem of each look (`TotemKind::ALL`) in a row, west to east, and 8 of the
-    ///   player's braves in front of them.
+    /// - North: one totem of each look (`TotemKind::ALL`) in a row, west to east, each asking for
+    ///   something else (`SANDBOX_TOTEMS`), and 8 of the player's braves in front of them.
     pub fn sandbox_worship() -> Self {
         const C: i32 = MAP_SIZE as i32 / 2;
         const ISLAND: i32 = 30;
@@ -310,8 +314,8 @@ impl GameMap {
         vault.vault = Some(crate::vault::Vault::new(Some(crate::building::Reward::Building(BuildingKind::Temple)), crate::vault::DEFAULT_PRAY_TIME));
         map.buildings.push(vault);
         for (k, &kind) in TotemKind::ALL.iter().enumerate() {
-            let (x, z) = at(-12 + 4 * k as i32, -12);
-            map.totems.push(Totem { kind, x, z });
+            let (prayers, shaman_only, summons_angel) = SANDBOX_TOTEMS[k];
+            map.totems.push(Totem { prayers, shaman_only, summons_angel, ..Totem::new(kind, at(-12 + 4 * k as i32, -12)) });
         }
         for n in 0..8 {
             let id = map.units.len() as u32 + 1;
@@ -1035,6 +1039,7 @@ mod tests {
         assert!(vault.door().1 < cz as u16 && site.z < vault.door().1, "its door faces the site");
         let kinds: Vec<TotemKind> = m.totems.iter().map(|t| t.kind).collect();
         assert_eq!(kinds, TotemKind::ALL);
+        assert!(m.totems.iter().any(|t| t.shaman_only) && m.totems.iter().any(|t| t.prayers == 8), "every case to try");
         for t in &m.totems {
             assert!(!m.terrain.is_water((t.x / 512) as i32, (t.z / 512) as i32));
         }

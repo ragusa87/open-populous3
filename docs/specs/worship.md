@@ -22,9 +22,14 @@ neutral pyramid of knowledge teaching the temple, its door facing the shaman; no
 look (`TotemKind::ALL`: totem, winged death totem with its bird, prayer totem, stone head, the three totem poles,
 since which one the levels' scenery 9 uses is not known), and 8 of the player's braves in front of them.
 Totems (`game_core::totem`, client `totems.rs`) only stand there for now: their original objects with animated
-flames, or a stone pillar without the original files.
+flames, or a stone pillar without the original files. Each asks for something else: one unit; the shaman with an
+Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`map::SANDBOX_TOTEMS`).
 
 ## Totems (scenery 9)
+- Loaded (done: `totem::totems_from_level`): every scenery 9 of a level becomes a `Totem` with `prayers`
+  (`TriggerCount`), `shaman_only` (types 3 and 5), `summons_angel` (type 5) and `pray_time` from the prayer trigger on
+  its cell (`totem::triggers_on_cell`, shared with the vaults); drawn as the stone head (its real model is not
+  known). Not prayed at yet.
 - Who may pray and how many are needed come from the level, per totem, from the trigger on its cell [player,
   files]: type 0 takes any of the tribe's units, followers and the shaman alike, each counting towards
   `TriggerCount`; type 3 takes only the shaman [player]. Type 5 takes only the shaman too, and when it fires an

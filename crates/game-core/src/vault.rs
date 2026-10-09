@@ -6,7 +6,7 @@
 use crate::building::{BuildingKind, Reward};
 use crate::spell_book::SpellKind;
 use pop3_format::level::{Thing, ThingData, KIND_BUILDING, KIND_SPELL};
-use pop3_format::{Level, WORLD_UNITS_PER_CELL};
+use pop3_format::Level;
 
 /// Trigger type of a vault's prayer.
 const TRIGGER_LIBRARY: u8 = 4;
@@ -47,11 +47,7 @@ impl Vault {
     /// The vault of `thing`, from the library trigger standing on its cell (the building record has
     /// no link of its own, docs/specs/level-format.md "Vault of knowledge").
     pub fn from_level(level: &Level, thing: &Thing) -> Self {
-        let cell = |t: &Thing| (t.x as u32 / WORLD_UNITS_PER_CELL, t.z as u32 / WORLD_UNITS_PER_CELL);
-        let library = level.things.iter().filter(|t| cell(t) == cell(thing)).find_map(|t| match t.data() {
-            ThingData::Trigger(trigger) if trigger.trigger_type == TRIGGER_LIBRARY => Some(trigger),
-            _ => None,
-        });
+        let library = crate::totem::triggers_on_cell(level, thing).into_iter().find(|t| t.trigger_type == TRIGGER_LIBRARY);
         let Some(trigger) = library else { return Vault::new(None, DEFAULT_PRAY_TIME) };
         let reward = trigger.targets.iter().filter_map(|&slot| level.slot(slot)).find_map(|target| match target.data() {
             ThingData::Discovery(d) if d.kind == KIND_SPELL => SpellKind::from_model(d.model).map(Reward::Spell),
