@@ -48,8 +48,10 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   Done so far: its layers turn once it gave, round and round (`totems::layer_turn`); to change to lining up,
   then sinking.
 - The stone head (object 82) [player]: its head nods at all times, completed or not: it tips forward and back
-  about a horizontal axis through its neck. Its model's head is to split from its pedestal by height, like the
-  rock layers [ours: the split height, the nod's angle and pace].
+  about a horizontal axis through its neck. Chosen from a side-by-side test of four nods ("A, gentle"): the head
+  is every face above the pedestal (all its points at height 324 or more); it turns about the horizontal axis
+  across the face's direction, through the top of the pedestal (height 324, centre axis), by `6° * sin(2π t / 1.6 s)`
+  (±6°, one nod every 1.6 s, smooth both ways).
 - The other looks do not move (to check in the game).
 - Gifts (`totem::gift`, from the trigger's targets): a spell (`Reward::Spell`, a "once" discovery
   `Reward::OneShot`: one more cast, `worship::one_more_shot`), a building, mana (`Reward::Mana`, only logged:
