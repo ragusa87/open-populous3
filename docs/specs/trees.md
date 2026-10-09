@@ -31,11 +31,11 @@ the same way.
 ## On screen (client, `nature.rs`)
 Drawn as 3D models standing on the terrain (`Grounded`, trunk footprint 0.15 cell), turned by a fixed per-tree
 angle (`tree_yaw`), scaled with the size (`size_factor`: 40% at size 1 to full at size 4), hidden at size 0.
-- With the original files: the original tree objects (`catalog::tree_object`: types 0-5 = scenery models 1-6 =
-  objects 13-18, types 6-17 = objects 60-71; 0.9-1.8 cells tall). The tree look actually depends on the level's
-  object bank: in banks 2-7, trees 4-6 are copies of 1-3, and bank 3/4/5/6 levels use bank 0's 60-62 / 63-65 /
-  66-68 / 69-71 (see objects.md). Not done yet: bank 6 levels (3, 5, 16, 22, 2120) show the wrong trees,
-  and level 2127 (bank 2) draws its 4 model-4 trees as bank 0's pine 16 instead of a cone pine. Textured from the map's theme atlas (theme 0 on maps without one: generated, sandboxes), drawn at their own size.
+- With the original files: the original tree objects, picked by the level's object bank
+  (`catalog::tree_object_in_bank`, `GameMap::object_bank`, objects.md): bank 0 types 0-5 = scenery models 1-6 =
+  objects 13-18; banks 2 and 7 bank 0's 13-15, bank 3/4/5/6 bank 0's 60-62 / 63-65 / 66-68 / 69-71, models 4-6
+  copies of 1-3 there; types 6-17 (generated maps) = objects 60-71; 0.9-1.8 cells tall. So level 3 (bank 6) shows
+  palms, tall cones and round trees, and level 2127 (bank 2) its model-4 trees as cone pines. Textured from the map's theme atlas (theme 0 on maps without one: generated, sandboxes), drawn at their own size.
 - Otherwise: the CC0 Quaternius Stylized Nature MegaKit (`assets/3d/nature`, type modulo 10: 0-4 common
   trees, 5-9 pines), 1.6 cells tall at full size. Models load through Bevy's asset server from the repository's
   `assets/` (`dev::asset_plugin`).

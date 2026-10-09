@@ -162,6 +162,18 @@ pub fn tree_object(tree_type: u8) -> usize {
     }
 }
 
+/// The bank 0 object a tree of `tree_type` is drawn with on a level of object bank `bank` (header byte
+/// 97, objects.md): banks 3-6 have three trees each, bank 0's 60-62, 63-65, 66-68, 69-71; banks 2 and
+/// 7 have bank 0's 13-15; in those banks scenery models 4-6 are copies of 1-3. Bank 0 and the types
+/// past the scenery models: `tree_object`.
+pub fn tree_object_in_bank(bank: u8, tree_type: u8) -> usize {
+    match (bank, tree_type) {
+        (3..=6, 0..=5) => 60 + 3 * (bank as usize - 3) + tree_type as usize % 3,
+        (2 | 7, 0..=5) => 13 + tree_type as usize % 3,
+        _ => tree_object(tree_type),
+    }
+}
+
 /// Tree types: 6 scenery models plus the 12 other tree objects.
 pub const TREE_TYPES: u8 = 18;
 
@@ -252,6 +264,16 @@ mod tests {
     fn tree_types_to_objects() {
         assert_eq!((tree_object(0), tree_object(1), tree_object(5)), (13, 14, 18));
         assert_eq!((tree_object(6), tree_object(17)), (60, 71));
+    }
+
+    #[test]
+    fn a_levels_object_bank_picks_its_trees() {
+        assert_eq!((tree_object_in_bank(6, 0), tree_object_in_bank(6, 1), tree_object_in_bank(6, 2)), (69, 70, 71));
+        assert_eq!(tree_object_in_bank(6, 5), 71, "model 6 is a copy of model 3");
+        assert_eq!(tree_object_in_bank(3, 3), 60);
+        assert_eq!(tree_object_in_bank(2, 4), 14);
+        assert_eq!(tree_object_in_bank(0, 3), 16, "bank 0 has its own pine");
+        assert_eq!(tree_object_in_bank(6, 7), tree_object(7), "generated types as before");
     }
 
     #[test]

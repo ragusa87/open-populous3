@@ -51,6 +51,8 @@ pub struct GameMap {
     pub walls: Walls,
     /// Where an original level's camera starts (its header), None when it does not say.
     pub start_camera: Option<StartCamera>,
+    /// An original level's object bank (header byte 97): its tree style. 0 elsewhere.
+    pub object_bank: u8,
 }
 
 /// An original level's start camera (`.hdr`): a cell to look at (None: the player's site) and an angle about
@@ -87,7 +89,7 @@ fn sandbox_gift(k: usize) -> crate::building::Reward {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: None }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: None, object_bank: 0 }
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
@@ -113,6 +115,7 @@ impl GameMap {
             campfires: Vec::new(),
             walls: Walls::default(),
             start_camera: None,
+            object_bank: 0,
         }
         .with_building_ground()
         .with_shamans()
@@ -171,7 +174,8 @@ impl GameMap {
         let spell_book = header.as_ref().map(|h| SpellBook::from_level(h, &level));
         let build_book = header.as_ref().map(|h| BuildBook::from_level(h, &level));
         let start_camera = header.as_ref().and_then(StartCamera::from_header);
-        Ok(GameMap { spell_book, build_book, start_camera, ..Self::from_level(&level, name, header.map(|h| h.theme)) })
+        let object_bank = header.as_ref().map_or(0, |h| h.object_bank);
+        Ok(GameMap { spell_book, build_book, start_camera, object_bank, ..Self::from_level(&level, name, header.map(|h| h.theme)) })
     }
 
     /// Deterministic island map from a seed (fallback when no original data exists).

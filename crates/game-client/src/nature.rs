@@ -14,7 +14,7 @@ use bevy::gltf::GltfAssetLabel;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use game_core::tree::{MAX_SIZE, VARIANTS};
-use pop3_format::catalog::tree_object;
+use pop3_format::catalog::tree_object_in_bank;
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 
 /// Open-source models (`assets/3d/nature/<name>.gltf`), by variant modulo their count.
@@ -93,6 +93,7 @@ fn original_trees(
     levels: &LevelList,
     objects: &OriginalObjects,
     theme: u8,
+    object_bank: u8,
     meshes: &mut Assets<Mesh>,
     images: &mut Assets<Image>,
     mats: &mut Assets<StandardMaterial>,
@@ -105,7 +106,7 @@ fn original_trees(
     let (atlas, palette) = load().map_err(|e| warn!("tree atlas for theme {theme}: {e}")).ok()?;
     let trees = (0..VARIANTS as usize)
         .map(|v| {
-            let obj = bank.get(tree_object(v as u8))?;
+            let obj = bank.get(tree_object_in_bank(object_bank, v as u8))?;
             let height = obj.points.iter().map(|p| p[1]).max().unwrap_or(0) as f32 / WORLD_UNITS_PER_CELL as f32;
             Some((meshes.add(to_mesh(object_mesh(obj, 0))), height))
         })
@@ -179,7 +180,7 @@ fn respawn_trees(
         commands.entity(e).despawn();
     }
     let theme = map.0.theme.unwrap_or(DEFAULT_THEME);
-    let original = original_trees(&levels, &objects, theme, &mut meshes, &mut images, &mut mats);
+    let original = original_trees(&levels, &objects, theme, map.0.object_bank, &mut meshes, &mut images, &mut mats);
     let cell = WORLD_UNITS_PER_CELL as f32;
     for (i, tree) in map.0.trees.iter().enumerate() {
         let at = Vec2::new(tree.x as f32 / cell, tree.z as f32 / cell);
