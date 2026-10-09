@@ -133,7 +133,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 ## Wood ([trees.md](docs/specs/trees.md))
 - [ ] Original scenery models 7 plant 1, 8 plant 2: not drawn yet. Scenery 9 (the totems, 98 in the levels) is drawn as the stone head (object 82), a guess: find its real model. Trees have no size in the thing record: full size is right.
 - [ ] Wood for repair and hut growth, like construction (`game_core::work`: assigned braves fetch, carry to the door, build). Cutting, carrying, fetching and construction are done (units.md "Wood", buildings.md "Construction").
-- [ ] Check in the game how long a brave chops one piece (`CHOP_TICKS`, 6 s guessed) and whether a brave ordered on a tree with no wood to spare goes to another one.
+- [ ] Align wood with the original (pop3-rev-analysis.md "Wood rules"): chopping `CHOP_TIME` 20 turns per piece instead of `CHOP_TICKS` 60, picking up from a pile 3 turns instead of instant, trees regrowing one piece per 800 turns instead of `GROW_TICKS` 600; balance values in turns, converted once the original turn rate is known.
+- [ ] Check in the game whether a brave ordered on a tree with no wood to spare goes to another one.
 - [ ] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible) trees.
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.
 
