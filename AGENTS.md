@@ -2,6 +2,9 @@
 
 Guidance for coding agents working on this repo (Rust + Bevy 0.19 Populous-like POC).
 
+## Before starting
+Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `roadmap.md`, then the `docs/specs/*` matching the task).
+
 ## Layout
 - `crates/pop3-format`: pure parsers of original game files. No Bevy, no game logic.
 - `crates/game-core`: deterministic simulation (terrain, map, spell, unit, command). No Bevy, no floats in state.
