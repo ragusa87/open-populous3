@@ -61,15 +61,16 @@ braves to build it. Details in buildings.md "Blueprint" and "Construction".
 ## Main menu (`menu.rs`)
 Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list: the original
 `levlNNNN.dat` files in level-number order, any file name case, `world::sort_levels`),
-Sandbox > Walk, Units, Buildings (the ground of every sandbox shows a grid along the cell borders, `world::ShowGrid`,
-`terrain_texture::draw_grid`; levels do not) (`GameMap::sandbox_walk`: small flat island, gentle ramp east, steep hill north, lake west, mesa ringed by cliffs south-east, each a few cells past the spawn), Quit.
+Sandbox > Walk, Units, Buildings, Worship (the ground of every sandbox shows a grid along the cell borders, `world::ShowGrid`,
+`terrain_texture::draw_grid`; levels do not) (`GameMap::sandbox_walk`: small flat island, gentle ramp east, steep hill north, lake west, mesa ringed by cliffs south-east, each a few cells past the spawn; `GameMap::sandbox_worship`: a pyramid of knowledge south of the site, door
+facing the shaman, and north one totem of each look with 8 braves, worship.md), Quit.
 Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
 Esc in the game (once an open view-presets menu is closed) pauses: the mouse is released (`VirtualCursor::request`)
 and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Main menu > "Leave this game?" No / Yes.
 Resuming or starting a game captures the mouse again.
 `AppState::Menu | Playing | Paused`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
 while playing. Behind the menu the game camera is off (no terrain, units or HUD drawn); the menu and the cursor
-are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk` picks the start; screenshots start in the game by default.
+are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship` picks the start; screenshots start in the game by default.
 
 ## Selection and orders
 Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect (Shift + right click puts out the player's camp fire under the cursor, or cancels the player's plan not flat yet);

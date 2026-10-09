@@ -16,6 +16,14 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
   proportion, `min(praying, TriggerCount) / TriggerCount` [ours, to check].
 - Nobody praying: the gauge drains, quite quickly (TODO.md) [player, speed to measure].
 
+## Sandbox
+Sandbox > Worship (`POP3_START=sandbox-worship`, `GameMap::sandbox_worship`): south of the player's site a
+neutral pyramid of knowledge teaching the temple, its door facing the shaman; north a row of totems, one of each
+look (`TotemKind::ALL`: totem, winged death totem with its bird, prayer totem, stone head, the three totem poles,
+since which one the levels' scenery 9 uses is not known), and 8 of the player's braves in front of them.
+Totems (`game_core::totem`, client `totems.rs`) only stand there for now: their original objects with animated
+flames, or a stone pillar without the original files.
+
 ## Totems (scenery 9)
 - Followers are assigned to pray at it (type 0 triggers), or only the shaman (type 3) [files].
 - More may be assigned than `TriggerCount`: e.g. 12 on a totem of 8. Only `TriggerCount` count; the gauge goes

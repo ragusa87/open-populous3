@@ -20,7 +20,7 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
 - `just shot out.png [level]` / `AERIAL=1 just shot out.png`: headless offscreen render, then exits. Use this to check visuals.
   `FOCUS=x,z` (cells), `DISTANCE`, `PITCH`, `YAW` (degrees), `SHOT_FRAME`, `SHAMAN=walk|teleport|...`, `BRAVES=cut|carry`, `HOVER=unit:N|wood:N|tree:N|building:N`, `TAB=spells|build|stats`, `BLUEPRINT=temple@64,70`, `BUILD=hut@90,62 BUILD_TICKS=150` (plan built by all the player's braves) set up the shot.
   Level paths with spaces or quotes break `just shot`: run `HEADLESS=1 SCREENSHOT=out.png cargo run -p game-client -- "<level>"`.
-- `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings`: skip the main menu or open it (`just shot` starts in the game by default).
+- `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship`: skip the main menu or open it (`just shot` starts in the game by default).
 - `just run-generated` / `--no-original`: no original files read at all (use for anything shippable).
 - `just level-info file.dat`: dump parsed level.
 - Original files: `$POP3_INSTALL`, else auto-detected (Wine prefixes, `C:\Program Files*\Bullfrog\*`) by `pop3_format::install`; `--no-original` skips it. Read-only, never modify or ship them.
