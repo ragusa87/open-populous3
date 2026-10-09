@@ -1,5 +1,6 @@
 //! Camera readout in the bottom-right corner (F3 hides it): focus, angle, tilt, distance, fov, eye, and the
-//! `just shot` variables that reproduce the view.
+//! `just shot` variables that reproduce the view. The same readout goes to stdout on one line each time the
+//! camera settles after a change (wheel, keys, drag, scrolling), to note views while tuning.
 
 use crate::camera::{CameraRig, GameCamera};
 use crate::game_frame::GamePos;
@@ -10,12 +11,41 @@ pub struct CameraDebugPlugin;
 
 impl Plugin for CameraDebugPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_readout).add_systems(Update, (toggle_readout, update_readout).chain());
+        app.add_systems(Startup, spawn_readout).add_systems(Update, (toggle_readout, update_readout, log_settled).chain());
     }
 }
 
 #[derive(Component)]
 struct CameraReadout;
+
+/// Seconds the camera stays still before its readout is printed.
+const SETTLE_SECS: f32 = 0.4;
+
+/// Prints a readout once it has stayed the same for `SETTLE_SECS`, and only once.
+#[derive(Default)]
+pub struct SettledLog {
+    printed: Option<String>,
+    pending: Option<(String, f32)>,
+}
+
+impl SettledLog {
+    /// The line to print at `now` (seconds) for the current readout, if it just settled.
+    pub fn update(&mut self, current: &str, now: f32) -> Option<String> {
+        match &self.pending {
+            Some((text, _)) if text == current => {}
+            _ => {
+                self.pending = Some((current.to_string(), now));
+                return None;
+            }
+        }
+        let (text, since) = self.pending.as_ref()?;
+        if now - since < SETTLE_SECS || self.printed.as_deref() == Some(text) {
+            return None;
+        }
+        self.printed = Some(text.clone());
+        Some(text.replace('\n', "  |  "))
+    }
+}
 
 /// The game's angle (0..2048, as in the level header and the things) a camera yaw looks along.
 pub fn game_angle(yaw: f32) -> u16 {
@@ -79,9 +109,28 @@ fn update_readout(
     }
 }
 
+fn log_settled(time: Res<Time>, rig: Res<CameraRig>, cam: Query<&Transform, With<GameCamera>>, mut log: Local<SettledLog>) {
+    let Ok(eye) = cam.single() else { return };
+    if let Some(line) = log.update(&readout(&rig, eye.translation), time.elapsed_secs()) {
+        println!("{line}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_view_is_printed_once_settled_and_once_only() {
+        let mut log = SettledLog::default();
+        assert_eq!(log.update("a\nb", 0.0), None, "just changed");
+        assert_eq!(log.update("a\nb", 0.2), None, "not settled yet");
+        assert_eq!(log.update("a\nb", 0.5).as_deref(), Some("a  |  b"), "settled: one line");
+        assert_eq!(log.update("a\nb", 2.0), None, "already printed");
+        assert_eq!(log.update("c", 2.1), None, "moving again");
+        assert_eq!(log.update("d", 2.3), None);
+        assert_eq!(log.update("d", 2.8).as_deref(), Some("d"), "only where it stopped");
+    }
 
     #[test]
     fn game_angle_reads_back_the_level_angle() {
