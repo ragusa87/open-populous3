@@ -28,6 +28,11 @@ struct WoodSprite(FrameAsset);
 #[derive(Component)]
 pub struct WoodView(pub usize);
 
+/// The ground's pieces and the piles' as last drawn.
+type Drawn = (Vec<game_core::wood::WoodPiece>, Vec<(u16, u16)>);
+
+type Shown = Or<(With<WoodView>, With<PileView>)>;
+
 /// A piece on a building's pile (not picked up from the ground).
 #[derive(Component)]
 pub struct PileView;
@@ -81,8 +86,8 @@ fn respawn_views(
     mut commands: Commands,
     map: Res<CurrentMap>,
     sprite: Option<Res<WoodSprite>>,
-    existing: Query<Entity, Or<(With<WoodView>, With<PileView>)>>,
-    mut drawn: Local<(Vec<game_core::wood::WoodPiece>, Vec<(u16, u16)>)>,
+    existing: Query<Entity, Shown>,
+    mut drawn: Local<Drawn>,
 ) {
     let Some(sprite) = sprite else { return };
     let piles = pile_pieces(&map.0);
@@ -108,7 +113,7 @@ fn respawn_views(
     }
 }
 
-fn face_camera(rig: Res<CameraRig>, mut views: Query<&mut Transform, Or<(With<WoodView>, With<PileView>)>>) {
+fn face_camera(rig: Res<CameraRig>, mut views: Query<&mut Transform, Shown>) {
     let facing = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
     for mut t in &mut views {
         t.rotation = facing;
@@ -116,12 +121,13 @@ fn face_camera(rig: Res<CameraRig>, mut views: Query<&mut Transform, Or<(With<Wo
 }
 
 /// Pulls each sprite towards the camera, keeping its picture (`units::toward_eye`).
+#[allow(clippy::type_complexity)]
 fn pull_to_eye(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     params: Res<CurveParamsRes>,
     eye: Query<&Transform, (With<GameCamera>, Without<WoodView>, Without<PileView>, Without<WoodBody>)>,
-    views: Query<(&Grounded, &Transform, &Children), Or<(With<WoodView>, With<PileView>)>>,
+    views: Query<(&Grounded, &Transform, &Children), Shown>,
     mut bodies: Query<&mut Transform, (With<WoodBody>, Without<WoodView>, Without<PileView>)>,
 ) {
     let Ok(eye) = eye.single() else { return };

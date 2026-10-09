@@ -102,10 +102,10 @@ impl GameMap {
     /// the pile.
     pub(crate) fn unassign(&mut self, i: usize) {
         let Some(site) = self.units[i].work.take() else { return };
-        if matches!(self.units[i].action, Action::Building { .. }) {
-            if let Some(b) = self.building_at_corner(site) {
-                self.buildings[b].stock += 1;
-            }
+        if matches!(self.units[i].action, Action::Building { .. })
+            && let Some(b) = self.building_at_corner(site)
+        {
+            self.buildings[b].stock += 1;
         }
     }
 
@@ -187,10 +187,8 @@ impl GameMap {
             self.units[i].facing = facing_to(me, building.centre());
         } else if building.stock == 0 && wanted {
             self.fetch_wood(i);
-        } else if !around {
-            if let Some(spot) = self.spot_around(b, me, id) {
-                self.units[i].start(Order::MoveTo { x: spot.0, z: spot.1 });
-            }
+        } else if !around && let Some(spot) = self.spot_around(b, me, id) {
+            self.units[i].start(Order::MoveTo { x: spot.0, z: spot.1 });
         }
         None
     }
@@ -304,7 +302,7 @@ mod tests {
     #[test]
     fn braves_flatten_fetch_and_build_a_hut() {
         let mut map = sandbox();
-        let c = (C + 24) as i32;
+        let c = C + 24;
         for (k, (x, z)) in [(c, C - 1), (c + 1, C), (c - 1, C + 1)].into_iter().enumerate() {
             map.terrain.set(x, z, 64 + 40 * k as u16);
         }

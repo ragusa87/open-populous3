@@ -158,6 +158,7 @@ pub fn tab_index(name: &str) -> Option<usize> {
     crate::hud::TABS.iter().position(|t| t.eq_ignore_ascii_case(name))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn screenshot(
     mut commands: Commands,
     mut frame: Local<u32>,
