@@ -178,12 +178,22 @@ pub(crate) fn spawn_camera(mut commands: Commands) {
 }
 
 fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {
-    rig.look_at_cell(start_cell(&map.0));
+    let (cell, yaw) = start_view(&map.0);
+    rig.look_at_cell(cell);
+    rig.yaw = yaw;
 }
 
 /// The player's (tribe 0) reincarnation site, else some low inland ground.
 pub fn start_cell(map: &game_core::map::GameMap) -> (i32, i32) {
     map.site_of(0).map_or_else(|| map.terrain.lowland_cell(), |s| s.cell())
+}
+
+/// Where a new map's camera looks and its yaw: the level's own start camera where it gives one (its
+/// angle read like the things' angles, `nature::angle_yaw`), else `start_cell` facing yaw 0.
+pub fn start_view(map: &game_core::map::GameMap) -> ((i32, i32), f32) {
+    let camera = map.start_camera;
+    let cell = camera.and_then(|c| c.cell).unwrap_or_else(|| start_cell(map));
+    (cell, camera.map_or(0.0, |c| crate::nature::angle_yaw(c.angle)))
 }
 
 fn fly(time: Res<Time>, mut rig: ResMut<CameraRig>) {
@@ -394,6 +404,19 @@ mod tests {
         map.sites.clear();
         assert_eq!(start_cell(&map), map.terrain.lowland_cell());
     }
+    #[test]
+    fn a_level_starts_its_camera_where_and_as_its_header_says() {
+        let mut map = game_core::map::GameMap::sandbox_walk();
+        let site = start_cell(&map);
+        assert_eq!(start_view(&map), (site, 0.0));
+        map.start_camera = Some(game_core::map::StartCamera { cell: Some((21, 83)), angle: 512 });
+        let (cell, yaw) = start_view(&map);
+        assert_eq!(cell, (21, 83));
+        assert!((yaw - std::f32::consts::FRAC_PI_2).abs() < 1e-6, "a quarter turn");
+        map.start_camera = Some(game_core::map::StartCamera { cell: None, angle: 1024 });
+        assert_eq!(start_view(&map).0, site, "an angle only: still the site");
+    }
+
 
     #[test]
     fn wasd_moves_like_arrows_and_strafes() {

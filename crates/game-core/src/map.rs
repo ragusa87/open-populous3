@@ -49,6 +49,27 @@ pub struct GameMap {
     pub campfires: Vec<Campfire>,
     /// The cells the buildings stand on, past their plan stage (`update_walls`).
     pub walls: Walls,
+    /// Where an original level's camera starts (its header), None when it does not say.
+    pub start_camera: Option<StartCamera>,
+}
+
+/// An original level's start camera (`.hdr`): a cell to look at (None: the player's site) and an angle about
+/// the vertical axis, 2048ths of a turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartCamera {
+    pub cell: Option<(i32, i32)>,
+    pub angle: u16,
+}
+
+impl StartCamera {
+    /// None when the header leaves both at 0, as most levels do.
+    pub fn from_header(h: &LevelHeader) -> Option<Self> {
+        let cell = (h.start != 0).then(|| {
+            let (x, z) = h.start_cell();
+            (x as i32, z as i32)
+        });
+        (cell.is_some() || h.start_angle != 0).then_some(StartCamera { cell, angle: h.start_angle % 2048 })
+    }
 }
 
 /// The Worship sandbox's totems, in `TotemKind::ALL` order: units counted, shaman only, Angel of
@@ -66,7 +87,7 @@ fn sandbox_gift(k: usize) -> crate::building::Reward {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: None }
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
@@ -91,6 +112,7 @@ impl GameMap {
             build_book: None,
             campfires: Vec::new(),
             walls: Walls::default(),
+            start_camera: None,
         }
         .with_building_ground()
         .with_shamans()
@@ -148,7 +170,8 @@ impl GameMap {
             .unwrap_or_else(|| dat.file_stem().unwrap_or_default().to_string_lossy().into_owned());
         let spell_book = header.as_ref().map(|h| SpellBook::from_level(h, &level));
         let build_book = header.as_ref().map(|h| BuildBook::from_level(h, &level));
-        Ok(GameMap { spell_book, build_book, ..Self::from_level(&level, name, header.map(|h| h.theme)) })
+        let start_camera = header.as_ref().and_then(StartCamera::from_header);
+        Ok(GameMap { spell_book, build_book, start_camera, ..Self::from_level(&level, name, header.map(|h| h.theme)) })
     }
 
     /// Deterministic island map from a seed (fallback when no original data exists).
@@ -842,6 +865,19 @@ pub fn showcase_states(kind: BuildingKind) -> Vec<Building> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_header_gives_the_start_camera_when_it_sets_one() {
+        let header = |start: u16, angle: u16| {
+            let mut hdr = vec![0u8; 616];
+            hdr[612..614].copy_from_slice(&start.to_le_bytes());
+            hdr[614..616].copy_from_slice(&angle.to_le_bytes());
+            LevelHeader::parse(&hdr)
+        };
+        assert_eq!(StartCamera::from_header(&header(0, 0)), None);
+        assert_eq!(StartCamera::from_header(&header(166 << 8 | 42, 1144)), Some(StartCamera { cell: Some((21, 83)), angle: 1144 }));
+        assert_eq!(StartCamera::from_header(&header(0, 1016)), Some(StartCamera { cell: None, angle: 1016 }));
+    }
 
     #[test]
     fn generation_is_deterministic_and_has_land_and_sea() {

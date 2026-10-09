@@ -263,4 +263,5 @@ LandBlocks, LandOrients, start info and access info can be zero (the editor does
 - `LevelHeader`: masks, tribes, AI scripts in owner order (blue from 99), allies, theme, bank, flags, markers,
   start position and angle. `LevelVersion` for `.ver`.
 
-Not used by the game yet: header masks, flags, allies, bank, start camera, discoveries and triggers (TODO.md).
+Not used by the game yet: header masks, flags, allies, bank, discoveries and triggers (TODO.md). The start camera
+(612, 614) frames a new map (`GameMap::start_camera`): set in levels 3, 5 and 79, the angle alone in level 21, 0 in the others.
