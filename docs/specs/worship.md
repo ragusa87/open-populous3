@@ -12,8 +12,10 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
   [files]; then the reward is granted. Its unit is unknown (game turns?); until measured, one `PrayTime` = one of our
   ticks [ours].
 - Praying is slow [player].
-- The gauge fills at full speed with `TriggerCount` people praying [player]. Fewer pray slower: speed in
-  proportion, `min(praying, TriggerCount) / TriggerCount` [ours, to check].
+- The gauge fills at full speed with `TriggerCount` people praying [player]. Fewer pray slower, on a soft curve:
+  speed `(n / TriggerCount)²` with `n = min(praying, TriggerCount)` [ours, to check]. A totem of 8: 8 praying 100 %,
+  6 about 56 %, 4 25 %, 2 about 6 %, 1 about 1.6 %. In integers: the gauge counts 1/256 steps and gains
+  `256 * n² / TriggerCount²` a tick (a lone prayer on a totem of 16 still gains 1 step).
 - Nobody praying: the gauge drains, quite quickly (TODO.md) [player, speed to measure].
 
 ## Sandbox
@@ -98,5 +100,5 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   [player]. The icon goes away once the reward is granted [player].
 
 ## Open
-- `PrayTime`'s unit, the drain speed (1 per tick, as fast as it fills [ours]), and the speed with fewer than
-  `TriggerCount` praying.
+- `PrayTime`'s unit, the drain speed (1 per tick, as fast as it fills [ours]), and whether the soft curve
+  matches the game.

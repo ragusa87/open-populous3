@@ -47,7 +47,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## Praying (worship) ([worship.md](docs/specs/worship.md))
 - [ ] Praying only happens at a totem or a pyramid of knowledge; today `Order::Pray` works anywhere: restrict it.
-- [ ] Prayer gauge per place and tribe, full at `PrayTime`, speed by `min(praying, TriggerCount)`, draining when nobody prays; the reward is granted when full.
+- [ ] Prayer gauge per place and tribe, full at `PrayTime`, speed `(n / TriggerCount)²` with `n = min(praying, TriggerCount)` (worship.md), draining when nobody prays; the reward is granted when full.
 - [ ] Totems (scenery 9): assigned followers and the shaman (only the shaman for trigger type 3) all in the prayer pose, the first `TriggerCount` counted, a waiting one taking the place of one ordered away; rewards decoded as a list of trigger targets.
 - [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); check `PrayTime`'s unit and the drain speed in the game.
 - [ ] Prisons: levels where the shaman starts imprisoned; she is locked inside (units.md "Locked shaman") until freed.
