@@ -23,6 +23,8 @@ use crate::unit::{Action, Inside, Order, Unit, UnitEvent, UnitKind, BUILD_TICKS,
 pub const JUMP_STEP: u16 = 32;
 /// Braves wait and build within this far (world units) out of the footprint.
 pub const AROUND: i32 = 400;
+/// A click this close (world units) to a built hut's footprint is on it.
+pub const HOUSE_MARGIN: i32 = 128;
 /// A brave this close (world units) to the door puts his wood on the pile.
 pub const DELIVER_RADIUS: i64 = 512;
 /// A brave this close (world units) to a height point jumps on it.
@@ -76,10 +78,10 @@ impl GameMap {
         build.chain(if others.is_empty() { Vec::new() } else { self.dispatch(player, &others, b.door()) }).collect()
     }
 
-    /// The player's built hut whose footprint (grown by `AROUND`) holds `at`: a click there sends
-    /// followers in to rest.
+    /// The player's built hut whose footprint (grown by `HOUSE_MARGIN`) holds `at`: a click there
+    /// sends followers in to rest.
     pub fn house_at(&self, player: u8, at: (u16, u16)) -> Option<usize> {
-        self.buildings.iter().position(|b| b.owner == player && b.stage() == Stage::Built && b.kind.capacity() > 0 && b.covers(at, AROUND))
+        self.buildings.iter().position(|b| b.owner == player && b.stage() == Stage::Built && b.kind.capacity() > 0 && b.covers(at, HOUSE_MARGIN))
     }
 
     /// Orders sending the player's followers among `units` into the hut `house` (index) to rest, in id

@@ -202,7 +202,7 @@ pub fn on_screen(
         .iter()
         .filter(|(_, _, vis)| **vis != Visibility::Hidden)
         .filter_map(|(view, gt, _)| {
-            let u = units.get(view.0).filter(|u| selectable(u))?;
+            let u = units.get(view.0).filter(|u| selectable(u) && !super::hidden_inside(u))?;
             let feet = cam.0.world_to_viewport(cam.1, gt.translation()).ok()?;
             let head = cam.0.world_to_viewport(cam.1, gt.translation() + gt.up() * UNIT_HEIGHT).ok()?;
             Some(OnScreen { id: u.id, feet, head })
@@ -265,17 +265,18 @@ pub(super) fn select_and_order(
             Some(Gesture::Click(c)) => match unit_at(c, &units) {
                 Some(u) => selection.click(u.id, add),
                 None => {
-                    if let Some(i) = tree.tree {
+                    let ray = cam.0.viewport_to_world(cam.1, c).ok();
+                    let at = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)).map(world_units);
+                    // One of the player's buildings wins over a tree in front of or behind it.
+                    if let Some(orders) = at.and_then(|at| building_click(&map.0, &selection.units, at)) {
+                        moves = orders;
+                    } else if let Some(i) = tree.tree {
                         moves = map.0.cut_orders(PLAYER, &selection.units, i);
-                    } else {
-                        let ray = cam.0.viewport_to_world(cam.1, c).ok();
-                        if let Some(cell) = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)) {
-                            let at = world_units(cell);
-                            moves = match map.0.wood_at(at) {
-                                Some(pile) => map.0.pick_orders(PLAYER, &selection.units, pile),
-                                None => ground_click(&map.0, &selection.units, at),
-                            };
-                        }
+                    } else if let Some(at) = at {
+                        moves = match map.0.wood_at(at) {
+                            Some(pile) => map.0.pick_orders(PLAYER, &selection.units, pile),
+                            None => ground_click(&map.0, &selection.units, at),
+                        };
                     }
                     if add {
                         moves = chained(moves);
@@ -298,13 +299,22 @@ pub(super) fn select_and_order(
     }
 }
 
-/// Commands for a left click on the ground at `at` (world units) with `selected` units: braves work
-/// on the player's building still to build there, they go round the player's camp fire there, else
-/// walk there.
-pub fn ground_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16, u16)) -> Vec<Command> {
-    if let Some(site) = map.site_at(PLAYER, at).filter(|_| !selected.is_empty()) {
-        return map.build_orders(PLAYER, selected, site);
+/// Commands for a left click at `at` (world units) on one of the player's buildings with `selected`
+/// units: braves work on it while it is still to build; a built hut takes followers in to rest. None
+/// elsewhere, or with nothing selected.
+pub fn building_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16, u16)) -> Option<Vec<Command>> {
+    if selected.is_empty() {
+        return None;
     }
+    if let Some(site) = map.site_at(PLAYER, at) {
+        return Some(map.build_orders(PLAYER, selected, site));
+    }
+    map.house_at(PLAYER, at).map(|house| map.enter_orders(PLAYER, selected, house))
+}
+
+/// Commands for a left click on the ground at `at` (world units) with `selected` units: they go
+/// round the player's camp fire there, else walk there.
+pub fn ground_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16, u16)) -> Vec<Command> {
     match map.campfire_at(at).filter(|f| f.owner == PLAYER) {
         _ if selected.is_empty() => Vec::new(),
         Some(fire) => map.gather(PLAYER, selected, fire.id),
@@ -403,7 +413,11 @@ mod tests {
         let site = map.place_building(PLAYER, game_core::building::BuildingKind::Hut { size: 1 }, (88 * 512, 64 * 512), 0).unwrap();
         let centre = map.buildings[site].centre();
         let brave = map.units.iter().find(|u| u.kind == game_core::unit::UnitKind::Brave && u.campfire().is_none()).unwrap().id;
-        assert!(matches!(ground_click(&map, &[brave], centre)[..], [Command::OrderUnit { order: Order::Build { site: (45056, 32768) }, .. }]));
+        assert!(matches!(building_click(&map, &[brave], centre).unwrap()[..], [Command::OrderUnit { order: Order::Build { site: (45056, 32768) }, .. }]));
+        assert_eq!(building_click(&map, &[], centre), None, "nothing selected");
+        let hut = map.buildings.iter().find(|b| b.owner == PLAYER && b.kind == game_core::building::BuildingKind::Hut { size: 2 } && b.stage() == game_core::building::Stage::Built).unwrap();
+        let (hut_site, hut_centre) = ((hut.x, hut.z), hut.centre());
+        assert!(matches!(building_click(&map, &[brave], hut_centre).unwrap()[..], [Command::OrderUnit { order: Order::Enter { site }, .. }] if site == hut_site), "a built hut: rest inside");
         assert_eq!(shift_right_click(&map, centre, true), Some(Command::CancelBuilding { player: PLAYER, at: centre }));
         assert_eq!(shift_right_click(&map, centre, false), None);
         map.buildings[site].flat = true;
