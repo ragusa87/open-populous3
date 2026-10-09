@@ -31,7 +31,9 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
 ## Pyramids of knowledge (vaults)
 - Holds one unit, and only the shaman: she is ordered in like followers into a hut (`game_core::enter`) [player].
 - Once placed, the door is closed: object 192 [player, objects.md "Pyramid of knowledge frames"].
-- She prays (sits) at the door until its gauge is full [player].
+- She prays (sits) at the door until its gauge is full [player]. Until the reward, the gauge behaves exactly like a
+  totem's: it builds up while she prays, stops when she is attacked or leaves, and goes down while nobody prays
+  [player].
 - The door then opens, sliding up (points 192 -> 191), for a short time; she walks in; reaching the middle grants
   the reward (permanent spell or building) [player]. She walks out, the door closes.
 - The top (petals) stays open the whole time, through the door opening for her [player].
@@ -39,6 +41,10 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
   (191 -> 193: door down and petals folded together) [player]. The vault stays like that: spent, nobody can go in
   any more (its capacity becomes 0) [player].
 - So: fresh 192 (door closed, top open); door opening 192 -> 191; spent 193 (door closed, top folded).
+- Before the reward, the door follows the gauge [player]: if she dies or leaves while the door is open (gauge
+  full, not yet at the middle), the gauge goes down and the door slides back down with it. The door's opening is
+  a function of the gauge, not a timer of its own: closed below the top band of the gauge, opening through it,
+  fully open when full [ours: the band's size].
 - The reward is granted the moment she reaches the middle, and kept whatever happens to her next (attacked,
   killed) [player].
 - From the reward on, the vault's sequence (her walk out, the door closing with the top folding, spent) plays
@@ -48,5 +54,4 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
   [player]. The icon goes away once the reward is granted [player].
 
 ## Open
-- Whether a vault's gauge drains like a totem's when the shaman stops praying, or starts over.
 - `PrayTime`'s unit, the drain speed, and the speed with fewer than `TriggerCount` praying.
