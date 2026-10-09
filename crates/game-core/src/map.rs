@@ -46,6 +46,11 @@ pub struct GameMap {
 }
 
 impl GameMap {
+    /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
+    fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }
+    }
+
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
     /// above the sea first, then the sites theirs (`with_shamans`).
     pub fn from_level(level: &Level, name: impl Into<String>, theme: Option<u8>) -> Self {
@@ -142,7 +147,7 @@ impl GameMap {
             terrain.set(x, z, v);
         }
         let sites = generated_sites(&terrain);
-        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }.with_shamans().with_trees(seed, 60)
+        GameMap::bare(format!("Generated #{seed}"), terrain, sites).with_shamans().with_trees(seed, 60)
     }
 
     /// Test ground for walking: a small flat island around the player's site at the centre, a gentle
@@ -169,7 +174,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }.with_shamans().with_trees(1, 150)
+        GameMap::bare("Sandbox: walk", terrain, sites).with_shamans().with_trees(1, 150)
     }
 
     /// Test ground for buildings: a flat island with the player's site at the centre.
@@ -193,7 +198,7 @@ impl GameMap {
         }
         terrain.raise((C + 26, C - 6), 3, 90);
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }.with_shamans();
+        let mut map = GameMap::bare("Sandbox: buildings", terrain, sites).with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let place = |owner: u8, kind: BuildingKind, (x, z): (u16, u16), facing: u8| Building::new(kind, owner, x - 256, z - 256, facing);
         for model in 1..=19u8 {
@@ -264,7 +269,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }.with_shamans().with_trees(2, 150);
+        let mut map = GameMap::bare("Sandbox: units", terrain, sites).with_shamans().with_trees(2, 150);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         for (row, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
             let row = row as i32;
