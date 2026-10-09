@@ -39,6 +39,11 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
   (191 -> 193: door down and petals folded together) [player]. The vault stays like that: spent, nobody can go in
   any more (its capacity becomes 0) [player].
 - So: fresh 192 (door closed, top open); door opening 192 -> 191; spent 193 (door closed, top folded).
+- The reward is granted the moment she reaches the middle, and kept whatever happens to her next (attacked,
+  killed) [player].
+- From the reward on, the vault's sequence (her walk out, the door closing with the top folding, spent) plays
+  the same whether she is alive or not [player]: it runs on the vault's own clock from the reward, not on her
+  progress [ours]. If she is killed inside, the door still closes on time [ours, to check].
 - What it gives is drawn: an icon at its top, from the cursor icons (sprites.md: 38-57 spells, 58-65 buildings)
   [player].
 
