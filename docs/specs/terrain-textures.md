@@ -72,14 +72,21 @@ dark land colours at row 63). PopResourceEditor: "damaged ground, lava and simil
 ## Our bake (`game-client/src/terrain_texture.rs`)
 Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cell / 128):
 - `h` = bilinear height; `d` = `disp` texel.
-- row = water (`h < 1`): `watdisp * 128 / 256` (`sea_row`, the whole water band; `disp` when the file is
+- row = water (outside the coast, below): `watdisp * 128 / 256` (`sea_row`, the whole water band; `disp` when the file is
   missing, generated noise in the procedural theme); land: `land_row` =
   `max(start, start + h + (d - mean(disp)) / 2)`. `start` = `Theme::land_start_row`, the first row from 128 up
-  where most columns are not water colours (colours of rows 0..127), at most 160: rows 128..~145 are still blue
+  where most columns are neither water colours (colours of rows 0..127) nor sea-like (`sea_like`:
+  blue > green >= red, the wet grey-blue of theme c's rows 134..136; purple land like theme i's stays land), at most 160: rows 128..~145 are still blue
   in most themes (theme 1: 146, 5: 136, m: 137; theme g reuses water colours up to row 475, hence the cap).
   So low ground (the simulation's land, height >= 1) never looks like the sea (level 5's reincarnation site
   used to), and centring `disp` on the file's mean keeps the detail without shifting the bands by a theme
   constant.
+- coast (`coast_land`): walkers cross every cell not sea on all four corners (`is_sea`), so the coast is
+  drawn round those cells, not where the bilinear height reaches 1 (that left most of a shore cell blue
+  and units looked like they walked on water). Field = 1 at the centre of each walkable cell, 0 at sea,
+  bilinear between centres; ground where it reaches 0.2 (`COAST_THRESHOLD`). Covers a lone walkable
+  cell's corner (0.25 there), puts straight coasts 0.3 cell past the walkable edge and rounds the corners.
+  Ground there, even at height 0, takes the lowest land row.
 - brightness column from baked Lambert lighting of the heightmap slope (`SUN`), material is unlit.
 - colour = `palette[bigfade[row][column]]`.
 
