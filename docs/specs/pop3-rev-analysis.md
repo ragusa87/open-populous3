@@ -30,6 +30,8 @@ Sources:
   missing prayer slows the gauge sharply (`C² / (C − n + 1)²`). See "Prayer at triggers".
 - **A spell is a recipe of reusable components** [exe]: the shaman fires a shot, and on arrival the spell spawns
   effects (a shockwave, fire, a status on the N nearest...) that do the work. See "Spells".
+- **The planet bend is a parabola of 0.011 × d² cells** [exe, measured], applied in camera space; heights are
+  256 units per cell (1024 = 4 cells) and the camera looks down at a fixed 20°. See "Landscape projection".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
 
@@ -295,6 +297,34 @@ Example, a totem needing 8 (C 8) with `PrayTime` 64 (level 3's stone head):
 At full count, the levels' totems (`PrayTime` 15-1000) take 5 s to 5 min 33 s, and the shaman-only triggers
 (5-35) take 1.7 s to 12 s.
 
+## Reincarnation sites [exe, measured]
+No level file has pillars (scenery 12): the game creates them when the level loads, for each tribe that has a
+site. The site (tribe+0x911) is on a cell centre; its height is kept at tribe+0x915.
+
+### Pillars
+| Slot | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| Offset (cells x, z) | 0, 3 | 2, 2 | 3, 0 | 2, −2 | 0, −3 | −2, −2 | −3, 0 | −2, 2 |
+| Angle (2048 = full turn) | 0 | 256 | 512 | 768 | 1024 | 1280 | 1536 | 1792 |
+
+- An octagon: 3 cells out on the axes, (2, 2) on the diagonals (2.8 cells). The offsets are a table at 0x5A9F10
+  (in map-index units, 2 per cell). Each pillar sits on the centre of its cell, at that cell's ground height.
+- Angle: `atan2(dx, −dz)` of the pillar's offset from the site (0x4A7D80), so each pillar faces the line from the
+  centre; it comes out as slot × 256.
+- Model: object 30 (the reincarnation stone, objects.md), from the scenery-12 record (`+0xA` = 30). The pillar
+  belongs to its tribe; between tribes only the low byte of its model flags differs (3 for blue, 2 for yellow),
+  probably the tribe colour (unverified).
+- A new pillar rises out of the ground: it starts 256 below and climbs 16 per step over 8 steps with rock debris
+  (7/0x33) and a sound (0x4A7EB0). "delete rs pillars" (7/0x4D) removes them; "move rs pillar" (7/7,
+  0x50C690) replaces a slot's pillar, with an explosion at the old and the new place.
+- Measured on a level (live memory): blue and yellow sites, 8 pillars each at exactly these offsets and angles;
+  heights 127-128 around a site at 128, except one pillar at 107 on lower ground.
+
+### Levelling ("prepare rs land", 7/8, 0x50C840)
+Over about 21 turns (1.75 s) a disc grows by 160 world units per turn up to 2560 (5 cells), and every cell inside is
+set to the site height. Inside it, enemy braves and specialists panic and lose half their `LIFE`, wildmen are
+converted (when the effect's flag 1 is set), trees catch fire and swamps are removed; 32 sparkles orbit the site.
+
 ## Spells [exe]
 Traced from the disassembly for all 21 spell ids. Values: "file" is `constant.dat` (wins at run time), "exe" the
 built-in default; costs below are the file's. Times at 12 turns per second.
@@ -386,6 +416,38 @@ Shared person and building states:
 Friendly fire: lightning, whirlwind, swamp, volcano and lava hurt the caster's own people; blast, firestorm and
 insects do not damage allies. Lightning and swamp kill regardless of health.
 
+## Landscape projection [exe, measured]
+The landscape is drawn as a grid of vertices around the camera: ±0x6E00 render units (±55 cells), built in 220
+strips (`draw_land` 0x467130, `main_landscape_mesh_generation` 0x46CB90). Render units are world units / 2, so
+**256 per cell**; a vertex stores its camera-relative x, z and the cell height unscaled (0..1024).
+
+Each vertex is then projected (0x46DE00; the same code at 0x46DC40 for the other buffer):
+```text
+(x', y', z') = M · (x, height, z) >> 14             # camera rotation, 14-bit fixed point (0x74A354..0x74A374)
+y'  -= ((2x')² + (2z')²) · K >> 32                    # the planet bend, K at 0x87CA5C
+z'  += D                                             # camera distance, 0x87CA64
+screen = (x', y') · (1 << (S + 16)) / z'             # S = 0x87CA68, then a per-axis screen scale
+```
+
+| Value | Where | Default / measured | Meaning |
+|---|---|---|---|
+| K | render block +0x0 (0x88F004), copied to 0x87CA5C | 46 000 (0xB3B0), constant while playing | bend: drop = `4 d² K / 2³²` render units = **0.01097 × d² cells** (d in cells) |
+| D | render block +0x10 | 6500 | camera 6500 render units (25.4 cells) behind the focus |
+| S | render block +0x14 | 11 | perspective shift |
+| M | 0x74A354 | pure rotation (column norms 16 384) | yaw follows the player; **pitch fixed at about 20.4°** (cos 15 357/16 384, sin 5709/16 384) |
+
+- The bend is measured in view space (the camera's horizontal and depth axes after rotation), not around the
+  focus point on the ground; with a 20° pitch the two are close.
+- Examples: 1.1 cells of drop at 10 cells, 4.4 at 20, 33 at the 55-cell edge of the grid.
+- Heights share the horizontal scale (the matrix is a pure rotation), so the highest ground (1024) is **4 cells**
+  above the sea, assuming the screen scales both axes alike (per-axis shifts at 0xAFC2F4 + 0xCF8 / 0xCFC, not
+  checked).
+- K can change: camera transitions (0x417510, 0x41C700) blend the whole render block, K included, towards a
+  target block. During normal play it stayed at 46 000, with the same distance, shift and pitch, on three levels
+  (including levels 3 and 24), while rotating and zooming: it is not a per-level setting.
+- Defaults set by 0x416F50 (render block) and 0x46DFB0 (draw state); `clear_land_draw_state` 0x46E700 copies the
+  block into the draw state before each frame.
+
 ## Combat [ghidra]
 - Internal controller units (class 10):
 
@@ -441,6 +503,10 @@ insects do not damage allies. Lightning and swamp kill regardless of health.
   - the original has one gauge per trigger, driven by the tribe with the most prayers, where ours has one per
     tribe.
 
+- Reincarnation sites (game-client `sites.rs`, game-core `site.rs`): ours put 8 stones on a round ring of 1.3
+  cells, not turned, and flatten radius 3 (blend 4). The original: the octagon above (3 cells, 2.8 on the
+  diagonals), on cell centres, each stone turned to face the centre, object 30; the ground levelled to the site
+  height over a 5-cell disc, in about 21 turns.
 - spells.md, the original spells:
   - every spell flies from the shaman as a shot first (6 turns after the cast starts, 1000 or 1400 units per
     turn) and takes effect on arrival; burn, blast, lightning, whirlwind and insects can be deflected by a
@@ -454,6 +520,11 @@ insects do not damage allies. Lightning and swamp kill regardless of health.
     (ours: radius 4 lowered by 120); Swamp, Earthquake and Volcano are now described in enough detail to
     implement (see "Per spell");
   - Teleport moves the caster's own shaman, as our sandbox teleport does; its range is effectively unlimited.
+
+- terrain.md "Planet illusion" and ui-and-editor.md view tuning: the original bend is k = 0.011 per cell² (our
+  default `POP3_CURVATURE` 0.008 is too gentle, the earlier 0.012 was close), measured in camera space. The
+  original height scale is 1/256 cell per unit (max 1024 = 4 cells), not "about 2 cells"; our 1/384 (2.7 cells)
+  is flatter than the original. The original camera pitch is fixed at about 20°, 25 cells behind the focus.
 
 ## Open questions
 - Where `MANA_F_<PERSON>`, `MANA_F_HOUSED/WORKING/TRAINING` and `MANA_F_HUT_LEVEL_1..3` are applied. Only the max
@@ -472,6 +543,9 @@ insects do not damage allies. Lightning and swamp kill regardless of health.
 - Prayer: the vault (library trigger) branch, what the "contest" countdown at trigger+0x6F does when several tribes
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
 
+- Projection: the per-axis screen scale (0xAFC2F4 + 0xCF8 / 0xCFC), which decides the on-screen height ratio, and
+  which views (zoom levels, cut scenes) change the render block.
+- Sites: which code creates the pillars at level load, and whether the levelling forces every cell of its disc.
 - Spells: burning trees (scenery state 5), the partial building explosion of the earthquake, whether ghosts
   expire, what starts the landscape-shaping mode, how people react to the ground moving or flooding under them,
   and the melee fight itself.
@@ -529,6 +603,13 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x515E30 | nearest-N selector (invisibility, shield, bloodlust, hypnotism) |
 | 0x4DA080 | person damage (unit, tribe, amount, ignore_shield) |
 | 0x4E6D00 | person physics: landing and fall damage |
+| 0x4A7D80 | reincarnation pillar init: snap to the cell centre, angle from the site, rise (0x4A7EB0) |
+| 0x50C690 | "move rs pillar" (7/7): replace a slot's pillar |
+| 0x467130, 0x46CB90 | `draw_land`, `main_landscape_mesh_generation`: the vertex grid |
+| 0x46DE00 | per-vertex projection with the planet bend |
+| 0x416F50, 0x46E700 | render block defaults (K 46 000), copy into the draw state |
+| 0x50C780, 0x50C840 | "prepare rs land" (7/8): init (site height at tribe+0x915), levelling per turn |
+| 0x41C140, 0x41C520 | landscape-shaping mode start and end: sites rebuilt at the shamans, pillars from 0x5A9F10 |
 
 Timing globals: turn counter 0x89D188 (u32), `turns_per_sec` 0x89D161 (u8, copied from the option at 0x98F712),
 `next_turn_time` 0x5CD92C, `step_ms` 0x5CD930 (83 in the exe image), `extra_turns` 0x895DAC (i8). Under Wine the
@@ -596,6 +677,8 @@ class are in `pop3-rev/docs/unit_types`.
 | +0x921 | base population capacity, added to the huts' |
 | +0x941 | flags; bit 6: no breeding |
 | +0xA05, +0xA07 | reservoir `delay` and `rate` |
+| +0x911, +0x915 | reincarnation site position (x, z) and height |
+| +0xA0D + 2·slot | the site's 8 pillar unit ids |
 | +0xC1F | controller type: 2 human, 1 full mana, others unknown |
 | +0xC22 | tribe number |
 
@@ -617,7 +700,7 @@ of 0x89C661.
 |---|---|---|---|
 | person types | 0x5A7060 | 0x32 | `MANA_F_` +0xE, `LIFE_` +0x10, `WOOD_` +0x14, `FIGHT_DAMAGE_` +0x1B, chop time (u8, not a named constant) +0x1D, `CONV_` +0x1F, tower detection radius +0x22, `SW_BLAST_DAMAGE_` +0x2C |
 | building types | 0x5A7228 | 0x4C | `WOOD_` +0x1A, next size +0x34 (u8), growth target +0x36 (2400, not a named constant), mana factor +0x38, `MAX_POP_VALUE__HUT_` +0x3A, `HUT_SPROG_TIME` +0x3C, flags +0x48 (bit 10: breeds; bit 6: holds wood) |
-| scenery types | 0x5A79B0 | 0x18 | `TREE_WOOD_VALUE` +0x4, `TREE_WOOD_GROW` +0x6, `TREE_DORMANT_TIME` +0x8, flags +0x14 |
+| scenery types | 0x5A79B0 | 0x18 | object +0x0A (12: 30), `TREE_WOOD_VALUE` +0x4, `TREE_WOOD_GROW` +0x6, `TREE_DORMANT_TIME` +0x8, flags +0x14 |
 | spells | 0x5A80D0 | 0x3E | kind +0x00 (1 normal, 2 hidden), cost (u32) +0x4, id +0x8, flags +0x1A (bit 0 castable) and +0x1B (0x40 homing), `SP_W_RANGE_` +0x1E, mode-0x20 range +0x22, shot without shaman +0x26, shot from shaman +0x27, effects +0x28..+0x2C, `SP_1_OFF_MAX_` +0x2D, mode-0x20 charges (`LSME_1_OFF_MAX_`) +0x2E, deflectable +0x2F, sound +0x30, enemy-cast alert +0x35/+0x36, `OPT_S` +0x3A |
 
 - The shipped `constant.dat` wins over the exe defaults, e.g. `SPELL_BLAST` 18 000 in the exe and 10 000 in the
