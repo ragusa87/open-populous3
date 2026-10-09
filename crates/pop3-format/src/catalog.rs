@@ -13,6 +13,11 @@ pub const WOOD_PILE_SPRITE: usize = 23;
 /// Teal unit figures (16 x 23) in `EFFECT_SPRITE_FILE`, in unit model order: brave, warrior, preacher,
 /// spy, firewarrior, shaman. Identified by eye.
 pub const UNIT_FIGURES: std::ops::RangeInclusive<usize> = 75..=80;
+/// The Stats tab's row labels (17 x 23) in `EFFECT_SPRITE_FILE`: selected, idle, in a house, working, in a
+/// boat, in a balloon.
+pub const STATS_ROW_ICONS: [usize; 6] = [1084, 1085, 1086, 1087, 655, 1088];
+/// Three people (24 x 16) in `EFFECT_SPRITE_FILE`, dark (681 the same light): the population.
+pub const PEOPLE_ICON: usize = 680;
 
 /// Camp fire: a cross of four dark logs (tile 137) and two crossed flame boards (blended faces,
 /// tile 92). Object 12 is the same with logs of tile 136, a third of it see-through (unknown use).

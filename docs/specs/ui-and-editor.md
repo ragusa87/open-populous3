@@ -24,10 +24,10 @@ health bar with `hp/max`; clicking it looks at her), the population strip (below
 (Spells / Build / Stats, `ActiveTab`), one content node per tab (`TabContent(n)`), info line under
 the grid.
 
-### Population (design, not implemented)
+### Population (`hud/population.rs`, the huts box in `hud/stats.rs`)
 The tribe's population against the room its huts give (huts-and-training.md rule 4: every living follower but the
 shaman, over the supply of its built huts, 3 / 5 / 7 by size, at most 200) [ours; picked from local HTML mockups]:
-- a strip between the shaman preview and the tabs, on every tab: a people icon, "population / room", and a bar
+- a strip between the shaman preview and the tabs, on every tab: a people icon (`hfx0-0.dat` 680, else "Pop"), "population / room", and a bar
   filling with it; at the room or over it the bar turns red and blinks (like a hut's blocked growth bar) and the
   count turns red when over;
 - on the Stats tab, a "Huts" box above the unit matrix (the strip stays above the tabs, not repeated): the total
@@ -60,7 +60,7 @@ for now) are aimed with the mouse while selected: over the map the cursor become
 where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground), left click casts it there and puts
 the spell away (arrow cursor, clicks go back to the units' selection), right click puts it away without casting; meanwhile clicks do not select or move units. The others: `C`
 casts the selected spell (demo: consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
-Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build tab icons, the Stats tab (see below).
+Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build tab icons
 
 ### Build tab (`hud/build.rs`)
 Mirrors `game_core::build_book::BuildBook` (resource `PlayerBuilds`, `level_builds`: the level's own, set with the
@@ -70,12 +70,13 @@ A click on an available tile picks its blueprint (white border, `blueprint.rs`):
 red where it cannot stand, Space turns it, right click puts it away; left click places it and sends the selected
 braves to build it. Details in buildings.md "Blueprint" and "Construction".
 
-### Stats tab (design, not implemented)
+### Stats tab (`hud/stats.rs`)
 The player's units at a glance, as a matrix in the panel's width (204 px), and a quick way to select them
 [player; picked from local HTML mockups, not kept].
-- Columns: the row's label; its total (the sum of the kind columns after it, headed "Σ"); then one per kind in
+- Columns: the row's label; its total (the sum of the kind columns after it, headed "All": the panel font has no Σ); then one per kind in
   this order: brave, warrior, firewarrior, preacher, spy (not the shaman, not wildmen), headed by the tooltip's
-  unit icons (`tooltip::icon_pixels`, at the same 1.5× size, in the player's colour; hovering one names the kind).
+  unit icons (`tooltip::IconImages`: the teal figures with the original files, else the generated ones in the
+  player's colour; hovering one names the kind).
 - Rows, in three groups set a little apart:
   1. Selected: the player's units selected now.
   2. Idle, Housed (inside a hut), Working (on any task: building, fetching or carrying wood, cutting, training,

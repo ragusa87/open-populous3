@@ -202,14 +202,8 @@ impl Plugin for SpellsPlugin {
 }
 
 fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, book: Res<PlayerSpells>) {
-    for (entity, tab) in &tabs {
-        commands.entity(entity).with_children(|c| match tab.0 {
-            0 => spawn_spells(c, &book.0.slots),
-            1 => {}
-            _ => {
-                c.spawn((Text::new("Coming soon"), TextFont { font_size: FontSize::Px(13.0), ..default() }, TextColor(INK)));
-            }
-        });
+    if let Some((entity, _)) = tabs.iter().find(|(_, t)| t.0 == 0) {
+        commands.entity(entity).with_children(|c| spawn_spells(c, &book.0.slots));
     }
 }
 

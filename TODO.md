@@ -144,8 +144,6 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Spell and building icons, tooltips.
-- [ ] Stats tab (still "Coming soon"): the unit matrix of ui-and-editor.md "Stats tab": Selected, Idle, Housed, Working, In boat, In balloon by kind, with totals; clicks add units to the selection (Shift: all). Counting and picking done in `game_core::headcount`.
-- [ ] Population strip and the Stats tab's huts box (ui-and-editor.md "Population"), from `GameMap::housing`.
 - [ ] Vehicles fill the In boat / In balloon rows (`headcount::State::InBoat`, `InBalloon`, always 0 for now).
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 

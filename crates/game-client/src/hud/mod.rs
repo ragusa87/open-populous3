@@ -2,8 +2,10 @@
 
 pub mod build;
 mod panel;
+mod population;
 mod shaman;
 pub mod spells;
+mod stats;
 mod view_menu;
 
 use crate::camera::CameraRig;
@@ -20,7 +22,7 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((panel::PanelPlugin, shaman::ShamanPreviewPlugin, spells::SpellsPlugin, build::BuildPlugin, view_menu::ViewMenuPlugin))
+        app.add_plugins((panel::PanelPlugin, shaman::ShamanPreviewPlugin, spells::SpellsPlugin, build::BuildPlugin, view_menu::ViewMenuPlugin, population::PopulationPlugin, stats::StatsPlugin))
             .add_systems(Startup, spawn_info)
             .add_systems(Update, update_info);
     }

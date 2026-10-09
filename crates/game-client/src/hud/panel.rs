@@ -1,4 +1,5 @@
-//! Left panel frame: shaman preview box (filled by `shaman.rs`), tab buttons, one content node per tab.
+//! Left panel frame: shaman preview box (filled by `shaman.rs`), the population strip (`population.rs`), tab
+//! buttons, one content node per tab.
 
 use bevy::prelude::*;
 
@@ -18,6 +19,10 @@ struct TabButton(usize);
 /// The box at the top of the panel showing the player's shaman.
 #[derive(Component)]
 pub struct ShamanPreview;
+
+/// The strip under the preview showing the tribe's population (filled by `population.rs`).
+#[derive(Component)]
+pub struct PopulationStrip;
 
 /// Content root of tab `n`; other plugins spawn their widgets inside it.
 #[derive(Component)]
@@ -59,6 +64,7 @@ fn spawn_panel(mut commands: Commands) {
                 BackgroundColor(Color::srgb(0.08, 0.16, 0.30)),
                 BorderColor::all(DARK_BROWN),
             ));
+            panel.spawn((PopulationStrip, Node { column_gap: px(6), align_items: AlignItems::Center, height: px(18), ..default() }));
             panel.spawn(Node { column_gap: px(4), ..default() }).with_children(|row| {
                 for (i, label) in TABS.iter().enumerate() {
                     row.spawn((
