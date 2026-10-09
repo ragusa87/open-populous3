@@ -36,9 +36,11 @@ those within a cell around it are pulled halfway, except sea, which stays sea (a
 jetty side). Then the reincarnation sites level their disc (`level_around`, 3/4 cells, at least 32). Level 4 has a
 hut on a sea-level shore: it now stands on sand; level 19's boat hut keeps the inlet its jetty points into.
 Construction state (`Building`): `used` pieces of wood, `flat`, `dismantling`, `inside` (units in), `shaking`
-(ticks left after a hit); `Building::stage` works out Blueprint (not flat) / UnderConstruction / Built /
+(ticks left after a hit), `stock` (wood on the pile by the door, not built in yet), `level` (the height a plan's
+footprint is flattened to); `Building::stage` works out Blueprint (not flat) / UnderConstruction / Built /
 Dismantling from them, and `BuildingKind::wood_cost` / `max_braves` hold the cost table below. Level buildings
-load as Built. Nothing changes the state over time yet, and there is no health. Sandbox > Buildings (`GameMap::sandbox_buildings`, an island of radius 48 cells): south, one of
+load as Built. Braves build plans placed in the game (see "Construction"); nothing else changes the state over
+time yet, and there is no health. Sandbox > Buildings (`GameMap::sandbox_buildings`, an island of radius 48 cells): south, one of
 every model 1-19 for the player and a few red ones; north, one row per buildable kind in each `showcase_states`
 column (blueprint, under construction at 0, 1/3, 2/3 and all but one piece, built, dismantling at half, attacked,
 people inside); east, free ground with 8 braves, a pile of 12 wood pieces and 6 trees, to try construction on.
@@ -89,7 +91,7 @@ need stable ids and updates per building.
 
 What huts and training huts do once built: [huts-and-training.md](huts-and-training.md).
 
-## Construction (planned)
+## Construction
 Only these are built and taken apart by braves: villager hut (placed at size 1, it grows later), drum tower, the
 training huts (warrior, firewarrior, temple = preachers, spy), boat hut and airship hut. The reincarnation site,
 prison, vault/pyramid of knowledge and totems can never be built nor dismantled.
@@ -127,7 +129,7 @@ available, is the camp fire (see "Camp fire").
 - More braves than the site's maximum: the first ones (by unit id, deterministic) up to the maximum are assigned,
   the others walk to the site and stand idle, not assigned.
 
-Done (UX only, nothing is placed yet):
+Done:
 - `game_core::placement`: `blocked_at(map, point)` (Sea: drawn height < 1; Building: `Building::covers` its turned
   footprint; Site: within `SPAWN_FLAT_RADIUS` of a reincarnation site; Tree: a cell with a tree that has wood),
   `too_steep` (height points under the footprint spread more than `STEEP_SPREAD` = 200, placeholder), `shore_ok`,
@@ -146,7 +148,9 @@ Done (UX only, nothing is placed yet):
   red when `too_steep` or a boat hut is off the shore, arrow red when any part is. Boat huts turn themselves
   (`best_facing`).
   Space turns it (and no longer looks at the shaman meanwhile), right click on the map puts it away, left click
-  does nothing yet; units are not selected or ordered while it is out. Leaving the game or changing level puts it
+  where it can stand places it (`blueprint::place_command`, `Command::PlaceBuilding`, `GameMap::place_building`
+  checks `can_place` again), sends the selected braves to it (`GameMap::build_orders`) and puts the blueprint
+  away; units are not selected or ordered while it is out. Leaving the game or changing level puts it
   away.
 
 ### Tooltip
@@ -168,7 +172,44 @@ pick one besides selecting it on the map.
   brought to it is lost (cancelling never gives wood back). Once the footprint is flat it is a building under
   construction: Shift + click does nothing, it can only be dismantled, which gives back its wood one piece at a time.
 
-### Building it (deterministic, integer state)
+### Done (`game_core::work`)
+- `Command::PlaceBuilding { player, kind, at, facing }` (`at`: the stored corner) adds a plan
+  (`Building::placed`: `level` = average height of its footprint points, at least `MIN_GROUND`). Building kinds
+  with no wood cost (vault, prison...) are refused.
+- Braves are assigned with `Order::Build { site }` (`site`: the stored corner) through `Command::OrderUnit` /
+  `QueueOrder`, as `Unit::work`. `GameMap::build_orders` makes them for a click: braves in id order (the first
+  ones up to `max_braves` are assigned, the others walk to the door unassigned), other kinds walk to the door.
+  Any other order to an assigned brave (direct or chained, when it starts) unassigns it; a piece it was building
+  goes back on the pile. Dying unassigns too.
+- Each tick, every assigned brave that is free (idle or holding wood, nothing chained) goes on (`GameMap::work`):
+  1. Carrying wood: walks to the door (`Building::door`, `DOOR_GAP` past the middle of the local -z side) and
+     puts it on the pile (`stock`) once within a cell of it.
+  2. Plan (not flat): while wood is wanted (`wood_wanted`: 1 piece before flat, as in the game, then the rest of
+     the cost) and fewer braves bring wood than missing pieces, fetches wood (`Order::FetchWood`'s rule). Else
+     walks to the nearest footprint height point off the site's level that no other brave is on or going to,
+     and jumps on it (`Action::Flattening`, `JUMP_TICKS` 8, the cast jump pose): the point moves `JUMP_STEP` (32)
+     towards the level. With no point left, the plan is flat: the ring around is blended
+     (`Building::flatten`) and it is under construction. Ground already level is flat at once.
+  3. Under construction: with wood on the pile and standing around the building (out of the footprint, within
+     `AROUND` = 400), takes a piece and builds it in (`Action::Building`, `BUILD_TICKS` 50, the chop pose);
+     with no pile, fetches wood under the dispatch rule below; else walks to the free standing spot around the
+     building nearest to him and waits.
+  4. Built: released (idle, `work` cleared).
+  Braves bringing wood (`wood_on_the_way`): carrying, fetching or cutting, or building a piece taken off the
+  pile.
+- `Command::CancelBuilding { player, at }`: the player's plan (not flat) whose footprint holds `at` is removed,
+  its braves stop, the wood brought is lost. Once flat it can only be dismantled (not done).
+- A hut with 3 braves and wood around (Sandbox > Buildings) takes about 20 s.
+- Client: a left click on one of the player's sites (within `AROUND`) with units selected sends braves to it
+  (`selection::ground_click`); Shift + right click on a plan cancels it (`shift_right_click`, after the camp
+  fires). Wood on a pile is drawn as wood pieces around the door (`Building::pile_point`, `wood::PileView`).
+  Building views are redone whenever a building changes. Dev: `BUILD=hut@90,62 BUILD_TICKS=150` places a plan
+  with all the player's braves and runs that many ticks before the shot.
+
+Not done yet: the gathering look, building inside, doors, walking around sites, dismantling, the tooltip, wood
+claimed by braves of another site, and a jump per point being the game's rule (to check).
+
+### Building it (design, deterministic, integer state)
 1. Gather: assigned braves walk to the site edge and stand looking at it for a short while.
 2. Flatten (stage Blueprint): each brave walks onto a footprint point, jumps, which moves that point's height
    toward the target height (average of the footprint, at least 64, as `Building::flatten`), then moves to the next

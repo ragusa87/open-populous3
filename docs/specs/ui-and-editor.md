@@ -55,8 +55,8 @@ Mirrors `game_core::build_book::BuildBook` (resource `PlayerBuilds`, `level_buil
 spells on New game and PgUp/PgDn; generated maps and sandboxes: every kind). Same grid as the spells: a named tile
 per available kind (no icons yet), "?" for plans to discover, an empty slot for hidden ones; hover describes it.
 A click on an available tile picks its blueprint (white border, `blueprint.rs`): it follows the mouse on the map,
-red where it cannot stand, Space turns it, right click puts it away; left click will place it (not yet). Details in
-buildings.md "Blueprint".
+red where it cannot stand, Space turns it, right click puts it away; left click places it and sends the selected
+braves to build it. Details in buildings.md "Blueprint" and "Construction".
 
 ## Main menu (`menu.rs`)
 Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list: the original
@@ -71,8 +71,8 @@ while playing. Behind the menu the game camera is off (no terrain, units or HUD 
 are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk` picks the start; screenshots start in the game by default.
 
 ## Selection and orders
-Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect (Shift + right click puts out the player's camp fire under the cursor);
-the shaman is selected like any unit on the map, clicking her panel preview selects her alone. Left click on the ground sends the selection there (on a tree: braves cut it; on a wood pile: braves with empty hands take a piece; units.md "Wood"), P pray, X stop (with Ctrl held, these orders are chained after
+Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect (Shift + right click puts out the player's camp fire under the cursor, or cancels the player's plan not flat yet);
+the shaman is selected like any unit on the map, clicking her panel preview selects her alone. Left click on the ground sends the selection there (on a tree: braves cut it; on a wood pile: braves with empty hands take a piece, units.md "Wood"; on one of the player's buildings still to build: braves work on it, buildings.md "Construction"), P pray, X stop (with Ctrl held, these orders are chained after
 the units' current ones, see units.md "Chained orders"), Space
 looks at the shaman. Selected units show a health bar; the cursor shows the count when more than one (see units.md).
 

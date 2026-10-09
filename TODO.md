@@ -12,7 +12,6 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 ## Camp fire ([buildings.md](docs/specs/buildings.md) "Camp fire")
 - [ ] Animate the firewarrior huts' two torches (objects 137-140) with the camp fire's flame (`flame.rs`): their flame faces are the same blended tile 92, drawn today as brown boards. Same for the large huts (133-136) and guard posts (190-193).
 - [ ] Check in the game: what a camp fire is for (people gathering? mana?), its burn time when left alone (`ABANDON_TICKS`, 60 s guessed), the ring size, the flatness rule, and when object 12 (other logs) is used.
-- [ ] Shift + right click on a placed building plan (blueprint stage) removes it, like a camp fire (`units::selection::shift_right_click`), once buildings are placed.
 - [ ] Hover/selection of a camp fire (tooltip with who is around it), a hover cursor when units are selected over one.
 
 ## Units ([units.md](docs/specs/units.md))
@@ -102,17 +101,14 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
 - [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
 - [ ] Build tab: icons; build books per tribe in the simulation (today `GameMap::build_book` is shared), discoveries unlocking "?".
-- [ ] Blueprint: left click places it (`Command::PlaceBuilding`, `placement::can_place`); tune `STEEP_SPREAD`; check the door side of the other kinds against the original objects; construction sites block like buildings once they exist.
-- [ ] At least one assigned brave is needed, up to the kind's maximum; more braves build faster (work shared).
+- [ ] Blueprint: tune `STEEP_SPREAD`; check the door side of the other kinds against the original objects.
+- [ ] Construction pace: check in the game how long a jump and building one piece take (`JUMP_TICKS`, `JUMP_STEP`, `BUILD_TICKS`, guessed) and whether braves gather and watch first (a plan on level ground is flat at once today).
 - [ ] Buildings and sites block walking (blocked-cell mask in `path` next to the terrain); not for flyers, not the reincarnation site; braves assigned to a site (or dismantling) may walk on its footprint, to flatten it or work inside it. Replan walkers when the mask changes, push units off a new footprint.
-- [ ] `Command::PlaceBuilding` (with the selected braves) and `Command::Assign`; extra braves beyond the maximum walk to the site and idle unassigned.
-- [ ] Orders: a new order to an assigned brave unassigns it (drops the wood it carries); assigned braves stay selectable on the map all along, the tooltip's brave icons also pick one (one at a time).
+- [ ] Tooltip of a site: kind, braves assigned / maximum (one icon each, clicking one selects that brave alone), wood delivered / needed, Dismantle toggle once wood is used (under construction or built).
 - [ ] Doors: units enter a building by its door then walk to its centre, and leave from the centre to the door then on (from the wooden structure on, not on a blueprint: a brave inside ordered to move goes centre, door, then its route).
-- [ ] Shift + click on a blueprint (footprint not flat yet) cancels it (`Command::Cancel`), its braves idle, wood brought is lost; once flat it can only be dismantled.
-- [ ] Building stage (Site / Built / Dismantling) with wood needed / delivered / used; tooltip with braves assigned/max (one icon each) and wood, Dismantle toggle once wood is used (under construction or built).
-- [ ] Braves' build cycle: gather and watch, flatten the footprint by jumping point by point, fetch wood (ground piece or cut a tree) to a pile by the door, build one piece at a time.
-- [ ] Wood dispatch rule: a brave goes for wood only while delivered + claimed (fetched/carried by others) < needed, so at most needed - delivered braves are out; the others wait and build. Refine later.
-- [ ] Site visuals are drawn from the state (blueprint mark, wooden structure + built part, shake, hut smoke): update views per building (stable ids) when ticks change them; compare the part order (from the ground up) and the structure with the original; chimney position per hut model; busy look for the other kinds.
+- [ ] Braves building inside the building (they only work around it), and through the door once there are doors.
+- [ ] Wood claimed across sites: two sites' braves can head for the same tree piece; braves of another task may take wood a site counts on. Refine the dispatch rule (nearest brave per piece, gatherers vs builders).
+- [ ] Site visuals: views are redone whenever any building changes; update them per building (stable ids) instead; compare the part order (from the ground up) and the structure with the original; chimney position per hut model; busy look for the other kinds; the pile by the door could be drawn as a stack rather than loose pieces.
 - [ ] Dismantling: braves remove one piece at a time, dropped as a wood piece (circle on the ground) near the door; the building disappears when empty and frees its ground.
 - [ ] Wood pieces lying on the ground (`GameMap::wood`, drawn): picked up by any construction; hovering one could show "Wood". Maybe draw the original's shadow under them (`hfx0-0.dat` 22, unconfirmed).
 - [ ] Destruction of buildings on uneven/flooded ground (spells, erosion).
@@ -127,7 +123,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## Wood ([trees.md](docs/specs/trees.md))
 - [ ] Original scenery models 7 plant 1, 8 plant 2, 9 stone head (98 in the levels): not drawn yet. Trees have no size in the thing record: full size is right.
-- [ ] Wood for tasks: construction, repair and hut growth chain `FetchWood` then their own `Assign` to a brave; skip the assign when the task is done (`GameMap::still_valid`). Cutting, carrying and fetching are done (units.md "Wood").
+- [ ] Wood for repair and hut growth, like construction (`game_core::work`: assigned braves fetch, carry to the door, build). Cutting, carrying, fetching and construction are done (units.md "Wood", buildings.md "Construction").
 - [ ] Check in the game how long a brave chops one piece (`CHOP_TICKS`, 6 s guessed) and whether a brave ordered on a tree with no wood to spare goes to another one.
 - [ ] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible) trees.
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.

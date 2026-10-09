@@ -19,6 +19,8 @@
 | Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle (Teleport: then at the target, Landing) |
 | Landing { left } | arriving from a teleport | 6 ticks, then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out); a puff of dust at touchdown (`units/dust.rs`) |
 | Chopping { tree, left } | `Order::CutTree`, `Order::FetchWood` (braves only) | walks to a free spot next to the tree, then `CHOP_TICKS` (60, 6 s, a guess) of chopping, then the tree loses one size and the brave carries the piece |
+| Flattening { at, left } | assigned to a plan (`Order::Build`) | `JUMP_TICKS` jump on a footprint height point, which then moves towards the site's level (buildings.md "Construction") |
+| Building { left } | assigned to a site with wood on its pile | `BUILD_TICKS` building one piece in |
 | Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (30, 3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
 | Drowning | ground under her becomes open sea | -4 HP per tick, no orders; back to Idle if land returns |
 | Dying { left } | health reaches 0 | 8 ticks |
