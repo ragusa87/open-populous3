@@ -107,6 +107,11 @@ The editor rotates buildings by quarter turns and scenery by eighths [editor].
 
   ThingIdxs land on the discoveries, effects and things a trigger reveals (164 of 170 hit a non-empty slot; read
   0-based they make no sense). levl2020 has 6 dangling indices (1708-1713, it has 470 things).
+- **Vault of knowledge (building 18) and its reward**: the building record has no link to what it gives; the link
+  is by position. Each of the 23 vaults in the levels has exactly one library trigger (type 4) on its own cell, and
+  no library trigger stands elsewhere. That trigger targets exactly one discovery, always permanent: a spell
+  (kind 11, 15 vaults) or a building (kind 2, 8 vaults; level 3: model 5, the temple). Its `PrayTime` is 20-200
+  (level 3: 100). So a vault's reward is: trigger type 4 on the vault's cell -> its target -> `Discovery`.
 - **General (6), model 9** ("building add-on"): all zero. Always within about 2 cells of a medium or large hut of
   the same owner (91 of 91).
 - **Effect (7)**: rest zero, except:
