@@ -112,6 +112,13 @@ The editor rotates buildings by quarter turns and scenery by eighths [editor].
   no library trigger stands elsewhere. That trigger targets exactly one discovery, always permanent: a spell
   (kind 11, 15 vaults) or a building (kind 2, 8 vaults; level 3: model 5, the temple). Its `PrayTime` is 20-200
   (level 3: 100). So a vault's reward is: trigger type 4 on the vault's cell -> its target -> `Discovery`.
+- **What triggers stand on** (all levels, 141 triggers; a thing on the trigger's cell): 23 library triggers
+  (type 4) on vaults; about 95 on scenery 9 (the "stone head" here, the totems players pray at): type 0 (followers
+  pray, `TriggerCount` 1-8 of them, `PrayTime` 15-1000, `NumOccurences` 0-4 times) or type 3 (shaman only,
+  `PrayTime` 5-35), one type 5 (level 5); 20 on effects alone (17 lightning, 15, 26, 85: repeating hazards in
+  level 21); 30 on nothing (walk-in triggers). Scenery 9 rewards: spells with `Once` availability (one-shot, never
+  `Permanent` like a vault's), mana (discovery kind 6), effects (24 land bridge, 17 lightning, 23, 26, 81...), a
+  vehicle (level 5: boat), revealed scenery 9 and triggers (chains), sometimes several targets at once.
 - **General (6), model 9** ("building add-on"): all zero. Always within about 2 cells of a medium or large hut of
   the same owner (91 of 91).
 - **Effect (7)**: rest zero, except:
