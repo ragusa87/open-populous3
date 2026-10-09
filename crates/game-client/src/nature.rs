@@ -185,7 +185,7 @@ fn respawn_trees(
     let cell = WORLD_UNITS_PER_CELL as f32;
     for (i, tree) in map.0.trees.iter().enumerate() {
         let at = Vec2::new(tree.x as f32 / cell, tree.z as f32 / cell);
-        let mut view = commands.spawn((TreeView(i), crate::hover::Hoverable::default(), Grounded { at, half: TRUNK_HALF }, Transform::from_rotation(angle_yaw(tree.angle).into()), Visibility::Hidden));
+        let mut view = commands.spawn((TreeView(i), crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Trees), crate::hover::Hoverable::default(), Grounded { at, half: TRUNK_HALF }, Transform::from_rotation(angle_yaw(tree.angle).into()), Visibility::Hidden));
         match &original {
             Some((trees, material)) => {
                 let (mesh, height) = &trees[tree.variant as usize % trees.len()];

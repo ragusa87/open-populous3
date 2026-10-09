@@ -289,6 +289,7 @@ fn respawn_buildings(
         });
         let mut view = commands.spawn((
             BuildingView(i),
+            crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Buildings),
             Grounded { at, half: 0.0 },
             Tilted { half: FOOTPRINT_HALF, yaw },
             Transform::from_rotation(yaw.into()),

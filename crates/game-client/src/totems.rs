@@ -198,7 +198,7 @@ fn respawn_totems(
         let at = Vec2::new(t.x as f32, t.z as f32) / cell;
         let parts: Vec<_> = bank.map(|bank| totem_objects(t.kind).into_iter().filter_map(|i| bank.get(i)).collect()).unwrap_or_default();
         let top = parts.iter().flat_map(|o| o.points.iter().map(|p| p[1])).max().map_or(PILLAR.y, |y| y as f32 / cell);
-        let mut view = commands.spawn((TotemView { index, top }, crate::hover::Hoverable::default(), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden));
+        let mut view = commands.spawn((TotemView { index, top }, crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), crate::hover::Hoverable::default(), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden));
         if t.kind == TotemKind::Totem {
             view.with_children(|v| {
                 for k in 0..SINKING.count {

@@ -1,9 +1,11 @@
-//! F2 view menu: pick a camera/terrain preset (distance, tilt, relief, curvature), applied live.
+//! F2 view menu: pick a camera/terrain preset (distance, tilt, relief, curvature), and tune the relief and the
+//! object scales step by step, applied live.
 
 use super::panel::{DARK_BROWN, INK, PANEL_WIDTH, PARCHMENT};
 use crate::camera::{CameraRig, CurveParamsRes};
 use crate::camera::{GROUND_DISTANCE, GROUND_PITCH_DEG};
 use crate::terrain_mesh::{CurveParams, DEFAULT_CURVATURE, DEFAULT_RELIEF};
+use crate::object_scale::{ObjectGroup, ObjectScale};
 use crate::world::TerrainDirty;
 use bevy::prelude::*;
 
@@ -45,6 +47,73 @@ impl ViewPreset {
     }
 }
 
+/// A value tuned with - / + in the menu.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Knob {
+    Relief,
+    /// Every object group at once, set to the trees' value stepped.
+    Objects,
+    Group(ObjectGroup),
+}
+
+pub const KNOB_STEP: f32 = 0.1;
+pub const RELIEF_RANGE: (f32, f32) = (0.5, 4.0);
+
+pub const KNOBS: [Knob; 6] = [
+    Knob::Relief,
+    Knob::Objects,
+    Knob::Group(ObjectGroup::Trees),
+    Knob::Group(ObjectGroup::Units),
+    Knob::Group(ObjectGroup::Buildings),
+    Knob::Group(ObjectGroup::Scenery),
+];
+
+impl Knob {
+    fn name(self) -> &'static str {
+        match self {
+            Knob::Relief => "Relief",
+            Knob::Objects => "All objects",
+            Knob::Group(g) => g.name(),
+        }
+    }
+
+    fn value(self, params: &CurveParams, scale: &ObjectScale) -> f32 {
+        match self {
+            Knob::Relief => params.relief(),
+            Knob::Objects => scale.get(ObjectGroup::Trees),
+            Knob::Group(g) => scale.get(g),
+        }
+    }
+
+    /// Steps the value by `delta` steps; true when the terrain must be rebuilt.
+    pub fn step(self, delta: f32, params: &mut CurveParams, scale: &mut ObjectScale) -> bool {
+        let next = stepped(self.value(params, scale), delta);
+        match self {
+            Knob::Relief => {
+                *params = params.with_relief(next.clamp(RELIEF_RANGE.0, RELIEF_RANGE.1));
+                return true;
+            }
+            Knob::Objects => ObjectGroup::ALL.iter().for_each(|&g| scale.set(g, next)),
+            Knob::Group(g) => scale.set(g, next),
+        }
+        false
+    }
+}
+
+/// `value` moved by `delta` steps of `KNOB_STEP`, on the step grid.
+pub fn stepped(value: f32, delta: f32) -> f32 {
+    ((value / KNOB_STEP).round() + delta) * KNOB_STEP
+}
+
+#[derive(Component)]
+struct KnobButton {
+    knob: Knob,
+    delta: f32,
+}
+
+#[derive(Component)]
+struct KnobValue(Knob);
+
 #[derive(Resource, Default)]
 struct ViewMenu {
     open: bool,
@@ -67,7 +136,7 @@ impl Plugin for ViewMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ViewMenu>()
             .add_systems(Startup, spawn_menu)
-            .add_systems(Update, (toggle_menu, preset_clicks, menu_visuals).chain().in_set(crate::menu::Gameplay))
+            .add_systems(Update, (toggle_menu, preset_clicks, knob_clicks, menu_visuals).chain().in_set(crate::menu::Gameplay))
             .add_systems(Update, close_on_escape.before(crate::menu::pause_on_escape).in_set(crate::menu::Gameplay));
     }
 }
@@ -108,6 +177,25 @@ fn spawn_menu(mut commands: Commands) {
                 });
             }
             menu.spawn((CurrentLine, text("", 12.0)));
+            menu.spawn(text("Tuning", 15.0));
+            for knob in KNOBS {
+                menu.spawn(Node { column_gap: px(6), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                    row.spawn((Node { width: px(90), ..default() }, children![text(knob.name(), 13.0)]));
+                    for (label, delta) in [("-", -1.0), ("+", 1.0)] {
+                        row.spawn((
+                            KnobButton { knob, delta },
+                            Button,
+                            Node { width: px(24), justify_content: JustifyContent::Center, border: UiRect::all(px(2)), ..default() },
+                            BackgroundColor(PARCHMENT),
+                            BorderColor::all(DARK_BROWN),
+                            children![text(label, 14.0)],
+                        ));
+                        if delta < 0.0 {
+                            row.spawn((KnobValue(knob), Node { width: px(44), ..default() }, text("", 13.0)));
+                        }
+                    }
+                });
+            }
         });
 }
 
@@ -144,13 +232,34 @@ fn preset_clicks(
     }
 }
 
+fn knob_clicks(
+    q: Query<(&Interaction, &KnobButton), Changed<Interaction>>,
+    mut params: ResMut<CurveParamsRes>,
+    mut scale: ResMut<ObjectScale>,
+    mut dirty: ResMut<TerrainDirty>,
+) {
+    for (interaction, button) in &q {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if button.knob.step(button.delta, &mut params.0, &mut scale) {
+            dirty.0 = true;
+        }
+        info!("view tuning: relief x{:.2}  {}", params.0.relief(), scale.describe());
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn menu_visuals(
     menu: Res<ViewMenu>,
     params: Res<CurveParamsRes>,
     rig: Res<CameraRig>,
     mut root: Query<&mut Node, With<MenuRoot>>,
     mut buttons: Query<(&PresetButton, &Interaction, &mut BackgroundColor)>,
-    mut current: Query<&mut Text, With<CurrentLine>>,
+    mut current: Query<&mut Text, (With<CurrentLine>, Without<KnobValue>)>,
+    scale: Res<ObjectScale>,
+    mut knob_buttons: Query<(&Interaction, &mut BackgroundColor), (With<KnobButton>, Without<PresetButton>)>,
+    mut values: Query<(&KnobValue, &mut Text), Without<CurrentLine>>,
 ) {
     for mut node in &mut root {
         node.display = if menu.open { Display::Flex } else { Display::None };
@@ -164,6 +273,15 @@ fn menu_visuals(
             (_, Interaction::Hovered) => Color::srgb(0.95, 0.72, 0.32),
             _ => PARCHMENT,
         };
+    }
+    for (interaction, mut bg) in &mut knob_buttons {
+        bg.0 = if *interaction == Interaction::None { PARCHMENT } else { Color::srgb(0.95, 0.72, 0.32) };
+    }
+    for (v, mut t) in &mut values {
+        let line = format!("x{:.2}", v.0.value(&params.0, &scale));
+        if t.0 != line {
+            t.0 = line;
+        }
     }
     let relief = params.0.relief();
     let line = format!(
@@ -197,6 +315,25 @@ mod tests {
         let base = CurveParams { radius: 7, ..CurveParams::default() };
         let p = PRESETS[9].curve(base);
         assert_eq!((p.radius, p.relief()), (7, 1.5));
+    }
+
+    #[test]
+    fn knobs_step_relief_and_object_scales() {
+        let (mut params, mut scale) = (CurveParams::default(), ObjectScale::from_env(|_| None));
+        assert!(Knob::Relief.step(-1.0, &mut params, &mut scale), "relief rebuilds the terrain");
+        assert!((params.relief() - (DEFAULT_RELIEF - KNOB_STEP)).abs() < 1e-5);
+        assert!(!Knob::Group(ObjectGroup::Trees).step(5.0, &mut params, &mut scale));
+        assert!((scale.get(ObjectGroup::Trees) - 1.5).abs() < 1e-5);
+        assert_eq!(scale.get(ObjectGroup::Units), 1.0, "one group only");
+        Knob::Objects.step(1.0, &mut params, &mut scale);
+        for g in ObjectGroup::ALL {
+            assert!((scale.get(g) - 1.6).abs() < 1e-5, "all follow the trees' value");
+        }
+        for _ in 0..100 {
+            Knob::Relief.step(-1.0, &mut params, &mut scale);
+        }
+        assert_eq!(params.relief(), RELIEF_RANGE.0);
+        assert!((stepped(1.49, 1.0) - 1.6).abs() < 1e-5, "back on the step grid");
     }
 
     #[test]

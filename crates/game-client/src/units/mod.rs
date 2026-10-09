@@ -272,7 +272,7 @@ fn respawn_views(
     let fill = meshes.add(Rectangle::new(1.0, BAR_SIZE.y * 0.6));
     for (i, u) in map.0.units.iter().enumerate() {
         let hover = crate::hover::Hoverable { health: u.owner == PLAYER };
-        commands.spawn((UnitView(i), hover, Grounded { at: Vec2::ZERO, half: 0.0 }, Transform::default(), Visibility::Hidden)).with_children(|v| {
+        commands.spawn((UnitView(i), crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Units), hover, Grounded { at: Vec2::ZERO, half: 0.0 }, Transform::default(), Visibility::Hidden)).with_children(|v| {
             v.spawn((UnitSprite(i), Mesh3d::default(), MeshMaterial3d::<StandardMaterial>::default(), Transform::default()));
             v.spawn((HealthBar, Mesh3d(bar.clone()), MeshMaterial3d(back.clone()), Transform::from_xyz(0.0, BAR_HEIGHT, 0.0), Visibility::Hidden))
                 .with_child((HealthFill(i), Mesh3d(fill.clone()), MeshMaterial3d(mats.add(flat(health_color(1.0)))), Transform::from_xyz(0.0, 0.0, 0.005)));

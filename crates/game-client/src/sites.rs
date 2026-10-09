@@ -140,6 +140,7 @@ fn respawn_markers(
             commands
                 .spawn((
                     SiteMarker,
+                    crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery),
                     part.ground,
                     Transform::from_rotation(part.yaw.into()),
                     Visibility::Hidden,

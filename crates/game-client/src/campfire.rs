@@ -135,7 +135,7 @@ fn sync_views(
     for i in new {
         let fire = &map.0.campfires[i];
         let at = Vec2::new(fire.x as f32, fire.z as f32) / cell;
-        commands.spawn((FireView(fire.id), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden)).with_children(|v| {
+        commands.spawn((FireView(fire.id), crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden)).with_children(|v| {
             v.spawn((Mesh3d(art.logs.clone()), MeshMaterial3d(art.logs_material.clone())));
             let offset = fire.id as usize * 3 % flame::FRAMES;
             v.spawn((Flame { offset }, Mesh3d(art.flame.clone()), MeshMaterial3d(frames[offset].clone()), NotShadowCaster));

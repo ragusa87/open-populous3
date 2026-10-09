@@ -102,13 +102,13 @@ fn respawn_views(
     for (i, piece) in map.0.wood.iter().enumerate() {
         let at = Vec2::new(piece.x as f32, piece.z as f32) / cell;
         commands
-            .spawn((WoodView(i), crate::hover::Hoverable::default(), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden))
+            .spawn((WoodView(i), crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), crate::hover::Hoverable::default(), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden))
             .with_child((WoodBody, Mesh3d(sprite.0.mesh.clone()), MeshMaterial3d(sprite.0.material.clone()), Transform::default()));
     }
     for (x, z) in piles {
         let at = Vec2::new(x as f32, z as f32) / cell;
         commands
-            .spawn((PileView, Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden))
+            .spawn((PileView, crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden))
             .with_child((WoodBody, Mesh3d(sprite.0.mesh.clone()), MeshMaterial3d(sprite.0.material.clone()), Transform::default()));
     }
 }

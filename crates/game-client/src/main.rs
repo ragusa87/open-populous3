@@ -20,6 +20,7 @@ mod hover;
 mod hud;
 mod menu;
 mod nature;
+mod object_scale;
 mod original_models;
 mod procedural_theme;
 mod sites;
@@ -87,6 +88,7 @@ fn main() {
             dev::DevPlugin,
             cursor_debug::CursorDebugPlugin,
             camera_debug::CameraDebugPlugin,
+            object_scale::ObjectScalePlugin,
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();

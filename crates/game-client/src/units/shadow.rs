@@ -99,7 +99,7 @@ fn respawn_shadows(
         .clone();
     for i in 0..map.0.units.len() {
         commands
-            .spawn((UnitShadow(i), Grounded { at: Vec2::ZERO, half: 0.0 }, Tilted { half: SLOPE_HALF, yaw: GameYaw::default() }, Transform::default(), Visibility::Hidden))
+            .spawn((UnitShadow(i), crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Units), Grounded { at: Vec2::ZERO, half: 0.0 }, Tilted { half: SLOPE_HALF, yaw: GameYaw::default() }, Transform::default(), Visibility::Hidden))
             .with_child((ShadowBody, Mesh3d(mesh.clone()), MeshMaterial3d(material.clone()), NotShadowCaster, Transform::from_xyz(0.0, LIFT, 0.0)));
     }
 }

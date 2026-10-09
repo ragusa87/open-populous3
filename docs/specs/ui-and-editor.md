@@ -198,3 +198,9 @@ relief, curvature; the terrain is rebuilt); the chosen values are logged. Esc cl
 consumed), otherwise Esc releases/captures the mouse. View tuning (dev, read at start): `POP3_RELIEF` (relief vs the original height ratio, default 1.5; F2 presets x1 original, x3 dramatic), `POP3_CURVATURE`
 (planet bend, default 0.008), `POP3_VIEW_DISTANCE` (cells, default 14), `POP3_VIEW_PITCH` (degrees, default 6).
 The previous default (relief x2, curvature 0.012, distance 20, tilt 3) is a menu preset.
+Under the presets, "Tuning" rows step values live with - / + (0.1 a click, logged): the relief (0.5-4, the terrain
+is rebuilt) and how big objects are drawn against the cells (`object_scale.rs`, `ObjectScale`, 0.25-4, 1 = the
+original model size): trees, units (with their shadows), buildings, scenery (sites, totems, wood, camp fires), or
+all objects at once. Each object's grounded root carries `Scaled(group)` and scales about the point it stands on,
+so buildings above 1 overflow their footprint cells. Start values: `POP3_SCALE_TREES`, `_UNITS`, `_BUILDINGS`,
+`_SCENERY`.
