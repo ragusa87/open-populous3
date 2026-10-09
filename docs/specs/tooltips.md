@@ -57,10 +57,11 @@ Nothing to select [player].
 A tree with no wood left is not drawn and has no tooltip (trees.md).
 
 ## Bars [player]
-Horizontal, on the left of the tooltip, one per progress, each its own colour:
-- Pyramid, totem: the prayer progress of the player's tribe (worship.md).
-- House: two bars, its growth (towards the next size) and its birth (the next brave), huts-and-training.md.
-- Training hut: the training.
+Horizontal, one per progress, each its own colour:
+- Pyramid, totem: the prayer progress of the player's tribe (worship.md), on the left.
+- House: two bars on the left, its growth (towards the next size) and its birth (the next brave),
+  huts-and-training.md.
+- Training hut: the training of the unit inside, across the top of the tooltip.
 
 A bar **blinks while blocked**: a house's birth bar when the tribe is at its population cap; its growth bar when
 the next size cannot be reached; a training bar without mana [player: blinking; ours: which causes count as
