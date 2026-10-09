@@ -199,7 +199,8 @@ pick one besides selecting it on the map.
      inside (`Action::Building`, `BUILD_TICKS` 50, the chop pose); with no pile, fetches wood under the dispatch
      rule below (out by the door first); else waits, inside, or at the free standing spot around the building
      nearest to him (within `AROUND` = 400 of the footprint).
-  4. Built: released (idle, `work` cleared).
+  4. Built: the moment the last piece is in, everyone inside walks out by the door to a free spot around it
+     (`slots::dispatch` from the door) and stands idle; assigned braves are released (`work` cleared).
   Braves bringing wood (`wood_on_the_way`): carrying, fetching or cutting, or building a piece taken off the
   pile.
 - `Command::CancelBuilding { player, at }`: the player's plan (not flat) whose footprint holds `at` is removed,

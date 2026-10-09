@@ -132,9 +132,27 @@ impl GameMap {
             UnitEvent::Built => {
                 let b = &mut self.buildings[b];
                 b.used = (b.used + 1).min(b.kind.wood_cost());
+                if b.stage() == Stage::Built {
+                    let (site, door) = ((b.x, b.z), b.door());
+                    self.empty_building(site, door);
+                }
                 None
             }
             _ => None,
+        }
+    }
+
+    /// Everyone inside the building at `site` is released and walks out by its `door` to a free spot
+    /// around it, then stands idle.
+    fn empty_building(&mut self, site: (u16, u16), door: (u16, u16)) {
+        let out: Vec<(u32, (u16, u16))> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.site == site)).map(|u| (u.id, (u.x, u.z))).collect();
+        let ids: Vec<u32> = out.iter().map(|o| o.0).collect();
+        let spots = slots::dispatch(&self.ground(), &out, door, &self.taken_spots(&ids));
+        for u in self.units.iter_mut().filter(|u| ids.contains(&u.id)) {
+            let to = spots.iter().find(|s| s.0 == u.id).map_or(door, |s| s.1);
+            u.work = None;
+            u.clear_queue();
+            u.start(Order::MoveTo { x: to.0, z: to.1 });
         }
     }
 
@@ -476,5 +494,22 @@ mod tests {
         });
         assert!(jumps.count() > 0);
         assert!(map.buildings[site].flat);
+    }
+
+    #[test]
+    fn once_built_everyone_inside_walks_out_and_idles() {
+        let mut map = sandbox();
+        let units = braves(&map, 4);
+        let site = place(&mut map, BuildingKind::Hut { size: 1 }, corner(24, 0), &units);
+        let at = (map.buildings[site].x, map.buildings[site].z);
+        run_until(&mut map, 2000, |m| m.buildings[site].stage() == Stage::Built).expect("built");
+        assert!(map.units.iter().filter(|u| u.inside.is_some_and(|i| i.site == at)).all(|u| matches!(u.action, Action::Walking { .. })), "on their way out");
+        run_until(&mut map, 300, |m| m.units.iter().all(|u| u.inside.is_none() && !matches!(u.action, Action::Walking { .. }) || u.campfire().is_some())).expect("all out");
+        let walled = map.buildings[site].walled_cells(128);
+        for id in &units {
+            let u = map.units.iter().find(|u| u.id == *id).unwrap();
+            assert!(!walled.contains(&u.cell()) && u.work.is_none());
+            assert!(matches!(u.action, Action::Idle | Action::Holding { .. }), "{:?}", u.action);
+        }
     }
 }
