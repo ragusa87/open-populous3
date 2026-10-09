@@ -16,8 +16,9 @@ use game_core::site::ReincarnationSite;
 use pop3_format::catalog::REINCARNATION_STONE;
 use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
 
-const STONES: usize = 8;
-const RING_RADIUS: f32 = 1.3;
+/// The 8 pillar slots, cells from the site's cell, in slot order (pop3-rev-analysis.md "Reincarnation site"):
+/// an octagon, 3 cells out on the axes, (2, 2) on the diagonals.
+pub const SLOTS: [(i32, i32); 8] = [(0, 3), (2, 2), (3, 0), (2, -2), (0, -3), (-2, -2), (-3, 0), (-2, 2)];
 const STONE: Vec3 = Vec3::new(0.22, 0.6, 0.22);
 /// Footprint half size of a ring stone, wide enough for the original pillar (~0.47 cell).
 const STONE_HALF: f32 = 0.24;
@@ -70,19 +71,20 @@ pub fn site_cell_pos(site: &ReincarnationSite) -> Vec2 {
 }
 
 /// Turn (game frame) bringing the stone's front (-Z in its own game frame: the glyph side, which it also
-/// leans towards) to the centre, for a stone placed at angle `a` on the ring (offset `(cos a, sin a)` in x/z).
-pub fn face_centre_yaw(a: f32) -> GameYaw {
-    GameYaw(std::f32::consts::FRAC_PI_2 - a)
+/// leans towards) to the centre, for a stone standing at offset `(dx, dz)` from it: the original's slot angles
+/// (slot × 256 of 2048).
+pub fn face_centre(dx: f32, dz: f32) -> GameYaw {
+    GameYaw(dx.atan2(dz))
 }
 
-/// A ring of stones facing the centre (where the shaman stands), each with its own ground position.
+/// A pillar on each slot, on its cell's centre, facing the centre (where the shaman stands).
 pub fn site_parts(site: &ReincarnationSite) -> Vec<SitePart> {
     let centre = site_cell_pos(site);
-    (0..STONES)
-        .map(|i| {
-            let a = i as f32 * std::f32::consts::TAU / STONES as f32;
-            let at = centre + Vec2::new(a.cos(), a.sin()) * RING_RADIUS;
-            SitePart { ground: Grounded { at, half: STONE_HALF }, yaw: face_centre_yaw(a) }
+    SLOTS
+        .iter()
+        .map(|&(dx, dz)| {
+            let (dx, dz) = (dx as f32, dz as f32);
+            SitePart { ground: Grounded { at: centre + Vec2::new(dx, dz), half: STONE_HALF }, yaw: face_centre(dx, dz) }
         })
         .collect()
 }
@@ -180,13 +182,14 @@ mod tests {
     }
 
     #[test]
-    fn stones_ring_the_centre_each_on_its_own_ground() {
+    fn stones_stand_on_the_octagons_cell_centres() {
         let s = ReincarnationSite::at_cell(1, (10, 20));
         let parts = site_parts(&s);
-        assert_eq!(parts.len(), STONES);
-        for p in &parts {
+        assert_eq!(parts.len(), SLOTS.len());
+        for (p, &(dx, dz)) in parts.iter().zip(&SLOTS) {
+            assert_eq!(p.ground.at, Vec2::new(10.5 + dx as f32, 20.5 + dz as f32), "on its cell's centre");
             let d = p.ground.at.distance(Vec2::new(10.5, 20.5));
-            assert!((d - RING_RADIUS).abs() < 1e-5);
+            assert!(d == 3.0 || (d - 8f32.sqrt()).abs() < 1e-5, "3 cells on the axes, (2, 2) on the diagonals: {d}");
         }
     }
 }

@@ -186,10 +186,12 @@ orders, spells and Teleport are ignored) while she is:
   to 4 cells is blended halfway. Integer-only, applied in owner order (deterministic).
 - Fixed and indestructible: no `Command` moves or removes it. `spawn_point()` is where the shaman
   appears at start and after death.
-- Rendered as a ring of 8 stones; the camera starts on the player's (tribe 0) site.
+- Rendered as 8 pillars on the original's octagon of cells (`sites::SLOTS`: 3 cells out on the axes, (2, 2) on the
+  diagonals, each on its cell's centre, turned to the centre, pop3-rev-analysis.md "Reincarnation sites"); the
+  camera starts on the player's (tribe 0) site.
   With the original files: the reincarnation stone (object 30) in the owner's tribe colour, textured from the
   level theme's `bl320` atlas (see objects.md), theme 0 on maps without one (sandboxes). Without them or with `--no-original`: plain blocks
-  tinted with the tribe colour (no totem: the shaman stands at the centre). Stones face the centre (glyph side inward, as in the game); count and radius are ours.
+  tinted with the tribe colour (no totem: the shaman stands at the centre). Stones face the centre (glyph side inward, as in the game).
 
 ## Standing on the ground (client)
 Anything placed on the map (site stones, buildings, trees, units) is made of `grounded::Grounded`
