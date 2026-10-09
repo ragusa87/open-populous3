@@ -3,7 +3,7 @@
 //! people in it or at work on it, its wood. Long rows wrap (`line_lengths`). It shows after resting the
 //! cursor on the thing or at once on a right click, stands above it and stays while the cursor is on
 //! the thing or on it (`sticky`), so a person's slot can be clicked to add that unit to the selection. A person is the
-//! original teal figure of its kind when allowed (`hfx0-0.dat`), greyed when the slot is empty; else, and for wood, the
+//! original teal figure of its kind when allowed (`hfx0-0.dat`, `IconImages`, shared with the panel), greyed when the slot is empty; else, and for wood, the
 //! icons are generated here, a silhouette per unit kind in its tribe's colour.
 
 use crate::buildings::{BuildingView, ModelHeights};
@@ -298,43 +298,54 @@ pub fn figure_sprite(kind: UnitKind) -> Option<usize> {
     Some(UNIT_FIGURES.start() + k)
 }
 
-/// A figure's pixels, `SLOT_W` x `SLOT_H` RGBA rows, standing at the bottom centre; greyed (its
-/// lightness, half seen through) for an empty place.
-pub fn figure_pixels(sprite: &Sprite, palette: &[[u8; 3]], greyed: bool) -> Vec<u8> {
-    let mut px = vec![0u8; SLOT_W * SLOT_H * 4];
-    let (dx, dy) = (SLOT_W.saturating_sub(sprite.width) / 2, SLOT_H.saturating_sub(sprite.height));
+/// A sprite's pixels, `w` x `h` RGBA rows, standing at the bottom centre; greyed (its lightness, half
+/// seen through) for an empty place.
+pub fn sprite_pixels(sprite: &Sprite, palette: &[[u8; 3]], greyed: bool, (w, h): (usize, usize)) -> Vec<u8> {
+    let mut px = vec![0u8; w * h * 4];
+    let (dx, dy) = (w.saturating_sub(sprite.width) / 2, h.saturating_sub(sprite.height));
     for (i, p) in sprite.pixels.iter().enumerate() {
         let (x, y) = (i % sprite.width + dx, i / sprite.width + dy);
         let Some(&[r, g, b]) = p.and_then(|p| palette.get(p as usize)) else { continue };
-        if x >= SLOT_W || y >= SLOT_H {
+        if x >= w || y >= h {
             continue;
         }
         let grey = ((r as u16 * 3 + g as u16 * 6 + b as u16) / 10) as u8;
-        px[(y * SLOT_W + x) * 4..][..4].copy_from_slice(&if greyed { [grey, grey, grey, 150] } else { [r, g, b, 255] });
+        px[(y * w + x) * 4..][..4].copy_from_slice(&if greyed { [grey, grey, grey, 150] } else { [r, g, b, 255] });
     }
     px
 }
 
-/// Icon images, made the first time each is shown, and the original figures with their palette.
-#[derive(Resource, Default)]
-struct IconImages {
-    made: HashMap<Icon, Handle<Image>>,
-    figures: Option<(Vec<Sprite>, Vec<[u8; 3]>)>,
+fn pixel_image(w: usize, h: usize, px: Vec<u8>) -> Image {
+    let mut image = Image::new(Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { mag_filter: ImageFilterMode::Nearest, min_filter: ImageFilterMode::Nearest, ..default() });
+    image
 }
 
-fn load_figures(levels: Res<LevelList>, mut icons: ResMut<IconImages>) {
+/// Icon images, made the first time each is shown, and the original effect sprites (`hfx0-0.dat`,
+/// teal figures, panel icons) with their palette when allowed: shared by the tooltip and the panel.
+#[derive(Resource, Default)]
+pub struct IconImages {
+    made: HashMap<Icon, Handle<Image>>,
+    sprites: HashMap<usize, Handle<Image>>,
+    original: Option<(SpriteBank, Vec<[u8; 3]>)>,
+}
+
+fn load_sprites(levels: Res<LevelList>, mut icons: ResMut<IconImages>) {
     if !levels.original {
         return;
     }
-    let load = || -> Result<_, pop3_format::LevelError> {
-        let bank = SpriteBank::load(&levels.data_dir, EFFECT_SPRITE_FILE)?;
-        Ok((bank.sprites.get(UNIT_FIGURES).unwrap_or_default().to_vec(), pop3_format::Theme::load(&levels.data_dir, 0)?.palette))
-    };
-    icons.figures = load().map_err(|e| warn!("original unit figures: {e}")).ok().filter(|(f, _)| f.len() == UNIT_FIGURES.count());
+    let load = || -> Result<_, pop3_format::LevelError> { Ok((SpriteBank::load(&levels.data_dir, EFFECT_SPRITE_FILE)?, pop3_format::Theme::load(&levels.data_dir, 0)?.palette)) };
+    icons.original = load().map_err(|e| warn!("original panel sprites: {e}")).ok();
     icons.made.clear();
+    icons.sprites.clear();
 }
 
 impl IconImages {
+    /// Whether the original sprites are there.
+    pub fn original(&self) -> bool {
+        self.original.is_some()
+    }
+
     /// The icon's pixels and size: the original figure for a person when loaded, else the generated icon.
     fn pixels(&self, icon: Icon) -> (usize, usize, Vec<u8>) {
         let person = match icon {
@@ -343,22 +354,36 @@ impl IconImages {
             _ => None,
         };
         let figure = person.and_then(|(kind, greyed)| {
-            let (sprites, palette) = self.figures.as_ref()?;
-            Some(figure_pixels(sprites.get(figure_sprite(kind)? - UNIT_FIGURES.start())?, palette, greyed))
+            let (bank, palette) = self.original.as_ref()?;
+            Some(sprite_pixels(bank.sprites.get(figure_sprite(kind)?)?, palette, greyed, (SLOT_W, SLOT_H)))
         });
         figure.map_or_else(|| (ICON_W, ICON_H, icon_pixels(icon)), |px| (SLOT_W, SLOT_H, px))
     }
 
-    fn get(&mut self, icon: Icon, images: &mut Assets<Image>) -> Handle<Image> {
+    pub fn get(&mut self, icon: Icon, images: &mut Assets<Image>) -> Handle<Image> {
         if let Some(h) = self.made.get(&icon) {
             return h.clone();
         }
         let (w, h, px) = self.pixels(icon);
-        let mut image = Image::new(Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
-        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { mag_filter: ImageFilterMode::Nearest, min_filter: ImageFilterMode::Nearest, ..default() });
-        let handle = images.add(image);
+        let handle = images.add(pixel_image(w, h, px));
         self.made.insert(icon, handle.clone());
         handle
+    }
+
+    /// Original effect sprite `index` at its own size, None without the original files.
+    pub fn sprite(&mut self, index: usize, images: &mut Assets<Image>) -> Option<(Handle<Image>, Vec2)> {
+        let (bank, palette) = self.original.as_ref()?;
+        let sprite = bank.sprites.get(index)?;
+        let size = Vec2::new(sprite.width as f32, sprite.height as f32);
+        let handle = match self.sprites.get(&index) {
+            Some(h) => h.clone(),
+            None => {
+                let h = images.add(pixel_image(sprite.width, sprite.height, sprite_pixels(sprite, palette, false, (sprite.width, sprite.height))));
+                self.sprites.insert(index, h.clone());
+                h
+            }
+        };
+        Some((handle, size))
     }
 }
 
@@ -385,7 +410,7 @@ pub struct TooltipPlugin;
 impl Plugin for TooltipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IconImages>()
-            .add_systems(Startup, (spawn_tooltip, load_figures))
+            .add_systems(Startup, (spawn_tooltip, load_sprites))
             .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, blink_bars).in_set(crate::menu::Gameplay));
     }
 }
@@ -688,11 +713,11 @@ mod tests {
         let sprite = Sprite { width: 2, height: 1, pixels: vec![Some(1), None] };
         let palette = [[0, 0, 0], [0, 200, 180]];
         let at = |px: &[u8], x: usize, y: usize| px[(y * SLOT_W + x) * 4..][..4].to_vec();
-        let filled = figure_pixels(&sprite, &palette, false);
+        let filled = sprite_pixels(&sprite, &palette, false, (SLOT_W, SLOT_H));
         assert_eq!(filled.len(), SLOT_W * SLOT_H * 4);
         assert_eq!(at(&filled, 8, SLOT_H - 1), vec![0, 200, 180, 255]);
         assert_eq!(filled.chunks(4).filter(|p| p[3] > 0).count(), 1);
-        let greyed = figure_pixels(&sprite, &palette, true);
+        let greyed = sprite_pixels(&sprite, &palette, true, (SLOT_W, SLOT_H));
         assert_eq!(at(&greyed, 8, SLOT_H - 1), vec![138, 138, 138, 150]);
     }
 
