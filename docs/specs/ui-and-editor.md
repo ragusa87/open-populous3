@@ -20,9 +20,19 @@ than a jump; pushing the camera by hand cancels it.
 ## Left panel (`hud/`)
 Fixed 204 px panel on the left, like the original: shaman preview at the top (`hud/shaman.rs`: her current
 sprite x2, same pose and view as on the map, what she is doing, e.g. "Praying" / "Reincarnating in 2s", and a
-health bar with `hp/max`; clicking it looks at her), 3 tabs
+health bar with `hp/max`; clicking it looks at her), the population strip (below), 3 tabs
 (Spells / Build / Stats, `ActiveTab`), one content node per tab (`TabContent(n)`), info line under
 the grid.
+
+### Population (design, not implemented)
+The tribe's population against the room its huts give (huts-and-training.md rule 4: every living follower but the
+shaman, over the supply of its built huts, 3 / 5 / 7 by size, at most 199) [ours; picked from local HTML mockups]:
+- a strip between the shaman preview and the tabs, on every tab: a people icon, "population / room", and a bar
+  filling with it; at the room or over it the bar turns red and blinks (like a hut's blocked growth bar) and the
+  count turns red when over;
+- on the Stats tab, a box above the unit matrix: "Population" with the same count and bar, then three tiles,
+  small / medium / large huts, each with how many built huts of that size the tribe has and the room they give
+  (e.g. 3 small, +9).
 
 ### Spells tab (`hud/spells.rs`)
 Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`). An original level brings its own loadout
