@@ -312,26 +312,23 @@ fn spawn_tooltip(mut commands: Commands) {
 }
 
 /// What the tooltip says about building `i`: its name, and for the player's buildings that take
-/// wood the braves working on it out of the most it takes, and its wood: brought out of its cost
-/// while it is built, the wood in it once built (what taking it apart gives back); for huts, the
-/// people inside out of its room.
+/// wood one `Braves` line, those working on it out of the most it takes while it is built, those
+/// inside out of its room once built (huts only), and its wood: brought out of its cost while it is
+/// built, the wood in it once built (what taking it apart gives back).
 pub fn building_label(map: &game_core::map::GameMap, i: usize) -> String {
     let b = &map.buildings[i];
     let mut label = b.kind.name();
-    if b.owner != crate::units::PLAYER {
+    let (site, cost) = ((b.x, b.z), b.kind.wood_cost());
+    if b.owner != crate::units::PLAYER || cost == 0 {
         return label;
     }
-    let (site, cost) = ((b.x, b.z), b.kind.wood_cost());
-    if cost > 0 {
+    let built = b.stage() == Stage::Built;
+    if !built {
         label += &format!("\nBraves: {}/{}", map.workers(site).count(), b.kind.max_braves());
-        label += &match b.stage() {
-            Stage::Built => format!("\nWood: {}", b.used),
-            _ => format!("\nWood: {}/{cost}", b.delivered().min(cost)),
-        };
+    } else if b.kind.capacity() > 0 {
+        label += &format!("\nBraves: {}/{}", map.people_inside(site), b.kind.capacity());
     }
-    if b.kind.capacity() > 0 && b.stage() == Stage::Built {
-        label += &format!("\nInside: {}/{}", map.people_inside(site), b.kind.capacity());
-    }
+    label += &if built { format!("\nWood: {}", b.used) } else { format!("\nWood: {}/{cost}", b.delivered().min(cost)) };
     label
 }
 
@@ -462,9 +459,9 @@ mod tests {
         (map.buildings[site].stock, map.buildings[site].used) = (1, 1);
         assert_eq!(building_label(&map, site), "Hut 1\nBraves: 1/6\nWood: 2/3");
         let built = map.buildings.iter().position(|b| b.owner == crate::units::PLAYER && b.kind == BuildingKind::DrumTower && b.stage() == Stage::Built).unwrap();
-        assert_eq!(building_label(&map, built), "Drum tower\nBraves: 0/12\nWood: 5", "the wood in it");
+        assert_eq!(building_label(&map, built), "Drum tower\nWood: 5", "the wood in it, nobody inside");
         let busy = map.buildings.iter().position(|b| b.owner == crate::units::PLAYER && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside > 0).unwrap();
-        assert_eq!(building_label(&map, busy), "Hut 1\nBraves: 0/6\nWood: 3\nInside: 3/3");
+        assert_eq!(building_label(&map, busy), "Hut 1\nBraves: 3/3\nWood: 3", "once built: the braves inside");
         let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();
         assert!(!building_label(&map, red).contains("Braves"), "not theirs");
     }

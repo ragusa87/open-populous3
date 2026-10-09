@@ -43,7 +43,7 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
   `BuildingKind::capacity` (3 / 4 / 5 by size): the others stay at the door, idle. Any walk takes them out by the
   door.
 - `Building::inside` is counted each tick from the units inside (`GameMap::count_inside`): a built hut with
-  people inside smokes from its chimney. The tooltip shows `Inside: people/room`.
+  people inside smokes from its chimney. The tooltip shows `Braves: people inside/room`.
 - Trees under a building (plans included) do not grow back.
 
 ### Rules
