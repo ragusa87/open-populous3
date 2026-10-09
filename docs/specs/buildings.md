@@ -165,12 +165,12 @@ Done:
   away.
 
 ### Tooltip
-Done (`buildings::building_label`, after resting the cursor `HOVER_SECS` on a building, plans included): the
-kind's name; for the player's buildings that take wood, `Braves: assigned/max` and `Wood: delivered/cost`, while
-a plan and under construction; once built, `Braves: inside/room` (huts, drum towers, and 1 for a training hut's trainee) and `Wood: n`, the wood in it
-(what dismantling gives back, raised when a hut grows). One `Braves` line either way. Other tribes' buildings show their name only. To do: the rendered tooltip of
-[tooltips.md](tooltips.md), a people row (assigned braves or people inside, clicking one selects it), a wood row
-and the Dismantle toggle (see "Dismantling"), also shown at once on a right click.
+Done (client `tooltip.rs`, [tooltips.md](tooltips.md)): after resting the cursor `HOVER_SECS` on a building,
+plans included, a box above it with the kind's name; for the player's buildings that take wood a people row
+(braves assigned while a plan or site, the people inside once built: huts, drum towers, a training hut's
+trainee; a click adds one to the selection) and a wood row (provided / cost, then the wood in it, what dismantling
+gives back); a pyramid also names what it teaches. Other tribes' buildings show their name only. To do: the
+Dismantle toggle (see "Dismantling") and showing it at once on a right click.
 
 ### Orders and selection
 - Any new order to an assigned brave (`Command::OrderUnit`: move, pray, stop...) unassigns it from the site,

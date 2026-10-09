@@ -23,6 +23,7 @@ mod sites;
 mod sky;
 mod terrain_mesh;
 mod terrain_texture;
+mod tooltip;
 mod totems;
 mod units;
 mod vault;
@@ -69,6 +70,7 @@ fn main() {
             flame::FlamePlugin,
             vault::VaultPlugin,
             totems::TotemsPlugin,
+            tooltip::TooltipPlugin,
             blueprint::BlueprintPlugin),
             units::UnitsPlugin,
             wood::WoodPlugin,

@@ -134,8 +134,6 @@ pub struct RespawnBuildings;
 impl Plugin for BuildingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ModelHeights>()
-            .add_systems(Startup, spawn_tooltip)
-            .add_systems(Update, building_tooltip.after(crate::hover::HoverSystems).in_set(crate::menu::Gameplay))
             .add_systems(Update, (respawn_buildings.in_set(RespawnBuildings), place_labels).chain())
             .add_systems(Update, (shake_walls, rise_smoke))
             .add_systems(PostUpdate, draw_site_marks);
@@ -364,64 +362,6 @@ fn respawn_buildings(
     }
 }
 
-#[derive(Component)]
-struct BuildingTooltip;
-
-fn spawn_tooltip(mut commands: Commands) {
-    commands.spawn((BuildingTooltip, crate::nature::tooltip()));
-}
-
-/// What the tooltip says about building `i`: its name, and for the player's buildings that take
-/// wood one `Braves` line, those working on it out of the most it takes while it is built, those
-/// inside out of its room once built (huts only), and its wood: brought out of its cost while it is
-/// built, the wood in it once built (what taking it apart gives back).
-pub fn building_label(map: &game_core::map::GameMap, i: usize) -> String {
-    use game_core::occupancy::Holder;
-    let b = &map.buildings[i];
-    let mut label = b.kind.name();
-    if b.owner != crate::units::PLAYER || b.kind.wood_cost() == 0 {
-        return label;
-    }
-    if let Some(people) = map.people_slots(Holder::Building(i)) {
-        label += &format!("\nBraves: {}/{}", people.filled.len(), people.capacity);
-    }
-    if let Some(wood) = map.wood_slots(Holder::Building(i)) {
-        label += &if b.stage() == Stage::Built { format!("\nWood: {}", wood.filled) } else { format!("\nWood: {}/{}", wood.filled, wood.capacity) };
-    }
-    label
-}
-
-/// Shows the hovered building's tooltip once the cursor rested on it for `HOVER_SECS`.
-fn building_tooltip(
-    time: Res<Time>,
-    map: Res<CurrentMap>,
-    windows: Query<&Window>,
-    hovered: Res<crate::hover::Hovered>,
-    mut since: Local<(Option<usize>, f32)>,
-    mut tooltip: Query<(&mut Text, &mut Node, &mut Visibility), With<BuildingTooltip>>,
-) {
-    let Ok((mut text, mut node, mut vis)) = tooltip.single_mut() else { return };
-    let building = match hovered.0 {
-        Some(crate::hover::HoverTarget::Building(i)) if i < map.0.buildings.len() => Some(i),
-        _ => None,
-    };
-    let now = time.elapsed_secs();
-    if building != since.0 {
-        *since = (building, now);
-    }
-    let cursor = windows.iter().next().and_then(Window::cursor_position);
-    match (building.filter(|_| now - since.1 >= crate::nature::HOVER_SECS), cursor) {
-        (Some(i), Some(c)) => {
-            text.0 = building_label(&map.0, i);
-            (node.left, node.top) = (px(c.x + 16.0), px(c.y + 18.0));
-            vis.set_if_neq(Visibility::Inherited);
-        }
-        _ => {
-            vis.set_if_neq(Visibility::Hidden);
-        }
-    }
-}
-
 /// Redraws each blueprint's white mark draped over the ground as drawn around the camera.
 fn draw_site_marks(
     map: Res<CurrentMap>,
@@ -532,24 +472,6 @@ mod tests {
         let (at, lift) = perch(&tower(0), 2.45).unwrap();
         assert!((at - Vec2::new(20.5, 20.5)).length() < 1e-5 && (lift - 1.372).abs() < 1e-3);
         assert!(perch(&Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0), 2.0).is_none(), "huts hide their people");
-    }
-
-    #[test]
-    fn tooltip_counts_braves_and_wood() {
-        let mut map = game_core::map::GameMap::sandbox_buildings();
-        let site = map.place_building(crate::units::PLAYER, BuildingKind::Hut { size: 1 }, (88 * 512, 64 * 512), 0).unwrap();
-        let brave = map.units.iter().find(|u| u.kind == game_core::unit::UnitKind::Brave).unwrap().id;
-        map.apply(&game_core::command::Command::OrderUnit { player: 0, unit: brave, order: game_core::unit::Order::Build { site: (88 * 512, 64 * 512) } });
-        (map.buildings[site].stock, map.buildings[site].used) = (1, 1);
-        assert_eq!(building_label(&map, site), "Hut 1\nBraves: 1/6\nWood: 2/3");
-        let tower = map.buildings.iter().position(|b| b.owner == crate::units::PLAYER && b.kind == BuildingKind::DrumTower && b.stage() == Stage::Built && b.inside == 0).unwrap();
-        assert_eq!(building_label(&map, tower), "Drum tower\nBraves: 0/1\nWood: 5", "a tower holds one");
-        let temple = map.buildings.iter().position(|b| b.owner == crate::units::PLAYER && b.kind == BuildingKind::Temple && b.stage() == Stage::Built && b.inside == 0).unwrap();
-        assert_eq!(building_label(&map, temple), "Temple\nBraves: 0/1\nWood: 8", "one trainee at a time, and the wood in it");
-        let busy = map.buildings.iter().position(|b| b.owner == crate::units::PLAYER && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside > 0).unwrap();
-        assert_eq!(building_label(&map, busy), "Hut 1\nBraves: 3/3\nWood: 3", "once built: the braves inside");
-        let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();
-        assert!(!building_label(&map, red).contains("Braves"), "not theirs");
     }
 
     #[test]

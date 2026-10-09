@@ -147,15 +147,12 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 
 ## Tooltips ([tooltips.md](docs/specs/tooltips.md))
-- [ ] Rendered tooltip instead of text: name, slot rows with separators, bars on the left, toggle; one `SlotRow` model built from `GameMap::people_slots` / `wood_slots` (done, `game_core::occupancy`), one UI widget.
-- [ ] People rows: plans and sites (assigned braves), houses and drum towers (people inside), training huts (the trainee), pyramids (the shaman), totems (counted prayers), vehicles; clicking a filled slot selects that unit.
-- [ ] Wood rows: provided / cost on plans and sites, used on built buildings, plus the pieces still needed on a growing house; a tree's current wood only.
-- [ ] Long rows wrap after 10 slots, a row of 16 after 8.
-- [ ] Pyramid tooltip names its reward until granted.
+- [ ] Rendered tooltip: done for buildings (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks); trees still show a text following the cursor; bars and the toggle to add.
+- [ ] People rows of totems (counted prayers, once praying exists) and vehicles; the trainee once training exists. Buildings and pyramids are done, a click adds the unit to the selection.
+- [ ] Wood rows: the pieces still needed on a growing house (once growth exists); a tree's current wood as slots. Plans, sites and built buildings are done.
 - [ ] Bars: prayer progress, house growth and birth, training; blinking while blocked.
 - [ ] Dismantle toggle on the player's buildings that take wood; right click shows a building's tooltip at once like trees.
 - [ ] Totems hoverable (`hover::Hovered`), with their tooltip.
-- [ ] Generated slot icons drawn in code: a silhouette per unit kind (tribe colour filled, grey placeholder), a log for wood.
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
 - [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).
 - [ ] Editor: smooth brush and the raise/lower levelling step of the ALACN editor (ui-and-editor.md).

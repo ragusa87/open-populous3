@@ -1,16 +1,22 @@
-# Tooltips (design; text-only tooltips done for buildings and trees)
+# Tooltips (buildings done: name, slot rows, clicks; bars, toggle and the other targets to do)
 
 What the game shows about the thing under the mouse. A tooltip **renders** things: rows of slots, bars and a
-toggle, not only text. Today buildings (`buildings::building_label`) and trees (`nature::tooltip`) show text.
+toggle, not only text. Buildings use it (client `tooltip.rs`); trees still show a text that follows the cursor
+(`nature::tooltip`).
 
 Tags: **[player]** how the game plays, as told by someone who played it, **[code]** what ours does today,
 **[ours]** a choice made here, to check.
 
-## Showing [code]
+## Showing
 - After resting the cursor `HOVER_SECS` (1.5 s) on a hovered thing, or at once on a right click (trees today,
-  buildings to come). One tooltip at a time, by the cursor (16 px right, 18 px down), hidden when the target goes.
+  buildings to come) [code]. One tooltip at a time.
+- It does not follow the mouse: it stands **above the hovered element**, centred over the top of its model, and
+  stays there [player]. It stays shown while the cursor is on the element or on the tooltip itself, and hides once
+  both lose the focus (after a short grace, `GRACE_SECS`, to cross the gap between them) [player; ours: the grace].
+  So the cursor can reach the tooltip and click its slots.
 - Not over the panel, nor while a spell or a blueprint is out, like the hover halo (ui-and-editor.md "Hover
-  halo"). What can be hovered: `hover::Hovered` (units, wood pieces, trees, buildings; totems to add).
+  halo"). What can be hovered: `hover::Hovered` (units, wood pieces, trees, buildings; totems to add). While the
+  cursor is over the tooltip, the map underneath is neither hovered nor clicked.
 
 ## Layout [player]
 The thing's name, then its slot rows with a small separator between rows, then its toggle where there is one.
@@ -24,7 +30,9 @@ One widget for every use: one slot per unit of capacity or need.
   8, 20 as 2 lines of 10, 12 as 10 then 2. Slots fill first to last, line by line.
 
 ### People rows: selecting what is inside
-Clicking a filled slot selects that unit [player].
+Clicking a filled slot adds that unit to the selection (`Selection::add`) [player]: on a hut with 3 braves,
+three clicks select all three. A unit already selected stays selected. It works even for a unit inside the
+building, not drawn.
 
 | Target | Slots | Placeholder | Filled by |
 |---|---|---|---|
@@ -89,7 +97,9 @@ unit ids in id order, at most `capacity`) and `GameMap::wood_slots(holder)` (`Wo
 tower, a training hut and an unspent pyramid). Who counts is decided there, next to the rules; the text tooltips
 read them already. To do in the client: one `SlotRow { kind: People | Wood, slots, filled }` model, `filled` holding each filled slot's icon (and, for
 people, the unit id its click selects), built from the simulation each frame by pure, tested functions; one Bevy
-UI widget draws every row. Bars and the toggle the same way: a model from the simulation, one widget.
+UI widget draws every row. Done for buildings: `tooltip::building_model` (lines and rows of `Slot { icon, unit }`),
+`line_lengths`, `sticky` (what stays shown), `icon_pixels` (the generated icons); the box is rebuilt only when its
+model changes. Bars and the toggle the same way: a model from the simulation, one widget.
 
 A pyramid's tooltip names its reward (the spell or building it teaches) [player]; once granted, like the icon
 on its top, not any more [ours].

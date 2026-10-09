@@ -57,6 +57,13 @@ impl Selection {
         self.units = vec![id];
     }
 
+    /// Adds `id` to the selection (a tooltip slot's click); already selected, it stays.
+    pub fn add(&mut self, id: u32) {
+        if !self.contains(id) {
+            self.units.push(id);
+        }
+    }
+
     /// Click on a unit. `add` (Ctrl) toggles it in the selection instead of replacing it.
     pub fn click(&mut self, id: u32, add: bool) {
         if !add {
@@ -390,6 +397,15 @@ mod tests {
 
     fn sel(units: &[u32]) -> Selection {
         Selection { units: units.to_vec() }
+    }
+
+    #[test]
+    fn tooltip_clicks_add_to_the_selection() {
+        let mut sel = Selection { units: vec![7] };
+        sel.add(3);
+        sel.add(5);
+        sel.add(3);
+        assert_eq!(sel.units, vec![7, 3, 5], "added once each, the others kept");
     }
 
     #[test]
