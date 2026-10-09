@@ -54,7 +54,9 @@ fn main() {
                 ..default()
             }),
             ..default()
-        }));
+        })
+        // No sound yet (TODO.md "Sound"): without it no audio device is opened.
+        .disable::<bevy::audio::AudioPlugin>());
     }
     app
         .add_plugins((

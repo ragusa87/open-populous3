@@ -39,6 +39,7 @@ pub fn headless_plugins() -> impl PluginGroup {
         .set(asset_plugin())
         .set(WindowPlugin { primary_window: None, exit_condition: bevy::window::ExitCondition::DontExit, ..default() })
         .disable::<WinitPlugin>()
+        .disable::<bevy::audio::AudioPlugin>()
 }
 
 pub struct DevPlugin;
