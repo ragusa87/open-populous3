@@ -163,6 +163,16 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 | 187, 188, 189 | totem poles |
 | 191 | pyramid of knowledge (unlocks a spell or building); 192, 193 door animation frames |
 
+Pyramid of knowledge frames (191-193, measured): the same 107 faces and 116 points in the same order, so one
+frame turns into another by moving points (heights also differ by 1-3 units everywhere: export noise). Two
+parts move:
+- The door (points 76-83, front face tile 182, on the -z side): down, closing the doorway, in 192 and 193
+  (y -9 to 473); in 191 slid up along the sloped face by (0, +479, +88), the doorway open.
+- The top (points 68-71, 100-115, four petals round the apex, tiles 190 and 221): spread (about ±150 units) in
+  191 and 192, folded into a point in 193.
+So 192 = door closed, 191 = door open, 193 = door closed and top folded (guessed: the spent pyramid). The game
+draws 191 today (door open).
+
 Unidentified: 75-81 (stone pillars, standing stones, arch), 89-93,
 190 (looks like the pyramid of knowledge).
 
