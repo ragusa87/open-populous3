@@ -26,7 +26,7 @@ the grid.
 
 ### Population (design, not implemented)
 The tribe's population against the room its huts give (huts-and-training.md rule 4: every living follower but the
-shaman, over the supply of its built huts, 3 / 5 / 7 by size, at most 199) [ours; picked from local HTML mockups]:
+shaman, over the supply of its built huts, 3 / 5 / 7 by size, at most 200) [ours; picked from local HTML mockups]:
 - a strip between the shaman preview and the tabs, on every tab: a people icon, "population / room", and a bar
   filling with it; at the room or over it the bar turns red and blinks (like a hut's blocked growth bar) and the
   count turns red when over;

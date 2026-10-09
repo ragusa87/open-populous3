@@ -26,9 +26,9 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
 
 ## Huts [community]
 - Capacity (people inside): 3 / 4 / 5 for a small / medium / large hut. Supply (cap): 3 / 5 / 7. The tribe's
-  population cap has a failsafe maximum: 199 [community], about 200 [player]; 28 large huts reach it. It is not
+  population cap is min(supply of its huts, 200) [player; 199 per the community]; 29 large huts reach it. It is not
   in `constant.dat` (only `MAX_POP_VALUE__HUT_1..3` and the breeding bands): probably one of the "extended"
-  constants of the executable (constants.md). Exact value to confirm.
+  constants of the executable (constants.md). We use 200.
 - A hut makes braves on its own, empty or not: empty at half speed, faster with more people inside (the
   `SPROG_TIME` comment above). The larger the hut, the faster.
 - A newly built hut starts with its breeding bar full: a brave comes out at once.
@@ -66,7 +66,7 @@ hut (max size) hides the red bar, it does not show it at 0.
 3. **Auto-housing** [ours]: an idle brave of the tribe with no order for `HOUSE_DELAY` (10 s) walks into the
    nearest built hut with room within 8 cells. Other kinds only enter when ordered.
 4. **Population**: every living unit of the tribe except the shaman, inside or out. Cap = sum of the supply of
-   its built huts at their current size (a hut being grown counts its old size), at most 199. Units over the cap (level start, conversions) stay; only breeding stops.
+   its built huts at their current size (a hut being grown counts its old size), at most 200. Units over the cap (level start, conversions) stay; only breeding stops.
 5. **Breeding** (green bar): each built hut, every update, adds `occupants + 1` to `breed` (half steps: 0 inside =
    0.5, 1 = 1.0, 2 = 1.5..., up to 3.0 for 5). At 100 % (`breed >= 2 * SPROG_TIME[level] * band / 100`, with
    `band` from the tribe's population as a % of its cap) a brave is born at the front door, idle, and `breed`
@@ -157,7 +157,7 @@ time to train one warrior and its mana, how fast the red bar fills.
 - `Order::Enter { building }`, `Command::Eject { player, building }`; wire codec kinds in multiplayer.md.
 
 ## Open questions
-- Huts: what the population band is a percentage of (the tribe's cap assumed, or 199); whether people outside
+- Huts: what the population band is a percentage of (the tribe's cap assumed, or 200); whether people outside
   huts make mana (assumed not); the red bar's speed and occupant bonus; the wood held per hut size; how many braves fetch and build when a hut grows (only those inside?); what damage really does to a growing hut; whether idle braves house
   themselves, from how far, after how long.
 - Whether spell recharge and training take from the same mana pool (TODO "Mana").
