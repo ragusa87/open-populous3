@@ -76,11 +76,14 @@ blocked].
 On the player's buildings that take wood. On a built building it marks it for dismantling: it stops working, the
 people inside walk out, braves take it apart, and its wood can be used again (buildings.md "Dismantling").
 Toggled back while dismantling, it is built again.
+With the original files (`hfx0-0.dat`, sprites.md): dismantle 49, 51 hovered, 50 on; undo (build it again) 46,
+48 hovered, 47 on.
 
 ## Unload button [player]
 A vehicle has no toggle but a button in the same place: pressed, everyone aboard gets off. It is disabled while
 there is no ground to get off on: a balloon over water, a boat not next to the shore, a balloon above ground too
 steep to walk on (where they would land is not walkable, `path` walkable cells).
+With the original files: 60, 62 hovered, 61 pressed (unconfirmed).
 
 ## Per target
 | Target | People row | Wood row | Bars | Toggle |
