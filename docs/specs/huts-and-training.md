@@ -6,7 +6,7 @@ in buildings.md ("Construction"); drawing occupants, bars and icons is not cover
 Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** the PopRe wiki
 ([Hut](https://wiki.popre.net/Hut), [Warrior Training Hut](https://wiki.popre.net/Warrior_Training_Hut)) and the
 [poptb.com building guide](https://ts.popre.net/websites/poptb.com/guide/basic-gameplay/building/index.html),
-**[ours]** a choice made here, to check in the game.
+**[exe]** the original executable (pop3-rev-analysis.md), **[ours]** a choice made here, to check in the game.
 
 ## Original values [files]
 | Constant | Value | Read as |
@@ -14,13 +14,16 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
 | `MAX_POP_VALUE__HUT_1..3` | 3, 5, 7 | population each hut size adds to the tribe's cap ("supply") |
 | `HUT1..3_SPROG_TIME` | 4000, 3000, 2000 | time for a hut to make a brave; comment: "X 0 - 0.5, 1 - 1.0, 2 - 1.5, 3 - 2.0" |
 | `SPROG%_POP_BAND_00_04%` .. `_95_99%` | 30, 35, 40, 50, 60, ... 190, 195, 200 | % applied to the sprog time by population band (20 bands of 5 %) |
-| `MANA_F_BRAVE`, `_WARR`, `_SPY`, `_PREACH`, `_SWARR`, `_SHAMEN` | 15, 4, 4, 4, 4, 30 | mana per person per update |
-| `MANA_F_HOUSED`, `_WORKING`, `_TRAINING` | 100, 100, 50 % | factor by what the person is doing |
-| `MANA_F_HUT_LEVEL_1..3` | 100, 110, 120 % | factor for people in a hut of that size |
+| `MANA_F_BRAVE`, `_WARR`, `_SPY`, `_PREACH`, `_SWARR`, `_SHAMEN` | 15, 4, 4, 4, 4, 30 | mana per person; only `_SHAMEN` is read by the income [exe] |
+| `MANA_F_HOUSED`, `_WORKING`, `_TRAINING` | 100, 100, 50 % | factor by what the person is doing; not read by the income [exe] |
+| `MANA_F_HUT_LEVEL_1..3` | 100, 110, 120 % | factor for people in a hut of that size; not read by the income [exe] |
 | `MANA_UPDATE_FREQ` | 15 | mana is added every 16 turns |
 | `HUMAN_MANA_ADJUST`, `COMPUTER_MANA_ADJUST` | 125, 50 % | income factor by player type |
 | `HUMAN_TRAIN_MANA_WARR`, `_SPY`, `_PREACH`, `_SWARR` | 3500, 4000, 3500, 4000 | mana to train one (computer players: 1000 each) |
 | `TRAIN_MANA_BAND_00_03` .. `_21+` | 100, 125, 150, 175, 200, 250 % | training cost factor by number of specialists |
+
+Not in the file [exe]: the income per person is `MANA_BUSY_BRAVES` 15 / `MANA_IDLE_BRAVES` 4 and
+`MANA_BUSY_SPECIALS` 5 / `MANA_IDLE_SPECIALS` 4, exe defaults that `constant.dat` cannot change.
 | `CONV_TEMPLE`, `_SPY`, `_WARRIOR`, `_SUPER` | 4000 each | probably the training time, same unit as the sprog times |
 | `WOOD_BRAVE`, `WOOD_HUT_1..3`, `TREE*_WOOD_VALUE` | 100, 300, 400 | a brave carries 1 piece, a hut costs 3, a tree holds 4 (as `wood_cost`, trees.md) |
 
@@ -34,8 +37,8 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
 - A newly built hut starts with its breeding bar full: a brave comes out at once.
 - A hut grows twice (small, medium, large) with wood brought to its door ("three pieces start the upgrade, only
   two are used"); a brave can also be ordered to drop wood there.
-- People inside make mana. The guide says a brave makes the same mana in any hut size, against
-  `MANA_F_HUT_LEVEL` 100/110/120 %: the files win until checked in the game.
+- People inside make mana. The guide says a brave makes the same mana in any hut size, which fits the
+  income routine [exe]: it does not read `MANA_F_HUT_LEVEL`.
 - Firewarriors in a hut throw fire at enemies nearby, the shaman casts from inside one (later: combat, spells).
 
 ### Done
@@ -92,10 +95,12 @@ hut (max size) hides the red bar, it does not show it at 0.
 
    Wood held by size [ours, to check]: grows with the size, about +2 per size: small 3, medium 5, large 7
    (`BuildingKind::wood_cost` is 3 for every hut size today).
-7. **Mana** (every `MANA_UPDATE` = 16 turns), per tribe: sum over its people of `MANA_F[kind]` x activity %
-   (inside a hut: `HOUSED` x `HUT_LEVEL[level]`; working on a building or fetching wood: `WORKING`; inside a
-   training hut: `TRAINING`; otherwise [ours]: 0), then x `HUMAN_` or `COMPUTER_MANA_ADJUST`, added to the
-   tribe's mana, capped at `MAX_MANA`. Praying at a totem is its own gauge (TODO "Praying"), not mana.
+7. **Mana** [exe] (every `MANA_UPDATE_FREQ` + 1 = 16 turns), per tribe: sum over its people of busy or idle
+   mana (brave 15 / 4, warrior, spy, firewarrior and preacher 5 / 4, shaman 30 always, wildmen and angel 0), then
+   x `HUMAN_` or `COMPUTER_MANA_ADJUST` (8.8 fixed point). "Busy" is probably inside a building or working: [ours]
+   inside a hut, working on a building or fetching wood. The income charges the spells first, the rest goes to
+   the tribe's mana, capped at `MAX_MANA` (pop3-rev-analysis.md "Mana rules"). Praying at a totem is its own
+   gauge (TODO "Praying"), not mana.
 
 ## Training huts
 | Building | Trains | Cost (human) |
@@ -127,7 +132,7 @@ A training hut makes no mana [community]. As in the game (checked by someone who
 7. **Damage**: when the hut is damaged, the whole queue is cancelled (its units idle where they stand) and the
    unit inside comes out unchanged. Later, with combat and spells: in a fight the unit inside comes out to fight,
    hit by a spell it is handled like any unit.
-8. While inside, a unit counts as `TRAINING` (50 %) for mana.
+8. While inside, a unit counts as busy for mana (rule 7) [ours].
 
 ## Balance and game turns
 The original counts in game turns (about 8 per second, unverified, ai-scripts.md); we tick 10 times per second.
@@ -149,17 +154,19 @@ time to train one warrior and its mana, how fast the red bar fills.
 ## Simulation (to build)
 - `Building::id` (stable, given in load order then creation order): units point at it; the view needs it too
   (TODO "Site visuals").
-- `game_core::tribe::Tribe { mana, human }` in `GameMap::tribes`, one per tribe in owner order.
+- `game_core::tribe::Tribe { mana, human }` in `GameMap::tribes`, one per tribe in owner order. Later the
+  original's other mana fields (income not yet distributed, delayed reservoir; pop3-rev-analysis.md).
 - Pure functions with tests: `breed_gain(occupants)`, `breed_threshold(level, population, cap)`,
   `population_band(population, cap)`, `train_cost(kind, specialists, human)`, `train_share(cost, duration)`,
   `mana_income(people)`, `queue_spots(building, count)` (the snake around the footprint).
-- `GameMap::tick`: huts and training huts in id order, then mana; no `HashMap`, no randomness.
+- `GameMap::tick`: huts and training huts in id order, then mana (income on update turns, then spell charges,
+  then the bank); no `HashMap`, no randomness.
 - `Order::Enter { building }`, `Command::Eject { player, building }`; wire codec kinds in multiplayer.md.
 
 ## Open questions
-- Huts: what the population band is a percentage of (the tribe's cap assumed, or 200); whether people outside
-  huts make mana (assumed not); the red bar's speed and occupant bonus; the wood held per hut size; how many braves fetch and build when a hut grows (only those inside?); what damage really does to a growing hut; whether idle braves house
+- Huts: what the population band is a percentage of (the tribe's cap assumed, or 200); what exactly counts as busy
+  (idle people make 4 [exe]); the red bar's speed and occupant bonus; the wood held per hut size; how many braves fetch and build when a hut grows (only those inside?); what damage really does to a growing hut; whether idle braves house
   themselves, from how far, after how long.
-- Whether spell recharge and training take from the same mana pool (TODO "Mana").
+- Whether training takes from the bank, after spells are charged (TODO "Mana").
 - Training: how mana is taken (assumed along the training), the real `CONV_*` meaning and the cost by specialist
   count (`TRAIN_MANA_BAND`).

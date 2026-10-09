@@ -19,9 +19,14 @@ Spells must only be cast through `Command::Cast` to stay deterministic.
 
 ## Spell book (`game_core::spell_book`)
 Per tribe: one `SpellSlot` per `SpellKind` with `Availability` (Hidden / Discoverable / Provided { shots } /
-Known / Unlimited: cast at will, used by sandbox spells), `charges` (max 4, fewer for big spells: `max_charges()` from `cost()`) and `recharge` mana.
+Known / Unlimited: cast at will, used by sandbox spells), `charges` (max 4, fewer for big spells: `max_charges()` from `cost()`, to replace with `SP_1_OFF_MAX`, see
+"Original balance") and `recharge` mana.
 `tick(mana)` refills recharging spells that are not paused (`paused`, `toggle_pause`), `cast(kind)` consumes a charge or a provided shot,
 `discover(kind)` turns "?" into Known. Integer only, deterministic. UI: see ui-and-editor.md.
+
+The original [exe] (pop3-rev-analysis.md "Mana rules") keeps per spell the mana still needed for its next charge.
+Every turn the tribe's new mana fills those first, and only the surplus goes to the bank, so the bar fills spell
+by spell. A cast takes its cost from the tribe's mana.
 
 `SpellBook::from_level(header, level)`: the header's `SpellsAvailable` panel spells are Known with full charges
 (how charged the original starts them is not checked), the spell discoveries (`DiscoveryType 11`) not already
@@ -98,10 +103,11 @@ Reading the columns:
   - Armageddon, bloodlust and teleport have no cost entry.
   - Mana: start 30 000, cap 1 000 000, updated every `MANA_UPDATE_FREQ` + 1 = 16 turns. Income is scaled by
     `HUMAN_MANA_ADJUST` 125 % for humans and `COMPUTER_MANA_ADJUST` 50 % for computer players.
-  - A shaman's death loses 25 % of her tribe's mana, and her killer gains 25 % (`SHAMEN_DEAD_MANA_%_LOST/GAIN`).
-- Charges: `SP_1_OFF_MAX` ("one-off max") is read as how many charges a spell holds, the panel's 1-4 count.
-  This fits the game but is unverified. Our `SpellKind::max_charges()` derives 4/2/1 from the cost instead, which
-  gets tornado, hypnotism, swamp and flatten (3) and lightning (4) wrong.
+  - A shaman's death loses 25 % of her tribe's mana, and her killer gains 25 % (`SHAMEN_DEAD_MANA_%_LOST/GAIN`),
+    after a 1000-turn delay [exe].
+- Charges: `SP_1_OFF_MAX` ("one-off max") is how many charges a spell holds, the panel's 1-4 count [exe]. Our
+  `SpellKind::max_charges()` derives 4/2/1 from the cost instead, which gets tornado, hypnotism, swamp and
+  flatten (3) and lightning (4) wrong.
 - `_OPT_S` is in seconds per the comments. Its meaning is unverified: probably the charge time of one charge at
   a reference income ("optimum").
 - Range is the cast distance from the shaman in world units (512 per cell).
