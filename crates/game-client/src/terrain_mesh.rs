@@ -1,9 +1,12 @@
-//! Pure (engine-free) construction of the camera-centred, curved terrain grid.
+//! Pure construction of the camera-centred, curved terrain grid, in render space (`game_frame`: the game's z
+//! drawn mirrored).
 //!
 //! The mesh always sits at the render origin, which is the camera focus. Each frame
 //! we sample the wrapping heightmap around the focus and bend vertices down with
 //! `y = height - k * (dx² + dz²)`, which makes the flat torus look like a small planet.
 
+use crate::game_frame::{mirrored, GamePos};
+use bevy::math::Vec3;
 use game_core::terrain::Heightmap;
 
 #[derive(Clone, Copy, Debug)]
@@ -70,7 +73,7 @@ pub fn build(map: &Heightmap, focus: (f32, f32), params: &CurveParams) -> Terrai
             let (dx, dz) = (i as f32 - fx, j as f32 - fz);
             let h = map.get(bx + i, bz + j);
             let y = h as f32 * params.height_scale - drop_at(params, dx, dz);
-            g.positions.push([dx, y, dz]);
+            g.positions.push(Vec3::from(GamePos::ground(dx, y, dz)).into());
             let size = map.size() as f32;
             g.uvs.push([(bx + i) as f32 / size, (bz + j) as f32 / size]);
         }
@@ -84,7 +87,7 @@ pub fn build(map: &Heightmap, focus: (f32, f32), params: &CurveParams) -> Terrai
             }
             let a = (j * n + i) as u32;
             let (b, c, d) = (a + 1, a + n as u32, a + n as u32 + 1);
-            g.indices.extend([a, c, b, b, c, d]);
+            g.indices.extend(mirrored([a, c, b]).into_iter().chain(mirrored([b, c, d])));
         }
     }
     g
@@ -99,10 +102,11 @@ fn grid_normals(p: &[[f32; 3]], n: usize) -> Vec<[f32; 3]> {
             let (d, u) = (at(i, j.saturating_sub(1)), at(i, j + 1));
             let ex = [r[0] - l[0], r[1] - l[1], r[2] - l[2]];
             let ez = [u[0] - d[0], u[1] - d[1], u[2] - d[2]];
+            // Rows run along the game's z, drawn towards -z: ex x ez points up.
             let c = [
-                ez[1] * ex[2] - ez[2] * ex[1],
-                ez[2] * ex[0] - ez[0] * ex[2],
-                ez[0] * ex[1] - ez[1] * ex[0],
+                ex[1] * ez[2] - ex[2] * ez[1],
+                ex[2] * ez[0] - ex[0] * ez[2],
+                ex[0] * ez[1] - ex[1] * ez[0],
             ];
             let len = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt().max(1e-6);
             out.push([c[0] / len, c[1] / len, c[2] / len]);
@@ -148,5 +152,21 @@ mod tests {
         let p = CurveParams { radius: 2, curvature: 0.0, ..Default::default() };
         let g = build(&map, (3.0, 3.0), &p);
         assert!(g.normals.iter().all(|n| (n[1] - 1.0).abs() < 1e-5));
+    }
+
+    #[test]
+    fn the_mirrored_grid_faces_up_and_leans_away_from_a_rise() {
+        let mut map = Heightmap::new(16);
+        for z in 0..16 {
+            for x in 0..16 {
+                map.set(x, z, (z * 10) as u16);
+            }
+        }
+        let p = CurveParams { radius: 2, curvature: 0.0, height_scale: 0.01 };
+        let g = build(&map, (3.0, 3.0), &p);
+        let n = g.normals[12];
+        assert!(n[2] > 0.05, "rising along the game's z, drawn towards -z: leans to +z {n:?}");
+        let [a, b, c] = [0, 1, 2].map(|k| Vec3::from(g.positions[g.indices[k] as usize]));
+        assert!((b - a).cross(c - a).y > 0.0, "front faces up");
     }
 }

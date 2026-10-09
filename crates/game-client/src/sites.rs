@@ -5,6 +5,7 @@
 //! blocks tinted with the tribe colour.
 
 use crate::camera::CameraRig;
+use crate::game_frame::GameYaw;
 use crate::grounded::Grounded;
 use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects};
 use crate::world::{CurrentMap, LevelList};
@@ -29,7 +30,7 @@ struct SiteMarker;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SitePart {
     pub ground: Grounded,
-    pub yaw: f32,
+    pub yaw: GameYaw,
 }
 
 pub struct SitesPlugin;
@@ -68,10 +69,10 @@ pub fn site_cell_pos(site: &ReincarnationSite) -> Vec2 {
     Vec2::new(site.x as f32, site.z as f32) / WORLD_UNITS_PER_CELL as f32
 }
 
-/// Yaw turning the stone's front (-Z: the glyph side, which it also leans towards) to the
-/// centre, for a stone placed at angle `a` on the ring (offset `(cos a, sin a)` in x/z).
-pub fn face_centre_yaw(a: f32) -> f32 {
-    std::f32::consts::FRAC_PI_2 - a
+/// Turn (game frame) bringing the stone's front (-Z in its own game frame: the glyph side, which it also
+/// leans towards) to the centre, for a stone placed at angle `a` on the ring (offset `(cos a, sin a)` in x/z).
+pub fn face_centre_yaw(a: f32) -> GameYaw {
+    GameYaw(std::f32::consts::FRAC_PI_2 - a)
 }
 
 /// A ring of stones facing the centre (where the shaman stands), each with its own ground position.
@@ -140,7 +141,7 @@ fn respawn_markers(
                 .spawn((
                     SiteMarker,
                     part.ground,
-                    Transform::from_rotation(Quat::from_rotation_y(part.yaw)),
+                    Transform::from_rotation(part.yaw.into()),
                     Visibility::Hidden,
                 ))
                 .with_child((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::from_xyz(0.0, lift, 0.0)));
@@ -171,7 +172,7 @@ mod tests {
         let s = ReincarnationSite::at_cell(0, (10, 20));
         let centre = site_cell_pos(&s);
         for p in &site_parts(&s) {
-            let front = Quat::from_rotation_y(p.yaw) * Vec3::NEG_Z;
+            let front = Quat::from_rotation_y(p.yaw.0) * Vec3::NEG_Z;
             let to_centre = (centre - p.ground.at).normalize();
             assert!(front.xz().distance(to_centre) < 1e-5, "{front:?} vs {to_centre:?}");
         }

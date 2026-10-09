@@ -12,6 +12,7 @@ mod edge_push;
 mod editor;
 mod effects;
 mod flame;
+mod game_frame;
 mod generated_buildings;
 mod grounded;
 mod hover;

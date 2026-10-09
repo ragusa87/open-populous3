@@ -6,6 +6,7 @@
 //! shows its tooltip (`tooltip`).
 
 use crate::camera::GameCamera;
+use crate::game_frame::GameYaw;
 use crate::grounded::Grounded;
 use crate::hud::PANEL_WIDTH;
 use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects};
@@ -45,9 +46,9 @@ pub fn tree_scale(size: u8) -> f32 {
     size_factor(size) * FULL_HEIGHT / MODEL_HEIGHT
 }
 
-/// A thing angle (2048ths of a turn) in radians.
-pub fn angle_yaw(angle: u16) -> f32 {
-    (angle % 2048) as f32 * std::f32::consts::TAU / 2048.0
+/// A thing angle (2048ths of a turn) as a turn in the game's frame.
+pub fn angle_yaw(angle: u16) -> GameYaw {
+    GameYaw((angle % 2048) as f32 * std::f32::consts::TAU / 2048.0)
 }
 
 /// A tree as seen on screen: its index, trunk base and top (pixels).
@@ -184,7 +185,7 @@ fn respawn_trees(
     let cell = WORLD_UNITS_PER_CELL as f32;
     for (i, tree) in map.0.trees.iter().enumerate() {
         let at = Vec2::new(tree.x as f32 / cell, tree.z as f32 / cell);
-        let mut view = commands.spawn((TreeView(i), crate::hover::Hoverable::default(), Grounded { at, half: TRUNK_HALF }, Transform::from_rotation(Quat::from_rotation_y(angle_yaw(tree.angle))), Visibility::Hidden));
+        let mut view = commands.spawn((TreeView(i), crate::hover::Hoverable::default(), Grounded { at, half: TRUNK_HALF }, Transform::from_rotation(angle_yaw(tree.angle).into()), Visibility::Hidden));
         match &original {
             Some((trees, material)) => {
                 let (mesh, height) = &trees[tree.variant as usize % trees.len()];
@@ -284,8 +285,8 @@ mod tests {
 
     #[test]
     fn thing_angles_in_radians() {
-        assert_eq!(angle_yaw(0), 0.0);
-        assert!((angle_yaw(512) - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!(angle_yaw(0), GameYaw(0.0));
+        assert!((angle_yaw(512).0 - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
         assert_eq!(angle_yaw(2048 + 512), angle_yaw(512));
     }
 

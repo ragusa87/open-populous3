@@ -11,7 +11,7 @@
 //! (`campfire::can_place`); a left click lights it (`Command::PlaceCampfire`) and puts it away.
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
-use crate::grounded::{ground_y, pick_ground};
+use crate::grounded::{ground_point, pick_ground};
 use crate::hud::PANEL_WIDTH;
 use crate::units::{world_units, PLAYER};
 use crate::virtual_cursor::CursorLook;
@@ -283,14 +283,9 @@ fn draw_blueprint(
         }
         return;
     };
-    let size = map.0.terrain.size() as f32;
-    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
     let terrain = &map.0.terrain;
     // A map position (cells) -> render position on the ground.
-    let on_ground = |at: Vec2| {
-        let (dx, dz) = (wrap(at.x - rig.focus.x), wrap(at.y - rig.focus.y));
-        [dx, ground_y(terrain, rig.focus, &params.0, dx, dz) + LIFT, dz]
-    };
+    let on_ground = |at: Vec2| <[f32; 3]>::from(ground_point(terrain, rig.focus, &params.0, at) + Vec3::Y * LIFT);
     let kind = match plan {
         Plan::Building(kind) => kind,
         Plan::Campfire => {

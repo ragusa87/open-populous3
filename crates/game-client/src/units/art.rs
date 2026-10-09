@@ -113,10 +113,11 @@ impl TribeArt {
     }
 }
 
-/// Which of the 8 drawn directions shows a unit with heading `facing` (eighths of a turn,
-/// 0 = +z, 2 = +x) to a camera at `yaw` (the eye sits towards `(sin yaw, cos yaw)`).
+/// Which of the 8 drawn directions shows a unit with heading `facing` (eighths of a turn in the game's
+/// frame, 0 = +z, 2 = +x) to a camera at render `yaw` (the eye sits towards `(sin yaw, cos yaw)`). The
+/// game's +z is drawn towards -z (`game_frame`): the heading's render angle is π minus its game angle.
 pub fn sprite_dir(facing: u8, yaw: f32) -> usize {
-    let a = facing as f32 * FRAC_PI_4 - yaw;
+    let a = std::f32::consts::PI - facing as f32 * FRAC_PI_4 - yaw;
     ((a / FRAC_PI_4).round() as i32).rem_euclid(DIRS as i32) as usize
 }
 
@@ -330,11 +331,11 @@ mod tests {
 
     #[test]
     fn direction_relative_to_the_camera() {
-        assert_eq!(sprite_dir(4, 0.0), 4, "walking away from a camera on +z: back");
-        assert_eq!(sprite_dir(0, 0.0), 0, "towards the camera: front");
+        assert_eq!(sprite_dir(0, 0.0), 4, "the game's +z is drawn away from a camera at yaw 0: back");
+        assert_eq!(sprite_dir(4, 0.0), 0, "towards the camera: front");
         assert_eq!(sprite_dir(2, 0.0), 2, "+x is screen right at yaw 0");
         assert_eq!(sprite_dir(2, PI / 2.0), 0, "camera moved to +x: she faces it");
-        assert_eq!(sprite_dir(0, PI / 4.0), 7);
+        assert_eq!(sprite_dir(4, PI / 4.0), 7);
     }
 
     #[test]

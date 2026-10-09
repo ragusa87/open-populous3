@@ -3,6 +3,7 @@
 //! The mouse is captured by the in-game cursor (`virtual_cursor`, Esc releases it).
 
 use crate::edge_push::EdgePush;
+use crate::game_frame::GamePos;
 use crate::terrain_mesh::{focus_height, CurveParams};
 use crate::world::CurrentMap;
 use bevy::input::mouse::AccumulatedMouseMotion;
@@ -83,9 +84,14 @@ impl Default for CameraRig {
 }
 
 impl CameraRig {
-    /// Ground-plane forward (where "up arrow" goes) for the current yaw.
+    /// Ground-plane forward (where "up arrow" goes) for the current yaw, in map cells.
     pub fn forward(&self) -> Vec2 {
-        Vec2::new(-self.yaw.sin(), -self.yaw.cos())
+        GamePos::from_render(Vec3::new(-self.yaw.sin(), 0.0, -self.yaw.cos())).xz()
+    }
+
+    /// Ground-plane right (screen right) for the current yaw, in map cells.
+    pub fn right(&self) -> Vec2 {
+        GamePos::from_render(Vec3::new(self.yaw.cos(), 0.0, -self.yaw.sin())).xz()
     }
 
     /// Moving by hand cancels a flight under way.
@@ -93,9 +99,7 @@ impl CameraRig {
         if forward != 0.0 || right != 0.0 {
             self.flight = None;
         }
-        let f = self.forward();
-        let r = Vec2::new(-f.y, f.x);
-        self.focus = (self.focus + f * forward + r * right).rem_euclid(Vec2::splat(MAP));
+        self.focus = (self.focus + self.forward() * forward + self.right() * right).rem_euclid(Vec2::splat(MAP));
     }
 
     pub fn toggle_aerial(&mut self) {
@@ -173,7 +177,8 @@ pub(crate) fn spawn_camera(mut commands: Commands) {
     commands.insert_resource(GlobalAmbientLight { brightness: 60.0, ..default() });
     commands.spawn((
         DirectionalLight { illuminance: 9000.0, ..default() },
-        Transform::from_xyz(40.0, 22.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+        // The sun of the baked terrain shading (`terrain_texture::SUN`), in the game's frame.
+        Transform::from_translation(GamePos(Vec3::new(40.0, 22.0, 15.0)).into()).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
 
@@ -189,13 +194,12 @@ pub fn start_cell(map: &game_core::map::GameMap) -> (i32, i32) {
 }
 
 /// Where a new map's camera looks and its yaw: the level's own start camera where it gives one, else
-/// `start_cell` facing yaw 0. Its angle is read like the things' angles (`nature::angle_yaw`) plus a half
-/// turn: our yaw places the eye, the angle is where the camera looks (checked on level 3: the player's hut
-/// stands beyond the stone circle, not in front of it).
+/// `start_cell` facing yaw 0. Its angle, read like the things' angles (`nature::angle_yaw`), is where the
+/// camera looks (checked on level 3: from the stone circle the player's hut ahead, the totem on its right).
 pub fn start_view(map: &game_core::map::GameMap) -> ((i32, i32), f32) {
     let camera = map.start_camera;
     let cell = camera.and_then(|c| c.cell).unwrap_or_else(|| start_cell(map));
-    (cell, camera.map_or(0.0, |c| crate::nature::angle_yaw((c.angle + 1024) % 2048)))
+    (cell, camera.map_or(0.0, |c| crate::nature::angle_yaw(c.angle).render()))
 }
 
 fn fly(time: Res<Time>, mut rig: ResMut<CameraRig>) {
@@ -410,11 +414,15 @@ mod tests {
     fn a_level_starts_its_camera_where_and_as_its_header_says() {
         let mut map = game_core::map::GameMap::sandbox_walk();
         let site = start_cell(&map);
+        let (cell, yaw) = start_view(&map);
+        assert_eq!(cell, site);
+        assert!((yaw.abs() - std::f32::consts::PI).abs() < 1e-6, "our maps: looking north, the eye on their south side");
+        map.start_camera = None;
         assert_eq!(start_view(&map), (site, 0.0));
         map.start_camera = Some(game_core::map::StartCamera { cell: Some((21, 83)), angle: 512 });
         let (cell, yaw) = start_view(&map);
         assert_eq!(cell, (21, 83));
-        assert!((yaw - 3.0 * std::f32::consts::FRAC_PI_2).abs() < 1e-6, "a quarter turn, the eye behind");
+        assert!((yaw + std::f32::consts::FRAC_PI_2).abs() < 1e-6, "a quarter turn, the other way once mirrored");
         map.start_camera = Some(game_core::map::StartCamera { cell: None, angle: 1024 });
         assert_eq!(start_view(&map).0, site, "an angle only: still the site");
     }
@@ -434,9 +442,21 @@ mod tests {
     fn focus_wraps_around_the_torus() {
         let mut rig = CameraRig { focus: Vec2::new(1.0, 127.5), ..default() };
         rig.move_by(2.0, 0.0);
-        assert!((rig.focus.y - 125.5).abs() < 1e-4);
+        assert!((rig.focus.y - 1.5).abs() < 1e-4, "yaw 0 looks along the game's +z");
         rig.move_by(-5.0, 0.0);
-        assert!((rig.focus.y - 2.5).abs() < 1e-4);
+        assert!((rig.focus.y - 124.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn forward_and_right_go_where_the_screen_shows() {
+        for yaw in [0.0, 0.7, 2.0, -1.2] {
+            let rig = CameraRig { yaw, ..default() };
+            let ahead = Vec3::from(GamePos::ground(rig.forward().x, 0.0, rig.forward().y));
+            let side = Vec3::from(GamePos::ground(rig.right().x, 0.0, rig.right().y));
+            let eye = rig.eye_offset();
+            assert!(ahead.dot(Vec3::new(eye.x, 0.0, eye.z)) < 0.0, "away from the eye");
+            assert!(ahead.cross(side).y < 0.0, "right of forward, seen from above");
+        }
     }
 
     #[test]

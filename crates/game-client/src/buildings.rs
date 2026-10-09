@@ -11,10 +11,11 @@
 
 use crate::blueprint::{mark_material, mark_mesh, set_mark};
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
+use crate::game_frame::GameYaw;
 use crate::construction::{beams, box_frame, built_part, chimney, layered_box, object_edges, pushed, BEAM, INNER_GAP};
 use crate::flame::{self, Flame, FlameFrames};
 use crate::generated_buildings;
-use crate::grounded::{ground_y, Grounded, Tilted};
+use crate::grounded::{ground_point, Grounded, Tilted};
 use crate::original_models::{atlas_image, object_mesh, solid_part, to_mesh, MeshData, OriginalObjects};
 use crate::sites::tribe_color;
 use crate::world::{CurrentMap, LevelList};
@@ -66,9 +67,9 @@ pub fn building_object(kind: BuildingKind, owner: u8) -> Option<usize> {
     })
 }
 
-/// Turn for a facing in eighths of a turn.
-pub fn facing_yaw(facing: u8) -> f32 {
-    facing as f32 * std::f32::consts::FRAC_PI_4
+/// Turn for a facing in eighths of a turn, in the game's frame.
+pub fn facing_yaw(facing: u8) -> GameYaw {
+    GameYaw(facing as f32 * std::f32::consts::FRAC_PI_4)
 }
 
 #[derive(Component)]
@@ -273,7 +274,7 @@ fn respawn_buildings(
             }
             (_, Some(look)) => {
                 let skin = kit_skin.get_or_insert_with(|| generated_skin(&mut images, &mut mats)).clone();
-                (look, skin.clone(), skin, flame::crossed_boards_at(generated_buildings::flame_bases(kind), BRAZIER_FLAME))
+                (look, skin.clone(), skin, flame::crossed_boards_at(&generated_buildings::flame_bases(kind), BRAZIER_FLAME))
             }
             _ => {
                 let mut look = staged(&layered_box(BOX, layers), pieces, &mut meshes);
@@ -290,7 +291,7 @@ fn respawn_buildings(
             BuildingView(i),
             Grounded { at, half: 0.0 },
             Tilted { half: FOOTPRINT_HALF, yaw },
-            Transform::from_rotation(Quat::from_rotation_y(yaw)),
+            Transform::from_rotation(yaw.into()),
             Visibility::Hidden,
         ));
         view.insert(crate::hover::Hoverable::default());
@@ -358,16 +359,11 @@ fn draw_site_marks(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let terrain = &map.0.terrain;
-    let size = terrain.size() as f32;
-    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
     let cell = WORLD_UNITS_PER_CELL as f32;
     for (mark, mesh) in &marks {
         let Some(b) = map.0.buildings.get(mark.0) else { continue };
         let (cx, cz) = b.centre();
-        let vertex = |at: Vec2| {
-            let (dx, dz) = (wrap(at.x - rig.focus.x), wrap(at.y - rig.focus.y));
-            ([dx, ground_y(terrain, rig.focus, &params.0, dx, dz) + MARK_LIFT, dz], [1.0, 1.0, 1.0, 0.55])
-        };
+        let vertex = |at: Vec2| ((ground_point(terrain, rig.focus, &params.0, at) + Vec3::Y * MARK_LIFT).into(), [1.0, 1.0, 1.0, 0.55]);
         if let Some(mut m) = meshes.get_mut(&mesh.0) {
             set_mark(&mut m, mark_mesh(b.kind, b.facing, Vec2::new(cx as f32, cz as f32) / cell, vertex));
         }
@@ -488,7 +484,7 @@ mod tests {
 
     #[test]
     fn facing_in_quarter_turns() {
-        assert_eq!(facing_yaw(0), 0.0);
-        assert!((facing_yaw(2) - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!(facing_yaw(0), GameYaw(0.0));
+        assert!((facing_yaw(2).0 - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
     }
 }

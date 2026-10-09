@@ -7,14 +7,15 @@ use crate::flame;
 use crate::original_models::{object_mesh, solid_part, to_mesh, OriginalObjects};
 use crate::world::CurrentMap;
 use bevy::prelude::*;
+use crate::game_frame::GamePos;
 use game_core::vault::FULL;
 use pop3_format::catalog::{KNOWLEDGE_PYRAMID, KNOWLEDGE_PYRAMID_CLOSED, KNOWLEDGE_PYRAMID_FOLDED};
 use pop3_format::Object;
 
 /// Points moving less than this (world units) between frames are export noise, not the door or top.
 const MOVE_MIN: i16 = 10;
-/// The generated door slab (cells, building frame): its size, where it stands closed, how far it
-/// slides up to open.
+/// The generated door slab (cells, building frame in the game's frame): its size, where it stands closed,
+/// how far it slides up to open.
 pub const SLAB: Vec3 = Vec3::new(0.4, 0.5, 0.06);
 pub const SLAB_AT: Vec3 = Vec3::new(0.0, 0.37, -0.95);
 const SLAB_RISE: f32 = 0.5;
@@ -74,7 +75,7 @@ pub struct VaultSlab(pub usize);
 
 /// Where the generated door slab stands with the door `door` open (thousandths).
 pub fn slab_at(door: u16) -> Vec3 {
-    SLAB_AT + Vec3::Y * SLAB_RISE * door as f32 / FULL as f32
+    Vec3::from(GamePos(SLAB_AT)) + Vec3::Y * SLAB_RISE * door as f32 / FULL as f32
 }
 
 pub struct VaultPlugin;
@@ -137,7 +138,7 @@ mod tests {
 
     #[test]
     fn the_slab_rises_as_the_door_opens() {
-        assert_eq!(slab_at(0), SLAB_AT);
+        assert_eq!(slab_at(0), Vec3::from(GamePos(SLAB_AT)), "drawn mirrored like the kit");
         assert!((slab_at(FULL).y - SLAB_AT.y - SLAB_RISE).abs() < 1e-6);
     }
 }

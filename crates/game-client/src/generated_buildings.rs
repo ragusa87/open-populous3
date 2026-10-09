@@ -3,7 +3,9 @@
 //! Contract: named Body/Scaffold meshes, baked cell-space positions, triangle primitives with
 //! normals, atlas UVs and material colours. Only the material named Tribe follows the owner.
 
+use crate::game_frame::{mirrored, GamePos};
 use crate::original_models::MeshData;
+use bevy::math::Vec3;
 use crate::sites::tribe_color;
 use bevy::asset::RenderAssetUsages;
 use bevy::color::ColorToComponents;
@@ -134,13 +136,14 @@ pub fn scaffold(kind: BuildingKind, owner: u8) -> Option<MeshData> {
     Some(painted(&d.model.scaffold, &d.tribe[1], owner))
 }
 
-/// Where the kind's fires burn (cells, building frame), each drawn by `flame`: the firewarrior
-/// hut's two braziers (tools/generate_buildings.py), their bowls' tops.
-pub fn flame_bases(kind: BuildingKind) -> &'static [[f32; 3]] {
-    match kind {
+/// Where the kind's fires burn (cells, building frame, drawn: `game_frame`), each drawn by `flame`: the
+/// firewarrior hut's two braziers (tools/generate_buildings.py, game frame), their bowls' tops.
+pub fn flame_bases(kind: BuildingKind) -> Vec<[f32; 3]> {
+    let game: &[[f32; 3]] = match kind {
         BuildingKind::FirewarriorTraining => &[[-1.08, 0.76, -1.03], [1.08, 0.76, -1.03]],
         _ => &[],
-    }
+    };
+    game.iter().map(|&p| Vec3::from(GamePos(Vec3::from(p))).into()).collect()
 }
 
 fn decoded(kind: BuildingKind) -> Option<&'static Decoded> {
@@ -191,13 +194,17 @@ fn decode(bytes: &[u8]) -> Option<Decoded> {
             if indices.len() % 3 != 0 {
                 return None;
             }
-            for i in indices {
-                out.indices.push(out.positions.len() as u32);
-                out.positions.push(*positions.get(i as usize)?);
-                out.normals.push(*normals.get(i as usize)?);
-                out.uvs.push(*uvs.get(i as usize)?);
-                out.colors.push(colour);
-                tribe.push(is_tribe);
+            // Authored in the game's frame like the original objects: drawn mirrored (`game_frame`).
+            let drawn = |v: [f32; 3]| <[f32; 3]>::from(Vec3::from(GamePos(Vec3::from(v))));
+            for tri in indices.chunks_exact(3) {
+                for i in mirrored([tri[0], tri[1], tri[2]]) {
+                    out.indices.push(out.positions.len() as u32);
+                    out.positions.push(drawn(*positions.get(i as usize)?));
+                    out.normals.push(drawn(*normals.get(i as usize)?));
+                    out.uvs.push(*uvs.get(i as usize)?);
+                    out.colors.push(colour);
+                    tribe.push(is_tribe);
+                }
             }
         }
         (!out.indices.is_empty()).then_some((out, tribe))
@@ -228,7 +235,7 @@ mod tests {
     #[test]
     fn flames_sit_on_the_firewarrior_huts_braziers() {
         let body = body(BuildingKind::FirewarriorTraining, 0).unwrap();
-        for &[x, y, z] in flame_bases(BuildingKind::FirewarriorTraining) {
+        for [x, y, z] in flame_bases(BuildingKind::FirewarriorTraining) {
             let rim = body.positions.iter().filter(|p| (p[1] - y).abs() < 1e-3 && ((p[0] - x).powi(2) + (p[2] - z).powi(2)).sqrt() < 0.3);
             assert!(rim.count() > 0, "a bowl top at {x}, {y}, {z}");
         }
@@ -258,7 +265,8 @@ mod tests {
                 }
             }
             let f = kind.footprint();
-            for &[x, y, z] in &model.body.positions {
+            for &drawn in &model.body.positions {
+                let [x, y, z] = GamePos::from_render(Vec3::from(drawn)).0.to_array();
                 // Eaves/posts get 0.12 cell of visual allowance. Boat piers intentionally
                 // extend beyond the land footprint on +Z into the launch channel.
                 assert!((-0.04..3.0).contains(&y), "{kind:?}: vertical bounds {y}");

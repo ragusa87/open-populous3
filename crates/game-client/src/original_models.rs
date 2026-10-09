@@ -4,6 +4,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, PrimitiveTopology};
+use crate::game_frame::{mirrored, GamePos};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use pop3_format::objects::{ATLAS_HEIGHT, ATLAS_WIDTH, TILE};
@@ -37,7 +38,8 @@ pub struct MeshData {
     pub colors: Vec<[f32; 4]>,
 }
 
-/// Flat-shaded triangles (quads split 0-1-2, 0-2-3), in cells (1 cell = 512 units), with the
+/// Flat-shaded triangles (quads split 0-1-2, 0-2-3), in cells (1 cell = 512 units), drawn mirrored like the
+/// world (`game_frame`: the objects are in the game's left-handed frame), with the
 /// tribe-coloured tiles of `tribe` (objects are stored in blue).
 pub fn object_mesh(obj: &Object, tribe: u8) -> MeshData {
     let scale = 1.0 / WORLD_UNITS_PER_CELL as f32;
@@ -49,17 +51,18 @@ pub fn object_mesh(obj: &Object, tribe: u8) -> MeshData {
             .zip(&face.uv)
             .map(|(&i, &uv)| {
                 let p = obj.points[i as usize];
-                ([p[0] as f32 * scale, p[1] as f32 * scale, p[2] as f32 * scale], face_uv(face.tile.map(|t| tribe_tile(t, tribe)), face.colour, uv))
+                let at = GamePos(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) * scale);
+                (Vec3::from(at).into(), face_uv(face.tile.map(|t| tribe_tile(t, tribe)), face.colour, uv))
             })
             .collect();
-        for tri in [[0, 1, 2], [0, 2, 3]].iter().take(corners.len() - 2) {
-            let [a, b, c] = tri.map(|k| corners[k].0);
+        for tri in [mirrored([0, 1, 2]), mirrored([0, 2, 3])].iter().take(corners.len() - 2) {
+            let [a, b, c] = tri.map(|k| corners[k as usize].0);
             let n = (Vec3::from(b) - Vec3::from(a)).cross(Vec3::from(c) - Vec3::from(a)).normalize_or(Vec3::Y);
-            for k in tri {
+            for &k in tri {
                 m.indices.push(m.positions.len() as u32);
-                m.positions.push(corners[*k].0);
+                m.positions.push(corners[k as usize].0);
                 m.normals.push(n.into());
-                m.uvs.push(corners[*k].1);
+                m.uvs.push(corners[k as usize].1);
             }
         }
     }
@@ -154,8 +157,8 @@ mod tests {
     fn quad_becomes_two_triangles_in_cells() {
         let m = object_mesh(&quad(), 0);
         assert_eq!(m.indices.len(), 6);
-        assert_eq!(m.positions[2], [1.0, 1.0, 0.0]);
-        assert_eq!(m.normals[0], [0.0, 0.0, 1.0]);
+        assert_eq!(m.positions[1], [1.0, 1.0, 0.0], "corners 0, 2, 1: the front kept once mirrored");
+        assert_eq!(m.normals[0], [0.0, 0.0, -1.0], "facing the game's +z, drawn towards -z");
     }
 
     #[test]

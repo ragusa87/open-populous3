@@ -49,11 +49,16 @@ pub struct GameMap {
     pub campfires: Vec<Campfire>,
     /// The cells the buildings stand on, past their plan stage (`update_walls`).
     pub walls: Walls,
-    /// Where an original level's camera starts (its header), None when it does not say.
+    /// Where the camera starts: an original level's header (None when it does not say), `OUR_MAPS_CAMERA`
+    /// on generated maps and sandboxes.
     pub start_camera: Option<StartCamera>,
     /// An original level's object bank (header byte 97): its tree style. 0 elsewhere.
     pub object_bank: u8,
 }
+
+/// Generated maps and sandboxes are laid out for a camera on their south side looking north (towards -z):
+/// half a turn from angle 0, which looks towards +z.
+pub const OUR_MAPS_CAMERA: StartCamera = StartCamera { cell: None, angle: 1024 };
 
 /// An original level's start camera (`.hdr`): a cell to look at (None: the player's site) and an angle about
 /// the vertical axis, 2048ths of a turn.
@@ -89,7 +94,7 @@ fn sandbox_gift(k: usize) -> crate::building::Reward {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: None, object_bank: 0 }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0 }
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground

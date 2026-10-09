@@ -8,6 +8,7 @@
 //! The generated stand-ins do the same with blocks. Redrawn when the map changes.
 
 use crate::effects::{Puff, SINKING};
+use crate::game_frame::GameYaw;
 use crate::flame::{self, Flame, FlameFrames};
 use crate::grounded::Grounded;
 use crate::original_models::{atlas_image, object_mesh, solid_part, to_mesh, OriginalObjects};
@@ -310,7 +311,7 @@ fn animate_totems(
                 }
             }
             if let Ok((block, mut tf)) = blocks.get_mut(e) {
-                tf.rotation = Quat::from_rotation_y(if block.0 == 0 { 0.0 } else { TOTAL_TURN * turn });
+                tf.rotation = GameYaw(if block.0 == 0 { 0.0 } else { TOTAL_TURN * turn }).into();
             }
             if let Ok(mut tf) = pivots.get_mut(e) {
                 tf.rotation = Quat::from_rotation_x(nod);

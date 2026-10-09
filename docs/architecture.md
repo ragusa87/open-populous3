@@ -13,6 +13,7 @@ crates/
                   world.rs        CurrentMap, LevelList, terrain entity rebuild
                   terrain_mesh.rs pure mesh builder (curvature, colors, normals), unit-tested
                   grounded.rs     parts set on the curved terrain under them (sites, buildings...)
+                  game_frame.rs   the game's left-handed frame and its mirror into Bevy (GamePos, GameYaw)
                   original_models.rs original 3D objects -> meshes + theme atlas (optional)
                   generated_buildings.rs embedded generated GLBs -> cell-space coloured meshes + construction frames
                   buildings.rs    model choice, construction stages, smoke and shaking
@@ -27,6 +28,16 @@ crates/
                   editor.rs       edit mode: spells as brushes at camera focus
                   dev.rs          HEADLESS / SCREENSHOT / AERIAL env helpers
 ```
+
+## Handedness
+The original renders with Direct3D (pop3-rev reverses `D3DPopTB.exe`): its world is left-handed, x right, y up,
+z away from the viewer (the game's `XPos`/`ZPos` on the ground, `YPos` height). The files, `game-core` and the
+original 3D objects keep that frame; Bevy is right-handed (z towards the viewer), and drawing the same numbers
+there gives the mirror image (on level 3 the totem stood left of the hut seen from the site instead of right).
+The client mirrors z at the boundary only, in `game_frame.rs`: a `GamePos` (position or offset in the game's frame)
+becomes a render `Vec3` with z negated, a `GameYaw` (a turn in the game's sense) a `Quat` turning the other way, and
+mirrored meshes (original objects, flames, our building kit, authored in the game's frame) reverse their triangles
+(`mirrored`) to keep their fronts. The simulation never sees it. Camera yaw, eye and billboards are render-space.
 
 Rules:
 - `pop3-format` and `game-core` never depend on Bevy: they must run in tests, servers and tools.

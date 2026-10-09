@@ -3,6 +3,7 @@
 //! built (one band per piece of wood, from the ground up), and where a hut's chimney smokes.
 //! Pure functions on `MeshData`, in the building's own frame (cells, y up).
 
+use crate::game_frame::GamePos;
 use crate::original_models::MeshData;
 use bevy::math::Vec3;
 use pop3_format::{Object, WORLD_UNITS_PER_CELL};
@@ -54,13 +55,13 @@ pub fn pushed(mesh: &MeshData, by: f32) -> MeshData {
 }
 
 /// The edges of an original object's faces, once each (shared edges and quads' diagonals are not
-/// doubled), in cells.
+/// doubled), in cells, drawn mirrored like `original_models::object_mesh`.
 pub fn object_edges(obj: &Object) -> Vec<Edge> {
     let mut seen = std::collections::BTreeSet::new();
     let scale = 1.0 / WORLD_UNITS_PER_CELL as f32;
     let point = |i: u16| {
         let p = obj.points[i as usize];
-        Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) * scale
+        Vec3::from(GamePos(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) * scale))
     };
     let mut edges = Vec::new();
     for face in &obj.faces {

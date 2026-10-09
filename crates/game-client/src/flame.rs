@@ -6,6 +6,7 @@
 //! swapping materials (`FlameFrames`, shared by every flame, `Flame` on each). Without the original
 //! files, a generated flame goes through the same steps.
 
+use crate::game_frame::{mirrored, GamePos};
 use crate::original_models::MeshData;
 use crate::units::SimClock;
 use crate::world::LevelList;
@@ -130,12 +131,14 @@ pub fn flame_mesh(obj: &Object) -> MeshData {
     for face in obj.faces.iter().filter(|f| f.is_alpha()) {
         let corner = |k: usize| {
             let p = obj.points[face.points[k] as usize];
-            ([p[0] as f32 * scale, p[1] as f32 * scale, p[2] as f32 * scale], [texel(face.uv[k].0), texel(face.uv[k].1)])
+            let at = GamePos(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) * scale);
+            (<[f32; 3]>::from(Vec3::from(at)), [texel(face.uv[k].0), texel(face.uv[k].1)])
         };
-        for tri in [[0, 1, 2], [0, 2, 3]].iter().take(face.points.len() - 2) {
+        for tri in [mirrored([0, 1, 2]), mirrored([0, 2, 3])].iter().take(face.points.len() - 2) {
+            let tri = tri.map(|k| k as usize);
             let [a, b, c] = tri.map(|k| Vec3::from(corner(k).0));
             let n = (b - a).cross(c - a).normalize_or(Vec3::Y);
-            for &k in tri {
+            for k in tri {
                 let (p, uv) = corner(k);
                 m.indices.push(m.positions.len() as u32);
                 m.positions.push(p);
@@ -310,9 +313,9 @@ mod tests {
         let obj = Object { points: vec![[0, 0, 0], [512, 0, 0], [512, 512, 0], [0, 512, 0]], faces: vec![face(0, 31), face(pop3_format::objects::FACE_ALPHA, 15)] };
         let m = flame_mesh(&obj);
         assert_eq!(m.indices.len(), 6, "the blended face only");
-        assert_eq!(m.positions[2], [1.0, 1.0, 0.0]);
+        assert_eq!(m.positions[1], [1.0, 1.0, 0.0], "corners 0, 2, 1 once mirrored");
         assert_eq!(m.uvs[0], [0.5 / 32.0, 0.5 / 32.0]);
-        assert_eq!(m.uvs[1], [15.0 / 32.0, 0.5 / 32.0], "half the tile");
+        assert_eq!(m.uvs[2], [15.0 / 32.0, 0.5 / 32.0], "half the tile");
     }
 
     #[test]

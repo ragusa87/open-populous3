@@ -2,6 +2,7 @@
 //! its own map position and is set on the curved terrain under it, so footprints follow slopes.
 
 use crate::camera::{CameraRig, CurveParamsRes};
+use crate::game_frame::{GamePos, GameYaw};
 use crate::terrain_mesh::{drop_at, CurveParams};
 use crate::world::CurrentMap;
 use bevy::prelude::*;
@@ -22,7 +23,7 @@ pub struct Grounded {
 pub struct Tilted {
     /// Half size (cells) of the square the slope is measured over.
     pub half: f32,
-    pub yaw: f32,
+    pub yaw: GameYaw,
 }
 
 pub struct GroundedPlugin;
@@ -65,12 +66,22 @@ pub fn render_pos(map: &Heightmap, g: &Grounded, focus: Vec2, params: &CurvePara
             mesh_height(map, g.at.x + ox, g.at.y + oz) * params.height_scale - drop_at(params, dx + ox, dz + oz)
         })
         .fold(f32::INFINITY, f32::min);
-    Some(Vec3::new(dx, y, dz))
+    Some(GamePos::ground(dx, y, dz).into())
 }
 
-/// Render-space ground height at offset `(dx, dz)` from the focus, as the mesh draws it.
+/// Render point on the ground as the mesh draws it at map position `at` (cells), the short way round
+/// the torus from the focus.
+pub fn ground_point(map: &Heightmap, focus: Vec2, params: &CurveParams, at: Vec2) -> Vec3 {
+    let size = map.size() as f32;
+    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
+    let r = Vec3::from(GamePos::ground(wrap(at.x - focus.x), 0.0, wrap(at.y - focus.y)));
+    Vec3::new(r.x, ground_y(map, focus, params, r.x, r.z), r.z)
+}
+
+/// Render-space ground height at render offset `(dx, dz)` from the focus, as the mesh draws it.
 pub fn ground_y(map: &Heightmap, focus: Vec2, params: &CurveParams, dx: f32, dz: f32) -> f32 {
-    mesh_height(map, focus.x + dx, focus.y + dz) * params.height_scale - drop_at(params, dx, dz)
+    let at = focus + GamePos::from_render(Vec3::new(dx, 0.0, dz)).xz();
+    mesh_height(map, at.x, at.y) * params.height_scale - drop_at(params, dx, dz)
 }
 
 /// Map position (cells, wrapped) of the first ground point hit by a render-space ray, None if it
@@ -100,7 +111,7 @@ pub fn pick_ground(map: &Heightmap, focus: Vec2, params: &CurveParams, origin: V
         return None;
     }
     let size = map.size() as f32;
-    Some((focus + Vec2::new(p.x, p.z)).rem_euclid(Vec2::splat(size)))
+    Some((focus + GamePos::from_render(p).xz()).rem_euclid(Vec2::splat(size)))
 }
 
 /// Ground normal (render space) at offset `(dx, dz)` from the focus, from the drawn heights `half`
@@ -122,9 +133,9 @@ fn tilt_grounded(
     let size = map.0.terrain.size() as f32;
     let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
     for (g, tilt, mut t) in &mut q {
-        let (dx, dz) = (wrap(g.at.x - rig.focus.x), wrap(g.at.y - rig.focus.y));
-        let normal = ground_normal(&map.0.terrain, rig.focus, &params.0, dx, dz, tilt.half);
-        t.rotation = Quat::from_rotation_arc(Vec3::Y, normal) * Quat::from_rotation_y(tilt.yaw);
+        let at = Vec3::from(GamePos::ground(wrap(g.at.x - rig.focus.x), 0.0, wrap(g.at.y - rig.focus.y)));
+        let normal = ground_normal(&map.0.terrain, rig.focus, &params.0, at.x, at.z, tilt.half);
+        t.rotation = Quat::from_rotation_arc(Vec3::Y, normal) * Quat::from(tilt.yaw);
     }
 }
 
@@ -189,7 +200,16 @@ mod tests {
     fn render_pos_wraps_around_the_torus() {
         let map = Heightmap::new(128);
         let pos = render_pos(&map, &point(Vec2::new(1.0, 1.0)), Vec2::new(126.0, 127.0), &flat_params()).unwrap();
-        assert_eq!((pos.x, pos.z), (3.0, 2.0));
+        assert_eq!((pos.x, pos.z), (3.0, -2.0), "the game's z drawn mirrored");
+    }
+
+    #[test]
+    fn picking_the_ground_finds_the_place_drawn_there() {
+        let map = Heightmap::new(128);
+        let (at, focus) = (Vec2::new(12.0, 7.0), Vec2::new(10.0, 10.0));
+        let drawn = render_pos(&map, &point(at), focus, &flat_params()).unwrap();
+        let hit = pick_ground(&map, focus, &flat_params(), drawn + Vec3::Y * 5.0, Vec3::NEG_Y).unwrap();
+        assert!(hit.distance(at) < 0.01, "{hit:?}");
     }
 
     #[test]
