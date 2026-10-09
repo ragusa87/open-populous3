@@ -32,7 +32,8 @@ One widget for every use: one slot per unit of capacity or need.
 ### People rows: selecting what is inside
 Clicking a filled slot adds that unit to the selection (`Selection::add`) [player]: on a hut with 3 braves,
 three clicks select all three. A unit already selected stays selected. It works even for a unit inside the
-building, not drawn.
+building, not drawn. A selected unit's slot has a small arrow pointing down on top of its icon [player]; every
+people slot keeps room for it, so the row does not move [ours].
 
 | Target | Slots | Placeholder | Filled by |
 |---|---|---|---|

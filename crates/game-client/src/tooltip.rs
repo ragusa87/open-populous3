@@ -30,6 +30,8 @@ const EIGHTS: usize = 16;
 pub const GRACE_SECS: f32 = 0.3;
 /// Pixels between the top of the building and the tooltip.
 const ABOVE: f32 = 8.0;
+/// Height of the arrow over a selected unit's slot, in pixels on screen.
+const ARROW_H: f32 = 6.0;
 
 /// What a slot shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -41,13 +43,16 @@ pub enum Icon {
     Wood,
     /// A piece of wood still missing (greyed).
     NoWood,
+    /// The arrow over a selected unit's slot.
+    Selected,
 }
 
-/// One slot: its icon, and the unit a click on it selects.
+/// One slot: its icon, the unit a click on it selects, and whether that unit is selected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Slot {
     pub icon: Icon,
     pub unit: Option<u32>,
+    pub selected: bool,
 }
 
 /// A tooltip: text lines (the name first), then rows of slots.
@@ -63,16 +68,16 @@ pub fn line_lengths(n: usize) -> Vec<usize> {
     (0..n.div_ceil(width)).map(|k| width.min(n - k * width)).collect()
 }
 
-/// A people row: the filled places with their unit's icon (a click selects it), the others with
-/// `placeholder`.
-pub fn people_row(map: &GameMap, people: &People, placeholder: UnitKind) -> Vec<Slot> {
-    let filled = people.filled.iter().filter_map(|id| map.units.iter().find(|u| u.id == *id)).map(|u| Slot { icon: Icon::Unit { kind: u.kind, tribe: u.owner }, unit: Some(u.id) });
-    let empty = std::iter::repeat_n(Slot { icon: Icon::Placeholder(placeholder), unit: None }, people.capacity as usize - people.filled.len());
+/// A people row: the filled places with their unit's icon (a click selects it, marked when among
+/// `selected`), the others with `placeholder`.
+pub fn people_row(map: &GameMap, people: &People, placeholder: UnitKind, selected: &[u32]) -> Vec<Slot> {
+    let filled = people.filled.iter().filter_map(|id| map.units.iter().find(|u| u.id == *id)).map(|u| Slot { icon: Icon::Unit { kind: u.kind, tribe: u.owner }, unit: Some(u.id), selected: selected.contains(&u.id) });
+    let empty = std::iter::repeat_n(Slot { icon: Icon::Placeholder(placeholder), unit: None, selected: false }, people.capacity as usize - people.filled.len());
     filled.chain(empty).collect()
 }
 
 pub fn wood_row(wood: Wood) -> Vec<Slot> {
-    let slot = |icon| Slot { icon, unit: None };
+    let slot = |icon| Slot { icon, unit: None, selected: false };
     std::iter::repeat_n(slot(Icon::Wood), wood.filled as usize).chain(std::iter::repeat_n(slot(Icon::NoWood), (wood.capacity - wood.filled) as usize)).collect()
 }
 
@@ -85,8 +90,8 @@ fn reward_name(reward: Reward) -> String {
 
 /// Building `i`'s tooltip: its name; a pyramid also what it teaches (until granted) and its shaman
 /// place; the player's buildings that take wood their people and wood rows; other buildings their
-/// name only.
-pub fn building_model(map: &GameMap, i: usize) -> TooltipModel {
+/// name only. People among `selected` are marked.
+pub fn building_model(map: &GameMap, i: usize, selected: &[u32]) -> TooltipModel {
     let b = &map.buildings[i];
     let mut model = TooltipModel { lines: vec![b.kind.name()], rows: Vec::new() };
     let holder = Holder::Building(i);
@@ -94,13 +99,13 @@ pub fn building_model(map: &GameMap, i: usize) -> TooltipModel {
         if let Some(reward) = vault.reward.filter(|_| !vault.is_spent()) {
             model.lines.push(format!("Teaches: {}", reward_name(reward)));
         }
-        model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Shaman)));
+        model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Shaman, selected)));
         return model;
     }
     if b.owner != crate::units::PLAYER || b.kind.wood_cost() == 0 {
         return model;
     }
-    model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Brave)));
+    model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Brave, selected)));
     model.rows.extend(map.wood_slots(holder).map(wood_row));
     model
 }
@@ -136,6 +141,14 @@ pub fn icon_pixels(icon: Icon) -> Vec<u8> {
         }
     };
     let (kind, body) = match icon {
+        Icon::Selected => {
+            for y in 0..4 {
+                for x in 3 + y..9 - y {
+                    put(x, y + 12, [255, 230, 120, 255]);
+                }
+            }
+            return px;
+        }
         Icon::Wood | Icon::NoWood => {
             let (bark, ring) = if icon == Icon::Wood { ([120, 74, 36, 255], [196, 150, 90, 255]) } else { (GREY, GREY) };
             for y in 6..11 {
@@ -251,6 +264,7 @@ fn show_building_tooltip(
     heights: Res<ModelHeights>,
     cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     views: Query<(&BuildingView, &GlobalTransform)>,
+    selection: Res<Selection>,
     mut state: Local<TooltipState>,
     mut icons: ResMut<IconImages>,
     mut images: ResMut<Assets<Image>>,
@@ -286,7 +300,7 @@ fn show_building_tooltip(
     let size = computed.size() * computed.inverse_scale_factor();
     (node.left, node.top) = (px(at.x - size.x / 2.0), px(at.y - size.y - ABOVE));
     vis.set_if_neq(Visibility::Inherited);
-    let model = building_model(&map.0, i);
+    let model = building_model(&map.0, i, &selection.units);
     if state.model.as_ref() == Some(&model) {
         return;
     }
@@ -300,13 +314,25 @@ fn show_building_tooltip(
             let mut start = 0;
             for len in line_lengths(row.len()) {
                 t.spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(1), ..default() }, Pickable::IGNORE)).with_children(|line| {
+                    let people = row.iter().any(|s| matches!(s.icon, Icon::Unit { .. } | Icon::Placeholder(_)));
                     for slot in &row[start..start + len] {
-                        let mut s = line.spawn((ImageNode::new(icons.get(slot.icon, &mut images)), Node { width: px(ICON_W as f32 * ICON_SCALE), height: px(ICON_H as f32 * ICON_SCALE), ..default() }));
-                        if let Some(id) = slot.unit {
-                            s.insert((SlotUnit(id), Interaction::default()));
-                        } else {
-                            s.insert(Pickable::IGNORE);
-                        }
+                        let mut s = line.spawn((Node { flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE));
+                        s.with_children(|cell| {
+                            if people {
+                                let arrow = (Node { width: px(ICON_W as f32 * ICON_SCALE), height: px(ARROW_H), ..default() }, Pickable::IGNORE);
+                                if slot.selected {
+                                    cell.spawn((ImageNode::new(icons.get(Icon::Selected, &mut images)).with_rect(Rect::new(0.0, 12.0, ICON_W as f32, 16.0)), arrow));
+                                } else {
+                                    cell.spawn(arrow);
+                                }
+                            }
+                            let mut icon = cell.spawn((ImageNode::new(icons.get(slot.icon, &mut images)), Node { width: px(ICON_W as f32 * ICON_SCALE), height: px(ICON_H as f32 * ICON_SCALE), ..default() }));
+                            if let Some(id) = slot.unit {
+                                icon.insert((SlotUnit(id), Interaction::default()));
+                            } else {
+                                icon.insert(Pickable::IGNORE);
+                            }
+                        });
                     }
                 });
                 start += len;
@@ -351,12 +377,13 @@ mod tests {
         let brave = map.units.iter().find(|u| u.kind == UnitKind::Brave).unwrap().id;
         map.apply(&game_core::command::Command::OrderUnit { player: 0, unit: brave, order: game_core::unit::Order::Build { site: (88 * 512, 64 * 512) } });
         (map.buildings[site].stock, map.buildings[site].used) = (1, 1);
-        let model = building_model(&map, site);
+        let model = building_model(&map, site, &[]);
         assert_eq!(model.lines, vec!["Hut 1".to_string()]);
         let people = &model.rows[0];
         assert_eq!(people.len(), 6, "max braves");
-        assert_eq!(people[0], Slot { icon: Icon::Unit { kind: UnitKind::Brave, tribe: 0 }, unit: Some(brave) }, "a click selects him");
-        assert_eq!(people[1], Slot { icon: Icon::Placeholder(UnitKind::Brave), unit: None });
+        assert_eq!(people[0], Slot { icon: Icon::Unit { kind: UnitKind::Brave, tribe: 0 }, unit: Some(brave), selected: false }, "a click selects him");
+        assert!(building_model(&map, site, &[brave]).rows[0][0].selected, "marked once selected");
+        assert_eq!(people[1], Slot { icon: Icon::Placeholder(UnitKind::Brave), unit: None, selected: false });
         assert_eq!(icons(&model.rows[1]), vec![Icon::Wood, Icon::Wood, Icon::NoWood], "2 of 3 provided, nothing to select");
         assert!(model.rows[1].iter().all(|s| s.unit.is_none()));
     }
@@ -365,22 +392,22 @@ mod tests {
     fn a_full_hut_and_others_buildings() {
         let map = GameMap::sandbox_buildings();
         let busy = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside > 0).unwrap();
-        let model = building_model(&map, busy);
+        let model = building_model(&map, busy, &[]);
         assert!(model.rows[0].iter().all(|s| matches!(s.icon, Icon::Unit { .. }) && s.unit.is_some()), "3 inside out of 3");
         assert_eq!(icons(&model.rows[1]), vec![Icon::Wood; 3], "the wood in it");
         let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();
-        assert!(building_model(&map, red).rows.is_empty(), "not theirs: the name only");
+        assert!(building_model(&map, red, &[]).rows.is_empty(), "not theirs: the name only");
     }
 
     #[test]
     fn a_pyramid_names_its_reward_until_granted_and_has_a_shaman_place() {
         let mut map = GameMap::sandbox_worship();
         let v = map.buildings.iter().position(|b| b.kind == BuildingKind::Vault).unwrap();
-        let model = building_model(&map, v);
+        let model = building_model(&map, v, &[]);
         assert_eq!(model.lines[1], "Teaches: Temple");
-        assert_eq!(model.rows, vec![vec![Slot { icon: Icon::Placeholder(UnitKind::Shaman), unit: None }]]);
+        assert_eq!(model.rows, vec![vec![Slot { icon: Icon::Placeholder(UnitKind::Shaman), unit: None, selected: false }]]);
         map.buildings[v].vault.as_mut().unwrap().grant();
-        let spent = building_model(&map, v);
+        let spent = building_model(&map, v, &[]);
         assert_eq!((spent.lines.len(), spent.rows.len()), (1, 0), "granted: its name only");
     }
 
@@ -405,5 +432,6 @@ mod tests {
         assert!(pixels(Icon::Unit { kind: UnitKind::Shaman, tribe: 0 }) > pixels(brave), "with her staff");
         assert_ne!(icon_pixels(brave), icon_pixels(Icon::Unit { kind: UnitKind::Brave, tribe: 1 }), "tribe colour");
         assert_eq!(icon_pixels(Icon::Wood).len(), ICON_W * ICON_H * 4);
+        assert!(pixels(Icon::Selected) > 0 && icon_pixels(Icon::Selected)[..12 * ICON_W * 4].iter().all(|&b| b == 0), "the arrow in the bottom rows");
     }
 }
