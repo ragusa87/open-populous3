@@ -47,6 +47,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## Praying (worship) ([worship.md](docs/specs/worship.md))
 - [ ] Praying only happens at a totem or a pyramid of knowledge; today `Order::Pray` (P) works anywhere: restrict it, or make it pray at the nearest one.
+- [ ] Stone totem (object 1): once completed, turn its layers into line (object 3) instead of spinning round; once exhausted (`occurrences` > 0, all given), sink it slowly under the ground with smoke and remove it from the map (worship.md). The generated stack of blocks too.
+- [ ] Stone head (object 82): split its head from its pedestal and nod it at all times (worship.md).
 - [ ] Totem gifts not handled yet (logged as `Reward::Unhandled`): effects (land bridge, lightning...), revealed scenery and triggers, vehicles, the Angel of Death of type 5 totems; mana once mana exists. Check what `NumOccurences` 0 means.
 - [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); check `PrayTime`'s unit and the drain speed in the game.
 - [ ] Prisons: levels where the shaman starts imprisoned; she is locked inside (units.md "Locked shaman") until freed.

@@ -166,8 +166,10 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 Totem rocks (objects 1 and 3, measured): a stack of square rock slabs around the vertical axis through the
 origin, each a ring of 4 points: rings at heights 0, 160, 321, 509 and 670, an apex at 858; points 21-36 are
 each slab's bottom ring (just inside the ring of the slab under it). Object 3 holds the same points with every
-slab above the base turned about 20° about that axis (and a different face list, 52 faces against 29): one frame
-of the layers turning.
+slab above the base turned about 20° about that axis (and a different face list, 52 faces against 29). In object 1
+each slab's bottom ring stands about 20° off the ring under it (radius 196 against 212 at height 160): the layers
+are out of line on purpose. Object 3 turns them back into line: its rings at 160 have the same radius (212 and
+214) and angle. So object 1 is the totem before, object 3 after its rocks line up (worship.md).
 
 Pyramid of knowledge frames (191-193, measured): the same 107 faces and 116 points in the same order, so one
 frame turns into another by moving points (heights also differ by 1-3 units everywhere: export noise). Two

@@ -39,10 +39,18 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   curve with its counted prayers and drains linearly without any (`gauge::step`). Full, the tribe gets the
   totem's gifts (`Totem::gifts`, logged in `GameMap::granted`), its gauge starts again; once it gave
   `occurrences` times (0: no limit, a guess) its prayers are sent away (stop) and it takes no more.
-- Once a totem gave, it shows it [player]: the stone totem (object 1, "Totem rocks" in objects.md) turns its rock
-  layers about its centre axis, each layer its own way [ours: directions and speeds], for as long as the level
-  lasts. The generated stand-in of that totem is a stack of blocks turning the same way. The other looks do not
-  move (to check in the game).
+- The stone totem (object 1, "Totem rocks" in objects.md) [player]: its rock layers are out of line on purpose
+  (each turned about 20° from the one under it). Once completed, its layers turn about its centre axis until
+  they line up (object 3's state); then, once it has given every time it can (`occurrences` > 0 and all given), it
+  sinks slowly under the ground, giving off smoke, and disappears: removed from the map once sunk, its cell
+  free again [ours]. What it does after a completion that is not its last (or with no limit) is not known: it
+  lines up and stays so [ours, to check]. The generated stand-in (a stack of blocks) does the same.
+  Done so far: its layers turn once it gave, round and round (`totems::layer_turn`); to change to lining up,
+  then sinking.
+- The stone head (object 82) [player]: its head nods at all times, completed or not: it tips forward and back
+  about a horizontal axis through its neck. Its model's head is to split from its pedestal by height, like the
+  rock layers [ours: the split height, the nod's angle and pace].
+- The other looks do not move (to check in the game).
 - Gifts (`totem::gift`, from the trigger's targets): a spell (`Reward::Spell`, a "once" discovery
   `Reward::OneShot`: one more cast, `worship::one_more_shot`), a building, mana (`Reward::Mana`, only logged:
   no mana yet), anything else `Reward::Unhandled { kind, model }` (effects, revealed things, the Angel of
