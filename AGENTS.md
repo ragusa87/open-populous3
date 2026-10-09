@@ -10,8 +10,9 @@ from the user's own install.
   dumps, renders or screenshots made with the original files, exported viewers. Keep such outputs in a scratch dir.
 - Never quote original texts (level names, briefings, messages, UI strings) in code, tests, docs, commits or
   TODO: refer to them by their text number (docs/specs/language.md).
-- Never look at a screenshot or video of the original game, for any purpose (not to check art, layout or
-  behaviour either), and never ask for or fetch one.
+- Never look at a screenshot or video of the original game running, for any purpose (not to check art, layout or
+  behaviour either), and never ask for or fetch one. Renders of our own engine loading the user's original files
+  (`just shot` with an install) are fine to check that they load right; they are never committed.
 - Facts from the community tools (README "References") yes, their code no.
 - Everything shippable works with `--no-original` (generated or CC0 content, our own texts).
 
