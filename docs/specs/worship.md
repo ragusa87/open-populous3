@@ -16,7 +16,9 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
   speed `(n / TriggerCount)²` with `n = min(praying, TriggerCount)` [ours, to check]. A totem of 8: 8 praying 100 %,
   6 about 56 %, 4 25 %, 2 about 6 %, 1 about 1.6 %. In integers: the gauge counts 1/256 steps and gains
   `256 * n² / TriggerCount²` a tick (a lone prayer on a totem of 16 still gains 1 step).
-- Nobody praying: the gauge drains, quite quickly (TODO.md) [player, speed to measure].
+- Nobody praying: the gauge drains, quite quickly, **linearly**: a constant amount each tick, whatever the totem
+  needs or how full it is [player]. The rate is to measure; until then as fast as it fills at full speed, 256
+  steps (one `PrayTime` unit) a tick [ours].
 
 ## Sandbox
 Sandbox > Worship (`POP3_START=sandbox-worship`, `GameMap::sandbox_worship`): south of the player's site a
@@ -100,5 +102,5 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   [player]. The icon goes away once the reward is granted [player].
 
 ## Open
-- `PrayTime`'s unit, the drain speed (1 per tick, as fast as it fills [ours]), and whether the soft curve
+- `PrayTime`'s unit, the drain rate (linear; as fast as a full fill [ours]), and whether the soft curve
   matches the game.
