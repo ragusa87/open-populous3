@@ -25,7 +25,9 @@ Totems (`game_core::totem`, client `totems.rs`) only stand there for now: their 
 flames, or a stone pillar without the original files.
 
 ## Totems (scenery 9)
-- Followers are assigned to pray at it (type 0 triggers), or only the shaman (type 3) [files].
+- Who may pray: usually followers and the shaman alike [player] (type 0 triggers, most totems); some totems only
+  the shaman [player] (type 3 triggers, 21 in the levels [files]). The shaman praying at a totem counts as one of
+  its `TriggerCount` like a follower [ours].
 - More may be assigned than `TriggerCount`: e.g. 12 on a totem of 8. Only `TriggerCount` count; the gauge goes
   no faster with more [player].
 - Every assigned unit takes the prayer pose, counted or not; none of them is idle [player].

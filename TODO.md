@@ -48,7 +48,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 ## Praying (worship) ([worship.md](docs/specs/worship.md))
 - [ ] Praying only happens at a totem or a pyramid of knowledge; today `Order::Pray` works anywhere: restrict it.
 - [ ] Prayer gauge per place and tribe, full at `PrayTime`, speed by `min(praying, TriggerCount)`, draining when nobody prays; the reward is granted when full.
-- [ ] Totems (scenery 9): assigned followers (or the shaman only, trigger type 3) all in the prayer pose, the first `TriggerCount` counted, a waiting one taking the place of one ordered away; rewards decoded as a list of trigger targets.
+- [ ] Totems (scenery 9): assigned followers and the shaman (only the shaman for trigger type 3) all in the prayer pose, the first `TriggerCount` counted, a waiting one taking the place of one ordered away; rewards decoded as a list of trigger targets.
 - [ ] Pyramids: shaman only (capacity 1, none once granted); she prays at the door (the gauge opens the door, `Vault::door_and_top`), walks to the middle (`Vault::grant`), walks out. The state, its phases and the door/top drawing are done (`game_core::vault`, client `vault.rs`).
 - [ ] Generated pyramid: fold its capstone like the original's top (a separate mesh in `tools/generate_buildings.py`).
 - [ ] Pyramids: draw the reward as an icon at the top (cursor sprites 38-57 spells, 58-65 buildings), gone once the reward is granted.
