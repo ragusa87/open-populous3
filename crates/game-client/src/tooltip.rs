@@ -2,14 +2,15 @@
 //! text, then slot rows of icons, one per place or piece (`GameMap::people_slots`, `wood_slots`): the
 //! people in it or at work on it, its wood. Long rows wrap (`line_lengths`). It shows after resting the
 //! cursor on the thing or at once on a right click, stands above it and stays while the cursor is on
-//! the thing or on it (`sticky`), so a person's slot can be clicked to add that unit to the selection. The icons are generated here, a silhouette per unit kind in its tribe's
-//! colour, grey when a slot is empty, a log for wood.
+//! the thing or on it (`sticky`), so a person's slot can be clicked to add that unit to the selection. A person is the
+//! original teal figure of its kind when allowed (`hfx0-0.dat`), greyed when the slot is empty; else, and for wood, the
+//! icons are generated here, a silhouette per unit kind in its tribe's colour.
 
 use crate::buildings::{BuildingView, ModelHeights};
 use crate::camera::GameCamera;
 use crate::nature::{size_factor, TreeModel, TreeView};
 use crate::units::selection::Selection;
-use crate::world::CurrentMap;
+use crate::world::{CurrentMap, LevelList};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
@@ -18,12 +19,16 @@ use game_core::building::Reward;
 use game_core::map::GameMap;
 use game_core::occupancy::{Holder, People, Wood};
 use game_core::unit::UnitKind;
+use pop3_format::catalog::{EFFECT_SPRITE_FILE, UNIT_FIGURES};
+use pop3_format::{Sprite, SpriteBank};
 use std::collections::HashMap;
 
-/// Icon size in pixels, and how much bigger it is drawn.
+/// Generated icon size in pixels, drawn 1.5 times bigger in a slot.
 pub const ICON_W: usize = 12;
 pub const ICON_H: usize = 16;
-const ICON_SCALE: f32 = 1.5;
+/// A slot's size in pixels on screen: an original figure is drawn 1:1 in it.
+const SLOT_W: usize = 18;
+const SLOT_H: usize = 24;
 /// A row wraps after this many slots, a row of `EIGHTS` after 8.
 const LINE: usize = 10;
 const EIGHTS: usize = 16;
@@ -279,20 +284,81 @@ pub fn icon_pixels(icon: Icon) -> Vec<u8> {
     px
 }
 
-/// Icon images, made the first time each is shown.
+/// The original teal figure of `kind` in `UNIT_FIGURES`; None for wildmen.
+pub fn figure_sprite(kind: UnitKind) -> Option<usize> {
+    let k = match kind {
+        UnitKind::Brave => 0,
+        UnitKind::Warrior => 1,
+        UnitKind::Preacher => 2,
+        UnitKind::Spy => 3,
+        UnitKind::Firewarrior => 4,
+        UnitKind::Shaman => 5,
+        UnitKind::Wildman => return None,
+    };
+    Some(UNIT_FIGURES.start() + k)
+}
+
+/// A figure's pixels, `SLOT_W` x `SLOT_H` RGBA rows, standing at the bottom centre; greyed (its
+/// lightness, half seen through) for an empty place.
+pub fn figure_pixels(sprite: &Sprite, palette: &[[u8; 3]], greyed: bool) -> Vec<u8> {
+    let mut px = vec![0u8; SLOT_W * SLOT_H * 4];
+    let (dx, dy) = (SLOT_W.saturating_sub(sprite.width) / 2, SLOT_H.saturating_sub(sprite.height));
+    for (i, p) in sprite.pixels.iter().enumerate() {
+        let (x, y) = (i % sprite.width + dx, i / sprite.width + dy);
+        let Some(&[r, g, b]) = p.and_then(|p| palette.get(p as usize)) else { continue };
+        if x >= SLOT_W || y >= SLOT_H {
+            continue;
+        }
+        let grey = ((r as u16 * 3 + g as u16 * 6 + b as u16) / 10) as u8;
+        px[(y * SLOT_W + x) * 4..][..4].copy_from_slice(&if greyed { [grey, grey, grey, 150] } else { [r, g, b, 255] });
+    }
+    px
+}
+
+/// Icon images, made the first time each is shown, and the original figures with their palette.
 #[derive(Resource, Default)]
-struct IconImages(HashMap<Icon, Handle<Image>>);
+struct IconImages {
+    made: HashMap<Icon, Handle<Image>>,
+    figures: Option<(Vec<Sprite>, Vec<[u8; 3]>)>,
+}
+
+fn load_figures(levels: Res<LevelList>, mut icons: ResMut<IconImages>) {
+    if !levels.original {
+        return;
+    }
+    let load = || -> Result<_, pop3_format::LevelError> {
+        let bank = SpriteBank::load(&levels.data_dir, EFFECT_SPRITE_FILE)?;
+        Ok((bank.sprites.get(UNIT_FIGURES).unwrap_or_default().to_vec(), pop3_format::Theme::load(&levels.data_dir, 0)?.palette))
+    };
+    icons.figures = load().map_err(|e| warn!("original unit figures: {e}")).ok().filter(|(f, _)| f.len() == UNIT_FIGURES.count());
+    icons.made.clear();
+}
 
 impl IconImages {
+    /// The icon's pixels and size: the original figure for a person when loaded, else the generated icon.
+    fn pixels(&self, icon: Icon) -> (usize, usize, Vec<u8>) {
+        let person = match icon {
+            Icon::Unit { kind, .. } => Some((kind, false)),
+            Icon::Placeholder(kind) => Some((kind, true)),
+            _ => None,
+        };
+        let figure = person.and_then(|(kind, greyed)| {
+            let (sprites, palette) = self.figures.as_ref()?;
+            Some(figure_pixels(sprites.get(figure_sprite(kind)? - UNIT_FIGURES.start())?, palette, greyed))
+        });
+        figure.map_or_else(|| (ICON_W, ICON_H, icon_pixels(icon)), |px| (SLOT_W, SLOT_H, px))
+    }
+
     fn get(&mut self, icon: Icon, images: &mut Assets<Image>) -> Handle<Image> {
-        self.0
-            .entry(icon)
-            .or_insert_with(|| {
-                let mut image = Image::new(Extent3d { width: ICON_W as u32, height: ICON_H as u32, depth_or_array_layers: 1 }, TextureDimension::D2, icon_pixels(icon), TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
-                image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { mag_filter: ImageFilterMode::Nearest, min_filter: ImageFilterMode::Nearest, ..default() });
-                images.add(image)
-            })
-            .clone()
+        if let Some(h) = self.made.get(&icon) {
+            return h.clone();
+        }
+        let (w, h, px) = self.pixels(icon);
+        let mut image = Image::new(Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
+        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { mag_filter: ImageFilterMode::Nearest, min_filter: ImageFilterMode::Nearest, ..default() });
+        let handle = images.add(image);
+        self.made.insert(icon, handle.clone());
+        handle
     }
 }
 
@@ -319,7 +385,7 @@ pub struct TooltipPlugin;
 impl Plugin for TooltipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IconImages>()
-            .add_systems(Startup, spawn_tooltip)
+            .add_systems(Startup, (spawn_tooltip, load_figures))
             .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, blink_bars).in_set(crate::menu::Gameplay));
     }
 }
@@ -468,14 +534,14 @@ fn spawn_content(t: &mut ChildSpawnerCommands, model: &TooltipModel, icons: &mut
                 for slot in &row[start..start + len] {
                     line.spawn((Node { flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|cell| {
                         if people {
-                            let arrow = (Node { width: px(ICON_W as f32 * ICON_SCALE), height: px(ARROW_H), ..default() }, Pickable::IGNORE);
+                            let arrow = (Node { width: px(SLOT_W as f32), height: px(ARROW_H), ..default() }, Pickable::IGNORE);
                             if slot.selected {
                                 cell.spawn((ImageNode::new(icons.get(Icon::Selected, images)).with_rect(Rect::new(0.0, 12.0, ICON_W as f32, 16.0)), arrow));
                             } else {
                                 cell.spawn(arrow);
                             }
                         }
-                        let mut icon = cell.spawn((ImageNode::new(icons.get(slot.icon, images)), Node { width: px(ICON_W as f32 * ICON_SCALE), height: px(ICON_H as f32 * ICON_SCALE), ..default() }));
+                        let mut icon = cell.spawn((ImageNode::new(icons.get(slot.icon, images)), Node { width: px(SLOT_W as f32), height: px(SLOT_H as f32), ..default() }));
                         if let Some(id) = slot.unit {
                             icon.insert((SlotUnit(id), Interaction::default()));
                         } else {
@@ -615,5 +681,27 @@ mod tests {
         assert_ne!(icon_pixels(brave), icon_pixels(Icon::Unit { kind: UnitKind::Brave, tribe: 1 }), "tribe colour");
         assert_eq!(icon_pixels(Icon::Wood).len(), ICON_W * ICON_H * 4);
         assert!(pixels(Icon::Selected) > 0 && icon_pixels(Icon::Selected)[..12 * ICON_W * 4].iter().all(|&b| b == 0), "the arrow in the bottom rows");
+    }
+
+    #[test]
+    fn a_figure_stands_at_the_bottom_centre_greyed_when_empty() {
+        let sprite = Sprite { width: 2, height: 1, pixels: vec![Some(1), None] };
+        let palette = [[0, 0, 0], [0, 200, 180]];
+        let at = |px: &[u8], x: usize, y: usize| px[(y * SLOT_W + x) * 4..][..4].to_vec();
+        let filled = figure_pixels(&sprite, &palette, false);
+        assert_eq!(filled.len(), SLOT_W * SLOT_H * 4);
+        assert_eq!(at(&filled, 8, SLOT_H - 1), vec![0, 200, 180, 255]);
+        assert_eq!(filled.chunks(4).filter(|p| p[3] > 0).count(), 1);
+        let greyed = figure_pixels(&sprite, &palette, true);
+        assert_eq!(at(&greyed, 8, SLOT_H - 1), vec![138, 138, 138, 150]);
+    }
+
+    #[test]
+    fn every_kind_but_wildmen_has_its_own_figure() {
+        let figures: Vec<_> = UnitKind::ALL.iter().filter_map(|&k| figure_sprite(k)).collect();
+        assert_eq!(figures.len(), UNIT_FIGURES.count());
+        assert!(figures.iter().all(|f| UNIT_FIGURES.contains(f)));
+        assert_eq!(figure_sprite(UnitKind::Wildman), None);
+        assert_eq!(figure_sprite(UnitKind::Brave), Some(*UNIT_FIGURES.start()));
     }
 }

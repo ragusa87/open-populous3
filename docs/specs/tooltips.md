@@ -116,6 +116,8 @@ A pyramid's tooltip names its reward (the spell or building it teaches) [player]
 on its top, not any more [ours].
 
 ## Icons [ours]
-Generated in code for now, no art asset: a small silhouette per unit kind (head and body shapes, a staff for the
-shaman), in the tribe's colour when filled and grey when a placeholder; a log for wood. Better art can replace
-them later, the slot rows only ask for an icon by what it shows.
+With the original files a person is its kind's teal figure (`hfx0-0.dat` 75-80, sprites.md, drawn 1:1 in an
+18 x 24 slot), greyed and half seen through when a placeholder, whatever the tribe (`tooltip::figure_pixels`).
+Otherwise (`--no-original`, wildmen) generated in code: a small silhouette per unit kind (head and body shapes, a
+staff for the shaman), in the tribe's colour when filled and grey when a placeholder; a log for wood, always.
+The slot rows only ask for an icon by what it shows.
