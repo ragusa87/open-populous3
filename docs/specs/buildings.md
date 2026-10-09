@@ -191,13 +191,14 @@ pick one besides selecting it on the map.
      puts it on the pile (`stock`) once within a cell of it.
   2. Plan (not flat): while wood is wanted (`wood_wanted`: 1 piece before flat, as in the game, then the rest of
      the cost) and fewer braves bring wood than missing pieces, fetches wood (`Order::FetchWood`'s rule). Else
-     walks to the nearest footprint height point off the site's level that no other brave is on or going to,
-     and jumps on it (`Action::Flattening`, `JUMP_TICKS` 8, the jump pose: original anim 12): the point moves `JUMP_STEP` (32)
+     walks to the nearest footprint height point not done (each needs one jump at least, `Building::jumped`, and
+     must be at the site's level) that no other brave is on or going to, and jumps on it (`Action::Flattening`, `JUMP_TICKS` 8, the jump pose: original anim 12): the point moves `JUMP_STEP` (32)
      towards the level. With no point left, the plan is flat: the ring around is blended
      (`Building::flatten`) and it is under construction: walled (see "Walking around buildings"). Wood lying in
      its walls is moved out in front of its door (`clear_wood_under`); braves never go for wood or trees
-     behind walls (`GameMap::behind_walls`). Ground already
-     level is flat at once.
+     behind walls (`GameMap::behind_walls`). Walls going up stop anyone walking to a spot behind them (they go
+     on with their next order or task); a walk whose target is behind walls ends idle, never stranded. Ground
+     already level still takes one jump per point: the flattening step always shows.
   3. Under construction: with wood on the pile, walks to the door, in (`Unit::enter`, `Action::Entering`,
      straight to a work point a third of a cell apart per brave around the centre) and builds the piece from
      inside (`Action::Building`, `BUILD_TICKS` 50, the hammer pose); with no pile, fetches wood under the
