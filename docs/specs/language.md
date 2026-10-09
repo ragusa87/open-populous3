@@ -30,6 +30,20 @@ This spec never quotes the original texts: it gives their numbers and what kind 
   order. Level 3's name is text 647 and its briefing 648; level 4's name is 653, level 5's 660.
 - The last text is an error message.
 
+## Our texts and the fallback (design, not implemented)
+The original texts are never shipped, so the game needs its own for `--no-original` and for everything the
+original has no text for (sandboxes, new UI). Chosen format: **Fluent** (`.ftl`, the `fluent` crates).
+- Why not CSV: briefings span several lines and hold quotes and commas, and CSV has no place for plurals,
+  variables or translator comments. Why not PO (gettext): the best translator tools (Poedit, Weblate), but its keys
+  are usually the English sentence and its Rust support is thinner. Fluent has named keys, variables and plurals
+  (`{ $count } braves`), multi-line texts and comments, maintained Rust crates, and Weblate supports it.
+- One file per language: `assets/lang/en.ftl`, `fr.ftl`... Keys are ours and named (`level-3-name`,
+  `brave-count`); game code only ever asks for a key, never for an original text number.
+- A table maps keys to original text numbers (`level-3-name` -> 647). With the original files, a key that has
+  a number reads `langNN.dat` (the language the player picked, English by default); without them, or for keys
+  without a number, our `.ftl` file of that language, then English.
+- Our texts are written here, never copied from the original files.
+
 ## Open
 - Which text number names each level: the groups have different lengths, and no table in `POPTB.EXE` pairs 647
   with 653 (u16 or u32). Maybe the scripts' message numbers (`CREATE_MSG_NARRATIVE idx`, ai-scripts.md) are text
