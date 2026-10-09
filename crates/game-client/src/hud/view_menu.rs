@@ -21,16 +21,16 @@ pub struct ViewPreset {
 
 /// First entry is the default view; the others vary one or two settings around it.
 pub const PRESETS: [ViewPreset; 10] = [
-    ViewPreset { name: "Default (relief x1.5)", relief: DEFAULT_RELIEF, curvature: DEFAULT_CURVATURE, distance: GROUND_DISTANCE, pitch_deg: GROUND_PITCH_DEG },
-    ViewPreset { name: "Original ratio (relief x1)", relief: 1.0, curvature: DEFAULT_CURVATURE, distance: GROUND_DISTANCE, pitch_deg: GROUND_PITCH_DEG },
-    ViewPreset { name: "Dramatic relief x3", relief: 3.0, curvature: DEFAULT_CURVATURE, distance: GROUND_DISTANCE, pitch_deg: GROUND_PITCH_DEG },
-    ViewPreset { name: "Previous default (relief x2)", relief: 2.0, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
-    ViewPreset { name: "Closer", relief: 2.0, curvature: 0.012, distance: 14.0, pitch_deg: 3.0 },
-    ViewPreset { name: "Close, ground level", relief: 2.0, curvature: 0.012, distance: 10.0, pitch_deg: 3.0 },
-    ViewPreset { name: "Close, flatter planet", relief: 2.0, curvature: 0.006, distance: 10.0, pitch_deg: 3.0 },
-    ViewPreset { name: "3/4 view", relief: 2.0, curvature: 0.008, distance: 14.0, pitch_deg: 15.0 },
-    ViewPreset { name: "High 3/4 view", relief: 2.0, curvature: 0.012, distance: 22.0, pitch_deg: 28.0 },
-    ViewPreset { name: "Gentle relief x1.5, far", relief: 1.5, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
+    ViewPreset { name: "Default (the original's)", relief: DEFAULT_RELIEF, curvature: DEFAULT_CURVATURE, distance: GROUND_DISTANCE, pitch_deg: GROUND_PITCH_DEG },
+    ViewPreset { name: "Previous default (tilt 6, distance 14)", relief: 1.0, curvature: 0.008, distance: 14.0, pitch_deg: 6.0 },
+    ViewPreset { name: "Dramatic relief x2", relief: 2.0, curvature: DEFAULT_CURVATURE, distance: GROUND_DISTANCE, pitch_deg: GROUND_PITCH_DEG },
+    ViewPreset { name: "Older default (relief x1.33)", relief: 1.33, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
+    ViewPreset { name: "Closer", relief: 1.33, curvature: 0.012, distance: 14.0, pitch_deg: 3.0 },
+    ViewPreset { name: "Close, ground level", relief: 1.33, curvature: 0.012, distance: 10.0, pitch_deg: 3.0 },
+    ViewPreset { name: "Close, flatter planet", relief: 1.33, curvature: 0.006, distance: 10.0, pitch_deg: 3.0 },
+    ViewPreset { name: "3/4 view", relief: 1.33, curvature: 0.008, distance: 14.0, pitch_deg: 15.0 },
+    ViewPreset { name: "High 3/4 view", relief: 1.33, curvature: 0.012, distance: 22.0, pitch_deg: 28.0 },
+    ViewPreset { name: "Gentle relief, far", relief: 1.0, curvature: 0.012, distance: 20.0, pitch_deg: 3.0 },
 ];
 
 impl ViewPreset {
@@ -300,6 +300,7 @@ fn menu_visuals(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::object_scale::UNITS_SCALE;
 
     #[test]
     fn first_preset_is_the_default_view() {
@@ -314,7 +315,7 @@ mod tests {
     fn presets_keep_the_draw_radius_and_set_relief() {
         let base = CurveParams { radius: 7, ..CurveParams::default() };
         let p = PRESETS[9].curve(base);
-        assert_eq!((p.radius, p.relief()), (7, 1.5));
+        assert_eq!((p.radius, p.relief()), (7, 1.0));
     }
 
     #[test]
@@ -324,7 +325,7 @@ mod tests {
         assert!((params.relief() - (DEFAULT_RELIEF - KNOB_STEP)).abs() < 1e-5);
         assert!(!Knob::Group(ObjectGroup::Trees).step(5.0, &mut params, &mut scale));
         assert!((scale.get(ObjectGroup::Trees) - 1.5).abs() < 1e-5);
-        assert_eq!(scale.get(ObjectGroup::Units), 1.0, "one group only");
+        assert_eq!(scale.get(ObjectGroup::Units), UNITS_SCALE, "one group only");
         Knob::Objects.step(1.0, &mut params, &mut scale);
         for g in ObjectGroup::ALL {
             assert!((scale.get(g) - 1.6).abs() < 1e-5, "all follow the trees' value");

@@ -7,7 +7,8 @@
 
 ## Planet illusion
 The world is flat; vertices are bent down with distance from the camera focus:
-`y = h * height_scale - k * (dx² + dz²)` (`terrain_mesh::build`, k = 0.012, scale = 1/384, max height 1024 = 2.7 cells, slightly exaggerated vs the original 2 cells).
+`y = h * height_scale - k * (dx² + dz²)` (`terrain_mesh::build`, k = 0.011, scale = 1/256, max height 1024 = 4 cells:
+the original's, pop3-rev-analysis.md "Landscape projection", where the bend is applied in camera space).
 The mesh is a (2R+1)² grid (R = 64, clipped to a disc) centred on the focus; the focus is the render
 origin, so wrapping is free. Aerial view = the same mesh seen from far away -> a globe. The grid is drawn with the
 game's z mirrored (architecture.md "Handedness", `game_frame`): map cell (x, z) at render (dx, -dz).

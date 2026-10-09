@@ -8,8 +8,9 @@ slows down while holding still, stops when leaving the edge. The cursor is confi
 (Esc toggles). The panel does not block it, Left/Right rotate, Up/Down or WASD move (A/D strafe)
 forward/back like the mouse, middle-drag rotates and tilts, Home/End tilt, the wheel or Ctrl+PgUp/PgDn zoom
 (`WHEEL_ZOOM` per notch), Ctrl+wheel tilts, Shift+wheel or Shift+PgUp/PgDn change the field of view, Enter toggles
-aerial (pitch 1.35, distance 115) and restores the previous ground view (default tilt 3 deg, distance 20,
-fov 60 deg, tuned by eye against the original). Clear color fades from sky blue to space when zooming out. Changing level frames the
+aerial (pitch 1.35, distance 115) and restores the previous ground view (default: the original's fixed
+tilt 20.4 deg and eye 25.4 cells behind the focus, pop3-rev-analysis.md "Landscape projection"; fov 35 deg, not
+traced, chosen to frame a view matched by eye on level 23 at 13.8 cells and 60 deg). Clear color fades from sky blue to space when zooming out. Changing level frames the
 level's start camera when its header gives one (`GameMap::start_camera`, `.hdr` start cell and angle, only levels 3,
 5, 21 and 79 do; the angle, read like the things' angles in the game's frame (`game_frame::GameYaw`), is where the camera
 looks: checked on level 3, where from the stone circle the player's hut stands ahead and the totem on its right), else
@@ -196,9 +197,10 @@ point at the centre, or a generated gold ring; grayed and see-through (`dimmed`)
 
 View presets: F2 opens a menu (`hud/view_menu.rs`) of camera/terrain presets applied live (distance, tilt,
 relief, curvature; the terrain is rebuilt); the chosen values are logged. Esc closes it when open (and is
-consumed), otherwise Esc releases/captures the mouse. View tuning (dev, read at start): `POP3_RELIEF` (relief vs the original height ratio, default 1.5; F2 presets x1 original, x3 dramatic), `POP3_CURVATURE`
-(planet bend, default 0.008), `POP3_VIEW_DISTANCE` (cells, default 14), `POP3_VIEW_PITCH` (degrees, default 6).
-The previous default (relief x2, curvature 0.012, distance 20, tilt 3) is a menu preset.
+consumed), otherwise Esc releases/captures the mouse. View tuning (dev, read at start): `POP3_RELIEF` (relief vs the original height ratio, 1024 = 4 cells, default 1; F2 preset x2 dramatic), `POP3_CURVATURE`
+(planet bend, default the original's 0.011), `POP3_VIEW_DISTANCE` (cells, default 25.4), `POP3_VIEW_PITCH` (degrees,
+default 20.4). The previous defaults (tilt 6, distance 14; relief x1.33, curvature 0.012, distance 20, tilt 3) are menu
+presets. Units are drawn 1.5 times their sprites' size (`object_scale::UNITS_SCALE`, `POP3_SCALE_UNITS`).
 Under the presets, "Tuning" rows step values live with - / + (0.1 a click, logged): the relief (0.5-4, the terrain
 is rebuilt) and how big objects are drawn against the cells (`object_scale.rs`, `ObjectScale`, 0.25-4, 1 = the
 original model size): trees, units (with their shadows), buildings, scenery (sites, totems, wood, camp fires), or

@@ -17,12 +17,13 @@ pub struct CurveParams {
     pub curvature: f32,
 }
 
-/// Height units per render unit at relief x1 (the original height-to-cell ratio).
-pub const BASE_HEIGHT_SCALE: f32 = 1.0 / 384.0;
-/// Default relief: hills drawn 1.5 times as tall as the original ratio (3 looked too high).
-pub const DEFAULT_RELIEF: f32 = 1.5;
-/// Default planet bend (`drop = curvature * distance²`).
-pub const DEFAULT_CURVATURE: f32 = 0.008;
+/// Height units per render unit at relief x1: the original's, 1024 = 4 cells (pop3-rev-analysis.md "Landscape
+/// projection").
+pub const BASE_HEIGHT_SCALE: f32 = 1.0 / 256.0;
+/// Default relief: the original's.
+pub const DEFAULT_RELIEF: f32 = 1.0;
+/// Default planet bend (`drop = curvature * distance²`): the original's 0.01097 per cell².
+pub const DEFAULT_CURVATURE: f32 = 0.011;
 
 impl Default for CurveParams {
     fn default() -> Self {
@@ -137,7 +138,7 @@ mod tests {
         map.set(0, 0, 768);
         let p = CurveParams { radius: 1, curvature: 0.0, ..Default::default() }.with_relief(1.0);
         let g = build(&map, (127.0, 127.0), &p);
-        assert_eq!(g.positions[8][1], 2.0, "cell (128,128) is cell (0,0)");
+        assert_eq!(g.positions[8][1], 3.0, "cell (128,128) is cell (0,0): 768 = 3 cells");
     }
 
     #[test]

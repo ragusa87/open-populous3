@@ -11,9 +11,10 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::prelude::*;
 
 const MAP: f32 = pop3_format::MAP_SIZE as f32;
-/// Default ground view tilt in degrees and distance in cells: low and close, like the original.
-pub const GROUND_PITCH_DEG: f32 = 6.0;
-pub const GROUND_DISTANCE: f32 = 14.0;
+/// Default ground view tilt in degrees and distance in cells: the original's fixed pitch (cos 15 357 / 16 384) and
+/// its eye 6500 render units (25.4 cells) behind the focus (pop3-rev-analysis.md "Landscape projection").
+pub const GROUND_PITCH_DEG: f32 = 20.4;
+pub const GROUND_DISTANCE: f32 = 25.4;
 /// (pitch radians, distance) of the default ground view.
 pub const GROUND_VIEW: (f32, f32) = (GROUND_PITCH_DEG * std::f32::consts::PI / 180.0, GROUND_DISTANCE);
 /// Scroll speeds in camera-distances per second (mouse = at full push).
@@ -22,7 +23,9 @@ pub const KEY_SPEED: f32 = 3.0;
 /// Tilt in radians/s and zoom as fraction of distance per second.
 pub const TILT_SPEED: f32 = 0.6;
 pub const ZOOM_SPEED: f32 = 1.2;
-pub const DEFAULT_FOV: f32 = std::f32::consts::FRAC_PI_3;
+/// Vertical field of view: not traced in the original (its screen scale is open); 35° frames at 25.4 cells what a
+/// view matched by eye on level 23 framed at 13.8 cells and 60°.
+pub const DEFAULT_FOV: f32 = 35.0 * std::f32::consts::PI / 180.0;
 pub const FOV_RANGE: (f32, f32) = (0.3, 2.2);
 pub const FOV_SPEED: f32 = 0.6;
 /// Per wheel notch: zoom (fraction of distance), tilt (radians, Ctrl) and field of view (radians, Shift).

@@ -39,7 +39,10 @@ pub struct Scaled(pub ObjectGroup);
 
 pub const SCALE_RANGE: (f32, f32) = (0.25, 4.0);
 
-/// Drawing scale per group, 1 = the original model size (512 world units per cell).
+/// Units are drawn 1.5 times their sprites' size, as in the original (by eye).
+pub const UNITS_SCALE: f32 = 1.5;
+
+/// Drawing scale per group, 1 = the original model size (512 world units per cell); units `UNITS_SCALE` by default.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct ObjectScale([f32; 4]);
 
@@ -52,6 +55,7 @@ impl Default for ObjectScale {
 impl ObjectScale {
     pub fn from_env(get: impl Fn(&str) -> Option<String>) -> Self {
         let mut s = ObjectScale([1.0; 4]);
+        s.set(ObjectGroup::Units, UNITS_SCALE);
         for g in ObjectGroup::ALL {
             if let Some(v) = get(g.env_key()).and_then(|v| v.parse::<f32>().ok()) {
                 s.set(g, v);
@@ -96,7 +100,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scales_start_at_one_read_the_env_and_clamp() {
+    fn scales_start_at_their_defaults_read_the_env_and_clamp() {
         let get = |k: &str| match k {
             "POP3_SCALE_TREES" => Some("1.5".to_string()),
             "POP3_SCALE_UNITS" => Some("oops".to_string()),
@@ -105,10 +109,10 @@ mod tests {
         };
         let s = ObjectScale::from_env(get);
         assert_eq!(s.get(ObjectGroup::Trees), 1.5);
-        assert_eq!(s.get(ObjectGroup::Units), 1.0, "bad value ignored");
+        assert_eq!(s.get(ObjectGroup::Units), UNITS_SCALE, "bad value ignored");
         assert_eq!(s.get(ObjectGroup::Buildings), SCALE_RANGE.1, "clamped");
         assert_eq!(s.get(ObjectGroup::Scenery), 1.0);
-        assert_eq!(ObjectScale::from_env(|_| None).describe(), "trees x1.00  units x1.00  buildings x1.00  scenery x1.00");
+        assert_eq!(ObjectScale::from_env(|_| None).describe(), "trees x1.00  units x1.50  buildings x1.00  scenery x1.00");
     }
 
     #[test]
