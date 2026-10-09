@@ -1,11 +1,12 @@
 //! Buildings standing on the map, loaded from the level things (kind 2), and their construction
 //! state (docs/specs/buildings.md "Construction"): wood used, footprint flattened, dismantling,
-//! people inside and being attacked. Braves build it (`crate::work`). A vault of knowledge knows
-//! what it teaches (`Reward`).
+//! people inside and being attacked. Braves build it (`crate::work`). A vault of knowledge has its
+//! own state (`crate::vault`).
 
 use crate::spell_book::SpellKind;
-use pop3_format::level::{Thing, ThingData, KIND_BUILDING, KIND_SPELL};
-use pop3_format::{Level, WORLD_UNITS_PER_CELL};
+use crate::vault::Vault;
+use pop3_format::level::KIND_BUILDING;
+use pop3_format::Level;
 
 /// Building types by thing model, as numbered in the original's scripts (`M_BUILDING_*`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -213,8 +214,8 @@ pub struct Building {
     /// A plan's height points (cells, unwrapped as `ground_points`) jumped on so far: each needs a
     /// jump, even when already level.
     pub jumped: Vec<(i32, i32)>,
-    /// What a vault of knowledge teaches (`vault_reward`); None for every other building.
-    pub reward: Option<Reward>,
+    /// A vault of knowledge's reward and phase; None for every other building.
+    pub vault: Option<Vault>,
 }
 
 /// What a vault of knowledge teaches the tribe praying at it, from the level.
@@ -224,13 +225,10 @@ pub enum Reward {
     Building(BuildingKind),
 }
 
-/// Trigger type of a vault's prayer.
-const TRIGGER_LIBRARY: u8 = 4;
-
 impl Building {
     /// A finished building, as the levels store them.
     pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
-        Building { kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, stock: 0, level: 0, jumped: Vec::new(), reward: None }
+        Building { kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)) }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.
@@ -341,32 +339,16 @@ pub fn buildings_from_level(level: &Level) -> Vec<Building> {
         .filter(|t| t.kind == KIND_BUILDING)
         .map(|t| {
             let kind = BuildingKind::from_model(t.model);
-            let reward = if kind == BuildingKind::Vault { vault_reward(level, t) } else { None };
-            Building { reward, ..Building::new(kind, t.owner, t.x, t.z, t.facing()) }
+            let vault = (kind == BuildingKind::Vault).then(|| Vault::from_level(level, t));
+            Building { vault, ..Building::new(kind, t.owner, t.x, t.z, t.facing()) }
         })
         .collect()
-}
-
-/// A vault's reward: the discovery targeted by the library trigger standing on its cell (the
-/// building record has no link of its own, docs/specs/level-format.md "Vault of knowledge").
-pub fn vault_reward(level: &Level, vault: &Thing) -> Option<Reward> {
-    let cell = |t: &Thing| (t.x as u32 / WORLD_UNITS_PER_CELL, t.z as u32 / WORLD_UNITS_PER_CELL);
-    level.things.iter().filter(|t| cell(t) == cell(vault)).find_map(|t| match t.data() {
-        ThingData::Trigger(trigger) if trigger.trigger_type == TRIGGER_LIBRARY => {
-            trigger.targets.iter().filter_map(|&slot| level.slot(slot)).find_map(|target| match target.data() {
-                ThingData::Discovery(d) if d.kind == KIND_SPELL => SpellKind::from_model(d.model).map(Reward::Spell),
-                ThingData::Discovery(d) if d.kind == KIND_BUILDING => Some(Reward::Building(BuildingKind::from_model(d.model))),
-                _ => None,
-            })
-        }
-        _ => None,
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pop3_format::level::{DAT_SIZE, KIND_PERSON};
+    use pop3_format::level::{DAT_SIZE, KIND_PERSON, KIND_SPELL};
 
     #[test]
     fn models_to_kinds_and_names() {
@@ -413,7 +395,9 @@ mod tests {
 
     /// A trigger of `trigger_type` on `cell` activating the thing in 1-based `slot`.
     fn trigger(cell: (u16, u16), trigger_type: u8, slot: u8) -> [u8; 55] {
-        thing(6, 6, 0, cell, &[trigger_type, 1, 0, 1, 1, 0, slot])
+        let mut t = thing(6, 6, 0, cell, &[trigger_type, 1, 0, 1, 1, 0, slot]);
+        t[33..35].copy_from_slice(&100u16.to_le_bytes());
+        t
     }
 
     /// A permanent discovery of a thing `kind` / `model`.
@@ -424,23 +408,24 @@ mod tests {
     #[test]
     fn a_vault_knows_what_its_library_trigger_teaches() {
         let vault = thing(18, KIND_BUILDING, 255, (113, 62), &[]);
-        let level = level_with(&[vault, trigger((113, 62), TRIGGER_LIBRARY, 3), discovery(KIND_BUILDING, 5)]);
+        let level = level_with(&[vault, trigger((113, 62), 4, 3), discovery(KIND_BUILDING, 5)]);
         let b = buildings_from_level(&level);
         assert_eq!(b[0].kind, BuildingKind::Vault);
-        assert_eq!(b[0].reward, Some(Reward::Building(BuildingKind::Temple)), "level 3's vault teaches the temple");
-        let spell = level_with(&[vault, discovery(KIND_SPELL, SpellKind::Swarm.model()), trigger((113, 62), TRIGGER_LIBRARY, 2)]);
-        assert_eq!(buildings_from_level(&spell)[0].reward, Some(Reward::Spell(SpellKind::Swarm)));
+        assert_eq!(b[0].vault.unwrap().reward, Some(Reward::Building(BuildingKind::Temple)), "level 3's vault teaches the temple");
+        assert_eq!(b[0].vault.unwrap().pray_time, 100, "the trigger's PrayTime");
+        let spell = level_with(&[vault, discovery(KIND_SPELL, SpellKind::Swarm.model()), trigger((113, 62), 4, 2)]);
+        assert_eq!(buildings_from_level(&spell)[0].vault.unwrap().reward, Some(Reward::Spell(SpellKind::Swarm)));
     }
 
     #[test]
     fn only_a_library_trigger_on_the_vaults_cell_counts() {
         let vault = thing(18, KIND_BUILDING, 255, (113, 62), &[]);
-        let elsewhere = level_with(&[vault, trigger((114, 62), TRIGGER_LIBRARY, 3), discovery(KIND_SPELL, SpellKind::Swarm.model())]);
-        assert_eq!(buildings_from_level(&elsewhere)[0].reward, None, "next cell");
+        let elsewhere = level_with(&[vault, trigger((114, 62), 4, 3), discovery(KIND_SPELL, SpellKind::Swarm.model())]);
+        assert_eq!(buildings_from_level(&elsewhere)[0].vault.and_then(|v| v.reward), None, "next cell");
         let proximity = level_with(&[vault, trigger((113, 62), 0, 3), discovery(KIND_SPELL, SpellKind::Swarm.model())]);
-        assert_eq!(buildings_from_level(&proximity)[0].reward, None, "not a library trigger");
-        let hut = level_with(&[thing(1, KIND_BUILDING, 0, (113, 62), &[]), trigger((113, 62), TRIGGER_LIBRARY, 3), discovery(KIND_SPELL, SpellKind::Swarm.model())]);
-        assert_eq!(buildings_from_level(&hut)[0].reward, None, "only vaults teach");
+        assert_eq!(buildings_from_level(&proximity)[0].vault.and_then(|v| v.reward), None, "not a library trigger");
+        let hut = level_with(&[thing(1, KIND_BUILDING, 0, (113, 62), &[]), trigger((113, 62), 4, 3), discovery(KIND_SPELL, SpellKind::Swarm.model())]);
+        assert_eq!(buildings_from_level(&hut)[0].vault.and_then(|v| v.reward), None, "only vaults teach");
     }
 
     #[test]

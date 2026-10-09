@@ -17,5 +17,6 @@ pub mod spell_book;
 pub mod terrain;
 pub mod tree;
 pub mod unit;
+pub mod vault;
 pub mod wood;
 pub mod work;

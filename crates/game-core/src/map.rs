@@ -443,6 +443,7 @@ impl GameMap {
         let buildings = &self.buildings;
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(Tree::tick);
         self.tend_campfires();
+        self.buildings.iter_mut().filter_map(|b| b.vault.as_mut()).for_each(crate::vault::Vault::tick);
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing { .. })).collect();
         let mut events = Vec::new();
         for (i, unit) in self.units.iter_mut().enumerate() {

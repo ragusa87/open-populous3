@@ -41,9 +41,11 @@ pub const STONE_HEAD: usize = 82;
 pub const PRISON: usize = 94;
 /// Totem poles (three variants).
 pub const TOTEM_POLES: [usize; 3] = [187, 188, 189];
-/// Pyramid of knowledge: unlocks a spell or a building. 192-193 are door animation frames.
+/// Pyramid of knowledge: unlocks a spell or a building. Three frames of one mesh (same faces, moved
+/// points, objects.md): door open, door closed, door closed with the top folded (spent).
 pub const KNOWLEDGE_PYRAMID: usize = 191;
-pub const KNOWLEDGE_PYRAMID_DOOR: std::ops::RangeInclusive<usize> = 192..=193;
+pub const KNOWLEDGE_PYRAMID_CLOSED: usize = 192;
+pub const KNOWLEDGE_PYRAMID_FOLDED: usize = 193;
 /// Boat (blue) and airship.
 pub const BOAT: usize = 181;
 pub const AIRSHIP: usize = 182;
