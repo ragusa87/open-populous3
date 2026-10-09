@@ -15,6 +15,7 @@
   - [buildings.md](specs/buildings.md): building models, stages and planned construction.
   - [building kit](../assets/3d/buildings/README.md): reproducible glTF generation, Blender preview and licence.
   - [constants.md](specs/constants.md): balance values (`constant.dat`), its XOR encoding and text format.
+  - [pop3-rev-analysis.md](specs/pop3-rev-analysis.md): original engine internals from the executable: unit model, tribes, constant table, mana.
   - [worship.md](specs/worship.md): praying at pyramids of knowledge and totems, their gauges and rewards.
   - [tooltips.md](specs/tooltips.md): what the game shows about the thing under the mouse: slot rows, bars, toggle.
   - [language.md](specs/language.md): original `langNN.dat` texts, numbered, per language.
