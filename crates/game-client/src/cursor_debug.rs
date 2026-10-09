@@ -34,11 +34,9 @@ fn log_cursor(
     mut backend_logged: Local<bool>,
     mut last_edge_log: Local<f32>,
 ) {
-    if !*backend_logged {
-        if let Some(h) = handles.iter().next() {
-            info!("cursor-debug: display backend {}", backend_name(&format!("{:?}", h.get_display_handle())));
-            *backend_logged = true;
-        }
+    if !*backend_logged && let Some(h) = handles.iter().next() {
+        info!("cursor-debug: display backend {}", backend_name(&format!("{:?}", h.get_display_handle())));
+        *backend_logged = true;
     }
     let Some((window, options)) = windows.iter().next() else { return };
     if options.is_changed() {

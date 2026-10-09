@@ -187,18 +187,18 @@ struct KitMeshes {
 fn kit_staged(cache: &mut KitMeshes, kind: BuildingKind, owner: u8, pieces: Option<(u8, u8)>, meshes: &mut Assets<Mesh>) -> Option<Staged> {
     let key = (kind, owner);
     if pieces.is_none() {
-        if !cache.built.contains_key(&key) {
+        if let std::collections::hash_map::Entry::Vacant(e) = cache.built.entry(key) {
             let full = generated_buildings::body(kind, owner)?;
             let top = chimney(&full);
-            cache.built.insert(key, (meshes.add(to_mesh(full)), top));
+            e.insert((meshes.add(to_mesh(full)), top));
         }
         let (mesh, top) = cache.built[&key].clone();
         return Some(Staged { shown: Some(mesh), inner: None, frame: None, top });
     }
     let mut staged = staged(&generated_buildings::body(kind, owner)?, pieces, meshes);
-    if !cache.frames.contains_key(&key) {
+    if let std::collections::hash_map::Entry::Vacant(e) = cache.frames.entry(key) {
         let frame = meshes.add(to_mesh(generated_buildings::scaffold(kind, owner)?));
-        cache.frames.insert(key, frame);
+        e.insert(frame);
     }
     staged.frame = cache.frames.get(&key).cloned();
     Some(staged)
@@ -431,10 +431,10 @@ mod tests {
         let vault = Building::new(BuildingKind::Vault, 255, 0, 0, 0);
         let mut praying = vault.clone();
         praying.vault.as_mut().unwrap().phase = game_core::vault::VaultPhase::Praying { progress: 40 };
-        assert!(same_look(&[vault.clone()], &[praying]));
+        assert!(same_look(std::slice::from_ref(&vault), &[praying]));
         let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
-        assert!(!same_look(&[vault.clone()], &[hut]));
-        assert!(!same_look(&[vault.clone()], &[]));
+        assert!(!same_look(std::slice::from_ref(&vault), &[hut]));
+        assert!(!same_look(std::slice::from_ref(&vault), &[]));
     }
 
     #[test]

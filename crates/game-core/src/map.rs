@@ -156,9 +156,9 @@ impl GameMap {
         let mut rng = Lcg(seed.max(1));
         let mut terrain = Heightmap::new(MAP_SIZE);
         for _ in 0..40 {
-            let c = ((rng.next() % MAP_SIZE as u32) as i32, (rng.next() % MAP_SIZE as u32) as i32);
-            let radius = 4 + (rng.next() % 14) as i32;
-            let amount = 150 + (rng.next() % 350) as i32;
+            let c = ((rng.next_u32() % MAP_SIZE as u32) as i32, (rng.next_u32() % MAP_SIZE as u32) as i32);
+            let radius = 4 + (rng.next_u32() % 14) as i32;
+            let amount = 150 + (rng.next_u32() % 350) as i32;
             terrain.raise(c, radius, amount);
         }
         for h in 0..MAP_SIZE * MAP_SIZE {
@@ -529,15 +529,13 @@ impl GameMap {
                 _ => self.wood_event(i, event),
             }
         }
-        for i in 0..self.units.len() {
-            if arriving[i] && self.units[i].action == Action::Idle && self.units[i].inside.is_none() {
+        for (i, &arrived) in arriving.iter().enumerate() {
+            if arrived && self.units[i].action == Action::Idle && self.units[i].inside.is_none() {
                 let u = &self.units[i];
                 let (taken, spot) = (self.taken_spots(&[u.id]), slots::spot_of((u.x, u.z)));
-                if taken.contains(&spot) {
-                    if let Some(&free) = slots::free_spots_near(&self.ground(), spot, &taken, 1).first() {
-                        let (x, z) = slots::spot_centre(free);
-                        self.units[i].start(Order::MoveTo { x, z });
-                    }
+                if taken.contains(&spot) && let Some(&free) = slots::free_spots_near(&self.ground(), spot, &taken, 1).first() {
+                    let (x, z) = slots::spot_centre(free);
+                    self.units[i].start(Order::MoveTo { x, z });
                 }
             }
         }
@@ -811,7 +809,7 @@ fn torus_cells(a: (u16, u16), b: (u16, u16)) -> i32 {
 pub struct Lcg(pub u32);
 
 impl Lcg {
-    pub fn next(&mut self) -> u32 {
+    pub fn next_u32(&mut self) -> u32 {
         self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         self.0 >> 8
     }
@@ -846,7 +844,7 @@ mod tests {
         let a = GameMap::generate(42);
         assert_eq!(a.terrain, GameMap::generate(42).terrain);
         let hs = a.terrain.heights();
-        assert!(hs.iter().any(|&h| h == 0));
+        assert!(hs.contains(&0));
         assert!(hs.iter().any(|&h| h > 100));
         assert_eq!(a.sites, GameMap::generate(42).sites);
         assert!(a.site_of(0).is_some());
@@ -1058,7 +1056,7 @@ mod tests {
         let vault = m.buildings.iter().find(|b| b.kind == BuildingKind::Vault).unwrap();
         assert!(vault.vault.unwrap().reward.is_some());
         let (_, cz) = vault.centre();
-        assert!(vault.door().1 < cz as u16 && site.z < vault.door().1, "its door faces the site");
+        assert!(vault.door().1 < cz && site.z < vault.door().1, "its door faces the site");
         let kinds: Vec<TotemKind> = m.totems.iter().map(|t| t.kind).collect();
         assert_eq!(kinds, TotemKind::ALL);
         assert!(m.totems.iter().any(|t| t.shaman_only) && m.totems.iter().any(|t| t.prayers == 8), "every case to try");
@@ -1153,7 +1151,7 @@ mod tests {
                     }
                     last[i] = Some(point);
                     let near = ring_point(centre, point);
-                    let d = (crate::unit::torus_delta(near.0, u.x).abs() + crate::unit::torus_delta(near.1, u.z).abs()) as i32;
+                    let d = crate::unit::torus_delta(near.0, u.x).abs() + crate::unit::torus_delta(near.1, u.z).abs();
                     assert!(d <= 2 * crate::campfire::RING, "on the ring");
                 }
             }

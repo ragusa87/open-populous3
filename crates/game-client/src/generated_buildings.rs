@@ -261,7 +261,7 @@ mod tests {
             for &[x, y, z] in &model.body.positions {
                 // Eaves/posts get 0.12 cell of visual allowance. Boat piers intentionally
                 // extend beyond the land footprint on +Z into the launch channel.
-                assert!(y >= -0.04 && y < 3.0, "{kind:?}: vertical bounds {y}");
+                assert!((-0.04..3.0).contains(&y), "{kind:?}: vertical bounds {y}");
                 assert!((x - f.offset.0 as f32 / 512.0).abs() <= f.half.0 as f32 / 512.0 + 0.12, "{kind:?}: x {x}");
                 if kind == BuildingKind::BoatHut && z > 0.7 {
                     assert!(z <= 2.1);

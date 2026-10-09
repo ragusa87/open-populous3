@@ -265,10 +265,8 @@ fn apply_rig(
     let top = top.map_or(0, |t| t.1) as f32 * params.0.height_scale;
     let target = Vec3::Y * focus_height(terrain, (rig.focus.x, rig.focus.y), &params.0);
     for (mut t, mut projection) in &mut cam {
-        if let Projection::Perspective(p) = projection.as_mut() {
-            if p.fov != rig.fov {
-                p.fov = rig.fov;
-            }
+        if let Projection::Perspective(p) = projection.as_mut() && p.fov != rig.fov {
+            p.fov = rig.fov;
         }
         let wanted = Transform::from_translation(eye_position(target, rig.eye_offset(), top)).looking_at(target, Vec3::Y);
         *t = Transform {

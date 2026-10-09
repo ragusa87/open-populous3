@@ -448,13 +448,11 @@ fn draw_sprite(
 ) {
     for (mut sprite, mut image, mut node, mut vis) in &mut q {
         let frame = frame_at(time.elapsed_secs(), look_frames(*look));
-        if (sprite.look, sprite.frame) != (*look, frame) {
-            if let Some(source) = source.as_deref() {
-                let (handle, size, tip) = uploaded.0.entry((*look, frame)).or_insert_with(|| upload(&mut images, source.image(*look, frame))).clone();
-                image.image = handle;
-                (node.width, node.height) = (Val::Px(size.x), Val::Px(size.y));
-                *sprite = CursorSprite { look: *look, frame, tip };
-            }
+        if (sprite.look, sprite.frame) != (*look, frame) && let Some(source) = source.as_deref() {
+            let (handle, size, tip) = uploaded.0.entry((*look, frame)).or_insert_with(|| upload(&mut images, source.image(*look, frame))).clone();
+            image.image = handle;
+            (node.width, node.height) = (Val::Px(size.x), Val::Px(size.y));
+            *sprite = CursorSprite { look: *look, frame, tip };
         }
         match cursor.position.filter(|_| cursor.captured) {
             Some(p) => {

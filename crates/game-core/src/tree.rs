@@ -89,12 +89,12 @@ pub fn scatter(terrain: &Heightmap, seed: u32, sites: &[(i32, i32)], groves: usi
     let clear = |c: (i32, i32)| sites.iter().all(|s| torus(c.0, s.0).max(torus(c.1, s.1)) > SITE_CLEARANCE);
     let mut trees: Vec<Tree> = Vec::new();
     for _ in 0..groves {
-        let centre = ((rng.next() % size as u32) as i32, (rng.next() % size as u32) as i32);
-        let count = 3 + rng.next() % 6;
+        let centre = ((rng.next_u32() % size as u32) as i32, (rng.next_u32() % size as u32) as i32);
+        let count = 3 + rng.next_u32() % 6;
         for _ in 0..count {
-            let cell = (centre.0 + (rng.next() % 7) as i32 - 3, centre.1 + (rng.next() % 7) as i32 - 3);
+            let cell = (centre.0 + (rng.next_u32() % 7) as i32 - 3, centre.1 + (rng.next_u32() % 7) as i32 - 3);
             let cell = (cell.0.rem_euclid(size), cell.1.rem_euclid(size));
-            let (variant, tree_size) = ((rng.next() % VARIANTS as u32) as u8, 1 + (rng.next() % MAX_SIZE as u32) as u8);
+            let (variant, tree_size) = ((rng.next_u32() % VARIANTS as u32) as u8, 1 + (rng.next_u32() % MAX_SIZE as u32) as u8);
             if Mobility::Walk.passable(terrain, cell) && clear(cell) && trees.iter().all(|t| t.cell() != cell) {
                 trees.push(Tree::new(cell, variant, tree_size));
             }

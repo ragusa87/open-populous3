@@ -11,3 +11,8 @@ game-core = { version = "0.1.0", path = "../game-core" }
 game-net = { version = "0.1.0", path = "../game-net" }
 pop3-format = { version = "0.1.0", path = "../pop3-format" }
 unit-atlas = { version = "0.1.0", path = "../unit-atlas" }
+
+# Bevy systems take their resources and queries as arguments: many, with long types.
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"

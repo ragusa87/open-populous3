@@ -253,19 +253,17 @@ fn draw_halo(
         _ => None,
     };
     let mut wanted: Vec<(Entity, Handle<Mesh>, Option<Handle<SpriteOutline>>)> = Vec::new();
-    if let Some(e) = sprite {
-        if let Ok((mesh, mat, _)) = shapes.get(e) {
-            let made = cache.sprites.get(&mesh.0.id()).cloned().or_else(|| {
-                let texture = mats.get(&mat.0)?.base_color_texture.clone()?;
-                let texels = images.get(&texture)?.width() as f32;
-                let (outline, width) = sprite_outline_mesh(meshes.get(&mesh.0)?, texels)?;
-                let made = (meshes.add(outline), sprite_mats.add(SpriteOutline { color: HALO.into(), sprite: texture, width: Vec4::new(width, 0.0, 0.0, 0.0) }));
-                cache.sprites.insert(mesh.0.id(), made.clone());
-                Some(made)
-            });
-            if let Some((m, s)) = made {
-                wanted.push((e, m, Some(s)));
-            }
+    if let Some(e) = sprite && let Ok((mesh, mat, _)) = shapes.get(e) {
+        let made = cache.sprites.get(&mesh.0.id()).cloned().or_else(|| {
+            let texture = mats.get(&mat.0)?.base_color_texture.clone()?;
+            let texels = images.get(&texture)?.width() as f32;
+            let (outline, width) = sprite_outline_mesh(meshes.get(&mesh.0)?, texels)?;
+            let made = (meshes.add(outline), sprite_mats.add(SpriteOutline { color: HALO.into(), sprite: texture, width: Vec4::new(width, 0.0, 0.0, 0.0) }));
+            cache.sprites.insert(mesh.0.id(), made.clone());
+            Some(made)
+        });
+        if let Some((m, s)) = made {
+            wanted.push((e, m, Some(s)));
         }
     }
     if let Some(root) = model {
@@ -295,10 +293,8 @@ fn draw_halo(
                 if mesh.0 != *m {
                     mesh.0 = m.clone();
                 }
-                if let (Some(mut mat), Some(s)) = (sprite_mat, s) {
-                    if mat.0 != *s {
-                        mat.0 = s.clone();
-                    }
+                if let (Some(mut mat), Some(s)) = (sprite_mat, s) && mat.0 != *s {
+                    mat.0 = s.clone();
                 }
                 kept.push(*e);
             }
@@ -364,7 +360,7 @@ mod tests {
 
     #[test]
     fn a_mesh_changed_in_place_loses_its_outlines() {
-        let (changed, other) = (AssetId::<Mesh>::from(Handle::<Mesh>::default().id()), AssetId::<Mesh>::invalid());
+        let (changed, other) = (Handle::<Mesh>::default().id(), AssetId::<Mesh>::invalid());
         let mut cache = OutlineCache::default();
         cache.hulls.insert((changed, 300), None);
         cache.hulls.insert((changed, 150), None);

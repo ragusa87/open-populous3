@@ -239,10 +239,8 @@ fn run_ticks(time: Res<Time>, mut clock: ResMut<SimClock>, mut map: ResMut<Curre
 
 /// Space looks at her, unless it turns a blueprint (`blueprint`).
 fn look_at_shaman(keys: Res<ButtonInput<KeyCode>>, mut rig: ResMut<CameraRig>, map: Res<CurrentMap>, clock: Res<SimClock>, blueprint: Res<crate::blueprint::Blueprint>) {
-    if keys.just_pressed(KeyCode::Space) && !blueprint.is_active() {
-        if let Some(cell) = player_shaman_cell(&map.0, &clock) {
-            rig.fly_to(cell);
-        }
+    if keys.just_pressed(KeyCode::Space) && !blueprint.is_active() && let Some(cell) = player_shaman_cell(&map.0, &clock) {
+        rig.fly_to(cell);
     }
 }
 
@@ -334,11 +332,9 @@ fn animate_views(
             let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
             sprites.frame_for(u, worship, rig.yaw, &clock)
         });
-        if let Some(f) = frame {
-            if mesh.0 != f.mesh {
-                mesh.0 = f.mesh.clone();
-                mat.0 = f.material.clone();
-            }
+        if let Some(f) = frame && mesh.0 != f.mesh {
+            mesh.0 = f.mesh.clone();
+            mat.0 = f.material.clone();
         }
     }
     for (parent, mut vis) in &mut bars {

@@ -317,10 +317,8 @@ fn cast_selected(
     selected: Res<SelectedSpell>,
     mut map: ResMut<CurrentMap>,
 ) {
-    if let (true, Some(kind)) = (keys.just_pressed(KeyCode::KeyC), selected.0) {
-        if ground_spell(kind, (0, 0)).is_none() && book.0.cast(kind) {
-            map.bypass_change_detection().0.apply(&Command::Order { player: PLAYER, order: Order::Cast });
-        }
+    if let (true, Some(kind)) = (keys.just_pressed(KeyCode::KeyC), selected.0) && ground_spell(kind, (0, 0)).is_none() && book.0.cast(kind) {
+        map.bypass_change_detection().0.apply(&Command::Order { player: PLAYER, order: Order::Cast });
     }
 }
 
@@ -363,12 +361,10 @@ fn aim_and_cast(
     let ready = book.0.slot(kind).is_some_and(|s| s.can_cast());
     let valid = spell.filter(|s| ready && map.0.can_cast(PLAYER, s));
     look.set_if_neq(CursorLook::Spell { kind, valid: valid.is_some() });
-    if let (true, Some(spell)) = (mouse.just_pressed(MouseButton::Left), valid) {
-        if book.0.cast(kind) {
-            dirty.0 |= map.bypass_change_detection().0.apply(&Command::Cast { player: PLAYER, spell }).is_some();
-            selected.0 = None;
-            look.set_if_neq(CursorLook::Arrow);
-        }
+    if let (true, Some(spell)) = (mouse.just_pressed(MouseButton::Left), valid) && book.0.cast(kind) {
+        dirty.0 |= map.bypass_change_detection().0.apply(&Command::Cast { player: PLAYER, spell }).is_some();
+        selected.0 = None;
+        look.set_if_neq(CursorLook::Arrow);
     }
 }
 

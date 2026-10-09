@@ -340,10 +340,8 @@ fn rasterise(c: &mut Canvas, b: &Body, shape: &Shape, grow: f32, colour: Option<
         for dy in -steps..=steps {
             for dx in -steps..=steps {
                 let p = (centre.0 + dx as f32, centre.1 + dy as f32);
-                if (dx * dx + dy * dy) as f32 <= r * r + 0.5 {
-                    if let Some((px, py)) = to_pixel(b, p) {
-                        c.plot(px, py, colour.unwrap_or(col));
-                    }
+                if (dx * dx + dy * dy) as f32 <= r * r + 0.5 && let Some((px, py)) = to_pixel(b, p) {
+                    c.plot(px, py, colour.unwrap_or(col));
                 }
             }
         }

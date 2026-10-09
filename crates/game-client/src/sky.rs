@@ -118,10 +118,8 @@ fn follow_eye(
     for (mut t, mut vis, material) in &mut dome {
         t.translation = eye.translation;
         *vis = if alpha > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
-        if let Some(mut m) = mats.get_mut(&material.0) {
-            if m.base_color.alpha() != alpha {
-                m.base_color = Color::WHITE.with_alpha(alpha);
-            }
+        if let Some(mut m) = mats.get_mut(&material.0) && m.base_color.alpha() != alpha {
+            m.base_color = Color::WHITE.with_alpha(alpha);
         }
     }
 }
