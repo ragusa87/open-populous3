@@ -85,12 +85,14 @@ impl Theme {
         (self.disp.iter().map(|&d| d as u64).sum::<u64>() / self.disp.len().max(1) as u64) as i32
     }
 
-    /// The first row from `BIGFADE_LAND_ROW` up where most columns are not water colours (colours
-    /// of rows 0..127), at most `MAX_SHORE_ROWS` above it: the lowest ground drawn as land.
+    /// The first row from `BIGFADE_LAND_ROW` up where most columns are neither water colours
+    /// (colours of rows 0..127) nor sea-like ones (`sea_like`), at most `MAX_SHORE_ROWS` above it:
+    /// the lowest ground drawn as land.
     pub fn land_start_row(&self) -> usize {
         let water: std::collections::BTreeSet<u8> = self.bigfade[..BIGFADE_LAND_ROW * BIGFADE_WIDTH].iter().copied().collect();
+        let land = |c: &&u8| !water.contains(c) && !sea_like(self.palette[**c as usize]);
         (BIGFADE_LAND_ROW..BIGFADE_LAND_ROW + MAX_SHORE_ROWS)
-            .find(|&r| self.bigfade[r * BIGFADE_WIDTH..(r + 1) * BIGFADE_WIDTH].iter().filter(|c| !water.contains(c)).count() > BIGFADE_WIDTH / 2)
+            .find(|&r| self.bigfade[r * BIGFADE_WIDTH..(r + 1) * BIGFADE_WIDTH].iter().filter(land).count() > BIGFADE_WIDTH / 2)
             .unwrap_or(BIGFADE_LAND_ROW + MAX_SHORE_ROWS)
     }
 
@@ -98,6 +100,12 @@ impl Theme {
     pub fn water(&self, x: usize, y: usize) -> u8 {
         self.water[(y % DISP_SIZE) * DISP_SIZE + x % DISP_SIZE]
     }
+}
+
+/// Blue over green over red: the wet grey-blue of the lowest rows (theme c: 77, 99, 102), not
+/// the purple or blue land some themes have (theme i: 92, 88, 173).
+pub fn sea_like([r, g, b]: [u8; 3]) -> bool {
+    b > g && g >= r
 }
 
 /// A theme's sky: a tiling cloud layer, RGB row-major.
@@ -155,6 +163,18 @@ mod tests {
         big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..].fill(5);
         let all_water = Theme::parse(&[0; 1024], &big, &disp).unwrap();
         assert_eq!(all_water.land_start_row(), BIGFADE_LAND_ROW + MAX_SHORE_ROWS, "capped");
+    }
+
+    #[test]
+    fn sea_like_rows_are_not_land() {
+        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
+        big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..].fill(2);
+        big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..(BIGFADE_LAND_ROW + 3) * BIGFADE_WIDTH].fill(1);
+        let mut pal = vec![0u8; 1024];
+        pal[4..7].copy_from_slice(&[77, 99, 102]);
+        pal[8..11].copy_from_slice(&[92, 88, 173]);
+        let t = Theme::parse(&pal, &big, &vec![128; DISP_SIZE * DISP_SIZE]).unwrap();
+        assert_eq!(t.land_start_row(), BIGFADE_LAND_ROW + 3, "grey-blue skipped, purple land kept");
     }
 
     #[test]
