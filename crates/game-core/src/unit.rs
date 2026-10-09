@@ -117,7 +117,6 @@ pub enum Action {
     /// `to` cannot be reached (never the shaman, she stays idle): arms up, loses health until a
     /// path opens or the unit dies.
     Stranded { to: (u16, u16) },
-    Praying,
     /// Jumping with the spell in her hands, `left` ticks to go.
     Casting { left: u16 },
     /// Just teleported: floating down onto the ground, `left` ticks to go.
@@ -154,7 +153,6 @@ impl Action {
             Action::Idle => "Idle",
             Action::Walking { .. } => "Walking",
             Action::Stranded { .. } => "Stranded",
-            Action::Praying => "Praying",
             Action::Worshipping { .. } => "Worshipping",
             Action::Casting { .. } => "Casting",
             Action::Landing { .. } => "Landing",
@@ -194,7 +192,6 @@ pub enum Order {
     MoveTo { x: u16, z: u16 },
     /// Walk to point `point` of the ring of the camp fire at `fire` (its centre), then go round it.
     Campfire { fire: (u16, u16), point: u8 },
-    Pray,
     Cast,
     Stop,
     /// Braves: cut one piece of wood off the tree at `tree` (its position), or the nearest tree with
@@ -462,7 +459,6 @@ impl Unit {
                 self.to_fire = Some((fire, point));
                 Action::Walking { to: campfire::ring_point(fire, point) }
             }
-            Order::Pray => Action::Praying,
             Order::Cast => Action::Casting { left: CAST_TICKS },
             Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } => Action::Idle,
             Order::CutTree { tree } => {
@@ -480,7 +476,7 @@ impl Unit {
             self.teleport_to = None;
         }
         match self.action {
-            Action::Idle | Action::Praying | Action::Hammering | Action::Worshipping { .. } => self.heal(),
+            Action::Idle | Action::Hammering | Action::Worshipping { .. } => self.heal(),
             Action::AroundFire { fire, point } => {
                 self.heal();
                 let next = (point + 1) % campfire::RING_POINTS;
@@ -993,7 +989,7 @@ mod tests {
     fn drowns_dies_and_reincarnates_at_the_site() {
         let mut t = land();
         let (mut u, site) = shaman_at((10, 10));
-        u.order(Order::Pray);
+        u.order(Order::Stop);
         u.x += 20 * 512;
         let (cx, cz) = u.cell();
         for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {

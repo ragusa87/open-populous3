@@ -74,7 +74,7 @@ are on an overlay camera (`OverlayCamera`, order 1) that clears the window in th
 
 ## Selection and orders
 Left click on a vault of knowledge with the shaman selected sends her to pray at it (worship.md). Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect (Shift + right click puts out the player's camp fire under the cursor, or cancels the player's plan not flat yet);
-the shaman is selected like any unit on the map, clicking her panel preview selects her alone. Left click on the ground sends the selection there (on a tree: braves cut it; on a wood pile: braves with empty hands take a piece, units.md "Wood"; on one of the player's buildings still to build: braves work on it, buildings.md "Construction"), P pray, X stop (with Ctrl held, these orders are chained after
+the shaman is selected like any unit on the map, clicking her panel preview selects her alone. Left click on the ground sends the selection there (on a tree: braves cut it; on a wood pile: braves with empty hands take a piece, units.md "Wood"; on one of the player's buildings still to build: braves work on it, buildings.md "Construction"; on a totem: the units that may pray there go and pray, worship.md), X stop (with Ctrl held, these orders are chained after
 the units' current ones, see units.md "Chained orders"), Space
 looks at the shaman. Selected units show a health bar; the cursor shows the count when more than one (see units.md).
 

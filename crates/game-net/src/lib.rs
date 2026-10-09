@@ -117,7 +117,6 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             b.extend(x.to_le_bytes());
             b.extend(z.to_le_bytes());
         }
-        Order::Pray => b.push(1),
         Order::Cast => b.push(2),
         Order::Stop => b.push(3),
         Order::Campfire { fire, point } => {
@@ -183,7 +182,6 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
 fn decode_order(c: &mut Cursor) -> Option<Order> {
     Some(match c.u8()? {
         0 => Order::MoveTo { x: c.u16()?, z: c.u16()? },
-        1 => Order::Pray,
         2 => Order::Cast,
         3 => Order::Stop,
         4 => Order::Campfire { fire: (c.u16()?, c.u16()?), point: c.u8()? },
@@ -255,13 +253,13 @@ mod tests {
                 Command::Cast { player: 0, spell: Spell::Flatten { at: (5, 6) } },
                 Command::Cast { player: 0, spell: Spell::Teleport { to: (65535, 7) } },
                 Command::Order { player: 2, order: Order::MoveTo { x: 65535, z: 300 } },
-                Command::Order { player: 0, order: Order::Pray },
+                Command::Order { player: 0, order: Order::Cast },
                 Command::Order { player: 1, order: Order::Stop },
                 Command::OrderUnit { player: 1, unit: 70_000, order: Order::MoveTo { x: 3, z: 4 } },
                 Command::OrderUnit { player: 0, unit: 9, order: Order::Campfire { fire: (65535, 256), point: 15 } },
                 Command::PlaceCampfire { player: 3, at: (40_000, 7) },
                 Command::RemoveCampfire { player: 1, at: (8, 65535) },
-                Command::QueueOrder { player: 2, unit: 12, order: Order::Pray },
+                Command::QueueOrder { player: 2, unit: 12, order: Order::Stop },
                 Command::OrderUnit { player: 0, unit: 3, order: Order::CutTree { tree: (65535, 1) } },
                 Command::QueueOrder { player: 1, unit: 4, order: Order::FetchWood },
                 Command::OrderUnit { player: 2, unit: 5, order: Order::PickUp { at: (7, 65535) } },

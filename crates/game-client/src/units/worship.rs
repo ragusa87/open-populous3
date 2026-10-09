@@ -73,7 +73,7 @@ mod tests {
         assert_eq!(worship_facing(&busy, Some(&her)), None, "not idle");
         her.action = Action::Walking { to: (0, 0) };
         assert!(worship_facing(&brave, Some(&her)).is_some(), "she walks past");
-        for action in [Action::Praying, Action::Casting { left: 3 }, Action::Dead { left: 3 }] {
+        for action in [Action::Worshipping { site: (0, 0) }, Action::Casting { left: 3 }, Action::Dead { left: 3 }] {
             her.action = action;
             assert_eq!(worship_facing(&brave, Some(&her)), None, "{action:?}");
         }

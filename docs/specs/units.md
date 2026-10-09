@@ -15,7 +15,6 @@
 | Idle | default, arrival, Stop | heals 1 HP every 5 ticks |
 | Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 64 units/tick on flat ground (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
 | Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -1 HP every 3 ticks until the terrain opens a path (walks again) or it dies |
-| Praying | `Order::Pray` | until another order; heals |
 | Worshipping | `Order::Worship { site }` (a click on a vault of knowledge with her selected) | prays at the vault's door; heals; see worship.md |
 | Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle (Teleport: then at the target, Landing) |
 | Landing { left } | arriving from a teleport | 6 ticks, then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out); a puff of dust at touchdown (`units/dust.rs`) |
@@ -171,9 +170,10 @@ orders, spells and Teleport are ignored) while she is:
   preview selects her alone (and looks at her). Selecting a vehicle or building will not select the people inside.
   The cursor shows the selected count when more than one. Dead units leave the selection.
 - Orders go to each selected unit as `Command::OrderUnit`: left click on the ground walks there
-  (`grounded::pick_ground`), P prays, X stops. C (cast selected spell) makes the player's shaman jump,
+  (`grounded::pick_ground`), X stops. Units never pray anywhere: only at a totem or a vault of knowledge
+  (`Order::Worship`, worship.md). C (cast selected spell) makes the player's shaman jump,
   Space looks at her.
-- Dev: `SHAMAN=walk|pray|cast|drown|teleport [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose.
+- Dev: `SHAMAN=walk|cast|drown|teleport|worship [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose.
 
 ## Reincarnation site (done: data + rendering)
 - `game_core::site::ReincarnationSite { owner, x, z }`, stored in `GameMap::sites` (one per tribe, sorted by owner).

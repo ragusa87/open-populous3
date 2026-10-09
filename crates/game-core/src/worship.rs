@@ -291,7 +291,7 @@ mod tests {
         assert!(map.locked(s), "walking in");
         let before = map.units[s].action;
         map.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::Stop });
-        map.apply(&Command::Order { player: 0, order: Order::Pray });
+        map.apply(&Command::Order { player: 0, order: Order::Cast });
         assert_eq!(map.units[s].action, before, "ignored");
     }
 

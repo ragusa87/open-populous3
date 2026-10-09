@@ -958,8 +958,8 @@ mod tests {
     fn orders_and_casts_go_to_the_shaman_not_the_first_unit() {
         let mut m = GameMap::sandbox_units();
         m.units.rotate_left(1);
-        m.apply(&Command::Order { player: 0, order: Order::Pray });
-        assert_eq!(m.shaman_of(0).unwrap().action, crate::unit::Action::Praying);
+        m.apply(&Command::Order { player: 0, order: Order::Cast });
+        assert!(matches!(m.shaman_of(0).unwrap().action, crate::unit::Action::Casting { .. }));
         assert!(m.units.iter().filter(|u| u.kind != UnitKind::Shaman).all(|u| u.action == crate::unit::Action::Idle));
     }
 
@@ -1181,7 +1181,7 @@ mod tests {
         m.trees.clear();
         let id = m.units[0].id;
         let (a, b) = (slots::cell_centre((c + 3, c)), slots::cell_centre((c + 3, c + 3)));
-        for order in [Order::MoveTo { x: a.0, z: a.1 }, Order::MoveTo { x: b.0, z: b.1 }, Order::Pray] {
+        for order in [Order::MoveTo { x: a.0, z: a.1 }, Order::MoveTo { x: b.0, z: b.1 }, Order::Stop] {
             m.apply(&Command::QueueOrder { player: 0, unit: id, order });
         }
         assert_eq!(m.units[0].action, Action::Walking { to: a }, "idle: the first one starts at once");
@@ -1192,14 +1192,14 @@ mod tests {
             seen_a |= m.units[0].cell() == (c + 3, c);
         }
         assert!(seen_a, "went by A");
-        assert_eq!((m.units[0].cell(), m.units[0].action), ((c + 3, c + 3), Action::Praying), "then B, then prays");
+        assert_eq!((m.units[0].cell(), m.units[0].action, m.units[0].queued().len()), ((c + 3, c + 3), Action::Idle, 0), "then B, then stops");
         m.apply(&Command::QueueOrder { player: 0, unit: id, order: Order::MoveTo { x: a.0, z: a.1 } });
-        run(&mut m, 50);
-        assert_eq!(m.units[0].action, Action::Praying, "praying (no target yet) does not end on its own");
+        m.apply(&Command::QueueOrder { player: 0, unit: id, order: Order::MoveTo { x: b.0, z: b.1 } });
+        assert_eq!((m.units[0].action, m.units[0].queued().len()), (Action::Walking { to: a }, 1));
         m.apply(&Command::OrderUnit { player: 0, unit: id, order: Order::Stop });
         run(&mut m, 50);
         assert_eq!((m.units[0].action, m.units[0].queued().len()), (Action::Idle, 0), "a direct order replaces the chain");
-        m.apply(&Command::QueueOrder { player: 1, unit: id, order: Order::Pray });
+        m.apply(&Command::QueueOrder { player: 1, unit: id, order: Order::MoveTo { x: a.0, z: a.1 } });
         assert_eq!(m.units[0].action, Action::Idle, "not red's unit");
     }
 
@@ -1230,7 +1230,7 @@ mod tests {
             for (i, &unit) in ids.iter().enumerate() {
                 let to = slots::cell_centre((c + i as i32 % 4, c + 4));
                 m.apply(&Command::QueueOrder { player: 0, unit, order: Order::MoveTo { x: to.0, z: to.1 } });
-                m.apply(&Command::QueueOrder { player: 0, unit, order: Order::Pray });
+                m.apply(&Command::QueueOrder { player: 0, unit, order: Order::Stop });
             }
             run(&mut m, 300);
             m.units
@@ -1540,13 +1540,13 @@ mod tests {
             for _ in 0..3 {
                 m.tick();
             }
-            m.apply(&Command::Order { player: 0, order: Order::Pray });
+            m.apply(&Command::Order { player: 0, order: Order::Cast });
             m.tick();
             m
         };
         let (a, b) = (run(), run());
         assert_eq!(a.units, b.units);
-        assert_eq!(a.units[0].action, Action::Praying);
+        assert!(matches!(a.units[0].action, Action::Casting { .. }));
         assert!(a.units[0].x != a.sites[0].x, "she moved");
     }
 
@@ -1555,9 +1555,10 @@ mod tests {
         use crate::unit::Action;
         let mut m = GameMap::generate(7);
         let (mine, theirs) = (m.units[0].id, m.units[1].id);
-        m.apply(&Command::OrderUnit { player: 0, unit: theirs, order: Order::Pray });
+        let to = |u: &crate::unit::Unit| Order::MoveTo { x: u.x.wrapping_add(1024), z: u.z };
+        m.apply(&Command::OrderUnit { player: 0, unit: theirs, order: to(&m.units[1]) });
         assert_eq!(m.units[1].action, Action::Idle);
-        m.apply(&Command::OrderUnit { player: 0, unit: mine, order: Order::Pray });
-        assert_eq!(m.units[0].action, Action::Praying);
+        m.apply(&Command::OrderUnit { player: 0, unit: mine, order: to(&m.units[0]) });
+        assert!(matches!(m.units[0].action, Action::Walking { .. }));
     }
 }

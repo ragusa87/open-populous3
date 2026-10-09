@@ -1,5 +1,5 @@
 //! Dev helpers driven by env vars, so screenshots can be taken without a window:
-//! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|pray|cast|drown|teleport|worship] game-client [level]`.
+//! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|cast|drown|teleport|worship] game-client [level]`.
 //! `SHAMAN=worship` sends her to pray at the map's first vault of knowledge; `BRAVES=totem:N` sends
 //! every brave of the player to pray at totem N.
 //! `SHAMAN` gives the player's shaman an order at start, to check each pose; `BRAVES=cut|carry` sends
@@ -71,7 +71,6 @@ pub fn demo_commands(name: &str, shaman: &Unit) -> Vec<Command> {
     let order = |order| vec![Command::Order { player: PLAYER, order }];
     match name {
         "walk" => order(Order::MoveTo { x: shaman.x.wrapping_add(3 * 512), z: shaman.z }),
-        "pray" => order(Order::Pray),
         "cast" => order(Order::Cast),
         "teleport" => vec![Command::Cast { player: PLAYER, spell: Spell::Teleport { to: (shaman.x.wrapping_add(3 * 512), shaman.z) } }],
         "drown" => vec![Command::Cast { player: PLAYER, spell: Spell::Erode { at: shaman.cell() } }; 6],

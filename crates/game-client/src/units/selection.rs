@@ -7,7 +7,7 @@
 //! walk next to it (`GameMap::cut_orders`); on a wood pile, braves with empty hands pick up a piece
 //! each (`GameMap::pick_orders`); on one of the player's buildings still to build, braves work on it
 //! (`GameMap::build_orders`); Shift + right click on one of the player's camp fires puts it out, on
-//! a plan not flat yet cancels it, and keeps the selection (`shift_right_click`); P prays, X stops.
+//! a plan not flat yet cancels it, and keeps the selection (`shift_right_click`); X stops.
 //! With Ctrl held, these orders are chained after the units' current ones (`chained`). Only selected units show their health bar, and the
 //! cursor shows how many units are selected when more than one. While a spell is aimed the mouse
 //! belongs to it (`hud::spells`): clicks neither select nor send units.
@@ -293,9 +293,6 @@ pub(super) fn select_and_order(
             None => {}
         }
     }
-    if keys.just_pressed(KeyCode::KeyP) {
-        orders.push(Order::Pray);
-    }
     if keys.just_pressed(KeyCode::KeyX) {
         orders.push(Order::Stop);
     }
@@ -450,12 +447,12 @@ mod tests {
     #[test]
     fn ctrl_chains_unit_orders_and_keeps_the_others() {
         let cmds = vec![
-            Command::OrderUnit { player: PLAYER, unit: 4, order: Order::Pray },
+            Command::OrderUnit { player: PLAYER, unit: 4, order: Order::Stop },
             Command::RemoveCampfire { player: PLAYER, at: (1, 2) },
         ];
         assert_eq!(
             chained(cmds),
-            [Command::QueueOrder { player: PLAYER, unit: 4, order: Order::Pray }, Command::RemoveCampfire { player: PLAYER, at: (1, 2) }]
+            [Command::QueueOrder { player: PLAYER, unit: 4, order: Order::Stop }, Command::RemoveCampfire { player: PLAYER, at: (1, 2) }]
         );
     }
 
