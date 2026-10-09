@@ -252,6 +252,18 @@ impl Building {
         crate::terrain::Heightmap::rect_points(self.centre(), f.half, f.offset, self.facing / 2).0
     }
 
+    /// The cells (wrapped on a map of `size` cells) whose centre its footprint covers: its walls.
+    pub fn walled_cells(&self, size: i32) -> Vec<(i32, i32)> {
+        let f = self.kind.footprint();
+        let r = (f.half.0.abs() + f.offset.0.abs()).max(f.half.1.abs() + f.offset.1.abs()) / 512 + 1;
+        let (cx, cz) = self.centre();
+        let (cx, cz) = (cx as i32 / 512, cz as i32 / 512);
+        (cz - r..=cz + r)
+            .flat_map(|z| (cx - r..=cx + r).map(move |x| (x.rem_euclid(size), z.rem_euclid(size))))
+            .filter(|&c| self.covers(crate::slots::cell_centre(c), 0))
+            .collect()
+    }
+
     /// A point of its own frame (world units from its centre, facing 0) on the map.
     pub fn local_point(&self, local: (i32, i32)) -> (u16, u16) {
         let (cx, cz) = self.centre();
@@ -381,6 +393,17 @@ mod tests {
         let flat = Building { flat: true, stock: 1, used: 2, ..site.clone() };
         assert_eq!((flat.delivered(), flat.wood_wanted()), (3, 2));
         assert_eq!(Building::placed(BuildingKind::DrumTower, 0, 0, 0, 0, &crate::terrain::Heightmap::new(128)).level, MIN_GROUND, "never sea");
+    }
+
+    #[test]
+    fn walls_under_the_footprint_the_door_outside() {
+        let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 20 * 512, 20 * 512, 0);
+        let mut cells = hut.walled_cells(128);
+        cells.sort();
+        assert_eq!(cells, (19..=21).flat_map(|x| (19..=21).map(move |z| (x, z))).collect::<Vec<_>>(), "3 x 3 cells");
+        let door = hut.door();
+        assert!(!cells.contains(&((door.0 / 512) as i32, (door.1 / 512) as i32)));
+        assert_eq!(Building::new(BuildingKind::DrumTower, 0, 0, 0, 0).walled_cells(128), vec![(0, 0)], "wraps");
     }
 
     #[test]

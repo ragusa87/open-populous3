@@ -50,16 +50,17 @@ pub fn pose_name(pose: Pose) -> &'static str {
         Pose::Chop => "chop",
         Pose::CarryWalk => "carry_walk",
         Pose::CarryIdle => "carry_idle",
+        Pose::Jump => "jump",
     }
 }
 
 /// Whether a kind's sheets have a pose: only the shaman casts, and she is never stranded; the wood
-/// poses are not rendered yet (`Pose::fallback` stands in).
+/// and jump poses are not rendered yet (`Pose::fallback` stands in).
 pub fn plays(kind: UnitKind, pose: Pose) -> bool {
     match pose {
         Pose::Cast => kind == UnitKind::Shaman,
         Pose::Stranded => kind != UnitKind::Shaman,
-        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle => false,
+        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump => false,
         _ => true,
     }
 }

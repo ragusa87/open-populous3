@@ -4,8 +4,9 @@
 //! - plan not flat yet: one brave fetches the first piece, the others jump on the footprint's height
 //!   points not yet at the site's level, nearest first, one brave per point; once all are level the
 //!   ring around is blended (`Building::flatten`) and it is under construction;
-//! - under construction: builds a piece from the pile standing around the building, else fetches wood
-//!   while less is delivered and on the way than needed, else waits around it;
+//! - under construction (walled, `GameMap::update_walls`): takes a piece from the pile, walks in by the
+//!   door and builds it in from inside, else fetches wood while less is delivered and on the way than
+//!   needed, else waits (inside, or around it);
 //! - built: released.
 //!
 //! Integers only, units in id order.
@@ -16,7 +17,7 @@ use crate::map::{torus_dist2, GameMap};
 use crate::placement::can_place;
 use crate::slots;
 use crate::terrain::DirtyRect;
-use crate::unit::{Action, Order, Unit, UnitEvent, UnitKind, BUILD_TICKS, JUMP_TICKS};
+use crate::unit::{Action, Inside, Order, Unit, UnitEvent, UnitKind, BUILD_TICKS, JUMP_TICKS};
 
 /// Height a brave's jump moves a height point towards the site's level.
 pub const JUMP_STEP: u16 = 32;
@@ -180,12 +181,18 @@ impl GameMap {
             }
             return self.flatten_step(i, b);
         }
-        let around = !building.covers(me, 0) && building.covers(me, AROUND);
-        if building.stock > 0 && around {
+        let inside = self.units[i].inside.map(|i| i.site) == Some(site);
+        let around = inside || !building.covers(me, 0) && building.covers(me, AROUND);
+        let door = building.door();
+        if building.stock > 0 && inside {
             self.buildings[b].stock -= 1;
             self.units[i].action = Action::Building { left: BUILD_TICKS };
             self.units[i].facing = facing_to(me, building.centre());
-        } else if building.stock == 0 && wanted {
+        } else if building.stock > 0 && torus_dist2(me, door) <= DELIVER_RADIUS * DELIVER_RADIUS {
+            self.units[i].enter(Inside { site, door }, work_point(&building, id));
+        } else if building.stock > 0 {
+            self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
+        } else if wanted {
             self.fetch_wood(i);
         } else if !around && let Some(spot) = self.spot_around(b, me, id) {
             self.units[i].start(Order::MoveTo { x: spot.0, z: spot.1 });
@@ -205,7 +212,9 @@ impl GameMap {
         if uneven.is_empty() {
             let b = &mut self.buildings[b];
             b.flat = true;
-            return Some(b.flatten(&mut self.terrain));
+            let dirty = b.flatten(&mut self.terrain);
+            self.update_walls();
+            return Some(dirty);
         }
         let claimed = |p: (i32, i32)| {
             self.workers(site).any(|u| {
@@ -232,7 +241,7 @@ impl GameMap {
     fn spot_around(&self, b: usize, me: (u16, u16), id: u32) -> Option<(u16, u16)> {
         let building = &self.buildings[b];
         let taken = self.taken_spots(&[id]);
-        slots::free_spots_near(&self.terrain, slots::spot_of(building.centre()), &taken, SPOTS_AROUND)
+        slots::free_spots_near(&self.ground(), slots::spot_of(building.door()), &taken, SPOTS_AROUND)
             .into_iter()
             .map(slots::spot_centre)
             .filter(|&p| !building.covers(p, 0) && building.covers(p, AROUND))
@@ -243,6 +252,12 @@ impl GameMap {
     pub(crate) fn still_building(&self, site: (u16, u16)) -> bool {
         self.building_at_corner(site).is_some_and(|b| self.buildings[b].stage() != Stage::Built)
     }
+}
+
+/// Where brave `id` builds inside `b`: around its centre, a third of a cell apart.
+fn work_point(b: &Building, id: u32) -> (u16, u16) {
+    let k = (id % 9) as i32;
+    b.local_point((b.kind.footprint().offset.0 + (k % 3 - 1) * 170, b.kind.footprint().offset.1 + (k / 3 - 1) * 170))
 }
 
 /// Heading from `from` to `to`.
@@ -395,5 +410,71 @@ mod tests {
         map.wood.push(WoodPiece::new(corner(22, 3).0, corner(22, 3).1));
         run_until(&mut map, 600, |m| m.buildings[site].stock == 1).expect("delivered");
         assert!(map.wood.is_empty());
+    }
+
+    #[test]
+    fn walkers_go_around_a_building_never_through_a_plan_is_walked_on() {
+        let mut map = sandbox();
+        let units = braves(&map, 1);
+        let site = map.place_building(0, BuildingKind::Temple, corner(24, 0), 0).unwrap();
+        map.tick();
+        assert!(map.walls.at((C + 24, C)).is_none(), "a plan has no walls");
+        map.buildings[site].flat = true;
+        map.tick();
+        let walled: Vec<(i32, i32)> = map.buildings[site].walled_cells(128);
+        assert!(walled.iter().all(|&c| map.walls.at(c).is_some()));
+        let u = map.units.iter().position(|u| u.id == units[0]).unwrap();
+        (map.units[u].x, map.units[u].z) = (corner(19, 0).0 + 256, corner(19, 0).1 + 256);
+        map.units[u].inside = None;
+        let to = (corner(29, 0).0 + 256, corner(29, 0).1 + 256);
+        map.apply(&Command::OrderUnit { player: 0, unit: units[0], order: Order::MoveTo { x: to.0, z: to.1 } });
+        for _ in 0..400 {
+            map.tick();
+            assert!(!walled.contains(&map.units[u].cell()), "crossed the temple at {:?}", map.units[u].cell());
+        }
+        assert_eq!((map.units[u].x, map.units[u].z), to);
+    }
+
+    #[test]
+    fn builders_go_in_and_out_by_the_door() {
+        let mut map = sandbox();
+        let units = braves(&map, 4);
+        let site = place(&mut map, BuildingKind::Hut { size: 1 }, corner(24, 0), &units);
+        let (walled, door) = (map.buildings[site].walled_cells(128), map.buildings[site].door());
+        let near_door = |p: (u16, u16)| torus_dist2(p, door) <= DELIVER_RADIUS * DELIVER_RADIUS;
+        let pos = |m: &GameMap| m.units.iter().map(|u| (u.cell(), (u.x, u.z), u.inside)).collect::<Vec<_>>();
+        let mut before = pos(&map);
+        let mut entered = 0;
+        for _ in 0..600 {
+            map.tick();
+            let now = pos(&map);
+            for (a, b) in before.iter().zip(&now) {
+                if !walled.contains(&a.0) && walled.contains(&b.0) {
+                    assert!(near_door(a.1), "walked in away from the door");
+                    assert!(b.2.is_some(), "inside");
+                    entered += 1;
+                }
+                if walled.contains(&a.0) && !walled.contains(&b.0) {
+                    assert!(near_door(b.1), "walked out away from the door");
+                }
+            }
+            before = now;
+        }
+        assert_eq!(map.buildings[site].stage(), Stage::Built);
+        assert!(entered >= 1, "built from inside");
+    }
+
+    #[test]
+    fn braves_jump_the_sandbox_mound_flat() {
+        let mut map = sandbox();
+        let units = braves(&map, 4);
+        let site = place(&mut map, BuildingKind::Hut { size: 1 }, corner(26, -6), &units);
+        assert!(!map.buildings[site].flat, "the mound is uneven");
+        let jumps = (0..2000).filter(|_| {
+            map.tick();
+            map.units.iter().any(|u| matches!(u.action, Action::Flattening { .. }))
+        });
+        assert!(jumps.count() > 0);
+        assert!(map.buildings[site].flat);
     }
 }

@@ -28,11 +28,13 @@ pub enum Pose {
     CarryWalk,
     /// A brave standing with a piece of wood.
     CarryIdle,
+    /// A brave jumping to flatten a plan's ground.
+    Jump,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 10] =
-        [Pose::Idle, Pose::Walk, Pose::Pray, Pose::Cast, Pose::Fall, Pose::Drown, Pose::Stranded, Pose::Chop, Pose::CarryWalk, Pose::CarryIdle];
+    pub const ALL: [Pose; 11] =
+        [Pose::Idle, Pose::Walk, Pose::Pray, Pose::Cast, Pose::Fall, Pose::Drown, Pose::Stranded, Pose::Chop, Pose::CarryWalk, Pose::CarryIdle, Pose::Jump];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only, and not in
     /// the open-source sheets yet).
@@ -40,6 +42,7 @@ impl Pose {
         match self {
             Pose::Chop | Pose::CarryIdle => Pose::Idle,
             Pose::CarryWalk => Pose::Walk,
+            Pose::Jump => Pose::Stranded,
             pose => pose,
         }
     }
@@ -59,7 +62,7 @@ impl Pose {
             Pose::Idle | Pose::Stranded | Pose::Chop | Pose::CarryIdle => ShamanAnim::Idle,
             Pose::Walk | Pose::CarryWalk => ShamanAnim::Walk,
             Pose::Pray => ShamanAnim::Kneel,
-            Pose::Cast => ShamanAnim::Cast,
+            Pose::Cast | Pose::Jump => ShamanAnim::Cast,
             Pose::Fall => ShamanAnim::Fall,
             Pose::Drown => ShamanAnim::Flung,
         }
@@ -72,9 +75,9 @@ pub fn pose_for(action: &Action, carrying: bool) -> Pose {
         Action::Idle | Action::Landing { .. } if carrying => Pose::CarryIdle,
         Action::Idle | Action::Landing { .. } => Pose::Idle,
         Action::Walking { .. } | Action::AroundFire { .. } if carrying => Pose::CarryWalk,
-        Action::Walking { .. } | Action::AroundFire { .. } => Pose::Walk,
+        Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } => Pose::Walk,
         Action::Chopping { .. } | Action::Building { .. } => Pose::Chop,
-        Action::Flattening { .. } => Pose::Cast,
+        Action::Flattening { .. } => Pose::Jump,
         Action::Holding { .. } => Pose::CarryIdle,
         Action::Stranded { .. } => Pose::Stranded,
         Action::Praying => Pose::Pray,
@@ -211,7 +214,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
         UnitKind::Shaman => (pose.original().anim(tribe), None, None),
         UnitKind::Wildman => {
             let anim = match pose {
-                Pose::Idle | Pose::Cast | Pose::Stranded | Pose::Chop | Pose::CarryIdle => WildmanAnim::Stand,
+                Pose::Idle | Pose::Cast | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Jump => WildmanAnim::Stand,
                 Pose::Walk | Pose::CarryWalk => WildmanAnim::Walk,
                 Pose::Pray => WildmanAnim::Sit,
                 Pose::Fall => WildmanAnim::Down,
@@ -238,6 +241,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Chop => PersonAnim::Chop,
                 Pose::CarryWalk => PersonAnim::CarryWalk,
                 Pose::CarryIdle => PersonAnim::CarryStand,
+                Pose::Jump => PersonAnim::ArmsUp,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }
@@ -358,6 +362,8 @@ mod tests {
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Chop, 0), original_anim(UnitKind::Warrior, Pose::Idle, 0), "braves only");
         assert_eq!(original_anim(UnitKind::Shaman, Pose::CarryWalk, 2), original_anim(UnitKind::Shaman, Pose::Walk, 2));
         assert_eq!(original_anim(UnitKind::Brave, Pose::Stranded, 2), (12, None, Some(ARMS_UP_FRAME)));
+        assert_eq!(original_anim(UnitKind::Brave, Pose::Jump, 1), (12, None, None), "the whole flattening jump");
+        assert_eq!(pose_for(&Action::Flattening { at: (0, 0), left: 3 }, false), Pose::Jump);
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Stranded, 0), (12, Some(OUTFIT_WARRIOR), Some(ARMS_UP_FRAME)));
         assert_eq!(original_anim(UnitKind::Preacher, Pose::Pray, 1), (8, Some(OUTFIT_PREACHER), None), "the monk on the tribesman body");
         assert_eq!(original_anim(UnitKind::Spy, Pose::Drown, 0), (40, Some(OUTFIT_SPY), None), "lying, spirit rising");

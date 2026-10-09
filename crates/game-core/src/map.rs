@@ -3,7 +3,7 @@
 use crate::building::{buildings_from_level, Building, BuildingKind};
 use crate::campfire::{self, Campfire};
 use crate::command::Command;
-use crate::path::Mobility;
+use crate::path::{Ground, Mobility, Walled, Walls};
 use crate::slots;
 use crate::spell::Spell;
 use crate::build_book::BuildBook;
@@ -41,6 +41,8 @@ pub struct GameMap {
     pub build_book: Option<BuildBook>,
     /// Lit camp fires, in lighting order (none in original levels).
     pub campfires: Vec<Campfire>,
+    /// The cells the buildings stand on, past their plan stage (`update_walls`).
+    pub walls: Walls,
 }
 
 impl GameMap {
@@ -63,6 +65,7 @@ impl GameMap {
             spell_book: None,
             build_book: None,
             campfires: Vec::new(),
+            walls: Walls::default(),
         }
         .with_building_ground()
         .with_shamans()
@@ -89,6 +92,7 @@ impl GameMap {
         for b in &self.buildings {
             b.flatten(&mut self.terrain);
         }
+        self.update_walls();
         self
     }
 
@@ -138,7 +142,7 @@ impl GameMap {
             terrain.set(x, z, v);
         }
         let sites = generated_sites(&terrain);
-        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new() }.with_shamans().with_trees(seed, 60)
+        GameMap { name: format!("Generated #{seed}"), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }.with_shamans().with_trees(seed, 60)
     }
 
     /// Test ground for walking: a small flat island around the player's site at the centre, a gentle
@@ -165,7 +169,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new() }.with_shamans().with_trees(1, 150)
+        GameMap { name: "Sandbox: walk".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }.with_shamans().with_trees(1, 150)
     }
 
     /// Test ground for buildings: a flat island with the player's site at the centre.
@@ -174,8 +178,8 @@ impl GameMap {
     ///   colours, with some wood pieces between them and the site.
     /// - North: one row per buildable kind (`BUILDABLE` order) showing each `showcase_states`
     ///   column, west to east.
-    /// - East: free ground to build on, with braves, a pile of wood and a few trees, and a camp
-    ///   fire three of the braves go round.
+    /// - East: free ground to build on, with braves, a pile of wood and a few trees, a low mound
+    ///   (north-east of the braves) to try flattening on, and a camp fire three of the braves go round.
     pub fn sandbox_buildings() -> Self {
         const C: i32 = MAP_SIZE as i32 / 2;
         const ISLAND: i32 = 48;
@@ -187,8 +191,9 @@ impl GameMap {
                 }
             }
         }
+        terrain.raise((C + 26, C - 6), 3, 90);
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new() }.with_shamans();
+        let mut map = GameMap { name: "Sandbox: buildings".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }.with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let place = |owner: u8, kind: BuildingKind, (x, z): (u16, u16), facing: u8| Building::new(kind, owner, x - 256, z - 256, facing);
         for model in 1..=19u8 {
@@ -246,7 +251,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new() }.with_shamans().with_trees(2, 150);
+        let mut map = GameMap { name: "Sandbox: units".into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }.with_shamans().with_trees(2, 150);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         for (row, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
             let row = row as i32;
@@ -280,7 +285,7 @@ impl GameMap {
         match *spell {
             Spell::Teleport { to } => {
                 let cell = ((to.0 as u32 / 512) as i32, (to.1 as u32 / 512) as i32);
-                self.shaman_of(player).is_some_and(Unit::is_alive) && Mobility::Walk.passable(&self.terrain, cell)
+                self.shaman_of(player).is_some_and(Unit::is_alive) && self.ground().passable(Mobility::Walk, cell)
             }
             _ => true,
         }
@@ -410,7 +415,7 @@ impl GameMap {
         let movers: Vec<(u32, (u16, u16))> =
             self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id)).map(|u| (u.id, (u.x, u.z))).collect();
         let ids: Vec<u32> = movers.iter().map(|m| m.0).collect();
-        slots::dispatch(&self.terrain, &movers, to, &self.taken_spots(&ids))
+        slots::dispatch(&self.ground(), &movers, to, &self.taken_spots(&ids))
             .into_iter()
             .map(|(unit, (x, z))| Command::OrderUnit { player, unit, order: Order::MoveTo { x, z } })
             .collect()
@@ -421,13 +426,15 @@ impl GameMap {
     /// nearest free one.
     pub fn tick(&mut self) -> Vec<DirtyRect> {
         let mut dirty = Vec::new();
+        self.update_walls();
         self.trees.iter_mut().for_each(Tree::tick);
         self.tend_campfires();
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing { .. })).collect();
         let mut events = Vec::new();
         for (i, unit) in self.units.iter_mut().enumerate() {
             let site = self.sites.iter().find(|s| s.owner == unit.owner);
-            match unit.tick(&self.terrain, site) {
+            let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: unit.inside.map(|i| i.site) };
+            match unit.tick(&ground, site) {
                 Some(UnitEvent::Reincarnated) => dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain))),
                 Some(event) => events.push((i, event)),
                 None => {}
@@ -440,11 +447,11 @@ impl GameMap {
             }
         }
         for i in 0..self.units.len() {
-            if arriving[i] && self.units[i].action == Action::Idle {
+            if arriving[i] && self.units[i].action == Action::Idle && self.units[i].inside.is_none() {
                 let u = &self.units[i];
                 let (taken, spot) = (self.taken_spots(&[u.id]), slots::spot_of((u.x, u.z)));
                 if taken.contains(&spot) {
-                    if let Some(&free) = slots::free_spots_near(&self.terrain, spot, &taken, 1).first() {
+                    if let Some(&free) = slots::free_spots_near(&self.ground(), spot, &taken, 1).first() {
                         let (x, z) = slots::spot_centre(free);
                         self.units[i].start(Order::MoveTo { x, z });
                     }
@@ -459,6 +466,30 @@ impl GameMap {
 }
 
 impl GameMap {
+    /// The terrain with the buildings' walls, as walkers outside every building see it.
+    pub fn ground(&self) -> Walled<'_> {
+        Walled { terrain: &self.terrain, walls: &self.walls, inside: None }
+    }
+
+    /// Walls the cells under every building past its plan stage (its footprint covers their
+    /// centre); a unit standing in a newly walled cell is inside that building, and walks out by its
+    /// door when it moves.
+    pub fn update_walls(&mut self) {
+        let size = self.terrain.size() as i32;
+        let mut cells = std::collections::BTreeMap::new();
+        for b in self.buildings.iter().filter(|b| b.stage() != crate::building::Stage::Blueprint) {
+            cells.extend(b.walled_cells(size).into_iter().map(|c| (c, (b.x, b.z))));
+        }
+        if self.walls.set(cells) {
+            for u in self.units.iter_mut().filter(|u| u.inside.is_none() && u.is_alive()) {
+                let Some(site) = self.walls.at(u.cell()) else { continue };
+                if let Some(b) = self.buildings.iter().find(|b| (b.x, b.z) == site) {
+                    u.inside = Some(crate::unit::Inside { site, door: b.door() });
+                }
+            }
+        }
+    }
+
     /// Every living idle unit starts its next chained order that is still valid.
     fn start_chained(&mut self) {
         for i in 0..self.units.len() {
@@ -509,7 +540,7 @@ impl GameMap {
         let tree = (chosen.x, chosen.z);
         let taken = self.taken_spots(&[id]);
         let me = (u.x, u.z);
-        let spots = slots::free_spots_near(&self.terrain, slots::spot_of(tree), &taken, 8);
+        let spots = slots::free_spots_near(&self.ground(), slots::spot_of(tree), &taken, 8);
         if let Some(stand) = spots.iter().map(|&s| slots::spot_centre(s)).min_by_key(|&p| torus_dist2(me, p)) {
             self.units[i].go_cut(tree, stand);
         }

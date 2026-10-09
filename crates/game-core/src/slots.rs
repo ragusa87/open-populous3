@@ -4,8 +4,7 @@
 //! target (`dispatch`), and a unit arriving on a spot taken meanwhile moves on to the nearest free
 //! one (`GameMap::tick`).
 
-use crate::path::Mobility;
-use crate::terrain::Heightmap;
+use crate::path::{Ground, Mobility};
 use pop3_format::WORLD_UNITS_PER_CELL;
 use std::collections::{BTreeSet, VecDeque};
 
@@ -51,8 +50,8 @@ pub fn cell_spots((cx, cz): (i32, i32)) -> impl Iterator<Item = Spot> {
 }
 
 /// The first `n` free spots around `target`, nearest first (ties by row then column): spots a walker
-/// reaches from `target` without crossing water or cliffs, within `SEARCH_RADIUS` cells, not in `taken`.
-pub fn free_spots_near(terrain: &Heightmap, target: Spot, taken: &BTreeSet<Spot>, n: usize) -> Vec<Spot> {
+/// reaches from `target` without crossing water, cliffs or walls, within `SEARCH_RADIUS` cells, not in `taken`.
+pub fn free_spots_near(ground: &impl Ground, target: Spot, taken: &BTreeSet<Spot>, n: usize) -> Vec<Spot> {
     let wrap = |(x, z): Spot| (x.rem_euclid(SPOTS), z.rem_euclid(SPOTS));
     let target = wrap(target);
     let delta = |a: i32, b: i32| {
@@ -60,7 +59,7 @@ pub fn free_spots_near(terrain: &Heightmap, target: Spot, taken: &BTreeSet<Spot>
         if d > SPOTS / 2 { d - SPOTS } else { d }
     };
     let offset = |s: Spot| (delta(target.0, s.0), delta(target.1, s.1));
-    let walkable = |s: Spot| Mobility::Walk.passable(terrain, spot_cell(s));
+    let walkable = |s: Spot| ground.passable(Mobility::Walk, spot_cell(s));
     let mut found = Vec::new();
     if !walkable(target) {
         return found;
@@ -91,9 +90,9 @@ pub fn free_spots_near(terrain: &Heightmap, target: Spot, taken: &BTreeSet<Spot>
 /// nearest spots first, each taken by the closest unit still unplaced (ties by id). The unit on the
 /// target spot goes exactly to `to`, the others to their spot's centre. Units left without a spot
 /// (no room) are left out.
-pub fn dispatch(terrain: &Heightmap, units: &[(u32, (u16, u16))], to: (u16, u16), taken: &BTreeSet<Spot>) -> Vec<(u32, (u16, u16))> {
+pub fn dispatch(ground: &impl Ground, units: &[(u32, (u16, u16))], to: (u16, u16), taken: &BTreeSet<Spot>) -> Vec<(u32, (u16, u16))> {
     let target = spot_of(to);
-    let spots = free_spots_near(terrain, target, taken, units.len());
+    let spots = free_spots_near(ground, target, taken, units.len());
     let mut left: Vec<(u32, (u16, u16))> = units.to_vec();
     let mut out = Vec::new();
     for spot in spots {
@@ -113,6 +112,7 @@ pub fn dispatch(terrain: &Heightmap, units: &[(u32, (u16, u16))], to: (u16, u16)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terrain::Heightmap;
 
     fn land() -> Heightmap {
         let mut t = Heightmap::new(128);

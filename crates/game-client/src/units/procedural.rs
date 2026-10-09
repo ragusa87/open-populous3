@@ -61,7 +61,7 @@ pub fn frame_count(pose: Pose) -> usize {
     match pose {
         Pose::Idle | Pose::Pray | Pose::Drown | Pose::Stranded | Pose::Chop | Pose::CarryIdle => 4,
         Pose::Walk | Pose::Fall | Pose::CarryWalk => 8,
-        Pose::Cast => 12,
+        Pose::Cast | Pose::Jump => 12,
     }
 }
 
@@ -120,7 +120,7 @@ fn body(pose: Pose, view: View, f: usize) -> Body {
                 ..base
             }
         }
-        Pose::Cast => {
+        Pose::Cast | Pose::Jump => {
             let t = f as f32 / (n - 1) as f32;
             let up = (t * PI).sin();
             Body {

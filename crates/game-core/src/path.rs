@@ -7,7 +7,7 @@ use crate::terrain::Heightmap;
 use crate::unit::{is_sea, isqrt, slope_factor, SLOPE_FACTOR_RANGE};
 use pop3_format::WORLD_UNITS_PER_CELL;
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, VecDeque};
+use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 
 const CELL: i32 = WORLD_UNITS_PER_CELL as i32;
 /// Time to cross a cell on flat ground, straight and diagonally (path costs are in these units).
@@ -54,6 +54,80 @@ impl Mobility {
     }
 }
 
+/// The ground movers cross: the terrain, and for walkers the walls of the buildings standing on it.
+pub trait Ground {
+    fn terrain(&self) -> &Heightmap;
+
+    /// A building's wall stands in `cell` (wrapped) and walkers may not cross it.
+    fn walled(&self, _cell: (i32, i32)) -> bool {
+        false
+    }
+
+    /// Changes whenever what can be crossed does: walkers replan.
+    fn revision(&self) -> (u32, u32) {
+        (self.terrain().revision(), 0)
+    }
+
+    fn passable(&self, mob: Mobility, cell: (i32, i32)) -> bool {
+        mob.passable(self.terrain(), cell) && !(mob == Mobility::Walk && self.walled(cell))
+    }
+}
+
+/// Bare terrain: no walls.
+impl Ground for Heightmap {
+    fn terrain(&self) -> &Heightmap {
+        self
+    }
+}
+
+/// The cells buildings stand on (wrapped), each with its building's stored corner: walkers go
+/// around them and only in and out by the door.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Walls {
+    cells: BTreeMap<(i32, i32), (u16, u16)>,
+    revision: u32,
+}
+
+impl Walls {
+    /// Replaces the walled cells; the revision changes only if they did (then true).
+    pub fn set(&mut self, cells: BTreeMap<(i32, i32), (u16, u16)>) -> bool {
+        let changed = cells != self.cells;
+        if changed {
+            self.cells = cells;
+            self.revision = self.revision.wrapping_add(1);
+        }
+        changed
+    }
+
+    /// The building (stored corner) whose wall is in `cell`, if any.
+    pub fn at(&self, cell: (i32, i32)) -> Option<(u16, u16)> {
+        self.cells.get(&cell).copied()
+    }
+}
+
+/// Terrain with walls, as seen by one unit: `inside` is the building it is in (or going in or out
+/// of), whose walls do not stop it.
+pub struct Walled<'a> {
+    pub terrain: &'a Heightmap,
+    pub walls: &'a Walls,
+    pub inside: Option<(u16, u16)>,
+}
+
+impl Ground for Walled<'_> {
+    fn terrain(&self) -> &Heightmap {
+        self.terrain
+    }
+
+    fn walled(&self, cell: (i32, i32)) -> bool {
+        let size = self.terrain.size() as i32;
+        self.walls.at((cell.0.rem_euclid(size), cell.1.rem_euclid(size))).is_some_and(|b| Some(b) != self.inside)
+    }
+
+    fn revision(&self) -> (u32, u32) {
+        (self.terrain.revision(), self.walls.revision)
+    }
+}
+
 /// A cell edge rises more than `MAX_CLIMB` between its two corners.
 pub fn is_cliff(terrain: &Heightmap, (x, z): (i32, i32)) -> bool {
     let h = |dx, dz| terrain.get(x + dx, z + dz);
@@ -65,9 +139,9 @@ pub fn is_cliff(terrain: &Heightmap, (x, z): (i32, i32)) -> bool {
 /// `to`; None when `to` cannot be reached. `straighten` merges cells into straight legs; without it
 /// the route goes through every cell centre, starting with the centre of the current cell
 /// (always safe, used when a straight leg was blocked).
-pub fn route(terrain: &Heightmap, mob: Mobility, from: (u16, u16), to: (u16, u16), straighten: bool) -> Option<Vec<(u16, u16)>> {
-    let cells = timed_cell_path(terrain, mob, cell_of(from), cell_of(to))?;
-    let size = terrain.size() as i32;
+pub fn route(ground: &impl Ground, mob: Mobility, from: (u16, u16), to: (u16, u16), straighten: bool) -> Option<Vec<(u16, u16)>> {
+    let cells = timed_cell_path(ground, mob, cell_of(from), cell_of(to))?;
+    let size = ground.terrain().size() as i32;
     let step = |a: i32, b: i32| (b - a + size / 2).rem_euclid(size) - size / 2;
     // Unwrapped coordinates with the time to reach them: the start, every cell centre one step at
     // a time, then the target in the last cell. Legs between consecutive points are passable.
@@ -81,7 +155,7 @@ pub fn route(terrain: &Heightmap, mob: Mobility, from: (u16, u16), to: (u16, u16
     let end = (cell.0 * CELL + to.0 as i32 % CELL, cell.1 * CELL + to.1 as i32 % CELL);
     points.push((end, points[points.len() - 1].1));
     points.dedup_by_key(|p| p.0);
-    let points = if straighten { straighten_legs(terrain, mob, &points) } else { points.into_iter().map(|p| p.0).collect() };
+    let points = if straighten { straighten_legs(ground, mob, &points) } else { points.into_iter().map(|p| p.0).collect() };
     Some(points.into_iter().skip(1).map(|(x, z)| (x as u16, z as u16)).collect())
 }
 
@@ -89,16 +163,17 @@ pub fn route(terrain: &Heightmap, mob: Mobility, from: (u16, u16), to: (u16, u16
 /// impassable cell, fastest for `mob` (see `step_time`). None if `to` is impassable or out of
 /// reach. The start cell may be impassable (ground raised into a cliff under her): she can step
 /// off it.
-pub fn cell_path(terrain: &Heightmap, mob: Mobility, from: (i32, i32), to: (i32, i32)) -> Option<Vec<(i32, i32)>> {
-    Some(timed_cell_path(terrain, mob, from, to)?.into_iter().map(|(c, _)| c).collect())
+pub fn cell_path(ground: &impl Ground, mob: Mobility, from: (i32, i32), to: (i32, i32)) -> Option<Vec<(i32, i32)>> {
+    Some(timed_cell_path(ground, mob, from, to)?.into_iter().map(|(c, _)| c).collect())
 }
 
 /// `cell_path` with the time to reach each cell.
-fn timed_cell_path(terrain: &Heightmap, mob: Mobility, from: (i32, i32), to: (i32, i32)) -> Option<Vec<((i32, i32), u32)>> {
+fn timed_cell_path(ground: &impl Ground, mob: Mobility, from: (i32, i32), to: (i32, i32)) -> Option<Vec<((i32, i32), u32)>> {
+    let terrain = ground.terrain();
     let size = terrain.size() as i32;
     let wrap = |(x, z): (i32, i32)| (x.rem_euclid(size), z.rem_euclid(size));
     let (from, to) = (wrap(from), wrap(to));
-    let ok = |c: (i32, i32)| mob.passable(terrain, c);
+    let ok = |c: (i32, i32)| ground.passable(mob, c);
     if !ok(to) {
         return None;
     }
@@ -149,8 +224,8 @@ fn timed_cell_path(terrain: &Heightmap, mob: Mobility, from: (i32, i32), to: (i3
 /// around the torus, first found on ties): where to go to get next to something on ground it
 /// cannot reach, such as a walker boarding a boat on the water, or a boat unloading at a shore.
 /// The start cell counts even if impassable.
-pub fn nearest_reachable(terrain: &Heightmap, mob: Mobility, from: (i32, i32), goal: (i32, i32)) -> (i32, i32) {
-    let size = terrain.size() as i32;
+pub fn nearest_reachable(ground: &impl Ground, mob: Mobility, from: (i32, i32), goal: (i32, i32)) -> (i32, i32) {
+    let size = ground.terrain().size() as i32;
     let wrap = |(x, z): (i32, i32)| (x.rem_euclid(size), z.rem_euclid(size));
     let from = wrap(from);
     let dist2 = |(x, z): (i32, i32)| {
@@ -168,7 +243,7 @@ pub fn nearest_reachable(terrain: &Heightmap, mob: Mobility, from: (i32, i32), g
         for (dx, dz) in NEIGHBOURS {
             let next = wrap((cell.0 + dx, cell.1 + dz));
             let i = (next.1 * size + next.0) as usize;
-            if !seen[i] && mob.passable(terrain, next) {
+            if !seen[i] && ground.passable(mob, next) {
                 seen[i] = true;
                 queue.push_back(next);
             }
@@ -198,13 +273,13 @@ fn leg_time(terrain: &Heightmap, mob: Mobility, a: (i32, i32), b: (i32, i32)) ->
 /// Keep only the turning points: from each kept point, jump to the farthest next point that a
 /// straight leg reaches over passable cells, no slower than the cells it skips (with a little
 /// slack: the cell path zigzags, its heights are cell averages).
-fn straighten_legs(terrain: &Heightmap, mob: Mobility, points: &[((i32, i32), u32)]) -> Vec<(i32, i32)> {
-    let no_slower = |a: &((i32, i32), u32), b: &((i32, i32), u32)| leg_time(terrain, mob, a.0, b.0) <= (b.1 - a.1) * 105 / 100 + STRAIGHT / 10;
+fn straighten_legs(ground: &impl Ground, mob: Mobility, points: &[((i32, i32), u32)]) -> Vec<(i32, i32)> {
+    let no_slower = |a: &((i32, i32), u32), b: &((i32, i32), u32)| leg_time(ground.terrain(), mob, a.0, b.0) <= (b.1 - a.1) * 105 / 100 + STRAIGHT / 10;
     let mut out = vec![points[0].0];
     let mut at = 0;
     while at + 1 < points.len() {
         let mut next = at + 1;
-        while next + 1 < points.len() && leg_is_clear(terrain, mob, points[at].0, points[next + 1].0) && no_slower(&points[at], &points[next + 1]) {
+        while next + 1 < points.len() && leg_is_clear(ground, mob, points[at].0, points[next + 1].0) && no_slower(&points[at], &points[next + 1]) {
             next += 1;
         }
         out.push(points[next].0);
@@ -216,7 +291,7 @@ fn straighten_legs(terrain: &Heightmap, mob: Mobility, points: &[((i32, i32), u3
 /// Every cell a straight leg touches after its first is passable (where it passes exactly
 /// through a cell corner, both side cells must be), and the leg is short enough (see
 /// `MAX_LEG_CELLS`).
-pub fn leg_is_clear(terrain: &Heightmap, mob: Mobility, a: (i32, i32), b: (i32, i32)) -> bool {
+pub fn leg_is_clear(ground: &impl Ground, mob: Mobility, a: (i32, i32), b: (i32, i32)) -> bool {
     let (dx, dz) = ((b.0 - a.0) as i64, (b.1 - a.1) as i64);
     if dx.abs().max(dz.abs()) > (MAX_LEG_CELLS * CELL) as i64 {
         return false;
@@ -227,7 +302,7 @@ pub fn leg_is_clear(terrain: &Heightmap, mob: Mobility, a: (i32, i32), b: (i32, 
     // Distance along each axis to the next cell border, compared as fractions of the leg.
     let border = |p: i32, c: i32, s: i32| if s > 0 { ((c + 1) * CELL - p) as i64 } else { (p - c * CELL) as i64 };
     let (mut nx, mut nz) = (border(a.0, cx, sx), border(a.1, cz, sz));
-    let ok = |c: (i32, i32)| mob.passable(terrain, c);
+    let ok = |c: (i32, i32)| ground.passable(mob, c);
     let max_steps = (end.0 - cx).abs() + (end.1 - cz).abs() + 2;
     for _ in 0..max_steps {
         if (cx, cz) == end {

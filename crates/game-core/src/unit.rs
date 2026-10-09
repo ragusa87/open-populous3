@@ -3,7 +3,7 @@
 //! `u16` wrapping arithmetic walks around the torus.
 
 use crate::campfire;
-use crate::path::{self, Mobility};
+use crate::path::{self, Ground, Mobility};
 use crate::site::ReincarnationSite;
 use crate::terrain::Heightmap;
 use pop3_format::WORLD_UNITS_PER_CELL;
@@ -138,6 +138,8 @@ pub enum Action {
     Flattening { at: (i32, i32), left: u16 },
     /// A brave building one piece of wood from the pile into the building it works on.
     Building { left: u16 },
+    /// Walking in by the door, straight to `to` inside the building (`Unit::inside`).
+    Entering { to: (u16, u16) },
 }
 
 impl Action {
@@ -157,6 +159,7 @@ impl Action {
             Action::Holding { .. } => "Holding wood",
             Action::Flattening { .. } => "Flattening",
             Action::Building { .. } => "Building",
+            Action::Entering { .. } => "Entering",
         }
     }
 
@@ -232,8 +235,8 @@ pub struct Unit {
     regen: u8,
     /// Waypoints left on the way to `Walking::to`, next one last.
     route: Vec<(u16, u16)>,
-    /// Terrain revision the route was planned on; None = plan on the next tick.
-    planned_on: Option<u32>,
+    /// Ground revision (`Ground::revision`) the route was planned on; None = plan on the next tick.
+    planned_on: Option<(u32, u32)>,
     /// Where the current cast jump takes her when it ends (Teleport).
     teleport_to: Option<(u16, u16)>,
     /// The camp fire (centre) and ring point she is walking to, to go round it once there.
@@ -246,6 +249,15 @@ pub struct Unit {
     queue: Vec<Order>,
     /// The building (stored corner) this brave is assigned to, `Order::Build`.
     pub work: Option<(u16, u16)>,
+    /// The building the unit is in: it walks out by its door before going anywhere.
+    pub inside: Option<Inside>,
+}
+
+/// A building a unit is in (or walking into): its stored corner and its door.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Inside {
+    pub site: (u16, u16),
+    pub door: (u16, u16),
 }
 
 impl Unit {
@@ -274,6 +286,7 @@ impl Unit {
             to_wood: None,
             queue: Vec::new(),
             work: None,
+            inside: None,
         }
     }
 
@@ -360,6 +373,15 @@ impl Unit {
         }
     }
 
+    /// Standing by the door of the building `inside`, walks in straight to `to`.
+    pub fn enter(&mut self, inside: Inside, to: (u16, u16)) {
+        if self.action.can_take_orders() {
+            self.start(Order::Stop);
+            self.inside = Some(inside);
+            self.action = Action::Entering { to };
+        }
+    }
+
     /// Idle, or only holding a piece of wood before putting it down: free for the next order.
     pub fn is_free(&self) -> bool {
         matches!(self.action, Action::Idle | Action::Holding { .. })
@@ -413,7 +435,8 @@ impl Unit {
     }
 
     /// One simulation step. `site` is where the unit reincarnates.
-    pub fn tick(&mut self, terrain: &Heightmap, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
+    pub fn tick(&mut self, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
+        let terrain = ground.terrain();
         if self.is_alive() && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
             self.teleport_to = None;
@@ -425,17 +448,30 @@ impl Unit {
                 let next = (point + 1) % campfire::RING_POINTS;
                 let pace = self.kind.speed() * AROUND_FIRE_PACE.0 / AROUND_FIRE_PACE.1;
                 // Blocked (the sea or a cliff across the ring): aim for the point after.
-                if self.step_towards(campfire::ring_point(fire, next), terrain, pace) != Step::Moved {
+                if self.step_towards(campfire::ring_point(fire, next), ground, pace) != Step::Moved {
                     self.action = Action::AroundFire { fire, point: next };
                 }
             }
+            Action::Walking { to } | Action::Stranded { to } if self.inside.is_some() => {
+                // Out by the door first, then on.
+                let door = self.inside.map_or(to, |i| i.door);
+                self.action = Action::Walking { to };
+                if self.step_towards(door, ground, self.kind.speed()) != Step::Moved {
+                    (self.inside, self.planned_on) = (None, None);
+                }
+            }
+            Action::Entering { to } => {
+                if self.step_towards(to, ground, self.kind.speed()) != Step::Moved {
+                    self.action = Action::Idle;
+                }
+            }
             Action::Walking { to } | Action::Stranded { to } => {
-                if self.planned_on != Some(terrain.revision()) {
-                    self.plan(to, terrain, true);
+                if self.planned_on != Some(ground.revision()) {
+                    self.plan(to, ground, true);
                 }
                 if let Action::Walking { .. } = self.action {
                     self.heal();
-                    self.follow_route(to, terrain);
+                    self.follow_route(to, ground);
                     if self.action == Action::Idle {
                         if let Some((fire, point)) = self.to_fire.take() {
                             self.action = Action::AroundFire { fire, point };
@@ -476,8 +512,9 @@ impl Unit {
             Action::Casting { left } if left > 1 => self.action = Action::Casting { left: left - 1 },
             Action::Casting { .. } => {
                 self.action = Action::Idle;
-                if let Some(to) = self.teleport_to.take().filter(|&to| self.mobility().passable(terrain, (cell_of(to.0), cell_of(to.1)))) {
+                if let Some(to) = self.teleport_to.take().filter(|&to| ground.passable(self.mobility(), (cell_of(to.0), cell_of(to.1)))) {
                     (self.x, self.z) = to;
+                    self.inside = None;
                     self.action = Action::Landing { left: LANDING_TICKS };
                 }
             }
@@ -541,8 +578,8 @@ impl Unit {
 
     /// Path to `to` on the current terrain: walking if there is one, else stranded (the shaman
     /// just stays idle).
-    fn plan(&mut self, to: (u16, u16), terrain: &Heightmap, straighten: bool) {
-        let route = path::route(terrain, self.mobility(), (self.x, self.z), to, straighten);
+    fn plan(&mut self, to: (u16, u16), ground: &impl Ground, straighten: bool) {
+        let route = path::route(ground, self.mobility(), (self.x, self.z), to, straighten);
         if route.is_none() && matches!(self.action, Action::Walking { .. }) {
             self.regen = 0;
         }
@@ -552,17 +589,17 @@ impl Unit {
             None => Action::Stranded { to },
         };
         self.route = route.map(|r| r.into_iter().rev().collect()).unwrap_or_default();
-        self.planned_on = Some(terrain.revision());
+        self.planned_on = Some(ground.revision());
     }
 
     /// One step along the route; idle once at `to`. A step that would end in a cell she cannot
     /// cross (a straight leg grazing its corner) replans cell by cell from the current cell centre.
-    fn follow_route(&mut self, to: (u16, u16), terrain: &Heightmap) {
+    fn follow_route(&mut self, to: (u16, u16), ground: &impl Ground) {
         let Some(&next) = self.route.last() else {
             self.action = Action::Idle;
             return;
         };
-        match self.step_towards(next, terrain, self.kind.speed()) {
+        match self.step_towards(next, ground, self.kind.speed()) {
             Step::Moved => {}
             Step::Arrived => {
                 self.route.pop();
@@ -570,24 +607,24 @@ impl Unit {
                     self.action = Action::Idle;
                 }
             }
-            Step::Blocked => self.plan(to, terrain, false),
+            Step::Blocked => self.plan(to, ground, false),
         }
     }
 
     /// Straight towards `to` at `flat_speed` (world units per tick on flat ground), shortest way
     /// around the torus, never into a cell she cannot cross.
-    fn step_towards(&mut self, to: (u16, u16), terrain: &Heightmap, flat_speed: i32) -> Step {
+    fn step_towards(&mut self, to: (u16, u16), ground: &impl Ground, flat_speed: i32) -> Step {
         let (dx, dz) = (torus_delta(self.x, to.0), torus_delta(self.z, to.1));
         if dx == 0 && dz == 0 {
             return Step::Arrived;
         }
         self.facing = octant(dx, dz);
         let dist = isqrt((dx * dx + dz * dz) as u32) as i32;
-        let speed = slope_speed(flat_speed, self.grade_ahead((dx, dz), dist, terrain));
+        let speed = slope_speed(flat_speed, self.grade_ahead((dx, dz), dist, ground.terrain()));
         let (sx, sz) = if dist <= speed { (dx, dz) } else { (dx * speed / dist, dz * speed / dist) };
         let (nx, nz) = (self.x.wrapping_add(sx as u16), self.z.wrapping_add(sz as u16));
         let next = (cell_of(nx), cell_of(nz));
-        if next != self.cell() && !self.mobility().passable(terrain, next) {
+        if next != self.cell() && !ground.passable(self.mobility(), next) {
             return Step::Blocked;
         }
         (self.x, self.z) = (nx, nz);
