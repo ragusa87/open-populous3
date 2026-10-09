@@ -458,8 +458,10 @@ mod tests {
         map.apply(&game_core::command::Command::OrderUnit { player: 0, unit: brave, order: game_core::unit::Order::Build { site: (88 * 512, 64 * 512) } });
         (map.buildings[site].stock, map.buildings[site].used) = (1, 1);
         assert_eq!(building_label(&map, site), "Hut 1\nBraves: 1/6\nWood: 2/3");
-        let built = map.buildings.iter().position(|b| b.owner == crate::units::PLAYER && b.kind == BuildingKind::DrumTower && b.stage() == Stage::Built).unwrap();
-        assert_eq!(building_label(&map, built), "Drum tower\nWood: 5", "the wood in it, nobody inside");
+        let tower = map.buildings.iter().position(|b| b.owner == crate::units::PLAYER && b.kind == BuildingKind::DrumTower && b.stage() == Stage::Built && b.inside == 0).unwrap();
+        assert_eq!(building_label(&map, tower), "Drum tower\nBraves: 0/1\nWood: 5", "a tower holds one");
+        let temple = map.buildings.iter().position(|b| b.owner == crate::units::PLAYER && b.kind == BuildingKind::Temple && b.stage() == Stage::Built && b.inside == 0).unwrap();
+        assert_eq!(building_label(&map, temple), "Temple\nWood: 8", "nobody goes in: the wood in it only");
         let busy = map.buildings.iter().position(|b| b.owner == crate::units::PLAYER && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside > 0).unwrap();
         assert_eq!(building_label(&map, busy), "Hut 1\nBraves: 3/3\nWood: 3", "once built: the braves inside");
         let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();

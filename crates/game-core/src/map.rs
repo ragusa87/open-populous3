@@ -529,7 +529,7 @@ impl GameMap {
         self.unassign(i);
         match order {
             Order::Build { site } => self.assign(i, site),
-            Order::Enter { site } => self.go_rest(i, site),
+            Order::Enter { site } => self.go_in(i, site),
             Order::CutTree { tree } => self.go_cut(i, tree),
             Order::FetchWood => self.fetch_wood(i),
             Order::PickUp { at } => self.pick_up(i, at),

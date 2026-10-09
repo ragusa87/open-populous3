@@ -309,7 +309,7 @@ pub fn building_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16,
     if let Some(site) = map.site_at(PLAYER, at) {
         return Some(map.build_orders(PLAYER, selected, site));
     }
-    map.house_at(PLAYER, at).map(|house| map.enter_orders(PLAYER, selected, house))
+    map.shelter_at(PLAYER, at).map(|house| map.enter_orders(PLAYER, selected, house))
 }
 
 /// Commands for a left click on the ground at `at` (world units) with `selected` units: they go

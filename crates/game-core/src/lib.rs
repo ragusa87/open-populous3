@@ -6,6 +6,7 @@ pub mod build_book;
 pub mod building;
 pub mod campfire;
 pub mod command;
+pub mod enter;
 pub mod map;
 pub mod path;
 pub mod placement;
