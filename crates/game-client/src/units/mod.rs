@@ -281,14 +281,20 @@ fn respawn_views(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// A unit standing in a building is not seen (walking in or out by the door, it is).
+pub fn hidden_inside(u: &game_core::unit::Unit) -> bool {
+    use game_core::unit::Action;
+    u.inside.is_some() && !matches!(u.action, Action::Walking { .. } | Action::Stranded { .. } | Action::Entering { .. })
+}
+
 fn animate_views(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     clock: Res<SimClock>,
     sprites: Res<UnitSprites>,
     mut views: Query<(&UnitView, &mut Grounded, &mut Transform, &crate::hover::Hoverable), (Without<UnitSprite>, Without<HealthFill>)>,
-    mut bodies: Query<(&UnitSprite, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>), Without<HealthFill>>,
-    mut bars: Query<(&ChildOf, &mut Visibility), With<HealthBar>>,
+    mut bodies: Query<(&UnitSprite, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>, &mut Visibility), (Without<HealthFill>, Without<HealthBar>)>,
+    mut bars: Query<(&ChildOf, &mut Visibility), (With<HealthBar>, Without<UnitSprite>)>,
     mut fills: Query<(&HealthFill, &mut Transform, &MeshMaterial3d<StandardMaterial>), Without<UnitView>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     selection: Res<Selection>,
@@ -302,7 +308,9 @@ fn animate_views(
         t.rotation = facing_camera;
     }
     let shamans = worship::shamans(units);
-    for (body, mut mesh, mut mat) in &mut bodies {
+    for (body, mut mesh, mut mat, mut vis) in &mut bodies {
+        let hidden = units.get(body.0).is_some_and(hidden_inside);
+        vis.set_if_neq(if hidden { Visibility::Hidden } else { Visibility::Inherited });
         let frame = units.get(body.0).and_then(|u| {
             let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
             sprites.frame_for(u, worship, rig.yaw, &clock)
@@ -381,6 +389,17 @@ fn pull_to_eye(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn units_inside_hide_unless_walking_through_the_door() {
+        use game_core::unit::{Action, Inside, Unit, UnitKind};
+        let mut u = Unit::new(1, 0, UnitKind::Brave, (0, 0));
+        assert!(!hidden_inside(&u));
+        u.inside = Some(Inside { site: (0, 0), door: (0, 0) });
+        assert!(hidden_inside(&u));
+        u.action = Action::Entering { to: (1, 1) };
+        assert!(!hidden_inside(&u));
+    }
 
     #[test]
     fn floats_down_when_landing() {
