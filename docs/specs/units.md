@@ -21,7 +21,8 @@
 | Chopping { tree, left } | `Order::CutTree`, `Order::FetchWood` (braves only) | walks to a free spot next to the tree, then `CHOP_TICKS` (60, 6 s, a guess) of chopping, then the tree loses one size and the brave carries the piece |
 | Flattening { at, left } | assigned to a plan (`Order::Build`) | `JUMP_TICKS` jump on a footprint height point, which then moves towards the site's level (buildings.md "Construction"); drawn with the jump pose (original anim 12; the CC0 sheets: arms up) |
 | Entering { to } | `Unit::enter` at a building's door | straight to `to` inside, through its walls, then Idle inside (`Unit::inside`) |
-| Building { left } | inside a site with wood on its pile | `BUILD_TICKS` building one piece in |
+| Building { left } | inside a site with wood on its pile | `BUILD_TICKS` building one piece in (hammer pose: the axe swing, anim 11, until the original hammering anim is found) |
+| Hammering | inside a site under construction with nothing to build yet | until wood comes or it is built; counts as free (`Unit::is_free`) |
 | Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (30, 3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
 | Drowning | ground under her becomes open sea | -4 HP per tick, no orders; back to Idle if land returns |
 | Dying { left } | health reaches 0 | 8 ticks |

@@ -140,6 +140,9 @@ pub enum Action {
     Building { left: u16 },
     /// Walking in by the door, straight to `to` inside the building (`Unit::inside`).
     Entering { to: (u16, u16) },
+    /// A brave inside a building under construction with nothing to build yet, hammering away until
+    /// wood comes or it is built.
+    Hammering,
 }
 
 impl Action {
@@ -160,6 +163,7 @@ impl Action {
             Action::Flattening { .. } => "Flattening",
             Action::Building { .. } => "Building",
             Action::Entering { .. } => "Entering",
+            Action::Hammering => "Hammering",
         }
     }
 
@@ -400,7 +404,7 @@ impl Unit {
 
     /// Idle, or only holding a piece of wood before putting it down: free for the next order.
     pub fn is_free(&self) -> bool {
-        matches!(self.action, Action::Idle | Action::Holding { .. })
+        matches!(self.action, Action::Idle | Action::Holding { .. } | Action::Hammering)
     }
 
     /// Forgets the chained orders (a direct order replaces them).
@@ -458,7 +462,7 @@ impl Unit {
             self.teleport_to = None;
         }
         match self.action {
-            Action::Idle | Action::Praying => self.heal(),
+            Action::Idle | Action::Praying | Action::Hammering => self.heal(),
             Action::AroundFire { fire, point } => {
                 self.heal();
                 let next = (point + 1) % campfire::RING_POINTS;

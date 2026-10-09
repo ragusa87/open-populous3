@@ -156,7 +156,8 @@ Done:
 ### Tooltip
 Done (`buildings::building_label`, after resting the cursor `HOVER_SECS` on a building, plans included): the
 kind's name; for the player's buildings that take wood, `Braves: assigned/max` and `Wood: delivered/cost`, while
-a plan, under construction and built. Other tribes' buildings show their name only. To do:
+a plan and under construction; once built, `Wood: n`, the wood in it (what dismantling gives back, raised when
+a hut grows), and for huts `Inside: people/room`. Other tribes' buildings show their name only. To do:
 Hovering or right-clicking a site (as for trees): kind, braves assigned / maximum, wood delivered / needed. On a
 building of a buildable kind with at least one piece of wood used (under construction or built): a "Dismantle"
 toggle (back to "Build" while dismantling). It also lists the
@@ -196,9 +197,9 @@ pick one besides selecting it on the map.
      level is flat at once.
   3. Under construction: with wood on the pile, walks to the door, in (`Unit::enter`, `Action::Entering`,
      straight to a work point a third of a cell apart per brave around the centre) and builds the piece from
-     inside (`Action::Building`, `BUILD_TICKS` 50, the chop pose); with no pile, fetches wood under the dispatch
-     rule below (out by the door first); else waits, inside, or at the free standing spot around the building
-     nearest to him (within `AROUND` = 400 of the footprint).
+     inside (`Action::Building`, `BUILD_TICKS` 50, the hammer pose); with no pile, fetches wood under the
+     dispatch rule below (out by the door first); else walks in by the door and hammers (`Action::Hammering`,
+     open-ended, free for the next step) until there is wood or the building is done. No brave stands idle.
   4. Built: the moment the last piece is in, everyone inside walks out by the door to a free spot around it
      (`slots::dispatch` from the door) and stands idle; assigned braves are released (`work` cleared).
   Braves bringing wood (`wood_on_the_way`): carrying, fetching or cutting, or building a piece taken off the
@@ -209,8 +210,9 @@ pick one besides selecting it on the map.
 - Client: a left click on one of the player's sites (within `AROUND`) with units selected sends braves to it
   (`selection::ground_click`); Shift + right click on a plan cancels it (`shift_right_click`, after the camp
   fires). Wood on a pile is drawn as wood pieces around the door (`Building::pile_point`, `wood::PileView`).
-  Building views are redone whenever a building changes. Units standing inside a building are not drawn
-  (`units::hidden_inside`), walking in or out they are. Dev: `BUILD=hut@90,62 BUILD_TICKS=150` places a plan
+  Building views are redone whenever a building changes. Units standing inside a built building are not
+  drawn nor picked (`units::hidden_inside`); inside a building under construction (open frame), and walking in
+  or out, they are. Dev: `BUILD=hut@90,62 BUILD_TICKS=150` places a plan
   with all the player's braves and runs that many ticks before the shot.
 
 Not done yet: the gathering look, dismantling, the tooltip's brave icons and Dismantle toggle, wood claimed by

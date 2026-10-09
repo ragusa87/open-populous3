@@ -6,7 +6,7 @@
 //!   ring around is blended (`Building::flatten`) and it is under construction;
 //! - under construction (walled, `GameMap::update_walls`): takes a piece from the pile, walks in by the
 //!   door and builds it in from inside, else fetches wood while less is delivered and on the way than
-//!   needed, else waits (inside, or around it);
+//!   needed, else walks in and hammers until there is wood;
 //! - built: released.
 //!
 //! Integers only, units in id order.
@@ -21,7 +21,7 @@ use crate::unit::{Action, Inside, Order, Unit, UnitEvent, UnitKind, BUILD_TICKS,
 
 /// Height a brave's jump moves a height point towards the site's level.
 pub const JUMP_STEP: u16 = 32;
-/// Braves wait and build within this far (world units) out of the footprint.
+/// A click this close (world units) to a site's footprint is on it.
 pub const AROUND: i32 = 400;
 /// A click this close (world units) to a built hut's footprint is on it.
 pub const HOUSE_MARGIN: i32 = 128;
@@ -29,8 +29,6 @@ pub const HOUSE_MARGIN: i32 = 128;
 pub const DELIVER_RADIUS: i64 = 512;
 /// A brave this close (world units) to a height point jumps on it.
 pub const JUMP_RADIUS: i64 = 256;
-/// Standing spots looked at around a building for a brave to work from.
-const SPOTS_AROUND: usize = 600;
 
 impl GameMap {
     /// The building whose stored corner is `site`.
@@ -260,7 +258,6 @@ impl GameMap {
             return self.flatten_step(i, b);
         }
         let inside = self.units[i].inside.map(|i| i.site) == Some(site);
-        let around = inside || !building.covers(me, 0) && building.covers(me, AROUND);
         let door = building.door();
         if building.stock > 0 && inside {
             self.buildings[b].stock -= 1;
@@ -272,8 +269,12 @@ impl GameMap {
             self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
         } else if wanted {
             self.fetch_wood(i);
-        } else if !around && let Some(spot) = self.spot_around(b, me, id) {
-            self.units[i].start(Order::MoveTo { x: spot.0, z: spot.1 });
+        } else if inside {
+            self.units[i].action = Action::Hammering;
+        } else if torus_dist2(me, door) <= DELIVER_RADIUS * DELIVER_RADIUS {
+            self.units[i].enter(Inside { site, door }, work_point(&building, id));
+        } else {
+            self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
         }
         None
     }
@@ -312,18 +313,6 @@ impl GameMap {
             self.units[i].start(Order::MoveTo { x: at.0, z: at.1 });
         }
         None
-    }
-
-    /// The free standing spot out of building `b`'s footprint and within `AROUND` of it nearest to
-    /// `me`.
-    fn spot_around(&self, b: usize, me: (u16, u16), id: u32) -> Option<(u16, u16)> {
-        let building = &self.buildings[b];
-        let taken = self.taken_spots(&[id]);
-        slots::free_spots_near(&self.ground(), slots::spot_of(building.door()), &taken, SPOTS_AROUND)
-            .into_iter()
-            .map(slots::spot_centre)
-            .filter(|&p| !building.covers(p, 0) && building.covers(p, AROUND))
-            .min_by_key(|&p| torus_dist2(me, p))
     }
 
     /// Whether a chained `Order::Build` still has a building to work on.
@@ -611,5 +600,30 @@ mod tests {
             map.tick();
         }
         assert_eq!(map.trees.last().unwrap().size, 0);
+    }
+
+    #[test]
+    fn six_braves_on_a_hut_never_stand_idle_the_waiting_ones_hammer_inside() {
+        let mut map = sandbox();
+        for k in 0..2u16 {
+            let id = map.units.len() as u32 + 1;
+            map.units.push(Unit::new(id, 0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1)));
+        }
+        let mut units = braves(&map, 5);
+        units.push(map.units.last().unwrap().id);
+        let site = place(&mut map, BuildingKind::Hut { size: 1 }, corner(24, 0), &units);
+        let at = (map.buildings[site].x, map.buildings[site].z);
+        let mut idle = vec![0; units.len()];
+        let mut hammered = false;
+        while map.buildings[site].stage() != Stage::Built {
+            map.tick();
+            for (k, id) in units.iter().enumerate() {
+                let u = map.units.iter().find(|u| u.id == *id).unwrap();
+                hammered |= u.action == Action::Hammering && u.inside.is_some_and(|i| i.site == at);
+                idle[k] = if u.action == Action::Idle { idle[k] + 1 } else { 0 };
+                assert!(idle[k] <= 2, "brave {id} stands idle");
+            }
+        }
+        assert!(hammered);
     }
 }

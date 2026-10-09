@@ -194,7 +194,7 @@ fn spawn_overlays(mut commands: Commands) {
 
 /// The player's selectable units on screen this frame.
 pub fn on_screen(
-    units: &[Unit],
+    map: &game_core::map::GameMap,
     views: &Query<(&UnitView, &GlobalTransform, &Visibility)>,
     cam: (&Camera, &GlobalTransform),
 ) -> Vec<OnScreen> {
@@ -202,7 +202,7 @@ pub fn on_screen(
         .iter()
         .filter(|(_, _, vis)| **vis != Visibility::Hidden)
         .filter_map(|(view, gt, _)| {
-            let u = units.get(view.0).filter(|u| selectable(u) && !super::hidden_inside(u))?;
+            let u = map.units.get(view.0).filter(|u| selectable(u) && !super::hidden_inside(map, u))?;
             let feet = cam.0.world_to_viewport(cam.1, gt.translation()).ok()?;
             let head = cam.0.world_to_viewport(cam.1, gt.translation() + gt.up() * UNIT_HEIGHT).ok()?;
             Some(OnScreen { id: u.id, feet, head })
@@ -259,7 +259,7 @@ pub(super) fn select_and_order(
     };
     let mut orders = Vec::new();
     if let Some(cam) = gesture.and_then(|_| cams.iter().next()) {
-        let units = on_screen(&map.0.units, &views, cam);
+        let units = on_screen(&map.0, &views, cam);
         match gesture {
             Some(Gesture::Box(a, b)) => selection.select_box(&in_box(a, b, &units), add),
             Some(Gesture::Click(c)) => match unit_at(c, &units) {

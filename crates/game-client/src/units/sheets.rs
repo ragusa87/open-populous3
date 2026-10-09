@@ -51,6 +51,7 @@ pub fn pose_name(pose: Pose) -> &'static str {
         Pose::CarryWalk => "carry_walk",
         Pose::CarryIdle => "carry_idle",
         Pose::Jump => "jump",
+        Pose::Hammer => "hammer",
     }
 }
 
@@ -60,7 +61,7 @@ pub fn plays(kind: UnitKind, pose: Pose) -> bool {
     match pose {
         Pose::Cast => kind == UnitKind::Shaman,
         Pose::Stranded => kind != UnitKind::Shaman,
-        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump => false,
+        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer => false,
         _ => true,
     }
 }

@@ -36,6 +36,16 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
   `MANA_F_HUT_LEVEL` 100/110/120 %: the files win until checked in the game.
 - Firewarriors in a hut throw fire at enemies nearby, the shaman casts from inside one (later: combat, spells).
 
+### Done
+- `Order::Enter { site }` (left click on one of the player's built huts with followers selected,
+  `GameMap::enter_orders`, `selection::building_click`; a click on a building wins over a tree): followers (not
+  the shaman, not wildmen) walk to the door and in (`Unit::enter`), and rest inside, idle, not drawn; a hut holds
+  `BuildingKind::capacity` (3 / 4 / 5 by size): the others stay at the door, idle. Any walk takes them out by the
+  door.
+- `Building::inside` is counted each tick from the units inside (`GameMap::count_inside`): a built hut with
+  people inside smokes from its chimney. The tooltip shows `Inside: people/room`.
+- Trees under a building (plans included) do not grow back.
+
 ### Rules
 State on `Building` (huts only): `level` 1-3 (from the kind, `villager_hut` sizes), `occupants` (unit ids, in
 entry order), `breed` (green bar) and `grow` (red bar) progress. The hut's tooltip shows both bars; a large

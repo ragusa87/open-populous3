@@ -106,7 +106,9 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Walls: replan only walkers whose route crosses a changed wall (every walker replans today); a boat hut's jetty side stays open to boats, to check with vehicles.
 - [ ] Building tooltip: one icon per assigned brave (clicking one selects that brave alone), Dismantle toggle once wood is used (under construction or built); right click shows it at once like trees.
 - [ ] Units inside a building are hidden but still selectable with a box; check what the original allows. Units walking out of several buildings: the door may be blocked by another wall or the sea.
-- [ ] CC0 sheets: a jump pose for flattening (`Pose::Jump` falls back on arms up).
+- [ ] CC0 sheets: a jump pose for flattening (`Pose::Jump` falls back on arms up) and a hammer pose (`Pose::Hammer` falls back on idle).
+- [ ] Find the original hammering anim (the axe swing, anim 11, stands in for `Pose::Hammer`).
+- [ ] Huts: auto-housing of idle braves, breeding, mana from people inside, Eject (huts-and-training.md rules).
 - [ ] Wood claimed across sites: two sites' braves can head for the same tree piece; braves of another task may take wood a site counts on. Refine the dispatch rule (nearest brave per piece, gatherers vs builders).
 - [ ] Site visuals: views are redone whenever any building changes; update them per building (stable ids) instead; compare the part order (from the ground up) and the structure with the original; chimney position per hut model; busy look for the other kinds; the pile by the door could be drawn as a stack rather than loose pieces.
 - [ ] Dismantling: braves remove one piece at a time, dropped as a wood piece (circle on the ground) near the door; the building disappears when empty and frees its ground.

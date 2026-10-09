@@ -281,10 +281,12 @@ fn respawn_views(
 }
 
 #[allow(clippy::too_many_arguments)]
-/// A unit standing in a building is not seen (walking in or out by the door, it is).
-pub fn hidden_inside(u: &game_core::unit::Unit) -> bool {
+/// A unit standing in a built building is not seen (walking in or out by the door it is, and in a
+/// building under construction, open, it is).
+pub fn hidden_inside(map: &game_core::map::GameMap, u: &game_core::unit::Unit) -> bool {
     use game_core::unit::Action;
-    u.inside.is_some() && !matches!(u.action, Action::Walking { .. } | Action::Stranded { .. } | Action::Entering { .. })
+    let built = |site| map.building_at_corner(site).is_some_and(|b| map.buildings[b].stage() == game_core::building::Stage::Built);
+    u.inside.is_some_and(|i| built(i.site)) && !matches!(u.action, Action::Walking { .. } | Action::Stranded { .. } | Action::Entering { .. })
 }
 
 fn animate_views(
@@ -309,7 +311,7 @@ fn animate_views(
     }
     let shamans = worship::shamans(units);
     for (body, mut mesh, mut mat, mut vis) in &mut bodies {
-        let hidden = units.get(body.0).is_some_and(hidden_inside);
+        let hidden = units.get(body.0).is_some_and(|u| hidden_inside(&map.0, u));
         vis.set_if_neq(if hidden { Visibility::Hidden } else { Visibility::Inherited });
         let frame = units.get(body.0).and_then(|u| {
             let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
@@ -393,12 +395,17 @@ mod tests {
     #[test]
     fn units_inside_hide_unless_walking_through_the_door() {
         use game_core::unit::{Action, Inside, Unit, UnitKind};
+        let map = game_core::map::GameMap::sandbox_buildings();
+        let built = map.buildings.iter().find(|b| b.stage() == game_core::building::Stage::Built).unwrap();
+        let open = map.buildings.iter().find(|b| matches!(b.stage(), game_core::building::Stage::UnderConstruction { .. })).unwrap();
         let mut u = Unit::new(1, 0, UnitKind::Brave, (0, 0));
-        assert!(!hidden_inside(&u));
-        u.inside = Some(Inside { site: (0, 0), door: (0, 0) });
-        assert!(hidden_inside(&u));
+        assert!(!hidden_inside(&map, &u));
+        u.inside = Some(Inside { site: (built.x, built.z), door: (0, 0) });
+        assert!(hidden_inside(&map, &u));
         u.action = Action::Entering { to: (1, 1) };
-        assert!(!hidden_inside(&u));
+        assert!(!hidden_inside(&map, &u));
+        (u.action, u.inside) = (Action::Hammering, Some(Inside { site: (open.x, open.z), door: (0, 0) }));
+        assert!(!hidden_inside(&map, &u), "seen through the open frame");
     }
 
     #[test]

@@ -173,7 +173,7 @@ fn detect(
     let target = on_map.zip(cams.iter().next()).and_then(|(c, cam)| {
         let people: Vec<OnScreen> = units
             .iter()
-            .filter(|(v, _, vis)| **vis != Visibility::Hidden && map.0.units.get(v.0).is_some_and(|u| u.is_alive() && !selection.contains(u.id) && !crate::units::hidden_inside(u)))
+            .filter(|(v, _, vis)| **vis != Visibility::Hidden && map.0.units.get(v.0).is_some_and(|u| u.is_alive() && !selection.contains(u.id) && !crate::units::hidden_inside(&map.0, u)))
             .filter_map(|(v, gt, _)| {
                 let feet = cam.0.world_to_viewport(cam.1, gt.translation()).ok()?;
                 let head = cam.0.world_to_viewport(cam.1, gt.translation() + gt.up() * UNIT_HEIGHT).ok()?;

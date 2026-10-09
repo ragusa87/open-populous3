@@ -136,14 +136,14 @@ pub fn parse_blueprint(v: &str) -> Option<(crate::blueprint::Plan, Vec2)> {
 }
 
 /// `BUILD` demo: places the plan `kind@x,z` (as `BLUEPRINT`) for the player, sends every brave of
-/// theirs to build it, then runs `ticks` ticks; whether it was placed.
+/// theirs outside buildings to build it, then runs `ticks` ticks; whether it was placed.
 pub fn build_demo(map: &mut game_core::map::GameMap, plan: &str, ticks: u32) -> bool {
     let Some((crate::blueprint::Plan::Building(kind), at)) = parse_blueprint(plan) else { return false };
     let Some(place) = crate::blueprint::place_command(map, kind, 0, at) else { return false };
     map.apply(&place);
     let Command::PlaceBuilding { at, .. } = place else { return false };
     let Some(site) = map.building_at_corner(at) else { return false };
-    let braves: Vec<u32> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave).map(|u| u.id).collect();
+    let braves: Vec<u32> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave && u.inside.is_none()).map(|u| u.id).collect();
     for c in map.build_orders(PLAYER, &braves, site) {
         map.apply(&c);
     }
