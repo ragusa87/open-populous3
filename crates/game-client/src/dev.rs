@@ -137,12 +137,12 @@ pub fn parse_blueprint(v: &str) -> Option<(crate::blueprint::Plan, Vec2)> {
     Some((plan, Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?)))
 }
 
-/// `progress:N` (the gauge), `granted:T` (ticks since the reward) or `spent`: a vault phase.
+/// `progress:N` (the gauge, in `PrayTime` units), `granted:T` (ticks since the reward) or `spent`: a vault phase.
 pub fn parse_vault(v: &str) -> Option<game_core::vault::VaultPhase> {
     use game_core::vault::VaultPhase;
     let (name, n) = v.split_once(':').unwrap_or((v, ""));
     match name {
-        "progress" => Some(VaultPhase::Praying { progress: n.parse().ok()? }),
+        "progress" => Some(VaultPhase::Praying { progress: n.parse::<u32>().ok()? * game_core::gauge::STEP }),
         "granted" => Some(VaultPhase::Granted { ticks: n.parse().ok()? }),
         "spent" => Some(VaultPhase::Spent),
         _ => None,
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn vault_phase_from_env() {
         use game_core::vault::VaultPhase;
-        assert_eq!(parse_vault("progress:95"), Some(VaultPhase::Praying { progress: 95 }));
+        assert_eq!(parse_vault("progress:95"), Some(VaultPhase::Praying { progress: 95 * game_core::gauge::STEP }), "in PrayTime units");
         assert_eq!(parse_vault("granted:3"), Some(VaultPhase::Granted { ticks: 3 }));
         assert_eq!(parse_vault("spent"), Some(VaultPhase::Spent));
         assert_eq!((parse_vault("granted"), parse_vault("open")), (None, None));

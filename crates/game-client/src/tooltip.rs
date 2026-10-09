@@ -149,9 +149,8 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[u32]) -> TooltipModel
             model.lines.push(format!("Teaches: {}", reward_name(reward)));
         }
         model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Shaman, selected)));
-        if let game_core::vault::VaultPhase::Praying { progress } = vault.phase {
-            let fill = (progress.min(vault.pray_time) as u32 * game_core::vault::FULL as u32 / vault.pray_time as u32) as u16;
-            model.bars.push(Bar { kind: BarKind::Prayer, fill, blocked: false });
+        if let game_core::vault::VaultPhase::Praying { .. } = vault.phase {
+            model.bars.push(Bar { kind: BarKind::Prayer, fill: vault.progress_permille(), blocked: false });
         }
         return model;
     }
@@ -551,7 +550,7 @@ mod tests {
         assert_eq!(model.lines[1], "Teaches: Temple");
         assert_eq!(model.rows, vec![vec![Slot { icon: Icon::Placeholder(UnitKind::Shaman), unit: None, selected: false }]]);
         assert_eq!(model.bars, vec![Bar { kind: BarKind::Prayer, fill: 0, blocked: false }], "prayer bar, empty");
-        map.buildings[v].vault.as_mut().unwrap().phase = game_core::vault::VaultPhase::Praying { progress: 60 };
+        map.buildings[v].vault.as_mut().unwrap().phase = game_core::vault::VaultPhase::Praying { progress: 60 * game_core::gauge::STEP };
         assert_eq!(building_model(&map, v, &[]).bars[0].fill, 600, "60 of 100");
         map.buildings[v].vault.as_mut().unwrap().grant();
         let spent = building_model(&map, v, &[]);

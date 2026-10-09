@@ -15,7 +15,8 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
 - The gauge fills at full speed with `TriggerCount` people praying [player]. Fewer pray slower, on a soft curve:
   speed `(n / TriggerCount)²` with `n = min(praying, TriggerCount)` [ours, to check]. A totem of 8: 8 praying 100 %,
   6 about 56 %, 4 25 %, 2 about 6 %, 1 about 1.6 %. In integers: the gauge counts 1/256 steps and gains
-  `256 * n² / TriggerCount²` a tick (a lone prayer on a totem of 16 still gains 1 step).
+  `256 * n² / TriggerCount²` a tick (a lone prayer on a totem of 16 still gains 1 step). Done:
+  `game_core::gauge` (`gain`, `step`, `STEP`, `DRAIN`), used by the vaults; totems will use it too.
 - Nobody praying: the gauge drains, quite quickly, **linearly**: a constant amount each tick, whatever the totem
   needs or how full it is [player]. The rate is to measure; until then as fast as it fills at full speed, 256
   steps (one `PrayTime` unit) a tick [ours].
@@ -85,8 +86,9 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   tenth of the gauge and the top is open; Granted, open, then both close together; Spent, both closed.
 - Praying (done: `game_core::worship`): a click on the vault with the shaman selected sends her
   (`Order::Worship`, `GameMap::worship_orders`; other units ignore it); she walks to its door and prays
-  (`Action::Worshipping`, the prayer pose). Each tick (`GameMap::tend_vaults`) its gauge rises by 1 while she prays
-  at the door or is inside, and drains by 1 otherwise: another order, death. Full, she walks in to its middle
+  (`Action::Worshipping`, the prayer pose). Each tick (`GameMap::tend_vaults`) its gauge fills while she prays at the
+  door or is inside (one prayer out of the one it needs: full speed), and drains linearly otherwise: another
+  order, death. Full, she walks in to its middle
   (`Unit::enter`); there the reward is granted (`Vault::grant`): logged in `GameMap::granted` with her tribe,
   given to the level's books, and the client makes it available on its panels (`hud::build::apply_rewards`).
   Then she walks out by the door (well within `OPEN_TICKS`). From going in until she is out she is locked: no

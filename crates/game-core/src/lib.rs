@@ -7,6 +7,7 @@ pub mod building;
 pub mod campfire;
 pub mod command;
 pub mod enter;
+pub mod gauge;
 pub mod map;
 pub mod occupancy;
 pub mod path;

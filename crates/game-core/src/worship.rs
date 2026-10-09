@@ -61,7 +61,7 @@ impl GameMap {
             let praying = self.units.iter().position(|u| u.is_alive() && u.action == Action::Worshipping { site });
             let inside = self.units.iter().position(|u| u.is_alive() && u.inside.is_some_and(|ins| ins.site == site));
             let mut vault = vault;
-            vault.tick(praying.is_some() || inside.is_some());
+            vault.tick((praying.is_some() || inside.is_some()) as u16);
             match (praying, inside) {
                 (Some(i), None) if vault.is_full() => self.units[i].enter(Inside { site, door }, middle),
                 (_, Some(i)) if self.units[i].action == Action::Idle && near(self.units[i].x, self.units[i].z, middle) => {
@@ -162,14 +162,14 @@ mod tests {
         let s = map.units.iter().position(|u| u.id == shaman).unwrap();
         (0..600).find(|_| {
             map.tick();
-            matches!(phase(&map, vault), VaultPhase::Praying { progress: 10 })
+            matches!(phase(&map, vault), VaultPhase::Praying { progress } if progress == 10 * crate::gauge::STEP)
         });
         let (x, z) = (map.units[s].x, map.units[s].z.wrapping_sub(1024));
         map.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::MoveTo { x, z } });
         for _ in 0..4 {
             map.tick();
         }
-        assert!(matches!(phase(&map, vault), VaultPhase::Praying { progress } if progress < 10), "drains once she left");
+        assert!(matches!(phase(&map, vault), VaultPhase::Praying { progress } if progress < 10 * crate::gauge::STEP), "drains once she left");
     }
 
     #[test]
