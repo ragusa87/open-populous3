@@ -15,6 +15,7 @@ pub mod slots;
 pub mod spell;
 pub mod spell_book;
 pub mod terrain;
+pub mod totem;
 pub mod tree;
 pub mod unit;
 pub mod vault;
