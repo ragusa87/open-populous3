@@ -1,14 +1,22 @@
-//! Flames drawn on boards (the camp fire's, later the firewarrior huts' torches): the original tile
+//! Flames drawn on boards (the camp fire's, the huts' torches): the original tile
 //! holds alpha pixels (`tint << 4 | strength`, docs/specs/objects.md "Blended faces"), turned into
 //! RGBA through the theme's alpha table, the faint board around the flame left out. Animated by
 //! warping the picture: the tip sways side to side with a wave climbing up the flame, the flame
 //! stretches and flickers. Frames are built once (pure functions) and cycled on the GPU side by
-//! swapping materials. Without the original files, a generated flame goes through the same steps.
+//! swapping materials (`FlameFrames`, shared by every flame, `Flame` on each). Without the original
+//! files, a generated flame goes through the same steps.
 
 use crate::original_models::MeshData;
-use pop3_format::blend::{STRENGTHS, TINTS};
-use pop3_format::objects::TILE;
-use pop3_format::{Object, WORLD_UNITS_PER_CELL};
+use crate::units::SimClock;
+use crate::world::LevelList;
+use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use pop3_format::blend::{AlphaTable, STRENGTHS, TINTS};
+use pop3_format::catalog::FLAME_TILE;
+use pop3_format::objects::{ATLAS_WIDTH, TILE};
+use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
 use std::f32::consts::{PI, TAU};
 
 /// Frames of the loop and how fast it plays.
@@ -125,8 +133,8 @@ pub fn flame_mesh(obj: &Object) -> MeshData {
             ([p[0] as f32 * scale, p[1] as f32 * scale, p[2] as f32 * scale], [texel(face.uv[k].0), texel(face.uv[k].1)])
         };
         for tri in [[0, 1, 2], [0, 2, 3]].iter().take(face.points.len() - 2) {
-            let [a, b, c] = tri.map(|k| bevy::math::Vec3::from(corner(k).0));
-            let n = (b - a).cross(c - a).normalize_or(bevy::math::Vec3::Y);
+            let [a, b, c] = tri.map(|k| Vec3::from(corner(k).0));
+            let n = (b - a).cross(c - a).normalize_or(Vec3::Y);
             for &k in tri {
                 let (p, uv) = corner(k);
                 m.indices.push(m.positions.len() as u32);
@@ -142,10 +150,15 @@ pub fn flame_mesh(obj: &Object) -> MeshData {
 /// Two boards crossed at right angles, `size` cells wide and high, standing on the ground, each
 /// showing the whole tile on both sides: the generated camp fire's flame.
 pub fn crossed_boards(size: f32) -> MeshData {
+    crossed_boards_at(&[[0.0; 3]], size)
+}
+
+/// `crossed_boards` standing on each of `bases` (cells, in the model's frame).
+pub fn crossed_boards_at(bases: &[[f32; 3]], size: f32) -> MeshData {
     let h = size / 2.0;
     let mut m = MeshData::default();
-    for (ax, az) in [(1.0, 0.0), (0.0, 1.0)] {
-        let corners = [[-h * ax, size, -h * az], [h * ax, size, h * az], [h * ax, 0.0, h * az], [-h * ax, 0.0, -h * az]];
+    for ([x, y, z], (ax, az)) in bases.iter().flat_map(|&b| [(b, (1.0, 0.0)), (b, (0.0, 1.0))]) {
+        let corners = [[x - h * ax, y + size, z - h * az], [x + h * ax, y + size, z + h * az], [x + h * ax, y, z + h * az], [x - h * ax, y, z - h * az]];
         let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
         for (order, normal) in [([0, 1, 2, 0, 2, 3], [az, 0.0, -ax]), ([0, 2, 1, 0, 3, 2], [-az, 0.0, ax])] {
             for k in order {
@@ -157,6 +170,84 @@ pub fn crossed_boards(size: f32) -> MeshData {
         }
     }
     m
+}
+
+/// The flame picture (RGBA) of `theme`: the original tile through its alpha table, None without
+/// the original files.
+fn original_picture(levels: &LevelList, theme: u8) -> Option<Vec<u8>> {
+    if !levels.original {
+        return None;
+    }
+    let load = || -> Result<_, pop3_format::LevelError> {
+        Ok((Atlas::load(&levels.data_dir, theme)?, Theme::load(&levels.data_dir, theme)?, AlphaTable::load(&levels.data_dir, theme)?))
+    };
+    let (atlas, palette, alpha) = load().map_err(|e| warn!("flame for theme {theme}: {e}")).ok()?;
+    let tile = tile_pixels(&atlas.pixels, ATLAS_WIDTH, Atlas::tile_origin(FLAME_TILE));
+    Some(flame_rgba(&tile, &alpha.rgba(&palette.palette)))
+}
+
+/// The frames as one unlit, blended material each (the original draws alpha pixels as their tint
+/// over the background by their strength).
+fn frame_materials(picture: &[u8], images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> Vec<Handle<StandardMaterial>> {
+    frames(picture)
+        .into_iter()
+        .map(|rgba| {
+            let mut image = Image::new(
+                Extent3d { width: TILE as u32, height: TILE as u32, depth_or_array_layers: 1 },
+                TextureDimension::D2,
+                rgba,
+                TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::default(),
+            );
+            image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { mag_filter: ImageFilterMode::Nearest, min_filter: ImageFilterMode::Nearest, ..default() });
+            mats.add(StandardMaterial { base_color_texture: Some(images.add(image)), alpha_mode: AlphaMode::Blend, unlit: true, ..default() })
+        })
+        .collect()
+}
+
+/// The flame loop's materials, made for one theme (and whether original files are read) the first
+/// time a flame is shown.
+#[derive(Resource, Default)]
+pub struct FlameFrames {
+    made_for: Option<(u8, bool)>,
+    frames: Vec<Handle<StandardMaterial>>,
+}
+
+impl FlameFrames {
+    pub fn get(&mut self, levels: &LevelList, theme: u8, images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> &[Handle<StandardMaterial>] {
+        if self.made_for != Some((theme, levels.original)) {
+            let picture = original_picture(levels, theme).unwrap_or_else(|| flame_rgba(&generated_tile(), &fallback_alpha_rgba()));
+            self.frames = frame_materials(&picture, images, mats);
+            self.made_for = Some((theme, levels.original));
+        }
+        &self.frames
+    }
+}
+
+/// A flame mesh, `offset` frames into the loop so flames do not flicker together.
+#[derive(Component)]
+pub struct Flame {
+    pub offset: usize,
+}
+
+pub struct FlamePlugin;
+
+impl Plugin for FlamePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<FlameFrames>().add_systems(Update, animate);
+    }
+}
+
+fn animate(clock: Res<SimClock>, art: Res<FlameFrames>, mut flames: Query<(&Flame, &mut MeshMaterial3d<StandardMaterial>)>) {
+    if art.frames.is_empty() {
+        return;
+    }
+    for (f, mut material) in &mut flames {
+        let frame = &art.frames[frame_at(clock.anim_secs, f.offset)];
+        if material.0 != *frame {
+            material.0 = frame.clone();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -230,6 +321,15 @@ mod tests {
         assert_eq!(m.indices.len(), 2 * 2 * 6);
         assert!(m.positions.iter().all(|p| (0.0..=0.3).contains(&p[1]) && p[0].abs() <= 0.15 && p[2].abs() <= 0.15));
         assert!(m.uvs.iter().all(|uv| (0.0..=1.0).contains(&uv[0]) && (0.0..=1.0).contains(&uv[1])));
+    }
+
+    #[test]
+    fn crossed_boards_at_stand_on_each_base() {
+        let m = crossed_boards_at(&[[1.0, 0.5, 0.0], [-1.0, 0.5, 0.0]], 0.4);
+        assert_eq!(m.indices.len(), 2 * crossed_boards(0.4).indices.len());
+        let (left, right): (Vec<[f32; 3]>, Vec<[f32; 3]>) = m.positions.iter().partition(|p| p[0] < 0.0);
+        assert_eq!(left.len(), right.len());
+        assert!(m.positions.iter().all(|p| (0.5..=0.9).contains(&p[1]) && (p[0].abs() - 1.0).abs() <= 0.2 + 1e-5));
     }
 
     #[test]

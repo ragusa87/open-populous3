@@ -5,15 +5,16 @@
 //! By construction stage (`Building::stage`): a blueprint is a white mark on the ground; under
 //! construction or being dismantled, a wooden structure of its shape with the parts already built
 //! (`construction`); built, the whole model. An attacked building's walls shake, a hut with people
-//! inside smokes from the top of its roof. Resting the cursor on a building (or one of the player's
+//! inside smokes from the top of its roof, a built one's torches burn (`flame`). Resting the cursor on a building (or one of the player's
 //! plans) for `HOVER_SECS` shows its tooltip: for the player's, braves at work and wood.
 
 use crate::blueprint::{mark_material, mark_mesh, set_mark};
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::construction::{beams, box_frame, built_part, chimney, layered_box, object_edges, pushed, BEAM, INNER_GAP};
+use crate::flame::{self, Flame, FlameFrames};
 use crate::generated_buildings;
 use crate::grounded::{ground_y, Grounded, Tilted};
-use crate::original_models::{atlas_image, object_mesh, to_mesh, MeshData, OriginalObjects};
+use crate::original_models::{atlas_image, object_mesh, solid_part, to_mesh, MeshData, OriginalObjects};
 use crate::sites::tribe_color;
 use crate::world::{CurrentMap, LevelList};
 use bevy::asset::RenderAssetUsages;
@@ -45,6 +46,8 @@ const PUFF_RISE: f32 = 1.2;
 const PUFF_SIZE: f32 = 0.22;
 /// Height of the white mark of a blueprint above the ground (render units).
 const MARK_LIFT: f32 = 0.02;
+/// Size (cells) of the flame over a generated building's brazier.
+const BRAZIER_FLAME: f32 = 0.7;
 
 /// The original object drawing a building of `owner`, None if not identified (neutral buildings
 /// take the blue version).
@@ -224,6 +227,7 @@ fn respawn_buildings(
     mut kit: Local<KitMeshes>,
     mut drawn: Local<Vec<Building>>,
     mut heights: ResMut<ModelHeights>,
+    mut flame_frames: ResMut<FlameFrames>,
 ) {
     if !map.is_changed() && *drawn == map.0.buildings {
         return;
@@ -236,7 +240,8 @@ fn respawn_buildings(
     if map.0.buildings.is_empty() {
         return;
     }
-    let material = original_material(&levels, map.0.theme.unwrap_or(DEFAULT_THEME), &mut images, &mut mats);
+    let theme = map.0.theme.unwrap_or(DEFAULT_THEME);
+    let material = original_material(&levels, theme, &mut images, &mut mats);
     let bank = objects.0.as_ref().filter(|_| material.is_some());
     let wood = mats.add(StandardMaterial { base_color: WOOD, perceptual_roughness: 0.9, ..default() });
     let smoke = mats.add(StandardMaterial { base_color: Color::srgba(0.75, 0.75, 0.75, 0.55), alpha_mode: AlphaMode::Blend, unlit: true, ..default() });
@@ -263,22 +268,28 @@ fn respawn_buildings(
         };
         let generated = original.is_none().then(|| kit_staged(&mut kit, kind, owner, pieces, &mut meshes)).flatten();
         let stand_in = original.is_none() && generated.is_none();
-        let (look, skin, frame_skin) = match (original, generated) {
+        let (look, skin, frame_skin, flames) = match (original, generated) {
             (Some((obj, mat)), _) => {
-                let mut look = staged(&object_mesh(obj, tribe), pieces, &mut meshes);
-                look.frame = pieces.map(|_| meshes.add(to_mesh(beams(&object_edges(obj), BEAM))));
-                (look, mat, wood.clone())
+                let solid = solid_part(obj);
+                let mut look = staged(&object_mesh(&solid, tribe), pieces, &mut meshes);
+                look.frame = pieces.map(|_| meshes.add(to_mesh(beams(&object_edges(&solid), BEAM))));
+                (look, mat, wood.clone(), flame::flame_mesh(obj))
             }
             (_, Some(look)) => {
                 let skin = kit_skin.get_or_insert_with(|| generated_skin(&mut images, &mut mats)).clone();
-                (look, skin.clone(), skin)
+                (look, skin.clone(), skin, flame::crossed_boards_at(generated_buildings::flame_bases(kind), BRAZIER_FLAME))
             }
             _ => {
                 let mut look = staged(&layered_box(BOX, layers), pieces, &mut meshes);
                 look.frame = pieces.map(|_| meshes.add(to_mesh(beams(&box_frame(BOX, layers), BEAM))));
-                (look, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, ..default() }), wood.clone())
+                (look, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, ..default() }), wood.clone(), MeshData::default())
             }
         };
+        let flames = (stage == Stage::Built && !flames.indices.is_empty()).then(|| {
+            let offset = (b.x as usize + b.z as usize) * 3 % flame::FRAMES;
+            let frame = flame_frames.get(&levels, theme, &mut images, &mut mats)[offset].clone();
+            (Flame { offset }, Mesh3d(meshes.add(to_mesh(flames))), MeshMaterial3d(frame), NotShadowCaster, crate::hover::NoOutline)
+        });
         let mut view = commands.spawn((
             BuildingView(i),
             Grounded { at, half: 0.0 },
@@ -308,6 +319,9 @@ fn respawn_buildings(
                 if let Some((mesh, inner)) = inner {
                     body.with_child((Mesh3d(mesh), MeshMaterial3d(inner)));
                 }
+            }
+            if let Some(flames) = flames {
+                body.with_child(flames);
             }
             if b.shaking > 0 {
                 body.insert(Shaking);

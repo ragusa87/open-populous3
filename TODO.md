@@ -10,7 +10,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
 
 ## Camp fire ([buildings.md](docs/specs/buildings.md) "Camp fire")
-- [ ] Animate the firewarrior huts' two torches (objects 137-140) with the camp fire's flame (`flame.rs`): their flame faces are the same blended tile 92, drawn today as brown boards. Same for the large huts (133-136) and guard posts (190-193).
+- [ ] Guard posts' torches (objects 190-193, blended tile 92): draw them with `flame.rs` once guard posts have an original object (the firewarrior and prayer huts' torches burn).
+- [ ] Generated firewarrior hut: drop the static ember cone from its braziers (tools/generate_buildings.py) now that an animated flame stands on them.
 - [ ] Check in the game: what a camp fire is for (people gathering? mana?), its burn time when left alone (`ABANDON_TICKS`, 60 s guessed), the ring size, the flatness rule, and when object 12 (other logs) is used.
 - [ ] Hover/selection of a camp fire (tooltip with who is around it), a hover cursor when units are selected over one.
 

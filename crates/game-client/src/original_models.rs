@@ -66,6 +66,11 @@ pub fn object_mesh(obj: &Object, tribe: u8) -> MeshData {
     m
 }
 
+/// `obj` without its blended faces (the flames, drawn by `flame`).
+pub fn solid_part(obj: &Object) -> Object {
+    Object { points: obj.points.clone(), faces: obj.faces.iter().filter(|f| !f.is_alpha()).cloned().collect() }
+}
+
 /// Normalised UV in the atlas image (atlas + palette rows); flat faces sample their palette texel.
 pub fn face_uv(tile: Option<u16>, colour: u8, (u, v): (i32, i32)) -> [f32; 2] {
     let (w, h) = (ATLAS_WIDTH as f32, IMAGE_HEIGHT as f32);
@@ -134,6 +139,15 @@ mod tests {
             points: vec![[0, 0, 0], [512, 0, 0], [512, 512, 0], [0, 512, 0]],
             faces: vec![Face { tile: Some(9), colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0); 4], flags: 0 }],
         }
+    }
+
+    #[test]
+    fn solid_part_leaves_out_the_blended_faces() {
+        let mut obj = quad();
+        obj.faces.push(Face { flags: pop3_format::objects::FACE_ALPHA, ..obj.faces[0].clone() });
+        let solid = solid_part(&obj);
+        assert_eq!((solid.faces.len(), solid.points.len()), (1, 4));
+        assert!(!solid.faces[0].is_alpha());
     }
 
     #[test]

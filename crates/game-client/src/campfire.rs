@@ -3,21 +3,15 @@
 //! crossed boards with the generated flame. Views follow the simulation's fires by id: lit ones
 //! appear, burnt-out ones go.
 
-use crate::flame;
+use crate::flame::{self, Flame, FlameFrames};
 use crate::grounded::Grounded;
-use crate::original_models::{atlas_image, object_mesh, to_mesh, MeshData, OriginalObjects};
-use crate::units::SimClock;
+use crate::original_models::{atlas_image, object_mesh, solid_part, to_mesh, MeshData, OriginalObjects};
 use crate::world::{CurrentMap, LevelList};
-use bevy::image::{ImageSampler, ImageSamplerDescriptor, ImageFilterMode};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use bevy::asset::RenderAssetUsages;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use game_core::campfire::Campfire;
-use pop3_format::blend::AlphaTable;
-use pop3_format::catalog::{CAMP_FIRE, FLAME_TILE};
-use pop3_format::objects::{ATLAS_WIDTH, TILE};
-use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
+use pop3_format::catalog::CAMP_FIRE;
+use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 
 /// Theme whose atlas and alpha table draw camp fires on maps without one.
 const DEFAULT_THEME: u8 = 0;
@@ -35,31 +29,18 @@ struct FireArt {
     logs: Handle<Mesh>,
     logs_material: Handle<StandardMaterial>,
     flame: Handle<Mesh>,
-    /// One material per frame of the flame loop.
-    frames: Vec<Handle<StandardMaterial>>,
 }
 
 /// The view of the camp fire with this id.
 #[derive(Component)]
 struct FireView(u32);
 
-/// A fire's flame boards, `offset` frames into the loop so fires do not flicker together.
-#[derive(Component)]
-struct Flame {
-    offset: usize,
-}
-
 pub struct CampfirePlugin;
 
 impl Plugin for CampfirePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (sync_views, animate_flames).chain());
+        app.add_systems(Update, sync_views);
     }
-}
-
-/// The original object without its blended faces (the logs).
-fn solid_part(obj: &Object) -> Object {
-    Object { points: obj.points.clone(), faces: obj.faces.iter().filter(|f| !f.is_alpha()).cloned().collect() }
 }
 
 /// Four logs in a cross, leaning in a little: the generated fire's wood.
@@ -69,38 +50,17 @@ fn generated_logs() -> MeshData {
     crate::construction::beams(&ends, LOG)
 }
 
-/// The flame frames as one unlit, blended material each (the original draws alpha pixels as their
-/// tint over the background by their strength).
-fn frame_materials(picture: &[u8], images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> Vec<Handle<StandardMaterial>> {
-    flame::frames(picture)
-        .into_iter()
-        .map(|rgba| {
-            let mut image = Image::new(
-                Extent3d { width: TILE as u32, height: TILE as u32, depth_or_array_layers: 1 },
-                TextureDimension::D2,
-                rgba,
-                TextureFormat::Rgba8UnormSrgb,
-                RenderAssetUsages::default(),
-            );
-            image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { mag_filter: ImageFilterMode::Nearest, min_filter: ImageFilterMode::Nearest, ..default() });
-            mats.add(StandardMaterial { base_color_texture: Some(images.add(image)), alpha_mode: AlphaMode::Blend, unlit: true, ..default() })
-        })
-        .collect()
-}
-
-/// The original fire for `theme`: object 0's logs and flame mesh, its atlas, and the flame tile
-/// through the theme's alpha table. None without the original files.
+/// The original fire for `theme`: object 0's logs and flame mesh, and its atlas. None without the
+/// original files.
 fn original_art(levels: &LevelList, objects: &OriginalObjects, theme: u8, meshes: &mut Assets<Mesh>, images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> Option<FireArt> {
     if !levels.original {
         return None;
     }
     let obj = objects.0.as_ref()?.get(CAMP_FIRE)?;
     let load = || -> Result<_, pop3_format::LevelError> {
-        Ok((Atlas::load(&levels.data_dir, theme)?, Theme::load(&levels.data_dir, theme)?, AlphaTable::load(&levels.data_dir, theme)?))
+        Ok((Atlas::load(&levels.data_dir, theme)?, Theme::load(&levels.data_dir, theme)?))
     };
-    let (atlas, palette, alpha) = load().map_err(|e| warn!("camp fire art for theme {theme}: {e}")).ok()?;
-    let tile = flame::tile_pixels(&atlas.pixels, ATLAS_WIDTH, Atlas::tile_origin(FLAME_TILE));
-    let picture = flame::flame_rgba(&tile, &alpha.rgba(&palette.palette));
+    let (atlas, palette) = load().map_err(|e| warn!("camp fire art for theme {theme}: {e}")).ok()?;
     let logs_material = mats.add(StandardMaterial {
         base_color_texture: Some(images.add(atlas_image(&atlas, &palette.palette))),
         perceptual_roughness: 0.95,
@@ -113,18 +73,15 @@ fn original_art(levels: &LevelList, objects: &OriginalObjects, theme: u8, meshes
         logs: meshes.add(to_mesh(object_mesh(&solid_part(obj), 0))),
         logs_material,
         flame: meshes.add(to_mesh(flame::flame_mesh(obj))),
-        frames: frame_materials(&picture, images, mats),
     })
 }
 
-fn generated_art(theme: u8, meshes: &mut Assets<Mesh>, images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> FireArt {
-    let picture = flame::flame_rgba(&flame::generated_tile(), &flame::fallback_alpha_rgba());
+fn generated_art(theme: u8, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> FireArt {
     FireArt {
         theme,
         logs: meshes.add(to_mesh(generated_logs())),
         logs_material: mats.add(StandardMaterial { base_color: LOG_COLOUR, perceptual_roughness: 0.95, ..default() }),
         flame: meshes.add(to_mesh(flame::crossed_boards(SIZE))),
-        frames: frame_materials(&picture, images, mats),
     }
 }
 
@@ -148,6 +105,7 @@ fn sync_views(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    mut flames: ResMut<FlameFrames>,
 ) {
     let theme = map.0.theme.unwrap_or(DEFAULT_THEME);
     let art = art.filter(|a| a.theme == theme);
@@ -161,7 +119,7 @@ fn sync_views(
     }
     let Some(art) = art else {
         if !map.0.campfires.is_empty() {
-            let made = original_art(&levels, &objects, theme, &mut meshes, &mut images, &mut mats).unwrap_or_else(|| generated_art(theme, &mut meshes, &mut images, &mut mats));
+            let made = original_art(&levels, &objects, theme, &mut meshes, &mut images, &mut mats).unwrap_or_else(|| generated_art(theme, &mut meshes, &mut mats));
             commands.insert_resource(made);
         }
         return;
@@ -172,6 +130,7 @@ fn sync_views(
             commands.entity(e).despawn();
         }
     }
+    let frames = if new.is_empty() { &[][..] } else { flames.get(&levels, theme, &mut images, &mut mats) };
     let cell = WORLD_UNITS_PER_CELL as f32;
     for i in new {
         let fire = &map.0.campfires[i];
@@ -179,18 +138,8 @@ fn sync_views(
         commands.spawn((FireView(fire.id), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden)).with_children(|v| {
             v.spawn((Mesh3d(art.logs.clone()), MeshMaterial3d(art.logs_material.clone())));
             let offset = fire.id as usize * 3 % flame::FRAMES;
-            v.spawn((Flame { offset }, Mesh3d(art.flame.clone()), MeshMaterial3d(art.frames[offset].clone()), NotShadowCaster));
+            v.spawn((Flame { offset }, Mesh3d(art.flame.clone()), MeshMaterial3d(frames[offset].clone()), NotShadowCaster));
         });
-    }
-}
-
-fn animate_flames(clock: Res<SimClock>, art: Option<Res<FireArt>>, mut flames: Query<(&Flame, &mut MeshMaterial3d<StandardMaterial>)>) {
-    let Some(art) = art else { return };
-    for (f, mut material) in &mut flames {
-        let frame = &art.frames[flame::frame_at(clock.anim_secs, f.offset)];
-        if material.0 != *frame {
-            material.0 = frame.clone();
-        }
     }
 }
 

@@ -64,6 +64,7 @@ fn main() {
             nature::NaturePlugin,
             buildings::BuildingsPlugin,
             campfire::CampfirePlugin,
+            flame::FlamePlugin,
             blueprint::BlueprintPlugin),
             units::UnitsPlugin,
             wood::WoodPlugin,

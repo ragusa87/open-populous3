@@ -96,11 +96,27 @@ bank 0 and pick the trees by bank.
 
 ### Blended faces (flames)
 The 144 faces with flag `0x20` all use tile 92, and only they do: the flame boards of the camp fires (0, 12),
-objects 133-136 (large huts), the firewarrior training huts (137-140) and the guard posts (190-193). Tile 92 holds
-alpha pixels like the blended `hfx0-0.dat` sprites (sprites.md): `tint << 4 | strength` through the theme's
-`al0-X.dat`. The flame uses tints 0 (red), 1 (orange), 2 (white-hot) and 5 (yellow); the board around it is
-index 0 (nothing) and 1-3 (tint 0, strength 1-3: barely visible). Drawn with the palette it looks like a brown
+the prayer huts (133-136), the firewarrior training huts (137-140) and the guard posts (190-193). The flames are
+not separate objects nor sprites: they are ordinary quads of the object, drawn as boards, flagged blended and
+textured with tile 92 of the theme's `bl320` atlas (the tile is the same in every tribe's version).
+Tile 92 holds alpha pixels like the blended `hfx0-0.dat` sprites (sprites.md): `tint << 4 | strength` through the
+theme's `al0-X.dat`. The flame uses tints 0 (red), 1 (orange), 2 (white-hot) and 5 (yellow); the board around it
+is index 0 (nothing) and 1-3 (tint 0, strength 1-3: barely visible). Drawn with the palette it looks like a brown
 board. The game animates the camp fire's flame (how is not known: the tile has no neighbouring frames).
+
+Every board is two faces back to back (one per side, opposite windings), so a flame is seen from both sides.
+How each object lays them out (bank 0, measured):
+- Camp fire (0, 12): 8 faces, a cross of 4 half boards from the centre (80 x 160 units each, along +x, -x, +z,
+  -z), each showing half the tile (u 0-15 or 16-31): together two crossed boards showing the whole flame.
+- Firewarrior training hut (137-140): 8 faces, 2 torches on its -z side (x = ±213, z = -670), each two
+  crossed diagonal boards showing the whole tile (u, v 0-31), about 230 units wide, from y 432 to 691.
+- Prayer hut (133-136): 16 faces, 4 torches at its corners (x = ±475, z = ±280), the same crossed whole-tile
+  boards, y 373 to 567 (370 to 534 in the yellow and green versions).
+- Guard posts (190-193): not measured, not drawn (no building uses them).
+
+Drawn (client `flame.rs`): `original_models::solid_part` leaves the blended faces out of the object, `flame_mesh`
+draws them alone, each face sampling tile 92 as its own picture (its UVs within the tile), turned into RGBA through
+the alpha table with the board left out, and animated (buildings.md "Camp fire", "On screen").
 
 ## Atlas: `data/bl320-X.dat` (theme char X, upper case on disk)
 256 x 1024 palette indices (theme `pal0-X.dat`): 8 x 32 tiles of 32x32, tile `i` at

@@ -85,6 +85,12 @@ By stage (`Building::stage`, client `construction.rs`):
   0): grey puffs rise from the middle of its highest points
   (`chimney`, the top of the roof; the generated hut has a central raised smoke vent), growing and drifting, then shrinking away (`puff_at`). Other kinds show
   nothing for busy yet.
+- Torches: a built building's flames burn, animated like the camp fire's (`flame.rs`, see "Camp fire"; each
+  building starts at its own frame), and cast no shadow. Original objects: their blended faces (tile 92, see
+  [objects.md](objects.md) "Blended faces") are left out of the model, its structure and its built part, and drawn
+  as the flame instead: the firewarrior training hut's 2 torches, the prayer hut's (temple) 4. Under construction
+  or dismantling, no flame. Generated kit: two crossed flame boards, 0.7 cell, standing on each bowl of the
+  firewarrior hut's braziers (`generated_buildings::flame_bases`), around the kit's static ember cone.
 Kit meshes are made the first time one shows and shared per kind and owner: the built model and the timber frame
 (a built building never paints its frame); the built part under construction is made per building.
 Views are rebuilt only when the map resource changes; once the simulation changes buildings during ticks they

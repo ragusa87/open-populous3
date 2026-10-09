@@ -63,7 +63,7 @@ The Blender preview uses Cycles CPU rendering to show the actual texture/materia
 | `temple.glb` | Broad steps, tiered canopy, paired ceremonial posts |
 | `spy_hut.glb` | Compact dark lodge |
 | `warrior_hut.glb` | Crossed training poles and practice post |
-| `firewarrior_hut.glb` | Wide hall, paired braziers (static flame shapes) |
+| `firewarrior_hut.glb` | Wide hall, paired braziers (static ember cones; the client adds an animated flame on them) |
 | `boat_hut.glb` | Open shed, two rear piers and an open launch channel |
 | `airship_hut.glb` | Workshop, tall assembly gantry, folded cloth |
 | `vault.glb` | Stepped stone archive with pale capstone |

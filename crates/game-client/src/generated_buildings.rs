@@ -134,6 +134,15 @@ pub fn scaffold(kind: BuildingKind, owner: u8) -> Option<MeshData> {
     Some(painted(&d.model.scaffold, &d.tribe[1], owner))
 }
 
+/// Where the kind's fires burn (cells, building frame), each drawn by `flame`: the firewarrior
+/// hut's two braziers (tools/generate_buildings.py), their bowls' tops.
+pub fn flame_bases(kind: BuildingKind) -> &'static [[f32; 3]] {
+    match kind {
+        BuildingKind::FirewarriorTraining => &[[-1.08, 0.76, -1.03], [1.08, 0.76, -1.03]],
+        _ => &[],
+    }
+}
+
 fn decoded(kind: BuildingKind) -> Option<&'static Decoded> {
     static KIT: OnceLock<Vec<Option<Decoded>>> = OnceLock::new();
     KIT.get_or_init(|| MODELS.iter().map(|bytes| decode(bytes)).collect())[index(kind)?].as_ref()
@@ -214,6 +223,16 @@ mod tests {
         // Black and white average to linear mid-grey, sRGB 188, not the sRGB midpoint 128.
         assert_eq!(half_gray(&gray(&[0, 255, 0, 255]), 2), gray(&[188]));
         assert_eq!(half_gray(&gray(&[0, 0, 255, 255, 0, 0, 255, 255, 9, 9, 9, 9, 9, 9, 9, 9]), 4), gray(&[0, 255, 9, 9]));
+    }
+
+    #[test]
+    fn flames_sit_on_the_firewarrior_huts_braziers() {
+        let body = body(BuildingKind::FirewarriorTraining, 0).unwrap();
+        for &[x, y, z] in flame_bases(BuildingKind::FirewarriorTraining) {
+            let rim = body.positions.iter().filter(|p| (p[1] - y).abs() < 1e-3 && ((p[0] - x).powi(2) + (p[2] - z).powi(2)).sqrt() < 0.3);
+            assert!(rim.count() > 0, "a bowl top at {x}, {y}, {z}");
+        }
+        assert!(flame_bases(BuildingKind::WarriorTraining).is_empty());
     }
 
     #[test]
