@@ -17,3 +17,4 @@ pub mod terrain;
 pub mod tree;
 pub mod unit;
 pub mod wood;
+pub mod work;

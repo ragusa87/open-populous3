@@ -8,6 +8,7 @@
 
 use crate::building::{Building, BuildingKind};
 use crate::map::GameMap;
+use crate::terrain::to_world;
 use crate::site::SPAWN_FLAT_RADIUS;
 use crate::unit::torus_delta;
 use pop3_format::WORLD_UNITS_PER_CELL;
@@ -75,16 +76,6 @@ fn beyond_side(b: &Building, z_sign: i32) -> [(u16, u16); 3] {
         let (wx, wz) = to_world((f.offset.0 + x, z), b.facing / 2);
         (cx.wrapping_add(wx as u16), cz.wrapping_add(wz as u16))
     })
-}
-
-/// A point of the building's own frame turned into world axes (the inverse of `terrain::to_local`).
-fn to_world((lx, lz): (i32, i32), quarter_turns: u8) -> (i32, i32) {
-    match quarter_turns % 4 {
-        0 => (lx, lz),
-        1 => (lz, -lx),
-        2 => (-lx, -lz),
-        _ => (-lz, lx),
-    }
 }
 
 /// Whether `b` stands right by the water the way its kind needs: a boat hut with the sea past the

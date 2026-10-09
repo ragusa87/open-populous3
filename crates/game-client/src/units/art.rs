@@ -2,7 +2,7 @@
 //! the feet. The shaman from the original animations when allowed (see docs/specs/animations.md),
 //! everything else generated (`procedural`). Which frame to show is decided here from the simulated action.
 
-use game_core::unit::{Action, UnitKind, CAST_TICKS, DYING_TICKS};
+use game_core::unit::{Action, UnitKind, CAST_TICKS, DYING_TICKS, JUMP_TICKS};
 use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
 use pop3_format::catalog::{PersonAnim, ARMS_UP_FRAME, ShamanAnim, WildmanAnim, OUTFIT_FIREWARRIOR, OUTFIT_PREACHER, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
 use pop3_format::{LevelError, Picture, SpriteBank, Theme};
@@ -73,7 +73,8 @@ pub fn pose_for(action: &Action, carrying: bool) -> Pose {
         Action::Idle | Action::Landing { .. } => Pose::Idle,
         Action::Walking { .. } | Action::AroundFire { .. } if carrying => Pose::CarryWalk,
         Action::Walking { .. } | Action::AroundFire { .. } => Pose::Walk,
-        Action::Chopping { .. } => Pose::Chop,
+        Action::Chopping { .. } | Action::Building { .. } => Pose::Chop,
+        Action::Flattening { .. } => Pose::Cast,
         Action::Holding { .. } => Pose::CarryIdle,
         Action::Stranded { .. } => Pose::Stranded,
         Action::Praying => Pose::Pray,
@@ -123,6 +124,7 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, anim_secs: f32, a
     let progress = |ticks: u16| (action.elapsed().unwrap_or(0) as f32 + alpha) / ticks as f32;
     match action {
         Action::Casting { .. } => ((progress(CAST_TICKS) * frames as f32) as usize).min(frames - 1),
+        Action::Flattening { .. } => ((progress(JUMP_TICKS) * frames as f32) as usize).min(frames - 1),
         Action::Dying { .. } => ((progress(DYING_TICKS) * (lying + 1) as f32) as usize).min(lying),
         Action::Dead { .. } => lying,
         _ => (anim_secs * pose.fps()) as usize % frames,

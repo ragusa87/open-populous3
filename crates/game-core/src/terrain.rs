@@ -40,6 +40,16 @@ pub fn to_local((wx, wz): (i32, i32), quarter_turns: u8) -> (i32, i32) {
     }
 }
 
+/// A building-frame offset turned into world axes (the inverse of `to_local`).
+pub fn to_world((lx, lz): (i32, i32), quarter_turns: u8) -> (i32, i32) {
+    match quarter_turns % 4 {
+        0 => (lx, lz),
+        1 => (lz, -lx),
+        2 => (-lx, -lz),
+        _ => (-lz, lx),
+    }
+}
+
 impl Heightmap {
     pub fn new(size: usize) -> Self {
         Heightmap { size, heights: vec![SEA_LEVEL; size * size], revision: 0 }
@@ -184,22 +194,18 @@ impl Heightmap {
         DirtyRect { min: (cx - r, cz - r), max: (cx + r + 1, cz + r + 1) }
     }
 
-    /// Level a building's footprint: a rectangle around `centre` (world units), `half` its half size and
-    /// `offset` its centre's shift (world units, x and z in the building's own frame), turned by
-    /// `quarter_turns` like the building (a turn takes its +z towards +x). Height points inside take
-    /// their average height (at least `min`); those within a cell around it are pulled halfway, except
-    /// sea, which stays sea (a boat hut's jetty keeps its water). Integer, deterministic.
-    pub fn level_rect(&mut self, centre: (u16, u16), half: (i32, i32), offset: (i32, i32), quarter_turns: u8, min: u16) -> DirtyRect {
+    /// The height points of a building's footprint (see `level_rect`), unwrapped cell coordinates:
+    /// those inside it, and those within a cell around it.
+    pub fn rect_points(centre: (u16, u16), half: (i32, i32), offset: (i32, i32), quarter_turns: u8) -> (Vec<(i32, i32)>, Vec<(i32, i32)>) {
         const UNIT: i32 = 512;
         let (cx, cz) = (centre.0 as i32 / UNIT, centre.1 as i32 / UNIT);
         let r = (half.0.abs() + offset.0.abs()).max(half.1.abs() + offset.1.abs()) / UNIT + 2;
-        let local = |wx: i32, wz: i32| to_local((wx, wz), quarter_turns);
         let inside = |(lx, lz): (i32, i32), margin: i32| (lx - offset.0).abs() <= half.0 + margin && (lz - offset.1).abs() <= half.1 + margin;
         let mut flat = Vec::new();
         let mut ring = Vec::new();
         for z in cz - r..=cz + r + 1 {
             for x in cx - r..=cx + r + 1 {
-                let l = local(x * UNIT - centre.0 as i32, z * UNIT - centre.1 as i32);
+                let l = to_local((x * UNIT - centre.0 as i32, z * UNIT - centre.1 as i32), quarter_turns);
                 if inside(l, 0) {
                     flat.push((x, z));
                 } else if inside(l, UNIT) {
@@ -207,6 +213,16 @@ impl Heightmap {
                 }
             }
         }
+        (flat, ring)
+    }
+
+    /// Level a building's footprint: a rectangle around `centre` (world units), `half` its half size and
+    /// `offset` its centre's shift (world units, x and z in the building's own frame), turned by
+    /// `quarter_turns` like the building (a turn takes its +z towards +x). Height points inside take
+    /// their average height (at least `min`); those within a cell around it are pulled halfway, except
+    /// sea, which stays sea (a boat hut's jetty keeps its water). Integer, deterministic.
+    pub fn level_rect(&mut self, centre: (u16, u16), half: (i32, i32), offset: (i32, i32), quarter_turns: u8, min: u16) -> DirtyRect {
+        let (flat, ring) = Self::rect_points(centre, half, offset, quarter_turns);
         let sum: u32 = flat.iter().map(|&(x, z)| self.get(x, z) as u32).sum();
         let target = ((sum / flat.len().max(1) as u32) as u16).max(min);
         for &(x, z) in &flat {
@@ -218,6 +234,8 @@ impl Heightmap {
                 self.set(x, z, ((h as u32 + target as u32) / 2) as u16);
             }
         }
+        let (cx, cz) = (centre.0 as i32 / 512, centre.1 as i32 / 512);
+        let r = (half.0.abs() + offset.0.abs()).max(half.1.abs() + offset.1.abs()) / 512 + 2;
         DirtyRect { min: (cx - r, cz - r), max: (cx + r + 1, cz + r + 1) }
     }
 

@@ -1,6 +1,6 @@
 //! Buildings standing on the map, loaded from the level things (kind 2), and their construction
 //! state (docs/specs/buildings.md "Construction"): wood used, footprint flattened, dismantling,
-//! people inside and being attacked. Nothing changes it over time yet (no braves at work).
+//! people inside and being attacked. Braves build it (`crate::work`).
 
 use pop3_format::level::KIND_BUILDING;
 use pop3_format::Level;
@@ -90,6 +90,27 @@ impl BuildingKind {
         }
     }
 
+    /// Its thing model (the first one where two share a kind), `from_model`'s inverse.
+    pub fn model(self) -> u8 {
+        match self {
+            BuildingKind::Hut { size } => size,
+            BuildingKind::DrumTower => 4,
+            BuildingKind::Temple => 5,
+            BuildingKind::SpyTraining => 6,
+            BuildingKind::WarriorTraining => 7,
+            BuildingKind::FirewarriorTraining => 8,
+            BuildingKind::Reconversion => 9,
+            BuildingKind::WallPiece => 10,
+            BuildingKind::Gate => 11,
+            BuildingKind::BoatHut => 13,
+            BuildingKind::AirshipHut => 15,
+            BuildingKind::GuardPost => 17,
+            BuildingKind::Vault => 18,
+            BuildingKind::Prison => 19,
+            BuildingKind::Other(m) => m,
+        }
+    }
+
     pub fn name(self) -> String {
         match self {
             BuildingKind::Hut { size } => format!("Hut {size}"),
@@ -147,6 +168,9 @@ pub enum Stage {
     Dismantling { used: u8, of: u8 },
 }
 
+/// How far (world units) past its door side wood is piled.
+pub const DOOR_GAP: i32 = 200;
+
 /// The levelled ground is never lower than this: a building placed on the shore stands on land.
 pub const MIN_GROUND: u16 = 64;
 
@@ -169,12 +193,17 @@ pub struct Building {
     pub inside: u8,
     /// Ticks its walls still shake for, after being hit (0: not attacked).
     pub shaking: u16,
+    /// Pieces of wood brought to the pile by its door, not built in yet.
+    pub stock: u8,
+    /// Height its footprint is flattened to (a blueprint's: the average when placed, at least
+    /// `MIN_GROUND`).
+    pub level: u16,
 }
 
 impl Building {
     /// A finished building, as the levels store them.
     pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
-        Building { kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0 }
+        Building { kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, stock: 0, level: 0 }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.
@@ -194,6 +223,53 @@ impl Building {
         } else {
             Stage::Built
         }
+    }
+
+    /// A blueprint placed on `terrain`: its footprint will be flattened to its average height.
+    pub fn placed(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8, terrain: &crate::terrain::Heightmap) -> Self {
+        let site = Building::site(kind, owner, x, z, facing);
+        let points = site.ground_points();
+        let sum: u32 = points.iter().map(|&(x, z)| terrain.get(x, z) as u32).sum();
+        let level = ((sum / points.len().max(1) as u32) as u16).max(MIN_GROUND);
+        Building { level, ..site }
+    }
+
+    /// Wood brought to it: on the pile and built in.
+    pub fn delivered(&self) -> u8 {
+        self.stock + self.used
+    }
+
+    /// Pieces of wood still to bring: one while it is flattened (brought meanwhile, as in the game),
+    /// then the rest of its cost.
+    pub fn wood_wanted(&self) -> u8 {
+        let needed = if self.flat { self.kind.wood_cost() } else { 1.min(self.kind.wood_cost()) };
+        needed.saturating_sub(self.delivered())
+    }
+
+    /// The height points of its footprint (cells, unwrapped), as `flatten` levels them.
+    pub fn ground_points(&self) -> Vec<(i32, i32)> {
+        let f = self.kind.footprint();
+        crate::terrain::Heightmap::rect_points(self.centre(), f.half, f.offset, self.facing / 2).0
+    }
+
+    /// A point of its own frame (world units from its centre, facing 0) on the map.
+    pub fn local_point(&self, local: (i32, i32)) -> (u16, u16) {
+        let (cx, cz) = self.centre();
+        let (wx, wz) = crate::terrain::to_world(local, self.facing / 2);
+        (cx.wrapping_add(wx as u16), cz.wrapping_add(wz as u16))
+    }
+
+    /// Just outside its door, the middle of its local -z side: where wood is piled.
+    pub fn door(&self) -> (u16, u16) {
+        let f = self.kind.footprint();
+        self.local_point((f.offset.0, f.offset.1 - f.half.1 - DOOR_GAP))
+    }
+
+    /// Where the `k`-th piece of its pile lies, around the door (for drawing).
+    pub fn pile_point(&self, k: u8) -> (u16, u16) {
+        let f = self.kind.footprint();
+        let (col, row) = ((k % 3) as i32 - 1, (k / 3) as i32);
+        self.local_point((f.offset.0 + col * 110, f.offset.1 - f.half.1 - DOOR_GAP - row * 90))
     }
 
     /// Its centre in world units (`BuildingKind::centre_shift` off the stored corner, wrapping).
@@ -239,6 +315,10 @@ mod tests {
         assert_eq!(BuildingKind::from_model(4), BuildingKind::DrumTower);
         assert_eq!((BuildingKind::from_model(13), BuildingKind::from_model(14)), (BuildingKind::BoatHut, BuildingKind::BoatHut));
         assert_eq!(BuildingKind::from_model(42), BuildingKind::Other(42));
+        for model in 1..=40 {
+            let kind = BuildingKind::from_model(model);
+            assert_eq!(BuildingKind::from_model(kind.model()), kind);
+        }
         assert_eq!(BuildingKind::Hut { size: 3 }.name(), "Hut 3");
         assert_eq!(BuildingKind::Other(42).name(), "Building 42");
     }
@@ -285,6 +365,32 @@ mod tests {
         assert!(temple(0).covers((cx, cz + 700), 0) && !temple(0).covers((cx + 900, cz), 0), "longer along z (950 x 800)");
         assert!(temple(2).covers((cx + 800, cz), 0) && !temple(2).covers((cx, cz + 900), 0), "a quarter turn swaps them");
         assert!(temple(0).covers((cx + 900, cz), 200), "margin");
+    }
+
+    #[test]
+    fn a_placed_site_wants_one_piece_then_the_rest() {
+        let mut t = crate::terrain::Heightmap::new(128);
+        for (x, z) in [(20, 30), (21, 30), (20, 31), (21, 31)] {
+            t.set(x, z, 200);
+        }
+        let site = Building::placed(BuildingKind::DrumTower, 0, 20 * 512, 30 * 512, 0, &t);
+        assert_eq!(site.ground_points(), vec![(20, 30), (21, 30), (20, 31), (21, 31)], "the cell at the corner");
+        assert_eq!((site.level, site.stage()), (200, Stage::Blueprint));
+        assert_eq!(site.wood_wanted(), 1, "one piece while flattening");
+        assert_eq!(Building { stock: 1, ..site.clone() }.wood_wanted(), 0);
+        let flat = Building { flat: true, stock: 1, used: 2, ..site.clone() };
+        assert_eq!((flat.delivered(), flat.wood_wanted()), (3, 2));
+        assert_eq!(Building::placed(BuildingKind::DrumTower, 0, 0, 0, 0, &crate::terrain::Heightmap::new(128)).level, MIN_GROUND, "never sea");
+    }
+
+    #[test]
+    fn the_door_is_out_of_the_local_minus_z_side() {
+        let hut = |facing| Building::new(BuildingKind::Hut { size: 1 }, 0, 20 * 512, 20 * 512, facing);
+        let (cx, cz) = hut(0).centre();
+        assert_eq!(hut(0).door(), (cx, cz - 600 - DOOR_GAP as u16));
+        assert_eq!(hut(2).door(), (cx - 600 - DOOR_GAP as u16, cz), "a quarter turn takes -z to -x");
+        assert!(!hut(0).covers(hut(0).door(), 0) && hut(0).covers(hut(0).door(), DOOR_GAP));
+        assert!(!hut(0).covers(hut(0).pile_point(7), 0));
     }
 
     #[test]

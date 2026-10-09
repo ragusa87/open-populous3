@@ -331,6 +331,14 @@ impl GameMap {
                 self.remove_campfire(player, at);
                 None
             }
+            Command::PlaceBuilding { player, kind, at, facing } => {
+                self.place_building(player, kind, at, facing);
+                None
+            }
+            Command::CancelBuilding { player, at } => {
+                self.cancel_building(player, at);
+                None
+            }
         }
     }
 
@@ -426,7 +434,10 @@ impl GameMap {
             }
         }
         for (i, event) in events {
-            self.wood_event(i, event);
+            match event {
+                UnitEvent::Jumped { .. } | UnitEvent::Built => dirty.extend(self.work_event(i, event)),
+                _ => self.wood_event(i, event),
+            }
         }
         for i in 0..self.units.len() {
             if arriving[i] && self.units[i].action == Action::Idle {
@@ -441,6 +452,7 @@ impl GameMap {
             }
         }
         self.start_chained();
+        dirty.extend(self.work());
         self.drop_wood();
         dirty
     }
@@ -459,10 +471,13 @@ impl GameMap {
         }
     }
 
-    /// Starts `order` for unit `i`, keeping its chained orders. Wood orders are for braves only (others
-    /// ignore them) and pick their tree or piece here, where the map is known.
+    /// Starts `order` for unit `i`, keeping its chained orders; it leaves the building it worked on.
+    /// Wood and build orders are for braves only (others ignore them) and pick their tree, piece or
+    /// building here, where the map is known.
     fn start_order(&mut self, i: usize, order: Order) {
+        self.unassign(i);
         match order {
+            Order::Build { site } => self.assign(i, site),
             Order::CutTree { tree } => self.go_cut(i, tree),
             Order::FetchWood => self.fetch_wood(i),
             Order::PickUp { at } => self.pick_up(i, at),
@@ -502,7 +517,7 @@ impl GameMap {
 
     /// Unit `i` goes for the nearest wood: a piece on the floor nobody is fetching, or a tree with wood
     /// to spare (`go_cut`); the floor wins ties.
-    fn fetch_wood(&mut self, i: usize) {
+    pub(crate) fn fetch_wood(&mut self, i: usize) {
         let u = &self.units[i];
         if !Self::can_take_wood(u) {
             return;
@@ -620,10 +635,13 @@ impl GameMap {
         cut.chain(if others.is_empty() { Vec::new() } else { self.dispatch(player, &others, at) }).collect()
     }
 
-    /// Whether a chained order still makes sense when its turn comes (every order today; tasks will
-    /// check they still need the unit).
-    fn still_valid(&self, _order: &Order) -> bool {
-        true
+    /// Whether a chained order still makes sense when its turn comes: building needs a building
+    /// still to build.
+    fn still_valid(&self, order: &Order) -> bool {
+        match *order {
+            Order::Build { site } => self.still_building(site),
+            _ => true,
+        }
     }
 
     /// Camp fires with someone of their tribe going to them or round them keep burning, the others
@@ -643,7 +661,7 @@ pub const REFIND_CELLS: i32 = 8;
 pub const PICK_RADIUS: i64 = 384;
 
 /// Squared distance between two world points the short way around the torus.
-fn torus_dist2(a: (u16, u16), b: (u16, u16)) -> i64 {
+pub(crate) fn torus_dist2(a: (u16, u16), b: (u16, u16)) -> i64 {
     let (dx, dz) = (torus_delta(a.0, b.0) as i64, torus_delta(a.1, b.1) as i64);
     dx * dx + dz * dz
 }

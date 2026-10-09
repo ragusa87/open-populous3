@@ -1,5 +1,6 @@
 //! Player inputs: the only thing exchanged in lockstep multiplayer.
 
+use crate::building::BuildingKind;
 use crate::spell::Spell;
 use crate::unit::Order;
 
@@ -18,4 +19,10 @@ pub enum Command {
     /// Put out the player's camp fire in the cell holding world point `at`; whoever went round it
     /// stops.
     RemoveCampfire { player: u8, at: (u16, u16) },
+    /// Place a building plan with its stored corner at `at` (`placement::can_place`); braves are
+    /// sent to it with `Order::Build`.
+    PlaceBuilding { player: u8, kind: BuildingKind, at: (u16, u16), facing: u8 },
+    /// Remove the player's building plan (not flattened yet) whose footprint holds world point
+    /// `at`: its braves stop, the wood brought is lost.
+    CancelBuilding { player: u8, at: (u16, u16) },
 }

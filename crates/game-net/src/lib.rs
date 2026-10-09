@@ -3,6 +3,7 @@
 //! Wire format: `u32 LE length` + payload. Payload starts with a tag byte.
 //! See docs/specs/multiplayer.md.
 
+use game_core::building::BuildingKind;
 use game_core::command::Command;
 use game_core::spell::Spell;
 use game_core::unit::Order;
@@ -46,7 +47,8 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 }
 
 /// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
-/// for a unit order `u32 unit id` then the order, for lighting or putting out a camp fire `u16 x, z`.
+/// for a unit order `u32 unit id` then the order, for lighting or putting out a camp fire `u16 x, z`,
+/// for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -94,6 +96,17 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             b.extend(unit.to_le_bytes());
             encode_order(b, order);
         }
+        Command::PlaceBuilding { player, kind, at, facing } => {
+            b.extend([6, *player, kind.model()]);
+            b.extend(at.0.to_le_bytes());
+            b.extend(at.1.to_le_bytes());
+            b.push(*facing);
+        }
+        Command::CancelBuilding { player, at } => {
+            b.extend([7, *player]);
+            b.extend(at.0.to_le_bytes());
+            b.extend(at.1.to_le_bytes());
+        }
     }
 }
 
@@ -124,6 +137,11 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
         }
+        Order::Build { site } => {
+            b.push(8);
+            b.extend(site.0.to_le_bytes());
+            b.extend(site.1.to_le_bytes());
+        }
     }
 }
 
@@ -146,6 +164,8 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         3 => Some(Command::PlaceCampfire { player, at: (c.u16()?, c.u16()?) }),
         4 => Some(Command::RemoveCampfire { player, at: (c.u16()?, c.u16()?) }),
         5 => Some(Command::QueueOrder { player, unit: c.u32()?, order: decode_order(c)? }),
+        6 => Some(Command::PlaceBuilding { player, kind: BuildingKind::from_model(c.u8()?), at: (c.u16()?, c.u16()?), facing: c.u8()? }),
+        7 => Some(Command::CancelBuilding { player, at: (c.u16()?, c.u16()?) }),
         _ => None,
     }
 }
@@ -160,6 +180,7 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         5 => Order::CutTree { tree: (c.u16()?, c.u16()?) },
         6 => Order::FetchWood,
         7 => Order::PickUp { at: (c.u16()?, c.u16()?) },
+        8 => Order::Build { site: (c.u16()?, c.u16()?) },
         _ => return None,
     })
 }
@@ -232,6 +253,10 @@ mod tests {
                 Command::OrderUnit { player: 0, unit: 3, order: Order::CutTree { tree: (65535, 1) } },
                 Command::QueueOrder { player: 1, unit: 4, order: Order::FetchWood },
                 Command::OrderUnit { player: 2, unit: 5, order: Order::PickUp { at: (7, 65535) } },
+                Command::PlaceBuilding { player: 1, kind: BuildingKind::AirshipHut, at: (512, 65024), facing: 6 },
+                Command::PlaceBuilding { player: 0, kind: BuildingKind::Hut { size: 1 }, at: (0, 1024), facing: 0 },
+                Command::OrderUnit { player: 1, unit: 9, order: Order::Build { site: (512, 65024) } },
+                Command::CancelBuilding { player: 3, at: (1, 2) },
             ],
         }
     }

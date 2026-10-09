@@ -36,6 +36,10 @@ pub const RESPAWN_TICKS: u16 = 30;
 pub const CHOP_TICKS: u16 = 60;
 /// With nothing more to do, a brave holds his piece of wood this long before putting it down (3 s).
 pub const HOLD_TICKS: u16 = 30;
+/// A brave's jump flattening one height point of a building site.
+pub const JUMP_TICKS: u16 = 8;
+/// A brave building one piece of wood into a building (5 s, a guess).
+pub const BUILD_TICKS: u16 = 50;
 /// Going round a camp fire: this fraction (numerator, denominator) of the walking speed.
 pub const AROUND_FIRE_PACE: (i32, i32) = (1, 2);
 
@@ -130,6 +134,10 @@ pub enum Action {
     Chopping { tree: (u16, u16), left: u16 },
     /// Standing with a piece of wood and nothing more to do: puts it down when `left` runs out.
     Holding { left: u16 },
+    /// A brave jumping on the height point `at` (cells) of the site it works on, to flatten it.
+    Flattening { at: (i32, i32), left: u16 },
+    /// A brave building one piece of wood from the pile into the building it works on.
+    Building { left: u16 },
 }
 
 impl Action {
@@ -147,6 +155,8 @@ impl Action {
             Action::AroundFire { .. } => "Around the fire",
             Action::Chopping { .. } => "Cutting wood",
             Action::Holding { .. } => "Holding wood",
+            Action::Flattening { .. } => "Flattening",
+            Action::Building { .. } => "Building",
         }
     }
 
@@ -157,6 +167,7 @@ impl Action {
             Action::Landing { left } => Some(LANDING_TICKS - left.min(LANDING_TICKS)),
             Action::Dying { left } => Some(DYING_TICKS - left.min(DYING_TICKS)),
             Action::Dead { left } => Some(RESPAWN_TICKS - left.min(RESPAWN_TICKS)),
+            Action::Flattening { left, .. } => Some(JUMP_TICKS - left.min(JUMP_TICKS)),
             _ => None,
         }
     }
@@ -182,6 +193,9 @@ pub enum Order {
     FetchWood,
     /// Braves: pick up the piece of wood nearest to `at` (a pile clicked on), within `PICK_RADIUS`.
     PickUp { at: (u16, u16) },
+    /// Braves: work on the building whose stored corner is `site` (`Building::x`, `z`) until it is
+    /// built: flatten, fetch wood, build (`GameMap::work`).
+    Build { site: (u16, u16) },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,6 +209,10 @@ pub enum UnitEvent {
     Chopped { tree: (u16, u16) },
     /// Arrived on the piece of wood at `at`: the caller picks it up.
     PickedUp { at: (u16, u16) },
+    /// Landed from a jump on the height point `at` (cells): the caller flattens it a step.
+    Jumped { at: (i32, i32) },
+    /// Done building a piece of wood in: the caller counts it.
+    Built,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -226,6 +244,8 @@ pub struct Unit {
     to_wood: Option<(u16, u16)>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
+    /// The building (stored corner) this brave is assigned to, `Order::Build`.
+    pub work: Option<(u16, u16)>,
 }
 
 impl Unit {
@@ -253,6 +273,7 @@ impl Unit {
             to_tree: None,
             to_wood: None,
             queue: Vec::new(),
+            work: None,
         }
     }
 
@@ -383,7 +404,7 @@ impl Unit {
             }
             Order::Pray => Action::Praying,
             Order::Cast => Action::Casting { left: CAST_TICKS },
-            Order::Stop | Order::FetchWood | Order::PickUp { .. } => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
                 Action::Walking { to: tree }
@@ -436,6 +457,16 @@ impl Unit {
             Action::Holding { .. } => {
                 self.action = Action::Idle;
                 return Some(UnitEvent::PutDown);
+            }
+            Action::Flattening { at, left } if left > 1 => self.action = Action::Flattening { at, left: left - 1 },
+            Action::Flattening { at, .. } => {
+                self.action = Action::Idle;
+                return Some(UnitEvent::Jumped { at });
+            }
+            Action::Building { left } if left > 1 => self.action = Action::Building { left: left - 1 },
+            Action::Building { .. } => {
+                self.action = Action::Idle;
+                return Some(UnitEvent::Built);
             }
             Action::Chopping { tree, left } if left > 1 => self.action = Action::Chopping { tree, left: left - 1 },
             Action::Chopping { tree, .. } => {
@@ -504,6 +535,7 @@ impl Unit {
         (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
         (self.to_tree, self.to_wood) = (None, None);
         self.queue.clear();
+        self.work = None;
         self.action = Action::Dying { left: DYING_TICKS };
     }
 
@@ -654,6 +686,19 @@ mod tests {
 
     fn run(u: &mut Unit, t: &Heightmap, site: &ReincarnationSite, ticks: usize) -> Vec<UnitEvent> {
         (0..ticks).filter_map(|_| u.tick(t, Some(site))).collect()
+    }
+
+    #[test]
+    fn jumps_and_builds_then_tells_the_caller() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.action = Action::Flattening { at: (10, 11), left: JUMP_TICKS };
+        assert_eq!(u.action.elapsed(), Some(0));
+        assert_eq!(run(&mut u, &t, &site, JUMP_TICKS as usize), vec![UnitEvent::Jumped { at: (10, 11) }]);
+        u.action = Action::Building { left: BUILD_TICKS };
+        assert_eq!(run(&mut u, &t, &site, BUILD_TICKS as usize - 1), vec![]);
+        assert_eq!(run(&mut u, &t, &site, 1), vec![UnitEvent::Built]);
+        assert_eq!(u.action, Action::Idle);
     }
 
     #[test]
