@@ -8,6 +8,7 @@ pub mod blend;
 pub mod catalog;
 pub mod header;
 pub mod install;
+pub mod language;
 pub mod level;
 pub mod objects;
 pub mod sprites;
@@ -17,4 +18,5 @@ pub use level::{Level, LevelError, LevelHeader, LevelVersion, Thing, ThingData, 
 pub use anim::{AnimBank, Picture};
 pub use objects::{find_file, Atlas, Face, Object, ObjectBank};
 pub use sprites::{Sprite, SpriteBank};
+pub use language::Language;
 pub use theme::{theme_char, Theme};

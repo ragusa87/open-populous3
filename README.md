@@ -53,8 +53,8 @@ File formats are reverse-engineered from the original files; community tools are
     [sprites.md](docs/specs/sprites.md).
   - [PopSoundEditor](https://github.com/Toksisitee/PopSoundEditor) (GPLv3): SDT sound banks, see
     [sound.md](docs/specs/sound.md).
-  - [PopLanguageEditor](https://github.com/Toksisitee/PopLanguageEditor) (GPLv3): language string files, not
-    used yet.
+  - [PopLanguageEditor](https://github.com/Toksisitee/PopLanguageEditor) (GPLv3): language string files; our
+    reader comes from the files themselves, see [language.md](docs/specs/language.md).
   - [PopScript Upgrader](https://github.com/TylerTheFox/popscript-upgraderi) (MIT)
 - The [PopScript Wiki](https://ts.popre.net/archive/Downloads/Docs/PopScript_Wiki_HTML_Help_File.htm) (Megafont,
   2006): the AI script language, its commands and attributes, see [ai-scripts.md](docs/specs/ai-scripts.md).
