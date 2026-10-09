@@ -157,9 +157,26 @@ impl Plugin for BlueprintPlugin {
     }
 }
 
-fn spawn_mark(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
-    let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    commands.spawn((BlueprintMark, Mesh3d(meshes.add(mesh)), MeshMaterial3d(mats.add(mark_material())), NotShadowCaster, Transform::default(), Visibility::Hidden));
+/// The mark gets its mesh when first drawn (`put_mark`): Bevy 0.19 logs a "Use-after-free" error for
+/// a mesh without vertices.
+fn spawn_mark(mut commands: Commands, mut mats: ResMut<Assets<StandardMaterial>>) {
+    commands.spawn((BlueprintMark, MeshMaterial3d(mats.add(mark_material())), NotShadowCaster, Transform::default(), Visibility::Hidden));
+}
+
+/// Draws `mark` into the mark's mesh, made the first time.
+fn put_mark(commands: &mut Commands, mark_entity: Entity, mesh: Option<&Mesh3d>, meshes: &mut Assets<Mesh>, mark: MarkMesh) {
+    match mesh {
+        Some(mesh) => {
+            if let Some(mut m) = meshes.get_mut(&mesh.0) {
+                set_mark(&mut m, mark);
+            }
+        }
+        None => {
+            let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            set_mark(&mut m, mark);
+            commands.entity(mark_entity).insert(Mesh3d(meshes.add(m)));
+        }
+    }
 }
 
 /// The mouse over the map (not the panel or a button), if any.
@@ -250,11 +267,12 @@ fn draw_blueprint(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
     pinned: Res<PinnedAt>,
-    mut mark: Query<(&Mesh3d, &mut Visibility), With<BlueprintMark>>,
+    mut mark: Query<(Entity, Option<&Mesh3d>, &mut Visibility), With<BlueprintMark>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut look: ResMut<CursorLook>,
+    mut commands: Commands,
 ) {
-    let Ok((mesh, mut vis)) = mark.single_mut() else { return };
+    let Ok((mark_entity, mesh, mut vis)) = mark.single_mut() else { return };
     let playing = *state.get() == crate::menu::AppState::Playing;
     let under_mouse = || ground_under_mouse(&windows, &ui, &cams, &map, &rig, &params);
     let ground = blueprint.plan.filter(|_| playing).and_then(|plan| Some((plan, pinned.0.or_else(under_mouse)?)));
@@ -281,9 +299,7 @@ fn draw_blueprint(
             let lo = Vec2::new(fire.0 as f32, fire.1 as f32);
             let mark = grid_mark(lo, lo + Vec2::ONE, |at| (on_ground(at), colour));
             look.set_if_neq(CursorLook::Building { plan, valid: colour == WHITE });
-            if let Some(mut m) = meshes.get_mut(&mesh.0) {
-                set_mark(&mut m, mark);
-            }
+            put_mark(&mut commands, mark_entity, mesh, &mut meshes, mark);
             *vis = Visibility::Inherited;
             return;
         }
@@ -298,9 +314,7 @@ fn draw_blueprint(
     let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at)).is_some() { RED } else { WHITE });
     let mark = mark_mesh(kind, b.facing, centre, vertex);
     look.set_if_neq(CursorLook::Building { plan, valid: !mark.colours.contains(&RED) });
-    if let Some(mut m) = meshes.get_mut(&mesh.0) {
-        set_mark(&mut m, mark);
-    }
+    put_mark(&mut commands, mark_entity, mesh, &mut meshes, mark);
     *vis = Visibility::Inherited;
 }
 

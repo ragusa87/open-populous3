@@ -139,7 +139,6 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Cliffs: `cliff0-X.dat` turns land colours to rock by level (what picks the level: slope? damage?); `fade0-X.dat` palette light table (object/sprite shading, fog of war). Load both in `pop3_format::theme`.
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
-- [ ] Investigate Bevy 0.19.1 headless startup slab-allocator `Use-after-free` diagnostic on Intel/Mesa (reproduces on baseline `4e1533e` with box buildings too; captures complete; [verification](docs/specs/assets.md#verification-of-this-first-pass)).
 - [ ] Spell and building icons, tooltips; Stats tab (still "Coming soon").
 - [ ] Hover tooltips for everything (the halo is done for the player's units, wood, trees and the player's buildings, ui-and-editor.md "Hover halo"; units: the health bar is their tooltip). Spies are the exception: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.

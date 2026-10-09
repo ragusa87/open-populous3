@@ -106,10 +106,10 @@ redirected to an empty directory. Add provenance to `assets/CREDITS.md`.
   including blueprint, bare scaffold, partial/full, dismantling, attacked and occupied states.
   Stages screenshot: `FOCUS=66,40 DISTANCE=44 PITCH=65 YAW=180 POP3_START=sandbox-buildings`.
   Texture close-up: `FOCUS=63,71 DISTANCE=13 PITCH=40 YAW=180 POP3_START=sandbox-buildings`.
-- Known baseline issue: Bevy 0.19.1 / Mesa 26.2.4 on Intel RPL-P logs
-  `Use-after-free: attempted to copy element data for an unallocated key` during headless startup.
-  Reproduced with the unchanged `4e1533e` snapshot and its box buildings as well as this kit;
-  screenshots complete. Tracked separately in TODO, not attributed to the GLBs.
+- The `Use-after-free: attempted to copy element data for an unallocated key` error logged at startup was
+  not the GLBs nor the GPU: Bevy 0.19.1's mesh allocator skips meshes without vertices but still copies
+  their data (`bevy_render` `mesh/allocator.rs`, `allocate_meshes`), and the Build tab's blueprint mark
+  started as an empty mesh. The mark now gets its mesh when first drawn (`blueprint::put_mark`).
 
 ## Text-only research
 

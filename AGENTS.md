@@ -29,6 +29,7 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
 - Keep logic in small pure functions with unit tests next to them; Bevy systems stay thin.
 - Simulation must stay deterministic: integers, `map::Lcg` for randomness, no time/HashMap-order dependence.
   State changes go through `Command` so lockstep replays match.
+- A `Mesh` without vertices reaching the renderer, even hidden, makes Bevy 0.19 log "Use-after-free ... unallocated key": make the mesh when there is data, or fill it the frame it is added (terrain, site marks).
 - All grid access wraps (`rem_euclid`): the map is a torus.
 - Bevy APIs change between versions: check `~/.cargo/registry/src/*/bevy_*-0.19.*` before guessing.
 - Never `rm` paths built from shell variables that may be empty. Write temp files to a scratch dir and overwrite.
