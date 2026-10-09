@@ -40,8 +40,9 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   totem's gifts (`Totem::gifts`, logged in `GameMap::granted`), its gauge starts again; once it gave
   `occurrences` times (0: no limit, a guess) its prayers are sent away (stop) and it takes no more.
 - The stone totem (object 1, "Totem rocks" in objects.md) [player]: its rock layers are out of line on purpose
-  (each turned about 20° from the one under it). Once completed, its layers turn about its centre axis until
-  they line up (object 3's state); then, once it has given every time it can (`occurrences` > 0 and all given), it
+  (each turned about 20° from the one under it). Once completed, every slab's bottom ring turns about the
+  centre axis (the way object 3 turns it) until it is turned **64°** from object 1 [player, picked with a slider;
+  object 3 is at 19.6°, straight], its radius going to object 3's; then, once it has given every time it can (`occurrences` > 0 and all given), it
   sinks slowly under the ground, giving off smoke, and disappears: removed from the map once sunk, its cell
   free again [ours]. What it does after a completion that is not its last (or with no limit) is not known: it
   lines up and stays so [ours, to check]. The generated stand-in (a stack of blocks) does the same.
