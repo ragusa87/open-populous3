@@ -27,8 +27,9 @@ flames, or a stone pillar without the original files.
 ## Totems (scenery 9)
 - Who may pray and how many are needed come from the level, per totem, from the trigger on its cell [player,
   files]: type 0 takes any of the tribe's units, followers and the shaman alike, each counting towards
-  `TriggerCount`; type 3 takes only the shaman [player]. Type 5 ("shaman + angel of death", one in level 5) is
-  taken as shaman only [ours].
+  `TriggerCount`; type 3 takes only the shaman [player]. Type 5 takes only the shaman too, and when it fires an
+  Angel of Death appears [player] (one in level 5, cell 83, 65; its targets are effects 91 and 88 [files], one of
+  them probably the Angel of Death).
 - In the levels [files]: 96 of the 98 totems have exactly one trigger on their cell; level 23 has two totems and
   two triggers on one cell (30, 84), paired in slot order [ours]. Type 0 needs 1-8 units (6 for 41 totems, 1 for
   17); the 21 type 3 totems need 1.
