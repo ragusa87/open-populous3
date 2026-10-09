@@ -90,6 +90,7 @@ UI widget draws every row. Bars and the toggle the same way: a model from the si
 A pyramid's tooltip names its reward (the spell or building it teaches) [player]; once granted, like the icon
 on its top, not any more [ours].
 
-## Open
-- Slot icons and placeholder art: our own (generated or CC0); original sprites only loaded at runtime from the
-  user's install.
+## Icons [ours]
+Generated in code for now, no art asset: a small silhouette per unit kind (head and body shapes, a staff for the
+shaman), in the tribe's colour when filled and grey when a placeholder; a log for wood. Better art can replace
+them later, the slot rows only ask for an icon by what it shows.

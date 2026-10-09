@@ -155,7 +155,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Bars: prayer progress, house growth and birth, training; blinking while blocked.
 - [ ] Dismantle toggle on the player's buildings that take wood; right click shows a building's tooltip at once like trees.
 - [ ] Totems hoverable (`hover::Hovered`), with their tooltip.
-- [ ] Our own slot icons and placeholder shapes (generated or CC0; original sprites only loaded at runtime).
+- [ ] Generated slot icons drawn in code: a silhouette per unit kind (tribe colour filled, grey placeholder), a log for wood.
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
 - [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).
 - [ ] Editor: smooth brush and the raise/lower levelling step of the ALACN editor (ui-and-editor.md).
