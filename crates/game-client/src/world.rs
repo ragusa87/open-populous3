@@ -31,6 +31,10 @@ pub struct LevelList {
 #[derive(Resource, Default)]
 pub struct TerrainDirty(pub bool);
 
+/// Cell borders drawn on the ground (the sandboxes).
+#[derive(Resource, Default)]
+pub struct ShowGrid(pub bool);
+
 #[derive(Component)]
 struct TerrainMesh;
 
@@ -133,6 +137,7 @@ impl Plugin for WorldPlugin {
             .insert_resource(objects)
             .insert_resource(levels)
             .insert_resource(TerrainDirty(true))
+            .init_resource::<ShowGrid>()
             .init_resource::<CurveParamsRes>()
             .add_systems(Startup, spawn_terrain)
             .add_systems(Update, (switch_level.in_set(crate::menu::Gameplay), rebuild_terrain).chain());
@@ -155,6 +160,7 @@ fn switch_level(
     mut selected: ResMut<crate::hud::spells::SelectedSpell>,
     mut builds: ResMut<crate::hud::build::PlayerBuilds>,
     mut blueprint: ResMut<crate::blueprint::Blueprint>,
+    mut grid: ResMut<ShowGrid>,
 ) {
     let modified = [KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight];
     if keys.any_pressed(modified) {
@@ -173,6 +179,7 @@ fn switch_level(
     selected.0 = None;
     builds.0 = crate::hud::build::level_builds(&map.0);
     blueprint.put_away();
+    grid.0 = false;
     dirty.0 = true;
 }
 
@@ -203,6 +210,7 @@ fn rebuild_terrain(
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     q: Query<&Mesh3d, With<TerrainMesh>>,
+    grid: Res<ShowGrid>,
 ) {
     if !dirty.0 && *last_focus == Some(rig.focus) {
         return;
@@ -212,7 +220,7 @@ fn rebuild_terrain(
             Theme::load(&levels.data_dir, t).map_err(|e| warn!("theme {t}: {e}")).ok()
         });
         let theme = original.unwrap_or_else(|| crate::procedural_theme::generate(levels.index as u32 + 1));
-        let image = images.add(theme_image(&map.0, &theme, params.0.height_scale));
+        let image = images.add(theme_image(&map.0, &theme, params.0.height_scale, grid.0));
         if let Some(mut m) = mats.get_mut(&material.0) {
             m.unlit = true;
             m.base_color_texture = Some(image);
@@ -231,9 +239,12 @@ fn rebuild_terrain(
     }
 }
 
-fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32) -> Image {
+fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32, grid: bool) -> Image {
     let row_scale = std::env::var("POP3_ROW_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
-    let (side, pixels) = crate::terrain_texture::bake(&map.terrain, theme, height_scale, row_scale);
+    let (side, mut pixels) = crate::terrain_texture::bake(&map.terrain, theme, height_scale, row_scale);
+    if grid {
+        crate::terrain_texture::draw_grid(&mut pixels, side);
+    }
     let mut image = Image::new(
         Extent3d { width: side as u32, height: side as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,

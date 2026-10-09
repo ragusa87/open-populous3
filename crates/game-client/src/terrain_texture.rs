@@ -54,10 +54,36 @@ pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32) -
     (side, out)
 }
 
+/// Brightness (out of 256) of the cell borders `draw_grid` darkens.
+const GRID_SHADE: u16 = 190;
+
+/// Darkens the first row and column of pixels of every cell: a grid along the cell borders.
+pub fn draw_grid(pixels: &mut [u8], side: usize) {
+    for (i, px) in pixels.chunks_exact_mut(4).enumerate() {
+        let (x, y) = (i % side, i / side);
+        if x % PX_PER_CELL == 0 || y % PX_PER_CELL == 0 {
+            for c in &mut px[..3] {
+                *c = (*c as u16 * GRID_SHADE / 256) as u8;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use pop3_format::theme::{BIGFADE_ROWS, BIGFADE_WIDTH, DISP_SIZE};
+
+    #[test]
+    fn grid_darkens_the_cell_borders_only() {
+        let side = 2 * PX_PER_CELL;
+        let mut px = vec![200u8; side * side * 4];
+        draw_grid(&mut px, side);
+        let at = |x: usize, y: usize| px[(y * side + x) * 4];
+        assert!(at(0, 3) < 200 && at(PX_PER_CELL, 5) < 200 && at(4, PX_PER_CELL) < 200);
+        assert_eq!(at(3, 3), 200);
+        assert_eq!(px[3], 200, "alpha kept");
+    }
 
     /// Palette index = row band (0 water, 1 land) so we can check the row choice.
     fn test_theme() -> Theme {

@@ -291,6 +291,7 @@ struct GameSetup<'w> {
     builds: ResMut<'w, PlayerBuilds>,
     blueprint: ResMut<'w, crate::blueprint::Blueprint>,
     selected_spell: ResMut<'w, SelectedSpell>,
+    grid: ResMut<'w, crate::world::ShowGrid>,
 }
 
 impl GameSetup<'_> {
@@ -307,6 +308,7 @@ impl GameSetup<'_> {
             Start::SandboxBuildings => (GameMap::sandbox_buildings(), sandbox_book()),
         };
         self.builds.0 = level_builds(&self.map.0);
+        self.grid.0 = start != Start::NewGame;
         self.blueprint.put_away();
         self.selected_spell.0 = None;
         self.dirty.0 = true;
