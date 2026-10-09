@@ -39,9 +39,8 @@ angle (`tree_yaw`), scaled with the size (`size_factor`: 40% at size 1 to full a
 - Otherwise: the CC0 Quaternius Stylized Nature MegaKit (`assets/3d/nature`, type modulo 10: 0-4 common
   trees, 5-9 pines), 1.6 cells tall at full size. Models load through Bevy's asset server from the repository's
   `assets/` (`dev::asset_plugin`).
-Resting the cursor on a visible tree for 1.5 s (`HOVER_SECS`), or right-clicking it, shows a tooltip by the
-cursor: its current wood, "Tree: 3 wood" (`GameMap::wood_slots`), until the cursor leaves the tree (`HoveredTree`). A right
+Resting the cursor on a visible tree for 1.5 s (`HOVER_SECS`), or right-clicking it, shows its tooltip above
+it (tooltips.md): its name and a wood row of its current wood, one log per piece (`GameMap::wood_slots`), until the cursor leaves the tree (`HoveredTree`). A right
 click on a tree keeps the unit selection (elsewhere it clears it). The tree under the cursor is the one whose screen box (trunk base to top,
 30% of its height either side) holds it, the nearest one when several overlap (`tree_at`). Not over the panel,
-nor while a spell is aimed. Planned (tooltips.md): a wood row of one filled slot per piece; the original
-capacity of a tree is not known, so it shows no "most it can hold".
+nor while a spell is aimed. The original capacity of a tree is not known, so the row has no empty places.

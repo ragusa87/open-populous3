@@ -147,11 +147,11 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 
 ## Tooltips ([tooltips.md](docs/specs/tooltips.md))
-- [ ] Rendered tooltip: done for buildings (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks); trees still show a text following the cursor; bars and the toggle to add.
+- [ ] Rendered tooltip: done for buildings and trees (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks, right click at once); bars and the toggle to add.
 - [ ] People rows of totems (counted prayers, once praying exists) and vehicles; the trainee once training exists. Buildings and pyramids are done, a click adds the unit to the selection.
-- [ ] Wood rows: the pieces still needed on a growing house (once growth exists); a tree's current wood as slots. Plans, sites and built buildings are done.
+- [ ] Wood rows: the pieces still needed on a growing house (once growth exists). Plans, sites, built buildings and trees are done.
 - [ ] Bars: prayer progress, house growth and birth, training; blinking while blocked.
-- [ ] Dismantle toggle on the player's buildings that take wood; right click shows a building's tooltip at once like trees.
+- [ ] Dismantle toggle on the player's buildings that take wood.
 - [ ] Vehicles: an unload button in the toggle's place, everyone aboard gets off; disabled with no walkable ground to land on (balloon over water or steep ground, boat away from the shore).
 - [ ] Totems hoverable (`hover::Hovered`), with their tooltip.
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.

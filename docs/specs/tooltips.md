@@ -1,15 +1,14 @@
-# Tooltips (buildings done: name, slot rows, clicks; bars, toggle and the other targets to do)
+# Tooltips (buildings and trees done: name, slot rows, clicks; bars, toggle and the other targets to do)
 
 What the game shows about the thing under the mouse. A tooltip **renders** things: rows of slots, bars and a
-toggle, not only text. Buildings use it (client `tooltip.rs`); trees still show a text that follows the cursor
-(`nature::tooltip`).
+toggle, not only text. Buildings and trees use it (client `tooltip.rs`).
 
 Tags: **[player]** how the game plays, as told by someone who played it, **[code]** what ours does today,
 **[ours]** a choice made here, to check.
 
 ## Showing
-- After resting the cursor `HOVER_SECS` (1.5 s) on a hovered thing, or at once on a right click (trees today,
-  buildings to come) [code]. One tooltip at a time.
+- After resting the cursor `HOVER_SECS` (1.5 s) on a hovered thing, or at once on a right click on it [code].
+  One tooltip at a time, for one `tooltip::Target` (a building or a tree for now).
 - It does not follow the mouse: it stands **above the hovered element**, centred over the top of its model, and
   stays there [player]. It stays shown while the cursor is on the element or on the tooltip itself, and hides once
   both lose the focus (after a short grace, `GRACE_SECS`, to cross the gap between them) [player; ours: the grace].
@@ -103,7 +102,7 @@ unit ids in id order, at most `capacity`) and `GameMap::wood_slots(holder)` (`Wo
 tower, a training hut and an unspent pyramid). Who counts is decided there, next to the rules; the text tooltips
 read them already. To do in the client: one `SlotRow { kind: People | Wood, slots, filled }` model, `filled` holding each filled slot's icon (and, for
 people, the unit id its click selects), built from the simulation each frame by pure, tested functions; one Bevy
-UI widget draws every row. Done for buildings: `tooltip::building_model` (lines and rows of `Slot { icon, unit }`),
+UI widget draws every row. Done for buildings and trees: `tooltip::building_model`, `tree_model` (lines and rows of `Slot { icon, unit }`),
 `line_lengths`, `sticky` (what stays shown), `icon_pixels` (the generated icons); the box is rebuilt only when its
 model changes. Bars and the toggle the same way: a model from the simulation, one widget.
 

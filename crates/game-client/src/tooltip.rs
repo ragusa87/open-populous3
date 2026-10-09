@@ -1,12 +1,13 @@
-//! The rendered tooltip of a building (docs/specs/tooltips.md): its name, a line or two of text, then
-//! slot rows of icons, one per place or piece (`GameMap::people_slots`, `wood_slots`): the people in
-//! it or at work on it, its wood. Long rows wrap (`line_lengths`). It stands above the building and
-//! stays while the cursor is on the building or on it (`sticky`), so a person's slot can be clicked
-//! to add that unit to the selection. The icons are generated here, a silhouette per unit kind in its tribe's
+//! The rendered tooltip of a building or a tree (docs/specs/tooltips.md): its name, a line or two of
+//! text, then slot rows of icons, one per place or piece (`GameMap::people_slots`, `wood_slots`): the
+//! people in it or at work on it, its wood. Long rows wrap (`line_lengths`). It shows after resting the
+//! cursor on the thing or at once on a right click, stands above it and stays while the cursor is on
+//! the thing or on it (`sticky`), so a person's slot can be clicked to add that unit to the selection. The icons are generated here, a silhouette per unit kind in its tribe's
 //! colour, grey when a slot is empty, a log for wood.
 
 use crate::buildings::{BuildingView, ModelHeights};
 use crate::camera::GameCamera;
+use crate::nature::{size_factor, TreeModel, TreeView};
 use crate::units::selection::Selection;
 use crate::world::CurrentMap;
 use bevy::asset::RenderAssetUsages;
@@ -45,6 +46,13 @@ pub enum Icon {
     NoWood,
     /// The arrow over a selected unit's slot.
     Selected,
+}
+
+/// What a tooltip is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Building(usize),
+    Tree(usize),
 }
 
 /// One slot: its icon, the unit a click on it selects, and whether that unit is selected.
@@ -110,10 +118,24 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[u32]) -> TooltipModel
     model
 }
 
-/// Which building's tooltip shows, from the one `shown`, the one under the cursor (`hovered`, `rested`
-/// on long enough), whether the cursor is on the tooltip, and since when (`lost`) neither has it.
-/// A shown tooltip stays while the cursor is on its building or on it, and `GRACE_SECS` after.
-pub fn sticky(shown: Option<usize>, hovered: Option<usize>, rested: bool, over_tooltip: bool, lost_for: f32) -> Option<usize> {
+/// A tree's tooltip: its name and its current wood (none for a tree without wood).
+pub fn tree_model(map: &GameMap, i: usize) -> Option<TooltipModel> {
+    map.wood_slots(Holder::Tree(i)).map(|wood| TooltipModel { lines: vec!["Tree".to_string()], rows: vec![wood_row(wood)] })
+}
+
+/// What `target` shows; None when it has nothing to show.
+fn model_of(map: &GameMap, target: Target, selected: &[u32]) -> Option<TooltipModel> {
+    match target {
+        Target::Building(i) => (i < map.buildings.len()).then(|| building_model(map, i, selected)),
+        Target::Tree(i) => tree_model(map, i),
+    }
+}
+
+/// Which tooltip shows, from the one `shown`, the thing under the cursor (`hovered`, `rested` on long
+/// enough or right-clicked), whether the cursor is on the tooltip, and for how long (`lost_for`)
+/// neither has it. A shown tooltip stays while the cursor is on its thing or on it, and `GRACE_SECS`
+/// after.
+pub fn sticky<T: Copy + PartialEq>(shown: Option<T>, hovered: Option<T>, rested: bool, over_tooltip: bool, lost_for: f32) -> Option<T> {
     if over_tooltip || (shown.is_some() && hovered == shown) {
         return shown;
     }
@@ -215,20 +237,21 @@ impl IconImages {
     }
 }
 
-/// The building tooltip's box.
+/// The tooltip's box.
 #[derive(Component)]
-struct BuildingTooltip;
+struct TooltipBox;
 
 /// A person's slot: a click selects this unit.
 #[derive(Component)]
 struct SlotUnit(u32);
 
-/// What the tooltip shows, and since when its building and itself lost the cursor.
+/// What the tooltip shows, since when the cursor is on the thing under it (and whether it was
+/// right-clicked), and since when the shown thing and the tooltip lost the cursor.
 #[derive(Default)]
 struct TooltipState {
-    shown: Option<usize>,
+    shown: Option<Target>,
     model: Option<TooltipModel>,
-    hovered_since: (Option<usize>, f32),
+    hovered_since: (Option<Target>, f32, bool),
     lost_at: Option<f32>,
 }
 
@@ -238,13 +261,13 @@ impl Plugin for TooltipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IconImages>()
             .add_systems(Startup, spawn_tooltip)
-            .add_systems(Update, (show_building_tooltip.after(crate::hover::HoverSystems), select_from_slot).in_set(crate::menu::Gameplay));
+            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot).in_set(crate::menu::Gameplay));
     }
 }
 
 fn spawn_tooltip(mut commands: Commands) {
     commands.spawn((
-        BuildingTooltip,
+        TooltipBox,
         Interaction::default(),
         BackgroundColor(Color::srgba(0.1, 0.07, 0.03, 0.85)),
         Node { position_type: PositionType::Absolute, flex_direction: FlexDirection::Column, row_gap: px(3), padding: UiRect::axes(px(6), px(4)), ..default() },
@@ -253,46 +276,61 @@ fn spawn_tooltip(mut commands: Commands) {
     ));
 }
 
-/// The tooltip of the building under the cursor once rested on for `HOVER_SECS`, above it, kept while
-/// the cursor is on the building or the tooltip (`sticky`), redrawn when its model changes.
+/// The tooltip of the building or tree under the cursor once rested on for `HOVER_SECS` or right-clicked,
+/// above it, kept while the cursor is on it or on the tooltip (`sticky`), redrawn when its model changes.
 #[allow(clippy::too_many_arguments)]
-fn show_building_tooltip(
+fn show_tooltip(
     mut commands: Commands,
     time: Res<Time>,
+    mouse: Res<ButtonInput<MouseButton>>,
     map: Res<CurrentMap>,
     hovered: Res<crate::hover::Hovered>,
     heights: Res<ModelHeights>,
     cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     views: Query<(&BuildingView, &GlobalTransform)>,
+    trees: Query<(&TreeView, &GlobalTransform, &Children)>,
+    tree_models: Query<&TreeModel>,
     selection: Res<Selection>,
     mut state: Local<TooltipState>,
     mut icons: ResMut<IconImages>,
     mut images: ResMut<Assets<Image>>,
-    mut tooltip: Query<(Entity, &Interaction, &ComputedNode, &mut Node, &mut Visibility), With<BuildingTooltip>>,
+    mut tooltip: Query<(Entity, &Interaction, &ComputedNode, &mut Node, &mut Visibility), With<TooltipBox>>,
 ) {
     let Ok((entity, interaction, computed, mut node, mut vis)) = tooltip.single_mut() else { return };
     let now = time.elapsed_secs();
-    let building = match hovered.0 {
-        Some(crate::hover::HoverTarget::Building(i)) if i < map.0.buildings.len() => Some(i),
+    let target = match hovered.0 {
+        Some(crate::hover::HoverTarget::Building(i)) if i < map.0.buildings.len() => Some(Target::Building(i)),
+        Some(crate::hover::HoverTarget::Tree(i)) if i < map.0.trees.len() => Some(Target::Tree(i)),
         _ => None,
     };
-    if building != state.hovered_since.0 {
-        state.hovered_since = (building, now);
+    if target != state.hovered_since.0 {
+        state.hovered_since = (target, now, false);
     }
+    state.hovered_since.2 |= target.is_some() && mouse.just_pressed(MouseButton::Right);
     let over = state.shown.is_some() && *interaction != Interaction::None;
-    let holding = over || (building.is_some() && building == state.shown);
+    let holding = over || (target.is_some() && target == state.shown);
     state.lost_at = if holding { None } else { state.lost_at.or(Some(now)) };
-    let rested = now - state.hovered_since.1 >= crate::nature::HOVER_SECS;
+    let rested = state.hovered_since.2 || now - state.hovered_since.1 >= crate::nature::HOVER_SECS;
     let lost_for = state.lost_at.map_or(0.0, |t| now - t);
-    state.shown = sticky(state.shown, building, rested, over, lost_for).filter(|&i| i < map.0.buildings.len());
-    let anchor = state.shown.and_then(|i| {
-        let b = &map.0.buildings[i];
-        let (_, gt) = views.iter().find(|(v, _)| v.0 == i)?;
+    state.shown = sticky(state.shown, target, rested, over, lost_for);
+    let model = state.shown.and_then(|t| model_of(&map.0, t, &selection.units));
+    let anchor = state.shown.and_then(|t| {
         let (cam, cam_t) = cams.single().ok()?;
-        let top = heights.0.get(&(b.x, b.z)).copied().unwrap_or(1.0);
-        cam.world_to_viewport(cam_t, gt.translation() + gt.up() * top).ok()
+        let top = match t {
+            Target::Building(i) => {
+                let b = &map.0.buildings[i];
+                let (_, gt) = views.iter().find(|(v, _)| v.0 == i)?;
+                gt.translation() + gt.up() * heights.0.get(&(b.x, b.z)).copied().unwrap_or(1.0)
+            }
+            Target::Tree(i) => {
+                let (_, gt, children) = trees.iter().find(|(v, _, _)| v.0 == i)?;
+                let full = children.iter().find_map(|c| tree_models.get(c).ok())?.full_height;
+                gt.translation() + Vec3::Y * size_factor(map.0.trees[i].size) * full
+            }
+        };
+        cam.world_to_viewport(cam_t, top).ok()
     });
-    let (Some(i), Some(at)) = (state.shown, anchor) else {
+    let (Some(model), Some(at)) = (model, anchor) else {
         vis.set_if_neq(Visibility::Hidden);
         state.model = None;
         return;
@@ -300,7 +338,6 @@ fn show_building_tooltip(
     let size = computed.size() * computed.inverse_scale_factor();
     (node.left, node.top) = (px(at.x - size.x / 2.0), px(at.y - size.y - ABOVE));
     vis.set_if_neq(Visibility::Inherited);
-    let model = building_model(&map.0, i, &selection.units);
     if state.model.as_ref() == Some(&model) {
         return;
     }
@@ -421,6 +458,17 @@ mod tests {
         assert_eq!(sticky(Some(3), None, false, false, GRACE_SECS), None, "focus lost");
         assert_eq!(sticky(Some(3), Some(5), false, false, 0.0), None, "another building, not rested yet");
         assert_eq!(sticky(Some(3), Some(5), true, false, 0.0), Some(5));
+    }
+
+    #[test]
+    fn a_tree_shows_its_current_wood_only() {
+        let mut map = GameMap::sandbox_buildings();
+        map.trees[0].size = 3;
+        let model = tree_model(&map, 0).unwrap();
+        assert_eq!(model.lines, vec!["Tree".to_string()]);
+        assert_eq!(icons(&model.rows[0]), vec![Icon::Wood; 3], "no placeholders: its capacity is not known");
+        map.trees[0].size = 0;
+        assert_eq!(tree_model(&map, 0), None, "no wood: no tooltip");
     }
 
     #[test]

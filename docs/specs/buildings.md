@@ -169,8 +169,8 @@ Done (client `tooltip.rs`, [tooltips.md](tooltips.md)): after resting the cursor
 plans included, a box above it with the kind's name; for the player's buildings that take wood a people row
 (braves assigned while a plan or site, the people inside once built: huts, drum towers, a training hut's
 trainee; a click adds one to the selection) and a wood row (provided / cost, then the wood in it, what dismantling
-gives back); a pyramid also names what it teaches. Other tribes' buildings show their name only. To do: the
-Dismantle toggle (see "Dismantling") and showing it at once on a right click.
+gives back); a pyramid also names what it teaches. Other tribes' buildings show their name only. A right click on
+the building shows it at once. To do: the Dismantle toggle (see "Dismantling").
 
 ### Orders and selection
 - Any new order to an assigned brave (`Command::OrderUnit`: move, pray, stop...) unassigns it from the site,
