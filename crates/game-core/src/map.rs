@@ -327,7 +327,9 @@ impl GameMap {
         map.buildings.push(vault);
         for (k, &kind) in TotemKind::ALL.iter().enumerate() {
             let (prayers, shaman_only, summons_angel) = SANDBOX_TOTEMS[k];
-            map.totems.push(Totem { prayers, shaman_only, summons_angel, gifts: vec![sandbox_gift(k)], ..Totem::new(kind, at(-12 + 4 * k as i32, -12)) });
+            // The stone totem gives once, to show it turning, sinking and gone; the others give again and again.
+            let occurrences = u8::from(kind == TotemKind::Totem);
+            map.totems.push(Totem { prayers, shaman_only, summons_angel, gifts: vec![sandbox_gift(k)], occurrences, ..Totem::new(kind, at(-12 + 4 * k as i32, -12)) });
         }
         for n in 0..8 {
             let id = map.units.len() as u32 + 1;

@@ -26,8 +26,9 @@ Sandbox > Worship (`POP3_START=sandbox-worship`, `GameMap::sandbox_worship`): so
 neutral pyramid of knowledge teaching the temple, its door facing the shaman; north a row of totems, one of each
 look (`TotemKind::ALL`: totem, winged death totem with its bird, prayer totem, stone head, the three totem poles,
 since which one the levels' scenery 9 uses is not known), and 8 of the player's braves in front of them.
-Totems (`game_core::totem`, client `totems.rs`) only stand there for now: their original objects with animated
-flames, or a stone pillar without the original files. Each asks for something else: one unit; the shaman with an
+Totems (`game_core::totem`, client `totems.rs`): their original objects with animated flames, or stone blocks
+without the original files. The stone totem gives once (`occurrences` 1), to show it turning, sinking and gone;
+the others give again and again. Each asks for something else: one unit; the shaman with an
 Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`map::SANDBOX_TOTEMS`).
 
 ## Totems (scenery 9)
@@ -54,13 +55,20 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
     up or top down; the whole slabs spinning as blocks (1-3 turns) while their rings ease to 64°; more full turns
     of the rings (2 or 3, over a longer time); spinning fast and slowing down into place; overshooting 64° and
     springing back; a ratchet of short clicks (4 × 16°) with pauses; a rumble (the totem shaking) while it sinks.
-  Done so far: its layers turn once it gave, round and round (`totems::layer_turn`); to change to this turn,
-  then sinking.
+  Done: the timeline is in the simulation (`Totem::since_given`; `TURN_TICKS` 20, `HOLD_TICKS` 10, `SINK_TICKS`
+  40; `Totem::is_gone`, then nothing finds it: `GameMap::totem_at`); the client poses the rings from objects 1
+  and 3 (`totems::twisted`, `turn_fraction`, eased and smoothed between ticks), lowers the body
+  (`sink_fraction`) with puffs of smoke (`puff`) and hides it once gone. The generated stack of blocks turns its
+  blocks above the base by the same amount.
+- While it turns and sinks (its slots all used: exhausted) no unit can be sent to it [player]: done, an
+  exhausted totem takes no order (`GameMap::totem_orders` gives none, `Order::Worship` there does nothing) and
+  sends away those still praying.
 - The stone head (object 82) [player]: its head nods at all times, completed or not: it tips forward and back
   about a horizontal axis through its neck. Chosen from a side-by-side test of four nods ("A, gentle"): the head
   is every face above the pedestal (all its points at height 324 or more); it turns about the horizontal axis
   across the face's direction, through the top of the pedestal (height 324, centre axis), by `6° * sin(2π t / 1.6 s)`
-  (±6°, one nod every 1.6 s, smooth both ways).
+  (±6°, one nod every 1.6 s, smooth both ways). Done: `totems::split_head`, `nod_angle`; the generated stand-in
+  is a pedestal block with a head block nodding the same way.
 - The other looks do not move (to check in the game).
 - Gifts (`totem::gift`, from the trigger's targets): a spell (`Reward::Spell`, a "once" discovery
   `Reward::OneShot`: one more cast, `worship::one_more_shot`), a building, mana (`Reward::Mana`, only logged:

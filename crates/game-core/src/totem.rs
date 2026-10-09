@@ -21,6 +21,11 @@ pub const DEFAULT_PRAY_TIME: u16 = 100;
 const DISCOVERY_MANA: u8 = 6;
 /// Tribes with a gauge of their own on each totem.
 pub const TRIBES: usize = 4;
+/// After its first gift the stone totem turns its rocks for `TURN_TICKS`; once it gave its last, it
+/// holds `HOLD_TICKS` more, then sinks under the ground for `SINK_TICKS` and is gone (worship.md).
+pub const TURN_TICKS: u16 = 20;
+pub const HOLD_TICKS: u16 = 10;
+pub const SINK_TICKS: u16 = 40;
 
 /// The original objects that look like something to pray at (objects.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -74,12 +79,14 @@ pub struct Totem {
     pub gauges: [u32; TRIBES],
     /// The units praying at it, in the order they started: each tribe's first `prayers` count.
     pub queue: Vec<u32>,
+    /// Ticks since it last gave (counting once it gave at all).
+    pub since_given: u16,
 }
 
 impl Totem {
     /// A totem any one unit fills in `DEFAULT_PRAY_TIME`.
     pub fn new(kind: TotemKind, (x, z): (u16, u16)) -> Self {
-        Totem { kind, x, z, prayers: 1, shaman_only: false, summons_angel: false, pray_time: DEFAULT_PRAY_TIME, gifts: Vec::new(), occurrences: 0, given: 0, gauges: [0; TRIBES], queue: Vec::new() }
+        Totem { kind, x, z, prayers: 1, shaman_only: false, summons_angel: false, pray_time: DEFAULT_PRAY_TIME, gifts: Vec::new(), occurrences: 0, given: 0, gauges: [0; TRIBES], queue: Vec::new(), since_given: 0 }
     }
 
     /// The totem of `thing` with what `trigger` asks for and gives (its targets in `level`); the
@@ -106,6 +113,11 @@ impl Totem {
     /// It gave as many times as it can.
     pub fn is_exhausted(&self) -> bool {
         self.occurrences > 0 && self.given >= self.occurrences
+    }
+
+    /// Exhausted and sunk under the ground: nothing to see, hover or pray at any more.
+    pub fn is_gone(&self) -> bool {
+        self.is_exhausted() && self.since_given >= TURN_TICKS + HOLD_TICKS + SINK_TICKS
     }
 }
 

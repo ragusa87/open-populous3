@@ -37,7 +37,7 @@ impl GameMap {
 
     /// The totem within `TOTEM_MARGIN` of world point `at` (on the torus).
     pub fn totem_at(&self, at: (u16, u16)) -> Option<usize> {
-        self.totems.iter().position(|t| torus_delta(t.x, at.0).abs() <= TOTEM_MARGIN && torus_delta(t.z, at.1).abs() <= TOTEM_MARGIN)
+        self.totems.iter().position(|t| !t.is_gone() && torus_delta(t.x, at.0).abs() <= TOTEM_MARGIN && torus_delta(t.z, at.1).abs() <= TOTEM_MARGIN)
     }
 
     /// Orders sending the player's units among `units` that may pray at totem `totem` (index) there:
@@ -90,6 +90,9 @@ impl GameMap {
             let site = (self.totems[k].x, self.totems[k].z);
             let praying: Vec<u32> = self.units.iter().filter(|u| u.is_alive() && u.action == Action::Worshipping { site }).map(|u| u.id).collect();
             let totem = &mut self.totems[k];
+            if totem.given > 0 {
+                totem.since_given = totem.since_given.saturating_add(1);
+            }
             totem.queue.retain(|id| praying.contains(id));
             for id in praying {
                 if !totem.queue.contains(&id) {
@@ -111,6 +114,7 @@ impl GameMap {
                 let totem = &mut self.totems[k];
                 totem.gauges[tribe as usize] = 0;
                 totem.given += 1;
+                totem.since_given = 0;
                 for gift in totem.gifts.clone() {
                     self.give(tribe, gift);
                 }
@@ -389,6 +393,13 @@ mod tests {
         map.tick();
         assert!(map.units.iter().filter(|u| units.contains(&u.id)).all(|u| !matches!(u.action, Action::Worshipping { .. })));
         assert!(map.totem_orders(0, &units, first).is_empty(), "no more");
+        let (x, z) = (map.totems[first].x, map.totems[first].z);
+        assert_eq!(map.totem_at((x, z)), Some(first), "still there while it turns and sinks");
+        for _ in 0..(crate::totem::TURN_TICKS + crate::totem::HOLD_TICKS + crate::totem::SINK_TICKS) {
+            map.tick();
+        }
+        assert!(map.totems[first].is_gone());
+        assert_eq!(map.totem_at((x, z)), None, "sunk: gone");
     }
 
     #[test]
