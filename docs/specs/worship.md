@@ -45,8 +45,16 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   object 3 is at 19.6°, straight], its radius going to object 3's; then, once it has given every time it can (`occurrences` > 0 and all given), it
   sinks slowly under the ground, giving off smoke, and disappears: removed from the map once sunk, its cell
   free again [ours]. What it does after a completion that is not its last (or with no limit) is not known: it
-  lines up and stays so [ours, to check]. The generated stand-in (a stack of blocks) does the same.
-  Done so far: its layers turn once it gave, round and round (`totems::layer_turn`); to change to lining up,
+  turns and stays so [ours, to check]. The generated stand-in (a stack of blocks) does the same.
+  - The turn, chosen for now from side-by-side tests (local HTML previews of the original model, not kept):
+    every slab's bottom ring turns together, smoothly (eased in and out), by 64° plus one full turn (424°) over
+    2 s; only the bottom rings move, so the slabs twist through themselves while turning. Then a 1 s hold, the
+    sinking over 4 s with smoke puffs rising round its base, gone [ours: the timings and the smoke].
+  - Other ways tried or worth trying, to revisit against the game: the slabs turning one after another, bottom
+    up or top down; the whole slabs spinning as blocks (1-3 turns) while their rings ease to 64°; more full turns
+    of the rings (2 or 3, over a longer time); spinning fast and slowing down into place; overshooting 64° and
+    springing back; a ratchet of short clicks (4 × 16°) with pauses; a rumble (the totem shaking) while it sinks.
+  Done so far: its layers turn once it gave, round and round (`totems::layer_turn`); to change to this turn,
   then sinking.
 - The stone head (object 82) [player]: its head nods at all times, completed or not: it tips forward and back
   about a horizontal axis through its neck. Chosen from a side-by-side test of four nods ("A, gentle"): the head
