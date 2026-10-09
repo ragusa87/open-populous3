@@ -1,4 +1,4 @@
-# Praying at vaults and totems (design, not implemented)
+# Praying at vaults and totems (design; the vault's state and look are done)
 
 Pyramids of knowledge (vaults, building 18) and totems (scenery 9) give their tribe a reward once prayed at long
 enough. What each one gives, and how long, comes from the level's trigger on its cell (level-format.md "Vault of
@@ -50,6 +50,16 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
 - From the reward on, the vault's sequence (her walk out, the door closing with the top folding, spent) plays
   the same whether she is alive or not [player]: it runs on the vault's own clock from the reward, not on her
   progress [ours]. If she is killed inside, the door still closes on time [ours, to check].
+- State (done: `game_core::vault`): `Building::vault` holds the reward, the gauge length (`pray_time`) and a
+  phase that only goes forward: `Praying { progress }` -> `Granted { ticks }` -> `Spent`. The reward is given once,
+  on entering Granted (`Vault::grant`); Granted counts ticks on its own (`OPEN_TICKS` 20 open, then `CLOSE_TICKS`
+  10 closing) whatever happens to the shaman, then Spent. The progress is not reused to close the door [ours].
+  `Vault::door_and_top` gives the door and top positions in thousandths: Praying, the door opens over the last
+  tenth of the gauge and the top is open; Granted, open, then both close together; Spent, both closed.
+- Drawn (done: client `vault.rs`): the original pyramid's frames blended point by point, the door's points from
+  192 towards 191, the top's from 192 towards 193 (points moving over 10 units between frames; the others are
+  export noise). The generated pyramid slides a stone slab up its doorway (its top does not fold yet). Its phase
+  does not rebuild the building views (`buildings::same_look`). Dev: `VAULT=progress:N|granted:T|spent`.
 - What it gives is drawn: an icon at its top, from the cursor icons (sprites.md: 38-57 spells, 58-65 buildings)
   [player]. The icon goes away once the reward is granted [player].
 

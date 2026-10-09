@@ -24,6 +24,7 @@ mod sky;
 mod terrain_mesh;
 mod terrain_texture;
 mod units;
+mod vault;
 mod virtual_cursor;
 mod wood;
 mod world;
@@ -65,6 +66,7 @@ fn main() {
             buildings::BuildingsPlugin,
             campfire::CampfirePlugin,
             flame::FlamePlugin,
+            vault::VaultPlugin,
             blueprint::BlueprintPlugin),
             units::UnitsPlugin,
             wood::WoodPlugin,

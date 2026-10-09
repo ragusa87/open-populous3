@@ -3,7 +3,7 @@
 ```
 crates/
   pop3-format   pure parsers for original files (no engine). Reusable by tools/editor.
-  game-core     deterministic simulation: terrain (Heightmap), map, spell, unit, command.
+  game-core     deterministic simulation: terrain (Heightmap), map, spell, unit, command, vault.
                 Integers only in state. No Bevy.
   game-net      lockstep wire protocol (length-prefixed, hand-written binary) over std TCP.
   unit-atlas    text index of baked unit frames (rectangle and feet per pose, direction, frame).
@@ -15,6 +15,7 @@ crates/
                   original_models.rs original 3D objects -> meshes + theme atlas (optional)
                   generated_buildings.rs embedded generated GLBs -> cell-space coloured meshes + construction frames
                   buildings.rs    model choice, construction stages, smoke and shaking
+                  vault.rs        pyramid of knowledge door and top, posed from its phase
                   sites.rs        reincarnation site markers on the curved surface
                   units/          sim clock, unit sprites (original or generated art), health bars, orders
                   virtual_cursor.rs in-game cursor (system cursor locked), drives edge scroll + UI picking

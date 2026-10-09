@@ -6,6 +6,7 @@
 //! `TAB=spells|build|stats` opens that panel tab; `BLUEPRINT=kind@x,z` (kind as in the Build tab,
 //! e.g. `temple@64,70`) shows that blueprint at map position x,z (cells); `BUILD=kind@x,z` places that
 //! plan with every brave of the player sent to it, then runs `BUILD_TICKS` ticks (0 by default).
+//! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
 
 use crate::camera::CameraRig;
 use crate::units::PLAYER;
@@ -135,6 +136,18 @@ pub fn parse_blueprint(v: &str) -> Option<(crate::blueprint::Plan, Vec2)> {
     Some((plan, Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?)))
 }
 
+/// `progress:N` (the gauge), `granted:T` (ticks since the reward) or `spent`: a vault phase.
+pub fn parse_vault(v: &str) -> Option<game_core::vault::VaultPhase> {
+    use game_core::vault::VaultPhase;
+    let (name, n) = v.split_once(':').unwrap_or((v, ""));
+    match name {
+        "progress" => Some(VaultPhase::Praying { progress: n.parse().ok()? }),
+        "granted" => Some(VaultPhase::Granted { ticks: n.parse().ok()? }),
+        "spent" => Some(VaultPhase::Spent),
+        _ => None,
+    }
+}
+
 /// `BUILD` demo: places the plan `kind@x,z` (as `BLUEPRINT`) for the player, sends every brave of
 /// theirs outside buildings to build it, then runs `ticks` ticks; whether it was placed.
 pub fn build_demo(map: &mut game_core::map::GameMap, plan: &str, ticks: u32) -> bool {
@@ -191,6 +204,9 @@ fn screenshot(
         for c in &cmds {
             dirty.0 |= map.0.apply(c).is_some();
         }
+        if let Some(phase) = std::env::var("VAULT").ok().and_then(|v| parse_vault(&v)) {
+            map.0.buildings.iter_mut().filter_map(|b| b.vault.as_mut()).for_each(|v| v.phase = phase);
+        }
         if let Ok(plan) = std::env::var("BUILD") {
             let ticks = std::env::var("BUILD_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             dirty.0 |= build_demo(&mut map.0, &plan, ticks);
@@ -240,6 +256,15 @@ mod tests {
         assert_eq!(parse_blueprint("Fire-warrior@1,2").map(|b| b.0), Some(Plan::Building(BuildingKind::FirewarriorTraining)));
         assert_eq!(parse_blueprint("camp fire@1,2").map(|b| b.0), Some(Plan::Campfire));
         assert_eq!(parse_blueprint("hut"), None);
+    }
+
+    #[test]
+    fn vault_phase_from_env() {
+        use game_core::vault::VaultPhase;
+        assert_eq!(parse_vault("progress:95"), Some(VaultPhase::Praying { progress: 95 }));
+        assert_eq!(parse_vault("granted:3"), Some(VaultPhase::Granted { ticks: 3 }));
+        assert_eq!(parse_vault("spent"), Some(VaultPhase::Spent));
+        assert_eq!((parse_vault("granted"), parse_vault("open")), (None, None));
     }
 
     #[test]

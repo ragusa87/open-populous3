@@ -41,7 +41,8 @@ footprint is flattened to); `Building::stage` works out Blueprint (not flat) / U
 Dismantling from them, and `BuildingKind::wood_cost` / `max_braves` hold the cost table below. Level buildings
 load as Built. A vault of knowledge also loads its `reward` (`Reward::Spell` / `Reward::Building`,
 `building::vault_reward`): the discovery of the library trigger on its cell (level-format.md "Vault of knowledge");
-all 23 vaults of the levels have one, none of the other buildings. Not drawn nor granted yet. Braves build plans placed in the game (see "Construction"); nothing else changes the state over
+all 23 vaults of the levels have one, none of the other buildings; with the gauge and phase of `game_core::vault`
+(worship.md), its door and top drawn from them. Not prayed at nor granted yet. Braves build plans placed in the game (see "Construction"); nothing else changes the state over
 time yet, and there is no health. Sandbox > Buildings (`GameMap::sandbox_buildings`, an island of radius 48 cells): south, one of
 every model 1-19 for the player and a few red ones; north, one row per buildable kind in each `showcase_states`
 column (blueprint, under construction at 0, 1/3, 2/3 and all but one piece, built, dismantling at half, attacked,

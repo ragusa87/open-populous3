@@ -6,7 +6,8 @@
 //! construction or being dismantled, a wooden structure of its shape with the parts already built
 //! (`construction`); built, the whole model. An attacked building's walls shake, a hut with people
 //! inside smokes from the top of its roof, a built one's torches burn (`flame`). Resting the cursor on a building (or one of the player's
-//! plans) for `HOVER_SECS` shows its tooltip: for the player's, braves at work and wood.
+//! plans) for `HOVER_SECS` shows its tooltip: for the player's, braves at work and wood. A built
+//! pyramid of knowledge's door and top are posed by `vault`.
 
 use crate::blueprint::{mark_material, mark_mesh, set_mark};
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
@@ -44,6 +45,8 @@ const PUFFS: usize = 5;
 const PUFF_LIFE: f32 = 2.5;
 const PUFF_RISE: f32 = 1.2;
 const PUFF_SIZE: f32 = 0.22;
+/// Colour of the generated pyramid's door slab.
+const SLAB_STONE: Color = Color::srgb(0.42, 0.4, 0.36);
 /// Height of the white mark of a blueprint above the ground (render units).
 const MARK_LIFT: f32 = 0.02;
 /// Size (cells) of the flame over a generated building's brazier.
@@ -124,12 +127,16 @@ struct BuildingLabel(Entity);
 
 pub struct BuildingsPlugin;
 
+/// Rebuilding the building views: systems that pose their parts run after it.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RespawnBuildings;
+
 impl Plugin for BuildingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ModelHeights>()
             .add_systems(Startup, spawn_tooltip)
             .add_systems(Update, building_tooltip.after(crate::hover::HoverSystems).in_set(crate::menu::Gameplay))
-            .add_systems(Update, (respawn_buildings, place_labels).chain())
+            .add_systems(Update, (respawn_buildings.in_set(RespawnBuildings), place_labels).chain())
             .add_systems(Update, (shake_walls, rise_smoke))
             .add_systems(PostUpdate, draw_site_marks);
     }
@@ -228,7 +235,7 @@ fn respawn_buildings(
     mut heights: ResMut<ModelHeights>,
     mut flame_frames: ResMut<FlameFrames>,
 ) {
-    if !map.is_changed() && *drawn == map.0.buildings {
+    if !map.is_changed() && same_look(&drawn, &map.0.buildings) {
         return;
     }
     drawn.clone_from(&map.0.buildings);
@@ -247,6 +254,8 @@ fn respawn_buildings(
     let puff = meshes.add(Sphere::new(0.5).mesh().ico(1).unwrap());
     let mark = mats.add(mark_material());
     let cell = WORLD_UNITS_PER_CELL as f32;
+    let posable_vaults = bank.is_some() && crate::vault::Frames::from_bank(&objects).is_some();
+    let slab = (meshes.add(Cuboid::from_size(crate::vault::SLAB)), mats.add(StandardMaterial { base_color: SLAB_STONE, perceptual_roughness: 0.95, ..default() }));
     for (i, b) in map.0.buildings.iter().enumerate() {
         let Building { kind, owner, facing, .. } = *b;
         let stage = b.stage();
@@ -267,6 +276,9 @@ fn respawn_buildings(
         };
         let generated = original.is_none().then(|| kit_staged(&mut kit, kind, owner, pieces, &mut meshes)).flatten();
         let stand_in = original.is_none() && generated.is_none();
+        let built_vault = (stage == Stage::Built).then_some(b.vault).flatten();
+        let vault_model = built_vault.filter(|_| original.is_some() && posable_vaults).is_some();
+        let vault_slab = built_vault.filter(|_| generated.is_some()).map(|v| crate::vault::slab_at(v.door_and_top().0));
         let (look, skin, frame_skin, flames) = match (original, generated) {
             (Some((obj, mat)), _) => {
                 let solid = solid_part(obj);
@@ -313,15 +325,21 @@ fn respawn_buildings(
         heights.0.insert((b.x, b.z), top.y);
         view.with_children(|v| {
             let mut body = v.spawn((Transform::default(), Visibility::Inherited));
-            if let Some(shown) = look.shown {
-                body.with_child((Mesh3d(shown), MeshMaterial3d(skin)));
-                if let Some((mesh, inner)) = inner {
-                    body.with_child((Mesh3d(mesh), MeshMaterial3d(inner)));
+            body.with_children(|parts| {
+                let flame = flames.map(|f| parts.spawn(f).id());
+                if let Some(shown) = look.shown {
+                    let mut model = parts.spawn((Mesh3d(shown), MeshMaterial3d(skin)));
+                    if vault_model {
+                        model.insert(crate::vault::VaultModel { index: i, tribe, flame, shown: None });
+                    }
+                    if let Some((mesh, inner)) = inner {
+                        parts.spawn((Mesh3d(mesh), MeshMaterial3d(inner)));
+                    }
                 }
-            }
-            if let Some(flames) = flames {
-                body.with_child(flames);
-            }
+                if let Some(at) = vault_slab {
+                    parts.spawn((crate::vault::VaultSlab(i), Mesh3d(slab.0.clone()), MeshMaterial3d(slab.1.clone()), Transform::from_translation(at)));
+                }
+            });
             if b.shaking > 0 {
                 body.insert(Shaking);
             }
@@ -488,9 +506,26 @@ fn place_labels(
     }
 }
 
+/// Whether the views of `drawn` still show `now`: a vault's phase does not count, `vault` poses it.
+pub fn same_look(drawn: &[Building], now: &[Building]) -> bool {
+    let look = |b: &Building| Building { vault: None, ..b.clone() };
+    drawn.len() == now.len() && drawn.iter().zip(now).all(|(a, b)| look(a) == look(b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_vaults_phase_does_not_rebuild_the_views() {
+        let vault = Building::new(BuildingKind::Vault, 255, 0, 0, 0);
+        let mut praying = vault.clone();
+        praying.vault.as_mut().unwrap().phase = game_core::vault::VaultPhase::Praying { progress: 40 };
+        assert!(same_look(&[vault.clone()], &[praying]));
+        let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
+        assert!(!same_look(&[vault.clone()], &[hut]));
+        assert!(!same_look(&[vault.clone()], &[]));
+    }
 
     #[test]
     fn a_tower_lookout_is_on_its_platform() {
