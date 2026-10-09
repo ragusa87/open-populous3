@@ -1,12 +1,13 @@
 //! Orbit camera around a wrapping focus point. Pushing the mouse against the window
-//! border, Up-Down or WASD move, Left-Right and middle-drag rotate, Enter toggles the aerial view.
+//! border, Up-Down or WASD move, Left-Right and middle-drag rotate, the wheel zooms (Ctrl tilts, Shift
+//! widens), Enter toggles the aerial view.
 //! The mouse is captured by the in-game cursor (`virtual_cursor`, Esc releases it).
 
 use crate::edge_push::EdgePush;
 use crate::game_frame::GamePos;
 use crate::terrain_mesh::{focus_height, CurveParams};
 use crate::world::CurrentMap;
-use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 
 const MAP: f32 = pop3_format::MAP_SIZE as f32;
@@ -24,6 +25,10 @@ pub const ZOOM_SPEED: f32 = 1.2;
 pub const DEFAULT_FOV: f32 = std::f32::consts::FRAC_PI_3;
 pub const FOV_RANGE: (f32, f32) = (0.3, 2.2);
 pub const FOV_SPEED: f32 = 0.6;
+/// Per wheel notch: zoom (fraction of distance), tilt (radians, Ctrl) and field of view (radians, Shift).
+pub const WHEEL_ZOOM: f32 = 0.12;
+pub const WHEEL_TILT: f32 = 0.04;
+pub const WHEEL_FOV: f32 = 0.05;
 pub const PITCH_RANGE: (f32, f32) = (0.05, 1.5);
 pub const DISTANCE_RANGE: (f32, f32) = (3.0, 220.0);
 /// The eye never goes lower than the map's highest ground plus this (cells), like the original's
@@ -126,6 +131,18 @@ impl CameraRig {
         self.distance = (self.distance * (1.0 - zoom)).clamp(DISTANCE_RANGE.0, DISTANCE_RANGE.1);
     }
 
+    /// Wheel `notches` (positive = away from the user): zoom in, or tilt down with Ctrl, or widen the
+    /// field of view with Shift.
+    pub fn wheel(&mut self, notches: f32, ctrl: bool, shift: bool) {
+        if ctrl {
+            self.adjust_view(notches * WHEEL_TILT, 0.0);
+        } else if shift {
+            self.fov = (self.fov + notches * WHEEL_FOV).clamp(FOV_RANGE.0, FOV_RANGE.1);
+        } else {
+            self.adjust_view(0.0, notches * WHEEL_ZOOM);
+        }
+    }
+
     /// Flies the focus to `to` (cells) in `FLIGHT_SECS`, instead of jumping there.
     pub fn fly_to(&mut self, to: Vec2) {
         self.flight = Some(Flight { from: self.focus, to: to.rem_euclid(Vec2::splat(MAP)), elapsed: 0.0 });
@@ -208,10 +225,20 @@ fn fly(time: Res<Time>, mut rig: ResMut<CameraRig>) {
     }
 }
 
+/// Wheel notches from a scroll delta, whatever its unit.
+pub fn wheel_notches(delta_y: f32, unit: MouseScrollUnit) -> f32 {
+    match unit {
+        MouseScrollUnit::Line => delta_y,
+        MouseScrollUnit::Pixel => delta_y / MouseScrollUnit::SCROLL_UNIT_CONVERSION_FACTOR,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn camera_input(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
+    scroll: Res<AccumulatedMouseScroll>,
     windows: Query<&Window>,
     cursor: Res<crate::virtual_cursor::VirtualCursor>,
     mut push: Local<EdgePush>,
@@ -243,6 +270,10 @@ fn camera_input(
     if mouse.pressed(MouseButton::Middle) {
         rig.yaw -= motion.delta.x * 0.005;
         rig.pitch = (rig.pitch + motion.delta.y * 0.005).clamp(PITCH_RANGE.0, PITCH_RANGE.1);
+    }
+    let notches = wheel_notches(scroll.delta.y, scroll.unit);
+    if notches != 0.0 {
+        rig.wheel(notches, ctrl, shift);
     }
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) {
         rig.toggle_aerial();
@@ -467,6 +498,22 @@ mod tests {
         assert!((rig.distance - GROUND_VIEW.1 * 0.5).abs() < 1e-6);
         rig.adjust_view(10.0, 0.99);
         assert_eq!((rig.pitch, rig.distance), (PITCH_RANGE.1, DISTANCE_RANGE.0));
+    }
+
+    #[test]
+    fn wheel_zooms_tilts_or_widens() {
+        let base = CameraRig::default();
+        let mut rig = base.clone();
+        rig.wheel(1.0, false, false);
+        assert!(rig.distance < base.distance && rig.pitch == base.pitch && rig.fov == base.fov, "away: closer");
+        let mut rig = base.clone();
+        rig.wheel(-1.0, true, false);
+        assert!(rig.pitch < base.pitch && rig.distance == base.distance, "Ctrl: tilt");
+        let mut rig = base.clone();
+        rig.wheel(2.0, false, true);
+        assert!((rig.fov - (base.fov + 2.0 * WHEEL_FOV)).abs() < 1e-6 && rig.distance == base.distance, "Shift: fov");
+        assert_eq!(wheel_notches(-3.0, MouseScrollUnit::Line), -3.0);
+        assert_eq!(wheel_notches(200.0, MouseScrollUnit::Pixel), 2.0);
     }
 
     #[test]

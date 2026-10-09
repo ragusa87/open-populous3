@@ -6,7 +6,8 @@ Like the original: scrolling happens only with the cursor pressed against the wi
 comes from how hard the mouse keeps pushing outward (raw motion while stuck at the edge, `edge_push.rs`),
 slows down while holding still, stops when leaving the edge. The cursor is confined to the window
 (Esc toggles). The panel does not block it, Left/Right rotate, Up/Down or WASD move (A/D strafe)
-forward/back like the mouse, middle-drag rotates, Home/End tilt, Ctrl+PgUp/PgDn zoom, Shift+PgUp/PgDn field of view (values shown in the HUD), Enter toggles
+forward/back like the mouse, middle-drag rotates and tilts, Home/End tilt, the wheel or Ctrl+PgUp/PgDn zoom
+(`WHEEL_ZOOM` per notch), Ctrl+wheel tilts, Shift+wheel or Shift+PgUp/PgDn change the field of view, Enter toggles
 aerial (pitch 1.35, distance 115) and restores the previous ground view (default tilt 3 deg, distance 20,
 fov 60 deg, tuned by eye against the original). Clear color fades from sky blue to space when zooming out. Changing level frames the
 level's start camera when its header gives one (`GameMap::start_camera`, `.hdr` start cell and angle, only levels 3,
@@ -21,6 +22,9 @@ stays up there and looks down more steeply, so cliffs between it and the focus n
 H flies the camera to the player's reincarnation site (nothing on maps without one), Space (or a click on her
 preview) to the shaman: a quick 0.4 s flight (`CameraRig::fly_to`, eased, the short way around the torus) rather
 than a jump; pushing the camera by hand cancels it.
+Camera readout (`camera_debug.rs`, bottom right, F3 hides it): focus, the game angle it looks along (0-2047, as in a
+level header's start camera), yaw, tilt, distance, fov, the eye's position (game frame, cells), and the
+`FOCUS`/`DISTANCE`/`PITCH`/`YAW` variables that give the same view in `just shot`.
 
 ## Left panel (`hud/`)
 Fixed 204 px panel on the left, like the original: shaman preview at the top (`hud/shaman.rs`: her current

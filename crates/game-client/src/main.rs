@@ -5,6 +5,7 @@ mod blueprint;
 mod buildings;
 mod campfire;
 mod camera;
+mod camera_debug;
 mod construction;
 mod cursor_debug;
 mod dev;
@@ -85,6 +86,7 @@ fn main() {
             menu::MenuPlugin,
             dev::DevPlugin,
             cursor_debug::CursorDebugPlugin,
+            camera_debug::CameraDebugPlugin,
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();

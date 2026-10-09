@@ -8,7 +8,6 @@ pub mod spells;
 mod stats;
 mod view_menu;
 
-use crate::camera::CameraRig;
 use crate::editor::EditorState;
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
@@ -40,7 +39,6 @@ fn spawn_info(mut commands: Commands) {
 fn update_info(
     map: Res<CurrentMap>,
     levels: Res<LevelList>,
-    rig: Res<CameraRig>,
     editor: Res<EditorState>,
     mut q: Query<&mut Text, With<InfoText>>,
 ) {
@@ -50,15 +48,9 @@ fn update_info(
     };
     let mode = if editor.active { "EDITOR  R raise  F lower  T flatten  M mark  B bridge" } else { "" };
     let s = format!(
-        "{} ({level})  focus {:.0},{:.0}  tilt {:.0}deg  distance {:.1}  fov {:.0}deg{}\n\
-         Push mouse on window edges / Up-Down / WASD move | Left-Right rotate | Home/End tilt | Ctrl+PgUp/PgDn zoom | Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | Left click unit: select (Ctrl add) | Left drag: box select | Left click ground: selection walks there (on a camp fire: goes round it) | Shift+right click camp fire: put it out | Right click: deselect | X stop | Space: look at her | H: reincarnation site | Click preview: select her alone | C cast selected spell | Tab editor | F2 view presets | Esc pause | F11 fullscreen\n{mode}",
+        "{} ({level})\n\
+         Push mouse on window edges / Up-Down / WASD move | Left-Right rotate | Middle drag rotate and tilt | Home/End tilt | Wheel or Ctrl+PgUp/PgDn zoom | Ctrl+wheel tilt | Shift+wheel or Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | Left click unit: select (Ctrl add) | Left drag: box select | Left click ground: selection walks there (on a camp fire: goes round it) | Shift+right click camp fire: put it out | Right click: deselect | X stop | Space: look at her | H: reincarnation site | Click preview: select her alone | C cast selected spell | Tab editor | F2 view presets | F3 camera readout | Esc pause | F11 fullscreen\n{mode}",
         map.0.name,
-        rig.focus.x,
-        rig.focus.y,
-        rig.pitch.to_degrees(),
-        rig.distance,
-        rig.fov.to_degrees(),
-        if rig.aerial { "  [aerial]" } else { "" },
     );
     for mut t in &mut q {
         t.0.clone_from(&s);
