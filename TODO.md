@@ -44,12 +44,12 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
 - [ ] Use the shaman's wand gesture (81-84), the conversion sit (18), the spy's juggling idle (92), the carbonized brave (97) for lightning; check the tribe layer flag `0x10` mapping.
 
-## Praying (worship)
+## Praying (worship) ([worship.md](docs/specs/worship.md))
 - [ ] Praying only happens at a totem or a pyramid of knowledge; today `Order::Pray` works anywhere: restrict it.
-- [ ] The player assigns units to pray there; each totem/pyramid has a gauge per tribe (tribes do not share progress).
-- [ ] The gauge fills while that tribe's units pray; when full, the action triggers (discover a spell, a building, a totem effect...).
-- [ ] Some totems need 1..x praying units for a decent fill time (more units = faster); some can only be used by the shaman.
-- [ ] Nobody praying: the gauge drains, quite quickly.
+- [ ] Prayer gauge per place and tribe, full at `PrayTime`, speed by `min(praying, TriggerCount)`, draining when nobody prays; the reward is granted when full.
+- [ ] Totems (scenery 9): assigned followers (or the shaman only, trigger type 3) all in the prayer pose, the first `TriggerCount` counted, a waiting one taking the place of one ordered away; rewards decoded as a list of trigger targets.
+- [ ] Pyramids: shaman only (capacity 1); door closed (object 192) at first; she prays at the door, the door slides up (192 -> 191), she walks to the middle (reward), walks out, the door closes, the vault is spent (capacity 0). Top petals open and close (193).
+- [ ] Pyramids: draw the reward as an icon at the top (cursor sprites 38-57 spells, 58-65 buildings).
 - [ ] HUD: show the gauge over the totem/pyramid and who is praying.
 
 ## Combat
