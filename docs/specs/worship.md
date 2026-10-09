@@ -45,7 +45,7 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
   the same whether she is alive or not [player]: it runs on the vault's own clock from the reward, not on her
   progress [ours]. If she is killed inside, the door still closes on time [ours, to check].
 - What it gives is drawn: an icon at its top, from the cursor icons (sprites.md: 38-57 spells, 58-65 buildings)
-  [player].
+  [player]. The icon goes away once the reward is granted [player].
 
 ## Open
 - Whether a vault's gauge drains like a totem's when the shaman stops praying, or starts over.
