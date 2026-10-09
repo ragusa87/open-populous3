@@ -217,6 +217,18 @@ impl GameMap {
             let id = map.units.len() as u32 + 1;
             map.units.push(Unit::new(id, 0, UnitKind::Brave, at(20 + n % 4, -2 + 2 * (n / 4))));
         }
+        // The showcase's occupied buildings get real people inside.
+        let occupied: Vec<Building> = map.buildings.iter().filter(|b| b.inside > 0).cloned().collect();
+        for b in occupied {
+            for _ in 0..b.inside {
+                let id = map.units.len() as u32 + 1;
+                let mut u = Unit::new(id, 0, UnitKind::Brave, b.centre());
+                u.inside = Some(crate::unit::Inside { site: (b.x, b.z), door: b.door() });
+                map.units.push(u);
+            }
+        }
+        map.update_walls();
+        map.count_inside();
         let (px, pz) = at(27, 6);
         for (dx, dz) in [(0, 0), (60, 30), (-50, 40), (30, -60), (-40, -30), (90, -20), (-90, 0), (0, 90), (120, 60), (-120, -70), (70, 110), (-30, -110)] {
             map.wood.push(WoodPiece::new((px as i32 + dx) as u16, (pz as i32 + dz) as u16));
@@ -427,7 +439,8 @@ impl GameMap {
     pub fn tick(&mut self) -> Vec<DirtyRect> {
         let mut dirty = Vec::new();
         self.update_walls();
-        self.trees.iter_mut().for_each(Tree::tick);
+        let buildings = &self.buildings;
+        self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(Tree::tick);
         self.tend_campfires();
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing { .. })).collect();
         let mut events = Vec::new();
@@ -443,6 +456,7 @@ impl GameMap {
         for (i, event) in events {
             match event {
                 UnitEvent::Jumped { .. } | UnitEvent::Built => dirty.extend(self.work_event(i, event)),
+                UnitEvent::AtDoor { site } => self.come_in(i, site),
                 _ => self.wood_event(i, event),
             }
         }
@@ -461,6 +475,7 @@ impl GameMap {
         self.start_chained();
         dirty.extend(self.work());
         self.drop_wood();
+        self.count_inside();
         dirty
     }
 }
@@ -509,6 +524,7 @@ impl GameMap {
         self.unassign(i);
         match order {
             Order::Build { site } => self.assign(i, site),
+            Order::Enter { site } => self.go_rest(i, site),
             Order::CutTree { tree } => self.go_cut(i, tree),
             Order::FetchWood => self.fetch_wood(i),
             Order::PickUp { at } => self.pick_up(i, at),
@@ -671,6 +687,7 @@ impl GameMap {
     fn still_valid(&self, order: &Order) -> bool {
         match *order {
             Order::Build { site } => self.still_building(site),
+            Order::Enter { site } => self.building_at_corner(site).is_some(),
             _ => true,
         }
     }

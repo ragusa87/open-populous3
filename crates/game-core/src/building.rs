@@ -143,6 +143,14 @@ impl BuildingKind {
         }
     }
 
+    /// People it holds resting inside: huts 3, 4, 5 by size (huts-and-training.md); 0 for the others.
+    pub fn capacity(self) -> u8 {
+        match self {
+            BuildingKind::Hut { size } => 2 + size.clamp(1, 3),
+            _ => 0,
+        }
+    }
+
     /// Most braves that can work on it at once, from the original game (min is always 1).
     pub fn max_braves(self) -> u8 {
         match self {
@@ -189,7 +197,7 @@ pub struct Building {
     /// Footprint flattened: no longer a blueprint.
     pub flat: bool,
     pub dismantling: bool,
-    /// Units inside (a busy hut smokes).
+    /// Units standing inside (a busy hut smokes), counted each tick (`GameMap::count_inside`).
     pub inside: u8,
     /// Ticks its walls still shake for, after being hit (0: not attacked).
     pub shaking: u16,

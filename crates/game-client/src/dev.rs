@@ -75,14 +75,14 @@ pub fn demo_commands(name: &str, shaman: &Unit) -> Vec<Command> {
     }
 }
 
-/// Commands for a `BRAVES` demo: every brave of the player cuts the tree nearest to it; `carry` then
+/// Commands for a `BRAVES` demo: every brave of the player (not inside a building) cuts the tree nearest to it; `carry` then
 /// brings the piece back where it stood.
 pub fn brave_commands(name: &str, map: &game_core::map::GameMap) -> Vec<Command> {
     if !matches!(name, "cut" | "carry") {
         return Vec::new();
     }
     let d = |a: u16, b: u16| (game_core::unit::torus_delta(a, b) as i64).pow(2);
-    let braves = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave);
+    let braves = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave && u.inside.is_none());
     braves
         .flat_map(|u| {
             let tree = map.trees.iter().filter(|t| t.size > 0).min_by_key(|t| d(t.x, u.x) + d(t.z, u.z));
@@ -220,7 +220,7 @@ mod tests {
         let mut map = game_core::map::GameMap::sandbox_buildings();
         let before: u32 = map.trees.iter().map(|t| t.size as u32).sum();
         let cmds = brave_commands("carry", &map);
-        assert_eq!(cmds.len(), 16, "a cut and a way back for each of the 8 braves");
+        assert_eq!(cmds.len(), 16, "a cut and a way back for each of the 8 braves outside");
         for c in &cmds {
             map.apply(c);
         }

@@ -199,6 +199,9 @@ pub enum Order {
     /// Braves: work on the building whose stored corner is `site` (`Building::x`, `z`) until it is
     /// built: flatten, fetch wood, build (`GameMap::work`).
     Build { site: (u16, u16) },
+    /// Followers: walk in by the door of the hut whose stored corner is `site` and rest inside, if it
+    /// has room (`GameMap::start_order`).
+    Enter { site: (u16, u16) },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -216,6 +219,8 @@ pub enum UnitEvent {
     Jumped { at: (i32, i32) },
     /// Done building a piece of wood in: the caller counts it.
     Built,
+    /// At the door of the building at `site` (stored corner): the caller lets her in if there is room.
+    AtDoor { site: (u16, u16) },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -245,6 +250,8 @@ pub struct Unit {
     to_tree: Option<(u16, u16)>,
     /// The piece of wood (position) she is walking to, to pick it up once there.
     to_wood: Option<(u16, u16)>,
+    /// The building (stored corner) she is walking to the door of, to go in once there.
+    to_house: Option<(u16, u16)>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
     /// The building (stored corner) this brave is assigned to, `Order::Build`.
@@ -284,6 +291,7 @@ impl Unit {
             to_fire: None,
             to_tree: None,
             to_wood: None,
+            to_house: None,
             queue: Vec::new(),
             work: None,
             inside: None,
@@ -365,6 +373,14 @@ impl Unit {
         }
     }
 
+    /// Walks to `door`, then goes into the building at `site` (`UnitEvent::AtDoor`).
+    pub fn go_enter(&mut self, site: (u16, u16), door: (u16, u16)) {
+        self.start(Order::MoveTo { x: door.0, z: door.1 });
+        if self.action.can_take_orders() {
+            self.to_house = Some(site);
+        }
+    }
+
     /// Walks onto the piece of wood at `at`, then picks it up.
     pub fn go_pick(&mut self, at: (u16, u16)) {
         self.start(Order::MoveTo { x: at.0, z: at.1 });
@@ -417,7 +433,7 @@ impl Unit {
             return;
         }
         (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
-        (self.to_tree, self.to_wood) = (None, None);
+        (self.to_tree, self.to_wood, self.to_house) = (None, None, None);
         self.action = match order {
             Order::MoveTo { x, z } => Action::Walking { to: (x, z) },
             Order::Campfire { fire, point } => {
@@ -426,7 +442,7 @@ impl Unit {
             }
             Order::Pray => Action::Praying,
             Order::Cast => Action::Casting { left: CAST_TICKS },
-            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
                 Action::Walking { to: tree }
@@ -483,6 +499,8 @@ impl Unit {
                             self.action = Action::Chopping { tree, left: CHOP_TICKS };
                         } else if let Some(at) = self.to_wood.take() {
                             return Some(UnitEvent::PickedUp { at });
+                        } else if let Some(site) = self.to_house.take() {
+                            return Some(UnitEvent::AtDoor { site });
                         }
                     }
                 } else if self.hurt() {
@@ -570,7 +588,7 @@ impl Unit {
 
     fn die(&mut self) {
         (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
-        (self.to_tree, self.to_wood) = (None, None);
+        (self.to_tree, self.to_wood, self.to_house) = (None, None, None);
         self.queue.clear();
         self.work = None;
         self.action = Action::Dying { left: DYING_TICKS };
