@@ -49,7 +49,7 @@ fn update_info(
     let mode = if editor.active { "EDITOR  R raise  F lower  T flatten  M mark  B bridge" } else { "" };
     let s = format!(
         "{} ({level})\n\
-         Push mouse on window edges / Up-Down / WASD move | Left-Right rotate | Middle drag rotate and tilt | Home/End tilt | Wheel or Ctrl+PgUp/PgDn zoom | Ctrl+wheel tilt | Shift+wheel or Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | Left click unit: select (Ctrl add) | Left drag: box select | Left click ground: selection walks there (on a camp fire: goes round it) | Shift+right click camp fire: put it out | Right click: deselect | X stop | Space: look at her | H: reincarnation site | Click preview: select her alone | C cast selected spell | Tab editor | F2 view presets | F3 camera readout | Esc pause | F11 fullscreen\n{mode}",
+         Push mouse on window edges / Up-Down / WASD move | Left-Right rotate | Middle drag rotate and tilt | Home/End tilt | Wheel or Ctrl+PgUp/PgDn zoom | Ctrl+wheel tilt | Shift+wheel or Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | Left click unit: select (Ctrl add) | Left drag: box select | Left click ground: selection walks there (on a camp fire: goes round it) | Shift+right click camp fire: put it out | Right click: deselect | X stop | Space: look at her | H: reincarnation site | Click preview: select her alone | C cast selected spell | Tab editor | F2 view presets | F3 camera readout | G grid | Esc pause | F11 fullscreen\n{mode}",
         map.0.name,
     );
     for mut t in &mut q {

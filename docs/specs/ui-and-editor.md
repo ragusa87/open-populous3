@@ -24,7 +24,8 @@ preview) to the shaman: a quick 0.4 s flight (`CameraRig::fly_to`, eased, the sh
 than a jump; pushing the camera by hand cancels it.
 Camera readout (`camera_debug.rs`, bottom right, F3 hides it): focus, the game angle it looks along (0-2047, as in a
 level header's start camera), yaw, tilt, distance, fov, the eye's position (game frame, cells), and the
-`FOCUS`/`DISTANCE`/`PITCH`/`YAW` variables that give the same view in `just shot`.
+`FOCUS`/`DISTANCE`/`PITCH`/`YAW` variables that give the same view in `just shot`. G toggles the cell grid on the
+ground (`ShowGrid`, on in the sandboxes, kept when changing level; the terrain texture is baked again).
 
 ## Left panel (`hud/`)
 Fixed 204 px panel on the left, like the original: shaman preview at the top (`hud/shaman.rs`: her current

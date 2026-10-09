@@ -31,7 +31,7 @@ pub struct LevelList {
 #[derive(Resource, Default)]
 pub struct TerrainDirty(pub bool);
 
-/// Cell borders drawn on the ground (the sandboxes).
+/// Cell borders drawn on the ground: on in the sandboxes, G toggles it.
 #[derive(Resource, Default)]
 pub struct ShowGrid(pub bool);
 
@@ -140,7 +140,7 @@ impl Plugin for WorldPlugin {
             .init_resource::<ShowGrid>()
             .init_resource::<CurveParamsRes>()
             .add_systems(Startup, spawn_terrain)
-            .add_systems(Update, (switch_level.in_set(crate::menu::Gameplay), rebuild_terrain).chain());
+            .add_systems(Update, ((switch_level, toggle_grid).in_set(crate::menu::Gameplay), rebuild_terrain).chain());
     }
 }
 
@@ -160,7 +160,6 @@ fn switch_level(
     mut selected: ResMut<crate::hud::spells::SelectedSpell>,
     mut builds: ResMut<crate::hud::build::PlayerBuilds>,
     mut blueprint: ResMut<crate::blueprint::Blueprint>,
-    mut grid: ResMut<ShowGrid>,
 ) {
     let modified = [KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight];
     if keys.any_pressed(modified) {
@@ -179,8 +178,14 @@ fn switch_level(
     selected.0 = None;
     builds.0 = crate::hud::build::level_builds(&map.0);
     blueprint.put_away();
-    grid.0 = false;
     dirty.0 = true;
+}
+
+fn toggle_grid(keys: Res<ButtonInput<KeyCode>>, mut grid: ResMut<ShowGrid>, mut dirty: ResMut<TerrainDirty>) {
+    if keys.just_pressed(KeyCode::KeyG) {
+        grid.0 = !grid.0;
+        dirty.0 = true;
+    }
 }
 
 /// Wraps through original files; with none, walks generated seeds (never below 0).
