@@ -1,5 +1,6 @@
 //! Dev helpers driven by env vars, so screenshots can be taken without a window:
-//! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|pray|cast|drown|teleport] game-client [level]`.
+//! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|pray|cast|drown|teleport|worship] game-client [level]`.
+//! `SHAMAN=worship` sends her to pray at the map's first vault of knowledge.
 //! `SHAMAN` gives the player's shaman an order at start, to check each pose; `BRAVES=cut|carry` sends
 //! the player's braves to cut their nearest tree (and, for `carry`, bring the piece back where they stood).
 //! `FOCUS=x,z` (cells), `DISTANCE=n`, `PITCH=deg`, `YAW=deg` place the camera for the shot;
@@ -200,6 +201,9 @@ fn screenshot(
         }
         let demo = std::env::var("SHAMAN").unwrap_or_default();
         let mut cmds = map.0.shaman_of(PLAYER).map(|u| demo_commands(&demo, u)).unwrap_or_default();
+        if let (Some(u), Some(vault), "worship") = (map.0.shaman_of(PLAYER), map.0.buildings.iter().position(|b| b.vault.is_some()), demo.as_str()) {
+            cmds.extend(map.0.worship_orders(PLAYER, &[u.id], vault));
+        }
         cmds.extend(brave_commands(&std::env::var("BRAVES").unwrap_or_default(), &map.0));
         for c in &cmds {
             dirty.0 |= map.0.apply(c).is_some();

@@ -147,6 +147,11 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             b.extend(site.0.to_le_bytes());
             b.extend(site.1.to_le_bytes());
         }
+        Order::Worship { site } => {
+            b.push(10);
+            b.extend(site.0.to_le_bytes());
+            b.extend(site.1.to_le_bytes());
+        }
     }
 }
 
@@ -187,6 +192,7 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         7 => Order::PickUp { at: (c.u16()?, c.u16()?) },
         8 => Order::Build { site: (c.u16()?, c.u16()?) },
         9 => Order::Enter { site: (c.u16()?, c.u16()?) },
+        10 => Order::Worship { site: (c.u16()?, c.u16()?) },
         _ => return None,
     })
 }
@@ -264,6 +270,7 @@ mod tests {
                 Command::OrderUnit { player: 1, unit: 9, order: Order::Build { site: (512, 65024) } },
                 Command::CancelBuilding { player: 3, at: (1, 2) },
                 Command::QueueOrder { player: 0, unit: 3, order: Order::Enter { site: (1024, 2048) } },
+                Command::OrderUnit { player: 0, unit: 1, order: Order::Worship { site: (32768, 36864) } },
             ],
         }
     }

@@ -307,14 +307,17 @@ pub(super) fn select_and_order(
 }
 
 /// Commands for a left click at `at` (world units) on one of the player's buildings with `selected`
-/// units: braves work on it while it is still to build; a built hut takes followers in to rest. None
-/// elsewhere, or with nothing selected.
+/// units: braves work on it while it is still to build; a built hut takes followers in to rest; on a
+/// vault of knowledge, the selected shaman goes to pray at it. None elsewhere, or with nothing selected.
 pub fn building_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16, u16)) -> Option<Vec<Command>> {
     if selected.is_empty() {
         return None;
     }
     if let Some(site) = map.site_at(PLAYER, at) {
         return Some(map.build_orders(PLAYER, selected, site));
+    }
+    if let Some(orders) = map.vault_at(at).map(|vault| map.worship_orders(PLAYER, selected, vault)).filter(|o| !o.is_empty()) {
+        return Some(orders);
     }
     map.shelter_at(PLAYER, at).map(|house| map.enter_orders(PLAYER, selected, house))
 }

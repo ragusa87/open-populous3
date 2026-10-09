@@ -101,6 +101,23 @@ struct OutlineCache {
     hull_material: Option<Handle<StandardMaterial>>,
 }
 
+impl OutlineCache {
+    /// Forgets the outlines made from mesh `id`, changed in place (a vault's door and top): the next
+    /// halo is made again from its new shape.
+    fn forget(&mut self, id: AssetId<Mesh>) {
+        self.sprites.remove(&id);
+        self.hulls.retain(|(mesh, _), _| *mesh != id);
+    }
+}
+
+fn forget_changed_outlines(mut events: MessageReader<AssetEvent<Mesh>>, mut cache: ResMut<OutlineCache>) {
+    for event in events.read() {
+        if let AssetEvent::Modified { id } = event {
+            cache.forget(*id);
+        }
+    }
+}
+
 /// Picks what is hovered and outlines it: read its result after this.
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct HoverSystems;
@@ -113,7 +130,7 @@ impl Plugin for HoverPlugin {
         app.add_plugins(MaterialPlugin::<SpriteOutline>::default())
             .init_resource::<Hovered>()
             .init_resource::<OutlineCache>()
-            .add_systems(Update, (detect, draw_halo).chain().after(UnitInput).after(crate::units::UnitViews).in_set(crate::menu::Gameplay).in_set(HoverSystems));
+            .add_systems(Update, (forget_changed_outlines, detect, draw_halo).chain().after(UnitInput).after(crate::units::UnitViews).in_set(crate::menu::Gameplay).in_set(HoverSystems));
     }
 }
 
@@ -348,6 +365,17 @@ pub fn hull(mesh: &Mesh, width: f32) -> Option<Mesh> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mesh_changed_in_place_loses_its_outlines() {
+        let (changed, other) = (AssetId::<Mesh>::from(Handle::<Mesh>::default().id()), AssetId::<Mesh>::invalid());
+        let mut cache = OutlineCache::default();
+        cache.hulls.insert((changed, 300), None);
+        cache.hulls.insert((changed, 150), None);
+        cache.hulls.insert((other, 300), None);
+        cache.forget(changed);
+        assert_eq!(cache.hulls.keys().collect::<Vec<_>>(), vec![&(other, 300)]);
+    }
     use crate::units::{sprite_quad, PLAYER};
 
     #[test]

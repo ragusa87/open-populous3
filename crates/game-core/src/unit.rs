@@ -143,6 +143,9 @@ pub enum Action {
     /// A brave inside a building under construction with nothing to build yet, hammering away until
     /// wood comes or it is built.
     Hammering,
+    /// The shaman praying at the door of the vault of knowledge whose stored corner is `site`
+    /// (`GameMap::tend_vaults`).
+    Worshipping { site: (u16, u16) },
 }
 
 impl Action {
@@ -152,6 +155,7 @@ impl Action {
             Action::Walking { .. } => "Walking",
             Action::Stranded { .. } => "Stranded",
             Action::Praying => "Praying",
+            Action::Worshipping { .. } => "Worshipping",
             Action::Casting { .. } => "Casting",
             Action::Landing { .. } => "Landing",
             Action::Drowning => "Drowning",
@@ -206,6 +210,9 @@ pub enum Order {
     /// Followers: walk in by the door of the hut whose stored corner is `site` and rest inside, if it
     /// has room (`GameMap::start_order`).
     Enter { site: (u16, u16) },
+    /// The shaman: walk to the door of the vault of knowledge whose stored corner is `site` and pray
+    /// there until it lets her in (`GameMap::go_worship`).
+    Worship { site: (u16, u16) },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -256,6 +263,8 @@ pub struct Unit {
     to_wood: Option<(u16, u16)>,
     /// The building (stored corner) she is walking to the door of, to go in once there.
     to_house: Option<(u16, u16)>,
+    /// The vault (stored corner) she is walking to the door of, to pray there once there.
+    to_shrine: Option<(u16, u16)>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
     /// The building (stored corner) this brave is assigned to, `Order::Build`.
@@ -296,6 +305,7 @@ impl Unit {
             to_tree: None,
             to_wood: None,
             to_house: None,
+            to_shrine: None,
             queue: Vec::new(),
             work: None,
             inside: None,
@@ -385,6 +395,14 @@ impl Unit {
         }
     }
 
+    /// Walks to `door`, then prays there for the vault at `site` (`Action::Worshipping`).
+    pub fn go_worship(&mut self, site: (u16, u16), door: (u16, u16)) {
+        self.start(Order::MoveTo { x: door.0, z: door.1 });
+        if self.action.can_take_orders() {
+            self.to_shrine = Some(site);
+        }
+    }
+
     /// Walks onto the piece of wood at `at`, then picks it up.
     pub fn go_pick(&mut self, at: (u16, u16)) {
         self.start(Order::MoveTo { x: at.0, z: at.1 });
@@ -437,7 +455,7 @@ impl Unit {
             return;
         }
         (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
-        (self.to_tree, self.to_wood, self.to_house) = (None, None, None);
+        (self.to_tree, self.to_wood, self.to_house, self.to_shrine) = (None, None, None, None);
         self.action = match order {
             Order::MoveTo { x, z } => Action::Walking { to: (x, z) },
             Order::Campfire { fire, point } => {
@@ -446,7 +464,7 @@ impl Unit {
             }
             Order::Pray => Action::Praying,
             Order::Cast => Action::Casting { left: CAST_TICKS },
-            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
                 Action::Walking { to: tree }
@@ -462,7 +480,7 @@ impl Unit {
             self.teleport_to = None;
         }
         match self.action {
-            Action::Idle | Action::Praying | Action::Hammering => self.heal(),
+            Action::Idle | Action::Praying | Action::Hammering | Action::Worshipping { .. } => self.heal(),
             Action::AroundFire { fire, point } => {
                 self.heal();
                 let next = (point + 1) % campfire::RING_POINTS;
@@ -508,6 +526,8 @@ impl Unit {
                             return Some(UnitEvent::PickedUp { at });
                         } else if let Some(site) = self.to_house.take() {
                             return Some(UnitEvent::AtDoor { site });
+                        } else if let Some(site) = self.to_shrine.take() {
+                            self.action = Action::Worshipping { site };
                         }
                     }
                 } else if self.hurt() {
@@ -595,7 +615,7 @@ impl Unit {
 
     fn die(&mut self) {
         (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
-        (self.to_tree, self.to_wood, self.to_house) = (None, None, None);
+        (self.to_tree, self.to_wood, self.to_house, self.to_shrine) = (None, None, None, None);
         self.queue.clear();
         self.work = None;
         self.action = Action::Dying { left: DYING_TICKS };

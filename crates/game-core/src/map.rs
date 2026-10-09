@@ -32,6 +32,9 @@ pub struct GameMap {
     pub trees: Vec<Tree>,
     /// An original level's buildings (none on generated maps and sandboxes yet).
     pub buildings: Vec<Building>,
+    /// Rewards granted so far, in order, with the tribe that got each (`worship`): the client
+    /// updates its panels from the ones it has not seen yet.
+    pub granted: Vec<(u8, crate::building::Reward)>,
     /// Places to pray at: a level's scenery 9, the Worship sandbox's row.
     pub totems: Vec<Totem>,
     /// Pieces of wood lying on the ground (none in original levels).
@@ -55,7 +58,7 @@ const SANDBOX_TOTEMS: [(u16, bool, bool); 7] = [(1, false, false), (1, true, tru
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default() }
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
@@ -73,6 +76,7 @@ impl GameMap {
                 .filter_map(|t| Some(Tree::new(((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32), t.tree_type()?, crate::tree::MAX_SIZE).with_angle(t.angle()?)))
                 .collect(),
             buildings: buildings_from_level(level),
+            granted: Vec::new(),
             totems: totems_from_level(level),
             wood: Vec::new(),
             spell_book: None,
@@ -338,9 +342,13 @@ impl GameMap {
         self.units.iter_mut().find(|u| u.owner == owner && u.kind == UnitKind::Shaman)
     }
 
-    /// Whether `player` can cast `spell` here and now: Teleport needs a living shaman and ground
-    /// she can walk at the target; other spells always apply.
+    /// Whether `player` can cast `spell` here and now: never while their shaman is inside a vault
+    /// (`locked`); Teleport needs a living shaman and ground she can walk at the target; other spells
+    /// always apply.
     pub fn can_cast(&self, player: u8, spell: &Spell) -> bool {
+        if self.shaman_locked(player) {
+            return false;
+        }
         match *spell {
             Spell::Teleport { to } => {
                 let cell = ((to.0 as u32 / 512) as i32, (to.1 as u32 / 512) as i32);
@@ -367,18 +375,20 @@ impl GameMap {
                 spell.cast(&mut self.terrain)
             }
             Command::Order { player, order } => {
-                self.order(player, order);
+                if !self.shaman_locked(player) {
+                    self.order(player, order);
+                }
                 None
             }
             Command::OrderUnit { player, unit, order } => {
-                if let Some(i) = self.units.iter().position(|u| u.id == unit && u.owner == player) {
+                if let Some(i) = self.units.iter().position(|u| u.id == unit && u.owner == player).filter(|&i| !self.locked(i)) {
                     self.units[i].clear_queue();
                     self.start_order(i, order);
                 }
                 None
             }
             Command::QueueOrder { player, unit, order } => {
-                if let Some(i) = self.units.iter().position(|u| u.id == unit && u.owner == player) {
+                if let Some(i) = self.units.iter().position(|u| u.id == unit && u.owner == player).filter(|&i| !self.locked(i)) {
                     if self.units[i].is_free() && self.units[i].queued().is_empty() {
                         self.start_order(i, order);
                     } else {
@@ -489,7 +499,7 @@ impl GameMap {
         let buildings = &self.buildings;
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(Tree::tick);
         self.tend_campfires();
-        self.buildings.iter_mut().filter_map(|b| b.vault.as_mut()).for_each(crate::vault::Vault::tick);
+        self.tend_vaults();
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing { .. })).collect();
         let mut events = Vec::new();
         for (i, unit) in self.units.iter_mut().enumerate() {
@@ -586,6 +596,7 @@ impl GameMap {
         match order {
             Order::Build { site } => self.assign(i, site),
             Order::Enter { site } => self.go_in(i, site),
+            Order::Worship { site } => self.go_worship(i, site),
             Order::CutTree { tree } => self.go_cut(i, tree),
             Order::FetchWood => self.fetch_wood(i),
             Order::PickUp { at } => self.pick_up(i, at),

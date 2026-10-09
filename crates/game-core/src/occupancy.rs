@@ -48,7 +48,8 @@ impl GameMap {
                 let site = (b.x, b.z);
                 let (capacity, mut filled): (u16, Vec<u32>) = if b.stage() == Stage::Built {
                     let room = if b.vault.is_some_and(|v| v.is_spent()) { 0 } else { room(b.kind) };
-                    (room, self.units_inside(site).map(|u| u.id).collect())
+                    let praying = self.units.iter().filter(|u| u.is_alive() && u.action == crate::unit::Action::Worshipping { site });
+                    (room, self.units_inside(site).chain(praying).map(|u| u.id).collect())
                 } else if b.kind.wood_cost() > 0 {
                     (b.kind.max_braves() as u16, self.workers(site).map(|u| u.id).collect())
                 } else {

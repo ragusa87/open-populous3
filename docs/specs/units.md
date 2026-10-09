@@ -16,6 +16,7 @@
 | Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 64 units/tick on flat ground (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
 | Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -1 HP every 3 ticks until the terrain opens a path (walks again) or it dies |
 | Praying | `Order::Pray` | until another order; heals |
+| Worshipping | `Order::Worship { site }` (a click on a vault of knowledge with her selected) | prays at the vault's door; heals; see worship.md |
 | Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle (Teleport: then at the target, Landing) |
 | Landing { left } | arriving from a teleport | 6 ticks, then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out); a puff of dust at touchdown (`units/dust.rs`) |
 | Chopping { tree, left } | `Order::CutTree`, `Order::FetchWood` (braves only) | walks to a free spot next to the tree, then `CHOP_TICKS` (60, 6 s, a guess) of chopping, then the tree loses one size and the brave carries the piece |
@@ -132,6 +133,13 @@ Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the 
 - The start cell may be impassable (ground raised into a cliff under her): she can step off it.
 - `path::nearest_reachable`: the cell a mobility reaches closest to a goal (walkers boarding a boat,
   boats unloading at a shore; vehicles to come).
+
+### Locked shaman
+No order of the player reaches her (`GameMap::locked`, `shaman_locked`: unit orders, chained orders, her own
+orders, spells and Teleport are ignored) while she is:
+- inside a vault of knowledge, from the moment its full gauge sends her in until she is out by the door
+  (done, worship.md), so nothing breaks its sequence;
+- inside a prison, held there until freed (to do: levels where she starts imprisoned; the prison holds her).
 
 ## Shaman on screen (client, `units/`)
 - `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks (moves over a cell in one tick, teleport or reincarnation, are not glided).

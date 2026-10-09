@@ -1,4 +1,4 @@
-# Praying at vaults and totems (design; the vault's state and look are done)
+# Praying at vaults and totems (the vault is done: state, look, the shaman praying, the reward; totems to do)
 
 Pyramids of knowledge (vaults, building 18) and totems (scenery 9) give their tribe a reward once prayed at long
 enough. What each one gives, and how long, comes from the level's trigger on its cell (level-format.md "Vault of
@@ -79,6 +79,15 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   10 closing) whatever happens to the shaman, then Spent. The progress is not reused to close the door [ours].
   `Vault::door_and_top` gives the door and top positions in thousandths: Praying, the door opens over the last
   tenth of the gauge and the top is open; Granted, open, then both close together; Spent, both closed.
+- Praying (done: `game_core::worship`): a click on the vault with the shaman selected sends her
+  (`Order::Worship`, `GameMap::worship_orders`; other units ignore it); she walks to its door and prays
+  (`Action::Worshipping`, the prayer pose). Each tick (`GameMap::tend_vaults`) its gauge rises by 1 while she prays
+  at the door or is inside, and drains by 1 otherwise: another order, death. Full, she walks in to its middle
+  (`Unit::enter`); there the reward is granted (`Vault::grant`): logged in `GameMap::granted` with her tribe,
+  given to the level's books, and the client makes it available on its panels (`hud::build::apply_rewards`).
+  Then she walks out by the door (well within `OPEN_TICKS`). From going in until she is out she is locked: no
+  order of the player reaches her (units.md "Locked shaman"). A spent vault does not take her. Dev:
+  `SHAMAN=worship` sends her to the map's first vault.
 - Drawn (done: client `vault.rs`): the original pyramid's frames blended point by point, the door's points from
   192 towards 191, the top's from 192 towards 193 (points moving over 10 units between frames; the others are
   export noise). The generated pyramid slides a stone slab up its doorway (its top does not fold yet). Its phase
@@ -89,4 +98,5 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   [player]. The icon goes away once the reward is granted [player].
 
 ## Open
-- `PrayTime`'s unit, the drain speed, and the speed with fewer than `TriggerCount` praying.
+- `PrayTime`'s unit, the drain speed (1 per tick, as fast as it fills [ours]), and the speed with fewer than
+  `TriggerCount` praying.
