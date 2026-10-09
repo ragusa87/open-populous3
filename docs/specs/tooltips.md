@@ -72,6 +72,11 @@ On the player's buildings that take wood. On a built building it marks it for di
 people inside walk out, braves take it apart, and its wood can be used again (buildings.md "Dismantling").
 Toggled back while dismantling, it is built again.
 
+## Unload button [player]
+A vehicle has no toggle but a button in the same place: pressed, everyone aboard gets off. It is disabled while
+there is no ground to get off on: a balloon over water, a boat not next to the shore, a balloon above ground too
+steep to walk on (where they would land is not walkable, `path` walkable cells).
+
 ## Per target
 | Target | People row | Wood row | Bars | Toggle |
 |---|---|---|---|---|
@@ -83,7 +88,7 @@ Toggled back while dismantling, it is built again.
 | Training hut | the trainee | used | training | dismantle |
 | Pyramid of knowledge | the shaman; the name of its reward under its own name | | prayer | |
 | Totem | counted prayers | | prayer | |
-| Vehicle | people aboard | | | |
+| Vehicle | people aboard | | | unload button |
 | Tree | | current wood | | |
 | Wood piece | name only ("Wood") | | | |
 | Camp fire | who is round it [ours: to define] | | | |

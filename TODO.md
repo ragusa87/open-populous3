@@ -152,6 +152,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Wood rows: the pieces still needed on a growing house (once growth exists); a tree's current wood as slots. Plans, sites and built buildings are done.
 - [ ] Bars: prayer progress, house growth and birth, training; blinking while blocked.
 - [ ] Dismantle toggle on the player's buildings that take wood; right click shows a building's tooltip at once like trees.
+- [ ] Vehicles: an unload button in the toggle's place, everyone aboard gets off; disabled with no walkable ground to land on (balloon over water or steep ground, boat away from the shore).
 - [ ] Totems hoverable (`hover::Hovered`), with their tooltip.
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
 - [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).
