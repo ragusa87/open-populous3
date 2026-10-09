@@ -19,7 +19,7 @@ Tags: **[player]** how the game plays, as told by someone who played it, **[code
 
 ## Layout [player]
 The thing's name, then its slot rows with a small separator between rows, then its toggle where there is one.
-Bars stand on the left side.
+Vertical bars stand on the left side of all that, a horizontal bar across the top (see "Bars").
 
 ## Slot rows [player]
 One widget for every use: one slot per unit of capacity or need.
@@ -57,11 +57,12 @@ Nothing to select [player].
 A tree with no wood left is not drawn and has no tooltip (trees.md).
 
 ## Bars [player]
-Horizontal, one per progress, each its own colour:
-- Pyramid, totem: the prayer progress of the player's tribe (worship.md), on the left.
-- House: two bars on the left, its growth (towards the next size) and its birth (the next brave),
+One per progress, each its own colour, either vertical on the left side of the tooltip (filling upwards) or
+horizontal across its top (filling left to right):
+- Pyramid, totem: the prayer progress of the player's tribe (worship.md), vertical, on the left.
+- House: two vertical bars on the left, its growth (towards the next size) and its birth (the next brave),
   huts-and-training.md.
-- Training hut: the training of the unit inside, across the top of the tooltip.
+- Training hut: the training of the unit inside, horizontal, across the top.
 
 A bar **blinks while blocked**: a house's birth bar when the tribe is at its population cap; its growth bar when
 the next size cannot be reached; a training bar without mana [player: blinking; ours: which causes count as
