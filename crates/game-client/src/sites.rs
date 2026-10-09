@@ -20,6 +20,8 @@ const RING_RADIUS: f32 = 1.3;
 const STONE: Vec3 = Vec3::new(0.22, 0.6, 0.22);
 /// Footprint half size of a ring stone, wide enough for the original pillar (~0.47 cell).
 const STONE_HALF: f32 = 0.24;
+/// Theme whose atlas textures the stones on maps without one (sandboxes, generated maps).
+const DEFAULT_THEME: u8 = 0;
 
 #[derive(Component)]
 struct SiteMarker;
@@ -86,12 +88,12 @@ pub fn site_parts(site: &ReincarnationSite) -> Vec<SitePart> {
         .collect()
 }
 
-/// Original stone and its theme atlas, None without original files or theme.
-fn original_stone<'a>(levels: &LevelList, objects: &'a OriginalObjects, theme: Option<u8>) -> Option<(&'a Object, Image)> {
+/// Original stone and its theme atlas, None without original files.
+fn original_stone<'a>(levels: &LevelList, objects: &'a OriginalObjects, theme: u8) -> Option<(&'a Object, Image)> {
     if !levels.original {
         return None;
     }
-    let (theme, stone) = (theme?, objects.0.as_ref()?.get(REINCARNATION_STONE)?);
+    let stone = objects.0.as_ref()?.get(REINCARNATION_STONE)?;
     let load = || -> Result<_, pop3_format::LevelError> {
         Ok((Atlas::load(&levels.data_dir, theme)?, Theme::load(&levels.data_dir, theme)?))
     };
@@ -116,7 +118,7 @@ fn respawn_markers(
     for e in &existing {
         commands.entity(e).despawn();
     }
-    let original = original_stone(&levels, &objects, map.0.theme).map(|(stone, image)| {
+    let original = original_stone(&levels, &objects, map.0.theme.unwrap_or(DEFAULT_THEME)).map(|(stone, image)| {
         let mat = StandardMaterial {
             base_color_texture: Some(images.add(image)),
             perceptual_roughness: 0.95,

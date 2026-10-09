@@ -180,7 +180,7 @@ Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the 
   appears at start and after death.
 - Rendered as a ring of 8 stones; the camera starts on the player's (tribe 0) site.
   With the original files: the reincarnation stone (object 30) in the owner's tribe colour, textured from the
-  level theme's `bl320` atlas (see objects.md). Without them or with `--no-original`: plain blocks
+  level theme's `bl320` atlas (see objects.md), theme 0 on maps without one (sandboxes). Without them or with `--no-original`: plain blocks
   tinted with the tribe colour (no totem: the shaman stands at the centre). Stones face the centre (glyph side inward, as in the game); count and radius are ours.
 
 ## Standing on the ground (client)
