@@ -40,6 +40,9 @@ pub fn to_local((wx, wz): (i32, i32), quarter_turns: u8) -> (i32, i32) {
     }
 }
 
+/// Height points (cells, unwrapped).
+pub type Points = Vec<(i32, i32)>;
+
 /// A building-frame offset turned into world axes (the inverse of `to_local`).
 pub fn to_world((lx, lz): (i32, i32), quarter_turns: u8) -> (i32, i32) {
     match quarter_turns % 4 {
@@ -196,7 +199,7 @@ impl Heightmap {
 
     /// The height points of a building's footprint (see `level_rect`), unwrapped cell coordinates:
     /// those inside it, and those within a cell around it.
-    pub fn rect_points(centre: (u16, u16), half: (i32, i32), offset: (i32, i32), quarter_turns: u8) -> (Vec<(i32, i32)>, Vec<(i32, i32)>) {
+    pub fn rect_points(centre: (u16, u16), half: (i32, i32), offset: (i32, i32), quarter_turns: u8) -> (Points, Points) {
         const UNIT: i32 = 512;
         let (cx, cz) = (centre.0 as i32 / UNIT, centre.1 as i32 / UNIT);
         let r = (half.0.abs() + offset.0.abs()).max(half.1.abs() + offset.1.abs()) / UNIT + 2;

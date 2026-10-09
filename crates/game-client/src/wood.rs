@@ -1,6 +1,7 @@
 //! Pieces of wood lying on the ground (`GameMap::wood`), drawn like units as a camera-facing sprite
 //! standing on the terrain: the original pile of logs (`hfx0-0.dat`, see docs/specs/sprites.md) when
-//! allowed, else the bundled one (`assets/sprites/wood_pile.png`, same pixel-art size).
+//! allowed, else the bundled one (`assets/sprites/wood_pile.png`, same pixel-art size). Wood piled by
+//! a building's door (`Building::stock`) is drawn the same way.
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{render_pos, Grounded};
@@ -27,8 +28,17 @@ struct WoodSprite(FrameAsset);
 #[derive(Component)]
 pub struct WoodView(pub usize);
 
+/// A piece on a building's pile (not picked up from the ground).
+#[derive(Component)]
+pub struct PileView;
+
 #[derive(Component)]
 pub struct WoodBody;
+
+/// Where the pieces piled by the buildings' doors lie.
+pub fn pile_pieces(map: &game_core::map::GameMap) -> Vec<(u16, u16)> {
+    map.buildings.iter().flat_map(|b| (0..b.stock).map(|k| b.pile_point(k))).collect()
+}
 
 pub struct WoodPlugin;
 
@@ -71,14 +81,15 @@ fn respawn_views(
     mut commands: Commands,
     map: Res<CurrentMap>,
     sprite: Option<Res<WoodSprite>>,
-    existing: Query<Entity, With<WoodView>>,
-    mut drawn: Local<Vec<game_core::wood::WoodPiece>>,
+    existing: Query<Entity, Or<(With<WoodView>, With<PileView>)>>,
+    mut drawn: Local<(Vec<game_core::wood::WoodPiece>, Vec<(u16, u16)>)>,
 ) {
     let Some(sprite) = sprite else { return };
-    if !map.is_changed() && !sprite.is_added() && *drawn == map.0.wood {
+    let piles = pile_pieces(&map.0);
+    if !map.is_changed() && !sprite.is_added() && drawn.0 == map.0.wood && drawn.1 == piles {
         return;
     }
-    drawn.clone_from(&map.0.wood);
+    *drawn = (map.0.wood.clone(), piles.clone());
     for e in &existing {
         commands.entity(e).despawn();
     }
@@ -89,9 +100,15 @@ fn respawn_views(
             .spawn((WoodView(i), crate::hover::Hoverable::default(), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden))
             .with_child((WoodBody, Mesh3d(sprite.0.mesh.clone()), MeshMaterial3d(sprite.0.material.clone()), Transform::default()));
     }
+    for (x, z) in piles {
+        let at = Vec2::new(x as f32, z as f32) / cell;
+        commands
+            .spawn((PileView, Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden))
+            .with_child((WoodBody, Mesh3d(sprite.0.mesh.clone()), MeshMaterial3d(sprite.0.material.clone()), Transform::default()));
+    }
 }
 
-fn face_camera(rig: Res<CameraRig>, mut views: Query<&mut Transform, With<WoodView>>) {
+fn face_camera(rig: Res<CameraRig>, mut views: Query<&mut Transform, Or<(With<WoodView>, With<PileView>)>>) {
     let facing = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
     for mut t in &mut views {
         t.rotation = facing;
@@ -103,9 +120,9 @@ fn pull_to_eye(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     params: Res<CurveParamsRes>,
-    eye: Query<&Transform, (With<GameCamera>, Without<WoodView>, Without<WoodBody>)>,
-    views: Query<(&Grounded, &Transform, &Children), With<WoodView>>,
-    mut bodies: Query<&mut Transform, (With<WoodBody>, Without<WoodView>)>,
+    eye: Query<&Transform, (With<GameCamera>, Without<WoodView>, Without<PileView>, Without<WoodBody>)>,
+    views: Query<(&Grounded, &Transform, &Children), Or<(With<WoodView>, With<PileView>)>>,
+    mut bodies: Query<&mut Transform, (With<WoodBody>, Without<WoodView>, Without<PileView>)>,
 ) {
     let Ok(eye) = eye.single() else { return };
     for (ground, view, children) in &views {

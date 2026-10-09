@@ -193,10 +193,12 @@ fn respawn_buildings(
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut kit_skin: Local<Option<Handle<StandardMaterial>>>,
     mut kit: Local<KitMeshes>,
+    mut drawn: Local<Vec<Building>>,
 ) {
-    if !map.is_changed() {
+    if !map.is_changed() && *drawn == map.0.buildings {
         return;
     }
+    drawn.clone_from(&map.0.buildings);
     for e in &existing {
         commands.entity(e).despawn();
     }

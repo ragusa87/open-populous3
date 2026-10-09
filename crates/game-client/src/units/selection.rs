@@ -5,8 +5,9 @@
 //! the selection there, each unit to a free cell of its own (`GameMap::dispatch`), or round one of
 //! the player's camp fires when clicked on it (`ground_click`); on a tree, braves cut it and the others
 //! walk next to it (`GameMap::cut_orders`); on a wood pile, braves with empty hands pick up a piece
-//! each (`GameMap::pick_orders`); Shift + right click on one of the
-//! player's camp fires puts it out and keeps the selection (`shift_right_click`); P prays, X stops.
+//! each (`GameMap::pick_orders`); on one of the player's buildings still to build, braves work on it
+//! (`GameMap::build_orders`); Shift + right click on one of the player's camp fires puts it out, on
+//! a plan not flat yet cancels it, and keeps the selection (`shift_right_click`); P prays, X stops.
 //! With Ctrl held, these orders are chained after the units' current ones (`chained`). Only selected units show their health bar, and the
 //! cursor shows how many units are selected when more than one. While a spell is aimed the mouse
 //! belongs to it (`hud::spells`): clicks neither select nor send units.
@@ -297,9 +298,13 @@ pub(super) fn select_and_order(
     }
 }
 
-/// Commands for a left click on the ground at `at` (world units) with `selected` units: they go
-/// round the player's camp fire there, else walk there.
+/// Commands for a left click on the ground at `at` (world units) with `selected` units: braves work
+/// on the player's building still to build there, they go round the player's camp fire there, else
+/// walk there.
 pub fn ground_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16, u16)) -> Vec<Command> {
+    if let Some(site) = map.site_at(PLAYER, at).filter(|_| !selected.is_empty()) {
+        return map.build_orders(PLAYER, selected, site);
+    }
     match map.campfire_at(at).filter(|f| f.owner == PLAYER) {
         _ if selected.is_empty() => Vec::new(),
         Some(fire) => map.gather(PLAYER, selected, fire.id),
@@ -319,10 +324,17 @@ pub fn chained(commands: Vec<Command>) -> Vec<Command> {
 }
 
 /// The command of a right click on the ground at `at` (world units) with Shift held (`shift`):
-/// putting out the player's camp fire there. None otherwise (a plain right click deselects).
+/// putting out the player's camp fire there, else cancelling the player's plan (not flat yet) there.
+/// None otherwise (a plain right click deselects).
 pub fn shift_right_click(map: &game_core::map::GameMap, at: (u16, u16), shift: bool) -> Option<Command> {
-    let fire = map.campfire_at(at).filter(|f| shift && f.owner == PLAYER)?;
-    Some(Command::RemoveCampfire { player: PLAYER, at: fire.centre() })
+    if !shift {
+        return None;
+    }
+    if let Some(fire) = map.campfire_at(at).filter(|f| f.owner == PLAYER) {
+        return Some(Command::RemoveCampfire { player: PLAYER, at: fire.centre() });
+    }
+    let plan = |b: &&game_core::building::Building| b.owner == PLAYER && b.stage() == game_core::building::Stage::Blueprint && b.covers(at, 0);
+    map.buildings.iter().find(plan).map(|_| Command::CancelBuilding { player: PLAYER, at })
 }
 
 /// Draws the drag box and the selected count next to the cursor.
@@ -383,6 +395,19 @@ mod tests {
         assert_eq!(shift_right_click(&map, (fire.0 + 100, fire.1), true), Some(Command::RemoveCampfire { player: PLAYER, at: fire }), "anywhere in its cell");
         assert_eq!(shift_right_click(&map, fire, false), None, "without Shift: deselect");
         assert_eq!(shift_right_click(&map, away, true), None, "no fire there");
+    }
+
+    #[test]
+    fn ground_clicks_on_a_plan_send_braves_to_build_shift_right_click_cancels_it() {
+        let mut map = game_core::map::GameMap::sandbox_buildings();
+        let site = map.place_building(PLAYER, game_core::building::BuildingKind::Hut { size: 1 }, (88 * 512, 64 * 512), 0).unwrap();
+        let centre = map.buildings[site].centre();
+        let brave = map.units.iter().find(|u| u.kind == game_core::unit::UnitKind::Brave && u.campfire().is_none()).unwrap().id;
+        assert!(matches!(ground_click(&map, &[brave], centre)[..], [Command::OrderUnit { order: Order::Build { site: (45056, 32768) }, .. }]));
+        assert_eq!(shift_right_click(&map, centre, true), Some(Command::CancelBuilding { player: PLAYER, at: centre }));
+        assert_eq!(shift_right_click(&map, centre, false), None);
+        map.buildings[site].flat = true;
+        assert_eq!(shift_right_click(&map, centre, true), None, "flat: no more a plan");
     }
 
     #[test]

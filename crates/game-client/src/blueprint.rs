@@ -4,8 +4,9 @@
 //! (`game_core::placement`: sea, another building, a site, a tree with wood; all of it when the
 //! ground is too steep or a boat hut is not on the shore). A boat hut turns itself to put its
 //! jetty over the water when it can (`best_facing`). Space turns it a quarter turn, right click
-//! puts it away, left click will place it (`Command::PlaceBuilding`, not yet). Meanwhile clicks do
-//! not select or order units. See docs/specs/buildings.md "Blueprint".
+//! puts it away, left click places it where it can stand (`Command::PlaceBuilding`), sends the
+//! selected braves to build it (`GameMap::build_orders`) and puts it away. Meanwhile clicks do not
+//! select or order units. See docs/specs/buildings.md "Blueprint".
 //! A camp fire's blueprint is the cell under the mouse, red where it cannot be lit
 //! (`campfire::can_place`); a left click lights it (`Command::PlaceCampfire`) and puts it away.
 
@@ -22,7 +23,8 @@ use bevy::prelude::*;
 use game_core::building::{Building, BuildingKind};
 use game_core::campfire;
 use game_core::command::Command;
-use game_core::placement::{best_facing, blocked_at, shore_ok, too_steep};
+use game_core::map::GameMap;
+use game_core::placement::{best_facing, blocked_at, can_place, shore_ok, too_steep};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// Height above the ground (render units), and grid lines per cell: the mark's grid follows the
@@ -78,6 +80,14 @@ pub fn campfire_cell(at: Vec2) -> (i32, i32) {
 pub fn blueprint_at(kind: BuildingKind, facing: u8, cell: Vec2) -> Building {
     let corner = |c: f32| ((c.round() as i32).rem_euclid(128) as u32 * WORLD_UNITS_PER_CELL) as u16;
     Building::site(kind, PLAYER, corner(cell.x), corner(cell.y), facing)
+}
+
+/// The command placing a plan of `kind` with the mouse over map position `cell`, turned to fit the
+/// shore like its blueprint; None where it cannot stand.
+pub fn place_command(map: &GameMap, kind: BuildingKind, facing: u8, cell: Vec2) -> Option<Command> {
+    let b = blueprint_at(kind, facing, cell);
+    let b = Building { facing: best_facing(map, &b, facing), ..b };
+    can_place(map, &b).then_some(Command::PlaceBuilding { player: PLAYER, kind, at: (b.x, b.z), facing: b.facing })
 }
 
 /// A point of the building's own frame (cells) turned by `facing` into map axes, the same way
@@ -173,8 +183,8 @@ fn ground_under_mouse(
     pick_ground(&map.0.terrain, rig.focus, &params.0, ray.origin, *ray.direction)
 }
 
-/// Space turns it, right click on the map puts it away; left click on the map lights a camp fire
-/// (and puts it away), buildings are not placed yet.
+/// Space turns it, right click on the map puts it away; left click on the map lights a camp fire or
+/// places a building plan with the selected braves sent to it, and puts it away.
 #[allow(clippy::too_many_arguments)]
 fn blueprint_input(
     keys: Res<ButtonInput<KeyCode>>,
@@ -186,6 +196,7 @@ fn blueprint_input(
     params: Res<CurveParamsRes>,
     mut map: ResMut<CurrentMap>,
     mut blueprint: ResMut<Blueprint>,
+    selection: Res<crate::units::selection::Selection>,
 ) {
     if !blueprint.is_active() {
         return;
@@ -194,6 +205,19 @@ fn blueprint_input(
         blueprint.turn();
     }
     if mouse.just_pressed(MouseButton::Right) && cursor_on_map(&windows, &ui).is_some() {
+        blueprint.put_away();
+    }
+    if let (Some(Plan::Building(kind)), true) = (blueprint.plan, mouse.just_pressed(MouseButton::Left)) {
+        let Some(cell) = ground_under_mouse(&windows, &ui, &cams, &map, &rig, &params) else { return };
+        let Some(place) = place_command(&map.0, kind, blueprint.facing, cell) else { return };
+        let map = &mut map.bypass_change_detection().0;
+        map.apply(&place);
+        if let Command::PlaceBuilding { at, .. } = place {
+            let site = map.building_at_corner(at);
+            for c in site.map(|site| map.build_orders(PLAYER, &selection.units, site)).unwrap_or_default() {
+                map.apply(&c);
+            }
+        }
         blueprint.put_away();
     }
     if blueprint.plan == Some(Plan::Campfire) && mouse.just_pressed(MouseButton::Left) {
@@ -377,6 +401,16 @@ mod tests {
         let m = grid_mark(Vec2::new(3.0, 4.0), Vec2::new(4.0, 5.0), |at| ([at.x, 0.0, at.y], WHITE));
         assert_eq!(m.positions.len(), 25, "a 4 x 4 grid over the cell");
         assert_eq!(m.indices.len(), 16 * 6);
+    }
+
+    #[test]
+    fn a_plan_is_placed_only_where_it_can_stand() {
+        let map = GameMap::sandbox_buildings();
+        let free = Vec2::new(88.0, 64.0);
+        let hut = BuildingKind::Hut { size: 1 };
+        assert_eq!(place_command(&map, hut, 2, free), Some(Command::PlaceBuilding { player: PLAYER, kind: hut, at: (88 * 512, 64 * 512), facing: 2 }));
+        assert_eq!(place_command(&map, hut, 0, Vec2::new(64.0, 64.0)), None, "on the site");
+        assert_eq!(place_command(&map, hut, 0, Vec2::new(120.0, 64.0)), None, "sea");
     }
 
     #[test]

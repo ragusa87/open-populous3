@@ -7,6 +7,7 @@
 //! - under construction: builds a piece from the pile standing around the building, else fetches wood
 //!   while less is delivered and on the way than needed, else waits around it;
 //! - built: released.
+//!
 //! Integers only, units in id order.
 
 use crate::building::{Building, BuildingKind, Stage};

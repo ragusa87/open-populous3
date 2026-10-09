@@ -4,7 +4,8 @@
 //! the player's braves to cut their nearest tree (and, for `carry`, bring the piece back where they stood).
 //! `FOCUS=x,z` (cells), `DISTANCE=n`, `PITCH=deg`, `YAW=deg` place the camera for the shot;
 //! `TAB=spells|build|stats` opens that panel tab; `BLUEPRINT=kind@x,z` (kind as in the Build tab,
-//! e.g. `temple@64,70`) shows that blueprint at map position x,z (cells).
+//! e.g. `temple@64,70`) shows that blueprint at map position x,z (cells); `BUILD=kind@x,z` places that
+//! plan with every brave of the player sent to it, then runs `BUILD_TICKS` ticks (0 by default).
 
 use crate::camera::CameraRig;
 use crate::units::PLAYER;
@@ -134,6 +135,24 @@ pub fn parse_blueprint(v: &str) -> Option<(crate::blueprint::Plan, Vec2)> {
     Some((plan, Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?)))
 }
 
+/// `BUILD` demo: places the plan `kind@x,z` (as `BLUEPRINT`) for the player, sends every brave of
+/// theirs to build it, then runs `ticks` ticks; whether it was placed.
+pub fn build_demo(map: &mut game_core::map::GameMap, plan: &str, ticks: u32) -> bool {
+    let Some((crate::blueprint::Plan::Building(kind), at)) = parse_blueprint(plan) else { return false };
+    let Some(place) = crate::blueprint::place_command(map, kind, 0, at) else { return false };
+    map.apply(&place);
+    let Command::PlaceBuilding { at, .. } = place else { return false };
+    let Some(site) = map.building_at_corner(at) else { return false };
+    let braves: Vec<u32> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave).map(|u| u.id).collect();
+    for c in map.build_orders(PLAYER, &braves, site) {
+        map.apply(&c);
+    }
+    for _ in 0..ticks {
+        map.tick();
+    }
+    true
+}
+
 /// Panel tab by name (any case).
 pub fn tab_index(name: &str) -> Option<usize> {
     crate::hud::TABS.iter().position(|t| t.eq_ignore_ascii_case(name))
@@ -170,6 +189,10 @@ fn screenshot(
         cmds.extend(brave_commands(&std::env::var("BRAVES").unwrap_or_default(), &map.0));
         for c in &cmds {
             dirty.0 |= map.0.apply(c).is_some();
+        }
+        if let Ok(plan) = std::env::var("BUILD") {
+            let ticks = std::env::var("BUILD_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            dirty.0 |= build_demo(&mut map.0, &plan, ticks);
         }
     }
     if *frame < shot {
@@ -216,6 +239,16 @@ mod tests {
         assert_eq!(parse_blueprint("Fire-warrior@1,2").map(|b| b.0), Some(Plan::Building(BuildingKind::FirewarriorTraining)));
         assert_eq!(parse_blueprint("camp fire@1,2").map(|b| b.0), Some(Plan::Campfire));
         assert_eq!(parse_blueprint("hut"), None);
+    }
+
+    #[test]
+    fn build_demo_places_and_runs() {
+        let mut map = game_core::map::GameMap::sandbox_buildings();
+        let n = map.buildings.len();
+        assert!(build_demo(&mut map, "hut@88,64", 50));
+        assert!(map.units.iter().any(|u| u.work.is_some()));
+        assert_eq!(map.buildings.len(), n + 1);
+        assert!(!build_demo(&mut map, "hut@64,64", 0), "on the site");
     }
 
     #[test]
