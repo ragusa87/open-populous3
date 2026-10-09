@@ -476,8 +476,11 @@ impl Unit {
                 // Out by the door first, then on.
                 let door = self.inside.map_or(to, |i| i.door);
                 self.action = Action::Walking { to };
-                if self.step_towards(door, ground, self.kind.speed()) != Step::Moved {
-                    (self.inside, self.planned_on) = (None, None);
+                match self.step_towards(door, ground, self.kind.speed()) {
+                    Step::Moved => {}
+                    Step::Arrived => (self.inside, self.planned_on) = (None, None),
+                    // The door is blocked: she stays in.
+                    Step::Blocked => self.action = Action::Idle,
                 }
             }
             Action::Entering { to } => {

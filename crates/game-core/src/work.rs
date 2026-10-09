@@ -11,7 +11,8 @@
 //!
 //! Integers only, units in id order.
 
-use crate::building::{Building, BuildingKind, Stage};
+use crate::building::{Building, BuildingKind, Stage, DOOR_GAP};
+use crate::wood::WoodPiece;
 use crate::command::Command;
 use crate::map::{torus_dist2, GameMap};
 use crate::placement::can_place;
@@ -289,10 +290,10 @@ impl GameMap {
         let world = |(x, z): (i32, i32)| ((x.rem_euclid(size) * 512) as u16, (z.rem_euclid(size) * 512) as u16);
         let uneven: Vec<(i32, i32)> = building.ground_points().into_iter().filter(|&(x, z)| self.terrain.get(x, z) != building.level).collect();
         if uneven.is_empty() {
-            let b = &mut self.buildings[b];
-            b.flat = true;
-            let dirty = b.flatten(&mut self.terrain);
+            self.buildings[b].flat = true;
+            let dirty = self.buildings[b].flatten(&mut self.terrain);
             self.update_walls();
+            self.clear_wood_under(&self.buildings[b].clone());
             return Some(dirty);
         }
         let claimed = |p: (i32, i32)| {
@@ -315,10 +316,29 @@ impl GameMap {
         None
     }
 
+    /// Wood lying in `b`'s walls is moved out in front of its door, a little past its pile, where braves
+    /// can still take it.
+    fn clear_wood_under(&mut self, b: &Building) {
+        let f = b.kind.footprint();
+        let mut k = 0;
+        for w in 0..self.wood.len() {
+            if self.walls.at(cell((self.wood[w].x, self.wood[w].z))) == Some((b.x, b.z)) {
+                let (col, row) = ((k % 4) as i32, (k / 4) as i32);
+                let (x, z) = b.local_point((f.offset.0 + (col * 2 - 3) * 80, f.offset.1 - f.half.1 - DOOR_GAP - 350 - row * 90));
+                self.wood[w] = WoodPiece::new(x, z);
+                k += 1;
+            }
+        }
+    }
+
     /// Whether a chained `Order::Build` still has a building to work on.
     pub(crate) fn still_building(&self, site: (u16, u16)) -> bool {
         self.building_at_corner(site).is_some_and(|b| self.buildings[b].stage() != Stage::Built)
     }
+}
+
+fn cell((x, z): (u16, u16)) -> (i32, i32) {
+    ((x as u32 / 512) as i32, (z as u32 / 512) as i32)
 }
 
 /// Followers rest in huts: not the shaman, not wildmen.
@@ -342,7 +362,6 @@ fn facing_to(from: (u16, u16), to: (u16, u16)) -> u8 {
 mod tests {
     use super::*;
     use crate::map::GameMap;
-    use crate::wood::WoodPiece;
 
     const C: i32 = 64;
 
@@ -625,5 +644,41 @@ mod tests {
             }
         }
         assert!(hammered);
+    }
+
+    #[test]
+    fn braves_taken_off_a_site_for_another_reach_it() {
+        let mut map = sandbox();
+        for k in 0..2u16 {
+            let id = map.units.len() as u32 + 1;
+            map.units.push(Unit::new(id, 0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1)));
+        }
+        let mut units = braves(&map, 5);
+        units.push(map.units.last().unwrap().id);
+        map.wood.clear();
+        let first = place(&mut map, BuildingKind::Hut { size: 1 }, corner(24, 0), &units);
+        let centre = map.buildings[first].centre();
+        for (dx, dz) in [(0, 0), (300, 200), (-250, -300)] {
+            map.wood.push(WoodPiece::new((centre.0 as i32 + dx) as u16, (centre.1 as i32 + dz) as u16));
+        }
+        for t in 0..400 {
+            map.tick();
+            if t > 100 && map.units.iter().any(|u| units.contains(&u.id) && u.inside.is_some() && u.action == Action::Hammering) {
+                break;
+            }
+        }
+        assert!(map.buildings[first].flat);
+        assert!(map.wood.iter().all(|w| !map.behind_walls((w.x, w.z))), "the wood under it was moved out by the door");
+        let second = place(&mut map, BuildingKind::Hut { size: 1 }, corner(24, -8), &units);
+        for t in 0..1500 {
+            map.tick();
+            for u in map.units.iter().filter(|u| units.contains(&u.id)) {
+                assert!(!matches!(u.action, Action::Stranded { .. }), "tick {t}: brave {} stranded at {:?} inside {:?}", u.id, (u.x, u.z), u.inside);
+            }
+            if map.buildings[second].stage() == Stage::Built {
+                return;
+            }
+        }
+        panic!("second hut not built");
     }
 }

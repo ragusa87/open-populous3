@@ -193,7 +193,9 @@ pick one besides selecting it on the map.
      walks to the nearest footprint height point off the site's level that no other brave is on or going to,
      and jumps on it (`Action::Flattening`, `JUMP_TICKS` 8, the jump pose: original anim 12): the point moves `JUMP_STEP` (32)
      towards the level. With no point left, the plan is flat: the ring around is blended
-     (`Building::flatten`) and it is under construction: walled (see "Walking around buildings"). Ground already
+     (`Building::flatten`) and it is under construction: walled (see "Walking around buildings"). Wood lying in
+     its walls is moved out in front of its door (`clear_wood_under`); braves never go for wood or trees
+     behind walls (`GameMap::behind_walls`). Ground already
      level is flat at once.
   3. Under construction: with wood on the pile, walks to the door, in (`Unit::enter`, `Action::Entering`,
      straight to a work point a third of a cell apart per brave around the centre) and builds the piece from
@@ -285,7 +287,7 @@ centre its footprint covers (`Building::walled_cells`). `path::Ground` is what m
 cross a wall (A*, straight legs, steps, standing spots, teleport landing), boats and balloons ignore walls, plans
 and the reincarnation site are not walled. A wall change bumps the walls' revision and walkers replan. A unit
 standing in a newly walled cell is inside that building (`Unit::inside`, with its door). A unit inside going
-anywhere first walks straight to the door, then plans its route. Into a building only `Unit::enter`: straight from
+anywhere first walks straight to the door, then plans its route; if the door is blocked it stays inside, idle. Into a building only `Unit::enter`: straight from
 the door. Design notes:
 Buildings and construction sites block walking over their footprint (`BuildingKind::footprint` turned with the
 facing, the cells it covers): `path::Mobility::Walk` gets a blocked-cell mask from `GameMap` besides the terrain,

@@ -486,6 +486,11 @@ impl GameMap {
         Walled { terrain: &self.terrain, walls: &self.walls, inside: None }
     }
 
+    /// Whether world point `p` is in a building's walls: nobody outside can get there.
+    pub fn behind_walls(&self, p: (u16, u16)) -> bool {
+        self.walls.at(((p.0 as u32 / 512) as i32, (p.1 as u32 / 512) as i32)).is_some()
+    }
+
     /// Walls the cells under every building past its plan stage (its footprint covers their
     /// centre); a unit standing in a newly walled cell is inside that building, and walks out by its
     /// door when it moves.
@@ -545,7 +550,7 @@ impl GameMap {
             return;
         }
         let id = u.id;
-        let spare = |t: &Tree| t.size as usize > self.tree_claims((t.x, t.z), id);
+        let spare = |t: &Tree| t.size as usize > self.tree_claims((t.x, t.z), id) && !self.behind_walls((t.x, t.z));
         let chosen = match self.trees.iter().find(|t| (t.x, t.z) == tree).filter(|t| spare(t)) {
             Some(t) => t,
             None => match self.trees.iter().filter(|t| spare(t) && torus_cells(tree, (t.x, t.z)) <= REFIND_CELLS).min_by_key(|t| torus_dist2(tree, (t.x, t.z))) {
@@ -574,9 +579,14 @@ impl GameMap {
             .wood
             .iter()
             .map(|w| (w.x, w.z))
-            .filter(|&p| self.units.iter().all(|o| o.id == id || o.fetching() != Some(p)))
+            .filter(|&p| !self.behind_walls(p) && self.units.iter().all(|o| o.id == id || o.fetching() != Some(p)))
             .min_by_key(|&p| torus_dist2(me, p));
-        let tree = self.trees.iter().filter(|t| t.size as usize > self.tree_claims((t.x, t.z), id)).map(|t| (t.x, t.z)).min_by_key(|&p| torus_dist2(me, p));
+        let tree = self
+            .trees
+            .iter()
+            .filter(|t| t.size as usize > self.tree_claims((t.x, t.z), id) && !self.behind_walls((t.x, t.z)))
+            .map(|t| (t.x, t.z))
+            .min_by_key(|&p| torus_dist2(me, p));
         match (piece, tree) {
             (Some(p), Some(t)) if torus_dist2(me, t) < torus_dist2(me, p) => self.go_cut(i, t),
             (Some(p), _) => self.units[i].go_pick(p),
@@ -597,7 +607,7 @@ impl GameMap {
             .wood
             .iter()
             .map(|w| (w.x, w.z))
-            .filter(|&p| torus_dist2(at, p) <= PICK_RADIUS * PICK_RADIUS)
+            .filter(|&p| torus_dist2(at, p) <= PICK_RADIUS * PICK_RADIUS && !self.behind_walls(p))
             .filter(|&p| self.units.iter().all(|o| o.id == id || o.fetching() != Some(p)))
             .min_by_key(|&p| torus_dist2(at, p));
         if let Some(p) = piece {
