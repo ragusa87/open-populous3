@@ -135,8 +135,6 @@ struct CellText(Cell);
 #[derive(Component)]
 struct KindHeader(UnitKind);
 #[derive(Component)]
-struct RoomText;
-#[derive(Component)]
 struct HutText(usize);
 #[derive(Component)]
 struct StatsInfo;
@@ -160,10 +158,7 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, mut ico
     commands.entity(entity).with_children(|c| {
         c.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(3), padding: UiRect::all(px(4)), border: UiRect::all(px(1)), ..default() }, BackgroundColor(TILE), BorderColor::all(DARK_BROWN)))
             .with_children(|b| {
-                b.spawn(Node { justify_content: JustifyContent::SpaceBetween, ..default() }).with_children(|top| {
-                    top.spawn(text("Huts", 13.0, INK));
-                    top.spawn((RoomText, text("", 12.0, INK)));
-                });
+                b.spawn(text("Huts", 13.0, INK));
                 b.spawn(Node { column_gap: px(4), ..default() }).with_children(|tiles| {
                     for i in 0..3 {
                         tiles
@@ -231,11 +226,10 @@ fn update_tab(
     map: Res<CurrentMap>,
     selection: Res<Selection>,
     mut cells: Query<(&Cell, &Interaction, &mut BackgroundColor, &mut BorderColor)>,
-    mut texts: Query<(&CellText, &mut Text, &mut TextColor), (Without<RoomText>, Without<HutText>, Without<StatsInfo>)>,
+    mut texts: Query<(&CellText, &mut Text, &mut TextColor), (Without<HutText>, Without<StatsInfo>)>,
     headers: Query<(&KindHeader, &Interaction)>,
-    mut room: Query<&mut Text, (With<RoomText>, Without<CellText>, Without<HutText>, Without<StatsInfo>)>,
-    mut huts: Query<(&HutText, &mut Text), (Without<CellText>, Without<RoomText>, Without<StatsInfo>)>,
-    mut info: Query<&mut Text, (With<StatsInfo>, Without<CellText>, Without<RoomText>, Without<HutText>)>,
+    mut huts: Query<(&HutText, &mut Text), (Without<CellText>, Without<StatsInfo>)>,
+    mut info: Query<&mut Text, (With<StatsInfo>, Without<CellText>, Without<HutText>)>,
 ) {
     if active.0 != TAB {
         return;
@@ -263,12 +257,6 @@ fn update_tab(
         }
         let base = if cell.kind.is_none() && cell.row != Row::Selected { LIGHT } else { INK };
         color.set_if_neq(TextColor(if n == 0 { base.with_alpha(0.35) } else { base }));
-    }
-    for mut t in &mut room {
-        let s = format!("room {}", housing.room());
-        if t.0 != s {
-            t.0 = s;
-        }
     }
     let tiles = hut_tiles(&housing);
     for (HutText(i), mut t) in &mut huts {
