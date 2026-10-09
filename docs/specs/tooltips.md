@@ -83,7 +83,7 @@ With the original files (`hfx0-0.dat`, sprites.md): dismantle 49, 51 hovered, 50
 A vehicle has no toggle but a button in the same place: pressed, everyone aboard gets off. It is disabled while
 there is no ground to get off on: a balloon over water, a boat not next to the shore, a balloon above ground too
 steep to walk on (where they would land is not walkable, `path` walkable cells).
-With the original files: 60, 62 hovered, 61 pressed (unconfirmed).
+With the original files: 60, 61 hovered, 62 pressed.
 
 ## Per target
 | Target | People row | Wood row | Bars | Toggle |

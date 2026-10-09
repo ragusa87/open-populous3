@@ -75,7 +75,7 @@ the camp fire's (66) while placing one (`plan_sprite`).
 Same palette. Identified: 2-3 dry plants, 22 a flat dark smear (shadow of 23?), 23 a pile of logs (17 x 11, a piece of
 wood on the ground: `catalog::WOOD_PILE_SPRITE`), 90-93 fire, 107-111 spell names, 187-210 build/wood action icons,
 46-51 the tooltip's dismantle toggle (49, 51 hovered, 50 on) and its undo (46, 48 hovered, 47 on), 60-62 the
-unload button of a vehicle (60, 62 hovered, 61 pressed, unconfirmed), tooltips.md; 639-656 gold state icons, each plain then outlined (653 a boat, 655 the same boat flat), 664-675 six unit figures (plain / outlined
+unload button of a vehicle (60, 61 hovered, 62 pressed), tooltips.md; 639-656 gold state icons, each plain then outlined (653 a boat, 655 the same boat flat), 664-675 six unit figures (plain / outlined
 pairs: 666 brave, 668 warrior, 670 firewarrior, 672 preacher, 674 spy, 664 probably the shaman; 75-80 the same in
 teal, in unit model order: brave, warrior, preacher, spy, firewarrior, shaman, `catalog::UNIT_FIGURES`, the tooltip's
 people), 1030-1083 spell and building glyphs, 1084-1088 the Stats
