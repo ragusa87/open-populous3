@@ -494,7 +494,7 @@ impl GameMap {
 
     /// Walls the cells under every building past its plan stage (its footprint covers their
     /// centre); a unit standing in a newly walled cell is inside that building, and walks out by its
-    /// door when it moves.
+    /// door when it moves; one walking to a newly walled spot stops.
     pub fn update_walls(&mut self) {
         let size = self.terrain.size() as i32;
         let mut cells = std::collections::BTreeMap::new();
@@ -506,6 +506,14 @@ impl GameMap {
                 let Some(site) = self.walls.at(u.cell()) else { continue };
                 if let Some(b) = self.buildings.iter().find(|b| (b.x, b.z) == site) {
                     u.inside = Some(crate::unit::Inside { site, door: b.door() });
+                }
+            }
+            // Walking to a spot now behind walls (even in their own building: only `Unit::enter` walks
+            // in): they stop, and go on with their next order or task from there.
+            for u in self.units.iter_mut().filter(|u| u.is_alive()) {
+                let (Action::Walking { to } | Action::Stranded { to }) = u.action else { continue };
+                if self.walls.at(((to.0 as u32 / 512) as i32, (to.1 as u32 / 512) as i32)).is_some() {
+                    u.start(Order::Stop);
                 }
             }
         }

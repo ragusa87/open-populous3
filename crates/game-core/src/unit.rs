@@ -608,9 +608,11 @@ impl Unit {
         if route.is_none() && matches!(self.action, Action::Walking { .. }) {
             self.regen = 0;
         }
+        let walled = ground.walled((cell_of(to.0), cell_of(to.1)));
         self.action = match route {
             Some(_) => Action::Walking { to },
-            None if self.kind == UnitKind::Shaman => Action::Idle,
+            // Behind walls nobody gets to: no point waiting for the ground to open a way.
+            None if self.kind == UnitKind::Shaman || walled => Action::Idle,
             None => Action::Stranded { to },
         };
         self.route = route.map(|r| r.into_iter().rev().collect()).unwrap_or_default();

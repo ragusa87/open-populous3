@@ -2,7 +2,8 @@
 //! (`Order::Build`), and what each assigned brave does when it is free, every tick:
 //! - carrying wood: takes it to the pile by the door;
 //! - plan not flat yet: one brave fetches the first piece, the others jump on the footprint's height
-//!   points not yet at the site's level, nearest first, one brave per point; once all are level the
+//!   points, each at least once and until it is at the site's level, nearest first, one brave per
+//!   point; once all are done the
 //!   ring around is blended (`Building::flatten`) and it is under construction;
 //! - under construction (walled, `GameMap::update_walls`): takes a piece from the pile, walks in by the
 //!   door and builds it in from inside, else fetches wood while less is delivered and on the way than
@@ -123,6 +124,9 @@ impl GameMap {
         let b = self.building_at_corner(self.units[i].work?)?;
         match event {
             UnitEvent::Jumped { at } => {
+                if !self.buildings[b].jumped.contains(&at) {
+                    self.buildings[b].jumped.push(at);
+                }
                 let (h, level) = (self.terrain.get(at.0, at.1), self.buildings[b].level);
                 let h = if h < level { (h + JUMP_STEP).min(level) } else { h.saturating_sub(JUMP_STEP).max(level) };
                 self.terrain.set(at.0, at.1, h);
@@ -220,7 +224,12 @@ impl GameMap {
         None
     }
 
-    /// Brave `i` jumps on the nearest height point of plan `b` still off its level that no other
+    /// Whether the plan's height point `p` is done: at the plan's level and jumped on at least once.
+    fn ground_done(&self, b: &Building, p: (i32, i32)) -> bool {
+        self.terrain.get(p.0, p.1) == b.level && b.jumped.contains(&p)
+    }
+
+    /// Brave `i` jumps on the nearest height point of plan `b` still off its level or never jumped on that no other
     /// brave is on or going to, walking there first; with none left the plan is flat.
     fn flatten_step(&mut self, i: usize, b: usize) -> Option<DirtyRect> {
         let building = self.buildings[b].clone();
@@ -228,9 +237,10 @@ impl GameMap {
         let (me, id) = ((self.units[i].x, self.units[i].z), self.units[i].id);
         let size = self.terrain.size() as i32;
         let world = |(x, z): (i32, i32)| ((x.rem_euclid(size) * 512) as u16, (z.rem_euclid(size) * 512) as u16);
-        let uneven: Vec<(i32, i32)> = building.ground_points().into_iter().filter(|&(x, z)| self.terrain.get(x, z) != building.level).collect();
+        let uneven: Vec<(i32, i32)> = building.ground_points().into_iter().filter(|&p| !self.ground_done(&building, p)).collect();
         if uneven.is_empty() {
             self.buildings[b].flat = true;
+            self.buildings[b].jumped.clear();
             let dirty = self.buildings[b].flatten(&mut self.terrain);
             self.update_walls();
             self.clear_wood_under(&self.buildings[b].clone());
@@ -472,15 +482,18 @@ mod tests {
         let mut before = pos(&map);
         let mut entered = 0;
         for _ in 0..600 {
+            // Only steps across walls standing before the tick count: walls going up around a brave on
+            // the footprint put him inside without a step.
+            let up = map.walls.at(walled[0]).is_some();
             map.tick();
             let now = pos(&map);
             for (a, b) in before.iter().zip(&now) {
-                if !walled.contains(&a.0) && walled.contains(&b.0) {
+                if up && !walled.contains(&a.0) && walled.contains(&b.0) {
                     assert!(near_door(a.1), "walked in away from the door");
                     assert!(b.2.is_some(), "inside");
                     entered += 1;
                 }
-                if walled.contains(&a.0) && !walled.contains(&b.0) {
+                if up && walled.contains(&a.0) && !walled.contains(&b.0) {
                     assert!(near_door(b.1), "walked out away from the door");
                 }
             }
@@ -535,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn six_braves_on_a_hut_never_stand_idle_the_waiting_ones_hammer_inside() {
+    fn six_braves_on_a_hut_never_stand_idle_once_flat_the_waiting_ones_hammer_inside() {
         let mut map = sandbox();
         for k in 0..2u16 {
             let id = map.units.len() as u32 + 1;
@@ -552,7 +565,8 @@ mod tests {
             for (k, id) in units.iter().enumerate() {
                 let u = map.units.iter().find(|u| u.id == *id).unwrap();
                 hammered |= u.action == Action::Hammering && u.inside.is_some_and(|i| i.site == at);
-                idle[k] = if u.action == Action::Idle { idle[k] + 1 } else { 0 };
+                let building = map.buildings[site].flat;
+                idle[k] = if building && u.action == Action::Idle { idle[k] + 1 } else { 0 };
                 assert!(idle[k] <= 2, "brave {id} stands idle");
             }
         }
@@ -593,5 +607,58 @@ mod tests {
             }
         }
         panic!("second hut not built");
+    }
+
+    #[test]
+    fn braves_moved_between_any_two_kinds_are_never_stranded() {
+        for (k, &first_kind) in crate::build_book::BUILDABLE.iter().enumerate() {
+            let second_kind = crate::build_book::BUILDABLE[(k + 2) % crate::build_book::BUILDABLE.len()];
+            if first_kind == BuildingKind::BoatHut || second_kind == BuildingKind::BoatHut {
+                continue;
+            }
+            let mut map = sandbox();
+            let units = braves(&map, 5);
+            let first = place(&mut map, first_kind, corner(26, 2), &units);
+            for _ in 0..250 {
+                map.tick();
+            }
+            assert!(map.buildings[first].flat, "{first_kind:?} flat");
+            let second = place(&mut map, second_kind, corner(26, -8), &units);
+            for t in 0..2500 {
+                map.tick();
+                for u in map.units.iter().filter(|u| units.contains(&u.id)) {
+                    assert!(!matches!(u.action, Action::Stranded { .. }), "{first_kind:?} -> {second_kind:?}, tick {t}: brave {} stranded at {:?} inside {:?}", u.id, u.cell(), u.inside);
+                }
+                if map.buildings[second].flat {
+                    break;
+                }
+            }
+            assert!(map.buildings[second].flat, "{first_kind:?} -> {second_kind:?}: second flattened");
+        }
+    }
+
+    #[test]
+    fn warrior_hut_to_temple_anywhere_any_time() {
+        for wait in [5, 120, 400] {
+            for (dx, dz) in [(0, -6), (0, 6), (6, 0), (-6, 0), (0, -5), (5, 0), (0, 5), (-5, 0), (9, 9)] {
+                let mut map = sandbox();
+                let units = braves(&map, 5);
+                place(&mut map, BuildingKind::WarriorTraining, corner(26, 2), &units);
+                for _ in 0..wait {
+                    map.tick();
+                }
+                map.apply(&Command::PlaceBuilding { player: 0, kind: BuildingKind::Temple, at: corner(26 + dx, 2 + dz), facing: 0 });
+                let Some(second) = map.building_at_corner(corner(26 + dx, 2 + dz)) else { continue };
+                for c in map.build_orders(0, &units, second) {
+                    map.apply(&c);
+                }
+                for t in 0..1000 {
+                    map.tick();
+                    for u in map.units.iter().filter(|u| units.contains(&u.id)) {
+                        assert!(!matches!(u.action, Action::Stranded { .. }), "wait {wait}, temple at {dx},{dz}, tick {t}: brave {} stranded at {:?} ({:?}) inside {:?} to {:?}", u.id, u.cell(), (u.x, u.z), u.inside, u.action);
+                    }
+                }
+            }
+        }
     }
 }

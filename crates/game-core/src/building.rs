@@ -208,12 +208,15 @@ pub struct Building {
     /// Height its footprint is flattened to (a blueprint's: the average when placed, at least
     /// `MIN_GROUND`).
     pub level: u16,
+    /// A plan's height points (cells, unwrapped as `ground_points`) jumped on so far: each needs a
+    /// jump, even when already level.
+    pub jumped: Vec<(i32, i32)>,
 }
 
 impl Building {
     /// A finished building, as the levels store them.
     pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
-        Building { kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, stock: 0, level: 0 }
+        Building { kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, stock: 0, level: 0, jumped: Vec::new() }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.
