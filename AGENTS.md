@@ -10,7 +10,8 @@ from the user's own install.
   dumps, renders or screenshots made with the original files, exported viewers. Keep such outputs in a scratch dir.
 - Never quote original texts (level names, briefings, messages, UI strings) in code, tests, docs, commits or
   TODO: refer to them by their text number (docs/specs/language.md).
-- Do not look at screenshots or videos of the original game: our art (generated, CC0) must not be traced from it.
+- Never look at a screenshot or video of the original game, for any purpose (not to check art, layout or
+  behaviour either), and never ask for or fetch one.
 - Facts from the community tools (README "References") yes, their code no.
 - Everything shippable works with `--no-original` (generated or CC0 content, our own texts).
 
