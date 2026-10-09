@@ -92,7 +92,7 @@ death's totem get none. Not over the panel, nor while a spell or a blueprint is 
 - Outline meshes are made once per source mesh and kept (`OutlineCache`).
 - Dev: `HOVER=unit:3` (or `wood`, `tree`, `building` and an index in its `GameMap` list) forces it for a shot.
 The hovered unit also shows its health bar (units.md). A building rested on for `HOVER_SECS` shows its tooltip
-(buildings.md "Tooltip"). Other tooltips on hover (spies show a spy indicator instead of their disguise) are still to do.
+(buildings.md "Tooltip"). Every tooltip, done and planned, is in [tooltips.md](tooltips.md).
 
 ## World editor (`editor.rs`)
 Tab toggles edit mode. Brushes at the camera focus: R raise, F lower (Erode), T flatten,

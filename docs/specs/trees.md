@@ -43,4 +43,5 @@ Resting the cursor on a visible tree for 1.5 s (`HOVER_SECS`), or right-clicking
 cursor: "Tree: 3/4 wood" (pieces left / most it can hold), until the cursor leaves the tree (`HoveredTree`). A right
 click on a tree keeps the unit selection (elsewhere it clears it). The tree under the cursor is the one whose screen box (trunk base to top,
 30% of its height either side) holds it, the nearest one when several overlap (`tree_at`). Not over the panel,
-nor while a spell is aimed.
+nor while a spell is aimed. Planned (tooltips.md): a wood row showing only the current wood, one filled slot per
+piece; the original capacity of a tree is not known, so no "most it can hold".

@@ -168,12 +168,9 @@ Done:
 Done (`buildings::building_label`, after resting the cursor `HOVER_SECS` on a building, plans included): the
 kind's name; for the player's buildings that take wood, `Braves: assigned/max` and `Wood: delivered/cost`, while
 a plan and under construction; once built, `Braves: inside/room` (huts only) and `Wood: n`, the wood in it
-(what dismantling gives back, raised when a hut grows). One `Braves` line either way. Other tribes' buildings show their name only. To do:
-Hovering or right-clicking a site (as for trees): kind, braves assigned / maximum, wood delivered / needed. On a
-building of a buildable kind with at least one piece of wood used (under construction or built): a "Dismantle"
-toggle (back to "Build" while dismantling). It also lists the
-assigned braves, one small icon each; clicking an icon selects that brave alone (one at a time), a quick way to
-pick one besides selecting it on the map.
+(what dismantling gives back, raised when a hut grows). One `Braves` line either way. Other tribes' buildings show their name only. To do: the rendered tooltip of
+[tooltips.md](tooltips.md), a people row (assigned braves or people inside, clicking one selects it), a wood row
+and the Dismantle toggle (see "Dismantling"), also shown at once on a right click.
 
 ### Orders and selection
 - Any new order to an assigned brave (`Command::OrderUnit`: move, pray, stop...) unassigns it from the site,
@@ -262,7 +259,8 @@ On screen (as in the game):
 - Dismantling and damage go the other way (parts back to wood, then removed).
 
 ### Dismantling
-With Dismantle on (on a built building or one under construction), braves assigned to it take it apart: after a while it loses one piece of wood, which
+Switched by the tooltip's toggle (tooltips.md). On a built building it stops working and the people inside walk
+out first. With Dismantle on (on a built building or one under construction), braves assigned to it take it apart: after a while it loses one piece of wood, which
 is dropped on the ground near the door as a wood piece (a pile of logs on the ground, `GameMap::wood`, see trees.md,
 usable by any construction). Once all its wood is out, the building is removed and its ground is free again (a
 covered tree grows back). Switching back to Build makes braves rebuild it with wood again.

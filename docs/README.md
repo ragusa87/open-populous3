@@ -16,5 +16,6 @@
   - [building kit](../assets/3d/buildings/README.md): reproducible glTF generation, Blender preview and licence.
   - [constants.md](specs/constants.md): balance values (`constant.dat`), its XOR encoding and text format.
   - [worship.md](specs/worship.md): praying at pyramids of knowledge and totems, their gauges and rewards.
+  - [tooltips.md](specs/tooltips.md): what the game shows about the thing under the mouse: slot rows, bars, toggle.
   - [language.md](specs/language.md): original `langNN.dat` texts, numbered, per language.
   - [sound.md](specs/sound.md): original `.SDT` sound, drum and music banks.

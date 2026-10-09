@@ -111,7 +111,6 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Blueprint: tune `STEEP_SPREAD`; check the door side of the other kinds against the original objects.
 - [ ] Construction pace: check in the game how long a jump and building one piece take (`JUMP_TICKS`, `JUMP_STEP`, `BUILD_TICKS`, guessed) and whether braves gather and watch first (a plan on level ground is flat at once today).
 - [ ] Walls: replan only walkers whose route crosses a changed wall (every walker replans today); a boat hut's jetty side stays open to boats, to check with vehicles.
-- [ ] Building tooltip: one icon per assigned brave (clicking one selects that brave alone), Dismantle toggle once wood is used (under construction or built); right click shows it at once like trees.
 - [ ] Units inside a building are hidden but still selectable with a box; check what the original allows. Units walking out of several buildings: the door may be blocked by another wall or the sea.
 - [ ] CC0 sheets: a jump pose for flattening (`Pose::Jump` falls back on arms up) and a hammer pose (`Pose::Hammer` falls back on idle).
 - [ ] Find the original hammering anim (the axe swing, anim 11, stands in for `Pose::Hammer`).
@@ -145,7 +144,17 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Spell and building icons, tooltips; Stats tab (still "Coming soon").
-- [ ] Hover tooltips for everything (the halo is done for the player's units, wood, trees and the player's buildings, ui-and-editor.md "Hover halo"; units: the health bar is their tooltip). Spies are the exception: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
+- [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
+
+## Tooltips ([tooltips.md](docs/specs/tooltips.md))
+- [ ] Rendered tooltip instead of text: name, slot rows with separators, bars on the left, toggle; one `SlotRow` model built by pure functions, one UI widget.
+- [ ] People rows: plans and sites (assigned braves), houses and drum towers (people inside), training huts (the trainee), pyramids (the shaman), totems (counted prayers), vehicles; clicking a filled slot selects that unit.
+- [ ] Wood rows: provided / cost on plans and sites, used on built buildings, plus the pieces still needed on a growing house; a tree's current wood only.
+- [ ] Long rows wrap onto even lines (16 -> 2 x 8, 20 -> 2 x 10); confirm the rule for other counts.
+- [ ] Bars: prayer progress, house growth and birth, training; blinking while blocked.
+- [ ] Dismantle toggle on the player's buildings that take wood; right click shows a building's tooltip at once like trees.
+- [ ] Totems hoverable (`hover::Hovered`), with their tooltip.
+- [ ] Our own slot icons and placeholder shapes (generated or CC0; original sprites only loaded at runtime).
 - [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
 - [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).
 - [ ] Editor: smooth brush and the raise/lower levelling step of the ALACN editor (ui-and-editor.md).

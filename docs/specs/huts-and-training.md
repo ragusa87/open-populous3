@@ -26,7 +26,9 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
 
 ## Huts [community]
 - Capacity (people inside): 3 / 4 / 5 for a small / medium / large hut. Supply (cap): 3 / 5 / 7. The tribe's
-  population cap is 199: 28 large huts reach it.
+  population cap has a failsafe maximum: 199 [community], about 200 [player]; 28 large huts reach it. It is not
+  in `constant.dat` (only `MAX_POP_VALUE__HUT_1..3` and the breeding bands): probably one of the "extended"
+  constants of the executable (constants.md). Exact value to confirm.
 - A hut makes braves on its own, empty or not: empty at half speed, faster with more people inside (the
   `SPROG_TIME` comment above). The larger the hut, the faster.
 - A newly built hut starts with its breeding bar full: a brave comes out at once.
@@ -48,12 +50,12 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
   (a boat's side, a balloon's basket) instead of a door.
 - `Building::inside` is counted each tick from the units inside (`GameMap::count_inside`): a built hut or
   drum tower with people inside smokes from the top of its roof. The one in a drum tower stands on its lookout,
-  in view (buildings.md "On screen"). The tooltip shows `Braves: people inside/room`.
+  in view (buildings.md "On screen"). The tooltip shows `Braves: people inside/room` (planned: a people row, tooltips.md).
 - Trees under a building (plans included) do not grow back.
 
 ### Rules
 State on `Building` (huts only): `level` 1-3 (from the kind, `villager_hut` sizes), `occupants` (unit ids, in
-entry order), `breed` (green bar) and `grow` (red bar) progress. The hut's tooltip shows both bars; a large
+entry order), `breed` (green bar) and `grow` (red bar) progress. The hut's tooltip shows both bars (tooltips.md "Bars", blinking while blocked); a large
 hut (max size) hides the red bar, it does not show it at 0.
 
 1. **Entering** (`Order::Enter { building }` through `Command::OrderUnit`): any follower of the owner (not the

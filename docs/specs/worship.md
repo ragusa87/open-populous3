@@ -44,7 +44,8 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
 - A unit given another order stops praying and leaves; an assigned unit not counted yet takes its place, so the
   count stays at `TriggerCount` while enough are assigned (12 assigned, one moved away: 11 praying, still 8
   counted) [player].
-- Its reward is not drawn: the player does not know what it gives before it is granted [player]. Rewards: spells
+- Its reward is not drawn: the player does not know what it gives before it is granted [player].
+- Tooltip (tooltips.md): a people row of `TriggerCount` slots filled by the counted prayers, and the prayer bar. Rewards: spells
   for one use, mana, effects, a vehicle, revealed scenery and triggers (level-format.md) [files].
 - `NumOccurences` (0-4) is probably how many times it can be prayed at; 0 unlimited? [files, meaning unverified]
 
@@ -80,6 +81,7 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   192 towards 191, the top's from 192 towards 193 (points moving over 10 units between frames; the others are
   export noise). The generated pyramid slides a stone slab up its doorway (its top does not fold yet). Its phase
   does not rebuild the building views (`buildings::same_look`). Dev: `VAULT=progress:N|granted:T|spent`.
+- Tooltip (tooltips.md): a people row of one shaman slot, and the prayer bar of the player's tribe.
 - What it gives is drawn: an icon at its top, from the cursor icons (sprites.md: 38-57 spells, 58-65 buildings)
   [player]. The icon goes away once the reward is granted [player].
 
