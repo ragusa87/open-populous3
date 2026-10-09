@@ -234,6 +234,7 @@ pub(super) fn select_and_order(
     spell: Res<crate::hud::spells::SelectedSpell>,
     blueprint: Res<crate::blueprint::Blueprint>,
     tree: Res<crate::nature::HoveredTree>,
+    hovered: Res<crate::hover::Hovered>,
 ) {
     selection.retain(&map.0.units);
     let cursor = windows.iter().next().and_then(Window::cursor_position);
@@ -274,8 +275,13 @@ pub(super) fn select_and_order(
                 None => {
                     let ray = cam.0.viewport_to_world(cam.1, c).ok();
                     let at = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)).map(world_units);
-                    // One of the player's buildings wins over a tree in front of or behind it.
-                    if let Some(orders) = at.and_then(|at| building_click(&map.0, &selection.units, at)) {
+                    // One of the player's buildings wins over a tree in front of or behind it; a building is
+                    // clicked anywhere on its model (as hovered), not only on its footprint.
+                    let on_building = match hovered.0 {
+                        Some(crate::hover::HoverTarget::Building(i)) => map.0.buildings.get(i).map(|b| b.centre()),
+                        _ => None,
+                    };
+                    if let Some(orders) = on_building.or(at).and_then(|at| building_click(&map.0, &selection.units, at)) {
                         moves = orders;
                     } else if let Some(i) = tree.tree {
                         moves = map.0.cut_orders(PLAYER, &selection.units, i);

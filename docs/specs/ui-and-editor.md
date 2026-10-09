@@ -122,7 +122,10 @@ looks at the shaman. Selected units show a health bar; the cursor shows the coun
 
 ## Hover halo (`hover.rs`)
 The thing under the mouse gets a warm white outline (`Hovered`, picked each frame: a unit first, then a wood pile,
-a tree, a totem, a building; a totem when the ground under the cursor is within `TOTEM_MARGIN` of its centre). What can be hovered is a `Hoverable { health }` component put on the views when they are
+a tree, a totem, a building; a totem when the ground under the cursor is within `TOTEM_MARGIN` of its centre; a
+building anywhere in the box its model covers on screen, footprint up to its model's height, the nearest when several
+overlap (`building_on_screen`): with the low camera the ground under a tower's top lies behind it; a plan by the
+ground under the cursor). A left click on a building uses the hovered one the same way (`building_click`). What can be hovered is a `Hoverable { health }` component put on the views when they are
 spawned, not a rule in the picking: every living unit not already selected (`health`: the player's own also show their health bar),
 wood pieces, trees, totems and every building, any tribe or neutral (the player's plans are hovered too, for their tooltip,
 but have no outline). The reincarnation site gets
