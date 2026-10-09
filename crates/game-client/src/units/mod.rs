@@ -42,6 +42,8 @@ const LANDING_HEIGHT: f32 = 0.2;
 /// How far (cells) sprites are pulled towards the camera: ground rising less than this in front
 /// of the feet does not cut them.
 const PULL_TO_EYE: f32 = 0.6;
+/// How far (cells) a unit up a lookout is pulled towards the camera, out of the tower's middle.
+pub const PERCH_PULL: f32 = 0.7;
 
 /// Fixed-step simulation clock, plus what the views need to draw between two ticks.
 #[derive(Resource, Default)]
@@ -281,12 +283,26 @@ fn respawn_views(
 }
 
 #[allow(clippy::too_many_arguments)]
-/// A unit standing in a built building is not seen (walking in or out by the door it is, and in a
-/// building under construction, open, it is).
+/// A unit standing in a built building is not seen (walking in or out by the door it is, in a
+/// building under construction, open, it is, and up a tower's lookout it is: `standing_in`).
 pub fn hidden_inside(map: &game_core::map::GameMap, u: &game_core::unit::Unit) -> bool {
+    standing_in(map, u).is_some_and(|b| crate::buildings::lookout(b.kind).is_none())
+}
+
+/// The built building a unit stands in (not walking in or out of it).
+pub fn standing_in<'a>(map: &'a game_core::map::GameMap, u: &game_core::unit::Unit) -> Option<&'a game_core::building::Building> {
     use game_core::unit::Action;
-    let built = |site| map.building_at_corner(site).is_some_and(|b| map.buildings[b].stage() == game_core::building::Stage::Built);
-    u.inside.is_some_and(|i| built(i.site)) && !matches!(u.action, Action::Walking { .. } | Action::Stranded { .. } | Action::Entering { .. })
+    if matches!(u.action, Action::Walking { .. } | Action::Stranded { .. } | Action::Entering { .. }) {
+        return None;
+    }
+    let b = &map.buildings[map.building_at_corner(u.inside?.site)?];
+    (b.stage() == game_core::building::Stage::Built).then_some(b)
+}
+
+/// Where a unit up a lookout is drawn (map position, height in cells), if it is up one.
+fn perched(map: &game_core::map::GameMap, heights: &crate::buildings::ModelHeights, u: &game_core::unit::Unit) -> Option<(Vec2, f32)> {
+    let b = standing_in(map, u)?;
+    crate::buildings::perch(b, *heights.0.get(&(b.x, b.z))?)
 }
 
 fn animate_views(
@@ -301,12 +317,13 @@ fn animate_views(
     mut mats: ResMut<Assets<StandardMaterial>>,
     selection: Res<Selection>,
     hovered: Res<crate::hover::Hovered>,
+    heights: Res<crate::buildings::ModelHeights>,
 ) {
     let units = &map.0.units;
     let facing_camera = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
     for (view, mut ground, mut t, _) in &mut views {
         let Some(u) = units.get(view.0) else { continue };
-        ground.at = clock.cell_pos(view.0, u);
+        ground.at = perched(&map.0, &heights, u).map_or_else(|| clock.cell_pos(view.0, u), |p| p.0);
         t.rotation = facing_camera;
     }
     let shamans = worship::shamans(units);
@@ -372,13 +389,17 @@ fn pull_to_eye(
     eye: Query<&Transform, (With<GameCamera>, Without<UnitView>)>,
     views: Query<(&UnitView, &Grounded, &Transform, &Children)>,
     mut parts: Query<(&mut Transform, Has<HealthBar>), (Or<(With<UnitSprite>, With<HealthBar>)>, Without<UnitView>, Without<GameCamera>)>,
+    heights: Res<crate::buildings::ModelHeights>,
 ) {
     let Ok(eye) = eye.single() else { return };
     for (unit, ground, view, children) in &views {
         let Some(feet) = render_pos(&map.0.terrain, ground, rig.focus, &params.0) else { continue };
-        let (offset, scale) = toward_eye(feet, eye.translation, PULL_TO_EYE);
-        let lift = map.0.units.get(unit.0).map_or(0.0, |u| landing_lift(&u.action, clock.alpha()));
-        let local = view.rotation.inverse() * offset + Vec3::Y * lift * scale;
+        let u = map.0.units.get(unit.0);
+        // Up a lookout: on its platform, pulled further so the building around him never hides him.
+        let up = u.and_then(|u| perched(&map.0, &heights, u)).map(|p| Vec3::Y * p.1);
+        let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, if up.is_some() { PERCH_PULL } else { PULL_TO_EYE });
+        let lift = u.map_or(0.0, |u| landing_lift(&u.action, clock.alpha()));
+        let local = view.rotation.inverse() * (offset + up.unwrap_or_default()) + Vec3::Y * lift * scale;
         for &child in children {
             if let Ok((mut t, bar)) = parts.get_mut(child) {
                 t.translation = local + if bar { Vec3::Y * BAR_HEIGHT * scale } else { Vec3::ZERO };

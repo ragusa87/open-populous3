@@ -46,8 +46,9 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
 - Vehicles (boats, balloons) will hold people the same way: `Unit::inside` will name its holder (a building's
   stored corner today; a holder enum with vehicle ids once vehicles exist), each with its room and its way in
   (a boat's side, a balloon's basket) instead of a door.
-- `Building::inside` is counted each tick from the units inside (`GameMap::count_inside`): a built hut with
-  people inside smokes from its chimney. The tooltip shows `Braves: people inside/room`.
+- `Building::inside` is counted each tick from the units inside (`GameMap::count_inside`): a built hut or
+  drum tower with people inside smokes from the top of its roof. The one in a drum tower stands on its lookout,
+  in view (buildings.md "On screen"). The tooltip shows `Braves: people inside/room`.
 - Trees under a building (plans included) do not grow back.
 
 ### Rules

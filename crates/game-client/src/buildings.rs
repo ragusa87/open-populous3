@@ -73,6 +73,31 @@ pub fn facing_yaw(facing: u8) -> f32 {
 #[derive(Component)]
 pub struct BuildingView(pub usize);
 
+/// Each drawn building's model height (cells), by stored corner: where a lookout stands.
+#[derive(Resource, Default)]
+pub struct ModelHeights(pub HashMap<(u16, u16), f32>);
+
+/// Where someone inside a building of `kind` stands to be seen: on a tower's lookout platform, as an
+/// offset in its own frame (cells, x and z) and a fraction of its model's height. None: out of sight.
+pub fn lookout(kind: BuildingKind) -> Option<(Vec2, f32)> {
+    match kind {
+        // The middle of the platform (the kit's at 1.365 of 2.45 cells), drawn pulled towards the camera
+        // so the drum never hides him (`units::PERCH_PULL`).
+        BuildingKind::DrumTower => Some((Vec2::ZERO, 0.56)),
+        _ => None,
+    }
+}
+
+/// Where a unit inside the building `b` (model `height` cells tall) is drawn: map position (cells)
+/// and height above the ground (cells); None if it is out of sight.
+pub fn perch(b: &Building, height: f32) -> Option<(Vec2, f32)> {
+    let (offset, fraction) = lookout(b.kind)?;
+    let cell = WORLD_UNITS_PER_CELL as f32;
+    let (cx, cz) = b.centre();
+    let at = Vec2::new(cx as f32, cz as f32) / cell + crate::blueprint::turn_local(offset, b.facing);
+    Some((at, height * fraction))
+}
+
 /// The white mark of the building at this index of `GameMap::buildings`, a blueprint: redrawn
 /// over the ground every frame (it follows the planet's curve as the camera moves).
 #[derive(Component)]
@@ -98,7 +123,8 @@ pub struct BuildingsPlugin;
 
 impl Plugin for BuildingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_tooltip)
+        app.init_resource::<ModelHeights>()
+            .add_systems(Startup, spawn_tooltip)
             .add_systems(Update, building_tooltip.after(crate::hover::HoverSystems).in_set(crate::menu::Gameplay))
             .add_systems(Update, (respawn_buildings, place_labels).chain())
             .add_systems(Update, (shake_walls, rise_smoke))
@@ -197,11 +223,13 @@ fn respawn_buildings(
     mut kit_skin: Local<Option<Handle<StandardMaterial>>>,
     mut kit: Local<KitMeshes>,
     mut drawn: Local<Vec<Building>>,
+    mut heights: ResMut<ModelHeights>,
 ) {
     if !map.is_changed() && *drawn == map.0.buildings {
         return;
     }
     drawn.clone_from(&map.0.buildings);
+    heights.0.clear();
     for e in &existing {
         commands.entity(e).despawn();
     }
@@ -272,6 +300,7 @@ fn respawn_buildings(
         };
         let inner = look.inner.map(|mesh| (mesh, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, cull_mode: Some(Face::Front), double_sided: true, ..default() })));
         let top = look.top;
+        heights.0.insert((b.x, b.z), top.y);
         view.with_children(|v| {
             let mut body = v.spawn((Transform::default(), Visibility::Inherited));
             if let Some(shown) = look.shown {
@@ -283,7 +312,7 @@ fn respawn_buildings(
             if b.shaking > 0 {
                 body.insert(Shaking);
             }
-            if stage == Stage::Built && b.inside > 0 && matches!(kind, BuildingKind::Hut { .. }) {
+            if stage == Stage::Built && b.inside > 0 && kind.capacity() > 0 {
                 for k in 0..PUFFS {
                     v.spawn((Puff { chimney: top, phase: k as f32 / PUFFS as f32 }, Mesh3d(puff.clone()), MeshMaterial3d(smoke.clone()), NotShadowCaster, crate::hover::NoOutline, Transform::from_translation(top)));
                 }
@@ -449,6 +478,14 @@ fn place_labels(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tower_lookout_is_on_its_platform() {
+        let tower = |facing| Building::new(BuildingKind::DrumTower, 0, 20 * 512, 20 * 512, facing);
+        let (at, lift) = perch(&tower(0), 2.45).unwrap();
+        assert!((at - Vec2::new(20.5, 20.5)).length() < 1e-5 && (lift - 1.372).abs() < 1e-3);
+        assert!(perch(&Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0), 2.0).is_none(), "huts hide their people");
+    }
 
     #[test]
     fn tooltip_counts_braves_and_wood() {

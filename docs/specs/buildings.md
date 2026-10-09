@@ -81,7 +81,8 @@ By stage (`Building::stage`, client `construction.rs`):
 - Attacked (`shaking` > 0, someone inside damaging it): the model (not the structure) rocks about its base, the
   walls move and the base stays: a blow every 0.7 s tilts it by up to 0.012 rad, a quick wobble dying out before
   the next, in a new direction each time (`blow_tilt`).
-- A built hut with people inside (`inside` > 0): grey puffs rise from the middle of its highest points
+- A built building people stay in (huts, drum towers: `BuildingKind::capacity`) with people inside (`inside` >
+  0): grey puffs rise from the middle of its highest points
   (`chimney`, the top of the roof; the generated hut has a central raised smoke vent), growing and drifting, then shrinking away (`puff_at`). Other kinds show
   nothing for busy yet.
 Kit meshes are made the first time one shows and shared per kind and owner: the built model and the timber frame
@@ -213,7 +214,9 @@ pick one besides selecting it on the map.
   (`selection::ground_click`); Shift + right click on a plan cancels it (`shift_right_click`, after the camp
   fires). Wood on a pile is drawn as wood pieces around the door (`Building::pile_point`, `wood::PileView`).
   Building views are redone whenever a building changes. Units standing inside a built building are not
-  drawn nor picked (`units::hidden_inside`); inside a building under construction (open frame), and walking in
+  drawn nor picked (`units::hidden_inside`), except up a lookout (`buildings::lookout`: a drum tower's
+  platform, at 0.56 of the drawn model's height, `ModelHeights`), where they stand in its middle, pulled
+  `PERCH_PULL` (0.7 cell) towards the camera so the drum or the walls never hide them; inside a building under construction (open frame), and walking in
   or out, they are. Dev: `BUILD=hut@90,62 BUILD_TICKS=150` places a plan
   with all the player's braves and runs that many ticks before the shot.
 

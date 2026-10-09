@@ -220,7 +220,8 @@ impl GameMap {
         // The showcase's occupied buildings get real people inside.
         let occupied: Vec<Building> = map.buildings.iter().filter(|b| b.inside > 0).cloned().collect();
         for b in occupied {
-            for _ in 0..b.inside {
+            let room = if b.kind.capacity() > 0 { b.kind.capacity() } else { b.inside };
+            for _ in 0..b.inside.min(room) {
                 let id = map.units.len() as u32 + 1;
                 let mut u = Unit::new(id, 0, UnitKind::Brave, b.centre());
                 u.inside = Some(crate::unit::Inside { site: (b.x, b.z), door: b.door() });
