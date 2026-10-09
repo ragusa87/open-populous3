@@ -71,9 +71,10 @@ pub fn tree_at(cursor: Vec2, trees: &[TreeOnScreen]) -> Option<usize> {
         .map(|t| t.index)
 }
 
-/// What the tooltip says about a tree of `size`.
-pub fn wood_label(size: u8) -> String {
-    format!("Tree: {size}/{MAX_SIZE} wood")
+/// What the tooltip says about a tree's wood (`GameMap::wood_slots`): its current wood only, the
+/// most it could hold is not known (docs/specs/tooltips.md).
+pub fn wood_label(wood: game_core::occupancy::Wood) -> String {
+    format!("Tree: {} wood", wood.filled)
 }
 
 #[derive(Resource)]
@@ -287,7 +288,8 @@ fn wood_tooltip(
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     match (hover.shown(time.elapsed_secs()).filter(|&i| i < map.0.trees.len()), cursor) {
         (Some(i), Some(c)) => {
-            text.0 = wood_label(map.0.trees[i].size);
+            let Some(wood) = map.0.wood_slots(game_core::occupancy::Holder::Tree(i)) else { return };
+            text.0 = wood_label(wood);
             (node.left, node.top) = (px(c.x + 16.0), px(c.y + 18.0));
             vis.set_if_neq(Visibility::Inherited);
         }
@@ -330,7 +332,7 @@ mod tests {
 
     #[test]
     fn label_counts_the_wood() {
-        assert_eq!(wood_label(3), "Tree: 3/4 wood");
+        assert_eq!(wood_label(game_core::occupancy::Wood { capacity: 3, filled: 3 }), "Tree: 3 wood");
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub mod campfire;
 pub mod command;
 pub mod enter;
 pub mod map;
+pub mod occupancy;
 pub mod path;
 pub mod placement;
 pub mod site;

@@ -147,7 +147,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 
 ## Tooltips ([tooltips.md](docs/specs/tooltips.md))
-- [ ] Rendered tooltip instead of text: name, slot rows with separators, bars on the left, toggle; one `SlotRow` model built by pure functions, one UI widget.
+- [ ] Rendered tooltip instead of text: name, slot rows with separators, bars on the left, toggle; one `SlotRow` model built from `GameMap::people_slots` / `wood_slots` (done, `game_core::occupancy`), one UI widget.
 - [ ] People rows: plans and sites (assigned braves), houses and drum towers (people inside), training huts (the trainee), pyramids (the shaman), totems (counted prayers), vehicles; clicking a filled slot selects that unit.
 - [ ] Wood rows: provided / cost on plans and sites, used on built buildings, plus the pieces still needed on a growing house; a tree's current wood only.
 - [ ] Long rows wrap after 10 slots, a row of 16 after 8.

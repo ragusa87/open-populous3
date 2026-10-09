@@ -167,7 +167,7 @@ Done:
 ### Tooltip
 Done (`buildings::building_label`, after resting the cursor `HOVER_SECS` on a building, plans included): the
 kind's name; for the player's buildings that take wood, `Braves: assigned/max` and `Wood: delivered/cost`, while
-a plan and under construction; once built, `Braves: inside/room` (huts only) and `Wood: n`, the wood in it
+a plan and under construction; once built, `Braves: inside/room` (huts, drum towers, and 1 for a training hut's trainee) and `Wood: n`, the wood in it
 (what dismantling gives back, raised when a hut grows). One `Braves` line either way. Other tribes' buildings show their name only. To do: the rendered tooltip of
 [tooltips.md](tooltips.md), a people row (assigned braves or people inside, clicking one selects it), a wood row
 and the Dismantle toggle (see "Dismantling"), also shown at once on a right click.

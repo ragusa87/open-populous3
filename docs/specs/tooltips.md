@@ -83,7 +83,11 @@ Toggled back while dismantling, it is built again.
 | Reincarnation site | none | | | |
 
 ## Model [ours]
-One `SlotRow { kind: People | Wood, slots, filled }` model, `filled` holding each filled slot's icon (and, for
+Done in the simulation: `game_core::occupancy`, `GameMap::people_slots(holder)` (`People { capacity, filled }`,
+unit ids in id order, at most `capacity`) and `GameMap::wood_slots(holder)` (`Wood { capacity, filled }`), for a
+`Holder::Building | Totem | Tree`; `occupancy::room` is a built building's people row (huts' room, 1 for a drum
+tower, a training hut and an unspent pyramid). Who counts is decided there, next to the rules; the text tooltips
+read them already. To do in the client: one `SlotRow { kind: People | Wood, slots, filled }` model, `filled` holding each filled slot's icon (and, for
 people, the unit id its click selects), built from the simulation each frame by pure, tested functions; one Bevy
 UI widget draws every row. Bars and the toggle the same way: a model from the simulation, one widget.
 

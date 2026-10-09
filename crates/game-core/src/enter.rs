@@ -60,7 +60,12 @@ impl GameMap {
 
     /// Living units in the building at `site`, standing or walking in (not those walking out).
     pub fn people_inside(&self, site: (u16, u16)) -> usize {
-        self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.site == site) && !matches!(u.action, Action::Walking { .. } | Action::Stranded { .. })).count()
+        self.units_inside(site).count()
+    }
+
+    /// The living units in the building at `site`, standing or walking in (not those walking out).
+    pub fn units_inside(&self, site: (u16, u16)) -> impl Iterator<Item = &Unit> {
+        self.units.iter().filter(move |u| u.is_alive() && u.inside.is_some_and(|i| i.site == site) && !matches!(u.action, Action::Walking { .. } | Action::Stranded { .. }))
     }
 
     /// Counts each building's people inside (`Building::inside`: a busy hut smokes).
