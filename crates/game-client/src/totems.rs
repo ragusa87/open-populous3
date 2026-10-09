@@ -21,8 +21,12 @@ const HALF: f32 = 0.4;
 const PILLAR: Vec3 = Vec3::new(0.45, 1.3, 0.45);
 const PILLAR_STONE: Color = Color::srgb(0.5, 0.48, 0.44);
 
+/// The view of the totem at this index of `GameMap::totems`, and the height of its top (cells).
 #[derive(Component)]
-struct TotemView;
+pub struct TotemView {
+    pub index: usize,
+    pub top: f32,
+}
 
 pub struct TotemsPlugin;
 
@@ -85,10 +89,11 @@ fn respawn_totems(
     let bank = objects.0.as_ref().filter(|_| material.is_some());
     let pillar = (meshes.add(Cuboid::from_size(PILLAR)), mats.add(StandardMaterial { base_color: PILLAR_STONE, perceptual_roughness: 0.95, ..default() }));
     let cell = WORLD_UNITS_PER_CELL as f32;
-    for t in &map.0.totems {
+    for (index, t) in map.0.totems.iter().enumerate() {
         let at = Vec2::new(t.x as f32, t.z as f32) / cell;
         let parts: Vec<_> = bank.map(|bank| totem_objects(t.kind).into_iter().filter_map(|i| bank.get(i)).collect()).unwrap_or_default();
-        let mut view = commands.spawn((TotemView, Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden));
+        let top = parts.iter().flat_map(|o| o.points.iter().map(|p| p[1])).max().map_or(PILLAR.y, |y| y as f32 / cell);
+        let mut view = commands.spawn((TotemView { index, top }, crate::hover::Hoverable::default(), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden));
         let (Some(mat), false) = (material.clone(), parts.is_empty()) else {
             view.with_child((Mesh3d(pillar.0.clone()), MeshMaterial3d(pillar.1.clone()), Transform::from_xyz(0.0, PILLAR.y / 2.0, 0.0)));
             continue;
@@ -99,7 +104,7 @@ fn respawn_totems(
             let flames = flame::flame_mesh(obj);
             if !flames.indices.is_empty() {
                 let frame = flame_frames.get(&levels, theme, &mut images, &mut mats)[offset].clone();
-                view.with_child((Flame { offset }, Mesh3d(meshes.add(to_mesh(flames))), MeshMaterial3d(frame), NotShadowCaster));
+                view.with_child((Flame { offset }, Mesh3d(meshes.add(to_mesh(flames))), MeshMaterial3d(frame), NotShadowCaster, crate::hover::NoOutline));
             }
         }
     }

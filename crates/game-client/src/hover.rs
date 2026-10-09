@@ -1,5 +1,5 @@
 //! What the mouse is over (`Hovered`) and its halo: a light outline around views marked `Hoverable`
-//! (every unit, wood piles, trees, every building; never the reincarnation site). Sprites (units, piles) get a
+//! (every unit, wood piles, trees, totems, every building; never the reincarnation site). Sprites (units, piles) get a
 //! quad behind them that draws only the pixels just outside their silhouette (`hover_outline.wgsl`);
 //! 3D models (trees, buildings) get an inverted hull: their meshes pushed out along the normals, front
 //! faces culled, so only a rim shows around them.
@@ -33,6 +33,13 @@ const SPRITE_MARGIN_PX: f32 = 2.5;
 const HULL_WIDTH: f32 = 0.03;
 /// A click this close to a building's footprint (world units) is on it.
 const BUILDING_MARGIN: i32 = 128;
+/// The cursor on the ground this close to a totem's centre (world units, either axis) is on it.
+const TOTEM_MARGIN: i32 = 320;
+
+/// The hoverable views of buildings, trees and totems (one query: systems take at most 16 parameters).
+type HoverableViews<'w, 's> = Query<'w, 's, (Option<&'static BuildingView>, Option<&'static TreeView>, Option<&'static crate::totems::TotemView>), With<Hoverable>>;
+/// Every tree, building and totem view, with its entity.
+type ModelViews<'w, 's> = Query<'w, 's, (Entity, Option<&'static TreeView>, Option<&'static BuildingView>, Option<&'static crate::totems::TotemView>)>;
 
 /// The thing under the mouse that gets a halo, by its index in its `GameMap` list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +47,7 @@ pub enum HoverTarget {
     Unit(usize),
     Wood(usize),
     Tree(usize),
+    Totem(usize),
     Building(usize),
 }
 
@@ -110,12 +118,20 @@ impl Plugin for HoverPlugin {
 }
 
 /// What gets the halo when the cursor is on each of these: a unit first, then a wood pile, a tree,
-/// a building.
-pub fn pick(unit: Option<usize>, wood: Option<usize>, tree: Option<usize>, building: Option<usize>) -> Option<HoverTarget> {
+/// a totem, a building.
+pub fn pick(unit: Option<usize>, wood: Option<usize>, tree: Option<usize>, totem: Option<usize>, building: Option<usize>) -> Option<HoverTarget> {
     unit.map(HoverTarget::Unit)
         .or(wood.map(HoverTarget::Wood))
         .or(tree.map(HoverTarget::Tree))
+        .or(totem.map(HoverTarget::Totem))
         .or(building.map(HoverTarget::Building))
+}
+
+/// The totem standing within `TOTEM_MARGIN` of world point `at` (on the torus) that `hoverable`
+/// accepts (by index).
+pub fn totem_at(map: &GameMap, at: (u16, u16), hoverable: impl Fn(usize) -> bool) -> Option<usize> {
+    let near = |a: u16, b: u16| (a.wrapping_sub(b) as i16).unsigned_abs() as i32 <= TOTEM_MARGIN;
+    map.totems.iter().enumerate().position(|(i, t)| near(t.x, at.0) && near(t.z, at.1) && hoverable(i))
 }
 
 /// The first building whose footprint holds world point `at` and that `hoverable` accepts (by
@@ -124,7 +140,7 @@ pub fn building_at(map: &GameMap, at: (u16, u16), hoverable: impl Fn(usize) -> b
     map.buildings.iter().enumerate().position(|(i, b)| b.covers(at, BUILDING_MARGIN) && hoverable(i))
 }
 
-/// Dev: `HOVER=unit:3` (or `wood`, `tree`, `building` and an index in its `GameMap` list) puts the
+/// Dev: `HOVER=unit:3` (or `wood`, `tree`, `totem`, `building` and an index in its `GameMap` list) puts the
 /// halo there instead of under the mouse, for screenshots.
 pub fn parse_target(v: &str) -> Option<HoverTarget> {
     let (kind, index) = v.split_once(':')?;
@@ -134,6 +150,7 @@ pub fn parse_target(v: &str) -> Option<HoverTarget> {
         "wood" => HoverTarget::Wood(i),
         "tree" => HoverTarget::Tree(i),
         "building" => HoverTarget::Building(i),
+        "totem" => HoverTarget::Totem(i),
         _ => return None,
     })
 }
@@ -153,8 +170,7 @@ fn detect(
     cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     units: Query<(&UnitView, &GlobalTransform, &Visibility), With<Hoverable>>,
     woods: Query<&WoodView, With<Hoverable>>,
-    houses: Query<&BuildingView, With<Hoverable>>,
-    groves: Query<&TreeView, With<Hoverable>>,
+    views: HoverableViews,
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     params: Res<CurveParamsRes>,
@@ -186,9 +202,10 @@ fn detect(
         let wood = ground.and_then(|at| wood_index(&map.0, at)).filter(|&i| woods.iter().any(|w| w.0 == i));
         // Plans have no view to outline but are hovered for their tooltip.
         let plan = |i: usize| map.0.buildings[i].owner == PLAYER && map.0.buildings[i].stage() == Stage::Blueprint;
-        let building = ground.and_then(|at| building_at(&map.0, at, |i| plan(i) || houses.iter().any(|b| b.0 == i)));
-        let tree = tree.tree.filter(|&i| groves.iter().any(|t| t.0 == i));
-        pick(unit, wood, tree, building)
+        let building = ground.and_then(|at| building_at(&map.0, at, |i| plan(i) || views.iter().any(|(b, _, _)| b.is_some_and(|b| b.0 == i))));
+        let tree = tree.tree.filter(|&i| views.iter().any(|(_, t, _)| t.is_some_and(|t| t.0 == i)));
+        let totem = ground.and_then(|at| totem_at(&map.0, at, |i| views.iter().any(|(_, _, t)| t.is_some_and(|t| t.index == i))));
+        pick(unit, wood, tree, totem, building)
     });
     hovered.set_if_neq(Hovered(target));
 }
@@ -206,8 +223,7 @@ fn draw_halo(
     unit_sprites: Query<(Entity, &UnitSprite)>,
     wood_views: Query<(&WoodView, &Children)>,
     wood_bodies: Query<Entity, With<WoodBody>>,
-    trees: Query<(Entity, &TreeView)>,
-    buildings: Query<(Entity, &BuildingView)>,
+    models: ModelViews,
     children: Query<&Children>,
     shapes: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>, &GlobalTransform), (Without<OutlinePart>, Without<NoOutline>)>,
     mut parts: Query<(Entity, &ChildOf, &mut Mesh3d, Option<&mut MeshMaterial3d<SpriteOutline>>), With<OutlinePart>>,
@@ -218,8 +234,9 @@ fn draw_halo(
         _ => None,
     };
     let model = match hovered.0 {
-        Some(HoverTarget::Tree(i)) => trees.iter().find(|(_, t)| t.0 == i).map(|(e, _)| e),
-        Some(HoverTarget::Building(i)) => buildings.iter().find(|(_, b)| b.0 == i).map(|(e, _)| e),
+        Some(HoverTarget::Tree(i)) => models.iter().find(|(_, t, _, _)| t.is_some_and(|t| t.0 == i)).map(|(e, ..)| e),
+        Some(HoverTarget::Building(i)) => models.iter().find(|(_, _, b, _)| b.is_some_and(|b| b.0 == i)).map(|(e, ..)| e),
+        Some(HoverTarget::Totem(i)) => models.iter().find(|(_, _, _, t)| t.is_some_and(|t| t.index == i)).map(|(e, ..)| e),
         _ => None,
     };
     let mut wanted: Vec<(Entity, Handle<Mesh>, Option<Handle<SpriteOutline>>)> = Vec::new();
@@ -335,11 +352,23 @@ mod tests {
 
     #[test]
     fn a_unit_wins_over_wood_trees_and_buildings() {
-        assert_eq!(pick(Some(3), Some(1), Some(2), Some(0)), Some(HoverTarget::Unit(3)));
-        assert_eq!(pick(None, Some(1), Some(2), Some(0)), Some(HoverTarget::Wood(1)));
-        assert_eq!(pick(None, None, Some(2), Some(0)), Some(HoverTarget::Tree(2)));
-        assert_eq!(pick(None, None, None, Some(0)), Some(HoverTarget::Building(0)));
-        assert_eq!(pick(None, None, None, None), None);
+        assert_eq!(pick(Some(3), Some(1), Some(2), Some(5), Some(0)), Some(HoverTarget::Unit(3)));
+        assert_eq!(pick(None, Some(1), Some(2), Some(5), Some(0)), Some(HoverTarget::Wood(1)));
+        assert_eq!(pick(None, None, Some(2), Some(5), Some(0)), Some(HoverTarget::Tree(2)));
+        assert_eq!(pick(None, None, None, Some(5), Some(0)), Some(HoverTarget::Totem(5)));
+        assert_eq!(pick(None, None, None, None, Some(0)), Some(HoverTarget::Building(0)));
+        assert_eq!(pick(None, None, None, None, None), None);
+    }
+
+    #[test]
+    fn a_totem_is_under_the_cursor_near_its_centre_across_the_seam() {
+        use game_core::totem::{Totem, TotemKind};
+        let mut map = GameMap::sandbox_worship();
+        map.totems = vec![Totem::new(TotemKind::StoneHead, (100, 30000)), Totem::new(TotemKind::Totem, (40000, 40000))];
+        assert_eq!(totem_at(&map, (100 + TOTEM_MARGIN as u16, 30000), |_| true), Some(0));
+        assert_eq!(totem_at(&map, (65500, 30100), |_| true), Some(0), "across the map's seam");
+        assert_eq!(totem_at(&map, (100 + TOTEM_MARGIN as u16 + 1, 30000), |_| true), None);
+        assert_eq!(totem_at(&map, (40000, 40000), |i| i != 1), None, "no view to hover");
     }
 
     #[test]

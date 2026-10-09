@@ -53,6 +53,7 @@ pub enum Icon {
 pub enum Target {
     Building(usize),
     Tree(usize),
+    Totem(usize),
 }
 
 /// One slot: its icon, the unit a click on it selects, and whether that unit is selected.
@@ -123,11 +124,21 @@ pub fn tree_model(map: &GameMap, i: usize) -> Option<TooltipModel> {
     map.wood_slots(Holder::Tree(i)).map(|wood| TooltipModel { lines: vec!["Tree".to_string()], rows: vec![wood_row(wood)] })
 }
 
+/// A totem's tooltip: its name and its places for prayers (`Totem::prayers`, brave shapes, or the
+/// shaman's for those only she prays at), filled by those counted; never its reward.
+pub fn totem_model(map: &GameMap, i: usize, selected: &[u32]) -> Option<TooltipModel> {
+    let totem = map.totems.get(i)?;
+    let placeholder = if totem.shaman_only { UnitKind::Shaman } else { UnitKind::Brave };
+    let rows = map.people_slots(Holder::Totem(i)).map(|p| people_row(map, &p, placeholder, selected)).into_iter().collect();
+    Some(TooltipModel { lines: vec![totem.kind.name().to_string()], rows })
+}
+
 /// What `target` shows; None when it has nothing to show.
 fn model_of(map: &GameMap, target: Target, selected: &[u32]) -> Option<TooltipModel> {
     match target {
         Target::Building(i) => (i < map.buildings.len()).then(|| building_model(map, i, selected)),
         Target::Tree(i) => tree_model(map, i),
+        Target::Totem(i) => totem_model(map, i, selected),
     }
 }
 
@@ -290,6 +301,7 @@ fn show_tooltip(
     views: Query<(&BuildingView, &GlobalTransform)>,
     trees: Query<(&TreeView, &GlobalTransform, &Children)>,
     tree_models: Query<&TreeModel>,
+    totems: Query<(&crate::totems::TotemView, &GlobalTransform)>,
     selection: Res<Selection>,
     mut state: Local<TooltipState>,
     mut icons: ResMut<IconImages>,
@@ -301,6 +313,7 @@ fn show_tooltip(
     let target = match hovered.0 {
         Some(crate::hover::HoverTarget::Building(i)) if i < map.0.buildings.len() => Some(Target::Building(i)),
         Some(crate::hover::HoverTarget::Tree(i)) if i < map.0.trees.len() => Some(Target::Tree(i)),
+        Some(crate::hover::HoverTarget::Totem(i)) if i < map.0.totems.len() => Some(Target::Totem(i)),
         _ => None,
     };
     if target != state.hovered_since.0 {
@@ -326,6 +339,10 @@ fn show_tooltip(
                 let (_, gt, children) = trees.iter().find(|(v, _, _)| v.0 == i)?;
                 let full = children.iter().find_map(|c| tree_models.get(c).ok())?.full_height;
                 gt.translation() + Vec3::Y * size_factor(map.0.trees[i].size) * full
+            }
+            Target::Totem(i) => {
+                let (view, gt) = totems.iter().find(|(v, _)| v.index == i)?;
+                gt.translation() + gt.up() * view.top
             }
         };
         cam.world_to_viewport(cam_t, top).ok()
@@ -469,6 +486,17 @@ mod tests {
         assert_eq!(icons(&model.rows[0]), vec![Icon::Wood; 3], "no placeholders: its capacity is not known");
         map.trees[0].size = 0;
         assert_eq!(tree_model(&map, 0), None, "no wood: no tooltip");
+    }
+
+    #[test]
+    fn a_totem_shows_its_places_for_prayers_never_its_reward() {
+        let map = GameMap::sandbox_worship();
+        let eight = map.totems.iter().position(|t| t.prayers == 8).unwrap();
+        let model = totem_model(&map, eight, &[]).unwrap();
+        assert_eq!(model.lines.len(), 1, "its name only");
+        assert_eq!(icons(&model.rows[0]), vec![Icon::Placeholder(UnitKind::Brave); 8]);
+        let shaman = map.totems.iter().position(|t| t.shaman_only).unwrap();
+        assert_eq!(icons(&totem_model(&map, shaman, &[]).unwrap().rows[0]), vec![Icon::Placeholder(UnitKind::Shaman)]);
     }
 
     #[test]

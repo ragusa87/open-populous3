@@ -45,7 +45,8 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   count stays at `TriggerCount` while enough are assigned (12 assigned, one moved away: 11 praying, still 8
   counted) [player].
 - Its reward is not drawn: the player does not know what it gives before it is granted [player].
-- Tooltip (tooltips.md): a people row of `TriggerCount` slots filled by the counted prayers (the others assigned
+- Tooltip (tooltips.md, done but for the bar and the filled places): its name, a people row of `TriggerCount`
+  places, brave shapes or the shaman's for shaman-only totems, filled by the counted prayers (the others assigned
   do not show), and the prayer bar. Rewards: spells
   for one use, mana, effects, a vehicle, revealed scenery and triggers (level-format.md) [files].
 - `NumOccurences` (0-4) is probably how many times it can be prayed at; 0 unlimited? [files, meaning unverified]
