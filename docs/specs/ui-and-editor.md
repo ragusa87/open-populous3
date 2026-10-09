@@ -69,6 +69,8 @@ The player's units at a glance, as a matrix in the panel's width (204 px), and a
   2. Idle, Housed (inside a hut), Working (on any task: building, fetching or carrying wood, cutting, training,
      praying at a totem or vault...) [ours: what counts as working].
   3. In boat, In balloon: aboard a vehicle (once vehicles exist).
+  With the original files each label is the row's icon, `hfx0-0.dat` 1084 Selected, 1085 Idle, 1086 Housed,
+  1087 Working, 1088 In balloon, 653 In boat (sprites.md); the text labels otherwise (`--no-original`).
 - Look ("D1"): each number on a tile like the spell tiles (`PARCHMENT` panel, light tiles with a dark brown
   border), the totals on dark brown tiles with light figures; the Selected row on brighter gold tiles, its label
   in bold, its total darker; zeros dimmed. Labels never wrap.

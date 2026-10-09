@@ -74,7 +74,9 @@ the camp fire's (66) while placing one (`plan_sprite`).
 ## `data/hfx0-0.dat` (1615 sprites: effects, map things, HUD art)
 Same palette. Identified: 2-3 dry plants, 22 a flat dark smear (shadow of 23?), 23 a pile of logs (17 x 11, a piece of
 wood on the ground: `catalog::WOOD_PILE_SPRITE`), 90-93 fire, 107-111 spell names, 187-210 build/wood action icons,
-1030-1089 spell and building glyphs, 1090-1600 spell effects (dust, explosions, swarm...).
+639-656 gold state icons, each plain then outlined (653 a boat), 664-675 six unit figures (plain / outlined
+pairs, kinds not identified yet; 75-80 the same in teal), 1030-1083 spell and building glyphs, 1084-1088 the Stats
+tab's row labels (selected, idle, in a house, working, in a balloon; in a boat: 653), 1090-1600 spell effects (dust, explosions, swarm...).
 The 3D objects have no wood pile: objects 0 and 12 are a camp fire (logs and a flame board), see objects.md.
 
 Alpha sprites: 1090..1499 and 1538..1592 are blended (same ranges in PopResourceEditor,
