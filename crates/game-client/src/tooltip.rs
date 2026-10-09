@@ -69,6 +69,46 @@ pub struct Slot {
 pub struct TooltipModel {
     pub lines: Vec<String>,
     pub rows: Vec<Vec<Slot>>,
+    pub bars: Vec<Bar>,
+}
+
+/// What a bar measures; it sets its colour and where it stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarKind {
+    /// Prayer progress of the player's tribe (pyramid, totem).
+    Prayer,
+    /// A house growing to its next size (once houses grow).
+    #[allow(dead_code)]
+    Growth,
+    /// A house making its next brave (once houses breed).
+    #[allow(dead_code)]
+    Birth,
+    /// The unit in a training hut.
+    Training,
+}
+
+impl BarKind {
+    /// Horizontal across the top of the tooltip (training), else vertical on its left.
+    pub fn horizontal(self) -> bool {
+        self == BarKind::Training
+    }
+
+    pub fn color(self) -> Color {
+        match self {
+            BarKind::Prayer => Color::srgb(0.95, 0.8, 0.3),
+            BarKind::Growth => Color::srgb(0.85, 0.25, 0.2),
+            BarKind::Birth => Color::srgb(0.3, 0.8, 0.3),
+            BarKind::Training => Color::srgb(0.35, 0.6, 1.0),
+        }
+    }
+}
+
+/// A progress bar: `fill` in thousandths, blinking while `blocked`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bar {
+    pub kind: BarKind,
+    pub fill: u16,
+    pub blocked: bool,
 }
 
 /// How many slots each line of a row of `n` holds: lines of 10, but a row of 16 as two of 8.
@@ -102,13 +142,17 @@ fn reward_name(reward: Reward) -> String {
 /// name only. People among `selected` are marked.
 pub fn building_model(map: &GameMap, i: usize, selected: &[u32]) -> TooltipModel {
     let b = &map.buildings[i];
-    let mut model = TooltipModel { lines: vec![b.kind.name()], rows: Vec::new() };
+    let mut model = TooltipModel { lines: vec![b.kind.name()], ..default() };
     let holder = Holder::Building(i);
     if let Some(vault) = b.vault {
         if let Some(reward) = vault.reward.filter(|_| !vault.is_spent()) {
             model.lines.push(format!("Teaches: {}", reward_name(reward)));
         }
         model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Shaman, selected)));
+        if let game_core::vault::VaultPhase::Praying { progress } = vault.phase {
+            let fill = (progress.min(vault.pray_time) as u32 * game_core::vault::FULL as u32 / vault.pray_time as u32) as u16;
+            model.bars.push(Bar { kind: BarKind::Prayer, fill, blocked: false });
+        }
         return model;
     }
     if b.owner != crate::units::PLAYER || b.kind.wood_cost() == 0 {
@@ -121,7 +165,7 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[u32]) -> TooltipModel
 
 /// A tree's tooltip: its name and its current wood (none for a tree without wood).
 pub fn tree_model(map: &GameMap, i: usize) -> Option<TooltipModel> {
-    map.wood_slots(Holder::Tree(i)).map(|wood| TooltipModel { lines: vec!["Tree".to_string()], rows: vec![wood_row(wood)] })
+    map.wood_slots(Holder::Tree(i)).map(|wood| TooltipModel { lines: vec!["Tree".to_string()], rows: vec![wood_row(wood)], ..default() })
 }
 
 /// A totem's tooltip: its name and its places for prayers (`Totem::prayers`, brave shapes, or the
@@ -130,7 +174,8 @@ pub fn totem_model(map: &GameMap, i: usize, selected: &[u32]) -> Option<TooltipM
     let totem = map.totems.get(i)?;
     let placeholder = if totem.shaman_only { UnitKind::Shaman } else { UnitKind::Brave };
     let rows = map.people_slots(Holder::Totem(i)).map(|p| people_row(map, &p, placeholder, selected)).into_iter().collect();
-    Some(TooltipModel { lines: vec![totem.kind.name().to_string()], rows })
+    let bars = vec![Bar { kind: BarKind::Prayer, fill: 0, blocked: false }];
+    Some(TooltipModel { lines: vec![totem.kind.name().to_string()], rows, bars })
 }
 
 /// What `target` shows; None when it has nothing to show.
@@ -272,7 +317,7 @@ impl Plugin for TooltipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IconImages>()
             .add_systems(Startup, spawn_tooltip)
-            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot).in_set(crate::menu::Gameplay));
+            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, blink_bars).in_set(crate::menu::Gameplay));
     }
 }
 
@@ -360,40 +405,85 @@ fn show_tooltip(
     }
     commands.entity(entity).despawn_children();
     commands.entity(entity).with_children(|t| {
-        for (k, line) in model.lines.iter().enumerate() {
-            t.spawn((Text::new(line.clone()), TextFont { font_size: FontSize::Px(if k == 0 { 14.0 } else { 12.0 }), ..default() }, TextColor(Color::WHITE), TextShadow::default(), Pickable::IGNORE));
+        for bar in model.bars.iter().filter(|b| b.kind.horizontal()) {
+            spawn_bar(t, *bar);
         }
-        for row in &model.rows {
-            t.spawn((Node { height: px(1), margin: UiRect::vertical(px(1)), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)), Pickable::IGNORE));
-            let mut start = 0;
-            for len in line_lengths(row.len()) {
-                t.spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(1), ..default() }, Pickable::IGNORE)).with_children(|line| {
-                    let people = row.iter().any(|s| matches!(s.icon, Icon::Unit { .. } | Icon::Placeholder(_)));
-                    for slot in &row[start..start + len] {
-                        let mut s = line.spawn((Node { flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE));
-                        s.with_children(|cell| {
-                            if people {
-                                let arrow = (Node { width: px(ICON_W as f32 * ICON_SCALE), height: px(ARROW_H), ..default() }, Pickable::IGNORE);
-                                if slot.selected {
-                                    cell.spawn((ImageNode::new(icons.get(Icon::Selected, &mut images)).with_rect(Rect::new(0.0, 12.0, ICON_W as f32, 16.0)), arrow));
-                                } else {
-                                    cell.spawn(arrow);
-                                }
-                            }
-                            let mut icon = cell.spawn((ImageNode::new(icons.get(slot.icon, &mut images)), Node { width: px(ICON_W as f32 * ICON_SCALE), height: px(ICON_H as f32 * ICON_SCALE), ..default() }));
-                            if let Some(id) = slot.unit {
-                                icon.insert((SlotUnit(id), Interaction::default()));
-                            } else {
-                                icon.insert(Pickable::IGNORE);
-                            }
-                        });
-                    }
-                });
-                start += len;
+        t.spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(5), ..default() }, Pickable::IGNORE)).with_children(|r| {
+            for bar in model.bars.iter().filter(|b| !b.kind.horizontal()) {
+                spawn_bar(r, *bar);
             }
-        }
+            r.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(3), ..default() }, Pickable::IGNORE)).with_children(|t| spawn_content(t, &model, &mut icons, &mut images));
+        });
     });
     state.model = Some(model);
+}
+
+/// Width of a vertical bar, height of a horizontal one, in pixels.
+const BAR_THICKNESS: f32 = 6.0;
+/// A bar's fill blinks this many times a second while blocked.
+const BLINK_HZ: f32 = 2.0;
+
+/// A bar's filled part, blinking while its bar is blocked.
+#[derive(Component)]
+struct BarFill {
+    color: Color,
+    blocked: bool,
+}
+
+/// A bar: a dark track and its fill, vertical (filling upwards, as tall as the tooltip's content) or
+/// horizontal (filling to the right, as wide as the tooltip).
+fn spawn_bar(parent: &mut ChildSpawnerCommands, bar: Bar) {
+    let share = percent(bar.fill as f32 * 100.0 / game_core::vault::FULL as f32);
+    let (track, fill) = if bar.kind.horizontal() {
+        (Node { height: px(BAR_THICKNESS), ..default() }, Node { position_type: PositionType::Absolute, left: px(0), top: px(0), bottom: px(0), width: share, ..default() })
+    } else {
+        (Node { width: px(BAR_THICKNESS), ..default() }, Node { position_type: PositionType::Absolute, left: px(0), right: px(0), bottom: px(0), height: share, ..default() })
+    };
+    parent.spawn((track, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)), Pickable::IGNORE)).with_child((fill, BackgroundColor(bar.kind.color()), BarFill { color: bar.kind.color(), blocked: bar.blocked }, Pickable::IGNORE));
+}
+
+/// Blocked bars blink: their fill fades out and back in.
+fn blink_bars(time: Res<Time>, mut fills: Query<(&BarFill, &mut BackgroundColor)>) {
+    let on = (time.elapsed_secs() * BLINK_HZ).fract() < 0.5;
+    for (fill, mut color) in &mut fills {
+        let shown = if fill.blocked && !on { fill.color.with_alpha(0.2) } else { fill.color };
+        color.set_if_neq(BackgroundColor(shown));
+    }
+}
+
+/// The tooltip's text lines and slot rows.
+fn spawn_content(t: &mut ChildSpawnerCommands, model: &TooltipModel, icons: &mut IconImages, images: &mut Assets<Image>) {
+    for (k, line) in model.lines.iter().enumerate() {
+        t.spawn((Text::new(line.clone()), TextFont { font_size: FontSize::Px(if k == 0 { 14.0 } else { 12.0 }), ..default() }, TextColor(Color::WHITE), TextShadow::default(), Pickable::IGNORE));
+    }
+    for row in &model.rows {
+        t.spawn((Node { height: px(1), margin: UiRect::vertical(px(1)), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)), Pickable::IGNORE));
+        let people = row.iter().any(|s| matches!(s.icon, Icon::Unit { .. } | Icon::Placeholder(_)));
+        let mut start = 0;
+        for len in line_lengths(row.len()) {
+            t.spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(1), ..default() }, Pickable::IGNORE)).with_children(|line| {
+                for slot in &row[start..start + len] {
+                    line.spawn((Node { flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|cell| {
+                        if people {
+                            let arrow = (Node { width: px(ICON_W as f32 * ICON_SCALE), height: px(ARROW_H), ..default() }, Pickable::IGNORE);
+                            if slot.selected {
+                                cell.spawn((ImageNode::new(icons.get(Icon::Selected, images)).with_rect(Rect::new(0.0, 12.0, ICON_W as f32, 16.0)), arrow));
+                            } else {
+                                cell.spawn(arrow);
+                            }
+                        }
+                        let mut icon = cell.spawn((ImageNode::new(icons.get(slot.icon, images)), Node { width: px(ICON_W as f32 * ICON_SCALE), height: px(ICON_H as f32 * ICON_SCALE), ..default() }));
+                        if let Some(id) = slot.unit {
+                            icon.insert((SlotUnit(id), Interaction::default()));
+                        } else {
+                            icon.insert(Pickable::IGNORE);
+                        }
+                    });
+                }
+            });
+            start += len;
+        }
+    }
 }
 
 /// A click on a person's slot adds that unit to the selection.
@@ -460,9 +550,12 @@ mod tests {
         let model = building_model(&map, v, &[]);
         assert_eq!(model.lines[1], "Teaches: Temple");
         assert_eq!(model.rows, vec![vec![Slot { icon: Icon::Placeholder(UnitKind::Shaman), unit: None, selected: false }]]);
+        assert_eq!(model.bars, vec![Bar { kind: BarKind::Prayer, fill: 0, blocked: false }], "prayer bar, empty");
+        map.buildings[v].vault.as_mut().unwrap().phase = game_core::vault::VaultPhase::Praying { progress: 60 };
+        assert_eq!(building_model(&map, v, &[]).bars[0].fill, 600, "60 of 100");
         map.buildings[v].vault.as_mut().unwrap().grant();
         let spent = building_model(&map, v, &[]);
-        assert_eq!((spent.lines.len(), spent.rows.len()), (1, 0), "granted: its name only");
+        assert_eq!((spent.lines.len(), spent.rows.len(), spent.bars.len()), (1, 0, 0), "granted: its name only");
     }
 
     #[test]
@@ -497,6 +590,16 @@ mod tests {
         assert_eq!(icons(&model.rows[0]), vec![Icon::Placeholder(UnitKind::Brave); 8]);
         let shaman = map.totems.iter().position(|t| t.shaman_only).unwrap();
         assert_eq!(icons(&totem_model(&map, shaman, &[]).unwrap().rows[0]), vec![Icon::Placeholder(UnitKind::Shaman)]);
+    }
+
+    #[test]
+    fn bars_stand_vertical_on_the_left_but_training_across_the_top() {
+        assert!(BarKind::Training.horizontal());
+        assert!(![BarKind::Prayer, BarKind::Growth, BarKind::Birth].iter().any(|k| k.horizontal()));
+        assert_ne!(BarKind::Growth.color(), BarKind::Birth.color(), "a house's two bars apart");
+        let map = GameMap::sandbox_worship();
+        assert_eq!(totem_model(&map, 0, &[]).unwrap().bars[0].kind, BarKind::Prayer);
+        assert!(tree_model(&map, 0).is_none_or(|m| m.bars.is_empty()), "a tree has no bar");
     }
 
     #[test]

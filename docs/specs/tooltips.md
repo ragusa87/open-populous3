@@ -1,4 +1,4 @@
-# Tooltips (buildings, trees and totems done: name, slot rows, clicks; bars, toggle and the other targets to do)
+# Tooltips (buildings, trees and totems done: name, slot rows, clicks, bars; the toggle and other targets to do)
 
 What the game shows about the thing under the mouse. A tooltip **renders** things: rows of slots, bars and a
 toggle, not only text. Buildings, trees and totems use it (client `tooltip.rs`).
@@ -63,6 +63,10 @@ horizontal across its top (filling left to right):
 - House: two vertical bars on the left, its growth (towards the next size) and its birth (the next brave),
   huts-and-training.md.
 - Training hut: the training of the unit inside, horizontal, across the top.
+
+Done (`tooltip::Bar { kind, fill, blocked }`, `BarKind` giving the colour and the side, `spawn_bar`,
+`blink_bars`): the pyramid's prayer bar from its progress (gone once granted), the totem's empty until praying
+exists; the house and training bars wait for those features.
 
 A bar **blinks while blocked**: a house's birth bar when the tribe is at its population cap; its growth bar when
 the next size cannot be reached; a training bar without mana [player: blinking; ours: which causes count as
