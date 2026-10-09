@@ -188,12 +188,14 @@ pub fn start_cell(map: &game_core::map::GameMap) -> (i32, i32) {
     map.site_of(0).map_or_else(|| map.terrain.lowland_cell(), |s| s.cell())
 }
 
-/// Where a new map's camera looks and its yaw: the level's own start camera where it gives one (its
-/// angle read like the things' angles, `nature::angle_yaw`), else `start_cell` facing yaw 0.
+/// Where a new map's camera looks and its yaw: the level's own start camera where it gives one, else
+/// `start_cell` facing yaw 0. Its angle is read like the things' angles (`nature::angle_yaw`) plus a half
+/// turn: our yaw places the eye, the angle is where the camera looks (checked on level 3: the player's hut
+/// stands beyond the stone circle, not in front of it).
 pub fn start_view(map: &game_core::map::GameMap) -> ((i32, i32), f32) {
     let camera = map.start_camera;
     let cell = camera.and_then(|c| c.cell).unwrap_or_else(|| start_cell(map));
-    (cell, camera.map_or(0.0, |c| crate::nature::angle_yaw(c.angle)))
+    (cell, camera.map_or(0.0, |c| crate::nature::angle_yaw((c.angle + 1024) % 2048)))
 }
 
 fn fly(time: Res<Time>, mut rig: ResMut<CameraRig>) {
@@ -412,7 +414,7 @@ mod tests {
         map.start_camera = Some(game_core::map::StartCamera { cell: Some((21, 83)), angle: 512 });
         let (cell, yaw) = start_view(&map);
         assert_eq!(cell, (21, 83));
-        assert!((yaw - std::f32::consts::FRAC_PI_2).abs() < 1e-6, "a quarter turn");
+        assert!((yaw - 3.0 * std::f32::consts::FRAC_PI_2).abs() < 1e-6, "a quarter turn, the eye behind");
         map.start_camera = Some(game_core::map::StartCamera { cell: None, angle: 1024 });
         assert_eq!(start_view(&map).0, site, "an angle only: still the site");
     }
