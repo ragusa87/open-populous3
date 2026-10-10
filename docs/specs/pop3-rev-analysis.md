@@ -32,6 +32,8 @@ Sources:
   effects (a shockwave, fire, a status on the N nearest...) that do the work. See "Spells".
 - **The planet bend is a parabola of 0.011 × d² cells** [exe, measured], applied in camera space; heights are
   256 units per cell (1024 = 4 cells) and the camera looks down at a fixed 20°. See "Landscape projection".
+- **Walking speed is per type, in world units per turn** [exe]: `<TYPE>_SPEED` plus up to 25 % at random per
+  walk; a brave walks 1.6-2.0 cells per second. See "Walking speed".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
 
@@ -448,6 +450,33 @@ screen = (x', y') · (1 << (S + 16)) / z'             # S = 0x87CA68, then a per
 - Defaults set by 0x416F50 (render block) and 0x46DFB0 (draw state); `clear_land_draw_state` 0x46E700 copies the
   block into the draw state before each frame.
 
+## Walking speed [exe]
+Each person type has a movement profile (table 0x5A7B90, 26 bytes each, picked by unit+0x30) whose speed at +4 is
+a named constant. When a person starts a walk (0x4D4F40, 0x4D6660):
+```text
+speed = SPEED + rand % max(1, SPEED / 4)          # 100 to 125 % of the constant, kept at unit+0x5F
+if bloodlusted: speed *= 2
+```
+The speed is in world units per turn (512 per cell): the move helper 0x4E6A70 adds `speed × sin/cos(angle)`
+(table 0x5DDDE8, 2048 = full turn, 16.16) to the position. A walking person moves through its velocity vector
+(+0x49, +0x4D), applied by the person physics step 0x4E6D00; the walk code checks that vector against `speed²`
+(0x4E9207).
+
+| Type | Constant | Exe | File | Per turn (file) | Cells per second |
+|---|---|---|---|---|---|
+| brave | `BRAVE_SPEED` | 64 | 70 | 70-87 | 1.64-2.05 |
+| spy | `SPY_SPEED` | 64 | 66 | 66-82 | 1.55-1.93 |
+| warrior | `WARRIOR_SPEED` | 48 | 59 | 59-73 | 1.38-1.72 |
+| preacher | `RELIGIOUS_SPEED` | 48 | 58 | 58-72 | 1.36-1.70 |
+| shaman | `MEDICINE_MAN_SPEED` | 56 | 58 | 58-72 | 1.36-1.70 |
+| firewarrior | `SUPER_WARRIOR_SPEED` | 32 | 55 | 55-68 | 1.29-1.60 |
+
+Other speeds seen in the spell code, same unit: panic and burning runs 110 (2.6 cells per second), the angel of
+death's throw 400, whirlwind 120, insect swarm 80.
+
+Not traced: whether slopes change the walking speed (no slope factor seen in a first pass over 0x4E6D00), and the
+movement profiles of wildmen, the angel of death and creatures.
+
 ## Combat [ghidra]
 - Internal controller units (class 10):
 
@@ -521,6 +550,10 @@ screen = (x', y') · (1 << (S + 16)) / z'             # S = 0x87CA68, then a per
     implement (see "Per spell");
   - Teleport moves the caster's own shaman, as our sandbox teleport does; its range is effectively unlimited.
 
+- units.md `Walking`: ours walks at 64 units per tick, 10 ticks per second, 1.25 cells per second for every kind.
+  The original brave walks 1.64-2.05 cells per second (`BRAVE_SPEED` 70 per turn, + up to 25 % per walk), and
+  each type has its own speed (firewarriors the slowest). About 82-102 of our units per tick would match a brave.
+  Our slope factor (uphill and downhill) is our own design; the original's is not traced.
 - terrain.md "Planet illusion" and ui-and-editor.md view tuning: the original bend is k = 0.011 per cell² (our
   default `POP3_CURVATURE` 0.008 is too gentle, the earlier 0.012 was close), measured in camera space. The
   original height scale is 1/256 cell per unit (max 1024 = 4 cells), not "about 2 cells"; our 1/384 (2.7 cells)
@@ -543,6 +576,7 @@ screen = (x', y') · (1 << (S + 16)) / z'             # S = 0x87CA68, then a per
 - Prayer: the vault (library trigger) branch, what the "contest" countdown at trigger+0x6F does when several tribes
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
 
+- Walking: whether slopes change the speed, and the speeds of wildmen, the angel of death and creatures.
 - Projection: the per-axis screen scale (0xAFC2F4 + 0xCF8 / 0xCFC), which decides the on-screen height ratio, and
   which views (zoom levels, cut scenes) change the render block.
 - Sites: which code creates the pillars at level load, and whether the levelling forces every cell of its disc.
@@ -608,6 +642,8 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x467130, 0x46CB90 | `draw_land`, `main_landscape_mesh_generation`: the vertex grid |
 | 0x46DE00 | per-vertex projection with the planet bend |
 | 0x416F50, 0x46E700 | render block defaults (K 46 000), copy into the draw state |
+| 0x4D4F40, 0x4D6660 | walk speed: `SPEED + rand % (SPEED / 4)`, doubled when bloodlusted, to unit+0x5F |
+| 0x4E6A70 | move a position by length and angle |
 | 0x50C780, 0x50C840 | "prepare rs land" (7/8): init (site height at tribe+0x915), levelling per turn |
 | 0x41C140, 0x41C520 | landscape-shaping mode start and end: sites rebuilt at the shamans, pillars from 0x5A9F10 |
 
@@ -636,6 +672,8 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
 - Person statuses: invisible +0x10 bit 0x1000 (timer +0xA3), shield +0x14 bit 0x8000 (timer +0xA5), bloodlust
   +0x14 bit 0x80000 (timer +0xB1), hypnotised +0x10 bit 0x4000 (timer +0xAC, original tribe +0xAD), ghost +0x10
   bit 0x800; the timers count down every 8 turns. On fire: +0xC bit 0x8 leads to state 31.
+- Movement: profile index +0x30 (into 0x5A7B90), walk speed +0x5F, heading +0x5D, velocity +0x49 (x),
+  +0x4B (vertical), +0x4D (z).
 - Per-cell index `unit_land_array` (the original "mapwho"), filled by `insert_unit_into_land_tile`.
 - Global lists: `wild_units`, `fight_units`, `pre_fight_units`, `guard_control_units`, `boat_units`,
   `airship_units`, `trigger_units`, `head_units`, `swamp_effect_units`.
@@ -701,6 +739,7 @@ of 0x89C661.
 | person types | 0x5A7060 | 0x32 | `MANA_F_` +0xE, `LIFE_` +0x10, `WOOD_` +0x14, `FIGHT_DAMAGE_` +0x1B, chop time (u8, not a named constant) +0x1D, `CONV_` +0x1F, tower detection radius +0x22, `SW_BLAST_DAMAGE_` +0x2C |
 | building types | 0x5A7228 | 0x4C | `WOOD_` +0x1A, next size +0x34 (u8), growth target +0x36 (2400, not a named constant), mana factor +0x38, `MAX_POP_VALUE__HUT_` +0x3A, `HUT_SPROG_TIME` +0x3C, flags +0x48 (bit 10: breeds; bit 6: holds wood) |
 | scenery types | 0x5A79B0 | 0x18 | object +0x0A (12: 30), `TREE_WOOD_VALUE` +0x4, `TREE_WOOD_GROW` +0x6, `TREE_DORMANT_TIME` +0x8, flags +0x14 |
+| movement profiles | 0x5A7B90 | 0x1A | speed +0x4 (`<TYPE>_SPEED`: brave profile 2, warrior 14, preacher 15, spy 16, firewarrior 17, shaman 18), flags +0x18; `WALK_ALT_DIFF2` copied into +0x10 for flagged profiles |
 | spells | 0x5A80D0 | 0x3E | kind +0x00 (1 normal, 2 hidden), cost (u32) +0x4, id +0x8, flags +0x1A (bit 0 castable) and +0x1B (0x40 homing), `SP_W_RANGE_` +0x1E, mode-0x20 range +0x22, shot without shaman +0x26, shot from shaman +0x27, effects +0x28..+0x2C, `SP_1_OFF_MAX_` +0x2D, mode-0x20 charges (`LSME_1_OFF_MAX_`) +0x2E, deflectable +0x2F, sound +0x30, enemy-cast alert +0x35/+0x36, `OPT_S` +0x3A |
 
 - The shipped `constant.dat` wins over the exe defaults, e.g. `SPELL_BLAST` 18 000 in the exe and 10 000 in the
