@@ -156,7 +156,8 @@ orders, spells and Teleport are ignored) while she is:
   anchor) turned to face the camera, uploaded Scale2x-upscaled x4 and filtered linearly (no blocky pixels),
   with a health bar over the head (green -> yellow -> red) shown while the unit is alive and selected, or under the
   mouse for the player's own units (`hover::Hoverable::health`).
-  Feet on the ground right under the unit (`Grounded` with no footprint). Sprite and bar are drawn pulled
+  Feet on the ground right under the unit (`Grounded` with no footprint), sprite and bar raised by its `motion.lift`
+  (terrain height units at the terrain's scale, `drawn_lift`; the shadow stays on the ground). Sprite and bar are drawn pulled
   0.6 cell towards the camera along the eye-feet line and shrunk to match (`toward_eye`): same picture on
   screen, but slopes and bumps around the feet no longer cut the legs; real hills in front still hide her.
   The original has no health bar: low-health units get a spinning star/crown over the head (to do). The panel

@@ -439,8 +439,14 @@ pub fn landing_lift(action: &Action, alpha: f32) -> f32 {
     LANDING_HEIGHT * t * t
 }
 
+/// Height above the ground (cells) a unit is drawn at: its `motion` lift (terrain height units, drawn
+/// with the terrain's `height_scale`) plus the landing after a teleport.
+pub fn drawn_lift(unit: &game_core::unit::Unit, alpha: f32, height_scale: f32) -> f32 {
+    unit.motion.lift as f32 * height_scale + landing_lift(&unit.action, alpha)
+}
+
 /// Pulls each unit's sprite and health bar towards the camera (see `toward_eye`), in the view's
-/// own (camera-facing) space, and lifts them while landing (`landing_lift`).
+/// own (camera-facing) space, and lifts them off the ground (`drawn_lift`).
 fn pull_to_eye(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
@@ -458,7 +464,7 @@ fn pull_to_eye(
         // Up a lookout: on its platform, pulled further so the building around him never hides him.
         let up = u.and_then(|u| perched(&map.0, &heights, u)).map(|p| Vec3::Y * p.1);
         let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, if up.is_some() { PERCH_PULL } else { PULL_TO_EYE });
-        let lift = u.map_or(0.0, |u| landing_lift(&u.action, clock.alpha()));
+        let lift = u.map_or(0.0, |u| drawn_lift(u, clock.alpha(), params.0.height_scale));
         let local = view.rotation.inverse() * (offset + up.unwrap_or_default()) + Vec3::Y * lift * scale;
         for &child in children {
             if let Ok((mut t, bar)) = parts.get_mut(child) {
@@ -548,6 +554,14 @@ mod tests {
         assert!(high - low > low - landing_lift(&landing(1), 0.99), "slows down as she touches down");
         assert_eq!(landing_lift(&landing(1), 1.0), 0.0);
         assert_eq!(landing_lift(&Action::Idle, 0.5), 0.0);
+    }
+
+    #[test]
+    fn drawn_at_the_unit_lift_like_the_terrain() {
+        let mut u = game_core::unit::Unit::new(1, 0, game_core::unit::UnitKind::Brave, (0, 0));
+        assert_eq!(drawn_lift(&u, 0.5, 0.01), 0.0);
+        u.motion.lift = 300;
+        assert_eq!(drawn_lift(&u, 0.5, 0.01), 3.0, "as high as ground 300 above");
     }
 
     #[test]
