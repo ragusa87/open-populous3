@@ -1,5 +1,7 @@
 # Camera, UI and editor
 
+All keys and clicks, original and ours: [shortcuts.md](shortcuts.md).
+
 ## Camera (`camera.rs`)
 `CameraRig { focus, yaw, pitch, distance, aerial }`. Focus is in cell units, wrapped in `[0,128)`.
 Like the original: scrolling happens only with the cursor pressed against the window border; speed

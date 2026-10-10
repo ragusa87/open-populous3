@@ -11,6 +11,7 @@
   - [units.md](specs/units.md): units, pathfinding (to do).
   - [multiplayer.md](specs/multiplayer.md): deterministic lockstep over TCP.
   - [ui-and-editor.md](specs/ui-and-editor.md): camera, control tabs, world editor.
+  - [shortcuts.md](specs/shortcuts.md): the original's keyboard and mouse shortcuts next to ours.
   - [assets.md](specs/assets.md): original-data-free path, missing-asset inventory and building kit brief.
   - [buildings.md](specs/buildings.md): building models, stages and planned construction.
   - [building kit](../assets/3d/buildings/README.md): reproducible glTF generation, Blender preview and licence.

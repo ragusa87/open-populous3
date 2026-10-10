@@ -67,6 +67,8 @@ File formats are reverse-engineered from the original files; community tools are
 - The PopRe wiki page [Constant](https://wiki.popre.net/Constant) and Brandan Lasley's decoded
   `New_Constants.dat` (2012): the names of the balance constants, cross-checked on the decoded file, see
   [constants.md](docs/specs/constants.md).
+- The PopRe wiki page [Keyboard Shortcuts](https://wiki.popre.net/Keyboard_Shortcuts): the original's keyboard and
+  mouse shortcuts, see [shortcuts.md](docs/specs/shortcuts.md).
 
 Only facts about the file formats are taken from the GPL and unlicensed tools, never their code, so the MIT
 licence is kept.

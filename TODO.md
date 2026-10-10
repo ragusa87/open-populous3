@@ -149,6 +149,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spell and building icons, tooltips.
 - [ ] Vehicles fill the In boat / In balloon rows (`headcount::State::InBoat`, `InBalloon`, always 0 for now).
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
+- [ ] Shortcuts as the original's ([shortcuts.md](docs/specs/shortcuts.md)): settle the conflicts listed there (Space, S/A/D, X, C, G, Home, PgUp/PgDn, editor keys), then add the missing ones (P pause, Shift +/- speed, +/- zoom, groups, camera points).
 
 ## Tooltips ([tooltips.md](docs/specs/tooltips.md))
 - [ ] Rendered tooltip: done for buildings, trees and totems (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks, right click at once); the toggle to add.
