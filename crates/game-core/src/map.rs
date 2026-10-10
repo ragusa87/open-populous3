@@ -1,5 +1,6 @@
 //! A playable map: terrain + metadata, built from an original level or generated.
 
+use crate::blast::Blast;
 use crate::building::{buildings_from_level, Building, BuildingKind};
 use crate::campfire::{self, Campfire};
 use crate::command::Command;
@@ -15,7 +16,7 @@ use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::totem::{totems_from_level, Totem, TotemKind};
 use crate::unit::{torus_delta, Action, Order, Unit, UnitEvent, UnitKind};
 use crate::wood::WoodPiece;
-use pop3_format::{Level, LevelHeader, MAP_SIZE};
+use pop3_format::{Level, LevelHeader, MAP_SIZE, WORLD_UNITS_PER_CELL};
 use crate::time::{Tick, Ticks};
 use std::path::Path;
 
@@ -55,6 +56,8 @@ pub struct GameMap {
     pub start_camera: Option<StartCamera>,
     /// An original level's object bank (header byte 97): its tree style. 0 elsewhere.
     pub object_bank: u8,
+    /// Blasts going on (`blast::Blast`), in casting order.
+    pub blasts: Vec<Blast>,
     /// Ticks run since the map was made (`tick`).
     pub now: Tick,
 }
@@ -97,7 +100,7 @@ fn sandbox_gift(k: usize) -> crate::building::Reward {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, now: Tick::ZERO }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, blasts: Vec::new(), now: Tick::ZERO }
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
@@ -124,6 +127,7 @@ impl GameMap {
             walls: Walls::default(),
             start_camera: None,
             object_bank: 0,
+            blasts: Vec::new(),
             now: Tick::ZERO,
         }
         .with_building_ground()
@@ -418,6 +422,9 @@ impl GameMap {
             }
             Command::Cast { player, spell } => {
                 self.order(player, Order::Cast);
+                if let Spell::Blast { at } = spell {
+                    self.blasts.push(Blast::new(at, player));
+                }
                 spell.cast(&mut self.terrain)
             }
             Command::Order { player, order } => {
@@ -565,6 +572,7 @@ impl GameMap {
         self.tend_campfires();
         self.tend_vaults();
         self.tend_totems();
+        self.tend_blasts();
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing)).collect();
         let mut events = Vec::new();
         for (i, unit) in self.units.iter_mut().enumerate() {
@@ -602,6 +610,18 @@ impl GameMap {
 }
 
 impl GameMap {
+    /// Each blast's turn: the units it reaches are flung (`Unit::fling`); finished blasts go.
+    fn tend_blasts(&mut self) {
+        for blast in &mut self.blasts {
+            for (i, push) in blast.turn(&self.units) {
+                let u = &self.units[i];
+                let ground = self.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
+                self.units[i].fling(push, ground);
+            }
+        }
+        self.blasts.retain(|b| !b.is_over());
+    }
+
     /// The terrain with the buildings' walls, as walkers outside every building see it.
     pub fn ground(&self) -> Walled<'_> {
         Walled { terrain: &self.terrain, walls: &self.walls, inside: None }
@@ -907,6 +927,27 @@ mod tests {
         assert!(!map.can_cast(player, &Spell::Teleport { to }));
         map.apply(&Command::Cast { player, spell: Spell::Teleport { to } });
         assert_eq!(map.units[s].action, Action::Tumbling);
+    }
+
+    #[test]
+    fn a_blast_throws_people_away_and_they_land() {
+        let mut map = GameMap::sandbox_walk();
+        let i = map.units.iter().position(|u| u.is_alive()).unwrap();
+        let (owner, start) = (map.units[i].owner, (map.units[i].x, map.units[i].z));
+        let at = (start.0.wrapping_add(300), start.1);
+        map.apply(&Command::Cast { player: owner, spell: Spell::Blast { at } });
+        map.tick();
+        assert!(map.units[i].action != Action::Tumbling && !map.units[i].motion.airborne(), "the caster's own people are spared");
+        map.apply(&Command::Cast { player: owner.wrapping_add(1), spell: Spell::Blast { at } });
+        map.tick();
+        assert!(map.units[i].action == Action::Tumbling && map.units[i].motion.airborne(), "thrown up");
+        assert_eq!(map.blasts.len(), 2, "the first one's last turn to come");
+        map.run(Ticks::new(2));
+        assert!(map.blasts.is_empty(), "3 turns");
+        map.run(Ticks::secs(2));
+        let u = &map.units[i];
+        assert_eq!((u.action, u.motion.airborne(), u.z), (Action::Idle, false, start.1), "landed, on its feet");
+        assert!(torus_delta(start.0, u.x) < -512, "away from the blast: {}", torus_delta(start.0, u.x));
     }
 
     #[test]

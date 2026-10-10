@@ -9,7 +9,8 @@ says whether a spell applies at its target; `GameMap::apply` ignores a cast that
 | Flatten | radius 4 set to center height |
 | Erode | radius 4 lowered by 120 (falloff) |
 | Raise | editor brush, radius 3 +64 |
-| Teleport | sandbox only (the original names a spell model 21 teleport, see below, effect unknown): the caster's living shaman does her cast jump, then is at the target (`Unit::cast_teleport`); only onto ground she can walk (`Mobility::Walk`: no sea, no cliff), checked when cast and again when she lands (she stays if it no longer is); another order during the jump cancels it |
+| Teleport | sandbox only (the original names a spell model 21 teleport, see below, effect unknown): the caster's living shaman does her cast jump, then is at the target (`Unit::cast_teleport`); only onto ground she can walk (`Mobility::Walk`: no sea, no cliff), checked when cast and again when she lands (she stays if it no longer is); another order during the jump cancels it; she lands falling from a cell up (units.md "Landing") |
+| Blast | aimed on the ground (`hud::spells::ground_spell`): the shaman's cast jump, and at once (no shot flying there yet) a `blast::Blast` at the target, in `GameMap::blasts`: the original's simple blast, 3 turns at radius 2, 4 then 5 cells; each living person of another tribe, not inside a building, within the turn's radius and 2.5 cells (`PUSH_RANGE` 1280) is flung once (`Unit::fling`): away from the centre at 140 and up at 98 (world / height units per tick), times `(1280 - d) / 1280`, then tumbles and falls (units.md "Physics"). Dev: `BLAST=x,z` (cells, cast by another tribe), `BLAST_TICKS=N` |
 
 To do: Swamp (surface type), Earthquake (seeded noise along a line - use `map::Lcg`, never `rand`),
 Volcano (cone + lava layer), Angel of Death, Firestorm... Mana cost, charges, cast range from shaman (original

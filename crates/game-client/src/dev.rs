@@ -11,7 +11,7 @@
 //! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
 
 use crate::camera::CameraRig;
-use crate::units::PLAYER;
+use crate::units::{world_units, PLAYER};
 use crate::world::CurrentMap;
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::camera::RenderTarget;
@@ -92,6 +92,16 @@ pub fn tumble_demo(how: &str, map: &mut game_core::map::GameMap) {
         };
         u.action = game_core::unit::Action::Tumbling;
     }
+}
+
+/// `BLAST=x,z` (cells): another tribe's blast there, then `ticks` run at once (with `GAME_SPEED=0`, the shot
+/// shows them as they were). False when `at` does not parse.
+pub fn blast_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
+    let at = world_units(Vec2::new(x, z));
+    map.apply(&Command::Cast { player: PLAYER + 1, spell: game_core::spell::Spell::Blast { at } });
+    map.run(game_core::time::Ticks::new(ticks));
+    true
 }
 
 /// Commands for a `BRAVES` demo: every brave of the player (not inside a building) cuts the tree nearest to it; `carry` then
@@ -232,6 +242,10 @@ fn screenshot(
         if let Ok(how) = std::env::var("TUMBLE") {
             tumble_demo(&how, &mut map.0);
         }
+        if let Ok(at) = std::env::var("BLAST") {
+            let ticks = std::env::var("BLAST_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            blast_demo(&mut map.0, &at, ticks);
+        }
         if let Some(phase) = std::env::var("VAULT").ok().and_then(|v| parse_vault(&v)) {
             map.0.buildings.iter_mut().filter_map(|b| b.vault.as_mut()).for_each(|v| v.phase = phase);
         }
@@ -293,6 +307,17 @@ mod tests {
         assert_eq!(parse_vault("granted:3"), Some(VaultPhase::Granted { ticks: 3 }));
         assert_eq!(parse_vault("spent"), Some(VaultPhase::Spent));
         assert_eq!((parse_vault("granted"), parse_vault("open")), (None, None));
+    }
+
+    #[test]
+    fn blast_demo_throws_the_player_up() {
+        let mut map = game_core::map::GameMap::sandbox_walk();
+        let s = map.units.iter().position(|u| u.owner == PLAYER).unwrap();
+        let cell = |v: u16| v as f32 / 512.0;
+        let at = format!("{},{}", cell(map.units[s].x), cell(map.units[s].z));
+        assert!(blast_demo(&mut map, &at, 2));
+        assert!(map.units[s].motion.airborne());
+        assert!(!blast_demo(&mut map, "here", 0));
     }
 
     #[test]

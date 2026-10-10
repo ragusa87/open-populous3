@@ -687,11 +687,29 @@ impl Unit {
     }
 
     fn die(&mut self) {
+        self.drop_plans();
+        self.action = Action::Dying { left: Countdown::new(DYING_TICKS) };
+    }
+
+    /// Forgets where it was going, what it was to do there and its work.
+    fn drop_plans(&mut self) {
         (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
         (self.to_tree, self.to_wood, self.to_house, self.to_shrine) = (None, None, None, None);
         self.queue.clear();
         self.work = None;
-        self.action = Action::Dying { left: Countdown::new(DYING_TICKS) };
+    }
+
+    /// Thrown by a spell: `push` adds to its velocity, it leaves the ground (`ground`: the height under it) and
+    /// tumbles, forgetting its plans. Nothing for the dead.
+    pub fn fling(&mut self, push: Velocity, ground: i32) {
+        if !self.is_alive() {
+            return;
+        }
+        self.drop_plans();
+        let v = self.motion.velocity;
+        let velocity = Velocity::new(v.x.saturating_add(push.x), v.y.saturating_add(push.y), v.z.saturating_add(push.z));
+        self.motion = Motion::flying(velocity, self.motion.height.unwrap_or(ground));
+        self.action = Action::Tumbling;
     }
 
     /// Path to `to` on the current terrain: walking if there is one, else stranded (the shaman
@@ -843,6 +861,13 @@ mod tests {
 
     fn run(u: &mut Unit, t: &Heightmap, site: &ReincarnationSite, ticks: usize) -> Vec<UnitEvent> {
         (0..ticks).filter_map(|_| u.tick(t, Some(site))).collect()
+    }
+
+    fn run_until(u: &mut Unit, t: &Heightmap, site: &ReincarnationSite, done: impl Fn(&Unit) -> bool) -> usize {
+        (1..500).find(|_| {
+            u.tick(t, Some(site));
+            done(u)
+        }).unwrap()
     }
 
     #[test]
@@ -1136,6 +1161,25 @@ mod tests {
         assert!(u.locked() && u.pickable().is_none(), "lifted");
         (u.motion.height, u.action) = (None, Action::Tumbling);
         assert!(u.locked() && u.pickable().is_none(), "rolling on the ground");
+    }
+
+    #[test]
+    fn flung_it_forgets_its_plans_and_flies() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.order(Order::MoveTo { x: u.x + 5 * 512, z: u.z });
+        u.fling(Velocity::new(70, 49, 0), 100);
+        assert_eq!((u.action, u.motion), (Action::Tumbling, Motion::flying(Velocity::new(70, 49, 0), 100)));
+        u.fling(Velocity::new(10, 10, 0), 0);
+        assert_eq!(u.motion, Motion::flying(Velocity::new(80, 59, 0), 100), "pushes add up, the height is kept");
+        let x = u.x;
+        let ticks = run_until(&mut u, &t, &site, |u| u.action == Action::Idle);
+        assert_eq!((ticks, u.x), (5, x + 5 * 80), "flew, landed, then stays: the walk is forgotten");
+        run(&mut u, &t, &site, 20);
+        assert_eq!(u.x, x + 5 * 80);
+        let mut dead = Unit { action: Action::Dead { left: Countdown::new(RESPAWN_TICKS) }, ..u.clone() };
+        dead.fling(Velocity::new(10, 10, 0), 100);
+        assert!(matches!(dead.action, Action::Dead { .. }) && dead.motion == Motion::STILL);
     }
 
     #[test]

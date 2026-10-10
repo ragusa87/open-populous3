@@ -14,6 +14,8 @@ pub enum Spell {
     Raise { at: Cell },
     /// Move the caster's shaman to `to` (world units), only onto ground she can walk.
     Teleport { to: (u16, u16) },
+    /// A blast at `at` (world units): `blast::Blast` pushes the people around (no shot flying there yet).
+    Blast { at: (u16, u16) },
 }
 
 impl Spell {
@@ -24,7 +26,7 @@ impl Spell {
             Spell::Flatten { at } => terrain.flatten(at, 4),
             Spell::Erode { at } => terrain.raise(at, 4, -120),
             Spell::Raise { at } => terrain.raise(at, 3, 64),
-            Spell::Teleport { .. } => return None,
+            Spell::Teleport { .. } | Spell::Blast { .. } => return None,
         })
     }
 }

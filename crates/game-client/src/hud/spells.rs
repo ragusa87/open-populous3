@@ -120,6 +120,7 @@ pub fn short_label(kind: SpellKind) -> &'static str {
 pub fn ground_spell(kind: SpellKind, at: (u16, u16)) -> Option<Spell> {
     match kind {
         SpellKind::Teleport => Some(Spell::Teleport { to: at }),
+        SpellKind::Blast => Some(Spell::Blast { at }),
         _ => None,
     }
 }
@@ -477,7 +478,8 @@ mod tests {
     #[test]
     fn only_spot_spells_are_aimed() {
         assert_eq!(ground_spell(SpellKind::Teleport, (5, 6)), Some(Spell::Teleport { to: (5, 6) }));
-        assert_eq!(ground_spell(SpellKind::Blast, (5, 6)), None);
+        assert_eq!(ground_spell(SpellKind::Blast, (5, 6)), Some(Spell::Blast { at: (5, 6) }));
+        assert_eq!(ground_spell(SpellKind::Swarm, (5, 6)), None);
         let teleport = sandbox_book().slot(SpellKind::Teleport).cloned().unwrap();
         assert!(teleport.can_cast() && teleport.availability == Availability::Unlimited);
         assert_eq!(demo_book().slot(SpellKind::Teleport).unwrap().availability, Availability::Hidden, "sandbox only");

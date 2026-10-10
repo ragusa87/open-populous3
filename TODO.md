@@ -70,7 +70,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 
 ## Spells ([spells.md](docs/specs/spells.md))
 - [ ] Spell effects with their own animations/visuals (lightning, swarm, whirlwind...); casting (C) only uses a charge and makes the shaman jump.
-- [ ] Aim the other spells on the terrain like Teleport (`hud::spells::ground_spell`), with cast range from the shaman.
+- [ ] Aim the other spells on the terrain like Teleport and Blast (`hud::spells::ground_spell`), with cast range from the shaman.
+- [ ] Blast (pushes only, `game_core::blast`): the fireball shot flying from the shaman first (1000 units per turn, 6 turns into the cast), `BLAST_DAMAGE_PERSON` 50 per turn in the radius, buildings 40 once, allies pushed at most 5 on the last turn, the caster's shaman and angels never pushed, shielded units immune, ghosts in the centre cell removed; the burn cell, smoke and explosion (pop3-rev-analysis.md "Components").
 - [ ] Spell cursors: confirm 40 = Armageddon and 43 = Ghost Army in the game (`virtual_cursor::spell_sprite`); check the gold arrow's frame order and speed against the game; the pause menu releases the mouse, so it shows the system cursor, not the gold arrow.
 - [ ] Burn (1), bloodlust (20) and the original teleport (21): what they do and who casts them (never on the player panel).
 - [ ] Level spells per tribe in the simulation (today `GameMap::spell_book` is the player's loadout, shared): keep each discovery's availability (permanent / this level / one shot) for when it is discovered; `SpellsAvailableLevel` / `SpellsNotCharging` and `SpellsAvailableOnce`.
