@@ -54,6 +54,7 @@ pub fn pose_name(pose: Pose) -> &'static str {
         Pose::Hammer => "hammer",
         Pose::Flung => "flung",
         Pose::Tumble => "tumble",
+        Pose::Spirit => "spirit",
     }
 }
 
@@ -63,7 +64,7 @@ pub fn plays(kind: UnitKind, pose: Pose) -> bool {
     match pose {
         Pose::Cast => kind == UnitKind::Shaman,
         Pose::Stranded => kind != UnitKind::Shaman,
-        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Flung | Pose::Tumble => false,
+        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit => false,
         _ => true,
     }
 }
@@ -128,6 +129,10 @@ pub fn sheet_art(kind: UnitKind) -> Option<Vec<TribeArt>> {
             }
             let stand_in = if pose.fallback() != pose { pose.fallback() } else { Pose::Idle };
             poses[pose as usize] = poses[stand_in as usize].clone();
+            if pose == Pose::Spirit {
+                // The body lies still: the fall's lying frame (second to last).
+                poses[pose as usize].iter_mut().for_each(|f| *f = f.get(f.len().saturating_sub(2)).cloned().into_iter().collect());
+            }
         }
     }
     Some(

@@ -36,9 +36,11 @@ pub const CAST_TICKS: Ticks = Ticks::new(10);
 /// After a teleport she appears this high above the target (terrain height units, one cell) and falls
 /// (`physics::step`): 5 ticks to the ground.
 pub const LANDING_DROP: i32 = 256;
-/// The fall when dying, and the wait before reincarnation.
+/// The fall when dying, and the shaman's wait before reincarnation.
 pub const DYING_TICKS: Ticks = Ticks::millis(800);
 pub const RESPAWN_TICKS: Ticks = Ticks::secs(3);
+/// Others' spirit rising from the body after the fall, before they are gone (a guess).
+pub const SPIRIT_TICKS: Ticks = Ticks::secs(1);
 /// Chopping one piece of wood off a tree: the original's countdown at a tree.
 pub const CHOP_TICKS: Ticks = Ticks::new(20);
 /// With nothing more to do, a brave holds his piece of wood this long before putting it down.
@@ -134,9 +136,12 @@ pub enum Action {
     /// Flung through the air or rolling on the ground by a spell, moved by `Unit::velocity` at
     /// `Unit::lift`: no orders until still on the ground again.
     Tumbling,
+    /// Falling down dead.
     Dying { left: Countdown },
-    /// Waiting to reincarnate at her site.
+    /// The shaman, lying dead: waiting to reincarnate at her site.
     Dead { left: Countdown },
+    /// Anyone else after the fall: its spirit rises from the body, then the unit is gone from the map.
+    Spirit { left: Countdown },
     /// Going round the camp fire at `fire` (its centre), last at its ring point `point`
     /// (`campfire::ring_point`), at `AROUND_FIRE_PACE` of her walking speed.
     AroundFire { fire: (u16, u16), point: u8 },
@@ -171,6 +176,7 @@ impl Action {
             Action::Tumbling => "Tumbling",
             Action::Dying { .. } => "Dying",
             Action::Dead { .. } => "Dead",
+            Action::Spirit { .. } => "Dead",
             Action::AroundFire { .. } => "Around the fire",
             Action::Chopping { .. } => "Cutting wood",
             Action::Holding { .. } => "Holding wood",
@@ -186,6 +192,7 @@ impl Action {
         match *self {
             Action::Casting { left }
             | Action::Dying { left }
+            | Action::Spirit { left }
             | Action::Dead { left }
             | Action::Chopping { left, .. }
             | Action::Holding { left }
@@ -196,7 +203,7 @@ impl Action {
     }
 
     fn can_take_orders(&self) -> bool {
-        !matches!(self, Action::Drowning | Action::Tumbling | Action::Dying { .. } | Action::Dead { .. })
+        !matches!(self, Action::Drowning | Action::Tumbling | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
     }
 }
 
@@ -229,6 +236,8 @@ pub enum Order {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnitEvent {
     Died,
+    /// Its spirit has risen: the caller removes it from the map.
+    Gone,
     /// Back at her site: the caller levels its ground.
     Reincarnated,
     /// Done holding a piece of wood: the caller puts it down where she stands.
@@ -353,7 +362,7 @@ impl Unit {
     }
 
     pub fn is_alive(&self) -> bool {
-        !matches!(self.action, Action::Dying { .. } | Action::Dead { .. })
+        !matches!(self.action, Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
     }
 
     /// Flung (tumbling) or off the ground: no order reaches it and it cannot be picked.
@@ -645,9 +654,18 @@ impl Unit {
                 }
             }
             Action::Dying { mut left } => {
-                self.action = if left.tick() { Action::Dead { left: Countdown::new(RESPAWN_TICKS) } } else { Action::Dying { left } };
+                self.action = match left.tick() {
+                    false => Action::Dying { left },
+                    true if self.kind == UnitKind::Shaman => Action::Dead { left: Countdown::new(RESPAWN_TICKS) },
+                    true => Action::Spirit { left: Countdown::new(SPIRIT_TICKS) },
+                };
             }
-            Action::Dead { .. } if self.kind != UnitKind::Shaman => {}
+            Action::Spirit { mut left } => {
+                if left.tick() {
+                    return Some(UnitEvent::Gone);
+                }
+                self.action = Action::Spirit { left };
+            }
             Action::Dead { mut left } => {
                 if !left.tick() {
                     self.action = Action::Dead { left };
@@ -1137,9 +1155,12 @@ mod tests {
         let mut brave = Unit::new(7, 0, UnitKind::Brave, (shaman.x + 20 * 512, shaman.z));
         assert_eq!(brave.health, Health::full(UnitKind::Brave.max_health()));
         sea_cell(&mut t, brave.cell());
-        let events = run(&mut brave, &t, &site, 200);
-        assert_eq!(events, vec![UnitEvent::Died], "no reincarnation");
-        assert!(matches!(brave.action, Action::Dead { .. }) && brave.kind == UnitKind::Brave);
+        let ticks = run_until(&mut brave, &t, &site, |u| !u.is_alive());
+        assert!(matches!(brave.action, Action::Dying { .. }));
+        run(&mut brave, &t, &site, DYING_TICKS.get() as usize);
+        assert!(matches!(brave.action, Action::Spirit { .. }), "its spirit rises, no reincarnation");
+        assert_eq!(run(&mut brave, &t, &site, SPIRIT_TICKS.get() as usize), [UnitEvent::Gone]);
+        assert!(ticks > 1 && brave.kind == UnitKind::Brave);
     }
 
     #[test]

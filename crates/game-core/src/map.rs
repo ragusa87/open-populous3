@@ -574,12 +574,13 @@ impl GameMap {
         self.tend_totems();
         self.tend_blasts();
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing)).collect();
-        let mut events = Vec::new();
+        let (mut events, mut gone) = (Vec::new(), Vec::new());
         for (i, unit) in self.units.iter_mut().enumerate() {
             let site = self.sites.iter().find(|s| s.owner == unit.owner);
             let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: unit.inside.map(|i| i.site) };
             match unit.tick(&ground, site) {
                 Some(UnitEvent::Reincarnated) => dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain))),
+                Some(UnitEvent::Gone) => gone.push(unit.id),
                 Some(event) => events.push((i, event)),
                 None => {}
             }
@@ -605,6 +606,7 @@ impl GameMap {
         dirty.extend(self.work());
         self.drop_wood();
         self.count_inside();
+        self.units.retain(|u| !gone.contains(&u.id));
         dirty
     }
 }
@@ -948,6 +950,23 @@ mod tests {
         let u = &map.units[i];
         assert_eq!((u.action, u.motion.airborne(), u.z), (Action::Idle, false, start.1), "landed, on its feet");
         assert!(torus_delta(start.0, u.x) < -512, "away from the blast: {}", torus_delta(start.0, u.x));
+    }
+
+    #[test]
+    fn the_dead_are_gone_once_their_spirit_has_risen() {
+        let mut map = GameMap::sandbox_walk();
+        let s = map.units.iter().position(|u| u.kind == UnitKind::Shaman).unwrap();
+        let (x, z) = (map.units[s].x, map.units[s].z);
+        let next = map.units.iter().map(|u| u.id).max().unwrap() + 1;
+        map.units.push(Unit::new(next, 0, UnitKind::Brave, (x.wrapping_add(512), z)));
+        map.units.push(Unit::new(next + 1, 0, UnitKind::Brave, (x.wrapping_add(1024), z)));
+        let i = map.units.len() - 2;
+        map.units[i].action = Action::Dying { left: crate::time::Countdown::new(crate::unit::DYING_TICKS) };
+        map.run(crate::unit::DYING_TICKS);
+        assert!(matches!(map.units[i].action, Action::Spirit { .. }));
+        map.run(crate::unit::SPIRIT_TICKS);
+        assert!(!map.units.iter().any(|u| u.id == next), "removed");
+        assert_eq!(map.units.last().map(|u| u.id), Some(next + 1), "the others kept");
     }
 
     #[test]

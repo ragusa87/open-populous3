@@ -70,8 +70,9 @@ const MAX_CATCH_UP: u32 = 4;
 #[derive(Resource, Default)]
 pub struct SimClock {
     acc: f32,
-    /// Unit positions and heights off the ground (`Motion::height`) before the last ticks run, to glide
+    /// Unit ids, positions and heights off the ground (`Motion::height`) before the last ticks run, to glide
     /// between them.
+    prev_ids: Vec<u32>,
     prev: Vec<(u16, u16)>,
     prev_heights: Vec<Option<i32>>,
     /// Game seconds since start (scaled by the speed, stopped while paused), drives looping animations.
@@ -107,14 +108,19 @@ impl SimClock {
 
     /// Drawn position of `units[i]` in cells: between its previous and current tick position.
     pub fn cell_pos(&self, i: usize, unit: &Unit) -> Vec2 {
-        let prev = self.prev.get(i).copied().unwrap_or((unit.x, unit.z));
+        let prev = self.prev.get(i).copied().filter(|_| self.same(i, unit)).unwrap_or((unit.x, unit.z));
         glide(prev, (unit.x, unit.z), self.alpha())
+    }
+
+    /// `units[i]` was there before the last ticks (not shifted by a unit gone from the map).
+    fn same(&self, i: usize, unit: &Unit) -> bool {
+        self.prev_ids.get(i) == Some(&unit.id)
     }
 
     /// Drawn height above the ground of `units[i]` in cells (see `drawn_lift`).
     pub fn lift(&self, i: usize, unit: &Unit, terrain: &game_core::terrain::Heightmap, height_scale: f32) -> f32 {
         let ground = terrain.height_at(unit.x as u32, unit.z as u32, WORLD_UNITS_PER_CELL);
-        let jumped = self.prev.get(i).is_some_and(|&p| jumped(p, (unit.x, unit.z)));
+        let jumped = !self.same(i, unit) || self.prev.get(i).is_some_and(|&p| jumped(p, (unit.x, unit.z)));
         let prev = if jumped { unit.motion.height } else { self.prev_heights.get(i).copied().flatten() };
         drawn_lift(prev, unit.motion.height, ground, self.alpha(), height_scale)
     }
@@ -295,6 +301,7 @@ fn run_ticks(
     let (mut levelled, mut ran) = (false, 0);
     if due > 0 {
         let map = &mut map.bypass_change_detection().0;
+        clock.prev_ids = map.units.iter().map(|u| u.id).collect();
         clock.prev = map.units.iter().map(|u| (u.x, u.z)).collect();
         clock.prev_heights = map.units.iter().map(|u| u.motion.height).collect();
         while ran < due {
@@ -338,7 +345,8 @@ fn respawn_views(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
-    if !map.is_changed() {
+    // Views follow units by index: the dead leaving the map shift them all.
+    if !map.is_changed() && existing.iter().count() == map.0.units.len() {
         return;
     }
     for e in &existing {
@@ -488,6 +496,14 @@ fn pull_to_eye(
 mod tests {
     use super::*;
     use game_core::unit::Action;
+
+    #[test]
+    fn no_glide_from_a_unit_gone_from_the_map() {
+        let unit = |id, x| Unit::new(id, 0, UnitKind::Brave, (x, 0));
+        let clock = SimClock { prev_ids: vec![1, 2], prev: vec![(0, 0), (512, 0)], acc: TICK_SECS / 2.0, ..default() };
+        assert_eq!(clock.cell_pos(1, &unit(2, 768)), Vec2::new(1.25, 0.0), "glides");
+        assert_eq!(clock.cell_pos(0, &unit(2, 768)), Vec2::new(1.5, 0.0), "unit 1 left: unit 2 moved to index 0");
+    }
 
     #[test]
     fn orders_issued_reach_the_map_on_the_next_tick_and_wait_while_paused() {

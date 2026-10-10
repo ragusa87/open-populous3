@@ -58,8 +58,12 @@ pub fn dust_texture(size: usize) -> Vec<u8> {
         .collect()
 }
 
-/// Whether each unit touched down this frame: it was landing and no longer is (alive).
+/// Whether each unit touched down this frame: it was landing and no longer is (alive). None did when units left
+/// the map meanwhile (the indices moved).
 pub fn touchdowns(was_landing: &[bool], actions: &[Action]) -> Vec<bool> {
+    if was_landing.len() > actions.len() {
+        return vec![false; actions.len()];
+    }
     actions
         .iter()
         .enumerate()
@@ -221,5 +225,6 @@ mod tests {
         let now = [Action::Idle, landing, Action::Idle, Action::Dying { left: game_core::time::Countdown::new(game_core::time::Ticks::new(8)) }];
         assert_eq!(touchdowns(&was, &now), vec![true, false, false, false]);
         assert_eq!(touchdowns(&[], &[Action::Idle]), vec![false], "new units");
+        assert_eq!(touchdowns(&[false, true], &[Action::Idle]), vec![false], "a unit gone: indices moved");
     }
 }

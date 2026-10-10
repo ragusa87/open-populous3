@@ -66,7 +66,7 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 25 | 7 | fighting: kick |
 | 38 | 8 | dying: the body falls down onto its back, last frame lying (checked in the game; used) |
 | 39 | 1 | lying dead |
-| 40 | 5 | the body lying, its spirit rising: drowning in the water (used) |
+| 40 | 5 | the body lying, its spirit rising: drowning in the water, and after the death fall (`Pose::Spirit`, used) |
 | 48 | 8 | brave hiding its eyes (an idle gesture?) |
 | 49 | 9 | waving an arm: crawling, maybe while running away (unsure) |
 | 50 | 7 | fighting: crouching to dodge a hit, then punching |

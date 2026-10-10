@@ -37,10 +37,12 @@ pub enum Pose {
     Flung,
     /// Tumbling on the ground, falling down a slope.
     Tumble,
+    /// Dead, its spirit rising from the body before it is gone.
+    Spirit,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 14] = [
+    pub const ALL: [Pose; 15] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -55,6 +57,7 @@ impl Pose {
         Pose::Hammer,
         Pose::Flung,
         Pose::Tumble,
+        Pose::Spirit,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -64,7 +67,7 @@ impl Pose {
             Pose::Chop | Pose::CarryIdle | Pose::Hammer => Pose::Idle,
             Pose::CarryWalk => Pose::Walk,
             Pose::Jump => Pose::Stranded,
-            Pose::Flung | Pose::Tumble => Pose::Fall,
+            Pose::Flung | Pose::Tumble | Pose::Spirit => Pose::Fall,
             pose => pose,
         }
     }
@@ -90,7 +93,7 @@ impl Pose {
             Pose::Walk | Pose::CarryWalk => ShamanAnim::Walk,
             Pose::Pray => ShamanAnim::Kneel,
             Pose::Cast | Pose::Jump => ShamanAnim::Cast,
-            Pose::Fall => ShamanAnim::Fall,
+            Pose::Fall | Pose::Spirit => ShamanAnim::Fall,
             Pose::Flung => ShamanAnim::Flying,
             Pose::Drown | Pose::Tumble => ShamanAnim::Tumble,
         }
@@ -116,6 +119,7 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Tumbling if airborne => Pose::Flung,
         Action::Tumbling => Pose::Tumble,
         Action::Dying { .. } | Action::Dead { .. } => Pose::Fall,
+        Action::Spirit { .. } => Pose::Spirit,
     }
 }
 
@@ -161,6 +165,7 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, anim_secs: f32, a
     match action {
         Action::Casting { .. } | Action::Flattening { .. } => done(frames),
         Action::Dying { .. } => done(lying + 1),
+        Action::Spirit { .. } => done(frames),
         Action::Dead { .. } => lying,
         _ => (anim_secs * pose.fps()) as usize % frames,
     }
@@ -249,10 +254,11 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Idle | Pose::Cast | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Jump | Pose::Hammer => WildmanAnim::Stand,
                 Pose::Walk | Pose::CarryWalk => WildmanAnim::Walk,
                 Pose::Pray => WildmanAnim::Sit,
-                Pose::Fall | Pose::Tumble => WildmanAnim::Tumble,
+                Pose::Fall | Pose::Tumble | Pose::Spirit => WildmanAnim::Tumble,
                 Pose::Drown | Pose::Flung => WildmanAnim::Flung,
             };
-            (anim.anim(), None, None)
+            // No spirit anim known: the body lies still (the fall's last frame).
+            (anim.anim(), None, (pose == Pose::Spirit).then_some(3))
         }
         _ => {
             let outfit = match kind {
@@ -268,7 +274,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Walk => PersonAnim::Walk,
                 Pose::Pray => PersonAnim::Kneel,
                 Pose::Fall => PersonAnim::Fall,
-                Pose::Drown => PersonAnim::Drown,
+                Pose::Drown | Pose::Spirit => PersonAnim::Drown,
                 Pose::Flung => PersonAnim::Flung,
                 Pose::Tumble => PersonAnim::Tumble,
                 Pose::Stranded => PersonAnim::ArmsUp,
@@ -408,6 +414,16 @@ mod tests {
         assert_eq!(original_anim(UnitKind::Preacher, Pose::Pray, 1), (8, Some(OUTFIT_PREACHER), None), "the monk on the tribesman body");
         assert_eq!(original_anim(UnitKind::Spy, Pose::Drown, 0), (40, Some(OUTFIT_SPY), None), "lying, spirit rising");
         assert_eq!(original_anim(UnitKind::Shaman, Pose::Stranded, 1), original_anim(UnitKind::Shaman, Pose::Idle, 1));
+    }
+
+    #[test]
+    fn the_spirit_rises_from_the_body() {
+        use game_core::time::{Countdown, Ticks};
+        let spirit = |left| Action::Spirit { left: Countdown::with_left(Ticks::new(10), Ticks::new(left)) };
+        assert_eq!(pose_for(&spirit(10), false, false), Pose::Spirit);
+        assert_eq!(original_anim(UnitKind::Warrior, Pose::Spirit, 0), (40, Some(OUTFIT_WARRIOR), None), "lying, its spirit rising");
+        assert_eq!(original_anim(UnitKind::Wildman, Pose::Spirit, 0), (47, None, Some(3)), "no spirit anim: lies still");
+        assert_eq!((frame_index(Pose::Spirit, 5, &spirit(10), 0.0, 0.0), frame_index(Pose::Spirit, 5, &spirit(1), 0.0, 1.0)), (0, 4), "played once");
     }
 
     #[test]

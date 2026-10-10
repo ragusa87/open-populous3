@@ -59,7 +59,7 @@ pub fn shadow_size() -> Vec2 {
 
 /// Whether a unit casts a shadow: not once dead, nor while sinking in the sea.
 pub fn casts_shadow(unit: &Unit) -> bool {
-    !matches!(unit.action, Action::Dead { .. } | Action::Drowning)
+    !matches!(unit.action, Action::Dead { .. } | Action::Spirit { .. } | Action::Drowning)
 }
 
 fn respawn_shadows(
@@ -71,7 +71,7 @@ fn respawn_shadows(
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut assets: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
 ) {
-    if !map.is_changed() {
+    if !map.is_changed() && existing.iter().count() == map.0.units.len() {
         return;
     }
     for e in &existing {
