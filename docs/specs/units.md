@@ -35,9 +35,9 @@
 | Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
 | Drowning | ground under her becomes open sea (on the ground) | -60 HP per tick, no orders; back to Idle if land returns |
 | Tumbling | flung or rolling from a spell (nothing sets it yet) | locked (no orders, not hovered, dropped from the selection, see "Locked units"), no healing, no drowning while off the ground; moved by the physics step (below) while off the ground, back to Idle once on the ground and still. Drawn flung in the air (off the ground: followers 19, wildmen 31, shaman 61) or falling down a slope on the ground (followers 37, wildmen 47, shaman 73); the CC0 sheets show their fall meanwhile. `TUMBLE=air\|ground` in a shot |
-| Dying { left } | health reaches 0 | `DYING_TICKS` (0.8 s), falling down (the fall pose) |
+| Dying { left } | health reaches 0 | `DYING_TICKS` (1.5 s), falling down (the fall pose) |
 | Dead { left } | the shaman, after dying | lying, `RESPAWN_TICKS` (3 s), then reincarnates at her site at full health; the site levels its ground again |
-| Spirit { left } | anyone else, after dying | `SPIRIT_TICKS` (1 s, a guess): its spirit rises from the body (followers' anim 40, played once; wildmen lie still), then the unit is gone from `GameMap::units` (`UnitEvent::Gone`, removed at the end of the tick). The client rebuilds its unit views and shadows when the count changes and does not glide a unit from another one's place |
+| Spirit { left } | anyone else, after dying | `SPIRIT_TICKS` (3 s, a guess): its spirit rises from the body (followers' anim 40, played once; wildmen lie still), then the unit is gone from `GameMap::units` (`UnitEvent::Gone`, removed at the end of the tick). The client rebuilds its unit views and shadows when the count changes and does not glide a unit from another one's place |
 
 Health: 2000. Orders are ignored while drowning, dying or dead.
 

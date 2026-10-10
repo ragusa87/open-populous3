@@ -37,10 +37,10 @@ pub const CAST_TICKS: Ticks = Ticks::new(10);
 /// (`physics::step`): 5 ticks to the ground.
 pub const LANDING_DROP: i32 = 256;
 /// The fall when dying, and the shaman's wait before reincarnation.
-pub const DYING_TICKS: Ticks = Ticks::millis(800);
+pub const DYING_TICKS: Ticks = Ticks::millis(1500);
 pub const RESPAWN_TICKS: Ticks = Ticks::secs(3);
 /// Others' spirit rising from the body after the fall, before they are gone (a guess).
-pub const SPIRIT_TICKS: Ticks = Ticks::secs(1);
+pub const SPIRIT_TICKS: Ticks = Ticks::secs(3);
 /// Chopping one piece of wood off a tree: the original's countdown at a tree.
 pub const CHOP_TICKS: Ticks = Ticks::new(20);
 /// With nothing more to do, a brave holds his piece of wood this long before putting it down.
