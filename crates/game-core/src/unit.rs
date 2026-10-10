@@ -286,6 +286,19 @@ pub struct Unit {
     pub inside: Option<Inside>,
 }
 
+/// A unit on the ground and not tumbling: only `Unit::pickable` makes one, so whatever takes it can
+/// never pick a flung or lifted unit.
+#[derive(Clone, Copy, Debug)]
+pub struct PickableUnit<'a>(&'a Unit);
+
+impl std::ops::Deref for PickableUnit<'_> {
+    type Target = Unit;
+
+    fn deref(&self) -> &Unit {
+        self.0
+    }
+}
+
 /// A building a unit is in (or walking into): its stored corner and its door.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Inside {
@@ -340,6 +353,16 @@ impl Unit {
 
     pub fn is_alive(&self) -> bool {
         !matches!(self.action, Action::Dying { .. } | Action::Dead { .. })
+    }
+
+    /// Flung (tumbling) or off the ground: no order reaches it and it cannot be picked.
+    pub fn locked(&self) -> bool {
+        self.action == Action::Tumbling || self.motion.airborne()
+    }
+
+    /// The unit as something the player may pick (hover, select), None while `locked`.
+    pub fn pickable(&self) -> Option<PickableUnit<'_>> {
+        (!self.locked()).then_some(PickableUnit(self))
     }
 
     /// Cell holding the unit.
@@ -1084,6 +1107,16 @@ mod tests {
         u.motion.velocity = Velocity::ZERO;
         run(&mut u, &t, &site, 1);
         assert_eq!(u.action, Action::Idle);
+    }
+
+    #[test]
+    fn locked_and_not_pickable_while_tumbling_or_lifted() {
+        let (mut u, _) = shaman_at((10, 10));
+        assert_eq!(u.pickable().map(|p| p.id), Some(u.id));
+        u.motion.lift = 1;
+        assert!(u.locked() && u.pickable().is_none(), "lifted");
+        (u.motion.lift, u.action) = (0, Action::Tumbling);
+        assert!(u.locked() && u.pickable().is_none(), "rolling on the ground");
     }
 
     #[test]

@@ -388,8 +388,8 @@ impl GameMap {
         self.units.iter_mut().find(|u| u.owner == owner && u.kind == UnitKind::Shaman)
     }
 
-    /// Whether `player` can cast `spell` here and now: never while their shaman is inside a vault
-    /// (`locked`); Teleport needs a living shaman and ground she can walk at the target; other spells
+    /// Whether `player` can cast `spell` here and now: never while their shaman is `locked` (inside a
+    /// vault, tumbling or lifted); Teleport needs a living shaman and ground she can walk at the target; other spells
     /// always apply.
     pub fn can_cast(&self, player: u8, spell: &Spell) -> bool {
         if self.shaman_locked(player) {
@@ -892,6 +892,22 @@ pub fn showcase_states(kind: BuildingKind) -> Vec<Building> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_order_or_spell_reaches_a_tumbling_unit() {
+        let mut map = GameMap::sandbox_walk();
+        let s = map.units.iter().position(|u| u.kind == UnitKind::Shaman).unwrap();
+        let (player, id) = (map.units[s].owner, map.units[s].id);
+        map.units[s].action = Action::Tumbling;
+        map.units[s].motion.velocity = crate::motion::Velocity::new(1, 0, 0);
+        let to = (map.units[s].x.wrapping_add(2048), map.units[s].z);
+        map.apply(&Command::OrderUnit { player, unit: id, order: Order::MoveTo { x: to.0, z: to.1 } });
+        map.apply(&Command::Order { player, order: Order::MoveTo { x: to.0, z: to.1 } });
+        assert_eq!(map.units[s].action, Action::Tumbling);
+        assert!(!map.can_cast(player, &Spell::Teleport { to }));
+        map.apply(&Command::Cast { player, spell: Spell::Teleport { to } });
+        assert_eq!(map.units[s].action, Action::Tumbling);
+    }
 
     #[test]
     fn the_clock_counts_ticks_run() {

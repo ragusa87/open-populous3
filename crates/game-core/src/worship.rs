@@ -129,13 +129,17 @@ impl GameMap {
         }
     }
 
-    /// Unit `i` is inside a vault (walking in, at its middle, walking out): no order reaches her.
+    /// Unit `i` is locked (`Unit::locked`: tumbling or lifted) or inside a vault (walking in, at its
+    /// middle, walking out): no order reaches it.
     pub fn locked(&self, i: usize) -> bool {
+        if self.units[i].locked() {
+            return true;
+        }
         let Some(inside) = self.units[i].inside else { return false };
         self.building_at_corner(inside.site).is_some_and(|k| self.buildings[k].vault.is_some())
     }
 
-    /// `player`'s shaman is inside a vault (`locked`).
+    /// `player`'s shaman is `locked`: inside a vault, tumbling or lifted.
     pub fn shaman_locked(&self, player: u8) -> bool {
         self.units.iter().position(|u| u.owner == player && u.kind == UnitKind::Shaman).is_some_and(|i| self.locked(i))
     }
