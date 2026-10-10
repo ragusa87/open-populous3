@@ -4,6 +4,7 @@
 
 use crate::campfire;
 use crate::health::Health;
+use crate::motion::Velocity;
 use crate::path::{self, Ground, Mobility};
 use crate::site::ReincarnationSite;
 use crate::terrain::Heightmap;
@@ -245,6 +246,10 @@ pub struct Unit {
     /// Heading in eighths of a turn: 0 = +z, 2 = +x, 4 = -z, 6 = -x.
     pub facing: u8,
     pub health: Health,
+    /// Free motion when flung or falling (zero while walking or standing).
+    pub velocity: Velocity,
+    /// Height above the ground under her, in terrain height units (0 = on the ground).
+    pub lift: u16,
     pub action: Action,
     /// Pieces of wood carried (braves, 0 or 1).
     pub carrying: u8,
@@ -296,6 +301,8 @@ impl Unit {
             z,
             facing: 0,
             health: Health::full(kind.max_health()),
+            velocity: Velocity::ZERO,
+            lift: 0,
             action: Action::Idle,
             carrying: 0,
             regen: 0,
