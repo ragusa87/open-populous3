@@ -16,6 +16,7 @@ use crate::totem::{totems_from_level, Totem, TotemKind};
 use crate::unit::{torus_delta, Action, Order, Unit, UnitEvent, UnitKind};
 use crate::wood::WoodPiece;
 use pop3_format::{Level, LevelHeader, MAP_SIZE};
+use crate::time::{Tick, Ticks};
 use std::path::Path;
 
 #[derive(Clone, Debug)]
@@ -54,6 +55,8 @@ pub struct GameMap {
     pub start_camera: Option<StartCamera>,
     /// An original level's object bank (header byte 97): its tree style. 0 elsewhere.
     pub object_bank: u8,
+    /// Ticks run since the map was made (`tick`).
+    pub now: Tick,
 }
 
 /// Generated maps and sandboxes are laid out for a camera on their south side looking north (towards -z):
@@ -94,7 +97,7 @@ fn sandbox_gift(k: usize) -> crate::building::Reward {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0 }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, now: Tick::ZERO }
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
@@ -121,6 +124,7 @@ impl GameMap {
             walls: Walls::default(),
             start_camera: None,
             object_bank: 0,
+            now: Tick::ZERO,
         }
         .with_building_ground()
         .with_shamans()
@@ -536,10 +540,16 @@ impl GameMap {
             .collect()
     }
 
+    /// `ticks` ticks in a row; returns the ground they levelled.
+    pub fn run(&mut self, ticks: Ticks) -> Vec<DirtyRect> {
+        (0..ticks.get()).flat_map(|_| self.tick()).collect()
+    }
+
     /// One simulation tick for every unit, in order; returns the ground levelled by reincarnations.
     /// A unit that arrives (walking, or landing from a teleport) on a taken spot moves on to the
     /// nearest free one.
     pub fn tick(&mut self) -> Vec<DirtyRect> {
+        self.now = self.now.next();
         let mut dirty = Vec::new();
         self.update_walls();
         let buildings = &self.buildings;
@@ -874,6 +884,14 @@ pub fn showcase_states(kind: BuildingKind) -> Vec<Building> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_clock_counts_ticks_run() {
+        let mut map = GameMap::sandbox_walk();
+        map.tick();
+        map.run(Ticks::secs(1));
+        assert_eq!(map.now - Tick::ZERO, Ticks::new(13));
+    }
 
     #[test]
     fn a_header_gives_the_start_camera_when_it_sets_one() {
