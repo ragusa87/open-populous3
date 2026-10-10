@@ -3,7 +3,8 @@
 - `game_core::unit::Unit`: id, owner, kind, `u16` x/z in world units (512 per cell), wrapping at 65536
   (plain `u16` wrapping arithmetic walks the torus), `facing` in eighths of a turn (0 = +z, 2 = +x), health
   (`game_core::health::Health`: integer current and max points), `velocity` (`game_core::motion::Velocity`: x, z in
-  world units, y in height units, per tick) and `lift` (height above the ground), both 0 until physics, action.
+  world units, y in height units, per tick) and `lift` (height above the ground), both 0 until physics,
+  `statuses` (`game_core::status::Statuses`: invisible, shielded, bloodlust, hypnotized, ghost; none set yet), action.
 - Movement in fixed point per tick; no floats in simulation state.
 - Time (`game_core::time`): one tick is one original game turn, 12 per second (`TICKS_PER_SECOND`,
   pop3-rev-analysis.md "Turns and timing"). `Tick` is a moment (`GameMap::now`), `Ticks` a length, built from the

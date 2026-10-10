@@ -20,6 +20,7 @@ pub mod site;
 pub mod slots;
 pub mod spell;
 pub mod spell_book;
+pub mod status;
 pub mod terrain;
 pub mod time;
 pub mod totem;

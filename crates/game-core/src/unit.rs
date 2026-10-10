@@ -7,6 +7,7 @@ use crate::health::Health;
 use crate::motion::Velocity;
 use crate::path::{self, Ground, Mobility};
 use crate::site::ReincarnationSite;
+use crate::status::Statuses;
 use crate::terrain::Heightmap;
 use crate::time::{Countdown, Ticks};
 use pop3_format::WORLD_UNITS_PER_CELL;
@@ -253,6 +254,7 @@ pub struct Unit {
     pub velocity: Velocity,
     /// Height above the ground under her, in terrain height units (0 = on the ground).
     pub lift: u16,
+    pub statuses: Statuses,
     pub action: Action,
     /// Pieces of wood carried (braves, 0 or 1).
     pub carrying: u8,
@@ -306,6 +308,7 @@ impl Unit {
             health: Health::full(kind.max_health()),
             velocity: Velocity::ZERO,
             lift: 0,
+            statuses: Statuses::default(),
             action: Action::Idle,
             carrying: 0,
             regen: 0,
