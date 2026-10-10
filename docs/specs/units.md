@@ -33,7 +33,7 @@
 | Hammering | inside a site under construction with nothing to build yet | until wood comes or it is built; counts as free (`Unit::is_free`) |
 | Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
 | Drowning | ground under her becomes open sea (on the ground: `lift` 0) | -60 HP per tick, no orders; back to Idle if land returns |
-| Tumbling | flung or rolling from a spell (nothing sets it yet) | no orders, no healing, no drowning while `lift` > 0; back to Idle once `lift` and `velocity` are 0; drawn with the drowning pose |
+| Tumbling | flung or rolling from a spell (nothing sets it yet) | no orders, no healing, no drowning while `lift` > 0; back to Idle once `lift` and `velocity` are 0. Drawn flung in the air (`lift` > 0: followers 19, wildmen 31, shaman 61) or falling down a slope on the ground (followers 37, wildmen 47, shaman 73); the CC0 sheets show their fall meanwhile. `TUMBLE=air\|ground` in a shot |
 | Dying { left } | health reaches 0 | `DYING_TICKS` (0.8 s) |
 | Dead { left } | after dying | `RESPAWN_TICKS` (3 s), then reincarnates at her site at full health; the site levels its ground again |
 

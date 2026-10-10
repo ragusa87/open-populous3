@@ -33,28 +33,52 @@ pub enum Pose {
     Jump,
     /// A brave hammering inside a building under construction.
     Hammer,
+    /// Tumbling through the air, arms spread.
+    Flung,
+    /// Tumbling on the ground, falling down a slope.
+    Tumble,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 12] =
-        [Pose::Idle, Pose::Walk, Pose::Pray, Pose::Cast, Pose::Fall, Pose::Drown, Pose::Stranded, Pose::Chop, Pose::CarryWalk, Pose::CarryIdle, Pose::Jump, Pose::Hammer];
+    pub const ALL: [Pose; 14] = [
+        Pose::Idle,
+        Pose::Walk,
+        Pose::Pray,
+        Pose::Cast,
+        Pose::Fall,
+        Pose::Drown,
+        Pose::Stranded,
+        Pose::Chop,
+        Pose::CarryWalk,
+        Pose::CarryIdle,
+        Pose::Jump,
+        Pose::Hammer,
+        Pose::Flung,
+        Pose::Tumble,
+    ];
 
-    /// The pose drawn instead where a pose has no art of its own (wood poses: braves only, and not in
-    /// the open-source sheets yet).
+    /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
+    /// tumbling poses: not in the open-source sheets yet).
     pub fn fallback(self) -> Pose {
         match self {
             Pose::Chop | Pose::CarryIdle | Pose::Hammer => Pose::Idle,
             Pose::CarryWalk => Pose::Walk,
             Pose::Jump => Pose::Stranded,
+            Pose::Flung | Pose::Tumble => Pose::Fall,
             pose => pose,
         }
+    }
+
+    /// Only braves have original art for it (the wood and flattening poses).
+    fn brave_only(self) -> bool {
+        matches!(self, Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer)
     }
 
     /// Frames per second of looping poses.
     fn fps(self) -> f32 {
         match self {
             Pose::Walk | Pose::CarryWalk => 10.0,
-            Pose::Drown => 8.0,
+            Pose::Drown | Pose::Flung | Pose::Tumble => 8.0,
             Pose::Pray | Pose::Stranded => 4.0,
             _ => 6.0,
         }
@@ -67,13 +91,15 @@ impl Pose {
             Pose::Pray => ShamanAnim::Kneel,
             Pose::Cast | Pose::Jump => ShamanAnim::Cast,
             Pose::Fall => ShamanAnim::Fall,
-            Pose::Drown => ShamanAnim::Flung,
+            Pose::Flung => ShamanAnim::Flying,
+            Pose::Drown | Pose::Tumble => ShamanAnim::Tumble,
         }
     }
 }
 
-/// The pose for an action; `carrying` wood changes standing and walking.
-pub fn pose_for(action: &Action, carrying: bool) -> Pose {
+/// The pose for an action; `carrying` wood changes standing and walking, `airborne` (lift above
+/// the ground) tumbling.
+pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
     match action {
         Action::Idle | Action::Landing { .. } if carrying => Pose::CarryIdle,
         Action::Idle | Action::Landing { .. } => Pose::Idle,
@@ -86,7 +112,9 @@ pub fn pose_for(action: &Action, carrying: bool) -> Pose {
         Action::Stranded { .. } => Pose::Stranded,
         Action::Worshipping { .. } => Pose::Pray,
         Action::Casting { .. } => Pose::Cast,
-        Action::Drowning | Action::Tumbling => Pose::Drown,
+        Action::Drowning => Pose::Drown,
+        Action::Tumbling if airborne => Pose::Flung,
+        Action::Tumbling => Pose::Tumble,
         Action::Dying { .. } | Action::Dead { .. } => Pose::Fall,
     }
 }
@@ -221,8 +249,8 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Idle | Pose::Cast | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Jump | Pose::Hammer => WildmanAnim::Stand,
                 Pose::Walk | Pose::CarryWalk => WildmanAnim::Walk,
                 Pose::Pray => WildmanAnim::Sit,
-                Pose::Fall => WildmanAnim::Down,
-                Pose::Drown => WildmanAnim::Flung,
+                Pose::Fall | Pose::Tumble => WildmanAnim::Tumble,
+                Pose::Drown | Pose::Flung => WildmanAnim::Flung,
             };
             (anim.anim(), None, None)
         }
@@ -234,13 +262,15 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 UnitKind::Preacher => Some(OUTFIT_PREACHER),
                 _ => None,
             };
-            let pose = if kind == UnitKind::Brave { pose } else { pose.fallback() };
+            let pose = if kind == UnitKind::Brave || !pose.brave_only() { pose } else { pose.fallback() };
             let anim = match pose {
                 Pose::Idle | Pose::Cast => PersonAnim::Stand,
                 Pose::Walk => PersonAnim::Walk,
                 Pose::Pray => PersonAnim::Kneel,
                 Pose::Fall => PersonAnim::Fall,
                 Pose::Drown => PersonAnim::Drown,
+                Pose::Flung => PersonAnim::Flung,
+                Pose::Tumble => PersonAnim::Tumble,
                 Pose::Stranded => PersonAnim::ArmsUp,
                 Pose::Chop => PersonAnim::Chop,
                 Pose::CarryWalk => PersonAnim::CarryWalk,
@@ -359,11 +389,11 @@ mod tests {
 
     #[test]
     fn stranded_tribesmen_hold_their_arms_up() {
-        assert_eq!(pose_for(&Action::Stranded { to: (0, 0) }, false), Pose::Stranded);
-        assert_eq!(pose_for(&Action::Chopping { tree: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, false), Pose::Chop);
-        assert_eq!(pose_for(&Action::Walking { to: (0, 0) }, true), Pose::CarryWalk);
-        assert_eq!(pose_for(&Action::Idle, true), Pose::CarryIdle);
-        assert_eq!(pose_for(&Action::Holding { left: game_core::time::Countdown::new(game_core::time::Ticks::new(5)) }, true), Pose::CarryIdle);
+        assert_eq!(pose_for(&Action::Stranded { to: (0, 0) }, false, false), Pose::Stranded);
+        assert_eq!(pose_for(&Action::Chopping { tree: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, false, false), Pose::Chop);
+        assert_eq!(pose_for(&Action::Walking { to: (0, 0) }, true, false), Pose::CarryWalk);
+        assert_eq!(pose_for(&Action::Idle, true, false), Pose::CarryIdle);
+        assert_eq!(pose_for(&Action::Holding { left: game_core::time::Countdown::new(game_core::time::Ticks::new(5)) }, true, false), Pose::CarryIdle);
         assert_eq!(original_anim(UnitKind::Brave, Pose::Chop, 1), (11, None, None), "cutting wood");
         assert_eq!(original_anim(UnitKind::Brave, Pose::CarryWalk, 0), (9, None, None));
         assert_eq!(original_anim(UnitKind::Brave, Pose::CarryIdle, 0), (10, None, None));
@@ -371,13 +401,22 @@ mod tests {
         assert_eq!(original_anim(UnitKind::Shaman, Pose::CarryWalk, 2), original_anim(UnitKind::Shaman, Pose::Walk, 2));
         assert_eq!(original_anim(UnitKind::Brave, Pose::Stranded, 2), (12, None, Some(ARMS_UP_FRAME)));
         assert_eq!(original_anim(UnitKind::Brave, Pose::Jump, 1), (12, None, None), "the whole flattening jump");
-        assert_eq!(pose_for(&Action::Flattening { at: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, false), Pose::Jump);
-        assert_eq!(pose_for(&Action::Hammering, false), Pose::Hammer);
+        assert_eq!(pose_for(&Action::Flattening { at: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, false, false), Pose::Jump);
+        assert_eq!(pose_for(&Action::Hammering, false, false), Pose::Hammer);
         assert_eq!(original_anim(UnitKind::Brave, Pose::Hammer, 0).0, 11, "the axe swing stands in");
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Stranded, 0), (12, Some(OUTFIT_WARRIOR), Some(ARMS_UP_FRAME)));
         assert_eq!(original_anim(UnitKind::Preacher, Pose::Pray, 1), (8, Some(OUTFIT_PREACHER), None), "the monk on the tribesman body");
         assert_eq!(original_anim(UnitKind::Spy, Pose::Drown, 0), (40, Some(OUTFIT_SPY), None), "lying, spirit rising");
         assert_eq!(original_anim(UnitKind::Shaman, Pose::Stranded, 1), original_anim(UnitKind::Shaman, Pose::Idle, 1));
+    }
+
+    #[test]
+    fn tumbling_in_the_air_or_down_a_slope() {
+        assert_eq!((pose_for(&Action::Tumbling, false, true), pose_for(&Action::Tumbling, true, false)), (Pose::Flung, Pose::Tumble));
+        assert_eq!((original_anim(UnitKind::Brave, Pose::Flung, 0), original_anim(UnitKind::Brave, Pose::Tumble, 0)), ((19, None, None), (37, None, None)));
+        assert_eq!(original_anim(UnitKind::Warrior, Pose::Flung, 0), (19, Some(OUTFIT_WARRIOR), None), "every outfit has them");
+        assert_eq!((original_anim(UnitKind::Shaman, Pose::Flung, 1).0, original_anim(UnitKind::Shaman, Pose::Tumble, 1).0), (62, 74));
+        assert_eq!((original_anim(UnitKind::Wildman, Pose::Flung, 0).0, original_anim(UnitKind::Wildman, Pose::Tumble, 0).0), (31, 47));
     }
 
     #[test]

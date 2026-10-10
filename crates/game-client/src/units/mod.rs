@@ -163,7 +163,7 @@ impl UnitSprites {
     /// The frame showing `unit` from a camera at `yaw`; praying towards `worship` when it
     /// worships its shaman (`worship::worship_facing`).
     pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, yaw: f32, clock: &SimClock) -> Option<&FrameAsset> {
-        let (pose, facing) = worship.map_or((pose_for(&unit.action, unit.carrying > 0), unit.facing), |f| (Pose::Pray, f));
+        let (pose, facing) = worship.map_or((pose_for(&unit.action, unit.carrying > 0, unit.lift > 0), unit.facing), |f| (Pose::Pray, f));
         let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
         // Wildmen have no tribe (owner 255): one look for all.
         let tribe = if unit.kind == UnitKind::Wildman { 0 } else { unit.owner as usize };

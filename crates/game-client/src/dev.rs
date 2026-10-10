@@ -78,6 +78,19 @@ pub fn demo_commands(name: &str, shaman: &Unit) -> Vec<Command> {
     }
 }
 
+/// `TUMBLE=air|ground`: every unit of the player tumbles, kept moving (no physics yet), in the air or on
+/// the ground.
+pub fn tumble_demo(how: &str, map: &mut game_core::map::GameMap) {
+    let lift = match how {
+        "air" => 100,
+        "ground" => 0,
+        _ => return,
+    };
+    for u in map.units.iter_mut().filter(|u| u.owner == PLAYER && u.is_alive()) {
+        (u.action, u.velocity, u.lift) = (game_core::unit::Action::Tumbling, game_core::motion::Velocity::new(1, 0, 0), lift);
+    }
+}
+
 /// Commands for a `BRAVES` demo: every brave of the player (not inside a building) cuts the tree nearest to it; `carry` then
 /// brings the piece back where it stood.
 pub fn brave_commands(name: &str, map: &game_core::map::GameMap) -> Vec<Command> {
@@ -212,6 +225,9 @@ fn screenshot(
         cmds.extend(brave_commands(&std::env::var("BRAVES").unwrap_or_default(), &map.0));
         for c in &cmds {
             dirty.0 |= map.0.apply(c).is_some();
+        }
+        if let Ok(how) = std::env::var("TUMBLE") {
+            tumble_demo(&how, &mut map.0);
         }
         if let Some(phase) = std::env::var("VAULT").ok().and_then(|v| parse_vault(&v)) {
             map.0.buildings.iter_mut().filter_map(|b| b.vault.as_mut()).for_each(|v| v.phase = phase);

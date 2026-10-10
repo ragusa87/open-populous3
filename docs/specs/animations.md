@@ -61,9 +61,10 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 16 | 1 | tilted, probably while carried by a tornado |
 | 17 | 12 | spy setting fire to a building: disguised as a brave (plain) or a firewarrior (`0x20/1`), or discovered (`0x20/3`) |
 | 18 | 6 | brave sitting down, being converted by a preacher |
-| 19, 37 | 4 | tumbling in the air; also falling down a slope |
+| 19 | 4 | tumbling in the air, arms spread (checked in the game; `Pose::Flung`: tumbling with `lift` > 0) |
+| 37 | 4 | falling down a slope (checked in the game; `Pose::Tumble`: tumbling on the ground) |
 | 25 | 7 | fighting: kick |
-| 38 | 8 | struck down onto the back (death, last frame lying) |
+| 38 | 8 | dying: the body falls down onto its back, last frame lying (checked in the game; used) |
 | 39 | 1 | lying dead |
 | 40 | 5 | the body lying, its spirit rising: drowning in the water (used) |
 | 48 | 8 | brave hiding its eyes (an idle gesture?) |
@@ -89,8 +90,8 @@ flying in a tornado, 32 (14) another spell, 33-36 and 41 staff gestures (fightin
 falling down (death), 44 (1) lying dead, 45 dying (burning, spirit rising), 46 (4) tumbling.
 Wildmen (no layers): 0 (4) walk, 1 (1) stand, 2 (3) eating fruit at a tree, 3 (1) drinking water (still), 4 (3)
 drinking water (animated),
-31 (4) flung,
-47 (4) flying or rolling down.
+31 (4) tumbling in the air, arms spread (checked in the game; also drawn for drowning),
+47 (4) falling down a slope (checked in the game; also drawn for dying, no death anim known).
 
 Shamans: 4 consecutive animations per action, one per tribe (blue, red, yellow, green), colours drawn in:
 
@@ -98,10 +99,10 @@ Shamans: 4 consecutive animations per action, one per tribe (blue, red, yellow, 
 |---|---|---|
 | 53 | idle | 5 |
 | 57 | staff strike | 4 |
-| 61 | flying horizontally, arms spread (blown by a whirlwind) | 4 |
+| 61 | flying horizontally, arms spread (blown by a whirlwind); drawn tumbling in the air | 4 |
 | 65 | cast (jumps, lightning in the hands) | 12 |
 | 69 | kick | 5 |
-| 73 | tumbling in the air | 4 |
+| 73 | tumbling; drawn tumbling on the ground and drowning | 4 |
 | 77 | walk | 8 |
 | 85 | knocked down | 8 |
 | 81 | moving the magic wand | 1 |

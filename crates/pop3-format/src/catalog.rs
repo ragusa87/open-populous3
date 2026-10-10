@@ -121,8 +121,8 @@ pub enum ShamanAnim {
     Cast,
     /// Kick (5 frames).
     Kick,
-    /// Tumbling in the air (4 frames).
-    Flung,
+    /// Falling down a slope, tumbling (4 frames).
+    Tumble,
     /// Walking (8 frames).
     Walk,
     /// Knocked down flat on her back (8 frames).
@@ -139,7 +139,7 @@ impl ShamanAnim {
             ShamanAnim::Flying => 61,
             ShamanAnim::Cast => 65,
             ShamanAnim::Kick => 69,
-            ShamanAnim::Flung => 73,
+            ShamanAnim::Tumble => 73,
             ShamanAnim::Walk => 77,
             ShamanAnim::Fall => 85,
             ShamanAnim::Kneel => 93,
@@ -191,6 +191,10 @@ pub enum PersonAnim {
     Fall,
     /// Lying, its spirit rising (5 frames): drowning.
     Drown,
+    /// Flung through the air, arms spread (4 frames).
+    Flung,
+    /// Falling down a slope, tumbling (4 frames).
+    Tumble,
     /// Crouch, both arms straight up (frame `ARMS_UP_FRAME`), leap, land (4 frames): its arms-up
     /// frame is held for stranded units.
     ArmsUp,
@@ -213,6 +217,8 @@ impl PersonAnim {
             PersonAnim::Kneel => 8,
             PersonAnim::Fall => 38,
             PersonAnim::Drown => 40,
+            PersonAnim::Flung => 19,
+            PersonAnim::Tumble => 37,
             PersonAnim::ArmsUp => 12,
             PersonAnim::Chop => 11,
             PersonAnim::CarryWalk => 9,
@@ -238,10 +244,10 @@ pub enum WildmanAnim {
     Walk,
     /// Sitting on the ground (1 frame): used for praying.
     Sit,
-    /// Tumbling in the air (4 frames): used for drowning.
+    /// Flung through the air, arms spread (4 frames): also used for drowning.
     Flung,
-    /// Thrown down, lying (4 frames): used for dying.
-    Down,
+    /// Falling down a slope, tumbling (4 frames): also used for dying (no death anim known).
+    Tumble,
 }
 
 impl WildmanAnim {
@@ -251,7 +257,7 @@ impl WildmanAnim {
             WildmanAnim::Walk => 0,
             WildmanAnim::Sit => 3,
             WildmanAnim::Flung => 31,
-            WildmanAnim::Down => 47,
+            WildmanAnim::Tumble => 47,
         }
     }
 }
