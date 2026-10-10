@@ -26,7 +26,7 @@
 | Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -20 HP every `STRANDED_HURT_EVERY` (0.3 s) until the terrain opens a path (walks again) or it dies |
 | Worshipping | `Order::Worship { site }` (a click on a vault of knowledge with her selected) | prays at the vault's door; heals; see worship.md |
 | Casting { left } | `Order::Cast`, any spell cast | `CAST_TICKS` (10, the original's cast state) jump, then Idle (Teleport: then at the target, Landing) |
-| Landing { left } | arriving from a teleport | `LANDING_TICKS` (0.6 s), then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out); a puff of dust at touchdown (`units/dust.rs`) |
+| Landing | arriving from a teleport | appears `LANDING_DROP` (256, one cell) above the target and falls ("Physics"): no orders while in the air, Idle on touchdown, 5 ticks (0.4 s) later; drawn in the idle pose at its height; a puff of dust at touchdown (`units/dust.rs`) |
 | Chopping { tree, left } | `Order::CutTree`, `Order::FetchWood` (braves only) | walks to a free spot next to the tree, then `CHOP_TICKS` (20, 1.67 s, the original's countdown) of chopping, then the tree loses one size and the brave carries the piece |
 | Flattening { at, left } | assigned to a plan (`Order::Build`) | `JUMP_TICKS` jump on a footprint height point, which then moves towards the site's level (buildings.md "Construction"); drawn with the jump pose (original anim 12; the CC0 sheets: arms up) |
 | Entering { to } | `Unit::enter` at a building's door | straight to `to` inside, through its walls, then Idle inside (`Unit::inside`) |

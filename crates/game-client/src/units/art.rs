@@ -101,8 +101,8 @@ impl Pose {
 /// the ground) tumbling.
 pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
     match action {
-        Action::Idle | Action::Landing { .. } if carrying => Pose::CarryIdle,
-        Action::Idle | Action::Landing { .. } => Pose::Idle,
+        Action::Idle | Action::Landing if carrying => Pose::CarryIdle,
+        Action::Idle | Action::Landing => Pose::Idle,
         Action::Walking { .. } | Action::AroundFire { .. } if carrying => Pose::CarryWalk,
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } => Pose::Walk,
         Action::Chopping { .. } => Pose::Chop,

@@ -63,7 +63,7 @@ pub fn touchdowns(was_landing: &[bool], actions: &[Action]) -> Vec<bool> {
     actions
         .iter()
         .enumerate()
-        .map(|(i, a)| was_landing.get(i).copied().unwrap_or(false) && !matches!(a, Action::Landing { .. } | Action::Dying { .. } | Action::Dead { .. }))
+        .map(|(i, a)| was_landing.get(i).copied().unwrap_or(false) && !matches!(a, Action::Landing | Action::Dying { .. } | Action::Dead { .. }))
         .collect()
 }
 
@@ -144,7 +144,7 @@ fn spawn_puffs(
             }
         });
     }
-    *was_landing = actions.iter().map(|a| matches!(a, Action::Landing { .. })).collect();
+    *was_landing = actions.iter().map(|a| matches!(a, Action::Landing)).collect();
 }
 
 /// Moves, grows and fades the motes, facing the camera and pulled towards it like the units
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn puffs_where_landing_ends() {
-        let landing = Action::Landing { left: game_core::time::Countdown::new(game_core::time::Ticks::new(1)) };
+        let landing = Action::Landing;
         let was = [true, true, false, true];
         let now = [Action::Idle, landing, Action::Idle, Action::Dying { left: game_core::time::Countdown::new(game_core::time::Ticks::new(8)) }];
         assert_eq!(touchdowns(&was, &now), vec![true, false, false, false]);

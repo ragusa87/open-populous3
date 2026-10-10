@@ -24,10 +24,10 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crate::game_speed::GameSpeed;
-use crate::sim_time::{progress, TICK_SECS};
+use crate::sim_time::TICK_SECS;
 use game_core::command::Command;
 use game_core::schedule::Schedule;
-use game_core::unit::{Action, Unit, UnitKind};
+use game_core::unit::{Unit, UnitKind};
 use selection::Selection;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
@@ -40,8 +40,6 @@ pub const PIXEL: f32 = 1.0 / 88.0;
 const UPSCALE_STEPS: usize = 2;
 const BAR_HEIGHT: f32 = 0.5;
 const BAR_SIZE: Vec2 = Vec2::new(0.36, 0.045);
-/// How high (cells) she floats when she appears after a teleport.
-const LANDING_HEIGHT: f32 = 0.2;
 /// How far (cells) sprites are pulled towards the camera: ground rising less than this in front
 /// of the feet does not cut them.
 const PULL_TO_EYE: f32 = 0.6;
@@ -116,8 +114,9 @@ impl SimClock {
     /// Drawn height above the ground of `units[i]` in cells (see `drawn_lift`).
     pub fn lift(&self, i: usize, unit: &Unit, terrain: &game_core::terrain::Heightmap, height_scale: f32) -> f32 {
         let ground = terrain.height_at(unit.x as u32, unit.z as u32, WORLD_UNITS_PER_CELL);
-        let prev = self.prev_heights.get(i).copied().flatten();
-        drawn_lift(prev, unit.motion.height, ground, self.alpha(), height_scale) + landing_lift(&unit.action, self.alpha())
+        let jumped = self.prev.get(i).is_some_and(|&p| jumped(p, (unit.x, unit.z)));
+        let prev = if jumped { unit.motion.height } else { self.prev_heights.get(i).copied().flatten() };
+        drawn_lift(prev, unit.motion.height, ground, self.alpha(), height_scale)
     }
 }
 
@@ -126,11 +125,16 @@ pub fn player_shaman_cell(map: &game_core::map::GameMap, clock: &SimClock) -> Op
     map.units.iter().enumerate().find(|(_, u)| u.owner == PLAYER).map(|(i, u)| clock.cell_pos(i, u))
 }
 
+/// Moved more than a cell along an axis in one tick (teleport, reincarnation): drawn there at once.
+fn jumped(a: (u16, u16), b: (u16, u16)) -> bool {
+    let far = |a: u16, b: u16| game_core::unit::torus_delta(a, b).unsigned_abs() > WORLD_UNITS_PER_CELL;
+    far(a.0, b.0) || far(a.1, b.1)
+}
+
 /// Position `alpha` of the way from `a` to `b` (world units, shortest way around the torus), in
 /// cells. Jumps of more than a cell in one tick (teleport, reincarnation) are not glided: at `b`.
 pub fn glide(a: (u16, u16), b: (u16, u16), alpha: f32) -> Vec2 {
-    let far = |a: u16, b: u16| game_core::unit::torus_delta(a, b).unsigned_abs() > WORLD_UNITS_PER_CELL;
-    let alpha = if far(a.0, b.0) || far(a.1, b.1) { 1.0 } else { alpha };
+    let alpha = if jumped(a, b) { 1.0 } else { alpha };
     let lerp = |a: u16, b: u16| {
         let d = game_core::unit::torus_delta(a, b) as f32;
         (a as f32 + d * alpha).rem_euclid(65536.0) / WORLD_UNITS_PER_CELL as f32
@@ -441,14 +445,6 @@ pub fn toward_eye(feet: Vec3, eye: Vec3, pull: f32) -> (Vec3, f32) {
     ((eye - feet) / dist * pull, (dist - pull) / dist)
 }
 
-/// Height above the ground (cells) while landing after a teleport: from `LANDING_HEIGHT` down to
-/// 0, slowing as she touches down. `alpha` is the fraction of the current tick.
-pub fn landing_lift(action: &Action, alpha: f32) -> f32 {
-    let Action::Landing { left } = *action else { return 0.0 };
-    let t = 1.0 - progress(left, alpha);
-    LANDING_HEIGHT * t * t
-}
-
 /// Height above `ground` (cells) of a unit off the ground: its absolute height (terrain height units, drawn
 /// with the terrain's `height_scale`) glided `alpha` of the way from the last tick's (`prev`, the ground when
 /// it was on it); 0 on the ground.
@@ -491,6 +487,7 @@ fn pull_to_eye(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use game_core::unit::Action;
 
     #[test]
     fn orders_issued_reach_the_map_on_the_next_tick_and_wait_while_paused() {
@@ -555,18 +552,6 @@ mod tests {
         assert!(!hidden_inside(&map, &u));
         (u.action, u.inside) = (Action::Hammering, Some(Inside { site: (open.x, open.z), door: (0, 0) }));
         assert!(!hidden_inside(&map, &u), "seen through the open frame");
-    }
-
-    #[test]
-    fn floats_down_when_landing() {
-        use game_core::time::{Countdown, Ticks};
-        let landing = |left| Action::Landing { left: Countdown::with_left(game_core::unit::LANDING_TICKS, Ticks::new(left)) };
-        assert_eq!(landing_lift(&landing(game_core::unit::LANDING_TICKS.get()), 0.0), LANDING_HEIGHT, "appears up in the air");
-        let (high, low) = (landing_lift(&landing(4), 0.0), landing_lift(&landing(2), 0.0));
-        assert!(LANDING_HEIGHT > high && high > low && low > 0.0);
-        assert!(high - low > low - landing_lift(&landing(1), 0.99), "slows down as she touches down");
-        assert_eq!(landing_lift(&landing(1), 1.0), 0.0);
-        assert_eq!(landing_lift(&Action::Idle, 0.5), 0.0);
     }
 
     #[test]

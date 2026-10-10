@@ -4,7 +4,7 @@
 
 use crate::campfire;
 use crate::health::Health;
-use crate::motion::Motion;
+use crate::motion::{Motion, Velocity};
 use crate::path::{self, Ground, Mobility};
 use crate::physics;
 use crate::site::ReincarnationSite;
@@ -33,8 +33,9 @@ pub const REGEN_EVERY: Ticks = Ticks::millis(500);
 pub const STRANDED_HURT_EVERY: Ticks = Ticks::millis(300);
 /// The cast: the original's cast state.
 pub const CAST_TICKS: Ticks = Ticks::new(10);
-/// After a teleport she floats down onto the ground for this long.
-pub const LANDING_TICKS: Ticks = Ticks::millis(600);
+/// After a teleport she appears this high above the target (terrain height units, one cell) and falls
+/// (`physics::step`): 5 ticks to the ground.
+pub const LANDING_DROP: i32 = 256;
 /// The fall when dying, and the wait before reincarnation.
 pub const DYING_TICKS: Ticks = Ticks::millis(800);
 pub const RESPAWN_TICKS: Ticks = Ticks::secs(3);
@@ -126,8 +127,8 @@ pub enum Action {
     Stranded { to: (u16, u16) },
     /// Jumping with the spell in her hands, `left` ticks to go.
     Casting { left: Countdown },
-    /// Just teleported: floating down onto the ground, `left` ticks to go.
-    Landing { left: Countdown },
+    /// Just teleported: falling onto the ground (`Unit::motion`), Idle on touchdown.
+    Landing,
     /// The ground under her is sea: loses health until dead or the land comes back.
     Drowning,
     /// Flung through the air or rolling on the ground by a spell, moved by `Unit::velocity` at
@@ -165,7 +166,7 @@ impl Action {
             Action::Stranded { .. } => "Stranded",
             Action::Worshipping { .. } => "Worshipping",
             Action::Casting { .. } => "Casting",
-            Action::Landing { .. } => "Landing",
+            Action::Landing => "Landing",
             Action::Drowning => "Drowning",
             Action::Tumbling => "Tumbling",
             Action::Dying { .. } => "Dying",
@@ -184,7 +185,6 @@ impl Action {
     pub fn countdown(&self) -> Option<Countdown> {
         match *self {
             Action::Casting { left }
-            | Action::Landing { left }
             | Action::Dying { left }
             | Action::Dead { left }
             | Action::Chopping { left, .. }
@@ -361,6 +361,11 @@ impl Unit {
         self.action == Action::Tumbling || self.motion.airborne()
     }
 
+    /// Orders change what it does: not while drowning, tumbling, dying or dead, nor off the ground.
+    fn takes_orders(&self) -> bool {
+        self.action.can_take_orders() && !self.motion.airborne()
+    }
+
     /// The unit as something the player may pick (hover, select), None while `locked`.
     pub fn pickable(&self) -> Option<PickableUnit<'_>> {
         (!self.locked()).then_some(PickableUnit(self))
@@ -374,7 +379,7 @@ impl Unit {
     /// Teleport: the cast jump, then she is at `to` (if she can still stand there by then).
     /// Ignored while drowning, dying or dead; another order before the jump ends cancels it.
     pub fn cast_teleport(&mut self, to: (u16, u16)) {
-        if self.action.can_take_orders() {
+        if self.takes_orders() {
             self.order(Order::Cast);
             self.teleport_to = Some(to);
         }
@@ -396,7 +401,7 @@ impl Unit {
 
     /// A direct order: replaces the chained ones. Ignored while drowning, dying or dead.
     pub fn order(&mut self, order: Order) {
-        if !self.action.can_take_orders() {
+        if !self.takes_orders() {
             return;
         }
         self.queue.clear();
@@ -492,7 +497,7 @@ impl Unit {
 
     /// Starts `order` now, keeping the chained ones. Ignored while drowning, dying or dead.
     pub fn start(&mut self, order: Order) {
-        if !self.action.can_take_orders() {
+        if !self.takes_orders() {
             return;
         }
         (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
@@ -615,10 +620,16 @@ impl Unit {
                 if let Some(to) = self.teleport_to.take().filter(|&to| ground.passable(self.mobility(), (cell_of(to.0), cell_of(to.1)))) {
                     (self.x, self.z) = to;
                     self.inside = None;
-                    self.action = Action::Landing { left: Countdown::new(LANDING_TICKS) };
+                    let below = terrain.height_at(to.0 as u32, to.1 as u32, WORLD_UNITS_PER_CELL);
+                    self.motion = Motion::flying(Velocity::ZERO, below + LANDING_DROP);
+                    self.action = Action::Landing;
                 }
             }
-            Action::Landing { mut left } => self.action = if left.tick() { Action::Idle } else { Action::Landing { left } },
+            Action::Landing => {
+                if !self.motion.airborne() {
+                    self.action = Action::Idle;
+                }
+            }
             Action::Tumbling => {
                 if self.motion.is_still() {
                     self.action = Action::Idle;
@@ -814,7 +825,6 @@ pub fn isqrt(n: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::motion::Velocity;
 
     fn land() -> Heightmap {
         let mut t = Heightmap::new(128);
@@ -1040,9 +1050,13 @@ mod tests {
         assert_eq!((u.x, u.z), start, "still jumping where she was");
         assert!(matches!(u.action, Action::Casting { left } if left.left() == Ticks::new(1)));
         run(&mut u, &t, &site, 1);
-        assert_eq!((u.x, u.z, u.action), (to.0, to.1, Action::Landing { left: Countdown::new(LANDING_TICKS) }), "at the target, floating down");
-        run(&mut u, &t, &site, LANDING_TICKS.get() as usize);
-        assert_eq!(u.action, Action::Idle, "landed");
+        assert_eq!((u.x, u.z, u.action), (to.0, to.1, Action::Landing), "at the target, up in the air");
+        assert_eq!(u.motion, Motion::flying(Velocity::ZERO, 100 + LANDING_DROP));
+        u.order(Order::Stop);
+        run(&mut u, &t, &site, 4);
+        assert_eq!((u.action, u.motion.height), (Action::Landing, Some(100 + LANDING_DROP - 192)), "falling, no orders");
+        run(&mut u, &t, &site, 1);
+        assert_eq!((u.action, u.motion), (Action::Idle, Motion::STILL), "landed");
         sea_cell(&mut t, (5, 5));
         u.cast_teleport((5 * 512, 5 * 512));
         run(&mut u, &t, &site, CAST_TICKS.get() as usize);
