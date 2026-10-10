@@ -136,7 +136,7 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   (`Unit::enter`); there the reward is granted (`Vault::grant`): logged in `GameMap::granted` with her tribe,
   given to the level's books, and the client makes it available on its panels (`hud::build::apply_rewards`).
   Then she walks out by the door (well within `OPEN_TICKS`). From going in until she is out she is locked: no
-  order of the player reaches her (units.md "Locked shaman"). A spent vault does not take her. Dev:
+  order of the player reaches her (units.md "Locked units"). A spent vault does not take her. Dev:
   `SHAMAN=worship` sends her to the map's first vault.
 - Drawn (done: client `vault.rs`): the original pyramid's frames blended point by point, the door's points from
   192 towards 191, the top's from 192 towards 193 (points moving over 10 units between frames; the others are
