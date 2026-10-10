@@ -239,15 +239,15 @@ fn detect(
     let target = on_map.zip(cams.iter().next()).and_then(|(c, cam)| {
         let people: Vec<OnScreen> = units
             .iter()
-            .filter(|(v, _, vis)| **vis != Visibility::Hidden && map.0.units.get(v.0).is_some_and(|u| u.is_alive() && !selection.contains(u.id) && !crate::units::hidden_inside(&map.0, u)))
+            .filter(|(_, _, vis)| **vis != Visibility::Hidden)
             .filter_map(|(v, gt, _)| {
+                let u = map.0.units.get(v.0).filter(|u| u.is_alive() && !selection.contains(u.id) && !crate::units::hidden_inside(&map.0, u))?.pickable()?;
                 let feet = cam.0.world_to_viewport(cam.1, gt.translation()).ok()?;
                 let head = cam.0.world_to_viewport(cam.1, gt.translation() + gt.up() * UNIT_HEIGHT).ok()?;
-                // `id` carries the view's index in `GameMap::units` here.
-                Some(OnScreen { id: v.0 as u32, feet, head })
+                Some(OnScreen::new(u, feet, head))
             })
             .collect();
-        let unit = unit_at(c, &people).map(|u| u.id as usize);
+        let unit = unit_at(c, &people).and_then(|p| map.0.units.iter().position(|u| u.id == p.id()));
         let ground = cam.0.viewport_to_world(cam.1, c).ok().and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)).map(world_units);
         let wood = ground.and_then(|at| wood_index(&map.0, at)).filter(|&i| woods.iter().any(|w| w.0 == i));
         // Plans have no view to outline but are hovered for their tooltip.

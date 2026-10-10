@@ -128,7 +128,7 @@ fn preview_click(
     if !q.iter().any(|i| *i == Interaction::Pressed) {
         return;
     }
-    if let Some(u) = map.0.shaman_of(PLAYER).filter(|u| selectable(u)) {
+    if let Some(u) = map.0.shaman_of(PLAYER).filter(|u| selectable(u).is_some()) {
         selection.select_only(u.id);
     }
     if let Some(cell) = player_shaman_cell(&map.0, &clock) {

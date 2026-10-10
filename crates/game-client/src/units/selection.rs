@@ -19,7 +19,7 @@ use crate::hud::PANEL_WIDTH;
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::command::Command;
-use game_core::unit::{Order, Unit};
+use game_core::unit::{Order, PickableUnit, Unit};
 
 /// Cursor travel (screen pixels) before a press becomes a box drag.
 pub const DRAG_PX: f32 = 6.0;
@@ -36,12 +36,23 @@ pub struct Selection {
     pub units: Vec<u32>,
 }
 
-/// A unit the player could select, as seen on screen.
+/// A unit the player could pick (hover, select), as seen on screen. Only made from a `PickableUnit`:
+/// a flung or lifted unit is never on screen to pick.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OnScreen {
-    pub id: u32,
-    pub feet: Vec2,
-    pub head: Vec2,
+    id: u32,
+    feet: Vec2,
+    head: Vec2,
+}
+
+impl OnScreen {
+    pub fn new(unit: PickableUnit, feet: Vec2, head: Vec2) -> Self {
+        OnScreen { id: unit.id, feet, head }
+    }
+
+    pub fn id(&self) -> u32 {
+        self.id
+    }
 }
 
 impl Selection {
@@ -87,9 +98,9 @@ impl Selection {
         }
     }
 
-    /// Drops units that can no longer be selected (dead, gone, inside something).
+    /// Drops units that can no longer be selected (dead, gone, flung, inside something).
     pub fn retain(&mut self, units: &[Unit]) {
-        self.units.retain(|&id| units.iter().any(|u| u.id == id && selectable(u)));
+        self.units.retain(|&id| units.iter().any(|u| u.id == id && selectable(u).is_some()));
     }
 
     /// One order per selected unit.
@@ -98,10 +109,11 @@ impl Selection {
     }
 }
 
-/// The player's own living units. Units inside a vehicle or building will be excluded here once
-/// they exist: selecting a vehicle or building does not select the people inside it.
-pub fn selectable(u: &Unit) -> bool {
-    u.owner == PLAYER && u.is_alive()
+/// The player's own living units, unless locked (`Unit::pickable`). Units inside a vehicle or building
+/// will be excluded here once they exist: selecting a vehicle or building does not select the people
+/// inside it.
+pub fn selectable(u: &Unit) -> Option<PickableUnit<'_>> {
+    (u.owner == PLAYER && u.is_alive()).then(|| u.pickable()).flatten()
 }
 
 /// The unit under the cursor: nearest feet-to-head line within `HIT_PX`.
@@ -209,10 +221,10 @@ pub fn on_screen(
         .iter()
         .filter(|(_, _, vis)| **vis != Visibility::Hidden)
         .filter_map(|(view, gt, _)| {
-            let u = map.units.get(view.0).filter(|u| selectable(u) && !super::hidden_inside(map, u))?;
+            let u = map.units.get(view.0).filter(|u| !super::hidden_inside(map, u)).and_then(selectable)?;
             let feet = cam.0.world_to_viewport(cam.1, gt.translation()).ok()?;
             let head = cam.0.world_to_viewport(cam.1, gt.translation() + gt.up() * UNIT_HEIGHT).ok()?;
-            Some(OnScreen { id: u.id, feet, head })
+            Some(OnScreen::new(u, feet, head))
         })
         .collect()
 }
@@ -407,6 +419,17 @@ mod tests {
 
     fn sel(units: &[u32]) -> Selection {
         Selection { units: units.to_vec() }
+    }
+
+    #[test]
+    fn a_flung_unit_is_not_selectable_and_leaves_the_selection() {
+        let mut units = vec![Unit::new(4, PLAYER, game_core::unit::UnitKind::Brave, (0, 0))];
+        assert!(selectable(&units[0]).is_some());
+        let mut sel = sel(&[4]);
+        units[0].action = game_core::unit::Action::Tumbling;
+        assert!(selectable(&units[0]).is_none());
+        sel.retain(&units);
+        assert!(sel.units.is_empty());
     }
 
     #[test]
