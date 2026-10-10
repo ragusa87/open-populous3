@@ -540,6 +540,14 @@ impl GameMap {
             .collect()
     }
 
+    /// One tick of the game: `commands` (that tick's, `schedule::Schedule::take`) apply, then the tick runs;
+    /// returns the ground changed.
+    pub fn step(&mut self, commands: &[Command]) -> Vec<DirtyRect> {
+        let mut dirty: Vec<DirtyRect> = commands.iter().filter_map(|c| self.apply(c)).collect();
+        dirty.extend(self.tick());
+        dirty
+    }
+
     /// `ticks` ticks in a row; returns the ground they levelled.
     pub fn run(&mut self, ticks: Ticks) -> Vec<DirtyRect> {
         (0..ticks.get()).flat_map(|_| self.tick()).collect()

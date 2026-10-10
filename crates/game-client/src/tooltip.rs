@@ -639,7 +639,7 @@ fn spawn_toggle(parent: &mut ChildSpawnerCommands, toggle: Toggle, icons: &mut I
 }
 
 /// The button shows its state; pressed, it sends its command.
-fn press_toggle(mut buttons: Query<(&Interaction, &ToggleButton, Option<&mut ImageNode>, Option<&mut BackgroundColor>), Changed<Interaction>>, mut map: ResMut<CurrentMap>) {
+fn press_toggle(mut buttons: Query<(&Interaction, &ToggleButton, Option<&mut ImageNode>, Option<&mut BackgroundColor>), Changed<Interaction>>, mut schedule: ResMut<crate::units::GameSchedule>) {
     for (interaction, button, image, bg) in &mut buttons {
         let state = match interaction {
             Interaction::None => 0,
@@ -653,7 +653,7 @@ fn press_toggle(mut buttons: Query<(&Interaction, &ToggleButton, Option<&mut Ima
             bg.0 = [Color::srgb(0.62, 0.42, 0.14), Color::srgb(0.75, 0.52, 0.18), Color::srgb(0.40, 0.25, 0.08)][state];
         }
         if *interaction == Interaction::Pressed {
-            map.bypass_change_detection().0.apply(&button.toggle.command());
+            schedule.issue(button.toggle.command());
         }
     }
 }

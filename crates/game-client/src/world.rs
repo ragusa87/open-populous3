@@ -160,6 +160,7 @@ fn switch_level(
     mut selected: ResMut<crate::hud::spells::SelectedSpell>,
     mut builds: ResMut<crate::hud::build::PlayerBuilds>,
     mut blueprint: ResMut<crate::blueprint::Blueprint>,
+    mut schedule: ResMut<crate::units::GameSchedule>,
 ) {
     use crate::keymap::Shortcut;
     let forward = if keys.just_pressed(Shortcut::NextLevel) {
@@ -171,6 +172,7 @@ fn switch_level(
     };
     levels.index = next_index(levels.index, levels.files.len(), forward);
     map.0 = levels.load_current();
+    *schedule = crate::units::GameSchedule::default();
     spells.0 = crate::hud::spells::level_book(&map.0);
     selected.0 = None;
     builds.0 = crate::hud::build::level_builds(&map.0);

@@ -84,6 +84,22 @@ impl GameMap {
     /// id order, the first ones up to its maximum are assigned), the others walk next to its door.
     pub fn build_orders(&self, player: u8, units: &[u32], site: usize) -> Vec<Command> {
         let Some(b) = self.buildings.get(site).filter(|b| b.owner == player) else { return Vec::new() };
+        self.orders_to_build(b, units)
+    }
+
+    /// The orders `build_orders` will give once `place` (a `Command::PlaceBuilding`) placed its plan, to send
+    /// with it on the same tick; none if it cannot be placed now.
+    pub fn place_orders(&self, place: &Command, units: &[u32]) -> Vec<Command> {
+        let Command::PlaceBuilding { player, kind, at, facing } = *place else { return Vec::new() };
+        let b = Building::placed(kind, player, at.0, at.1, facing % 8, &self.terrain);
+        if kind.wood_cost() == 0 || !can_place(self, &b) {
+            return Vec::new();
+        }
+        self.orders_to_build(&b, units)
+    }
+
+    fn orders_to_build(&self, b: &Building, units: &[u32]) -> Vec<Command> {
+        let player = b.owner;
         let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
         let mut braves: Vec<u32> = self.units.iter().filter(mine).filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
         braves.sort_unstable();
@@ -354,6 +370,20 @@ mod tests {
             map.tick();
             done(map)
         })
+    }
+
+    #[test]
+    fn orders_sent_with_a_plan_are_those_given_once_it_is_placed() {
+        let mut map = sandbox();
+        let mut units = braves(&map, 3);
+        units.push(map.units.iter().find(|u| u.kind == UnitKind::Shaman).unwrap().id);
+        let place = Command::PlaceBuilding { player: 0, kind: BuildingKind::Hut { size: 1 }, at: corner(24, 0), facing: 0 };
+        let before = map.place_orders(&place, &units);
+        assert_eq!(before.len(), 4, "the braves build, the shaman goes to the door");
+        map.apply(&place);
+        let site = map.building_at_corner(corner(24, 0)).unwrap();
+        assert_eq!(before, map.build_orders(0, &units, site));
+        assert!(map.place_orders(&place, &units).is_empty(), "the place is taken now");
     }
 
     #[test]

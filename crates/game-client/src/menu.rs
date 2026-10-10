@@ -312,6 +312,7 @@ struct GameSetup<'w> {
     grid: ResMut<'w, crate::world::ShowGrid>,
     dev: ResMut<'w, crate::keymap::DevMode>,
     speed: ResMut<'w, GameSpeed>,
+    schedule: ResMut<'w, crate::units::GameSchedule>,
 }
 
 impl GameSetup<'_> {
@@ -328,6 +329,7 @@ impl GameSetup<'_> {
             Start::SandboxBuildings => (GameMap::sandbox_buildings(), sandbox_book()),
             Start::SandboxWorship => (GameMap::sandbox_worship(), sandbox_book()),
         };
+        *self.schedule = crate::units::GameSchedule::default();
         self.builds.0 = level_builds(&self.map.0);
         self.grid.0 = start != Start::NewGame;
         self.blueprint.put_away();

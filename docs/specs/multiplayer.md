@@ -4,8 +4,26 @@ The original game used lockstep: peers exchange inputs only and run the same sim
 
 ## Rules for the simulation (game-core)
 - No floats, no `HashMap` iteration order, no system time, PRNG = `map::Lcg` seeded by the host.
-- Advance in fixed turns (e.g. 10 Hz); a turn runs only when all players' `Message::Turn` arrived.
-- Commands issued in turn N are scheduled for N + delay (2-3) to hide latency.
+- Advance in fixed ticks, 12 per second, one per original turn (`game_core::time`); a tick runs only when all
+  players' turn for it arrived.
+- Commands issued in tick N are scheduled for N + delay (2-3) to hide latency.
+
+## Schedule (`game_core::schedule::Schedule`, done)
+Input never touches the map: the client issues commands to its `GameSchedule` (`units/mod.rs`), and
+`run_ticks` steps the map (`GameMap::step`: that tick's commands, then the tick).
+- `issue(command)`: a local command waits in `pending`.
+- `close_local(now)`, before running tick `now`: the local turn of `now + delay` closes with the pending
+  commands, and is returned to be sent to the peers (`Message::Turn`); once per tick, so a stalled tick does not
+  close it twice.
+- `receive(player, tick, commands)`: a peer's turn; a second one for the same tick is ignored.
+- `ready(tick)`: every player closed it, or it is one of the first `delay` ticks after the start, which nobody
+  could have sent anything for. Not ready: the client stops stepping until it is (the clock drops that time).
+- `take(tick)`: its commands, players in order, each player's in the order issued.
+- Single player: `Schedule::single`, one player, no delay: what was issued during a frame applies on the next
+  tick; while paused it waits. A new map (new game, sandbox, level switch) starts a new schedule.
+- A building plan and the orders sent with it go on the same tick: `GameMap::place_orders` gives the orders the
+  plan will get once placed (`build_orders` needs it on the map).
+- Dev shots (`dev.rs`) still apply their set-up commands to the map directly.
 - Periodically exchange a checksum of the heightmap/units to detect desync.
 
 ## Wire format (game-net)
@@ -21,4 +39,4 @@ Frame: `u32 LE` length + payload. Payload tag byte:
   - kind 6 `PlaceBuilding`: `u8` building model (`BuildingKind::model`), `u16` x, z of its corner, `u8` facing;
   - kind 7 `CancelBuilding`: `u16` x, z of a point of the plan's footprint.
 
-Implemented: codec + TCP round trip test. To do: host/join, turn scheduler, reconnect, lobby UI.
+Implemented: codec + TCP round trip test. To do: host/join, sending and receiving the turns, reconnect, lobby UI.

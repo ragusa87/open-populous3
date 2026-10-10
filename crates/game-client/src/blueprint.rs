@@ -211,7 +211,8 @@ fn blueprint_input(
     cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     rig: Res<CameraRig>,
     params: Res<CurveParamsRes>,
-    mut map: ResMut<CurrentMap>,
+    map: Res<CurrentMap>,
+    mut schedule: ResMut<crate::units::GameSchedule>,
     mut blueprint: ResMut<Blueprint>,
     selection: Res<crate::units::selection::Selection>,
 ) {
@@ -227,21 +228,16 @@ fn blueprint_input(
     if let (Some(Plan::Building(kind)), true) = (blueprint.plan, mouse.just_pressed(MouseButton::Left)) {
         let Some(cell) = ground_under_mouse(&windows, &ui, &cams, &map, &rig, &params) else { return };
         let Some(place) = place_command(&map.0, kind, blueprint.facing, cell) else { return };
-        let map = &mut map.bypass_change_detection().0;
-        map.apply(&place);
-        if let Command::PlaceBuilding { at, .. } = place {
-            let site = map.building_at_corner(at);
-            for c in site.map(|site| map.build_orders(PLAYER, &selection.units, site)).unwrap_or_default() {
-                map.apply(&c);
-            }
-        }
+        let orders = map.0.place_orders(&place, &selection.units);
+        schedule.issue(place);
+        orders.into_iter().for_each(|c| schedule.issue(c));
         blueprint.put_away();
     }
     if blueprint.plan == Some(Plan::Campfire) && mouse.just_pressed(MouseButton::Left) {
         let Some(cell) = ground_under_mouse(&windows, &ui, &cams, &map, &rig, &params).map(campfire_cell) else { return };
         if campfire::can_place(&map.0, cell) {
             let at = world_units(Vec2::new(cell.0 as f32 + 0.5, cell.1 as f32 + 0.5));
-            map.bypass_change_detection().0.apply(&Command::PlaceCampfire { player: PLAYER, at });
+            schedule.issue(Command::PlaceCampfire { player: PLAYER, at });
             blueprint.put_away();
         }
     }

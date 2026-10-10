@@ -171,7 +171,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Script side effects outside the AI: messages, flybys, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`, `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
 
 ## Multiplayer ([multiplayer.md](docs/specs/multiplayer.md))
-- [ ] Turn scheduler with 2-3 turns input delay; local input goes through it instead of `GameMap::apply` directly.
+- [ ] Network driver: send `Schedule::close_local`'s turn as `Message::Turn` every tick, feed peers' turns to `receive`, 2-3 ticks of delay (the schedule is done, single player only today).
 - [ ] Host/join UI, lobby, reconnect.
 - [ ] Desync checksum of heightmap + units.
 - [ ] Pause and game speed as `Command`s, so every peer agrees (single player only today, `game_speed.rs`).

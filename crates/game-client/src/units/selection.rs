@@ -220,8 +220,8 @@ pub fn on_screen(
 /// Left/right mouse and P/X: selection changes and orders to the selection.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn select_and_order(
-    keys: Res<ButtonInput<KeyCode>>,
     shortcuts: crate::keymap::Shortcuts,
+    mut schedule: ResMut<super::GameSchedule>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -229,7 +229,7 @@ pub(super) fn select_and_order(
     ui: Query<&Interaction>,
     params: Res<CurveParamsRes>,
     rig: Res<CameraRig>,
-    mut map: ResMut<CurrentMap>,
+    map: Res<CurrentMap>,
     mut selection: ResMut<Selection>,
     mut drag: ResMut<Drag>,
     spell: Res<crate::hud::spells::SelectedSpell>,
@@ -241,8 +241,7 @@ pub(super) fn select_and_order(
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
     let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && spell.0.is_none() && !blueprint.is_active());
-    let add = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
-    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let crate::keymap::Mods { ctrl: add, shift } = shortcuts.mods();
     let mut moves = Vec::new();
     // Shift + right click removes what is under the cursor (a camp fire) and keeps the selection; a
     // right click on a tree shows its wood (`nature`) and keeps it too.
@@ -306,7 +305,7 @@ pub(super) fn select_and_order(
     let commands = orders.into_iter().flat_map(|order| selection.commands(order));
     let commands: Vec<Command> = if add { chained(commands.collect()) } else { commands.collect() };
     for command in moves.into_iter().chain(commands) {
-        map.bypass_change_detection().0.apply(&command);
+        schedule.issue(command);
     }
 }
 

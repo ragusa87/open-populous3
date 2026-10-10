@@ -13,6 +13,7 @@ pub mod map;
 pub mod occupancy;
 pub mod path;
 pub mod placement;
+pub mod schedule;
 pub mod site;
 pub mod slots;
 pub mod spell;

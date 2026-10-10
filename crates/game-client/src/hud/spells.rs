@@ -12,7 +12,7 @@ use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::pick_ground;
 use crate::units::{world_units, PLAYER};
 use crate::virtual_cursor::CursorLook;
-use crate::world::{CurrentMap, TerrainDirty};
+use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::command::Command;
 use game_core::map::GameMap;
@@ -306,10 +306,10 @@ fn cast_selected(
     keys: crate::keymap::Shortcuts,
     mut book: ResMut<PlayerSpells>,
     selected: Res<SelectedSpell>,
-    mut map: ResMut<CurrentMap>,
+    mut schedule: ResMut<crate::units::GameSchedule>,
 ) {
     if let (true, Some(kind)) = (keys.just_pressed(crate::keymap::Shortcut::CastSelf), selected.0) && ground_spell(kind, (0, 0)).is_none() && book.0.cast(kind) {
-        map.bypass_change_detection().0.apply(&Command::Order { player: PLAYER, order: Order::Cast });
+        schedule.issue(Command::Order { player: PLAYER, order: Order::Cast });
     }
 }
 
@@ -323,8 +323,8 @@ fn aim_and_cast(
     cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     params: Res<CurveParamsRes>,
     rig: Res<CameraRig>,
-    mut map: ResMut<CurrentMap>,
-    mut dirty: ResMut<TerrainDirty>,
+    map: Res<CurrentMap>,
+    mut schedule: ResMut<crate::units::GameSchedule>,
     mut book: ResMut<PlayerSpells>,
     mut selected: ResMut<SelectedSpell>,
     mut look: ResMut<CursorLook>,
@@ -353,7 +353,7 @@ fn aim_and_cast(
     let valid = spell.filter(|s| ready && map.0.can_cast(PLAYER, s));
     look.set_if_neq(CursorLook::Spell { kind, valid: valid.is_some() });
     if let (true, Some(spell)) = (mouse.just_pressed(MouseButton::Left), valid) && book.0.cast(kind) {
-        dirty.0 |= map.bypass_change_detection().0.apply(&Command::Cast { player: PLAYER, spell }).is_some();
+        schedule.issue(Command::Cast { player: PLAYER, spell });
         selected.0 = None;
         look.set_if_neq(CursorLook::Arrow);
     }

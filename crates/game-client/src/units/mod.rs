@@ -25,7 +25,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crate::game_speed::GameSpeed;
 use crate::sim_time::{progress, TICK_SECS};
-use game_core::time::Ticks;
+use game_core::command::Command;
+use game_core::schedule::Schedule;
 use game_core::unit::{Action, Unit, UnitKind};
 use selection::Selection;
 use pop3_format::WORLD_UNITS_PER_CELL;
@@ -46,6 +47,23 @@ const LANDING_HEIGHT: f32 = 0.2;
 const PULL_TO_EYE: f32 = 0.6;
 /// How far (cells) a unit up a lookout is pulled towards the camera, out of the tower's middle.
 pub const PERCH_PULL: f32 = 0.7;
+
+/// The local player's commands, waiting for the tick they apply on (`game_core::schedule`). Input issues
+/// them here, never to the map; `run_ticks` applies them. A new map starts a new schedule.
+#[derive(Resource)]
+pub struct GameSchedule(pub Schedule);
+
+impl Default for GameSchedule {
+    fn default() -> Self {
+        GameSchedule(Schedule::single(PLAYER, game_core::time::Tick::ZERO))
+    }
+}
+
+impl GameSchedule {
+    pub fn issue(&mut self, command: Command) {
+        self.0.issue(command);
+    }
+}
 
 /// Tick times run at most per frame: past that a slow frame drops time instead of catching up.
 const MAX_CATCH_UP: u32 = 4;
@@ -182,6 +200,7 @@ pub struct UnitsPlugin;
 impl Plugin for UnitsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SimClock>()
+            .init_resource::<GameSchedule>()
             .init_resource::<UnitSprites>()
             .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin))
             .add_systems(Startup, load_sprites)
@@ -251,14 +270,31 @@ pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<M
     FrameAsset { image, mesh: meshes.add(sprite_quad(size, origin)), material, size, origin }
 }
 
-fn run_ticks(time: Res<Time>, speed: Res<GameSpeed>, mut clock: ResMut<SimClock>, mut map: ResMut<CurrentMap>, mut dirty: ResMut<TerrainDirty>) {
-    let ticks = clock.steps_due(time.delta_secs(), *speed);
-    let mut levelled = false;
-    if ticks > 0 {
-        let map = map.bypass_change_detection();
-        clock.prev = map.0.units.iter().map(|u| (u.x, u.z)).collect();
-        levelled = !map.0.run(Ticks::new(ticks)).is_empty();
+fn run_ticks(
+    time: Res<Time>,
+    speed: Res<GameSpeed>,
+    mut clock: ResMut<SimClock>,
+    mut schedule: ResMut<GameSchedule>,
+    mut map: ResMut<CurrentMap>,
+    mut dirty: ResMut<TerrainDirty>,
+) {
+    let due = clock.steps_due(time.delta_secs(), *speed);
+    let (mut levelled, mut ran) = (false, 0);
+    if due > 0 {
+        let map = &mut map.bypass_change_detection().0;
+        clock.prev = map.units.iter().map(|u| (u.x, u.z)).collect();
+        while ran < due {
+            let now = map.now;
+            schedule.0.close_local(now);
+            if !schedule.0.ready(now) {
+                break;
+            }
+            let commands = schedule.0.take(now);
+            levelled |= !map.step(&commands).is_empty();
+            ran += 1;
+        }
     }
+    clock.ran = ran;
     if levelled {
         dirty.0 = true;
         map.set_changed();
@@ -436,6 +472,33 @@ fn pull_to_eye(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn orders_issued_reach_the_map_on_the_next_tick_and_wait_while_paused() {
+        use bevy::ecs::system::RunSystemOnce;
+        use game_core::unit::Order;
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<SimClock>()
+            .init_resource::<GameSchedule>()
+            .init_resource::<TerrainDirty>()
+            .insert_resource(GameSpeed { paused: true, times: 1 })
+            .insert_resource(CurrentMap(game_core::map::GameMap::sandbox_walk()));
+        let tick_time = |app: &mut App| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(TICK_SECS * 1.01));
+            app.world_mut().run_system_once(run_ticks).unwrap();
+        };
+        let shaman = &app.world().resource::<CurrentMap>().0.units[0];
+        let (x, z) = (shaman.x, shaman.z + 2048);
+        app.world_mut().resource_mut::<GameSchedule>().issue(Command::Order { player: PLAYER, order: Order::MoveTo { x, z } });
+        tick_time(&mut app);
+        assert_eq!(app.world().resource::<CurrentMap>().0.units[0].action, Action::Idle, "paused: waits");
+        app.world_mut().resource_mut::<GameSpeed>().paused = false;
+        tick_time(&mut app);
+        let map = &app.world().resource::<CurrentMap>().0;
+        assert_eq!((map.units[0].action, map.now.to_wire()), (Action::Walking { to: (x, z) }, 1));
+        assert_eq!(app.world().resource::<SimClock>().ran, 1);
+    }
 
     #[test]
     fn the_clock_runs_whole_tick_times_at_the_game_speed() {
