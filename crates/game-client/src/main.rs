@@ -18,6 +18,7 @@ mod generated_buildings;
 mod grounded;
 mod hover;
 mod hud;
+mod keymap;
 mod menu;
 mod nature;
 mod object_scale;
@@ -85,6 +86,7 @@ fn main() {
             editor::EditorPlugin,
             hud::HudPlugin,
             menu::MenuPlugin,
+            keymap::KeymapPlugin,
             dev::DevPlugin,
             cursor_debug::CursorDebugPlugin,
             camera_debug::CameraDebugPlugin,

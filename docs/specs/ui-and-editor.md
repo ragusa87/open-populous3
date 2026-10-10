@@ -1,6 +1,7 @@
 # Camera, UI and editor
 
-All keys and clicks, original and ours: [shortcuts.md](shortcuts.md).
+All keys and clicks, original and ours: [shortcuts.md](shortcuts.md). Dev mode (pause menu, `POP3_DEV`) picks our
+keymap over the original's and shows the info line and the camera readout; the keys below are dev mode's.
 
 ## Camera (`camera.rs`)
 `CameraRig { focus, yaw, pitch, distance, aerial }`. Focus is in cell units, wrapped in `[0,128)`.
@@ -122,7 +123,8 @@ Sandbox > Walk, Units, Buildings, Worship (the ground of every sandbox shows a g
 facing the shaman, and north one totem of each look with 8 braves, worship.md), Quit.
 Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
 Esc in the game (once an open view-presets menu is closed) pauses: the mouse is released (`VirtualCursor::request`)
-and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Main menu > "Leave this game?" No / Yes.
+and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Dev mode: on/off (shortcuts.md), Main menu >
+"Leave this game?" No / Yes.
 Resuming or starting a game captures the mouse again.
 `AppState::Menu | Playing | Paused`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
 while playing. Behind the menu the game camera is off (no terrain, units or HUD drawn); the menu and the cursor

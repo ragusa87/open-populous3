@@ -4,7 +4,7 @@
 //! Gameplay systems are in the `Gameplay` set, which only runs while `Playing`. Behind the menu the
 //! game camera is off: no world, units or HUD are drawn, the menu has its own overlay camera.
 //! Esc in the game pauses: the mouse is released and the pause menu (Resume, Main menu with a
-//! confirmation) shows over the frozen game; Esc on it resumes.
+//! confirmation) shows over the frozen game; Esc on it resumes. Its Dev mode entry switches `keymap::DevMode`.
 //! `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship` picks where to start (screenshots start in the game).
 
 use crate::camera::{GameCamera, OverlayCamera};
@@ -60,6 +60,7 @@ pub enum Action {
     Open(Page),
     Back,
     Resume,
+    ToggleDev,
     Leave,
     Quit,
 }
@@ -69,6 +70,7 @@ pub enum Action {
 pub enum Outcome {
     Start(Start),
     Resume,
+    ToggleDev,
     /// Leave the game for the main menu.
     Leave,
     Quit,
@@ -87,8 +89,16 @@ pub fn items(page: Page) -> &'static [(&'static str, Action)] {
     match page {
         Page::Main => &[("New game", Action::Start(Start::NewGame)), ("Sandbox", Action::Open(Page::Sandbox)), ("Quit", Action::Quit)],
         Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Units", Action::Start(Start::SandboxUnits)), ("Buildings", Action::Start(Start::SandboxBuildings)), ("Worship", Action::Start(Start::SandboxWorship)), ("Back", Action::Back)],
-        Page::Paused => &[("Resume", Action::Resume), ("Main menu", Action::Open(Page::ConfirmLeave))],
+        Page::Paused => &[("Resume", Action::Resume), ("Dev mode", Action::ToggleDev), ("Main menu", Action::Open(Page::ConfirmLeave))],
         Page::ConfirmLeave => &[("No, keep playing", Action::Back), ("Yes, back to the main menu", Action::Leave)],
+    }
+}
+
+/// An entry's text; a toggle shows its state.
+pub fn label(entry: (&str, Action), dev: bool) -> String {
+    match entry {
+        (name, Action::ToggleDev) => format!("{name}: {}", if dev { "on" } else { "off" }),
+        (name, _) => name.to_string(),
     }
 }
 
@@ -136,6 +146,7 @@ impl MenuNav {
         match items(self.page())[self.cursor()].1 {
             Action::Start(s) => Some(Outcome::Start(s)),
             Action::Resume => Some(Outcome::Resume),
+            Action::ToggleDev => Some(Outcome::ToggleDev),
             Action::Leave => Some(Outcome::Leave),
             Action::Quit => Some(Outcome::Quit),
             Action::Open(p) => {
@@ -294,6 +305,7 @@ struct GameSetup<'w> {
     blueprint: ResMut<'w, crate::blueprint::Blueprint>,
     selected_spell: ResMut<'w, SelectedSpell>,
     grid: ResMut<'w, crate::world::ShowGrid>,
+    dev: ResMut<'w, crate::keymap::DevMode>,
 }
 
 impl GameSetup<'_> {
@@ -344,6 +356,9 @@ fn apply(outcome: Option<Outcome>, game: &mut GameSetup, nav: &mut MenuNav, stat
         Some(Outcome::Resume) => {
             game.cursor.request = Some(true);
             state.set(AppState::Playing);
+        }
+        Some(Outcome::ToggleDev) => {
+            game.dev.0 = !game.dev.0;
         }
         Some(Outcome::Leave) => {
             *nav = MenuNav::default();
@@ -415,21 +430,22 @@ fn menu_mouse(
 fn rebuild_items(
     mut commands: Commands,
     nav: Res<MenuNav>,
-    mut shown: Local<Option<Page>>,
+    dev: Res<crate::keymap::DevMode>,
+    mut shown: Local<Option<(Page, bool)>>,
     lists: Query<Entity, With<MenuList>>,
     mut titles: Query<&mut Text, With<MenuTitle>>,
 ) {
     let page = nav.page();
-    if *shown == Some(page) {
+    if *shown == Some((page, dev.0)) {
         return;
     }
-    *shown = Some(page);
+    *shown = Some((page, dev.0));
     for mut t in &mut titles {
         t.0 = title(page).to_string();
     }
     for list in &lists {
         commands.entity(list).despawn_children().with_children(|l| {
-            for (i, (label, _)) in items(page).iter().enumerate() {
+            for (i, &entry) in items(page).iter().enumerate() {
                 l.spawn((
                     MenuItem(i),
                     Button,
@@ -437,7 +453,7 @@ fn rebuild_items(
                     BackgroundColor(ITEM),
                     BorderColor::all(Color::NONE),
                 ))
-                .with_child((Text::new(*label), TextFont { font_size: FontSize::Px(20.0), ..default() }, TextColor(TEXT)));
+                .with_child((Text::new(label(entry, dev.0)), TextFont { font_size: FontSize::Px(20.0), ..default() }, TextColor(TEXT)));
             }
         });
     }
@@ -495,14 +511,25 @@ mod tests {
     fn leaving_a_paused_game_asks_first() {
         let mut nav = MenuNav::at(Page::Paused);
         assert_eq!(nav.activate(), Some(Outcome::Resume), "Resume is first");
-        nav.step(1);
+        nav.step(2);
         assert_eq!(nav.activate(), None, "Main menu opens the confirmation");
         assert_eq!((nav.page(), nav.cursor()), (Page::ConfirmLeave, 0));
         assert_eq!(nav.activate(), None, "No (highlighted first) goes back");
-        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 1));
+        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 2));
         nav.activate();
         nav.step(1);
         assert_eq!(nav.activate(), Some(Outcome::Leave));
+    }
+
+    #[test]
+    fn dev_mode_toggles_from_the_pause_menu_and_shows_its_state() {
+        let mut nav = MenuNav::at(Page::Paused);
+        nav.step(1);
+        assert_eq!(nav.activate(), Some(Outcome::ToggleDev));
+        assert_eq!(nav.page(), Page::Paused, "stays open to see the new state");
+        let entry = items(Page::Paused)[1];
+        assert_eq!((label(entry, true), label(entry, false)), ("Dev mode: on".to_string(), "Dev mode: off".to_string()));
+        assert_eq!(label(items(Page::Paused)[0], true), "Resume");
     }
 
     #[test]

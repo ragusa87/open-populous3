@@ -1,10 +1,11 @@
 //! Orbit camera around a wrapping focus point. Pushing the mouse against the window
-//! border, Up-Down or WASD move, Left-Right and middle-drag rotate, the wheel zooms (Ctrl tilts, Shift
-//! widens), Enter toggles the aerial view.
+//! border or the keymap's move keys (`keymap`) move, its rotate keys and middle-drag rotate, the wheel zooms
+//! (Ctrl tilts, Shift widens), Enter toggles the aerial view.
 //! The mouse is captured by the in-game cursor (`virtual_cursor`, Esc releases it).
 
 use crate::edge_push::EdgePush;
 use crate::game_frame::GamePos;
+use crate::keymap::{Shortcut, Shortcuts};
 use crate::terrain_mesh::{focus_height, CurveParams};
 use crate::world::CurrentMap;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
@@ -238,7 +239,7 @@ pub fn wheel_notches(delta_y: f32, unit: MouseScrollUnit) -> f32 {
 
 #[allow(clippy::too_many_arguments)]
 fn camera_input(
-    keys: Res<ButtonInput<KeyCode>>,
+    keys: Shortcuts,
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
@@ -249,23 +250,18 @@ fn camera_input(
     mut rig: ResMut<CameraRig>,
 ) {
     let dt = time.delta_secs();
-    let axis = |a: KeyCode, b: KeyCode| keys.pressed(a) as i32 as f32 - keys.pressed(b) as i32 as f32;
-    rig.yaw += axis(KeyCode::ArrowLeft, KeyCode::ArrowRight) * 1.8 * dt;
-    let pressed_any = |ks: &[KeyCode]| keys.any_pressed(ks.iter().copied()) as i32 as f32;
-    let tilt = pressed_any(&[KeyCode::Home]) - pressed_any(&[KeyCode::End]);
-    let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
-    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    let page = pressed_any(&[KeyCode::PageUp]) - pressed_any(&[KeyCode::PageDown]);
-    let zoom = if ctrl { page } else { 0.0 };
+    rig.yaw += keys.axis(Shortcut::RotateLeft, Shortcut::RotateRight) * 1.8 * dt;
+    let tilt = keys.axis(Shortcut::TiltUp, Shortcut::TiltDown);
+    let zoom = keys.axis(Shortcut::ZoomIn, Shortcut::ZoomOut);
     rig.adjust_view(tilt * TILT_SPEED * dt, zoom * ZOOM_SPEED * dt);
-    let widen = if shift && !ctrl { page } else { 0.0 };
+    let widen = keys.axis(Shortcut::FovWider, Shortcut::FovNarrower);
     rig.fov = (rig.fov + widen * FOV_SPEED * dt).clamp(FOV_RANGE.0, FOV_RANGE.1);
 
     let edge = windows
         .iter()
         .next()
         .map_or(Vec2::ZERO, |w| push.update(cursor.effective(w.cursor_position()), w.size(), motion.delta, dt));
-    let keys_move = key_move(|k| keys.pressed(k)) * KEY_SPEED;
+    let keys_move = key_move(|s| keys.pressed(s)) * KEY_SPEED;
     let speed = (edge * MOUSE_SPEED + keys_move).clamp(Vec2::splat(-KEY_SPEED), Vec2::splat(KEY_SPEED));
     let scale = rig.distance.max(10.0) * dt;
     rig.move_by(speed.x * scale, speed.y * scale);
@@ -276,22 +272,18 @@ fn camera_input(
     }
     let notches = wheel_notches(scroll.delta.y, scroll.unit);
     if notches != 0.0 {
-        rig.wheel(notches, ctrl, shift);
+        let mods = keys.mods();
+        rig.wheel(notches, mods.ctrl, mods.shift);
     }
-    if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) {
+    if keys.just_pressed(Shortcut::Aerial) {
         rig.toggle_aerial();
     }
 }
 
-/// Keyboard scroll as (forward, right) in -1..1: Up/Down or W/S, A/D strafe.
-pub fn key_move(pressed: impl Fn(KeyCode) -> bool) -> Vec2 {
-    let axis = |plus: &[KeyCode], minus: &[KeyCode]| {
-        plus.iter().any(|&k| pressed(k)) as i32 as f32 - minus.iter().any(|&k| pressed(k)) as i32 as f32
-    };
-    Vec2::new(
-        axis(&[KeyCode::ArrowUp, KeyCode::KeyW], &[KeyCode::ArrowDown, KeyCode::KeyS]),
-        axis(&[KeyCode::KeyD], &[KeyCode::KeyA]),
-    )
+/// Keyboard scroll as (forward, right) in -1..1.
+pub fn key_move(pressed: impl Fn(Shortcut) -> bool) -> Vec2 {
+    let axis = |plus, minus| pressed(plus) as i32 as f32 - pressed(minus) as i32 as f32;
+    Vec2::new(axis(Shortcut::Forward, Shortcut::Back), axis(Shortcut::StrafeRight, Shortcut::StrafeLeft))
 }
 
 /// Where the eye goes: `offset` from the target, but never lower than `top` (the map's highest
@@ -463,13 +455,13 @@ mod tests {
 
 
     #[test]
-    fn wasd_moves_like_arrows_and_strafes() {
-        let only = |ks: &'static [KeyCode]| move |k| ks.contains(&k);
-        assert_eq!(key_move(only(&[KeyCode::KeyW])), Vec2::new(1.0, 0.0));
-        assert_eq!(key_move(only(&[KeyCode::KeyW, KeyCode::ArrowUp])), Vec2::new(1.0, 0.0), "no double speed");
-        assert_eq!(key_move(only(&[KeyCode::KeyS, KeyCode::KeyA])), Vec2::new(-1.0, -1.0));
-        assert_eq!(key_move(only(&[KeyCode::KeyD])), Vec2::new(0.0, 1.0));
-        assert_eq!(key_move(only(&[KeyCode::KeyW, KeyCode::ArrowDown])), Vec2::ZERO);
+    fn move_keys_go_forward_and_strafe() {
+        use Shortcut::*;
+        let only = |ss: &'static [Shortcut]| move |s| ss.contains(&s);
+        assert_eq!(key_move(only(&[Forward])), Vec2::new(1.0, 0.0));
+        assert_eq!(key_move(only(&[Back, StrafeLeft])), Vec2::new(-1.0, -1.0));
+        assert_eq!(key_move(only(&[StrafeRight])), Vec2::new(0.0, 1.0));
+        assert_eq!(key_move(only(&[Forward, Back])), Vec2::ZERO);
     }
 
     #[test]

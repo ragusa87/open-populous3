@@ -221,6 +221,7 @@ pub fn on_screen(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn select_and_order(
     keys: Res<ButtonInput<KeyCode>>,
+    shortcuts: crate::keymap::Shortcuts,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -299,7 +300,7 @@ pub(super) fn select_and_order(
             None => {}
         }
     }
-    if keys.just_pressed(KeyCode::KeyX) {
+    if shortcuts.just_pressed(crate::keymap::Shortcut::Stop) {
         orders.push(Order::Stop);
     }
     let commands = orders.into_iter().flat_map(|order| selection.commands(order));

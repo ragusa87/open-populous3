@@ -199,8 +199,11 @@ fn spawn_menu(mut commands: Commands) {
         });
 }
 
-fn toggle_menu(keys: Res<ButtonInput<KeyCode>>, mut menu: ResMut<ViewMenu>) {
-    if keys.just_pressed(KeyCode::F2) {
+fn toggle_menu(keys: crate::keymap::Shortcuts, mut menu: ResMut<ViewMenu>) {
+    if !keys.dev() && menu.open {
+        menu.open = false;
+    }
+    if keys.just_pressed(crate::keymap::Shortcut::ViewPresets) {
         menu.open = !menu.open;
     }
 }

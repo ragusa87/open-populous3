@@ -1,4 +1,4 @@
-//! World editor (embryo): Tab toggles edit mode, then brushes apply at the
+//! World editor (embryo), dev mode only: Tab toggles edit mode, then brushes apply at the
 //! camera focus. R raise, F lower, T flatten, B land bridge from last mark (M).
 
 use crate::camera::CameraRig;
@@ -33,12 +33,16 @@ pub fn spell_for_key(key: KeyCode, at: (i32, i32), mark: Option<(i32, i32)>) -> 
 
 fn editor_input(
     keys: Res<ButtonInput<KeyCode>>,
+    shortcuts: crate::keymap::Shortcuts,
     rig: Res<CameraRig>,
     mut state: ResMut<EditorState>,
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<TerrainDirty>,
 ) {
-    if keys.just_pressed(KeyCode::Tab) {
+    if !shortcuts.dev() && state.active {
+        state.active = false;
+    }
+    if shortcuts.just_pressed(crate::keymap::Shortcut::Editor) {
         state.active = !state.active;
     }
     if !state.active {

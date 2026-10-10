@@ -1,8 +1,18 @@
 # Keyboard and mouse shortcuts
 
 The original game's shortcuts, from the PopRe wiki page [Keyboard Shortcuts](https://wiki.popre.net/Keyboard_Shortcuts)
-(described in our words), next to what our client does with the same input today. "-" means unbound in ours.
-Where ours differs, the original wins unless a row says why not; conflicts are listed at the end.
+(described in our words), next to what our client does with the same input in dev mode. "-" means unbound in ours.
+
+## Two keymaps (`keymap.rs`)
+Systems ask for a `Shortcut` (`Shortcuts::pressed` / `just_pressed`), never for a key; `keymap::bindings(dev, ..)`
+holds two tables. Dev mode is toggled by the pause menu's "Dev mode" entry (`POP3_DEV=0|1` at start, on by default);
+it also shows the info line (level name and keys, top) and the camera readout (bottom right, printed to stdout too).
+- Dev mode: the "Ours" column below.
+- Off: the original's keys, for what we have: Up/Down and numpad 8/2 move, Ctrl+Left/Right and numpad 4/6 scroll
+  sideways, Left/Right and numpad 7/9 rotate, `+`/`-` (and the numpad's) zoom, Enter aerial, `>` (the character,
+  any layout) to the shaman, H to the site, Space turns a held plan. No level switch, grid, editor, view presets,
+  tilt keys, stop or self cast keys; the editor and the view presets menu close.
+A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a character binding ignores Shift.
 
 ## Game and view
 | Input | Original | Ours |
@@ -101,7 +111,7 @@ Where ours differs, the original wins unless a row says why not; conflicts are l
 F2 view presets, F3 camera readout, F11 fullscreen, Tab world editor (R/F/T/B/M brushes, ui-and-editor.md),
 Home/End tilt, PgUp/PgDn next level, G cell grid, W/A/S/D move, C casts the selected self spell.
 
-## Conflicts to settle
-- Space: ours looks at the shaman, the original skips the fly-by and uses `>` for the shaman.
-- S, A, D (camera), X, C (orders), G (grid), Home, PgUp/PgDn and M, B (editor) take keys the original uses.
-- `+` / `-` zoom and Shift + `+` / `-` set the speed: the game speed control (P, 1x-8x) follows that.
+## Conflicts
+Only in dev mode, where they stay: Space (the shaman), S, A, D (camera), X, C (orders), G (grid), Home, PgUp/PgDn
+and M, B (editor) take keys the original uses. `+` / `-` zoom and Shift + `+` / `-` set the speed: the game speed
+control (P, 1x-8x) follows that in both keymaps.

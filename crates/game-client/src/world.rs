@@ -152,7 +152,7 @@ fn spawn_terrain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut m
 }
 
 fn switch_level(
-    keys: Res<ButtonInput<KeyCode>>,
+    keys: crate::keymap::Shortcuts,
     mut levels: ResMut<LevelList>,
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<TerrainDirty>,
@@ -161,13 +161,10 @@ fn switch_level(
     mut builds: ResMut<crate::hud::build::PlayerBuilds>,
     mut blueprint: ResMut<crate::blueprint::Blueprint>,
 ) {
-    let modified = [KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight];
-    if keys.any_pressed(modified) {
-        return;
-    }
-    let forward = if keys.just_pressed(KeyCode::PageDown) {
+    use crate::keymap::Shortcut;
+    let forward = if keys.just_pressed(Shortcut::NextLevel) {
         true
-    } else if keys.just_pressed(KeyCode::PageUp) {
+    } else if keys.just_pressed(Shortcut::PreviousLevel) {
         false
     } else {
         return;
@@ -181,8 +178,8 @@ fn switch_level(
     dirty.0 = true;
 }
 
-fn toggle_grid(keys: Res<ButtonInput<KeyCode>>, mut grid: ResMut<ShowGrid>, mut dirty: ResMut<TerrainDirty>) {
-    if keys.just_pressed(KeyCode::KeyG) {
+fn toggle_grid(keys: crate::keymap::Shortcuts, mut grid: ResMut<ShowGrid>, mut dirty: ResMut<TerrainDirty>) {
+    if keys.just_pressed(crate::keymap::Shortcut::Grid) {
         grid.0 = !grid.0;
         dirty.0 = true;
     }

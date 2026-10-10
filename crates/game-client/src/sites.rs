@@ -48,8 +48,8 @@ pub fn player_site_cell(map: &GameMap) -> Option<Vec2> {
 }
 
 /// H flies the camera to the player's reincarnation site.
-fn look_at_site(keys: Res<ButtonInput<KeyCode>>, mut rig: ResMut<CameraRig>, map: Res<CurrentMap>) {
-    if keys.just_pressed(KeyCode::KeyH) && let Some(cell) = player_site_cell(&map.0) {
+fn look_at_site(keys: crate::keymap::Shortcuts, mut rig: ResMut<CameraRig>, map: Res<CurrentMap>) {
+    if keys.just_pressed(crate::keymap::Shortcut::LookAtSite) && let Some(cell) = player_site_cell(&map.0) {
         rig.fly_to(cell);
     }
 }

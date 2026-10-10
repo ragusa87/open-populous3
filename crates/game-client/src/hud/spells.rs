@@ -306,12 +306,12 @@ fn pause_clicks(mouse: Res<ButtonInput<MouseButton>>, tiles: Query<(&Interaction
 
 /// Spells not cast on a spot: C makes the shaman jump (the spell effects come later).
 fn cast_selected(
-    keys: Res<ButtonInput<KeyCode>>,
+    keys: crate::keymap::Shortcuts,
     mut book: ResMut<PlayerSpells>,
     selected: Res<SelectedSpell>,
     mut map: ResMut<CurrentMap>,
 ) {
-    if let (true, Some(kind)) = (keys.just_pressed(KeyCode::KeyC), selected.0) && ground_spell(kind, (0, 0)).is_none() && book.0.cast(kind) {
+    if let (true, Some(kind)) = (keys.just_pressed(crate::keymap::Shortcut::CastSelf), selected.0) && ground_spell(kind, (0, 0)).is_none() && book.0.cast(kind) {
         map.bypass_change_detection().0.apply(&Command::Order { player: PLAYER, order: Order::Cast });
     }
 }

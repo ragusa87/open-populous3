@@ -204,7 +204,7 @@ fn ground_under_mouse(
 /// places a building plan with the selected braves sent to it, and puts it away.
 #[allow(clippy::too_many_arguments)]
 fn blueprint_input(
-    keys: Res<ButtonInput<KeyCode>>,
+    keys: crate::keymap::Shortcuts,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     ui: Query<&Interaction>,
@@ -218,7 +218,7 @@ fn blueprint_input(
     if !blueprint.is_active() {
         return;
     }
-    if keys.just_pressed(KeyCode::Space) {
+    if keys.just_pressed(crate::keymap::Shortcut::TurnPlan) {
         blueprint.turn();
     }
     if mouse.just_pressed(MouseButton::Right) && cursor_on_map(&windows, &ui).is_some() {

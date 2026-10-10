@@ -1,9 +1,10 @@
-//! Camera readout in the bottom-right corner (F3 hides it): focus, angle, tilt, distance, fov, eye, and the
-//! `just shot` variables that reproduce the view. The same readout goes to stdout on one line each time the
-//! camera settles after a change (wheel, keys, drag, scrolling), to note views while tuning.
+//! Camera readout in the bottom-right corner, in dev mode (F3 hides it): focus, angle, tilt, distance, fov, eye,
+//! and the `just shot` variables that reproduce the view. The same readout goes to stdout on one line each time
+//! the camera settles after a change (wheel, keys, drag, scrolling), to note views while tuning.
 
 use crate::camera::{CameraRig, GameCamera};
 use crate::game_frame::GamePos;
+use crate::keymap::{DevMode, Shortcut, Shortcuts};
 use bevy::prelude::*;
 use std::f32::consts::TAU;
 
@@ -87,11 +88,13 @@ fn spawn_readout(mut commands: Commands) {
     ));
 }
 
-fn toggle_readout(keys: Res<ButtonInput<KeyCode>>, mut q: Query<&mut Visibility, With<CameraReadout>>) {
-    if keys.just_pressed(KeyCode::F3) {
-        for mut v in &mut q {
-            v.toggle_visible_hidden();
-        }
+fn toggle_readout(keys: Shortcuts, mut hidden: Local<bool>, mut q: Query<&mut Visibility, With<CameraReadout>>) {
+    if keys.just_pressed(Shortcut::CameraReadout) {
+        *hidden = !*hidden;
+    }
+    let shown = if keys.dev() && !*hidden { Visibility::Inherited } else { Visibility::Hidden };
+    for mut v in &mut q {
+        v.set_if_neq(shown);
     }
 }
 
@@ -109,8 +112,11 @@ fn update_readout(
     }
 }
 
-fn log_settled(time: Res<Time>, rig: Res<CameraRig>, cam: Query<&Transform, With<GameCamera>>, mut log: Local<SettledLog>) {
+fn log_settled(time: Res<Time>, dev: Res<DevMode>, rig: Res<CameraRig>, cam: Query<&Transform, With<GameCamera>>, mut log: Local<SettledLog>) {
     let Ok(eye) = cam.single() else { return };
+    if !dev.0 {
+        return;
+    }
     if let Some(line) = log.update(&readout(&rig, eye.translation), time.elapsed_secs()) {
         println!("{line}");
     }

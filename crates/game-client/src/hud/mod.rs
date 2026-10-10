@@ -1,4 +1,4 @@
-//! HUD: left control panel (shaman preview, tabs: spells, buildings, stats) and the info line.
+//! HUD: left control panel (shaman preview, tabs: spells, buildings, stats) and, in dev mode, the info line.
 
 pub mod build;
 mod panel;
@@ -9,6 +9,7 @@ mod stats;
 mod view_menu;
 
 use crate::editor::EditorState;
+use crate::keymap::DevMode;
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
 
@@ -40,8 +41,10 @@ fn update_info(
     map: Res<CurrentMap>,
     levels: Res<LevelList>,
     editor: Res<EditorState>,
-    mut q: Query<&mut Text, With<InfoText>>,
+    dev: Res<DevMode>,
+    mut q: Query<(&mut Text, &mut Visibility), With<InfoText>>,
 ) {
+    let shown = if dev.0 { Visibility::Inherited } else { Visibility::Hidden };
     let level = match levels.files.len() {
         0 => "generated".to_string(),
         n => format!("level {}/{n}", levels.index + 1),
@@ -52,7 +55,10 @@ fn update_info(
          Push mouse on window edges / Up-Down / WASD move | Left-Right rotate | Middle drag rotate and tilt | Home/End tilt | Wheel or Ctrl+PgUp/PgDn zoom | Ctrl+wheel tilt | Shift+wheel or Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | Left click unit: select (Ctrl add) | Left drag: box select | Left click ground: selection walks there (on a camp fire: goes round it) | Shift+right click camp fire: put it out | Right click: deselect | X stop | Space: look at her | H: reincarnation site | Click preview: select her alone | C cast selected spell | Tab editor | F2 view presets | F3 camera readout | G grid | Esc pause | F11 fullscreen\n{mode}",
         map.0.name,
     );
-    for mut t in &mut q {
-        t.0.clone_from(&s);
+    for (mut t, mut v) in &mut q {
+        v.set_if_neq(shown);
+        if t.0 != s {
+            t.0.clone_from(&s);
+        }
     }
 }

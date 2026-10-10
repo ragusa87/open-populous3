@@ -238,8 +238,8 @@ fn run_ticks(time: Res<Time>, mut clock: ResMut<SimClock>, mut map: ResMut<Curre
 }
 
 /// Space looks at her, unless it turns a blueprint (`blueprint`).
-fn look_at_shaman(keys: Res<ButtonInput<KeyCode>>, mut rig: ResMut<CameraRig>, map: Res<CurrentMap>, clock: Res<SimClock>, blueprint: Res<crate::blueprint::Blueprint>) {
-    if keys.just_pressed(KeyCode::Space) && !blueprint.is_active() && let Some(cell) = player_shaman_cell(&map.0, &clock) {
+fn look_at_shaman(keys: crate::keymap::Shortcuts, mut rig: ResMut<CameraRig>, map: Res<CurrentMap>, clock: Res<SimClock>, blueprint: Res<crate::blueprint::Blueprint>) {
+    if keys.just_pressed(crate::keymap::Shortcut::LookAtShaman) && !blueprint.is_active() && let Some(cell) = player_shaman_cell(&map.0, &clock) {
         rig.fly_to(cell);
     }
 }
