@@ -11,7 +11,7 @@ use crate::terrain::Heightmap;
 use crate::time::{Countdown, Ticks};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
-pub const SHAMAN_MAX_HEALTH: u16 = 100;
+pub const SHAMAN_MAX_HEALTH: u16 = 2000;
 /// World units per tick on flat ground (1.24 cells per second).
 pub const SHAMAN_SPEED: i32 = 53;
 /// Walking speed factor change in 1/256 per 100 of slope (height per cell). Uphill: the sandbox
@@ -22,10 +22,12 @@ pub const SLOPE_SPEEDUP_DOWN: i32 = 128;
 /// Walking speed factor bounds in 1/256 (steep climbs crawl, steep descents are capped).
 pub const SLOPE_FACTOR_RANGE: (i32, i32) = (32, 384);
 /// Health lost per tick while in the sea.
-pub const DROWN_DAMAGE: u16 = 3;
-/// Between two health points regained on land.
+pub const DROWN_DAMAGE: u16 = 60;
+/// Health points regained on land, or lost while stranded, at a time.
+pub const HEALTH_STEP: u16 = 20;
+/// Between two `HEALTH_STEP`s regained on land.
 pub const REGEN_EVERY: Ticks = Ticks::millis(500);
-/// Between two health points lost while stranded (100 health points last 33 s).
+/// Between two `HEALTH_STEP`s lost while stranded (the shaman's health lasts 33 s).
 pub const STRANDED_HURT_EVERY: Ticks = Ticks::millis(300);
 /// The cast: the original's cast state.
 pub const CAST_TICKS: Ticks = Ticks::new(10);
@@ -89,14 +91,15 @@ impl UnitKind {
         }
     }
 
-    /// Placeholder balance until combat: braves are the frailest, warriors the toughest.
+    /// The original's `LIFE_<P>` (constants.md); wildmen have none, a brave's stands in.
     pub fn max_health(self) -> u16 {
         match self {
             UnitKind::Shaman => SHAMAN_MAX_HEALTH,
-            UnitKind::Brave | UnitKind::Spy | UnitKind::Wildman => 60,
-            UnitKind::Preacher => 70,
-            UnitKind::Firewarrior => 80,
-            UnitKind::Warrior => 120,
+            UnitKind::Brave | UnitKind::Wildman => 1000,
+            UnitKind::Warrior => 1800,
+            UnitKind::Preacher => 1100,
+            UnitKind::Spy => 600,
+            UnitKind::Firewarrior => 700,
         }
     }
 
@@ -618,7 +621,7 @@ impl Unit {
         self.regen += 1;
         if self.regen as u32 >= REGEN_EVERY.get() {
             self.regen = 0;
-            self.health.heal(1);
+            self.health.heal(HEALTH_STEP);
         }
     }
 
@@ -627,7 +630,7 @@ impl Unit {
         self.regen += 1;
         if self.regen as u32 >= STRANDED_HURT_EVERY.get() {
             self.regen = 0;
-            self.health.damage(1);
+            self.health.damage(HEALTH_STEP);
         }
         if self.health.is_zero() {
             self.die();
@@ -942,7 +945,7 @@ mod tests {
         u.order(Order::MoveTo { x: to.0, z: to.1 });
         run(&mut u, &t, &site, 3 * STRANDED_HURT_EVERY.get() as usize);
         assert_eq!((u.action, u.x, u.z), (Action::Stranded { to }, start.0, start.1), "arms up, not moving");
-        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH - 3);
+        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH - 3 * HEALTH_STEP);
         for z in 0..128 {
             for x in 15..17 {
                 t.set(x, z, 100);
@@ -962,7 +965,7 @@ mod tests {
         u.order(Order::Stop);
         assert_eq!(u.action, Action::Idle, "orders still work");
         u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
-        let events = run(&mut u, &t, &site, STRANDED_HURT_EVERY.get() as usize * SHAMAN_MAX_HEALTH as usize);
+        let events = run(&mut u, &t, &site, STRANDED_HURT_EVERY.get() as usize * (SHAMAN_MAX_HEALTH / HEALTH_STEP) as usize);
         assert_eq!((events, u.health.current(), u.is_alive()), (vec![UnitEvent::Died], 0, false));
     }
 
@@ -1060,9 +1063,9 @@ mod tests {
     fn heals_slowly_on_land() {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
-        u.health = Health::new(50, SHAMAN_MAX_HEALTH);
+        u.health = Health::new(1000, SHAMAN_MAX_HEALTH);
         run(&mut u, &t, &site, 5 * REGEN_EVERY.get() as usize);
-        assert_eq!(u.health.current(), 55);
+        assert_eq!(u.health.current(), 1000 + 5 * HEALTH_STEP);
     }
 
     #[test]

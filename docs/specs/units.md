@@ -19,9 +19,9 @@
 
 | Action | Entered by | Behaviour |
 |---|---|---|
-| Idle | default, arrival, Stop | heals 1 HP every 5 ticks |
+| Idle | default, arrival, Stop | heals `HEALTH_STEP` (20) HP every `REGEN_EVERY` (0.5 s) |
 | Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 53 units/tick on flat ground (1.24 cells/s) (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
-| Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -1 HP every 3 ticks until the terrain opens a path (walks again) or it dies |
+| Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -20 HP every `STRANDED_HURT_EVERY` (0.3 s) until the terrain opens a path (walks again) or it dies |
 | Worshipping | `Order::Worship { site }` (a click on a vault of knowledge with her selected) | prays at the vault's door; heals; see worship.md |
 | Casting { left } | `Order::Cast`, any spell cast | `CAST_TICKS` (10, the original's cast state) jump, then Idle (Teleport: then at the target, Landing) |
 | Landing { left } | arriving from a teleport | `LANDING_TICKS` (0.6 s), then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out); a puff of dust at touchdown (`units/dust.rs`) |
@@ -31,11 +31,11 @@
 | Building { left } | inside a site with wood on its pile | `BUILD_TICKS` building one piece in (hammer pose: the axe swing, anim 11, until the original hammering anim is found) |
 | Hammering | inside a site under construction with nothing to build yet | until wood comes or it is built; counts as free (`Unit::is_free`) |
 | Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
-| Drowning | ground under her becomes open sea | -3 HP per tick, no orders; back to Idle if land returns |
+| Drowning | ground under her becomes open sea | -60 HP per tick, no orders; back to Idle if land returns |
 | Dying { left } | health reaches 0 | `DYING_TICKS` (0.8 s) |
 | Dead { left } | after dying | `RESPAWN_TICKS` (3 s), then reincarnates at her site at full health; the site levels its ground again |
 
-Health: 100. Orders are ignored while drowning, dying or dead.
+Health: 2000. Orders are ignored while drowning, dying or dead.
 
 ## From the levels (done)
 `GameMap::from_level` spawns every person thing (kind 1) where it is placed, model = kind
@@ -53,16 +53,17 @@ or else a generated figure in a hide with a mane, or the brave's rendered sheets
 
 ## Unit kinds (simulation: walking only)
 `UnitKind::ALL`: Shaman, Brave, Warrior, Preacher, Spy, Firewarrior, built with `Unit::new(id, owner, kind, pos)`.
-Placeholder balance until combat (`max_health`, flat-ground `speed` in world units per tick):
+`max_health` is the original's `LIFE_<P>` (constants.md, fixed values until the file is parsed); wildmen have no
+constant and take a brave's. Flat-ground `speed` in world units per tick is a placeholder:
 
 | Kind | Health | Speed |
 |---|---|---|
-| Shaman | 100 | 53 |
-| Brave | 60 | 53 |
-| Warrior | 120 | 47 |
-| Preacher | 70 | 47 |
-| Spy | 60 | 60 |
-| Firewarrior | 80 | 50 |
+| Shaman | 2000 | 53 |
+| Brave, Wildman | 1000 | 53 |
+| Warrior | 1800 | 47 |
+| Preacher | 1100 | 47 |
+| Spy | 600 | 60 |
+| Firewarrior | 700 | 50 |
 
 Every kind walks, prays, heals, drowns and dies like the shaman; only the shaman reincarnates (the others stay
 `Dead`, lying where they fell). `Command::Order` and spells go to the player's shaman (`GameMap::shaman_of`),

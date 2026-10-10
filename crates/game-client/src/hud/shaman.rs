@@ -144,9 +144,9 @@ mod tests {
     #[test]
     fn status_shows_action_and_health() {
         let mut u = Unit::shaman(1, &ReincarnationSite::at_cell(0, (1, 1)));
-        u.health = game_core::health::Health::new(40, u.health.max());
+        u.health = game_core::health::Health::new(800, u.health.max());
         let s = status(Some(&u));
-        assert_eq!((s.title.as_str(), s.health, s.health_text.as_str()), ("Idle", 0.4, "40/100"));
+        assert_eq!((s.title.as_str(), s.health, s.health_text.as_str()), ("Idle", 0.4, "800/2000"));
         u.action = Action::Dead { left: game_core::time::Countdown::with_left(game_core::unit::RESPAWN_TICKS, game_core::time::Ticks::new(13)) };
         assert_eq!(status(Some(&u)).title, "Reincarnating in 2s");
         assert_eq!(status(None).title, "No shaman");
