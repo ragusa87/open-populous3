@@ -20,6 +20,7 @@ use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy::winit::WinitPlugin;
 use game_core::command::Command;
+use game_core::motion::{Motion, Velocity};
 use game_core::spell::Spell;
 use game_core::unit::{Order, Unit};
 use std::time::Duration;
@@ -87,7 +88,7 @@ pub fn tumble_demo(how: &str, map: &mut game_core::map::GameMap) {
         _ => return,
     };
     for u in map.units.iter_mut().filter(|u| u.owner == PLAYER && u.is_alive()) {
-        (u.action, u.velocity, u.lift) = (game_core::unit::Action::Tumbling, game_core::motion::Velocity::new(1, 0, 0), lift);
+        (u.action, u.motion) = (game_core::unit::Action::Tumbling, Motion::new(Velocity::new(1, 0, 0), lift));
     }
 }
 

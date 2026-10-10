@@ -4,7 +4,7 @@
 
 use crate::campfire;
 use crate::health::Health;
-use crate::motion::Velocity;
+use crate::motion::Motion;
 use crate::path::{self, Ground, Mobility};
 use crate::site::ReincarnationSite;
 use crate::status::Statuses;
@@ -254,10 +254,8 @@ pub struct Unit {
     /// Heading in eighths of a turn: 0 = +z, 2 = +x, 4 = -z, 6 = -x.
     pub facing: u8,
     pub health: Health,
-    /// Free motion when flung or falling (zero while walking or standing).
-    pub velocity: Velocity,
-    /// Height above the ground under her, in terrain height units (0 = on the ground).
-    pub lift: u16,
+    /// Free motion when flung or falling (still while walking or standing).
+    pub motion: Motion,
     pub statuses: Statuses,
     pub action: Action,
     /// Pieces of wood carried (braves, 0 or 1).
@@ -310,8 +308,7 @@ impl Unit {
             z,
             facing: 0,
             health: Health::full(kind.max_health()),
-            velocity: Velocity::ZERO,
-            lift: 0,
+            motion: Motion::STILL,
             statuses: Statuses::default(),
             action: Action::Idle,
             carrying: 0,
@@ -494,7 +491,7 @@ impl Unit {
     /// One simulation step. `site` is where the unit reincarnates.
     pub fn tick(&mut self, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
         let terrain = ground.terrain();
-        if self.is_alive() && self.lift == 0 && is_sea(terrain, self.cell()) {
+        if self.is_alive() && !self.motion.airborne() && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
             self.teleport_to = None;
         }
@@ -595,7 +592,7 @@ impl Unit {
             }
             Action::Landing { mut left } => self.action = if left.tick() { Action::Idle } else { Action::Landing { left } },
             Action::Tumbling => {
-                if self.lift == 0 && self.velocity.is_zero() {
+                if self.motion.is_still() {
                     self.action = Action::Idle;
                 }
             }
@@ -789,6 +786,7 @@ pub fn isqrt(n: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::motion::Velocity;
 
     fn land() -> Heightmap {
         let mut t = Heightmap::new(128);
@@ -1076,14 +1074,14 @@ mod tests {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
         u.action = Action::Tumbling;
-        (u.velocity, u.lift) = (Velocity::new(10, 0, 0), 30);
+        u.motion = Motion::new(Velocity::new(10, 0, 0), 30);
         u.order(Order::MoveTo { x: 0, z: 0 });
         run(&mut u, &t, &site, 3);
         assert_eq!(u.action, Action::Tumbling, "no orders, still moving");
-        u.lift = 0;
+        u.motion.lift = 0;
         run(&mut u, &t, &site, 1);
         assert_eq!(u.action, Action::Tumbling, "rolling on the ground");
-        u.velocity = Velocity::ZERO;
+        u.motion.velocity = Velocity::ZERO;
         run(&mut u, &t, &site, 1);
         assert_eq!(u.action, Action::Idle);
     }
@@ -1093,10 +1091,10 @@ mod tests {
         let mut t = land();
         let (mut u, site) = shaman_at((10, 10));
         sea_cell(&mut t, u.cell());
-        (u.action, u.lift) = (Action::Tumbling, 50);
+        (u.action, u.motion.lift) = (Action::Tumbling, 50);
         run(&mut u, &t, &site, 1);
         assert_eq!((u.action, u.health.is_full()), (Action::Tumbling, true));
-        u.lift = 0;
+        u.motion.lift = 0;
         run(&mut u, &t, &site, 1);
         assert_eq!(u.action, Action::Drowning);
     }
