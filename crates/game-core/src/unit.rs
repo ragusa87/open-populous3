@@ -129,6 +129,9 @@ pub enum Action {
     Landing { left: Countdown },
     /// The ground under her is sea: loses health until dead or the land comes back.
     Drowning,
+    /// Flung through the air or rolling on the ground by a spell, moved by `Unit::velocity` at
+    /// `Unit::lift`: no orders until still on the ground again.
+    Tumbling,
     Dying { left: Countdown },
     /// Waiting to reincarnate at her site.
     Dead { left: Countdown },
@@ -163,6 +166,7 @@ impl Action {
             Action::Casting { .. } => "Casting",
             Action::Landing { .. } => "Landing",
             Action::Drowning => "Drowning",
+            Action::Tumbling => "Tumbling",
             Action::Dying { .. } => "Dying",
             Action::Dead { .. } => "Dead",
             Action::AroundFire { .. } => "Around the fire",
@@ -191,7 +195,7 @@ impl Action {
     }
 
     fn can_take_orders(&self) -> bool {
-        !matches!(self, Action::Drowning | Action::Dying { .. } | Action::Dead { .. })
+        !matches!(self, Action::Drowning | Action::Tumbling | Action::Dying { .. } | Action::Dead { .. })
     }
 }
 
@@ -490,7 +494,7 @@ impl Unit {
     /// One simulation step. `site` is where the unit reincarnates.
     pub fn tick(&mut self, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
         let terrain = ground.terrain();
-        if self.is_alive() && is_sea(terrain, self.cell()) {
+        if self.is_alive() && self.lift == 0 && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
             self.teleport_to = None;
         }
@@ -590,6 +594,11 @@ impl Unit {
                 }
             }
             Action::Landing { mut left } => self.action = if left.tick() { Action::Idle } else { Action::Landing { left } },
+            Action::Tumbling => {
+                if self.lift == 0 && self.velocity.is_zero() {
+                    self.action = Action::Idle;
+                }
+            }
             Action::Drowning => {
                 if self.health.damage(DROWN_DAMAGE) {
                     self.die();
@@ -1060,6 +1069,36 @@ mod tests {
             walk(&mut u, &t, &site, (s.x + 10 * 512, s.z), 500).unwrap()
         };
         assert!(ticks(UnitKind::Spy) < ticks(UnitKind::Brave) && ticks(UnitKind::Brave) < ticks(UnitKind::Warrior));
+    }
+
+    #[test]
+    fn tumbling_takes_no_orders_and_settles_once_still_on_the_ground() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.action = Action::Tumbling;
+        (u.velocity, u.lift) = (Velocity::new(10, 0, 0), 30);
+        u.order(Order::MoveTo { x: 0, z: 0 });
+        run(&mut u, &t, &site, 3);
+        assert_eq!(u.action, Action::Tumbling, "no orders, still moving");
+        u.lift = 0;
+        run(&mut u, &t, &site, 1);
+        assert_eq!(u.action, Action::Tumbling, "rolling on the ground");
+        u.velocity = Velocity::ZERO;
+        run(&mut u, &t, &site, 1);
+        assert_eq!(u.action, Action::Idle);
+    }
+
+    #[test]
+    fn no_drowning_in_the_air_over_the_sea() {
+        let mut t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        sea_cell(&mut t, u.cell());
+        (u.action, u.lift) = (Action::Tumbling, 50);
+        run(&mut u, &t, &site, 1);
+        assert_eq!((u.action, u.health.is_full()), (Action::Tumbling, true));
+        u.lift = 0;
+        run(&mut u, &t, &site, 1);
+        assert_eq!(u.action, Action::Drowning);
     }
 
     #[test]

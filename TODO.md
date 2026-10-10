@@ -40,7 +40,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Selection of vehicles and buildings (without the people inside), and of units inside them once they exist (`selection::selectable`).
 - [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
 - [ ] Statuses (`Unit::statuses`, never set today): their timers (the original counts them down every 8 turns), the hypnotized unit's original tribe, other options to define; set by the spells (Invisibility, Shield, Bloodlust, Hypnotise, Ghost Army) and read by combat, selection and drawing.
-- [ ] Physics on `Unit::velocity` and `Unit::lift` (both always 0 today): a step moving flung units, gravity, landing (lift back to 0), fall damage; the client draws a unit `lift` above the ground.
+- [ ] Physics on `Unit::velocity` and `Unit::lift` (both always 0 today): spells put units in `Action::Tumbling` with a velocity; a step moving them, gravity, friction when rolling, landing (lift back to 0), fall damage, a task dropped or kept; the client draws a unit `lift` above the ground, with its own tumbling pose (flying 61, tumbling 73) instead of the drowning one.
 - [ ] Flying: units thrown by Whirlwind / Blast / explosions follow a ballistic or carried path (flying 61, tumbling 73 anims), land with damage, drown if they land in the sea.
 - [ ] Vehicles (boats, airships from their huts): board, carry units over water/land, unload.
 - [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
