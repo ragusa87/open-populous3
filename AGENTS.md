@@ -32,7 +32,7 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
 - `just test` (or `cargo test --workspace`): must pass before committing.
 - `just run [levl.dat|dir]`: windowed game. Avoid it as an agent: it opens a window and steals focus.
 - `just shot out.png [level]` / `AERIAL=1 just shot out.png`: headless offscreen render, then exits. Use this to check visuals.
-  `FOCUS=x,z` (cells), `DISTANCE`, `PITCH`, `YAW` (degrees), `SHOT_FRAME`, `SHAMAN=walk|teleport|worship|...`, `BRAVES=cut|carry|totem:N`, `HOVER=unit:N|wood:N|tree:N|totem:N|building:N`, `VAULT=progress:N|granted:T|spent`, `TAB=spells|build|stats`, `BLUEPRINT=temple@64,70`, `BUILD=hut@90,62 BUILD_TICKS=150` (plan built by all the player's braves), `TUMBLE=air|ground` (the player's units tumble) set up the shot.
+  `FOCUS=x,z` (cells), `DISTANCE`, `PITCH`, `YAW` (degrees), `SHOT_FRAME`, `SHAMAN=walk|teleport|worship|...`, `BRAVES=cut|carry|totem:N`, `HOVER=unit:N|wood:N|tree:N|totem:N|building:N`, `VAULT=progress:N|granted:T|spent`, `TAB=spells|build|stats`, `BLUEPRINT=temple@64,70`, `BUILD=hut@90,62 BUILD_TICKS=150` (plan built by all the player's braves), `TUMBLE=air|ground` (the player's units tumble; add `GAME_SPEED=0` to hold them in the air) set up the shot.
   Level paths with spaces or quotes break `just shot`: run `HEADLESS=1 SCREENSHOT=out.png cargo run -p game-client -- "<level>"`.
 - `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship`: skip the main menu or open it (`just shot` starts in the game by default).
 - `GAME_SPEED=0|1|2|4|8`: start paused or sped up (P and Shift +/- in the game).

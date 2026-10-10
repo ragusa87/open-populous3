@@ -6,6 +6,7 @@ use crate::campfire;
 use crate::health::Health;
 use crate::motion::Motion;
 use crate::path::{self, Ground, Mobility};
+use crate::physics;
 use crate::site::ReincarnationSite;
 use crate::status::Statuses;
 use crate::terrain::Heightmap;
@@ -514,6 +515,10 @@ impl Unit {
     /// One simulation step. `site` is where the unit reincarnates.
     pub fn tick(&mut self, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
         let terrain = ground.terrain();
+        if self.motion.airborne() {
+            let below = |(x, z): (u16, u16)| terrain.height_at(x as u32, z as u32, WORLD_UNITS_PER_CELL);
+            ((self.x, self.z), self.motion, _) = physics::step((self.x, self.z), self.motion, below);
+        }
         if self.is_alive() && !self.motion.airborne() && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
             self.teleport_to = None;
@@ -1096,26 +1101,26 @@ mod tests {
     fn tumbling_takes_no_orders_and_settles_once_still_on_the_ground() {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
+        let (x, z) = (u.x, u.z);
         u.action = Action::Tumbling;
-        u.motion = Motion::new(Velocity::new(10, 0, 0), 30);
+        u.motion = Motion::flying(Velocity::new(10, 40, 0), 100);
         u.order(Order::MoveTo { x: 0, z: 0 });
+        run(&mut u, &t, &site, 2);
+        assert_eq!((u.action, u.motion.height, u.x), (Action::Tumbling, Some(148), x + 20), "no orders, flying");
         run(&mut u, &t, &site, 3);
-        assert_eq!(u.action, Action::Tumbling, "no orders, still moving");
-        u.motion.lift = 0;
-        run(&mut u, &t, &site, 1);
-        assert_eq!(u.action, Action::Tumbling, "rolling on the ground");
-        u.motion.velocity = Velocity::ZERO;
-        run(&mut u, &t, &site, 1);
-        assert_eq!(u.action, Action::Idle);
+        assert_eq!((u.action, u.motion, (u.x, u.z)), (Action::Idle, Motion::STILL, (x + 40, z)), "landed and settled the same tick");
+        (u.action, u.motion.velocity) = (Action::Tumbling, Velocity::new(5, 0, 0));
+        run(&mut u, &t, &site, 3);
+        assert_eq!((u.action, u.x), (Action::Tumbling, x + 40), "rolling on the ground: not moved, no friction yet");
     }
 
     #[test]
     fn locked_and_not_pickable_while_tumbling_or_lifted() {
         let (mut u, _) = shaman_at((10, 10));
         assert_eq!(u.pickable().map(|p| p.id), Some(u.id));
-        u.motion.lift = 1;
+        u.motion.height = Some(1000);
         assert!(u.locked() && u.pickable().is_none(), "lifted");
-        (u.motion.lift, u.action) = (0, Action::Tumbling);
+        (u.motion.height, u.action) = (None, Action::Tumbling);
         assert!(u.locked() && u.pickable().is_none(), "rolling on the ground");
     }
 
@@ -1124,10 +1129,10 @@ mod tests {
         let mut t = land();
         let (mut u, site) = shaman_at((10, 10));
         sea_cell(&mut t, u.cell());
-        (u.action, u.motion.lift) = (Action::Tumbling, 50);
+        (u.action, u.motion) = (Action::Tumbling, Motion::flying(Velocity::ZERO, 50));
         run(&mut u, &t, &site, 1);
         assert_eq!((u.action, u.health.is_full()), (Action::Tumbling, true));
-        u.motion.lift = 0;
+        u.motion = Motion::STILL;
         run(&mut u, &t, &site, 1);
         assert_eq!(u.action, Action::Drowning);
     }

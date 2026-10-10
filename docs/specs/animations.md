@@ -61,7 +61,7 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 16 | 1 | tilted, probably while carried by a tornado |
 | 17 | 12 | spy setting fire to a building: disguised as a brave (plain) or a firewarrior (`0x20/1`), or discovered (`0x20/3`) |
 | 18 | 6 | brave sitting down, being converted by a preacher |
-| 19 | 4 | tumbling in the air, arms spread (checked in the game; `Pose::Flung`: tumbling with `lift` > 0) |
+| 19 | 4 | tumbling in the air, arms spread (checked in the game; `Pose::Flung`: tumbling off the ground) |
 | 37 | 4 | falling down a slope (checked in the game; `Pose::Tumble`: tumbling on the ground) |
 | 25 | 7 | fighting: kick |
 | 38 | 8 | dying: the body falls down onto its back, last frame lying (checked in the game; used) |

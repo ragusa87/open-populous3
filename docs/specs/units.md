@@ -3,7 +3,8 @@
 - `game_core::unit::Unit`: id, owner, kind, `u16` x/z in world units (512 per cell), wrapping at 65536
   (plain `u16` wrapping arithmetic walks the torus), `facing` in eighths of a turn (0 = +z, 2 = +x), health
   (`game_core::health::Health`: integer current and max points), `motion` (`game_core::motion::Motion`: `velocity`, x and z
-  in world units, y in height units, per tick, and `lift`, height above the ground; still until physics),
+  in world units, y in height units, per tick, and `height`, absolute, above the sea, in terrain height units,
+  while off the ground, None on it),
   `statuses` (`game_core::status::Statuses`: invisible, shielded, bloodlust, hypnotized, ghost; none set yet), action.
 - Movement in fixed point per tick; no floats in simulation state.
 - Time (`game_core::time`): one tick is one original game turn, 12 per second (`TICKS_PER_SECOND`,
@@ -32,8 +33,8 @@
 | Building { left } | inside a site with wood on its pile | `BUILD_TICKS` building one piece in (hammer pose: the axe swing, anim 11, until the original hammering anim is found) |
 | Hammering | inside a site under construction with nothing to build yet | until wood comes or it is built; counts as free (`Unit::is_free`) |
 | Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
-| Drowning | ground under her becomes open sea (on the ground: `lift` 0) | -60 HP per tick, no orders; back to Idle if land returns |
-| Tumbling | flung or rolling from a spell (nothing sets it yet) | locked (no orders, not hovered, dropped from the selection, see "Locked units"), no healing, no drowning while `lift` > 0; back to Idle once `lift` and `velocity` are 0. Drawn flung in the air (`lift` > 0: followers 19, wildmen 31, shaman 61) or falling down a slope on the ground (followers 37, wildmen 47, shaman 73); the CC0 sheets show their fall meanwhile. `TUMBLE=air\|ground` in a shot |
+| Drowning | ground under her becomes open sea (on the ground) | -60 HP per tick, no orders; back to Idle if land returns |
+| Tumbling | flung or rolling from a spell (nothing sets it yet) | locked (no orders, not hovered, dropped from the selection, see "Locked units"), no healing, no drowning while off the ground; moved by the physics step (below) while off the ground, back to Idle once on the ground and still. Drawn flung in the air (off the ground: followers 19, wildmen 31, shaman 61) or falling down a slope on the ground (followers 37, wildmen 47, shaman 73); the CC0 sheets show their fall meanwhile. `TUMBLE=air\|ground` in a shot |
 | Dying { left } | health reaches 0 | `DYING_TICKS` (0.8 s) |
 | Dead { left } | after dying | `RESPAWN_TICKS` (3 s), then reincarnates at her site at full health; the site levels its ground again |
 
@@ -146,12 +147,22 @@ Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the 
 ### Locked units
 No order of the player reaches a unit (`GameMap::locked`, `shaman_locked`: unit orders, chained orders, the
 shaman's own orders, spells and Teleport are ignored) while it is:
-- flung (`Action::Tumbling`) or off the ground (`motion.lift` > 0), `Unit::locked`: it is not hovered either, and
+- flung (`Action::Tumbling`) or off the ground (`motion.height` set), `Unit::locked`: it is not hovered either, and
   it leaves the selection. Picking only takes a `PickableUnit`, which only `Unit::pickable` makes, None while
   locked: hover and selection (`selection::OnScreen::new`) cannot reach such a unit;
 - inside a vault of knowledge, from the moment its full gauge sends her in until she is out by the door
   (done, worship.md), so nothing breaks its sequence;
 - inside a prison, held there until freed (to do: levels where she starts imprisoned; the prison holds her).
+
+## Physics (done: `game_core::physics`)
+A unit off the ground (`Motion::height` set) moves freely, every tick before its action (`Unit::tick`):
+- `physics::step`: the position moves by the velocity (x, z in world units, wrapping), the height by its vertical
+  speed, then gravity takes `GRAVITY` (32, the original's per turn) off the vertical speed. All integers.
+- At or below the ground under its new position (`Heightmap::height_at`), it lands: `height` None, velocity zero,
+  a `Touchdown` with its vertical speed (for the fall damage to come). Higher ground in its way stops it there too.
+- On the ground nothing moves it yet (rolling and friction to come). A tumbling unit still on the ground goes back to
+  Idle.
+- Example: pushed up at 98 it rises 3 ticks to about 200 above where it left, and lands 8 ticks (0.67 s) later.
 
 ## Shaman on screen (client, `units/`)
 - `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks (moves over a cell in one tick, teleport or reincarnation, are not glided).
@@ -159,8 +170,9 @@ shaman's own orders, spells and Teleport are ignored) while it is:
   anchor) turned to face the camera, uploaded Scale2x-upscaled x4 and filtered linearly (no blocky pixels),
   with a health bar over the head (green -> yellow -> red) shown while the unit is alive and selected, or under the
   mouse for the player's own units (`hover::Hoverable::health`).
-  Feet on the ground right under the unit (`Grounded` with no footprint), sprite and bar raised by its `motion.lift`
-  (terrain height units at the terrain's scale, `drawn_lift`; the shadow stays on the ground). Sprite and bar are drawn pulled
+  Feet on the ground right under the unit (`Grounded` with no footprint), sprite and bar raised to its `motion.height`
+  off the ground (terrain height units at the terrain's scale, glided between ticks, `drawn_lift`; the shadow stays
+  on the ground). Sprite and bar are drawn pulled
   0.6 cell towards the camera along the eye-feet line and shrunk to match (`toward_eye`): same picture on
   screen, but slopes and bumps around the feet no longer cut the legs; real hills in front still hide her.
   The original has no health bar: low-health units get a spinning star/crown over the head (to do). The panel

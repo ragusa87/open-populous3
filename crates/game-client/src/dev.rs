@@ -79,16 +79,18 @@ pub fn demo_commands(name: &str, shaman: &Unit) -> Vec<Command> {
     }
 }
 
-/// `TUMBLE=air|ground`: every unit of the player tumbles, kept moving (no physics yet), in the air or on
-/// the ground.
+/// `TUMBLE=air|ground`: every unit of the player tumbles, in the air (a cell above the ground, falling: add
+/// `GAME_SPEED=0` to hold it there) or on the ground (kept rolling, no friction yet).
 pub fn tumble_demo(how: &str, map: &mut game_core::map::GameMap) {
-    let lift = match how {
-        "air" => 100,
-        "ground" => 0,
-        _ => return,
-    };
+    let terrain = &map.terrain;
     for u in map.units.iter_mut().filter(|u| u.owner == PLAYER && u.is_alive()) {
-        (u.action, u.motion) = (game_core::unit::Action::Tumbling, Motion::new(Velocity::new(1, 0, 0), lift));
+        let ground = terrain.height_at(u.x as u32, u.z as u32, pop3_format::WORLD_UNITS_PER_CELL);
+        u.motion = match how {
+            "air" => Motion::flying(Velocity::ZERO, ground + 256),
+            "ground" => Motion { velocity: Velocity::new(1, 0, 0), height: None },
+            _ => return,
+        };
+        u.action = game_core::unit::Action::Tumbling;
     }
 }
 

@@ -72,8 +72,10 @@ const MAX_CATCH_UP: u32 = 4;
 #[derive(Resource, Default)]
 pub struct SimClock {
     acc: f32,
-    /// Unit positions before the last ticks run, to glide between them.
+    /// Unit positions and heights off the ground (`Motion::height`) before the last ticks run, to glide
+    /// between them.
     prev: Vec<(u16, u16)>,
+    prev_heights: Vec<Option<i32>>,
     /// Game seconds since start (scaled by the speed, stopped while paused), drives looping animations.
     pub anim_secs: f32,
     /// Ticks run this frame.
@@ -109,6 +111,13 @@ impl SimClock {
     pub fn cell_pos(&self, i: usize, unit: &Unit) -> Vec2 {
         let prev = self.prev.get(i).copied().unwrap_or((unit.x, unit.z));
         glide(prev, (unit.x, unit.z), self.alpha())
+    }
+
+    /// Drawn height above the ground of `units[i]` in cells (see `drawn_lift`).
+    pub fn lift(&self, i: usize, unit: &Unit, terrain: &game_core::terrain::Heightmap, height_scale: f32) -> f32 {
+        let ground = terrain.height_at(unit.x as u32, unit.z as u32, WORLD_UNITS_PER_CELL);
+        let prev = self.prev_heights.get(i).copied().flatten();
+        drawn_lift(prev, unit.motion.height, ground, self.alpha(), height_scale) + landing_lift(&unit.action, self.alpha())
     }
 }
 
@@ -283,6 +292,7 @@ fn run_ticks(
     if due > 0 {
         let map = &mut map.bypass_change_detection().0;
         clock.prev = map.units.iter().map(|u| (u.x, u.z)).collect();
+        clock.prev_heights = map.units.iter().map(|u| u.motion.height).collect();
         while ran < due {
             let now = map.now;
             schedule.0.close_local(now);
@@ -439,10 +449,13 @@ pub fn landing_lift(action: &Action, alpha: f32) -> f32 {
     LANDING_HEIGHT * t * t
 }
 
-/// Height above the ground (cells) a unit is drawn at: its `motion` lift (terrain height units, drawn
-/// with the terrain's `height_scale`) plus the landing after a teleport.
-pub fn drawn_lift(unit: &game_core::unit::Unit, alpha: f32, height_scale: f32) -> f32 {
-    unit.motion.lift as f32 * height_scale + landing_lift(&unit.action, alpha)
+/// Height above `ground` (cells) of a unit off the ground: its absolute height (terrain height units, drawn
+/// with the terrain's `height_scale`) glided `alpha` of the way from the last tick's (`prev`, the ground when
+/// it was on it); 0 on the ground.
+pub fn drawn_lift(prev: Option<i32>, now: Option<i32>, ground: i32, alpha: f32, height_scale: f32) -> f32 {
+    let Some(now) = now else { return 0.0 };
+    let from = prev.unwrap_or(ground) as f32;
+    ((from + (now as f32 - from) * alpha - ground as f32) * height_scale).max(0.0)
 }
 
 /// Pulls each unit's sprite and health bar towards the camera (see `toward_eye`), in the view's
@@ -464,7 +477,7 @@ fn pull_to_eye(
         // Up a lookout: on its platform, pulled further so the building around him never hides him.
         let up = u.and_then(|u| perched(&map.0, &heights, u)).map(|p| Vec3::Y * p.1);
         let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, if up.is_some() { PERCH_PULL } else { PULL_TO_EYE });
-        let lift = u.map_or(0.0, |u| drawn_lift(u, clock.alpha(), params.0.height_scale));
+        let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale));
         let local = view.rotation.inverse() * (offset + up.unwrap_or_default()) + Vec3::Y * lift * scale;
         for &child in children {
             if let Ok((mut t, bar)) = parts.get_mut(child) {
@@ -558,10 +571,11 @@ mod tests {
 
     #[test]
     fn drawn_at_the_unit_lift_like_the_terrain() {
-        let mut u = game_core::unit::Unit::new(1, 0, game_core::unit::UnitKind::Brave, (0, 0));
-        assert_eq!(drawn_lift(&u, 0.5, 0.01), 0.0);
-        u.motion.lift = 300;
-        assert_eq!(drawn_lift(&u, 0.5, 0.01), 3.0, "as high as ground 300 above");
+        assert_eq!(drawn_lift(None, None, 100, 0.5, 0.01), 0.0, "on the ground");
+        assert_eq!(drawn_lift(Some(400), Some(400), 100, 0.5, 0.01), 3.0, "as high as ground 300 above");
+        assert_eq!(drawn_lift(None, Some(300), 100, 0.5, 0.01), 1.0, "half way up from the ground");
+        assert_eq!(drawn_lift(Some(300), Some(500), 100, 0.25, 0.01), 2.5);
+        assert_eq!(drawn_lift(Some(150), Some(90), 100, 1.0, 0.01), 0.0, "never under the ground");
     }
 
     #[test]

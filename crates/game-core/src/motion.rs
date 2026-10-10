@@ -21,23 +21,25 @@ impl Velocity {
     }
 }
 
-/// A unit's free motion: its velocity and its height above the ground.
+/// A unit's free motion: its velocity and, off the ground, its absolute height.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Motion {
     pub velocity: Velocity,
-    /// Above the ground under it, in terrain height units (0 = on the ground).
-    pub lift: u16,
+    /// Above the sea, in terrain height units, while off the ground (`physics::step` moves it); None on the
+    /// ground, where the unit stands at the terrain's height.
+    pub height: Option<i32>,
 }
 
 impl Motion {
-    pub const STILL: Motion = Motion { velocity: Velocity::ZERO, lift: 0 };
+    pub const STILL: Motion = Motion { velocity: Velocity::ZERO, height: None };
 
-    pub fn new(velocity: Velocity, lift: u16) -> Self {
-        Motion { velocity, lift }
+    /// Off the ground at `height`, moving at `velocity`.
+    pub fn flying(velocity: Velocity, height: i32) -> Self {
+        Motion { velocity, height: Some(height) }
     }
 
     pub fn airborne(self) -> bool {
-        self.lift > 0
+        self.height.is_some()
     }
 
     /// On the ground and not moving.
@@ -59,7 +61,8 @@ mod tests {
     #[test]
     fn still_only_on_the_ground_and_not_moving() {
         assert!(Motion::default().is_still());
-        assert!(!Motion::new(Velocity::ZERO, 3).is_still() && Motion::new(Velocity::ZERO, 3).airborne());
-        assert!(!Motion::new(Velocity::new(2, 0, 0), 0).is_still());
+        let up = Motion::flying(Velocity::ZERO, 300);
+        assert!(!up.is_still() && up.airborne());
+        assert!(!Motion { velocity: Velocity::new(2, 0, 0), height: None }.is_still());
     }
 }
