@@ -142,7 +142,8 @@ available, is the camp fire (see "Camp fire").
 
 Done:
 - `game_core::placement`: `blocked_at(map, point)` (Sea: drawn height < 1; Building: `Building::covers` its turned
-  footprint; Site: within `SPAWN_FLAT_RADIUS` of a reincarnation site; Tree: a cell with a tree that has wood),
+  footprint; Site: within `SPAWN_FLAT_RADIUS` of a reincarnation site; Tree: a cell with a tree that has wood; Campfire: its cell; Totem: within
+  `worship::TOTEM_MARGIN` of a totem not sunk yet, `GameMap::totem_at`),
   `too_steep` (height points under the footprint spread more than `STEEP_SPREAD` = 200, placeholder), `shore_ok`,
   `can_place`.
 - Boat hut (`shore_ok`): its jetty is local +z, its door local -z (all 11 boat huts of the levels: only sea within
@@ -335,7 +336,7 @@ lights it and puts the blueprint away. Clicking one of the player's fires with u
 it (instead of walking there).
 - Placed at a cell's centre (`Command::PlaceCampfire`, `GameMap::place_campfire`), only on flat free land
   (`campfire::can_place`): no corner of the cell in the sea, corners within `FLAT_SPREAD` of each other, and no
-  building, site platform, tree with wood or other camp fire on it. It blocks buildings on its cell
+  building, site platform, tree with wood, totem or other camp fire on it. It blocks buildings on its cell
   (`placement::Blocked::Campfire`).
 - Units sent to it (`GameMap::gather`, `Order::Campfire`) walk to a point of its ring (`RING` world units out,
   `RING_POINTS` points), spread evenly from the point nearest the first one, then go round it

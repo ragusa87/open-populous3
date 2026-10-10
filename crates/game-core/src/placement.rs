@@ -24,6 +24,7 @@ pub enum Blocked {
     Site,
     Tree,
     Campfire,
+    Totem,
 }
 
 /// What blocks building on the world point `p`, if anything (the slope is checked per building,
@@ -44,6 +45,8 @@ pub fn blocked_at(map: &GameMap, p: (u16, u16)) -> Option<Blocked> {
         Some(Blocked::Tree)
     } else if map.campfires.iter().any(|f| f.cell() == cell) {
         Some(Blocked::Campfire)
+    } else if map.totem_at(p).is_some() {
+        Some(Blocked::Totem)
     } else {
         None
     }
@@ -143,7 +146,7 @@ mod tests {
     }
 
     #[test]
-    fn sea_buildings_sites_and_trees_block() {
+    fn sea_buildings_sites_trees_fires_and_totems_block() {
         let mut m = map();
         assert_eq!(blocked_at(&m, (5 * 512, 30 * 512)), Some(Blocked::Sea));
         assert!(!can_place(&m, &hut((9, 30))), "half on the sea");
@@ -159,6 +162,10 @@ mod tests {
         m.campfires.push(crate::campfire::Campfire::new(1, 0, (60, 60)));
         assert_eq!(blocked_at(&m, (60 * 512 + 10, 60 * 512 + 500)), Some(Blocked::Campfire));
         assert!(!can_place(&m, &hut((60, 60))), "over a camp fire");
+        m.totems.push(crate::totem::Totem::new(crate::totem::TotemKind::Totem, (70 * 512 + 256, 70 * 512 + 256)));
+        assert_eq!(blocked_at(&m, (70 * 512 + 300, 70 * 512 + 200)), Some(Blocked::Totem));
+        assert!(!can_place(&m, &hut((70, 70))), "over a totem");
+        assert!(!crate::campfire::can_place(&m, (70, 70)), "no camp fire on a totem");
     }
 
     fn boat_hut(cell: (u16, u16), facing: u8) -> Building {
