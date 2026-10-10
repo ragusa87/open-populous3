@@ -160,6 +160,10 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
   speed, then gravity takes `GRAVITY` (32, the original's per turn) off the vertical speed. All integers.
 - At or below the ground under its new position (`Heightmap::height_at`), it lands: `height` None, velocity zero,
   a `Touchdown` with its vertical speed (for the fall damage to come). Higher ground in its way stops it there too.
+- Where it lands (`Unit::touch_down`, judged by its own mobility, so a boat's ground will be the sea):
+  - in the sea: it dies at once whatever its health (Dying, the dying pose), no drowning;
+  - on ground it can stand on: Idle, or it dies if no health is left;
+  - anywhere else (a cliff, a building): to do, it stands up meanwhile.
 - What throws it: `Unit::fling(push, ground)` adds the push to its velocity, lifts it off the ground and makes it
   tumble, forgetting its plans (the blast, spells.md).
 - On the ground nothing moves it yet (rolling and friction to come). A tumbling unit still on the ground goes back to

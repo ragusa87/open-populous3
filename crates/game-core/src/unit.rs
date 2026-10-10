@@ -522,7 +522,11 @@ impl Unit {
         let terrain = ground.terrain();
         if self.motion.airborne() {
             let below = |(x, z): (u16, u16)| terrain.height_at(x as u32, z as u32, WORLD_UNITS_PER_CELL);
-            ((self.x, self.z), self.motion, _) = physics::step((self.x, self.z), self.motion, below);
+            let touchdown;
+            ((self.x, self.z), self.motion, touchdown) = physics::step((self.x, self.z), self.motion, below);
+            if touchdown.is_some() && let Some(event) = self.touch_down(ground) {
+                return Some(event);
+            }
         }
         if self.is_alive() && !self.motion.airborne() && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
@@ -625,11 +629,7 @@ impl Unit {
                     self.action = Action::Landing;
                 }
             }
-            Action::Landing => {
-                if !self.motion.airborne() {
-                    self.action = Action::Idle;
-                }
-            }
+            Action::Landing => {}
             Action::Tumbling => {
                 if self.motion.is_still() {
                     self.action = Action::Idle;
@@ -689,6 +689,23 @@ impl Unit {
     fn die(&mut self) {
         self.drop_plans();
         self.action = Action::Dying { left: Countdown::new(DYING_TICKS) };
+    }
+
+    /// Back on the ground after flying (`physics::Touchdown`). On ground it can stand on (by its mobility: a boat's
+    /// is the sea) it stands up, or dies with no health left; in the sea it dies whatever its health. Anywhere
+    /// else (a cliff, a building) it stands up for now.
+    fn touch_down(&mut self, ground: &impl Ground) -> Option<UnitEvent> {
+        if !self.is_alive() {
+            return None;
+        }
+        let cell = self.cell();
+        let standing = ground.passable(self.mobility(), cell);
+        if (standing && self.health.is_zero()) || (!standing && is_sea(ground.terrain(), cell)) {
+            self.die();
+            return Some(UnitEvent::Died);
+        }
+        self.action = Action::Idle;
+        None
     }
 
     /// Forgets where it was going, what it was to do there and its work.
@@ -1180,6 +1197,42 @@ mod tests {
         let mut dead = Unit { action: Action::Dead { left: Countdown::new(RESPAWN_TICKS) }, ..u.clone() };
         dead.fling(Velocity::new(10, 10, 0), 100);
         assert!(matches!(dead.action, Action::Dead { .. }) && dead.motion == Motion::STILL);
+    }
+
+    #[test]
+    fn landing_in_the_sea_kills_whatever_the_health() {
+        let mut t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        for z in -1..=1 {
+            for x in 1..=4 {
+                sea_cell(&mut t, (u.cell().0 + x, u.cell().1 + z));
+            }
+        }
+        u.fling(Velocity::new(120, 60, 0), 100);
+        let mut events = Vec::new();
+        while u.motion.airborne() {
+            events.extend(u.tick(&t, Some(&site)));
+        }
+        assert_eq!((is_sea(&t, u.cell()), events), (true, vec![UnitEvent::Died]));
+        assert!(matches!(u.action, Action::Dying { .. }) && u.health.is_full(), "dies at once, the dying pose");
+    }
+
+    #[test]
+    fn landing_on_ground_stands_up_unless_no_health_is_left() {
+        let mut t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.fling(Velocity::new(0, 40, 0), 100);
+        assert_eq!(run_until(&mut u, &t, &site, |u| !u.motion.airborne()), 4);
+        assert_eq!(u.action, Action::Idle);
+        u.health = Health::new(0, SHAMAN_MAX_HEALTH);
+        u.fling(Velocity::new(0, 40, 0), 100);
+        assert_eq!(run(&mut u, &t, &site, 4), [UnitEvent::Died]);
+        assert!(matches!(u.action, Action::Dying { .. }));
+        let (mut u, _) = shaman_at((20, 20));
+        t.set(u.cell().0 + 1, u.cell().1, 1000);
+        u.fling(Velocity::new(0, 40, 0), 100);
+        run(&mut u, &t, &site, 4);
+        assert_eq!(u.action, Action::Idle, "on a cliff: stands up for now");
     }
 
     #[test]
