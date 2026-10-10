@@ -13,7 +13,7 @@ Input never touches the map: the client issues commands to its `GameSchedule` (`
 `run_ticks` steps the map (`GameMap::step`: that tick's commands, then the tick).
 - `issue(command)`: a local command waits in `pending`.
 - `close_local(now)`, before running tick `now`: the local turn of `now + delay` closes with the pending
-  commands, and is returned to be sent to the peers (`Message::Turn`); once per tick, so a stalled tick does not
+  commands, and is returned to be sent to the peers (`Message::Tick`); once per tick, so a stalled tick does not
   close it twice.
 - `receive(player, tick, commands)`: a peer's turn; a second one for the same tick is ignored.
 - `ready(tick)`: every player closed it, or it is one of the first `delay` ticks after the start, which nobody
@@ -29,7 +29,7 @@ Input never touches the map: the client issues commands to its `GameSchedule` (`
 ## Wire format (game-net)
 Frame: `u32 LE` length + payload. Payload tag byte:
 - `0 Hello { player: u8 }`
-- `1 Turn { turn: u32, n: u8, n x Command }`, Command = `kind u8, player u8`, then
+- `1 Tick { tick: u32, n: u8, n x Command }`: a player's turn for that tick, Command = `kind u8, player u8`, then
   - kind 0 `Cast`: `spell tag u8`, cells as i16 x/z pairs (tag 4 Teleport: `u16` x, z in world units);
   - kind 1 `Order` (to the shaman): `order tag u8` (0 MoveTo + `u16` x, z in world units, 1 Pray, 2 Cast, 3 Stop, 4 Campfire + `u16` x, z of the fire's centre + `u8` ring point, 5 CutTree + `u16` x, z of the tree, 6 FetchWood, 7 PickUp + `u16` x, z of the click, 8 Build + `u16` x, z of the building's stored corner, 9 Enter + `u16` x, z of the hut's stored corner);
   - kind 2 `OrderUnit` (to one of the player's units): `u32` unit id, then the order as in kind 1;

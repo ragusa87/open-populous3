@@ -1,4 +1,4 @@
-//! Deterministic lockstep over TCP: peers only exchange per-turn command lists.
+//! Deterministic lockstep over TCP: peers only exchange per-tick command lists (`game_core::schedule`).
 //!
 //! Wire format: `u32 LE length` + payload. Payload starts with a tag byte.
 //! See docs/specs/multiplayer.md.
@@ -6,14 +6,15 @@
 use game_core::building::BuildingKind;
 use game_core::command::Command;
 use game_core::spell::Spell;
+use game_core::time::Tick;
 use game_core::unit::Order;
 use std::io::{self, Read, Write};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
     Hello { player: u8 },
-    /// All commands a player issues for one simulation turn (possibly none).
-    Turn { turn: u32, commands: Vec<Command> },
+    /// All commands a player issues for one simulation tick (possibly none): its turn.
+    Tick { tick: Tick, commands: Vec<Command> },
 }
 
 pub fn send(w: &mut impl Write, msg: &Message) -> io::Result<()> {
@@ -34,9 +35,9 @@ pub fn encode(msg: &Message) -> Vec<u8> {
     let mut b = Vec::new();
     match msg {
         Message::Hello { player } => b.extend([0, *player]),
-        Message::Turn { turn, commands } => {
+        Message::Tick { tick, commands } => {
             b.push(1);
-            b.extend(turn.to_le_bytes());
+            b.extend(tick.to_wire().to_le_bytes());
             b.push(commands.len() as u8);
             for command in commands {
                 encode_command(&mut b, command);
@@ -207,13 +208,13 @@ pub fn decode(b: &[u8]) -> Option<Message> {
     match c.u8()? {
         0 => Some(Message::Hello { player: c.u8()? }),
         1 => {
-            let turn = u32::from_le_bytes(c.take(4)?.try_into().ok()?);
+            let tick = Tick::from_wire(u32::from_le_bytes(c.take(4)?.try_into().ok()?));
             let n = c.u8()?;
             let mut commands = Vec::with_capacity(n as usize);
             for _ in 0..n {
                 commands.push(decode_command(&mut c)?);
             }
-            Some(Message::Turn { turn, commands })
+            Some(Message::Tick { tick, commands })
         }
         _ => None,
     }
@@ -253,8 +254,8 @@ mod tests {
     use std::net::{TcpListener, TcpStream};
 
     fn sample_turn() -> Message {
-        Message::Turn {
-            turn: 7,
+        Message::Tick {
+            tick: Tick::from_wire(7),
             commands: vec![
                 Command::Cast { player: 1, spell: Spell::LandBridge { from: (1, 2), to: (120, -3) } },
                 Command::Cast { player: 0, spell: Spell::Flatten { at: (5, 6) } },
