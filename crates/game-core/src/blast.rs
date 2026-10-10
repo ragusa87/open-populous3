@@ -1,9 +1,9 @@
 //! The simple blast (pop3-rev-analysis.md "Components"): 3 turns at radius 2, 4 then 5 cells around its centre.
-//! Each person of another tribe within the turn's radius and `PUSH_RANGE` is pushed away and up, once (damage,
-//! allies and shields to come).
+//! Each person within the turn's radius and `PUSH_RANGE`, of any tribe but the caster's own shaman, is pushed away
+//! and up, once (damage and shields to come).
 
 use crate::motion::Velocity;
-use crate::unit::{isqrt, torus_delta, Unit};
+use crate::unit::{isqrt, torus_delta, Unit, UnitKind};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// Radius of each turn, in world units.
@@ -19,7 +19,7 @@ pub const PUSH_UP: i32 = 98;
 pub struct Blast {
     /// Centre, world units.
     pub at: (u16, u16),
-    /// The caster's tribe: its people are not pushed.
+    /// The caster's tribe: its shaman is not pushed.
     pub owner: u8,
     /// Turns done.
     turn: u8,
@@ -44,7 +44,7 @@ impl Blast {
         let hits: Vec<(usize, Velocity)> = units
             .iter()
             .enumerate()
-            .filter(|(_, u)| u.owner != self.owner && u.is_alive() && u.inside.is_none() && !self.pushed.contains(&u.id))
+            .filter(|(_, u)| !(u.owner == self.owner && u.kind == UnitKind::Shaman) && u.is_alive() && u.inside.is_none() && !self.pushed.contains(&u.id))
             .filter_map(|(i, u)| Some((i, push(self.at, (u.x, u.z), reach)?)))
             .collect();
         self.pushed.extend(hits.iter().map(|&(i, _)| units[i].id));
@@ -69,7 +69,6 @@ pub fn push(at: (u16, u16), pos: (u16, u16), reach: u32) -> Option<Velocity> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::unit::UnitKind;
 
     #[test]
     fn pushes_away_and_up_fading_with_distance() {
@@ -85,10 +84,17 @@ mod tests {
     #[test]
     fn three_turns_growing_and_each_unit_once() {
         let unit = |id, x| Unit::new(id, 1, UnitKind::Brave, (x, 5000));
-        let units = [unit(1, 5000), unit(2, 5000 + 1200), unit(3, 5000 + 1500), Unit::new(4, 0, UnitKind::Brave, (5000, 5000))];
+        let units = [
+            unit(1, 5000),
+            unit(2, 5000 + 1200),
+            unit(3, 5000 + 1500),
+            Unit::new(4, 0, UnitKind::Brave, (5000, 5000)),
+            Unit::new(5, 0, UnitKind::Shaman, (5000, 5000)),
+            Unit::new(6, 1, UnitKind::Shaman, (5000, 5000)),
+        ];
         let mut blast = Blast::new((5000, 5000), 0);
         let ids = |hits: Vec<(usize, Velocity)>| hits.iter().map(|&(i, _)| units[i].id).collect::<Vec<_>>();
-        assert_eq!(ids(blast.turn(&units)), [1], "2 cells: the caster's own brave is spared");
+        assert_eq!(ids(blast.turn(&units)), [1, 4, 6], "2 cells: the caster's own brave too, not the caster's shaman");
         assert_eq!(ids(blast.turn(&units)), [2], "4 cells, pushed only within 2.5");
         assert!(blast.turn(&units).is_empty() && blast.is_over());
         assert!(blast.turn(&units).is_empty());

@@ -932,12 +932,12 @@ mod tests {
     #[test]
     fn a_blast_throws_people_away_and_they_land() {
         let mut map = GameMap::sandbox_walk();
-        let i = map.units.iter().position(|u| u.is_alive()).unwrap();
+        let i = map.units.iter().position(|u| u.is_alive() && u.kind == UnitKind::Shaman).unwrap();
         let (owner, start) = (map.units[i].owner, (map.units[i].x, map.units[i].z));
         let at = (start.0.wrapping_add(300), start.1);
         map.apply(&Command::Cast { player: owner, spell: Spell::Blast { at } });
         map.tick();
-        assert!(map.units[i].action != Action::Tumbling && !map.units[i].motion.airborne(), "the caster's own people are spared");
+        assert!(map.units[i].action != Action::Tumbling && !map.units[i].motion.airborne(), "the caster's own shaman is spared");
         map.apply(&Command::Cast { player: owner.wrapping_add(1), spell: Spell::Blast { at } });
         map.tick();
         assert!(map.units[i].action == Action::Tumbling && map.units[i].motion.airborne(), "thrown up");
