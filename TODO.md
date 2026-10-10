@@ -17,6 +17,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Hover/selection of a camp fire (tooltip with who is around it), a hover cursor when units are selected over one.
 
 ## Units ([units.md](docs/specs/units.md))
+- [ ] Health values from the original (`LIFE_<P>` in constants.md: brave 1000, warrior 1800...) instead of the placeholder `UnitKind::max_health` (shaman 100, brave 60...); scale the damage (drowning, stranded) and the regeneration with them.
 - [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
 - [ ] Walk animation rate could follow the slope speed (slower steps uphill).

@@ -412,7 +412,7 @@ fn animate_views(
     }
     for (fill, mut t, mat) in &mut fills {
         let Some(u) = units.get(fill.0) else { continue };
-        let f = u.health as f32 / u.max_health() as f32;
+        let f = u.health.current() as f32 / u.health.max() as f32;
         t.scale.x = (BAR_SIZE.x - 0.03) * f;
         t.translation.x = -(BAR_SIZE.x - 0.03) * (1.0 - f) / 2.0;
         if let Some(mut m) = mats.get_mut(&mat.0) {

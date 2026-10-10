@@ -9,6 +9,7 @@ pub mod command;
 pub mod enter;
 pub mod gauge;
 pub mod headcount;
+pub mod health;
 pub mod map;
 pub mod occupancy;
 pub mod path;

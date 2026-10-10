@@ -3,6 +3,7 @@
 //! `u16` wrapping arithmetic walks around the torus.
 
 use crate::campfire;
+use crate::health::Health;
 use crate::path::{self, Ground, Mobility};
 use crate::site::ReincarnationSite;
 use crate::terrain::Heightmap;
@@ -243,7 +244,7 @@ pub struct Unit {
     pub z: u16,
     /// Heading in eighths of a turn: 0 = +z, 2 = +x, 4 = -z, 6 = -x.
     pub facing: u8,
-    pub health: u16,
+    pub health: Health,
     pub action: Action,
     /// Pieces of wood carried (braves, 0 or 1).
     pub carrying: u8,
@@ -294,7 +295,7 @@ impl Unit {
             x,
             z,
             facing: 0,
-            health: kind.max_health(),
+            health: Health::full(kind.max_health()),
             action: Action::Idle,
             carrying: 0,
             regen: 0,
@@ -310,10 +311,6 @@ impl Unit {
             work: None,
             inside: None,
         }
-    }
-
-    pub fn max_health(&self) -> u16 {
-        self.kind.max_health()
     }
 
     /// Every person walks (vehicles will sail or fly).
@@ -581,8 +578,7 @@ impl Unit {
             }
             Action::Landing { mut left } => self.action = if left.tick() { Action::Idle } else { Action::Landing { left } },
             Action::Drowning => {
-                self.health = self.health.saturating_sub(DROWN_DAMAGE);
-                if self.health == 0 {
+                if self.health.damage(DROWN_DAMAGE) {
                     self.die();
                     return Some(UnitEvent::Died);
                 }
@@ -608,14 +604,14 @@ impl Unit {
     }
 
     fn heal(&mut self) {
-        if self.health >= self.max_health() {
+        if self.health.is_full() {
             self.regen = 0;
             return;
         }
         self.regen += 1;
         if self.regen as u32 >= REGEN_EVERY.get() {
             self.regen = 0;
-            self.health += 1;
+            self.health.heal(1);
         }
     }
 
@@ -624,12 +620,12 @@ impl Unit {
         self.regen += 1;
         if self.regen as u32 >= STRANDED_HURT_EVERY.get() {
             self.regen = 0;
-            self.health = self.health.saturating_sub(1);
+            self.health.damage(1);
         }
-        if self.health == 0 {
+        if self.health.is_zero() {
             self.die();
         }
-        self.health == 0
+        self.health.is_zero()
     }
 
     fn die(&mut self) {
@@ -939,7 +935,7 @@ mod tests {
         u.order(Order::MoveTo { x: to.0, z: to.1 });
         run(&mut u, &t, &site, 3 * STRANDED_HURT_EVERY.get() as usize);
         assert_eq!((u.action, u.x, u.z), (Action::Stranded { to }, start.0, start.1), "arms up, not moving");
-        assert_eq!(u.health, SHAMAN_MAX_HEALTH - 3);
+        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH - 3);
         for z in 0..128 {
             for x in 15..17 {
                 t.set(x, z, 100);
@@ -960,7 +956,7 @@ mod tests {
         assert_eq!(u.action, Action::Idle, "orders still work");
         u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
         let events = run(&mut u, &t, &site, STRANDED_HURT_EVERY.get() as usize * SHAMAN_MAX_HEALTH as usize);
-        assert_eq!((events, u.health, u.is_alive()), (vec![UnitEvent::Died], 0, false));
+        assert_eq!((events, u.health.current(), u.is_alive()), (vec![UnitEvent::Died], 0, false));
     }
 
     #[test]
@@ -971,7 +967,7 @@ mod tests {
         let start = (u.x, u.z);
         u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
         run(&mut u, &t, &site, 10);
-        assert_eq!((u.action, u.x, u.z, u.health), (Action::Idle, start.0, start.1, SHAMAN_MAX_HEALTH));
+        assert_eq!((u.action, u.x, u.z, u.health.current()), (Action::Idle, start.0, start.1, SHAMAN_MAX_HEALTH));
     }
 
     #[test]
@@ -1020,14 +1016,14 @@ mod tests {
             t.set(cx + dx, cz + dz, 0);
         }
         u.tick(&t, Some(&site));
-        assert_eq!((u.action, u.health), (Action::Drowning, SHAMAN_MAX_HEALTH - DROWN_DAMAGE));
+        assert_eq!((u.action, u.health.current()), (Action::Drowning, SHAMAN_MAX_HEALTH - DROWN_DAMAGE));
         u.order(Order::MoveTo { x: 0, z: 0 });
         assert_eq!(u.action, Action::Drowning, "no orders while drowning");
         let events = run(&mut u, &t, &site, (SHAMAN_MAX_HEALTH / DROWN_DAMAGE) as usize);
-        assert_eq!((events, u.health, u.is_alive()), (vec![UnitEvent::Died], 0, false));
+        assert_eq!((events, u.health.current(), u.is_alive()), (vec![UnitEvent::Died], 0, false));
         let events = run(&mut u, &t, &site, (DYING_TICKS + RESPAWN_TICKS).get() as usize);
         assert_eq!(events, vec![UnitEvent::Reincarnated]);
-        assert_eq!((u.x, u.z, u.health, u.action), (site.x, site.z, SHAMAN_MAX_HEALTH, Action::Idle));
+        assert_eq!((u.x, u.z, u.health.current(), u.action), (site.x, site.z, SHAMAN_MAX_HEALTH, Action::Idle));
     }
 
     #[test]
@@ -1035,7 +1031,7 @@ mod tests {
         let mut t = land();
         let (shaman, site) = shaman_at((10, 10));
         let mut brave = Unit::new(7, 0, UnitKind::Brave, (shaman.x + 20 * 512, shaman.z));
-        assert_eq!(brave.health, UnitKind::Brave.max_health());
+        assert_eq!(brave.health, Health::full(UnitKind::Brave.max_health()));
         sea_cell(&mut t, brave.cell());
         let events = run(&mut brave, &t, &site, 200);
         assert_eq!(events, vec![UnitEvent::Died], "no reincarnation");
@@ -1057,9 +1053,9 @@ mod tests {
     fn heals_slowly_on_land() {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
-        u.health = 50;
+        u.health = Health::new(50, SHAMAN_MAX_HEALTH);
         run(&mut u, &t, &site, 5 * REGEN_EVERY.get() as usize);
-        assert_eq!(u.health, 55);
+        assert_eq!(u.health.current(), 55);
     }
 
     #[test]

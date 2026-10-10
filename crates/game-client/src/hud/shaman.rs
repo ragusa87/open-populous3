@@ -32,8 +32,8 @@ pub fn status(unit: Option<&Unit>) -> Status {
     };
     Status {
         title,
-        health: u.health as f32 / u.max_health() as f32,
-        health_text: format!("{}/{}", u.health, u.max_health()),
+        health: u.health.current() as f32 / u.health.max() as f32,
+        health_text: format!("{}/{}", u.health.current(), u.health.max()),
     }
 }
 
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn status_shows_action_and_health() {
         let mut u = Unit::shaman(1, &ReincarnationSite::at_cell(0, (1, 1)));
-        u.health = 40;
+        u.health = game_core::health::Health::new(40, u.health.max());
         let s = status(Some(&u));
         assert_eq!((s.title.as_str(), s.health, s.health_text.as_str()), ("Idle", 0.4, "40/100"));
         u.action = Action::Dead { left: game_core::time::Countdown::with_left(game_core::unit::RESPAWN_TICKS, game_core::time::Ticks::new(13)) };
