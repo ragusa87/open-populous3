@@ -497,7 +497,7 @@ mod tests {
         let mine = Unit::shaman(1, &ReincarnationSite::at_cell(PLAYER, (1, 1)));
         let theirs = Unit::shaman(2, &ReincarnationSite::at_cell(1, (5, 5)));
         let mut dead = Unit::shaman(3, &ReincarnationSite::at_cell(PLAYER, (1, 1)));
-        dead.action = Action::Dead { left: 3 };
+        dead.action = Action::Dead { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) };
         let mut s = sel(&[1, 2, 3, 4]);
         s.retain(&[mine, theirs, dead]);
         assert_eq!(s.units, [1]);

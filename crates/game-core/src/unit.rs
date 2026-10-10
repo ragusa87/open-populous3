@@ -6,13 +6,12 @@ use crate::campfire;
 use crate::path::{self, Ground, Mobility};
 use crate::site::ReincarnationSite;
 use crate::terrain::Heightmap;
+use crate::time::{Countdown, Ticks};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
-/// Simulation ticks per second (the client runs them at a fixed rate).
-pub const TICKS_PER_SECOND: u32 = 10;
 pub const SHAMAN_MAX_HEALTH: u16 = 100;
-/// World units per tick on flat ground (1.25 cells per second).
-pub const SHAMAN_SPEED: i32 = 64;
+/// World units per tick on flat ground (1.24 cells per second).
+pub const SHAMAN_SPEED: i32 = 53;
 /// Walking speed factor change in 1/256 per 100 of slope (height per cell). Uphill: the sandbox
 /// ramp (30 per cell) is ~22% slower, the steep hill (100 per cell) quarter speed. Downhill: the
 /// steep hill is 1.5x faster.
@@ -21,25 +20,26 @@ pub const SLOPE_SPEEDUP_DOWN: i32 = 128;
 /// Walking speed factor bounds in 1/256 (steep climbs crawl, steep descents are capped).
 pub const SLOPE_FACTOR_RANGE: (i32, i32) = (32, 384);
 /// Health lost per tick while in the sea.
-pub const DROWN_DAMAGE: u16 = 4;
-/// Ticks between two health points regained on land.
-pub const REGEN_EVERY: u8 = 5;
-/// Ticks between two health points lost while stranded (100 health points last 30 s).
-pub const STRANDED_HURT_EVERY: u8 = 3;
-/// Length of the cast jump, the fall when dying, and the wait before reincarnation.
-pub const CAST_TICKS: u16 = 12;
+pub const DROWN_DAMAGE: u16 = 3;
+/// Between two health points regained on land.
+pub const REGEN_EVERY: Ticks = Ticks::millis(500);
+/// Between two health points lost while stranded (100 health points last 33 s).
+pub const STRANDED_HURT_EVERY: Ticks = Ticks::millis(300);
+/// The cast: the original's cast state.
+pub const CAST_TICKS: Ticks = Ticks::new(10);
 /// After a teleport she floats down onto the ground for this long.
-pub const LANDING_TICKS: u16 = 6;
-pub const DYING_TICKS: u16 = 8;
-pub const RESPAWN_TICKS: u16 = 30;
-/// Chopping one piece of wood off a tree (6 s, to check against the original).
-pub const CHOP_TICKS: u16 = 60;
-/// With nothing more to do, a brave holds his piece of wood this long before putting it down (3 s).
-pub const HOLD_TICKS: u16 = 30;
+pub const LANDING_TICKS: Ticks = Ticks::millis(600);
+/// The fall when dying, and the wait before reincarnation.
+pub const DYING_TICKS: Ticks = Ticks::millis(800);
+pub const RESPAWN_TICKS: Ticks = Ticks::secs(3);
+/// Chopping one piece of wood off a tree: the original's countdown at a tree.
+pub const CHOP_TICKS: Ticks = Ticks::new(20);
+/// With nothing more to do, a brave holds his piece of wood this long before putting it down.
+pub const HOLD_TICKS: Ticks = Ticks::secs(3);
 /// A brave's jump flattening one height point of a building site.
-pub const JUMP_TICKS: u16 = 8;
-/// A brave building one piece of wood into a building (5 s, a guess).
-pub const BUILD_TICKS: u16 = 50;
+pub const JUMP_TICKS: Ticks = Ticks::millis(800);
+/// A brave building one piece of wood into a building (a guess).
+pub const BUILD_TICKS: Ticks = Ticks::secs(5);
 /// Going round a camp fire: this fraction (numerator, denominator) of the walking speed.
 pub const AROUND_FIRE_PACE: (i32, i32) = (1, 2);
 
@@ -102,9 +102,9 @@ impl UnitKind {
     pub fn speed(self) -> i32 {
         match self {
             UnitKind::Shaman | UnitKind::Brave => SHAMAN_SPEED,
-            UnitKind::Spy => 72,
-            UnitKind::Firewarrior => 60,
-            UnitKind::Warrior | UnitKind::Preacher | UnitKind::Wildman => 56,
+            UnitKind::Spy => 60,
+            UnitKind::Firewarrior => 50,
+            UnitKind::Warrior | UnitKind::Preacher | UnitKind::Wildman => 47,
         }
     }
 }
@@ -118,25 +118,25 @@ pub enum Action {
     /// path opens or the unit dies.
     Stranded { to: (u16, u16) },
     /// Jumping with the spell in her hands, `left` ticks to go.
-    Casting { left: u16 },
+    Casting { left: Countdown },
     /// Just teleported: floating down onto the ground, `left` ticks to go.
-    Landing { left: u16 },
+    Landing { left: Countdown },
     /// The ground under her is sea: loses health until dead or the land comes back.
     Drowning,
-    Dying { left: u16 },
+    Dying { left: Countdown },
     /// Waiting to reincarnate at her site.
-    Dead { left: u16 },
+    Dead { left: Countdown },
     /// Going round the camp fire at `fire` (its centre), last at its ring point `point`
     /// (`campfire::ring_point`), at `AROUND_FIRE_PACE` of her walking speed.
     AroundFire { fire: (u16, u16), point: u8 },
     /// A brave cutting one piece of wood off the tree at `tree` (its position), `left` ticks to go.
-    Chopping { tree: (u16, u16), left: u16 },
+    Chopping { tree: (u16, u16), left: Countdown },
     /// Standing with a piece of wood and nothing more to do: puts it down when `left` runs out.
-    Holding { left: u16 },
+    Holding { left: Countdown },
     /// A brave jumping on the height point `at` (cells) of the site it works on, to flatten it.
-    Flattening { at: (i32, i32), left: u16 },
+    Flattening { at: (i32, i32), left: Countdown },
     /// A brave building one piece of wood from the pile into the building it works on.
-    Building { left: u16 },
+    Building { left: Countdown },
     /// Walking in by the door, straight to `to` inside the building (`Unit::inside`).
     Entering { to: (u16, u16) },
     /// A brave inside a building under construction with nothing to build yet, hammering away until
@@ -169,14 +169,17 @@ impl Action {
         }
     }
 
-    /// Ticks since a timed action started (for one-shot animations), None for open-ended ones.
-    pub fn elapsed(&self) -> Option<u16> {
+    /// The countdown of a timed action (for one-shot animations), None for open-ended ones.
+    pub fn countdown(&self) -> Option<Countdown> {
         match *self {
-            Action::Casting { left } => Some(CAST_TICKS - left.min(CAST_TICKS)),
-            Action::Landing { left } => Some(LANDING_TICKS - left.min(LANDING_TICKS)),
-            Action::Dying { left } => Some(DYING_TICKS - left.min(DYING_TICKS)),
-            Action::Dead { left } => Some(RESPAWN_TICKS - left.min(RESPAWN_TICKS)),
-            Action::Flattening { left, .. } => Some(JUMP_TICKS - left.min(JUMP_TICKS)),
+            Action::Casting { left }
+            | Action::Landing { left }
+            | Action::Dying { left }
+            | Action::Dead { left }
+            | Action::Chopping { left, .. }
+            | Action::Holding { left }
+            | Action::Flattening { left, .. }
+            | Action::Building { left } => Some(left),
             _ => None,
         }
     }
@@ -465,7 +468,7 @@ impl Unit {
                 self.to_fire = Some((fire, point));
                 Action::Walking { to: campfire::ring_point(fire, point) }
             }
-            Order::Cast => Action::Casting { left: CAST_TICKS },
+            Order::Cast => Action::Casting { left: Countdown::new(CAST_TICKS) },
             Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
@@ -523,7 +526,7 @@ impl Unit {
                             if (dx, dz) != (0, 0) {
                                 self.facing = octant(dx, dz);
                             }
-                            self.action = Action::Chopping { tree, left: CHOP_TICKS };
+                            self.action = Action::Chopping { tree, left: Countdown::new(CHOP_TICKS) };
                         } else if let Some(at) = self.to_wood.take() {
                             return Some(UnitEvent::PickedUp { at });
                         } else if let Some(site) = self.to_house.take() {
@@ -536,36 +539,47 @@ impl Unit {
                     return Some(UnitEvent::Died);
                 }
             }
-            Action::Holding { left } if left > 1 => self.action = Action::Holding { left: left - 1 },
-            Action::Holding { .. } => {
-                self.action = Action::Idle;
-                return Some(UnitEvent::PutDown);
+            Action::Holding { mut left } => {
+                if left.tick() {
+                    self.action = Action::Idle;
+                    return Some(UnitEvent::PutDown);
+                }
+                self.action = Action::Holding { left };
             }
-            Action::Flattening { at, left } if left > 1 => self.action = Action::Flattening { at, left: left - 1 },
-            Action::Flattening { at, .. } => {
-                self.action = Action::Idle;
-                return Some(UnitEvent::Jumped { at });
+            Action::Flattening { at, mut left } => {
+                if left.tick() {
+                    self.action = Action::Idle;
+                    return Some(UnitEvent::Jumped { at });
+                }
+                self.action = Action::Flattening { at, left };
             }
-            Action::Building { left } if left > 1 => self.action = Action::Building { left: left - 1 },
-            Action::Building { .. } => {
-                self.action = Action::Idle;
-                return Some(UnitEvent::Built);
+            Action::Building { mut left } => {
+                if left.tick() {
+                    self.action = Action::Idle;
+                    return Some(UnitEvent::Built);
+                }
+                self.action = Action::Building { left };
             }
-            Action::Chopping { tree, left } if left > 1 => self.action = Action::Chopping { tree, left: left - 1 },
-            Action::Chopping { tree, .. } => {
-                self.action = Action::Idle;
-                return Some(UnitEvent::Chopped { tree });
+            Action::Chopping { tree, mut left } => {
+                if left.tick() {
+                    self.action = Action::Idle;
+                    return Some(UnitEvent::Chopped { tree });
+                }
+                self.action = Action::Chopping { tree, left };
             }
-            Action::Casting { left } if left > 1 => self.action = Action::Casting { left: left - 1 },
-            Action::Casting { .. } => {
+            Action::Casting { mut left } => {
+                if !left.tick() {
+                    self.action = Action::Casting { left };
+                    return None;
+                }
                 self.action = Action::Idle;
                 if let Some(to) = self.teleport_to.take().filter(|&to| ground.passable(self.mobility(), (cell_of(to.0), cell_of(to.1)))) {
                     (self.x, self.z) = to;
                     self.inside = None;
-                    self.action = Action::Landing { left: LANDING_TICKS };
+                    self.action = Action::Landing { left: Countdown::new(LANDING_TICKS) };
                 }
             }
-            Action::Landing { left } => self.action = if left > 1 { Action::Landing { left: left - 1 } } else { Action::Idle },
+            Action::Landing { mut left } => self.action = if left.tick() { Action::Idle } else { Action::Landing { left } },
             Action::Drowning => {
                 self.health = self.health.saturating_sub(DROWN_DAMAGE);
                 if self.health == 0 {
@@ -576,12 +590,15 @@ impl Unit {
                     self.action = Action::Idle;
                 }
             }
-            Action::Dying { left } => {
-                self.action = if left > 1 { Action::Dying { left: left - 1 } } else { Action::Dead { left: RESPAWN_TICKS } };
+            Action::Dying { mut left } => {
+                self.action = if left.tick() { Action::Dead { left: Countdown::new(RESPAWN_TICKS) } } else { Action::Dying { left } };
             }
             Action::Dead { .. } if self.kind != UnitKind::Shaman => {}
-            Action::Dead { left } if left > 1 => self.action = Action::Dead { left: left - 1 },
-            Action::Dead { .. } => {
+            Action::Dead { mut left } => {
+                if !left.tick() {
+                    self.action = Action::Dead { left };
+                    return None;
+                }
                 let site = site?;
                 *self = Unit { facing: self.facing, ..Unit::shaman(self.id, site) };
                 return Some(UnitEvent::Reincarnated);
@@ -596,7 +613,7 @@ impl Unit {
             return;
         }
         self.regen += 1;
-        if self.regen >= REGEN_EVERY {
+        if self.regen as u32 >= REGEN_EVERY.get() {
             self.regen = 0;
             self.health += 1;
         }
@@ -605,7 +622,7 @@ impl Unit {
     /// Stranded: one health point lost every few ticks; true when that kills her.
     fn hurt(&mut self) -> bool {
         self.regen += 1;
-        if self.regen >= STRANDED_HURT_EVERY {
+        if self.regen as u32 >= STRANDED_HURT_EVERY.get() {
             self.regen = 0;
             self.health = self.health.saturating_sub(1);
         }
@@ -620,7 +637,7 @@ impl Unit {
         (self.to_tree, self.to_wood, self.to_house, self.to_shrine) = (None, None, None, None);
         self.queue.clear();
         self.work = None;
-        self.action = Action::Dying { left: DYING_TICKS };
+        self.action = Action::Dying { left: Countdown::new(DYING_TICKS) };
     }
 
     /// Path to `to` on the current terrain: walking if there is one, else stranded (the shaman
@@ -778,11 +795,11 @@ mod tests {
     fn jumps_and_builds_then_tells_the_caller() {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
-        u.action = Action::Flattening { at: (10, 11), left: JUMP_TICKS };
-        assert_eq!(u.action.elapsed(), Some(0));
-        assert_eq!(run(&mut u, &t, &site, JUMP_TICKS as usize), vec![UnitEvent::Jumped { at: (10, 11) }]);
-        u.action = Action::Building { left: BUILD_TICKS };
-        assert_eq!(run(&mut u, &t, &site, BUILD_TICKS as usize - 1), vec![]);
+        u.action = Action::Flattening { at: (10, 11), left: Countdown::new(JUMP_TICKS) };
+        assert_eq!(u.action.countdown().map(Countdown::done), Some(Ticks::ZERO));
+        assert_eq!(run(&mut u, &t, &site, JUMP_TICKS.get() as usize), vec![UnitEvent::Jumped { at: (10, 11) }]);
+        u.action = Action::Building { left: Countdown::new(BUILD_TICKS) };
+        assert_eq!(run(&mut u, &t, &site, BUILD_TICKS.get() as usize - 1), vec![]);
         assert_eq!(run(&mut u, &t, &site, 1), vec![UnitEvent::Built]);
         assert_eq!(u.action, Action::Idle);
     }
@@ -793,10 +810,10 @@ mod tests {
         let (mut u, site) = shaman_at((10, 10));
         let to = (u.x + 3 * 512, u.z);
         u.order(Order::MoveTo { x: to.0, z: to.1 });
-        run(&mut u, &t, &site, 23);
+        run(&mut u, &t, &site, 28);
         assert_eq!(u.action, Action::Walking { to });
         assert_eq!(u.facing, 2, "heading +x");
-        run(&mut u, &t, &site, 2);
+        run(&mut u, &t, &site, 1);
         assert_eq!((u.x, u.z, u.action), (to.0, to.1, Action::Idle));
     }
 
@@ -814,7 +831,7 @@ mod tests {
     fn slower_uphill_faster_downhill() {
         assert_eq!(slope_speed(SHAMAN_SPEED, 0), SHAMAN_SPEED);
         assert_eq!(slope_speed(SHAMAN_SPEED, 100), SHAMAN_SPEED / 4, "steep hill: quarter speed");
-        assert_eq!(slope_speed(SHAMAN_SPEED, 30), 49, "gentle ramp: ~22% slower");
+        assert_eq!(slope_speed(SHAMAN_SPEED, 30), 41, "gentle ramp: ~22% slower");
         assert_eq!(slope_speed(SHAMAN_SPEED, -100), SHAMAN_SPEED * 3 / 2, "steep descent: 1.5x");
         assert!(slope_speed(SHAMAN_SPEED, 30) < SHAMAN_SPEED && slope_speed(SHAMAN_SPEED, -30) > SHAMAN_SPEED, "gentle ramp");
         assert_eq!(slope_speed(SHAMAN_SPEED, 1000), SHAMAN_SPEED / 8, "cliffs: clamped, never stuck");
@@ -920,7 +937,7 @@ mod tests {
         let start = (u.x, u.z);
         let to = (20 * 512 + 256, u.z);
         u.order(Order::MoveTo { x: to.0, z: to.1 });
-        run(&mut u, &t, &site, 3 * STRANDED_HURT_EVERY as usize);
+        run(&mut u, &t, &site, 3 * STRANDED_HURT_EVERY.get() as usize);
         assert_eq!((u.action, u.x, u.z), (Action::Stranded { to }, start.0, start.1), "arms up, not moving");
         assert_eq!(u.health, SHAMAN_MAX_HEALTH - 3);
         for z in 0..128 {
@@ -942,7 +959,7 @@ mod tests {
         u.order(Order::Stop);
         assert_eq!(u.action, Action::Idle, "orders still work");
         u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
-        let events = run(&mut u, &t, &site, STRANDED_HURT_EVERY as usize * SHAMAN_MAX_HEALTH as usize);
+        let events = run(&mut u, &t, &site, STRANDED_HURT_EVERY.get() as usize * SHAMAN_MAX_HEALTH as usize);
         assert_eq!((events, u.health, u.is_alive()), (vec![UnitEvent::Died], 0, false));
     }
 
@@ -962,9 +979,9 @@ mod tests {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
         u.order(Order::Cast);
-        assert_eq!(u.action.elapsed(), Some(0));
-        run(&mut u, &t, &site, CAST_TICKS as usize - 1);
-        assert_eq!(u.action, Action::Casting { left: 1 });
+        assert_eq!(u.action.countdown().map(Countdown::done), Some(Ticks::ZERO));
+        run(&mut u, &t, &site, CAST_TICKS.get() as usize - 1);
+        assert!(matches!(u.action, Action::Casting { left } if left.left() == Ticks::new(1)));
         run(&mut u, &t, &site, 1);
         assert_eq!(u.action, Action::Idle);
     }
@@ -975,19 +992,20 @@ mod tests {
         let (mut u, site) = shaman_at((10, 10));
         let (start, to) = ((u.x, u.z), (30 * 512 + 100, 40 * 512 + 7));
         u.cast_teleport(to);
-        run(&mut u, &t, &site, CAST_TICKS as usize - 1);
-        assert_eq!((u.x, u.z, u.action), (start.0, start.1, Action::Casting { left: 1 }), "still jumping where she was");
+        run(&mut u, &t, &site, CAST_TICKS.get() as usize - 1);
+        assert_eq!((u.x, u.z), start, "still jumping where she was");
+        assert!(matches!(u.action, Action::Casting { left } if left.left() == Ticks::new(1)));
         run(&mut u, &t, &site, 1);
-        assert_eq!((u.x, u.z, u.action), (to.0, to.1, Action::Landing { left: LANDING_TICKS }), "at the target, floating down");
-        run(&mut u, &t, &site, LANDING_TICKS as usize);
+        assert_eq!((u.x, u.z, u.action), (to.0, to.1, Action::Landing { left: Countdown::new(LANDING_TICKS) }), "at the target, floating down");
+        run(&mut u, &t, &site, LANDING_TICKS.get() as usize);
         assert_eq!(u.action, Action::Idle, "landed");
         sea_cell(&mut t, (5, 5));
         u.cast_teleport((5 * 512, 5 * 512));
-        run(&mut u, &t, &site, CAST_TICKS as usize);
+        run(&mut u, &t, &site, CAST_TICKS.get() as usize);
         assert_eq!((u.x, u.z), to, "the target became sea meanwhile: stays");
         u.cast_teleport(start);
         u.order(Order::Stop);
-        run(&mut u, &t, &site, CAST_TICKS as usize);
+        run(&mut u, &t, &site, CAST_TICKS.get() as usize);
         assert_eq!((u.x, u.z), to, "an order cancels it");
     }
 
@@ -1005,9 +1023,9 @@ mod tests {
         assert_eq!((u.action, u.health), (Action::Drowning, SHAMAN_MAX_HEALTH - DROWN_DAMAGE));
         u.order(Order::MoveTo { x: 0, z: 0 });
         assert_eq!(u.action, Action::Drowning, "no orders while drowning");
-        let events = run(&mut u, &t, &site, 24);
+        let events = run(&mut u, &t, &site, (SHAMAN_MAX_HEALTH / DROWN_DAMAGE) as usize);
         assert_eq!((events, u.health, u.is_alive()), (vec![UnitEvent::Died], 0, false));
-        let events = run(&mut u, &t, &site, (DYING_TICKS + RESPAWN_TICKS) as usize);
+        let events = run(&mut u, &t, &site, (DYING_TICKS + RESPAWN_TICKS).get() as usize);
         assert_eq!(events, vec![UnitEvent::Reincarnated]);
         assert_eq!((u.x, u.z, u.health, u.action), (site.x, site.z, SHAMAN_MAX_HEALTH, Action::Idle));
     }
@@ -1040,7 +1058,7 @@ mod tests {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
         u.health = 50;
-        run(&mut u, &t, &site, 5 * REGEN_EVERY as usize);
+        run(&mut u, &t, &site, 5 * REGEN_EVERY.get() as usize);
         assert_eq!(u.health, 55);
     }
 

@@ -138,9 +138,9 @@ Neither source describes the engine loop. What follows is what both of them and 
     `(turn + stored_m + 1) & stored_n == 0`. The exact off-by-one is unverified.
   - The converter adds the tribe index, `(turn + tribe + m) % n == 0`, so tribes sharing a script don't act on
     the same turn [lua]. Whether the original does this is unknown.
-- **Turn rate**: the wiki says "about 8 game turns per second". Message timeouts and flyby times are also in
-  turns, but `SET_TIMER_GOING` takes seconds. The simulation here runs 10 ticks per second (units.md), so script
-  timings need a conversion.
+- **Turn rate**: the wiki says "about 8 game turns per second"; the executable runs 12 (pop3-rev-analysis.md
+  "Turns and timing"), and one of our ticks is one turn (units.md). Message timeouts and flyby times are also in
+  turns, but `SET_TIMER_GOING` takes seconds.
 - **User variables keep their values between turns.** Counters such as `INCREMENT $n 1` depend on it. They start
   at 0, the on-disk storage area.
 - Internal variables read the live game state when evaluated.
@@ -1036,7 +1036,6 @@ end
   the script sets. A future native or Lua-like scripting layer can then drive the same data, the way Script4
   wraps the original functions.
 - Open before implementing:
-  - the original turn rate (~8 per second?) against our 10 ticks per second
   - the `EVERY` off-by-one and whether there is a per-tribe phase
   - what `SET_ATTACK_VARIABLE` receives
   - the unknown states and commands marked "-" or "?" above

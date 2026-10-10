@@ -95,6 +95,11 @@ impl Countdown {
         Countdown { left: total, total }
     }
 
+    /// Part way through: `left` of `total` to go.
+    pub fn with_left(total: Ticks, left: Ticks) -> Countdown {
+        Countdown { left: left.min(total), total }
+    }
+
     /// One tick; true on the tick it ends (the `total`-th call), and on every call after.
     pub fn tick(&mut self) -> bool {
         self.left.0 = self.left.0.saturating_sub(1);
@@ -152,6 +157,7 @@ mod tests {
         assert!(c.tick());
         assert!(c.tick(), "stays ended");
         assert_eq!(c.done(), Ticks::new(3));
+        assert_eq!(Countdown::with_left(Ticks::new(3), Ticks::new(1)).done(), Ticks::new(2));
     }
 
     #[test]

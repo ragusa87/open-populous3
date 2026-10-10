@@ -19,6 +19,7 @@ use crate::map::{torus_dist2, GameMap};
 use crate::placement::can_place;
 use crate::slots;
 use crate::terrain::DirtyRect;
+use crate::time::Countdown;
 use crate::unit::{Action, Inside, Order, Unit, UnitEvent, UnitKind, BUILD_TICKS, JUMP_TICKS};
 
 /// Height a brave's jump moves a height point towards the site's level.
@@ -222,7 +223,7 @@ impl GameMap {
         let door = building.door();
         if building.stock > 0 && inside {
             self.buildings[b].stock -= 1;
-            self.units[i].action = Action::Building { left: BUILD_TICKS };
+            self.units[i].action = Action::Building { left: Countdown::new(BUILD_TICKS) };
             self.units[i].facing = facing_to(me, building.centre());
         } else if building.stock > 0 && torus_dist2(me, door) <= DELIVER_RADIUS * DELIVER_RADIUS {
             self.units[i].enter(Inside { site, door }, work_point(&building, id));
@@ -275,7 +276,7 @@ impl GameMap {
         let point = uneven.into_iter().filter(|&p| !claimed(p)).min_by_key(|&p| torus_dist2(me, world(p)))?;
         let at = world(point);
         if torus_dist2(me, at) <= JUMP_RADIUS * JUMP_RADIUS {
-            self.units[i].action = Action::Flattening { at: point, left: JUMP_TICKS };
+            self.units[i].action = Action::Flattening { at: point, left: Countdown::new(JUMP_TICKS) };
         } else {
             self.units[i].start(Order::MoveTo { x: at.0, z: at.1 });
         }
@@ -591,9 +592,7 @@ mod tests {
         map.trees.push(crate::tree::Tree::new((C + 24, C), 0, 0));
         let site = map.place_building(0, BuildingKind::Hut { size: 1 }, at, 0).unwrap();
         assert!(map.buildings[site].covers((map.trees.last().unwrap().x, map.trees.last().unwrap().z), 0));
-        for _ in 0..crate::tree::GROW_TICKS as usize * 2 {
-            map.tick();
-        }
+        map.run(crate::tree::GROW_TICKS * 2);
         assert_eq!(map.trees.last().unwrap().size, 0);
     }
 

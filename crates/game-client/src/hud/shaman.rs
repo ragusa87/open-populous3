@@ -7,7 +7,7 @@ use crate::units::selection::{selectable, Selection};
 use crate::units::{health_color, player_shaman_cell, SimClock, UnitSprites, PLAYER};
 use crate::world::CurrentMap;
 use bevy::prelude::*;
-use game_core::unit::{Action, Unit, TICKS_PER_SECOND};
+use game_core::unit::{Action, Unit};
 
 const SCALE: f32 = 2.0;
 /// Feet line, from the top of the box.
@@ -27,7 +27,7 @@ pub fn status(unit: Option<&Unit>) -> Status {
         return Status { title: "No shaman".into(), health: 0.0, health_text: String::new() };
     };
     let title = match u.action {
-        Action::Dead { left } => format!("Reincarnating in {}s", (left as u32).div_ceil(TICKS_PER_SECOND)),
+        Action::Dead { left } => format!("Reincarnating in {}s", crate::sim_time::secs_left(left)),
         a => a.name().to_string(),
     };
     Status {
@@ -147,7 +147,7 @@ mod tests {
         u.health = 40;
         let s = status(Some(&u));
         assert_eq!((s.title.as_str(), s.health, s.health_text.as_str()), ("Idle", 0.4, "40/100"));
-        u.action = Action::Dead { left: 11 };
+        u.action = Action::Dead { left: game_core::time::Countdown::with_left(game_core::unit::RESPAWN_TICKS, game_core::time::Ticks::new(13)) };
         assert_eq!(status(Some(&u)).title, "Reincarnating in 2s");
         assert_eq!(status(None).title, "No shaman");
     }

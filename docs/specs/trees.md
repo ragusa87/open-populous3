@@ -7,7 +7,7 @@
   Level 19 has 50 of model 1 and 14 of model 2: cone pines and weeping trees, as in the game.
   Each tree's angle is the scenery `i16@10` (quarter turns in the files, see level-format.md). It is not read
   yet: `Thing::facing` reads byte 8, which is always 0 for scenery.
-- Growth: below size 4, one size every `GROW_TICKS` (600 ticks, a minute), ticked by `GameMap::tick`. A tree at
+- Growth: below size 4, one size every `GROW_TICKS` (800 ticks, 67 s, the original's regrowth of one load), ticked by `GameMap::tick`. A tree at
   size 0 stays in place, invisible, and grows back. `Tree::cut` takes one piece (size - 1, growth restarts).
 - Placement (`tree::scatter`, deterministic from a seed): groves around random centres, 3-8 trees within 3 cells,
   only on ground units can walk (no sea, no cliff), never within 7 cells of a reincarnation site, one per cell,

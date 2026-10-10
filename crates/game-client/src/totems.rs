@@ -17,6 +17,7 @@ use crate::world::{CurrentMap, LevelList};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::Face;
+use crate::sim_time::ticks_f32;
 use game_core::totem::{Totem, TotemKind, HOLD_TICKS, SINK_TICKS, TURN_TICKS};
 use pop3_format::catalog::{PRAYER_TOTEM, STONE_HEAD, TOTEM, TOTEM_ANIMATED, TOTEM_POLES, WINGED_DEATH_PERCHED, WINGED_DEATH_TOTEM};
 use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
@@ -102,7 +103,7 @@ fn ease(x: f32) -> f32 {
 pub fn turn_fraction(t: &Totem, alpha: f32) -> f32 {
     match t.given {
         0 => 0.0,
-        1 => ease((t.since_given as f32 + alpha) / TURN_TICKS as f32),
+        1 => ease((t.since_given as f32 + alpha) / ticks_f32(TURN_TICKS)),
         _ => 1.0,
     }
 }
@@ -112,7 +113,7 @@ pub fn sink_fraction(t: &Totem, alpha: f32) -> f32 {
     if !t.is_exhausted() {
         return 0.0;
     }
-    ease((t.since_given as f32 + alpha - (TURN_TICKS + HOLD_TICKS) as f32) / SINK_TICKS as f32)
+    ease((t.since_given as f32 + alpha - ticks_f32(TURN_TICKS + HOLD_TICKS)) / ticks_f32(SINK_TICKS))
 }
 
 /// The stone totem with its rings turned `fraction` of the way: each point on a ring that turns
@@ -297,7 +298,7 @@ fn animate_totems(
     for (view, kids) in &views {
         let Some(t) = map.0.totems.get(view.index) else { continue };
         let (turn, sink) = (turn_fraction(t, alpha), sink_fraction(t, alpha));
-        let sinking = (t.since_given as f32 + alpha - (TURN_TICKS + HOLD_TICKS) as f32) / 10.0;
+        let sinking = (t.since_given as f32 + alpha - ticks_f32(TURN_TICKS + HOLD_TICKS)) / ticks_f32(game_core::time::Ticks::secs(1));
         for e in std::iter::once(kids.iter().collect::<Vec<_>>()).flatten().flat_map(|c| std::iter::once(c).chain(children.iter_descendants(c))) {
             if let Ok((mut tf, mut vis)) = bodies.get_mut(e) {
                 tf.translation.y = -view.top * 1.05 * sink;
@@ -346,12 +347,12 @@ mod tests {
     #[test]
     fn it_turns_after_its_first_gift_and_sinks_once_exhausted() {
         assert_eq!(turn_fraction(&gave(0, 0, 0), 0.0), 0.0, "not yet");
-        assert!((turn_fraction(&gave(1, TURN_TICKS / 2, 0), 0.0) - 0.5).abs() < 1e-6, "half way, eased");
-        assert_eq!(turn_fraction(&gave(1, TURN_TICKS, 0), 0.0), 1.0);
+        assert!((turn_fraction(&gave(1, TURN_TICKS.get() as u16 / 2, 0), 0.0) - 0.5).abs() < 1e-6, "half way, eased");
+        assert_eq!(turn_fraction(&gave(1, TURN_TICKS.get() as u16, 0), 0.0), 1.0);
         assert_eq!(turn_fraction(&gave(3, 0, 0), 0.0), 1.0, "turned for good");
         assert_eq!(sink_fraction(&gave(5, 999, 0), 0.0), 0.0, "no limit: never sinks");
-        assert_eq!(sink_fraction(&gave(1, TURN_TICKS + HOLD_TICKS, 1), 0.0), 0.0, "turn, then the hold");
-        assert_eq!(sink_fraction(&gave(1, TURN_TICKS + HOLD_TICKS + SINK_TICKS, 1), 0.0), 1.0);
+        assert_eq!(sink_fraction(&gave(1, (TURN_TICKS + HOLD_TICKS).get() as u16, 1), 0.0), 0.0, "turn, then the hold");
+        assert_eq!(sink_fraction(&gave(1, (TURN_TICKS + HOLD_TICKS + SINK_TICKS).get() as u16, 1), 0.0), 1.0);
     }
 
     fn ring(y: i16, angle: f32, r: f32) -> [i16; 3] {

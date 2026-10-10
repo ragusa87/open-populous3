@@ -3,30 +3,35 @@
 - `game_core::unit::Unit`: id, owner, kind, `u16` x/z in world units (512 per cell), wrapping at 65536
   (plain `u16` wrapping arithmetic walks the torus), `facing` in eighths of a turn (0 = +z, 2 = +x), health, action.
 - Movement in fixed point per tick; no floats in simulation state.
+- Time (`game_core::time`): one tick is one original game turn, 12 per second (`TICKS_PER_SECOND`,
+  pop3-rev-analysis.md "Turns and timing"). `Tick` is a moment (`GameMap::now`), `Ticks` a length, built from the
+  original's turns (`Ticks::new`) or from our guesses in seconds (`Ticks::secs`, `Ticks::millis`); a timed action
+  holds a `Countdown`, which the client also reads for its animation; `Every::new(16).fires(now, phase)` is a
+  power-of-two rhythm. `GameMap::run(ticks)` runs several ticks (tests, dev shots).
 
 ## Shaman (done: simulation)
 `GameMap::units` holds one shaman per reincarnation site, spawned at `spawn_point()` when the map loads.
-`GameMap::tick()` advances every unit (10 ticks per second, `TICKS_PER_SECOND`); orders arrive as
+`GameMap::tick()` advances every unit; orders arrive as
 `Command::Order { player, order }` through `GameMap::apply` (lockstep-safe). Casting a spell
 (`Command::Cast`) also makes the caster's shaman jump.
 
 | Action | Entered by | Behaviour |
 |---|---|---|
 | Idle | default, arrival, Stop | heals 1 HP every 5 ticks |
-| Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 64 units/tick on flat ground (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
+| Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 53 units/tick on flat ground (1.24 cells/s) (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
 | Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -1 HP every 3 ticks until the terrain opens a path (walks again) or it dies |
 | Worshipping | `Order::Worship { site }` (a click on a vault of knowledge with her selected) | prays at the vault's door; heals; see worship.md |
-| Casting { left } | `Order::Cast`, any spell cast | 12-tick jump, then Idle (Teleport: then at the target, Landing) |
-| Landing { left } | arriving from a teleport | 6 ticks, then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out); a puff of dust at touchdown (`units/dust.rs`) |
-| Chopping { tree, left } | `Order::CutTree`, `Order::FetchWood` (braves only) | walks to a free spot next to the tree, then `CHOP_TICKS` (60, 6 s, a guess) of chopping, then the tree loses one size and the brave carries the piece |
+| Casting { left } | `Order::Cast`, any spell cast | `CAST_TICKS` (10, the original's cast state) jump, then Idle (Teleport: then at the target, Landing) |
+| Landing { left } | arriving from a teleport | `LANDING_TICKS` (0.6 s), then Idle; drawn in the idle pose floating 0.2 cell up and settling down (`landing_lift`, eases out); a puff of dust at touchdown (`units/dust.rs`) |
+| Chopping { tree, left } | `Order::CutTree`, `Order::FetchWood` (braves only) | walks to a free spot next to the tree, then `CHOP_TICKS` (20, 1.67 s, the original's countdown) of chopping, then the tree loses one size and the brave carries the piece |
 | Flattening { at, left } | assigned to a plan (`Order::Build`) | `JUMP_TICKS` jump on a footprint height point, which then moves towards the site's level (buildings.md "Construction"); drawn with the jump pose (original anim 12; the CC0 sheets: arms up) |
 | Entering { to } | `Unit::enter` at a building's door | straight to `to` inside, through its walls, then Idle inside (`Unit::inside`) |
 | Building { left } | inside a site with wood on its pile | `BUILD_TICKS` building one piece in (hammer pose: the axe swing, anim 11, until the original hammering anim is found) |
 | Hammering | inside a site under construction with nothing to build yet | until wood comes or it is built; counts as free (`Unit::is_free`) |
-| Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (30, 3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
-| Drowning | ground under her becomes open sea | -4 HP per tick, no orders; back to Idle if land returns |
-| Dying { left } | health reaches 0 | 8 ticks |
-| Dead { left } | after dying | 30 ticks, then reincarnates at her site at full health; the site levels its ground again |
+| Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
+| Drowning | ground under her becomes open sea | -3 HP per tick, no orders; back to Idle if land returns |
+| Dying { left } | health reaches 0 | `DYING_TICKS` (0.8 s) |
+| Dead { left } | after dying | `RESPAWN_TICKS` (3 s), then reincarnates at her site at full health; the site levels its ground again |
 
 Health: 100. Orders are ignored while drowning, dying or dead.
 
@@ -50,12 +55,12 @@ Placeholder balance until combat (`max_health`, flat-ground `speed` in world uni
 
 | Kind | Health | Speed |
 |---|---|---|
-| Shaman | 100 | 64 |
-| Brave | 60 | 64 |
-| Warrior | 120 | 56 |
-| Preacher | 70 | 56 |
-| Spy | 60 | 72 |
-| Firewarrior | 80 | 60 |
+| Shaman | 100 | 53 |
+| Brave | 60 | 53 |
+| Warrior | 120 | 47 |
+| Preacher | 70 | 47 |
+| Spy | 60 | 60 |
+| Firewarrior | 80 | 50 |
 
 Every kind walks, prays, heals, drowns and dies like the shaman; only the shaman reincarnates (the others stay
 `Dead`, lying where they fell). `Command::Order` and spells go to the player's shaman (`GameMap::shaman_of`),

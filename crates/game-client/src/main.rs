@@ -24,6 +24,7 @@ mod nature;
 mod object_scale;
 mod original_models;
 mod procedural_theme;
+mod sim_time;
 mod sites;
 mod sky;
 mod terrain_mesh;

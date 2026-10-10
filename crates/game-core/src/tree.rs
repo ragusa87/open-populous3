@@ -5,11 +5,12 @@
 use crate::map::Lcg;
 use crate::path::Mobility;
 use crate::terrain::Heightmap;
+use crate::time::Ticks;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 pub const MAX_SIZE: u8 = 4;
-/// Ticks to grow one size (a minute at 10 ticks per second).
-pub const GROW_TICKS: u16 = 600;
+/// To grow one size: the original regrows a load (100 wood) in 800 turns (trees.md).
+pub const GROW_TICKS: Ticks = Ticks::new(800);
 /// Tree types: 0-5 are the levels' scenery trees (models 1-6), 6-17 the other original tree objects
 /// (`pop3_format::catalog::tree_object`); the client maps a variant to a model.
 pub const VARIANTS: u8 = pop3_format::catalog::TREE_TYPES;
@@ -54,7 +55,7 @@ impl Tree {
             return;
         }
         self.growth += 1;
-        if self.growth >= GROW_TICKS {
+        if self.growth as u32 >= GROW_TICKS.get() {
             self.growth = 0;
             self.size += 1;
         }
@@ -128,16 +129,16 @@ mod tests {
     }
 
     #[test]
-    fn grows_back_one_size_a_minute_up_to_four() {
+    fn grows_back_one_size_at_a_time_up_to_four() {
         let mut t = Tree::new((5, 5), 3, 0);
         assert!(!t.is_visible());
-        for _ in 0..GROW_TICKS - 1 {
+        for _ in 0..GROW_TICKS.get() - 1 {
             t.tick();
         }
         assert_eq!(t.size, 0);
         t.tick();
         assert_eq!(t.size, 1);
-        for _ in 0..10 * GROW_TICKS {
+        for _ in 0..10 * GROW_TICKS.get() {
             t.tick();
         }
         assert_eq!(t.size, MAX_SIZE);

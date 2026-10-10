@@ -5,11 +5,11 @@
 
 use crate::map::GameMap;
 use crate::placement::blocked_at;
-use crate::unit::TICKS_PER_SECOND;
+use crate::time::Ticks;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// Ticks a camp fire burns with nobody around before it goes out (placeholder to tune).
-pub const ABANDON_TICKS: u16 = 60 * TICKS_PER_SECOND as u16;
+pub const ABANDON_TICKS: Ticks = Ticks::secs(60);
 /// Radius (world units) of the ring the units go round.
 pub const RING: i32 = 400;
 /// Points on the ring, evenly spread (`RING_DIRS`).
@@ -66,7 +66,7 @@ impl Campfire {
 
     /// Burnt out: nobody came for `ABANDON_TICKS`.
     pub fn is_out(&self) -> bool {
-        self.unattended >= ABANDON_TICKS
+        self.unattended as u32 >= ABANDON_TICKS.get()
     }
 }
 

@@ -135,7 +135,7 @@ A training hut makes no mana [community]. As in the game (checked by someone who
 8. While inside, a unit counts as busy for mana (rule 7) [ours].
 
 ## Balance and game turns
-The original counts in game turns (about 8 per second, unverified, ai-scripts.md); we tick 10 times per second.
+The original counts in game turns, 12 per second (pop3-rev-analysis.md "Turns and timing"); one of our ticks is one turn.
 Every number of these rules lives in one place, `game_core::balance`:
 - `Turns(u32)`: a duration in original game turns, as the constants store it. `Balance::ticks(Turns) -> u32`
   converts with an integer ratio (`turns_per_second`, 10 until the original rate is measured, so 1 turn = 1 tick

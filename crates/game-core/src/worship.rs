@@ -247,12 +247,12 @@ mod tests {
         });
         assert!(granted.is_some(), "the gauge filled, she walked in");
         assert_eq!(map.granted, vec![(0, Reward::Building(BuildingKind::Temple))]);
-        let out = (0..(OPEN_TICKS + CLOSE_TICKS) as usize).find(|_| {
+        let out = (0..(OPEN_TICKS + CLOSE_TICKS).get() as usize).find(|_| {
             map.tick();
             map.units[s].inside.is_none()
         });
-        assert!(out.is_some_and(|t| t < OPEN_TICKS as usize), "out by the door before it starts closing: {out:?}");
-        (0..(OPEN_TICKS + CLOSE_TICKS) as usize).for_each(|_| {
+        assert!(out.is_some_and(|t| t < OPEN_TICKS.get() as usize), "out by the door before it starts closing: {out:?}");
+        (0..(OPEN_TICKS + CLOSE_TICKS).get() as usize).for_each(|_| {
             map.tick();
         });
         assert_eq!(phase(&map, vault), VaultPhase::Spent);
@@ -395,9 +395,7 @@ mod tests {
         assert!(map.totem_orders(0, &units, first).is_empty(), "no more");
         let (x, z) = (map.totems[first].x, map.totems[first].z);
         assert_eq!(map.totem_at((x, z)), Some(first), "still there while it turns and sinks");
-        for _ in 0..(crate::totem::TURN_TICKS + crate::totem::HOLD_TICKS + crate::totem::SINK_TICKS) {
-            map.tick();
-        }
+        map.run(crate::totem::TURN_TICKS + crate::totem::HOLD_TICKS + crate::totem::SINK_TICKS);
         assert!(map.totems[first].is_gone());
         assert_eq!(map.totem_at((x, z)), None, "sunk: gone");
     }

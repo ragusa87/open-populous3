@@ -197,7 +197,7 @@ mod tests {
         add(&mut map, 0, UnitKind::Shaman);
         add(&mut map, 0, UnitKind::Wildman);
         let dead = add(&mut map, 0, UnitKind::Brave);
-        map.units[dead].action = Action::Dying { left: 3 };
+        map.units[dead].action = Action::Dying { left: crate::time::Countdown::new(crate::time::Ticks::new(3)) };
         add(&mut map, 1, UnitKind::Warrior);
         assert_eq!(map.headcount(0), Headcount::default());
         assert_eq!(map.housing(0).population, 0);
@@ -217,7 +217,7 @@ mod tests {
         map.units[builder].inside = Some(Inside { site: site_build, door: site_build });
         map.units[builder].action = Action::Hammering;
         let chopping = add(&mut map, 0, UnitKind::Brave);
-        map.units[chopping].action = Action::Chopping { tree: (0, 0), left: 5 };
+        map.units[chopping].action = Action::Chopping { tree: (0, 0), left: crate::time::Countdown::new(crate::time::Ticks::new(5)) };
         let carrying = add(&mut map, 0, UnitKind::Brave);
         map.units[carrying].carrying = 1;
         map.units[carrying].action = Action::Walking { to: (0, 0) };
@@ -267,7 +267,7 @@ mod tests {
         let mut map = empty();
         let a = add(&mut map, 0, UnitKind::Spy);
         let dead = add(&mut map, 0, UnitKind::Spy);
-        map.units[dead].action = Action::Dead { left: 3 };
+        map.units[dead].action = Action::Dead { left: crate::time::Countdown::new(crate::time::Ticks::new(3)) };
         let ids = [map.units[a].id, map.units[dead].id, 999];
         assert_eq!(kinds_of(&map, &ids).get(UnitKind::Spy), 1);
         assert_eq!(kinds_of(&map, &ids).total(), 1);

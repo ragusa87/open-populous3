@@ -23,7 +23,8 @@ use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use game_core::unit::{Action, Unit, UnitKind, LANDING_TICKS, TICKS_PER_SECOND};
+use crate::sim_time::{progress, TICK_SECS};
+use game_core::unit::{Action, Unit, UnitKind};
 use selection::Selection;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
@@ -34,7 +35,6 @@ pub const PLAYER: u8 = 0;
 pub const PIXEL: f32 = 1.0 / 88.0;
 /// Sprites are uploaded upscaled (Scale2x twice) and filtered linearly instead of shown as blocks.
 const UPSCALE_STEPS: usize = 2;
-const TICK_SECS: f32 = 1.0 / TICKS_PER_SECOND as f32;
 const BAR_HEIGHT: f32 = 0.5;
 const BAR_SIZE: Vec2 = Vec2::new(0.36, 0.045);
 /// How high (cells) she floats when she appears after a teleport.
@@ -371,7 +371,7 @@ pub fn toward_eye(feet: Vec3, eye: Vec3, pull: f32) -> (Vec3, f32) {
 /// 0, slowing as she touches down. `alpha` is the fraction of the current tick.
 pub fn landing_lift(action: &Action, alpha: f32) -> f32 {
     let Action::Landing { left } = *action else { return 0.0 };
-    let t = ((left as f32 - alpha) / LANDING_TICKS as f32).clamp(0.0, 1.0);
+    let t = 1.0 - progress(left, alpha);
     LANDING_HEIGHT * t * t
 }
 
@@ -427,8 +427,9 @@ mod tests {
 
     #[test]
     fn floats_down_when_landing() {
-        let landing = |left| Action::Landing { left };
-        assert_eq!(landing_lift(&landing(LANDING_TICKS), 0.0), LANDING_HEIGHT, "appears up in the air");
+        use game_core::time::{Countdown, Ticks};
+        let landing = |left| Action::Landing { left: Countdown::with_left(game_core::unit::LANDING_TICKS, Ticks::new(left)) };
+        assert_eq!(landing_lift(&landing(game_core::unit::LANDING_TICKS.get()), 0.0), LANDING_HEIGHT, "appears up in the air");
         let (high, low) = (landing_lift(&landing(4), 0.0), landing_lift(&landing(2), 0.0));
         assert!(LANDING_HEIGHT > high && high > low && low > 0.0);
         assert!(high - low > low - landing_lift(&landing(1), 0.99), "slows down as she touches down");

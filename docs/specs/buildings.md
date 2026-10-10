@@ -208,7 +208,7 @@ the building shows it at once. To do: the Dismantle toggle (see "Dismantling").
      already level still takes one jump per point: the flattening step always shows.
   3. Under construction: with wood on the pile, walks to the door, in (`Unit::enter`, `Action::Entering`,
      straight to a work point a third of a cell apart per brave around the centre) and builds the piece from
-     inside (`Action::Building`, `BUILD_TICKS` 50, the hammer pose); with no pile, fetches wood under the
+     inside (`Action::Building`, `BUILD_TICKS` 5 s, the hammer pose); with no pile, fetches wood under the
      dispatch rule below (out by the door first); else walks in by the door and hammers (`Action::Hammering`,
      open-ended, free for the next step) until there is wood or the building is done. No brave stands idle.
   4. Built: the moment the last piece is in, everyone inside walks out by the door to a free spot around it

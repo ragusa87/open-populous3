@@ -2,7 +2,8 @@
 //! the feet. The shaman from the original animations when allowed (see docs/specs/animations.md),
 //! everything else generated (`procedural`). Which frame to show is decided here from the simulated action.
 
-use game_core::unit::{Action, UnitKind, CAST_TICKS, DYING_TICKS, JUMP_TICKS};
+use crate::sim_time::progress;
+use game_core::unit::{Action, UnitKind};
 use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
 use pop3_format::catalog::{PersonAnim, ARMS_UP_FRAME, ShamanAnim, WildmanAnim, OUTFIT_FIREWARRIOR, OUTFIT_PREACHER, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
 use pop3_format::{LevelError, Picture, SpriteBank, Theme};
@@ -128,11 +129,10 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, anim_secs: f32, a
         return 0;
     }
     let lying = frames.saturating_sub(2);
-    let progress = |ticks: u16| (action.elapsed().unwrap_or(0) as f32 + alpha) / ticks as f32;
+    let done = |n: usize| action.countdown().map_or(0, |c| ((progress(c, alpha) * n as f32) as usize).min(n - 1));
     match action {
-        Action::Casting { .. } => ((progress(CAST_TICKS) * frames as f32) as usize).min(frames - 1),
-        Action::Flattening { .. } => ((progress(JUMP_TICKS) * frames as f32) as usize).min(frames - 1),
-        Action::Dying { .. } => ((progress(DYING_TICKS) * (lying + 1) as f32) as usize).min(lying),
+        Action::Casting { .. } | Action::Flattening { .. } => done(frames),
+        Action::Dying { .. } => done(lying + 1),
         Action::Dead { .. } => lying,
         _ => (anim_secs * pose.fps()) as usize % frames,
     }
@@ -340,12 +340,14 @@ mod tests {
 
     #[test]
     fn timed_actions_play_once_in_step_with_ticks() {
-        let cast = |left| Action::Casting { left };
-        assert_eq!(frame_index(Pose::Cast, 12, &cast(CAST_TICKS), 5.0, 0.0), 0);
-        assert_eq!(frame_index(Pose::Cast, 12, &cast(6), 0.0, 0.0), 6);
+        use game_core::time::{Countdown, Ticks};
+        use game_core::unit::{CAST_TICKS, DYING_TICKS, RESPAWN_TICKS};
+        let cast = |left| Action::Casting { left: Countdown::with_left(CAST_TICKS, Ticks::new(left)) };
+        assert_eq!(frame_index(Pose::Cast, 12, &cast(CAST_TICKS.get()), 5.0, 0.0), 0);
+        assert_eq!(frame_index(Pose::Cast, 12, &cast(5), 0.0, 0.0), 6);
         assert_eq!(frame_index(Pose::Cast, 12, &cast(1), 0.0, 0.99), 11);
-        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dying { left: 1 }, 0.0, 0.99), 6);
-        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dead { left: 3 }, 0.0, 0.0), 6, "lies still");
+        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dying { left: Countdown::with_left(DYING_TICKS, Ticks::new(1)) }, 0.0, 0.99), 6);
+        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dead { left: Countdown::new(RESPAWN_TICKS) }, 0.0, 0.0), 6, "lies still");
     }
 
     #[test]
@@ -358,10 +360,10 @@ mod tests {
     #[test]
     fn stranded_tribesmen_hold_their_arms_up() {
         assert_eq!(pose_for(&Action::Stranded { to: (0, 0) }, false), Pose::Stranded);
-        assert_eq!(pose_for(&Action::Chopping { tree: (0, 0), left: 3 }, false), Pose::Chop);
+        assert_eq!(pose_for(&Action::Chopping { tree: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, false), Pose::Chop);
         assert_eq!(pose_for(&Action::Walking { to: (0, 0) }, true), Pose::CarryWalk);
         assert_eq!(pose_for(&Action::Idle, true), Pose::CarryIdle);
-        assert_eq!(pose_for(&Action::Holding { left: 5 }, true), Pose::CarryIdle);
+        assert_eq!(pose_for(&Action::Holding { left: game_core::time::Countdown::new(game_core::time::Ticks::new(5)) }, true), Pose::CarryIdle);
         assert_eq!(original_anim(UnitKind::Brave, Pose::Chop, 1), (11, None, None), "cutting wood");
         assert_eq!(original_anim(UnitKind::Brave, Pose::CarryWalk, 0), (9, None, None));
         assert_eq!(original_anim(UnitKind::Brave, Pose::CarryIdle, 0), (10, None, None));
@@ -369,7 +371,7 @@ mod tests {
         assert_eq!(original_anim(UnitKind::Shaman, Pose::CarryWalk, 2), original_anim(UnitKind::Shaman, Pose::Walk, 2));
         assert_eq!(original_anim(UnitKind::Brave, Pose::Stranded, 2), (12, None, Some(ARMS_UP_FRAME)));
         assert_eq!(original_anim(UnitKind::Brave, Pose::Jump, 1), (12, None, None), "the whole flattening jump");
-        assert_eq!(pose_for(&Action::Flattening { at: (0, 0), left: 3 }, false), Pose::Jump);
+        assert_eq!(pose_for(&Action::Flattening { at: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, false), Pose::Jump);
         assert_eq!(pose_for(&Action::Hammering, false), Pose::Hammer);
         assert_eq!(original_anim(UnitKind::Brave, Pose::Hammer, 0).0, 11, "the axe swing stands in");
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Stranded, 0), (12, Some(OUTFIT_WARRIOR), Some(ARMS_UP_FRAME)));

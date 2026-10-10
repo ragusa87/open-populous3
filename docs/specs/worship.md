@@ -55,8 +55,8 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
     up or top down; the whole slabs spinning as blocks (1-3 turns) while their rings ease to 64°; more full turns
     of the rings (2 or 3, over a longer time); spinning fast and slowing down into place; overshooting 64° and
     springing back; a ratchet of short clicks (4 × 16°) with pauses; a rumble (the totem shaking) while it sinks.
-  Done: the timeline is in the simulation (`Totem::since_given`; `TURN_TICKS` 20, `HOLD_TICKS` 10, `SINK_TICKS`
-  40; `Totem::is_gone`, then nothing finds it: `GameMap::totem_at`); the client poses the rings from objects 1
+  Done: the timeline is in the simulation (`Totem::since_given`; `TURN_TICKS` 2 s, `HOLD_TICKS` 1 s, `SINK_TICKS`
+  4 s; `Totem::is_gone`, then nothing finds it: `GameMap::totem_at`); the client poses the rings from objects 1
   and 3 (`totems::twisted`, `turn_fraction`, eased and smoothed between ticks), lowers the body
   (`sink_fraction`) with puffs of smoke (`effects::SINKING`) and hides it once gone. The generated stack of blocks turns its
   blocks above the base by the same amount.

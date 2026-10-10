@@ -5,6 +5,7 @@
 
 use crate::building::{BuildingKind, Reward};
 use crate::spell_book::SpellKind;
+use crate::time::Ticks;
 use pop3_format::level::{Availability, Thing, Trigger, KIND_BUILDING, KIND_SCENERY, KIND_SPELL};
 use pop3_format::{Level, ThingData, WORLD_UNITS_PER_CELL};
 
@@ -23,9 +24,9 @@ const DISCOVERY_MANA: u8 = 6;
 pub const TRIBES: usize = 4;
 /// After its first gift the stone totem turns its rocks for `TURN_TICKS`; once it gave its last, it
 /// holds `HOLD_TICKS` more, then sinks under the ground for `SINK_TICKS` and is gone (worship.md).
-pub const TURN_TICKS: u16 = 20;
-pub const HOLD_TICKS: u16 = 10;
-pub const SINK_TICKS: u16 = 40;
+pub const TURN_TICKS: Ticks = Ticks::millis(2000);
+pub const HOLD_TICKS: Ticks = Ticks::millis(1000);
+pub const SINK_TICKS: Ticks = Ticks::millis(4000);
 
 /// The original objects that look like something to pray at (objects.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -117,7 +118,7 @@ impl Totem {
 
     /// Exhausted and sunk under the ground: nothing to see, hover or pray at any more.
     pub fn is_gone(&self) -> bool {
-        self.is_exhausted() && self.since_given >= TURN_TICKS + HOLD_TICKS + SINK_TICKS
+        self.is_exhausted() && self.since_given as u32 >= (TURN_TICKS + HOLD_TICKS + SINK_TICKS).get()
     }
 }
 

@@ -11,7 +11,7 @@ Sources:
 
 ## Takeaways for the implementation
 - **12 turns per second** [exe, measured]: a fixed timestep of 83 ms. Every "turns" value below converts at that
-  rate. Our simulation runs 10 ticks per second.
+  rate. Our simulation runs at the same rate: one tick is one turn (`game_core::time`).
 - **Lockstep is the original design** [ghidra]. Orders are queued tribe commands applied on the network turn, with
   one global pseudo-random generator. Our `Command` + `map::Lcg` model (multiplayer.md) matches it.
 - **Everything is a unit** [ghidra]. People, buildings, scenery, shots, spells and invisible controllers share one
@@ -505,10 +505,10 @@ movement profiles of wildmen, the angel of death and creatures.
   not traced.
 - Wood, mapped to ours: one load (100) is one piece, a tree's 400 is our size 4, a small hut's 300 is our
   `wood_cost` 3. Our model (one piece moved at the end of the chop) already matches the single transfer.
-- units.md `Chopping`: the original is 20 turns per load, 1.67 s; our `CHOP_TICKS` is 60 ticks (6 s), a guess,
-  so about 17 ticks would match. Picking up from a pile is 3 turns (0.25 s); ours is instant on arrival.
-- trees.md "Growth": ours regrow one piece every 600 ticks (60 s); the original regrows 2 wood per 16 turns, one
-  piece in 800 turns (67 s), so about 667 ticks.
+- units.md `Chopping`: the original is 20 turns per load, 1.67 s; our `CHOP_TICKS` is the same 20 ticks. Picking
+  up from a pile is 3 turns (0.25 s); ours is instant on arrival.
+- trees.md "Growth": the original regrows 2 wood per 16 turns, one piece in 800 turns (67 s); ours regrow one
+  piece every 800 ticks, the same time, in one step.
 - Spell durations in turns convert the same way, e.g. `SHIELD_COUNT_X8` 180 is 1440 turns, 120 s.
 - Specialists cannot carry wood with the file's values, as in our braves-only rule.
 - huts-and-training.md rule 5 (breeding): our `occupants + 1` per update against `2 × SPROG_TIME × band` gives the
@@ -524,8 +524,8 @@ movement profiles of wildmen, the angel of death and creatures.
   check. The new site starts with 100 wood (one piece), so 2 more pieces are brought, not 3 with 1 consumed.
   `GROW_STEP` / `GROW_BONUS` can be replaced by these values.
 - worship.md "Shared: the prayer gauge":
-  - one `PrayTime` unit is 4 turns (1/3 s), not one of our ticks (0.1 s), so our gauges fill about 3.3× too fast;
-    `PrayTime` × 10 / 3 ticks would match;
+  - one `PrayTime` unit is 4 turns (1/3 s), not one of our ticks (1/12 s), so our gauges fill 4× too fast;
+    `PrayTime` × 4 ticks would match;
   - the original's speed is `C² / (C − n + 1)²`, much harsher than our `n² / C²`: on a totem of 8, 6 praying is
     11 % (ours 56 %) and 4 praying is 3 % (ours 25 %); `game_core::gauge::gain` can use it, still in integers;
   - the linear drain at the full-speed rate matches our guess;

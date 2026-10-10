@@ -797,7 +797,7 @@ impl GameMap {
                 }
                 u.carrying = 0;
             } else if u.action == Action::Idle {
-                u.action = Action::Holding { left: crate::unit::HOLD_TICKS };
+                u.action = Action::Holding { left: crate::time::Countdown::new(crate::unit::HOLD_TICKS) };
             }
         }
     }
@@ -996,9 +996,7 @@ mod tests {
         assert_eq!(m.apply(&cast(to)), None, "no terrain change");
         assert!(matches!(m.units[0].action, crate::unit::Action::Casting { .. }), "the cast jump first");
         assert_eq!(m.units[0].teleport_target(), Some(to));
-        for _ in 0..crate::unit::CAST_TICKS {
-            m.tick();
-        }
+        m.run(crate::unit::CAST_TICKS);
         assert_eq!((m.units[0].x, m.units[0].z), to, "then on the hill top");
     }
 
@@ -1043,9 +1041,7 @@ mod tests {
         }
         let small = m.trees.iter().position(|t| t.size < crate::tree::MAX_SIZE).unwrap();
         let before = m.trees[small].size;
-        for _ in 0..crate::tree::GROW_TICKS {
-            m.tick();
-        }
+        m.run(crate::tree::GROW_TICKS);
         assert_eq!(m.trees[small].size, before + 1);
     }
 
@@ -1163,9 +1159,7 @@ mod tests {
         assert_eq!(m.campfires.len(), 1);
         let fire = m.campfires[0].centre();
         assert_eq!(m.units.iter().filter(|u| u.campfire() == Some(fire)).count(), 3);
-        for _ in 0..crate::campfire::ABANDON_TICKS + 10 {
-            m.tick();
-        }
+        m.run(crate::campfire::ABANDON_TICKS + Ticks::new(10));
         assert_eq!(m.campfires.len(), 1, "tended: still burning");
         assert_eq!(m.units.iter().filter(|u| matches!(u.action, Action::AroundFire { .. })).count(), 3);
     }
@@ -1227,7 +1221,7 @@ mod tests {
         for c in braves.iter().map(|&unit| Command::OrderUnit { player: 0, unit, order: Order::Stop }) {
             m.apply(&c);
         }
-        for _ in 0..ABANDON_TICKS - 1 {
+        for _ in 0..ABANDON_TICKS.get() - 1 {
             m.tick();
         }
         assert_eq!(m.campfires.iter().filter(|f| f.id == fire).count(), 1, "not yet");
@@ -1348,8 +1342,8 @@ mod tests {
                 _ => {}
             }
         }
-        assert_eq!(chopped, crate::unit::CHOP_TICKS, "chopped for CHOP_TICKS");
-        assert_eq!(held, crate::unit::HOLD_TICKS, "then held it for HOLD_TICKS");
+        assert_eq!(Ticks::new(chopped), crate::unit::CHOP_TICKS, "chopped for CHOP_TICKS");
+        assert_eq!(Ticks::new(held), crate::unit::HOLD_TICKS, "then held it for HOLD_TICKS");
         assert_eq!(m.trees[0].size, 3);
         let b = unit(&m, ids[0]);
         assert_eq!((b.action, b.carrying), (Action::Idle, 0));
