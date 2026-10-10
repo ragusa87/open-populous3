@@ -20,9 +20,8 @@ use game_core::spell::Spell;
 use game_core::unit::Order;
 use game_core::spell_book::{Availability, SpellBook, SpellKind, SpellSlot, MAX_CHARGES};
 
-/// Mana given to every recharging spell per tick, and tick length.
-const MANA_PER_TICK: u32 = 8;
-const TICK_SECS: f32 = 0.1;
+/// Mana given to every recharging spell per simulation tick.
+const MANA_PER_TICK: u32 = 7;
 
 #[derive(Resource)]
 pub struct PlayerSpells(pub SpellBook);
@@ -192,7 +191,7 @@ impl Plugin for SpellsPlugin {
             .add_systems(
                 Update,
                 (
-                    (recharge, tile_clicks, pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput)).chain().in_set(crate::menu::Gameplay),
+                    (recharge.after(crate::units::SimStep), tile_clicks, pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput)).chain().in_set(crate::menu::Gameplay),
                     update_tiles,
                     update_info,
                 )
@@ -270,10 +269,8 @@ fn style_colors(style: TileStyle) -> (Color, Color) {
     }
 }
 
-fn recharge(time: Res<Time>, mut acc: Local<f32>, mut book: ResMut<PlayerSpells>) {
-    *acc += time.delta_secs();
-    while *acc >= TICK_SECS {
-        *acc -= TICK_SECS;
+fn recharge(clock: Res<crate::units::SimClock>, mut book: ResMut<PlayerSpells>) {
+    for _ in 0..clock.ran {
         book.0.tick(MANA_PER_TICK);
     }
 }

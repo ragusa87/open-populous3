@@ -10,7 +10,7 @@ it also shows the info line (level name and keys, top) and the camera readout (b
 - Dev mode: the "Ours" column below.
 - Off: the original's keys, for what we have: Up/Down and numpad 8/2 move, Ctrl+Left/Right and numpad 4/6 scroll
   sideways, Left/Right and numpad 7/9 rotate, `+`/`-` (and the numpad's) zoom, Enter aerial, `>` (the character,
-  any layout) to the shaman, H to the site, Space turns a held plan. No level switch, grid, editor, view presets,
+  any layout) to the shaman, H to the site, Space turns a held plan, P pause, Shift + `+`/`-` game speed. No level switch, grid, editor, view presets,
   tilt keys, stop or self cast keys; the editor and the view presets menu close.
 A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a character binding ignores Shift.
 
@@ -18,8 +18,8 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | Input | Original | Ours |
 |---|---|---|
 | Esc | in-game menu | pause menu (`menu.rs`) |
-| P | pause | - |
-| Shift + `+` / `-` | game speed up / down | - |
+| P | pause | same (the simulation only, `game_speed.rs`) |
+| Shift + `+` / `-` | game speed up / down | same (x1, x2, x4, x8) |
 | `+` / `-` | zoom in / out | - (wheel, Ctrl+PgUp/PgDn) |
 | F1 | encyclopedia | - |
 | Enter | world view / normal view | toggles aerial view |
@@ -113,5 +113,4 @@ Home/End tilt, PgUp/PgDn next level, G cell grid, W/A/S/D move, C casts the sele
 
 ## Conflicts
 Only in dev mode, where they stay: Space (the shaman), S, A, D (camera), X, C (orders), G (grid), Home, PgUp/PgDn
-and M, B (editor) take keys the original uses. `+` / `-` zoom and Shift + `+` / `-` set the speed: the game speed
-control (P, 1x-8x) follows that in both keymaps.
+and M, B (editor) take keys the original uses. P and Shift + `+` / `-` (pause, speed) are the same in both keymaps.

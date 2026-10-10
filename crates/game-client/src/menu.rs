@@ -8,6 +8,7 @@
 //! `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship` picks where to start (screenshots start in the game).
 
 use crate::camera::{GameCamera, OverlayCamera};
+use crate::game_speed::GameSpeed;
 use crate::hud::build::{level_builds, PlayerBuilds};
 use crate::hud::spells::{level_book, sandbox_book, PlayerSpells, SelectedSpell};
 use crate::units::selection::Selection;
@@ -61,6 +62,7 @@ pub enum Action {
     Back,
     Resume,
     ToggleDev,
+    CycleSpeed,
     Leave,
     Quit,
 }
@@ -71,6 +73,7 @@ pub enum Outcome {
     Start(Start),
     Resume,
     ToggleDev,
+    CycleSpeed,
     /// Leave the game for the main menu.
     Leave,
     Quit,
@@ -89,15 +92,16 @@ pub fn items(page: Page) -> &'static [(&'static str, Action)] {
     match page {
         Page::Main => &[("New game", Action::Start(Start::NewGame)), ("Sandbox", Action::Open(Page::Sandbox)), ("Quit", Action::Quit)],
         Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Units", Action::Start(Start::SandboxUnits)), ("Buildings", Action::Start(Start::SandboxBuildings)), ("Worship", Action::Start(Start::SandboxWorship)), ("Back", Action::Back)],
-        Page::Paused => &[("Resume", Action::Resume), ("Dev mode", Action::ToggleDev), ("Main menu", Action::Open(Page::ConfirmLeave))],
+        Page::Paused => &[("Resume", Action::Resume), ("Game speed", Action::CycleSpeed), ("Dev mode", Action::ToggleDev), ("Main menu", Action::Open(Page::ConfirmLeave))],
         Page::ConfirmLeave => &[("No, keep playing", Action::Back), ("Yes, back to the main menu", Action::Leave)],
     }
 }
 
-/// An entry's text; a toggle shows its state.
-pub fn label(entry: (&str, Action), dev: bool) -> String {
+/// An entry's text; a setting shows its value.
+pub fn label(entry: (&str, Action), dev: bool, speed: GameSpeed) -> String {
     match entry {
         (name, Action::ToggleDev) => format!("{name}: {}", if dev { "on" } else { "off" }),
+        (name, Action::CycleSpeed) => format!("{name}: x{}", speed.times),
         (name, _) => name.to_string(),
     }
 }
@@ -147,6 +151,7 @@ impl MenuNav {
             Action::Start(s) => Some(Outcome::Start(s)),
             Action::Resume => Some(Outcome::Resume),
             Action::ToggleDev => Some(Outcome::ToggleDev),
+            Action::CycleSpeed => Some(Outcome::CycleSpeed),
             Action::Leave => Some(Outcome::Leave),
             Action::Quit => Some(Outcome::Quit),
             Action::Open(p) => {
@@ -306,6 +311,7 @@ struct GameSetup<'w> {
     selected_spell: ResMut<'w, SelectedSpell>,
     grid: ResMut<'w, crate::world::ShowGrid>,
     dev: ResMut<'w, crate::keymap::DevMode>,
+    speed: ResMut<'w, GameSpeed>,
 }
 
 impl GameSetup<'_> {
@@ -359,6 +365,9 @@ fn apply(outcome: Option<Outcome>, game: &mut GameSetup, nav: &mut MenuNav, stat
         }
         Some(Outcome::ToggleDev) => {
             game.dev.0 = !game.dev.0;
+        }
+        Some(Outcome::CycleSpeed) => {
+            game.speed.cycle();
         }
         Some(Outcome::Leave) => {
             *nav = MenuNav::default();
@@ -431,15 +440,16 @@ fn rebuild_items(
     mut commands: Commands,
     nav: Res<MenuNav>,
     dev: Res<crate::keymap::DevMode>,
-    mut shown: Local<Option<(Page, bool)>>,
+    speed: Res<GameSpeed>,
+    mut shown: Local<Option<(Page, bool, GameSpeed)>>,
     lists: Query<Entity, With<MenuList>>,
     mut titles: Query<&mut Text, With<MenuTitle>>,
 ) {
     let page = nav.page();
-    if *shown == Some((page, dev.0)) {
+    if *shown == Some((page, dev.0, *speed)) {
         return;
     }
-    *shown = Some((page, dev.0));
+    *shown = Some((page, dev.0, *speed));
     for mut t in &mut titles {
         t.0 = title(page).to_string();
     }
@@ -453,7 +463,7 @@ fn rebuild_items(
                     BackgroundColor(ITEM),
                     BorderColor::all(Color::NONE),
                 ))
-                .with_child((Text::new(label(entry, dev.0)), TextFont { font_size: FontSize::Px(20.0), ..default() }, TextColor(TEXT)));
+                .with_child((Text::new(label(entry, dev.0, *speed)), TextFont { font_size: FontSize::Px(20.0), ..default() }, TextColor(TEXT)));
             }
         });
     }
@@ -511,11 +521,11 @@ mod tests {
     fn leaving_a_paused_game_asks_first() {
         let mut nav = MenuNav::at(Page::Paused);
         assert_eq!(nav.activate(), Some(Outcome::Resume), "Resume is first");
-        nav.step(2);
+        nav.step(3);
         assert_eq!(nav.activate(), None, "Main menu opens the confirmation");
         assert_eq!((nav.page(), nav.cursor()), (Page::ConfirmLeave, 0));
         assert_eq!(nav.activate(), None, "No (highlighted first) goes back");
-        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 2));
+        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 3));
         nav.activate();
         nav.step(1);
         assert_eq!(nav.activate(), Some(Outcome::Leave));
@@ -523,13 +533,17 @@ mod tests {
 
     #[test]
     fn dev_mode_toggles_from_the_pause_menu_and_shows_its_state() {
+        let normal = GameSpeed::default();
         let mut nav = MenuNav::at(Page::Paused);
-        nav.step(1);
+        nav.step(2);
         assert_eq!(nav.activate(), Some(Outcome::ToggleDev));
         assert_eq!(nav.page(), Page::Paused, "stays open to see the new state");
-        let entry = items(Page::Paused)[1];
-        assert_eq!((label(entry, true), label(entry, false)), ("Dev mode: on".to_string(), "Dev mode: off".to_string()));
-        assert_eq!(label(items(Page::Paused)[0], true), "Resume");
+        let entry = items(Page::Paused)[2];
+        assert_eq!((label(entry, true, normal), label(entry, false, normal)), ("Dev mode: on".to_string(), "Dev mode: off".to_string()));
+        assert_eq!(label(items(Page::Paused)[0], true, normal), "Resume");
+        nav.set_cursor(1);
+        assert_eq!(nav.activate(), Some(Outcome::CycleSpeed));
+        assert_eq!(label(items(Page::Paused)[1], true, GameSpeed { paused: false, times: 4 }), "Game speed: x4");
     }
 
     #[test]

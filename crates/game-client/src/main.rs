@@ -14,6 +14,7 @@ mod editor;
 mod effects;
 mod flame;
 mod game_frame;
+mod game_speed;
 mod generated_buildings;
 mod grounded;
 mod hover;
@@ -88,6 +89,7 @@ fn main() {
             hud::HudPlugin,
             menu::MenuPlugin,
             keymap::KeymapPlugin,
+            game_speed::GameSpeedPlugin,
             dev::DevPlugin,
             cursor_debug::CursorDebugPlugin,
             camera_debug::CameraDebugPlugin,

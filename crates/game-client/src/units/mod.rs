@@ -23,7 +23,9 @@ use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use crate::game_speed::GameSpeed;
 use crate::sim_time::{progress, TICK_SECS};
+use game_core::time::Ticks;
 use game_core::unit::{Action, Unit, UnitKind};
 use selection::Selection;
 use pop3_format::WORLD_UNITS_PER_CELL;
@@ -45,17 +47,41 @@ const PULL_TO_EYE: f32 = 0.6;
 /// How far (cells) a unit up a lookout is pulled towards the camera, out of the tower's middle.
 pub const PERCH_PULL: f32 = 0.7;
 
+/// Tick times run at most per frame: past that a slow frame drops time instead of catching up.
+const MAX_CATCH_UP: u32 = 4;
+
 /// Fixed-step simulation clock, plus what the views need to draw between two ticks.
 #[derive(Resource, Default)]
 pub struct SimClock {
     acc: f32,
-    /// Unit positions before the last tick, to glide between ticks.
+    /// Unit positions before the last ticks run, to glide between them.
     prev: Vec<(u16, u16)>,
-    /// Seconds since start, drives looping animations.
+    /// Game seconds since start (scaled by the speed, stopped while paused), drives looping animations.
     pub anim_secs: f32,
+    /// Ticks run this frame.
+    pub ran: u32,
 }
 
 impl SimClock {
+    /// Ticks to run for a frame of `dt` seconds: whole tick times elapsed (at most `MAX_CATCH_UP`), each
+    /// running `speed.ticks_per_step()` ticks. Paused, time stands still and nothing runs.
+    pub fn steps_due(&mut self, dt: f32, speed: GameSpeed) -> u32 {
+        let per_step = speed.ticks_per_step();
+        self.ran = 0;
+        if per_step == 0 {
+            return 0;
+        }
+        self.anim_secs += dt * per_step as f32;
+        self.acc += dt;
+        let due = (self.acc / TICK_SECS) as u32;
+        self.acc -= due as f32 * TICK_SECS;
+        if due > MAX_CATCH_UP {
+            self.acc = 0.0;
+        }
+        self.ran = due.min(MAX_CATCH_UP) * per_step;
+        self.ran
+    }
+
     /// Fraction of the current tick elapsed, 0..1.
     pub fn alpha(&self) -> f32 {
         (self.acc / TICK_SECS).clamp(0.0, 1.0)
@@ -143,6 +169,10 @@ pub fn sprite_quad(size: Vec2, origin: Vec2) -> Mesh {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnitInput;
 
+/// The simulation's ticks for this frame (`SimClock::ran`): what follows the map's time runs after it.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SimStep;
+
 /// Unit sprites take this frame's picture: halos and overlays drawn from them come after.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnitViews;
@@ -155,7 +185,7 @@ impl Plugin for UnitsPlugin {
             .init_resource::<UnitSprites>()
             .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin))
             .add_systems(Startup, load_sprites)
-            .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks, respawn_views, animate_views.in_set(UnitViews)).chain().in_set(crate::menu::Gameplay))
+            .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks.in_set(SimStep), respawn_views, animate_views.in_set(UnitViews)).chain().in_set(crate::menu::Gameplay))
             .add_systems(PostUpdate, pull_to_eye.before(TransformSystems::Propagate));
     }
 }
@@ -221,15 +251,13 @@ pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<M
     FrameAsset { image, mesh: meshes.add(sprite_quad(size, origin)), material, size, origin }
 }
 
-fn run_ticks(time: Res<Time>, mut clock: ResMut<SimClock>, mut map: ResMut<CurrentMap>, mut dirty: ResMut<TerrainDirty>) {
-    clock.anim_secs += time.delta_secs();
-    clock.acc += time.delta_secs();
+fn run_ticks(time: Res<Time>, speed: Res<GameSpeed>, mut clock: ResMut<SimClock>, mut map: ResMut<CurrentMap>, mut dirty: ResMut<TerrainDirty>) {
+    let ticks = clock.steps_due(time.delta_secs(), *speed);
     let mut levelled = false;
-    while clock.acc >= TICK_SECS {
-        clock.acc -= TICK_SECS;
+    if ticks > 0 {
         let map = map.bypass_change_detection();
         clock.prev = map.0.units.iter().map(|u| (u.x, u.z)).collect();
-        levelled |= !map.0.tick().is_empty();
+        levelled = !map.0.run(Ticks::new(ticks)).is_empty();
     }
     if levelled {
         dirty.0 = true;
@@ -408,6 +436,28 @@ fn pull_to_eye(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_clock_runs_whole_tick_times_at_the_game_speed() {
+        let normal = GameSpeed::default();
+        let mut c = SimClock::default();
+        assert_eq!(c.steps_due(TICK_SECS * 0.5, normal), 0);
+        assert!((c.alpha() - 0.5).abs() < 1e-4);
+        assert_eq!(c.steps_due(TICK_SECS * 0.6, normal), 1);
+        assert_eq!(c.steps_due(TICK_SECS * 2.0, GameSpeed { paused: false, times: 4 }), 8, "two tick times, 4 ticks each");
+        assert_eq!(c.ran, 8);
+    }
+
+    #[test]
+    fn paused_time_stands_still_and_a_slow_frame_drops_its_backlog() {
+        let mut c = SimClock::default();
+        c.steps_due(TICK_SECS * 0.3, GameSpeed::default());
+        let (alpha, anim) = (c.alpha(), c.anim_secs);
+        assert_eq!(c.steps_due(5.0, GameSpeed { paused: true, times: 1 }), 0);
+        assert_eq!((c.alpha(), c.anim_secs, c.ran), (alpha, anim, 0));
+        assert_eq!(c.steps_due(5.0, GameSpeed::default()), MAX_CATCH_UP);
+        assert_eq!(c.steps_due(TICK_SECS * 0.5, GameSpeed::default()), 0, "the backlog is gone");
+    }
 
     #[test]
     fn units_inside_hide_unless_walking_through_the_door() {

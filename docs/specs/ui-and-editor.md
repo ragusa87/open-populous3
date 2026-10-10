@@ -74,7 +74,7 @@ be cast; badge "paused", grey frozen bar. Right click again resumes. Spells cast
 for now) are aimed with the mouse while selected: over the map the cursor becomes the animated gold arrow with the spell's icon on its right, the icon grayed out
 where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground), left click casts it there and puts
 the spell away (arrow cursor, clicks go back to the units' selection), right click puts it away without casting; meanwhile clicks do not select or move units. The others: `C`
-casts the selected spell (demo: consumes a charge and the shaman does her cast jump). Mana: every 0.1 s each recharging spell gets 8 mana (`MANA_PER_TICK`).
+casts the selected spell (demo: consumes a charge and the shaman does her cast jump). Mana: each simulation tick every recharging spell gets 7 mana (`MANA_PER_TICK`), so it stops while paused.
 Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build tab icons
 
 ### Build tab (`hud/build.rs`)
@@ -123,12 +123,21 @@ Sandbox > Walk, Units, Buildings, Worship (the ground of every sandbox shows a g
 facing the shaman, and north one totem of each look with 8 braves, worship.md), Quit.
 Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
 Esc in the game (once an open view-presets menu is closed) pauses: the mouse is released (`VirtualCursor::request`)
-and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Dev mode: on/off (shortcuts.md), Main menu >
+and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Game speed: x1/x2/x4/x8 (cycles), Dev mode: on/off (shortcuts.md), Main menu >
 "Leave this game?" No / Yes.
 Resuming or starting a game captures the mouse again.
 `AppState::Menu | Playing | Paused`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
 while playing. Behind the menu the game camera is off (no terrain, units or HUD drawn); the menu and the cursor
 are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship` picks the start; screenshots start in the game by default.
+
+## Game speed (`game_speed.rs`)
+P pauses the simulation only: the camera, hovering, selecting and the HUD keep working, units and their
+animations stand still (`SimClock::anim_secs` stops, the glide between ticks holds). Shift + `+` / `-` (or the
+numpad's) step the speed through x1, x2, x4, x8 and resume; the pause menu's Game speed entry cycles it;
+`GAME_SPEED=0|1|2|4|8` sets the start. A label at the top of the view says "Paused" or "Speed xN" when not x1.
+The clock (`SimClock::steps_due`) runs whole tick times (1/12 s), each running the speed's number of ticks, at
+most 4 tick times a frame (a slow frame drops the rest rather than catching up); units glide from where they were
+before the frame's ticks. Purely visual motion (flames, swaying, blinking, dust puffs) keeps real time.
 
 ## Selection and orders
 Left click on a vault of knowledge with the shaman selected sends her to pray at it (worship.md). Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect (Shift + right click puts out the player's camp fire under the cursor, or cancels the player's plan not flat yet);

@@ -41,6 +41,9 @@ pub enum Shortcut {
     Editor,
     ViewPresets,
     CameraReadout,
+    Pause,
+    Faster,
+    Slower,
 }
 
 /// A key on the keyboard, or a character wherever the layout puts it (`>`).
@@ -104,6 +107,9 @@ fn original_bindings(shortcut: Shortcut) -> &'static [Binding] {
         LookAtShaman => &[Binding { input: Input::Char(">"), mods: NONE }],
         LookAtSite => &[key!(KeyH, NONE)],
         TurnPlan => &[key!(Space, NONE)],
+        Pause => &[key!(KeyP, NONE)],
+        Faster => &[key!(Equal, SHIFT), key!(NumpadAdd, SHIFT)],
+        Slower => &[key!(Minus, SHIFT), key!(NumpadSubtract, SHIFT)],
         TiltUp | TiltDown | FovWider | FovNarrower | Stop | CastSelf | NextLevel | PreviousLevel | Grid | Editor
         | ViewPresets | CameraReadout => &[],
     }
@@ -136,6 +142,9 @@ fn dev_bindings(shortcut: Shortcut) -> &'static [Binding] {
         Editor => &[key!(Tab, NONE)],
         ViewPresets => &[key!(F2, NONE)],
         CameraReadout => &[key!(F3, NONE)],
+        Pause => &[key!(KeyP, NONE)],
+        Faster => &[key!(Equal, SHIFT), key!(NumpadAdd, SHIFT)],
+        Slower => &[key!(Minus, SHIFT), key!(NumpadSubtract, SHIFT)],
     }
 }
 
@@ -196,12 +205,12 @@ impl Plugin for KeymapPlugin {
 mod tests {
     use super::*;
 
-    const ALL: [Shortcut; 24] = {
+    const ALL: [Shortcut; 27] = {
         use Shortcut::*;
         [
             Forward, Back, StrafeLeft, StrafeRight, RotateLeft, RotateRight, TiltUp, TiltDown, ZoomIn, ZoomOut, FovWider,
             FovNarrower, Aerial, LookAtShaman, LookAtSite, TurnPlan, Stop, CastSelf, NextLevel, PreviousLevel, Grid,
-            Editor, ViewPresets, CameraReadout,
+            Editor, ViewPresets, CameraReadout, Pause, Faster, Slower,
         ]
     };
 
@@ -219,6 +228,14 @@ mod tests {
         assert!(fires(true, Shortcut::PreviousLevel, page_up, NONE));
         assert!(!fires(true, Shortcut::PreviousLevel, page_up, CTRL));
         assert!(fires(true, Shortcut::ZoomIn, page_up, CTRL));
+    }
+
+    #[test]
+    fn shift_plus_minus_set_the_speed_plain_ones_zoom() {
+        let plus = Input::Code(KeyCode::Equal);
+        assert!(fires(false, Shortcut::ZoomIn, plus, NONE) && !fires(false, Shortcut::Faster, plus, NONE));
+        assert!(fires(false, Shortcut::Faster, plus, SHIFT) && !fires(false, Shortcut::ZoomIn, plus, SHIFT));
+        assert!(fires(true, Shortcut::Pause, Input::Code(KeyCode::KeyP), NONE), "in both keymaps");
     }
 
     #[test]

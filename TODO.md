@@ -149,7 +149,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spell and building icons, tooltips.
 - [ ] Vehicles fill the In boat / In balloon rows (`headcount::State::InBoat`, `InBalloon`, always 0 for now).
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
-- [ ] Original keymap ([shortcuts.md](docs/specs/shortcuts.md), dev mode off): add the missing shortcuts (P pause, Shift +/- speed, F1, S status, groups 1-6, camera points Z/X/C/V, `\\` track, Shift+Enter, Space skips the fly-by), and a way to stop and cast self spells without the dev keys.
+- [ ] Original keymap ([shortcuts.md](docs/specs/shortcuts.md), dev mode off): add the missing shortcuts (F1, S status, groups 1-6, camera points Z/X/C/V, `\\` track, Shift+Enter, Space skips the fly-by), and a way to stop and cast self spells without the dev keys.
 
 ## Tooltips ([tooltips.md](docs/specs/tooltips.md))
 - [ ] Rendered tooltip: done for buildings, trees and totems (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks, right click at once); the toggle to add.
@@ -174,6 +174,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Turn scheduler with 2-3 turns input delay; local input goes through it instead of `GameMap::apply` directly.
 - [ ] Host/join UI, lobby, reconnect.
 - [ ] Desync checksum of heightmap + units.
+- [ ] Pause and game speed as `Command`s, so every peer agrees (single player only today, `game_speed.rs`).
 
 ## Original sprites and blending ([sprites.md](docs/specs/sprites.md))
 - [ ] Spell effects from the alpha sprites (`hfx0-0.dat`, decoded by `blend::AlphaTable`, blended on the GPU): map each effect to its frames (sprites.md).
