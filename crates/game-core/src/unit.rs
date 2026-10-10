@@ -115,27 +115,6 @@ impl UnitKind {
     }
 }
 
-/// Where a tumbling unit is, which picks its pose.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Tumble {
-    /// In the air (`lift` > 0).
-    Flying,
-    /// On walkable ground.
-    Rolling,
-    /// On ground nobody walks on (a cliff, a building).
-    Sliding,
-}
-
-impl Tumble {
-    pub fn of(lift: u16, walkable: bool) -> Self {
-        match (lift, walkable) {
-            (1.., _) => Tumble::Flying,
-            (0, true) => Tumble::Rolling,
-            (0, false) => Tumble::Sliding,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Idle,
@@ -151,8 +130,8 @@ pub enum Action {
     /// The ground under her is sea: loses health until dead or the land comes back.
     Drowning,
     /// Flung through the air or rolling on the ground by a spell, moved by `Unit::velocity` at
-    /// `Unit::lift`: no orders until still on the ground again. `on` is updated every tick.
-    Tumbling { on: Tumble },
+    /// `Unit::lift`: no orders until still on the ground again.
+    Tumbling,
     Dying { left: Countdown },
     /// Waiting to reincarnate at her site.
     Dead { left: Countdown },
@@ -187,7 +166,7 @@ impl Action {
             Action::Casting { .. } => "Casting",
             Action::Landing { .. } => "Landing",
             Action::Drowning => "Drowning",
-            Action::Tumbling { .. } => "Tumbling",
+            Action::Tumbling => "Tumbling",
             Action::Dying { .. } => "Dying",
             Action::Dead { .. } => "Dead",
             Action::AroundFire { .. } => "Around the fire",
@@ -216,7 +195,7 @@ impl Action {
     }
 
     fn can_take_orders(&self) -> bool {
-        !matches!(self, Action::Drowning | Action::Tumbling { .. } | Action::Dying { .. } | Action::Dead { .. })
+        !matches!(self, Action::Drowning | Action::Tumbling | Action::Dying { .. } | Action::Dead { .. })
     }
 }
 
@@ -615,12 +594,10 @@ impl Unit {
                 }
             }
             Action::Landing { mut left } => self.action = if left.tick() { Action::Idle } else { Action::Landing { left } },
-            Action::Tumbling { .. } => {
-                self.action = if self.lift == 0 && self.velocity.is_zero() {
-                    Action::Idle
-                } else {
-                    Action::Tumbling { on: Tumble::of(self.lift, ground.passable(self.mobility(), self.cell())) }
-                };
+            Action::Tumbling => {
+                if self.lift == 0 && self.velocity.is_zero() {
+                    self.action = Action::Idle;
+                }
             }
             Action::Drowning => {
                 if self.health.damage(DROWN_DAMAGE) {
@@ -1098,34 +1075,17 @@ mod tests {
     fn tumbling_takes_no_orders_and_settles_once_still_on_the_ground() {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
-        u.action = Action::Tumbling { on: Tumble::Flying };
+        u.action = Action::Tumbling;
         (u.velocity, u.lift) = (Velocity::new(10, 0, 0), 30);
         u.order(Order::MoveTo { x: 0, z: 0 });
         run(&mut u, &t, &site, 3);
-        assert_eq!(u.action, Action::Tumbling { on: Tumble::Flying }, "no orders, still moving");
+        assert_eq!(u.action, Action::Tumbling, "no orders, still moving");
         u.lift = 0;
         run(&mut u, &t, &site, 1);
-        assert_eq!(u.action, Action::Tumbling { on: Tumble::Rolling });
+        assert_eq!(u.action, Action::Tumbling, "rolling on the ground");
         u.velocity = Velocity::ZERO;
         run(&mut u, &t, &site, 1);
         assert_eq!(u.action, Action::Idle);
-    }
-
-    #[test]
-    fn tumble_from_lift_and_ground() {
-        assert_eq!([Tumble::of(5, true), Tumble::of(5, false)], [Tumble::Flying; 2]);
-        assert_eq!([Tumble::of(0, true), Tumble::of(0, false)], [Tumble::Rolling, Tumble::Sliding]);
-    }
-
-    #[test]
-    fn slides_down_a_cliff() {
-        let mut t = land();
-        let (mut u, site) = shaman_at((10, 10));
-        let (cx, cz) = u.cell();
-        t.set(cx + 1, cz, 1000);
-        (u.action, u.velocity) = (Action::Tumbling { on: Tumble::Flying }, Velocity::new(0, -5, 0));
-        run(&mut u, &t, &site, 1);
-        assert_eq!(u.action, Action::Tumbling { on: Tumble::Sliding });
     }
 
     #[test]
@@ -1133,9 +1093,9 @@ mod tests {
         let mut t = land();
         let (mut u, site) = shaman_at((10, 10));
         sea_cell(&mut t, u.cell());
-        (u.action, u.lift) = (Action::Tumbling { on: Tumble::Flying }, 50);
+        (u.action, u.lift) = (Action::Tumbling, 50);
         run(&mut u, &t, &site, 1);
-        assert_eq!((u.action, u.health.is_full()), (Action::Tumbling { on: Tumble::Flying }, true));
+        assert_eq!((u.action, u.health.is_full()), (Action::Tumbling, true));
         u.lift = 0;
         run(&mut u, &t, &site, 1);
         assert_eq!(u.action, Action::Drowning);

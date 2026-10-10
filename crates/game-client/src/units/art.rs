@@ -86,7 +86,7 @@ pub fn pose_for(action: &Action, carrying: bool) -> Pose {
         Action::Stranded { .. } => Pose::Stranded,
         Action::Worshipping { .. } => Pose::Pray,
         Action::Casting { .. } => Pose::Cast,
-        Action::Drowning | Action::Tumbling { .. } => Pose::Drown,
+        Action::Drowning | Action::Tumbling => Pose::Drown,
         Action::Dying { .. } | Action::Dead { .. } => Pose::Fall,
     }
 }
