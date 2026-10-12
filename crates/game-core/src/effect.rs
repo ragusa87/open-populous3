@@ -24,6 +24,7 @@ pub struct Effect {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EffectKind {
+    SimpleBlast(crate::blast::SimpleBlast),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -60,9 +61,10 @@ impl Effect {
     }
 
     /// One turn at `now`: its work on its own rhythm, then one turn less to go.
-    #[allow(unused_variables, unreachable_code)]
+    #[allow(unused_variables)]
     pub fn tick(&mut self, now: Tick, world: &GameMap, rng: &mut Lcg) -> Vec<EffectEvent> {
         let events = match self.kind {
+            EffectKind::SimpleBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), world),
         };
