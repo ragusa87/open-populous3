@@ -47,7 +47,9 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
 ## Attacking
 - `Order::Attack { target }` (`Target::Unit` or `Target::Building`), from a left click on an enemy person or
   building with own people selected (`units::selection::attack_click`). Only those that may attack it go
-  (`attack::may_attack`): both fight (never a wildman), other tribes, the target alive. Firewarriors take no attack
+  (`attack::may_attack`): both fight (never a wildman), other tribes, the target alive. A building only if it
+  belongs to another tribe and wears down (`may_attack_building`): never a neutral one (a vault of knowledge, a
+  totem), which is prayed at; a click on it gives the prayer orders as before. Firewarriors take no attack
   order yet: theirs throws fire from afar (TODO).
 - `Action::Attacking { target, to }`: walks a path to `to`, the person or the building's door, and stands there.
   Each turn before the coordinators `GameMap::tend_attacks` aims `to` at where the target is, planning again once it

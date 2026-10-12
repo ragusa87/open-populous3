@@ -10,9 +10,10 @@ pub fn may_attack(attacker: &Unit, target: &Unit) -> bool {
     fights(attacker.kind) && target.kind.stats().fights && attacker.owner != target.owner && target.is_alive()
 }
 
-/// Whether `attacker` may go for the building `b`: another tribe's.
+/// Whether `attacker` may go for the building `b`: another tribe's, one that wears down. Never a neutral building
+/// (a vault of knowledge): those are prayed at.
 pub fn may_attack_building(attacker: &Unit, b: &Building) -> bool {
-    fights(attacker.kind) && attacker.owner != b.owner
+    fights(attacker.kind) && attacker.owner != b.owner && (b.owner as usize) < crate::totem::TRIBES && crate::wreck::wear_limit(b.kind).is_some()
 }
 
 /// Kinds that take an attack order. Not the firewarrior yet: its own attack throws fire from afar (TODO).
@@ -105,6 +106,17 @@ mod tests {
         let own = map.spawn(0, UnitKind::Brave, (0, 0)).id;
         attack(&mut map, a, own);
         assert_eq!(map.unit(a).unwrap().action, Action::Idle);
+    }
+
+    #[test]
+    fn neutral_buildings_are_prayed_at_not_attacked() {
+        let (mut map, a, _) = duel(UnitKind::Warrior, UnitKind::Brave);
+        let vault = map.add_building(Building::new(crate::building::BuildingKind::Vault, 255, 70 * 512, 70 * 512, 0));
+        let neutral_hut = map.add_building(Building::new(crate::building::BuildingKind::Hut { size: 1 }, 255, 80 * 512, 80 * 512, 0));
+        for b in [vault, neutral_hut] {
+            map.go_attack(map.unit_index(a).unwrap(), Target::Building(b));
+            assert_eq!(map.unit(a).unwrap().action, Action::Idle);
+        }
     }
 
     #[test]

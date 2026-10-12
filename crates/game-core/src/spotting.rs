@@ -97,7 +97,7 @@ impl GameMap {
         let centre = crate::slots::cell_centre(cell);
         self.buildings
             .iter()
-            .find(|b| b.covers(centre, 0) && crate::wreck::wear_limit(b.kind).is_some() && (b.owner as usize) < crate::totem::TRIBES && crate::attack::may_attack_building(u, b))
+            .find(|b| b.covers(centre, 0) && crate::attack::may_attack_building(u, b))
             .map(|b| b.id)
     }
 }
