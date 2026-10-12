@@ -7,7 +7,8 @@ Tags: **[player]** how the game plays, as told by someone who played it, **[code
 **[ours]** a choice made here, to check.
 
 ## Showing
-- After resting the cursor `HOVER_SECS` (1.5 s) on a hovered thing, or at once on a right click on it [code].
+- After resting the cursor `HOVER_SECS` (1.5 s) on a hovered thing, or at once on a right click on it, or a
+  left click with nothing selected [code].
   One tooltip at a time, for one `tooltip::Target` (a building, a tree or a totem for now).
 - It does not follow the mouse: it stands **above the hovered element**, centred over the top of its model, and
   stays there [player]. It stays shown while the cursor is on the element or on the tooltip itself, and hides once
@@ -103,6 +104,7 @@ With the original files: 60, 61 hovered, 62 pressed.
 | Vehicle | people aboard | | | unload button |
 | Tree | | current wood | | |
 | Wood piece | name only ("Wood") | | | |
+| Another tribe's building | its name only; clicked (left with nothing selected, or right), its people row too: who is in, not selectable [player] | | | |
 | Camp fire | who is round it [ours: to define] | | | |
 | Unit | no box: its health bar is its tooltip (units.md) | | | |
 | Spy | a spy indicator instead of its disguise (units.md) | | | |

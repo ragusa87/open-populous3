@@ -168,9 +168,10 @@ fn reward_name(reward: Reward) -> String {
 }
 
 /// Building `i`'s tooltip: its name; a pyramid also what it teaches (until granted) and its shaman
-/// place; the player's buildings that take wood their people and wood rows; other buildings their
-/// name only. People among `selected` are marked.
-pub fn building_model(map: &GameMap, i: usize, selected: &[u32]) -> TooltipModel {
+/// place; the player's buildings that take wood their people and wood rows; other tribes' buildings
+/// their name only, and once `revealed` (clicked) who is in them, not selectable. People among
+/// `selected` are marked.
+pub fn building_model(map: &GameMap, i: usize, selected: &[u32], revealed: bool) -> TooltipModel {
     let b = &map.buildings[i];
     let mut model = TooltipModel { lines: vec![b.kind.name()], ..default() };
     let holder = Holder::Building(i);
@@ -184,7 +185,14 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[u32]) -> TooltipModel
         }
         return model;
     }
-    if b.owner != crate::units::PLAYER || b.kind.wood_cost() == 0 {
+    if b.owner != crate::units::PLAYER {
+        if revealed {
+            let unselectable = |row: Vec<Slot>| row.into_iter().map(|s| Slot { unit: None, selected: false, ..s }).collect();
+            model.rows.extend(map.people_slots(holder).map(|p| unselectable(people_row(map, &p, UnitKind::Brave, &[]))));
+        }
+        return model;
+    }
+    if b.kind.wood_cost() == 0 {
         return model;
     }
     model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Brave, selected)));
@@ -210,9 +218,9 @@ pub fn totem_model(map: &GameMap, i: usize, selected: &[u32]) -> Option<TooltipM
 }
 
 /// What `target` shows; None when it has nothing to show.
-fn model_of(map: &GameMap, target: Target, selected: &[u32]) -> Option<TooltipModel> {
+fn model_of(map: &GameMap, target: Target, selected: &[u32], revealed: bool) -> Option<TooltipModel> {
     match target {
-        Target::Building(i) => (i < map.buildings.len()).then(|| building_model(map, i, selected)),
+        Target::Building(i) => (i < map.buildings.len()).then(|| building_model(map, i, selected, revealed)),
         Target::Tree(i) => tree_model(map, i),
         Target::Totem(i) => totem_model(map, i, selected),
     }
@@ -418,11 +426,12 @@ struct TooltipBox;
 #[derive(Component)]
 struct SlotUnit(u32);
 
-/// What the tooltip shows, since when the cursor is on the thing under it (and whether it was
-/// right-clicked), and since when the shown thing and the tooltip lost the cursor.
+/// What the tooltip shows (`revealed`: clicked, see `building_model`), since when the cursor is on the
+/// thing under it (and whether it was clicked), and since when the shown thing and the tooltip lost the cursor.
 #[derive(Default)]
 struct TooltipState {
     shown: Option<Target>,
+    revealed: bool,
     model: Option<TooltipModel>,
     hovered_since: (Option<Target>, f32, bool),
     lost_at: Option<f32>,
@@ -449,7 +458,8 @@ fn spawn_tooltip(mut commands: Commands) {
     ));
 }
 
-/// The tooltip of the building or tree under the cursor once rested on for `HOVER_SECS` or right-clicked,
+/// The tooltip of the building or tree under the cursor once rested on for `HOVER_SECS`, right-clicked or
+/// left-clicked with nothing selected (which also reveals who is in another tribe's building),
 /// above it, kept while the cursor is on it or on the tooltip (`sticky`), redrawn when its model changes.
 #[allow(clippy::too_many_arguments)]
 fn show_tooltip(
@@ -481,14 +491,17 @@ fn show_tooltip(
     if target != state.hovered_since.0 {
         state.hovered_since = (target, now, false);
     }
-    state.hovered_since.2 |= target.is_some() && mouse.just_pressed(MouseButton::Right);
+    let clicked = target.is_some() && (mouse.just_pressed(MouseButton::Right) || (mouse.just_pressed(MouseButton::Left) && selection.units.is_empty()));
+    state.hovered_since.2 |= clicked;
     let over = state.shown.is_some() && *interaction != Interaction::None;
     let holding = over || (target.is_some() && target == state.shown);
     state.lost_at = if holding { None } else { state.lost_at.or(Some(now)) };
     let rested = state.hovered_since.2 || now - state.hovered_since.1 >= crate::nature::HOVER_SECS;
     let lost_for = state.lost_at.map_or(0.0, |t| now - t);
+    let before = state.shown;
     state.shown = sticky(state.shown, target, rested, over, lost_for);
-    let model = state.shown.and_then(|t| model_of(&map.0, t, &selection.units));
+    state.revealed = (state.revealed && state.shown == before) || (clicked && state.shown == target);
+    let model = state.shown.and_then(|t| model_of(&map.0, t, &selection.units, state.revealed));
     let anchor = state.shown.and_then(|t| {
         let (cam, cam_t) = cams.single().ok()?;
         let top = match t {
@@ -693,12 +706,12 @@ mod tests {
         let brave = map.units.iter().find(|u| u.kind == UnitKind::Brave).unwrap().id;
         map.apply(&game_core::command::Command::OrderUnit { player: 0, unit: brave, order: game_core::unit::Order::Build { site: (88 * 512, 64 * 512) } });
         (map.buildings[site].stock, map.buildings[site].used) = (1, 1);
-        let model = building_model(&map, site, &[]);
+        let model = building_model(&map, site, &[], false);
         assert_eq!(model.lines, vec!["Hut 1".to_string()]);
         let people = &model.rows[0];
         assert_eq!(people.len(), 6, "max braves");
         assert_eq!(people[0], Slot { icon: Icon::Unit { kind: UnitKind::Brave, tribe: 0 }, unit: Some(brave), selected: false }, "a click selects him");
-        assert!(building_model(&map, site, &[brave]).rows[0][0].selected, "marked once selected");
+        assert!(building_model(&map, site, &[brave], false).rows[0][0].selected, "marked once selected");
         assert_eq!(people[1], Slot { icon: Icon::Placeholder(UnitKind::Brave), unit: None, selected: false });
         assert_eq!(icons(&model.rows[1]), vec![Icon::Wood, Icon::Wood, Icon::NoWood], "2 of 3 provided, nothing to select");
         assert!(model.rows[1].iter().all(|s| s.unit.is_none()));
@@ -708,11 +721,28 @@ mod tests {
     fn a_full_hut_and_others_buildings() {
         let map = GameMap::sandbox_buildings();
         let busy = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside > 0).unwrap();
-        let model = building_model(&map, busy, &[]);
+        let model = building_model(&map, busy, &[], false);
         assert!(model.rows[0].iter().all(|s| matches!(s.icon, Icon::Unit { .. }) && s.unit.is_some()), "3 inside out of 3");
         assert_eq!(icons(&model.rows[1]), vec![Icon::Wood; 3], "the wood in it");
         let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();
-        assert!(building_model(&map, red, &[]).rows.is_empty(), "not theirs: the name only");
+        assert!(building_model(&map, red, &[], false).rows.is_empty(), "not theirs: the name only");
+    }
+
+    #[test]
+    fn a_clicked_building_of_another_tribe_shows_who_is_in_not_selectable() {
+        let mut map = GameMap::sandbox_buildings();
+        let red = map.buildings.iter().position(|b| b.owner == 1 && b.stage() == Stage::Built && game_core::occupancy::room(b.kind) > 0).unwrap();
+        let id = map.buildings[red].id;
+        let model = building_model(&map, red, &[], true);
+        assert_eq!(model.lines, vec![map.buildings[red].kind.name()]);
+        assert!(model.rows[0].iter().all(|s| s.icon == Icon::Placeholder(UnitKind::Brave)), "empty: its places");
+        let unit = map.units.iter().position(|u| u.kind == UnitKind::Brave && u.is_alive()).unwrap();
+        (map.units[unit].owner, map.units[unit].action) = (1, game_core::unit::Action::Idle);
+        map.units[unit].inside = Some(game_core::unit::Inside { building: id, door: map.buildings[red].door() });
+        let row = &building_model(&map, red, &[map.units[unit].id], true).rows[0];
+        assert!(matches!(row[0].icon, Icon::Unit { tribe: 1, .. }), "the unit inside");
+        assert!(row.iter().all(|s| s.unit.is_none() && !s.selected), "not ours to select");
+        assert_eq!(building_model(&map, red, &[], true).toggle, None);
     }
 
     #[test]
@@ -720,30 +750,30 @@ mod tests {
         let mut map = GameMap::sandbox_buildings();
         let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
         let building = map.buildings[hut].id;
-        let toggle = building_model(&map, hut, &[]).toggle.expect("built: dismantle");
+        let toggle = building_model(&map, hut, &[], false).toggle.expect("built: dismantle");
         assert_eq!(toggle, Toggle { building, on: false });
         assert_eq!(toggle.look(), (DISMANTLE_BUTTON, "Dismantle"));
         map.apply(&toggle.command());
-        let toggle = building_model(&map, hut, &[]).toggle.unwrap();
+        let toggle = building_model(&map, hut, &[], false).toggle.unwrap();
         assert_eq!((toggle.on, toggle.look()), (true, (REBUILD_BUTTON, "Rebuild")));
         let plan = map.buildings.iter().position(|b| b.owner == 0 && b.stage() == Stage::Blueprint).unwrap();
-        assert_eq!(building_model(&map, plan, &[]).toggle, None, "a plan is cancelled instead");
+        assert_eq!(building_model(&map, plan, &[], false).toggle, None, "a plan is cancelled instead");
         let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();
-        assert_eq!(building_model(&map, red, &[]).toggle, None);
+        assert_eq!(building_model(&map, red, &[], false).toggle, None);
     }
 
     #[test]
     fn a_pyramid_names_its_reward_until_granted_and_has_a_shaman_place() {
         let mut map = GameMap::sandbox_worship();
         let v = map.buildings.iter().position(|b| b.kind == BuildingKind::Vault).unwrap();
-        let model = building_model(&map, v, &[]);
+        let model = building_model(&map, v, &[], false);
         assert_eq!(model.lines[1], "Teaches: Temple");
         assert_eq!(model.rows, vec![vec![Slot { icon: Icon::Placeholder(UnitKind::Shaman), unit: None, selected: false }]]);
         assert_eq!(model.bars, vec![Bar { kind: BarKind::Prayer, fill: 0, blocked: false }], "prayer bar, empty");
         map.buildings[v].vault.as_mut().unwrap().phase = game_core::vault::VaultPhase::Praying { progress: 60 * game_core::gauge::STEP };
-        assert_eq!(building_model(&map, v, &[]).bars[0].fill, 600, "60 of 100");
+        assert_eq!(building_model(&map, v, &[], false).bars[0].fill, 600, "60 of 100");
         map.buildings[v].vault.as_mut().unwrap().grant();
-        let spent = building_model(&map, v, &[]);
+        let spent = building_model(&map, v, &[], false);
         assert_eq!((spent.lines.len(), spent.rows.len(), spent.bars.len()), (1, 0, 0), "granted: its name only");
     }
 

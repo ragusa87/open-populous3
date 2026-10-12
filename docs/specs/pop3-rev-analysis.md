@@ -648,7 +648,7 @@ otherwise:
 - Example: an earthquake's drop of up to 600 under a person: it falls for about 6 turns (0.5 s) and lands at
   about −190, below the fall-damage threshold even in the blown mode.
 
-## Combat [ghidra]
+## Combat [exe]
 - Internal controller units (class 10):
 
 | Type | Role |
@@ -658,11 +658,130 @@ otherwise:
 | 10/0xA | guard control |
 | 10/4, 10/0xC | soul convert |
 
-  A melee is probably one fight controller that its participants link to. Melee damage per hit is
-  `max(32, FIGHT_DAMAGE_<type> × hp / max_hp)` (× `BLOODLUST_DAMAGE_X` when bloodlusted, 0x4A39C0) [exe];
-  the rest of the fight is not traced.
 - Per person type, the constants hold `LIFE_`, `FIGHT_DAMAGE_`, `CONV_`, `SW_BLAST_DAMAGE_` and the tower detection
   radius (see "Constant table").
+- A melee is two controllers in sequence. A **pre-fight** (10/9) pairs one attacker with one target: the attacker
+  runs up, kicks the target away without damage, runs up again, then the pre-fight turns into a **fight** (10/8).
+  A fight holds up to 6 people in a ring and is where all the health is lost. People in a pre-fight are in person
+  state 29 (0x1D), in a fight in state 25 (0x19); both link to their controller by `+0x9D`.
+- Ranged fighting is not part of these controllers: firewarriors (type 6, person-type flag `+0x30` bit 0x40) can
+  never take a fight slot, and their attack order uses its own approach sub-states (10, 11) instead of 2, 3
+  (0x51BC2E), presumably to throw fire from a distance (not traced).
+
+### Starting a melee (the attack-order handler, 0x51A2A0)
+```text
+attacker within reach of the target (0x439850(person, 224)):
+  target already in a fight (+0x9D is a 10/8)  → join it (below)
+  target already in a pre-fight (10/9)         → attacker sub-state 8 (not traced further)
+  else                                         → new pre-fight(attacker, target, mode)
+mode 0: both in the open
+mode 1: the attacker is in an enemy building and pulls one occupant out (0x407490)
+mode 2: the target is at its building (target +0x72 is the building on its cell)   (meaning unverified)
+```
+Both people take state 29 (their previous state saved in `+0x7D`); the pre-fight keeps the attacker (`+0x6A`),
+the target (`+0x6C`), their tribes (`+0x6E`, `+0x6F`) and, for modes 1-2, the building (`+0x68`). A pre-fight or
+a fight involving the player's tribe sets 0x89D167 = 2 (probably the fight music or alert, unverified), and
+0x431EA0 is called on every new controller (an alert to both tribes, unverified).
+
+### Pre-fight (per turn 0x518630; person sub-state `+0x2D`, timer `+0x70`)
+```text
+ends (both freed, +0x9D = 0) when a person is gone, both are of one tribe, a person leaves state 29,
+or the attacker's approach timer runs out
+mode 0: attacker sub 5, target sub 4
+4 target stands: stops, faces the attacker, stance animation; waits as long as the pre-fight lasts
+5 attacker runs: 40-turn timer (3.3 s), steps towards the target each turn
+    reached when |dx| < 315 and |dz| < 315 (0.6 cell) and the target is in sub 4 → attacker sub 6
+6 attacker kicks: speed 0, action anim 10, faces the target; timer = the animation length
+    2 turns before the end: target sub 7; at the end: sound 13, attacker sub 8
+7 target kicked away: hit animation (action 11, per-type table 0x5A6E16) for 2 turns, then
+    velocity 100 + rand(100) units per turn at (heading to the attacker) + 120°..240°
+    (+0x2AB + rand(0x2AA) of 2048: away from the kicker, ±60°); no damage
+    back on the ground (+0xE bit 0x8 clear) → sub 4
+8 attacker runs again (as 5, a new 40-turn timer); reached and the target in sub 4 → the fight starts:
+    a fight 10/8 at the target's place, both in state 25, placed by 0x519D10 (below)
+global flag 0x89D17C bit 0x40 (an option, not traced): no kick, reaching the target starts the fight
+mode 1 (pulled out of a building): both sub 3; the target is thrown out of the door (0x4044B0, 0x404420):
+    speed 100, ×12/16 per turn while ≥ 40 (floor 30), from the door outwards; after 6 turns or on landing
+    → target sub 4, attacker sub 5 (then as mode 0)
+mode 2: both sub 1: wait up to 100 turns (8.3 s) for 0x439030, then sub 2: walk to the building door, up to
+    100 turns; both in sub 2 → sub 3 as mode 1                                   (meaning unverified)
+```
+So the opening kick exists: a knockback of 100-199 units per turn, without damage, once per pair, before the first
+exchange. Nobody is gathered: a pre-fight is always one attacker and one target.
+
+### Fight (per turn 0x518FB0)
+Controller fields: count `+0x68` (≤ 6), the two tribes `+0x69` / `+0x6A`, winner tribe `+0x6B`, the centre
+person `+0x6C`, the 6 people `+0x70` (u16 ids), ring angle `+0x26`. A person's opponent is in its `+0x72`.
+```text
+every turn:
+  drop a person who is gone, not linked any more, dead, in a state without flag 0x10 (state table 0x5A6F79),
+    or more than 2048 units (4 cells) from the controller
+  fewer than 2 people, or one tribe left → the fight ends: everyone freed, the remaining tribe wins
+    (stats[winner][0] += 1, per-tribe counters at 0x969DC6)
+  centre = the person alone on its side (0x5199F0); the controller moves onto it, the ring angle turns 180°
+  every 32 turns, 1 chance in 2: ring angle ± (113 + rand(341)) of 2048 (20°-80°): the ring turns
+  every 32 turns (and on creation): unsuitable ground under the controller (0x51E4B0) → move it to the nearest
+    suitable cell (spiral search, 0x49A2F0); on a building cell → to its door
+slots (0x51E3D0): the centre at the controller, the others on a circle of radius 180 units (0.35 cell):
+  2 people: one slot at the ring angle; 3: angle, angle + 90°; 4: angle, +120°, +240°; 5th and 6th: the centre
+per person (state 25):
+  0 walk to its slot; within 12 units → 1
+  1 ready: faces the controller (ring people); r = rand & 15
+    opponent: the centre picks a random ring person, a ring person picks the centre
+    opponent ready (state 25, sub 1):
+      shaman:  r ≤ 6 → move 2, else move 4
+      others:  r ≤ 4 → move 2, r ≤ 13 → move 4, else move 3
+    opponent busy, r ≤ 3, opponent within 360 units of its slot:
+      opponent in state 25 and more than 2 people → move 4 (r even) or 3 (r odd)
+      opponent not in state 25 → move 4
+    away from its slot → 0
+  2, 3, 4 attack: speed 0, action anim 10 / 8 / 16, timer = its length; both turn to face each other
+    first turn: hit(target, self, one_sided = (move == 4))
+    a ready target reacts: sub 5 if the move is 2 and the target is not a shaman (and flag 0x40 clear), else 6
+    at the end: sound 13 (moves 2, 4) or 14 (move 3; a warrior's move 3: 0x27 against a warrior, else 0x2B
+      and 0x32 on the target); → 0
+  5 hit and knocked: 4 turns of the hit animation (action 9, table 0x5A6DF2), → 7
+  6 hit: the hit animation (action 9; 7 turns for a shaman), → 0
+  7 knocked back: velocity 35 + rand(70) units per turn backwards; after 2 turns stands (action 5 when
+    carrying wood, else 1); on landing → 0
+hit(target, attacker, one_sided):                                                (0x4A39C0)
+  strength(p) = max(32, FIGHT_DAMAGE_<p> × life / max_life), × BLOODLUST_DAMAGE_X when bloodlusted
+  target.life -= strength(attacker)
+  unless one_sided: attacker.life -= strength(target)                  (both hit at once)
+  each one at life ≤ 0 dies (0x4F3190, killer = the other); stats[its tribe][1] += 1
+join(person, fight)                                                    (0x51DDC0, 0x51DCC0)
+  only a person of one of the fight's two tribes, never a firewarrior
+  its tribe already has 3 or more there → replaces one of its own tribe with a lower rank
+    (person table +0x17: brave, preacher, spy 1; warrior, shaman 2; firewarrior 3)
+  else the first free slot; state 25
+  then split (0x51DF90): both tribes with 2 or more people → the last of each leaves for a new 1-to-1 fight
+    at the same place
+```
+- The fight is a series of exchanges, not a kick/guard toggle: the attacker plays one of three attack moves and
+  the target one of two hit reactions. Move 2 (the pre-fight kick's action, 10) knocks a non-shaman target back;
+  moves 2 and 3 trade blows (both lose health); move 4 lands without a return blow. A shaman is never knocked
+  back in a fight and never uses move 3.
+- **A fight is always one against several** (up to 5): joining and splitting keep one side at one person, who
+  stands in the centre and takes every ring person's blows.
+- The actions are not mapped to animations.md. Table 0x5A6D50 (`[action × 9 + type]`, object ids) gives move 2
+  → 63-67 for types 2-6 (shaman 106), move 3 → 53-57 (106), move 4 → 83-87 (125), hit 9 → 58-62, kicked 11 →
+  68-72. A guess: move 2 kick (25, shaman 69), move 3 punch (15), move 4 dodge then punch (50: no return
+  blow), hit 14 (unverified).
+- Timings: every attack and hit lasts its animation (`(0x5A6AFB[+0x3A] + 1) × frames`), not measured.
+
+Strength per type (exe default / `constant.dat`); it falls with the attacker's health, never under 32:
+
+| Type | `LIFE_` | `FIGHT_DAMAGE_` | Full-health blows to kill a full brave (file, estimate) |
+|---|---|---|---|
+| brave | 1400 / 1000 | 60 / 60 | about 21 (60 falling to 32 as the attacker weakens) |
+| warrior | 1800 / 1800 | 180 / 360 | 3 |
+| preacher | 1400 / 1100 | 60 / 60 | about 21 |
+| spy | 1400 / 600 | 60 / 60 | about 21 |
+| firewarrior | 1200 / 700 | 180 / 60 | never in a fight |
+| shaman | 900 / 2000 | 60 / 60 | about 21 |
+
+- The file spells the shaman's constant `FIGHT_DAMAGE_SHAMAN`, the exe table `FIGHT_DAMAGE_SHAMEN`; if
+  `read_levels_const` matches names exactly, the file's line is ignored (both are 60: no effect).
 
 ## Impact on our specs
 - huts-and-training.md rule 7 (`MANA_F[kind]` × `HOUSED`/`WORKING`/`TRAINING` %, × `HUT_LEVEL`) is not what the
