@@ -83,7 +83,7 @@ impl Effect {
 /// Whether `kind` damage from tribe `from` hurts `u`: never a shielded unit (pop3-rev-analysis.md "Per spell",
 /// Shield), and a blast spares the caster's own tribe (no alliances yet).
 pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
-    if u.statuses.shielded || !u.is_alive() {
+    if u.statuses.shield.is_on() || !u.is_alive() {
         return false;
     }
     match kind {
@@ -93,7 +93,7 @@ pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
 
 /// Whether a push moves `u`: not a shielded unit.
 pub fn pushes(u: &Unit) -> bool {
-    !u.statuses.shielded
+    !u.statuses.shield.is_on()
 }
 
 #[cfg(test)]
@@ -213,10 +213,10 @@ pub(crate) mod tests {
         let max = map.unit(enemy).unwrap().health.max();
         map.damage(shaman, 50, DamageKind::Blast, Some(0));
         assert!(map.unit(shaman).unwrap().health.is_full(), "own tribe");
-        map.unit_mut(enemy).unwrap().statuses.shielded = true;
+        map.unit_mut(enemy).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
         map.damage(enemy, 50, DamageKind::Blast, Some(0));
         assert_eq!(map.unit(enemy).unwrap().health.current(), max, "shielded");
-        map.unit_mut(enemy).unwrap().statuses.shielded = false;
+        map.unit_mut(enemy).unwrap().statuses.shield = crate::status::Timed::default();
         map.damage(enemy, 50, DamageKind::Blast, Some(0));
         assert_eq!(map.unit(enemy).unwrap().health.current(), max - 50);
         map.damage(enemy, max, DamageKind::Blast, Some(0));

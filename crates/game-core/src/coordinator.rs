@@ -191,7 +191,7 @@ pub(crate) mod tests {
     fn its_damage_takes_the_one_hurt_path() {
         let mut map = GameMap::sandbox_units();
         let units = braves(&mut map, 2);
-        map.unit_mut(units[1]).unwrap().statuses.shielded = true;
+        map.unit_mut(units[1]).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
         gather(&mut map, &units, 5, true, false);
         let max = map.unit(units[0]).unwrap().health.max();
         map.tick();

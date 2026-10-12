@@ -11,6 +11,7 @@ use super::{hidden_inside, upload_frame, FrameAsset, UnitView};
 use crate::sim_time::SimNow;
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
+use game_core::time::Tick;
 use game_core::unit::Unit;
 use pop3_format::blend::AlphaTable;
 use pop3_format::catalog::{BLOODLUST_SPRITES, EFFECT_SPRITE_FILE, HYPNOSIS_SPRITES, LOW_HEALTH_SPRITES, SELECTED_ARROW_SPRITE, SHIELD_SPRITES, TRIBES};
@@ -47,15 +48,16 @@ pub struct MarkerSlot {
 #[derive(Component, Default)]
 pub struct BodyHeight(pub f32);
 
-/// Whether `u` carries marker `m`; `selected` by the player, `original`: drawn with the original's art.
-pub fn shown(m: Marker, u: &Unit, player: u8, selected: bool, original: bool) -> bool {
+/// Whether `u` carries marker `m` at `now`; `selected` by the player, `original`: drawn with the original's art.
+/// Shield and bloodlust blink in their last steps (`Timed::shown`, phased by the unit's id).
+pub fn shown(m: Marker, u: &Unit, player: u8, selected: bool, original: bool, now: Tick) -> bool {
     u.is_alive()
         && match m {
             Marker::LowHealth => original && u.health.is_low(),
-            Marker::Bloodlust => u.statuses.bloodlust,
+            Marker::Bloodlust => u.statuses.bloodlust.shown(now, u.id),
             Marker::Hypnotised => u.statuses.hypnotized,
             Marker::Selected => original && selected && u.owner == player,
-            Marker::Shield(_) => u.statuses.shielded,
+            Marker::Shield(_) => u.statuses.shield.shown(now, u.id),
         }
 }
 
@@ -237,7 +239,7 @@ fn animate_markers(
             let Ok((mut slot, mut mesh, mut material, mut vis)) = slots.get_mut(child) else { continue };
             let m = SLOTS[slot.slot];
             let (i, above) = pose(m, n, u.id);
-            let frame = (seen && shown(m, u, super::PLAYER, selection.contains(u.id), art.original)).then(|| art.frame(m, i, u.owner)).flatten();
+            let frame = (seen && shown(m, u, super::PLAYER, selection.contains(u.id), art.original, now.tick)).then(|| art.frame(m, i, u.owner)).flatten();
             let Some((m_mesh, m_material)) = frame else {
                 vis.set_if_neq(Visibility::Hidden);
                 continue;
@@ -265,6 +267,7 @@ impl Plugin for MarkersPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use game_core::status::{Timed, BLINK_STEPS, SHIELD_STEPS};
     use game_core::unit::UnitKind;
 
     fn brave(owner: u8) -> Unit {
@@ -274,24 +277,34 @@ mod tests {
     #[test]
     fn markers_read_the_units_own_state() {
         let mut u = brave(0);
-        assert!(SLOTS.iter().all(|&m| !shown(m, &u, 0, false, true)), "nothing on a healthy plain brave");
-        u.statuses.shielded = true;
+        assert!(SLOTS.iter().all(|&m| !shown(m, &u, 0, false, true, Tick::ZERO)), "nothing on a healthy plain brave");
+        u.statuses.shield = Timed::steps(SHIELD_STEPS);
         u.statuses.hypnotized = true;
-        assert!(shown(Marker::Shield(2), &u, 0, false, false) && shown(Marker::Hypnotised, &u, 0, false, false));
-        assert!(!shown(Marker::Bloodlust, &u, 0, false, true));
+        assert!(shown(Marker::Shield(2), &u, 0, false, false, Tick::ZERO) && shown(Marker::Hypnotised, &u, 0, false, false, Tick::ZERO));
+        assert!(!shown(Marker::Bloodlust, &u, 0, false, true, Tick::ZERO));
         u.health.damage(u.health.max() * 3 / 4);
-        assert!(shown(Marker::LowHealth, &u, 0, false, true), "a quarter left");
-        assert!(!shown(Marker::LowHealth, &u, 0, false, false), "only with the original's art");
+        assert!(shown(Marker::LowHealth, &u, 0, false, true, Tick::ZERO), "a quarter left");
+        assert!(!shown(Marker::LowHealth, &u, 0, false, false, Tick::ZERO), "only with the original's art");
         u.action = game_core::unit::Action::Dead { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) };
-        assert!(SLOTS.iter().all(|&m| !shown(m, &u, 0, true, true)), "none once dead");
+        assert!(SLOTS.iter().all(|&m| !shown(m, &u, 0, true, true, Tick::ZERO)), "none once dead");
+    }
+
+    #[test]
+    fn shield_and_bloodlust_blink_in_their_last_steps() {
+        let mut u = brave(0);
+        u.statuses.shield = Timed::steps(BLINK_STEPS);
+        u.statuses.bloodlust = Timed::steps(SHIELD_STEPS);
+        let at = |n: u32| Tick::from_wire(n.wrapping_sub(u.id));
+        assert!(shown(Marker::Shield(0), &u, 0, false, false, at(0)) && !shown(Marker::Shield(0), &u, 0, false, false, at(2)), "2 on, 2 off");
+        assert!(shown(Marker::Bloodlust, &u, 0, false, false, at(2)), "steady with time left");
     }
 
     #[test]
     fn the_arrow_only_over_the_players_selected_people_with_the_originals_art() {
-        assert!(shown(Marker::Selected, &brave(0), 0, true, true));
-        assert!(!shown(Marker::Selected, &brave(0), 0, false, true), "not selected");
-        assert!(!shown(Marker::Selected, &brave(1), 0, true, true), "another tribe's");
-        assert!(!shown(Marker::Selected, &brave(0), 0, true, false), "fallback: the health bar instead");
+        assert!(shown(Marker::Selected, &brave(0), 0, true, true, Tick::ZERO));
+        assert!(!shown(Marker::Selected, &brave(0), 0, false, true, Tick::ZERO), "not selected");
+        assert!(!shown(Marker::Selected, &brave(1), 0, true, true, Tick::ZERO), "another tribe's");
+        assert!(!shown(Marker::Selected, &brave(0), 0, true, false, Tick::ZERO), "fallback: the health bar instead");
     }
 
     #[test]

@@ -18,6 +18,7 @@ use crate::tree::{scatter, Tree};
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::totem::{totems_from_level, Totem, TotemKind};
+use crate::status::Timed;
 use crate::unit::{torus_delta, Action, Order, Unit, UnitEvent, UnitKind};
 use crate::wood::WoodPiece;
 use pop3_format::header::TRIBES;
@@ -775,6 +776,7 @@ impl GameMap {
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
         self.release_orphans();
+        self.units.iter_mut().for_each(|u| u.statuses.tick(now, u.id));
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing)).collect();
         let (mut events, mut gone) = (Vec::new(), Vec::new());
         for (i, unit) in self.units.iter_mut().enumerate() {
@@ -822,8 +824,8 @@ pub const SANDBOX_MARKERS: [fn(&mut Unit); 5] = [
     |u| {
         u.health.damage(u.health.max() - 1);
     },
-    |u| u.statuses.shielded = true,
-    |u| u.statuses.bloodlust = true,
+    |u| u.statuses.shield = Timed::steps(crate::status::SHIELD_STEPS),
+    |u| u.statuses.bloodlust = Timed::steps(crate::status::BLOODLUST_STEPS),
     |u| u.statuses.hypnotized = true,
     |u| SANDBOX_MARKERS[..4].iter().for_each(|marked| marked(u)),
 ];
@@ -1622,6 +1624,17 @@ mod tests {
     }
 
     #[test]
+    fn shields_and_bloodlust_run_out_with_the_turns() {
+        let mut m = GameMap::sandbox_units();
+        let marked = |m: &GameMap| m.units.iter().filter(|u| u.statuses.shield.is_on() || u.statuses.bloodlust.is_on()).count();
+        assert!(marked(&m) > 0);
+        m.run(Ticks::secs(119));
+        assert!(m.units.iter().any(|u| (1..=crate::status::BLINK_STEPS).contains(&u.statuses.shield.steps_left())), "in their last steps");
+        m.run(Ticks::secs(1));
+        assert_eq!(marked(&m), 0, "gone after 180 steps of 8 turns");
+    }
+
+    #[test]
     fn sandbox_units_has_every_kind_on_land() {
         let m = GameMap::sandbox_units();
         let count = |owner: u8, kind: UnitKind| m.units.iter().filter(|u| u.owner == owner && u.kind == kind).count();
@@ -1630,7 +1643,7 @@ mod tests {
         for kind in &UnitKind::FOLLOWERS {
             assert_eq!((count(0, *kind), count(1, *kind)), (3 + SANDBOX_MARKERS.len(), 1), "{kind:?}");
             let marked: Vec<&Unit> = m.units.iter().filter(|u| u.owner == 0 && u.kind == *kind).skip(3).collect();
-            let markers = |u: &Unit| [u.health.is_low(), u.statuses.shielded, u.statuses.bloodlust, u.statuses.hypnotized];
+            let markers = |u: &Unit| [u.health.is_low(), u.statuses.shield.is_on(), u.statuses.bloodlust.is_on(), u.statuses.hypnotized];
             assert_eq!(marked.iter().map(|u| markers(u)).collect::<Vec<_>>(), [
                 [true, false, false, false],
                 [false, true, false, false],

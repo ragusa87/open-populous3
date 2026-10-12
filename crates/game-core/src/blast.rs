@@ -117,7 +117,7 @@ mod tests {
         let enemy = map.spawn(1, UnitKind::Brave, at).id;
         let mine = map.spawn(0, UnitKind::Brave, (at.0, at.1.wrapping_add(200))).id;
         let shielded = map.spawn(1, UnitKind::Brave, (at.0, at.1.wrapping_sub(200))).id;
-        map.unit_mut(shielded).unwrap().statuses.shielded = true;
+        map.unit_mut(shielded).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
         map.add_effect(effect(0, at));
         map.run(Ticks::new(RADII.len() as u32));
         assert!(map.effects.is_empty());
