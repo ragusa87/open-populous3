@@ -441,7 +441,7 @@ Worked examples (hand estimates, flat ground, not measured):
 | 9 | Ghost army (18 000, 4096, 4) | Copies the best own unit type near the target (shaman > firewarrior > preacher > spy > warrior > brave): 6 brave ghosts, 3 specialists or 1 shaman; at most 60 per tribe. No expiry found. They attack only enemy ghosts and shamans, their shots do nothing; melee untested. Blast and insects destroy them. |
 | 10 | Erosion (210 000, 4096, 2) | 63 hydraulic-erosion passes, one per turn (5.25 s), on an 8 × 8-cell window jittered around the target: ground washed downhill. No direct effect on units. |
 | 11 | Swamp (100 000, 4096, 3) | No terrain change. Lasts 32 000 turns (44 min). Every 4 turns it kills outright every person on its 3 × 3 cells, any tribe, until `SWAMP_NUM_PEOPLE` (exe 10) are dead. At most 30 per tribe (the oldest goes). Removed when most of its cells are unsuitable. |
-| 12 | Land bridge (70 000, 5120, 4) | From the caster to the target, 4 cells wide, heights on a straight slope between both ends (at least 90), reached over 62 turns (5.2 s), at most `LAND_BRIDGE_MAX_CHANGE` per step; sea cells raised too. |
+| 12 | Land bridge (70 000, 5120, 4) | From the caster to the target, 4 cells wide (−1, 0, +1, +2 across the line), heights on a straight slope between both ends (at least 90): each turn `h += clamp(T − h, ±LAND_BRIDGE_MAX_CHANGE) / (64 − turn)`, so every cell reaches its height after 62 turns (5.2 s); sea cells raised too; a smoke puff on every bridge cell every turn. Buildings left on ground uneven by more than 200 collapse ("Terrain changes: what reacts"). |
 | 13 | Angel of death (510 000, 3072, 1) | A meteor, then an angel (person type 8, `LIFE_AOD` 10 000) hunts the nearest enemy on the whole map, shamans included, pulling people out of buildings; carries and throws each victim to death, about one per 28 turns (2.3 s). Ends after `AOD_KILL_COUNT` (40) kills or `AOD_DURATION` (2500 turns, 208 s). Two angels fight by health. |
 | 14 | Earthquake (175 000, 4096, 2) | 120 turns (10 s) of shake. At turns 24, 56 and 88 each building in 16 × 16 cells has a 20/128 chance to be shaken (occupants out, partial explosion). At turn 60, a half-disc of radius 8 cells sinks by up to 600 (`600 × (4096 − d) / 4096`), with a lava fissure of short-lived lava squares and possibly two lava flows. |
 | 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point. |
@@ -454,6 +454,24 @@ Worked examples (hand estimates, flat ground, not measured):
 
 Friendly fire: lightning, whirlwind, swamp, volcano and lava hurt the caster's own people; blast, firestorm and
 insects do not damage allies. Lightning and swamp kill regardless of health.
+
+### Terrain changes: what reacts
+Every terrain-changing effect (land bridge, flatten, erosion, earthquake, volcano...) ends each cell change with the
+same two calls:
+- `0x44DDF0(cell, r, 1)`: the landscape around the cell is recomputed (radius r);
+- `0x44F2F0(1, cell, r, −1)`: every unit and building on the (2r + 1)² cells around gets the "ground moved" flag
+  (+0xC bit 2), and building cells the cell flag 0x20000. Mode 2 of the same call is the lava's "set on fire".
+
+Land bridge example (0x50EE00, per cell 0x50ECC0, r = 2 so 5 × 5 cells): a smoke puff (7/3, 2 turns) on every
+bridge cell every turn, which is the dust seen along it (there is no sparkle effect); the height step; then both
+calls. Two sounds (0xAB, 0x29) when it starts.
+
+| Unit | Reaction to "ground moved" |
+|---|---|
+| Person | Nothing beyond clearing the flag at the end of its turn (0x4D3CEA): standing and walking people sit on the ground anyway, so they ride up or down with it. No push, no damage. |
+| Building (0x408080) | The base becomes the average height of its footprint. Footprint cells within 200 of it (building record +0x46, every type) are pulled back towards it (0x44FDE0, rate +0x44 = 2): the building re-levels its own ground. If any footprint cell is more than 200 away, the building is destroyed (state 3, sub-state 1). Boat huts (types 13, 14) keep their base. A second destroy reason (sub-state 2) exists, not traced. |
+| Boat (vehicle types 1, 2) | One forced movement pass (0x4E7FB0); no damage or destroy call in it. What a boat does on raised land is not traced. |
+| Balloon (vehicle types 3, 4) | Never explodes from it. Each turn (0x4E8F00) it samples the ground ahead, takes the highest point plus a hover height of its type (another one over buildings: vehicle table 0x5A7938, stride 0x17, +0xD / +0xF) and climbs or sinks towards it at its profile's vertical rate: a bridge under it lifts it. |
 
 ## Landscape projection [exe, measured]
 The landscape is drawn as a grid of vertices around the camera: ±0x6E00 render units (±55 cells), built in 220
@@ -595,6 +613,10 @@ movement profiles of wildmen, the angel of death and creatures.
   tick (10 per second) where the original's are per turn (12 per second): the same numbers fly about 17 % slower
   and lower in time. The original does not kill a unit landing in the sea outright (no fall damage on water
   cells; what follows is not traced).
+- Terrain changes (spells.md, buildings.md, TODO "Destruction of buildings on uneven/flooded ground"): in the
+  original a building re-levels its footprint towards its average height and is destroyed when a footprint cell is
+  more than 200 away; people ride the ground (no push, no damage); balloons keep a hover height over the highest
+  ground ahead. The land bridge raises smoke on its cells every turn; ours has no such dust.
 - units.md `Walking`: ours walks at 64 units per tick, 10 ticks per second, 1.25 cells per second for every kind.
   The original brave walks 1.64-2.05 cells per second (`BRAVE_SPEED` 70 per turn, + up to 25 % per walk), and
   each type has its own speed (firewarriors the slowest). About 82-102 of our units per tick would match a brave.
@@ -628,8 +650,8 @@ movement profiles of wildmen, the angel of death and creatures.
   which views (zoom levels, cut scenes) change the render block.
 - Sites: which code creates the pillars at level load, and whether the levelling forces every cell of its disc.
 - Spells: burning trees (scenery state 5), the partial building explosion of the earthquake, whether ghosts
-  expire, what starts the landscape-shaping mode, how people react to the ground moving or flooding under them,
-  and the melee fight itself.
+  expire, what starts the landscape-shaping mode, what a person does when the ground under it floods, the
+  building's second destroy reason (sub-state 2), boats on raised land, and the melee fight itself.
 
 ## Reference
 
@@ -691,6 +713,11 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x416F50, 0x46E700 | render block defaults (K 46 000), copy into the draw state |
 | 0x4D4F40, 0x4D6660 | walk speed: `SPEED + rand % (SPEED / 4)`, doubled when bloodlusted, to unit+0x5F |
 | 0x4E6A70 | move a position by length and angle |
+| 0x50EE00, 0x50ECC0 | land bridge: per turn, per cell (smoke, height step, refresh, notify) |
+| 0x44DDF0 | recompute the landscape around a cell after a height change |
+| 0x44F2F0 | notify units and buildings around a cell: mode 1 "ground moved", mode 2 "set on fire" |
+| 0x408080 | building foundation check: re-level the footprint or collapse |
+| 0x4E7FB0, 0x4E8F00 | boat and balloon movement passes (balloon hover height) |
 | 0x4E93F0 | add a push to a velocity, scaled by the slope along it |
 | 0x4EBC20 | slope vector at a position (ground sliding) |
 | 0x4503F0 | horizontal distance between two positions (wrapping, square root) |
@@ -787,7 +814,7 @@ of 0x89C661.
 | Table | Base | Stride | Fields |
 |---|---|---|---|
 | person types | 0x5A7060 | 0x32 | `MANA_F_` +0xE, `LIFE_` +0x10, `WOOD_` +0x14, `FIGHT_DAMAGE_` +0x1B, chop time (u8, not a named constant) +0x1D, `CONV_` +0x1F, tower detection radius +0x22, `SW_BLAST_DAMAGE_` +0x2C |
-| building types | 0x5A7228 | 0x4C | `WOOD_` +0x1A, next size +0x34 (u8), growth target +0x36 (2400, not a named constant), mana factor +0x38, `MAX_POP_VALUE__HUT_` +0x3A, `HUT_SPROG_TIME` +0x3C, flags +0x48 (bit 10: breeds; bit 6: holds wood) |
+| building types | 0x5A7228 | 0x4C | `WOOD_` +0x1A, next size +0x34 (u8), growth target +0x36 (2400, not a named constant), mana factor +0x38, `MAX_POP_VALUE__HUT_` +0x3A, `HUT_SPROG_TIME` +0x3C, flags +0x48 (bit 10: breeds; bit 6: holds wood), foundation re-level rate +0x44 (2) and tolerance +0x46 (200) |
 | scenery types | 0x5A79B0 | 0x18 | object +0x0A (12: 30), `TREE_WOOD_VALUE` +0x4, `TREE_WOOD_GROW` +0x6, `TREE_DORMANT_TIME` +0x8, flags +0x14 |
 | movement profiles | 0x5A7B90 | 0x1A | speed +0x4 (`<TYPE>_SPEED`: brave profile 2, warrior 14, preacher 15, spy 16, firewarrior 17, shaman 18), velocity caps +0x8 / +0xA and +0xC / +0xE (horizontal / vertical: 192 / 512 for persons), `WALK_ALT_DIFF2` +0x10 (copied for flagged profiles), gravity +0x12 (32), ground friction +0x14 (28) / +0x16 (72), flags +0x18 |
 | spells | 0x5A80D0 | 0x3E | kind +0x00 (1 normal, 2 hidden), cost (u32) +0x4, id +0x8, flags +0x1A (bit 0 castable) and +0x1B (0x40 homing), `SP_W_RANGE_` +0x1E, mode-0x20 range +0x22, shot without shaman +0x26, shot from shaman +0x27, effects +0x28..+0x2C, `SP_1_OFF_MAX_` +0x2D, mode-0x20 charges (`LSME_1_OFF_MAX_`) +0x2E, deflectable +0x2F, sound +0x30, enemy-cast alert +0x35/+0x36, `OPT_S` +0x3A |
