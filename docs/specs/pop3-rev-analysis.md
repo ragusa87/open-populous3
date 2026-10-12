@@ -409,16 +409,7 @@ flags  : airborne (+0xC |= 0x2000 | 0x80000)
   farther. Not pushed: the caster's shaman, angels of death, shielded units, units inside something (+0x9F);
   allies only on the last turn, at most `BLAST_FRIEND_AFFECT` (5).
 
-Then every turn, the person physics step (0x4E6D00) with the person movement profile (braves and specialists):
-
-| Rule | Value |
-|---|---|
-| Velocity caps | 192 on each horizontal axis, 512 vertical (profile +0x8 / +0xA and +0xC / +0xE) |
-| Gravity | 32 per turn off the vertical speed (profile +0x12) |
-| Air drag | 2 per turn off each horizontal axis, towards 0 |
-| In the air | the unit spins: its heading turns by 147 (of 2048, about 26°) per turn; a scream when it takes off (one sound for the player's shaman, another for other shamans, a third for others rising faster than 90) |
-| Landing | vertical speed ≤ −100: dust (7/3) and a sound; ≤ −200: `FALL_OUT_OF_WW_DAMAGE` (700), not on terrain with flag 2 |
-| On the ground | a slope vector (gradient over ±76 units, 0x4EBC20) is added: the unit slides downhill; friction takes 28 per turn off each horizontal axis (profile +0x14), 72 on terrain with flags 0x3E (+0x16); the unit faces where it slides |
+Then the person physics moves it every turn ("Person physics", blown mode).
 
 Worked examples (hand estimates, flat ground, not measured):
 - Hit once at the centre: 149 outward and 98 up; it rises about 200, lands after about 8 turns at about −126
@@ -441,7 +432,7 @@ Worked examples (hand estimates, flat ground, not measured):
 | 9 | Ghost army (18 000, 4096, 4) | Copies the best own unit type near the target (shaman > firewarrior > preacher > spy > warrior > brave): 6 brave ghosts, 3 specialists or 1 shaman; at most 60 per tribe. No expiry found. They attack only enemy ghosts and shamans, their shots do nothing; melee untested. Blast and insects destroy them. |
 | 10 | Erosion (210 000, 4096, 2) | 63 hydraulic-erosion passes, one per turn (5.25 s), on an 8 × 8-cell window jittered around the target: ground washed downhill. No direct effect on units. |
 | 11 | Swamp (100 000, 4096, 3) | No terrain change. Lasts 32 000 turns (44 min). Every 4 turns it kills outright every person on its 3 × 3 cells, any tribe, until `SWAMP_NUM_PEOPLE` (exe 10) are dead. At most 30 per tribe (the oldest goes). Removed when most of its cells are unsuitable. |
-| 12 | Land bridge (70 000, 5120, 4) | From the caster to the target, 4 cells wide (−1, 0, +1, +2 across the line), heights on a straight slope between both ends (at least 90): each turn `h += clamp(T − h, ±LAND_BRIDGE_MAX_CHANGE) / (64 − turn)` (`LAND_BRIDGE_MAX_CHANGE` 256, 64 being `LAND_BRIDGE_DURATION`), so every cell reaches its height after 62 turns (5.2 s); sea cells raised too; a smoke puff on every bridge cell every turn. Buildings left on ground uneven by more than 200 collapse ("Terrain changes: what reacts"). |
+| 12 | Land bridge (70 000, 5120, 4) | From the caster to the target, 4 cells wide (−1, 0, +1, +2 across the line), heights on a straight slope between both ends (at least 90): each turn `h += clamp(T − h, ±LAND_BRIDGE_MAX_CHANGE) / (64 − turn)` (`LAND_BRIDGE_MAX_CHANGE` 256, 64 being `LAND_BRIDGE_DURATION`), so every cell reaches its height after 62 turns (5.2 s) when the gap is small: the cap makes large gaps fall short (gap 256: 251 reached, 500: 488, 800: 759, 1000: 900); sea cells raised too; a smoke puff on every bridge cell every turn. Buildings left on ground uneven by more than 200 collapse ("Terrain changes: what reacts"). |
 | 13 | Angel of death (510 000, 3072, 1) | A meteor, then an angel (person type 8, `LIFE_AOD` 10 000) hunts the nearest enemy on the whole map, shamans included, pulling people out of buildings; carries and throws each victim to death, about one per 28 turns (2.3 s). Ends after `AOD_KILL_COUNT` (40) kills or `AOD_DURATION` (2500 turns, 208 s). Two angels fight by health. |
 | 14 | Earthquake (175 000, 4096, 2) | 120 turns (10 s) of shake. At turns 24, 56 and 88 each building in 16 × 16 cells has a 20/128 chance to be shaken (occupants out, partial explosion). At turn 60, a half-disc of radius 8 cells sinks by up to 600 (`600 × (4096 − d) / 4096`), with a lava fissure of short-lived lava squares and possibly two lava flows. |
 | 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point. |
@@ -468,7 +459,7 @@ calls. Two sounds (0xAB, 0x29) when it starts.
 
 | Unit | Reaction to "ground moved" |
 |---|---|
-| Person | Nothing beyond clearing the flag at the end of its turn (0x4D3CEA): standing and walking people sit on the ground anyway, so they ride up or down with it. No push, no damage. |
+| Person | Nothing beyond clearing the flag at the end of its turn (0x4D3CEA): the person physics follows the ground every turn, lifting people when it rises and letting them fall when it drops ("Person physics"). No push, no damage. |
 | Building (0x408080) | The base becomes the average height of its footprint. Footprint cells within 200 of it (building record +0x46, every type) are pulled back towards it (0x44FDE0, rate +0x44 = 2): the building re-levels its own ground. If any footprint cell is more than 200 away, the building is destroyed (state 3, sub-state 1). Boat huts (types 13, 14) keep their base. A second destroy reason (sub-state 2) exists, not traced. |
 | Boat (vehicle types 1, 2) | One forced movement pass (0x4E7FB0); no damage or destroy call in it. What a boat does on raised land is not traced. |
 | Balloon (vehicle types 3, 4) | Never explodes from it. Each turn (0x4E8F00) it samples the ground ahead, takes the highest point plus a hover height of its type (another one over buildings: vehicle table 0x5A7938, stride 0x17, +0xD / +0xF) and climbs or sinks towards it at its profile's vertical rate: a bridge under it lifts it. |
@@ -531,6 +522,35 @@ death's throw 400, whirlwind 120, insect swarm 80.
 
 Not traced: whether slopes change the walking speed (no slope factor seen in a first pass over 0x4E6D00), and the
 movement profiles of wildmen, the angel of death and creatures.
+
+## Person physics [exe]
+Every person, every turn, goes through one physics step (0x4E6D00), with the numbers of its movement profile
+(table 0x5A7B90, see "Walking speed"). It has three modes:
+
+```text
+blown (+0xC bit 0x80000, set by a blast push):           # 0x4E7307
+    if ground(pos) < height:  in the air: scream once on take-off, gravity, air drag, spin, move
+    else:                     landing (dust, fall damage), then slide downhill with friction until still
+otherwise:
+    ground = ground(new position)
+    if ground >= height:      height = ground              # rising ground lifts it: slopes, bridges, hills
+    else:                     falling (0x4E71CD): gravity, air drag, move, until the ground is reached (0x4E72E9)
+```
+
+| Rule | Value (persons: braves and specialists) |
+|---|---|
+| Velocity caps | 192 on each horizontal axis, 512 vertical (profile +0x8 / +0xA and +0xC / +0xE), applied every step |
+| Gravity | 32 per turn off the vertical speed (profile +0x12), while above the ground |
+| Air drag | 2 per turn off each horizontal axis, towards 0 (falling and blown) |
+| Blown, in the air | the unit spins: its heading turns by 147 (of 2048, about 26°) per turn; a scream when it takes off (one sound for the player's shaman, another for other shamans, a third for others rising faster than 90) |
+| Blown, landing | vertical speed ≤ −100: dust (7/3) and a sound; ≤ −200: `FALL_OUT_OF_WW_DAMAGE` (700, ignoring the shield), not on terrain with flag 2 |
+| Blown, on the ground | a slope vector (gradient over ±76 units, 0x4EBC20) is added: the unit slides downhill; friction takes 28 per turn off each horizontal axis (profile +0x14), 72 on terrain with flags 0x3E (+0x16); the unit faces where it slides |
+| Ordinary fall | ground dropping under a person (earthquake, erosion, flatten lowering) makes it fall with gravity and drag; the fall damage above is only in the blown mode, so an ordinary fall seems harmless (unverified: the grounded path also calls a landing routine, 0x4E9950, not read) |
+
+- People do not need the terrain's "ground moved" flag: this step follows the ground every turn ("Terrain
+  changes: what reacts").
+- Example: an earthquake's drop of up to 600 under a person: it falls for about 6 turns (0.5 s) and lands at
+  about −190, below the fall-damage threshold even in the blown mode.
 
 ## Combat [ghidra]
 - Internal controller units (class 10):
@@ -612,7 +632,8 @@ movement profiles of wildmen, the angel of death and creatures.
   caps, drag 2, a 26° turn per turn in the air, friction 28 or 72 per turn, downhill slide), no dust below −100 and no fall damage. Our speeds are per
   tick (10 per second) where the original's are per turn (12 per second): the same numbers fly about 17 % slower
   and lower in time. The original does not kill a unit landing in the sea outright (no fall damage on water
-  cells; what follows is not traced).
+  cells; what follows is not traced). Ordinary falls (ground dropping under a person) use the same gravity and
+  drag but no fall damage ("Person physics").
 - Terrain changes (spells.md, buildings.md, TODO "Destruction of buildings on uneven/flooded ground"): in the
   original a building re-levels its footprint towards its average height and is destroyed when a footprint cell is
   more than 200 away; people ride the ground (no push, no damage); balloons keep a hover height over the highest
@@ -643,6 +664,7 @@ movement profiles of wildmen, the angel of death and creatures.
 - Prayer: the vault (library trigger) branch, what the "contest" countdown at trigger+0x6F does when several tribes
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
 
+- Physics: what the grounded landing routine 0x4E9950 does, so whether ordinary falls ever hurt.
 - Blast: what happens to a person landing in water, and measured flights (position, velocity and life per turn of
   a blown brave) to check the estimates of "Blast push and flight".
 - Walking: whether slopes change the speed, and the speeds of wildmen, the angel of death and creatures.
@@ -705,7 +727,7 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x50B630, 0x50B6F0, 0x50B740 | simple blast: default init, init with parameters, per turn |
 | 0x515E30 | nearest-N selector (invisibility, shield, bloodlust, hypnotism) |
 | 0x4DA080 | person damage (unit, tribe, amount, ignore_shield) |
-| 0x4E6D00 | person physics: landing and fall damage |
+| 0x4E6D00 | person physics, every turn: follow the ground, falling (0x4E71CD), blown mode with landing and sliding (0x4E7307) |
 | 0x4A7D80 | reincarnation pillar init: snap to the cell centre, angle from the site, rise (0x4A7EB0) |
 | 0x50C690 | "move rs pillar" (7/7): replace a slot's pillar |
 | 0x467130, 0x46CB90 | `draw_land`, `main_landscape_mesh_generation`: the vertex grid |

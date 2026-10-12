@@ -5,7 +5,7 @@ says whether a spell applies at its target; `GameMap::apply` ignores a cast that
 
 | Spell | Effect |
 |---|---|
-| Land Bridge | line between two cells, heights interpolated, min height 32 |
+| Land Bridge | aimed on the ground (`hud::spells::ground_spell`), within range; starts at the caster's shaman as she stands when the command runs, or where it was aimed from on a god level (`GameMap::shaman_omni`: the ground under the bottom middle of the view). An effect (`land_bridge`, `EffectKind::LandBridge`): 4 height points wide (−1, 0, +1, +2 across the line), each moving every turn towards a straight slope between both ends' heights at cast (at least 90), `h += clamp(T − h, ±256) / (64 − turn)`, for 64 turns (`LAND_BRIDGE_MAX_CHANGE`, `LAND_BRIDGE_DURATION`): sea raised, hills in the way lowered. The editor's B brush is still the instant 1-wide line (min 32) |
 | Flatten | radius 4 set to center height |
 | Erode | radius 4 lowered by 120 (falloff) |
 | Raise | editor brush, radius 3 +64 |
@@ -15,9 +15,10 @@ says whether a spell applies at its target; `GameMap::apply` ignores a cast that
 To do: the other original spells, as traced in pop3-rev-analysis.md "Per spell" (Swamp kills people on its cells and
 does not change the terrain; Earthquake sinks a half-disc and opens a lava fissure; Volcano raises a cone with lava;
 any randomness through `map::Lcg`, never `rand`). Mana cost, charges, cast range from shaman (original values
-below, "Original balance").
-Our Land Bridge, Flatten and Erode differ from the original's (pop3-rev-analysis.md "Per spell"): its land bridge
-is 4 cells wide with a minimum height of 90 and builds over 62 turns; its flatten levels a 45-cell disc (about 3.5
+below, "Original balance"). Range: `cast_range` (`SP_W_RANGE` by the caster's altitude band, `GameMap::altitude`,
++1/3 in a finished drum tower), checked when aiming (`GameMap::in_cast_range`); none on a god level; nothing is cast
+while the shaman is off the ground.
+Our Flatten and Erode differ from the original's (pop3-rev-analysis.md "Per spell"): its flatten levels a 45-cell disc (about 3.5
 cells) in 15 turns; its erosion is a hydraulic simulation over 63 turns on 8 × 8 cells.
 After every cast: update normals, walkability and destroy buildings on uneven/flooded ground.
 Spells must only be cast through `Command::Cast` to stay deterministic.

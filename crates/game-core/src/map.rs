@@ -507,10 +507,17 @@ impl GameMap {
             Command::Cast { player, spell } => {
                 let spell = self.from_caster(player, spell);
                 self.order(player, Order::Cast);
-                if let Spell::Blast { at } = spell {
-                    self.add_effect(crate::blast::effect(player, at));
+                match spell {
+                    Spell::Blast { at } => {
+                        self.add_effect(crate::blast::effect(player, at));
+                        None
+                    }
+                    Spell::LandBridge { from, to } => {
+                        self.add_effect(crate::land_bridge::effect(player, from, to, &self.terrain));
+                        None
+                    }
+                    _ => spell.cast(&mut self.terrain),
                 }
-                spell.cast(&mut self.terrain)
             }
             Command::CastSelf { player, kind } => {
                 if !self.shaman_locked(player) && self.use_charge(player, Some(kind)) {
@@ -847,6 +854,7 @@ impl GameMap {
             }
             WorldEvent::Terrain(TerrainChange::Raise { at, radius, by }) => Some(self.terrain.raise(at, radius, by)),
             WorldEvent::Terrain(TerrainChange::Flatten { at, radius }) => Some(self.terrain.flatten(at, radius)),
+            WorldEvent::Terrain(TerrainChange::Bridge { from, to, heights, turn }) => Some(crate::land_bridge::apply(&mut self.terrain, from, to, heights, turn)),
             WorldEvent::Release { unit } => {
                 if let Some(u) = self.unit_mut(unit) {
                     u.release();
@@ -1378,16 +1386,28 @@ mod tests {
         let shaman = ((m.units[0].x as u32 / 512) as i32, (m.units[0].z as u32 / 512) as i32);
         let (aimed_from, to) = ((shaman.0 - 20, shaman.1), (shaman.0, shaman.1 - 6));
         let mut god = m.clone();
-        let cast = Command::Cast { player: 0, spell: Spell::LandBridge { from: aimed_from, to } };
-        let mut expected = m.terrain.clone();
-        m.apply(&cast);
-        expected.land_bridge(shaman, to, 32);
-        assert_eq!(m.terrain.heights(), expected.heights(), "from the shaman, not where it was aimed from");
         god.shaman_omni = true;
-        let mut expected = god.terrain.clone();
+        let cast = Command::Cast { player: 0, spell: Spell::LandBridge { from: aimed_from, to } };
+        let bridge = |map: &GameMap| map.effects.iter().find_map(|(_, e)| match e.kind {
+            crate::effect::EffectKind::LandBridge(b) => Some(b),
+            _ => None,
+        });
+        let before = m.terrain.clone();
+        assert_eq!(m.apply(&cast), None, "nothing at once");
+        assert_eq!(m.terrain.heights(), before.heights());
+        let b = bridge(&m).unwrap();
+        assert_eq!((b.from, b.to), (shaman, to), "from the shaman, not where it was aimed from");
         god.apply(&cast);
-        expected.land_bridge(aimed_from, to, 32);
-        assert_eq!(god.terrain.heights(), expected.heights(), "a god's bridge starts where it was aimed from");
+        assert_eq!(bridge(&god).map(|b| (b.from, b.to)), Some((aimed_from, to)), "a god's bridge starts where it was aimed from");
+        let mut built = before.clone();
+        for turn in 0..crate::land_bridge::DURATION {
+            crate::land_bridge::apply(&mut built, b.from, b.to, b.heights, turn);
+        }
+        m.run(crate::time::Ticks::new(crate::land_bridge::DURATION / 2));
+        assert!(m.terrain.heights() != before.heights() && m.terrain.heights() != built.heights(), "part-way");
+        m.run(crate::time::Ticks::new(crate::land_bridge::DURATION / 2));
+        assert_eq!(m.terrain.heights(), built.heights(), "built in its turns");
+        assert!(bridge(&m).is_none(), "done");
     }
 
     #[test]

@@ -16,6 +16,7 @@ pub mod gauge;
 pub mod headcount;
 pub mod health;
 pub mod id;
+pub mod land_bridge;
 pub mod mana;
 pub mod map;
 pub mod motion;
