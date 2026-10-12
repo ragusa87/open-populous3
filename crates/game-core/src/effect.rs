@@ -41,6 +41,8 @@ pub enum DamageKind {
     Blast,
     /// Kills whatever the health (`lightning`).
     Lightning,
+    /// A blow in a fight: the shield blocks spells, not this (combat.md).
+    Melee,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,13 +91,14 @@ impl Effect {
     }
 }
 
-/// Whether `kind` damage from tribe `from` hurts `u`: never a shielded unit (pop3-rev-analysis.md "Per spell",
-/// Shield); a blast spares the caster's own tribe (no alliances yet), lightning only the caster's own shaman.
+/// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow (pop3-rev-analysis.md
+/// "Per spell", Shield); a blast spares the caster's own tribe (no alliances yet), lightning only the caster's own shaman.
 pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
-    if u.statuses.shield.is_on() || !u.is_alive() {
+    if !u.is_alive() || (u.statuses.shield.is_on() && kind != DamageKind::Melee) {
         return false;
     }
     match kind {
+        DamageKind::Melee => true,
         DamageKind::Blast => from != Some(u.owner),
         DamageKind::Lightning => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman),
     }
@@ -232,6 +235,15 @@ pub(crate) mod tests {
         assert_eq!(map.unit(enemy).unwrap().health.current(), max - 50);
         map.damage(enemy, max, DamageKind::Blast, Some(0));
         assert!(!map.unit(enemy).unwrap().is_alive(), "dies at 0");
+    }
+
+    #[test]
+    fn a_shield_does_not_stop_a_blow() {
+        let (mut map, enemy, _) = with_enemy();
+        map.unit_mut(enemy).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
+        let max = map.unit(enemy).unwrap().health.max();
+        map.damage(enemy, 60, DamageKind::Melee, Some(0));
+        assert_eq!(map.unit(enemy).unwrap().health.current(), max - 60);
     }
 
     #[test]

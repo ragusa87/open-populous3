@@ -7,6 +7,7 @@ pub mod build_book;
 pub mod building;
 pub mod campfire;
 pub mod cast_range;
+pub mod combat;
 pub mod command;
 pub mod coordinator;
 pub mod effect;
