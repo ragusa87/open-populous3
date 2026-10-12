@@ -289,6 +289,15 @@ impl SpellBook {
         b
     }
 
+    /// Every spell, Teleport too, cast at will (Sandbox > Spells).
+    pub fn unlimited() -> Self {
+        let mut b = SpellBook::new();
+        for k in SpellKind::ALL {
+            b.set(k, Availability::Unlimited);
+        }
+        b
+    }
+
     /// Every known spell at full charges.
     pub fn fill(&mut self) {
         for s in self.slots.iter_mut().filter(|s| s.availability == Availability::Known) {
@@ -515,5 +524,13 @@ mod tests {
         b.charge(Mana(80));
         assert!(b.cast(SpellKind::Convert));
         assert_eq!(b.slot(SpellKind::Convert).unwrap().charges, 1);
+    }
+
+    #[test]
+    fn unlimited_casts_every_spell_at_will() {
+        let mut b = SpellBook::unlimited();
+        for k in SpellKind::ALL {
+            assert!(b.cast(k) && b.cast(k), "{k:?}");
+        }
     }
 }

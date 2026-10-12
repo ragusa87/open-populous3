@@ -418,7 +418,59 @@ impl GameMap {
     }
 }
 
+/// Islands of the spells sandbox (`GameMap::sandbox_spells`): centre offset from the map's middle and radius, cells.
+const SPELL_ISLANDS: [((i32, i32), i32); 4] = [((0, 0), 14), ((28, 0), 10), ((0, -30), 10), ((-24, 20), 5)];
+
 impl GameMap {
+    /// Test ground for spells, every one cast at will (`SpellBook::unlimited`, Teleport too), on islands
+    /// (`SPELL_ISLANDS`) a few cells of sea apart, to bridge or teleport across:
+    /// - Middle: the player's site and shaman, 6 braves and some trees.
+    /// - East: a village of tribe 1 (red): huts with people inside, a drum tower, a warrior hut, braves and
+    ///   warriors around, to strike.
+    /// - North: a hill to flatten or erode, with a few people of tribe 2 on its slopes.
+    /// - South-west: an empty islet.
+    pub fn sandbox_spells() -> Self {
+        const C: i32 = MAP_SIZE as i32 / 2;
+        let mut terrain = Heightmap::new(MAP_SIZE);
+        for z in 0..MAP_SIZE as i32 {
+            for x in 0..MAP_SIZE as i32 {
+                if SPELL_ISLANDS.iter().any(|&((ox, oz), r)| (x - C - ox).pow(2) + (z - C - oz).pow(2) <= r * r) {
+                    terrain.set(x, z, 64);
+                }
+            }
+        }
+        terrain.raise((C, C - 31), 6, 420);
+        let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
+        let mut map = GameMap { spell_books: per_player(SpellBook::unlimited()), ..GameMap::bare("Sandbox: spells", terrain, sites) }.with_shamans();
+        map.trees = scatter(&map.terrain, 3, &[(C, C)], 40);
+        let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
+        let corner = |dx: i32, dz: i32| ((C + dx) as u16 * 512, (C + dz) as u16 * 512);
+        for n in 0..6 {
+            map.spawn(0, UnitKind::Brave, at(-3 + n, 5));
+        }
+        let village = [(BuildingKind::Hut { size: 1 }, (25, -4), 2), (BuildingKind::Hut { size: 2 }, (31, -4), 3), (BuildingKind::Hut { size: 3 }, (25, 3), 4), (BuildingKind::DrumTower, (31, 3), 1), (BuildingKind::WarriorTraining, (28, -8), 0)];
+        for (kind, (dx, dz), people) in village {
+            let (x, z) = corner(dx, dz);
+            let b = Building::new(kind, 1, x, z, 4);
+            let (id, door, centre) = (map.add_building(b.clone()), b.door(), b.centre());
+            for _ in 0..people {
+                map.spawn(1, UnitKind::Brave, centre).inside = Some(crate::unit::Inside { building: id, door });
+            }
+        }
+        for n in 0..4 {
+            map.spawn(1, UnitKind::Brave, at(22 + 2 * n, 7));
+            map.spawn(1, UnitKind::Warrior, at(23 + 2 * n, 0));
+        }
+        for (n, kind) in [UnitKind::Brave, UnitKind::Brave, UnitKind::Warrior, UnitKind::Preacher].into_iter().enumerate() {
+            map.spawn(2, kind, at(-4 + 3 * n as i32, -26));
+        }
+        let buildings = &map.buildings;
+        map.trees.retain(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 512)));
+        map.update_walls();
+        map.count_inside();
+        map
+    }
+
     pub fn site_of(&self, owner: u8) -> Option<&ReincarnationSite> {
         self.sites.iter().find(|s| s.owner == owner)
     }
@@ -1840,6 +1892,20 @@ mod tests {
         }
         assert!(m.shaman_of(0).is_some());
         assert_eq!(m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == 0).count(), 8);
+    }
+
+    #[test]
+    fn sandbox_spells_has_its_village_on_its_island_and_every_spell() {
+        let m = GameMap::sandbox_spells();
+        assert!(m.spell_books[0].slot(SpellKind::Teleport).is_some_and(|s| s.can_cast()));
+        assert_eq!(m.buildings.len(), 5);
+        for b in &m.buildings {
+            assert!(b.walled_cells(MAP_SIZE as i32).iter().all(|&(x, z)| !m.terrain.is_water(x, z)), "{:?} on land", b.kind);
+            assert!(!m.terrain.is_water((b.door().0 / 512) as i32, (b.door().1 / 512) as i32), "{:?}'s door on land", b.kind);
+        }
+        assert_eq!(m.buildings.iter().map(|b| b.inside as usize).sum::<usize>(), 10);
+        assert!(m.units.iter().all(|u| !m.terrain.is_water(u.cell().0, u.cell().1)));
+        assert!(m.terrain.is_water(64 + 16, 64), "sea between the home island and the village");
     }
 
     #[test]
