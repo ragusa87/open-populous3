@@ -16,7 +16,10 @@ crates/
                   game_frame.rs   the game's left-handed frame and its mirror into Bevy (GamePos, GameYaw)
                   original_models.rs original 3D objects -> meshes + theme atlas (optional)
                   generated_buildings.rs embedded generated GLBs -> cell-space coloured meshes + construction frames
-                  buildings.rs    model choice, construction stages, smoke and shaking
+                  sim_time.rs     SimNow (the drawn moment, from the map's tick), seeds from ids
+                  views.rs        WorldView: one view object per model, keyed by stable id (sync_views)
+                  buildings.rs    model choice, construction stages, shaking
+                  chimney.rs      a busy hut's smoke, the first WorldView
                   vault.rs        pyramid of knowledge door and top, posed from its phase
                   tooltip.rs      rendered tooltips above buildings: slot rows of generated icons
                   effects.rs      puffs of smoke and dust: one pattern each (chimney, landing dust, sinking totem)
@@ -77,6 +80,39 @@ To add a spell: add an `EffectKind` variant (or reuse one) whose `tick` follows 
 rhythm as an `Every`, its length as `left`), returning events; add a `DamageKind` if it hurts differently; add the
 effect where the spell lands (`GameMap::apply`, later on a shot's arrival); test it on a small map (`effect.rs`
 tests show how).
+
+## Client: world visuals
+Two clocks (`sim_time.rs`):
+- **Simulation time** for everything drawn in the world: units, smoke, dust, flames, nods, shakes, later spell
+  effects. The client draws the world at `SimNow`, set each frame by `units::run_ticks` from the map's tick counter
+  (`GameMap::now`), the ticks per step of the last step and `SimClock::alpha` (one step behind the map, like the unit
+  glides). So it stops while paused, scales with the game speed, jumps when several ticks run in one frame, and
+  a client that resyncs, rejoins or replays draws the same picture from the simulation state alone. No visual
+  state goes over the network.
+- **Real time** (`Res<Time>`) for UI, camera and mouse feedback, and debug: blinking (population, tooltip bars),
+  tooltip timing, the virtual cursor, camera flights and movement, a hovered tree's reaction, the debug logs. They
+  work while paused. `SimClock::steps_due` also reads it: it is what runs the simulation.
+
+Rules for a world visual:
+- **Computed, never accumulated.** A pose is a pure function of when it started and the drawn moment
+  (`SimNow::secs_since`), never `x += v * dt`, which drifts on pause and cannot be rebuilt after a jump. Ages are
+  whole ticks first, then a fraction; loops are taken modulo on whole ticks (`SimNow::secs_in`, a period of whole
+  ticks holding whole loops), so long games keep their precision.
+- **Seeded by stable ids.** A visual's randomness or phase comes from its model's id (`sim_time::seed`), never from
+  an entity index or a list position, so the same game always looks the same.
+- **One view object per model** (`views.rs`). A model in game-core is drawn by one view type implementing
+  `WorldView`: which models it draws (`models`), their stable id (`id`), building the view (`spawn`) and posing it
+  at the drawn moment (`update`). Everything about drawing that kind lives in its view's file. The generic
+  `sync_views::<V>` spawns a view when a model appears, updates it every frame, and despawns it once its id is
+  gone (or the game changed, `SimClock::game`: ids restart on a new map). Views are keyed by id, never by list
+  index. Each view type has its own plugin, so adding or removing a kind of visual is one line in `main.rs`. First
+  view: `chimney::ChimneyView` (a busy hut's smoke). Older visuals still index their models by position (units,
+  building views, totems): they move over as their models get ids or are removed.
+
+For later, spell effects: each will be a game-core `Effect` with its id, each kind drawn by its own view
+(`VolcanoView`, `SwarmView`...) through the same trait and `sync_views`. Timing rules stay in game-core, read by
+the views, never hard-coded in the client: e.g. a future `Effect::volcano_phase()` (rumbling, rising, erupting,
+flowing) that `VolcanoView` reads to start the camera shake and the rock spray.
 
 ## Handedness
 The original renders with Direct3D (pop3-rev reverses `D3DPopTB.exe`): its world is left-handed, x right, y up,

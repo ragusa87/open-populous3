@@ -190,7 +190,7 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
   screen, but slopes and bumps around the feet no longer cut the legs; real hills in front still hide her.
   The original has no health bar: low-health units get a spinning star/crown over the head (to do). The panel
   preview always shows the shaman's health.
-- Dust (`units/dust.rs`, cosmetic, real-time): when a unit stops landing, 10 soft generated motes spread 0.4 cell
+- Dust (`units/dust.rs`, cosmetic, simulation time: shown once the unit is drawn landed): when a unit stops landing, 10 soft generated motes spread 0.4 cell
   around its feet, rise 0.1, grow and fade over 0.8 s, facing the camera and pulled towards it like the sprites.
 - Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (original anim 40 for followers: the body lying, its spirit rising; tumbling otherwise), Fall (dying, then lies still while dead), Chop, CarryWalk, CarryIdle (braves cutting and carrying wood: original anims 11, 9, 10; other kinds, and the CC0 sheets and generated figures, which have no wood poses yet, show idle / walk instead, `Pose::fallback`), Stranded (arms up: frame 1 of original anim 12 for every follower, a stand-in, the real anim is unknown; wildmen and the shaman show their idle; the CC0 sheets loop their own arms-up `stranded` sheet).
   Timed actions (cast, dying) play once in step with the simulation, others loop.

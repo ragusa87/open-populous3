@@ -66,6 +66,9 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Rhythms still on per-object counters or missing: unit healing and stranded hurt (`REGEN_EVERY`, `STRANDED_HURT_EVERY`, rates unknown), hut breeding every 4 turns (0x404C80) and growth every 16 (0x4050C0), mana income every 16 (`MANA_UPDATE_FREQ`), status timers every 8.
 - [ ] Effect events without behaviour yet: `Panic` (person state 0x1A, 64 turns), `Raid` (occupants thrown out), `SetFire` (burning building, 127 turns).
 - [ ] Shots (fireballs 8/4, 8/7, 8/8): a typed list ticked before effects, integer flight, spawning a simple blast on arrival.
+- [ ] World views (architecture.md "Client: world visuals"): the landing dust (`units::dust`) as a `WorldView` once
+  touchdowns are kept in game-core (a unit's landing tick), so a rejoining client draws it too; the sinking totem's
+  smoke once totems have ids; units, building views and the unit glide (`SimClock::prev_ids`) still keyed by index.
 - [ ] Controllers (preacher's sermon, fight, pre-fight, formation, guard control): ticked before units, participants linking to them by id.
 
 ## Combat

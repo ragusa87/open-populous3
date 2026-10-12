@@ -52,6 +52,9 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
   line in `GameMap::tick` at its place in the order. Removable objects get ids from `GameMap::new_id`.
 - A new spell is a recipe of effects: an `EffectKind` variant reading the map and returning `EffectEvent`s; units
   are hurt only through `GameMap::damage`.
+- World visuals follow simulation time (`sim_time::SimNow`), computed from a start tick and never accumulated per
+  frame, seeded by stable ids; UI, camera and mouse feedback stay on `Res<Time>`. A new kind of visual for a
+  game-core object is a `views::WorldView` with its own plugin (docs/architecture.md "Client: world visuals").
 - A `Mesh` without vertices reaching the renderer, even hidden, makes Bevy 0.19 log "Use-after-free ... unallocated key": make the mesh when there is data, or fill it the frame it is added (terrain, site marks).
 - All grid access wraps (`rem_euclid`): the map is a torus.
 - Bevy APIs change between versions: check `~/.cargo/registry/src/*/bevy_*-0.19.*` before guessing.

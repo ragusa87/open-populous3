@@ -132,12 +132,14 @@ are on an overlay camera (`OverlayCamera`, order 1) that clears the window in th
 
 ## Game speed (`game_speed.rs`)
 P pauses the simulation only: the camera, hovering, selecting and the HUD keep working, units and their
-animations stand still (`SimClock::anim_secs` stops, the glide between ticks holds). Shift + `+` / `-` (or the
+animations stand still (the drawn moment `SimNow` stops, the glide between ticks holds). Shift + `+` / `-` (or the
 numpad's) step the speed through x1, x2, x4, x8 and resume; the pause menu's Game speed entry cycles it;
 `GAME_SPEED=0|1|2|4|8` sets the start. A label at the top of the view says "Paused" or "Speed xN" when not x1.
 The clock (`SimClock::steps_due`) runs whole tick times (1/12 s), each running the speed's number of ticks, at
 most 4 tick times a frame (a slow frame drops the rest rather than catching up); units glide from where they were
-before the frame's ticks. Purely visual motion (flames, swaying, blinking, dust puffs) keeps real time.
+before the frame's ticks. Everything in the world (flames, smoke, dust, nods, shakes) follows simulation time and
+stops too; UI and mouse feedback (blinking, tooltips, a hovered tree's sway, the cursor) keep real time
+(architecture.md "Client: world visuals").
 
 ## Selection and orders
 Left click on a vault of knowledge with the shaman selected sends her to pray at it (worship.md). Left click a unit to select it (Ctrl adds/removes), left drag for a whitish box selection, right click to deselect (Shift + right click puts out the player's camp fire under the cursor, or cancels the player's plan not flat yet);
