@@ -19,6 +19,7 @@ pub mod ground_fire;
 pub mod headcount;
 pub mod health;
 pub mod id;
+pub mod kind_stats;
 pub mod land_bridge;
 pub mod lightning;
 pub mod mana;

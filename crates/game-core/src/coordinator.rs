@@ -144,15 +144,27 @@ pub(crate) mod tests {
             map.damage(u, 1, DamageKind::Blast, None);
         }
         let g = gather(&mut map, &units, 2, false, true);
-        let regen = |map: &GameMap| units.iter().map(|&u| map.unit(u).unwrap().regen).collect::<Vec<_>>();
         map.tick();
         assert!(map.coordinators.gatherings.contains(g));
         assert!(units.iter().all(|&u| action(&map, u) == Action::Gathered { gathering: g }));
-        assert_eq!(regen(&map), [0, 0, 0], "held: no healing");
         map.tick();
         assert!(!map.coordinators.gatherings.contains(g));
         assert!(units.iter().all(|&u| action(&map, u) == Action::Idle), "released by its events, the same turn");
-        assert_eq!(regen(&map), [1, 1, 1], "and ticked as idle: released before the units' turn");
+    }
+
+    #[test]
+    fn units_held_by_a_coordinator_heal_like_anyone() {
+        let mut map = GameMap::sandbox_units();
+        let units = braves(&mut map, 2);
+        map.damage(units[0], 100, DamageKind::Blast, None);
+        gather(&mut map, &units, 50, false, false);
+        let life = |map: &GameMap| map.unit(units[0]).unwrap().health.current();
+        let before = life(&map);
+        while !crate::unit::HEAL_EVERY.fires(map.now.next(), 0) {
+            map.tick();
+        }
+        map.tick();
+        assert_eq!(life(&map), before + UnitKind::Brave.stats().heal.unwrap());
     }
 
     #[test]

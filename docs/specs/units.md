@@ -29,10 +29,10 @@
 
 | Action | Entered by | Behaviour |
 |---|---|---|
-| Idle | default, arrival, Stop | heals `HEALTH_STEP` (20) HP every `REGEN_EVERY` (0.5 s) |
+| Idle | default, arrival, Stop | stands (healing: see "Health" below) |
 | Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 53 units/tick on flat ground (1.24 cells/s) (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
-| Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -20 HP every `STRANDED_HURT_EVERY` (0.3 s) until the terrain opens a path (walks again) or it dies |
-| Worshipping | `Order::Worship { site }` (a click on a vault of knowledge with her selected) | prays at the vault's door; heals; see worship.md |
+| Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -`STRANDED_DAMAGE` (20) HP every `STRANDED_HURT_EVERY` (4 turns, at its own phase) until the terrain opens a path (walks again) or it dies |
+| Worshipping | `Order::Worship { site }` (a click on a vault of knowledge with her selected) | prays at the vault's door; see worship.md |
 | Casting { left } | `Order::Cast`, any spell cast | `CAST_TICKS` (10, the original's cast state) jump, then Idle (Teleport: then at the target, Landing); a book spell (Blast, Land Bridge) is held by her (`Unit::cast_spell`) and takes effect `CAST_RELEASE` (6) into the jump (`UnitEvent::Released`), lost if another order comes first; without a shaman to jump it takes effect at once |
 | Landing | arriving from a teleport | appears `LANDING_DROP` (256, one cell) above the target and falls ("Physics"): no orders while in the air, Idle on touchdown, 5 ticks (0.4 s) later; drawn in the idle pose at its height; a puff of dust at touchdown (`units/dust.rs`) |
 | Chopping { tree, left } | `Order::CutTree`, `Order::FetchWood` (braves only) | walks to a free spot next to the tree, then `CHOP_TICKS` (20, 1.67 s, the original's countdown) of chopping, then the tree loses one size and the brave carries the piece |
@@ -48,6 +48,11 @@
 | Spirit { left } | anyone else, after dying | `SPIRIT_TICKS` (3 s, a guess): its spirit rises from the body (followers' anim 40, played once; wildmen lie still), then the unit is gone from `GameMap::units` (`UnitEvent::Gone`, removed at the end of the tick). The client rebuilds its unit views and shadows when the count changes and does not glide a unit from another one's place |
 
 Health: 2000. Orders are ignored while drowning, dying or dead.
+
+Health of every kind: full life and healing per kind in `UnitKind::stats` (`kind_stats.rs`). Everyone heals on
+every eighth turn of the game (`HEAL_EVERY`, phase 0), whatever it is doing, fights included: shaman +32, brave,
+preacher and spy +4, warrior and firewarrior +6, never past full; wildmen never. Not while in the air, drowning,
+stranded or dead. Hurt to death in the air, a unit falls on and dies on landing. See combat.md "Health".
 
 ## From the levels (done)
 `GameMap::from_level` spawns every person thing (kind 1) where it is placed, model = kind

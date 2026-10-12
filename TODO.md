@@ -49,7 +49,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Hover/selection of a camp fire (tooltip with who is around it), a hover cursor when units are selected over one.
 
 ## Units ([units.md](docs/specs/units.md))
-- [ ] Health: read `LIFE_<P>` from `constant.dat` once parsed (`UnitKind::max_health` holds the file's values); find the wildman's life; check in the game the drowning, stranded and regeneration rates (`DROWN_DAMAGE`, `HEALTH_STEP`, scaled x20 from our old 100 HP guesses).
+- [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the drowning and stranded rates (`DROWN_DAMAGE`, `STRANDED_DAMAGE`, scaled x20 from our old 100 HP guesses).
 - [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
 - [ ] Walk animation rate could follow the slope speed (slower steps uphill).
@@ -96,7 +96,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 
 ## The tick ([architecture.md](docs/architecture.md) "The tick")
 - [ ] Find the original's order of work inside a turn (people, buildings, effects, shots, mana; income comes before spell charging): ours is a guess.
-- [ ] Rhythms still on per-object counters or missing: unit healing (every 8 turns on the global turn, `turn & 7 == 0`: pop3-rev-analysis.md "Health and healing") and stranded hurt (`STRANDED_HURT_EVERY`, rate unknown), hut breeding every 4 turns (0x404C80) and growth every 16 (0x4050C0), mana income every 16 (`MANA_UPDATE_FREQ`), the other status timers every 8 (shield and bloodlust done).
+- [ ] Rhythms still on per-object counters or missing: stranded hurt (`STRANDED_HURT_EVERY`, rate unknown), hut breeding every 4 turns (0x404C80) and growth every 16 (0x4050C0), mana income every 16 (`MANA_UPDATE_FREQ`), the other status timers every 8 (shield and bloodlust done).
 - [ ] World events without behaviour yet: `Raid` (occupants thrown out). Panic: the screaming, and how the original turns at an obstacle.
 - [ ] Burning buildings (`fire`): the igniter's tribe and the destroyed-building count (`stats[tribe][7]`), the fire sound.
 - [ ] Shots (fireballs 8/4, 8/7, 8/8): a typed list ticked before effects, integer flight, spawning a simple blast on arrival.
@@ -116,7 +116,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Preachers convert enemies.
 - [ ] Firewarriors (pyro-warriors) throw fire at enemies, both on the ground and in vehicles; they never join an existing fight (person-type flag 0x40), but fight in melee when attacked, at half speed (14-turn moves; pop3-rev-analysis.md "Combat"); their ranged attack (pop3-rev-analysis.md "Firewarrior fire"): two homing bolts 8/6 per throw (anim 7, 5 turns), one per hand, only the right one hits; 512 units per turn with a smoke trail (hfx 314-321) and a ground light; on arrival 100 to every enemy in the impact cell (trees set burning, vehicles hit) and `SW_BLAST_DAMAGE` (file 100, 400 from a drum tower) × `SW_BLAST_DAMAGE_<type>` % to the target (file: warriors 5 %), the people hit thrown 64 per turn + 110 up (living warriors and preachers only hop); reload `SW_FIRE_RATE` 25-28 turns (>> 3 bloodlusted); range 11 cells × `ALT_BAND_<b>_SUPER_INCR` % by height, +4 in a tower, odd, reach `cells × 256 + 56` per axis (file: 9 cells low down to 17 at the top, 2360-4408 units); drawn hfx 1120-1123.
 - [ ] Health, hit feedback and death animations for every unit type.
-- [ ] Healing needs no action: every unit heals over time (the shaman already does, except while casting or drowning; make it the rule for all units). Exception: flying monsters (e.g. Angel of Death) never heal. The original (pop3-rev-analysis.md "Health and healing"): every 8 turns, +4 brave, preacher, spy; +6 warrior, firewarrior; +32 shaman; wildmen and angels never; also in fights; not while drowning, dying, struck by lightning or in the air; ours is 20 every 0.5 s for the shaman (40 per s against the original's 48, and 6-9 per s for the others). Death waits until a thrown person lands.
+- [ ] Healing (combat.md "Health"): no healing while struck by lightning once it has its own state; the angel of death never heals; the original lets life go past full by up to one heal (ours stops at full).
 
 ## Spells ([spells.md](docs/specs/spells.md))
 - [ ] Spell effects with their own animations/visuals (swarm, whirlwind...; lightning has our own bolt, the original's bolt sprites are not identified); casting (C) only uses a charge and makes the shaman jump.

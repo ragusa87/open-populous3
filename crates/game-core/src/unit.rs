@@ -11,10 +11,10 @@ use crate::site::ReincarnationSite;
 use crate::spell::Spell;
 use crate::status::Statuses;
 use crate::terrain::Heightmap;
-use crate::time::{Countdown, Ticks};
+use crate::time::{Countdown, Every, Tick, Ticks};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
-pub const SHAMAN_MAX_HEALTH: u16 = 2000;
+pub const SHAMAN_MAX_HEALTH: u16 = UnitKind::Shaman.stats().life;
 /// World units per tick on flat ground (1.24 cells per second).
 pub const SHAMAN_SPEED: i32 = 53;
 /// Walking speed factor change in 1/256 per 100 of slope (height per cell). Uphill: the sandbox
@@ -26,12 +26,13 @@ pub const SLOPE_SPEEDUP_DOWN: i32 = 128;
 pub const SLOPE_FACTOR_RANGE: (i32, i32) = (32, 384);
 /// Health lost per tick while in the sea.
 pub const DROWN_DAMAGE: u16 = 60;
-/// Health points regained on land, or lost while stranded, at a time.
-pub const HEALTH_STEP: u16 = 20;
-/// Between two `HEALTH_STEP`s regained on land.
-pub const REGEN_EVERY: Ticks = Ticks::millis(500);
-/// Between two `HEALTH_STEP`s lost while stranded (the shaman's health lasts 33 s).
-pub const STRANDED_HURT_EVERY: Ticks = Ticks::millis(300);
+/// Health lost at a time while stranded (a guess).
+pub const STRANDED_DAMAGE: u16 = 20;
+/// Between two `STRANDED_DAMAGE`s, at each unit's own phase (the shaman's health lasts 33 s; a guess).
+pub const STRANDED_HURT_EVERY: Every = Every::new(4);
+/// Healing comes on every eighth turn of the game, the same for everyone (pop3-rev-analysis.md "Health and
+/// healing" [exe, measured]); how much is the kind's (`KindStats::heal`).
+pub const HEAL_EVERY: Every = Every::new(8);
 /// The cast: the original's cast state.
 pub const CAST_TICKS: Ticks = Ticks::new(10);
 /// Into the cast, when the spell leaves her (pop3-rev-analysis.md "From cast to effect": the shot flies at +6).
@@ -107,16 +108,8 @@ impl UnitKind {
         }
     }
 
-    /// The original's `LIFE_<P>` (constants.md); wildmen have none, a brave's stands in.
     pub fn max_health(self) -> u16 {
-        match self {
-            UnitKind::Shaman => SHAMAN_MAX_HEALTH,
-            UnitKind::Brave | UnitKind::Wildman => 1000,
-            UnitKind::Warrior => 1800,
-            UnitKind::Preacher => 1100,
-            UnitKind::Spy => 600,
-            UnitKind::Firewarrior => 700,
-        }
+        self.stats().life
     }
 
     /// World units per tick on flat ground: spies are the quickest, warriors and preachers the slowest.
@@ -306,8 +299,6 @@ pub struct Unit {
     pub action: Action,
     /// Pieces of wood carried (braves, 0 or 1).
     pub carrying: u8,
-    /// Ticks counted towards the next health point gained (or lost while stranded).
-    pub(crate) regen: u8,
     /// Waypoints left on the way to `Walking::to`, next one last.
     route: Vec<(u16, u16)>,
     /// Ground revision (`Ground::revision`) the route was planned on; None = plan on the next tick.
@@ -373,7 +364,6 @@ impl Unit {
             statuses: Statuses::default(),
             action: Action::Idle,
             carrying: 0,
-            regen: 0,
             route: Vec::new(),
             planned_on: None,
             teleport_to: None,
@@ -594,7 +584,7 @@ impl Unit {
     }
 
     /// One simulation step. `site` is where the unit reincarnates.
-    pub fn tick(&mut self, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
+    pub fn tick(&mut self, now: Tick, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
         let terrain = ground.terrain();
         if self.motion.airborne() {
             let below = |(x, z): (u16, u16)| terrain.height_at(x as u32, z as u32, WORLD_UNITS_PER_CELL);
@@ -609,9 +599,8 @@ impl Unit {
             (self.teleport_to, self.spell) = (None, None);
         }
         match self.action {
-            Action::Idle | Action::Hammering | Action::Worshipping { .. } => self.heal(),
+            Action::Idle | Action::Hammering | Action::Worshipping { .. } => {}
             Action::AroundFire { fire, point } => {
-                self.heal();
                 let next = (point + 1) % campfire::RING_POINTS;
                 let pace = self.kind.speed() * AROUND_FIRE_PACE.0 / AROUND_FIRE_PACE.1;
                 // Blocked (the sea or a cliff across the ring): aim for the point after.
@@ -640,7 +629,6 @@ impl Unit {
                     self.plan(to, ground, true);
                 }
                 if let Action::Walking { .. } = self.action {
-                    self.heal();
                     self.follow_route(to, ground);
                     if self.action == Action::Idle {
                         if let Some((fire, point)) = self.to_fire.take() {
@@ -659,7 +647,7 @@ impl Unit {
                             self.action = Action::Worshipping { site };
                         }
                     }
-                } else if self.hurt() {
+                } else if self.hurt(now) {
                     return Some(UnitEvent::Died);
                 }
             }
@@ -763,24 +751,26 @@ impl Unit {
         None
     }
 
-    fn heal(&mut self) {
-        if self.health.is_full() {
-            self.regen = 0;
-            return;
-        }
-        self.regen += 1;
-        if self.regen as u32 >= REGEN_EVERY.get() {
-            self.regen = 0;
-            self.health.heal(HEALTH_STEP);
+    /// Whether it heals on a `HEAL_EVERY` turn: alive and on the ground, fighting or not, but not while drowning or
+    /// stranded (losing life), nor for a kind that never heals.
+    pub fn heals(&self) -> bool {
+        self.kind.stats().heal.is_some()
+            && self.is_alive()
+            && !self.motion.airborne()
+            && !matches!(self.action, Action::Drowning | Action::Stranded { .. })
+    }
+
+    /// Its turn of healing (`HEAL_EVERY`), if it `heals`.
+    pub fn heal(&mut self) {
+        if let Some(points) = self.kind.stats().heal.filter(|_| self.heals()) {
+            self.health.heal(points);
         }
     }
 
-    /// Stranded: one health point lost every few ticks; true when that kills her.
-    fn hurt(&mut self) -> bool {
-        self.regen += 1;
-        if self.regen as u32 >= STRANDED_HURT_EVERY.get() {
-            self.regen = 0;
-            self.health.damage(HEALTH_STEP);
+    /// Stranded: `STRANDED_DAMAGE` lost on its `STRANDED_HURT_EVERY` turns; true when that kills her.
+    fn hurt(&mut self, now: Tick) -> bool {
+        if STRANDED_HURT_EVERY.fires(now, self.id) {
+            self.health.damage(STRANDED_DAMAGE);
         }
         if self.health.is_zero() {
             self.die();
@@ -805,13 +795,14 @@ impl Unit {
         }
     }
 
-    /// Loses `amount` health (`GameMap::damage` decides whether it is hurt at all); true when that kills it.
+    /// Loses `amount` health (`GameMap::damage` decides whether it is hurt at all); true when that kills it. In the
+    /// air it falls on: death comes on landing (`touch_down`; pop3-rev-analysis.md "Health and healing").
     pub fn take_damage(&mut self, amount: u16) -> bool {
         if !self.is_alive() {
             return false;
         }
         let dead = self.health.damage(amount);
-        if dead {
+        if dead && !self.motion.airborne() {
             self.die();
         }
         dead
@@ -882,9 +873,6 @@ impl Unit {
     /// just stays idle).
     fn plan(&mut self, to: (u16, u16), ground: &impl Ground, straighten: bool) {
         let route = path::route(ground, self.mobility(), (self.x, self.z), to, straighten);
-        if route.is_none() && matches!(self.action, Action::Walking { .. }) {
-            self.regen = 0;
-        }
         let walled = ground.walled((cell_of(to.0), cell_of(to.1)));
         self.action = match route {
             Some(_) => Action::Walking { to },
@@ -1036,12 +1024,12 @@ mod tests {
     }
 
     fn run(u: &mut Unit, t: &Heightmap, site: &ReincarnationSite, ticks: usize) -> Vec<UnitEvent> {
-        (0..ticks).filter_map(|_| u.tick(t, Some(site))).collect()
+        (1..=ticks).filter_map(|k| u.tick(Tick::from_wire(k as u32), t, Some(site))).collect()
     }
 
     fn run_until(u: &mut Unit, t: &Heightmap, site: &ReincarnationSite, done: impl Fn(&Unit) -> bool) -> usize {
         (1..500).find(|_| {
-            u.tick(t, Some(site));
+            u.tick(Tick::ZERO, t, Some(site));
             done(u)
         }).unwrap()
     }
@@ -1116,7 +1104,7 @@ mod tests {
         u.panic((PANIC_REACH as i16, 0));
         run(&mut u, &t, &site, 10);
         assert_eq!((u.inside, u.x), (None, door.0), "out by the door, then the run");
-        u.tick(&t, Some(&site));
+        u.tick(Tick::ZERO, &t, Some(&site));
         assert_eq!(u.x, door.0 + PANIC_SPEED as u16);
     }
 
@@ -1125,7 +1113,7 @@ mod tests {
         let t = land();
         let (mut u, site) = shaman_at((127, 0));
         u.order(Order::MoveTo { x: 256, z: u.z });
-        u.tick(&t, Some(&site));
+        u.tick(Tick::ZERO, &t, Some(&site));
         assert_eq!(u.x, 127 * 512 + 256 + SHAMAN_SPEED as u16);
         assert_eq!(u.facing, 2);
     }
@@ -1157,7 +1145,7 @@ mod tests {
             let to = (to_cell as u16 * 512 + 256, u.z);
             u.order(Order::MoveTo { x: to.0, z: to.1 });
             (1..500).find(|_| {
-                u.tick(&t, Some(&site));
+                u.tick(Tick::ZERO, &t, Some(&site));
                 u.action == Action::Idle
             })
         };
@@ -1175,7 +1163,7 @@ mod tests {
     fn walk(u: &mut Unit, t: &Heightmap, site: &ReincarnationSite, to: (u16, u16), max: usize) -> Option<usize> {
         u.order(Order::MoveTo { x: to.0, z: to.1 });
         (1..=max).find(|_| {
-            u.tick(t, Some(site));
+            u.tick(Tick::ZERO, t, Some(site));
             assert!(!is_sea(t, u.cell()), "in the sea at {:?}", u.cell());
             u.action == Action::Idle
         })
@@ -1240,9 +1228,9 @@ mod tests {
         let start = (u.x, u.z);
         let to = (20 * 512 + 256, u.z);
         u.order(Order::MoveTo { x: to.0, z: to.1 });
-        run(&mut u, &t, &site, 3 * STRANDED_HURT_EVERY.get() as usize);
+        run(&mut u, &t, &site, 3 * STRANDED_HURT_EVERY.period() as usize);
         assert_eq!((u.action, u.x, u.z), (Action::Stranded { to }, start.0, start.1), "arms up, not moving");
-        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH - 3 * HEALTH_STEP);
+        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH - 3 * STRANDED_DAMAGE);
         for z in 0..128 {
             for x in 15..17 {
                 t.set(x, z, 100);
@@ -1262,7 +1250,7 @@ mod tests {
         u.order(Order::Stop);
         assert_eq!(u.action, Action::Idle, "orders still work");
         u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
-        let events = run(&mut u, &t, &site, STRANDED_HURT_EVERY.get() as usize * (SHAMAN_MAX_HEALTH / HEALTH_STEP) as usize);
+        let events = run(&mut u, &t, &site, STRANDED_HURT_EVERY.period() as usize * (SHAMAN_MAX_HEALTH / STRANDED_DAMAGE) as usize);
         assert_eq!((events, u.health.current(), u.is_alive()), (vec![UnitEvent::Died], 0, false));
     }
 
@@ -1295,7 +1283,7 @@ mod tests {
         let (mut u, site) = shaman_at((10, 10));
         let spell = Spell::Blast { at: (100, 100) };
         assert!(u.cast_spell(spell));
-        let events: Vec<_> = (1..=CAST_TICKS.get()).map(|n| (n, u.tick(&t, Some(&site)))).filter(|e| e.1.is_some()).collect();
+        let events: Vec<_> = (1..=CAST_TICKS.get()).map(|n| (n, u.tick(Tick::ZERO, &t, Some(&site)))).filter(|e| e.1.is_some()).collect();
         assert_eq!(events, [(CAST_RELEASE.get(), Some(UnitEvent::Released { spell }))]);
         assert!(u.cast_spell(spell));
         u.order(Order::Stop);
@@ -1340,7 +1328,7 @@ mod tests {
         for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
             t.set(cx + dx, cz + dz, 0);
         }
-        u.tick(&t, Some(&site));
+        u.tick(Tick::ZERO, &t, Some(&site));
         assert_eq!((u.action, u.health.current()), (Action::Drowning, SHAMAN_MAX_HEALTH - DROWN_DAMAGE));
         u.order(Order::MoveTo { x: 0, z: 0 });
         assert_eq!(u.action, Action::Drowning, "no orders while drowning");
@@ -1435,7 +1423,7 @@ mod tests {
         u.fling(Velocity::new(120, 60, 0), 100);
         let mut events = Vec::new();
         while u.motion.airborne() {
-            events.extend(u.tick(&t, Some(&site)));
+            events.extend(u.tick(Tick::ZERO, &t, Some(&site)));
         }
         assert_eq!((is_sea(&t, u.cell()), events), (true, vec![UnitEvent::Died]));
         assert!(matches!(u.action, Action::Dying { .. }) && u.health.is_full(), "dies at once, the dying pose");
@@ -1473,12 +1461,41 @@ mod tests {
     }
 
     #[test]
-    fn heals_slowly_on_land() {
+    fn each_kind_heals_its_own_amount_but_never_past_full() {
+        let (s, _) = shaman_at((10, 10));
+        let healed = |kind: UnitKind| {
+            let mut u = Unit { kind, health: Health::new(100, kind.max_health()), ..s.clone() };
+            u.heal();
+            u.health.current() - 100
+        };
+        assert_eq!(UnitKind::ALL.map(healed), [32, 4, 6, 4, 4, 6, 0]);
+        let mut full = s.clone();
+        full.heal();
+        assert!(full.health.is_full());
+    }
+
+    #[test]
+    fn no_healing_in_the_air_drowning_stranded_or_dead() {
+        let (s, _) = shaman_at((10, 10));
+        let hurt = Unit { health: Health::new(100, SHAMAN_MAX_HEALTH), ..s };
+        let flung = Unit { motion: Motion::flying(Velocity::ZERO, 50), action: Action::Tumbling, ..hurt.clone() };
+        let drowning = Unit { action: Action::Drowning, ..hurt.clone() };
+        let stranded = Unit { action: Action::Stranded { to: (0, 0) }, ..hurt.clone() };
+        let dying = Unit { action: Action::Dying { left: Countdown::new(DYING_TICKS) }, ..hurt.clone() };
+        assert!(hurt.heals());
+        assert!([flung, drowning, stranded, dying].iter().all(|u| !u.heals()));
+    }
+
+    #[test]
+    fn hurt_to_death_in_the_air_it_dies_on_landing() {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
-        u.health = Health::new(1000, SHAMAN_MAX_HEALTH);
-        run(&mut u, &t, &site, 5 * REGEN_EVERY.get() as usize);
-        assert_eq!(u.health.current(), 1000 + 5 * HEALTH_STEP);
+        let ground = t.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
+        u.fling(Velocity::new(0, 40, 0), ground);
+        assert!(u.take_damage(SHAMAN_MAX_HEALTH), "a deadly blow");
+        assert_eq!(u.action, Action::Tumbling, "still flying");
+        let fall = run_until(&mut u, &t, &site, |u| !u.is_alive());
+        assert!(fall > 1 && !u.motion.airborne(), "dead once landed, after {fall} ticks");
     }
 
     #[test]

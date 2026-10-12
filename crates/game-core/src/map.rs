@@ -835,12 +835,15 @@ impl GameMap {
         dirty.extend(self.tend_coordinators());
         self.release_orphans();
         self.units.iter_mut().for_each(|u| u.statuses.tick(now, u.id));
+        if crate::unit::HEAL_EVERY.fires(now, 0) {
+            self.units.iter_mut().for_each(Unit::heal);
+        }
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing)).collect();
         let (mut events, mut gone) = (Vec::new(), Vec::new());
         for (i, unit) in self.units.iter_mut().enumerate() {
             let site = self.sites.iter().find(|s| s.owner == unit.owner);
             let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: unit.inside.map(|i| i.building) };
-            match unit.tick(&ground, site) {
+            match unit.tick(now, &ground, site) {
                 Some(UnitEvent::Reincarnated) => dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain))),
                 Some(UnitEvent::Gone) => gone.push(unit.id),
                 Some(event) => events.push((i, event)),
@@ -1532,7 +1535,7 @@ mod tests {
             for &(x, z) in hops {
                 u.order(Order::MoveTo { x, z });
                 while u.action != crate::unit::Action::Idle {
-                    u.tick(&m.terrain, None);
+                    u.tick(m.now, &m.terrain, None);
                     ticks += 1;
                 }
             }
