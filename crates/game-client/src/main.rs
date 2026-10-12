@@ -34,6 +34,7 @@ mod tooltip;
 mod totems;
 mod units;
 mod vault;
+mod views;
 mod virtual_cursor;
 mod wood;
 mod world;
