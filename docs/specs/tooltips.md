@@ -13,8 +13,8 @@ Tags: **[player]** how the game plays, as told by someone who played it, **[code
   stays there [player]. It stays shown while the cursor is on the element or on the tooltip itself, and hides once
   both lose the focus (after a short grace, `GRACE_SECS`, to cross the gap between them) [player; ours: the grace].
   So the cursor can reach the tooltip and click its slots.
-- Not over the panel, nor while a spell or a blueprint is out, like the hover halo (ui-and-editor.md "Hover
-  halo"). What can be hovered: `hover::Hovered` (units, wood pieces, trees, totems, buildings). While the
+- Not over the panel, nor while a spell or a blueprint is out (the hover halo still shows while a spell is aimed,
+  ui-and-editor.md "Hover halo"). What can be hovered: `hover::Hovered` (units, wood pieces, trees, totems, buildings). While the
   cursor is over the tooltip, the map underneath is neither hovered nor clicked.
 
 ## Layout [player]

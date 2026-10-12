@@ -173,7 +173,7 @@ impl Plugin for SpellsPlugin {
             .add_systems(
                 Update,
                 (
-                    (tile_clicks.after(crate::units::SimStep), pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput)).chain().in_set(crate::menu::Gameplay),
+                    (tile_clicks.after(crate::units::SimStep), pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput).after(crate::hover::HoverSystems)).chain().in_set(crate::menu::Gameplay),
                     update_tiles,
                     update_info,
                 )
@@ -309,6 +309,7 @@ fn aim_and_cast(
     mut schedule: ResMut<crate::units::GameSchedule>,
     mut selected: ResMut<SelectedSpell>,
     mut look: ResMut<CursorLook>,
+    hovered: Res<crate::hover::Hovered>,
 ) {
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
@@ -337,7 +338,7 @@ fn aim_and_cast(
     } else {
         map.0.shaman_of(PLAYER).map_or((0, 0), |u| (u.x, u.z))
     };
-    let target = pick(c).map(world_units);
+    let target = crate::units::selection::hovered_site(&map.0, hovered.0).or_else(|| pick(c).map(world_units));
     let spell = target.and_then(|at| ground_spell(kind, at, origin));
     let ready = player_book(&map.0).slot(kind).is_some_and(|s| s.can_cast());
     let valid = spell.filter(|s| ready && map.0.can_cast(PLAYER, s));

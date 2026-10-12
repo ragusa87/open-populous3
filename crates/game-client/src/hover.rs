@@ -215,7 +215,6 @@ fn wood_index(map: &GameMap, at: (u16, u16)) -> Option<usize> {
 fn detect(
     windows: Query<&Window>,
     ui: Query<&Interaction>,
-    spell: Res<crate::hud::spells::SelectedSpell>,
     blueprint: Res<crate::blueprint::Blueprint>,
     cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     units: Query<(&UnitView, &GlobalTransform, &Visibility), With<Hoverable>>,
@@ -236,7 +235,7 @@ fn detect(
     }
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
-    let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && spell.0.is_none() && !blueprint.is_active());
+    let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && !blueprint.is_active());
     let target = on_map.zip(cams.iter().next()).and_then(|(c, cam)| {
         let people: Vec<OnScreen> = units
             .iter()

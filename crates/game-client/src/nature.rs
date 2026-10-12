@@ -213,7 +213,7 @@ fn grow_trees(map: Res<CurrentMap>, mut models: Query<(&TreeModel, &mut Transfor
     }
 }
 
-/// Which tree is under the cursor (not over the panel, nor while a spell is aimed), and whether it
+/// Which tree is under the cursor (not over the panel), and whether it
 /// was right-clicked.
 #[allow(clippy::too_many_arguments)]
 fn hover_tree(
@@ -222,7 +222,6 @@ fn hover_tree(
     map: Res<CurrentMap>,
     windows: Query<&Window>,
     ui: Query<&Interaction>,
-    spell: Res<crate::hud::spells::SelectedSpell>,
     cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     views: Query<(&TreeView, &GlobalTransform, &Visibility, &Children)>,
     models: Query<&TreeModel>,
@@ -230,7 +229,7 @@ fn hover_tree(
 ) {
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
-    let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && spell.0.is_none());
+    let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui);
     let tree = on_map.zip(cams.iter().next()).and_then(|(c, (cam, cam_t))| {
         let on_screen: Vec<TreeOnScreen> = views
             .iter()

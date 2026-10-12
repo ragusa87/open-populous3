@@ -457,7 +457,7 @@ fn show_tooltip(
     time: Res<Time>,
     mouse: Res<ButtonInput<MouseButton>>,
     map: Res<CurrentMap>,
-    hovered: Res<crate::hover::Hovered>,
+    (hovered, spell): (Res<crate::hover::Hovered>, Res<crate::hud::spells::SelectedSpell>),
     heights: Res<ModelHeights>,
     cams: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     views: Query<(&BuildingView, &GlobalTransform)>,
@@ -472,7 +472,7 @@ fn show_tooltip(
 ) {
     let Ok((entity, interaction, computed, mut node, mut vis)) = tooltip.single_mut() else { return };
     let now = time.elapsed_secs();
-    let target = match hovered.0 {
+    let target = match hovered.0.filter(|_| spell.0.is_none()) {
         Some(crate::hover::HoverTarget::Building(i)) if i < map.0.buildings.len() => Some(Target::Building(i)),
         Some(crate::hover::HoverTarget::Tree(i)) if i < map.0.trees.len() => Some(Target::Tree(i)),
         Some(crate::hover::HoverTarget::Totem(i)) if i < map.0.totems.len() => Some(Target::Totem(i)),

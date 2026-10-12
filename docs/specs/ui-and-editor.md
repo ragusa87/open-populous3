@@ -176,7 +176,8 @@ ground under the cursor). A left click on a building uses the hovered one the sa
 spawned, not a rule in the picking: every living unit not already selected (`health`: the player's own also show their health bar),
 wood pieces, trees, totems and every building, any tribe or neutral (the player's plans are hovered too, for their tooltip,
 but have no outline). The reincarnation site gets
-none. Not over the panel, nor while a spell or a blueprint is out.
+none. Not over the panel, nor while a blueprint is out. While a spell is aimed the halo shows what it would
+land on, and the spell is cast on a hovered building or totem's centre, like a click (`hovered_site`).
 - Sprites (units, wood pieces): a quad 2.5 px larger behind the sprite with `hover_outline.wgsl`, which draws only
   the pixels within 1.5 px outside the sprite's alpha (16 samples), both sides.
 - 3D models (trees, buildings): an inverted hull, each mesh pushed out 0.03 cell along normals averaged per
