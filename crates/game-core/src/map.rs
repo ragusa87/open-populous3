@@ -349,7 +349,9 @@ impl GameMap {
     /// Test ground for units: a flat island with the player's site and shaman at the centre, three
     /// of every other kind for the player in columns to the west (one column per kind), one of each
     /// for tribe 1 (red, no shaman) in a row to the east, all in view of the starting camera (south
-    /// of the site), and a pond to the north to walk around.
+    /// of the site), and a pond to the north to walk around. Further south in the same columns, one of
+    /// each kind per marker drawn over people (`SANDBOX_MARKERS`): low health, shielded, bloodlust,
+    /// hypnotised, then all of them at once.
     pub fn sandbox_units() -> Self {
         const C: i32 = MAP_SIZE as i32 / 2;
         const ISLAND: i32 = 24;
@@ -372,6 +374,10 @@ impl GameMap {
                 map.spawn(0, kind, at(-5 - 2 * row, 2 * n - 2));
             }
             map.spawn(1, kind, at(6 + 2 * row, 0));
+            for (n, marked) in SANDBOX_MARKERS.iter().enumerate() {
+                let u = map.spawn(0, kind, at(-5 - 2 * row, 5 + 2 * n as i32));
+                marked(u);
+            }
         }
         map
     }
@@ -809,6 +815,18 @@ impl GameMap {
         dirty
     }
 }
+
+/// The rows of marked people in the units sandbox, north to south: what each row's people carry. Low health is
+/// 1 point left: they heal out of it in about 6 s.
+pub const SANDBOX_MARKERS: [fn(&mut Unit); 5] = [
+    |u| {
+        u.health.damage(u.health.max() - 1);
+    },
+    |u| u.statuses.shielded = true,
+    |u| u.statuses.bloodlust = true,
+    |u| u.statuses.hypnotized = true,
+    |u| SANDBOX_MARKERS[..4].iter().for_each(|marked| marked(u)),
+];
 
 impl GameMap {
     /// The map for one game whose random draws start from `seed`. No level stores one: the client draws it for
@@ -1610,7 +1628,17 @@ mod tests {
         assert_eq!(count(0, UnitKind::Shaman), 1);
         assert_eq!(count(1, UnitKind::Shaman), 0);
         for kind in &UnitKind::FOLLOWERS {
-            assert_eq!((count(0, *kind), count(1, *kind)), (3, 1), "{kind:?}");
+            assert_eq!((count(0, *kind), count(1, *kind)), (3 + SANDBOX_MARKERS.len(), 1), "{kind:?}");
+            let marked: Vec<&Unit> = m.units.iter().filter(|u| u.owner == 0 && u.kind == *kind).skip(3).collect();
+            let markers = |u: &Unit| [u.health.is_low(), u.statuses.shielded, u.statuses.bloodlust, u.statuses.hypnotized];
+            assert_eq!(marked.iter().map(|u| markers(u)).collect::<Vec<_>>(), [
+                [true, false, false, false],
+                [false, true, false, false],
+                [false, false, true, false],
+                [false, false, false, true],
+                [true, true, true, true],
+            ], "{kind:?}: one row per marker, then all");
+            assert!(marked.iter().all(|u| u.is_alive()));
         }
         let mut ids: Vec<u32> = m.units.iter().map(|u| u.id).collect();
         ids.dedup();
