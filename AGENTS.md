@@ -49,7 +49,10 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
 - The tick (docs/architecture.md "The tick"): a new ticking object is a typed list on `GameMap` with its own
   `tick(&mut self, now, ...)`, its rhythm an `Every` checked with phase 0 and its lengths `Countdown`s (each constant
   cites the original's name or address, or says it is a guess), events out for anything it does to others, and one
-  line in `GameMap::tick` at its place in the order. Removable objects get ids from `GameMap::new_id`.
+  line in `GameMap::tick` at its place in the order. Removable objects get ids from `GameMap::new_id` (new kinds:
+  typed `Id<T>` in a `Registry<T>`, `GameMap::new_id_of`).
+- An object coordinating several units (a fight, a sermon, a formation) is a coordinator (docs/specs/coordinators.md):
+  units link to it one way, it ticks before them and is removed when its situation ends.
 - A new spell is a recipe of effects: an `EffectKind` variant reading the map and returning `WorldEvent`s; units
   are hurt only through `GameMap::damage`.
 - World visuals follow simulation time (`sim_time::SimNow`), computed from a start tick and never accumulated per

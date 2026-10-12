@@ -63,6 +63,8 @@ Rules for every object that ticks:
   not fit where another kind's id is expected. They are kept in an `id::Registry<T>` (sorted by id, iterated in id
   order); effects are. Units and buildings still hold a raw `u32` (TODO). Whoever holds an id finds None once that object is gone: it has ended. Indices are only valid inside
   one turn.
+- **Coordinators** (docs/specs/coordinators.md): an object that coordinates several units (a fight, a sermon) is a
+  coordinator, linked one way by the units' actions and ticked before them.
 - **Randomness** is `GameMap::rng` (`Lcg`), handed to the objects that draw, in the loop's order. It is seeded
   per game (`GameMap::seeded`), never by game-core itself: the client draws a seed for each new game
   (`world::new_game`, from the clock, or `GAME_SEED`), and in multiplayer the host sends it to every peer
