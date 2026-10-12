@@ -252,6 +252,21 @@ pub fn nearest_reachable(ground: &impl Ground, mob: Mobility, from: (i32, i32), 
     best.1
 }
 
+/// How far in from a cell's edges `closest_point_in_cell` stays (world units), so the point is well inside it.
+pub const CELL_INSET: i32 = 64;
+
+/// The point of `cell` closest to `target` (world units, the short way around the torus): `target` itself when it is
+/// in the cell, else clamped inside it, `CELL_INSET` from its edges.
+pub fn closest_point_in_cell(cell: (i32, i32), target: (u16, u16)) -> (u16, u16) {
+    let half = WORLD_UNITS_PER_CELL as i32 / 2;
+    let along = |c: i32, t: u16| {
+        let centre = (c as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
+        let reach = crate::unit::torus_delta(centre, t).clamp(-(half - CELL_INSET), half - CELL_INSET);
+        if crate::unit::torus_delta(centre, t).abs() < half { t } else { centre.wrapping_add(reach as u16) }
+    };
+    (along(cell.0, target.0), along(cell.1, target.1))
+}
+
 /// Time to step between two neighbour cells, `flat` on level ground, from their centre heights.
 fn step_time(terrain: &Heightmap, mob: Mobility, a: (i32, i32), b: (i32, i32), flat: u32) -> u32 {
     let h = |(x, z): (i32, i32)| (0..4).map(|k| terrain.get(x + k % 2, z + k / 2) as i64).sum::<i64>() / 4;
@@ -497,6 +512,14 @@ mod tests {
     fn balloons_fly_straight_over_everything() {
         let t = map(&["", "", "  ^^^^", "  ^^^^", "  #####"]);
         assert_eq!(route(&t, Mobility::Fly, at((0, 3)), at((9, 3)), true), Some(vec![at((9, 3))]));
+    }
+
+    #[test]
+    fn the_closest_point_of_a_cell_to_a_target() {
+        assert_eq!(closest_point_in_cell((2, 3), (2 * 512 + 100, 3 * 512 + 400)), (2 * 512 + 100, 3 * 512 + 400), "inside: the target");
+        assert_eq!(closest_point_in_cell((2, 3), (9 * 512, 3 * 512 + 10)), (3 * 512 - CELL_INSET as u16, 3 * 512 + 10), "east: its east side");
+        assert_eq!(closest_point_in_cell((2, 3), (0, 0)), (2 * 512 + CELL_INSET as u16, 3 * 512 + CELL_INSET as u16), "north-west corner");
+        assert_eq!(closest_point_in_cell((127, 0), (100, 200)), ((65536 - CELL_INSET) as u16, 200), "across the map's edge");
     }
 
     #[test]

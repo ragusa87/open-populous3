@@ -16,8 +16,9 @@ To do: the other original spells, as traced in pop3-rev-analysis.md "Per spell" 
 does not change the terrain; Earthquake sinks a half-disc and opens a lava fissure; Volcano raises a cone with lava;
 any randomness through `map::Lcg`, never `rand`). Mana cost, charges, cast range from shaman (original values
 below, "Original balance"). Range: `cast_range` (`SP_W_RANGE` by the caster's altitude band, `GameMap::altitude`,
-+1/3 in a finished drum tower), none on a god level. Cast beyond it (`GameMap::in_cast_range`), the shaman walks towards the target (or the nearest
-ground she can reach to it) and casts as soon as she is in range (`GameMap::walk_to_cast`, `cast_when_in_range`;
++1/3 in a finished drum tower), none on a god level. Cast beyond it (`GameMap::in_cast_range`), the shaman walks as close to the target as she can,
+reachable or not (land on another island, the sea): to the point nearest it of the cell nearest it among those she
+can walk to (`path::nearest_reachable`, `path::closest_point_in_cell`), and casts as soon as she is in range (`GameMap::walk_to_cast`, `cast_when_in_range`;
 the original's walk-to-cast state): no charge is used before, another order on the way drops the cast, and she gives
 up if she stops short; without a living shaman the spell takes effect at once; nothing is cast
 while the shaman is off the ground.

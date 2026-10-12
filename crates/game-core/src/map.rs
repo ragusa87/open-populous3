@@ -526,21 +526,16 @@ impl GameMap {
     }
 
     /// The player's shaman walks towards where `spell` is aimed, to cast it once within range
-    /// (`cast_when_in_range`), if she could cast it now (`can_cast`, a charge left, none used yet): to the target,
-    /// or the nearest ground she can reach to it.
+    /// (`cast_when_in_range`), if she could cast it now (`can_cast`, a charge left, none used yet): as close to the
+    /// target as she can get, reachable or not (another island, the sea): the point nearest it of the cell nearest it
+    /// among those she can walk to (`path::nearest_reachable`, `path::closest_point_in_cell`).
     fn walk_to_cast(&mut self, player: u8, spell: Spell) {
         let charged = spell.kind().is_some_and(|k| self.spell_books.get(player as usize).and_then(|b| b.slot(k)).is_some_and(|s| s.can_cast()));
         let (Some(to), true) = (self.spell_target(&spell), charged && self.can_cast(player, &spell)) else { return };
         let Some(from) = self.shaman_of(player).map(Unit::cell) else { return };
         let goal = (crate::unit::cell_of(to.0), crate::unit::cell_of(to.1));
-        let ground = self.ground();
-        let to = if ground.passable(Mobility::Walk, goal) {
-            to
-        } else {
-            let (x, z) = crate::path::nearest_reachable(&ground, Mobility::Walk, from, goal);
-            let centre = |c: i32| (c as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
-            (centre(x), centre(z))
-        };
+        let closest = crate::path::nearest_reachable(&self.ground(), Mobility::Walk, from, goal);
+        let to = crate::path::closest_point_in_cell(closest, to);
         if let Some(u) = self.shaman_mut(player) {
             u.walk_to_cast(spell, to);
         }
@@ -1488,6 +1483,49 @@ mod tests {
         assert_eq!(m.units[0].teleport_target(), Some(to));
         m.run(crate::unit::CAST_TICKS);
         assert_eq!((m.units[0].x, m.units[0].z), to, "then on the hill top");
+    }
+
+    /// The walk sandbox with a small island east of its own, across the water, at cells `x..x + 5`.
+    fn with_island_east(x: i32) -> GameMap {
+        let mut m = GameMap::sandbox_walk();
+        m.spell_books[0].fill();
+        for px in x..=x + 5 {
+            for pz in 61..=67 {
+                m.terrain.set(px, pz, 64);
+            }
+        }
+        m
+    }
+
+    #[test]
+    fn a_target_she_cannot_reach_she_walks_to_the_nearest_shore_then_casts_from_there() {
+        let mut m = with_island_east(90);
+        let (start, target) = (m.units[0].cell(), (92, 64));
+        assert!(!crate::unit::is_sea(&m.terrain, target) && !m.in_cast_range(0, SpellKind::LandBridge, m.spell_target(&Spell::LandBridge { from: start, to: target }).unwrap()));
+        let charges = |m: &GameMap| m.spell_books[0].slot(SpellKind::LandBridge).unwrap().charges;
+        let before = charges(&m);
+        m.apply(&Command::Cast { player: 0, spell: Spell::LandBridge { from: start, to: target } });
+        assert!(matches!(m.units[0].action, Action::Walking { .. }), "on her way though the island is out of reach");
+        let cast = (1..1200).find(|_| {
+            m.tick();
+            charges(&m) < before
+        });
+        assert!(cast.is_some(), "cast once in range");
+        assert!(m.units[0].cell().0 > start.0 + 10, "walked east towards it: {:?}", m.units[0].cell());
+    }
+
+    #[test]
+    fn too_far_even_from_the_nearest_shore_she_goes_there_and_casts_nothing() {
+        let mut m = with_island_east(108);
+        let (start, target) = (m.units[0].cell(), (110, 64));
+        let charges = |m: &GameMap| m.spell_books[0].slot(SpellKind::LandBridge).unwrap().charges;
+        let before = charges(&m);
+        m.apply(&Command::Cast { player: 0, spell: Spell::LandBridge { from: start, to: target } });
+        m.run(Ticks::secs(30));
+        let u = &m.units[0];
+        assert_eq!((u.action, u.walking_to_cast(), charges(&m)), (Action::Idle, None, before), "gave up, no charge used");
+        assert!(u.cell().0 >= start.0 + 18, "but on the shore nearest it: {:?}", u.cell());
+        assert!(m.effects.is_empty());
     }
 
     #[test]
