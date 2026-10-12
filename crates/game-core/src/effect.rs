@@ -2,7 +2,7 @@
 //! its own rhythm for its own length. An effect reads the map and changes only itself: what it does to others
 //! comes out as `WorldEvent`s, which `GameMap::tend_effects` applies in order (architecture.md "The tick").
 
-use crate::event::WorldEvent;
+use crate::event::{PushKind, WorldEvent};
 use crate::map::{GameMap, Lcg};
 use crate::spell::Cell;
 use crate::terrain::Heightmap;
@@ -104,9 +104,9 @@ pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
     }
 }
 
-/// Whether a push moves `u`: not a shielded unit.
-pub fn pushes(u: &Unit) -> bool {
-    !u.statuses.shield.is_on()
+/// Whether a push of `kind` moves `u`: a spell's not a shielded unit.
+pub fn pushes(u: &Unit, kind: PushKind) -> bool {
+    kind == PushKind::Melee || !u.statuses.shield.is_on()
 }
 
 #[cfg(test)]
@@ -135,7 +135,7 @@ pub(crate) mod tests {
             if self.every.fires(now, 0) {
                 let near = |u: &&Unit| torus_delta(at.0, u.x).abs().max(torus_delta(at.1, u.z).abs()) <= 512;
                 for u in world.units.iter().filter(near) {
-                    events.push(WorldEvent::Push { unit: u.id, vel: Velocity::new(0, 60, 0) });
+                    events.push(WorldEvent::Push { unit: u.id, vel: Velocity::new(0, 60, 0), kind: PushKind::Spell });
                     events.push(WorldEvent::Damage { unit: u.id, amount: 1, kind: DamageKind::Blast, from: Some(owner) });
                 }
             }
@@ -212,7 +212,7 @@ pub(crate) mod tests {
         let before = map.units.clone();
         for event in [
             WorldEvent::Damage { unit: Id::from_raw(9999), amount: 50, kind: DamageKind::Blast, from: Some(1) },
-            WorldEvent::Push { unit: Id::from_raw(9999), vel: Velocity::new(0, 60, 0) },
+            WorldEvent::Push { unit: Id::from_raw(9999), vel: Velocity::new(0, 60, 0), kind: PushKind::Spell },
             WorldEvent::Raid { building: Id::from_raw(9999) },
         ] {
             assert_eq!(map.apply_event(event), (None, Vec::new()));

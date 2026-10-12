@@ -4,7 +4,7 @@
 //! `PUSH_RANGE`, of any tribe but the caster's own shaman, is pushed away and up, once.
 
 use crate::effect::{DamageKind, Effect, EffectKind};
-use crate::event::WorldEvent;
+use crate::event::{PushKind, WorldEvent};
 use crate::motion::Velocity;
 use crate::time::{Countdown, Ticks};
 use crate::unit::{isqrt, torus_delta, Unit, UnitId, UnitKind};
@@ -45,7 +45,7 @@ impl SimpleBlast {
             let pushable = !(u.owner == owner && u.kind == UnitKind::Shaman) && !self.pushed.contains(&u.id);
             if let Some(vel) = push(at, (u.x, u.z), reach).filter(|_| pushable) {
                 self.pushed.push(u.id);
-                events.push(WorldEvent::Push { unit: u.id, vel });
+                events.push(WorldEvent::Push { unit: u.id, vel, kind: PushKind::Spell });
             }
             if push(at, (u.x, u.z), radius).is_some() {
                 events.push(WorldEvent::Damage { unit: u.id, amount: DAMAGE_PERSON, kind: DamageKind::Blast, from: Some(owner) });

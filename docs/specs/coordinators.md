@@ -29,7 +29,7 @@ computer, pop3-rev-analysis.md "Mana rules"), and will name whoever plays an AI 
 |---|---|---|
 | `Id<T>` | `id.rs` | `u32` with the kind in its type: an `Id<Fight>` does not fit where an `Id<Sermon>` is expected. `raw` / `from_raw` for the wire and tests. |
 | `Registry<T>` | `id.rs` | Objects of one kind by id, a `Vec` sorted by id: `insert` (a fresh id only), `get`, `get_mut`, `contains`, `iter` in id order, `retain`. Clone and PartialEq, no HashMap. Effects use it too. |
-| `Coordinator` | `coordinator.rs` | The trait of a kind: `tick(&mut self, id, now, &GameMap, &mut Lcg) -> Step`. |
+| `Coordinator` | `coordinator.rs` | The trait of a kind: `link_of(&Unit)` (its units' link) and `tick(&mut self, id, members, now, &GameMap, &mut Lcg) -> Step`; `members` are found once per kind and turn (`tick_kind`). |
 | `Coordinators` | `coordinator.rs` | `GameMap::coordinators`: one `Registry` per kind. `tick` runs the kinds in one written order (`tick_kind` per kind); `exists(Link)`. |
 | `Link` | `coordinator.rs` | What a unit's action points at: one variant per kind, wrapping its `Id`. |
 | `participants` | `coordinator.rs` | The reverse view: the units linked to each coordinator of one kind, built once when needed (who is still in it; AI script counts later). |
@@ -45,7 +45,7 @@ for each variant:
 | Variant | Rule |
 |---|---|
 | `Damage { unit, amount, kind, from }` | `GameMap::damage`, the one hurt path (`effect::hurts`: shielded units, the attacker's tribe for a blast); `from` the attacker's tribe, if any |
-| `Push { unit, vel }` | `Unit::fling`, not the shielded |
+| `Push { unit, vel, kind }` | `Unit::fling`; a `PushKind::Spell` push spares the shielded, a `Melee` one (a fighter's shove or knock) does not |
 | `SetFire { building }` | `GameMap::set_fire` (`fire`): occupants out by the door, one piece of wood lost, burning; a `Panic` per occupant |
 | `Panic { unit }` | `Unit::panic`: `Action::Panicking`, a random heading from `GameMap::rng` (`unit::panic_heading`) |
 | `Raid { building }` | routed, no behaviour yet |

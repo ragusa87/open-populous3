@@ -1008,8 +1008,8 @@ impl GameMap {
                 self.damage(unit, amount, kind, from);
                 None
             }
-            WorldEvent::Push { unit, vel } => {
-                if let Some(i) = self.unit_index(unit).filter(|&i| crate::effect::pushes(&self.units[i])) {
+            WorldEvent::Push { unit, vel, kind } => {
+                if let Some(i) = self.unit_index(unit).filter(|&i| crate::effect::pushes(&self.units[i], kind)) {
                     let u = &self.units[i];
                     let ground = self.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
                     self.units[i].fling(vel, ground);

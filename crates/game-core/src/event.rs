@@ -12,7 +12,8 @@ use std::collections::VecDeque;
 pub enum WorldEvent {
     /// Hurts through `GameMap::damage`, the one hurt path; `from` is the attacker's tribe, if any.
     Damage { unit: UnitId, amount: u16, kind: DamageKind, from: Option<u8> },
-    Push { unit: UnitId, vel: Velocity },
+    /// Throws the unit (`Unit::fling`), unless its `kind` of push spares it (`effect::pushes`).
+    Push { unit: UnitId, vel: Velocity, kind: PushKind },
     Panic { unit: UnitId },
     Raid { building: BuildingId },
     SetFire { building: BuildingId },
@@ -23,6 +24,14 @@ pub enum WorldEvent {
     Terrain(TerrainChange),
     /// The unit leaves its coordinator (`Unit::release`); nothing if it is in none.
     Release { unit: UnitId },
+}
+
+/// What throws a unit, for its immunities.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PushKind {
+    Spell,
+    /// A fighter's shove or knock: the shield does not stop it, and it stays in its fight (combat.md).
+    Melee,
 }
 
 /// Applies `batch` in order with `apply`; what `apply` returns comes after the whole batch, never in its middle.

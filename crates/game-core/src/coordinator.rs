@@ -20,7 +20,10 @@ pub struct Step {
 
 /// One kind of coordinator. It reads the map as it was before any coordinator ticked, changes only itself.
 pub trait Coordinator: Sized {
-    fn tick(&mut self, id: Id<Self>, now: Tick, world: &GameMap, rng: &mut Lcg) -> Step;
+    /// The coordinator of this kind `u` links to, if any.
+    fn link_of(u: &Unit) -> Option<Id<Self>>;
+    /// Its turn; `members`: the units linked to it, in unit order.
+    fn tick(&mut self, id: Id<Self>, members: &[UnitId], now: Tick, world: &GameMap, rng: &mut Lcg) -> Step;
 }
 
 /// A unit's link to its coordinator (`Action::link`), one variant per kind.
@@ -56,11 +59,13 @@ impl Coordinators {
     }
 }
 
-/// The turn of every coordinator of one kind, in id order; the finished ones are removed.
+/// The turn of every coordinator of one kind, in id order, its members found once for all; the finished ones are
+/// removed.
 pub fn tick_kind<C: Coordinator>(list: &mut Registry<C>, now: Tick, world: &GameMap, rng: &mut Lcg, events: &mut Vec<WorldEvent>) {
+    let members = participants(&world.units, C::link_of);
     let mut finished = Vec::new();
     for (id, c) in list.iter_mut() {
-        let step = c.tick(id, now, world, rng);
+        let step = c.tick(id, members.get(&id).map_or(&[], Vec::as_slice), now, world, rng);
         events.extend(step.events);
         if step.finished {
             finished.push(id);
@@ -97,12 +102,17 @@ pub(crate) mod tests {
     }
 
     fn link_of(u: &Unit) -> Option<Id<Gathering>> {
-        u.action.link().map(|Link::Gathering(id)| id)
+        <Gathering as Coordinator>::link_of(u)
     }
 
     impl Coordinator for Gathering {
-        fn tick(&mut self, id: Id<Self>, _now: Tick, world: &GameMap, rng: &mut Lcg) -> Step {
-            let units = participants(&world.units, link_of).remove(&id).unwrap_or_default();
+        fn link_of(u: &Unit) -> Option<Id<Self>> {
+            match u.action.link()? {
+                Link::Gathering(id) => Some(id),
+            }
+        }
+
+        fn tick(&mut self, _id: Id<Self>, units: &[UnitId], _now: Tick, _world: &GameMap, rng: &mut Lcg) -> Step {
             let mut events = Vec::new();
             if self.hurt {
                 events.extend(units.iter().map(|&unit| WorldEvent::Damage { unit, amount: 1 + (rng.next_u32() % 3) as u16, kind: DamageKind::Blast, from: None }));
