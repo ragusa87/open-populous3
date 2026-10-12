@@ -10,8 +10,6 @@ use crate::unit::Unit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Effect {
-    /// From `GameMap::new_id`, given when the effect is added (`GameMap::add_effect`).
-    pub id: u32,
     /// The caster's tribe.
     pub owner: u8,
     /// Where it stands, world units.
@@ -57,7 +55,7 @@ pub enum TerrainChange {
 
 impl Effect {
     pub fn new(owner: u8, (x, z): (u16, u16), left: Countdown, kind: EffectKind) -> Self {
-        Effect { id: 0, owner, x, z, left, kind }
+        Effect { owner, x, z, left, kind }
     }
 
     /// One turn at `now`: its work on its own rhythm, then one turn less to go.
@@ -158,11 +156,22 @@ pub(crate) mod tests {
         map.tick();
         assert!(map.unit(enemy).unwrap().motion.airborne(), "pushed, then its own tick flew it");
         assert_eq!(map.unit(enemy).unwrap().health.current(), max - 1);
-        assert_eq!(map.effects.iter().map(|e| e.id).collect::<Vec<_>>(), [long, other]);
+        assert_eq!(map.effects.ids().collect::<Vec<_>>(), [long, other]);
         map.tick();
-        assert_eq!(map.effects.iter().map(|e| e.id).collect::<Vec<_>>(), [long]);
+        assert_eq!(map.effects.ids().collect::<Vec<_>>(), [long]);
         map.tick();
         assert!(map.effects.is_empty());
+    }
+
+    #[test]
+    fn an_id_is_never_given_again_after_its_effect_ends() {
+        let (mut map, _, at) = with_enemy();
+        let first = map.add_effect(probe(0, at, 1, 1));
+        map.tick();
+        assert!(map.effects.is_empty());
+        let second = map.add_effect(probe(0, at, 1, 1));
+        let other: crate::id::Id<Unit> = map.new_id_of();
+        assert!(first < second && second.raw() < other.raw(), "one counter for every kind");
     }
 
     #[test]
@@ -170,11 +179,11 @@ pub(crate) mod tests {
         let (mut map, _, at) = with_enemy();
         let parent = map.add_effect(Effect { kind: EffectKind::Probe(Probe { every: Every::new(1), spawn: true }), ..probe(0, at, 1, 3) });
         map.tick();
-        let child = map.effects.iter().find(|e| e.id != parent).expect("spawned");
-        assert!(child.id > parent);
-        assert_eq!(child.left.left(), Ticks::new(5), "not ticked yet");
+        let (child, effect) = map.effects.iter().find(|(id, _)| *id != parent).expect("spawned");
+        assert!(child > parent);
+        assert_eq!(effect.left.left(), Ticks::new(5), "not ticked yet");
         map.tick();
-        assert_eq!(map.effects.iter().find(|e| e.id != parent).unwrap().left.left(), Ticks::new(4));
+        assert_eq!(map.effects.get(child).unwrap().left.left(), Ticks::new(4));
     }
 
     #[test]

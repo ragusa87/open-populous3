@@ -54,7 +54,9 @@ Rules for every object that ticks:
   two objects at once.
 - **Stable ids.** Units, buildings and effects get an id from `GameMap::new_id` (via `spawn`, `add_building`,
   `add_effect`), never given twice, so each list stays sorted by id and lookups (`unit`, `building`) are binary
-  searches. Whoever holds an id finds None once that object is gone: it has ended. Indices are only valid inside
+  searches. New kinds use typed ids (`id::Id<T>`, from `GameMap::new_id_of`, the same counter): an `Id<Effect>` does
+  not fit where another kind's id is expected. They are kept in an `id::Registry<T>` (sorted by id, iterated in id
+  order); effects are. Units and buildings still hold a raw `u32` (TODO). Whoever holds an id finds None once that object is gone: it has ended. Indices are only valid inside
   one turn.
 - **Randomness** is `GameMap::rng` (`Lcg`), handed to the objects that draw, in the loop's order. It is seeded
   per game (`GameMap::seeded`), never by game-core itself: the client draws a seed for each new game
@@ -65,7 +67,7 @@ Rules for every object that ticks:
 
 ### Spell effects
 A spell is a recipe of components (pop3-rev-analysis.md "From cast to effect"): later a shot flies, then on arrival
-effects are added. An `Effect` (`effect.rs`) has an id, the caster's tribe, a position, `left` (a `Countdown`) and
+effects are added. An `Effect` (`effect.rs`, kept in `GameMap::effects`, a `Registry<Effect>` that holds its id) has the caster's tribe, a position, `left` (a `Countdown`) and
 an `EffectKind` variant carrying only its own data (`SimpleBlast`). `tend_effects` takes the list out of the map
 (`std::mem::take`), so each `Effect::tick(now, &map, &mut rng)` reads the whole map without cloning it and returns
 `EffectEvent`s; finished effects are dropped (order kept), the list is put back, then the events apply in order:

@@ -10,18 +10,22 @@ says whether a spell applies at its target; `GameMap::apply` ignores a cast that
 | Erode | radius 4 lowered by 120 (falloff) |
 | Raise | editor brush, radius 3 +64 |
 | Teleport | sandbox only (the original names a spell model 21 teleport, see below, effect unknown): the caster's living shaman does her cast jump, then is at the target (`Unit::cast_teleport`); only onto ground she can walk (`Mobility::Walk`: no sea, no cliff), checked when cast and again when she lands (she stays if it no longer is); another order during the jump cancels it; she lands falling from a cell up (units.md "Landing") |
-| Blast | aimed on the ground (`hud::spells::ground_spell`): the shaman's cast jump, and at once (no shot flying there yet) a simple blast effect at the target (`blast::effect`, in `GameMap::effects`): the original's simple blast, 3 turns at radius 2, 4 then 5 cells. Each turn every living person outside buildings in the radius takes `BLAST_DAMAGE_PERSON` 50 (`GameMap::damage`: not the caster's tribe, not the shielded); each living person of any tribe but the caster's own shaman, not inside a building, within the turn's radius and 2.5 cells (`PUSH_RANGE` 1280) is flung once (`Unit::fling`): away from the centre at 140 and up at 98 (world / height units per tick), times `(1280 - d) / 1280`, then tumbles and falls (units.md "Physics"). Dev: `BLAST=x,z` (cells, cast by another tribe), `BLAST_TICKS=N` |
+| Blast | aimed on the ground (`hud::spells::ground_spell`): the shaman's cast jump, and at once (no shot flying there yet) a simple blast effect at the target (`blast::effect`, in `GameMap::effects`): the original's simple blast, 3 turns at radius 2, 4 then 5 cells. Each turn every living person outside buildings in the radius takes `BLAST_DAMAGE_PERSON` 50 (`GameMap::damage`: not the caster's tribe, not the shielded); each living person of any tribe but the caster's own shaman, not inside a building, within the turn's radius and 2.5 cells (`PUSH_RANGE` 1280) is flung once (`Unit::fling`): away from the centre at 140 and up at 98 (world / height units per tick), times `(1280 - d) / 1280`, then tumbles and falls (units.md "Physics"). The original pushes again on each turn the person is still within 2.5 cells, scales the push by the slope and treats allies apart (pop3-rev-analysis.md "Blast push and flight"; TODO). Dev: `BLAST=x,z` (cells, cast by another tribe), `BLAST_TICKS=N` |
 
-To do: Swamp (surface type), Earthquake (seeded noise along a line - use `map::Lcg`, never `rand`),
-Volcano (cone + lava layer), Angel of Death, Firestorm... Mana cost, charges, cast range from shaman (original
-values below, "Original balance").
+To do: the other original spells, as traced in pop3-rev-analysis.md "Per spell" (Swamp kills people on its cells and
+does not change the terrain; Earthquake sinks a half-disc and opens a lava fissure; Volcano raises a cone with lava;
+any randomness through `map::Lcg`, never `rand`). Mana cost, charges, cast range from shaman (original values
+below, "Original balance").
+Our Land Bridge, Flatten and Erode differ from the original's (pop3-rev-analysis.md "Per spell"): its land bridge
+is 4 cells wide with a minimum height of 90 and builds over 62 turns; its flatten levels a 45-cell disc (about 3.5
+cells) in 15 turns; its erosion is a hydraulic simulation over 63 turns on 8 × 8 cells.
 After every cast: update normals, walkability and destroy buildings on uneven/flooded ground.
 Spells must only be cast through `Command::Cast` to stay deterministic.
 
 ## Effects (`game_core::effect`)
 In the original a cast flies a shot to the target, which spawns reusable components there (pop3-rev-analysis.md
-"From cast to effect", "Components"); the components do the work. Ours: `GameMap::effects`, a list of `Effect`
-(id, caster's tribe, position, `left` turns, `EffectKind` with only its own data), ticked once per turn before the
+"From cast to effect", "Components"); the components do the work. Ours: `GameMap::effects`, a `Registry<Effect>` (by
+`Id<Effect>`) of `Effect` (caster's tribe, position, `left` turns, `EffectKind` with only its own data), ticked once per turn before the
 units (`GameMap::tend_effects`, architecture.md "The tick"). An effect reads the map and returns `EffectEvent`s:
 `Damage` (through `GameMap::damage`, the one place for immunities: shielded units, the caster's own tribe for a
 blast), `Push` (`Unit::fling`, not the shielded), `Spawn` (a new effect, ticking from the next turn), `Terrain`
@@ -135,17 +139,17 @@ Reading the columns:
 - Charges: `SP_1_OFF_MAX` ("one-off max") is how many charges a spell holds, the panel's 1-4 count [exe]. Our
   `SpellKind::max_charges()` derives 4/2/1 from the cost instead, which gets tornado, hypnotism, swamp and
   flatten (3) and lightning (4) wrong.
-- `_OPT_S` is in seconds per the comments. Its meaning is unverified: probably the charge time of one charge at
-  a reference income ("optimum").
+- `_OPT_S` is in seconds per the comments. It is not a recharge or cooldown time: the original only reads it in the
+  advisor's mana bookkeeping, and no per-spell cooldown exists, only a 1 s cooldown after any human cast [exe].
 - Range is the cast distance from the shaman in world units (512 per cell).
   - It is scaled by the caster's altitude: `ALT_BAND_0..7_SPELL_INCR` give 80, 90, ..., 150 % from the lowest
     band to the highest.
   - Firewarriors' shots use the same scaling (`ALT_BAND_x_SUPER_INCR`).
-  - How heights map to the 8 bands is unknown. A guess is the height divided into 8 equal bands up to the map's
-    maximum.
+  - The caster's band is `clamp(z >> 7, 0, 7)`, 128 height units per band, interpolated linearly to the next
+    band [exe]. A shaman in a finished drum tower gets +1/3.
   - Teleport's 65 536 (128 cells) is the farthest any point can be along one axis of the 256-cell torus, so it
-    reads as "no limit". Every other range is 6-16 cells. Unverified whether the original checks it; our
-    sandbox teleport has no range limit.
+    reads as "no limit". Every other range is 6-16 cells. The original checks the range in the interface and the
+    shaman's walk-to-cast, not again when the command runs [exe]; our sandbox teleport has no range limit.
   - Convert has the longest real range (16 cells), and blast, angel of death and volcano the shortest (6).
 
 Effect constants:
@@ -153,11 +157,11 @@ Effect constants:
 |---|---|---|
 | `HYPNO_COUNT_X8`, `INVISIBLE_COUNT_X8`, `SHIELD_COUNT_X8`, `BLOODLUST_COUNT_X8` | 55, 180, 180, 180 | duration in turns / 8 (440, 1440 turns) |
 | `HYPNO_NUM_PEOPLE`, `INVIS_NUM_PEOPLE`, `SHIELD_NUM_PEOPLE`, `BLOODLUST_NUM_PEOPLE` | 6 each | people affected per cast |
-| `LIGHTNING_NUM_KILLS` | 6 | |
+| `LIGHTNING_NUM_KILLS` | 6 | at most this + 1 people killed in the target cell [exe] |
 | `SWARM_PERSON_DAMAGE` | 100 | |
-| `FIRESTORM_DURATION` | 220 | turns? |
+| `FIRESTORM_DURATION` | 220 | turns (18.3 s): one fireball every 4 turns [exe] |
 | `LAND_BRIDGE_MAX_CHANGE`, `LAND_BRIDGE_DURATION` | 256, 64 | height change limit, build time |
-| `AOD_KILL_COUNT`, `AOD_DURATION`, `LIFE_AOD`, `BLAST_DAMAGE_AOD` | 40, 2500, 10 000, 10 | the angel: kills, lifetime, hit points, damage it takes from blast |
+| `AOD_KILL_COUNT`, `AOD_DURATION`, `LIFE_AOD`, `BLAST_DAMAGE_AOD` | 40, 2500, 10 000, 10 | the angel: kills, lifetime (turns), hit points; the exe's matching constant is `SW_BLAST_DAMAGE_AOD` (firewarrior shots against an angel, % of `SW_BLAST_DAMAGE`), so this unprefixed file name may not apply (unverified) |
 | `BLOODLUST_DAMAGE_X`, `BLOODLUST_HEALTH_X`, `BLOODLUST_SW_BLAST_X` | 3 each | multipliers |
 | `DME_RESTORE_TIME` | 6000 | unknown |
-| `LSME_DURATION_SECS` | 120 | unknown |
+| `LSME_DURATION_SECS` | 120 | length of the timed landscape-shaping mode, where erosion, land bridge and flatten get 5 charges [exe] |

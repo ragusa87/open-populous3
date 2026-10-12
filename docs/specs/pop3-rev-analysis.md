@@ -373,7 +373,7 @@ not again when the command is executed.
 ### Components
 | Component | Effect | What it does |
 |---|---|---|
-| Simple blast | 7/0x01, 0x4E (spell blast), 0x38 | 3 turns; radius 2, 4, 5 cells. Each turn every non-allied person within the radius takes `BLAST_DAMAGE_PERSON` (exe 50, not in the file), so up to 150; pushed within 2.5 cells (140 horizontal, +98 up, × (1280 − d) / 1280). Buildings take `BLAST_DAMAGE_BLDG` (exe 40) once, vehicles 50 per turn. Allies: no damage, at most `BLAST_FRIEND_AFFECT` (5) pushed, on the last turn. Not pushed: own shaman, angel of death; immune: shielded units. Ghosts in the centre cell are removed. |
+| Simple blast | 7/0x01, 0x4E (spell blast), 0x38 | 3 turns; radius 2, 4, 5 cells. Each turn every non-allied person within the radius takes `BLAST_DAMAGE_PERSON` (exe 50, not in the file), so up to 150; pushed each turn within 2.5 cells, cumulatively (140 outward, +98 up, × (1280 − d) / 1280, scaled by the slope: "Blast push and flight"). Buildings take `BLAST_DAMAGE_BLDG` (exe 40) once, vehicles 50 per turn. Allies: no damage, at most `BLAST_FRIEND_AFFECT` (5) pushed, on the last turn. Not pushed: own shaman, angel of death; immune: shielded units. Ghosts in the centre cell are removed. |
 | Burn cell | 7/0x05 | Once, on the target cell: trees, plants, wood piles and fires start burning. No damage to people. |
 | Lightning | 7/0x1E | On the target cell: sets the building on fire, burns trees (or lights a fire), and a simple blast. |
 | Fireball shots | 8/4 (blast, firestorm), 8/7 and 8/8 (volcano) | Fly or fall to a point; on impact a simple blast (firestorm's also panics everyone it hits), smoke, and a short fire. |
@@ -385,16 +385,53 @@ Shared person and building states:
 - **Panic** (person state 0x1A): runs at a random heading at speed 110, screaming, for 64 turns (5.3 s).
 - **On fire** (person state 31): runs about and loses `LIFE_<type>` / 32 per turn for 70 turns, so dies in about
   32 turns (2.7 s).
-- **Fall**: landing at vertical speed ≤ −200 costs `FALL_OUT_OF_WW_DAMAGE` (exe 700, not in the file).
-  Gravity 32 per turn.
+- **Fall**: landing at vertical speed ≤ −100 raises dust and a sound; ≤ −200 costs `FALL_OUT_OF_WW_DAMAGE` (exe 700,
+  not in the file), except on cells whose terrain has flag 2 (probably water). Gravity 32 per turn.
 - **Burning building**: 127 turns (10.6 s); occupants thrown out and panicked; one structural hit of 100 wood; a
   building with no wood left is destroyed.
+
+### Blast push and flight
+Each turn of a simple blast (0x50B740), for every person it may push in its current radius:
+```text
+d     = horizontal distance to the centre (2D, wrapping, square root; 0x4503F0), clamped to 0..R    R = 1280
+f     = (R − d) / R                               # 1 at the centre, 0 from 2.5 cells on: no push, damage only
+angle = direction from the centre to the unit     # straight outward, no randomness
+len   = 140 × f, then the slope rule              # 0x4E93F0
+h     = ground(unit) − ground(unit + 32 units along the push)
+len  += len × clamp(|h|, 1, 16) / 16 if h ≥ 0 else −that; at least 3
+vel.x += len × sin(angle); vel.z += len × cos(angle)        # added to the velocity, not replacing it
+vel.y += 98 × f
+flags  : airborne (+0xC |= 0x2000 | 0x80000)
+```
+- The slope rule gives ×1.06 on flat ground, up to ×2 when the ground falls away along the push, and almost
+  nothing (3) against a rising one.
+- The pushes add up: a person still within 2.5 cells on the 2nd and 3rd turn is pushed again, less as it got
+  farther. Not pushed: the caster's shaman, angels of death, shielded units, units inside something (+0x9F);
+  allies only on the last turn, at most `BLAST_FRIEND_AFFECT` (5).
+
+Then every turn, the person physics step (0x4E6D00) with the person movement profile (braves and specialists):
+
+| Rule | Value |
+|---|---|
+| Velocity caps | 192 on each horizontal axis, 512 vertical (profile +0x8 / +0xA and +0xC / +0xE) |
+| Gravity | 32 per turn off the vertical speed (profile +0x12) |
+| Air drag | 2 per turn off each horizontal axis, towards 0 |
+| In the air | the unit spins: its heading turns by 147 (of 2048, about 26°) per turn; a scream when it takes off (one sound for the player's shaman, another for other shamans, a third for others rising faster than 90) |
+| Landing | vertical speed ≤ −100: dust (7/3) and a sound; ≤ −200: `FALL_OUT_OF_WW_DAMAGE` (700), not on terrain with flag 2 |
+| On the ground | a slope vector (gradient over ±76 units, 0x4EBC20) is added: the unit slides downhill; friction takes 28 per turn off each horizontal axis (profile +0x14), 72 on terrain with flags 0x3E (+0x16); the unit faces where it slides |
+
+Worked examples (hand estimates, flat ground, not measured):
+- Hit once at the centre: 149 outward and 98 up; it rises about 200, lands after about 8 turns at about −126
+  (dust, no damage), having travelled about 2.2 cells in the air and 0.8 sliding: about 3 cells.
+- At the centre on all 3 turns: the vertical kicks add up (98, then about 153, then about 196); it rises about
+  950 and lands at about −220: 700 fall damage on top of the 150 blast damage, 850 of a brave's 1000. Horizontal
+  speed reaches the 192 cap.
 
 ### Per spell
 | # | Spell (file cost, range, charges) | Mechanism |
 |---|---|---|
 | 1 | Burn (exe 12 000; not castable) | Standard shot, burn cell, smoke, explosion. No damage to people. |
-| 2 | Blast (10 000, 3072, 4) | Fireball shot, then simple blast, burn cell, smoke, explosion. |
+| 2 | Blast (10 000, 3072, 4) | Fireball shot, then simple blast, burn cell, smoke, explosion. No thrown state: people are pushed (see "Blast push and flight"), and only a hard landing hurts them. |
 | 3 | Lightning (80 000, 6144, 4) | Kills outright up to `LIGHTNING_NUM_KILLS` + 1 (file 7) people in the single target cell, any tribe except the caster's shaman, angels of death and shielded units: own followers and enemy shamans die too. Plus the lightning component. |
 | 4 | Whirlwind (90 000, 4096, 3) | 200 + 24 turns (18.7 s), 120 units per turn. Wanders around the target for 100 turns, then drifts away. Lifts every person in its own cell, any tribe, for 12-19 turns, then throws them: the landing costs 700. Each turn a building in its cell has a 25 % chance to lose 100 wood (a hut survives 3, a temple 8); trees lose 100 wood (50 %); library and prison immune; vehicles get a simple blast. |
 | 5 | Insect plague (40 000, 6144, 4) | 60 insects for 200 turns (16.7 s), at most 6 cells from the target. Every 8 turns, enemies in its 3 × 3 cells take `SWARM_PERSON_DAMAGE` (100) and panic; shamans and angels immune; ghosts destroyed. Up to 3 times it raids an enemy building: occupants thrown out, damaged and panicked. |
@@ -550,6 +587,14 @@ movement profiles of wildmen, the angel of death and creatures.
     implement (see "Per spell");
   - Teleport moves the caster's own shaman, as our sandbox teleport does; its range is effectively unlimited.
 
+- spells.md Blast and units.md "Physics" (`blast::effect`, `Unit::fling`, `physics::step`): ours flings each person
+  once; the original pushes again on each of the 3 turns while the person is within 2.5 cells (cumulative), scales
+  the horizontal push by the slope, pushes allies only on the last turn (at most 5), never pushes angels of death
+  or units inside something. Ours has no velocity caps, air drag, spin, ground sliding or friction yet (192 / 512
+  caps, drag 2, a 26° turn per turn in the air, friction 28 or 72 per turn, downhill slide), no dust below −100 and no fall damage. Our speeds are per
+  tick (10 per second) where the original's are per turn (12 per second): the same numbers fly about 17 % slower
+  and lower in time. The original does not kill a unit landing in the sea outright (no fall damage on water
+  cells; what follows is not traced).
 - units.md `Walking`: ours walks at 64 units per tick, 10 ticks per second, 1.25 cells per second for every kind.
   The original brave walks 1.64-2.05 cells per second (`BRAVE_SPEED` 70 per turn, + up to 25 % per walk), and
   each type has its own speed (firewarriors the slowest). About 82-102 of our units per tick would match a brave.
@@ -576,6 +621,8 @@ movement profiles of wildmen, the angel of death and creatures.
 - Prayer: the vault (library trigger) branch, what the "contest" countdown at trigger+0x6F does when several tribes
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
 
+- Blast: what happens to a person landing in water, and measured flights (position, velocity and life per turn of
+  a blown brave) to check the estimates of "Blast push and flight".
 - Walking: whether slopes change the speed, and the speeds of wildmen, the angel of death and creatures.
 - Projection: the per-axis screen scale (0xAFC2F4 + 0xCF8 / 0xCFC), which decides the on-screen height ratio, and
   which views (zoom levels, cut scenes) change the render block.
@@ -644,6 +691,9 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x416F50, 0x46E700 | render block defaults (K 46 000), copy into the draw state |
 | 0x4D4F40, 0x4D6660 | walk speed: `SPEED + rand % (SPEED / 4)`, doubled when bloodlusted, to unit+0x5F |
 | 0x4E6A70 | move a position by length and angle |
+| 0x4E93F0 | add a push to a velocity, scaled by the slope along it |
+| 0x4EBC20 | slope vector at a position (ground sliding) |
+| 0x4503F0 | horizontal distance between two positions (wrapping, square root) |
 | 0x50C780, 0x50C840 | "prepare rs land" (7/8): init (site height at tribe+0x915), levelling per turn |
 | 0x41C140, 0x41C520 | landscape-shaping mode start and end: sites rebuilt at the shamans, pillars from 0x5A9F10 |
 
@@ -739,7 +789,7 @@ of 0x89C661.
 | person types | 0x5A7060 | 0x32 | `MANA_F_` +0xE, `LIFE_` +0x10, `WOOD_` +0x14, `FIGHT_DAMAGE_` +0x1B, chop time (u8, not a named constant) +0x1D, `CONV_` +0x1F, tower detection radius +0x22, `SW_BLAST_DAMAGE_` +0x2C |
 | building types | 0x5A7228 | 0x4C | `WOOD_` +0x1A, next size +0x34 (u8), growth target +0x36 (2400, not a named constant), mana factor +0x38, `MAX_POP_VALUE__HUT_` +0x3A, `HUT_SPROG_TIME` +0x3C, flags +0x48 (bit 10: breeds; bit 6: holds wood) |
 | scenery types | 0x5A79B0 | 0x18 | object +0x0A (12: 30), `TREE_WOOD_VALUE` +0x4, `TREE_WOOD_GROW` +0x6, `TREE_DORMANT_TIME` +0x8, flags +0x14 |
-| movement profiles | 0x5A7B90 | 0x1A | speed +0x4 (`<TYPE>_SPEED`: brave profile 2, warrior 14, preacher 15, spy 16, firewarrior 17, shaman 18), flags +0x18; `WALK_ALT_DIFF2` copied into +0x10 for flagged profiles |
+| movement profiles | 0x5A7B90 | 0x1A | speed +0x4 (`<TYPE>_SPEED`: brave profile 2, warrior 14, preacher 15, spy 16, firewarrior 17, shaman 18), velocity caps +0x8 / +0xA and +0xC / +0xE (horizontal / vertical: 192 / 512 for persons), `WALK_ALT_DIFF2` +0x10 (copied for flagged profiles), gravity +0x12 (32), ground friction +0x14 (28) / +0x16 (72), flags +0x18 |
 | spells | 0x5A80D0 | 0x3E | kind +0x00 (1 normal, 2 hidden), cost (u32) +0x4, id +0x8, flags +0x1A (bit 0 castable) and +0x1B (0x40 homing), `SP_W_RANGE_` +0x1E, mode-0x20 range +0x22, shot without shaman +0x26, shot from shaman +0x27, effects +0x28..+0x2C, `SP_1_OFF_MAX_` +0x2D, mode-0x20 charges (`LSME_1_OFF_MAX_`) +0x2E, deflectable +0x2F, sound +0x30, enemy-cast alert +0x35/+0x36, `OPT_S` +0x3A |
 
 - The shipped `constant.dat` wins over the exe defaults, e.g. `SPELL_BLAST` 18 000 in the exe and 10 000 in the

@@ -5,6 +5,7 @@ use crate::campfire::{self, Campfire};
 use crate::command::Command;
 use crate::effect::{DamageKind, Effect, EffectEvent, TerrainChange};
 use crate::path::{Ground, Mobility, Walled, Walls};
+use crate::id::{Id, Registry};
 use crate::slots;
 use crate::spell::Spell;
 use crate::build_book::{BuildAvailability, BuildBook};
@@ -61,7 +62,7 @@ pub struct GameMap {
     /// An original level's object bank (header byte 97): its tree style. 0 elsewhere.
     pub object_bank: u8,
     /// Spell effects going on (`effect::Effect`), in the order they were added.
-    pub effects: Vec<Effect>,
+    pub effects: Registry<Effect>,
     /// Ticks run since the map was made (`tick`).
     pub now: Tick,
     /// The next id `new_id` gives: units, buildings and effects share it, an id is never given twice.
@@ -111,7 +112,7 @@ fn per_player<T: Clone>(t: T) -> Vec<T> {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, effects: Vec::new(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, effects: Registry::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -144,7 +145,7 @@ impl GameMap {
             walls: Walls::default(),
             start_camera: None,
             object_bank: 0,
-            effects: Vec::new(),
+            effects: Registry::default(),
             now: Tick::ZERO,
             next_id: 1,
             rng: Lcg(0),
@@ -666,6 +667,11 @@ impl GameMap {
         id
     }
 
+    /// A fresh id for a `T`, from the same counter as `new_id`.
+    pub fn new_id_of<T>(&mut self) -> Id<T> {
+        Id::from_raw(self.new_id())
+    }
+
     /// A new unit with a fresh id, last in `units` (which stays sorted by id).
     pub fn spawn(&mut self, owner: u8, kind: UnitKind, at: (u16, u16)) -> &mut Unit {
         let id = self.new_id();
@@ -704,10 +710,9 @@ impl GameMap {
     }
 
     /// Adds `e` with a fresh id, last in `effects`; its id.
-    pub fn add_effect(&mut self, mut e: Effect) -> u32 {
-        e.id = self.new_id();
-        let id = e.id;
-        self.effects.push(e);
+    pub fn add_effect(&mut self, e: Effect) -> Id<Effect> {
+        let id = self.new_id_of();
+        self.effects.insert(id, e);
         id
     }
 
@@ -715,8 +720,8 @@ impl GameMap {
     /// events apply in order (`apply_effect`); returns the ground they changed.
     fn tend_effects(&mut self) -> Vec<DirtyRect> {
         let (mut effects, mut rng) = (std::mem::take(&mut self.effects), self.rng);
-        let events: Vec<(u8, EffectEvent)> = effects.iter_mut().flat_map(|e| e.tick(self.now, self, &mut rng).into_iter().map(|ev| (e.owner, ev)).collect::<Vec<_>>()).collect();
-        effects.retain(|e| !e.is_over());
+        let events: Vec<(u8, EffectEvent)> = effects.iter_mut().flat_map(|(_, e)| e.tick(self.now, self, &mut rng).into_iter().map(|ev| (e.owner, ev)).collect::<Vec<_>>()).collect();
+        effects.retain(|_, e| !e.is_over());
         (self.effects, self.rng) = (effects, rng);
         events.into_iter().filter_map(|(owner, event)| self.apply_effect(owner, event)).collect()
     }
