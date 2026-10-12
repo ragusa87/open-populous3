@@ -13,7 +13,9 @@
 //! the Spells tab.
 //! `VIDEO=secs` instead of `SCREENSHOT`: the same setup, then `secs` seconds recorded from `SHOT_FRAME` straight
 //! into `video::VIDEO_PATH` (`video.rs`). The clock steps exactly one video frame per rendered frame (none during
-//! the warm-up), so the video plays at true speed.
+//! loading and the warm-up), so the video plays at true speed.
+//! Frames (`SHOT_FRAME`, 10 by default) count from the end of loading (`boot::Loaded`), so captures never include
+//! the boot; `SHOT_BOOT=1` counts them from launch instead, to shoot the loading screen.
 
 use crate::camera::CameraRig;
 use crate::units::{world_units, PLAYER};
@@ -264,7 +266,8 @@ pub fn video_frame(frame: u32, start: u32, frames: u32) -> Option<u32> {
 #[allow(clippy::too_many_arguments)]
 fn screenshot(
     mut commands: Commands,
-    mut frame: Local<u32>,
+    mut counted: Local<Option<u32>>,
+    mut loaded: MessageReader<crate::boot::Loaded>,
     mut rig: ResMut<CameraRig>,
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<crate::world::TerrainDirty>,
@@ -279,7 +282,17 @@ fn screenshot(
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(capture) = Capture::from_env(|k| std::env::var(k).ok()) else { return };
-    let shot = std::env::var("SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(90);
+    let shot = std::env::var("SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
+    let from_launch = std::env::var("SHOT_BOOT").is_ok_and(|v| v == "1");
+    if loaded.read().count() > 0 || from_launch {
+        counted.get_or_insert(0);
+    }
+    let Some(frame) = counted.as_mut() else {
+        if matches!(capture, Capture::Video { .. }) {
+            *clock = TimeUpdateStrategy::ManualDuration(Duration::ZERO);
+        }
+        return;
+    };
     *frame += 1;
     if *frame == 1 && std::env::var("AERIAL").is_ok() {
         rig.toggle_aerial();

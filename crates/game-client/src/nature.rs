@@ -155,8 +155,9 @@ impl Plugin for NaturePlugin {
     }
 }
 
-fn load_models(mut commands: Commands, assets: Res<AssetServer>) {
-    let scenes = MODELS.iter().map(|m| assets.load(GltfAssetLabel::Scene(0).from_asset(format!("3d/nature/{m}.gltf")))).collect();
+fn load_models(mut commands: Commands, assets: Res<AssetServer>, mut tracked: ResMut<crate::boot::TrackedAssets>) {
+    let scenes: Vec<Handle<WorldAsset>> = MODELS.iter().map(|m| assets.load(GltfAssetLabel::Scene(0).from_asset(format!("3d/nature/{m}.gltf")))).collect();
+    tracked.0.extend(scenes.iter().map(|h| h.clone().untyped()));
     commands.insert_resource(TreeModels(scenes));
 }
 

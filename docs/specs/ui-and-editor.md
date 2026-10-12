@@ -26,8 +26,8 @@ stays up there and looks down more steeply, so cliffs between it and the focus n
 H flies the camera to the player's reincarnation site (nothing on maps without one), Space (or a click on her
 preview) to the shaman: a quick 0.4 s flight (`CameraRig::fly_to`, eased, the short way around the torus) rather
 than a jump; pushing the camera by hand cancels it.
-Camera readout (`camera_debug.rs`, bottom right, F3 hides it): frames per second and frame time (Bevy's smoothed
-`FrameTimeDiagnosticsPlugin`, on screen only), focus, the game angle it looks along (0-2047, as in a
+Camera readout (`camera_debug.rs`, bottom right, F3 hides it): frames per second and frame time (measured on the wall
+clock and smoothed, `camera_debug::FrameRate`, so captures show the real rate too; on screen only), focus, the game angle it looks along (0-2047, as in a
 level header's start camera), yaw, tilt, distance, fov, the eye's position (game frame, cells), and the
 `FOCUS`/`DISTANCE`/`PITCH`/`YAW` variables that give the same view in `just shot`. The same readout is printed
 to stdout on one line once the camera has stayed still 0.4 s after a change (`SettledLog`). G toggles the cell grid on the
@@ -123,6 +123,15 @@ The player's units at a glance, as a matrix in the panel's width (204 px), and a
   wood, a door, a place to pray or a fire), or inside a building that is not a built hut. A unit walking on a plain
   move, or out of a hut, is idle.
 
+## Loading screen (`boot/`)
+`AppState::Loading` is where the client starts, and where it goes when a game or sandbox starts: a title, a bar and
+the current step (`boot::screen::screen_text`), on the menu's backdrop with the game camera off. At launch the boot
+jobs run (`boot::BootJob`: today the unit sprites, read and upscaled on a worker thread, uploaded on the main thread;
+"Unit sprites 7/15"), then the models Bevy loads in the background are waited for (`boot::TrackedAssets`: "Models
+1/2"; a failed one counts as done). Starting a game draws "Preparing the map" for `boot::SHOW_FRAMES` frames, then
+builds the map (`menu::begin_game` on `boot::BeginGame`), then plays. The end of a loading pass sends `boot::Loaded`
+and enters a `ready` span: captures (`dev`) and `tools/trace_top.py` count from there.
+
 ## Main menu (`menu.rs`)
 Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list: the original
 `levlNNNN.dat` files in level-number order, any file name case, `world::sort_levels`),
@@ -134,7 +143,7 @@ Esc in the game (once an open view-presets menu is closed) pauses: the mouse is 
 and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Game speed: x1/x2/x4/x8 (cycles), Dev mode: on/off (shortcuts.md), Main menu >
 "Leave this game?" No / Yes.
 Resuming or starting a game captures the mouse again.
-`AppState::Menu | Playing | Paused`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
+`AppState::Loading | Menu | Playing | Paused`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
 while playing. Behind the menu the game camera is off (no terrain, units or HUD drawn); the menu and the cursor
 are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship` picks the start; screenshots start in the game by default.
 

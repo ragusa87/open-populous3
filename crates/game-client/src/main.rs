@@ -2,6 +2,7 @@
 //! `--no-original` (or `POP3_NO_ORIGINAL=1`) never reads the original game files.
 
 mod blueprint;
+mod boot;
 mod buildings;
 mod campfire;
 mod chimney;
@@ -92,7 +93,7 @@ fn main() {
             hover::HoverPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,
-            menu::MenuPlugin,
+            (menu::MenuPlugin, boot::BootPlugin),
             keymap::KeymapPlugin,
             game_speed::GameSpeedPlugin,
             dev::DevPlugin,

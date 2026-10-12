@@ -1,11 +1,12 @@
 //! Camera readout in the bottom-right corner, in dev mode (F3 hides it): frames per second, focus, angle, tilt,
-//! distance, fov, eye, and the `just shot` variables that reproduce the view. The same readout goes to stdout on one line each time
+//! distance, fov, eye, and the `just shot` variables that reproduce the view. The frame rate is measured on the wall
+//! clock (`FrameRate`), not Bevy's `Time`, which captures step by hand (frozen while loading, 1/30 s a frame in a
+//! video): it shows the real rate in the window, a screenshot or a video alike. The same readout goes to stdout on one line each time
 //! the camera settles after a change (wheel, keys, drag, scrolling), to note views while tuning.
 
 use crate::camera::{CameraRig, GameCamera};
 use crate::game_frame::GamePos;
 use crate::keymap::{DevMode, Shortcut, Shortcuts};
-use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use std::f32::consts::TAU;
 
@@ -13,9 +14,6 @@ pub struct CameraDebugPlugin;
 
 impl Plugin for CameraDebugPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<FrameTimeDiagnosticsPlugin>() {
-            app.add_plugins(FrameTimeDiagnosticsPlugin::default());
-        }
         app.add_systems(Startup, spawn_readout).add_systems(Update, (toggle_readout, update_readout, log_settled).chain());
     }
 }
@@ -82,6 +80,27 @@ pub fn readout(rig: &CameraRig, eye: Vec3) -> String {
     )
 }
 
+/// Smoothing of the frame time: each frame weighs this much in the average.
+const FPS_SMOOTHING: f64 = 0.1;
+
+/// The frame time between rendered frames on the wall clock, smoothed.
+#[derive(Default)]
+pub struct FrameRate {
+    last: Option<std::time::Instant>,
+    secs: Option<f64>,
+}
+
+impl FrameRate {
+    /// A frame drawn at `now`; the smoothed frames per second, once two frames were seen.
+    pub fn frame(&mut self, now: std::time::Instant) -> Option<f64> {
+        if let Some(last) = self.last.replace(now) {
+            let dt = now.duration_since(last).as_secs_f64();
+            self.secs = Some(self.secs.map_or(dt, |s| s + (dt - s) * FPS_SMOOTHING));
+        }
+        self.secs.filter(|s| *s > 0.0).map(|s| 1.0 / s)
+    }
+}
+
 /// The frame rate line (smoothed frames per second and frame time), dashes until measured.
 pub fn fps_line(fps: Option<f64>) -> String {
     match fps.filter(|f| *f > 0.0) {
@@ -112,12 +131,12 @@ fn toggle_readout(keys: Shortcuts, mut hidden: Local<bool>, mut q: Query<&mut Vi
 
 fn update_readout(
     rig: Res<CameraRig>,
-    diagnostics: Res<DiagnosticsStore>,
+    mut rate: Local<FrameRate>,
     cam: Query<&Transform, With<GameCamera>>,
     mut q: Query<&mut Text, With<CameraReadout>>,
 ) {
     let Ok(eye) = cam.single() else { return };
-    let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed());
+    let fps = rate.frame(std::time::Instant::now());
     let s = format!("{}\n{}", fps_line(fps), readout(&rig, eye.translation));
     for mut t in &mut q {
         if t.0 != s {
@@ -150,6 +169,17 @@ mod tests {
         assert_eq!(log.update("c", 2.1), None, "moving again");
         assert_eq!(log.update("d", 2.3), None);
         assert_eq!(log.update("d", 2.8).as_deref(), Some("d"), "only where it stopped");
+    }
+
+    #[test]
+    fn the_wall_clock_rate_is_smoothed() {
+        let start = std::time::Instant::now();
+        let at = |ms: u64| start + std::time::Duration::from_millis(ms);
+        let mut r = FrameRate::default();
+        assert_eq!(r.frame(at(0)), None, "one frame: nothing to measure");
+        assert!((r.frame(at(20)).unwrap() - 50.0).abs() < 1e-6, "the first interval as is");
+        let fps = r.frame(at(30)).unwrap();
+        assert!(fps > 50.0 && fps < 100.0, "a fast frame moves the average part of the way: {fps}");
     }
 
     #[test]

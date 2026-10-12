@@ -26,8 +26,11 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   flattening a site, every few ticks) `run_ticks` marks `CurrentMap` changed, and trees (re-reading their original
   meshes), sites, buildings, unit views, shadows and totems all despawn and rebuild. Those views should only
   re-ground on `world::TerrainPatches`, and rebuild on a real change of their list.
-- [ ] Startup: `load_sprites` takes 6.5 s (Scale2x twice on every frame of every kind and tribe); recolour tribes in
-  the shader or a palette swap, cache the result, or bake in parallel.
+- [ ] Startup: the unit sprites take about 6.5 s (Scale2x twice on every frame of every kind and tribe), now a boot job
+  off the main thread behind the loading screen (`units::UnitSpritesJob`); still to shorten: one job per kind to use
+  every core, recolour tribes in the shader or a palette swap, or cache the result. Other loaders could become boot
+  jobs (markers, dust, wood, tooltip icons, cursor: each under 10 ms today), and the map's own work at a game start
+  (terrain bake, tree meshes) too.
 - [ ] Measure the windowed release build too (`cargo run --release`): the numbers above are the dev build under
   tracing. The simulation only matters with many units: every walker replans A* on any terrain write
   ("Replanning" in Units).

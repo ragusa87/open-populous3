@@ -91,6 +91,15 @@ rhythm as an `Every`, its length as `left`), returning events; add a `DamageKind
 effect where the spell lands (`GameMap::apply`, later on a shot's arrival); test it on a small map (`effect.rs`
 tests show how).
 
+## Client: boot jobs
+Heavy loading never holds the first frames: it is a `boot::BootJob` (`boot/mod.rs`), whose `run` does the CPU work on
+a worker thread (`AsyncComputeTaskPool`) from an `Input` copied out of the world, reporting `Progress` steps, and
+whose `install` puts the `Output` in the world on the main thread (GPU uploads, resources). `BootJobPlugin::<J>`
+registers one: started on entering `AppState::Loading`, its task held in its own typed slot, installed when done;
+`BootStatus` is what the loading screen shows. A job's CPU half takes plain data: for the unit sprites,
+`units::prepare_frame` makes a `PreparedFrame` (the only way to get one) and `units::upload_prepared` uploads it.
+Assets Bevy loads itself (glTF scenes) are pushed to `boot::TrackedAssets` and waited for too.
+
 ## Client: world visuals
 Two clocks (`sim_time.rs`):
 - **Simulation time** for everything drawn in the world: units, smoke, dust, flames, nods, shakes, later spell

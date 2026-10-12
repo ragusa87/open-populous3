@@ -12,6 +12,7 @@ use crate::game_speed::GameSpeed;
 use crate::hud::spells::SelectedSpell;
 use crate::units::selection::Selection;
 use crate::virtual_cursor::VirtualCursor;
+use crate::boot::BeginGame;
 use crate::world::{new_game, CurrentMap, LevelList, TerrainDirty};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -26,7 +27,9 @@ const ITEM: Color = Color::srgba(0.30, 0.18, 0.06, 0.9);
 
 #[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppState {
+    /// The loading screen (`boot`): at launch, and while a game's map is built.
     #[default]
+    Loading,
     Menu,
     Playing,
     Paused,
@@ -188,9 +191,6 @@ pub fn start_from_env(start: Option<&str>, screenshot: bool) -> Option<Start> {
     }
 }
 
-#[derive(Resource)]
-struct InitialStart(Option<Start>);
-
 #[derive(Component)]
 struct MenuRoot;
 #[derive(Component)]
@@ -205,17 +205,18 @@ pub struct MenuPlugin;
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         let start = start_from_env(std::env::var("POP3_START").ok().as_deref(), crate::dev::Capture::from_env(|k| std::env::var(k).ok()).is_some());
-        app.insert_state(if start.is_some() { AppState::Playing } else { AppState::Menu })
-            .insert_resource(InitialStart(start))
+        app.insert_state(AppState::Loading)
+            .insert_resource(crate::boot::LoadTarget::Boot { then: start })
             .init_resource::<MenuNav>()
             .configure_sets(Update, Gameplay.run_if(in_state(AppState::Playing)))
-            .add_systems(Startup, (spawn_menu, initial_start))
+            .add_systems(Startup, spawn_menu)
+            .add_systems(Update, begin_game.after(crate::boot::LoadingSystems))
             .add_systems(Update, pause_on_escape.before(crate::virtual_cursor::toggle_capture).in_set(Gameplay))
             .add_systems(
                 Update,
                 (menu_keys.before(crate::virtual_cursor::toggle_capture), menu_mouse, rebuild_items, item_visuals)
                     .chain()
-                    .run_if(not(in_state(AppState::Playing))),
+                    .run_if(in_state(AppState::Menu).or_else(in_state(AppState::Paused))),
             )
             .add_systems(Update, show_state.run_if(state_changed::<AppState>));
     }
@@ -234,6 +235,7 @@ pub struct View {
 
 pub fn view(state: AppState) -> View {
     match state {
+        AppState::Loading => View { game: false, clear: Some(BACKDROP), menu: None },
         AppState::Menu => View { game: false, clear: Some(BACKDROP), menu: Some(Color::NONE) },
         AppState::Playing => View { game: true, clear: None, menu: None },
         AppState::Paused => View { game: true, clear: None, menu: Some(DIM) },
@@ -290,9 +292,11 @@ fn spawn_menu(mut commands: Commands, overlay: Single<Entity, With<OverlayCamera
         });
 }
 
-fn initial_start(initial: Res<InitialStart>, mut game: GameSetup) {
-    if let Some(start) = initial.0 {
-        game.begin(start);
+/// Builds the map of a game the loading pass starts (`boot::BeginGame`), behind the loading screen.
+fn begin_game(mut begins: MessageReader<BeginGame>, mut game: GameSetup) {
+    for BeginGame(start) in begins.read() {
+        game.begin(*start);
+        game.cursor.request = Some(true);
     }
 }
 
@@ -311,6 +315,7 @@ struct GameSetup<'w> {
     speed: ResMut<'w, GameSpeed>,
     schedule: ResMut<'w, crate::units::GameSchedule>,
     clock: ResMut<'w, crate::units::SimClock>,
+    target: ResMut<'w, crate::boot::LoadTarget>,
 }
 
 impl GameSetup<'_> {
@@ -351,9 +356,8 @@ pub(crate) fn pause_on_escape(
 fn apply(outcome: Option<Outcome>, game: &mut GameSetup, nav: &mut MenuNav, state: &mut NextState<AppState>, exit: &mut MessageWriter<AppExit>) {
     match outcome {
         Some(Outcome::Start(s)) => {
-            game.begin(s);
-            game.cursor.request = Some(true);
-            state.set(AppState::Playing);
+            *game.target = crate::boot::LoadTarget::game(s);
+            state.set(AppState::Loading);
         }
         Some(Outcome::Resume) => {
             game.cursor.request = Some(true);

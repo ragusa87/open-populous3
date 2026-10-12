@@ -1,6 +1,6 @@
 import unittest
 
-from trace_top import totals
+from trace_top import ready_at, totals
 
 
 class TotalsTest(unittest.TestCase):
@@ -15,6 +15,22 @@ class TotalsTest(unittest.TestCase):
         total, calls = totals(events)
         self.assertEqual((total["system: a"], calls["system: a"]), (8, 2))
         self.assertEqual(total["frame"], 7)
+
+    def test_only_after_ready_unless_asked(self):
+        events = [
+            {"ph": "B", "ts": 0, "tid": 1, "name": "boot"},
+            {"ph": "E", "ts": 10, "tid": 1, "name": "boot"},
+            {"ph": "B", "ts": 10, "tid": 1, "name": "ready"},
+            {"ph": "E", "ts": 10, "tid": 1, "name": "ready"},
+            {"ph": "B", "ts": 12, "tid": 1, "name": "frame"},
+            {"ph": "E", "ts": 15, "tid": 1, "name": "frame"},
+        ]
+        since = ready_at(events)
+        self.assertEqual(since, 10)
+        self.assertNotIn("boot", totals(events, since)[0])
+        self.assertEqual(totals(events, since)[0]["frame"], 3)
+        self.assertEqual(totals(events)[0]["boot"], 10)
+        self.assertIsNone(ready_at(events[:2]))
 
 
 if __name__ == "__main__":

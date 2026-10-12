@@ -18,7 +18,7 @@ pub mod worship;
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{render_pos, Grounded};
 use crate::world::{CurrentMap, LevelList, TerrainPatches};
-use art::{frame_index, pose_for, sprite_dir, Frame, Pose, TribeArt};
+use art::{frame_index, pose_for, sprite_dir, Frame, Pose};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -246,71 +246,118 @@ impl Plugin for UnitsPlugin {
             .init_resource::<GameSchedule>()
             .init_resource::<UnitSprites>()
             .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin, markers::MarkersPlugin))
-            .add_systems(Startup, load_sprites)
+            .add_plugins(crate::boot::BootJobPlugin::<UnitSpritesJob>::default())
             .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks.in_set(SimStep), respawn_views, animate_views.in_set(UnitViews)).chain().in_set(crate::menu::Gameplay))
             .add_systems(PostUpdate, pull_to_eye.before(TransformSystems::Propagate));
     }
 }
 
-fn load_sprites(
-    levels: Res<LevelList>,
-    mut sprites: ResMut<UnitSprites>,
-    mut images: ResMut<Assets<Image>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
-) {
-    // Original animations when allowed, else the open-source sheets, else generated figures.
-    let originals = levels.original.then(|| art::Originals::load(&levels.data_dir).map_err(|e| warn!("original unit sprites: {e}")).ok()).flatten();
-    let art: Vec<Vec<TribeArt>> = UnitKind::ALL
-        .iter()
-        .map(|&kind| {
-            let original = originals.as_ref().and_then(|o| o.art(kind).map_err(|e| warn!("original {kind:?} sprites: {e}")).ok());
-            original.or_else(|| sheets::sheet_art(kind)).unwrap_or_else(|| {
-                info!("{kind:?}: generated sprites");
-                art::generated_art(kind)
-            })
-        })
-        .collect();
-    let mut upload = |f: &Frame| upload_frame(f, &mut images, &mut meshes, &mut mats);
-    sprites.kinds = art
-        .iter()
-        .map(|tribes| {
-            tribes
-                .iter()
-                .map(|t| t.poses.iter().map(|dirs| dirs.iter().map(|frames| frames.iter().map(&mut upload).collect()).collect()).collect())
-                .collect()
-        })
-        .collect();
+/// The unit sprites, made at boot (`boot::BootJob`): each kind's art from the original files when allowed, else the
+/// open-source sheets, else generated figures, every frame prepared off the main thread, then uploaded.
+pub struct UnitSpritesJob;
+
+/// Where the unit art comes from.
+pub struct UnitArtSource {
+    original: Option<std::path::PathBuf>,
 }
 
-/// Uploads a frame: pixel art (scale 1) upscaled with Scale2x and filtered linearly, edges bled so
-/// they do not darken; an unlit quad anchored at the feet, cut out, or blended when the frame has
-/// see-through pixels (alpha sprites, `art::alpha_picture_frame`).
-pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> FrameAsset {
+/// Every frame of every kind and tribe, prepared: `[kind][tribe][pose][dir][frame]`.
+pub type PreparedKinds = Vec<Vec<Vec<Vec<Vec<PreparedFrame>>>>>;
+
+impl crate::boot::BootJob for UnitSpritesJob {
+    const LABEL: &'static str = "Unit sprites";
+    type Input = UnitArtSource;
+    type Output = PreparedKinds;
+
+    fn input(world: &World) -> UnitArtSource {
+        let levels = world.resource::<LevelList>();
+        UnitArtSource { original: levels.original.then(|| levels.data_dir.clone()) }
+    }
+
+    fn steps(_: &UnitArtSource) -> u32 {
+        1 + 2 * UnitKind::ALL.len() as u32
+    }
+
+    fn run(source: UnitArtSource, progress: crate::boot::Progress) -> PreparedKinds {
+        let originals = source.original.and_then(|dir| art::Originals::load(&dir).map_err(|e| warn!("original unit sprites: {e}")).ok());
+        progress.step();
+        UnitKind::ALL
+            .iter()
+            .map(|&kind| {
+                let original = originals.as_ref().and_then(|o| o.art(kind).map_err(|e| warn!("original {kind:?} sprites: {e}")).ok());
+                let tribes = original.or_else(|| sheets::sheet_art(kind)).unwrap_or_else(|| {
+                    info!("{kind:?}: generated sprites");
+                    art::generated_art(kind)
+                });
+                progress.step();
+                let prepared = tribes.iter().map(|t| t.poses.iter().map(|dirs| dirs.iter().map(|frames| frames.iter().map(prepare_frame).collect()).collect()).collect()).collect();
+                progress.step();
+                prepared
+            })
+            .collect()
+    }
+
+    fn install(kinds: PreparedKinds, world: &mut World) {
+        world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
+            world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
+                world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {
+                    let mut upload = |f: PreparedFrame| upload_prepared(f, &mut images, &mut meshes, &mut mats);
+                    let kinds = kinds
+                        .into_iter()
+                        .map(|tribes| tribes.into_iter().map(|poses| poses.into_iter().map(|dirs| dirs.into_iter().map(|frames| frames.into_iter().map(&mut upload).collect()).collect()).collect()).collect())
+                        .collect();
+                    world.resource_mut::<UnitSprites>().kinds = kinds;
+                });
+            });
+        });
+    }
+}
+
+/// A frame ready to upload: upscaled and edge-bled (`prepare_frame`, the only way to make one), with its quad's size
+/// and feet in base pixels and whether it is drawn blended.
+pub struct PreparedFrame {
+    pixels: Frame,
+    size: Vec2,
+    origin: Vec2,
+    blended: bool,
+}
+
+/// The CPU half of an upload: pixel art (scale 1) upscaled with Scale2x, edges bled so linear filtering does not
+/// darken them; blended when the frame has see-through pixels (alpha sprites, `art::alpha_picture_frame`).
+pub fn prepare_frame(f: &Frame) -> PreparedFrame {
     let blended = art::has_partial_alpha(f);
     let steps = if f.scale == 1 { UPSCALE_STEPS } else { 0 };
     let mut big = (0..steps).fold(f.clone(), |g, _| art::scale2x(&g));
     art::bleed_edges(&mut big);
+    let s = f.scale as f32;
+    PreparedFrame { pixels: big, size: Vec2::new(f.width as f32, f.height as f32) / s, origin: Vec2::new(f.origin.0 as f32, f.origin.1 as f32) / s, blended }
+}
+
+/// The GPU half: the image, an unlit quad anchored at the feet, cut out or blended.
+pub fn upload_prepared(p: PreparedFrame, images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> FrameAsset {
     let mut image = Image::new(
-        Extent3d { width: big.width as u32, height: big.height as u32, depth_or_array_layers: 1 },
+        Extent3d { width: p.pixels.width as u32, height: p.pixels.height as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
-        big.rgba,
+        p.pixels.rgba,
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     );
     image.sampler = ImageSampler::linear();
     let image = images.add(image);
-    let s = f.scale as f32;
-    let (size, origin) = (Vec2::new(f.width as f32, f.height as f32) / s, Vec2::new(f.origin.0 as f32, f.origin.1 as f32) / s);
     let material = mats.add(StandardMaterial {
         base_color_texture: Some(image.clone()),
-        alpha_mode: if blended { AlphaMode::Blend } else { AlphaMode::Mask(0.5) },
+        alpha_mode: if p.blended { AlphaMode::Blend } else { AlphaMode::Mask(0.5) },
         unlit: true,
         cull_mode: None,
         double_sided: true,
         ..default()
     });
-    FrameAsset { image, mesh: meshes.add(sprite_quad(size, origin)), material, size, origin }
+    FrameAsset { image, mesh: meshes.add(sprite_quad(p.size, p.origin)), material, size: p.size, origin: p.origin }
+}
+
+/// Prepares and uploads a frame at once (`prepare_frame`, `upload_prepared`).
+pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> FrameAsset {
+    upload_prepared(prepare_frame(f), images, meshes, mats)
 }
 
 pub(crate) fn run_ticks(
