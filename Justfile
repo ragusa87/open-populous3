@@ -4,6 +4,10 @@ levels := env_var_or_default("POP3_LEVELS", "")
 run *args:
     cargo run -p game-client -- {{args}}
 
+# Compile the whole workspace without running: just build [--release]
+build *args:
+    cargo build --workspace {{args}}
+
 # Bake the unit sprites (assets/units) from the CC0 characters in assets/3d/characters: just bake-units [kind]
 bake-units *kind:
     cargo run --release -p unit-baker -- {{kind}}
