@@ -1,7 +1,8 @@
 //! Puffs of smoke or dust: a few blobs, each born at its own time, moving out from an origin while
 //! they rise, grow and fade. A pattern (`Puffs`) tells where puff `k` is `secs` after it started
 //! (`Puffs::pose`); `move_puffs` poses the 3D ones (smoke balls: a busy hut's chimney, a sinking
-//! totem). The landing dust (`units::dust`) poses its camera-facing motes with the same patterns.
+//! totem) at the `secs` their owner sets from simulation time (`chimney::ChimneyView`, `totems`). The
+//! landing dust (`units::dust`) poses its camera-facing motes with the same patterns.
 
 use bevy::prelude::*;
 use std::f32::consts::TAU;
@@ -139,20 +140,19 @@ impl Puffs {
 }
 
 /// A 3D puff (a ball of smoke): `pattern`'s puff `k` about `origin` (its parent's frame), `secs`
-/// into its run. `driven`: its owner sets `secs` (and hides it when off); otherwise it runs on the
-/// real-time clock.
+/// into its run, shown while `on`. Its owner sets `secs`, `on` (and may move `origin`) each frame.
 #[derive(Component)]
 pub struct Puff {
     pub pattern: Puffs,
     pub k: usize,
     pub origin: Vec3,
     pub secs: f32,
-    pub driven: bool,
+    pub on: bool,
 }
 
 impl Puff {
     pub fn new(pattern: Puffs, k: usize, origin: Vec3) -> Self {
-        Puff { pattern, k, origin, secs: 0.0, driven: false }
+        Puff { pattern, k, origin, secs: 0.0, on: false }
     }
 }
 
@@ -164,20 +164,15 @@ impl Plugin for EffectsPlugin {
     }
 }
 
-/// Moves, grows and fades every 3D puff; one that is not out is hidden.
-fn move_puffs(time: Res<Time>, mut puffs: Query<(&mut Puff, &mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>)>, mut mats: ResMut<Assets<StandardMaterial>>) {
-    for (mut puff, mut t, mut vis, mat) in &mut puffs {
-        if !puff.driven {
-            puff.secs += time.delta_secs();
-        }
-        let Some(pose) = puff.pattern.pose(puff.k, puff.secs) else {
+/// Moves, grows and fades every 3D puff; one off or not out is hidden.
+fn move_puffs(mut puffs: Query<(&Puff, &mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>)>, mut mats: ResMut<Assets<StandardMaterial>>) {
+    for (puff, mut t, mut vis, mat) in &mut puffs {
+        let Some(pose) = puff.pattern.pose(puff.k, puff.secs).filter(|_| puff.on) else {
             vis.set_if_neq(Visibility::Hidden);
             continue;
         };
         (t.translation, t.scale) = (puff.origin + pose.offset, Vec3::splat(pose.size));
-        if *vis == Visibility::Hidden && !puff.driven {
-            vis.set_if_neq(Visibility::Inherited);
-        }
+        vis.set_if_neq(Visibility::Inherited);
         if let Some(mut m) = mats.get_mut(&mat.0).filter(|m| (m.base_color.alpha() - pose.opacity).abs() > 1e-3) {
             m.base_color.set_alpha(pose.opacity);
         }

@@ -4,6 +4,7 @@
 mod blueprint;
 mod buildings;
 mod campfire;
+mod chimney;
 mod camera;
 mod camera_debug;
 mod construction;
@@ -95,6 +96,7 @@ fn main() {
             cursor_debug::CursorDebugPlugin,
             camera_debug::CameraDebugPlugin,
             object_scale::ObjectScalePlugin,
+            chimney::ChimneyPlugin,
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();

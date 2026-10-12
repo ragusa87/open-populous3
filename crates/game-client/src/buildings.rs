@@ -5,7 +5,7 @@
 //! By construction stage (`Building::stage`): a blueprint is a white mark on the ground; under
 //! construction or being dismantled, a wooden structure of its shape with the parts already built
 //! (`construction`); built, the whole model. An attacked building's walls shake, a hut with people
-//! inside smokes from the top of its roof, a built one's torches burn (`flame`). Resting the cursor on a building (or one of the player's
+//! inside smokes from the top of its roof (`chimney`, from the tops kept in `Chimneys`), a built one's torches burn (`flame`). Resting the cursor on a building (or one of the player's
 //! plans) for `HOVER_SECS` shows its tooltip: for the player's, braves at work and wood. A built
 //! pyramid of knowledge's door and top are posed by `vault`.
 
@@ -32,7 +32,7 @@ use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 use std::collections::HashMap;
 
 /// Half size (cells) of the square the ground slope under a building is measured over.
-const FOOTPRINT_HALF: f32 = 1.0;
+pub const FOOTPRINT_HALF: f32 = 1.0;
 /// Stand-in box (cells) when there is no model.
 const BOX: Vec3 = Vec3::new(1.6, 0.8, 1.6);
 /// Theme whose atlas textures buildings on maps without one.
@@ -223,6 +223,7 @@ fn respawn_buildings(
     mut kit: Local<KitMeshes>,
     mut drawn: Local<Vec<Building>>,
     mut heights: ResMut<ModelHeights>,
+    mut chimneys: ResMut<crate::chimney::Chimneys>,
     mut flame_frames: ResMut<FlameFrames>,
 ) {
     if !map.is_changed() && same_look(&drawn, &map.0.buildings) {
@@ -230,6 +231,7 @@ fn respawn_buildings(
     }
     drawn.clone_from(&map.0.buildings);
     heights.0.clear();
+    chimneys.0.clear();
     for e in &existing {
         commands.entity(e).despawn();
     }
@@ -240,8 +242,6 @@ fn respawn_buildings(
     let material = original_material(&levels, theme, &mut images, &mut mats);
     let bank = objects.0.as_ref().filter(|_| material.is_some());
     let wood = mats.add(StandardMaterial { base_color: WOOD, perceptual_roughness: 0.9, ..default() });
-    let smoke = mats.add(StandardMaterial { base_color: Color::srgba(0.75, 0.75, 0.75, 0.55), alpha_mode: AlphaMode::Blend, unlit: true, ..default() });
-    let puff = meshes.add(Sphere::new(0.5).mesh().ico(1).unwrap());
     let mark = mats.add(mark_material());
     let cell = WORLD_UNITS_PER_CELL as f32;
     let posable_vaults = bank.is_some() && crate::vault::Frames::from_bank(&objects).is_some();
@@ -314,6 +314,9 @@ fn respawn_buildings(
         let inner = look.inner.map(|mesh| (mesh, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, cull_mode: Some(Face::Front), double_sided: true, ..default() })));
         let top = look.top;
         heights.0.insert(b.id, top.y);
+        if stage == Stage::Built && kind.capacity() > 0 {
+            chimneys.0.insert(b.id, top);
+        }
         view.with_children(|v| {
             let mut body = v.spawn((Transform::default(), Visibility::Inherited));
             body.with_children(|parts| {
@@ -333,11 +336,6 @@ fn respawn_buildings(
             });
             if b.shaking > 0 {
                 body.insert(Shaking(b.id));
-            }
-            if stage == Stage::Built && b.inside > 0 && kind.capacity() > 0 {
-                for k in 0..crate::effects::CHIMNEY.count {
-                    v.spawn((crate::effects::Puff::new(crate::effects::CHIMNEY, k, top), Mesh3d(puff.clone()), MeshMaterial3d(smoke.clone()), NotShadowCaster, crate::hover::NoOutline, Transform::from_translation(top), Visibility::Hidden));
-                }
             }
         });
         if stand_in {
@@ -421,9 +419,10 @@ fn place_labels(
     }
 }
 
-/// Whether the views of `drawn` still show `now`: a vault's phase does not count, `vault` poses it.
+/// Whether the views of `drawn` still show `now`: a vault's phase does not count (`vault` poses it),
+/// nor the people inside (`chimney` smokes).
 pub fn same_look(drawn: &[Building], now: &[Building]) -> bool {
-    let look = |b: &Building| Building { vault: None, ..b.clone() };
+    let look = |b: &Building| Building { vault: None, inside: 0, ..b.clone() };
     drawn.len() == now.len() && drawn.iter().zip(now).all(|(a, b)| look(a) == look(b))
 }
 
@@ -437,6 +436,8 @@ mod tests {
         let mut praying = vault.clone();
         praying.vault.as_mut().unwrap().phase = game_core::vault::VaultPhase::Praying { progress: 40 };
         assert!(same_look(std::slice::from_ref(&vault), &[praying]));
+        let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
+        assert!(same_look(std::slice::from_ref(&hut), &[Building { inside: 2, ..hut.clone() }]), "people going in");
         let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
         assert!(!same_look(std::slice::from_ref(&vault), &[hut]));
         assert!(!same_look(std::slice::from_ref(&vault), &[]));

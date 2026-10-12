@@ -74,7 +74,7 @@ struct NodPivot;
 type Bodies<'w, 's> = Query<'w, 's, (&'static mut Transform, &'static mut Visibility), (With<TotemBody>, Without<Puff>, Without<NodPivot>, Without<RockBlock>)>;
 type Blocks<'w, 's> = Query<'w, 's, (&'static RockBlock, &'static mut Transform), (Without<TotemBody>, Without<Puff>, Without<NodPivot>)>;
 type Pivots<'w, 's> = Query<'w, 's, &'static mut Transform, (With<NodPivot>, Without<TotemBody>, Without<Puff>)>;
-type Puffs<'w, 's> = Query<'w, 's, (&'static mut Puff, &'static mut Visibility), (Without<TotemBody>, Without<NodPivot>, Without<RockBlock>)>;
+type Puffs<'w, 's> = Query<'w, 's, &'static mut Puff, (Without<TotemBody>, Without<NodPivot>, Without<RockBlock>)>;
 
 pub struct TotemsPlugin;
 
@@ -205,7 +205,7 @@ fn respawn_totems(
         if t.kind == TotemKind::Totem {
             view.with_children(|v| {
                 for k in 0..SINKING.count {
-                    let puff = Puff { driven: true, ..Puff::new(SINKING, k, Vec3::ZERO) };
+                    let puff = Puff::new(SINKING, k, Vec3::ZERO);
                     v.spawn((puff, Mesh3d(ball.clone()), MeshMaterial3d(mats.add(smoke.clone())), NotShadowCaster, crate::hover::NoOutline, Transform::default(), Visibility::Hidden));
                 }
             });
@@ -319,10 +319,9 @@ fn animate_totems(
             if let Ok(mut tf) = pivots.get_mut(e) {
                 tf.rotation = Quat::from_rotation_x(nod);
             }
-            if let Ok((mut p, mut vis)) = puffs.get_mut(e) {
+            if let Ok(mut p) = puffs.get_mut(e) {
                 p.secs = sinking;
-                let out = t.is_exhausted() && !t.is_gone() && SINKING.pose(p.k, sinking).is_some();
-                vis.set_if_neq(if out { Visibility::Inherited } else { Visibility::Hidden });
+                p.on = t.is_exhausted() && !t.is_gone();
             }
         }
     }
