@@ -55,21 +55,21 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 10 | 1 | standing still, holding wood (brave only; used) |
 | 11 | 4 | cutting wood with an axe (brave only; used) |
 | 12 | 4 | flattening the ground: crouch, arms up, jump (brave only; maybe also wrecking a construction site in an attack); played once per flattening jump (`Pose::Jump`); frame 1 stands in for stranded units today |
-| 13 | 7 | punching (unchecked) |
-| 14 | 7 | receiving a punch |
-| 15 | 7 | punching, left foot forward |
-| 16 | 1 | tilted, probably while carried by a tornado |
+| 13 | 7 | punching: fight move 3, trading blows (exe, pop3-rev-analysis.md "Combat") |
+| 14 | 7 | receiving a punch: hit in a fight (exe) |
+| 15 | 7 (6 facing the viewer) | punching, left foot forward: fight move 2 (knocks back) and the pre-fight opening blow (exe) |
+| 16 | 1 | tilted: held 2 turns by a person struck by the pre-fight opening blow, before it is flung (exe); maybe also in a tornado |
 | 17 | 12 | spy setting fire to a building: disguised as a brave (plain) or a firewarrior (`0x20/1`), or discovered (`0x20/3`) |
 | 18 | 6 | brave sitting down, being converted by a preacher |
 | 19 | 4 | tumbling in the air, arms spread (checked in the game; `Pose::Flung`: tumbling off the ground) |
 | 37 | 4 | falling down a slope (checked in the game; `Pose::Tumble`: tumbling on the ground) |
-| 25 | 7 | fighting: kick |
+| 25 | 7 | fighting: kick: fight move 4, the blow without a return (exe) |
 | 38 | 8 | dying: the body falls down onto its back, last frame lying (checked in the game; used) |
 | 39 | 1 | lying dead |
 | 40 | 5 | the body lying, its spirit rising: drowning in the water, and after the death fall (`Pose::Spirit`, used) |
-| 48 | 8 | brave hiding its eyes (an idle gesture?) |
-| 49 | 9 | waving an arm: crawling, maybe while running away (unsure) |
-| 50 | 7 | fighting: crouching to dodge a hit, then punching |
+| 48 | 8 | brave hiding its eyes: a taunt, one of 48-50 played at random by a person waiting to be attacked (exe, table 0x5A6ECA) |
+| 49 | 9 | waving an arm: a taunt (as 48) |
+| 50 | 7 | crouching, then punching: a taunt (as 48), not a fight move |
 | 51 | 4 | pedalling: moving a vehicle |
 | 52 | 4 | running away (bitten by a swarm of bees) |
 | 20-24 | 4-18 | attacks with a club, the monk's pointed helmet drawn in (whose attacks: to check) |
@@ -98,10 +98,10 @@ Shamans: 4 consecutive animations per action, one per tribe (blue, red, yellow, 
 | Blue | Action | Frames |
 |---|---|---|
 | 53 | idle | 5 |
-| 57 | staff strike | 4 |
+| 57 | staff strike: fight moves 2 and 3, the pre-fight opening blow (exe) | 4 |
 | 61 | flying horizontally, arms spread (blown by a whirlwind); drawn tumbling in the air | 4 |
 | 65 | cast (jumps, lightning in the hands) | 12 |
-| 69 | kick | 5 |
+| 69 | kick: fight move 4 (exe) | 5 |
 | 73 | tumbling; drawn tumbling on the ground and drowning | 4 |
 | 77 | walk | 8 |
 | 85 | knocked down | 8 |

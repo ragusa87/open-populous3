@@ -1013,7 +1013,14 @@ impl GameMap {
                 None
             }
             WorldEvent::SetFire { building } => return (None, self.set_fire(building)),
-            WorldEvent::Panic { .. } | WorldEvent::Raid { .. } => None,
+            WorldEvent::Panic { unit } => {
+                let away = crate::unit::panic_heading(self.rng.next_u32(), self.rng.next_u32());
+                if let Some(u) = self.unit_mut(unit) {
+                    u.panic(away);
+                }
+                None
+            }
+            WorldEvent::Raid { .. } => None,
             WorldEvent::SpawnEffect(e) => {
                 self.add_effect(e);
                 None

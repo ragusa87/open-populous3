@@ -47,7 +47,8 @@ for each variant:
 | `Damage { unit, amount, kind, from }` | `GameMap::damage`, the one hurt path (`effect::hurts`: shielded units, the attacker's tribe for a blast); `from` the attacker's tribe, if any |
 | `Push { unit, vel }` | `Unit::fling`, not the shielded |
 | `SetFire { building }` | `GameMap::set_fire` (`fire`): occupants out by the door, one piece of wood lost, burning; a `Panic` per occupant |
-| `Panic { unit }`, `Raid { building }` | routed, no behaviour yet |
+| `Panic { unit }` | `Unit::panic`: `Action::Panicking`, a random heading from `GameMap::rng` (`unit::panic_heading`) |
+| `Raid { building }` | routed, no behaviour yet |
 | `SpawnEffect(Effect)` | a new effect, ticking from the next turn |
 | `Terrain(TerrainChange)` | raise or flatten ground |
 | `Release { unit }` | the unit leaves its coordinator: back to Idle (`Unit::release`); nothing if it is in none or gone |

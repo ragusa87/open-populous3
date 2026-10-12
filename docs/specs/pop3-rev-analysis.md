@@ -691,12 +691,13 @@ a fight involving the player's tribe sets 0x89D167 = 2 (probably the fight music
 ends (both freed, +0x9D = 0) when a person is gone, both are of one tribe, a person leaves state 29,
 or the attacker's approach timer runs out
 mode 0: attacker sub 5, target sub 4
-4 target stands: stops, faces the attacker, stance animation; waits as long as the pre-fight lasts
-5 attacker runs: 40-turn timer (3.3 s), steps towards the target each turn
+4 target stands: stops, faces the attacker, idle (6); while idle, 1 chance in 8 per turn of a taunt
+    (48, 49 or 50 at random); waits as long as the pre-fight lasts
+5 attacker runs: walks (anim 5, 9 carrying wood; walking speed + rand(speed / 4)), 40-turn timer (3.3 s)
     reached when |dx| < 315 and |dz| < 315 (0.6 cell) and the target is in sub 4 → attacker sub 6
-6 attacker kicks: speed 0, action anim 10, faces the target; timer = the animation length
-    2 turns before the end: target sub 7; at the end: sound 13, attacker sub 8
-7 target kicked away: hit animation (action 11, per-type table 0x5A6E16) for 2 turns, then
+6 attacker kicks: speed 0, anim 15 (shaman 57), faces the target; 6 turns (shaman 4)
+    2 turns before the end (turn 4 of 6): target sub 7; at the end: sound 13, attacker sub 8
+7 target kicked away: anim 16 (one tilted frame; a shaman stays idle, 53) for 2 turns, then
     velocity 100 + rand(100) units per turn at (heading to the attacker) + 120°..240°
     (+0x2AB + rand(0x2AA) of 2048: away from the kicker, ±60°); no damage
     back on the ground (+0xE bit 0x8 clear) → sub 4
@@ -738,15 +739,16 @@ per person (state 25):
       opponent in state 25 and more than 2 people → move 4 (r even) or 3 (r odd)
       opponent not in state 25 → move 4
     away from its slot → 0
-  2, 3, 4 attack: speed 0, action anim 10 / 8 / 16, timer = its length; both turn to face each other
+  2, 3, 4 attack: speed 0, anim 15 / 13 / 25 for 6 / 7 / 7 turns (shaman: 57 / 57 / 69, 4 / 4 / 5 turns);
+    both turn to face each other
     first turn: hit(target, self, one_sided = (move == 4))
     a ready target reacts: sub 5 if the move is 2 and the target is not a shaman (and flag 0x40 clear), else 6
     at the end: sound 13 (moves 2, 4) or 14 (move 3; a warrior's move 3: 0x27 against a warrior, else 0x2B
       and 0x32 on the target); → 0
-  5 hit and knocked: 4 turns of the hit animation (action 9, table 0x5A6DF2), → 7
-  6 hit: the hit animation (action 9; 7 turns for a shaman), → 0
-  7 knocked back: velocity 35 + rand(70) units per turn backwards; after 2 turns stands (action 5 when
-    carrying wood, else 1); on landing → 0
+  5 hit and knocked: anim 14 for 4 turns (cut short), → 7
+  6 hit: anim 14 for its 7 turns (a shaman: idle 53, 7 turns), → 0
+  7 knocked back: velocity 35 + rand(70) units per turn backwards; after 2 turns walks (anim 5, 9 when
+    carrying wood); on landing → 0
 hit(target, attacker, one_sided):                                                (0x4A39C0)
   strength(p) = max(32, FIGHT_DAMAGE_<p> × life / max_life), × BLOODLUST_DAMAGE_X when bloodlusted
   target.life -= strength(attacker)
@@ -761,16 +763,31 @@ join(person, fight)                                                    (0x51DDC0
     at the same place
 ```
 - The fight is a series of exchanges, not a kick/guard toggle: the attacker plays one of three attack moves and
-  the target one of two hit reactions. Move 2 (the pre-fight kick's action, 10) knocks a non-shaman target back;
+  the target one of two hit reactions. Move 2 (anim 15, also the pre-fight kick) knocks a non-shaman target back;
   moves 2 and 3 trade blows (both lose health); move 4 lands without a return blow. A shaman is never knocked
   back in a fight and never uses move 3.
 - **A fight is always one against several** (up to 5): joining and splitting keep one side at one person, who
   stands in the centre and takes every ring person's blows.
-- The actions are not mapped to animations.md. Table 0x5A6D50 (`[action × 9 + type]`, object ids) gives move 2
-  → 63-67 for types 2-6 (shaman 106), move 3 → 53-57 (106), move 4 → 83-87 (125), hit 9 → 58-62, kicked 11 →
-  68-72. A guess: move 2 kick (25, shaman 69), move 3 punch (15), move 4 dodge then punch (50: no return
-  blow), hit 14 (unverified).
-- Timings: every attack and hit lasts its animation (`(0x5A6AFB[+0x3A] + 1) × frames`), not measured.
+- Animations [exe]: `0x4D3FF0(person, action)` reads an object id from 0x5A6D50 `[action × 9 + type]`, and
+  object `o` is the pair at 0x5A6858 + 4·o: (`VSTART` index × 8 → `+0x33`, draw class → `+0x3A`). So the
+  `VSTART-0.ANI` animation is the first value / 8 (checked on idle 6/53, walk 5/77, pray 8, chop 11, flung 19/61).
+  Types 2-6 share the body and differ by draw class (14-18, the outfit).
+
+| Use | Action | Followers (types 2-6) | Shaman | Turns (frames from `VFRA-0.ANI`) |
+|---|---|---|---|---|
+| move 2 and the pre-fight kick | 10 | 15 | 57 staff strike | 6 (shaman 4) |
+| move 3 (trade) | 8 | 13 | 57 staff strike | 7 (shaman 4) |
+| move 4 (one-sided) | 16 | 25 kick | 69 kick | 7 (shaman 5) |
+| hit (fight) | 9 | 14 | 53 idle | 4 (knocked), else 7 |
+| kicked away (pre-fight) | 11 | 16 tilted (1 frame, held 2 turns) | 53 idle | 2, then the flight |
+| taunt while waiting (0x4D4DA0, table 0x5A6ECA) | | 48, 49 or 50 | 53 idle | its frames (8, 9, 7) |
+| running up, back to the slot | 1 / 5 | 5 walk / 9 walk with wood | 77 walk | |
+
+- Timings: one turn per frame for every draw class used (0x5A6AFB[class] = 0; 1 for the firewarrior's, 2 turns
+  per frame), so an attack is `frames` turns, counted on the direction-0 loop (`+0x33` = anim × 8; anim 15 has
+  6 frames there, 7 in the other directions): a brave's exchange is 6-7 turns (0.5-0.6 s), a shaman's 4-5. An
+  idle person in sub 1 attacks again at once if its opponent is ready, so the rhythm is about one blow per
+  0.6 s per pair (estimate, not measured).
 
 Strength per type (exe default / `constant.dat`); it falls with the attacker's health, never under 32:
 
@@ -884,8 +901,9 @@ Strength per type (exe default / `constant.dat`); it falls with the attacker's h
 - What "busy" means (unit+0xE bit 7, unit+0xA7), and the preacher's extra check.
 - The controller types of tribe+0xC1F (2 is human; 1 gets full mana).
 - Spell order and share inside the distribution loop.
-- Combat: the length of each attack and hit (animation lengths; measure with `fightwatch.py`), which original
-  animations the actions 8, 9, 10, 11, 16 are, what option flag 0x89D17C bit 0x40 is (no kick, no knockback),
+- Combat: a live check of the exchange rhythm (`fightwatch.py`), whether a taunt (48-50) plays to its end (0x4D4DA0
+  resets a non-idle person to idle the next turn; the per-person `+0x7E` it sets may hold it),
+  what option flag 0x89D17C bit 0x40 is (no kick, no knockback),
   the meaning of pre-fight mode 2, the ground test of a fight's place (0x51E4B0), the attacker's sub-state 8 when
   its target is already in a pre-fight, and the firewarriors' ranged attack (attack-order sub-states 10, 11).
 - What the per-building stored mana is.

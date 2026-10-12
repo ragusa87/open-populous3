@@ -35,7 +35,7 @@ In the original a cast flies a shot to the target, which spawns reusable compone
 units (`GameMap::tend_effects`, architecture.md "The tick"). An effect reads the map and returns `WorldEvent`s (`event.rs`):
 `Damage` (with the caster's tribe as `from`, through `GameMap::damage`, the one place for immunities: shielded units, the caster's own tribe for a
 blast), `Push` (`Unit::fling`, not the shielded), `SpawnEffect` (a new effect, ticking from the next turn), `Terrain`
-(raise, flatten). `SetFire` burns a building (`fire`, buildings.md "Damage and repair"). `Panic` and `Raid` are routed but do nothing yet. An effect never holds another
+(raise, flatten). `SetFire` burns a building (`fire`, buildings.md "Damage and repair"). `Panic` sets the person running (`Action::Panicking`: out by the door first when inside, then `PANIC_SPEED` 110 at a random heading for `PANIC_TICKS` 64 turns, a quarter turn left when the way is blocked, no orders meanwhile; a guess: the original's turning not traced). `Raid` is routed but does nothing yet. An effect never holds another
 object's state: a unit it panics or sets on fire counts down its own state.
 
 ## Spell book (`game_core::spell_book`)

@@ -56,6 +56,12 @@ pub const JUMP_TICKS: Ticks = Ticks::millis(800);
 pub const BUILD_TICKS: Ticks = Ticks::secs(5);
 /// Going round a camp fire: this fraction (numerator, denominator) of the walking speed.
 pub const AROUND_FIRE_PACE: (i32, i32) = (1, 2);
+/// Panic (pop3-rev-analysis.md "Shared person and building states", person state 0x1A): the run's length in turns.
+pub const PANIC_TICKS: Ticks = Ticks::new(64);
+/// The panic run's speed, world units per tick on flat ground (pop3-rev-analysis.md "Walking speeds": 110).
+pub const PANIC_SPEED: i32 = 110;
+/// Length of a panic heading (`panic_heading`), world units: beyond a step, so a step never reaches its end.
+const PANIC_REACH: i32 = 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnitKind {
@@ -141,6 +147,9 @@ pub enum Action {
     /// Flung through the air or rolling on the ground by a spell, moved by `Unit::velocity` at
     /// `Unit::lift`: no orders until still on the ground again.
     Tumbling,
+    /// Running in panic towards `away` (a heading, `panic_heading`) at `PANIC_SPEED`, out by the door first when
+    /// inside: no orders until `left` runs out.
+    Panicking { away: (i16, i16), left: Countdown },
     /// Falling down dead.
     Dying { left: Countdown },
     /// The shaman, lying dead: waiting to reincarnate at her site.
@@ -185,6 +194,7 @@ impl Action {
             Action::Landing => "Landing",
             Action::Drowning => "Drowning",
             Action::Tumbling => "Tumbling",
+            Action::Panicking { .. } => "Panicking",
             Action::Dying { .. } => "Dying",
             Action::Dead { .. } => "Dead",
             Action::Spirit { .. } => "Dead",
@@ -227,7 +237,7 @@ impl Action {
     }
 
     fn can_take_orders(&self) -> bool {
-        !matches!(self, Action::Drowning | Action::Tumbling | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
+        !matches!(self, Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
     }
 }
 
@@ -704,6 +714,13 @@ impl Unit {
                 }
             }
             Action::Landing => {}
+            Action::Panicking { away, mut left } => {
+                if left.tick() {
+                    self.action = Action::Idle;
+                    return None;
+                }
+                self.action = Action::Panicking { away: self.run_in_panic(away, ground), left };
+            }
             #[cfg(test)]
             Action::Gathered { .. } => {}
             Action::Tumbling => {
@@ -771,6 +788,16 @@ impl Unit {
         self.health.is_zero()
     }
 
+    /// Runs off in panic towards `away` (`panic_heading`), forgetting its plans; nothing while it takes no orders
+    /// (already panicking, tumbling, drowning, dead).
+    pub fn panic(&mut self, away: (i16, i16)) {
+        if !self.takes_orders() {
+            return;
+        }
+        self.drop_plans();
+        self.action = Action::Panicking { away, left: Countdown::new(PANIC_TICKS) };
+    }
+
     /// Leaves its coordinator, if it is in one: back to Idle (`WorldEvent::Release`, or its coordinator gone).
     pub fn release(&mut self) {
         if self.action.link().is_some() {
@@ -831,6 +858,24 @@ impl Unit {
         let velocity = Velocity::new(v.x.saturating_add(push.x), v.y.saturating_add(push.y), v.z.saturating_add(push.z));
         self.motion = Motion::flying(velocity, self.motion.height.unwrap_or(ground));
         self.action = Action::Tumbling;
+    }
+
+    /// One step of a panic run towards `away`, out by the door first when inside; the heading it goes on with,
+    /// turned a quarter left when the way is blocked.
+    fn run_in_panic(&mut self, away: (i16, i16), ground: &impl Ground) -> (i16, i16) {
+        if let Some(inside) = self.inside {
+            match self.step_towards(inside.door, ground, PANIC_SPEED) {
+                Step::Moved => {}
+                Step::Arrived => (self.inside, self.planned_on) = (None, None),
+                Step::Blocked => {}
+            }
+            return away;
+        }
+        let to = (self.x.wrapping_add(away.0 as u16), self.z.wrapping_add(away.1 as u16));
+        match self.step_towards(to, ground, PANIC_SPEED) {
+            Step::Blocked => (-away.1, away.0),
+            Step::Moved | Step::Arrived => away,
+        }
     }
 
     /// Path to `to` on the current terrain: walking if there is one, else stranded (the shaman
@@ -930,6 +975,16 @@ pub fn torus_delta(a: u16, b: u16) -> i32 {
     b.wrapping_sub(a) as i16 as i32
 }
 
+/// A panic run's heading from two random numbers: any direction, `PANIC_REACH` long.
+pub fn panic_heading(a: u32, b: u32) -> (i16, i16) {
+    let (dx, dz) = ((a % 2049) as i32 - 1024, (b % 2049) as i32 - 1024);
+    let len = isqrt((dx * dx + dz * dz) as u32) as i32;
+    if len == 0 {
+        return (PANIC_REACH as i16, 0);
+    }
+    ((dx * PANIC_REACH / len) as i16, (dz * PANIC_REACH / len) as i16)
+}
+
 /// Nearest of 8 headings for a direction (0 = +z, 2 = +x, 4 = -z, 6 = -x), integers only.
 pub fn octant(dx: i32, dz: i32) -> u8 {
     // tan(22.5 deg) ~ 29/70.
@@ -1015,6 +1070,54 @@ mod tests {
         assert_eq!(u.facing, 2, "heading +x");
         run(&mut u, &t, &site, 1);
         assert_eq!((u.x, u.z, u.action), (to.0, to.1, Action::Idle));
+    }
+
+    #[test]
+    fn panic_headings_are_full_length_in_any_direction() {
+        for (a, b) in [(0, 0), (2048, 1024), (1024, 1024), (7, 1500), (u32::MAX, 3)] {
+            let (dx, dz) = panic_heading(a, b);
+            let len = isqrt((dx as i32 * dx as i32 + dz as i32 * dz as i32) as u32) as i32;
+            assert!((PANIC_REACH - 2..=PANIC_REACH).contains(&len), "{a},{b}: {len}");
+        }
+        assert_eq!(panic_heading(1024, 1024), (PANIC_REACH as i16, 0), "no direction: +x");
+    }
+
+    #[test]
+    fn panics_runs_straight_at_its_speed_without_orders_then_idles() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        let start = u.x;
+        u.order(Order::MoveTo { x: u.x, z: u.z + 2048 });
+        u.panic((PANIC_REACH as i16, 0));
+        u.order(Order::MoveTo { x: u.x, z: u.z + 2048 });
+        run(&mut u, &t, &site, 10);
+        assert_eq!((u.x - start, u.facing), (10 * PANIC_SPEED as u16, 2), "ignores orders, runs +x");
+        u.panic((0, PANIC_REACH as i16));
+        assert_eq!(u.facing, 2, "panicking already: no new run");
+        run(&mut u, &t, &site, PANIC_TICKS.get() as usize - 11);
+        assert!(matches!(u.action, Action::Panicking { .. }));
+        run(&mut u, &t, &site, 1);
+        assert_eq!(u.action, Action::Idle);
+    }
+
+    #[test]
+    fn a_panic_run_turns_away_from_the_sea_and_leaves_by_the_door_first() {
+        let mut t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        sea_cell(&mut t, (11, 10));
+        u.panic((PANIC_REACH as i16, 0));
+        run(&mut u, &t, &site, 6);
+        assert_eq!(u.cell(), (10, 11), "blocked going +x, turned to +z");
+
+        let t = land();
+        let (mut u, _) = shaman_at((10, 10));
+        let door = (u.x, u.z - 1024);
+        u.inside = Some(Inside { building: 7, door });
+        u.panic((PANIC_REACH as i16, 0));
+        run(&mut u, &t, &site, 10);
+        assert_eq!((u.inside, u.x), (None, door.0), "out by the door, then the run");
+        u.tick(&t, Some(&site));
+        assert_eq!(u.x, door.0 + PANIC_SPEED as u16);
     }
 
     #[test]

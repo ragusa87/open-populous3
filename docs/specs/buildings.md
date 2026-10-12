@@ -299,8 +299,8 @@ back up like a construction. Its wood is its health. To check in the game: wheth
 
 Fire (done: `game_core::fire`, `WorldEvent::SetFire`, set by lightning): a building built with wood, past its plan,
 not already burning (a guess), loses one piece at once (the original's structural hit of 100 wood) and burns for
-`BURN_TICKS` (127 turns, `Building::burning`). Everyone inside walks out by the door (a `Panic` each, no behaviour
-yet), builders inside are released. With no wood left it is removed. While it burns, its braves only fetch wood and
+`BURN_TICKS` (127 turns, `Building::burning`). Everyone inside runs out by the door in panic (a `Panic` each,
+`Action::Panicking`), builders inside are released. With no wood left it is removed. While it burns, its braves only fetch wood and
 nobody builds in it. Vault, prison and other buildings without a wood cost never burn. Drawn (`buildings.rs`, `fire_bases`): its
 frame with 9 animated flames (the torches' `flame.rs` boards, `FIRE_FLAME` 1.3 cells) over its footprint, the middle one
 half way up, going down as it burns (`fire_height`: from their full height when lit, `Building::lit_at`, to

@@ -154,6 +154,21 @@ mod tests {
     }
 
     #[test]
+    fn its_people_run_off_in_panic() {
+        let mut map = GameMap::sandbox_buildings();
+        let hut = sandbox_hut(&map);
+        let id = map.buildings[hut].id;
+        let people = rest_inside(&mut map, hut, 2);
+        map.apply_events(vec![WorldEvent::SetFire { building: id }]);
+        let panicking = |map: &GameMap| map.units.iter().filter(|u| people.contains(&u.id) && matches!(u.action, Action::Panicking { .. })).count();
+        assert_eq!(panicking(&map), people.len());
+        for _ in 0..crate::unit::PANIC_TICKS.get() {
+            map.tick();
+        }
+        assert_eq!(panicking(&map), 0, "over after 64 turns");
+    }
+
+    #[test]
     fn a_building_burnt_to_nothing_is_removed() {
         let mut map = GameMap::sandbox_buildings();
         let hut = sandbox_hut(&map);
