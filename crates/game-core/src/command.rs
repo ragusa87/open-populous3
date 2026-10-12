@@ -3,7 +3,7 @@
 use crate::building::BuildingKind;
 use crate::spell::Spell;
 use crate::spell_book::SpellKind;
-use crate::unit::Order;
+use crate::unit::{Order, UnitId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -16,10 +16,10 @@ pub enum Command {
     /// An order to the player's shaman.
     Order { player: u8, order: Order },
     /// An order to one of the player's units (by `Unit::id`); ignored if the unit is not theirs.
-    OrderUnit { player: u8, unit: u32, order: Order },
+    OrderUnit { player: u8, unit: UnitId, order: Order },
     /// Chains `order` after the unit's current action and chained orders (Ctrl + click): it starts
     /// once the unit is idle. Ignored if the unit is not theirs.
-    QueueOrder { player: u8, unit: u32, order: Order },
+    QueueOrder { player: u8, unit: UnitId, order: Order },
     /// Light a camp fire in the cell holding world point `at` (`campfire::can_place`).
     PlaceCampfire { player: u8, at: (u16, u16) },
     /// Put out the player's camp fire in the cell holding world point `at`; whoever went round it

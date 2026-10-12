@@ -111,7 +111,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::motion::Velocity;
     use crate::time::{Every, Ticks};
-    use crate::unit::{torus_delta, UnitKind};
+    use crate::id::Id;
+    use crate::unit::{torus_delta, UnitId, UnitKind};
 
     /// A test effect: on its rhythm, pushes up and hurts by 1 every unit within a cell; on its first turn it may
     /// spawn a copy of itself (that does not spawn).
@@ -144,7 +145,7 @@ pub(crate) mod tests {
     }
 
     /// The walk sandbox with an enemy brave next to the shaman; the brave's id and position.
-    fn with_enemy() -> (GameMap, u32, (u16, u16)) {
+    fn with_enemy() -> (GameMap, UnitId, (u16, u16)) {
         let mut map = GameMap::sandbox_walk();
         let s = &map.units[0];
         let at = (s.x.wrapping_add(1024), s.z);
@@ -207,8 +208,8 @@ pub(crate) mod tests {
         let (mut map, _, _) = with_enemy();
         let before = map.units.clone();
         for event in [
-            WorldEvent::Damage { unit: 9999, amount: 50, kind: DamageKind::Blast, from: Some(1) },
-            WorldEvent::Push { unit: 9999, vel: Velocity::new(0, 60, 0) },
+            WorldEvent::Damage { unit: Id::from_raw(9999), amount: 50, kind: DamageKind::Blast, from: Some(1) },
+            WorldEvent::Push { unit: Id::from_raw(9999), vel: Velocity::new(0, 60, 0) },
             WorldEvent::Raid { building: 9999 },
         ] {
             assert_eq!(map.apply_event(event), (None, Vec::new()));

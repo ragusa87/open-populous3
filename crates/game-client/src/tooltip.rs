@@ -18,7 +18,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use game_core::building::{BuildingKind, Reward};
 use game_core::map::GameMap;
 use game_core::occupancy::{Holder, People, Wood};
-use game_core::unit::UnitKind;
+use game_core::unit::{UnitId, UnitKind};
 use pop3_format::catalog::{DISMANTLE_BUTTON, EFFECT_SPRITE_FILE, REBUILD_BUTTON, UNIT_FIGURES};
 use pop3_format::{Sprite, SpriteBank};
 use std::collections::HashMap;
@@ -65,7 +65,7 @@ pub enum Target {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Slot {
     pub icon: Icon,
-    pub unit: Option<u32>,
+    pub unit: Option<UnitId>,
     pub selected: bool,
 }
 
@@ -146,7 +146,7 @@ pub fn line_lengths(n: usize) -> Vec<usize> {
 
 /// A people row: the filled places with their unit's icon (a click selects it, marked when among
 /// `selected`), the others with `placeholder`.
-pub fn people_row(map: &GameMap, people: &People, placeholder: UnitKind, selected: &[u32]) -> Vec<Slot> {
+pub fn people_row(map: &GameMap, people: &People, placeholder: UnitKind, selected: &[UnitId]) -> Vec<Slot> {
     let filled = people.filled.iter().filter_map(|id| map.units.iter().find(|u| u.id == *id)).map(|u| Slot { icon: Icon::Unit { kind: u.kind, tribe: u.owner }, unit: Some(u.id), selected: selected.contains(&u.id) });
     let empty = std::iter::repeat_n(Slot { icon: Icon::Placeholder(placeholder), unit: None, selected: false }, people.capacity as usize - people.filled.len());
     filled.chain(empty).collect()
@@ -171,7 +171,7 @@ fn reward_name(reward: Reward) -> String {
 /// place; the player's buildings that take wood their people and wood rows; other tribes' buildings
 /// their name only, and a drum tower once `revealed` (clicked) who is in it, not selectable. People among
 /// `selected` are marked.
-pub fn building_model(map: &GameMap, i: usize, selected: &[u32], revealed: bool) -> TooltipModel {
+pub fn building_model(map: &GameMap, i: usize, selected: &[UnitId], revealed: bool) -> TooltipModel {
     let b = &map.buildings[i];
     let mut model = TooltipModel { lines: vec![b.kind.name()], ..default() };
     let holder = Holder::Building(i);
@@ -208,7 +208,7 @@ pub fn tree_model(map: &GameMap, i: usize) -> Option<TooltipModel> {
 
 /// A totem's tooltip: its name and its places for prayers (`Totem::prayers`, brave shapes, or the
 /// shaman's for those only she prays at), filled by those counted; never its reward.
-pub fn totem_model(map: &GameMap, i: usize, selected: &[u32]) -> Option<TooltipModel> {
+pub fn totem_model(map: &GameMap, i: usize, selected: &[UnitId]) -> Option<TooltipModel> {
     let totem = map.totems.get(i)?;
     let placeholder = if totem.shaman_only { UnitKind::Shaman } else { UnitKind::Brave };
     let rows = map.people_slots(Holder::Totem(i)).map(|p| people_row(map, &p, placeholder, selected)).into_iter().collect();
@@ -218,7 +218,7 @@ pub fn totem_model(map: &GameMap, i: usize, selected: &[u32]) -> Option<TooltipM
 }
 
 /// What `target` shows; None when it has nothing to show.
-fn model_of(map: &GameMap, target: Target, selected: &[u32], revealed: bool) -> Option<TooltipModel> {
+fn model_of(map: &GameMap, target: Target, selected: &[UnitId], revealed: bool) -> Option<TooltipModel> {
     match target {
         Target::Building(i) => (i < map.buildings.len()).then(|| building_model(map, i, selected, revealed)),
         Target::Tree(i) => tree_model(map, i),
@@ -424,7 +424,7 @@ struct TooltipBox;
 
 /// A person's slot: a click selects this unit.
 #[derive(Component)]
-struct SlotUnit(u32);
+struct SlotUnit(UnitId);
 
 /// What the tooltip shows (`revealed`: clicked, see `building_model`), since when the cursor is on the
 /// thing under it (and whether it was clicked), and since when the shown thing and the tooltip lost the cursor.

@@ -28,7 +28,7 @@ use crate::game_speed::GameSpeed;
 use crate::sim_time::{SimNow, TICK_SECS};
 use game_core::command::Command;
 use game_core::schedule::Schedule;
-use game_core::unit::{Unit, UnitKind};
+use game_core::unit::{Unit, UnitId, UnitKind};
 use selection::Selection;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
@@ -74,7 +74,7 @@ pub struct SimClock {
     acc: f32,
     /// Unit ids, positions and heights off the ground (`Motion::height`) before the last ticks run, to glide
     /// between them.
-    prev_ids: Vec<u32>,
+    prev_ids: Vec<UnitId>,
     prev: Vec<(u16, u16)>,
     prev_heights: Vec<Option<i32>>,
     /// Ticks the last step ran (the game speed then), kept while paused: the drawn moment trails the map by
@@ -586,8 +586,8 @@ mod tests {
 
     #[test]
     fn no_glide_from_a_unit_gone_from_the_map() {
-        let unit = |id, x| Unit::new(id, 0, UnitKind::Brave, (x, 0));
-        let clock = SimClock { prev_ids: vec![1, 2], prev: vec![(0, 0), (512, 0)], acc: TICK_SECS / 2.0, ..default() };
+        let unit = |id, x| Unit::new(game_core::id::Id::from_raw(id), 0, UnitKind::Brave, (x, 0));
+        let clock = SimClock { prev_ids: vec![game_core::id::Id::from_raw(1), game_core::id::Id::from_raw(2)], prev: vec![(0, 0), (512, 0)], acc: TICK_SECS / 2.0, ..default() };
         assert_eq!(clock.cell_pos(1, &unit(2, 768)), Vec2::new(1.25, 0.0), "glides");
         assert_eq!(clock.cell_pos(0, &unit(2, 768)), Vec2::new(1.5, 0.0), "unit 1 left: unit 2 moved to index 0");
     }
@@ -714,7 +714,7 @@ mod tests {
         let map = game_core::map::GameMap::sandbox_buildings();
         let built = map.buildings.iter().find(|b| b.stage() == game_core::building::Stage::Built).unwrap();
         let open = map.buildings.iter().find(|b| matches!(b.stage(), game_core::building::Stage::UnderConstruction { .. })).unwrap();
-        let mut u = Unit::new(1, 0, UnitKind::Brave, (0, 0));
+        let mut u = Unit::new(game_core::id::Id::from_raw(1), 0, UnitKind::Brave, (0, 0));
         assert!(!hidden_inside(&map, &u));
         u.inside = Some(Inside { building: built.id, door: (0, 0) });
         assert!(hidden_inside(&map, &u));

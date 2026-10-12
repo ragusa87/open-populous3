@@ -14,7 +14,7 @@ use crate::map::GameMap;
 use crate::mana::Mana;
 use crate::spell_book::{Availability, SpellBook, SpellKind};
 use crate::totem::TRIBES;
-use crate::unit::{torus_delta, Action, Inside, Order, UnitKind};
+use crate::unit::{torus_delta, Action, Inside, Order, UnitId, UnitKind};
 
 /// Within this many world units of the vault's middle she has reached it.
 const MIDDLE: i32 = 64;
@@ -30,7 +30,7 @@ impl GameMap {
 
     /// The order sending the player's shaman among `units` to pray at the vault `vault` (index), if
     /// she is among them.
-    pub fn worship_orders(&self, player: u8, units: &[u32], vault: usize) -> Vec<Command> {
+    pub fn worship_orders(&self, player: u8, units: &[UnitId], vault: usize) -> Vec<Command> {
         let Some(b) = self.buildings.get(vault).filter(|b| b.kind == BuildingKind::Vault) else { return Vec::new() };
         let site = (b.x, b.z);
         self.units.iter().filter(|u| u.owner == player && u.kind == UnitKind::Shaman && units.contains(&u.id)).map(|u| Command::OrderUnit { player, unit: u.id, order: Order::Worship { site } }).collect()
@@ -44,7 +44,7 @@ impl GameMap {
     /// Orders sending the player's units among `units` that may pray at totem `totem` (index) there:
     /// the shaman only for a shaman-only totem, else the followers and the shaman; none at an
     /// exhausted totem.
-    pub fn totem_orders(&self, player: u8, units: &[u32], totem: usize) -> Vec<Command> {
+    pub fn totem_orders(&self, player: u8, units: &[UnitId], totem: usize) -> Vec<Command> {
         let Some(t) = self.totems.get(totem).filter(|t| !t.is_exhausted()) else { return Vec::new() };
         let site = (t.x, t.z);
         let may = |kind: UnitKind| if t.shaman_only { kind == UnitKind::Shaman } else { kind != UnitKind::Wildman };
@@ -89,7 +89,7 @@ impl GameMap {
     pub(crate) fn tend_totems(&mut self) {
         for k in 0..self.totems.len() {
             let site = (self.totems[k].x, self.totems[k].z);
-            let praying: Vec<u32> = self.units.iter().filter(|u| u.is_alive() && u.action == Action::Worshipping { site }).map(|u| u.id).collect();
+            let praying: Vec<UnitId> = self.units.iter().filter(|u| u.is_alive() && u.action == Action::Worshipping { site }).map(|u| u.id).collect();
             let totem = &mut self.totems[k];
             if totem.given > 0 {
                 totem.since_given = totem.since_given.saturating_add(1);
@@ -232,7 +232,7 @@ mod tests {
         assert_eq!((map.mana[0].incoming, map.mana[1].incoming), (Mana::ZERO, Mana(500)));
     }
 
-    fn sandbox() -> (GameMap, usize, u32) {
+    fn sandbox() -> (GameMap, usize, UnitId) {
         let map = GameMap::sandbox_worship();
         let vault = map.buildings.iter().position(|b| b.kind == BuildingKind::Vault).unwrap();
         let shaman = map.shaman_of(0).unwrap().id;
@@ -243,7 +243,7 @@ mod tests {
         map.buildings[vault].vault.unwrap().phase
     }
 
-    fn send(map: &mut GameMap, shaman: u32, vault: usize) {
+    fn send(map: &mut GameMap, shaman: UnitId, vault: usize) {
         for c in map.worship_orders(0, &[shaman], vault) {
             map.apply(&c);
         }
@@ -315,11 +315,11 @@ mod tests {
         assert_eq!(map.units[s].action, before, "ignored");
     }
 
-    fn braves(map: &GameMap, n: usize) -> Vec<u32> {
+    fn braves(map: &GameMap, n: usize) -> Vec<UnitId> {
         map.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == 0).take(n).map(|u| u.id).collect()
     }
 
-    fn pray_at(map: &mut GameMap, units: &[u32], totem: usize) {
+    fn pray_at(map: &mut GameMap, units: &[UnitId], totem: usize) {
         for c in map.totem_orders(0, units, totem) {
             map.apply(&c);
         }

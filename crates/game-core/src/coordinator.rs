@@ -8,7 +8,7 @@ use crate::event::WorldEvent;
 use crate::id::{Id, Registry};
 use crate::map::{GameMap, Lcg};
 use crate::time::Tick;
-use crate::unit::Unit;
+use crate::unit::{Unit, UnitId};
 use std::collections::BTreeMap;
 
 /// What a coordinator's turn gives: whether its situation is over (it is removed this turn), and its events.
@@ -70,8 +70,8 @@ pub fn tick_kind<C: Coordinator>(list: &mut Registry<C>, now: Tick, world: &Game
 }
 
 /// The reverse of the units' links: the units (ids, in unit order) linked to each coordinator of one kind.
-pub fn participants<C>(units: &[Unit], link_of: impl Fn(&Unit) -> Option<Id<C>>) -> BTreeMap<Id<C>, Vec<u32>> {
-    let mut by = BTreeMap::<Id<C>, Vec<u32>>::new();
+pub fn participants<C>(units: &[Unit], link_of: impl Fn(&Unit) -> Option<Id<C>>) -> BTreeMap<Id<C>, Vec<UnitId>> {
+    let mut by = BTreeMap::<Id<C>, Vec<UnitId>>::new();
     for u in units {
         if let Some(id) = link_of(u) {
             by.entry(id).or_default().push(u.id);
@@ -116,7 +116,7 @@ pub(crate) mod tests {
     }
 
     /// `units` gathered for `turns` turns.
-    fn gather(map: &mut GameMap, units: &[u32], turns: u32, hurt: bool, release: bool) -> Id<Gathering> {
+    fn gather(map: &mut GameMap, units: &[UnitId], turns: u32, hurt: bool, release: bool) -> Id<Gathering> {
         let id = map.new_id_of();
         map.coordinators.gatherings.insert(id, Gathering { left: Countdown::new(Ticks::new(turns)), hurt, release });
         for &u in units {
@@ -126,13 +126,13 @@ pub(crate) mod tests {
     }
 
     /// `n` new braves of tribe 0, standing near its shaman.
-    fn braves(map: &mut GameMap, n: usize) -> Vec<u32> {
+    fn braves(map: &mut GameMap, n: usize) -> Vec<UnitId> {
         let s = map.shaman_of(0).unwrap();
         let at = (s.x.wrapping_add(1024), s.z);
         (0..n).map(|k| map.spawn(0, UnitKind::Brave, (at.0, at.1.wrapping_add(300 * k as u16))).id).collect()
     }
 
-    fn action(map: &GameMap, id: u32) -> Action {
+    fn action(map: &GameMap, id: UnitId) -> Action {
         map.unit(id).unwrap().action
     }
 
@@ -195,7 +195,7 @@ pub(crate) mod tests {
         let mut map = GameMap::sandbox_units();
         let free = braves(&mut map, 1)[0];
         let before = map.units.clone();
-        map.apply_events(vec![WorldEvent::Release { unit: free }, WorldEvent::Release { unit: 99_999 }]);
+        map.apply_events(vec![WorldEvent::Release { unit: free }, WorldEvent::Release { unit: Id::from_raw(99_999) }]);
         assert_eq!(map.units, before);
     }
 

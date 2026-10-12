@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn no_shadow_once_dead_or_drowning() {
-        let mut u = Unit::new(1, 0, UnitKind::Brave, (512, 512));
+        let mut u = Unit::new(game_core::id::Id::from_raw(1), 0, UnitKind::Brave, (512, 512));
         assert!(casts_shadow(&u));
         u.action = Action::Drowning;
         assert!(!casts_shadow(&u));

@@ -30,7 +30,7 @@ use bevy::winit::WinitPlugin;
 use game_core::command::Command;
 use game_core::motion::{Motion, Velocity};
 use game_core::spell::Spell;
-use game_core::unit::{Order, Unit};
+use game_core::unit::{Order, Unit, UnitId};
 use std::time::Duration;
 
 pub fn headless() -> bool {
@@ -146,7 +146,7 @@ pub fn flatten_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> 
 /// brings the piece back where it stood.
 pub fn brave_commands(name: &str, map: &game_core::map::GameMap) -> Vec<Command> {
     if let Some(totem) = name.strip_prefix("totem:").and_then(|n| n.parse().ok()) {
-        let braves: Vec<u32> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave).map(|u| u.id).collect();
+        let braves: Vec<UnitId> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave).map(|u| u.id).collect();
         return map.totem_orders(PLAYER, &braves, totem);
     }
     if !matches!(name, "cut" | "carry") {
@@ -226,7 +226,7 @@ pub fn build_demo(map: &mut game_core::map::GameMap, plan: &str, ticks: u32) -> 
     map.apply(&place);
     let Command::PlaceBuilding { at, .. } = place else { return false };
     let Some(site) = map.building_at_corner(at) else { return false };
-    let braves: Vec<u32> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave && u.inside.is_none()).map(|u| u.id).collect();
+    let braves: Vec<UnitId> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave && u.inside.is_none()).map(|u| u.id).collect();
     for c in map.build_orders(PLAYER, &braves, site) {
         map.apply(&c);
     }

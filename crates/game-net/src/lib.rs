@@ -5,6 +5,7 @@
 
 use game_core::building::BuildingKind;
 use game_core::command::Command;
+use game_core::id::Id;
 use game_core::spell::Spell;
 use game_core::spell_book::SpellKind;
 use game_core::time::Tick;
@@ -91,7 +92,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         }
         Command::OrderUnit { player, unit, order } => {
             b.extend([2, *player]);
-            b.extend(unit.to_le_bytes());
+            b.extend(unit.raw().to_le_bytes());
             encode_order(b, order);
         }
         Command::PlaceCampfire { player, at } => {
@@ -106,7 +107,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         }
         Command::QueueOrder { player, unit, order } => {
             b.extend([5, *player]);
-            b.extend(unit.to_le_bytes());
+            b.extend(unit.raw().to_le_bytes());
             encode_order(b, order);
         }
         Command::PlaceBuilding { player, kind, at, facing } => {
@@ -196,10 +197,10 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
             Some(Command::Cast { player, spell })
         }
         1 => Some(Command::Order { player, order: decode_order(c)? }),
-        2 => Some(Command::OrderUnit { player, unit: c.u32()?, order: decode_order(c)? }),
+        2 => Some(Command::OrderUnit { player, unit: Id::from_raw(c.u32()?), order: decode_order(c)? }),
         3 => Some(Command::PlaceCampfire { player, at: (c.u16()?, c.u16()?) }),
         4 => Some(Command::RemoveCampfire { player, at: (c.u16()?, c.u16()?) }),
-        5 => Some(Command::QueueOrder { player, unit: c.u32()?, order: decode_order(c)? }),
+        5 => Some(Command::QueueOrder { player, unit: Id::from_raw(c.u32()?), order: decode_order(c)? }),
         6 => Some(Command::PlaceBuilding { player, kind: BuildingKind::from_model(c.u8()?), at: (c.u16()?, c.u16()?), facing: c.u8()? }),
         7 => Some(Command::CancelBuilding { player, at: (c.u16()?, c.u16()?) }),
         8 => Some(Command::Dismantle { player, building: c.u32()?, on: c.u8()? != 0 }),
@@ -288,22 +289,22 @@ mod tests {
                 Command::Order { player: 2, order: Order::MoveTo { x: 65535, z: 300 } },
                 Command::Order { player: 0, order: Order::Cast },
                 Command::Order { player: 1, order: Order::Stop },
-                Command::OrderUnit { player: 1, unit: 70_000, order: Order::MoveTo { x: 3, z: 4 } },
-                Command::OrderUnit { player: 0, unit: 9, order: Order::Campfire { fire: (65535, 256), point: 15 } },
+                Command::OrderUnit { player: 1, unit: Id::from_raw(70_000), order: Order::MoveTo { x: 3, z: 4 } },
+                Command::OrderUnit { player: 0, unit: Id::from_raw(9), order: Order::Campfire { fire: (65535, 256), point: 15 } },
                 Command::PlaceCampfire { player: 3, at: (40_000, 7) },
                 Command::RemoveCampfire { player: 1, at: (8, 65535) },
-                Command::QueueOrder { player: 2, unit: 12, order: Order::Stop },
-                Command::OrderUnit { player: 0, unit: 3, order: Order::CutTree { tree: (65535, 1) } },
-                Command::QueueOrder { player: 1, unit: 4, order: Order::FetchWood },
-                Command::OrderUnit { player: 2, unit: 5, order: Order::PickUp { at: (7, 65535) } },
+                Command::QueueOrder { player: 2, unit: Id::from_raw(12), order: Order::Stop },
+                Command::OrderUnit { player: 0, unit: Id::from_raw(3), order: Order::CutTree { tree: (65535, 1) } },
+                Command::QueueOrder { player: 1, unit: Id::from_raw(4), order: Order::FetchWood },
+                Command::OrderUnit { player: 2, unit: Id::from_raw(5), order: Order::PickUp { at: (7, 65535) } },
                 Command::PlaceBuilding { player: 1, kind: BuildingKind::AirshipHut, at: (512, 65024), facing: 6 },
                 Command::PlaceBuilding { player: 0, kind: BuildingKind::Hut { size: 1 }, at: (0, 1024), facing: 0 },
-                Command::OrderUnit { player: 1, unit: 9, order: Order::Build { site: (512, 65024) } },
+                Command::OrderUnit { player: 1, unit: Id::from_raw(9), order: Order::Build { site: (512, 65024) } },
                 Command::CancelBuilding { player: 3, at: (1, 2) },
                 Command::Dismantle { player: 2, building: u32::MAX, on: true },
                 Command::Dismantle { player: 0, building: 7, on: false },
-                Command::QueueOrder { player: 0, unit: 3, order: Order::Enter { site: (1024, 2048) } },
-                Command::OrderUnit { player: 0, unit: 1, order: Order::Worship { site: (32768, 36864) } },
+                Command::QueueOrder { player: 0, unit: Id::from_raw(3), order: Order::Enter { site: (1024, 2048) } },
+                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Worship { site: (32768, 36864) } },
                 Command::CastSelf { player: 1, kind: SpellKind::Teleport },
                 Command::PauseSpell { player: 3, kind: SpellKind::Armageddon, paused: true },
             ],

@@ -9,7 +9,7 @@ use crate::effect::{DamageKind, Effect, EffectKind};
 use crate::event::WorldEvent;
 use crate::map::GameMap;
 use crate::time::{Countdown, Ticks};
-use crate::unit::{cell_of, Unit};
+use crate::unit::{cell_of, Unit, UnitId};
 
 /// `LIGHTNING_NUM_KILLS` (file and exe 6) + 1: the most people one strike kills.
 pub const KILLS: usize = 7;
@@ -52,7 +52,7 @@ impl Strike {
 /// The people a strike at `at` by `owner` kills (ids): the living ones in its cell, not inside a building (the original
 /// walks the cell's unit list, which a person inside is not in, pop3-rev-analysis.md spell 3), that it can hurt
 /// (`effect::hurts`: not the caster's own shaman, not the shielded), in id order, at most `KILLS`.
-pub fn struck(at: (u16, u16), owner: u8, units: &[Unit]) -> Vec<u32> {
+pub fn struck(at: (u16, u16), owner: u8, units: &[Unit]) -> Vec<UnitId> {
     let cell = (cell_of(at.0), cell_of(at.1));
     units
         .iter()
@@ -65,21 +65,22 @@ pub fn struck(at: (u16, u16), owner: u8, units: &[Unit]) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::Id;
     use crate::status::{Timed, SHIELD_STEPS};
     use crate::unit::UnitKind;
 
     const AT: (u16, u16) = (10 * 512 + 256, 20 * 512 + 256);
 
     fn person(id: u32, owner: u8, kind: UnitKind, at: (u16, u16)) -> Unit {
-        Unit::new(id, owner, kind, at)
+        Unit::new(Id::from_raw(id), owner, kind, at)
     }
 
     #[test]
     fn kills_at_most_seven_in_its_cell_of_any_tribe() {
         let mut units: Vec<Unit> = (1..=9).map(|id| person(id, (id % 2) as u8, UnitKind::Brave, (AT.0 + id as u16 * 20, AT.1))).collect();
         units.push(person(10, 1, UnitKind::Brave, (AT.0 + 512, AT.1)));
-        assert_eq!(struck(AT, 0, &units), [1, 2, 3, 4, 5, 6, 7], "own braves too, 7 at most, in id order");
-        assert!(!struck(AT, 0, &units).contains(&10), "the next cell is spared");
+        assert_eq!(struck(AT, 0, &units), [1, 2, 3, 4, 5, 6, 7].map(Id::from_raw), "own braves too, 7 at most, in id order");
+        assert!(!struck(AT, 0, &units).contains(&Id::from_raw(10)), "the next cell is spared");
     }
 
     #[test]
@@ -87,7 +88,7 @@ mod tests {
         let mut shielded = person(3, 1, UnitKind::Warrior, AT);
         shielded.statuses.shield = Timed::steps(SHIELD_STEPS);
         let units = [person(1, 0, UnitKind::Shaman, AT), person(2, 1, UnitKind::Shaman, AT), shielded];
-        assert_eq!(struck(AT, 0, &units), [2]);
+        assert_eq!(struck(AT, 0, &units), [Id::from_raw(2)]);
     }
 
     #[test]
@@ -95,7 +96,7 @@ mod tests {
         let mut inside = person(1, 1, UnitKind::Brave, AT);
         inside.inside = Some(crate::unit::Inside { building: 50, door: AT });
         let units = [inside, person(2, 1, UnitKind::Brave, AT)];
-        assert_eq!(struck(AT, 0, &units), [2]);
+        assert_eq!(struck(AT, 0, &units), [Id::from_raw(2)]);
     }
 
     fn world(units: Vec<Unit>, buildings: Vec<crate::building::Building>, trees: Vec<crate::tree::Tree>) -> GameMap {
@@ -134,7 +135,7 @@ mod tests {
         let map = world(vec![person(1, 1, UnitKind::Brave, AT)], vec![], vec![]);
         let mut s = Strike::default();
         let first = s.turn(AT, 0, &map);
-        assert!(matches!(first[0], WorldEvent::Damage { unit: 1, amount: u16::MAX, kind: DamageKind::Lightning, from: Some(0) }));
+        assert!(matches!(first[0], WorldEvent::Damage { unit, amount: u16::MAX, kind: DamageKind::Lightning, from: Some(0) } if unit == Id::from_raw(1)));
         assert!(matches!(first.last(), Some(WorldEvent::SpawnEffect(e)) if matches!(e.kind, EffectKind::SimpleBlast(_))), "and a simple blast");
         assert!(s.turn(AT, 0, &map).is_empty());
     }

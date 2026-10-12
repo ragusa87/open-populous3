@@ -4,6 +4,7 @@
 
 use crate::building::{Building, BuildingKind, Stage};
 use crate::map::GameMap;
+use crate::unit::UnitId;
 
 /// Something whose slots can be shown, by its index in its `GameMap` list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,7 +18,7 @@ pub enum Holder {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct People {
     pub capacity: u16,
-    pub filled: Vec<u32>,
+    pub filled: Vec<UnitId>,
 }
 
 /// Wood slots: `capacity` pieces, `filled` of them there.
@@ -46,7 +47,7 @@ impl GameMap {
             Holder::Building(i) => {
                 let b = self.buildings.get(i)?;
                 let site = (b.x, b.z);
-                let (capacity, mut filled): (u16, Vec<u32>) = if b.stage() == Stage::Built {
+                let (capacity, mut filled): (u16, Vec<UnitId>) = if b.stage() == Stage::Built {
                     let room = if b.vault.is_some_and(|v| v.is_spent()) { 0 } else { room(b.kind) };
                     let praying = self.units.iter().filter(|u| u.is_alive() && u.action == crate::unit::Action::Worshipping { site });
                     (room, self.units_inside(b.id).chain(praying).map(|u| u.id).collect())
@@ -107,7 +108,7 @@ mod tests {
         let mut map = sandbox();
         let hut = find(&map, BuildingKind::Hut { size: 1 }, |s| s == Stage::Built);
         assert_eq!(map.people_slots(Holder::Building(hut)), Some(People { capacity: 3, filled: Vec::new() }));
-        let braves: Vec<u32> = map.units.iter().filter(|u| u.kind == crate::unit::UnitKind::Brave && u.inside.is_none() && u.work.is_none()).take(2).map(|u| u.id).collect();
+        let braves: Vec<UnitId> = map.units.iter().filter(|u| u.kind == crate::unit::UnitKind::Brave && u.inside.is_none() && u.work.is_none()).take(2).map(|u| u.id).collect();
         for c in map.enter_orders(0, &braves, hut) {
             map.apply(&c);
         }

@@ -8,7 +8,7 @@ use crate::building::{Building, Stage};
 use crate::event::WorldEvent;
 use crate::map::GameMap;
 use crate::time::{Countdown, Tick, Ticks};
-use crate::unit::Order;
+use crate::unit::{Order, UnitId};
 
 /// 127 turns (10.6 s), the original's burning building (timer `+0xA7`).
 pub const BURN_TICKS: Ticks = Ticks::new(127);
@@ -80,7 +80,7 @@ impl GameMap {
     /// Throws everyone inside `building` out by its door; their panics, to apply next.
     fn throw_out(&mut self, building: u32) -> Vec<WorldEvent> {
         let Some(i) = self.building_index(building) else { return Vec::new() };
-        let out: Vec<u32> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building)).map(|u| u.id).collect();
+        let out: Vec<UnitId> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building)).map(|u| u.id).collect();
         let door = self.buildings[i].door();
         self.empty_building(building, door);
         out.into_iter().map(|unit| WorldEvent::Panic { unit }).collect()
@@ -168,8 +168,8 @@ mod tests {
         map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside == 0).unwrap()
     }
 
-    fn rest_inside(map: &mut GameMap, hut: usize, n: usize) -> Vec<u32> {
-        let units: Vec<u32> = map.units.iter().filter(|u| u.owner == 0 && u.kind == crate::unit::UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).take(n).map(|u| u.id).collect();
+    fn rest_inside(map: &mut GameMap, hut: usize, n: usize) -> Vec<UnitId> {
+        let units: Vec<UnitId> = map.units.iter().filter(|u| u.owner == 0 && u.kind == crate::unit::UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).take(n).map(|u| u.id).collect();
         for c in map.enter_orders(0, &units, hut) {
             map.apply(&c);
         }
@@ -182,7 +182,7 @@ mod tests {
         units
     }
 
-    fn panicking(map: &GameMap, people: &[u32]) -> usize {
+    fn panicking(map: &GameMap, people: &[UnitId]) -> usize {
         map.units.iter().filter(|u| people.contains(&u.id) && matches!(u.action, Action::Panicking { .. })).count()
     }
 

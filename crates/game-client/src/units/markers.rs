@@ -54,10 +54,10 @@ pub fn shown(m: Marker, u: &Unit, player: u8, selected: bool, original: bool, no
     u.is_alive()
         && match m {
             Marker::LowHealth => original && u.health.is_low(),
-            Marker::Bloodlust => u.statuses.bloodlust.shown(now, u.id),
+            Marker::Bloodlust => u.statuses.bloodlust.shown(now, u.id.raw()),
             Marker::Hypnotised => u.statuses.hypnotized,
             Marker::Selected => original && selected && u.owner == player,
-            Marker::Shield(_) => u.statuses.shield.shown(now, u.id),
+            Marker::Shield(_) => u.statuses.shield.shown(now, u.id.raw()),
         }
 }
 
@@ -238,7 +238,7 @@ fn animate_markers(
         for child in children.iter() {
             let Ok((mut slot, mut mesh, mut material, mut vis)) = slots.get_mut(child) else { continue };
             let m = SLOTS[slot.slot];
-            let (i, above) = pose(m, n, u.id);
+            let (i, above) = pose(m, n, u.id.raw());
             let frame = (seen && shown(m, u, super::PLAYER, selection.contains(u.id), art.original, now.tick)).then(|| art.frame(m, i, u.owner)).flatten();
             let Some((m_mesh, m_material)) = frame else {
                 vis.set_if_neq(Visibility::Hidden);
@@ -271,7 +271,7 @@ mod tests {
     use game_core::unit::UnitKind;
 
     fn brave(owner: u8) -> Unit {
-        Unit::new(1, owner, UnitKind::Brave, (5000, 5000))
+        Unit::new(game_core::id::Id::from_raw(1), owner, UnitKind::Brave, (5000, 5000))
     }
 
     #[test]
@@ -294,7 +294,7 @@ mod tests {
         let mut u = brave(0);
         u.statuses.shield = Timed::steps(BLINK_STEPS);
         u.statuses.bloodlust = Timed::steps(SHIELD_STEPS);
-        let at = |n: u32| Tick::from_wire(n.wrapping_sub(u.id));
+        let at = |n: u32| Tick::from_wire(n.wrapping_sub(u.id.raw()));
         assert!(shown(Marker::Shield(0), &u, 0, false, false, at(0)) && !shown(Marker::Shield(0), &u, 0, false, false, at(2)), "2 on, 2 off");
         assert!(shown(Marker::Bloodlust, &u, 0, false, false, at(2)), "steady with time left");
     }

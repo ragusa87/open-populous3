@@ -5,6 +5,7 @@
 //! one (`GameMap::tick`).
 
 use crate::path::{Ground, Mobility};
+use crate::unit::UnitId;
 use pop3_format::WORLD_UNITS_PER_CELL;
 use std::collections::{BTreeSet, VecDeque};
 
@@ -90,10 +91,10 @@ pub fn free_spots_near(ground: &impl Ground, target: Spot, taken: &BTreeSet<Spot
 /// nearest spots first, each taken by the closest unit still unplaced (ties by id). The unit on the
 /// target spot goes exactly to `to`, the others to their spot's centre. Units left without a spot
 /// (no room) are left out.
-pub fn dispatch(ground: &impl Ground, units: &[(u32, (u16, u16))], to: (u16, u16), taken: &BTreeSet<Spot>) -> Vec<(u32, (u16, u16))> {
+pub fn dispatch(ground: &impl Ground, units: &[(UnitId, (u16, u16))], to: (u16, u16), taken: &BTreeSet<Spot>) -> Vec<(UnitId, (u16, u16))> {
     let target = spot_of(to);
     let spots = free_spots_near(ground, target, taken, units.len());
-    let mut left: Vec<(u32, (u16, u16))> = units.to_vec();
+    let mut left: Vec<(UnitId, (u16, u16))> = units.to_vec();
     let mut out = Vec::new();
     for spot in spots {
         let at = if spot == target { to } else { spot_centre(spot) };
@@ -112,6 +113,7 @@ pub fn dispatch(ground: &impl Ground, units: &[(u32, (u16, u16))], to: (u16, u16
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::Id;
     use crate::terrain::Heightmap;
 
     fn land() -> Heightmap {
@@ -159,12 +161,12 @@ mod tests {
     #[test]
     fn a_group_packs_around_the_target_the_closest_unit_on_it() {
         let t = land();
-        let units = [(1, spot_centre((0, 30))), (2, spot_centre((25, 30))), (3, spot_centre((3, 30)))];
+        let units = [(Id::from_raw(1), spot_centre((0, 30))), (Id::from_raw(2), spot_centre((25, 30))), (Id::from_raw(3), spot_centre((3, 30)))];
         let to = spot_centre((30, 30));
         let out = dispatch(&t, &units, to, &BTreeSet::new());
         let spots: BTreeSet<_> = out.iter().map(|&(_, p)| spot_of(p)).collect();
         assert_eq!((out.len(), spots.len()), (3, 3), "one spot each: {out:?}");
-        assert_eq!(out.iter().find(|o| o.0 == 2).unwrap().1, to, "the nearest goes exactly where clicked");
+        assert_eq!(out.iter().find(|o| o.0 == Id::from_raw(2)).unwrap().1, to, "the nearest goes exactly where clicked");
         assert!(spots.iter().all(|&(x, z)| (x - 30).abs() <= 1 && (z - 30).abs() <= 1), "shoulder to shoulder");
         assert_eq!(out, dispatch(&t, &units, to, &BTreeSet::new()), "deterministic");
     }

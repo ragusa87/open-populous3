@@ -20,7 +20,7 @@ use crate::placement::can_place;
 use crate::slots;
 use crate::terrain::DirtyRect;
 use crate::time::Countdown;
-use crate::unit::{Action, Inside, Order, Unit, UnitEvent, UnitKind, BUILD_TICKS, JUMP_TICKS};
+use crate::unit::{Action, Inside, Order, Unit, UnitEvent, UnitId, UnitKind, BUILD_TICKS, JUMP_TICKS};
 
 /// Height a brave's jump moves a height point towards the site's level.
 pub const JUMP_STEP: u16 = 32;
@@ -76,14 +76,14 @@ impl GameMap {
 
     /// Orders for the player's `units` clicked on the building `site` (index): braves work on it (in
     /// id order, the first ones up to its maximum are assigned), the others walk next to its door.
-    pub fn build_orders(&self, player: u8, units: &[u32], site: usize) -> Vec<Command> {
+    pub fn build_orders(&self, player: u8, units: &[UnitId], site: usize) -> Vec<Command> {
         let Some(b) = self.buildings.get(site).filter(|b| b.owner == player) else { return Vec::new() };
         self.orders_to_build(b, units)
     }
 
     /// The orders `build_orders` will give once `place` (a `Command::PlaceBuilding`) placed its plan, to send
     /// with it on the same tick; none if it cannot be placed now.
-    pub fn place_orders(&self, place: &Command, units: &[u32]) -> Vec<Command> {
+    pub fn place_orders(&self, place: &Command, units: &[UnitId]) -> Vec<Command> {
         let Command::PlaceBuilding { player, kind, at, facing } = *place else { return Vec::new() };
         let b = Building::placed(kind, player, at.0, at.1, facing % 8, &self.terrain);
         if kind.wood_cost() == 0 || !can_place(self, &b) {
@@ -92,12 +92,12 @@ impl GameMap {
         self.orders_to_build(&b, units)
     }
 
-    fn orders_to_build(&self, b: &Building, units: &[u32]) -> Vec<Command> {
+    fn orders_to_build(&self, b: &Building, units: &[UnitId]) -> Vec<Command> {
         let player = b.owner;
         let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
-        let mut braves: Vec<u32> = self.units.iter().filter(mine).filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
+        let mut braves: Vec<UnitId> = self.units.iter().filter(mine).filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
         braves.sort_unstable();
-        let others: Vec<u32> = units.iter().copied().filter(|id| !braves.contains(id)).collect();
+        let others: Vec<UnitId> = units.iter().copied().filter(|id| !braves.contains(id)).collect();
         let build = braves.into_iter().map(|unit| Command::OrderUnit { player, unit, order: Order::Build { site: (b.x, b.z) } });
         build.chain(if others.is_empty() { Vec::new() } else { self.dispatch(player, &others, b.door()) }).collect()
     }
@@ -138,7 +138,7 @@ impl GameMap {
 
     /// Assigned braves of `building` other than `except` bringing wood: carrying, fetching, cutting, or
     /// building a piece taken off the pile.
-    fn wood_on_the_way(&self, building: u32, except: u32) -> usize {
+    fn wood_on_the_way(&self, building: u32, except: UnitId) -> usize {
         self.workers(building)
             .filter(|u| u.id != except)
             .filter(|u| u.carrying > 0 || u.fetching().is_some() || u.cutting().is_some() || matches!(u.action, Action::Building { .. }))
@@ -174,8 +174,8 @@ impl GameMap {
     /// Everyone inside the building `building` is released and walks out by its `door` to a free spot
     /// around it, then stands idle.
     pub(crate) fn empty_building(&mut self, building: u32, door: (u16, u16)) {
-        let out: Vec<(u32, (u16, u16))> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building)).map(|u| (u.id, (u.x, u.z))).collect();
-        let ids: Vec<u32> = out.iter().map(|o| o.0).collect();
+        let out: Vec<(UnitId, (u16, u16))> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building)).map(|u| (u.id, (u.x, u.z))).collect();
+        let ids: Vec<UnitId> = out.iter().map(|o| o.0).collect();
         let spots = slots::dispatch(&self.ground(), &out, door, &self.taken_spots(&ids));
         for u in self.units.iter_mut().filter(|u| ids.contains(&u.id)) {
             let to = spots.iter().find(|s| s.0 == u.id).map_or(door, |s| s.1);
@@ -325,8 +325,8 @@ fn cell((x, z): (u16, u16)) -> (i32, i32) {
 }
 
 /// Where brave `id` builds inside `b`: around its centre, a third of a cell apart.
-pub(crate) fn work_point(b: &Building, id: u32) -> (u16, u16) {
-    let k = (id % 9) as i32;
+pub(crate) fn work_point(b: &Building, id: UnitId) -> (u16, u16) {
+    let k = (id.raw() % 9) as i32;
     b.local_point((b.kind.footprint().offset.0 + (k % 3 - 1) * 170, b.kind.footprint().offset.1 + (k / 3 - 1) * 170))
 }
 
@@ -352,11 +352,11 @@ mod tests {
         (((C + dx) * 512) as u16, ((C + dz) * 512) as u16)
     }
 
-    fn braves(map: &GameMap, n: usize) -> Vec<u32> {
+    fn braves(map: &GameMap, n: usize) -> Vec<UnitId> {
         map.units.iter().filter(|u| u.kind == UnitKind::Brave && u.campfire().is_none()).take(n).map(|u| u.id).collect()
     }
 
-    fn place(map: &mut GameMap, kind: BuildingKind, at: (u16, u16), units: &[u32]) -> usize {
+    fn place(map: &mut GameMap, kind: BuildingKind, at: (u16, u16), units: &[UnitId]) -> usize {
         map.apply(&Command::PlaceBuilding { player: 0, kind, at, facing: 0 });
         let site = map.building_at_corner(at).expect("placed");
         for c in map.build_orders(0, units, site) {
@@ -439,11 +439,11 @@ mod tests {
         for k in 0..6u16 {
             map.spawn(0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1));
         }
-        let units: Vec<u32> = map.units.iter().filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
+        let units: Vec<UnitId> = map.units.iter().filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
         assert!(units.len() > 6);
         let site = place(&mut map, BuildingKind::Hut { size: 1 }, corner(24, 0), &units);
         let at = map.buildings[site].id;
-        let assigned: Vec<u32> = map.workers(at).map(|u| u.id).collect();
+        let assigned: Vec<UnitId> = map.workers(at).map(|u| u.id).collect();
         let mut first = units.clone();
         first.sort_unstable();
         assert_eq!(assigned, first[..6], "the first by id");
@@ -647,7 +647,7 @@ mod tests {
                 hammered |= u.action == Action::Hammering && u.inside.is_some_and(|i| i.building == at);
                 let building = map.buildings[site].flat;
                 idle[k] = if building && u.action == Action::Idle { idle[k] + 1 } else { 0 };
-                assert!(idle[k] <= 2, "brave {id} stands idle");
+                assert!(idle[k] <= 2, "brave {} stands idle", id.raw());
             }
         }
         assert!(hammered);
@@ -679,7 +679,7 @@ mod tests {
         for t in 0..1500 {
             map.tick();
             for u in map.units.iter().filter(|u| units.contains(&u.id)) {
-                assert!(!matches!(u.action, Action::Stranded { .. }), "tick {t}: brave {} stranded at {:?} inside {:?}", u.id, (u.x, u.z), u.inside);
+                assert!(!matches!(u.action, Action::Stranded { .. }), "tick {t}: brave {} stranded at {:?} inside {:?}", u.id.raw(), (u.x, u.z), u.inside);
             }
             if map.buildings[second].stage() == Stage::Built {
                 return;
@@ -703,7 +703,7 @@ mod tests {
             for t in 0..2500 {
                 map.tick();
                 for u in map.units.iter().filter(|u| units.contains(&u.id)) {
-                    assert!(!matches!(u.action, Action::Stranded { .. }), "{first_kind:?} -> {second_kind:?}, tick {t}: brave {} stranded at {:?} inside {:?}", u.id, u.cell(), u.inside);
+                    assert!(!matches!(u.action, Action::Stranded { .. }), "{first_kind:?} -> {second_kind:?}, tick {t}: brave {} stranded at {:?} inside {:?}", u.id.raw(), u.cell(), u.inside);
                 }
                 if map.buildings[second].flat {
                     break;
@@ -731,7 +731,7 @@ mod tests {
                 for t in 0..1000 {
                     map.tick();
                     for u in map.units.iter().filter(|u| units.contains(&u.id)) {
-                        assert!(!matches!(u.action, Action::Stranded { .. }), "wait {wait}, temple at {dx},{dz}, tick {t}: brave {} stranded at {:?} ({:?}) inside {:?} to {:?}", u.id, u.cell(), (u.x, u.z), u.inside, u.action);
+                        assert!(!matches!(u.action, Action::Stranded { .. }), "wait {wait}, temple at {dx},{dz}, tick {t}: brave {} stranded at {:?} ({:?}) inside {:?} to {:?}", u.id.raw(), u.cell(), (u.x, u.z), u.inside, u.action);
                     }
                 }
             }

@@ -19,7 +19,7 @@ use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::totem::{totems_from_level, Totem, TotemKind};
 use crate::status::Timed;
-use crate::unit::{torus_delta, Action, Order, Unit, UnitEvent, UnitKind};
+use crate::unit::{torus_delta, Action, Order, Unit, UnitEvent, UnitId, UnitKind};
 use crate::wood::WoodPiece;
 use pop3_format::header::TRIBES;
 use pop3_format::{Level, LevelHeader, MAP_SIZE, WORLD_UNITS_PER_CELL};
@@ -200,7 +200,7 @@ impl GameMap {
     fn with_shamans(mut self) -> Self {
         for k in 0..self.sites.len() {
             self.sites[k].flatten_for_spawn(&mut self.terrain);
-            let id = self.new_id();
+            let id = self.new_id_of();
             self.units.push(Unit::shaman(id, &self.sites[k]));
         }
         self
@@ -339,7 +339,7 @@ impl GameMap {
             map.trees.push(Tree::new((C + dx, C + dz), i as u8, crate::tree::MAX_SIZE));
         }
         if let Some(fire) = map.place_campfire(0, (C + 21, C + 4)) {
-            let braves: Vec<u32> = map.units.iter().filter(|u| u.kind == UnitKind::Brave).take(3).map(|u| u.id).collect();
+            let braves: Vec<UnitId> = map.units.iter().filter(|u| u.kind == UnitKind::Brave).take(3).map(|u| u.id).collect();
             for c in map.gather(0, &braves, fire) {
                 map.apply(&c);
             }
@@ -754,7 +754,7 @@ impl GameMap {
 
     /// Orders sending the player's living `units` round their own camp fire `fire`, spread evenly
     /// over its ring from the point nearest the first of them; none if the fire is not theirs.
-    pub fn gather(&self, player: u8, units: &[u32], fire: u32) -> Vec<Command> {
+    pub fn gather(&self, player: u8, units: &[UnitId], fire: u32) -> Vec<Command> {
         let Some(f) = self.campfires.iter().find(|f| f.id == fire && f.owner == player) else { return Vec::new() };
         let going: Vec<&Unit> = self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id)).collect();
         let Some(first) = going.first() else { return Vec::new() };
@@ -779,7 +779,7 @@ impl GameMap {
 
     /// Spots a unit cannot stop on: every spot of a visible tree's cell, and every living unit's but
     /// `except`'s (where it stands, or where it is going).
-    pub fn taken_spots(&self, except: &[u32]) -> BTreeSet<slots::Spot> {
+    pub fn taken_spots(&self, except: &[UnitId]) -> BTreeSet<slots::Spot> {
         let trees = self.trees.iter().filter(|t| t.is_visible()).flat_map(|t| slots::cell_spots(t.cell()));
         let units = self.units.iter().filter(|u| u.is_alive() && !except.contains(&u.id)).map(|u| match u.action {
             Action::Walking { to } | Action::Stranded { to } => slots::spot_of(to),
@@ -790,10 +790,10 @@ impl GameMap {
 
     /// Orders sending the player's living `units` to `to`, each to a free spot of its own around it
     /// (`slots::dispatch`).
-    pub fn dispatch(&self, player: u8, units: &[u32], to: (u16, u16)) -> Vec<Command> {
-        let movers: Vec<(u32, (u16, u16))> =
+    pub fn dispatch(&self, player: u8, units: &[UnitId], to: (u16, u16)) -> Vec<Command> {
+        let movers: Vec<(UnitId, (u16, u16))> =
             self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id)).map(|u| (u.id, (u.x, u.z))).collect();
-        let ids: Vec<u32> = movers.iter().map(|m| m.0).collect();
+        let ids: Vec<UnitId> = movers.iter().map(|m| m.0).collect();
         slots::dispatch(&self.ground(), &movers, to, &self.taken_spots(&ids))
             .into_iter()
             .map(|(unit, (x, z))| Command::OrderUnit { player, unit, order: Order::MoveTo { x, z } })
@@ -834,7 +834,7 @@ impl GameMap {
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
         self.release_orphans();
-        self.units.iter_mut().for_each(|u| u.statuses.tick(now, u.id));
+        self.units.iter_mut().for_each(|u| u.statuses.tick(now, u.id.raw()));
         if crate::unit::HEAL_EVERY.fires(now, 0) {
             self.units.iter_mut().for_each(Unit::heal);
         }
@@ -912,21 +912,21 @@ impl GameMap {
 
     /// A new unit with a fresh id, last in `units` (which stays sorted by id).
     pub fn spawn(&mut self, owner: u8, kind: UnitKind, at: (u16, u16)) -> &mut Unit {
-        let id = self.new_id();
+        let id = self.new_id_of();
         self.units.push(Unit::new(id, owner, kind, at));
         self.units.last_mut().unwrap()
     }
 
     /// Where the unit `id` is in `units`; None once it has left the map.
-    pub fn unit_index(&self, id: u32) -> Option<usize> {
+    pub fn unit_index(&self, id: UnitId) -> Option<usize> {
         self.units.binary_search_by_key(&id, |u| u.id).ok()
     }
 
-    pub fn unit(&self, id: u32) -> Option<&Unit> {
+    pub fn unit(&self, id: UnitId) -> Option<&Unit> {
         self.unit_index(id).map(|i| &self.units[i])
     }
 
-    pub fn unit_mut(&mut self, id: u32) -> Option<&mut Unit> {
+    pub fn unit_mut(&mut self, id: UnitId) -> Option<&mut Unit> {
         self.unit_index(id).map(|i| &mut self.units[i])
     }
 
@@ -1052,7 +1052,7 @@ impl GameMap {
 
     /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`); true
     /// when that kills it.
-    pub(crate) fn damage(&mut self, unit: u32, amount: u16, kind: DamageKind, from: Option<u8>) -> bool {
+    pub(crate) fn damage(&mut self, unit: UnitId, amount: u16, kind: DamageKind, from: Option<u8>) -> bool {
         match self.unit_index(unit).filter(|&i| crate::effect::hurts(&self.units[i], kind, from)) {
             Some(i) => self.units[i].take_damage(amount),
             None => false,
@@ -1209,16 +1209,16 @@ impl GameMap {
 
     /// Orders sending the player's `units` to the wood pile at `at`: braves with empty hands pick up
     /// a piece each, the others walk next to it.
-    pub fn pick_orders(&self, player: u8, units: &[u32], at: (u16, u16)) -> Vec<Command> {
+    pub fn pick_orders(&self, player: u8, units: &[UnitId], at: (u16, u16)) -> Vec<Command> {
         let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
-        let takers: Vec<u32> = self.units.iter().filter(mine).filter(|u| Self::can_take_wood(u)).map(|u| u.id).collect();
-        let others: Vec<u32> = units.iter().copied().filter(|id| !takers.contains(id)).collect();
+        let takers: Vec<UnitId> = self.units.iter().filter(mine).filter(|u| Self::can_take_wood(u)).map(|u| u.id).collect();
+        let others: Vec<UnitId> = units.iter().copied().filter(|id| !takers.contains(id)).collect();
         let pick = takers.iter().map(|&unit| Command::OrderUnit { player, unit, order: Order::PickUp { at } });
         pick.chain(if others.is_empty() { Vec::new() } else { self.dispatch(player, &others, at) }).collect()
     }
 
     /// Living units other than `except` cutting the tree at `tree` or walking to cut it.
-    pub fn tree_claims(&self, tree: (u16, u16), except: u32) -> usize {
+    pub fn tree_claims(&self, tree: (u16, u16), except: UnitId) -> usize {
         self.units.iter().filter(|u| u.id != except && u.is_alive() && u.cutting() == Some(tree)).count()
     }
 
@@ -1269,12 +1269,12 @@ impl GameMap {
 
     /// Orders sending the player's `units` to the tree `tree` (index in `trees`): braves cut it (or
     /// a neighbour), the others walk next to it.
-    pub fn cut_orders(&self, player: u8, units: &[u32], tree: usize) -> Vec<Command> {
+    pub fn cut_orders(&self, player: u8, units: &[UnitId], tree: usize) -> Vec<Command> {
         let Some(t) = self.trees.get(tree) else { return Vec::new() };
         let at = (t.x, t.z);
         let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
-        let braves: Vec<u32> = self.units.iter().filter(mine).filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
-        let others: Vec<u32> = units.iter().copied().filter(|id| !braves.contains(id)).collect();
+        let braves: Vec<UnitId> = self.units.iter().filter(mine).filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
+        let others: Vec<UnitId> = units.iter().copied().filter(|id| !braves.contains(id)).collect();
         let cut = braves.iter().map(|&unit| Command::OrderUnit { player, unit, order: Order::CutTree { tree: at } });
         cut.chain(if others.is_empty() { Vec::new() } else { self.dispatch(player, &others, at) }).collect()
     }
@@ -1646,7 +1646,7 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         let s = &m.units[0];
         let (shaman, at) = (s.id, (s.x.wrapping_add(4 * 512), s.z));
-        let crowd: Vec<u32> = (0..9).map(|k| m.spawn(1, UnitKind::Brave, (at.0.wrapping_add(k * 30), at.1)).id).collect();
+        let crowd: Vec<UnitId> = (0..9).map(|k| m.spawn(1, UnitKind::Brave, (at.0.wrapping_add(k * 30), at.1)).id).collect();
         let next_cell = m.spawn(1, UnitKind::Brave, (at.0.wrapping_add(512), at.1)).id;
         m.apply(&Command::Cast { player: 0, spell: Spell::Lightning { at } });
         m.run(crate::unit::CAST_RELEASE);
@@ -1797,7 +1797,7 @@ mod tests {
             ], "{kind:?}: one row per marker, then all");
             assert!(marked.iter().all(|u| u.is_alive()));
         }
-        let mut ids: Vec<u32> = m.units.iter().map(|u| u.id).collect();
+        let mut ids: Vec<UnitId> = m.units.iter().map(|u| u.id).collect();
         ids.dedup();
         assert_eq!(ids.len(), m.units.len(), "unique ids");
         for u in &m.units {
@@ -1839,7 +1839,7 @@ mod tests {
         m.trees.clear();
         let c = MAP_SIZE as i32 / 2;
         let to = slots::cell_centre((c + 2, c + 6));
-        let group: Vec<u32> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
+        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
         for cmd in m.dispatch(0, &group, to) {
             m.apply(&cmd);
         }
@@ -1994,7 +1994,7 @@ mod tests {
         let mut m = GameMap::sandbox_buildings();
         m.campfires.clear();
         let fire = m.place_campfire(0, (84, 70)).unwrap();
-        let braves: Vec<u32> = m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.campfire().is_none()).take(4).map(|u| u.id).collect();
+        let braves: Vec<UnitId> = m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.campfire().is_none()).take(4).map(|u| u.id).collect();
         let orders = m.gather(0, &braves, fire);
         let points: Vec<u8> = orders.iter().map(|c| match c {
             Command::OrderUnit { order: Order::Campfire { point, .. }, .. } => *point,
@@ -2095,7 +2095,7 @@ mod tests {
     fn chained_orders_replay_the_same() {
         let play = || {
             let mut m = GameMap::sandbox_units();
-            let ids: Vec<u32> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
+            let ids: Vec<UnitId> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
             let c = MAP_SIZE as i32 / 2;
             for (i, &unit) in ids.iter().enumerate() {
                 let to = slots::cell_centre((c + i as i32 % 4, c + 4));
@@ -2109,7 +2109,7 @@ mod tests {
     }
 
     /// Sandbox walk with no trees but `trees`, and braves of tribe 0 at `braves` (cells); their ids.
-    fn woodland(trees: &[((i32, i32), u8)], braves: &[(i32, i32)]) -> (GameMap, Vec<u32>) {
+    fn woodland(trees: &[((i32, i32), u8)], braves: &[(i32, i32)]) -> (GameMap, Vec<UnitId>) {
         let mut m = GameMap::sandbox_walk();
         let c = MAP_SIZE as i32 / 2;
         m.trees = trees.iter().map(|&((x, z), size)| Tree::new((c + x, c + z), 0, size)).collect();
@@ -2117,7 +2117,7 @@ mod tests {
         (m, ids)
     }
 
-    fn unit(m: &GameMap, id: u32) -> &Unit {
+    fn unit(m: &GameMap, id: UnitId) -> &Unit {
         m.unit(id).unwrap()
     }
 
@@ -2308,7 +2308,7 @@ mod tests {
         assert_eq!(unit(&m.0, m.1[0]).carrying, 1);
     }
 
-    fn run_until_unit(m: &mut GameMap, id: u32, done: impl Fn(&Unit) -> bool) {
+    fn run_until_unit(m: &mut GameMap, id: UnitId, done: impl Fn(&Unit) -> bool) {
         for _ in 0..300 {
             m.tick();
             if done(unit(m, id)) {
@@ -2355,7 +2355,7 @@ mod tests {
             m.tick();
         }
         let fire = m.campfires[0].centre();
-        let around: Vec<u32> = m.units.iter().filter(|u| u.campfire() == Some(fire)).map(|u| u.id).collect();
+        let around: Vec<UnitId> = m.units.iter().filter(|u| u.campfire() == Some(fire)).map(|u| u.id).collect();
         assert_eq!(around.len(), 3);
         m.apply(&Command::RemoveCampfire { player: 1, at: fire });
         assert_eq!(m.campfires.len(), 1, "not red's to put out");
@@ -2410,7 +2410,7 @@ mod tests {
             d[base + i * 55..base + i * 55 + 7].copy_from_slice(t);
         }
         let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None);
-        let kinds: Vec<_> = m.units.iter().map(|u| (u.id, u.owner, u.kind, u.x, u.z)).collect();
+        let kinds: Vec<_> = m.units.iter().map(|u| (u.id.raw(), u.owner, u.kind, u.x, u.z)).collect();
         assert_eq!(kinds[0].2, UnitKind::Shaman);
         assert_eq!(
             kinds[1..],

@@ -39,7 +39,7 @@ mod tests {
     const CELL: u16 = WORLD_UNITS_PER_CELL as u16;
 
     fn unit(owner: u8, kind: UnitKind, cell: (u16, u16)) -> Unit {
-        Unit::new(1, owner, kind, (cell.0 * CELL + CELL / 2, cell.1 * CELL + CELL / 2))
+        Unit::new(game_core::id::Id::from_raw(1), owner, kind, (cell.0 * CELL + CELL / 2, cell.1 * CELL + CELL / 2))
     }
 
     #[test]

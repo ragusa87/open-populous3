@@ -4,6 +4,7 @@
 
 use crate::campfire;
 use crate::health::Health;
+use crate::id::Id;
 use crate::motion::{Motion, Velocity};
 use crate::path::{self, Ground, Mobility};
 use crate::physics;
@@ -63,6 +64,9 @@ pub const PANIC_TICKS: Ticks = Ticks::new(64);
 pub const PANIC_SPEED: i32 = 110;
 /// Length of a panic heading (`panic_heading`), world units: beyond a step, so a step never reaches its end.
 const PANIC_REACH: i32 = 1024;
+
+/// A unit's stable id (`GameMap::new_id_of`).
+pub type UnitId = Id<Unit>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnitKind {
@@ -285,7 +289,7 @@ pub enum UnitEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unit {
-    pub id: u32,
+    pub id: UnitId,
     pub owner: u8,
     pub kind: UnitKind,
     pub x: u16,
@@ -346,12 +350,12 @@ pub struct Inside {
 }
 
 impl Unit {
-    pub fn shaman(id: u32, site: &ReincarnationSite) -> Self {
+    pub fn shaman(id: UnitId, site: &ReincarnationSite) -> Self {
         Unit::new(id, site.owner, UnitKind::Shaman, site.spawn_point())
     }
 
     /// A unit standing idle at `(x, z)` (world units), at full health.
-    pub fn new(id: u32, owner: u8, kind: UnitKind, (x, z): (u16, u16)) -> Self {
+    pub fn new(id: UnitId, owner: u8, kind: UnitKind, (x, z): (u16, u16)) -> Self {
         Unit {
             id,
             owner,
@@ -769,7 +773,7 @@ impl Unit {
 
     /// Stranded: `STRANDED_DAMAGE` lost on its `STRANDED_HURT_EVERY` turns; true when that kills her.
     fn hurt(&mut self, now: Tick) -> bool {
-        if STRANDED_HURT_EVERY.fires(now, self.id) {
+        if STRANDED_HURT_EVERY.fires(now, self.id.raw()) {
             self.health.damage(STRANDED_DAMAGE);
         }
         if self.health.is_zero() {
@@ -1020,7 +1024,7 @@ mod tests {
 
     fn shaman_at(cell: (i32, i32)) -> (Unit, ReincarnationSite) {
         let site = ReincarnationSite::at_cell(0, cell);
-        (Unit::shaman(1, &site), site)
+        (Unit::shaman(Id::from_raw(1), &site), site)
     }
 
     fn run(u: &mut Unit, t: &Heightmap, site: &ReincarnationSite, ticks: usize) -> Vec<UnitEvent> {
@@ -1343,7 +1347,7 @@ mod tests {
     fn only_the_shaman_reincarnates() {
         let mut t = land();
         let (shaman, site) = shaman_at((10, 10));
-        let mut brave = Unit::new(7, 0, UnitKind::Brave, (shaman.x + 20 * 512, shaman.z));
+        let mut brave = Unit::new(Id::from_raw(7), 0, UnitKind::Brave, (shaman.x + 20 * 512, shaman.z));
         assert_eq!(brave.health, Health::full(UnitKind::Brave.max_health()));
         sea_cell(&mut t, brave.cell());
         let ticks = run_until(&mut brave, &t, &site, |u| !u.is_alive());
@@ -1359,7 +1363,7 @@ mod tests {
         let t = land();
         let ticks = |kind: UnitKind| {
             let (s, site) = shaman_at((10, 10));
-            let mut u = Unit::new(2, 0, kind, (s.x, s.z));
+            let mut u = Unit::new(Id::from_raw(2), 0, kind, (s.x, s.z));
             walk(&mut u, &t, &site, (s.x + 10 * 512, s.z), 500).unwrap()
         };
         assert!(ticks(UnitKind::Spy) < ticks(UnitKind::Brave) && ticks(UnitKind::Brave) < ticks(UnitKind::Warrior));

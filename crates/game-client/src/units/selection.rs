@@ -19,7 +19,7 @@ use crate::hud::PANEL_WIDTH;
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::command::Command;
-use game_core::unit::{Order, PickableUnit, Unit};
+use game_core::unit::{Order, PickableUnit, Unit, UnitId};
 
 /// Cursor travel (screen pixels) before a press becomes a box drag.
 pub const DRAG_PX: f32 = 6.0;
@@ -33,14 +33,14 @@ const BOX_FILL: Color = Color::srgba(1.0, 1.0, 0.95, 0.08);
 /// The local player's selected units, by `Unit::id`, in selection order.
 #[derive(Resource, Default, Debug, Clone, PartialEq)]
 pub struct Selection {
-    pub units: Vec<u32>,
+    pub units: Vec<UnitId>,
 }
 
 /// A unit the player could pick (hover, select), as seen on screen. Only made from a `PickableUnit`:
 /// a flung or lifted unit is never on screen to pick.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OnScreen {
-    id: u32,
+    id: UnitId,
     feet: Vec2,
     head: Vec2,
 }
@@ -50,13 +50,13 @@ impl OnScreen {
         OnScreen { id: unit.id, feet, head }
     }
 
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> UnitId {
         self.id
     }
 }
 
 impl Selection {
-    pub fn contains(&self, id: u32) -> bool {
+    pub fn contains(&self, id: UnitId) -> bool {
         self.units.contains(&id)
     }
 
@@ -64,19 +64,19 @@ impl Selection {
         self.units.clear();
     }
 
-    pub fn select_only(&mut self, id: u32) {
+    pub fn select_only(&mut self, id: UnitId) {
         self.units = vec![id];
     }
 
     /// Adds `id` to the selection (a tooltip slot's click); already selected, it stays.
-    pub fn add(&mut self, id: u32) {
+    pub fn add(&mut self, id: UnitId) {
         if !self.contains(id) {
             self.units.push(id);
         }
     }
 
     /// Click on a unit. `add` (Ctrl) toggles it in the selection instead of replacing it.
-    pub fn click(&mut self, id: u32, add: bool) {
+    pub fn click(&mut self, id: UnitId, add: bool) {
         if !add {
             self.select_only(id);
         } else if let Some(i) = self.units.iter().position(|&u| u == id) {
@@ -330,7 +330,7 @@ pub fn hovered_site(map: &game_core::map::GameMap, hovered: Option<crate::hover:
 /// units: braves work on it while it is still to build; a built hut takes followers in to rest; on a
 /// vault of knowledge, the selected shaman goes to pray at it; on a totem, the selected units that
 /// may pray there. None elsewhere, or with nothing selected.
-pub fn building_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16, u16)) -> Option<Vec<Command>> {
+pub fn building_click(map: &game_core::map::GameMap, selected: &[UnitId], at: (u16, u16)) -> Option<Vec<Command>> {
     if selected.is_empty() {
         return None;
     }
@@ -348,7 +348,7 @@ pub fn building_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16,
 
 /// Commands for a left click on the ground at `at` (world units) with `selected` units: they go
 /// round the player's camp fire there, else walk there.
-pub fn ground_click(map: &game_core::map::GameMap, selected: &[u32], at: (u16, u16)) -> Vec<Command> {
+pub fn ground_click(map: &game_core::map::GameMap, selected: &[UnitId], at: (u16, u16)) -> Vec<Command> {
     match map.campfire_at(at).filter(|f| f.owner == PLAYER) {
         _ if selected.is_empty() => Vec::new(),
         Some(fire) => map.gather(PLAYER, selected, fire.id),
@@ -417,20 +417,21 @@ fn draw_overlays(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use game_core::id::Id;
 
     fn at(id: u32, x: f32) -> OnScreen {
-        OnScreen { id, feet: Vec2::new(x, 100.0), head: Vec2::new(x, 70.0) }
+        OnScreen { id: Id::from_raw(id), feet: Vec2::new(x, 100.0), head: Vec2::new(x, 70.0) }
     }
 
-    fn sel(units: &[u32]) -> Selection {
+    fn sel(units: &[UnitId]) -> Selection {
         Selection { units: units.to_vec() }
     }
 
     #[test]
     fn a_flung_unit_is_not_selectable_and_leaves_the_selection() {
-        let mut units = vec![Unit::new(4, PLAYER, game_core::unit::UnitKind::Brave, (0, 0))];
+        let mut units = vec![Unit::new(Id::from_raw(4), PLAYER, game_core::unit::UnitKind::Brave, (0, 0))];
         assert!(selectable(&units[0]).is_some());
-        let mut sel = sel(&[4]);
+        let mut sel = sel(&[Id::from_raw(4)]);
         units[0].action = game_core::unit::Action::Tumbling;
         assert!(selectable(&units[0]).is_none());
         sel.retain(&units);
@@ -439,11 +440,11 @@ mod tests {
 
     #[test]
     fn tooltip_clicks_add_to_the_selection() {
-        let mut sel = Selection { units: vec![7] };
-        sel.add(3);
-        sel.add(5);
-        sel.add(3);
-        assert_eq!(sel.units, vec![7, 3, 5], "added once each, the others kept");
+        let mut sel = Selection { units: vec![Id::from_raw(7)] };
+        sel.add(Id::from_raw(3));
+        sel.add(Id::from_raw(5));
+        sel.add(Id::from_raw(3));
+        assert_eq!(sel.units, [7, 3, 5].map(Id::from_raw), "added once each, the others kept");
     }
 
     #[test]
@@ -495,73 +496,73 @@ mod tests {
     #[test]
     fn ctrl_chains_unit_orders_and_keeps_the_others() {
         let cmds = vec![
-            Command::OrderUnit { player: PLAYER, unit: 4, order: Order::Stop },
+            Command::OrderUnit { player: PLAYER, unit: Id::from_raw(4), order: Order::Stop },
             Command::RemoveCampfire { player: PLAYER, at: (1, 2) },
         ];
         assert_eq!(
             chained(cmds),
-            [Command::QueueOrder { player: PLAYER, unit: 4, order: Order::Stop }, Command::RemoveCampfire { player: PLAYER, at: (1, 2) }]
+            [Command::QueueOrder { player: PLAYER, unit: Id::from_raw(4), order: Order::Stop }, Command::RemoveCampfire { player: PLAYER, at: (1, 2) }]
         );
     }
 
     #[test]
     fn click_replaces_and_ctrl_toggles() {
-        let mut s = sel(&[1, 2]);
-        s.click(3, false);
-        assert_eq!(s.units, [3]);
-        s.click(4, true);
-        assert_eq!(s.units, [3, 4]);
-        s.click(3, true);
-        assert_eq!(s.units, [4], "ctrl click on a selected unit removes it");
+        let mut s = sel(&[1, 2].map(Id::from_raw));
+        s.click(Id::from_raw(3), false);
+        assert_eq!(s.units, [3].map(Id::from_raw));
+        s.click(Id::from_raw(4), true);
+        assert_eq!(s.units, [3, 4].map(Id::from_raw));
+        s.click(Id::from_raw(3), true);
+        assert_eq!(s.units, [4].map(Id::from_raw), "ctrl click on a selected unit removes it");
     }
 
     #[test]
     fn box_replaces_or_adds_and_empty_clears() {
-        let mut s = sel(&[1]);
+        let mut s = sel(&[Id::from_raw(1)]);
         s.select_box(&[at(2, 0.0), at(3, 0.0)], false);
-        assert_eq!(s.units, [2, 3]);
+        assert_eq!(s.units, [2, 3].map(Id::from_raw));
         s.select_box(&[at(3, 0.0), at(4, 0.0)], true);
-        assert_eq!(s.units, [2, 3, 4]);
+        assert_eq!(s.units, [2, 3, 4].map(Id::from_raw));
         s.select_box(&[], true);
-        assert_eq!(s.units, [2, 3, 4]);
+        assert_eq!(s.units, [2, 3, 4].map(Id::from_raw));
         s.select_box(&[], false);
         assert!(s.units.is_empty());
         s.select_box(&[at(2, 0.0)], false);
-        s.select_only(9);
-        assert_eq!(s.units, [9], "the panel preview selects the shaman alone");
+        s.select_only(Id::from_raw(9));
+        assert_eq!(s.units, [9].map(Id::from_raw), "the panel preview selects the shaman alone");
     }
 
     #[test]
     fn keeps_only_the_players_living_units() {
         use game_core::site::ReincarnationSite;
         use game_core::unit::Action;
-        let mine = Unit::shaman(1, &ReincarnationSite::at_cell(PLAYER, (1, 1)));
-        let theirs = Unit::shaman(2, &ReincarnationSite::at_cell(1, (5, 5)));
-        let mut dead = Unit::shaman(3, &ReincarnationSite::at_cell(PLAYER, (1, 1)));
+        let mine = Unit::shaman(Id::from_raw(1), &ReincarnationSite::at_cell(PLAYER, (1, 1)));
+        let theirs = Unit::shaman(Id::from_raw(2), &ReincarnationSite::at_cell(1, (5, 5)));
+        let mut dead = Unit::shaman(Id::from_raw(3), &ReincarnationSite::at_cell(PLAYER, (1, 1)));
         dead.action = Action::Dead { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) };
-        let mut s = sel(&[1, 2, 3, 4]);
+        let mut s = sel(&[1, 2, 3, 4].map(Id::from_raw));
         s.retain(&[mine, theirs, dead]);
-        assert_eq!(s.units, [1]);
+        assert_eq!(s.units, [1].map(Id::from_raw));
     }
 
     #[test]
     fn orders_go_to_each_selected_unit() {
-        let cmds = sel(&[4, 7]).commands(Order::Stop);
-        assert_eq!(cmds, [Command::OrderUnit { player: PLAYER, unit: 4, order: Order::Stop }, Command::OrderUnit { player: PLAYER, unit: 7, order: Order::Stop }]);
+        let cmds = sel(&[4, 7].map(Id::from_raw)).commands(Order::Stop);
+        assert_eq!(cmds, [Command::OrderUnit { player: PLAYER, unit: Id::from_raw(4), order: Order::Stop }, Command::OrderUnit { player: PLAYER, unit: Id::from_raw(7), order: Order::Stop }]);
     }
 
     #[test]
     fn picks_the_nearest_unit_line() {
         let units = [at(1, 100.0), at(2, 108.0)];
-        assert_eq!(unit_at(Vec2::new(105.0, 85.0), &units).map(|u| u.id), Some(2));
-        assert_eq!(unit_at(Vec2::new(98.0, 63.0), &units).map(|u| u.id), Some(1), "just over the head");
+        assert_eq!(unit_at(Vec2::new(105.0, 85.0), &units).map(|u| u.id), Some(Id::from_raw(2)));
+        assert_eq!(unit_at(Vec2::new(98.0, 63.0), &units).map(|u| u.id), Some(Id::from_raw(1)), "just over the head");
         assert_eq!(unit_at(Vec2::new(150.0, 85.0), &units), None);
     }
 
     #[test]
     fn box_takes_units_whose_middle_is_inside() {
         let units = [at(1, 100.0), at(2, 200.0)];
-        let ids = |v: Vec<OnScreen>| v.iter().map(|u| u.id).collect::<Vec<_>>();
+        let ids = |v: Vec<OnScreen>| v.iter().map(|u| u.id.raw()).collect::<Vec<_>>();
         assert_eq!(ids(in_box(Vec2::new(150.0, 50.0), Vec2::new(90.0, 90.0), &units)), [1]);
         assert_eq!(ids(in_box(Vec2::new(0.0, 0.0), Vec2::new(300.0, 80.0), &units)), Vec::<u32>::new(), "middle at y=85");
     }

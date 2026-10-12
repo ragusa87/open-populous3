@@ -104,7 +104,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   touchdowns are kept in game-core (a unit's landing tick), so a rejoining client draws it too; the sinking totem's
   smoke once totems have ids; units, building views and the unit glide (`SimClock::prev_ids`) still keyed by index.
 - [ ] Coordinators: the infrastructure is done ([coordinators.md](docs/specs/coordinators.md)); each kind to specify and implement (preacher's sermon, fight, pre-fight, formation, guard control, soul convert), with its scan in `GameMap::detect_coordinators`.
-- [ ] Units and buildings to typed ids (`Id<Unit>`, `Id<Building>`) before the first coordinator kind stores one: `Unit::id`, `WorldEvent`, `Command::OrderUnit` / `QueueOrder`, the net codec, client selection (coordinators.md "Ids of units and buildings").
+- [ ] Buildings to typed ids (`Id<Building>`; units are `UnitId` already): `Building::id`, `Inside::building`, the building fields of `WorldEvent` and `Command::Dismantle`, the client's building views (coordinators.md "Ids of units and buildings").
 - [ ] The hurt path (`GameMap::damage`): the last attacker, the death cause, and death held off while tumbling, so no emitter repeats them.
 - [ ] World events still to add with their kinds: `ChangeOwner { unit, tribe }` (conversion), `SpawnCoordinator` (a pre-fight starting a fight).
 - [ ] Internal model 10/6: Preacher Attract (wiki) or a formation (pop3-rev-analysis.md "Combat"): decide from the original.

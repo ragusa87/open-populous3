@@ -4,7 +4,7 @@
 
 use crate::building::{BuildingKind, Stage};
 use crate::map::GameMap;
-use crate::unit::{Action, Unit, UnitKind};
+use crate::unit::{Action, Unit, UnitId, UnitKind};
 
 /// What a unit is doing, as the Stats tab rows group it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -111,7 +111,7 @@ pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
 }
 
 /// The kinds among the living units `ids` (the selection; an AI's group), unknown ids ignored.
-pub fn kinds_of(map: &GameMap, ids: &[u32]) -> Counts {
+pub fn kinds_of(map: &GameMap, ids: &[UnitId]) -> Counts {
     let mut counts = Counts::default();
     for u in map.units.iter().filter(|u| u.is_alive() && ids.contains(&u.id)) {
         counts.add(u.kind);
@@ -139,7 +139,7 @@ impl GameMap {
 
     /// The unit a pick adds: the lowest id doing `state` not in `taken`, of `kind`, or when None of the
     /// first kind in `KINDS` order with one left.
-    pub fn next_unit(&self, tribe: u8, state: State, kind: Option<UnitKind>, taken: &[u32]) -> Option<u32> {
+    pub fn next_unit(&self, tribe: u8, state: State, kind: Option<UnitKind>, taken: &[UnitId]) -> Option<UnitId> {
         let kinds: &[UnitKind] = match kind {
             Some(ref k) => std::slice::from_ref(k),
             None => &KINDS,
@@ -267,7 +267,7 @@ mod tests {
         let a = add(&mut map, 0, UnitKind::Spy);
         let dead = add(&mut map, 0, UnitKind::Spy);
         map.units[dead].action = Action::Dead { left: crate::time::Countdown::new(crate::time::Ticks::new(3)) };
-        let ids = [map.units[a].id, map.units[dead].id, 999];
+        let ids = [map.units[a].id, map.units[dead].id, crate::id::Id::from_raw(999)];
         assert_eq!(kinds_of(&map, &ids).get(UnitKind::Spy), 1);
         assert_eq!(kinds_of(&map, &ids).total(), 1);
     }

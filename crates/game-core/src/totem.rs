@@ -6,6 +6,7 @@
 use crate::building::{BuildingKind, Reward};
 use crate::spell_book::SpellKind;
 use crate::time::Ticks;
+use crate::unit::UnitId;
 use pop3_format::level::{Availability, Thing, Trigger, KIND_BUILDING, KIND_SCENERY, KIND_SPELL};
 use pop3_format::{Level, ThingData, WORLD_UNITS_PER_CELL};
 
@@ -79,7 +80,7 @@ pub struct Totem {
     /// Each tribe's gauge, in `gauge::STEP`s.
     pub gauges: [u32; TRIBES],
     /// The units praying at it, in the order they started: each tribe's first `prayers` count.
-    pub queue: Vec<u32>,
+    pub queue: Vec<UnitId>,
     /// Ticks since it last gave (counting once it gave at all).
     pub since_given: u16,
 }

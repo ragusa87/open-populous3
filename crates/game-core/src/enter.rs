@@ -6,7 +6,7 @@
 use crate::building::Stage;
 use crate::command::Command;
 use crate::map::GameMap;
-use crate::unit::{Action, Inside, Order, Unit, UnitKind};
+use crate::unit::{Action, Inside, Order, Unit, UnitId, UnitKind};
 use crate::work::work_point;
 
 /// A click this close (world units) to a built building's footprint is on it.
@@ -21,12 +21,12 @@ impl GameMap {
 
     /// Orders sending the player's followers among `units` into the building `house` (index), in id
     /// order; the shaman walks to its door.
-    pub fn enter_orders(&self, player: u8, units: &[u32], house: usize) -> Vec<Command> {
+    pub fn enter_orders(&self, player: u8, units: &[UnitId], house: usize) -> Vec<Command> {
         let Some(b) = self.buildings.get(house).filter(|b| b.owner == player) else { return Vec::new() };
         let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
-        let mut going: Vec<u32> = self.units.iter().filter(mine).filter(|u| can_enter(u.kind)).map(|u| u.id).collect();
+        let mut going: Vec<UnitId> = self.units.iter().filter(mine).filter(|u| can_enter(u.kind)).map(|u| u.id).collect();
         going.sort_unstable();
-        let others: Vec<u32> = units.iter().copied().filter(|id| !going.contains(id)).collect();
+        let others: Vec<UnitId> = units.iter().copied().filter(|id| !going.contains(id)).collect();
         let enter = going.into_iter().map(|unit| Command::OrderUnit { player, unit, order: Order::Enter { site: (b.x, b.z) } });
         enter.chain(if others.is_empty() { Vec::new() } else { self.dispatch(player, &others, b.door()) }).collect()
     }
@@ -92,7 +92,7 @@ mod tests {
         (((64 + dx) * 512) as u16, ((64 + dz) * 512) as u16)
     }
 
-    fn braves(map: &GameMap, n: usize) -> Vec<u32> {
+    fn braves(map: &GameMap, n: usize) -> Vec<UnitId> {
         map.units.iter().filter(|u| u.kind == UnitKind::Brave && u.campfire().is_none() && u.inside.is_none()).take(n).map(|u| u.id).collect()
     }
 

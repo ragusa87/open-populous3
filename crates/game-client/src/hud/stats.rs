@@ -12,7 +12,7 @@ use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::headcount::{kinds_of, Counts, Headcount, Housing, State, KINDS, SUPPLY};
 use game_core::map::GameMap;
-use game_core::unit::UnitKind;
+use game_core::unit::{UnitId, UnitKind};
 use pop3_format::catalog::STATS_ROW_ICONS;
 
 const TAB: usize = 2;
@@ -93,7 +93,7 @@ impl Cell {
     }
 
     /// The units a click adds: the next one not selected yet, or with `all` every one of them.
-    pub fn pick(self, map: &GameMap, tribe: u8, selected: &[u32], all: bool) -> Vec<u32> {
+    pub fn pick(self, map: &GameMap, tribe: u8, selected: &[UnitId], all: bool) -> Vec<UnitId> {
         let Row::Doing(state) = self.row else { return Vec::new() };
         if all {
             return map.units_in(tribe, state, self.kind).map(|u| u.id).filter(|id| !selected.contains(id)).collect();
@@ -102,10 +102,10 @@ impl Cell {
     }
 
     /// What hovering it says.
-    pub fn describe(self, map: &GameMap, tribe: u8, selected: &[u32]) -> String {
+    pub fn describe(self, map: &GameMap, tribe: u8, selected: &[UnitId]) -> String {
         let what = self.kind.map_or("units", |k| kind_plural(k));
         let Row::Doing(state) = self.row else { return format!("Selected {what}.") };
-        let units: Vec<u32> = map.units_in(tribe, state, self.kind).map(|u| u.id).collect();
+        let units: Vec<UnitId> = map.units_in(tribe, state, self.kind).map(|u| u.id).collect();
         let picked = units.iter().filter(|id| selected.contains(id)).count();
         let row = self.row.label().to_lowercase();
         format!("{row}: {} {what}, {picked} selected.\nClick: one more. Shift + click: all.", units.len())
@@ -283,13 +283,14 @@ fn update_tab(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use game_core::id::Id;
     use game_core::unit::{Action, Unit};
 
     fn map_with(units: &[(UnitKind, Action)]) -> GameMap {
         let mut map = GameMap::sandbox_units();
         map.units.clear();
         for (i, (kind, action)) in units.iter().enumerate() {
-            let mut u = Unit::new(i as u32 + 1, PLAYER, *kind, (64 * 512, 64 * 512));
+            let mut u = Unit::new(Id::from_raw(i as u32 + 1), PLAYER, *kind, (64 * 512, 64 * 512));
             u.action = *action;
             map.units.push(u);
         }
@@ -310,21 +311,21 @@ mod tests {
     fn cells_read_their_row_and_the_selection() {
         let map = map_with(&[(UnitKind::Brave, Action::Idle), (UnitKind::Brave, Action::Idle), (UnitKind::Spy, Action::Hammering)]);
         let count = map.headcount(PLAYER);
-        let selected = kinds_of(&map, &[2]);
+        let selected = kinds_of(&map, &[Id::from_raw(2)]);
         let idle_braves = Cell { row: Row::Doing(State::Idle), kind: Some(UnitKind::Brave) };
         assert_eq!(idle_braves.value(&count, &selected), 2);
         assert_eq!(Cell { row: Row::Doing(State::Working), kind: None }.value(&count, &selected), 1);
         assert_eq!(Cell { row: Row::Selected, kind: Some(UnitKind::Brave) }.value(&count, &selected), 1);
-        assert!(idle_braves.describe(&map, PLAYER, &[2]).starts_with("idle: 2 braves, 1 selected."));
+        assert!(idle_braves.describe(&map, PLAYER, &[Id::from_raw(2)]).starts_with("idle: 2 braves, 1 selected."));
     }
 
     #[test]
     fn a_click_adds_the_next_unit_shift_all_and_the_selected_row_none() {
         let map = map_with(&[(UnitKind::Warrior, Action::Idle), (UnitKind::Brave, Action::Idle), (UnitKind::Brave, Action::Idle)]);
         let total = Cell { row: Row::Doing(State::Idle), kind: None };
-        assert_eq!(total.pick(&map, PLAYER, &[], false), vec![2], "braves first");
-        assert_eq!(total.pick(&map, PLAYER, &[2, 3], false), vec![1]);
-        assert_eq!(total.pick(&map, PLAYER, &[2], true), vec![1, 3]);
+        assert_eq!(total.pick(&map, PLAYER, &[], false), [Id::from_raw(2)], "braves first");
+        assert_eq!(total.pick(&map, PLAYER, &[2, 3].map(Id::from_raw), false), [Id::from_raw(1)]);
+        assert_eq!(total.pick(&map, PLAYER, &[Id::from_raw(2)], true), [1, 3].map(Id::from_raw));
         assert!(Cell { row: Row::Selected, kind: None }.pick(&map, PLAYER, &[], true).is_empty());
     }
 
