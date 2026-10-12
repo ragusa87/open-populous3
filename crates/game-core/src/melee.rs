@@ -155,9 +155,9 @@ impl Coordinator for Melee {
         }
         if RING_TURN.fires(now, id.raw()) {
             self.angle += angle::TURN / 2;
-            if rng.next_u32() % 2 == 0 {
+            if rng.next_u32().is_multiple_of(2) {
                 let extra = RING_EXTRA.0 + rng.next_u32() % RING_EXTRA.1;
-                self.angle = if rng.next_u32() % 2 == 0 { self.angle + extra } else { self.angle + angle::TURN - extra };
+                self.angle = if rng.next_u32().is_multiple_of(2) { self.angle + extra } else { self.angle + angle::TURN - extra };
             }
             self.angle %= angle::TURN;
         }
@@ -444,7 +444,7 @@ mod tests {
     }
 
     fn melee_of(map: &GameMap, u: UnitId) -> Option<MeleeId> {
-        map.unit(u).and_then(|u| <Melee as Coordinator>::link_of(u))
+        map.unit(u).and_then(<Melee as Coordinator>::link_of)
     }
 
     #[test]

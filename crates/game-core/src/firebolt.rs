@@ -249,7 +249,7 @@ mod tests {
     fn a_bolt_homes_in_one_cell_a_turn() {
         let (at, h, there) = fly((0, 0), 0, (2048, 0, 0));
         assert_eq!((at, h, there), ((512, 0), 0, false));
-        assert_eq!(fly((65500, 0), 0, (100, 0, 30)).2, true, "across the edge, within a turn");
+        assert!(fly((65500, 0), 0, (100, 0, 30)).2, "across the edge, within a turn");
     }
 
     /// A firewarrior of tribe 0 and a `kind` of tribe 1 `gap` cells east, away from the sandbox's people.
