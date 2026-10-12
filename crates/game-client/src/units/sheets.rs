@@ -55,16 +55,17 @@ pub fn pose_name(pose: Pose) -> &'static str {
         Pose::Flung => "flung",
         Pose::Tumble => "tumble",
         Pose::Spirit => "spirit",
+        Pose::Panic => "panic",
     }
 }
 
 /// Whether a kind's sheets have a pose: only the shaman casts, and she is never stranded; the wood
-/// jump and tumbling poses are not rendered yet (`Pose::fallback` stands in).
+/// jump, tumbling and panic poses are not rendered yet (`Pose::fallback` stands in).
 pub fn plays(kind: UnitKind, pose: Pose) -> bool {
     match pose {
         Pose::Cast => kind == UnitKind::Shaman,
         Pose::Stranded => kind != UnitKind::Shaman,
-        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit => false,
+        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Panic => false,
         _ => true,
     }
 }

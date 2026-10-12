@@ -71,7 +71,7 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 49 | 9 | waving an arm: a taunt (as 48) |
 | 50 | 7 | crouching, then punching: a taunt (as 48), not a fight move |
 | 51 | 4 | pedalling: moving a vehicle |
-| 52 | 4 | running away (bitten by a swarm of bees) |
+| 52 | 4 | running away (bitten by a swarm of bees; `Pose::Panic`, used: shamans and wildmen walk instead) |
 | 20-24 | 4-18 | attacks with a club, the monk's pointed helmet drawn in (whose attacks: to check) |
 | 89 | 12 | scratching itself: a brave idle for too long |
 | 90 | 14 | push-ups (warriors idle for too long), firewarrior gear drawn in; 91 (14) push-ups, warrior headband drawn in |

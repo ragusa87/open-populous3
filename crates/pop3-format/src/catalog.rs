@@ -215,6 +215,8 @@ pub enum PersonAnim {
     CarryWalk,
     /// Brave standing with a piece of wood (1 frame).
     CarryStand,
+    /// Running away, as from a swarm of bees (4 frames).
+    RunAway,
 }
 
 /// The frame of `PersonAnim::ArmsUp` standing with both arms up.
@@ -234,6 +236,7 @@ impl PersonAnim {
             PersonAnim::Chop => 11,
             PersonAnim::CarryWalk => 9,
             PersonAnim::CarryStand => 10,
+            PersonAnim::RunAway => 52,
         }
     }
 }

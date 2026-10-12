@@ -40,10 +40,12 @@ pub enum Pose {
     Tumble,
     /// Dead, its spirit rising from the body before it is gone.
     Spirit,
+    /// Running in panic.
+    Panic,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 15] = [
+    pub const ALL: [Pose; 16] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -59,6 +61,7 @@ impl Pose {
         Pose::Flung,
         Pose::Tumble,
         Pose::Spirit,
+        Pose::Panic,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -66,7 +69,7 @@ impl Pose {
     pub fn fallback(self) -> Pose {
         match self {
             Pose::Chop | Pose::CarryIdle | Pose::Hammer => Pose::Idle,
-            Pose::CarryWalk => Pose::Walk,
+            Pose::CarryWalk | Pose::Panic => Pose::Walk,
             Pose::Jump => Pose::Stranded,
             Pose::Flung | Pose::Tumble | Pose::Spirit => Pose::Fall,
             pose => pose,
@@ -82,6 +85,7 @@ impl Pose {
     fn fps(self) -> f32 {
         match self {
             Pose::Walk | Pose::CarryWalk => 10.0,
+            Pose::Panic => 12.0,
             Pose::Drown | Pose::Flung | Pose::Tumble => 8.0,
             Pose::Pray | Pose::Stranded => 4.0,
             _ => 6.0,
@@ -91,7 +95,7 @@ impl Pose {
     fn original(self) -> ShamanAnim {
         match self {
             Pose::Idle | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Hammer => ShamanAnim::Idle,
-            Pose::Walk | Pose::CarryWalk => ShamanAnim::Walk,
+            Pose::Walk | Pose::CarryWalk | Pose::Panic => ShamanAnim::Walk,
             Pose::Pray => ShamanAnim::Kneel,
             Pose::Cast | Pose::Jump => ShamanAnim::Cast,
             Pose::Fall | Pose::Spirit => ShamanAnim::Fall,
@@ -108,7 +112,8 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Idle | Action::Landing if carrying => Pose::CarryIdle,
         Action::Idle | Action::Landing => Pose::Idle,
         Action::Walking { .. } | Action::AroundFire { .. } if carrying => Pose::CarryWalk,
-        Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } | Action::Panicking { .. } => Pose::Walk,
+        Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } => Pose::Walk,
+        Action::Panicking { .. } => Pose::Panic,
         Action::Chopping { .. } | Action::PickingUpWood { .. } => Pose::Chop,
         Action::Building { .. } | Action::Hammering => Pose::Hammer,
         Action::Flattening { .. } => Pose::Jump,
@@ -254,7 +259,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
         UnitKind::Wildman => {
             let anim = match pose {
                 Pose::Idle | Pose::Cast | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Jump | Pose::Hammer => WildmanAnim::Stand,
-                Pose::Walk | Pose::CarryWalk => WildmanAnim::Walk,
+                Pose::Walk | Pose::CarryWalk | Pose::Panic => WildmanAnim::Walk,
                 Pose::Pray => WildmanAnim::Sit,
                 Pose::Fall | Pose::Tumble | Pose::Spirit => WildmanAnim::Tumble,
                 Pose::Drown | Pose::Flung => WildmanAnim::Flung,
@@ -274,6 +279,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
             let anim = match pose {
                 Pose::Idle | Pose::Cast => PersonAnim::Stand,
                 Pose::Walk => PersonAnim::Walk,
+                Pose::Panic => PersonAnim::RunAway,
                 Pose::Pray => PersonAnim::Kneel,
                 Pose::Fall => PersonAnim::Fall,
                 Pose::Drown | Pose::Spirit => PersonAnim::Drown,
@@ -404,6 +410,7 @@ mod tests {
     #[test]
     fn stranded_tribesmen_hold_their_arms_up() {
         assert_eq!(pose_for(&Action::Stranded { to: (0, 0) }, false, false), Pose::Stranded);
+        assert_eq!(pose_for(&Action::Panicking { away: (1024, 0), left: game_core::time::Countdown::new(game_core::unit::PANIC_TICKS) }, true, false), Pose::Panic);
         assert_eq!(pose_for(&Action::Chopping { tree: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, false, false), Pose::Chop);
         assert_eq!(pose_for(&Action::Walking { to: (0, 0) }, true, false), Pose::CarryWalk);
         assert_eq!(pose_for(&Action::Idle, true, false), Pose::CarryIdle);
@@ -414,6 +421,8 @@ mod tests {
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Chop, 0), original_anim(UnitKind::Warrior, Pose::Idle, 0), "braves only");
         assert_eq!(original_anim(UnitKind::Shaman, Pose::CarryWalk, 2), original_anim(UnitKind::Shaman, Pose::Walk, 2));
         assert_eq!(original_anim(UnitKind::Brave, Pose::Stranded, 2), (12, None, Some(ARMS_UP_FRAME)));
+        assert_eq!(original_anim(UnitKind::Spy, Pose::Panic, 1), (52, Some(OUTFIT_SPY), None), "running away");
+        assert_eq!(original_anim(UnitKind::Shaman, Pose::Panic, 1), original_anim(UnitKind::Shaman, Pose::Walk, 1));
         assert_eq!(original_anim(UnitKind::Brave, Pose::Jump, 1), (12, None, None), "the whole flattening jump");
         assert_eq!(pose_for(&Action::Flattening { at: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, false, false), Pose::Jump);
         assert_eq!(pose_for(&Action::Hammering, false, false), Pose::Hammer);

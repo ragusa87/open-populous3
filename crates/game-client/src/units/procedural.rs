@@ -60,7 +60,7 @@ pub fn tribe_rgb(tribe: u8) -> [u8; 3] {
 pub fn frame_count(pose: Pose) -> usize {
     match pose {
         Pose::Idle | Pose::Pray | Pose::Drown | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit => 4,
-        Pose::Walk | Pose::Fall | Pose::CarryWalk => 8,
+        Pose::Walk | Pose::Fall | Pose::CarryWalk | Pose::Panic => 8,
         Pose::Cast | Pose::Jump => 12,
     }
 }
@@ -99,14 +99,18 @@ fn body(pose: Pose, view: View, f: usize) -> Body {
             let breath = (f % 2) as f32 * 0.5;
             Body { shoulder: 21.0 + breath, head: (0.0, 25.5 + breath), ..base }
         }
-        Pose::Walk | Pose::CarryWalk => {
+        Pose::Walk | Pose::CarryWalk | Pose::Panic => {
             let s = phase.sin();
             let feet = if side {
                 [(-4.0 * s, 0.0), (4.0 * s, 0.0)]
             } else {
                 [(-2.0, (s * 3.0).max(0.0)), (2.0, (-s * 3.0).max(0.0))]
             };
-            let hands = if side { [(3.0 * s, 12.0), (-3.0 * s, 12.0)] } else { base.hands };
+            let hands = match (pose, side) {
+                (Pose::Panic, _) => [(-6.0 - s, 30.0), (6.0 - s, 30.0)],
+                (_, true) => [(3.0 * s, 12.0), (-3.0 * s, 12.0)],
+                (_, false) => base.hands,
+            };
             Body { feet, hands, lift: s.abs(), ..base }
         }
         Pose::Pray => {

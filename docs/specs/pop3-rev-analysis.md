@@ -378,7 +378,7 @@ not again when the command is executed.
 |---|---|---|
 | Simple blast | 7/0x01, 0x4E (spell blast), 0x38 | 3 turns; radius 2, 4, 5 cells. Each turn every non-allied person within the radius takes `BLAST_DAMAGE_PERSON` (exe 50, not in the file), so up to 150; pushed each turn within 2.5 cells, cumulatively (140 outward, +98 up, × (1280 − d) / 1280, scaled by the slope: "Blast push and flight"). Buildings take `BLAST_DAMAGE_BLDG` (exe 40) once, vehicles 50 per turn. Allies: no damage, at most `BLAST_FRIEND_AFFECT` (5) pushed, on the last turn. Not pushed: own shaman, angel of death; immune: shielded units. Ghosts in the centre cell are removed. |
 | Burn cell | 7/0x05 | Once, on the target cell: trees, plants, wood piles and fires start burning. No damage to people. |
-| Lightning | 7/0x1E | On the target cell: sets the building on fire, burns trees (or lights a fire), and a simple blast. |
+| Lightning | 7/0x1E (0x511AE0) | On its first turn, at the strike point: sets the building on that cell on fire (0x408CB0, so its occupants come out 8 turns later), burns the trees of the cell or else lights a fire (7/0x0A), and a simple blast. |
 | Fireball shots | 8/4 (blast, firestorm), 8/7 and 8/8 (volcano) | Fly or fall to a point; on impact a simple blast (firestorm's also panics everyone it hits), smoke, and a short fire. |
 | Smoke, explosions, sparkles, strands, gloops | 7/0x03, 0x26, 0x27, 0x2A, 0x3C, 0x3E, 0x3F, 0x40 | Visual only. |
 | Nearest-N selector | function 0x515E30 | The 3 × 3 cells around the target; applies an action to the N closest units passing a filter. |
@@ -390,8 +390,19 @@ Shared person and building states:
   32 turns (2.7 s).
 - **Fall**: landing at vertical speed ≤ −100 raises dust and a sound; ≤ −200 costs `FALL_OUT_OF_WW_DAMAGE` (exe 700,
   not in the file), except on cells whose terrain has flag 2 (probably water). Gravity 32 per turn.
-- **Burning building**: 127 turns (10.6 s); occupants thrown out and panicked; one structural hit of 100 wood; a
-  building with no wood left is destroyed.
+- **Burning building** (building state 4, set by 0x408CB0; per turn 0x408AB0): 127 turns (10.6 s), then back to
+  state 1. The library and the prison never burn (building-type flag `+0x4A` bit 0x1); a building already burning
+  is not lit again (its timer is not reset). The igniter's tribe is kept in `+0xAF`.
+```text
+on fire:  timer +0xA7 = 127
+per turn: timer -= 1
+  timer 119 (turn 8, 0.67 s): every occupant (6 slots at +0x86) is thrown out (`remove_person_from_hut`
+    0x407490) and panics (person state 0x1A)
+  timer > 79: fire sound 0x53
+  timer 79 (turn 48, 4 s): one structural hit of 100 wood (0x4BA2C0(shape, −100)) with damage smoke;
+    no wood left → the building is destroyed, stats[tribe][7] += 1
+  timer 0 (turn 127): state 1
+```
 
 ### Blast push and flight
 Each turn of a simple blast (0x50B740), for every person it may push in its current radius:
