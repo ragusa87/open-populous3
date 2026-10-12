@@ -24,7 +24,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crate::game_speed::GameSpeed;
-use crate::sim_time::TICK_SECS;
+use crate::sim_time::{SimNow, TICK_SECS};
 use game_core::command::Command;
 use game_core::schedule::Schedule;
 use game_core::unit::{Unit, UnitKind};
@@ -66,7 +66,8 @@ impl GameSchedule {
 /// Tick times run at most per frame: past that a slow frame drops time instead of catching up.
 const MAX_CATCH_UP: u32 = 4;
 
-/// Fixed-step simulation clock, plus what the views need to draw between two ticks.
+/// Fixed-step simulation clock, plus what the views need to draw between two ticks. It runs on the
+/// real frame time (it drives the simulation); the world is drawn at `SimNow`, derived from the map's tick.
 #[derive(Resource, Default)]
 pub struct SimClock {
     acc: f32,
@@ -75,10 +76,13 @@ pub struct SimClock {
     prev_ids: Vec<u32>,
     prev: Vec<(u16, u16)>,
     prev_heights: Vec<Option<i32>>,
-    /// Game seconds since start (scaled by the speed, stopped while paused), drives looping animations.
-    pub anim_secs: f32,
+    /// Ticks the last step ran (the game speed then), kept while paused: the drawn moment trails the map by
+    /// one step (`SimNow::drawn`).
+    step: u32,
     /// Ticks run this frame.
     pub ran: u32,
+    /// Counts the games started (`new_game`): views of an earlier game are cleared (ids restart on a new map).
+    pub game: u32,
 }
 
 impl SimClock {
@@ -90,7 +94,6 @@ impl SimClock {
         if per_step == 0 {
             return 0;
         }
-        self.anim_secs += dt * per_step as f32;
         self.acc += dt;
         let due = (self.acc / TICK_SECS) as u32;
         self.acc -= due as f32 * TICK_SECS;
@@ -98,7 +101,26 @@ impl SimClock {
             self.acc = 0.0;
         }
         self.ran = due.min(MAX_CATCH_UP) * per_step;
+        if self.ran > 0 {
+            self.step = per_step;
+        }
         self.ran
+    }
+
+    /// The ticks due could not all run (lockstep waiting for a peer): hold the picture at the last tick
+    /// run instead of going back, and try again next frame.
+    pub fn stalled(&mut self) {
+        self.acc = TICK_SECS;
+    }
+
+    /// A new game: nothing to glide from, and the views of the last game go.
+    pub fn new_game(&mut self) {
+        *self = SimClock { game: self.game.wrapping_add(1), ..SimClock::default() };
+    }
+
+    /// The moment to draw the world at, the map being at `now`.
+    pub fn now(&self, now: game_core::time::Tick) -> SimNow {
+        SimNow::drawn(now, self.step.max(1), self.alpha())
     }
 
     /// Fraction of the current tick elapsed, 0..1.
@@ -181,13 +203,13 @@ pub struct UnitSprites {
 impl UnitSprites {
     /// The frame showing `unit` from a camera at `yaw`; praying towards `worship` when it
     /// worships its shaman (`worship::worship_facing`).
-    pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, yaw: f32, clock: &SimClock) -> Option<&FrameAsset> {
+    pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, yaw: f32, clock: &SimClock, now: SimNow) -> Option<&FrameAsset> {
         let (pose, facing) = worship.map_or((pose_for(&unit.action, unit.carrying > 0, unit.motion.airborne()), unit.facing), |f| (Pose::Pray, f));
         let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
         // Wildmen have no tribe (owner 255): one look for all.
         let tribe = if unit.kind == UnitKind::Wildman { 0 } else { unit.owner as usize };
         let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(sprite_dir(facing, yaw))?;
-        frames.get(frame_index(pose, frames.len(), &unit.action, clock.anim_secs, clock.alpha()))
+        frames.get(frame_index(pose, frames.len(), &unit.action, now, clock.alpha()))
     }
 }
 
@@ -219,6 +241,7 @@ pub struct UnitsPlugin;
 impl Plugin for UnitsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SimClock>()
+            .init_resource::<SimNow>()
             .init_resource::<GameSchedule>()
             .init_resource::<UnitSprites>()
             .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin))
@@ -296,6 +319,7 @@ fn run_ticks(
     mut schedule: ResMut<GameSchedule>,
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<TerrainDirty>,
+    mut drawn: ResMut<SimNow>,
 ) {
     let due = clock.steps_due(time.delta_secs(), *speed);
     let (mut levelled, mut ran) = (false, 0);
@@ -316,6 +340,10 @@ fn run_ticks(
         }
     }
     clock.ran = ran;
+    if ran < due {
+        clock.stalled();
+    }
+    drawn.set_if_neq(clock.now(map.0.now));
     if levelled {
         dirty.0 = true;
         map.set_changed();
@@ -393,6 +421,7 @@ fn animate_views(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     clock: Res<SimClock>,
+    now: Res<SimNow>,
     sprites: Res<UnitSprites>,
     mut views: Query<(&UnitView, &mut Grounded, &mut Transform, &crate::hover::Hoverable), (Without<UnitSprite>, Without<HealthFill>)>,
     mut bodies: Query<(&UnitSprite, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>, &mut Visibility), (Without<HealthFill>, Without<HealthBar>)>,
@@ -416,7 +445,7 @@ fn animate_views(
         vis.set_if_neq(if hidden { Visibility::Hidden } else { Visibility::Inherited });
         let frame = units.get(body.0).and_then(|u| {
             let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
-            sprites.frame_for(u, worship, rig.yaw, &clock)
+            sprites.frame_for(u, worship, rig.yaw, &clock, *now)
         });
         if let Some(f) = frame && mesh.0 != f.mesh {
             mesh.0 = f.mesh.clone();
@@ -495,6 +524,7 @@ fn pull_to_eye(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use game_core::time::{Tick, Ticks};
     use game_core::unit::Action;
 
     #[test]
@@ -512,6 +542,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Time>()
             .init_resource::<SimClock>()
+            .init_resource::<SimNow>()
             .init_resource::<GameSchedule>()
             .init_resource::<TerrainDirty>()
             .insert_resource(GameSpeed { paused: true, times: 1 })
@@ -532,6 +563,72 @@ mod tests {
         assert_eq!(app.world().resource::<SimClock>().ran, 1);
     }
 
+    /// Frames of `dt` seconds at `speed`, the map's tick following the ticks run: the drawn moment after each.
+    fn frames(c: &mut SimClock, now: &mut Tick, dt: f32, speed: GameSpeed, n: usize) -> Vec<SimNow> {
+        (0..n)
+            .map(|_| {
+                *now = *now + Ticks::new(c.steps_due(dt, speed));
+                c.now(*now)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_drawn_moment_stops_while_paused_and_follows_the_speed() {
+        let (mut c, mut now) = (SimClock::default(), Tick::ZERO);
+        frames(&mut c, &mut now, TICK_SECS * 0.25, GameSpeed::default(), 5);
+        let paused = frames(&mut c, &mut now, TICK_SECS * 0.25, GameSpeed { paused: true, times: 1 }, 6);
+        assert!(paused.windows(2).all(|w| w[0] == w[1]), "frozen");
+        let secs = |d: &SimNow| d.secs_since(Tick::ZERO);
+        let gain = |c: &mut SimClock, now: &mut Tick, times| {
+            let d = frames(c, now, TICK_SECS * 0.5, GameSpeed { paused: false, times }, 9);
+            secs(&d[8]) - secs(&d[0])
+        };
+        let (mut c1, mut n1, mut c2, mut n2) = (SimClock::default(), Tick::ZERO, SimClock::default(), Tick::ZERO);
+        gain(&mut c1, &mut n1, 1);
+        gain(&mut c2, &mut n2, 2);
+        let (one, two) = (gain(&mut c1, &mut n1, 1), gain(&mut c2, &mut n2, 2));
+        assert!((two - 2.0 * one).abs() < 1e-4, "x2 runs twice as far per frame: {one} {two}");
+    }
+
+    #[test]
+    fn the_drawn_moment_comes_from_the_tick_alone() {
+        let (mut stepped, mut a) = (SimClock::default(), Tick::ZERO);
+        frames(&mut stepped, &mut a, TICK_SECS, GameSpeed::default(), 4);
+        let (mut caught_up, mut b) = (SimClock::default(), Tick::ZERO);
+        frames(&mut caught_up, &mut b, TICK_SECS * 4.0, GameSpeed::default(), 1);
+        assert_eq!((a, stepped.now(a)), (b, caught_up.now(b)), "four ticks in one frame land where four frames do");
+        let walk = Action::Walking { to: (0, 0) };
+        assert_eq!(frame_index(Pose::Walk, 8, &walk, stepped.now(a), 0.0), frame_index(Pose::Walk, 8, &walk, caught_up.now(b), 0.0));
+        let mut played = SimClock::default();
+        frames(&mut played, &mut a, TICK_SECS * 0.7, GameSpeed::default(), 37);
+        let mut resynced = SimClock::default();
+        resynced.new_game();
+        resynced.steps_due(TICK_SECS * (1.0 + played.alpha()), GameSpeed::default());
+        let at = Tick::from_wire(500);
+        assert!((played.now(at).secs_since(Tick::ZERO) - resynced.now(at).secs_since(Tick::ZERO)).abs() < 1e-4, "a resync draws what the game drew");
+    }
+
+    #[test]
+    fn a_stall_holds_the_picture() {
+        let mut c = SimClock::default();
+        c.steps_due(TICK_SECS * 0.9, GameSpeed::default());
+        let at = Tick::from_wire(20);
+        let before = c.now(at);
+        assert_eq!(c.steps_due(TICK_SECS * 0.3, GameSpeed::default()), 1);
+        c.stalled();
+        assert!(c.now(at).secs_since(Tick::ZERO) >= before.secs_since(Tick::ZERO), "never back");
+        assert_eq!(c.now(at), SimNow { tick: at, frac: 0.0 });
+    }
+
+    #[test]
+    fn a_new_game_clears_the_clock_and_counts() {
+        let mut c = SimClock::default();
+        c.steps_due(TICK_SECS * 2.5, GameSpeed { paused: false, times: 4 });
+        c.new_game();
+        assert_eq!((c.game, c.alpha(), c.now(Tick::from_wire(1))), (1, 0.0, SimNow::default()));
+    }
+
     #[test]
     fn the_clock_runs_whole_tick_times_at_the_game_speed() {
         let normal = GameSpeed::default();
@@ -547,9 +644,9 @@ mod tests {
     fn paused_time_stands_still_and_a_slow_frame_drops_its_backlog() {
         let mut c = SimClock::default();
         c.steps_due(TICK_SECS * 0.3, GameSpeed::default());
-        let (alpha, anim) = (c.alpha(), c.anim_secs);
+        let (alpha, drawn) = (c.alpha(), c.now(Tick::ZERO));
         assert_eq!(c.steps_due(5.0, GameSpeed { paused: true, times: 1 }), 0);
-        assert_eq!((c.alpha(), c.anim_secs, c.ran), (alpha, anim, 0));
+        assert_eq!((c.alpha(), c.now(Tick::ZERO), c.ran), (alpha, drawn, 0));
         assert_eq!(c.steps_due(5.0, GameSpeed::default()), MAX_CATCH_UP);
         assert_eq!(c.steps_due(TICK_SECS * 0.5, GameSpeed::default()), 0, "the backlog is gone");
     }

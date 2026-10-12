@@ -30,6 +30,11 @@ impl Tick {
     pub fn to_wire(self) -> u32 {
         self.0
     }
+
+    /// Ticks from `earlier` to this moment, negative when `earlier` is still to come (across the wrap too).
+    pub fn since(self, earlier: Tick) -> i32 {
+        self.0.wrapping_sub(earlier.0) as i32
+    }
 }
 
 impl Ticks {
@@ -180,6 +185,7 @@ mod tests {
         assert_eq!(after, Tick(3));
         assert_eq!(after - before, Ticks::new(5));
         assert_eq!(Tick(u32::MAX).next(), Tick::ZERO);
+        assert_eq!((after.since(before), before.since(after)), (5, -5));
         let every = Every::new(16);
         let fired = (0..64u32).map(|i| Tick(u32::MAX - 31).0.wrapping_add(i)).filter(|&t| every.fires(Tick(t), 0)).count();
         assert_eq!(fired, 4, "the rhythm runs on across the wrap");

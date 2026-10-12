@@ -2,7 +2,8 @@
 //! the feet. The shaman from the original animations when allowed (see docs/specs/animations.md),
 //! everything else generated (`procedural`). Which frame to show is decided here from the simulated action.
 
-use crate::sim_time::progress;
+use crate::sim_time::{progress, SimNow};
+use game_core::time::{Tick, Ticks};
 use game_core::unit::{Action, UnitKind};
 use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
 use pop3_format::catalog::{PersonAnim, ARMS_UP_FRAME, ShamanAnim, WildmanAnim, OUTFIT_FIREWARRIOR, OUTFIT_PREACHER, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
@@ -155,8 +156,9 @@ pub fn sprite_dir(facing: u8, yaw: f32) -> usize {
 }
 
 /// Frame to show: timed actions play once in step with the simulation (`alpha` = fraction of
-/// the current tick), the fall holds the lying frame (second to last); others loop on `anim_secs`.
-pub fn frame_index(pose: Pose, frames: usize, action: &Action, anim_secs: f32, alpha: f32) -> usize {
+/// the current tick), the fall holds the lying frame (second to last); others loop on the drawn moment
+/// `now` (a loop of `frames` seconds holds whole loops at any fps).
+pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alpha: f32) -> usize {
     if frames == 0 {
         return 0;
     }
@@ -167,7 +169,7 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, anim_secs: f32, a
         Action::Dying { .. } => done(lying + 1),
         Action::Spirit { .. } => done(frames),
         Action::Dead { .. } => lying,
-        _ => (anim_secs * pose.fps()) as usize % frames,
+        _ => (now.secs_in(Tick::ZERO, Ticks::secs(frames as u32)) * pose.fps()) as usize % frames,
     }
 }
 
@@ -352,6 +354,12 @@ pub fn generated_art(kind: UnitKind) -> Vec<TribeArt> {
 mod tests {
     use super::*;
 
+    /// The drawn moment `secs` into the game.
+    fn at(secs: f32) -> SimNow {
+        let ticks = secs * game_core::time::TICKS_PER_SECOND as f32;
+        SimNow { tick: Tick::from_wire(ticks as u32), frac: ticks.fract() }
+    }
+
     #[test]
     fn alpha_sprites_keep_their_strength() {
         let mut lut = [[0u8; 4]; 256];
@@ -379,18 +387,18 @@ mod tests {
         use game_core::time::{Countdown, Ticks};
         use game_core::unit::{CAST_TICKS, DYING_TICKS, RESPAWN_TICKS};
         let cast = |left| Action::Casting { left: Countdown::with_left(CAST_TICKS, Ticks::new(left)) };
-        assert_eq!(frame_index(Pose::Cast, 12, &cast(CAST_TICKS.get()), 5.0, 0.0), 0);
-        assert_eq!(frame_index(Pose::Cast, 12, &cast(5), 0.0, 0.0), 6);
-        assert_eq!(frame_index(Pose::Cast, 12, &cast(1), 0.0, 0.99), 11);
-        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dying { left: Countdown::with_left(DYING_TICKS, Ticks::new(1)) }, 0.0, 0.99), 6);
-        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dead { left: Countdown::new(RESPAWN_TICKS) }, 0.0, 0.0), 6, "lies still");
+        assert_eq!(frame_index(Pose::Cast, 12, &cast(CAST_TICKS.get()), at(5.0), 0.0), 0);
+        assert_eq!(frame_index(Pose::Cast, 12, &cast(5), at(0.0), 0.0), 6);
+        assert_eq!(frame_index(Pose::Cast, 12, &cast(1), at(0.0), 0.99), 11);
+        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dying { left: Countdown::with_left(DYING_TICKS, Ticks::new(1)) }, at(0.0), 0.99), 6);
+        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dead { left: Countdown::new(RESPAWN_TICKS) }, at(0.0), 0.0), 6, "lies still");
     }
 
     #[test]
     fn open_actions_loop() {
-        assert_eq!(frame_index(Pose::Walk, 8, &Action::Walking { to: (0, 0) }, 0.95, 0.0), 1);
-        assert_eq!(frame_index(Pose::Walk, 8, &Action::Walking { to: (0, 0) }, 1.0, 0.0), 2);
-        assert_eq!(frame_index(Pose::Idle, 0, &Action::Idle, 1.0, 0.0), 0);
+        assert_eq!(frame_index(Pose::Walk, 8, &Action::Walking { to: (0, 0) }, at(0.95), 0.0), 1);
+        assert_eq!(frame_index(Pose::Walk, 8, &Action::Walking { to: (0, 0) }, at(1.05), 0.0), 2);
+        assert_eq!(frame_index(Pose::Idle, 0, &Action::Idle, at(1.0), 0.0), 0);
     }
 
     #[test]
@@ -423,7 +431,7 @@ mod tests {
         assert_eq!(pose_for(&spirit(10), false, false), Pose::Spirit);
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Spirit, 0), (40, Some(OUTFIT_WARRIOR), None), "lying, its spirit rising");
         assert_eq!(original_anim(UnitKind::Wildman, Pose::Spirit, 0), (47, None, Some(3)), "no spirit anim: lies still");
-        assert_eq!((frame_index(Pose::Spirit, 5, &spirit(10), 0.0, 0.0), frame_index(Pose::Spirit, 5, &spirit(1), 0.0, 1.0)), (0, 4), "played once");
+        assert_eq!((frame_index(Pose::Spirit, 5, &spirit(10), at(0.0), 0.0), frame_index(Pose::Spirit, 5, &spirit(1), at(0.0), 1.0)), (0, 4), "played once");
     }
 
     #[test]

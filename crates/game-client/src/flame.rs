@@ -8,7 +8,8 @@
 
 use crate::game_frame::{mirrored, GamePos};
 use crate::original_models::MeshData;
-use crate::units::SimClock;
+use crate::sim_time::SimNow;
+use game_core::time::{Tick, Ticks};
 use crate::world::LevelList;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -23,6 +24,8 @@ use std::f32::consts::{PI, TAU};
 /// Frames of the loop and how fast it plays.
 pub const FRAMES: usize = 8;
 pub const FPS: f32 = 10.0;
+/// Whole loops of the frames, in whole ticks (`SimNow::secs_in`).
+const LOOP: Ticks = Ticks::secs(FRAMES as u32);
 /// Alpha pixels weaker than this are the board around the flame (tint 0, strength 1-3): left out.
 pub const MIN_STRENGTH: u8 = 4;
 /// How far (pixels) the tip sways, how much (fraction) the flame stretches and dims through the loop.
@@ -241,12 +244,12 @@ impl Plugin for FlamePlugin {
     }
 }
 
-fn animate(clock: Res<SimClock>, art: Res<FlameFrames>, mut flames: Query<(&Flame, &mut MeshMaterial3d<StandardMaterial>)>) {
+fn animate(now: Res<SimNow>, art: Res<FlameFrames>, mut flames: Query<(&Flame, &mut MeshMaterial3d<StandardMaterial>)>) {
     if art.frames.is_empty() {
         return;
     }
     for (f, mut material) in &mut flames {
-        let frame = &art.frames[frame_at(clock.anim_secs, f.offset)];
+        let frame = &art.frames[frame_at(now.secs_in(Tick::ZERO, LOOP), f.offset)];
         if material.0 != *frame {
             material.0 = frame.clone();
         }

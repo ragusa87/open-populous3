@@ -83,6 +83,7 @@ fn update_preview(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     clock: Res<SimClock>,
+    now: Res<crate::sim_time::SimNow>,
     sprites: Res<UnitSprites>,
     boxes: Query<&ComputedNode, With<ShamanPreview>>,
     mut sprite: Query<(&mut ImageNode, &mut Node, &mut Visibility), With<PreviewSprite>>,
@@ -94,7 +95,7 @@ fn update_preview(
     let s = status(unit);
     let width = boxes.iter().next().map_or(190.0, |c| c.size().x * c.inverse_scale_factor());
     for (mut image, mut node, mut vis) in &mut sprite {
-        match unit.and_then(|u| sprites.frame_for(u, None, rig.yaw, &clock)) {
+        match unit.and_then(|u| sprites.frame_for(u, None, rig.yaw, &clock, *now)) {
             Some(f) => {
                 image.image = f.image.clone();
                 node.width = px(f.size.x * SCALE);
