@@ -501,8 +501,8 @@ drawn by 0x516430), otherwise drawn 1:1 (0x5162E0).
 | Status | Flag | Marker | Sprites (`hfx0-0.dat`) | Above the feet | Blinks |
 |---|---|---|---|---|---|
 | Low health | +0x14 bit 0x1000 | white sparkles circling, plus the looping sound 0xCF | 1489-1498 (10 frames, 41 x 29) | 1.11 h | no |
-| Shield | +0x14 bit 0x8000 | three rings in the tribe's colour sliding up and down the body | 1538-1552 (3 rings x 5 sizes, 32 x 16) | h/8 to h | last 15 timer steps |
-| Bloodlust | +0x14 bit 0x80000 | red bubbles | 1478-1487 (10 frames, 30 x 25) | 1.11 h | last 15 timer steps |
+| Shield | +0x14 bit 0x8000 | three rings in the tribe's colour sliding up and down the body | 1538-1552 (3 rings x 5 sizes, 32 x 16) | h/8 to h | last 15 steps (10 s) |
+| Bloodlust | +0x14 bit 0x80000 | red bubbles | 1478-1487 (10 frames, 30 x 25) | 1.11 h | last 15 steps (10 s) |
 | Hypnotised | +0x10 bit 0x4000 | a yellow ring turning, a halo | 1553-1563 (11 frames, 27 x 19) | 1.25 h | no |
 | Invisible | +0x10 bit 0x1000 | no marker: own people drawn translucent, enemies not drawn | - | - | own, last 23 timer steps |
 | Ghost | +0x10 bit 0x800 | no marker: own ghosts drawn translucent, enemy ones look normal | - | - | no |
@@ -515,8 +515,15 @@ drawn by 0x516430), otherwise drawn 1:1 (0x5162E0).
   6: 2, 6/8; 7: 1, 7/8; 8: 0, 1; then back down, 9: 1, 7/8 ... 15: 1, 1/8. A ring rises from the feet to the head
   over 8 frames and comes back, largest (offset 4) at mid-height; rings 0, 1, 2 are bright, medium and faint. The
   phase is offset per person by `+0x24` (probably its index), so shielded people do not move in step.
-- Blinking (shield, bloodlust): with fewer than 16 timer steps left (the timers count down every 8 turns, so the
-  last 128 turns, 10.7 s), the marker is drawn only when `class_counter` bit 1 is clear: 2 turns on, 2 off.
+- Blinking (shield, bloodlust): the timer (+0xA5 / +0xB1, a byte) starts at `SHIELD_COUNT_X8` / `BLOODLUST_COUNT_X8`
+  (0x5156F0 / 0x515690; file 180 each, exe 180 / 90) and loses 1 on the turns where `class_counter & 7 == 0`
+  (0x4D3C74), the flag being cleared when it reaches 0. While it is 15..1 the marker is drawn only when
+  `class_counter & 2 == 0`. `class_counter` +0x2E goes up once per turn for every active unit, just before its
+  handler (`main_loop_inner` 0x4EC8B3 → 0x4ED700), so:
+  - full duration 1433-1440 turns (179 steps of 8, the first one 1-8 turns after the cast): 119.4-120 s;
+  - blinking for the last 15 steps, exactly 120 turns = 10 s;
+  - 2 turns on, 2 off (167 ms each), 3 blinks per second, 30 blinks, in phase with the timer steps (each step is
+    two full blinks) and phased per person by its `class_counter`.
 - Low health (0x4D43A0, every 8 turns, person types with flag 8 at person table +0x30): life +0x6E regains the
   type's byte +0x1A while below the maximum +0x6C (when full, the last attacker +0xB0 is reset to 0xFF); the flag
   is set when `max_life / 4 >= life` (a quarter or less), cleared otherwise. Buildings use the same bit for
@@ -752,8 +759,7 @@ otherwise:
 - What sets `turns_per_sec` to 14, and whether game options or multiplayer change it.
 - Which field holds the gather sub-state: +0xA8 stays 0 while chopping, so the handler's state byte is elsewhere.
 - What `TREE_DORMANT_TIME` does (maybe the time before a cut tree regrows or a new tree appears).
-- Huts: whether `class_counter` advances once per turn (the 4- and 16-turn rhythms assume it), what the growth
-  placement check tests (footprint, population?), the every-128-turns branch when it fails, and the per-tribe base
+- Huts: what the growth placement check tests (footprint, population?), the every-128-turns branch when it fails, and the per-tribe base
   capacity (tribe+0x921).
 - Prayer: the vault (library trigger) branch, what the "contest" countdown at trigger+0x6F does when several tribes
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
@@ -863,7 +869,8 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
   and +0xA4 for the building types that hold wood. The gather handler switches on a byte read as +0xA8, but that field stays 0 while
   chopping (measured), so the offset is unconfirmed.
 - Hut fields: `grow` +0xA0, `breed` +0xA4 (the same offset as wood in other building types), people inside +0xA6,
-  "brave ready" flag bit 14 of the word at +0x9C. `class_counter` +0x2E gives each unit its 4- or 16-turn phase.
+  "brave ready" flag bit 14 of the word at +0x9C. `class_counter` +0x2E gives each unit its 4- or 16-turn phase:
+  +1 per turn for every unit whose state is not 0, just before its handler (0x4EC8B3).
 - Trigger fields (from the level record, 0x485D00): `TriggerType` +0x68, `CellRadius` +0x69, `RandomValue` +0x6A,
   `NumOccurences` +0x6B, `StartInactive` +0x70, `ThingIdxs` +0x72 (10 × u16), `TriggerCount` +0x8E,
   `InactiveTime` +0x94, `PrayTime` +0x9A (i32). Run time: prayers per tribe +0x86 (4 × u16), `gauge` +0x96 (i32),
