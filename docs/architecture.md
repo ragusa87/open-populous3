@@ -116,7 +116,7 @@ Rules for a world visual:
   `sync_views::<V>` spawns a view when a model appears, updates it every frame, and despawns it once its id is
   gone (or the game changed, `SimClock::game`: ids restart on a new map). Views are keyed by id, never by list
   index. Each view type has its own plugin, so adding or removing a kind of visual is one line in `main.rs`. First
-  view: `chimney::ChimneyView` (a busy hut's smoke). Older visuals still index their models by position (units,
+  view: `chimney::ChimneyView` (a busy hut's smoke); `sparkles::SparkleView` draws the effects reshaping the ground. Older visuals still index their models by position (units,
   building views, totems): they move over as their models get ids or are removed.
 
 For later, spell effects: each will be a game-core `Effect` with its id, each kind drawn by its own view

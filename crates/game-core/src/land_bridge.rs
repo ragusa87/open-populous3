@@ -47,6 +47,11 @@ impl LandBridge {
         self.turn += 1;
         vec![WorldEvent::Terrain(change)]
     }
+
+    /// Its height points not yet at their target on `terrain`.
+    pub fn reshaping(&self, terrain: &Heightmap) -> Vec<Cell> {
+        targets(terrain.size(), self.from, self.to, self.heights).into_iter().filter(|&((x, z), h)| terrain.get(x, z) != h).map(|(p, _)| p).collect()
+    }
 }
 
 /// The bridge's height points (unwrapped) with their target heights: along the line the short way around the
@@ -146,6 +151,17 @@ mod tests {
         let mut bridge = build(&mut terrain, (2, 10), (12, 10), DURATION);
         assert_eq!((terrain.get(7, 10), terrain.get(12, 11), terrain.get(2, 12)), (195, MIN_HEIGHT, 300));
         assert_eq!(bridge.turn(), Vec::new(), "done");
+        assert!(bridge.reshaping(&terrain).is_empty());
+    }
+
+    #[test]
+    fn reshapes_the_points_not_yet_at_their_height() {
+        let mut terrain = Heightmap::new(64);
+        terrain.set(2, 10, 300);
+        let bridge = build(&mut terrain, (2, 10), (12, 10), 0);
+        let points = bridge.reshaping(&terrain);
+        assert_eq!(points.len(), 11 * 4 - 1, "all but the caster's point, already at its height");
+        assert!(!points.contains(&(2, 10)) && points.contains(&(12, 11)));
     }
 
     #[test]

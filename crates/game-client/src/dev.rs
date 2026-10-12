@@ -106,6 +106,17 @@ pub fn blast_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bo
     true
 }
 
+/// `BRIDGE=x,z` (cells): the player's land bridge from their shaman to there (no charge used, no cast jump), then
+/// `ticks` run at once. False when `to` does not parse or the player has no shaman.
+pub fn bridge_demo(map: &mut game_core::map::GameMap, to: &str, ticks: u32) -> bool {
+    let Some(to) = to.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<i32>().ok()?, z.trim().parse::<i32>().ok()?))) else { return false };
+    let Some(from) = map.shaman_of(PLAYER).map(|u| u.cell()) else { return false };
+    let bridge = game_core::land_bridge::effect(PLAYER, from, to, &map.terrain);
+    map.add_effect(bridge);
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
 /// Commands for a `BRAVES` demo: every brave of the player (not inside a building) cuts the tree nearest to it; `carry` then
 /// brings the piece back where it stood.
 pub fn brave_commands(name: &str, map: &game_core::map::GameMap) -> Vec<Command> {
@@ -259,6 +270,10 @@ fn screenshot(
         if let Ok(at) = std::env::var("BLAST") {
             let ticks = std::env::var("BLAST_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             blast_demo(&mut map.0, &at, ticks);
+        }
+        if let Ok(to) = std::env::var("BRIDGE") {
+            let ticks = std::env::var("BRIDGE_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            dirty.0 |= bridge_demo(&mut map.0, &to, ticks);
         }
         if let Some(phase) = std::env::var("VAULT").ok().and_then(|v| parse_vault(&v)) {
             map.0.buildings.iter_mut().filter_map(|b| b.vault.as_mut()).for_each(|v| v.phase = phase);

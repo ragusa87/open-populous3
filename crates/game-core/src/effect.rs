@@ -5,6 +5,7 @@
 use crate::event::WorldEvent;
 use crate::map::{GameMap, Lcg};
 use crate::spell::Cell;
+use crate::terrain::Heightmap;
 use crate::time::{Countdown, Tick};
 use crate::unit::Unit;
 
@@ -62,6 +63,16 @@ impl Effect {
 
     pub fn is_over(&self) -> bool {
         self.left.left().get() == 0
+    }
+
+    /// The height points (cells, unwrapped) of `terrain` it is still reshaping: the terrain spells' sparkles.
+    pub fn reshaping(&self, terrain: &Heightmap) -> Vec<Cell> {
+        match self.kind {
+            EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
+            EffectKind::SimpleBlast(_) => Vec::new(),
+            #[cfg(test)]
+            EffectKind::Probe(_) => Vec::new(),
+        }
     }
 }
 

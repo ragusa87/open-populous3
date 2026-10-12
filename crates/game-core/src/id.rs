@@ -106,6 +106,11 @@ impl<T> Registry<T> {
         self.items.iter().map(|(id, t)| (*id, t))
     }
 
+    /// Each item with its id, as stored.
+    pub fn entries(&self) -> impl Iterator<Item = &(Id<T>, T)> {
+        self.items.iter()
+    }
+
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (Id<T>, &mut T)> {
         self.items.iter_mut().map(|(id, t)| (*id, t))
     }

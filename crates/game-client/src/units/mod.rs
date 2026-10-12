@@ -312,7 +312,7 @@ pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<M
     FrameAsset { image, mesh: meshes.add(sprite_quad(size, origin)), material, size, origin }
 }
 
-fn run_ticks(
+pub(crate) fn run_ticks(
     time: Res<Time>,
     speed: Res<GameSpeed>,
     mut clock: ResMut<SimClock>,

@@ -30,6 +30,7 @@ mod range_ring;
 mod sim_time;
 mod sites;
 mod sky;
+mod sparkles;
 mod terrain_mesh;
 mod terrain_texture;
 mod tooltip;
@@ -98,7 +99,7 @@ fn main() {
             camera_debug::CameraDebugPlugin,
             object_scale::ObjectScalePlugin,
             chimney::ChimneyPlugin,
-            range_ring::RangeRingPlugin,
+            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin),
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();
