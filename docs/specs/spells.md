@@ -6,7 +6,7 @@ says whether a spell applies at its target; `GameMap::apply` ignores a cast that
 | Spell | Effect |
 |---|---|
 | Land Bridge | aimed on the ground (`hud::spells::ground_spell`), within range, at land only (not open sea, `unit::is_sea`: the water on its way is raised); released like a blast 6 turns into her cast jump; starts at the caster's shaman as she stands when the command runs, or where it was aimed from on a god level (`GameMap::shaman_omni`: the ground under the bottom middle of the view). An effect (`land_bridge`, `EffectKind::LandBridge`): 4 height points wide (−1, 0, +1, +2 across the line), each moving every turn towards a straight slope between both ends' heights at cast (at least 90), `h += clamp(T − h, ±256) / (64 − turn)`, for 64 turns (`LAND_BRIDGE_MAX_CHANGE`, `LAND_BRIDGE_DURATION`): sea raised, hills in the way lowered. The editor's B brush is still the instant 1-wide line (min 32). While it builds, a tiny star twinkles at the centre of each cell with a corner not yet at its height (`sparkles::SparkleView`, from `Effect::reshaping`: every terrain effect gets them). Dev: `BRIDGE=x,z` (cells, from the player's shaman), `BRIDGE_TICKS=N` |
-| Flatten | radius 4 set to center height |
+| Flatten | aimed on the ground at the nearest height point (`flatten::nearest_point`), released 6 turns into the cast jump like a blast. An effect (`flatten`, `EffectKind::Flatten`): the 45 height points of a disc (within √13 of the target point, about 3.5 cells: the original's count) move each turn towards the target point's height at cast, `h += (T − h) / (15 − turn)`, for 15 turns (the original's length; its curve is not traced, ours lands on the last turn): hills cut, hollows and sea filled. Sparkles on each cell it is reshaping (`sparkles`). Buildings on it are not re-levelled or destroyed yet (TODO). Free in the sandboxes. The editor's T brush is still the instant radius 4. Dev: `FLATTEN=x,z` (height point, another tribe's), `FLATTEN_TICKS=N` |
 | Erode | radius 4 lowered by 120 (falloff) |
 | Raise | editor brush, radius 3 +64 |
 | Teleport | sandbox only (the original names a spell model 21 teleport, see below, effect unknown): the caster's living shaman does her cast jump, then is at the target (`Unit::cast_teleport`); only onto ground she can walk (`Mobility::Walk`: no sea, no cliff), checked when cast and again when she lands (she stays if it no longer is); another order during the jump cancels it; she lands falling from a cell up (units.md "Landing") |
@@ -18,8 +18,8 @@ any randomness through `map::Lcg`, never `rand`). Mana cost, charges, cast range
 below, "Original balance"). Range: `cast_range` (`SP_W_RANGE` by the caster's altitude band, `GameMap::altitude`,
 +1/3 in a finished drum tower), checked when aiming (`GameMap::in_cast_range`); none on a god level; nothing is cast
 while the shaman is off the ground.
-Our Flatten and Erode differ from the original's (pop3-rev-analysis.md "Per spell"): its flatten levels a 45-cell disc (about 3.5
-cells) in 15 turns; its erosion is a hydraulic simulation over 63 turns on 8 × 8 cells.
+Our Erode differs from the original's (pop3-rev-analysis.md "Per spell"): its erosion is a hydraulic simulation over 63
+turns on 8 × 8 cells.
 After every cast: update normals, walkability and destroy buildings on uneven/flooded ground.
 Spells must only be cast through `Command::Cast` to stay deterministic.
 

@@ -10,6 +10,7 @@ pub type Cell = (i32, i32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Spell {
     LandBridge { from: Cell, to: Cell },
+    /// Level the ground around the height point `at` to its height (`flatten`); `cast`: the editor's instant brush.
     Flatten { at: Cell },
     Erode { at: Cell },
     Raise { at: Cell },
@@ -26,7 +27,8 @@ impl Spell {
             Spell::Teleport { .. } => Some(SpellKind::Teleport),
             Spell::Blast { .. } => Some(SpellKind::Blast),
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
-            Spell::Flatten { .. } | Spell::Erode { .. } | Spell::Raise { .. } => None,
+            Spell::Flatten { .. } => Some(SpellKind::Flatten),
+            Spell::Erode { .. } | Spell::Raise { .. } => None,
         }
     }
 

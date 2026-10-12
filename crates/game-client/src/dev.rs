@@ -117,6 +117,16 @@ pub fn bridge_demo(map: &mut game_core::map::GameMap, to: &str, ticks: u32) -> b
     true
 }
 
+/// `FLATTEN=x,z` (height point): another tribe's flatten there (no cast jump), then `ticks` run at once. False when
+/// `at` does not parse.
+pub fn flatten_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some(at) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<i32>().ok()?, z.trim().parse::<i32>().ok()?))) else { return false };
+    let flatten = game_core::flatten::effect(PLAYER + 1, at, &map.terrain);
+    map.add_effect(flatten);
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
 /// Commands for a `BRAVES` demo: every brave of the player (not inside a building) cuts the tree nearest to it; `carry` then
 /// brings the piece back where it stood.
 pub fn brave_commands(name: &str, map: &game_core::map::GameMap) -> Vec<Command> {
@@ -274,6 +284,10 @@ fn screenshot(
         if let Ok(to) = std::env::var("BRIDGE") {
             let ticks = std::env::var("BRIDGE_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             dirty.0 |= bridge_demo(&mut map.0, &to, ticks);
+        }
+        if let Ok(at) = std::env::var("FLATTEN") {
+            let ticks = std::env::var("FLATTEN_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            dirty.0 |= flatten_demo(&mut map.0, &at, ticks);
         }
         if let Some(phase) = std::env::var("VAULT").ok().and_then(|v| parse_vault(&v)) {
             map.0.buildings.iter_mut().filter_map(|b| b.vault.as_mut()).for_each(|v| v.phase = phase);

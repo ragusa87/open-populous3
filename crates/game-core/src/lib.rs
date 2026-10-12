@@ -11,6 +11,7 @@ pub mod command;
 pub mod coordinator;
 pub mod effect;
 pub mod event;
+pub mod flatten;
 pub mod enter;
 pub mod gauge;
 pub mod headcount;

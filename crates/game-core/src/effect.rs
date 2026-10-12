@@ -25,6 +25,7 @@ pub struct Effect {
 pub enum EffectKind {
     SimpleBlast(crate::blast::SimpleBlast),
     LandBridge(crate::land_bridge::LandBridge),
+    Flatten(crate::flatten::Flatten),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -38,7 +39,8 @@ pub enum DamageKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerrainChange {
     Raise { at: Cell, radius: i32, by: i32 },
-    Flatten { at: Cell, radius: i32 },
+    /// One turn of a flatten (`flatten::apply`).
+    Flatten { at: Cell, height: u16, turn: u32 },
     /// One turn of a land bridge (`land_bridge::apply`).
     Bridge { from: Cell, to: Cell, heights: (u16, u16), turn: u32 },
 }
@@ -54,6 +56,7 @@ impl Effect {
         let events = match self.kind {
             EffectKind::SimpleBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units),
             EffectKind::LandBridge(ref mut bridge) => bridge.turn(),
+            EffectKind::Flatten(ref mut flatten) => flatten.turn(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
         };
@@ -69,6 +72,7 @@ impl Effect {
     pub fn reshaping(&self, terrain: &Heightmap) -> Vec<Cell> {
         match self.kind {
             EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
+            EffectKind::Flatten(ref flatten) => flatten.reshaping(terrain),
             EffectKind::SimpleBlast(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),

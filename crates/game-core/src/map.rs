@@ -505,6 +505,10 @@ impl GameMap {
                 self.add_effect(crate::land_bridge::effect(player, from, to, &self.terrain));
                 None
             }
+            Spell::Flatten { at } => {
+                self.add_effect(crate::flatten::effect(player, at, &self.terrain));
+                None
+            }
             _ => spell.cast(&mut self.terrain),
         }
     }
@@ -865,7 +869,7 @@ impl GameMap {
                 None
             }
             WorldEvent::Terrain(TerrainChange::Raise { at, radius, by }) => Some(self.terrain.raise(at, radius, by)),
-            WorldEvent::Terrain(TerrainChange::Flatten { at, radius }) => Some(self.terrain.flatten(at, radius)),
+            WorldEvent::Terrain(TerrainChange::Flatten { at, height, turn }) => Some(crate::flatten::apply(&mut self.terrain, at, height, turn)),
             WorldEvent::Terrain(TerrainChange::Bridge { from, to, heights, turn }) => Some(crate::land_bridge::apply(&mut self.terrain, from, to, heights, turn)),
             WorldEvent::Release { unit } => {
                 if let Some(u) = self.unit_mut(unit) {
@@ -1393,6 +1397,24 @@ mod tests {
         assert_eq!(m.units[0].teleport_target(), Some(to));
         m.run(crate::unit::CAST_TICKS);
         assert_eq!((m.units[0].x, m.units[0].z), to, "then on the hill top");
+    }
+
+    #[test]
+    fn a_flatten_levels_its_disc_after_the_cast_jump() {
+        let mut m = GameMap::sandbox_walk();
+        m.spell_books[0].set(SpellKind::Flatten, crate::spell_book::Availability::Known);
+        m.spell_books[0].fill();
+        let shaman = m.units[0].cell();
+        let at = (shaman.0, shaman.1 - 8);
+        let level = m.terrain.get(at.0, at.1);
+        assert!(crate::flatten::disc(at).any(|(x, z)| m.terrain.get(x, z) != level), "the hill's slope");
+        m.apply(&Command::Cast { player: 0, spell: Spell::Flatten { at } });
+        assert!(m.effects.is_empty(), "her cast jump first");
+        m.run(crate::unit::CAST_RELEASE);
+        assert_eq!(m.effects.len(), 1, "released into the jump");
+        m.run(Ticks::new(crate::flatten::DURATION));
+        assert!(m.effects.is_empty());
+        assert!(crate::flatten::disc(at).all(|(x, z)| m.terrain.get(x, z) == level), "level at the target's height");
     }
 
     #[test]
