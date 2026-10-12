@@ -138,7 +138,8 @@ Shown before the game over the first map: New game (the level from the command l
 Sandbox > Walk, Units, Buildings, Worship, Spells (the ground of every sandbox shows a grid along the cell borders, `world::ShowGrid`,
 `terrain_texture::draw_grid`; levels do not) (`GameMap::sandbox_walk`: small flat island, gentle ramp east, steep hill north, lake west, mesa ringed by cliffs south-east, each a few cells past the spawn; `GameMap::sandbox_worship`: a pyramid of knowledge south of the site, door
 facing the shaman, and north one totem of each look with 8 braves, worship.md; `GameMap::sandbox_spells`: every spell
-unlimited, Teleport too (`SpellBook::unlimited`), on islands a few cells of sea apart: the player's in the middle, a red
+unlimited, Teleport too (`SpellBook::unlimited`), on islands a few cells of sea apart: the player's in the middle with 3 of each follower kind of the player south and of
+tribe 1 north, kind by kind 5 cells apart, a red
 village east with people in its huts, a hill north with a few people of tribe 2, an empty islet south-west), Quit.
 Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
 Esc in the game (once an open view-presets menu is closed) pauses: the mouse is released (`VirtualCursor::request`)

@@ -424,7 +424,8 @@ const SPELL_ISLANDS: [((i32, i32), i32); 4] = [((0, 0), 14), ((28, 0), 10), ((0,
 impl GameMap {
     /// Test ground for spells, every one cast at will (`SpellBook::unlimited`, Teleport too), on islands
     /// (`SPELL_ISLANDS`) a few cells of sea apart, to bridge or teleport across:
-    /// - Middle: the player's site and shaman, 6 braves and some trees.
+    /// - Middle: the player's site and shaman; south, 3 of each follower kind of the player, one group per kind 5 cells
+    ///   apart, west to east (`UnitKind::FOLLOWERS`); north, the same for tribe 1.
     /// - East: a village of tribe 1 (red): huts with people inside, a drum tower, a warrior hut, braves and
     ///   warriors around, to strike.
     /// - North: a hill to flatten or erode, with a few people of tribe 2 on its slopes.
@@ -445,8 +446,12 @@ impl GameMap {
         map.trees = scatter(&map.terrain, 3, &[(C, C)], 40);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let corner = |dx: i32, dz: i32| ((C + dx) as u16 * 512, (C + dz) as u16 * 512);
-        for n in 0..6 {
-            map.spawn(0, UnitKind::Brave, at(-3 + n, 5));
+        for (k, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
+            let dx = -10 + 5 * k as i32;
+            for (ox, oz) in [(0, 0), (1, 0), (0, 1)] {
+                map.spawn(0, kind, at(dx + ox, 6 + oz));
+                map.spawn(1, kind, at(dx + ox, -8 + oz));
+            }
         }
         let village = [(BuildingKind::Hut { size: 1 }, (25, -4), 2), (BuildingKind::Hut { size: 2 }, (31, -4), 3), (BuildingKind::Hut { size: 3 }, (25, 3), 4), (BuildingKind::DrumTower, (31, 3), 1), (BuildingKind::WarriorTraining, (28, -8), 0)];
         for (kind, (dx, dz), people) in village {
@@ -1906,6 +1911,13 @@ mod tests {
         assert_eq!(m.buildings.iter().map(|b| b.inside as usize).sum::<usize>(), 10);
         assert!(m.units.iter().all(|u| !m.terrain.is_water(u.cell().0, u.cell().1)));
         assert!(m.terrain.is_water(64 + 16, 64), "sea between the home island and the village");
+        for owner in [0, 1] {
+            for kind in UnitKind::FOLLOWERS {
+                let group: Vec<(i32, i32)> = m.units.iter().filter(|u| u.owner == owner && u.kind == kind && (u.cell().0 - 64).abs() <= 14 && (u.cell().1 - 64).abs() <= 14).map(Unit::cell).collect();
+                assert_eq!(group.len(), 3, "tribe {owner}'s {kind:?} on the home island");
+                assert!(m.units.iter().filter(|u| u.kind != kind && u.inside.is_none()).all(|u| group.iter().all(|&c| (c.0 - u.cell().0).abs().max((c.1 - u.cell().1).abs()) >= 3)), "apart from the others");
+            }
+        }
     }
 
     #[test]
