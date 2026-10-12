@@ -104,7 +104,7 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Spell share inside the distribution: the original also splits evenly between the learned, unblocked spells that are not full (0x41AD70, pop3-rev-analysis.md "Distribution"); check where it puts the odd mana (ours: the first ones in book order).
 - [ ] Spell charges from `SP_1_OFF_MAX` instead of `max_charges()` from the cost.
 - [ ] Spent on training units in the training huts: check whether training takes from the bank.
-- [ ] Swamp, Earthquake (`map::Lcg`), Volcano, Firestorm, Angel of Death, Armageddon..., as traced in pop3-rev-analysis.md "Per spell" and "Components": swamp kills (not a surface type), the earthquake sinks a half-disc with a lava fissure, the volcano raises a cone with lava, firestorm drops fireballs (each a simple blast that panics), lightning kills up to 7 in its cell.
+- [ ] Swamp, Earthquake (`map::Lcg`), Volcano, Firestorm, Angel of Death, Armageddon..., as traced in pop3-rev-analysis.md "Per spell" and "Components": swamp kills (not a surface type), the earthquake sinks a half-disc with a lava fissure, the volcano raises a cone with lava and throws 26 decorative rocks (pop3-rev-analysis.md "Volcano rocks": hfx 346-349 billboards rolling down its slope, client only), firestorm drops fireballs (each a simple blast that panics), lightning kills up to 7 in its cell.
 
 ## Tribes
 - [ ] A tribe model in game-core: `TribeId` instead of bare `u8` owners (blue 0 .. green 3, wildmen 255), its colour

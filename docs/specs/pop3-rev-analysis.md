@@ -436,7 +436,7 @@ Worked examples (hand estimates, flat ground, not measured):
 | 13 | Angel of death (510 000, 3072, 1) | A meteor, then an angel (person type 8, `LIFE_AOD` 10 000) hunts the nearest enemy on the whole map, shamans included, pulling people out of buildings; carries and throws each victim to death, about one per 28 turns (2.3 s). Ends after `AOD_KILL_COUNT` (40) kills or `AOD_DURATION` (2500 turns, 208 s). Two angels fight by health. |
 | 14 | Earthquake (175 000, 4096, 2) | 120 turns (10 s) of shake. At turns 24, 56 and 88 each building in 16 × 16 cells has a 20/128 chance to be shaken (occupants out, partial explosion). At turn 60, a half-disc of radius 8 cells sinks by up to 600 (`600 × (4096 − d) / 4096`), with a lava fissure of short-lived lava squares and possibly two lava flows. |
 | 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point. |
-| 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow (up to 16 s); about 22 small and 6 big fireballs (simple blasts) and 26 rocks. |
+| 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow (up to 16 s); about 22 small and 6 big fireballs (simple blasts) and 26 decorative rocks ("Volcano rocks"). |
 | 17 | Convert wild (10 000, 8192, 4) | Every 8 turns the nearest wildman within 2 cells becomes a brave of the caster (if the tribe is under 200); ends 18 turns after the last conversion. |
 | 18 | Armageddon (hidden) | Clears the map, turns every building into one person, gathers every tribe on an arena around the target and makes them fight; the weakest shaman is struck by blast or lightning at intervals; anyone more than 9 cells away dies. |
 | 19 | Shield (60 000, 4096, 4) | The `SHIELD_NUM_PEOPLE` (file 6) nearest own followers (not shaman, wildmen, angels, ghosts) for 120 s: immune to blast and whirlwind, other damage ignored too, except melee; deflects burn, blast, lightning, whirlwind and insect shots. |
@@ -445,6 +445,31 @@ Worked examples (hand estimates, flat ground, not measured):
 
 Friendly fire: lightning, whirlwind, swamp, volcano and lava hurt the caster's own people; blast, firestorm and
 insects do not damage allies. Lightning and swamp kill regardless of health.
+
+### Volcano rocks [exe]
+Purely decorative: the volcano's per-turn function (0x50E060) makes one scenery 13 ("rock", `create_unit(5, 13)`
+0x4ED8A0, at 0x50E2A2) per turn on volcano turns 105-130 (26 in all). No level places one; the volcano is their only
+creator.
+- Placement: a random angle (`rand & 0x7FF`) and distance `(rand & 0x1FF) × 2 + 0x600` (1536-2558 units, 3-5 cells:
+  the cone's outer slope) from the centre, then a random point in that cell (scenery init 0x4A5EF0, model 13 at
+  0x4A604A), at the crater's height when cast.
+- Motion: no initial velocity. State 7 (0x4A650C) runs the generic mover 0x4E7A80 with movement profile 11 (speed 4,
+  caps 192 / 512, gravity 32, ground friction 8, 72 on terrain flags 0x3E): it falls, and slides downhill while the
+  slope (0x44F750, max − min height of its triangle) is above 24; blocking cells (flags 0x80200) push it out and
+  reflect it. No bounce, no damage, no sound, no effect spawned, no terrain change (0x517F10 in the collision
+  helper not checked).
+- Stop: not sliding, its speed is scaled by 22/32 per turn; at 2 or below it goes to state 1 with 128 turns to
+  live (0x4A6F40), then is deleted (0x4A6E20 → 0x4EDCF0), about 10.7 s at rest. "Ground moved" in state 1 (0x4A80B0)
+  sends it sliding again.
+- Drawn: a camera-facing sprite of `hfx0-0.dat` (sprite table `[0x59DF14]`, draw type 0 of the table 0x5A6AF8, draw
+  kind 1 at 0x46895E), bottom-centred on its position, no rotation, opaque: frame `346 + ((x >> 6) + (z >> 6)) & 3`
+  (scenery flag 0x20), so it seems to roll, changing every 1/8 cell. Its ground shadow is hfx 22 (draw kind 15,
+  0x46ACF6). Which palette the game uses for hfx in a level is open.
+- Related: "volcano explosions" 7/0x23 is deleted at init (0x509EE9). "Rock debris" 7/0x33 (init 0x5137C0) is not a
+  rock but a 20-turn dust burst at ground − 112 (alpha sprites hfx 1160-1179, draw type 0x25, 20
+  frames, animator 0x4EE7B0), made by the rising reincarnation pillars. "Rock explosion" 7/0x3F (init 0x50A278) is the
+  16-turn fire blast where a big volcano fireball 8/8 lands (alpha hfx 1194-1209, sound 0xB2); small 8/7 ones make
+  7/0x3E instead.
 
 ### Terrain changes: what reacts
 Every terrain-changing effect (land bridge, flatten, erosion, earthquake, volcano...) ends each cell change with the

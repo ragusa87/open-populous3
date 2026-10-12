@@ -72,13 +72,13 @@ at the same scale, sits right of it (`virtual_cursor::building_sprite`, `with_ba
 the camp fire's (66) while placing one (`plan_sprite`).
 
 ## `data/hfx0-0.dat` (1615 sprites: effects, map things, HUD art)
-Same palette. Identified: 2-3 dry plants, 22 a flat dark smear (shadow of 23?), 23 a pile of logs (17 x 11, a piece of
+Same palette. Identified: 2-3 dry plants, 22 a flat dark smear, the generic ground shadow under sprite things (draw kind 15, pop3-rev-analysis.md "Volcano rocks") [exe], 23 a pile of logs (17 x 11, a piece of
 wood on the ground: `catalog::WOOD_PILE_SPRITE`), 90-93 fire, 107-111 spell names, 187-210 build/wood action icons,
 46-51 the tooltip's dismantle toggle (49, 51 hovered, 50 pressed) and its undo (46, 48 hovered, 47 pressed), 60-62 the
 unload button of a vehicle (60, 61 hovered, 62 pressed), tooltips.md; 639-656 gold state icons, each plain then outlined (653 a boat, 655 the same boat flat), 664-675 six unit figures (plain / outlined
 pairs: 666 brave, 668 warrior, 670 firewarrior, 672 preacher, 674 spy, 664 probably the shaman; 75-80 the same in
 teal, in unit model order: brave, warrior, preacher, spy, firewarrior, shaman, `catalog::UNIT_FIGURES`, the tooltip's
-people), 1030-1083 spell and building glyphs, 1084-1088 the Stats
+people), 346-349 the volcano's rock, a boulder in 4 orientations (17 x 13) [exe], 1030-1083 spell and building glyphs, 1084-1088 the Stats
 tab's row labels (selected, idle, in a house, working, in a balloon; in a boat: 655), 1090-1600 spell effects (dust, explosions, swarm...).
 The 3D objects have no wood pile: objects 0 and 12 are a camp fire (logs and a flame board), see objects.md.
 
@@ -87,7 +87,7 @@ Alpha sprites: 1090..1499 and 1538..1592 are blended (same ranges in PopResource
 `pop3_format::sprites` returns the raw indices; `blend::AlphaTable::rgba` turns them into RGBA (tint colour,
 opacity strength / 15) for GPU blending (`art::alpha_picture_frame`, uploaded with `AlphaMode::Blend`).
 Identified: 1225-1239 a cream dust cloud growing and fading (the teleport landing puff), 1210-1224 the same in
-grey, 1181-1209 fire clouds, 1241-1247 and 1265-1279 flashes, 1330-1345 smoke columns.
+grey, 1181-1209 fire clouds (1194-1209 the rock explosion of a big volcano fireball's landing [exe]), 1160-1179 the rock-debris dust burst [exe], 1241-1247 and 1265-1279 flashes, 1330-1345 smoke columns.
 
 ## Blend tables (`data/`, one per theme, 65 536 bytes = 256 x 256 palette indices)
 Layouts from PopResourceEditor (Toksisitee, MIT, `140e389`), checked against the files.
