@@ -22,6 +22,10 @@ pub enum WorldEvent {
     /// A new effect, ticking from the next turn; its id is given then.
     SpawnEffect(Effect),
     Terrain(TerrainChange),
+    /// A coordinator tells one of its units where to go (a charge's target, a melee's place).
+    Placed { unit: UnitId, at: (u16, u16) },
+    /// The attacker of a challenge starts its shove (`GameMap::shove`).
+    Shove { attacker: UnitId },
     /// The unit leaves its coordinator (`Unit::release`); nothing if it is in none.
     Release { unit: UnitId },
 }

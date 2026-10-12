@@ -1,8 +1,8 @@
 # Coordinators
 
 Short-lived simulation objects that coordinate several units: a sermon, a fight, a formation, a guard post's
-control. Only the infrastructure exists (`game_core::coordinator`); no real kind does. Each kind will get its own
-spec and rules on top of this.
+control. The infrastructure is `game_core::coordinator`; kinds: the challenge (combat.md "Challenge"). Each kind
+has its own spec and rules on top of this.
 
 Tags: **[exe]** the original executable (pop3-rev-analysis.md), **[wiki]** the Populous Wiki (Object Data),
 **[ours]** a choice made here.
@@ -51,6 +51,8 @@ for each variant:
 | `Raid { building }` | routed, no behaviour yet |
 | `SpawnEffect(Effect)` | a new effect, ticking from the next turn |
 | `Terrain(TerrainChange)` | raise or flatten ground |
+| `Placed { unit, at }` | `Unit::placed`: a charger's goal (later a melee's place) |
+| `Shove { attacker }` | `GameMap::shove`: the challenger starts its shove |
 | `Release { unit }` | the unit leaves its coordinator: back to Idle (`Unit::release`); nothing if it is in none or gone |
 
 Expected later, when their kinds come: `ChangeOwner { unit, tribe }` (conversion), `SpawnCoordinator(..)` (a
@@ -69,7 +71,7 @@ Rules:
 
 ## In the tick
 In `GameMap::tick`, after camp fires, vaults and totems, before units (architecture.md "The tick"):
-1. `detect_coordinators`: scans that start coordinators or add units to them, one per kind (none yet);
+1. `detect_coordinators`: scans that start coordinators or add units to them, one per kind (`start_challenges`);
 2. `tend_coordinators`: each coordinator's turn (`mem::take` of the list, the map read as it was, the rng handed
    in turn), kind after kind in `Coordinators::tick`'s order;
 3. the finished ones removed;

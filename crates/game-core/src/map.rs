@@ -965,8 +965,10 @@ impl GameMap {
         self.apply_events(events)
     }
 
-    /// Scans that start coordinators or add units to them, one per kind in `Coordinators::tick`'s order (none yet).
-    fn detect_coordinators(&mut self) {}
+    /// Scans that start coordinators or add units to them, one per kind in `Coordinators::tick`'s order.
+    fn detect_coordinators(&mut self) {
+        self.start_challenges();
+    }
 
     /// Every coordinator's turn, reading the map as it was before any of them; the finished ones removed; then their
     /// events apply in order. The ground they changed.
@@ -1012,7 +1014,10 @@ impl GameMap {
                 if let Some(i) = self.unit_index(unit).filter(|&i| crate::effect::pushes(&self.units[i], kind)) {
                     let u = &self.units[i];
                     let ground = self.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
-                    self.units[i].fling(vel, ground);
+                    match kind {
+                        crate::event::PushKind::Spell => self.units[i].fling(vel, ground),
+                        crate::event::PushKind::Melee => self.units[i].knock(vel, ground),
+                    }
                 }
                 None
             }
@@ -1041,6 +1046,16 @@ impl GameMap {
             WorldEvent::Terrain(TerrainChange::Raise { at, radius, by }) => Some(self.terrain.raise(at, radius, by)),
             WorldEvent::Terrain(TerrainChange::Flatten { at, height, turn }) => Some(crate::flatten::apply(&mut self.terrain, at, height, turn)),
             WorldEvent::Terrain(TerrainChange::Bridge { from, to, heights, turn }) => Some(crate::land_bridge::apply(&mut self.terrain, from, to, heights, turn)),
+            WorldEvent::Placed { unit, at } => {
+                if let Some(u) = self.unit_mut(unit) {
+                    u.placed(at);
+                }
+                None
+            }
+            WorldEvent::Shove { attacker } => {
+                self.shove(attacker);
+                None
+            }
             WorldEvent::Release { unit } => {
                 if let Some(u) = self.unit_mut(unit) {
                     u.release();

@@ -87,6 +87,26 @@ pub fn demo_commands(name: &str, shaman: &Unit) -> Vec<Command> {
     }
 }
 
+/// `ATTACK=nearest`: each of the player's people that may fight attacks the nearest enemy person it may attack.
+pub fn attack_commands(how: &str, map: &game_core::map::GameMap) -> Vec<Command> {
+    if how != "nearest" {
+        return Vec::new();
+    }
+    let dist = |a: &game_core::unit::Unit, b: &game_core::unit::Unit| {
+        let (dx, dz) = (game_core::unit::torus_delta(a.x, b.x) as i64, game_core::unit::torus_delta(a.z, b.z) as i64);
+        dx * dx + dz * dz
+    };
+    map.units
+        .iter()
+        .filter(|u| u.owner == PLAYER && u.is_alive())
+        .filter_map(|u| {
+            let target = map.units.iter().filter(|t| game_core::attack::may_attack(u, t)).min_by_key(|t| dist(u, t))?;
+            let order = game_core::unit::Order::Attack { target: game_core::unit::Target::Unit(target.id) };
+            Some(Command::OrderUnit { player: PLAYER, unit: u.id, order })
+        })
+        .collect()
+}
+
 /// `TUMBLE=air|ground`: every unit of the player tumbles, in the air (a cell above the ground, falling: add
 /// `GAME_SPEED=0` to hold it there) or on the ground (kept rolling, no friction yet).
 pub fn tumble_demo(how: &str, map: &mut game_core::map::GameMap) {
@@ -331,6 +351,7 @@ fn screenshot(
             cmds.extend(map.0.worship_orders(PLAYER, &[u.id], vault));
         }
         cmds.extend(brave_commands(&std::env::var("BRAVES").unwrap_or_default(), &map.0));
+        cmds.extend(attack_commands(&std::env::var("ATTACK").unwrap_or_default(), &map.0));
         for c in &cmds {
             dirty.0 |= map.0.apply(c).is_some();
         }
@@ -395,6 +416,15 @@ fn screenshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attack_nearest_sends_the_fighters_at_the_closest_enemy() {
+        let map = game_core::map::GameMap::sandbox_units();
+        let cmds = attack_commands("nearest", &map);
+        let fighters = map.units.iter().filter(|u| u.owner == PLAYER && map.units.iter().any(|t| game_core::attack::may_attack(u, t))).count();
+        assert!(fighters > 0 && cmds.len() == fighters);
+        assert!(attack_commands("", &map).is_empty());
+    }
 
     #[test]
     fn brave_demo_sends_every_brave_to_cut_then_carry_back() {

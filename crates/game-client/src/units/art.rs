@@ -105,6 +105,20 @@ impl Pose {
     }
 }
 
+/// The pose for a part in a challenge.
+fn challenge_pose(role: game_core::challenge::Role, carrying: bool, airborne: bool) -> Pose {
+    use game_core::challenge::Role;
+    match role {
+        Role::Waiting if carrying => Pose::CarryIdle,
+        Role::Waiting => Pose::Idle,
+        Role::Charging { .. } if carrying => Pose::CarryWalk,
+        Role::Charging { .. } => Pose::Walk,
+        Role::Shoving { .. } => Pose::Idle,
+        Role::Shoved if airborne => Pose::Flung,
+        Role::Shoved => Pose::Tumble,
+    }
+}
+
 /// The pose for an action; `carrying` wood changes standing and walking, `airborne` (lift above
 /// the ground) tumbling.
 pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
@@ -114,6 +128,7 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Attacking { .. } if carrying => Pose::CarryWalk,
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } | Action::Attacking { .. } => Pose::Walk,
         Action::Panicking { .. } => Pose::Panic,
+        Action::Challenge { role, .. } => challenge_pose(*role, carrying, airborne),
         Action::Chopping { .. } | Action::PickingUpWood { .. } => Pose::Chop,
         Action::Building { .. } | Action::Hammering => Pose::Hammer,
         Action::Flattening { .. } => Pose::Jump,

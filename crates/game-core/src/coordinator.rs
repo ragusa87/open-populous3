@@ -2,7 +2,7 @@
 //! invisible "internal" things (class 10: fights, formations, guard control...). Units link to one through their
 //! action, one way; the coordinator keeps no list of them. It ticks before the units, returns `WorldEvent`s, and is
 //! removed when its situation ends; its units then find its id gone and are released (`GameMap::release_orphans`).
-//! No real kind exists yet: a test-only `Gathering` proves the pattern.
+//! Kinds: `challenge::Challenge`; a test-only `Gathering` proves the pattern.
 
 use crate::event::WorldEvent;
 use crate::id::{Id, Registry};
@@ -29,6 +29,7 @@ pub trait Coordinator: Sized {
 /// A unit's link to its coordinator (`Action::link`), one variant per kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Link {
+    Challenge(crate::challenge::ChallengeId),
     #[cfg(test)]
     Gathering(Id<tests::Gathering>),
 }
@@ -36,6 +37,7 @@ pub enum Link {
 /// Every coordinator, one registry per kind.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Coordinators {
+    pub challenges: Registry<crate::challenge::Challenge>,
     #[cfg(test)]
     pub gatherings: Registry<tests::Gathering>,
 }
@@ -44,6 +46,7 @@ impl Coordinators {
     /// Whether the coordinator `link` points at is still there.
     pub fn exists(&self, link: Link) -> bool {
         match link {
+            Link::Challenge(id) => self.challenges.contains(id),
             #[cfg(test)]
             Link::Gathering(id) => self.gatherings.contains(id),
         }
@@ -53,6 +56,7 @@ impl Coordinators {
     #[allow(unused_variables, unused_mut)]
     pub fn tick(&mut self, now: Tick, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         let mut events = Vec::new();
+        tick_kind(&mut self.challenges, now, world, rng, &mut events);
         #[cfg(test)]
         tick_kind(&mut self.gatherings, now, world, rng, &mut events);
         events
@@ -109,6 +113,7 @@ pub(crate) mod tests {
         fn link_of(u: &Unit) -> Option<Id<Self>> {
             match u.action.link()? {
                 Link::Gathering(id) => Some(id),
+                _ => None,
             }
         }
 

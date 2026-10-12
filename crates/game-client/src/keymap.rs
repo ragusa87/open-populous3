@@ -38,6 +38,7 @@ pub enum Shortcut {
     NextLevel,
     PreviousLevel,
     Grid,
+    DebugOverlay,
     Editor,
     ViewPresets,
     CameraReadout,
@@ -110,7 +111,7 @@ fn original_bindings(shortcut: Shortcut) -> &'static [Binding] {
         Pause => &[key!(KeyP, NONE)],
         Faster => &[key!(Equal, SHIFT), key!(NumpadAdd, SHIFT)],
         Slower => &[key!(Minus, SHIFT), key!(NumpadSubtract, SHIFT)],
-        TiltUp | TiltDown | FovWider | FovNarrower | Stop | CastSelf | NextLevel | PreviousLevel | Grid | Editor
+        TiltUp | TiltDown | FovWider | FovNarrower | Stop | CastSelf | NextLevel | PreviousLevel | Grid | DebugOverlay | Editor
         | ViewPresets | CameraReadout => &[],
     }
 }
@@ -139,6 +140,7 @@ fn dev_bindings(shortcut: Shortcut) -> &'static [Binding] {
         NextLevel => &[key!(PageDown, NONE)],
         PreviousLevel => &[key!(PageUp, NONE)],
         Grid => &[key!(KeyG, NONE)],
+        DebugOverlay => &[key!(F4, NONE)],
         Editor => &[key!(Tab, NONE)],
         ViewPresets => &[key!(F2, NONE)],
         CameraReadout => &[key!(F3, NONE)],
@@ -205,12 +207,12 @@ impl Plugin for KeymapPlugin {
 mod tests {
     use super::*;
 
-    const ALL: [Shortcut; 27] = {
+    const ALL: [Shortcut; 28] = {
         use Shortcut::*;
         [
             Forward, Back, StrafeLeft, StrafeRight, RotateLeft, RotateRight, TiltUp, TiltDown, ZoomIn, ZoomOut, FovWider,
             FovNarrower, Aerial, LookAtShaman, LookAtSite, TurnPlan, Stop, CastSelf, NextLevel, PreviousLevel, Grid,
-            Editor, ViewPresets, CameraReadout, Pause, Faster, Slower,
+            DebugOverlay, Editor, ViewPresets, CameraReadout, Pause, Faster, Slower,
         ]
     };
 
@@ -247,7 +249,7 @@ mod tests {
     #[test]
     fn original_keymap_has_no_dev_tools() {
         use Shortcut::*;
-        for s in [Stop, CastSelf, NextLevel, PreviousLevel, Grid, Editor, ViewPresets, CameraReadout, TiltUp, FovWider] {
+        for s in [Stop, CastSelf, NextLevel, PreviousLevel, Grid, DebugOverlay, Editor, ViewPresets, CameraReadout, TiltUp, FovWider] {
             assert!(bindings(false, s).is_empty(), "{s:?}");
         }
         assert!(!fires(false, Shortcut::LookAtShaman, Input::Code(KeyCode::Space), NONE), "Space skips the fly-by there");

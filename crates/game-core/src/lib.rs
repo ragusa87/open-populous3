@@ -8,6 +8,7 @@ pub mod blast;
 pub mod build_book;
 pub mod building;
 pub mod campfire;
+pub mod challenge;
 pub mod cast_range;
 pub mod combat;
 pub mod command;

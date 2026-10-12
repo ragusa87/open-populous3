@@ -51,5 +51,25 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
   order yet: theirs throws fire from afar (TODO).
 - `Action::Attacking { target, to }`: walks a path to `to`, the person or the building's door, and stands there.
   Each turn before the coordinators `GameMap::tend_attacks` aims `to` at where the target is, planning again once it
-  is a cell off; a target gone, dead or no longer an enemy stops the attack (Idle). What happens once there comes
-  with the challenge and the melee.
+  is a cell off; a target gone, dead or no longer an enemy stops the attack (Idle). Once within reach of a person, a
+  challenge starts (below).
+
+## Challenge
+A coordinator (`challenge::Challenge`, coordinators.md) for one attacker and one target, before a melee
+("Pre-fight" [exe, measured]):
+- Started in `detect_coordinators` (`GameMap::start_challenges`): an attacker within `FIGHT_REACH` (224) of a
+  target that is in no coordinator, outside and on the ground. Both join it (`Unit::join`): the attacker
+  `Role::Charging` at its walking speed + a draw below a quarter of it, the target `Role::Waiting`. A target already
+  in a challenge or a melee is left alone for now (joining a melee comes with it).
+- Each turn: it ends, both released, when one is gone, dead, no longer linked (an order took it away) or of the same
+  tribe, or when a charge lasts `CHARGE_TICKS` (40). The charger runs straight at the target (`Placed` gives the
+  target's place when it moved). Within `SHOVE_REACH` (315) on both axes of a waiting target: `Shove`, 6 turns
+  (shaman 4, × pace); with 2 left the target is thrown (`Push`, `PushKind::Melee`: the shield does not stop it, the
+  target stays `Shoved` in the challenge) at 100 + a draw below 100 per turn, turned a third to two thirds of a turn
+  from the way to the attacker (away from it), lift `SHOVE_LIFT` 48 [guess: ours does not slide on the ground]; no
+  damage. Still again, it waits. The attacker charges again; reaching it again ends the challenge (the melee comes
+  next).
+- Already in reach when it starts, the attacker shoves at once.
+- Not yet: the target facing the attacker and its taunts; the original's option with no shove; a target at its
+  building (the third approach, unverified).
+

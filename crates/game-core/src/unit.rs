@@ -178,6 +178,8 @@ pub enum Action {
     Worshipping { site: (u16, u16) },
     /// On its way to attack `target`, whose place it last aimed at is `to` (`GameMap::tend_attacks` keeps it up to date).
     Attacking { target: Target, to: (u16, u16) },
+    /// Its `role` in the challenge `challenge` (challenge.rs).
+    Challenge { challenge: crate::challenge::ChallengeId, role: crate::challenge::Role },
     /// Held by the test-only coordinator `gathering` (coordinator.rs).
     #[cfg(test)]
     Gathered { gathering: crate::id::Id<crate::coordinator::tests::Gathering> },
@@ -207,6 +209,7 @@ impl Action {
             Action::Entering { .. } => "Entering",
             Action::Hammering => "Hammering",
             Action::Attacking { .. } => "Attacking",
+            Action::Challenge { .. } => "Fighting",
             #[cfg(test)]
             Action::Gathered { .. } => "Gathered",
         }
@@ -214,6 +217,9 @@ impl Action {
 
     /// The coordinator this action takes part in, if any (coordinator.rs).
     pub fn link(&self) -> Option<crate::coordinator::Link> {
+        if let Action::Challenge { challenge, .. } = *self {
+            return Some(crate::coordinator::Link::Challenge(challenge));
+        }
         #[cfg(test)]
         if let Action::Gathered { gathering } = *self {
             return Some(crate::coordinator::Link::Gathering(gathering));
@@ -638,6 +644,7 @@ impl Unit {
                 }
             }
             Action::Attacking { to, .. } => self.approach(to, ground),
+            Action::Challenge { challenge, role } => self.action = Action::Challenge { challenge, role: self.play(role, ground) },
             Action::Entering { to } => {
                 if self.step_towards(to, ground, self.kind.speed()) != Step::Moved {
                     self.action = Action::Idle;
@@ -845,7 +852,9 @@ impl Unit {
             self.die();
             return Some(UnitEvent::Died);
         }
-        self.action = Action::Idle;
+        if self.action.link().is_none() {
+            self.action = Action::Idle;
+        }
         None
     }
 
@@ -868,6 +877,51 @@ impl Unit {
         let velocity = Velocity::new(v.x.saturating_add(push.x), v.y.saturating_add(push.y), v.z.saturating_add(push.z));
         self.motion = Motion::flying(velocity, self.motion.height.unwrap_or(ground));
         self.action = Action::Tumbling;
+    }
+
+    /// Thrown in a fight: like `fling`, but it stays in its fight (a challenge's target `Shoved`).
+    pub fn knock(&mut self, push: Velocity, ground: i32) {
+        let Action::Challenge { challenge, .. } = self.action else { return self.fling(push, ground) };
+        if !self.is_alive() {
+            return;
+        }
+        let v = self.motion.velocity;
+        let velocity = Velocity::new(v.x.saturating_add(push.x), v.y.saturating_add(push.y), v.z.saturating_add(push.z));
+        self.motion = Motion::flying(velocity, self.motion.height.unwrap_or(ground));
+        self.action = Action::Challenge { challenge, role: crate::challenge::Role::Shoved };
+    }
+
+    /// Joins a coordinator with `action` (one that links to it), leaving its way and its chained orders.
+    pub(crate) fn join(&mut self, action: Action) {
+        debug_assert!(action.link().is_some());
+        (self.route, self.planned_on) = (Vec::new(), None);
+        self.queue.clear();
+        self.action = action;
+    }
+
+    /// Its coordinator sends it to `at` (`WorldEvent::Placed`).
+    pub fn placed(&mut self, at: (u16, u16)) {
+        if let Action::Challenge { challenge, role: crate::challenge::Role::Charging { speed, .. } } = self.action {
+            self.action = Action::Challenge { challenge, role: crate::challenge::Role::Charging { to: at, speed } };
+        }
+    }
+
+    /// One turn of its part in a challenge: running straight at the target, shoving, standing up again once still.
+    fn play(&mut self, role: crate::challenge::Role, ground: &impl Ground) -> crate::challenge::Role {
+        use crate::challenge::Role;
+        match role {
+            Role::Waiting => Role::Waiting,
+            Role::Charging { to, speed } => {
+                self.step_towards(to, ground, speed);
+                role
+            }
+            Role::Shoving { mut left, speed } => match left.tick() {
+                false => Role::Shoving { left, speed },
+                true => Role::Charging { to: (self.x, self.z), speed },
+            },
+            Role::Shoved if self.motion.is_still() => Role::Waiting,
+            Role::Shoved => Role::Shoved,
+        }
     }
 
     /// One step of a panic run towards `away`, out by the door first when inside; the heading it goes on with,
