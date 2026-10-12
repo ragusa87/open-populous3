@@ -93,10 +93,13 @@ Internal moves (stepping off a taken spot on arrival, a fire put out) use `Unit:
 - `Order::CutTree { tree }` (left click on a tree with braves selected, `GameMap::cut_orders`; other kinds
   sent along walk next to it): each tree takes as many braves as it has wood (`GameMap::tree_claims`: braves
   chopping it or walking to it); one with no wood to spare sends the brave to the nearest tree that has within
-  `REFIND_CELLS` (8). The brave stands on the free spot by the tree nearest to him, chops, takes the piece.
+  `REFIND_CELLS` (8). The brave stands on the free spot by the tree nearest to him, chops (`Action::Chopping`,
+  `CHOP_TICKS` 20 turns), takes the piece.
 - `Order::PickUp { at }` (left click on a wood pile, `GameMap::wood_at` / `pick_orders`): each brave with empty
   hands walks onto the nearest piece within `PICK_RADIUS` (3/4 cell) of the click that nobody else is fetching
-  and takes it; the others walk next to the pile.
+  and takes it (`Action::PickingUpWood`, `PICK_TICKS` 3 turns, drawn with the chop pose); the others walk next to
+  the pile. Both countdowns are the original's `CHOP_TIME`, 20 at a tree and 3 at a wood pile (pop3-rev-analysis.md
+  "Chopping"): a countdown from the brave's arrival, not a global turn rhythm.
 - `Order::FetchWood`: the nearest wood, a piece on the floor nobody is fetching (walk onto it, pick it up) or a
   tree with wood to spare; the floor wins ties. Tasks will chain it before reassigning the brave to themselves
   (huts-and-training.md, buildings.md); he then works with the piece he carries.

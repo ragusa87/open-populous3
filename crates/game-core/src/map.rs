@@ -1651,6 +1651,38 @@ mod tests {
     }
 
     #[test]
+    fn picking_up_a_piece_takes_three_turns_a_tree_twenty() {
+        let (mut m, ids) = woodland(&[((2, 0), 4)], &[(0, 0)]);
+        let c = MAP_SIZE as i32 / 2;
+        let piece = slots::cell_centre((c, c + 2));
+        m.wood.push(WoodPiece::new(piece.0, piece.1));
+        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::PickUp { at: piece } });
+        run_until_unit(&mut m, ids[0], |u| matches!(u.action, Action::PickingUpWood { .. }));
+        m.run(Ticks::new(crate::unit::PICK_TICKS.get() - 1));
+        assert_eq!(unit(&m, ids[0]).carrying, 0);
+        m.tick();
+        assert_eq!((unit(&m, ids[0]).carrying, m.wood.len()), (1, 0));
+        let mut m = woodland(&[((2, 0), 4)], &[(0, 0)]);
+        let tree = tree_at(&m.0, (2, 0));
+        m.0.apply(&Command::OrderUnit { player: 0, unit: m.1[0], order: Order::CutTree { tree } });
+        run_until_unit(&mut m.0, m.1[0], |u| matches!(u.action, Action::Chopping { .. }));
+        m.0.run(Ticks::new(crate::unit::CHOP_TICKS.get() - 1));
+        assert_eq!(unit(&m.0, m.1[0]).carrying, 0);
+        m.0.tick();
+        assert_eq!(unit(&m.0, m.1[0]).carrying, 1);
+    }
+
+    fn run_until_unit(m: &mut GameMap, id: u32, done: impl Fn(&Unit) -> bool) {
+        for _ in 0..300 {
+            m.tick();
+            if done(unit(m, id)) {
+                return;
+            }
+        }
+        panic!("never got there");
+    }
+
+    #[test]
     fn wood_carried_into_the_sea_is_lost() {
         let (mut m, ids) = woodland(&[], &[(0, 0)]);
         let c = MAP_SIZE as i32 / 2;

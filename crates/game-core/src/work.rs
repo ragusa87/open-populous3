@@ -696,10 +696,7 @@ mod tests {
             let mut map = sandbox();
             let units = braves(&map, 5);
             let first = place(&mut map, first_kind, corner(26, 2), &units);
-            for _ in 0..250 {
-                map.tick();
-            }
-            assert!(map.buildings[first].flat, "{first_kind:?} flat");
+            run_until(&mut map, 600, |m| m.buildings[first].flat).unwrap_or_else(|| panic!("{first_kind:?} flat"));
             let second = place(&mut map, second_kind, corner(26, -8), &units);
             for t in 0..2500 {
                 map.tick();

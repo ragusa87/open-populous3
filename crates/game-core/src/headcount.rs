@@ -102,7 +102,7 @@ pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
         return Some(if hut { State::Housed } else { State::Working });
     }
     let working = match unit.action {
-        Action::Chopping { .. } | Action::Holding { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Entering { .. } | Action::Hammering | Action::Worshipping { .. } | Action::AroundFire { .. } => true,
+        Action::Chopping { .. } | Action::PickingUpWood { .. } | Action::Holding { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Entering { .. } | Action::Hammering | Action::Worshipping { .. } | Action::AroundFire { .. } => true,
         Action::Idle | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Drowning | Action::Tumbling | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => false,
     };
     Some(if working || unit.busy() { State::Working } else { State::Idle })

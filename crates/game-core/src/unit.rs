@@ -41,8 +41,10 @@ pub const DYING_TICKS: Ticks = Ticks::millis(1500);
 pub const RESPAWN_TICKS: Ticks = Ticks::secs(3);
 /// Others' spirit rising from the body after the fall, before they are gone (a guess).
 pub const SPIRIT_TICKS: Ticks = Ticks::secs(3);
-/// Chopping one piece of wood off a tree: the original's countdown at a tree.
+/// Chopping one piece of wood off a tree: the original's `CHOP_TIME` at a tree (pop3-rev-analysis.md "Chopping").
 pub const CHOP_TICKS: Ticks = Ticks::new(20);
+/// Picking up a piece of wood lying on the ground: the original's `CHOP_TIME` at a wood pile.
+pub const PICK_TICKS: Ticks = Ticks::new(3);
 /// With nothing more to do, a brave holds his piece of wood this long before putting it down.
 pub const HOLD_TICKS: Ticks = Ticks::secs(3);
 /// A brave's jump flattening one height point of a building site.
@@ -147,6 +149,9 @@ pub enum Action {
     AroundFire { fire: (u16, u16), point: u8 },
     /// A brave cutting one piece of wood off the tree at `tree` (its position), `left` ticks to go.
     Chopping { tree: (u16, u16), left: Countdown },
+    /// A brave picking up the piece of wood at `at` (its position), `left` ticks to go: the original's same
+    /// gather state as chopping, shorter.
+    PickingUpWood { at: (u16, u16), left: Countdown },
     /// Standing with a piece of wood and nothing more to do: puts it down when `left` runs out.
     Holding { left: Countdown },
     /// A brave jumping on the height point `at` (cells) of the site it works on, to flatten it.
@@ -179,6 +184,7 @@ impl Action {
             Action::Spirit { .. } => "Dead",
             Action::AroundFire { .. } => "Around the fire",
             Action::Chopping { .. } => "Cutting wood",
+            Action::PickingUpWood { .. } => "Picking up wood",
             Action::Holding { .. } => "Holding wood",
             Action::Flattening { .. } => "Flattening",
             Action::Building { .. } => "Building",
@@ -195,6 +201,7 @@ impl Action {
             | Action::Spirit { left }
             | Action::Dead { left }
             | Action::Chopping { left, .. }
+            | Action::PickingUpWood { left, .. }
             | Action::Holding { left }
             | Action::Flattening { left, .. }
             | Action::Building { left } => Some(left),
@@ -244,7 +251,7 @@ pub enum UnitEvent {
     PutDown,
     /// Done chopping the tree at `tree`: the caller cuts it and gives the piece.
     Chopped { tree: (u16, u16) },
-    /// Arrived on the piece of wood at `at`: the caller picks it up.
+    /// Done picking up the piece of wood at `at`: the caller gives it.
     PickedUp { at: (u16, u16) },
     /// Landed from a jump on the height point `at` (cells): the caller flattens it a step.
     Jumped { at: (i32, i32) },
@@ -426,9 +433,10 @@ impl Unit {
         }
     }
 
-    /// The piece of wood (position) she is walking to pick up, if any.
+    /// The piece of wood (position) she is walking to or picking up, if any.
     pub fn fetching(&self) -> Option<(u16, u16)> {
         match self.action {
+            Action::PickingUpWood { at, .. } => Some(at),
             Action::Walking { .. } | Action::Stranded { .. } => self.to_wood,
             _ => None,
         }
@@ -585,7 +593,7 @@ impl Unit {
                             }
                             self.action = Action::Chopping { tree, left: Countdown::new(CHOP_TICKS) };
                         } else if let Some(at) = self.to_wood.take() {
-                            return Some(UnitEvent::PickedUp { at });
+                            self.action = Action::PickingUpWood { at, left: Countdown::new(PICK_TICKS) };
                         } else if let Some(building) = self.to_house.take() {
                             return Some(UnitEvent::AtDoor { building });
                         } else if let Some(site) = self.to_shrine.take() {
@@ -616,6 +624,13 @@ impl Unit {
                     return Some(UnitEvent::Built);
                 }
                 self.action = Action::Building { left };
+            }
+            Action::PickingUpWood { at, mut left } => {
+                if left.tick() {
+                    self.action = Action::Idle;
+                    return Some(UnitEvent::PickedUp { at });
+                }
+                self.action = Action::PickingUpWood { at, left };
             }
             Action::Chopping { tree, mut left } => {
                 if left.tick() {
