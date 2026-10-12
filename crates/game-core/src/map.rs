@@ -433,7 +433,8 @@ impl GameMap {
     /// Whether `player` can cast `spell` here and now: never while their shaman is `locked` (inside a
     /// vault, tumbling or lifted); Teleport needs a living shaman and ground she can walk at the target; a
     /// spell starting at the caster (land bridge) needs a living shaman, unless the player is a god
-    /// (`shaman_omni`); other spells always apply. The range is checked when aiming (`in_cast_range`).
+    /// (`shaman_omni`), and a land bridge a target on land (the water on its way is raised); other spells always
+    /// apply. The range is checked when aiming (`in_cast_range`).
     pub fn can_cast(&self, player: u8, spell: &Spell) -> bool {
         if self.shaman_locked(player) {
             return false;
@@ -444,7 +445,7 @@ impl GameMap {
                 let cell = ((to.0 as u32 / 512) as i32, (to.1 as u32 / 512) as i32);
                 shaman_alive && self.ground().passable(Mobility::Walk, cell)
             }
-            Spell::LandBridge { .. } => self.shaman_omni || shaman_alive,
+            Spell::LandBridge { to, .. } => (self.shaman_omni || shaman_alive) && !crate::unit::is_sea(&self.terrain, to),
             _ => true,
         }
     }
@@ -1408,6 +1409,24 @@ mod tests {
         m.run(crate::time::Ticks::new(crate::land_bridge::DURATION / 2));
         assert_eq!(m.terrain.heights(), built.heights(), "built in its turns");
         assert!(bridge(&m).is_none(), "done");
+    }
+
+    #[test]
+    fn a_land_bridge_targets_land_only_and_raises_the_water_on_its_way() {
+        let mut m = GameMap::sandbox_walk();
+        m.spell_books[0].fill();
+        let c = MAP_SIZE as i32 / 2;
+        let (lake, past_lake) = ((c - 9, c), (c - 14, c));
+        assert!(crate::unit::is_sea(&m.terrain, lake) && !crate::unit::is_sea(&m.terrain, past_lake), "the walk sandbox's lake, land west of it");
+        let charges = |m: &GameMap| m.spell_books[0].slot(SpellKind::LandBridge).unwrap().charges;
+        let before = charges(&m);
+        assert!(!m.can_cast(0, &Spell::LandBridge { from: (c, c), to: lake }));
+        m.apply(&Command::Cast { player: 0, spell: Spell::LandBridge { from: (c, c), to: lake } });
+        assert_eq!((m.effects.iter().count(), charges(&m)), (0, before), "refused: no bridge, no charge");
+        m.apply(&Command::Cast { player: 0, spell: Spell::LandBridge { from: (c, c), to: past_lake } });
+        assert_eq!(charges(&m), before - 1);
+        m.run(crate::time::Ticks::new(crate::land_bridge::DURATION));
+        assert!(!m.terrain.is_water(lake.0, lake.1), "the lake raised under the bridge");
     }
 
     #[test]
