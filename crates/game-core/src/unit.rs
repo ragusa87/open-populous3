@@ -175,6 +175,8 @@ pub enum Action {
     /// The shaman praying at the door of the vault of knowledge whose stored corner is `site`
     /// (`GameMap::tend_vaults`).
     Worshipping { site: (u16, u16) },
+    /// On its way to attack `target`, whose place it last aimed at is `to` (`GameMap::tend_attacks` keeps it up to date).
+    Attacking { target: Target, to: (u16, u16) },
     /// Held by the test-only coordinator `gathering` (coordinator.rs).
     #[cfg(test)]
     Gathered { gathering: crate::id::Id<crate::coordinator::tests::Gathering> },
@@ -203,6 +205,7 @@ impl Action {
             Action::Building { .. } => "Building",
             Action::Entering { .. } => "Entering",
             Action::Hammering => "Hammering",
+            Action::Attacking { .. } => "Attacking",
             #[cfg(test)]
             Action::Gathered { .. } => "Gathered",
         }
@@ -262,6 +265,16 @@ pub enum Order {
     /// The shaman: walk to the door of the vault of knowledge whose stored corner is `site` and pray
     /// there until it lets her in (`GameMap::go_worship`).
     Worship { site: (u16, u16) },
+    /// Fighters: attack an enemy person or building (`GameMap::go_attack`, combat.md).
+    Attack { target: Target },
+}
+
+/// What an attack is aimed at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Unit(UnitId),
+    /// A building, by id.
+    Building(u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -579,7 +592,7 @@ impl Unit {
                 Action::Walking { to: campfire::ring_point(fire, point) }
             }
             Order::Cast => Action::Casting { left: Countdown::new(CAST_TICKS) },
-            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
                 Action::Walking { to: tree }
@@ -623,6 +636,7 @@ impl Unit {
                     Step::Blocked => self.action = Action::Idle,
                 }
             }
+            Action::Attacking { to, .. } => self.approach(to, ground),
             Action::Entering { to } => {
                 if self.step_towards(to, ground, self.kind.speed()) != Step::Moved {
                     self.action = Action::Idle;
@@ -870,6 +884,41 @@ impl Unit {
         match self.step_towards(to, ground, PANIC_SPEED) {
             Step::Blocked => (-away.1, away.0),
             Step::Moved | Step::Arrived => away,
+        }
+    }
+
+    /// Sets off to attack `target`, standing at `to`; `to` follows the target (`retarget`).
+    pub fn attack(&mut self, target: Target, to: (u16, u16)) {
+        self.start(Order::Stop);
+        if self.action.can_take_orders() {
+            self.action = Action::Attacking { target, to };
+        }
+    }
+
+    /// The target of its attack moved to `to`: aims there, planning again once it is a cell away from where it
+    /// aimed.
+    pub fn retarget(&mut self, to: (u16, u16)) {
+        if let Action::Attacking { target, to: aimed } = self.action
+            && (torus_delta(aimed.0, to.0).abs() >= WORLD_UNITS_PER_CELL as i32 || torus_delta(aimed.1, to.1).abs() >= WORLD_UNITS_PER_CELL as i32)
+        {
+            self.action = Action::Attacking { target, to };
+            self.planned_on = None;
+        }
+    }
+
+    /// One step of the way to `to` while attacking: a path planned again when the ground changes, standing once
+    /// there or when no way leads there.
+    fn approach(&mut self, to: (u16, u16), ground: &impl Ground) {
+        if self.planned_on != Some(ground.revision()) {
+            let route = path::route(ground, self.mobility(), (self.x, self.z), to, true);
+            self.route = route.map(|r| r.into_iter().rev().collect()).unwrap_or_default();
+            self.planned_on = Some(ground.revision());
+        }
+        let Some(&next) = self.route.last() else { return };
+        match self.step_towards(next, ground, self.kind.speed()) {
+            Step::Moved => {}
+            Step::Arrived => _ = self.route.pop(),
+            Step::Blocked => self.planned_on = None,
         }
     }
 

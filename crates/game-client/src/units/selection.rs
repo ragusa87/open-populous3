@@ -19,7 +19,7 @@ use crate::hud::PANEL_WIDTH;
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::command::Command;
-use game_core::unit::{Order, PickableUnit, Unit, UnitId};
+use game_core::unit::{Order, PickableUnit, Target, Unit, UnitId};
 
 /// Cursor travel (screen pixels) before a press becomes a box drag.
 pub const DRAG_PX: f32 = 6.0;
@@ -289,7 +289,9 @@ pub(super) fn select_and_order(
                     let at = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)).map(world_units);
                     // One of the player's buildings wins over a tree in front of or behind it; a building or a
                     // totem is clicked anywhere on its model (as hovered), not only on its footprint.
-                    if let Some(orders) = hovered_site(&map.0, hovered.0).or(at).and_then(|at| building_click(&map.0, &selection.units, at)) {
+                    if let Some(orders) = attack_click(&map.0, &selection.units, hovered.0) {
+                        moves = orders;
+                    } else if let Some(orders) = hovered_site(&map.0, hovered.0).or(at).and_then(|at| building_click(&map.0, &selection.units, at)) {
                         moves = orders;
                     } else if let Some(i) = tree.tree {
                         moves = map.0.cut_orders(PLAYER, &selection.units, i);
@@ -324,6 +326,19 @@ pub fn hovered_site(map: &game_core::map::GameMap, hovered: Option<crate::hover:
         crate::hover::HoverTarget::Totem(i) => map.totems.get(i).map(|t| (t.x, t.z)),
         _ => None,
     }
+}
+
+/// Commands for a left click on the enemy person or building under the cursor (`hovered`) with `selected` units:
+/// those that may attack it go for it. None when none may, or when nothing of an enemy is under the cursor.
+pub fn attack_click(map: &game_core::map::GameMap, selected: &[UnitId], hovered: Option<crate::hover::HoverTarget>) -> Option<Vec<Command>> {
+    let target = match hovered? {
+        crate::hover::HoverTarget::Unit(i) => Target::Unit(map.units.get(i)?.id),
+        crate::hover::HoverTarget::Building(i) => Target::Building(map.buildings.get(i)?.id),
+        _ => return None,
+    };
+    let attackers = selected.iter().filter_map(|&id| map.unit(id)).filter(|u| map.attack_goal(u, target).is_some());
+    let orders: Vec<Command> = attackers.map(|u| Command::OrderUnit { player: PLAYER, unit: u.id, order: Order::Attack { target } }).collect();
+    (!orders.is_empty()).then_some(orders)
 }
 
 /// Commands for a left click at `at` (world units) on one of the player's buildings with `selected`
@@ -425,6 +440,24 @@ mod tests {
 
     fn sel(units: &[UnitId]) -> Selection {
         Selection { units: units.to_vec() }
+    }
+
+    #[test]
+    fn a_click_on_an_enemy_sends_the_selected_fighters_at_it() {
+        use crate::hover::HoverTarget;
+        use game_core::unit::UnitKind;
+        let mut map = game_core::map::GameMap::sandbox_units();
+        let mine = |k: UnitKind| map.units.iter().find(|u| u.owner == PLAYER && u.kind == k).unwrap().id;
+        let (brave, warrior) = (mine(UnitKind::Brave), mine(UnitKind::Warrior));
+        let enemy = map.units.iter().position(|u| u.owner != PLAYER && u.kind == UnitKind::Brave).unwrap();
+        let target = Target::Unit(map.units[enemy].id);
+        let orders = attack_click(&map, &[brave, warrior], Some(HoverTarget::Unit(enemy))).unwrap();
+        assert_eq!(orders, [brave, warrior].map(|unit| Command::OrderUnit { player: PLAYER, unit, order: Order::Attack { target } }));
+        let own = map.units.iter().position(|u| u.id == brave).unwrap();
+        assert_eq!(attack_click(&map, &[warrior], Some(HoverTarget::Unit(own))), None, "not its own");
+        assert_eq!(attack_click(&map, &[], Some(HoverTarget::Unit(enemy))), None);
+        map.units[enemy].kind = UnitKind::Wildman;
+        assert_eq!(attack_click(&map, &[brave], Some(HoverTarget::Unit(enemy))), None, "wildmen never fight");
     }
 
     #[test]

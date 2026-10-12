@@ -19,7 +19,7 @@ use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::totem::{totems_from_level, Totem, TotemKind};
 use crate::status::Timed;
-use crate::unit::{torus_delta, Action, Order, Unit, UnitEvent, UnitId, UnitKind};
+use crate::unit::{torus_delta, Action, Order, Target, Unit, UnitEvent, UnitId, UnitKind};
 use crate::wood::WoodPiece;
 use pop3_format::header::TRIBES;
 use pop3_format::{Level, LevelHeader, MAP_SIZE, WORLD_UNITS_PER_CELL};
@@ -831,6 +831,7 @@ impl GameMap {
         // Coordinators, before the units, so that one ending this turn is gone when its units tick (coordinators.md):
         // a. scans that start coordinators or add units to them; b. each one's turn, kind after kind; c. the finished
         // ones removed; d. their events applied in order; e. units whose coordinator is gone released.
+        self.tend_attacks();
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
         self.release_orphans();
@@ -1120,6 +1121,7 @@ impl GameMap {
             Order::CutTree { tree } => self.go_cut(i, tree),
             Order::FetchWood => self.fetch_wood(i),
             Order::PickUp { at } => self.pick_up(i, at),
+            Order::Attack { target } => self.go_attack(i, target),
             order => self.units[i].start(order),
         }
     }
@@ -1285,6 +1287,8 @@ impl GameMap {
         match *order {
             Order::Build { site } => self.still_building(site),
             Order::Enter { site } => self.building_at_corner(site).is_some(),
+            Order::Attack { target: Target::Unit(id) } => self.unit(id).is_some_and(Unit::is_alive),
+            Order::Attack { target: Target::Building(id) } => self.building(id).is_some(),
             _ => true,
         }
     }

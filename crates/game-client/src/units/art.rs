@@ -111,8 +111,8 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
     match action {
         Action::Idle | Action::Landing if carrying => Pose::CarryIdle,
         Action::Idle | Action::Landing => Pose::Idle,
-        Action::Walking { .. } | Action::AroundFire { .. } if carrying => Pose::CarryWalk,
-        Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } => Pose::Walk,
+        Action::Walking { .. } | Action::AroundFire { .. } | Action::Attacking { .. } if carrying => Pose::CarryWalk,
+        Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } | Action::Attacking { .. } => Pose::Walk,
         Action::Panicking { .. } => Pose::Panic,
         Action::Chopping { .. } | Action::PickingUpWood { .. } => Pose::Chop,
         Action::Building { .. } | Action::Hammering => Pose::Hammer,

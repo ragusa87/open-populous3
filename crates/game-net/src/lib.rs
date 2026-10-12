@@ -9,7 +9,7 @@ use game_core::id::Id;
 use game_core::spell::Spell;
 use game_core::spell_book::SpellKind;
 use game_core::time::Tick;
-use game_core::unit::Order;
+use game_core::unit::{Order, Target};
 use std::io::{self, Read, Write};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -177,6 +177,14 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             b.extend(site.0.to_le_bytes());
             b.extend(site.1.to_le_bytes());
         }
+        Order::Attack { target: Target::Unit(id) } => {
+            b.push(11);
+            b.extend(id.raw().to_le_bytes());
+        }
+        Order::Attack { target: Target::Building(id) } => {
+            b.push(12);
+            b.extend(id.to_le_bytes());
+        }
     }
 }
 
@@ -222,6 +230,8 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         8 => Order::Build { site: (c.u16()?, c.u16()?) },
         9 => Order::Enter { site: (c.u16()?, c.u16()?) },
         10 => Order::Worship { site: (c.u16()?, c.u16()?) },
+        11 => Order::Attack { target: Target::Unit(Id::from_raw(c.u32()?)) },
+        12 => Order::Attack { target: Target::Building(c.u32()?) },
         _ => return None,
     })
 }
@@ -305,6 +315,8 @@ mod tests {
                 Command::Dismantle { player: 0, building: 7, on: false },
                 Command::QueueOrder { player: 0, unit: Id::from_raw(3), order: Order::Enter { site: (1024, 2048) } },
                 Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Worship { site: (32768, 36864) } },
+                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Attack { target: Target::Unit(Id::from_raw(70_000)) } },
+                Command::QueueOrder { player: 0, unit: Id::from_raw(2), order: Order::Attack { target: Target::Building(9) } },
                 Command::CastSelf { player: 1, kind: SpellKind::Teleport },
                 Command::PauseSpell { player: 3, kind: SpellKind::Armageddon, paused: true },
             ],
