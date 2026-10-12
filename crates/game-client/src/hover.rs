@@ -259,7 +259,7 @@ fn detect(
                 let building = map.0.buildings.get(i)?;
                 let f = building.kind.footprint();
                 let half = Vec2::new(f.half.0 as f32, f.half.1 as f32) / 512.0;
-                let height = heights.0.get(&(building.x, building.z)).copied().unwrap_or(1.0);
+                let height = heights.0.get(&building.id).copied().unwrap_or(1.0);
                 let (min, max) = screen_box(cam, gt, half, height)?;
                 Some(BuildingOnScreen { index: i, min, max, depth: cam.1.translation().distance(gt.translation()) })
             })

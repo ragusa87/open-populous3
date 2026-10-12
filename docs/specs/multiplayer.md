@@ -38,5 +38,6 @@ Frame: `u32 LE` length + payload. Payload tag byte:
   - kind 5 `QueueOrder` (chained after the unit's current orders): `u32` unit id, then the order as in kind 1;
   - kind 6 `PlaceBuilding`: `u8` building model (`BuildingKind::model`), `u16` x, z of its corner, `u8` facing;
   - kind 7 `CancelBuilding`: `u16` x, z of a point of the plan's footprint.
+  - kind 8 `Dismantle`: `u32` building id, `u8` on (1) or off (0).
 
 Implemented: codec + TCP round trip test. To do: host/join, sending and receiving the turns, reconnect, lobby UI.

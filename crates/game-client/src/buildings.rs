@@ -75,9 +75,9 @@ pub fn facing_yaw(facing: u8) -> GameYaw {
 #[derive(Component)]
 pub struct BuildingView(pub usize);
 
-/// Each drawn building's model height (cells), by stored corner: where a lookout stands.
+/// Each drawn building's model height (cells), by building id: where a lookout stands.
 #[derive(Resource, Default)]
-pub struct ModelHeights(pub HashMap<(u16, u16), f32>);
+pub struct ModelHeights(pub HashMap<u32, f32>);
 
 /// Where someone inside a building of `kind` stands to be seen: on a tower's lookout platform, as an
 /// offset in its own frame (cells, x and z) and a fraction of its model's height. None: out of sight.
@@ -309,7 +309,7 @@ fn respawn_buildings(
         };
         let inner = look.inner.map(|mesh| (mesh, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, cull_mode: Some(Face::Front), double_sided: true, ..default() })));
         let top = look.top;
-        heights.0.insert((b.x, b.z), top.y);
+        heights.0.insert(b.id, top.y);
         view.with_children(|v| {
             let mut body = v.spawn((Transform::default(), Visibility::Inherited));
             body.with_children(|parts| {

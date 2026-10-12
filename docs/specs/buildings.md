@@ -189,8 +189,12 @@ the building shows it at once. To do: the Dismantle toggle (see "Dismantling").
 - `Command::PlaceBuilding { player, kind, at, facing }` (`at`: the stored corner) adds a plan
   (`Building::placed`: `level` = average height of its footprint points, at least `MIN_GROUND`). Building kinds
   with no wood cost (vault, prison...) are refused.
+- Each building gets an id from `GameMap::add_building` (shared with units and effects, never given twice), so
+  `buildings` stays sorted by id and `GameMap::building(id)` is a binary search. State holds ids (`Unit::work`,
+  `Unit::inside`, the walls, `Command::Dismantle`); a removed building's id finds None. Orders name a position
+  instead, resolved when they start, because a plan's braves are ordered in the same tick it is placed.
 - Braves are assigned with `Order::Build { site }` (`site`: the stored corner) through `Command::OrderUnit` /
-  `QueueOrder`, as `Unit::work`. `GameMap::build_orders` makes them for a click: braves in id order (the first
+  `QueueOrder`, as `Unit::work` (the building's id). `GameMap::build_orders` makes them for a click: braves in id order (the first
   ones up to `max_braves` are assigned, the others walk to the door unassigned), other kinds walk to the door.
   Any other order to an assigned brave (direct or chained, when it starts) unassigns it; a piece it was building
   goes back on the pile. Dying unassigns too.

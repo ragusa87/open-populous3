@@ -136,7 +136,7 @@ impl GameMap {
             return true;
         }
         let Some(inside) = self.units[i].inside else { return false };
-        self.building_at_corner(inside.site).is_some_and(|k| self.buildings[k].vault.is_some())
+        self.building(inside.building).is_some_and(|b| b.vault.is_some())
     }
 
     /// `player`'s shaman is `locked`: inside a vault, tumbling or lifted.
@@ -151,14 +151,14 @@ impl GameMap {
         for k in 0..self.buildings.len() {
             let Some(vault) = self.buildings[k].vault else { continue };
             let b = &self.buildings[k];
-            let (site, door) = ((b.x, b.z), b.door());
+            let (site, id, door) = ((b.x, b.z), b.id, b.door());
             let middle = b.centre();
             let praying = self.units.iter().position(|u| u.is_alive() && u.action == Action::Worshipping { site });
-            let inside = self.units.iter().position(|u| u.is_alive() && u.inside.is_some_and(|ins| ins.site == site));
+            let inside = self.units.iter().position(|u| u.is_alive() && u.inside.is_some_and(|ins| ins.building == id));
             let mut vault = vault;
             vault.tick((praying.is_some() || inside.is_some()) as u16);
             match (praying, inside) {
-                (Some(i), None) if vault.is_full() => self.units[i].enter(Inside { site, door }, middle),
+                (Some(i), None) if vault.is_full() => self.units[i].enter(Inside { building: id, door }, middle),
                 (_, Some(i)) if self.units[i].action == Action::Idle && near(self.units[i].x, self.units[i].z, middle) => {
                     if let Some(reward) = vault.grant() {
                         let owner = self.units[i].owner;

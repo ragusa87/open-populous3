@@ -79,18 +79,18 @@ pub struct TooltipModel {
     pub toggle: Option<Toggle>,
 }
 
-/// A tooltip's button (tooltips.md "Dismantle toggle"): dismantle the building at `site` (stored
-/// corner), or build it again when `on`.
+/// A tooltip's button (tooltips.md "Dismantle toggle"): dismantle the building `building` (id), or
+/// build it again when `on`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Toggle {
-    pub site: (u16, u16),
+    pub building: u32,
     pub on: bool,
 }
 
 impl Toggle {
     /// What a click sends.
     pub fn command(self) -> game_core::command::Command {
-        game_core::command::Command::Dismantle { player: crate::units::PLAYER, site: self.site, on: !self.on }
+        game_core::command::Command::Dismantle { player: crate::units::PLAYER, building: self.building, on: !self.on }
     }
 
     /// Its sprites (normal, hovered, pressed) and its text without the original files.
@@ -189,7 +189,7 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[u32]) -> TooltipModel
     }
     model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Brave, selected)));
     model.rows.extend(map.wood_slots(holder).map(wood_row));
-    model.toggle = b.flat.then_some(Toggle { site: (b.x, b.z), on: b.dismantling });
+    model.toggle = b.flat.then_some(Toggle { building: b.id, on: b.dismantling });
     model
 }
 
@@ -495,7 +495,7 @@ fn show_tooltip(
             Target::Building(i) => {
                 let b = &map.0.buildings[i];
                 let (_, gt) = views.iter().find(|(v, _)| v.0 == i)?;
-                gt.translation() + gt.up() * heights.0.get(&(b.x, b.z)).copied().unwrap_or(1.0)
+                gt.translation() + gt.up() * heights.0.get(&b.id).copied().unwrap_or(1.0)
             }
             Target::Tree(i) => {
                 let (_, gt, children) = trees.iter().find(|(v, _, _)| v.0 == i)?;
@@ -689,7 +689,7 @@ mod tests {
     #[test]
     fn a_site_shows_its_braves_and_wood_as_slots() {
         let mut map = GameMap::sandbox_buildings();
-        let site = map.place_building(crate::units::PLAYER, BuildingKind::Hut { size: 1 }, (88 * 512, 64 * 512), 0).unwrap();
+        let site = map.place_building(crate::units::PLAYER, BuildingKind::Hut { size: 1 }, (88 * 512, 64 * 512), 0).and_then(|id| map.building_index(id)).unwrap();
         let brave = map.units.iter().find(|u| u.kind == UnitKind::Brave).unwrap().id;
         map.apply(&game_core::command::Command::OrderUnit { player: 0, unit: brave, order: game_core::unit::Order::Build { site: (88 * 512, 64 * 512) } });
         (map.buildings[site].stock, map.buildings[site].used) = (1, 1);
@@ -719,9 +719,9 @@ mod tests {
     fn the_players_flat_buildings_have_the_dismantle_toggle() {
         let mut map = GameMap::sandbox_buildings();
         let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
-        let site = (map.buildings[hut].x, map.buildings[hut].z);
+        let building = map.buildings[hut].id;
         let toggle = building_model(&map, hut, &[]).toggle.expect("built: dismantle");
-        assert_eq!(toggle, Toggle { site, on: false });
+        assert_eq!(toggle, Toggle { building, on: false });
         assert_eq!(toggle.look(), (DISMANTLE_BUTTON, "Dismantle"));
         map.apply(&toggle.command());
         let toggle = building_model(&map, hut, &[]).toggle.unwrap();

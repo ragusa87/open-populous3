@@ -250,8 +250,8 @@ pub enum UnitEvent {
     Jumped { at: (i32, i32) },
     /// Done building a piece of wood in: the caller counts it.
     Built,
-    /// At the door of the building at `site` (stored corner): the caller lets her in if there is room.
-    AtDoor { site: (u16, u16) },
+    /// At the door of the building `building` (id): the caller lets her in if there is room.
+    AtDoor { building: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -285,13 +285,13 @@ pub struct Unit {
     /// The piece of wood (position) she is walking to, to pick it up once there.
     to_wood: Option<(u16, u16)>,
     /// The building (stored corner) she is walking to the door of, to go in once there.
-    to_house: Option<(u16, u16)>,
+    to_house: Option<u32>,
     /// The vault (stored corner) she is walking to the door of, to pray there once there.
     to_shrine: Option<(u16, u16)>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
-    /// The building (stored corner) this brave is assigned to, `Order::Build`.
-    pub work: Option<(u16, u16)>,
+    /// The building (id) this brave is assigned to, `Order::Build`.
+    pub work: Option<u32>,
     /// The building the unit is in: it walks out by its door before going anywhere.
     pub inside: Option<Inside>,
 }
@@ -312,7 +312,7 @@ impl std::ops::Deref for PickableUnit<'_> {
 /// A building a unit is in (or walking into): its stored corner and its door.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Inside {
-    pub site: (u16, u16),
+    pub building: u32,
     pub door: (u16, u16),
 }
 
@@ -442,11 +442,11 @@ impl Unit {
         }
     }
 
-    /// Walks to `door`, then goes into the building at `site` (`UnitEvent::AtDoor`).
-    pub fn go_enter(&mut self, site: (u16, u16), door: (u16, u16)) {
+    /// Walks to `door`, then goes into the building `building` (id, `UnitEvent::AtDoor`).
+    pub fn go_enter(&mut self, building: u32, door: (u16, u16)) {
         self.start(Order::MoveTo { x: door.0, z: door.1 });
         if self.action.can_take_orders() {
-            self.to_house = Some(site);
+            self.to_house = Some(building);
         }
     }
 
@@ -586,8 +586,8 @@ impl Unit {
                             self.action = Action::Chopping { tree, left: Countdown::new(CHOP_TICKS) };
                         } else if let Some(at) = self.to_wood.take() {
                             return Some(UnitEvent::PickedUp { at });
-                        } else if let Some(site) = self.to_house.take() {
-                            return Some(UnitEvent::AtDoor { site });
+                        } else if let Some(building) = self.to_house.take() {
+                            return Some(UnitEvent::AtDoor { building });
                         } else if let Some(site) = self.to_shrine.take() {
                             self.action = Action::Worshipping { site };
                         }

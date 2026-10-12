@@ -49,7 +49,7 @@ Not in the file [exe]: the income per person is `MANA_BUSY_BRAVES` 15 / `MANA_ID
   rest), a drum tower 1 (buildings.md "Towers"); the others stay at the door, idle. Any walk takes them out by
   the door. Builders go in and out the same way (buildings.md "Construction").
 - Vehicles (boats, balloons) will hold people the same way: `Unit::inside` will name its holder (a building's
-  stored corner today; a holder enum with vehicle ids once vehicles exist), each with its room and its way in
+  id today; a holder enum with vehicle ids once vehicles exist), each with its room and its way in
   (a boat's side, a balloon's basket) instead of a door.
 - `Building::inside` is counted each tick from the units inside (`GameMap::count_inside`): a built hut or
   drum tower with people inside smokes from the top of its roof. The one in a drum tower stands on its lookout,

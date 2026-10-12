@@ -98,7 +98,7 @@ pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
     }
     let leaving = matches!(unit.action, Action::Walking { .. } | Action::Stranded { .. });
     if let Some(inside) = unit.inside.filter(|_| !leaving) {
-        let hut = map.building_at_corner(inside.site).map(|b| &map.buildings[b]).is_some_and(|b| matches!(b.kind, BuildingKind::Hut { .. }) && b.stage() == Stage::Built);
+        let hut = map.building(inside.building).is_some_and(|b| matches!(b.kind, BuildingKind::Hut { .. }) && b.stage() == Stage::Built);
         return Some(if hut { State::Housed } else { State::Working });
     }
     let working = match unit.action {
@@ -178,9 +178,8 @@ mod tests {
         map.units.len() - 1
     }
 
-    fn hut(map: &mut GameMap, owner: u8, size: u8, at: u16) -> (u16, u16) {
-        map.buildings.push(Building::new(BuildingKind::Hut { size }, owner, at, at, 0));
-        (at, at)
+    fn hut(map: &mut GameMap, owner: u8, size: u8, at: u16) -> u32 {
+        map.add_building(Building::new(BuildingKind::Hut { size }, owner, at, at, 0))
     }
 
     #[test]
@@ -207,13 +206,12 @@ mod tests {
     fn each_brave_in_its_row() {
         let mut map = empty();
         let site = hut(&mut map, 0, 1, 10 * 512);
-        let site_build = (20 * 512, 20 * 512);
-        map.buildings.push(Building { used: 0, ..Building::new(BuildingKind::DrumTower, 0, site_build.0, site_build.1, 0) });
+        let site_build = map.add_building(Building { used: 0, ..Building::new(BuildingKind::DrumTower, 0, 20 * 512, 20 * 512, 0) });
         add(&mut map, 0, UnitKind::Brave);
         let housed = add(&mut map, 0, UnitKind::Brave);
-        map.units[housed].inside = Some(Inside { site, door: site });
+        map.units[housed].inside = Some(Inside { building: site, door: (0, 0) });
         let builder = add(&mut map, 0, UnitKind::Brave);
-        map.units[builder].inside = Some(Inside { site: site_build, door: site_build });
+        map.units[builder].inside = Some(Inside { building: site_build, door: (0, 0) });
         map.units[builder].action = Action::Hammering;
         let chopping = add(&mut map, 0, UnitKind::Brave);
         map.units[chopping].action = Action::Chopping { tree: (0, 0), left: crate::time::Countdown::new(crate::time::Ticks::new(5)) };
@@ -225,7 +223,7 @@ mod tests {
         let walking = add(&mut map, 0, UnitKind::Brave);
         map.units[walking].action = Action::Walking { to: (0, 0) };
         let leaving = add(&mut map, 0, UnitKind::Brave);
-        map.units[leaving].inside = Some(Inside { site, door: site });
+        map.units[leaving].inside = Some(Inside { building: site, door: (0, 0) });
         map.units[leaving].action = Action::Walking { to: (0, 0) };
         let count = map.headcount(0);
         assert_eq!(count.get(State::Idle, UnitKind::Brave), 3, "standing, walking on a plain move, leaving the hut");
@@ -280,7 +278,7 @@ mod tests {
         hut(&mut map, 0, 1, 2 * 512);
         hut(&mut map, 0, 3, 3 * 512);
         hut(&mut map, 1, 2, 4 * 512);
-        map.buildings.push(Building { used: 0, ..Building::new(BuildingKind::Hut { size: 2 }, 0, 5 * 512, 5 * 512, 0) });
+        map.add_building(Building { used: 0, ..Building::new(BuildingKind::Hut { size: 2 }, 0, 5 * 512, 5 * 512, 0) });
         for _ in 0..12 {
             add(&mut map, 0, UnitKind::Brave);
         }

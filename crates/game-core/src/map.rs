@@ -119,7 +119,7 @@ impl GameMap {
                 .iter()
                 .filter_map(|t| Some(Tree::new(((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32), t.tree_type()?, crate::tree::MAX_SIZE).with_angle(t.angle()?)))
                 .collect(),
-            buildings: buildings_from_level(level),
+            buildings: Vec::new(),
             granted: Vec::new(),
             totems: totems_from_level(level),
             wood: Vec::new(),
@@ -133,6 +133,7 @@ impl GameMap {
             now: Tick::ZERO,
             next_id: 1,
         }
+        .with_buildings(buildings_from_level(level))
         .with_building_ground()
         .with_shamans()
         .with_people(level)
@@ -149,6 +150,13 @@ impl GameMap {
             let welcomed = (kind == UnitKind::Wildman).then(|| self.sites.iter().find(|s| s.welcomes(cell))).flatten();
             let (owner, kind) = welcomed.map_or((t.owner, kind), |s| (s.owner, UnitKind::Brave));
             self.spawn(owner, kind, (t.x, t.z));
+        }
+        self
+    }
+
+    fn with_buildings(mut self, buildings: Vec<Building>) -> Self {
+        for b in buildings {
+            self.add_building(b);
         }
         self
     }
@@ -266,10 +274,10 @@ impl GameMap {
         let place = |owner: u8, kind: BuildingKind, (x, z): (u16, u16), facing: u8| Building::new(kind, owner, x - 256, z - 256, facing);
         for model in 1..=19u8 {
             let i = model as i32 - 1;
-            map.buildings.push(place(0, BuildingKind::from_model(model), at(-12 + (i % 7) * 4, 6 + (i / 7) * 4), (i % 4) as u8 * 2));
+            map.add_building(place(0, BuildingKind::from_model(model), at(-12 + (i % 7) * 4, 6 + (i / 7) * 4), (i % 4) as u8 * 2));
         }
         for (i, model) in [1u8, 3, 4, 7].iter().enumerate() {
-            map.buildings.push(place(1, BuildingKind::from_model(*model), at(-6 + i as i32 * 4, 19), 0));
+            map.add_building(place(1, BuildingKind::from_model(*model), at(-6 + i as i32 * 4, 19), 0));
         }
         let (cx, cz) = at(0, 3);
         for (dx, dz) in [(0, 0), (90, 40), (-80, 60), (20, -70), (-600, 100), (700, -50)] {
@@ -278,7 +286,7 @@ impl GameMap {
         for (row, &kind) in crate::build_book::BUILDABLE.iter().enumerate() {
             for (col, state) in showcase_states(kind).into_iter().enumerate() {
                 let (x, z) = at(-22 + 5 * col as i32, -7 - 5 * row as i32);
-                map.buildings.push(Building { x: x - 256, z: z - 256, ..state });
+                map.add_building(Building { x: x - 256, z: z - 256, ..state });
             }
         }
         for n in 0..8 {
@@ -289,7 +297,7 @@ impl GameMap {
         for b in occupied {
             let room = if b.kind.capacity() > 0 { b.kind.capacity() } else { b.inside };
             for _ in 0..b.inside.min(room) {
-                map.spawn(0, UnitKind::Brave, b.centre()).inside = Some(crate::unit::Inside { site: (b.x, b.z), door: b.door() });
+                map.spawn(0, UnitKind::Brave, b.centre()).inside = Some(crate::unit::Inside { building: b.id, door: b.door() });
             }
         }
         map.update_walls();
@@ -361,7 +369,7 @@ impl GameMap {
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let mut vault = Building::new(BuildingKind::Vault, 255, (C * 512) as u16, ((C + 8) * 512) as u16, 0);
         vault.vault = Some(crate::vault::Vault::new(Some(crate::building::Reward::Building(BuildingKind::Temple)), crate::vault::DEFAULT_PRAY_TIME));
-        map.buildings.push(vault);
+        map.add_building(vault);
         for (k, &kind) in TotemKind::ALL.iter().enumerate() {
             let (prayers, shaman_only, summons_angel) = SANDBOX_TOTEMS[k];
             // The stone totem gives once, to show it turning, sinking and gone; the others give again and again.
@@ -462,8 +470,8 @@ impl GameMap {
                 self.cancel_building(player, at);
                 None
             }
-            Command::Dismantle { player, site, on } => {
-                self.set_dismantling(player, site, on);
+            Command::Dismantle { player, building, on } => {
+                self.set_dismantling(player, building, on);
                 None
             }
         }
@@ -574,7 +582,7 @@ impl GameMap {
         let (mut events, mut gone) = (Vec::new(), Vec::new());
         for (i, unit) in self.units.iter_mut().enumerate() {
             let site = self.sites.iter().find(|s| s.owner == unit.owner);
-            let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: unit.inside.map(|i| i.site) };
+            let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: unit.inside.map(|i| i.building) };
             match unit.tick(&ground, site) {
                 Some(UnitEvent::Reincarnated) => dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain))),
                 Some(UnitEvent::Gone) => gone.push(unit.id),
@@ -585,7 +593,7 @@ impl GameMap {
         for (i, event) in events {
             match event {
                 UnitEvent::Jumped { .. } | UnitEvent::Built => dirty.extend(self.work_event(i, event)),
-                UnitEvent::AtDoor { site } => self.come_in(i, site),
+                UnitEvent::AtDoor { building } => self.come_in(i, building),
                 _ => self.wood_event(i, event),
             }
         }
@@ -648,6 +656,23 @@ impl GameMap {
         self.unit_index(id).map(|i| &mut self.units[i])
     }
 
+    /// Adds `b` with a fresh id, last in `buildings` (which stays sorted by id); its id.
+    pub fn add_building(&mut self, mut b: Building) -> u32 {
+        b.id = self.new_id();
+        let id = b.id;
+        self.buildings.push(b);
+        id
+    }
+
+    /// Where the building `id` is in `buildings`; None once it is gone.
+    pub fn building_index(&self, id: u32) -> Option<usize> {
+        self.buildings.binary_search_by_key(&id, |b| b.id).ok()
+    }
+
+    pub fn building(&self, id: u32) -> Option<&Building> {
+        self.building_index(id).map(|i| &self.buildings[i])
+    }
+
     /// The terrain with the buildings' walls, as walkers outside every building see it.
     pub fn ground(&self) -> Walled<'_> {
         Walled { terrain: &self.terrain, walls: &self.walls, inside: None }
@@ -665,13 +690,13 @@ impl GameMap {
         let size = self.terrain.size() as i32;
         let mut cells = std::collections::BTreeMap::new();
         for b in self.buildings.iter().filter(|b| b.stage() != crate::building::Stage::Blueprint) {
-            cells.extend(b.walled_cells(size).into_iter().map(|c| (c, (b.x, b.z))));
+            cells.extend(b.walled_cells(size).into_iter().map(|c| (c, b.id)));
         }
         if self.walls.set(cells) {
             for u in self.units.iter_mut().filter(|u| u.inside.is_none() && u.is_alive()) {
-                let Some(site) = self.walls.at(u.cell()) else { continue };
-                if let Some(b) = self.buildings.iter().find(|b| (b.x, b.z) == site) {
-                    u.inside = Some(crate::unit::Inside { site, door: b.door() });
+                let Some(id) = self.walls.at(u.cell()) else { continue };
+                if let Some(i) = self.buildings.binary_search_by_key(&id, |b| b.id).ok() {
+                    u.inside = Some(crate::unit::Inside { building: id, door: self.buildings[i].door() });
                 }
             }
             // Walking to a spot now behind walls (even in their own building: only `Unit::enter` walks

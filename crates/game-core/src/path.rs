@@ -80,17 +80,17 @@ impl Ground for Heightmap {
     }
 }
 
-/// The cells buildings stand on (wrapped), each with its building's stored corner: walkers go
+/// The cells buildings stand on (wrapped), each with its building's id: walkers go
 /// around them and only in and out by the door.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Walls {
-    cells: BTreeMap<(i32, i32), (u16, u16)>,
+    cells: BTreeMap<(i32, i32), u32>,
     revision: u32,
 }
 
 impl Walls {
     /// Replaces the walled cells; the revision changes only if they did (then true).
-    pub fn set(&mut self, cells: BTreeMap<(i32, i32), (u16, u16)>) -> bool {
+    pub fn set(&mut self, cells: BTreeMap<(i32, i32), u32>) -> bool {
         let changed = cells != self.cells;
         if changed {
             self.cells = cells;
@@ -99,8 +99,8 @@ impl Walls {
         changed
     }
 
-    /// The building (stored corner) whose wall is in `cell`, if any.
-    pub fn at(&self, cell: (i32, i32)) -> Option<(u16, u16)> {
+    /// The building (id) whose wall is in `cell`, if any.
+    pub fn at(&self, cell: (i32, i32)) -> Option<u32> {
         self.cells.get(&cell).copied()
     }
 }
@@ -110,7 +110,7 @@ impl Walls {
 pub struct Walled<'a> {
     pub terrain: &'a Heightmap,
     pub walls: &'a Walls,
-    pub inside: Option<(u16, u16)>,
+    pub inside: Option<u32>,
 }
 
 impl Ground for Walled<'_> {

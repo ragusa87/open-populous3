@@ -150,7 +150,7 @@ mod tests {
         let mut m = map();
         assert_eq!(blocked_at(&m, (5 * 512, 30 * 512)), Some(Blocked::Sea));
         assert!(!can_place(&m, &hut((9, 30))), "half on the sea");
-        m.buildings.push(hut((40, 40)));
+        m.add_building(hut((40, 40)));
         assert_eq!(blocked_at(&m, (40 * 512 + 256, 40 * 512 + 256)), Some(Blocked::Building));
         assert!(!can_place(&m, &hut((41, 41))), "overlaps");
         let (sx, sz) = (m.sites[0].x, m.sites[0].z);
@@ -254,7 +254,7 @@ mod tests {
     fn a_boat_hut_on_the_shore_still_minds_other_blockers() {
         let mut m = island();
         assert!(can_place(&m, &boat_hut((40, 59), 0)));
-        m.buildings.push(hut((41, 57)));
+        m.add_building(hut((41, 57)));
         assert!(!can_place(&m, &boat_hut((40, 59), 0)), "overlaps a hut");
         m.buildings.clear();
         m.trees.push(Tree::new((40, 59), 0, 3));

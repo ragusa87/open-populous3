@@ -379,14 +379,14 @@ pub fn standing_in<'a>(map: &'a game_core::map::GameMap, u: &game_core::unit::Un
     if matches!(u.action, Action::Walking { .. } | Action::Stranded { .. } | Action::Entering { .. }) {
         return None;
     }
-    let b = &map.buildings[map.building_at_corner(u.inside?.site)?];
+    let b = map.building(u.inside?.building)?;
     (b.stage() == game_core::building::Stage::Built).then_some(b)
 }
 
 /// Where a unit up a lookout is drawn (map position, height in cells), if it is up one.
 fn perched(map: &game_core::map::GameMap, heights: &crate::buildings::ModelHeights, u: &game_core::unit::Unit) -> Option<(Vec2, f32)> {
     let b = standing_in(map, u)?;
-    crate::buildings::perch(b, *heights.0.get(&(b.x, b.z))?)
+    crate::buildings::perch(b, *heights.0.get(&b.id)?)
 }
 
 fn animate_views(
@@ -562,11 +562,11 @@ mod tests {
         let open = map.buildings.iter().find(|b| matches!(b.stage(), game_core::building::Stage::UnderConstruction { .. })).unwrap();
         let mut u = Unit::new(1, 0, UnitKind::Brave, (0, 0));
         assert!(!hidden_inside(&map, &u));
-        u.inside = Some(Inside { site: (built.x, built.z), door: (0, 0) });
+        u.inside = Some(Inside { building: built.id, door: (0, 0) });
         assert!(hidden_inside(&map, &u));
         u.action = Action::Entering { to: (1, 1) };
         assert!(!hidden_inside(&map, &u));
-        (u.action, u.inside) = (Action::Hammering, Some(Inside { site: (open.x, open.z), door: (0, 0) }));
+        (u.action, u.inside) = (Action::Hammering, Some(Inside { building: open.id, door: (0, 0) }));
         assert!(!hidden_inside(&map, &u), "seen through the open frame");
     }
 

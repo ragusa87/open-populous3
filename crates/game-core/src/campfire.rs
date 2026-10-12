@@ -171,7 +171,7 @@ mod tests {
         assert!(can_place(&m, (42, 32)), "away from it");
         m.trees.push(Tree::new((50, 50), 0, 3));
         assert!(!can_place(&m, (50, 50)), "a tree");
-        m.buildings.push(Building::new(BuildingKind::Hut { size: 1 }, 0, 60 * 512, 60 * 512, 0));
+        m.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, 60 * 512, 60 * 512, 0));
         assert!(!can_place(&m, (60, 60)), "a building");
         let (sx, sz) = (m.sites[0].x / 512, m.sites[0].z / 512);
         assert!(!can_place(&m, (sx as i32, sz as i32)), "the site");

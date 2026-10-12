@@ -39,40 +39,40 @@ impl GameMap {
         if !can_enter(u.kind) || u.owner != b.owner || b.stage() != Stage::Built || b.kind.capacity() == 0 {
             return;
         }
-        if u.inside.is_some_and(|ins| ins.site == site) {
+        if u.inside.is_some_and(|ins| ins.building == b.id) {
             self.units[i].start(Order::Stop);
             return;
         }
-        let door = b.door();
-        self.units[i].go_enter(site, door);
+        let (building, door) = (b.id, b.door());
+        self.units[i].go_enter(building, door);
     }
 
-    /// Unit `i` is at the door of the building at `site`: in it goes if there is room, else it stays at
-    /// the door, idle.
-    pub(crate) fn come_in(&mut self, i: usize, site: (u16, u16)) {
-        let Some(b) = self.building_at_corner(site).map(|b| self.buildings[b].clone()) else { return };
-        if b.stage() != Stage::Built || self.people_inside(site) >= b.kind.capacity() as usize {
+    /// Unit `i` is at the door of the building `building`: in it goes if there is room, else it stays
+    /// at the door, idle.
+    pub(crate) fn come_in(&mut self, i: usize, building: u32) {
+        let Some(b) = self.building(building).cloned() else { return };
+        if b.stage() != Stage::Built || self.people_inside(building) >= b.kind.capacity() as usize {
             return;
         }
         let id = self.units[i].id;
-        self.units[i].enter(Inside { site, door: b.door() }, work_point(&b, id));
+        self.units[i].enter(Inside { building, door: b.door() }, work_point(&b, id));
     }
 
-    /// Living units in the building at `site`, standing or walking in (not those walking out).
-    pub fn people_inside(&self, site: (u16, u16)) -> usize {
-        self.units_inside(site).count()
+    /// Living units in the building `building`, standing or walking in (not those walking out).
+    pub fn people_inside(&self, building: u32) -> usize {
+        self.units_inside(building).count()
     }
 
-    /// The living units in the building at `site`, standing or walking in (not those walking out).
-    pub fn units_inside(&self, site: (u16, u16)) -> impl Iterator<Item = &Unit> {
-        self.units.iter().filter(move |u| u.is_alive() && u.inside.is_some_and(|i| i.site == site) && !matches!(u.action, Action::Walking { .. } | Action::Stranded { .. }))
+    /// The living units in the building `building`, standing or walking in (not those walking out).
+    pub fn units_inside(&self, building: u32) -> impl Iterator<Item = &Unit> {
+        self.units.iter().filter(move |u| u.is_alive() && u.inside.is_some_and(|i| i.building == building) && !matches!(u.action, Action::Walking { .. } | Action::Stranded { .. }))
     }
 
     /// Counts each building's people inside (`Building::inside`: a busy hut smokes).
     pub(crate) fn count_inside(&mut self) {
         for k in 0..self.buildings.len() {
-            let site = (self.buildings[k].x, self.buildings[k].z);
-            self.buildings[k].inside = self.people_inside(site).min(u8::MAX as usize) as u8;
+            let id = self.buildings[k].id;
+            self.buildings[k].inside = self.people_inside(id).min(u8::MAX as usize) as u8;
         }
     }
 
@@ -107,19 +107,19 @@ mod tests {
     fn followers_rest_in_a_hut_up_to_its_room() {
         let mut map = GameMap::sandbox_buildings();
         let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside == 0).unwrap();
-        let site = (map.buildings[hut].x, map.buildings[hut].z);
+        let id = map.buildings[hut].id;
         let units = braves(&map, 5);
         for c in map.enter_orders(0, &units, hut) {
             map.apply(&c);
         }
         run_until(&mut map, 600, |m| m.units.iter().filter(|u| units.contains(&u.id)).all(|u| u.action == Action::Idle)).expect("arrived");
-        assert_eq!(map.people_inside(site), 3, "a small hut holds 3");
+        assert_eq!(map.people_inside(id), 3, "a small hut holds 3");
         assert_eq!(map.buildings[hut].inside, 3);
         let walled = map.buildings[hut].walled_cells(128);
         let outside = map.units.iter().filter(|u| units.contains(&u.id) && u.inside.is_none()).count();
         assert_eq!(outside, 2, "the others wait at the door");
-        let resting = map.units.iter().find(|u| u.inside.is_some_and(|i| i.site == site)).unwrap().id;
-        assert!(walled.contains(&map.units.iter().find(|u| u.id == resting).unwrap().cell()));
+        let resting = map.units.iter().find(|u| u.inside.is_some_and(|i| i.building == id)).unwrap().id;
+        assert!(walled.contains(&map.unit(resting).unwrap().cell()));
         map.apply(&Command::OrderUnit { player: 0, unit: resting, order: Order::MoveTo { x: corner(20, 10).0, z: corner(20, 10).1 } });
         map.tick();
         assert_eq!(map.buildings[hut].inside, 2, "leaving");

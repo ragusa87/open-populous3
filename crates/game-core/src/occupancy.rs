@@ -49,9 +49,9 @@ impl GameMap {
                 let (capacity, mut filled): (u16, Vec<u32>) = if b.stage() == Stage::Built {
                     let room = if b.vault.is_some_and(|v| v.is_spent()) { 0 } else { room(b.kind) };
                     let praying = self.units.iter().filter(|u| u.is_alive() && u.action == crate::unit::Action::Worshipping { site });
-                    (room, self.units_inside(site).chain(praying).map(|u| u.id).collect())
+                    (room, self.units_inside(b.id).chain(praying).map(|u| u.id).collect())
                 } else if b.kind.wood_cost() > 0 {
-                    (b.kind.max_braves() as u16, self.workers(site).map(|u| u.id).collect())
+                    (b.kind.max_braves() as u16, self.workers(b.id).map(|u| u.id).collect())
                 } else {
                     (0, Vec::new())
                 };
@@ -165,9 +165,9 @@ mod tests {
     fn filled_never_exceeds_capacity() {
         let mut map = sandbox();
         let hut = find(&map, BuildingKind::Hut { size: 1 }, |s| s == Stage::Built);
-        let site = (map.buildings[hut].x, map.buildings[hut].z);
+        let (building, door) = (map.buildings[hut].id, map.buildings[hut].door());
         for u in map.units.iter_mut().filter(|u| u.kind == crate::unit::UnitKind::Brave).take(5) {
-            u.inside = Some(crate::unit::Inside { site, door: site });
+            u.inside = Some(crate::unit::Inside { building, door });
             u.start(Order::Stop);
         }
         assert_eq!(map.people_slots(Holder::Building(hut)).unwrap().filled.len(), 3);

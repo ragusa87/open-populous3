@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn ground_clicks_on_a_plan_send_braves_to_build_shift_right_click_cancels_it() {
         let mut map = game_core::map::GameMap::sandbox_buildings();
-        let site = map.place_building(PLAYER, game_core::building::BuildingKind::Hut { size: 1 }, (88 * 512, 64 * 512), 0).unwrap();
+        let site = map.place_building(PLAYER, game_core::building::BuildingKind::Hut { size: 1 }, (88 * 512, 64 * 512), 0).and_then(|id| map.building_index(id)).unwrap();
         let centre = map.buildings[site].centre();
         let brave = map.units.iter().find(|u| u.kind == game_core::unit::UnitKind::Brave && u.campfire().is_none()).unwrap().id;
         assert!(matches!(building_click(&map, &[brave], centre).unwrap()[..], [Command::OrderUnit { order: Order::Build { site: (45056, 32768) }, .. }]));
