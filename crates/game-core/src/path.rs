@@ -3,6 +3,7 @@
 //! are slow uphill, so going around a hill can win), then straightened into a few waypoints.
 //! Integer-only and deterministic (ties broken by cell index).
 
+use crate::building::BuildingId;
 use crate::terrain::Heightmap;
 use crate::unit::{is_sea, isqrt, slope_factor, SLOPE_FACTOR_RANGE};
 use pop3_format::WORLD_UNITS_PER_CELL;
@@ -84,13 +85,13 @@ impl Ground for Heightmap {
 /// around them and only in and out by the door.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Walls {
-    cells: BTreeMap<(i32, i32), u32>,
+    cells: BTreeMap<(i32, i32), BuildingId>,
     revision: u32,
 }
 
 impl Walls {
     /// Replaces the walled cells; the revision changes only if they did (then true).
-    pub fn set(&mut self, cells: BTreeMap<(i32, i32), u32>) -> bool {
+    pub fn set(&mut self, cells: BTreeMap<(i32, i32), BuildingId>) -> bool {
         let changed = cells != self.cells;
         if changed {
             self.cells = cells;
@@ -100,7 +101,7 @@ impl Walls {
     }
 
     /// The building (id) whose wall is in `cell`, if any.
-    pub fn at(&self, cell: (i32, i32)) -> Option<u32> {
+    pub fn at(&self, cell: (i32, i32)) -> Option<BuildingId> {
         self.cells.get(&cell).copied()
     }
 }
@@ -110,7 +111,7 @@ impl Walls {
 pub struct Walled<'a> {
     pub terrain: &'a Heightmap,
     pub walls: &'a Walls,
-    pub inside: Option<u32>,
+    pub inside: Option<BuildingId>,
 }
 
 impl Ground for Walled<'_> {

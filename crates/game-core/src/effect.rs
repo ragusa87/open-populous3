@@ -213,7 +213,7 @@ pub(crate) mod tests {
         for event in [
             WorldEvent::Damage { unit: Id::from_raw(9999), amount: 50, kind: DamageKind::Blast, from: Some(1) },
             WorldEvent::Push { unit: Id::from_raw(9999), vel: Velocity::new(0, 60, 0) },
-            WorldEvent::Raid { building: 9999 },
+            WorldEvent::Raid { building: Id::from_raw(9999) },
         ] {
             assert_eq!(map.apply_event(event), (None, Vec::new()));
         }

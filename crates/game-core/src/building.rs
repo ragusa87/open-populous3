@@ -3,6 +3,7 @@
 //! people inside and being attacked. Braves build it (`crate::work`). A vault of knowledge has its
 //! own state (`crate::vault`).
 
+use crate::id::Id;
 use crate::spell_book::SpellKind;
 use crate::vault::Vault;
 use pop3_format::level::KIND_BUILDING;
@@ -193,10 +194,13 @@ pub const DOOR_GAP: i32 = 200;
 /// The levelled ground is never lower than this: a building placed on the shore stands on land.
 pub const MIN_GROUND: u16 = 64;
 
+/// A building's stable id (`GameMap::new_id_of`).
+pub type BuildingId = Id<Building>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Building {
     /// Given by `GameMap::add_building`, never twice on a map (0 until then).
-    pub id: u32,
+    pub id: BuildingId,
     pub kind: BuildingKind,
     /// Tribe 0-3 (other values as found in the level).
     pub owner: u8,
@@ -246,7 +250,7 @@ pub enum Reward {
 impl Building {
     /// A finished building, as the levels store them.
     pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
-        Building { id: 0, kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)) }
+        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)) }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.

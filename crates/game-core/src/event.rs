@@ -1,6 +1,7 @@
 //! Changes to the world that an object makes to something else (architecture.md "The tick"): effects and
 //! coordinators return them, the map applies each with its one rule (`GameMap::apply_event`), in order.
 
+use crate::building::BuildingId;
 use crate::effect::{DamageKind, Effect, TerrainChange};
 use crate::motion::Velocity;
 use crate::unit::UnitId;
@@ -13,8 +14,8 @@ pub enum WorldEvent {
     Damage { unit: UnitId, amount: u16, kind: DamageKind, from: Option<u8> },
     Push { unit: UnitId, vel: Velocity },
     Panic { unit: UnitId },
-    Raid { building: u32 },
-    SetFire { building: u32 },
+    Raid { building: BuildingId },
+    SetFire { building: BuildingId },
     /// Sets the trees of the cell on fire (`Tree::ignite`).
     BurnTrees { cell: (i32, i32) },
     /// A new effect, ticking from the next turn; its id is given then.

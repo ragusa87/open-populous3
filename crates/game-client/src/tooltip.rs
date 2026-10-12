@@ -15,7 +15,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use game_core::building::{BuildingKind, Reward};
+use game_core::building::{BuildingId, BuildingKind, Reward};
 use game_core::map::GameMap;
 use game_core::occupancy::{Holder, People, Wood};
 use game_core::unit::{UnitId, UnitKind};
@@ -83,7 +83,7 @@ pub struct TooltipModel {
 /// build it again when `on`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Toggle {
-    pub building: u32,
+    pub building: BuildingId,
     pub on: bool,
 }
 

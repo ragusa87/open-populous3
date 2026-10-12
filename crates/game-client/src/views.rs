@@ -126,7 +126,7 @@ mod tests {
         }
 
         fn id(b: &Building) -> u32 {
-            b.id
+            b.id.raw()
         }
 
         fn spawn(_: &Building, _: &mut EntityCommands, _: &mut ResMut<Updates>) -> Option<Self> {
@@ -134,7 +134,7 @@ mod tests {
         }
 
         fn update(&self, b: &Building, _: SimNow, updates: &mut ResMut<Updates>) {
-            updates.0.push(b.id);
+            updates.0.push(b.id.raw());
         }
     }
 
@@ -157,7 +157,7 @@ mod tests {
             set_busy(&mut app, i, 1);
         }
         sync(&mut app);
-        let ids: Vec<u32> = app.world().resource::<CurrentMap>().0.buildings[..3].iter().map(|b| b.id).collect();
+        let ids: Vec<u32> = app.world().resource::<CurrentMap>().0.buildings[..3].iter().map(|b| b.id.raw()).collect();
         let before = viewed(&mut app);
         assert_eq!(before.iter().map(|v| v.0).collect::<Vec<_>>(), ids);
         sync(&mut app);

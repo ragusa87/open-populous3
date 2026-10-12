@@ -2,6 +2,7 @@
 //! Positions are fixed-point (1 cell = 512 units, like the original), wrapping at 65536: plain
 //! `u16` wrapping arithmetic walks around the torus.
 
+use crate::building::BuildingId;
 use crate::campfire;
 use crate::health::Health;
 use crate::id::Id;
@@ -274,7 +275,7 @@ pub enum Order {
 pub enum Target {
     Unit(UnitId),
     /// A building, by id.
-    Building(u32),
+    Building(BuildingId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -295,7 +296,7 @@ pub enum UnitEvent {
     /// Done building a piece of wood in: the caller counts it.
     Built,
     /// At the door of the building `building` (id): the caller lets her in if there is room.
-    AtDoor { building: u32 },
+    AtDoor { building: BuildingId },
     /// Her cast jump let `spell` go: the caller makes it take effect.
     Released { spell: Spell },
 }
@@ -331,13 +332,13 @@ pub struct Unit {
     /// The piece of wood (position) she is walking to, to pick it up once there.
     to_wood: Option<(u16, u16)>,
     /// The building (stored corner) she is walking to the door of, to go in once there.
-    to_house: Option<u32>,
+    to_house: Option<BuildingId>,
     /// The vault (stored corner) she is walking to the door of, to pray there once there.
     to_shrine: Option<(u16, u16)>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
     /// The building (id) this brave is assigned to, `Order::Build`.
-    pub work: Option<u32>,
+    pub work: Option<BuildingId>,
     /// The building the unit is in: it walks out by its door before going anywhere.
     pub inside: Option<Inside>,
 }
@@ -358,7 +359,7 @@ impl std::ops::Deref for PickableUnit<'_> {
 /// A building a unit is in (or walking into): its stored corner and its door.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Inside {
-    pub building: u32,
+    pub building: BuildingId,
     pub door: (u16, u16),
 }
 
@@ -517,7 +518,7 @@ impl Unit {
     }
 
     /// Walks to `door`, then goes into the building `building` (id, `UnitEvent::AtDoor`).
-    pub fn go_enter(&mut self, building: u32, door: (u16, u16)) {
+    pub fn go_enter(&mut self, building: BuildingId, door: (u16, u16)) {
         self.start(Order::MoveTo { x: door.0, z: door.1 });
         if self.action.can_take_orders() {
             self.to_house = Some(building);
@@ -1153,7 +1154,7 @@ mod tests {
         let t = land();
         let (mut u, _) = shaman_at((10, 10));
         let door = (u.x, u.z - 1024);
-        u.inside = Some(Inside { building: 7, door });
+        u.inside = Some(Inside { building: Id::from_raw(7), door });
         u.panic((PANIC_REACH as i16, 0));
         run(&mut u, &t, &site, 10);
         assert_eq!((u.inside, u.x), (None, door.0), "out by the door, then the run");

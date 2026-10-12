@@ -1,6 +1,6 @@
 //! Player inputs: the only thing exchanged in lockstep multiplayer.
 
-use crate::building::BuildingKind;
+use crate::building::{BuildingId, BuildingKind};
 use crate::spell::Spell;
 use crate::spell_book::SpellKind;
 use crate::unit::{Order, UnitId};
@@ -34,5 +34,5 @@ pub enum Command {
     /// Switch dismantling of the player's building `building` (id; built or under construction, one
     /// that takes wood): on, the people inside walk out and nobody builds it; off, it is built again
     /// (`GameMap::set_dismantling`).
-    Dismantle { player: u8, building: u32, on: bool },
+    Dismantle { player: u8, building: BuildingId, on: bool },
 }

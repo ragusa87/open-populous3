@@ -25,7 +25,7 @@ use bevy::light::NotShadowCaster;
 use bevy::mesh::PrimitiveTopology;
 use bevy::render::render_resource::Face;
 use bevy::prelude::*;
-use game_core::building::{Building, BuildingKind, Stage};
+use game_core::building::{Building, BuildingId, BuildingKind, Stage};
 use game_core::time::{Countdown, Tick, Ticks};
 use pop3_format::catalog::{self, villager_hut, Building as Object};
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
@@ -85,7 +85,7 @@ pub struct BuildingView(pub usize);
 
 /// Each drawn building's model height (cells), by building id: where a lookout stands.
 #[derive(Resource, Default)]
-pub struct ModelHeights(pub HashMap<u32, f32>);
+pub struct ModelHeights(pub HashMap<BuildingId, f32>);
 
 /// Where someone inside a building of `kind` stands to be seen: on a tower's lookout platform, as an
 /// offset in its own frame (cells, x and z) and a fraction of its model's height. None: out of sight.
@@ -119,7 +119,7 @@ struct SiteMark(usize);
 struct Fire(Tick);
 
 #[derive(Component)]
-struct Shaking(u32);
+struct Shaking(BuildingId);
 
 /// The name over a stand-in box, following its building on screen.
 #[derive(Component)]
@@ -393,7 +393,7 @@ fn draw_site_marks(
 /// `BLOW` seconds of game time, each building its own rhythm.
 fn shake_walls(now: Res<SimNow>, mut bodies: Query<(&Shaking, &mut Transform)>) {
     for (shaking, mut tf) in &mut bodies {
-        tf.rotation = shake_at(*now, shaking.0);
+        tf.rotation = shake_at(*now, shaking.0.raw());
     }
 }
 

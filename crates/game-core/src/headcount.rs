@@ -163,7 +163,7 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::building::Building;
+    use crate::building::{Building, BuildingId};
     use crate::totem::{Totem, TotemKind};
     use crate::unit::Inside;
 
@@ -180,7 +180,7 @@ mod tests {
         map.units.len() - 1
     }
 
-    fn hut(map: &mut GameMap, owner: u8, size: u8, at: u16) -> u32 {
+    fn hut(map: &mut GameMap, owner: u8, size: u8, at: u16) -> BuildingId {
         map.add_building(Building::new(BuildingKind::Hut { size }, owner, at, at, 0))
     }
 

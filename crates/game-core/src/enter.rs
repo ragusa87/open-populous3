@@ -3,7 +3,7 @@
 //! walk to its door, in, and stay there (`Unit::inside`) until another order takes them out by the
 //! door. Builders use the same way in (`crate::work`). Vehicles will hold people the same way.
 
-use crate::building::Stage;
+use crate::building::{BuildingId, Stage};
 use crate::command::Command;
 use crate::map::GameMap;
 use crate::unit::{Action, Inside, Order, Unit, UnitId, UnitKind};
@@ -49,7 +49,7 @@ impl GameMap {
 
     /// Unit `i` is at the door of the building `building`: in it goes if there is room, else it stays
     /// at the door, idle.
-    pub(crate) fn come_in(&mut self, i: usize, building: u32) {
+    pub(crate) fn come_in(&mut self, i: usize, building: BuildingId) {
         let Some(b) = self.building(building).cloned() else { return };
         if b.stage() != Stage::Built || self.people_inside(building) >= b.kind.capacity() as usize {
             return;
@@ -59,12 +59,12 @@ impl GameMap {
     }
 
     /// Living units in the building `building`, standing or walking in (not those walking out).
-    pub fn people_inside(&self, building: u32) -> usize {
+    pub fn people_inside(&self, building: BuildingId) -> usize {
         self.units_inside(building).count()
     }
 
     /// The living units in the building `building`, standing or walking in (not those walking out).
-    pub fn units_inside(&self, building: u32) -> impl Iterator<Item = &Unit> {
+    pub fn units_inside(&self, building: BuildingId) -> impl Iterator<Item = &Unit> {
         self.units.iter().filter(move |u| u.is_alive() && u.inside.is_some_and(|i| i.building == building) && !matches!(u.action, Action::Walking { .. } | Action::Stranded { .. }))
     }
 

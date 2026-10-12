@@ -4,7 +4,7 @@
 //! (`smoke::damage`). With wood left it stands
 //! as under construction, which braves repair with wood once the fire is out; with none left it is destroyed.
 
-use crate::building::{Building, Stage};
+use crate::building::{Building, BuildingId, Stage};
 use crate::event::WorldEvent;
 use crate::map::GameMap;
 use crate::time::{Countdown, Tick, Ticks};
@@ -71,14 +71,14 @@ impl Building {
 
 impl GameMap {
     /// Sets the building `building` on fire (`Building::ignite`).
-    pub(crate) fn set_fire(&mut self, building: u32) {
+    pub(crate) fn set_fire(&mut self, building: BuildingId) {
         if let Some(i) = self.building_index(building) {
             self.buildings[i].ignite();
         }
     }
 
     /// Throws everyone inside `building` out by its door; their panics, to apply next.
-    fn throw_out(&mut self, building: u32) -> Vec<WorldEvent> {
+    fn throw_out(&mut self, building: BuildingId) -> Vec<WorldEvent> {
         let Some(i) = self.building_index(building) else { return Vec::new() };
         let out: Vec<UnitId> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building)).map(|u| u.id).collect();
         let door = self.buildings[i].door();
@@ -98,7 +98,7 @@ impl GameMap {
     /// Each burning building's fire burns on: its people thrown out and panicking, its wood lost with damage smoke,
     /// a building with none left removed (anyone still inside put out first).
     pub(crate) fn tend_fires(&mut self) {
-        let turns: Vec<(u32, FireTurn)> = self.buildings.iter_mut().map(|b| (b.id, b.burn())).filter(|t| t.1 != FireTurn::Nothing).collect();
+        let turns: Vec<(BuildingId, FireTurn)> = self.buildings.iter_mut().map(|b| (b.id, b.burn())).filter(|t| t.1 != FireTurn::Nothing).collect();
         let mut events = Vec::new();
         for (id, turn) in turns {
             match turn {

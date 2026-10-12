@@ -12,7 +12,7 @@
 //!
 //! Integers only, units in id order.
 
-use crate::building::{Building, BuildingKind, Stage, DOOR_GAP};
+use crate::building::{Building, BuildingId, BuildingKind, Stage, DOOR_GAP};
 use crate::wood::WoodPiece;
 use crate::command::Command;
 use crate::map::{torus_dist2, GameMap};
@@ -44,7 +44,7 @@ impl GameMap {
     }
 
     /// Places `player`'s plan of `kind` with its corner at `at` if it can stand there; its id.
-    pub fn place_building(&mut self, player: u8, kind: BuildingKind, at: (u16, u16), facing: u8) -> Option<u32> {
+    pub fn place_building(&mut self, player: u8, kind: BuildingKind, at: (u16, u16), facing: u8) -> Option<BuildingId> {
         let b = Building::placed(kind, player, at.0, at.1, facing % 8, &self.terrain);
         if kind.wood_cost() == 0 || !can_place(self, &b) {
             return None;
@@ -62,7 +62,7 @@ impl GameMap {
     /// Switches dismantling of `player`'s building `building` (id), flat and taking wood. On, everyone
     /// inside walks out and its braves stop building it (taking it apart comes later); off, it is built
     /// again: braves bring its missing wood back.
-    pub fn set_dismantling(&mut self, player: u8, building: u32, on: bool) {
+    pub fn set_dismantling(&mut self, player: u8, building: BuildingId, on: bool) {
         let Some(b) = self.building_index(building).filter(|&b| self.buildings[b].owner == player && self.buildings[b].flat && self.buildings[b].kind.wood_cost() > 0) else { return };
         if self.buildings[b].dismantling == on {
             return;
@@ -103,7 +103,7 @@ impl GameMap {
     }
 
     /// Living braves assigned to the building `building` (id).
-    pub fn workers(&self, building: u32) -> impl Iterator<Item = &Unit> {
+    pub fn workers(&self, building: BuildingId) -> impl Iterator<Item = &Unit> {
         self.units.iter().filter(move |u| u.is_alive() && u.work == Some(building))
     }
 
@@ -138,7 +138,7 @@ impl GameMap {
 
     /// Assigned braves of `building` other than `except` bringing wood: carrying, fetching, cutting, or
     /// building a piece taken off the pile.
-    fn wood_on_the_way(&self, building: u32, except: UnitId) -> usize {
+    fn wood_on_the_way(&self, building: BuildingId, except: UnitId) -> usize {
         self.workers(building)
             .filter(|u| u.id != except)
             .filter(|u| u.carrying > 0 || u.fetching().is_some() || u.cutting().is_some() || matches!(u.action, Action::Building { .. }))
@@ -173,7 +173,7 @@ impl GameMap {
 
     /// Everyone inside the building `building` is released and walks out by its `door` to a free spot
     /// around it, then stands idle.
-    pub(crate) fn empty_building(&mut self, building: u32, door: (u16, u16)) {
+    pub(crate) fn empty_building(&mut self, building: BuildingId, door: (u16, u16)) {
         let out: Vec<(UnitId, (u16, u16))> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building)).map(|u| (u.id, (u.x, u.z))).collect();
         let ids: Vec<UnitId> = out.iter().map(|o| o.0).collect();
         let spots = slots::dispatch(&self.ground(), &out, door, &self.taken_spots(&ids));
@@ -481,7 +481,7 @@ mod tests {
         map.apply(&Command::CancelBuilding { player: 0, at: centre });
         assert_eq!((map.buildings.len(), map.wood.len()), (n - 1, wood));
         assert!(map.units.iter().all(|u| u.work.is_none()));
-        let gone = map.buildings.iter().map(|b| b.id).max().unwrap() + 1;
+        let gone = BuildingId::from_raw(map.buildings.iter().map(|b| b.id.raw()).max().unwrap() + 1);
         let again = map.place_building(0, BuildingKind::DrumTower, corner(24, 0), 0).unwrap();
         assert!(again > gone && map.building(gone).is_none(), "same corner, new id");
     }

@@ -80,9 +80,9 @@ Then the units tick: a coordinator that ends this turn is already gone, and its 
 
 ## Ids of units and buildings
 Units and buildings have stable ids (`GameMap::new_id`): their lists stay sorted by id, lookups are binary
-searches, and units leave the list during the game. Indices are only valid within a turn. Units' ids are typed
-(`unit::UnitId`, an `Id<Unit>` from `GameMap::new_id_of`), in `WorldEvent`, `Command` and the game-net codec
-(`raw` on the wire). Buildings' are still raw `u32`s; they become `Id<Building>` before a coordinator stores one.
+searches, and units leave the list during the game. Indices are only valid within a turn. Both are typed
+(`unit::UnitId`, `building::BuildingId`: an `Id<Unit>`, an `Id<Building>` from `GameMap::new_id_of`), in `WorldEvent`,
+`Command` and the game-net codec (`u32` on the wire); `raw` only where a number is needed (view keys, visual seeds).
 
 ## The original's internal models [wiki, exe]
 Class 10 things in the original. All **Unverified** for our purposes: the names come from the wiki, the roles partly

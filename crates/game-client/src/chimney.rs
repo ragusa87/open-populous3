@@ -12,7 +12,7 @@ use crate::views::{sync_views, WorldView};
 use bevy::light::NotShadowCaster;
 use bevy::ecs::system::SystemParamItem;
 use bevy::prelude::*;
-use game_core::building::{Building, Stage};
+use game_core::building::{Building, BuildingId, Stage};
 use game_core::map::GameMap;
 use game_core::time::{Tick, Ticks};
 use pop3_format::WORLD_UNITS_PER_CELL;
@@ -23,7 +23,7 @@ const LOOP: Ticks = Ticks::millis(2500);
 
 /// The top of each built building's roof that could smoke, by building id, in its view's frame (cells).
 #[derive(Resource, Default)]
-pub struct Chimneys(pub HashMap<u32, Vec3>);
+pub struct Chimneys(pub HashMap<BuildingId, Vec3>);
 
 #[derive(Resource)]
 pub struct SmokeAssets {
@@ -34,7 +34,7 @@ pub struct SmokeAssets {
 /// The smoke of the building with id `id`: its puffs.
 #[derive(Component)]
 pub struct ChimneyView {
-    id: u32,
+    id: BuildingId,
     puffs: Vec<Entity>,
 }
 
@@ -57,7 +57,7 @@ impl WorldView for ChimneyView {
     }
 
     fn id(b: &Building) -> u32 {
-        b.id
+        b.id.raw()
     }
 
     fn spawn(b: &Building, view: &mut EntityCommands, (chimneys, assets, _): &mut SystemParamItem<Self::Params>) -> Option<Self> {
@@ -86,7 +86,7 @@ impl WorldView for ChimneyView {
         let top = chimneys.0.get(&self.id).copied();
         for &e in &self.puffs {
             let Ok(mut p) = puffs.get_mut(e) else { continue };
-            (p.secs, p.on) = (smoke_secs(now, self.id), top.is_some());
+            (p.secs, p.on) = (smoke_secs(now, self.id.raw()), top.is_some());
             if let Some(top) = top {
                 p.origin = top;
             }

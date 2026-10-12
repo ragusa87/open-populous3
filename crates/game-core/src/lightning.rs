@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn spares_the_people_inside_a_building() {
         let mut inside = person(1, 1, UnitKind::Brave, AT);
-        inside.inside = Some(crate::unit::Inside { building: 50, door: AT });
+        inside.inside = Some(crate::unit::Inside { building: Id::from_raw(50), door: AT });
         let units = [inside, person(2, 1, UnitKind::Brave, AT)];
         assert_eq!(struck(AT, 0, &units), [Id::from_raw(2)]);
     }
@@ -114,9 +114,9 @@ mod tests {
 
     #[test]
     fn sets_the_building_it_hits_on_fire_and_lights_a_fire_on_bare_ground() {
-        let hut = crate::building::Building { id: 50, ..crate::building::Building::new(crate::building::BuildingKind::Hut { size: 1 }, 0, AT.0 - 256, AT.1 - 256, 0) };
+        let hut = crate::building::Building { id: Id::from_raw(50), ..crate::building::Building::new(crate::building::BuildingKind::Hut { size: 1 }, 0, AT.0 - 256, AT.1 - 256, 0) };
         let events = Strike::default().turn(AT, 0, &world(vec![], vec![hut], vec![]));
-        assert_eq!(events[0], WorldEvent::SetFire { building: 50 });
+        assert_eq!(events[0], WorldEvent::SetFire { building: Id::from_raw(50) });
         let fire = crate::ground_fire::effect(0, AT);
         assert_eq!(events[1], WorldEvent::SpawnEffect(fire), "no tree: a fire");
     }

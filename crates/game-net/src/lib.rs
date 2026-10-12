@@ -92,7 +92,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         }
         Command::OrderUnit { player, unit, order } => {
             b.extend([2, *player]);
-            b.extend(unit.raw().to_le_bytes());
+            put_id(b, *unit);
             encode_order(b, order);
         }
         Command::PlaceCampfire { player, at } => {
@@ -107,7 +107,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         }
         Command::QueueOrder { player, unit, order } => {
             b.extend([5, *player]);
-            b.extend(unit.raw().to_le_bytes());
+            put_id(b, *unit);
             encode_order(b, order);
         }
         Command::PlaceBuilding { player, kind, at, facing } => {
@@ -123,12 +123,17 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         }
         Command::Dismantle { player, building, on } => {
             b.extend([8, *player]);
-            b.extend(building.to_le_bytes());
+            put_id(b, *building);
             b.push(*on as u8);
         }
         Command::CastSelf { player, kind } => b.extend([9, *player, spell_index(*kind)]),
         Command::PauseSpell { player, kind, paused } => b.extend([10, *player, spell_index(*kind), *paused as u8]),
     }
+}
+
+/// An id on the wire: `u32` LE.
+fn put_id<T>(b: &mut Vec<u8>, id: Id<T>) {
+    b.extend(id.raw().to_le_bytes());
 }
 
 /// A spell kind as its place in `SpellKind::ALL` (Teleport has no panel model).
@@ -179,11 +184,11 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
         }
         Order::Attack { target: Target::Unit(id) } => {
             b.push(11);
-            b.extend(id.raw().to_le_bytes());
+            put_id(b, *id);
         }
         Order::Attack { target: Target::Building(id) } => {
             b.push(12);
-            b.extend(id.to_le_bytes());
+            put_id(b, *id);
         }
     }
 }
@@ -205,13 +210,13 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
             Some(Command::Cast { player, spell })
         }
         1 => Some(Command::Order { player, order: decode_order(c)? }),
-        2 => Some(Command::OrderUnit { player, unit: Id::from_raw(c.u32()?), order: decode_order(c)? }),
+        2 => Some(Command::OrderUnit { player, unit: c.id()?, order: decode_order(c)? }),
         3 => Some(Command::PlaceCampfire { player, at: (c.u16()?, c.u16()?) }),
         4 => Some(Command::RemoveCampfire { player, at: (c.u16()?, c.u16()?) }),
-        5 => Some(Command::QueueOrder { player, unit: Id::from_raw(c.u32()?), order: decode_order(c)? }),
+        5 => Some(Command::QueueOrder { player, unit: c.id()?, order: decode_order(c)? }),
         6 => Some(Command::PlaceBuilding { player, kind: BuildingKind::from_model(c.u8()?), at: (c.u16()?, c.u16()?), facing: c.u8()? }),
         7 => Some(Command::CancelBuilding { player, at: (c.u16()?, c.u16()?) }),
-        8 => Some(Command::Dismantle { player, building: c.u32()?, on: c.u8()? != 0 }),
+        8 => Some(Command::Dismantle { player, building: c.id()?, on: c.u8()? != 0 }),
         9 => Some(Command::CastSelf { player, kind: *SpellKind::ALL.get(c.u8()? as usize)? }),
         10 => Some(Command::PauseSpell { player, kind: *SpellKind::ALL.get(c.u8()? as usize)?, paused: c.u8()? != 0 }),
         _ => None,
@@ -230,8 +235,8 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         8 => Order::Build { site: (c.u16()?, c.u16()?) },
         9 => Order::Enter { site: (c.u16()?, c.u16()?) },
         10 => Order::Worship { site: (c.u16()?, c.u16()?) },
-        11 => Order::Attack { target: Target::Unit(Id::from_raw(c.u32()?)) },
-        12 => Order::Attack { target: Target::Building(c.u32()?) },
+        11 => Order::Attack { target: Target::Unit(c.id()?) },
+        12 => Order::Attack { target: Target::Building(c.id()?) },
         _ => return None,
     })
 }
@@ -270,6 +275,9 @@ impl<'a> Cursor<'a> {
     }
     fn u32(&mut self) -> Option<u32> {
         Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
+    }
+    fn id<T>(&mut self) -> Option<Id<T>> {
+        self.u32().map(Id::from_raw)
     }
     fn u16(&mut self) -> Option<u16> {
         self.take(2).map(|b| u16::from_le_bytes([b[0], b[1]]))
@@ -311,12 +319,12 @@ mod tests {
                 Command::PlaceBuilding { player: 0, kind: BuildingKind::Hut { size: 1 }, at: (0, 1024), facing: 0 },
                 Command::OrderUnit { player: 1, unit: Id::from_raw(9), order: Order::Build { site: (512, 65024) } },
                 Command::CancelBuilding { player: 3, at: (1, 2) },
-                Command::Dismantle { player: 2, building: u32::MAX, on: true },
-                Command::Dismantle { player: 0, building: 7, on: false },
+                Command::Dismantle { player: 2, building: Id::from_raw(u32::MAX), on: true },
+                Command::Dismantle { player: 0, building: Id::from_raw(7), on: false },
                 Command::QueueOrder { player: 0, unit: Id::from_raw(3), order: Order::Enter { site: (1024, 2048) } },
                 Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Worship { site: (32768, 36864) } },
                 Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Attack { target: Target::Unit(Id::from_raw(70_000)) } },
-                Command::QueueOrder { player: 0, unit: Id::from_raw(2), order: Order::Attack { target: Target::Building(9) } },
+                Command::QueueOrder { player: 0, unit: Id::from_raw(2), order: Order::Attack { target: Target::Building(Id::from_raw(9)) } },
                 Command::CastSelf { player: 1, kind: SpellKind::Teleport },
                 Command::PauseSpell { player: 3, kind: SpellKind::Armageddon, paused: true },
             ],

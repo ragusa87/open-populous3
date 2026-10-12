@@ -1,6 +1,6 @@
 //! A playable map: terrain + metadata, built from an original level or generated.
 
-use crate::building::{buildings_from_level, Building, BuildingKind};
+use crate::building::{buildings_from_level, Building, BuildingId, BuildingKind};
 use crate::campfire::{self, Campfire};
 use crate::command::Command;
 use crate::coordinator::{Coordinators, Link};
@@ -932,19 +932,19 @@ impl GameMap {
     }
 
     /// Adds `b` with a fresh id, last in `buildings` (which stays sorted by id); its id.
-    pub fn add_building(&mut self, mut b: Building) -> u32 {
-        b.id = self.new_id();
+    pub fn add_building(&mut self, mut b: Building) -> BuildingId {
+        b.id = self.new_id_of();
         let id = b.id;
         self.buildings.push(b);
         id
     }
 
     /// Where the building `id` is in `buildings`; None once it is gone.
-    pub fn building_index(&self, id: u32) -> Option<usize> {
+    pub fn building_index(&self, id: BuildingId) -> Option<usize> {
         self.buildings.binary_search_by_key(&id, |b| b.id).ok()
     }
 
-    pub fn building(&self, id: u32) -> Option<&Building> {
+    pub fn building(&self, id: BuildingId) -> Option<&Building> {
         self.building_index(id).map(|i| &self.buildings[i])
     }
 
