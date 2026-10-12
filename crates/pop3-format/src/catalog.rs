@@ -10,6 +10,17 @@ pub const EFFECT_SPRITE_FILE: &str = "hfx0-0.dat";
 /// A pile of logs (17 x 11) in `EFFECT_SPRITE_FILE`: a piece of wood on the ground. 22 is a flat
 /// dark smear under it (its shadow, probably).
 pub const WOOD_PILE_SPRITE: usize = 23;
+/// Markers over people in `EFFECT_SPRITE_FILE` (docs/specs/pop3-rev-analysis.md "Status markers over people"):
+/// alpha sprites but the selection arrow. Low health: white sparkles circling (10 frames, 41 x 29).
+pub const LOW_HEALTH_SPRITES: std::ops::RangeInclusive<usize> = 1489..=1498;
+/// Shield: 3 rings (bright, medium, faint) x 5 sizes (32 x 16), ring `k` size `s` at `first + s + 5k`.
+pub const SHIELD_SPRITES: std::ops::RangeInclusive<usize> = 1538..=1552;
+/// Bloodlust: red bubbles (10 frames, 30 x 25).
+pub const BLOODLUST_SPRITES: std::ops::RangeInclusive<usize> = 1478..=1487;
+/// Hypnotised: a yellow ring turning, a halo (11 frames, 27 x 19).
+pub const HYPNOSIS_SPRITES: std::ops::RangeInclusive<usize> = 1553..=1563;
+/// The yellow down arrow over the player's selected people (9 x 7, opaque).
+pub const SELECTED_ARROW_SPRITE: usize = 53;
 /// Teal unit figures (16 x 23) in `EFFECT_SPRITE_FILE`, in unit model order: brave, warrior, preacher,
 /// spy, firewarrior, shaman. Identified by eye.
 pub const UNIT_FIGURES: std::ops::RangeInclusive<usize> = 75..=80;

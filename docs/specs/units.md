@@ -5,7 +5,7 @@
   (`game_core::health::Health`: integer current and max points), `motion` (`game_core::motion::Motion`: `velocity`, x and z
   in world units, y in height units, per tick, and `height`, absolute, above the sea, in terrain height units,
   while off the ground, None on it),
-  `statuses` (`game_core::status::Statuses`: invisible, shielded, bloodlust, hypnotized, ghost; none set yet), action.
+  `statuses` (`game_core::status::Statuses`: invisible, shielded, bloodlust, hypnotized, ghost; none set by a spell yet, the units sandbox sets them), action.
 - Ids: `GameMap::spawn` (or `new_id`) gives each unit an id never given before on the map (shared with buildings
   and effects), so `units` stays sorted by id and `GameMap::unit(id)` is a binary search. A unit leaves the list
   when its spirit has risen; anything holding its id then finds None, which means it has ended.
@@ -193,8 +193,17 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
   on the ground). Sprite and bar are drawn pulled
   0.6 cell towards the camera along the eye-feet line and shrunk to match (`toward_eye`): same picture on
   screen, but slopes and bumps around the feet no longer cut the legs; real hills in front still hide her.
-  The original has no health bar: low-health units get a spinning star/crown over the head (to do). The panel
-  preview always shows the shaman's health.
+  The panel preview always shows the shaman's health.
+- Markers over people (`units/markers.rs`, pop3-rev-analysis.md "Status markers over people"), read from the unit's
+  own state, nothing stored for them: shield rings (`statuses.shielded`, three rings one step apart rising and
+  falling along the body, each person at its own phase from its id, tinted in the tribe's colour), bloodlust bubbles
+  (`statuses.bloodlust`), the hypnosis halo (`statuses.hypnotized`); with the original files also the low-health
+  sparkles (`Health::is_low`: a quarter of the maximum or less) and the yellow arrow over the player's selected
+  people, which then replaces the health bar (no bar at all). Without them: generated rings, bubbles and halo, the
+  health bar as above, no arrow, no low-health marker. Frames step once per sim tick (the original's counter may
+  be per rendered frame, unverified), raised 1.11 (sparkles, bubbles), 1.25 (halo), 1.0 (arrow) or 1/8 to 1 (rings)
+  times the body frame's height. Not yet: blinking in the statuses' last 15 timer steps, the low-health sound,
+  invisible and ghost people. Sandbox Units has each follower kind with each marker, then all at once.
 - Dust (`units/dust.rs`, cosmetic, simulation time: shown once the unit is drawn landed): when a unit stops landing, 10 soft generated motes spread 0.4 cell
   around its feet, rise 0.1, grow and fade over 0.8 s, facing the camera and pulled towards it like the sprites.
 - Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (original anim 40 for followers: the body lying, its spirit rising; tumbling otherwise), Fall (dying, then lies still while dead), Chop, CarryWalk, CarryIdle (braves cutting and carrying wood: original anims 11, 9, 10; other kinds, and the CC0 sheets and generated figures, which have no wood poses yet, show idle / walk instead, `Pose::fallback`), Stranded (arms up: frame 1 of original anim 12 for every follower, a stand-in, the real anim is unknown; wildmen and the shaman show their idle; the CC0 sheets loop their own arms-up `stranded` sheet).

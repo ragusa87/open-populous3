@@ -242,6 +242,7 @@ fn screenshot(
     mut blueprint: ResMut<crate::blueprint::Blueprint>,
     mut pinned: ResMut<crate::blueprint::PinnedAt>,
     mut aimed: ResMut<crate::hud::spells::SelectedSpell>,
+    mut selection: ResMut<crate::units::selection::Selection>,
     target: Option<Res<OffscreenTarget>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -254,6 +255,9 @@ fn screenshot(
     if *frame == 1 {
         if let Some(i) = std::env::var("TAB").ok().and_then(|t| tab_index(&t)) {
             tab.0 = i;
+        }
+        if std::env::var("SELECT").is_ok_and(|v| v == "own") {
+            selection.units = map.0.units.iter().filter(|u| u.owner == PLAYER && u.is_alive()).map(|u| u.id).collect();
         }
         if let Some(kind) = std::env::var("AIM").ok().and_then(|n| spell_by_name(&n)) {
             aimed.0 = Some(kind);

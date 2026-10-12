@@ -8,6 +8,7 @@
 
 pub mod art;
 mod dust;
+pub mod markers;
 mod procedural;
 mod shadow;
 pub mod sheets;
@@ -244,7 +245,7 @@ impl Plugin for UnitsPlugin {
             .init_resource::<SimNow>()
             .init_resource::<GameSchedule>()
             .init_resource::<UnitSprites>()
-            .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin))
+            .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin, markers::MarkersPlugin))
             .add_systems(Startup, load_sprites)
             .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks.in_set(SimStep), respawn_views, animate_views.in_set(UnitViews)).chain().in_set(crate::menu::Gameplay))
             .add_systems(PostUpdate, pull_to_eye.before(TransformSystems::Propagate));
@@ -387,7 +388,10 @@ fn respawn_views(
     for (i, u) in map.0.units.iter().enumerate() {
         let hover = crate::hover::Hoverable { health: u.owner == PLAYER };
         commands.spawn((UnitView(i), crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Units), hover, Grounded { at: Vec2::ZERO, half: 0.0 }, Transform::default(), Visibility::Hidden)).with_children(|v| {
-            v.spawn((UnitSprite(i), Mesh3d::default(), MeshMaterial3d::<StandardMaterial>::default(), Transform::default()));
+            v.spawn((UnitSprite(i), markers::BodyHeight::default(), Mesh3d::default(), MeshMaterial3d::<StandardMaterial>::default(), Transform::default()));
+            for slot in 0..markers::SLOTS.len() {
+                v.spawn((markers::MarkerSlot { slot, above: 0.0 }, Mesh3d::default(), MeshMaterial3d::<StandardMaterial>::default(), Transform::default(), Visibility::Hidden, bevy::light::NotShadowCaster, crate::hover::NoOutline));
+            }
             v.spawn((HealthBar, Mesh3d(bar.clone()), MeshMaterial3d(back.clone()), Transform::from_xyz(0.0, BAR_HEIGHT, 0.0), Visibility::Hidden))
                 .with_child((HealthFill(i), Mesh3d(fill.clone()), MeshMaterial3d(mats.add(flat(health_color(1.0)))), Transform::from_xyz(0.0, 0.0, 0.005)));
         });
@@ -424,15 +428,17 @@ fn animate_views(
     now: Res<SimNow>,
     sprites: Res<UnitSprites>,
     mut views: Query<(&UnitView, &mut Grounded, &mut Transform, &crate::hover::Hoverable), (Without<UnitSprite>, Without<HealthFill>)>,
-    mut bodies: Query<(&UnitSprite, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>, &mut Visibility), (Without<HealthFill>, Without<HealthBar>)>,
+    mut bodies: Query<(&UnitSprite, &mut markers::BodyHeight, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>, &mut Visibility), (Without<HealthFill>, Without<HealthBar>)>,
     mut bars: Query<(&ChildOf, &mut Visibility), (With<HealthBar>, Without<UnitSprite>)>,
     mut fills: Query<(&HealthFill, &mut Transform, &MeshMaterial3d<StandardMaterial>), Without<UnitView>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     selection: Res<Selection>,
     hovered: Res<crate::hover::Hovered>,
     heights: Res<crate::buildings::ModelHeights>,
+    marker_art: Option<Res<markers::MarkerArt>>,
 ) {
     let units = &map.0.units;
+    let bars_on = !marker_art.is_some_and(|a| a.original);
     let facing_camera = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
     for (view, mut ground, mut t, _) in &mut views {
         let Some(u) = units.get(view.0) else { continue };
@@ -440,13 +446,16 @@ fn animate_views(
         t.rotation = facing_camera;
     }
     let shamans = worship::shamans(units);
-    for (body, mut mesh, mut mat, mut vis) in &mut bodies {
+    for (body, mut height, mut mesh, mut mat, mut vis) in &mut bodies {
         let hidden = units.get(body.0).is_some_and(|u| hidden_inside(&map.0, u));
         vis.set_if_neq(if hidden { Visibility::Hidden } else { Visibility::Inherited });
         let frame = units.get(body.0).and_then(|u| {
             let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
             sprites.frame_for(u, worship, rig.yaw, &clock, *now)
         });
+        if let Some(f) = frame {
+            height.0 = f.size.y * PIXEL;
+        }
         if let Some(f) = frame && mesh.0 != f.mesh {
             mesh.0 = f.mesh.clone();
             mat.0 = f.material.clone();
@@ -458,7 +467,7 @@ fn animate_views(
         let unit = index.and_then(|i| units.get(i));
         let health_on_hover = view.is_some_and(|(.., h)| h.health);
         let under_mouse = health_on_hover && index.is_some_and(|i| hovered.0 == Some(crate::hover::HoverTarget::Unit(i)));
-        let shown = unit.is_some_and(|u| u.is_alive() && (selection.contains(u.id) || under_mouse));
+        let shown = bars_on && unit.is_some_and(|u| u.is_alive() && (selection.contains(u.id) || under_mouse));
         *vis = if shown { Visibility::Inherited } else { Visibility::Hidden };
     }
     for (fill, mut t, mat) in &mut fills {
@@ -491,7 +500,7 @@ pub fn drawn_lift(prev: Option<i32>, now: Option<i32>, ground: i32, alpha: f32, 
     ((from + (now as f32 - from) * alpha - ground as f32) * height_scale).max(0.0)
 }
 
-/// Pulls each unit's sprite and health bar towards the camera (see `toward_eye`), in the view's
+/// Pulls each unit's sprite, health bar and markers towards the camera (see `toward_eye`), in the view's
 /// own (camera-facing) space, and lifts them off the ground (`drawn_lift`).
 fn pull_to_eye(
     map: Res<CurrentMap>,
@@ -500,7 +509,7 @@ fn pull_to_eye(
     clock: Res<SimClock>,
     eye: Query<&Transform, (With<GameCamera>, Without<UnitView>)>,
     views: Query<(&UnitView, &Grounded, &Transform, &Children)>,
-    mut parts: Query<(&mut Transform, Has<HealthBar>), (Or<(With<UnitSprite>, With<HealthBar>)>, Without<UnitView>, Without<GameCamera>)>,
+    mut parts: Query<(&mut Transform, Has<HealthBar>, Option<&markers::MarkerSlot>), (Or<(With<UnitSprite>, With<HealthBar>, With<markers::MarkerSlot>)>, Without<UnitView>, Without<GameCamera>)>,
     heights: Res<crate::buildings::ModelHeights>,
 ) {
     let Ok(eye) = eye.single() else { return };
@@ -513,8 +522,9 @@ fn pull_to_eye(
         let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale));
         let local = view.rotation.inverse() * (offset + up.unwrap_or_default()) + Vec3::Y * lift * scale;
         for &child in children {
-            if let Ok((mut t, bar)) = parts.get_mut(child) {
-                t.translation = local + if bar { Vec3::Y * BAR_HEIGHT * scale } else { Vec3::ZERO };
+            if let Ok((mut t, bar, marker)) = parts.get_mut(child) {
+                let above = if bar { BAR_HEIGHT } else { marker.map_or(0.0, |m| m.above) };
+                t.translation = local + Vec3::Y * above * scale;
                 t.scale = Vec3::splat(scale);
             }
         }
