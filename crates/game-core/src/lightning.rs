@@ -1,8 +1,8 @@
 //! Lightning (pop3-rev-analysis.md "Per spell" 3, "Components" Lightning 7/0x1E), an effect
 //! (`effect::EffectKind::Lightning`): on its first turn it kills outright up to `KILLS` people in the target cell,
 //! whatever their health and tribe (own followers and enemy shamans too) but the caster's own shaman and the
-//! shielded (`effect::hurts`), the people inside the building there counted with them, sets that building on fire
-//! (`crate::fire`) and spawns a simple blast; the rest of its turns the bolt is only seen.
+//! shielded (`effect::hurts`), sets the building there on fire (`crate::fire`: the people inside are not struck,
+//! they come out 8 turns later, panicking) and spawns a simple blast; the rest of its turns the bolt is only seen.
 
 use crate::effect::{DamageKind, Effect, EffectKind};
 use crate::event::WorldEvent;
@@ -33,7 +33,7 @@ impl Strike {
             return Vec::new();
         }
         let building = buildings.iter().find(|b| b.covers(at, 0)).map(|b| b.id);
-        let mut events: Vec<WorldEvent> = struck(at, owner, units, building)
+        let mut events: Vec<WorldEvent> = struck(at, owner, units)
             .into_iter()
             .map(|unit| WorldEvent::Damage { unit, amount: u16::MAX, kind: DamageKind::Lightning, from: Some(owner) })
             .collect();
@@ -43,18 +43,14 @@ impl Strike {
     }
 }
 
-/// The people a strike at `at` by `owner` kills (ids): the living ones in its cell outside buildings and those inside
-/// the building it hits (`building`), that it can hurt (`effect::hurts`: not the caster's own shaman, not the
-/// shielded), in id order, at most `KILLS`.
-pub fn struck(at: (u16, u16), owner: u8, units: &[Unit], building: Option<u32>) -> Vec<u32> {
+/// The people a strike at `at` by `owner` kills (ids): the living ones in its cell, not inside a building (the original
+/// walks the cell's unit list, which a person inside is not in, pop3-rev-analysis.md spell 3), that it can hurt
+/// (`effect::hurts`: not the caster's own shaman, not the shielded), in id order, at most `KILLS`.
+pub fn struck(at: (u16, u16), owner: u8, units: &[Unit]) -> Vec<u32> {
     let cell = (cell_of(at.0), cell_of(at.1));
-    let there = |u: &Unit| match u.inside {
-        None => u.cell() == cell,
-        Some(inside) => Some(inside.building) == building,
-    };
     units
         .iter()
-        .filter(|u| there(u) && crate::effect::hurts(u, DamageKind::Lightning, Some(owner)))
+        .filter(|u| u.inside.is_none() && u.cell() == cell && crate::effect::hurts(u, DamageKind::Lightning, Some(owner)))
         .take(KILLS)
         .map(|u| u.id)
         .collect()
@@ -76,8 +72,8 @@ mod tests {
     fn kills_at_most_seven_in_its_cell_of_any_tribe() {
         let mut units: Vec<Unit> = (1..=9).map(|id| person(id, (id % 2) as u8, UnitKind::Brave, (AT.0 + id as u16 * 20, AT.1))).collect();
         units.push(person(10, 1, UnitKind::Brave, (AT.0 + 512, AT.1)));
-        assert_eq!(struck(AT, 0, &units, None), [1, 2, 3, 4, 5, 6, 7], "own braves too, 7 at most, in id order");
-        assert!(!struck(AT, 0, &units, None).contains(&10), "the next cell is spared");
+        assert_eq!(struck(AT, 0, &units), [1, 2, 3, 4, 5, 6, 7], "own braves too, 7 at most, in id order");
+        assert!(!struck(AT, 0, &units).contains(&10), "the next cell is spared");
     }
 
     #[test]
@@ -85,19 +81,15 @@ mod tests {
         let mut shielded = person(3, 1, UnitKind::Warrior, AT);
         shielded.statuses.shield = Timed::steps(SHIELD_STEPS);
         let units = [person(1, 0, UnitKind::Shaman, AT), person(2, 1, UnitKind::Shaman, AT), shielded];
-        assert_eq!(struck(AT, 0, &units, None), [2]);
+        assert_eq!(struck(AT, 0, &units), [2]);
     }
 
     #[test]
-    fn kills_the_people_inside_the_building_it_hits() {
-        let mut inside = person(1, 1, UnitKind::Brave, (AT.0 + 2048, AT.1));
+    fn spares_the_people_inside_a_building() {
+        let mut inside = person(1, 1, UnitKind::Brave, AT);
         inside.inside = Some(crate::unit::Inside { building: 50, door: AT });
-        let mut elsewhere = inside.clone();
-        elsewhere.id = 2;
-        elsewhere.inside = Some(crate::unit::Inside { building: 51, door: AT });
-        let units = [inside, elsewhere, person(3, 1, UnitKind::Brave, AT)];
-        assert_eq!(struck(AT, 0, &units, Some(50)), [1, 3]);
-        assert_eq!(struck(AT, 0, &units, None), [3], "no building hit: only those outside");
+        let units = [inside, person(2, 1, UnitKind::Brave, AT)];
+        assert_eq!(struck(AT, 0, &units), [2]);
     }
 
     #[test]

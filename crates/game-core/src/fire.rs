@@ -215,6 +215,22 @@ mod tests {
     }
 
     #[test]
+    fn lightning_spares_the_people_inside_who_come_out_panicking() {
+        let mut map = GameMap::sandbox_buildings();
+        let hut = sandbox_hut(&map);
+        let id = map.buildings[hut].id;
+        let people = rest_inside(&mut map, hut, 2);
+        map.add_effect(crate::lightning::effect(1, map.buildings[hut].centre()));
+        for _ in 0..THROW_OUT_AT.get() {
+            map.tick();
+        }
+        assert!(map.buildings[hut].burning.is_some());
+        assert!(people.iter().all(|&p| map.unit(p).is_some_and(|u| u.is_alive())), "not struck");
+        assert_eq!(panicking(&map, &people), people.len());
+        assert_eq!(map.building(id).map(|b| b.used), Some(3));
+    }
+
+    #[test]
     fn a_building_burnt_to_nothing_is_removed_on_turn_48() {
         let mut map = GameMap::sandbox_buildings();
         let hut = sandbox_hut(&map);
