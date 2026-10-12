@@ -8,6 +8,7 @@ pub mod building;
 pub mod campfire;
 pub mod command;
 pub mod effect;
+pub mod event;
 pub mod enter;
 pub mod gauge;
 pub mod headcount;

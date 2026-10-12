@@ -26,9 +26,9 @@ Spells must only be cast through `Command::Cast` to stay deterministic.
 In the original a cast flies a shot to the target, which spawns reusable components there (pop3-rev-analysis.md
 "From cast to effect", "Components"); the components do the work. Ours: `GameMap::effects`, a `Registry<Effect>` (by
 `Id<Effect>`) of `Effect` (caster's tribe, position, `left` turns, `EffectKind` with only its own data), ticked once per turn before the
-units (`GameMap::tend_effects`, architecture.md "The tick"). An effect reads the map and returns `EffectEvent`s:
-`Damage` (through `GameMap::damage`, the one place for immunities: shielded units, the caster's own tribe for a
-blast), `Push` (`Unit::fling`, not the shielded), `Spawn` (a new effect, ticking from the next turn), `Terrain`
+units (`GameMap::tend_effects`, architecture.md "The tick"). An effect reads the map and returns `WorldEvent`s (`event.rs`):
+`Damage` (with the caster's tribe as `from`, through `GameMap::damage`, the one place for immunities: shielded units, the caster's own tribe for a
+blast), `Push` (`Unit::fling`, not the shielded), `SpawnEffect` (a new effect, ticking from the next turn), `Terrain`
 (raise, flatten). `Panic`, `Raid` and `SetFire` are routed but do nothing yet. An effect never holds another
 object's state: a unit it panics or sets on fire counts down its own state.
 

@@ -3,7 +3,8 @@
 //! caster's tribe and the shielded are spared by `GameMap::damage`); each person within the turn's radius and
 //! `PUSH_RANGE`, of any tribe but the caster's own shaman, is pushed away and up, once.
 
-use crate::effect::{DamageKind, Effect, EffectEvent, EffectKind};
+use crate::effect::{DamageKind, Effect, EffectKind};
+use crate::event::WorldEvent;
 use crate::motion::Velocity;
 use crate::time::{Countdown, Ticks};
 use crate::unit::{isqrt, torus_delta, Unit, UnitKind};
@@ -35,7 +36,7 @@ pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
 
 impl SimpleBlast {
     /// One turn of the blast at `at` cast by `owner`: the pushes and damage it deals now.
-    pub fn turn(&mut self, at: (u16, u16), owner: u8, units: &[Unit]) -> Vec<EffectEvent> {
+    pub fn turn(&mut self, at: (u16, u16), owner: u8, units: &[Unit]) -> Vec<WorldEvent> {
         let Some(&radius) = RADII.get(self.turn as usize) else { return Vec::new() };
         self.turn += 1;
         let reach = radius.min(PUSH_RANGE);
@@ -44,10 +45,10 @@ impl SimpleBlast {
             let pushable = !(u.owner == owner && u.kind == UnitKind::Shaman) && !self.pushed.contains(&u.id);
             if let Some(vel) = push(at, (u.x, u.z), reach).filter(|_| pushable) {
                 self.pushed.push(u.id);
-                events.push(EffectEvent::Push { unit: u.id, vel });
+                events.push(WorldEvent::Push { unit: u.id, vel });
             }
             if push(at, (u.x, u.z), radius).is_some() {
-                events.push(EffectEvent::Damage { unit: u.id, amount: DAMAGE_PERSON, kind: DamageKind::Blast });
+                events.push(WorldEvent::Damage { unit: u.id, amount: DAMAGE_PERSON, kind: DamageKind::Blast, from: Some(owner) });
             }
         }
         events
@@ -96,8 +97,8 @@ mod tests {
         ];
         let mut blast = SimpleBlast::default();
         let mut turn = || blast.turn((5000, 5000), 0, &units);
-        let pushed = |events: &[EffectEvent]| events.iter().filter_map(|e| if let EffectEvent::Push { unit, .. } = e { Some(*unit) } else { None }).collect::<Vec<_>>();
-        let hit = |events: &[EffectEvent]| events.iter().filter_map(|e| if let EffectEvent::Damage { unit, .. } = e { Some(*unit) } else { None }).collect::<Vec<_>>();
+        let pushed = |events: &[WorldEvent]| events.iter().filter_map(|e| if let WorldEvent::Push { unit, .. } = e { Some(*unit) } else { None }).collect::<Vec<_>>();
+        let hit = |events: &[WorldEvent]| events.iter().filter_map(|e| if let WorldEvent::Damage { unit, .. } = e { Some(*unit) } else { None }).collect::<Vec<_>>();
         let first = turn();
         assert_eq!(pushed(&first), [1, 4, 6], "2 cells: the caster's own brave too, not the caster's shaman");
         assert_eq!(hit(&first), [1, 4, 5, 6], "everyone in the radius: GameMap::damage spares the caster's tribe");

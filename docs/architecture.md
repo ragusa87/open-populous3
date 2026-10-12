@@ -49,9 +49,12 @@ Rules for every object that ticks:
   checked with phase 0 (`GROW_EVERY.fires(now, 0)` is the original's `turn & 15 == 0`), so it fires on the same
   turns as in the original, for every object at once. A length is a `time::Countdown` held by the object. Each
   constant cites the original's constant name or code address (pop3-rev-analysis.md), or says it is our guess.
-- **An object changes only itself.** What it does to others comes out as events (`UnitEvent`, `EffectEvent`), and
-  the map applies them in order, after the loop over that kind. The map's handlers are the only code that touches
-  two objects at once.
+- **An object changes only itself.** What it does to others comes out as events, and the map applies them in order,
+  after the loop over that kind. The map's handlers are the only code that touches two objects at once. A change to
+  the world (damage, a push, terrain, a new effect...) is a `event::WorldEvent`, shared by every kind that makes it,
+  each variant with one rule (`GameMap::apply_event`); they run in emission order, and the events applying one
+  causes run after the whole batch, never in its middle (`event::run_in_order`). `UnitEvent` stays for what only
+  a unit's own outcome means (wood, work, doors, death).
 - **Stable ids.** Units, buildings and effects get an id from `GameMap::new_id` (via `spawn`, `add_building`,
   `add_effect`), never given twice, so each list stays sorted by id and lookups (`unit`, `building`) are binary
   searches. New kinds use typed ids (`id::Id<T>`, from `GameMap::new_id_of`, the same counter): an `Id<Effect>` does
@@ -70,11 +73,11 @@ A spell is a recipe of components (pop3-rev-analysis.md "From cast to effect"): 
 effects are added. An `Effect` (`effect.rs`, kept in `GameMap::effects`, a `Registry<Effect>` that holds its id) has the caster's tribe, a position, `left` (a `Countdown`) and
 an `EffectKind` variant carrying only its own data (`SimpleBlast`). `tend_effects` takes the list out of the map
 (`std::mem::take`), so each `Effect::tick(now, &map, &mut rng)` reads the whole map without cloning it and returns
-`EffectEvent`s; finished effects are dropped (order kept), the list is put back, then the events apply in order:
-- `Damage` goes through `GameMap::damage`, the one place for immunities (shield, the caster's tribe, later angels
-  and friendly-fire rules per `DamageKind`), which calls `Unit::take_damage`;
+`WorldEvent`s; finished effects are dropped (order kept), the list is put back, then the events apply in order:
+- `Damage` (with the attacker's tribe, `from`) goes through `GameMap::damage`, the one place for immunities (shield,
+  the caster's tribe, later angels and friendly-fire rules per `DamageKind`), which calls `Unit::take_damage`;
 - `Push` flings the unit (`Unit::fling`) unless it is shielded;
-- `Spawn` adds a new effect, which first ticks on the next turn;
+- `SpawnEffect` adds a new effect, which first ticks on the next turn;
 - `Terrain` raises or flattens ground; `Panic`, `Raid`, `SetFire` are routed, without behaviour yet.
 An effect never holds another object's state: a unit it affects keeps its own countdown (panic, on fire) and
 finishes it alone, even after the effect has ended.

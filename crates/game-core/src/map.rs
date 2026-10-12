@@ -3,7 +3,8 @@
 use crate::building::{buildings_from_level, Building, BuildingKind};
 use crate::campfire::{self, Campfire};
 use crate::command::Command;
-use crate::effect::{DamageKind, Effect, EffectEvent, TerrainChange};
+use crate::effect::{DamageKind, Effect, TerrainChange};
+use crate::event::{run_in_order, WorldEvent};
 use crate::path::{Ground, Mobility, Walled, Walls};
 use crate::id::{Id, Registry};
 use crate::slots;
@@ -717,39 +718,58 @@ impl GameMap {
     }
 
     /// Each effect's turn, in order, reading the map as it was before any of them; finished ones go. Then their
-    /// events apply in order (`apply_effect`); returns the ground they changed.
+    /// events apply in order (`apply_events`); returns the ground they changed.
     fn tend_effects(&mut self) -> Vec<DirtyRect> {
         let (mut effects, mut rng) = (std::mem::take(&mut self.effects), self.rng);
-        let events: Vec<(u8, EffectEvent)> = effects.iter_mut().flat_map(|(_, e)| e.tick(self.now, self, &mut rng).into_iter().map(|ev| (e.owner, ev)).collect::<Vec<_>>()).collect();
+        let events: Vec<WorldEvent> = effects.iter_mut().flat_map(|(_, e)| e.tick(self.now, self, &mut rng)).collect();
         effects.retain(|_, e| !e.is_over());
         (self.effects, self.rng) = (effects, rng);
-        events.into_iter().filter_map(|(owner, event)| self.apply_effect(owner, event)).collect()
+        self.apply_events(events)
     }
 
-    /// One event of an effect cast by tribe `owner`; the ground it changed, if any. Things gone are skipped.
-    pub(crate) fn apply_effect(&mut self, owner: u8, event: EffectEvent) -> Option<DirtyRect> {
-        match event {
-            EffectEvent::Damage { unit, amount, kind } => self.damage(unit, amount, kind, owner),
-            EffectEvent::Push { unit, vel } => {
-                let i = self.unit_index(unit).filter(|&i| crate::effect::pushes(&self.units[i]))?;
-                let u = &self.units[i];
-                let ground = self.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
-                self.units[i].fling(vel, ground);
+    /// `batch` applied in order, then what applying it caused (`event::run_in_order`); the ground changed.
+    pub(crate) fn apply_events(&mut self, batch: Vec<WorldEvent>) -> Vec<DirtyRect> {
+        let mut dirty = Vec::new();
+        run_in_order(batch, |event| {
+            let (changed, follow_ups) = self.apply_event(event);
+            dirty.extend(changed);
+            follow_ups
+        });
+        dirty
+    }
+
+    /// The one rule for each kind of event: the ground it changed, and the events it causes. Things gone are skipped.
+    pub(crate) fn apply_event(&mut self, event: WorldEvent) -> (Option<DirtyRect>, Vec<WorldEvent>) {
+        let changed = match event {
+            WorldEvent::Damage { unit, amount, kind, from } => {
+                self.damage(unit, amount, kind, from);
+                None
             }
-            EffectEvent::Panic { .. } | EffectEvent::Raid { .. } | EffectEvent::SetFire { .. } => {}
-            EffectEvent::Spawn(e) => {
+            WorldEvent::Push { unit, vel } => {
+                if let Some(i) = self.unit_index(unit).filter(|&i| crate::effect::pushes(&self.units[i])) {
+                    let u = &self.units[i];
+                    let ground = self.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
+                    self.units[i].fling(vel, ground);
+                }
+                None
+            }
+            WorldEvent::Panic { .. } | WorldEvent::Raid { .. } | WorldEvent::SetFire { .. } => None,
+            WorldEvent::SpawnEffect(e) => {
                 self.add_effect(e);
+                None
             }
-            EffectEvent::Terrain(TerrainChange::Raise { at, radius, by }) => return Some(self.terrain.raise(at, radius, by)),
-            EffectEvent::Terrain(TerrainChange::Flatten { at, radius }) => return Some(self.terrain.flatten(at, radius)),
-        }
-        None
+            WorldEvent::Terrain(TerrainChange::Raise { at, radius, by }) => Some(self.terrain.raise(at, radius, by)),
+            WorldEvent::Terrain(TerrainChange::Flatten { at, radius }) => Some(self.terrain.flatten(at, radius)),
+        };
+        (changed, Vec::new())
     }
 
-    /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`).
-    pub(crate) fn damage(&mut self, unit: u32, amount: u16, kind: DamageKind, from: u8) {
-        if let Some(i) = self.unit_index(unit).filter(|&i| crate::effect::hurts(&self.units[i], kind, from)) {
-            self.units[i].take_damage(amount);
+    /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`); true
+    /// when that kills it.
+    pub(crate) fn damage(&mut self, unit: u32, amount: u16, kind: DamageKind, from: Option<u8>) -> bool {
+        match self.unit_index(unit).filter(|&i| crate::effect::hurts(&self.units[i], kind, from)) {
+            Some(i) => self.units[i].take_damage(amount),
+            None => false,
         }
     }
 

@@ -1,9 +1,9 @@
 //! Spell effects (pop3-rev-analysis.md "Components"): what a spell leaves on the map once cast, each ticking on
 //! its own rhythm for its own length. An effect reads the map and changes only itself: what it does to others
-//! comes out as `EffectEvent`s, which `GameMap::tend_effects` applies in order (architecture.md "The tick").
+//! comes out as `WorldEvent`s, which `GameMap::tend_effects` applies in order (architecture.md "The tick").
 
+use crate::event::WorldEvent;
 use crate::map::{GameMap, Lcg};
-use crate::motion::Velocity;
 use crate::spell::Cell;
 use crate::time::{Countdown, Tick};
 use crate::unit::Unit;
@@ -33,20 +33,6 @@ pub enum DamageKind {
     Blast,
 }
 
-/// An effect's change to something else, applied by the map in order. A unit or building gone meanwhile (its id
-/// missing) is skipped.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum EffectEvent {
-    Damage { unit: u32, amount: u16, kind: DamageKind },
-    Push { unit: u32, vel: Velocity },
-    Panic { unit: u32 },
-    Raid { building: u32 },
-    SetFire { building: u32 },
-    /// A new effect, ticking from the next turn; its id is given then.
-    Spawn(Effect),
-    Terrain(TerrainChange),
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerrainChange {
     Raise { at: Cell, radius: i32, by: i32 },
@@ -60,11 +46,11 @@ impl Effect {
 
     /// One turn at `now`: its work on its own rhythm, then one turn less to go.
     #[allow(unused_variables)]
-    pub fn tick(&mut self, now: Tick, world: &GameMap, rng: &mut Lcg) -> Vec<EffectEvent> {
+    pub fn tick(&mut self, now: Tick, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         let events = match self.kind {
             EffectKind::SimpleBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units),
             #[cfg(test)]
-            EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), world),
+            EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
         };
         self.left.tick();
         events
@@ -77,12 +63,12 @@ impl Effect {
 
 /// Whether `kind` damage from tribe `from` hurts `u`: never a shielded unit (pop3-rev-analysis.md "Per spell",
 /// Shield), and a blast spares the caster's own tribe (no alliances yet).
-pub fn hurts(u: &Unit, kind: DamageKind, from: u8) -> bool {
+pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
     if u.statuses.shielded || !u.is_alive() {
         return false;
     }
     match kind {
-        DamageKind::Blast => u.owner != from,
+        DamageKind::Blast => from != Some(u.owner),
     }
 }
 
@@ -94,6 +80,7 @@ pub fn pushes(u: &Unit) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::motion::Velocity;
     use crate::time::{Every, Ticks};
     use crate::unit::{torus_delta, UnitKind};
 
@@ -106,17 +93,17 @@ pub(crate) mod tests {
     }
 
     impl Probe {
-        pub(super) fn turn(&mut self, now: Tick, at: (u16, u16), world: &GameMap) -> Vec<EffectEvent> {
+        pub(super) fn turn(&mut self, now: Tick, at: (u16, u16), owner: u8, world: &GameMap) -> Vec<WorldEvent> {
             let mut events = Vec::new();
             if std::mem::take(&mut self.spawn) {
                 let copy = Probe { every: self.every, spawn: false };
-                events.push(EffectEvent::Spawn(Effect::new(0, at, Countdown::new(Ticks::new(5)), EffectKind::Probe(copy))));
+                events.push(WorldEvent::SpawnEffect(Effect::new(0, at, Countdown::new(Ticks::new(5)), EffectKind::Probe(copy))));
             }
             if self.every.fires(now, 0) {
                 let near = |u: &&Unit| torus_delta(at.0, u.x).abs().max(torus_delta(at.1, u.z).abs()) <= 512;
                 for u in world.units.iter().filter(near) {
-                    events.push(EffectEvent::Push { unit: u.id, vel: Velocity::new(0, 60, 0) });
-                    events.push(EffectEvent::Damage { unit: u.id, amount: 1, kind: DamageKind::Blast });
+                    events.push(WorldEvent::Push { unit: u.id, vel: Velocity::new(0, 60, 0) });
+                    events.push(WorldEvent::Damage { unit: u.id, amount: 1, kind: DamageKind::Blast, from: Some(owner) });
                 }
             }
             events
@@ -191,11 +178,11 @@ pub(crate) mod tests {
         let (mut map, _, _) = with_enemy();
         let before = map.units.clone();
         for event in [
-            EffectEvent::Damage { unit: 9999, amount: 50, kind: DamageKind::Blast },
-            EffectEvent::Push { unit: 9999, vel: Velocity::new(0, 60, 0) },
-            EffectEvent::Raid { building: 9999 },
+            WorldEvent::Damage { unit: 9999, amount: 50, kind: DamageKind::Blast, from: Some(1) },
+            WorldEvent::Push { unit: 9999, vel: Velocity::new(0, 60, 0) },
+            WorldEvent::Raid { building: 9999 },
         ] {
-            assert_eq!(map.apply_effect(1, event), None);
+            assert_eq!(map.apply_event(event), (None, Vec::new()));
         }
         assert_eq!(map.units, before);
     }
@@ -205,15 +192,15 @@ pub(crate) mod tests {
         let (mut map, enemy, _) = with_enemy();
         let shaman = map.units[0].id;
         let max = map.unit(enemy).unwrap().health.max();
-        map.damage(shaman, 50, DamageKind::Blast, 0);
+        map.damage(shaman, 50, DamageKind::Blast, Some(0));
         assert!(map.unit(shaman).unwrap().health.is_full(), "own tribe");
         map.unit_mut(enemy).unwrap().statuses.shielded = true;
-        map.damage(enemy, 50, DamageKind::Blast, 0);
+        map.damage(enemy, 50, DamageKind::Blast, Some(0));
         assert_eq!(map.unit(enemy).unwrap().health.current(), max, "shielded");
         map.unit_mut(enemy).unwrap().statuses.shielded = false;
-        map.damage(enemy, 50, DamageKind::Blast, 0);
+        map.damage(enemy, 50, DamageKind::Blast, Some(0));
         assert_eq!(map.unit(enemy).unwrap().health.current(), max - 50);
-        map.damage(enemy, max, DamageKind::Blast, 0);
+        map.damage(enemy, max, DamageKind::Blast, Some(0));
         assert!(!map.unit(enemy).unwrap().is_alive(), "dies at 0");
     }
 
