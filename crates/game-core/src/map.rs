@@ -449,25 +449,35 @@ impl GameMap {
         }
     }
 
+    /// Where `u` stands, in height units (the original reads its z): the level of the building it is in (a
+    /// balloon's height once units can board one), the ground under it otherwise.
+    pub fn altitude(&self, u: &Unit) -> u16 {
+        let height = match u.inside.and_then(|i| self.building(i.building)) {
+            Some(b) => b.level as i32,
+            None => self.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL),
+        };
+        height.clamp(0, MAX_HEIGHT as i32) as u16
+    }
+
     /// How far `player`'s shaman casts `kind` from where she stands (`cast_range`): None when there is no
-    /// limit (the spell has none, or the player is a god) or no living shaman to cast from.
+    /// limit (the spell has none, or the player is a god), or no shaman free to cast (dead or `locked`: off the
+    /// ground she casts nothing until she lands).
     pub fn cast_range(&self, player: u8, kind: SpellKind) -> Option<u32> {
         let base = kind.range().filter(|_| !self.shaman_omni)?;
-        let shaman = self.shaman_of(player).filter(|u| u.is_alive())?;
-        let height = shaman.motion.height.unwrap_or_else(|| self.terrain.height_at(shaman.x as u32, shaman.z as u32, WORLD_UNITS_PER_CELL)).clamp(0, u16::MAX as i32) as u16;
+        let shaman = self.shaman_of(player).filter(|u| u.is_alive() && !self.shaman_locked(player))?;
         let in_tower = shaman.inside.and_then(|i| self.building(i.building)).is_some_and(|b| b.kind == BuildingKind::DrumTower && b.stage() == crate::building::Stage::Built);
-        Some(crate::cast_range::range(base, height, in_tower))
+        Some(crate::cast_range::range(base, self.altitude(shaman), in_tower))
     }
 
     /// Whether `player` can aim `kind` at `to` (world units): within their shaman's `cast_range`, anywhere
-    /// for a spell without a limit or on a level where the player is a god; never without a living shaman
-    /// otherwise.
+    /// for a spell without a limit or on a level where the player is a god; never without a shaman free to
+    /// cast otherwise.
     pub fn in_cast_range(&self, player: u8, kind: SpellKind, to: (u16, u16)) -> bool {
         if self.shaman_omni || kind.range().is_none() {
             return true;
         }
-        let Some(shaman) = self.shaman_of(player).filter(|u| u.is_alive()) else { return false };
-        self.cast_range(player, kind).is_some_and(|r| crate::cast_range::within((shaman.x, shaman.z), to, r))
+        let (Some(shaman), Some(range)) = (self.shaman_of(player), self.cast_range(player, kind)) else { return false };
+        crate::cast_range::within((shaman.x, shaman.z), to, range)
     }
 
     /// `spell` as it takes effect: a land bridge starts at the caster's shaman, as she stands when the command
@@ -1390,9 +1400,21 @@ mod tests {
         assert!(!m.in_cast_range(0, SpellKind::Blast, (x + range as u16 + 1, z)));
         assert!(m.in_cast_range(0, SpellKind::Teleport, (x + 20_000, z)), "teleport has no limit");
         assert!(!m.in_cast_range(1, SpellKind::Blast, (x, z)), "no shaman for player 1");
+        m.units[0].fling(crate::motion::Velocity::new(0, 98, 0), 200);
+        assert!(!m.in_cast_range(0, SpellKind::Blast, (x, z)) && !m.can_cast(0, &Spell::Blast { at: (x, z) }), "nothing in the air");
         m.shaman_omni = true;
         assert_eq!(m.cast_range(0, SpellKind::Blast), None);
         assert!(m.in_cast_range(1, SpellKind::Blast, (x + 20_000, z)), "a god casts anywhere");
+    }
+
+    #[test]
+    fn a_shaman_in_a_drum_tower_casts_from_its_level_a_third_farther() {
+        let mut m = GameMap::sandbox_walk();
+        let (x, z) = (m.units[0].x, m.units[0].z);
+        let tower = m.add_building(Building { level: 256, ..Building::new(BuildingKind::DrumTower, 0, x, z, 0) });
+        m.units[0].inside = Some(crate::unit::Inside { building: tower, door: (x, z) });
+        assert_eq!(m.altitude(&m.units[0]), 256);
+        assert_eq!(m.cast_range(0, SpellKind::Blast), Some(4096), "3072 at band 2, + 1/3");
     }
 
     #[test]

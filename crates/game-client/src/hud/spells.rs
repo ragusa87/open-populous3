@@ -18,6 +18,7 @@ use game_core::command::Command;
 use game_core::map::GameMap;
 use game_core::spell::Spell;
 use game_core::spell_book::{Availability, SpellBook, SpellKind, SpellSlot, MAX_CHARGES};
+use pop3_format::WORLD_UNITS_PER_CELL;
 
 #[derive(Resource, Default)]
 pub struct SelectedSpell(pub Option<SpellKind>);
@@ -108,14 +109,22 @@ pub fn short_label(kind: SpellKind) -> &'static str {
     }
 }
 
-/// The spell to cast when `kind` is aimed at `at` (world units); None for spells not cast on a
-/// spot (yet): those go with C.
-pub fn ground_spell(kind: SpellKind, at: (u16, u16)) -> Option<Spell> {
+/// The spell to cast when `kind` is aimed at `at` from `origin` (world units: the shaman, or the view on a
+/// god level, `cast_origin`); None for spells not cast on a spot (yet): those go with C.
+pub fn ground_spell(kind: SpellKind, at: (u16, u16), origin: (u16, u16)) -> Option<Spell> {
+    let cell = |(x, z): (u16, u16)| ((x as u32 / WORLD_UNITS_PER_CELL) as i32, (z as u32 / WORLD_UNITS_PER_CELL) as i32);
     match kind {
         SpellKind::Teleport => Some(Spell::Teleport { to: at }),
         SpellKind::Blast => Some(Spell::Blast { at }),
+        SpellKind::LandBridge => Some(Spell::LandBridge { from: cell(origin), to: cell(at) }),
         _ => None,
     }
+}
+
+/// Where a god's spells start (`GameMap::shaman_omni`): the bottom middle of the map view, right of the panel
+/// (window pixels).
+pub fn view_bottom_middle(window: Vec2) -> Vec2 {
+    Vec2::new(PANEL_WIDTH + (window.x - PANEL_WIDTH) / 2.0, window.y - 1.0)
 }
 
 /// Columns of the spell grid.
@@ -279,7 +288,7 @@ fn cast_selected(
     selected: Res<SelectedSpell>,
     mut schedule: ResMut<crate::units::GameSchedule>,
 ) {
-    if let (true, Some(kind)) = (keys.just_pressed(crate::keymap::Shortcut::CastSelf), selected.0) && ground_spell(kind, (0, 0)).is_none() {
+    if let (true, Some(kind)) = (keys.just_pressed(crate::keymap::Shortcut::CastSelf), selected.0) && ground_spell(kind, (0, 0), (0, 0)).is_none() {
         schedule.issue(Command::CastSelf { player: PLAYER, kind });
     }
 }
@@ -314,13 +323,23 @@ fn aim_and_cast(
         look.set_if_neq(CursorLook::Arrow);
         return;
     }
-    let ground = cams.iter().next().and_then(|cam| {
-        let ray = cam.0.viewport_to_world(cam.1, c).ok()?;
-        pick_ground(&map.0.terrain, rig.focus, &params.0, ray.origin, *ray.direction)
-    });
-    let spell = ground.and_then(|cell| ground_spell(kind, world_units(cell)));
+    let pick = |at: Vec2| {
+        cams.iter().next().and_then(|cam| {
+            let ray = cam.0.viewport_to_world(cam.1, at).ok()?;
+            pick_ground(&map.0.terrain, rig.focus, &params.0, ray.origin, *ray.direction)
+        })
+    };
+    let origin = if map.0.shaman_omni {
+        let window = windows.iter().next().map(|w| w.size()).unwrap_or_default();
+        world_units(pick(view_bottom_middle(window)).unwrap_or(rig.focus))
+    } else {
+        map.0.shaman_of(PLAYER).map_or((0, 0), |u| (u.x, u.z))
+    };
+    let target = pick(c).map(world_units);
+    let spell = target.and_then(|at| ground_spell(kind, at, origin));
     let ready = player_book(&map.0).slot(kind).is_some_and(|s| s.can_cast());
-    let valid = spell.filter(|s| ready && map.0.can_cast(PLAYER, s));
+    let in_range = target.is_some_and(|at| map.0.in_cast_range(PLAYER, kind, at));
+    let valid = spell.filter(|s| ready && in_range && map.0.can_cast(PLAYER, s));
     look.set_if_neq(CursorLook::Spell { kind, valid: valid.is_some() });
     if let (true, Some(spell)) = (mouse.just_pressed(MouseButton::Left), valid) {
         schedule.issue(Command::Cast { player: PLAYER, spell });
@@ -459,9 +478,16 @@ mod tests {
 
     #[test]
     fn only_spot_spells_are_aimed() {
-        assert_eq!(ground_spell(SpellKind::Teleport, (5, 6)), Some(Spell::Teleport { to: (5, 6) }));
-        assert_eq!(ground_spell(SpellKind::Blast, (5, 6)), Some(Spell::Blast { at: (5, 6) }));
-        assert_eq!(ground_spell(SpellKind::Swarm, (5, 6)), None);
+        assert_eq!(ground_spell(SpellKind::Teleport, (5, 6), (0, 0)), Some(Spell::Teleport { to: (5, 6) }));
+        assert_eq!(ground_spell(SpellKind::Blast, (5, 6), (0, 0)), Some(Spell::Blast { at: (5, 6) }));
+        assert_eq!(ground_spell(SpellKind::LandBridge, (5 * 512 + 9, 6 * 512), (512, 1023)), Some(Spell::LandBridge { from: (1, 1), to: (5, 6) }));
+        assert_eq!(ground_spell(SpellKind::Swarm, (5, 6), (0, 0)), None);
+    }
+
+    #[test]
+    fn a_gods_spells_start_at_the_bottom_middle_of_the_view() {
+        let at = view_bottom_middle(Vec2::new(PANEL_WIDTH + 800.0, 600.0));
+        assert_eq!(at, Vec2::new(PANEL_WIDTH + 400.0, 599.0));
     }
 
     #[test]
