@@ -98,7 +98,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Find the original's order of work inside a turn (people, buildings, effects, shots, mana; income comes before spell charging): ours is a guess.
 - [ ] Rhythms still on per-object counters or missing: unit healing and stranded hurt (`REGEN_EVERY`, `STRANDED_HURT_EVERY`, rates unknown), hut breeding every 4 turns (0x404C80) and growth every 16 (0x4050C0), mana income every 16 (`MANA_UPDATE_FREQ`), the other status timers every 8 (shield and bloodlust done).
 - [ ] World events without behaviour yet: `Raid` (occupants thrown out). Panic: the screaming, and how the original turns at an obstacle.
-- [ ] Burning buildings (`fire`): when the original's structural hit lands (ours at once), whether a burning building can be set on fire again (ours: not), and whether lightning kills the people inside (ours: counted with its 7).
+- [ ] Burning buildings (`fire`), to the original (pop3-rev-analysis.md "Components", burning building): 127 turns; the occupants thrown out and panicked at turn 8 (ours at once), the structural hit of 100 wood at turn 48 (ours at once); a burning building is not lit again (ours: same); the library and the prison never burn. Lightning does not kill the people inside a building (ours: counted with its 7): they come out 8 turns later, panicking (inferred: they are not in the cell's unit list).
 - [ ] Shots (fireballs 8/4, 8/7, 8/8): a typed list ticked before effects, integer flight, spawning a simple blast on arrival.
 - [ ] World views (architecture.md "Client: world visuals"): the landing dust (`units::dust`) as a `WorldView` once
   touchdowns are kept in game-core (a unit's landing tick), so a rejoining client draws it too; the sinking totem's
