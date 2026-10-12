@@ -434,7 +434,7 @@ impl GameMap {
     /// vault, tumbling or lifted); Teleport needs a living shaman and ground she can walk at the target; a
     /// spell starting at the caster (land bridge) needs a living shaman, unless the player is a god
     /// (`shaman_omni`), and a land bridge a target on land (the water on its way is raised); other spells always
-    /// apply. The range is checked when aiming (`in_cast_range`).
+    /// apply. Out of range (`in_cast_range`), she first walks into it (`walk_to_cast`).
     pub fn can_cast(&self, player: u8, spell: &Spell) -> bool {
         if self.shaman_locked(player) {
             return false;
@@ -493,6 +493,72 @@ impl GameMap {
         }
     }
 
+    /// Where `spell` is aimed, world units: the centre of a target cell, a target height point itself; None for the
+    /// terrain brushes.
+    pub fn spell_target(&self, spell: &Spell) -> Option<(u16, u16)> {
+        let n = self.terrain.size() as i32;
+        let world = |(x, z): crate::spell::Cell, centre: u32| {
+            let at = |c: i32| (c.rem_euclid(n) as u32 * WORLD_UNITS_PER_CELL + centre) as u16;
+            (at(x), at(z))
+        };
+        match *spell {
+            Spell::Teleport { to } => Some(to),
+            Spell::Blast { at } => Some(at),
+            Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
+            Spell::Flatten { at } => Some(world(at, 0)),
+            Spell::Erode { .. } | Spell::Raise { .. } => None,
+        }
+    }
+
+    /// Where `player` aims `spell` when it is beyond their living shaman's reach (`in_cast_range`). Without one the
+    /// spell takes effect at once.
+    fn out_of_range(&self, player: u8, spell: &Spell) -> Option<(u16, u16)> {
+        self.shaman_of(player).filter(|u| u.is_alive())?;
+        let (kind, to) = (spell.kind()?, self.spell_target(spell)?);
+        (!self.in_cast_range(player, kind, to)).then_some(to)
+    }
+
+    /// The player's shaman walks towards where `spell` is aimed, to cast it once within range
+    /// (`cast_when_in_range`), if she could cast it now (`can_cast`, a charge left, none used yet): to the target,
+    /// or the nearest ground she can reach to it.
+    fn walk_to_cast(&mut self, player: u8, spell: Spell) {
+        let charged = spell.kind().is_some_and(|k| self.spell_books.get(player as usize).and_then(|b| b.slot(k)).is_some_and(|s| s.can_cast()));
+        let (Some(to), true) = (self.spell_target(&spell), charged && self.can_cast(player, &spell)) else { return };
+        let Some(from) = self.shaman_of(player).map(Unit::cell) else { return };
+        let goal = (crate::unit::cell_of(to.0), crate::unit::cell_of(to.1));
+        let ground = self.ground();
+        let to = if ground.passable(Mobility::Walk, goal) {
+            to
+        } else {
+            let (x, z) = crate::path::nearest_reachable(&ground, Mobility::Walk, from, goal);
+            let centre = |c: i32| (c as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
+            (centre(x), centre(z))
+        };
+        if let Some(u) = self.shaman_mut(player) {
+            u.walk_to_cast(spell, to);
+        }
+    }
+
+    /// Shamans walking to cast (`walk_to_cast`) stop and cast once within range; one that stopped short gives up.
+    fn cast_when_in_range(&mut self) -> Vec<DirtyRect> {
+        let walking: Vec<(u8, Spell, bool)> = self
+            .units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Shaman)
+            .filter_map(|u| u.walking_to_cast().map(|spell| (u.owner, spell, u.action == Action::Idle)))
+            .collect();
+        let mut dirty = Vec::new();
+        for (player, spell, stopped) in walking {
+            if self.out_of_range(player, &spell).is_none() {
+                self.order(player, Order::Stop);
+                dirty.extend(self.apply(&Command::Cast { player, spell }));
+            } else if stopped {
+                self.order(player, Order::Stop);
+            }
+        }
+        dirty
+    }
+
     /// `spell` cast by `player` takes effect now: its effect starts (ticking from the next turn), or the terrain
     /// brush applies (the region it changed).
     fn release(&mut self, player: u8, spell: Spell) -> Option<DirtyRect> {
@@ -518,6 +584,10 @@ impl GameMap {
     /// cannot be cast (`can_cast`) does nothing.
     pub fn apply(&mut self, command: &Command) -> Option<DirtyRect> {
         match *command {
+            Command::Cast { player, spell } if self.out_of_range(player, &spell).is_some() => {
+                self.walk_to_cast(player, spell);
+                None
+            }
             Command::Cast { player, spell } if !self.can_cast(player, &spell) || !self.use_charge(player, spell.kind()) => None,
             Command::Cast { player, spell: Spell::Teleport { to } } => {
                 if let Some(u) = self.shaman_mut(player) {
@@ -719,6 +789,7 @@ impl GameMap {
                 _ => self.wood_event(i, event),
             }
         }
+        dirty.extend(self.cast_when_in_range());
         for (i, &arrived) in arriving.iter().enumerate() {
             if arrived && self.units[i].action == Action::Idle && self.units[i].inside.is_none() {
                 let u = &self.units[i];
@@ -1400,12 +1471,42 @@ mod tests {
     }
 
     #[test]
+    fn out_of_range_she_walks_until_in_range_then_casts_unless_ordered_otherwise() {
+        let mut m = GameMap::sandbox_walk();
+        let (x, z) = (m.units[0].x, m.units[0].z);
+        let range = m.cast_range(0, SpellKind::Blast).unwrap();
+        let at = (x, z.wrapping_add(range as u16 + 6 * 512));
+        let blasts = |m: &GameMap| m.spell_books[0].slot(SpellKind::Blast).unwrap().charges;
+        let before = blasts(&m);
+        m.apply(&Command::Cast { player: 0, spell: Spell::Blast { at } });
+        assert!(matches!(m.units[0].action, Action::Walking { .. }) && m.effects.is_empty() && blasts(&m) == before, "walks first, no charge used");
+        let cast = (1..600).find(|_| {
+            let charges = blasts(&m);
+            m.tick();
+            matches!(m.units[0].action, Action::Casting { .. }) && blasts(&m) == charges - 1
+        });
+        assert!(cast.is_some(), "casts once in range, using a charge then");
+        let u = &m.units[0];
+        assert!(crate::cast_range::within((u.x, u.z), at, m.cast_range(0, SpellKind::Blast).unwrap()), "stopped within range");
+        assert!(torus_delta(z, u.z) > 6 * 512 - 512, "not farther than needed: {}", torus_delta(z, u.z));
+        m.run(crate::unit::CAST_RELEASE);
+        assert_eq!(m.effects.len(), 1, "the blast");
+
+        let mut m = GameMap::sandbox_walk();
+        m.apply(&Command::Cast { player: 0, spell: Spell::Blast { at } });
+        m.run(Ticks::new(6));
+        m.apply(&Command::Order { player: 0, order: Order::Stop });
+        m.run(Ticks::secs(10));
+        assert!(m.effects.is_empty() && m.units[0].action == Action::Idle, "another order drops the cast");
+    }
+
+    #[test]
     fn a_flatten_levels_its_disc_after_the_cast_jump() {
         let mut m = GameMap::sandbox_walk();
         m.spell_books[0].set(SpellKind::Flatten, crate::spell_book::Availability::Known);
         m.spell_books[0].fill();
         let shaman = m.units[0].cell();
-        let at = (shaman.0, shaman.1 - 8);
+        let at = (shaman.0, shaman.1 - 6);
         let level = m.terrain.get(at.0, at.1);
         assert!(crate::flatten::disc(at).any(|(x, z)| m.terrain.get(x, z) != level), "the hill's slope");
         m.apply(&Command::Cast { player: 0, spell: Spell::Flatten { at } });
@@ -1464,7 +1565,13 @@ mod tests {
         m.apply(&Command::Cast { player: 0, spell: Spell::LandBridge { from: (c, c), to: lake } });
         assert_eq!((m.effects.iter().count(), charges(&m)), (0, before), "refused: no bridge, no charge");
         m.apply(&Command::Cast { player: 0, spell: Spell::LandBridge { from: (c, c), to: past_lake } });
-        assert_eq!(charges(&m), before - 1);
+        assert_eq!(charges(&m), before, "out of range: she walks first");
+        let walked = (1..600).find(|_| {
+            m.tick();
+            charges(&m) < before
+        });
+        assert!(walked.is_some_and(|t| t > 12), "then casts, once in range");
+        assert!(m.in_cast_range(0, SpellKind::LandBridge, m.spell_target(&Spell::LandBridge { from: (c, c), to: past_lake }).unwrap()));
         m.run(crate::time::Ticks::new(crate::land_bridge::DURATION));
         assert!(!m.terrain.is_water(lake.0, lake.1), "the lake raised under the bridge");
     }

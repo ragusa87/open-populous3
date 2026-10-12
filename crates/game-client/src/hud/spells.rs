@@ -339,8 +339,7 @@ fn aim_and_cast(
     let target = pick(c).map(world_units);
     let spell = target.and_then(|at| ground_spell(kind, at, origin));
     let ready = player_book(&map.0).slot(kind).is_some_and(|s| s.can_cast());
-    let in_range = target.is_some_and(|at| map.0.in_cast_range(PLAYER, kind, at));
-    let valid = spell.filter(|s| ready && in_range && map.0.can_cast(PLAYER, s));
+    let valid = spell.filter(|s| ready && map.0.can_cast(PLAYER, s));
     look.set_if_neq(CursorLook::Spell { kind, valid: valid.is_some() });
     if let (true, Some(spell)) = (mouse.just_pressed(MouseButton::Left), valid) {
         schedule.issue(Command::Cast { player: PLAYER, spell });

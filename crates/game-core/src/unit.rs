@@ -304,7 +304,7 @@ pub struct Unit {
     planned_on: Option<(u32, u32)>,
     /// Where the current cast jump takes her when it ends (Teleport).
     teleport_to: Option<(u16, u16)>,
-    /// The spell her cast jump releases (`CAST_RELEASE`).
+    /// The spell she is walking into range to cast (`walk_to_cast`), or that her cast jump releases (`CAST_RELEASE`).
     spell: Option<Spell>,
     /// The camp fire (centre) and ring point she is walking to, to go round it once there.
     to_fire: Option<((u16, u16), u8)>,
@@ -432,6 +432,22 @@ impl Unit {
         self.order(Order::Cast);
         self.spell = Some(spell);
         true
+    }
+
+    /// Walks to `to` (world units) to cast `spell` once within range (`GameMap::cast_when_in_range`); whether she
+    /// took it. Another order on the way cancels it.
+    pub fn walk_to_cast(&mut self, spell: Spell, to: (u16, u16)) -> bool {
+        if !self.takes_orders() {
+            return false;
+        }
+        self.order(Order::MoveTo { x: to.0, z: to.1 });
+        self.spell = Some(spell);
+        true
+    }
+
+    /// The spell she is walking into range to cast, if any.
+    pub fn walking_to_cast(&self) -> Option<Spell> {
+        self.spell.filter(|_| !matches!(self.action, Action::Casting { .. }))
     }
 
     /// Where the current cast jump takes her, if anywhere.
@@ -900,7 +916,7 @@ pub fn slope_factor(grade: i32) -> i32 {
     (256 - grade * per_100 / 100).clamp(SLOPE_FACTOR_RANGE.0, SLOPE_FACTOR_RANGE.1)
 }
 
-fn cell_of(v: u16) -> i32 {
+pub(crate) fn cell_of(v: u16) -> i32 {
     (v as u32 / WORLD_UNITS_PER_CELL) as i32
 }
 

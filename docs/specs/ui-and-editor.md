@@ -71,9 +71,10 @@ Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 Hover shows the tile's description, click selects (white border). Right click on a known spell pauses its recharge
 (`Command::PauseSpell`, like the original's "toggle on/off"): it takes no mana, keeps its charges and can still
 be cast; badge "paused", grey frozen bar. Right click again resumes. Spells cast on a spot (`ground_spell`: Teleport,
-Blast, Land Bridge) are aimed with the mouse while selected: over the map the cursor becomes the animated gold arrow with the spell's icon on its right, the icon grayed out
-where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground, a land bridge onto land; out of range,
-`GameMap::in_cast_range`). Meanwhile a range ring stands round the shaman at the spell's range (`range_ring`, our own
+Blast, Land Bridge, Flatten) are aimed with the mouse while selected: over the map the cursor becomes the animated gold arrow with the spell's icon on its right, the icon grayed out
+where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground, a land bridge onto land). Out of
+range (`GameMap::in_cast_range`) the click still casts: the shaman walks towards the target and casts once in range
+(spells.md). Meanwhile a range ring stands round the shaman at the spell's range (`range_ring`, our own
 look, isolated in that file to be redone: a gold curtain growing in with an overshoot in 0.75 s and shrinking back
 when the spell is put away, a glowing line at its foot; when she starts casting a white line contracts into her and
 the curtain jumps up; none for spells without a range nor on god levels), left click casts it there and puts
