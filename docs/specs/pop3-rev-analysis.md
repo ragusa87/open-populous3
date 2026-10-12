@@ -8,6 +8,12 @@ Sources:
 - [exe]: disassembly of `D3DPOPTB.EXE` (French release, 1998, Direct3D build) with `objdump`.
 - [ghidra]: the `pop3-rev` Ghidra project. Function names in `code style` are its names, names in quotes are our
   proposed renames.
+- [measured]: live memory reads of the running game, on `D3DPOPTB.EXE` or on `POPTB.EXE` (software build of the
+  same release, same game code).
+
+Every address in this file is a `D3DPOPTB.EXE` address. `POPTB.EXE` runs the same rules at other addresses
+(`pop3-rev/docs/poptb_map.tsv`: game state shifted by −0x17A68, per-type tables by −0x7220, functions one by one),
+so a live measurement may run on it with the addresses translated.
 
 ## Takeaways for the implementation
 - **12 turns per second** [exe, measured]: a fixed timestep of 83 ms. Every "turns" value below converts at that
@@ -37,6 +43,9 @@ Sources:
 - **A melee is a pre-fight, then a fight** [exe]: the attacker runs up, kicks the target away without damage,
   runs up again; then a ring fight of one against up to five, where every blow costs
   `max(32, FIGHT_DAMAGE × life / max_life)` and most blows hit both fighters. See "Combat".
+- **A firewarrior throws two homing fire bolts, one hits** [exe]: 1 cell per turn, 100 to every enemy in the
+  impact cell plus `SW_BLAST_DAMAGE` × a per-type % to the target, every 25-28 turns, at 9.2-17.2 cells by altitude.
+  See "Firewarrior fire".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
 
@@ -683,6 +692,57 @@ otherwise:
   distance (not traced). But a firewarrior attacked by someone else goes through the pre-fight and fights in melee
   like anyone, at half speed (its draw class plays 2 turns per frame: 14-turn moves and hits) [measured].
 
+### Auto-attack: people who see an enemy (0x4D4690) [exe]
+Every person runs this check in its per-turn update; it decides who starts an attack on its own.
+```text
+rhythm: when class_counter & mask == 0 (person table +0x2F: 3 → every 4 turns; preacher 1 → every 2)
+skipped: busy (0x4D44E0: in a vehicle or building unless a firewarrior, a state with flag 0x40 in 0x5A6F79,
+  i.e. 2, 3, 5, 6, 9, 11, 14-16, 20, 22-29 (fight 25, pre-fight 29, panic 26), 31, 36-42, 44; and some orders)
+radius in cells (0x51FF60):
+  no order being carried out (state not 10):     person table +0x18
+  carrying out an order (state 10): per order kind, byte +3 of its record in table 0x5A7DC0 (stride 11):
+    0 or 4 → no scan at all: kinds 0-5, 7-21 odd, 23, 25-31 odd, 33, 35, 37, 39 and up (4 is not handled)
+    2 → +0x19: kinds 6-20 even, 24-30 even, 38
+    1 → +0x18: kinds 22, 32, 34, 36
+  firewarrior: the same, × ALT_BAND_<b>_SUPER_INCR % by height, + 4 in a drum tower, then made odd
+by type: preacher → its own scan (0x51E7B0, conversion); firewarrior → its own scan when reloaded (0x51E9A0);
+  shaman → 0x51E7B0 only during some orders; everyone else → the melee scan below
+melee scan (0x51E5E0): r = radius rounded down to even; the square of (r + 1) × (r + 1) cells centred on its
+  cell, row by row from a corner (0x51EAB0); the first match wins, not the nearest:
+    an enemy person (not allied, alive, visible: not invisible +0x10 bit 0x1000, not inside anything, not
+      already in a fight other than a pre-fight, not in state 23, not of an excluded state) → 2
+    in a state with flag 0x8 (1, 13, 17-19, 21, 30, 57, 58) and outside, also: a fight controller to join → 1,
+      an enemy building on a cell → 3
+  a match → the person gives itself an order of kind 0x15 (attack around that cell, 0x438730), then the attack
+  order runs as in "Starting a melee"
+```
+
+Order kinds come in pairs: an odd kind with a sprite (`hfx0-0.dat` index at record +6) and the even kind after it.
+Our guess (not traced): the odd kind is going to the order's place, the even one doing it; the text below reads the
+kinds that way. The sprites hint at some kinds, but they are not drawn over people: in the game, a person who
+spots an enemy (kind 21) shows no icon [observed]; where the game shows them is open. Sprites: 1 and 21 123 (an
+arrow over a figure), 3 131, 5 and 7 139/147 (helmets), 11 163 (a hand over a bowl),
+13 171 (a book), 15 179 (a robed figure), 17 187 (logs), 19 195 (a house frame), 23, 37 and 41 211 (two swords),
+31 243 "DISGUISE", 33 251 "PREACH", 35 115 (a helmet rim), 39 259 "PORTAL", 43 267 "IN". With the guess, a
+person walking under an order never auto-attacks, a person doing most orders only checks its own cell, and the
+second halves of the attack (22), disguise (32), preach (34) and kind 36 keep the full radius.
+
+| Type | +0x18 (no order) | Melee square | +0x19 (some orders) |
+|---|---|---|---|
+| wild | 0 | never | 0 |
+| brave | 5 | 5 × 5 cells (2 each side) | 1 (1 × 1: its own cell) |
+| warrior | 5 | 5 × 5 cells | 1 |
+| preacher | 3 | (conversion scan) | 1 |
+| spy | 0 | never | 0 |
+| firewarrior | 11 | (fire scan: 9.2-17.2 cells by height, see "Firewarrior fire") | 5 |
+| shaman | 3 | (only during some orders) | 1 |
+| angel of death | 7 | 7 × 7 cells (3 each side) | 7 |
+
+- Not named constants: `constant.dat` cannot change them. The `<TYPE>_DT_RADIUS` constants (person table +0x22)
+  are read only by drum-tower code (0x40B450, 0x40BD20), not by this scan.
+- A preacher attacker only targets preachers and shamans (0x51EC80), angels of death are never targeted by the
+  melee scan, and spies and wildmen never scan.
+
 ### Starting a melee (the attack-order handler, 0x51A2A0)
 ```text
 attacker within reach of the target (0x439850(person, 224)):
@@ -800,6 +860,157 @@ join(person, fight)                                                    (0x51DDC0
   idle person in sub 1 attacks again at once if its opponent is ready, so the rhythm is about one blow per
   0.6 s per pair (estimate, not measured).
 
+### Attacking a building [exe]
+An attack order on an enemy building (`+0x89` the building; sub-states in `+0xA8`, 0x51A2A0):
+```text
+at the door, 16 turns: hacking anim (action 6: anim 11, the axe chop; a shaman stays idle) and the building shakes
+  then occupied (0x51E300: people inside, or enemies on a plan's cells) → one occupant is pulled out
+    (0x407490) and a pre-fight mode 1 starts ("Starting a melee"), again while people are inside
+  empty → hacking turns:
+hacking (0x51B37D): anim 11, sound 1, for 8 + rand(16) turns; every turn:
+    shake(building, 6) (0x407810), building +0x9C bit 0x10 (attacked)
+    damage(building, attacker) (0x409140): unless the attacker is a ghost,
+      building +0x9E += person table +0x16 >> 2: brave, preacher, spy 7; warrior 12; shaman 10; firewarrior 16;
+      angel 31; the attacker's tribe kept in +0xAF; the player warned once (0x89CE60, map position 0x89C6E5)
+  then → walk to a random point 360 units from the building's cell centre (0x51B42E), and hack again
+```
+The building's side, every turn (`unit_processing_class_2_bldg` 0x403280, 0x4092A0):
+```text
+shaking (+0x9C bit 0x2, timer +0xA7 = 6, refreshed by every blow; not while burning): draw offsets +0x6C, +0x6E
+  each ±2, flipping with class_counter bits 1 (x, z out of phase): a small jitter of the whole model, gone 6
+  turns after the last blow
++0x9C bit 0x40: the accumulator also gains 24 + rand(128) per turn (what sets the bit: not traced)
+every 4 turns: accumulator −1
+accumulator >= threshold (building type +0x2E: 2000; wall 16 000, prison 22 000; library 0: never):
+  accumulator −= threshold;  one structural hit: −100 wood (0x4BA2C0), with:
+    a size ≥ 3 building with people inside: everyone thrown out
+    a damage smoke (0x40B320) at one of the model's smoke points, lasting DME_RESTORE_TIME (6000) + rand(256)
+      turns (8.3 min)
+    a partial explosion (0x407860: internal 10/7 "object face" units, the model's faces flying off, and smoke 7/3)
+    repair delay: the building's plan +0x94 = SW_BLDG_DAMAGE_DELAY (exe 2000, file 1200 turns: 100 s), counted
+      down by the plan (0x4B8BB0, state 2): no repair until it reaches 0; at 0, 0x40AFD0 (probably the smoke
+      removal)
+    the plan's +0xA0 = the attacker's tribe
+  no wood left: the building is destroyed (stats[tribe][7] += 1, sound 0x34)
+```
+- So damage goes through an accumulator, not straight to wood: one brave hacking (7 per turn, −1 per 4 turns
+  decay) takes about 300 turns (25 s) per 100 wood, plus its walks between spots; a small hut (300 wood) about
+  75 s, a warrior about 14 s per 100 wood (estimates, not measured). Several attackers add up. Firewarrior shots
+  (100 file) and blasts (`BLAST_DAMAGE_BLDG` 40) feed the same accumulator.
+- "Unusable for a while": a building destroyed this way leaves ashes on its footprint, which cannot be built on
+  for about 8.7 min ("Building ashes").
+
+### Building ashes ("Damaged Ground") [exe]
+The ashes are a mark on the landscape, not a sprite, a model or a unit: the destroyed building's footprint cells
+get the map-cell flag 0x4000000 and their blend byte (cell +0xA) forced to 127, the landscape texture then draws
+its darkest "cliff" colour row there. Mouse-over text: "Damaged Ground: Cannot be built on." (lang00 string 0x348).
+```text
+map cells: 0x8A03E4, 16 bytes, 128 per row; +0 flags (0x2 units, 0x10000 reincarnation site, 0x4000000 damaged
+  ground, 0x8000000 lava), +4 height, +0xA blend byte (normally clamp((max neighbour height − min) / 8, 1, 127),
+  0 at height 0, from level_land_processing_2 0x44DF40, which skips flagged cells)
+
+a building losing its last wood (wood +0x96 <= 0 on its shape +0x82):
+  attack accumulator 0x4092A0 (branch 0x409498), fire 0x408AB0 (0x408C38), whirlwind 0x4980A0 → 0x40B130
+    make_ashes(shape)  0x40B230
+    delete the shape and the building, stats[tribe][7] += 1
+make_ashes 0x40B230:
+  own tribe, not type 0x13: 0x499D90(0x4000, 0x253)   (probably the "building lost" alert, not checked)
+  every footprint cell (0x4B9E20, building-type table 0x59DF3C, mask bit 0x2): +0xA = 127, flags |= 0x4000000
+  damage smoke 7/0x4C (0x40B320) lasting DME_RESTORE_TIME + rand(256)
+  scorch_add(kind 1, position, building type)   0x4509D0
+scorch list 0x969E9F: 100 slots × 8 bytes (age, kind 1 footprint / 2 rectangle, phase, size, position);
+  full: the oldest slot is cleared at once and reused
+scorch_tick 0x450A70 (from 0x4ECA09), on turns where turn & 15 == 0, every slot: age += 16
+  phase 1: age >= DME_RESTORE_TIME (exe and file 6000) → phase 2
+  phase 2 (0x450B30): every flagged cell with +0xA >= 0x5C: +0xA −= 2, at <= 0x5C the flag is cleared;
+    a pass changing nothing → phase 3, the area's blend recomputed from its slopes (0x44DDF0)
+  phase 3: slot freed
+placement 0x44EE50: a cell with flags & 0x4010000 cannot be built on
+```
+- Durations: 6000 turns (500 s, ±15 from the 16-turn check) of full ashes, then a 288-turn (24 s) fade, 127 to 91
+  in 18 steps of 2; the building ban lasts about 6290 turns (8 min 44 s) per cell.
+- Drawn (`set_texture_landscape_main` 0x4BE330, texels 0x4BEC09-0x4BECB1): +0xA, interpolated over the cell's
+  corners, / 4 picks one of the 64 rows of the 128-wide table 0x5D45CC (8 KB, named `set_cliff_palette`, probably
+  `data/cliff0-N.dat`, guessed from its size); a non-zero +0xA also adds 0x4B to the altitude colour index (max
+  0x3FE). Ashes are row 31, the darkest a normal slope reaches; lava goes up to 0xFF (rows 32-63, presumably
+  glowing) and cools back to 127. The row colours were not checked. Only other visual: the long damage smoke.
+- Ashes or not:
+
+| Destroyed by | Path | Ashes |
+|---|---|---|
+| attackers (melee, shots, blasts) emptying the wood | 0x4092A0 → 0x40B230 | yes |
+| fire (lightning 0x408CB0, firestorm, lava → state 4) | 0x408AB0: fire timer +0xA7 127, occupants out at 0x77, one −100 wood hit at 0x4F | yes, if that hit empties the wood; else back to state 1 |
+| whirlwind pulling the wood out | 0x4980A0 → 0x40B130 → 0x40B230 | yes |
+| foundation check (terrain no longer fits), earthquake, swamp, flatten, land changes | 0x408080 → state 3 sub 1 | no: explodes |
+| volcano | 0x50E5FB → state 3 sub 1 | no (its own lava cells are damaged ground) |
+| foundation sub 2 | 0x4082A0 | no |
+
+- State 3 (0x406F40, from the class-2 dispatcher 0x403280): a 2-turn countdown (+0x67); at 1 everyone inside is
+  thrown out (0x407490); at 0, sub 1 a partial explosion (0x407860) and a blast 7/1, sub 2 a unit 10/0x13; then the
+  building is removed (0x403860, landscape 0x403A00) without calling 0x40B230.
+- Other damaged ground, same flag and list: lava squares (0x512B94, kind-2 rectangle at 0x513096), the earthquake
+  effect 7/0x1A (0x50D9A0, rectangle at 0x50DFB7), one cell at 0xC4 (0x5134C0); the volcano cone sets the flag
+  without a list entry (how it clears is not traced); 0x515AC0 clears a cell outright (caller not traced).
+
+### Firewarrior fire [exe]
+A firewarrior attacks from a distance with its own attack-order sub-states (person `+0xA8`, in 0x51A2A0): it
+faces the target, throws, then waits for its reload.
+```text
+range (0x51F990), a square per axis around the firewarrior:
+  cells = 11 (person table +0x18 of type 6) × ALT_BAND_<b>_SUPER_INCR / 256,  b = clamp(height / 128, 0, 7)
+  + 4 in a drum tower;  cells |= 1;  reach = cells × 256 + 56 units
+  then a line of fire, sampled every 384 units (from 0x51FAA2, not read in detail)
+  the caller at 0x4E938B passes a flag adding 2 cells after the odd step (0x51FA10); option 0x89D17C bit 0x2:
+  19 cells whatever the height
+  file (80 % at band 0 .. 150 % at band 7), reach per axis: bands 0-1 9 cells (2360 units), band 2 11 (2872),
+  bands 3-4 13 (3384), bands 5-6 15 (3896), band 7 17 (4408); a drum tower adds 4 before the odd step
+  (exe: 100 % everywhere, 11 cells)
+throw (+0xA8 = 0x2C): anim 7 (the firewarrior throwing fire, 5 frames, 1 turn each), speed 0 (half its speed
+  when aboard a vehicle), and at once fire(self, target) (0x51FBF0):
+    two shots 8/6, one per hand: started 96 units to the left and to the right of the thrower, at its height
+      + its own height (+0x1C) + 16; launch sound 0xA1
+    only the second (right) one hits; the left one only flies (its arrival does nothing)
+    a ghost firewarrior's shots are ghosts too (+0x10 bit 0x800): they do nothing
+    reload (+0xB2) = SW_FIRE_RATE (exe 36, file 25), SW_FIRE_RATE_TOWER (36) in a drum tower;
+      bloodlusted: >> BLOODLUST_SW_BLAST_X (exe 2, file 3: 25 → 3 turns)
+reload (0x4D42A4, every turn for type 6): −1 per turn; its last step only on a turn where class_counter & 3 == 0,
+  so 25-28 turns (2.1-2.3 s) between throws with the file values
+```
+The shot 8/6 (init 0x4BBCF0, per turn 0x4BBF30, in the main loop's own list):
+```text
+speed 512 units per turn (1 cell), homing: aims at the target's position + its height + 16 every turn (a building:
+  its door point at ground height); arrived when within one turn's move (3D), then a last 15/16 step
+every turn: a smoke puff 7/3 at its position (a trail); own people standing still in the 3 × 3 cells around it get
+  +0x10 bit 0x400000 (cleared each turn by their own update; probably a duck or flinch, unverified)
+the hitting shot carries a ground light (`sunlight_update_unit_landscape` 0x4010B0(shot, 2, 4, 0): one of 50
+  dynamic lights that brighten the landscape under it)
+arrival of the hitting shot: snapped onto the target, sound 0xB2, then hit (0x514410):
+  every enemy (not of an allied tribe, 0x416D70) in the impact cell:
+    person: 100 (× BLOODLUST_DAMAGE_X when the shot is bloodlusted), killed → credited to the thrower
+    vehicle: 100;  tree (scenery flag 4): set burning (+0x65 = 1, +0x61 = its cell)
+  the target, if it was in that cell:
+    person: + SW_BLAST_DAMAGE (exe 400, file 100; SW_BLAST_DAMAGE_TOWER 400 from a drum tower)
+              × SW_BLAST_DAMAGE_<type> % (exe 100 % all, angel 10 %; file: warrior 5 %)
+            a shaman inside a building or vehicle: max_life / 2 instead (0x5AA5E8 = 128 / 256)
+            a firewarrior target fires back (0x520610), an angel of death reacts (0x4DE570)
+    building (its own cell): structural damage SW_BLAST_DAMAGE (0x409200) and set burning (+0x65, +0x61)
+  every person hit is thrown: dead, or a type without person-table +0x31 bit 0x2 (brave, spy, firewarrior,
+    shaman): 64 units per turn away from the thrower + 110 up (blown, "Person physics"); a living warrior or
+    preacher only hops (vertical speed 36); a building or vehicle holding the person is flagged (+0xA0)
+```
+So with the file values a firewarrior's hit costs a brave 200 (100 in the cell + 100 targeted), a warrior 104 (5 % stored as 12 / 256, so 4), and
+anyone else standing in the target's cell 100. The live capture of "Combat" shows those 200-life steps.
+
+Drawn:
+- The shot: hfx 1120-1123 (`hfx0-0.dat`, alpha range: a 16 × 16 white-yellow fireball, 4 frames), draw class 29
+  (table 0x5A6AF8 row 29); the volcano's small fireball 8/7 uses the same sprite (0x4BC537), the big 8/8 hfx 1248.
+  1124-1127 (the same ball shrinking: 14, 11, 9, 5 pixels) follow it, probably its fade (not traced).
+- The trail: a smoke puff 7/3 every turn (init 0x50BF60): hfx 314-321 (a 15 × 16 puff dissipating over 8 frames),
+  rising 20 units per turn, 4 turns of life, its randomness from a second generator (0x89BC72, not the game's).
+- A light on the ground following the hitting shot; no explosion sprite at the impact (none spawned by the hit),
+  only sound 0xB2 and the victims thrown.
+- The thrower: anim 7 (5 frames, gear drawn in).
+
 ### Measured (a level against tribe 1, `fightwatch.py`, about 500 turns) [measured]
 - Timings as traced: the opening blow 6 turns, the target flung when the attacker has 2 left; moves 2, 3, 4 last
   6, 7, 7 turns, a hit 7 (4 then the knockback for move 2); a firewarrior's move or hit 14. A pair exchanges
@@ -812,11 +1023,44 @@ join(person, fight)                                                    (0x51DDC0
   `LIFE_<type>`: these braves fitted about 800 (tribe 0) and 970 (tribe 1), and a warrior's blows (270-320 against
   braves) fit about 1450-1620 instead of 1800. Where the maximum comes from is open.
 - Healing, outside and inside fights, every 8 turns (turns that are multiples of 8): brave and preacher +4,
-  warrior and firewarrior +6. Not traced in the exe.
+  warrior and firewarrior +6, as traced ("Health and healing").
+- A second capture (4 tribes, about 1700 turns) adds:
+  - a shaman target is flung by the pre-fight's opening blow like anyone (about 3 cells, sliding): only the fight's
+    knockback spares her, as traced; in the fight she only used moves 4 (5 turns) and the 7-turn hit, and healed
+    +32 every 8 turns;
+  - the same id was read in 2-3 slots of one fight (#1620 in fight #1134, turns 904-941; #1298, #1292), `n`
+    counting them, and that person's move timer then dropped 2 per turn (turns 911-913: 6, 4, 2) as if handled
+    once per slot. Doubtful (not seen in the game, the watcher reads memory while the game runs): unverified, to
+    check with a raw dump of the fight's `+0x70` slots and the person's `+0x9D`;
+  - pre-fight mode 2 seen: both people walking side by side (about 82 units per turn) for up to 100 turns, the
+    target stopping at its building's door, then thrown away from it (about 2.8 cells over 10 turns, the speed
+    rising to about 185 per turn before slowing, faster than the traced ejection; slope not checked) while the
+    attacker runs up (sub 5);
+  - people leave a fight or a pre-fight into state 10 (an order), state 2 (drowning), state 14 (both cases were
+    preachers, so probably preaching; not traced), kept in the fight's list for 15+ turns, and state 44 (struck by lightning).
 - Edge cases seen: the attacker in one pre-fight became the target of another, and the first one stood
   stalled (attacker in sub 4) until a fight took it away; a fighter walked off by an order was pulled into a new
   pre-fight and its fight ended; a person kept running in a pre-fight for 11 turns at negative life (hurt by
   something else) before dying.
+- A third capture (`fightwatch.py --fire --no-fights`, turns 2548-2901, 4 tribes) of firewarriors:
+  - damage as traced: a brave or preacher target loses 200 per throw, a warrior target 104 and the warriors standing
+    in its cell 100 each (up to 6 hit by one throw); throws stack: 2 firewarriors on one brave 400, 3 of them 600
+    (the shots arriving the same turn);
+  - the bolts fly 3-8 turns, their aim point updated every turn while the target walks (homing);
+  - one firewarrior on its own threw every 27-28 turns; between throws it went to state 19 (not traced) for about
+    20 turns, then back to its attack order (state 10, sub 10 or 11);
+  - throws happened at up to 9.4 cells (per axis) from height 0 and 13 cells from height band 3, within the reach
+    above (the target walking away after the check);
+  - one firewarrior at height 0 threw 5 times at the same preacher, standing still at height 186 about 5.8 cells
+    away: each pair ended within one move of it, at the same spot every time, and it never lost life: probably blocked by a building
+    (seen in the game, not traced);
+  - the reload byte (`+0xB2`) sometimes read 252-255 on firewarriors that had read 0 a turn or two before, then
+    counted down one per turn as usual: five of them stood in their attack order (sub 10, `+0xA8` = reload) next
+    to their target for 20+ turns without throwing. The countdown (0x4D42A4) stops at 0 and cannot wrap, and no
+    writer of `+0xB2` found sets 255 for a firewarrior (the others are the spy's and other states' flags): open;
+  - healing as traced: +6 per 8 turns for firewarriors, on turns that are multiples of 8;
+  - wildmen (type 1, tribe 255) going from 32 life to 0 about every 40 turns: they walk into water on their own
+    and drown, unrelated to fighting (out of scope here).
 
 Strength per type (exe default / `constant.dat`); it falls with the attacker's health, never under 32:
 
@@ -831,6 +1075,38 @@ Strength per type (exe default / `constant.dat`); it falls with the attacker's h
 
 - The file spells the shaman's constant `FIGHT_DAMAGE_SHAMAN`, the exe table `FIGHT_DAMAGE_SHAMEN`; if
   `read_levels_const` matches names exactly, the file's line is ignored (both are 60: no effect).
+
+## Health and healing [exe, measured]
+`unit_processing_class_1_person` (0x4D3B2C) calls the life step 0x4D43A0 every turn for every person, unless its
+state has flag 0x1 in the state table 0x5A6F79 (stride 5): states 2 (drowning, set by this step), 3 (dying), 22,
+24, 27, 28, 37, 40, 42 and 44 (struck by lightning). The fight (25) and pre-fight (29) states do not have it: people
+heal and die normally while fighting.
+```text
+in the air (+0xC bit 0x80000, blown or flung):  nothing: no healing, and no death until it lands
+cheat flag 0x89D17C bit 0x80:                   life = max_life (+0x6C)
+life <= 0:                                      state 3 (dying), previous state kept in +0x7D
+heals (person table +0x30 bit 0x8) and turn & 7 == 0:
+    life < max_life: life += heal (person table +0x1A, a byte; no clamp to the maximum)
+    else:            last attacker (+0xB0) = none
+low health (+0x14 bit 0x1000, the sparkles) = life <= max_life / 4
++0xC bit 0x8 (set on fire) and not already state 31: state 31 (burning)
+```
+
+| Type | Heals | Per 8 turns | Per second | Full from empty (file `LIFE_`) |
+|---|---|---|---|---|
+| wild | no | | | |
+| brave | yes | 4 | 6 | 1000: 167 s |
+| warrior | yes | 6 | 9 | 1800: 200 s |
+| preacher | yes | 4 | 6 | 1100: 183 s |
+| spy | yes | 4 | 6 | 600: 100 s |
+| firewarrior | yes | 6 | 9 | 700: 78 s |
+| shaman | yes | 32 | 48 | 2000: 42 s |
+| angel of death | no | | | |
+
+- The heal amounts are not named constants (`constant.dat` cannot change them). The live capture of "Combat" shows
+  the same +4 (brave, preacher) and +6 (warrior, firewarrior) on the turns that are multiples of 8, inside fights.
+- Being thrown delays death: a person at life ≤ 0 keeps moving until it lands (the capture's runner at −144 for 11
+  turns was flung by a firewarrior's bolt).
 
 ## Impact on our specs
 - huts-and-training.md rule 7 (`MANA_F[kind]` × `HOUSED`/`WORKING`/`TRAINING` %, × `HUT_LEVEL`) is not what the
@@ -930,8 +1206,17 @@ Strength per type (exe default / `constant.dat`); it falls with the attacker's h
 - What "busy" means (unit+0xE bit 7, unit+0xA7), and the preacher's extra check.
 - The controller types of tribe+0xC1F (2 is human; 1 gets full mana).
 - Spell order and share inside the distribution loop.
-- Combat: where a person's maximum life (`+0x6C`) comes from when it is not `LIFE_<type>`, the healing rule
-  (measured +4 / +6 every 8 turns), whether a taunt (48-50) plays to its end (0x4D4DA0
+- Auto-attack: the names of the person states (1 is probably idle) and of the order kinds (map the player commands
+  in `process_tribe_cmd` to the kinds they create), whether the odd / even kinds are really going / doing, where
+  the kinds' sprites are drawn, the radius byte (0x20,
+  0x30) given to the self-issued attack order, the preacher's and firewarrior's own scans (0x51E7B0, 0x51E9A0).
+- Building ashes: the cliff rows' colours, the volcano cone's clearing, foundation sub 2's condition and its unit
+  10/0x13.
+- Attacking a building: what sets building +0x9C bit 0x40, and the partial explosion's 10/7 units.
+- Firewarrior fire: the line-of-fire test, whether a building stops the bolts (5 throws at a still preacher did nothing), what sets the reload
+  byte to 252-255 (third capture), what the +0x10 bit 0x400000 set on own people under a passing shot does,
+  whether hfx 1124-1127 is the shot's fade, and the approach sub-states (10, 11) before the throw.
+- Combat: where a person's maximum life (`+0x6C`) comes from when it is not `LIFE_<type>`, whether a taunt (48-50) plays to its end (0x4D4DA0
   resets a non-idle person to idle the next turn; the per-person `+0x7E` it sets may hold it),
   what option flag 0x89D17C bit 0x40 is (no kick, no knockback),
   the meaning of pre-fight mode 2, the ground test of a fight's place (0x51E4B0), the attacker's sub-state 8 when
@@ -991,6 +1276,19 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x51DDC0, 0x51DCC0 | join a fight; slot choice and rank replacement |
 | 0x51DF90 | split a fight into a new 1-to-1 when both sides have 2 or more |
 | 0x4A39C0 | "melee_hit(target, attacker, one_sided)" |
+| 0x4D4690 | auto-attack check (rhythm, busy test 0x4D44E0, per-type scan) |
+| 0x51FF60 | auto-attack radius in cells (by order kind, type, height for firewarriors) |
+| 0x51E5E0, 0x51EAB0 | melee auto-attack scan: square of cells, first enemy found |
+| 0x409140, 0x409200 | building damage: add to its accumulator `+0x9E` (per attacker turn, or an amount) |
+| 0x4092A0 | building accumulator: decay, structural hits of 100 wood, destruction |
+| 0x407810 | shake a building (timer `+0xA7`, offsets `+0x6C`/`+0x6E`) |
+| 0x4B8BB0 | damaged building's plan per turn (repair delay `+0x94`) |
+| 0x51F990 | firewarrior range and line of fire |
+| 0x51FBF0 | "firewarrior_fire(thrower, target, point)": two shots 8/6, reload |
+| 0x4BBCF0, 0x4BBF30 | shot 8/6 init and per turn (homing, trail, arrival) |
+| 0x514410 | firewarrior shot hit: the impact cell, the target, buildings, throws |
+| 0x4D42A4 | firewarrior reload countdown |
+| 0x4010B0 | `sunlight_update_unit_landscape`: a dynamic ground light following a unit (50 at most) |
 | 0x41B550 | per-tribe combat counters at 0x969DC6 (`[tribe × 12 + k]`: 0 fights won, 1 people killed) |
 | 0x4D3FF0 | a person's action animation (`[action × 9 + type]` at 0x5A6D50) |
 | 0x4C16E5 | cast cost in `init_unit_type_11`; parameter queue at 0x892443 |
@@ -1038,6 +1336,10 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x44DDF0 | recompute the landscape around a cell after a height change |
 | 0x44F2F0 | notify units and buildings around a cell: mode 1 "ground moved", mode 2 "set on fire" |
 | 0x408080 | building foundation check: re-level the footprint or collapse |
+| 0x40B230 | make the ashes: footprint cells flagged damaged ground, damage smoke, scorch list entry |
+| 0x4509D0, 0x450A70, 0x450B30 | scorch list: add, tick every 16 turns, fade / clear an area |
+| 0x406F40 | building state 3: thrown out, explode, removed (no ashes) |
+| 0x50D9A0 | earthquake effect 7/0x1A per turn (Ghidra: `process_explode_building`) |
 | 0x4E7FB0, 0x4E8F00 | boat and balloon movement passes (balloon hover height) |
 | 0x4E93F0 | add a push to a velocity, scaled by the slope along it |
 | 0x4EBC20 | slope vector at a position (ground sliding) |
