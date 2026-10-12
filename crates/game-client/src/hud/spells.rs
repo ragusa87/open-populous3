@@ -116,6 +116,7 @@ pub fn ground_spell(kind: SpellKind, at: (u16, u16), origin: (u16, u16)) -> Opti
     match kind {
         SpellKind::Teleport => Some(Spell::Teleport { to: at }),
         SpellKind::Blast => Some(Spell::Blast { at }),
+        SpellKind::Lightning => Some(Spell::Lightning { at }),
         SpellKind::LandBridge => Some(Spell::LandBridge { from: cell(origin), to: cell(at) }),
         SpellKind::Flatten => Some(Spell::Flatten { at: game_core::flatten::nearest_point(at) }),
         _ => None,
@@ -481,6 +482,7 @@ mod tests {
         assert_eq!(ground_spell(SpellKind::Teleport, (5, 6), (0, 0)), Some(Spell::Teleport { to: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::Blast, (5, 6), (0, 0)), Some(Spell::Blast { at: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::LandBridge, (5 * 512 + 9, 6 * 512), (512, 1023)), Some(Spell::LandBridge { from: (1, 1), to: (5, 6) }));
+        assert_eq!(ground_spell(SpellKind::Lightning, (700, 900), (0, 0)), Some(Spell::Lightning { at: (700, 900) }));
         assert_eq!(ground_spell(SpellKind::Flatten, (5 * 512 + 300, 6 * 512 + 9), (0, 0)), Some(Spell::Flatten { at: (6, 6) }), "the nearest height point");
         assert_eq!(ground_spell(SpellKind::Swarm, (5, 6), (0, 0)), None);
     }

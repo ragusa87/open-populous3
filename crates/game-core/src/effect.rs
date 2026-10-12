@@ -25,6 +25,7 @@ pub struct Effect {
 pub enum EffectKind {
     SimpleBlast(crate::blast::SimpleBlast),
     LandBridge(crate::land_bridge::LandBridge),
+    Lightning(crate::lightning::Strike),
     Flatten(crate::flatten::Flatten),
     #[cfg(test)]
     Probe(tests::Probe),
@@ -34,6 +35,8 @@ pub enum EffectKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DamageKind {
     Blast,
+    /// Kills whatever the health (`lightning`).
+    Lightning,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +59,7 @@ impl Effect {
         let events = match self.kind {
             EffectKind::SimpleBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units),
             EffectKind::LandBridge(ref mut bridge) => bridge.turn(),
+            EffectKind::Lightning(ref mut strike) => strike.turn((self.x, self.z), self.owner, &world.units, &world.buildings),
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
@@ -73,7 +77,7 @@ impl Effect {
         match self.kind {
             EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
             EffectKind::Flatten(ref flatten) => flatten.reshaping(terrain),
-            EffectKind::SimpleBlast(_) => Vec::new(),
+            EffectKind::SimpleBlast(_) | EffectKind::Lightning(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }
@@ -81,13 +85,14 @@ impl Effect {
 }
 
 /// Whether `kind` damage from tribe `from` hurts `u`: never a shielded unit (pop3-rev-analysis.md "Per spell",
-/// Shield), and a blast spares the caster's own tribe (no alliances yet).
+/// Shield); a blast spares the caster's own tribe (no alliances yet), lightning only the caster's own shaman.
 pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
     if u.statuses.shield.is_on() || !u.is_alive() {
         return false;
     }
     match kind {
         DamageKind::Blast => from != Some(u.owner),
+        DamageKind::Lightning => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman),
     }
 }
 

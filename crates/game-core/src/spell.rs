@@ -18,6 +18,8 @@ pub enum Spell {
     Teleport { to: (u16, u16) },
     /// A blast at `at` (world units): `blast::Blast` pushes the people around (no shot flying there yet).
     Blast { at: (u16, u16) },
+    /// A bolt at `at` (world units): `lightning::effect`.
+    Lightning { at: (u16, u16) },
 }
 
 impl Spell {
@@ -26,6 +28,7 @@ impl Spell {
         match self {
             Spell::Teleport { .. } => Some(SpellKind::Teleport),
             Spell::Blast { .. } => Some(SpellKind::Blast),
+            Spell::Lightning { .. } => Some(SpellKind::Lightning),
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
             Spell::Flatten { .. } => Some(SpellKind::Flatten),
             Spell::Erode { .. } | Spell::Raise { .. } => None,
@@ -39,7 +42,7 @@ impl Spell {
             Spell::Flatten { at } => terrain.flatten(at, 4),
             Spell::Erode { at } => terrain.raise(at, 4, -120),
             Spell::Raise { at } => terrain.raise(at, 3, 64),
-            Spell::Teleport { .. } | Spell::Blast { .. } => return None,
+            Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } => return None,
         })
     }
 }

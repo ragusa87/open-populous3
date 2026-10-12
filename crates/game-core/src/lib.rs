@@ -18,6 +18,7 @@ pub mod headcount;
 pub mod health;
 pub mod id;
 pub mod land_bridge;
+pub mod lightning;
 pub mod mana;
 pub mod map;
 pub mod motion;

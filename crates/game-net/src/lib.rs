@@ -62,8 +62,12 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
             b.extend([0, *player]);
-            if let Spell::Teleport { to: at } | Spell::Blast { at } = spell {
-                b.push(if matches!(spell, Spell::Teleport { .. }) { 4 } else { 5 });
+            if let Spell::Teleport { to: at } | Spell::Blast { at } | Spell::Lightning { at } = spell {
+                b.push(match spell {
+                    Spell::Teleport { .. } => 4,
+                    Spell::Blast { .. } => 5,
+                    _ => 6,
+                });
                 b.extend(at.0.to_le_bytes());
                 b.extend(at.1.to_le_bytes());
                 return;
@@ -73,7 +77,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                 Spell::Flatten { at } => (1, std::slice::from_ref(at)),
                 Spell::Erode { at } => (2, std::slice::from_ref(at)),
                 Spell::Raise { at } => (3, std::slice::from_ref(at)),
-                Spell::Teleport { .. } | Spell::Blast { .. } => unreachable!("encoded above"),
+                Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } => unreachable!("encoded above"),
             };
             b.push(tag);
             for (x, z) in cells {
@@ -186,6 +190,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
                 3 => Spell::Raise { at: c.cell()? },
                 4 => Spell::Teleport { to: (c.u16()?, c.u16()?) },
                 5 => Spell::Blast { at: (c.u16()?, c.u16()?) },
+                6 => Spell::Lightning { at: (c.u16()?, c.u16()?) },
                 _ => return None,
             };
             Some(Command::Cast { player, spell })
@@ -279,6 +284,7 @@ mod tests {
                 Command::Cast { player: 0, spell: Spell::Flatten { at: (5, 6) } },
                 Command::Cast { player: 0, spell: Spell::Teleport { to: (65535, 7) } },
                 Command::Cast { player: 3, spell: Spell::Blast { at: (9, 65535) } },
+                Command::Cast { player: 2, spell: Spell::Lightning { at: (512, 7) } },
                 Command::Order { player: 2, order: Order::MoveTo { x: 65535, z: 300 } },
                 Command::Order { player: 0, order: Order::Cast },
                 Command::Order { player: 1, order: Order::Stop },

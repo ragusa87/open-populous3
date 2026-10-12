@@ -280,11 +280,12 @@ impl SpellBook {
         b
     }
 
-    /// The sandboxes': the demo loadout plus Teleport and Flatten, free.
+    /// The sandboxes': the demo loadout plus Teleport, Flatten and Lightning, free.
     pub fn sandbox() -> Self {
         let mut b = SpellBook::demo();
-        b.set(SpellKind::Teleport, Availability::Unlimited);
-        b.set(SpellKind::Flatten, Availability::Unlimited);
+        for k in [SpellKind::Teleport, SpellKind::Flatten, SpellKind::Lightning] {
+            b.set(k, Availability::Unlimited);
+        }
         b
     }
 

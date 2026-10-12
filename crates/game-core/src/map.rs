@@ -510,7 +510,7 @@ impl GameMap {
         };
         match *spell {
             Spell::Teleport { to } => Some(to),
-            Spell::Blast { at } => Some(at),
+            Spell::Blast { at } | Spell::Lightning { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
             Spell::Flatten { at } => Some(world(at, 0)),
             Spell::Erode { .. } | Spell::Raise { .. } => None,
@@ -568,6 +568,10 @@ impl GameMap {
         match spell {
             Spell::Blast { at } => {
                 self.add_effect(crate::blast::effect(player, at));
+                None
+            }
+            Spell::Lightning { at } => {
+                self.add_effect(crate::lightning::effect(player, at));
                 None
             }
             Spell::LandBridge { from, to } => {
@@ -1557,6 +1561,29 @@ mod tests {
         m.apply(&Command::Order { player: 0, order: Order::Stop });
         m.run(Ticks::secs(10));
         assert!(m.effects.is_empty() && m.units[0].action == Action::Idle, "another order drops the cast");
+    }
+
+    #[test]
+    fn lightning_kills_seven_in_its_cell_after_the_jump_but_not_its_caster() {
+        let mut m = GameMap::sandbox_walk();
+        let s = &m.units[0];
+        let (shaman, at) = (s.id, (s.x.wrapping_add(4 * 512), s.z));
+        let crowd: Vec<u32> = (0..9).map(|k| m.spawn(1, UnitKind::Brave, (at.0.wrapping_add(k * 30), at.1)).id).collect();
+        let next_cell = m.spawn(1, UnitKind::Brave, (at.0.wrapping_add(512), at.1)).id;
+        m.apply(&Command::Cast { player: 0, spell: Spell::Lightning { at } });
+        m.run(crate::unit::CAST_RELEASE);
+        let dead = |m: &GameMap, id| !m.unit(id).is_some_and(Unit::is_alive);
+        assert!(crowd.iter().all(|&id| !dead(&m, id)), "released, not struck yet");
+        m.tick();
+        assert_eq!(crowd.iter().filter(|&&id| dead(&m, id)).count(), crate::lightning::KILLS);
+        assert!(!dead(&m, next_cell), "the next cell: the blast's, not killed");
+        assert!(!dead(&m, shaman), "far from it");
+        let mut m = GameMap::sandbox_walk();
+        let s = &m.units[0];
+        let (shaman, at) = (s.id, (s.x, s.z));
+        m.apply(&Command::Cast { player: 0, spell: Spell::Lightning { at } });
+        m.run(Ticks::new(crate::unit::CAST_RELEASE.get() + 2));
+        assert!(m.unit(shaman).is_some_and(Unit::is_alive), "on her own cell, she is spared");
     }
 
     #[test]
