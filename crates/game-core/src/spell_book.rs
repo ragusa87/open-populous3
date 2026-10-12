@@ -125,6 +125,34 @@ impl SpellKind {
         }
     }
 
+    /// How far the shaman casts it at the middle altitude band (`SP_W_RANGE`, world units, `cast_range`);
+    /// None: no limit (Teleport's 65 536 is the whole torus, Armageddon has none).
+    pub fn range(self) -> Option<u32> {
+        match self {
+            SpellKind::Teleport | SpellKind::Armageddon => None,
+            SpellKind::Blast | SpellKind::AngelOfDeath | SpellKind::Volcano => Some(3072),
+            SpellKind::LandBridge => Some(5120),
+            SpellKind::Lightning | SpellKind::Swarm => Some(6144),
+            SpellKind::Convert => Some(8192),
+            SpellKind::Whirlwind
+            | SpellKind::Invisibility
+            | SpellKind::Hypnotism
+            | SpellKind::Firestorm
+            | SpellKind::GhostArmy
+            | SpellKind::Erosion
+            | SpellKind::Swamp
+            | SpellKind::Earthquake
+            | SpellKind::Flatten
+            | SpellKind::MagicalShield => Some(4096),
+        }
+    }
+
+    /// Spells that start at the caster and reach towards the target (land bridge): their origin is the
+    /// shaman, or the view on a level where the player is a god (`GameMap::shaman_omni`).
+    pub fn has_origin(self) -> bool {
+        self == SpellKind::LandBridge
+    }
+
     /// The most charges this spell can hold (big spells hold fewer).
     pub fn max_charges(self) -> u8 {
         match self.cost() {
@@ -337,6 +365,15 @@ mod tests {
         b.charge(Mana(10_000));
         let s = b.slot(SpellKind::Blast).unwrap();
         assert_eq!((s.charges, s.recharge), (MAX_CHARGES, 0));
+    }
+
+    #[test]
+    fn ranges_from_the_original_table() {
+        assert_eq!(SpellKind::Blast.range(), Some(3072));
+        assert_eq!(SpellKind::LandBridge.range(), Some(5120));
+        assert_eq!(SpellKind::Convert.range(), Some(8192));
+        assert_eq!(SpellKind::Teleport.range(), None);
+        assert!(SpellKind::LandBridge.has_origin() && !SpellKind::Blast.has_origin());
     }
 
     #[test]

@@ -25,7 +25,8 @@ impl Spell {
         match self {
             Spell::Teleport { .. } => Some(SpellKind::Teleport),
             Spell::Blast { .. } => Some(SpellKind::Blast),
-            Spell::LandBridge { .. } | Spell::Flatten { .. } | Spell::Erode { .. } | Spell::Raise { .. } => None,
+            Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
+            Spell::Flatten { .. } | Spell::Erode { .. } | Spell::Raise { .. } => None,
         }
     }
 

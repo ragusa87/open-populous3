@@ -63,6 +63,9 @@ pub struct GameMap {
     pub start_camera: Option<StartCamera>,
     /// An original level's object bank (header byte 97): its tree style. 0 elsewhere.
     pub object_bank: u8,
+    /// The player is a god (level flag "shaman omni", level 25): spells starting at the caster start at the
+    /// view instead (`Spell::LandBridge::from` as aimed), and casts have no range.
+    pub shaman_omni: bool,
     /// Spell effects going on (`effect::Effect`), in the order they were added.
     pub effects: Registry<Effect>,
     /// Objects coordinating several units, one registry per kind (coordinator.rs).
@@ -116,7 +119,7 @@ fn per_player<T: Clone>(t: T) -> Vec<T> {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, effects: Registry::default(), coordinators: Coordinators::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -149,6 +152,7 @@ impl GameMap {
             walls: Walls::default(),
             start_camera: None,
             object_bank: 0,
+            shaman_omni: false,
             effects: Registry::default(),
             coordinators: Coordinators::default(),
             now: Tick::ZERO,
@@ -222,7 +226,8 @@ impl GameMap {
         let build_books = header.as_ref().map_or(map.build_books.clone(), |h| per_player(BuildBook::from_level(h, &level)));
         let start_camera = header.as_ref().and_then(StartCamera::from_header);
         let object_bank = header.as_ref().map_or(0, |h| h.object_bank);
-        Ok(GameMap { spell_books, build_books, start_camera, object_bank, ..map })
+        let shaman_omni = header.as_ref().is_some_and(|h| h.flags.has(pop3_format::header::LevelFlags::SHAMAN_OMNI));
+        Ok(GameMap { spell_books, build_books, start_camera, object_bank, shaman_omni, ..map })
     }
 
     /// Deterministic island map from a seed (fallback when no original data exists).
@@ -426,18 +431,54 @@ impl GameMap {
     }
 
     /// Whether `player` can cast `spell` here and now: never while their shaman is `locked` (inside a
-    /// vault, tumbling or lifted); Teleport needs a living shaman and ground she can walk at the target; other spells
-    /// always apply.
+    /// vault, tumbling or lifted); Teleport needs a living shaman and ground she can walk at the target; a
+    /// spell starting at the caster (land bridge) needs a living shaman, unless the player is a god
+    /// (`shaman_omni`); other spells always apply. The range is checked when aiming (`in_cast_range`).
     pub fn can_cast(&self, player: u8, spell: &Spell) -> bool {
         if self.shaman_locked(player) {
             return false;
         }
+        let shaman_alive = self.shaman_of(player).is_some_and(Unit::is_alive);
         match *spell {
             Spell::Teleport { to } => {
                 let cell = ((to.0 as u32 / 512) as i32, (to.1 as u32 / 512) as i32);
-                self.shaman_of(player).is_some_and(Unit::is_alive) && self.ground().passable(Mobility::Walk, cell)
+                shaman_alive && self.ground().passable(Mobility::Walk, cell)
             }
+            Spell::LandBridge { .. } => self.shaman_omni || shaman_alive,
             _ => true,
+        }
+    }
+
+    /// How far `player`'s shaman casts `kind` from where she stands (`cast_range`): None when there is no
+    /// limit (the spell has none, or the player is a god) or no living shaman to cast from.
+    pub fn cast_range(&self, player: u8, kind: SpellKind) -> Option<u32> {
+        let base = kind.range().filter(|_| !self.shaman_omni)?;
+        let shaman = self.shaman_of(player).filter(|u| u.is_alive())?;
+        let height = shaman.motion.height.unwrap_or_else(|| self.terrain.height_at(shaman.x as u32, shaman.z as u32, WORLD_UNITS_PER_CELL)).clamp(0, u16::MAX as i32) as u16;
+        let in_tower = shaman.inside.and_then(|i| self.building(i.building)).is_some_and(|b| b.kind == BuildingKind::DrumTower && b.stage() == crate::building::Stage::Built);
+        Some(crate::cast_range::range(base, height, in_tower))
+    }
+
+    /// Whether `player` can aim `kind` at `to` (world units): within their shaman's `cast_range`, anywhere
+    /// for a spell without a limit or on a level where the player is a god; never without a living shaman
+    /// otherwise.
+    pub fn in_cast_range(&self, player: u8, kind: SpellKind, to: (u16, u16)) -> bool {
+        if self.shaman_omni || kind.range().is_none() {
+            return true;
+        }
+        let Some(shaman) = self.shaman_of(player).filter(|u| u.is_alive()) else { return false };
+        self.cast_range(player, kind).is_some_and(|r| crate::cast_range::within((shaman.x, shaman.z), to, r))
+    }
+
+    /// `spell` as it takes effect: a land bridge starts at the caster's shaman, as she stands when the command
+    /// runs, unless the player is a god (then where it was aimed from, the view).
+    fn from_caster(&self, player: u8, spell: Spell) -> Spell {
+        match spell {
+            Spell::LandBridge { to, .. } if !self.shaman_omni => match self.shaman_of(player) {
+                Some(u) => Spell::LandBridge { from: ((u.x as u32 / WORLD_UNITS_PER_CELL) as i32, (u.z as u32 / WORLD_UNITS_PER_CELL) as i32), to },
+                None => spell,
+            },
+            _ => spell,
         }
     }
 
@@ -454,6 +495,7 @@ impl GameMap {
                 None
             }
             Command::Cast { player, spell } => {
+                let spell = self.from_caster(player, spell);
                 self.order(player, Order::Cast);
                 if let Spell::Blast { at } = spell {
                     self.add_effect(crate::blast::effect(player, at));
@@ -1317,6 +1359,40 @@ mod tests {
         assert_eq!(m.units[0].teleport_target(), Some(to));
         m.run(crate::unit::CAST_TICKS);
         assert_eq!((m.units[0].x, m.units[0].z), to, "then on the hill top");
+    }
+
+    #[test]
+    fn a_land_bridge_starts_at_the_shaman_unless_the_player_is_a_god() {
+        let mut m = GameMap::sandbox_walk();
+        m.spell_books[0].fill();
+        let shaman = ((m.units[0].x as u32 / 512) as i32, (m.units[0].z as u32 / 512) as i32);
+        let (aimed_from, to) = ((shaman.0 - 20, shaman.1), (shaman.0, shaman.1 - 6));
+        let mut god = m.clone();
+        let cast = Command::Cast { player: 0, spell: Spell::LandBridge { from: aimed_from, to } };
+        let mut expected = m.terrain.clone();
+        m.apply(&cast);
+        expected.land_bridge(shaman, to, 32);
+        assert_eq!(m.terrain.heights(), expected.heights(), "from the shaman, not where it was aimed from");
+        god.shaman_omni = true;
+        let mut expected = god.terrain.clone();
+        god.apply(&cast);
+        expected.land_bridge(aimed_from, to, 32);
+        assert_eq!(god.terrain.heights(), expected.heights(), "a god's bridge starts where it was aimed from");
+    }
+
+    #[test]
+    fn spells_are_aimed_within_the_shamans_range() {
+        let mut m = GameMap::sandbox_walk();
+        let (x, z) = (m.units[0].x, m.units[0].z);
+        let range = m.cast_range(0, SpellKind::Blast).unwrap();
+        assert!((2457..=4608).contains(&range), "the blast's 3072 scaled by her altitude: {range}");
+        assert!(m.in_cast_range(0, SpellKind::Blast, (x + range as u16, z)));
+        assert!(!m.in_cast_range(0, SpellKind::Blast, (x + range as u16 + 1, z)));
+        assert!(m.in_cast_range(0, SpellKind::Teleport, (x + 20_000, z)), "teleport has no limit");
+        assert!(!m.in_cast_range(1, SpellKind::Blast, (x, z)), "no shaman for player 1");
+        m.shaman_omni = true;
+        assert_eq!(m.cast_range(0, SpellKind::Blast), None);
+        assert!(m.in_cast_range(1, SpellKind::Blast, (x + 20_000, z)), "a god casts anywhere");
     }
 
     #[test]
