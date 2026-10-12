@@ -13,6 +13,8 @@ use std::io::{self, Read, Write};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
     Hello { player: u8 },
+    /// From the host before the first turn: the game's seed (`GameMap::seeded`), the same for every peer.
+    Start { seed: u32 },
     /// All commands a player issues for one simulation tick (possibly none): its turn.
     Tick { tick: Tick, commands: Vec<Command> },
 }
@@ -35,6 +37,10 @@ pub fn encode(msg: &Message) -> Vec<u8> {
     let mut b = Vec::new();
     match msg {
         Message::Hello { player } => b.extend([0, *player]),
+        Message::Start { seed } => {
+            b.push(2);
+            b.extend(seed.to_le_bytes());
+        }
         Message::Tick { tick, commands } => {
             b.push(1);
             b.extend(tick.to_wire().to_le_bytes());
@@ -207,6 +213,7 @@ pub fn decode(b: &[u8]) -> Option<Message> {
     let mut c = Cursor(b);
     match c.u8()? {
         0 => Some(Message::Hello { player: c.u8()? }),
+        2 => Some(Message::Start { seed: c.u32()? }),
         1 => {
             let tick = Tick::from_wire(u32::from_le_bytes(c.take(4)?.try_into().ok()?));
             let n = c.u8()?;
@@ -289,6 +296,8 @@ mod tests {
         let m = sample_turn();
         assert_eq!(decode(&encode(&m)), Some(m));
         assert_eq!(decode(&[9]), None);
+        let start = Message::Start { seed: 0xDEAD_BEEF };
+        assert_eq!(decode(&encode(&start)), Some(start));
     }
 
     #[test]

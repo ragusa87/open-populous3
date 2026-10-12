@@ -62,12 +62,9 @@ pub struct GameMap {
     pub now: Tick,
     /// The next id `new_id` gives: units, buildings and effects share it, an id is never given twice.
     next_id: u32,
-    /// The game's random draws while it runs (effects), the same on every peer.
+    /// The game's random draws while it runs (effects), the same on every peer: seeded per game (`seeded`).
     pub rng: Lcg,
 }
-
-/// The seed of `GameMap::rng`: the same for every map, as nothing in a level names one.
-pub const PLAY_SEED: u32 = 0x5EED;
 
 /// Generated maps and sandboxes are laid out for a camera on their south side looking north (towards -z):
 /// half a turn from angle 0, which looks towards +z.
@@ -107,7 +104,7 @@ fn sandbox_gift(k: usize) -> crate::building::Reward {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, effects: Vec::new(), now: Tick::ZERO, next_id: 1, rng: Lcg(PLAY_SEED) }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, effects: Vec::new(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
@@ -137,7 +134,7 @@ impl GameMap {
             effects: Vec::new(),
             now: Tick::ZERO,
             next_id: 1,
-            rng: Lcg(PLAY_SEED),
+            rng: Lcg(0),
         }
         .with_buildings(buildings_from_level(level))
         .with_building_ground()
@@ -623,6 +620,12 @@ impl GameMap {
 }
 
 impl GameMap {
+    /// The map for one game whose random draws start from `seed`. No level stores one: the client draws it for
+    /// each new game, and in multiplayer the host sends its seed to every peer (multiplayer.md).
+    pub fn seeded(self, seed: u32) -> Self {
+        GameMap { rng: Lcg(seed), ..self }
+    }
+
     /// A fresh id, never given before on this map.
     pub fn new_id(&mut self) -> u32 {
         let id = self.next_id;
@@ -1039,6 +1042,16 @@ mod tests {
         let u = &map.units[i];
         assert_eq!((u.action, u.motion.airborne(), u.z), (Action::Idle, false, start.1), "landed, on its feet");
         assert!(torus_delta(start.0, u.x) < -512, "away from the blast: {}", torus_delta(start.0, u.x));
+    }
+
+    #[test]
+    fn a_game_draws_from_its_own_seed() {
+        let draws = |seed| {
+            let mut rng = GameMap::sandbox_walk().seeded(seed).rng;
+            (0..4).map(|_| rng.next_u32()).collect::<Vec<_>>()
+        };
+        assert_eq!(draws(7), draws(7), "same seed on every peer, same draws");
+        assert_ne!(draws(7), draws(8));
     }
 
     #[test]

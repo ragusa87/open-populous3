@@ -73,12 +73,26 @@ impl LevelList {
         LevelList { data_dir, objects_dir, original: true, files, index }
     }
 
+    /// The current level, as a new game (`new_game`).
     pub fn load_current(&self) -> GameMap {
-        self.files
+        let map = self
+            .files
             .get(self.index)
             .and_then(|p| GameMap::load_original(p).map_err(|e| warn!("{}: {e}", p.display())).ok())
-            .unwrap_or_else(|| GameMap::generate(self.index as u32 + 1))
+            .unwrap_or_else(|| GameMap::generate(self.index as u32 + 1));
+        new_game(map)
     }
+}
+
+/// `map` as a new game, with its own seed: `GAME_SEED` if set (to replay a game), else drawn from the clock.
+pub fn new_game(map: GameMap) -> GameMap {
+    let seed = std::env::var("GAME_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or_else(clock_seed);
+    map.seeded(seed)
+}
+
+fn clock_seed() -> u32 {
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    ((t.as_nanos() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) as u32
 }
 
 /// `data/` and `objects/` next to a levels directory (any case).

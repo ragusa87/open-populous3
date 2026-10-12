@@ -36,6 +36,7 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
   Level paths with spaces or quotes break `just shot`: run `HEADLESS=1 SCREENSHOT=out.png cargo run -p game-client -- "<level>"`.
 - `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship`: skip the main menu or open it (`just shot` starts in the game by default).
 - `GAME_SPEED=0|1|2|4|8`: start paused or sped up (P and Shift +/- in the game).
+- `GAME_SEED=N`: the game's random seed (drawn per game otherwise), to replay a game the same way.
 - `POP3_DEV=0`: start with dev mode off (original keymap, no info line or camera readout); on by default.
 - `just run-generated` / `--no-original`: no original files read at all (use for anything shippable).
 - `just level-info file.dat`: dump parsed level.

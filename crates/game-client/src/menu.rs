@@ -13,7 +13,7 @@ use crate::hud::build::{level_builds, PlayerBuilds};
 use crate::hud::spells::{level_book, sandbox_book, PlayerSpells, SelectedSpell};
 use crate::units::selection::Selection;
 use crate::virtual_cursor::VirtualCursor;
-use crate::world::{CurrentMap, LevelList, TerrainDirty};
+use crate::world::{new_game, CurrentMap, LevelList, TerrainDirty};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use game_core::map::GameMap;
@@ -324,10 +324,10 @@ impl GameSetup<'_> {
                 let book = level_book(&map);
                 (map, book)
             }
-            Start::SandboxWalk => (GameMap::sandbox_walk(), sandbox_book()),
-            Start::SandboxUnits => (GameMap::sandbox_units(), sandbox_book()),
-            Start::SandboxBuildings => (GameMap::sandbox_buildings(), sandbox_book()),
-            Start::SandboxWorship => (GameMap::sandbox_worship(), sandbox_book()),
+            Start::SandboxWalk => (new_game(GameMap::sandbox_walk()), sandbox_book()),
+            Start::SandboxUnits => (new_game(GameMap::sandbox_units()), sandbox_book()),
+            Start::SandboxBuildings => (new_game(GameMap::sandbox_buildings()), sandbox_book()),
+            Start::SandboxWorship => (new_game(GameMap::sandbox_worship()), sandbox_book()),
         };
         *self.schedule = crate::units::GameSchedule::default();
         self.builds.0 = level_builds(&self.map.0);

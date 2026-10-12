@@ -52,7 +52,10 @@ Rules for every object that ticks:
   `add_effect`), never given twice, so each list stays sorted by id and lookups (`unit`, `building`) are binary
   searches. Whoever holds an id finds None once that object is gone: it has ended. Indices are only valid inside
   one turn.
-- **Randomness** is `GameMap::rng` (`Lcg`), handed to the objects that draw, in the loop's order.
+- **Randomness** is `GameMap::rng` (`Lcg`), handed to the objects that draw, in the loop's order. It is seeded
+  per game (`GameMap::seeded`), never by game-core itself: the client draws a seed for each new game
+  (`world::new_game`, from the clock, or `GAME_SEED`), and in multiplayer the host sends it to every peer
+  (multiplayer.md `Start`).
 - **No visuals in game-core.** Timing the client needs (a phase, a countdown) is read-only state on the object;
   smoke, rocks and shakes are drawn by the client from it.
 

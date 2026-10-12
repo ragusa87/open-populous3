@@ -29,6 +29,8 @@ Input never touches the map: the client issues commands to its `GameSchedule` (`
 ## Wire format (game-net)
 Frame: `u32 LE` length + payload. Payload tag byte:
 - `0 Hello { player: u8 }`
+- `2 Start { seed: u32 }`: from the host, before the first turn. The game's seed (`GameMap::seeded`): unique per
+  game (the host draws it, levels store none), identical for every peer so their random draws match.
 - `1 Tick { tick: u32, n: u8, n x Command }`: a player's turn for that tick, Command = `kind u8, player u8`, then
   - kind 0 `Cast`: `spell tag u8`, cells as i16 x/z pairs (tag 4 Teleport: `u16` x, z in world units);
   - kind 1 `Order` (to the shaman): `order tag u8` (0 MoveTo + `u16` x, z in world units, 1 Pray, 2 Cast, 3 Stop, 4 Campfire + `u16` x, z of the fire's centre + `u8` ring point, 5 CutTree + `u16` x, z of the tree, 6 FetchWood, 7 PickUp + `u16` x, z of the click, 8 Build + `u16` x, z of the building's stored corner, 9 Enter + `u16` x, z of the hut's stored corner);
