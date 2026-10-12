@@ -15,7 +15,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use game_core::building::Reward;
+use game_core::building::{BuildingKind, Reward};
 use game_core::map::GameMap;
 use game_core::occupancy::{Holder, People, Wood};
 use game_core::unit::UnitKind;
@@ -169,7 +169,7 @@ fn reward_name(reward: Reward) -> String {
 
 /// Building `i`'s tooltip: its name; a pyramid also what it teaches (until granted) and its shaman
 /// place; the player's buildings that take wood their people and wood rows; other tribes' buildings
-/// their name only, and once `revealed` (clicked) who is in them, not selectable. People among
+/// their name only, and a drum tower once `revealed` (clicked) who is in it, not selectable. People among
 /// `selected` are marked.
 pub fn building_model(map: &GameMap, i: usize, selected: &[u32], revealed: bool) -> TooltipModel {
     let b = &map.buildings[i];
@@ -186,7 +186,7 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[u32], revealed: bool)
         return model;
     }
     if b.owner != crate::units::PLAYER {
-        if revealed {
+        if revealed && b.kind == BuildingKind::DrumTower {
             let unselectable = |row: Vec<Slot>| row.into_iter().map(|s| Slot { unit: None, selected: false, ..s }).collect();
             model.rows.extend(map.people_slots(holder).map(|p| unselectable(people_row(map, &p, UnitKind::Brave, &[]))));
         }
@@ -683,7 +683,7 @@ fn select_from_slot(slots: Query<(&Interaction, &SlotUnit), Changed<Interaction>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use game_core::building::{BuildingKind, Stage};
+    use game_core::building::Stage;
 
     fn icons(row: &[Slot]) -> Vec<Icon> {
         row.iter().map(|s| s.icon).collect()
@@ -729,9 +729,12 @@ mod tests {
     }
 
     #[test]
-    fn a_clicked_building_of_another_tribe_shows_who_is_in_not_selectable() {
+    fn a_clicked_tower_of_another_tribe_shows_who_is_in_not_selectable() {
         let mut map = GameMap::sandbox_buildings();
-        let red = map.buildings.iter().position(|b| b.owner == 1 && b.stage() == Stage::Built && game_core::occupancy::room(b.kind) > 0).unwrap();
+        let hut = map.buildings.iter().position(|b| b.owner == 1 && b.kind != BuildingKind::DrumTower && b.stage() == Stage::Built && game_core::occupancy::room(b.kind) > 0).unwrap();
+        assert!(building_model(&map, hut, &[], true).rows.is_empty(), "only a tower shows who is in");
+        let red = map.buildings.iter().position(|b| b.kind == BuildingKind::DrumTower && b.stage() == Stage::Built).unwrap();
+        map.buildings[red].owner = 1;
         let id = map.buildings[red].id;
         let model = building_model(&map, red, &[], true);
         assert_eq!(model.lines, vec![map.buildings[red].kind.name()]);

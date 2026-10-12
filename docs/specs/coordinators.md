@@ -98,8 +98,8 @@ from the executable (pop3-rev-analysis.md "Combat").
 | 5 | Soul Man | name only | unknown |
 | 6 | Preacher Attract | **conflict**: the wiki says Preacher Attract, pop3-rev-analysis.md groups 10/1 and 10/6 as formations; not resolved | a sermon, or a formation |
 | 7 | Object Face | name only | unknown |
-| 8 | Fight | fight; people link to it (`fight_units`) [exe] | a fight coordinator |
-| 9 | Pre-Fight | pre-fight (`pre_fight_units`) [exe] | a pre-fight coordinator starting fights |
+| 8 | Fight | up to 6 people in a ring around one centre person alone on its side; all melee damage [exe] | a fight coordinator |
+| 9 | Pre-Fight | one attacker and one target: run-up, damage-free kick, run-up, then a fight [exe] | a pre-fight coordinator starting fights |
 | 10 | Guard Control | guard control [exe] | a guard post's control |
 | 11 | Bridge Control | name only | unknown (land bridge?) |
 | 12 | Soul Convert 2 | soul convert [exe] | conversion |

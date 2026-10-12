@@ -34,6 +34,9 @@ Sources:
   256 units per cell (1024 = 4 cells) and the camera looks down at a fixed 20°. See "Landscape projection".
 - **Walking speed is per type, in world units per turn** [exe]: `<TYPE>_SPEED` plus up to 25 % at random per
   walk; a brave walks 1.6-2.0 cells per second. See "Walking speed".
+- **A melee is a pre-fight, then a fight** [exe]: the attacker runs up, kicks the target away without damage,
+  runs up again; then a ring fight of one against up to five, where every blow costs
+  `max(32, FIGHT_DAMAGE × life / max_life)` and most blows hit both fighters. See "Combat".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
 
@@ -866,6 +869,14 @@ Strength per type (exe default / `constant.dat`); it falls with the attacker's h
   1478-1487) and hypnosis (a halo, 1553-1563); invisible and ghost people of the player are drawn translucent,
   invisible enemies not at all; own damaged people can show a health bar; the selection arrow is hfx 53
   ("Status markers over people").
+- coordinators.md models 8 and 9 and TODO "Combat": the original's melee is a pre-fight coordinator (one attacker,
+  one target: approach within 40 turns, a damage-free kick knocking the target 100-199 units per turn away, a
+  second approach) handing over to a fight coordinator (a ring of radius 180 around one centre person, up to 6,
+  one side always alone, re-split when both sides have 2). Damage is per exchange, mutual except for move 4, and
+  scales with the hitter's health ("Combat").
+- TODO "Warriors: about 3-4x a brave's combat strength": with `constant.dat` a warrior hits 6 times as hard
+  (360 against 60) with 1.8 times the life (1800 against 1000); the exe defaults give 3 times (180).
+- TODO "Firewarriors throw fire": firewarriors never take a melee slot; their attack is a separate ranged path.
 
 ## Open questions
 - Where `MANA_F_<PERSON>`, `MANA_F_HOUSED/WORKING/TRAINING` and `MANA_F_HUT_LEVEL_1..3` are applied. Only the max
@@ -873,7 +884,10 @@ Strength per type (exe default / `constant.dat`); it falls with the attacker's h
 - What "busy" means (unit+0xE bit 7, unit+0xA7), and the preacher's extra check.
 - The controller types of tribe+0xC1F (2 is human; 1 gets full mana).
 - Spell order and share inside the distribution loop.
-- Combat: how the fight controllers apply `FIGHT_DAMAGE_<P>` to `LIFE_<P>`.
+- Combat: the length of each attack and hit (animation lengths; measure with `fightwatch.py`), which original
+  animations the actions 8, 9, 10, 11, 16 are, what option flag 0x89D17C bit 0x40 is (no kick, no knockback),
+  the meaning of pre-fight mode 2, the ground test of a fight's place (0x51E4B0), the attacker's sub-state 8 when
+  its target is already in a pre-fight, and the firewarriors' ranged attack (attack-order sub-states 10, 11).
 - What the per-building stored mana is.
 - What sets `turns_per_sec` to 14, and whether game options or multiplayer change it.
 - Which field holds the gather sub-state: +0xA8 stays 0 while chopping, so the handler's state byte is elsewhere.
@@ -892,7 +906,7 @@ Strength per type (exe default / `constant.dat`); it falls with the attacker's h
 - Sites: which code creates the pillars at level load, and whether the levelling forces every cell of its disc.
 - Spells: burning trees (scenery state 5), the partial building explosion of the earthquake, whether ghosts
   expire, what starts the landscape-shaping mode, what a person does when the ground under it floods, the
-  building's second destroy reason (sub-state 2), boats on raised land, and the melee fight itself.
+  building's second destroy reason (sub-state 2), and boats on raised land.
 - Status markers: whether `frame_counter` 0x897981 advances per rendered frame or per turn, the anchor of the
   screen position the height offsets are taken from, what the colour tables (0x87D000 + n × 0x1000) do to an alpha
   sprite, the key behind commands 100/101 (health bars), tribe flag +0x93D bit 0x8 (sees invisible people?), and
@@ -917,6 +931,20 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4C2D50 | `charges(spell)`: `SP_1_OFF_MAX` |
 | 0x41AE60 | sum of stored building mana |
 | 0x406218 | adds a building's stored mana to a type 1 tribe |
+| 0x51A2A0 | a person's attack order: reach, then join a fight or start a pre-fight |
+| 0x51E150 | "start_pre_fight(attacker, target, mode)" |
+| 0x518630 | "pre_fight_turn": approach, kick, knockback, then the fight |
+| 0x51DE60 | "start_fight(a, b)" from a pre-fight |
+| 0x518FB0 | "fight_turn": slots, opponents, moves, hit reactions |
+| 0x519A70 | fight roster check (drops gone, dead, unlinked, > 4 cells), winner |
+| 0x5199F0 | picks the fight's centre (the side with one person) |
+| 0x519D10 | moves a fight to suitable ground, every 32 turns |
+| 0x51E3D0 | ring slot position (radius 180) |
+| 0x51DDC0, 0x51DCC0 | join a fight; slot choice and rank replacement |
+| 0x51DF90 | split a fight into a new 1-to-1 when both sides have 2 or more |
+| 0x4A39C0 | "melee_hit(target, attacker, one_sided)" |
+| 0x41B550 | per-tribe combat counters at 0x969DC6 (`[tribe × 12 + k]`: 0 fights won, 1 people killed) |
+| 0x4D3FF0 | a person's action animation (`[action × 9 + type]` at 0x5A6D50) |
 | 0x4C16E5 | cast cost in `init_unit_type_11`; parameter queue at 0x892443 |
 | 0x43F21F | `process_tribe_cmd` mana command |
 | 0x491A82 | AI-script mana opcode, through `get_tribe_data` |
@@ -982,6 +1010,7 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
 ### Unit record [ghidra]
 - `unit_struct`, 0xB3 bytes. Pool of 2000 (`unit_array` 0x8E0428), two free lists split at index 640
   (`alloc_unit`, `move_unit_to_free_list`).
+- Fight links: controller id +0x9D (pre-fight or fight), state saved on entering one +0x7D, fight opponent +0x72.
 - Fields: `unit_class` +0x2A, `unit_type` +0x2B, `state` +0x2C, `state_2` +0x2D, `tribe_index` +0x2F, `unit_obj`
   (model or sprite) +0x33, `pos` +0x3D, building stored value +0x98, last attacker's tribe +0xB0.
 - Wood fields: a person's state timer +0x70 and carried wood +0x78, a tree's wood left +0x84, a shape's wood +0x96,

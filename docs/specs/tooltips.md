@@ -104,7 +104,7 @@ With the original files: 60, 61 hovered, 62 pressed.
 | Vehicle | people aboard | | | unload button |
 | Tree | | current wood | | |
 | Wood piece | name only ("Wood") | | | |
-| Another tribe's building | its name only; clicked (left with nothing selected, or right), its people row too: who is in, not selectable [player] | | | |
+| Another tribe's building | its name only; a drum tower clicked (left with nothing selected, or right), its people row too: who is in, not selectable [player] | | | |
 | Camp fire | who is round it [ours: to define] | | | |
 | Unit | no box: its health bar is its tooltip (units.md) | | | |
 | Spy | a spy indicator instead of its disguise (units.md) | | | |

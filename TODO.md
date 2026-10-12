@@ -110,11 +110,11 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Internal model 10/6: Preacher Attract (wiki) or a formation (pop3-rev-analysis.md "Combat"): decide from the original.
 
 ## Combat
-- [ ] Fight logic: units engage enemies in range, melee exchanges, damage per unit type, death.
-- [ ] Shaman fighting: strike (57) and kick (69) animations.
-- [ ] Warriors: melee specialists, about 3-4x a brave's combat strength.
+- [ ] Fight logic, to the original (pop3-rev-analysis.md "Combat"): a pre-fight coordinator per attacker/target pair (attacker runs up, 40-turn timeout; kick: no damage, target flung 100-199 units per turn at 120°-240° from the kicker; second run-up), then a fight coordinator: up to 6 in a ring of radius 180 around one centre person who is alone on its side (a newcomer from a side of 2+ splits off a new 1-to-1 fight), the ring turning every 32 turns; per exchange a random move (others: 5/16 move 2 = knockback 35-104 per turn, 9/16 move 4 = no return blow, 2/16 move 3; shaman: 7/16 move 2, 9/16 move 4, never knocked back), damage `max(32, FIGHT_DAMAGE × life / max_life)` (× bloodlust) to the target and, except move 4, the target's own strength back to the attacker; fighters more than 4 cells away dropped; also pulling occupants out of an enemy building (pre-fight mode 1).
+- [ ] Shaman fighting: strike (57) and kick (69) animations; which actions they play in a fight is not mapped yet (pop3-rev-analysis.md "Combat": action 10 for move 2, 106/125 for moves 3/4).
+- [ ] Warriors: melee specialists: `FIGHT_DAMAGE_WARR` 360 against a brave's 60 (`constant.dat`; 180 in the exe), life 1800 against 1000 (pop3-rev-analysis.md "Combat").
 - [ ] Preachers convert enemies.
-- [ ] Firewarriors (pyro-warriors) throw fire at enemies, both on the ground and in vehicles.
+- [ ] Firewarriors (pyro-warriors) throw fire at enemies, both on the ground and in vehicles; they never join a melee (person-type flag 0x40, pop3-rev-analysis.md "Combat"), their ranged attack is not traced.
 - [ ] Health, hit feedback and death animations for every unit type.
 - [ ] Healing needs no action: every unit heals over time (the shaman already does, except while casting or drowning; make it the rule for all units). Exception: flying monsters (e.g. Angel of Death) never heal.
 
