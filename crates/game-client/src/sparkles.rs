@@ -1,8 +1,7 @@
 //! Sparkles on the ground a terrain spell is reshaping (land bridge, later flatten, volcano...): a world view
 //! (`views::WorldView`) of each effect with height points still moving (`Effect::reshaping`), one tiny twinkling
-//! star per point, facing the camera. Each star loops on simulation time at its own phase, each twinkle at a new
-//! random spot of the cell round its point, seeded from the effect's id and the point; it goes out once its point
-//! reached its height.
+//! star at the centre of each cell touching one (`cells_of`), facing the camera. Each star loops on simulation time
+//! at its own phase, seeded from the effect's id and the cell; it goes out once its corners reached their heights.
 
 use crate::camera::{CameraRig, CurveParamsRes};
 use crate::grounded::{render_pos, Grounded};
@@ -27,8 +26,6 @@ const SIZE: f32 = 0.22;
 /// How high a star rises over a twinkle, from `LIFT` over the ground (render units).
 const RISE: f32 = 0.35;
 const LIFT: f32 = 0.08;
-/// Farthest a star sits from its height point (cells): the whole cell around it, so neighbours' stars mingle.
-const SPREAD: f32 = 0.5;
 const TEXTURE: usize = 32;
 const COLOUR: Color = Color::srgb(1.0, 0.92, 0.6);
 
@@ -48,11 +45,9 @@ pub struct SparkleView {
 #[derive(Component)]
 pub struct Star;
 
-/// A star's pose at a moment: where it sits from its height point (cells), its lift over the ground (render units)
-/// and its size (cells).
+/// A star's pose at a moment: its lift over the ground (render units) and its size (cells).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Twinkle {
-    pub offset: Vec2,
     pub rise: f32,
     pub size: f32,
 }
@@ -71,23 +66,23 @@ fn mix(mut x: u32) -> u32 {
     x ^ (x >> 16)
 }
 
-/// 0..1 from a hash.
-fn unit(h: u32) -> f32 {
-    (h >> 8) as f32 / (1u32 << 24) as f32
+/// The cells (wrapped on a map of `size` points, sorted) having one of `points` (height points, unwrapped) at a
+/// corner: cell `(x, z)` spans the points `x..=x + 1`, `z..=z + 1`.
+pub fn cells_of(points: &[Cell], size: usize) -> Vec<Cell> {
+    let n = size as i32;
+    let cells: std::collections::BTreeSet<Cell> =
+        points.iter().flat_map(|&(x, z)| [(x - 1, z - 1), (x, z - 1), (x - 1, z), (x, z)]).map(|(x, z)| (x.rem_euclid(n), z.rem_euclid(n))).collect();
+    cells.into_iter().collect()
 }
 
-/// The star of the effect `id` on height point `point` (wrapped on a map of `size` points) at `now`: each twinkle
-/// at its own phase, and at a new random spot of the cell around the point.
-pub fn twinkle(id: u32, point: Cell, size: usize, now: SimNow) -> Twinkle {
-    let n = size as i32;
-    let key = mix(id ^ mix(point.0.rem_euclid(n) as u32 ^ mix(point.1.rem_euclid(n) as u32)));
+/// The star of the effect `id` on cell `cell` at `now`, at its own phase.
+pub fn twinkle(id: u32, cell: Cell, now: SimNow) -> Twinkle {
+    let key = mix(id ^ mix(cell.0 as u32 ^ mix(cell.1 as u32)));
     let period = LOOP.get();
     let t = now.tick.to_wire().wrapping_add(key % period);
-    let (cycle, p) = (t / period, ((t % period) as f32 + now.frac) / period as f32);
-    let spot = mix(key ^ cycle);
-    let offset = Vec2::new(unit(spot) - 0.5, unit(mix(spot)) - 0.5) * 2.0 * SPREAD;
+    let p = ((t % period) as f32 + now.frac) / period as f32;
     let glow = (std::f32::consts::PI * p).sin();
-    Twinkle { offset, rise: LIFT + RISE * p, size: SIZE * glow * glow }
+    Twinkle { rise: LIFT + RISE * p, size: SIZE * glow * glow }
 }
 
 /// A four-pointed glint, white and opaque in the middle, fading along its arms (RGBA, `size` x `size`).
@@ -131,14 +126,14 @@ impl WorldView for SparkleView {
 
     fn update(&self, (_, effect): &(Id<Effect>, Effect), now: SimNow, (commands, map, rig, params, assets, children, stars): &mut SystemParamItem<Self::Params>) {
         let terrain = &map.0.terrain;
-        let points = effect.reshaping(terrain);
+        let cells = cells_of(&effect.reshaping(terrain), terrain.size());
         let facing = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
         let have = children.get(self.entity).map(|c| c.to_vec()).unwrap_or_default();
         for (k, &star) in have.iter().enumerate() {
             let Ok(mut t) = stars.get_mut(star) else { continue };
-            let pose = points.get(k).and_then(|&p| {
-                let tw = twinkle(self.id, p, terrain.size(), now);
-                let at = Vec2::new(p.0 as f32, p.1 as f32) + tw.offset;
+            let pose = cells.get(k).and_then(|&c| {
+                let tw = twinkle(self.id, c, now);
+                let at = Vec2::new(c.0 as f32 + 0.5, c.1 as f32 + 0.5);
                 render_pos(terrain, &Grounded { at, half: 0.0 }, rig.focus, &params.0).map(|ground| (ground + Vec3::Y * tw.rise, tw.size))
             });
             *t = match pose {
@@ -146,7 +141,7 @@ impl WorldView for SparkleView {
                 None => Transform::from_scale(Vec3::ZERO),
             };
         }
-        for _ in have.len()..points.len() {
+        for _ in have.len()..cells.len() {
             commands.spawn((Star, Mesh3d(assets.quad.clone()), MeshMaterial3d(assets.material.clone()), Transform::from_scale(Vec3::ZERO), NotShadowCaster, crate::hover::NoOutline, ChildOf(self.entity)));
         }
     }
@@ -185,26 +180,20 @@ mod tests {
     use game_core::time::Tick;
 
     #[test]
-    fn a_star_twinkles_at_a_new_spot_of_its_cell_each_time() {
-        let at = |tick: u32, frac: f32| SimNow { tick: Tick::from_wire(tick), frac };
-        let period = LOOP.get();
-        let poses: Vec<Twinkle> = (0..period * 4).map(|t| twinkle(7, (3, 4), 128, at(t, 0.5))).collect();
-        assert!(poses.iter().all(|t| t.offset.abs().max_element() <= SPREAD && t.size <= SIZE && t.rise >= LIFT));
+    fn a_star_twinkles_at_its_own_phase() {
+        let at = |tick: u32| SimNow { tick: Tick::from_wire(tick), frac: 0.5 };
+        let poses: Vec<Twinkle> = (0..LOOP.get()).map(|t| twinkle(7, (3, 4), at(t))).collect();
+        assert!(poses.iter().all(|t| t.size <= SIZE && t.rise >= LIFT));
         assert!(poses.iter().any(|t| t.size > SIZE * 0.8) && poses.iter().any(|t| t.size < SIZE * 0.2), "twinkles");
-        let spots: std::collections::BTreeSet<_> = poses.iter().map(|t| (t.offset.x.to_bits(), t.offset.y.to_bits())).collect();
-        assert!(spots.len() >= 4, "a new spot each twinkle: {}", spots.len());
-        assert_eq!(twinkle(7, (3, 4), 128, at(20, 0.2)), twinkle(7, (131, -124), 128, at(20, 0.2)), "a point the same across the map's edge");
-        assert_ne!(twinkle(7, (3, 4), 128, at(20, 0.2)), twinkle(7, (3, 5), 128, at(20, 0.2)), "each point its own phase and spot");
-        assert_ne!(twinkle(7, (3, 4), 128, at(20, 0.2)), twinkle(8, (3, 4), 128, at(20, 0.2)), "each effect its own");
+        assert_eq!(twinkle(7, (3, 4), at(20)), twinkle(7, (3, 4), at(20 + LOOP.get())), "loops");
+        assert_ne!(twinkle(7, (3, 4), at(20)), twinkle(7, (3, 5), at(20)), "each cell its own phase");
     }
 
     #[test]
-    fn neighbours_stars_are_not_lined_up() {
-        let at = SimNow { tick: Tick::from_wire(100), frac: 0.0 };
-        let xs: Vec<f32> = (0..20).map(|z| twinkle(7, (10, z), 128, at).offset.x).collect();
-        let mean = xs.iter().sum::<f32>() / xs.len() as f32;
-        let spread = xs.iter().map(|x| (x - mean).abs()).sum::<f32>() / xs.len() as f32;
-        assert!(spread > 0.15, "a column of points gives scattered stars: {xs:?}");
+    fn one_star_per_cell_touching_a_moving_point() {
+        assert_eq!(cells_of(&[(5, 5)], 128), [(4, 4), (4, 5), (5, 4), (5, 5)]);
+        assert_eq!(cells_of(&[(5, 5), (6, 5)], 128).len(), 6, "shared cells once");
+        assert_eq!(cells_of(&[(0, 128)], 128), [(0, 127), (0, 0), (127, 127), (127, 0)].iter().copied().collect::<std::collections::BTreeSet<_>>().into_iter().collect::<Vec<_>>(), "wrapped");
     }
 
     #[test]
