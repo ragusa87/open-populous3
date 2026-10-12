@@ -287,13 +287,9 @@ pub(super) fn select_and_order(
                 None => {
                     let ray = cam.0.viewport_to_world(cam.1, c).ok();
                     let at = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)).map(world_units);
-                    // One of the player's buildings wins over a tree in front of or behind it; a building is
-                    // clicked anywhere on its model (as hovered), not only on its footprint.
-                    let on_building = match hovered.0 {
-                        Some(crate::hover::HoverTarget::Building(i)) => map.0.buildings.get(i).map(|b| b.centre()),
-                        _ => None,
-                    };
-                    if let Some(orders) = on_building.or(at).and_then(|at| building_click(&map.0, &selection.units, at)) {
+                    // One of the player's buildings wins over a tree in front of or behind it; a building or a
+                    // totem is clicked anywhere on its model (as hovered), not only on its footprint.
+                    if let Some(orders) = hovered_site(&map.0, hovered.0).or(at).and_then(|at| building_click(&map.0, &selection.units, at)) {
                         moves = orders;
                     } else if let Some(i) = tree.tree {
                         moves = map.0.cut_orders(PLAYER, &selection.units, i);
@@ -318,6 +314,15 @@ pub(super) fn select_and_order(
     let commands: Vec<Command> = if add { chained(commands.collect()) } else { commands.collect() };
     for command in moves.into_iter().chain(commands) {
         schedule.issue(command);
+    }
+}
+
+/// Where a click on the hovered building or totem lands (world units): its centre.
+pub fn hovered_site(map: &game_core::map::GameMap, hovered: Option<crate::hover::HoverTarget>) -> Option<(u16, u16)> {
+    match hovered? {
+        crate::hover::HoverTarget::Building(i) => map.buildings.get(i).map(|b| b.centre()),
+        crate::hover::HoverTarget::Totem(i) => map.totems.get(i).map(|t| (t.x, t.z)),
+        _ => None,
     }
 }
 
@@ -471,6 +476,20 @@ mod tests {
         assert_eq!(shift_right_click(&map, centre, false), None);
         map.buildings[site].flat = true;
         assert_eq!(shift_right_click(&map, centre, true), None, "flat: no more a plan");
+    }
+
+    #[test]
+    fn a_click_on_a_hovered_totem_sends_the_selection_to_pray_there() {
+        use crate::hover::HoverTarget;
+        let mut map = game_core::map::GameMap::sandbox_buildings();
+        let site = (40 * 512, 40 * 512);
+        map.totems = vec![game_core::totem::Totem::new(game_core::totem::TotemKind::StoneHead, site)];
+        let brave = map.units.iter().find(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave).unwrap().id;
+        assert_eq!(hovered_site(&map, Some(HoverTarget::Totem(0))), Some(site));
+        assert_eq!(hovered_site(&map, Some(HoverTarget::Totem(1))), None);
+        assert_eq!(hovered_site(&map, Some(HoverTarget::Tree(0))), None);
+        let orders = building_click(&map, &[brave], hovered_site(&map, Some(HoverTarget::Totem(0))).unwrap()).unwrap();
+        assert!(matches!(orders[..], [Command::OrderUnit { order: Order::Worship { site: s }, .. }] if s == site));
     }
 
     #[test]
