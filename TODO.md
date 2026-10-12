@@ -3,6 +3,35 @@
 What is left to implement. Tick or remove an item in the commit that does it, add new ones as they
 come up. Details live in the linked specs; done work is summarised in [docs/roadmap.md](docs/roadmap.md).
 
+## Performance (60 fps)
+Measured with `just profile` (units sandbox, dev build, headless, tracing on): about 73 ms a frame. The simulation
+(`run_ticks`) takes 0.014 ms a frame and all our systems together about 1 ms: the time goes to Bevy's own CPU work
+around rendering (render app about 43 ms, extract and asset preparation about 10 ms, transform propagation in
+PostUpdate about 5 ms), driven by how we hand it the world:
+- [ ] Unit sprites: one image, material and quad mesh per animation frame (`units::upload_frame`), so each unit is its
+  own draw call and bind group, nothing batches. One atlas texture and material per kind and tribe (frames as UV
+  rects in a sprite material, instanced); the same for markers, dust and wood. Biggest win expected.
+- [ ] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
+  prepared again each frame; write only when the colour changes, or share a material per colour step.
+- [ ] Some image is prepared again every frame (`prepare_assets<GpuImage>` about 3 ms, its extract 1.6 ms): find which
+  (the UI text atlas of readouts changing every frame? the cursor? the offscreen target?).
+- [ ] Mesh allocator about 3 ms a frame: meshes rewritten every frame (range ring `put` while shown, blueprint marks)
+  and the 129 x 129 terrain mesh rebuilt on every camera move (`world::rebuild_terrain`): rewrite only on change;
+  the planet curve could move to the vertex shader over a static grid.
+- [ ] Transforms written every frame for everything grounded (`grounded::place_grounded`) and every unit part
+  (`units::pull_to_eye`), so Bevy propagates all trees, buildings and unit parts each frame: write with
+  `set_if_neq`, or only when the camera or the thing moved.
+- [ ] Unit views carry 7 marker slots and a health bar each, hidden most of the time: spawn markers when shown.
+- [ ] Whole-world respawn on terrain changes: when the simulation levels ground (land bridge, flatten, braves
+  flattening a site, every few ticks) `run_ticks` marks `CurrentMap` changed, and trees (re-reading their original
+  meshes), sites, buildings, unit views, shadows and totems all despawn and rebuild. Those views should only
+  re-ground on `world::TerrainPatches`, and rebuild on a real change of their list.
+- [ ] Startup: `load_sprites` takes 6.5 s (Scale2x twice on every frame of every kind and tribe); recolour tribes in
+  the shader or a palette swap, cache the result, or bake in parallel.
+- [ ] Measure the windowed release build too (`cargo run --release`): the numbers above are the dev build under
+  tracing. The simulation only matters with many units: every walker replans A* on any terrain write
+  ("Replanning" in Units).
+
 ## Menu and sandboxes ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Sandbox Spells: test ground to cast every spell freely (no mana, no charges).
 - [ ] Sandbox Buildings: placing and constructing buildings on its free ground (braves, wood and trees are there; every model and every construction stage are shown).

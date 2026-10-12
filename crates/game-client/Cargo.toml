@@ -12,6 +12,10 @@ game-net = { version = "0.1.0", path = "../game-net" }
 pop3-format = { version = "0.1.0", path = "../pop3-format" }
 unit-atlas = { version = "0.1.0", path = "../unit-atlas" }
 
+[features]
+# Per-system timings as a Chrome trace (`just profile`, open in ui.perfetto.dev); off in normal builds.
+profile = ["bevy/trace_chrome"]
+
 # Bevy systems take their resources and queries as arguments: many, with long types.
 [lints.clippy]
 too_many_arguments = "allow"

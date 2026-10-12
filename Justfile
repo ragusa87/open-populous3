@@ -35,6 +35,12 @@ shot out *args:
 video *args:
     HEADLESS=1 VIDEO=${VIDEO:-5} cargo run -p game-client -- {{args}}
 
+# Per-system timings of a headless video run (same setup vars, VIDEO=secs, 2 by default): target/trace.json (open in
+# ui.perfetto.dev), its most expensive spans printed (tools/trace_top.py target/trace.json 40 game_client: ours only)
+profile *args:
+    HEADLESS=1 VIDEO=${VIDEO:-2} TRACE_CHROME=target/trace.json cargo run -p game-client --features profile -- {{args}}
+    python3 tools/trace_top.py target/trace.json 30
+
 test:
     cargo test --workspace
     python3 -m unittest discover -s tools -q

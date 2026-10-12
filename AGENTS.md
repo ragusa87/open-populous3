@@ -36,6 +36,9 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
   Level paths with spaces or quotes break `just shot`: run `HEADLESS=1 SCREENSHOT=out.png cargo run -p game-client -- "<level>"`.
 - `just video [level]`: the same headless setup recorded as a video, `VIDEO=secs` (5 by default) from `SHOT_FRAME`,
   always to `target/video.mp4` (git-ignored; frames piped raw into `ffmpeg`, which must be installed). Use it for animations.
+- `just profile [level]`: the same headless run built with Bevy's `trace_chrome` (cargo feature `profile`, off in normal
+  builds), `VIDEO=secs` (2 by default): `target/trace.json` (ui.perfetto.dev) and its most expensive spans printed
+  (`tools/trace_top.py target/trace.json 40 game_client` for our systems only). Slow: minutes, and a large file.
 - `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship`: skip the main menu or open it (`just shot` starts in the game by default).
 - `GAME_SPEED=0|1|2|4|8`: start paused or sped up (P and Shift +/- in the game).
 - `GAME_SEED=N`: the game's random seed (drawn per game otherwise), to replay a game the same way.
