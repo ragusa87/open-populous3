@@ -77,6 +77,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Flying: units thrown by Whirlwind / Blast / explosions follow a ballistic or carried path (flying 61, tumbling 73 anims), land with damage, drown if they land in the sea.
 - [ ] Vehicles (boats, airships from their huts): board, carry units over water/land, unload. A unit in a balloon stands at its height (`GameMap::altitude`), so a shaman casts farther from one.
 - [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
+- [ ] Walking into range from a balloon: `GameMap::walk_to_cast` already plans with the caster's `Unit::mobility()` (`Fly` reaches any cell), so once she can board one, `mobility()` must say so (or the order go to the balloon carrying her), and the balloon fly to the closest point in range.
 - [ ] The shaman can cast only some spells from a vehicle (list to define: fire-type probably yes, Land Bridge no).
 - [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
 - [ ] Use the shaman's wand gesture (81-84), the conversion sit (18), the spy's juggling idle (92), the carbonized brave (97) for lightning; check the tribe layer flag `0x10` mapping.

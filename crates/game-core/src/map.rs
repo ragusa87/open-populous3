@@ -528,13 +528,14 @@ impl GameMap {
     /// The player's shaman walks towards where `spell` is aimed, to cast it once within range
     /// (`cast_when_in_range`), if she could cast it now (`can_cast`, a charge left, none used yet): as close to the
     /// target as she can get, reachable or not (another island, the sea): the point nearest it of the cell nearest it
-    /// among those she can walk to (`path::nearest_reachable`, `path::closest_point_in_cell`).
+    /// among those she can get to as she moves (`Unit::mobility`: on foot today, flying in a balloon once she can
+    /// board one; `path::nearest_reachable`, `path::closest_point_in_cell`).
     fn walk_to_cast(&mut self, player: u8, spell: Spell) {
         let charged = spell.kind().is_some_and(|k| self.spell_books.get(player as usize).and_then(|b| b.slot(k)).is_some_and(|s| s.can_cast()));
         let (Some(to), true) = (self.spell_target(&spell), charged && self.can_cast(player, &spell)) else { return };
-        let Some(from) = self.shaman_of(player).map(Unit::cell) else { return };
+        let Some((from, mobility)) = self.shaman_of(player).map(|u| (u.cell(), u.mobility())) else { return };
         let goal = (crate::unit::cell_of(to.0), crate::unit::cell_of(to.1));
-        let closest = crate::path::nearest_reachable(&self.ground(), Mobility::Walk, from, goal);
+        let closest = crate::path::nearest_reachable(&self.ground(), mobility, from, goal);
         let to = crate::path::closest_point_in_cell(closest, to);
         if let Some(u) = self.shaman_mut(player) {
             u.walk_to_cast(spell, to);

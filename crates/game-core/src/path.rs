@@ -515,6 +515,14 @@ mod tests {
     }
 
     #[test]
+    fn a_balloon_reaches_any_target_cell() {
+        let mut t = Heightmap::new(16);
+        t.set(12, 4, 300);
+        assert_eq!(nearest_reachable(&t, Mobility::Fly, (2, 2), (12, 4)), (12, 4), "over the sea");
+        assert_ne!(nearest_reachable(&t, Mobility::Walk, (2, 2), (12, 4)), (12, 4), "on foot from the sea it cannot");
+    }
+
+    #[test]
     fn the_closest_point_of_a_cell_to_a_target() {
         assert_eq!(closest_point_in_cell((2, 3), (2 * 512 + 100, 3 * 512 + 400)), (2 * 512 + 100, 3 * 512 + 400), "inside: the target");
         assert_eq!(closest_point_in_cell((2, 3), (9 * 512, 3 * 512 + 10)), (3 * 512 - CELL_INSET as u16, 3 * 512 + 10), "east: its east side");
