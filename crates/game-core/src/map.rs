@@ -1012,7 +1012,10 @@ impl GameMap {
                 }
                 None
             }
-            WorldEvent::SetFire { building } => return (None, self.set_fire(building)),
+            WorldEvent::SetFire { building } => {
+                self.set_fire(building);
+                None
+            }
             WorldEvent::Panic { unit } => {
                 let away = crate::unit::panic_heading(self.rng.next_u32(), self.rng.next_u32());
                 if let Some(u) = self.unit_mut(unit) {

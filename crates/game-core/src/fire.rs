@@ -1,7 +1,7 @@
 //! Burning buildings (pop3-rev-analysis.md "Shared person and building states", Burning building), set on fire by
-//! `WorldEvent::SetFire` (lightning): the people inside are thrown out by the door and panic, the building loses one
-//! piece of wood at once and burns for `BURN_TICKS`. With wood left it stands as under construction, which braves
-//! repair with wood once the fire is out; with none left it is destroyed.
+//! `WorldEvent::SetFire` (lightning). A building burns for `BURN_TICKS`: on its `THROW_OUT_AT`th turn the people
+//! inside are thrown out by the door and panic, on its `HIT_AT`th it loses one piece of wood. With wood left it stands
+//! as under construction, which braves repair with wood once the fire is out; with none left it is destroyed.
 
 use crate::building::{Building, Stage};
 use crate::event::WorldEvent;
@@ -9,33 +9,32 @@ use crate::map::GameMap;
 use crate::time::{Countdown, Tick, Ticks};
 use crate::unit::Order;
 
-/// 127 turns (10.6 s), the original's burning building.
+/// 127 turns (10.6 s), the original's burning building (timer `+0xA7`).
 pub const BURN_TICKS: Ticks = Ticks::new(127);
+/// The turn of its fire its people are thrown out (timer 119).
+pub const THROW_OUT_AT: Ticks = Ticks::new(8);
+/// The turn of its fire it takes its structural hit of 100 wood, one piece (timer 79).
+pub const HIT_AT: Ticks = Ticks::new(48);
 
-/// What setting a building on fire did to it.
+/// What a turn of its fire does to a building.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Burnt {
-    /// Not burnt: fireproof (`BuildingKind::fireproof`), only a plan (ours, a guess), or already burning.
-    Spared,
-    /// Burning, one piece of wood less, the rest standing.
-    Damaged,
-    /// Burning, its last piece of wood lost.
-    Destroyed,
+pub enum FireTurn {
+    /// Not burning, or nothing this turn.
+    Nothing,
+    ThrowOut,
+    /// One piece of wood lost; `destroyed` when it was its last.
+    Hit { destroyed: bool },
 }
 
 impl Building {
-    /// Sets it on fire: one structural hit of 100 wood (one piece), and it burns for `BURN_TICKS`. A kind whose wood
-    /// we do not know (`wood_cost` 0: guard post, gate...) burns without losing any (ours, a guess).
-    pub fn ignite(&mut self) -> Burnt {
+    /// Sets it on fire for `BURN_TICKS`; false when it does not catch: fireproof (`BuildingKind::fireproof`), only a
+    /// plan (ours, a guess) or already burning (its fire is not lit again).
+    pub fn ignite(&mut self) -> bool {
         if self.kind.fireproof() || self.stage() == Stage::Blueprint || self.burning.is_some() {
-            return Burnt::Spared;
+            return false;
         }
         self.burning = Some(Countdown::new(BURN_TICKS));
-        if self.kind.wood_cost() == 0 {
-            return Burnt::Damaged;
-        }
-        self.used = self.used.min(self.kind.wood_cost()).saturating_sub(1);
-        if self.used == 0 { Burnt::Destroyed } else { Burnt::Damaged }
+        true
     }
 
     /// The tick its fire was lit, the map being at `now`; None when it does not burn.
@@ -43,29 +42,46 @@ impl Building {
         self.burning.map(|c| Tick::from_wire(now.to_wire().wrapping_sub(c.done().get())))
     }
 
-    /// One tick of its fire, out when it has burnt `BURN_TICKS`.
-    pub fn burn(&mut self) {
-        if self.burning.as_mut().is_some_and(Countdown::tick) {
+    /// One turn of its fire, out when it has burnt `BURN_TICKS`.
+    pub fn burn(&mut self) -> FireTurn {
+        let Some(fire) = self.burning.as_mut() else { return FireTurn::Nothing };
+        let out = fire.tick();
+        let done = fire.done();
+        if out {
             self.burning = None;
         }
+        match done {
+            THROW_OUT_AT => FireTurn::ThrowOut,
+            HIT_AT => FireTurn::Hit { destroyed: self.lose_a_piece() },
+            _ => FireTurn::Nothing,
+        }
+    }
+
+    /// Loses one piece of the wood its blueprint asks for (`BuildingKind::wood_cost`); whether none is left. A kind
+    /// with no blueprint (`wood_cost` 0: guard post, gate...) has none to lose.
+    fn lose_a_piece(&mut self) -> bool {
+        if self.kind.wood_cost() == 0 {
+            return false;
+        }
+        self.used = self.used.min(self.kind.wood_cost()).saturating_sub(1);
+        self.used == 0
     }
 }
 
 impl GameMap {
-    /// Sets the building `building` on fire (`Building::ignite`): everyone inside walks out by the door and panics,
-    /// a building with no wood left is removed. The panics, to apply next.
-    pub(crate) fn set_fire(&mut self, building: u32) -> Vec<WorldEvent> {
-        let Some(i) = self.building_index(building) else { return Vec::new() };
-        let burnt = self.buildings[i].ignite();
-        if burnt == Burnt::Spared {
-            return Vec::new();
+    /// Sets the building `building` on fire (`Building::ignite`).
+    pub(crate) fn set_fire(&mut self, building: u32) {
+        if let Some(i) = self.building_index(building) {
+            self.buildings[i].ignite();
         }
+    }
+
+    /// Throws everyone inside `building` out by its door; their panics, to apply next.
+    fn throw_out(&mut self, building: u32) -> Vec<WorldEvent> {
+        let Some(i) = self.building_index(building) else { return Vec::new() };
         let out: Vec<u32> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building)).map(|u| u.id).collect();
         let door = self.buildings[i].door();
         self.empty_building(building, door);
-        if burnt == Burnt::Destroyed {
-            self.remove_building(i);
-        }
         out.into_iter().map(|unit| WorldEvent::Panic { unit }).collect()
     }
 
@@ -78,9 +94,24 @@ impl GameMap {
         }
     }
 
-    /// Each burning building's fire burns on.
+    /// Each burning building's fire burns on: its people thrown out and panicking, its wood lost, a building with
+    /// none left removed (anyone still inside put out first).
     pub(crate) fn tend_fires(&mut self) {
-        self.buildings.iter_mut().for_each(Building::burn);
+        let turns: Vec<(u32, FireTurn)> = self.buildings.iter_mut().map(|b| (b.id, b.burn())).filter(|t| t.1 != FireTurn::Nothing).collect();
+        let mut panics = Vec::new();
+        for (id, turn) in turns {
+            match turn {
+                FireTurn::ThrowOut => panics.extend(self.throw_out(id)),
+                FireTurn::Hit { destroyed: true } => {
+                    self.throw_out(id);
+                    if let Some(i) = self.building_index(id) {
+                        self.remove_building(i);
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.apply_events(panics);
     }
 }
 
@@ -90,32 +121,43 @@ mod tests {
     use crate::building::BuildingKind;
     use crate::unit::Action;
 
+    /// The turns (1-based) of a fire on which something happens, and what.
+    fn timeline(b: &mut Building) -> Vec<(u32, FireTurn)> {
+        (1..=BURN_TICKS.get() + 5).map(|n| (n, b.burn())).filter(|t| t.1 != FireTurn::Nothing).collect()
+    }
+
     #[test]
-    fn a_fire_takes_one_piece_and_burns_out() {
+    fn people_out_on_turn_8_a_piece_lost_on_turn_48_out_after_127() {
         let mut hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
-        assert_eq!(hut.ignite(), Burnt::Damaged);
-        assert_eq!(hut.stage(), Stage::UnderConstruction { used: 2, of: 3 }, "repaired like a construction");
-        assert_eq!(hut.ignite(), Burnt::Spared, "already burning");
-        (1..BURN_TICKS.get()).for_each(|_| hut.burn());
-        assert!(hut.burning.is_some());
-        assert_eq!(hut.lit_at(Tick::from_wire(200)), Some(Tick::from_wire(200 - (BURN_TICKS.get() - 1))));
+        assert!(hut.ignite());
+        assert!(!hut.ignite(), "already burning");
+        assert_eq!(hut.stage(), Stage::Built, "nothing lost yet");
+        (1..BURN_TICKS.get()).for_each(|n| {
+            hut.burn();
+            assert_eq!(hut.lit_at(Tick::from_wire(200)), Some(Tick::from_wire(200 - n)));
+        });
         hut.burn();
         assert_eq!((hut.burning, hut.lit_at(Tick::from_wire(200))), (None, None));
-        assert_eq!(hut.ignite(), Burnt::Damaged);
-        hut.burning = None;
-        assert_eq!(hut.ignite(), Burnt::Destroyed, "no wood left");
+        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
+        hut.ignite();
+        assert_eq!(timeline(&mut hut), [(8, FireTurn::ThrowOut), (48, FireTurn::Hit { destroyed: false })]);
+        assert_eq!(hut.stage(), Stage::UnderConstruction { used: 2, of: 3 }, "repaired like a construction");
+        hut.used = 1;
+        hut.ignite();
+        assert_eq!(timeline(&mut hut)[1], (48, FireTurn::Hit { destroyed: true }), "no wood left");
     }
 
     #[test]
     fn the_library_the_prison_and_plans_never_burn() {
-        assert_eq!(Building::new(BuildingKind::Vault, 0, 0, 0, 0).ignite(), Burnt::Spared);
-        assert_eq!(Building::new(BuildingKind::Prison, 0, 0, 0, 0).ignite(), Burnt::Spared);
-        assert_eq!(Building::site(BuildingKind::Temple, 0, 0, 0, 0).ignite(), Burnt::Spared);
+        assert!(!Building::new(BuildingKind::Vault, 0, 0, 0, 0).ignite());
+        assert!(!Building::new(BuildingKind::Prison, 0, 0, 0, 0).ignite());
+        assert!(!Building::site(BuildingKind::Temple, 0, 0, 0, 0).ignite());
         let mut post = Building::new(BuildingKind::GuardPost, 0, 0, 0, 0);
-        assert_eq!(post.ignite(), Burnt::Damaged, "burns, its wood unknown: stands");
-        assert!(post.burning.is_some());
-        let frame = Building { used: 0, ..Building::new(BuildingKind::Temple, 0, 0, 0, 0) };
-        assert_eq!(frame.clone().ignite(), Burnt::Destroyed, "a bare frame burns down");
+        assert!(post.ignite());
+        assert_eq!(timeline(&mut post)[1], (48, FireTurn::Hit { destroyed: false }), "its wood unknown: stands");
+        let mut frame = Building { used: 0, ..Building::new(BuildingKind::Temple, 0, 0, 0, 0) };
+        assert!(frame.ignite());
+        assert_eq!(timeline(&mut frame)[1], (48, FireTurn::Hit { destroyed: true }), "a bare frame burns down");
     }
 
     fn sandbox_hut(map: &GameMap) -> usize {
@@ -136,23 +178,34 @@ mod tests {
         units
     }
 
+    fn panicking(map: &GameMap, people: &[u32]) -> usize {
+        map.units.iter().filter(|u| people.contains(&u.id) && matches!(u.action, Action::Panicking { .. })).count()
+    }
+
     #[test]
-    fn its_people_are_thrown_out_braves_repair_it_once_the_fire_is_out() {
+    fn its_people_come_out_in_panic_on_turn_8_and_braves_repair_it_once_the_fire_is_out() {
         let mut map = GameMap::sandbox_buildings();
         let hut = sandbox_hut(&map);
         let id = map.buildings[hut].id;
         let people = rest_inside(&mut map, hut, 2);
-        let panics = map.set_fire(id);
-        assert_eq!(panics, people.iter().map(|&unit| WorldEvent::Panic { unit }).collect::<Vec<_>>());
+        map.apply_events(vec![WorldEvent::SetFire { building: id }]);
+        for _ in 1..THROW_OUT_AT.get() {
+            map.tick();
+        }
+        assert_eq!((map.people_inside(id), panicking(&map, &people)), (2, 0), "still inside on turn 7");
         map.tick();
-        assert_eq!(map.people_inside(id), 0, "walking out");
+        assert_eq!(panicking(&map, &people), people.len(), "thrown out, panicking");
+        assert!((0..40).any(|_| {
+            map.tick();
+            map.people_inside(id) == 0
+        }), "out by the door");
+        while map.buildings[hut].burning.is_some() {
+            map.tick();
+        }
         assert_eq!(map.buildings[hut].stage(), Stage::UnderConstruction { used: 2, of: 3 });
+        assert_eq!(panicking(&map, &people), 0, "calm again");
         for c in map.build_orders(0, &people, hut) {
             map.apply(&c);
-        }
-        for _ in 0..BURN_TICKS.get() - 2 {
-            map.tick();
-            assert!(!map.units.iter().any(|u| people.contains(&u.id) && matches!(u.action, Action::Building { .. })), "not while it burns");
         }
         let repaired = (0..4000).find(|_| {
             map.tick();
@@ -162,27 +215,17 @@ mod tests {
     }
 
     #[test]
-    fn its_people_run_off_in_panic() {
-        let mut map = GameMap::sandbox_buildings();
-        let hut = sandbox_hut(&map);
-        let id = map.buildings[hut].id;
-        let people = rest_inside(&mut map, hut, 2);
-        map.apply_events(vec![WorldEvent::SetFire { building: id }]);
-        let panicking = |map: &GameMap| map.units.iter().filter(|u| people.contains(&u.id) && matches!(u.action, Action::Panicking { .. })).count();
-        assert_eq!(panicking(&map), people.len());
-        for _ in 0..crate::unit::PANIC_TICKS.get() {
-            map.tick();
-        }
-        assert_eq!(panicking(&map), 0, "over after 64 turns");
-    }
-
-    #[test]
-    fn a_building_burnt_to_nothing_is_removed() {
+    fn a_building_burnt_to_nothing_is_removed_on_turn_48() {
         let mut map = GameMap::sandbox_buildings();
         let hut = sandbox_hut(&map);
         let id = map.buildings[hut].id;
         map.buildings[hut].used = 1;
-        map.set_fire(id);
+        map.apply_events(vec![WorldEvent::SetFire { building: id }]);
+        for _ in 1..HIT_AT.get() {
+            map.tick();
+        }
+        assert!(map.building(id).is_some());
+        map.tick();
         assert!(map.building(id).is_none());
     }
 }

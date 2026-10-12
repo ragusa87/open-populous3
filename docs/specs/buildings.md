@@ -297,11 +297,13 @@ Model: damage takes wood out of a building (its used count drops below the kind'
 not dropped): it is under construction again, its view goes back to the wooden frame, and braves sent to it bring it
 back up like a construction. Its wood is its health. To check in the game: whether repairs need fetched wood.
 
-Fire (done: `game_core::fire`, `WorldEvent::SetFire`, set by lightning): a building built with wood, past its plan,
-not already burning (a guess), loses one piece at once (the original's structural hit of 100 wood) and burns for
-`BURN_TICKS` (127 turns, `Building::burning`). Everyone inside runs out by the door in panic (a `Panic` each,
-`Action::Panicking`), builders inside are released. With no wood left it is removed. While it burns, its braves only fetch wood and
-nobody builds in it. Vault, prison and other buildings without a wood cost never burn. Drawn (`buildings.rs`, `fire_bases`): its
+Fire (done: `game_core::fire`, `WorldEvent::SetFire`, set by lightning): a building past its plan, not already
+burning, burns for `BURN_TICKS` (127 turns, `Building::burning`). On its 8th turn (`THROW_OUT_AT`) everyone inside
+runs out by the door in panic (a `Panic` each, `Action::Panicking`), builders inside are released; on its 48th
+(`HIT_AT`) it loses one piece of the wood its blueprint asks for (the original's structural hit of 100 wood), and
+with none left it is removed. A kind with no blueprint (guard post, gate...) has no wood to lose. While it burns,
+its braves only fetch wood and nobody builds in it. The library (vault) and the prison never burn
+(`BuildingKind::fireproof`). Drawn (`buildings.rs`, `fire_bases`): its
 frame with 9 animated flames (the torches' `flame.rs` boards, `FIRE_FLAME` 1.3 cells) over its footprint, the middle one
 half way up, going down as it burns (`fire_height`: from their full height when lit, `Building::lit_at`, to
 `FIRE_LAST` 15 % at the end, on sim time). Dev: `LIGHTNING=x,z` on a building (`POP3_START=sandbox-buildings`, a hut at 52.5,70.5).
