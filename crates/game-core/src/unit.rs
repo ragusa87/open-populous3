@@ -180,6 +180,8 @@ pub enum Action {
     Attacking { target: Target, to: (u16, u16) },
     /// Its `role` in the challenge `challenge` (challenge.rs).
     Challenge { challenge: crate::challenge::ChallengeId, role: crate::challenge::Role },
+    /// Fighting in the melee `melee` (melee.rs): its place in the ring, its stance.
+    Melee { melee: crate::melee::MeleeId, place: (u16, u16), stance: crate::melee::Stance },
     /// Held by the test-only coordinator `gathering` (coordinator.rs).
     #[cfg(test)]
     Gathered { gathering: crate::id::Id<crate::coordinator::tests::Gathering> },
@@ -209,7 +211,7 @@ impl Action {
             Action::Entering { .. } => "Entering",
             Action::Hammering => "Hammering",
             Action::Attacking { .. } => "Attacking",
-            Action::Challenge { .. } => "Fighting",
+            Action::Challenge { .. } | Action::Melee { .. } => "Fighting",
             #[cfg(test)]
             Action::Gathered { .. } => "Gathered",
         }
@@ -217,8 +219,10 @@ impl Action {
 
     /// The coordinator this action takes part in, if any (coordinator.rs).
     pub fn link(&self) -> Option<crate::coordinator::Link> {
-        if let Action::Challenge { challenge, .. } = *self {
-            return Some(crate::coordinator::Link::Challenge(challenge));
+        match *self {
+            Action::Challenge { challenge, .. } => return Some(crate::coordinator::Link::Challenge(challenge)),
+            Action::Melee { melee, .. } => return Some(crate::coordinator::Link::Melee(melee)),
+            _ => {}
         }
         #[cfg(test)]
         if let Action::Gathered { gathering } = *self {
@@ -645,6 +649,7 @@ impl Unit {
             }
             Action::Attacking { to, .. } => self.approach(to, ground),
             Action::Challenge { challenge, role } => self.action = Action::Challenge { challenge, role: self.play(role, ground) },
+            Action::Melee { melee, place, stance } => self.action = Action::Melee { melee, place, stance: self.fight(place, stance, ground) },
             Action::Entering { to } => {
                 if self.step_towards(to, ground, self.kind.speed()) != Step::Moved {
                     self.action = Action::Idle;
@@ -901,8 +906,48 @@ impl Unit {
 
     /// Its coordinator sends it to `at` (`WorldEvent::Placed`).
     pub fn placed(&mut self, at: (u16, u16)) {
-        if let Action::Challenge { challenge, role: crate::challenge::Role::Charging { speed, .. } } = self.action {
-            self.action = Action::Challenge { challenge, role: crate::challenge::Role::Charging { to: at, speed } };
+        match self.action {
+            Action::Challenge { challenge, role: crate::challenge::Role::Charging { speed, .. } } => {
+                self.action = Action::Challenge { challenge, role: crate::challenge::Role::Charging { to: at, speed } };
+            }
+            Action::Melee { melee, stance, .. } => self.action = Action::Melee { melee, place: at, stance },
+            _ => {}
+        }
+    }
+
+    /// Turns to face `at`.
+    pub fn face(&mut self, at: (u16, u16)) {
+        let (dx, dz) = (torus_delta(self.x, at.0), torus_delta(self.z, at.1));
+        if (dx, dz) != (0, 0) {
+            self.facing = octant(dx, dz);
+        }
+    }
+
+    /// One turn of its stance in a melee: to its place, on guard, striking, reeling then thrown back.
+    fn fight(&mut self, place: (u16, u16), stance: crate::melee::Stance, ground: &impl Ground) -> crate::melee::Stance {
+        use crate::melee::{Stance, PLACE_REACH};
+        let near = |u: &Self| torus_delta(u.x, place.0).abs() <= PLACE_REACH && torus_delta(u.z, place.1).abs() <= PLACE_REACH;
+        match stance {
+            Stance::ToPlace | Stance::OnGuard if near(self) => Stance::OnGuard,
+            Stance::ToPlace | Stance::OnGuard => {
+                self.step_towards(place, ground, self.kind.speed());
+                if near(self) { Stance::OnGuard } else { Stance::ToPlace }
+            }
+            Stance::Striking { blow, mut left } => match left.tick() {
+                false => Stance::Striking { blow, left },
+                true => Stance::ToPlace,
+            },
+            Stance::Reeling { mut left, knock } => match (left.tick(), knock) {
+                (false, _) => Stance::Reeling { left, knock },
+                (true, None) => Stance::ToPlace,
+                (true, Some(push)) => {
+                    let below = ground.terrain().height_at(self.x as u32, self.z as u32, WORLD_UNITS_PER_CELL);
+                    self.motion = Motion::flying(push, below);
+                    Stance::Staggering
+                }
+            },
+            Stance::Staggering if self.motion.is_still() => Stance::ToPlace,
+            Stance::Staggering => Stance::Staggering,
         }
     }
 

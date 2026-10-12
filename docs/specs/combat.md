@@ -67,9 +67,36 @@ A coordinator (`challenge::Challenge`, coordinators.md) for one attacker and one
   (shaman 4, × pace); with 2 left the target is thrown (`Push`, `PushKind::Melee`: the shield does not stop it, the
   target stays `Shoved` in the challenge) at 100 + a draw below 100 per turn, turned a third to two thirds of a turn
   from the way to the attacker (away from it), lift `SHOVE_LIFT` 48 [guess: ours does not slide on the ground]; no
-  damage. Still again, it waits. The attacker charges again; reaching it again ends the challenge (the melee comes
-  next).
+  damage. Still again, it waits. The attacker charges again; reaching it again ends the challenge with `StartMelee`: a melee
+  at the target's place.
 - Already in reach when it starts, the attacker shoves at once.
 - Not yet: the target facing the attacker and its taunts; the original's option with no shove; a target at its
   building (the third approach, unverified).
 
+
+## Melee
+A coordinator (`melee::Melee`) holding up to `MAX_FIGHTERS` (6) people of two tribes: one alone on its side in the
+middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `Action::Melee { melee, place, stance }`.
+- Started by a challenge (`GameMap::start_melee`): the middle where the target stands, the ring's turn drawn
+  [guess: the original's first angle is not traced].
+- Each turn, in this order:
+  1. fighters gone, dead, unlinked or farther than `MELEE_LEASH` (2048) from the middle leave (`Release`);
+  2. fewer than 2 left or one tribe left: it ends, everyone released (the winner's count: TODO);
+  3. the middle is the fighter alone on its side (the last one first) and follows it;
+  4. on `RING_TURN` (every 32 turns, at its own phase) the ring turns half a turn, then by 1 chance in 2 another
+     20° to 80° either way (`RING_EXTRA`);
+  5. places (`ring_place`): the middle, the others at `RING_RADIUS` (180) around it at the ring's turn, + 90° with
+     3 people, + 120° and 240° with 4, the 5th and 6th in the middle; `Placed` only when a place changed;
+  6. each fighter on guard draws 0..16 and picks its opponent (the middle one any of the ring, the ring the
+     middle one). Against an opponent on guard (`blow_on_guard`): the shaman 7/16 knocking, 9/16 clean; others
+     5/16 knocking, 9/16 clean, 2/16 trading. Against a busy one near its place (`BUSY_REACH` 360), 4/16 of the
+     time (`blow_on_busy`): clean, or with more than 2 people clean or trading by the draw's parity.
+     A blow (`Struck`): the target loses the attacker's strength, and except a clean blow the attacker the target's
+     (both at once, `DamageKind::Melee`); lives already lost this turn count. Both are then busy for the turn.
+- A fighter's own cycle (`Stance`): `ToPlace` (walks to its place) → `OnGuard` within `PLACE_REACH` (12) →
+  `Striking` (the blow's length) or `Reeling` (7 turns, 4 when knocked) → to its place again. A knocking blow
+  against an on-guard follower (never the shaman) throws it back after it reeled: 35 + a draw below 70 per turn,
+  away from the attacker, along the ground (`Staggering` until still).
+- Fighters heal as anyone (see "Health").
+- Not yet: joining and splitting (next), the ground check moving the middle off unsuitable ground, the winner's
+  count, the move's sounds.

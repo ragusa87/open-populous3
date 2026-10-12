@@ -26,6 +26,10 @@ pub enum WorldEvent {
     Placed { unit: UnitId, at: (u16, u16) },
     /// The attacker of a challenge starts its shove (`GameMap::shove`).
     Shove { attacker: UnitId },
+    /// A blow in a melee (`GameMap::struck`); `knock`: the one struck is thrown back so, once it has reeled.
+    Struck { attacker: UnitId, target: UnitId, blow: crate::combat::Blow, knock: Option<Velocity> },
+    /// A challenge won: the two fight in a new melee (`GameMap::start_melee`).
+    StartMelee { attacker: UnitId, target: UnitId },
     /// The unit leaves its coordinator (`Unit::release`); nothing if it is in none.
     Release { unit: UnitId },
 }

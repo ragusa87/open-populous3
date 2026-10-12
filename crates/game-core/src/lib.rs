@@ -28,6 +28,7 @@ pub mod land_bridge;
 pub mod lightning;
 pub mod mana;
 pub mod map;
+pub mod melee;
 pub mod motion;
 pub mod occupancy;
 pub mod path;

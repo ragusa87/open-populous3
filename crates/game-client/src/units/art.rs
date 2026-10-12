@@ -105,6 +105,17 @@ impl Pose {
     }
 }
 
+/// The pose for a stance in a melee.
+fn melee_pose(stance: game_core::melee::Stance, airborne: bool) -> Pose {
+    use game_core::melee::Stance;
+    match stance {
+        Stance::ToPlace => Pose::Walk,
+        Stance::OnGuard | Stance::Striking { .. } | Stance::Reeling { .. } => Pose::Idle,
+        Stance::Staggering if airborne => Pose::Flung,
+        Stance::Staggering => Pose::Walk,
+    }
+}
+
 /// The pose for a part in a challenge.
 fn challenge_pose(role: game_core::challenge::Role, carrying: bool, airborne: bool) -> Pose {
     use game_core::challenge::Role;
@@ -129,6 +140,7 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } | Action::Attacking { .. } => Pose::Walk,
         Action::Panicking { .. } => Pose::Panic,
         Action::Challenge { role, .. } => challenge_pose(*role, carrying, airborne),
+        Action::Melee { stance, .. } => melee_pose(*stance, airborne),
         Action::Chopping { .. } | Action::PickingUpWood { .. } => Pose::Chop,
         Action::Building { .. } | Action::Hammering => Pose::Hammer,
         Action::Flattening { .. } => Pose::Jump,

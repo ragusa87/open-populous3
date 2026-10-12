@@ -100,7 +100,6 @@ impl Coordinator for Challenge {
     fn link_of(u: &Unit) -> Option<Id<Self>> {
         match u.action.link()? {
             Link::Challenge(id) => Some(id),
-            #[cfg(test)]
             _ => None,
         }
     }
@@ -123,7 +122,7 @@ impl Coordinator for Challenge {
                 }
                 if reached((a.x, a.z), target_at) && waiting == Role::Waiting {
                     if matches!(self.phase, Phase::Recharge { .. }) {
-                        return self.end();
+                        return Step { finished: true, events: vec![WorldEvent::StartMelee { attacker: a.id, target: t.id }] };
                     }
                     events.push(WorldEvent::Shove { attacker: a.id });
                     self.phase = Phase::Shove;
@@ -221,11 +220,12 @@ mod tests {
     }
 
     #[test]
-    fn after_the_second_charge_the_challenge_is_over() {
+    fn after_the_second_charge_they_fight() {
         let (mut map, a, t) = pair(3);
         until(&mut map, 200, |m| role(m, t) == Some(Role::Shoved)).expect("shoved");
         until(&mut map, 200, |m| m.coordinators.challenges.is_empty()).expect("over");
-        assert!(role(&map, a).is_none() && role(&map, t).is_none());
+        assert_eq!(map.coordinators.melees.len(), 1);
+        assert!([a, t].iter().all(|&u| matches!(map.unit(u).unwrap().action, Action::Melee { .. })));
     }
 
     #[test]

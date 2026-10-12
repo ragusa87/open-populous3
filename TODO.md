@@ -103,9 +103,9 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] World views (architecture.md "Client: world visuals"): the landing dust (`units::dust`) as a `WorldView` once
   touchdowns are kept in game-core (a unit's landing tick), so a rejoining client draws it too; the sinking totem's
   smoke once totems have ids; units, building views and the unit glide (`SimClock::prev_ids`) still keyed by index.
-- [ ] Coordinators: the infrastructure is done ([coordinators.md](docs/specs/coordinators.md)); each kind to specify and implement (preacher's sermon, melee, formation, guard control, soul convert; the challenge is done), with its scan in `GameMap::detect_coordinators`.
+- [ ] Coordinators: the infrastructure is done ([coordinators.md](docs/specs/coordinators.md)); each kind to specify and implement (preacher's sermon, formation, guard control, soul convert; the challenge and the melee are done), with its scan in `GameMap::detect_coordinators`.
 - [ ] The hurt path (`GameMap::damage`): the last attacker, the death cause, and death held off while tumbling, so no emitter repeats them.
-- [ ] World events still to add with their kinds: `ChangeOwner { unit, tribe }` (conversion), `SpawnCoordinator` (a pre-fight starting a fight).
+- [ ] World events still to add with their kinds: `ChangeOwner { unit, tribe }` (conversion).
 - [ ] Internal model 10/6: Preacher Attract (wiki) or a formation (pop3-rev-analysis.md "Combat"): decide from the original.
 
 ## Combat

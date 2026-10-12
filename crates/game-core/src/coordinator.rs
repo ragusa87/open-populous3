@@ -2,7 +2,7 @@
 //! invisible "internal" things (class 10: fights, formations, guard control...). Units link to one through their
 //! action, one way; the coordinator keeps no list of them. It ticks before the units, returns `WorldEvent`s, and is
 //! removed when its situation ends; its units then find its id gone and are released (`GameMap::release_orphans`).
-//! Kinds: `challenge::Challenge`; a test-only `Gathering` proves the pattern.
+//! Kinds: `challenge::Challenge`, `melee::Melee`; a test-only `Gathering` proves the pattern.
 
 use crate::event::WorldEvent;
 use crate::id::{Id, Registry};
@@ -30,6 +30,7 @@ pub trait Coordinator: Sized {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Link {
     Challenge(crate::challenge::ChallengeId),
+    Melee(crate::melee::MeleeId),
     #[cfg(test)]
     Gathering(Id<tests::Gathering>),
 }
@@ -38,6 +39,7 @@ pub enum Link {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Coordinators {
     pub challenges: Registry<crate::challenge::Challenge>,
+    pub melees: Registry<crate::melee::Melee>,
     #[cfg(test)]
     pub gatherings: Registry<tests::Gathering>,
 }
@@ -47,6 +49,7 @@ impl Coordinators {
     pub fn exists(&self, link: Link) -> bool {
         match link {
             Link::Challenge(id) => self.challenges.contains(id),
+            Link::Melee(id) => self.melees.contains(id),
             #[cfg(test)]
             Link::Gathering(id) => self.gatherings.contains(id),
         }
@@ -57,6 +60,7 @@ impl Coordinators {
     pub fn tick(&mut self, now: Tick, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         tick_kind(&mut self.challenges, now, world, rng, &mut events);
+        tick_kind(&mut self.melees, now, world, rng, &mut events);
         #[cfg(test)]
         tick_kind(&mut self.gatherings, now, world, rng, &mut events);
         events

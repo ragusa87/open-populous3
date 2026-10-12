@@ -1,7 +1,7 @@
 # Coordinators
 
 Short-lived simulation objects that coordinate several units: a sermon, a fight, a formation, a guard post's
-control. The infrastructure is `game_core::coordinator`; kinds: the challenge (combat.md "Challenge"). Each kind
+control. The infrastructure is `game_core::coordinator`; kinds: the challenge and the melee (combat.md "Challenge", "Melee"). Each kind
 has its own spec and rules on top of this.
 
 Tags: **[exe]** the original executable (pop3-rev-analysis.md), **[wiki]** the Populous Wiki (Object Data),
@@ -51,12 +51,13 @@ for each variant:
 | `Raid { building }` | routed, no behaviour yet |
 | `SpawnEffect(Effect)` | a new effect, ticking from the next turn |
 | `Terrain(TerrainChange)` | raise or flatten ground |
-| `Placed { unit, at }` | `Unit::placed`: a charger's goal (later a melee's place) |
+| `Placed { unit, at }` | `Unit::placed`: a charger's goal, a fighter's place in its melee |
 | `Shove { attacker }` | `GameMap::shove`: the challenger starts its shove |
+| `Struck { attacker, target, blow, knock }` | `GameMap::struck`: the attacker strikes, a target on guard reels (and is thrown back after) |
+| `StartMelee { attacker, target }` | `GameMap::start_melee`: a new melee, both in it |
 | `Release { unit }` | the unit leaves its coordinator: back to Idle (`Unit::release`); nothing if it is in none or gone |
 
-Expected later, when their kinds come: `ChangeOwner { unit, tribe }` (conversion), `SpawnCoordinator(..)` (a
-pre-fight starting a fight).
+Expected later, when their kinds come: `ChangeOwner { unit, tribe }` (conversion).
 
 Rules:
 - Emitters say **what happened** (`Release`, `Panic`); the map decides the resulting action. No `SetAction`.

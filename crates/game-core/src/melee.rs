@@ -1,0 +1,391 @@
+//! A melee (docs/specs/combat.md "Melee"): one person in the middle against up to five in a ring around it, trading
+//! blows until one side is left. A coordinator (docs/specs/coordinators.md): fighters link to it with their place
+//! and their stance, it picks who strikes whom and how.
+
+use crate::angle;
+use crate::combat::{move_turns, strength, Blow, Move};
+use crate::coordinator::{Coordinator, Link, Step};
+use crate::effect::DamageKind;
+use crate::event::WorldEvent;
+use crate::id::Id;
+use crate::map::{GameMap, Lcg};
+use crate::motion::Velocity;
+use crate::time::{Countdown, Every, Tick, Ticks};
+use crate::unit::{isqrt, torus_delta, Action, Unit, UnitId, UnitKind};
+
+pub type MeleeId = Id<Melee>;
+
+/// The ring's radius around the middle, world units ("Fight" [exe, measured]).
+pub const RING_RADIUS: i32 = 180;
+/// A fighter farther than this from the middle has left the melee ("Fight" [exe]).
+pub const MELEE_LEASH: i32 = 2048;
+/// A fighter this close to its place is on guard ("Fight" [exe]).
+pub const PLACE_REACH: i32 = 12;
+/// A busy opponent this close to its place may still be struck ("Fight" [exe]).
+pub const BUSY_REACH: i32 = 360;
+/// The ring turns half a turn on this rhythm, then maybe a little more ("Fight" [exe]).
+pub const RING_TURN: Every = Every::new(32);
+/// The extra turn: the first plus a draw below the second, of `angle::TURN` (20° to 80°) ("Fight" [exe]).
+pub const RING_EXTRA: (u32, u32) = (113, 341);
+/// A knocked fighter is thrown back at the first plus a draw below the second per turn ("Fight" [exe, measured]).
+pub const KNOCK_SPEED: (i32, i32) = (35, 70);
+/// The most people in one melee ("Fight" [exe]).
+pub const MAX_FIGHTERS: usize = 6;
+
+/// A fighter's own cycle (`Action::Melee`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stance {
+    /// Walking to its place.
+    ToPlace,
+    /// At its place, ready to strike or be struck.
+    OnGuard,
+    /// Dealing `blow`, `left` turns to go.
+    Striking { blow: Blow, left: Countdown },
+    /// Struck, `left` turns to go; then thrown back at `knock`, if any.
+    Reeling { left: Countdown, knock: Option<Velocity> },
+    /// Thrown back: walking to its place again once still.
+    Staggering,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Melee {
+    pub tribes: (u8, u8),
+    /// The middle of the ring: where the one alone on its side stands.
+    pub at: (u16, u16),
+    /// The ring's turn, of `angle::TURN`.
+    pub angle: u32,
+    pub centre: Option<UnitId>,
+}
+
+/// A fighter as the melee sees it this turn.
+#[derive(Clone, Copy)]
+struct Fighter<'a> {
+    unit: &'a Unit,
+    place: (u16, u16),
+    stance: Stance,
+}
+
+fn fighter(u: &Unit) -> Option<Fighter<'_>> {
+    match u.action {
+        Action::Melee { place, stance, .. } => Some(Fighter { unit: u, place, stance }),
+        _ => None,
+    }
+}
+
+fn distance(a: (u16, u16), b: (u16, u16)) -> i32 {
+    let (dx, dz) = (torus_delta(a.0, b.0), torus_delta(a.1, b.1));
+    isqrt((dx * dx + dz * dz) as u32) as i32
+}
+
+/// Where the ring's `k`-th person stands with `count` in the melee: around `at` at the ring's `angle`; the 5th and
+/// 6th in the middle ("Fight" [exe]).
+pub fn ring_place(at: (u16, u16), angle: u32, count: usize, k: usize) -> (u16, u16) {
+    let offsets: &[u32] = match count {
+        0..=2 => &[0],
+        3 => &[0, angle::TURN / 4],
+        _ => &[0, angle::TURN / 3, 2 * angle::TURN / 3],
+    };
+    let Some(offset) = offsets.get(k) else { return at };
+    let (x, z) = angle::rotate((RING_RADIUS, 0), angle + offset);
+    (at.0.wrapping_add(x as u16), at.1.wrapping_add(z as u16))
+}
+
+/// The blow `attacker` deals for the draw `r` (0..16) to an opponent on guard ("Fight" [exe]): the shaman never trades.
+pub fn blow_on_guard(attacker: UnitKind, r: u32) -> Blow {
+    match (attacker, r) {
+        (UnitKind::Shaman, 0..=6) => Blow::Knock,
+        (UnitKind::Shaman, _) => Blow::Clean,
+        (_, 0..=4) => Blow::Knock,
+        (_, 5..=13) => Blow::Clean,
+        _ => Blow::Trade,
+    }
+}
+
+/// The blow, if any, `attacker` deals for the draw `r` to a busy opponent near its place ("Fight" [exe]).
+pub fn blow_on_busy(r: u32, crowded: bool) -> Option<Blow> {
+    match (r, crowded) {
+        (4.., _) => None,
+        (_, false) => Some(Blow::Clean),
+        (r, true) if r % 2 == 0 => Some(Blow::Clean),
+        _ => Some(Blow::Trade),
+    }
+}
+
+impl Melee {
+    /// A new melee where `target` stands, `attacker` against it.
+    pub fn new(attacker: &Unit, target: &Unit, angle: u32) -> Self {
+        Melee { tribes: (attacker.owner, target.owner), at: (target.x, target.z), angle, centre: Some(target.id) }
+    }
+
+    /// The fighter alone on its side, the last centre first.
+    fn find_centre(&self, fighters: &[Fighter]) -> Option<UnitId> {
+        let alone = |f: &&Fighter| fighters.iter().filter(|o| o.unit.owner == f.unit.owner).count() == 1;
+        let candidates: Vec<&Fighter> = fighters.iter().filter(alone).collect();
+        candidates.iter().find(|f| Some(f.unit.id) == self.centre).or(candidates.first()).map(|f| f.unit.id)
+    }
+}
+
+impl Coordinator for Melee {
+    fn link_of(u: &Unit) -> Option<Id<Self>> {
+        match u.action.link()? {
+            Link::Melee(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    fn tick(&mut self, id: Id<Self>, members: &[UnitId], now: Tick, world: &GameMap, rng: &mut Lcg) -> Step {
+        let mut events = Vec::new();
+        let mut fighters = Vec::new();
+        for &m in members {
+            let Some(f) = world.unit(m).filter(|u| u.is_alive()).and_then(fighter) else { continue };
+            if distance((f.unit.x, f.unit.z), self.at) > MELEE_LEASH {
+                events.push(WorldEvent::Release { unit: m });
+            } else {
+                fighters.push(f);
+            }
+        }
+        let sides = fighters.iter().filter(|f| f.unit.owner != fighters[0].unit.owner).count();
+        if fighters.len() < 2 || sides == 0 {
+            events.extend(fighters.iter().map(|f| WorldEvent::Release { unit: f.unit.id }));
+            return Step { finished: true, events };
+        }
+        self.centre = self.find_centre(&fighters);
+        if let Some(c) = self.centre.and_then(|c| world.unit(c)) {
+            self.at = (c.x, c.z);
+        }
+        if RING_TURN.fires(now, id.raw()) {
+            self.angle += angle::TURN / 2;
+            if rng.next_u32() % 2 == 0 {
+                let extra = RING_EXTRA.0 + rng.next_u32() % RING_EXTRA.1;
+                self.angle = if rng.next_u32() % 2 == 0 { self.angle + extra } else { self.angle + angle::TURN - extra };
+            }
+            self.angle %= angle::TURN;
+        }
+        let ring: Vec<Fighter> = fighters.iter().copied().filter(|f| Some(f.unit.id) != self.centre).collect();
+        for (k, f) in ring.iter().enumerate() {
+            let place = ring_place(self.at, self.angle, fighters.len(), k);
+            if place != f.place {
+                events.push(WorldEvent::Placed { unit: f.unit.id, at: place });
+            }
+        }
+        if let Some(c) = fighters.iter().find(|f| Some(f.unit.id) == self.centre).filter(|c| c.place != self.at) {
+            events.push(WorldEvent::Placed { unit: c.unit.id, at: self.at });
+        }
+        events.extend(self.exchange(&fighters, &ring, rng));
+        Step { finished: false, events }
+    }
+}
+
+impl Melee {
+    /// This turn's blows: each fighter on guard picks its opponent and maybe a blow. Lives lost this turn count for
+    /// the next blows, and someone struck is busy for the rest of the turn.
+    fn exchange(&self, fighters: &[Fighter], ring: &[Fighter], rng: &mut Lcg) -> Vec<WorldEvent> {
+        let mut events = Vec::new();
+        let mut lost: Vec<(UnitId, u16)> = Vec::new();
+        let mut busy: Vec<UnitId> = Vec::new();
+        let life = |u: &Unit, lost: &[(UnitId, u16)]| u.health.current().saturating_sub(lost.iter().filter(|l| l.0 == u.id).map(|l| l.1).sum());
+        for f in fighters {
+            if f.stance != Stance::OnGuard || busy.contains(&f.unit.id) {
+                continue;
+            }
+            let r = rng.next_u32() & 15;
+            let opponent = if Some(f.unit.id) == self.centre {
+                ring[(rng.next_u32() % ring.len() as u32) as usize]
+            } else {
+                match fighters.iter().find(|o| Some(o.unit.id) == self.centre) {
+                    Some(&c) => c,
+                    None => continue,
+                }
+            };
+            let ready = opponent.stance == Stance::OnGuard && !busy.contains(&opponent.unit.id);
+            let blow = if ready {
+                blow_on_guard(f.unit.kind, r)
+            } else if distance((opponent.unit.x, opponent.unit.z), opponent.place) <= BUSY_REACH {
+                match blow_on_busy(r, fighters.len() > 2) {
+                    Some(b) => b,
+                    None => continue,
+                }
+            } else {
+                continue;
+            };
+            let (a, t) = (f.unit, opponent.unit);
+            let (a_life, t_life) = (life(a, &lost), life(t, &lost));
+            let hit = strength(a.kind, a_life, a.health.max(), a.statuses.bloodlust.is_on());
+            events.push(WorldEvent::Damage { unit: t.id, amount: hit, kind: DamageKind::Melee, from: Some(a.owner) });
+            lost.push((t.id, hit));
+            if blow != Blow::Clean {
+                let back = strength(t.kind, t_life, t.health.max(), t.statuses.bloodlust.is_on());
+                events.push(WorldEvent::Damage { unit: a.id, amount: back, kind: DamageKind::Melee, from: Some(t.owner) });
+                lost.push((a.id, back));
+            }
+            let knock = (ready && blow == Blow::Knock && t.kind != UnitKind::Shaman).then(|| {
+                let speed = KNOCK_SPEED.0 + (rng.next_u32() % KNOCK_SPEED.1 as u32) as i32;
+                knock_back((a.x, a.z), (t.x, t.z), speed)
+            });
+            events.push(WorldEvent::Struck { attacker: a.id, target: t.id, blow, knock });
+            busy.extend([a.id, t.id]);
+        }
+        events
+    }
+}
+
+/// A knock back at `speed` per turn from `target`, straight away from `attacker`, along the ground.
+pub fn knock_back(attacker: (u16, u16), target: (u16, u16), speed: i32) -> Velocity {
+    let (dx, dz) = (torus_delta(attacker.0, target.0), torus_delta(attacker.1, target.1));
+    let d = isqrt((dx * dx + dz * dz) as u32).max(1) as i32;
+    Velocity::new((dx * speed / d) as i16, 0, (dz * speed / d) as i16)
+}
+
+impl GameMap {
+    /// A challenge won its second charge: a melee at the target's place, both in it.
+    pub(crate) fn start_melee(&mut self, attacker: UnitId, target: UnitId) {
+        let angle = self.rng.next_u32() % angle::TURN;
+        let (Some(a), Some(t)) = (self.unit(attacker), self.unit(target)) else { return };
+        if !(a.is_alive() && t.is_alive()) {
+            return;
+        }
+        let melee = Melee::new(a, t, angle);
+        let ring = ring_place(melee.at, melee.angle, 2, 0);
+        let id = self.new_id_of();
+        let at = melee.at;
+        self.coordinators.melees.insert(id, melee);
+        for (unit, place) in [(attacker, ring), (target, at)] {
+            if let Some(u) = self.unit_mut(unit) {
+                u.join(Action::Melee { melee: id, place, stance: Stance::ToPlace });
+            }
+        }
+    }
+
+    /// A blow dealt (`WorldEvent::Struck`): the attacker strikes, a target on guard reels, both face each other.
+    pub(crate) fn struck(&mut self, attacker: UnitId, target: UnitId, blow: Blow, knock: Option<Velocity>) {
+        let (Some(a), Some(t)) = (self.unit_index(attacker), self.unit_index(target)) else { return };
+        let (pa, pt) = ((self.units[a].x, self.units[a].z), (self.units[t].x, self.units[t].z));
+        let a = &mut self.units[a];
+        a.face(pt);
+        if let Action::Melee { melee, place, .. } = a.action {
+            let left = Countdown::new(Ticks::new(move_turns(a.kind, Move::Strike(blow))));
+            a.action = Action::Melee { melee, place, stance: Stance::Striking { blow, left } };
+        }
+        let t = &mut self.units[t];
+        t.face(pa);
+        if let Action::Melee { melee, place, stance: Stance::OnGuard } = t.action {
+            let left = Countdown::new(Ticks::new(move_turns(t.kind, Move::Reel { knocked: knock.is_some() })));
+            t.action = Action::Melee { melee, place, stance: Stance::Reeling { left, knock } };
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two braves of tribes 0 and 1 already in a melee, a cell apart.
+    fn duel(attacker: UnitKind, target: UnitKind) -> (GameMap, UnitId, UnitId) {
+        let mut map = GameMap::sandbox_units().seeded(5);
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(1024), s.z.wrapping_add(2048));
+        let a = map.spawn(0, attacker, at).id;
+        let t = map.spawn(1, target, (at.0.wrapping_add(200), at.1)).id;
+        map.start_melee(a, t);
+        (map, a, t)
+    }
+
+    fn stance(map: &GameMap, u: UnitId) -> Option<Stance> {
+        match map.unit(u)?.action {
+            Action::Melee { stance, .. } => Some(stance),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn places_around_the_middle() {
+        let at = (1000, 1000);
+        assert_eq!(ring_place(at, 0, 2, 0), (1180, 1000));
+        assert_eq!(ring_place(at, 0, 3, 1), (1000, 1180));
+        assert_eq!(ring_place(at, 0, 6, 3), at, "the 5th and 6th stand in the middle");
+        for k in 0..3 {
+            assert!((RING_RADIUS - 1..=RING_RADIUS).contains(&distance(ring_place(at, 300, 4, k), at)), "integer turns round down");
+        }
+    }
+
+    #[test]
+    fn the_odds_of_the_blows() {
+        let count = |kind, blow| (0..16).filter(|&r| blow_on_guard(kind, r) == blow).count();
+        assert_eq!([Blow::Knock, Blow::Clean, Blow::Trade].map(|b| count(UnitKind::Brave, b)), [5, 9, 2]);
+        assert_eq!([Blow::Knock, Blow::Clean, Blow::Trade].map(|b| count(UnitKind::Shaman, b)), [7, 9, 0]);
+        assert_eq!((0..16).filter_map(|r| blow_on_busy(r, false)).count(), 4);
+    }
+
+    #[test]
+    fn a_duel_goes_on_until_one_falls_and_the_winner_is_free() {
+        let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Brave);
+        assert_eq!(map.coordinators.melees.len(), 1);
+        let ring = map.coordinators.melees.iter().next().unwrap().1.at;
+        let p = map.unit(a).map(|u| match u.action {
+            Action::Melee { place, .. } => place,
+            _ => unreachable!(),
+        });
+        assert!(p.is_some_and(|p| (RING_RADIUS - 1..=RING_RADIUS).contains(&distance(p, ring))));
+        let mut struck = 0;
+        for _ in 0..3000 {
+            map.tick();
+            if matches!(stance(&map, a), Some(Stance::Striking { .. })) || matches!(stance(&map, t), Some(Stance::Striking { .. })) {
+                struck += 1;
+            }
+            if map.coordinators.melees.is_empty() {
+                break;
+            }
+        }
+        assert!(struck > 0, "blows were dealt");
+        assert!(map.coordinators.melees.is_empty(), "over");
+        let alive = [a, t].iter().filter(|&&u| map.unit(u).is_some_and(Unit::is_alive)).count();
+        assert_eq!(alive, 1, "one fell");
+        assert!([a, t].iter().filter_map(|&u| map.unit(u)).filter(|u| u.is_alive()).all(|u| u.action == Action::Idle));
+    }
+
+    #[test]
+    fn a_clean_blow_hurts_only_the_one_struck() {
+        let (map, a, t) = duel(UnitKind::Warrior, UnitKind::Brave);
+        let melee = map.coordinators.melees.iter().next().unwrap().1.clone();
+        let fighters: Vec<Fighter> = [a, t].iter().map(|&u| Fighter { stance: Stance::OnGuard, ..fighter(map.unit(u).unwrap()).unwrap() }).collect();
+        let ring = vec![fighters[0]];
+        for seed in 0..40 {
+            let mut rng = Lcg(seed);
+            let events = melee.exchange(&fighters, &ring, &mut rng);
+            let damaged: Vec<UnitId> = events.iter().filter_map(|e| if let WorldEvent::Damage { unit, .. } = e { Some(*unit) } else { None }).collect();
+            for e in &events {
+                if let WorldEvent::Struck { attacker, target, blow, .. } = *e {
+                    let hurt_back = damaged.contains(&attacker);
+                    assert_eq!(hurt_back, blow != Blow::Clean, "{blow:?}");
+                    assert!(damaged.contains(&target));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_fighter_walked_far_away_leaves_and_fighters_heal() {
+        let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Brave);
+        map.unit_mut(a).unwrap().x = map.unit(a).unwrap().x.wrapping_add(10 * 512);
+        map.tick();
+        assert!(map.coordinators.melees.is_empty());
+        assert_eq!(map.unit(t).unwrap().action, Action::Idle);
+        let (map, a, t) = duel(UnitKind::Firewarrior, UnitKind::Brave);
+        assert!([a, t].iter().all(|&u| map.unit(u).unwrap().heals()), "fighting, they heal"); 
+    }
+
+    #[test]
+    fn a_firewarrior_strikes_twice_as_long() {
+        assert_eq!(move_turns(UnitKind::Firewarrior, Move::Strike(Blow::Knock)), 2 * move_turns(UnitKind::Brave, Move::Strike(Blow::Knock)));
+    }
+
+    #[test]
+    fn the_same_seed_gives_the_same_melee() {
+        let run = || {
+            let (mut map, _, _) = duel(UnitKind::Brave, UnitKind::Warrior);
+            map.run(Ticks::new(200));
+            (map.units, map.coordinators, map.rng)
+        };
+        assert_eq!(run(), run());
+    }
+}

@@ -7,6 +7,8 @@ use crate::keymap::{DevMode, Shortcut, Shortcuts};
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::challenge::{FIGHT_REACH, SHOVE_REACH};
+use game_core::melee::{MELEE_LEASH, RING_RADIUS};
+use game_core::unit::Action;
 use pop3_format::WORLD_UNITS_PER_CELL;
 use std::f32::consts::TAU;
 
@@ -16,6 +18,9 @@ const LIFT: f32 = 0.03;
 const CIRCLE_POINTS: usize = 48;
 const SIDE_POINTS: usize = 8;
 const CHALLENGE: Color = Color::srgb(1.0, 0.55, 0.1);
+const MELEE: Color = Color::srgb(0.95, 0.15, 0.15);
+/// A fighter's place: a small circle, cells.
+const PLACE_MARK: f32 = 0.06;
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShowOverlay(pub bool);
@@ -71,6 +76,19 @@ fn draw(show: Res<ShowOverlay>, dev: Res<DevMode>, map: Res<CurrentMap>, rig: Re
         outline(vec![a, toward], CHALLENGE);
         outline(outline_circle(t, cells_of(FIGHT_REACH)), CHALLENGE);
         outline(outline_square(t, cells_of(SHOVE_REACH)), CHALLENGE.with_alpha(0.5));
+    }
+    for (id, m) in map.coordinators.melees.iter() {
+        let at = cells(m.at);
+        outline(outline_circle(at, cells_of(RING_RADIUS)), MELEE);
+        outline(outline_circle(at, cells_of(MELEE_LEASH)), MELEE.with_alpha(0.4));
+        for u in &map.units {
+            if let Action::Melee { melee, place, .. } = u.action
+                && melee == id
+            {
+                outline(outline_circle(cells(place), PLACE_MARK), MELEE);
+                outline(vec![cells((u.x, u.z)), cells((u.x, u.z)) + torus_delta_cells(cells((u.x, u.z)), cells(place))], MELEE.with_alpha(0.6));
+            }
+        }
     }
 }
 

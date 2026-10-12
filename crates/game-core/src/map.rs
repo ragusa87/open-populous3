@@ -1052,6 +1052,14 @@ impl GameMap {
                 }
                 None
             }
+            WorldEvent::Struck { attacker, target, blow, knock } => {
+                self.struck(attacker, target, blow, knock);
+                None
+            }
+            WorldEvent::StartMelee { attacker, target } => {
+                self.start_melee(attacker, target);
+                None
+            }
             WorldEvent::Shove { attacker } => {
                 self.shove(attacker);
                 None
