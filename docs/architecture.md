@@ -3,7 +3,7 @@
 ```
 crates/
   pop3-format   pure parsers for original files (no engine). Reusable by tools/editor.
-  game-core     deterministic simulation: terrain (Heightmap), map, spell, blast, unit, physics, command, vault; query layers
+  game-core     deterministic simulation: terrain (Heightmap), map, spell, effect, blast, unit, physics, command, vault; query layers
                 over the map (occupancy: who fills a building; headcount: units by state and kind, housing).
                 Integers only in state. No Bevy.
   game-net      lockstep wire protocol (length-prefixed, hand-written binary) over std TCP.
@@ -28,6 +28,52 @@ crates/
                   editor.rs       edit mode: spells as brushes at camera focus
                   dev.rs          HEADLESS / SCREENSHOT / AERIAL env helpers
 ```
+
+## The tick
+`GameMap::tick` is the one main loop: one call is one turn of the original (12 per second, `time.rs`), and it ticks
+each kind of object in a fixed, written order. The original's order inside a turn is not known yet (TODO.md); ours:
+1. walls (`update_walls`), then trees (`Tree::tick`);
+2. effects (`tend_effects`): before anything they act on, so units react the same turn;
+3. camp fires, vaults, totems;
+4. units (`Unit::tick`), then their events (wood, work, doors) in unit order;
+5. chained orders, building work, wood put down, people counted inside, the gone units removed.
+
+Rules for every object that ticks:
+- **One typed list per kind** on `GameMap` (`trees`, `units`, `effects`...), no trait objects. Each kind has its own
+  `tick(&mut self, now, ...)`.
+- **Each object owns its rhythm.** Periodic work runs on the original's global turn masks: a `time::Every` constant
+  checked with phase 0 (`GROW_EVERY.fires(now, 0)` is the original's `turn & 15 == 0`), so it fires on the same
+  turns as in the original, for every object at once. A length is a `time::Countdown` held by the object. Each
+  constant cites the original's constant name or code address (pop3-rev-analysis.md), or says it is our guess.
+- **An object changes only itself.** What it does to others comes out as events (`UnitEvent`, `EffectEvent`), and
+  the map applies them in order, after the loop over that kind. The map's handlers are the only code that touches
+  two objects at once.
+- **Stable ids.** Units, buildings and effects get an id from `GameMap::new_id` (via `spawn`, `add_building`,
+  `add_effect`), never given twice, so each list stays sorted by id and lookups (`unit`, `building`) are binary
+  searches. Whoever holds an id finds None once that object is gone: it has ended. Indices are only valid inside
+  one turn.
+- **Randomness** is `GameMap::rng` (`Lcg`), handed to the objects that draw, in the loop's order.
+- **No visuals in game-core.** Timing the client needs (a phase, a countdown) is read-only state on the object;
+  smoke, rocks and shakes are drawn by the client from it.
+
+### Spell effects
+A spell is a recipe of components (pop3-rev-analysis.md "From cast to effect"): later a shot flies, then on arrival
+effects are added. An `Effect` (`effect.rs`) has an id, the caster's tribe, a position, `left` (a `Countdown`) and
+an `EffectKind` variant carrying only its own data (`SimpleBlast`). `tend_effects` takes the list out of the map
+(`std::mem::take`), so each `Effect::tick(now, &map, &mut rng)` reads the whole map without cloning it and returns
+`EffectEvent`s; finished effects are dropped (order kept), the list is put back, then the events apply in order:
+- `Damage` goes through `GameMap::damage`, the one place for immunities (shield, the caster's tribe, later angels
+  and friendly-fire rules per `DamageKind`), which calls `Unit::take_damage`;
+- `Push` flings the unit (`Unit::fling`) unless it is shielded;
+- `Spawn` adds a new effect, which first ticks on the next turn;
+- `Terrain` raises or flattens ground; `Panic`, `Raid`, `SetFire` are routed, without behaviour yet.
+An effect never holds another object's state: a unit it affects keeps its own countdown (panic, on fire) and
+finishes it alone, even after the effect has ended.
+
+To add a spell: add an `EffectKind` variant (or reuse one) whose `tick` follows the original's component (its
+rhythm as an `Every`, its length as `left`), returning events; add a `DamageKind` if it hurts differently; add the
+effect where the spell lands (`GameMap::apply`, later on a shot's arrival); test it on a small map (`effect.rs`
+tests show how).
 
 ## Handedness
 The original renders with Direct3D (pop3-rev reverses `D3DPopTB.exe`): its world is left-handed, x right, y up,

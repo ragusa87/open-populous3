@@ -51,6 +51,8 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Use the shaman's wand gesture (81-84), the conversion sit (18), the spy's juggling idle (92), the carbonized brave (97) for lightning; check the tribe layer flag `0x10` mapping.
 
 ## Praying (worship) ([worship.md](docs/specs/worship.md))
+- [ ] Prayer gauge on the original's rhythm and curve (pop3-rev-analysis.md "The gauge"): every 4 turns, `C² / (C − n + 1)²` per update, drain `C²`; today it steps every tick with `STEP · (n/C)²`.
+- [ ] Totems: ids (`GameMap::new_id`) and removal from `GameMap::totems` once sunk (exhausted after their gifts, `NumOccurences` times; infinite ones stay), then `Order::Worship` / `Action::Worshipping` by id.
 - [ ] Stone totem: check in the game what it does after a completion that is not its last, the timings (turn 2 s, hold 1 s, sink 4 s) and the smoke; other turns to try are listed in worship.md.
 - [ ] Totem gifts not handled yet (logged as `Reward::Unhandled`): effects (land bridge, lightning...), revealed scenery and triggers, vehicles, the Angel of Death of type 5 totems; mana once mana exists. Check what `NumOccurences` 0 means.
 - [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); check `PrayTime`'s unit and the drain speed in the game.
@@ -58,6 +60,13 @@ come up. Details live in the linked specs; done work is summarised in [docs/road
 - [ ] Generated pyramid: fold its capstone like the original's top (a separate mesh in `tools/generate_buildings.py`).
 - [ ] Pyramids: draw the reward as an icon at the top (cursor sprites 38-57 spells, 58-65 buildings), gone once the reward is granted.
 - [ ] HUD: show the gauge over the totem/pyramid and who is praying.
+
+## The tick ([architecture.md](docs/architecture.md) "The tick")
+- [ ] Find the original's order of work inside a turn (people, buildings, effects, shots, mana; income comes before spell charging): ours is a guess.
+- [ ] Rhythms still on per-object counters or missing: unit healing and stranded hurt (`REGEN_EVERY`, `STRANDED_HURT_EVERY`, rates unknown), hut breeding every 4 turns (0x404C80) and growth every 16 (0x4050C0), mana income every 16 (`MANA_UPDATE_FREQ`), status timers every 8.
+- [ ] Effect events without behaviour yet: `Panic` (person state 0x1A, 64 turns), `Raid` (occupants thrown out), `SetFire` (burning building, 127 turns).
+- [ ] Shots (fireballs 8/4, 8/7, 8/8): a typed list ticked before effects, integer flight, spawning a simple blast on arrival.
+- [ ] Controllers (preacher's sermon, fight, pre-fight, formation, guard control): ticked before units, participants linking to them by id.
 
 ## Combat
 - [ ] Fight logic: units engage enemies in range, melee exchanges, damage per unit type, death.

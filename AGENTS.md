@@ -45,6 +45,12 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
 - Keep logic in small pure functions with unit tests next to them; Bevy systems stay thin.
 - Simulation must stay deterministic: integers, `map::Lcg` for randomness, no time/HashMap-order dependence.
   State changes go through `Command` so lockstep replays match.
+- The tick (docs/architecture.md "The tick"): a new ticking object is a typed list on `GameMap` with its own
+  `tick(&mut self, now, ...)`, its rhythm an `Every` checked with phase 0 and its lengths `Countdown`s (each constant
+  cites the original's name or address, or says it is a guess), events out for anything it does to others, and one
+  line in `GameMap::tick` at its place in the order. Removable objects get ids from `GameMap::new_id`.
+- A new spell is a recipe of effects: an `EffectKind` variant reading the map and returning `EffectEvent`s; units
+  are hurt only through `GameMap::damage`.
 - A `Mesh` without vertices reaching the renderer, even hidden, makes Bevy 0.19 log "Use-after-free ... unallocated key": make the mesh when there is data, or fill it the frame it is added (terrain, site marks).
 - All grid access wraps (`rem_euclid`): the map is a torus.
 - Bevy APIs change between versions: check `~/.cargo/registry/src/*/bevy_*-0.19.*` before guessing.
