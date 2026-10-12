@@ -16,7 +16,7 @@ pub mod worship;
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{render_pos, Grounded};
-use crate::world::{CurrentMap, LevelList, TerrainDirty};
+use crate::world::{CurrentMap, LevelList, TerrainPatches};
 use art::{frame_index, pose_for, sprite_dir, Frame, Pose, TribeArt};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
@@ -318,11 +318,11 @@ fn run_ticks(
     mut clock: ResMut<SimClock>,
     mut schedule: ResMut<GameSchedule>,
     mut map: ResMut<CurrentMap>,
-    mut dirty: ResMut<TerrainDirty>,
+    mut patches: ResMut<TerrainPatches>,
     mut drawn: ResMut<SimNow>,
 ) {
     let due = clock.steps_due(time.delta_secs(), *speed);
-    let (mut levelled, mut ran) = (false, 0);
+    let (mut levelled, mut ran) = (Vec::new(), 0);
     if due > 0 {
         let map = &mut map.bypass_change_detection().0;
         clock.prev_ids = map.units.iter().map(|u| u.id).collect();
@@ -335,7 +335,7 @@ fn run_ticks(
                 break;
             }
             let commands = schedule.0.take(now);
-            levelled |= !map.step(&commands).is_empty();
+            levelled.extend(map.step(&commands));
             ran += 1;
         }
     }
@@ -344,8 +344,8 @@ fn run_ticks(
         clock.stalled();
     }
     drawn.set_if_neq(clock.now(map.0.now));
-    if levelled {
-        dirty.0 = true;
+    if !levelled.is_empty() {
+        patches.0.extend(levelled);
         map.set_changed();
     }
 }
@@ -544,7 +544,7 @@ mod tests {
             .init_resource::<SimClock>()
             .init_resource::<SimNow>()
             .init_resource::<GameSchedule>()
-            .init_resource::<TerrainDirty>()
+            .init_resource::<TerrainPatches>()
             .insert_resource(GameSpeed { paused: true, times: 1 })
             .insert_resource(CurrentMap(game_core::map::GameMap::sandbox_walk()));
         let tick_time = |app: &mut App| {

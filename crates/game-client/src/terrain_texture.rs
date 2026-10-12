@@ -5,7 +5,7 @@
 //! simulation does not see there, and the coast is drawn round every walkable cell (`coast_land`).
 //! Pure function, no Bevy.
 
-use game_core::terrain::Heightmap;
+use game_core::terrain::{DirtyRect, Heightmap};
 use game_core::unit::is_sea;
 use pop3_format::theme::{Theme, BIGFADE_LAND_ROW};
 
@@ -56,36 +56,65 @@ pub fn coast_land(walkable: &[bool], size: usize, x: f32, z: f32) -> bool {
 /// `row_scale` multiplies height before picking the bigfade row (1.0 = 1:1, unverified).
 pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32) -> (usize, Vec<u8>) {
     let side = map.size() * PX_PER_CELL;
+    let mut out = vec![0; side * side * 4];
+    let all = DirtyRect { min: (0, 0), max: (map.size() as i32, map.size() as i32) };
+    rebake(map, theme, height_scale, row_scale, false, all, &mut out);
+    (side, out)
+}
+
+/// Cells around a height change whose pixels it reaches: the slope light and the coast read half a cell
+/// and one cell around each point.
+pub const REBAKE_MARGIN: i32 = 2;
+
+/// Bakes again, into the whole texture `pixels` (`bake`), the pixels of the cells in `rect` (wrapping) and
+/// `REBAKE_MARGIN` around them, after their heights changed; `grid`: with the cell borders (`draw_grid`).
+pub fn rebake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32, grid: bool, rect: DirtyRect, pixels: &mut [u8]) {
+    let (n, side) = (map.size() as i32, map.size() * PX_PER_CELL);
     let len = (SUN[0] * SUN[0] + SUN[1] * SUN[1] + SUN[2] * SUN[2]).sqrt();
     let sun = SUN.map(|c| c / len);
     let step = 1.0 / PX_PER_CELL as f32;
     let (disp_mean, land_start) = (theme.disp_mean(), theme.land_start_row());
     let walkable = walkable_cells(map);
-    let mut out = Vec::with_capacity(side * side * 4);
-    for py in 0..side {
-        for px in 0..side {
-            let (x, z) = (px as f32 * step, py as f32 * step);
-            let h = map.sample(x, z);
-            let disp = theme.disp(px, py) as i32;
-            let row = if !coast_land(&walkable, map.size(), x, z) {
-                sea_row(theme.water(px, py))
-            } else {
-                land_row(h * row_scale, disp, disp_mean, land_start)
-            };
-            let gx = (map.sample(x + 0.5, z) - map.sample(x - 0.5, z)) * height_scale;
-            let gz = (map.sample(x, z + 0.5) - map.sample(x, z - 0.5)) * height_scale;
-            let n_len = (gx * gx + 1.0 + gz * gz).sqrt();
-            let lambert = ((-gx * sun[0] + sun[1] - gz * sun[2]) / n_len).max(0.0);
-            let brightness = ((1.0 - (0.3 + 0.7 * lambert)) * 255.0).clamp(0.0, 255.0) as u8;
-            let [r, g, b] = theme.shade(row, brightness);
-            out.extend([r, g, b, 255]);
+    let span = |lo: i32, hi: i32| {
+        let (lo, hi) = (lo - REBAKE_MARGIN, hi + REBAKE_MARGIN);
+        if hi - lo >= n { 0..n } else { lo..hi }
+    };
+    for cz in span(rect.min.1, rect.max.1) {
+        for cx in span(rect.min.0, rect.max.0) {
+            let (cx, cz) = (cx.rem_euclid(n) as usize, cz.rem_euclid(n) as usize);
+            for py in cz * PX_PER_CELL..(cz + 1) * PX_PER_CELL {
+                for px in cx * PX_PER_CELL..(cx + 1) * PX_PER_CELL {
+                    let (x, z) = (px as f32 * step, py as f32 * step);
+                    let h = map.sample(x, z);
+                    let disp = theme.disp(px, py) as i32;
+                    let row = if !coast_land(&walkable, map.size(), x, z) {
+                        sea_row(theme.water(px, py))
+                    } else {
+                        land_row(h * row_scale, disp, disp_mean, land_start)
+                    };
+                    let gx = (map.sample(x + 0.5, z) - map.sample(x - 0.5, z)) * height_scale;
+                    let gz = (map.sample(x, z + 0.5) - map.sample(x, z - 0.5)) * height_scale;
+                    let n_len = (gx * gx + 1.0 + gz * gz).sqrt();
+                    let lambert = ((-gx * sun[0] + sun[1] - gz * sun[2]) / n_len).max(0.0);
+                    let brightness = ((1.0 - (0.3 + 0.7 * lambert)) * 255.0).clamp(0.0, 255.0) as u8;
+                    let mut rgb = theme.shade(row, brightness);
+                    if grid && (px % PX_PER_CELL == 0 || py % PX_PER_CELL == 0) {
+                        rgb = rgb.map(grid_shade);
+                    }
+                    let i = (py * side + px) * 4;
+                    pixels[i..i + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+                }
+            }
         }
     }
-    (side, out)
 }
 
 /// Brightness (out of 256) of the cell borders `draw_grid` darkens.
 const GRID_SHADE: u16 = 190;
+
+fn grid_shade(c: u8) -> u8 {
+    (c as u16 * GRID_SHADE / 256) as u8
+}
 
 /// Darkens the first row and column of pixels of every cell: a grid along the cell borders.
 pub fn draw_grid(pixels: &mut [u8], side: usize) {
@@ -93,7 +122,7 @@ pub fn draw_grid(pixels: &mut [u8], side: usize) {
         let (x, y) = (i % side, i / side);
         if x % PX_PER_CELL == 0 || y % PX_PER_CELL == 0 {
             for c in &mut px[..3] {
-                *c = (*c as u16 * GRID_SHADE / 256) as u8;
+                *c = grid_shade(*c);
             }
         }
     }
@@ -175,5 +204,25 @@ mod tests {
         assert_eq!(&px[j..j + 3], &[0, 200, 0], "a walkable cell's height-0 corner is ground");
         let i = (2 * PX_PER_CELL * side + 2 * PX_PER_CELL) * 4;
         assert_eq!(&px[i..i + 3], &[0, 200, 0], "cell (2,2) is land");
+    }
+
+    #[test]
+    fn rebaking_a_change_matches_a_full_bake_and_leaves_the_rest() {
+        let mut m = Heightmap::new(16);
+        m.set(4, 4, 500);
+        let theme = test_theme();
+        let (side, mut px) = bake(&m, &theme, 1.0 / 384.0, 1.0);
+        draw_grid(&mut px, side);
+        let far = (4 * PX_PER_CELL * side + 4 * PX_PER_CELL + 3) * 4;
+        px[far] = 7;
+        m.set(15, 8, 600);
+        m.set(0, 8, 600);
+        rebake(&m, &theme, 1.0 / 384.0, 1.0, true, DirtyRect { min: (15, 8), max: (17, 9) }, &mut px);
+        assert_eq!(px[far], 7, "far cells untouched");
+        px[far] = 0;
+        let mut full = bake(&m, &theme, 1.0 / 384.0, 1.0).1;
+        draw_grid(&mut full, side);
+        full[far] = 0;
+        assert_eq!(px, full, "across the map's edge too");
     }
 }

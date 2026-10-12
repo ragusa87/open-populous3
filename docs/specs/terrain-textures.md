@@ -89,6 +89,10 @@ Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cel
   Ground there, even at height 0, takes the lowest land row.
 - brightness column from baked Lambert lighting of the heightmap slope (`SUN`), material is unlit.
 - colour = `palette[bigfade[row][column]]`.
+- When the simulation changes heights (`GameMap::step`'s `DirtyRect`s, kept in `world::TerrainPatches`), only those
+  cells and 2 around them (`REBAKE_MARGIN`: slope light and coast read up to a cell around) are baked again into the
+  texture (`rebake`), with the theme loaded once per level: a full bake is ~0.4 s, a land bridge changes cells
+  every tick.
 
 Unverified guesses to tune against the real game (see disp above): the height -> row scale (`POP3_ROW_SCALE`, default 1.0;
 x3-x4 turns level 1 olive/green but washes level 5 peaks out; level 1, all

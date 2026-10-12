@@ -8,6 +8,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use game_core::map::GameMap;
+use game_core::terrain::DirtyRect;
 use pop3_format::Theme;
 use std::path::{Path, PathBuf};
 
@@ -30,6 +31,11 @@ pub struct LevelList {
 /// Set when the heightmap changed and the mesh must be rebuilt.
 #[derive(Resource, Default)]
 pub struct TerrainDirty(pub bool);
+
+/// Regions whose heights the simulation changed since the last frame: the ground texture is baked again
+/// there only (a land bridge changes a few cells every tick), unless `TerrainDirty` asks for all of it.
+#[derive(Resource, Default)]
+pub struct TerrainPatches(pub Vec<DirtyRect>);
 
 /// Cell borders drawn on the ground: on in the sandboxes, G toggles it.
 #[derive(Resource, Default)]
@@ -151,6 +157,7 @@ impl Plugin for WorldPlugin {
             .insert_resource(objects)
             .insert_resource(levels)
             .insert_resource(TerrainDirty(true))
+            .init_resource::<TerrainPatches>()
             .init_resource::<ShowGrid>()
             .init_resource::<CurveParamsRes>()
             .add_systems(Startup, spawn_terrain)
@@ -219,7 +226,9 @@ fn rebuild_terrain(
     map: Res<CurrentMap>,
     params: Res<CurveParamsRes>,
     mut dirty: ResMut<TerrainDirty>,
+    mut patches: ResMut<TerrainPatches>,
     mut last_focus: Local<Option<Vec2>>,
+    mut baked: Local<Option<(Theme, Handle<Image>)>>,
     levels: Res<LevelList>,
     material: Res<TerrainMaterial>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -228,18 +237,30 @@ fn rebuild_terrain(
     q: Query<&Mesh3d, With<TerrainMesh>>,
     grid: Res<ShowGrid>,
 ) {
-    if !dirty.0 && *last_focus == Some(rig.focus) {
+    let changed = std::mem::take(&mut patches.0);
+    if !dirty.0 && changed.is_empty() && *last_focus == Some(rig.focus) {
         return;
     }
-    if dirty.0 {
-        let original = original_theme(map.0.theme, levels.original).and_then(|t| {
-            Theme::load(&levels.data_dir, t).map_err(|e| warn!("theme {t}: {e}")).ok()
-        });
-        let theme = original.unwrap_or_else(|| crate::procedural_theme::generate(levels.index as u32 + 1));
-        let image = images.add(theme_image(&map.0, &theme, params.0.height_scale, grid.0));
-        if let Some(mut m) = mats.get_mut(&material.0) {
-            m.unlit = true;
-            m.base_color_texture = Some(image);
+    let row_scale = row_scale();
+    match baked.as_ref().filter(|_| !dirty.0) {
+        Some((theme, image)) => {
+            if let Some(mut image) = images.get_mut(image) && let Some(pixels) = image.data.as_mut() {
+                for rect in changed {
+                    crate::terrain_texture::rebake(&map.0.terrain, theme, params.0.height_scale, row_scale, grid.0, rect, pixels);
+                }
+            }
+        }
+        None => {
+            let original = original_theme(map.0.theme, levels.original).and_then(|t| {
+                Theme::load(&levels.data_dir, t).map_err(|e| warn!("theme {t}: {e}")).ok()
+            });
+            let theme = original.unwrap_or_else(|| crate::procedural_theme::generate(levels.index as u32 + 1));
+            let image = images.add(theme_image(&map.0, &theme, params.0.height_scale, row_scale, grid.0));
+            if let Some(mut m) = mats.get_mut(&material.0) {
+                m.unlit = true;
+                m.base_color_texture = Some(image.clone());
+            }
+            *baked = Some((theme, image));
         }
     }
     dirty.0 = false;
@@ -255,8 +276,11 @@ fn rebuild_terrain(
     }
 }
 
-fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32, grid: bool) -> Image {
-    let row_scale = std::env::var("POP3_ROW_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+fn row_scale() -> f32 {
+    std::env::var("POP3_ROW_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0)
+}
+
+fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32, row_scale: f32, grid: bool) -> Image {
     let (side, mut pixels) = crate::terrain_texture::bake(&map.terrain, theme, height_scale, row_scale);
     if grid {
         crate::terrain_texture::draw_grid(&mut pixels, side);
