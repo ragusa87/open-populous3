@@ -243,6 +243,8 @@ impl Action {
             | Action::Holding { left }
             | Action::Flattening { left, .. }
             | Action::Building { left } => Some(left),
+            Action::Challenge { role: crate::challenge::Role::Shoving { left, .. }, .. } => Some(left),
+            Action::Melee { stance: crate::melee::Stance::Striking { left, .. } | crate::melee::Stance::Reeling { left, .. }, .. } => Some(left),
             _ => None,
         }
     }

@@ -217,6 +217,16 @@ pub enum PersonAnim {
     CarryStand,
     /// Running away, as from a swarm of bees (4 frames).
     RunAway,
+    /// A swinging blow that knocks the other back; also a challenge's shove.
+    Strike,
+    /// A blow traded with the other.
+    Trade,
+    /// A kick the other cannot return.
+    Kick,
+    /// Struck in a fight.
+    Hit,
+    /// Shoved away, tilted (1 frame).
+    Shoved,
 }
 
 /// The frame of `PersonAnim::ArmsUp` standing with both arms up.
@@ -237,6 +247,11 @@ impl PersonAnim {
             PersonAnim::CarryWalk => 9,
             PersonAnim::CarryStand => 10,
             PersonAnim::RunAway => 52,
+            PersonAnim::Strike => 15,
+            PersonAnim::Trade => 13,
+            PersonAnim::Kick => 25,
+            PersonAnim::Hit => 14,
+            PersonAnim::Shoved => 16,
         }
     }
 }

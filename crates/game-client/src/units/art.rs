@@ -42,10 +42,20 @@ pub enum Pose {
     Spirit,
     /// Running in panic.
     Panic,
+    /// A swinging blow in a fight, or a challenge's shove.
+    Strike,
+    /// A blow traded in a fight.
+    Trade,
+    /// A kick in a fight.
+    Kick,
+    /// Struck in a fight.
+    Reel,
+    /// Shoved away by a challenger.
+    Shoved,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 16] = [
+    pub const ALL: [Pose; 21] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -62,6 +72,11 @@ impl Pose {
         Pose::Tumble,
         Pose::Spirit,
         Pose::Panic,
+        Pose::Strike,
+        Pose::Trade,
+        Pose::Kick,
+        Pose::Reel,
+        Pose::Shoved,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -72,6 +87,8 @@ impl Pose {
             Pose::CarryWalk | Pose::Panic => Pose::Walk,
             Pose::Jump => Pose::Stranded,
             Pose::Flung | Pose::Tumble | Pose::Spirit => Pose::Fall,
+            Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel => Pose::Idle,
+            Pose::Shoved => Pose::Fall,
             pose => pose,
         }
     }
@@ -101,32 +118,39 @@ impl Pose {
             Pose::Fall | Pose::Spirit => ShamanAnim::Fall,
             Pose::Flung => ShamanAnim::Flying,
             Pose::Drown | Pose::Tumble => ShamanAnim::Tumble,
+            Pose::Strike | Pose::Trade => ShamanAnim::Strike,
+            Pose::Kick => ShamanAnim::Kick,
+            Pose::Reel | Pose::Shoved => ShamanAnim::Idle,
         }
     }
 }
 
 /// The pose for a stance in a melee.
 fn melee_pose(stance: game_core::melee::Stance, airborne: bool) -> Pose {
+    use game_core::combat::Blow;
     use game_core::melee::Stance;
     match stance {
         Stance::ToPlace => Pose::Walk,
-        Stance::OnGuard | Stance::Striking { .. } | Stance::Reeling { .. } => Pose::Idle,
+        Stance::OnGuard => Pose::Idle,
+        Stance::Striking { blow: Blow::Knock, .. } => Pose::Strike,
+        Stance::Striking { blow: Blow::Trade, .. } => Pose::Trade,
+        Stance::Striking { blow: Blow::Clean, .. } => Pose::Kick,
+        Stance::Reeling { .. } => Pose::Reel,
         Stance::Staggering if airborne => Pose::Flung,
         Stance::Staggering => Pose::Walk,
     }
 }
 
 /// The pose for a part in a challenge.
-fn challenge_pose(role: game_core::challenge::Role, carrying: bool, airborne: bool) -> Pose {
+fn challenge_pose(role: game_core::challenge::Role, carrying: bool) -> Pose {
     use game_core::challenge::Role;
     match role {
         Role::Waiting if carrying => Pose::CarryIdle,
         Role::Waiting => Pose::Idle,
         Role::Charging { .. } if carrying => Pose::CarryWalk,
         Role::Charging { .. } => Pose::Walk,
-        Role::Shoving { .. } => Pose::Idle,
-        Role::Shoved if airborne => Pose::Flung,
-        Role::Shoved => Pose::Tumble,
+        Role::Shoving { .. } => Pose::Strike,
+        Role::Shoved => Pose::Shoved,
     }
 }
 
@@ -139,7 +163,7 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Attacking { .. } if carrying => Pose::CarryWalk,
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } | Action::Attacking { .. } => Pose::Walk,
         Action::Panicking { .. } => Pose::Panic,
-        Action::Challenge { role, .. } => challenge_pose(*role, carrying, airborne),
+        Action::Challenge { role, .. } => challenge_pose(*role, carrying),
         Action::Melee { stance, .. } => melee_pose(*stance, airborne),
         Action::Chopping { .. } | Action::PickingUpWood { .. } => Pose::Chop,
         Action::Building { .. } | Action::Hammering => Pose::Hammer,
@@ -197,7 +221,7 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alph
     let lying = frames.saturating_sub(2);
     let done = |n: usize| action.countdown().map_or(0, |c| ((progress(c, alpha) * n as f32) as usize).min(n - 1));
     match action {
-        Action::Casting { .. } | Action::Flattening { .. } => done(frames),
+        Action::Casting { .. } | Action::Flattening { .. } | Action::Challenge { .. } | Action::Melee { .. } if action.countdown().is_some() => done(frames),
         Action::Dying { .. } => done(lying + 1),
         Action::Spirit { .. } => done(frames),
         Action::Dead { .. } => lying,
@@ -289,7 +313,8 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Walk | Pose::CarryWalk | Pose::Panic => WildmanAnim::Walk,
                 Pose::Pray => WildmanAnim::Sit,
                 Pose::Fall | Pose::Tumble | Pose::Spirit => WildmanAnim::Tumble,
-                Pose::Drown | Pose::Flung => WildmanAnim::Flung,
+                Pose::Drown | Pose::Flung | Pose::Shoved => WildmanAnim::Flung,
+                Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel => WildmanAnim::Stand,
             };
             // No spirit anim known: the body lies still (the fall's last frame).
             (anim.anim(), None, (pose == Pose::Spirit).then_some(3))
@@ -319,6 +344,11 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Jump => PersonAnim::ArmsUp,
                 // No hammering anim identified yet: the axe swing stands in.
                 Pose::Hammer => PersonAnim::Chop,
+                Pose::Strike => PersonAnim::Strike,
+                Pose::Trade => PersonAnim::Trade,
+                Pose::Kick => PersonAnim::Kick,
+                Pose::Reel => PersonAnim::Hit,
+                Pose::Shoved => PersonAnim::Shoved,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }
@@ -454,6 +484,12 @@ mod tests {
         assert_eq!(pose_for(&Action::Flattening { at: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, false, false), Pose::Jump);
         assert_eq!(pose_for(&Action::Hammering, false, false), Pose::Hammer);
         assert_eq!(original_anim(UnitKind::Brave, Pose::Hammer, 0).0, 11, "the axe swing stands in");
+        let melee = |stance| Action::Melee { melee: game_core::id::Id::from_raw(1), place: (0, 0), stance };
+        let left = game_core::time::Countdown::new(game_core::time::Ticks::new(6));
+        assert_eq!(pose_for(&melee(game_core::melee::Stance::Striking { blow: game_core::combat::Blow::Clean, left }), false, false), Pose::Kick);
+        assert_eq!(pose_for(&melee(game_core::melee::Stance::Reeling { left, knock: None }), false, false), Pose::Reel);
+        assert_eq!([Pose::Strike, Pose::Trade, Pose::Kick, Pose::Reel, Pose::Shoved].map(|p| original_anim(UnitKind::Warrior, p, 0).0), [15, 13, 25, 14, 16]);
+        assert_eq!([Pose::Strike, Pose::Kick, Pose::Reel].map(|p| original_anim(UnitKind::Shaman, p, 0).0), [57, 69, 53], "staff, kick, no hit of her own");
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Stranded, 0), (12, Some(OUTFIT_WARRIOR), Some(ARMS_UP_FRAME)));
         assert_eq!(original_anim(UnitKind::Preacher, Pose::Pray, 1), (8, Some(OUTFIT_PREACHER), None), "the monk on the tribesman body");
         assert_eq!(original_anim(UnitKind::Spy, Pose::Drown, 0), (40, Some(OUTFIT_SPY), None), "lying, spirit rising");

@@ -59,7 +59,7 @@ pub fn tribe_rgb(tribe: u8) -> [u8; 3] {
 
 pub fn frame_count(pose: Pose) -> usize {
     match pose {
-        Pose::Idle | Pose::Pray | Pose::Drown | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit => 4,
+        Pose::Idle | Pose::Pray | Pose::Drown | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Shoved => 4,
         Pose::Walk | Pose::Fall | Pose::CarryWalk | Pose::Panic => 8,
         Pose::Cast | Pose::Jump => 12,
     }
@@ -148,6 +148,16 @@ fn body(pose: Pose, view: View, f: usize) -> Body {
             Body { hands: [(-10.0, 22.0 + k), (10.0, 23.0 - k)], feet: [(-4.0, 0.0), (4.0, 0.0)], lift: 10.0, tilt: FRAC_PI_2 - 0.2 * k, ..base }
         }
         Pose::Tumble => Body { hands: [(-7.0, 18.0), (7.0, 18.0)], lift: 8.0, tilt: phase, ..base },
+        Pose::Strike | Pose::Trade => {
+            let swing = [24.0, 20.0, 14.0, 12.0][f % 4];
+            Body { hands: if side { [(8.0, swing), (6.0, swing - 2.0)] } else { [(-6.0, swing), (6.0, swing)] }, ..base }
+        }
+        Pose::Kick => {
+            let out = [2.0, 6.0, 8.0, 4.0][f % 4];
+            Body { feet: if side { [(-2.0, 0.0), (out, 4.0)] } else { [(-2.0, 0.0), (2.0, out)] }, ..base }
+        }
+        Pose::Reel => Body { tilt: -0.2, hands: [(-8.0, 18.0), (8.0, 18.0)], ..base },
+        Pose::Shoved => Body { tilt: -0.5, hands: [(-9.0, 22.0), (9.0, 22.0)], ..base },
         Pose::Spirit => Body { tilt: FRAC_PI_2, hands: [(-8.0, 20.0), (8.0, 20.0)], lift: -2.0 * f as f32, ..base },
         Pose::Drown => {
             let k = (f % 2) as f32 * 3.0;
