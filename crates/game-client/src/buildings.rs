@@ -26,7 +26,7 @@ use bevy::mesh::PrimitiveTopology;
 use bevy::render::render_resource::Face;
 use bevy::prelude::*;
 use game_core::building::{Building, BuildingKind, Stage};
-use game_core::time::{Tick, Ticks};
+use game_core::time::{Countdown, Tick, Ticks};
 use pop3_format::catalog::{self, villager_hut, Building as Object};
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 use std::collections::HashMap;
@@ -51,6 +51,8 @@ const SLAB_STONE: Color = Color::srgb(0.42, 0.4, 0.36);
 const MARK_LIFT: f32 = 0.02;
 /// Size (cells) of the flame over a generated building's brazier.
 const BRAZIER_FLAME: f32 = 0.7;
+/// Size (cells) of each flame over a burning building.
+const FIRE_FLAME: f32 = 1.3;
 
 /// The original object drawing a building of `owner`, None if not identified (neutral buildings
 /// take the blue version).
@@ -286,7 +288,8 @@ fn respawn_buildings(
                 (look, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, ..default() }), wood.clone(), MeshData::default())
             }
         };
-        let flames = (stage == Stage::Built && !flames.indices.is_empty()).then(|| {
+        let flames = if b.burning.is_some() { flame::crossed_boards_at(&fire_bases(kind, look.top.y), FIRE_FLAME) } else { flames };
+        let flames = ((stage == Stage::Built || b.burning.is_some()) && !flames.indices.is_empty()).then(|| {
             let offset = (b.x as usize + b.z as usize) * 3 % flame::FRAMES;
             let frame = flame_frames.get(&levels, theme, &mut images, &mut mats)[offset].clone();
             (Flame { offset }, Mesh3d(meshes.add(to_mesh(flames))), MeshMaterial3d(frame), NotShadowCaster, crate::hover::NoOutline)
@@ -419,16 +422,43 @@ fn place_labels(
     }
 }
 
+/// Where the flames of a burning building of `kind` stand (cells, in the model's frame): a grid over its footprint,
+/// the middle one up to half its `top` height.
+pub fn fire_bases(kind: BuildingKind, top: f32) -> Vec<[f32; 3]> {
+    let f = kind.footprint();
+    let half = (f.half.0 as f32 / WORLD_UNITS_PER_CELL as f32 * 0.55, f.half.1 as f32 / WORLD_UNITS_PER_CELL as f32 * 0.55);
+    (-1..=1).flat_map(|i| (-1..=1).map(move |j| [i as f32 * half.0, if i == 0 && j == 0 { top * 0.5 } else { 0.0 }, j as f32 * half.1])).collect()
+}
+
 /// Whether the views of `drawn` still show `now`: a vault's phase does not count (`vault` poses it),
-/// nor the people inside (`chimney` smokes).
+/// nor the people inside (`chimney` smokes), nor how long a fire has left.
 pub fn same_look(drawn: &[Building], now: &[Building]) -> bool {
-    let look = |b: &Building| Building { vault: None, inside: 0, ..b.clone() };
+    let look = |b: &Building| Building { vault: None, inside: 0, burning: b.burning.map(|c| Countdown::new(c.total())), ..b.clone() };
     drawn.len() == now.len() && drawn.iter().zip(now).all(|(a, b)| look(a) == look(b))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fire_burning_on_does_not_rebuild_the_views_lit_or_out_does() {
+        let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
+        let mut burning = hut.clone();
+        burning.ignite();
+        let mut later = burning.clone();
+        later.burn();
+        assert!(same_look(&[burning.clone()], &[later]));
+        assert!(!same_look(&[Building { burning: None, ..burning.clone() }], &[burning]));
+    }
+
+    #[test]
+    fn fire_spreads_over_the_footprint_the_middle_one_up() {
+        let bases = fire_bases(BuildingKind::Hut { size: 1 }, 2.0);
+        assert_eq!(bases.len(), 9);
+        assert_eq!(bases[4], [0.0, 1.0, 0.0]);
+        assert!(bases.iter().all(|b| b[0].abs() < 1.2 && b[2].abs() < 1.2), "within its 3 x 3 cells");
+    }
 
     #[test]
     fn a_vaults_phase_does_not_rebuild_the_views() {

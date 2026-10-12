@@ -301,7 +301,9 @@ Fire (done: `game_core::fire`, `WorldEvent::SetFire`, set by lightning): a build
 not already burning (a guess), loses one piece at once (the original's structural hit of 100 wood) and burns for
 `BURN_TICKS` (127 turns, `Building::burning`). Everyone inside walks out by the door (a `Panic` each, no behaviour
 yet), builders inside are released. With no wood left it is removed. While it burns, its braves only fetch wood and
-nobody builds in it. Vault, prison and other buildings without a wood cost never burn. Not drawn yet.
+nobody builds in it. Vault, prison and other buildings without a wood cost never burn. Drawn (`buildings.rs`, `fire_bases`): its
+frame with 9 animated flames (the torches' `flame.rs` boards, `FIRE_FLAME` 1.3 cells) over its footprint, the middle one
+half way up. Dev: `LIGHTNING=x,z` on a building (`POP3_START=sandbox-buildings`, a hut at 52.5,70.5).
 
 ### Doors
 Units enter and leave a building only through its door (the facing's side, local -z), the same way in and out:
