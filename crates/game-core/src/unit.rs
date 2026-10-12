@@ -8,6 +8,7 @@ use crate::motion::{Motion, Velocity};
 use crate::path::{self, Ground, Mobility};
 use crate::physics;
 use crate::site::ReincarnationSite;
+use crate::spell::Spell;
 use crate::status::Statuses;
 use crate::terrain::Heightmap;
 use crate::time::{Countdown, Ticks};
@@ -33,6 +34,8 @@ pub const REGEN_EVERY: Ticks = Ticks::millis(500);
 pub const STRANDED_HURT_EVERY: Ticks = Ticks::millis(300);
 /// The cast: the original's cast state.
 pub const CAST_TICKS: Ticks = Ticks::new(10);
+/// Into the cast, when the spell leaves her (pop3-rev-analysis.md "From cast to effect": the shot flies at +6).
+pub const CAST_RELEASE: Ticks = Ticks::new(6);
 /// After a teleport she appears this high above the target (terrain height units, one cell) and falls
 /// (`physics::step`): 5 ticks to the ground.
 pub const LANDING_DROP: i32 = 256;
@@ -273,6 +276,8 @@ pub enum UnitEvent {
     Built,
     /// At the door of the building `building` (id): the caller lets her in if there is room.
     AtDoor { building: u32 },
+    /// Her cast jump let `spell` go: the caller makes it take effect.
+    Released { spell: Spell },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -299,6 +304,8 @@ pub struct Unit {
     planned_on: Option<(u32, u32)>,
     /// Where the current cast jump takes her when it ends (Teleport).
     teleport_to: Option<(u16, u16)>,
+    /// The spell her cast jump releases (`CAST_RELEASE`).
+    spell: Option<Spell>,
     /// The camp fire (centre) and ring point she is walking to, to go round it once there.
     to_fire: Option<((u16, u16), u8)>,
     /// The tree (position) she is walking to, to cut it once there.
@@ -360,6 +367,7 @@ impl Unit {
             route: Vec::new(),
             planned_on: None,
             teleport_to: None,
+            spell: None,
             to_fire: None,
             to_tree: None,
             to_wood: None,
@@ -413,6 +421,17 @@ impl Unit {
             self.order(Order::Cast);
             self.teleport_to = Some(to);
         }
+    }
+
+    /// Her cast jump, releasing `spell` `CAST_RELEASE` into it (`UnitEvent::Released`); whether she took it.
+    /// Ignored while drowning, dying or dead; another order before the release cancels it.
+    pub fn cast_spell(&mut self, spell: Spell) -> bool {
+        if !self.takes_orders() {
+            return false;
+        }
+        self.order(Order::Cast);
+        self.spell = Some(spell);
+        true
     }
 
     /// Where the current cast jump takes her, if anywhere.
@@ -531,7 +550,7 @@ impl Unit {
         if !self.takes_orders() {
             return;
         }
-        (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
+        (self.route, self.planned_on, self.teleport_to, self.spell, self.to_fire) = (Vec::new(), None, None, None, None);
         (self.to_tree, self.to_wood, self.to_house, self.to_shrine) = (None, None, None, None);
         self.action = match order {
             Order::MoveTo { x, z } => Action::Walking { to: (x, z) },
@@ -561,7 +580,7 @@ impl Unit {
         }
         if self.is_alive() && !self.motion.airborne() && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
-            self.teleport_to = None;
+            (self.teleport_to, self.spell) = (None, None);
         }
         match self.action {
             Action::Idle | Action::Hammering | Action::Worshipping { .. } => self.heal(),
@@ -656,7 +675,8 @@ impl Unit {
             Action::Casting { mut left } => {
                 if !left.tick() {
                     self.action = Action::Casting { left };
-                    return None;
+                    let release = (left.done() == CAST_RELEASE).then(|| self.spell.take()).flatten();
+                    return release.map(|spell| UnitEvent::Released { spell });
                 }
                 self.action = Action::Idle;
                 if let Some(to) = self.teleport_to.take().filter(|&to| ground.passable(self.mobility(), (cell_of(to.0), cell_of(to.1)))) {
@@ -778,7 +798,7 @@ impl Unit {
 
     /// Forgets where it was going, what it was to do there and its work.
     fn drop_plans(&mut self) {
-        (self.route, self.planned_on, self.teleport_to, self.to_fire) = (Vec::new(), None, None, None);
+        (self.route, self.planned_on, self.teleport_to, self.spell, self.to_fire) = (Vec::new(), None, None, None, None);
         (self.to_tree, self.to_wood, self.to_house, self.to_shrine) = (None, None, None, None);
         self.queue.clear();
         self.work = None;
@@ -1148,6 +1168,20 @@ mod tests {
         assert!(matches!(u.action, Action::Casting { left } if left.left() == Ticks::new(1)));
         run(&mut u, &t, &site, 1);
         assert_eq!(u.action, Action::Idle);
+    }
+
+    #[test]
+    fn the_spell_leaves_her_into_the_jump_unless_an_order_comes_first() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        let spell = Spell::Blast { at: (100, 100) };
+        assert!(u.cast_spell(spell));
+        let events: Vec<_> = (1..=CAST_TICKS.get()).map(|n| (n, u.tick(&t, Some(&site)))).filter(|e| e.1.is_some()).collect();
+        assert_eq!(events, [(CAST_RELEASE.get(), Some(UnitEvent::Released { spell }))]);
+        assert!(u.cast_spell(spell));
+        u.order(Order::Stop);
+        run(&mut u, &t, &site, CAST_TICKS.get() as usize);
+        assert_eq!(u.action, Action::Idle, "cancelled, nothing released");
     }
 
     #[test]

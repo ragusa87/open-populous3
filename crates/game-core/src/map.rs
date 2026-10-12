@@ -493,6 +493,22 @@ impl GameMap {
         }
     }
 
+    /// `spell` cast by `player` takes effect now: its effect starts (ticking from the next turn), or the terrain
+    /// brush applies (the region it changed).
+    fn release(&mut self, player: u8, spell: Spell) -> Option<DirtyRect> {
+        match spell {
+            Spell::Blast { at } => {
+                self.add_effect(crate::blast::effect(player, at));
+                None
+            }
+            Spell::LandBridge { from, to } => {
+                self.add_effect(crate::land_bridge::effect(player, from, to, &self.terrain));
+                None
+            }
+            _ => spell.cast(&mut self.terrain),
+        }
+    }
+
     /// Apply a player's command; returns the terrain region it changed, if any. Casting a spell
     /// makes the caster's shaman do her cast jump (Teleport: she moves when it ends); a spell that
     /// cannot be cast (`can_cast`) does nothing.
@@ -507,18 +523,12 @@ impl GameMap {
             }
             Command::Cast { player, spell } => {
                 let spell = self.from_caster(player, spell);
-                self.order(player, Order::Cast);
-                match spell {
-                    Spell::Blast { at } => {
-                        self.add_effect(crate::blast::effect(player, at));
-                        None
-                    }
-                    Spell::LandBridge { from, to } => {
-                        self.add_effect(crate::land_bridge::effect(player, from, to, &self.terrain));
-                        None
-                    }
-                    _ => spell.cast(&mut self.terrain),
+                let held = spell.kind().is_some() && self.shaman_mut(player).is_some_and(|u| u.cast_spell(spell));
+                if held {
+                    return None;
                 }
+                self.order(player, Order::Cast);
+                self.release(player, spell)
             }
             Command::CastSelf { player, kind } => {
                 if !self.shaman_locked(player) && self.use_charge(player, Some(kind)) {
@@ -701,6 +711,7 @@ impl GameMap {
             match event {
                 UnitEvent::Jumped { .. } | UnitEvent::Built => dirty.extend(self.work_event(i, event)),
                 UnitEvent::AtDoor { building } => self.come_in(i, building),
+                UnitEvent::Released { spell } => dirty.extend(self.release(self.units[i].owner, spell)),
                 _ => self.wood_event(i, event),
             }
         }
@@ -1224,6 +1235,10 @@ mod tests {
         let (owner, start) = (map.units[i].owner, (map.units[i].x, map.units[i].z));
         let at = (start.0.wrapping_add(300), start.1);
         map.apply(&Command::Cast { player: owner, spell: Spell::Blast { at } });
+        map.run(Ticks::new(crate::unit::CAST_RELEASE.get() - 1));
+        assert!(map.effects.is_empty(), "her cast jump first");
+        map.tick();
+        assert_eq!(map.effects.len(), 1, "released into the jump");
         map.tick();
         assert!(map.units[i].action != Action::Tumbling && !map.units[i].motion.airborne(), "the caster's own shaman is spared");
         map.apply(&Command::Cast { player: owner.wrapping_add(1), spell: Spell::Blast { at } });
@@ -1395,10 +1410,13 @@ mod tests {
         });
         let before = m.terrain.clone();
         assert_eq!(m.apply(&cast), None, "nothing at once");
+        assert!(bridge(&m).is_none(), "her cast jump first");
+        m.run(crate::unit::CAST_RELEASE);
         assert_eq!(m.terrain.heights(), before.heights());
         let b = bridge(&m).unwrap();
         assert_eq!((b.from, b.to), (shaman, to), "from the shaman, not where it was aimed from");
         god.apply(&cast);
+        god.run(crate::unit::CAST_RELEASE);
         assert_eq!(bridge(&god).map(|b| (b.from, b.to)), Some((aimed_from, to)), "a god's bridge starts where it was aimed from");
         let mut built = before.clone();
         for turn in 0..crate::land_bridge::DURATION {
