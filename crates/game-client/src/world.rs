@@ -170,9 +170,7 @@ fn switch_level(
     mut levels: ResMut<LevelList>,
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<TerrainDirty>,
-    mut spells: ResMut<crate::hud::spells::PlayerSpells>,
     mut selected: ResMut<crate::hud::spells::SelectedSpell>,
-    mut builds: ResMut<crate::hud::build::PlayerBuilds>,
     mut blueprint: ResMut<crate::blueprint::Blueprint>,
     mut schedule: ResMut<crate::units::GameSchedule>,
     mut clock: ResMut<crate::units::SimClock>,
@@ -189,9 +187,7 @@ fn switch_level(
     map.0 = levels.load_current();
     *schedule = crate::units::GameSchedule::default();
     clock.new_game();
-    spells.0 = crate::hud::spells::level_book(&map.0);
     selected.0 = None;
-    builds.0 = crate::hud::build::level_builds(&map.0);
     blueprint.put_away();
     dirty.0 = true;
 }

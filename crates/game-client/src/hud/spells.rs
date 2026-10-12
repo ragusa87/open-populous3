@@ -19,9 +19,6 @@ use game_core::map::GameMap;
 use game_core::spell::Spell;
 use game_core::spell_book::{Availability, SpellBook, SpellKind, SpellSlot, MAX_CHARGES};
 
-#[derive(Resource)]
-pub struct PlayerSpells(pub SpellBook);
-
 #[derive(Resource, Default)]
 pub struct SelectedSpell(pub Option<SpellKind>);
 
@@ -137,8 +134,8 @@ pub fn tile_order(slots: &[SpellSlot]) -> Vec<usize> {
 }
 
 /// The player's spells on `map` (`GameMap::spell_books`).
-pub fn level_book(map: &GameMap) -> SpellBook {
-    map.spell_books[PLAYER as usize].clone()
+pub fn player_book(map: &GameMap) -> &SpellBook {
+    &map.spell_books[PLAYER as usize]
 }
 
 #[derive(Component)]
@@ -160,13 +157,12 @@ pub struct SpellsPlugin;
 
 impl Plugin for SpellsPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(PlayerSpells(SpellBook::demo()))
-            .init_resource::<SelectedSpell>()
+        app.init_resource::<SelectedSpell>()
             .add_systems(Startup, spawn_tab)
             .add_systems(
                 Update,
                 (
-                    (recharge.after(crate::units::SimStep), tile_clicks, pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput)).chain().in_set(crate::menu::Gameplay),
+                    (tile_clicks.after(crate::units::SimStep), pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput)).chain().in_set(crate::menu::Gameplay),
                     update_tiles,
                     update_info,
                 )
@@ -175,9 +171,9 @@ impl Plugin for SpellsPlugin {
     }
 }
 
-fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, book: Res<PlayerSpells>) {
+fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>) {
     if let Some((entity, _)) = tabs.iter().find(|(_, t)| t.0 == 0) {
-        commands.entity(entity).with_children(|c| spawn_spells(c, &book.0.slots));
+        commands.entity(entity).with_children(|c| spawn_spells(c, &SpellBook::new().slots));
     }
 }
 
@@ -244,18 +240,15 @@ fn style_colors(style: TileStyle) -> (Color, Color) {
     }
 }
 
-fn recharge(map: Res<CurrentMap>, mut book: ResMut<PlayerSpells>) {
-    book.0.clone_from(&map.0.spell_books[PLAYER as usize]);
-}
-
 fn tile_clicks(
     q: Query<(&Interaction, &Tile), Changed<Interaction>>,
-    book: Res<PlayerSpells>,
+    map: Res<CurrentMap>,
     mut selected: ResMut<SelectedSpell>,
     mut blueprint: ResMut<crate::blueprint::Blueprint>,
 ) {
+    let book = player_book(&map.0);
     for (interaction, tile) in &q {
-        let slot = &book.0.slots[tile.0];
+        let slot = &book.slots[tile.0];
         if *interaction == Interaction::Pressed && slot.availability != Availability::Hidden {
             selected.0 = Some(slot.kind);
             blueprint.put_away();
@@ -264,12 +257,13 @@ fn tile_clicks(
 }
 
 /// Right click on a known spell's tile pauses or resumes its recharge.
-fn pause_clicks(mouse: Res<ButtonInput<MouseButton>>, tiles: Query<(&Interaction, &Tile)>, book: Res<PlayerSpells>, mut schedule: ResMut<crate::units::GameSchedule>) {
+fn pause_clicks(mouse: Res<ButtonInput<MouseButton>>, tiles: Query<(&Interaction, &Tile)>, map: Res<CurrentMap>, mut schedule: ResMut<crate::units::GameSchedule>) {
+    let book = player_book(&map.0);
     if !mouse.just_pressed(MouseButton::Right) {
         return;
     }
     if let Some((_, tile)) = tiles.iter().find(|(i, _)| **i == Interaction::Hovered) {
-        let slot = &book.0.slots[tile.0];
+        let slot = &book.slots[tile.0];
         schedule.issue(Command::PauseSpell { player: PLAYER, kind: slot.kind, paused: !slot.paused });
     }
 }
@@ -297,7 +291,6 @@ fn aim_and_cast(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
     mut schedule: ResMut<crate::units::GameSchedule>,
-    book: Res<PlayerSpells>,
     mut selected: ResMut<SelectedSpell>,
     mut look: ResMut<CursorLook>,
 ) {
@@ -321,7 +314,7 @@ fn aim_and_cast(
         pick_ground(&map.0.terrain, rig.focus, &params.0, ray.origin, *ray.direction)
     });
     let spell = ground.and_then(|cell| ground_spell(kind, world_units(cell)));
-    let ready = book.0.slot(kind).is_some_and(|s| s.can_cast());
+    let ready = player_book(&map.0).slot(kind).is_some_and(|s| s.can_cast());
     let valid = spell.filter(|s| ready && map.0.can_cast(PLAYER, s));
     look.set_if_neq(CursorLook::Spell { kind, valid: valid.is_some() });
     if let (true, Some(spell)) = (mouse.just_pressed(MouseButton::Left), valid) {
@@ -333,7 +326,7 @@ fn aim_and_cast(
 
 
 fn update_tiles(
-    book: Res<PlayerSpells>,
+    map: Res<CurrentMap>,
     selected: Res<SelectedSpell>,
     mut tiles: Query<(&Tile, &Interaction, &mut BackgroundColor, &mut BorderColor)>,
     mut labels: Query<(&TileLabel, &mut Text, &mut TextFont), Without<TileBadge>>,
@@ -342,12 +335,13 @@ fn update_tiles(
     mut bars: Query<(&RechargeBar, &mut Node), (Without<Pip>, Without<RechargeFill>)>,
     mut fills: Query<(&RechargeFill, &mut Node, &mut BackgroundColor), (Without<Pip>, Without<RechargeBar>, Without<Tile>)>,
 ) {
-    let views: Vec<TileView> = book.0.slots.iter().map(tile_view).collect();
+    let book = player_book(&map.0);
+    let views: Vec<TileView> = book.slots.iter().map(tile_view).collect();
     for (tile, interaction, mut bg, mut border) in &mut tiles {
         let v = &views[tile.0];
         let (fill, edge) = style_colors(v.style);
         bg.0 = fill;
-        let is_selected = selected.0 == Some(book.0.slots[tile.0].kind) && v.style != TileStyle::Empty;
+        let is_selected = selected.0 == Some(book.slots[tile.0].kind) && v.style != TileStyle::Empty;
         *border = BorderColor::all(match (is_selected, interaction, v.style) {
             (true, _, _) => Color::WHITE,
             (_, _, TileStyle::Empty) => Color::NONE,
@@ -373,18 +367,19 @@ fn update_tiles(
     }
     for (fill, mut node, mut bg) in &mut fills {
         node.width = percent(views[fill.0].progress.unwrap_or(0.0) * 100.0);
-        bg.0 = if book.0.slots[fill.0].paused { PAUSED_GREY } else { MANA_BLUE };
+        bg.0 = if book.slots[fill.0].paused { PAUSED_GREY } else { MANA_BLUE };
     }
 }
 
 fn update_info(
-    book: Res<PlayerSpells>,
+    map: Res<CurrentMap>,
     selected: Res<SelectedSpell>,
     tiles: Query<(&Tile, &Interaction)>,
     mut info: Query<&mut Text, With<SpellInfo>>,
 ) {
-    let hovered = tiles.iter().find(|(_, i)| **i == Interaction::Hovered).map(|(t, _)| &book.0.slots[t.0]);
-    let selected = selected.0.and_then(|k| book.0.slot(k));
+    let book = player_book(&map.0);
+    let hovered = tiles.iter().find(|(_, i)| **i == Interaction::Hovered).map(|(t, _)| &book.slots[t.0]);
+    let selected = selected.0.and_then(|k| book.slot(k));
     let text = hovered.or(selected).map(describe).unwrap_or_else(|| "Click a spell to select it.".into());
     for mut t in &mut info {
         t.0.clone_from(&text);

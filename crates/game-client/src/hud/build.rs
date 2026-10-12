@@ -14,8 +14,6 @@ use game_core::map::GameMap;
 
 const COLUMNS: u16 = 3;
 
-#[derive(Resource)]
-pub struct PlayerBuilds(pub BuildBook);
 
 /// A tile of the tab: a building of the book, or the camp fire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,8 +91,8 @@ pub fn describe_build(slot: &BuildSlot) -> String {
 }
 
 /// The player's buildings on `map` (`GameMap::build_books`).
-pub fn level_builds(map: &GameMap) -> BuildBook {
-    map.build_books[crate::units::PLAYER as usize].clone()
+pub fn player_builds(map: &GameMap) -> &BuildBook {
+    &map.build_books[crate::units::PLAYER as usize]
 }
 
 #[derive(Component)]
@@ -108,22 +106,16 @@ pub struct BuildPlugin;
 
 impl Plugin for BuildPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(PlayerBuilds(BuildBook::all(BuildAvailability::Available)))
-            .add_systems(Startup, spawn_tab)
-            .add_systems(Update, ((tile_clicks.in_set(crate::menu::Gameplay), update_tiles).chain(), update_info, take_rewards.before(update_tiles)));
+        app.add_systems(Startup, spawn_tab).add_systems(Update, ((tile_clicks.in_set(crate::menu::Gameplay), update_tiles).chain(), update_info));
     }
 }
 
-fn take_rewards(map: Res<CurrentMap>, mut builds: ResMut<PlayerBuilds>) {
-    builds.0.clone_from(&level_builds(&map.0));
-}
-
-fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, book: Res<PlayerBuilds>) {
+fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>) {
     let Some((entity, _)) = tabs.iter().find(|(_, t)| t.0 == 1) else { return };
     commands.entity(entity).with_children(|c| {
         c.spawn(Node { display: Display::Grid, grid_template_columns: RepeatedGridTrack::flex(COLUMNS, 1.0), row_gap: px(4), column_gap: px(4), ..default() })
             .with_children(|grid| {
-                for i in 0..tiles(&book.0).len() {
+                for i in 0..tiles(&BuildBook::all(BuildAvailability::Hidden)).len() {
                     grid.spawn((
                         BuildTile(i),
                         Button,
@@ -142,11 +134,11 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, book: R
 /// spell away).
 fn tile_clicks(
     q: Query<(&Interaction, &BuildTile), Changed<Interaction>>,
-    book: Res<PlayerBuilds>,
+    map: Res<CurrentMap>,
     mut blueprint: ResMut<crate::blueprint::Blueprint>,
     mut spell: ResMut<crate::hud::spells::SelectedSpell>,
 ) {
-    let tiles = tiles(&book.0);
+    let tiles = tiles(player_builds(&map.0));
     for (interaction, tile) in &q {
         let Some(plan) = tiles.get(tile.0).and_then(Tile::plan) else { continue };
         if *interaction == Interaction::Pressed {
@@ -157,12 +149,12 @@ fn tile_clicks(
 }
 
 fn update_tiles(
-    book: Res<PlayerBuilds>,
+    map: Res<CurrentMap>,
     blueprint: Res<crate::blueprint::Blueprint>,
     mut tiles: Query<(&BuildTile, &Interaction, &mut BackgroundColor, &mut BorderColor)>,
     mut labels: Query<(&BuildLabel, &mut Text, &mut TextFont)>,
 ) {
-    let all = self::tiles(&book.0);
+    let all = self::tiles(player_builds(&map.0));
     let views: Vec<BuildTileView> = all.iter().map(Tile::view).collect();
     for (tile, interaction, mut bg, mut border) in &mut tiles {
         let Some(v) = views.get(tile.0) else { continue };
@@ -186,8 +178,8 @@ fn update_tiles(
     }
 }
 
-fn update_info(book: Res<PlayerBuilds>, tiles: Query<(&BuildTile, &Interaction)>, mut info: Query<&mut Text, With<BuildInfo>>) {
-    let all = self::tiles(&book.0);
+fn update_info(map: Res<CurrentMap>, tiles: Query<(&BuildTile, &Interaction)>, mut info: Query<&mut Text, With<BuildInfo>>) {
+    let all = self::tiles(player_builds(&map.0));
     let hovered = tiles.iter().find(|(_, i)| **i == Interaction::Hovered).and_then(|(t, _)| all.get(t.0));
     let text = hovered.map(Tile::describe).filter(|s| !s.is_empty()).unwrap_or_else(|| "Hover a building to see it.".into());
     for mut t in &mut info {

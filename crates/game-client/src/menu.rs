@@ -9,8 +9,7 @@
 
 use crate::camera::{GameCamera, OverlayCamera};
 use crate::game_speed::GameSpeed;
-use crate::hud::build::{level_builds, PlayerBuilds};
-use crate::hud::spells::{level_book, PlayerSpells, SelectedSpell};
+use crate::hud::spells::SelectedSpell;
 use crate::units::selection::Selection;
 use crate::virtual_cursor::VirtualCursor;
 use crate::world::{new_game, CurrentMap, LevelList, TerrainDirty};
@@ -305,8 +304,6 @@ struct GameSetup<'w> {
     dirty: ResMut<'w, TerrainDirty>,
     selection: ResMut<'w, Selection>,
     cursor: ResMut<'w, VirtualCursor>,
-    spells: ResMut<'w, PlayerSpells>,
-    builds: ResMut<'w, PlayerBuilds>,
     blueprint: ResMut<'w, crate::blueprint::Blueprint>,
     selected_spell: ResMut<'w, SelectedSpell>,
     grid: ResMut<'w, crate::world::ShowGrid>,
@@ -326,10 +323,8 @@ impl GameSetup<'_> {
             Start::SandboxBuildings => new_game(GameMap::sandbox_buildings()),
             Start::SandboxWorship => new_game(GameMap::sandbox_worship()),
         };
-        self.spells.0 = level_book(&self.map.0);
         *self.schedule = crate::units::GameSchedule::default();
         self.clock.new_game();
-        self.builds.0 = level_builds(&self.map.0);
         self.grid.0 = start != Start::NewGame;
         self.blueprint.put_away();
         self.selected_spell.0 = None;
