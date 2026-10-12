@@ -119,7 +119,7 @@ fn per_player<T: Clone>(t: T) -> Vec<T> {
 
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
-    fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
+    pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
@@ -1016,6 +1016,12 @@ impl GameMap {
                 self.set_fire(building);
                 None
             }
+            WorldEvent::BurnTrees { cell } => {
+                self.trees.iter_mut().filter(|t| t.cell() == cell).for_each(|t| {
+                    t.ignite();
+                });
+                None
+            }
             WorldEvent::Panic { unit } => {
                 let away = crate::unit::panic_heading(self.rng.next_u32(), self.rng.next_u32());
                 if let Some(u) = self.unit_mut(unit) {
@@ -1128,7 +1134,7 @@ impl GameMap {
             return;
         }
         let id = u.id;
-        let spare = |t: &Tree| t.size as usize > self.tree_claims((t.x, t.z), id) && !self.behind_walls((t.x, t.z));
+        let spare = |t: &Tree| t.wood() as usize > self.tree_claims((t.x, t.z), id) && !self.behind_walls((t.x, t.z));
         let chosen = match self.trees.iter().find(|t| (t.x, t.z) == tree).filter(|t| spare(t)) {
             Some(t) => t,
             None => match self.trees.iter().filter(|t| spare(t) && torus_cells(tree, (t.x, t.z)) <= REFIND_CELLS).min_by_key(|t| torus_dist2(tree, (t.x, t.z))) {
@@ -1162,7 +1168,7 @@ impl GameMap {
         let tree = self
             .trees
             .iter()
-            .filter(|t| t.size as usize > self.tree_claims((t.x, t.z), id) && !self.behind_walls((t.x, t.z)))
+            .filter(|t| t.wood() as usize > self.tree_claims((t.x, t.z), id) && !self.behind_walls((t.x, t.z)))
             .map(|t| (t.x, t.z))
             .min_by_key(|&p| torus_dist2(me, p));
         match (piece, tree) {

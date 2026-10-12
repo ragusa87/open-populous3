@@ -25,7 +25,7 @@ const MODELS: [&str; 10] =
 const DEFAULT_THEME: u8 = 0;
 /// The models are about this many units tall; a full-size tree stands `FULL_HEIGHT` cells.
 const MODEL_HEIGHT: f32 = 7.0;
-const FULL_HEIGHT: f32 = 1.6;
+pub const FULL_HEIGHT: f32 = 1.6;
 /// Footprint half size (cells): the trunk rests on the lowest ground under it.
 const TRUNK_HALF: f32 = 0.15;
 /// Seconds the cursor rests on a tree before its wood shows.

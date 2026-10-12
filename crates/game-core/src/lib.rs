@@ -15,6 +15,7 @@ pub mod flatten;
 pub mod enter;
 pub mod fire;
 pub mod gauge;
+pub mod ground_fire;
 pub mod headcount;
 pub mod health;
 pub mod id;

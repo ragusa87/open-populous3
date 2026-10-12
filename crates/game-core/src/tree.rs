@@ -1,11 +1,12 @@
 //! Trees: the tribes' wood. Each has a size 0-4, the pieces of wood it can still give; a tree at
-//! size 0 stays in place, invisible, and grows back one size at a time. Integer state, ticked with
-//! the map; placed deterministically in groves (`scatter`).
+//! size 0 stays in place, invisible, and grows back one size at a time. Set on fire (lightning), it
+//! gives no wood for `BURN_TICKS` and is burnt to size 0. Integer state, ticked with the map; placed
+//! deterministically in groves (`scatter`).
 
 use crate::map::Lcg;
 use crate::path::Mobility;
 use crate::terrain::Heightmap;
-use crate::time::{Every, Tick, Ticks};
+use crate::time::{Countdown, Every, Tick, Ticks};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 pub const MAX_SIZE: u8 = 4;
@@ -19,6 +20,9 @@ pub const GROW_TICKS: Ticks = Ticks::new(WOOD_PER_SIZE as u32 / WOOD_GROW as u32
 /// Tree types: 0-5 are the levels' scenery trees (models 1-6), 6-17 the other original tree objects
 /// (`pop3_format::catalog::tree_object`); the client maps a variant to a model.
 pub const VARIANTS: u8 = pop3_format::catalog::TREE_TYPES;
+/// How long a tree burns (a guess, as long as a building: the original's burning trees, scenery state 5, are not
+/// traced).
+pub const BURN_TICKS: Ticks = Ticks::new(127);
 /// No tree this close (cells) to a reincarnation site: its stones and spawn ground stay clear.
 pub const SITE_CLEARANCE: i32 = 7;
 
@@ -32,13 +36,15 @@ pub struct Tree {
     /// Turn about the vertical axis, 2048ths (the level's scenery angle, else scattered by position).
     pub angle: u16,
     growth: u16,
+    /// Its fire, while it burns.
+    pub burning: Option<Countdown>,
 }
 
 impl Tree {
     pub fn new((cx, cz): (i32, i32), variant: u8, size: u8) -> Self {
         let centre = |c: i32| (c.rem_euclid(128) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
         let (x, z) = (centre(cx), centre(cz));
-        Tree { x, z, variant: variant % VARIANTS, size: size.min(MAX_SIZE), angle: scattered_angle(x, z), growth: 0 }
+        Tree { x, z, variant: variant % VARIANTS, size: size.min(MAX_SIZE), angle: scattered_angle(x, z), growth: 0, burning: None }
     }
 
     pub fn with_angle(self, angle: u16) -> Self {
@@ -53,9 +59,32 @@ impl Tree {
         self.size > 0
     }
 
-    /// One turn: on the original's growth turns, `grow`.
+    /// The pieces of wood it can give now: none while it burns.
+    pub fn wood(&self) -> u8 {
+        if self.burning.is_some() { 0 } else { self.size }
+    }
+
+    /// Sets it on fire; false when there is nothing to burn (size 0) or it already burns.
+    pub fn ignite(&mut self) -> bool {
+        if self.size == 0 || self.burning.is_some() {
+            return false;
+        }
+        self.burning = Some(Countdown::new(BURN_TICKS));
+        true
+    }
+
+    /// The tick its fire was lit, the map being at `now`; None when it does not burn.
+    pub fn lit_at(&self, now: Tick) -> Option<Tick> {
+        self.burning.map(|c| Tick::from_wire(now.to_wire().wrapping_sub(c.done().get())))
+    }
+
+    /// One turn: its fire burns on, burning it to nothing when out; else on the original's growth turns, `grow`.
     pub fn tick(&mut self, now: Tick) {
-        if GROW_EVERY.fires(now, 0) {
+        if let Some(fire) = self.burning.as_mut() {
+            if fire.tick() {
+                (self.burning, self.size, self.growth) = (None, 0, 0);
+            }
+        } else if GROW_EVERY.fires(now, 0) {
             self.grow();
         }
     }
@@ -73,9 +102,9 @@ impl Tree {
         }
     }
 
-    /// Takes one piece of wood: false if there is none left (size 0).
+    /// Takes one piece of wood: false if it has none to give (`wood`).
     pub fn cut(&mut self) -> bool {
-        if self.size == 0 {
+        if self.wood() == 0 {
             return false;
         }
         self.size -= 1;
@@ -184,6 +213,21 @@ mod tests {
         assert!(t.cut() && t.cut());
         assert!(!t.cut(), "nothing left");
         assert_eq!((t.size, t.cell()), (0, (5, 5)), "stays in place, invisible");
+    }
+
+    #[test]
+    fn a_burning_tree_gives_no_wood_then_is_burnt_to_nothing_and_grows_back() {
+        let mut t = Tree::new((5, 5), 0, 3);
+        assert!(t.ignite());
+        assert!(!t.ignite(), "already burning");
+        assert!(!t.cut() && t.wood() == 0);
+        run(&mut t, 1..=BURN_TICKS.get() - 1);
+        assert_eq!((t.size, t.lit_at(Tick::from_wire(500))), (3, Some(Tick::from_wire(500 - (BURN_TICKS.get() - 1)))));
+        run(&mut t, BURN_TICKS.get()..=BURN_TICKS.get());
+        assert_eq!((t.size, t.burning), (0, None), "burnt");
+        assert!(!t.ignite(), "nothing left to burn");
+        run(&mut t, 1..=GROW_TICKS.get());
+        assert_eq!(t.size, 1, "grows back");
     }
 
     #[test]

@@ -33,6 +33,8 @@ mod sim_time;
 mod sites;
 mod sky;
 mod sparkles;
+mod ground_fire;
+mod burning_trees;
 mod smoke;
 mod terrain_mesh;
 mod terrain_texture;
@@ -103,7 +105,7 @@ fn main() {
             camera_debug::CameraDebugPlugin,
             object_scale::ObjectScalePlugin,
             chimney::ChimneyPlugin,
-            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin),
+            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin),
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();

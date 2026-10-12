@@ -14,6 +14,8 @@ pub enum WorldEvent {
     Panic { unit: u32 },
     Raid { building: u32 },
     SetFire { building: u32 },
+    /// Sets the trees of the cell on fire (`Tree::ignite`).
+    BurnTrees { cell: (i32, i32) },
     /// A new effect, ticking from the next turn; its id is given then.
     SpawnEffect(Effect),
     Terrain(TerrainChange),

@@ -82,7 +82,7 @@ an `EffectKind` variant carrying only its own data (`SimpleBlast`). `tend_effect
   the caster's tribe, later angels and friendly-fire rules per `DamageKind`), which calls `Unit::take_damage`;
 - `Push` flings the unit (`Unit::fling`) unless it is shielded;
 - `SpawnEffect` adds a new effect, which first ticks on the next turn;
-- `Terrain` raises or flattens ground; `Panic` makes the unit run off (`Unit::panic`); `SetFire` burns a building;
+- `Terrain` raises or flattens ground; `Panic` makes the unit run off (`Unit::panic`); `SetFire` burns a building; `BurnTrees` the trees of a cell;
   `Raid` is routed, without behaviour yet.
 An effect never holds another object's state: a unit it affects keeps its own countdown (panic, on fire) and
 finishes it alone, even after the effect has ended.

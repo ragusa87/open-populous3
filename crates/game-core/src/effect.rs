@@ -29,6 +29,8 @@ pub enum EffectKind {
     Flatten(crate::flatten::Flatten),
     /// Only seen (`smoke`).
     Smoke,
+    /// Only seen (`ground_fire`).
+    GroundFire,
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -61,9 +63,9 @@ impl Effect {
         let events = match self.kind {
             EffectKind::SimpleBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units),
             EffectKind::LandBridge(ref mut bridge) => bridge.turn(),
-            EffectKind::Lightning(ref mut strike) => strike.turn((self.x, self.z), self.owner, &world.units, &world.buildings),
+            EffectKind::Lightning(ref mut strike) => strike.turn((self.x, self.z), self.owner, world),
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
-            EffectKind::Smoke => Vec::new(),
+            EffectKind::Smoke | EffectKind::GroundFire => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
         };
@@ -80,7 +82,7 @@ impl Effect {
         match self.kind {
             EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
             EffectKind::Flatten(ref flatten) => flatten.reshaping(terrain),
-            EffectKind::SimpleBlast(_) | EffectKind::Lightning(_) | EffectKind::Smoke => Vec::new(),
+            EffectKind::SimpleBlast(_) | EffectKind::Lightning(_) | EffectKind::Smoke | EffectKind::GroundFire => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }

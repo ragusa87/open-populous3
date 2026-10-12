@@ -2,11 +2,12 @@
 //! (`effect::EffectKind::Lightning`): on its first turn it kills outright up to `KILLS` people in the target cell,
 //! whatever their health and tribe (own followers and enemy shamans too) but the caster's own shaman and the
 //! shielded (`effect::hurts`), sets the building there on fire (`crate::fire`: the people inside are not struck,
-//! they come out 8 turns later, panicking) and spawns a simple blast; the rest of its turns the bolt is only seen.
+//! they come out 8 turns later, panicking), burns the trees of the cell or else lights a fire (`ground_fire`), and
+//! spawns a simple blast; the rest of its turns the bolt is only seen.
 
 use crate::effect::{DamageKind, Effect, EffectKind};
 use crate::event::WorldEvent;
-use crate::building::Building;
+use crate::map::GameMap;
 use crate::time::{Countdown, Ticks};
 use crate::unit::{cell_of, Unit};
 
@@ -27,17 +28,22 @@ pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
 }
 
 impl Strike {
-    /// One turn of the strike at `at` cast by `owner`: on the first, the kills, the fire and the blast.
-    pub fn turn(&mut self, at: (u16, u16), owner: u8, units: &[Unit], buildings: &[Building]) -> Vec<WorldEvent> {
+    /// One turn of the strike at `at` cast by `owner` on `world`: on the first, the kills, the fires and the blast.
+    pub fn turn(&mut self, at: (u16, u16), owner: u8, world: &GameMap) -> Vec<WorldEvent> {
         if std::mem::replace(&mut self.struck, true) {
             return Vec::new();
         }
-        let building = buildings.iter().find(|b| b.covers(at, 0)).map(|b| b.id);
-        let mut events: Vec<WorldEvent> = struck(at, owner, units)
+        let cell = (cell_of(at.0), cell_of(at.1));
+        let building = world.buildings.iter().find(|b| b.covers(at, 0)).map(|b| b.id);
+        let mut events: Vec<WorldEvent> = struck(at, owner, &world.units)
             .into_iter()
             .map(|unit| WorldEvent::Damage { unit, amount: u16::MAX, kind: DamageKind::Lightning, from: Some(owner) })
             .collect();
         events.extend(building.map(|building| WorldEvent::SetFire { building }));
+        events.push(match world.trees.iter().any(|t| t.cell() == cell && t.wood() > 0) {
+            true => WorldEvent::BurnTrees { cell },
+            false => WorldEvent::SpawnEffect(crate::ground_fire::effect(owner, at)),
+        });
         events.push(WorldEvent::SpawnEffect(crate::blast::effect(owner, at)));
         events
     }
@@ -92,20 +98,44 @@ mod tests {
         assert_eq!(struck(AT, 0, &units), [2]);
     }
 
+    fn world(units: Vec<Unit>, buildings: Vec<crate::building::Building>, trees: Vec<crate::tree::Tree>) -> GameMap {
+        let mut map = GameMap::bare("strike", crate::terrain::Heightmap::new(128), Vec::new());
+        (map.units, map.buildings, map.trees) = (units, buildings, trees);
+        map
+    }
+
+    fn kinds(events: &[WorldEvent]) -> Vec<String> {
+        events.iter().map(|e| match e {
+            WorldEvent::SpawnEffect(e) => format!("{:?}", std::mem::discriminant(&e.kind)),
+            e => format!("{e:?}"),
+        }).collect()
+    }
+
     #[test]
-    fn sets_the_building_it_hits_on_fire() {
-        let hut = Building { id: 50, ..Building::new(crate::building::BuildingKind::Hut { size: 1 }, 0, AT.0 - 256, AT.1 - 256, 0) };
-        let events = Strike::default().turn(AT, 0, &[], &[hut]);
+    fn sets_the_building_it_hits_on_fire_and_lights_a_fire_on_bare_ground() {
+        let hut = crate::building::Building { id: 50, ..crate::building::Building::new(crate::building::BuildingKind::Hut { size: 1 }, 0, AT.0 - 256, AT.1 - 256, 0) };
+        let events = Strike::default().turn(AT, 0, &world(vec![], vec![hut], vec![]));
         assert_eq!(events[0], WorldEvent::SetFire { building: 50 });
+        let fire = crate::ground_fire::effect(0, AT);
+        assert_eq!(events[1], WorldEvent::SpawnEffect(fire), "no tree: a fire");
+    }
+
+    #[test]
+    fn burns_the_tree_of_its_cell_instead_of_lighting_a_fire() {
+        let tree = crate::tree::Tree::new((10, 20), 0, 2);
+        let events = Strike::default().turn(AT, 0, &world(vec![], vec![], vec![tree.clone()]));
+        assert_eq!(events[0], WorldEvent::BurnTrees { cell: (10, 20) });
+        let bare = crate::tree::Tree::new((10, 20), 0, 0);
+        assert_eq!(kinds(&Strike::default().turn(AT, 0, &world(vec![], vec![], vec![bare]))), kinds(&[WorldEvent::SpawnEffect(crate::ground_fire::effect(0, AT)), WorldEvent::SpawnEffect(crate::blast::effect(0, AT))]), "nothing to burn");
     }
 
     #[test]
     fn strikes_once_then_only_shows() {
-        let units = [person(1, 1, UnitKind::Brave, AT)];
+        let map = world(vec![person(1, 1, UnitKind::Brave, AT)], vec![], vec![]);
         let mut s = Strike::default();
-        let first = s.turn(AT, 0, &units, &[]);
+        let first = s.turn(AT, 0, &map);
         assert!(matches!(first[0], WorldEvent::Damage { unit: 1, amount: u16::MAX, kind: DamageKind::Lightning, from: Some(0) }));
-        assert!(matches!(first.last(), Some(WorldEvent::SpawnEffect(_))), "and a simple blast");
-        assert!(s.turn(AT, 0, &units, &[]).is_empty());
+        assert!(matches!(first.last(), Some(WorldEvent::SpawnEffect(e)) if matches!(e.kind, EffectKind::SimpleBlast(_))), "and a simple blast");
+        assert!(s.turn(AT, 0, &map).is_empty());
     }
 }
