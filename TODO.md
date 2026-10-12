@@ -82,6 +82,9 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
 - [ ] Use the shaman's wand gesture (81-84), the conversion sit (18), the spy's juggling idle (92), the carbonized brave (97) for lightning; check the tribe layer flag `0x10` mapping.
 
+- [ ] The shaman's reincarnation is not instant: ours waits a fixed `RESPAWN_TICKS` (3 s). Find in the original how long she waits and what it depends on (her tribe's mana, its population, or both), then compute it from that.
+- [ ] Training units: followers turned into warriors, preachers, spies and firewarriors in the training huts (see "Buildings": training huts and training lines).
+
 ## Praying (worship) ([worship.md](docs/specs/worship.md))
 - [ ] Prayer gauge on the original's rhythm and curve (pop3-rev-analysis.md "The gauge"): every 4 turns, `C² / (C − n + 1)²` per update, drain `C²`; today it steps every tick with `STEP · (n/C)²`.
 - [ ] Contested totems: keep one gauge per tribe (our choice; the original has one per trigger, driven by the tribe with the most prayers), but the gifts are shared: a totem's `NumOccurences` counts across all tribes, so a one-gift totem rewards only the first tribe to fill its gauge, and the other gauges stop. Once `NumOccurences` is reached by any tribe, the totem sinks back into the ground for everyone and every tribe's prayers are sent away (`Totem::is_exhausted`: one shared sink, whoever took the last gift). Check `Totem::given` does this and test it with two tribes.
@@ -147,6 +150,9 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   (header byte 88: 1v1, 1v1v1, 2v1...), allies (header byte 92, see "Default allies" below), human / computer,
   defeated; holding the player's mana pool, spell book and build book (today `GameMap::mana`, `spell_books`,
   `build_books` by owner).
+
+## Winning and losing
+- [ ] Conditions to win or lose a level: find them in the original (tribes wiped out, the shaman unable to reincarnate, level scripts and triggers), then end the game with a victory or defeat screen.
 
 ## Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
 - [ ] Start camera from the header's start position (cell) and angle (2048ths) instead of looking at the shaman.
