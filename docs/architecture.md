@@ -39,7 +39,8 @@ each kind of object in a fixed, written order. The original's order inside a tur
 2. effects (`tend_effects`): before anything they act on, so units react the same turn;
 3. camp fires, vaults, totems;
 4. units (`Unit::tick`), then their events (wood, work, doors) in unit order;
-5. chained orders, building work, wood put down, people counted inside, the gone units removed.
+5. chained orders, building work, wood put down, people counted inside, mana (`ManaPool::tick`, each player's with
+   its spell book), the gone units removed.
 
 Rules for every object that ticks:
 - **One typed list per kind** on `GameMap` (`trees`, `units`, `effects`...), no trait objects. Each kind has its own

@@ -14,6 +14,8 @@
 - Ground textured from the original theme files (palette + bigfade + disp), per level theme.
 - Shaman: simulated (walk, pray, cast jump, drowning, death, reincarnation at her site), drawn as a sprite
   from the original animations or generated art, health bar, panel preview, right-click orders.
+- Mana, spell and build books per player in the simulation: a mana pool settled once per turn (spells charged
+  first, the rest banked), casts and pauses as commands; the Spells and Build tabs only draw them.
 
 ## Next
 See [TODO.md](../TODO.md).

@@ -114,8 +114,8 @@ taken from the level (`.hdr`) and unlocked by triggers. Clicking an available ti
 Done (no icons; a click picks the blueprint, see below): `game_core::build_book::BuildBook`, the original panel's 8 kinds (`BUILDABLE`: hut,
 drum tower, temple, spy, warrior and firewarrior training, boat hut, airship hut). `BuildBook::from_level`: the
 header's `BuildingsAvailable` (hut = model 1, boat hut 13, airship hut 15) are Available, building discoveries
-(`DiscoveryType 2`, any hut size = the hut) not yet available are "?". Stored as `GameMap::build_book` (original
-levels; generated maps and sandboxes: all available). The campaign is consistent: each level discovers one kind that
+(`DiscoveryType 2`, any hut size = the hut) not yet available are "?". Stored per player as `GameMap::build_books`
+(original levels; generated maps and sandboxes: all available). The campaign is consistent: each level discovers one kind that
 the next level's header has (warrior hut 1 -> 2, temple 3 -> 4, drum tower 4 -> 5, firewarrior 8 -> 9, boat hut
 9 -> 10, spy 12 -> 13, airship hut 13 -> 14). Models 12 ("curr OE slot") and 17 (guard post) are set in many
 masks but are not on the panel; 18 and 19 (vault, prison) are always set and never built. Client: `hud/build.rs`,

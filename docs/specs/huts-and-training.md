@@ -154,8 +154,8 @@ time to train one warrior and its mana, how fast the red bar fills.
 ## Simulation (to build)
 - `Building::id` (stable, given in load order then creation order): units point at it; the view needs it too
   (TODO "Site visuals").
-- `game_core::tribe::Tribe { mana, human }` in `GameMap::tribes`, one per tribe in owner order. Later the
-  original's other mana fields (income not yet distributed, delayed reservoir; pop3-rev-analysis.md).
+- Mana per player is done (`game_core::mana::ManaPool` in `GameMap::mana`, spells.md "Mana"); `mana_income(people)`
+  replaces its fixed `INCOME`. Later a tribe model holds it with `human` (TODO "Tribes").
 - Pure functions with tests: `breed_gain(occupants)`, `breed_threshold(level, population, cap)`,
   `population_band(population, cap)`, `train_cost(kind, specialists, human)`, `train_share(cost, duration)`,
   `mana_income(people)`, `queue_spots(building, count)` (the snake around the footprint).

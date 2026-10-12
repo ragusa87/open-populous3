@@ -96,7 +96,7 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | Right click (spell held) | put the spell away | same |
 | Ctrl + left click (spell held) | cast several times | - |
 | Alt + left click (spell held) | toggle auto-cast for this order | - |
-| Right click on a spell icon | toggle its charging | same (`SpellBook::toggle_pause`) |
+| Right click on a spell icon | toggle its charging | same (`Command::PauseSpell`) |
 | Ctrl + right click on a spell icon | toggle every other spell's charging | - |
 | Shift + right click on a spell icon | toggle every spell's charging | - |
 

@@ -29,20 +29,33 @@ blast), `Push` (`Unit::fling`, not the shielded), `Spawn` (a new effect, ticking
 object's state: a unit it panics or sets on fire counts down its own state.
 
 ## Spell book (`game_core::spell_book`)
-Per tribe: one `SpellSlot` per `SpellKind` with `Availability` (Hidden / Discoverable / Provided { shots } /
+Per player (`GameMap::spell_books`, by owner): one `SpellSlot` per `SpellKind` with `Availability` (Hidden / Discoverable / Provided { shots } /
 Known / Unlimited: cast at will, used by sandbox spells), `charges` (max 4, fewer for big spells: `max_charges()` from `cost()`, to replace with `SP_1_OFF_MAX`, see
 "Original balance") and `recharge` mana.
-`tick(mana)` refills recharging spells that are not paused (`paused`, `toggle_pause`), `cast(kind)` consumes a charge or a provided shot,
-`discover(kind)` turns "?" into Known. Integer only, deterministic. UI: see ui-and-editor.md.
+`charge(mana)` shares mana evenly between the spells taking it (known, not full, not paused: `set_paused`), a
+spell filled up passing the rest of its share on, and returns what is left; `cast(kind)` consumes a charge or a
+provided shot, `discover(kind)` turns "?" into Known. Integer only, deterministic. The engine owns it: casts
+(`Command::Cast` for a spell aimed at a spot, through `Spell::kind`; `Command::CastSelf` for the others) use a charge
+and are ignored without one, `Command::PauseSpell` pauses, rewards go to their tribe's book. The terrain brushes
+(`Spell::kind` None: editor and dev) use no book. The view only reads it (ui-and-editor.md).
 
-The original [exe] (pop3-rev-analysis.md "Mana rules") keeps per spell the mana still needed for its next charge.
-Every turn the tribe's new mana fills those first, and only the surplus goes to the bank, so the bar fills spell
-by spell. A cast takes its cost from the tribe's mana.
+## Mana (`game_core::mana`)
+Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, used }`, amounts as `Mana`. As in the
+original [exe] (pop3-rev-analysis.md "Mana rules"), two entry points:
+- `add(amount)` (`add_mana`): mana gained during the turn (a reward) only goes to `incoming`;
+- `tick(now, book)`, once per turn from `GameMap::tick`: the income every 16 turns (`MANA_EVERY`, a fixed `INCOME`
+  guessed until income from people), then `distribute`: `incoming` charges the spells first (`SpellBook::charge`),
+  the rest goes to the bank (capped at `MAX_MANA`). Only this changes the bank and the charges.
+
+`received` is the last income, `used` what went into spells since then: with `bank`, what a mana bar shows.
+Starts at `START_MANA`. Not done: income from people, the delayed reservoir, a cast's own cost (`incoming -=
+cost` in the original, on top of our prepaid charges?).
 
 `SpellBook::from_level(header, level)`: the header's `SpellsAvailable` panel spells are Known with full charges
 (how charged the original starts them is not checked), the spell discoveries (`DiscoveryType 11`) not already
-known are Discoverable. Their availability (permanent / this level / once) is not kept yet. Stored as
-`GameMap::spell_book` for original levels, the same for every tribe. Armageddon (bit 18) is special: the
+known are Discoverable. Their availability (permanent / this level / once) is not kept yet. Given to every
+player of an original level (`GameMap::spell_books`); generated maps and levels without a header get
+`SpellBook::demo` (every tile state), the sandboxes `SpellBook::sandbox` (plus Teleport, unlimited). Armageddon (bit 18) is special: the
 campaign's last spell, discovered in levels 17 and 18 and in the masks from level 19 on, always with Convert (17).
 Levels 1 and 2 also set bit 18, among leftover bits (1 burn, 20 bloodlust, 21 teleport) and without Convert:
 `known_in_header` only takes Armageddon next to Convert. The panel keeps a tile for it.

@@ -52,10 +52,10 @@ shaman, over the supply of its built huts, 3 / 5 / 7 by size, at most 200) [ours
   `full()`), which the computer players read too.
 
 ### Spells tab (`hud/spells.rs`)
-Mirrors `game_core::spell_book::SpellBook` (resource `PlayerSpells`). An original level brings its own loadout
-(`level_book` = `GameMap::spell_book`, set on New game and PgUp/PgDn): the header's spells known and full, its
-spell discoveries as "?" (spells.md). Generated maps get the demo loadout (`demo_book`, every tile state); the
-sandboxes add Teleport, unlimited (`sandbox_book`). One tile per `SpellKind`, Hidden ones as empty slots.
+Draws the player's `game_core::spell_book::SpellBook` from the map (`player_book` = `GameMap::spell_books[PLAYER]`),
+no copy of its own. An original level brings its own loadout: the header's spells known and full, its spell
+discoveries as "?" (spells.md). Generated maps get the demo loadout (`SpellBook::demo`, every tile state); the
+sandboxes add Teleport, unlimited (`SpellBook::sandbox`). One tile per `SpellKind`, Hidden ones as empty slots.
 Armageddon is special (only some levels give it): it always has its own full-width tile under the grid
 (`is_special`, `tile_order`), empty when the level does not give it, so the panel never has to make room for it.
 Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
@@ -69,17 +69,19 @@ Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 | Unlimited | gold tile, badge `free` |
 
 Hover shows the tile's description, click selects (white border). Right click on a known spell pauses its recharge
-(`SpellBook::toggle_pause`, like the original's "toggle on/off"): it takes no mana, keeps its charges and can still
+(`Command::PauseSpell`, like the original's "toggle on/off"): it takes no mana, keeps its charges and can still
 be cast; badge "paused", grey frozen bar. Right click again resumes. Spells cast on a spot (`ground_spell`: Teleport
 for now) are aimed with the mouse while selected: over the map the cursor becomes the animated gold arrow with the spell's icon on its right, the icon grayed out
 where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground), left click casts it there and puts
 the spell away (arrow cursor, clicks go back to the units' selection), right click puts it away without casting; meanwhile clicks do not select or move units. The others: `C`
-casts the selected spell (demo: consumes a charge and the shaman does her cast jump). Mana: each simulation tick every recharging spell gets 7 mana (`MANA_PER_TICK`), so it stops while paused.
+casts the selected spell (`Command::CastSelf`: the engine uses a charge and the shaman does her cast jump). Every
+cast goes through a command; the engine uses the charge and recharges the spells from the player's mana (spells.md
+"Mana"). No mana bar yet.
 Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build tab icons
 
 ### Build tab (`hud/build.rs`)
-Mirrors `game_core::build_book::BuildBook` (resource `PlayerBuilds`, `level_builds`: the level's own, set with the
-spells on New game and PgUp/PgDn; generated maps and sandboxes: every kind). Same grid as the spells: a named tile
+Draws the player's `game_core::build_book::BuildBook` from the map (`player_builds` = `GameMap::build_books[PLAYER]`:
+the level's own; generated maps and sandboxes: every kind). Same grid as the spells: a named tile
 per available kind (no icons yet), "?" for plans to discover, an empty slot for hidden ones; hover describes it.
 A click on an available tile picks its blueprint (white border, `blueprint.rs`): it follows the mouse on the map,
 red where it cannot stand, Space turns it, right click puts it away; left click places it and sends the selected
