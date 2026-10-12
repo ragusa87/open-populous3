@@ -275,6 +275,66 @@ impl GameMap {
     }
 }
 
+impl GameMap {
+    /// Attackers within reach of a target already in a melee join it ("Fight" [exe]): one of its two tribes only,
+    /// never a firewarrior, up to `MAX_FIGHTERS`; a tribe with 3 or more there is joined only by replacing one of
+    /// lower rank, who leaves. Then the melee splits if both sides have 2 or more.
+    pub(crate) fn join_melees(&mut self) {
+        for i in 0..self.units.len() {
+            let a = &self.units[i];
+            let Action::Attacking { target: crate::unit::Target::Unit(target), .. } = a.action else { continue };
+            let Some(t) = self.unit(target) else { continue };
+            let Some(Link::Melee(id)) = self.linked(t) else { continue };
+            let Some(melee) = self.coordinators.melees.get(id) else { continue };
+            if !a.kind.stats().joins_melees || ![melee.tribes.0, melee.tribes.1].contains(&a.owner) || !crate::challenge::in_reach((a.x, a.z), (t.x, t.z)) {
+                continue;
+            }
+            let members: Vec<&Unit> = self.units.iter().filter(|u| <Melee as Coordinator>::link_of(u) == Some(id)).collect();
+            let own: Vec<&&Unit> = members.iter().filter(|u| u.owner == a.owner).collect();
+            let rank = a.kind.stats().rank;
+            let leaving = if own.len() >= 3 {
+                match own.iter().filter(|u| u.kind.stats().rank < rank).min_by_key(|u| (u.kind.stats().rank, u.id)) {
+                    Some(u) => Some(u.id),
+                    None => continue,
+                }
+            } else if members.len() >= MAX_FIGHTERS {
+                continue;
+            } else {
+                None
+            };
+            if let Some(u) = leaving.and_then(|u| self.unit_mut(u)) {
+                u.release();
+            }
+            let a = &mut self.units[i];
+            let place = (a.x, a.z);
+            a.join(Action::Melee { melee: id, place, stance: Stance::ToPlace });
+            self.split(id);
+        }
+    }
+
+    /// Both sides of the melee `id` with 2 or more: the last of each leaves for a new one-to-one melee at the same
+    /// place ("Fight" [exe]).
+    fn split(&mut self, id: MeleeId) {
+        let Some(melee) = self.coordinators.melees.get(id) else { return };
+        let (tribes, at) = (melee.tribes, melee.at);
+        let side = |tribe: u8| self.units.iter().filter(|u| u.owner == tribe && <Melee as Coordinator>::link_of(u) == Some(id)).map(|u| u.id).collect::<Vec<_>>();
+        let (first, second) = (side(tribes.0), side(tribes.1));
+        if first.len() < 2 || second.len() < 2 {
+            return;
+        }
+        let pair = [*first.last().unwrap(), *second.last().unwrap()];
+        let angle = self.rng.next_u32() % angle::TURN;
+        let new = self.new_id_of();
+        self.coordinators.melees.insert(new, Melee { tribes, at, angle, centre: None });
+        for u in pair {
+            if let Some(u) = self.unit_mut(u) {
+                let place = (u.x, u.z);
+                u.join(Action::Melee { melee: new, place, stance: Stance::ToPlace });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,6 +432,60 @@ mod tests {
         assert_eq!(map.unit(t).unwrap().action, Action::Idle);
         let (map, a, t) = duel(UnitKind::Firewarrior, UnitKind::Brave);
         assert!([a, t].iter().all(|&u| map.unit(u).unwrap().heals()), "fighting, they heal"); 
+    }
+
+    /// `kind` of `tribe` going for `target`, standing next to it.
+    fn attacker(map: &mut GameMap, tribe: u8, kind: UnitKind, target: UnitId) -> UnitId {
+        let t = map.unit(target).unwrap();
+        let at = (t.x.wrapping_add(100), t.z.wrapping_add(50));
+        let u = map.spawn(tribe, kind, at);
+        u.action = Action::Attacking { target: crate::unit::Target::Unit(target), to: at };
+        u.id
+    }
+
+    fn melee_of(map: &GameMap, u: UnitId) -> Option<MeleeId> {
+        map.unit(u).and_then(|u| <Melee as Coordinator>::link_of(u))
+    }
+
+    #[test]
+    fn a_newcomer_joins_but_never_a_firewarrior() {
+        let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Brave);
+        let ring = melee_of(&map, t);
+        let fire = attacker(&mut map, 0, UnitKind::Firewarrior, t);
+        let brave = attacker(&mut map, 0, UnitKind::Brave, t);
+        map.join_melees();
+        assert_eq!(melee_of(&map, fire), None, "a firewarrior never joins");
+        assert_eq!((melee_of(&map, brave), melee_of(&map, a)), (ring, ring), "1 against 2");
+    }
+
+    #[test]
+    fn two_against_two_splits_in_two_duels() {
+        let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Brave);
+        let b = attacker(&mut map, 0, UnitKind::Brave, t);
+        map.join_melees();
+        let c = attacker(&mut map, 1, UnitKind::Brave, a);
+        map.join_melees();
+        assert_eq!(map.coordinators.melees.len(), 2);
+        let per: Vec<usize> = map.coordinators.melees.ids().map(|id| [a, t, b, c].iter().filter(|&&u| melee_of(&map, u) == Some(id)).count()).collect();
+        assert_eq!(per, [2, 2]);
+    }
+
+    #[test]
+    fn a_fourth_of_a_tribe_replaces_one_of_lower_rank() {
+        let (mut map, _, t) = duel(UnitKind::Brave, UnitKind::Brave);
+        let ring = melee_of(&map, t);
+        for _ in 0..2 {
+            attacker(&mut map, 0, UnitKind::Brave, t);
+            map.join_melees();
+        }
+        let in_ring = |map: &GameMap| map.units.iter().filter(|u| melee_of(map, u.id) == ring).count();
+        assert_eq!(in_ring(&map), 4, "3 braves against 1");
+        let brave = attacker(&mut map, 0, UnitKind::Brave, t);
+        map.join_melees();
+        assert_eq!(melee_of(&map, brave), None, "no one of lower rank to replace");
+        let warrior = attacker(&mut map, 0, UnitKind::Warrior, t);
+        map.join_melees();
+        assert_eq!((melee_of(&map, warrior), in_ring(&map)), (ring, 4), "a brave gave way");
     }
 
     #[test]

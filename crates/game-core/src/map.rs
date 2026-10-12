@@ -968,6 +968,7 @@ impl GameMap {
     /// Scans that start coordinators or add units to them, one per kind in `Coordinators::tick`'s order.
     fn detect_coordinators(&mut self) {
         self.start_challenges();
+        self.join_melees();
     }
 
     /// Every coordinator's turn, reading the map as it was before any of them; the finished ones removed; then their

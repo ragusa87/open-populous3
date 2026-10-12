@@ -98,5 +98,10 @@ middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `
   against an on-guard follower (never the shaman) throws it back after it reeled: 35 + a draw below 70 per turn,
   away from the attacker, along the ground (`Staggering` until still).
 - Fighters heal as anyone (see "Health").
-- Not yet: joining and splitting (next), the ground check moving the middle off unsuitable ground, the winner's
+- Joining (`GameMap::join_melees`, in `detect_coordinators` after the challenges): an attacker within
+  `FIGHT_REACH` of a target in a melee joins it if it is of one of its two tribes and not a firewarrior, while there
+  are fewer than 6; with 3 or more of its tribe there it joins only by replacing the one of lowest rank below its
+  own (released). Then, both sides with 2 or more, the last of each leaves for a new one-to-one melee at the same
+  place: a melee stays one against several ("Fight" [exe, measured]).
+- Not yet: the ground check moving the middle off unsuitable ground, the winner's
   count, the move's sounds.
