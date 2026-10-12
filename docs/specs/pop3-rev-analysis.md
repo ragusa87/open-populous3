@@ -941,7 +941,8 @@ placement 0x44EE50: a cell with flags & 0x4010000 cannot be built on
 | attackers (melee, shots, blasts) emptying the wood | 0x4092A0 → 0x40B230 | yes |
 | fire (lightning 0x408CB0, firestorm, lava → state 4) | 0x408AB0: fire timer +0xA7 127, occupants out at 0x77, one −100 wood hit at 0x4F | yes, if that hit empties the wood; else back to state 1 |
 | whirlwind pulling the wood out | 0x4980A0 → 0x40B130 → 0x40B230 | yes |
-| foundation check (terrain no longer fits), earthquake, swamp, flatten, land changes | 0x408080 → state 3 sub 1 | no: explodes |
+| earthquake shake (turns 24, 56, 88, 20/128 chance per building) | 0x50D9A0 → effect 7/0xE (init 0x50FE60) → 0x4980A0(b, 1): −100 wood dropped as a pile 5/0xB, then a partial explosion | yes, if the wood runs out |
+| foundation check (terrain no longer fits): the earthquake's sinking, swamp, flatten, land changes | 0x408080 → state 3 sub 1 | no: explodes |
 | volcano | 0x50E5FB → state 3 sub 1 | no (its own lava cells are damaged ground) |
 | foundation sub 2 | 0x4082A0 | no |
 
@@ -1338,8 +1339,9 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x408080 | building foundation check: re-level the footprint or collapse |
 | 0x40B230 | make the ashes: footprint cells flagged damaged ground, damage smoke, scorch list entry |
 | 0x4509D0, 0x450A70, 0x450B30 | scorch list: add, tick every 16 turns, fade / clear an area |
-| 0x406F40 | building state 3: thrown out, explode, removed (no ashes) |
-| 0x50D9A0 | earthquake effect 7/0x1A per turn (Ghidra: `process_explode_building`) |
+| 0x406F40 | building state 3: thrown out, explode, removed (no ashes) (Ghidra: `alloc_spell_blast_or_sinking`) |
+| 0x50D9A0 | earthquake effect 7/0x1A per turn (Ghidra: `process_explode_building`), spawned only by the earthquake spell (spell table effect 26) |
+| 0x50FE60 | effect 7/0xE init: shake one building (−100 wood via 0x4980A0, partial explosion) |
 | 0x4E7FB0, 0x4E8F00 | boat and balloon movement passes (balloon hover height) |
 | 0x4E93F0 | add a push to a velocity, scaled by the slope along it |
 | 0x4EBC20 | slope vector at a position (ground sliding) |
