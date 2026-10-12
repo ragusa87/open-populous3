@@ -18,10 +18,11 @@ use game_core::command::Command;
 use game_core::map::GameMap;
 use game_core::spell::Spell;
 use game_core::unit::Order;
+use game_core::mana::Mana;
 use game_core::spell_book::{Availability, SpellBook, SpellKind, SpellSlot, MAX_CHARGES};
 
-/// Mana given to every recharging spell per simulation tick.
-const MANA_PER_TICK: u32 = 7;
+/// Mana shared by the recharging spells per simulation tick.
+const MANA_PER_TICK: u32 = 35;
 
 #[derive(Resource)]
 pub struct PlayerSpells(pub SpellBook);
@@ -163,7 +164,7 @@ pub fn demo_book() -> SpellBook {
     b.set(SpellKind::Volcano, Availability::Provided { shots: 1 });
     b.set(SpellKind::Flatten, Availability::Discoverable);
     b.set(SpellKind::Lightning, Availability::Discoverable);
-    b.tick(100);
+    b.charge(Mana(500));
     b
 }
 
@@ -272,7 +273,7 @@ fn style_colors(style: TileStyle) -> (Color, Color) {
 
 fn recharge(clock: Res<crate::units::SimClock>, mut book: ResMut<PlayerSpells>) {
     for _ in 0..clock.ran {
-        book.0.tick(MANA_PER_TICK);
+        book.0.charge(Mana(MANA_PER_TICK));
     }
 }
 

@@ -1,6 +1,7 @@
 //! A tribe's spells: which ones it knows, their charges and mana recharge.
 //! Deterministic integer state, ticked by the simulation.
 
+use crate::mana::Mana;
 use pop3_format::level::{ThingData, KIND_SPELL};
 use pop3_format::{Level, LevelHeader};
 
@@ -181,6 +182,19 @@ impl SpellSlot {
     pub fn takes_mana(&self) -> bool {
         self.is_recharging() && !self.paused
     }
+
+    /// Adds `mana` toward the next charges; returns what is left once full.
+    fn give(&mut self, mana: u32) -> u32 {
+        self.recharge += mana;
+        while self.recharge >= self.kind.cost() && self.charges < self.kind.max_charges() {
+            self.recharge -= self.kind.cost();
+            self.charges += 1;
+        }
+        if self.charges < self.kind.max_charges() {
+            return 0;
+        }
+        std::mem::take(&mut self.recharge)
+    }
 }
 
 /// Whether the header's `SpellsAvailable` gives `kind` from the start. Armageddon only counts next to
@@ -255,16 +269,19 @@ impl SpellBook {
         }
     }
 
-    /// Give `mana` to every recharging spell that is not paused; full charges keep the rest at 0.
-    pub fn tick(&mut self, mana: u32) {
-        for s in self.slots.iter_mut().filter(|s| s.takes_mana()) {
-            s.recharge += mana;
-            while s.recharge >= s.kind.cost() && s.charges < s.kind.max_charges() {
-                s.recharge -= s.kind.cost();
-                s.charges += 1;
+    /// Share `mana` evenly between the spells that take it (`SpellSlot::takes_mana`); a spell filled up passes
+    /// the rest of its share on. Returns what no spell took.
+    pub fn charge(&mut self, mana: Mana) -> Mana {
+        let mut left = mana.0;
+        loop {
+            let takers: Vec<usize> = (0..self.slots.len()).filter(|&i| self.slots[i].takes_mana()).collect();
+            if left == 0 || takers.is_empty() {
+                return Mana(left);
             }
-            if s.charges == s.kind.max_charges() {
-                s.recharge = 0;
+            let share = (left / takers.len() as u32).max(1);
+            for i in takers {
+                let given = share.min(left);
+                left = left - given + self.slots[i].give(given);
             }
         }
     }
@@ -292,11 +309,11 @@ mod tests {
     fn known_spells_recharge_up_to_max() {
         let mut b = SpellBook::new();
         b.set(SpellKind::Blast, Availability::Known);
-        b.tick(39);
+        b.charge(Mana(39));
         assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 0);
-        b.tick(1);
+        b.charge(Mana(1));
         assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 1);
-        b.tick(10_000);
+        b.charge(Mana(10_000));
         let s = b.slot(SpellKind::Blast).unwrap();
         assert_eq!((s.charges, s.recharge), (MAX_CHARGES, 0));
     }
@@ -360,18 +377,30 @@ mod tests {
     fn paused_spells_take_no_mana_and_keep_their_charges() {
         let mut b = SpellBook::new();
         b.set(SpellKind::Blast, Availability::Known);
-        b.tick(40);
+        b.charge(Mana(40));
         b.toggle_pause(SpellKind::Blast);
-        b.tick(1000);
+        b.charge(Mana(1000));
         let s = b.slot(SpellKind::Blast).unwrap();
         assert_eq!((s.charges, s.recharge, s.paused), (1, 0, true));
         assert!(b.cast(SpellKind::Blast), "a paused spell can still be cast");
         b.toggle_pause(SpellKind::Blast);
-        b.tick(40);
+        b.charge(Mana(40));
         assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 1, "recharging again");
         b.set(SpellKind::Volcano, Availability::Provided { shots: 1 });
         b.toggle_pause(SpellKind::Volcano);
         assert!(!b.slot(SpellKind::Volcano).unwrap().paused, "only known spells recharge");
+    }
+
+    #[test]
+    fn mana_is_shared_and_a_full_spell_passes_its_share_on() {
+        let mut b = SpellBook::new();
+        b.set(SpellKind::Blast, Availability::Known);
+        b.set(SpellKind::Swarm, Availability::Known);
+        assert_eq!(b.charge(Mana(81)), Mana::ZERO);
+        let (blast, swarm) = (b.slot(SpellKind::Blast).unwrap(), b.slot(SpellKind::Swarm).unwrap());
+        assert_eq!((blast.charges, blast.recharge, swarm.recharge), (1, 1, 40), "41 and 40, the odd one to the first");
+        assert_eq!(b.charge(Mana(1000)), Mana(1000 - 119 - 440), "both full: 4 x 40 and 4 x 120");
+        assert!(b.slots.iter().all(|s| s.recharge == 0));
     }
 
     #[test]
@@ -384,7 +413,7 @@ mod tests {
     fn provided_shots_run_out_and_never_recharge() {
         let mut b = SpellBook::new();
         b.set(SpellKind::Volcano, Availability::Provided { shots: 2 });
-        b.tick(10_000);
+        b.charge(Mana(10_000));
         assert!(b.cast(SpellKind::Volcano));
         assert!(b.cast(SpellKind::Volcano));
         assert_eq!(b.slot(SpellKind::Volcano).unwrap().availability, Availability::Hidden);
@@ -395,10 +424,10 @@ mod tests {
     fn discoverable_must_be_discovered_first() {
         let mut b = SpellBook::new();
         b.set(SpellKind::Flatten, Availability::Discoverable);
-        b.tick(10_000);
+        b.charge(Mana(10_000));
         assert!(!b.cast(SpellKind::Flatten));
         b.discover(SpellKind::Flatten);
-        b.tick(200);
+        b.charge(Mana(200));
         assert!(b.cast(SpellKind::Flatten));
     }
 
@@ -416,7 +445,7 @@ mod tests {
     fn casting_uses_a_charge() {
         let mut b = SpellBook::new();
         b.set(SpellKind::Convert, Availability::Known);
-        b.tick(80);
+        b.charge(Mana(80));
         assert!(b.cast(SpellKind::Convert));
         assert_eq!(b.slot(SpellKind::Convert).unwrap().charges, 1);
     }

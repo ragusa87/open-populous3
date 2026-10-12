@@ -12,6 +12,7 @@ pub mod enter;
 pub mod gauge;
 pub mod headcount;
 pub mod health;
+pub mod mana;
 pub mod map;
 pub mod motion;
 pub mod occupancy;
