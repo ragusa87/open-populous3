@@ -6,7 +6,7 @@
 use crate::building::{Building, Stage};
 use crate::event::WorldEvent;
 use crate::map::GameMap;
-use crate::time::{Countdown, Ticks};
+use crate::time::{Countdown, Tick, Ticks};
 use crate::unit::Order;
 
 /// 127 turns (10.6 s), the original's burning building.
@@ -32,6 +32,11 @@ impl Building {
         self.burning = Some(Countdown::new(BURN_TICKS));
         self.used = self.used.min(self.kind.wood_cost()).saturating_sub(1);
         if self.used == 0 { Burnt::Destroyed } else { Burnt::Damaged }
+    }
+
+    /// The tick its fire was lit, the map being at `now`; None when it does not burn.
+    pub fn lit_at(&self, now: Tick) -> Option<Tick> {
+        self.burning.map(|c| Tick::from_wire(now.to_wire().wrapping_sub(c.done().get())))
     }
 
     /// One tick of its fire, out when it has burnt `BURN_TICKS`.
@@ -89,8 +94,9 @@ mod tests {
         assert_eq!(hut.ignite(), Burnt::Spared, "already burning");
         (1..BURN_TICKS.get()).for_each(|_| hut.burn());
         assert!(hut.burning.is_some());
+        assert_eq!(hut.lit_at(Tick::from_wire(200)), Some(Tick::from_wire(200 - (BURN_TICKS.get() - 1))));
         hut.burn();
-        assert_eq!(hut.burning, None);
+        assert_eq!((hut.burning, hut.lit_at(Tick::from_wire(200))), (None, None));
         assert_eq!(hut.ignite(), Burnt::Damaged);
         hut.burning = None;
         assert_eq!(hut.ignite(), Burnt::Destroyed, "no wood left");

@@ -17,7 +17,7 @@ use crate::flame::{self, Flame, FlameFrames};
 use crate::generated_buildings;
 use crate::grounded::{ground_point, Grounded, Tilted};
 use crate::original_models::{atlas_image, object_mesh, solid_part, to_mesh, MeshData, OriginalObjects};
-use crate::sim_time::{seed, SimNow};
+use crate::sim_time::{seed, ticks_f32, SimNow, TICK_SECS};
 use crate::sites::tribe_color;
 use crate::world::{CurrentMap, LevelList};
 use bevy::asset::RenderAssetUsages;
@@ -53,6 +53,8 @@ const MARK_LIFT: f32 = 0.02;
 const BRAZIER_FLAME: f32 = 0.7;
 /// Size (cells) of each flame over a burning building.
 const FIRE_FLAME: f32 = 1.3;
+/// The flames of a burning building at the end of its fire, of their height when it was lit.
+const FIRE_LAST: f32 = 0.15;
 
 /// The original object drawing a building of `owner`, None if not identified (neutral buildings
 /// take the blue version).
@@ -112,6 +114,10 @@ pub fn perch(b: &Building, height: f32) -> Option<(Vec2, f32)> {
 struct SiteMark(usize);
 
 /// The part of a view that shakes (the building with this id is being attacked).
+/// The flames of a building whose fire was lit at this tick: they go down as it burns (`fire_height`).
+#[derive(Component)]
+struct Fire(Tick);
+
 #[derive(Component)]
 struct Shaking(u32);
 
@@ -129,7 +135,7 @@ impl Plugin for BuildingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ModelHeights>()
             .add_systems(Update, (respawn_buildings.in_set(RespawnBuildings), place_labels).chain())
-            .add_systems(Update, shake_walls)
+            .add_systems(Update, (shake_walls, burn_down))
             .add_systems(PostUpdate, draw_site_marks);
     }
 }
@@ -294,6 +300,7 @@ fn respawn_buildings(
             let frame = flame_frames.get(&levels, theme, &mut images, &mut mats)[offset].clone();
             (Flame { offset }, Mesh3d(meshes.add(to_mesh(flames))), MeshMaterial3d(frame), NotShadowCaster, crate::hover::NoOutline)
         });
+        let fire = b.lit_at(map.0.now).map(Fire);
         let mut view = commands.spawn((
             BuildingView(i),
             crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Buildings),
@@ -323,7 +330,13 @@ fn respawn_buildings(
         view.with_children(|v| {
             let mut body = v.spawn((Transform::default(), Visibility::Inherited));
             body.with_children(|parts| {
-                let flame = flames.map(|f| parts.spawn(f).id());
+                let flame = flames.map(|f| {
+                    let mut flame = parts.spawn(f);
+                    if let Some(fire) = fire {
+                        flame.insert(fire);
+                    }
+                    flame.id()
+                });
                 if let Some(shown) = look.shown {
                     let mut model = parts.spawn((Mesh3d(shown), MeshMaterial3d(skin)));
                     if vault_model {
@@ -385,6 +398,18 @@ fn shake_walls(now: Res<SimNow>, mut bodies: Query<(&Shaking, &mut Transform)>) 
 }
 
 /// The walls' tilt of building `id` at `now`.
+/// Each burning building's flames as high as its fire has left to burn.
+fn burn_down(now: Res<SimNow>, mut flames: Query<(&Fire, &mut Transform)>) {
+    for (fire, mut tf) in &mut flames {
+        tf.scale.y = fire_height(now.secs_since(fire.0) / (ticks_f32(game_core::fire::BURN_TICKS) * TICK_SECS));
+    }
+}
+
+/// The flames' height (of their height when lit) `p` (0..1) through the fire: down from 1 to `FIRE_LAST`.
+pub fn fire_height(p: f32) -> f32 {
+    1.0 - (1.0 - FIRE_LAST) * p.clamp(0.0, 1.0)
+}
+
 fn shake_at(now: SimNow, id: u32) -> Quat {
     let (rx, rz) = blow_tilt(now.secs_in(Tick::ZERO, BLOWS_LOOP) / BLOW + seed(id));
     Quat::from_rotation_x(rx * SHAKE) * Quat::from_rotation_z(rz * SHAKE)
@@ -450,6 +475,14 @@ mod tests {
         later.burn();
         assert!(same_look(&[burning.clone()], &[later]));
         assert!(!same_look(&[Building { burning: None, ..burning.clone() }], &[burning]));
+    }
+
+    #[test]
+    fn flames_go_down_as_the_fire_burns() {
+        assert_eq!(fire_height(0.0), 1.0);
+        assert!(fire_height(0.5) < 1.0 && fire_height(0.5) > FIRE_LAST);
+        assert!((fire_height(1.0) - FIRE_LAST).abs() < 1e-6 && fire_height(2.0) == fire_height(1.0));
+        assert_eq!(fire_height(-1.0), 1.0, "not lit yet");
     }
 
     #[test]

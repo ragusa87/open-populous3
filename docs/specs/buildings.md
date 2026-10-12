@@ -303,7 +303,8 @@ not already burning (a guess), loses one piece at once (the original's structura
 yet), builders inside are released. With no wood left it is removed. While it burns, its braves only fetch wood and
 nobody builds in it. Vault, prison and other buildings without a wood cost never burn. Drawn (`buildings.rs`, `fire_bases`): its
 frame with 9 animated flames (the torches' `flame.rs` boards, `FIRE_FLAME` 1.3 cells) over its footprint, the middle one
-half way up. Dev: `LIGHTNING=x,z` on a building (`POP3_START=sandbox-buildings`, a hut at 52.5,70.5).
+half way up, going down as it burns (`fire_height`: from their full height when lit, `Building::lit_at`, to
+`FIRE_LAST` 15 % at the end, on sim time). Dev: `LIGHTNING=x,z` on a building (`POP3_START=sandbox-buildings`, a hut at 52.5,70.5).
 
 ### Doors
 Units enter and leave a building only through its door (the facing's side, local -z), the same way in and out:
