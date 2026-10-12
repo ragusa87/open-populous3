@@ -1,7 +1,7 @@
 //! Puffs of smoke or dust: a few blobs, each born at its own time, moving out from an origin while
 //! they rise, grow and fade. A pattern (`Puffs`) tells where puff `k` is `secs` after it started
 //! (`Puffs::pose`); `move_puffs` poses the 3D ones (smoke balls: a busy hut's chimney, a sinking
-//! totem) at the `secs` their owner sets from simulation time (`chimney::ChimneyView`, `totems`). The
+//! totem, a damaged building) at the `secs` their owner sets from simulation time (`chimney::ChimneyView`, `totems`). The
 //! landing dust (`units::dust`) poses its camera-facing motes with the same patterns.
 
 use bevy::prelude::*;
@@ -113,6 +113,22 @@ pub const SINKING: Puffs = Puffs {
     angle: (0.0, 2.4),
 };
 
+/// A damaged building's smoke (`smoke::SmokeView`, which starts puff `k` `k` gaps late): dark puffs spreading over
+/// its footprint, rising high, growing and fading.
+pub const DAMAGE: Puffs = Puffs {
+    count: 12,
+    life: 1.4,
+    emit: Emit::Burst,
+    spread: (0.15, 0.6),
+    spread_curve: Curve::EaseOut,
+    rise: (0.3, 1.8),
+    size: (0.25, 0.7),
+    opacity: (0.75, 0.0),
+    curve: Curve::EaseOut,
+    shrink: 0.0,
+    angle: (0.0, 2.4),
+};
+
 impl Puffs {
     /// How far through its life (0 to 1) puff `k` is `secs` after the puffs started; None when it is
     /// not out.
@@ -205,6 +221,13 @@ mod tests {
         let around: Vec3 = (0..DUST.count).map(|k| DUST.pose(k, DUST.life).unwrap().offset * Vec3::new(1.0, 0.0, 1.0)).sum();
         assert!(around.length() < 1e-4, "evenly spread around the feet");
         assert!(DUST.pose(0, DUST.life + 0.01).is_none(), "once");
+    }
+
+    #[test]
+    fn damage_smoke_rises_spreads_and_fades_once() {
+        let (low, high) = (DAMAGE.pose(0, 0.1).unwrap(), DAMAGE.pose(0, 1.0).unwrap());
+        assert!(high.offset.y > low.offset.y && high.offset.xz().length() > low.offset.xz().length() && high.opacity < low.opacity);
+        assert!(DAMAGE.pose(0, DAMAGE.life + 0.01).is_none(), "once");
     }
 
     #[test]

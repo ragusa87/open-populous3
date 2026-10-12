@@ -300,8 +300,9 @@ back up like a construction. Its wood is its health. To check in the game: wheth
 Fire (done: `game_core::fire`, `WorldEvent::SetFire`, set by lightning): a building past its plan, not already
 burning, burns for `BURN_TICKS` (127 turns, `Building::burning`). On its 8th turn (`THROW_OUT_AT`) everyone inside
 runs out by the door in panic (a `Panic` each, `Action::Panicking`), builders inside are released; on its 48th
-(`HIT_AT`) it loses one piece of the wood its blueprint asks for (the original's structural hit of 100 wood), and
-with none left it is removed. A kind with no blueprint (guard post, gate...) has no wood to lose. While it burns,
+(`HIT_AT`) it loses one piece of the wood its blueprint asks for (the original's structural hit of 100 wood) with
+damage smoke (a `smoke::damage` effect, 3 s, drawn by `smoke::SmokeView` as dark puffs), and with none left it is
+removed. A kind with no blueprint (guard post, gate...) has no wood to lose. While it burns,
 its braves only fetch wood and nobody builds in it. The library (vault) and the prison never burn
 (`BuildingKind::fireproof`). Drawn (`buildings.rs`, `fire_bases`): its
 frame with 9 animated flames (the torches' `flame.rs` boards, `FIRE_FLAME` 1.3 cells) over its footprint, the middle one

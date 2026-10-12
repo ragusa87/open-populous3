@@ -33,6 +33,7 @@ mod sim_time;
 mod sites;
 mod sky;
 mod sparkles;
+mod smoke;
 mod terrain_mesh;
 mod terrain_texture;
 mod tooltip;
@@ -102,7 +103,7 @@ fn main() {
             camera_debug::CameraDebugPlugin,
             object_scale::ObjectScalePlugin,
             chimney::ChimneyPlugin,
-            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin),
+            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin),
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();

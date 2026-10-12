@@ -30,6 +30,7 @@ pub mod placement;
 pub mod schedule;
 pub mod site;
 pub mod slots;
+pub mod smoke;
 pub mod spell;
 pub mod spell_book;
 pub mod status;

@@ -27,6 +27,8 @@ pub enum EffectKind {
     LandBridge(crate::land_bridge::LandBridge),
     Lightning(crate::lightning::Strike),
     Flatten(crate::flatten::Flatten),
+    /// Only seen (`smoke`).
+    Smoke,
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -61,6 +63,7 @@ impl Effect {
             EffectKind::LandBridge(ref mut bridge) => bridge.turn(),
             EffectKind::Lightning(ref mut strike) => strike.turn((self.x, self.z), self.owner, &world.units, &world.buildings),
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
+            EffectKind::Smoke => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
         };
@@ -77,7 +80,7 @@ impl Effect {
         match self.kind {
             EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
             EffectKind::Flatten(ref flatten) => flatten.reshaping(terrain),
-            EffectKind::SimpleBlast(_) | EffectKind::Lightning(_) => Vec::new(),
+            EffectKind::SimpleBlast(_) | EffectKind::Lightning(_) | EffectKind::Smoke => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }

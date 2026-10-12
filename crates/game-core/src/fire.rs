@@ -1,6 +1,7 @@
 //! Burning buildings (pop3-rev-analysis.md "Shared person and building states", Burning building), set on fire by
 //! `WorldEvent::SetFire` (lightning). A building burns for `BURN_TICKS`: on its `THROW_OUT_AT`th turn the people
-//! inside are thrown out by the door and panic, on its `HIT_AT`th it loses one piece of wood. With wood left it stands
+//! inside are thrown out by the door and panic, on its `HIT_AT`th it loses one piece of wood, with damage smoke
+//! (`smoke::damage`). With wood left it stands
 //! as under construction, which braves repair with wood once the fire is out; with none left it is destroyed.
 
 use crate::building::{Building, Stage};
@@ -94,24 +95,27 @@ impl GameMap {
         }
     }
 
-    /// Each burning building's fire burns on: its people thrown out and panicking, its wood lost, a building with
-    /// none left removed (anyone still inside put out first).
+    /// Each burning building's fire burns on: its people thrown out and panicking, its wood lost with damage smoke,
+    /// a building with none left removed (anyone still inside put out first).
     pub(crate) fn tend_fires(&mut self) {
         let turns: Vec<(u32, FireTurn)> = self.buildings.iter_mut().map(|b| (b.id, b.burn())).filter(|t| t.1 != FireTurn::Nothing).collect();
-        let mut panics = Vec::new();
+        let mut events = Vec::new();
         for (id, turn) in turns {
             match turn {
-                FireTurn::ThrowOut => panics.extend(self.throw_out(id)),
-                FireTurn::Hit { destroyed: true } => {
-                    self.throw_out(id);
-                    if let Some(i) = self.building_index(id) {
+                FireTurn::ThrowOut => events.extend(self.throw_out(id)),
+                FireTurn::Hit { destroyed } => {
+                    let Some(i) = self.building_index(id) else { continue };
+                    let b = &self.buildings[i];
+                    events.push(WorldEvent::SpawnEffect(crate::smoke::damage(b.owner, b.centre())));
+                    if destroyed {
+                        self.throw_out(id);
                         self.remove_building(i);
                     }
                 }
-                _ => {}
+                FireTurn::Nothing => {}
             }
         }
-        self.apply_events(panics);
+        self.apply_events(events);
     }
 }
 
@@ -241,7 +245,13 @@ mod tests {
             map.tick();
         }
         assert!(map.building(id).is_some());
+        let smokes = |map: &GameMap| map.effects.iter().filter(|(_, e)| e.kind == crate::effect::EffectKind::Smoke).map(|(_, e)| (e.x, e.z)).collect::<Vec<_>>();
+        assert!(smokes(&map).is_empty());
+        let at = map.buildings[hut].centre();
         map.tick();
         assert!(map.building(id).is_none());
+        assert_eq!(smokes(&map), [at], "damage smoke where it stood");
+        map.run(crate::smoke::DAMAGE_TICKS + Ticks::new(1));
+        assert!(smokes(&map).is_empty(), "gone up");
     }
 }
