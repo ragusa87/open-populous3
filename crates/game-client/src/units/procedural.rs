@@ -59,7 +59,7 @@ pub fn tribe_rgb(tribe: u8) -> [u8; 3] {
 
 pub fn frame_count(pose: Pose) -> usize {
     match pose {
-        Pose::Idle | Pose::Pray | Pose::Drown | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Shoved => 4,
+        Pose::Idle | Pose::Pray | Pose::Drown | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Shoved | Pose::Hack => 4,
         Pose::Walk | Pose::Fall | Pose::CarryWalk | Pose::Panic => 8,
         Pose::Cast | Pose::Jump => 12,
     }
@@ -148,7 +148,7 @@ fn body(pose: Pose, view: View, f: usize) -> Body {
             Body { hands: [(-10.0, 22.0 + k), (10.0, 23.0 - k)], feet: [(-4.0, 0.0), (4.0, 0.0)], lift: 10.0, tilt: FRAC_PI_2 - 0.2 * k, ..base }
         }
         Pose::Tumble => Body { hands: [(-7.0, 18.0), (7.0, 18.0)], lift: 8.0, tilt: phase, ..base },
-        Pose::Strike | Pose::Trade => {
+        Pose::Strike | Pose::Trade | Pose::Hack => {
             let swing = [24.0, 20.0, 14.0, 12.0][f % 4];
             Body { hands: if side { [(8.0, swing), (6.0, swing - 2.0)] } else { [(-6.0, swing), (6.0, swing)] }, ..base }
         }

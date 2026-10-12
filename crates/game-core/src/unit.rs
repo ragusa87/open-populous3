@@ -180,6 +180,8 @@ pub enum Action {
     Attacking { target: Target, to: (u16, u16) },
     /// Its `role` in the challenge `challenge` (challenge.rs).
     Challenge { challenge: crate::challenge::ChallengeId, role: crate::challenge::Role },
+    /// Hacking at the building `building` (wreck.rs), `left` turns to go; first at its door.
+    Hacking { building: crate::building::BuildingId, left: Countdown, at_door: bool },
     /// Fighting in the melee `melee` (melee.rs): its place in the ring, its stance.
     Melee { melee: crate::melee::MeleeId, place: (u16, u16), stance: crate::melee::Stance },
     /// Held by the test-only coordinator `gathering` (coordinator.rs).
@@ -212,6 +214,7 @@ impl Action {
             Action::Hammering => "Hammering",
             Action::Attacking { .. } => "Attacking",
             Action::Challenge { .. } | Action::Melee { .. } => "Fighting",
+            Action::Hacking { .. } => "Attacking",
             #[cfg(test)]
             Action::Gathered { .. } => "Gathered",
         }
@@ -242,7 +245,8 @@ impl Action {
             | Action::PickingUpWood { left, .. }
             | Action::Holding { left }
             | Action::Flattening { left, .. }
-            | Action::Building { left } => Some(left),
+            | Action::Building { left }
+            | Action::Hacking { left, .. } => Some(left),
             Action::Challenge { role: crate::challenge::Role::Shoving { left, .. }, .. } => Some(left),
             Action::Melee { stance: crate::melee::Stance::Striking { left, .. } | crate::melee::Stance::Reeling { left, .. }, .. } => Some(left),
             _ => None,
@@ -650,6 +654,7 @@ impl Unit {
                 }
             }
             Action::Attacking { to, .. } => self.approach(to, ground),
+            Action::Hacking { .. } => {}
             Action::Challenge { challenge, role } => self.action = Action::Challenge { challenge, role: self.play(role, ground) },
             Action::Melee { melee, place, stance } => self.action = Action::Melee { melee, place, stance: self.fight(place, stance, ground) },
             Action::Entering { to } => {

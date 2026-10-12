@@ -52,16 +52,26 @@ pub enum Role {
     Shoved,
 }
 
+/// How a challenge began.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Approach {
+    /// The attacker reached its target in the open.
+    Open,
+    /// The target was pulled out of its `building` by its attacker (`crate::wreck`).
+    PulledOut { building: crate::building::BuildingId },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Challenge {
     pub attacker: UnitId,
     pub target: UnitId,
+    pub approach: Approach,
     pub phase: Phase,
 }
 
 impl Challenge {
     pub fn new(attacker: UnitId, target: UnitId) -> Self {
-        Challenge { attacker, target, phase: Phase::Charge { left: Countdown::new(CHARGE_TICKS) } }
+        Challenge { attacker, target, approach: Approach::Open, phase: Phase::Charge { left: Countdown::new(CHARGE_TICKS) } }
     }
 
     fn end(&self) -> Step {

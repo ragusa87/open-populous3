@@ -196,7 +196,7 @@ impl GameMap {
                 continue;
             }
             match self.building_index(building).filter(|&b| self.buildings[b].stage() != Stage::Built) {
-                Some(b) if self.buildings[b].dismantling => {}
+                Some(b) if self.buildings[b].dismantling || self.buildings[b].repair_delay.is_some() => {}
                 Some(b) => dirty.extend(self.work_on(i, b)),
                 None => self.units[i].work = None,
             }

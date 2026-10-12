@@ -19,15 +19,17 @@ pub struct KindStats {
     pub fights: bool,
     /// Joins a melee already going on: never a firewarrior ("Fight" [exe]); it still fights when challenged.
     pub joins_melees: bool,
+    /// Wear it adds to a building per turn of hacking ("Attacking a building" [exe]).
+    pub sabotage: u16,
 }
 
-const SHAMAN: KindStats = KindStats { life: 2000, heal: Some(32), fight_damage: 60, rank: 2, pace: 1, fights: true, joins_melees: true };
-const BRAVE: KindStats = KindStats { life: 1000, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true };
-const WARRIOR: KindStats = KindStats { life: 1800, heal: Some(6), fight_damage: 360, rank: 2, pace: 1, fights: true, joins_melees: true };
-const PREACHER: KindStats = KindStats { life: 1100, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true };
-const SPY: KindStats = KindStats { life: 600, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true };
-const FIREWARRIOR: KindStats = KindStats { life: 700, heal: Some(6), fight_damage: 60, rank: 3, pace: 2, fights: true, joins_melees: false };
-const WILDMAN: KindStats = KindStats { life: 1000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false };
+const SHAMAN: KindStats = KindStats { life: 2000, heal: Some(32), fight_damage: 60, rank: 2, pace: 1, fights: true, joins_melees: true, sabotage: 10 };
+const BRAVE: KindStats = KindStats { life: 1000, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7 };
+const WARRIOR: KindStats = KindStats { life: 1800, heal: Some(6), fight_damage: 360, rank: 2, pace: 1, fights: true, joins_melees: true, sabotage: 12 };
+const PREACHER: KindStats = KindStats { life: 1100, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7 };
+const SPY: KindStats = KindStats { life: 600, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7 };
+const FIREWARRIOR: KindStats = KindStats { life: 700, heal: Some(6), fight_damage: 60, rank: 3, pace: 2, fights: true, joins_melees: false, sabotage: 16 };
+const WILDMAN: KindStats = KindStats { life: 1000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, sabotage: 0 };
 
 impl UnitKind {
     pub const fn stats(self) -> &'static KindStats {
@@ -51,6 +53,11 @@ mod tests {
     fn fighting_numbers() {
         let rows: Vec<_> = UnitKind::ALL.iter().map(|k| (k.stats().fight_damage, k.stats().rank, k.stats().pace, k.stats().fights, k.stats().joins_melees)).collect();
         assert_eq!(rows, [(60, 2, 1, true, true), (60, 1, 1, true, true), (360, 2, 1, true, true), (60, 1, 1, true, true), (60, 1, 1, true, true), (60, 3, 2, true, false), (0, 0, 1, false, false)]);
+    }
+
+    #[test]
+    fn wear_dealt_to_buildings() {
+        assert_eq!(UnitKind::ALL.map(|k| k.stats().sabotage), [10, 7, 12, 7, 7, 16, 0]);
     }
 
     #[test]

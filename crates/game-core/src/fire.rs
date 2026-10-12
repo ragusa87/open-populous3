@@ -60,7 +60,7 @@ impl Building {
 
     /// Loses one piece of the wood its blueprint asks for (`BuildingKind::wood_cost`); whether none is left. A kind
     /// with no blueprint (`wood_cost` 0: guard post, gate...) has none to lose.
-    fn lose_a_piece(&mut self) -> bool {
+    pub(crate) fn lose_a_piece(&mut self) -> bool {
         if self.kind.wood_cost() == 0 {
             return false;
         }
@@ -78,12 +78,19 @@ impl GameMap {
     }
 
     /// Throws everyone inside `building` out by its door; their panics, to apply next.
-    fn throw_out(&mut self, building: BuildingId) -> Vec<WorldEvent> {
+    pub(crate) fn throw_out(&mut self, building: BuildingId) -> Vec<WorldEvent> {
         let Some(i) = self.building_index(building) else { return Vec::new() };
         let out: Vec<UnitId> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building)).map(|u| u.id).collect();
         let door = self.buildings[i].door();
         self.empty_building(building, door);
         out.into_iter().map(|unit| WorldEvent::Panic { unit }).collect()
+    }
+
+    /// The building `id` is destroyed, having lost its last piece of wood.
+    pub(crate) fn destroy_building(&mut self, id: BuildingId) {
+        if let Some(i) = self.building_index(id) {
+            self.remove_building(i);
+        }
     }
 
     /// Removes the building at `i`: its braves stop working on it.
@@ -109,7 +116,7 @@ impl GameMap {
                     events.push(WorldEvent::SpawnEffect(crate::smoke::damage(b.owner, b.centre())));
                     if destroyed {
                         self.throw_out(id);
-                        self.remove_building(i);
+                        self.destroy_building(id);
                     }
                 }
                 FireTurn::Nothing => {}

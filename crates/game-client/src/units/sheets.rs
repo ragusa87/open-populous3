@@ -61,6 +61,7 @@ pub fn pose_name(pose: Pose) -> &'static str {
         Pose::Kick => "kick",
         Pose::Reel => "reel",
         Pose::Shoved => "shoved",
+        Pose::Hack => "hack",
     }
 }
 
@@ -70,7 +71,7 @@ pub fn plays(kind: UnitKind, pose: Pose) -> bool {
     match pose {
         Pose::Cast => kind == UnitKind::Shaman,
         Pose::Stranded => kind != UnitKind::Shaman,
-        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Panic | Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Shoved => false,
+        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Panic | Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Shoved | Pose::Hack => false,
         _ => true,
     }
 }

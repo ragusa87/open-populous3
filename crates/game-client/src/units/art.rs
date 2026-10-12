@@ -52,10 +52,12 @@ pub enum Pose {
     Reel,
     /// Shoved away by a challenger.
     Shoved,
+    /// Hacking at an enemy building.
+    Hack,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 21] = [
+    pub const ALL: [Pose; 22] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -77,6 +79,7 @@ impl Pose {
         Pose::Kick,
         Pose::Reel,
         Pose::Shoved,
+        Pose::Hack,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -87,7 +90,7 @@ impl Pose {
             Pose::CarryWalk | Pose::Panic => Pose::Walk,
             Pose::Jump => Pose::Stranded,
             Pose::Flung | Pose::Tumble | Pose::Spirit => Pose::Fall,
-            Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel => Pose::Idle,
+            Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack => Pose::Idle,
             Pose::Shoved => Pose::Fall,
             pose => pose,
         }
@@ -120,7 +123,7 @@ impl Pose {
             Pose::Drown | Pose::Tumble => ShamanAnim::Tumble,
             Pose::Strike | Pose::Trade => ShamanAnim::Strike,
             Pose::Kick => ShamanAnim::Kick,
-            Pose::Reel | Pose::Shoved => ShamanAnim::Idle,
+            Pose::Reel | Pose::Shoved | Pose::Hack => ShamanAnim::Idle,
         }
     }
 }
@@ -163,6 +166,7 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Attacking { .. } if carrying => Pose::CarryWalk,
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } | Action::Attacking { .. } => Pose::Walk,
         Action::Panicking { .. } => Pose::Panic,
+        Action::Hacking { .. } => Pose::Hack,
         Action::Challenge { role, .. } => challenge_pose(*role, carrying),
         Action::Melee { stance, .. } => melee_pose(*stance, airborne),
         Action::Chopping { .. } | Action::PickingUpWood { .. } => Pose::Chop,
@@ -314,7 +318,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Pray => WildmanAnim::Sit,
                 Pose::Fall | Pose::Tumble | Pose::Spirit => WildmanAnim::Tumble,
                 Pose::Drown | Pose::Flung | Pose::Shoved => WildmanAnim::Flung,
-                Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel => WildmanAnim::Stand,
+                Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack => WildmanAnim::Stand,
             };
             // No spirit anim known: the body lies still (the fall's last frame).
             (anim.anim(), None, (pose == Pose::Spirit).then_some(3))
@@ -349,6 +353,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Kick => PersonAnim::Kick,
                 Pose::Reel => PersonAnim::Hit,
                 Pose::Shoved => PersonAnim::Shoved,
+                Pose::Hack => PersonAnim::Chop,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }

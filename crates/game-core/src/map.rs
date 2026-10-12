@@ -825,6 +825,7 @@ impl GameMap {
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now));
         dirty.extend(self.tend_effects());
         self.tend_fires();
+        self.tend_building_wear();
         self.tend_campfires();
         self.tend_vaults();
         self.tend_totems();
@@ -832,6 +833,7 @@ impl GameMap {
         // a. scans that start coordinators or add units to them; b. each one's turn, kind after kind; c. the finished
         // ones removed; d. their events applied in order; e. units whose coordinator is gone released.
         self.tend_attacks();
+        self.tend_wrecking();
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
         self.release_orphans();

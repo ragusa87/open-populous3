@@ -105,3 +105,21 @@ middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `
   place: a melee stays one against several ("Fight" [exe, measured]).
 - Not yet: the ground check moving the middle off unsuitable ground, the winner's
   count, the move's sounds.
+
+## Attacking a building
+`crate::wreck` ("Attacking a building" [exe]); the attacker's own work, no coordinator except the pull-out.
+- `Order::Attack` on an enemy building walks the attacker to its door. Arrived (`ARRIVED` 32 per axis): it hacks
+  (`Action::Hacking`), `HACK_AT_DOOR` (16) turns at the door, the building shaking. Then, if people are inside, the
+  first is pulled out: thrown from the door outwards at `PULL_SPEED` (100) with a small lift `PULL_LIFT` [guess: ours
+  does not slide], and a challenge (`Approach::PulledOut`) starts with it already `Shoved`; the attack on the
+  building is chained after it. Empty: it hacks for 8 + a draw below 16 turns, adding its kind's `sabotage` (brave,
+  preacher, spy 7; warrior 12; shaman 10; firewarrior 16) to the building's `wear` each turn, then walks to a spot
+  `WANDER` (360) from the building's middle (outside the walls, else the door) and hacks again.
+- The building (`Building::tend_wear`, every turn, `GameMap::tend_building_wear` after the fires): it shakes
+  `SHAKE_TICKS` (6) after each blow; its wear fades by one every 4 turns; at its limit (`wear_limit`: 2000; walls
+  and gates 16 000; the prison 22 000; a vault never) the wear drops by the limit and it loses a piece of wood
+  (`lose_a_piece`): damage smoke, a large building's people thrown out [which kinds are large: guess], no repairs
+  for `REPAIR_DELAY` (1200 turns); with no wood left it is destroyed (its people thrown out).
+- Not yet: enemies standing on a plan counting as its people, blasts' and firewarriors' wear, the flying faces of
+  the partial explosion, the player warned once, the attack going on from where it stands when no way leads to its
+  spot.

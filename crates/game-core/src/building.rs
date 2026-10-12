@@ -218,6 +218,10 @@ pub struct Building {
     pub inside: u8,
     /// Ticks its walls still shake for, after being hit (0: not attacked).
     pub shaking: u16,
+    /// Wear from attackers, towards its next lost piece of wood (`crate::wreck`).
+    pub wear: u16,
+    /// While it runs, nobody repairs it (`wreck::REPAIR_DELAY`).
+    pub repair_delay: Option<crate::time::Countdown>,
     /// Its fire, while it burns (`crate::fire`).
     pub burning: Option<crate::time::Countdown>,
     /// Pieces of wood brought to the pile by its door, not built in yet.
@@ -250,7 +254,7 @@ pub enum Reward {
 impl Building {
     /// A finished building, as the levels store them.
     pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
-        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)) }
+        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)) }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.

@@ -19,6 +19,11 @@ const CIRCLE_POINTS: usize = 48;
 const SIDE_POINTS: usize = 8;
 const CHALLENGE: Color = Color::srgb(1.0, 0.55, 0.1);
 const MELEE: Color = Color::srgb(0.95, 0.15, 0.15);
+const WEAR: Color = Color::srgb(0.85, 0.1, 0.1);
+const WEAR_BACK: Color = Color::srgb(0.3, 0.3, 0.3);
+/// The wear bar: its height over the ground and its length, cells.
+const BAR_LIFT: f32 = 1.2;
+const BAR_LENGTH: f32 = 1.0;
 /// A fighter's place: a small circle, cells.
 const PLACE_MARK: f32 = 0.06;
 
@@ -77,6 +82,14 @@ fn draw(show: Res<ShowOverlay>, dev: Res<DevMode>, map: Res<CurrentMap>, rig: Re
         outline(outline_circle(t, cells_of(FIGHT_REACH)), CHALLENGE);
         outline(outline_square(t, cells_of(SHOVE_REACH)), CHALLENGE.with_alpha(0.5));
     }
+    for b in map.buildings.iter().filter(|b| b.wear > 0) {
+        let Some(limit) = game_core::wreck::wear_limit(b.kind) else { continue };
+        let (start, full) = bar(cells(b.centre()), b.wear, limit);
+        let lift = |p: Vec2| on_ground(p) + Vec3::Y * BAR_LIFT;
+        gizmos.line(lift(start), lift(start + Vec2::X * BAR_LENGTH), WEAR_BACK);
+        gizmos.line(lift(start), lift(start + Vec2::X * full), WEAR);
+    }
+    let mut outline = |points: Vec<Vec2>, color: Color| gizmos.linestrip(points.into_iter().map(on_ground), color);
     for (id, m) in map.coordinators.melees.iter() {
         let at = cells(m.at);
         outline(outline_circle(at, cells_of(RING_RADIUS)), MELEE);
@@ -90,6 +103,11 @@ fn draw(show: Res<ShowOverlay>, dev: Res<DevMode>, map: Res<CurrentMap>, rig: Re
             }
         }
     }
+}
+
+/// A wear bar centred over `centre`: where it starts, and the length of its worn part out of `BAR_LENGTH`.
+pub fn bar(centre: Vec2, wear: u16, limit: u16) -> (Vec2, f32) {
+    (centre - Vec2::X * BAR_LENGTH / 2.0, BAR_LENGTH * (wear as f32 / limit.max(1) as f32).min(1.0))
 }
 
 /// From `a` to `b` (cells) the short way round the torus.
@@ -112,6 +130,12 @@ mod tests {
         assert_eq!(s.len(), 4 * SIDE_POINTS + 1);
         assert!(s.iter().all(|p| p.x.abs().max(p.y.abs()) == 1.0), "on the square's sides");
         assert_eq!((s[0], *s.last().unwrap()), (Vec2::new(-1.0, -1.0), Vec2::new(-1.0, -1.0)));
+    }
+
+    #[test]
+    fn the_wear_bar_fills_up_to_the_limit() {
+        assert_eq!(bar(Vec2::new(5.0, 5.0), 500, 2000), (Vec2::new(4.5, 5.0), 0.25));
+        assert_eq!(bar(Vec2::ZERO, 5000, 2000).1, BAR_LENGTH);
     }
 
     #[test]

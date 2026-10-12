@@ -40,9 +40,10 @@ impl GameMap {
     pub(crate) fn tend_attacks(&mut self) {
         for i in 0..self.units.len() {
             let Action::Attacking { target, .. } = self.units[i].action else { continue };
-            match self.attack_goal(&self.units[i], target) {
-                Some(to) => self.units[i].retarget(to),
-                None => self.units[i].action = Action::Idle,
+            match (self.attack_goal(&self.units[i], target), target) {
+                (Some(to), Target::Unit(_)) => self.units[i].retarget(to),
+                (Some(_), Target::Building(_)) => {}
+                (None, _) => self.units[i].action = Action::Idle,
             }
         }
     }

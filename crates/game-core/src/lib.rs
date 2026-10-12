@@ -50,3 +50,4 @@ pub mod vault;
 pub mod wood;
 pub mod work;
 pub mod worship;
+pub mod wreck;
