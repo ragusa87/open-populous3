@@ -174,7 +174,7 @@ impl MenuNav {
     }
 }
 
-/// `POP3_START` value (or screenshot mode) to the game to start right away; None shows the menu.
+/// `POP3_START` value (or capture mode: a screenshot, a video) to the game to start right away; None shows the menu.
 pub fn start_from_env(start: Option<&str>, screenshot: bool) -> Option<Start> {
     match start {
         Some("menu") => None,
@@ -204,7 +204,7 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        let start = start_from_env(std::env::var("POP3_START").ok().as_deref(), std::env::var("SCREENSHOT").is_ok());
+        let start = start_from_env(std::env::var("POP3_START").ok().as_deref(), crate::dev::Capture::from_env(|k| std::env::var(k).ok()).is_some());
         app.insert_state(if start.is_some() { AppState::Playing } else { AppState::Menu })
             .insert_resource(InitialStart(start))
             .init_resource::<MenuNav>()

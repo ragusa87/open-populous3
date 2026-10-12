@@ -11,6 +11,9 @@
 //! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
 //! `AIM=spell` (its name without spaces, any case, e.g. `blast`, `landbridge`) selects that spell as if picked in
 //! the Spells tab.
+//! `VIDEO=secs` instead of `SCREENSHOT`: the same setup, then `secs` seconds recorded at `VIDEO_FPS` from
+//! `SHOT_FRAME` into `VIDEO_DIR` (`just video` encodes them to `target/video.mp4`). The clock steps exactly one
+//! video frame per rendered frame (none during the warm-up), so the video plays at true speed.
 
 use crate::camera::CameraRig;
 use crate::units::{world_units, PLAYER};
@@ -20,6 +23,7 @@ use bevy::camera::RenderTarget;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
 use game_core::command::Command;
 use game_core::motion::{Motion, Velocity};
@@ -231,6 +235,36 @@ pub fn tab_index(name: &str) -> Option<usize> {
     crate::hud::TABS.iter().position(|t| t.eq_ignore_ascii_case(name))
 }
 
+/// Frames per second of a `VIDEO`.
+pub const VIDEO_FPS: u32 = 30;
+/// Where a `VIDEO`'s frames go, `frame_00001.png` on (git-ignored).
+pub const VIDEO_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/video");
+
+/// What the run captures before it exits.
+#[derive(Debug, PartialEq)]
+pub enum Capture {
+    /// One frame to this path (`SCREENSHOT`).
+    Shot(String),
+    /// This many frames into `VIDEO_DIR` (`VIDEO=secs`).
+    Video { frames: u32 },
+}
+
+impl Capture {
+    /// From the environment (`get` reads a variable); None when nothing is to be captured.
+    pub fn from_env(get: impl Fn(&str) -> Option<String>) -> Option<Capture> {
+        if let Some(path) = get("SCREENSHOT") {
+            return Some(Capture::Shot(path));
+        }
+        let secs: f32 = get("VIDEO")?.trim().parse().ok()?;
+        Some(Capture::Video { frames: (secs * VIDEO_FPS as f32).round().max(1.0) as u32 })
+    }
+}
+
+/// The video frame (from 1) recorded at app frame `frame` when recording `frames` from `start`, None outside.
+pub fn video_frame(frame: u32, start: u32, frames: u32) -> Option<u32> {
+    (start..start + frames).contains(&frame).then(|| frame - start + 1)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn screenshot(
     mut commands: Commands,
@@ -244,9 +278,10 @@ fn screenshot(
     mut aimed: ResMut<crate::hud::spells::SelectedSpell>,
     mut selection: ResMut<crate::units::selection::Selection>,
     target: Option<Res<OffscreenTarget>>,
+    mut clock: ResMut<TimeUpdateStrategy>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let Ok(path) = std::env::var("SCREENSHOT") else { return };
+    let Some(capture) = Capture::from_env(|k| std::env::var(k).ok()) else { return };
     let shot = std::env::var("SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(90);
     *frame += 1;
     if *frame == 1 && std::env::var("AERIAL").is_ok() {
@@ -304,14 +339,30 @@ fn screenshot(
     if *frame < shot {
         ShotCamera::parse(|k| std::env::var(k).ok()).apply(&mut rig);
     }
-    if *frame == shot {
-        let shot = match target {
-            Some(t) => Screenshot::image(t.0.clone()),
-            None => Screenshot::primary_window(),
-        };
-        commands.spawn(shot).observe(save_to_disk(path));
-    }
-    if *frame == shot + 60 {
+    let grab = || match &target {
+        Some(t) => Screenshot::image(t.0.clone()),
+        None => Screenshot::primary_window(),
+    };
+    let last = match capture {
+        Capture::Shot(path) => {
+            if *frame == shot {
+                commands.spawn(grab()).observe(save_to_disk(path));
+            }
+            shot
+        }
+        Capture::Video { frames } => {
+            if *frame == 1 && let Err(e) = std::fs::create_dir_all(VIDEO_DIR) {
+                error!("{VIDEO_DIR}: {e}");
+            }
+            let step = if *frame >= shot { Duration::from_secs_f64(1.0 / VIDEO_FPS as f64) } else { Duration::ZERO };
+            *clock = TimeUpdateStrategy::ManualDuration(step);
+            if let Some(n) = video_frame(*frame, shot, frames) {
+                commands.spawn(grab()).observe(save_to_disk(format!("{VIDEO_DIR}/frame_{n:05}.png")));
+            }
+            shot + frames
+        }
+    };
+    if *frame == last + 60 {
         exit.write(AppExit::Success);
     }
 }
@@ -381,6 +432,20 @@ mod tests {
     fn tabs_by_name() {
         assert_eq!((tab_index("build"), tab_index("Spells"), tab_index("nope")), (Some(1), Some(0), None));
         assert_eq!((spell_by_name("landbridge"), spell_by_name("BLAST"), spell_by_name("nope")), (Some(game_core::spell_book::SpellKind::LandBridge), Some(game_core::spell_book::SpellKind::Blast), None));
+    }
+
+    #[test]
+    fn capture_from_env() {
+        let env = |vars: &'static [(&'static str, &'static str)]| move |k: &str| vars.iter().find(|v| v.0 == k).map(|v| v.1.to_string());
+        assert_eq!(Capture::from_env(env(&[("SCREENSHOT", "a.png")])), Some(Capture::Shot("a.png".into())));
+        assert_eq!(Capture::from_env(env(&[("VIDEO", "2.5")])), Some(Capture::Video { frames: 75 }));
+        assert_eq!(Capture::from_env(env(&[("VIDEO", "soon")])), None);
+        assert_eq!(Capture::from_env(env(&[])), None);
+    }
+
+    #[test]
+    fn video_frames_from_the_start_frame() {
+        assert_eq!((video_frame(89, 90, 3), video_frame(90, 90, 3), video_frame(92, 90, 3), video_frame(93, 90, 3)), (None, Some(1), Some(3), None));
     }
 
     #[test]
