@@ -136,3 +136,21 @@ one removed any other way (a plan cancelled) leaves none.
   map's dirty rects redraw them when a patch comes, fades a step or goes.
 - Not yet: the hover text over ashes; the long damage smoke at the ashes; the whirlwind's destruction; lava and
   earthquake ground, which share the mark in the original.
+
+## Spotting
+`crate::spotting` ("Auto-attack" [exe]): people who see an enemy attack it on their own, before the attacks are
+followed each turn (`GameMap::spot_enemies`).
+- Who: braves and warriors (`looks_for_melee`); the preacher's conversion, the firewarrior's fire and the shaman's
+  look during some orders are TODO; spies and wildmen never look. On its kind's `look_every` (4 turns; preacher 2),
+  phase 0.
+- How far (`sight_now`, cells; per kind `sight` and `sight_at_work`: brave and warrior 5 and 1, preacher and shaman
+  3 and 1, firewarrior 11 and 5, spy and wildman 0): idle, holding wood or hacking at a building, its full sight;
+  walking (every walk is on an order, the original's "going to the place") or attacking on its way, nothing;
+  working (cutting, picking up, flattening, building, hammering, round a fire, praying), `sight_at_work`, its own
+  cell; busy (fighting, panicking, thrown, casting, drowning, entering, inside, dead), no look at all [the order
+  kinds' split is the analysis' guess].
+- What: the square of cells (sight rounded down to even, + 1) around it, row by row from a corner (`square`); the
+  first match wins, not the nearest: an enemy person it may attack, alive, outside, on the ground and not in a melee;
+  when idle, also someone in a melee (to join it) or an enemy building it can wear down. It then attacks it
+  (`Order::Attack`'s path) [ours: the original gives itself an "attack around this cell" order].
+- `UnitGrid`: the living people outside by cell, sorted, built only on a look turn.

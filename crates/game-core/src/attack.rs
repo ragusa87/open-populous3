@@ -74,16 +74,17 @@ mod tests {
         let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Brave);
         attack(&mut map, a, t);
         assert!(matches!(map.unit(a).unwrap().action, Action::Attacking { .. }));
-        let away = map.unit(t).unwrap();
-        let to = (away.x.wrapping_add(4 * 512), away.z);
+        let start = map.unit(t).map(|u| (u.x, u.z)).unwrap();
+        let to = (start.0.wrapping_add(4 * 512), start.1);
         map.unit_mut(t).unwrap().order(Order::MoveTo { x: to.0, z: to.1 });
-        let gap = |m: &GameMap| crate::map::torus_dist2(m.unit(a).map(|u| (u.x, u.z)).unwrap(), m.unit(t).map(|u| (u.x, u.z)).unwrap());
-        let start = gap(&map);
-        for _ in 0..200 {
+        let caught = (1..400).find(|_| {
             map.tick();
-        }
-        assert!(gap(&map) < start / 4, "followed it");
-        assert!(matches!(map.unit(a).unwrap().action, Action::Attacking { to: aimed, .. } if crate::map::torus_dist2(aimed, to) < 512 * 512));
+            !matches!(map.unit(a).unwrap().action, Action::Attacking { .. })
+        });
+        assert!(caught.is_some(), "caught up");
+        assert!(matches!(map.unit(a).unwrap().action, Action::Challenge { .. }));
+        let moved = map.unit(t).map(|u| crate::map::torus_dist2(start, (u.x, u.z))).unwrap();
+        assert!(moved > 2 * 512 * 512, "it had walked off");
     }
 
     #[test]

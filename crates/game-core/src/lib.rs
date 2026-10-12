@@ -41,6 +41,7 @@ pub mod slots;
 pub mod smoke;
 pub mod spell;
 pub mod spell_book;
+pub mod spotting;
 pub mod status;
 pub mod terrain;
 pub mod time;

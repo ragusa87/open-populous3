@@ -1,6 +1,7 @@
 //! What each kind of person is made of, in one table (docs/specs/combat.md): life, healing, and later its fighting
 //! numbers. Values from pop3-rev-analysis.md, each field saying where.
 
+use crate::time::Every;
 use crate::unit::UnitKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,15 +22,20 @@ pub struct KindStats {
     pub joins_melees: bool,
     /// Wear it adds to a building per turn of hacking ("Attacking a building" [exe]).
     pub sabotage: u16,
+    /// How far it looks for enemies, cells, with no order, and while working ("Auto-attack" [exe]).
+    pub sight: u8,
+    pub sight_at_work: u8,
+    /// Its rhythm of looking ("Auto-attack" [exe]).
+    pub look_every: Every,
 }
 
-const SHAMAN: KindStats = KindStats { life: 2000, heal: Some(32), fight_damage: 60, rank: 2, pace: 1, fights: true, joins_melees: true, sabotage: 10 };
-const BRAVE: KindStats = KindStats { life: 1000, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7 };
-const WARRIOR: KindStats = KindStats { life: 1800, heal: Some(6), fight_damage: 360, rank: 2, pace: 1, fights: true, joins_melees: true, sabotage: 12 };
-const PREACHER: KindStats = KindStats { life: 1100, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7 };
-const SPY: KindStats = KindStats { life: 600, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7 };
-const FIREWARRIOR: KindStats = KindStats { life: 700, heal: Some(6), fight_damage: 60, rank: 3, pace: 2, fights: true, joins_melees: false, sabotage: 16 };
-const WILDMAN: KindStats = KindStats { life: 1000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, sabotage: 0 };
+const SHAMAN: KindStats = KindStats { life: 2000, heal: Some(32), fight_damage: 60, rank: 2, pace: 1, fights: true, joins_melees: true, sabotage: 10, sight: 3, sight_at_work: 1, look_every: Every::new(4) };
+const BRAVE: KindStats = KindStats { life: 1000, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7, sight: 5, sight_at_work: 1, look_every: Every::new(4) };
+const WARRIOR: KindStats = KindStats { life: 1800, heal: Some(6), fight_damage: 360, rank: 2, pace: 1, fights: true, joins_melees: true, sabotage: 12, sight: 5, sight_at_work: 1, look_every: Every::new(4) };
+const PREACHER: KindStats = KindStats { life: 1100, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7, sight: 3, sight_at_work: 1, look_every: Every::new(2) };
+const SPY: KindStats = KindStats { life: 600, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
+const FIREWARRIOR: KindStats = KindStats { life: 700, heal: Some(6), fight_damage: 60, rank: 3, pace: 2, fights: true, joins_melees: false, sabotage: 16, sight: 11, sight_at_work: 5, look_every: Every::new(4) };
+const WILDMAN: KindStats = KindStats { life: 1000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
 
 impl UnitKind {
     pub const fn stats(self) -> &'static KindStats {
@@ -58,6 +64,11 @@ mod tests {
     #[test]
     fn wear_dealt_to_buildings() {
         assert_eq!(UnitKind::ALL.map(|k| k.stats().sabotage), [10, 7, 12, 7, 7, 16, 0]);
+    }
+
+    #[test]
+    fn how_far_each_looks() {
+        assert_eq!(UnitKind::ALL.map(|k| (k.stats().sight, k.stats().sight_at_work, k.stats().look_every.period())), [(3, 1, 4), (5, 1, 4), (5, 1, 4), (3, 1, 2), (0, 0, 4), (11, 5, 4), (0, 0, 4)]);
     }
 
     #[test]

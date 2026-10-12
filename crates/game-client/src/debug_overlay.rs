@@ -20,6 +20,7 @@ const SIDE_POINTS: usize = 8;
 const CHALLENGE: Color = Color::srgb(1.0, 0.55, 0.1);
 const MELEE: Color = Color::srgb(0.95, 0.15, 0.15);
 const WEAR: Color = Color::srgb(0.85, 0.1, 0.1);
+const SIGHT: Color = Color::srgb(1.0, 0.9, 0.2);
 const ASHES: Color = Color::srgb(0.6, 0.6, 0.6);
 const WEAR_BACK: Color = Color::srgb(0.3, 0.3, 0.3);
 /// The wear bar: its height over the ground and its length, cells.
@@ -68,7 +69,17 @@ pub fn outline_square(centre: Vec2, half: f32) -> Vec<Vec2> {
     points
 }
 
-fn draw(show: Res<ShowOverlay>, dev: Res<DevMode>, map: Res<CurrentMap>, rig: Res<CameraRig>, params: Res<CurveParamsRes>, mut gizmos: Gizmos) {
+#[allow(clippy::too_many_arguments)]
+fn draw(
+    show: Res<ShowOverlay>,
+    dev: Res<DevMode>,
+    map: Res<CurrentMap>,
+    rig: Res<CameraRig>,
+    params: Res<CurveParamsRes>,
+    selection: Res<crate::units::selection::Selection>,
+    hovered: Res<crate::hover::Hovered>,
+    mut gizmos: Gizmos,
+) {
     if !(show.0 && dev.0) {
         return;
     }
@@ -91,6 +102,15 @@ fn draw(show: Res<ShowOverlay>, dev: Res<DevMode>, map: Res<CurrentMap>, rig: Re
         gizmos.line(lift(start), lift(start + Vec2::X * full), WEAR);
     }
     let mut outline = |points: Vec<Vec2>, color: Color| gizmos.linestrip(points.into_iter().map(on_ground), color);
+    let hovered = match hovered.0 {
+        Some(crate::hover::HoverTarget::Unit(i)) => map.units.get(i).map(|u| u.id),
+        _ => None,
+    };
+    for u in selection.units.iter().copied().chain(hovered).filter_map(|id| map.unit(id)) {
+        let Some(sight) = game_core::spotting::sight_now(u).filter(|_| game_core::spotting::looks_for_melee(u.kind)) else { continue };
+        let (x, z) = u.cell();
+        outline(outline_square(Vec2::new(x as f32 + 0.5, z as f32 + 0.5), sight_half(sight)), SIGHT);
+    }
     for p in &map.ashes.patches {
         let fade = (p.darkness - game_core::ashes::FADED) as f32 / (game_core::ashes::DARK - game_core::ashes::FADED) as f32;
         for &(x, z) in &p.cells {
@@ -110,6 +130,11 @@ fn draw(show: Res<ShowOverlay>, dev: Res<DevMode>, map: Res<CurrentMap>, rig: Re
             }
         }
     }
+}
+
+/// Half the side of the square of cells `sight` looks over, cells.
+pub fn sight_half(sight: u8) -> f32 {
+    (sight / 2) as f32 + 0.5
 }
 
 /// A wear bar centred over `centre`: where it starts, and the length of its worn part out of `BAR_LENGTH`.
@@ -137,6 +162,11 @@ mod tests {
         assert_eq!(s.len(), 4 * SIDE_POINTS + 1);
         assert!(s.iter().all(|p| p.x.abs().max(p.y.abs()) == 1.0), "on the square's sides");
         assert_eq!((s[0], *s.last().unwrap()), (Vec2::new(-1.0, -1.0), Vec2::new(-1.0, -1.0)));
+    }
+
+    #[test]
+    fn the_sight_square_covers_whole_cells() {
+        assert_eq!([0, 1, 3, 5].map(sight_half), [0.5, 0.5, 1.5, 2.5]);
     }
 
     #[test]

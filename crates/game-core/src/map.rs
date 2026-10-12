@@ -836,6 +836,7 @@ impl GameMap {
         // Coordinators, before the units, so that one ending this turn is gone when its units tick (coordinators.md):
         // a. scans that start coordinators or add units to them; b. each one's turn, kind after kind; c. the finished
         // ones removed; d. their events applied in order; e. units whose coordinator is gone released.
+        self.spot_enemies();
         self.tend_attacks();
         self.tend_wrecking();
         self.detect_coordinators();
