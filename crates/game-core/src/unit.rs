@@ -166,6 +166,9 @@ pub enum Action {
     /// The shaman praying at the door of the vault of knowledge whose stored corner is `site`
     /// (`GameMap::tend_vaults`).
     Worshipping { site: (u16, u16) },
+    /// Held by the test-only coordinator `gathering` (coordinator.rs).
+    #[cfg(test)]
+    Gathered { gathering: crate::id::Id<crate::coordinator::tests::Gathering> },
 }
 
 impl Action {
@@ -190,7 +193,18 @@ impl Action {
             Action::Building { .. } => "Building",
             Action::Entering { .. } => "Entering",
             Action::Hammering => "Hammering",
+            #[cfg(test)]
+            Action::Gathered { .. } => "Gathered",
         }
+    }
+
+    /// The coordinator this action takes part in, if any (coordinator.rs).
+    pub fn link(&self) -> Option<crate::coordinator::Link> {
+        #[cfg(test)]
+        if let Action::Gathered { gathering } = *self {
+            return Some(crate::coordinator::Link::Gathering(gathering));
+        }
+        None
     }
 
     /// The countdown of a timed action (for one-shot animations), None for open-ended ones.
@@ -278,7 +292,7 @@ pub struct Unit {
     /// Pieces of wood carried (braves, 0 or 1).
     pub carrying: u8,
     /// Ticks counted towards the next health point gained (or lost while stranded).
-    regen: u8,
+    pub(crate) regen: u8,
     /// Waypoints left on the way to `Walking::to`, next one last.
     route: Vec<(u16, u16)>,
     /// Ground revision (`Ground::revision`) the route was planned on; None = plan on the next tick.
@@ -654,6 +668,8 @@ impl Unit {
                 }
             }
             Action::Landing => {}
+            #[cfg(test)]
+            Action::Gathered { .. } => {}
             Action::Tumbling => {
                 if self.motion.is_still() {
                     self.action = Action::Idle;
@@ -717,6 +733,13 @@ impl Unit {
             self.die();
         }
         self.health.is_zero()
+    }
+
+    /// Leaves its coordinator, if it is in one: back to Idle (`WorldEvent::Release`, or its coordinator gone).
+    pub fn release(&mut self) {
+        if self.action.link().is_some() {
+            self.action = Action::Idle;
+        }
     }
 
     /// Loses `amount` health (`GameMap::damage` decides whether it is hurt at all); true when that kills it.

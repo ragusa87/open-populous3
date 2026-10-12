@@ -3,6 +3,7 @@
 use crate::building::{buildings_from_level, Building, BuildingKind};
 use crate::campfire::{self, Campfire};
 use crate::command::Command;
+use crate::coordinator::{Coordinators, Link};
 use crate::effect::{DamageKind, Effect, TerrainChange};
 use crate::event::{run_in_order, WorldEvent};
 use crate::path::{Ground, Mobility, Walled, Walls};
@@ -64,6 +65,8 @@ pub struct GameMap {
     pub object_bank: u8,
     /// Spell effects going on (`effect::Effect`), in the order they were added.
     pub effects: Registry<Effect>,
+    /// Objects coordinating several units, one registry per kind (coordinator.rs).
+    pub coordinators: Coordinators,
     /// Ticks run since the map was made (`tick`).
     pub now: Tick,
     /// The next id `new_id` gives: units, buildings and effects share it, an id is never given twice.
@@ -113,7 +116,7 @@ fn per_player<T: Clone>(t: T) -> Vec<T> {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, effects: Registry::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, effects: Registry::default(), coordinators: Coordinators::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -147,6 +150,7 @@ impl GameMap {
             start_camera: None,
             object_bank: 0,
             effects: Registry::default(),
+            coordinators: Coordinators::default(),
             now: Tick::ZERO,
             next_id: 1,
             rng: Lcg(0),
@@ -615,6 +619,12 @@ impl GameMap {
         self.tend_campfires();
         self.tend_vaults();
         self.tend_totems();
+        // Coordinators, before the units, so that one ending this turn is gone when its units tick (coordinators.md):
+        // a. scans that start coordinators or add units to them; b. each one's turn, kind after kind; c. the finished
+        // ones removed; d. their events applied in order; e. units whose coordinator is gone released.
+        self.detect_coordinators();
+        dirty.extend(self.tend_coordinators());
+        self.release_orphans();
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing)).collect();
         let (mut events, mut gone) = (Vec::new(), Vec::new());
         for (i, unit) in self.units.iter_mut().enumerate() {
@@ -727,6 +737,31 @@ impl GameMap {
         self.apply_events(events)
     }
 
+    /// Scans that start coordinators or add units to them, one per kind in `Coordinators::tick`'s order (none yet).
+    fn detect_coordinators(&mut self) {}
+
+    /// Every coordinator's turn, reading the map as it was before any of them; the finished ones removed; then their
+    /// events apply in order. The ground they changed.
+    fn tend_coordinators(&mut self) -> Vec<DirtyRect> {
+        let (mut coordinators, mut rng) = (std::mem::take(&mut self.coordinators), self.rng);
+        let events = coordinators.tick(self.now, self, &mut rng);
+        (self.coordinators, self.rng) = (coordinators, rng);
+        self.apply_events(events)
+    }
+
+    /// The coordinator `u` takes part in, if it still exists.
+    pub fn linked(&self, u: &Unit) -> Option<Link> {
+        u.action.link().filter(|&link| self.coordinators.exists(link))
+    }
+
+    /// Units whose coordinator is gone go back to Idle.
+    fn release_orphans(&mut self) {
+        let coordinators = &self.coordinators;
+        for u in self.units.iter_mut().filter(|u| u.action.link().is_some_and(|link| !coordinators.exists(link))) {
+            u.release();
+        }
+    }
+
     /// `batch` applied in order, then what applying it caused (`event::run_in_order`); the ground changed.
     pub(crate) fn apply_events(&mut self, batch: Vec<WorldEvent>) -> Vec<DirtyRect> {
         let mut dirty = Vec::new();
@@ -760,6 +795,12 @@ impl GameMap {
             }
             WorldEvent::Terrain(TerrainChange::Raise { at, radius, by }) => Some(self.terrain.raise(at, radius, by)),
             WorldEvent::Terrain(TerrainChange::Flatten { at, radius }) => Some(self.terrain.flatten(at, radius)),
+            WorldEvent::Release { unit } => {
+                if let Some(u) = self.unit_mut(unit) {
+                    u.release();
+                }
+                None
+            }
         };
         (changed, Vec::new())
     }

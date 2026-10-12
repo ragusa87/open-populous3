@@ -38,8 +38,10 @@ each kind of object in a fixed, written order. The original's order inside a tur
 1. walls (`update_walls`), then trees (`Tree::tick`);
 2. effects (`tend_effects`): before anything they act on, so units react the same turn;
 3. camp fires, vaults, totems;
-4. units (`Unit::tick`), then their events (wood, work, doors) in unit order;
-5. chained orders, building work, wood put down, people counted inside, mana (`ManaPool::tick`, each player's with
+4. coordinators (docs/specs/coordinators.md): scans that start them, their turns, the finished ones removed, their
+   events, then the units whose coordinator is gone released, so a coordinator ending now is gone when its units tick;
+5. units (`Unit::tick`), then their events (wood, work, doors) in unit order;
+6. chained orders, building work, wood put down, people counted inside, mana (`ManaPool::tick`, each player's with
    its spell book), the gone units removed.
 
 Rules for every object that ticks:

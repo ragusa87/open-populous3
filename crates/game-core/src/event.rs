@@ -17,6 +17,8 @@ pub enum WorldEvent {
     /// A new effect, ticking from the next turn; its id is given then.
     SpawnEffect(Effect),
     Terrain(TerrainChange),
+    /// The unit leaves its coordinator (`Unit::release`); nothing if it is in none.
+    Release { unit: u32 },
 }
 
 /// Applies `batch` in order with `apply`; what `apply` returns comes after the whole batch, never in its middle.

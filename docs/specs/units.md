@@ -9,6 +9,11 @@
 - Ids: `GameMap::spawn` (or `new_id`) gives each unit an id never given before on the map (shared with buildings
   and effects), so `units` stays sorted by id and `GameMap::unit(id)` is a binary search. A unit leaves the list
   when its spirit has risen; anything holding its id then finds None, which means it has ended.
+  The id is still a raw `u32` (effects and coordinators use typed `id::Id<T>`); it becomes `Id<Unit>` before the
+  first coordinator kind stores one (TODO).
+- Coordinators (coordinators.md): a unit takes part in one through its action (`Action::link`), one way. It leaves on
+  `WorldEvent::Release`, or by itself when its coordinator's id is gone (`GameMap::release_orphans`, before the units
+  tick): back to Idle (`Unit::release`). No action links to one yet.
 - Movement in fixed point per tick; no floats in simulation state.
 - Time (`game_core::time`): one tick is one original game turn, 12 per second (`TICKS_PER_SECOND`,
   pop3-rev-analysis.md "Turns and timing"). `Tick` is a moment (`GameMap::now`), `Ticks` a length, built from the
