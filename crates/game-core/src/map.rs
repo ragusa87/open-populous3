@@ -567,8 +567,8 @@ impl GameMap {
         self.now = self.now.next();
         let mut dirty = Vec::new();
         self.update_walls();
-        let buildings = &self.buildings;
-        self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(Tree::tick);
+        let (buildings, now) = (&self.buildings, self.now);
+        self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now));
         self.tend_campfires();
         self.tend_vaults();
         self.tend_totems();

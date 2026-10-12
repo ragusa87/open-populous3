@@ -7,8 +7,10 @@
   Level 19 has 50 of model 1 and 14 of model 2: cone pines and weeping trees, as in the game.
   Each tree's angle is the scenery `i16@10` (quarter turns in the files, see level-format.md). It is not read
   yet: `Thing::facing` reads byte 8, which is always 0 for scenery.
-- Growth: below size 4, one size every `GROW_TICKS` (800 ticks, 67 s, the original's regrowth of one load), ticked by `GameMap::tick`. A tree at
-  size 0 stays in place, invisible, and grows back. `Tree::cut` takes one piece (size - 1, growth restarts).
+- Growth, on the original's rhythm (pop3-rev-analysis.md "Regrowth"): below size 4, a tree regains 2 wood on every
+  turn divisible by 16 (the same turns for every tree), one size per 100 wood, so one size takes `GROW_TICKS`
+  (800 turns, 67 s). A tree at size 0 stays in place, invisible, and grows back. `Tree::cut` takes one piece
+  (size - 1) and keeps the wood regained toward the next size. `TREE<N>_DORMANT_TIME` is ignored.
 - Placement (`tree::scatter`, deterministic from a seed): groves around random centres, 3-8 trees within 3 cells,
   only on ground units can walk (no sea, no cliff), never within 7 cells of a reincarnation site, one per cell,
   starting at size 1-4, of any type. Generated maps: 60 groves (seed = map seed); sandboxes: 150 attempts (most

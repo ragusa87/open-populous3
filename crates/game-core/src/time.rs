@@ -129,6 +129,10 @@ impl Every {
         Every(period - 1)
     }
 
+    pub const fn period(self) -> u32 {
+        self.0 + 1
+    }
+
     /// Whether it fires at `tick` for something offset by `phase` (each unit its own, to spread the work).
     pub fn fires(self, tick: Tick, phase: u32) -> bool {
         tick.0.wrapping_add(phase) & self.0 == 0

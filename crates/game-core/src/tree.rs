@@ -5,12 +5,17 @@
 use crate::map::Lcg;
 use crate::path::Mobility;
 use crate::terrain::Heightmap;
-use crate::time::Ticks;
+use crate::time::{Every, Tick, Ticks};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 pub const MAX_SIZE: u8 = 4;
-/// To grow one size: the original regrows a load (100 wood) in 800 turns (trees.md).
-pub const GROW_TICKS: Ticks = Ticks::new(800);
+/// A tree regains `TREE<N>_WOOD_GROW` (file 2) every 16 turns (pop3-rev-analysis.md "Regrowth").
+const GROW_EVERY: Every = Every::new(16);
+const WOOD_GROW: u16 = 2;
+/// Wood in one size: `TREE<N>_WOOD_VALUE` 400 over `MAX_SIZE` pieces, a load of `WOOD_BRAVE` 100.
+pub const WOOD_PER_SIZE: u16 = 100;
+/// To grow one size: 800 turns.
+pub const GROW_TICKS: Ticks = Ticks::new(WOOD_PER_SIZE as u32 / WOOD_GROW as u32 * GROW_EVERY.period());
 /// Tree types: 0-5 are the levels' scenery trees (models 1-6), 6-17 the other original tree objects
 /// (`pop3_format::catalog::tree_object`); the client maps a variant to a model.
 pub const VARIANTS: u8 = pop3_format::catalog::TREE_TYPES;
@@ -48,15 +53,22 @@ impl Tree {
         self.size > 0
     }
 
-    /// One tick: below full size it grows one size every `GROW_TICKS`.
-    pub fn tick(&mut self) {
+    /// One turn: on the original's growth turns, `grow`.
+    pub fn tick(&mut self, now: Tick) {
+        if GROW_EVERY.fires(now, 0) {
+            self.grow();
+        }
+    }
+
+    /// Below full size: regains `WOOD_GROW`, one size per `WOOD_PER_SIZE`.
+    fn grow(&mut self) {
         if self.size >= MAX_SIZE {
             self.growth = 0;
             return;
         }
-        self.growth += 1;
-        if self.growth as u32 >= GROW_TICKS.get() {
-            self.growth = 0;
+        self.growth += WOOD_GROW;
+        if self.growth >= WOOD_PER_SIZE {
+            self.growth -= WOOD_PER_SIZE;
             self.size += 1;
         }
     }
@@ -67,7 +79,6 @@ impl Tree {
             return false;
         }
         self.size -= 1;
-        self.growth = 0;
         true
     }
 }
@@ -128,26 +139,48 @@ mod tests {
         assert_eq!(t.with_angle(2048 + 512).angle, 512);
     }
 
-    #[test]
-    fn grows_back_one_size_at_a_time_up_to_four() {
-        let mut t = Tree::new((5, 5), 3, 0);
-        assert!(!t.is_visible());
-        for _ in 0..GROW_TICKS.get() - 1 {
-            t.tick();
+    fn run(t: &mut Tree, turns: std::ops::RangeInclusive<u32>) {
+        for n in turns {
+            t.tick(Tick::from_wire(n));
         }
-        assert_eq!(t.size, 0);
-        t.tick();
-        assert_eq!(t.size, 1);
-        for _ in 0..10 * GROW_TICKS.get() {
-            t.tick();
-        }
-        assert_eq!(t.size, MAX_SIZE);
     }
 
     #[test]
-    fn cutting_takes_one_piece_and_restarts_growth() {
+    fn grows_one_size_on_the_800th_turn_up_to_four() {
+        assert_eq!(GROW_TICKS, Ticks::new(800));
+        let mut t = Tree::new((5, 5), 3, 0);
+        assert!(!t.is_visible());
+        run(&mut t, 1..=799);
+        assert_eq!(t.size, 0);
+        run(&mut t, 800..=800);
+        assert_eq!(t.size, 1);
+        run(&mut t, 801..=3200);
+        assert_eq!(t.size, MAX_SIZE);
+        run(&mut t, 3201..=6400);
+        assert_eq!((t.size, t.growth), (MAX_SIZE, 0));
+    }
+
+    #[test]
+    fn grows_only_on_the_original_turns() {
+        let mut t = Tree::new((5, 5), 0, 0);
+        run(&mut t, 1..=15);
+        assert_eq!(t.growth, 0);
+        run(&mut t, 16..=16);
+        assert_eq!(t.growth, WOOD_GROW);
+        run(&mut t, 17..=31);
+        assert_eq!(t.growth, WOOD_GROW);
+        run(&mut t, 32..=32);
+        assert_eq!(t.growth, 2 * WOOD_GROW);
+    }
+
+    #[test]
+    fn cutting_takes_one_piece_and_keeps_the_growth() {
         let mut t = Tree::new((5, 5), 0, 2);
-        t.tick();
+        run(&mut t, 1..=400);
+        assert!(t.cut());
+        assert_eq!((t.size, t.growth), (1, 50));
+        run(&mut t, 401..=800);
+        assert_eq!(t.size, 2, "half a size was already there");
         assert!(t.cut() && t.cut());
         assert!(!t.cut(), "nothing left");
         assert_eq!((t.size, t.cell()), (0, (5, 5)), "stays in place, invisible");
