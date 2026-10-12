@@ -121,7 +121,7 @@ impl GameMap {
             }
             if self.totems[k].is_exhausted() {
                 for id in std::mem::take(&mut self.totems[k].queue) {
-                    if let Some(u) = self.units.iter_mut().find(|u| u.id == id) {
+                    if let Some(u) = self.unit_mut(id) {
                         u.start(Order::Stop);
                     }
                 }

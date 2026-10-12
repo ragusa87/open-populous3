@@ -437,8 +437,7 @@ mod tests {
     fn extra_braves_beyond_the_maximum_are_not_assigned() {
         let mut map = sandbox();
         for k in 0..6u16 {
-            let id = map.units.len() as u32 + 1;
-            map.units.push(Unit::new(id, 0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1)));
+            map.spawn(0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1));
         }
         let units: Vec<u32> = map.units.iter().filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
         assert!(units.len() > 6);
@@ -630,8 +629,7 @@ mod tests {
     fn six_braves_on_a_hut_never_stand_idle_once_flat_the_waiting_ones_hammer_inside() {
         let mut map = sandbox();
         for k in 0..2u16 {
-            let id = map.units.len() as u32 + 1;
-            map.units.push(Unit::new(id, 0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1)));
+            map.spawn(0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1));
         }
         let mut units = braves(&map, 5);
         units.push(map.units.last().unwrap().id);
@@ -656,8 +654,7 @@ mod tests {
     fn braves_taken_off_a_site_for_another_reach_it() {
         let mut map = sandbox();
         for k in 0..2u16 {
-            let id = map.units.len() as u32 + 1;
-            map.units.push(Unit::new(id, 0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1)));
+            map.spawn(0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1));
         }
         let mut units = braves(&map, 5);
         units.push(map.units.last().unwrap().id);

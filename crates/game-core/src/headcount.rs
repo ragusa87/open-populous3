@@ -174,8 +174,7 @@ mod tests {
     }
 
     fn add(map: &mut GameMap, owner: u8, kind: UnitKind) -> usize {
-        let id = map.units.iter().map(|u| u.id).max().unwrap_or(0) + 1;
-        map.units.push(Unit::new(id, owner, kind, (64 * 512, 64 * 512)));
+        map.spawn(owner, kind, (64 * 512, 64 * 512));
         map.units.len() - 1
     }
 

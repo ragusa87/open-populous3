@@ -60,6 +60,8 @@ pub struct GameMap {
     pub blasts: Vec<Blast>,
     /// Ticks run since the map was made (`tick`).
     pub now: Tick,
+    /// The next id `new_id` gives: units, buildings and effects share it, an id is never given twice.
+    next_id: u32,
 }
 
 /// Generated maps and sandboxes are laid out for a camera on their south side looking north (towards -z):
@@ -100,7 +102,7 @@ fn sandbox_gift(k: usize) -> crate::building::Reward {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, blasts: Vec::new(), now: Tick::ZERO }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, blasts: Vec::new(), now: Tick::ZERO, next_id: 1 }
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
@@ -129,6 +131,7 @@ impl GameMap {
             object_bank: 0,
             blasts: Vec::new(),
             now: Tick::ZERO,
+            next_id: 1,
         }
         .with_building_ground()
         .with_shamans()
@@ -145,8 +148,7 @@ impl GameMap {
             let cell = ((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32);
             let welcomed = (kind == UnitKind::Wildman).then(|| self.sites.iter().find(|s| s.welcomes(cell))).flatten();
             let (owner, kind) = welcomed.map_or((t.owner, kind), |s| (s.owner, UnitKind::Brave));
-            let id = self.units.len() as u32 + 1;
-            self.units.push(Unit::new(id, owner, kind, (t.x, t.z)));
+            self.spawn(owner, kind, (t.x, t.z));
         }
         self
     }
@@ -161,9 +163,10 @@ impl GameMap {
 
     /// Shamans spawn at game start: each site levels its ground (see `flatten_for_spawn`).
     fn with_shamans(mut self) -> Self {
-        for (i, site) in self.sites.iter().enumerate() {
-            site.flatten_for_spawn(&mut self.terrain);
-            self.units.push(Unit::shaman(i as u32 + 1, site));
+        for k in 0..self.sites.len() {
+            self.sites[k].flatten_for_spawn(&mut self.terrain);
+            let id = self.new_id();
+            self.units.push(Unit::shaman(id, &self.sites[k]));
         }
         self
     }
@@ -279,18 +282,14 @@ impl GameMap {
             }
         }
         for n in 0..8 {
-            let id = map.units.len() as u32 + 1;
-            map.units.push(Unit::new(id, 0, UnitKind::Brave, at(20 + n % 4, -2 + 2 * (n / 4))));
+            map.spawn(0, UnitKind::Brave, at(20 + n % 4, -2 + 2 * (n / 4)));
         }
         // The showcase's occupied buildings get real people inside.
         let occupied: Vec<Building> = map.buildings.iter().filter(|b| b.inside > 0).cloned().collect();
         for b in occupied {
             let room = if b.kind.capacity() > 0 { b.kind.capacity() } else { b.inside };
             for _ in 0..b.inside.min(room) {
-                let id = map.units.len() as u32 + 1;
-                let mut u = Unit::new(id, 0, UnitKind::Brave, b.centre());
-                u.inside = Some(crate::unit::Inside { site: (b.x, b.z), door: b.door() });
-                map.units.push(u);
+                map.spawn(0, UnitKind::Brave, b.centre()).inside = Some(crate::unit::Inside { site: (b.x, b.z), door: b.door() });
             }
         }
         map.update_walls();
@@ -334,11 +333,9 @@ impl GameMap {
         for (row, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
             let row = row as i32;
             for n in 0..3 {
-                let id = map.units.len() as u32 + 1;
-                map.units.push(Unit::new(id, 0, kind, at(-5 - 2 * row, 2 * n - 2)));
+                map.spawn(0, kind, at(-5 - 2 * row, 2 * n - 2));
             }
-            let id = map.units.len() as u32 + 1;
-            map.units.push(Unit::new(id, 1, kind, at(6 + 2 * row, 0)));
+            map.spawn(1, kind, at(6 + 2 * row, 0));
         }
         map
     }
@@ -372,8 +369,7 @@ impl GameMap {
             map.totems.push(Totem { prayers, shaman_only, summons_angel, gifts: vec![sandbox_gift(k)], occurrences, ..Totem::new(kind, at(-12 + 4 * k as i32, -12)) });
         }
         for n in 0..8 {
-            let id = map.units.len() as u32 + 1;
-            map.units.push(Unit::new(id, 0, UnitKind::Brave, at(-7 + 2 * n, -7)));
+            map.spawn(0, UnitKind::Brave, at(-7 + 2 * n, -7));
         }
         map
     }
@@ -434,14 +430,14 @@ impl GameMap {
                 None
             }
             Command::OrderUnit { player, unit, order } => {
-                if let Some(i) = self.units.iter().position(|u| u.id == unit && u.owner == player).filter(|&i| !self.locked(i)) {
+                if let Some(i) = self.unit_index(unit).filter(|&i| self.units[i].owner == player && !self.locked(i)) {
                     self.units[i].clear_queue();
                     self.start_order(i, order);
                 }
                 None
             }
             Command::QueueOrder { player, unit, order } => {
-                if let Some(i) = self.units.iter().position(|u| u.id == unit && u.owner == player).filter(|&i| !self.locked(i)) {
+                if let Some(i) = self.unit_index(unit).filter(|&i| self.units[i].owner == player && !self.locked(i)) {
                     if self.units[i].is_free() && self.units[i].queued().is_empty() {
                         self.start_order(i, order);
                     } else {
@@ -565,6 +561,7 @@ impl GameMap {
     /// nearest free one.
     pub fn tick(&mut self) -> Vec<DirtyRect> {
         self.now = self.now.next();
+        debug_assert!(self.units.windows(2).all(|w| w[0].id < w[1].id), "units sorted by id");
         let mut dirty = Vec::new();
         self.update_walls();
         let (buildings, now) = (&self.buildings, self.now);
@@ -622,6 +619,33 @@ impl GameMap {
             }
         }
         self.blasts.retain(|b| !b.is_over());
+    }
+
+    /// A fresh id, never given before on this map.
+    pub fn new_id(&mut self) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// A new unit with a fresh id, last in `units` (which stays sorted by id).
+    pub fn spawn(&mut self, owner: u8, kind: UnitKind, at: (u16, u16)) -> &mut Unit {
+        let id = self.new_id();
+        self.units.push(Unit::new(id, owner, kind, at));
+        self.units.last_mut().unwrap()
+    }
+
+    /// Where the unit `id` is in `units`; None once it has left the map.
+    pub fn unit_index(&self, id: u32) -> Option<usize> {
+        self.units.binary_search_by_key(&id, |u| u.id).ok()
+    }
+
+    pub fn unit(&self, id: u32) -> Option<&Unit> {
+        self.unit_index(id).map(|i| &self.units[i])
+    }
+
+    pub fn unit_mut(&mut self, id: u32) -> Option<&mut Unit> {
+        self.unit_index(id).map(|i| &mut self.units[i])
     }
 
     /// The terrain with the buildings' walls, as walkers outside every building see it.
@@ -957,16 +981,16 @@ mod tests {
         let mut map = GameMap::sandbox_walk();
         let s = map.units.iter().position(|u| u.kind == UnitKind::Shaman).unwrap();
         let (x, z) = (map.units[s].x, map.units[s].z);
-        let next = map.units.iter().map(|u| u.id).max().unwrap() + 1;
-        map.units.push(Unit::new(next, 0, UnitKind::Brave, (x.wrapping_add(512), z)));
-        map.units.push(Unit::new(next + 1, 0, UnitKind::Brave, (x.wrapping_add(1024), z)));
-        let i = map.units.len() - 2;
-        map.units[i].action = Action::Dying { left: crate::time::Countdown::new(crate::unit::DYING_TICKS) };
+        let dead = map.spawn(0, UnitKind::Brave, (x.wrapping_add(512), z)).id;
+        let other = map.spawn(0, UnitKind::Brave, (x.wrapping_add(1024), z)).id;
+        map.unit_mut(dead).unwrap().action = Action::Dying { left: crate::time::Countdown::new(crate::unit::DYING_TICKS) };
         map.run(crate::unit::DYING_TICKS);
-        assert!(matches!(map.units[i].action, Action::Spirit { .. }));
+        assert!(matches!(map.unit(dead).unwrap().action, Action::Spirit { .. }));
         map.run(crate::unit::SPIRIT_TICKS);
-        assert!(!map.units.iter().any(|u| u.id == next), "removed");
-        assert_eq!(map.units.last().map(|u| u.id), Some(next + 1), "the others kept");
+        assert!(map.unit(dead).is_none(), "removed");
+        assert!(map.unit(other).is_some(), "the others kept");
+        assert!(map.spawn(0, UnitKind::Brave, (x, z)).id > other, "an id is never given twice");
+        map.tick();
     }
 
     #[test]
@@ -1156,7 +1180,7 @@ mod tests {
         let c = MAP_SIZE as i32 / 2;
         m.trees = vec![Tree::new((c + 5, c), 0, 3)];
         let shaman = m.units[0].id;
-        m.units.push(Unit::new(99, 0, UnitKind::Brave, slots::cell_centre((c + 6, c))));
+        m.spawn(0, UnitKind::Brave, slots::cell_centre((c + 6, c)));
         for target in [(c + 5, c), (c + 6, c)] {
             let to = slots::cell_centre(target);
             m.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::MoveTo { x: to.0, z: to.1 } });
@@ -1388,15 +1412,12 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         let c = MAP_SIZE as i32 / 2;
         m.trees = trees.iter().map(|&((x, z), size)| Tree::new((c + x, c + z), 0, size)).collect();
-        let ids: Vec<u32> = (0..braves.len() as u32).map(|i| 100 + i).collect();
-        for (&id, &(x, z)) in ids.iter().zip(braves) {
-            m.units.push(Unit::new(id, 0, UnitKind::Brave, slots::cell_centre((c + x, c + z))));
-        }
+        let ids = braves.iter().map(|&(x, z)| m.spawn(0, UnitKind::Brave, slots::cell_centre((c + x, c + z))).id).collect();
         (m, ids)
     }
 
     fn unit(m: &GameMap, id: u32) -> &Unit {
-        m.units.iter().find(|u| u.id == id).unwrap()
+        m.unit(id).unwrap()
     }
 
     fn near(a: (u16, u16), b: (u16, u16), cells: i32) -> bool {
@@ -1439,11 +1460,11 @@ mod tests {
     fn only_braves_cut() {
         let (mut m, _) = woodland(&[((4, 0), 4)], &[]);
         let c = MAP_SIZE as i32 / 2;
-        m.units.push(Unit::new(200, 0, UnitKind::Warrior, slots::cell_centre((c, c))));
+        let warrior = m.spawn(0, UnitKind::Warrior, slots::cell_centre((c, c))).id;
         let tree = tree_at(&m, (4, 0));
-        m.apply(&Command::OrderUnit { player: 0, unit: 200, order: Order::CutTree { tree } });
+        m.apply(&Command::OrderUnit { player: 0, unit: warrior, order: Order::CutTree { tree } });
         run(&mut m, 200);
-        assert_eq!((m.trees[0].size, m.wood.len(), unit(&m, 200).action), (4, 0, Action::Idle));
+        assert_eq!((m.trees[0].size, m.wood.len(), unit(&m, warrior).action), (4, 0, Action::Idle));
     }
 
     #[test]
