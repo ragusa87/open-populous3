@@ -227,6 +227,8 @@ pub enum PersonAnim {
     Hit,
     /// Shoved away, tilted (1 frame).
     Shoved,
+    /// A firewarrior throwing fire (5 frames).
+    Throw,
 }
 
 /// The frame of `PersonAnim::ArmsUp` standing with both arms up.
@@ -252,6 +254,7 @@ impl PersonAnim {
             PersonAnim::Kick => 25,
             PersonAnim::Hit => 14,
             PersonAnim::Shoved => 16,
+            PersonAnim::Throw => 7,
         }
     }
 }

@@ -21,6 +21,7 @@ const CHALLENGE: Color = Color::srgb(1.0, 0.55, 0.1);
 const MELEE: Color = Color::srgb(0.95, 0.15, 0.15);
 const WEAR: Color = Color::srgb(0.85, 0.1, 0.1);
 const SIGHT: Color = Color::srgb(1.0, 0.9, 0.2);
+const BOLT: Color = Color::srgb(0.3, 0.6, 1.0);
 const ASHES: Color = Color::srgb(0.6, 0.6, 0.6);
 const WEAR_BACK: Color = Color::srgb(0.3, 0.3, 0.3);
 /// The wear bar: its height over the ground and its length, cells.
@@ -69,15 +70,12 @@ pub fn outline_square(centre: Vec2, half: f32) -> Vec<Vec2> {
     points
 }
 
-#[allow(clippy::too_many_arguments)]
 fn draw(
     show: Res<ShowOverlay>,
     dev: Res<DevMode>,
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     params: Res<CurveParamsRes>,
-    selection: Res<crate::units::selection::Selection>,
-    hovered: Res<crate::hover::Hovered>,
     mut gizmos: Gizmos,
 ) {
     if !(show.0 && dev.0) {
@@ -102,14 +100,19 @@ fn draw(
         gizmos.line(lift(start), lift(start + Vec2::X * full), WEAR);
     }
     let mut outline = |points: Vec<Vec2>, color: Color| gizmos.linestrip(points.into_iter().map(on_ground), color);
-    let hovered = match hovered.0 {
-        Some(crate::hover::HoverTarget::Unit(i)) => map.units.get(i).map(|u| u.id),
-        _ => None,
-    };
-    for u in selection.units.iter().copied().chain(hovered).filter_map(|id| map.unit(id)) {
-        let Some(sight) = game_core::spotting::sight_now(u).filter(|_| game_core::spotting::looks_for_melee(u.kind)) else { continue };
+    for u in &map.units {
         let (x, z) = u.cell();
-        outline(outline_square(Vec2::new(x as f32 + 0.5, z as f32 + 0.5), sight_half(sight)), SIGHT);
+        let cell = Vec2::new(x as f32 + 0.5, z as f32 + 0.5);
+        if u.kind.stats().throws && u.is_alive() {
+            outline(outline_square(cells((u.x, u.z)), cells_of(game_core::firebolt::bolt_reach(map.altitude(u), false))), BOLT.with_alpha(0.5));
+        }
+        if let Some(sight) = map.looking(u).filter(|&s| s > 0) {
+            outline(outline_square(cell, sight_half(sight)), SIGHT);
+        }
+    }
+    for (_, b) in map.bolts.iter() {
+        let at = cells(b.at);
+        outline(vec![at, at + torus_delta_cells(at, cells((b.aim.0, b.aim.1)))], BOLT);
     }
     for p in &map.ashes.patches {
         let fade = (p.darkness - game_core::ashes::FADED) as f32 / (game_core::ashes::DARK - game_core::ashes::FADED) as f32;

@@ -114,7 +114,7 @@ impl GameMap {
     pub(crate) fn tend_wrecking(&mut self) {
         for i in 0..self.units.len() {
             match self.units[i].action {
-                Action::Attacking { target: Target::Building(b), to } => {
+                Action::Attacking { target: Target::Building(b), to } if !self.units[i].kind.stats().throws => {
                     let u = &self.units[i];
                     if torus_delta(u.x, to.0).abs() <= ARRIVED && torus_delta(u.z, to.1).abs() <= ARRIVED {
                         let at_door = self.building(b).is_some_and(|b| b.door() == to);

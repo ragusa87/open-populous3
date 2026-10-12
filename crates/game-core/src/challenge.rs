@@ -162,6 +162,9 @@ impl GameMap {
         for i in 0..self.units.len() {
             let a = &self.units[i];
             let Action::Attacking { target: crate::unit::Target::Unit(target), .. } = a.action else { continue };
+            if a.kind.stats().throws {
+                continue;
+            }
             let Some(j) = self.unit_index(target) else { continue };
             let t = &self.units[j];
             if self.linked(t).is_some() || t.locked() || t.inside.is_some() || !in_reach((a.x, a.z), (t.x, t.z)) {

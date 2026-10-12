@@ -102,7 +102,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Rhythms still on per-object counters or missing: stranded hurt (`STRANDED_HURT_EVERY`, rate unknown), hut breeding every 4 turns (0x404C80) and growth every 16 (0x4050C0), mana income every 16 (`MANA_UPDATE_FREQ`), the other status timers every 8 (shield and bloodlust done).
 - [ ] World events without behaviour yet: `Raid` (occupants thrown out). Panic: the screaming, and how the original turns at an obstacle.
 - [ ] Burning buildings (`fire`): the igniter's tribe and the destroyed-building count (`stats[tribe][7]`), the fire sound.
-- [ ] Shots (fireballs 8/4, 8/7, 8/8): a typed list ticked before effects, integer flight, spawning a simple blast on arrival.
+- [ ] Shots (fireballs 8/4, 8/7, 8/8): a typed list ticked before effects like `GameMap::bolts`, integer flight, spawning a simple blast on arrival.
 - [ ] World views (architecture.md "Client: world visuals"): the landing dust (`units::dust`) as a `WorldView` once
   touchdowns are kept in game-core (a unit's landing tick), so a rejoining client draws it too; the sinking totem's
   smoke once totems have ids; units, building views and the unit glide (`SimClock::prev_ids`) still keyed by index.
@@ -119,7 +119,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Spotting (combat.md "Spotting"): the preacher's conversion look, the shaman's look during some orders, invisible people unseen, allies.
 - [ ] Preachers convert enemies.
 - [ ] Attackers inside a building walk out first (combat.md "Attacking": they set off from where they stand).
-- [ ] Firewarriors (pyro-warriors) throw fire at enemies, both on the ground and in vehicles; they never join an existing fight (person-type flag 0x40), but fight in melee when attacked, at half speed (14-turn moves; pop3-rev-analysis.md "Combat"); their ranged attack (pop3-rev-analysis.md "Firewarrior fire"): two homing bolts 8/6 per throw (anim 7, 5 turns), one per hand, only the right one hits; 512 units per turn with a smoke trail (hfx 314-321) and a ground light; on arrival 100 to every enemy in the impact cell (trees set burning, vehicles hit) and `SW_BLAST_DAMAGE` (file 100, 400 from a drum tower) × `SW_BLAST_DAMAGE_<type>` % to the target (file: warriors 5 %), the people hit thrown 64 per turn + 110 up (living warriors and preachers only hop); reload `SW_FIRE_RATE` 25-28 turns (>> 3 bloodlusted); range 11 cells × `ALT_BAND_<b>_SUPER_INCR` % by height, +4 in a tower, odd, reach `cells × 256 + 56` per axis (file: 9 cells low down to 17 at the top, 2360-4408 units); drawn hfx 1120-1123.
+- [ ] Firebolts (combat.md "Firebolts"): the line of fire, from drum towers and vehicles, the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.
 - [ ] Health, hit feedback and death animations for every unit type.
 - [ ] Healing (combat.md "Health"): no healing while struck by lightning once it has its own state; the angel of death never heals; the original lets life go past full by up to one heal (ours stops at full).
 

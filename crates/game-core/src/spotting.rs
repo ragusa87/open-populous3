@@ -17,7 +17,7 @@ pub fn sight_now(u: &Unit) -> Option<u8> {
         Action::Idle | Action::Holding { .. } | Action::Hacking { .. } => Some(stats.sight),
         Action::Walking { .. } | Action::Stranded { .. } | Action::Attacking { .. } => Some(0),
         Action::Chopping { .. } | Action::PickingUpWood { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Hammering | Action::AroundFire { .. } | Action::Worshipping { .. } => Some(stats.sight_at_work),
-        Action::Challenge { .. } | Action::Melee { .. } | Action::Panicking { .. } | Action::Tumbling | Action::Casting { .. } | Action::Landing | Action::Drowning | Action::Entering { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => None,
+        Action::Challenge { .. } | Action::Melee { .. } | Action::Panicking { .. } | Action::Tumbling | Action::Casting { .. } | Action::Landing | Action::Drowning | Action::Entering { .. } | Action::Throwing { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => None,
         #[cfg(test)]
         Action::Gathered { .. } => None,
     }
@@ -27,6 +27,19 @@ pub fn sight_now(u: &Unit) -> Option<u8> {
 /// looks during some orders, spies and wildmen never look (TODO for the others' own looks).
 pub fn looks_for_melee(kind: UnitKind) -> bool {
     matches!(kind, UnitKind::Brave | UnitKind::Warrior)
+}
+
+impl GameMap {
+    /// How far `u` looks this turn, cells across, if it looks at all: a fighter by `sight_now`, a reloaded
+    /// thrower as far as its fire reaches ("Auto-attack" [exe]).
+    pub fn looking(&self, u: &Unit) -> Option<u8> {
+        let sight = sight_now(u)?;
+        if u.kind.stats().throws {
+            (u.reload == 0 && sight > 0).then(|| crate::firebolt::reach_cells(self.altitude(u), false))
+        } else {
+            looks_for_melee(u.kind).then_some(sight)
+        }
+    }
 }
 
 /// The cells `sight` around `centre` covers, row by row from a corner: a square of `sight` rounded down to even, plus
@@ -58,7 +71,7 @@ impl GameMap {
     /// On the looking rhythm, fighters that are not busy attack the first enemy they see.
     pub(crate) fn spot_enemies(&mut self) {
         let now = self.now;
-        let looks = |u: &Unit| looks_for_melee(u.kind) && u.kind.stats().look_every.fires(now, 0) && sight_now(u).is_some_and(|s| s > 0);
+        let looks = |u: &Unit| u.kind.stats().look_every.fires(now, 0) && self.looking(u).is_some_and(|s| s > 0);
         let lookers: Vec<usize> = (0..self.units.len()).filter(|&i| looks(&self.units[i])).collect();
         if lookers.is_empty() {
             return;
@@ -75,14 +88,16 @@ impl GameMap {
     /// building.
     fn first_seen(&self, i: usize, grid: &UnitGrid) -> Option<Target> {
         let u = &self.units[i];
-        let sight = sight_now(u)?;
-        let idle = matches!(u.action, Action::Idle | Action::Holding { .. });
+        let sight = self.looking(u)?;
+        let throws = u.kind.stats().throws;
+        let idle = matches!(u.action, Action::Idle | Action::Holding { .. }) && !throws;
         let size = self.terrain.size() as i32;
         square(u.cell(), sight, size).find_map(|cell| {
             let people = grid.at(cell).filter_map(|id| self.unit(id)).filter(|t| crate::attack::may_attack(u, t) && !t.locked());
             let mut fighting = None;
             for t in people {
                 match self.linked(t) {
+                    _ if throws => return Some(Target::Unit(t.id)),
                     Some(Link::Melee(_)) if idle && fighting.is_none() => fighting = Some(Target::Unit(t.id)),
                     Some(Link::Melee(_)) => {}
                     _ => return Some(Target::Unit(t.id)),
@@ -155,6 +170,24 @@ mod tests {
         u.action = Action::Panicking { away: (1, 0), left: crate::time::Countdown::new(Ticks::new(3)) };
         assert_eq!(sight_now(&u), None, "busy");
         assert!(!looks_for_melee(UnitKind::Spy) && !looks_for_melee(UnitKind::Wildman) && looks_for_melee(UnitKind::Warrior));
+    }
+
+    #[test]
+    fn a_reloaded_firewarrior_looks_as_far_as_it_throws() {
+        let (mut map, a, _) = watch(4);
+        map.unit_mut(a).unwrap().kind = UnitKind::Firewarrior;
+        let u = map.unit(a).unwrap().clone();
+        assert_eq!(map.looking(&u), Some(crate::firebolt::reach_cells(map.altitude(&u), false)));
+        map.unit_mut(a).unwrap().reload = 3;
+        assert_eq!(map.looking(map.unit(a).unwrap()), None, "reloading");
+        map.unit_mut(a).unwrap().reload = 0;
+        map.run(Ticks::new(4));
+        let thrown_at = match map.unit(a).unwrap().action {
+            Action::Throwing { target: Target::Unit(x), .. } | Action::Attacking { target: Target::Unit(x), .. } => map.unit(x),
+            _ => None,
+        };
+        assert!(thrown_at.is_some_and(|x| x.owner != 0), "throws at the first enemy it sees");
+
     }
 
     #[test]

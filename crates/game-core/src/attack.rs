@@ -16,9 +16,9 @@ pub fn may_attack_building(attacker: &Unit, b: &Building) -> bool {
     fights(attacker.kind) && attacker.owner != b.owner && (b.owner as usize) < crate::totem::TRIBES && crate::wreck::wear_limit(b.kind).is_some()
 }
 
-/// Kinds that take an attack order. Not the firewarrior yet: its own attack throws fire from afar (TODO).
+/// Kinds that take an attack order.
 fn fights(kind: UnitKind) -> bool {
-    kind.stats().fights && kind != UnitKind::Firewarrior
+    kind.stats().fights
 }
 
 impl GameMap {
@@ -37,10 +37,22 @@ impl GameMap {
         }
     }
 
-    /// Every attacker follows its target; one whose target is gone, dead or no longer an enemy stops.
+    /// Every attacker follows its target; one whose target is gone, dead or no longer an enemy stops. A thrower in
+    /// reach stops and throws when reloaded.
     pub(crate) fn tend_attacks(&mut self) {
         for i in 0..self.units.len() {
             let Action::Attacking { target, .. } = self.units[i].action else { continue };
+            let u = &self.units[i];
+            if u.kind.stats().throws && let Some(goal) = self.attack_goal(u, target) {
+                let reach = crate::firebolt::bolt_reach(self.altitude(u), false);
+                if crate::firebolt::in_reach((u.x, u.z), goal, reach) {
+                    self.units[i].hold();
+                    if self.units[i].reload == 0 {
+                        self.throw_fire(i, target);
+                    }
+                    continue;
+                }
+            }
             match (self.attack_goal(&self.units[i], target), target) {
                 (Some(to), Target::Unit(_)) => self.units[i].retarget(to),
                 (Some(_), Target::Building(_)) => {}

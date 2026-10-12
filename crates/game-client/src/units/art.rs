@@ -54,10 +54,12 @@ pub enum Pose {
     Shoved,
     /// Hacking at an enemy building.
     Hack,
+    /// A firewarrior throwing fire.
+    Throw,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 22] = [
+    pub const ALL: [Pose; 23] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -80,6 +82,7 @@ impl Pose {
         Pose::Reel,
         Pose::Shoved,
         Pose::Hack,
+        Pose::Throw,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -91,6 +94,7 @@ impl Pose {
             Pose::Jump => Pose::Stranded,
             Pose::Flung | Pose::Tumble | Pose::Spirit => Pose::Fall,
             Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack => Pose::Idle,
+            Pose::Throw => Pose::Cast,
             Pose::Shoved => Pose::Fall,
             pose => pose,
         }
@@ -124,6 +128,7 @@ impl Pose {
             Pose::Strike | Pose::Trade => ShamanAnim::Strike,
             Pose::Kick => ShamanAnim::Kick,
             Pose::Reel | Pose::Shoved | Pose::Hack => ShamanAnim::Idle,
+            Pose::Throw => ShamanAnim::Cast,
         }
     }
 }
@@ -167,6 +172,7 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } | Action::Attacking { .. } => Pose::Walk,
         Action::Panicking { .. } => Pose::Panic,
         Action::Hacking { .. } => Pose::Hack,
+        Action::Throwing { .. } => Pose::Throw,
         Action::Challenge { role, .. } => challenge_pose(*role, carrying),
         Action::Melee { stance, .. } => melee_pose(*stance, airborne),
         Action::Chopping { .. } | Action::PickingUpWood { .. } => Pose::Chop,
@@ -225,7 +231,7 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alph
     let lying = frames.saturating_sub(2);
     let done = |n: usize| action.countdown().map_or(0, |c| ((progress(c, alpha) * n as f32) as usize).min(n - 1));
     match action {
-        Action::Casting { .. } | Action::Flattening { .. } | Action::Challenge { .. } | Action::Melee { .. } if action.countdown().is_some() => done(frames),
+        Action::Casting { .. } | Action::Flattening { .. } | Action::Throwing { .. } | Action::Challenge { .. } | Action::Melee { .. } if action.countdown().is_some() => done(frames),
         Action::Dying { .. } => done(lying + 1),
         Action::Spirit { .. } => done(frames),
         Action::Dead { .. } => lying,
@@ -318,7 +324,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Pray => WildmanAnim::Sit,
                 Pose::Fall | Pose::Tumble | Pose::Spirit => WildmanAnim::Tumble,
                 Pose::Drown | Pose::Flung | Pose::Shoved => WildmanAnim::Flung,
-                Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack => WildmanAnim::Stand,
+                Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack | Pose::Throw => WildmanAnim::Stand,
             };
             // No spirit anim known: the body lies still (the fall's last frame).
             (anim.anim(), None, (pose == Pose::Spirit).then_some(3))
@@ -354,6 +360,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Reel => PersonAnim::Hit,
                 Pose::Shoved => PersonAnim::Shoved,
                 Pose::Hack => PersonAnim::Chop,
+                Pose::Throw => PersonAnim::Throw,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }

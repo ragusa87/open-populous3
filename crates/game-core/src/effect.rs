@@ -43,6 +43,8 @@ pub enum DamageKind {
     Lightning,
     /// A blow in a fight: the shield blocks spells, not this (combat.md).
     Melee,
+    /// A firebolt: not a spell either (combat.md "Firebolts"; whether the shield stops it is a guess).
+    Fire,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,11 +96,11 @@ impl Effect {
 /// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow (pop3-rev-analysis.md
 /// "Per spell", Shield); a blast spares the caster's own tribe (no alliances yet), lightning only the caster's own shaman.
 pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
-    if !u.is_alive() || (u.statuses.shield.is_on() && kind != DamageKind::Melee) {
+    if !u.is_alive() || (u.statuses.shield.is_on() && !matches!(kind, DamageKind::Melee | DamageKind::Fire)) {
         return false;
     }
     match kind {
-        DamageKind::Melee => true,
+        DamageKind::Melee | DamageKind::Fire => true,
         DamageKind::Blast => from != Some(u.owner),
         DamageKind::Lightning => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman),
     }

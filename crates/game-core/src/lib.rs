@@ -19,6 +19,7 @@ pub mod event;
 pub mod flatten;
 pub mod enter;
 pub mod fire;
+pub mod firebolt;
 pub mod gauge;
 pub mod ground_fire;
 pub mod headcount;

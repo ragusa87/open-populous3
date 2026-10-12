@@ -20,6 +20,8 @@ pub struct KindStats {
     pub fights: bool,
     /// Joins a melee already going on: never a firewarrior ("Fight" [exe]); it still fights when challenged.
     pub joins_melees: bool,
+    /// Attacks by throwing fire from afar (`crate::firebolt`): the firewarrior.
+    pub throws: bool,
     /// Wear it adds to a building per turn of hacking ("Attacking a building" [exe]).
     pub sabotage: u16,
     /// How far it looks for enemies, cells, with no order, and while working ("Auto-attack" [exe]).
@@ -29,13 +31,13 @@ pub struct KindStats {
     pub look_every: Every,
 }
 
-const SHAMAN: KindStats = KindStats { life: 2000, heal: Some(32), fight_damage: 60, rank: 2, pace: 1, fights: true, joins_melees: true, sabotage: 10, sight: 3, sight_at_work: 1, look_every: Every::new(4) };
-const BRAVE: KindStats = KindStats { life: 1000, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7, sight: 5, sight_at_work: 1, look_every: Every::new(4) };
-const WARRIOR: KindStats = KindStats { life: 1800, heal: Some(6), fight_damage: 360, rank: 2, pace: 1, fights: true, joins_melees: true, sabotage: 12, sight: 5, sight_at_work: 1, look_every: Every::new(4) };
-const PREACHER: KindStats = KindStats { life: 1100, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7, sight: 3, sight_at_work: 1, look_every: Every::new(2) };
-const SPY: KindStats = KindStats { life: 600, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, sabotage: 7, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
-const FIREWARRIOR: KindStats = KindStats { life: 700, heal: Some(6), fight_damage: 60, rank: 3, pace: 2, fights: true, joins_melees: false, sabotage: 16, sight: 11, sight_at_work: 5, look_every: Every::new(4) };
-const WILDMAN: KindStats = KindStats { life: 1000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
+const SHAMAN: KindStats = KindStats { life: 2000, heal: Some(32), fight_damage: 60, rank: 2, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 10, sight: 3, sight_at_work: 1, look_every: Every::new(4) };
+const BRAVE: KindStats = KindStats { life: 1000, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 5, sight_at_work: 1, look_every: Every::new(4) };
+const WARRIOR: KindStats = KindStats { life: 1800, heal: Some(6), fight_damage: 360, rank: 2, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 12, sight: 5, sight_at_work: 1, look_every: Every::new(4) };
+const PREACHER: KindStats = KindStats { life: 1100, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 3, sight_at_work: 1, look_every: Every::new(2) };
+const SPY: KindStats = KindStats { life: 600, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
+const FIREWARRIOR: KindStats = KindStats { life: 700, heal: Some(6), fight_damage: 60, rank: 3, pace: 2, fights: true, joins_melees: false, throws: true, sabotage: 16, sight: 11, sight_at_work: 5, look_every: Every::new(4) };
+const WILDMAN: KindStats = KindStats { life: 1000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, throws: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
 
 impl UnitKind {
     pub const fn stats(self) -> &'static KindStats {

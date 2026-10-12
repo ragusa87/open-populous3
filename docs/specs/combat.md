@@ -49,8 +49,8 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
   building with own people selected (`units::selection::attack_click`). Only those that may attack it go
   (`attack::may_attack`): both fight (never a wildman), other tribes, the target alive. A building only if it
   belongs to another tribe and wears down (`may_attack_building`): never a neutral one (a vault of knowledge, a
-  totem), which is prayed at; a click on it gives the prayer orders as before. Firewarriors take no attack
-  order yet: theirs throws fire from afar (TODO).
+  totem), which is prayed at; a click on it gives the prayer orders as before. A firewarrior's attack throws fire
+  from afar ("Firebolts").
 - `Action::Attacking { target, to }`: walks a path to `to`, the person or the building's door, and stands there.
   Each turn before the coordinators `GameMap::tend_attacks` aims `to` at where the target is, planning again once it
   is a cell off; a target gone, dead or no longer an enemy stops the attack (Idle). Once within reach of a person, a
@@ -142,8 +142,9 @@ one removed any other way (a plan cancelled) leaves none.
 ## Spotting
 `crate::spotting` ("Auto-attack" [exe]): people who see an enemy attack it on their own, before the attacks are
 followed each turn (`GameMap::spot_enemies`).
-- Who: braves and warriors (`looks_for_melee`); the preacher's conversion, the firewarrior's fire and the shaman's
-  look during some orders are TODO; spies and wildmen never look. On its kind's `look_every` (4 turns; preacher 2),
+- Who: braves and warriors (`looks_for_melee`), and firewarriors once reloaded, as far as they throw
+  (`GameMap::looking`; any enemy person, in a melee or not: their own look is not traced); the preacher's conversion
+  and the shaman's look during some orders are TODO; spies and wildmen never look. On its kind's `look_every` (4 turns; preacher 2),
   phase 0.
 - How far (`sight_now`, cells; per kind `sight` and `sight_at_work`: brave and warrior 5 and 1, preacher and shaman
   3 and 1, firewarrior 11 and 5, spy and wildman 0): idle, holding wood or hacking at a building, its full sight;
@@ -156,3 +157,25 @@ followed each turn (`GameMap::spot_enemies`).
   when idle, also someone in a melee (to join it) or an enemy building it can wear down. It then attacks it
   (`Order::Attack`'s path) [ours: the original gives itself an "attack around this cell" order].
 - `UnitGrid`: the living people outside by cell, sorted, built only on a look turn.
+
+## Firebolts
+`crate::firebolt` ("Firewarrior fire" [exe, measured]). Firewarriors (`KindStats::throws`) never charge, hack or
+join a melee on their own attack (they still fight when challenged).
+- Reach per axis (`bolt_reach`): 11 cells × the altitude band's percent (`cast_range::ALT_BAND_PERCENT`, the band
+  `height / 128`), + 4 in a drum tower (not used yet), made odd, × 256 + 56 units: 9 cells low down, 11, 13, 15, up
+  to 17 at the top.
+- Attacking: it walks until its target (a person, or a building's door) is in reach, then stops there
+  (`Unit::hold`); reloaded, it throws (`Action::Throwing`, 5 turns): two bolts start 96 units to each side at its
+  height + 16, only the right one hits. Reload `RELOAD` 25 turns (36 from a tower, >> 3 bloodlusted), its last step
+  only on a turn of four (`reload_step`): 25 to 28 turns between throws.
+- A bolt (`Registry<Firebolt>` on `GameMap::bolts`, ticked first in the turn, `tend_bolts`): 512 units per turn in
+  3D, homing on the target's middle (+ 16) or a building's door on the ground, arriving within one turn's move. The
+  hitting one: every enemy person outside in that cell loses `CELL_DAMAGE` 100 (× 3 bloodlusted), the target also
+  `TARGET_DAMAGE` 100 × its kind's share (`bolt_share`: the warrior 12/256, so 4; others all of it): a brave 200, a
+  warrior 104, anyone else in the cell 100; `DamageKind::Fire` [whether the shield stops it: guess, it does not].
+  Those hit are thrown 64 per turn away from the thrower and 110 up; a warrior or preacher that lives only hops 36.
+  Trees in the cell burn; a targeted building takes 100 wear and burns. A firewarrior target that is free fires back.
+- Drawn: our own glowing ball per bolt (`firebolts` view); the throw pose (anim 7).
+- Not yet: the line of fire (a building in the way), throwing from a drum tower or a vehicle, the smoke trail and
+  the ground light, a ghost firewarrior's harmless bolts, the shaman inside a building or vehicle taking half her
+  life, an angel's reaction.

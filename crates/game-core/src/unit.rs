@@ -180,6 +180,8 @@ pub enum Action {
     Attacking { target: Target, to: (u16, u16) },
     /// Its `role` in the challenge `challenge` (challenge.rs).
     Challenge { challenge: crate::challenge::ChallengeId, role: crate::challenge::Role },
+    /// A firewarrior throwing fire at `target` (firebolt.rs), `left` turns to go; then back to its attack.
+    Throwing { target: Target, left: Countdown },
     /// Hacking at the building `building` (wreck.rs), `left` turns to go; first at its door.
     Hacking { building: crate::building::BuildingId, left: Countdown, at_door: bool },
     /// Fighting in the melee `melee` (melee.rs): its place in the ring, its stance.
@@ -214,7 +216,7 @@ impl Action {
             Action::Hammering => "Hammering",
             Action::Attacking { .. } => "Attacking",
             Action::Challenge { .. } | Action::Melee { .. } => "Fighting",
-            Action::Hacking { .. } => "Attacking",
+            Action::Hacking { .. } | Action::Throwing { .. } => "Attacking",
             #[cfg(test)]
             Action::Gathered { .. } => "Gathered",
         }
@@ -246,7 +248,8 @@ impl Action {
             | Action::Holding { left }
             | Action::Flattening { left, .. }
             | Action::Building { left }
-            | Action::Hacking { left, .. } => Some(left),
+            | Action::Hacking { left, .. }
+            | Action::Throwing { left, .. } => Some(left),
             Action::Challenge { role: crate::challenge::Role::Shoving { left, .. }, .. } => Some(left),
             Action::Melee { stance: crate::melee::Stance::Striking { left, .. } | crate::melee::Stance::Reeling { left, .. }, .. } => Some(left),
             _ => None,
@@ -331,6 +334,8 @@ pub struct Unit {
     pub motion: Motion,
     pub statuses: Statuses,
     pub action: Action,
+    /// Turns before a firewarrior throws again (`firebolt::reload`).
+    pub reload: u8,
     /// Pieces of wood carried (braves, 0 or 1).
     pub carrying: u8,
     /// Waypoints left on the way to `Walking::to`, next one last.
@@ -398,6 +403,7 @@ impl Unit {
             statuses: Statuses::default(),
             action: Action::Idle,
             carrying: 0,
+            reload: 0,
             route: Vec::new(),
             planned_on: None,
             teleport_to: None,
@@ -655,6 +661,12 @@ impl Unit {
             }
             Action::Attacking { to, .. } => self.approach(to, ground),
             Action::Hacking { .. } => {}
+            Action::Throwing { target, mut left } => {
+                self.action = match left.tick() {
+                    false => Action::Throwing { target, left },
+                    true => Action::Attacking { target, to: (self.x, self.z) },
+                };
+            }
             Action::Challenge { challenge, role } => self.action = Action::Challenge { challenge, role: self.play(role, ground) },
             Action::Melee { melee, place, stance } => self.action = Action::Melee { melee, place, stance: self.fight(place, stance, ground) },
             Action::Entering { to } => {
@@ -999,6 +1011,14 @@ impl Unit {
         self.start(Order::Stop);
         if self.action.can_take_orders() {
             self.action = Action::Attacking { target, to };
+        }
+    }
+
+    /// Stops where it stands, still attacking (a thrower in reach).
+    pub fn hold(&mut self) {
+        if let Action::Attacking { target, .. } = self.action {
+            self.action = Action::Attacking { target, to: (self.x, self.z) };
+            self.route.clear();
         }
     }
 

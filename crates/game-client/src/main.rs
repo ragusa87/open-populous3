@@ -7,6 +7,7 @@ mod buildings;
 mod campfire;
 mod chimney;
 mod debug_overlay;
+mod firebolts;
 mod camera;
 mod camera_debug;
 mod construction;
@@ -106,7 +107,7 @@ fn main() {
             (camera_debug::CameraDebugPlugin, debug_overlay::DebugOverlayPlugin),
             object_scale::ObjectScalePlugin,
             chimney::ChimneyPlugin,
-            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin),
+            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin),
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();
