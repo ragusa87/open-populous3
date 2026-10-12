@@ -57,12 +57,17 @@ pub struct Twinkle {
     pub size: f32,
 }
 
-/// A well-mixed hash of `x` (murmur3's finaliser): nearby inputs give unrelated outputs.
+/// The two multipliers of MurmurHash3's 32-bit finaliser (`fmix32`): odd numbers its author found by search to
+/// spread every input bit over every output bit. Any value is fine as long as it is odd and bit-scrambled.
+const MURMUR3_MIX_1: u32 = 0x85EB_CA6B;
+const MURMUR3_MIX_2: u32 = 0xC2B2_AE35;
+
+/// A well-mixed hash of `x` (MurmurHash3's `fmix32`): nearby inputs give unrelated outputs.
 fn mix(mut x: u32) -> u32 {
     x ^= x >> 16;
-    x = x.wrapping_mul(0x85EB_CA6B);
+    x = x.wrapping_mul(MURMUR3_MIX_1);
     x ^= x >> 13;
-    x = x.wrapping_mul(0xC2B2_AE35);
+    x = x.wrapping_mul(MURMUR3_MIX_2);
     x ^ (x >> 16)
 }
 
