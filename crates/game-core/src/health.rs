@@ -33,6 +33,11 @@ impl Health {
         self.current == 0
     }
 
+    /// A quarter of the maximum or less: the original's low-health flag (0x4D43A0), shown over the person.
+    pub fn is_low(self) -> bool {
+        self.max / 4 >= self.current
+    }
+
     /// Loses `points` (down to 0); true when that leaves none.
     pub fn damage(&mut self, points: u16) -> bool {
         self.current = self.current.saturating_sub(points);
@@ -48,6 +53,14 @@ impl Health {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn low_at_a_quarter_or_less() {
+        assert!(!Health::new(251, 1000).is_low());
+        assert!(Health::new(250, 1000).is_low(), "a quarter exactly");
+        assert!(Health::new(0, 1000).is_low());
+        assert!(!Health::full(1000).is_low());
+    }
 
     #[test]
     fn damage_stops_at_zero() {
