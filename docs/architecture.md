@@ -36,12 +36,15 @@ crates/
 `GameMap::tick` is the one main loop: one call is one turn of the original (12 per second, `time.rs`), and it ticks
 each kind of object in a fixed, written order. The original's order inside a turn is not known yet (TODO.md); ours:
 1. walls (`update_walls`), then trees (`Tree::tick`);
-2. effects (`tend_effects`): before anything they act on, so units react the same turn;
-3. camp fires, vaults, totems;
-4. coordinators (docs/specs/coordinators.md): scans that start them, their turns, the finished ones removed, their
-   events, then the units whose coordinator is gone released, so a coordinator ending now is gone when its units tick;
-5. units (`Unit::tick`), then their events (wood, work, doors) in unit order;
-6. chained orders, building work, wood put down, people counted inside, mana (`ManaPool::tick`, each player's with
+2. firewarriors' reloads and their bolts in flight (`tend_reloads`, `tend_bolts`, combat.md "Firebolts"), then
+   effects (`tend_effects`): before anything they act on, so units react the same turn;
+3. fires, buildings' wear (`tend_building_wear`), ashes (`Ashes::tick`), camp fires, vaults, totems;
+4. spotting (`spot_enemies`), attacks followed (`tend_attacks`) and buildings hacked (`tend_wrecking`) (combat.md);
+5. coordinators (docs/specs/coordinators.md): scans that start them (challenges, melees joined), their turns, the
+   finished ones removed, their events, then the units whose coordinator is gone released, so a coordinator ending
+   now is gone when its units tick;
+6. healing on its rhythm (`HEAL_EVERY`), units (`Unit::tick`), then their events (wood, work, doors) in unit order;
+7. chained orders, building work, wood put down, people counted inside, mana (`ManaPool::tick`, each player's with
    its spell book), the gone units removed.
 
 Rules for every object that ticks:
@@ -61,7 +64,8 @@ Rules for every object that ticks:
   `add_effect`), never given twice, so each list stays sorted by id and lookups (`unit`, `building`) are binary
   searches. New kinds use typed ids (`id::Id<T>`, from `GameMap::new_id_of`, the same counter): an `Id<Effect>` does
   not fit where another kind's id is expected. They are kept in an `id::Registry<T>` (sorted by id, iterated in id
-  order); effects are. Units and buildings still hold a raw `u32` (TODO). Whoever holds an id finds None once that object is gone: it has ended. Indices are only valid inside
+  order); effects, coordinators and firebolts are. Units and buildings hold typed ids too (`UnitId`, `BuildingId`)
+  in plain sorted `Vec`s. Whoever holds an id finds None once that object is gone: it has ended. Indices are only valid inside
   one turn.
 - **Coordinators** (docs/specs/coordinators.md): an object that coordinates several units (a fight, a sermon) is a
   coordinator, linked one way by the units' actions and ticked before them.
