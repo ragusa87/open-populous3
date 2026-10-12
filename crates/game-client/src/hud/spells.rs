@@ -256,15 +256,20 @@ fn tile_clicks(
     }
 }
 
-/// Right click on a known spell's tile pauses or resumes its recharge.
+/// The command a right click on `slot`'s tile sends: pause or resume its recharge, only for a spell discovered and
+/// recharging with mana (known).
+pub fn pause_toggle(slot: &SpellSlot) -> Option<Command> {
+    (slot.availability == Availability::Known).then_some(Command::PauseSpell { player: PLAYER, kind: slot.kind, paused: !slot.paused })
+}
+
+/// Right click on a spell's tile toggles its pause (`pause_toggle`).
 fn pause_clicks(mouse: Res<ButtonInput<MouseButton>>, tiles: Query<(&Interaction, &Tile)>, map: Res<CurrentMap>, mut schedule: ResMut<crate::units::GameSchedule>) {
     let book = player_book(&map.0);
     if !mouse.just_pressed(MouseButton::Right) {
         return;
     }
-    if let Some((_, tile)) = tiles.iter().find(|(i, _)| **i == Interaction::Hovered) {
-        let slot = &book.slots[tile.0];
-        schedule.issue(Command::PauseSpell { player: PLAYER, kind: slot.kind, paused: !slot.paused });
+    if let Some(command) = tiles.iter().find(|(i, _)| **i == Interaction::Hovered).and_then(|(_, tile)| pause_toggle(&book.slots[tile.0])) {
+        schedule.issue(command);
     }
 }
 
@@ -421,6 +426,17 @@ mod tests {
         s.charges = 4;
         s.recharge = 0;
         assert_eq!(tile_view(&s).progress, None, "full spells hide the bar");
+    }
+
+    #[test]
+    fn right_click_toggles_the_pause_of_known_spells_only() {
+        let mut s = slot(SpellKind::Blast, Availability::Known);
+        assert_eq!(pause_toggle(&s), Some(Command::PauseSpell { player: PLAYER, kind: SpellKind::Blast, paused: true }));
+        s.paused = true;
+        assert_eq!(pause_toggle(&s), Some(Command::PauseSpell { player: PLAYER, kind: SpellKind::Blast, paused: false }));
+        for a in [Availability::Hidden, Availability::Discoverable, Availability::Provided { shots: 2 }, Availability::Unlimited] {
+            assert_eq!(pause_toggle(&slot(SpellKind::Blast, a)), None, "{a:?}");
+        }
     }
 
     #[test]
