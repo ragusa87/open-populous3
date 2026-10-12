@@ -96,7 +96,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 
 ## The tick ([architecture.md](docs/architecture.md) "The tick")
 - [ ] Find the original's order of work inside a turn (people, buildings, effects, shots, mana; income comes before spell charging): ours is a guess.
-- [ ] Rhythms still on per-object counters or missing: unit healing and stranded hurt (`REGEN_EVERY`, `STRANDED_HURT_EVERY`, rates unknown), hut breeding every 4 turns (0x404C80) and growth every 16 (0x4050C0), mana income every 16 (`MANA_UPDATE_FREQ`), the other status timers every 8 (shield and bloodlust done).
+- [ ] Rhythms still on per-object counters or missing: unit healing (measured: every 8 turns, brave and preacher +4, warrior and firewarrior +6; pop3-rev-analysis.md "Combat", Measured) and stranded hurt (`STRANDED_HURT_EVERY`, rate unknown), hut breeding every 4 turns (0x404C80) and growth every 16 (0x4050C0), mana income every 16 (`MANA_UPDATE_FREQ`), the other status timers every 8 (shield and bloodlust done).
 - [ ] World events without behaviour yet: `Raid` (occupants thrown out). Panic: the screaming, and how the original turns at an obstacle.
 - [ ] Burning buildings (`fire`): the igniter's tribe and the destroyed-building count (`stats[tribe][7]`), the fire sound.
 - [ ] Shots (fireballs 8/4, 8/7, 8/8): a typed list ticked before effects, integer flight, spawning a simple blast on arrival.
@@ -114,7 +114,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Shaman fighting: staff strike (57) for moves 2 and 3 and the opening blow, kick (69) for move 4; no hit anim (idle 53 for 7 turns), never knocked back (pop3-rev-analysis.md "Combat").
 - [ ] Warriors: melee specialists: `FIGHT_DAMAGE_WARR` 360 against a brave's 60 (`constant.dat`; 180 in the exe), life 1800 against 1000 (pop3-rev-analysis.md "Combat").
 - [ ] Preachers convert enemies.
-- [ ] Firewarriors (pyro-warriors) throw fire at enemies, both on the ground and in vehicles; they never join a melee (person-type flag 0x40, pop3-rev-analysis.md "Combat"), their ranged attack is not traced.
+- [ ] Firewarriors (pyro-warriors) throw fire at enemies, both on the ground and in vehicles; they never join an existing fight (person-type flag 0x40), but fight in melee when attacked, at half speed (14-turn moves; pop3-rev-analysis.md "Combat"); their ranged attack is not traced.
 - [ ] Health, hit feedback and death animations for every unit type.
 - [ ] Healing needs no action: every unit heals over time (the shaman already does, except while casting or drowning; make it the rule for all units). Exception: flying monsters (e.g. Angel of Death) never heal.
 

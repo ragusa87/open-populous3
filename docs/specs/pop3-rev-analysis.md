@@ -678,9 +678,10 @@ otherwise:
   runs up, kicks the target away without damage, runs up again, then the pre-fight turns into a **fight** (10/8).
   A fight holds up to 6 people in a ring and is where all the health is lost. People in a pre-fight are in person
   state 29 (0x1D), in a fight in state 25 (0x19); both link to their controller by `+0x9D`.
-- Ranged fighting is not part of these controllers: firewarriors (type 6, person-type flag `+0x30` bit 0x40) can
-  never take a fight slot, and their attack order uses its own approach sub-states (10, 11) instead of 2, 3
-  (0x51BC2E), presumably to throw fire from a distance (not traced).
+- Firewarriors (type 6, person-type flag `+0x30` bit 0x40) never join an existing fight, and their own attack
+  order uses its own approach sub-states (10, 11) instead of 2, 3 (0x51BC2E), presumably to throw fire from a
+  distance (not traced). But a firewarrior attacked by someone else goes through the pre-fight and fights in melee
+  like anyone, at half speed (its draw class plays 2 turns per frame: 14-turn moves and hits) [measured].
 
 ### Starting a melee (the attack-order handler, 0x51A2A0)
 ```text
@@ -708,10 +709,9 @@ mode 0: attacker sub 5, target sub 4
     reached when |dx| < 315 and |dz| < 315 (0.6 cell) and the target is in sub 4 → attacker sub 6
 6 attacker kicks: speed 0, anim 15 (shaman 57), faces the target; 6 turns (shaman 4)
     2 turns before the end (turn 4 of 6): target sub 7; at the end: sound 13, attacker sub 8
-7 target kicked away: anim 16 (one tilted frame; a shaman stays idle, 53) for 2 turns, then
-    velocity 100 + rand(100) units per turn at (heading to the attacker) + 120°..240°
-    (+0x2AB + rand(0x2AA) of 2048: away from the kicker, ±60°); no damage
-    back on the ground (+0xE bit 0x8 clear) → sub 4
+7 target kicked away, at once: velocity 100 + rand(100) units per turn at (heading to the attacker) + 120°..240°
+    (+0x2AB + rand(0x2AA) of 2048: away from the kicker, ±60°); no damage; anim 16 (one tilted frame; a shaman
+    stays idle, 53) for the first 2 turns of the flight; stopped (+0xE bit 0x8 clear) → sub 4
 8 attacker runs again (as 5, a new 40-turn timer); reached and the target in sub 4 → the fight starts:
     a fight 10/8 at the target's place, both in state 25, placed by 0x519D10 (below)
 global flag 0x89D17C bit 0x40 (an option, not traced): no kick, reaching the target starts the fight
@@ -721,8 +721,8 @@ mode 1 (pulled out of a building): both sub 3; the target is thrown out of the d
 mode 2: both sub 1: wait up to 100 turns (8.3 s) for 0x439030, then sub 2: walk to the building door, up to
     100 turns; both in sub 2 → sub 3 as mode 1                                   (meaning unverified)
 ```
-So the opening kick exists: a knockback of 100-199 units per turn, without damage, once per pair, before the first
-exchange. Nobody is gathered: a pre-fight is always one attacker and one target.
+So the opening kick exists: a knockback without damage, once per pair, before the first exchange. Nobody is
+gathered: a pre-fight is always one attacker and one target.
 
 ### Fight (per turn 0x518FB0)
 Controller fields: count `+0x68` (≤ 6), the two tribes `+0x69` / `+0x6A`, winner tribe `+0x6B`, the centre
@@ -800,6 +800,24 @@ join(person, fight)                                                    (0x51DDC0
   idle person in sub 1 attacks again at once if its opponent is ready, so the rhythm is about one blow per
   0.6 s per pair (estimate, not measured).
 
+### Measured (a level against tribe 1, `fightwatch.py`, about 500 turns) [measured]
+- Timings as traced: the opening blow 6 turns, the target flung when the attacker has 2 left; moves 2, 3, 4 last
+  6, 7, 7 turns, a hit 7 (4 then the knockback for move 2); a firewarrior's move or hit 14. A pair exchanges
+  about every 8 turns (0.67 s). With the attacker already in reach, a pre-fight lasts about 8 turns before the fight.
+- The ring radius is 180 (two fighters 179 apart). Fights were always 1 against 1-3, never 2 against 2.
+- Moves 2 and 3 cost both fighters health, move 4 only the target, as traced.
+- The opening blow's flight: 190-370 units on its first turn, then slowing: 0.7 to 2.5 cells in all (the long ones
+  kept sliding for up to 10 turns, probably downhill: "Person physics"). The fight's knockback (sub 7): about 50.
+- Damage fits `FIGHT_DAMAGE × life / max_life` only with each person's own maximum (`+0x6C`), which is not always
+  `LIFE_<type>`: these braves fitted about 800 (tribe 0) and 970 (tribe 1), and a warrior's blows (270-320 against
+  braves) fit about 1450-1620 instead of 1800. Where the maximum comes from is open.
+- Healing, outside and inside fights, every 8 turns (turns that are multiples of 8): brave and preacher +4,
+  warrior and firewarrior +6. Not traced in the exe.
+- Edge cases seen: the attacker in one pre-fight became the target of another, and the first one stood
+  stalled (attacker in sub 4) until a fight took it away; a fighter walked off by an order was pulled into a new
+  pre-fight and its fight ended; a person kept running in a pre-fight for 11 turns at negative life (hurt by
+  something else) before dying.
+
 Strength per type (exe default / `constant.dat`); it falls with the attacker's health, never under 32:
 
 | Type | `LIFE_` | `FIGHT_DAMAGE_` | Full-health blows to kill a full brave (file, estimate) |
@@ -808,7 +826,7 @@ Strength per type (exe default / `constant.dat`); it falls with the attacker's h
 | warrior | 1800 / 1800 | 180 / 360 | 3 |
 | preacher | 1400 / 1100 | 60 / 60 | about 21 |
 | spy | 1400 / 600 | 60 / 60 | about 21 |
-| firewarrior | 1200 / 700 | 180 / 60 | never in a fight |
+| firewarrior | 1200 / 700 | 180 / 60 | about 21, at half the rhythm |
 | shaman | 900 / 2000 | 60 / 60 | about 21 |
 
 - The file spells the shaman's constant `FIGHT_DAMAGE_SHAMAN`, the exe table `FIGHT_DAMAGE_SHAMEN`; if
@@ -912,7 +930,8 @@ Strength per type (exe default / `constant.dat`); it falls with the attacker's h
 - What "busy" means (unit+0xE bit 7, unit+0xA7), and the preacher's extra check.
 - The controller types of tribe+0xC1F (2 is human; 1 gets full mana).
 - Spell order and share inside the distribution loop.
-- Combat: a live check of the exchange rhythm (`fightwatch.py`), whether a taunt (48-50) plays to its end (0x4D4DA0
+- Combat: where a person's maximum life (`+0x6C`) comes from when it is not `LIFE_<type>`, the healing rule
+  (measured +4 / +6 every 8 turns), whether a taunt (48-50) plays to its end (0x4D4DA0
   resets a non-idle person to idle the next turn; the per-person `+0x7E` it sets may hold it),
   what option flag 0x89D17C bit 0x40 is (no kick, no knockback),
   the meaning of pre-fight mode 2, the ground test of a fight's place (0x51E4B0), the attacker's sub-state 8 when
