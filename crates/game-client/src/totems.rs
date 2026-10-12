@@ -26,7 +26,7 @@ use std::f32::consts::TAU;
 /// Theme whose atlas textures totems on maps without one.
 const DEFAULT_THEME: u8 = 0;
 /// Footprint half size (cells): the totem rests on the lowest ground under it.
-const HALF: f32 = 0.4;
+pub const HALF: f32 = 0.4;
 /// The generated stand-in pillar (cells) and its colour.
 const PILLAR: Vec3 = Vec3::new(0.45, 1.3, 0.45);
 const PILLAR_STONE: Color = Color::srgb(0.5, 0.48, 0.44);

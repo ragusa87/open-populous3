@@ -147,21 +147,21 @@ pub fn totem_at(map: &GameMap, at: (u16, u16), hoverable: impl Fn(usize) -> bool
     map.totem_at(at).filter(|&i| hoverable(i))
 }
 
-/// A building as seen on screen: its index, the box around its model (pixels) and how far it is from
-/// the eye.
+/// A building or totem as seen on screen: its index, the box around its model (pixels) and how far it
+/// is from the eye.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BuildingOnScreen {
+pub struct ModelOnScreen {
     pub index: usize,
     pub min: Vec2,
     pub max: Vec2,
     pub depth: f32,
 }
 
-/// The building under the cursor: inside its box on screen, the nearest one when several overlap. The
+/// The model under the cursor: inside its box on screen, the nearest one when several overlap. The
 /// whole model counts, not only its footprint on the ground (with a low camera, the cursor on a tower's
 /// top points at the ground behind it).
-pub fn building_on_screen(cursor: Vec2, buildings: &[BuildingOnScreen]) -> Option<usize> {
-    buildings
+pub fn model_on_screen(cursor: Vec2, models: &[ModelOnScreen]) -> Option<usize> {
+    models
         .iter()
         .filter(|b| (b.min.x..=b.max.x).contains(&cursor.x) && (b.min.y..=b.max.y).contains(&cursor.y))
         .min_by(|a, b| a.depth.total_cmp(&b.depth))
@@ -169,9 +169,10 @@ pub fn building_on_screen(cursor: Vec2, buildings: &[BuildingOnScreen]) -> Optio
 }
 
 /// The box on screen around a model standing at `gt`: its footprint (`half` cells either side along
-/// its own axes) from the ground up to `height` cells.
+/// its own axes) from the ground up to `height` cells, both at the model's scale.
 pub fn screen_box(cam: (&Camera, &GlobalTransform), gt: &GlobalTransform, half: Vec2, height: f32) -> Option<(Vec2, Vec2)> {
-    let (o, right, back, up) = (gt.translation(), gt.right() * half.x, gt.back() * half.y, gt.up() * height);
+    let s = gt.scale();
+    let (o, right, back, up) = (gt.translation(), gt.right() * half.x * s.x, gt.back() * half.y * s.z, gt.up() * height * s.y);
     let mut points = Vec::with_capacity(8);
     for corner in [right + back, right - back, -right + back, -right - back] {
         for lift in [Vec3::ZERO, up] {
@@ -252,7 +253,7 @@ fn detect(
         let wood = ground.and_then(|at| wood_index(&map.0, at)).filter(|&i| woods.iter().any(|w| w.0 == i));
         // Plans have no view to outline but are hovered for their tooltip.
         let plan = |i: usize| map.0.buildings[i].owner == PLAYER && map.0.buildings[i].stage() == Stage::Blueprint;
-        let standing: Vec<BuildingOnScreen> = views
+        let standing: Vec<ModelOnScreen> = views
             .iter()
             .filter_map(|(b, _, _, gt)| {
                 let i = b?.0;
@@ -261,12 +262,21 @@ fn detect(
                 let half = Vec2::new(f.half.0 as f32, f.half.1 as f32) / 512.0;
                 let height = heights.0.get(&building.id).copied().unwrap_or(1.0);
                 let (min, max) = screen_box(cam, gt, half, height)?;
-                Some(BuildingOnScreen { index: i, min, max, depth: cam.1.translation().distance(gt.translation()) })
+                Some(ModelOnScreen { index: i, min, max, depth: cam.1.translation().distance(gt.translation()) })
             })
             .collect();
-        let building = building_on_screen(c, &standing).or_else(|| ground.and_then(|at| building_at(&map.0, at, plan)));
+        let building = model_on_screen(c, &standing).or_else(|| ground.and_then(|at| building_at(&map.0, at, plan)));
         let tree = tree.tree.filter(|&i| views.iter().any(|(_, t, _, _)| t.is_some_and(|t| t.0 == i)));
-        let totem = ground.and_then(|at| totem_at(&map.0, at, |i| views.iter().any(|(_, _, t, _)| t.is_some_and(|t| t.index == i))));
+        let totems: Vec<ModelOnScreen> = views
+            .iter()
+            .filter_map(|(_, _, t, gt)| {
+                let t = t?;
+                map.0.totems.get(t.index).filter(|totem| !totem.is_gone())?;
+                let (min, max) = screen_box(cam, gt, Vec2::splat(crate::totems::HALF), t.top)?;
+                Some(ModelOnScreen { index: t.index, min, max, depth: cam.1.translation().distance(gt.translation()) })
+            })
+            .collect();
+        let totem = model_on_screen(c, &totems).or_else(|| ground.and_then(|at| totem_at(&map.0, at, |i| views.iter().any(|(_, _, t, _)| t.is_some_and(|t| t.index == i)))));
         pick(unit, wood, tree, totem, building)
     });
     hovered.set_if_neq(Hovered(target));
@@ -421,11 +431,11 @@ mod tests {
 
     #[test]
     fn a_building_is_under_the_cursor_anywhere_on_its_model_the_nearest_first() {
-        let tower = BuildingOnScreen { index: 1, min: Vec2::new(100.0, 50.0), max: Vec2::new(140.0, 200.0), depth: 20.0 };
-        let hut = BuildingOnScreen { index: 2, min: Vec2::new(90.0, 150.0), max: Vec2::new(180.0, 210.0), depth: 12.0 };
-        assert_eq!(building_on_screen(Vec2::new(120.0, 60.0), &[tower, hut]), Some(1), "the tower's top");
-        assert_eq!(building_on_screen(Vec2::new(120.0, 180.0), &[tower, hut]), Some(2), "the hut in front of it");
-        assert_eq!(building_on_screen(Vec2::new(120.0, 40.0), &[tower, hut]), None, "above them");
+        let tower = ModelOnScreen { index: 1, min: Vec2::new(100.0, 50.0), max: Vec2::new(140.0, 200.0), depth: 20.0 };
+        let hut = ModelOnScreen { index: 2, min: Vec2::new(90.0, 150.0), max: Vec2::new(180.0, 210.0), depth: 12.0 };
+        assert_eq!(model_on_screen(Vec2::new(120.0, 60.0), &[tower, hut]), Some(1), "the tower's top");
+        assert_eq!(model_on_screen(Vec2::new(120.0, 180.0), &[tower, hut]), Some(2), "the hut in front of it");
+        assert_eq!(model_on_screen(Vec2::new(120.0, 40.0), &[tower, hut]), None, "above them");
     }
 
     #[test]
