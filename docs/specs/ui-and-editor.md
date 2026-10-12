@@ -26,7 +26,8 @@ stays up there and looks down more steeply, so cliffs between it and the focus n
 H flies the camera to the player's reincarnation site (nothing on maps without one), Space (or a click on her
 preview) to the shaman: a quick 0.4 s flight (`CameraRig::fly_to`, eased, the short way around the torus) rather
 than a jump; pushing the camera by hand cancels it.
-Camera readout (`camera_debug.rs`, bottom right, F3 hides it): focus, the game angle it looks along (0-2047, as in a
+Camera readout (`camera_debug.rs`, bottom right, F3 hides it): frames per second and frame time (Bevy's smoothed
+`FrameTimeDiagnosticsPlugin`, on screen only), focus, the game angle it looks along (0-2047, as in a
 level header's start camera), yaw, tilt, distance, fov, the eye's position (game frame, cells), and the
 `FOCUS`/`DISTANCE`/`PITCH`/`YAW` variables that give the same view in `just shot`. The same readout is printed
 to stdout on one line once the camera has stayed still 0.4 s after a change (`SettledLog`). G toggles the cell grid on the
