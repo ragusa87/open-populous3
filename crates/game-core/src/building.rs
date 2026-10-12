@@ -146,6 +146,12 @@ impl BuildingKind {
         }
     }
 
+    /// Whether it never burns: the library (vault of knowledge) and the prison (building-type flag `+0x4A` bit 0x1,
+    /// pop3-rev-analysis.md "Burning building").
+    pub fn fireproof(self) -> bool {
+        matches!(self, BuildingKind::Vault | BuildingKind::Prison)
+    }
+
     /// People it holds inside: huts 3, 4, 5 by size (huts-and-training.md), a drum tower one
     /// (buildings.md "Towers"); 0 for the others (training huts will queue instead).
     pub fn capacity(self) -> u8 {

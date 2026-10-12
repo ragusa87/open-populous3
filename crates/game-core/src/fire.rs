@@ -15,7 +15,7 @@ pub const BURN_TICKS: Ticks = Ticks::new(127);
 /// What setting a building on fire did to it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Burnt {
-    /// Not burnt: never built with wood (vault, prison...), only a plan, or already burning (ours, a guess).
+    /// Not burnt: fireproof (`BuildingKind::fireproof`), only a plan (ours, a guess), or already burning.
     Spared,
     /// Burning, one piece of wood less, the rest standing.
     Damaged,
@@ -24,12 +24,16 @@ pub enum Burnt {
 }
 
 impl Building {
-    /// Sets it on fire: one structural hit of 100 wood (one piece), and it burns for `BURN_TICKS`.
+    /// Sets it on fire: one structural hit of 100 wood (one piece), and it burns for `BURN_TICKS`. A kind whose wood
+    /// we do not know (`wood_cost` 0: guard post, gate...) burns without losing any (ours, a guess).
     pub fn ignite(&mut self) -> Burnt {
-        if self.kind.wood_cost() == 0 || self.stage() == Stage::Blueprint || self.burning.is_some() {
+        if self.kind.fireproof() || self.stage() == Stage::Blueprint || self.burning.is_some() {
             return Burnt::Spared;
         }
         self.burning = Some(Countdown::new(BURN_TICKS));
+        if self.kind.wood_cost() == 0 {
+            return Burnt::Damaged;
+        }
         self.used = self.used.min(self.kind.wood_cost()).saturating_sub(1);
         if self.used == 0 { Burnt::Destroyed } else { Burnt::Damaged }
     }
@@ -103,9 +107,13 @@ mod tests {
     }
 
     #[test]
-    fn plans_and_buildings_without_wood_never_burn() {
+    fn the_library_the_prison_and_plans_never_burn() {
         assert_eq!(Building::new(BuildingKind::Vault, 0, 0, 0, 0).ignite(), Burnt::Spared);
+        assert_eq!(Building::new(BuildingKind::Prison, 0, 0, 0, 0).ignite(), Burnt::Spared);
         assert_eq!(Building::site(BuildingKind::Temple, 0, 0, 0, 0).ignite(), Burnt::Spared);
+        let mut post = Building::new(BuildingKind::GuardPost, 0, 0, 0, 0);
+        assert_eq!(post.ignite(), Burnt::Damaged, "burns, its wood unknown: stands");
+        assert!(post.burning.is_some());
         let frame = Building { used: 0, ..Building::new(BuildingKind::Temple, 0, 0, 0, 0) };
         assert_eq!(frame.clone().ignite(), Burnt::Destroyed, "a bare frame burns down");
     }
