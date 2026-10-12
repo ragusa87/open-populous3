@@ -803,7 +803,7 @@ nibble gifted one-shots; `set_struct_56B_array_spell_val`); the reservoir short-
 of 0x89C661.
 
 ### Constant table [exe]
-- At 0x5AA60F, 343 records of 31 bytes: `char name[25]`, `u8 size` (1, 2 or 4), `u8 flags`, `u32 value_ptr`.
+- At 0x5AA60F, 340 records of 31 bytes: `char name[25]`, `u8 size` (1, 2 or 4), `u8 flags`, `u32 value_ptr`.
   Read by `read_levels_const`.
 - Flag bit 0, percent: stored as `value * 256 / 100` (0x49C4C1). The exe defaults are already in that form
   (512 = 200 %).

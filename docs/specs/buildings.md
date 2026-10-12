@@ -284,6 +284,15 @@ Seen in the game once the island is up (wood in the building / wood needed): eve
 common percentage and no link with the island heights stored under them (huts at heights 30 to 90 all show 1/3):
 the rule is unknown (fixed per kind, random, or from how far the ground moved).
 
+The original's reaction to moved ground does not explain it (pop3-rev-analysis.md "Terrain changes: what reacts"):
+after a terrain change near it, a building only re-levels its footprint towards its average height, or collapses
+when a footprint cell is more than 200 away; it never loses part of its wood. The island's lost pieces must come
+from elsewhere: the atlantis effects (89/90) themselves, a partial explosion like the earthquake's (effect 14), or
+the building's second destroy reason (sub-state 2, not traced). Ours: the foundation check will go where terrain
+changes are applied (`WorldEvent::Terrain` in `GameMap::apply_event`). Only effects change terrain that way today:
+cast terrain spells (`GameMap::apply`, `Spell::cast`) and the editor brushes write the heightmap directly, and must go
+through it too so every change triggers the check (TODO "Destruction of buildings on uneven/flooded ground").
+
 Planned model: damage takes wood out of a Built building (its used count drops below the kind's wood cost, the
 pieces are lost, not dropped), its view goes back to the wooden frame, and assigned braves bring it back up like a
 construction. To check in the game: what sets the damage, and whether repairs need fetched wood.
