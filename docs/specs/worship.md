@@ -71,8 +71,8 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   is a pedestal block with a head block nodding the same way.
 - The other looks do not move (to check in the game).
 - Gifts (`totem::gift`, from the trigger's targets): a spell (`Reward::Spell`, a "once" discovery
-  `Reward::OneShot`: one more cast, `worship::one_more_shot`), a building, mana (`Reward::Mana`, only logged:
-  no mana yet), anything else `Reward::Unhandled { kind, model }` (effects, revealed things, the Angel of
+  `Reward::OneShot`: one more cast, `worship::one_more_shot`), a building, mana (`Reward::Mana`, added to the
+  tribe's mana pool), anything else `Reward::Unhandled { kind, model }` (effects, revealed things, the Angel of
   Death), only logged. The Worship sandbox's totems give one cast of a spell, mana, or (the winged death
   totem) an unhandled effect (`map::sandbox_gift`). Dev: `BRAVES=totem:N`.
 - Loaded (done: `totem::totems_from_level`): every scenery 9 of a level becomes a `Totem` with `prayers`

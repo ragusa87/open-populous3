@@ -34,7 +34,10 @@ Known / Unlimited: cast at will, used by sandbox spells), `charges` (max 4, fewe
 "Original balance") and `recharge` mana.
 `charge(mana)` shares mana evenly between the spells taking it (known, not full, not paused: `set_paused`), a
 spell filled up passing the rest of its share on, and returns what is left; `cast(kind)` consumes a charge or a
-provided shot, `discover(kind)` turns "?" into Known. Integer only, deterministic. The engine owns it: casts
+provided shot, `discover(kind)` turns "?" into Known. Integer only, deterministic.
+Provided shots (a totem's or a vault's one-shot gift, `worship::one_more_shot`) never recharge and cannot be paused;
+each gift adds a shot, none to a spell already known. The last shot used leaves the slot empty (Hidden), even when it
+was "?" before the gift: "?" means not discovered, and the gift showed the spell, so it does not come back. The engine owns it: casts
 (`Command::Cast` for a spell aimed at a spot, through `Spell::kind`; `Command::CastSelf` for the others) use a charge
 and are ignored without one, `Command::PauseSpell` pauses, rewards go to their tribe's book. The terrain brushes
 (`Spell::kind` None: editor and dev) use no book. The view only reads it (ui-and-editor.md).

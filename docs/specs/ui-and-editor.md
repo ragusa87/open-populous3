@@ -64,7 +64,7 @@ Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 |---|---|
 | Hidden | empty faint slot (keeps the grid stable) |
 | Discoverable | dark tile with "?", cannot be selected for casting until discovered |
-| Provided { shots } | gray tile, badge `xN`, no recharge, disappears when used up |
+| Provided { shots } | gray tile, badge `xN`, no recharge, no pause; an empty slot once used up, never back to "?" |
 | Known | gold tile, 1-4 charge pips (max depends on the spell), blue recharge bar while not full; dimmed at 0 charges |
 | Unlimited | gold tile, badge `free` |
 
