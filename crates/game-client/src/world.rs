@@ -247,6 +247,7 @@ fn rebuild_terrain(
             if let Some(mut image) = images.get_mut(image) && let Some(pixels) = image.data.as_mut() {
                 for rect in changed {
                     crate::terrain_texture::rebake(&map.0.terrain, theme, params.0.height_scale, row_scale, grid.0, rect, pixels);
+                    crate::terrain_texture::char_ashes(&map.0.ashes, map.0.terrain.size(), rect, pixels);
                 }
             }
         }
@@ -285,6 +286,8 @@ fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32, row_scale: f32, 
     if grid {
         crate::terrain_texture::draw_grid(&mut pixels, side);
     }
+    let all = DirtyRect { min: (0, 0), max: (map.terrain.size() as i32, map.terrain.size() as i32) };
+    crate::terrain_texture::char_ashes(&map.ashes, map.terrain.size(), all, &mut pixels);
     let mut image = Image::new(
         Extent3d { width: side as u32, height: side as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,

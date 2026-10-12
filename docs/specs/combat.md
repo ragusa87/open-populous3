@@ -119,7 +119,20 @@ middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `
   `SHAKE_TICKS` (6) after each blow; its wear fades by one every 4 turns; at its limit (`wear_limit`: 2000; walls
   and gates 16 000; the prison 22 000; a vault never) the wear drops by the limit and it loses a piece of wood
   (`lose_a_piece`): damage smoke, a large building's people thrown out [which kinds are large: guess], no repairs
-  for `REPAIR_DELAY` (1200 turns); with no wood left it is destroyed (its people thrown out).
+  for `REPAIR_DELAY` (1200 turns); with no wood left it is destroyed (its people thrown out) and leaves ashes.
 - Not yet: enemies standing on a plan counting as its people, blasts' and firewarriors' wear, the flying faces of
   the partial explosion, the player warned once, the attack going on from where it stands when no way leads to its
   spot.
+
+## Ashes
+`crate::ashes` ("Building ashes" [exe]): a building destroyed by losing its last piece of wood (worn down by
+attackers, burnt down) is removed and leaves its footprint cells (`walled_cells`) in ashes (`GameMap::burn_down`);
+one removed any other way (a plan cancelled) leaves none.
+- `GameMap::ashes`: up to `ASHES_SLOTS` (100) patches, oldest first; a new one when full clears the oldest.
+- On `ASHES_EVERY` (every 16 turns, phase 0) every patch ages by 16; past `ASHES_FULL_TICKS` (6000) its darkness
+  (127 when fresh) drops by 2 each time; at 92 or below the patch is gone: 6000 turns dark, then 18 steps (288 turns).
+- Nothing is built on a cell with ashes (`placement::Blocked::Ashes`).
+- Drawn: the terrain texture chars those cells (`terrain_texture::char_ashes`, our colour), less as they fade; the
+  map's dirty rects redraw them when a patch comes, fades a step or goes.
+- Not yet: the hover text over ashes; the long damage smoke at the ashes; the whirlwind's destruction; lava and
+  earthquake ground, which share the mark in the original.

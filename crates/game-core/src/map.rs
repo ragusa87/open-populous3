@@ -71,6 +71,8 @@ pub struct GameMap {
     pub effects: Registry<Effect>,
     /// Objects coordinating several units, one registry per kind (coordinator.rs).
     pub coordinators: Coordinators,
+    /// Ground left in ashes by destroyed buildings (`crate::ashes`).
+    pub ashes: crate::ashes::Ashes,
     /// Ticks run since the map was made (`tick`).
     pub now: Tick,
     /// The next id `new_id` gives: units, buildings and effects share it, an id is never given twice.
@@ -120,7 +122,7 @@ fn per_player<T: Clone>(t: T) -> Vec<T> {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), ashes: Default::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -156,6 +158,7 @@ impl GameMap {
             shaman_omni: false,
             effects: Registry::default(),
             coordinators: Coordinators::default(),
+            ashes: Default::default(),
             now: Tick::ZERO,
             next_id: 1,
             rng: Lcg(0),
@@ -824,8 +827,9 @@ impl GameMap {
         let (buildings, now) = (&self.buildings, self.now);
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now));
         dirty.extend(self.tend_effects());
-        self.tend_fires();
-        self.tend_building_wear();
+        dirty.extend(self.tend_fires());
+        dirty.extend(self.tend_building_wear());
+        dirty.extend(self.ashes.tick(now));
         self.tend_campfires();
         self.tend_vaults();
         self.tend_totems();

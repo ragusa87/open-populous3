@@ -20,6 +20,7 @@ const SIDE_POINTS: usize = 8;
 const CHALLENGE: Color = Color::srgb(1.0, 0.55, 0.1);
 const MELEE: Color = Color::srgb(0.95, 0.15, 0.15);
 const WEAR: Color = Color::srgb(0.85, 0.1, 0.1);
+const ASHES: Color = Color::srgb(0.6, 0.6, 0.6);
 const WEAR_BACK: Color = Color::srgb(0.3, 0.3, 0.3);
 /// The wear bar: its height over the ground and its length, cells.
 const BAR_LIFT: f32 = 1.2;
@@ -90,6 +91,12 @@ fn draw(show: Res<ShowOverlay>, dev: Res<DevMode>, map: Res<CurrentMap>, rig: Re
         gizmos.line(lift(start), lift(start + Vec2::X * full), WEAR);
     }
     let mut outline = |points: Vec<Vec2>, color: Color| gizmos.linestrip(points.into_iter().map(on_ground), color);
+    for p in &map.ashes.patches {
+        let fade = (p.darkness - game_core::ashes::FADED) as f32 / (game_core::ashes::DARK - game_core::ashes::FADED) as f32;
+        for &(x, z) in &p.cells {
+            outline(outline_square(Vec2::new(x as f32 + 0.5, z as f32 + 0.5), 0.5), ASHES.with_alpha(0.3 + 0.7 * fade));
+        }
+    }
     for (id, m) in map.coordinators.melees.iter() {
         let at = cells(m.at);
         outline(outline_circle(at, cells_of(RING_RADIUS)), MELEE);

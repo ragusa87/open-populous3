@@ -175,7 +175,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold.
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
 - [ ] Attacking buildings (combat.md "Attacking a building"): enemies on a plan's cells count as its people; blasts (40) and firewarrior bolts (100) add wear; the flying faces of the partial explosion; the original's jitter is ±2 units (ours tilts); the player warned once.
-- [ ] Building ashes (pop3-rev-analysis.md "Building ashes"): a building destroyed by losing its wood (attackers, fire, whirlwind, an earthquake's shake: −100 wood per shake) darkens its footprint cells to the landscape's darkest cliff row and bans building there ("Damaged Ground") for `DME_RESTORE_TIME` (6000 turns, 500 s), then fades over 24 s; a building collapsing on terrain that no longer fits (foundation check after an earthquake's sinking, volcano, land changes) explodes without ashes. No sprite or model, only the terrain mark and the long damage smoke.
+- [ ] Ashes (combat.md "Ashes"): the hover text ("damaged ground", our words), the long damage smoke over them, the whirlwind's destruction, lava and earthquake ground as the same mark.
 - [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
 - [ ] Build tab: icons, discoveries unlocking "?".
 - [ ] Blueprint: tune `STEEP_SPREAD`; check the door side of the other kinds against the original objects.

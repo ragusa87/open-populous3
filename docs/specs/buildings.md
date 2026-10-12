@@ -293,6 +293,9 @@ changes are applied (`WorldEvent::Terrain` in `GameMap::apply_event`). Only effe
 cast terrain spells (`GameMap::apply`, `Spell::cast`) and the editor brushes write the heightmap directly, and must go
 through it too so every change triggers the check (TODO "Destruction of buildings on uneven/flooded ground").
 
+Attackers wear buildings down and burnt or worn-down buildings leave ashes: combat.md "Attacking a building",
+"Ashes".
+
 Model: damage takes wood out of a building (its used count drops below the kind's wood cost, the pieces are lost,
 not dropped): it is under construction again, its view goes back to the wooden frame, and braves sent to it bring it
 back up like a construction. Its wood is its health. To check in the game: whether repairs need fetched wood.

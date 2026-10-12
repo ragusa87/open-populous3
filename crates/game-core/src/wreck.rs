@@ -7,6 +7,7 @@ use crate::building::{Building, BuildingId, BuildingKind};
 use crate::challenge::{Approach, Challenge, Role};
 use crate::event::WorldEvent;
 use crate::map::GameMap;
+use crate::terrain::DirtyRect;
 use crate::motion::{Motion, Velocity};
 use crate::time::{Countdown, Every, Ticks};
 use crate::unit::{isqrt, torus_delta, Action, Order, Target, UnitId};
@@ -87,25 +88,26 @@ impl Building {
 impl GameMap {
     /// Every building's wear for this turn: lost wood with damage smoke, a large one's people thrown out, a building
     /// with no wood left destroyed.
-    pub(crate) fn tend_building_wear(&mut self) {
+    pub(crate) fn tend_building_wear(&mut self) -> Vec<DirtyRect> {
         let now = self.now;
         let hits: Vec<(BuildingId, bool)> = self.buildings.iter_mut().filter_map(|b| match b.tend_wear(now) {
             Wear::Hit { destroyed } => Some((b.id, destroyed)),
             Wear::Nothing => None,
         }).collect();
-        let mut events = Vec::new();
+        let (mut events, mut dirty) = (Vec::new(), Vec::new());
         for (id, destroyed) in hits {
             let Some(i) = self.building_index(id) else { continue };
             let b = &self.buildings[i];
             events.push(WorldEvent::SpawnEffect(crate::smoke::damage(b.owner, b.centre())));
             if destroyed {
                 events.extend(self.throw_out(id));
-                self.destroy_building(id);
+                dirty.extend(self.burn_down(id));
             } else if large(b.kind) {
                 events.extend(self.throw_out(id));
             }
         }
-        self.apply_events(events);
+        dirty.extend(self.apply_events(events));
+        dirty
     }
 
     /// The attackers of buildings: at the door, hacking, pulling people out, walking round it.
@@ -244,7 +246,9 @@ mod tests {
         assert!(took > 2000 / 12, "about 2000 wear at 12 a turn, walks between rounds");
         let b = map.building(hut).unwrap();
         assert!(matches!(b.stage(), Stage::UnderConstruction { .. }) && b.repair_delay.is_some());
+        let cell = map.building(hut).unwrap().walled_cells(128)[0];
         until(&mut map, 6000, |m| m.building(hut).is_none()).expect("destroyed");
+        assert!(!map.ashes.buildable(cell), "left in ashes");
         assert_eq!(map.unit(a).unwrap().action, Action::Idle, "nothing left to attack");
     }
 

@@ -25,6 +25,8 @@ pub enum Blocked {
     Tree,
     Campfire,
     Totem,
+    /// Ashes of a destroyed building (`crate::ashes`).
+    Ashes,
 }
 
 /// What blocks building on the world point `p`, if anything (the slope is checked per building,
@@ -47,6 +49,8 @@ pub fn blocked_at(map: &GameMap, p: (u16, u16)) -> Option<Blocked> {
         Some(Blocked::Campfire)
     } else if map.totem_at(p).is_some() {
         Some(Blocked::Totem)
+    } else if !map.ashes.buildable(cell) {
+        Some(Blocked::Ashes)
     } else {
         None
     }

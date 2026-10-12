@@ -7,6 +7,7 @@
 use crate::building::{Building, BuildingId, Stage};
 use crate::event::WorldEvent;
 use crate::map::GameMap;
+use crate::terrain::DirtyRect;
 use crate::time::{Countdown, Tick, Ticks};
 use crate::unit::{Order, UnitId};
 
@@ -86,13 +87,6 @@ impl GameMap {
         out.into_iter().map(|unit| WorldEvent::Panic { unit }).collect()
     }
 
-    /// The building `id` is destroyed, having lost its last piece of wood.
-    pub(crate) fn destroy_building(&mut self, id: BuildingId) {
-        if let Some(i) = self.building_index(id) {
-            self.remove_building(i);
-        }
-    }
-
     /// Removes the building at `i`: its braves stop working on it.
     pub(crate) fn remove_building(&mut self, i: usize) {
         let id = self.buildings.remove(i).id;
@@ -104,9 +98,9 @@ impl GameMap {
 
     /// Each burning building's fire burns on: its people thrown out and panicking, its wood lost with damage smoke,
     /// a building with none left removed (anyone still inside put out first).
-    pub(crate) fn tend_fires(&mut self) {
+    pub(crate) fn tend_fires(&mut self) -> Vec<DirtyRect> {
         let turns: Vec<(BuildingId, FireTurn)> = self.buildings.iter_mut().map(|b| (b.id, b.burn())).filter(|t| t.1 != FireTurn::Nothing).collect();
-        let mut events = Vec::new();
+        let (mut events, mut dirty) = (Vec::new(), Vec::new());
         for (id, turn) in turns {
             match turn {
                 FireTurn::ThrowOut => events.extend(self.throw_out(id)),
@@ -116,13 +110,14 @@ impl GameMap {
                     events.push(WorldEvent::SpawnEffect(crate::smoke::damage(b.owner, b.centre())));
                     if destroyed {
                         self.throw_out(id);
-                        self.destroy_building(id);
+                        dirty.extend(self.burn_down(id));
                     }
                 }
                 FireTurn::Nothing => {}
             }
         }
-        self.apply_events(events);
+        dirty.extend(self.apply_events(events));
+        dirty
     }
 }
 

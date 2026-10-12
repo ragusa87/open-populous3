@@ -3,6 +3,7 @@
 //! Everything here must give identical results on every lockstep peer.
 
 pub mod angle;
+pub mod ashes;
 pub mod attack;
 pub mod blast;
 pub mod build_book;

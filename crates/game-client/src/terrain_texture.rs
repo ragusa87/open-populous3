@@ -5,6 +5,7 @@
 //! simulation does not see there, and the coast is drawn round every walkable cell (`coast_land`).
 //! Pure function, no Bevy.
 
+use game_core::ashes::{Ashes, DARK, FADED};
 use game_core::terrain::{DirtyRect, Heightmap};
 use game_core::unit::is_sea;
 use pop3_format::theme::{Theme, BIGFADE_LAND_ROW};
@@ -109,6 +110,36 @@ pub fn rebake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32,
     }
 }
 
+/// Our colour of ashes, and how much of it covers the ground at its darkest.
+const ASH: [f32; 3] = [38.0, 33.0, 30.0];
+const ASH_COVER: f32 = 0.75;
+
+/// Chars the pixels of the cells under ashes around `rect` (as `rebake` spans it), by their darkness: call it after
+/// baking those cells.
+pub fn char_ashes(ashes: &Ashes, size: usize, rect: DirtyRect, pixels: &mut [u8]) {
+    let (n, side) = (size as i32, size * PX_PER_CELL);
+    let span = |lo: i32, hi: i32| {
+        let (lo, hi) = (lo - REBAKE_MARGIN, hi + REBAKE_MARGIN);
+        if hi - lo >= n { 0..n } else { lo..hi }
+    };
+    for cz in span(rect.min.1, rect.max.1) {
+        for cx in span(rect.min.0, rect.max.0) {
+            let (cx, cz) = (cx.rem_euclid(n), cz.rem_euclid(n));
+            let Some(dark) = ashes.darkness((cx, cz)) else { continue };
+            let k = ASH_COVER * (dark.saturating_sub(FADED)) as f32 / (DARK - FADED) as f32;
+            let (cx, cz) = (cx as usize, cz as usize);
+            for py in cz * PX_PER_CELL..(cz + 1) * PX_PER_CELL {
+                for px in cx * PX_PER_CELL..(cx + 1) * PX_PER_CELL {
+                    let i = (py * side + px) * 4;
+                    for (c, ash) in pixels[i..i + 3].iter_mut().zip(ASH) {
+                        *c = (*c as f32 * (1.0 - k) + ash * k).round() as u8;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Brightness (out of 256) of the cell borders `draw_grid` darkens.
 const GRID_SHADE: u16 = 190;
 
@@ -204,6 +235,25 @@ mod tests {
         assert_eq!(&px[j..j + 3], &[0, 200, 0], "a walkable cell's height-0 corner is ground");
         let i = (2 * PX_PER_CELL * side + 2 * PX_PER_CELL) * 4;
         assert_eq!(&px[i..i + 3], &[0, 200, 0], "cell (2,2) is land");
+    }
+
+    #[test]
+    fn ashes_char_their_cells_less_as_they_fade() {
+        let mut m = Heightmap::new(8);
+        (0..8).for_each(|z| (0..8).for_each(|x| m.set(x, z, 500)));
+        let (side, mut px) = bake(&m, &test_theme(), 1.0 / 384.0, 1.0);
+        let at = |px: &[u8], cell: usize| px[(cell * PX_PER_CELL * side + cell * PX_PER_CELL + 2) * 4 + 1];
+        let ground = at(&px, 3);
+        let mut ashes = Ashes::default();
+        ashes.add(vec![(3, 3)]);
+        let all = DirtyRect { min: (0, 0), max: (8, 8) };
+        char_ashes(&ashes, 8, all, &mut px);
+        assert!(at(&px, 3) < ground / 2, "charred");
+        assert_eq!(at(&px, 5), ground, "only its cells");
+        let (_, mut faded) = bake(&m, &test_theme(), 1.0 / 384.0, 1.0);
+        ashes.patches[0].darkness = FADED + 4;
+        char_ashes(&ashes, 8, all, &mut faded);
+        assert!(at(&faded, 3) > at(&px, 3) && at(&faded, 3) < ground, "fading");
     }
 
     #[test]
