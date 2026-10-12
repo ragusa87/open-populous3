@@ -22,6 +22,7 @@ mod grounded;
 mod hover;
 mod hud;
 mod keymap;
+mod lightning;
 mod menu;
 mod nature;
 mod object_scale;
@@ -101,7 +102,7 @@ fn main() {
             camera_debug::CameraDebugPlugin,
             object_scale::ObjectScalePlugin,
             chimney::ChimneyPlugin,
-            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin),
+            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin),
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();

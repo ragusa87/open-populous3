@@ -112,6 +112,15 @@ pub fn blast_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bo
     true
 }
 
+/// `LIGHTNING=x,z` (cells): another tribe's lightning there, then `ticks` run at once (with `GAME_SPEED=0`, the shot
+/// shows them as they were). False when `at` does not parse.
+pub fn lightning_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
+    map.add_effect(game_core::lightning::effect(PLAYER + 1, world_units(Vec2::new(x, z))));
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
 /// `BRIDGE=x,z` (cells): the player's land bridge from their shaman to there (no charge used, no cast jump), then
 /// `ticks` run at once. False when `to` does not parse or the player has no shaman.
 pub fn bridge_demo(map: &mut game_core::map::GameMap, to: &str, ticks: u32) -> bool {
@@ -284,10 +293,12 @@ fn screenshot(
     let Some(capture) = Capture::from_env(|k| std::env::var(k).ok()) else { return };
     let shot = std::env::var("SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
     let from_launch = std::env::var("SHOT_BOOT").is_ok_and(|v| v == "1");
-    if loaded.read().count() > 0 || from_launch {
+    // The state set with `Loaded` takes effect the next frame: count from there, so no frame shows the loading screen.
+    let just_loaded = loaded.read().count() > 0 && counted.is_none();
+    if just_loaded || from_launch {
         counted.get_or_insert(0);
     }
-    let Some(frame) = counted.as_mut() else {
+    let Some(frame) = counted.as_mut().filter(|_| !just_loaded) else {
         if matches!(capture, Capture::Video { .. }) {
             *clock = TimeUpdateStrategy::ManualDuration(Duration::ZERO);
         }
@@ -329,6 +340,10 @@ fn screenshot(
         if let Ok(at) = std::env::var("BLAST") {
             let ticks = std::env::var("BLAST_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             blast_demo(&mut map.0, &at, ticks);
+        }
+        if let Ok(at) = std::env::var("LIGHTNING") {
+            let ticks = std::env::var("LIGHTNING_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            lightning_demo(&mut map.0, &at, ticks);
         }
         if let Ok(to) = std::env::var("BRIDGE") {
             let ticks = std::env::var("BRIDGE_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
