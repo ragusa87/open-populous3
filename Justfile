@@ -33,10 +33,7 @@ shot out *args:
 
 # Offscreen video, no window: just video [level]  (VIDEO=secs, 5 by default; same setup vars as shot) -> target/video.mp4
 video *args:
-    rm -rf target/video
     HEADLESS=1 VIDEO=${VIDEO:-5} cargo run -p game-client -- {{args}}
-    ffmpeg -loglevel error -y -framerate 30 -i target/video/frame_%05d.png -pix_fmt yuv420p target/video.mp4
-    @echo target/video.mp4
 
 test:
     cargo test --workspace

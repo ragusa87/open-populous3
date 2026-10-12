@@ -36,6 +36,7 @@ mod terrain_texture;
 mod tooltip;
 mod totems;
 mod units;
+mod video;
 mod vault;
 mod views;
 mod virtual_cursor;

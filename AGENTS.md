@@ -35,7 +35,7 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
   `FOCUS=x,z` (cells), `DISTANCE`, `PITCH`, `YAW` (degrees), `SHOT_FRAME`, `SHAMAN=walk|teleport|worship|...`, `BRAVES=cut|carry|totem:N`, `HOVER=unit:N|wood:N|tree:N|totem:N|building:N`, `VAULT=progress:N|granted:T|spent`, `TAB=spells|build|stats`, `BLUEPRINT=temple@64,70`, `AIM=blast` (a spell selected as if picked: shows its range ring), `BUILD=hut@90,62 BUILD_TICKS=150` (plan built by all the player's braves), `TUMBLE=air|ground` (the player's units tumble; add `GAME_SPEED=0` to hold them in the air), `BLAST=x,z BLAST_TICKS=N` (another tribe's blast, N ticks run; with `GAME_SPEED=0`), `BRIDGE=x,z BRIDGE_TICKS=N` (the player's land bridge from the shaman, N ticks run; with `GAME_SPEED=0`: its sparkles), `FLATTEN=x,z FLATTEN_TICKS=N` (a flatten on that height point), `SELECT=own` (all the player's people selected) set up the shot.
   Level paths with spaces or quotes break `just shot`: run `HEADLESS=1 SCREENSHOT=out.png cargo run -p game-client -- "<level>"`.
 - `just video [level]`: the same headless setup recorded as a video, `VIDEO=secs` (5 by default) from `SHOT_FRAME`,
-  always to `target/video.mp4` (frames in `target/video/`, git-ignored; needs `ffmpeg`). Use it for animations.
+  always to `target/video.mp4` (git-ignored; frames piped raw into `ffmpeg`, which must be installed). Use it for animations.
 - `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship`: skip the main menu or open it (`just shot` starts in the game by default).
 - `GAME_SPEED=0|1|2|4|8`: start paused or sped up (P and Shift +/- in the game).
 - `GAME_SEED=N`: the game's random seed (drawn per game otherwise), to replay a game the same way.

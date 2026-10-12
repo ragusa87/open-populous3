@@ -11,9 +11,9 @@
 //! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
 //! `AIM=spell` (its name without spaces, any case, e.g. `blast`, `landbridge`) selects that spell as if picked in
 //! the Spells tab.
-//! `VIDEO=secs` instead of `SCREENSHOT`: the same setup, then `secs` seconds recorded at `VIDEO_FPS` from
-//! `SHOT_FRAME` into `VIDEO_DIR` (`just video` encodes them to `target/video.mp4`). The clock steps exactly one
-//! video frame per rendered frame (none during the warm-up), so the video plays at true speed.
+//! `VIDEO=secs` instead of `SCREENSHOT`: the same setup, then `secs` seconds recorded from `SHOT_FRAME` straight
+//! into `video::VIDEO_PATH` (`video.rs`). The clock steps exactly one video frame per rendered frame (none during
+//! the warm-up), so the video plays at true speed.
 
 use crate::camera::CameraRig;
 use crate::units::{world_units, PLAYER};
@@ -57,7 +57,7 @@ impl Plugin for DevPlugin {
             app.add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(1.0 / 60.0)))
                 .add_systems(PostStartup, render_to_image);
         }
-        app.add_systems(Update, screenshot);
+        app.init_resource::<crate::video::Video>().add_systems(Update, screenshot);
     }
 }
 
@@ -235,17 +235,13 @@ pub fn tab_index(name: &str) -> Option<usize> {
     crate::hud::TABS.iter().position(|t| t.eq_ignore_ascii_case(name))
 }
 
-/// Frames per second of a `VIDEO`.
-pub const VIDEO_FPS: u32 = 30;
-/// Where a `VIDEO`'s frames go, `frame_00001.png` on (git-ignored).
-pub const VIDEO_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/video");
 
 /// What the run captures before it exits.
 #[derive(Debug, PartialEq)]
 pub enum Capture {
     /// One frame to this path (`SCREENSHOT`).
     Shot(String),
-    /// This many frames into `VIDEO_DIR` (`VIDEO=secs`).
+    /// This many frames into `video::VIDEO_PATH` (`VIDEO=secs`).
     Video { frames: u32 },
 }
 
@@ -256,7 +252,7 @@ impl Capture {
             return Some(Capture::Shot(path));
         }
         let secs: f32 = get("VIDEO")?.trim().parse().ok()?;
-        Some(Capture::Video { frames: (secs * VIDEO_FPS as f32).round().max(1.0) as u32 })
+        Some(Capture::Video { frames: (secs * crate::video::FPS as f32).round().max(1.0) as u32 })
     }
 }
 
@@ -279,6 +275,7 @@ fn screenshot(
     mut selection: ResMut<crate::units::selection::Selection>,
     target: Option<Res<OffscreenTarget>>,
     mut clock: ResMut<TimeUpdateStrategy>,
+    mut video: ResMut<crate::video::Video>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(capture) = Capture::from_env(|k| std::env::var(k).ok()) else { return };
@@ -351,13 +348,13 @@ fn screenshot(
             shot
         }
         Capture::Video { frames } => {
-            if *frame == 1 && let Err(e) = std::fs::create_dir_all(VIDEO_DIR) {
-                error!("{VIDEO_DIR}: {e}");
-            }
-            let step = if *frame >= shot { Duration::from_secs_f64(1.0 / VIDEO_FPS as f64) } else { Duration::ZERO };
+            let step = if *frame >= shot { Duration::from_secs_f64(1.0 / crate::video::FPS as f64) } else { Duration::ZERO };
             *clock = TimeUpdateStrategy::ManualDuration(step);
             if let Some(n) = video_frame(*frame, shot, frames) {
-                commands.spawn(grab()).observe(save_to_disk(format!("{VIDEO_DIR}/frame_{n:05}.png")));
+                commands.spawn(grab()).observe(crate::video::to_video(n));
+            }
+            if *frame == shot + frames + 60 {
+                video.finish();
             }
             shot + frames
         }
