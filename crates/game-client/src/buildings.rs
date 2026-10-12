@@ -17,6 +17,7 @@ use crate::flame::{self, Flame, FlameFrames};
 use crate::generated_buildings;
 use crate::grounded::{ground_point, Grounded, Tilted};
 use crate::original_models::{atlas_image, object_mesh, solid_part, to_mesh, MeshData, OriginalObjects};
+use crate::sim_time::{seed, SimNow};
 use crate::sites::tribe_color;
 use crate::world::{CurrentMap, LevelList};
 use bevy::asset::RenderAssetUsages;
@@ -25,6 +26,7 @@ use bevy::mesh::PrimitiveTopology;
 use bevy::render::render_resource::Face;
 use bevy::prelude::*;
 use game_core::building::{Building, BuildingKind, Stage};
+use game_core::time::{Tick, Ticks};
 use pop3_format::catalog::{self, villager_hut, Building as Object};
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 use std::collections::HashMap;
@@ -41,6 +43,8 @@ const WOOD: Color = Color::srgb(0.55, 0.37, 0.2);
 /// blow every `BLOW` seconds, the jolt dying out before the next.
 const SHAKE: f32 = 0.012;
 const BLOW: f32 = 0.7;
+/// Ten blows: the shake's loop in whole ticks (`SimNow::secs_in`).
+const BLOWS_LOOP: Ticks = Ticks::secs(7);
 /// Colour of the generated pyramid's door slab.
 const SLAB_STONE: Color = Color::srgb(0.42, 0.4, 0.36);
 /// Height of the white mark of a blueprint above the ground (render units).
@@ -105,9 +109,9 @@ pub fn perch(b: &Building, height: f32) -> Option<(Vec2, f32)> {
 #[derive(Component)]
 struct SiteMark(usize);
 
-/// The part of a view that shakes (the building is being attacked).
+/// The part of a view that shakes (the building with this id is being attacked).
 #[derive(Component)]
-struct Shaking;
+struct Shaking(u32);
 
 /// The name over a stand-in box, following its building on screen.
 #[derive(Component)]
@@ -328,7 +332,7 @@ fn respawn_buildings(
                 }
             });
             if b.shaking > 0 {
-                body.insert(Shaking);
+                body.insert(Shaking(b.id));
             }
             if stage == Stage::Built && b.inside > 0 && kind.capacity() > 0 {
                 for k in 0..crate::effects::CHIMNEY.count {
@@ -372,13 +376,17 @@ fn draw_site_marks(
 }
 
 /// An attacked building rocks about its base (the walls move, the base stays): one blow every
-/// `BLOW` seconds, each building its own rhythm.
-fn shake_walls(time: Res<Time>, mut bodies: Query<(Entity, &mut Transform), With<Shaking>>) {
-    for (e, mut tf) in &mut bodies {
-        let o = (e.index_u32() % 7) as f32 * 0.13;
-        let (rx, rz) = blow_tilt((time.elapsed_secs() + o) / BLOW);
-        tf.rotation = Quat::from_rotation_x(rx * SHAKE) * Quat::from_rotation_z(rz * SHAKE);
+/// `BLOW` seconds of game time, each building its own rhythm.
+fn shake_walls(now: Res<SimNow>, mut bodies: Query<(&Shaking, &mut Transform)>) {
+    for (shaking, mut tf) in &mut bodies {
+        tf.rotation = shake_at(*now, shaking.0);
     }
+}
+
+/// The walls' tilt of building `id` at `now`.
+fn shake_at(now: SimNow, id: u32) -> Quat {
+    let (rx, rz) = blow_tilt(now.secs_in(Tick::ZERO, BLOWS_LOOP) / BLOW + seed(id));
+    Quat::from_rotation_x(rx * SHAKE) * Quat::from_rotation_z(rz * SHAKE)
 }
 
 /// Tilt (-1..1 on two axes) at `t` blows: a quick wobble right after each blow, dying out before
@@ -481,6 +489,15 @@ mod tests {
         assert!(size(3.06) > 0.5, "right after a blow");
         assert!(size(3.95) < 0.01, "still before the next");
         assert_ne!(blow_tilt(3.06), blow_tilt(4.06), "another direction each blow");
+    }
+
+    #[test]
+    fn the_shake_follows_game_time_each_building_its_own() {
+        let at = |tick: u32, frac: f32| SimNow { tick: Tick::from_wire(tick), frac };
+        assert_eq!(shake_at(at(40, 0.25), 3), shake_at(at(40, 0.25), 3), "the same moment, the same tilt (paused)");
+        assert_eq!(shake_at(at(40, 0.25), 3), shake_at(at(40 + BLOWS_LOOP.get() * 1000, 0.25), 3), "a whole loop later");
+        assert_ne!(shake_at(at(40, 0.25), 3), shake_at(at(41, 0.25), 3), "moves");
+        assert_ne!(shake_at(at(40, 0.25), 3), shake_at(at(40, 0.25), 4), "its own rhythm");
     }
 
     #[test]

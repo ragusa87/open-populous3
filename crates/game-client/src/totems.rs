@@ -17,7 +17,7 @@ use crate::world::{CurrentMap, LevelList};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::Face;
-use crate::sim_time::ticks_f32;
+use crate::sim_time::{ticks_f32, SimNow};
 use game_core::totem::{Totem, TotemKind, HOLD_TICKS, SINK_TICKS, TURN_TICKS};
 use pop3_format::catalog::{PRAYER_TOTEM, STONE_HEAD, TOTEM, TOTEM_ANIMATED, TOTEM_POLES, WINGED_DEATH_PERCHED, WINGED_DEATH_TOTEM};
 use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
@@ -42,6 +42,8 @@ const TURNING: f32 = 0.05;
 const NECK: i16 = 324;
 const NOD_DEG: f32 = 6.0;
 const NOD_SECS: f32 = 1.6;
+/// Five nods: the nod's loop in whole ticks (`SimNow::secs_in`).
+const NODS_LOOP: game_core::time::Ticks = game_core::time::Ticks::secs(8);
 
 /// The view of the totem at this index of `GameMap::totems`, and the height of its top (cells).
 #[derive(Component)]
@@ -279,7 +281,7 @@ fn respawn_totems(
 /// gone), the stone heads nod.
 #[allow(clippy::too_many_arguments)]
 fn animate_totems(
-    time: Res<Time>,
+    now: Res<SimNow>,
     clock: Res<SimClock>,
     map: Res<CurrentMap>,
     objects: Res<OriginalObjects>,
@@ -293,7 +295,7 @@ fn animate_totems(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let alpha = clock.alpha();
-    let nod = nod_angle(time.elapsed_secs());
+    let nod = nod_angle(now.secs_in(game_core::time::Tick::ZERO, NODS_LOOP));
     let frames = objects.0.as_ref().and_then(|b| b.get(TOTEM).zip(b.get(TOTEM_ANIMATED)));
     for (view, kids) in &views {
         let Some(t) = map.0.totems.get(view.index) else { continue };
@@ -383,5 +385,6 @@ mod tests {
         assert_eq!(nod_angle(0.0), 0.0);
         assert!((nod_angle(NOD_SECS / 4.0) - NOD_DEG.to_radians()).abs() < 1e-5, "6° at most");
         assert!((nod_angle(NOD_SECS) - nod_angle(0.0)).abs() < 1e-5, "one nod every 1.6 s");
+        assert!((nod_angle(NODS_LOOP.get() as f32 * crate::sim_time::TICK_SECS)).abs() < 1e-4, "the loop holds whole nods");
     }
 }

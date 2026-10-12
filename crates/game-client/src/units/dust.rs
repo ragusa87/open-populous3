@@ -1,7 +1,8 @@
 //! A puff of dust where a unit touches down after floating (teleport landing): the original
 //! blended dust cloud (`hfx0-0.dat` 1225-1239, through the alpha table) when allowed, else soft
 //! motes moving as `effects::DUST` (spreading around the feet, rising a little, growing, fading),
-//! facing the camera. Cosmetic only, on the real-time clock.
+//! facing the camera. Cosmetic only, on simulation time: born at the tick the touchdown was seen,
+//! shown once the units drawn a step behind (`SimNow`) reach it.
 
 use super::art::alpha_picture_frame;
 use super::{toward_eye, upload_frame, FrameAsset, UnitView, PULL_TO_EYE};
@@ -11,6 +12,8 @@ use crate::world::{CurrentMap, LevelList};
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use crate::sim_time::SimNow;
+use game_core::time::Tick;
 use game_core::unit::Action;
 use pop3_format::blend::AlphaTable;
 use pop3_format::catalog::EFFECT_SPRITE_FILE;
@@ -30,6 +33,11 @@ const ORIGINAL_CLOUD: std::ops::RangeInclusive<usize> = 1225..=1239;
 /// Which of `frames` frames of the original cloud shows `age` seconds after touchdown.
 pub fn cloud_frame(age: f32, frames: usize) -> usize {
     (((age / LIFE).clamp(0.0, 1.0) * frames as f32) as usize).min(frames.saturating_sub(1))
+}
+
+/// Whether a puff `age` seconds old shows: not yet before its touchdown is drawn, None once over.
+pub fn shown(age: f32) -> Option<bool> {
+    (age <= LIFE).then_some(age >= 0.0)
 }
 
 /// The original cloud's frames, around the feet (two thirds down), blended over the background.
@@ -81,7 +89,7 @@ struct DustAssets {
 
 #[derive(Component)]
 struct Puff {
-    born: f32,
+    born: Tick,
 }
 
 #[derive(Component)]
@@ -118,7 +126,6 @@ fn load_assets(levels: Res<LevelList>, mut commands: Commands, mut meshes: ResMu
 fn spawn_puffs(
     mut commands: Commands,
     map: Res<CurrentMap>,
-    time: Res<Time>,
     clock: Res<super::SimClock>,
     assets: Res<DustAssets>,
     mut mats: ResMut<Assets<StandardMaterial>>,
@@ -130,7 +137,7 @@ fn spawn_puffs(
             continue;
         }
         let at = clock.cell_pos(i, &map.0.units[i]);
-        let puff = (Puff { born: time.elapsed_secs() }, Grounded { at, half: 0.0 }, Transform::default(), Visibility::Hidden);
+        let puff = (Puff { born: map.0.now }, Grounded { at, half: 0.0 }, Transform::default(), Visibility::Hidden);
         if let Some(first) = assets.cloud.first() {
             commands.spawn(puff).with_child((Cloud, Mesh3d(first.mesh.clone()), MeshMaterial3d(first.material.clone()), Transform::default()));
             continue;
@@ -156,7 +163,7 @@ fn spawn_puffs(
 #[allow(clippy::too_many_arguments)]
 fn animate_puffs(
     mut commands: Commands,
-    time: Res<Time>,
+    now: Res<SimNow>,
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     params: Res<CurveParamsRes>,
@@ -170,10 +177,17 @@ fn animate_puffs(
     let Ok(eye) = eye.single() else { return };
     let facing = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
     for (entity, puff, ground, mut t, children) in &mut puffs {
-        let age = time.elapsed_secs() - puff.born;
-        if age > LIFE {
-            commands.entity(entity).despawn();
-            continue;
+        let age = now.secs_since(puff.born);
+        match shown(age) {
+            None => {
+                commands.entity(entity).despawn();
+                continue;
+            }
+            Some(false) => {
+                t.scale = Vec3::ZERO;
+                continue;
+            }
+            Some(true) => t.scale = Vec3::ONE,
         }
         t.rotation = facing;
         let Some(feet) = render_pos(&map.0.terrain, ground, rig.focus, &params.0) else { continue };
@@ -209,6 +223,14 @@ mod tests {
         assert_eq!(cloud_frame(LIFE, 15), 14);
         assert_eq!(cloud_frame(LIFE * 2.0, 15), 14);
         assert_eq!(cloud_frame(0.3, 0), 0);
+    }
+
+    #[test]
+    fn a_puff_waits_for_the_drawn_touchdown_then_ends() {
+        assert_eq!(shown(-0.05), Some(false));
+        assert_eq!(shown(0.0), Some(true));
+        assert_eq!(shown(LIFE), Some(true));
+        assert_eq!(shown(LIFE + 0.01), None);
     }
 
     #[test]
