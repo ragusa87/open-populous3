@@ -56,11 +56,7 @@ impl GameMap {
     /// brought is lost.
     pub fn cancel_building(&mut self, player: u8, at: (u16, u16)) {
         let Some(i) = self.buildings.iter().position(|b| b.owner == player && b.stage() == Stage::Blueprint && b.covers(at, 0)) else { return };
-        let id = self.buildings.remove(i).id;
-        for u in self.units.iter_mut().filter(|u| u.work == Some(id)) {
-            u.work = None;
-            u.start(Order::Stop);
-        }
+        self.remove_building(i);
     }
 
     /// Switches dismantling of `player`'s building `building` (id), flat and taking wood. On, everyone
@@ -177,7 +173,7 @@ impl GameMap {
 
     /// Everyone inside the building `building` is released and walks out by its `door` to a free spot
     /// around it, then stands idle.
-    fn empty_building(&mut self, building: u32, door: (u16, u16)) {
+    pub(crate) fn empty_building(&mut self, building: u32, door: (u16, u16)) {
         let out: Vec<(u32, (u16, u16))> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building)).map(|u| (u.id, (u.x, u.z))).collect();
         let ids: Vec<u32> = out.iter().map(|o| o.0).collect();
         let spots = slots::dispatch(&self.ground(), &out, door, &self.taken_spots(&ids));
@@ -232,6 +228,12 @@ impl GameMap {
                 }
             }
             return self.flatten_step(i, b);
+        }
+        if building.burning.is_some() {
+            if wanted {
+                self.fetch_wood(i);
+            }
+            return None;
         }
         let inside = self.units[i].inside.map(|i| i.building) == Some(site);
         let door = building.door();

@@ -13,6 +13,7 @@ pub mod effect;
 pub mod event;
 pub mod flatten;
 pub mod enter;
+pub mod fire;
 pub mod gauge;
 pub mod headcount;
 pub mod health;

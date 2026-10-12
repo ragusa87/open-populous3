@@ -767,6 +767,7 @@ impl GameMap {
         let (buildings, now) = (&self.buildings, self.now);
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now));
         dirty.extend(self.tend_effects());
+        self.tend_fires();
         self.tend_campfires();
         self.tend_vaults();
         self.tend_totems();
@@ -954,7 +955,8 @@ impl GameMap {
                 }
                 None
             }
-            WorldEvent::Panic { .. } | WorldEvent::Raid { .. } | WorldEvent::SetFire { .. } => None,
+            WorldEvent::SetFire { building } => return (None, self.set_fire(building)),
+            WorldEvent::Panic { .. } | WorldEvent::Raid { .. } => None,
             WorldEvent::SpawnEffect(e) => {
                 self.add_effect(e);
                 None

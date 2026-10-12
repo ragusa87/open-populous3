@@ -293,9 +293,15 @@ changes are applied (`WorldEvent::Terrain` in `GameMap::apply_event`). Only effe
 cast terrain spells (`GameMap::apply`, `Spell::cast`) and the editor brushes write the heightmap directly, and must go
 through it too so every change triggers the check (TODO "Destruction of buildings on uneven/flooded ground").
 
-Planned model: damage takes wood out of a Built building (its used count drops below the kind's wood cost, the
-pieces are lost, not dropped), its view goes back to the wooden frame, and assigned braves bring it back up like a
-construction. To check in the game: what sets the damage, and whether repairs need fetched wood.
+Model: damage takes wood out of a building (its used count drops below the kind's wood cost, the pieces are lost,
+not dropped): it is under construction again, its view goes back to the wooden frame, and braves sent to it bring it
+back up like a construction. Its wood is its health. To check in the game: whether repairs need fetched wood.
+
+Fire (done: `game_core::fire`, `WorldEvent::SetFire`, set by lightning): a building built with wood, past its plan,
+not already burning (a guess), loses one piece at once (the original's structural hit of 100 wood) and burns for
+`BURN_TICKS` (127 turns, `Building::burning`). Everyone inside walks out by the door (a `Panic` each, no behaviour
+yet), builders inside are released. With no wood left it is removed. While it burns, its braves only fetch wood and
+nobody builds in it. Vault, prison and other buildings without a wood cost never burn. Not drawn yet.
 
 ### Doors
 Units enter and leave a building only through its door (the facing's side, local -z), the same way in and out:
