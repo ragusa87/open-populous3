@@ -26,6 +26,7 @@ mod nature;
 mod object_scale;
 mod original_models;
 mod procedural_theme;
+mod range_ring;
 mod sim_time;
 mod sites;
 mod sky;
@@ -97,6 +98,7 @@ fn main() {
             camera_debug::CameraDebugPlugin,
             object_scale::ObjectScalePlugin,
             chimney::ChimneyPlugin,
+            range_ring::RangeRingPlugin,
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();

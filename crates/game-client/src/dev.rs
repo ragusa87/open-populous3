@@ -9,6 +9,8 @@
 //! e.g. `temple@64,70`) shows that blueprint at map position x,z (cells); `BUILD=kind@x,z` places that
 //! plan with every brave of the player sent to it, then runs `BUILD_TICKS` ticks (0 by default).
 //! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
+//! `AIM=spell` (its name without spaces, any case, e.g. `blast`, `landbridge`) selects that spell as if picked in
+//! the Spells tab.
 
 use crate::camera::CameraRig;
 use crate::units::{world_units, PLAYER};
@@ -198,6 +200,11 @@ pub fn build_demo(map: &mut game_core::map::GameMap, plan: &str, ticks: u32) -> 
     true
 }
 
+/// A spell by its name without spaces, any case.
+pub fn spell_by_name(name: &str) -> Option<game_core::spell_book::SpellKind> {
+    game_core::spell_book::SpellKind::ALL.into_iter().find(|k| k.name().replace(' ', "").eq_ignore_ascii_case(name))
+}
+
 /// Panel tab by name (any case).
 pub fn tab_index(name: &str) -> Option<usize> {
     crate::hud::TABS.iter().position(|t| t.eq_ignore_ascii_case(name))
@@ -213,6 +220,7 @@ fn screenshot(
     mut tab: ResMut<crate::hud::ActiveTab>,
     mut blueprint: ResMut<crate::blueprint::Blueprint>,
     mut pinned: ResMut<crate::blueprint::PinnedAt>,
+    mut aimed: ResMut<crate::hud::spells::SelectedSpell>,
     target: Option<Res<OffscreenTarget>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -225,6 +233,9 @@ fn screenshot(
     if *frame == 1 {
         if let Some(i) = std::env::var("TAB").ok().and_then(|t| tab_index(&t)) {
             tab.0 = i;
+        }
+        if let Some(kind) = std::env::var("AIM").ok().and_then(|n| spell_by_name(&n)) {
+            aimed.0 = Some(kind);
         }
         if let Some((kind, at)) = std::env::var("BLUEPRINT").ok().and_then(|v| parse_blueprint(&v)) {
             blueprint.pick(kind);
@@ -336,6 +347,7 @@ mod tests {
     #[test]
     fn tabs_by_name() {
         assert_eq!((tab_index("build"), tab_index("Spells"), tab_index("nope")), (Some(1), Some(0), None));
+        assert_eq!((spell_by_name("landbridge"), spell_by_name("BLAST"), spell_by_name("nope")), (Some(game_core::spell_book::SpellKind::LandBridge), Some(game_core::spell_book::SpellKind::Blast), None));
     }
 
     #[test]
