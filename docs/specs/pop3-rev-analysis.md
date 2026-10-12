@@ -471,6 +471,70 @@ creator.
   16-turn fire blast where a big volcano fireball 8/8 lands (alpha hfx 1194-1209, sound 0xB2); small 8/7 ones make
   7/0x3E instead.
 
+### Status markers over people [exe]
+All drawn with the person's sprite in `draw_polygons` (0x468B3F-0x4694F2), straight from the status flags: no
+effect unit. Sprites are `hfx0-0.dat` (table `[0x59DF14]`); `h` is the height of the person's current frame (VFRA
+record byte +3), offsets go up the screen from the sprite's anchor; `n` is `frame_counter` (u32 0x897981).
+```text
+translucent = person[+0x36] & 0x40                  # whole person sprite alpha-blended (draw flag 0x5DA074 bit 3)
+if own_tribe and life < max_life and not low_health and not ghost and health_bars_on:   # 0x468E1C
+    health_bar(x, y - 0.75 h)                        # 0x525450, lines, not a sprite
+if low_health:                                        # +0x14 bit 0x1000 (0x468EF5)
+    draw hfx[1489 + n % 10] at y - 1.11 h, alpha, colour table 0x87F000; start sound 0xCF (0x48A050, mode 2)
+elif person[+0x10] & 0x10: stop sound 0xCF (0x48A770)
+if shielded and (timer +0xA5 >= 16 or class_counter & 2 == 0):           # +0x14 bit 0x8000 (0x469021)
+    colour table = 0x87D000 + tribe_colour[tribe] << 12 (byte table 0x5A89CB, stride 5)
+    for ring k in 0, 1, 2:                            # three rings, each one step behind the previous
+        i = ((person[+0x24] + n) & 15 - k) & 15
+        (s, f) = SHIELD_PATH[i]                       # table 0x59D9D8, 16 × (i16 sprite, i16 height × 256)
+        draw hfx[s + 5k] at y - h / 8 - f × 7h / 8, alpha
+if bloodlust and (timer +0xB1 >= 16 or class_counter & 2 == 0):         # +0x14 bit 0x80000 (0x4691F4)
+    draw hfx[1478 + n % 10] at y - 1.11 h, alpha, colour table 0x87F000
+if hypnotised:                                        # +0x10 bit 0x4000 (0x46930B)
+    draw hfx[1553 + n % 11] at y - 1.25 h, alpha, colour table 0x87F000
+if own_tribe and class == 1 and person[+0x7A] & 0x80:                    # selected (0x469415)
+    draw hfx[53] at y - h, opaque
+```
+All markers are centred horizontally on the person. When zoomed (`[esp+0x3C]` set) they are scaled (0x476090,
+drawn by 0x516430), otherwise drawn 1:1 (0x5162E0).
+
+| Status | Flag | Marker | Sprites (`hfx0-0.dat`) | Above the feet | Blinks |
+|---|---|---|---|---|---|
+| Low health | +0x14 bit 0x1000 | white sparkles circling, plus the looping sound 0xCF | 1489-1498 (10 frames, 41 x 29) | 1.11 h | no |
+| Shield | +0x14 bit 0x8000 | three rings in the tribe's colour sliding up and down the body | 1538-1552 (3 rings x 5 sizes, 32 x 16) | h/8 to h | last 15 timer steps |
+| Bloodlust | +0x14 bit 0x80000 | red bubbles | 1478-1487 (10 frames, 30 x 25) | 1.11 h | last 15 timer steps |
+| Hypnotised | +0x10 bit 0x4000 | a yellow ring turning, a halo | 1553-1563 (11 frames, 27 x 19) | 1.25 h | no |
+| Invisible | +0x10 bit 0x1000 | no marker: own people drawn translucent, enemies not drawn | - | - | own, last 23 timer steps |
+| Ghost | +0x10 bit 0x800 | no marker: own ghosts drawn translucent, enemy ones look normal | - | - | no |
+| Selected | +0x7A bit 0x80 | yellow down arrow, own people only | 53 (9 x 7, opaque) | 1.0 h | no |
+
+- All marker sprites are alpha sprites (`hfx0-0.dat` 1090..1499 and 1538..1592), except the arrow. Sparkles and
+  rings are cream/white, bubbles red, the halo yellow at about half strength. What the colour tables do to an alpha
+  sprite is open; for the shield it is the only thing that makes the rings tribe-coloured.
+- `SHIELD_PATH` (index: sprite offset, height): 0: 0, 0; 1: 1, 1/8; 2: 2, 2/8; 3: 3, 3/8; 4: 4, 4/8; 5: 3, 5/8;
+  6: 2, 6/8; 7: 1, 7/8; 8: 0, 1; then back down, 9: 1, 7/8 ... 15: 1, 1/8. A ring rises from the feet to the head
+  over 8 frames and comes back, largest (offset 4) at mid-height; rings 0, 1, 2 are bright, medium and faint. The
+  phase is offset per person by `+0x24` (probably its index), so shielded people do not move in step.
+- Blinking (shield, bloodlust): with fewer than 16 timer steps left (the timers count down every 8 turns, so the
+  last 128 turns, 10.7 s), the marker is drawn only when `class_counter` bit 1 is clear: 2 turns on, 2 off.
+- Low health (0x4D43A0, every 8 turns, person types with flag 8 at person table +0x30): life +0x6E regains the
+  type's byte +0x1A while below the maximum +0x6C (when full, the last attacker +0xB0 is reset to 0xFF); the flag
+  is set when `max_life / 4 >= life` (a quarter or less), cleared otherwise. Buildings use the same bit for
+  something else (set in the mana distribution 0x41A7CA and hut growth 0x4055BA).
+- Health bar (0x525450): a 7 x 26 px box (lines in palette 0x9A, 0x9D, 0x96) filled from the bottom with
+  `24 × life / max_life` px in colour `[0x89C6F4]`, at 1:1 whatever the zoom. Only the player's damaged people,
+  only while display flag 0x87CA1C bit 3 is on: player commands 100 (on) and 101 (off) in `process_cmd`
+  (0x4AB4EA, 0x4AB4F6); which key sends them is not traced.
+- Translucency (+0x36 bit 0x40, decided when the sprite is chosen, 0x4D41F2): a ghost of the player's tribe; an
+  invisible person of the player's tribe, or any invisible person when the player's tribe has flag 0x8 at
+  +0x93D (meaning not traced); other invisible people get +0x35 bit 0x10 and are not drawn. Near the end of
+  invisibility the player's people flicker (0x4D3BA4): timer 14-23 toggles every 4 turns, 6-13 every 2, 0-5 every
+  turn (`turn & mask`). Ghost army sets the same bit on its ghosts (0x50D84F).
+- `frame_counter` is incremented once per pass of the loop at 0x4A4710 (`main_3`), not by the game turn: if that
+  loop runs per rendered frame, the markers animate at the frame rate (unverified).
+- The hypnotised halo lasts as long as the flag: 0x4D92B0 counts the timer +0xAC down every 8 turns, then
+  recreates the person in its original tribe +0xAD; the flag is cleared at once if that tribe is gone.
+
 ### Terrain changes: what reacts
 Every terrain-changing effect (land bridge, flatten, erosion, earthquake, volcano...) ends each cell change with the
 same two calls:
@@ -671,6 +735,11 @@ otherwise:
   default `POP3_CURVATURE` 0.008 is too gentle, the earlier 0.012 was close), measured in camera space. The
   original height scale is 1/256 cell per unit (max 1024 = 4 cells), not "about 2 cells"; our 1/384 (2.7 cells)
   is flatter than the original. The original camera pitch is fixed at about 20°, 25 cells behind the focus.
+- units.md `statuses` / unit drawing: our drawing has no status marker yet. The original shows low health
+  (sparkles, `hfx0-0.dat` 1489-1498), shield (three tribe-coloured rings, 1538-1552), bloodlust (red bubbles,
+  1478-1487) and hypnosis (a halo, 1553-1563); invisible and ghost people of the player are drawn translucent,
+  invisible enemies not at all; own damaged people can show a health bar; the selection arrow is hfx 53
+  ("Status markers over people").
 
 ## Open questions
 - Where `MANA_F_<PERSON>`, `MANA_F_HOUSED/WORKING/TRAINING` and `MANA_F_HUT_LEVEL_1..3` are applied. Only the max
@@ -699,6 +768,10 @@ otherwise:
 - Spells: burning trees (scenery state 5), the partial building explosion of the earthquake, whether ghosts
   expire, what starts the landscape-shaping mode, what a person does when the ground under it floods, the
   building's second destroy reason (sub-state 2), boats on raised land, and the melee fight itself.
+- Status markers: whether `frame_counter` 0x897981 advances per rendered frame or per turn, the anchor of the
+  screen position the height offsets are taken from, what the colour tables (0x87D000 + n × 0x1000) do to an alpha
+  sprite, the key behind commands 100/101 (health bars), tribe flag +0x93D bit 0x8 (sees invisible people?), and
+  what +0x3C (a colour table index −15..15, 0x468B50) tints a person for.
 
 ## Reference
 
@@ -770,6 +843,12 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4503F0 | horizontal distance between two positions (wrapping, square root) |
 | 0x50C780, 0x50C840 | "prepare rs land" (7/8): init (site height at tribe+0x915), levelling per turn |
 | 0x41C140, 0x41C520 | landscape-shaping mode start and end: sites rebuilt at the shamans, pillars from 0x5A9F10 |
+| 0x468E1C-0x4694F2 | in `draw_polygons`: health bar, low health, shield, bloodlust, hypnosis and selection markers |
+| 0x525450 | health bar of a person |
+| 0x4D43A0 | person regeneration and the low-health flag, every 8 turns |
+| 0x4D41F2 | translucent / hidden flags for ghosts and invisible people |
+| 0x4D92B0 | "hypnosis_tick": every 8 turns counts +0xAC down, then restores the person to tribe +0xAD |
+| 0x516270 | select the colour table for the next sprite draw (0x974560 = none) |
 
 Timing globals: turn counter 0x89D188 (u32), `turns_per_sec` 0x89D161 (u8, copied from the option at 0x98F712),
 `next_turn_time` 0x5CD92C, `step_ms` 0x5CD930 (83 in the exe image), `extra_turns` 0x895DAC (i8). Under Wine the
@@ -795,7 +874,9 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
   33, lava square 38, convert wild 60, shield 68, armageddon 71, bloodlust 72, teleport 73.
 - Person statuses: invisible +0x10 bit 0x1000 (timer +0xA3), shield +0x14 bit 0x8000 (timer +0xA5), bloodlust
   +0x14 bit 0x80000 (timer +0xB1), hypnotised +0x10 bit 0x4000 (timer +0xAC, original tribe +0xAD), ghost +0x10
-  bit 0x800; the timers count down every 8 turns. On fire: +0xC bit 0x8 leads to state 31.
+  bit 0x800, low health +0x14 bit 0x1000; the timers count down every 8 turns. On fire: +0xC bit 0x8 leads to
+  state 31. Life +0x6E, maximum life +0x6C. Drawing: translucent +0x36 bit 0x40, hidden +0x35 bit 0x10,
+  selected +0x7A bit 0x80.
 - Movement: profile index +0x30 (into 0x5A7B90), walk speed +0x5F, heading +0x5D, velocity +0x49 (x),
   +0x4B (vertical), +0x4D (z).
 - Per-cell index `unit_land_array` (the original "mapwho"), filled by `insert_unit_into_land_tile`.

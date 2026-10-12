@@ -72,7 +72,7 @@ at the same scale, sits right of it (`virtual_cursor::building_sprite`, `with_ba
 the camp fire's (66) while placing one (`plan_sprite`).
 
 ## `data/hfx0-0.dat` (1615 sprites: effects, map things, HUD art)
-Same palette. Identified: 2-3 dry plants, 22 a flat dark smear, the generic ground shadow under sprite things (draw kind 15, pop3-rev-analysis.md "Volcano rocks") [exe], 23 a pile of logs (17 x 11, a piece of
+Same palette. Identified: 2-3 dry plants, 53 the yellow down arrow over the player's selected people (9 x 7) [exe], 22 a flat dark smear, the generic ground shadow under sprite things (draw kind 15, pop3-rev-analysis.md "Volcano rocks") [exe], 23 a pile of logs (17 x 11, a piece of
 wood on the ground: `catalog::WOOD_PILE_SPRITE`), 90-93 fire, 107-111 spell names, 187-210 build/wood action icons,
 46-51 the tooltip's dismantle toggle (49, 51 hovered, 50 pressed) and its undo (46, 48 hovered, 47 pressed), 60-62 the
 unload button of a vehicle (60, 61 hovered, 62 pressed), tooltips.md; 639-656 gold state icons, each plain then outlined (653 a boat, 655 the same boat flat), 664-675 six unit figures (plain / outlined
@@ -87,7 +87,9 @@ Alpha sprites: 1090..1499 and 1538..1592 are blended (same ranges in PopResource
 `pop3_format::sprites` returns the raw indices; `blend::AlphaTable::rgba` turns them into RGBA (tint colour,
 opacity strength / 15) for GPU blending (`art::alpha_picture_frame`, uploaded with `AlphaMode::Blend`).
 Identified: 1225-1239 a cream dust cloud growing and fading (the teleport landing puff), 1210-1224 the same in
-grey, 1181-1209 fire clouds (1194-1209 the rock explosion of a big volcano fireball's landing [exe]), 1160-1179 the rock-debris dust burst [exe], 1241-1247 and 1265-1279 flashes, 1330-1345 smoke columns.
+grey, 1181-1209 fire clouds (1194-1209 the rock explosion of a big volcano fireball's landing [exe]), 1160-1179 the rock-debris dust burst [exe], status markers over people [exe] (pop3-rev-analysis.md "Status markers over people"): 1478-1487 bloodlust
+(red bubbles), 1489-1498 low health (white sparkles), 1538-1552 shield (3 rings x 5 sizes), 1553-1563 the hypnotised
+halo (a yellow ring turning over 11 frames), 1241-1247 and 1265-1279 flashes, 1330-1345 smoke columns.
 
 ## Blend tables (`data/`, one per theme, 65 536 bytes = 256 x 256 palette indices)
 Layouts from PopResourceEditor (Toksisitee, MIT, `140e389`), checked against the files.
