@@ -2,11 +2,17 @@
 
 use crate::building::BuildingKind;
 use crate::spell::Spell;
+use crate::spell_book::SpellKind;
 use crate::unit::Order;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
+    /// A spell aimed at a spot: uses a charge of the player's book (`Spell::kind`), ignored without one.
     Cast { player: u8, spell: Spell },
+    /// A spell not aimed (C): uses a charge of `kind` and the shaman casts (its effect comes later).
+    CastSelf { player: u8, kind: SpellKind },
+    /// Stops (true) or resumes the recharge of the player's known spell `kind`.
+    PauseSpell { player: u8, kind: SpellKind, paused: bool },
     /// An order to the player's shaman.
     Order { player: u8, order: Order },
     /// An order to one of the player's units (by `Unit::id`); ignored if the unit is not theirs.

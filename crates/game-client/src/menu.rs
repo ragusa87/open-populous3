@@ -10,7 +10,7 @@
 use crate::camera::{GameCamera, OverlayCamera};
 use crate::game_speed::GameSpeed;
 use crate::hud::build::{level_builds, PlayerBuilds};
-use crate::hud::spells::{level_book, sandbox_book, PlayerSpells, SelectedSpell};
+use crate::hud::spells::{level_book, PlayerSpells, SelectedSpell};
 use crate::units::selection::Selection;
 use crate::virtual_cursor::VirtualCursor;
 use crate::world::{new_game, CurrentMap, LevelList, TerrainDirty};
@@ -319,17 +319,14 @@ struct GameSetup<'w> {
 impl GameSetup<'_> {
     /// Loads the map a game starts on; the camera frames it (`LevelList` change).
     fn begin(&mut self, start: Start) {
-        (self.map.0, self.spells.0) = match start {
-            Start::NewGame => {
-                let map = self.levels.load_current();
-                let book = level_book(&map);
-                (map, book)
-            }
-            Start::SandboxWalk => (new_game(GameMap::sandbox_walk()), sandbox_book()),
-            Start::SandboxUnits => (new_game(GameMap::sandbox_units()), sandbox_book()),
-            Start::SandboxBuildings => (new_game(GameMap::sandbox_buildings()), sandbox_book()),
-            Start::SandboxWorship => (new_game(GameMap::sandbox_worship()), sandbox_book()),
+        self.map.0 = match start {
+            Start::NewGame => self.levels.load_current(),
+            Start::SandboxWalk => new_game(GameMap::sandbox_walk()),
+            Start::SandboxUnits => new_game(GameMap::sandbox_units()),
+            Start::SandboxBuildings => new_game(GameMap::sandbox_buildings()),
+            Start::SandboxWorship => new_game(GameMap::sandbox_worship()),
         };
+        self.spells.0 = level_book(&self.map.0);
         *self.schedule = crate::units::GameSchedule::default();
         self.clock.new_game();
         self.builds.0 = level_builds(&self.map.0);

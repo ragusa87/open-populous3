@@ -17,12 +17,7 @@ use bevy::prelude::*;
 use game_core::command::Command;
 use game_core::map::GameMap;
 use game_core::spell::Spell;
-use game_core::unit::Order;
-use game_core::mana::Mana;
 use game_core::spell_book::{Availability, SpellBook, SpellKind, SpellSlot, MAX_CHARGES};
-
-/// Mana shared by the recharging spells per simulation tick.
-const MANA_PER_TICK: u32 = 35;
 
 #[derive(Resource)]
 pub struct PlayerSpells(pub SpellBook);
@@ -141,31 +136,9 @@ pub fn tile_order(slots: &[SpellSlot]) -> Vec<usize> {
     others.into_iter().chain(special).collect()
 }
 
-/// The player's spells on `map`: an original level's own loadout (`GameMap::spell_book`), else
-/// the demo one (generated maps).
+/// The player's spells on `map` (`GameMap::spell_books`).
 pub fn level_book(map: &GameMap) -> SpellBook {
-    map.spell_book.clone().unwrap_or_else(demo_book)
-}
-
-/// Walk sandbox: the demo loadout plus Teleport, free.
-pub fn sandbox_book() -> SpellBook {
-    let mut b = demo_book();
-    b.set(SpellKind::Teleport, Availability::Unlimited);
-    b
-}
-
-/// Loadout showing every tile state, for maps without one of their own.
-pub fn demo_book() -> SpellBook {
-    let mut b = SpellBook::new();
-    for k in [SpellKind::Blast, SpellKind::Convert, SpellKind::Swarm, SpellKind::LandBridge, SpellKind::Erosion] {
-        b.set(k, Availability::Known);
-    }
-    b.set(SpellKind::Invisibility, Availability::Provided { shots: 3 });
-    b.set(SpellKind::Volcano, Availability::Provided { shots: 1 });
-    b.set(SpellKind::Flatten, Availability::Discoverable);
-    b.set(SpellKind::Lightning, Availability::Discoverable);
-    b.charge(Mana(500));
-    b
+    map.spell_books[PLAYER as usize].clone()
 }
 
 #[derive(Component)]
@@ -187,7 +160,7 @@ pub struct SpellsPlugin;
 
 impl Plugin for SpellsPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(PlayerSpells(demo_book()))
+        app.insert_resource(PlayerSpells(SpellBook::demo()))
             .init_resource::<SelectedSpell>()
             .add_systems(Startup, spawn_tab)
             .add_systems(
@@ -271,10 +244,8 @@ fn style_colors(style: TileStyle) -> (Color, Color) {
     }
 }
 
-fn recharge(clock: Res<crate::units::SimClock>, mut book: ResMut<PlayerSpells>) {
-    for _ in 0..clock.ran {
-        book.0.charge(Mana(MANA_PER_TICK));
-    }
+fn recharge(map: Res<CurrentMap>, mut book: ResMut<PlayerSpells>) {
+    book.0.clone_from(&map.0.spell_books[PLAYER as usize]);
 }
 
 fn tile_clicks(
@@ -293,25 +264,24 @@ fn tile_clicks(
 }
 
 /// Right click on a known spell's tile pauses or resumes its recharge.
-fn pause_clicks(mouse: Res<ButtonInput<MouseButton>>, tiles: Query<(&Interaction, &Tile)>, mut book: ResMut<PlayerSpells>) {
+fn pause_clicks(mouse: Res<ButtonInput<MouseButton>>, tiles: Query<(&Interaction, &Tile)>, book: Res<PlayerSpells>, mut schedule: ResMut<crate::units::GameSchedule>) {
     if !mouse.just_pressed(MouseButton::Right) {
         return;
     }
     if let Some((_, tile)) = tiles.iter().find(|(i, _)| **i == Interaction::Hovered) {
-        let kind = book.0.slots[tile.0].kind;
-        book.0.toggle_pause(kind);
+        let slot = &book.0.slots[tile.0];
+        schedule.issue(Command::PauseSpell { player: PLAYER, kind: slot.kind, paused: !slot.paused });
     }
 }
 
 /// Spells not cast on a spot: C makes the shaman jump (the spell effects come later).
 fn cast_selected(
     keys: crate::keymap::Shortcuts,
-    mut book: ResMut<PlayerSpells>,
     selected: Res<SelectedSpell>,
     mut schedule: ResMut<crate::units::GameSchedule>,
 ) {
-    if let (true, Some(kind)) = (keys.just_pressed(crate::keymap::Shortcut::CastSelf), selected.0) && ground_spell(kind, (0, 0)).is_none() && book.0.cast(kind) {
-        schedule.issue(Command::Order { player: PLAYER, order: Order::Cast });
+    if let (true, Some(kind)) = (keys.just_pressed(crate::keymap::Shortcut::CastSelf), selected.0) && ground_spell(kind, (0, 0)).is_none() {
+        schedule.issue(Command::CastSelf { player: PLAYER, kind });
     }
 }
 
@@ -327,7 +297,7 @@ fn aim_and_cast(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
     mut schedule: ResMut<crate::units::GameSchedule>,
-    mut book: ResMut<PlayerSpells>,
+    book: Res<PlayerSpells>,
     mut selected: ResMut<SelectedSpell>,
     mut look: ResMut<CursorLook>,
 ) {
@@ -354,7 +324,7 @@ fn aim_and_cast(
     let ready = book.0.slot(kind).is_some_and(|s| s.can_cast());
     let valid = spell.filter(|s| ready && map.0.can_cast(PLAYER, s));
     look.set_if_neq(CursorLook::Spell { kind, valid: valid.is_some() });
-    if let (true, Some(spell)) = (mouse.just_pressed(MouseButton::Left), valid) && book.0.cast(kind) {
+    if let (true, Some(spell)) = (mouse.just_pressed(MouseButton::Left), valid) {
         schedule.issue(Command::Cast { player: PLAYER, spell });
         selected.0 = None;
         look.set_if_neq(CursorLook::Arrow);
@@ -481,19 +451,6 @@ mod tests {
         assert_eq!(ground_spell(SpellKind::Teleport, (5, 6)), Some(Spell::Teleport { to: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::Blast, (5, 6)), Some(Spell::Blast { at: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::Swarm, (5, 6)), None);
-        let teleport = sandbox_book().slot(SpellKind::Teleport).cloned().unwrap();
-        assert!(teleport.can_cast() && teleport.availability == Availability::Unlimited);
-        assert_eq!(demo_book().slot(SpellKind::Teleport).unwrap().availability, Availability::Hidden, "sandbox only");
-    }
-
-    #[test]
-    fn original_levels_bring_their_spells() {
-        let mut map = GameMap::generate(1);
-        assert_eq!(level_book(&map), demo_book(), "generated: demo loadout");
-        let mut own = SpellBook::new();
-        own.set(SpellKind::Blast, Availability::Known);
-        map.spell_book = Some(own.clone());
-        assert_eq!(level_book(&map), own);
     }
 
     #[test]
@@ -507,7 +464,7 @@ mod tests {
 
     #[test]
     fn demo_book_covers_every_state() {
-        let styles: Vec<TileStyle> = demo_book().slots.iter().map(|s| tile_view(s).style).collect();
+        let styles: Vec<TileStyle> = SpellBook::demo().slots.iter().map(|s| tile_view(s).style).collect();
         for st in [TileStyle::Empty, TileStyle::Unknown, TileStyle::Provided, TileStyle::Ready] {
             assert!(styles.contains(&st), "{st:?} missing");
         }

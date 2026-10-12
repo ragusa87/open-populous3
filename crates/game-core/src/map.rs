@@ -7,8 +7,9 @@ use crate::effect::{DamageKind, Effect, EffectEvent, TerrainChange};
 use crate::path::{Ground, Mobility, Walled, Walls};
 use crate::slots;
 use crate::spell::Spell;
-use crate::build_book::BuildBook;
-use crate::spell_book::SpellBook;
+use crate::build_book::{BuildAvailability, BuildBook};
+use crate::mana::ManaPool;
+use crate::spell_book::{SpellBook, SpellKind};
 use std::collections::BTreeSet;
 use crate::tree::{scatter, Tree};
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
@@ -16,6 +17,7 @@ use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::totem::{totems_from_level, Totem, TotemKind};
 use crate::unit::{torus_delta, Action, Order, Unit, UnitEvent, UnitKind};
 use crate::wood::WoodPiece;
+use pop3_format::header::TRIBES;
 use pop3_format::{Level, LevelHeader, MAP_SIZE, WORLD_UNITS_PER_CELL};
 use crate::time::{Tick, Ticks};
 use std::path::Path;
@@ -34,19 +36,21 @@ pub struct GameMap {
     pub trees: Vec<Tree>,
     /// An original level's buildings (none on generated maps and sandboxes yet).
     pub buildings: Vec<Building>,
-    /// Rewards granted so far, in order, with the tribe that got each (`worship`): the client
-    /// updates its panels from the ones it has not seen yet.
+    /// Rewards granted so far, in order, with the tribe that got each (`worship`).
     pub granted: Vec<(u8, crate::building::Reward)>,
     /// Places to pray at: a level's scenery 9, the Worship sandbox's row.
     pub totems: Vec<Totem>,
     /// Pieces of wood lying on the ground (none in original levels).
     pub wood: Vec<WoodPiece>,
-    /// The spells an original level gives (`SpellBook::from_level`, the same for every tribe for
-    /// now); None for generated maps, sandboxes and levels without a header.
-    pub spell_book: Option<SpellBook>,
-    /// The buildings an original level lets the tribes build (`BuildBook::from_level`); None like
-    /// `spell_book`.
-    pub build_book: Option<BuildBook>,
+    /// Each player's mana, by owner (`mana::ManaPool`, ticked with its spell book).
+    pub mana: Vec<ManaPool>,
+    /// Each player's spells, by owner: an original level's (`SpellBook::from_level`, the same for every
+    /// player), `SpellBook::demo` on generated maps and levels without a header, `SpellBook::sandbox` in the
+    /// sandboxes.
+    pub spell_books: Vec<SpellBook>,
+    /// Each player's buildings, by owner: an original level's (`BuildBook::from_level`), all available
+    /// elsewhere.
+    pub build_books: Vec<BuildBook>,
     /// Lit camp fires, in lighting order (none in original levels).
     pub campfires: Vec<Campfire>,
     /// The cells the buildings stand on, past their plan stage (`update_walls`).
@@ -97,14 +101,22 @@ const SANDBOX_TOTEMS: [(u16, bool, bool); 7] = [(1, false, false), (1, true, tru
 /// mana, or (the winged death totem) the Angel of Death's effect, not handled yet.
 fn sandbox_gift(k: usize) -> crate::building::Reward {
     use crate::building::Reward;
-    use crate::spell_book::SpellKind;
     [Reward::OneShot(SpellKind::Blast), Reward::Unhandled { kind: 7, model: 91 }, Reward::OneShot(SpellKind::Swarm), Reward::OneShot(SpellKind::Lightning), Reward::Mana(50_000), Reward::OneShot(SpellKind::Invisibility), Reward::OneShot(SpellKind::Convert)][k]
+}
+
+fn per_player<T: Clone>(t: T) -> Vec<T> {
+    vec![t; TRIBES]
 }
 
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, effects: Vec::new(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, effects: Vec::new(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+    }
+
+    /// `bare`, with the sandboxes' spells for every player.
+    fn sandbox_bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
+        GameMap { spell_books: per_player(SpellBook::sandbox()), ..GameMap::bare(name, terrain, sites) }
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
@@ -125,8 +137,9 @@ impl GameMap {
             granted: Vec::new(),
             totems: totems_from_level(level),
             wood: Vec::new(),
-            spell_book: None,
-            build_book: None,
+            mana: per_player(ManaPool::default()),
+            spell_books: per_player(SpellBook::demo()),
+            build_books: per_player(BuildBook::all(BuildAvailability::Available)),
             campfires: Vec::new(),
             walls: Walls::default(),
             start_camera: None,
@@ -198,11 +211,12 @@ impl GameMap {
             .map(|h| h.name.clone())
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| dat.file_stem().unwrap_or_default().to_string_lossy().into_owned());
-        let spell_book = header.as_ref().map(|h| SpellBook::from_level(h, &level));
-        let build_book = header.as_ref().map(|h| BuildBook::from_level(h, &level));
+        let map = Self::from_level(&level, name, header.as_ref().map(|h| h.theme));
+        let spell_books = header.as_ref().map_or(map.spell_books.clone(), |h| per_player(SpellBook::from_level(h, &level)));
+        let build_books = header.as_ref().map_or(map.build_books.clone(), |h| per_player(BuildBook::from_level(h, &level)));
         let start_camera = header.as_ref().and_then(StartCamera::from_header);
         let object_bank = header.as_ref().map_or(0, |h| h.object_bank);
-        Ok(GameMap { spell_book, build_book, start_camera, object_bank, ..Self::from_level(&level, name, header.map(|h| h.theme)) })
+        Ok(GameMap { spell_books, build_books, start_camera, object_bank, ..map })
     }
 
     /// Deterministic island map from a seed (fallback when no original data exists).
@@ -248,7 +262,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        GameMap::bare("Sandbox: walk", terrain, sites).with_shamans().with_trees(1, 150)
+        GameMap::sandbox_bare("Sandbox: walk", terrain, sites).with_shamans().with_trees(1, 150)
     }
 
     /// Test ground for buildings: a flat island with the player's site at the centre.
@@ -272,7 +286,7 @@ impl GameMap {
         }
         terrain.raise((C + 26, C - 6), 3, 90);
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap::bare("Sandbox: buildings", terrain, sites).with_shamans();
+        let mut map = GameMap::sandbox_bare("Sandbox: buildings", terrain, sites).with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let place = |owner: u8, kind: BuildingKind, (x, z): (u16, u16), facing: u8| Building::new(kind, owner, x - 256, z - 256, facing);
         for model in 1..=19u8 {
@@ -339,7 +353,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap::bare("Sandbox: units", terrain, sites).with_shamans().with_trees(2, 150);
+        let mut map = GameMap::sandbox_bare("Sandbox: units", terrain, sites).with_shamans().with_trees(2, 150);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         for (row, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
             let row = row as i32;
@@ -368,7 +382,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap::bare("Sandbox: worship", terrain, sites).with_shamans();
+        let mut map = GameMap::sandbox_bare("Sandbox: worship", terrain, sites).with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let mut vault = Building::new(BuildingKind::Vault, 255, (C * 512) as u16, ((C + 8) * 512) as u16, 0);
         vault.vault = Some(crate::vault::Vault::new(Some(crate::building::Reward::Building(BuildingKind::Temple)), crate::vault::DEFAULT_PRAY_TIME));
@@ -399,6 +413,12 @@ impl GameMap {
         self.units.iter_mut().find(|u| u.owner == owner && u.kind == UnitKind::Shaman)
     }
 
+    /// Uses one cast of `kind` from the player's book; false when there is none. No kind: nothing to use.
+    fn use_charge(&mut self, player: u8, kind: Option<SpellKind>) -> bool {
+        let Some(kind) = kind else { return true };
+        self.spell_books.get_mut(player as usize).is_some_and(|b| b.cast(kind))
+    }
+
     /// Whether `player` can cast `spell` here and now: never while their shaman is `locked` (inside a
     /// vault, tumbling or lifted); Teleport needs a living shaman and ground she can walk at the target; other spells
     /// always apply.
@@ -420,7 +440,7 @@ impl GameMap {
     /// cannot be cast (`can_cast`) does nothing.
     pub fn apply(&mut self, command: &Command) -> Option<DirtyRect> {
         match *command {
-            Command::Cast { player, spell } if !self.can_cast(player, &spell) => None,
+            Command::Cast { player, spell } if !self.can_cast(player, &spell) || !self.use_charge(player, spell.kind()) => None,
             Command::Cast { player, spell: Spell::Teleport { to } } => {
                 if let Some(u) = self.shaman_mut(player) {
                     u.cast_teleport(to);
@@ -433,6 +453,18 @@ impl GameMap {
                     self.add_effect(crate::blast::effect(player, at));
                 }
                 spell.cast(&mut self.terrain)
+            }
+            Command::CastSelf { player, kind } => {
+                if !self.shaman_locked(player) && self.use_charge(player, Some(kind)) {
+                    self.order(player, Order::Cast);
+                }
+                None
+            }
+            Command::PauseSpell { player, kind, paused } => {
+                if let Some(book) = self.spell_books.get_mut(player as usize) {
+                    book.set_paused(kind, paused);
+                }
+                None
             }
             Command::Order { player, order } => {
                 if !self.shaman_locked(player) {
@@ -614,6 +646,7 @@ impl GameMap {
         dirty.extend(self.work());
         self.drop_wood();
         self.count_inside();
+        self.mana.iter_mut().zip(&mut self.spell_books).for_each(|(pool, book)| pool.tick(now, book));
         self.units.retain(|u| !gone.contains(&u.id));
         dirty
     }
@@ -1006,6 +1039,40 @@ pub fn showcase_states(kind: BuildingKind) -> Vec<Building> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn charges(map: &GameMap, player: u8, kind: SpellKind) -> u8 {
+        map.spell_books[player as usize].slot(kind).unwrap().charges
+    }
+
+    #[test]
+    fn a_cast_uses_a_charge_of_its_players_book() {
+        let mut map = GameMap::sandbox_walk();
+        let s = map.units.iter().find(|u| u.kind == UnitKind::Shaman).unwrap();
+        let at = (s.x.wrapping_add(1024), s.z);
+        let before = charges(&map, 0, SpellKind::Blast);
+        map.apply(&Command::Cast { player: 0, spell: Spell::Blast { at } });
+        assert_eq!((charges(&map, 0, SpellKind::Blast), charges(&map, 1, SpellKind::Blast)), (before - 1, before));
+        while charges(&map, 0, SpellKind::Blast) > 0 {
+            map.spell_books[0].cast(SpellKind::Blast);
+        }
+        let effects = map.effects.len();
+        map.apply(&Command::Cast { player: 0, spell: Spell::Blast { at } });
+        assert_eq!(map.effects.len(), effects, "no charge left");
+        map.apply(&Command::CastSelf { player: 0, kind: SpellKind::Convert });
+        assert_eq!(charges(&map, 0, SpellKind::Convert), 1, "2 from the demo loadout, one used");
+    }
+
+    #[test]
+    fn the_tick_charges_spells_from_mana_except_paused_ones() {
+        let mut map = GameMap::sandbox_walk();
+        map.apply(&Command::PauseSpell { player: 0, kind: SpellKind::Swarm, paused: true });
+        let swarm = map.spell_books[0].slot(SpellKind::Swarm).unwrap().recharge;
+        map.run(Ticks::secs(2));
+        assert_eq!(map.spell_books[0].slot(SpellKind::Swarm).unwrap().recharge, swarm, "paused");
+        assert_eq!(charges(&map, 0, SpellKind::Convert), crate::spell_book::MAX_CHARGES);
+        assert!(charges(&map, 1, SpellKind::Swarm) > charges(&map, 0, SpellKind::Swarm), "another player's is not paused");
+        assert!(map.mana[0].received > crate::mana::Mana::ZERO);
+    }
 
     #[test]
     fn no_order_or_spell_reaches_a_tumbling_unit() {

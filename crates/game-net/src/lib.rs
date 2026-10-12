@@ -6,6 +6,7 @@
 use game_core::building::BuildingKind;
 use game_core::command::Command;
 use game_core::spell::Spell;
+use game_core::spell_book::SpellKind;
 use game_core::time::Tick;
 use game_core::unit::Order;
 use std::io::{self, Read, Write};
@@ -55,7 +56,8 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 
 /// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport, Blast: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
 /// for a unit order `u32 unit id` then the order, for lighting or putting out a camp fire `u16 x, z`,
-/// for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`.
+/// for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`, for a self cast `spell u8`
+/// (its place in `SpellKind::ALL`), for pausing one `spell u8, paused u8`.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -119,7 +121,14 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             b.extend(building.to_le_bytes());
             b.push(*on as u8);
         }
+        Command::CastSelf { player, kind } => b.extend([9, *player, spell_index(*kind)]),
+        Command::PauseSpell { player, kind, paused } => b.extend([10, *player, spell_index(*kind), *paused as u8]),
     }
+}
+
+/// A spell kind as its place in `SpellKind::ALL` (Teleport has no panel model).
+fn spell_index(kind: SpellKind) -> u8 {
+    SpellKind::ALL.iter().position(|&k| k == kind).unwrap() as u8
 }
 
 fn encode_order(b: &mut Vec<u8>, order: &Order) {
@@ -189,6 +198,8 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         6 => Some(Command::PlaceBuilding { player, kind: BuildingKind::from_model(c.u8()?), at: (c.u16()?, c.u16()?), facing: c.u8()? }),
         7 => Some(Command::CancelBuilding { player, at: (c.u16()?, c.u16()?) }),
         8 => Some(Command::Dismantle { player, building: c.u32()?, on: c.u8()? != 0 }),
+        9 => Some(Command::CastSelf { player, kind: *SpellKind::ALL.get(c.u8()? as usize)? }),
+        10 => Some(Command::PauseSpell { player, kind: *SpellKind::ALL.get(c.u8()? as usize)?, paused: c.u8()? != 0 }),
         _ => None,
     }
 }
@@ -287,6 +298,8 @@ mod tests {
                 Command::Dismantle { player: 0, building: 7, on: false },
                 Command::QueueOrder { player: 0, unit: 3, order: Order::Enter { site: (1024, 2048) } },
                 Command::OrderUnit { player: 0, unit: 1, order: Order::Worship { site: (32768, 36864) } },
+                Command::CastSelf { player: 1, kind: SpellKind::Teleport },
+                Command::PauseSpell { player: 3, kind: SpellKind::Armageddon, paused: true },
             ],
         }
     }

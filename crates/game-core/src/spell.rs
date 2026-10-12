@@ -2,6 +2,7 @@
 //! caster's shaman (`GameMap::apply`). Mana, cooldowns and effects on units/buildings come later
 //! (see docs/specs/spells.md).
 
+use crate::spell_book::SpellKind;
 use crate::terrain::{DirtyRect, Heightmap};
 
 pub type Cell = (i32, i32);
@@ -19,6 +20,15 @@ pub enum Spell {
 }
 
 impl Spell {
+    /// The book spell this cast uses; None for the terrain brushes (editor and dev tools, not cast from a book yet).
+    pub fn kind(&self) -> Option<SpellKind> {
+        match self {
+            Spell::Teleport { .. } => Some(SpellKind::Teleport),
+            Spell::Blast { .. } => Some(SpellKind::Blast),
+            Spell::LandBridge { .. } | Spell::Flatten { .. } | Spell::Erode { .. } | Spell::Raise { .. } => None,
+        }
+    }
+
     /// Apply the terrain part of the spell and return the region to refresh (None: no terrain part).
     pub fn cast(&self, terrain: &mut Heightmap) -> Option<DirtyRect> {
         Some(match *self {

@@ -9,9 +9,8 @@ use crate::blueprint::Plan;
 use bevy::prelude::*;
 use game_core::build_book::{BuildAvailability, BuildBook, BuildSlot};
 use crate::world::CurrentMap;
-use game_core::building::{BuildingKind, Reward};
+use game_core::building::BuildingKind;
 use game_core::map::GameMap;
-use game_core::spell_book::SpellBook;
 
 const COLUMNS: u16 = 3;
 
@@ -93,10 +92,9 @@ pub fn describe_build(slot: &BuildSlot) -> String {
     }
 }
 
-/// The player's buildings on `map`: an original level's own (`GameMap::build_book`), else all of
-/// them (generated maps and sandboxes).
+/// The player's buildings on `map` (`GameMap::build_books`).
 pub fn level_builds(map: &GameMap) -> BuildBook {
-    map.build_book.clone().unwrap_or_else(|| BuildBook::all(BuildAvailability::Available))
+    map.build_books[crate::units::PLAYER as usize].clone()
 }
 
 #[derive(Component)]
@@ -116,31 +114,8 @@ impl Plugin for BuildPlugin {
     }
 }
 
-/// Makes the player's rewards (`GameMap::granted`, from vaults of knowledge) available on the panels:
-/// a spell becomes known, a building buildable. `seen` counts the rewards already taken; a new map
-/// starts its list again.
-pub fn apply_rewards(granted: &[(u8, Reward)], seen: &mut usize, spells: &mut SpellBook, builds: &mut BuildBook) {
-    if granted.len() < *seen {
-        *seen = 0;
-    }
-    for &(owner, reward) in &granted[*seen..] {
-        if owner != crate::units::PLAYER {
-            continue;
-        }
-        match reward {
-            Reward::Spell(kind) => spells.set(kind, game_core::spell_book::Availability::Known),
-            Reward::Building(kind) => builds.set(kind, BuildAvailability::Available),
-            Reward::OneShot(kind) => game_core::worship::one_more_shot(spells, kind),
-            Reward::Mana(_) | Reward::Unhandled { .. } => {}
-        }
-    }
-    *seen = granted.len();
-}
-
-fn take_rewards(map: Res<CurrentMap>, mut seen: Local<usize>, mut spells: ResMut<crate::hud::spells::PlayerSpells>, mut builds: ResMut<PlayerBuilds>) {
-    if map.0.granted.len() != *seen {
-        apply_rewards(&map.0.granted, &mut seen, &mut spells.0, &mut builds.0);
-    }
+fn take_rewards(map: Res<CurrentMap>, mut builds: ResMut<PlayerBuilds>) {
+    builds.0.clone_from(&level_builds(&map.0));
 }
 
 fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, book: Res<PlayerBuilds>) {
@@ -224,23 +199,6 @@ fn update_info(book: Res<PlayerBuilds>, tiles: Query<(&BuildTile, &Interaction)>
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_players_rewards_reach_the_panels_once() {
-        use game_core::spell_book::{Availability, SpellKind};
-        let mut spells = SpellBook::new();
-        let mut builds = BuildBook::all(BuildAvailability::Discoverable);
-        let mut seen = 0;
-        let granted = vec![(0, Reward::Building(BuildingKind::Temple)), (1, Reward::Spell(SpellKind::Swarm)), (0, Reward::Spell(SpellKind::Swarm))];
-        apply_rewards(&granted[..2], &mut seen, &mut spells, &mut builds);
-        assert_eq!(builds.slot(BuildingKind::Temple).unwrap().availability, BuildAvailability::Available);
-        assert_ne!(spells.slots.iter().find(|s| s.kind == SpellKind::Swarm).unwrap().availability, Availability::Known, "another tribe's");
-        assert_eq!(seen, 2);
-        apply_rewards(&granted, &mut seen, &mut spells, &mut builds);
-        assert_eq!(spells.slots.iter().find(|s| s.kind == SpellKind::Swarm).unwrap().availability, Availability::Known);
-        apply_rewards(&[], &mut seen, &mut spells, &mut builds);
-        assert_eq!(seen, 0, "a new map starts again");
-    }
-
     fn slot(kind: BuildingKind, availability: BuildAvailability) -> BuildSlot {
         BuildSlot { kind, availability }
     }
@@ -269,12 +227,4 @@ mod tests {
         assert_eq!(open.plan(), Some(Plan::Building(BuildingKind::Temple)));
     }
 
-    #[test]
-    fn original_levels_bring_their_buildings() {
-        let mut map = GameMap::generate(1);
-        assert!(level_builds(&map).slots.iter().all(|s| s.availability == BuildAvailability::Available), "generated: all");
-        let own = BuildBook::all(BuildAvailability::Hidden);
-        map.build_book = Some(own.clone());
-        assert_eq!(level_builds(&map), own);
-    }
 }

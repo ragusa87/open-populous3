@@ -238,6 +238,27 @@ impl SpellBook {
         book
     }
 
+    /// Loadout showing every tile state, for maps without one of their own.
+    pub fn demo() -> Self {
+        let mut b = SpellBook::new();
+        for k in [SpellKind::Blast, SpellKind::Convert, SpellKind::Swarm, SpellKind::LandBridge, SpellKind::Erosion] {
+            b.set(k, Availability::Known);
+        }
+        b.set(SpellKind::Invisibility, Availability::Provided { shots: 3 });
+        b.set(SpellKind::Volcano, Availability::Provided { shots: 1 });
+        b.set(SpellKind::Flatten, Availability::Discoverable);
+        b.set(SpellKind::Lightning, Availability::Discoverable);
+        b.charge(Mana(500));
+        b
+    }
+
+    /// The sandboxes': the demo loadout plus Teleport, free.
+    pub fn sandbox() -> Self {
+        let mut b = SpellBook::demo();
+        b.set(SpellKind::Teleport, Availability::Unlimited);
+        b
+    }
+
     /// Every known spell at full charges.
     pub fn fill(&mut self) {
         for s in self.slots.iter_mut().filter(|s| s.availability == Availability::Known) {
@@ -256,10 +277,10 @@ impl SpellBook {
         }
     }
 
-    /// Switches a known spell's recharge off or on (the player's right click on its tile).
-    pub fn toggle_pause(&mut self, kind: SpellKind) {
+    /// Stops or resumes a known spell's recharge (`Command::PauseSpell`).
+    pub fn set_paused(&mut self, kind: SpellKind, paused: bool) {
         if let Some(s) = self.slots.iter_mut().find(|s| s.kind == kind && s.availability == Availability::Known) {
-            s.paused = !s.paused;
+            s.paused = paused;
         }
     }
 
@@ -378,16 +399,16 @@ mod tests {
         let mut b = SpellBook::new();
         b.set(SpellKind::Blast, Availability::Known);
         b.charge(Mana(40));
-        b.toggle_pause(SpellKind::Blast);
+        b.set_paused(SpellKind::Blast, true);
         b.charge(Mana(1000));
         let s = b.slot(SpellKind::Blast).unwrap();
         assert_eq!((s.charges, s.recharge, s.paused), (1, 0, true));
         assert!(b.cast(SpellKind::Blast), "a paused spell can still be cast");
-        b.toggle_pause(SpellKind::Blast);
+        b.set_paused(SpellKind::Blast, false);
         b.charge(Mana(40));
         assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 1, "recharging again");
         b.set(SpellKind::Volcano, Availability::Provided { shots: 1 });
-        b.toggle_pause(SpellKind::Volcano);
+        b.set_paused(SpellKind::Volcano, true);
         assert!(!b.slot(SpellKind::Volcano).unwrap().paused, "only known spells recharge");
     }
 
@@ -429,6 +450,13 @@ mod tests {
         b.discover(SpellKind::Flatten);
         b.charge(Mana(200));
         assert!(b.cast(SpellKind::Flatten));
+    }
+
+    #[test]
+    fn teleport_is_free_in_the_sandboxes_only() {
+        let teleport = SpellBook::sandbox().slot(SpellKind::Teleport).cloned().unwrap();
+        assert!(teleport.can_cast() && teleport.availability == Availability::Unlimited);
+        assert_eq!(SpellBook::demo().slot(SpellKind::Teleport).unwrap().availability, Availability::Hidden);
     }
 
     #[test]

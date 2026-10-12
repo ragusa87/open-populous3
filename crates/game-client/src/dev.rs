@@ -231,6 +231,9 @@ fn screenshot(
             pinned.0 = Some(at);
         }
         let demo = std::env::var("SHAMAN").unwrap_or_default();
+        if demo == "teleport" {
+            map.0.spell_books[PLAYER as usize].set(game_core::spell_book::SpellKind::Teleport, game_core::spell_book::Availability::Unlimited);
+        }
         let mut cmds = map.0.shaman_of(PLAYER).map(|u| demo_commands(&demo, u)).unwrap_or_default();
         if let (Some(u), Some(vault), "worship") = (map.0.shaman_of(PLAYER), map.0.buildings.iter().position(|b| b.vault.is_some()), demo.as_str()) {
             cmds.extend(map.0.worship_orders(PLAYER, &[u.id], vault));

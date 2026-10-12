@@ -11,6 +11,7 @@ use crate::building::{BuildingKind, Reward};
 use crate::build_book::BuildAvailability;
 use crate::command::Command;
 use crate::map::GameMap;
+use crate::mana::Mana;
 use crate::spell_book::{Availability, SpellBook, SpellKind};
 use crate::totem::TRIBES;
 use crate::unit::{torus_delta, Action, Inside, Order, UnitKind};
@@ -172,27 +173,32 @@ impl GameMap {
         }
     }
 
-    /// `reward` goes to tribe `owner`: kept in `granted` (the client updates its panels from it) and
-    /// made available in the level's books (shared by the tribes for now).
+    /// `reward` goes to tribe `owner`: kept in `granted` and made available in its books or added to its mana.
     fn give(&mut self, owner: u8, reward: Reward) {
         self.granted.push((owner, reward));
+        let i = owner as usize;
         match reward {
             Reward::Spell(kind) => {
-                if let Some(book) = self.spell_book.as_mut() {
+                if let Some(book) = self.spell_books.get_mut(i) {
                     book.set(kind, Availability::Known);
                 }
             }
             Reward::Building(kind) => {
-                if let Some(book) = self.build_book.as_mut() {
+                if let Some(book) = self.build_books.get_mut(i) {
                     book.set(kind, BuildAvailability::Available);
                 }
             }
             Reward::OneShot(kind) => {
-                if let Some(book) = self.spell_book.as_mut() {
+                if let Some(book) = self.spell_books.get_mut(i) {
                     one_more_shot(book, kind);
                 }
             }
-            Reward::Mana(_) | Reward::Unhandled { .. } => {}
+            Reward::Mana(n) => {
+                if let Some(pool) = self.mana.get_mut(i) {
+                    pool.add(Mana(n));
+                }
+            }
+            Reward::Unhandled { .. } => {}
         }
     }
 }
@@ -215,6 +221,16 @@ fn near(x: u16, z: u16, to: (u16, u16)) -> bool {
 mod tests {
     use super::*;
     use crate::vault::{VaultPhase, CLOSE_TICKS, OPEN_TICKS};
+
+    #[test]
+    fn a_reward_goes_to_its_tribe_only() {
+        let mut map = GameMap::sandbox_worship();
+        map.give(1, Reward::Spell(SpellKind::Volcano));
+        map.give(1, Reward::Mana(500));
+        let volcano = |p: usize| map.spell_books[p].slot(SpellKind::Volcano).unwrap().availability;
+        assert_eq!((volcano(0), volcano(1)), (Availability::Provided { shots: 1 }, Availability::Known));
+        assert_eq!((map.mana[0].incoming, map.mana[1].incoming), (Mana::ZERO, Mana(500)));
+    }
 
     fn sandbox() -> (GameMap, usize, u32) {
         let map = GameMap::sandbox_worship();
