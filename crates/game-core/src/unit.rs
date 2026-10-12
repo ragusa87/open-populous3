@@ -704,6 +704,18 @@ impl Unit {
         self.health.is_zero()
     }
 
+    /// Loses `amount` health (`GameMap::damage` decides whether it is hurt at all); true when that kills it.
+    pub fn take_damage(&mut self, amount: u16) -> bool {
+        if !self.is_alive() {
+            return false;
+        }
+        let dead = self.health.damage(amount);
+        if dead {
+            self.die();
+        }
+        dead
+    }
+
     fn die(&mut self) {
         self.drop_plans();
         self.action = Action::Dying { left: Countdown::new(DYING_TICKS) };

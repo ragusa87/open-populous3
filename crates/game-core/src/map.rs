@@ -4,6 +4,7 @@ use crate::blast::Blast;
 use crate::building::{buildings_from_level, Building, BuildingKind};
 use crate::campfire::{self, Campfire};
 use crate::command::Command;
+use crate::effect::{DamageKind, Effect, EffectEvent, TerrainChange};
 use crate::path::{Ground, Mobility, Walled, Walls};
 use crate::slots;
 use crate::spell::Spell;
@@ -58,6 +59,8 @@ pub struct GameMap {
     pub object_bank: u8,
     /// Blasts going on (`blast::Blast`), in casting order.
     pub blasts: Vec<Blast>,
+    /// Spell effects going on (`effect::Effect`), in the order they were added.
+    pub effects: Vec<Effect>,
     /// Ticks run since the map was made (`tick`).
     pub now: Tick,
     /// The next id `new_id` gives: units, buildings and effects share it, an id is never given twice.
@@ -107,7 +110,7 @@ fn sandbox_gift(k: usize) -> crate::building::Reward {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, blasts: Vec::new(), now: Tick::ZERO, next_id: 1, rng: Lcg(PLAY_SEED) }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), spell_book: None, build_book: None, campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, blasts: Vec::new(), effects: Vec::new(), now: Tick::ZERO, next_id: 1, rng: Lcg(PLAY_SEED) }
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
@@ -135,6 +138,7 @@ impl GameMap {
             start_camera: None,
             object_bank: 0,
             blasts: Vec::new(),
+            effects: Vec::new(),
             now: Tick::ZERO,
             next_id: 1,
             rng: Lcg(PLAY_SEED),
@@ -580,6 +584,7 @@ impl GameMap {
         self.update_walls();
         let (buildings, now) = (&self.buildings, self.now);
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now));
+        dirty.extend(self.tend_effects());
         self.tend_campfires();
         self.tend_vaults();
         self.tend_totems();
@@ -677,6 +682,51 @@ impl GameMap {
 
     pub fn building(&self, id: u32) -> Option<&Building> {
         self.building_index(id).map(|i| &self.buildings[i])
+    }
+
+    /// Adds `e` with a fresh id, last in `effects`; its id.
+    pub fn add_effect(&mut self, mut e: Effect) -> u32 {
+        e.id = self.new_id();
+        let id = e.id;
+        self.effects.push(e);
+        id
+    }
+
+    /// Each effect's turn, in order, reading the map as it was before any of them; finished ones go. Then their
+    /// events apply in order (`apply_effect`); returns the ground they changed.
+    fn tend_effects(&mut self) -> Vec<DirtyRect> {
+        let (mut effects, mut rng) = (std::mem::take(&mut self.effects), self.rng);
+        let events: Vec<(u8, EffectEvent)> = effects.iter_mut().flat_map(|e| e.tick(self.now, self, &mut rng).into_iter().map(|ev| (e.owner, ev)).collect::<Vec<_>>()).collect();
+        effects.retain(|e| !e.is_over());
+        (self.effects, self.rng) = (effects, rng);
+        events.into_iter().filter_map(|(owner, event)| self.apply_effect(owner, event)).collect()
+    }
+
+    /// One event of an effect cast by tribe `owner`; the ground it changed, if any. Things gone are skipped.
+    pub(crate) fn apply_effect(&mut self, owner: u8, event: EffectEvent) -> Option<DirtyRect> {
+        match event {
+            EffectEvent::Damage { unit, amount, kind } => self.damage(unit, amount, kind, owner),
+            EffectEvent::Push { unit, vel } => {
+                let i = self.unit_index(unit).filter(|&i| crate::effect::pushes(&self.units[i]))?;
+                let u = &self.units[i];
+                let ground = self.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
+                self.units[i].fling(vel, ground);
+            }
+            EffectEvent::Panic { .. } | EffectEvent::Raid { .. } | EffectEvent::SetFire { .. } => {}
+            EffectEvent::Spawn(e) => {
+                self.add_effect(e);
+            }
+            EffectEvent::Terrain(TerrainChange::Raise { at, radius, by }) => return Some(self.terrain.raise(at, radius, by)),
+            EffectEvent::Terrain(TerrainChange::Flatten { at, radius }) => return Some(self.terrain.flatten(at, radius)),
+        }
+        None
+    }
+
+    /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`).
+    pub(crate) fn damage(&mut self, unit: u32, amount: u16, kind: DamageKind, from: u8) {
+        if let Some(i) = self.unit_index(unit).filter(|&i| crate::effect::hurts(&self.units[i], kind, from)) {
+            self.units[i].take_damage(amount);
+        }
     }
 
     /// The terrain with the buildings' walls, as walkers outside every building see it.
