@@ -13,6 +13,9 @@
 //! `GAME_SPEED=0` the shot holds it there): the explosion is drawn, then the building removed the next frame.
 //! `TRAIN=stored/cost[:short]` puts a brave of the player in each of their training units, making something with
 //! that much mana stored (`:short`: short of mana).
+//! `VEHICLE=boat@x,z[:n]` (or `balloon`, several separated by `;`) puts a vehicle of the player at map position x,z
+//! (cells) with n new braves aboard (none by default); `VEHICLE_TO=x,z` sends them there; then `VEHICLE_TICKS`
+//! ticks run (0 by default).
 //! `AIM=spell` (its name without spaces, any case, e.g. `blast`, `landbridge`) selects that spell as if picked in
 //! the Spells tab.
 //! `VIDEO=secs` instead of `SCREENSHOT`: the same setup, then `secs` seconds recorded from `SHOT_FRAME` straight
@@ -288,6 +291,47 @@ pub fn build_demo(map: &mut game_core::map::GameMap, plan: &str, ticks: u32) -> 
     true
 }
 
+/// `kind@x,z[:n]`: a vehicle kind by name (`boat`, `balloon`, any case), a map position in cells, and how many
+/// people aboard.
+pub fn parse_vehicle(v: &str) -> Option<(game_core::vehicle::VehicleKind, Vec2, u8)> {
+    let (name, rest) = v.split_once('@')?;
+    let kind = game_core::vehicle::VehicleKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(name.trim()))?;
+    let (at, n) = rest.split_once(':').map_or(Some((rest, 0)), |(a, n)| Some((a, n.trim().parse().ok()?)))?;
+    let (x, z) = at.split_once(',')?;
+    Some((kind, Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?), n))
+}
+
+/// `VEHICLE` demo: a vehicle of the player at `at` (cells) with `aboard` new braves in it; then sent to `to`
+/// (cells) for `ticks` ticks.
+pub fn vehicle_demo(map: &mut game_core::map::GameMap, (kind, at, aboard): (game_core::vehicle::VehicleKind, Vec2, u8), to: Option<Vec2>, ticks: u32) {
+    use game_core::vehicle::Vehicle;
+    let world = |c: Vec2| ((c.x * WORLD as f32) as u16, (c.y * WORLD as f32) as u16);
+    let at = world(at);
+    let vehicle = map.add_vehicle(Vehicle::new(kind, PLAYER, at, game_core::angle::Angle::ZERO));
+    for _ in 0..aboard.min(kind.seats()) {
+        let u = map.spawn(PLAYER, game_core::unit::UnitKind::Brave, at);
+        u.aboard = Some(vehicle);
+        let id = u.id;
+        if let Some(v) = map.vehicles.get_mut(vehicle) {
+            v.seat(id, PLAYER);
+        }
+    }
+    if let Some(to) = to {
+        map.apply(&Command::MoveVehicle { player: PLAYER, vehicle, to: world(to) });
+    }
+    for _ in 0..ticks {
+        map.tick();
+    }
+}
+
+const WORLD: u32 = pop3_format::WORLD_UNITS_PER_CELL;
+
+/// `x,z`: a map position in cells.
+pub fn parse_cells(v: &str) -> Option<Vec2> {
+    let (x, z) = v.split_once(',')?;
+    Some(Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?))
+}
+
 /// A spell by its name without spaces, any case.
 pub fn spell_by_name(name: &str) -> Option<game_core::spell_book::SpellKind> {
     game_core::spell_book::SpellKind::ALL.into_iter().find(|k| k.name().replace(' ', "").eq_ignore_ascii_case(name))
@@ -420,6 +464,14 @@ fn screenshot(
         if let Some(production) = std::env::var("TRAIN").ok().and_then(|v| parse_train(&v)) {
             train_demo(&mut map.0, production);
         }
+        if let Ok(vehicles) = std::env::var("VEHICLE") {
+            let to = std::env::var("VEHICLE_TO").ok().and_then(|v| parse_cells(&v));
+            for vehicle in vehicles.split(';').filter_map(parse_vehicle) {
+                vehicle_demo(&mut map.0, vehicle, to, 0);
+            }
+            let ticks = std::env::var("VEHICLE_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            map.0.run(game_core::time::Ticks::new(ticks));
+        }
         if let Ok(plan) = std::env::var("BUILD") {
             let ticks = std::env::var("BUILD_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             dirty.0 |= build_demo(&mut map.0, &plan, ticks);
@@ -459,6 +511,20 @@ fn screenshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vehicle_setups() {
+        use game_core::vehicle::VehicleKind;
+        assert_eq!(parse_vehicle("boat@64,115:3"), Some((VehicleKind::Boat, Vec2::new(64.0, 115.0), 3)));
+        assert_eq!(parse_vehicle("Balloon@1.5,2"), Some((VehicleKind::Balloon, Vec2::new(1.5, 2.0), 0)));
+        assert_eq!(parse_vehicle("cart@1,2"), None);
+        assert_eq!(parse_vehicle("boat@1,2:x"), None);
+        let mut map = game_core::map::GameMap::sandbox_buildings();
+        vehicle_demo(&mut map, (VehicleKind::Boat, Vec2::new(64.5, 116.5), 9), parse_cells("80,116"), 30);
+        let (_, v) = map.vehicles.entries().next().unwrap();
+        assert_eq!(v.passengers.len(), 5, "its seats");
+        assert!(v.x > 64 * 512 + 256 + 512, "on its way east");
+    }
 
     #[test]
     fn train_puts_a_trainee_in_each_training_unit() {

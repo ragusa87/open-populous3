@@ -446,10 +446,10 @@ fn respawn_views(
 }
 
 #[allow(clippy::too_many_arguments)]
-/// A unit standing in a built building is not seen (walking in or out by the door it is, in a
+/// A unit aboard a vehicle or standing in a built building is not seen (walking in or out by the door it is, in a
 /// building under construction, open, it is, and up a tower's lookout it is: `standing_in`).
 pub fn hidden_inside(map: &game_core::map::GameMap, u: &game_core::unit::Unit) -> bool {
-    standing_in(map, u).is_some_and(|b| crate::buildings::lookout(b.kind).is_none())
+    u.aboard.is_some() || standing_in(map, u).is_some_and(|b| crate::buildings::lookout(b.kind).is_none())
 }
 
 /// The built building a unit stands in (not walking in or out of it).

@@ -36,7 +36,7 @@ pub const FOOTPRINT_HALF: f32 = 1.0;
 /// Stand-in box (cells) when there is no model.
 const BOX: Vec3 = Vec3::new(1.6, 0.8, 1.6);
 /// Theme whose atlas textures buildings on maps without one.
-const DEFAULT_THEME: u8 = 0;
+pub(crate) const DEFAULT_THEME: u8 = 0;
 /// Colour of the wooden structure.
 const WOOD: Color = Color::srgb(0.55, 0.37, 0.2);
 /// Attacked: the building tilts about its base by up to this much (radians) at each blow, one
@@ -145,7 +145,7 @@ impl Plugin for BuildingsPlugin {
 }
 
 /// The theme atlas as a material, None without original files.
-fn original_material(levels: &LevelList, theme: u8, images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> Option<Handle<StandardMaterial>> {
+pub(crate) fn original_material(levels: &LevelList, theme: u8, images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> Option<Handle<StandardMaterial>> {
     if !levels.original {
         return None;
     }
