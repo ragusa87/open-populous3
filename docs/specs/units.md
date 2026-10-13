@@ -131,7 +131,7 @@ route (units.md "Pathfinding", buildings.md "Walking around buildings"). A telep
 Idle followers (braves, warriors, firewarriors, spies, preachers) whose shaman (same tribe) is within 3 cells on each axis (torus)
 and idle or walking pray facing her: the Pray pose (original anim 8, kneeling, arms going up and down; the CC0
 pray sheet), turned towards her (`octant`), following her as she walks by. Drawn only: in the simulation they stay
-Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the shaman never do it; casting, praying, drowning or dying, she gets no worship.
+Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the shaman never do it; casting, praying, drowning or dying, she gets no worship. Nobody aboard a vehicle worships (they pedal), and nobody worships her while she is aboard one.
 
 ## Standing slots (done: `game_core::slots`)
 - Each cell holds 3 x 3 standing spots (`PER_CELL`, about a third of a cell apart: a unit's width).

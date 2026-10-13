@@ -20,12 +20,14 @@ pub fn shamans(units: &[Unit]) -> [Option<&Unit>; TRIBES as usize] {
 }
 
 /// The facing (eighths of a turn) towards `shaman` when `unit` worships her: an idle follower
-/// of her tribe (not a wildman), with her idle or walking within range.
+/// of her tribe (not a wildman) on foot, with her idle or walking within range, on foot too (aboard a vehicle, they
+/// pedal instead).
 pub fn worship_facing(unit: &Unit, shaman: Option<&Unit>) -> Option<u8> {
     let shaman = shaman?;
     let worshipper = UnitKind::FOLLOWERS.contains(&unit.kind);
     let present = matches!(shaman.action, Action::Idle | Action::Walking { .. });
-    if !worshipper || unit.action != Action::Idle || !present || unit.owner != shaman.owner {
+    let on_foot = unit.aboard.is_none() && shaman.aboard.is_none();
+    if !worshipper || !on_foot || unit.action != Action::Idle || !present || unit.owner != shaman.owner {
         return None;
     }
     let (dx, dz) = (torus_delta(unit.x, shaman.x), torus_delta(unit.z, shaman.z));
@@ -78,6 +80,13 @@ mod tests {
             assert_eq!(worship_facing(&brave, Some(&her)), None, "{action:?}");
         }
         assert_eq!(worship_facing(&brave, None), None, "no shaman");
+        her.action = Action::Idle;
+        let boat = Some(game_core::id::Id::from_raw(9));
+        let mut aboard = brave.clone();
+        aboard.aboard = boat;
+        assert_eq!(worship_facing(&aboard, Some(&her)), None, "aboard a vehicle: pedalling");
+        her.aboard = boat;
+        assert_eq!(worship_facing(&brave, Some(&her)), None, "she is aboard one");
     }
 
     #[test]
