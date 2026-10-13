@@ -215,7 +215,7 @@ impl GameMap {
             }
             Target::Unit(id) => {
                 if self.unit(id).is_some_and(fires_back) {
-                    events.push(WorldEvent::FireBack { unit: id, thrower: b.thrower });
+                    events.push(WorldEvent::StrikeBack { unit: id, at: b.thrower });
                 }
             }
         }

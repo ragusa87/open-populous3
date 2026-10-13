@@ -37,8 +37,9 @@ pub enum WorldEvent {
     ChangeOwner { unit: UnitId, tribe: u8 },
     /// The unit leaves the coordinator `from` (`Unit::release`); nothing if it is in another one by now, or in none.
     Release { unit: UnitId, from: crate::coordinator::Link },
-    /// A firewarrior hit by `thrower`'s bolt fires back: at once on its feet, else once it has landed.
-    FireBack { unit: UnitId, thrower: UnitId },
+    /// The unit attacks `at` back: a firewarrior hit by its bolt, a listener whose preacher was attacked. At once on
+    /// its feet, else once it has landed.
+    StrikeBack { unit: UnitId, at: UnitId },
 }
 
 /// What throws a unit, for its immunities.

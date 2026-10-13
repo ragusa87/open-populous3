@@ -1229,8 +1229,8 @@ impl GameMap {
                 }
                 None
             }
-            WorldEvent::FireBack { unit, thrower } => {
-                let target = Target::Unit(thrower);
+            WorldEvent::StrikeBack { unit, at } => {
+                let target = Target::Unit(at);
                 match self.unit_index(unit) {
                     Some(i) if self.units[i].locked() => self.units[i].chain_after_landing(Order::Attack { target }),
                     Some(i) => self.go_attack(i, target),

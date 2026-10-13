@@ -56,6 +56,7 @@ for each variant:
 | `Struck { attacker, target, blow, knock }` | `GameMap::struck`: the attacker strikes, a target on guard reels (and is thrown back after) |
 | `StartMelee { attacker, target }` | `GameMap::start_melee`: a new melee, both in it |
 | `Release { unit, from }` | the unit leaves the coordinator `from`: back to Idle (`Unit::release`); nothing if it is gone, in none, or taken by another one meanwhile (a listener challenged the same turn its sermon ends stays in the challenge) |
+| `StrikeBack { unit, at }` | the unit attacks `at` back (`GameMap::go_attack`, chained after landing when thrown): a firewarrior hit by a bolt, a listener whose preacher was attacked |
 | `ChangeOwner { unit, tribe }` | `GameMap::change_owner`: a converted person joins the tribe, starting afresh (combat.md "Sermon") |
 
 Rules:

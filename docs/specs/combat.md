@@ -181,7 +181,7 @@ join a melee on their own attack (they still fight when challenged).
   warrior 104, anyone else in the cell 100; `DamageKind::Fire` [whether the shield stops it: guess, it does not].
   Those hit are thrown 64 per turn away from the thrower and 110 up; a warrior or preacher that lives only hops 36.
   Trees in the cell burn; a targeted building takes 100 wear and burns. A firewarrior target fires back at the
-  thrower (`fires_back`, `WorldEvent::FireBack` after its push) unless it is already attacking or in a fight: whatever
+  thrower (`fires_back`, `WorldEvent::StrikeBack` after its push) unless it is already attacking or in a fight: whatever
   else it does (walking, working) it drops; thrown, the attack is chained for when it lands [ours: that part of the
   original is not read in detail].
 - Drawn: our own glowing ball per bolt (`firebolts` view); the throw pose (anim 7).
@@ -206,7 +206,9 @@ join a melee on their own attack (they still fight when challenged).
   heals and can be attacked: an attacker challenges it as anyone, which takes it out of its sermon, the others listen
   on [game].
 - Each turn the sermon ends (the listener freed) when the preacher is gone, dead or no longer preaching (an order took
-  it, or it was attacked: every one of its sermons ends [game]), or the listener is gone, dead or taken by something
+  it, or it was attacked: every one of its sermons ends [game], and each freed listener attacks it back at once,
+  `WorldEvent::StrikeBack` [game]; nothing else protects them: whether the preacher, free again, sits them down before
+  they reach it is up to the usual rules), or the listener is gone, dead or taken by something
   else. Its countdown: the first chance after `CONV_FIRST_CHECK` (250) turns, then every `CONV_CHECK` (500), each give
   or take a sixteenth [exe]; a chance converts 1 time in `CONV_CHANCE` (5) [exe], unless the preacher's tribe is at
   the population cap (`headcount::MAX_POPULATION`, 200), when it waits the next check.

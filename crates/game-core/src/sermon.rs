@@ -63,7 +63,15 @@ impl Coordinator for Sermon {
     fn tick(&mut self, id: Id<Self>, members: &[UnitId], _now: Tick, world: &GameMap, rng: &mut Lcg) -> Step {
         let end = |listener| Step { finished: true, events: vec![WorldEvent::Release { unit: listener, from: Link::Sermon(id) }] };
         let (Some(p), Some(l)) = (world.unit(self.preacher), world.unit(self.listener)) else { return end(self.listener) };
-        if !members.contains(&l.id) || !l.is_alive() || !p.is_alive() || !preaching(p) || p.owner == l.owner {
+        if !members.contains(&l.id) || !l.is_alive() || !p.is_alive() || p.owner == l.owner {
+            return end(l.id);
+        }
+        if matches!(p.action, Action::Challenge { .. } | Action::Melee { .. }) {
+            let mut step = end(l.id);
+            step.events.push(WorldEvent::StrikeBack { unit: l.id, at: p.id });
+            return step;
+        }
+        if !preaching(p) {
             return end(l.id);
         }
         if !self.left.tick() {
@@ -242,6 +250,7 @@ mod tests {
         challenged(&mut map, p);
         map.tick();
         assert!(map.coordinators.sermons.is_empty() && !listening(&map, others[1]), "the preacher attacked: every sermon ends");
+        assert!(matches!(map.unit(others[1]).unwrap().action, Action::Attacking { target: Target::Unit(t), .. } if t == p), "its listener turns on it");
     }
 
     #[test]
