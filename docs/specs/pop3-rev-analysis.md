@@ -51,6 +51,11 @@ so a live measurement may run on it with the addresses translated.
 - **A firewarrior throws two homing fire bolts, one hits** [exe]: 1 cell per turn, 100 to every enemy in the
   impact cell plus `SW_BLAST_DAMAGE` × a per-type % to the target, every 25-28 turns, at 9.2-17.2 cells by altitude.
   See "Firewarrior fire".
+- **Preaching rerolls a 1-in-`PREACHEE_CONV_CHANCE` (5) chance every `PREACHEE_CONV_FREQ` (500 turns, 41.7 s)**
+  [exe]: on success the preachee is destroyed and a person of its own type, in the preacher's tribe, takes its
+  place (capped by the preacher's tribe population); instant for a wildman or other "no breeding" tribe. The
+  order-kind link from the preacher's own look scan (0x51E7B0) to this state machine is not yet traced. See
+  "Preacher conversion".
 - **A vehicle's life is also its abandon timer** [exe]: 5000, −1 per turn, refilled every turn while it moves or
   carries anyone; blasts (50 per turn) and bolts (100) only sink an empty, still one. A boat whose cell turns to
   land is emptied, keels over and explodes 13-24 s later. Both are 3D objects 143 / 144. See "Vehicles".
@@ -850,7 +855,7 @@ otherwise:
 | 10/8, 10/9 | fight, pre-fight |
 | 10/1, 10/6 | formations (`process_formation_unit`, `add_unit_to_formation`) |
 | 10/0xA | guard control |
-| 10/4, 10/0xC | soul convert |
+| 10/4, 10/0xC | soul convert (created at 0x4D5E78 for type 0xC, from the preachee's own state 3): "Preacher conversion" |
 
 - Per person type, the constants hold `LIFE_`, `FIGHT_DAMAGE_`, `CONV_`, `SW_BLAST_DAMAGE_` and the tower detection
   radius (see "Constant table").
@@ -1030,6 +1035,69 @@ join(person, fight)                                                    (0x51DDC0
   6 frames there, 7 in the other directions): a brave's exchange is 6-7 turns (0.5-0.6 s), a shaman's 4-5. An
   idle person in sub 1 attacks again at once if its opponent is ready, so the rhythm is about one blow per
   0.6 s per pair (estimate, not measured).
+
+### Preacher conversion ("soul convert") [exe]
+The preacher does not convert in the melee scan: `unit_processing_class_1_person`'s state dispatch (table at
+0x4D3D18, keyed by person state `+0x2C`; cross-checked against the known fight = state 25 and pre-fight = state 29)
+sends state 3 to `0x4D5CF0`, state 23 to `0x4D83B0` and state 24 to `0x4D8E40`. Roles below are inferred from field
+use (population cap on the tribe at `+0x89` beyond; "no breeding" tribe flag; the melee scan's own exclusion of
+state 23 targets) and not yet watched live.
+```text
+preacher's own scan (0x51E7B0), replacing the melee scan on its auto-attack turn (same rhythm/radius as the melee
+  scan; "Auto-attack"): scans its square twice (0x51F030, not fully read) for an enemy person and, separately, a
+  candidate building
+  person found (preacher or shaman only, 0x51EC80) → ordinary attack order (kind 0x15): preachers and shamans
+    fight each other in melee like anyone else, no conversion on a person match
+  building found → an order at the preacher's own position (kind 0x20 pushed; unverified against the order-kind
+    table's own guess that 32 is disguise's second half, not preach - open question, see below)
+
+state 3 (0x4D5CF0), the preachee the instant it is struck: at its own position and tribe,
+  spawns a 7/0x4D effect (a soul-like visual, not confirmed) and a class 10 type 0xC controller ("Soul Convert 2")
+
+state 23 (0x4D83B0), the preachee while a conversion is in progress; `+0x89` the preacher, `+0x70` the timer:
+  abort (idle) if the preacher is gone, or not carrying out an order (state != 0xA) and not itself preaching
+    (state != 0x21/33)
+  every turn: timer -= 1
+  timer < 0, OR the preachee's own tribe has the "no breeding" flag (tribe +0x941 bit 6: set for, at least,
+    wildmen) which forces a roll every turn regardless of the timer:
+    rearm the timer: PREACHEE_CONV_FREQ (exe 500 turns), halved to 250 unless global flag byte 0x89C668 bit 2 is
+      set (meaning/scope of that byte not traced: many unrelated bits of it are read all over the exe), jittered
+      by the pop3 PRNG by roughly ± (freq / 16) turns
+    roll: success if rng() % PREACHEE_CONV_CHANCE (exe 5) == 1, or flag 0x89C668 bit 2 is set, or the preachee's
+      tribe has the bit-6 "no breeding" flag (both make every roll succeed)
+    roll failed → rearm the timer again at the full PREACHEE_CONV_FREQ (not halved this time) and continue
+    roll succeeded:
+      the preacher's tribe is at its population cap (tribe +0x89DAE5 array >= 200, "Village growth") and the
+        preachee's tribe does not have the bit-6 flag → nothing happens this turn, try again later
+      else → queue a trailing visual (particle list 0x892443, `[0x892443]` += 0x14 per entry) at the preachee's
+        position; spawn a person of the preachee's own type in the preacher's tribe, at the preachee's position,
+        with a random short-range offset and a movement-profile-scaled random speed; copy the preacher's facing
+        bits; play a sound (0x48A050(preacher, 5, 0)); spawn a class 7 type 0x3A ("soul") effect at the
+        preacher's position and link it to the new person (`+0x72` = the new person's id, presumably so the
+        effect's own per-turn routine flies the sprite from the preacher to the new body - not traced)
+      destroy the preachee (0x4D4B50) either way once a roll has succeeded this check
+
+state 24 (0x4D8E40): the same shape as state 23 (target via `+0x89`, a check gated the same way), but increments
+  a second counter at the target `+0x2D` (capped at 0x13/19) instead of rolling a chance - not fully read; likely
+  the building-occupant variant paired with the class 10 type 0xC controller, the counterpart of state 23's
+  type 4 (unverified: no creation site for type 4, only for type 0xC at 0x4D5E78, was found)
+```
+- Numbers: with the file default (12 turns/s), `PREACHEE_CONV_FREQ` 500 is 41.7 s between checks (20.8 s with
+  flag 0x89C668 bit 2 set), each with a 1 in `PREACHEE_CONV_CHANCE` (5) chance: about 5 checks (3.5 min at the
+  full interval, worst case) on average per conversion once a preacher has engaged a target, instantly for a
+  wildman or any other member of a "no breeding" tribe.
+- A converted person keeps its original type (a converted warrior stays a warrior, in the preacher's tribe), not
+  the preacher's own type.
+- Open questions: what makes a preachee enter state 3 in the first place (not traced: presumably the preacher's
+  own preach order, kind 33/0x21, reaching its target, paralleling "Starting a melee"); the role of the lookup
+  table at 0x938830 (gates state 23/24 on the preacher's suborder, values 0x11/0x1F/0x20) and 0x5A707E (a per-type
+  byte read on a model-variant branch); whether order kind 0x20 from the preacher's scan is really what starts
+  this (it may instead be "disguise", per the order-kind table's existing guess - the scan's building match and
+  the preachee's state 3 have not been linked by tracing the code in between); the exact meaning of flag byte
+  0x89C668 (many unrelated systems read other bits of the same byte, so it is unlikely to be preach-specific).
+- A live check would settle the open questions and confirm the numbers: watch a preacher ordered to preach an
+  enemy brave, logging its target's state/sub-state/`+0x70` timer and tribe every turn (as `fightwatch.py` does
+  for firewarriors), until the brave disappears and a new one appears in the preacher's tribe.
 
 ### Attacking a building [exe]
 An attack order on an enemy building (`+0x89` the building; sub-states in `+0xA8`, 0x51A2A0):
@@ -1643,6 +1711,14 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4D4690 | auto-attack check (rhythm, busy test 0x4D44E0, per-type scan) |
 | 0x51FF60 | auto-attack radius in cells (by order kind, type, height for firewarriors) |
 | 0x51E5E0, 0x51EAB0 | melee auto-attack scan: square of cells, first enemy found |
+| 0x51E7B0 | preacher's own auto-attack scan (person or building; replaces the melee scan) |
+| 0x51F030 | scan helper used by 0x51E7B0 (two out-params; mode flag; not fully read) |
+| 0x4D3D18 | person per-turn state dispatch table (`unit_processing_class_1_person`, keyed by `+0x2C − 1`) |
+| 0x4D5CF0 | person state 3: a preachee struck - spawns a 7/0x4D effect and a 10/0xC controller at its own place |
+| 0x4D83B0 | person state 23: a preachee's conversion roll ("Preacher conversion") |
+| 0x4D8E40 | person state 24: the same shape as state 23, increments the target's `+0x2D` instead (not fully read) |
+| 0x4D4B50 | destroy a unit (called on the preachee once its conversion roll succeeds) |
+| 0x500E20, 0x500EC0 | class 10 controller init and per-turn dispatch (by state `+0x2C`; generic housekeeping) |
 | 0x409140, 0x409200 | building damage: add to its accumulator `+0x9E` (per attacker turn, or an amount) |
 | 0x4092A0 | building accumulator: decay, structural hits of 100 wood, destruction |
 | 0x407810 | shake a building (timer `+0xA7`, offsets `+0x6C`/`+0x6E`) |

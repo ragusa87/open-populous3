@@ -96,7 +96,7 @@ from the executable (pop3-rev-analysis.md "Combat").
 | 1 | Formation | its own per-turn routine [exe] | a formation coordinator (group moves) |
 | 2 | Beacon | heads a list of its own in the tribe struct [exe] | unknown |
 | 3 | Thing Info Display | name only | probably nothing (display) |
-| 4 | Soul Convert | soul convert [exe] | conversion (with `ChangeOwner`) |
+| 4 | Soul Convert | soul convert [exe]; no creation site found, only for 0xC below | conversion (with `ChangeOwner`) |
 | 5 | Soul Man | name only | unknown |
 | 6 | Preacher Attract | **conflict**: the wiki says Preacher Attract, pop3-rev-analysis.md groups 10/1 and 10/6 as formations; not resolved | a sermon, or a formation |
 | 7 | Object Face | name only | unknown |
@@ -104,7 +104,7 @@ from the executable (pop3-rev-analysis.md "Combat").
 | 9 | Pre-Fight | one attacker and one target: run-up, damage-free kick, run-up, then a fight [exe] | a pre-fight coordinator starting fights |
 | 10 | Guard Control | guard control [exe] | a guard post's control |
 | 11 | Bridge Control | name only | unknown (land bridge?) |
-| 12 | Soul Convert 2 | soul convert [exe] | conversion |
+| 12 | Soul Convert 2 | soul convert [exe]: created when a preachee enters state 3 (pop3-rev-analysis.md "Preacher conversion"), at its own position and tribe | conversion |
 | 13 | DT Beacon | name only (drum tower?) | unknown |
 | 14 | Player Raise | name only | unknown |
 

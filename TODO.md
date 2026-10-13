@@ -109,7 +109,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] World views (architecture.md "Client: world visuals"): the landing dust (`units::dust`) as a `WorldView` once
   touchdowns are kept in game-core (a unit's landing tick), so a rejoining client draws it too; the sinking totem's
   smoke once totems have ids; units, building views and the unit glide (`SimClock::prev_ids`) still keyed by index.
-- [ ] Coordinators: the infrastructure is done ([coordinators.md](docs/specs/coordinators.md)); each kind to specify and implement (preacher's sermon, formation, guard control, soul convert; the challenge and the melee are done), with its scan in `GameMap::detect_coordinators`.
+- [ ] Coordinators: the infrastructure is done ([coordinators.md](docs/specs/coordinators.md)); each kind to specify and implement (preacher's sermon, formation, guard control, soul convert - see pop3-rev-analysis.md "Preacher conversion" for soul convert's traced numbers (`PREACHEE_CONV_FREQ`/`_CHANCE`, the population cap, the "no breeding" tribe bypass); the challenge and the melee are done), with its scan in `GameMap::detect_coordinators`.
 - [ ] The hurt path (`GameMap::damage`): the last attacker, the death cause, and death held off while tumbling, so no emitter repeats them.
 - [ ] World events still to add with their kinds: `ChangeOwner { unit, tribe }` (conversion).
 - [ ] Internal model 10/6: Preacher Attract (wiki) or a formation (pop3-rev-analysis.md "Combat"): decide from the original.
@@ -119,7 +119,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Challenge (combat.md "Challenge"): the target facing the attacker and its taunts (client, 1 in 8 per turn while waiting), ground sliding instead of `SHOVE_LIFT`.
 - [ ] Fight poses in the generated (CC0) unit sheets: strike, trade, kick, reel, shoved (`Pose::fallback` stands in: idle, fall).
 - [ ] Spotting (combat.md "Spotting"): the preacher's conversion look (it fights what it sees meanwhile), the shaman's look during some orders, invisible people unseen, allies.
-- [ ] Preachers (ordered to attack, or on their own when they spot an enemy): close fighting (melee) only against a shaman or another preacher (pop3-rev-analysis.md "Auto-attack": a preacher attacker only targets preachers and shamans); anyone else they walk close to and preach to (the preacher's sermon coordinator, coordinators.md), converting them to the preacher's tribe (`WorldEvent::ChangeOwner`). Today preachers fight everyone in melee (`spotting::looks_for_melee`).
+- [ ] Preachers (ordered to attack, or on their own when they spot an enemy): close fighting (melee) only against a shaman or another preacher (pop3-rev-analysis.md "Auto-attack": a preacher attacker only targets preachers and shamans); anyone else they walk close to and preach to (the preacher's sermon coordinator, coordinators.md), converting them to the preacher's tribe (`WorldEvent::ChangeOwner`). Today preachers fight everyone in melee (`spotting::looks_for_melee`). The original's rule (pop3-rev-analysis.md "Preacher conversion"): every `PREACHEE_CONV_FREQ` (exe 500 turns, 41.7 s; jittered, halved by an untraced global flag) turns, a 1 in `PREACHEE_CONV_CHANCE` (exe 5) roll; on success the target is destroyed and a person of its own type (not the preacher's) is created in the preacher's tribe at its place, capped by the preacher's tribe population (same cap as hut breeding, 200); instant (every turn) for a wildman or any other "no breeding" tribe member. The link from the preacher's own look scan ("Auto-attack") to this state machine is not traced (open question).
 - [ ] Attackers inside a building walk out first (combat.md "Attacking": they set off from where they stand).
 - [ ] Firebolts (combat.md "Firebolts"): the line of fire, from drum towers and vehicles, the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.
 - [ ] Health, hit feedback and death animations for every unit type.
@@ -127,7 +127,8 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 
 ## Spells ([spells.md](docs/specs/spells.md))
 - [ ] Bloodlust (hidden spell, model 20; in the book, no effect yet): its cast (the 6 nearest own followers, `status::bloodlust`), and which levels give it (header bit 20 is among levels 1 and 2's leftover bits, so only discoveries give it today).
-- [ ] Spell and building icons: find Magical Shield's and Bloodlust's panel icons (none in `hfx0-0.dat` 1057-1074; Bloodlust's looks like a crane, in no PSFB bank nor the old `.DAT`/`.TAB` pairs; their names stand in), and draw our own icons for `--no-original` (the names stand in).
+- [ ] Spell icons for `--no-original` (`assets/spell-hud`, `hud::spells::generated_glyph_path`): 14 of 20 drawn and wired in; still missing Convert, Volcano, Armageddon, Magical Shield, Teleport and Bloodlust (their names stand in). Building icons for `--no-original` are still unstarted.
+- [ ] Find Magical Shield's and Bloodlust's original panel icons (none in `hfx0-0.dat` 1057-1074; Bloodlust's looks like a crane, in no PSFB bank nor the old `.DAT`/`.TAB` pairs; their names stand in with the original files too).
 - [ ] Spell effects with their own animations/visuals (swarm, whirlwind...; lightning has our own bolt, the original's bolt sprites are not identified); casting (C) only uses a charge and makes the shaman jump.
 - [ ] Aim the other spells on the terrain like Teleport, Blast and Land Bridge (`hud::spells::ground_spell`), within the cast range (`GameMap::in_cast_range`, done: `SP_W_RANGE` by altitude band, +1/3 in a drum tower, none on god levels).
 - [ ] Every spell flies from the shaman as a shot before it takes effect (6 turns into the cast; standard shot 1400 units per turn, blast's fireball 1000), homing on a targeted unit for the spells that follow one; burn, blast, lightning, whirlwind and insect shots are deflected 8 cells away by a shielded enemy on the target cell. A 1 s cooldown after any human cast, no per-spell cooldown (`SPELL_x_OPT_S` is not one).
@@ -225,7 +226,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Cliffs: `cliff0-X.dat` turns land colours to rock by level (what picks the level: slope? damage?); `fade0-X.dat` palette light table (object/sprite shading, fog of war). Load both in `pop3_format::theme`.
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
-- [ ] Spell and building icons, tooltips.
+- [ ] Building icons, tooltips (spell icons done: `assets/spell-hud`).
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 - [ ] Original keymap ([shortcuts.md](docs/specs/shortcuts.md), dev mode off): add the missing shortcuts (F1, S status, groups 1-6, camera points Z/X/C/V, `\\` track, Shift+Enter, Space skips the fly-by), and a way to stop and cast self spells without the dev keys.
 
@@ -263,4 +264,4 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 
 ## Art ([assets.md](docs/specs/assets.md))
 - [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).
-- [ ] Next open art: building/spell icons, ritual scenery/reincarnation stones, vehicles and worker action clips (inventory P1). CC0 trees/unit sheets and the generated building kit already ship.
+- [ ] Next open art: building icons, ritual scenery/reincarnation stones, vehicles and worker action clips (inventory P1). CC0 trees/unit sheets, the generated building kit and 14 of 20 spell icons already ship.

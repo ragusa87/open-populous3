@@ -148,6 +148,10 @@ followed each turn (`GameMap::spot_enemies`).
   exists), and firewarriors once reloaded, as far as they throw (`GameMap::looking`; any enemy person, in a melee or
   not: their own look is not traced); the preacher's conversion and the shaman's look during some orders are TODO; spies and wildmen never look. On its kind's `look_every` (4 turns; preacher 2),
   phase 0.
+- The preacher's own look (pop3-rev-analysis.md "Preacher conversion") only fights another preacher or a shaman;
+  anyone else it finds gets preached to instead, a separate state machine on the target
+  (`PREACHEE_CONV_FREQ`/`_CHANCE`, a 1 in 5 roll every 41.7 s) that destroys the target and recreates it, same
+  type, in the preacher's tribe. The link from its scan to that state machine is not traced yet.
 - How far (`sight_now`, cells; per kind `sight` and `sight_at_work`: brave and warrior 5 and 1, preacher and shaman
   3 and 1, firewarrior 11 and 5, spy and wildman 0): idle, holding wood or hacking at a building, its full sight;
   walking (every walk is on an order, the original's "going to the place") or attacking on its way, nothing;
