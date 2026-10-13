@@ -82,9 +82,11 @@ wood on the ground: `catalog::WOOD_PILE_SPRITE`), 90-93 fire, 107-111 spell name
 unload button of a vehicle (60, 61 hovered, 62 pressed), tooltips.md; 639-656 gold state icons, each plain then outlined (653 a boat, 655 the same boat flat), 664-675 six unit figures (plain / outlined
 pairs: 666 brave, 668 warrior, 670 firewarrior, 672 preacher, 674 spy, 664 probably the shaman; 75-80 the same in
 teal, in unit model order: brave, warrior, preacher, spy, firewarrior, shaman, `catalog::UNIT_FIGURES`, the tooltip's
-people), 346-349 the volcano's rock, a boulder in 4 orientations (17 x 13) [exe], 1030-1083 spell and building glyphs (from 1058 the panel's spell icons, white, in spell-model order: 1056 + model,
-Blast 1058, Angel of Death 1069 seen in the game, drawn dark on the panel; the ends, Armageddon 1074, Bloodlust 1076,
-Teleport 1077, unchecked), 1084-1088 the Stats
+people), 346-349 the volcano's rock, a boulder in 4 orientations (17 x 13) [exe], 1030-1083 spell and building glyphs (seen in the game: 1030-1036 coloured building pictures, 1037-1045 the building
+icons' shadows and 1046-1054 their highlights, 1055 the "?" of something to discover (1056 the same, smaller),
+1057-1074 the panel's spell icons, white, drawn dark: Armageddon 1057, models 2-17 in order from 1058 (Blast; Angel
+of Death 1069), Teleport 1074; 1075-1083 the panel's building icons, white, drawn dark, in the cursor's order: hut,
+drum tower 1076, warrior, firewarrior, temple, spy, boat hut, airship hut, camp fire), 1084-1088 the Stats
 tab's row labels (selected, idle, in a house, working, in a balloon; in a boat: 655), 1090-1600 spell effects (dust, explosions, swarm...).
 The 3D objects have no wood pile: objects 0 and 12 are a camp fire (logs and a flame board), see objects.md.
 

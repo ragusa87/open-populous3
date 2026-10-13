@@ -170,11 +170,20 @@ pub const STAND_INS: [(SpellKind, SpellKind); 1] = [(SpellKind::Bloodlust, Spell
 /// Under the rows: Teleport, a sandbox spell, in a row shown only when the book has it.
 pub const SANDBOX_ROW: [SpellKind; 1] = [SpellKind::Teleport];
 
-/// The panel's icon of a spell: its white glyph in `hfx0-0.dat`, in spell-model order from 1058 (Blast, model 2;
-/// Angel of Death, 13, is 1069), drawn in the panel's dark ink.
-pub fn panel_glyph(kind: SpellKind) -> usize {
-    1056 + kind.model() as usize
+/// The panel's icon of a spell (`hfx0-0.dat` 1057-1074, drawn in the panel's dark ink): Armageddon's scales at 1057,
+/// models 2-17 in order from 1058 (Blast; Angel of Death, 13, is 1069), Teleport at 1074. None for the spells without
+/// one (Magical Shield, Bloodlust): their name stands in.
+pub fn panel_glyph(kind: SpellKind) -> Option<usize> {
+    match kind {
+        SpellKind::Armageddon => Some(1057),
+        SpellKind::Teleport => Some(1074),
+        SpellKind::MagicalShield | SpellKind::Bloodlust => None,
+        k => Some(1056 + k.model() as usize),
+    }
 }
+
+/// The panel's "?" of a spell to discover (`hfx0-0.dat`; 1056 is the same, smaller), drawn as it is.
+pub const UNKNOWN_GLYPH: usize = 1055;
 
 /// A tile's width and height, pixels.
 const TILE: f32 = 58.0;
@@ -485,9 +494,14 @@ fn update_tiles(
         }));
     }
     // The original glyph when there is one, the spell's name otherwise.
+    // A known spell's glyph in dark ink, a "?" as it is.
     let glyph = |i: usize, icons: &mut crate::tooltip::IconImages, images: &mut Assets<Image>| {
-        let v = &views[i];
-        matches!(v.style, TileStyle::Own | TileStyle::Gift).then(|| icons.sprite(panel_glyph(book.slots[i].kind), images)).flatten().map(|g| g.0)
+        let (index, ink) = match views[i].style {
+            TileStyle::Own | TileStyle::Gift => (panel_glyph(book.slots[i].kind)?, INK),
+            TileStyle::Unknown => (UNKNOWN_GLYPH, Color::WHITE),
+            TileStyle::Empty => return None,
+        };
+        icons.sprite(index, images).map(|g| (g.0, ink))
     };
     for (g, mut image, mut node) in &mut glyphs {
         let shown = glyph(g.0, &mut icons, &mut images);
@@ -495,8 +509,8 @@ fn update_tiles(
         if node.display != display {
             node.display = display;
         }
-        if let Some(h) = shown.filter(|h| image.image != *h) {
-            image.image = h;
+        if let Some((h, ink)) = shown.filter(|(h, ink)| image.image != *h || image.color != *ink) {
+            (image.image, image.color) = (h, ink);
         }
     }
     for (l, mut text, mut font, mut node) in &mut labels {
@@ -644,9 +658,14 @@ mod tests {
 
     #[test]
     fn the_panels_glyphs_follow_the_spell_models() {
-        assert_eq!(panel_glyph(SpellKind::Blast), 1058);
-        assert_eq!(panel_glyph(SpellKind::AngelOfDeath), 1069);
-        assert_eq!(panel_glyph(SpellKind::Convert), 1073);
+        assert_eq!(panel_glyph(SpellKind::Blast), Some(1058));
+        assert_eq!(panel_glyph(SpellKind::AngelOfDeath), Some(1069));
+        assert_eq!(panel_glyph(SpellKind::Convert), Some(1073));
+        assert_eq!(panel_glyph(SpellKind::Armageddon), Some(1057));
+        assert_eq!(panel_glyph(SpellKind::Teleport), Some(1074));
+        assert_eq!(panel_glyph(SpellKind::MagicalShield), None);
+        let glyphs: std::collections::BTreeSet<usize> = SpellKind::ALL.iter().filter_map(|&k| panel_glyph(k)).collect();
+        assert_eq!(glyphs, (1057..=1074).collect(), "1057-1074, each once");
     }
 
     #[test]

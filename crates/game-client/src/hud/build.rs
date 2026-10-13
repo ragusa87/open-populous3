@@ -7,7 +7,7 @@
 
 use super::panel::{TabContent, DARK_BROWN, INK};
 use crate::blueprint::Plan;
-use crate::world::{CurrentMap, LevelList};
+use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::build_book::{BuildAvailability, BuildBook, BuildSlot};
 use game_core::building::BuildingKind;
@@ -33,6 +33,22 @@ pub const LAYOUT: [[Cell; 2]; 5] = {
         [Cell::Campfire, Cell::Empty],
     ]
 };
+
+/// The panel's building icons in `hfx0-0.dat`, in the order of the cursor's (hut, drum tower, warrior, firewarrior,
+/// temple, spy, boat hut, airship hut, camp fire): the icons themselves (white, drawn in dark ink), their shadows,
+/// their highlights.
+pub const ICONS: usize = 1075;
+pub const SHADOWS: usize = 1037;
+pub const HIGHLIGHTS: usize = 1046;
+/// The "?" of plans to discover (`hfx0-0.dat`).
+pub const UNKNOWN_ICON: usize = 1055;
+
+/// A tile's picture (sprite indices in `hfx0-0.dat`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TileIcon {
+    Building { icon: usize, shadow: usize, highlight: usize },
+    Unknown,
+}
 
 /// A tile of the tab: a building of the book, the camp fire, or an empty cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,9 +85,15 @@ impl Tile {
         }
     }
 
-    /// Its icon: the original's teal one (`POINT0-0.DAT`, `virtual_cursor::plan_sprite`) once known.
-    pub fn icon(&self) -> Option<usize> {
-        self.plan().and_then(crate::virtual_cursor::plan_sprite)
+    /// Its icon on the panel (`hfx0-0.dat`): the building's, in the cursor's order (`virtual_cursor::plan_sprite`,
+    /// `POINT0-0.DAT` 58-66), from `ICONS` (drawn in dark ink), over its shadow (`SHADOWS`), its highlight on hover
+    /// (`HIGHLIGHTS`); the "?" of plans to discover. None for an empty or hidden cell.
+    pub fn icon(&self) -> Option<TileIcon> {
+        if self.view().unknown {
+            return Some(TileIcon::Unknown);
+        }
+        let k = self.plan().and_then(crate::virtual_cursor::plan_sprite)? - *pop3_format::sprites::POINTER_BUILDING_ICONS.start();
+        Some(TileIcon::Building { icon: ICONS + k, shadow: SHADOWS + k, highlight: HIGHLIGHTS + k })
     }
 
     pub fn describe(&self) -> String {
@@ -174,23 +196,16 @@ struct BuildLabel(usize);
 #[derive(Component)]
 struct BuildIcon(usize);
 #[derive(Component)]
+struct BuildShadow(usize);
+#[derive(Component)]
 struct BuildInfo;
 
-/// The tiles' original icons (`POINT0-0.DAT`), made once the original files are known to be there.
-#[derive(Resource, Default)]
-struct BuildIcons {
-    loaded: bool,
-    images: Vec<Option<Handle<Image>>>,
-}
 
 pub struct BuildPlugin;
 
 impl Plugin for BuildPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<BuildIcons>().add_systems(Startup, spawn_tab).add_systems(
-            Update,
-            (load_icons, (tile_clicks, look_at_next).in_set(crate::menu::Gameplay), update_tiles, update_info).chain(),
-        );
+        app.add_systems(Startup, spawn_tab).add_systems(Update, ((tile_clicks, look_at_next).in_set(crate::menu::Gameplay), update_tiles, update_info).chain());
     }
 }
 
@@ -208,6 +223,7 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>) {
                         BorderColor::all(Color::NONE),
                     ))
                     .with_children(|tile| {
+                        tile.spawn((BuildShadow(i), ImageNode::default(), Node { display: Display::None, position_type: PositionType::Absolute, height: px(44), ..default() }));
                         tile.spawn((BuildIcon(i), ImageNode::default(), Node { display: Display::None, height: px(44), ..default() }));
                         tile.spawn((BuildLabel(i), Text::new(""), TextFont { font_size: FontSize::Px(12.0), ..default() }, TextColor(INK), TextLayout::justify(Justify::Center)));
                     });
@@ -215,28 +231,6 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>) {
             });
         c.spawn((BuildInfo, Text::new(""), TextFont { font_size: FontSize::Px(12.0), ..default() }, TextColor(INK), Node { min_height: px(48), ..default() }));
     });
-}
-
-/// The original teal icons, once, when allowed.
-fn load_icons(levels: Res<LevelList>, mut icons: ResMut<BuildIcons>, mut images: ResMut<Assets<Image>>) {
-    if icons.loaded {
-        return;
-    }
-    icons.loaded = true;
-    if !levels.original {
-        return;
-    }
-    let load = || -> Result<_, pop3_format::LevelError> { Ok((pop3_format::SpriteBank::load(&levels.data_dir, pop3_format::sprites::POINTER_FILE)?, pop3_format::Theme::load(&levels.data_dir, 0)?.palette)) };
-    let Ok((bank, palette)) = load().map_err(|e| warn!("build tab icons: {e}")) else { return };
-    let all = tiles(&BuildBook::all(BuildAvailability::Available));
-    icons.images = all
-        .iter()
-        .map(|t| {
-            let sprite = bank.sprites.get(t.icon()?)?;
-            let p = crate::virtual_cursor::sprite_pointer(sprite, &palette);
-            Some(images.add(crate::tooltip::pixel_image(p.width, p.height, p.rgba)))
-        })
-        .collect();
 }
 
 /// A left click on an available building or the camp fire picks it as the blueprint (and puts any spell away); with
@@ -289,14 +283,28 @@ fn look_at_next(
 fn update_tiles(
     map: Res<CurrentMap>,
     blueprint: Res<crate::blueprint::Blueprint>,
-    icons: Res<BuildIcons>,
+    (mut icons, mut images): (ResMut<crate::tooltip::IconImages>, ResMut<Assets<Image>>),
     mut tiles: Query<(&BuildTile, &Interaction, &mut BackgroundColor, &mut BorderColor)>,
-    mut labels: Query<(&BuildLabel, &mut Text, &mut TextFont, &mut Node), Without<BuildIcon>>,
-    mut pictures: Query<(&BuildIcon, &mut ImageNode, &mut Node), Without<BuildLabel>>,
+    mut labels: Query<(&BuildLabel, &mut Text, &mut TextFont, &mut Node), (Without<BuildIcon>, Without<BuildShadow>)>,
+    mut pictures: Query<(&BuildIcon, &mut ImageNode, &mut Node), (Without<BuildLabel>, Without<BuildShadow>)>,
+    mut shadows: Query<(&BuildShadow, &mut ImageNode, &mut Node), (Without<BuildLabel>, Without<BuildIcon>)>,
 ) {
     let all = self::tiles(player_builds(&map.0));
     let views: Vec<BuildTileView> = all.iter().map(Tile::view).collect();
-    let icon = |i: usize| icons.images.get(i).cloned().flatten().filter(|_| views.get(i).is_some_and(|v| v.shown && !v.unknown));
+    let hovered: Vec<usize> = tiles.iter().filter(|(_, i, ..)| **i != Interaction::None).map(|(t, ..)| t.0).collect();
+    // What each tile draws: the icon (dark, or its highlight when hovered) and its shadow; the "?" alone.
+    let mut drawn: Vec<Option<(Handle<Image>, Color, Option<Handle<Image>>)>> = Vec::new();
+    for (i, tile) in all.iter().enumerate() {
+        let mut sprite = |index: usize| icons.sprite(index, &mut images).map(|s| s.0);
+        drawn.push(match tile.icon() {
+            Some(TileIcon::Building { icon, shadow, highlight }) => match hovered.contains(&i) {
+                true => sprite(highlight).map(|h| (h, Color::WHITE, sprite(shadow))),
+                false => sprite(icon).map(|h| (h, INK, sprite(shadow))),
+            },
+            Some(TileIcon::Unknown) => sprite(UNKNOWN_ICON).map(|h| (h, Color::WHITE, None)),
+            None => None,
+        });
+    }
     for (tile, interaction, mut bg, mut border) in &mut tiles {
         let Some(v) = views.get(tile.0) else { continue };
         let (fill, edge) = match (v.shown, v.unknown) {
@@ -312,22 +320,29 @@ fn update_tiles(
             _ => edge,
         }));
     }
-    for (pic, mut image, mut node) in &mut pictures {
-        let shown = icon(pic.0);
-        let display = if shown.is_some() { Display::Flex } else { Display::None };
+    let show = |node: &mut Node, shown: bool| {
+        let display = if shown { Display::Flex } else { Display::None };
         if node.display != display {
             node.display = display;
         }
-        if let Some(h) = shown.filter(|h| image.image != *h) {
+    };
+    for (pic, mut image, mut node) in &mut pictures {
+        let d = drawn.get(pic.0).cloned().flatten();
+        show(&mut node, d.is_some());
+        if let Some((h, ink, _)) = d.filter(|(h, ink, _)| image.image != *h || image.color != *ink) {
+            (image.image, image.color) = (h, ink);
+        }
+    }
+    for (shadow, mut image, mut node) in &mut shadows {
+        let d = drawn.get(shadow.0).cloned().flatten().and_then(|d| d.2);
+        show(&mut node, d.is_some());
+        if let Some(h) = d.filter(|h| image.image != *h) {
             image.image = h;
         }
     }
     for (label, mut text, mut font, mut node) in &mut labels {
         let Some(v) = views.get(label.0) else { continue };
-        let display = if icon(label.0).is_some() { Display::None } else { Display::Flex };
-        if node.display != display {
-            node.display = display;
-        }
+        show(&mut node, drawn.get(label.0).is_none_or(|d| d.is_none()));
         if text.0 != v.label {
             text.0 = v.label.to_string();
         }
@@ -373,8 +388,10 @@ mod tests {
         assert_eq!(all[8..], [Tile::Campfire, Tile::Empty]);
         assert_eq!((Tile::Campfire.plan(), Tile::Empty.plan()), (Some(Plan::Campfire), None));
         assert_eq!(Tile::Empty.destination(), None);
-        assert_eq!(all[0].icon(), Some(58), "the hut's teal icon");
-        assert_eq!(Tile::Campfire.icon(), Some(pop3_format::sprites::POINTER_CAMP_FIRE));
+        assert_eq!(all[0].icon(), Some(TileIcon::Building { icon: 1075, shadow: 1037, highlight: 1046 }), "the hut's");
+        assert_eq!(Tile::Campfire.icon(), Some(TileIcon::Building { icon: 1083, shadow: 1045, highlight: 1054 }), "the camp fire's, last");
+        assert_eq!(Tile::Empty.icon(), None);
+        assert_eq!(Tile::Slot(slot(BuildingKind::Temple, BuildAvailability::Discoverable)).icon(), Some(TileIcon::Unknown));
     }
 
     #[test]

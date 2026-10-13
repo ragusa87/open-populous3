@@ -66,9 +66,9 @@ when the book has it (sandboxes). Armageddon is special (only some levels give i
 full-width tile under the rows (`is_special`), empty when the level does not give it, so the panel never has to make
 room for it.
 A tile: on top a dot per charge the spell holds (`max_charges`: blast 4, volcano 1), blue loaded, red gifted, a
-hollow (a dark pit) for room left; the spell's icon in the middle, most of the tile (the original's white glyph of `hfx0-0.dat` in spell-model order,
-1056 + model: Blast 1058, Angel of Death 1069, drawn in the panel's dark ink, `panel_glyph`; its name without the
-original files); at the bottom the charge on its way, the training unit's bar (`progress_bar`: yellow,
+hollow (a dark pit) for room left; the spell's icon in the middle, most of the tile (the original's white glyph of `hfx0-0.dat`, drawn in the panel's dark ink,
+`panel_glyph`: sprites.md; "?" 1055 for a spell to discover; its name without the original files or for Magical
+Shield and Bloodlust, which have none); at the bottom the charge on its way, the training unit's bar (`progress_bar`: yellow,
 the mana given over the cost; blue, the finer layer). Pure view model `tile_view(slot) -> TileView` (unit-tested):
 
 | Availability | Tile |
@@ -99,8 +99,8 @@ Next: icons (Kenney game-icons), casting on the terrain, mana from followers, to
 Draws the player's `game_core::build_book::BuildBook` from the map (`player_builds` = `GameMap::build_books[PLAYER]`:
 the level's own; generated maps and sandboxes: every kind). A 2 x 5 grid as the original's panel (`LAYOUT`): hut,
 drum tower; warrior hut, temple (preachers); spy hut, firewarrior hut; boat hut, airship hut; camp fire, an empty
-cell. A tile is the building's icon (the original's teal one, `POINT0-0.DAT` 58-66, else its name), "?" for plans to
-discover, an empty slot for hidden ones; hover describes it. Right click on a tile flies the camera to the player's
+cell. A tile is the building's icon (the original's `hfx0-0.dat` 1075-1083 in dark ink over its shadow, its
+highlight on hover, sprites.md; else its name), "?" (1055) for plans to discover, an empty slot for hidden ones; hover describes it. Right click on a tile flies the camera to the player's
 next built building of that kind (or camp fire), one after the other at each click (`own_places`, `next_step`).
 Shift + left click with people selected sends them in (`GameMap::send_into`, huts-and-training.md): into the
 player's buildings of that kind with room, spread evenly and nearest first (a training unit takes everyone, they
