@@ -234,6 +234,8 @@ pub struct Building {
     pub jumped: Vec<(i32, i32)>,
     /// A vault of knowledge's reward and phase; None for every other building.
     pub vault: Option<Vault>,
+    /// What a training unit makes from stored mana (`crate::production`); None for the others.
+    pub production: Option<crate::production::Production>,
 }
 
 /// What a vault of knowledge teaches the tribe praying at it, from the level.
@@ -254,7 +256,7 @@ pub enum Reward {
 impl Building {
     /// A finished building, as the levels store them.
     pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
-        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)) }
+        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)), production: None }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.
