@@ -33,6 +33,11 @@ def frames(file, group, first, last, name, ref=""):
     return [(file, i, group, f"{name} {i - first + 1}/{last - first + 1}", ref) for i in range(first, last + 1)]
 
 
+def series(file, group, first, last, name, ref=""):
+    """A run of separate sprites sharing a name, not an animation."""
+    return [(file, i, group, f"{name} #{i - first + 1}", ref) for i in range(first, last + 1)]
+
+
 CATALOG = [
     *labels(POINT, "pointers", 13, ["arrow + ?"]),
     *labels(POINT, "pointers", 14, ["arrow (standard pointer)"], "sprites::POINTER_ARROW"),
@@ -68,10 +73,10 @@ CATALOG = [
     *labels(HFX, "unit figures", 75, ["brave", "warrior", "preacher", "spy", "firewarrior", "shaman"],
             "catalog::UNIT_FIGURES"),
     *frames(HFX, "map things", 90, 93, "fire"),
-    *frames(HFX, "HUD", 107, 111, "spell name"),
+    *series(HFX, "HUD", 107, 111, "spell name"),
     *frames(HFX, "HUD", 187, 210, "build/wood action icon"),
     *frames(HFX, "effects", 346, 349, "volcano rock"),
-    *frames(HFX, "HUD", 639, 652, "gold state icon"),
+    *series(HFX, "HUD", 639, 652, "gold state icon"),
     *labels(HFX, "HUD", 653, ["boat", "boat outlined"]),
     *labels(HFX, "stats rows", 655, ["in a boat (flat boat)", "flat boat outlined"], "catalog::STATS_ROW_ICONS"),
     *labels(HFX, "unit figures", 664, [f"{u} {style}" for u in ["shaman (probably)", "brave", "warrior", "firewarrior",
@@ -79,7 +84,7 @@ CATALOG = [
     *labels(HFX, "panel tabs", 676, ["build tab", "build tab highlighted", "spells tab", "spells tab highlighted"]),
     *labels(HFX, "panel tabs", 680, ["stats tab (people)", "stats tab highlighted"], "catalog::PEOPLE_ICON"),
     *labels(HFX, "HUD", 682, ["Magical Shield icon"]),
-    *frames(HFX, "panel buildings", 1030, 1036, "coloured building picture"),
+    *series(HFX, "panel buildings", 1030, 1036, "coloured building picture"),
     *labels(HFX, "panel buildings", 1037, [f"{b} shadow" for b in BUILDINGS], "hud::build::SHADOWS"),
     *labels(HFX, "panel buildings", 1046, [f"{b} highlight" for b in BUILDINGS], "hud::build::HIGHLIGHTS"),
     *labels(HFX, "HUD", 1055, ["? to discover", "? to discover (small)"], "hud::build::UNKNOWN_ICON"),
@@ -108,7 +113,7 @@ CATALOG = [
     *frames(HFX, "effects", 1385, 1416, "smoke"),
     *frames(HFX, "effects", 1433, 1440, "sparkle"),
     *frames(HFX, "effects", 1443, 1448, "sparkle"),
-    *frames(HFX, "HUD", 1450, 1465, "cell border part"),
+    *series(HFX, "HUD", 1450, 1465, "cell border part"),
     *frames(HFX, "effects", 1466, 1477, "wind"),
     *frames(HFX, "markers", 1478, 1487, "bloodlust bubbles", "catalog::BLOODLUST_SPRITES"),
     *frames(HFX, "markers", 1489, 1498, "low health sparkles", "catalog::LOW_HEALTH_SPRITES"),

@@ -34,6 +34,7 @@ class CatalogTest(unittest.TestCase):
     def test_animation_of_frames(self):
         self.assertEqual(animation(POINT, 86, "fight 3/6"), f"{POINT}:84")
         self.assertIsNone(animation(POINT, 14, "arrow (standard pointer)"))
+        self.assertIsNone(animation(HFX, 108, "spell name #2"))
 
     def test_page_embeds_entries(self):
         self.assertIn('"name": "x"', page([{"name": "x"}]))
