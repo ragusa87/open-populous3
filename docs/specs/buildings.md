@@ -270,6 +270,15 @@ is dropped on the ground near the door as a wood piece (a pile of logs on the gr
 usable by any construction). Once all its wood is out, the building is removed and its ground is free again (a
 covered tree grows back). Switching back to Build makes braves rebuild it with wood again.
 
+### Explosion (drawn)
+A building that blows up is drawn only, the simulation just removes it (`game-client` `explosion`): a
+`BuildingExploded { building, start }` message copies the building's view while it is still drawn, whatever drew it
+(original model, generated kit, stand-in box). Each polygon (triangles sharing a corner: a quad, a flat face) flies
+on its own: out from the middle and a little to the side, up, spinning about its own axis, falls back under gravity
+and lies where it landed, then every polygon shrinks away; gone 3 s after the blast. Poses are functions of the start
+tick and the drawn moment, seeded by the building's id. Started by the dev hook `EXPLODE=building:N` until the
+foundation check exists (TODO "Destruction of buildings on uneven/flooded ground").
+
 ### Damage and repair
 The level files store every building as a finished one (level-format.md, building union), but in level 10 the
 island that praying at the stone head brings back (effects 89 atlantis set / 90 atlantis invoke) shows its

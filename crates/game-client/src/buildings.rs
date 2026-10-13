@@ -83,6 +83,10 @@ pub fn facing_yaw(facing: u8) -> GameYaw {
 #[derive(Component)]
 pub struct BuildingView(pub usize);
 
+/// The building a view draws (`BuildingView` holds its index, which moves as buildings come and go).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DrawnBuilding(pub BuildingId);
+
 /// Each drawn building's model height (cells), by building id: where a lookout stands.
 #[derive(Resource, Default)]
 pub struct ModelHeights(pub HashMap<BuildingId, f32>);
@@ -303,6 +307,7 @@ fn respawn_buildings(
         let fire = b.lit_at(map.0.now).map(Fire);
         let mut view = commands.spawn((
             BuildingView(i),
+            DrawnBuilding(b.id),
             crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Buildings),
             Grounded { at, half: 0.0 },
             Tilted { half: FOOTPRINT_HALF, yaw },

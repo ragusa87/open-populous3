@@ -9,6 +9,8 @@
 //! e.g. `temple@64,70`) shows that blueprint at map position x,z (cells); `BUILD=kind@x,z` places that
 //! plan with every brave of the player sent to it, then runs `BUILD_TICKS` ticks (0 by default).
 //! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
+//! `EXPLODE=building:N` blows up building N (its index), as if `EXPLODE_TICKS` ticks ago (0 by default; with
+//! `GAME_SPEED=0` the shot holds it there): the explosion is drawn, then the building removed the next frame.
 //! `TRAIN=stored/cost[:short]` puts a brave of the player in each of their training units, making something with
 //! that much mana stored (`:short`: short of mana).
 //! `AIM=spell` (its name without spaces, any case, e.g. `blast`, `landbridge`) selects that spell as if picked in
@@ -122,6 +124,14 @@ pub fn tumble_demo(how: &str, map: &mut game_core::map::GameMap) {
         };
         u.action = game_core::unit::Action::Tumbling;
     }
+}
+
+/// `EXPLODE=building:N`: building N's explosion, started `ago` ticks before now; None when it does not parse or
+/// there is no such building.
+pub fn explode_demo(map: &game_core::map::GameMap, what: &str, ago: u32) -> Option<crate::explosion::BuildingExploded> {
+    let n: usize = what.strip_prefix("building:")?.trim().parse().ok()?;
+    let start = game_core::time::Tick::from_wire(map.now.to_wire().wrapping_sub(ago));
+    Some(crate::explosion::BuildingExploded { building: map.buildings.get(n)?.id, start })
 }
 
 /// `BLAST=x,z` (cells): another tribe's blast there, then `ticks` run at once (with `GAME_SPEED=0`, the shot
@@ -331,6 +341,7 @@ fn screenshot(
     mut clock: ResMut<TimeUpdateStrategy>,
     mut video: ResMut<crate::video::Video>,
     mut exit: MessageWriter<AppExit>,
+    (mut explode, mut exploded): (MessageWriter<crate::explosion::BuildingExploded>, Local<Option<game_core::building::BuildingId>>),
 ) {
     let Some(capture) = Capture::from_env(|k| std::env::var(k).ok()) else { return };
     let shot = std::env::var("SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
@@ -347,6 +358,9 @@ fn screenshot(
         return;
     };
     *frame += 1;
+    if *frame == 2 && let Some(id) = exploded.take() {
+        map.0.buildings.retain(|b| b.id != id);
+    }
     if *frame == 1 && std::env::var("AERIAL").is_ok() {
         rig.toggle_aerial();
     }
@@ -398,6 +412,10 @@ fn screenshot(
         }
         if let Some(phase) = std::env::var("VAULT").ok().and_then(|v| parse_vault(&v)) {
             map.0.buildings.iter_mut().filter_map(|b| b.vault.as_mut()).for_each(|v| v.phase = phase);
+        }
+        if let Some(e) = std::env::var("EXPLODE").ok().and_then(|v| explode_demo(&map.0, &v, std::env::var("EXPLODE_TICKS").ok().and_then(|t| t.parse().ok()).unwrap_or(0))) {
+            *exploded = Some(e.building);
+            explode.write(e);
         }
         if let Some(production) = std::env::var("TRAIN").ok().and_then(|v| parse_train(&v)) {
             train_demo(&mut map.0, production);
@@ -498,6 +516,15 @@ mod tests {
         assert_eq!(parse_vault("granted:3"), Some(VaultPhase::Granted { ticks: 3 }));
         assert_eq!(parse_vault("spent"), Some(VaultPhase::Spent));
         assert_eq!((parse_vault("granted"), parse_vault("open")), (None, None));
+    }
+
+    #[test]
+    fn explode_demo_names_the_building_and_when() {
+        let map = game_core::map::GameMap::sandbox_buildings();
+        let e = explode_demo(&map, "building:3", 0).unwrap();
+        assert_eq!((e.building, e.start), (map.buildings[3].id, map.now));
+        assert!(explode_demo(&map, "building:99999", 0).is_none());
+        assert!(explode_demo(&map, "tree:1", 0).is_none());
     }
 
     #[test]
