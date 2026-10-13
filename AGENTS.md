@@ -10,6 +10,8 @@ from the user's own install.
   dumps, renders or screenshots made with the original files, exported viewers. Keep such outputs in a scratch dir.
 - Never quote original texts (level names, briefings, messages, UI strings) in code, tests, docs, commits or
   TODO: refer to them by their text number (docs/specs/language.md).
+- Memory addresses, struct offsets and function names of the original executable stay in
+  docs/specs/pop3-rev-analysis.md only: elsewhere cite its section ("Fight" [exe]).
 - Never look at a screenshot or video of the original game running, for any purpose (not to check art, layout or
   behaviour either), and never ask for or fetch one. Renders of our own engine loading the user's original files
   (`just shot` with an install) are fine to check that they load right; they are never committed.
@@ -54,8 +56,8 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
   State changes go through `Command` so lockstep replays match.
 - The tick (docs/architecture.md "The tick"): a new ticking object is a typed list on `GameMap` with its own
   `tick(&mut self, now, ...)`, its rhythm an `Every` checked with phase 0 and its lengths `Countdown`s (each constant
-  cites the original's name or address, or says it is a guess), events out for anything it does to others, and one
-  line in `GameMap::tick` at its place in the order. Removable objects get ids from `GameMap::new_id` (new kinds:
+  cites the original's constant name or its pop3-rev-analysis.md section, or says it is a guess), events out for
+  anything it does to others, and one line in `GameMap::tick` at its place in the order. Removable objects get ids from `GameMap::new_id` (new kinds:
   typed `Id<T>` in a `Registry<T>`, `GameMap::new_id_of`).
 - An object coordinating several units (a fight, a sermon, a formation) is a coordinator (docs/specs/coordinators.md):
   units link to it one way, it ticks before them and is removed when its situation ends.

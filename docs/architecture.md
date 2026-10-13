@@ -53,7 +53,7 @@ Rules for every object that ticks:
 - **Each object owns its rhythm.** Periodic work runs on the original's global turn masks: a `time::Every` constant
   checked with phase 0 (`GROW_EVERY.fires(now, 0)` is the original's `turn & 15 == 0`), so it fires on the same
   turns as in the original, for every object at once. A length is a `time::Countdown` held by the object. Each
-  constant cites the original's constant name or code address (pop3-rev-analysis.md), or says it is our guess.
+  constant cites the original's constant name or its pop3-rev-analysis.md section, or says it is our guess.
 - **An object changes only itself.** What it does to others comes out as events, and the map applies them in order,
   after the loop over that kind. The map's handlers are the only code that touches two objects at once. A change to
   the world (damage, a push, terrain, a new effect...) is a `event::WorldEvent`, shared by every kind that makes it,
