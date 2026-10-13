@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100" width="200" height="200" stroke-linejoin="round" stroke-linecap="round">
+  <rect x="3" y="3" width="94" height="94" rx="3" fill="#f6f0e1" stroke="#2b2420" stroke-width="3"/>
+  <defs>
+    <g id="meteor">
+      <path d="M0 -8 Q20 -6 38 0 Q20 6 0 8 A8 8 0 0 1 0 -8Z" fill="#f04a1e" stroke="#2b2420" stroke-width="1.8"/>
+      <path d="M0 -4.5 Q10 -3 18 0 Q10 3 0 4.5 A4.5 4.5 0 0 1 0 -4.5Z" fill="#ffc93c"/>
+    </g>
+  </defs>
+  <use xlink:href="#meteor" href="#meteor" transform="translate(26 44) rotate(-48)"/>
+  <use xlink:href="#meteor" href="#meteor" transform="translate(64 30) rotate(-55) scale(0.75)"/>
+  <use xlink:href="#meteor" href="#meteor" transform="translate(28 80) rotate(-50) scale(0.8)"/>
+  <use xlink:href="#meteor" href="#meteor" transform="translate(70 70) rotate(-58)"/>
+</svg>

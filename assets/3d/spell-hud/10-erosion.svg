@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100" width="200" height="200" stroke-linejoin="round" stroke-linecap="round">
+  <rect x="3" y="3" width="94" height="94" rx="3" fill="#f6f0e1" stroke="#2b2420" stroke-width="3"/>
+  <path d="M30 92 L46 74 L52 62 L60 54 L64 40 L72 26 L80 14 L88 22 L92 92Z" fill="#a8703e" stroke="#2b2420" stroke-width="2.5"/>
+  <path d="M72 30 L68 44 L74 52 M62 64 L70 70 M80 46 L78 60 L84 70 M56 78 L64 84" fill="none" stroke="#2b2420" stroke-width="1.6"/>
+  <polygon points="28.8,23.5 24.9,26.1 20.3,25.4 19.7,20.7 22.9,17.4 27.1,19.1" fill="#8b5a32" stroke="#2b2420" stroke-width="1.8"/>
+  <polygon points="39.3,39.0 36.7,40.9 33.4,40.4 33.0,37.1 35.3,34.8 38.2,36.0" fill="#8b5a32" stroke="#2b2420" stroke-width="1.8"/>
+  <polygon points="24.3,53.3 20.8,55.7 16.7,55.1 16.1,50.8 19.1,47.8 22.8,49.4" fill="#8b5a32" stroke="#2b2420" stroke-width="1.8"/>
+  <polygon points="39.8,63.2 36.8,65.3 33.1,64.7 32.6,60.9 35.2,58.3 38.5,59.7" fill="#8b5a32" stroke="#2b2420" stroke-width="1.8"/>
+  <polygon points="19.8,83.2 16.8,85.3 13.1,84.7 12.6,80.9 15.2,78.3 18.5,79.7" fill="#8b5a32" stroke="#2b2420" stroke-width="1.8"/>
+  <circle cx="30" cy="30" r="1.3" fill="#2b2420"/><circle cx="44" cy="48" r="1.3" fill="#2b2420"/><circle cx="28" cy="72" r="1.3" fill="#2b2420"/>
+</svg>

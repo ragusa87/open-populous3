@@ -12,8 +12,9 @@ use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::pick_ground;
 use crate::units::{world_units, PLAYER};
 use crate::virtual_cursor::CursorLook;
-use crate::world::CurrentMap;
+use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
+use std::collections::HashMap;
 use game_core::command::Command;
 use game_core::map::GameMap;
 use game_core::spell::Spell;
@@ -185,6 +186,35 @@ pub fn panel_glyph(kind: SpellKind) -> Option<usize> {
 /// The panel's "?" of a spell to discover (`hfx0-0.dat`; 1056 is the same, smaller), drawn as it is.
 pub const UNKNOWN_GLYPH: usize = 1055;
 
+/// The panel's icon of a spell without the original files (`assets/spell-hud`, baked from
+/// `assets/3d/spell-hud/*.svg`): None for the spells without one yet, which show their name instead
+/// (as `panel_glyph` does for Magical Shield and Bloodlust).
+pub fn generated_glyph_path(kind: SpellKind) -> Option<&'static str> {
+    let name = match kind {
+        SpellKind::Blast => "blast",
+        SpellKind::Lightning => "lightning",
+        SpellKind::Whirlwind => "whirlwind",
+        SpellKind::Swarm => "swarm",
+        SpellKind::Invisibility => "invisibility",
+        SpellKind::Hypnotism => "hypnotism",
+        SpellKind::Firestorm => "firestorm",
+        SpellKind::GhostArmy => "ghostarmy",
+        SpellKind::Erosion => "erosion",
+        SpellKind::Swamp => "swamp",
+        SpellKind::LandBridge => "land-bridge",
+        SpellKind::AngelOfDeath => "angel-of-death",
+        SpellKind::Earthquake => "earthquake",
+        SpellKind::Flatten => "flatten",
+        SpellKind::Convert | SpellKind::Volcano | SpellKind::Armageddon | SpellKind::MagicalShield | SpellKind::Teleport | SpellKind::Bloodlust => return None,
+    };
+    Some(name)
+}
+
+/// `generated_glyph_path`'s name as the asset path under `assets/`.
+fn generated_glyph_asset(kind: SpellKind) -> Option<String> {
+    generated_glyph_path(kind).map(|name| format!("spell-hud/{name}.png"))
+}
+
 /// A tile's width and height, pixels.
 const TILE: f32 = 58.0;
 
@@ -220,12 +250,25 @@ struct ChargeBar(usize);
 #[derive(Component)]
 struct SpellInfo;
 
+/// The panel's icons without the original files (`generated_glyph_path`), loaded once: whichever of this
+/// and `IconImages`'s original sprites applies to `LevelList.original` is the one with anything in it.
+#[derive(Resource, Default)]
+struct GeneratedSpellIcons(HashMap<SpellKind, Handle<Image>>);
+
+fn load_generated_icons(levels: Res<LevelList>, assets: Res<AssetServer>, mut icons: ResMut<GeneratedSpellIcons>) {
+    if levels.original {
+        return;
+    }
+    icons.0 = SpellKind::ALL.iter().filter_map(|&k| Some((k, assets.load(generated_glyph_asset(k)?)))).collect();
+}
+
 pub struct SpellsPlugin;
 
 impl Plugin for SpellsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectedSpell>()
-            .add_systems(Startup, spawn_tab)
+            .init_resource::<GeneratedSpellIcons>()
+            .add_systems(Startup, (spawn_tab, load_generated_icons))
             .add_systems(
                 Update,
                 (
@@ -475,7 +518,7 @@ fn update_tiles(
     mut labels: Query<(&TileLabel, &mut Text, &mut TextFont, &mut Node), (Without<TileBadge>, Without<TileIcon>, Without<DotView>)>,
     mut badges: Query<(&TileBadge, &mut Text), Without<TileLabel>>,
     mut glyphs: Query<(&TileIcon, &mut ImageNode, &mut Node), (Without<TileLabel>, Without<DotView>)>,
-    (mut icons, mut images): (ResMut<crate::tooltip::IconImages>, ResMut<Assets<Image>>),
+    (mut icons, mut images, generated): (ResMut<crate::tooltip::IconImages>, ResMut<Assets<Image>>, Res<GeneratedSpellIcons>),
     mut dot_views: Query<(&DotView, &mut BackgroundColor, &mut BorderColor, &mut Node), Without<Tile>>,
     mut bars: Query<(&ChargeBar, &mut crate::progress_bar::ProgressBar, &mut Visibility)>,
 ) {
@@ -493,18 +536,21 @@ fn update_tiles(
             _ => edge,
         }));
     }
-    // The original glyph when there is one, the spell's name otherwise.
-    // A known spell's glyph in dark ink, a "?" as it is.
-    let glyph = |i: usize, icons: &mut crate::tooltip::IconImages, images: &mut Assets<Image>| {
-        let (index, ink) = match views[i].style {
-            TileStyle::Own | TileStyle::Gift => (panel_glyph(book.slots[i].kind)?, INK),
-            TileStyle::Unknown => (UNKNOWN_GLYPH, Color::WHITE),
-            TileStyle::Empty => return None,
-        };
-        icons.sprite(index, images).map(|g| (g.0, ink))
+    // The original glyph when there is one, else the generated one (`GeneratedSpellIcons`) in its own
+    // colours, else the spell's name. A known spell's original glyph in dark ink, a "?" as it is.
+    let glyph = |i: usize, icons: &mut crate::tooltip::IconImages, images: &mut Assets<Image>, generated: &GeneratedSpellIcons| {
+        match views[i].style {
+            TileStyle::Own | TileStyle::Gift => {
+                let kind = book.slots[i].kind;
+                let original = panel_glyph(kind).and_then(|index| icons.sprite(index, images)).map(|g| (g.0, INK));
+                original.or_else(|| generated.0.get(&kind).map(|h| (h.clone(), Color::WHITE)))
+            }
+            TileStyle::Unknown => icons.sprite(UNKNOWN_GLYPH, images).map(|g| (g.0, Color::WHITE)),
+            TileStyle::Empty => None,
+        }
     };
     for (g, mut image, mut node) in &mut glyphs {
-        let shown = glyph(g.0, &mut icons, &mut images);
+        let shown = glyph(g.0, &mut icons, &mut images, &generated);
         let display = if shown.is_some() { Display::Flex } else { Display::None };
         if node.display != display {
             node.display = display;
@@ -515,7 +561,7 @@ fn update_tiles(
     }
     for (l, mut text, mut font, mut node) in &mut labels {
         let v = &views[l.0];
-        let display = if glyph(l.0, &mut icons, &mut images).is_some() { Display::None } else { Display::Flex };
+        let display = if glyph(l.0, &mut icons, &mut images, &generated).is_some() { Display::None } else { Display::Flex };
         if node.display != display {
             node.display = display;
         }
@@ -666,6 +712,16 @@ mod tests {
         assert_eq!(panel_glyph(SpellKind::MagicalShield), None);
         let glyphs: std::collections::BTreeSet<usize> = SpellKind::ALL.iter().filter_map(|&k| panel_glyph(k)).collect();
         assert_eq!(glyphs, (1057..=1074).collect(), "1057-1074, each once");
+    }
+
+    #[test]
+    fn the_generated_glyphs_are_each_a_distinct_file() {
+        let names: Vec<&str> = SpellKind::ALL.iter().filter_map(|&k| generated_glyph_path(k)).collect();
+        assert_eq!(names.len(), std::collections::BTreeSet::from_iter(names.iter()).len(), "no two spells share a file");
+        assert_eq!(generated_glyph_asset(SpellKind::Blast).as_deref(), Some("spell-hud/blast.png"));
+        for kind in [SpellKind::Convert, SpellKind::Volcano, SpellKind::Armageddon, SpellKind::MagicalShield, SpellKind::Teleport, SpellKind::Bloodlust] {
+            assert_eq!(generated_glyph_path(kind), None, "{kind:?}: no icon yet, its name stands in");
+        }
     }
 
     #[test]
