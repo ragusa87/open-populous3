@@ -45,12 +45,26 @@ pub struct VehicleView {
     hull: Entity,
 }
 
-/// Where the view glides from and to, cells, and for which tribe its parts were made.
-#[derive(Component, Clone, Copy)]
+/// Where the view glides from and to (cells) during the map tick `moved`, when the vehicle last moved, and for which
+/// tribe its parts were made.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct Drawn {
     from: Vec2,
     to: Vec2,
+    moved: game_core::time::Tick,
     owner: u8,
+}
+
+impl Drawn {
+    /// Where to draw a vehicle at `at` (cells) when the map is at tick `now`, `alpha` into its step: from where it was
+    /// to `at` during the tick it moved in, then still at `at` (never back and forth once it stops).
+    pub fn glide(&mut self, at: Vec2, now: game_core::time::Tick, alpha: f32) -> Vec2 {
+        if at != self.to {
+            (self.from, self.to, self.moved) = (self.to, at, now);
+        }
+        let far = (self.to - self.from).abs().max_element() > 1.0;
+        if far || now != self.moved { self.to } else { self.from.lerp(self.to, alpha) }
+    }
 }
 
 /// A vehicle's place in cells.
@@ -215,7 +229,7 @@ impl WorldView for VehicleView {
         let at = cells_at(v);
         view.insert((
             Grounded { at, half: 0.0 },
-            Drawn { from: at, to: at, owner: v.owner },
+            Drawn { from: at, to: at, moved: map.0.now, owner: v.owner },
             crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Buildings),
             Transform::default(),
             Visibility::Hidden,
@@ -231,12 +245,7 @@ impl WorldView for VehicleView {
 
     fn update(&self, (_, v): &(VehicleId, Vehicle), _now: SimNow, (commands, (map, params, clock, levels, objects), look, assets, grounded, transforms): &mut SystemParamItem<Self::Params>) {
         if let Ok((mut g, mut drawn)) = grounded.get_mut(self.me) {
-            let at = cells_at(v);
-            if at != drawn.to {
-                (drawn.from, drawn.to) = (drawn.to, at);
-            }
-            let far = (drawn.to - drawn.from).abs().max_element() > 1.0;
-            g.at = if far { drawn.to } else { drawn.from.lerp(drawn.to, clock.alpha()) };
+            g.at = drawn.glide(cells_at(v), map.0.now, clock.alpha());
             if drawn.owner != v.owner {
                 drawn.owner = v.owner;
                 let theme = map.0.theme.unwrap_or(crate::buildings::DEFAULT_THEME);
@@ -287,6 +296,16 @@ mod tests {
         assert!((seat_offset(&boat, 4) - Vec2::new(2.0 * SEAT_GAP, 0.0)).length() < 1e-5, "heading +x: along x");
         let balloon = vehicle(VehicleKind::Balloon, (0, 0));
         assert!((seat_offset(&balloon, 0) - Vec2::new(0.0, -SEAT_GAP / 2.0)).length() < 1e-5, "side by side");
+    }
+
+    #[test]
+    fn it_glides_in_the_tick_it_moved_then_stays_put() {
+        let tick = game_core::time::Tick::from_wire;
+        let mut d = Drawn { from: Vec2::ZERO, to: Vec2::ZERO, moved: tick(0), owner: 0 };
+        assert_eq!(d.glide(Vec2::new(0.2, 0.0), tick(5), 0.5), Vec2::new(0.1, 0.0), "half way through its step");
+        assert!((d.glide(Vec2::new(0.2, 0.0), tick(5), 0.9) - Vec2::new(0.18, 0.0)).length() < 1e-6);
+        assert_eq!(d.glide(Vec2::new(0.2, 0.0), tick(6), 0.1), Vec2::new(0.2, 0.0), "parked: still, not replaying the step");
+        assert_eq!(d.glide(Vec2::new(3.2, 0.0), tick(7), 0.1), Vec2::new(3.2, 0.0), "a jump is not glided");
     }
 
     #[test]

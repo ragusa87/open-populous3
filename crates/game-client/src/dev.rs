@@ -13,6 +13,7 @@
 //! `GAME_SPEED=0` the shot holds it there): the explosion is drawn, then the building removed the next frame.
 //! `TRAIN=stored/cost[:short]` puts a brave of the player in each of their training units, making something with
 //! that much mana stored (`:short`: short of mana).
+//! `CREW=building:N` sends every brave of the player on foot into building N (its index), then runs `CREW_TICKS` ticks.
 //! `VEHICLE=boat@x,z[:n]` (or `balloon`, several separated by `;`) puts a vehicle of the player at map position x,z
 //! (cells) with n new braves aboard (none by default); `VEHICLE_TO=x,z` sends them there; then `VEHICLE_TICKS`
 //! ticks run (0 by default).
@@ -326,6 +327,16 @@ pub fn vehicle_demo(map: &mut game_core::map::GameMap, (kind, at, aboard): (game
 
 const WORLD: u32 = pop3_format::WORLD_UNITS_PER_CELL;
 
+/// `CREW` demo: every brave of the player on foot is sent into building `building` (its index: a hut's people, a vehicle
+/// hut's crew), then `ticks` ticks run.
+pub fn crew_demo(map: &mut game_core::map::GameMap, building: usize, ticks: u32) {
+    let braves: Vec<UnitId> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave && u.in_the_open()).map(|u| u.id).collect();
+    for c in map.enter_orders(PLAYER, &braves, building) {
+        map.apply(&c);
+    }
+    map.run(game_core::time::Ticks::new(ticks));
+}
+
 /// `x,z`: a map position in cells.
 pub fn parse_cells(v: &str) -> Option<Vec2> {
     let (x, z) = v.split_once(',')?;
@@ -463,6 +474,10 @@ fn screenshot(
         }
         if let Some(production) = std::env::var("TRAIN").ok().and_then(|v| parse_train(&v)) {
             train_demo(&mut map.0, production);
+        }
+        if let Some(building) = std::env::var("CREW").ok().and_then(|v| v.strip_prefix("building:").and_then(|n| n.trim().parse().ok())) {
+            let ticks = std::env::var("CREW_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            crew_demo(&mut map.0, building, ticks);
         }
         if let Ok(vehicles) = std::env::var("VEHICLE") {
             let to = std::env::var("VEHICLE_TO").ok().and_then(|v| parse_cells(&v));
