@@ -25,11 +25,25 @@ pub struct SelectedSpell(pub Option<SpellKind>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TileStyle {
+    /// Not in this level: a faint empty slot.
     Empty,
+    /// To discover: "?".
     Unknown,
-    Provided,
-    Ready,
-    Depleted,
+    /// A gift (uses found on the map, no recharge): light grey.
+    Gift,
+    /// The tribe's own spell: the panel's yellow.
+    Own,
+}
+
+/// One of a tile's charge dots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dot {
+    /// A charge ready to cast: blue.
+    Loaded,
+    /// A gifted use: red.
+    Gift,
+    /// Room for a charge, empty: a hollow.
+    Empty,
 }
 
 /// Everything a tile shows, derived from a slot. Pure, so it is unit-tested.
@@ -37,26 +51,33 @@ pub enum TileStyle {
 pub struct TileView {
     pub style: TileStyle,
     pub label: &'static str,
-    pub pips: (u8, u8),
-    pub progress: Option<f32>,
+    /// Its charge dots, left to right: as many as the spell holds.
+    pub dots: Vec<Dot>,
+    /// The charge on its way: mana given and the cost of a charge (the bar's fill and finer layer).
+    pub progress: Option<(u32, u32)>,
     pub badge: Option<String>,
+}
+
+/// `loaded` of `room` dots filled with `dot`, the rest hollow (at most `MAX_CHARGES` in all).
+fn dots(dot: Dot, loaded: u8, room: u8) -> Vec<Dot> {
+    let room = room.max(loaded).min(MAX_CHARGES);
+    (0..room).map(|n| if n < loaded { dot } else { Dot::Empty }).collect()
 }
 
 pub fn tile_view(slot: &SpellSlot) -> TileView {
     let label = short_label(slot.kind);
-    let base = TileView { style: TileStyle::Empty, label: "", pips: (0, 0), progress: None, badge: None };
+    let room = slot.kind.max_charges();
+    let base = TileView { style: TileStyle::Empty, label: "", dots: Vec::new(), progress: None, badge: None };
     match slot.availability {
         Availability::Hidden => base,
         Availability::Discoverable => TileView { style: TileStyle::Unknown, label: "?", ..base },
-        Availability::Provided { shots } => {
-            TileView { style: TileStyle::Provided, label, badge: Some(format!("x{shots}")), ..base }
-        }
-        Availability::Unlimited => TileView { style: TileStyle::Ready, label, badge: Some("free".into()), ..base },
+        Availability::Provided { shots } => TileView { style: TileStyle::Gift, label, dots: dots(Dot::Gift, shots, room), ..base },
+        Availability::Unlimited => TileView { style: TileStyle::Own, label, dots: dots(Dot::Loaded, room, room), badge: Some("free".into()), ..base },
         Availability::Known => TileView {
-            style: if slot.charges > 0 { TileStyle::Ready } else { TileStyle::Depleted },
+            style: TileStyle::Own,
             label,
-            pips: (slot.charges, slot.kind.max_charges()),
-            progress: slot.is_recharging().then(|| slot.recharge as f32 / slot.kind.cost() as f32),
+            dots: dots(Dot::Loaded, slot.charges, room),
+            progress: slot.is_recharging().then(|| (slot.recharge, slot.kind.cost())),
             badge: slot.paused.then(|| "paused".into()),
         },
     }
@@ -106,6 +127,7 @@ pub fn short_label(kind: SpellKind) -> &'static str {
         SpellKind::GhostArmy => "Ghosts",
         SpellKind::MagicalShield => "Shield",
         SpellKind::Teleport => "Teleport",
+        SpellKind::Bloodlust => "Blood",
     }
 }
 
@@ -142,6 +164,9 @@ pub const ROWS: [&[SpellKind]; 6] = {
     ]
 };
 
+/// A hidden spell that takes another's place on the panel when the level gives it: Bloodlust, Ghost Army's.
+pub const STAND_INS: [(SpellKind, SpellKind); 1] = [(SpellKind::Bloodlust, SpellKind::GhostArmy)];
+
 /// Under the rows: Teleport, a sandbox spell, in a row shown only when the book has it.
 pub const SANDBOX_ROW: [SpellKind; 1] = [SpellKind::Teleport];
 
@@ -171,11 +196,10 @@ struct TileLabel(usize);
 #[derive(Component)]
 struct TileBadge(usize);
 #[derive(Component)]
-struct Pip(usize, u8);
+struct DotView(usize, u8);
+/// The bar of slot `i`'s tile (`progress_bar`).
 #[derive(Component)]
-struct RechargeBar(usize);
-#[derive(Component)]
-struct RechargeFill(usize);
+struct ChargeBar(usize);
 #[derive(Component)]
 struct SpellInfo;
 
@@ -189,7 +213,7 @@ impl Plugin for SpellsPlugin {
                 Update,
                 (
                     (tile_clicks.after(crate::units::SimStep), pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput).after(crate::hover::HoverSystems)).chain().in_set(crate::menu::Gameplay),
-                    (update_tiles, show_given_rows),
+                    (update_tiles.before(crate::progress_bar::DrawBars), show_given_rows),
                     update_info,
                 )
                     .chain(),
@@ -203,18 +227,39 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>) {
     }
 }
 
-/// A row of the panel shown only while the player's book has one of its spells (Teleport's).
+/// A row or tile of the panel shown only while the player's book has one of these spells (Teleport's row,
+/// Bloodlust's tile).
 #[derive(Component)]
 struct GivenOnly(Vec<usize>);
+
+/// A tile hidden while the book has this spell, which takes its place (Ghost Army's, for Bloodlust: `STAND_INS`).
+#[derive(Component)]
+struct UnlessGiven(usize);
 
 fn spawn_spells(c: &mut ChildSpawnerCommands, slots: &[SpellSlot]) {
     let row = Node { flex_direction: FlexDirection::Row, justify_content: JustifyContent::Center, column_gap: px(4), ..default() };
     c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(4), ..default() }).with_children(|rows| {
         for kinds in ROWS {
-            rows.spawn(row.clone()).with_children(|r| kinds.iter().filter_map(|&k| slot_of(slots, k)).for_each(|i| spawn_tile(r, i, px(TILE))));
+            rows.spawn(row.clone()).with_children(|r| {
+                for &kind in kinds.iter() {
+                    let Some(i) = slot_of(slots, kind) else { continue };
+                    let stand_in = STAND_INS.iter().find(|s| s.1 == kind).and_then(|s| slot_of(slots, s.0));
+                    if let Some(j) = stand_in {
+                        spawn_tile(r, j, px(TILE)).insert(GivenOnly(vec![j]));
+                    }
+                    let mut tile = spawn_tile(r, i, px(TILE));
+                    if let Some(j) = stand_in {
+                        tile.insert(UnlessGiven(j));
+                    }
+                }
+            });
         }
         let sandbox: Vec<usize> = SANDBOX_ROW.iter().filter_map(|&k| slot_of(slots, k)).collect();
-        rows.spawn((row.clone(), GivenOnly(sandbox.clone()))).with_children(|r| sandbox.iter().for_each(|&i| spawn_tile(r, i, px(TILE))));
+        rows.spawn((row.clone(), GivenOnly(sandbox.clone()))).with_children(|r| {
+            for &i in &sandbox {
+                spawn_tile(r, i, px(TILE));
+            }
+        });
         // The special spell has a row of its own, the whole width.
         for i in (0..slots.len()).filter(|&i| is_special(slots[i].kind)) {
             spawn_tile(rows, i, percent(100));
@@ -229,60 +274,79 @@ fn spawn_spells(c: &mut ChildSpawnerCommands, slots: &[SpellSlot]) {
     ));
 }
 
-/// The tile of slot `i`, `width` wide.
-fn spawn_tile(parent: &mut ChildSpawnerCommands, i: usize, width: Val) {
-    parent
-        .spawn((
-            Tile(i),
-            Button,
-            Node {
-                width,
-                height: px(TILE),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                padding: UiRect::all(px(3)),
-                border: UiRect::all(px(2)),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            BorderColor::all(Color::NONE),
-        ))
-        .with_children(|tile| {
-            tile.spawn(Node { column_gap: px(2), height: px(8), ..default() }).with_children(|pips| {
-                for n in 0..MAX_CHARGES {
-                    pips.spawn((Pip(i, n), Node { width: px(8), height: px(8), ..default() }, BackgroundColor(Color::NONE)));
-                }
-            });
-            tile.spawn((TileLabel(i), Text::new(""), TextFont { font_size: FontSize::Px(12.0), ..default() }, TextColor(INK)));
-            tile.spawn((TileBadge(i), Text::new(""), TextFont { font_size: FontSize::Px(11.0), ..default() }, TextColor(INK)));
-            tile.spawn((RechargeBar(i), Node { width: percent(100), height: px(4), ..default() }, BackgroundColor(DARK_BROWN)))
-                .with_child((RechargeFill(i), Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(MANA_BLUE)));
+/// The tile of slot `i`, `width` wide: its charge dots on top, its icon taking most of the room, its charge bar at
+/// the bottom (`progress_bar`, as a training unit's).
+fn spawn_tile<'a>(parent: &'a mut ChildSpawnerCommands, i: usize, width: Val) -> EntityCommands<'a> {
+    let mut tile = parent.spawn((
+        Tile(i),
+        Button,
+        Node {
+            width,
+            height: px(TILE),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            padding: UiRect::all(px(3)),
+            border: UiRect::all(px(2)),
+            ..default()
+        },
+        BackgroundColor(Color::NONE),
+        BorderColor::all(Color::NONE),
+    ));
+    tile.with_children(|tile| {
+        tile.spawn(Node { column_gap: px(3), height: px(DOT), ..default() }).with_children(|row| {
+            for n in 0..MAX_CHARGES {
+                let dot = Node { width: px(DOT), height: px(DOT), border: UiRect::all(px(1)), border_radius: BorderRadius::MAX, ..default() };
+                row.spawn((DotView(i, n), dot, BackgroundColor(Color::NONE), BorderColor::all(Color::NONE)));
+            }
         });
+        tile.spawn(Node { flex_grow: 1.0, flex_direction: FlexDirection::Column, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() })
+            .with_children(|icon| {
+                icon.spawn((TileLabel(i), Text::new(""), TextFont { font_size: FontSize::Px(13.0), ..default() }, TextColor(INK)));
+                icon.spawn((TileBadge(i), Text::new(""), TextFont { font_size: FontSize::Px(10.0), ..default() }, TextColor(INK)));
+            });
+        let bar = crate::progress_bar::ProgressBar::horizontal(crate::progress_bar::FILL, true);
+        crate::progress_bar::spawn(tile, bar, Node { width: percent(100), height: px(4), ..default() }).insert(ChargeBar(i));
+    });
+    tile
 }
 
-/// Rows shown only while the book has one of their spells (`GivenOnly`).
-fn show_given_rows(map: Res<CurrentMap>, mut rows: Query<(&GivenOnly, &mut Node)>) {
+/// Rows and tiles shown only while the book has one of their spells (`GivenOnly`), tiles hidden while it has the one
+/// taking their place (`UnlessGiven`).
+fn show_given_rows(map: Res<CurrentMap>, mut parts: Query<(Option<&GivenOnly>, Option<&UnlessGiven>, &mut Node), Or<(With<GivenOnly>, With<UnlessGiven>)>>) {
     let book = player_book(&map.0);
-    for (row, mut node) in &mut rows {
-        let given = row.0.iter().any(|&i| book.slots.get(i).is_some_and(|s| s.availability != Availability::Hidden));
-        let display = if given { Display::Flex } else { Display::None };
+    let given = |i: usize| book.slots.get(i).is_some_and(|s| s.availability != Availability::Hidden);
+    for (only, unless, mut node) in &mut parts {
+        let shown = only.is_none_or(|o| o.0.iter().any(|&i| given(i))) && unless.is_none_or(|u| !given(u.0));
+        let display = if shown { Display::Flex } else { Display::None };
         if node.display != display {
             node.display = display;
         }
     }
 }
 
-const MANA_BLUE: Color = Color::srgb(0.25, 0.55, 1.0);
-const PAUSED_GREY: Color = Color::srgb(0.5, 0.5, 0.5);
+/// A charge dot's size, pixels, and its colours: loaded, gifted, and a hollow's (a dark pit, a lit lower rim).
+const DOT: f32 = 8.0;
+const LOADED: Color = Color::srgb(0.25, 0.55, 1.0);
+const GIFTED: Color = Color::srgb(0.85, 0.15, 0.1);
+const HOLLOW: Color = Color::srgba(0.0, 0.0, 0.0, 0.3);
+const HOLLOW_RIM: Color = Color::srgba(0.30, 0.18, 0.06, 0.6);
+
+/// A dot's fill and rim.
+fn dot_colors(dot: Dot) -> (Color, Color) {
+    match dot {
+        Dot::Loaded => (LOADED, DARK_BROWN),
+        Dot::Gift => (GIFTED, DARK_BROWN),
+        Dot::Empty => (HOLLOW, HOLLOW_RIM),
+    }
+}
 
 fn style_colors(style: TileStyle) -> (Color, Color) {
     match style {
         TileStyle::Empty => (Color::srgba(0.0, 0.0, 0.0, 0.10), Color::NONE),
         TileStyle::Unknown => (Color::srgb(0.36, 0.24, 0.10), DARK_BROWN),
-        TileStyle::Provided => (Color::srgb(0.66, 0.66, 0.64), Color::srgb(0.35, 0.35, 0.35)),
-        TileStyle::Ready => (Color::srgb(1.0, 0.84, 0.48), DARK_BROWN),
-        TileStyle::Depleted => (Color::srgb(0.62, 0.48, 0.28), DARK_BROWN),
+        TileStyle::Gift => (Color::srgb(0.80, 0.80, 0.78), Color::srgb(0.35, 0.35, 0.35)),
+        TileStyle::Own => (super::panel::PARCHMENT, DARK_BROWN),
     }
 }
 
@@ -389,46 +453,60 @@ fn aim_and_cast(
 fn update_tiles(
     map: Res<CurrentMap>,
     selected: Res<SelectedSpell>,
-    mut tiles: Query<(&Tile, &Interaction, &mut BackgroundColor, &mut BorderColor)>,
+    mut tiles: Query<(&Tile, &Interaction, &mut BackgroundColor, &mut BorderColor), Without<DotView>>,
     mut labels: Query<(&TileLabel, &mut Text, &mut TextFont), Without<TileBadge>>,
     mut badges: Query<(&TileBadge, &mut Text), Without<TileLabel>>,
-    mut pips: Query<(&Pip, &mut BackgroundColor, &mut Node), (Without<Tile>, Without<RechargeFill>, Without<RechargeBar>)>,
-    mut bars: Query<(&RechargeBar, &mut Node), (Without<Pip>, Without<RechargeFill>)>,
-    mut fills: Query<(&RechargeFill, &mut Node, &mut BackgroundColor), (Without<Pip>, Without<RechargeBar>, Without<Tile>)>,
+    mut dot_views: Query<(&DotView, &mut BackgroundColor, &mut BorderColor, &mut Node), Without<Tile>>,
+    mut bars: Query<(&ChargeBar, &mut crate::progress_bar::ProgressBar, &mut Visibility)>,
 ) {
     let book = player_book(&map.0);
     let views: Vec<TileView> = book.slots.iter().map(tile_view).collect();
     for (tile, interaction, mut bg, mut border) in &mut tiles {
         let v = &views[tile.0];
         let (fill, edge) = style_colors(v.style);
-        bg.0 = fill;
+        bg.set_if_neq(BackgroundColor(fill));
         let is_selected = selected.0 == Some(book.slots[tile.0].kind) && v.style != TileStyle::Empty;
-        *border = BorderColor::all(match (is_selected, interaction, v.style) {
+        border.set_if_neq(BorderColor::all(match (is_selected, interaction, v.style) {
             (true, _, _) => Color::WHITE,
             (_, _, TileStyle::Empty) => Color::NONE,
             (_, Interaction::Hovered, _) => Color::srgb(1.0, 0.95, 0.7),
             _ => edge,
-        });
+        }));
     }
     for (l, mut text, mut font) in &mut labels {
         let v = &views[l.0];
-        text.0 = v.label.to_string();
-        font.font_size = FontSize::Px(if v.style == TileStyle::Unknown { 22.0 } else { 12.0 });
+        if text.0 != v.label {
+            text.0 = v.label.to_string();
+        }
+        font.font_size = FontSize::Px(if v.style == TileStyle::Unknown { 22.0 } else { 13.0 });
     }
     for (b, mut text) in &mut badges {
-        text.0 = views[b.0].badge.clone().unwrap_or_default();
+        let badge = views[b.0].badge.clone().unwrap_or_default();
+        if text.0 != badge {
+            text.0 = badge;
+        }
     }
-    for (pip, mut bg, mut node) in &mut pips {
-        let (filled, max) = views[pip.0].pips;
-        node.display = if pip.1 < max { Display::Flex } else { Display::None };
-        bg.0 = if pip.1 < filled { MANA_BLUE } else { DARK_BROWN };
+    for (dot, mut bg, mut rim, mut node) in &mut dot_views {
+        let shown = views[dot.0].dots.get(dot.1 as usize).copied();
+        let display = if shown.is_some() { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+        if let Some(d) = shown {
+            let (fill, edge) = dot_colors(d);
+            bg.set_if_neq(BackgroundColor(fill));
+            rim.set_if_neq(BorderColor::all(edge));
+        }
     }
-    for (bar, mut node) in &mut bars {
-        node.display = if views[bar.0].progress.is_some() { Display::Flex } else { Display::None };
-    }
-    for (fill, mut node, mut bg) in &mut fills {
-        node.width = percent(views[fill.0].progress.unwrap_or(0.0) * 100.0);
-        bg.0 = if book.slots[fill.0].paused { PAUSED_GREY } else { MANA_BLUE };
+    for (bar, mut widget, mut vis) in &mut bars {
+        // Hidden, not removed, while no charge is on its way: the tile keeps its layout.
+        let progress = views[bar.0].progress;
+        vis.set_if_neq(if progress.is_some() { Visibility::Inherited } else { Visibility::Hidden });
+        let (mana, cost) = progress.unwrap_or((0, 1));
+        let shown = crate::progress_bar::ProgressBar { fill: mana as f32 / cost.max(1) as f32, fine: Some((mana, cost)), blocked: book.slots[bar.0].paused, ..*widget };
+        if *widget != shown {
+            *widget = shown;
+        }
     }
 }
 
@@ -460,25 +538,30 @@ mod tests {
         assert_eq!(tile_view(&slot(SpellKind::Blast, Availability::Hidden)).style, TileStyle::Empty);
         let unknown = tile_view(&slot(SpellKind::Blast, Availability::Discoverable));
         assert_eq!((unknown.style, unknown.label), (TileStyle::Unknown, "?"));
-        let provided = tile_view(&slot(SpellKind::Volcano, Availability::Provided { shots: 2 }));
-        assert_eq!((provided.style, provided.badge.as_deref(), provided.progress), (TileStyle::Provided, Some("x2"), None));
+        let gift = tile_view(&slot(SpellKind::Blast, Availability::Provided { shots: 2 }));
+        assert_eq!((gift.style, gift.progress), (TileStyle::Gift, None), "light grey, no recharge");
+        assert_eq!(gift.dots, [Dot::Gift, Dot::Gift, Dot::Empty, Dot::Empty], "red gifted uses in the blast's room of 4");
+        let volcano = tile_view(&slot(SpellKind::Volcano, Availability::Provided { shots: 1 }));
+        assert_eq!(volcano.dots, [Dot::Gift], "a volcano holds one");
     }
 
     #[test]
     fn unlimited_is_ready_and_free() {
         let v = tile_view(&slot(SpellKind::Teleport, Availability::Unlimited));
-        assert_eq!((v.style, v.label, v.badge.as_deref(), v.pips, v.progress), (TileStyle::Ready, "Teleport", Some("free"), (0, 0), None));
+        assert_eq!((v.style, v.label, v.badge.as_deref(), v.progress), (TileStyle::Own, "Teleport", Some("free"), None));
+        assert!(v.dots.iter().all(|&d| d == Dot::Loaded));
         assert!(describe(&slot(SpellKind::Teleport, Availability::Unlimited)).contains("Unlimited"));
     }
 
     #[test]
-    fn known_shows_pips_and_progress() {
+    fn known_shows_its_charges_and_the_one_on_its_way() {
         let mut s = slot(SpellKind::Blast, Availability::Known);
-        assert_eq!(tile_view(&s).style, TileStyle::Depleted);
+        assert_eq!(tile_view(&s).dots, [Dot::Empty; 4], "4 hollows: no charge");
         s.charges = 2;
         s.recharge = 20;
         let v = tile_view(&s);
-        assert_eq!((v.style, v.pips, v.progress), (TileStyle::Ready, (2, 4), Some(0.5)));
+        assert_eq!((v.style, v.progress), (TileStyle::Own, Some((20, 40))));
+        assert_eq!(v.dots, [Dot::Loaded, Dot::Loaded, Dot::Empty, Dot::Empty]);
         s.charges = 4;
         s.recharge = 0;
         assert_eq!(tile_view(&s).progress, None, "full spells hide the bar");
@@ -501,7 +584,7 @@ mod tests {
         s.charges = 1;
         s.paused = true;
         let v = tile_view(&s);
-        assert_eq!((v.badge.as_deref(), v.progress), (Some("paused"), Some(0.0)), "the bar stays, frozen");
+        assert_eq!((v.badge.as_deref(), v.progress), (Some("paused"), Some((0, 40))), "the bar stays, frozen");
         assert!(describe(&s).contains("paused"));
         s.paused = false;
         assert!(describe(&s).contains("right click to pause"));
@@ -531,7 +614,7 @@ mod tests {
 
     #[test]
     fn every_spell_has_one_place_on_the_panel() {
-        let placed: Vec<SpellKind> = ROWS.iter().flat_map(|r| r.iter().copied()).chain(SANDBOX_ROW).chain(SpellKind::ALL.into_iter().filter(|&k| is_special(k))).collect();
+        let placed: Vec<SpellKind> = ROWS.iter().flat_map(|r| r.iter().copied()).chain(SANDBOX_ROW).chain(STAND_INS.map(|s| s.0)).chain(SpellKind::ALL.into_iter().filter(|&k| is_special(k))).collect();
         for kind in SpellKind::ALL {
             assert_eq!(placed.iter().filter(|&&k| k == kind).count(), 1, "{kind:?}");
         }
@@ -544,7 +627,7 @@ mod tests {
     #[test]
     fn demo_book_covers_every_state() {
         let styles: Vec<TileStyle> = SpellBook::demo().slots.iter().map(|s| tile_view(s).style).collect();
-        for st in [TileStyle::Empty, TileStyle::Unknown, TileStyle::Provided, TileStyle::Ready] {
+        for st in [TileStyle::Empty, TileStyle::Unknown, TileStyle::Gift, TileStyle::Own] {
             assert!(styles.contains(&st), "{st:?} missing");
         }
     }

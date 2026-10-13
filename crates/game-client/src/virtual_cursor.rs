@@ -196,6 +196,7 @@ pub fn spell_sprite(kind: SpellKind) -> usize {
         SpellKind::AngelOfDeath => 55,
         SpellKind::Volcano => 56,
         SpellKind::Teleport => 57,
+        SpellKind::Bloodlust => 38,
     }
 }
 
@@ -520,7 +521,7 @@ mod tests {
         let icons: std::collections::BTreeSet<usize> = SpellKind::ALL.iter().map(|&k| spell_sprite(k)).collect();
         assert_eq!(icons.len(), SpellKind::ALL.len());
         assert!(icons.iter().all(|i| pop3_format::sprites::POINTER_SPELL_ICONS.contains(i)));
-        assert!(!icons.contains(&38), "bloodlust is not on the panel");
+        assert_eq!(spell_sprite(SpellKind::Bloodlust), 38, "the skull");
         assert_eq!((spell_sprite(SpellKind::Teleport), spell_sprite(SpellKind::Hypnotism)), (57, 47));
     }
 

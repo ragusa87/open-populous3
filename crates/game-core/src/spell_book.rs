@@ -30,10 +30,13 @@ pub enum SpellKind {
     /// Sandbox spell: moves the shaman to any walkable spot. The original has a spell model 21
     /// teleport, never on the player's panel (`from_model` leaves it out).
     Teleport,
+    /// A hidden spell some levels give (model 20): the nearest followers fight harder for a while (no effect yet).
+    /// It takes Ghost Army's place on the panel when given.
+    Bloodlust,
 }
 
 impl SpellKind {
-    pub const ALL: [SpellKind; 19] = [
+    pub const ALL: [SpellKind; 20] = [
         SpellKind::Blast,
         SpellKind::Convert,
         SpellKind::Swarm,
@@ -53,6 +56,7 @@ impl SpellKind {
         SpellKind::GhostArmy,
         SpellKind::MagicalShield,
         SpellKind::Teleport,
+        SpellKind::Bloodlust,
     ];
 
     /// The original spell model number (level header masks, discovery things, AI scripts).
@@ -76,12 +80,13 @@ impl SpellKind {
             SpellKind::Convert => 17,
             SpellKind::Armageddon => 18,
             SpellKind::MagicalShield => 19,
+            SpellKind::Bloodlust => 20,
             SpellKind::Teleport => 21,
         }
     }
 
-    /// The player's spell for an original model (2-19). Burn (1), bloodlust (20) and teleport (21)
-    /// are not on the original panel: None, like unknown models.
+    /// The player's spell for an original model (2-20). Burn (1) and teleport (21) are not on the original
+    /// panel: None, like unknown models.
     pub fn from_model(model: u8) -> Option<SpellKind> {
         SpellKind::ALL.iter().copied().find(|k| k.model() == model && *k != SpellKind::Teleport)
     }
@@ -107,6 +112,7 @@ impl SpellKind {
             SpellKind::GhostArmy => "Ghost Army",
             SpellKind::MagicalShield => "Magical Shield",
             SpellKind::Teleport => "Teleportation",
+            SpellKind::Bloodlust => "Bloodlust",
         }
     }
 
@@ -116,7 +122,7 @@ impl SpellKind {
             SpellKind::Teleport => 1,
             SpellKind::Blast | SpellKind::Convert => 40,
             SpellKind::Swarm | SpellKind::Invisibility | SpellKind::LandBridge | SpellKind::GhostArmy => 120,
-            SpellKind::MagicalShield => 200,
+            SpellKind::MagicalShield | SpellKind::Bloodlust => 200,
             SpellKind::Hypnotism | SpellKind::Whirlwind | SpellKind::Lightning | SpellKind::Flatten => 200,
             SpellKind::Erosion | SpellKind::Swamp => 300,
             SpellKind::Earthquake | SpellKind::Firestorm => 500,
@@ -143,7 +149,8 @@ impl SpellKind {
             | SpellKind::Swamp
             | SpellKind::Earthquake
             | SpellKind::Flatten
-            | SpellKind::MagicalShield => Some(4096),
+            | SpellKind::MagicalShield
+            | SpellKind::Bloodlust => Some(4096),
         }
     }
 
@@ -231,7 +238,8 @@ impl SpellSlot {
 /// teleport) and no Convert.
 pub fn known_in_header(header: &LevelHeader, kind: SpellKind) -> bool {
     let set = |k: SpellKind| header.spell_available(k.model());
-    set(kind) && (kind != SpellKind::Armageddon || set(SpellKind::Convert))
+    // Bit 20 is among the leftovers of levels 1 and 2 too: bloodlust only comes from discoveries (to check).
+    kind != SpellKind::Bloodlust && set(kind) && (kind != SpellKind::Armageddon || set(SpellKind::Convert))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -289,10 +297,11 @@ impl SpellBook {
         b
     }
 
-    /// Every spell, Teleport too, cast at will (Sandbox > Spells).
+    /// Every spell, Teleport too, cast at will (Sandbox > Spells); not Bloodlust, which would hide Ghost Army's tile
+    /// and does nothing yet.
     pub fn unlimited() -> Self {
         let mut b = SpellBook::new();
-        for k in SpellKind::ALL {
+        for k in SpellKind::ALL.into_iter().filter(|&k| k != SpellKind::Bloodlust) {
             b.set(k, Availability::Unlimited);
         }
         b
@@ -392,7 +401,8 @@ mod tests {
         assert_eq!(SpellKind::from_model(2), Some(SpellKind::Blast));
         assert_eq!(SpellKind::from_model(17), Some(SpellKind::Convert));
         assert_eq!(SpellKind::from_model(19), Some(SpellKind::MagicalShield));
-        for model in [0, 1, 20, 21, 22] {
+        assert_eq!(SpellKind::from_model(20), Some(SpellKind::Bloodlust), "a level's discovery may give it");
+        for model in [0, 1, 21, 22] {
             assert_eq!(SpellKind::from_model(model), None, "model {model} is not a panel spell");
         }
         for k in SpellKind::ALL.iter().filter(|&&k| k != SpellKind::Teleport) {
@@ -529,8 +539,9 @@ mod tests {
     #[test]
     fn unlimited_casts_every_spell_at_will() {
         let mut b = SpellBook::unlimited();
-        for k in SpellKind::ALL {
+        for k in SpellKind::ALL.into_iter().filter(|&k| k != SpellKind::Bloodlust) {
             assert!(b.cast(k) && b.cast(k), "{k:?}");
         }
+        assert!(!b.cast(SpellKind::Bloodlust), "left out: it would hide Ghost Army's tile");
     }
 }

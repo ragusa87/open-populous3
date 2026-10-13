@@ -126,6 +126,8 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Healing (combat.md "Health"): no healing while struck by lightning once it has its own state; the angel of death never heals; the original lets life go past full by up to one heal (ours stops at full).
 
 ## Spells ([spells.md](docs/specs/spells.md))
+- [ ] Bloodlust (hidden spell, model 20; in the book, no effect yet): its cast (the 6 nearest own followers, `status::bloodlust`), and which levels give it (header bit 20 is among levels 1 and 2's leftover bits, so only discoveries give it today).
+- [ ] Spell icons on the tiles (the name stands in): pick them on `target/spell-icons.html` (`just spell-icons`), and draw our own for `--no-original`.
 - [ ] Spell effects with their own animations/visuals (swarm, whirlwind...; lightning has our own bolt, the original's bolt sprites are not identified); casting (C) only uses a charge and makes the shaman jump.
 - [ ] Aim the other spells on the terrain like Teleport, Blast and Land Bridge (`hud::spells::ground_spell`), within the cast range (`GameMap::in_cast_range`, done: `SP_W_RANGE` by altitude band, +1/3 in a drum tower, none on god levels).
 - [ ] Every spell flies from the shaman as a shot before it takes effect (6 turns into the cast; standard shot 1400 units per turn, blast's fireball 1000), homing on a targeted unit for the spells that follow one; burn, blast, lightning, whirlwind and insect shots are deflected 8 cells away by a shielded enemy on the target cell. A 1 s cooldown after any human cast, no per-spell cooldown (`SPELL_x_OPT_S` is not one).

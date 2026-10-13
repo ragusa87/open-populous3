@@ -60,23 +60,27 @@ discoveries as "?" (spells.md). Generated maps get the demo loadout (`SpellBook:
 sandboxes add Teleport, unlimited (`SpellBook::sandbox`). One tile per `SpellKind`, Hidden ones as empty slots,
 in centred rows as on the original's panel (`ROWS`): Angel of Death, Volcano; Earthquake, Erosion, Firestorm;
 Whirlwind, Swamp, Flatten; Land Bridge, Lightning, Hypnotism; Swarm, Invisibility, Magical Shield; Ghost Army,
-Blast, Convert (the last row's first spell assumed to be Ghost Army, the one left). Then Teleport's row, shown only
+Blast, Convert; on levels giving Bloodlust (a hidden spell, model 20, from discoveries only for now), its tile takes
+Ghost Army's place (`STAND_INS`). Then Teleport's row, shown only
 when the book has it (sandboxes). Armageddon is special (only some levels give it): it always has its own
 full-width tile under the rows (`is_special`), empty when the level does not give it, so the panel never has to make
 room for it.
-Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
+A tile: on top a dot per charge the spell holds (`max_charges`: blast 4, volcano 1), blue loaded, red gifted, a
+hollow (a dark pit) for room left; the spell's icon in the middle, most of the tile (its name until icons are picked,
+`target/spell-icons.html`); at the bottom the charge on its way, the training unit's bar (`progress_bar`: yellow,
+the mana given over the cost; blue, the finer layer). Pure view model `tile_view(slot) -> TileView` (unit-tested):
 
 | Availability | Tile |
 |---|---|
 | Hidden | empty faint slot (keeps the grid stable) |
 | Discoverable | dark tile with "?", cannot be selected for casting until discovered |
-| Provided { shots } | gray tile, badge `xN`, no recharge, no pause; an empty slot once used up, never back to "?" |
-| Known | gold tile, 1-4 charge pips (max depends on the spell), blue recharge bar while not full; dimmed at 0 charges |
-| Unlimited | gold tile, badge `free` |
+| Provided { shots } | light grey tile (a gift found on the map), a red dot per use left, no recharge, no pause; an empty slot once used up, never back to "?" |
+| Known | the panel's yellow, a blue dot per charge, hollows for the rest, the bar while a charge is on its way |
+| Unlimited | the panel's yellow, every dot blue, badge `free` |
 
 Hover shows the tile's description, click selects (white border). Right click on a known spell pauses its recharge
 (`Command::PauseSpell`, like the original's "toggle on/off"): it takes no mana, keeps its charges and can still
-be cast; badge "paused", grey frozen bar. Right click again resumes. Spells cast on a spot (`ground_spell`: Teleport,
+be cast; badge "paused", its bar blinking, frozen. Right click again resumes. Spells cast on a spot (`ground_spell`: Teleport,
 Blast, Land Bridge, Flatten) are aimed with the mouse while selected: over the map the cursor becomes the animated gold arrow with the spell's icon on its right, the icon grayed out
 where it cannot apply (`GameMap::can_cast`: Teleport only onto walkable ground, a land bridge onto land). Out of
 range (`GameMap::in_cast_range`) the click still casts: the shaman walks towards the target and casts once in range
