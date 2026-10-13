@@ -62,6 +62,10 @@ guard...), 156-161 small icons.
 each spell of the panel, these cursor icons, the `hfx0-0.dat` glyphs 1030-1083 and spell names 107-111, and the
 `plspanel.spr` / `plsspace.spr` artwork as candidates for its tile's icon, the choices shown as JSON.
 
+`just sprites` (`tools/sprite_catalog.py`) writes `target/sprites.html` (original art: never committed): every sprite
+of `POINT0-0.DAT` and `hfx0-0.dat`, searchable by name, file:index, group or code constant; the names are those of
+this page, keep its `CATALOG` in step when one is identified.
+
 Spell icons, named by someone who knows the game (`virtual_cursor::spell_sprite`), shown right of the gold arrow
 while aiming: 38 bloodlust (a skull, not on
 the player's panel), 39 magical shield (fist), 40 armageddon (scales, probably), 41 blast (flame), 42 convert

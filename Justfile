@@ -57,6 +57,10 @@ model-mapping:
 spell-icons:
     uvx --with pillow python tools/spell_icons.py
 
+# Standalone page of every identified original sprite, by name / file / index (embeds original art: stays in target/)
+sprites:
+    uvx --with pillow python tools/sprite_catalog.py
+
 # Windowed run logging cursor confinement (focus, enter/leave, edge pushes)
 cursor-debug *args:
     POP3_CURSOR_DEBUG=1 cargo run -q -p game-client -- {{args}} 2>&1 | grep --line-buffered cursor-debug
