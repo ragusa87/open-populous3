@@ -86,8 +86,8 @@ impl Tile {
     }
 
     /// Its icon on the panel (`hfx0-0.dat`): the building's, in the cursor's order (`virtual_cursor::plan_sprite`,
-    /// `POINT0-0.DAT` 58-66), from `ICONS` (drawn in dark ink), over its shadow (`SHADOWS`), its highlight on hover
-    /// (`HIGHLIGHTS`); the "?" of plans to discover. None for an empty or hidden cell.
+    /// `POINT0-0.DAT` 58-66): the original's icon (`ICONS`) and shadow (`SHADOWS`), and its highlight (`HIGHLIGHTS`),
+    /// which the tab draws (black, white on hover); the "?" of plans to discover. None for an empty or hidden cell.
     pub fn icon(&self) -> Option<TileIcon> {
         if self.view().unknown {
             return Some(TileIcon::Unknown);
@@ -297,9 +297,10 @@ fn update_tiles(
     for (i, tile) in all.iter().enumerate() {
         let mut sprite = |index: usize| icons.sprite(index, &mut images).map(|s| s.0);
         drawn.push(match tile.icon() {
-            Some(TileIcon::Building { icon, shadow, highlight }) => match hovered.contains(&i) {
-                true => sprite(highlight).map(|h| (h, Color::WHITE, sprite(shadow))),
-                false => sprite(icon).map(|h| (h, INK, sprite(shadow))),
+            // The highlight, white when hovered, black otherwise: it reads better than the dark icons on the panel.
+            Some(TileIcon::Building { highlight, .. }) => match hovered.contains(&i) {
+                true => sprite(highlight).map(|h| (h, Color::WHITE, None)),
+                false => sprite(highlight).map(|h| (h, Color::BLACK, None)),
             },
             Some(TileIcon::Unknown) => sprite(UNKNOWN_ICON).map(|h| (h, Color::WHITE, None)),
             None => None,

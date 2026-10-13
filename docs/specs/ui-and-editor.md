@@ -99,8 +99,8 @@ Next: icons (Kenney game-icons), casting on the terrain, mana from followers, to
 Draws the player's `game_core::build_book::BuildBook` from the map (`player_builds` = `GameMap::build_books[PLAYER]`:
 the level's own; generated maps and sandboxes: every kind). A 2 x 5 grid as the original's panel (`LAYOUT`): hut,
 drum tower; warrior hut, temple (preachers); spy hut, firewarrior hut; boat hut, airship hut; camp fire, an empty
-cell. A tile is the building's icon (the original's `hfx0-0.dat` 1075-1083 in dark ink over its shadow, its
-highlight on hover, sprites.md; else its name), "?" (1055) for plans to discover, an empty slot for hidden ones; hover describes it. Right click on a tile flies the camera to the player's
+cell. A tile is the building's icon (the original's highlight, `hfx0-0.dat` 1046-1054, in black, white on hover:
+it reads better than its dark icons 1075-1083, sprites.md; else its name), "?" (1055) for plans to discover, an empty slot for hidden ones; hover describes it. Right click on a tile flies the camera to the player's
 next built building of that kind (or camp fire), one after the other at each click (`own_places`, `next_step`).
 Shift + left click with people selected sends them in (`GameMap::send_into`, huts-and-training.md): into the
 player's buildings of that kind with room, spread evenly and nearest first (a training unit takes everyone, they
