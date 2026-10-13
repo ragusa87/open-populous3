@@ -82,7 +82,7 @@ pub struct TooltipModel {
 }
 
 impl TooltipModel {
-    /// Whether `other` differs at most by its bars' fills and blinking, updated in place (`update_bars`)
+    /// Whether `other` differs at most by its bars' fills and blinking, updated in place (`set_bars`)
     /// without drawing it again.
     pub fn same_layout(&self, other: &TooltipModel) -> bool {
         self.lines == other.lines && self.rows == other.rows && self.toggle == other.toggle && self.bars.iter().map(|b| (b.kind, b.fine.is_some())).eq(other.bars.iter().map(|b| (b.kind, b.fine.is_some())))
@@ -156,32 +156,19 @@ impl BarKind {
             BarKind::Prayer => Color::srgb(0.95, 0.8, 0.3),
             BarKind::Growth => Color::srgb(0.85, 0.25, 0.2),
             BarKind::Birth => Color::srgb(0.3, 0.8, 0.3),
-            BarKind::Training => Color::srgb(1.0, 0.85, 0.2),
+            BarKind::Training => crate::progress_bar::FILL,
         }
     }
 }
 
-/// The training bar's mana layer, under its overall fill.
-const MANA_LAYER: Color = Color::srgb(0.25, 0.5, 1.0);
-
 /// A progress bar: `fill` in thousandths, blinking while `blocked`. `fine` (value, max) draws the
-/// original's finer layer under the fill (`fine_fill`).
+/// original's finer layer under the fill (`progress_bar::fine_fill`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bar {
     pub kind: BarKind,
     pub fill: u16,
     pub blocked: bool,
     pub fine: Option<(u32, u32)>,
-}
-
-/// The finer layer of a bar `width` pixels wide filled `value / max` (pop3-rev-analysis.md "The panel's
-/// training bar"), 0 to 1: what the fill has beyond its last whole pixel, so it sweeps the whole width
-/// each time the fill moves by a pixel.
-pub fn fine_fill(value: u32, max: u32, width: u32) -> f32 {
-    if max == 0 {
-        return 0.0;
-    }
-    ((value as u64 * width as u64) % max as u64) as f32 / max as f32
 }
 
 /// How many slots each line of a row of `n` holds: lines of 10, but a row of 16 as two of 8.
@@ -519,7 +506,7 @@ impl Plugin for TooltipPlugin {
         app.init_resource::<IconImages>()
             .init_resource::<ShownBars>()
             .add_systems(Startup, (spawn_tooltip, load_sprites))
-            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, press_toggle, blink_bars, update_bars).in_set(crate::menu::Gameplay));
+            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, press_toggle, set_bars.before(crate::progress_bar::DrawBars)).in_set(crate::menu::Gameplay));
     }
 }
 
@@ -642,60 +629,29 @@ fn show_tooltip(
 
 /// Width of a vertical bar, height of a horizontal one, in pixels.
 const BAR_THICKNESS: f32 = 6.0;
-/// A bar's fill blinks this many times a second while blocked.
-const BLINK_HZ: f32 = 2.0;
 
-/// A filled part of the shown tooltip's bar `index` (`ShownBars`): its fill, or its finer layer.
+/// The shown tooltip's bar `index` (`ShownBars`).
 #[derive(Component)]
-struct BarFill {
-    index: usize,
-    fine: bool,
-    color: Color,
-}
+struct TooltipBar(usize);
 
-/// A bar: a dark track and its fill, vertical (filling upwards, as tall as the tooltip's content) or
-/// horizontal (filling to the right, as wide as the tooltip); a finer layer first, under the fill. Their
-/// sizes follow `ShownBars` (`update_bars`).
+/// A bar (`progress_bar`): vertical (filling upwards, as tall as the tooltip's content) or horizontal (filling to
+/// the right, as wide as the tooltip), its finer layer under the fill; kept up to date from `ShownBars` (`set_bars`).
 fn spawn_bar(parent: &mut ChildSpawnerCommands, index: usize, bar: Bar) {
-    let (track, fill) = if bar.kind.horizontal() {
-        (Node { height: px(BAR_THICKNESS), ..default() }, Node { position_type: PositionType::Absolute, left: px(0), top: px(0), bottom: px(0), width: px(0), ..default() })
-    } else {
-        (Node { width: px(BAR_THICKNESS), ..default() }, Node { position_type: PositionType::Absolute, left: px(0), right: px(0), bottom: px(0), height: px(0), ..default() })
+    let (shape, track) = match bar.kind.horizontal() {
+        true => (crate::progress_bar::ProgressBar::horizontal(bar.kind.color(), bar.fine.is_some()), Node { height: px(BAR_THICKNESS), ..default() }),
+        false => (crate::progress_bar::ProgressBar::vertical(bar.kind.color()), Node { width: px(BAR_THICKNESS), ..default() }),
     };
-    parent.spawn((track, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)), Pickable::IGNORE)).with_children(|t| {
-        if bar.fine.is_some() {
-            t.spawn((fill.clone(), BackgroundColor(MANA_LAYER), BarFill { index, fine: true, color: MANA_LAYER }, Pickable::IGNORE));
-        }
-        t.spawn((fill, BackgroundColor(bar.kind.color()), BarFill { index, fine: false, color: bar.kind.color() }, Pickable::IGNORE));
-    });
+    crate::progress_bar::spawn(parent, shape, track).insert(TooltipBar(index));
 }
 
-/// Sizes each bar's parts from `ShownBars`: the fill its share of the track, a finer layer its share of
-/// the track's laid-out width (`fine_fill`, whole pixels as the original's).
-fn update_bars(bars: Res<ShownBars>, mut parts: Query<(&BarFill, &ChildOf, &mut Node)>, tracks: Query<&ComputedNode>) {
-    for (part, parent, mut node) in &mut parts {
-        let Some(bar) = bars.0.get(part.index) else { continue };
-        let share = match (part.fine, bar.fine) {
-            (true, Some((value, max))) => {
-                let Ok(track) = tracks.get(parent.parent()) else { continue };
-                fine_fill(value, max, (track.size().x * track.inverse_scale_factor()).round() as u32) * 100.0
-            }
-            _ => bar.fill as f32 * 100.0 / game_core::vault::FULL as f32,
-        };
-        let size = if bar.kind.horizontal() { &mut node.width } else { &mut node.height };
-        if *size != percent(share) {
-            *size = percent(share);
+/// The shown tooltip's bars into their widgets.
+fn set_bars(bars: Res<ShownBars>, mut widgets: Query<(&TooltipBar, &mut crate::progress_bar::ProgressBar)>) {
+    for (index, mut widget) in &mut widgets {
+        let Some(bar) = bars.0.get(index.0) else { continue };
+        let fill = bar.fill as f32 / game_core::vault::FULL as f32;
+        if (widget.fill, widget.fine, widget.blocked) != (fill, bar.fine, bar.blocked) {
+            (widget.fill, widget.fine, widget.blocked) = (fill, bar.fine, bar.blocked);
         }
-    }
-}
-
-/// Blocked bars blink: their parts fade out and back in.
-fn blink_bars(time: Res<Time>, bars: Res<ShownBars>, mut parts: Query<(&BarFill, &mut BackgroundColor)>) {
-    let on = (time.elapsed_secs() * BLINK_HZ).fract() < 0.5;
-    for (part, mut color) in &mut parts {
-        let blocked = bars.0.get(part.index).is_some_and(|b| b.blocked);
-        let shown = if blocked && !on { part.color.with_alpha(0.2) } else { part.color };
-        color.set_if_neq(BackgroundColor(shown));
     }
 }
 
@@ -1016,15 +972,6 @@ mod tests {
     }
 
     #[test]
-    fn the_fine_layer_is_the_fill_beyond_its_last_whole_pixel() {
-        assert_eq!(fine_fill(35, 3500, 100), 0.0, "exactly one pixel");
-        assert!((fine_fill(52, 3500, 100) - 0.4857).abs() < 1e-3);
-        assert_eq!(fine_fill(0, 3500, 100), 0.0);
-        assert_eq!(fine_fill(10, 0, 100), 0.0, "nothing to make");
-        assert!(fine_fill(u16::MAX as u32, u16::MAX as u32 - 1, u32::MAX) < 1.0, "no overflow");
-    }
-
-    #[test]
     fn a_training_unit_making_someone_has_the_double_bar() {
         let mut map = GameMap::sandbox_buildings();
         let id = map.add_building(game_core::building::Building::new(BuildingKind::WarriorTraining, crate::units::PLAYER, 40 * 512, 90 * 512, 0));
@@ -1040,7 +987,7 @@ mod tests {
         assert!(BarKind::Training.horizontal());
         assert!(![BarKind::Prayer, BarKind::Growth, BarKind::Birth].iter().any(|k| k.horizontal()));
         assert_ne!(BarKind::Growth.color(), BarKind::Birth.color(), "a house's two bars apart");
-        assert_ne!(BarKind::Training.color(), MANA_LAYER, "the training bar's two fills apart");
+        assert_ne!(BarKind::Training.color(), crate::progress_bar::FINE, "the training bar's two fills apart");
         let map = GameMap::sandbox_worship();
         assert_eq!(totem_model(&map, 0, &[]).unwrap().bars[0].kind, BarKind::Prayer);
         assert!(tree_model(&map, 0).is_none_or(|m| m.bars.is_empty()), "a tree has no bar");

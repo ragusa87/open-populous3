@@ -31,6 +31,7 @@ mod nature;
 mod object_scale;
 mod original_models;
 mod procedural_theme;
+mod progress_bar;
 mod range_ring;
 mod sim_time;
 mod sites;
@@ -109,7 +110,7 @@ fn main() {
             (camera_debug::CameraDebugPlugin, debug_overlay::DebugOverlayPlugin),
             object_scale::ObjectScalePlugin,
             chimney::ChimneyPlugin,
-            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin),
+            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin),
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();
