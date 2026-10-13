@@ -102,8 +102,8 @@ The player's units at a glance, as a matrix in the panel's width (204 px), and a
   player's colour; hovering one names the kind).
 - Rows, in three groups set a little apart:
   1. Selected: the player's units selected now.
-  2. Idle, Housed (inside a hut), Working (on any task: building, fetching or carrying wood, cutting, training,
-     praying at a totem or vault...) [ours: what counts as working].
+  2. Idle, Housed (inside a hut), Working (on any task: building, fetching or carrying wood, cutting, training or
+     queueing at a training hut, praying at a totem or vault...) [ours: what counts as working].
   3. In boat, In balloon: aboard a vehicle (once vehicles exist).
   With the original files each label is the row's icon, `hfx0-0.dat` 1084 Selected, 1085 Idle, 1086 Housed,
   1087 Working, 1088 In balloon, 655 In boat (sprites.md); the text labels otherwise (`--no-original`).

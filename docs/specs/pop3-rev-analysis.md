@@ -32,9 +32,9 @@ so a live measurement may run on it with the addresses translated.
   (100 wood, one of our pieces) moves at once. A wood pile takes 3 turns. See "Wood rules".
 - **A hut has two independent counters** [exe]: breeding (a brave at the door, slower as the tribe grows) and
   growth (the next size, only with people inside, independent of population). See "Huts: breeding and growth".
-- **Training deletes the trainee and creates a new person** [exe]: the hut stores mana taken from each income (at
-  most `cost / 32` per pass, before the spells), and when the store reaches the batch cost every occupant is
-  replaced at once by a new unit of the hut's kind. See "Training huts".
+- **Training deletes the trainee and creates a new person** [exe]: a training building (not a house) stores mana
+  taken from each income (at most `cost / 32` per pass, before the spells), and when the store reaches the cost
+  the trainee is replaced by a new unit of the building's kind. See "Training buildings".
 - **Prayer gauges fill in `PrayTime / 3` seconds at full count** [exe]: one `PrayTime` unit is 4 turns, and each
   missing prayer slows the gauge sharply (`C² / (C − n + 1)²`). See "Prayer at triggers".
 - **A spell is a recipe of reusable components** [exe]: the shaman fires a shot, and on arrival the spell spawns
@@ -121,8 +121,8 @@ Example: 20 busy braves, 4 idle warriors and the shaman make 300 + 16 + 30 = 346
 | above 361 500 | amount / 240 |
 
 ### Distribution
-0. Training huts take their share first: up to half of `incoming`, at most `cost / 32` each (see "Training
-   huts"); huts not training give their store back, 100 per turn.
+0. Training buildings take their share first: up to half of `incoming`, at most `cost / 32` each (see
+   "Training buildings"); those not training give their store back, 100 per turn.
 1. `incoming` charges the available spells (bitmask in the level header, per tribe): each `charge[spell]` is
    decreased by what it receives, clamped at 0. When a charge is filled, the loop runs again. The mana is shared
    evenly between the learned, unblocked spells that are not full (0x41AD70).
@@ -140,11 +140,12 @@ So spells charge first and only the surplus is banked: the bar fills spell by sp
 - Casting: `incoming -= cost` through `add_mana`, so it reaches the bank at the next distribution, unless the
   tribe's "free spells" flag is set. Costs are `SPELL_<X>` (spells.md "Original balance").
 - A tribe command adds a signed amount, and a PopScript opcode adds a script expression (ai-scripts.md).
-- Training huts hold the mana they collect (+0x98, see "Training huts"); 0x41AE60 sums it over the tribe's
-  training huts (used by the shaman death loss), and a controller type 1 tribe gets it back when a training ends.
-- The bank (+0x94D) is written in the distribution only on the controller type 1 path (0x41AD1C); the other
-  tribes' path ends with `incoming = 0` (0x41AD57) after the spells and huts. How their surplus reaches the bank is
-  not traced.
+- Training buildings hold the mana they collect (+0x98, see "Training buildings"); 0x41AE60 sums it over the
+  tribe's training buildings (used by the shaman death loss), and a controller type 1 tribe gets it back when a
+  training ends.
+- The bank (+0x94D) is written in the distribution only on the controller type 1 path (0x41AD1C); the other tribes'
+  path ends with `incoming = 0` (0x41AD57) after the spells and training buildings. How their surplus reaches the
+  bank is not traced.
 
 ### Shaman death
 - `base = bank`; for a human tribe (controller type 2), `base = needed + stored building mana`.
@@ -274,8 +275,9 @@ Time to start growing, at 12 turns per second:
 | Turns | 4800 | 2400 | 1600 | 960 | 688 |
 | Seconds | 400 | 200 | 133 | 80 | 57 |
 
-## Training huts [exe]
-Building types 5-9 (type flags +0x48 bit 0) train the people inside into the type's output person (+0x31):
+## Training buildings [exe]
+Training buildings (building types 5-9, type flags +0x48 bit 0; not houses, types 1-3) train the people inside
+into the type's output person (+0x31):
 
 | Building type | Output | Slots (+0x20) | Cost constant (human / computer) |
 |---|---|---|---|
@@ -285,13 +287,18 @@ Building types 5-9 (type flags +0x48 bit 0) train the people inside into the typ
 | 8 firewarrior training | 6 firewarrior | 5 | `HUMAN_TRAIN_MANA_SWARR` 4000 / 1000 |
 | 9 reconversion | 2 brave | 1 | none (person type 2 has no cost: free) |
 
+Trainees go in one at a time, from an unlimited queue in front of the building [player]: the 5 slots are the
+building record's capacity, and the queue logic that admits one person is not traced. The routine below loops
+over all the slots, but in play it finds one trainee.
+
 Values are the file's; the exe defaults of `HUMAN_`/`CP_TRAIN_MANA_*` and `TRAIN_MANA_BAND_*` are all 0.
 
 ### The trainee is replaced, not changed
-Training never changes a person's type. When the hut has the mana, every occupant that is not already of the
-output type is deleted (`remove_person_from_hut` 0x407490, then 0x436CA0, then `delete_unit` 0x4EF180), and new
-persons are allocated (`alloc_unit(1, type, tribe, door)`, 0x406190): new unit ids, new records with the type's
-full life, at the door. So nothing of the old person (life, statuses, kills) carries over, except:
+Training never changes a person's type. When the training building has the mana, every occupant that is not
+already of the output type is deleted (`remove_person_from_hut` 0x407490, then 0x436CA0, then `delete_unit`
+0x4EF180), and new persons are allocated (`alloc_unit(1, type, tribe, door)`, 0x406190): new unit ids, new
+records with the type's full life, at the door. So nothing of the old person (life, statuses, kills) carries
+over, except:
 - its queued orders: if an occupant has queued command groups (+0x8B, 0x43B120), they are given to the new units
   (0x436D00); otherwise each new unit gets a fresh group with one move order (kind 3) to a point one cell
   (0x200) in front of the door (0x436C20, 0x438730);
@@ -308,34 +315,34 @@ cost   = TRAIN_MANA[output] * n * BAND%[count[output]] / 100         # min(cost,
 TRAIN_MANA = HUMAN_TRAIN_MANA_* if tribe controller (+0xC1F) == 2 else CP_TRAIN_MANA_*
 count[output] = the tribe's people of the output type (tribe +0xA27, rebuilt each turn)
 ```
-- `0x41B0C0` "train_cost(hut, &cost, type, n)": returns `stored >= cost`.
+- `0x41B0C0` "train_cost(building, &cost, type, n)": returns `stored >= cost`.
 - Bands (`TRAIN_MANA_BAND_*`, percent constants): 0-3 → 100 %, 4-7 → 125 %, 8-11 → 150 %, 12-15 → 175 %,
   16-20 → 200 %, 21+ → 250 %, by the number of that specialist the tribe already has.
 - File `CONV_<PERSON>` are all 1, so `n` is the number of occupants not already of the output type and `extra`
-  is 0: one brave in, one specialist out. With the exe defaults (brave 1, warrior / preacher / spy 3, firewarrior 6) it
-  would take 3 braves for a warrior and 6 for a firewarrior.
-- The cost is for the whole batch: 3 braves in a warrior hut with 2 warriors in the tribe cost 3 × 3500 = 10 500.
+  is 0: one brave in, one specialist out. With the exe defaults (brave 1, warrior / preacher / spy 3, firewarrior
+  6) it would take 3 braves for a warrior and 6 for a firewarrior.
+- With one trainee inside, `n` is 1: a human's warrior costs 3500 while the tribe has 0-3 warriors, 4375 with 4-7.
 - It is recomputed when someone enters (0x407150) and every 16 turns (`class_counter & 0xF == 0`) while training.
 
-### Mana flows into the hut, then is spent at once
-The hut has its own store (`stored` u16 +0x98) and a target (`cost` u16 +0x96). Training is on while bit 0x80 of
-+0x9C is set: set on entry when `n > 0`, cleared by `remove_person_from_hut` (0x4075F1) and on entry when
-`n == 0` (0x4073FC).
+### Mana flows into the building, then is spent at once
+The training building has its own store (`stored` u16 +0x98) and a target (`cost` u16 +0x96). Training is on
+while bit 0x80 of +0x9C is set: set on entry when `n > 0`, cleared by `remove_person_from_hut` (0x4075F1) and on
+entry when `n == 0` (0x4073FC).
 ```text
 distribution (every turn, per tribe, 0x41A590), before the spells:
-    for each training hut (type flag bit 0) of the tribe:
+    for each training building (type flag bit 0) of the tribe:
         if not training: give min(stored, 100) back to incoming          # 100 per turn, until empty
         else: list it
     share = (incoming / 2) / listed                                       # half of incoming, split evenly
-    per listed hut: give = min(share, cost / 32, cost - stored)           # negative when stored > cost
-                    stored += give; incoming -= give
-                    if give <= 32: +0x14 bit 0x1000 (probably "short of mana" for the panel)
+    per listed building: give = min(share, cost / 32, cost - stored)      # negative when stored > cost
+                         stored += give; incoming -= give
+                         if give <= 32: +0x14 bit 0x1000 (probably "short of mana" for the panel)
     ... spells charged from incoming (see Distribution) ...
-    if no spell needs mana: second pass, over the huts with stored < cost,
+    if no spell needs mana: second pass, over the training buildings with stored < cost,
         share = incoming / count, give = min(share, cost / 32, cost - stored)
-    if incoming < 0 (casts): huts give back up to -share each
+    if incoming < 0 (casts): training buildings give back up to -share each
 
-training hut, every turn (0x405B80):
+training building, every turn (0x405B80):
     if training and stored >= cost:
         stored = cost; make n specialists and `extra` braves (see above); delete the converted occupants
         unless an occupant is a ghost:
@@ -345,16 +352,36 @@ training hut, every turn (0x405B80):
 - So the mana is taken along the training, from each income, never from the bank. Ghost trainees still wait
   for a full store but do not empty it.
 - Cancelling (everyone leaves): the stored mana goes back to the tribe at 100 per turn; nothing is lost.
-- Time: incoming is non-zero only on income turns (every 16 turns) and reservoir turns, and a hut gets at most
-  `cost / 32` per pass. So at least 32 income turns, 512 turns (43 s), while spells are still charging; 16 income
-  turns, 256 turns (21 s), when every spell is full and income is large enough. A slower income (half of it
-  shared between huts) stretches it. Estimate, not measured.
-- Worked example, estimate: a human with 432 income per 16 turns and one hut training a warrior (3500): the first
-  pass gives min(216, 109) = 109 per income, so 33 incomes, 528 turns (44 s), while spells charge.
+- Time: incoming is non-zero only on income turns (every 16 turns) and reservoir turns, and a training building
+  gets at most `cost / 32` per pass. So at least 32 income turns, 512 turns (43 s), while spells are still
+  charging; 16 income turns, 256 turns (21 s), when every spell is full and income is large enough. A slower income
+  (half of it shared between training buildings) stretches it. Estimate, not measured.
+- Worked example, estimate: a human with 432 income per 16 turns and one warrior training building at work (3500):
+  the first pass gives min(216, 109) = 109 per income, so 33 incomes, 528 turns (44 s), while spells charge.
 - `CONV_TIME_TEMPLE/SPY/WARRIOR/SUPER/RECONV` (building table +0x2C, exe 32) have no reader found. The file's
   `CONV_TEMPLE`, `CONV_SPY`, `CONV_WARRIOR`, `CONV_SUPER` (4000) and `CONV_RECONV` (128) match no exe constant
   name, so they are probably ignored.
 - A shaman entering a full building pushes one occupant out (0x4071AD).
+
+### The panel's training bar
+The building panel (`draw_ui_panel` 0x504BC0, switch on the panel kind: training buildings are kind 5, case
+0x504FDD) shows the building's slot icons and one progress bar:
+```text
+if building.training (+0x9C bit 0x80):
+    value = stored << 12, max = cost << 12                # +0x98, +0x96: the bar is stored / cost
+    blocked = building +0x14 bit 0x1000                   # set when its last share was 32 or less
+else: no bar
+```
+- The bar (0x505604): a 5 px tall box as wide as the panel's content (the slot icons row), filled with palette
+  0x9A, edged with 0x9D (top, left) and 0x96 (bottom, right), the health bar's colours. The fill is 3 px tall.
+- Fill: `value × W / max` pixels in the player's tribe colour (0x5A89CC + 5 × tribe), W the inner width.
+- When `max` is far above `W`, finer layers are drawn first (colours 0xF0 − k, up to 0xEF): layer periods
+  `p, p × W, ...` below `max`, each `(value mod p) × W / p` long. They run ahead of the main fill, so the bar
+  visibly moves even when one income adds less than a pixel (reading of 0x50575A-0x505817, not seen in game).
+- Blocked: the fill is drawn only on the frames where the global blink 0x897989 is set, so the bar blinks while
+  the building gets 32 mana or less per pass: a cost below 1056 (any computer player, 1000), or a small income
+  split between many training buildings and spells.
+- The bar jumps on income turns (every 16 turns) and stays still between them.
 
 ## Prayer at triggers [exe]
 Totems, stone heads and other prayer places are driven by the level's trigger on their cell (class 6, type 6;
@@ -1205,13 +1232,14 @@ low health (+0x14 bit 0x1000, the sparkles) = life <= max_life / 4
   somewhere else, not found yet. Brave 15 and specialists 4 happen to equal the busy and idle defaults.
 - spells.md "Charges": the charge count is read from `SP_1_OFF_MAX`, so `SpellKind::max_charges()` should read it
   rather than derive it from the cost.
-- TODO "Mana", "split between spells and training": training huts take their part of each income first (up to half,
-  `cost / 32` per hut and pass), then the spells; training never takes from the bank. A cancelled training gives
-  its store back at 100 per turn.
-- huts-and-training.md rule 5 ("transformed into the hut's kind, same unit"): the original deletes the occupant
-  and allocates a new person (new id, full life), carrying only queued orders and the ghost flag.
-- huts-and-training.md rule 3 ("one at a time"): a training hut has 5 slots and converts everyone inside at once,
-  for the whole batch's cost. Whether people walk in one by one is not traced.
+- TODO "Mana", "split between spells and training": training buildings take their part of each income first (up to
+  half, `cost / 32` per building and pass), then the spells; training never takes from the bank. A cancelled
+  training gives its store back at 100 per turn.
+- huts-and-training.md rule 5 ("transformed into the hut's kind, same unit", hut meaning the training building):
+  the original deletes the occupant and allocates a new person (new id, full life), carrying only queued orders and
+  the ghost flag.
+- huts-and-training.md rules 2-3 (unlimited queue, one at a time) match the game [player]; the exe's 5 slots are
+  the record's capacity, the queue that admits one person is not traced.
 - huts-and-training.md rule 4 (cost / duration per update, paused without mana): the original has no duration;
   the time is the cost filled at `cost / 32` per income (16 turns), 256-512 turns (21-43 s) at best. In our
   ticks (1 tick = 1 turn): a share every 16 ticks.
@@ -1324,9 +1352,10 @@ low health (+0x14 bit 0x1000, the sparkles) = life <= max_life / 4
   what option flag 0x89D17C bit 0x40 is (no kick, no knockback),
   the meaning of pre-fight mode 2, the ground test of a fight's place (0x51E4B0), the attacker's sub-state 8 when
   its target is already in a pre-fight, and the firewarriors' ranged attack (attack-order sub-states 10, 11).
-- Training huts: whether people enter one at a time (5 slots), the meaning of `+0x9D` bit 0x4 and `+0x7E` set at
-  the end, `+0x14` bit 0x1000 (set when a hut receives 32 or less), the reconversion building (type 9), and how
-  long a training really takes (live: watch +0x96/+0x98 of a warrior hut per turn).
+- Training buildings: the queue in front of the door (which code admits one trainee at a time), the meaning of
+  `+0x9D` bit 0x4 and `+0x7E` set at the end, `+0x14` bit 0x1000 (set when a training building receives 32 or
+  less), the reconversion building (type 9), and how long a training really takes (live: watch +0x96/+0x98 of a
+  warrior training building per turn).
 - What sets `turns_per_sec` to 14, and whether game options or multiplayer change it.
 - Which field holds the gather sub-state: +0xA8 stays 0 while chopping, so the handler's state byte is elsewhere.
 - What `TREE_DORMANT_TIME` does (maybe the time before a cut tree regrows or a new tree appears).
@@ -1367,13 +1396,14 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x41A590 | "tribe_distribute_mana"; its refill loop at 0x41ACCB |
 | 0x41AEB0 | charge reset (callers 0x44139B, 0x50AFAC) |
 | 0x4C2D50 | `charges(spell)`: `SP_1_OFF_MAX` |
-| 0x41AE60 | sum of stored training hut mana |
-| 0x406218 | adds a training hut's stored mana to a type 1 tribe |
-| 0x405B80 | "training_hut_turn": cost, conversion (delete occupants, alloc new persons) |
-| 0x41B0C0 | "train_cost(hut, &cost, type, n)": cost by band, returns `stored >= cost` |
+| 0x41AE60 | sum of stored training building mana |
+| 0x406218 | adds a training building's stored mana to a type 1 tribe |
+| 0x405B80 | "training_building_turn": cost, conversion (delete occupants, alloc new persons) |
+| 0x41B0C0 | "train_cost(building, &cost, type, n)": cost by band, returns `stored >= cost` |
 | 0x407150 | "enter_building(person, building)": slot, training flag, cost |
-| 0x40BBE0 | recomputes a training hut's cost |
+| 0x40BBE0 | recomputes a training building's cost |
 | 0x4EF180 | "delete_unit" |
+| 0x504BC0 | `draw_ui_panel`: building panel, training bar at 0x504FDD (values) and 0x505604 (drawing) |
 | 0x436C20 / 0x436D00 / 0x438730 | new command group / give a group to a unit / add an order to a group |
 | 0x51A2A0 | a person's attack order: reach, then join a fight or start a pre-fight |
 | 0x51E150 | "start_pre_fight(attacker, target, mode)" |
@@ -1475,8 +1505,8 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
 - Fight links: controller id +0x9D (pre-fight or fight), state saved on entering one +0x7D, fight opponent +0x72.
 - Fields: `unit_class` +0x2A, `unit_type` +0x2B, `state` +0x2C, `state_2` +0x2D, `tribe_index` +0x2F, `unit_obj`
   (model or sprite) +0x33, `pos` +0x3D, last attacker's tribe +0xB0.
-- Training hut fields: occupants +0x86 (6 × u16 unit ids, the type's +0x20 used), training cost +0x96 (u16),
-  stored mana +0x98 (u16), training on +0x9C bit 0x80, next hut in the distribution list +0xA0.
+- Training building fields: occupants +0x86 (6 × u16 unit ids, the type's +0x20 used), training cost +0x96 (u16),
+  stored mana +0x98 (u16), training on +0x9C bit 0x80, next training building in the distribution list +0xA0.
 - Wood fields: a person's state timer +0x70 and carried wood +0x78, a tree's wood left +0x84, a shape's wood +0x96,
   and +0xA4 for the building types that hold wood. The gather handler switches on a byte read as +0xA8, but that field stays 0 while
   chopping (measured), so the offset is unconfirmed.

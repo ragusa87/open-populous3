@@ -120,12 +120,14 @@ A training hut makes no mana [community]. As in the game (checked by someone who
    map, selectable and orderable as usual. When the head goes in, or a queued unit is given another order and
    leaves, everyone behind it moves up one spot.
 3. **One at a time**: the head of the queue walks in by the door and is trained for a while. The hut's tooltip
-   shows the training progress, and the unit inside can be selected.
-4. **Mana** [ours]: taken along the training, a share every update (cost / duration). Without enough
-   mana for the share, training pauses. Mana spent is lost if the training is cancelled. Later: the training speed
-   may depend on the mana available. The original [exe] has no duration: the hut stores mana taken from each
-   income before the spells (at most `cost / 32` per income), never from the bank, trains when the store reaches
-   the cost, and gives the store back at 100 per turn when cancelled (pop3-rev-analysis.md "Training huts").
+   shows the training progress, and the unit inside can be selected. In the original [exe] the bar is the training
+   building's stored mana over its cost, blinking while it is short of mana (pop3-rev-analysis.md "The panel's
+   training bar").
+4. **Mana** [ours]: taken along the training, a share every update (cost / duration). Without enough mana for the
+   share, training pauses. Mana spent is lost if the training is cancelled. Later: the training speed may depend on
+   the mana available. The original [exe] has no duration: the training building stores mana taken from each income
+   before the spells (at most `cost / 32` per income), never from the bank, trains when the store reaches the cost,
+   and gives the store back at 100 per turn when cancelled (pop3-rev-analysis.md "Training buildings").
 5. **Done**: the unit is transformed into the hut's kind (same unit, new kind: a brave goes in, a firewarrior
    comes out). The original [exe] deletes the trainee and creates a new person at the door (new id, full life),
    keeping only its queued orders and the ghost flag. A small room by the door lets it come out while the next in
@@ -136,7 +138,8 @@ A training hut makes no mana [community]. As in the game (checked by someone who
 7. **Damage**: when the hut is damaged, the whole queue is cancelled (its units idle where they stand) and the
    unit inside comes out unchanged. Later, with combat and spells: in a fight the unit inside comes out to fight,
    hit by a spell it is handled like any unit.
-8. While inside, a unit counts as busy for mana (rule 7) [ours].
+8. While inside, a unit counts as busy for mana (rule 7) [ours]. In the people counts (headcount, ui-and-editor.md)
+   the trainee and every queued unit are Working, never Idle [player].
 
 ## Balance and game turns
 The original counts in game turns, 12 per second (pop3-rev-analysis.md "Turns and timing"); one of our ticks is one turn.
@@ -171,5 +174,4 @@ time to train one warrior and its mana, how fast the red bar fills.
 - Huts: what the population band is a percentage of (the tribe's cap assumed, or 200); what exactly counts as busy
   (idle people make 4 [exe]); the red bar's speed and occupant bonus; the wood held per hut size; how many braves fetch and build when a hut grows (only those inside?); what damage really does to a growing hut; whether idle braves house
   themselves, from how far, after how long.
-- Training: whether the original lets people in one at a time (its training huts have 5 slots and convert all of
-  them at once, for the whole batch's cost), and the measured training time.
+- Training: the measured training time.
