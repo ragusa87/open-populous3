@@ -291,6 +291,7 @@ impl GameMap {
     ///   column, west to east.
     /// - East: free ground to build on, with braves, a pile of wood and a few trees, a low mound
     ///   (north-east of the braves) to try flattening on, and a camp fire three of the braves go round.
+    /// - Further south: a row of built buildings the client blows up in a loop (`SANDBOX_BLASTS`).
     pub fn sandbox_buildings() -> Self {
         const C: i32 = MAP_SIZE as i32 / 2;
         const ISLAND: i32 = 48;
@@ -304,7 +305,7 @@ impl GameMap {
         }
         terrain.raise((C + 26, C - 6), 3, 90);
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap::sandbox_bare("Sandbox: buildings", terrain, sites).with_shamans();
+        let mut map = GameMap::sandbox_bare(SANDBOX_BUILDINGS, terrain, sites).with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let place = |owner: u8, kind: BuildingKind, (x, z): (u16, u16), facing: u8| Building::new(kind, owner, x - 256, z - 256, facing);
         for model in 1..=19u8 {
@@ -323,6 +324,10 @@ impl GameMap {
                 let (x, z) = at(-22 + 5 * col as i32, -7 - 5 * row as i32);
                 map.add_building(Building { x: x - 256, z: z - 256, ..state });
             }
+        }
+        for (i, &kind) in SANDBOX_BLASTS.iter().enumerate() {
+            let (x, z) = sandbox_blast_corner(i);
+            map.add_building(Building::new(kind, 0, x, z, 0));
         }
         for n in 0..8 {
             map.spawn(0, UnitKind::Brave, at(20 + n % 4, -2 + 2 * (n / 4)));
@@ -896,6 +901,28 @@ impl GameMap {
         self.units.retain(|u| !gone.contains(&u.id));
         dirty
     }
+}
+
+/// The buildings sandbox's name.
+pub const SANDBOX_BUILDINGS: &str = "Sandbox: buildings";
+
+/// The buildings sandbox's row blown up in a loop by the client (its explosion is drawn only), west to east.
+pub const SANDBOX_BLASTS: [BuildingKind; 9] = [
+    BuildingKind::Hut { size: 1 },
+    BuildingKind::Hut { size: 2 },
+    BuildingKind::Hut { size: 3 },
+    BuildingKind::SpyTraining,
+    BuildingKind::WarriorTraining,
+    BuildingKind::FirewarriorTraining,
+    BuildingKind::BoatHut,
+    BuildingKind::AirshipHut,
+    BuildingKind::Prison,
+];
+
+/// Where the `i`-th of `SANDBOX_BLASTS` stands (its corner, as `Building::x`, `z`).
+pub fn sandbox_blast_corner(i: usize) -> (u16, u16) {
+    let c = MAP_SIZE as i32 / 2;
+    (((c - 20 + 5 * i as i32) * 512) as u16, ((c + 27) * 512) as u16)
 }
 
 /// The rows of marked people in the units sandbox, north to south: what each row's people carry. Low health is
@@ -1998,7 +2025,7 @@ mod tests {
     fn sandbox_buildings_has_every_model_on_land() {
         let m = GameMap::sandbox_buildings();
         let models = m.buildings.iter().filter(|b| b.owner == 0 && b.stage() == crate::building::Stage::Built && b.inside == 0 && b.shaking == 0);
-        assert_eq!(models.count(), 19 + crate::build_book::BUILDABLE.len());
+        assert_eq!(models.count(), 19 + crate::build_book::BUILDABLE.len() + SANDBOX_BLASTS.len());
         assert!(m.buildings.iter().any(|b| b.owner == 1));
         assert!(!m.wood.is_empty(), "some wood to look at");
         for w in &m.wood {

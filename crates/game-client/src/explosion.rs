@@ -2,7 +2,7 @@
 //! spinning, out from the middle and up, fall back, lie on the ground a moment and shrink away. Started by a
 //! `BuildingExploded` message while the building's view is still drawn: its meshes are copied, so the explosion
 //! looks like whatever drew the building. Poses follow simulation time from the start tick, seeded by the
-//! building's id.
+//! building's id. In the buildings sandbox, its row of `SANDBOX_BLASTS` blows up in a loop.
 
 use crate::buildings::{DrawnBuilding, RespawnBuildings};
 use crate::flame::Flame;
@@ -13,8 +13,10 @@ use crate::units::SimClock;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
-use game_core::building::BuildingId;
-use game_core::time::Tick;
+use crate::world::CurrentMap;
+use game_core::building::{Building, BuildingId};
+use game_core::map::{sandbox_blast_corner, GameMap, SANDBOX_BLASTS, SANDBOX_BUILDINGS};
+use game_core::time::{Tick, Ticks};
 
 /// Seconds from the blast until the last polygon is gone.
 pub const DURATION: f32 = 3.0;
@@ -28,6 +30,8 @@ const OUT_SPEED: (f32, f32) = (0.6, 1.4);
 const UP_SPEED: (f32, f32) = (2.5, 4.0);
 /// Spin, radians per second: the first plus up to the second.
 const SPIN: (f32, f32) = (4.0, 10.0);
+/// In the sandbox loop, how long the row stands between two explosions.
+const STANDING: Ticks = Ticks::secs(2);
 
 /// The building `building` blows up at `start`.
 #[derive(Message, Clone, Copy, Debug)]
@@ -63,7 +67,8 @@ pub struct ExplosionPlugin;
 impl Plugin for ExplosionPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<BuildingExploded>()
-            .add_systems(Update, (start_explosions.before(RespawnBuildings), fly));
+            .add_systems(Update, (sandbox_loop, start_explosions.before(RespawnBuildings)).chain())
+            .add_systems(Update, fly);
     }
 }
 
@@ -249,6 +254,50 @@ fn fly(
     }
 }
 
+/// The buildings sandbox's row blown up in a loop, by index; empty on any other map.
+pub fn blast_row(map: &GameMap) -> Vec<usize> {
+    if map.name != SANDBOX_BUILDINGS {
+        return Vec::new();
+    }
+    let spots: Vec<_> = SANDBOX_BLASTS.iter().enumerate().map(|(i, &kind)| (kind, sandbox_blast_corner(i))).collect();
+    (0..map.buildings.len()).filter(|&i| spots.contains(&(map.buildings[i].kind, (map.buildings[i].x, map.buildings[i].z)))).collect()
+}
+
+/// The sandbox loop: the row blown up (removed, its explosion drawn) once it has stood `STANDING`, built again
+/// whole (new ids: each round flies its own way) once the explosion is over.
+#[derive(Default)]
+struct Round {
+    game: u32,
+    next: Option<Tick>,
+    blown: Vec<Building>,
+    since: Tick,
+}
+
+fn sandbox_loop(mut map: ResMut<CurrentMap>, now: Res<SimNow>, clock: Res<SimClock>, mut round: Local<Round>, mut exploded: MessageWriter<BuildingExploded>) {
+    if round.game != clock.game {
+        *round = Round { game: clock.game, ..default() };
+    }
+    if round.blown.is_empty() {
+        let next = *round.next.get_or_insert(now.tick + STANDING);
+        let row = blast_row(&map.0);
+        if now.secs_since(next) < 0.0 || row.is_empty() {
+            return;
+        }
+        round.blown = row.iter().map(|&i| map.0.buildings[i].clone()).collect();
+        round.since = now.tick;
+        for b in &round.blown {
+            exploded.write(BuildingExploded { building: b.id, start: now.tick });
+        }
+        let gone: Vec<BuildingId> = round.blown.iter().map(|b| b.id).collect();
+        map.0.buildings.retain(|b| !gone.contains(&b.id));
+    } else if now.secs_since(round.since) > DURATION {
+        for b in std::mem::take(&mut round.blown) {
+            map.0.add_building(b);
+        }
+        round.next = Some(now.tick + STANDING);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,6 +305,15 @@ mod tests {
     fn quad_and_triangle() -> MeshData {
         let positions = vec![[0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [1.0, 2.0, 0.0], [0.0, 2.0, 0.0], [3.0, 0.0, 0.0], [4.0, 0.0, 0.0], [3.0, 0.0, 1.0]];
         MeshData { normals: vec![[0.0, 0.0, 1.0]; 7], uvs: vec![[0.0; 2]; 7], indices: vec![0, 1, 2, 0, 2, 3, 4, 5, 6], positions, colors: Vec::new() }
+    }
+
+    #[test]
+    fn the_sandbox_row_is_found_on_the_sandbox_only() {
+        let map = GameMap::sandbox_buildings();
+        let row = blast_row(&map);
+        assert_eq!(row.iter().map(|&i| map.buildings[i].kind).collect::<Vec<_>>(), SANDBOX_BLASTS);
+        assert!(row.iter().all(|&i| map.buildings[i].stage() == game_core::building::Stage::Built));
+        assert!(blast_row(&GameMap::sandbox_units()).is_empty());
     }
 
     #[test]
