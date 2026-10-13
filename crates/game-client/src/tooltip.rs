@@ -247,9 +247,18 @@ pub fn totem_model(map: &GameMap, i: usize, selected: &[UnitId]) -> Option<Toolt
 }
 
 /// What `target` shows; None when it has nothing to show.
+/// Whether the thing `target` points at is still on `map` (it may have been removed, or the map replaced).
+pub fn exists(map: &GameMap, target: Target) -> bool {
+    match target {
+        Target::Building(i) => i < map.buildings.len(),
+        Target::Tree(i) => i < map.trees.len(),
+        Target::Totem(i) => i < map.totems.len(),
+    }
+}
+
 fn model_of(map: &GameMap, target: Target, selected: &[UnitId], revealed: bool) -> Option<TooltipModel> {
     match target {
-        Target::Building(i) => (i < map.buildings.len()).then(|| building_model(map, i, selected, revealed)),
+        Target::Building(i) => Some(building_model(map, i, selected, revealed)),
         Target::Tree(i) => tree_model(map, i),
         Target::Totem(i) => totem_model(map, i, selected),
     }
@@ -513,11 +522,13 @@ fn show_tooltip(
     let Ok((entity, interaction, computed, mut node, mut vis)) = tooltip.single_mut() else { return };
     let now = time.elapsed_secs();
     let target = match hovered.0.filter(|_| spell.0.is_none()) {
-        Some(crate::hover::HoverTarget::Building(i)) if i < map.0.buildings.len() => Some(Target::Building(i)),
-        Some(crate::hover::HoverTarget::Tree(i)) if i < map.0.trees.len() => Some(Target::Tree(i)),
-        Some(crate::hover::HoverTarget::Totem(i)) if i < map.0.totems.len() => Some(Target::Totem(i)),
+        Some(crate::hover::HoverTarget::Building(i)) => Some(Target::Building(i)),
+        Some(crate::hover::HoverTarget::Tree(i)) => Some(Target::Tree(i)),
+        Some(crate::hover::HoverTarget::Totem(i)) => Some(Target::Totem(i)),
         _ => None,
-    };
+    }
+    .filter(|&t| exists(&map.0, t));
+    state.shown = state.shown.filter(|&t| exists(&map.0, t));
     if target != state.hovered_since.0 {
         state.hovered_since = (target, now, false);
     }
@@ -751,6 +762,17 @@ mod tests {
 
     fn icons(row: &[Slot]) -> Vec<Icon> {
         row.iter().map(|s| s.icon).collect()
+    }
+
+    #[test]
+    fn a_removed_thing_no_longer_exists() {
+        let mut map = GameMap::sandbox_buildings();
+        let last = map.buildings.len() - 1;
+        assert!(exists(&map, Target::Building(last)));
+        map.buildings.pop();
+        assert!(!exists(&map, Target::Building(last)));
+        assert!(!exists(&map, Target::Tree(map.trees.len())));
+        assert!(!exists(&map, Target::Totem(map.totems.len())));
     }
 
     #[test]
