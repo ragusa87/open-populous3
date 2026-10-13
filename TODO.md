@@ -119,7 +119,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Challenge (combat.md "Challenge"): the target facing the attacker and its taunts (client, 1 in 8 per turn while waiting), ground sliding instead of `SHOVE_LIFT`.
 - [ ] Fight poses in the generated (CC0) unit sheets: strike, trade, kick, reel, shoved (`Pose::fallback` stands in: idle, fall).
 - [ ] Spotting (combat.md "Spotting"): the preacher's conversion look (it fights what it sees meanwhile), the shaman's look during some orders, invisible people unseen, allies.
-- [ ] Preachers convert enemies.
+- [ ] Preachers (ordered to attack, or on their own when they spot an enemy): close fighting (melee) only against a shaman or another preacher (pop3-rev-analysis.md "Auto-attack": a preacher attacker only targets preachers and shamans); anyone else they walk close to and preach to (the preacher's sermon coordinator, coordinators.md), converting them to the preacher's tribe (`WorldEvent::ChangeOwner`). Today preachers fight everyone in melee (`spotting::looks_for_melee`).
 - [ ] Attackers inside a building walk out first (combat.md "Attacking": they set off from where they stand).
 - [ ] Firebolts (combat.md "Firebolts"): the line of fire, from drum towers and vehicles, the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.
 - [ ] Health, hit feedback and death animations for every unit type.
