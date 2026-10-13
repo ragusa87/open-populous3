@@ -34,7 +34,7 @@ impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveTab>()
             .add_systems(PreStartup, spawn_panel)
-            .add_systems(Update, (tab_clicks, tab_visuals));
+            .add_systems(Update, (spells_for_the_shaman, tab_clicks, tab_visuals).chain());
     }
 }
 
@@ -90,6 +90,27 @@ fn spawn_panel(mut commands: Commands) {
         });
 }
 
+/// The Spells tab, by its place in `TABS`.
+pub const SPELLS_TAB: usize = 0;
+
+/// The tab to open when the selection goes from `before` to `now`: the Spells tab when it changed and the player's
+/// `shaman` is in it; None otherwise (the tab stays as the player left it).
+pub fn tab_for_selection(before: &[game_core::unit::UnitId], now: &[game_core::unit::UnitId], shaman: Option<game_core::unit::UnitId>) -> Option<usize> {
+    (before != now && shaman.is_some_and(|s| now.contains(&s))).then_some(SPELLS_TAB)
+}
+
+/// A new selection holding the shaman opens the Spells tab.
+fn spells_for_the_shaman(selection: Res<crate::units::selection::Selection>, map: Res<crate::world::CurrentMap>, mut before: Local<Vec<game_core::unit::UnitId>>, mut active: ResMut<ActiveTab>) {
+    if *before == selection.units {
+        return;
+    }
+    let shaman = map.0.shaman_of(crate::units::PLAYER).map(|u| u.id);
+    if let Some(tab) = tab_for_selection(&before, &selection.units, shaman) {
+        active.set_if_neq(ActiveTab(tab));
+    }
+    before.clone_from(&selection.units);
+}
+
 fn tab_clicks(q: Query<(&Interaction, &TabButton), Changed<Interaction>>, mut active: ResMut<ActiveTab>) {
     for (i, tab) in &q {
         if *i == Interaction::Pressed {
@@ -108,5 +129,21 @@ fn tab_visuals(
     }
     for (content, mut node) in &mut contents {
         node.display = if content.0 == active.0 { Display::Flex } else { Display::None };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use game_core::id::Id;
+
+    #[test]
+    fn a_selection_with_the_shaman_opens_the_spells_tab() {
+        let (shaman, brave) = (Id::from_raw(1), Id::from_raw(2));
+        assert_eq!(tab_for_selection(&[], &[shaman], Some(shaman)), Some(SPELLS_TAB), "she is selected");
+        assert_eq!(tab_for_selection(&[shaman], &[shaman, brave], Some(shaman)), Some(SPELLS_TAB), "a brave added to her");
+        assert_eq!(tab_for_selection(&[shaman], &[shaman], Some(shaman)), None, "unchanged: the tab stays as left");
+        assert_eq!(tab_for_selection(&[], &[brave], Some(shaman)), None, "without her");
+        assert_eq!(tab_for_selection(&[], &[brave], None), None, "no shaman");
     }
 }
