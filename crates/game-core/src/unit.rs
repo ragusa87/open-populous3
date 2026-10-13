@@ -256,7 +256,7 @@ impl Action {
         }
     }
 
-    fn can_take_orders(&self) -> bool {
+    pub(crate) fn can_take_orders(&self) -> bool {
         !matches!(self, Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
     }
 }
@@ -593,6 +593,13 @@ impl Unit {
     pub fn enqueue(&mut self, order: Order) {
         if self.action.can_take_orders() {
             self.queue.push(order);
+        }
+    }
+
+    /// Chains `order` for when it is back on its feet, thrown or not: what it was doing is over.
+    pub(crate) fn chain_after_landing(&mut self, order: Order) {
+        if self.is_alive() {
+            self.queue = vec![order];
         }
     }
 

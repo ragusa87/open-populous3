@@ -174,7 +174,10 @@ join a melee on their own attack (they still fight when challenged).
   `TARGET_DAMAGE` 100 × its kind's share (`bolt_share`: the warrior 12/256, so 4; others all of it): a brave 200, a
   warrior 104, anyone else in the cell 100; `DamageKind::Fire` [whether the shield stops it: guess, it does not].
   Those hit are thrown 64 per turn away from the thrower and 110 up; a warrior or preacher that lives only hops 36.
-  Trees in the cell burn; a targeted building takes 100 wear and burns. A firewarrior target that is free fires back.
+  Trees in the cell burn; a targeted building takes 100 wear and burns. A firewarrior target fires back at the
+  thrower (`fires_back`, `WorldEvent::FireBack` after its push) unless it is already attacking or in a fight: whatever
+  else it does (walking, working) it drops; thrown, the attack is chained for when it lands [ours: the original's
+  0x520610 is not read in detail].
 - Drawn: our own glowing ball per bolt (`firebolts` view); the throw pose (anim 7).
 - Not yet: the line of fire (a building in the way), throwing from a drum tower or a vehicle, the smoke trail and
   the ground light, a ghost firewarrior's harmless bolts, the shaman inside a building or vehicle taking half her

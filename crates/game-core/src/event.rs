@@ -32,6 +32,8 @@ pub enum WorldEvent {
     StartMelee { attacker: UnitId, target: UnitId },
     /// The unit leaves its coordinator (`Unit::release`); nothing if it is in none.
     Release { unit: UnitId },
+    /// A firewarrior hit by `thrower`'s bolt fires back: at once on its feet, else once it has landed.
+    FireBack { unit: UnitId, thrower: UnitId },
 }
 
 /// What throws a unit, for its immunities.

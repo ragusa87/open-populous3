@@ -105,6 +105,16 @@ pub fn steady(kind: UnitKind) -> bool {
     matches!(kind, UnitKind::Warrior | UnitKind::Preacher)
 }
 
+/// Whether a firewarrior hit by a bolt fires back: unless it is already attacking, in a fight or past orders
+/// (whatever else it does, walking or working, it drops).
+pub fn fires_back(u: &Unit) -> bool {
+    u.kind == UnitKind::Firewarrior
+        && u.is_alive()
+        && u.action.link().is_none()
+        && u.action.can_take_orders()
+        && !matches!(u.action, Action::Attacking { .. } | Action::Throwing { .. })
+}
+
 /// The step a bolt at `at` (height `h`) makes towards `aim`: its next place, and whether it got there.
 pub fn fly(at: (u16, u16), h: i32, aim: (u16, u16, i32)) -> ((u16, u16), i32, bool) {
     let (dx, dz, dy) = (torus_delta(at.0, aim.0), torus_delta(at.1, aim.1), aim.2 - h);
@@ -202,8 +212,8 @@ impl GameMap {
                 }
             }
             Target::Unit(id) => {
-                if let Some(i) = self.unit_index(id).filter(|&i| self.units[i].kind == UnitKind::Firewarrior && self.units[i].is_free()) {
-                    self.go_attack(i, Target::Unit(b.thrower));
+                if self.unit(id).is_some_and(fires_back) {
+                    events.push(WorldEvent::FireBack { unit: id, thrower: b.thrower });
                 }
             }
         }
@@ -308,6 +318,23 @@ mod tests {
         }
         assert!(throws.len() >= 2, "{throws:?}");
         assert!((25..=29).contains(&(throws[1] - throws[0])), "{throws:?}");
+    }
+
+    #[test]
+    fn a_firewarrior_hit_fires_back_even_walking() {
+        for walking in [false, true] {
+            let (mut map, a, t) = duel(UnitKind::Firewarrior, 5);
+            if walking {
+                let to = map.unit(t).map(|u| (u.x, u.z.wrapping_add(8 * 512))).unwrap();
+                map.apply(&Command::OrderUnit { player: 1, unit: t, order: Order::MoveTo { x: to.0, z: to.1 } });
+            }
+            let full = life(&map, t);
+            let fired_back = (0..80).any(|_| {
+                map.tick();
+                life(&map, t) < full && matches!(map.unit(t).map(|u| u.action), Some(Action::Attacking { target: Target::Unit(x), .. } | Action::Throwing { target: Target::Unit(x), .. }) if x == a)
+            });
+            assert!(fired_back, "walking: {walking}");
+        }
     }
 
     #[test]
