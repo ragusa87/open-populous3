@@ -299,6 +299,8 @@ pub enum Order {
     Attack { target: Target },
     /// Walk next to the vehicle `vehicle` and get on, if it has a free seat (`GameMap::go_board`, vehicles.md).
     Board { vehicle: crate::vehicle::VehicleId },
+    /// Aboard a vehicle: get off it, if there is ground to get off on (`GameMap::get_off`, vehicles.md).
+    GetOff,
 }
 
 /// What an attack is aimed at.
@@ -665,7 +667,7 @@ impl Unit {
                 Action::Walking { to: campfire::ring_point(fire, point) }
             }
             Order::Cast => Action::Casting { left: Countdown::new(CAST_TICKS) },
-            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } | Order::GetOff => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
                 Action::Walking { to: tree }

@@ -205,6 +205,7 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             b.push(13);
             put_id(b, *vehicle);
         }
+        Order::GetOff => b.push(14),
     }
 }
 
@@ -255,6 +256,7 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         11 => Order::Attack { target: Target::Unit(c.id()?) },
         12 => Order::Attack { target: Target::Building(c.id()?) },
         13 => Order::Board { vehicle: c.id()? },
+        14 => Order::GetOff,
         _ => return None,
     })
 }
@@ -348,6 +350,7 @@ mod tests {
                 Command::OrderUnit { player: 1, unit: Id::from_raw(4), order: Order::Board { vehicle: Id::from_raw(70_001) } },
                 Command::MoveVehicle { player: 2, vehicle: Id::from_raw(8), to: (65535, 3) },
                 Command::Unload { player: 0, vehicle: Id::from_raw(u32::MAX) },
+                Command::OrderUnit { player: 3, unit: Id::from_raw(6), order: Order::GetOff },
             ],
         }
     }

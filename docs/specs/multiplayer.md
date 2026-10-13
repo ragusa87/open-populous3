@@ -33,7 +33,7 @@ Frame: `u32 LE` length + payload. Payload tag byte:
   game (the host draws it, levels store none), identical for every peer so their random draws match.
 - `1 Tick { tick: u32, n: u8, n x Command }`: a player's turn for that tick, Command = `kind u8, player u8`, then
   - kind 0 `Cast`: `spell tag u8`, cells as i16 x/z pairs (tag 4 Teleport: `u16` x, z in world units);
-  - kind 1 `Order` (to the shaman): `order tag u8` (0 MoveTo + `u16` x, z in world units, 1 Pray, 2 Cast, 3 Stop, 4 Campfire + `u16` x, z of the fire's centre + `u8` ring point, 5 CutTree + `u16` x, z of the tree, 6 FetchWood, 7 PickUp + `u16` x, z of the click, 8 Build + `u16` x, z of the building's stored corner, 9 Enter + `u16` x, z of the hut's stored corner, 10 Worship + `u16` x, z of the vault's stored corner, 11 Attack a unit + `u32` id, 12 Attack a building + `u32` id, 13 Board + `u32` vehicle id);
+  - kind 1 `Order` (to the shaman): `order tag u8` (0 MoveTo + `u16` x, z in world units, 1 Pray, 2 Cast, 3 Stop, 4 Campfire + `u16` x, z of the fire's centre + `u8` ring point, 5 CutTree + `u16` x, z of the tree, 6 FetchWood, 7 PickUp + `u16` x, z of the click, 8 Build + `u16` x, z of the building's stored corner, 9 Enter + `u16` x, z of the hut's stored corner, 10 Worship + `u16` x, z of the vault's stored corner, 11 Attack a unit + `u32` id, 12 Attack a building + `u32` id, 13 Board + `u32` vehicle id, 14 GetOff);
   - kind 2 `OrderUnit` (to one of the player's units): `u32` unit id, then the order as in kind 1;
   - kind 3 `PlaceCampfire`: `u16` x, z in world units (the fire takes that cell);
   - kind 4 `RemoveCampfire`: `u16` x, z in world units (the player's fire in that cell);

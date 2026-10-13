@@ -633,8 +633,8 @@ impl GameMap {
         self.vehicles.get_mut(id).unwrap().go(to);
     }
 
-    /// An order to unit `i`, aboard a vehicle: a move takes its vehicle there, a stop stops it; it takes no other
-    /// order before getting off.
+    /// An order to unit `i`, aboard a vehicle: a move takes its vehicle there, a stop stops it, `GetOff` gets it off;
+    /// it takes no other order before getting off.
     pub(crate) fn order_aboard(&mut self, i: usize, order: Order) {
         let Some(vehicle) = self.units[i].aboard else { return };
         match order {
@@ -644,28 +644,30 @@ impl GameMap {
                     v.stop();
                 }
             }
+            Order::GetOff => {
+                let unit = self.units[i].id;
+                self.get_off(vehicle, &[unit]);
+            }
             _ => {}
         }
     }
 
     /// Orders sending the player's `units` to `to`: those aboard move their vehicle there (one order per vehicle), or
-    /// get off when it is stopped and `to` is walkable ground right next to it (`gets_off_at`); the others walk there
-    /// (`dispatch`).
+    /// get off (each its `Order::GetOff`; the others aboard stay) when it is stopped and `to` is walkable ground right
+    /// next to it (`gets_off_at`); the others walk there (`dispatch`).
     pub fn move_orders(&self, player: u8, units: &[UnitId], to: (u16, u16)) -> Vec<Command> {
         let mut vehicles: Vec<VehicleId> = Vec::new();
-        let mut walkers = Vec::new();
+        let (mut walkers, mut getting_off) = (Vec::new(), Vec::new());
         for &id in units {
             match self.unit(id).filter(|u| u.owner == player && u.is_alive()).map(|u| u.aboard) {
+                Some(Some(v)) if self.gets_off_at(v, to) => getting_off.push(Command::OrderUnit { player, unit: id, order: Order::GetOff }),
                 Some(Some(v)) if !vehicles.contains(&v) => vehicles.push(v),
                 Some(Some(_)) => {}
                 _ => walkers.push(id),
             }
         }
-        let moves = vehicles.into_iter().map(|vehicle| match self.gets_off_at(vehicle, to) {
-            true => Command::Unload { player, vehicle },
-            false => Command::MoveVehicle { player, vehicle, to },
-        });
-        moves.chain(if walkers.is_empty() { Vec::new() } else { self.dispatch(player, &walkers, to) }).collect()
+        let moves = vehicles.into_iter().map(|vehicle| Command::MoveVehicle { player, vehicle, to });
+        getting_off.into_iter().chain(moves).chain(if walkers.is_empty() { Vec::new() } else { self.dispatch(player, &walkers, to) }).collect()
     }
 
     /// Whether a click at `to` gets the people aboard `id` off rather than moving it: it is stopped (parked: a boat by
@@ -679,7 +681,13 @@ impl GameMap {
     /// Where the people aboard `id` get off, in seat order: free spots on the walkable ground nearest the vehicle,
     /// within `UNLOAD_REACH`. Empty when there is none (a boat away from the shore): nobody can get off.
     pub fn unload_spots(&self, id: VehicleId) -> Vec<(u16, u16)> {
-        let Some(v) = self.vehicle(id).filter(|v| !v.passengers.is_empty()) else { return Vec::new() };
+        let n = self.vehicle(id).map_or(0, |v| v.passengers.len());
+        self.spots_off(id, n)
+    }
+
+    /// `n` free spots to get off `id` onto (see `unload_spots`).
+    fn spots_off(&self, id: VehicleId, n: usize) -> Vec<(u16, u16)> {
+        let Some(v) = self.vehicle(id).filter(|v| !v.passengers.is_empty() && n > 0) else { return Vec::new() };
         let ground = self.ground();
         let reach = (UNLOAD_REACH as u32 / WORLD_UNITS_PER_CELL) as i32;
         let (cx, cz) = v.cell();
@@ -690,7 +698,7 @@ impl GameMap {
         let Some((dx, dz)) = near else { return Vec::new() };
         let taken = self.taken_spots(&v.passengers);
         let from = crate::slots::spot_of(crate::slots::cell_centre((cx + dx, cz + dz)));
-        crate::slots::free_spots_near(&ground, from, &taken, v.passengers.len())
+        crate::slots::free_spots_near(&ground, from, &taken, n)
             .into_iter()
             .map(crate::slots::spot_centre)
             .filter(|&p| within(p, (v.x, v.z), UNLOAD_REACH))
@@ -702,14 +710,21 @@ impl GameMap {
         !self.unload_spots(id).is_empty()
     }
 
-    /// Everyone aboard `id` gets off onto its own spot (`unload_spots`), jumping down to it (`Action::Alighting`);
-    /// those left without one stay aboard.
+    /// Everyone aboard `id` gets off (`get_off`).
     pub fn unload(&mut self, id: VehicleId) {
-        let spots = self.unload_spots(id);
+        let all = self.vehicle(id).map_or(Vec::new(), |v| v.passengers.clone());
+        self.get_off(id, &all);
+    }
+
+    /// Those of `units` aboard `id` get off, each onto its own spot (`spots_off`), jumping down to it
+    /// (`Action::Alighting`); those left without one stay aboard, as do the others.
+    pub fn get_off(&mut self, id: VehicleId, units: &[UnitId]) {
+        let leaving: Vec<UnitId> = self.vehicle(id).map_or(Vec::new(), |v| v.passengers.iter().copied().filter(|p| units.contains(p)).collect());
+        let spots = self.spots_off(id, leaving.len());
         let Some(height) = self.vehicle(id).map(|v| v.altitude(&self.terrain)) else { return };
         let Some(v) = self.vehicles.get_mut(id) else { return };
         let from = (v.x, v.z);
-        let off: Vec<UnitId> = v.passengers.iter().copied().take(spots.len()).collect();
+        let off: Vec<UnitId> = leaving.into_iter().take(spots.len()).collect();
         v.passengers.retain(|p| !off.contains(p));
         for (unit, at) in off.into_iter().zip(spots) {
             if let Some(u) = self.unit_mut(unit) {
@@ -1343,11 +1358,18 @@ mod tests {
         let v = boat(&mut map, (C, C));
         let people = aboard(&mut map, v, 2);
         let shore = at((C - 1, C));
-        assert_eq!(map.move_orders(0, &people, shore), vec![Command::Unload { player: 0, vehicle: v }], "parked by the shore");
-        assert_eq!(map.move_orders(0, &people, at((C - 5, C))), vec![Command::MoveVehicle { player: 0, vehicle: v, to: at((C - 5, C)) }], "too far: it goes");
-        assert_eq!(map.move_orders(0, &people, at((C + 1, C))), vec![Command::MoveVehicle { player: 0, vehicle: v, to: at((C + 1, C)) }], "on the water: it goes");
+        let off = |units: &[UnitId]| units.iter().map(|&unit| Command::OrderUnit { player: 0, unit, order: Order::GetOff }).collect::<Vec<_>>();
+        assert_eq!(map.move_orders(0, &people, shore), off(&people), "parked by the shore: those selected get off");
+        for c in map.move_orders(0, &people[..1], shore) {
+            map.apply(&c);
+        }
+        assert_eq!(map.unit(people[0]).unwrap().aboard, None, "the one selected is off");
+        assert_eq!(map.vehicle(v).unwrap().passengers, people[1..], "the other stays aboard");
+        let aboard = &people[1..];
+        assert_eq!(map.move_orders(0, aboard, at((C - 5, C))), vec![Command::MoveVehicle { player: 0, vehicle: v, to: at((C - 5, C)) }], "too far: it goes");
+        assert_eq!(map.move_orders(0, aboard, at((C + 1, C))), vec![Command::MoveVehicle { player: 0, vehicle: v, to: at((C + 1, C)) }], "on the water: it goes");
         map.vehicles.get_mut(v).unwrap().go(at((C, C + 10)));
-        assert_eq!(map.move_orders(0, &people, shore), vec![Command::MoveVehicle { player: 0, vehicle: v, to: shore }], "moving: it turns back");
+        assert_eq!(map.move_orders(0, aboard, shore), vec![Command::MoveVehicle { player: 0, vehicle: v, to: shore }], "moving: it turns back");
     }
 
     #[test]

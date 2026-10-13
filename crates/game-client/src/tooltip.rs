@@ -775,7 +775,12 @@ const BUTTON: [Color; 3] = [Color::srgb(0.62, 0.42, 0.14), Color::srgb(0.75, 0.5
 const DISABLED: Color = Color::srgb(0.45, 0.45, 0.45);
 
 /// The button shows its state; pressed, it sends its command. A disabled one stays greyed.
-fn press_toggle(mut buttons: Query<(&Interaction, &ToggleButton, Option<&mut ImageNode>, Option<&mut BackgroundColor>), Changed<Interaction>>, mut schedule: ResMut<crate::units::GameSchedule>) {
+fn press_toggle(
+    mut buttons: Query<(&Interaction, &ToggleButton, Option<&mut ImageNode>, Option<&mut BackgroundColor>), Changed<Interaction>>,
+    mut schedule: ResMut<crate::units::GameSchedule>,
+    map: Res<CurrentMap>,
+    mut selection: ResMut<Selection>,
+) {
     for (interaction, button, image, bg) in &mut buttons {
         let Some(command) = button.toggle.command() else { continue };
         let state = match interaction {
@@ -790,9 +795,19 @@ fn press_toggle(mut buttons: Query<(&Interaction, &ToggleButton, Option<&mut Ima
             bg.0 = BUTTON[state];
         }
         if *interaction == Interaction::Pressed {
+            if let Some(everyone) = unloaded(&map.0, button.toggle) {
+                selection.units = everyone;
+            }
             schedule.issue(command);
         }
     }
+}
+
+/// Who the unload button gets off, to select: everyone aboard its vehicle (a click on the ground next to it gets only
+/// those selected off). None for another button.
+pub fn unloaded(map: &GameMap, toggle: Toggle) -> Option<Vec<UnitId>> {
+    let Toggle::Unload { vehicle, .. } = toggle else { return None };
+    map.vehicle(vehicle).map(|v| v.passengers.clone())
 }
 
 /// A click on a person's slot adds that unit to the selection.
@@ -937,6 +952,7 @@ mod tests {
         map.vehicles.get_mut(boat).unwrap().z += 8 * 512;
         let toggle = vehicle_model(&map, boat, &[]).unwrap().toggle.unwrap();
         assert!(!toggle.enabled(), "out at sea");
+        assert_eq!(unloaded(&map, toggle), Some(vec![brave]), "the button selects everyone aboard");
         map.vehicles.get_mut(boat).unwrap().owner = 1;
         assert!(vehicle_model(&map, boat, &[]).unwrap().rows.is_empty(), "not ours: the name only");
     }
