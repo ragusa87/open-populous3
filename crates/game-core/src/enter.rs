@@ -48,6 +48,9 @@ impl GameMap {
             return;
         }
         let (building, door) = (b.id, b.door());
+        if crate::training::trains(b.kind).is_some() {
+            return self.join_queue(i, building);
+        }
         self.units[i].go_enter(building, door);
     }
 
@@ -55,7 +58,13 @@ impl GameMap {
     /// at the door, idle.
     pub(crate) fn come_in(&mut self, i: usize, building: BuildingId) {
         let Some(b) = self.building(building).cloned() else { return };
-        if b.stage() != Stage::Built || self.people_inside(building) >= b.kind.capacity() as usize {
+        if b.stage() != Stage::Built {
+            return;
+        }
+        if self.people_inside(building) >= b.kind.capacity() as usize {
+            if crate::training::trains(b.kind).is_some() {
+                self.join_queue(i, building);
+            }
             return;
         }
         let id = self.units[i].id;

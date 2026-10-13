@@ -190,6 +190,8 @@ pub enum Action {
     Throwing { target: Target, left: Countdown },
     /// Hacking at the building `building` (wreck.rs), `left` turns to go; first at its door.
     Hacking { building: crate::building::BuildingId, left: Countdown, at_door: bool },
+    /// Waiting in the queue of the training unit `building` (training.rs), standing at or walking to its spot `at`.
+    Queuing { building: crate::building::BuildingId, at: (u16, u16) },
     /// Sitting, listening to a preacher in the sermon `sermon` (sermon.rs): locked until converted or the sermon ends.
     Listening { sermon: crate::sermon::SermonId, sitting: Countdown },
     /// A preacher standing, preaching to its listeners (sermon.rs).
@@ -229,6 +231,7 @@ impl Action {
             Action::Attacking { .. } => "Attacking",
             Action::Challenge { .. } | Action::Melee { .. } => "Fighting",
             Action::Listening { .. } => "Listening",
+            Action::Queuing { .. } => "Queuing",
             Action::Preaching => "Preaching",
             Action::Hacking { .. } | Action::Throwing { .. } => "Attacking",
             #[cfg(test)]
@@ -730,6 +733,7 @@ impl Unit {
                 }
             }
             Action::Attacking { to, .. } if self.in_the_open() => self.approach(to, ground),
+            Action::Queuing { at, .. } => self.approach(at, ground),
             Action::Attacking { .. } => {}
             Action::Hacking { .. } => {}
             Action::Throwing { target, mut left } => {
@@ -1108,6 +1112,29 @@ impl Unit {
         self.start(Order::Stop);
         if self.action.can_take_orders() {
             self.action = Action::Attacking { target, to };
+        }
+    }
+
+    /// The building it is walking to the door of, to go in.
+    pub fn heading_into(&self) -> Option<crate::building::BuildingId> {
+        self.to_house.filter(|_| matches!(self.action, Action::Walking { .. } | Action::Stranded { .. }))
+    }
+
+    /// Joins the queue of the training unit `building`, standing where it is until given its spot (`queue_at`).
+    pub(crate) fn queue_up(&mut self, building: crate::building::BuildingId) {
+        self.start(Order::Stop);
+        if self.action.can_take_orders() {
+            self.action = Action::Queuing { building, at: (self.x, self.z) };
+        }
+    }
+
+    /// Its spot in its queue is now `at` (the queue moved up): it walks there.
+    pub(crate) fn queue_at(&mut self, at: (u16, u16)) {
+        if let Action::Queuing { building, at: was } = self.action
+            && was != at
+        {
+            self.action = Action::Queuing { building, at };
+            self.planned_on = None;
         }
     }
 

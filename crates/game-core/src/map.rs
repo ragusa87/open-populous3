@@ -945,6 +945,7 @@ impl GameMap {
         self.tend_campfires();
         self.tend_vaults();
         self.tend_totems();
+        self.tend_queues();
         self.tend_training();
         self.tend_vehicle_huts();
         // Coordinators, before the units, so that one ending this turn is gone when its units tick (coordinators.md):

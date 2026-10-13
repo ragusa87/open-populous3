@@ -150,8 +150,20 @@ A training hut makes no mana [community]. As in the game (checked by someone who
 (`BuildingKind::capacity`); while someone is inside its cost is `train_cost(kind, count)` (`HUMAN_` costs for
 every tribe, the band from the tribe's people of that kind), recomputed every 16 turns (`RECOST_EVERY`), and 0
 with nobody inside (the store then given back). The mana distribution fills the store (`crate::production`); at
-the cost the trainee is replaced at the door (rule 5, ghost flag kept). Not yet: the queue (the others wait idle at
-the door), queued orders carried over, the computer players' cost, damage sending the trainee out.
+the cost the trainee is replaced (rule 5, ghost flag kept): the new person appears inside where the trainee was and
+walks out by the door to a free spot, so the one going in and the one coming out are seen apart.
+
+The queue (`training::tend_queues`, before `tend_training`; "The queue at the door" [exe]): sent into a training
+unit (`Order::Enter`), a follower goes straight in when nobody queues, nobody is walking in and there is room;
+otherwise it joins the building's queue (`Building::queue`, in arrival order) as `Action::Queuing`, and one reaching
+a full door joins it too. Each rank has its spot (`queue_spot`): a quarter cell apart (`QUEUE_STEP`) along the
+walls at the door's distance, from beside the door (the doorway stays free) round the building; a full lap goes on
+a row further out, turning the other way [ours: past one lap is not traced]. Anyone given another order leaves the
+queue and those behind move up at once [ours: the original ripples, 2 turns per rank]. The head goes in when there
+is room and the admission gate is open: `ADMIT_GAP` (16) turns after one went in, `LEFT_GAP` (12) after one came
+out [exe]. Queued people count as working (`headcount`). Not yet: queued orders carried over, those already of the
+building's kind letting others pass, five inside training together (the exe's count), the computer players' cost,
+damage sending the trainee out.
 
 ## Balance and game turns
 The original counts in game turns, 12 per second (pop3-rev-analysis.md "Turns and timing"); one of our ticks is one turn.

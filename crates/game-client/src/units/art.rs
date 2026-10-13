@@ -175,6 +175,11 @@ pub fn pose_of(u: &game_core::unit::Unit) -> Pose {
     if u.aboard.is_some() && matches!(u.action, Action::Idle | Action::Attacking { .. }) {
         return Pose::Pedal;
     }
+    if let Action::Queuing { at, .. } = u.action
+        && (u.x, u.z) != at
+    {
+        return if u.carrying > 0 { Pose::CarryWalk } else { Pose::Walk };
+    }
     pose_for(&u.action, u.carrying > 0, u.motion.airborne())
 }
 
@@ -190,6 +195,8 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Hacking { .. } => Pose::Hack,
         Action::Throwing { .. } => Pose::Throw,
         Action::Listening { .. } => Pose::Listen,
+        Action::Queuing { .. } if carrying => Pose::CarryIdle,
+        Action::Queuing { .. } => Pose::Idle,
         Action::Preaching => Pose::Idle,
         Action::Challenge { role, .. } => challenge_pose(*role, carrying),
         Action::Melee { stance, .. } => melee_pose(*stance, airborne),
