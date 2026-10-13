@@ -57,9 +57,13 @@ shaman, over the supply of its built huts, 3 / 5 / 7 by size, at most 200) [ours
 Draws the player's `game_core::spell_book::SpellBook` from the map (`player_book` = `GameMap::spell_books[PLAYER]`),
 no copy of its own. An original level brings its own loadout: the header's spells known and full, its spell
 discoveries as "?" (spells.md). Generated maps get the demo loadout (`SpellBook::demo`, every tile state); the
-sandboxes add Teleport, unlimited (`SpellBook::sandbox`). One tile per `SpellKind`, Hidden ones as empty slots.
-Armageddon is special (only some levels give it): it always has its own full-width tile under the grid
-(`is_special`, `tile_order`), empty when the level does not give it, so the panel never has to make room for it.
+sandboxes add Teleport, unlimited (`SpellBook::sandbox`). One tile per `SpellKind`, Hidden ones as empty slots,
+in centred rows as on the original's panel (`ROWS`): Angel of Death, Volcano; Earthquake, Erosion, Firestorm;
+Whirlwind, Swamp, Flatten; Land Bridge, Lightning, Hypnotism; Swarm, Invisibility, Magical Shield; Ghost Army,
+Blast, Convert (the last row's first spell assumed to be Ghost Army, the one left). Then Teleport's row, shown only
+when the book has it (sandboxes). Armageddon is special (only some levels give it): it always has its own
+full-width tile under the rows (`is_special`), empty when the level does not give it, so the panel never has to make
+room for it.
 Pure view model `tile_view(slot) -> TileView` (unit-tested) drives the tiles:
 
 | Availability | Tile |

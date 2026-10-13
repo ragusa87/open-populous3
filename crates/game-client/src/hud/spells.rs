@@ -129,19 +129,34 @@ pub fn view_bottom_middle(window: Vec2) -> Vec2 {
     Vec2::new(PANEL_WIDTH + (window.x - PANEL_WIDTH) / 2.0, window.y - 1.0)
 }
 
-/// Columns of the spell grid.
-pub const COLUMNS: usize = 3;
+/// The panel's spells, row by row, each row centred, as on the original's panel.
+pub const ROWS: [&[SpellKind]; 6] = {
+    use SpellKind::*;
+    [
+        &[AngelOfDeath, Volcano],
+        &[Earthquake, Erosion, Firestorm],
+        &[Whirlwind, Swamp, Flatten],
+        &[LandBridge, Lightning, Hypnotism],
+        &[Swarm, Invisibility, MagicalShield],
+        &[GhostArmy, Blast, Convert],
+    ]
+};
 
-/// The special spell with its own full-width tile under the grid, kept free even while hidden so
+/// Under the rows: Teleport, a sandbox spell, in a row shown only when the book has it.
+pub const SANDBOX_ROW: [SpellKind; 1] = [SpellKind::Teleport];
+
+/// A tile's width and height, pixels.
+const TILE: f32 = 58.0;
+
+/// The special spell with its own full-width tile under the rows, kept free even while hidden so
 /// the panel never has to make room for it.
 pub fn is_special(kind: SpellKind) -> bool {
     kind == SpellKind::Armageddon
 }
 
-/// Slot indices in drawing order: every other spell in book order, the special one last.
-pub fn tile_order(slots: &[SpellSlot]) -> Vec<usize> {
-    let (special, others): (Vec<usize>, Vec<usize>) = (0..slots.len()).partition(|&i| is_special(slots[i].kind));
-    others.into_iter().chain(special).collect()
+/// The slot (index in `slots`) of `kind`.
+fn slot_of(slots: &[SpellSlot], kind: SpellKind) -> Option<usize> {
+    slots.iter().position(|s| s.kind == kind)
 }
 
 /// The player's spells on `map` (`GameMap::spell_books`).
@@ -174,7 +189,7 @@ impl Plugin for SpellsPlugin {
                 Update,
                 (
                     (tile_clicks.after(crate::units::SimStep), pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput).after(crate::hover::HoverSystems)).chain().in_set(crate::menu::Gameplay),
-                    update_tiles,
+                    (update_tiles, show_given_rows),
                     update_info,
                 )
                     .chain(),
@@ -188,45 +203,21 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>) {
     }
 }
 
+/// A row of the panel shown only while the player's book has one of its spells (Teleport's).
+#[derive(Component)]
+struct GivenOnly(Vec<usize>);
+
 fn spawn_spells(c: &mut ChildSpawnerCommands, slots: &[SpellSlot]) {
-    c.spawn(Node {
-        display: Display::Grid,
-        grid_template_columns: RepeatedGridTrack::flex(COLUMNS as u16, 1.0),
-        row_gap: px(4),
-        column_gap: px(4),
-        ..default()
-    })
-    .with_children(|grid| {
-        for i in tile_order(slots) {
-            // The special spell starts a row of its own, the whole width.
-            let grid_column = if is_special(slots[i].kind) { GridPlacement::start_span(1, COLUMNS as u16) } else { GridPlacement::DEFAULT };
-            grid.spawn((
-                Tile(i),
-                Button,
-                Node {
-                    grid_column,
-                    height: px(58),
-                    flex_direction: FlexDirection::Column,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    padding: UiRect::all(px(3)),
-                    border: UiRect::all(px(2)),
-                    ..default()
-                },
-                BackgroundColor(Color::NONE),
-                BorderColor::all(Color::NONE),
-            ))
-            .with_children(|tile| {
-                tile.spawn(Node { column_gap: px(2), height: px(8), ..default() }).with_children(|pips| {
-                    for n in 0..MAX_CHARGES {
-                        pips.spawn((Pip(i, n), Node { width: px(8), height: px(8), ..default() }, BackgroundColor(Color::NONE)));
-                    }
-                });
-                tile.spawn((TileLabel(i), Text::new(""), TextFont { font_size: FontSize::Px(12.0), ..default() }, TextColor(INK)));
-                tile.spawn((TileBadge(i), Text::new(""), TextFont { font_size: FontSize::Px(11.0), ..default() }, TextColor(INK)));
-                tile.spawn((RechargeBar(i), Node { width: percent(100), height: px(4), ..default() }, BackgroundColor(DARK_BROWN)))
-                    .with_child((RechargeFill(i), Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(MANA_BLUE)));
-            });
+    let row = Node { flex_direction: FlexDirection::Row, justify_content: JustifyContent::Center, column_gap: px(4), ..default() };
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(4), ..default() }).with_children(|rows| {
+        for kinds in ROWS {
+            rows.spawn(row.clone()).with_children(|r| kinds.iter().filter_map(|&k| slot_of(slots, k)).for_each(|i| spawn_tile(r, i, px(TILE))));
+        }
+        let sandbox: Vec<usize> = SANDBOX_ROW.iter().filter_map(|&k| slot_of(slots, k)).collect();
+        rows.spawn((row.clone(), GivenOnly(sandbox.clone()))).with_children(|r| sandbox.iter().for_each(|&i| spawn_tile(r, i, px(TILE))));
+        // The special spell has a row of its own, the whole width.
+        for i in (0..slots.len()).filter(|&i| is_special(slots[i].kind)) {
+            spawn_tile(rows, i, percent(100));
         }
     });
     c.spawn((
@@ -236,6 +227,50 @@ fn spawn_spells(c: &mut ChildSpawnerCommands, slots: &[SpellSlot]) {
         TextColor(INK),
         Node { min_height: px(48), ..default() },
     ));
+}
+
+/// The tile of slot `i`, `width` wide.
+fn spawn_tile(parent: &mut ChildSpawnerCommands, i: usize, width: Val) {
+    parent
+        .spawn((
+            Tile(i),
+            Button,
+            Node {
+                width,
+                height: px(TILE),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                padding: UiRect::all(px(3)),
+                border: UiRect::all(px(2)),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+            BorderColor::all(Color::NONE),
+        ))
+        .with_children(|tile| {
+            tile.spawn(Node { column_gap: px(2), height: px(8), ..default() }).with_children(|pips| {
+                for n in 0..MAX_CHARGES {
+                    pips.spawn((Pip(i, n), Node { width: px(8), height: px(8), ..default() }, BackgroundColor(Color::NONE)));
+                }
+            });
+            tile.spawn((TileLabel(i), Text::new(""), TextFont { font_size: FontSize::Px(12.0), ..default() }, TextColor(INK)));
+            tile.spawn((TileBadge(i), Text::new(""), TextFont { font_size: FontSize::Px(11.0), ..default() }, TextColor(INK)));
+            tile.spawn((RechargeBar(i), Node { width: percent(100), height: px(4), ..default() }, BackgroundColor(DARK_BROWN)))
+                .with_child((RechargeFill(i), Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(MANA_BLUE)));
+        });
+}
+
+/// Rows shown only while the book has one of their spells (`GivenOnly`).
+fn show_given_rows(map: Res<CurrentMap>, mut rows: Query<(&GivenOnly, &mut Node)>) {
+    let book = player_book(&map.0);
+    for (row, mut node) in &mut rows {
+        let given = row.0.iter().any(|&i| book.slots.get(i).is_some_and(|s| s.availability != Availability::Hidden));
+        let display = if given { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+    }
 }
 
 const MANA_BLUE: Color = Color::srgb(0.25, 0.55, 1.0);
@@ -495,12 +530,15 @@ mod tests {
     }
 
     #[test]
-    fn armageddon_has_the_last_tile_whatever_the_level() {
+    fn every_spell_has_one_place_on_the_panel() {
+        let placed: Vec<SpellKind> = ROWS.iter().flat_map(|r| r.iter().copied()).chain(SANDBOX_ROW).chain(SpellKind::ALL.into_iter().filter(|&k| is_special(k))).collect();
+        for kind in SpellKind::ALL {
+            assert_eq!(placed.iter().filter(|&&k| k == kind).count(), 1, "{kind:?}");
+        }
+        assert_eq!(ROWS.map(|r| r.len()), [2, 3, 3, 3, 3, 3]);
+        assert_eq!(ROWS[5], [SpellKind::GhostArmy, SpellKind::Blast, SpellKind::Convert], "the last row");
         let book = SpellBook::new();
-        let order = tile_order(&book.slots);
-        assert_eq!(order.len(), book.slots.len());
-        assert_eq!(book.slots[*order.last().unwrap()].kind, SpellKind::Armageddon);
-        assert_eq!(order.iter().filter(|&&i| is_special(book.slots[i].kind)).count(), 1);
+        assert!(SpellKind::ALL.iter().all(|&k| slot_of(&book.slots, k).is_some()));
     }
 
     #[test]
