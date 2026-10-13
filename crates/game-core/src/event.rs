@@ -35,8 +35,8 @@ pub enum WorldEvent {
     StartMelee { attacker: UnitId, target: UnitId },
     /// The unit joins `tribe`, converted (`GameMap::change_owner`).
     ChangeOwner { unit: UnitId, tribe: u8 },
-    /// The unit leaves its coordinator (`Unit::release`); nothing if it is in none.
-    Release { unit: UnitId },
+    /// The unit leaves the coordinator `from` (`Unit::release`); nothing if it is in another one by now, or in none.
+    Release { unit: UnitId, from: crate::coordinator::Link },
     /// A firewarrior hit by `thrower`'s bolt fires back: at once on its feet, else once it has landed.
     FireBack { unit: UnitId, thrower: UnitId },
 }

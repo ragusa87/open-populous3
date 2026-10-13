@@ -60,8 +60,8 @@ impl Coordinator for Sermon {
         }
     }
 
-    fn tick(&mut self, _id: Id<Self>, members: &[UnitId], _now: Tick, world: &GameMap, rng: &mut Lcg) -> Step {
-        let end = |listener| Step { finished: true, events: vec![WorldEvent::Release { unit: listener }] };
+    fn tick(&mut self, id: Id<Self>, members: &[UnitId], _now: Tick, world: &GameMap, rng: &mut Lcg) -> Step {
+        let end = |listener| Step { finished: true, events: vec![WorldEvent::Release { unit: listener, from: Link::Sermon(id) }] };
         let (Some(p), Some(l)) = (world.unit(self.preacher), world.unit(self.listener)) else { return end(self.listener) };
         if !members.contains(&l.id) || !l.is_alive() || !p.is_alive() || !preaching(p) || p.owner == l.owner {
             return end(l.id);

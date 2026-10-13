@@ -125,14 +125,14 @@ pub(crate) mod tests {
             }
         }
 
-        fn tick(&mut self, _id: Id<Self>, units: &[UnitId], _now: Tick, _world: &GameMap, rng: &mut Lcg) -> Step {
+        fn tick(&mut self, id: Id<Self>, units: &[UnitId], _now: Tick, _world: &GameMap, rng: &mut Lcg) -> Step {
             let mut events = Vec::new();
             if self.hurt {
                 events.extend(units.iter().map(|&unit| WorldEvent::Damage { unit, amount: 1 + (rng.next_u32() % 3) as u16, kind: DamageKind::Blast, from: None }));
             }
             let finished = self.left.tick();
             if finished && self.release {
-                events.extend(units.iter().map(|&unit| WorldEvent::Release { unit }));
+                events.extend(units.iter().map(|&unit| WorldEvent::Release { unit, from: Link::Gathering(id) }));
             }
             Step { finished, events }
         }
@@ -218,7 +218,8 @@ pub(crate) mod tests {
         let mut map = GameMap::sandbox_units();
         let free = braves(&mut map, 1)[0];
         let before = map.units.clone();
-        map.apply_events(vec![WorldEvent::Release { unit: free }, WorldEvent::Release { unit: Id::from_raw(99_999) }]);
+        let from = Link::Gathering(Id::from_raw(1));
+        map.apply_events(vec![WorldEvent::Release { unit: free, from }, WorldEvent::Release { unit: Id::from_raw(99_999), from }]);
         assert_eq!(map.units, before);
     }
 

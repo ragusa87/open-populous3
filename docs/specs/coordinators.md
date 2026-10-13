@@ -55,7 +55,7 @@ for each variant:
 | `Shove { attacker }` | `GameMap::shove`: the challenger starts its shove |
 | `Struck { attacker, target, blow, knock }` | `GameMap::struck`: the attacker strikes, a target on guard reels (and is thrown back after) |
 | `StartMelee { attacker, target }` | `GameMap::start_melee`: a new melee, both in it |
-| `Release { unit }` | the unit leaves its coordinator: back to Idle (`Unit::release`); nothing if it is in none or gone |
+| `Release { unit, from }` | the unit leaves the coordinator `from`: back to Idle (`Unit::release`); nothing if it is gone, in none, or taken by another one meanwhile (a listener challenged the same turn its sermon ends stays in the challenge) |
 | `ChangeOwner { unit, tribe }` | `GameMap::change_owner`: a converted person joins the tribe, starting afresh (combat.md "Sermon") |
 
 Rules:

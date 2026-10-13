@@ -139,14 +139,14 @@ impl Coordinator for Melee {
         for &m in members {
             let Some(f) = world.unit(m).filter(|u| u.is_alive()).and_then(fighter) else { continue };
             if distance((f.unit.x, f.unit.z), self.at) > MELEE_LEASH {
-                events.push(WorldEvent::Release { unit: m });
+                events.push(WorldEvent::Release { unit: m, from: Link::Melee(id) });
             } else {
                 fighters.push(f);
             }
         }
         let sides = fighters.iter().filter(|f| f.unit.owner != fighters[0].unit.owner).count();
         if fighters.len() < 2 || sides == 0 {
-            events.extend(fighters.iter().map(|f| WorldEvent::Release { unit: f.unit.id }));
+            events.extend(fighters.iter().map(|f| WorldEvent::Release { unit: f.unit.id, from: Link::Melee(id) }));
             return Step { finished: true, events };
         }
         self.centre = self.find_centre(&fighters);

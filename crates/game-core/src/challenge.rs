@@ -74,8 +74,9 @@ impl Challenge {
         Challenge { attacker, target, approach: Approach::Open, phase: Phase::Charge { left: Countdown::new(CHARGE_TICKS) } }
     }
 
-    fn end(&self) -> Step {
-        Step { finished: true, events: vec![WorldEvent::Release { unit: self.attacker }, WorldEvent::Release { unit: self.target }] }
+    fn end(&self, id: ChallengeId) -> Step {
+        let from = Link::Challenge(id);
+        Step { finished: true, events: vec![WorldEvent::Release { unit: self.attacker, from }, WorldEvent::Release { unit: self.target, from }] }
     }
 }
 
@@ -114,13 +115,13 @@ impl Coordinator for Challenge {
         }
     }
 
-    fn tick(&mut self, _id: Id<Self>, members: &[UnitId], _now: Tick, world: &GameMap, rng: &mut Lcg) -> Step {
-        let (Some(a), Some(t)) = (world.unit(self.attacker), world.unit(self.target)) else { return self.end() };
+    fn tick(&mut self, id: Id<Self>, members: &[UnitId], _now: Tick, world: &GameMap, rng: &mut Lcg) -> Step {
+        let (Some(a), Some(t)) = (world.unit(self.attacker), world.unit(self.target)) else { return self.end(id) };
         let linked = members.contains(&a.id) && members.contains(&t.id);
         if !linked || !a.is_alive() || !t.is_alive() || a.owner == t.owner {
-            return self.end();
+            return self.end(id);
         }
-        let (Some(charger), Some(waiting)) = (role_of(a), role_of(t)) else { return self.end() };
+        let (Some(charger), Some(waiting)) = (role_of(a), role_of(t)) else { return self.end(id) };
         let mut events = Vec::new();
         let target_at = (t.x, t.z);
         match self.phase {
@@ -137,7 +138,7 @@ impl Coordinator for Challenge {
                     events.push(WorldEvent::Shove { attacker: a.id });
                     self.phase = Phase::Shove;
                 } else if left.tick() {
-                    return self.end();
+                    return self.end(id);
                 }
             }
             Phase::Shove => match charger {

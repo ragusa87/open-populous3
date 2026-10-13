@@ -1223,8 +1223,8 @@ impl GameMap {
                 self.shove(attacker);
                 None
             }
-            WorldEvent::Release { unit } => {
-                if let Some(u) = self.unit_mut(unit) {
+            WorldEvent::Release { unit, from } => {
+                if let Some(u) = self.unit_mut(unit).filter(|u| u.action.link() == Some(from)) {
                     u.release();
                 }
                 None
