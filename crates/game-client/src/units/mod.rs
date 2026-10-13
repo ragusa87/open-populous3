@@ -204,13 +204,15 @@ pub struct UnitSprites {
 impl UnitSprites {
     /// The frame showing `unit` from a camera at `yaw`; praying towards `worship` when it
     /// worships its shaman (`worship::worship_facing`).
-    pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, yaw: f32, clock: &SimClock, now: SimNow) -> Option<&FrameAsset> {
+    /// `still`: the vehicle it is aboard is not under way, so its pedalling holds its first frame.
+    pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, still: bool, yaw: f32, clock: &SimClock, now: SimNow) -> Option<&FrameAsset> {
         let (pose, facing) = worship.map_or((art::pose_of(unit), unit.facing), |f| (Pose::Pray, f));
         let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
         // Wildmen have no tribe (owner 255): one look for all.
         let tribe = if unit.kind == UnitKind::Wildman { 0 } else { unit.owner as usize };
         let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(sprite_dir(facing, yaw))?;
-        frames.get(frame_index(pose, frames.len(), &unit.action, now, clock.alpha()))
+        let frame = if pose == Pose::Pedal && still { 0 } else { frame_index(pose, frames.len(), &unit.action, now, clock.alpha()) };
+        frames.get(frame)
     }
 }
 
@@ -542,7 +544,8 @@ fn animate_views(
         vis.set_if_neq(if hidden { Visibility::Hidden } else { Visibility::Inherited });
         let frame = units.get(body.0).and_then(|u| {
             let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
-            sprites.frame_for(u, worship, rig.yaw, &clock, *now)
+            let still = !u.aboard.and_then(|v| map.0.vehicle(v)).is_some_and(crate::vehicles::under_way);
+            sprites.frame_for(u, worship, still, rig.yaw, &clock, *now)
         });
         if let Some(f) = frame {
             height.0 = f.size.y * PIXEL;

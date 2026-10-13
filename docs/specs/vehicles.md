@@ -114,7 +114,8 @@ and a stranded one's roll, lifted to its altitude (a balloon's hover, a sinking 
 gliding between ticks like the units. People aboard are drawn in it (`units::riding`): on their seat
 (`vehicles::seat_offset`: along a boat, side by side in a basket) at its floor, the model's origin (the original
 boat's waterline, its keel going below; the airship's basket floor), sitting and pedalling (`Pose::Pedal`, the
-original's anim 51; the end of `SitDown` in our sheets), hoverable and clickable. Unlike a tower's lookout they are
+original's anim 51; the end of `SitDown` in our sheets) while it is under way (`vehicles::under_way`; still, parked or
+waiting after a boarding, the pedalling holds its first frame), hoverable and clickable. Unlike a tower's lookout they are
 not pulled towards the camera: the depth test lets the near side of the hull or basket hide their lower body, so
 they are seen inside, not in front. Dev shots:
 `VEHICLE=boat@x,z[:n]` (`;` between several), `VEHICLE_TO=x,z`, `VEHICLE_TICKS=N` (`dev.rs`).

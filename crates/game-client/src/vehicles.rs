@@ -64,6 +64,15 @@ impl Drawn {
     }
 }
 
+/// Whether it is going somewhere now (not waiting after a boarding): its people pedal.
+pub fn under_way(v: &Vehicle) -> bool {
+    match v.state {
+        State::Moving { .. } => v.wait.left() == game_core::time::Ticks::ZERO,
+        State::Drifting { .. } => true,
+        _ => false,
+    }
+}
+
 /// A vehicle's place in cells.
 pub fn cells_at(v: &Vehicle) -> Vec2 {
     Vec2::new(v.x as f32, v.z as f32) / WORLD_UNITS_PER_CELL as f32
@@ -301,6 +310,16 @@ mod tests {
         assert!((d.glide(Vec2::new(0.2, 0.0), tick(5), 0.9) - Vec2::new(0.18, 0.0)).length() < 1e-6);
         assert_eq!(d.glide(Vec2::new(0.2, 0.0), tick(6), 0.1), Vec2::new(0.2, 0.0), "parked: still, not replaying the step");
         assert_eq!(d.glide(Vec2::new(3.2, 0.0), tick(7), 0.1), Vec2::new(3.2, 0.0), "a jump is not glided");
+    }
+
+    #[test]
+    fn its_people_pedal_only_while_it_goes() {
+        let mut v = vehicle(VehicleKind::Boat, (0, 0));
+        assert!(!under_way(&v), "parked");
+        v.go((5000, 0));
+        assert!(under_way(&v));
+        v.seat(game_core::id::Id::from_raw(3), 0);
+        assert!(!under_way(&v), "waiting after a boarding");
     }
 
     #[test]
