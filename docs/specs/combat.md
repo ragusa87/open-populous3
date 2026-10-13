@@ -190,8 +190,9 @@ join a melee on their own attack (they still fight when challenged).
   vehicle's, so a balloon throws further; in a building, its level), the bolts start at that height; in a finished
   drum tower (`GameMap::in_tower`) it reaches 4 cells more across, reloads in `RELOAD_IN_TOWER` (36) and its target
   takes `TARGET_DAMAGE_FROM_TOWER` (400). An attack order reaches a passenger (`order_aboard`); aboard or inside, a
-  target out of reach is waited for, it does not walk [ours: the original's half speed of a vehicle while its
-  passenger throws, and driving it towards the target, are not done]. Drawn pedalling aboard while it waits, its
+  target out of reach is waited for, it does not walk [ours: driving it towards the target is not done]. While a
+  passenger throws, its vehicle goes at half speed (`Vehicle::speed_now`) [exe: the thrower's speed is halved
+  aboard; that this slows the vehicle is ours]. Drawn pedalling aboard while it waits, its
   throw pose while it throws.
 - Not yet: the line of fire (a building in the way), the smoke trail and
   the ground light, a ghost firewarrior's harmless bolts, the shaman inside a building or vehicle taking half her

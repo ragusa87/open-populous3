@@ -120,7 +120,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Spotting (combat.md "Spotting"): the preacher's conversion look (it fights what it sees meanwhile), the shaman's look during some orders, invisible people unseen, allies.
 - [ ] Sermon (combat.md "Sermon"): the building variant (preaching to a building's people), the soul flying from the preacher to the converted, the preacher's preaching animation, the halving flag of the first check. To trace (spec session): what starts a sermon (the link from the preacher's look to the preached person's state), how many listen at once and from how far.
 - [ ] Attackers inside a building walk out first (combat.md "Attacking": they set off from where they stand).
-- [ ] Firebolts (combat.md "Firebolts"): the line of fire, a vehicle slowing to half speed while its passenger throws, and driving it towards an out-of-reach target, the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.
+- [ ] Firebolts (combat.md "Firebolts"): the line of fire, driving a vehicle towards an out-of-reach target (to trace: whether the original's halved speed of a passenger throwing aboard really slows its vehicle, ours does), the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.
 - [ ] Health, hit feedback and death animations for every unit type.
 - [ ] Healing (combat.md "Health"): no healing while struck by lightning once it has its own state; the angel of death never heals; the original lets life go past full by up to one heal (ours stops at full).
 

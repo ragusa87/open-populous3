@@ -235,12 +235,14 @@ pub struct Vehicle {
     route: Vec<(u16, u16)>,
     /// Ground revision the route was planned on; None: plan on its next turn.
     planned_on: Option<(u32, u32)>,
+    /// A passenger is throwing fire this turn: it goes at half speed (`speed_now`).
+    pub slowed: bool,
 }
 
 impl Vehicle {
     /// A new, empty vehicle parked at `at`.
     pub fn new(kind: VehicleKind, owner: u8, (x, z): (u16, u16), heading: Angle) -> Self {
-        Vehicle { kind, owner, x, z, heading, health: Health::full(LIFE), state: State::Parked, passengers: Vec::new(), wait: Countdown::new(Ticks::ZERO), float: None, was_at: None, route: Vec::new(), planned_on: None }
+        Vehicle { kind, owner, x, z, heading, health: Health::full(LIFE), state: State::Parked, passengers: Vec::new(), wait: Countdown::new(Ticks::ZERO), float: None, was_at: None, route: Vec::new(), planned_on: None, slowed: false }
     }
 
     pub fn cell(&self) -> (i32, i32) {
@@ -253,6 +255,12 @@ impl Vehicle {
     }
 
     /// Seats nobody sits in.
+    /// How fast it goes this turn: half its speed while a passenger throws fire ("Firewarrior fire" [exe]: the
+    /// thrower's speed is halved aboard; that this slows the vehicle is ours).
+    pub fn speed_now(&self) -> u16 {
+        if self.slowed { self.kind.speed() / 2 } else { self.kind.speed() }
+    }
+
     pub fn free_seats(&self) -> u8 {
         self.kind.seats().saturating_sub(self.passengers.len() as u8)
     }
@@ -359,7 +367,7 @@ impl Vehicle {
             self.health.heal(LIFE);
         }
         match self.state {
-            State::Moving { to } if self.wait.tick() => self.travel(to, self.kind.speed(), ground),
+            State::Moving { to } if self.wait.tick() => self.travel(to, self.speed_now(), ground),
             State::Drifting { to } => self.travel(to, DRIFT_SPEED, ground),
             _ => {}
         }
@@ -776,8 +784,10 @@ impl GameMap {
     fn sync_passengers(&mut self) {
         let units = &self.units;
         let aboard = |id: VehicleId, p: UnitId| units.binary_search_by_key(&p, |u| u.id).ok().is_some_and(|i| units[i].is_alive() && units[i].aboard == Some(id));
+        let throwing = |p: UnitId| units.binary_search_by_key(&p, |u| u.id).ok().is_some_and(|i| matches!(units[i].action, crate::unit::Action::Throwing { .. }));
         for (id, v) in self.vehicles.iter_mut() {
             v.passengers.retain(|&p| aboard(id, p));
+            v.slowed = v.passengers.iter().any(|&p| throwing(p));
         }
         let vehicles = &self.vehicles;
         for u in self.units.iter_mut().filter(|u| u.aboard.is_some()) {

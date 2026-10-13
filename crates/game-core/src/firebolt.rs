@@ -344,6 +344,27 @@ mod tests {
     }
 
     #[test]
+    fn a_boat_goes_at_half_speed_while_its_passenger_throws() {
+        let mut map = GameMap::sandbox_vehicles();
+        let (boat, at) = map.vehicles.iter().find(|(_, v)| v.kind == crate::vehicle::VehicleKind::Boat && !v.passengers.is_empty()).map(|(id, v)| (id, (v.x, v.z))).unwrap();
+        let crew = map.vehicle(boat).unwrap().passengers[0];
+        map.move_vehicle(boat, (at.0.wrapping_add(10 * 512), at.1.wrapping_add(4 * 512)));
+        let pos = |m: &GameMap| m.vehicle(boat).map(|v| (v.x, v.z)).unwrap();
+        let step = |m: &mut GameMap, throwing: bool| {
+            if throwing {
+                m.unit_mut(crew).unwrap().action = Action::Throwing { target: Target::Unit(crew), left: Countdown::new(THROW_TICKS) };
+            }
+            let before = pos(m);
+            m.tick();
+            isqrt(crate::map::torus_dist2(before, pos(m)) as u32)
+        };
+        (0..12).for_each(|_| _ = map.tick());
+        let full = step(&mut map, false);
+        let half = step(&mut map, true);
+        assert!(full > 0 && half <= full / 2 + 1, "full {full}, throwing {half}");
+    }
+
+    #[test]
     fn two_firewarriors_on_one_brave_take_400() {
         let (mut map, a, t) = duel(UnitKind::Brave, 3);
         let at = map.unit(a).map(|u| (u.x, u.z.wrapping_add(200))).unwrap();
