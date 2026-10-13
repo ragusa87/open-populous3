@@ -100,9 +100,16 @@ Alpha sprites: 1090..1499 and 1538..1592 are blended (same ranges in PopResource
 `pop3_format::sprites` returns the raw indices; `blend::AlphaTable::rgba` turns them into RGBA (tint colour,
 opacity strength / 15) for GPU blending (`art::alpha_picture_frame`, uploaded with `AlphaMode::Blend`).
 Identified: 1225-1239 a cream dust cloud growing and fading (the teleport landing puff), 1210-1224 the same in
-grey, 1181-1209 fire clouds (1194-1209 the rock explosion of a big volcano fireball's landing [exe]), 1160-1179 the rock-debris dust burst [exe], status markers over people [exe] (pop3-rev-analysis.md "Status markers over people"): 1478-1487 bloodlust
+grey, 1180-1187 a fire cloud and 1188-1192 its fading, 1193 an explosion, 1194-1209 the rock explosion of a big
+volcano fireball's landing [exe] (by eye two explosions, 1193-1197 and 1198-1202), 1160-1179 the rock-debris dust burst [exe], status markers over people [exe] (pop3-rev-analysis.md "Status markers over people"): 1478-1487 bloodlust
 (red bubbles), 1489-1498 low health (white sparkles), 1538-1552 shield (3 rings x 5 sizes), 1553-1563 the hypnotised
-halo (a yellow ring turning over 11 frames), 1241-1247 and 1265-1279 flashes, 1330-1345 smoke columns.
+halo (a yellow ring turning over 11 frames), 1240-1247 a flash (the conversion's halo, a guess) and 1265-1279 a
+similar one. By eye, unconfirmed: 1090-1098 a building's fire, 1100-1107 a fireball turning to smoke and up to 1127
+other fireball effects, 1136-1151 fog (the whirlwind's base?), 1288-1303 sparks, 1304-1319 a water splash (drowning?),
+1329-1360 the smoke of a spy setting a building on fire, 1369-1384 and 1385-1416 smoke, 1433-1440 and 1443-1448
+sparkles, 1450-1465 parts of a HUD cell border, 1466-1477 wind.
+Opaque again after 1592: 1594-1597 a row of 1 to 4 braves and 1598-1602 a row of 1 to 5 pieces of wood (the
+tooltip's people and wood when full, one sprite per count), 1603-1614 parts of a progress bar (probably).
 
 ## Blend tables (`data/`, one per theme, 65 536 bytes = 256 x 256 palette indices)
 Layouts from PopResourceEditor (Toksisitee, MIT, `140e389`), checked against the files.
