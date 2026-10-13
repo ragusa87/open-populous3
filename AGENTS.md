@@ -15,6 +15,10 @@ from the user's own install.
 - Never look at a screenshot or video of the original game running, for any purpose (not to check art, layout or
   behaviour either), and never ask for or fetch one. Renders of our own engine loading the user's original files
   (`just shot` with an install) are fine to check that they load right; they are never committed.
+- Clean room: reverse engineering (disassembly, tracing, live memory reads, running the original) happens only in
+  separate spec sessions, whose only output is docs/specs/pop3-rev-analysis.md and its tools. A coding session never
+  reads, disassembles or runs the original executable and never traces anything itself: it implements from the docs.
+  A fact the docs lack becomes a question in TODO.md for a spec session, or a guess tagged as such.
 - Facts from the community tools (README "References") yes, their code no.
 - Everything shippable works with `--no-original` (generated or CC0 content, our own texts).
 
