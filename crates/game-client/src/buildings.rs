@@ -456,9 +456,10 @@ pub fn fire_bases(kind: BuildingKind, top: f32) -> Vec<[f32; 3]> {
 }
 
 /// Whether the views of `drawn` still show `now`: a vault's phase does not count (`vault` poses it),
-/// nor the people inside (`chimney` smokes), nor how long a fire has left, nor a training unit's mana.
+/// nor the people inside (`chimney` smokes), nor how long a fire has left or a blow shakes it (only whether),
+/// nor its wear and repair delay, nor a training unit's mana.
 pub fn same_look(drawn: &[Building], now: &[Building]) -> bool {
-    let look = |b: &Building| Building { vault: None, inside: 0, production: None, burning: b.burning.map(|c| Countdown::new(c.total())), ..b.clone() };
+    let look = |b: &Building| Building { vault: None, inside: 0, production: None, shaking: (b.shaking > 0) as u16, wear: 0, repair_delay: None, burning: b.burning.map(|c| Countdown::new(c.total())), ..b.clone() };
     drawn.len() == now.len() && drawn.iter().zip(now).all(|(a, b)| look(a) == look(b))
 }
 
@@ -503,6 +504,9 @@ mod tests {
         assert!(same_look(std::slice::from_ref(&hut), &[Building { inside: 2, ..hut.clone() }]), "people going in");
         let training = Building { production: Some(game_core::production::Production { stored: 109, cost: 3500, short: false }), ..hut.clone() };
         assert!(same_look(std::slice::from_ref(&hut), &[training]), "mana stored");
+        let hit = Building { shaking: 40, wear: 3, ..hut.clone() };
+        assert!(same_look(std::slice::from_ref(&hit), &[Building { shaking: 39, wear: 2, ..hut.clone() }]), "a shake running on");
+        assert!(!same_look(std::slice::from_ref(&hut), &[hit]), "starting to shake");
         let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
         assert!(!same_look(std::slice::from_ref(&vault), &[hut]));
         assert!(!same_look(std::slice::from_ref(&vault), &[]));
