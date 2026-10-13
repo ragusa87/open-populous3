@@ -27,7 +27,7 @@ pub const UNIT_FIGURES: std::ops::RangeInclusive<usize> = 75..=80;
 /// The Stats tab's row labels (17 x 23) in `EFFECT_SPRITE_FILE`: selected, idle, in a house, working, in a
 /// boat, in a balloon.
 pub const STATS_ROW_ICONS: [usize; 6] = [1084, 1085, 1086, 1087, 655, 1088];
-/// Three people (24 x 16) in `EFFECT_SPRITE_FILE`, dark (681 the same light): the population.
+/// Three people (24 x 16) in `EFFECT_SPRITE_FILE`, the Stats tab's icon (681 highlighted), also the population.
 pub const PEOPLE_ICON: usize = 680;
 /// The tooltip's buttons in `EFFECT_SPRITE_FILE`, each normal, hovered, pressed: dismantle a building,
 /// build it again (undo the dismantling), get everyone off a vehicle.
