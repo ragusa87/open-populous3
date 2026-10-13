@@ -432,6 +432,64 @@ impl GameMap {
     }
 }
 
+/// The vehicles sandbox's name.
+pub const SANDBOX_VEHICLES: &str = "Sandbox: vehicles";
+
+impl GameMap {
+    /// Test ground for vehicles: a flat island with the player's site, its south coast in view of the starting camera,
+    /// and a smaller island south across a strait.
+    /// - South coast: a built boat hut, its jetty out to sea, and an airship hut, with 8 braves and a pile of wood
+    ///   between them to crew them; an empty boat on the coast, a boat with 2 braves aboard, and an empty boat out at
+    ///   sea, drifting back to the shore.
+    /// - By the site: an empty balloon for the shaman.
+    /// - The south island: an empty boat of tribe 1 on its coast, to take.
+    pub fn sandbox_vehicles() -> Self {
+        use crate::vehicle::{Vehicle, VehicleKind};
+        const C: i32 = MAP_SIZE as i32 / 2;
+        let mut terrain = Heightmap::new(MAP_SIZE);
+        let land = |x: i32, z: i32| ((C - 18..=C + 18).contains(&x) && (C - 14..=C + 8).contains(&z)) || ((C - 8..=C + 8).contains(&x) && (C + 18..=C + 24).contains(&z));
+        for z in 0..MAP_SIZE as i32 {
+            for x in 0..MAP_SIZE as i32 {
+                if land(x, z) {
+                    terrain.set(x, z, 64);
+                }
+            }
+        }
+        let sites = vec![ReincarnationSite::at_cell(0, (C, C - 6))];
+        let mut map = GameMap::sandbox_bare(SANDBOX_VEHICLES, terrain, sites).with_shamans();
+        let corner = |dx: i32, dz: i32| (((C + dx) * 512) as u16, ((C + dz) * 512) as u16);
+        let at = |dx: i32, dz: i32| crate::slots::cell_centre((C + dx, C + dz));
+        let (x, z) = corner(-8, 7);
+        map.add_building(Building::new(BuildingKind::BoatHut, 0, x, z, 0));
+        let (x, z) = corner(5, 1);
+        map.add_building(Building::new(BuildingKind::AirshipHut, 0, x, z, 0));
+        for n in 0..8 {
+            map.spawn(0, UnitKind::Brave, at(-4 + n % 4, 1 + n / 4));
+        }
+        let (px, pz) = at(-1, 3);
+        for k in 0..10u16 {
+            map.wood.push(WoodPiece::new(px + (k % 5) * 80, pz + (k / 5) * 90));
+        }
+        for (i, (dx, dz)) in [(12, -10), (14, -8), (13, -12), (15, -11)].into_iter().enumerate() {
+            map.trees.push(Tree::new((C + dx, C + dz), i as u8, crate::tree::MAX_SIZE));
+        }
+        let boat = |owner: u8, cell: (i32, i32)| Vehicle::new(VehicleKind::Boat, owner, at(cell.0, cell.1), crate::angle::Angle::new(512));
+        map.add_vehicle(boat(0, (-2, 8)));
+        let manned = map.add_vehicle(boat(0, (4, 8)));
+        for _ in 0..2 {
+            let u = map.spawn(0, UnitKind::Brave, at(4, 8));
+            u.aboard = Some(manned);
+            let id = u.id;
+            map.vehicles.get_mut(manned).unwrap().seat(id, 0);
+        }
+        map.add_vehicle(boat(0, (10, 13)));
+        map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at(3, -4), crate::angle::Angle::ZERO));
+        map.add_vehicle(boat(1, (0, 17)));
+        map.update_walls();
+        map
+    }
+}
+
 /// Islands of the spells sandbox (`GameMap::sandbox_spells`): centre offset from the map's middle and radius, cells.
 const SPELL_ISLANDS: [((i32, i32), i32); 4] = [((0, 0), 14), ((28, 0), 10), ((0, -30), 10), ((-24, 20), 5)];
 
@@ -2063,6 +2121,25 @@ mod tests {
                 assert!(m.units.iter().filter(|u| u.kind != kind && u.inside.is_none()).all(|u| group.iter().all(|&c| (c.0 - u.cell().0).abs().max((c.1 - u.cell().1).abs()) >= 3)), "apart from the others");
             }
         }
+    }
+
+    #[test]
+    fn sandbox_vehicles_has_its_huts_on_the_coast_and_a_crew_makes_a_boat() {
+        use crate::vehicle::{resting, VehicleKind};
+        let mut m = GameMap::sandbox_vehicles();
+        let hut = m.buildings.iter().position(|b| b.kind == BuildingKind::BoatHut).unwrap();
+        assert!(crate::placement::shore_ok(&m, &m.buildings[hut]), "jetty out to sea");
+        let afloat: Vec<_> = m.vehicles.iter().map(|(_, v)| (v.kind, v.owner, resting(v.kind, &m.terrain, v.cell()))).collect();
+        assert_eq!(afloat, vec![(VehicleKind::Boat, 0, true), (VehicleKind::Boat, 0, true), (VehicleKind::Boat, 0, false), (VehicleKind::Balloon, 0, true), (VehicleKind::Boat, 1, true)]);
+        let braves: Vec<UnitId> = m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.aboard.is_none()).take(3).map(|u| u.id).collect();
+        for c in m.enter_orders(0, &braves, hut) {
+            m.apply(&c);
+        }
+        let before = m.vehicles.len();
+        assert!((0..6000).any(|_| {
+            m.tick();
+            m.vehicles.len() > before
+        }), "a boat out of the hut");
     }
 
     #[test]

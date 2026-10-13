@@ -38,7 +38,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 ## Menu and sandboxes ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Sandbox Spells: test ground to cast every spell freely (no mana, no charges).
 - [ ] Sandbox Buildings: placing and constructing buildings on its free ground (braves, wood and trees are there; every model and every construction stage are shown).
-- [ ] More sandboxes as features come (combat, vehicles...).
+- [ ] More sandboxes as features come (combat...).
 - [ ] Sandbox Worship: totems are drawn but nothing can be prayed at yet; the generated stand-ins are identical pillars.
 - [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
 

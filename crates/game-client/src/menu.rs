@@ -1,11 +1,11 @@
 //! Main menu shown before the game: New game (the level from the command line / PgUp-PgDn list),
-//! Sandbox (test grounds: Walk, Units, Buildings, Worship, Spells), Quit. Sub-pages open on Enter and go back with Esc/Backspace or
+//! Sandbox (test grounds: Walk, Units, Buildings, Worship, Spells, Vehicles), Quit. Sub-pages open on Enter and go back with Esc/Backspace or
 //! their Back entry; arrows (or W/S) move, Enter/Space picks, the mouse hovers and clicks.
 //! Gameplay systems are in the `Gameplay` set, which only runs while `Playing`. Behind the menu the
 //! game camera is off: no world, units or HUD are drawn, the menu has its own overlay camera.
 //! Esc in the game pauses: the mouse is released and the pause menu (Resume, Main menu with a
 //! confirmation) shows over the frozen game; Esc on it resumes. Its Dev mode entry switches `keymap::DevMode`.
-//! `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship|sandbox-spells` picks where to start (screenshots start in the game).
+//! `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship|sandbox-spells|sandbox-vehicles` picks where to start (screenshots start in the game).
 
 use crate::camera::{GameCamera, OverlayCamera};
 use crate::game_speed::GameSpeed;
@@ -56,6 +56,7 @@ pub enum Start {
     SandboxBuildings,
     SandboxWorship,
     SandboxSpells,
+    SandboxVehicles,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,7 +95,7 @@ pub fn title(page: Page) -> &'static str {
 pub fn items(page: Page) -> &'static [(&'static str, Action)] {
     match page {
         Page::Main => &[("New game", Action::Start(Start::NewGame)), ("Sandbox", Action::Open(Page::Sandbox)), ("Quit", Action::Quit)],
-        Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Units", Action::Start(Start::SandboxUnits)), ("Buildings", Action::Start(Start::SandboxBuildings)), ("Worship", Action::Start(Start::SandboxWorship)), ("Spells", Action::Start(Start::SandboxSpells)), ("Back", Action::Back)],
+        Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Units", Action::Start(Start::SandboxUnits)), ("Buildings", Action::Start(Start::SandboxBuildings)), ("Worship", Action::Start(Start::SandboxWorship)), ("Spells", Action::Start(Start::SandboxSpells)), ("Vehicles", Action::Start(Start::SandboxVehicles)), ("Back", Action::Back)],
         Page::Paused => &[("Resume", Action::Resume), ("Game speed", Action::CycleSpeed), ("Dev mode", Action::ToggleDev), ("Main menu", Action::Open(Page::ConfirmLeave))],
         Page::ConfirmLeave => &[("No, keep playing", Action::Back), ("Yes, back to the main menu", Action::Leave)],
     }
@@ -188,6 +189,7 @@ pub fn start_from_env(start: Option<&str>, screenshot: bool) -> Option<Start> {
         Some("sandbox-buildings") => Some(Start::SandboxBuildings),
         Some("sandbox-worship") => Some(Start::SandboxWorship),
         Some("sandbox-spells") => Some(Start::SandboxSpells),
+        Some("sandbox-vehicles") => Some(Start::SandboxVehicles),
         _ if screenshot => Some(Start::NewGame),
         _ => None,
     }
@@ -330,6 +332,7 @@ impl GameSetup<'_> {
             Start::SandboxBuildings => new_game(GameMap::sandbox_buildings()),
             Start::SandboxWorship => new_game(GameMap::sandbox_worship()),
             Start::SandboxSpells => new_game(GameMap::sandbox_spells()),
+            Start::SandboxVehicles => new_game(GameMap::sandbox_vehicles()),
         };
         *self.schedule = crate::units::GameSchedule::default();
         self.clock.new_game();
@@ -565,5 +568,6 @@ mod tests {
         assert_eq!(start_from_env(Some("sandbox-buildings"), false), Some(Start::SandboxBuildings));
         assert_eq!(start_from_env(Some("sandbox-worship"), false), Some(Start::SandboxWorship));
         assert_eq!(start_from_env(Some("sandbox-spells"), false), Some(Start::SandboxSpells));
+        assert_eq!(start_from_env(Some("sandbox-vehicles"), false), Some(Start::SandboxVehicles));
     }
 }

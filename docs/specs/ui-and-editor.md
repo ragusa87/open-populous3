@@ -135,12 +135,15 @@ and enters a `ready` span: captures (`dev`) and `tools/trace_top.py` count from 
 ## Main menu (`menu.rs`)
 Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list: the original
 `levlNNNN.dat` files in level-number order, any file name case, `world::sort_levels`),
-Sandbox > Walk, Units, Buildings, Worship, Spells (the ground of every sandbox shows a grid along the cell borders, `world::ShowGrid`,
+Sandbox > Walk, Units, Buildings, Worship, Spells, Vehicles (the ground of every sandbox shows a grid along the cell borders, `world::ShowGrid`,
 `terrain_texture::draw_grid`; levels do not) (`GameMap::sandbox_walk`: small flat island, gentle ramp east, steep hill north, lake west, mesa ringed by cliffs south-east, each a few cells past the spawn; `GameMap::sandbox_worship`: a pyramid of knowledge south of the site, door
 facing the shaman, and north one totem of each look with 8 braves, worship.md; `GameMap::sandbox_spells`: every spell
 unlimited, Teleport too (`SpellBook::unlimited`), on islands a few cells of sea apart: the player's in the middle with 3 of each follower kind of the player south and of
 tribe 1 north, kind by kind 5 cells apart, a red
-village east with people in its huts, a hill north with a few people of tribe 2, an empty islet south-west), Quit.
+village east with people in its huts, a hill north with a few people of tribe 2, an empty islet south-west;
+`GameMap::sandbox_vehicles`: a boat hut and an airship hut on the south coast with 8 braves and wood to crew them,
+boats on the coast (one manned), one adrift at sea, a balloon by the site for the shaman, and an empty boat of
+tribe 1 on an island south across a strait, vehicles.md), Quit.
 Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
 Esc in the game (once an open view-presets menu is closed) pauses: the mouse is released (`VirtualCursor::request`)
 and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Game speed: x1/x2/x4/x8 (cycles), Dev mode: on/off (shortcuts.md), Main menu >
@@ -148,7 +151,7 @@ and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Game spe
 Resuming or starting a game captures the mouse again.
 `AppState::Loading | Menu | Playing | Paused`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
 while playing. Behind the menu the game camera is off (no terrain, units or HUD drawn); the menu and the cursor
-are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship|sandbox-spells` picks the start; screenshots start in the game by default.
+are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship|sandbox-spells|sandbox-vehicles` picks the start; screenshots start in the game by default.
 
 ## Game speed (`game_speed.rs`)
 P pauses the simulation only: the camera, hovering, selecting and the HUD keep working, units and their
