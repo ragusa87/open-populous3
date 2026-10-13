@@ -56,10 +56,12 @@ pub enum Pose {
     Hack,
     /// A firewarrior throwing fire.
     Throw,
+    /// Sitting aboard a vehicle, pedalling it.
+    Pedal,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 23] = [
+    pub const ALL: [Pose; 24] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -83,6 +85,7 @@ impl Pose {
         Pose::Shoved,
         Pose::Hack,
         Pose::Throw,
+        Pose::Pedal,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -96,6 +99,7 @@ impl Pose {
             Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack => Pose::Idle,
             Pose::Throw => Pose::Cast,
             Pose::Shoved => Pose::Fall,
+            Pose::Pedal => Pose::Pray,
             pose => pose,
         }
     }
@@ -108,7 +112,7 @@ impl Pose {
     /// Frames per second of looping poses.
     fn fps(self) -> f32 {
         match self {
-            Pose::Walk | Pose::CarryWalk => 10.0,
+            Pose::Walk | Pose::CarryWalk | Pose::Pedal => 10.0,
             Pose::Panic => 12.0,
             Pose::Drown | Pose::Flung | Pose::Tumble => 8.0,
             Pose::Pray | Pose::Stranded => 4.0,
@@ -120,7 +124,7 @@ impl Pose {
         match self {
             Pose::Idle | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Hammer => ShamanAnim::Idle,
             Pose::Walk | Pose::CarryWalk | Pose::Panic => ShamanAnim::Walk,
-            Pose::Pray => ShamanAnim::Kneel,
+            Pose::Pray | Pose::Pedal => ShamanAnim::Kneel,
             Pose::Cast | Pose::Jump => ShamanAnim::Cast,
             Pose::Fall | Pose::Spirit => ShamanAnim::Fall,
             Pose::Flung => ShamanAnim::Flying,
@@ -160,6 +164,14 @@ fn challenge_pose(role: game_core::challenge::Role, carrying: bool) -> Pose {
         Role::Shoving { .. } => Pose::Strike,
         Role::Shoved => Pose::Shoved,
     }
+}
+
+/// The pose `u` is drawn in: aboard a vehicle and idle, pedalling it; else by its action (`pose_for`).
+pub fn pose_of(u: &game_core::unit::Unit) -> Pose {
+    if u.aboard.is_some() && u.action == Action::Idle {
+        return Pose::Pedal;
+    }
+    pose_for(&u.action, u.carrying > 0, u.motion.airborne())
 }
 
 /// The pose for an action; `carrying` wood changes standing and walking, `airborne` (lift above
@@ -321,7 +333,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
             let anim = match pose {
                 Pose::Idle | Pose::Cast | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Jump | Pose::Hammer => WildmanAnim::Stand,
                 Pose::Walk | Pose::CarryWalk | Pose::Panic => WildmanAnim::Walk,
-                Pose::Pray => WildmanAnim::Sit,
+                Pose::Pray | Pose::Pedal => WildmanAnim::Sit,
                 Pose::Fall | Pose::Tumble | Pose::Spirit => WildmanAnim::Tumble,
                 Pose::Drown | Pose::Flung | Pose::Shoved => WildmanAnim::Flung,
                 Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack | Pose::Throw => WildmanAnim::Stand,
@@ -361,6 +373,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Shoved => PersonAnim::Shoved,
                 Pose::Hack => PersonAnim::Chop,
                 Pose::Throw => PersonAnim::Throw,
+                Pose::Pedal => PersonAnim::Pedal,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }

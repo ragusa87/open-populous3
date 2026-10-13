@@ -18,7 +18,7 @@ pub mod worship;
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{render_pos, Grounded};
 use crate::world::{CurrentMap, LevelList, TerrainPatches};
-use art::{frame_index, pose_for, sprite_dir, Frame, Pose};
+use art::{frame_index, sprite_dir, Frame, Pose};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -205,7 +205,7 @@ impl UnitSprites {
     /// The frame showing `unit` from a camera at `yaw`; praying towards `worship` when it
     /// worships its shaman (`worship::worship_facing`).
     pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, yaw: f32, clock: &SimClock, now: SimNow) -> Option<&FrameAsset> {
-        let (pose, facing) = worship.map_or((pose_for(&unit.action, unit.carrying > 0, unit.motion.airborne()), unit.facing), |f| (Pose::Pray, f));
+        let (pose, facing) = worship.map_or((art::pose_of(unit), unit.facing), |f| (Pose::Pray, f));
         let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
         // Wildmen have no tribe (owner 255): one look for all.
         let tribe = if unit.kind == UnitKind::Wildman { 0 } else { unit.owner as usize };
@@ -489,7 +489,7 @@ fn back_to(to: Vec2, from: (u16, u16)) -> Vec2 {
 /// the ground (render units). Aboard, on its seat (`vehicles::seat_offset`) at the vehicle's deck; boarding, on an
 /// arc from where it stood to its seat; getting off, on an arc down from the vehicle to where it stands. `at` is
 /// where the unit glides (`SimClock::cell_pos`).
-pub fn riding(map: &game_core::map::GameMap, look: &crate::vehicles::VehicleLook, u: &game_core::unit::Unit, at: Vec2, alpha: f32, height_scale: f32) -> Option<(Vec2, f32)> {
+pub fn riding(map: &game_core::map::GameMap, u: &game_core::unit::Unit, at: Vec2, alpha: f32, height_scale: f32) -> Option<(Vec2, f32)> {
     use game_core::unit::Action;
     let arc = |t: f32| HOP * 4.0 * t * (1.0 - t);
     if let Action::Alighting { from, height, left } = u.action {
@@ -500,7 +500,7 @@ pub fn riding(map: &game_core::map::GameMap, look: &crate::vehicles::VehicleLook
     }
     let v = map.vehicle(u.aboard?)?;
     let k = v.passengers.iter().position(|&p| p == u.id).unwrap_or(0);
-    let (seat, deck) = (at + crate::vehicles::seat_offset(v, k), crate::vehicles::deck(map, v, height_scale, look));
+    let (seat, deck) = (at + crate::vehicles::seat_offset(v, k), crate::vehicles::deck(map, v, height_scale));
     Some(match u.action {
         Action::Boarding { from, left } => {
             let t = jump_progress(left, alpha);
@@ -525,7 +525,7 @@ fn animate_views(
     hovered: Res<crate::hover::Hovered>,
     heights: Res<crate::buildings::ModelHeights>,
     marker_art: Option<Res<markers::MarkerArt>>,
-    (params, look): (Res<CurveParamsRes>, Res<crate::vehicles::VehicleLook>),
+    params: Res<CurveParamsRes>,
 ) {
     let units = &map.0.units;
     let bars_on = !marker_art.is_some_and(|a| a.original);
@@ -533,7 +533,7 @@ fn animate_views(
     for (view, mut ground, mut t, _) in &mut views {
         let Some(u) = units.get(view.0) else { continue };
         let at = clock.cell_pos(view.0, u);
-        ground.at = perched(&map.0, &heights, u).or_else(|| riding(&map.0, &look, u, at, clock.alpha(), params.0.height_scale)).map_or(at, |p| p.0);
+        ground.at = perched(&map.0, &heights, u).or_else(|| riding(&map.0, u, at, clock.alpha(), params.0.height_scale)).map_or(at, |p| p.0);
         t.rotation = facing_camera;
     }
     let shamans = worship::shamans(units);
@@ -602,7 +602,7 @@ fn pull_to_eye(
     views: Query<(&UnitView, &Grounded, &Transform, &Children)>,
     mut parts: Query<(&mut Transform, Has<HealthBar>, Option<&markers::MarkerSlot>), (Or<(With<UnitSprite>, With<HealthBar>, With<markers::MarkerSlot>)>, Without<UnitView>, Without<GameCamera>)>,
     heights: Res<crate::buildings::ModelHeights>,
-    (look, sizes): (Res<crate::vehicles::VehicleLook>, Res<crate::object_scale::ObjectScale>),
+    sizes: Res<crate::object_scale::ObjectScale>,
 ) {
     use crate::object_scale::ObjectGroup;
     let Ok(eye) = eye.single() else { return };
@@ -613,9 +613,11 @@ fn pull_to_eye(
         let perch = u.and_then(|u| perched(&map.0, &heights, u)).map(|p| Vec3::Y * p.1);
         // Aboard: at the deck of a hull drawn at the buildings' scale, from a view drawn at the units' (its
         // children's offsets are scaled with it).
-        let riding = u.and_then(|u| riding(&map.0, &look, u, clock.cell_pos(unit.0, u), clock.alpha(), params.0.height_scale)).map(|p| Vec3::Y * p.1 * sizes.get(ObjectGroup::Buildings));
+        let riding = u.and_then(|u| riding(&map.0, u, clock.cell_pos(unit.0, u), clock.alpha(), params.0.height_scale)).map(|p| Vec3::Y * p.1 * sizes.get(ObjectGroup::Buildings));
         let up = perch.or(riding);
-        let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, if up.is_some() { PERCH_PULL } else { PULL_TO_EYE });
+        // Aboard, not pulled at all: its hull's near side hides it as it should (seen inside, not in front).
+        let pull = if perch.is_some() { PERCH_PULL } else if riding.is_some() { 0.0 } else { PULL_TO_EYE };
+        let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, pull);
         let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale));
         let shown = perch.or(riding.map(|r| r / sizes.get(ObjectGroup::Units))).unwrap_or_default();
         let local = view.rotation.inverse() * (offset + shown) + Vec3::Y * lift * scale;
@@ -644,17 +646,16 @@ mod tests {
         let id = map.spawn(0, UnitKind::Brave, at).id;
         map.unit_mut(id).unwrap().aboard = Some(v);
         map.vehicles.get_mut(v).unwrap().seat(id, 0);
-        let look = crate::vehicles::VehicleLook::default();
         let cells = Vec2::new(60.5, 60.5);
-        let deck = crate::vehicles::deck(&map, map.vehicle(v).unwrap(), 0.01, &look);
-        let (pos, h) = riding(&map, &look, map.unit(id).unwrap(), cells, 0.0, 0.01).unwrap();
+        let deck = crate::vehicles::deck(&map, map.vehicle(v).unwrap(), 0.01);
+        let (pos, h) = riding(&map, map.unit(id).unwrap(), cells, 0.0, 0.01).unwrap();
         assert_eq!(h, deck, "on the basket's floor");
         assert!((pos - cells).length() < 0.1, "on its seat");
         let from = (58 * 512 + 256, 60 * 512 + 256);
         map.unit_mut(id).unwrap().action = Action::Boarding { from, left: game_core::time::Countdown::new(Ticks::new(7)) };
-        let (pos, h) = riding(&map, &look, map.unit(id).unwrap(), cells, 0.0, 0.01).unwrap();
+        let (pos, h) = riding(&map, map.unit(id).unwrap(), cells, 0.0, 0.01).unwrap();
         assert!((pos - Vec2::new(58.5, 60.5)).length() < 0.1 && h == 0.0, "the jump starts where it stood");
-        assert_eq!(riding(&map, &look, &map.units[0], cells, 0.0, 0.01), None, "on foot");
+        assert_eq!(riding(&map, &map.units[0], cells, 0.0, 0.01), None, "on foot");
     }
 
     #[test]

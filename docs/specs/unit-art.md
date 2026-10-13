@@ -154,7 +154,7 @@ SitDown, StandUp, SwordSlash, Victory, Walk, Walk_Carry), no props, and hand bon
 | 7 | firewarrior throwing fire | firewarrior | Shoot_OneHanded (once) | a fireball sprite at the hand, or the spell effect |
 | 17 | spy setting fire to a building | spy | PickUp (crouch moment, loop) | a torch prop (optional) |
 | 18 | sitting while being converted | brave | SitDown end (as pray) | none |
-| 51 | pedalling a vehicle | all | SitDown end, legs still | none (no pedalling clip) |
+| 51 | pedalling a vehicle (`Pose::Pedal`, used) | all | SitDown end, legs still (the `pray` sheet stands in) | none (no pedalling clip) |
 | 52 | running from bees | all | Run (loop) | none |
 | 16 / 19, 37 | tilted in a tornado / tumbling | all | Idle or Death frame, turned by the renderer | rotate the model about its feet per frame |
 | 40 | drowning, spirit rising | all | Death last frame, sunk | a see-through copy rising, drawn in post (alpha sprite) |

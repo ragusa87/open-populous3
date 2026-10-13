@@ -32,9 +32,6 @@ pub struct VehicleLook {
     theme: Option<u8>,
     original: Option<Handle<StandardMaterial>>,
     parts: Vec<((VehicleKind, u8), Vec<(Handle<Mesh>, Handle<StandardMaterial>, Transform)>)>,
-    /// Each kind's lowest point under its hull's origin, render units: where its people stand (the original
-    /// airship's basket hangs below it).
-    floors: Vec<(VehicleKind, f32)>,
 }
 
 /// One vehicle's view: the root (moved along the ground), its hull (lifted, turned and tilted) and what it last
@@ -83,14 +80,15 @@ pub fn lift(map: &GameMap, v: &Vehicle, height_scale: f32) -> f32 {
     (v.altitude(&map.terrain) as i32 - ground - depth) as f32 * height_scale
 }
 
-/// Where its people stand over the model's lowest point (a hull's bottom, a basket's floor), render units.
+/// Where its people stand over the model's origin, render units: the origin is its floor (the original boat's
+/// waterline, its keel going below; the airship's basket floor; our stand-ins' bottoms).
 const FEET: f32 = 0.03;
 /// Seats along a boat, across a basket, cells apart.
 const SEAT_GAP: f32 = 0.12;
 
-/// The height its people stand at over the ground under it, render units: its model's floor (`VehicleLook::floor`).
-pub fn deck(map: &GameMap, v: &Vehicle, height_scale: f32, look: &VehicleLook) -> f32 {
-    lift(map, v, height_scale) + look.floor(v.kind) + FEET
+/// The height its people stand at over the ground under it, render units.
+pub fn deck(map: &GameMap, v: &Vehicle, height_scale: f32) -> f32 {
+    lift(map, v, height_scale) + FEET
 }
 
 /// Where seat `k` is from the vehicle's middle, cells: along a boat from bow to stern, side by side in a basket.
@@ -136,11 +134,6 @@ pub fn hull_rotation(v: &Vehicle) -> Quat {
 }
 
 impl VehicleLook {
-    /// The lowest point of `kind`'s model under its origin, render units (0 until it is first drawn).
-    pub fn floor(&self, kind: VehicleKind) -> f32 {
-        self.floors.iter().find(|(k, _)| *k == kind).map_or(0.0, |f| f.1)
-    }
-
     /// The parts of a `kind` of `owner`: the original object when there is one, else our stand-in.
     fn parts(&mut self, kind: VehicleKind, owner: u8, theme: u8, levels: &LevelList, objects: &OriginalObjects, assets: &mut Assets3d) -> Vec<(Handle<Mesh>, Handle<StandardMaterial>, Transform)> {
         if let Some((_, parts)) = self.parts.iter().find(|(k, _)| *k == (kind, owner)) {
@@ -149,7 +142,7 @@ impl VehicleLook {
         if self.theme != Some(theme) {
             self.theme = Some(theme);
             self.original = crate::buildings::original_material(levels, theme, &mut assets.images, &mut assets.materials);
-            (self.parts, self.floors) = (Vec::new(), Vec::new());
+            self.parts.clear();
         }
         let index = match kind {
             VehicleKind::Boat => catalog::BOAT,
@@ -158,14 +151,7 @@ impl VehicleLook {
         let original = self.original.clone().zip(objects.0.as_ref().and_then(|bank| bank.get(index)));
         let tribe = if owner < catalog::TRIBES { owner } else { 0 };
         let parts = match original {
-            Some((material, obj)) => {
-                let data = object_mesh(&solid_part(obj), tribe);
-                let floor = data.positions.iter().map(|p| p[1]).fold(f32::MAX, f32::min);
-                if !self.floors.iter().any(|(k, _)| *k == kind) && floor.is_finite() {
-                    self.floors.push((kind, floor));
-                }
-                vec![(assets.meshes.add(to_mesh(data)), material, Transform::IDENTITY)]
-            }
+            Some((material, obj)) => vec![(assets.meshes.add(to_mesh(object_mesh(&solid_part(obj), tribe))), material, Transform::IDENTITY)],
             None => stand_in(kind, owner, assets),
         };
         self.parts.push(((kind, owner), parts.clone()));

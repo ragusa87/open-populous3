@@ -107,9 +107,12 @@ after the loop), passengers carried.
 `--no-original` our stand-in (a wooden hull with a deck in the tribe's colour, a balloon in the tribe's colour over
 a basket). Turned by its heading (the original boat's bow is along its own -z), tilted by a sinking boat's pitch
 and a stranded one's roll, lifted to its altitude (a balloon's hover, a sinking boat's depth below the surface),
-gliding between ticks like the units. People aboard are drawn in it, like a tower's lookout (`units::riding`): on
-their seat (`vehicles::seat_offset`: along a boat, side by side in a basket) at its floor (the model's lowest point,
-`VehicleLook::floor`: the original airship's basket hangs below its origin), hoverable and clickable. Dev shots:
+gliding between ticks like the units. People aboard are drawn in it (`units::riding`): on their seat
+(`vehicles::seat_offset`: along a boat, side by side in a basket) at its floor, the model's origin (the original
+boat's waterline, its keel going below; the airship's basket floor), sitting and pedalling (`Pose::Pedal`, the
+original's anim 51; the end of `SitDown` in our sheets), hoverable and clickable. Unlike a tower's lookout they are
+not pulled towards the camera: the depth test lets the near side of the hull or basket hide their lower body, so
+they are seen inside, not in front. Dev shots:
 `VEHICLE=boat@x,z[:n]` (`;` between several), `VEHICLE_TO=x,z`, `VEHICLE_TICKS=N` (`dev.rs`).
 
 ## Client (done: orders and tooltip)
