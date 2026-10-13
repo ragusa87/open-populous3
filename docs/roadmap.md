@@ -18,6 +18,10 @@
   by every emitter and applied in order, coordinators ticked before units, their units released when they end.
 - Mana, spell and build books per player in the simulation: a mana pool settled once per turn (spells charged
   first, the rest banked), casts and pauses as commands; the Spells and Build tabs only draw them.
+- Vehicles (docs/specs/vehicles.md): boats and balloons with health as an abandon timer, sinking, rising,
+  stranding, enemy damage; boarding up to the seats, driven by a passenger's move order, unloaded near the shore;
+  vehicle huts whose crew fetches wood and launches them; drawn from the original objects or generated stand-ins,
+  hovered, clicked to board, with a tooltip and the unload button.
 
 ## Next
 See [TODO.md](../TODO.md).
