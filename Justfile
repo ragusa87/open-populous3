@@ -53,6 +53,10 @@ level-info file:
 model-mapping:
     uvx --with pillow python tools/model_mapping.py
 
+# Standalone page to pick each spell's icon among the original sprites (embeds original art: stays in target/)
+spell-icons:
+    uvx --with pillow python tools/spell_icons.py
+
 # Windowed run logging cursor confinement (focus, enter/leave, edge pushes)
 cursor-debug *args:
     POP3_CURSOR_DEBUG=1 cargo run -q -p game-client -- {{args}} 2>&1 | grep --line-buffered cursor-debug

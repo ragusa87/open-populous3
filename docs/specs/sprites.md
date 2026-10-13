@@ -58,6 +58,10 @@ guessed): the menus' cursor and, with the spell's icon, the cursor while aiming 
 38-57 gold spell icons, 58-66 teal building icons, 80-155 action pointers (build, plant,
 guard...), 156-161 small icons.
 
+`just spell-icons` (`tools/spell_icons.py`) writes `target/spell-icons.html` (original art: never committed): for
+each spell of the panel, these cursor icons, the `hfx0-0.dat` glyphs 1030-1083 and spell names 107-111, and the
+`plspanel.spr` / `plsspace.spr` artwork as candidates for its tile's icon, the choices shown as JSON.
+
 Spell icons, named by someone who knows the game (`virtual_cursor::spell_sprite`), shown right of the gold arrow
 while aiming: 38 bloodlust (a skull, not on
 the player's panel), 39 magical shield (fist), 40 armageddon (scales, probably), 41 blast (flame), 42 convert
