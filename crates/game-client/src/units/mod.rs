@@ -446,10 +446,10 @@ fn respawn_views(
 }
 
 #[allow(clippy::too_many_arguments)]
-/// A unit aboard a vehicle or standing in a built building is not seen (walking in or out by the door it is, in a
+/// A unit standing in a built building is not seen (one aboard a vehicle is, in it: `riding`) (walking in or out by the door it is, in a
 /// building under construction, open, it is, and up a tower's lookout it is: `standing_in`).
 pub fn hidden_inside(map: &game_core::map::GameMap, u: &game_core::unit::Unit) -> bool {
-    u.aboard.is_some() || standing_in(map, u).is_some_and(|b| crate::buildings::lookout(b.kind).is_none())
+    standing_in(map, u).is_some_and(|b| crate::buildings::lookout(b.kind).is_none())
 }
 
 /// The built building a unit stands in (not walking in or out of it).
@@ -468,6 +468,48 @@ fn perched(map: &game_core::map::GameMap, heights: &crate::buildings::ModelHeigh
     crate::buildings::perch(b, *heights.0.get(&b.id)?)
 }
 
+/// How high a jump into or out of a vehicle goes over the straight line, cells.
+const HOP: f32 = 0.3;
+
+/// How far through a timed jump `left` the drawn moment is, 0..1 (one tick behind, gliding with `alpha`).
+fn jump_progress(left: game_core::time::Countdown, alpha: f32) -> f32 {
+    let total = left.total().get().max(1) as f32;
+    ((left.done().get() as f32 - 1.0 + alpha) / total).clamp(0.0, 1.0)
+}
+
+/// From `to` (cells) back to world point `from`, the short way around the torus, cells.
+fn back_to(to: Vec2, from: (u16, u16)) -> Vec2 {
+    let cell = WORLD_UNITS_PER_CELL as f32;
+    let world = |c: f32| (c * cell) as i64 as u16;
+    let d = |a: f32, b: u16| game_core::unit::torus_delta(world(a), b) as f32 / cell;
+    Vec2::new(d(to.x, from.0), d(to.y, from.1))
+}
+
+/// Where a unit aboard a vehicle, or jumping into or out of one, is drawn: map position (cells) and height over
+/// the ground (render units). Aboard, on its seat (`vehicles::seat_offset`) at the vehicle's deck; boarding, on an
+/// arc from where it stood to its seat; getting off, on an arc down from the vehicle to where it stands. `at` is
+/// where the unit glides (`SimClock::cell_pos`).
+pub fn riding(map: &game_core::map::GameMap, look: &crate::vehicles::VehicleLook, u: &game_core::unit::Unit, at: Vec2, alpha: f32, height_scale: f32) -> Option<(Vec2, f32)> {
+    use game_core::unit::Action;
+    let arc = |t: f32| HOP * 4.0 * t * (1.0 - t);
+    if let Action::Alighting { from, height, left } = u.action {
+        let t = jump_progress(left, alpha);
+        let ground = map.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
+        let start = (height as i32 - ground).max(0) as f32 * height_scale;
+        return Some((at + back_to(at, from) * (1.0 - t), start * (1.0 - t) + arc(t)));
+    }
+    let v = map.vehicle(u.aboard?)?;
+    let k = v.passengers.iter().position(|&p| p == u.id).unwrap_or(0);
+    let (seat, deck) = (at + crate::vehicles::seat_offset(v, k), crate::vehicles::deck(map, v, height_scale, look));
+    Some(match u.action {
+        Action::Boarding { from, left } => {
+            let t = jump_progress(left, alpha);
+            (seat + back_to(seat, from) * (1.0 - t), deck * t + arc(t))
+        }
+        _ => (seat, deck),
+    })
+}
+
 fn animate_views(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
@@ -483,13 +525,15 @@ fn animate_views(
     hovered: Res<crate::hover::Hovered>,
     heights: Res<crate::buildings::ModelHeights>,
     marker_art: Option<Res<markers::MarkerArt>>,
+    (params, look): (Res<CurveParamsRes>, Res<crate::vehicles::VehicleLook>),
 ) {
     let units = &map.0.units;
     let bars_on = !marker_art.is_some_and(|a| a.original);
     let facing_camera = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
     for (view, mut ground, mut t, _) in &mut views {
         let Some(u) = units.get(view.0) else { continue };
-        ground.at = perched(&map.0, &heights, u).map_or_else(|| clock.cell_pos(view.0, u), |p| p.0);
+        let at = clock.cell_pos(view.0, u);
+        ground.at = perched(&map.0, &heights, u).or_else(|| riding(&map.0, &look, u, at, clock.alpha(), params.0.height_scale)).map_or(at, |p| p.0);
         t.rotation = facing_camera;
     }
     let shamans = worship::shamans(units);
@@ -558,16 +602,23 @@ fn pull_to_eye(
     views: Query<(&UnitView, &Grounded, &Transform, &Children)>,
     mut parts: Query<(&mut Transform, Has<HealthBar>, Option<&markers::MarkerSlot>), (Or<(With<UnitSprite>, With<HealthBar>, With<markers::MarkerSlot>)>, Without<UnitView>, Without<GameCamera>)>,
     heights: Res<crate::buildings::ModelHeights>,
+    (look, sizes): (Res<crate::vehicles::VehicleLook>, Res<crate::object_scale::ObjectScale>),
 ) {
+    use crate::object_scale::ObjectGroup;
     let Ok(eye) = eye.single() else { return };
     for (unit, ground, view, children) in &views {
         let Some(feet) = render_pos(&map.0.terrain, ground, rig.focus, &params.0) else { continue };
         let u = map.0.units.get(unit.0);
         // Up a lookout: on its platform, pulled further so the building around him never hides him.
-        let up = u.and_then(|u| perched(&map.0, &heights, u)).map(|p| Vec3::Y * p.1);
+        let perch = u.and_then(|u| perched(&map.0, &heights, u)).map(|p| Vec3::Y * p.1);
+        // Aboard: at the deck of a hull drawn at the buildings' scale, from a view drawn at the units' (its
+        // children's offsets are scaled with it).
+        let riding = u.and_then(|u| riding(&map.0, &look, u, clock.cell_pos(unit.0, u), clock.alpha(), params.0.height_scale)).map(|p| Vec3::Y * p.1 * sizes.get(ObjectGroup::Buildings));
+        let up = perch.or(riding);
         let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, if up.is_some() { PERCH_PULL } else { PULL_TO_EYE });
         let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale));
-        let local = view.rotation.inverse() * (offset + up.unwrap_or_default()) + Vec3::Y * lift * scale;
+        let shown = perch.or(riding.map(|r| r / sizes.get(ObjectGroup::Units))).unwrap_or_default();
+        let local = view.rotation.inverse() * (offset + shown) + Vec3::Y * lift * scale;
         for &child in children {
             if let Ok((mut t, bar, marker)) = parts.get_mut(child) {
                 let above = if bar { BAR_HEIGHT } else { marker.map_or(0.0, |m| m.above) };
@@ -583,6 +634,38 @@ mod tests {
     use super::*;
     use game_core::time::{Tick, Ticks};
     use game_core::unit::Action;
+
+    #[test]
+    fn people_aboard_stand_on_the_deck_and_jump_in_from_where_they_stood() {
+        use game_core::vehicle::{Vehicle, VehicleKind};
+        let mut map = game_core::map::GameMap::sandbox_vehicles();
+        let at = (60 * 512 + 256, 60 * 512 + 256);
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at, game_core::angle::Angle::ZERO));
+        let id = map.spawn(0, UnitKind::Brave, at).id;
+        map.unit_mut(id).unwrap().aboard = Some(v);
+        map.vehicles.get_mut(v).unwrap().seat(id, 0);
+        let look = crate::vehicles::VehicleLook::default();
+        let cells = Vec2::new(60.5, 60.5);
+        let deck = crate::vehicles::deck(&map, map.vehicle(v).unwrap(), 0.01, &look);
+        let (pos, h) = riding(&map, &look, map.unit(id).unwrap(), cells, 0.0, 0.01).unwrap();
+        assert_eq!(h, deck, "on the basket's floor");
+        assert!((pos - cells).length() < 0.1, "on its seat");
+        let from = (58 * 512 + 256, 60 * 512 + 256);
+        map.unit_mut(id).unwrap().action = Action::Boarding { from, left: game_core::time::Countdown::new(Ticks::new(7)) };
+        let (pos, h) = riding(&map, &look, map.unit(id).unwrap(), cells, 0.0, 0.01).unwrap();
+        assert!((pos - Vec2::new(58.5, 60.5)).length() < 0.1 && h == 0.0, "the jump starts where it stood");
+        assert_eq!(riding(&map, &look, &map.units[0], cells, 0.0, 0.01), None, "on foot");
+    }
+
+    #[test]
+    fn a_jump_goes_through_its_turns_one_tick_behind() {
+        let mut left = game_core::time::Countdown::new(Ticks::new(4));
+        assert_eq!(jump_progress(left, 0.5), 0.0);
+        left.tick();
+        assert_eq!(jump_progress(left, 0.5), 0.125);
+        (0..3).for_each(|_| _ = left.tick());
+        assert_eq!(jump_progress(left, 1.0), 1.0);
+    }
 
     #[test]
     fn no_glide_from_a_unit_gone_from_the_map() {

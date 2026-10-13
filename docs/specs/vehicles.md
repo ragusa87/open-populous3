@@ -57,7 +57,9 @@ on.
   world units per axis, "within 1-2 cells"), gets on (`board`, `UnitEvent::AtVehicle`). Refused when every seat is
   taken (a hard limit), when it is wrecked or stranded, and when someone of another tribe is aboard. Whoever gets
   on makes it their tribe's: an empty enemy or neutral vehicle becomes theirs. It then waits `BOARD_WAIT` (7 turns)
-  before moving off. Getting on is instant for now (the jump or the balloon landing on them: TODO.md).
+  before moving off. Getting on is a jump (`Action::Boarding`, `BOARD_JUMP` = the vehicle's 7-turn wait): seated at
+  once, it is drawn on an arc from where it stood to its seat. Getting off too (`Action::Alighting`): on the ground
+  at once, drawn jumping down from the vehicle.
 - Anyone aboard drives: a move order to a passenger (or to a shaman aboard) sends its vehicle there
   (`order_aboard`), a stop stops it, other orders are ignored until they get off. `Command::MoveVehicle` does the
   same for a manned vehicle of the player; `GameMap::move_orders` turns a move of a selection into one per vehicle
@@ -101,7 +103,9 @@ after the loop), passengers carried.
 `--no-original` our stand-in (a wooden hull with a deck in the tribe's colour, a balloon in the tribe's colour over
 a basket). Turned by its heading (the original boat's bow is along its own -z), tilted by a sinking boat's pitch
 and a stranded one's roll, lifted to its altitude (a balloon's hover, a sinking boat's depth below the surface),
-gliding between ticks like the units. People aboard are not drawn (`units::hidden_inside`). Dev shots:
+gliding between ticks like the units. People aboard are drawn in it, like a tower's lookout (`units::riding`): on
+their seat (`vehicles::seat_offset`: along a boat, side by side in a basket) at its floor (the model's lowest point,
+`VehicleLook::floor`: the original airship's basket hangs below its origin), hoverable and clickable. Dev shots:
 `VEHICLE=boat@x,z[:n]` (`;` between several), `VEHICLE_TO=x,z`, `VEHICLE_TICKS=N` (`dev.rs`).
 
 ## Client (done: orders and tooltip)

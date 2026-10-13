@@ -56,7 +56,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Replanning: every walker replans on any terrain write; only replan when the change touches its route (`DirtyRect`) once there are many units. Group moves could share a flow field.
 - [ ] Worshipping the shaman: check in the game the range (3 cells guessed) and the states she must be in (idle or walking today).
 - [ ] Stranded units: find the game's anim (frame 1 of anim 12, the flattening jump, stands in today).
-- [ ] Boarding vehicles (vehicles.md "Boarding, driving, unloading"; seats, tribe, driving and unloading done): the unit jumps on (boat) or the balloon lands on it, and off the same way (instant today); people of the same group within 440 units join the vehicle's group (pop3-rev-analysis.md "Boarding and driving").
+- [ ] Boarding vehicles: people of the same group within 440 units join the vehicle's group (pop3-rev-analysis.md "Boarding and driving"); the original's boarding clip (our jump uses the `Jump` pose, unit-art.md).
 - [ ] Open-source units: models closer to the original look (feathers and staff for the shaman, tribal outfits); a prayer clip (SitDown's end stands in) and a swim/drown clip (RecieveHit sunk stands in). CC0 poses to render as each action lands: [unit-art.md, Planned poses](docs/specs/unit-art.md#planned-poses-cc0-stand-ins).
 - [ ] CC0 sheets for the wood poses (`chop`, `carry_walk`, `carry_idle`: axe and log props, unit-art.md "Planned poses"); the braves show idle / walk meanwhile.
 - [ ] CC0 sheets for tumbling (`flung`: in the air, arms spread; `tumble`: falling down a slope); the fall loops meanwhile.
@@ -79,7 +79,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Whirlwind spell (to implement), on a vehicle: everyone aboard is put out, it spins (roll +204, pitch +153 /2048 per tick) for 10 ticks (boat; ends early when the ground reaches it) or 2 (balloon), then explodes like a destroyed boat on land (pop3-rev-analysis.md "Life, damage and destruction", state 9).
 - [ ] Swarm spell (to implement), on people aboard a vehicle: the bees put them out (`GameMap::put_out`): they fall out of a balloon; off a boat they drown, unless it is by the shore, where they get off onto the ground (`GameMap::unload_spots`).
 - [ ] Vehicle destruction (vehicles.md; health, damage from blasts and bolts, sinking, rising and exploding done): the partial explosion of a boat on land (its faces flying off, `explosion.rs`).
-- [ ] Balloons: a moving one hovers over the highest ground ahead (560 / 200, pop3-rev-analysis.md "Terrain changes") and bobs; passengers drawn in their vehicle (hidden today).
+- [ ] Balloons: a moving one hovers over the highest ground ahead (560 / 200, pop3-rev-analysis.md "Terrain changes") and bobs.
 - [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
 - [ ] The shaman can cast only some spells from a vehicle: Land Bridge is refused (done); check the others in the game (fire-type probably yes).
 - [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).

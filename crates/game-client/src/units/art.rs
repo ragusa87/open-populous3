@@ -177,7 +177,7 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Melee { stance, .. } => melee_pose(*stance, airborne),
         Action::Chopping { .. } | Action::PickingUpWood { .. } => Pose::Chop,
         Action::Building { .. } | Action::Hammering => Pose::Hammer,
-        Action::Flattening { .. } => Pose::Jump,
+        Action::Flattening { .. } | Action::Boarding { .. } | Action::Alighting { .. } => Pose::Jump,
         Action::Holding { .. } => Pose::CarryIdle,
         Action::Stranded { .. } => Pose::Stranded,
         Action::Worshipping { .. } => Pose::Pray,

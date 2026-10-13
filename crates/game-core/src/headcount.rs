@@ -109,7 +109,7 @@ pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
     }
     let working = match unit.action {
         Action::Chopping { .. } | Action::PickingUpWood { .. } | Action::Holding { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Entering { .. } | Action::Hammering | Action::Worshipping { .. } | Action::AroundFire { .. } | Action::Attacking { .. } | Action::Challenge { .. } | Action::Melee { .. } | Action::Hacking { .. } | Action::Throwing { .. } => true,
-        Action::Idle | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => false,
+        Action::Idle | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Boarding { .. } | Action::Alighting { .. } | Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => false,
         #[cfg(test)]
         Action::Gathered { .. } => true,
     };

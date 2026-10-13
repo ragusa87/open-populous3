@@ -14,7 +14,7 @@ use crate::motion::{Motion, Velocity};
 use crate::path::{self, touches_sea, Ground, Mobility, Walled};
 use crate::terrain::Heightmap;
 use crate::time::{Countdown, Every, Tick, Ticks};
-use crate::unit::{isqrt, torus_delta, Order, UnitId, UnitKind};
+use crate::unit::{isqrt, torus_delta, Action, Order, UnitId, UnitKind};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 pub type VehicleId = Id<Vehicle>;
@@ -38,6 +38,8 @@ pub const SUNK_DEPTH: u16 = 192;
 /// A destroyed balloon climbs this much a turn and bursts at `BURST_ALTITUDE` ("Life, damage and destruction").
 pub const RISE_STEP: u16 = 80;
 pub const BURST_ALTITUDE: u16 = 1024;
+/// A person's jump into its vehicle, or down from it, in turns: the vehicle's wait after a boarding [ours].
+pub const BOARD_JUMP: Ticks = BOARD_WAIT;
 /// A person gets on within this of the vehicle, per axis ("within 1-2 cells", "Boarding and driving").
 pub const BOARD_REACH: u16 = 1024;
 /// People get off onto walkable ground within this of the vehicle, per axis (as `BOARD_REACH`).
@@ -529,8 +531,10 @@ impl GameMap {
         let Some(v) = self.vehicle(vehicle).filter(|v| v.welcomes(u.owner) && within((u.x, u.z), (v.x, v.z), BOARD_REACH)) else { return };
         let (at, id, owner) = ((v.x, v.z), u.id, u.owner);
         let u = &mut self.units[i];
+        let from = (u.x, u.z);
         u.start(Order::Stop);
         (u.inside, u.aboard, (u.x, u.z)) = (None, Some(vehicle), at);
+        u.action = Action::Boarding { from, left: Countdown::new(BOARD_JUMP) };
         self.vehicles.get_mut(vehicle).unwrap().seat(id, owner);
     }
 
@@ -604,17 +608,20 @@ impl GameMap {
         !self.unload_spots(id).is_empty()
     }
 
-    /// Everyone aboard `id` gets off onto its own spot (`unload_spots`), standing idle; those left without one stay
-    /// aboard.
+    /// Everyone aboard `id` gets off onto its own spot (`unload_spots`), jumping down to it (`Action::Alighting`);
+    /// those left without one stay aboard.
     pub fn unload(&mut self, id: VehicleId) {
         let spots = self.unload_spots(id);
+        let Some(height) = self.vehicle(id).map(|v| v.altitude(&self.terrain)) else { return };
         let Some(v) = self.vehicles.get_mut(id) else { return };
+        let from = (v.x, v.z);
         let off: Vec<UnitId> = v.passengers.iter().copied().take(spots.len()).collect();
         v.passengers.retain(|p| !off.contains(p));
         for (unit, at) in off.into_iter().zip(spots) {
             if let Some(u) = self.unit_mut(unit) {
                 u.aboard = None;
                 (u.x, u.z) = at;
+                u.action = Action::Alighting { from, height, left: Countdown::new(BOARD_JUMP) };
             }
         }
     }
@@ -703,7 +710,6 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::unit::Action;
 
     const C: i32 = 64;
 
@@ -934,6 +940,7 @@ mod tests {
         let mine = braves(&mut map, 0, 1);
         order(&mut map, 0, &mine, Order::Board { vehicle: v });
         assert!(until(&mut map, 300, |m| m.unit(mine[0]).unwrap().aboard.is_some()));
+        assert!(matches!(map.unit(mine[0]).unwrap().action, Action::Boarding { .. }), "jumping in");
         assert_eq!(map.vehicle(v).unwrap().owner, 0);
         let theirs = braves(&mut map, 1, 1);
         order(&mut map, 1, &theirs, Order::Board { vehicle: v });
@@ -963,7 +970,8 @@ mod tests {
             assert!(map.ground().passable(Mobility::Walk, u.cell()), "on the island");
             assert!(within((u.x, u.z), (b.x, b.z), UNLOAD_REACH));
         }
-        map.tick();
+        assert!(people.iter().all(|&p| matches!(map.unit(p).unwrap().action, Action::Alighting { .. })), "jumping down");
+        run(&mut map, BOARD_JUMP.get());
         assert!(people.iter().all(|&p| map.unit(p).unwrap().action == Action::Idle), "standing, not drowning");
     }
 

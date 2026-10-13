@@ -17,7 +17,7 @@ pub fn sight_now(u: &Unit) -> Option<u8> {
         Action::Idle | Action::Holding { .. } | Action::Hacking { .. } => Some(stats.sight),
         Action::Walking { .. } | Action::Stranded { .. } | Action::Attacking { .. } => Some(0),
         Action::Chopping { .. } | Action::PickingUpWood { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Hammering | Action::AroundFire { .. } | Action::Worshipping { .. } => Some(stats.sight_at_work),
-        Action::Challenge { .. } | Action::Melee { .. } | Action::Panicking { .. } | Action::Tumbling | Action::Casting { .. } | Action::Landing | Action::Drowning | Action::Entering { .. } | Action::Throwing { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => None,
+        Action::Challenge { .. } | Action::Melee { .. } | Action::Panicking { .. } | Action::Tumbling | Action::Casting { .. } | Action::Landing | Action::Drowning | Action::Entering { .. } | Action::Boarding { .. } | Action::Alighting { .. } | Action::Throwing { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => None,
         #[cfg(test)]
         Action::Gathered { .. } => None,
     }

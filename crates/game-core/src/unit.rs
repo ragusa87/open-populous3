@@ -168,6 +168,12 @@ pub enum Action {
     Flattening { at: (i32, i32), left: Countdown },
     /// A brave building one piece of wood from the pile into the building it works on.
     Building { left: Countdown },
+    /// Just seated in its vehicle (`Unit::aboard`): jumping in from `from` (where it stood), `left` turns to go
+    /// (`vehicle::BOARD_JUMP`). Drawn only: it is aboard all along.
+    Boarding { from: (u16, u16), left: Countdown },
+    /// Just off its vehicle: jumping down from `from` at height `height` (where the vehicle was) to where it stands,
+    /// `left` turns to go. Drawn only: it is on the ground all along.
+    Alighting { from: (u16, u16), height: u16, left: Countdown },
     /// Walking in by the door, straight to `to` inside the building (`Unit::inside`).
     Entering { to: (u16, u16) },
     /// A brave inside a building under construction with nothing to build yet, hammering away until
@@ -213,6 +219,8 @@ impl Action {
             Action::Flattening { .. } => "Flattening",
             Action::Building { .. } => "Building",
             Action::Entering { .. } => "Entering",
+            Action::Boarding { .. } => "Boarding",
+            Action::Alighting { .. } => "Getting off",
             Action::Hammering => "Hammering",
             Action::Attacking { .. } => "Attacking",
             Action::Challenge { .. } | Action::Melee { .. } => "Fighting",
@@ -249,7 +257,9 @@ impl Action {
             | Action::Flattening { left, .. }
             | Action::Building { left }
             | Action::Hacking { left, .. }
-            | Action::Throwing { left, .. } => Some(left),
+            | Action::Throwing { left, .. }
+            | Action::Boarding { left, .. }
+            | Action::Alighting { left, .. } => Some(left),
             Action::Challenge { role: crate::challenge::Role::Shoving { left, .. }, .. } => Some(left),
             Action::Melee { stance: crate::melee::Stance::Striking { left, .. } | crate::melee::Stance::Reeling { left, .. }, .. } => Some(left),
             _ => None,
@@ -674,8 +684,8 @@ impl Unit {
                 return Some(event);
             }
         }
-        if self.aboard.is_some() && self.is_alive() && !matches!(self.action, Action::Casting { .. }) {
-            // Carried: only a cast goes on aboard.
+        if self.aboard.is_some() && self.is_alive() && !matches!(self.action, Action::Casting { .. } | Action::Boarding { .. }) {
+            // Carried: only a cast or the jump in goes on aboard.
             self.action = Action::Idle;
             return None;
         }
@@ -799,6 +809,8 @@ impl Unit {
                 }
             }
             Action::Landing => {}
+            Action::Boarding { from, mut left } => self.action = if left.tick() { Action::Idle } else { Action::Boarding { from, left } },
+            Action::Alighting { from, height, mut left } => self.action = if left.tick() { Action::Idle } else { Action::Alighting { from, height, left } },
             Action::Panicking { away, mut left } => {
                 if left.tick() {
                     self.action = Action::Idle;
