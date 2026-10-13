@@ -1,13 +1,13 @@
 # Vehicles (boats and balloons)
 
-Boats sail the sea and its coast, balloons (airships) fly anywhere; each carries a few people. The original's
+Boats sail the water cells, balloons (airships) fly anywhere; each carries a few people. The original's
 rules are in pop3-rev-analysis.md "Vehicles" [exe]; this page says what `game_core::vehicle` does, and which
 numbers are guesses.
 
 ## The object (`Vehicle`, done)
 - Kept in `GameMap::vehicles`, a `Registry<Vehicle>` (typed `VehicleId`, the map's id counter).
-- `VehicleKind`: Boat or Balloon. Seats 5 / 2, a hard limit (vehicle table +0x8). Mobility `Sail` (cells touching
-  the sea: open sea and the coast, `path::touches_sea`) / `Fly` (anywhere, walls ignored). Speed 96 / 80 world
+- `VehicleKind`: Boat or Balloon. Seats 5 / 2, a hard limit (vehicle table +0x8). Mobility `Sail` (water cells only,
+  all four corners at sea level: a shore cell with land in it is land for a boat) / `Fly` (anywhere, walls ignored). Speed 96 / 80 world
   units per turn [ours, a guess].
 - State: `Parked`, `Moving { to }`, `Sinking`, `Rising`, `Stranded` (the exe's states 1-8, without the drift to a
   resting place, state 7, and the whirlwind's spin, state 9: TODO.md).
@@ -23,17 +23,17 @@ numbers are guesses.
 ## Parking and drifting (done, improvised)
 - One vehicle a cell: a vehicle sent where another stands or is going stops in the nearest free cell it reaches
   (`GameMap::move_vehicle`, `berths_taken`).
-- Resting places (`vehicle::resting`) [ours, after "Parking and the shore"]: a boat on the coast (a cell touching
-  the sea, not open sea), a balloon anywhere but over open sea. Every 64 turns (`DRIFT_EVERY`) an empty parked
+- Resting places (`vehicle::resting`) [ours, after "Parking and the shore"]: a boat on a water cell next to
+  land (`by_the_shore`: where people board it), a balloon anywhere but over the water. Every 64 turns (`DRIFT_EVERY`) an empty parked
   vehicle away from one drifts at speed 8 (`DRIFT_SPEED`, `State::Drifting`) to the nearest free one it reaches
-  (`path::nearest_matching`): abandoned boats go back to a shore. The exe's coast landing flag and its time limits
+  (`path::nearest_matching`): abandoned boats go back to a shore. The exe's landing flag and its time limits
   on the drift are not followed.
 
 ## Health is also an abandon timer (done)
 `health` (a `Health` of max `LIFE` 5000, `VEHICLE_LIFE_*` of constant.dat) loses 1 every turn and is full again
 every turn while the vehicle moves or carries anyone. So an empty, still vehicle falls apart after 5000 turns
 (417 s). At 0:
-- a boat on the water (its cell touching the sea, the coast too) sinks: 8 deeper and 8/2048 more bow-up a turn (capped at 398), gone at depth 192 (24 turns);
+- a boat on the water sinks: 8 deeper and 8/2048 more bow-up a turn (capped at 398), gone at depth 192 (24 turns);
 - a boat on land (an all-land cell) explodes: a simple blast of its tribe where it stood, and it is gone;
 - a balloon rises 80 a turn and explodes the same way at altitude 1024.
 Damage (`GameMap::damage_vehicle`, `WorldEvent::DamageVehicle`) comes only from another tribe: 50
@@ -44,7 +44,7 @@ Whoever is aboard is put out where it is (`GameMap::put_out`): out of a balloon 
 (`Unit::tick`).
 
 ## Stranded boat (done)
-Every 16 turns (`STRAND_EVERY`) a boat whose cell no longer touches the sea (Raise Land, Land Bridge...) is
+Every 16 turns (`STRAND_EVERY`) a boat whose cell is no longer all water (Raise Land, Land Bridge...) is
 stranded: everyone is put off, its health becomes 160 + a draw below 128 turns, and it keels over 8/2048 a turn to
 a random side, up to 90° (`KEEL_MAX`). Water back in its cell: parked again. Otherwise it explodes when its health
 runs out (13-24 s).
@@ -57,7 +57,7 @@ on.
 
 ## Boarding, driving, unloading (done in game-core)
 - `Order::Board { vehicle }` (`GameMap::go_board`): any living person but wildmen walks to the walkable cell
-  nearest the vehicle (`path::nearest_reachable`, the coast for a boat at sea) and, within `BOARD_REACH` (1024
+  nearest the vehicle (`path::nearest_reachable`: the land next to a boat on the water by the shore) and, within `BOARD_REACH` (1024
   world units per axis, "within 1-2 cells"), gets on (`board`, `UnitEvent::AtVehicle`). Refused when every seat is
   taken (a hard limit), when it is wrecked or stranded, and when someone of another tribe is aboard. Whoever gets
   on makes it their tribe's: an empty enemy or neutral vehicle becomes theirs. It then waits `BOARD_WAIT` (7 turns)

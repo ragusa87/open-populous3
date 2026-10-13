@@ -439,8 +439,8 @@ impl GameMap {
     /// Test ground for vehicles: a flat island with the player's site, its south coast in view of the starting camera,
     /// and a smaller island south across a strait.
     /// - South coast: a built boat hut, its jetty out to sea, and an airship hut, with 8 braves and a pile of wood
-    ///   between them to crew them; an empty boat on the coast, a boat with 2 braves aboard, and an empty boat out at
-    ///   sea, drifting back to the shore.
+    ///   between them to crew them; an empty boat on the water by the shore, a boat with 2 braves aboard, and an
+    ///   empty boat out at sea, drifting back to the shore.
     /// - By the site: an empty balloon for the shaman.
     /// - The south island: an empty boat of tribe 1 on its coast, to take.
     pub fn sandbox_vehicles() -> Self {
@@ -474,17 +474,17 @@ impl GameMap {
             map.trees.push(Tree::new((C + dx, C + dz), i as u8, crate::tree::MAX_SIZE));
         }
         let boat = |owner: u8, cell: (i32, i32)| Vehicle::new(VehicleKind::Boat, owner, at(cell.0, cell.1), crate::angle::Angle::new(512));
-        map.add_vehicle(boat(0, (-2, 8)));
-        let manned = map.add_vehicle(boat(0, (4, 8)));
+        map.add_vehicle(boat(0, (-2, 9)));
+        let manned = map.add_vehicle(boat(0, (4, 9)));
         for _ in 0..2 {
-            let u = map.spawn(0, UnitKind::Brave, at(4, 8));
+            let u = map.spawn(0, UnitKind::Brave, at(4, 9));
             u.aboard = Some(manned);
             let id = u.id;
             map.vehicles.get_mut(manned).unwrap().seat(id, 0);
         }
         map.add_vehicle(boat(0, (10, 13)));
         map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at(3, -4), crate::angle::Angle::ZERO));
-        map.add_vehicle(boat(1, (0, 17)));
+        map.add_vehicle(boat(1, (0, 16)));
         map.update_walls();
         map
     }

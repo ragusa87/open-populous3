@@ -11,7 +11,8 @@ use crate::health::Health;
 use crate::id::Id;
 use crate::map::{GameMap, Lcg};
 use crate::motion::{Motion, Velocity};
-use crate::path::{self, touches_sea, Ground, Mobility, Walled};
+use crate::path::{self, Ground, Mobility, Walled};
+use crate::unit::is_sea;
 use crate::terrain::Heightmap;
 use crate::time::{Countdown, Every, Tick, Ticks};
 use crate::unit::{isqrt, torus_delta, Action, Order, UnitId, UnitKind};
@@ -323,7 +324,7 @@ impl Vehicle {
             }
             _ => {}
         }
-        let on_land = !touches_sea(terrain, self.cell());
+        let on_land = !is_sea(terrain, self.cell());
         if let State::Stranded { side, roll } = self.state {
             self.state = match on_land {
                 true => State::Stranded { side, roll: keel(roll, side) },
@@ -354,12 +355,11 @@ impl Vehicle {
         None
     }
 
-    /// Out of health: a boat on the water (its cell touching the sea, the coast too) sinks, one on land explodes; a
-    /// balloon rises. Who is aboard is put out.
+    /// Out of health: a boat on the water sinks, one on land explodes; a balloon rises. Who is aboard is put out.
     fn destroyed(&mut self, terrain: &Heightmap) -> VehicleEvent {
         self.route.clear();
         match self.kind {
-            VehicleKind::Boat if touches_sea(terrain, self.cell()) => self.state = State::Sinking { depth: 0, pitch: Angle::ZERO },
+            VehicleKind::Boat if is_sea(terrain, self.cell()) => self.state = State::Sinking { depth: 0, pitch: Angle::ZERO },
             VehicleKind::Boat => return VehicleEvent::Exploded,
             VehicleKind::Balloon => self.state = State::Rising { climbed: 0 },
         }
@@ -428,14 +428,19 @@ pub fn launch_point(b: &crate::building::Building, kind: VehicleKind, terrain: &
     Some((crate::slots::cell_centre((sea.0.rem_euclid(size), sea.1.rem_euclid(size))), heading))
 }
 
-/// Where an empty vehicle may rest [ours, after "Parking and the shore"]: a boat on the coast (a cell touching the
-/// sea, not open sea), a balloon anywhere but over open sea.
+/// Where an empty vehicle may rest [ours, after "Parking and the shore"]: a boat on a water cell next to land (by
+/// the shore, where people board it), a balloon anywhere but over the water.
 pub fn resting(kind: VehicleKind, terrain: &Heightmap, cell: (i32, i32)) -> bool {
-    let open_sea = crate::unit::is_sea(terrain, cell);
+    let water = is_sea(terrain, cell);
     match kind {
-        VehicleKind::Boat => touches_sea(terrain, cell) && !open_sea,
-        VehicleKind::Balloon => !open_sea,
+        VehicleKind::Boat => water && by_the_shore(terrain, cell),
+        VehicleKind::Balloon => !water,
     }
+}
+
+/// Whether one of the 8 cells around `cell` can be walked on: a boat there is at the shore.
+pub fn by_the_shore(terrain: &Heightmap, (x, z): (i32, i32)) -> bool {
+    (-1..=1).flat_map(|dz| (-1..=1).map(move |dx| (dx, dz))).filter(|&d| d != (0, 0)).any(|(dx, dz)| Mobility::Walk.passable(terrain, (x + dx, z + dz)))
 }
 
 /// The ground's height at world point `p`, the sea at 0.
@@ -789,7 +794,7 @@ mod tests {
     #[test]
     fn an_empty_still_vehicle_falls_apart_after_its_life_a_manned_one_never() {
         let mut map = coast();
-        let empty = boat(&mut map, (C - 1, C));
+        let empty = boat(&mut map, (C, C));
         let manned = boat(&mut map, (C + 8, C));
         aboard(&mut map, manned, 1);
         run(&mut map, LIFE as u32 - 1);
@@ -869,7 +874,9 @@ mod tests {
         run(&mut map, 100);
         let State::Stranded { roll, .. } = map.vehicle(v).unwrap().state else { panic!("stranded") };
         assert_eq!(roll.signed().abs(), KEEL_MAX.signed(), "on its side");
-        map.terrain.set(C + 5, C, 0);
+        for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            map.terrain.set(C + 5 + dx, C + dz, 0);
+        }
         run(&mut map, 1);
         assert_eq!(map.vehicle(v).unwrap().state, State::Parked);
     }
@@ -894,7 +901,7 @@ mod tests {
         let mut map = coast();
         let v = boat(&mut map, (C + 10, C));
         let people = aboard(&mut map, v, 2);
-        let to = at((C + 22, C));
+        let to = at((C + 23, C));
         map.vehicles.get_mut(v).unwrap().go(to);
         (0..400).find(|_| {
             map.tick();
@@ -903,7 +910,7 @@ mod tests {
         .expect("arrived");
         let b = map.vehicle(v).unwrap();
         assert_eq!((b.x, b.z), to);
-        assert!(touches_sea(&map.terrain, b.cell()) && !crate::unit::is_sea(&map.terrain, b.cell()), "the coast");
+        assert!(is_sea(&map.terrain, b.cell()) && by_the_shore(&map.terrain, b.cell()), "on the water by the island");
         assert!(people.iter().all(|&p| map.unit(p).is_some_and(|u| (u.x, u.z) == to && u.action == Action::Idle)));
     }
 
@@ -1147,12 +1154,13 @@ mod tests {
     fn an_empty_boat_at_sea_drifts_to_the_nearest_free_coast_and_stays() {
         let mut map = coast();
         let v = boat(&mut map, (C + 4, C));
-        let berth = boat(&mut map, (C - 1, C));
-        assert!(resting(VehicleKind::Boat, &map.terrain, (C - 1, C)) && !resting(VehicleKind::Boat, &map.terrain, (C + 4, C)));
+        let berth = boat(&mut map, (C, C));
+        assert!(resting(VehicleKind::Boat, &map.terrain, (C, C)) && !resting(VehicleKind::Boat, &map.terrain, (C + 4, C)));
+        assert!(!resting(VehicleKind::Boat, &map.terrain, (C - 1, C)), "the coast is land for a boat");
         run(&mut map, DRIFT_EVERY.period());
         let State::Drifting { to } = map.vehicle(v).unwrap().state else { panic!("drifting") };
         let cell = ((to.0 / 512) as i32, (to.1 / 512) as i32);
-        assert!(resting(VehicleKind::Boat, &map.terrain, cell) && cell != (C - 1, C), "a free coast cell: {cell:?}");
+        assert!(resting(VehicleKind::Boat, &map.terrain, cell) && cell != (C, C), "a free water cell by the shore: {cell:?}");
         assert_eq!(map.vehicle(berth).unwrap().state, State::Parked, "already resting");
         assert!(until(&mut map, 600, |m| m.vehicle(v).unwrap().state == State::Parked));
         assert_eq!(map.vehicle(v).unwrap().cell(), cell);

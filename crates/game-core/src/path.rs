@@ -1,5 +1,5 @@
 //! Path finding on the cell grid (a torus): A* over the cells a mover can cross (land without
-//! cliffs on foot, the sea and its coast by boat, anywhere by balloon), fastest rather than shortest (walkers
+//! cliffs on foot, water cells by boat, anywhere by balloon), fastest rather than shortest (walkers
 //! are slow uphill, so going around a hill can win), then straightened into a few waypoints.
 //! Integer-only and deterministic (ties broken by cell index).
 
@@ -30,7 +30,7 @@ pub const MAX_CLIMB: u16 = 300;
 pub enum Mobility {
     /// On foot: land, no cliffs.
     Walk,
-    /// Boats: cells touching the sea (a corner at sea level): open sea and the coast, where walkers board them.
+    /// Boats: water cells only (all four corners at sea level); walkers board them from the land next to them.
     Sail,
     /// Balloons: anywhere.
     Fly,
@@ -40,7 +40,7 @@ impl Mobility {
     pub fn passable(self, terrain: &Heightmap, cell: (i32, i32)) -> bool {
         match self {
             Mobility::Walk => !is_sea(terrain, cell) && !is_cliff(terrain, cell),
-            Mobility::Sail => touches_sea(terrain, cell),
+            Mobility::Sail => is_sea(terrain, cell),
             Mobility::Fly => true,
         }
     }
@@ -127,11 +127,6 @@ impl Ground for Walled<'_> {
     fn revision(&self) -> (u32, u32) {
         (self.terrain.revision(), self.walls.revision)
     }
-}
-
-/// A corner of the cell is at sea level: open sea or the coast.
-pub fn touches_sea(terrain: &Heightmap, (x, z): (i32, i32)) -> bool {
-    [(0, 0), (1, 0), (0, 1), (1, 1)].iter().any(|&(dx, dz)| terrain.is_water(x + dx, z + dz))
 }
 
 /// A cell edge rises more than `MAX_CLIMB` between its two corners.
@@ -532,18 +527,18 @@ mod tests {
     }
 
     #[test]
-    fn boats_sail_the_sea_and_its_coast() {
+    fn boats_sail_the_water_cells_only() {
         let t = map(&["", "", "", "    ####", "    ####", "    ####", "    ####"]);
         assert!(cell_path(&t, Mobility::Sail, (4, 3), (7, 6)).is_some());
-        assert!(cell_path(&t, Mobility::Sail, (4, 3), (8, 4)).is_some(), "the coast");
+        assert_eq!(cell_path(&t, Mobility::Sail, (4, 3), (8, 4)), None, "the coast is land for a boat");
         assert_eq!(cell_path(&t, Mobility::Sail, (4, 3), (10, 3)), None, "land");
-        assert_eq!(nearest_reachable(&t, Mobility::Sail, (5, 4), (12, 4)), (8, 4), "unload at the east shore");
+        assert_eq!(nearest_reachable(&t, Mobility::Sail, (5, 4), (12, 4)), (7, 4), "the water by the east shore");
     }
 
     #[test]
     fn the_nearest_cell_wanted_within_reach() {
         let t = map(&["", "", "", "    ####", "    ####", "    ####", "    ####"]);
-        assert_eq!(nearest_matching(&t, Mobility::Sail, (5, 4), |c| !is_sea(&t, c)), Some((3, 4)), "the west coast, two steps away");
+        assert_eq!(nearest_matching(&t, Mobility::Sail, (5, 4), |c| c.1 == 6), Some((5, 6)), "the south row, two steps straight down");
         assert_eq!(nearest_matching(&t, Mobility::Sail, (5, 4), |c| c == (20, 20)), None, "inland");
         assert_eq!(nearest_matching(&t, Mobility::Walk, (20, 20), |c| c == (20, 20)), Some((20, 20)));
     }
