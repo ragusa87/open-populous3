@@ -66,7 +66,7 @@ impl Coordinator for Sermon {
         if !members.contains(&l.id) || !l.is_alive() || !p.is_alive() || p.owner == l.owner {
             return end(l.id);
         }
-        if matches!(p.action, Action::Challenge { .. } | Action::Melee { .. }) {
+        if p.thrown() || matches!(p.action, Action::Challenge { .. } | Action::Melee { .. }) {
             let mut step = end(l.id);
             step.events.push(WorldEvent::StrikeBack { unit: l.id, at: p.id });
             return step;
@@ -251,6 +251,51 @@ mod tests {
         map.tick();
         assert!(map.coordinators.sermons.is_empty() && !listening(&map, others[1]), "the preacher attacked: every sermon ends");
         assert!(matches!(map.unit(others[1]).unwrap().action, Action::Attacking { target: Target::Unit(t), .. } if t == p), "its listener turns on it");
+    }
+
+    /// A bolt of tribe `owner`, thrown from 20 cells west, about to strike `target`.
+    fn bolt_at(map: &mut GameMap, owner: u8, target: UnitId) {
+        let t = map.unit(target).map(|u| (u.x, u.z)).unwrap();
+        let thrower = map.spawn(owner, UnitKind::Firewarrior, (t.0.wrapping_sub(20 * 512), t.1)).id;
+        let height = map.terrain.height_at(t.0 as u32, t.1 as u32, pop3_format::WORLD_UNITS_PER_CELL) + crate::firebolt::BOLT_RISE;
+        let at = (t.0.wrapping_sub(100), t.1);
+        let bolt = crate::firebolt::Firebolt { owner, thrower, target: Target::Unit(target), at, height, aim: (t.0, t.1, height), hits: true, bloodlusted: false, from_tower: false };
+        let id = map.new_id_of();
+        map.bolts.insert(id, bolt);
+    }
+
+    #[test]
+    /// The brave listens a cell away: by the time it reaches the preacher, the preacher is back on its feet (a bolt only
+    /// makes it hop, `firebolt::steady`) and its next look sits the brave down again, about 20 units before the brave
+    /// is close enough to challenge it.
+    fn a_preacher_struck_by_a_bolt_is_avenged_but_sits_the_avenger_down_again() {
+        let mut outcomes = Vec::new();
+        for seed in 0..8 {
+            let (mut map, p, others) = sermon_scene(&[UnitKind::Brave]);
+            map.rng = Lcg(seed);
+            let b = others[0];
+            until(&mut map, 4, |m| listening(m, b)).expect("sat down");
+            bolt_at(&mut map, 1, p);
+            until(&mut map, 3, |m| m.unit(p).unwrap().thrown()).expect("thrown by the bolt");
+            assert!(matches!(map.unit(b).unwrap().action, Action::Attacking { target: Target::Unit(t), .. } if t == p), "the brave turns on it");
+            let fought = |m: &GameMap| matches!(m.unit(p).unwrap().action, Action::Challenge { .. } | Action::Melee { .. });
+            let end = until(&mut map, 200, |m| listening(m, b) || fought(m));
+            outcomes.push((end.is_some(), listening(&map, b)));
+        }
+        assert!(outcomes.iter().all(|&(over, sat)| over && sat), "the preacher, back on its feet, sits it down first: {outcomes:?}");
+    }
+
+    #[test]
+    fn a_brave_listening_right_next_to_a_struck_preacher_reaches_it_first() {
+        let (mut map, p, others) = sermon_scene(&[UnitKind::Brave]);
+        let b = others[0];
+        until(&mut map, 4, |m| listening(m, b)).expect("sat down");
+        let at = map.unit(p).map(|u| (u.x.wrapping_add(250), u.z)).unwrap();
+        (map.unit_mut(b).unwrap().x, map.unit_mut(b).unwrap().z) = at;
+        bolt_at(&mut map, 1, p);
+        let fought = |m: &GameMap| matches!(m.unit(p).unwrap().action, Action::Challenge { .. } | Action::Melee { .. });
+        until(&mut map, 200, |m| listening(m, b) || fought(m)).expect("one or the other");
+        assert!(fought(&map), "a preacher only hops under a bolt: the brave next to it challenges it before its next look");
     }
 
     #[test]
