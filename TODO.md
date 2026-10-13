@@ -81,7 +81,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Vehicle destruction (vehicles.md; health, damage from blasts and bolts, sinking, rising and exploding done): the partial explosion of a boat on land (its faces flying off, `explosion.rs`).
 - [ ] Balloons: a moving one hovers over the highest ground ahead (560 / 200, pop3-rev-analysis.md "Terrain changes") and bobs; passengers drawn in their vehicle (hidden today).
 - [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
-- [ ] The shaman can cast only some spells from a vehicle (list to define: fire-type probably yes, Land Bridge no).
+- [ ] The shaman can cast only some spells from a vehicle: Land Bridge is refused (done); check the others in the game (fire-type probably yes).
 - [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
 - [ ] Use the shaman's wand gesture (81-84), the conversion sit (18), the spy's juggling idle (92), the carbonized brave (97) for lightning; check the tribe layer flag `0x10` mapping.
 

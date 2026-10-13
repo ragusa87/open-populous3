@@ -568,20 +568,21 @@ impl GameMap {
 
     /// Whether `player` can cast `spell` here and now: never while their shaman is `locked` (inside a
     /// vault, tumbling or lifted); Teleport needs a living shaman and ground she can walk at the target; a
-    /// spell starting at the caster (land bridge) needs a living shaman, unless the player is a god
-    /// (`shaman_omni`), and a land bridge a target on land (the water on its way is raised); other spells always
+    /// spell starting at the caster (land bridge) needs a living shaman on her feet, never aboard a vehicle, unless the
+    /// player is a god (`shaman_omni`), and a land bridge a target on land (the water on its way is raised); other spells always
     /// apply. Out of range (`in_cast_range`), she first walks into it (`walk_to_cast`).
     pub fn can_cast(&self, player: u8, spell: &Spell) -> bool {
         if self.shaman_locked(player) {
             return false;
         }
         let shaman_alive = self.shaman_of(player).is_some_and(Unit::is_alive);
+        let aboard = self.shaman_of(player).is_some_and(|u| u.aboard.is_some());
         match *spell {
             Spell::Teleport { to } => {
                 let cell = ((to.0 as u32 / 512) as i32, (to.1 as u32 / 512) as i32);
                 shaman_alive && self.ground().passable(Mobility::Walk, cell)
             }
-            Spell::LandBridge { to, .. } => (self.shaman_omni || shaman_alive) && !crate::unit::is_sea(&self.terrain, to),
+            Spell::LandBridge { to, .. } => (self.shaman_omni || (shaman_alive && !aboard)) && !crate::unit::is_sea(&self.terrain, to),
             _ => true,
         }
     }

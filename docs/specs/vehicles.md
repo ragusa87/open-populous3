@@ -72,6 +72,8 @@ on.
 - A shaman aboard casting out of range is carried there (`GameMap::walk_to_cast`, `Unit::ride_to_cast`): her
   vehicle goes towards the target (a balloon anywhere, a boat as near as the sea lets it), and she casts as soon
   as it is within her range (from a balloon's altitude, farther); a vehicle stopped short gives it up.
+- Aboard, the shaman cannot cast a land bridge (it starts at her feet; `GameMap::can_cast`, the cursor shows it
+  invalid), unless the player is a god (`shaman_omni`: it starts at the view). Other spells: all allowed for now.
 
 ## Vehicle huts (done in game-core)
 A boat hut makes boats, an airship hut balloons (`VehicleKind::made_by`). Built with wood like any building; then

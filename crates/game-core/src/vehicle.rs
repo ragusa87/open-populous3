@@ -1136,6 +1136,21 @@ mod tests {
     }
 
     #[test]
+    fn no_land_bridge_from_a_vehicle() {
+        let mut map = coast();
+        map.spell_books = vec![crate::spell_book::SpellBook::sandbox(); 4];
+        let v = boat(&mut map, (C + 2, C));
+        let shaman = map.spawn(0, UnitKind::Shaman, at((C - 2, C))).id;
+        let bridge = crate::spell::Spell::LandBridge { from: (C - 2, C), to: (C - 10, C) };
+        assert!(map.can_cast(0, &bridge));
+        map.unit_mut(shaman).unwrap().aboard = Some(v);
+        map.vehicles.get_mut(v).unwrap().seat(shaman, 0);
+        assert!(!map.can_cast(0, &bridge), "aboard");
+        map.shaman_omni = true;
+        assert!(map.can_cast(0, &bridge), "a god bridges from the view");
+    }
+
+    #[test]
     fn keeling_stops_on_its_side() {
         assert_eq!(keel(Angle::ZERO, Side::Port).signed(), -KEEL_STEP);
         assert_eq!(keel(Angle::new(508), Side::Starboard), KEEL_MAX);
