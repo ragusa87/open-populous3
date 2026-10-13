@@ -258,6 +258,31 @@ pub fn nearest_reachable(ground: &impl Ground, mob: Mobility, from: (i32, i32), 
     best.1
 }
 
+/// The nearest cell (in steps of 8 neighbours, first found on ties) reachable by `mob` from `from` that `wanted`
+/// accepts, `from` itself included; None when none is.
+pub fn nearest_matching(ground: &impl Ground, mob: Mobility, from: (i32, i32), wanted: impl Fn((i32, i32)) -> bool) -> Option<(i32, i32)> {
+    let size = ground.terrain().size() as i32;
+    let wrap = |(x, z): (i32, i32)| (x.rem_euclid(size), z.rem_euclid(size));
+    let from = wrap(from);
+    let mut seen = vec![false; (size * size) as usize];
+    let mut queue = VecDeque::from([from]);
+    seen[(from.1 * size + from.0) as usize] = true;
+    while let Some(cell) = queue.pop_front() {
+        if wanted(cell) {
+            return Some(cell);
+        }
+        for (dx, dz) in NEIGHBOURS {
+            let next = wrap((cell.0 + dx, cell.1 + dz));
+            let i = (next.1 * size + next.0) as usize;
+            if !seen[i] && ground.passable(mob, next) {
+                seen[i] = true;
+                queue.push_back(next);
+            }
+        }
+    }
+    None
+}
+
 /// How far in from a cell's edges `closest_point_in_cell` stays (world units), so the point is well inside it.
 pub const CELL_INSET: i32 = 64;
 
@@ -513,6 +538,14 @@ mod tests {
         assert!(cell_path(&t, Mobility::Sail, (4, 3), (8, 4)).is_some(), "the coast");
         assert_eq!(cell_path(&t, Mobility::Sail, (4, 3), (10, 3)), None, "land");
         assert_eq!(nearest_reachable(&t, Mobility::Sail, (5, 4), (12, 4)), (8, 4), "unload at the east shore");
+    }
+
+    #[test]
+    fn the_nearest_cell_wanted_within_reach() {
+        let t = map(&["", "", "", "    ####", "    ####", "    ####", "    ####"]);
+        assert_eq!(nearest_matching(&t, Mobility::Sail, (5, 4), |c| !is_sea(&t, c)), Some((3, 4)), "the west coast, two steps away");
+        assert_eq!(nearest_matching(&t, Mobility::Sail, (5, 4), |c| c == (20, 20)), None, "inland");
+        assert_eq!(nearest_matching(&t, Mobility::Walk, (20, 20), |c| c == (20, 20)), Some((20, 20)));
     }
 
     #[test]

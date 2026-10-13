@@ -42,6 +42,10 @@ pub const BURST_ALTITUDE: u16 = 1024;
 pub const BOARD_REACH: u16 = 1024;
 /// People get off onto walkable ground within this of the vehicle, per axis (as `BOARD_REACH`).
 pub const UNLOAD_REACH: u16 = 1024;
+/// An empty vehicle away from a resting place (`resting`) drifts to the nearest one, checked on this rhythm, at
+/// this speed ("Parking and the shore": 64 turns, speed 8).
+pub const DRIFT_EVERY: Every = Every::new(64);
+pub const DRIFT_SPEED: u16 = 8;
 /// Braves working in a vehicle hut at once [ours, a guess].
 pub const CREW: u8 = 4;
 /// Work for one vehicle, once its wood is there: each crew member inside adds 1 a turn (a guess: 100 s alone, 25 s
@@ -165,6 +169,8 @@ pub enum State {
     Parked,
     /// On its way to `to`.
     Moving { to: (u16, u16) },
+    /// Empty, slowly on its way to a resting place at `to` (`DRIFT_SPEED`).
+    Drifting { to: (u16, u16) },
     /// A destroyed boat going down, `depth` under where it floated, its bow up by `pitch`.
     Sinking { depth: u16, pitch: Angle },
     /// A destroyed balloon going up, `climbed` over its hover height.
@@ -246,9 +252,18 @@ impl Vehicle {
         (self.route, self.planned_on) = (Vec::new(), None);
     }
 
+    /// Drifts to `to` (`DRIFT_SPEED`), unless destroyed or stranded.
+    pub fn drift(&mut self, to: (u16, u16)) {
+        if self.is_destroyed() || matches!(self.state, State::Stranded { .. }) {
+            return;
+        }
+        self.state = State::Drifting { to };
+        (self.route, self.planned_on) = (Vec::new(), None);
+    }
+
     /// Stops where it is.
     pub fn stop(&mut self) {
-        if let State::Moving { .. } = self.state {
+        if let State::Moving { .. } | State::Drifting { .. } = self.state {
             self.state = State::Parked;
             self.route.clear();
         }
@@ -299,22 +314,23 @@ impl Vehicle {
         if self.health.damage(1) {
             return Some(self.destroyed(terrain));
         }
-        if matches!(self.state, State::Moving { .. }) || !self.passengers.is_empty() {
+        if matches!(self.state, State::Moving { .. } | State::Drifting { .. }) || !self.passengers.is_empty() {
             self.health.heal(LIFE);
         }
-        if let State::Moving { to } = self.state
-            && self.wait.tick()
-        {
-            self.travel(to, ground);
+        match self.state {
+            State::Moving { to } if self.wait.tick() => self.travel(to, self.kind.speed(), ground),
+            State::Drifting { to } => self.travel(to, DRIFT_SPEED, ground),
+            _ => {}
         }
         None
     }
 
-    /// Out of health: a boat on the water sinks, one on land explodes; a balloon rises. Who is aboard is put out.
+    /// Out of health: a boat on the water (its cell touching the sea, the coast too) sinks, one on land explodes; a
+    /// balloon rises. Who is aboard is put out.
     fn destroyed(&mut self, terrain: &Heightmap) -> VehicleEvent {
         self.route.clear();
         match self.kind {
-            VehicleKind::Boat if terrain.is_water_at(self.x, self.z) => self.state = State::Sinking { depth: 0, pitch: Angle::ZERO },
+            VehicleKind::Boat if touches_sea(terrain, self.cell()) => self.state = State::Sinking { depth: 0, pitch: Angle::ZERO },
             VehicleKind::Boat => return VehicleEvent::Exploded,
             VehicleKind::Balloon => self.state = State::Rising { climbed: 0 },
         }
@@ -323,7 +339,7 @@ impl Vehicle {
 
     /// One step of the way to `to`, planned again when the ground changed; parked once there, or when no way leads
     /// there.
-    fn travel(&mut self, to: (u16, u16), ground: &impl Ground) {
+    fn travel(&mut self, to: (u16, u16), speed: u16, ground: &impl Ground) {
         let mobility = self.kind.mobility();
         if self.planned_on != Some(ground.revision()) {
             match path::route(ground, mobility, (self.x, self.z), to, true) {
@@ -345,7 +361,7 @@ impl Vehicle {
             self.heading = atan2(dz, dx);
         }
         let dist = isqrt((dx * dx + dz * dz) as u32) as i32;
-        let speed = self.kind.speed() as i32;
+        let speed = speed as i32;
         let (sx, sz) = if dist <= speed { (dx, dz) } else { (dx * speed / dist, dz * speed / dist) };
         let (nx, nz) = (self.x.wrapping_add(sx as u16), self.z.wrapping_add(sz as u16));
         let cell = ((nx as u32 / WORLD_UNITS_PER_CELL) as i32, (nz as u32 / WORLD_UNITS_PER_CELL) as i32);
@@ -383,6 +399,16 @@ pub fn launch_point(b: &crate::building::Building, kind: VehicleKind, terrain: &
     Some((crate::slots::cell_centre((sea.0.rem_euclid(size), sea.1.rem_euclid(size))), heading))
 }
 
+/// Where an empty vehicle may rest [ours, after "Parking and the shore"]: a boat on the coast (a cell touching the
+/// sea, not open sea), a balloon anywhere but over open sea.
+pub fn resting(kind: VehicleKind, terrain: &Heightmap, cell: (i32, i32)) -> bool {
+    let open_sea = crate::unit::is_sea(terrain, cell);
+    match kind {
+        VehicleKind::Boat => touches_sea(terrain, cell) && !open_sea,
+        VehicleKind::Balloon => !open_sea,
+    }
+}
+
 /// Whether `a` is within `reach` of `b` on both axes, the short way around the torus.
 fn within(a: (u16, u16), b: (u16, u16), reach: u16) -> bool {
     torus_delta(a.0, b.0).unsigned_abs() <= reach as u32 && torus_delta(a.1, b.1).unsigned_abs() <= reach as u32
@@ -406,9 +432,13 @@ impl GameMap {
         self.vehicles.get(id)
     }
 
-    /// Every vehicle's turn, then what it did (`VehicleEvent`), then its passengers moved along with it.
+    /// Every vehicle's turn, then what it did (`VehicleEvent`), then its passengers moved along with it. On
+    /// `DRIFT_EVERY`, empty vehicles parked away from a resting place first drift to the nearest free one.
     pub(crate) fn tend_vehicles(&mut self) {
         self.sync_passengers();
+        if DRIFT_EVERY.fires(self.now, 0) {
+            self.drift_to_rest();
+        }
         let (now, mut rng) = (self.now, self.rng);
         let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: None };
         let events: Vec<(VehicleId, VehicleEvent)> = self.vehicles.iter_mut().filter_map(|(id, v)| v.tick(now, &ground, &mut rng).map(|e| (id, e))).collect();
@@ -505,12 +535,15 @@ impl GameMap {
     }
 
     /// Sends the vehicle `id` to `to`, or to the closest point it can reach (a boat to the shore nearest a point
-    /// inland).
+    /// inland); another vehicle there or going there: to the nearest free cell (one vehicle a cell).
     pub fn move_vehicle(&mut self, id: VehicleId, to: (u16, u16)) {
         let Some(v) = self.vehicle(id) else { return };
         let goal = ((to.0 as u32 / WORLD_UNITS_PER_CELL) as i32, (to.1 as u32 / WORLD_UNITS_PER_CELL) as i32);
-        let cell = path::nearest_reachable(&self.ground(), v.kind.mobility(), v.cell(), goal);
-        let to = path::closest_point_in_cell(cell, to);
+        let ground = self.ground();
+        let cell = path::nearest_reachable(&ground, v.kind.mobility(), v.cell(), goal);
+        let taken = self.berths_taken(id);
+        let free = path::nearest_matching(&ground, v.kind.mobility(), cell, |c| !taken.contains(&c)).unwrap_or(cell);
+        let to = if free == cell { path::closest_point_in_cell(cell, to) } else { crate::slots::cell_centre(free) };
         self.vehicles.get_mut(id).unwrap().go(to);
     }
 
@@ -592,6 +625,33 @@ impl GameMap {
         if let Some(v) = self.vehicles.get_mut(id).filter(|v| v.owner != from) {
             v.health.damage(amount);
         }
+    }
+
+    /// Empty parked vehicles away from a resting place (`resting`) drift to the nearest free one they reach.
+    fn drift_to_rest(&mut self) {
+        let adrift: Vec<VehicleId> = self.vehicles.iter().filter(|(_, v)| v.state == State::Parked && v.passengers.is_empty() && !resting(v.kind, &self.terrain, v.cell())).map(|(id, _)| id).collect();
+        for id in adrift {
+            let v = &self.vehicles.get(id).unwrap();
+            let taken = self.berths_taken(id);
+            let ground = self.ground();
+            let berth = path::nearest_matching(&ground, v.kind.mobility(), v.cell(), |c| resting(v.kind, &self.terrain, c) && !taken.contains(&c));
+            if let Some(cell) = berth {
+                self.vehicles.get_mut(id).unwrap().drift(crate::slots::cell_centre(cell));
+            }
+        }
+    }
+
+    /// The cells other vehicles than `except` stand in or are going to: one vehicle a cell.
+    fn berths_taken(&self, except: VehicleId) -> Vec<(i32, i32)> {
+        let cell = |p: (u16, u16)| ((p.0 as u32 / WORLD_UNITS_PER_CELL) as i32, (p.1 as u32 / WORLD_UNITS_PER_CELL) as i32);
+        self.vehicles
+            .iter()
+            .filter(|&(id, _)| id != except)
+            .map(|(_, v)| match v.state {
+                State::Moving { to } | State::Drifting { to } => cell(to),
+                _ => v.cell(),
+            })
+            .collect()
     }
 
     /// Passengers no longer aboard (dead, gone, teleported off) leave their seat; units aboard a vehicle that does not
@@ -691,14 +751,14 @@ mod tests {
     #[test]
     fn an_empty_still_vehicle_falls_apart_after_its_life_a_manned_one_never() {
         let mut map = coast();
-        let empty = boat(&mut map, (C + 5, C));
+        let empty = boat(&mut map, (C - 1, C));
         let manned = boat(&mut map, (C + 8, C));
         aboard(&mut map, manned, 1);
         run(&mut map, LIFE as u32 - 1);
         assert_eq!(map.vehicle(empty).unwrap().health.current(), 1);
         assert_eq!(map.vehicle(manned).unwrap().health.current(), LIFE, "refilled every turn");
         run(&mut map, 1);
-        assert!(matches!(map.vehicle(empty).unwrap().state, State::Sinking { .. }), "on the water it sinks");
+        assert!(matches!(map.vehicle(empty).unwrap().state, State::Sinking { .. }), "on the coast's water it sinks");
         run(&mut map, (SUNK_DEPTH / SINK_STEP) as u32);
         assert!(map.vehicle(empty).is_none(), "gone under");
         assert!(map.vehicle(manned).is_some());
@@ -730,7 +790,7 @@ mod tests {
     #[test]
     fn a_boat_destroyed_on_land_explodes() {
         let mut map = coast();
-        let v = boat(&mut map, (C - 1, C));
+        let v = boat(&mut map, (C - 3, C));
         map.vehicles.get_mut(v).unwrap().health = Health::new(1, LIFE);
         run(&mut map, 1);
         assert!(map.vehicle(v).is_none());
@@ -1041,6 +1101,38 @@ mod tests {
         let b = map.vehicle(v).unwrap();
         assert!(torus_delta(b.x, target.0).abs() > 1024, "from afar, not over the target");
         assert_eq!(map.unit(shaman).unwrap().aboard, Some(v));
+    }
+
+    #[test]
+    fn an_empty_boat_at_sea_drifts_to_the_nearest_free_coast_and_stays() {
+        let mut map = coast();
+        let v = boat(&mut map, (C + 4, C));
+        let berth = boat(&mut map, (C - 1, C));
+        assert!(resting(VehicleKind::Boat, &map.terrain, (C - 1, C)) && !resting(VehicleKind::Boat, &map.terrain, (C + 4, C)));
+        run(&mut map, DRIFT_EVERY.period());
+        let State::Drifting { to } = map.vehicle(v).unwrap().state else { panic!("drifting") };
+        let cell = ((to.0 / 512) as i32, (to.1 / 512) as i32);
+        assert!(resting(VehicleKind::Boat, &map.terrain, cell) && cell != (C - 1, C), "a free coast cell: {cell:?}");
+        assert_eq!(map.vehicle(berth).unwrap().state, State::Parked, "already resting");
+        assert!(until(&mut map, 600, |m| m.vehicle(v).unwrap().state == State::Parked));
+        assert_eq!(map.vehicle(v).unwrap().cell(), cell);
+        assert_eq!(map.vehicle(v).unwrap().health.current(), LIFE, "whole while it drifted");
+    }
+
+    #[test]
+    fn a_manned_boat_never_drifts_and_two_never_share_a_cell() {
+        let mut map = coast();
+        let (a, b) = (boat(&mut map, (C + 4, C)), boat(&mut map, (C + 6, C)));
+        aboard(&mut map, a, 1);
+        aboard(&mut map, b, 1);
+        let to = at((C + 10, C + 10));
+        map.move_vehicle(a, to);
+        map.move_vehicle(b, to);
+        assert!(until(&mut map, 300, |m| m.vehicle(a).unwrap().state == State::Parked && m.vehicle(b).unwrap().state == State::Parked));
+        assert_eq!(map.vehicle(a).unwrap().cell(), (C + 10, C + 10));
+        assert_ne!(map.vehicle(b).unwrap().cell(), (C + 10, C + 10));
+        run(&mut map, DRIFT_EVERY.period());
+        assert_eq!(map.vehicle(a).unwrap().state, State::Parked, "at sea but manned");
     }
 
     #[test]

@@ -16,12 +16,21 @@ numbers are guesses.
 - `altitude`: the ground under a boat (the sea's surface is 0), `HOVER` 200 over the ground for a balloon (the
   exe's parked height; the moving hover over the highest ground ahead is not done).
 
+## Parking and drifting (done, improvised)
+- One vehicle a cell: a vehicle sent where another stands or is going stops in the nearest free cell it reaches
+  (`GameMap::move_vehicle`, `berths_taken`).
+- Resting places (`vehicle::resting`) [ours, after "Parking and the shore"]: a boat on the coast (a cell touching
+  the sea, not open sea), a balloon anywhere but over open sea. Every 64 turns (`DRIFT_EVERY`) an empty parked
+  vehicle away from one drifts at speed 8 (`DRIFT_SPEED`, `State::Drifting`) to the nearest free one it reaches
+  (`path::nearest_matching`): abandoned boats go back to a shore. The exe's coast landing flag and its time limits
+  on the drift are not followed.
+
 ## Health is also an abandon timer (done)
 `health` (a `Health` of max `LIFE` 5000, `VEHICLE_LIFE_*` of constant.dat) loses 1 every turn and is full again
 every turn while the vehicle moves or carries anyone. So an empty, still vehicle falls apart after 5000 turns
 (417 s). At 0:
-- a boat on the water sinks: 8 deeper and 8/2048 more bow-up a turn (capped at 398), gone at depth 192 (24 turns);
-- a boat on land explodes: a simple blast of its tribe where it stood, and it is gone;
+- a boat on the water (its cell touching the sea, the coast too) sinks: 8 deeper and 8/2048 more bow-up a turn (capped at 398), gone at depth 192 (24 turns);
+- a boat on land (an all-land cell) explodes: a simple blast of its tribe where it stood, and it is gone;
 - a balloon rises 80 a turn and explodes the same way at altitude 1024.
 Damage (`GameMap::damage_vehicle`, `WorldEvent::DamageVehicle`) comes only from another tribe: 50
 (`blast::DAMAGE_PERSON`) each turn of a simple blast whose radius holds it, 100 (`firebolt::CELL_DAMAGE`) from a
