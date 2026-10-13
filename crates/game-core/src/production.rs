@@ -3,6 +3,12 @@
 //! of what it makes now. Filled by the mana distribution (TODO "Mana"); the tooltip's bar reads it.
 
 use crate::map::GameMap;
+use crate::mana::Mana;
+
+/// A building's share of an income is at most its cost / `MAX_SHARE_DIV` (0x41A590).
+pub const MAX_SHARE_DIV: u16 = 32;
+/// Mana a building making nothing gives back to the tribe each turn, until its store is empty.
+pub const REFUND: u16 = 100;
 
 /// Most mana a share can bring and still leave the building short of mana (the panel's blinking bar,
 /// pop3-rev-analysis.md "The panel's training bar": hut `+0x14` bit 0x1000).
@@ -23,6 +29,42 @@ impl Production {
     pub fn is_active(&self) -> bool {
         self.cost > 0
     }
+
+    /// Making something and not full: it would take mana (as `SpellSlot::takes_mana`).
+    pub fn takes_mana(&self) -> bool {
+        self.is_active() && self.stored < self.cost
+    }
+
+    /// Takes what it can of `share` (at most `cost / MAX_SHARE_DIV` and what it still needs), noting
+    /// whether that left it short; returns the rest.
+    pub fn give(&mut self, share: Mana) -> Mana {
+        let taken = share.0.min((self.cost / MAX_SHARE_DIV) as u32).min((self.cost - self.stored.min(self.cost)) as u32);
+        self.stored += taken as u16;
+        self.short = taken <= SHORT_SHARE as u32;
+        Mana(share.0 - taken)
+    }
+
+    /// While making nothing, gives back up to `REFUND` of its store.
+    pub fn refund(&mut self) -> Mana {
+        if self.is_active() {
+            return Mana::ZERO;
+        }
+        let back = self.stored.min(REFUND);
+        self.stored -= back;
+        Mana(back as u32)
+    }
+}
+
+/// Shares `mana` evenly between the `stores` that take it, each taking what it can (`Production::give`).
+/// Returns what they did not take.
+pub fn charge(stores: &mut [&mut Production], mana: Mana) -> Mana {
+    let takers = stores.iter().filter(|p| p.takes_mana()).count() as u32;
+    if takers == 0 {
+        return mana;
+    }
+    let share = Mana(mana.0 / takers);
+    let left = stores.iter_mut().filter(|p| p.takes_mana()).fold(Mana::ZERO, |left, p| left + p.give(share));
+    left + mana.saturating_sub(Mana(share.0 * takers))
 }
 
 impl GameMap {
@@ -36,6 +78,39 @@ impl GameMap {
 mod tests {
     use super::*;
     use crate::building::{Building, BuildingKind};
+
+    fn warrior(stored: u16) -> Production {
+        Production { stored, cost: 3500, short: false }
+    }
+
+    #[test]
+    fn a_share_is_at_most_a_32nd_of_the_cost_and_what_is_missing() {
+        let mut p = warrior(0);
+        assert_eq!(p.give(Mana(280)), Mana(171), "3500 / 32 = 109 taken");
+        assert_eq!((p.stored, p.short), (109, false));
+        let mut p = warrior(3450);
+        assert_eq!(p.give(Mana(280)), Mana(230), "only the 50 missing");
+        assert!(!p.short, "50 is more than 32");
+        let mut p = warrior(0);
+        p.give(Mana(20));
+        assert!(p.short, "20 is short");
+    }
+
+    #[test]
+    fn stores_share_evenly_and_pass_on_what_they_cannot_take() {
+        let (mut a, mut b, mut idle) = (warrior(0), warrior(3490), Production::default());
+        let left = charge(&mut [&mut a, &mut b, &mut idle], Mana(201));
+        assert_eq!((a.stored, b.stored, idle.stored), (100, 3500, 0), "100 each, the full one took 10");
+        assert_eq!(left, Mana(91), "90 not taken and the odd one");
+        assert_eq!(charge(&mut [&mut idle], Mana(50)), Mana(50), "nobody takes");
+    }
+
+    #[test]
+    fn a_store_making_nothing_gives_back_100_a_turn() {
+        let mut p = Production { stored: 250, cost: 0, short: false };
+        assert_eq!((p.refund(), p.refund(), p.refund(), p.refund()), (Mana(100), Mana(100), Mana(50), Mana::ZERO));
+        assert_eq!(warrior(250).refund(), Mana::ZERO, "making something: kept");
+    }
 
     #[test]
     fn only_a_building_making_something_has_a_production() {

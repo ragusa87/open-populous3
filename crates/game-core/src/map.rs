@@ -887,7 +887,11 @@ impl GameMap {
         dirty.extend(self.work());
         self.drop_wood();
         self.count_inside();
-        self.mana.iter_mut().zip(&mut self.spell_books).for_each(|(pool, book)| pool.tick(now, book));
+        let buildings = &mut self.buildings;
+        for (player, (pool, book)) in self.mana.iter_mut().zip(&mut self.spell_books).enumerate() {
+            let mut stores: Vec<&mut crate::production::Production> = buildings.iter_mut().filter(|b| b.owner as usize == player).filter_map(|b| b.production.as_mut()).collect();
+            pool.tick(now, book, &mut stores);
+        }
         self.units.retain(|u| !gone.contains(&u.id));
         dirty
     }

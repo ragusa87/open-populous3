@@ -1,8 +1,10 @@
 //! A player's mana (pop3-rev-analysis.md "Mana rules"): what is gained or spent during a turn waits in
-//! `incoming` (`add`, the original's `add_mana`); once per turn `tick` adds the income, charges the spells
-//! first and banks the rest. Only `tick` changes the bank and the spell charges.
+//! `incoming` (`add`, the original's `add_mana`); once per turn `tick` adds the income, feeds the training
+//! units (`crate::production`), charges the spells and banks the rest. Only `tick` changes the bank, the
+//! spell charges and the training units' stores.
 
-use crate::spell_book::SpellBook;
+use crate::production::{self, Production};
+use crate::spell_book::{SpellBook, SpellSlot};
 use crate::time::{Every, Tick};
 
 /// An amount of mana.
@@ -64,19 +66,30 @@ impl ManaPool {
     }
 
     /// The turn's update (0x41A550): the income on update turns, then `distribute`.
-    pub fn tick(&mut self, now: Tick, book: &mut SpellBook) {
+    pub fn tick(&mut self, now: Tick, book: &mut SpellBook, stores: &mut [&mut Production]) {
         if MANA_EVERY.fires(now, 0) {
             self.received = INCOME;
             self.used = Mana::ZERO;
             self.incoming += INCOME;
         }
-        self.distribute(book);
+        self.distribute(book, stores);
     }
 
-    /// `incoming` charges the spells first (`SpellBook::charge`), the rest goes to the bank (0x41A590).
-    pub fn distribute(&mut self, book: &mut SpellBook) {
-        let left = book.charge(self.incoming);
-        self.used += self.incoming.saturating_sub(left);
+    /// The distribution (0x41A590): the training units' `stores` making nothing give some back; those
+    /// making something take their share of half of `incoming` (`production::charge`); the rest charges
+    /// the spells (`SpellBook::charge`); with every spell full, the stores take another share of what is
+    /// left, and the rest goes to the bank.
+    pub fn distribute(&mut self, book: &mut SpellBook, stores: &mut [&mut Production]) {
+        for store in stores.iter_mut() {
+            self.incoming += store.refund();
+        }
+        let half = Mana(self.incoming.0 / 2);
+        let rest = self.incoming.saturating_sub(half) + production::charge(stores, half);
+        let mut left = book.charge(rest);
+        self.used += rest.saturating_sub(left);
+        if !book.slots.iter().any(SpellSlot::takes_mana) {
+            left = production::charge(stores, left);
+        }
         self.bank = (self.bank + left).min(MAX_MANA);
         self.incoming = Mana::ZERO;
     }
@@ -100,16 +113,44 @@ mod tests {
         let mut b = book(&[SpellKind::Blast]);
         let mut pool = ManaPool { bank: Mana::ZERO, ..ManaPool::default() };
         pool.add(Mana(1000));
-        pool.distribute(&mut b);
+        pool.distribute(&mut b, &mut []);
         assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 4, "4 charges of 40");
         assert_eq!((pool.used, pool.bank, pool.incoming), (Mana(160), Mana(840), Mana::ZERO));
+    }
+
+    #[test]
+    fn training_units_take_their_share_before_the_spells() {
+        let mut b = book(&[SpellKind::Swarm]);
+        let mut pool = ManaPool { bank: Mana::ZERO, ..ManaPool::default() };
+        let mut warrior = Production { stored: 0, cost: 3500, short: false };
+        pool.add(Mana(560));
+        pool.distribute(&mut b, &mut [&mut warrior]);
+        assert_eq!(warrior.stored, 109, "a 32nd of its cost, out of half of 560");
+        assert_eq!((pool.used, pool.bank), (Mana(451), Mana::ZERO), "the rest charges the spell, still not full");
+    }
+
+    #[test]
+    fn with_every_spell_full_the_store_takes_a_second_share() {
+        let mut pool = ManaPool { bank: Mana::ZERO, ..ManaPool::default() };
+        let mut warrior = Production { stored: 0, cost: 3500, short: false };
+        pool.add(Mana(560));
+        pool.distribute(&mut SpellBook::new(), &mut [&mut warrior]);
+        assert_eq!((warrior.stored, pool.bank), (218, Mana(342)));
+    }
+
+    #[test]
+    fn a_store_making_nothing_goes_back_to_the_bank() {
+        let mut pool = ManaPool { bank: Mana::ZERO, ..ManaPool::default() };
+        let mut done = Production { stored: 150, cost: 0, short: false };
+        pool.distribute(&mut SpellBook::new(), &mut [&mut done]);
+        assert_eq!((done.stored, pool.bank), (50, Mana(100)));
     }
 
     #[test]
     fn the_bank_is_capped() {
         let mut pool = ManaPool { bank: Mana(999_990), ..ManaPool::default() };
         pool.add(Mana(100));
-        pool.distribute(&mut SpellBook::new());
+        pool.distribute(&mut SpellBook::new(), &mut []);
         assert_eq!(pool.bank, MAX_MANA);
     }
 
@@ -119,7 +160,7 @@ mod tests {
         let mut pool = ManaPool::default();
         pool.add(Mana(40));
         assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 0);
-        pool.tick(Tick::ZERO.next(), &mut b);
+        pool.tick(Tick::ZERO.next(), &mut b, &mut []);
         assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 1);
     }
 
@@ -130,7 +171,7 @@ mod tests {
         let mut now = Tick::ZERO;
         for _ in 0..32 {
             now = now.next();
-            pool.tick(now, &mut b);
+            pool.tick(now, &mut b, &mut []);
         }
         assert_eq!((pool.bank, pool.received), (Mana(2 * INCOME.0), INCOME));
     }
@@ -139,9 +180,9 @@ mod tests {
     fn used_counts_since_the_last_income() {
         let mut b = book(&[SpellKind::Swarm]);
         let mut pool = ManaPool { bank: Mana::ZERO, ..ManaPool::default() };
-        pool.tick(Tick::ZERO, &mut b);
+        pool.tick(Tick::ZERO, &mut b, &mut []);
         assert_eq!((pool.used, pool.bank), (Mana(480), Mana(80)), "4 swarm charges of 120");
-        pool.tick(Tick::ZERO.next(), &mut b);
+        pool.tick(Tick::ZERO.next(), &mut b, &mut []);
         assert_eq!(pool.used, Mana(480), "kept between incomes");
     }
 }
