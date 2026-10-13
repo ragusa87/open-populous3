@@ -40,7 +40,7 @@ people slot keeps room for it, so the row does not move [ours].
 | Plan, building under construction | `max_braves` | brave | the braves assigned to it |
 | House (villager hut) | its room (`capacity`, 3/4/5): `XXOOO` | brave | the people inside |
 | Drum tower | 1 | brave | the unit inside |
-| Training hut | 1 (one trainee at a time) | brave | the trainee, with its icon as it is now (e.g. a preacher being trained into a firewarrior) |
+| Training unit | 1 (one trainee at a time) | brave | the trainee, with its icon as it is now (e.g. a preacher being trained into a firewarrior) |
 | Pyramid of knowledge | 1 | shaman | the shaman assigned to it, praying at the door or inside |
 | Totem | `TriggerCount` (`Totem::prayers`), e.g. 8: `XOOOOOOO` | brave (shaman for shaman-only totems) | the counted prayers, each with the icon of its own kind; assigned units beyond the count do not show |
 | Vehicle | its seats | brave | the people aboard |
@@ -63,15 +63,19 @@ horizontal across its top (filling left to right):
 - Pyramid, totem: the prayer progress of the player's tribe (worship.md), vertical, on the left.
 - House: two vertical bars on the left, its growth (towards the next size) and its birth (the next brave),
   huts-and-training.md.
-- Training hut: the training of the unit inside, horizontal, across the top.
+- Training unit (warrior, firewarrior and spy buildings; later boat and balloon huts, which make their vehicle
+  the same way): horizontal, across the top, a double fill as the original's (pop3-rev-analysis.md "The panel's
+  training bar"): the overall progress, its stored mana over the cost of what it makes (yellow, on top), over the
+  mana layer (blue), what the overall fill has beyond its last whole pixel, so it sweeps the whole width each time
+  mana is dispatched and the overall fill moves by a pixel. No bar while it makes nothing.
 
 Done (`tooltip::Bar { kind, fill, blocked }`, `BarKind` giving the colour and the side, `spawn_bar`,
 `blink_bars`): the pyramid's prayer bar from its progress (gone once granted), the totem's from the player's gauge
-(gone once exhausted); the house and training bars wait for those features.
+(gone once exhausted); the training bar from `GameMap::production` (`game_core::production`, both fills,
+`tooltip::fine_fill`), waiting for the mana distribution to fill it; the house bars wait for that feature.
 
 A bar **blinks while blocked**: a house's birth bar when the tribe is at its population cap; its growth bar when
-the next size cannot be reached; a training bar without mana [player: blinking; ours: which causes count as
-blocked].
+the next size cannot be reached; a training bar while its last mana share was 32 or less (both fills blink).
 
 ## Dismantle toggle [player]
 On the player's buildings that take wood. On a built building it marks it for dismantling: it stops working, the
@@ -98,7 +102,7 @@ With the original files: 60, 61 hovered, 62 pressed.
 | Built building | people inside (when it holds any) | used | | dismantle |
 | House | people inside | used (+ needed while growing) | growth, birth | dismantle |
 | Drum tower | the unit inside | used | | dismantle |
-| Training hut | the trainee | used | training | dismantle |
+| Training unit | the trainee | used | training | dismantle |
 | Pyramid of knowledge | the shaman; the name of its reward under its own name | | prayer | |
 | Totem | counted prayers | | prayer | |
 | Vehicle | people aboard | | | unload button |

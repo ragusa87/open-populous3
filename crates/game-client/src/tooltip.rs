@@ -110,7 +110,8 @@ pub enum BarKind {
     /// A house making its next brave (once houses breed).
     #[allow(dead_code)]
     Birth,
-    /// The unit in a training hut.
+    /// What a training unit makes (later a boat or balloon hut too): its stored mana over the cost,
+    /// over the mana layer (`Bar::fine`).
     Training,
 }
 
@@ -125,17 +126,32 @@ impl BarKind {
             BarKind::Prayer => Color::srgb(0.95, 0.8, 0.3),
             BarKind::Growth => Color::srgb(0.85, 0.25, 0.2),
             BarKind::Birth => Color::srgb(0.3, 0.8, 0.3),
-            BarKind::Training => Color::srgb(0.35, 0.6, 1.0),
+            BarKind::Training => Color::srgb(1.0, 0.85, 0.2),
         }
     }
 }
 
-/// A progress bar: `fill` in thousandths, blinking while `blocked`.
+/// The training bar's mana layer, under its overall fill.
+const MANA_LAYER: Color = Color::srgb(0.25, 0.5, 1.0);
+
+/// A progress bar: `fill` in thousandths, blinking while `blocked`. `fine` (value, max) draws the
+/// original's finer layer under the fill (`fine_fill`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bar {
     pub kind: BarKind,
     pub fill: u16,
     pub blocked: bool,
+    pub fine: Option<(u32, u32)>,
+}
+
+/// The finer layer of a bar `width` pixels wide filled `value / max` (pop3-rev-analysis.md "The panel's
+/// training bar"), 0 to 1: what the fill has beyond its last whole pixel, so it sweeps the whole width
+/// each time the fill moves by a pixel.
+pub fn fine_fill(value: u32, max: u32, width: u32) -> f32 {
+    if max == 0 {
+        return 0.0;
+    }
+    ((value as u64 * width as u64) % max as u64) as f32 / max as f32
 }
 
 /// How many slots each line of a row of `n` holds: lines of 10, but a row of 16 as two of 8.
@@ -181,7 +197,7 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[UnitId], revealed: bo
         }
         model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Shaman, selected)));
         if let game_core::vault::VaultPhase::Praying { .. } = vault.phase {
-            model.bars.push(Bar { kind: BarKind::Prayer, fill: vault.progress_permille(), blocked: false });
+            model.bars.push(Bar { kind: BarKind::Prayer, fill: vault.progress_permille(), blocked: false, fine: None });
         }
         return model;
     }
@@ -198,6 +214,7 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[UnitId], revealed: bo
     model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Brave, selected)));
     model.rows.extend(map.wood_slots(holder).map(wood_row));
     model.toggle = b.flat.then_some(Toggle { building: b.id, on: b.dismantling });
+    model.bars.extend(map.production(i).map(|p| Bar { kind: BarKind::Training, fill: (p.stored.min(p.cost) as u32 * game_core::vault::FULL as u32 / p.cost as u32) as u16, blocked: p.short, fine: Some((p.stored as u32, p.cost as u32)) }));
     model
 }
 
@@ -213,7 +230,7 @@ pub fn totem_model(map: &GameMap, i: usize, selected: &[UnitId]) -> Option<Toolt
     let placeholder = if totem.shaman_only { UnitKind::Shaman } else { UnitKind::Brave };
     let rows = map.people_slots(Holder::Totem(i)).map(|p| people_row(map, &p, placeholder, selected)).into_iter().collect();
     let fill = (totem.gauges[crate::units::PLAYER as usize] as u64 * game_core::vault::FULL as u64 / totem.full().max(1) as u64) as u16;
-    let bars = if totem.is_exhausted() { Vec::new() } else { vec![Bar { kind: BarKind::Prayer, fill, blocked: false }] };
+    let bars = if totem.is_exhausted() { Vec::new() } else { vec![Bar { kind: BarKind::Prayer, fill, blocked: false, fine: None }] };
     Some(TooltipModel { lines: vec![totem.kind.name().to_string()], rows, bars, toggle: None })
 }
 
@@ -443,7 +460,7 @@ impl Plugin for TooltipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IconImages>()
             .add_systems(Startup, (spawn_tooltip, load_sprites))
-            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, press_toggle, blink_bars).in_set(crate::menu::Gameplay));
+            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, press_toggle, blink_bars, size_fine_fills).in_set(crate::menu::Gameplay));
     }
 }
 
@@ -560,8 +577,15 @@ struct BarFill {
     blocked: bool,
 }
 
+/// A bar's finer layer (`fine_fill`), sized from its track's width once laid out (`size_fine_fills`).
+#[derive(Component)]
+struct FineFill {
+    value: u32,
+    max: u32,
+}
+
 /// A bar: a dark track and its fill, vertical (filling upwards, as tall as the tooltip's content) or
-/// horizontal (filling to the right, as wide as the tooltip).
+/// horizontal (filling to the right, as wide as the tooltip); a finer layer first, under the fill.
 fn spawn_bar(parent: &mut ChildSpawnerCommands, bar: Bar) {
     let share = percent(bar.fill as f32 * 100.0 / game_core::vault::FULL as f32);
     let (track, fill) = if bar.kind.horizontal() {
@@ -569,7 +593,25 @@ fn spawn_bar(parent: &mut ChildSpawnerCommands, bar: Bar) {
     } else {
         (Node { width: px(BAR_THICKNESS), ..default() }, Node { position_type: PositionType::Absolute, left: px(0), right: px(0), bottom: px(0), height: share, ..default() })
     };
-    parent.spawn((track, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)), Pickable::IGNORE)).with_child((fill, BackgroundColor(bar.kind.color()), BarFill { color: bar.kind.color(), blocked: bar.blocked }, Pickable::IGNORE));
+    parent.spawn((track, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)), Pickable::IGNORE)).with_children(|t| {
+        if let Some((value, max)) = bar.fine {
+            let layer = Node { position_type: PositionType::Absolute, left: px(0), top: px(0), bottom: px(0), width: px(0), ..default() };
+            t.spawn((layer, BackgroundColor(MANA_LAYER), BarFill { color: MANA_LAYER, blocked: bar.blocked }, FineFill { value, max }, Pickable::IGNORE));
+        }
+        t.spawn((fill, BackgroundColor(bar.kind.color()), BarFill { color: bar.kind.color(), blocked: bar.blocked }, Pickable::IGNORE));
+    });
+}
+
+/// Finer layers span their share of their track's laid-out width, in whole pixels as the original's.
+fn size_fine_fills(mut layers: Query<(&FineFill, &ChildOf, &mut Node)>, tracks: Query<&ComputedNode>) {
+    for (layer, parent, mut node) in &mut layers {
+        let Ok(track) = tracks.get(parent.parent()) else { continue };
+        let width = track.size().x * track.inverse_scale_factor();
+        let share = percent(fine_fill(layer.value, layer.max, width.round() as u32) * 100.0);
+        if node.width != share {
+            node.width = share;
+        }
+    }
 }
 
 /// Blocked bars blink: their fill fades out and back in.
@@ -772,7 +814,7 @@ mod tests {
         let model = building_model(&map, v, &[], false);
         assert_eq!(model.lines[1], "Teaches: Temple");
         assert_eq!(model.rows, vec![vec![Slot { icon: Icon::Placeholder(UnitKind::Shaman), unit: None, selected: false }]]);
-        assert_eq!(model.bars, vec![Bar { kind: BarKind::Prayer, fill: 0, blocked: false }], "prayer bar, empty");
+        assert_eq!(model.bars, vec![Bar { kind: BarKind::Prayer, fill: 0, blocked: false, fine: None }], "prayer bar, empty");
         map.buildings[v].vault.as_mut().unwrap().phase = game_core::vault::VaultPhase::Praying { progress: 60 * game_core::gauge::STEP };
         assert_eq!(building_model(&map, v, &[], false).bars[0].fill, 600, "60 of 100");
         map.buildings[v].vault.as_mut().unwrap().grant();
@@ -815,10 +857,31 @@ mod tests {
     }
 
     #[test]
+    fn the_fine_layer_is_the_fill_beyond_its_last_whole_pixel() {
+        assert_eq!(fine_fill(35, 3500, 100), 0.0, "exactly one pixel");
+        assert!((fine_fill(52, 3500, 100) - 0.4857).abs() < 1e-3);
+        assert_eq!(fine_fill(0, 3500, 100), 0.0);
+        assert_eq!(fine_fill(10, 0, 100), 0.0, "nothing to make");
+        assert!(fine_fill(u16::MAX as u32, u16::MAX as u32 - 1, u32::MAX) < 1.0, "no overflow");
+    }
+
+    #[test]
+    fn a_training_unit_making_someone_has_the_double_bar() {
+        let mut map = GameMap::sandbox_buildings();
+        let id = map.add_building(game_core::building::Building::new(BuildingKind::WarriorTraining, crate::units::PLAYER, 40 * 512, 90 * 512, 0));
+        let i = map.building_index(id).unwrap();
+        assert!(building_model(&map, i, &[], false).bars.is_empty(), "making nothing: no bar");
+        map.buildings[i].production = Some(game_core::production::Production { stored: 875, cost: 3500, short: true });
+        let bars = building_model(&map, i, &[], false).bars;
+        assert_eq!(bars, vec![Bar { kind: BarKind::Training, fill: 250, blocked: true, fine: Some((875, 3500)) }]);
+    }
+
+    #[test]
     fn bars_stand_vertical_on_the_left_but_training_across_the_top() {
         assert!(BarKind::Training.horizontal());
         assert!(![BarKind::Prayer, BarKind::Growth, BarKind::Birth].iter().any(|k| k.horizontal()));
         assert_ne!(BarKind::Growth.color(), BarKind::Birth.color(), "a house's two bars apart");
+        assert_ne!(BarKind::Training.color(), MANA_LAYER, "the training bar's two fills apart");
         let map = GameMap::sandbox_worship();
         assert_eq!(totem_model(&map, 0, &[]).unwrap().bars[0].kind, BarKind::Prayer);
         assert!(tree_model(&map, 0).is_none_or(|m| m.bars.is_empty()), "a tree has no bar");
