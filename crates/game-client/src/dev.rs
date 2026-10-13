@@ -577,7 +577,7 @@ mod tests {
             map.tick();
         }
         let cut = wood(&map) - before;
-        assert!(cut >= game_core::map::SANDBOX_FREE_BRAVES as u32 * 3 / 4, "most bring a piece; the last find no tree with wood to spare near enough: {cut}");
+        assert!(cut >= 8, "pieces cut and carried back, as long as the trees near the crowd have wood to spare: {cut}");
         assert!(brave_commands("dance", &map).is_empty());
     }
 

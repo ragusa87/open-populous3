@@ -158,7 +158,8 @@ unit (`Order::Enter`), a follower goes straight in when nobody queues, nobody is
 otherwise it joins the building's queue (`Building::queue`, in arrival order) as `Action::Queuing`, and one reaching
 a full door joins it too. Each rank has its spot (`queue_spot`): a quarter cell apart (`QUEUE_STEP`) along the
 walls at the door's distance, from beside the door (the doorway stays free) round the building; a full lap goes on
-a row further out, turning the other way [ours: past one lap is not traced]. Anyone given another order leaves the
+a row further out, turning the other way [ours: past one lap is not traced]. At its spot each one faces the one ahead (the head
+faces the door) [ours]. Anyone given another order leaves the
 queue and those behind move up at once [ours: the original ripples, 2 turns per rank]. The head goes in when there
 is room and the admission gate is open: `ADMIT_GAP` (16) turns after one went in, `LEFT_GAP` (12) after one came
 out [exe]. Queued people count as working (`headcount`). Not yet: queued orders carried over, those already of the

@@ -120,10 +120,15 @@ impl GameMap {
             let b = &mut self.buildings[k];
             b.queue.retain(queuing);
             b.admit_gate = b.admit_gate.saturating_sub(1);
+            let door = b.door();
             let spots: Vec<(crate::unit::UnitId, (u16, u16))> = b.queue.iter().enumerate().map(|(rank, &u)| (u, queue_spot(b, rank))).collect();
-            for (u, at) in spots {
+            for (rank, &(u, at)) in spots.iter().enumerate() {
+                let ahead = if rank == 0 { door } else { spots[rank - 1].1 };
                 if let Some(u) = self.unit_mut(u) {
                     u.queue_at(at);
+                    if (u.x, u.z) == at {
+                        u.face(ahead);
+                    }
                 }
             }
             let b = &self.buildings[k];
@@ -298,6 +303,14 @@ mod tests {
         .expect("at their spots");
         let b = &map.buildings[hut];
         assert!(queued.iter().enumerate().all(|(r, &u)| map.unit(u).map(|u| (u.x, u.z)) == Some(queue_spot(b, r))), "in arrival order round the walls");
+        map.tick();
+        let b = &map.buildings[hut];
+        for (r, &u) in queued.iter().enumerate() {
+            let ahead = if r == 0 { b.door() } else { queue_spot(b, r - 1) };
+            let u = map.unit(u).unwrap();
+            let (dx, dz) = (crate::unit::torus_delta(u.x, ahead.0), crate::unit::torus_delta(u.z, ahead.1));
+            assert_eq!(u.facing, crate::unit::octant(dx, dz), "rank {r} faces the one ahead");
+        }
         let leaving = queued[0];
         map.apply(&crate::command::Command::OrderUnit { player: 0, unit: leaving, order: Order::Stop });
         map.tick();

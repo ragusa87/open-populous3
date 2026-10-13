@@ -333,7 +333,7 @@ impl GameMap {
             map.add_building(Building::new(kind, 0, x, z, 0));
         }
         for n in 0..SANDBOX_FREE_BRAVES {
-            map.spawn(0, UnitKind::Brave, at(20 + n % 7, -2 + 2 * (n / 7)));
+            map.spawn(0, UnitKind::Brave, at(20 + n % 10, -2 - n / 10));
         }
         // The showcase's occupied buildings get real people inside.
         let occupied: Vec<Building> = map.buildings.iter().filter(|b| b.inside > 0).cloned().collect();
@@ -1031,7 +1031,7 @@ pub fn sandbox_blast_corner(i: usize) -> (u16, u16) {
 }
 
 /// Braves standing free in the buildings sandbox, enough to fill a training unit's queue round its walls.
-pub const SANDBOX_FREE_BRAVES: i32 = 28;
+pub const SANDBOX_FREE_BRAVES: i32 = 100;
 
 /// The rows of marked people in the units sandbox, north to south: what each row's people carry. Low health is
 /// 1 point left: they heal out of it in about 6 s.
