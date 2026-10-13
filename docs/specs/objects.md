@@ -63,7 +63,9 @@ Empty in banks 2-7: 6, 12, 22-29, 33-38, 48-50, 57-61, 145-148.
 - **Bank 0** itself: 13-15 like banks 2 and 7, 17-18 copies of 14-15, but 16 is a different pine.
 
 So the tree look follows the object bank, not the landscape theme. Which file the game loads for a bank-N level,
-and how it indexes it, is not verified (it needs the game). Either load bank N with the table above, or stay on
+and how it indexes it, is not verified (it needs the game). A hint from the exe: vehicles set their object index
+to 143 (boat) and 144 (balloon), the banks 2-7 numbering of bank 0's 181 / 182 (pop3-rev-analysis.md "Vehicles"),
+so the loaded object table uses the banks 2-7 layout. Either load bank N with the table above, or stay on
 bank 0 and pick the trees by bank.
 
 ### Records

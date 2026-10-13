@@ -51,6 +51,9 @@ so a live measurement may run on it with the addresses translated.
 - **A firewarrior throws two homing fire bolts, one hits** [exe]: 1 cell per turn, 100 to every enemy in the
   impact cell plus `SW_BLAST_DAMAGE` × a per-type % to the target, every 25-28 turns, at 9.2-17.2 cells by altitude.
   See "Firewarrior fire".
+- **A vehicle's life is also its abandon timer** [exe]: 5000, −1 per turn, refilled every turn while it moves or
+  carries anyone; blasts (50 per turn) and bolts (100) only sink an empty, still one. A boat whose cell turns to
+  land is emptied, keels over and explodes 13-24 s later. Both are 3D objects 143 / 144. See "Vehicles".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
 
@@ -746,7 +749,7 @@ calls. Two sounds (0xAB, 0x29) when it starts.
 |---|---|
 | Person | Nothing beyond clearing the flag at the end of its turn (0x4D3CEA): the person physics follows the ground every turn, lifting people when it rises and letting them fall when it drops ("Person physics"). No push, no damage. |
 | Building (0x408080) | The base becomes the average height of its footprint. Footprint cells within 200 of it (building record +0x46, every type) are pulled back towards it (0x44FDE0, rate +0x44 = 2): the building re-levels its own ground. If any footprint cell is more than 200 away, the building is destroyed (state 3, sub-state 1). Boat huts (types 13, 14) keep their base. A second destroy reason (sub-state 2) exists, not traced. |
-| Boat (vehicle types 1, 2) | One forced movement pass (0x4E7FB0); no damage or destroy call in it. What a boat does on raised land is not traced. |
+| Boat (vehicle types 1, 2) | One forced movement pass (0x4E7FB0); no damage or destroy call in it. A boat whose cell becomes all land is stranded at the next 16-turn check (state 8): passengers put off, it keels over, explodes 160-287 turns later ("Vehicles"). |
 | Balloon (vehicle types 3, 4) | Never explodes from it. Each turn (0x4E8F00) it samples the ground ahead, takes the highest point plus a hover height of its type (another one over buildings: vehicle table 0x5A7938, stride 0x17, +0xD / +0xF) and climbs or sinks towards it at its profile's vertical rate: a bridge under it lifts it. |
 
 ## Landscape projection [exe, measured]
@@ -1275,6 +1278,149 @@ low health (+0x14 bit 0x1000, the sparkles) = life <= max_life / 4
 - Being thrown delays death: a person at life ≤ 0 keeps moving until it lands (the capture's runner at −144 for 11
   turns was flung by a firewarrior's bolt).
 
+## Vehicles [exe]
+Class 4: types 1, 2 boat, 3, 4 balloon (airship). Init `init_unit_class_4` 0x463370 (state entry, jump table
+0x46372C), per turn `unit_processing_class_4_vehicle` 0x463780 (jump table 0x463B78 by state `+0x2C`), then the
+life step 0x463CB0 every turn in every state. Vehicle table 0x5A7938, stride 0x17 (types 1-2 and 3-4 identical):
+
+| Field | Boat | Balloon | Meaning |
+|---|---|---|---|
+| +0x0 (u32) | 8000 (file 5000) | 8000 (file 5000) | `VEHICLE_LIFE_BOAT` / `_BALLOON`: life `+0x98` at creation and refill |
+| +0x4 | 143 | 144 | object index of the model (`+0x33`, draw class 2) |
+| +0x6 | 838 | 839 | not read by the vehicle code (unverified: a text id) |
+| +0x8 | 5 | 2 | seats: passenger ids at `+0x7A`, count `+0x9E` |
+| +0xA, +0xB | 1, 3 | 2, 4 | the type's parked and moving states |
+| +0xD, +0xF | 0, 0 | 560, 200 | hover heights (see "Terrain changes"; parked balloon: ground + 200) |
+| +0x13 | 600 (file 400) | 1000 (file 300) | `WOOD_VEHICLE_BOAT1` / `_AIRSHIP_1`, the hut's cost |
+| +0x15 | 0 | 1 | flag 1: flies (selects the balloon branch everywhere) |
+
+### Drawing
+- The model is a 3D object, not a sprite: `0x4EE700(&vehicle+0x33, 2, table+0x4)` sets the object index 143
+  (boat) or 144 (balloon) and draw class 2 (`0x5A6AF8` row 2: renderer 3, the object path `0x4708D0`, the same
+  as buildings and trees). The object record is `[0x895EC1] + 54 × index` (the `objs` record of objects.md).
+- 143 and 144 are the boat and the airship in the layout of object banks 2-7 (objects.md: bank 0's 181 and
+  182). In bank 0 they are warrior training huts, so the game's loaded object table follows the banks 2-7 layout
+  (which file the game loads for a bank-0 level is still open, objects.md).
+- The model is turned by the heading `+0x26` and two tilt angles, `+0x6C` (pitch, `0x47F930`) and `+0x6E`
+  (roll, `0x47FA30`), 2048 per turn: the sinking, beaching and spinning below are these angles, not other models.
+- Heading at creation (0x463BA0, called by the type inits 0x463220-0x46333D): on a coast cell, away from the shore
+  (cell shape direction + 4, × 256).
+- A parked balloon (state 2) floats at ground + 200 (+0xF); a moving one samples the ground ahead (0x4E8F00).
+  A moving balloon bobs: height ± (`+0x2E` & 15 folded to 0..8) × 128 / 256 every turn, carrying its passengers.
+- Sounds: moving loop 0x4F (boat) / 0x4E (balloon), started with flag 0x40 (0x48A050) and stopped when it parks
+  (0x48A770); destruction 0x4D (boat) / 0x4C (balloon), played on the blast.
+
+### States
+| State | Kind | Per turn |
+|---|---|---|
+| 1 | boat parked | movement pass, starts moving (state 3) when its driver (0x466760) moves |
+| 2 | balloon parked | same, state 4 |
+| 3 | boat moving | 0x463F20 |
+| 4 | balloon moving | 0x4641D0 |
+| 5 | boat destroyed | sinks or explodes (0x4638E6) |
+| 6 | balloon destroyed | rises, then explodes (0x4639C8) |
+| 7 | empty, drifting to a resting place | 0x464480 |
+| 8 | boat stranded on land | keels over (init 0x464710, per turn 0x4648A0) |
+| 9 | caught by a whirlwind: spins, then explodes | 0x4649B0 (whirlwind [player]; the setter is not traced) |
+
+### Life, damage and destruction
+`+0x98` is both the hull's health and an abandon timer:
+```text
+life step (0x463CB0), every turn, every state:
+  life -= 1
+  life <= 0 (and not +0xC bit 0x100000):
+      state 8 → +0x92 |= 0x400000
+      boat: state 5;  balloon: state 6
+  else if speed (+0x5F) != 0 or anyone aboard (+0x9E):
+      life = VEHICLE_LIFE (file 5000)              ; full again every turn
+
+damage_vehicle(vehicle, tribe, amount)  0x466F00:
+  skipped when global 0x895DA7 bit 4 is set or the vehicle is of that tribe
+  life -= amount
+  callers: simple blast 7/1 (0x50B8C8): BLAST_DAMAGE_PERSON (exe 50) per turn of the blast, any vehicle in
+           its radius; firewarrior bolt (0x514583): 100 to every enemy vehicle in the impact cell
+```
+- So damage only sinks an empty, stopped vehicle: a manned or moving one is refilled to the full 5000 every turn,
+  and would need 5000 damage between two of its turns (100 blast turns, 50 bolts). No spell writes the vehicle
+  states directly (only 0x463CB0 sets 5 and 6); whirlwind and blast reach vehicles through the simple blast.
+- An abandoned vehicle (empty and still) is destroyed after 5000 turns: 417 s, about 7 minutes (exe 8000: 667 s).
+- Destroyed boat (state 5). Entry (0x463532): everyone aboard is put out at its position (0x4659D0, 0x432520,
+  0x402E70, person `+0xC` |= 0x10). Then, by the 8 × 8 land mask of its cell (0x44F980):
+  - on water: sinks, height −8 and pitch +8 per turn (pitch up to 398, 70°), deleted (0x4EF180) at height
+    −192: 24 turns (2 s) from the sea surface, no explosion;
+  - on land: at once a partial explosion (0x407860: the model's faces fly off, smoke), a simple blast 7/1
+    (0x50B6F0 with 3, 2, 5, 0x62, 0x8C, 1, 0), sound 0x4D, and the boat is deleted.
+- Destroyed balloon (state 6): passengers put out the same way (they fall), then it rises 80 per turn and, at
+  height 1024 or more, explodes like a boat on land (sound 0x4C). From 300 that is 10 turns (0.8 s).
+- State 9 (a whirlwind's victim, as seen in play): speed 0, passengers put out, a countdown `+0x9A` of 10 (boat) or
+  2 (balloon) turns; a boat spins (roll +204, pitch +153 per turn) and its countdown ends early when the ground
+  reaches its height; at 0 the same explosion.
+
+### Boarding and driving [exe, player]
+```text
+board(vehicle, person)  0x4657D0:
+  no free seat among the type's seats (table +0x8: boat 5, balloon 2)  →  refused (a hard limit)
+  the person plays its boarding animation (table 0x5A6DCE by type, 0x5A6D98 when +0x78 is set), its +0x9F =
+    the vehicle; in a balloon its +0x10 bit 0x2000000 (aloft) is set
+  seat = the person, +0x9E += 1, +0x9A = 7 (the vehicle waits 7 turns before moving off)
+  vehicle tribe (+0x2F) and +0xA1 = the person's tribe (a spy: 0x4DE740, probably its disguise)
+  a person of the same group (+0x63) as the vehicle's leader (0x4668B0) within 440 units joins its group
+```
+- Ownership follows whoever boards: an empty enemy or neutral vehicle becomes yours when one of your people gets
+  in [player]; the exe rewrites the tribe on every boarding.
+- Anyone can drive: there is no driver type; the vehicle moves when its leading passenger (0x466760) is given a
+  move [player].
+- Getting on and off [player]: the person walks under the vehicle or within 1-2 cells of it, then jumps on
+  (boat) or the balloon lands on it; getting off is the reverse. A passenger stays selected, and a move order
+  given to it moves the vehicle instead. The vehicle's tooltip has the unload button; clicking the ground
+  several times also unloads (minor).
+
+### Parking and the shore
+Map cells (0x8A03E4, 16 bytes): the low nibble of `+0xC` is the cell's coast shape, read through the table
+0x5AA328 (14 bytes per shape: +0 class bit, +1 direction 0-7 or none, +6..+13 an 8 × 8 land mask, one byte per
+row):
+
+| Shape | Class | Land in the cell |
+|---|---|---|
+| 0 | 0x01 | all land |
+| 1 | 0x02 | none (open sea) |
+| 2-5 | 0x04 | a strip along one side (straight coast) |
+| 6-9 | 0x08 | a small corner (water cell by a headland) |
+| 10-13 | 0x10 | two sides (water cell in a bay corner) |
+| 14-15 | 0x20 | two opposite corners |
+
+```text
+moving (states 3, 4), each turn: movement pass, then when the driver has stopped, the vehicle's speed <= 1 and
+it stands on a cell centre (x and z & 0x1FF == 0x100):
+  boat may park (0x4650D0) when its cell has no flag 0x204, holds no other vehicle, and is
+      open sea (shape 1), or a coast cell (shapes 2-15) with cell flag 0x1000000 that is not a bay corner (10-13)
+  balloon may park when its cell has no flag 0x204, holds no other vehicle, and, when empty, is not open sea
+      (shape 1) and has no cell flag 0x2
+  parks: speed 0, the moving sound stops, state 1 / 2;  else 0x466FC0(vehicle, 12) and it goes on
+```
+- Cell flag 0x1000000 ("boat landing", partly traced): set by `level_land_processing_2` (0x44E2CF) when four of
+  the cell's neighbouring points are at height 0, cleared when one of its 8 neighbours has flag 0x200 (a
+  building stands there, its id at cell +0x8), and cleared on a boat hut's cells by `init_boat_hut` (0x40B7F0).
+  Flag 0x4 of the 0x204 test is not identified.
+- An empty vehicle not at a resting place (0x465650: boat on a coast cell, shapes 2-15, without cell flags
+  0x100004; balloon anywhere but open sea without 0x100204) goes to state 7 at the next 64-turn check: it picks a
+  destination (boat 0x464AE0, balloon 0x4651B0) and moves there at speed 8 for up to 128 turns (or, without one,
+  towards a random point 4096 away for 64 turns), parking within 80 units of it at a resting place. Abandoned
+  boats drift back to a shore.
+
+### Stranded boat (state 8)
+```text
+check (0x463CB0), boats only, every 16 turns (+0x2E & 15 == 0) or when "ground moved" (+0xC & 0x2004):
+  its cell is all land (shape 0), not +0xC bit 0x100000, not already state 8  →  state 8
+entry (0x464710): speed 0; everyone aboard is put off on the ground, each at its cell's centre (or by the
+  building there, 0x4044B0); life = 160 + rand(128) turns; roll (+0x6E) = 1 or −1 at random (its side)
+per turn (0x4648A0): kept on the ground; while the cell is still all land the roll grows 8 per turn up to 512
+  (90°, on its side, 64 turns = 5.3 s); when the cell is water again: back to state 1 (parked)
+the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the boat explodes
+```
+- This is what Raise Land, Land Bridge, Earthquake and the like do to a boat whose cell becomes land; boats on
+  coast cells (shapes 2-15) are not stranded.
+
 ## Impact on our specs
 - huts-and-training.md rule 7 (`MANA_F[kind]` × `HOUSED`/`WORKING`/`TRAINING` %, × `HUT_LEVEL`) is not what the
   income routine does: it uses the busy/idle constants above. The `MANA_F_<PERSON>` and activity % values are read
@@ -1383,6 +1529,16 @@ low health (+0x14 bit 0x1000, the sparkles) = life <= max_life / 4
 - TODO "Warriors: about 3-4x a brave's combat strength": with `constant.dat` a warrior hits 6 times as hard
   (360 against 60) with 1.8 times the life (1800 against 1000); the exe defaults give 3 times (180).
 - TODO "Firewarriors throw fire": firewarriors never take a melee slot; their attack is a separate ranged path.
+- TODO "Vehicles" and assets.md "Vehicles" (none in our code): the original's boat and balloon are 3D objects
+  143 / 144 of the banks 2-7 layout (bank 0: `catalog::BOAT`, `AIRSHIP`), turned by a pitch and a
+  roll for sinking and keeling over, no sprites. Life `VEHICLE_LIFE_*` = 5000 turns (one tick each), refilled
+  every turn while moving or manned; damage 50 per blast turn, 100 per firewarrior bolt (enemies only). Destroyed:
+  a boat sinks 8 units per turn on water (gone in 2 s) or explodes on land (blast 7/1); a balloon rises 80 per
+  turn and explodes at height 1024. A boat whose cell becomes all land: passengers off, keels over 90° in 64
+  turns, explodes after 160-287 turns ("Vehicles").
+- units.md `Mobility::Sail` ("open sea only, boats") and `path::nearest_reachable` (boats unloading at a shore):
+  the original parks a boat on open sea or on a coast cell with the landing flag (four neighbouring points at
+  height 0, no building next to it, not a bay corner); only an all-land cell strands it.
 
 ## Open questions
 - Where `MANA_F_<PERSON>`, `MANA_F_HOUSED/WORKING/TRAINING` and `MANA_F_HUT_LEVEL_1..3` are applied. Only the max
@@ -1427,11 +1583,17 @@ low health (+0x14 bit 0x1000, the sparkles) = life <= max_life / 4
 - Sites: which code creates the pillars at level load, and whether the levelling forces every cell of its disc.
 - Spells: burning trees (scenery state 5), the partial building explosion of the earthquake, whether ghosts
   expire, what starts the landscape-shaping mode, what a person does when the ground under it floods, the
-  building's second destroy reason (sub-state 2), and boats on raised land.
+  building's second destroy reason (sub-state 2).
 - Status markers: whether `frame_counter` 0x897981 advances per rendered frame or per turn, the anchor of the
   screen position the height offsets are taken from, what the colour tables (0x87D000 + n × 0x1000) do to an alpha
   sprite, the key behind commands 100/101 (health bars), tribe flag +0x93D bit 0x8 (sees invisible people?), and
   what +0x3C (a colour table index −15..15, 0x468B50) tints a person for.
+
+- Vehicles: where the whirlwind sets state 9 (not in its vehicle branch 0x50FA1F, which only makes a blast); the
+  boarding range check and the unloading path (0x4659D0, 0x466190, 0x465C50); the 4 neighbouring points of the boat landing flag 0x1000000; cell flag 0x4;
+  `+0xC` bit 0x100000 (no stranding, no destruction); the movement passes and the state-7 destination
+  searches (0x464AE0, 0x4651B0); 0x466FC0; table +0x6 (838 / 839); whether a parked balloon's passengers can be
+  hit; what a passenger put out over water does (drowns?). Live check of the 5000-turn abandon life.
 
 ## Reference
 
@@ -1542,6 +1704,15 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x50D9A0 | earthquake effect 7/0x1A per turn (Ghidra: `process_explode_building`), spawned only by the earthquake spell (spell table effect 26) |
 | 0x50FE60 | effect 7/0xE init: shake one building (−100 wood via 0x4980A0, partial explosion) |
 | 0x4E7FB0, 0x4E8F00 | boat and balloon movement passes (balloon hover height) |
+| 0x463370, 0x463780 | vehicle class init (by state) and per turn (by state) |
+| 0x463CB0 | "vehicle_life_step": −1 per turn, refill while moving or manned, destroy at 0, strand on land |
+| 0x466F00 | "damage_vehicle"(vehicle, tribe, amount) |
+| 0x463BA0 | vehicle creation: heading off the coast, model (0x4EE700 draw class 2), life |
+| 0x4650D0, 0x465650 | boat may park here; empty vehicle at a resting place |
+| 0x4657D0 | "board_vehicle"(vehicle, person): seat, animation, the vehicle takes the person's tribe |
+| 0x464710, 0x4648A0 | stranded boat: entry (put everyone off, 160-287 turns of life), per turn (keel over) |
+| 0x44F980 | "is_land_at"(pos): the cell's coast shape and its 8 × 8 land mask (table 0x5AA328) |
+| 0x4EE700 | set a unit's drawable (`+0x33` index, `+0x3A` draw class from table 0x5A6AF8, 11 bytes per class) |
 | 0x4E93F0 | add a push to a velocity, scaled by the slope along it |
 | 0x4EBC20 | slope vector at a position (ground sliding) |
 | 0x4503F0 | horizontal distance between two positions (wrapping, square root) |
