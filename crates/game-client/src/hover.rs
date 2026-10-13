@@ -117,6 +117,14 @@ fn forget_changed_outlines(mut events: MessageReader<AssetEvent<Mesh>>, mut cach
     }
 }
 
+/// An outline whose model was despawned before it could follow (a view rebuilt the frame it was made) would stand
+/// alone at the world's origin, where the camera's focus is drawn: it goes.
+fn drop_orphan_outlines(mut commands: Commands, orphans: Query<Entity, (With<OutlinePart>, Without<ChildOf>)>) {
+    for e in &orphans {
+        commands.entity(e).despawn();
+    }
+}
+
 /// Picks what is hovered and outlines it: read its result after this.
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct HoverSystems;
@@ -129,7 +137,17 @@ impl Plugin for HoverPlugin {
         app.add_plugins(MaterialPlugin::<SpriteOutline>::default())
             .init_resource::<Hovered>()
             .init_resource::<OutlineCache>()
-            .add_systems(Update, (forget_changed_outlines, detect, draw_halo).chain().after(UnitInput).after(crate::units::UnitViews).in_set(crate::menu::Gameplay).in_set(HoverSystems));
+            .add_systems(
+                Update,
+                (forget_changed_outlines, drop_orphan_outlines, detect, draw_halo)
+                    .chain()
+                    .after(UnitInput)
+                    .after(crate::units::UnitViews)
+                    .after(crate::buildings::RespawnBuildings)
+                    .after(crate::views::sync_views::<crate::vehicles::VehicleView>)
+                    .in_set(crate::menu::Gameplay)
+                    .in_set(HoverSystems),
+            );
     }
 }
 
