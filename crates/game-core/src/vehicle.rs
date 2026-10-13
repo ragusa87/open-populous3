@@ -1026,6 +1026,24 @@ mod tests {
     }
 
     #[test]
+    fn a_shaman_in_a_balloon_is_flown_into_range_then_casts() {
+        let mut map = coast();
+        map.sites = vec![crate::site::ReincarnationSite::at_cell(0, (C - 30, C))];
+        map.spell_books = vec![crate::spell_book::SpellBook::sandbox(); 4];
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at((C - 20, C)), Angle::ZERO));
+        let shaman = map.spawn(0, UnitKind::Shaman, at((C - 20, C))).id;
+        map.unit_mut(shaman).unwrap().aboard = Some(v);
+        map.vehicles.get_mut(v).unwrap().seat(shaman, 0);
+        let target = at((C + 20, C + 2));
+        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at: target } });
+        assert!(matches!(map.vehicle(v).unwrap().state, State::Moving { .. }), "the balloon sets off");
+        assert!(until(&mut map, 600, |m| !m.effects.is_empty()), "cast once in range");
+        let b = map.vehicle(v).unwrap();
+        assert!(torus_delta(b.x, target.0).abs() > 1024, "from afar, not over the target");
+        assert_eq!(map.unit(shaman).unwrap().aboard, Some(v));
+    }
+
+    #[test]
     fn keeling_stops_on_its_side() {
         assert_eq!(keel(Angle::ZERO, Side::Port).signed(), -KEEL_STEP);
         assert_eq!(keel(Angle::new(508), Side::Starboard), KEEL_MAX);

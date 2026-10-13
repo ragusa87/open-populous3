@@ -500,6 +500,16 @@ impl Unit {
         true
     }
 
+    /// Aboard a vehicle that carries her towards where `spell` is aimed, she casts it once within range
+    /// (`GameMap::cast_when_in_range`); whether she took it. Another order on the way cancels it.
+    pub fn ride_to_cast(&mut self, spell: Spell) -> bool {
+        if !self.takes_orders() || self.aboard.is_none() {
+            return false;
+        }
+        self.spell = Some(spell);
+        true
+    }
+
     /// The spell she is walking into range to cast, if any.
     pub fn walking_to_cast(&self) -> Option<Spell> {
         self.spell.filter(|_| !matches!(self.action, Action::Casting { .. }))

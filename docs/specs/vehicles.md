@@ -60,6 +60,9 @@ on.
 - A passenger is out of reach of blasts, lightning, bolts, spotting and challenges (`Unit::in_the_open`); a
   balloon's people stand at its altitude (`GameMap::altitude`), so a shaman casts farther from one. The headcount
   counts them In boat / In balloon.
+- A shaman aboard casting out of range is carried there (`GameMap::walk_to_cast`, `Unit::ride_to_cast`): her
+  vehicle goes towards the target (a balloon anywhere, a boat as near as the sea lets it), and she casts as soon
+  as it is within her range (from a balloon's altitude, farther); a vehicle stopped short gives it up.
 
 ## Vehicle huts (done in game-core)
 A boat hut makes boats, an airship hut balloons (`VehicleKind::made_by`). Built with wood like any building; then
