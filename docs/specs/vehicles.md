@@ -13,8 +13,12 @@ numbers are guesses.
   resting place, state 7, and the whirlwind's spin, state 9: TODO.md).
 - `heading` (an `angle::Angle`, from +x towards +z) follows the way it moves; the sinking pitch and the stranded
   roll live in their states.
-- `altitude`: the ground under a boat (the sea's surface is 0), `HOVER` 200 over the ground for a balloon (the
-  exe's parked height; the moving hover over the highest ground ahead is not done).
+- `altitude`: the ground under a boat (the sea's surface is 0); a balloon's `float`, which follows the terrain
+  ("Terrain changes" [exe]): each turn it climbs or sinks at most `CLIMB_STEP` 16 towards `HOVER` 200 over the
+  highest ground under it and, while it moves, at `LOOK_AHEAD` 256, 512 and 1024 ahead (`float_target`), so it
+  rises before a mountain and comes down after it; never nearer the ground under it than `CLEARANCE` 100 [ours].
+  The step, the distances and the clearance are guesses; the exe's other hover height over buildings (560) is not
+  done.
 
 ## Parking and drifting (done, improvised)
 - One vehicle a cell: a vehicle sent where another stands or is going stops in the nearest free cell it reaches

@@ -29,6 +29,13 @@ pub const STRANDED_SPREAD: u32 = 128;
 pub const BOARD_WAIT: Ticks = Ticks::new(7);
 /// A balloon floats this high over the ground (vehicle table +0xF, "Drawing").
 pub const HOVER: u16 = 200;
+/// A moving balloon floats `HOVER` over the highest ground under it and at these distances ahead (world units), and
+/// climbs or sinks towards that at most `CLIMB_STEP` a turn ("Terrain changes": it samples the ground ahead and
+/// moves at its profile's vertical rate; the distances and the rate are guesses). It never comes nearer the ground
+/// under it than `CLEARANCE` [ours].
+pub const LOOK_AHEAD: [i32; 3] = [256, 512, 1024];
+pub const CLIMB_STEP: u16 = 16;
+pub const CLEARANCE: u16 = 100;
 /// A sinking boat goes down and tilts this much a turn, its tilt stopping at `SINK_TILT_MAX`, and is gone at
 /// `SUNK_DEPTH` ("Life, damage and destruction").
 pub const SINK_STEP: u16 = 8;
@@ -208,6 +215,9 @@ pub struct Vehicle {
     pub passengers: Vec<UnitId>,
     /// Turns before it moves off after a boarding.
     pub wait: Countdown,
+    /// A balloon's height (terrain height units), following the ground under and ahead of it (`float_target`); None
+    /// for a boat, and for a balloon until its first turn (then `HOVER` over the ground).
+    pub float: Option<u16>,
     /// Waypoints left to `State::Moving::to`, next one last.
     route: Vec<(u16, u16)>,
     /// Ground revision the route was planned on; None: plan on its next turn.
@@ -217,7 +227,7 @@ pub struct Vehicle {
 impl Vehicle {
     /// A new, empty vehicle parked at `at`.
     pub fn new(kind: VehicleKind, owner: u8, (x, z): (u16, u16), heading: Angle) -> Self {
-        Vehicle { kind, owner, x, z, heading, health: Health::full(LIFE), state: State::Parked, passengers: Vec::new(), wait: Countdown::new(Ticks::ZERO), route: Vec::new(), planned_on: None }
+        Vehicle { kind, owner, x, z, heading, health: Health::full(LIFE), state: State::Parked, passengers: Vec::new(), wait: Countdown::new(Ticks::ZERO), float: None, route: Vec::new(), planned_on: None }
     }
 
     pub fn cell(&self) -> (i32, i32) {
@@ -235,14 +245,27 @@ impl Vehicle {
     }
 
     /// The height its people are at: the ground (the sea's surface) under a boat, a sinking one's depth left out (drawn
-    /// from its state); `HOVER` over the ground for a balloon, and what a destroyed one has climbed.
+    /// from its state); a balloon's `float` (`HOVER` over the ground before its first turn), never nearer the ground
+    /// than `CLEARANCE`, and what a destroyed one has climbed.
     pub fn altitude(&self, terrain: &Heightmap) -> u16 {
-        let ground = terrain.height_at(self.x as u32, self.z as u32, WORLD_UNITS_PER_CELL).max(0) as u16;
+        let ground = ground_at(terrain, (self.x, self.z));
+        let floating = self.float.unwrap_or(ground.saturating_add(HOVER)).max(ground.saturating_add(CLEARANCE));
         match (self.kind, self.state) {
             (VehicleKind::Boat, _) => ground,
-            (VehicleKind::Balloon, State::Rising { climbed }) => ground.saturating_add(HOVER).saturating_add(climbed),
-            (VehicleKind::Balloon, _) => ground.saturating_add(HOVER),
+            (VehicleKind::Balloon, State::Rising { climbed }) => floating.saturating_add(climbed),
+            (VehicleKind::Balloon, _) => floating,
         }
+    }
+
+    /// The height a balloon floats towards: `HOVER` over the highest ground under it and, while it moves, at
+    /// `LOOK_AHEAD` along its heading.
+    pub fn float_target(&self, terrain: &Heightmap) -> u16 {
+        let moving = matches!(self.state, State::Moving { .. } | State::Drifting { .. });
+        let ahead = LOOK_AHEAD.iter().filter(|_| moving).map(|&d| {
+            let (dx, dz) = crate::angle::rotate((d, 0), self.heading.steps());
+            ground_at(terrain, (self.x.wrapping_add(dx as u16), self.z.wrapping_add(dz as u16)))
+        });
+        std::iter::once(ground_at(terrain, (self.x, self.z))).chain(ahead).max().unwrap_or(0).saturating_add(HOVER)
     }
 
     /// Sets off to `to` (world units), planning its way on its next turn; nothing once destroyed or stranded.
@@ -323,6 +346,10 @@ impl Vehicle {
             State::Moving { to } if self.wait.tick() => self.travel(to, self.kind.speed(), ground),
             State::Drifting { to } => self.travel(to, DRIFT_SPEED, ground),
             _ => {}
+        }
+        if self.kind == VehicleKind::Balloon {
+            let (now, target) = (self.altitude(terrain), self.float_target(terrain));
+            self.float = Some(if target > now { now.saturating_add(CLIMB_STEP).min(target) } else { now.saturating_sub(CLIMB_STEP).max(target) });
         }
         None
     }
@@ -409,6 +436,11 @@ pub fn resting(kind: VehicleKind, terrain: &Heightmap, cell: (i32, i32)) -> bool
         VehicleKind::Boat => touches_sea(terrain, cell) && !open_sea,
         VehicleKind::Balloon => !open_sea,
     }
+}
+
+/// The ground's height at world point `p`, the sea at 0.
+fn ground_at(terrain: &Heightmap, p: (u16, u16)) -> u16 {
+    terrain.height_at(p.0 as u32, p.1 as u32, WORLD_UNITS_PER_CELL).max(0) as u16
 }
 
 /// Whether `a` is within `reach` of `b` on both axes, the short way around the torus.
@@ -1156,6 +1188,38 @@ mod tests {
         assert!(!map.can_cast(0, &bridge), "aboard");
         map.shaman_omni = true;
         assert!(map.can_cast(0, &bridge), "a god bridges from the view");
+    }
+
+    #[test]
+    fn a_balloon_climbs_before_a_hill_keeps_clear_of_it_and_comes_down_after() {
+        let mut map = coast();
+        map.terrain.raise((C - 20, C), 2, 400);
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at((C - 30, C)), Angle::ZERO));
+        aboard(&mut map, v, 1);
+        map.vehicles.get_mut(v).unwrap().go(at((C - 10, C)));
+        let (mut highest, mut before_hill) = (0, 0);
+        let parked = until(&mut map, 600, |m| m.vehicle(v).unwrap().state == State::Parked);
+        assert!(parked);
+        map.vehicles.get_mut(v).unwrap().go(at((C - 30, C)));
+        for _ in 0..600 {
+            map.tick();
+            let b = map.vehicle(v).unwrap();
+            let ground = ground_at(&map.terrain, (b.x, b.z));
+            let altitude = b.altitude(&map.terrain);
+            assert!(altitude >= ground + CLEARANCE, "clear of the ground");
+            highest = highest.max(altitude);
+            if b.cell().0 == C - 16 {
+                before_hill = before_hill.max(altitude);
+            }
+            if b.state == State::Parked {
+                break;
+            }
+        }
+        let peak = map.terrain.get(C - 20, C);
+        assert!(highest >= peak + HOVER / 2, "over the hill: {highest}");
+        assert!(before_hill > 100 + HOVER, "climbing before it");
+        run(&mut map, 40);
+        assert_eq!(map.vehicle(v).unwrap().altitude(&map.terrain), 100 + HOVER, "down again");
     }
 
     #[test]

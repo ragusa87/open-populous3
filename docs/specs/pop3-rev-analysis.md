@@ -498,7 +498,9 @@ site. The site (tribe+0x911) is on a cell centre; its height is kept at tribe+0x
   belongs to its tribe; between tribes only the low byte of its model flags differs (3 for blue, 2 for yellow),
   probably the tribe colour (unverified).
 - A new pillar rises out of the ground: it starts 256 below and climbs 16 per step over 8 steps with rock debris
-  (7/0x33) and a sound (0x4A7EB0). "delete rs pillars" (7/0x4D) removes them; "move rs pillar" (7/7,
+  (7/0x33) and a sound (0x4A7EB0). So it ends 128 below the ground (256 − 8 × 16), partly buried. Hint, unverified: a
+  stone at full height would probably reach a balloon floating 200 over the site (vehicle table +0xF, "Vehicles"),
+  so it is sunk to stay under one. "delete rs pillars" (7/0x4D) removes them; "move rs pillar" (7/7,
   0x50C690) replaces a slot's pillar, with an explosion at the old and the new place.
 - Measured on a level (live memory): blue and yellow sites, 8 pillars each at exactly these offsets and angles;
   heights 127-128 around a site at 128, except one pillar at 107 on lower ground.
