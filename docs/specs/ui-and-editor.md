@@ -36,9 +36,10 @@ ground (`ShowGrid`, on in the sandboxes, kept when changing level; the terrain t
 ## Left panel (`hud/`)
 Fixed 204 px panel on the left, like the original: shaman preview at the top (`hud/shaman.rs`: her current
 sprite x2, same pose and view as on the map, what she is doing, e.g. "Praying" / "Reincarnating in 2s", and a
-health bar with `hp/max`; clicking it looks at her), the population strip (below), 3 tabs
-(Spells / Build / Stats, `ActiveTab`), one content node per tab (`TabContent(n)`), info line under
-the grid.
+health bar with `hp/max`; a left click on it selects her alone, the camera staying; a right click flies the camera
+to her, the selection staying), the population strip (below), 3 tabs (Spells / Build / Stats, `ActiveTab`; a new
+selection holding the shaman opens Spells, `panel::tab_for_selection`), one content node per tab
+(`TabContent(n)`), info line under the grid.
 
 ### Population (`hud/population.rs`, the huts box in `hud/stats.rs`)
 The tribe's population against the room its huts give (huts-and-training.md rule 4: every living follower but the

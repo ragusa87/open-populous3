@@ -119,21 +119,49 @@ fn update_preview(
     }
 }
 
+/// What a click on the preview does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewClick {
+    /// Left: selects her alone, the camera stays.
+    Select,
+    /// Right: the camera flies to her, the selection stays.
+    Look,
+}
+
+/// The click on the preview, from the buttons pressed this frame (left wins).
+pub fn preview_click_of(left: bool, right: bool) -> Option<PreviewClick> {
+    if left {
+        Some(PreviewClick::Select)
+    } else if right {
+        Some(PreviewClick::Look)
+    } else {
+        None
+    }
+}
+
 fn preview_click(
-    q: Query<&Interaction, (Changed<Interaction>, With<ShamanPreview>)>,
+    q: Query<&Interaction, With<ShamanPreview>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     map: Res<CurrentMap>,
     clock: Res<SimClock>,
     mut rig: ResMut<CameraRig>,
     mut selection: ResMut<Selection>,
 ) {
-    if !q.iter().any(|i| *i == Interaction::Pressed) {
+    if q.iter().all(|i| *i == Interaction::None) {
         return;
     }
-    if let Some(u) = map.0.shaman_of(PLAYER).filter(|u| selectable(u).is_some()) {
-        selection.select_only(u.id);
-    }
-    if let Some(cell) = player_shaman_cell(&map.0, &clock) {
-        rig.fly_to(cell);
+    match preview_click_of(mouse.just_pressed(MouseButton::Left), mouse.just_pressed(MouseButton::Right)) {
+        Some(PreviewClick::Select) => {
+            if let Some(u) = map.0.shaman_of(PLAYER).filter(|u| selectable(u).is_some()) {
+                selection.select_only(u.id);
+            }
+        }
+        Some(PreviewClick::Look) => {
+            if let Some(cell) = player_shaman_cell(&map.0, &clock) {
+                rig.fly_to(cell);
+            }
+        }
+        None => {}
     }
 }
 
@@ -141,6 +169,14 @@ fn preview_click(
 mod tests {
     use super::*;
     use game_core::site::ReincarnationSite;
+
+    #[test]
+    fn left_selects_right_looks() {
+        assert_eq!(preview_click_of(true, false), Some(PreviewClick::Select));
+        assert_eq!(preview_click_of(false, true), Some(PreviewClick::Look));
+        assert_eq!(preview_click_of(true, true), Some(PreviewClick::Select));
+        assert_eq!(preview_click_of(false, false), None);
+    }
 
     #[test]
     fn status_shows_action_and_health() {
