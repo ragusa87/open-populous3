@@ -48,6 +48,12 @@ Not in the file [exe]: the income per person is `MANA_BUSY_BRAVES` 15 / `MANA_ID
   (`Unit::enter`), and stay inside, idle, not drawn. `BuildingKind::capacity`: huts 3 / 4 / 5 by size (they
   rest), a drum tower 1 (buildings.md "Towers"); the others stay at the door, idle. Any walk takes them out by
   the door. Builders go in and out the same way (buildings.md "Construction").
+- Sending a selection into buildings of a kind (the Build tab's shift click, `game_core::send_in`): only the
+  player's own people into their own built buildings of that kind (huts of any size, a tower, a training unit, a
+  vehicle hut: braves only) or round their camp fires. Room: a hut's or tower's free room, a vehicle hut's free crew
+  places, a training unit and a camp fire everyone (they queue, go round). `send_in::assign`: the units spread
+  evenly over the places with room, nearest pairs first, then the rest to the nearest place still with room; those
+  that fit nowhere stay.
 - Vehicles hold people their own way (`Unit::aboard`, vehicles.md); vehicle huts take braves as a crew that
   fetches wood and builds vehicles (vehicles.md "Vehicle huts").
 - `Building::inside` is counted each tick from the units inside (`GameMap::count_inside`): a built hut or
