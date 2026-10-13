@@ -90,7 +90,10 @@ count 18, 19 and 20, then the aerial view's map icons up to 150 (by eye): 115 an
 firewarrior training, 118 temple, 119 spy training, 120 drum tower, 121 pyramid, 122-124 totems (123 with the stone
 animation, 124 with the moving head), 125-128 a boat and 129-132 a balloon, each blue, red, yellow, green, 133 a drum
 tower (probably), huts by rooms and people inside: 134-137 3 rooms with 0 to 3, 138-142 4 rooms with 0 to 4, 143-148
-5 rooms with 0 to 5, 149 the prison, 150 the winged death's totem; 187-210 build/wood action icons,
+5 rooms with 0 to 5, 149 the prison, 150 the winged death's totem; 163-170 building icons: drum tower, warrior
+training, firewarrior training, temple, spy training, boat hut, airship hut, camp fire; 171 a book (the help icon),
+172 a coloured praying figure, 173 a bubble with "!" and 174 an "i" (info), 175 a blue flag, 178 a coloured
+firewarrior, 179 a coloured preacher; 187-210 build/wood action icons,
 40 a piece of wood in the tooltip (16 x 15, `catalog::TOOLTIP_WOOD_SPRITE`), 46-51 the tooltip's dismantle toggle (49, 51 hovered, 50 pressed) and its undo (46, 48 hovered, 47 pressed), 60-62 the
 unload button of a vehicle (60, 61 hovered, 62 pressed), tooltips.md; 59 the combat icon of the aerial view's map,
 69-74 ground shadows of various shapes (under a balloon or a flying unit), 81 a RIP tombstone, the icon of a swamp
