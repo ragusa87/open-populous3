@@ -136,10 +136,10 @@ fn radians(a: Angle) -> f32 {
     a.signed() as f32 * std::f32::consts::TAU / TURN as f32
 }
 
-/// The hull's turn: its heading (from +x towards +z; the original boat's bow is along its game -z, render +z), then its pitch (bow up) and
+/// The hull's turn: its heading (from +x towards +z; the original boat's bow is along its game +z, render -z), then its pitch (bow up) and
 /// roll.
 pub fn hull_rotation(v: &Vehicle) -> Quat {
-    let yaw = GameYaw(-std::f32::consts::FRAC_PI_2 - radians(v.heading));
+    let yaw = GameYaw(std::f32::consts::FRAC_PI_2 - radians(v.heading));
     let (pitch, roll) = match v.state {
         State::Sinking { pitch, .. } => (radians(pitch), 0.0),
         State::Stranded { roll, .. } => (0.0, radians(roll)),
@@ -329,7 +329,7 @@ mod tests {
             v.heading = Angle::new(steps);
             v
         };
-        let bow = |steps| hull_rotation(&v(steps)) * Vec3::Z;
+        let bow = |steps| hull_rotation(&v(steps)) * Vec3::NEG_Z;
         let game = |r: Vec3| Vec2::new(r.x, -r.z);
         assert!((game(bow(0)) - Vec2::X).length() < 1e-5, "heading 0 is +x");
         assert!((game(bow(512)) - Vec2::Y).length() < 1e-5, "a quarter turn is +z");

@@ -112,7 +112,7 @@ after the loop), passengers carried.
 `vehicles.rs`, a `WorldView` per vehicle (`VehicleView`): the original boat or airship object (`catalog::BOAT`,
 `AIRSHIP`, recoloured for its tribe and remade when the tribe changes) with the theme's material, or with
 `--no-original` our stand-in (a wooden hull with a deck in the tribe's colour, a balloon in the tribe's colour over
-a basket). Turned by its heading (the original boat's bow is along its own -z), tilted by a sinking boat's pitch
+a basket). Turned by its heading (the original boat's bow is along its own +z), tilted by a sinking boat's pitch
 and a stranded one's roll, lifted to its altitude (a balloon's hover, a sinking boat's depth below the surface),
 gliding between ticks like the units. People aboard are drawn in it (`units::riding`): on their seat
 (`vehicles::seat_offset`: along a boat, side by side in a basket) at its floor, the model's origin (the original
