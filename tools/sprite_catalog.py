@@ -9,6 +9,7 @@ import base64
 import io
 import json
 import os
+import re
 import sys
 
 POINT = "POINT0-0.DAT"
@@ -122,6 +123,12 @@ WHOLE_BANKS = [POINT, HFX]
 ALPHA_SPRITES = [range(1090, 1500), range(1538, 1593)]
 
 
+def animation(file, index, name):
+    """The animation a `frames` entry belongs to, named after its file and first index; None for a lone sprite."""
+    m = re.fullmatch(r"(.*) (\d+)/(\d+)", name)
+    return f"{file}:{index - int(m[2]) + 1}" if m else None
+
+
 def is_alpha(file, index):
     return file == HFX and any(index in r for r in ALPHA_SPRITES)
 
@@ -154,18 +161,19 @@ def png(sprite, colours):
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-PAGE = """<!doctype html><meta charset="utf-8"><title>Sprite catalog</title>
+PAGE = r"""<!doctype html><meta charset="utf-8"><title>Sprite catalog</title>
 <style>
 :root{--bg:#1d1a16;--fg:#eee3cf;--card:#2c2722;--mute:#a59783;--tile:#cc8f33}
 body{font-family:sans-serif;background:var(--bg);color:var(--fg);margin:16px}
 header{position:sticky;top:0;background:var(--bg);padding:8px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:center;z-index:1}
 input,select{background:var(--card);color:var(--fg);border:1px solid #555;padding:4px}
-#grid{display:flex;flex-wrap:wrap;gap:6px}
+#grid,#anims{display:flex;flex-wrap:wrap;gap:6px}
+h2{font-size:15px;margin:14px 0 6px}
 .s{background:var(--card);width:150px;padding:6px;box-sizing:border-box;font-size:11px;cursor:pointer;display:flex;flex-direction:column;gap:3px}
 .s.unnamed{opacity:.7}
 .pic{display:flex;align-items:center;justify-content:center;min-height:60px;background:var(--bg)}
 body.tile .pic{background:var(--tile)}
-.pic img{image-rendering:pixelated}
+.pic img{image-rendering:pixelated;max-width:100%;height:auto}
 .name{font-weight:bold} .meta,.ref{color:var(--mute)} .ref{font-family:monospace;font-size:10px;word-break:break-all}
 </style>
 <header>
@@ -175,9 +183,11 @@ body.tile .pic{background:var(--tile)}
 <label><input type="checkbox" id="unnamed"> unnamed</label>
 <label><input type="checkbox" id="tile"> panel background</label>
 <label>scale <input type="range" id="scale" min="1" max="6" value="3"></label>
+<label>frame ms <input type="number" id="speed" min="20" max="2000" step="10" value="120" style="width:60px"></label>
 <span id="count"></span>
 </header>
-<div id="grid"></div>
+<h2>Animations</h2><div id="anims"></div>
+<h2>Sprites</h2><div id="grid"></div>
 <script>
 const SPRITES = __DATA__;
 const $ = id => document.getElementById(id);
@@ -192,11 +202,28 @@ function render() {
     <div class="name">${s.name || '(unnamed)'}</div><div class="meta">${s.file}:${s.index} · ${s.w}x${s.h}${s.alpha ? ' · alpha' : ''}</div>
     <div class="meta">${s.group || ''}</div><div class="ref">${s.ref || ''}</div></div>`).join('');
   $('count').textContent = `${shown.length} / ${SPRITES.length}`;
+  animFrames = Map.groupBy(shown.filter(s => s.anim && s.src), s => s.anim);
+  $('anims').innerHTML = [...animFrames].map(([id, f]) => `<div class="s" data-id="${id}" title="click to copy">
+    <div class="pic" style="height:${Math.max(...f.map(s => s.h)) * scale}px"><img data-anim="${id}"></div>
+    <div class="name">${f[0].name.replace(/ \d+\/\d+$/, '')}</div><div class="meta">${f[0].file}:${f[0].index}-${f.at(-1).index} · ${f.length} frames</div>
+    <div class="meta">${f[0].group}</div><div class="ref">${f[0].ref || ''}</div></div>`).join('');
 }
+let animFrames = new Map(), tick = 0;
+function step() {
+  const scale = +$('scale').value;
+  for (const img of $('anims').querySelectorAll('img')) {
+    const f = animFrames.get(img.dataset.anim), s = f[tick % f.length];
+    img.src = s.src; img.width = s.w * scale; img.height = s.h * scale;
+  }
+  tick++;
+  setTimeout(step, Math.max(20, +$('speed').value || 120));
+}
+$('anims').addEventListener('click', e => { const c = e.target.closest('.s'); if (c) navigator.clipboard?.writeText(c.dataset.id); });
 for (const id of ['q', 'file', 'group', 'unnamed', 'scale']) $(id).addEventListener('input', render);
 $('tile').addEventListener('input', e => document.body.classList.toggle('tile', e.target.checked));
 $('grid').addEventListener('click', e => { const c = e.target.closest('.s'); if (c) navigator.clipboard?.writeText(c.dataset.id); });
 render();
+step();
 </script>"""
 
 
@@ -222,7 +249,7 @@ def main():
         for i, sprite in enumerate(bank):
             group, name, ref = named.get((file, i), ("", "", ""))
             entries.append({"file": file, "index": i, "group": group, "name": name, "ref": ref, "w": sprite[0],
-                            "h": sprite[1], "alpha": is_alpha(file, i),
+                            "h": sprite[1], "alpha": is_alpha(file, i), "anim": animation(file, i, name),
                             "src": png(sprite, alpha if is_alpha(file, i) else opaque)})
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w") as fh:

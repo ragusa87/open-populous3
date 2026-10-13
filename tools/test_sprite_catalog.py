@@ -1,6 +1,6 @@
 import unittest
 
-from sprite_catalog import CATALOG, HFX, POINT, alpha_colours, is_alpha, page
+from sprite_catalog import CATALOG, HFX, POINT, alpha_colours, animation, is_alpha, page
 
 
 class CatalogTest(unittest.TestCase):
@@ -30,6 +30,10 @@ class CatalogTest(unittest.TestCase):
         self.assertEqual(colours[1 * 16 + 15], (255, 255, 255, 255))
         self.assertEqual(colours[1 * 16], (255, 255, 255, 0))
         self.assertEqual(colours[2 * 16 + 5], (0, 0, 0, 85))
+
+    def test_animation_of_frames(self):
+        self.assertEqual(animation(POINT, 86, "fight 3/6"), f"{POINT}:84")
+        self.assertIsNone(animation(POINT, 14, "arrow (standard pointer)"))
 
     def test_page_embeds_entries(self):
         self.assertIn('"name": "x"', page([{"name": "x"}]))
