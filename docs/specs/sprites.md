@@ -85,7 +85,12 @@ the camp fire's (66) while placing one (`plan_sprite`).
 
 ## `data/hfx0-0.dat` (1615 sprites: effects, map things, HUD art)
 Same palette. Identified: 2-3 dry plants, 53 the yellow down arrow over the player's selected people (9 x 7) [exe], 22 a flat dark smear, the generic ground shadow under sprite things (draw kind 15, pop3-rev-analysis.md "Volcano rocks") [exe], 23 a pile of logs (17 x 11, a piece of
-wood on the ground: `catalog::WOOD_PILE_SPRITE`), 90-93 fire, 107-111 spell names, 187-210 build/wood action icons,
+wood on the ground: `catalog::WOOD_PILE_SPRITE`), 90-93 fire, 107-111 spell names, 112-114 the selection
+count 18, 19 and 20, then the aerial view's map icons up to 150 (by eye): 115 an empty hut, 116 warrior training, 117
+firewarrior training, 118 temple, 119 spy training, 120 drum tower, 121 pyramid, 122-124 totems (123 with the stone
+animation, 124 with the moving head), 125-128 a boat and 129-132 a balloon, each blue, red, yellow, green, 133 a drum
+tower (probably), huts by rooms and people inside: 134-137 3 rooms with 0 to 3, 138-142 4 rooms with 0 to 4, 143-148
+5 rooms with 0 to 5, 149 the prison, 150 the winged death's totem; 187-210 build/wood action icons,
 40 a piece of wood in the tooltip (16 x 15, `catalog::TOOLTIP_WOOD_SPRITE`), 46-51 the tooltip's dismantle toggle (49, 51 hovered, 50 pressed) and its undo (46, 48 hovered, 47 pressed), 60-62 the
 unload button of a vehicle (60, 61 hovered, 62 pressed), tooltips.md; 59 the combat icon of the aerial view's map,
 69-74 ground shadows of various shapes (under a balloon or a flying unit), 81 a RIP tombstone, the icon of a swamp
