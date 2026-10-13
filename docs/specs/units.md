@@ -148,8 +148,8 @@ Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the 
 ## Pathfinding (done: `game_core::path`)
 - Walls: walkers never cross a building's walled cells (`path::Ground`, buildings.md "Walking around buildings").
 - `path::Mobility`: Walk (land, not open sea = cell with 4 water corners, not a cliff = a cell edge
-  rising more than `MAX_CLIMB` 300; ~5.5% of the original levels' land), Sail (open sea only, boats),
-  Fly (anywhere, balloons). Every person walks. A* on the 128² torus, 8 neighbours, no diagonal past an
+  rising more than `MAX_CLIMB` 300; ~5.5% of the original levels' land), Sail (boats: cells touching the
+  sea, a corner at sea level, so open sea and the coast where walkers board), Fly (anywhere, balloons). Every person walks. A* on the 128² torus, 8 neighbours, no diagonal past an
   impassable side cell, ties broken by cell index (deterministic).
 - Fastest, not shortest: a step costs its walking time (100 straight, 141 diagonal on flat ground, divided
   by `slope_factor` of the rise between the two cell centres, the same rule as walking), so a walker goes
@@ -164,7 +164,7 @@ Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the 
   by cell through cell centres.
 - The start cell may be impassable (ground raised into a cliff under her): she can step off it.
 - `path::nearest_reachable`: the cell a mobility reaches closest to a goal (walkers boarding a boat,
-  boats unloading at a shore; vehicles to come).
+  vehicles sent where they cannot go, docs/specs/vehicles.md).
 
 ### Locked units
 No order of the player reaches a unit (`GameMap::locked`, `shaman_locked`: unit orders, chained orders, the

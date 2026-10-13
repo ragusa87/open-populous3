@@ -52,6 +52,7 @@ pub mod training;
 pub mod tree;
 pub mod unit;
 pub mod vault;
+pub mod vehicle;
 pub mod wood;
 pub mod work;
 pub mod worship;

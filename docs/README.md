@@ -9,6 +9,7 @@
   - [terrain-textures.md](specs/terrain-textures.md): original theme files and the texture bake.
   - [spells.md](specs/spells.md): terrain spells and what they must recompute.
   - [units.md](specs/units.md): units, pathfinding (to do).
+  - [vehicles.md](specs/vehicles.md): boats and balloons: health as an abandon timer, stranding, passengers.
   - [coordinators.md](specs/coordinators.md): short-lived objects coordinating units (fights, sermons...), typed ids, world events.
   - [multiplayer.md](specs/multiplayer.md): deterministic lockstep over TCP.
   - [ui-and-editor.md](specs/ui-and-editor.md): camera, control tabs, world editor.

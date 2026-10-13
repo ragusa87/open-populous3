@@ -3,7 +3,7 @@
 ```
 crates/
   pop3-format   pure parsers for original files (no engine). Reusable by tools/editor.
-  game-core     deterministic simulation: terrain (Heightmap), map, spell, effect, blast, unit, physics, command, vault; query layers
+  game-core     deterministic simulation: terrain (Heightmap), map, spell, effect, blast, unit, vehicle, physics, command, vault; query layers
                 over the map (occupancy: who fills a building; headcount: units by state and kind, housing).
                 Integers only in state. No Bevy.
   game-net      lockstep wire protocol (length-prefixed, hand-written binary) over std TCP.
@@ -43,7 +43,8 @@ each kind of object in a fixed, written order. The original's order inside a tur
 5. coordinators (docs/specs/coordinators.md): scans that start them (challenges, melees joined), their turns, the
    finished ones removed, their events, then the units whose coordinator is gone released, so a coordinator ending
    now is gone when its units tick;
-6. healing on its rhythm (`HEAL_EVERY`), units (`Unit::tick`), then their events (wood, work, doors) in unit order;
+6. vehicles (`tend_vehicles`, docs/specs/vehicles.md: their passengers carried along), healing on its rhythm
+   (`HEAL_EVERY`), units (`Unit::tick`), then their events (wood, work, doors) in unit order;
 7. chained orders, building work, wood put down, people counted inside, mana (`ManaPool::tick`, each player's with
    its spell book), the gone units removed.
 

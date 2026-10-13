@@ -73,6 +73,8 @@ pub struct GameMap {
     pub coordinators: Coordinators,
     /// Firebolts in flight (`crate::firebolt`).
     pub bolts: Registry<crate::firebolt::Firebolt>,
+    /// Boats and balloons (`crate::vehicle`).
+    pub vehicles: Registry<crate::vehicle::Vehicle>,
     /// Ground left in ashes by destroyed buildings (`crate::ashes`).
     pub ashes: crate::ashes::Ashes,
     /// Ticks run since the map was made (`tick`).
@@ -124,7 +126,7 @@ fn per_player<T: Clone>(t: T) -> Vec<T> {
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), bolts: Registry::default(), ashes: Default::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), bolts: Registry::default(), vehicles: Registry::default(), ashes: Default::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -161,6 +163,7 @@ impl GameMap {
             effects: Registry::default(),
             coordinators: Coordinators::default(),
             bolts: Registry::default(),
+            vehicles: Registry::default(),
             ashes: Default::default(),
             now: Tick::ZERO,
             next_id: 1,
@@ -854,6 +857,7 @@ impl GameMap {
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
         self.release_orphans();
+        self.tend_vehicles();
         self.units.iter_mut().for_each(|u| u.statuses.tick(now, u.id.raw()));
         if crate::unit::HEAL_EVERY.fires(now, 0) {
             self.units.iter_mut().for_each(Unit::heal);

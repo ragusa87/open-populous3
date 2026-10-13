@@ -1,5 +1,5 @@
 //! Path finding on the cell grid (a torus): A* over the cells a mover can cross (land without
-//! cliffs on foot, open sea by boat, anywhere by balloon), fastest rather than shortest (walkers
+//! cliffs on foot, the sea and its coast by boat, anywhere by balloon), fastest rather than shortest (walkers
 //! are slow uphill, so going around a hill can win), then straightened into a few waypoints.
 //! Integer-only and deterministic (ties broken by cell index).
 
@@ -30,7 +30,7 @@ pub const MAX_CLIMB: u16 = 300;
 pub enum Mobility {
     /// On foot: land, no cliffs.
     Walk,
-    /// Boats: open sea only.
+    /// Boats: cells touching the sea (a corner at sea level): open sea and the coast, where walkers board them.
     Sail,
     /// Balloons: anywhere.
     Fly,
@@ -40,7 +40,7 @@ impl Mobility {
     pub fn passable(self, terrain: &Heightmap, cell: (i32, i32)) -> bool {
         match self {
             Mobility::Walk => !is_sea(terrain, cell) && !is_cliff(terrain, cell),
-            Mobility::Sail => is_sea(terrain, cell),
+            Mobility::Sail => touches_sea(terrain, cell),
             Mobility::Fly => true,
         }
     }
@@ -127,6 +127,11 @@ impl Ground for Walled<'_> {
     fn revision(&self) -> (u32, u32) {
         (self.terrain.revision(), self.walls.revision)
     }
+}
+
+/// A corner of the cell is at sea level: open sea or the coast.
+pub fn touches_sea(terrain: &Heightmap, (x, z): (i32, i32)) -> bool {
+    [(0, 0), (1, 0), (0, 1), (1, 1)].iter().any(|&(dx, dz)| terrain.is_water(x + dx, z + dz))
 }
 
 /// A cell edge rises more than `MAX_CLIMB` between its two corners.
@@ -502,11 +507,12 @@ mod tests {
     }
 
     #[test]
-    fn boats_sail_the_sea_only() {
+    fn boats_sail_the_sea_and_its_coast() {
         let t = map(&["", "", "", "    ####", "    ####", "    ####", "    ####"]);
         assert!(cell_path(&t, Mobility::Sail, (4, 3), (7, 6)).is_some());
+        assert!(cell_path(&t, Mobility::Sail, (4, 3), (8, 4)).is_some(), "the coast");
         assert_eq!(cell_path(&t, Mobility::Sail, (4, 3), (10, 3)), None, "land");
-        assert_eq!(nearest_reachable(&t, Mobility::Sail, (5, 4), (12, 4)), (7, 4), "unload at the east shore");
+        assert_eq!(nearest_reachable(&t, Mobility::Sail, (5, 4), (12, 4)), (8, 4), "unload at the east shore");
     }
 
     #[test]

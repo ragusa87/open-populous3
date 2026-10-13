@@ -362,6 +362,8 @@ pub struct Unit {
     pub work: Option<BuildingId>,
     /// The building the unit is in: it walks out by its door before going anywhere.
     pub inside: Option<Inside>,
+    /// The vehicle carrying it (`crate::vehicle`): it stands where the vehicle is and goes nowhere on its own.
+    pub aboard: Option<crate::vehicle::VehicleId>,
 }
 
 /// A unit on the ground and not tumbling: only `Unit::pickable` makes one, so whatever takes it can
@@ -416,6 +418,7 @@ impl Unit {
             queue: Vec::new(),
             work: None,
             inside: None,
+            aboard: None,
         }
     }
 
@@ -641,7 +644,12 @@ impl Unit {
                 return Some(event);
             }
         }
-        if self.is_alive() && !self.motion.airborne() && is_sea(terrain, self.cell()) {
+        if self.aboard.is_some() && self.is_alive() && !matches!(self.action, Action::Casting { .. }) {
+            // Carried: only a cast goes on aboard.
+            self.action = Action::Idle;
+            return None;
+        }
+        if self.is_alive() && self.aboard.is_none() && !self.motion.airborne() && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
             (self.teleport_to, self.spell) = (None, None);
         }
@@ -752,7 +760,7 @@ impl Unit {
                 self.action = Action::Idle;
                 if let Some(to) = self.teleport_to.take().filter(|&to| ground.passable(self.mobility(), (cell_of(to.0), cell_of(to.1)))) {
                     (self.x, self.z) = to;
-                    self.inside = None;
+                    (self.inside, self.aboard) = (None, None);
                     let below = terrain.height_at(to.0 as u32, to.1 as u32, WORLD_UNITS_PER_CELL);
                     self.motion = Motion::flying(Velocity::ZERO, below + LANDING_DROP);
                     self.action = Action::Landing;

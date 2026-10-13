@@ -65,9 +65,77 @@ pub fn rotate((x, z): (i32, i32), angle: u32) -> (i32, i32) {
     ((x * c - z * s) / ONE, (x * s + z * c) / ONE)
 }
 
+/// An angle in `TURN` steps, wrapping: a heading or a tilt held in the simulation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Angle(u16);
+
+impl Angle {
+    pub const ZERO: Angle = Angle(0);
+
+    /// `steps` of `TURN` (wrapped).
+    pub const fn new(steps: u32) -> Angle {
+        Angle((steps % TURN) as u16)
+    }
+
+    pub const fn steps(self) -> u32 {
+        self.0 as u32
+    }
+
+    /// Turned by `by` steps, either way.
+    pub fn turned(self, by: i32) -> Angle {
+        Angle::new((self.0 as i32 + by).rem_euclid(TURN as i32) as u32)
+    }
+
+    /// Its signed size, `-TURN / 2..TURN / 2`: how far it turns from 0, and which way.
+    pub fn signed(self) -> i32 {
+        let a = self.0 as i32;
+        if a >= TURN as i32 / 2 { a - TURN as i32 } else { a }
+    }
+}
+
+/// The angle of `(x, z)` (from +x towards +z, `rotate`'s sense); 0 for the zero vector.
+pub fn atan2(z: i32, x: i32) -> Angle {
+    let (ax, az) = (x.unsigned_abs() as i64, z.unsigned_abs() as i64);
+    let (mut lo, mut hi) = (0u32, TURN / 4);
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if sin(mid) as i64 * ax >= cos(mid) as i64 * az {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    Angle::new(match (x >= 0, z >= 0) {
+        (true, true) => lo,
+        (false, true) => TURN / 2 - lo,
+        (false, false) => TURN / 2 + lo,
+        (true, false) => TURN - lo,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn angle_of_a_vector() {
+        assert_eq!([atan2(0, 100), atan2(100, 0), atan2(0, -100), atan2(-100, 0)].map(Angle::steps), [0, 512, 1024, 1536]);
+        assert_eq!(atan2(100, 100).steps(), 256);
+        assert_eq!(atan2(-100, -100).steps(), 1280);
+        assert_eq!(atan2(0, 0), Angle::ZERO);
+        for a in (0..TURN).step_by(37) {
+            let (x, z) = rotate((10_000, 0), a);
+            assert!(atan2(z, x).turned(-(a as i32)).signed().abs() <= 1, "{a}");
+        }
+    }
+
+    #[test]
+    fn angles_wrap_and_turn_either_way() {
+        assert_eq!(Angle::new(TURN + 5).steps(), 5);
+        assert_eq!(Angle::new(10).turned(-20).steps(), TURN - 10);
+        assert_eq!(Angle::new(TURN - 10).signed(), -10);
+        assert_eq!(Angle::new(398).signed(), 398);
+    }
 
     #[test]
     fn quarter_turns() {
