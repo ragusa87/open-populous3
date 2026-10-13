@@ -19,12 +19,12 @@ Tags: **[files]** decoded `levels/constant.dat` (constants.md), **[community]** 
 | `MANA_F_HUT_LEVEL_1..3` | 100, 110, 120 % | factor for people in a hut of that size; not read by the income [exe] |
 | `MANA_UPDATE_FREQ` | 15 | mana is added every 16 turns |
 | `HUMAN_MANA_ADJUST`, `COMPUTER_MANA_ADJUST` | 125, 50 % | income factor by player type |
-| `HUMAN_TRAIN_MANA_WARR`, `_SPY`, `_PREACH`, `_SWARR` | 3500, 4000, 3500, 4000 | mana to train one (computer players: 1000 each) |
-| `TRAIN_MANA_BAND_00_03` .. `_21+` | 100, 125, 150, 175, 200, 250 % | training cost factor by number of specialists |
+| `HUMAN_TRAIN_MANA_WARR`, `_SPY`, `_PREACH`, `_SWARR` | 3500, 4000, 3500, 4000 | mana to train one (computer players: 1000 each) [exe] |
+| `TRAIN_MANA_BAND_00_03` .. `_21+` | 100, 125, 150, 175, 200, 250 % | cost factor by the tribe's number of that specialist (0-3, 4-7, 8-11, 12-15, 16-20, 21+) [exe] |
 
 Not in the file [exe]: the income per person is `MANA_BUSY_BRAVES` 15 / `MANA_IDLE_BRAVES` 4 and
 `MANA_BUSY_SPECIALS` 5 / `MANA_IDLE_SPECIALS` 4, exe defaults that `constant.dat` cannot change.
-| `CONV_TEMPLE`, `_SPY`, `_WARRIOR`, `_SUPER` | 4000 each | probably the training time, same unit as the sprog times |
+| `CONV_TEMPLE`, `_SPY`, `_WARRIOR`, `_SUPER` | 4000 each | match no exe constant name, probably ignored; not the training time [exe] |
 | `WOOD_BRAVE`, `WOOD_HUT_1..3`, `TREE*_WOOD_VALUE` | 100, 300, 400 | a brave carries 1 piece, a hut costs 3, a tree holds 4 (as `wood_cost`, trees.md) |
 
 ## Huts [community]
@@ -121,12 +121,16 @@ A training hut makes no mana [community]. As in the game (checked by someone who
    leaves, everyone behind it moves up one spot.
 3. **One at a time**: the head of the queue walks in by the door and is trained for a while. The hut's tooltip
    shows the training progress, and the unit inside can be selected.
-4. **Mana** [ours, to check]: taken along the training, a share every update (cost / duration). Without enough
+4. **Mana** [ours]: taken along the training, a share every update (cost / duration). Without enough
    mana for the share, training pauses. Mana spent is lost if the training is cancelled. Later: the training speed
-   may depend on the mana available.
+   may depend on the mana available. The original [exe] has no duration: the hut stores mana taken from each
+   income before the spells (at most `cost / 32` per income), never from the bank, trains when the store reaches
+   the cost, and gives the store back at 100 per turn when cancelled (pop3-rev-analysis.md "Training huts").
 5. **Done**: the unit is transformed into the hut's kind (same unit, new kind: a brave goes in, a firewarrior
-   comes out). A small room by the door lets it come out while the next in the queue goes in. Out of the door it
-   is idle, on the nearest free standing spot (never one taken by another unit, `GameMap::taken_spots`).
+   comes out). The original [exe] deletes the trainee and creates a new person at the door (new id, full life),
+   keeping only its queued orders and the ghost flag. A small room by the door lets it come out while the next in
+   the queue goes in. Out of the door it is idle, on the nearest free standing spot (never one taken by another
+   unit, `GameMap::taken_spots`).
 6. **Cancelling**: ordering the unit inside (move...) makes it come out by the door, its kind unchanged, then
    carry out the order; its training is cancelled and the queue goes on.
 7. **Damage**: when the hut is damaged, the whole queue is cancelled (its units idle where they stand) and the
@@ -167,6 +171,5 @@ time to train one warrior and its mana, how fast the red bar fills.
 - Huts: what the population band is a percentage of (the tribe's cap assumed, or 200); what exactly counts as busy
   (idle people make 4 [exe]); the red bar's speed and occupant bonus; the wood held per hut size; how many braves fetch and build when a hut grows (only those inside?); what damage really does to a growing hut; whether idle braves house
   themselves, from how far, after how long.
-- Whether training takes from the bank, after spells are charged (TODO "Mana").
-- Training: how mana is taken (assumed along the training), the real `CONV_*` meaning and the cost by specialist
-  count (`TRAIN_MANA_BAND`).
+- Training: whether the original lets people in one at a time (its training huts have 5 slots and convert all of
+  them at once, for the whole batch's cost), and the measured training time.
