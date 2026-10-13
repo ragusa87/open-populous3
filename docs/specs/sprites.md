@@ -52,11 +52,15 @@ Not PSFB: `HSPR0-0.TAB`, `HSPR0-1.DAT`/`.TAB`, `HFX20-0.DAT`/`.TAB` (look like t
 `.DAT` + `.TAB` sprite pair), `vspr-0.inf`.
 
 ## `data/POINT0-0.DAT` (162 sprites)
-13 arrow + "?", 14 arrow (the standard pointer, tip at 0,0), 15-21 arrow + 2..8, 27 arrow + up/down,
+13 arrow + "?", 14 arrow (the standard pointer, tip at 0,0), 15-21 arrow + 2..8 (how many units are selected), 27 arrow + up/down,
 28 move cross, 29 rotate, 30-33 gold arrow: the frames of an animated cursor, looping (0.12 s each, timing
 guessed): the menus' cursor and, with the spell's icon, the cursor while aiming a spell,
-38-57 gold spell icons, 58-66 teal building icons, 80-155 action pointers (build, plant,
-guard...), 156-161 small icons.
+38-57 gold spell icons, 58-66 teal building icons, 80-155 action pointers, animated:
+84-89 fight, 90-93 send into a house, 94-99 cut wood, 100-105 a spy setting a building on fire, 106-111 build (with
+wood), 112-115 board a balloon, 116-119 board a boat, 120-125 dismantle, 126-131 pray, 132-137 a spy's disguise,
+138-143 guard (patrol, for a camp fire and guarding an area), 144-147 go into a building (a pyramid?), 148-151 pick up
+cut wood, 152-155 grab; 156-161 small icons, maybe unused: 156 and 158 bridge variants, 157 and 159 lowered ground
+variants, 160 a person, 161 a tree.
 
 `just spell-icons` (`tools/spell_icons.py`) writes `target/spell-icons.html` (original art: never committed): for
 each spell of the panel, these cursor icons, the `hfx0-0.dat` glyphs 1030-1083 and spell names 107-111, and the
