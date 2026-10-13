@@ -922,10 +922,11 @@ impl Unit {
         self.action = Action::Challenge { challenge, role: crate::challenge::Role::Shoved };
     }
 
-    /// Joins a coordinator with `action` (one that links to it), leaving its way and its chained orders.
+    /// Joins a coordinator with `action` (one that links to it), leaving its way, its chained orders and the spell
+    /// it was to cast.
     pub(crate) fn join(&mut self, action: Action) {
         debug_assert!(action.link().is_some());
-        (self.route, self.planned_on) = (Vec::new(), None);
+        (self.route, self.planned_on, self.teleport_to, self.spell) = (Vec::new(), None, None, None);
         self.queue.clear();
         self.action = action;
     }
@@ -1476,6 +1477,14 @@ mod tests {
         u.order(Order::Stop);
         run(&mut u, &t, &site, CAST_TICKS.get() as usize);
         assert_eq!(u.action, Action::Idle, "cancelled, nothing released");
+    }
+
+    #[test]
+    fn pulled_into_a_fight_she_drops_the_spell_she_held() {
+        let (mut u, _) = shaman_at((10, 10));
+        assert!(u.cast_spell(Spell::Blast { at: (100, 100) }));
+        u.join(Action::Melee { melee: crate::id::Id::from_raw(1), place: (u.x, u.z), stance: crate::melee::Stance::ToPlace });
+        assert_eq!(u.walking_to_cast(), None, "not cast again once out of it");
     }
 
     #[test]

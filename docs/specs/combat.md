@@ -62,7 +62,9 @@ A coordinator (`challenge::Challenge`, coordinators.md) for one attacker and one
 - Started in `detect_coordinators` (`GameMap::start_challenges`): an attacker within `FIGHT_REACH` (224) of a
   target that is in no coordinator, outside and on the ground. Both join it (`Unit::join`): the attacker
   `Role::Charging` at its walking speed + a draw below a quarter of it, the target `Role::Waiting`. A target already
-  in a challenge or a melee is left alone for now (joining a melee comes with it).
+  in a challenge or a melee is left alone for now (joining a melee comes with it), a shaman in her cast jump until it
+  ends: a cast during a fight takes her out of it (an order), goes off, and the attacker challenges her again [ours:
+  the original's rule for casting in a fight is not traced]. Joining drops a spell she held (`Unit::join`).
 - Each turn: it ends, both released, when one is gone, dead, no longer linked (an order took it away) or of the same
   tribe, or when a charge lasts `CHARGE_TICKS` (40). The charger runs straight at the target (`Placed` gives the
   target's place when it moved). Within `SHOVE_REACH` (315) on both axes of a waiting target: `Shove`, 6 turns

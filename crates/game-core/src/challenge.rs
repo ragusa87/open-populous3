@@ -157,7 +157,7 @@ impl Coordinator for Challenge {
 
 impl GameMap {
     /// Attackers within reach of a free target challenge it (`Challenge`); the charge's speed is drawn here. A
-    /// target already in a fight is left alone for now.
+    /// target already in a fight is left alone for now, a shaman in her cast jump until it ends.
     pub(crate) fn start_challenges(&mut self) {
         for i in 0..self.units.len() {
             let a = &self.units[i];
@@ -167,7 +167,7 @@ impl GameMap {
             }
             let Some(j) = self.unit_index(target) else { continue };
             let t = &self.units[j];
-            if self.linked(t).is_some() || t.locked() || t.inside.is_some() || !in_reach((a.x, a.z), (t.x, t.z)) {
+            if self.linked(t).is_some() || t.locked() || matches!(t.action, Action::Casting { .. }) || t.inside.is_some() || !in_reach((a.x, a.z), (t.x, t.z)) {
                 continue;
             }
             let base = a.kind.speed();
@@ -266,6 +266,27 @@ mod tests {
         let left = until(&mut map, 100, |m| m.coordinators.challenges.is_empty()).expect("given up");
         assert!(left <= CHARGE_TICKS.get() + 1);
         assert!(role(&map, a).is_none());
+    }
+
+    #[test]
+    fn a_shaman_casting_in_a_fight_casts_once_then_fights_on() {
+        let mut map = GameMap::sandbox_walk();
+        let s = map.shaman_of(0).unwrap();
+        let (shaman, at) = (s.id, (s.x, s.z.wrapping_add(4 * 512)));
+        let w = map.spawn(1, UnitKind::Warrior, (s.x.wrapping_add(512), s.z)).id;
+        map.apply(&Command::OrderUnit { player: 1, unit: w, order: Order::Attack { target: Target::Unit(shaman) } });
+        until(&mut map, 200, |m| role(m, shaman).is_some()).expect("challenged");
+        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at } });
+        map.run(crate::unit::CAST_RELEASE);
+        assert_eq!(map.effects.len(), 1, "her jump not cut short");
+        until(&mut map, 200, |m| role(m, shaman).is_some()).expect("challenged again after it");
+        let casting = |m: &GameMap| matches!(m.unit(shaman).unwrap().action, Action::Casting { .. });
+        assert_eq!(until(&mut map, 200, casting), None, "not cast again");
+        until(&mut map, 400, |m| matches!(m.unit(shaman).unwrap().action, Action::Melee { .. })).expect("in a melee");
+        let effects = map.effects.len();
+        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at } });
+        map.run(crate::unit::CAST_RELEASE);
+        assert_eq!(map.effects.len(), effects + 1, "blasts in a melee too");
     }
 
     #[test]
