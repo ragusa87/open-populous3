@@ -32,9 +32,8 @@ pub struct Wood {
 /// training hut, the shaman in a pyramid; 0 for the others.
 pub fn room(kind: BuildingKind) -> u16 {
     match kind {
-        BuildingKind::Hut { .. } | BuildingKind::DrumTower => kind.capacity() as u16,
-        BuildingKind::Temple | BuildingKind::SpyTraining | BuildingKind::WarriorTraining | BuildingKind::FirewarriorTraining | BuildingKind::Vault => 1,
-        _ => 0,
+        BuildingKind::Vault => 1,
+        _ => kind.capacity() as u16,
     }
 }
 

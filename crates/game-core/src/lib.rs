@@ -48,6 +48,7 @@ pub mod status;
 pub mod terrain;
 pub mod time;
 pub mod totem;
+pub mod training;
 pub mod tree;
 pub mod unit;
 pub mod vault;

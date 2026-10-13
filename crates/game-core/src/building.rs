@@ -154,11 +154,11 @@ impl BuildingKind {
     }
 
     /// People it holds inside: huts 3, 4, 5 by size (huts-and-training.md), a drum tower one
-    /// (buildings.md "Towers"); 0 for the others (training huts will queue instead).
+    /// (buildings.md "Towers"), a training unit its trainee (`crate::training`); 0 for the others.
     pub fn capacity(self) -> u8 {
         match self {
             BuildingKind::Hut { size } => 2 + size.clamp(1, 3),
-            BuildingKind::DrumTower => 1,
+            BuildingKind::DrumTower | BuildingKind::Temple | BuildingKind::SpyTraining | BuildingKind::WarriorTraining | BuildingKind::FirewarriorTraining => 1,
             _ => 0,
         }
     }
