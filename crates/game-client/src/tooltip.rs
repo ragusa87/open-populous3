@@ -79,6 +79,18 @@ pub struct TooltipModel {
     pub toggle: Option<Toggle>,
 }
 
+impl TooltipModel {
+    /// Whether `other` differs at most by its bars' fills and blinking, updated in place (`update_bars`)
+    /// without drawing it again.
+    pub fn same_layout(&self, other: &TooltipModel) -> bool {
+        self.lines == other.lines && self.rows == other.rows && self.toggle == other.toggle && self.bars.iter().map(|b| (b.kind, b.fine.is_some())).eq(other.bars.iter().map(|b| (b.kind, b.fine.is_some())))
+    }
+}
+
+/// The bars of the tooltip shown, read every frame by its bars' parts.
+#[derive(Resource, Default)]
+struct ShownBars(Vec<Bar>);
+
 /// A tooltip's button (tooltips.md "Dismantle toggle"): dismantle the building `building` (id), or
 /// build it again when `on`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -459,8 +471,9 @@ pub struct TooltipPlugin;
 impl Plugin for TooltipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IconImages>()
+            .init_resource::<ShownBars>()
             .add_systems(Startup, (spawn_tooltip, load_sprites))
-            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, press_toggle, blink_bars, size_fine_fills).in_set(crate::menu::Gameplay));
+            .add_systems(Update, (show_tooltip.after(crate::hover::HoverSystems), select_from_slot, press_toggle, blink_bars, update_bars).in_set(crate::menu::Gameplay));
     }
 }
 
@@ -493,8 +506,7 @@ fn show_tooltip(
     totems: Query<(&crate::totems::TotemView, &GlobalTransform)>,
     selection: Res<Selection>,
     mut state: Local<TooltipState>,
-    mut icons: ResMut<IconImages>,
-    mut images: ResMut<Assets<Image>>,
+    (mut icons, mut images, mut shown_bars): (ResMut<IconImages>, ResMut<Assets<Image>>, ResMut<ShownBars>),
     mut tooltip: Query<(Entity, &Interaction, &ComputedNode, &mut Node, &mut Visibility), With<TooltipBox>>,
 ) {
     let Ok((entity, interaction, computed, mut node, mut vis)) = tooltip.single_mut() else { return };
@@ -550,14 +562,21 @@ fn show_tooltip(
     if state.model.as_ref() == Some(&model) {
         return;
     }
+    if shown_bars.0 != model.bars {
+        shown_bars.0 = model.bars.clone();
+    }
+    if state.model.as_ref().is_some_and(|m| m.same_layout(&model)) {
+        state.model = Some(model);
+        return;
+    }
     commands.entity(entity).despawn_children();
     commands.entity(entity).with_children(|t| {
-        for bar in model.bars.iter().filter(|b| b.kind.horizontal()) {
-            spawn_bar(t, *bar);
+        for (index, bar) in model.bars.iter().enumerate().filter(|(_, b)| b.kind.horizontal()) {
+            spawn_bar(t, index, *bar);
         }
         t.spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(5), ..default() }, Pickable::IGNORE)).with_children(|r| {
-            for bar in model.bars.iter().filter(|b| !b.kind.horizontal()) {
-                spawn_bar(r, *bar);
+            for (index, bar) in model.bars.iter().enumerate().filter(|(_, b)| !b.kind.horizontal()) {
+                spawn_bar(r, index, *bar);
             }
             r.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(3), ..default() }, Pickable::IGNORE)).with_children(|t| spawn_content(t, &model, &mut icons, &mut images));
         });
@@ -570,55 +589,56 @@ const BAR_THICKNESS: f32 = 6.0;
 /// A bar's fill blinks this many times a second while blocked.
 const BLINK_HZ: f32 = 2.0;
 
-/// A bar's filled part, blinking while its bar is blocked.
+/// A filled part of the shown tooltip's bar `index` (`ShownBars`): its fill, or its finer layer.
 #[derive(Component)]
 struct BarFill {
+    index: usize,
+    fine: bool,
     color: Color,
-    blocked: bool,
-}
-
-/// A bar's finer layer (`fine_fill`), sized from its track's width once laid out (`size_fine_fills`).
-#[derive(Component)]
-struct FineFill {
-    value: u32,
-    max: u32,
 }
 
 /// A bar: a dark track and its fill, vertical (filling upwards, as tall as the tooltip's content) or
-/// horizontal (filling to the right, as wide as the tooltip); a finer layer first, under the fill.
-fn spawn_bar(parent: &mut ChildSpawnerCommands, bar: Bar) {
-    let share = percent(bar.fill as f32 * 100.0 / game_core::vault::FULL as f32);
+/// horizontal (filling to the right, as wide as the tooltip); a finer layer first, under the fill. Their
+/// sizes follow `ShownBars` (`update_bars`).
+fn spawn_bar(parent: &mut ChildSpawnerCommands, index: usize, bar: Bar) {
     let (track, fill) = if bar.kind.horizontal() {
-        (Node { height: px(BAR_THICKNESS), ..default() }, Node { position_type: PositionType::Absolute, left: px(0), top: px(0), bottom: px(0), width: share, ..default() })
+        (Node { height: px(BAR_THICKNESS), ..default() }, Node { position_type: PositionType::Absolute, left: px(0), top: px(0), bottom: px(0), width: px(0), ..default() })
     } else {
-        (Node { width: px(BAR_THICKNESS), ..default() }, Node { position_type: PositionType::Absolute, left: px(0), right: px(0), bottom: px(0), height: share, ..default() })
+        (Node { width: px(BAR_THICKNESS), ..default() }, Node { position_type: PositionType::Absolute, left: px(0), right: px(0), bottom: px(0), height: px(0), ..default() })
     };
     parent.spawn((track, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)), Pickable::IGNORE)).with_children(|t| {
-        if let Some((value, max)) = bar.fine {
-            let layer = Node { position_type: PositionType::Absolute, left: px(0), top: px(0), bottom: px(0), width: px(0), ..default() };
-            t.spawn((layer, BackgroundColor(MANA_LAYER), BarFill { color: MANA_LAYER, blocked: bar.blocked }, FineFill { value, max }, Pickable::IGNORE));
+        if bar.fine.is_some() {
+            t.spawn((fill.clone(), BackgroundColor(MANA_LAYER), BarFill { index, fine: true, color: MANA_LAYER }, Pickable::IGNORE));
         }
-        t.spawn((fill, BackgroundColor(bar.kind.color()), BarFill { color: bar.kind.color(), blocked: bar.blocked }, Pickable::IGNORE));
+        t.spawn((fill, BackgroundColor(bar.kind.color()), BarFill { index, fine: false, color: bar.kind.color() }, Pickable::IGNORE));
     });
 }
 
-/// Finer layers span their share of their track's laid-out width, in whole pixels as the original's.
-fn size_fine_fills(mut layers: Query<(&FineFill, &ChildOf, &mut Node)>, tracks: Query<&ComputedNode>) {
-    for (layer, parent, mut node) in &mut layers {
-        let Ok(track) = tracks.get(parent.parent()) else { continue };
-        let width = track.size().x * track.inverse_scale_factor();
-        let share = percent(fine_fill(layer.value, layer.max, width.round() as u32) * 100.0);
-        if node.width != share {
-            node.width = share;
+/// Sizes each bar's parts from `ShownBars`: the fill its share of the track, a finer layer its share of
+/// the track's laid-out width (`fine_fill`, whole pixels as the original's).
+fn update_bars(bars: Res<ShownBars>, mut parts: Query<(&BarFill, &ChildOf, &mut Node)>, tracks: Query<&ComputedNode>) {
+    for (part, parent, mut node) in &mut parts {
+        let Some(bar) = bars.0.get(part.index) else { continue };
+        let share = match (part.fine, bar.fine) {
+            (true, Some((value, max))) => {
+                let Ok(track) = tracks.get(parent.parent()) else { continue };
+                fine_fill(value, max, (track.size().x * track.inverse_scale_factor()).round() as u32) * 100.0
+            }
+            _ => bar.fill as f32 * 100.0 / game_core::vault::FULL as f32,
+        };
+        let size = if bar.kind.horizontal() { &mut node.width } else { &mut node.height };
+        if *size != percent(share) {
+            *size = percent(share);
         }
     }
 }
 
-/// Blocked bars blink: their fill fades out and back in.
-fn blink_bars(time: Res<Time>, mut fills: Query<(&BarFill, &mut BackgroundColor)>) {
+/// Blocked bars blink: their parts fade out and back in.
+fn blink_bars(time: Res<Time>, bars: Res<ShownBars>, mut parts: Query<(&BarFill, &mut BackgroundColor)>) {
     let on = (time.elapsed_secs() * BLINK_HZ).fract() < 0.5;
-    for (fill, mut color) in &mut fills {
-        let shown = if fill.blocked && !on { fill.color.with_alpha(0.2) } else { fill.color };
+    for (part, mut color) in &mut parts {
+        let blocked = bars.0.get(part.index).is_some_and(|b| b.blocked);
+        let shown = if blocked && !on { part.color.with_alpha(0.2) } else { part.color };
         color.set_if_neq(BackgroundColor(shown));
     }
 }
@@ -854,6 +874,15 @@ mod tests {
         assert_eq!(icons(&model.rows[0]), vec![Icon::Placeholder(UnitKind::Brave); 8]);
         let shaman = map.totems.iter().position(|t| t.shaman_only).unwrap();
         assert_eq!(icons(&totem_model(&map, shaman, &[]).unwrap().rows[0]), vec![Icon::Placeholder(UnitKind::Shaman)]);
+    }
+
+    #[test]
+    fn a_bar_moving_keeps_the_tooltip_drawn() {
+        let bar = |fill, blocked| Bar { kind: BarKind::Training, fill, blocked, fine: Some((fill as u32, 1000)) };
+        let model = |bars| TooltipModel { lines: vec!["Warrior hut".into()], bars, ..default() };
+        assert!(model(vec![bar(100, false)]).same_layout(&model(vec![bar(400, true)])), "fills and blinking only");
+        assert!(!model(vec![bar(100, false)]).same_layout(&model(vec![])), "a bar gone");
+        assert!(!model(vec![]).same_layout(&TooltipModel { lines: vec!["Hut 1".into()], ..default() }), "another text");
     }
 
     #[test]
