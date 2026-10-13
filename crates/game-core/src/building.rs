@@ -240,6 +240,12 @@ pub struct Building {
     pub production: Option<crate::production::Production>,
     /// A training unit's queue, head first (`crate::training`).
     pub queue: Vec<crate::unit::UnitId>,
+    /// Its queue's spots by rank, as found on the ground of `spots_on` (`GameMap::queue_spots`): extended as the
+    /// queue grows, found again when the ground changes.
+    pub queue_spots: Vec<(u16, u16)>,
+    pub spots_on: Option<(u32, u32)>,
+    /// Those let into a training unit and walking in, not inside yet (`crate::training`).
+    pub admitted: Vec<crate::unit::UnitId>,
     /// Turns before a training unit lets the next of its queue in (`training::ADMIT_GAP`, `LEFT_GAP`).
     pub admit_gate: u8,
     /// A vehicle hut's work on its next vehicle (`crate::vehicle::Launch`); None while none is under way.
@@ -264,7 +270,7 @@ pub enum Reward {
 impl Building {
     /// A finished building, as the levels store them.
     pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
-        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)), production: None, queue: Vec::new(), admit_gate: 0, launch: None }
+        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)), production: None, queue: Vec::new(), queue_spots: Vec::new(), spots_on: None, admitted: Vec::new(), admit_gate: 0, launch: None }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.

@@ -733,7 +733,12 @@ impl Unit {
                 }
             }
             Action::Attacking { to, .. } if self.in_the_open() => self.approach(to, ground),
-            Action::Queuing { at, .. } => self.approach(at, ground),
+            Action::Queuing { at, .. } => {
+                self.approach(at, ground);
+                if self.route.is_empty() && (self.x, self.z) != at && self.planned_on == Some(ground.revision()) {
+                    self.action = Action::Stranded { to: at };
+                }
+            }
             Action::Attacking { .. } => {}
             Action::Hacking { .. } => {}
             Action::Throwing { target, mut left } => {

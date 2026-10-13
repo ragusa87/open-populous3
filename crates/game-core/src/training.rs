@@ -7,7 +7,7 @@ use crate::building::{Building, BuildingId, BuildingKind, Stage, DOOR_GAP};
 use crate::map::GameMap;
 use crate::slots;
 use crate::time::Every;
-use crate::unit::{Action, Inside, Order, UnitKind};
+use crate::unit::{Action, Inside, Order, UnitId, UnitKind};
 
 /// The cost is recomputed on this rhythm while training ("Cost").
 pub const RECOST_EVERY: Every = Every::new(16);
@@ -18,6 +18,10 @@ pub const QUEUE_ROW: i32 = 192;
 /// Turns before the next is let in after one went in, and after one came out ("The queue at the door" [exe]).
 pub const ADMIT_GAP: u8 = 16;
 pub const LEFT_GAP: u8 = 12;
+/// Coming within this of the door on both axes, someone sent in goes straight in or joins the queue ("The queue at
+/// the door" [exe]: 2.6 cells).
+pub const QUEUE_REACH: i32 = 0x538;
+
 
 /// Where the queue's `rank`-th person stands (0: the head, a step beside the door, which stays free for whoever goes
 /// in or out): along the building's walls from its door,
@@ -38,6 +42,42 @@ pub fn queue_spot(b: &Building, rank: usize) -> (u16, u16) {
         return b.local_point((f.offset.0 + lx, f.offset.1 + lz));
     }
     unreachable!()
+}
+
+/// The spots of `b`'s queue from rank `have.len()` up to `n`, after those already found (`have`), on `ground`:
+/// each the next of the chain round the walls (`queue_spot`), or, when that one is on ground nobody can walk on
+/// (another building, the sea) or already someone's, the nearest free spot within `NEAREST_REACH` of it; failing
+/// that, one near the door [user's account of the game].
+pub fn queue_spots_from(ground: &impl crate::path::Ground, b: &Building, have: &[(u16, u16)], n: usize) -> Vec<(u16, u16)> {
+    let mut taken: std::collections::BTreeSet<(u16, u16)> = have.iter().copied().collect();
+    let mut out = Vec::new();
+    for rank in have.len()..n {
+        let wanted = queue_spot(b, rank);
+        let at = nearest_free(ground, wanted, &taken).or_else(|| nearest_free(ground, b.door(), &taken)).unwrap_or(wanted);
+        taken.insert(at);
+        out.push(at);
+    }
+    out
+}
+
+/// How far (spots) a queue spot is looked for around an unwalkable one: two cells.
+const NEAREST_REACH: i32 = 2 * slots::PER_CELL;
+
+/// `at` if it is walkable and free, else the nearest spot centre within `NEAREST_REACH` that is (ties by row, then
+/// column).
+fn nearest_free(ground: &impl crate::path::Ground, at: (u16, u16), taken: &std::collections::BTreeSet<(u16, u16)>) -> Option<(u16, u16)> {
+    let walkable = |p: (u16, u16)| ground.passable(crate::path::Mobility::Walk, slots::spot_cell(slots::spot_of(p)));
+    if walkable(at) && !taken.contains(&at) {
+        return Some(at);
+    }
+    let target = slots::spot_of(at);
+    let r = NEAREST_REACH;
+    (-r..=r)
+        .flat_map(|dz| (-r..=r).map(move |dx| (dx, dz)))
+        .map(|(dx, dz)| (slots::spot_centre((target.0 + dx, target.1 + dz)), dx * dx + dz * dz, (dz, dx)))
+        .filter(|&(p, _, _)| walkable(p) && !taken.contains(&p))
+        .min_by_key(|&(_, d, tie)| (d, tie))
+        .map(|(p, _, _)| p)
 }
 
 /// The point `d` along the rectangle `±hx × ±hz` (its own frame), from the middle of its -z side (the door's),
@@ -88,27 +128,17 @@ pub fn train_cost(kind: UnitKind, count: usize) -> u16 {
 }
 
 impl GameMap {
-    /// Unit `i`, sent into the training unit `building`: straight in when nobody is queuing and there is room, else
-    /// at the end of its queue.
+    /// Unit `i`, sent into the training unit `building`: it walks to the door; near it, it either goes straight in
+    /// or joins the end of the queue (`tend_queues`), so the queue builds up in the order people arrive.
     pub(crate) fn join_queue(&mut self, i: usize, building: BuildingId) {
-        let Some(b) = self.building(building) else { return };
-        let coming = self.units.iter().filter(|u| u.heading_into() == Some(building)).count();
-        let (door, full) = (b.door(), !b.queue.is_empty() || b.admit_gate > 0 || self.people_inside(building) + coming >= b.kind.capacity() as usize);
-        let id = self.units[i].id;
-        if !full {
+        if let Some(door) = self.building(building).map(Building::door) {
             self.units[i].go_enter(building, door);
-            return;
-        }
-        self.units[i].queue_up(building);
-        if let Some(b) = self.buildings.iter_mut().find(|b| b.id == building)
-            && !b.queue.contains(&id)
-        {
-            b.queue.push(id);
         }
     }
 
-    /// Each training unit's queue: those who left it dropped, everyone at its spot, the head let in when there is
-    /// room and the gate is open.
+    /// Each training unit's queue ("The queue at the door" [exe]): those who left it dropped; anyone coming within
+    /// `QUEUE_REACH` of the door goes straight in when nobody waits and there is room, else joins the end; everyone at
+    /// its spot facing the one ahead; the head let in when there is room and the gate is open.
     pub(crate) fn tend_queues(&mut self) {
         for k in 0..self.buildings.len() {
             let id = self.buildings[k].id;
@@ -116,14 +146,37 @@ impl GameMap {
                 continue;
             }
             let units = &self.units;
-            let queuing = |u: &crate::unit::UnitId| units.binary_search_by_key(u, |x| x.id).ok().is_some_and(|i| matches!(units[i].action, Action::Queuing { building, .. } if building == id) && units[i].is_alive());
+            let index = |u: &UnitId| units.binary_search_by_key(u, |x| x.id).ok();
+            let queuing = |u: &UnitId| index(u).is_some_and(|i| matches!(units[i].action, Action::Queuing { building, .. } if building == id) && units[i].is_alive());
+            let walking_in = |u: &UnitId| index(u).is_some_and(|i| units[i].heading_into() == Some(id));
             let b = &mut self.buildings[k];
             b.queue.retain(queuing);
+            b.admitted.retain(walking_in);
             b.admit_gate = b.admit_gate.saturating_sub(1);
-            let door = b.door();
-            let spots: Vec<(crate::unit::UnitId, (u16, u16))> = b.queue.iter().enumerate().map(|(rank, &u)| (u, queue_spot(b, rank))).collect();
-            for (rank, &(u, at)) in spots.iter().enumerate() {
-                let ahead = if rank == 0 { door } else { spots[rank - 1].1 };
+            let (door, capacity, built) = (b.door(), b.kind.capacity() as usize, b.stage() == Stage::Built);
+            let arriving: Vec<usize> = (0..self.units.len())
+                .filter(|&i| {
+                    let u = &self.units[i];
+                    u.heading_into() == Some(id) && !self.buildings[k].admitted.contains(&u.id) && crate::firebolt::in_reach((u.x, u.z), door, QUEUE_REACH)
+                })
+                .collect();
+            for i in arriving {
+                let inside = self.people_inside(id) + self.buildings[k].admitted.len();
+                let b = &mut self.buildings[k];
+                let unit = self.units[i].id;
+                if built && b.queue.is_empty() && b.admit_gate == 0 && inside < capacity {
+                    b.admitted.push(unit);
+                } else {
+                    b.queue.push(unit);
+                    self.units[i].queue_up(id);
+                }
+            }
+            let n = self.buildings[k].queue.len();
+            self.update_queue_spots(k, n);
+            let spots = self.buildings[k].queue_spots[..n].to_vec();
+            let queue = self.buildings[k].queue.clone();
+            for (rank, (&u, &at)) in queue.iter().zip(&spots).enumerate() {
+                let ahead = if rank == 0 { door } else { spots[rank - 1] };
                 if let Some(u) = self.unit_mut(u) {
                     u.queue_at(at);
                     if (u.x, u.z) == at {
@@ -131,19 +184,40 @@ impl GameMap {
                     }
                 }
             }
-            let b = &self.buildings[k];
-            let coming = self.units.iter().filter(|u| u.heading_into() == Some(id)).count();
-            let room = b.stage() == Stage::Built && self.people_inside(id) + coming < b.kind.capacity() as usize && b.admit_gate == 0;
-            if let (true, Some(&head)) = (room, b.queue.first()) {
-                let door = b.door();
-                let b = &mut self.buildings[k];
+            let inside = self.people_inside(id) + self.buildings[k].admitted.len();
+            let b = &mut self.buildings[k];
+            if let (true, Some(&head)) = (built && inside < capacity && b.admit_gate == 0, b.queue.first()) {
                 b.queue.remove(0);
+                b.admitted.push(head);
                 b.admit_gate = ADMIT_GAP;
                 if let Some(i) = self.unit_index(head) {
                     self.units[i].go_enter(id, door);
                 }
             }
         }
+    }
+
+    /// The first `n` spots of `b`'s queue, kept on the building: extended from the last one found, all found again
+    /// when the ground has changed since.
+    pub(crate) fn update_queue_spots(&mut self, k: usize, n: usize) {
+        use crate::path::Ground;
+        let revision = self.ground().revision();
+        if self.buildings[k].spots_on != Some(revision) {
+            self.buildings[k].queue_spots.clear();
+            self.buildings[k].spots_on = Some(revision);
+        }
+        let have = self.buildings[k].queue_spots.len();
+        if have >= n {
+            return;
+        }
+        let b = &self.buildings[k];
+        let more = queue_spots_from(&self.ground(), b, &b.queue_spots, n);
+        self.buildings[k].queue_spots.extend(more);
+    }
+
+    /// The first `n` spots of `b`'s queue, on the ground as it is now (`queue_spots_from`).
+    pub fn queue_spots(&self, b: &Building, n: usize) -> Vec<(u16, u16)> {
+        queue_spots_from(&self.ground(), b, &[], n)
     }
 
     /// Each built training unit: its cost set from its trainee, or cleared without one; with the store full, the
@@ -293,8 +367,11 @@ mod tests {
         for c in map.enter_orders(0, &braves, hut) {
             map.apply(&c);
         }
-        map.tick();
-        assert_eq!(map.buildings[hut].queue.len(), 3, "one goes straight in, the others queue");
+        (0..600).find(|_| {
+            map.tick();
+            map.buildings[hut].queue.len() == 3
+        })
+        .expect("one goes straight in, the others queue as they reach the door");
         let queued = map.buildings[hut].queue.clone();
         (0..400).find(|_| {
             map.tick();
@@ -328,5 +405,24 @@ mod tests {
             map.units_inside(id).any(|u| u.id == queued[1])
         });
         assert!(walked_in.is_some(), "the head goes in once there is room");
+    }
+
+    #[test]
+    fn a_crowd_queues_round_a_hut_hemmed_in_by_others_each_on_a_walkable_spot_of_its_own() {
+        use crate::path::Ground;
+        let mut map = GameMap::sandbox_buildings();
+        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::WarriorTraining).unwrap();
+        let braves: Vec<UnitId> = map.units.iter().filter(|u| u.owner == 0 && u.kind == UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).map(|u| u.id).collect();
+        for c in map.enter_orders(0, &braves, hut) {
+            map.apply(&c);
+        }
+        (0..1500).for_each(|_| _ = map.tick());
+        let b = &map.buildings[hut];
+        assert!(b.queue.len() > 60, "a long queue: {}", b.queue.len());
+        let spots = map.queue_spots(b, b.queue.len());
+        let ground = map.ground();
+        assert!(spots.iter().all(|&p| ground.passable(crate::path::Mobility::Walk, slots::spot_cell(slots::spot_of(p)))), "never on another building");
+        assert_eq!(spots.iter().collect::<std::collections::BTreeSet<_>>().len(), spots.len(), "each its own");
+        assert!(b.queue.iter().zip(&spots).all(|(&u, &s)| map.unit(u).map(|u| (u.x, u.z)) == Some(s)), "everyone got there");
     }
 }

@@ -154,11 +154,16 @@ the cost the trainee is replaced (rule 5, ghost flag kept): the new person appea
 walks out by the door to a free spot, so the one going in and the one coming out are seen apart.
 
 The queue (`training::tend_queues`, before `tend_training`; "The queue at the door" [exe]): sent into a training
-unit (`Order::Enter`), a follower goes straight in when nobody queues, nobody is walking in and there is room;
-otherwise it joins the building's queue (`Building::queue`, in arrival order) as `Action::Queuing`, and one reaching
-a full door joins it too. Each rank has its spot (`queue_spot`): a quarter cell apart (`QUEUE_STEP`) along the
+unit (`Order::Enter`), a follower walks to its door; coming within `QUEUE_REACH` (2.6 cells per axis) of it, it goes
+straight in when nobody queues, nobody else is let in and walking (`Building::admitted`) and there is room, else
+joins the end of the queue (`Building::queue`) as `Action::Queuing`: the queue builds up in the order people arrive,
+chained from the door. Each rank has its spot (`queue_spot`): a quarter cell apart (`QUEUE_STEP`) along the
 walls at the door's distance, from beside the door (the doorway stays free) round the building; a full lap goes on
-a row further out, turning the other way [ours: past one lap is not traced]. At its spot each one faces the one ahead (the head
+a row further out, turning the other way [ours: past one lap is not traced]. A spot on ground nobody can walk on
+(another building, the sea) or already given gives way to the nearest free one within 2 cells, failing that one near
+the door [user's account of the game]; someone with no way to its spot is stranded (arms up, losing health). The
+spots are kept on the building (`queue_spots`, `spots_on`): extended as the queue grows, found again when the
+ground changes. At its spot each one faces the one ahead (the head
 faces the door) [ours]. Anyone given another order leaves the
 queue and those behind move up at once [ours: the original ripples, 2 turns per rank]. The head goes in when there
 is room and the admission gate is open: `ADMIT_GAP` (16) turns after one went in, `LEFT_GAP` (12) after one came
