@@ -27,7 +27,8 @@ One widget for every use: one slot per unit of capacity or need.
 - An empty slot shows a **placeholder**, the greyed shape of what fits there; a filled slot shows the **icon** of
   what is there. Written below as `O` and `X`: a site for 6 braves with one assigned shows `XOOOOO`.
 - A long row wraps after 10 slots, except a row of 16, which wraps after 8 [player]: 16 slots show as 2 lines of
-  8, 20 as 2 lines of 10, 12 as 10 then 2. Slots fill first to last, line by line.
+  8, 20 as 2 lines of 10, 12 as 10 then 2. Slots fill first to last, line by line. Wood wraps after 4, the lines
+  touching, as the original's rows of wood (hfx 1598-1602) lay them out.
 
 ### People rows: selecting what is inside
 Clicking a filled slot adds that unit to the selection (`Selection::add`) [player]: on a hut with 3 braves,
@@ -46,7 +47,7 @@ people slot keeps room for it, so the row does not move [ours].
 | Vehicle | its seats | brave | the people aboard |
 
 ### Wood rows: display only
-Nothing to select [player].
+Nothing to select [player]. A piece is the original log (hfx 40), greyed when missing; generated logs with `--no-original` [code].
 
 | Target | Slots | Filled by |
 |---|---|---|

@@ -29,6 +29,10 @@ pub const UNIT_FIGURES: std::ops::RangeInclusive<usize> = 75..=80;
 pub const STATS_ROW_ICONS: [usize; 6] = [1084, 1085, 1086, 1087, 655, 1088];
 /// Three people (24 x 16) in `EFFECT_SPRITE_FILE`, the Stats tab's icon (681 highlighted), also the population.
 pub const PEOPLE_ICON: usize = 680;
+/// A piece of wood in the tooltip (16 x 15) in `EFFECT_SPRITE_FILE`. 1598-1602 are rows of 3 to 11 of it,
+/// one every 17 pixels, 4 to a line, the lines touching (docs/specs/sprites.md).
+pub const TOOLTIP_WOOD_SPRITE: usize = 40;
+pub const TOOLTIP_WOOD_PER_LINE: usize = 4;
 /// The tooltip's buttons in `EFFECT_SPRITE_FILE`, each normal, hovered, pressed: dismantle a building,
 /// build it again (undo the dismantling), get everyone off a vehicle.
 pub const DISMANTLE_BUTTON: [usize; 3] = [49, 51, 50];

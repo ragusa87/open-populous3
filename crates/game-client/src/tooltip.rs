@@ -3,8 +3,9 @@
 //! people in it or at work on it, its wood. Long rows wrap (`line_lengths`). It shows after resting the
 //! cursor on the thing or at once on a right click, stands above it and stays while the cursor is on
 //! the thing or on it (`sticky`), so a person's slot can be clicked to add that unit to the selection. A person is the
-//! original teal figure of its kind when allowed (`hfx0-0.dat`, `IconImages`, shared with the panel), greyed when the slot is empty; else, and for wood, the
-//! icons are generated here, a silhouette per unit kind in its tribe's colour.
+//! original teal figure of its kind when allowed (`hfx0-0.dat`, `IconImages`, shared with the panel), greyed when the slot is empty; a
+//! piece of wood the original log, greyed when missing. Else the icons are generated here, a silhouette per
+//! unit kind in its tribe's colour, a log.
 
 use crate::buildings::{BuildingView, ModelHeights};
 use crate::camera::GameCamera;
@@ -20,7 +21,7 @@ use game_core::map::GameMap;
 use game_core::occupancy::{Holder, People, Wood};
 use game_core::unit::{UnitId, UnitKind};
 use game_core::vehicle::VehicleId;
-use pop3_format::catalog::{DISMANTLE_BUTTON, EFFECT_SPRITE_FILE, REBUILD_BUTTON, UNIT_FIGURES, UNLOAD_BUTTON};
+use pop3_format::catalog::{DISMANTLE_BUTTON, EFFECT_SPRITE_FILE, REBUILD_BUTTON, TOOLTIP_WOOD_PER_LINE, TOOLTIP_WOOD_SPRITE, UNIT_FIGURES, UNLOAD_BUTTON};
 use pop3_format::{Sprite, SpriteBank};
 use std::collections::HashMap;
 
@@ -30,6 +31,9 @@ pub const ICON_H: usize = 16;
 /// A slot's size in pixels on screen: an original figure is drawn 1:1 in it.
 const SLOT_W: usize = 18;
 const SLOT_H: usize = 24;
+/// A piece of wood's slot, drawn 1:1, 1 pixel apart; the lines of wood touch.
+const WOOD_W: usize = 16;
+const WOOD_H: usize = 15;
 /// A row wraps after this many slots, a row of `EIGHTS` after 8.
 const LINE: usize = 10;
 const EIGHTS: usize = 16;
@@ -171,9 +175,9 @@ pub struct Bar {
     pub fine: Option<(u32, u32)>,
 }
 
-/// How many slots each line of a row of `n` holds: lines of 10, but a row of 16 as two of 8.
-pub fn line_lengths(n: usize) -> Vec<usize> {
-    let width = if n == EIGHTS { 8 } else { LINE };
+/// How many slots each line of a row of `n` holds: lines of 10, but a row of 16 as two of 8, and wood 4 to a line.
+pub fn line_lengths(n: usize, wood: bool) -> Vec<usize> {
+    let width = if wood { TOOLTIP_WOOD_PER_LINE } else if n == EIGHTS { 8 } else { LINE };
     (0..n.div_ceil(width)).map(|k| width.min(n - k * width)).collect()
 }
 
@@ -308,9 +312,9 @@ fn rgba(c: Color, alpha: u8) -> [u8; 4] {
     [(s.red * 255.0) as u8, (s.green * 255.0) as u8, (s.blue * 255.0) as u8, alpha]
 }
 
-/// The icon's pixels, `ICON_W` x `ICON_H` RGBA rows from the top: a person (head, body, legs) shaped
-/// by kind (a staff for the shaman, broad shoulders for warriors, a robe for preachers, a flame for
-/// firewarriors), or a log.
+/// The icon's pixels, `ICON_W` x `ICON_H` RGBA rows from the top (`WOOD_W` x `WOOD_H` for wood): a person
+/// (head, body, legs) shaped by kind (a staff for the shaman, broad shoulders for warriors, a robe for
+/// preachers, a flame for firewarriors), or a log.
 pub fn icon_pixels(icon: Icon) -> Vec<u8> {
     const GREY: [u8; 4] = [150, 150, 150, 150];
     let mut px = vec![0u8; ICON_W * ICON_H * 4];
@@ -330,9 +334,10 @@ pub fn icon_pixels(icon: Icon) -> Vec<u8> {
         }
         Icon::Wood | Icon::NoWood => {
             let (bark, ring) = if icon == Icon::Wood { ([120, 74, 36, 255], [196, 150, 90, 255]) } else { (GREY, GREY) };
-            for y in 6..11 {
-                for x in 1..11 {
-                    put(x, y, if x >= 9 { ring } else { bark });
+            let mut px = vec![0u8; WOOD_W * WOOD_H * 4];
+            for y in 5..11 {
+                for x in 2..15 {
+                    px[(y * WOOD_W + x) * 4..][..4].copy_from_slice(&if x >= 12 { ring } else { bark });
                 }
             }
             return px;
@@ -439,8 +444,12 @@ impl IconImages {
         self.original.is_some()
     }
 
-    /// The icon's pixels and size: the original figure for a person when loaded, else the generated icon.
+    /// The icon's pixels and size: the original figure for a person or log for wood when loaded, else the generated icon.
     fn pixels(&self, icon: Icon) -> (usize, usize, Vec<u8>) {
+        if let Icon::Wood | Icon::NoWood = icon {
+            let log = self.original.as_ref().and_then(|(bank, palette)| Some(sprite_pixels(bank.sprites.get(TOOLTIP_WOOD_SPRITE)?, palette, icon == Icon::NoWood, (WOOD_W, WOOD_H))));
+            return (WOOD_W, WOOD_H, log.unwrap_or_else(|| icon_pixels(icon)));
+        }
         let person = match icon {
             Icon::Unit { kind, .. } => Some((kind, false)),
             Icon::Placeholder(kind) => Some((kind, true)),
@@ -674,8 +683,10 @@ fn spawn_content(t: &mut ChildSpawnerCommands, model: &TooltipModel, icons: &mut
     for row in &model.rows {
         t.spawn((Node { height: px(1), margin: UiRect::vertical(px(1)), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)), Pickable::IGNORE));
         let people = row.iter().any(|s| matches!(s.icon, Icon::Unit { .. } | Icon::Placeholder(_)));
+        let wood = row.iter().any(|s| matches!(s.icon, Icon::Wood | Icon::NoWood));
+        let (w, h) = if wood { (WOOD_W, WOOD_H) } else { (SLOT_W, SLOT_H) };
         let mut start = 0;
-        for len in line_lengths(row.len()) {
+        for len in line_lengths(row.len(), wood) {
             t.spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(1), ..default() }, Pickable::IGNORE)).with_children(|line| {
                 for slot in &row[start..start + len] {
                     line.spawn((Node { flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|cell| {
@@ -687,7 +698,7 @@ fn spawn_content(t: &mut ChildSpawnerCommands, model: &TooltipModel, icons: &mut
                                 cell.spawn(arrow);
                             }
                         }
-                        let mut icon = cell.spawn((ImageNode::new(icons.get(slot.icon, images)), Node { width: px(SLOT_W as f32), height: px(SLOT_H as f32), ..default() }));
+                        let mut icon = cell.spawn((ImageNode::new(icons.get(slot.icon, images)), Node { width: px(w as f32), height: px(h as f32), ..default() }));
                         if let Some(id) = slot.unit {
                             icon.insert((SlotUnit(id), Interaction::default()));
                         } else {
@@ -796,13 +807,15 @@ mod tests {
     }
 
     #[test]
-    fn rows_wrap_at_ten_and_sixteen_at_eight() {
-        assert_eq!(line_lengths(6), vec![6]);
-        assert_eq!(line_lengths(10), vec![10]);
-        assert_eq!(line_lengths(12), vec![10, 2]);
-        assert_eq!(line_lengths(16), vec![8, 8]);
-        assert_eq!(line_lengths(20), vec![10, 10]);
-        assert!(line_lengths(0).is_empty());
+    fn rows_wrap_at_ten_and_sixteen_at_eight_wood_at_four() {
+        assert_eq!(line_lengths(6, false), vec![6]);
+        assert_eq!(line_lengths(10, false), vec![10]);
+        assert_eq!(line_lengths(12, false), vec![10, 2]);
+        assert_eq!(line_lengths(16, false), vec![8, 8]);
+        assert_eq!(line_lengths(20, false), vec![10, 10]);
+        assert!(line_lengths(0, false).is_empty());
+        assert_eq!(line_lengths(5, true), vec![4, 1], "as the original's 5 wood");
+        assert_eq!(line_lengths(11, true), vec![4, 4, 3]);
     }
 
     #[test]
@@ -1001,7 +1014,8 @@ mod tests {
         assert_eq!(pixels(brave), pixels(Icon::Placeholder(UnitKind::Brave)), "same shape");
         assert!(pixels(Icon::Unit { kind: UnitKind::Shaman, tribe: 0 }) > pixels(brave), "with her staff");
         assert_ne!(icon_pixels(brave), icon_pixels(Icon::Unit { kind: UnitKind::Brave, tribe: 1 }), "tribe colour");
-        assert_eq!(icon_pixels(Icon::Wood).len(), ICON_W * ICON_H * 4);
+        assert_eq!(icon_pixels(Icon::Wood).len(), WOOD_W * WOOD_H * 4);
+        assert_eq!(pixels(Icon::Wood), pixels(Icon::NoWood), "same shape");
         assert!(pixels(Icon::Selected) > 0 && icon_pixels(Icon::Selected)[..12 * ICON_W * 4].iter().all(|&b| b == 0), "the arrow in the bottom rows");
     }
 

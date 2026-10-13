@@ -65,6 +65,7 @@ CATALOG = [
                                         "lowered ground variant 2", "person", "tree"]),
     *labels(HFX, "map things", 2, ["dry plant", "dry plant"]),
     *labels(HFX, "map things", 22, ["ground shadow", "wood pile"], "catalog::WOOD_PILE_SPRITE"),
+    *labels(HFX, "tooltip", 40, ["piece of wood"], "catalog::TOOLTIP_WOOD_SPRITE"),
     *labels(HFX, "tooltip buttons", 46, ["rebuild", "rebuild pressed", "rebuild hovered",
                                          "dismantle", "dismantle pressed", "dismantle hovered"],
             "catalog::DISMANTLE_BUTTON / REBUILD_BUTTON"),
