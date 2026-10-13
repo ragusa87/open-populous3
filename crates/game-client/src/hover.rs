@@ -1,5 +1,5 @@
 //! What the mouse is over (`Hovered`) and its halo: a light outline around views marked `Hoverable`
-//! (every unit, wood piles, trees, totems, every building; never the reincarnation site). Sprites (units, piles) get a
+//! (every unit, wood piles, trees, totems, every building, vehicles; never the reincarnation site). Sprites (units, piles) get a
 //! quad behind them that draws only the pixels just outside their silhouette (`hover_outline.wgsl`);
 //! 3D models (trees, buildings) get an inverted hull: their meshes pushed out along the normals, front
 //! faces culled, so only a rim shows around them.
@@ -39,10 +39,11 @@ type HoverableViews<'w, 's> = Query<'w, 's, (Option<&'static BuildingView>, Opti
 /// Every tree, building and totem view, with its entity.
 type ModelViews<'w, 's> = Query<'w, 's, (Entity, Option<&'static TreeView>, Option<&'static BuildingView>, Option<&'static crate::totems::TotemView>)>;
 
-/// The thing under the mouse that gets a halo, by its index in its `GameMap` list.
+/// The thing under the mouse that gets a halo, by its index in its `GameMap` list (a vehicle by its id).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HoverTarget {
     Unit(usize),
+    Vehicle(game_core::vehicle::VehicleId),
     Wood(usize),
     Tree(usize),
     Totem(usize),
@@ -132,10 +133,11 @@ impl Plugin for HoverPlugin {
     }
 }
 
-/// What gets the halo when the cursor is on each of these: a unit first, then a wood pile, a tree,
-/// a totem, a building.
-pub fn pick(unit: Option<usize>, wood: Option<usize>, tree: Option<usize>, totem: Option<usize>, building: Option<usize>) -> Option<HoverTarget> {
+/// What gets the halo when the cursor is on each of these: a unit first, then a vehicle, a wood pile, a
+/// tree, a totem, a building.
+pub fn pick(unit: Option<usize>, vehicle: Option<game_core::vehicle::VehicleId>, wood: Option<usize>, tree: Option<usize>, totem: Option<usize>, building: Option<usize>) -> Option<HoverTarget> {
     unit.map(HoverTarget::Unit)
+        .or(vehicle.map(HoverTarget::Vehicle))
         .or(wood.map(HoverTarget::Wood))
         .or(tree.map(HoverTarget::Tree))
         .or(totem.map(HoverTarget::Totem))
@@ -147,7 +149,7 @@ pub fn totem_at(map: &GameMap, at: (u16, u16), hoverable: impl Fn(usize) -> bool
     map.totem_at(at).filter(|&i| hoverable(i))
 }
 
-/// A building or totem as seen on screen: its index, the box around its model (pixels) and how far it
+/// A building, totem or vehicle as seen on screen: its index, the box around its model (pixels) and how far it
 /// is from the eye.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModelOnScreen {
@@ -190,8 +192,8 @@ pub fn building_at(map: &GameMap, at: (u16, u16), hoverable: impl Fn(usize) -> b
     map.buildings.iter().enumerate().position(|(i, b)| b.covers(at, BUILDING_MARGIN) && hoverable(i))
 }
 
-/// Dev: `HOVER=unit:3` (or `wood`, `tree`, `totem`, `building` and an index in its `GameMap` list) puts the
-/// halo there instead of under the mouse, for screenshots.
+/// Dev: `HOVER=unit:3` (or `wood`, `tree`, `totem`, `building` and an index in its `GameMap` list, or `vehicle`
+/// and its id) puts the halo there instead of under the mouse, for screenshots.
 pub fn parse_target(v: &str) -> Option<HoverTarget> {
     let (kind, index) = v.split_once(':')?;
     let i = index.trim().parse().ok()?;
@@ -201,6 +203,7 @@ pub fn parse_target(v: &str) -> Option<HoverTarget> {
         "tree" => HoverTarget::Tree(i),
         "building" => HoverTarget::Building(i),
         "totem" => HoverTarget::Totem(i),
+        "vehicle" => HoverTarget::Vehicle(game_core::id::Id::from_raw(i as u32)),
         _ => return None,
     })
 }
@@ -226,6 +229,7 @@ fn detect(
     tree: Res<HoveredTree>,
     selection: Res<crate::units::selection::Selection>,
     heights: Res<crate::buildings::ModelHeights>,
+    vehicles: Query<(&crate::views::ViewOf, &GlobalTransform), (With<crate::vehicles::VehicleView>, With<Hoverable>)>,
     mut hovered: ResMut<Hovered>,
     mut forced: Local<Option<Option<HoverTarget>>>,
 ) {
@@ -276,7 +280,18 @@ fn detect(
             })
             .collect();
         let totem = model_on_screen(c, &totems).or_else(|| ground.and_then(|at| totem_at(&map.0, at, |i| views.iter().any(|(_, _, t, _)| t.is_some_and(|t| t.index == i)))));
-        pick(unit, wood, tree, totem, building)
+        let ids: Vec<game_core::vehicle::VehicleId> = vehicles.iter().map(|(of, _)| game_core::id::Id::from_raw(of.id)).collect();
+        let afloat: Vec<ModelOnScreen> = vehicles
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (_, gt))| {
+                let v = map.0.vehicle(ids[index])?;
+                let (min, max) = screen_box(cam, gt, Vec2::splat(crate::vehicles::HALF), crate::vehicles::top(&map.0, v, params.0.height_scale))?;
+                Some(ModelOnScreen { index, min, max, depth: cam.1.translation().distance(gt.translation()) })
+            })
+            .collect();
+        let vehicle = model_on_screen(c, &afloat).map(|i| ids[i]);
+        pick(unit, vehicle, wood, tree, totem, building)
     });
     hovered.set_if_neq(Hovered(target));
 }
@@ -296,6 +311,7 @@ fn draw_halo(
     wood_bodies: Query<Entity, With<WoodBody>>,
     models: ModelViews,
     children: Query<&Children>,
+    vehicles: Query<(Entity, &crate::views::ViewOf), With<crate::vehicles::VehicleView>>,
     shapes: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>, &GlobalTransform), (Without<OutlinePart>, Without<NoOutline>)>,
     mut parts: Query<(Entity, &ChildOf, &mut Mesh3d, Option<&mut MeshMaterial3d<SpriteOutline>>), With<OutlinePart>>,
 ) {
@@ -308,6 +324,7 @@ fn draw_halo(
         Some(HoverTarget::Tree(i)) => models.iter().find(|(_, t, _, _)| t.is_some_and(|t| t.0 == i)).map(|(e, ..)| e),
         Some(HoverTarget::Building(i)) => models.iter().find(|(_, _, b, _)| b.is_some_and(|b| b.0 == i)).map(|(e, ..)| e),
         Some(HoverTarget::Totem(i)) => models.iter().find(|(_, _, _, t)| t.is_some_and(|t| t.index == i)).map(|(e, ..)| e),
+        Some(HoverTarget::Vehicle(id)) => vehicles.iter().find(|(_, of)| of.id == id.raw()).map(|(e, _)| e),
         _ => None,
     };
     let mut wanted: Vec<(Entity, Handle<Mesh>, Option<Handle<SpriteOutline>>)> = Vec::new();
@@ -439,12 +456,14 @@ mod tests {
 
     #[test]
     fn a_unit_wins_over_wood_trees_and_buildings() {
-        assert_eq!(pick(Some(3), Some(1), Some(2), Some(5), Some(0)), Some(HoverTarget::Unit(3)));
-        assert_eq!(pick(None, Some(1), Some(2), Some(5), Some(0)), Some(HoverTarget::Wood(1)));
-        assert_eq!(pick(None, None, Some(2), Some(5), Some(0)), Some(HoverTarget::Tree(2)));
-        assert_eq!(pick(None, None, None, Some(5), Some(0)), Some(HoverTarget::Totem(5)));
-        assert_eq!(pick(None, None, None, None, Some(0)), Some(HoverTarget::Building(0)));
-        assert_eq!(pick(None, None, None, None, None), None);
+        let boat = Some(game_core::id::Id::from_raw(9));
+        assert_eq!(pick(Some(3), boat, Some(1), Some(2), Some(5), Some(0)), Some(HoverTarget::Unit(3)));
+        assert_eq!(pick(None, boat, Some(1), Some(2), Some(5), Some(0)), Some(HoverTarget::Vehicle(game_core::id::Id::from_raw(9))));
+        assert_eq!(pick(None, None, Some(1), Some(2), Some(5), Some(0)), Some(HoverTarget::Wood(1)));
+        assert_eq!(pick(None, None, None, Some(2), Some(5), Some(0)), Some(HoverTarget::Tree(2)));
+        assert_eq!(pick(None, None, None, None, Some(5), Some(0)), Some(HoverTarget::Totem(5)));
+        assert_eq!(pick(None, None, None, None, None, Some(0)), Some(HoverTarget::Building(0)));
+        assert_eq!(pick(None, None, None, None, None, None), None);
     }
 
     #[test]
@@ -462,6 +481,7 @@ mod tests {
     fn dev_target_by_kind_and_index() {
         assert_eq!(parse_target("tree:4"), Some(HoverTarget::Tree(4)));
         assert_eq!(parse_target("building: 2"), Some(HoverTarget::Building(2)));
+        assert_eq!(parse_target("vehicle:40"), Some(HoverTarget::Vehicle(game_core::id::Id::from_raw(40))));
         assert_eq!(parse_target("rock:1"), None);
         assert_eq!(parse_target("unit"), None);
     }

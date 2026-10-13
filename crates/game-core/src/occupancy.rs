@@ -6,12 +6,13 @@ use crate::building::{Building, BuildingKind, Stage};
 use crate::map::GameMap;
 use crate::unit::UnitId;
 
-/// Something whose slots can be shown, by its index in its `GameMap` list.
+/// Something whose slots can be shown, by its index in its `GameMap` list (a vehicle by its id).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Holder {
     Building(usize),
     Totem(usize),
     Tree(usize),
+    Vehicle(crate::vehicle::VehicleId),
 }
 
 /// People slots: `capacity` places, `filled` by these units (ids, in fill order, at most `capacity`).
@@ -40,7 +41,7 @@ pub fn room(kind: BuildingKind) -> u16 {
 impl GameMap {
     /// The people slots of `holder`, None when it holds nobody: a plan or site, its braves at work
     /// (`max_braves`); a built building with room, the people inside; a spent vault, none; a totem,
-    /// its `prayers`, filled by the first of its queue (those counted).
+    /// its `prayers`, filled by the first of its queue (those counted); a vehicle, its seats and who is aboard.
     pub fn people_slots(&self, holder: Holder) -> Option<People> {
         match holder {
             Holder::Building(i) => {
@@ -63,6 +64,7 @@ impl GameMap {
             }
             Holder::Totem(i) => self.totems.get(i).map(|t| People { capacity: t.prayers, filled: t.queue.iter().take(t.prayers as usize).copied().collect() }),
             Holder::Tree(_) => None,
+            Holder::Vehicle(id) => self.vehicle(id).map(|v| People { capacity: v.kind.seats() as u16, filled: v.passengers.clone() }),
         }
     }
 
@@ -73,7 +75,7 @@ impl GameMap {
         match holder {
             Holder::Building(i) => self.buildings.get(i).and_then(building_wood),
             Holder::Tree(i) => self.trees.get(i).filter(|t| t.size > 0).map(|t| Wood { capacity: t.size as u16, filled: t.size as u16 }),
-            Holder::Totem(_) => None,
+            Holder::Totem(_) | Holder::Vehicle(_) => None,
         }
     }
 }

@@ -1,4 +1,4 @@
-//! The rendered tooltip of a building or a tree (docs/specs/tooltips.md): its name, a line or two of
+//! The rendered tooltip of a building, a tree, a totem or a vehicle (docs/specs/tooltips.md): its name, a line or two of
 //! text, then slot rows of icons, one per place or piece (`GameMap::people_slots`, `wood_slots`): the
 //! people in it or at work on it, its wood. Long rows wrap (`line_lengths`). It shows after resting the
 //! cursor on the thing or at once on a right click, stands above it and stays while the cursor is on
@@ -19,7 +19,8 @@ use game_core::building::{BuildingId, BuildingKind, Reward};
 use game_core::map::GameMap;
 use game_core::occupancy::{Holder, People, Wood};
 use game_core::unit::{UnitId, UnitKind};
-use pop3_format::catalog::{DISMANTLE_BUTTON, EFFECT_SPRITE_FILE, REBUILD_BUTTON, UNIT_FIGURES};
+use game_core::vehicle::VehicleId;
+use pop3_format::catalog::{DISMANTLE_BUTTON, EFFECT_SPRITE_FILE, REBUILD_BUTTON, UNIT_FIGURES, UNLOAD_BUTTON};
 use pop3_format::{Sprite, SpriteBank};
 use std::collections::HashMap;
 
@@ -59,6 +60,7 @@ pub enum Target {
     Building(usize),
     Tree(usize),
     Totem(usize),
+    Vehicle(VehicleId),
 }
 
 /// One slot: its icon, the unit a click on it selects, and whether that unit is selected.
@@ -91,23 +93,39 @@ impl TooltipModel {
 #[derive(Resource, Default)]
 struct ShownBars(Vec<Bar>);
 
-/// A tooltip's button (tooltips.md "Dismantle toggle"): dismantle the building `building` (id), or
-/// build it again when `on`.
+/// A tooltip's button (tooltips.md "Dismantle toggle").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Toggle {
-    pub building: BuildingId,
-    pub on: bool,
+pub enum Toggle {
+    /// Dismantle the building `building` (id), or build it again when `on`.
+    Dismantle { building: BuildingId, on: bool },
+    /// Everyone aboard `vehicle` gets off; disabled (greyed, does nothing) while `can` is false: no ground to get
+    /// off on (`GameMap::can_unload`).
+    Unload { vehicle: VehicleId, can: bool },
 }
 
 impl Toggle {
-    /// What a click sends.
-    pub fn command(self) -> game_core::command::Command {
-        game_core::command::Command::Dismantle { player: crate::units::PLAYER, building: self.building, on: !self.on }
+    /// What a click sends; None while disabled.
+    pub fn command(self) -> Option<game_core::command::Command> {
+        use game_core::command::Command;
+        let player = crate::units::PLAYER;
+        match self {
+            Toggle::Dismantle { building, on } => Some(Command::Dismantle { player, building, on: !on }),
+            Toggle::Unload { vehicle, can } => can.then_some(Command::Unload { player, vehicle }),
+        }
+    }
+
+    /// Whether a click does something.
+    pub fn enabled(self) -> bool {
+        self.command().is_some()
     }
 
     /// Its sprites (normal, hovered, pressed) and its text without the original files.
     pub fn look(self) -> ([usize; 3], &'static str) {
-        if self.on { (REBUILD_BUTTON, "Rebuild") } else { (DISMANTLE_BUTTON, "Dismantle") }
+        match self {
+            Toggle::Dismantle { on: true, .. } => (REBUILD_BUTTON, "Rebuild"),
+            Toggle::Dismantle { on: false, .. } => (DISMANTLE_BUTTON, "Dismantle"),
+            Toggle::Unload { .. } => (UNLOAD_BUTTON, "Unload"),
+        }
     }
 }
 
@@ -122,8 +140,8 @@ pub enum BarKind {
     /// A house making its next brave (once houses breed).
     #[allow(dead_code)]
     Birth,
-    /// What a training unit makes (later a boat or balloon hut too): its stored mana over the cost,
-    /// over the mana layer (`Bar::fine`).
+    /// What a training unit makes: its stored mana over the cost, over the mana layer (`Bar::fine`); a vehicle
+    /// hut's work on its next vehicle.
     Training,
 }
 
@@ -225,9 +243,26 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[UnitId], revealed: bo
     }
     model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Brave, selected)));
     model.rows.extend(map.wood_slots(holder).map(wood_row));
-    model.toggle = b.flat.then_some(Toggle { building: b.id, on: b.dismantling });
+    model.toggle = b.flat.then_some(Toggle::Dismantle { building: b.id, on: b.dismantling });
     model.bars.extend(map.production(i).map(|p| Bar { kind: BarKind::Training, fill: (p.stored.min(p.cost) as u32 * game_core::vault::FULL as u32 / p.cost as u32) as u16, blocked: p.short, fine: Some((p.stored as u32, p.cost as u32)) }));
+    let wood_short = map.wood_slots(holder).is_some_and(|w| w.filled < w.capacity);
+    model.bars.extend(map.launch_progress(i).map(|l| {
+        let (done, of) = l.progress();
+        Bar { kind: BarKind::Training, fill: (done as u32 * game_core::vault::FULL as u32 / of.max(1) as u32) as u16, blocked: wood_short, fine: None }
+    }));
     model
+}
+
+/// A vehicle's tooltip: its name, and for the player's own its seats (who is aboard, a click selects one) and the
+/// unload button.
+pub fn vehicle_model(map: &GameMap, id: VehicleId, selected: &[UnitId]) -> Option<TooltipModel> {
+    let v = map.vehicle(id)?;
+    let mut model = TooltipModel { lines: vec![v.kind.name().to_string()], ..default() };
+    if v.owner == crate::units::PLAYER {
+        model.rows.extend(map.people_slots(Holder::Vehicle(id)).map(|p| people_row(map, &p, UnitKind::Brave, selected)));
+        model.toggle = (!v.passengers.is_empty()).then(|| Toggle::Unload { vehicle: id, can: map.can_unload(id) });
+    }
+    Some(model)
 }
 
 /// A tree's tooltip: its name and its current wood (none for a tree without wood).
@@ -253,6 +288,7 @@ pub fn exists(map: &GameMap, target: Target) -> bool {
         Target::Building(i) => i < map.buildings.len(),
         Target::Tree(i) => i < map.trees.len(),
         Target::Totem(i) => i < map.totems.len(),
+        Target::Vehicle(id) => map.vehicle(id).is_some(),
     }
 }
 
@@ -261,6 +297,7 @@ fn model_of(map: &GameMap, target: Target, selected: &[UnitId], revealed: bool) 
         Target::Building(i) => Some(building_model(map, i, selected, revealed)),
         Target::Tree(i) => tree_model(map, i),
         Target::Totem(i) => totem_model(map, i, selected),
+        Target::Vehicle(id) => vehicle_model(map, id, selected),
     }
 }
 
@@ -518,6 +555,7 @@ fn show_tooltip(
     mut state: Local<TooltipState>,
     (mut icons, mut images, mut shown_bars): (ResMut<IconImages>, ResMut<Assets<Image>>, ResMut<ShownBars>),
     mut tooltip: Query<(Entity, &Interaction, &ComputedNode, &mut Node, &mut Visibility), With<TooltipBox>>,
+    (vehicles, curve): (Query<(&crate::views::ViewOf, &GlobalTransform), With<crate::vehicles::VehicleView>>, Res<crate::camera::CurveParamsRes>),
 ) {
     let Ok((entity, interaction, computed, mut node, mut vis)) = tooltip.single_mut() else { return };
     let now = time.elapsed_secs();
@@ -525,6 +563,7 @@ fn show_tooltip(
         Some(crate::hover::HoverTarget::Building(i)) => Some(Target::Building(i)),
         Some(crate::hover::HoverTarget::Tree(i)) => Some(Target::Tree(i)),
         Some(crate::hover::HoverTarget::Totem(i)) => Some(Target::Totem(i)),
+        Some(crate::hover::HoverTarget::Vehicle(id)) => Some(Target::Vehicle(id)),
         _ => None,
     }
     .filter(|&t| exists(&map.0, t));
@@ -559,6 +598,10 @@ fn show_tooltip(
             Target::Totem(i) => {
                 let (view, gt) = totems.iter().find(|(v, _)| v.index == i)?;
                 gt.translation() + gt.up() * view.top
+            }
+            Target::Vehicle(id) => {
+                let (_, gt) = vehicles.iter().find(|(of, _)| of.id == id.raw())?;
+                gt.translation() + gt.up() * crate::vehicles::top(&map.0, map.0.vehicle(id)?, curve.0.height_scale)
             }
         };
         cam.world_to_viewport(cam_t, top).ok()
@@ -716,19 +759,25 @@ fn spawn_toggle(parent: &mut ChildSpawnerCommands, toggle: Toggle, icons: &mut I
         Some(made) => {
             let size = made[0].1;
             let images = [made[0].0.clone(), made[1].0.clone(), made[2].0.clone()];
-            parent.spawn((ImageNode::new(images[0].clone()), Node { width: px(size.x), height: px(size.y), ..default() }, Interaction::default(), ToggleButton { toggle, images: Some(images) }));
+            let tint = if toggle.enabled() { Color::WHITE } else { DISABLED };
+            parent.spawn((ImageNode::new(images[0].clone()).with_color(tint), Node { width: px(size.x), height: px(size.y), ..default() }, Interaction::default(), ToggleButton { toggle, images: Some(images) }));
         }
         None => {
             parent
-                .spawn((Node { padding: UiRect::axes(px(4), px(1)), border: UiRect::all(px(1)), ..default() }, BackgroundColor(Color::srgb(0.62, 0.42, 0.14)), BorderColor::all(Color::srgb(1.0, 0.84, 0.48)), Interaction::default(), ToggleButton { toggle, images: None }))
+                .spawn((Node { padding: UiRect::axes(px(4), px(1)), border: UiRect::all(px(1)), ..default() }, BackgroundColor(if toggle.enabled() { BUTTON[0] } else { DISABLED }), BorderColor::all(Color::srgb(1.0, 0.84, 0.48)), Interaction::default(), ToggleButton { toggle, images: None }))
                 .with_child((Text::new(label), TextFont { font_size: FontSize::Px(11.0), ..default() }, TextColor(Color::WHITE), Pickable::IGNORE));
         }
     }
 }
 
-/// The button shows its state; pressed, it sends its command.
+/// The text button's colours by state (normal, hovered, pressed), and a disabled button's tint.
+const BUTTON: [Color; 3] = [Color::srgb(0.62, 0.42, 0.14), Color::srgb(0.75, 0.52, 0.18), Color::srgb(0.40, 0.25, 0.08)];
+const DISABLED: Color = Color::srgb(0.45, 0.45, 0.45);
+
+/// The button shows its state; pressed, it sends its command. A disabled one stays greyed.
 fn press_toggle(mut buttons: Query<(&Interaction, &ToggleButton, Option<&mut ImageNode>, Option<&mut BackgroundColor>), Changed<Interaction>>, mut schedule: ResMut<crate::units::GameSchedule>) {
     for (interaction, button, image, bg) in &mut buttons {
+        let Some(command) = button.toggle.command() else { continue };
         let state = match interaction {
             Interaction::None => 0,
             Interaction::Hovered => 1,
@@ -738,10 +787,10 @@ fn press_toggle(mut buttons: Query<(&Interaction, &ToggleButton, Option<&mut Ima
             image.image = images[state].clone();
         }
         if let Some(mut bg) = bg {
-            bg.0 = [Color::srgb(0.62, 0.42, 0.14), Color::srgb(0.75, 0.52, 0.18), Color::srgb(0.40, 0.25, 0.08)][state];
+            bg.0 = BUTTON[state];
         }
         if *interaction == Interaction::Pressed {
-            schedule.issue(button.toggle.command());
+            schedule.issue(command);
         }
     }
 }
@@ -840,15 +889,56 @@ mod tests {
         let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
         let building = map.buildings[hut].id;
         let toggle = building_model(&map, hut, &[], false).toggle.expect("built: dismantle");
-        assert_eq!(toggle, Toggle { building, on: false });
+        assert_eq!(toggle, Toggle::Dismantle { building, on: false });
         assert_eq!(toggle.look(), (DISMANTLE_BUTTON, "Dismantle"));
-        map.apply(&toggle.command());
+        map.apply(&toggle.command().unwrap());
         let toggle = building_model(&map, hut, &[], false).toggle.unwrap();
-        assert_eq!((toggle.on, toggle.look()), (true, (REBUILD_BUTTON, "Rebuild")));
+        assert_eq!((toggle, toggle.look()), (Toggle::Dismantle { building, on: true }, (REBUILD_BUTTON, "Rebuild")));
         let plan = map.buildings.iter().position(|b| b.owner == 0 && b.stage() == Stage::Blueprint).unwrap();
         assert_eq!(building_model(&map, plan, &[], false).toggle, None, "a plan is cancelled instead");
         let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();
         assert_eq!(building_model(&map, red, &[], false).toggle, None);
+    }
+
+    #[test]
+    fn a_vehicle_hut_shows_its_crew_the_vehicles_wood_and_its_work() {
+        let mut map = GameMap::sandbox_buildings();
+        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::BoatHut && b.stage() == Stage::Built).unwrap();
+        map.buildings[hut].stock = 2;
+        let model = building_model(&map, hut, &[], false);
+        assert_eq!(model.rows[0].len(), game_core::vehicle::CREW as usize);
+        assert_eq!(icons(&model.rows[1]), vec![Icon::Wood, Icon::Wood, Icon::NoWood, Icon::NoWood], "2 of a boat's 4");
+        assert!(model.bars.is_empty(), "no work yet");
+        let mut launch = game_core::vehicle::Launch::default();
+        launch.advance(game_core::vehicle::CREW);
+        map.buildings[hut].launch = Some(launch);
+        let bar = building_model(&map, hut, &[], false).bars[0];
+        assert_eq!((bar.kind, bar.blocked), (BarKind::Training, true), "short of wood");
+        assert!(bar.fill > 0);
+    }
+
+    #[test]
+    fn a_vehicle_shows_its_seats_and_unloads_only_by_the_shore() {
+        use game_core::vehicle::{Vehicle, VehicleKind};
+        let mut map = GameMap::sandbox_buildings();
+        let shore = (64 * 512 + 256, 112 * 512 + 256);
+        let boat = map.add_vehicle(Vehicle::new(VehicleKind::Boat, 0, shore, game_core::angle::Angle::ZERO));
+        assert_eq!(vehicle_model(&map, boat, &[]).unwrap().toggle, None, "empty: nothing to unload");
+        let brave = map.units.iter().find(|u| u.kind == UnitKind::Brave && u.inside.is_none()).unwrap().id;
+        map.unit_mut(brave).unwrap().aboard = Some(boat);
+        map.vehicles.get_mut(boat).unwrap().seat(brave, 0);
+        let model = vehicle_model(&map, boat, &[]).unwrap();
+        assert_eq!(model.lines, vec!["Boat".to_string()]);
+        assert_eq!(icons(&model.rows[0]), [vec![Icon::Unit { kind: UnitKind::Brave, tribe: 0 }], vec![Icon::Placeholder(UnitKind::Brave); 4]].concat());
+        let toggle = model.toggle.unwrap();
+        assert_eq!((toggle, toggle.look().1), (Toggle::Unload { vehicle: boat, can: true }, "Unload"));
+        assert_eq!(toggle.command(), Some(game_core::command::Command::Unload { player: 0, vehicle: boat }));
+        map.vehicles.get_mut(boat).unwrap().x += 10 * 512;
+        map.vehicles.get_mut(boat).unwrap().z += 8 * 512;
+        let toggle = vehicle_model(&map, boat, &[]).unwrap().toggle.unwrap();
+        assert!(!toggle.enabled(), "out at sea");
+        map.vehicles.get_mut(boat).unwrap().owner = 1;
+        assert!(vehicle_model(&map, boat, &[]).unwrap().rows.is_empty(), "not ours: the name only");
     }
 
     #[test]

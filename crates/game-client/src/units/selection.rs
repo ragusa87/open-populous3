@@ -109,9 +109,8 @@ impl Selection {
     }
 }
 
-/// The player's own living units, unless locked (`Unit::pickable`). Units inside a vehicle or building
-/// will be excluded here once they exist: selecting a vehicle or building does not select the people
-/// inside it.
+/// The player's own living units, unless locked (`Unit::pickable`). People aboard a vehicle stay selectable:
+/// a move order to them moves their vehicle.
 pub fn selectable(u: &Unit) -> Option<PickableUnit<'_>> {
     (u.owner == PLAYER && u.is_alive()).then(|| u.pickable()).flatten()
 }
@@ -289,7 +288,11 @@ pub(super) fn select_and_order(
                     let at = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)).map(world_units);
                     // One of the player's buildings wins over a tree in front of or behind it; a building or a
                     // totem is clicked anywhere on its model (as hovered), not only on its footprint.
-                    if let Some(orders) = attack_click(&map.0, &selection.units, hovered.0) {
+                    if let Some(people) = crew_click(&map.0, &selection.units, hovered.0) {
+                        selection.units = people;
+                    } else if let Some(orders) = vehicle_click(&map.0, &selection.units, hovered.0) {
+                        moves = orders;
+                    } else if let Some(orders) = attack_click(&map.0, &selection.units, hovered.0) {
                         moves = orders;
                     } else if let Some(orders) = hovered_site(&map.0, hovered.0).or(at).and_then(|at| building_click(&map.0, &selection.units, at)) {
                         moves = orders;
@@ -328,6 +331,23 @@ pub fn hovered_site(map: &game_core::map::GameMap, hovered: Option<crate::hover:
     }
 }
 
+/// The people aboard the player's vehicle under the cursor, for a left click on it with nothing selected: they
+/// get selected (then a click elsewhere moves their vehicle). None otherwise.
+pub fn crew_click(map: &game_core::map::GameMap, selected: &[UnitId], hovered: Option<crate::hover::HoverTarget>) -> Option<Vec<UnitId>> {
+    let crate::hover::HoverTarget::Vehicle(id) = hovered? else { return None };
+    let v = map.vehicle(id).filter(|v| v.owner == PLAYER && !v.passengers.is_empty() && selected.is_empty())?;
+    Some(v.passengers.clone())
+}
+
+/// Commands for a left click on the vehicle under the cursor with `selected` units: those not aboard it get on
+/// (`Order::Board`). None when it is not a vehicle, or all of them are aboard it.
+pub fn vehicle_click(map: &game_core::map::GameMap, selected: &[UnitId], hovered: Option<crate::hover::HoverTarget>) -> Option<Vec<Command>> {
+    let crate::hover::HoverTarget::Vehicle(vehicle) = hovered? else { return None };
+    let boarding = selected.iter().filter_map(|&id| map.unit(id)).filter(|u| u.owner == PLAYER && u.is_alive() && u.aboard != Some(vehicle));
+    let orders: Vec<Command> = boarding.map(|u| Command::OrderUnit { player: PLAYER, unit: u.id, order: Order::Board { vehicle } }).collect();
+    (!orders.is_empty()).then_some(orders)
+}
+
 /// Commands for a left click on the enemy person or building under the cursor (`hovered`) with `selected` units:
 /// those that may attack it go for it. None when none may, or when nothing of an enemy is under the cursor.
 pub fn attack_click(map: &game_core::map::GameMap, selected: &[UnitId], hovered: Option<crate::hover::HoverTarget>) -> Option<Vec<Command>> {
@@ -362,12 +382,12 @@ pub fn building_click(map: &game_core::map::GameMap, selected: &[UnitId], at: (u
 }
 
 /// Commands for a left click on the ground at `at` (world units) with `selected` units: they go
-/// round the player's camp fire there, else walk there.
+/// round the player's camp fire there, else walk there (those aboard a vehicle take it there, `move_orders`).
 pub fn ground_click(map: &game_core::map::GameMap, selected: &[UnitId], at: (u16, u16)) -> Vec<Command> {
     match map.campfire_at(at).filter(|f| f.owner == PLAYER) {
         _ if selected.is_empty() => Vec::new(),
         Some(fire) => map.gather(PLAYER, selected, fire.id),
-        None => map.dispatch(PLAYER, selected, at),
+        None => map.move_orders(PLAYER, selected, at),
     }
 }
 
@@ -536,6 +556,27 @@ mod tests {
             chained(cmds),
             [Command::QueueOrder { player: PLAYER, unit: Id::from_raw(4), order: Order::Stop }, Command::RemoveCampfire { player: PLAYER, at: (1, 2) }]
         );
+    }
+
+    #[test]
+    fn a_click_on_a_vehicle_boards_the_selection_or_selects_its_people() {
+        use game_core::vehicle::{Vehicle, VehicleKind};
+        let mut map = game_core::map::GameMap::sandbox_buildings();
+        let boat = map.add_vehicle(Vehicle::new(VehicleKind::Boat, PLAYER, (64 * 512, 116 * 512), game_core::angle::Angle::ZERO));
+        let braves: Vec<UnitId> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave).take(2).map(|u| u.id).collect();
+        let on = Some(crate::hover::HoverTarget::Vehicle(boat));
+        let orders = vehicle_click(&map, &braves, on).unwrap();
+        assert_eq!(orders, braves.iter().map(|&unit| Command::OrderUnit { player: PLAYER, unit, order: Order::Board { vehicle: boat } }).collect::<Vec<_>>());
+        assert_eq!(vehicle_click(&map, &braves, None), None);
+        assert_eq!(crew_click(&map, &[], on), None, "nobody aboard");
+        let u = map.unit_mut(braves[0]).unwrap();
+        u.aboard = Some(boat);
+        map.vehicles.get_mut(boat).unwrap().seat(braves[0], PLAYER);
+        assert_eq!(crew_click(&map, &[], on), Some(vec![braves[0]]));
+        assert_eq!(crew_click(&map, &braves, on), None, "a selection boards instead");
+        assert_eq!(vehicle_click(&map, &braves[..1], on), None, "already aboard");
+        let moves = ground_click(&map, &braves[..1], (70 * 512, 118 * 512));
+        assert_eq!(moves, vec![Command::MoveVehicle { player: PLAYER, vehicle: boat, to: (70 * 512, 118 * 512) }]);
     }
 
     #[test]

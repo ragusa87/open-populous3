@@ -66,6 +66,21 @@ pub fn lift(map: &GameMap, v: &Vehicle, height_scale: f32) -> f32 {
     (v.altitude(&map.terrain) as i32 - ground - depth) as f32 * height_scale
 }
 
+/// Half the width of the box a vehicle is hovered in, cells.
+pub const HALF: f32 = 0.45;
+/// How tall a boat stands and how far a balloon's top is over its basket, cells.
+const BOAT_TOP: f32 = 0.7;
+const BALLOON_TOP: f32 = 1.1;
+
+/// The top of a vehicle's model over the ground under it, render units: for its hover box.
+pub fn top(map: &GameMap, v: &Vehicle, height_scale: f32) -> f32 {
+    let model = match v.kind {
+        VehicleKind::Boat => BOAT_TOP,
+        VehicleKind::Balloon => BALLOON_TOP,
+    };
+    lift(map, v, height_scale).max(0.0) + model
+}
+
 fn radians(a: Angle) -> f32 {
     a.signed() as f32 * std::f32::consts::TAU / TURN as f32
 }

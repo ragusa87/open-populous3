@@ -93,6 +93,9 @@ A vehicle has no toggle but a button in the same place: pressed, everyone aboard
 there is no ground to get off on: a balloon over water, a boat not next to the shore, a balloon above ground too
 steep to walk on (where they would land is not walkable, `path` walkable cells).
 With the original files: 60, 61 hovered, 62 pressed.
+Done (`tooltip::Toggle::Unload`, the same widget as the dismantle toggle): shown on the player's manned vehicles,
+greyed and doing nothing while `GameMap::can_unload` is false (no walkable ground within reach, vehicles.md);
+pressed, it sends `Command::Unload`. Without the original files, an "Unload" text button.
 
 ## Per target
 | Target | People row | Wood row | Bars | Toggle |

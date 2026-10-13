@@ -89,3 +89,14 @@ a basket). Turned by its heading (the original boat's bow is along its own -z), 
 and a stranded one's roll, lifted to its altitude (a balloon's hover, a sinking boat's depth below the surface),
 gliding between ticks like the units. People aboard are not drawn (`units::hidden_inside`). Dev shots:
 `VEHICLE=boat@x,z[:n]` (`;` between several), `VEHICLE_TO=x,z`, `VEHICLE_TICKS=N` (`dev.rs`).
+
+## Client (done: orders and tooltip)
+- Hover: a vehicle is under the cursor anywhere in the box around its model (`hover::HoverTarget::Vehicle`, after
+  units and before wood piles), and gets the halo.
+- A left click on a vehicle with people selected sends those not aboard to board it (`selection::vehicle_click`);
+  with nothing selected, it selects the people aboard the player's vehicle (`crew_click`). Passengers stay
+  selected; a click on the ground with passengers selected moves their vehicle (`ground_click` through
+  `GameMap::move_orders`).
+- Tooltip (`tooltip::vehicle_model`): its name; for the player's own its seats in a people row (a click selects
+  one) and the unload button (tooltips.md "Unload button"). A vehicle hut's tooltip shows its crew, the vehicle's
+  wood and its work as the training bar, blinking while wood is missing.
