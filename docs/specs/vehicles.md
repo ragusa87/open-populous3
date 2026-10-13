@@ -76,6 +76,9 @@ on.
 - `Command::Unload` (`GameMap::unload`): everyone aboard gets off onto free spots of the walkable cell nearest the
   vehicle within `UNLOAD_REACH` (1024 per axis), standing idle; nobody when there is none (`can_unload` false: a
   boat away from the shore, a balloon over the sea). Those left without a spot stay aboard.
+- A click with passengers selected on walkable ground right next to their stopped vehicle (parked: a boat by the
+  shore; within `UNLOAD_REACH`) gets them off the same way instead of moving it (`GameMap::gets_off_at`, through
+  `move_orders`); anywhere else, or while it moves, the click sends the vehicle there.
 - A passenger is out of reach of blasts, lightning, bolts, spotting and challenges (`Unit::in_the_open`); a
   balloon's people stand at its altitude (`GameMap::altitude`), so a shaman casts farther from one. The headcount
   counts them In boat / In balloon.

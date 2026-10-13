@@ -643,8 +643,9 @@ impl GameMap {
         }
     }
 
-    /// Orders sending the player's `units` to `to`: those aboard move their vehicle there (one order per vehicle),
-    /// the others walk there (`dispatch`).
+    /// Orders sending the player's `units` to `to`: those aboard move their vehicle there (one order per vehicle), or
+    /// get off when it is stopped and `to` is walkable ground right next to it (`gets_off_at`); the others walk there
+    /// (`dispatch`).
     pub fn move_orders(&self, player: u8, units: &[UnitId], to: (u16, u16)) -> Vec<Command> {
         let mut vehicles: Vec<VehicleId> = Vec::new();
         let mut walkers = Vec::new();
@@ -655,8 +656,19 @@ impl GameMap {
                 _ => walkers.push(id),
             }
         }
-        let moves = vehicles.into_iter().map(|vehicle| Command::MoveVehicle { player, vehicle, to });
+        let moves = vehicles.into_iter().map(|vehicle| match self.gets_off_at(vehicle, to) {
+            true => Command::Unload { player, vehicle },
+            false => Command::MoveVehicle { player, vehicle, to },
+        });
         moves.chain(if walkers.is_empty() { Vec::new() } else { self.dispatch(player, &walkers, to) }).collect()
+    }
+
+    /// Whether a click at `to` gets the people aboard `id` off rather than moving it: it is stopped (parked: a boat by
+    /// the shore), `to` is walkable ground within `UNLOAD_REACH` of it, and they can get off there (`can_unload`).
+    pub fn gets_off_at(&self, id: VehicleId, to: (u16, u16)) -> bool {
+        let Some(v) = self.vehicle(id) else { return false };
+        let cell = ((to.0 as u32 / WORLD_UNITS_PER_CELL) as i32, (to.1 as u32 / WORLD_UNITS_PER_CELL) as i32);
+        v.state == State::Parked && within(to, (v.x, v.z), UNLOAD_REACH) && self.ground().passable(Mobility::Walk, cell) && self.can_unload(id)
     }
 
     /// Where the people aboard `id` get off, in seat order: free spots on the walkable ground nearest the vehicle,
@@ -1318,6 +1330,19 @@ mod tests {
         }).collect();
         assert!(steps.windows(2).all(|w| w[1] <= w[0]), "it only slows down: {steps:?}");
         assert!(h <= 600);
+    }
+
+    #[test]
+    fn a_click_on_the_shore_next_to_a_stopped_boat_gets_its_people_off() {
+        let mut map = coast();
+        let v = boat(&mut map, (C, C));
+        let people = aboard(&mut map, v, 2);
+        let shore = at((C - 1, C));
+        assert_eq!(map.move_orders(0, &people, shore), vec![Command::Unload { player: 0, vehicle: v }], "parked by the shore");
+        assert_eq!(map.move_orders(0, &people, at((C - 5, C))), vec![Command::MoveVehicle { player: 0, vehicle: v, to: at((C - 5, C)) }], "too far: it goes");
+        assert_eq!(map.move_orders(0, &people, at((C + 1, C))), vec![Command::MoveVehicle { player: 0, vehicle: v, to: at((C + 1, C)) }], "on the water: it goes");
+        map.vehicles.get_mut(v).unwrap().go(at((C, C + 10)));
+        assert_eq!(map.move_orders(0, &people, shore), vec![Command::MoveVehicle { player: 0, vehicle: v, to: shore }], "moving: it turns back");
     }
 
     #[test]
