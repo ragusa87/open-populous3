@@ -490,7 +490,8 @@ fn spawn_tooltip(mut commands: Commands) {
 
 /// The tooltip of the building or tree under the cursor once rested on for `HOVER_SECS`, right-clicked or
 /// left-clicked with nothing selected (which also reveals who is in another tribe's building),
-/// above it, kept while the cursor is on it or on the tooltip (`sticky`), redrawn when its model changes.
+/// above it, kept while the cursor is on it or on the tooltip (`sticky`), redrawn when its model changes
+/// (hidden that frame, until laid out at its new size).
 #[allow(clippy::too_many_arguments)]
 fn show_tooltip(
     mut commands: Commands,
@@ -569,6 +570,7 @@ fn show_tooltip(
         state.model = Some(model);
         return;
     }
+    vis.set_if_neq(Visibility::Hidden);
     commands.entity(entity).despawn_children();
     commands.entity(entity).with_children(|t| {
         for (index, bar) in model.bars.iter().enumerate().filter(|(_, b)| b.kind.horizontal()) {
