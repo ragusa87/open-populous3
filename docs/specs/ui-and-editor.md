@@ -142,8 +142,9 @@ unlimited, Teleport too (`SpellBook::unlimited`), on islands a few cells of sea 
 tribe 1 north, kind by kind 5 cells apart, a red
 village east with people in its huts, a hill north with a few people of tribe 2, an empty islet south-west;
 `GameMap::sandbox_vehicles`: a boat hut and an airship hut on the south coast with 8 braves and wood to crew them,
-boats on the coast (one manned), one adrift at sea, a balloon by the site for the shaman, and an empty boat of
-tribe 1 on an island south across a strait, vehicles.md), Quit.
+boats on the water by the shore (one manned), one adrift at sea, a balloon by the site for the shaman, hills to fly
+over (a tall one west, a lower one east, a mound on the south island), and an empty boat of tribe 1 by an island
+south across a strait, vehicles.md), Quit.
 Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
 Esc in the game (once an open view-presets menu is closed) pauses: the mouse is released (`VirtualCursor::request`)
 and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Game speed: x1/x2/x4/x8 (cycles), Dev mode: on/off (shortcuts.md), Main menu >

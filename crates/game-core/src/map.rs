@@ -435,6 +435,9 @@ impl GameMap {
 /// The vehicles sandbox's name.
 pub const SANDBOX_VEHICLES: &str = "Sandbox: vehicles";
 
+/// The vehicles sandbox's hills, to fly balloons over: offset from the map's middle (cells), radius (cells), height.
+pub const SANDBOX_VEHICLE_HILLS: [(i32, i32, i32, i32); 3] = [(-13, -6, 4, 500), (13, 0, 3, 250), (0, 21, 2, 200)];
+
 impl GameMap {
     /// Test ground for vehicles: a flat island with the player's site, its south coast in view of the starting camera,
     /// and a smaller island south across a strait.
@@ -442,7 +445,8 @@ impl GameMap {
     ///   between them to crew them; an empty boat on the water by the shore, a boat with 2 braves aboard, and an
     ///   empty boat out at sea, drifting back to the shore.
     /// - By the site: an empty balloon for the shaman.
-    /// - The south island: an empty boat of tribe 1 on its coast, to take.
+    /// - Hills (`SANDBOX_VEHICLE_HILLS`): a tall one west, a lower one east, a mound on the south island.
+    /// - The south island: an empty boat of tribe 1 on the water by its shore, to take.
     pub fn sandbox_vehicles() -> Self {
         use crate::vehicle::{Vehicle, VehicleKind};
         const C: i32 = MAP_SIZE as i32 / 2;
@@ -454,6 +458,9 @@ impl GameMap {
                     terrain.set(x, z, 64);
                 }
             }
+        }
+        for (dx, dz, radius, height) in SANDBOX_VEHICLE_HILLS {
+            terrain.raise((C + dx, C + dz), radius, height);
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C - 6))];
         let mut map = GameMap::sandbox_bare(SANDBOX_VEHICLES, terrain, sites).with_shamans();
@@ -2130,6 +2137,8 @@ mod tests {
         let mut m = GameMap::sandbox_vehicles();
         let hut = m.buildings.iter().position(|b| b.kind == BuildingKind::BoatHut).unwrap();
         assert!(crate::placement::shore_ok(&m, &m.buildings[hut]), "jetty out to sea");
+        let (c, (dx, dz, _, height)) = (MAP_SIZE as i32 / 2, SANDBOX_VEHICLE_HILLS[0]);
+        assert!(m.terrain.get(c + dx, c + dz) as i32 >= 64 + height / 2, "a tall hill west");
         let afloat: Vec<_> = m.vehicles.iter().map(|(_, v)| (v.kind, v.owner, resting(v.kind, &m.terrain, v.cell()))).collect();
         assert_eq!(afloat, vec![(VehicleKind::Boat, 0, true), (VehicleKind::Boat, 0, true), (VehicleKind::Boat, 0, false), (VehicleKind::Balloon, 0, true), (VehicleKind::Boat, 1, true)]);
         let braves: Vec<UnitId> = m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.aboard.is_none()).take(3).map(|u| u.id).collect();
