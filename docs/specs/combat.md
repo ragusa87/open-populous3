@@ -226,7 +226,8 @@ join a melee on their own attack (they still fight when challenged).
 - Conversion (`WorldEvent::ChangeOwner`, `Unit::change_owner`): the original destroys the person and makes one of
   the same kind in the preacher's tribe at its place [exe]; ours keeps the unit (same id and kind) and starts it
   afresh the same way: new tribe, plans, orders, work and wood gone, full health, no status, idle.
-- Drawn: listeners sit (anim 18; the generated sheets stand in with the prayer pose), the preacher stands; the dev
+- Drawn: listeners sit down once (anim 18 over `SIT_TICKS`, 6 turns, the `Listening` countdown) and stay seated on
+  its last frame (the generated sheets stand in with the prayer pose), the preacher stands; the dev
   overlay draws a line from each preacher to each listener.
 - Not yet: the building variant (preaching to a building's people), what really starts a sermon, the soul flying
   from the preacher to the converted, the preacher's own preaching animation, the halving flag of the first check.

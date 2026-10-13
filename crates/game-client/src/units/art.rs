@@ -249,7 +249,7 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alph
     let lying = frames.saturating_sub(2);
     let done = |n: usize| action.countdown().map_or(0, |c| ((progress(c, alpha) * n as f32) as usize).min(n - 1));
     match action {
-        Action::Casting { .. } | Action::Flattening { .. } | Action::Throwing { .. } | Action::Challenge { .. } | Action::Melee { .. } if action.countdown().is_some() => done(frames),
+        Action::Casting { .. } | Action::Flattening { .. } | Action::Throwing { .. } | Action::Challenge { .. } | Action::Melee { .. } | Action::Listening { .. } if action.countdown().is_some() => done(frames),
         Action::Dying { .. } => done(lying + 1),
         Action::Spirit { .. } => done(frames),
         Action::Dead { .. } => lying,
@@ -475,6 +475,17 @@ mod tests {
         assert_eq!(sprite_dir(2, 0.0), 2, "+x is screen right at yaw 0");
         assert_eq!(sprite_dir(2, PI / 2.0), 0, "camera moved to +x: she faces it");
         assert_eq!(sprite_dir(4, PI / 4.0), 7);
+    }
+
+    #[test]
+    fn a_listener_sits_down_once_then_stays_seated() {
+        use game_core::sermon::SIT_TICKS;
+        use game_core::time::{Countdown, Ticks};
+        let listening = |left| Action::Listening { sermon: game_core::id::Id::from_raw(1), sitting: Countdown::with_left(SIT_TICKS, Ticks::new(left)) };
+        assert_eq!(frame_index(Pose::Listen, 6, &listening(SIT_TICKS.get()), at(0.0), 0.0), 0, "starting to sit");
+        for secs in [0.0, 1.3, 7.0, 42.5] {
+            assert_eq!(frame_index(Pose::Listen, 6, &listening(0), at(secs), 0.5), 5, "seated, never up again");
+        }
     }
 
     #[test]

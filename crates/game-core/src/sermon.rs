@@ -18,6 +18,8 @@ pub const CONV_CHECK: u32 = 500;
 pub const CONV_FIRST_CHECK: u32 = 250;
 /// One chance in this many per check ("Preacher conversion" [exe]).
 pub const CONV_CHANCE: u32 = 5;
+/// Sitting down to listen: the sit-down animation's 6 frames, one turn each ("Combat" [exe]: one turn per frame).
+pub const SIT_TICKS: Ticks = Ticks::new(6);
 
 /// One listener's sermon: who preaches, who listens, and the turns to its next chance of conversion.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -133,7 +135,7 @@ impl GameMap {
         }
         let u = &mut self.units[j];
         u.face(preacher);
-        u.join(Action::Listening { sermon: id });
+        u.join(Action::Listening { sermon: id, sitting: Countdown::new(SIT_TICKS) });
     }
 
     /// The unit `unit` joins `tribe` (`WorldEvent::ChangeOwner`): as the original's new person in its place, it keeps

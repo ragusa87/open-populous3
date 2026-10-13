@@ -191,7 +191,7 @@ pub enum Action {
     /// Hacking at the building `building` (wreck.rs), `left` turns to go; first at its door.
     Hacking { building: crate::building::BuildingId, left: Countdown, at_door: bool },
     /// Sitting, listening to a preacher in the sermon `sermon` (sermon.rs): locked until converted or the sermon ends.
-    Listening { sermon: crate::sermon::SermonId },
+    Listening { sermon: crate::sermon::SermonId, sitting: Countdown },
     /// A preacher standing, preaching to its listeners (sermon.rs).
     Preaching,
     /// Fighting in the melee `melee` (melee.rs): its place in the ring, its stance.
@@ -241,7 +241,7 @@ impl Action {
         match *self {
             Action::Challenge { challenge, .. } => return Some(crate::coordinator::Link::Challenge(challenge)),
             Action::Melee { melee, .. } => return Some(crate::coordinator::Link::Melee(melee)),
-            Action::Listening { sermon } => return Some(crate::coordinator::Link::Sermon(sermon)),
+            Action::Listening { sermon, .. } => return Some(crate::coordinator::Link::Sermon(sermon)),
             _ => {}
         }
         #[cfg(test)]
@@ -266,7 +266,8 @@ impl Action {
             | Action::Hacking { left, .. }
             | Action::Throwing { left, .. }
             | Action::Boarding { left, .. }
-            | Action::Alighting { left, .. } => Some(left),
+            | Action::Alighting { left, .. }
+            | Action::Listening { sitting: left, .. } => Some(left),
             Action::Challenge { role: crate::challenge::Role::Shoving { left, .. }, .. } => Some(left),
             Action::Melee { stance: crate::melee::Stance::Striking { left, .. } | crate::melee::Stance::Reeling { left, .. }, .. } => Some(left),
             _ => None,
@@ -739,7 +740,11 @@ impl Unit {
             }
             Action::Challenge { challenge, role } => self.action = Action::Challenge { challenge, role: self.play(role, ground) },
             Action::Melee { melee, place, stance } => self.action = Action::Melee { melee, place, stance: self.fight(place, stance, ground) },
-            Action::Listening { .. } | Action::Preaching => {}
+            Action::Listening { sermon, mut sitting } => {
+                sitting.tick();
+                self.action = Action::Listening { sermon, sitting };
+            }
+            Action::Preaching => {}
             Action::Entering { to } => {
                 if self.step_towards(to, ground, self.kind.speed()) != Step::Moved {
                     self.action = Action::Idle;
