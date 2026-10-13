@@ -586,6 +586,14 @@ impl GameMap {
         }
     }
 
+    /// The vehicle `id` loses `amount` health, unless it is of tribe `from`; at 0 it is destroyed on its next turn.
+    /// Only an empty, still one stays hurt: moving or manned, it is whole again every turn.
+    pub(crate) fn damage_vehicle(&mut self, id: VehicleId, amount: u16, from: u8) {
+        if let Some(v) = self.vehicles.get_mut(id).filter(|v| v.owner != from) {
+            v.health.damage(amount);
+        }
+    }
+
     /// Passengers no longer aboard (dead, gone, teleported off) leave their seat; units aboard a vehicle that does not
     /// hold them are aboard nothing.
     fn sync_passengers(&mut self) {
@@ -999,6 +1007,22 @@ mod tests {
         let id = map.buildings[hut].id;
         assert_eq!(map.workers(id).map(|u| u.id).collect::<Vec<_>>(), people[..4]);
         assert_eq!(map.unit(warrior).unwrap().work, None);
+    }
+
+    #[test]
+    fn a_blast_sinks_a_worn_empty_enemy_boat_a_manned_or_own_one_holds() {
+        let mut map = coast();
+        let (empty, manned, own) = (boat(&mut map, (C + 6, C)), boat(&mut map, (C + 6, C + 1)), boat(&mut map, (C + 7, C)));
+        aboard(&mut map, manned, 1);
+        map.vehicles.get_mut(own).unwrap().owner = 1;
+        for v in [empty, manned, own] {
+            map.vehicles.get_mut(v).unwrap().health = Health::new(140, LIFE);
+        }
+        map.add_effect(crate::blast::effect(1, at((C + 6, C))));
+        run(&mut map, 3);
+        assert!(matches!(map.vehicle(empty).unwrap().state, State::Sinking { .. }), "3 × 50 wore it out");
+        assert_eq!(map.vehicle(manned).unwrap().state, State::Parked, "whole again every turn");
+        assert_eq!(map.vehicle(own).unwrap().health.current(), 140 - 3, "its own tribe's blast: only time");
     }
 
     #[test]

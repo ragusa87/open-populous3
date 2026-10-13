@@ -23,6 +23,10 @@ every turn while the vehicle moves or carries anyone. So an empty, still vehicle
 - a boat on the water sinks: 8 deeper and 8/2048 more bow-up a turn (capped at 398), gone at depth 192 (24 turns);
 - a boat on land explodes: a simple blast of its tribe where it stood, and it is gone;
 - a balloon rises 80 a turn and explodes the same way at altitude 1024.
+Damage (`GameMap::damage_vehicle`, `WorldEvent::DamageVehicle`) comes only from another tribe: 50
+(`blast::DAMAGE_PERSON`) each turn of a simple blast whose radius holds it, 100 (`firebolt::CELL_DAMAGE`) from a
+bolt landing in its cell. As the exe, it only destroys an empty, still vehicle: a moving or manned one is whole
+again every turn.
 Whoever is aboard is put out where it is (`GameMap::put_out`): out of a balloon they fall, at sea they drown
 (`Unit::tick`).
 

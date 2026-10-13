@@ -5,6 +5,7 @@ use crate::building::BuildingId;
 use crate::effect::{DamageKind, Effect, TerrainChange};
 use crate::motion::Velocity;
 use crate::unit::UnitId;
+use crate::vehicle::VehicleId;
 use std::collections::VecDeque;
 
 /// One change, applied by the map. A unit or building gone meanwhile (its id missing) is skipped.
@@ -12,6 +13,8 @@ use std::collections::VecDeque;
 pub enum WorldEvent {
     /// Hurts through `GameMap::damage`, the one hurt path; `from` is the attacker's tribe, if any.
     Damage { unit: UnitId, amount: u16, kind: DamageKind, from: Option<u8> },
+    /// Wears a vehicle down (`GameMap::damage_vehicle`): only an enemy's.
+    DamageVehicle { vehicle: VehicleId, amount: u16, from: u8 },
     /// Throws the unit (`Unit::fling`), unless its `kind` of push spares it (`effect::pushes`).
     Push { unit: UnitId, vel: Velocity, kind: PushKind },
     Panic { unit: UnitId },

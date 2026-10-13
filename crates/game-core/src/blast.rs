@@ -1,13 +1,17 @@
 //! The simple blast (pop3-rev-analysis.md "Components"), an effect (`effect::EffectKind::SimpleBlast`): 3 turns at
 //! radius 2, 4 then 5 cells around its centre. Each turn every person in the radius takes `DAMAGE_PERSON` (the
 //! caster's tribe and the shielded are spared by `GameMap::damage`); each person within the turn's radius and
-//! `PUSH_RANGE`, of any tribe but the caster's own shaman, is pushed away and up, once.
+//! `PUSH_RANGE`, of any tribe but the caster's own shaman, is pushed away and up, once. Each turn every vehicle in the
+//! radius takes `DAMAGE_PERSON` too (`GameMap::damage_vehicle` spares the caster's tribe; pop3-rev-analysis.md
+//! "Life, damage and destruction").
 
 use crate::effect::{DamageKind, Effect, EffectKind};
 use crate::event::{PushKind, WorldEvent};
 use crate::motion::Velocity;
 use crate::time::{Countdown, Ticks};
+use crate::id::Registry;
 use crate::unit::{isqrt, torus_delta, Unit, UnitId, UnitKind};
+use crate::vehicle::Vehicle;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// Radius of each turn, in world units.
@@ -36,7 +40,7 @@ pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
 
 impl SimpleBlast {
     /// One turn of the blast at `at` cast by `owner`: the pushes and damage it deals now.
-    pub fn turn(&mut self, at: (u16, u16), owner: u8, units: &[Unit]) -> Vec<WorldEvent> {
+    pub fn turn(&mut self, at: (u16, u16), owner: u8, units: &[Unit], vehicles: &Registry<Vehicle>) -> Vec<WorldEvent> {
         let Some(&radius) = RADII.get(self.turn as usize) else { return Vec::new() };
         self.turn += 1;
         let reach = radius.min(PUSH_RANGE);
@@ -50,6 +54,9 @@ impl SimpleBlast {
             if push(at, (u.x, u.z), radius).is_some() {
                 events.push(WorldEvent::Damage { unit: u.id, amount: DAMAGE_PERSON, kind: DamageKind::Blast, from: Some(owner) });
             }
+        }
+        for (vehicle, _) in vehicles.iter().filter(|(_, v)| push(at, (v.x, v.z), radius).is_some()) {
+            events.push(WorldEvent::DamageVehicle { vehicle, amount: DAMAGE_PERSON, from: owner });
         }
         events
     }
@@ -97,7 +104,8 @@ mod tests {
             Unit::new(Id::from_raw(6), 1, UnitKind::Shaman, (5000, 5000)),
         ];
         let mut blast = SimpleBlast::default();
-        let mut turn = || blast.turn((5000, 5000), 0, &units);
+        let vehicles = Registry::default();
+        let mut turn = || blast.turn((5000, 5000), 0, &units, &vehicles);
         let pushed = |events: &[WorldEvent]| events.iter().filter_map(|e| if let WorldEvent::Push { unit, .. } = e { Some(unit.raw()) } else { None }).collect::<Vec<_>>();
         let hit = |events: &[WorldEvent]| events.iter().filter_map(|e| if let WorldEvent::Damage { unit, .. } = e { Some(unit.raw()) } else { None }).collect::<Vec<_>>();
         let first = turn();

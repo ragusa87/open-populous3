@@ -187,6 +187,8 @@ impl GameMap {
         let thrower = self.unit(b.thrower).map_or(b.at, |t| (t.x, t.z));
         let boost = if b.bloodlusted { BLOODLUST_DAMAGE } else { 1 };
         let mut events = vec![WorldEvent::BurnTrees { cell }];
+        let vehicles = self.vehicles.iter().filter(|(_, v)| v.owner != b.owner && v.cell() == cell);
+        events.extend(vehicles.map(|(vehicle, _)| WorldEvent::DamageVehicle { vehicle, amount: CELL_DAMAGE, from: b.owner }));
         let hit: Vec<&Unit> = self.units.iter().filter(|u| u.is_alive() && u.in_the_open() && u.owner != b.owner && u.cell() == cell).collect();
         for u in hit {
             let mut amount = CELL_DAMAGE.saturating_mul(boost);

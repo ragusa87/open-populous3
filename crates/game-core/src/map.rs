@@ -1083,6 +1083,10 @@ impl GameMap {
                 self.damage(unit, amount, kind, from);
                 None
             }
+            WorldEvent::DamageVehicle { vehicle, amount, from } => {
+                self.damage_vehicle(vehicle, amount, from);
+                None
+            }
             WorldEvent::Push { unit, vel, kind } => {
                 if let Some(i) = self.unit_index(unit).filter(|&i| crate::effect::pushes(&self.units[i], kind)) {
                     let u = &self.units[i];
