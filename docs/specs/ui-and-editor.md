@@ -96,8 +96,14 @@ Next: icons (Kenney game-icons), casting on the terrain, mana from followers, to
 
 ### Build tab (`hud/build.rs`)
 Draws the player's `game_core::build_book::BuildBook` from the map (`player_builds` = `GameMap::build_books[PLAYER]`:
-the level's own; generated maps and sandboxes: every kind). Same grid as the spells: a named tile
-per available kind (no icons yet), "?" for plans to discover, an empty slot for hidden ones; hover describes it.
+the level's own; generated maps and sandboxes: every kind). A 2 x 5 grid as the original's panel (`LAYOUT`): hut,
+drum tower; warrior hut, temple (preachers); spy hut, firewarrior hut; boat hut, airship hut; camp fire, an empty
+cell. A tile is the building's icon (the original's teal one, `POINT0-0.DAT` 58-66, else its name), "?" for plans to
+discover, an empty slot for hidden ones; hover describes it. Right click on a tile flies the camera to the player's
+next built building of that kind (or camp fire), one after the other at each click (`own_places`, `next_step`).
+Shift + left click with people selected sends them in (`GameMap::send_into`, huts-and-training.md): into the
+player's buildings of that kind with room, spread evenly and nearest first (a training unit takes everyone, they
+queue; braves only into vehicle huts), or round their camp fires.
 A click on an available tile picks its blueprint (white border, `blueprint.rs`): it follows the mouse on the map,
 red where it cannot stand, Space turns it, right click puts it away; left click places it and sends the selected
 braves to build it. Details in buildings.md "Blueprint" and "Construction".

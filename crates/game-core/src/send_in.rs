@@ -51,7 +51,7 @@ pub fn assign(units: &[(UnitId, (u16, u16))], places: &[Place]) -> Vec<(UnitId, 
 }
 
 /// Whether `a` and `b` are the same kind for the Build tab: a hut of any size is a hut.
-fn same_kind(a: BuildingKind, b: BuildingKind) -> bool {
+pub fn same_kind(a: BuildingKind, b: BuildingKind) -> bool {
     matches!((a, b), (BuildingKind::Hut { .. }, BuildingKind::Hut { .. })) || a == b
 }
 

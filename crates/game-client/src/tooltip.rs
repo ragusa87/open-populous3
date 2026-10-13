@@ -408,7 +408,7 @@ pub fn sprite_pixels(sprite: &Sprite, palette: &[[u8; 3]], greyed: bool, (w, h):
     px
 }
 
-fn pixel_image(w: usize, h: usize, px: Vec<u8>) -> Image {
+pub(crate) fn pixel_image(w: usize, h: usize, px: Vec<u8>) -> Image {
     let mut image = Image::new(Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { mag_filter: ImageFilterMode::Nearest, min_filter: ImageFilterMode::Nearest, ..default() });
     image
