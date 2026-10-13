@@ -144,9 +144,9 @@ one removed any other way (a plan cancelled) leaves none.
 ## Spotting
 `crate::spotting` ("Auto-attack" [exe]): people who see an enemy attack it on their own, before the attacks are
 followed each turn (`GameMap::spot_enemies`).
-- Who: braves and warriors (`looks_for_melee`), and firewarriors once reloaded, as far as they throw
-  (`GameMap::looking`; any enemy person, in a melee or not: their own look is not traced); the preacher's conversion
-  and the shaman's look during some orders are TODO; spies and wildmen never look. On its kind's `look_every` (4 turns; preacher 2),
+- Who: braves, warriors and preachers (`looks_for_melee`; the preacher fights [ours] until its conversion look
+  exists), and firewarriors once reloaded, as far as they throw (`GameMap::looking`; any enemy person, in a melee or
+  not: their own look is not traced); the preacher's conversion and the shaman's look during some orders are TODO; spies and wildmen never look. On its kind's `look_every` (4 turns; preacher 2),
   phase 0.
 - How far (`sight_now`, cells; per kind `sight` and `sight_at_work`: brave and warrior 5 and 1, preacher and shaman
   3 and 1, firewarrior 11 and 5, spy and wildman 0): idle, holding wood or hacking at a building, its full sight;

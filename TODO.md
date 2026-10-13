@@ -115,7 +115,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Melee (combat.md "Melee"): the ground check moving the middle off unsuitable ground, the winner's count and the killed count per tribe, the moves' sounds, the original's option with no shove, the third approach (a target at its building), the fight music or alert.
 - [ ] Challenge (combat.md "Challenge"): the target facing the attacker and its taunts (client, 1 in 8 per turn while waiting), ground sliding instead of `SHOVE_LIFT`.
 - [ ] Fight poses in the generated (CC0) unit sheets: strike, trade, kick, reel, shoved (`Pose::fallback` stands in: idle, fall).
-- [ ] Spotting (combat.md "Spotting"): the preacher's conversion look, the shaman's look during some orders, invisible people unseen, allies.
+- [ ] Spotting (combat.md "Spotting"): the preacher's conversion look (it fights what it sees meanwhile), the shaman's look during some orders, invisible people unseen, allies.
 - [ ] Preachers convert enemies.
 - [ ] Attackers inside a building walk out first (combat.md "Attacking": they set off from where they stand).
 - [ ] Firebolts (combat.md "Firebolts"): the line of fire, from drum towers and vehicles, the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.

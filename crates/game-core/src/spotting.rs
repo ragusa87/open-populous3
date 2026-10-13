@@ -23,10 +23,10 @@ pub fn sight_now(u: &Unit) -> Option<u8> {
     }
 }
 
-/// Kinds that look for a melee to start: the preacher converts instead, the firewarrior throws fire, the shaman only
-/// looks during some orders, spies and wildmen never look (TODO for the others' own looks).
+/// Kinds that look for a melee to start: the preacher too until it converts (TODO), the firewarrior throws fire
+/// instead, the shaman only looks during some orders, spies and wildmen never look.
 pub fn looks_for_melee(kind: UnitKind) -> bool {
-    matches!(kind, UnitKind::Brave | UnitKind::Warrior)
+    matches!(kind, UnitKind::Brave | UnitKind::Warrior | UnitKind::Preacher)
 }
 
 impl GameMap {
@@ -150,6 +150,15 @@ mod tests {
     }
 
     #[test]
+    fn a_preacher_goes_for_an_enemy_it_sees() {
+        let (mut map, a, t) = watch(1);
+        map.unit_mut(a).unwrap().kind = UnitKind::Preacher;
+        map.run(Ticks::new(4));
+        assert!(map.unit(a).is_some_and(|u| u.action != Action::Idle), "it went for the enemy");
+        assert!(map.linked(map.unit(t).unwrap()).is_some() || attacking(&map, a) == Some(Target::Unit(t)));
+    }
+
+    #[test]
     fn row_by_row_from_a_corner() {
         let cells: Vec<_> = square((10, 10), 3, 128).collect();
         assert_eq!(cells.len(), 9, "3 rounds down to 2: a 3 × 3 square");
@@ -169,7 +178,7 @@ mod tests {
         assert_eq!(sight_now(&u), Some(1), "working: its own cell");
         u.action = Action::Panicking { away: (1, 0), left: crate::time::Countdown::new(Ticks::new(3)) };
         assert_eq!(sight_now(&u), None, "busy");
-        assert!(!looks_for_melee(UnitKind::Spy) && !looks_for_melee(UnitKind::Wildman) && looks_for_melee(UnitKind::Warrior));
+        assert!(!looks_for_melee(UnitKind::Spy) && !looks_for_melee(UnitKind::Wildman) && looks_for_melee(UnitKind::Warrior) && looks_for_melee(UnitKind::Preacher));
     }
 
     #[test]
