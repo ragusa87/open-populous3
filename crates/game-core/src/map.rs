@@ -528,9 +528,12 @@ impl GameMap {
         }
     }
 
-    /// Where `u` stands, in height units (the original reads its z): the level of the building it is in (a
-    /// balloon's height once units can board one), the ground under it otherwise.
+    /// Where `u` stands, in height units (the original reads its z): the level of the building it is in, its
+    /// vehicle's (`Vehicle::altitude`: a balloon's is high), the ground under it otherwise.
     pub fn altitude(&self, u: &Unit) -> u16 {
+        if let Some(v) = u.aboard.and_then(|v| self.vehicle(v)) {
+            return v.altitude(&self.terrain);
+        }
         let height = match u.inside.and_then(|i| self.building(i.building)) {
             Some(b) => b.level as i32,
             None => self.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL),
@@ -702,13 +705,17 @@ impl GameMap {
             }
             Command::OrderUnit { player, unit, order } => {
                 if let Some(i) = self.unit_index(unit).filter(|&i| self.units[i].owner == player && !self.locked(i)) {
+                    if self.units[i].aboard.is_some() {
+                        self.order_aboard(i, order);
+                        return None;
+                    }
                     self.units[i].clear_queue();
                     self.start_order(i, order);
                 }
                 None
             }
             Command::QueueOrder { player, unit, order } => {
-                if let Some(i) = self.unit_index(unit).filter(|&i| self.units[i].owner == player && !self.locked(i)) {
+                if let Some(i) = self.unit_index(unit).filter(|&i| self.units[i].owner == player && !self.locked(i) && self.units[i].aboard.is_none()) {
                     if self.units[i].is_free() && self.units[i].queued().is_empty() {
                         self.start_order(i, order);
                     } else {
@@ -735,6 +742,18 @@ impl GameMap {
             }
             Command::Dismantle { player, building, on } => {
                 self.set_dismantling(player, building, on);
+                None
+            }
+            Command::MoveVehicle { player, vehicle, to } => {
+                if self.vehicle(vehicle).is_some_and(|v| v.owner == player && !v.passengers.is_empty()) {
+                    self.move_vehicle(vehicle, to);
+                }
+                None
+            }
+            Command::Unload { player, vehicle } => {
+                if self.vehicle(vehicle).is_some_and(|v| v.owner == player) {
+                    self.unload(vehicle);
+                }
                 None
             }
         }
@@ -784,10 +803,12 @@ impl GameMap {
             .collect()
     }
 
-    /// An order to the player's shaman.
+    /// An order to the player's shaman (aboard a vehicle: `order_aboard`).
     fn order(&mut self, player: u8, order: Order) {
-        if let Some(u) = self.shaman_mut(player) {
-            u.order(order);
+        match self.units.iter().position(|u| u.owner == player && u.kind == UnitKind::Shaman) {
+            Some(i) if self.units[i].aboard.is_some() && order != Order::Cast => self.order_aboard(i, order),
+            Some(i) => self.units[i].order(order),
+            None => {}
         }
     }
 
@@ -878,13 +899,14 @@ impl GameMap {
             match event {
                 UnitEvent::Jumped { .. } | UnitEvent::Built => dirty.extend(self.work_event(i, event)),
                 UnitEvent::AtDoor { building } => self.come_in(i, building),
+                UnitEvent::AtVehicle { vehicle } => self.board(i, vehicle),
                 UnitEvent::Released { spell } => dirty.extend(self.release(self.units[i].owner, spell)),
                 _ => self.wood_event(i, event),
             }
         }
         dirty.extend(self.cast_when_in_range());
         for (i, &arrived) in arriving.iter().enumerate() {
-            if arrived && self.units[i].action == Action::Idle && self.units[i].inside.is_none() {
+            if arrived && self.units[i].action == Action::Idle && self.units[i].in_the_open() {
                 let u = &self.units[i];
                 let (taken, spot) = (self.taken_spots(&[u.id]), slots::spot_of((u.x, u.z)));
                 if taken.contains(&spot) && let Some(&free) = slots::free_spots_near(&self.ground(), spot, &taken, 1).first() {
@@ -1162,7 +1184,7 @@ impl GameMap {
             cells.extend(b.walled_cells(size).into_iter().map(|c| (c, b.id)));
         }
         if self.walls.set(cells) {
-            for u in self.units.iter_mut().filter(|u| u.inside.is_none() && u.is_alive()) {
+            for u in self.units.iter_mut().filter(|u| u.in_the_open() && u.is_alive()) {
                 let Some(id) = self.walls.at(u.cell()) else { continue };
                 if let Some(i) = self.buildings.binary_search_by_key(&id, |b| b.id).ok() {
                     u.inside = Some(crate::unit::Inside { building: id, door: self.buildings[i].door() });
@@ -1204,6 +1226,7 @@ impl GameMap {
             Order::FetchWood => self.fetch_wood(i),
             Order::PickUp { at } => self.pick_up(i, at),
             Order::Attack { target } => self.go_attack(i, target),
+            Order::Board { vehicle } => self.go_board(i, vehicle),
             order => self.units[i].start(order),
         }
     }
@@ -1371,6 +1394,7 @@ impl GameMap {
             Order::Enter { site } => self.building_at_corner(site).is_some(),
             Order::Attack { target: Target::Unit(id) } => self.unit(id).is_some_and(Unit::is_alive),
             Order::Attack { target: Target::Building(id) } => self.building(id).is_some(),
+            Order::Board { vehicle } => self.vehicle(vehicle).is_some(),
             _ => true,
         }
     }

@@ -58,7 +58,8 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 /// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport, Blast: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
 /// for a unit order `u32 unit id` then the order, for lighting or putting out a camp fire `u16 x, z`,
 /// for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`, for a self cast `spell u8`
-/// (its place in `SpellKind::ALL`), for pausing one `spell u8, paused u8`.
+/// (its place in `SpellKind::ALL`), for pausing one `spell u8, paused u8`, for moving a vehicle `u32 vehicle id, u16 x, z`,
+/// for unloading one `u32 vehicle id`.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -128,6 +129,16 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         }
         Command::CastSelf { player, kind } => b.extend([9, *player, spell_index(*kind)]),
         Command::PauseSpell { player, kind, paused } => b.extend([10, *player, spell_index(*kind), *paused as u8]),
+        Command::MoveVehicle { player, vehicle, to } => {
+            b.extend([11, *player]);
+            put_id(b, *vehicle);
+            b.extend(to.0.to_le_bytes());
+            b.extend(to.1.to_le_bytes());
+        }
+        Command::Unload { player, vehicle } => {
+            b.extend([12, *player]);
+            put_id(b, *vehicle);
+        }
     }
 }
 
@@ -190,6 +201,10 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             b.push(12);
             put_id(b, *id);
         }
+        Order::Board { vehicle } => {
+            b.push(13);
+            put_id(b, *vehicle);
+        }
     }
 }
 
@@ -219,6 +234,8 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         8 => Some(Command::Dismantle { player, building: c.id()?, on: c.u8()? != 0 }),
         9 => Some(Command::CastSelf { player, kind: *SpellKind::ALL.get(c.u8()? as usize)? }),
         10 => Some(Command::PauseSpell { player, kind: *SpellKind::ALL.get(c.u8()? as usize)?, paused: c.u8()? != 0 }),
+        11 => Some(Command::MoveVehicle { player, vehicle: c.id()?, to: (c.u16()?, c.u16()?) }),
+        12 => Some(Command::Unload { player, vehicle: c.id()? }),
         _ => None,
     }
 }
@@ -237,6 +254,7 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         10 => Order::Worship { site: (c.u16()?, c.u16()?) },
         11 => Order::Attack { target: Target::Unit(c.id()?) },
         12 => Order::Attack { target: Target::Building(c.id()?) },
+        13 => Order::Board { vehicle: c.id()? },
         _ => return None,
     })
 }
@@ -327,6 +345,9 @@ mod tests {
                 Command::QueueOrder { player: 0, unit: Id::from_raw(2), order: Order::Attack { target: Target::Building(Id::from_raw(9)) } },
                 Command::CastSelf { player: 1, kind: SpellKind::Teleport },
                 Command::PauseSpell { player: 3, kind: SpellKind::Armageddon, paused: true },
+                Command::OrderUnit { player: 1, unit: Id::from_raw(4), order: Order::Board { vehicle: Id::from_raw(70_001) } },
+                Command::MoveVehicle { player: 2, vehicle: Id::from_raw(8), to: (65535, 3) },
+                Command::Unload { player: 0, vehicle: Id::from_raw(u32::MAX) },
             ],
         }
     }

@@ -187,7 +187,7 @@ impl GameMap {
         let thrower = self.unit(b.thrower).map_or(b.at, |t| (t.x, t.z));
         let boost = if b.bloodlusted { BLOODLUST_DAMAGE } else { 1 };
         let mut events = vec![WorldEvent::BurnTrees { cell }];
-        let hit: Vec<&Unit> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_none() && u.owner != b.owner && u.cell() == cell).collect();
+        let hit: Vec<&Unit> = self.units.iter().filter(|u| u.is_alive() && u.in_the_open() && u.owner != b.owner && u.cell() == cell).collect();
         for u in hit {
             let mut amount = CELL_DAMAGE.saturating_mul(boost);
             if b.target == Target::Unit(u.id) {

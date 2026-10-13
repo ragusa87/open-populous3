@@ -9,7 +9,7 @@ use crate::unit::{Action, Target, Unit, UnitId, UnitKind};
 /// How far `u` looks now, cells; None when it is busy ("Auto-attack" [exe]). Walking on an order it does not look
 /// (0); working, only its own cell (`sight_at_work`); idle or hacking at a building, its full `sight`.
 pub fn sight_now(u: &Unit) -> Option<u8> {
-    if !u.is_alive() || u.inside.is_some() || u.locked() {
+    if !u.is_alive() || !u.in_the_open() || u.locked() {
         return None;
     }
     let stats = u.kind.stats();
@@ -54,7 +54,7 @@ pub struct UnitGrid(Vec<((i32, i32), UnitId)>);
 
 impl UnitGrid {
     pub fn new(units: &[Unit]) -> Self {
-        let mut cells: Vec<((i32, i32), UnitId)> = units.iter().filter(|u| u.is_alive() && u.inside.is_none()).map(|u| (u.cell(), u.id)).collect();
+        let mut cells: Vec<((i32, i32), UnitId)> = units.iter().filter(|u| u.is_alive() && u.in_the_open()).map(|u| (u.cell(), u.id)).collect();
         cells.sort_by_key(|&(cell, id)| (cell.1, cell.0, id));
         UnitGrid(cells)
     }

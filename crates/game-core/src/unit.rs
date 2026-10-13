@@ -287,6 +287,8 @@ pub enum Order {
     Worship { site: (u16, u16) },
     /// Fighters: attack an enemy person or building (`GameMap::go_attack`, combat.md).
     Attack { target: Target },
+    /// Walk next to the vehicle `vehicle` and get on, if it has a free seat (`GameMap::go_board`, vehicles.md).
+    Board { vehicle: crate::vehicle::VehicleId },
 }
 
 /// What an attack is aimed at.
@@ -318,6 +320,8 @@ pub enum UnitEvent {
     AtDoor { building: BuildingId },
     /// Her cast jump let `spell` go: the caller makes it take effect.
     Released { spell: Spell },
+    /// Next to the vehicle `vehicle` (id): the caller seats her if she may get on.
+    AtVehicle { vehicle: crate::vehicle::VehicleId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -356,6 +360,8 @@ pub struct Unit {
     to_house: Option<BuildingId>,
     /// The vault (stored corner) she is walking to the door of, to pray there once there.
     to_shrine: Option<(u16, u16)>,
+    /// The vehicle she is walking to, to get on once there.
+    to_vehicle: Option<crate::vehicle::VehicleId>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
     /// The building (id) this brave is assigned to, `Order::Build`.
@@ -415,6 +421,7 @@ impl Unit {
             to_wood: None,
             to_house: None,
             to_shrine: None,
+            to_vehicle: None,
             queue: Vec::new(),
             work: None,
             inside: None,
@@ -427,10 +434,15 @@ impl Unit {
         Mobility::Walk
     }
 
-    /// On a task: building, carrying wood, or on the way to a tree, wood, a door, a place to pray or
-    /// a camp fire.
+    /// On a task: building, carrying wood, or on the way to a tree, wood, a door, a place to pray, a
+    /// camp fire or a vehicle.
     pub fn busy(&self) -> bool {
-        self.work.is_some() || self.carrying > 0 || self.to_tree.is_some() || self.to_wood.is_some() || self.to_house.is_some() || self.to_shrine.is_some() || self.to_fire.is_some()
+        self.work.is_some() || self.carrying > 0 || self.to_tree.is_some() || self.to_wood.is_some() || self.to_house.is_some() || self.to_shrine.is_some() || self.to_fire.is_some() || self.to_vehicle.is_some()
+    }
+
+    /// Neither in a building nor aboard a vehicle: out where spells, fire and fighters reach it.
+    pub fn in_the_open(&self) -> bool {
+        self.inside.is_none() && self.aboard.is_none()
     }
 
     pub fn is_alive(&self) -> bool {
@@ -558,6 +570,14 @@ impl Unit {
         }
     }
 
+    /// Walks to `stand`, then gets on the vehicle `vehicle` (`UnitEvent::AtVehicle`).
+    pub fn go_board(&mut self, vehicle: crate::vehicle::VehicleId, stand: (u16, u16)) {
+        self.start(Order::MoveTo { x: stand.0, z: stand.1 });
+        if self.action.can_take_orders() {
+            self.to_vehicle = Some(vehicle);
+        }
+    }
+
     /// Walks onto the piece of wood at `at`, then picks it up.
     pub fn go_pick(&mut self, at: (u16, u16)) {
         self.start(Order::MoveTo { x: at.0, z: at.1 });
@@ -617,7 +637,7 @@ impl Unit {
             return;
         }
         (self.route, self.planned_on, self.teleport_to, self.spell, self.to_fire) = (Vec::new(), None, None, None, None);
-        (self.to_tree, self.to_wood, self.to_house, self.to_shrine) = (None, None, None, None);
+        (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle) = (None, None, None, None, None);
         self.action = match order {
             Order::MoveTo { x, z } => Action::Walking { to: (x, z) },
             Order::Campfire { fire, point } => {
@@ -625,7 +645,7 @@ impl Unit {
                 Action::Walking { to: campfire::ring_point(fire, point) }
             }
             Order::Cast => Action::Casting { left: Countdown::new(CAST_TICKS) },
-            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
                 Action::Walking { to: tree }
@@ -710,6 +730,8 @@ impl Unit {
                             return Some(UnitEvent::AtDoor { building });
                         } else if let Some(site) = self.to_shrine.take() {
                             self.action = Action::Worshipping { site };
+                        } else if let Some(vehicle) = self.to_vehicle.take() {
+                            return Some(UnitEvent::AtVehicle { vehicle });
                         }
                     }
                 } else if self.hurt(now) {
@@ -900,7 +922,7 @@ impl Unit {
     /// Forgets where it was going, what it was to do there and its work.
     fn drop_plans(&mut self) {
         (self.route, self.planned_on, self.teleport_to, self.spell, self.to_fire) = (Vec::new(), None, None, None, None);
-        (self.to_tree, self.to_wood, self.to_house, self.to_shrine) = (None, None, None, None);
+        (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle) = (None, None, None, None, None);
         self.queue.clear();
         self.work = None;
     }

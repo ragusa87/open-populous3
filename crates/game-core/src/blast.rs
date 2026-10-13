@@ -41,7 +41,7 @@ impl SimpleBlast {
         self.turn += 1;
         let reach = radius.min(PUSH_RANGE);
         let mut events = Vec::new();
-        for u in units.iter().filter(|u| u.is_alive() && u.inside.is_none()) {
+        for u in units.iter().filter(|u| u.is_alive() && u.in_the_open()) {
             let pushable = !(u.owner == owner && u.kind == UnitKind::Shaman) && !self.pushed.contains(&u.id);
             if let Some(vel) = push(at, (u.x, u.z), reach).filter(|_| pushable) {
                 self.pushed.push(u.id);

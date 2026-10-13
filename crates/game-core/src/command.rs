@@ -4,6 +4,7 @@ use crate::building::{BuildingId, BuildingKind};
 use crate::spell::Spell;
 use crate::spell_book::SpellKind;
 use crate::unit::{Order, UnitId};
+use crate::vehicle::VehicleId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -35,4 +36,10 @@ pub enum Command {
     /// that takes wood): on, the people inside walk out and nobody builds it; off, it is built again
     /// (`GameMap::set_dismantling`).
     Dismantle { player: u8, building: BuildingId, on: bool },
+    /// Send the player's manned vehicle `vehicle` to `to` (world units), or as close as it gets
+    /// (`GameMap::move_vehicle`).
+    MoveVehicle { player: u8, vehicle: VehicleId, to: (u16, u16) },
+    /// Everyone aboard the player's vehicle `vehicle` gets off, if there is ground within reach
+    /// (`GameMap::unload`).
+    Unload { player: u8, vehicle: VehicleId },
 }

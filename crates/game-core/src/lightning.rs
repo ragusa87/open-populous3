@@ -56,7 +56,7 @@ pub fn struck(at: (u16, u16), owner: u8, units: &[Unit]) -> Vec<UnitId> {
     let cell = (cell_of(at.0), cell_of(at.1));
     units
         .iter()
-        .filter(|u| u.inside.is_none() && u.cell() == cell && crate::effect::hurts(u, DamageKind::Lightning, Some(owner)))
+        .filter(|u| u.in_the_open() && u.cell() == cell && crate::effect::hurts(u, DamageKind::Lightning, Some(owner)))
         .take(KILLS)
         .map(|u| u.id)
         .collect()

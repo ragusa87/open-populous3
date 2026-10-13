@@ -96,6 +96,12 @@ pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
     if !unit.is_alive() || kind_index(unit.kind).is_none() {
         return None;
     }
+    if let Some(v) = unit.aboard.and_then(|v| map.vehicle(v)) {
+        return Some(match v.kind {
+            crate::vehicle::VehicleKind::Boat => State::InBoat,
+            crate::vehicle::VehicleKind::Balloon => State::InBalloon,
+        });
+    }
     let leaving = matches!(unit.action, Action::Walking { .. } | Action::Stranded { .. } | Action::Panicking { .. });
     if let Some(inside) = unit.inside.filter(|_| !leaving) {
         let hut = map.building(inside.building).is_some_and(|b| matches!(b.kind, BuildingKind::Hut { .. }) && b.stage() == Stage::Built);
