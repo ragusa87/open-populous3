@@ -34,9 +34,14 @@ pub const HOVER: u16 = 200;
 /// climbs or sinks towards that at most `CLIMB_STEP` a turn ("Terrain changes": it samples the ground ahead and
 /// moves at its profile's vertical rate; the distances and the rate are guesses). It never comes nearer the ground
 /// under it than `CLEARANCE` [ours].
-pub const LOOK_AHEAD: [i32; 3] = [256, 512, 1024];
-pub const CLIMB_STEP: u16 = 16;
+pub const LOOK_AHEAD: [i32; 4] = [256, 512, 1024, 1536];
+pub const CLIMB_STEP: u16 = 32;
 pub const CLEARANCE: u16 = 100;
+/// A balloon floats this high over a building, the pyramid of knowledge among them (vehicle table +0xD, "Terrain
+/// changes"), and over a tree or a totem [ours, a guess], instead of `HOVER`.
+pub const HOVER_OVER_BUILDING: u16 = 560;
+pub const HOVER_OVER_TREE: u16 = 450;
+pub const HOVER_OVER_TOTEM: u16 = 450;
 /// A sinking boat goes down and tilts this much a turn, its tilt stopping at `SINK_TILT_MAX`, and is gone at
 /// `SUNK_DEPTH` ("Life, damage and destruction").
 pub const SINK_STEP: u16 = 8;
@@ -258,15 +263,17 @@ impl Vehicle {
         }
     }
 
-    /// The height a balloon floats towards: `HOVER` over the highest ground under it and, while it moves, at
-    /// `LOOK_AHEAD` along its heading.
-    pub fn float_target(&self, terrain: &Heightmap) -> u16 {
+    /// The height a balloon floats towards: over the ground under it and, while it moves, at `LOOK_AHEAD` along its
+    /// heading, the highest of the ground plus what it floats over there (`hover`: `HOVER`, or more over a building,
+    /// a tree, a totem).
+    pub fn float_target(&self, terrain: &Heightmap, hover: impl Fn((i32, i32)) -> u16) -> u16 {
         let moving = matches!(self.state, State::Moving { .. } | State::Drifting { .. });
         let ahead = LOOK_AHEAD.iter().filter(|_| moving).map(|&d| {
             let (dx, dz) = crate::angle::rotate((d, 0), self.heading.steps());
-            ground_at(terrain, (self.x.wrapping_add(dx as u16), self.z.wrapping_add(dz as u16)))
+            (self.x.wrapping_add(dx as u16), self.z.wrapping_add(dz as u16))
         });
-        std::iter::once(ground_at(terrain, (self.x, self.z))).chain(ahead).max().unwrap_or(0).saturating_add(HOVER)
+        let cell = |p: (u16, u16)| ((p.0 as u32 / WORLD_UNITS_PER_CELL) as i32, (p.1 as u32 / WORLD_UNITS_PER_CELL) as i32);
+        std::iter::once((self.x, self.z)).chain(ahead).map(|p| ground_at(terrain, p).saturating_add(hover(cell(p)))).max().unwrap_or(HOVER)
     }
 
     /// Sets off to `to` (world units), planning its way on its next turn; nothing once destroyed or stranded.
@@ -310,7 +317,7 @@ impl Vehicle {
 
     /// One turn: a destroyed one sinks or rises; a boat on land strands; health goes down, full again while it moves
     /// or carries anyone; then it moves on.
-    pub fn tick(&mut self, now: Tick, ground: &impl Ground, rng: &mut Lcg) -> Option<VehicleEvent> {
+    pub fn tick(&mut self, now: Tick, ground: &impl Ground, hover: impl Fn((i32, i32)) -> u16, rng: &mut Lcg) -> Option<VehicleEvent> {
         let terrain = ground.terrain();
         match self.state {
             State::Sinking { depth, pitch } => {
@@ -349,7 +356,7 @@ impl Vehicle {
             _ => {}
         }
         if self.kind == VehicleKind::Balloon {
-            let (now, target) = (self.altitude(terrain), self.float_target(terrain));
+            let (now, target) = (self.altitude(terrain), self.float_target(terrain, hover));
             self.float = Some(if target > now { now.saturating_add(CLIMB_STEP).min(target) } else { now.saturating_sub(CLIMB_STEP).max(target) });
         }
         None
@@ -443,6 +450,21 @@ pub fn by_the_shore(terrain: &Heightmap, (x, z): (i32, i32)) -> bool {
     (-1..=1).flat_map(|dz| (-1..=1).map(move |dx| (dx, dz))).filter(|&d| d != (0, 0)).any(|(dx, dz)| Mobility::Walk.passable(terrain, (x + dx, z + dz)))
 }
 
+/// How high a balloon floats over `cell` (`Vehicle::float_target`): over a building's walls, a visible tree or a totem
+/// standing there, higher than over bare ground.
+pub fn hover_over(walls: &path::Walls, trees: &[crate::tree::Tree], totems: &[crate::totem::Totem], cell: (i32, i32)) -> u16 {
+    let totem_cell = |t: &crate::totem::Totem| ((t.x as u32 / WORLD_UNITS_PER_CELL) as i32, (t.z as u32 / WORLD_UNITS_PER_CELL) as i32);
+    if walls.at(cell).is_some() {
+        HOVER_OVER_BUILDING
+    } else if trees.iter().any(|t| t.is_visible() && t.cell() == cell) {
+        HOVER_OVER_TREE
+    } else if totems.iter().any(|t| !t.is_gone() && totem_cell(t) == cell) {
+        HOVER_OVER_TOTEM
+    } else {
+        HOVER
+    }
+}
+
 /// The ground's height at world point `p`, the sea at 0.
 fn ground_at(terrain: &Heightmap, p: (u16, u16)) -> u16 {
     terrain.height_at(p.0 as u32, p.1 as u32, WORLD_UNITS_PER_CELL).max(0) as u16
@@ -480,7 +502,9 @@ impl GameMap {
         }
         let (now, mut rng) = (self.now, self.rng);
         let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: None };
-        let events: Vec<(VehicleId, VehicleEvent)> = self.vehicles.iter_mut().filter_map(|(id, v)| v.tick(now, &ground, &mut rng).map(|e| (id, e))).collect();
+        let (trees, totems) = (&self.trees, &self.totems);
+        let hover = |cell: (i32, i32)| hover_over(&self.walls, trees, totems, cell);
+        let events: Vec<(VehicleId, VehicleEvent)> = self.vehicles.iter_mut().filter_map(|(id, v)| v.tick(now, &ground, hover, &mut rng).map(|e| (id, e))).collect();
         self.rng = rng;
         for (id, event) in events {
             match event {
@@ -1228,6 +1252,38 @@ mod tests {
         assert!(before_hill > 100 + HOVER, "climbing before it");
         run(&mut map, 40);
         assert_eq!(map.vehicle(v).unwrap().altitude(&map.terrain), 100 + HOVER, "down again");
+    }
+
+    #[test]
+    fn a_balloon_floats_over_a_building_and_a_tree_without_bumping_into_them() {
+        let mut map = coast();
+        map.add_building(crate::building::Building::new(BuildingKind::Hut { size: 1 }, 0, ((C - 20) * 512) as u16, (C * 512) as u16, 0));
+        map.trees.push(crate::tree::Tree::new((C - 27, C), 0, crate::tree::MAX_SIZE));
+        map.update_walls();
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at((C - 40, C)), Angle::ZERO));
+        aboard(&mut map, v, 1);
+        map.vehicles.get_mut(v).unwrap().go(at((C - 10, C)));
+        let (mut over_hut, mut over_tree) = (false, false);
+        for _ in 0..600 {
+            map.tick();
+            let b = map.vehicle(v).unwrap();
+            let (cell, altitude) = (b.cell(), b.altitude(&map.terrain));
+            let ground = ground_at(&map.terrain, (b.x, b.z));
+            if map.walls.at(cell).is_some() {
+                assert!(altitude >= ground + HOVER_OVER_BUILDING, "over the hut at {altitude}");
+                over_hut = true;
+            }
+            if cell == (C - 27, C) {
+                assert!(altitude >= ground + HOVER_OVER_TREE, "over the tree at {altitude}");
+                over_tree = true;
+            }
+            if b.state == State::Parked {
+                break;
+            }
+        }
+        assert!(over_hut && over_tree);
+        run(&mut map, 40);
+        assert_eq!(map.vehicle(v).unwrap().altitude(&map.terrain), 100 + HOVER, "down again past them");
     }
 
     #[test]

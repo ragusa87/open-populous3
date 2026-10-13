@@ -79,7 +79,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Whirlwind spell (to implement), on a vehicle: everyone aboard is put out, it spins (roll +204, pitch +153 /2048 per tick) for 10 ticks (boat; ends early when the ground reaches it) or 2 (balloon), then explodes like a destroyed boat on land (pop3-rev-analysis.md "Life, damage and destruction", state 9).
 - [ ] Swarm spell (to implement), on people aboard a vehicle: the bees put them out (`GameMap::put_out`): they fall out of a balloon; off a boat they drown, unless it is by the shore, where they get off onto the ground (`GameMap::unload_spots`).
 - [ ] Vehicle destruction (vehicles.md; health, damage from blasts and bolts, sinking, rising and exploding done): the partial explosion of a boat on land (its faces flying off, `explosion.rs`).
-- [ ] Balloons: the hover height over buildings (560, pop3-rev-analysis.md "Terrain changes"), bobbing while moving, and the original's climb rate and look-ahead (vehicles.md, guessed).
+- [ ] Balloons: bobbing while moving, and the original's climb rate and look-ahead; check the hover over trees and totems in the game (450 guessed; buildings 560 from the exe) (vehicles.md).
 - [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
 - [ ] The shaman can cast only some spells from a vehicle: Land Bridge is refused (done); check the others in the game (fire-type probably yes).
 - [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
