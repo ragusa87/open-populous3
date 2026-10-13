@@ -670,6 +670,31 @@ creator.
   16-turn fire blast where a big volcano fireball 8/8 lands (alpha hfx 1194-1209, sound 0xB2); small 8/7 ones make
   7/0x3E instead.
 
+### Swamp: drawing, and the reedy-grass / mist ground dressing [exe]
+The Swamp spell's effect (7/18, init 0x511340 → 0x511400 for the kill state, "Per spell" above) sets its own
+draw class directly (`mov [unit+0x3A], 0x34`, i.e. 52) without going through the usual drawable setter
+`0x4EE700`, so its sprite index `+0x33` stays 0 (the class-7 default, set by the shared init 0x50BCD0 as
+`0x4EE700(&unit+0x33, 0, 0)`). It has no in-world ground sprite: its only visible trace is the aerial/overview
+map icon `hfx0-0.dat` 81 (a small grey-teal striped shape, read as a headstone; `sprites.md` "swamp (RIP
+tombstone)"). This matches "No terrain change" in the per-spell table: casting Swamp does not paint anything
+on the ground, it only marks the map and starts killing people in its 3x3 cells (state 19, 0x511400).
+
+The actual marsh/swamp ground look comes from two separate, unrelated class-7 effect types that level
+designers place directly (not spawned by casting the spell): 7/84 "reedy grass" and 7/85 "swamp mist"
+(level-format.md's effect-model list, "81-90").
+- 7/84 "reedy grass" (init 0x513620): a plain opaque billboard, same renderer as the volcano rock (draw class
+  0, `0x46895E`): `0x4EE700(&unit+0x33, 0, 0x219 + rand(0x89BC72) % 12)`, i.e. one of 12 `hfx0-0.dat` frames
+  537-548 picked at random — olive-green tufts of reed/grass, no flower head (checked by decoding and viewing
+  all 12 frames against `pal0-0.dat`).
+- 7/85 "swamp mist" (init 0x50C050): an alpha-blended billboard, draw class 0x33 (51):
+  `0x4EE700(&unit+0x33, 0x33, 0x626)`, hfx sprite 1574 (within the 1538-1592 alpha range) — a dark muddy-brown
+  blotch, not a drifting fog despite the name; it is painted flat, presumably tinting the ground to look wet/
+  mired.
+- Neither type's sprites (checked: hfx 2-6, 78-85, 537-548, 1574-1576) show anything resembling a flower; no
+  "flower" sprite tied to swamp was found. Open: what sprite the user means by "the flower on it" — possibly a
+  specific frame not yet checked, or a different system (level editor decoration, generated-map flora) not
+  traced here.
+
 ### Status markers over people [exe]
 All drawn with the person's sprite in `draw_polygons` (0x468B3F-0x4694F2), straight from the status flags: no
 effect unit. Sprites are `hfx0-0.dat` (table `[0x59DF14]`); `h` is the height of the person's current frame (VFRA
