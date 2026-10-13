@@ -42,6 +42,13 @@ pub const BURST_ALTITUDE: u16 = 1024;
 pub const BOARD_REACH: u16 = 1024;
 /// People get off onto walkable ground within this of the vehicle, per axis (as `BOARD_REACH`).
 pub const UNLOAD_REACH: u16 = 1024;
+/// Braves working in a vehicle hut at once [ours, a guess].
+pub const CREW: u8 = 4;
+/// Work for one vehicle, once its wood is there: each crew member inside adds 1 a turn (a guess: 100 s alone, 25 s
+/// with a full crew).
+pub const LAUNCH_WORK: u16 = 1200;
+/// Up to this many cells from its jetty a boat hut looks for open sea to put its boat on.
+pub const LAUNCH_SEARCH: i32 = 4;
 /// Boats check whether their cell turned to land on this rhythm ("Stranded boat").
 pub const STRAND_EVERY: Every = Every::new(16);
 /// A stranded boat keels over this much a turn, until on its side.
@@ -104,6 +111,36 @@ impl VehicleKind {
             VehicleKind::Boat => "Boat",
             VehicleKind::Balloon => "Balloon",
         }
+    }
+}
+
+/// A vehicle hut's work on its next vehicle: `done` of `of`, the vehicle out when they meet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Launch {
+    done: u16,
+    of: u16,
+}
+
+impl Default for Launch {
+    fn default() -> Self {
+        Launch { done: 0, of: LAUNCH_WORK }
+    }
+}
+
+impl Launch {
+    /// One turn with `crew` working inside; true once the work is done.
+    pub fn advance(&mut self, crew: u8) -> bool {
+        self.done = self.done.saturating_add(crew as u16).min(self.of);
+        self.is_done()
+    }
+
+    pub fn is_done(self) -> bool {
+        self.done >= self.of
+    }
+
+    /// Work done and work needed, for a progress bar.
+    pub fn progress(self) -> (u16, u16) {
+        (self.done, self.of)
     }
 }
 
@@ -326,6 +363,26 @@ impl Vehicle {
     }
 }
 
+/// Where vehicle hut `b` puts its new vehicle, and its heading: out past its jetty side (local +z), facing away
+/// from the hut. A boat on the open sea nearest that point within `LAUNCH_SEARCH` cells (None without); a balloon
+/// just past that side.
+pub fn launch_point(b: &crate::building::Building, kind: VehicleKind, terrain: &Heightmap) -> Option<((u16, u16), Angle)> {
+    let f = b.kind.footprint();
+    let out = b.local_point((f.offset.0, f.offset.1 + f.half.1 + WORLD_UNITS_PER_CELL as i32 / 2));
+    let centre = b.centre();
+    let heading = atan2(torus_delta(centre.1, out.1), torus_delta(centre.0, out.0));
+    if kind == VehicleKind::Balloon {
+        return Some((out, heading));
+    }
+    let (cx, cz) = ((out.0 as u32 / WORLD_UNITS_PER_CELL) as i32, (out.1 as u32 / WORLD_UNITS_PER_CELL) as i32);
+    let sea = (-LAUNCH_SEARCH..=LAUNCH_SEARCH)
+        .flat_map(|dz| (-LAUNCH_SEARCH..=LAUNCH_SEARCH).map(move |dx| (cx + dx, cz + dz)))
+        .filter(|&c| crate::unit::is_sea(terrain, c))
+        .min_by_key(|&(x, z)| ((x - cx).pow(2) + (z - cz).pow(2), z, x))?;
+    let size = terrain.size() as i32;
+    Some((crate::slots::cell_centre((sea.0.rem_euclid(size), sea.1.rem_euclid(size))), heading))
+}
+
 /// Whether `a` is within `reach` of `b` on both axes, the short way around the torus.
 fn within(a: (u16, u16), b: (u16, u16), reach: u16) -> bool {
     torus_delta(a.0, b.0).unsigned_abs() <= reach as u32 && torus_delta(a.1, b.1).unsigned_abs() <= reach as u32
@@ -371,6 +428,55 @@ impl GameMap {
             }
         }
         self.carry_passengers();
+    }
+
+    /// Unit `i` sent into the vehicle hut whose stored corner is `site`: a brave joins its crew (`work`) while it has
+    /// room (`CREW`), anyone else walks to its door.
+    pub(crate) fn join_crew(&mut self, i: usize, site: (u16, u16)) {
+        let Some(b) = self.building_at_corner(site).map(|b| &self.buildings[b]) else { return };
+        let (id, door) = (b.id, b.door());
+        let room = self.workers(id).filter(|u| u.id != self.units[i].id).count() < CREW as usize;
+        if self.units[i].kind == UnitKind::Brave && room {
+            self.units[i].start(Order::Stop);
+            self.units[i].work = Some(id);
+        } else {
+            self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
+        }
+    }
+
+    /// Each built vehicle hut with its vehicle's wood on the pile works on it, a turn per crew member inside
+    /// (`Launch`); once done, the wood is spent and the vehicle comes out (`launch_point`) with the first of the crew
+    /// inside aboard. No room for a boat on the water: it waits, done.
+    pub(crate) fn tend_vehicle_huts(&mut self) {
+        for k in 0..self.buildings.len() {
+            let b = &self.buildings[k];
+            let Some(kind) = VehicleKind::made_by(b.kind).filter(|_| b.stage() == crate::building::Stage::Built) else { continue };
+            let id = b.id;
+            let crew: Vec<UnitId> = self.units_inside(id).filter(|u| u.work == Some(id)).map(|u| u.id).collect();
+            if b.stock < kind.wood_cost() || crew.is_empty() {
+                continue;
+            }
+            if !self.buildings[k].launch.get_or_insert_default().advance(crew.len().min(CREW as usize) as u8) {
+                continue;
+            }
+            let Some((at, heading)) = launch_point(&self.buildings[k], kind, &self.terrain) else { continue };
+            let b = &mut self.buildings[k];
+            (b.launch, b.stock) = (None, b.stock - kind.wood_cost());
+            let owner = b.owner;
+            let vehicle = self.add_vehicle(Vehicle::new(kind, owner, at, heading));
+            let driver = crew[0];
+            if let Some(u) = self.unit_mut(driver) {
+                u.work = None;
+                u.start(Order::Stop);
+                (u.inside, u.aboard, u.x, u.z) = (None, Some(vehicle), at.0, at.1);
+            }
+            self.vehicles.get_mut(vehicle).unwrap().seat(driver, owner);
+        }
+    }
+
+    /// Building `i`'s work on its next vehicle, if it is a vehicle hut working on one.
+    pub fn launch_progress(&self, i: usize) -> Option<Launch> {
+        self.buildings.get(i)?.launch
     }
 
     /// Unit `i` takes `Order::Board`: anyone but wildmen walks to the ground nearest the vehicle (`AtVehicle` once
@@ -816,6 +922,83 @@ mod tests {
         map.add_effect(crate::blast::effect(1, at((C - 10, C))));
         run(&mut map, 3);
         assert!(people.iter().all(|&p| map.unit(p).unwrap().health.is_full() && map.unit(p).unwrap().aboard == Some(v)));
+    }
+
+    /// A built hut of `kind` on the coast, its jetty side to the sea (+x), with `wood` pieces lying inland.
+    fn shipyard(kind: BuildingKind, wood: u16) -> (GameMap, usize) {
+        let mut map = coast();
+        map.add_building(crate::building::Building::new(kind, 0, ((C - 2) * 512) as u16, (C * 512) as u16, 2));
+        for k in 0..wood {
+            map.wood.push(crate::wood::WoodPiece::new(at((C - 7, C - 2)).0 + 90 * k, at((C - 7, C - 2)).1));
+        }
+        map.update_walls();
+        (map, 0)
+    }
+
+    fn crew(map: &mut GameMap, hut: usize, n: i32) -> Vec<UnitId> {
+        let people = braves(map, 0, n);
+        for c in map.enter_orders(0, &people, hut) {
+            map.apply(&c);
+        }
+        people
+    }
+
+    #[test]
+    fn a_crew_brings_the_wood_then_a_boat_comes_out_on_the_sea_with_one_of_them_aboard() {
+        let (mut map, hut) = shipyard(BuildingKind::BoatHut, 6);
+        let people = crew(&mut map, hut, 3);
+        let id = map.buildings[hut].id;
+        assert_eq!(map.workers(id).count(), 3);
+        assert!(until(&mut map, 6000, |m| !m.vehicles.is_empty()), "a boat");
+        let (_, boat) = map.vehicles.entries().next().unwrap();
+        assert_eq!((boat.kind, boat.owner), (VehicleKind::Boat, 0));
+        assert!(crate::unit::is_sea(&map.terrain, boat.cell()), "on the open sea");
+        assert_eq!(boat.passengers.len(), 1);
+        let driver = boat.passengers[0];
+        assert!(people.contains(&driver));
+        assert_eq!(map.unit(driver).unwrap().work, None, "out of the crew");
+        assert_eq!(map.workers(id).count(), 2, "the others go on");
+        assert_eq!(map.buildings[hut].stock + map.wood.len() as u8, 2, "4 pieces spent");
+        assert_eq!(map.buildings[hut].launch, None);
+    }
+
+    #[test]
+    fn no_crew_inside_no_work_and_a_full_crew_works_four_times_as_fast() {
+        let (mut map, hut) = shipyard(BuildingKind::BoatHut, 0);
+        map.buildings[hut].stock = 4;
+        run(&mut map, 50);
+        assert_eq!(map.launch_progress(hut), None, "nobody inside");
+        crew(&mut map, hut, 4);
+        assert!(until(&mut map, 300, |m| m.units_inside(m.buildings[hut].id).count() == 4));
+        let before = map.launch_progress(hut).map_or(0, |l| l.progress().0);
+        run(&mut map, 10);
+        assert_eq!(map.launch_progress(hut).unwrap().progress().0, before + 40);
+    }
+
+    #[test]
+    fn an_airship_hut_makes_a_balloon_by_the_hut() {
+        let (mut map, hut) = shipyard(BuildingKind::AirshipHut, 0);
+        map.buildings[hut].stock = VehicleKind::Balloon.wood_cost();
+        map.buildings[hut].launch = Some(Launch { done: LAUNCH_WORK - 1, of: LAUNCH_WORK });
+        let people = crew(&mut map, hut, 1);
+        assert!(until(&mut map, 300, |m| !m.vehicles.is_empty()));
+        let (vid, balloon) = map.vehicles.entries().next().map(|(id, v)| (*id, v.clone())).unwrap();
+        assert_eq!(balloon.kind, VehicleKind::Balloon);
+        assert_eq!(map.unit(people[0]).unwrap().aboard, Some(vid));
+        assert_eq!(map.buildings[hut].stock, 0);
+    }
+
+    #[test]
+    fn only_braves_crew_and_only_four() {
+        let (mut map, hut) = shipyard(BuildingKind::BoatHut, 0);
+        let people = crew(&mut map, hut, 5);
+        let warrior = map.spawn(0, UnitKind::Warrior, at((C - 6, C + 3))).id;
+        for c in map.enter_orders(0, &[warrior], hut) {
+            map.apply(&c);
+        }
+        let id = map.buildings[hut].id;
+        assert_eq!(map.workers(id).map(|u| u.id).collect::<Vec<_>>(), people[..4]);
+        assert_eq!(map.unit(warrior).unwrap().work, None);
     }
 
     #[test]

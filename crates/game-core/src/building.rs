@@ -154,11 +154,13 @@ impl BuildingKind {
     }
 
     /// People it holds inside: huts 3, 4, 5 by size (huts-and-training.md), a drum tower one
-    /// (buildings.md "Towers"), a training unit its trainee (`crate::training`); 0 for the others.
+    /// (buildings.md "Towers"), a training unit its trainee (`crate::training`), a vehicle hut its crew
+    /// (`crate::vehicle::CREW`); 0 for the others.
     pub fn capacity(self) -> u8 {
         match self {
             BuildingKind::Hut { size } => 2 + size.clamp(1, 3),
             BuildingKind::DrumTower | BuildingKind::Temple | BuildingKind::SpyTraining | BuildingKind::WarriorTraining | BuildingKind::FirewarriorTraining => 1,
+            BuildingKind::BoatHut | BuildingKind::AirshipHut => crate::vehicle::CREW,
             _ => 0,
         }
     }
@@ -236,6 +238,8 @@ pub struct Building {
     pub vault: Option<Vault>,
     /// What a training unit makes from stored mana (`crate::production`); None for the others.
     pub production: Option<crate::production::Production>,
+    /// A vehicle hut's work on its next vehicle (`crate::vehicle::Launch`); None while none is under way.
+    pub launch: Option<crate::vehicle::Launch>,
 }
 
 /// What a vault of knowledge teaches the tribe praying at it, from the level.
@@ -256,7 +260,7 @@ pub enum Reward {
 impl Building {
     /// A finished building, as the levels store them.
     pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
-        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)), production: None }
+        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)), production: None, launch: None }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.

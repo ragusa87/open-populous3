@@ -195,7 +195,7 @@ impl GameMap {
             if !u.is_alive() || !u.is_free() || !u.queued().is_empty() {
                 continue;
             }
-            match self.building_index(building).filter(|&b| self.buildings[b].stage() != Stage::Built) {
+            match self.building_index(building).filter(|&b| self.buildings[b].stage() != Stage::Built || self.crewed(b)) {
                 Some(b) if self.buildings[b].dismantling || self.buildings[b].repair_delay.is_some() => {}
                 Some(b) => dirty.extend(self.work_on(i, b)),
                 None => self.units[i].work = None,
@@ -218,6 +218,9 @@ impl GameMap {
                 self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
             }
             return None;
+        }
+        if building.stage() == Stage::Built {
+            return self.crew_step(i, b);
         }
         let wanted = building.wood_wanted() as usize > self.wood_on_the_way(site, id);
         if !building.flat {
@@ -251,6 +254,35 @@ impl GameMap {
             self.units[i].action = Action::Hammering;
         } else if torus_dist2(me, door) <= DELIVER_RADIUS * DELIVER_RADIUS {
             self.units[i].enter(Inside { building: site, door }, work_point(&building, id));
+        } else {
+            self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
+        }
+        None
+    }
+
+    /// Whether building `b` is a built vehicle hut, whose crew works on vehicles (`crate::vehicle`).
+    fn crewed(&self, b: usize) -> bool {
+        let b = &self.buildings[b];
+        b.stage() == Stage::Built && crate::vehicle::VehicleKind::made_by(b.kind).is_some()
+    }
+
+    /// Free crew member `i` of the vehicle hut `b` goes on: fetches wood while the pile and the wood on the way are
+    /// short of the vehicle's cost, else works inside (`Hammering`; `GameMap::tend_vehicle_huts` counts it).
+    fn crew_step(&mut self, i: usize, b: usize) -> Option<DirtyRect> {
+        let building = self.buildings[b].clone();
+        let (me, id) = ((self.units[i].x, self.units[i].z), self.units[i].id);
+        let cost = crate::vehicle::VehicleKind::made_by(building.kind).map_or(0, |k| k.wood_cost());
+        if building.burning.is_none() && cost.saturating_sub(building.stock) as usize > self.wood_on_the_way(building.id, id) {
+            self.fetch_wood(i);
+            if !self.units[i].is_free() {
+                return None;
+            }
+        }
+        let door = building.door();
+        if self.units[i].inside.is_some_and(|ins| ins.building == building.id) {
+            self.units[i].action = Action::Hammering;
+        } else if torus_dist2(me, door) <= DELIVER_RADIUS * DELIVER_RADIUS {
+            self.units[i].enter(Inside { building: building.id, door }, work_point(&building, id));
         } else {
             self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
         }

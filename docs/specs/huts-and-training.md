@@ -48,9 +48,8 @@ Not in the file [exe]: the income per person is `MANA_BUSY_BRAVES` 15 / `MANA_ID
   (`Unit::enter`), and stay inside, idle, not drawn. `BuildingKind::capacity`: huts 3 / 4 / 5 by size (they
   rest), a drum tower 1 (buildings.md "Towers"); the others stay at the door, idle. Any walk takes them out by
   the door. Builders go in and out the same way (buildings.md "Construction").
-- Vehicles (boats, balloons) will hold people the same way: `Unit::inside` will name its holder (a building's
-  id today; a holder enum with vehicle ids once vehicles exist), each with its room and its way in
-  (a boat's side, a balloon's basket) instead of a door.
+- Vehicles hold people their own way (`Unit::aboard`, vehicles.md); vehicle huts take braves as a crew that
+  fetches wood and builds vehicles (vehicles.md "Vehicle huts").
 - `Building::inside` is counted each tick from the units inside (`GameMap::count_inside`): a built hut or
   drum tower with people inside smokes from the top of its roof. The one in a drum tower stands on its lookout,
   in view (buildings.md "On screen"). The tooltip shows `Braves: people inside/room` (planned: a people row, tooltips.md).

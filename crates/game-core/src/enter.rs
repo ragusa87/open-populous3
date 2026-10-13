@@ -39,6 +39,10 @@ impl GameMap {
         if !can_enter(u.kind) || u.owner != b.owner || b.stage() != Stage::Built || b.kind.capacity() == 0 {
             return;
         }
+        if crate::vehicle::VehicleKind::made_by(b.kind).is_some() {
+            let site = (b.x, b.z);
+            return self.join_crew(i, site);
+        }
         if u.inside.is_some_and(|ins| ins.building == b.id) {
             self.units[i].start(Order::Stop);
             return;

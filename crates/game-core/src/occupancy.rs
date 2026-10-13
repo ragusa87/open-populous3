@@ -46,7 +46,9 @@ impl GameMap {
             Holder::Building(i) => {
                 let b = self.buildings.get(i)?;
                 let site = (b.x, b.z);
-                let (capacity, mut filled): (u16, Vec<UnitId>) = if b.stage() == Stage::Built {
+                let (capacity, mut filled): (u16, Vec<UnitId>) = if b.stage() == Stage::Built && crate::vehicle::VehicleKind::made_by(b.kind).is_some() {
+                    (crate::vehicle::CREW as u16, self.workers(b.id).map(|u| u.id).collect())
+                } else if b.stage() == Stage::Built {
                     let room = if b.vault.is_some_and(|v| v.is_spent()) { 0 } else { room(b.kind) };
                     let praying = self.units.iter().filter(|u| u.is_alive() && u.action == crate::unit::Action::Worshipping { site });
                     (room, self.units_inside(b.id).chain(praying).map(|u| u.id).collect())
@@ -81,9 +83,10 @@ fn building_wood(b: &Building) -> Option<Wood> {
     if cost == 0 {
         return None;
     }
-    Some(match b.stage() {
-        Stage::Built => Wood { capacity: b.used as u16, filled: b.used as u16 },
-        _ => Wood { capacity: cost, filled: (b.delivered() as u16).min(cost) },
+    Some(match (b.stage(), crate::vehicle::VehicleKind::made_by(b.kind)) {
+        (Stage::Built, Some(vehicle)) => Wood { capacity: vehicle.wood_cost() as u16, filled: (b.stock as u16).min(vehicle.wood_cost() as u16) },
+        (Stage::Built, None) => Wood { capacity: b.used as u16, filled: b.used as u16 },
+        (_, _) => Wood { capacity: cost, filled: (b.delivered() as u16).min(cost) },
     })
 }
 

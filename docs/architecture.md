@@ -38,7 +38,8 @@ each kind of object in a fixed, written order. The original's order inside a tur
 1. walls (`update_walls`), then trees (`Tree::tick`);
 2. firewarriors' reloads and their bolts in flight (`tend_reloads`, `tend_bolts`, combat.md "Firebolts"), then
    effects (`tend_effects`): before anything they act on, so units react the same turn;
-3. fires, buildings' wear (`tend_building_wear`), ashes (`Ashes::tick`), camp fires, vaults, totems;
+3. fires, buildings' wear (`tend_building_wear`), ashes (`Ashes::tick`), camp fires, vaults, totems, training,
+   vehicle huts (`tend_vehicle_huts`);
 4. spotting (`spot_enemies`), attacks followed (`tend_attacks`) and buildings hacked (`tend_wrecking`) (combat.md);
 5. coordinators (docs/specs/coordinators.md): scans that start them (challenges, melees joined), their turns, the
    finished ones removed, their events, then the units whose coordinator is gone released, so a coordinator ending
