@@ -87,7 +87,9 @@ the camp fire's (66) while placing one (`plan_sprite`).
 Same palette. Identified: 2-3 dry plants, 53 the yellow down arrow over the player's selected people (9 x 7) [exe], 22 a flat dark smear, the generic ground shadow under sprite things (draw kind 15, pop3-rev-analysis.md "Volcano rocks") [exe], 23 a pile of logs (17 x 11, a piece of
 wood on the ground: `catalog::WOOD_PILE_SPRITE`), 90-93 fire, 107-111 spell names, 187-210 build/wood action icons,
 40 a piece of wood in the tooltip (16 x 15, `catalog::TOOLTIP_WOOD_SPRITE`), 46-51 the tooltip's dismantle toggle (49, 51 hovered, 50 pressed) and its undo (46, 48 hovered, 47 pressed), 60-62 the
-unload button of a vehicle (60, 61 hovered, 62 pressed), tooltips.md; 639-656 gold state icons, each plain then outlined (653 a boat, 655 the same boat flat), 664-675 six unit figures (plain / outlined
+unload button of a vehicle (60, 61 hovered, 62 pressed), tooltips.md; 59 the combat icon of the aerial view's map,
+69-74 ground shadows of various shapes (under a balloon or a flying unit), 81 a RIP tombstone, the icon of a swamp
+area; 639-656 gold state icons, each plain then outlined (653 a boat, 655 the same boat flat), 664-675 six unit figures (plain / outlined
 pairs: 666 brave, 668 warrior, 670 firewarrior, 672 preacher, 674 spy, 664 probably the shaman; 75-80 the same in
 teal, in unit model order: brave, warrior, preacher, spy, firewarrior, shaman, `catalog::UNIT_FIGURES`, the tooltip's
 people), 676-681 the panel's tab icons, each then highlighted: 676 build (a house), 678 spells, 680 stats (three
