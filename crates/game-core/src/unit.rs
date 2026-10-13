@@ -698,8 +698,8 @@ impl Unit {
                 return Some(event);
             }
         }
-        if self.aboard.is_some() && self.is_alive() && !matches!(self.action, Action::Casting { .. } | Action::Boarding { .. }) {
-            // Carried: only a cast or the jump in goes on aboard.
+        if self.aboard.is_some() && self.is_alive() && !matches!(self.action, Action::Casting { .. } | Action::Boarding { .. } | Action::Attacking { .. } | Action::Throwing { .. }) {
+            // Carried: only a cast, the jump in, or a firewarrior's attack goes on aboard.
             self.action = Action::Idle;
             return None;
         }
@@ -728,7 +728,8 @@ impl Unit {
                     Step::Blocked => self.action = Action::Idle,
                 }
             }
-            Action::Attacking { to, .. } => self.approach(to, ground),
+            Action::Attacking { to, .. } if self.in_the_open() => self.approach(to, ground),
+            Action::Attacking { .. } => {}
             Action::Hacking { .. } => {}
             Action::Throwing { target, mut left } => {
                 self.action = match left.tick() {

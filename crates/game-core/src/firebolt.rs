@@ -147,18 +147,28 @@ impl GameMap {
         let (dx, dz) = (torus_delta(u.x, aim.0), torus_delta(u.z, aim.1));
         let d = isqrt((dx * dx + dz * dz) as u32).max(1) as i32;
         let side = (-dz * BOLT_SIDE / d, dx * BOLT_SIDE / d);
-        let height = self.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL) + BOLT_RISE;
-        let bloodlusted = u.statuses.bloodlust.is_on();
+        let height = self.altitude(u) as i32 + BOLT_RISE;
+        let (bloodlusted, from_tower) = (u.statuses.bloodlust.is_on(), self.in_tower(u));
         let (owner, thrower, at) = (u.owner, u.id, (u.x, u.z));
         for (sign, hits) in [(1, false), (-1, true)] {
             let start = (at.0.wrapping_add((sign * side.0) as u16), at.1.wrapping_add((sign * side.1) as u16));
             let id = self.new_id_of();
-            self.bolts.insert(id, Firebolt { owner, thrower, target, at: start, height, aim, hits, bloodlusted, from_tower: false });
+            self.bolts.insert(id, Firebolt { owner, thrower, target, at: start, height, aim, hits, bloodlusted, from_tower });
         }
         let u = &mut self.units[i];
         u.face((aim.0, aim.1));
-        u.reload = reload(bloodlusted, false);
+        u.reload = reload(bloodlusted, from_tower);
         u.action = Action::Throwing { target, left: Countdown::new(THROW_TICKS) };
+    }
+
+    /// Whether `u` is in a finished drum tower: it throws further, harder, slower ("Firewarrior fire" [exe]).
+    pub fn in_tower(&self, u: &Unit) -> bool {
+        u.inside.and_then(|i| self.building(i.building)).is_some_and(|b| b.kind == crate::building::BuildingKind::DrumTower && b.stage() == crate::building::Stage::Built)
+    }
+
+    /// How far `u` throws on each axis from where it is: its altitude (aboard: its vehicle's), a drum tower's more.
+    pub fn bolt_reach_of(&self, u: &Unit) -> i32 {
+        bolt_reach(self.altitude(u), self.in_tower(u))
     }
 
     /// Every bolt flies a turn towards its target; those arriving hit and are gone. The events of the hits.
@@ -292,6 +302,45 @@ mod tests {
             assert_eq!(full - life(&map, t), lost, "{kind:?}");
             assert!(map.unit(a).unwrap().reload > 0);
         }
+    }
+
+    #[test]
+    fn from_a_drum_tower_it_throws_further_harder_and_slower() {
+        let (mut map, a, t) = duel(UnitKind::Brave, 6);
+        let at = map.unit(a).map(|u| (u.x, u.z)).unwrap();
+        let tower = map.add_building(crate::building::Building::new(crate::building::BuildingKind::DrumTower, 0, at.0.wrapping_sub(256), at.1.wrapping_sub(256), 0));
+        let door = map.building(tower).unwrap().door();
+        map.unit_mut(a).unwrap().inside = Some(crate::unit::Inside { building: tower, door });
+        let u = map.unit(a).unwrap().clone();
+        assert!(map.in_tower(&u));
+        assert_eq!(map.bolt_reach_of(&u), bolt_reach(map.altitude(&u), false) + 4 * 256, "4 cells more across");
+        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Attack { target: Target::Unit(t) } });
+        let full = life(&map, t);
+        (1..60).find(|_| {
+            map.tick();
+            life(&map, t) < full
+        })
+        .expect("hit from the tower, 6 cells away");
+        assert_eq!(full - life(&map, t), CELL_DAMAGE + TARGET_DAMAGE_FROM_TOWER);
+        assert!(map.unit(a).unwrap().inside.is_some(), "it never left the tower");
+        assert!(map.unit(a).unwrap().reload > RELOAD, "a tower's slower reload");
+    }
+
+    #[test]
+    fn from_a_boat_it_throws_at_the_shore() {
+        let mut map = GameMap::sandbox_vehicles();
+        let (boat, at) = map.vehicles.iter().find(|(_, v)| v.kind == crate::vehicle::VehicleKind::Boat && !v.passengers.is_empty()).map(|(id, v)| (id, (v.x, v.z))).unwrap();
+        let crew = map.vehicle(boat).unwrap().passengers[0];
+        map.unit_mut(crew).unwrap().kind = UnitKind::Firewarrior;
+        let foe = map.spawn(1, UnitKind::Brave, (at.0, at.1.wrapping_sub(2 * 512))).id;
+        map.apply(&Command::OrderUnit { player: 0, unit: crew, order: Order::Attack { target: Target::Unit(foe) } });
+        let full = life(&map, foe);
+        (1..60).find(|_| {
+            map.tick();
+            life(&map, foe) < full
+        })
+        .expect("hit from the boat");
+        assert_eq!(map.unit(crew).unwrap().aboard, Some(boat), "still aboard");
     }
 
     #[test]

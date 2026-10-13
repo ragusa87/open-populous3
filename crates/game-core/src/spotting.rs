@@ -9,7 +9,7 @@ use crate::unit::{Action, Target, Unit, UnitId, UnitKind};
 /// How far `u` looks now, cells; None when it is busy ("Auto-attack" [exe]). Walking on an order it does not look
 /// (0); working, only its own cell (`sight_at_work`); idle or hacking at a building, its full `sight`.
 pub fn sight_now(u: &Unit) -> Option<u8> {
-    if !u.is_alive() || !u.in_the_open() || u.thrown() {
+    if !u.is_alive() || (!u.in_the_open() && !u.kind.stats().throws) || u.thrown() {
         return None;
     }
     let stats = u.kind.stats();
@@ -35,7 +35,7 @@ impl GameMap {
     pub fn looking(&self, u: &Unit) -> Option<u8> {
         let sight = sight_now(u)?;
         if u.kind.stats().throws {
-            (u.reload == 0 && sight > 0).then(|| crate::firebolt::reach_cells(self.altitude(u), false))
+            (u.reload == 0 && sight > 0).then(|| crate::firebolt::reach_cells(self.altitude(u), self.in_tower(u)))
         } else {
             looks_for_melee(u.kind).then_some(sight)
         }

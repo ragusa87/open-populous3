@@ -46,12 +46,15 @@ impl GameMap {
             let Action::Attacking { target, .. } = self.units[i].action else { continue };
             let u = &self.units[i];
             if u.kind.stats().throws && let Some(goal) = self.attack_goal(u, target) {
-                let reach = crate::firebolt::bolt_reach(self.altitude(u), false);
-                if crate::firebolt::in_reach((u.x, u.z), goal, reach) {
+                let reach = self.bolt_reach_of(u);
+                let (in_reach, open) = (crate::firebolt::in_reach((u.x, u.z), goal, reach), u.in_the_open());
+                if in_reach {
                     self.units[i].hold();
                     if self.units[i].reload == 0 {
                         self.throw_fire(i, target);
                     }
+                }
+                if in_reach || !open {
                     continue;
                 }
             }

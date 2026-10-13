@@ -185,7 +185,15 @@ join a melee on their own attack (they still fight when challenged).
   else it does (walking, working) it drops; thrown, the attack is chained for when it lands [ours: that part of the
   original is not read in detail].
 - Drawn: our own glowing ball per bolt (`firebolts` view); the throw pose (anim 7).
-- Not yet: the line of fire (a building in the way), throwing from a drum tower or a vehicle, the smoke trail and
+- From a drum tower or a vehicle [exe]: the firewarrior looks for enemies and throws without getting out (it is the
+  only kind that looks from inside or aboard). Its reach follows its altitude (`GameMap::altitude`: aboard, its
+  vehicle's, so a balloon throws further; in a building, its level), the bolts start at that height; in a finished
+  drum tower (`GameMap::in_tower`) it reaches 4 cells more across, reloads in `RELOAD_IN_TOWER` (36) and its target
+  takes `TARGET_DAMAGE_FROM_TOWER` (400). An attack order reaches a passenger (`order_aboard`); aboard or inside, a
+  target out of reach is waited for, it does not walk [ours: the original's half speed of a vehicle while its
+  passenger throws, and driving it towards the target, are not done]. Drawn pedalling aboard while it waits, its
+  throw pose while it throws.
+- Not yet: the line of fire (a building in the way), the smoke trail and
   the ground light, a ghost firewarrior's harmless bolts, the shaman inside a building or vehicle taking half her
   life, an angel's reaction.
 

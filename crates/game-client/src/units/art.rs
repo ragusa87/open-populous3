@@ -169,9 +169,10 @@ fn challenge_pose(role: game_core::challenge::Role, carrying: bool) -> Pose {
     }
 }
 
-/// The pose `u` is drawn in: aboard a vehicle and idle, pedalling it; else by its action (`pose_for`).
+/// The pose `u` is drawn in: aboard a vehicle and idle or waiting to throw, pedalling it; else by its action
+/// (`pose_for`).
 pub fn pose_of(u: &game_core::unit::Unit) -> Pose {
-    if u.aboard.is_some() && u.action == Action::Idle {
+    if u.aboard.is_some() && matches!(u.action, Action::Idle | Action::Attacking { .. }) {
         return Pose::Pedal;
     }
     pose_for(&u.action, u.carrying > 0, u.motion.airborne())

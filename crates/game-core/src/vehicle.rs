@@ -648,6 +648,7 @@ impl GameMap {
                 let unit = self.units[i].id;
                 self.get_off(vehicle, &[unit]);
             }
+            Order::Attack { target } if self.units[i].kind.stats().throws => self.go_attack(i, target),
             _ => {}
         }
     }

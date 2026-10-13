@@ -112,7 +112,6 @@ fn a_preacher_beats_five_warriors() {
 }
 
 #[test]
-#[ignore = "firewarriors don't throw from vehicles yet"]
 fn a_firewarrior_in_a_balloon_beats_five_warriors_on_foot() {
     let won = winner(
         |map| {
@@ -125,7 +124,6 @@ fn a_firewarrior_in_a_balloon_beats_five_warriors_on_foot() {
 }
 
 #[test]
-#[ignore = "firewarriors don't throw from vehicles yet"]
 fn a_firewarrior_in_a_balloon_beats_a_preacher_on_foot() {
     let won = winner(
         |map| {
