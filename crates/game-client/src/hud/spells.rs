@@ -170,6 +170,12 @@ pub const STAND_INS: [(SpellKind, SpellKind); 1] = [(SpellKind::Bloodlust, Spell
 /// Under the rows: Teleport, a sandbox spell, in a row shown only when the book has it.
 pub const SANDBOX_ROW: [SpellKind; 1] = [SpellKind::Teleport];
 
+/// The panel's icon of a spell: its white glyph in `hfx0-0.dat`, in spell-model order from 1058 (Blast, model 2;
+/// Angel of Death, 13, is 1069), drawn in the panel's dark ink.
+pub fn panel_glyph(kind: SpellKind) -> usize {
+    1056 + kind.model() as usize
+}
+
 /// A tile's width and height, pixels.
 const TILE: f32 = 58.0;
 
@@ -193,6 +199,8 @@ pub fn player_book(map: &GameMap) -> &SpellBook {
 struct Tile(usize);
 #[derive(Component)]
 struct TileLabel(usize);
+#[derive(Component)]
+struct TileIcon(usize);
 #[derive(Component)]
 struct TileBadge(usize);
 #[derive(Component)]
@@ -302,6 +310,7 @@ fn spawn_tile<'a>(parent: &'a mut ChildSpawnerCommands, i: usize, width: Val) ->
         });
         tile.spawn(Node { flex_grow: 1.0, flex_direction: FlexDirection::Column, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() })
             .with_children(|icon| {
+                icon.spawn((TileIcon(i), ImageNode::default().with_color(INK), Node { display: Display::None, height: px(30), ..default() }));
                 icon.spawn((TileLabel(i), Text::new(""), TextFont { font_size: FontSize::Px(13.0), ..default() }, TextColor(INK)));
                 icon.spawn((TileBadge(i), Text::new(""), TextFont { font_size: FontSize::Px(10.0), ..default() }, TextColor(INK)));
             });
@@ -454,8 +463,10 @@ fn update_tiles(
     map: Res<CurrentMap>,
     selected: Res<SelectedSpell>,
     mut tiles: Query<(&Tile, &Interaction, &mut BackgroundColor, &mut BorderColor), Without<DotView>>,
-    mut labels: Query<(&TileLabel, &mut Text, &mut TextFont), Without<TileBadge>>,
+    mut labels: Query<(&TileLabel, &mut Text, &mut TextFont, &mut Node), (Without<TileBadge>, Without<TileIcon>, Without<DotView>)>,
     mut badges: Query<(&TileBadge, &mut Text), Without<TileLabel>>,
+    mut glyphs: Query<(&TileIcon, &mut ImageNode, &mut Node), (Without<TileLabel>, Without<DotView>)>,
+    (mut icons, mut images): (ResMut<crate::tooltip::IconImages>, ResMut<Assets<Image>>),
     mut dot_views: Query<(&DotView, &mut BackgroundColor, &mut BorderColor, &mut Node), Without<Tile>>,
     mut bars: Query<(&ChargeBar, &mut crate::progress_bar::ProgressBar, &mut Visibility)>,
 ) {
@@ -473,8 +484,27 @@ fn update_tiles(
             _ => edge,
         }));
     }
-    for (l, mut text, mut font) in &mut labels {
+    // The original glyph when there is one, the spell's name otherwise.
+    let glyph = |i: usize, icons: &mut crate::tooltip::IconImages, images: &mut Assets<Image>| {
+        let v = &views[i];
+        matches!(v.style, TileStyle::Own | TileStyle::Gift).then(|| icons.sprite(panel_glyph(book.slots[i].kind), images)).flatten().map(|g| g.0)
+    };
+    for (g, mut image, mut node) in &mut glyphs {
+        let shown = glyph(g.0, &mut icons, &mut images);
+        let display = if shown.is_some() { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+        if let Some(h) = shown.filter(|h| image.image != *h) {
+            image.image = h;
+        }
+    }
+    for (l, mut text, mut font, mut node) in &mut labels {
         let v = &views[l.0];
+        let display = if glyph(l.0, &mut icons, &mut images).is_some() { Display::None } else { Display::Flex };
+        if node.display != display {
+            node.display = display;
+        }
         if text.0 != v.label {
             text.0 = v.label.to_string();
         }
@@ -610,6 +640,13 @@ mod tests {
     fn a_gods_spells_start_at_the_bottom_middle_of_the_view() {
         let at = view_bottom_middle(Vec2::new(PANEL_WIDTH + 800.0, 600.0));
         assert_eq!(at, Vec2::new(PANEL_WIDTH + 400.0, 599.0));
+    }
+
+    #[test]
+    fn the_panels_glyphs_follow_the_spell_models() {
+        assert_eq!(panel_glyph(SpellKind::Blast), 1058);
+        assert_eq!(panel_glyph(SpellKind::AngelOfDeath), 1069);
+        assert_eq!(panel_glyph(SpellKind::Convert), 1073);
     }
 
     #[test]

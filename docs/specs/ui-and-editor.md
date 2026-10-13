@@ -66,8 +66,9 @@ when the book has it (sandboxes). Armageddon is special (only some levels give i
 full-width tile under the rows (`is_special`), empty when the level does not give it, so the panel never has to make
 room for it.
 A tile: on top a dot per charge the spell holds (`max_charges`: blast 4, volcano 1), blue loaded, red gifted, a
-hollow (a dark pit) for room left; the spell's icon in the middle, most of the tile (its name until icons are picked,
-`target/spell-icons.html`); at the bottom the charge on its way, the training unit's bar (`progress_bar`: yellow,
+hollow (a dark pit) for room left; the spell's icon in the middle, most of the tile (the original's white glyph of `hfx0-0.dat` in spell-model order,
+1056 + model: Blast 1058, Angel of Death 1069, drawn in the panel's dark ink, `panel_glyph`; its name without the
+original files); at the bottom the charge on its way, the training unit's bar (`progress_bar`: yellow,
 the mana given over the cost; blue, the finer layer). Pure view model `tile_view(slot) -> TileView` (unit-tested):
 
 | Availability | Tile |
