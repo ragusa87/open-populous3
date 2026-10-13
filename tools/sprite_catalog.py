@@ -119,8 +119,8 @@ CATALOG = [
     *frames(HFX, "markers", 1489, 1498, "low health sparkles", "catalog::LOW_HEALTH_SPRITES"),
     *frames(HFX, "markers", 1538, 1552, "shield ring", "catalog::SHIELD_SPRITES"),
     *frames(HFX, "markers", 1553, 1563, "hypnotised halo", "catalog::HYPNOSIS_SPRITES"),
-    *labels(HFX, "tooltip", 1594, [f"{n} brave{'s' * (n > 1)} row" for n in range(1, 5)]),
-    *labels(HFX, "tooltip", 1598, [f"{n} wood row" for n in range(1, 6)]),
+    *labels(HFX, "tooltip", 1594, ["1 brave", "3 braves", "4 braves", "5 braves"]),
+    *labels(HFX, "tooltip", 1598, [f"{n} wood" for n in (3, 5, 6, 8, 11)]),
     *frames(HFX, "HUD", 1603, 1614, "progress bar part"),
 ]
 

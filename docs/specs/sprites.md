@@ -112,8 +112,8 @@ similar one. By eye, unconfirmed: 1090-1098 a building's fire, 1100-1107 a fireb
 other fireball effects, 1136-1151 the whirlwind's base, 1288-1303 sparks, 1304-1319 a water splash (drowning?),
 1329-1344 and 1345-1360 the smoke of a spy setting a building on fire (two animations), 1369-1384 and 1385-1416 smoke, 1433-1440 and 1443-1448
 sparkles, 1450-1465 parts of a HUD cell border, 1466-1477 wind.
-Opaque again after 1592: 1594-1597 a row of 1 to 4 braves and 1598-1602 a row of 1 to 5 pieces of wood (the
-tooltip's people and wood when full, one sprite per count), 1603-1614 parts of a progress bar (probably).
+Opaque again after 1592: the tooltip's people and wood, one sprite per count: 1594-1597 braves (1, 3, 4 and 5),
+1598-1602 wood (3, 5 as a row of 4 and a row of 1, 6, 8 and 11), 1603-1614 parts of a progress bar (probably).
 
 ## Blend tables (`data/`, one per theme, 65 536 bytes = 256 x 256 palette indices)
 Layouts from PopResourceEditor (Toksisitee, MIT, `140e389`), checked against the files.
