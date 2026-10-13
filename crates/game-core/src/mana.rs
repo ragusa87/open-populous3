@@ -88,7 +88,7 @@ impl ManaPool {
         let mut left = book.charge(rest);
         self.used += rest.saturating_sub(left);
         if !book.slots.iter().any(SpellSlot::takes_mana) {
-            left = production::charge(stores, left);
+            left = production::top_up(stores, left);
         }
         self.bank = (self.bank + left).min(MAX_MANA);
         self.incoming = Mana::ZERO;

@@ -35,12 +35,11 @@ impl Production {
         self.is_active() && self.stored < self.cost
     }
 
-    /// Takes what it can of `share` (at most `cost / MAX_SHARE_DIV` and what it still needs), noting
-    /// whether that left it short; returns the rest.
+    /// Takes what it can of `share` (at most `cost / MAX_SHARE_DIV` and what it still needs); returns
+    /// the rest.
     pub fn give(&mut self, share: Mana) -> Mana {
         let taken = share.0.min((self.cost / MAX_SHARE_DIV) as u32).min((self.cost - self.stored.min(self.cost)) as u32);
         self.stored += taken as u16;
-        self.short = taken <= SHORT_SHARE as u32;
         Mana(share.0 - taken)
     }
 
@@ -55,16 +54,36 @@ impl Production {
     }
 }
 
-/// Shares `mana` evenly between the `stores` that take it, each taking what it can (`Production::give`).
-/// Returns what they did not take.
+/// The first share of the distribution: `mana` shared evenly between the `stores` that take it, each
+/// taking what it can (`Production::give`) and short when that is `SHORT_SHARE` or less. Turns without mana
+/// to share leave them as they are. Returns what they did not take.
 pub fn charge(stores: &mut [&mut Production], mana: Mana) -> Mana {
+    if mana == Mana::ZERO {
+        return mana;
+    }
+    share(stores, mana, true)
+}
+
+/// The second share, once every spell is full: like `charge`, without changing whether they are short.
+pub fn top_up(stores: &mut [&mut Production], mana: Mana) -> Mana {
+    share(stores, mana, false)
+}
+
+fn share(stores: &mut [&mut Production], mana: Mana, mark_short: bool) -> Mana {
     let takers = stores.iter().filter(|p| p.takes_mana()).count() as u32;
     if takers == 0 {
         return mana;
     }
     let share = Mana(mana.0 / takers);
-    let left = stores.iter_mut().filter(|p| p.takes_mana()).fold(Mana::ZERO, |left, p| left + p.give(share));
-    left + mana.saturating_sub(Mana(share.0 * takers))
+    let mut left = mana.saturating_sub(Mana(share.0 * takers));
+    for p in stores.iter_mut().filter(|p| p.takes_mana()) {
+        let rest = p.give(share);
+        if mark_short {
+            p.short = share.saturating_sub(rest).0 <= SHORT_SHARE as u32;
+        }
+        left += rest;
+    }
+    left
 }
 
 impl GameMap {
@@ -87,13 +106,9 @@ mod tests {
     fn a_share_is_at_most_a_32nd_of_the_cost_and_what_is_missing() {
         let mut p = warrior(0);
         assert_eq!(p.give(Mana(280)), Mana(171), "3500 / 32 = 109 taken");
-        assert_eq!((p.stored, p.short), (109, false));
+        assert_eq!(p.stored, 109);
         let mut p = warrior(3450);
         assert_eq!(p.give(Mana(280)), Mana(230), "only the 50 missing");
-        assert!(!p.short, "50 is more than 32");
-        let mut p = warrior(0);
-        p.give(Mana(20));
-        assert!(p.short, "20 is short");
     }
 
     #[test]
@@ -103,6 +118,21 @@ mod tests {
         assert_eq!((a.stored, b.stored, idle.stored), (100, 3500, 0), "100 each, the full one took 10");
         assert_eq!(left, Mana(91), "90 not taken and the odd one");
         assert_eq!(charge(&mut [&mut idle], Mana(50)), Mana(50), "nobody takes");
+    }
+
+    #[test]
+    fn short_from_a_small_first_share_only() {
+        let mut p = warrior(0);
+        charge(&mut [&mut p], Mana(20));
+        assert!(p.short, "20 is short");
+        charge(&mut [&mut p], Mana::ZERO);
+        assert!(p.short, "a turn without income changes nothing");
+        charge(&mut [&mut p], Mana(280));
+        assert!(!p.short, "109 is enough");
+        charge(&mut [&mut p], Mana::ZERO);
+        assert!(!p.short, "a turn without income changes nothing");
+        top_up(&mut [&mut p], Mana(10));
+        assert!(!p.short, "the second share does not say");
     }
 
     #[test]
