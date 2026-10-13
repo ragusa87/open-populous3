@@ -93,6 +93,8 @@ CATALOG = [
                                          "spy training", "boat hut", "airship hut", "camp fire"]),
     *labels(HFX, "HUD", 171, ["help (book)", "prayer (coloured)", "info (bubble with !)", "info (i)", "blue flag"]),
     *labels(HFX, "HUD", 178, ["firewarrior (coloured)", "preacher (coloured)"]),
+    *labels(HFX, "digits", 219, [f"digit {n} (6 x 9)" for n in range(10)]),
+    *labels(HFX, "digits", 229, [f"digit {n} (7 x 9)" for n in range(10)]),
     *frames(HFX, "HUD", 187, 210, "build/wood action icon"),
     *frames(HFX, "effects", 346, 349, "volcano rock"),
     *series(HFX, "HUD", 639, 652, "gold state icon"),
