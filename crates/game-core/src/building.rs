@@ -147,7 +147,7 @@ impl BuildingKind {
         }
     }
 
-    /// Whether it never burns: the library (vault of knowledge) and the prison (building-type flag `+0x4A` bit 0x1,
+    /// Whether it never burns: the library (vault of knowledge) and the prison (a building-type flag,
     /// pop3-rev-analysis.md "Burning building").
     pub fn fireproof(self) -> bool {
         matches!(self, BuildingKind::Vault | BuildingKind::Prison)

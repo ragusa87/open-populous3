@@ -67,7 +67,7 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 38 | 8 | dying: the body falls down onto its back, last frame lying (checked in the game; used) |
 | 39 | 1 | lying dead |
 | 40 | 5 | the body lying, its spirit rising: drowning in the water, and after the death fall (`Pose::Spirit`, used) |
-| 48 | 8 | brave hiding its eyes: a taunt, one of 48-50 played at random by a person waiting to be attacked (exe, table 0x5A6ECA) |
+| 48 | 8 | brave hiding its eyes: a taunt, one of 48-50 played at random by a person waiting to be attacked [exe] |
 | 49 | 9 | waving an arm: a taunt (as 48) |
 | 50 | 7 | crouching, then punching: a taunt (as 48), not a fight move |
 | 51 | 4 | pedalling: moving a vehicle |

@@ -33,7 +33,7 @@ impl Health {
         self.current == 0
     }
 
-    /// A quarter of the maximum or less: the original's low-health flag (0x4D43A0), shown over the person.
+    /// A quarter of the maximum or less: the original's low-health flag ("Status markers over people"), shown over the person.
     pub fn is_low(self) -> bool {
         self.max / 4 >= self.current
     }

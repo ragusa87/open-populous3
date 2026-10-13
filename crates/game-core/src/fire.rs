@@ -11,7 +11,7 @@ use crate::terrain::DirtyRect;
 use crate::time::{Countdown, Tick, Ticks};
 use crate::unit::{Order, UnitId};
 
-/// 127 turns (10.6 s), the original's burning building (timer `+0xA7`).
+/// 127 turns (10.6 s), the original's burning building (pop3-rev-analysis.md "Burning building").
 pub const BURN_TICKS: Ticks = Ticks::new(127);
 /// The turn of its fire its people are thrown out (timer 119).
 pub const THROW_OUT_AT: Ticks = Ticks::new(8);

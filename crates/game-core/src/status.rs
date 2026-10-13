@@ -30,7 +30,7 @@ impl Timed {
     }
 
     /// Whether its marker shows at `now` on a person at `phase`: always until its last `BLINK_STEPS`, then 2 turns
-    /// on, 2 off (the original's `class_counter & 2`).
+    /// on, 2 off, as in the original ("Status markers over people").
     pub fn shown(self, now: Tick, phase: u32) -> bool {
         self.is_on() && (self.0 > BLINK_STEPS || now.to_wire().wrapping_add(phase) & 2 == 0)
     }

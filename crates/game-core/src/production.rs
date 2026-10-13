@@ -5,20 +5,20 @@
 use crate::map::GameMap;
 use crate::mana::Mana;
 
-/// A building's share of an income is at most its cost / `MAX_SHARE_DIV` (0x41A590).
+/// A building's share of an income is at most its cost / `MAX_SHARE_DIV` ("Distribution").
 pub const MAX_SHARE_DIV: u16 = 32;
 /// Mana a building making nothing gives back to the tribe each turn, until its store is empty.
 pub const REFUND: u16 = 100;
 
 /// Most mana a share can bring and still leave the building short of mana (the panel's blinking bar,
-/// pop3-rev-analysis.md "The panel's training bar": hut `+0x14` bit 0x1000).
+/// pop3-rev-analysis.md "The panel's training bar").
 pub const SHORT_SHARE: u16 = 32;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Production {
-    /// Mana taken so far (`+0x98`).
+    /// Mana taken so far.
     pub stored: u16,
-    /// Mana it needs to make what it makes now (`+0x96`); 0 while it makes nothing.
+    /// Mana it needs to make what it makes now; 0 while it makes nothing.
     pub cost: u16,
     /// Its last share was `SHORT_SHARE` or less.
     pub short: bool,

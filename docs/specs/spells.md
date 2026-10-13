@@ -55,7 +55,7 @@ and are ignored without one, `Command::PauseSpell` pauses, rewards go to their t
 ## Mana (`game_core::mana`)
 Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, used }`, amounts as `Mana`. As in the
 original [exe] (pop3-rev-analysis.md "Mana rules"), two entry points:
-- `add(amount)` (`add_mana`): mana gained during the turn (a reward) only goes to `incoming`;
+- `add(amount)`: mana gained during the turn (a reward) only goes to `incoming`;
 - `tick(now, book)`, once per turn from `GameMap::tick`: the income every 16 turns (`MANA_EVERY`, a fixed `INCOME`
   guessed until income from people), then `distribute`: `incoming` charges the spells first (`SpellBook::charge`),
   the rest goes to the bank (capped at `MAX_MANA`). Only this changes the bank and the charges.

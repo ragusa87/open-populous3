@@ -32,7 +32,7 @@ pub enum Marker {
 /// One slot per marker in each unit's view.
 pub const SLOTS: [Marker; 7] = [Marker::LowHealth, Marker::Bloodlust, Marker::Hypnotised, Marker::Selected, Marker::Shield(0), Marker::Shield(1), Marker::Shield(2)];
 
-/// A shield ring's path (the original's table 0x59D9D8): its size (0-4) and height in eighths of the body, rising
+/// A shield ring's path ("Status markers over people"): its size (0-4) and height in eighths of the body, rising
 /// from the feet to the head over 8 steps and back, largest at mid-height.
 pub const SHIELD_PATH: [(usize, u8); 16] =
     [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (3, 5), (2, 6), (1, 7), (0, 8), (1, 7), (2, 6), (3, 5), (4, 4), (3, 3), (2, 2), (1, 1)];

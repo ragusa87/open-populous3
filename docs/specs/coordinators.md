@@ -93,7 +93,7 @@ from the executable (pop3-rev-analysis.md "Combat").
 
 | Model | Name [wiki] | What we know | Will become |
 |---|---|---|---|
-| 1 | Formation | `process_formation_unit`, `add_unit_to_formation` [exe] | a formation coordinator (group moves) |
+| 1 | Formation | its own per-turn routine [exe] | a formation coordinator (group moves) |
 | 2 | Beacon | heads a list of its own in the tribe struct [exe] | unknown |
 | 3 | Thing Info Display | name only | probably nothing (display) |
 | 4 | Soul Convert | soul convert [exe] | conversion (with `ChangeOwner`) |

@@ -1,5 +1,5 @@
 //! A player's mana (pop3-rev-analysis.md "Mana rules"): what is gained or spent during a turn waits in
-//! `incoming` (`add`, the original's `add_mana`); once per turn `tick` adds the income, feeds the training
+//! `incoming` (`add`); once per turn `tick` adds the income, feeds the training
 //! units (`crate::production`), charges the spells and banks the rest. Only `tick` changes the bank, the
 //! spell charges and the training units' stores.
 
@@ -60,12 +60,12 @@ impl Default for ManaPool {
 }
 
 impl ManaPool {
-    /// Mana gained during the turn (`add_mana` 0x41A4F0): settled by the next `tick`.
+    /// Mana gained during the turn ("Spending and other sources"): settled by the next `tick`.
     pub fn add(&mut self, amount: Mana) {
         self.incoming += amount;
     }
 
-    /// The turn's update (0x41A550): the income on update turns, then `distribute`.
+    /// The turn's update ("Every turn, per tribe"): the income on update turns, then `distribute`.
     pub fn tick(&mut self, now: Tick, book: &mut SpellBook, stores: &mut [&mut Production]) {
         if MANA_EVERY.fires(now, 0) {
             self.received = INCOME;
@@ -75,7 +75,7 @@ impl ManaPool {
         self.distribute(book, stores);
     }
 
-    /// The distribution (0x41A590): the training units' `stores` making nothing give some back; those
+    /// The distribution ("Distribution"): the training units' `stores` making nothing give some back; those
     /// making something take their share of half of `incoming` (`production::charge`); the rest charges
     /// the spells (`SpellBook::charge`); with every spell full, the stores take another share of what is
     /// left, and the rest goes to the bank.
