@@ -122,7 +122,8 @@ A training hut makes no mana [community]. As in the game (checked by someone who
 3. **One at a time**: the head of the queue walks in by the door and is trained for a while. The hut's tooltip
    shows the training progress, and the unit inside can be selected. In the original [exe] the bar is the training
    building's stored mana over its cost, blinking while it is short of mana (pop3-rev-analysis.md "The panel's
-   training bar").
+   training bar"). The exe disagrees on "one" (pop3-rev-analysis.md "The queue at the door"): the head goes in
+   every 16 turns while fewer than 5 are inside, and they train together; not yet checked in the game.
 4. **Mana** [exe]: no duration: the training building stores mana taken from each income before the spells (at
    most `cost / 32` per income), never from the bank, and trains when the store reaches the cost; so the more
    income, the faster. Cancelled, the store goes back to the tribe at 100 per turn (pop3-rev-analysis.md

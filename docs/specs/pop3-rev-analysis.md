@@ -35,6 +35,8 @@ so a live measurement may run on it with the addresses translated.
 - **Training deletes the trainee and creates a new person** [exe]: a training building (not a house) stores mana
   taken from each income (at most `cost / 32` per pass, before the spells), and when the store reaches the cost
   the trainee is replaced by a new unit of the building's kind. See "Training buildings".
+- **Training buildings take up to 5 at once** [exe]: queued people (a wall-hugging queue from the door) go in
+  one every 16 turns while fewer than 5 are inside, and train together for `n × cost`. See "The queue at the door".
 - **Prayer gauges fill in `PrayTime / 3` seconds at full count** [exe]: one `PrayTime` unit is 4 turns, and each
   missing prayer slows the gauge sharply (`C² / (C − n + 1)²`). See "Prayer at triggers".
 - **A spell is a recipe of reusable components** [exe]: the shaman fires a shot, and on arrival the spell spawns
@@ -287,9 +289,9 @@ into the type's output person (+0x31):
 | 8 firewarrior training | 6 firewarrior | 5 | `HUMAN_TRAIN_MANA_SWARR` 4000 / 1000 |
 | 9 reconversion | 2 brave | 1 | none (person type 2 has no cost: free) |
 
-Trainees go in one at a time, from an unlimited queue in front of the building [player]: the 5 slots are the
-building record's capacity, and the queue logic that admits one person is not traced. The routine below loops
-over all the slots, but in play it finds one trainee.
+Trainees queue outside and go in one by one, at least 16 turns apart, until the 5 slots are full: up to 5
+people train together and come out together (see "The queue at the door"). This contradicts the [player] note
+"one at a time" that our spec follows; settle it in the game.
 
 Values are the file's; the exe defaults of `HUMAN_`/`CP_TRAIN_MANA_*` and `TRAIN_MANA_BAND_*` are all 0.
 
@@ -362,6 +364,53 @@ training building, every turn (0x405B80):
   `CONV_TEMPLE`, `CONV_SPY`, `CONV_WARRIOR`, `CONV_SUPER` (4000) and `CONV_RECONV` (128) match no exe constant
   name, so they are probably ignored.
 - A shaman entering a full building pushes one occupant out (0x4071AD).
+
+### The queue at the door
+The "go into a building" order (person state 0xA or 0xE, current command kind 8 on the building) runs 0x434610,
+sub-state +0x2D. Buildings with type flag +0x48 bit 0x800 have a queue: the training buildings (types 5-9) and the
+boat and airship huts (13-16), not the houses. The queue is a linked list: head person id at building +0xA2, next
+at person +0x85, the person's rank at +0xAA, person +0x14 bit 0x20 while listed.
+```text
+sub 0 (start): target = building (+0x89), timeout +0x70 = 256
+    already listed (+0x14 bit 0x20)     -> sub 3 at its rank
+    standing at the building, queue empty, inside (+0xA6) < slots and entering (+0xAD) < slots -> sub 4
+    else walk to the door point (0x4044B0) -> sub 1
+sub 1 (walking), every 2 turns:
+    queue building, within 0x538 (2.6 cells, per axis) of the door point,
+    and (queue not empty or inside >= slots or entering >= slots) -> sub 2
+    within 0x70 of the door point -> sub 4
+sub 2: append at the end (0x409B10), rank = last rank + 1, walk to the spot of that rank -> sub 3
+sub 3 (queued, +0xC bit 0x200000):
+    if inside < slots and building gate +0xAB == 0 and I am the head and not walking:
+        +0xAB = 16; -> sub 6 (walk to the door point; within 0x70 -> sub 4)
+    moving up: when the countdown +0xA9 reaches 0, the one behind gets +0xA9 = 2, my rank = rank of the
+        one ahead + 1, walk to that spot: the queue moves up as a ripple, 2 turns per rank
+    at my spot, every 16 turns: if I am already of the output type (+0x31) and the one behind is not,
+        swap places (so people to convert pass those who would come out unchanged)
+    not at the spot: re-walk; while walking +0x70 counts down, at 0 restart (sub 0): 256 turns (21 s)
+sub 4/5 (entering): inside < slots: walk in (0x404420), entering count +0xAD += 1 (up to 120; more than
+    slots at once sets building +0x14 bit 0x40); every 2 turns, within 0x70: enter_building (0x407150)
+    building full: queue building -> sub 8, 9 (back to the door point, then sub 0: queue again)
+```
+- Admission gate +0xAB: set to 16 when a head is admitted, 12 when anyone leaves (`remove_person_from_hut`
+  0x40778C, also the converted occupants of a finished training), minus 1 per building turn (0x4032E0). So one
+  person every 16 turns (1.3 s) while there is room, 12 turns (1 s) after someone came out.
+- Capacity: `inside < slots` (type +0x20, 5 for types 5-8, 1 for the reconversion building 9), checked by the
+  head (0x434AC1) and again on entry (0x4071A5). So 5 trainees can be inside, admitted 16 turns apart, and the
+  cost is recomputed on each entry with `n` = all of them (`TRAIN_MANA × n × BAND%`); they all come out at
+  once. Not seen in game: with a training at 500 turns, a queue of 5 fills the building in 64 turns.
+- Leaving the queue: any other order ends state 0xA/0xE; the queue rebuild (0x409580, run every turn by queued
+  people not in sub 3) unlinks anyone no longer queued for this building, stores the first freed rank in
+  building +0xAC and sets +0x9C bit 0x2000; the next queued person to run sees the bit and starts the ripple at
+  that rank (0x43475D). A finished training sets the bit as well (0x4065E4).
+- Entering jam: +0xAD counts people walking in; +0xAE (16 turns) resets it to 0; while +0x14 bit 0x40 is set it
+  drops by 1 every 8 turns instead, and newcomers queue instead of going straight in.
+- Spots (0x409710(building, rank, &pos)): start at the door point (building pos − shape origin × 256 + door
+  offset × 64, 0x4044B0), snapped to 64 units inside the edge of its cell, facing along the wall (the quadrant
+  from the door to the building, turned by 90°). Then `rank` steps of 0x80 (a quarter cell, 4 spots per cell):
+  each step turns towards the building when that cell is not footprint (shape mask bit 0x1), otherwise goes
+  straight, and turns away when the next cell lacks mask bit 0x4 (the ring around the footprint). So the queue
+  hugs the building, going round it from the door. What happens past one lap, and off the mask grid: not traced.
 
 ### The panel's training bar
 The building panel (`draw_ui_panel` 0x504BC0, switch on the panel kind: training buildings are kind 5, case
@@ -1238,8 +1287,12 @@ low health (+0x14 bit 0x1000, the sparkles) = life <= max_life / 4
 - huts-and-training.md rule 5 ("transformed into the hut's kind, same unit", hut meaning the training building):
   the original deletes the occupant and allocates a new person (new id, full life), carrying only queued orders and
   the ghost flag.
-- huts-and-training.md rules 2-3 (unlimited queue, one at a time) match the game [player]; the exe's 5 slots are
-  the record's capacity, the queue that admits one person is not traced.
+- huts-and-training.md rules 2-3 (unlimited queue, one at a time) [player] vs the exe ("The queue at the door"):
+  the queue is unlimited, but the head goes in whenever fewer than 5 are inside and 16 turns have passed since
+  the last admission (12 after someone came out), so up to 5 train together for `n × cost` and come out
+  together; ours holds one (`BuildingKind::capacity`). The queue hugs the building at 4 spots per cell, moves up
+  2 turns per rank, and people already of the output type let the others pass (every 16 turns). Ours has no
+  queue yet.
 - huts-and-training.md rule 4 (cost / duration per update, paused without mana): the original has no duration;
   the time is the cost filled at `cost / 32` per income (16 turns), 256-512 turns (21-43 s) at best. In our
   ticks (1 tick = 1 turn): a share every 16 ticks.
@@ -1352,7 +1405,8 @@ low health (+0x14 bit 0x1000, the sparkles) = life <= max_life / 4
   what option flag 0x89D17C bit 0x40 is (no kick, no knockback),
   the meaning of pre-fight mode 2, the ground test of a fight's place (0x51E4B0), the attacker's sub-state 8 when
   its target is already in a pre-fight, and the firewarriors' ranged attack (attack-order sub-states 10, 11).
-- Training buildings: the queue in front of the door (which code admits one trainee at a time), the meaning of
+- Training buildings: whether 5 trainees really go in together in play (the exe says so; live: queue 5 braves
+  into a warrior training building and watch +0xA6), the queue spots past one lap, the meaning of
   `+0x9D` bit 0x4 and `+0x7E` set at the end, `+0x14` bit 0x1000 (set when a training building receives 32 or
   less), the reconversion building (type 9), and how long a training really takes (live: watch +0x96/+0x98 of a
   warrior training building per turn).
@@ -1401,6 +1455,11 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x405B80 | "training_building_turn": cost, conversion (delete occupants, alloc new persons) |
 | 0x41B0C0 | "train_cost(building, &cost, type, n)": cost by band, returns `stored >= cost` |
 | 0x407150 | "enter_building(person, building)": slot, training flag, cost |
+| 0x434610 | "go_into_building" (person state 0xA/0xE): walk, queue (sub 1-3), admission, entry (sub 4-9) |
+| 0x409580 | rebuild a building's queue: unlink who left, first freed rank to `+0xAC`, `+0x9C` bit 0x2000 |
+| 0x409710 | queue spot of a rank: wall-following steps of 0x80 from the door point |
+| 0x409B10 / 0x409BD0 / 0x409C50 | append to the queue / the one ahead of a person / the person at a rank (-1: last) |
+| 0x4044B0 | a building's door point (pos, shape origin, door offset) |
 | 0x40BBE0 | recomputes a training building's cost |
 | 0x4EF180 | "delete_unit" |
 | 0x504BC0 | `draw_ui_panel`: building panel, training bar at 0x504FDD (values) and 0x505604 (drawing) |
@@ -1507,6 +1566,10 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
   (model or sprite) +0x33, `pos` +0x3D, last attacker's tribe +0xB0.
 - Training building fields: occupants +0x86 (6 × u16 unit ids, the type's +0x20 used), training cost +0x96 (u16),
   stored mana +0x98 (u16), training on +0x9C bit 0x80, next training building in the distribution list +0xA0.
+- Queue fields (buildings with type flag 0x800): queue head id +0xA2, inside count +0xA6, admission gate +0xAB
+  (turns), first freed rank +0xAC, entering count +0xAD and its reset timer +0xAE, queue changed +0x9C bit
+  0x2000, entering jam +0x14 bit 0x40. Person: next in queue +0x85, ripple countdown +0xA9, rank +0xAA, listed
+  +0x14 bit 0x20, target building +0x89.
 - Wood fields: a person's state timer +0x70 and carried wood +0x78, a tree's wood left +0x84, a shape's wood +0x96,
   and +0xA4 for the building types that hold wood. The gather handler switches on a byte read as +0xA8, but that field stays 0 while
   chopping (measured), so the offset is unconfirmed.
