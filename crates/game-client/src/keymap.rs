@@ -47,6 +47,116 @@ pub enum Shortcut {
     Slower,
 }
 
+impl Shortcut {
+    pub const ALL: [Shortcut; 28] = {
+        use Shortcut::*;
+        [
+            Forward, Back, StrafeLeft, StrafeRight, RotateLeft, RotateRight, TiltUp, TiltDown, ZoomIn, ZoomOut, FovWider,
+            FovNarrower, Aerial, LookAtShaman, LookAtSite, TurnPlan, Stop, CastSelf, NextLevel, PreviousLevel, Grid,
+            DebugOverlay, Editor, ViewPresets, CameraReadout, Pause, Faster, Slower,
+        ]
+    };
+
+    /// What it does, for the shortcuts page.
+    pub fn describe(self) -> &'static str {
+        use Shortcut::*;
+        match self {
+            Forward => "Scroll forward",
+            Back => "Scroll back",
+            StrafeLeft => "Scroll left",
+            StrafeRight => "Scroll right",
+            RotateLeft => "Rotate left",
+            RotateRight => "Rotate right",
+            TiltUp => "Tilt up",
+            TiltDown => "Tilt down",
+            ZoomIn => "Zoom in",
+            ZoomOut => "Zoom out",
+            FovWider => "Wider field of view",
+            FovNarrower => "Narrower field of view",
+            Aerial => "Aerial view",
+            LookAtShaman => "Look at the shaman",
+            LookAtSite => "Look at the reincarnation site",
+            TurnPlan => "Turn the building plan",
+            Stop => "Stop the selection",
+            CastSelf => "Cast the selected spell",
+            NextLevel => "Next level",
+            PreviousLevel => "Previous level",
+            Grid => "Cell grid",
+            DebugOverlay => "Debug overlay",
+            Editor => "World editor",
+            ViewPresets => "View presets",
+            CameraReadout => "Camera readout",
+            Pause => "Pause the game",
+            Faster => "Game faster",
+            Slower => "Game slower",
+        }
+    }
+}
+
+/// Mouse and other inputs, the same in both keymaps, for the shortcuts page.
+pub const MOUSE: [(&str, &str); 12] = [
+    ("Select a unit", "Left click (Ctrl: add)"),
+    ("Select in a box", "Left drag"),
+    ("Order the selection", "Left click: ground, tree, building, vehicle, enemy"),
+    ("Deselect", "Right click"),
+    ("Put out a camp fire, cancel a plan", "Shift + right click"),
+    ("Scroll", "Mouse against a window edge"),
+    ("Rotate and tilt", "Middle drag"),
+    ("Zoom (Ctrl: tilt, Shift: field of view)", "Wheel"),
+    ("Select the shaman alone", "Left click on her preview"),
+    ("Look at the shaman", "Right click on her preview"),
+    ("Pause menu", "Esc"),
+    ("Fullscreen", "F11"),
+];
+
+/// Dev mode only, in the world editor (`editor.rs`).
+pub const EDITOR_KEYS: (&str, &str) = ("Editor brushes", "R raise, F lower, T flatten, M mark, B bridge");
+
+/// A key's name as printed on the shortcuts page.
+pub fn key_name(code: KeyCode) -> String {
+    let name = format!("{code:?}");
+    match code {
+        KeyCode::ArrowUp => "Up".into(),
+        KeyCode::ArrowDown => "Down".into(),
+        KeyCode::ArrowLeft => "Left".into(),
+        KeyCode::ArrowRight => "Right".into(),
+        KeyCode::PageUp => "PgUp".into(),
+        KeyCode::PageDown => "PgDn".into(),
+        KeyCode::Equal => "+".into(),
+        KeyCode::Minus => "-".into(),
+        KeyCode::NumpadAdd => "Numpad +".into(),
+        KeyCode::NumpadSubtract => "Numpad -".into(),
+        KeyCode::NumpadEnter => "Numpad Enter".into(),
+        _ => match (name.strip_prefix("Key"), name.strip_prefix("Numpad")) {
+            (Some(letter), _) => letter.into(),
+            (_, Some(digit)) => format!("Numpad {digit}"),
+            _ => name,
+        },
+    }
+}
+
+/// A binding as printed on the shortcuts page: its modifiers, then its key.
+pub fn binding_name(b: &Binding) -> String {
+    let key = match b.input {
+        Input::Code(code) => key_name(code),
+        Input::Char(c) => c.to_string(),
+    };
+    let ctrl = if b.mods.ctrl { "Ctrl+" } else { "" };
+    let shift = if b.mods.shift { "Shift+" } else { "" };
+    format!("{ctrl}{shift}{key}")
+}
+
+/// The shortcuts page of a keymap: every keyboard shortcut it binds (what it does, its keys), then the editor's in
+/// dev mode, then the mouse.
+pub fn shortcut_lines(dev: bool) -> Vec<(&'static str, String)> {
+    let keys = Shortcut::ALL.iter().filter_map(|&s| {
+        let b = bindings(dev, s);
+        (!b.is_empty()).then(|| (s.describe(), b.iter().map(binding_name).collect::<Vec<_>>().join(" / ")))
+    });
+    let editor = dev.then(|| (EDITOR_KEYS.0, EDITOR_KEYS.1.to_string()));
+    keys.chain(editor).chain(MOUSE.iter().map(|&(what, how)| (what, how.to_string()))).collect()
+}
+
 /// A key on the keyboard, or a character wherever the layout puts it (`>`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -207,14 +317,7 @@ impl Plugin for KeymapPlugin {
 mod tests {
     use super::*;
 
-    const ALL: [Shortcut; 28] = {
-        use Shortcut::*;
-        [
-            Forward, Back, StrafeLeft, StrafeRight, RotateLeft, RotateRight, TiltUp, TiltDown, ZoomIn, ZoomOut, FovWider,
-            FovNarrower, Aerial, LookAtShaman, LookAtSite, TurnPlan, Stop, CastSelf, NextLevel, PreviousLevel, Grid,
-            DebugOverlay, Editor, ViewPresets, CameraReadout, Pause, Faster, Slower,
-        ]
-    };
+    const ALL: [Shortcut; 28] = Shortcut::ALL;
 
     fn fires(dev: bool, shortcut: Shortcut, input: Input, mods: Mods) -> bool {
         bindings(dev, shortcut).iter().any(|b| b.matches(|i| i == input, mods))
@@ -275,6 +378,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_shortcuts_page_lists_the_active_keymap() {
+        assert_eq!(binding_name(&key!(PageUp, CTRL)), "Ctrl+PgUp");
+        assert_eq!(binding_name(&key!(Equal, SHIFT)), "Shift++");
+        assert_eq!(binding_name(&key!(KeyW, NONE)), "W");
+        assert_eq!(binding_name(&key!(Numpad8, NONE)), "Numpad 8");
+        assert_eq!(binding_name(&Binding { input: Input::Char(">"), mods: NONE }), ">");
+        let line = |dev: bool, what: &str| shortcut_lines(dev).into_iter().find(|l| l.0 == what).map(|l| l.1);
+        assert_eq!(line(true, "Look at the shaman"), Some("Space".into()));
+        assert_eq!(line(false, "Look at the shaman"), Some(">".into()));
+        assert_eq!(line(false, "World editor"), None, "not in the original's keymap");
+        assert_eq!(line(false, "Editor brushes"), None);
+        assert!(line(true, "Editor brushes").is_some());
+        assert_eq!(line(false, "Deselect"), Some("Right click".into()), "the mouse in both");
+        assert_eq!(shortcut_lines(true).len(), Shortcut::ALL.len() + 1 + MOUSE.len(), "every dev shortcut has a key");
     }
 
     #[test]

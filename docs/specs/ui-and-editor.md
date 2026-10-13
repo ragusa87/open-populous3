@@ -148,7 +148,8 @@ over (a tall one west, a lower one east, a mound on the south island), and an em
 south across a strait, vehicles.md), Quit.
 Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
 Esc in the game (once an open view-presets menu is closed) pauses: the mouse is released (`VirtualCursor::request`)
-and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Game speed: x1/x2/x4/x8 (cycles), Dev mode: on/off (shortcuts.md), Main menu >
+and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Game speed: x1/x2/x4/x8 (cycles), Dev mode: on/off (shortcuts.md), Shortcuts > (the
+keys and mouse of the keymap in use, shortcuts.md; `MENU=shortcuts` opens it for shots), Main menu >
 "Leave this game?" No / Yes.
 Resuming or starting a game captures the mouse again.
 `AppState::Loading | Menu | Playing | Paused`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run

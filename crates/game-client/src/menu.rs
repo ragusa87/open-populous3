@@ -4,7 +4,8 @@
 //! Gameplay systems are in the `Gameplay` set, which only runs while `Playing`. Behind the menu the
 //! game camera is off: no world, units or HUD are drawn, the menu has its own overlay camera.
 //! Esc in the game pauses: the mouse is released and the pause menu (Resume, Main menu with a
-//! confirmation) shows over the frozen game; Esc on it resumes. Its Dev mode entry switches `keymap::DevMode`.
+//! confirmation) shows over the frozen game; Esc on it resumes. Its Dev mode entry switches `keymap::DevMode`; its
+//! Shortcuts page lists the keys and mouse of the keymap in use (`keymap::shortcut_lines`).
 //! `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship|sandbox-spells|sandbox-vehicles` picks where to start (screenshots start in the game).
 
 use crate::camera::{GameCamera, OverlayCamera};
@@ -44,6 +45,8 @@ pub enum Page {
     Main,
     Sandbox,
     Paused,
+    /// The shortcuts of the keymap in use (`keymap::shortcut_lines`).
+    Shortcuts,
     ConfirmLeave,
 }
 
@@ -88,6 +91,7 @@ pub fn title(page: Page) -> &'static str {
         Page::Main => "Open Populous",
         Page::Sandbox => "Sandbox",
         Page::Paused => "Paused",
+        Page::Shortcuts => "Shortcuts",
         Page::ConfirmLeave => "Leave this game?",
     }
 }
@@ -96,7 +100,8 @@ pub fn items(page: Page) -> &'static [(&'static str, Action)] {
     match page {
         Page::Main => &[("New game", Action::Start(Start::NewGame)), ("Sandbox", Action::Open(Page::Sandbox)), ("Quit", Action::Quit)],
         Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Units", Action::Start(Start::SandboxUnits)), ("Buildings", Action::Start(Start::SandboxBuildings)), ("Worship", Action::Start(Start::SandboxWorship)), ("Spells", Action::Start(Start::SandboxSpells)), ("Vehicles", Action::Start(Start::SandboxVehicles)), ("Back", Action::Back)],
-        Page::Paused => &[("Resume", Action::Resume), ("Game speed", Action::CycleSpeed), ("Dev mode", Action::ToggleDev), ("Main menu", Action::Open(Page::ConfirmLeave))],
+        Page::Paused => &[("Resume", Action::Resume), ("Game speed", Action::CycleSpeed), ("Dev mode", Action::ToggleDev), ("Shortcuts", Action::Open(Page::Shortcuts)), ("Main menu", Action::Open(Page::ConfirmLeave))],
+        Page::Shortcuts => &[("Back", Action::Back)],
         Page::ConfirmLeave => &[("No, keep playing", Action::Back), ("Yes, back to the main menu", Action::Leave)],
     }
 }
@@ -216,6 +221,7 @@ impl Plugin for MenuPlugin {
             .add_systems(Startup, spawn_menu)
             .add_systems(Update, begin_game.after(crate::boot::LoadingSystems))
             .add_systems(Update, pause_on_escape.before(crate::virtual_cursor::toggle_capture).in_set(Gameplay))
+            .add_systems(Update, menu_from_env.in_set(Gameplay))
             .add_systems(
                 Update,
                 (menu_keys.before(crate::virtual_cursor::toggle_capture), menu_mouse, rebuild_items, item_visuals)
@@ -286,7 +292,7 @@ fn spawn_menu(mut commands: Commands, overlay: Single<Entity, With<OverlayCamera
         ))
         .with_children(|root| {
             root.spawn((MenuTitle, Text::new(""), TextFont { font_size: FontSize::Px(40.0), ..default() }, TextColor(TEXT)));
-            root.spawn((MenuList, Node { flex_direction: FlexDirection::Column, row_gap: px(8), margin: UiRect::top(px(12)), ..default() }));
+            root.spawn((MenuList, Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(8), margin: UiRect::top(px(12)), ..default() }));
             root.spawn((
                 Text::new("Up/Down: move   Enter: select   Esc: back"),
                 TextFont { font_size: FontSize::Px(13.0), ..default() },
@@ -357,6 +363,15 @@ pub(crate) fn pause_on_escape(
         cursor.request = Some(false);
         state.set(AppState::Paused);
     }
+}
+
+/// Dev: `MENU=shortcuts` pauses the game on the Shortcuts page once it runs, for shots.
+fn menu_from_env(mut done: Local<bool>, mut nav: ResMut<MenuNav>, mut state: ResMut<NextState<AppState>>) {
+    if std::mem::replace(&mut *done, true) || std::env::var("MENU").ok().as_deref() != Some("shortcuts") {
+        return;
+    }
+    *nav = MenuNav { stack: vec![(Page::Paused, 3), (Page::Shortcuts, 0)] };
+    state.set(AppState::Paused);
 }
 
 fn apply(outcome: Option<Outcome>, game: &mut GameSetup, nav: &mut MenuNav, state: &mut NextState<AppState>, exit: &mut MessageWriter<AppExit>) {
@@ -457,10 +472,16 @@ fn rebuild_items(
     }
     *shown = Some((page, dev.0, *speed));
     for mut t in &mut titles {
-        t.0 = title(page).to_string();
+        t.0 = match page {
+            Page::Shortcuts => format!("{} ({})", title(page), if dev.0 { "dev mode" } else { "original keys" }),
+            _ => title(page).to_string(),
+        };
     }
     for list in &lists {
         commands.entity(list).despawn_children().with_children(|l| {
+            if page == Page::Shortcuts {
+                spawn_shortcuts(l, dev.0);
+            }
             for (i, &entry) in items(page).iter().enumerate() {
                 l.spawn((
                     MenuItem(i),
@@ -473,6 +494,31 @@ fn rebuild_items(
             }
         });
     }
+}
+
+/// The shortcuts page's table: what each does and its keys, in two pairs of columns.
+fn spawn_shortcuts(list: &mut ChildSpawnerCommands, dev: bool) {
+    let font = |size: f32| TextFont { font_size: FontSize::Px(size), ..default() };
+    list.spawn((
+        Node {
+            display: Display::Grid,
+            grid_template_columns: vec![RepeatedGridTrack::fr(1, 1.2), RepeatedGridTrack::fr(1, 1.0), RepeatedGridTrack::fr(1, 1.2), RepeatedGridTrack::fr(1, 1.0)],
+            width: Val::Vw(90.0),
+            max_width: px(1100),
+            column_gap: px(14),
+            row_gap: px(2),
+            padding: UiRect::all(px(12)),
+            margin: UiRect::bottom(px(8)),
+            ..default()
+        },
+        BackgroundColor(ITEM),
+    ))
+    .with_children(|grid| {
+        for (what, keys) in crate::keymap::shortcut_lines(dev) {
+            grid.spawn((Text::new(what), font(12.0), TextColor(TEXT.with_alpha(0.75))));
+            grid.spawn((Text::new(keys), font(12.0), TextColor(TEXT)));
+        }
+    });
 }
 
 fn item_visuals(nav: Res<MenuNav>, mut q: Query<(&MenuItem, &mut BorderColor)>) {
@@ -527,11 +573,11 @@ mod tests {
     fn leaving_a_paused_game_asks_first() {
         let mut nav = MenuNav::at(Page::Paused);
         assert_eq!(nav.activate(), Some(Outcome::Resume), "Resume is first");
-        nav.step(3);
+        nav.step(4);
         assert_eq!(nav.activate(), None, "Main menu opens the confirmation");
         assert_eq!((nav.page(), nav.cursor()), (Page::ConfirmLeave, 0));
         assert_eq!(nav.activate(), None, "No (highlighted first) goes back");
-        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 3));
+        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 4));
         nav.activate();
         nav.step(1);
         assert_eq!(nav.activate(), Some(Outcome::Leave));
@@ -550,6 +596,16 @@ mod tests {
         nav.set_cursor(1);
         assert_eq!(nav.activate(), Some(Outcome::CycleSpeed));
         assert_eq!(label(items(Page::Paused)[1], true, GameSpeed { paused: false, times: 4 }), "Game speed: x4");
+    }
+
+    #[test]
+    fn the_pause_menu_opens_the_shortcuts_page_and_back() {
+        let mut nav = MenuNav::at(Page::Paused);
+        nav.step(3);
+        assert_eq!(nav.activate(), None);
+        assert_eq!(nav.page(), Page::Shortcuts);
+        assert_eq!(nav.activate(), None, "Back");
+        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 3));
     }
 
     #[test]

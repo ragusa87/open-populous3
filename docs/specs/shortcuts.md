@@ -6,7 +6,10 @@ The original game's shortcuts, from the PopRe wiki page [Keyboard Shortcuts](htt
 ## Two keymaps (`keymap.rs`)
 Systems ask for a `Shortcut` (`Shortcuts::pressed` / `just_pressed`), never for a key; `keymap::bindings(dev, ..)`
 holds two tables. Dev mode is toggled by the pause menu's "Dev mode" entry (`POP3_DEV=0|1` at start, on by default);
-it also shows the info line (level name and keys, top) and the camera readout (bottom right, printed to stdout too).
+it also shows the info line (level name, and the editor's brushes while it is on; top) and the camera readout (bottom
+right, printed to stdout too). The pause menu's Shortcuts page lists the keymap in use, then the mouse
+(`keymap::shortcut_lines`: each `Shortcut` it binds with `describe` and its keys, the editor's brushes in dev mode,
+`keymap::MOUSE`), so it never drifts from the bindings.
 - Dev mode: the "Ours" column below.
 - Off: the original's keys, for what we have: Up/Down and numpad 8/2 move, Ctrl+Left/Right and numpad 4/6 scroll
   sideways, Left/Right and numpad 7/9 rotate, `+`/`-` (and the numpad's) zoom, Enter aerial, `>` (the character,

@@ -1,4 +1,5 @@
-//! HUD: left control panel (shaman preview, tabs: spells, buildings, stats) and, in dev mode, the info line.
+//! HUD: left control panel (shaman preview, tabs: spells, buildings, stats) and, in dev mode, the info line (the
+//! level's name, the editor's brushes while it is on; the keys are on the pause menu's Shortcuts page).
 
 pub mod build;
 mod panel;
@@ -50,11 +51,7 @@ fn update_info(
         n => format!("level {}/{n}", levels.index + 1),
     };
     let mode = if editor.active { "EDITOR  R raise  F lower  T flatten  M mark  B bridge" } else { "" };
-    let s = format!(
-        "{} ({level})\n\
-         Push mouse on window edges / Up-Down / WASD move | Left-Right rotate | Middle drag rotate and tilt | Home/End tilt | Wheel or Ctrl+PgUp/PgDn zoom | Ctrl+wheel tilt | Shift+wheel or Shift+PgUp/PgDn fov | Enter aerial | PgUp/PgDn level | Left click unit: select (Ctrl add) | Left drag: box select | Left click ground: selection walks there (on a camp fire: goes round it) | Shift+right click camp fire: put it out | Right click: deselect | X stop | Space: look at her | H: reincarnation site | Click preview: select her alone (right click: look at her) | C cast selected spell | Tab editor | F2 view presets | F3 camera readout | G grid | Esc pause | F11 fullscreen\n{mode}",
-        map.0.name,
-    );
+    let s = format!("{} ({level})\n{mode}", map.0.name);
     for (mut t, mut v) in &mut q {
         v.set_if_neq(shown);
         if t.0 != s {
