@@ -112,7 +112,7 @@ impl Selection {
 /// The player's own living units, unless locked (`Unit::pickable`). People aboard a vehicle stay selectable:
 /// a move order to them moves their vehicle.
 pub fn selectable(u: &Unit) -> Option<PickableUnit<'_>> {
-    (u.owner == PLAYER && u.is_alive()).then(|| u.pickable()).flatten()
+    (u.owner == PLAYER && u.is_alive() && !u.locked()).then(|| u.pickable()).flatten()
 }
 
 /// The unit under the cursor: nearest feet-to-head line within `HIT_PX`.

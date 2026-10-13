@@ -19,6 +19,7 @@ const CIRCLE_POINTS: usize = 48;
 const SIDE_POINTS: usize = 8;
 const CHALLENGE: Color = Color::srgb(1.0, 0.55, 0.1);
 const MELEE: Color = Color::srgb(0.95, 0.15, 0.15);
+const SERMON: Color = Color::srgb(0.75, 0.4, 1.0);
 const WEAR: Color = Color::srgb(0.85, 0.1, 0.1);
 const SIGHT: Color = Color::srgb(1.0, 0.9, 0.2);
 const BOLT: Color = Color::srgb(0.3, 0.6, 1.0);
@@ -119,6 +120,11 @@ fn draw(
         for &(x, z) in &p.cells {
             outline(outline_square(Vec2::new(x as f32 + 0.5, z as f32 + 0.5), 0.5), ASHES.with_alpha(0.3 + 0.7 * fade));
         }
+    }
+    for (_, sermon) in map.coordinators.sermons.iter() {
+        let (Some(p), Some(l)) = (map.unit(sermon.preacher), map.unit(sermon.listener)) else { continue };
+        let p = cells((p.x, p.z));
+        outline(vec![p, p + torus_delta_cells(p, cells((l.x, l.z)))], SERMON);
     }
     for (id, m) in map.coordinators.melees.iter() {
         let at = cells(m.at);

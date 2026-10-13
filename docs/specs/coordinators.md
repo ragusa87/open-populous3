@@ -1,7 +1,7 @@
 # Coordinators
 
 Short-lived simulation objects that coordinate several units: a sermon, a fight, a formation, a guard post's
-control. The infrastructure is `game_core::coordinator`; kinds: the challenge and the melee (combat.md "Challenge", "Melee"). Each kind
+control. The infrastructure is `game_core::coordinator`; kinds: the challenge, the melee and the sermon (combat.md "Challenge", "Melee", "Sermon"). Each kind
 has its own spec and rules on top of this.
 
 Tags: **[exe]** the original executable (pop3-rev-analysis.md), **[wiki]** the Populous Wiki (Object Data),
@@ -16,7 +16,7 @@ computer, pop3-rev-analysis.md "Mana rules"), and will name whoever plays an AI 
 - **A stable id**, typed (`id::Id<C>` from `GameMap::new_id_of`), never given again.
 - **Created when a situation starts** (an enemy in a preacher's range, two enemies meeting), by a scan of the map
   (step a below).
-- **Units link to it one way**, through their action (e.g. a future `Action::Listening { sermon }`;
+- **Units link to it one way**, through their action (e.g. `Action::Listening { sermon }`;
   `Action::link` returns it as a `coordinator::Link`). The coordinator stores no list of its units: "the units of
   X" is computed when needed (`coordinator::participants`).
 - **Ticked each turn**: it checks its own conditions, decides, and returns a `Step { finished, events }`. It reads
@@ -57,7 +57,7 @@ for each variant:
 | `StartMelee { attacker, target }` | `GameMap::start_melee`: a new melee, both in it |
 | `Release { unit }` | the unit leaves its coordinator: back to Idle (`Unit::release`); nothing if it is in none or gone |
 
-Expected later, when their kinds come: `ChangeOwner { unit, tribe }` (conversion).
+| `ChangeOwner { unit, tribe }` | `GameMap::change_owner`: a converted person joins the tribe, starting afresh (combat.md "Sermon") |
 
 Rules:
 - Emitters say **what happened** (`Release`, `Panic`); the map decides the resulting action. No `SetAction`.

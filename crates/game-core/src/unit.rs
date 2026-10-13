@@ -190,6 +190,10 @@ pub enum Action {
     Throwing { target: Target, left: Countdown },
     /// Hacking at the building `building` (wreck.rs), `left` turns to go; first at its door.
     Hacking { building: crate::building::BuildingId, left: Countdown, at_door: bool },
+    /// Sitting, listening to a preacher in the sermon `sermon` (sermon.rs): locked until converted or the sermon ends.
+    Listening { sermon: crate::sermon::SermonId },
+    /// A preacher standing, preaching to its listeners (sermon.rs).
+    Preaching,
     /// Fighting in the melee `melee` (melee.rs): its place in the ring, its stance.
     Melee { melee: crate::melee::MeleeId, place: (u16, u16), stance: crate::melee::Stance },
     /// Held by the test-only coordinator `gathering` (coordinator.rs).
@@ -224,6 +228,8 @@ impl Action {
             Action::Hammering => "Hammering",
             Action::Attacking { .. } => "Attacking",
             Action::Challenge { .. } | Action::Melee { .. } => "Fighting",
+            Action::Listening { .. } => "Listening",
+            Action::Preaching => "Preaching",
             Action::Hacking { .. } | Action::Throwing { .. } => "Attacking",
             #[cfg(test)]
             Action::Gathered { .. } => "Gathered",
@@ -235,6 +241,7 @@ impl Action {
         match *self {
             Action::Challenge { challenge, .. } => return Some(crate::coordinator::Link::Challenge(challenge)),
             Action::Melee { melee, .. } => return Some(crate::coordinator::Link::Melee(melee)),
+            Action::Listening { sermon } => return Some(crate::coordinator::Link::Sermon(sermon)),
             _ => {}
         }
         #[cfg(test)]
@@ -267,7 +274,7 @@ impl Action {
     }
 
     pub(crate) fn can_take_orders(&self) -> bool {
-        !matches!(self, Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
+        !matches!(self, Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::Listening { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
     }
 }
 
@@ -461,9 +468,14 @@ impl Unit {
         !matches!(self.action, Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
     }
 
-    /// Flung (tumbling) or off the ground: no order reaches it and it cannot be picked.
-    pub fn locked(&self) -> bool {
+    /// Flung (tumbling) or off the ground: it cannot be picked, nor taken on.
+    pub fn thrown(&self) -> bool {
         self.action == Action::Tumbling || self.motion.airborne()
+    }
+
+    /// Thrown, or listening to a preacher: no order reaches it and its player cannot select it.
+    pub fn locked(&self) -> bool {
+        self.thrown() || matches!(self.action, Action::Listening { .. })
     }
 
     /// Orders change what it does: not while drowning, tumbling, dying or dead, nor off the ground.
@@ -471,9 +483,9 @@ impl Unit {
         self.action.can_take_orders() && !self.motion.airborne()
     }
 
-    /// The unit as something the player may pick (hover, select), None while `locked`.
+    /// The unit as something the player may pick (hover, select), None while `thrown`.
     pub fn pickable(&self) -> Option<PickableUnit<'_>> {
-        (!self.locked()).then_some(PickableUnit(self))
+        (!self.thrown()).then_some(PickableUnit(self))
     }
 
     /// Cell holding the unit.
@@ -726,6 +738,7 @@ impl Unit {
             }
             Action::Challenge { challenge, role } => self.action = Action::Challenge { challenge, role: self.play(role, ground) },
             Action::Melee { melee, place, stance } => self.action = Action::Melee { melee, place, stance: self.fight(place, stance, ground) },
+            Action::Listening { .. } | Action::Preaching => {}
             Action::Entering { to } => {
                 if self.step_towards(to, ground, self.kind.speed()) != Step::Moved {
                     self.action = Action::Idle;
@@ -974,6 +987,22 @@ impl Unit {
         let velocity = Velocity::new(v.x.saturating_add(push.x), v.y.saturating_add(push.y), v.z.saturating_add(push.z));
         self.motion = Motion::flying(velocity, self.motion.height.unwrap_or(ground));
         self.action = Action::Challenge { challenge, role: crate::challenge::Role::Shoved };
+    }
+
+    /// A preacher starts preaching where it stands (sermon.rs): no more way to go.
+    pub(crate) fn join_preaching(&mut self) {
+        (self.route, self.planned_on) = (Vec::new(), None);
+        self.action = Action::Preaching;
+    }
+
+    /// Joins `tribe`, as a new person in its place would: its plans, orders, work and wood gone, full health, no
+    /// status, standing idle (combat.md "Sermon").
+    pub fn change_owner(&mut self, tribe: u8) {
+        self.drop_plans();
+        self.owner = tribe;
+        self.health = Health::full(self.kind.max_health());
+        (self.statuses, self.motion, self.carrying, self.reload) = (Statuses::default(), Motion::STILL, 0, 0);
+        self.action = Action::Idle;
     }
 
     /// Joins a coordinator with `action` (one that links to it), leaving its way, its chained orders and the spell

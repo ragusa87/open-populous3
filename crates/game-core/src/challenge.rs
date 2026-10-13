@@ -167,7 +167,8 @@ impl GameMap {
             }
             let Some(j) = self.unit_index(target) else { continue };
             let t = &self.units[j];
-            if self.linked(t).is_some() || t.locked() || matches!(t.action, Action::Casting { .. }) || !t.in_the_open() || !in_reach((a.x, a.z), (t.x, t.z)) {
+            let free = matches!(self.linked(t), None | Some(Link::Sermon(_)));
+            if !free || t.thrown() || !crate::attack::may_attack(a, t) || matches!(t.action, Action::Casting { .. }) || !t.in_the_open() || !in_reach((a.x, a.z), (t.x, t.z)) {
                 continue;
             }
             let base = a.kind.speed();

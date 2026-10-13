@@ -1116,6 +1116,7 @@ impl GameMap {
 
     /// Scans that start coordinators or add units to them, one per kind in `Coordinators::tick`'s order.
     fn detect_coordinators(&mut self) {
+        self.start_sermons();
         self.start_challenges();
         self.join_melees();
     }
@@ -1208,6 +1209,10 @@ impl GameMap {
             }
             WorldEvent::Struck { attacker, target, blow, knock } => {
                 self.struck(attacker, target, blow, knock);
+                None
+            }
+            WorldEvent::ChangeOwner { unit, tribe } => {
+                self.change_owner(unit, tribe);
                 None
             }
             WorldEvent::StartMelee { attacker, target } => {

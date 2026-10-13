@@ -33,6 +33,8 @@ pub enum WorldEvent {
     Struck { attacker: UnitId, target: UnitId, blow: crate::combat::Blow, knock: Option<Velocity> },
     /// A challenge won: the two fight in a new melee (`GameMap::start_melee`).
     StartMelee { attacker: UnitId, target: UnitId },
+    /// The unit joins `tribe`, converted (`GameMap::change_owner`).
+    ChangeOwner { unit: UnitId, tribe: u8 },
     /// The unit leaves its coordinator (`Unit::release`); nothing if it is in none.
     Release { unit: UnitId },
     /// A firewarrior hit by `thrower`'s bolt fires back: at once on its feet, else once it has landed.

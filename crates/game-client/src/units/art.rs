@@ -58,10 +58,12 @@ pub enum Pose {
     Throw,
     /// Sitting aboard a vehicle, pedalling it.
     Pedal,
+    /// Sitting, listening to a preacher.
+    Listen,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 24] = [
+    pub const ALL: [Pose; 25] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -86,6 +88,7 @@ impl Pose {
         Pose::Hack,
         Pose::Throw,
         Pose::Pedal,
+        Pose::Listen,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -99,7 +102,7 @@ impl Pose {
             Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack => Pose::Idle,
             Pose::Throw => Pose::Cast,
             Pose::Shoved => Pose::Fall,
-            Pose::Pedal => Pose::Pray,
+            Pose::Pedal | Pose::Listen => Pose::Pray,
             pose => pose,
         }
     }
@@ -124,7 +127,7 @@ impl Pose {
         match self {
             Pose::Idle | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Hammer => ShamanAnim::Idle,
             Pose::Walk | Pose::CarryWalk | Pose::Panic => ShamanAnim::Walk,
-            Pose::Pray | Pose::Pedal => ShamanAnim::Kneel,
+            Pose::Pray | Pose::Pedal | Pose::Listen => ShamanAnim::Kneel,
             Pose::Cast | Pose::Jump => ShamanAnim::Cast,
             Pose::Fall | Pose::Spirit => ShamanAnim::Fall,
             Pose::Flung => ShamanAnim::Flying,
@@ -185,6 +188,8 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Panicking { .. } => Pose::Panic,
         Action::Hacking { .. } => Pose::Hack,
         Action::Throwing { .. } => Pose::Throw,
+        Action::Listening { .. } => Pose::Listen,
+        Action::Preaching => Pose::Idle,
         Action::Challenge { role, .. } => challenge_pose(*role, carrying),
         Action::Melee { stance, .. } => melee_pose(*stance, airborne),
         Action::Chopping { .. } | Action::PickingUpWood { .. } => Pose::Chop,
@@ -333,7 +338,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
             let anim = match pose {
                 Pose::Idle | Pose::Cast | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Jump | Pose::Hammer => WildmanAnim::Stand,
                 Pose::Walk | Pose::CarryWalk | Pose::Panic => WildmanAnim::Walk,
-                Pose::Pray | Pose::Pedal => WildmanAnim::Sit,
+                Pose::Pray | Pose::Pedal | Pose::Listen => WildmanAnim::Sit,
                 Pose::Fall | Pose::Tumble | Pose::Spirit => WildmanAnim::Tumble,
                 Pose::Drown | Pose::Flung | Pose::Shoved => WildmanAnim::Flung,
                 Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack | Pose::Throw => WildmanAnim::Stand,
@@ -374,6 +379,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Hack => PersonAnim::Chop,
                 Pose::Throw => PersonAnim::Throw,
                 Pose::Pedal => PersonAnim::Pedal,
+                Pose::Listen => PersonAnim::Listen,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }

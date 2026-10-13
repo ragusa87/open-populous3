@@ -108,7 +108,7 @@ pub fn attack_commands(how: &str, map: &game_core::map::GameMap) -> Vec<Command>
         .iter()
         .filter(|u| u.owner == PLAYER && u.is_alive())
         .filter_map(|u| {
-            let target = map.units.iter().filter(|t| game_core::attack::may_attack(u, t)).min_by_key(|t| dist(u, t))?;
+            let target = map.units.iter().filter(|t| game_core::attack::may_attack(u, t) || game_core::sermon::may_preach(u, t)).min_by_key(|t| dist(u, t))?;
             let order = game_core::unit::Order::Attack { target: game_core::unit::Target::Unit(target.id) };
             Some(Command::OrderUnit { player: PLAYER, unit: u.id, order })
         })

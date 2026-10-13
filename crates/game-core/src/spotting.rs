@@ -9,15 +9,15 @@ use crate::unit::{Action, Target, Unit, UnitId, UnitKind};
 /// How far `u` looks now, cells; None when it is busy ("Auto-attack" [exe]). Walking on an order it does not look
 /// (0); working, only its own cell (`sight_at_work`); idle or hacking at a building, its full `sight`.
 pub fn sight_now(u: &Unit) -> Option<u8> {
-    if !u.is_alive() || !u.in_the_open() || u.locked() {
+    if !u.is_alive() || !u.in_the_open() || u.thrown() {
         return None;
     }
     let stats = u.kind.stats();
     match u.action {
-        Action::Idle | Action::Holding { .. } | Action::Hacking { .. } => Some(stats.sight),
+        Action::Idle | Action::Holding { .. } | Action::Hacking { .. } | Action::Preaching => Some(stats.sight),
         Action::Walking { .. } | Action::Stranded { .. } | Action::Attacking { .. } => Some(0),
         Action::Chopping { .. } | Action::PickingUpWood { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Hammering | Action::AroundFire { .. } | Action::Worshipping { .. } => Some(stats.sight_at_work),
-        Action::Challenge { .. } | Action::Melee { .. } | Action::Panicking { .. } | Action::Tumbling | Action::Casting { .. } | Action::Landing | Action::Drowning | Action::Entering { .. } | Action::Boarding { .. } | Action::Alighting { .. } | Action::Throwing { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => None,
+        Action::Challenge { .. } | Action::Melee { .. } | Action::Listening { .. } | Action::Panicking { .. } | Action::Tumbling | Action::Casting { .. } | Action::Landing | Action::Drowning | Action::Entering { .. } | Action::Boarding { .. } | Action::Alighting { .. } | Action::Throwing { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => None,
         #[cfg(test)]
         Action::Gathered { .. } => None,
     }
@@ -93,7 +93,7 @@ impl GameMap {
         let idle = matches!(u.action, Action::Idle | Action::Holding { .. }) && !throws;
         let size = self.terrain.size() as i32;
         square(u.cell(), sight, size).find_map(|cell| {
-            let people = grid.at(cell).filter_map(|id| self.unit(id)).filter(|t| crate::attack::may_attack(u, t) && !t.locked());
+            let people = grid.at(cell).filter_map(|id| self.unit(id)).filter(|t| crate::attack::may_attack(u, t) && !t.thrown());
             let mut fighting = None;
             for t in people {
                 match self.linked(t) {

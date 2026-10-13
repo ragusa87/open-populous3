@@ -31,6 +31,7 @@ pub trait Coordinator: Sized {
 pub enum Link {
     Challenge(crate::challenge::ChallengeId),
     Melee(crate::melee::MeleeId),
+    Sermon(crate::sermon::SermonId),
     #[cfg(test)]
     Gathering(Id<tests::Gathering>),
 }
@@ -40,6 +41,7 @@ pub enum Link {
 pub struct Coordinators {
     pub challenges: Registry<crate::challenge::Challenge>,
     pub melees: Registry<crate::melee::Melee>,
+    pub sermons: Registry<crate::sermon::Sermon>,
     #[cfg(test)]
     pub gatherings: Registry<tests::Gathering>,
 }
@@ -50,6 +52,7 @@ impl Coordinators {
         match link {
             Link::Challenge(id) => self.challenges.contains(id),
             Link::Melee(id) => self.melees.contains(id),
+            Link::Sermon(id) => self.sermons.contains(id),
             #[cfg(test)]
             Link::Gathering(id) => self.gatherings.contains(id),
         }
@@ -61,6 +64,7 @@ impl Coordinators {
         let mut events = Vec::new();
         tick_kind(&mut self.challenges, now, world, rng, &mut events);
         tick_kind(&mut self.melees, now, world, rng, &mut events);
+        tick_kind(&mut self.sermons, now, world, rng, &mut events);
         #[cfg(test)]
         tick_kind(&mut self.gatherings, now, world, rng, &mut events);
         events

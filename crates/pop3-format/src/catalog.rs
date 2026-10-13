@@ -235,6 +235,8 @@ pub enum PersonAnim {
     Throw,
     /// Sitting, pedalling a vehicle (4 frames).
     Pedal,
+    /// Sitting down, listening to a preacher (6 frames).
+    Listen,
 }
 
 /// The frame of `PersonAnim::ArmsUp` standing with both arms up.
@@ -262,6 +264,7 @@ impl PersonAnim {
             PersonAnim::Shoved => 16,
             PersonAnim::Throw => 7,
             PersonAnim::Pedal => 51,
+            PersonAnim::Listen => 18,
         }
     }
 }

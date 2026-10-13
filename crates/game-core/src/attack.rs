@@ -27,7 +27,7 @@ impl GameMap {
     /// Where an attack on `target` leads, if `attacker` may make it: the person, or the building's door.
     pub fn attack_goal(&self, attacker: &Unit, target: Target) -> Option<(u16, u16)> {
         match target {
-            Target::Unit(id) => self.unit(id).filter(|t| may_attack(attacker, t)).map(|t| (t.x, t.z)),
+            Target::Unit(id) => self.unit(id).filter(|t| may_attack(attacker, t) || crate::sermon::may_preach(attacker, t)).map(|t| (t.x, t.z)),
             Target::Building(id) => self.building(id).filter(|b| may_attack_building(attacker, b)).map(Building::door),
         }
     }
@@ -134,11 +134,20 @@ mod tests {
     }
 
     #[test]
-    fn a_preacher_starts_fights_only_with_preachers_and_shamans() {
-        for (target, goes) in [(UnitKind::Brave, false), (UnitKind::Warrior, false), (UnitKind::Preacher, true), (UnitKind::Shaman, true)] {
+    fn a_preacher_fights_preachers_and_shamans_and_preaches_to_the_rest() {
+        for (target, fights) in [(UnitKind::Brave, false), (UnitKind::Warrior, false), (UnitKind::Preacher, true), (UnitKind::Shaman, true)] {
             let (mut map, a, t) = duel(UnitKind::Preacher, target);
             attack(&mut map, a, t);
-            assert_eq!(matches!(map.unit(a).unwrap().action, Action::Attacking { .. }), goes, "{target:?}");
+            assert!(matches!(map.unit(a).unwrap().action, Action::Attacking { .. }), "{target:?}: it sets off");
+            let met = (0..300).find_map(|_| {
+                map.tick();
+                match map.unit(a).unwrap().action {
+                    Action::Challenge { .. } | Action::Melee { .. } => Some(true),
+                    Action::Preaching => Some(false),
+                    _ => None,
+                }
+            });
+            assert_eq!(met, Some(fights), "{target:?}");
         }
     }
 

@@ -146,7 +146,7 @@ one removed any other way (a plan cancelled) leaves none.
 followed each turn (`GameMap::spot_enemies`).
 - Who: braves, warriors and preachers (`looks_for_melee`; a preacher only starts a fight with a preacher or a shaman,
   `attack::may_attack`, and defends itself like anyone when attacked), and firewarriors once reloaded, as far as they throw (`GameMap::looking`; any enemy person, in a melee or
-  not: their own look is not traced); the preacher's sermon and the shaman's look during some orders are TODO; spies and wildmen never look. On its kind's `look_every` (4 turns; preacher 2),
+  not: their own look is not traced); the preacher's sermon is its own look ("Sermon"); the shaman's look during some orders is TODO; spies and wildmen never look. On its kind's `look_every` (4 turns; preacher 2),
   phase 0.
 - The preacher's own look (pop3-rev-analysis.md "Preacher conversion") only fights another preacher or a shaman;
   anyone else it finds gets preached to instead, a separate state machine on the target
@@ -188,3 +188,32 @@ join a melee on their own attack (they still fight when challenged).
 - Not yet: the line of fire (a building in the way), throwing from a drum tower or a vehicle, the smoke trail and
   the ground light, a ghost firewarrior's harmless bolts, the shaman inside a building or vehicle taking half her
   life, an angel's reaction.
+
+## Sermon
+`crate::sermon`: a preacher sits the enemies it sees down and preaches to them; now and then one joins its tribe
+("Preacher conversion" [exe]; [game]: the user's account of the game).
+- Who may be preached to (`may_preach`): an enemy that fights, alive, on the ground in the open, not a preacher or a
+  shaman (those the preacher fights), never a wildman [game: the trace converts them at once, the user's game never],
+  never someone aboard a balloon or a boat [game], not taken by another coordinator already.
+- The start [guess: not traced]: on the preacher's look turn (every 2 turns), a preacher that is free (idle, holding
+  wood, preaching, or ordered to attack someone it may preach to) sits down every such enemy in its look square
+  (3 × 3 cells, `spotting::square`) at once; there is no walk-up, so attackers coming at it sit before they reach it.
+  Ordered at someone further, it walks until that one is in the square. It then stands `Action::Preaching`, facing a
+  listener, and goes idle again once it has no listener left.
+- A sermon per listener (a coordinator, `Sermon { preacher, listener, left }`), as the original keeps a state per
+  preached person [exe]. The listener sits (`Action::Listening`, anim 18) and is locked [game]: no orders, dropped
+  from its player's selection, until converted, freed or dead; a brave puts down the wood it carries [game]. It still
+  heals and can be attacked: an attacker challenges it as anyone, which takes it out of its sermon, the others listen
+  on [game].
+- Each turn the sermon ends (the listener freed) when the preacher is gone, dead or no longer preaching (an order took
+  it, or it was attacked: every one of its sermons ends [game]), or the listener is gone, dead or taken by something
+  else. Its countdown: the first chance after `CONV_FIRST_CHECK` (250) turns, then every `CONV_CHECK` (500), each give
+  or take a sixteenth [exe]; a chance converts 1 time in `CONV_CHANCE` (5) [exe], unless the preacher's tribe is at
+  the population cap (`headcount::MAX_POPULATION`, 200), when it waits the next check.
+- Conversion (`WorldEvent::ChangeOwner`, `Unit::change_owner`): the original destroys the person and makes one of
+  the same kind in the preacher's tribe at its place [exe]; ours keeps the unit (same id and kind) and starts it
+  afresh the same way: new tribe, plans, orders, work and wood gone, full health, no status, idle.
+- Drawn: listeners sit (anim 18; the generated sheets stand in with the prayer pose), the preacher stands; the dev
+  overlay draws a line from each preacher to each listener.
+- Not yet: the building variant (preaching to a building's people), what really starts a sermon, the soul flying
+  from the preacher to the converted, the preacher's own preaching animation, the halving flag of the first check.
