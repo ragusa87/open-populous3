@@ -489,6 +489,16 @@ mod tests {
     }
 
     #[test]
+    fn an_attacked_preacher_strikes_back() {
+        let (mut map, _, preacher) = duel(UnitKind::Brave, UnitKind::Preacher);
+        let struck = (0..400).any(|_| {
+            map.tick();
+            matches!(stance(&map, preacher), Some(Stance::Striking { .. }))
+        });
+        assert!(struck, "it defends itself like anyone");
+    }
+
+    #[test]
     fn a_firewarrior_strikes_twice_as_long() {
         assert_eq!(move_turns(UnitKind::Firewarrior, Move::Strike(Blow::Knock)), 2 * move_turns(UnitKind::Brave, Move::Strike(Blow::Knock)));
     }

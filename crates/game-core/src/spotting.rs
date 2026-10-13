@@ -23,8 +23,8 @@ pub fn sight_now(u: &Unit) -> Option<u8> {
     }
 }
 
-/// Kinds that look for a melee to start: the preacher too until it converts (TODO), the firewarrior throws fire
-/// instead, the shaman only looks during some orders, spies and wildmen never look.
+/// Kinds that look for a melee to start: the preacher only for a preacher or a shaman (`attack::may_attack`), the
+/// firewarrior throws fire instead, the shaman only looks during some orders, spies and wildmen never look.
 pub fn looks_for_melee(kind: UnitKind) -> bool {
     matches!(kind, UnitKind::Brave | UnitKind::Warrior | UnitKind::Preacher)
 }
@@ -150,11 +150,15 @@ mod tests {
     }
 
     #[test]
-    fn a_preacher_goes_for_an_enemy_it_sees() {
+    fn a_preacher_fights_a_preacher_it_sees_never_a_brave() {
         let (mut map, a, t) = watch(1);
         map.unit_mut(a).unwrap().kind = UnitKind::Preacher;
         map.run(Ticks::new(4));
-        assert!(map.unit(a).is_some_and(|u| u.action != Action::Idle), "it went for the enemy");
+        assert_ne!(attacking(&map, a), Some(Target::Unit(t)), "a brave is no fight for a preacher");
+        let (mut map, a, t) = watch(1);
+        map.unit_mut(a).unwrap().kind = UnitKind::Preacher;
+        map.unit_mut(t).unwrap().kind = UnitKind::Preacher;
+        map.run(Ticks::new(4));
         assert!(map.linked(map.unit(t).unwrap()).is_some() || attacking(&map, a) == Some(Target::Unit(t)));
     }
 

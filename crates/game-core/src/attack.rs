@@ -5,9 +5,11 @@ use crate::building::Building;
 use crate::map::GameMap;
 use crate::unit::{Action, Target, Unit, UnitKind};
 
-/// Whether `attacker` may go for `target`: both fight, of other tribes, the target alive.
+/// Whether `attacker` may start a fight with `target`: both fight, of other tribes, the target alive. A preacher starts
+/// one only with a preacher or a shaman ("Auto-attack" [exe]); attacked, it defends itself like anyone.
 pub fn may_attack(attacker: &Unit, target: &Unit) -> bool {
-    fights(attacker.kind) && target.kind.stats().fights && attacker.owner != target.owner && target.is_alive()
+    let preacher_may = attacker.kind != UnitKind::Preacher || matches!(target.kind, UnitKind::Preacher | UnitKind::Shaman);
+    fights(attacker.kind) && preacher_may && target.kind.stats().fights && attacker.owner != target.owner && target.is_alive()
 }
 
 /// Whether `attacker` may go for the building `b`: another tribe's, one that wears down. Never a neutral building
@@ -128,6 +130,15 @@ mod tests {
         for b in [vault, neutral_hut] {
             map.go_attack(map.unit_index(a).unwrap(), Target::Building(b));
             assert_eq!(map.unit(a).unwrap().action, Action::Idle);
+        }
+    }
+
+    #[test]
+    fn a_preacher_starts_fights_only_with_preachers_and_shamans() {
+        for (target, goes) in [(UnitKind::Brave, false), (UnitKind::Warrior, false), (UnitKind::Preacher, true), (UnitKind::Shaman, true)] {
+            let (mut map, a, t) = duel(UnitKind::Preacher, target);
+            attack(&mut map, a, t);
+            assert_eq!(matches!(map.unit(a).unwrap().action, Action::Attacking { .. }), goes, "{target:?}");
         }
     }
 
