@@ -69,15 +69,21 @@ pub fn cells_at(v: &Vehicle) -> Vec2 {
     Vec2::new(v.x as f32, v.z as f32) / WORLD_UNITS_PER_CELL as f32
 }
 
-/// How high over the ground under it the hull is drawn, in render units: a balloon's hover, a sinking boat's depth
+/// How high over the ground under it the hull is drawn, in render units, `alpha` into the step: a balloon's hover,
+/// glided from where its last turn started (`Vehicle::was_at`) so it climbs and sinks smoothly; a sinking boat's depth
 /// below the surface (negative).
-pub fn lift(map: &GameMap, v: &Vehicle, height_scale: f32) -> f32 {
-    let ground = map.terrain.height_at(v.x as u32, v.z as u32, WORLD_UNITS_PER_CELL).max(0);
+pub fn lift(map: &GameMap, v: &Vehicle, height_scale: f32, alpha: f32) -> f32 {
+    let ground = map.terrain.height_at(v.x as u32, v.z as u32, WORLD_UNITS_PER_CELL).max(0) as f32;
     let depth = match v.state {
-        State::Sinking { depth, .. } => depth as i32,
-        _ => 0,
+        State::Sinking { depth, .. } => depth as f32,
+        _ => 0.0,
     };
-    (v.altitude(&map.terrain) as i32 - ground - depth) as f32 * height_scale
+    let now = v.altitude(&map.terrain) as f32;
+    let drawn = match (v.kind, v.was_at) {
+        (VehicleKind::Balloon, Some(was)) => was as f32 + (now - was as f32) * alpha.clamp(0.0, 1.0),
+        _ => now,
+    };
+    (drawn - ground - depth) * height_scale
 }
 
 /// Where its people stand over the model's origin, render units: the origin is its floor (the original boat's
@@ -87,8 +93,8 @@ const FEET: f32 = 0.03;
 const SEAT_GAP: f32 = 0.12;
 
 /// The height its people stand at over the ground under it, render units.
-pub fn deck(map: &GameMap, v: &Vehicle, height_scale: f32) -> f32 {
-    lift(map, v, height_scale) + FEET
+pub fn deck(map: &GameMap, v: &Vehicle, height_scale: f32, alpha: f32) -> f32 {
+    lift(map, v, height_scale, alpha) + FEET
 }
 
 /// Where seat `k` is from the vehicle's middle, cells: along a boat from bow to stern, side by side in a basket.
@@ -114,7 +120,7 @@ pub fn top(map: &GameMap, v: &Vehicle, height_scale: f32) -> f32 {
         VehicleKind::Boat => BOAT_TOP,
         VehicleKind::Balloon => BALLOON_TOP,
     };
-    lift(map, v, height_scale).max(0.0) + model
+    lift(map, v, height_scale, 1.0).max(0.0) + model
 }
 
 fn radians(a: Angle) -> f32 {
@@ -222,7 +228,7 @@ impl WorldView for VehicleView {
             crate::hover::Hoverable::default(),
         ));
         let mut hull = Entity::PLACEHOLDER;
-        let pose = Transform::from_xyz(0.0, lift(&map.0, v, params.0.height_scale), 0.0).with_rotation(hull_rotation(v));
+        let pose = Transform::from_xyz(0.0, lift(&map.0, v, params.0.height_scale, 1.0), 0.0).with_rotation(hull_rotation(v));
         view.with_children(|c| {
             hull = c.spawn((pose, Visibility::Inherited)).with_children(|h| spawn_parts(h, parts)).id();
         });
@@ -240,7 +246,7 @@ impl WorldView for VehicleView {
             }
         }
         if let Ok(mut t) = transforms.get_mut(self.hull) {
-            t.translation.y = lift(&map.0, v, params.0.height_scale);
+            t.translation.y = lift(&map.0, v, params.0.height_scale, clock.alpha());
             t.rotation = hull_rotation(v);
         }
     }
@@ -268,10 +274,13 @@ mod tests {
         let at = (64 * 512, 64 * 512);
         let ground = map.terrain.height_at(at.0 as u32, at.1 as u32, WORLD_UNITS_PER_CELL);
         assert_eq!(cells_at(&vehicle(VehicleKind::Boat, at)), Vec2::new(64.0, 64.0));
-        assert_eq!(lift(&map, &vehicle(VehicleKind::Balloon, at), 0.5), game_core::vehicle::HOVER as f32 * 0.5);
+        assert_eq!(lift(&map, &vehicle(VehicleKind::Balloon, at), 0.5, 1.0), game_core::vehicle::HOVER as f32 * 0.5);
+        let mut climbing = vehicle(VehicleKind::Balloon, at);
+        climbing.was_at = Some(ground as u16 + 100);
+        assert_eq!(lift(&map, &climbing, 0.5, 0.25), (100.0 + 0.25 * 100.0) * 0.5, "a quarter of the way up its turn's climb");
         let mut sinking = vehicle(VehicleKind::Boat, (0, 0));
         sinking.state = State::Sinking { depth: 40, pitch: Angle::ZERO };
-        assert_eq!(lift(&map, &sinking, 0.5), -20.0);
+        assert_eq!(lift(&map, &sinking, 0.5, 0.0), -20.0);
         assert!(ground > 0);
     }
 

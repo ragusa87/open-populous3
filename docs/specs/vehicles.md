@@ -14,12 +14,15 @@ numbers are guesses.
 - `heading` (an `angle::Angle`, from +x towards +z) follows the way it moves; the sinking pitch and the stranded
   roll live in their states.
 - `altitude`: the ground under a boat (the sea's surface is 0); a balloon's `float`, which follows the terrain
-  and what stands on it ("Terrain changes" [exe]): each turn it climbs or sinks at most `CLIMB_STEP` 32 towards the
-  highest of, under it and while it moves at `LOOK_AHEAD` 256, 512, 1024 and 1536 ahead, the ground plus what it
+  and what stands on it ("Terrain changes" [exe]): each turn it eases towards the highest of, under it and while it
+  moves at `LOOK_AHEAD` 256 to 2048 ahead, the ground plus what it
   floats over there (`hover_over`): `HOVER` 200 over bare ground, `HOVER_OVER_BUILDING` 560 over a building (the
   pyramid included; the exe's value), `HOVER_OVER_TREE` / `_TOTEM` 450 over a tree or a totem [guesses]. So it
   rises before a mountain, a building or a tree and comes down after it, never bumping into them; never nearer the
-  ground under it than `CLEARANCE` 100 [ours]. The step and the distances are guesses.
+  ground under it than `CLEARANCE` 100 [ours]. Easing (`vehicle::ease`): a quarter of what is left each turn
+  (`EASE`), at most `CLIMB_STEP` 32, at least `MIN_STEP` 4, so it speeds up and slows down on a curve, never past the
+  height it heads for. The step and the distances are guesses. Drawn, its height glides between turns from where its
+  last turn started (`Vehicle::was_at`), its people with it.
 
 ## Parking and drifting (done, improvised)
 - One vehicle a cell: a vehicle sent where another stands or is going stops in the nearest free cell it reaches

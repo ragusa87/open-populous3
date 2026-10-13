@@ -34,8 +34,12 @@ pub const HOVER: u16 = 200;
 /// climbs or sinks towards that at most `CLIMB_STEP` a turn ("Terrain changes": it samples the ground ahead and
 /// moves at its profile's vertical rate; the distances and the rate are guesses). It never comes nearer the ground
 /// under it than `CLEARANCE` [ours].
-pub const LOOK_AHEAD: [i32; 4] = [256, 512, 1024, 1536];
+pub const LOOK_AHEAD: [i32; 5] = [256, 512, 1024, 1536, 2048];
 pub const CLIMB_STEP: u16 = 32;
+/// A balloon covers a share of what is left to climb or sink each turn (1 / `EASE`, at most `CLIMB_STEP`, at least
+/// `MIN_STEP`): it slows down as it gets there, never overshooting [ours].
+pub const EASE: u16 = 4;
+pub const MIN_STEP: u16 = 4;
 pub const CLEARANCE: u16 = 100;
 /// A balloon floats this high over a building, the pyramid of knowledge among them (vehicle table +0xD, "Terrain
 /// changes"), and over a tree or a totem [ours, a guess], instead of `HOVER`.
@@ -224,6 +228,9 @@ pub struct Vehicle {
     /// A balloon's height (terrain height units), following the ground under and ahead of it (`float_target`); None
     /// for a boat, and for a balloon until its first turn (then `HOVER` over the ground).
     pub float: Option<u16>,
+    /// Its altitude when its last turn started: drawing glides from it to `altitude` (read-only for the client); None
+    /// before its first turn.
+    pub was_at: Option<u16>,
     /// Waypoints left to `State::Moving::to`, next one last.
     route: Vec<(u16, u16)>,
     /// Ground revision the route was planned on; None: plan on its next turn.
@@ -233,7 +240,7 @@ pub struct Vehicle {
 impl Vehicle {
     /// A new, empty vehicle parked at `at`.
     pub fn new(kind: VehicleKind, owner: u8, (x, z): (u16, u16), heading: Angle) -> Self {
-        Vehicle { kind, owner, x, z, heading, health: Health::full(LIFE), state: State::Parked, passengers: Vec::new(), wait: Countdown::new(Ticks::ZERO), float: None, route: Vec::new(), planned_on: None }
+        Vehicle { kind, owner, x, z, heading, health: Health::full(LIFE), state: State::Parked, passengers: Vec::new(), wait: Countdown::new(Ticks::ZERO), float: None, was_at: None, route: Vec::new(), planned_on: None }
     }
 
     pub fn cell(&self) -> (i32, i32) {
@@ -319,6 +326,7 @@ impl Vehicle {
     /// or carries anyone; then it moves on.
     pub fn tick(&mut self, now: Tick, ground: &impl Ground, hover: impl Fn((i32, i32)) -> u16, rng: &mut Lcg) -> Option<VehicleEvent> {
         let terrain = ground.terrain();
+        self.was_at = Some(self.altitude(terrain));
         match self.state {
             State::Sinking { depth, pitch } => {
                 let depth = depth.saturating_add(SINK_STEP);
@@ -357,7 +365,7 @@ impl Vehicle {
         }
         if self.kind == VehicleKind::Balloon {
             let (now, target) = (self.altitude(terrain), self.float_target(terrain, hover));
-            self.float = Some(if target > now { now.saturating_add(CLIMB_STEP).min(target) } else { now.saturating_sub(CLIMB_STEP).max(target) });
+            self.float = Some(ease(now, target));
         }
         None
     }
@@ -463,6 +471,14 @@ pub fn hover_over(walls: &path::Walls, trees: &[crate::tree::Tree], totems: &[cr
     } else {
         HOVER
     }
+}
+
+/// One turn of a balloon's height from `now` towards `target`: `1 / EASE` of the gap, at most `CLIMB_STEP`, at least
+/// `MIN_STEP` (the rest of the gap when less).
+pub fn ease(now: u16, target: u16) -> u16 {
+    let gap = now.abs_diff(target);
+    let step = (gap / EASE).clamp(gap.min(MIN_STEP), CLIMB_STEP);
+    if target > now { now + step } else { now - step }
 }
 
 /// The ground's height at world point `p`, the sea at 0.
@@ -1284,6 +1300,24 @@ mod tests {
         assert!(over_hut && over_tree);
         run(&mut map, 40);
         assert_eq!(map.vehicle(v).unwrap().altitude(&map.terrain), 100 + HOVER, "down again past them");
+    }
+
+    #[test]
+    fn a_balloon_eases_into_its_height_never_past_it() {
+        assert_eq!(ease(200, 1000), 232, "far: the most a turn");
+        assert_eq!(ease(900, 1000), 925, "near: a quarter of the gap");
+        assert_eq!(ease(990, 1000), 994, "nearly there: a few at a time");
+        assert_eq!(ease(998, 1000), 1000, "there");
+        assert_eq!(ease(1000, 1000), 1000);
+        assert_eq!(ease(1000, 200), 968, "down the same way");
+        let mut h = 200;
+        let steps: Vec<u16> = (0..40).map(|_| {
+            let before = h;
+            h = ease(h, 600);
+            h - before
+        }).collect();
+        assert!(steps.windows(2).all(|w| w[1] <= w[0]), "it only slows down: {steps:?}");
+        assert!(h <= 600);
     }
 
     #[test]
