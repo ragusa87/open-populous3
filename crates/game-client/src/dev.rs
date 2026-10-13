@@ -9,6 +9,8 @@
 //! e.g. `temple@64,70`) shows that blueprint at map position x,z (cells); `BUILD=kind@x,z` places that
 //! plan with every brave of the player sent to it, then runs `BUILD_TICKS` ticks (0 by default).
 //! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
+//! `TRAIN=stored/cost[:short]` puts a brave of the player in each of their training units, making something with
+//! that much mana stored (`:short`: short of mana).
 //! `AIM=spell` (its name without spaces, any case, e.g. `blast`, `landbridge`) selects that spell as if picked in
 //! the Spells tab.
 //! `VIDEO=secs` instead of `SCREENSHOT`: the same setup, then `secs` seconds recorded from `SHOT_FRAME` straight
@@ -238,6 +240,26 @@ pub fn parse_vault(v: &str) -> Option<game_core::vault::VaultPhase> {
     }
 }
 
+/// `stored/cost[:short]`: a training unit's production.
+pub fn parse_train(v: &str) -> Option<game_core::production::Production> {
+    let (amounts, short) = v.split_once(':').map_or((v, false), |(a, s)| (a, s == "short"));
+    let (stored, cost) = amounts.split_once('/')?;
+    Some(game_core::production::Production { stored: stored.trim().parse().ok()?, cost: cost.trim().parse().ok()?, short })
+}
+
+/// `TRAIN` demo: each of the player's training units gets `production` and one of their idle braves
+/// inside, as its trainee.
+pub fn train_demo(map: &mut game_core::map::GameMap, production: game_core::production::Production) {
+    use game_core::building::BuildingKind;
+    let units: Vec<usize> = (0..map.buildings.len()).filter(|&i| map.buildings[i].owner == PLAYER && matches!(map.buildings[i].kind, BuildingKind::WarriorTraining | BuildingKind::FirewarriorTraining | BuildingKind::SpyTraining)).collect();
+    for i in units {
+        map.buildings[i].production = Some(production);
+        let (building, door) = (map.buildings[i].id, map.buildings[i].door());
+        let Some(u) = map.units.iter_mut().find(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave && u.is_alive() && u.inside.is_none() && u.action == game_core::unit::Action::Idle) else { return };
+        u.inside = Some(game_core::unit::Inside { building, door });
+    }
+}
+
 /// `BUILD` demo: places the plan `kind@x,z` (as `BLUEPRINT`) for the player, sends every brave of
 /// theirs outside buildings to build it, then runs `ticks` ticks; whether it was placed.
 pub fn build_demo(map: &mut game_core::map::GameMap, plan: &str, ticks: u32) -> bool {
@@ -377,6 +399,9 @@ fn screenshot(
         if let Some(phase) = std::env::var("VAULT").ok().and_then(|v| parse_vault(&v)) {
             map.0.buildings.iter_mut().filter_map(|b| b.vault.as_mut()).for_each(|v| v.phase = phase);
         }
+        if let Some(production) = std::env::var("TRAIN").ok().and_then(|v| parse_train(&v)) {
+            train_demo(&mut map.0, production);
+        }
         if let Ok(plan) = std::env::var("BUILD") {
             let ticks = std::env::var("BUILD_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             dirty.0 |= build_demo(&mut map.0, &plan, ticks);
@@ -416,6 +441,19 @@ fn screenshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn train_puts_a_trainee_in_each_training_unit() {
+        use game_core::production::Production;
+        assert_eq!(parse_train("875/3500"), Some(Production { stored: 875, cost: 3500, short: false }));
+        assert_eq!(parse_train("10/3500:short"), Some(Production { stored: 10, cost: 3500, short: true }));
+        assert_eq!(parse_train("3500"), None);
+        let mut map = game_core::map::GameMap::sandbox_buildings();
+        train_demo(&mut map, Production { stored: 875, cost: 3500, short: false });
+        let warrior = map.buildings.iter().position(|b| b.owner == PLAYER && b.kind == game_core::building::BuildingKind::WarriorTraining).unwrap();
+        assert!(map.production(warrior).is_some());
+        assert_eq!(map.people_inside(map.buildings[warrior].id), 1);
+    }
 
     #[test]
     fn attack_nearest_sends_the_fighters_at_the_closest_enemy() {
