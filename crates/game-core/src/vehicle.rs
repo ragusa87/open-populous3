@@ -602,13 +602,18 @@ impl GameMap {
     }
 
     /// Unit `i` is next to the vehicle `vehicle`: it gets on if within `BOARD_REACH` and still welcome, else stays
-    /// where it is.
+    /// where it is. A piece of wood it carries is put down where it stood.
     pub(crate) fn board(&mut self, i: usize, vehicle: VehicleId) {
         let u = &self.units[i];
         let Some(v) = self.vehicle(vehicle).filter(|v| v.welcomes(u.owner) && within((u.x, u.z), (v.x, v.z), BOARD_REACH)) else { return };
         let (at, id, owner) = ((v.x, v.z), u.id, u.owner);
         let u = &mut self.units[i];
         let from = (u.x, u.z);
+        if u.carrying > 0 {
+            u.carrying = 0;
+            self.wood.push(crate::wood::WoodPiece::new(from.0, from.1));
+        }
+        let u = &mut self.units[i];
         u.start(Order::Stop);
         (u.inside, u.aboard, (u.x, u.z)) = (None, Some(vehicle), at);
         u.action = Action::Boarding { from, left: Countdown::new(BOARD_JUMP) };
@@ -1343,6 +1348,19 @@ mod tests {
         assert_eq!(map.move_orders(0, &people, at((C + 1, C))), vec![Command::MoveVehicle { player: 0, vehicle: v, to: at((C + 1, C)) }], "on the water: it goes");
         map.vehicles.get_mut(v).unwrap().go(at((C, C + 10)));
         assert_eq!(map.move_orders(0, &people, shore), vec![Command::MoveVehicle { player: 0, vehicle: v, to: shore }], "moving: it turns back");
+    }
+
+    #[test]
+    fn a_brave_puts_his_wood_down_before_getting_on() {
+        let mut map = coast();
+        let v = boat(&mut map, (C, C));
+        let brave = braves(&mut map, 0, 1)[0];
+        map.unit_mut(brave).unwrap().carrying = 1;
+        order(&mut map, 0, &[brave], Order::Board { vehicle: v });
+        assert!(until(&mut map, 300, |m| m.unit(brave).unwrap().aboard.is_some()));
+        assert_eq!(map.unit(brave).unwrap().carrying, 0);
+        let piece = map.wood.last().expect("left on the shore");
+        assert!(map.ground().passable(Mobility::Walk, ((piece.x / 512) as i32, (piece.z / 512) as i32)));
     }
 
     #[test]

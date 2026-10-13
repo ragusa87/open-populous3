@@ -64,7 +64,8 @@ on.
   nearest the vehicle (`path::nearest_reachable`: the land next to a boat on the water by the shore) and, within `BOARD_REACH` (1024
   world units per axis, "within 1-2 cells"), gets on (`board`, `UnitEvent::AtVehicle`). Refused when every seat is
   taken (a hard limit), when it is wrecked or stranded, and when someone of another tribe is aboard. Whoever gets
-  on makes it their tribe's: an empty enemy or neutral vehicle becomes theirs. It then waits `BOARD_WAIT` (7 turns)
+  on makes it their tribe's: an empty enemy or neutral vehicle becomes theirs. A brave carrying wood puts it down
+  where he stood before getting on. It then waits `BOARD_WAIT` (7 turns)
   before moving off. Getting on is a jump (`Action::Boarding`, `BOARD_JUMP` = the vehicle's 7-turn wait): seated at
   once, it is drawn on an arc from where it stood to its seat. Getting off too (`Action::Alighting`): on the ground
   at once, drawn jumping down from the vehicle.
