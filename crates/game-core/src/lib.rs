@@ -5,6 +5,8 @@
 pub mod angle;
 pub mod ashes;
 pub mod attack;
+#[cfg(test)]
+mod battle;
 pub mod blast;
 pub mod build_book;
 pub mod building;

@@ -65,6 +65,11 @@ impl Headcount {
     pub fn get(&self, state: State, kind: UnitKind) -> u16 {
         self.row(state).get(kind)
     }
+
+    /// Every counted follower of the tribe, whatever it does.
+    pub fn total(&self) -> u16 {
+        self.rows.iter().map(Counts::total).sum()
+    }
 }
 
 /// Room per hut size 1..=3 (`MAX_POP_VALUE__HUT_1..3`).
@@ -208,6 +213,7 @@ mod tests {
         assert_eq!(map.headcount(0), Headcount::default());
         assert_eq!(map.housing(0).population, 0);
         assert_eq!(map.headcount(1).get(State::Idle, UnitKind::Warrior), 1);
+        assert_eq!((map.headcount(0).total(), map.headcount(1).total()), (0, 1));
     }
 
     #[test]
