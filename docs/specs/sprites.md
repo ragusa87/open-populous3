@@ -101,7 +101,9 @@ area; 639-656 gold state icons, each plain then outlined (653 a boat, 655 the sa
 pairs: 666 brave, 668 warrior, 670 firewarrior, 672 preacher, 674 spy, 664 probably the shaman; 75-80 the same in
 teal, in unit model order: brave, warrior, preacher, spy, firewarrior, shaman, `catalog::UNIT_FIGURES`, the tooltip's
 people), 676-681 the panel's tab icons, each then highlighted: 676 build (a house), 678 spells, 680 stats (three
-people, also `catalog::PEOPLE_ICON`), 682 the Magical Shield's icon, 346-349 the volcano's rock, a boulder in 4 orientations (17 x 13) [exe], 1030-1083 spell and building glyphs (seen in the game: 1030-1036 coloured building pictures, 1037-1045 the building
+people, also `catalog::PEOPLE_ICON`), 682 the Magical Shield's icon, 346-349 the volcano's rock, a boulder in 4 orientations (17 x 13) [exe], 354-371 spell icons in purple (the hovered look?), 372-389 spell icons, 390-407 the same lighter, 408-419 colour
+variants of the shield's closed fist, but 411-413 and 415 the bloodlust's skull,
+1028-1083 spell and building glyphs (seen in the game: 1028-1036 coloured building pictures, a bit pink, 1037-1045 the building
 icons' shadows and 1046-1054 their highlights, 1055 the "?" of something to discover (1056 the same, smaller),
 1057-1074 the panel's spell icons, white, drawn dark: Armageddon 1057, models 2-17 in order from 1058 (Blast; Angel
 of Death 1069), Teleport 1074; 1075-1083 the panel's building icons, white, drawn dark, in the cursor's order: hut,
