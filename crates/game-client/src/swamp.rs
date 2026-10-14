@@ -1,111 +1,111 @@
 //! The swamp's ground (`game_core::swamp`), a world view (`views::WorldView`) of each effect: the original marks
-//! only the aerial map (pop3-rev-analysis.md "Swamp: drawing..."), no ground sprite at all; ours instead shows the
-//! ground gone marshy, a pale misty patch a few centimetres over it (`LIFT`), draped over its 3 cells like a
-//! blueprint's footprint (`blueprint::grid_mark`), with a scatter of flat reed-like leaves lying on it, pseudo-random
-//! and seeded from the effect's id (`leaf_offset`, `leaf_yaw`) so every client draws the same ones. Our own look.
+//! only the aerial map (pop3-rev-analysis.md "Swamp: drawing..."), no ground sprite at all. Ours instead stacks
+//! `FOG_LAYERS` flat, transparent planes over its 3 × 3 cells, all within one unit's height (`FOG_TOP_Y`,
+//! `units::selection::UNIT_HEIGHT`) so they sit close together, each running its own drifting, domain-warped
+//! noise (seeded and phased per layer, `SwampFog`, a custom material, `swamp_fog.wgsl`) with a soft edge and a
+//! height-based fade, so the layers never line up and the lot reads as a grounded volume, not a flat sticker.
+//! Our own look, no original to trace. The ground itself is left alone, the real terrain showing through.
 
-use crate::blueprint::{grid_mark, mark_material, set_mark};
-use crate::camera::{CameraRig, CurveParamsRes};
-use crate::grounded::{ground_point, Grounded};
+use crate::grounded::Grounded;
 use crate::sim_time::{seed, SimNow};
 use crate::views::{sync_views, WorldView};
 use crate::world::CurrentMap;
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::embedded_asset;
 use bevy::ecs::system::SystemParamItem;
 use bevy::light::NotShadowCaster;
-use bevy::mesh::PrimitiveTopology;
+use bevy::mesh::MeshVertexBufferLayoutRef;
+use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError};
+use bevy::shader::ShaderRef;
 use game_core::effect::{Effect, EffectKind};
 use game_core::id::Id;
 use game_core::map::GameMap;
+use game_core::time::Tick;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
-/// Height over the ground (render units).
-const LIFT: f32 = 0.05;
-/// The patch's pale, misty colour (RGBA).
-const COLOUR: [f32; 4] = [0.82, 0.86, 0.80, 0.5];
-/// Leaves scattered on the patch, and how far from its centre (cells).
-const LEAVES: u32 = 7;
-const SCATTER_RADIUS: f32 = 1.15;
-/// A leaf's size (cells): tapered to a point at both ends along its length.
-const LEAF: (f32, f32) = (0.3, 0.5);
-const TEXTURE: usize = 24;
+/// Inside the swamp (Chebyshev distance from its centre cell): its 3 × 3 cells.
+const SWAMP_REACH: i32 = 1;
 
-/// A pseudo-random offset (cells, within `SCATTER_RADIUS` of the centre) for the `k`th leaf of swamp `id`.
-fn leaf_offset(id: u32, k: u32) -> Vec2 {
-    let s = |salt: u32| seed(id.wrapping_mul(31).wrapping_add(k.wrapping_mul(97)).wrapping_add(salt)) * 2.0 - 1.0;
-    Vec2::new(s(1), s(2)) * SCATTER_RADIUS
-}
+/// Fog planes stacked from `FOG_BASE_Y` to `FOG_TOP_Y` (render units, close together: about a unit's own
+/// height, `units::selection::UNIT_HEIGHT`), and their footprint (cells, centred).
+const FOG_LAYERS: u32 = 5;
+const FOG_BASE_Y: f32 = 0.02;
+const FOG_TOP_Y: f32 = crate::units::selection::UNIT_HEIGHT;
+/// Exactly the swamp's own 3 × 3 cells, no further.
+const FOG_SIZE: f32 = (2 * SWAMP_REACH + 1) as f32;
+/// How thick the fog reads, and how fast it drifts: both tuned low, matched against a live prototype.
+const DENSITY: f32 = 0.3;
+const DRIFT_SCALE: f32 = 0.3;
+const FOG_COLOUR: Vec4 = Vec4::new(0.93, 0.95, 0.92, 1.0);
+/// Where the tooltip anchors above a swamp (`tooltip::show_tooltip`), clear of the fog stack.
+pub const TOOLTIP_HEIGHT: f32 = FOG_TOP_Y + 0.3;
 
-/// Lobes the patch's edge is built from (`blob_alpha`): the first covers the centre, the rest are its bumps.
-const LOBES: u32 = 6;
-
-/// The patch's alpha at offset `p` (cells from its centre), 0 past its edge: several overlapping round lobes,
-/// seeded from the effect's `id` (a different stream from the leaves'), so it reads as an irregular, cloud-like
-/// blob rather than the grid it is built on, the same every frame and for every client.
-fn blob_alpha(id: u32, p: Vec2) -> f32 {
-    (0..LOBES)
-        .map(|k| {
-            let s = |salt: u32| seed(id.wrapping_mul(53).wrapping_add(k.wrapping_mul(131)).wrapping_add(salt));
-            let centre = if k == 0 { Vec2::ZERO } else { Vec2::new(s(11) * 2.0 - 1.0, s(12) * 2.0 - 1.0) * 0.85 };
-            let radius = 0.9 + s(13) * 0.55;
-            (1.0 - (p - centre).length() / radius).clamp(0.0, 1.0).powf(1.3)
-        })
-        .fold(0.0f32, f32::max)
-}
-
-/// A pseudo-random yaw (radians) for the `k`th leaf of swamp `id`.
-fn leaf_yaw(id: u32, k: u32) -> f32 {
-    seed(id.wrapping_mul(31).wrapping_add(k.wrapping_mul(97)).wrapping_add(3)) * std::f32::consts::TAU
-}
-
-/// A leaf, green, tapering to a point at both ends along its length (the texture's y), opaque in the middle
-/// (RGBA, `size` square).
-fn leaf_texture(size: usize) -> Vec<u8> {
-    let c = (size as f32 - 1.0) / 2.0;
-    (0..size * size)
-        .flat_map(|i| {
-            let x = ((i % size) as f32 - c) / c;
-            let y = ((i / size) as f32 - c) / c;
-            let width = (1.0 - y * y).max(0.0).sqrt();
-            let d = if width > 1e-3 { x.abs() / width } else { 2.0 };
-            let a = (1.0 - d).clamp(0.0, 1.0);
-            [70, 110, 45, (a.powf(0.4) * 255.0) as u8]
-        })
-        .collect()
-}
-
+/// Marks the swamp's ground anchor (its `Grounded` point) by the effect's id, for the tooltip to anchor above
+/// (`tooltip::show_tooltip`): only the player's own swamp shows one (`tooltip::swamp_model`).
 #[derive(Component)]
-struct Leaf;
+pub struct SwampAnchor(pub u32);
+
+/// This layer's noise seed (cells) and drift (cells/second, already at `DRIFT_SCALE`): its own stream per swamp
+/// and layer, so no two layers (or swamps) line up.
+fn layer_seed(id: u32, layer: u32) -> Vec2 {
+    let s = |salt: u32| seed(id.wrapping_mul(71).wrapping_add(layer.wrapping_mul(151)).wrapping_add(salt));
+    Vec2::new(s(1) * 40.0, s(2) * 40.0)
+}
+fn layer_drift(id: u32, layer: u32) -> Vec2 {
+    let s = |salt: u32| seed(id.wrapping_mul(71).wrapping_add(layer.wrapping_mul(151)).wrapping_add(salt));
+    Vec2::new(0.03 + s(3) * 0.02, 0.02 + s(4) * 0.02) * DRIFT_SCALE
+}
+/// Layer `layer`'s opacity multiplier (0 at the top): the bottom layers stay thick, the top ones thin out, so the
+/// fog hugs the ground instead of reading as a cloud.
+fn layer_fade(layer: u32) -> f32 {
+    1.0 - (layer as f32 / FOG_LAYERS as f32).powf(1.4) * 0.75
+}
+
+/// One fog layer: drifting, domain-warped noise (`swamp_fog.wgsl`) with a soft edge and this layer's own fade.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct SwampFog {
+    /// x: time (seconds since the swamp was cast), y: density, z: this layer's fade, w: unused.
+    #[uniform(0)]
+    time_density: Vec4,
+    /// xy: this layer's noise seed, zw: its drift.
+    #[uniform(1)]
+    seed_drift: Vec4,
+    #[uniform(2)]
+    fog_colour: Vec4,
+}
+
+impl Material for SwampFog {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://game_client/swamp_fog.wgsl".into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Blend
+    }
+
+    /// Seen from either side, like a blueprint's mark.
+    fn specialize(_: &MaterialPipeline, descriptor: &mut RenderPipelineDescriptor, _: &MeshVertexBufferLayoutRef, _: MaterialPipelineKey<Self>) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = None;
+        Ok(())
+    }
+}
 
 #[derive(Resource)]
 pub struct SwampAssets {
-    leaf: Handle<Mesh>,
-    leaf_material: Handle<StandardMaterial>,
+    fog_quad: Handle<Mesh>,
 }
 
-/// One swamp's view: the patch over its 3 × 3 cells, rebuilt every frame as the camera moves (it spans several
-/// cells, like a blueprint's footprint, not one grounded point); its leaves, scattered once at spawn, are plain
-/// `Grounded` points and need no further updates.
+/// One swamp's view: its stack of fog layers (a fixed shape, posed once at spawn; only their `time` moves, each
+/// frame).
 #[derive(Component)]
 pub struct SwampView {
-    mesh: Handle<Mesh>,
-}
-
-/// The patch's mesh over the 3 cells centred on `centre` (cells), draped on the ground at `rig`'s focus, its edge
-/// shaped by `blob_alpha` instead of the square it is built on.
-fn patch_mesh(terrain: &game_core::terrain::Heightmap, rig: &CameraRig, params: &CurveParamsRes, id: u32, centre: Vec2) -> crate::blueprint::MarkMesh {
-    let on_ground = |at: Vec2| <[f32; 3]>::from(ground_point(terrain, rig.focus, &params.0, at) + Vec3::Y * LIFT);
-    grid_mark(centre - Vec2::splat(1.5), centre + Vec2::splat(1.5), |at| {
-        let a = COLOUR[3] * blob_alpha(id, at - centre);
-        (on_ground(at), [COLOUR[0], COLOUR[1], COLOUR[2], a])
-    })
+    fog: Vec<Handle<SwampFog>>,
 }
 
 impl WorldView for SwampView {
     type Model = (Id<Effect>, Effect);
-    type Params = (Res<'static, CurrentMap>, Res<'static, CameraRig>, Res<'static, CurveParamsRes>, Res<'static, SwampAssets>, ResMut<'static, Assets<Mesh>>, ResMut<'static, Assets<StandardMaterial>>);
+    type Params = (Res<'static, CurrentMap>, Res<'static, SwampAssets>, ResMut<'static, Assets<SwampFog>>);
 
     fn models(map: &GameMap) -> impl Iterator<Item = &(Id<Effect>, Effect)> {
         map.effects.entries().filter(|(_, e)| matches!(e.kind, EffectKind::Swamp(_)))
@@ -115,35 +115,56 @@ impl WorldView for SwampView {
         id.raw()
     }
 
-    fn spawn((id, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (map, rig, params, assets, meshes, mats): &mut SystemParamItem<Self::Params>) -> Option<Self> {
+    fn spawn((id, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (_, assets, fog_mats): &mut SystemParamItem<Self::Params>) -> Option<Self> {
         let id = id.raw();
         let centre = Vec2::new(e.x as f32, e.z as f32) / WORLD_UNITS_PER_CELL as f32;
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-        set_mark(&mut mesh, patch_mesh(&map.0.terrain, rig, params, id, centre));
-        let mesh = meshes.add(mesh);
-        view.insert((Mesh3d(mesh.clone()), MeshMaterial3d(mats.add(mark_material())), NotShadowCaster, crate::hover::NoOutline, Transform::default(), Visibility::Visible));
+        view.insert((SwampAnchor(id), Grounded { at: centre, half: 0.0 }, Transform::default(), Visibility::Visible));
+
+        let flat = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+        let mut fog = Vec::with_capacity(FOG_LAYERS as usize);
         view.with_children(|v| {
-            for k in 0..LEAVES {
-                let lying_flat = Quat::from_rotation_y(leaf_yaw(id, k)) * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+            for layer in 0..FOG_LAYERS {
+                let (ls, ld) = (layer_seed(id, layer), layer_drift(id, layer));
+                let material = fog_mats.add(SwampFog {
+                    time_density: Vec4::new(0.0, DENSITY, layer_fade(layer), 0.0),
+                    seed_drift: Vec4::new(ls.x, ls.y, ld.x, ld.y),
+                    fog_colour: FOG_COLOUR,
+                });
+                let height = FOG_BASE_Y + (FOG_TOP_Y - FOG_BASE_Y) * (layer as f32 / (FOG_LAYERS - 1) as f32);
                 v.spawn((
-                    Leaf,
-                    Mesh3d(assets.leaf.clone()),
-                    MeshMaterial3d(assets.leaf_material.clone()),
-                    Grounded { at: centre + leaf_offset(id, k), half: 0.0 },
-                    Transform::from_rotation(lying_flat),
+                    Mesh3d(assets.fog_quad.clone()),
+                    MeshMaterial3d(material.clone()),
+                    Transform { translation: Vec3::Y * height, rotation: flat, ..default() },
                     Visibility::Inherited,
                     NotShadowCaster,
                     crate::hover::NoOutline,
                 ));
+                fog.push(material);
             }
         });
-        Some(SwampView { mesh })
+        Some(SwampView { fog })
     }
 
-    fn update(&self, (id, e): &(Id<Effect>, Effect), _now: SimNow, (map, rig, params, _, meshes, _): &mut SystemParamItem<Self::Params>) {
-        let Some(mut mesh) = meshes.get_mut(&self.mesh) else { return };
-        let centre = Vec2::new(e.x as f32, e.z as f32) / WORLD_UNITS_PER_CELL as f32;
-        set_mark(&mut mesh, patch_mesh(&map.0.terrain, rig, params, id.raw(), centre));
+    fn update(&self, (_, e): &(Id<Effect>, Effect), now: SimNow, (map, _, fog_mats): &mut SystemParamItem<Self::Params>) {
+        let start = Tick::from_wire(map.0.now.to_wire().wrapping_sub(e.left.done().get()));
+        let secs = now.secs_since(start);
+        for handle in &self.fog {
+            if let Some(mut m) = fog_mats.get_mut(handle) {
+                m.time_density.x = secs;
+            }
+        }
+    }
+}
+
+/// Right click + Ctrl on the player's own swamp ends it early (`GameMap::clear_swamp`), like a blueprint put
+/// away; never another tribe's.
+fn clear_on_right_click(mouse: Res<ButtonInput<MouseButton>>, keys: crate::keymap::Shortcuts, hovered: Res<crate::hover::Hovered>, map: Res<CurrentMap>, mut schedule: ResMut<crate::units::GameSchedule>) {
+    if !(mouse.just_pressed(MouseButton::Right) && keys.mods().ctrl) {
+        return;
+    }
+    let Some(crate::hover::HoverTarget::Swamp(id)) = hovered.0 else { return };
+    if map.0.effects.get(id).is_some_and(|e| e.owner == crate::units::PLAYER) {
+        schedule.issue(game_core::command::Command::ClearSwamp { player: crate::units::PLAYER, swamp: id });
     }
 }
 
@@ -151,29 +172,16 @@ pub struct SwampPlugin;
 
 impl Plugin for SwampPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_assets).add_systems(Update, sync_views::<SwampView>.after(crate::units::run_ticks));
+        embedded_asset!(app, "swamp_fog.wgsl");
+        app.add_plugins(MaterialPlugin::<SwampFog>::default())
+            .add_systems(Startup, load_assets)
+            .add_systems(Update, sync_views::<SwampView>.after(crate::units::run_ticks))
+            .add_systems(Update, clear_on_right_click.after(crate::hover::HoverSystems).in_set(crate::menu::Gameplay));
     }
 }
 
-fn load_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, mut mats: ResMut<Assets<StandardMaterial>>) {
-    let texture = Image::new(
-        Extent3d { width: TEXTURE as u32, height: TEXTURE as u32, depth_or_array_layers: 1 },
-        TextureDimension::D2,
-        leaf_texture(TEXTURE),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
-    );
-    let leaf_material = mats.add(StandardMaterial {
-        base_color: Color::srgb(0.3, 0.46, 0.2),
-        base_color_texture: Some(images.add(texture)),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        cull_mode: None,
-        // Over the patch's own depth bias (`mark_material`, 20.0), so the leaves draw over it, not under.
-        depth_bias: 25.0,
-        ..default()
-    });
-    commands.insert_resource(SwampAssets { leaf: meshes.add(Rectangle::new(LEAF.0, LEAF.1)), leaf_material });
+fn load_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
+    commands.insert_resource(SwampAssets { fog_quad: meshes.add(Rectangle::new(FOG_SIZE, FOG_SIZE)) });
 }
 
 #[cfg(test)]
@@ -181,32 +189,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn leaves_scatter_within_radius_each_its_own_spot() {
-        let offsets: Vec<Vec2> = (0..LEAVES).map(|k| leaf_offset(5, k)).collect();
-        assert!(offsets.iter().all(|o| o.length() <= SCATTER_RADIUS * 2f32.sqrt() + 1e-4));
-        assert!(offsets.windows(2).all(|w| w[0] != w[1]), "each leaf its own spot");
-        assert_eq!(leaf_offset(5, 2), leaf_offset(5, 2), "the same swamp looks the same");
-        assert_ne!(leaf_offset(5, 2), leaf_offset(6, 2), "so do different swamps");
-    }
-
-    #[test]
-    fn the_blob_is_full_at_the_centre_and_gone_well_past_the_patch() {
-        assert_eq!(blob_alpha(9, Vec2::ZERO), 1.0, "the first lobe always covers the centre");
-        assert_eq!(blob_alpha(9, Vec2::splat(5.0)), 0.0, "long gone far out");
-        assert_eq!(blob_alpha(9, Vec2::new(0.3, -0.2)), blob_alpha(9, Vec2::new(0.3, -0.2)), "the same swamp looks the same");
-        assert_ne!(
-            (0..20).map(|k| blob_alpha(9, Vec2::new(k as f32 * 0.1, 0.0))).collect::<Vec<_>>(),
-            (0..20).map(|k| blob_alpha(10, Vec2::new(k as f32 * 0.1, 0.0))).collect::<Vec<_>>(),
-            "so do different swamps"
-        );
-    }
-
-    #[test]
-    fn the_leaf_is_opaque_along_its_middle_and_clear_at_the_tips() {
-        let px = leaf_texture(TEXTURE);
-        let alpha = |x: usize, y: usize| px[(y * TEXTURE + x) * 4 + 3];
-        let mid = TEXTURE / 2;
-        assert!(alpha(mid, mid) > 150);
-        assert_eq!((alpha(mid, 0), alpha(mid, TEXTURE - 1)), (0, 0));
+    fn fog_fades_toward_the_top_and_each_layer_drifts_its_own_way() {
+        assert_eq!(layer_fade(0), 1.0, "the bottom layer at full strength");
+        assert!(layer_fade(FOG_LAYERS - 1) < layer_fade(0), "thinner near the top");
+        assert!((0..FOG_LAYERS - 1).all(|l| layer_fade(l) >= layer_fade(l + 1)), "fades monotonically");
+        assert_ne!(layer_seed(5, 0), layer_seed(5, 1), "each layer its own seed");
+        assert_ne!(layer_drift(5, 0), layer_drift(6, 0), "and different swamps drift differently");
     }
 }

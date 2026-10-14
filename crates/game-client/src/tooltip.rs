@@ -56,6 +56,10 @@ pub enum Icon {
     NoWood,
     /// The arrow over a selected unit's slot.
     Selected,
+    /// A swamp's kill, one of its own tally (`swamp::Swamp::processed`): a headstone.
+    Tomb,
+    /// A swamp's still-open slot, up to `game_core::swamp::SWAMP_NUM_PEOPLE` (greyed).
+    TombPlaceholder,
 }
 
 /// What a tooltip is about.
@@ -65,6 +69,7 @@ pub enum Target {
     Tree(usize),
     Totem(usize),
     Vehicle(VehicleId),
+    Swamp(game_core::id::Id<game_core::effect::Effect>),
 }
 
 /// One slot: its icon, the unit a click on it selects, and whether that unit is selected.
@@ -272,6 +277,21 @@ pub fn totem_model(map: &GameMap, i: usize, selected: &[UnitId]) -> Option<Toolt
     Some(TooltipModel { lines: vec![totem.kind.name().to_string()], rows, bars, toggle: None })
 }
 
+/// A swamp's tooltip, the player's own only: how many it has killed so far (`swamp::Swamp::processed`) out of
+/// its own cap (`game_core::swamp::SWAMP_NUM_PEOPLE`), a headstone per kill and a placeholder per slot still
+/// open.
+pub fn swamp_model(map: &GameMap, id: game_core::id::Id<game_core::effect::Effect>) -> Option<TooltipModel> {
+    let e = map.effects.get(id)?;
+    let game_core::effect::EffectKind::Swamp(swamp) = &e.kind else { return None };
+    if e.owner != crate::units::PLAYER {
+        return None;
+    }
+    let cap = game_core::swamp::SWAMP_NUM_PEOPLE;
+    let processed = swamp.processed.min(cap);
+    let row = (0..cap).map(|k| Slot { icon: if k < processed { Icon::Tomb } else { Icon::TombPlaceholder }, unit: None, selected: false }).collect();
+    Some(TooltipModel { lines: vec![format!("Swamp: {processed}/{cap} dead")], rows: vec![row], ..default() })
+}
+
 /// What `target` shows; None when it has nothing to show.
 /// Whether the thing `target` points at is still on `map` (it may have been removed, or the map replaced).
 pub fn exists(map: &GameMap, target: Target) -> bool {
@@ -280,6 +300,7 @@ pub fn exists(map: &GameMap, target: Target) -> bool {
         Target::Tree(i) => i < map.trees.len(),
         Target::Totem(i) => i < map.totems.len(),
         Target::Vehicle(id) => map.vehicle(id).is_some(),
+        Target::Swamp(id) => map.effects.contains(id),
     }
 }
 
@@ -289,6 +310,7 @@ fn model_of(map: &GameMap, target: Target, selected: &[UnitId], revealed: bool) 
         Target::Tree(i) => tree_model(map, i),
         Target::Totem(i) => totem_model(map, i, selected),
         Target::Vehicle(id) => vehicle_model(map, id, selected),
+        Target::Swamp(id) => swamp_model(map, id),
     }
 }
 
@@ -328,6 +350,23 @@ pub fn icon_pixels(icon: Icon) -> Vec<u8> {
             for y in 0..4 {
                 for x in 3 + y..9 - y {
                     put(x, y + 12, [255, 230, 120, 255]);
+                }
+            }
+            return px;
+        }
+        Icon::Tomb | Icon::TombPlaceholder => {
+            // A dead tribesperson's stone stands pale and solid; a slot still open is barely a shadow of one.
+            let stone = if icon == Icon::Tomb { [205, 205, 210, 255] } else { [90, 90, 95, 70] };
+            // A small headstone: a rounded top widening into a straight-sided body, on a mound of earth.
+            for y in 3..14 {
+                let half = if y < 6 { 2 + (y - 3) } else { 4 };
+                for x in 6usize.saturating_sub(half)..(6 + half).min(ICON_W) {
+                    put(x, y, stone);
+                }
+            }
+            for y in 14..16 {
+                for x in 1..11 {
+                    put(x, y, stone);
                 }
             }
             return px;
@@ -551,7 +590,7 @@ fn show_tooltip(
     mut state: Local<TooltipState>,
     (mut icons, mut images, mut shown_bars): (ResMut<IconImages>, ResMut<Assets<Image>>, ResMut<ShownBars>),
     mut tooltip: Query<(Entity, &Interaction, &ComputedNode, &mut Node, &mut Visibility), With<TooltipBox>>,
-    (vehicles, curve): (Query<(&crate::views::ViewOf, &GlobalTransform), With<crate::vehicles::VehicleView>>, Res<crate::camera::CurveParamsRes>),
+    (vehicles, curve, swamps): (Query<(&crate::views::ViewOf, &GlobalTransform), With<crate::vehicles::VehicleView>>, Res<crate::camera::CurveParamsRes>, Query<(&crate::swamp::SwampAnchor, &GlobalTransform)>),
 ) {
     let Ok((entity, interaction, computed, mut node, mut vis)) = tooltip.single_mut() else { return };
     let now = time.elapsed_secs();
@@ -560,6 +599,7 @@ fn show_tooltip(
         Some(crate::hover::HoverTarget::Tree(i)) => Some(Target::Tree(i)),
         Some(crate::hover::HoverTarget::Totem(i)) => Some(Target::Totem(i)),
         Some(crate::hover::HoverTarget::Vehicle(id)) => Some(Target::Vehicle(id)),
+        Some(crate::hover::HoverTarget::Swamp(id)) => Some(Target::Swamp(id)),
         _ => None,
     }
     .filter(|&t| exists(&map.0, t));
@@ -598,6 +638,10 @@ fn show_tooltip(
             Target::Vehicle(id) => {
                 let (_, gt) = vehicles.iter().find(|(of, _)| of.id == id.raw())?;
                 gt.translation() + gt.up() * crate::vehicles::top(&map.0, map.0.vehicle(id)?, curve.0.height_scale)
+            }
+            Target::Swamp(id) => {
+                let (_, gt) = swamps.iter().find(|(a, _)| a.0 == id.raw())?;
+                gt.translation() + gt.up() * crate::swamp::TOOLTIP_HEIGHT
             }
         };
         cam.world_to_viewport(cam_t, top).ok()

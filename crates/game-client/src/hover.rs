@@ -21,6 +21,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, Face, RenderPipelineDescriptor, SpecializedMeshPipelineError};
 use bevy::shader::ShaderRef;
 use game_core::building::Stage;
+use game_core::effect::{Effect, EffectKind};
+use game_core::id::Id;
 use game_core::map::GameMap;
 use std::collections::HashMap;
 
@@ -48,6 +50,8 @@ pub enum HoverTarget {
     Tree(usize),
     Totem(usize),
     Building(usize),
+    /// No halo (`draw_halo`'s matches fall through to it): a swamp has no model, only a tooltip.
+    Swamp(Id<Effect>),
 }
 
 #[derive(Resource, Default, Debug, PartialEq)]
@@ -151,15 +155,24 @@ impl Plugin for HoverPlugin {
     }
 }
 
-/// What gets the halo when the cursor is on each of these: a unit first, then a vehicle, a wood pile, a
-/// tree, a totem, a building.
-pub fn pick(unit: Option<usize>, vehicle: Option<game_core::vehicle::VehicleId>, wood: Option<usize>, tree: Option<usize>, totem: Option<usize>, building: Option<usize>) -> Option<HoverTarget> {
+/// What gets the halo (or, for a swamp, just a tooltip) when the cursor is on each of these: a unit first, then
+/// a vehicle, a wood pile, a tree, a totem, a building, a swamp last (it is never in the way of anything else).
+#[allow(clippy::too_many_arguments)]
+pub fn pick(unit: Option<usize>, vehicle: Option<game_core::vehicle::VehicleId>, wood: Option<usize>, tree: Option<usize>, totem: Option<usize>, building: Option<usize>, swamp: Option<Id<Effect>>) -> Option<HoverTarget> {
     unit.map(HoverTarget::Unit)
         .or(vehicle.map(HoverTarget::Vehicle))
         .or(wood.map(HoverTarget::Wood))
         .or(tree.map(HoverTarget::Tree))
         .or(totem.map(HoverTarget::Totem))
         .or(building.map(HoverTarget::Building))
+        .or(swamp.map(HoverTarget::Swamp))
+}
+
+/// The swamp whose cells (`game_core::swamp::cells`) hold world point `at`, its effect id.
+fn swamp_at(map: &GameMap, at: (u16, u16)) -> Option<Id<Effect>> {
+    let cell = ((at.0 as u32 / pop3_format::WORLD_UNITS_PER_CELL) as i32, (at.1 as u32 / pop3_format::WORLD_UNITS_PER_CELL) as i32);
+    let size = map.terrain.size() as i32;
+    map.effects.entries().find(|(_, e)| matches!(e.kind, EffectKind::Swamp(_)) && game_core::swamp::cells((e.x, e.z), size).contains(&cell)).map(|&(id, _)| id)
 }
 
 /// The totem standing at world point `at` (`GameMap::totem_at`) if `hoverable` accepts it (by index).
@@ -222,6 +235,7 @@ pub fn parse_target(v: &str) -> Option<HoverTarget> {
         "building" => HoverTarget::Building(i),
         "totem" => HoverTarget::Totem(i),
         "vehicle" => HoverTarget::Vehicle(game_core::id::Id::from_raw(i as u32)),
+        "swamp" => HoverTarget::Swamp(Id::from_raw(i as u32)),
         _ => return None,
     })
 }
@@ -309,7 +323,8 @@ fn detect(
             })
             .collect();
         let vehicle = model_on_screen(c, &afloat).map(|i| ids[i]);
-        pick(unit, vehicle, wood, tree, totem, building)
+        let swamp = ground.and_then(|at| swamp_at(&map.0, at));
+        pick(unit, vehicle, wood, tree, totem, building, swamp)
     });
     hovered.set_if_neq(Hovered(target));
 }
@@ -473,15 +488,17 @@ mod tests {
     }
 
     #[test]
-    fn a_unit_wins_over_wood_trees_and_buildings() {
+    fn a_unit_wins_over_wood_trees_buildings_and_a_swamp_last_of_all() {
         let boat = Some(game_core::id::Id::from_raw(9));
-        assert_eq!(pick(Some(3), boat, Some(1), Some(2), Some(5), Some(0)), Some(HoverTarget::Unit(3)));
-        assert_eq!(pick(None, boat, Some(1), Some(2), Some(5), Some(0)), Some(HoverTarget::Vehicle(game_core::id::Id::from_raw(9))));
-        assert_eq!(pick(None, None, Some(1), Some(2), Some(5), Some(0)), Some(HoverTarget::Wood(1)));
-        assert_eq!(pick(None, None, None, Some(2), Some(5), Some(0)), Some(HoverTarget::Tree(2)));
-        assert_eq!(pick(None, None, None, None, Some(5), Some(0)), Some(HoverTarget::Totem(5)));
-        assert_eq!(pick(None, None, None, None, None, Some(0)), Some(HoverTarget::Building(0)));
-        assert_eq!(pick(None, None, None, None, None, None), None);
+        let swamp = Some(game_core::id::Id::from_raw(4));
+        assert_eq!(pick(Some(3), boat, Some(1), Some(2), Some(5), Some(0), swamp), Some(HoverTarget::Unit(3)));
+        assert_eq!(pick(None, boat, Some(1), Some(2), Some(5), Some(0), swamp), Some(HoverTarget::Vehicle(game_core::id::Id::from_raw(9))));
+        assert_eq!(pick(None, None, Some(1), Some(2), Some(5), Some(0), swamp), Some(HoverTarget::Wood(1)));
+        assert_eq!(pick(None, None, None, Some(2), Some(5), Some(0), swamp), Some(HoverTarget::Tree(2)));
+        assert_eq!(pick(None, None, None, None, Some(5), Some(0), swamp), Some(HoverTarget::Totem(5)));
+        assert_eq!(pick(None, None, None, None, None, Some(0), swamp), Some(HoverTarget::Building(0)));
+        assert_eq!(pick(None, None, None, None, None, None, swamp), Some(HoverTarget::Swamp(game_core::id::Id::from_raw(4))));
+        assert_eq!(pick(None, None, None, None, None, None, None), None);
     }
 
     #[test]
