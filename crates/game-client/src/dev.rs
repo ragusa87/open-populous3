@@ -157,6 +157,18 @@ pub fn lightning_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -
     true
 }
 
+/// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there (needs it known/charged, e.g. the Spells sandbox's
+/// `SpellBook::unlimited`), then `ticks` run at once — v1 settles almost immediately (`docs/specs/outcome.md`
+/// "Armageddon"); with `GAME_SPEED=0`, a shot can catch the brief camera-takeover/lock window. False when `at`
+/// does not parse.
+pub fn armageddon_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
+    let at = world_units(Vec2::new(x, z));
+    map.apply(&Command::Cast { player: PLAYER, spell: game_core::spell::Spell::Armageddon { at } });
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
 /// `BRIDGE=x,z` (cells): the player's land bridge from their shaman to there (no charge used, no cast jump), then
 /// `ticks` run at once. False when `to` does not parse or the player has no shaman.
 pub fn bridge_demo(map: &mut game_core::map::GameMap, to: &str, ticks: u32) -> bool {
@@ -457,6 +469,10 @@ fn screenshot(
             let ticks = std::env::var("LIGHTNING_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             lightning_demo(&mut map.0, &at, ticks);
         }
+        if let Ok(at) = std::env::var("ARMAGEDDON") {
+            let ticks = std::env::var("ARMAGEDDON_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            armageddon_demo(&mut map.0, &at, ticks);
+        }
         if let Ok(to) = std::env::var("BRIDGE") {
             let ticks = std::env::var("BRIDGE_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             dirty.0 |= bridge_demo(&mut map.0, &to, ticks);
@@ -618,6 +634,15 @@ mod tests {
         assert!(blast_demo(&mut map, &at, 2));
         assert!(map.units[s].motion.airborne());
         assert!(!blast_demo(&mut map, "here", 0));
+    }
+
+    #[test]
+    fn armageddon_demo_casts_and_settles_within_the_run() {
+        let mut map = game_core::map::GameMap::sandbox_spells(); // SpellBook::unlimited: Armageddon known
+        // CAST_RELEASE (6 ticks) for the cast jump to release, then the match's own first-tick resolution.
+        assert!(armageddon_demo(&mut map, "5,5", 10));
+        assert!(map.outcome.is_some(), "v1 settles almost immediately once released");
+        assert!(!armageddon_demo(&mut map, "nope", 0));
     }
 
     #[test]
