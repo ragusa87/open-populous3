@@ -24,6 +24,8 @@ from the user's own install.
 
 ## Before starting
 Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `roadmap.md`, then the `docs/specs/*` matching the task).
+If `docs/plans/` has a plan for the task, read it too: it is the current approach and task breakdown, ahead of whatever
+the matching spec still says.
 
 ## Layout
 - `crates/pop3-format`: pure parsers of original game files. No Bevy, no game logic.
@@ -32,7 +34,22 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
 - `crates/unit-baker`: renders `assets/3d/characters` into `assets/units` atlases (`just bake-units`); `crates/unit-atlas` is their index format.
 - `crates/game-client`: Bevy app, one plugin per concern (world, camera, hud, editor, dev).
 - `docs/`: architecture, roadmap, `docs/specs/*`. Update the matching spec when behaviour changes.
+- `docs/plans/`: WIP implementation plans, see "Plans" below. Gitignored (only `.gitignore` itself is tracked):
+  local working files, never committed.
 - `TODO.md`: what is left to implement. Tick/remove items in the commit that does them, add what you leave undone or discover.
+
+## Plans
+A plan (`docs/plans/<topic>.md`) is scratch, not documentation: the approach and step breakdown for a task too large
+for one sitting, kept so the same working copy can pick up where a prior session left off. It is gitignored and
+never committed — it carries no history and is not shared by cloning the repo.
+- Start one before a multi-commit feature or refactor: what changes, in what order, open questions, which
+  `docs/specs/*.md` and `TODO.md` entries it will touch when done.
+- Update it as you go — ticking steps, revising the approach when reality disagrees with the plan — instead of
+  letting it drift stale. A plan that no longer matches what you're doing is worse than none.
+- Facts that will outlive the task (final behaviour, formats, numbers) belong in the matching `docs/specs/*.md`, not
+  in the plan: move them over as each piece lands.
+- Delete the plan file once its task is fully committed. Nothing enforces this (it's gitignored, so it never shows
+  up as a diff) — leaving it behind just litters the working copy with stale instructions for next time.
 
 ## Commands
 - `just test` (or `cargo test --workspace`): must pass before committing.
