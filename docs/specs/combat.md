@@ -209,8 +209,10 @@ join a melee on their own attack (they still fight when challenged).
 - The start [guess: not traced]: on the preacher's look turn (every 2 turns), a preacher that is free (idle, holding
   wood, preaching, or ordered to attack someone it may preach to) sits down every such enemy in its look square
   (3 × 3 cells, `spotting::square`) at once; there is no walk-up, so attackers coming at it sit before they reach it.
-  Ordered at someone further, it walks until that one is in the square. It then stands `Action::Preaching`, facing a
-  listener, and goes idle again once it has no listener left.
+  Ordered at someone further, it walks until that one is in the square, checking that one target every turn rather
+  than only on its look turn, so the target's own spotting cannot challenge it first while the preacher is between
+  look turns [game]. It then stands `Action::Preaching`, facing a listener, and goes idle again once it has no
+  listener left.
 - A sermon per listener (a coordinator, `Sermon { preacher, listener, left }`), as the original keeps a state per
   preached person [exe]. The listener sits (`Action::Listening`, anim 18) and is locked [game]: no orders, dropped
   from its player's selection, until converted, freed or dead; a brave puts down the wood it carries [game]. It still

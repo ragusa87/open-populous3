@@ -89,8 +89,9 @@ impl Coordinator for Sermon {
 
 impl GameMap {
     /// Preachers start sermons: on their look turn, every enemy they may preach to within their look square sits down
-    /// to listen [guess: what starts a sermon is not traced]. One ordered to preach walks until its target is in that
-    /// square. A preacher with no listener left stands idle again.
+    /// to listen [guess: what starts a sermon is not traced]. One ordered to preach checks its one target every turn,
+    /// not gated by the look rhythm: the gap it still has to close can otherwise vanish into the target's own melee
+    /// reach before the preacher's next look turn [game]. A preacher with no listener left stands idle again.
     pub(crate) fn start_sermons(&mut self) {
         let listened: Vec<UnitId> = self.coordinators.sermons.iter().map(|(_, s)| s.preacher).collect();
         for u in self.units.iter_mut().filter(|u| preaching(u) && !listened.contains(&u.id)) {
@@ -100,9 +101,24 @@ impl GameMap {
         let size = self.terrain.size() as i32;
         for i in 0..self.units.len() {
             let p = &self.units[i];
-            let ordered = matches!(p.action, Action::Attacking { target: Target::Unit(t), .. } if self.unit(t).is_some_and(|t| may_preach(p, t)));
-            let free = matches!(p.action, Action::Idle | Action::Holding { .. }) || preaching(p) || ordered;
-            if p.kind != UnitKind::Preacher || !p.is_alive() || !p.in_the_open() || !free || !p.kind.stats().look_every.fires(now, 0) {
+            if p.kind != UnitKind::Preacher || !p.is_alive() || !p.in_the_open() {
+                continue;
+            }
+            let ordered = match p.action {
+                Action::Attacking { target: Target::Unit(t), .. } => self.unit(t).filter(|t| may_preach(p, t)).map(|t| t.id),
+                _ => None,
+            };
+            if let Some(t) = ordered {
+                let p = &self.units[i];
+                let cells: Vec<(i32, i32)> = crate::spotting::square(p.cell(), p.kind.stats().sight, size).collect();
+                if let Some(j) = self.unit_index(t).filter(|&j| cells.contains(&self.units[j].cell())) {
+                    self.begin_sermon(i, &[j]);
+                    continue;
+                }
+            }
+            let p = &self.units[i];
+            let free = matches!(p.action, Action::Idle | Action::Holding { .. }) || preaching(p) || ordered.is_some();
+            if !free || !p.kind.stats().look_every.fires(now, 0) {
                 continue;
             }
             let cells: Vec<(i32, i32)> = crate::spotting::square(p.cell(), p.kind.stats().sight, size).collect();
@@ -110,19 +126,25 @@ impl GameMap {
             if listeners.is_empty() {
                 continue;
             }
-            let at = (p.x, p.z);
-            let preacher = p.id;
-            let first = (self.units[listeners[0]].x, self.units[listeners[0]].z);
-            for j in listeners {
-                let id = self.new_id_of();
-                let left = jittered(CONV_FIRST_CHECK, &mut self.rng);
-                self.coordinators.sermons.insert(id, Sermon { preacher, listener: self.units[j].id, left });
-                self.sit_down(j, id, at);
-            }
-            let p = &mut self.units[i];
-            p.face(first);
-            p.join_preaching();
+            self.begin_sermon(i, &listeners);
         }
+    }
+
+    /// Preacher `i` starts preaching: `listeners` sit down at once, it faces the first.
+    fn begin_sermon(&mut self, i: usize, listeners: &[usize]) {
+        let p = &self.units[i];
+        let at = (p.x, p.z);
+        let preacher = p.id;
+        let first = (self.units[listeners[0]].x, self.units[listeners[0]].z);
+        for &j in listeners {
+            let id = self.new_id_of();
+            let left = jittered(CONV_FIRST_CHECK, &mut self.rng);
+            self.coordinators.sermons.insert(id, Sermon { preacher, listener: self.units[j].id, left });
+            self.sit_down(j, id, at);
+        }
+        let p = &mut self.units[i];
+        p.face(first);
+        p.join_preaching();
     }
 
     /// Unit `j` sits down to listen to the sermon `id` of the preacher at `preacher`: a brave puts down the wood it
@@ -308,5 +330,22 @@ mod tests {
             (map.units, map.coordinators, map.rng)
         };
         assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn ordered_to_convert_it_does_not_lose_an_off_rhythm_tick_to_the_targets_own_challenge() {
+        // On the very first simulated tick (now == 1), the preacher's look_every(2) does not fire (it only fires on
+        // even ticks), yet its ordered target is already right next to it, and that target already decided (on its
+        // own, earlier) to attack the preacher back: this is the exact race the preacher must not lose.
+        let mut map = GameMap::sandbox_units().seeded(11);
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(1024), s.z.wrapping_sub(15 * 512));
+        let p = map.spawn(0, UnitKind::Preacher, at).id;
+        let brave = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
+        map.apply(&crate::command::Command::OrderUnit { player: 0, unit: p, order: crate::unit::Order::Attack { target: Target::Unit(brave) } });
+        map.unit_mut(brave).unwrap().action = Action::Attacking { target: Target::Unit(p), to: at };
+        map.tick();
+        assert!(listening(&map, brave), "the preacher converts it on this very tick, despite being off its look rhythm");
+        assert!(!matches!(map.unit(p).unwrap().action, Action::Challenge { .. } | Action::Melee { .. }), "it must not end up fighting it instead");
     }
 }
