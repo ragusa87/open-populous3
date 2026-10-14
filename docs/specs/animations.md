@@ -72,7 +72,7 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 50 | 7 | crouching, then punching: a taunt (as 48), not a fight move |
 | 51 | 4 | pedalling: moving a vehicle (`Pose::Pedal`, used: people aboard a vehicle) |
 | 52 | 4 | running away (bitten by a swarm of bees; `Pose::Panic`, used: shamans and wildmen walk instead) |
-| 20-24 | 4-18 | attacks with a club, the monk's pointed helmet drawn in (whose attacks: to check) |
+| 20-24 | 4-18 | preacher giving a sermon: raises a held book (20), holds it across the chest (21), gestures with the free arm while reading (22), both arms up, book held high (23), lowers it again, open arms (24); the monk's pointed helmet drawn in [game: by eye, `HSPR0-0.DAT:6526`-`6574`, corrects an earlier "club attack" guess] |
 | 89 | 12 | scratching itself: a brave idle for too long |
 | 90 | 14 | push-ups (warriors idle for too long), firewarrior gear drawn in; 91 (14) push-ups, warrior headband drawn in |
 | 92 | 17 | spy idle: juggling |
@@ -111,3 +111,16 @@ Shamans: 4 consecutive animations per action, one per tribe (blue, red, yellow, 
 Reading the sprite as `field / 6` (no -1) looks almost right but shows the next view's sprite once per
 loop, and the next tribe's in the back view: the -1 is checked on every shaman pose and tribe.
 No animated shaman prayer was found; 90/91 are push-ups (not worship, checked in the game).
+
+## `HSPR0-0.DAT` by index, browsed with `tools/sprite_catalog.py` [game: by eye]
+A unit's body and its outfit's gear are separate pieces in the bank, close together but not interleaved:
+- 4510-4529: the firewarrior's body pose sprites.
+- 4530-4554: the firewarrior's decoration layer over that pose (the held fire, the horned helmet).
+- 4665-5079: more firewarrior pose and decoration, same split, not pinned down sprite by sprite [guess].
+- 5193-5217: the warrior's decoration layer (headband, vest, hip item).
+- 6526-6574: the preacher's sermon gesture (anims 20-24 above); the 5 runs by eye (`6526`-`6536`,
+  `6537`-`6547`, `6548`-`6558`, `6559`-`6566`, `6567`-`6574`) are its 5 phases (one run each for
+  anims 20, 21, 22, 23, 24: traced through `VELE`/`VFRA`/`VSTART`, direction 0), not 5 directions of one.
+
+The shaman is drawn in her own colours (see above), not layered: only her blue (tribe 0) pose sprites were
+found in this bank; the other 3 tribes' cloth recolour is somewhere else, not yet located [guess].

@@ -58,9 +58,9 @@ PERSON_ANIM_NAMES = {
     17: "spy setting fire to a building",
     18: "sitting down, being converted by a preacher",
     19: "tumbling in the air, arms spread",
-    20: "club attack (outfit: to check)", 21: "club attack (outfit: to check)",
-    22: "club attack (outfit: to check)", 23: "club attack (outfit: to check)",
-    24: "club attack (outfit: to check)",
+    20: "preaching: raises a held book", 21: "preaching: holds the book across the chest",
+    22: "preaching: gestures with the free arm while reading", 23: "preaching: both arms up, book held high",
+    24: "preaching: lowers the book, open arms",
     25: "kick",
     37: "falling down a slope, tumbling on the ground",
     38: "dying, falls onto its back",
@@ -85,10 +85,12 @@ OLD_SHAMAN_ANIM_NAMES = {
     44: "old shaman: lying dead (unused)", 45: "old shaman: dying, burning (unused)",
     46: "old shaman: tumbling (unused)",
 }
-# `pop3_format::catalog::ShamanAnim`: 4 consecutive indices per action, one per tribe, not layered.
+# docs/specs/animations.md's shaman table: 4 consecutive indices per action, one per tribe, not layered
+# (`pop3_format::catalog::ShamanAnim` only wires up the ones the client actually plays, not `wand`).
 SHAMAN_ANIM_BASES = {53: "shaman: idle", 57: "shaman: staff strike", 61: "shaman: flying (whirlwind)",
                      65: "shaman: casting a spell", 69: "shaman: kick", 73: "shaman: tumbling down a slope",
-                     77: "shaman: walk", 85: "shaman: fall (death)", 93: "shaman: kneeling (praying)"}
+                     77: "shaman: walk", 81: "shaman: moving the magic wand", 85: "shaman: fall (death)",
+                     93: "shaman: kneeling (praying)"}
 TRIBES = 4
 # Wildmen (no layers, no tribe variants): docs/specs/animations.md, below the identified table
 # (`pop3_format::catalog::WildmanAnim` only wires up the ones the client actually plays).
@@ -326,6 +328,16 @@ CATALOG = [
     *labels(HFX, "tooltip", 1594, ["1 brave", "3 braves", "4 braves", "5 braves"]),
     *labels(HFX, "tooltip", 1598, [f"{n} wood" for n in (3, 5, 6, 8, 11)]),
     *frames(HFX, "HUD", 1603, 1614, "progress bar part"),
+    # docs/specs/animations.md "`HSPR0-0.DAT` by index": a unit's body pose and its outfit's gear, separate pieces.
+    *series(HSPR, "firewarrior", 4510, 4529, "pose sprite"),
+    *series(HSPR, "firewarrior", 4530, 4554, "decoration: held fire, horned helmet"),
+    *series(HSPR, "firewarrior", 4665, 5079, "pose or decoration"),
+    *series(HSPR, "warrior", 5193, 5217, "decoration: headband, vest, hip item"),
+    *series(HSPR, "preacher", 6526, 6536, "sermon: raises a held book", "anim 20"),
+    *series(HSPR, "preacher", 6537, 6547, "sermon: holds the book across the chest", "anim 21"),
+    *series(HSPR, "preacher", 6548, 6558, "sermon: gestures with the free arm while reading", "anim 22"),
+    *series(HSPR, "preacher", 6559, 6566, "sermon: both arms up, book held high", "anim 23"),
+    *series(HSPR, "preacher", 6567, 6574, "sermon: lowers the book, open arms", "anim 24"),
 ]
 
 # Banks small enough to list whole (unnamed sprites hidden by default on the page).

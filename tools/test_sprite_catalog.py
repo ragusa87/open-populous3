@@ -67,7 +67,9 @@ class AnimTest(unittest.TestCase):
         self.assertEqual(anim_name(6), "idle, standing breathing")
         self.assertEqual(anim_name(53), "shaman: idle")
         self.assertEqual(anim_name(56), "shaman: idle (tribe 3)")
-        self.assertIsNone(anim_name(82), "not identified (gap between the old and real shaman bodies)")
+        self.assertIsNone(anim_name(99), "out of the valid 0-98 range")
+        self.assertEqual(anim_name(81), "shaman: moving the magic wand")
+        self.assertEqual(anim_name(20), "preaching: raises a held book")
 
 
 class CatalogTest(unittest.TestCase):

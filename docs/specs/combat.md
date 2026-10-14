@@ -232,7 +232,9 @@ join a melee on their own attack (they still fight when challenged).
   the same kind in the preacher's tribe at its place [exe]; ours keeps the unit (same id and kind) and starts it
   afresh the same way: new tribe, plans, orders, work and wood gone, full health, no status, idle.
 - Drawn: listeners sit down once (anim 18 over `SIT_TICKS`, 6 turns, the `Listening` countdown) and stay seated on
-  its last frame (the generated sheets stand in with the prayer pose), the preacher stands; the dev
-  overlay draws a line from each preacher to each listener.
+  its last frame (the generated sheets stand in with the prayer pose), the preacher stands (`Pose::Idle`: its own
+  sermon gesture, anims 20-24, animations.md "`HSPR0-0.DAT` by index", is identified but not wired up yet); the
+  dev overlay draws a line from each preacher to each listener.
 - Not yet: the building variant (preaching to a building's people), what really starts a sermon, the soul flying
-  from the preacher to the converted, the preacher's own preaching animation, the halving flag of the first check.
+  from the preacher to the converted, drawing the preacher's own preaching animation, the halving flag of the
+  first check.

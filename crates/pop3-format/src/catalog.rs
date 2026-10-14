@@ -140,6 +140,8 @@ pub enum ShamanAnim {
     Tumble,
     /// Walking (8 frames).
     Walk,
+    /// Moving the magic wand (1 frame): not drawn by anything yet.
+    Wand,
     /// Knocked down flat on her back (8 frames).
     Fall,
     /// Kneeling on one knee (1 frame): used for praying.
@@ -156,6 +158,7 @@ impl ShamanAnim {
             ShamanAnim::Kick => 69,
             ShamanAnim::Tumble => 73,
             ShamanAnim::Walk => 77,
+            ShamanAnim::Wand => 81,
             ShamanAnim::Fall => 85,
             ShamanAnim::Kneel => 93,
         }
@@ -357,6 +360,7 @@ mod tests {
         assert_eq!(ShamanAnim::Idle.anim(0), 53);
         assert_eq!(ShamanAnim::Idle.anim(3), 56);
         assert_eq!(ShamanAnim::Walk.anim(1), 78);
+        assert_eq!(ShamanAnim::Wand.anim(0), 81);
         assert_eq!(ShamanAnim::Fall.anim(2), 87);
         assert_eq!(ShamanAnim::Kneel.anim(3), 96);
     }
