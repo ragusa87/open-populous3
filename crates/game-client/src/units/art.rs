@@ -60,10 +60,12 @@ pub enum Pose {
     Pedal,
     /// Sitting, listening to a preacher.
     Listen,
+    /// Preaching to a sermon's listeners.
+    Preach,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 25] = [
+    pub const ALL: [Pose; 26] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -89,6 +91,7 @@ impl Pose {
         Pose::Throw,
         Pose::Pedal,
         Pose::Listen,
+        Pose::Preach,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -102,7 +105,7 @@ impl Pose {
             Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack => Pose::Idle,
             Pose::Throw => Pose::Cast,
             Pose::Shoved => Pose::Fall,
-            Pose::Pedal | Pose::Listen => Pose::Pray,
+            Pose::Pedal | Pose::Listen | Pose::Preach => Pose::Pray,
             pose => pose,
         }
     }
@@ -118,7 +121,7 @@ impl Pose {
             Pose::Walk | Pose::CarryWalk | Pose::Pedal => 10.0,
             Pose::Panic => 12.0,
             Pose::Drown | Pose::Flung | Pose::Tumble => 8.0,
-            Pose::Pray | Pose::Stranded => 4.0,
+            Pose::Pray | Pose::Preach | Pose::Stranded => 4.0,
             _ => 6.0,
         }
     }
@@ -127,7 +130,7 @@ impl Pose {
         match self {
             Pose::Idle | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Hammer => ShamanAnim::Idle,
             Pose::Walk | Pose::CarryWalk | Pose::Panic => ShamanAnim::Walk,
-            Pose::Pray | Pose::Pedal | Pose::Listen => ShamanAnim::Kneel,
+            Pose::Pray | Pose::Pedal | Pose::Listen | Pose::Preach => ShamanAnim::Kneel,
             Pose::Cast | Pose::Jump => ShamanAnim::Cast,
             Pose::Fall | Pose::Spirit => ShamanAnim::Fall,
             Pose::Flung => ShamanAnim::Flying,
@@ -197,7 +200,7 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Listening { .. } => Pose::Listen,
         Action::Queuing { .. } if carrying => Pose::CarryIdle,
         Action::Queuing { .. } => Pose::Idle,
-        Action::Preaching => Pose::Idle,
+        Action::Preaching => Pose::Preach,
         Action::Challenge { role, .. } => challenge_pose(*role, carrying),
         Action::Melee { stance, .. } => melee_pose(*stance, airborne),
         Action::Chopping { .. } | Action::PickingUpWood { .. } => Pose::Chop,
@@ -346,7 +349,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
             let anim = match pose {
                 Pose::Idle | Pose::Cast | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Jump | Pose::Hammer => WildmanAnim::Stand,
                 Pose::Walk | Pose::CarryWalk | Pose::Panic => WildmanAnim::Walk,
-                Pose::Pray | Pose::Pedal | Pose::Listen => WildmanAnim::Sit,
+                Pose::Pray | Pose::Pedal | Pose::Listen | Pose::Preach => WildmanAnim::Sit,
                 Pose::Fall | Pose::Tumble | Pose::Spirit => WildmanAnim::Tumble,
                 Pose::Drown | Pose::Flung | Pose::Shoved => WildmanAnim::Flung,
                 Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack | Pose::Throw => WildmanAnim::Stand,
@@ -388,6 +391,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Throw => PersonAnim::Throw,
                 Pose::Pedal => PersonAnim::Pedal,
                 Pose::Listen => PersonAnim::Listen,
+                Pose::Preach => PersonAnim::Preach,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }
@@ -542,6 +546,8 @@ mod tests {
         assert_eq!([Pose::Strike, Pose::Kick, Pose::Reel].map(|p| original_anim(UnitKind::Shaman, p, 0).0), [57, 69, 53], "staff, kick, no hit of her own");
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Stranded, 0), (12, Some(OUTFIT_WARRIOR), Some(ARMS_UP_FRAME)));
         assert_eq!(original_anim(UnitKind::Preacher, Pose::Pray, 1), (8, Some(OUTFIT_PREACHER), None), "the monk on the tribesman body");
+        assert_eq!(pose_for(&Action::Preaching, false, false), Pose::Preach, "the monk takes its own sermon gesture, not idle");
+        assert_eq!(original_anim(UnitKind::Preacher, Pose::Preach, 0), (22, Some(OUTFIT_PREACHER), None));
         assert_eq!(original_anim(UnitKind::Spy, Pose::Drown, 0), (40, Some(OUTFIT_SPY), None), "lying, spirit rising");
         assert_eq!(original_anim(UnitKind::Shaman, Pose::Stranded, 1), original_anim(UnitKind::Shaman, Pose::Idle, 1));
     }

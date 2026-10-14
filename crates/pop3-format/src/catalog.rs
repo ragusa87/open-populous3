@@ -240,6 +240,10 @@ pub enum PersonAnim {
     Pedal,
     /// Sitting down, listening to a preacher (6 frames).
     Listen,
+    /// Preaching: gestures with its free arm while holding the book open (10 frames); the preacher's own
+    /// sermon has 4 more identified phases around it (animations.md "`HSPR0-0.DAT` by index", anims 20,
+    /// 21, 23, 24) not wired up here [guess: picked as the best single standing, looping phase].
+    Preach,
 }
 
 /// The frame of `PersonAnim::ArmsUp` standing with both arms up.
@@ -268,6 +272,7 @@ impl PersonAnim {
             PersonAnim::Throw => 7,
             PersonAnim::Pedal => 51,
             PersonAnim::Listen => 18,
+            PersonAnim::Preach => 22,
         }
     }
 }

@@ -65,6 +65,7 @@ pub fn pose_name(pose: Pose) -> &'static str {
         Pose::Throw => "throw",
         Pose::Pedal => "pedal",
         Pose::Listen => "listen",
+        Pose::Preach => "preach",
     }
 }
 
@@ -74,7 +75,7 @@ pub fn plays(kind: UnitKind, pose: Pose) -> bool {
     match pose {
         Pose::Cast => kind == UnitKind::Shaman,
         Pose::Stranded => kind != UnitKind::Shaman,
-        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Panic | Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Shoved | Pose::Hack | Pose::Throw | Pose::Pedal | Pose::Listen => false,
+        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Panic | Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Shoved | Pose::Hack | Pose::Throw | Pose::Pedal | Pose::Listen | Pose::Preach => false,
         _ => true,
     }
 }
