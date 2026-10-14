@@ -4,6 +4,7 @@
 //! (`TODO.md`) will be a third.
 
 use crate::map::GameMap;
+use crate::status::{Timed, SHIELD_STEPS};
 use crate::time::Tick;
 
 /// Why the match ended.
@@ -53,6 +54,19 @@ impl GameMap {
         let sides = self.tribes.alive_sides(|t| self.tribe_wiped_out(t));
         if sides.len() <= 1 {
             self.declare_outcome(sides.first().copied(), Reason::Eliminated);
+        }
+    }
+
+    /// Once the match has ended, nothing can hurt anyone any more: every living unit's Magical Shield is kept
+    /// topped up, every tick, for as long as the game keeps running past that point — a no-op before `outcome` is
+    /// set. "Permanent" by being continuously refreshed, the same trick a real Armageddon shield will need
+    /// (`docs/plans/spells.md` "Armageddon"), not a new status kind.
+    pub(crate) fn shield_everyone_once_ended(&mut self) {
+        if self.outcome.is_none() {
+            return;
+        }
+        for u in self.units.iter_mut().filter(|u| u.is_alive()) {
+            u.statuses.shield = Timed::steps(SHIELD_STEPS);
         }
     }
 }
@@ -124,5 +138,30 @@ mod tests {
         map.declare_outcome(Some(0), super::Reason::Eliminated);
         map.run(crate::time::Ticks::new(5));
         assert_eq!(map.outcome.unwrap().winner, Some(0));
+    }
+
+    #[test]
+    fn nobody_is_shielded_before_the_match_ends() {
+        let map = two_tribes();
+        assert!(map.units.iter().all(|u| !u.statuses.shield.is_on()));
+    }
+
+    #[test]
+    fn every_living_unit_is_shielded_once_the_match_ends_and_stays_shielded() {
+        let mut map = two_tribes();
+        map.declare_outcome(Some(0), super::Reason::Eliminated);
+        map.run(crate::time::Ticks::new(1));
+        assert!(map.units.iter().filter(|u| u.is_alive()).all(|u| u.statuses.shield.is_on()));
+        map.run(crate::time::Ticks::secs(130)); // longer than SHIELD_STEPS' own duration
+        assert!(map.units.iter().filter(|u| u.is_alive()).all(|u| u.statuses.shield.is_on()), "continuously refreshed, not a one-shot");
+    }
+
+    #[test]
+    fn every_command_is_rejected_once_the_match_has_ended_even_without_an_active_armageddon() {
+        let mut map = two_tribes();
+        let before = map.units.clone();
+        map.declare_outcome(Some(0), super::Reason::Eliminated);
+        map.apply(&crate::command::Command::Order { player: 0, order: crate::unit::Order::Stop });
+        assert_eq!(map.units, before);
     }
 }

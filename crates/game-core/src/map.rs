@@ -757,9 +757,11 @@ impl GameMap {
 
     /// Apply a player's command; returns the terrain region it changed, if any. Casting a spell
     /// makes the caster's shaman do her cast jump (Teleport: she moves when it ends); a spell that
-    /// cannot be cast (`can_cast`) does nothing.
+    /// cannot be cast (`can_cast`) does nothing. Rejected outright while an Armageddon match is resolving, or once
+    /// the match has ended (`outcome`) — the simulation itself keeps running past that point (the "victory lap"
+    /// epilogue, `outcome.rs`), but nothing can act on it any more.
     pub fn apply(&mut self, command: &Command) -> Option<DirtyRect> {
-        if self.armageddon().is_some() {
+        if self.armageddon().is_some() || self.outcome.is_some() {
             return None;
         }
         match *command {
@@ -1036,6 +1038,7 @@ impl GameMap {
         }
         self.units.retain(|u| !gone.contains(&u.id));
         self.check_elimination();
+        self.shield_everyone_once_ended();
         dirty
     }
 }
