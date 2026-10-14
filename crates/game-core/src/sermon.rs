@@ -21,12 +21,14 @@ pub const CONV_CHANCE: u32 = 5;
 /// Sitting down to listen: the sit-down animation's 6 frames, one turn each ("Combat" [exe]: one turn per frame).
 pub const SIT_TICKS: Ticks = Ticks::new(6);
 
-/// One listener's sermon: who preaches, who listens, and the turns to its next chance of conversion.
+/// One listener's sermon: who preaches, who listens, the turns to its next chance of conversion, and the
+/// checks so far that missed (debug overlay: shows it is still trying, not stuck).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sermon {
     pub preacher: UnitId,
     pub listener: UnitId,
     pub left: Countdown,
+    pub attempts: u32,
 }
 
 /// `base` turns, give or take a sixteenth of them ("Preacher conversion" [exe]).
@@ -82,6 +84,7 @@ impl Coordinator for Sermon {
         if rng.next_u32() % CONV_CHANCE == 1 && world.housing(p.owner).population < MAX_POPULATION {
             return Step { finished: true, events: vec![WorldEvent::ChangeOwner { unit: l.id, tribe: p.owner }] };
         }
+        self.attempts += 1;
         self.left = jittered(CONV_CHECK, rng);
         Step::default()
     }
@@ -141,7 +144,7 @@ impl GameMap {
         for &j in listeners {
             let id = self.new_id_of();
             let left = jittered(CONV_FIRST_CHECK, &mut self.rng);
-            self.coordinators.sermons.insert(id, Sermon { preacher, listener: self.units[j].id, left });
+            self.coordinators.sermons.insert(id, Sermon { preacher, listener: self.units[j].id, left, attempts: 0 });
             self.sit_down(j, id, at);
         }
         let p = &mut self.units[i];

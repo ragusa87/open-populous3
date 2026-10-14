@@ -28,6 +28,9 @@ const WEAR_BACK: Color = Color::srgb(0.3, 0.3, 0.3);
 /// The wear bar: its height over the ground and its length, cells.
 const BAR_LIFT: f32 = 1.2;
 const BAR_LENGTH: f32 = 1.0;
+/// A sermon's failed-attempt ticks: their height above the bar and their spacing, cells.
+const ATTEMPT_TICK: f32 = 0.18;
+const ATTEMPT_SPACING: f32 = 0.12;
 /// A fighter's place: a small circle, cells.
 const PLACE_MARK: f32 = 0.06;
 
@@ -94,18 +97,25 @@ fn draw(
         outline(outline_square(t, cells_of(SHOVE_REACH)), CHALLENGE.with_alpha(0.5));
     }
     let lift_bar = |p: Vec2| on_ground(p) + Vec3::Y * BAR_LIFT;
+    // Screen right at the current yaw, so every bar reads left-to-right under the camera, not the world's.
+    let right = rig.right();
     for b in map.buildings.iter().filter(|b| b.wear > 0) {
         let Some(limit) = game_core::wreck::wear_limit(b.kind) else { continue };
-        let (start, full) = bar(cells(b.centre()), b.wear as u32, limit as u32);
-        gizmos.line(lift_bar(start), lift_bar(start + Vec2::X * BAR_LENGTH), WEAR_BACK);
-        gizmos.line(lift_bar(start), lift_bar(start + Vec2::X * full), WEAR);
+        let (start, fill) = bar(cells(b.centre()), b.wear as u32, limit as u32, right);
+        gizmos.line(lift_bar(start), lift_bar(start + right * BAR_LENGTH), WEAR_BACK);
+        gizmos.line(lift_bar(start), lift_bar(start + fill), WEAR);
     }
-    // A listener's progress to its next conversion chance (`Sermon::left`, sermon.rs): fills up, then resets.
+    // A listener's progress to its next conversion chance (`Sermon::left`, sermon.rs): fills up, then resets;
+    // a tick above the bar per check already missed, so a sermon stuck resetting still reads as making progress.
     for (_, sermon) in map.coordinators.sermons.iter() {
         let Some(l) = map.unit(sermon.listener) else { continue };
-        let (start, full) = bar(cells((l.x, l.z)), sermon.left.done().get(), sermon.left.total().get());
-        gizmos.line(lift_bar(start), lift_bar(start + Vec2::X * BAR_LENGTH), WEAR_BACK);
-        gizmos.line(lift_bar(start), lift_bar(start + Vec2::X * full), SERMON);
+        let (start, fill) = bar(cells((l.x, l.z)), sermon.left.done().get(), sermon.left.total().get(), right);
+        gizmos.line(lift_bar(start), lift_bar(start + right * BAR_LENGTH), WEAR_BACK);
+        gizmos.line(lift_bar(start), lift_bar(start + fill), SERMON);
+        for n in 0..sermon.attempts {
+            let base = lift_bar(start + right * (ATTEMPT_SPACING * n as f32 + ATTEMPT_SPACING / 2.0));
+            gizmos.line(base, base + Vec3::Y * ATTEMPT_TICK, SERMON);
+        }
     }
     let mut outline = |points: Vec<Vec2>, color: Color| gizmos.linestrip(points.into_iter().map(on_ground), color);
     for u in &map.units {
@@ -153,10 +163,10 @@ pub fn sight_half(sight: u8) -> f32 {
     (sight / 2) as f32 + 0.5
 }
 
-/// A progress bar centred over `centre` (wear, a sermon's countdown, ...): where it starts, and the length of its
-/// filled part out of `BAR_LENGTH`.
-pub fn bar(centre: Vec2, done: u32, total: u32) -> (Vec2, f32) {
-    (centre - Vec2::X * BAR_LENGTH / 2.0, BAR_LENGTH * (done as f32 / total.max(1) as f32).min(1.0))
+/// A progress bar centred over `centre`, laid out along `right` (wear, a sermon's countdown, ...): where it
+/// starts, and the vector to its filled end, out of `BAR_LENGTH` along `right`.
+pub fn bar(centre: Vec2, done: u32, total: u32, right: Vec2) -> (Vec2, Vec2) {
+    (centre - right * BAR_LENGTH / 2.0, right * BAR_LENGTH * (done as f32 / total.max(1) as f32).min(1.0))
 }
 
 /// From `a` to `b` (cells) the short way round the torus.
@@ -188,10 +198,16 @@ mod tests {
 
     #[test]
     fn a_progress_bar_fills_up_to_the_total() {
-        assert_eq!(bar(Vec2::new(5.0, 5.0), 500, 2000), (Vec2::new(4.5, 5.0), 0.25), "wear out of its limit");
-        assert_eq!(bar(Vec2::ZERO, 5000, 2000).1, BAR_LENGTH, "never past a full bar");
+        assert_eq!(bar(Vec2::new(5.0, 5.0), 500, 2000, Vec2::X), (Vec2::new(4.5, 5.0), Vec2::new(0.25, 0.0)), "wear out of its limit");
+        assert_eq!(bar(Vec2::ZERO, 5000, 2000, Vec2::X).1, Vec2::X * BAR_LENGTH, "never past a full bar");
         let left = game_core::time::Countdown::with_left(game_core::time::Ticks::new(500), game_core::time::Ticks::new(125));
-        assert_eq!(bar(Vec2::ZERO, left.done().get(), left.total().get()).1, 0.75, "a sermon's countdown, 3/4 of the way to its next check");
+        assert_eq!(bar(Vec2::ZERO, left.done().get(), left.total().get(), Vec2::X).1, Vec2::new(0.75, 0.0), "a sermon's countdown, 3/4 of the way to its next check");
+    }
+
+    #[test]
+    fn a_progress_bar_follows_the_cameras_right() {
+        let right = Vec2::new(0.0, 1.0);
+        assert_eq!(bar(Vec2::new(5.0, 5.0), 500, 2000, right), (Vec2::new(5.0, 4.5), Vec2::new(0.0, 0.25)), "laid out along the given right, not the world's X axis");
     }
 
     #[test]
