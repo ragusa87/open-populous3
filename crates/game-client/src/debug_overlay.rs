@@ -93,12 +93,19 @@ fn draw(
         outline(outline_circle(t, cells_of(FIGHT_REACH)), CHALLENGE);
         outline(outline_square(t, cells_of(SHOVE_REACH)), CHALLENGE.with_alpha(0.5));
     }
+    let lift_bar = |p: Vec2| on_ground(p) + Vec3::Y * BAR_LIFT;
     for b in map.buildings.iter().filter(|b| b.wear > 0) {
         let Some(limit) = game_core::wreck::wear_limit(b.kind) else { continue };
-        let (start, full) = bar(cells(b.centre()), b.wear, limit);
-        let lift = |p: Vec2| on_ground(p) + Vec3::Y * BAR_LIFT;
-        gizmos.line(lift(start), lift(start + Vec2::X * BAR_LENGTH), WEAR_BACK);
-        gizmos.line(lift(start), lift(start + Vec2::X * full), WEAR);
+        let (start, full) = bar(cells(b.centre()), b.wear as u32, limit as u32);
+        gizmos.line(lift_bar(start), lift_bar(start + Vec2::X * BAR_LENGTH), WEAR_BACK);
+        gizmos.line(lift_bar(start), lift_bar(start + Vec2::X * full), WEAR);
+    }
+    // A listener's progress to its next conversion chance (`Sermon::left`, sermon.rs): fills up, then resets.
+    for (_, sermon) in map.coordinators.sermons.iter() {
+        let Some(l) = map.unit(sermon.listener) else { continue };
+        let (start, full) = bar(cells((l.x, l.z)), sermon.left.done().get(), sermon.left.total().get());
+        gizmos.line(lift_bar(start), lift_bar(start + Vec2::X * BAR_LENGTH), WEAR_BACK);
+        gizmos.line(lift_bar(start), lift_bar(start + Vec2::X * full), SERMON);
     }
     let mut outline = |points: Vec<Vec2>, color: Color| gizmos.linestrip(points.into_iter().map(on_ground), color);
     for u in &map.units {
@@ -146,9 +153,10 @@ pub fn sight_half(sight: u8) -> f32 {
     (sight / 2) as f32 + 0.5
 }
 
-/// A wear bar centred over `centre`: where it starts, and the length of its worn part out of `BAR_LENGTH`.
-pub fn bar(centre: Vec2, wear: u16, limit: u16) -> (Vec2, f32) {
-    (centre - Vec2::X * BAR_LENGTH / 2.0, BAR_LENGTH * (wear as f32 / limit.max(1) as f32).min(1.0))
+/// A progress bar centred over `centre` (wear, a sermon's countdown, ...): where it starts, and the length of its
+/// filled part out of `BAR_LENGTH`.
+pub fn bar(centre: Vec2, done: u32, total: u32) -> (Vec2, f32) {
+    (centre - Vec2::X * BAR_LENGTH / 2.0, BAR_LENGTH * (done as f32 / total.max(1) as f32).min(1.0))
 }
 
 /// From `a` to `b` (cells) the short way round the torus.
@@ -179,9 +187,11 @@ mod tests {
     }
 
     #[test]
-    fn the_wear_bar_fills_up_to_the_limit() {
-        assert_eq!(bar(Vec2::new(5.0, 5.0), 500, 2000), (Vec2::new(4.5, 5.0), 0.25));
-        assert_eq!(bar(Vec2::ZERO, 5000, 2000).1, BAR_LENGTH);
+    fn a_progress_bar_fills_up_to_the_total() {
+        assert_eq!(bar(Vec2::new(5.0, 5.0), 500, 2000), (Vec2::new(4.5, 5.0), 0.25), "wear out of its limit");
+        assert_eq!(bar(Vec2::ZERO, 5000, 2000).1, BAR_LENGTH, "never past a full bar");
+        let left = game_core::time::Countdown::with_left(game_core::time::Ticks::new(500), game_core::time::Ticks::new(125));
+        assert_eq!(bar(Vec2::ZERO, left.done().get(), left.total().get()).1, 0.75, "a sermon's countdown, 3/4 of the way to its next check");
     }
 
     #[test]
