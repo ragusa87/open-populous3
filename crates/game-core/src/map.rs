@@ -866,6 +866,19 @@ impl GameMap {
                 }
                 None
             }
+            Command::ClearSwamp { player, swamp } => {
+                self.clear_swamp(player, swamp);
+                None
+            }
+        }
+    }
+
+    /// Ends the player's own swamp `swamp` early (right click + Ctrl on it, like a blueprint put away): as if
+    /// its own tally had already reached its cap (`tend_swamps`), gone by the next tick's cleanup
+    /// (`tend_effects`). Ignored for a swamp not theirs, or gone already.
+    pub(crate) fn clear_swamp(&mut self, player: u8, swamp: Id<Effect>) {
+        if let Some(e) = self.effects.get_mut(swamp).filter(|e| e.owner == player && matches!(e.kind, EffectKind::Swamp(_))) {
+            e.left = Countdown::with_left(e.left.total(), Ticks::ZERO);
         }
     }
 

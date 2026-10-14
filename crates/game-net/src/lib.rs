@@ -59,7 +59,7 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 /// for a unit order `u32 unit id` then the order, for lighting or putting out a camp fire `u16 x, z`,
 /// for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`, for a self cast `spell u8`
 /// (its place in `SpellKind::ALL`), for pausing one `spell u8, paused u8`, for moving a vehicle `u32 vehicle id, u16 x, z`,
-/// for unloading one `u32 vehicle id`.
+/// for unloading one `u32 vehicle id`, for clearing a swamp `u32 effect id`.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -140,6 +140,10 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         Command::Unload { player, vehicle } => {
             b.extend([12, *player]);
             put_id(b, *vehicle);
+        }
+        Command::ClearSwamp { player, swamp } => {
+            b.extend([13, *player]);
+            put_id(b, *swamp);
         }
     }
 }
@@ -241,6 +245,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         10 => Some(Command::PauseSpell { player, kind: *SpellKind::ALL.get(c.u8()? as usize)?, paused: c.u8()? != 0 }),
         11 => Some(Command::MoveVehicle { player, vehicle: c.id()?, to: (c.u16()?, c.u16()?) }),
         12 => Some(Command::Unload { player, vehicle: c.id()? }),
+        13 => Some(Command::ClearSwamp { player, swamp: c.id()? }),
         _ => None,
     }
 }

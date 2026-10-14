@@ -1,6 +1,8 @@
 //! Player inputs: the only thing exchanged in lockstep multiplayer.
 
 use crate::building::{BuildingId, BuildingKind};
+use crate::effect::Effect;
+use crate::id::Id;
 use crate::spell::Spell;
 use crate::spell_book::SpellKind;
 use crate::unit::{Order, UnitId};
@@ -42,4 +44,7 @@ pub enum Command {
     /// Everyone aboard the player's vehicle `vehicle` gets off, if there is ground within reach
     /// (`GameMap::unload`).
     Unload { player: u8, vehicle: VehicleId },
+    /// Ends the player's own swamp `swamp` early, like a blueprint put away (right click + Ctrl); ignored for
+    /// one not theirs (`GameMap::clear_swamp`).
+    ClearSwamp { player: u8, swamp: Id<Effect> },
 }
