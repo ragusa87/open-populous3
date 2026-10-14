@@ -1,6 +1,8 @@
 """Build target/sprites.html: every original sprite we have identified (docs/specs/sprites.md, the code's constants),
-with its name, bank file and index, searchable; the unnamed sprites of the small banks can be shown too. The page
-embeds the user's original art: never commit it.
+with its name, bank file and index, searchable; the unnamed sprites of the small banks can be shown too. Also every
+person animation (docs/specs/animations.md, `pop3_format::anim`), composed from `VSTART`/`VFRA`/`VELE` over
+`HSPR0-0.DAT`, one per kind (outfit) that actually looks different from the plain body. The page embeds the user's
+original art: never commit it.
 
 uvx --with pillow python tools/sprite_catalog.py [install dir] [out.html]
 """
@@ -10,10 +12,16 @@ import io
 import json
 import os
 import re
+import struct
 import sys
 
 POINT = "POINT0-0.DAT"
 HFX = "hfx0-0.dat"
+HSPR = "HSPR0-0.DAT"
+VSTART = "VSTART-0.ANI"
+VFRA = "VFRA-0.ANI"
+VELE = "VELE-0.ANI"
+PERSON_ANIM = "person animations"
 SPELLS_BY_MODEL = ["Blast", "Lightning", "Whirlwind", "Swarm", "Invisibility", "Hypnotism", "Firestorm", "Ghost Army",
                    "Erosion", "Swamp", "Land Bridge", "Angel of Death", "Earthquake", "Flatten", "Volcano", "Convert"]
 CURSOR_SPELLS = ["Bloodlust", "Magical Shield", "Armageddon", "Blast", "Convert", "Ghost Army", "Whirlwind",
@@ -36,6 +44,173 @@ def frames(file, group, first, last, name, ref=""):
 def series(file, group, first, last, name, ref=""):
     """A run of separate sprites sharing a name, not an animation."""
     return [(file, i, group, f"{name} #{i - first + 1}", ref) for i in range(first, last + 1)]
+
+
+# docs/specs/animations.md "Identified animations": tribesman body (braves, warriors, firewarriors, spies,
+# preachers; `pop3_format::catalog::PersonAnim`), shared across outfits.
+PERSON_ANIM_NAMES = {
+    5: "walk", 6: "idle, standing breathing", 7: "firewarrior throwing fire (attack)",
+    8: "kneeling, praying (worship)", 9: "walking with wood (brave only)",
+    10: "standing holding wood (brave only)", 11: "cutting wood with an axe (brave only)",
+    12: "flattening jump (brave only); stranded (frame 2, arms up)",
+    13: "punch: trading blows", 14: "receiving a punch", 15: "punch, left foot forward (opening blow)",
+    16: "tilted (struck by the opening blow, before flung)",
+    17: "spy setting fire to a building",
+    18: "sitting down, being converted by a preacher",
+    19: "tumbling in the air, arms spread",
+    20: "club attack (outfit: to check)", 21: "club attack (outfit: to check)",
+    22: "club attack (outfit: to check)", 23: "club attack (outfit: to check)",
+    24: "club attack (outfit: to check)",
+    25: "kick",
+    37: "falling down a slope, tumbling on the ground",
+    38: "dying, falls onto its back",
+    39: "lying dead",
+    40: "spirit rising (drowning, or after the death fall)",
+    48: "taunt: hiding its eyes", 49: "taunt: waving an arm", 50: "taunt: crouch, then punch",
+    51: "pedalling a vehicle", 52: "running away (panic; bitten by a swarm)",
+    89: "idle too long: scratching itself (brave)",
+    90: "idle too long: push-ups (firewarrior gear)",
+    91: "idle too long: push-ups (warrior headband)",
+    92: "idle too long: juggling (spy)",
+    97: "carbonized, struck by lightning (brave)", 98: "carbonized (shaman; probably unused)",
+}
+# Old, unused shaman body (blue headdress, staff): docs/specs/animations.md, below the identified table.
+OLD_SHAMAN_ANIM_NAMES = {
+    26: "old shaman: standing (unused)", 27: "old shaman: walk (unused)", 28: "old shaman: casting a spell (unused)",
+    29: "old shaman: punch (unused)", 30: "old shaman: flying in a tornado (unused)",
+    32: "old shaman: another spell (unused)", 33: "old shaman: staff gesture (unused)",
+    34: "old shaman: staff gesture (unused)", 35: "old shaman: staff gesture (unused)",
+    36: "old shaman: staff gesture (unused)", 41: "old shaman: staff gesture (unused)",
+    42: "old shaman: kick (unused)", 43: "old shaman: falling, death (unused)",
+    44: "old shaman: lying dead (unused)", 45: "old shaman: dying, burning (unused)",
+    46: "old shaman: tumbling (unused)",
+}
+# `pop3_format::catalog::ShamanAnim`: 4 consecutive indices per action, one per tribe, not layered.
+SHAMAN_ANIM_BASES = {53: "shaman: idle", 57: "shaman: staff strike", 61: "shaman: flying (whirlwind)",
+                     65: "shaman: casting a spell", 69: "shaman: kick", 73: "shaman: tumbling down a slope",
+                     77: "shaman: walk", 85: "shaman: fall (death)", 93: "shaman: kneeling (praying)"}
+TRIBES = 4
+# Wildmen (no layers, no tribe variants): docs/specs/animations.md, below the identified table
+# (`pop3_format::catalog::WildmanAnim` only wires up the ones the client actually plays).
+WILDMAN_ANIM_NAMES = {0: "wildman: walk", 1: "wildman: standing", 2: "wildman: eating fruit at a tree",
+                      3: "wildman: drinking water, still (used for praying)",
+                      4: "wildman: drinking water, animated",
+                      31: "wildman: flung, arms spread (also drowning)",
+                      47: "wildman: falling down a slope (also dying)"}
+
+# `pop3_format::anim::Outfit` over the shared tribesman body: braves wear none.
+OUTFITS = {"brave (no outfit)": None, "firewarrior": (0x20, 1), "warrior": (0x20, 2), "spy": (0x20, 3),
+           "preacher": (0x30, 1)}
+FLAG_FLIP, FLAG_SHADOW, FLAG_TRIBE_LAYER, FLAG_OUTFIT = 0x0001, 0x0004, 0x0010, 0x0020
+MAX_ANIM_FRAMES = 64
+
+
+def anim_name(index):
+    """The best name we have for a `VSTART` animation index, or None."""
+    if index in PERSON_ANIM_NAMES:
+        return PERSON_ANIM_NAMES[index]
+    if index in OLD_SHAMAN_ANIM_NAMES:
+        return OLD_SHAMAN_ANIM_NAMES[index]
+    if index in WILDMAN_ANIM_NAMES:
+        return WILDMAN_ANIM_NAMES[index]
+    for base, name in SHAMAN_ANIM_BASES.items():
+        if base <= index < base + TRIBES:
+            tribe = index - base
+            return name if tribe == 0 else f"{name} (tribe {tribe})"
+    return None
+
+
+def parse_starts(data):
+    """`VSTART-0.ANI`: per animation, 8 directions x (u16 frame, u16 mirror source != 0 = mirrored)."""
+    per_anim = 4 * 8
+    return [[struct.unpack_from("<HH", data, i * per_anim + d * 4) for d in range(8)] for i in range(len(data) // per_anim)]
+
+
+def parse_frames(data):
+    """`VFRA-0.ANI`: 8 bytes, u16 first element, u8 w, u8 h (unused), u16 flags (unused), u16 next frame."""
+    return [struct.unpack_from("<HBBHH", data, i * 8) for i in range(len(data) // 8)]
+
+
+def parse_elements(data):
+    """`VELE-0.ANI`: 10 bytes, u16 (sprite index + 1) x 6 (0 = none), i16 x, i16 y, u16 flags, u16 next element."""
+    out = []
+    for i in range(len(data) // 10):
+        raw_sprite, x, y, flags, nxt = struct.unpack_from("<HhhHH", data, i * 10)
+        out.append((raw_sprite // 6 - 1 if raw_sprite else None, x, y, flags, nxt))
+    return out
+
+
+def frame_loop(starts, frames, anim, direction):
+    """Frame indices of one loop, following `next` until it comes back (or breaks)."""
+    if anim >= len(starts):
+        return []
+    first = starts[anim][direction % 8][0]
+    if first == 0:
+        return []
+    out, f = [first], first
+    while f < len(frames):
+        nxt = frames[f][4]
+        if nxt == 0 or nxt == first or len(out) >= MAX_ANIM_FRAMES:
+            break
+        out.append(nxt)
+        f = nxt
+    return out
+
+
+def frame_elements(frames, elements, frame):
+    """Elements drawn for a frame, back to front."""
+    out = []
+    e = frames[frame][0] if frame < len(frames) else 0
+    while e != 0 and e < len(elements) and len(out) < MAX_ANIM_FRAMES:
+        el = elements[e]
+        out.append(el)
+        e = el[4]
+    return out
+
+
+def element_shown(flags, tribe, outfit):
+    """Whether an element is drawn for a person of `tribe` wearing `outfit`: never shadows; outfit layers only for
+    that outfit; tribe layers only for that tribe; everything else always."""
+    bits = (flags >> 9) & 3
+    if flags & FLAG_SHADOW:
+        return False
+    if flags & FLAG_OUTFIT:
+        return outfit is not None and outfit == (flags & (FLAG_TRIBE_LAYER | FLAG_OUTFIT), bits)
+    if flags & FLAG_TRIBE_LAYER:
+        return bits == tribe
+    return True
+
+
+def compose_frame(starts, frames, elements, sprite_bank, anim, direction, tribe, outfit):
+    """The person as a unit of `tribe` wearing `outfit`, one composed frame per `frame_loop` index: palette indices
+    (rows of rows, `None` = transparent), the feet at `origin`. None if the loop or every element is empty."""
+    mirrored = starts[anim][direction % 8][1] != 0 if anim < len(starts) else False
+    out = []
+    for frame in frame_loop(starts, frames, anim, direction):
+        parts = []
+        for sprite, x, y, flags, _next in frame_elements(frames, elements, frame):
+            if sprite is None or not element_shown(flags, tribe, outfit) or sprite >= len(sprite_bank):
+                continue
+            sw, sh, pixels = sprite_bank[sprite]
+            if sw and sh:
+                parts.append((x, y, flags, sw, sh, pixels))
+        x0 = min([0, *(x for x, *_ in parts)])
+        y0 = min([0, *(y for _, y, *_ in parts)])
+        x1 = max([0, *(x + sw for x, _, _, sw, _, _ in parts)])
+        y1 = max([0, *(y + sh for _, y, _, _, sh, _ in parts)])
+        w, h = max(x1 - x0, 1), max(y1 - y0, 1)
+        pixels = [[None] * w for _ in range(h)]
+        for x, y, flags, sw, sh, spixels in parts:
+            flip = bool(flags & FLAG_FLIP)
+            for sy in range(sh):
+                for sx in range(sw):
+                    c = spixels[sy][sw - 1 - sx if flip else sx]
+                    if c is not None:
+                        pixels[y - y0 + sy][x - x0 + sx] = c
+        if mirrored:
+            pixels = [row[::-1] for row in pixels]
+        out.append((w, h, pixels))
+    return out
 
 
 CATALOG = [
@@ -154,7 +329,7 @@ CATALOG = [
 ]
 
 # Banks small enough to list whole (unnamed sprites hidden by default on the page).
-WHOLE_BANKS = [POINT, HFX]
+WHOLE_BANKS = [POINT, HFX, HSPR]
 ALPHA_SPRITES = [range(1090, 1500), range(1538, 1593)]
 
 
@@ -279,17 +454,45 @@ def main():
     alpha = alpha_colours(read(data_dir, "al0-0.dat"), pal)
     named = {(f, i): (g, n, r) for f, i, g, n, r in CATALOG}
     entries = []
+    banks = {}
     for file in WHOLE_BANKS:
-        bank = sprites(read(data_dir, file))
-        for i, sprite in enumerate(bank):
+        banks[file] = sprites(read(data_dir, file))
+        for i, sprite in enumerate(banks[file]):
             group, name, ref = named.get((file, i), ("", "", ""))
             entries.append({"file": file, "index": i, "group": group, "name": name, "ref": ref, "w": sprite[0],
                             "h": sprite[1], "alpha": is_alpha(file, i), "anim": animation(file, i, name),
                             "src": png(sprite, alpha if is_alpha(file, i) else opaque)})
+    entries += person_animations(data_dir, read, banks[HSPR], opaque)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w") as fh:
         fh.write(page(entries))
     print(f"{out}: {sum(1 for e in entries if e['name'])} named sprites, {len(entries)} in all")
+
+
+def person_animations(data_dir, read, hspr, opaque):
+    """One entry per frame of every animated loop that has one (`VSTART`/`VFRA`/`VELE`, direction 0, tribe 0): the
+    plain body, plus any outfit (`OUTFITS`) whose composed frames actually differ from it."""
+    starts = parse_starts(read(data_dir, VSTART))
+    frames = parse_frames(read(data_dir, VFRA))
+    elements = parse_elements(read(data_dir, VELE))
+    entries = []
+    for anim in range(len(starts)):
+        name = anim_name(anim)
+        baseline = None
+        for outfit_name, outfit in OUTFITS.items():
+            composed = compose_frame(starts, frames, elements, hspr, anim, 0, 0, outfit)
+            is_baseline = outfit_name == "brave (no outfit)"
+            if not composed or (not is_baseline and composed == baseline):
+                continue
+            if is_baseline:
+                baseline = composed
+            label = f"anim {anim}" + (f": {name}" if name else "") + ("" if is_baseline else f" ({outfit_name})")
+            total = len(composed)
+            for k, sprite in enumerate(composed):
+                entries.append({"file": PERSON_ANIM, "index": anim * 1000 + k, "group": "person animations",
+                                "name": f"{label} {k + 1}/{total}", "ref": "", "w": sprite[0], "h": sprite[1],
+                                "alpha": False, "anim": f"{PERSON_ANIM}:{anim}:{outfit_name}", "src": png(sprite, opaque)})
+    return entries
 
 
 if __name__ == "__main__":
