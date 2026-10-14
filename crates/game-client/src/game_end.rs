@@ -76,6 +76,10 @@ struct EndRoot;
 struct EndHeadline;
 #[derive(Component)]
 struct EndSubtext;
+/// The "Press Enter or click to continue" button: only a click actually on it dismisses the dialog, not anywhere
+/// on screen (the backdrop behind it is not itself clickable).
+#[derive(Component)]
+struct DismissButton;
 
 pub struct GameEndPlugin;
 
@@ -125,6 +129,8 @@ fn spawn_end_root(mut commands: Commands, overlay: Single<Entity, With<crate::ca
             root.spawn((EndHeadline, Text::new(""), TextFont { font_size: FontSize::Px(44.0), ..default() }, TextColor(TEXT)));
             root.spawn((EndSubtext, Text::new(""), TextFont { font_size: FontSize::Px(16.0), ..default() }, TextColor(TEXT.with_alpha(0.8))));
             root.spawn((
+                DismissButton,
+                Button,
                 Node { margin: UiRect::top(px(10)), padding: UiRect::axes(px(16), px(8)), border: UiRect::all(px(2)), ..default() },
                 BackgroundColor(ITEM),
                 BorderColor::all(HIGHLIGHT),
@@ -158,8 +164,8 @@ fn dismiss_keys(keys: Res<ButtonInput<KeyCode>>, mut game: GameSetup, mut nav: R
     }
 }
 
-fn dismiss_mouse(mouse: Res<ButtonInput<MouseButton>>, mut game: GameSetup, mut nav: ResMut<MenuNav>, mut state: ResMut<NextState<AppState>>) {
-    if mouse.just_pressed(MouseButton::Left) {
+fn dismiss_mouse(buttons: Query<&Interaction, (With<DismissButton>, Changed<Interaction>)>, mut game: GameSetup, mut nav: ResMut<MenuNav>, mut state: ResMut<NextState<AppState>>) {
+    if buttons.iter().any(|i| *i == Interaction::Pressed) {
         leave_to_menu(&mut game, &mut nav, &mut state);
     }
 }
