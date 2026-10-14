@@ -178,7 +178,10 @@ impl Plugin for CameraPlugin {
         app.init_resource::<CameraRig>()
             .add_systems(PreStartup, spawn_camera)
             .add_systems(Update, frame_new_map.run_if(resource_changed::<crate::world::LevelList>))
-            .add_systems(Update, ((camera_input, fly).in_set(crate::menu::Gameplay), apply_rig, sky_color).chain());
+            .add_systems(
+                Update,
+                ((camera_input.run_if(not(crate::armageddon::armageddon_active)), fly).in_set(crate::menu::Gameplay), apply_rig, sky_color).chain(),
+            );
     }
 }
 

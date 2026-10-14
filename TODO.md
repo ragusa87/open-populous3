@@ -182,7 +182,12 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   is the one entry point anything else (Armageddon, below, or a future level-script interpreter) can also call.
 - [ ] Level scripts and triggers also ending the game (`TRIGGER_LEVEL_WON`/`LOST`, timers) — needs the PopScript
   interpreter below; will call the same `GameMap::declare_outcome` hook, not a separate mechanism.
-- [ ] A victory/defeat screen in the client (currently: nothing shows `GameMap::outcome` to the player yet).
+- [x] A victory/defeat screen in the client (`game_end.rs`, `AppState::Ended`): headline, reason, every tribe's
+  survivor count; `GAME_END=victory|defeat|draw` and `GAME_END=eliminate:<tribe>` dev hooks. Wording/art are our
+  own (AGENTS.md licence) — not traced from or compared against the original's screens.
+- [ ] The client assumes the local player is always tribe 0/blue (`units::PLAYER`, `units/mod.rs:36`) throughout —
+  multiplayer needs this determined per-session instead; affects win/lose presentation (`game_end::verdict`'s
+  `local`), spell casting, camera, and HUD alike. Pre-existing, not introduced by the win/lose work above.
 
 ## Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
 - [ ] Start camera from the header's start position (cell) and angle (2048ths) instead of looking at the shaman.

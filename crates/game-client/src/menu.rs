@@ -20,11 +20,11 @@ use bevy::prelude::*;
 use game_core::map::GameMap;
 
 const BACKDROP: Color = Color::srgb(0.06, 0.04, 0.02);
-/// Over the frozen game while paused (the main menu is drawn on `BACKDROP`).
-const DIM: Color = Color::srgba(0.0, 0.0, 0.0, 0.55);
-const TEXT: Color = Color::srgb(0.95, 0.85, 0.6);
-const HIGHLIGHT: Color = Color::srgb(0.80, 0.56, 0.20);
-const ITEM: Color = Color::srgba(0.30, 0.18, 0.06, 0.9);
+/// Over the frozen game while paused (the main menu is drawn on `BACKDROP`); reused by `game_end.rs`'s dialog.
+pub(crate) const DIM: Color = Color::srgba(0.0, 0.0, 0.0, 0.55);
+pub(crate) const TEXT: Color = Color::srgb(0.95, 0.85, 0.6);
+pub(crate) const HIGHLIGHT: Color = Color::srgb(0.80, 0.56, 0.20);
+pub(crate) const ITEM: Color = Color::srgba(0.30, 0.18, 0.06, 0.9);
 
 #[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppState {
@@ -34,6 +34,8 @@ pub enum AppState {
     Menu,
     Playing,
     Paused,
+    /// The match ended (`game_core::map::GameMap::outcome`); its dialog shows over the frozen game (`game_end.rs`).
+    Ended,
 }
 
 /// Systems that only run in the game (input, simulation, HUD actions), not behind the menu.
@@ -249,6 +251,8 @@ pub fn view(state: AppState) -> View {
         AppState::Menu => View { game: false, clear: Some(BACKDROP), menu: Some(Color::NONE) },
         AppState::Playing => View { game: true, clear: None, menu: None },
         AppState::Paused => View { game: true, clear: None, menu: Some(DIM) },
+        // No menu overlay here: game_end.rs draws its own root, over the frozen game, like Paused's.
+        AppState::Ended => View { game: true, clear: None, menu: None },
     }
 }
 
@@ -312,7 +316,7 @@ fn begin_game(mut begins: MessageReader<BeginGame>, mut game: GameSetup) {
 
 /// What starting, pausing and leaving a game touch.
 #[derive(SystemParam)]
-struct GameSetup<'w> {
+pub(crate) struct GameSetup<'w> {
     levels: ResMut<'w, LevelList>,
     map: ResMut<'w, CurrentMap>,
     dirty: ResMut<'w, TerrainDirty>,
@@ -326,6 +330,14 @@ struct GameSetup<'w> {
     schedule: ResMut<'w, crate::units::GameSchedule>,
     clock: ResMut<'w, crate::units::SimClock>,
     target: ResMut<'w, crate::boot::LoadTarget>,
+}
+
+/// Leaves the current game for the main menu (the pause menu's "Main menu", and `game_end.rs`'s dismiss): resets
+/// navigation, clears the selection, switches state. The one implementation both share.
+pub(crate) fn leave_to_menu(game: &mut GameSetup, nav: &mut MenuNav, state: &mut NextState<AppState>) {
+    *nav = MenuNav::default();
+    game.selection.clear();
+    state.set(AppState::Menu);
 }
 
 impl GameSetup<'_> {
@@ -390,11 +402,7 @@ fn apply(outcome: Option<Outcome>, game: &mut GameSetup, nav: &mut MenuNav, stat
         Some(Outcome::CycleSpeed) => {
             game.speed.cycle();
         }
-        Some(Outcome::Leave) => {
-            *nav = MenuNav::default();
-            game.selection.clear();
-            state.set(AppState::Menu);
-        }
+        Some(Outcome::Leave) => leave_to_menu(game, nav, state),
         Some(Outcome::Quit) => {
             exit.write(AppExit::Success);
         }

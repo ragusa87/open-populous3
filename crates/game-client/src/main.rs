@@ -1,6 +1,7 @@
 //! Populous-like sandbox. Usage: `game-client [--no-original] [levlXXXX.dat | levels_dir]`.
 //! `--no-original` (or `POP3_NO_ORIGINAL=1`) never reads the original game files.
 
+mod armageddon;
 mod blueprint;
 mod boot;
 mod buildings;
@@ -18,6 +19,7 @@ mod edge_push;
 mod editor;
 mod effects;
 mod flame;
+mod game_end;
 mod game_frame;
 mod game_speed;
 mod generated_buildings;
@@ -102,7 +104,7 @@ fn main() {
             hover::HoverPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,
-            (menu::MenuPlugin, boot::BootPlugin),
+            (menu::MenuPlugin, boot::BootPlugin, game_end::GameEndPlugin),
             keymap::KeymapPlugin,
             game_speed::GameSpeedPlugin,
             dev::DevPlugin,
@@ -110,7 +112,7 @@ fn main() {
             (camera_debug::CameraDebugPlugin, debug_overlay::DebugOverlayPlugin),
             object_scale::ObjectScalePlugin,
             chimney::ChimneyPlugin,
-            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin),
+            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin, armageddon::ArmageddonPlugin),
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();

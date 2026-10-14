@@ -249,7 +249,17 @@ impl Plugin for UnitsPlugin {
             .init_resource::<UnitSprites>()
             .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin, markers::MarkersPlugin))
             .add_plugins(crate::boot::BootJobPlugin::<UnitSpritesJob>::default())
-            .add_systems(Update, (selection::select_and_order.in_set(UnitInput), look_at_shaman, run_ticks.in_set(SimStep), respawn_views, animate_views.in_set(UnitViews)).chain().in_set(crate::menu::Gameplay))
+            .add_systems(
+                Update,
+                (
+                    (selection::select_and_order.in_set(UnitInput), look_at_shaman).run_if(not(crate::armageddon::armageddon_active)),
+                    run_ticks.in_set(SimStep),
+                    respawn_views,
+                    animate_views.in_set(UnitViews),
+                )
+                    .chain()
+                    .in_set(crate::menu::Gameplay),
+            )
             .add_systems(PostUpdate, pull_to_eye.before(TransformSystems::Propagate));
     }
 }

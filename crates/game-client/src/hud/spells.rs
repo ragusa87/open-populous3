@@ -140,6 +140,7 @@ pub fn ground_spell(kind: SpellKind, at: (u16, u16), origin: (u16, u16)) -> Opti
         SpellKind::Teleport => Some(Spell::Teleport { to: at }),
         SpellKind::Blast => Some(Spell::Blast { at }),
         SpellKind::Lightning => Some(Spell::Lightning { at }),
+        SpellKind::Armageddon => Some(Spell::Armageddon { at }),
         SpellKind::LandBridge => Some(Spell::LandBridge { from: cell(origin), to: cell(at) }),
         SpellKind::Flatten => Some(Spell::Flatten { at: game_core::flatten::nearest_point(at) }),
         _ => None,
@@ -272,7 +273,10 @@ impl Plugin for SpellsPlugin {
             .add_systems(
                 Update,
                 (
-                    (tile_clicks.after(crate::units::SimStep), pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput).after(crate::hover::HoverSystems)).chain().in_set(crate::menu::Gameplay),
+                    (tile_clicks.after(crate::units::SimStep), pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput).after(crate::hover::HoverSystems))
+                        .chain()
+                        .in_set(crate::menu::Gameplay)
+                        .run_if(not(crate::armageddon::armageddon_active)),
                     (update_tiles.before(crate::progress_bar::DrawBars), show_given_rows),
                     update_info,
                 )
