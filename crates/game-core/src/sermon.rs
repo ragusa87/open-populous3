@@ -89,9 +89,11 @@ impl Coordinator for Sermon {
 
 impl GameMap {
     /// Preachers start sermons: on their look turn, every enemy they may preach to within their look square sits down
-    /// to listen [guess: what starts a sermon is not traced]. One ordered to preach checks its one target every turn,
-    /// not gated by the look rhythm: the gap it still has to close can otherwise vanish into the target's own melee
-    /// reach before the preacher's next look turn [game]. A preacher with no listener left stands idle again.
+    /// to listen [guess: what starts a sermon is not traced]. Unlike anyone else's own look, walking on any order does
+    /// not blind it to this [game]: its conversion look is not a melee scan, so it keeps working while it is on its
+    /// way somewhere, not only once it arrives. One ordered to preach checks its one target every turn, not gated by
+    /// the look rhythm: the gap it still has to close can otherwise vanish into the target's own melee reach before
+    /// the preacher's next look turn [game]. A preacher with no listener left stands idle again.
     pub(crate) fn start_sermons(&mut self) {
         let listened: Vec<UnitId> = self.coordinators.sermons.iter().map(|(_, s)| s.preacher).collect();
         for u in self.units.iter_mut().filter(|u| preaching(u) && !listened.contains(&u.id)) {
@@ -117,7 +119,7 @@ impl GameMap {
                 }
             }
             let p = &self.units[i];
-            let free = matches!(p.action, Action::Idle | Action::Holding { .. }) || preaching(p) || ordered.is_some();
+            let free = matches!(p.action, Action::Idle | Action::Holding { .. } | Action::Walking { .. }) || preaching(p) || ordered.is_some();
             if !free || !p.kind.stats().look_every.fires(now, 0) {
                 continue;
             }
@@ -347,5 +349,19 @@ mod tests {
         map.tick();
         assert!(listening(&map, brave), "the preacher converts it on this very tick, despite being off its look rhythm");
         assert!(!matches!(map.unit(p).unwrap().action, Action::Challenge { .. } | Action::Melee { .. }), "it must not end up fighting it instead");
+    }
+
+    #[test]
+    fn walked_near_an_idle_enemy_on_a_plain_move_order_it_still_converts_it() {
+        let mut map = GameMap::sandbox_units().seeded(11);
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(1024), s.z.wrapping_sub(15 * 512));
+        let p = map.spawn(0, UnitKind::Preacher, at).id;
+        let brave = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(6 * 512), at.1)).id;
+        let near = (at.0.wrapping_add(5 * 512), at.1);
+        map.apply(&crate::command::Command::OrderUnit { player: 0, unit: p, order: crate::unit::Order::MoveTo { x: near.0, z: near.1 } });
+        let fought = |m: &GameMap| matches!(m.unit(p).unwrap().action, Action::Challenge { .. } | Action::Melee { .. });
+        until(&mut map, 300, |m| listening(m, brave) || fought(m)).expect("one or the other");
+        assert!(listening(&map, brave), "walked close enough to preach on a plain move order, not an attack order: the preacher must still convert it, not fight it");
     }
 }
