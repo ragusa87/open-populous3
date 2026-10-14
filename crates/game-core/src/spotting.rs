@@ -93,7 +93,7 @@ impl GameMap {
         let idle = matches!(u.action, Action::Idle | Action::Holding { .. }) && !throws;
         let size = self.terrain.size() as i32;
         square(u.cell(), sight, size).find_map(|cell| {
-            let people = grid.at(cell).filter_map(|id| self.unit(id)).filter(|t| crate::attack::may_attack(u, t) && !t.locked());
+            let people = grid.at(cell).filter_map(|id| self.unit(id)).filter(|t| crate::attack::may_attack(u, t) && !t.locked() && !self.tribes.allied(u.owner, t.owner));
             let mut fighting = None;
             for t in people {
                 match self.linked(t) {

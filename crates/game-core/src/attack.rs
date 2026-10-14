@@ -27,8 +27,11 @@ impl GameMap {
     /// Where an attack on `target` leads, if `attacker` may make it: the person, or the building's door.
     pub fn attack_goal(&self, attacker: &Unit, target: Target) -> Option<(u16, u16)> {
         match target {
-            Target::Unit(id) => self.unit(id).filter(|t| may_attack(attacker, t) || crate::sermon::may_preach(attacker, t)).map(|t| (t.x, t.z)),
-            Target::Building(id) => self.building(id).filter(|b| may_attack_building(attacker, b)).map(Building::door),
+            Target::Unit(id) => self
+                .unit(id)
+                .filter(|t| (may_attack(attacker, t) || crate::sermon::may_preach(attacker, t)) && !self.tribes.allied(attacker.owner, t.owner))
+                .map(|t| (t.x, t.z)),
+            Target::Building(id) => self.building(id).filter(|b| may_attack_building(attacker, b) && !self.tribes.allied(attacker.owner, b.owner)).map(Building::door),
         }
     }
 

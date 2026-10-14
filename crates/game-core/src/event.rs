@@ -40,6 +40,8 @@ pub enum WorldEvent {
     /// The unit attacks `at` back: a firewarrior hit by its bolt, a listener whose preacher was attacked. At once on
     /// its feet, else once it has landed.
     StrikeBack { unit: UnitId, at: UnitId },
+    /// Declares the match's result (`GameMap::declare_outcome`), the hookable "the match ended" entry point.
+    Declare { winner: Option<u8>, reason: crate::outcome::Reason },
 }
 
 /// What throws a unit, for its immunities.

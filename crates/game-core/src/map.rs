@@ -19,6 +19,8 @@ use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::totem::{totems_from_level, Totem, TotemKind};
 use crate::status::Timed;
+use crate::outcome::Outcome;
+use crate::tribes::Tribes;
 use crate::unit::{torus_delta, Action, Order, Target, Unit, UnitEvent, UnitId, UnitKind};
 use crate::wood::WoodPiece;
 use pop3_format::header::TRIBES;
@@ -34,6 +36,9 @@ pub struct GameMap {
     pub terrain: Heightmap,
     /// One per tribe, sorted by owner.
     pub sites: Vec<ReincarnationSite>,
+    /// The tribes actually in this match and their alliances (`tribes.rs`), read once and independent of whether
+    /// each one still has (or ever had) a reincarnation site.
+    pub tribes: Tribes,
     /// One shaman per site for now, in site order.
     pub units: Vec<Unit>,
     /// Wood on the map: an original level's scenery trees, or groves on generated maps and sandboxes.
@@ -77,6 +82,8 @@ pub struct GameMap {
     pub vehicles: Registry<crate::vehicle::Vehicle>,
     /// Ground left in ashes by destroyed buildings (`crate::ashes`).
     pub ashes: crate::ashes::Ashes,
+    /// The match's result, once declared (`outcome.rs`): never unset, never relabelled.
+    pub outcome: Option<Outcome>,
     /// Ticks run since the map was made (`tick`).
     pub now: Tick,
     /// The next id `new_id` gives: units, buildings and effects share it, an id is never given twice.
@@ -124,9 +131,12 @@ fn per_player<T: Clone>(t: T) -> Vec<T> {
 }
 
 impl GameMap {
-    /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes).
+    /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes). `tribes` (its roster, not
+    /// its alliances, which these maps have no header to set) comes straight from `sites`: 1:1 for every map built
+    /// this way.
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
-        GameMap { name: name.into(), theme: None, terrain, sites, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), bolts: Registry::default(), vehicles: Registry::default(), ashes: Default::default(), now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        let tribes = Tribes::from_sites(&sites);
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), bolts: Registry::default(), vehicles: Registry::default(), ashes: Default::default(), outcome: None, now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -142,6 +152,7 @@ impl GameMap {
             theme,
             terrain: Heightmap::from_heights(MAP_SIZE, level.heights.clone()),
             sites: sites_from_level(level),
+            tribes: Tribes::from_level(level),
             units: Vec::new(),
             trees: level
                 .things
@@ -165,6 +176,7 @@ impl GameMap {
             bolts: Registry::default(),
             vehicles: Registry::default(),
             ashes: Default::default(),
+            outcome: None,
             now: Tick::ZERO,
             next_id: 1,
             rng: Lcg(0),
@@ -237,7 +249,8 @@ impl GameMap {
         let start_camera = header.as_ref().and_then(StartCamera::from_header);
         let object_bank = header.as_ref().map_or(0, |h| h.object_bank);
         let shaman_omni = header.as_ref().is_some_and(|h| h.flags.has(pop3_format::header::LevelFlags::SHAMAN_OMNI));
-        Ok(GameMap { spell_books, build_books, start_camera, object_bank, shaman_omni, ..map })
+        let tribes = header.as_ref().map_or(map.tribes.clone(), |h| map.tribes.clone().with_allies(h.allies));
+        Ok(GameMap { spell_books, build_books, start_camera, object_bank, shaman_omni, tribes, ..map })
     }
 
     /// Deterministic island map from a seed (fallback when no original data exists).
@@ -590,6 +603,7 @@ impl GameMap {
                 shaman_alive && self.ground().passable(Mobility::Walk, cell)
             }
             Spell::LandBridge { to, .. } => (self.shaman_omni || (shaman_alive && !aboard)) && !crate::unit::is_sea(&self.terrain, to),
+            Spell::Armageddon { .. } => self.armageddon().is_none(),
             _ => true,
         }
     }
@@ -650,7 +664,7 @@ impl GameMap {
         };
         match *spell {
             Spell::Teleport { to } => Some(to),
-            Spell::Blast { at } | Spell::Lightning { at } => Some(at),
+            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
             Spell::Flatten { at } => Some(world(at, 0)),
             Spell::Erode { .. } | Spell::Raise { .. } => None,
@@ -733,6 +747,10 @@ impl GameMap {
                 self.add_effect(crate::flatten::effect(player, at, &self.terrain));
                 None
             }
+            Spell::Armageddon { at } => {
+                self.start_armageddon(at);
+                None
+            }
             _ => spell.cast(&mut self.terrain),
         }
     }
@@ -741,6 +759,9 @@ impl GameMap {
     /// makes the caster's shaman do her cast jump (Teleport: she moves when it ends); a spell that
     /// cannot be cast (`can_cast`) does nothing.
     pub fn apply(&mut self, command: &Command) -> Option<DirtyRect> {
+        if self.armageddon().is_some() {
+            return None;
+        }
         match *command {
             Command::Cast { player, spell } if self.out_of_range(player, &spell).is_some() => {
                 self.walk_to_cast(player, spell);
@@ -932,6 +953,10 @@ impl GameMap {
         self.now = self.now.next();
         debug_assert!(self.units.windows(2).all(|w| w[0].id < w[1].id), "units sorted by id");
         let mut dirty = Vec::new();
+        // Armageddon (armageddon.rs): while a match is active, the economy and combat-seeking are suspended —
+        // nothing to tend to (buildings/totems/vehicles are gone once the full mechanic lands) and nothing should
+        // start a fresh fight before the match's own resolution decides things.
+        let armageddon = self.armageddon().is_some();
         self.update_walls();
         let (buildings, now) = (&self.buildings, self.now);
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now));
@@ -943,16 +968,20 @@ impl GameMap {
         dirty.extend(self.tend_building_wear());
         dirty.extend(self.ashes.tick(now));
         self.tend_campfires();
-        self.tend_vaults();
-        self.tend_totems();
-        self.tend_queues();
-        self.tend_training();
-        self.tend_vehicle_huts();
+        if !armageddon {
+            self.tend_vaults();
+            self.tend_totems();
+            self.tend_queues();
+            self.tend_training();
+            self.tend_vehicle_huts();
+        }
         // Coordinators, before the units, so that one ending this turn is gone when its units tick (coordinators.md):
         // a. scans that start coordinators or add units to them; b. each one's turn, kind after kind; c. the finished
         // ones removed; d. their events applied in order; e. units whose coordinator is gone released.
-        self.spot_enemies();
-        self.tend_attacks();
+        if !armageddon {
+            self.spot_enemies();
+            self.tend_attacks();
+        }
         self.tend_wrecking();
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
@@ -998,12 +1027,15 @@ impl GameMap {
         dirty.extend(self.work());
         self.drop_wood();
         self.count_inside();
-        let buildings = &mut self.buildings;
-        for (player, (pool, book)) in self.mana.iter_mut().zip(&mut self.spell_books).enumerate() {
-            let mut stores: Vec<&mut crate::production::Production> = buildings.iter_mut().filter(|b| b.owner as usize == player).filter_map(|b| b.production.as_mut()).collect();
-            pool.tick(now, book, &mut stores);
+        if !armageddon {
+            let buildings = &mut self.buildings;
+            for (player, (pool, book)) in self.mana.iter_mut().zip(&mut self.spell_books).enumerate() {
+                let mut stores: Vec<&mut crate::production::Production> = buildings.iter_mut().filter(|b| b.owner as usize == player).filter_map(|b| b.production.as_mut()).collect();
+                pool.tick(now, book, &mut stores);
+            }
         }
         self.units.retain(|u| !gone.contains(&u.id));
+        self.check_elimination();
         dirty
     }
 }
@@ -1240,6 +1272,10 @@ impl GameMap {
                     Some(i) => self.go_attack(i, target),
                     None => {}
                 }
+                None
+            }
+            WorldEvent::Declare { winner, reason } => {
+                self.declare_outcome(winner, reason);
                 None
             }
         };

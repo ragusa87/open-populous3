@@ -2,7 +2,8 @@
 //! invisible "internal" things (class 10: fights, formations, guard control...). Units link to one through their
 //! action, one way; the coordinator keeps no list of them. It ticks before the units, returns `WorldEvent`s, and is
 //! removed when its situation ends; its units then find its id gone and are released (`GameMap::release_orphans`).
-//! Kinds: `challenge::Challenge`, `melee::Melee`; a test-only `Gathering` proves the pattern.
+//! Kinds: `challenge::Challenge`, `melee::Melee`, `sermon::Sermon`, `armageddon::ArmageddonMatch` (global: no unit
+//! ever links to it); a test-only `Gathering` proves the pattern.
 
 use crate::event::WorldEvent;
 use crate::id::{Id, Registry};
@@ -42,6 +43,8 @@ pub struct Coordinators {
     pub challenges: Registry<crate::challenge::Challenge>,
     pub melees: Registry<crate::melee::Melee>,
     pub sermons: Registry<crate::sermon::Sermon>,
+    /// Armageddon's match, if one is active (`armageddon.rs`): global, no unit ever links to it.
+    pub armageddons: Registry<crate::armageddon::ArmageddonMatch>,
     #[cfg(test)]
     pub gatherings: Registry<tests::Gathering>,
 }
@@ -65,6 +68,7 @@ impl Coordinators {
         tick_kind(&mut self.challenges, now, world, rng, &mut events);
         tick_kind(&mut self.melees, now, world, rng, &mut events);
         tick_kind(&mut self.sermons, now, world, rng, &mut events);
+        tick_kind(&mut self.armageddons, now, world, rng, &mut events);
         #[cfg(test)]
         tick_kind(&mut self.gatherings, now, world, rng, &mut events);
         events

@@ -3,6 +3,7 @@
 //! Everything here must give identical results on every lockstep peer.
 
 pub mod angle;
+pub mod armageddon;
 pub mod ashes;
 pub mod attack;
 #[cfg(test)]
@@ -35,6 +36,7 @@ pub mod map;
 pub mod melee;
 pub mod motion;
 pub mod occupancy;
+pub mod outcome;
 pub mod path;
 pub mod physics;
 pub mod placement;
@@ -54,6 +56,7 @@ pub mod time;
 pub mod totem;
 pub mod training;
 pub mod tree;
+pub mod tribes;
 pub mod unit;
 pub mod vault;
 pub mod vehicle;
