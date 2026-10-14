@@ -83,8 +83,8 @@ impl Plugin for GameEndPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EndingWatch>()
             .add_systems(Startup, spawn_end_root)
-            .add_systems(Update, detect_ending.in_set(crate::menu::Gameplay))
-            .add_systems(Update, game_end_from_env.in_set(crate::menu::Gameplay))
+            .add_systems(Update, detect_ending.in_set(crate::menu::Gameplay).run_if(in_state(AppState::Playing)))
+            .add_systems(Update, game_end_from_env.in_set(crate::menu::Gameplay).run_if(in_state(AppState::Playing)))
             .add_systems(Update, show_ended.run_if(state_changed::<AppState>))
             .add_systems(Update, (dismiss_keys, dismiss_mouse).run_if(in_state(AppState::Ended)));
     }

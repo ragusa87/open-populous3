@@ -5,8 +5,16 @@
 interpreter, [TODO.md](../../TODO.md) "Level scripting"), and the tick it was declared. `GameMap::declare_outcome`
 is the single write path, idempotent: the first call wins, every later one is a no-op, so nothing can un-declare or
 relabel a result once set. `GameMap::tick` never stops or branches once `outcome` is set — the simulation keeps
-running exactly as before (so the client can keep rendering a live world to spectate), it's just that nothing reads
-`outcome` a second time.
+running exactly as before, it's just that nothing reads `outcome` a second time. `GameMap::apply` rejects every
+`Command` once `outcome` is set, same as while an Armageddon match is active (below) — the match keeps running as a
+"victory lap" epilogue (every living unit permanently shielded, `shield_everyone_once_ended`; the client plays a
+small happy jump on every unit, `units/mod.rs::victory_bounce`, our own invented stand-in, not traced from the
+original), but nothing can act on it any more.
+
+Client-side, the win/lose dialog (`game_end.rs`, `AppState::Ended`) shows once a short hold lets the final blow's
+animation finish; unlike `AppState::Paused`, `Ended` does **not** freeze the simulation or rendering (`menu::Gameplay`
+runs in both `Playing` and `Ended`) — only manual input (camera, selection, orders, spell-casting) is locked
+(`armageddon::input_locked`), so the epilogue above is actually visible behind the dialog.
 
 ## Automatic elimination
 

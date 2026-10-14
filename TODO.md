@@ -185,6 +185,14 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [x] A victory/defeat screen in the client (`game_end.rs`, `AppState::Ended`): headline, reason, every tribe's
   survivor count; `GAME_END=victory|defeat|draw` and `GAME_END=eliminate:<tribe>` dev hooks. Wording/art are our
   own (AGENTS.md licence) — not traced from or compared against the original's screens.
+- [x] Once the match ends, the simulation keeps running (not frozen) and every living unit is shielded
+  (`GameMap::shield_everyone_once_ended`, `outcome.rs`) — directly sets `Unit::statuses.shield`, not a real cast of
+  Magical Shield (still unimplemented, `docs/plans/spells.md` "Magical Shield": the nearest-N selection, `CastSelf`).
+  Once that spell lands, consider whether this "victory lap" epilogue should reuse its actual cast path instead of
+  poking the status directly — not done now, to avoid blocking this on an unrelated spell.
+- [x] A "victory lap" visual once the match ends: every unit plays a small repeating happy jump
+  (`units/mod.rs::victory_bounce`, added to `pull_to_eye`'s lift) — there's no such animation traced in the
+  original's identified sprites, so this is our own invented stand-in, not a reproduction.
 - [ ] The client assumes the local player is always tribe 0/blue (`units::PLAYER`, `units/mod.rs:36`) throughout —
   multiplayer needs this determined per-session instead; affects win/lose presentation (`game_end::verdict`'s
   `local`), spell casting, camera, and HUD alike. Pre-existing, not introduced by the win/lose work above.

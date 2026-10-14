@@ -1,8 +1,10 @@
 //! Main menu shown before the game: New game (the level from the command line / PgUp-PgDn list),
 //! Sandbox (test grounds: Walk, Units, Buildings, Worship, Spells, Vehicles), Quit. Sub-pages open on Enter and go back with Esc/Backspace or
 //! their Back entry; arrows (or W/S) move, Enter/Space picks, the mouse hovers and clicks.
-//! Gameplay systems are in the `Gameplay` set, which only runs while `Playing`. Behind the menu the
-//! game camera is off: no world, units or HUD are drawn, the menu has its own overlay camera.
+//! Gameplay systems are in the `Gameplay` set, which runs while `Playing` or `Ended` (the match keeps running past
+//! the win/lose dialog, `game_end.rs` — only input-driven systems need to exclude `Ended` themselves, e.g. via
+//! `armageddon::input_locked`). Behind the menu the game camera is off: no world, units or HUD are drawn, the menu
+//! has its own overlay camera.
 //! Esc in the game pauses: the mouse is released and the pause menu (Resume, Main menu with a
 //! confirmation) shows over the frozen game; Esc on it resumes. Its Dev mode entry switches `keymap::DevMode`; its
 //! Shortcuts page lists the keys and mouse of the keymap in use (`keymap::shortcut_lines`).
@@ -219,11 +221,11 @@ impl Plugin for MenuPlugin {
         app.insert_state(AppState::Loading)
             .insert_resource(crate::boot::LoadTarget::Boot { then: start })
             .init_resource::<MenuNav>()
-            .configure_sets(Update, Gameplay.run_if(in_state(AppState::Playing)))
+            .configure_sets(Update, Gameplay.run_if(in_state(AppState::Playing).or_else(in_state(AppState::Ended))))
             .add_systems(Startup, spawn_menu)
             .add_systems(Update, begin_game.after(crate::boot::LoadingSystems))
-            .add_systems(Update, pause_on_escape.before(crate::virtual_cursor::toggle_capture).in_set(Gameplay))
-            .add_systems(Update, menu_from_env.in_set(Gameplay))
+            .add_systems(Update, pause_on_escape.before(crate::virtual_cursor::toggle_capture).in_set(Gameplay).run_if(not(in_state(AppState::Ended))))
+            .add_systems(Update, menu_from_env.in_set(Gameplay).run_if(not(in_state(AppState::Ended))))
             .add_systems(
                 Update,
                 (menu_keys.before(crate::virtual_cursor::toggle_capture), menu_mouse, rebuild_items, item_visuals)

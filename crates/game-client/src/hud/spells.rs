@@ -276,7 +276,7 @@ impl Plugin for SpellsPlugin {
                     (tile_clicks.after(crate::units::SimStep), pause_clicks, cast_selected, aim_and_cast.after(crate::units::UnitInput).after(crate::hover::HoverSystems))
                         .chain()
                         .in_set(crate::menu::Gameplay)
-                        .run_if(not(crate::armageddon::armageddon_active)),
+                        .run_if(not(crate::armageddon::input_locked)),
                     (update_tiles.before(crate::progress_bar::DrawBars), show_given_rows),
                     update_info,
                 )

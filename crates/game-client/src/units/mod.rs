@@ -252,7 +252,7 @@ impl Plugin for UnitsPlugin {
             .add_systems(
                 Update,
                 (
-                    (selection::select_and_order.in_set(UnitInput), look_at_shaman).run_if(not(crate::armageddon::armageddon_active)),
+                    (selection::select_and_order.in_set(UnitInput), look_at_shaman).run_if(not(crate::armageddon::input_locked)),
                     run_ticks.in_set(SimStep),
                     respawn_views,
                     animate_views.in_set(UnitViews),
@@ -483,6 +483,20 @@ fn perched(map: &game_core::map::GameMap, heights: &crate::buildings::ModelHeigh
 /// How high a jump into or out of a vehicle goes over the straight line, cells.
 const HOP: f32 = 0.3;
 
+/// How long one little victory jump takes, seconds.
+const VICTORY_HOP_SECS: f32 = 0.6;
+
+/// Every unit's small happy jump once the match has ended (`start`: `GameMap::outcome.at`) — our own invented
+/// stand-in for a "victory lap", since no such animation is traced in the original's identified sprites. Loops
+/// every `VICTORY_HOP_SECS` on the same arc a vehicle boarding jump uses (`HOP`), each unit's own phase offset by
+/// its stable id (`sim_time::seed`, never its list index) so they don't all hop in lockstep. Zero before `start`.
+fn victory_bounce(now: SimNow, start: Option<game_core::time::Tick>, id: u32) -> f32 {
+    let Some(start) = start else { return 0.0 };
+    let period = game_core::time::Ticks::new((VICTORY_HOP_SECS / TICK_SECS).round() as u32);
+    let t = (now.secs_in(start, period) / VICTORY_HOP_SECS + crate::sim_time::seed(id)).fract();
+    HOP * 4.0 * t * (1.0 - t)
+}
+
 /// How far through a timed jump `left` the drawn moment is, 0..1 (one tick behind, gliding with `alpha`).
 fn jump_progress(left: game_core::time::Countdown, alpha: f32) -> f32 {
     let total = left.total().get().max(1) as f32;
@@ -611,6 +625,7 @@ fn pull_to_eye(
     rig: Res<CameraRig>,
     params: Res<CurveParamsRes>,
     clock: Res<SimClock>,
+    now: Res<SimNow>,
     eye: Query<&Transform, (With<GameCamera>, Without<UnitView>)>,
     views: Query<(&UnitView, &Grounded, &Transform, &Children)>,
     mut parts: Query<(&mut Transform, Has<HealthBar>, Option<&markers::MarkerSlot>), (Or<(With<UnitSprite>, With<HealthBar>, With<markers::MarkerSlot>)>, Without<UnitView>, Without<GameCamera>)>,
@@ -632,8 +647,9 @@ fn pull_to_eye(
         let pull = if perch.is_some() { PERCH_PULL } else if riding.is_some() { 0.0 } else { PULL_TO_EYE };
         let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, pull);
         let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale));
+        let bounce = u.map_or(0.0, |u| victory_bounce(*now, map.0.outcome.map(|o| o.at), u.id.raw()));
         let shown = perch.or(riding.map(|r| r / sizes.get(ObjectGroup::Units))).unwrap_or_default();
-        let local = view.rotation.inverse() * (offset + shown) + Vec3::Y * lift * scale;
+        let local = view.rotation.inverse() * (offset + shown) + Vec3::Y * (lift + bounce) * scale;
         for &child in children {
             if let Ok((mut t, bar, marker)) = parts.get_mut(child) {
                 let above = if bar { BAR_HEIGHT } else { marker.map_or(0.0, |m| m.above) };
@@ -669,6 +685,22 @@ mod tests {
         let (pos, h) = riding(&map, map.unit(id).unwrap(), cells, 0.0, 0.01).unwrap();
         assert!((pos - Vec2::new(58.5, 60.5)).length() < 0.1 && h == 0.0, "the jump starts where it stood");
         assert_eq!(riding(&map, &map.units[0], cells, 0.0, 0.01), None, "on foot");
+    }
+
+    #[test]
+    fn victory_bounce_is_zero_before_the_match_ends_then_loops_within_its_arc() {
+        let at = |t: u32| SimNow { tick: Tick::from_wire(t), frac: 0.0 };
+        assert_eq!(victory_bounce(at(100), None, 1), 0.0, "no match ended yet");
+        let start = Tick::from_wire(100);
+        let h = victory_bounce(at(130), Some(start), 1);
+        assert!((0.0..=HOP).contains(&h), "{h} within the jump's own arc");
+        let period_ticks = (VICTORY_HOP_SECS / TICK_SECS).round() as u32;
+        assert_eq!(h, victory_bounce(at(130 + period_ticks), Some(start), 1), "loops every VICTORY_HOP_SECS");
+        assert_ne!(
+            victory_bounce(at(100), Some(start), 1),
+            victory_bounce(at(100), Some(start), 2),
+            "different units are out of phase (not guaranteed never equal by height, but true for these seeds)"
+        );
     }
 
     #[test]
