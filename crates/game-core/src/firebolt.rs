@@ -214,7 +214,7 @@ impl GameMap {
                 let d = isqrt((dx * dx + dz * dz) as u32).max(1) as i32;
                 Velocity::new((dx * THROW_OUT / d) as i16, THROW_UP, (dz * THROW_OUT / d) as i16)
             };
-            events.push(WorldEvent::Push { unit: u.id, vel, kind: PushKind::Melee });
+            events.push(WorldEvent::Push { unit: u.id, vel, kind: PushKind::Spell });
         }
         match b.target {
             Target::Building(id) => {
@@ -302,6 +302,16 @@ mod tests {
             assert_eq!(full - life(&map, t), lost, "{kind:?}");
             assert!(map.unit(a).unwrap().reload > 0);
         }
+    }
+
+    #[test]
+    fn a_shielded_target_takes_no_damage_and_is_not_thrown() {
+        let (mut map, _, t) = duel(UnitKind::Brave, 3);
+        map.unit_mut(t).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
+        let full = life(&map, t);
+        map.run(Ticks::new(60));
+        assert_eq!(life(&map, t), full, "a magical ranged attack, stopped like a spell");
+        assert!(!map.unit(t).unwrap().motion.airborne(), "its knockback is stopped too");
     }
 
     #[test]

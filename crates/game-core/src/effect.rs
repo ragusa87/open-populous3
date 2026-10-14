@@ -41,9 +41,10 @@ pub enum DamageKind {
     Blast,
     /// Kills whatever the health (`lightning`).
     Lightning,
-    /// A blow in a fight: the shield blocks spells, not this (combat.md).
+    /// A blow in a fight: the only damage a shield does not stop (combat.md).
     Melee,
-    /// A firebolt: not a spell either (combat.md "Firebolts"; whether the shield stops it is a guess).
+    /// A firewarrior's bolt: a magical ranged attack, so the shield stops it too (combat.md "Firebolts"; reported,
+    /// not traced).
     Fire,
 }
 
@@ -93,10 +94,11 @@ impl Effect {
     }
 }
 
-/// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow (pop3-rev-analysis.md
-/// "Per spell", Shield); a blast spares the caster's own tribe (no alliances yet), lightning only the caster's own shaman.
+/// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow, a firewarrior's
+/// bolt stopped like any other magical attack (pop3-rev-analysis.md "Per spell", Shield; reported, not traced); a
+/// blast spares the caster's own tribe (no alliances yet), lightning only the caster's own shaman.
 pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
-    if !u.is_alive() || (u.statuses.shield.is_on() && !matches!(kind, DamageKind::Melee | DamageKind::Fire)) {
+    if !u.is_alive() || (u.statuses.shield.is_on() && kind != DamageKind::Melee) {
         return false;
     }
     match kind {
@@ -237,6 +239,15 @@ pub(crate) mod tests {
         assert_eq!(map.unit(enemy).unwrap().health.current(), max - 50);
         map.damage(enemy, max, DamageKind::Blast, Some(0));
         assert!(!map.unit(enemy).unwrap().is_alive(), "dies at 0");
+    }
+
+    #[test]
+    fn a_shield_stops_a_firewarriors_bolt() {
+        let (mut map, enemy, _) = with_enemy();
+        map.unit_mut(enemy).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
+        let max = map.unit(enemy).unwrap().health.max();
+        map.damage(enemy, 50, DamageKind::Fire, Some(0));
+        assert_eq!(map.unit(enemy).unwrap().health.current(), max, "a magical ranged attack, stopped like a spell");
     }
 
     #[test]
