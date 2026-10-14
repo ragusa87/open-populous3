@@ -11,7 +11,7 @@ says whether a spell applies at its target; `GameMap::apply` ignores a cast that
 | Raise | editor brush, radius 3 +64 |
 | Teleport | sandbox only (the original names a spell model 21 teleport, see below, effect unknown): the caster's living shaman does her cast jump, then is at the target (`Unit::cast_teleport`); only onto ground she can walk (`Mobility::Walk`: no sea, no cliff), checked when cast and again when she lands (she stays if it no longer is); another order during the jump cancels it; she lands falling from a cell up (units.md "Landing") |
 | Blast | aimed on the ground (`hud::spells::ground_spell`): the shaman's cast jump, and `CAST_RELEASE` (6 turns) into it, when the original's shot leaves her (no shot flying there yet), a simple blast effect at the target (`blast::effect`, in `GameMap::effects`): the original's simple blast, 3 turns at radius 2, 4 then 5 cells. Each turn every living person outside buildings in the radius takes `BLAST_DAMAGE_PERSON` 50 (`GameMap::damage`: not the caster's tribe, not the shielded); each living person of any tribe but the caster's own shaman, not inside a building, within the turn's radius and 2.5 cells (`PUSH_RANGE` 1280) is flung once (`Unit::fling`): away from the centre at 140 and up at 98 (world / height units per tick), times `(1280 - d) / 1280`, then tumbles and falls (units.md "Physics"). The original pushes again on each turn the person is still within 2.5 cells, scales the push by the slope and treats allies apart (pop3-rev-analysis.md "Blast push and flight"; TODO). Dev: `BLAST=x,z` (cells, cast by another tribe), `BLAST_TICKS=N` |
-| Lightning | aimed on the ground like a blast (`Spell::Lightning`, world units), released 6 turns into the cast jump, walked into range first; free in the sandboxes. An effect (`lightning`, `EffectKind::Lightning`, 12 turns, a guess): on its first turn it kills outright up to `LIGHTNING_NUM_KILLS` + 1 = 7 people in the target cell outside buildings and inside the building it hits, in id order (`DamageKind::Lightning` through `GameMap::damage`: any tribe, the caster's own followers and enemy shamans too; spared: the caster's own shaman and the shielded), sets a building covering the point on fire (`WorldEvent::SetFire`, `fire`: its survivors thrown out, one piece of wood lost), and spawns a simple blast there. Drawn (`client lightning.rs`, our own look): a jagged white-blue bolt from 8 cells up, flickering between 3 zigzags seeded by the effect id and fading over the strike, and a glow on the ground. Not yet: burning trees, the carbonized victims (anim 97), the shot from the shaman. Dev: `LIGHTNING=x,z` (cells, another tribe's), `LIGHTNING_TICKS=N` |
+| Lightning | aimed on the ground like a blast (`Spell::Lightning`, world units), released 6 turns into the cast jump, walked into range first; free in the sandboxes. An effect (`lightning`, `EffectKind::Lightning`, 12 turns, a guess): on its first turn it kills outright up to `LIGHTNING_NUM_KILLS` + 1 = 7 people in the target cell outside buildings and inside the building it hits, in id order (`DamageKind::Lightning` through `GameMap::damage`: any tribe, the caster's own followers and enemy shamans too; spared: the caster's own shaman and the shielded), sets a building covering the point on fire (`WorldEvent::SetFire`, `fire`: its survivors thrown out, one piece of wood lost), burns the trees of its cell (`WorldEvent::BurnTrees`, `Tree::ignite`) or else lights a ground fire (`ground_fire`), and spawns a simple blast there. Drawn (`client lightning.rs`, our own look): a jagged white-blue bolt from 8 cells up, flickering between 3 zigzags seeded by the effect id and fading over the strike, and a glow on the ground. Not yet: the carbonized victims (anim 97), the shot from the shaman. Dev: `LIGHTNING=x,z` (cells, another tribe's), `LIGHTNING_TICKS=N` |
 
 To do: the other original spells, as traced in pop3-rev-analysis.md "Per spell" (Swamp kills people on its cells and
 does not change the terrain; Earthquake sinks a half-disc and opens a lava fissure; Volcano raises a cone with lava;
@@ -34,8 +34,8 @@ In the original a cast flies a shot to the target, which spawns reusable compone
 `Id<Effect>`) of `Effect` (caster's tribe, position, `left` turns, `EffectKind` with only its own data), ticked once per turn before the
 units (`GameMap::tend_effects`, architecture.md "The tick"). An effect reads the map and returns `WorldEvent`s (`event.rs`):
 `Damage` (with the caster's tribe as `from`, through `GameMap::damage`, the one place for immunities: shielded units, the caster's own tribe for a
-blast), `Push` (`Unit::fling`, not the shielded), `SpawnEffect` (a new effect, ticking from the next turn), `Terrain`
-(raise, flatten). `SetFire` burns a building (`fire`, buildings.md "Damage and repair"). `Panic` sets the person running (`Action::Panicking`: out by the door first when inside, then `PANIC_SPEED` 110 at a random heading for `PANIC_TICKS` 64 turns, a quarter turn left when the way is blocked, no orders meanwhile; a guess: the original's turning not traced). `Raid` is routed but does nothing yet. An effect never holds another
+blast), `DamageVehicle` (`GameMap::damage_vehicle`, enemies only), `Push` (`Unit::fling`, not the shielded), `SpawnEffect` (a new effect, ticking from the next turn), `Terrain`
+(raise, flatten, land bridge). `SetFire` burns a building (`fire`, buildings.md "Damage and repair"). `BurnTrees` sets a cell's trees alight (`Tree::ignite`). `Panic` sets the person running (`Action::Panicking`: out by the door first when inside, then `PANIC_SPEED` 110 at a random heading for `PANIC_TICKS` 64 turns, a quarter turn left when the way is blocked, no orders meanwhile; a guess: the original's turning not traced). `Raid` is routed but does nothing yet. An effect never holds another
 object's state: a unit it panics or sets on fire counts down its own state.
 
 ## Spell book (`game_core::spell_book`)
@@ -56,13 +56,18 @@ and are ignored without one, `Command::PauseSpell` pauses, rewards go to their t
 Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, used }`, amounts as `Mana`. As in the
 original [exe] (pop3-rev-analysis.md "Mana rules"), two entry points:
 - `add(amount)`: mana gained during the turn (a reward) only goes to `incoming`;
-- `tick(now, book)`, once per turn from `GameMap::tick`: the income every 16 turns (`MANA_EVERY`, a fixed `INCOME`
-  guessed until income from people), then `distribute`: `incoming` charges the spells first (`SpellBook::charge`),
-  the rest goes to the bank (capped at `MAX_MANA`). Only this changes the bank and the charges.
+- `tick(now, book, stores)`, once per turn from `GameMap::tick`: the income every 16 turns (`MANA_EVERY`, a fixed
+  `INCOME` guessed until income from people), then `distribute`: a training building making nothing refunds its
+  store first (`Production::refund`); half of `incoming` offers the training buildings still making something a
+  share each (`production::charge`, huts-and-training.md "Mana"); what they do not take, plus the other half,
+  charges the spells first (`SpellBook::charge`); with every spell full, a second share tops the stores back up
+  (`production::top_up`); what is left banks (capped at `MAX_MANA`). Only this changes the bank, the charges and
+  the stores.
 
 `received` is the last income, `used` what went into spells since then: with `bank`, what a mana bar shows.
-Starts at `START_MANA`. Not done: income from people, the delayed reservoir, a cast's own cost (`incoming -=
-cost` in the original, on top of our prepaid charges?).
+Starts at `START_MANA`. Not done: income from people (huts-and-training.md "Mana" rule 7), the delayed reservoir, a
+cast's own cost (`incoming -= cost` in the original, on top of our prepaid charges?), a negative `incoming` taking
+mana back from the training stores, and the stores counted in the shaman death loss.
 
 `SpellBook::from_level(header, level)`: the header's `SpellsAvailable` panel spells are Known with full charges
 (how charged the original starts them is not checked), the spell discoveries (`DiscoveryType 11`) not already
@@ -90,10 +95,11 @@ world editor, checked against the campaign's discoveries, see level-format.md):
 | 6 | invisibility | 13 | angel of death | 20 | bloodlust |
 | 7 | hypnotism | 14 | earthquake | 21 | teleport |
 
-`SpellKind::model()` / `SpellKind::from_model()` map them; `from_model` only returns the 18 spells of the
-original panel (2-19): burn, bloodlust and teleport are never on it (our `Teleport` is a sandbox spell that keeps
-model 21 for reference). Our costs are placeholders on another scale (blast 40); the original ones are under
-"Original balance".
+`SpellKind::model()` / `SpellKind::from_model()` map them; `from_model` returns every spell but Teleport (model 21,
+kept only for reference: our `Teleport` is a sandbox spell) and Burn (model 1, no `SpellKind` of its own): models
+2-19 are the panel's 18 spells, plus Bloodlust (20) so a discovery thing can still grant it, even though
+`known_in_header` keeps the header's own mask from ever giving it (TODO.md "Bloodlust"). Our costs are placeholders
+on another scale (blast 40); the original ones are under "Original balance".
 
 The editor also names models 23-30 (hill, rise, valley, dip, place tree, clear mapwho, place shaman, place
 wild) but can't place them: unverified.
@@ -144,7 +150,7 @@ Reading the columns:
     after a 1000-turn delay [exe].
 - Charges: `SP_1_OFF_MAX` ("one-off max") is how many charges a spell holds, the panel's 1-4 count [exe]. Our
   `SpellKind::max_charges()` derives 4/2/1 from the cost instead, which gets tornado, hypnotism, swamp and
-  flatten (3) and lightning (4) wrong.
+  flatten (3 in the file) wrong.
 - `_OPT_S` is in seconds per the comments. It is not a recharge or cooldown time: the original only reads it in the
   advisor's mana bookkeeping, and no per-spell cooldown exists, only a 1 s cooldown after any human cast [exe].
 - Range is the cast distance from the shaman in world units (512 per cell).
