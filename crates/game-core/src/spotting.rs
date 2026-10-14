@@ -93,7 +93,7 @@ impl GameMap {
         let idle = matches!(u.action, Action::Idle | Action::Holding { .. }) && !throws;
         let size = self.terrain.size() as i32;
         square(u.cell(), sight, size).find_map(|cell| {
-            let people = grid.at(cell).filter_map(|id| self.unit(id)).filter(|t| crate::attack::may_attack(u, t) && !t.thrown());
+            let people = grid.at(cell).filter_map(|id| self.unit(id)).filter(|t| crate::attack::may_attack(u, t) && !t.locked());
             let mut fighting = None;
             for t in people {
                 match self.linked(t) {
@@ -201,6 +201,26 @@ mod tests {
         };
         assert!(thrown_at.is_some_and(|x| x.owner != 0), "throws at the first enemy it sees");
 
+    }
+
+    #[test]
+    fn a_listener_sitting_down_to_a_sermon_is_not_picked_as_a_target() {
+        let mut map = GameMap::sandbox_units().seeded(11);
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(1024), s.z.wrapping_sub(15 * 512));
+        map.spawn(0, UnitKind::Preacher, at);
+        let l = map.spawn(1, UnitKind::Warrior, (at.0.wrapping_add(512), at.1)).id;
+        let listening = |m: &GameMap| matches!(m.unit(l).map(|u| u.action), Some(Action::Listening { .. }));
+        (1..10).find(|_| {
+            map.tick();
+            listening(&map)
+        })
+        .expect("sat down");
+        let at_l = map.unit(l).map(|u| (u.x, u.z)).unwrap();
+        let a = map.spawn(0, UnitKind::Brave, (at_l.0.wrapping_add(512), at_l.1)).id;
+        map.run(Ticks::new(10));
+        assert!(listening(&map), "still listening");
+        assert_eq!(attacking(&map, a), None, "a listener is left alone");
     }
 
     #[test]

@@ -159,9 +159,10 @@ followed each turn (`GameMap::spot_enemies`).
   cell; busy (fighting, panicking, thrown, casting, drowning, entering, inside, dead), no look at all [the order
   kinds' split is the analysis' guess].
 - What: the square of cells (sight rounded down to even, + 1) around it, row by row from a corner (`square`); the
-  first match wins, not the nearest: an enemy person it may attack, alive, outside, on the ground and not in a melee;
-  when idle, also someone in a melee (to join it) or an enemy building it can wear down. It then attacks it
-  (`Order::Attack`'s path) [ours: the original gives itself an "attack around this cell" order].
+  first match wins, not the nearest: an enemy person it may attack, alive, outside, on the ground, not thrown and
+  not listening to a sermon [guess: not traced, but it would undo the preacher's sit-down on its very next look],
+  and not in a melee; when idle, also someone in a melee (to join it) or an enemy building it can wear down. It then
+  attacks it (`Order::Attack`'s path) [ours: the original gives itself an "attack around this cell" order].
 - `UnitGrid`: the living people outside by cell, sorted, built only on a look turn.
 
 ## Firebolts
