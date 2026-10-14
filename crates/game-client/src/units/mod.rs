@@ -206,14 +206,21 @@ impl UnitSprites {
     /// worships its shaman (`worship::worship_facing`).
     /// `still`: the vehicle it is aboard is not under way, so its pedalling holds its first frame.
     /// `celebrating`: the match has ended (`GameMap::outcome`) — an otherwise-idle unit's victory bounce
-    /// (`victory_bounce`) is shown arms-up (`Pose::Stranded`, our own stand-in: no real "happy" pose is traced in
-    /// the original) instead of just standing there; a unit mid-action keeps its own pose unchanged. The shaman has
-    /// no Stranded art at all (`sheets::plays`, she's "never stranded") and keeps standing — a silently empty frame
-    /// lookup would otherwise just freeze her on her last pose instead of failing loudly.
+    /// (`victory_bounce`) is shown arms-up (`Pose::Stranded`) instead of just standing there, our own stand-in: no
+    /// real "happy" pose is traced in the original. A unit mid-action keeps its own pose unchanged. The shaman has
+    /// no Stranded art at all (`sheets::plays`, she's "never stranded"); she gets her own cast pose instead (the
+    /// closest thing to "excited" she has) — forced with no `Action::Casting` under it, so `frame_index` loops it
+    /// by time instead of a one-shot countdown, same as Stranded already does for everyone else.
     pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, still: bool, yaw: f32, clock: &SimClock, now: SimNow, celebrating: bool) -> Option<&FrameAsset> {
         let (mut pose, facing) = worship.map_or((art::pose_of(unit), unit.facing), |f| (Pose::Pray, f));
-        if celebrating && matches!(pose, Pose::Idle | Pose::CarryIdle) && sheets::plays(unit.kind, Pose::Stranded) {
-            pose = Pose::Stranded;
+        if celebrating && matches!(pose, Pose::Idle | Pose::CarryIdle) {
+            pose = if sheets::plays(unit.kind, Pose::Stranded) {
+                Pose::Stranded
+            } else if sheets::plays(unit.kind, Pose::Cast) {
+                Pose::Cast
+            } else {
+                pose
+            };
         }
         let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
         // Wildmen have no tribe (owner 255): one look for all.
