@@ -95,7 +95,7 @@ fn update_preview(
     let s = status(unit);
     let width = boxes.iter().next().map_or(190.0, |c| c.size().x * c.inverse_scale_factor());
     for (mut image, mut node, mut vis) in &mut sprite {
-        match unit.and_then(|u| sprites.frame_for(u, None, !u.aboard.and_then(|v| map.0.vehicle(v)).is_some_and(crate::vehicles::under_way), rig.yaw, &clock, *now)) {
+        match unit.and_then(|u| sprites.frame_for(u, None, !u.aboard.and_then(|v| map.0.vehicle(v)).is_some_and(crate::vehicles::under_way), rig.yaw, &clock, *now, map.0.outcome.is_some())) {
             Some(f) => {
                 image.image = f.image.clone();
                 node.width = px(f.size.x * SCALE);

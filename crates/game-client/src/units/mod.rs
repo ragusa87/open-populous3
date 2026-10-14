@@ -205,8 +205,16 @@ impl UnitSprites {
     /// The frame showing `unit` from a camera at `yaw`; praying towards `worship` when it
     /// worships its shaman (`worship::worship_facing`).
     /// `still`: the vehicle it is aboard is not under way, so its pedalling holds its first frame.
-    pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, still: bool, yaw: f32, clock: &SimClock, now: SimNow) -> Option<&FrameAsset> {
-        let (pose, facing) = worship.map_or((art::pose_of(unit), unit.facing), |f| (Pose::Pray, f));
+    /// `celebrating`: the match has ended (`GameMap::outcome`) — an otherwise-idle unit's victory bounce
+    /// (`victory_bounce`) is shown arms-up (`Pose::Stranded`, our own stand-in: no real "happy" pose is traced in
+    /// the original) instead of just standing there; a unit mid-action keeps its own pose unchanged. The shaman has
+    /// no Stranded art at all (`sheets::plays`, she's "never stranded") and keeps standing — a silently empty frame
+    /// lookup would otherwise just freeze her on her last pose instead of failing loudly.
+    pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, still: bool, yaw: f32, clock: &SimClock, now: SimNow, celebrating: bool) -> Option<&FrameAsset> {
+        let (mut pose, facing) = worship.map_or((art::pose_of(unit), unit.facing), |f| (Pose::Pray, f));
+        if celebrating && matches!(pose, Pose::Idle | Pose::CarryIdle) && sheets::plays(unit.kind, Pose::Stranded) {
+            pose = Pose::Stranded;
+        }
         let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
         // Wildmen have no tribe (owner 255): one look for all.
         let tribe = if unit.kind == UnitKind::Wildman { 0 } else { unit.owner as usize };
@@ -569,7 +577,7 @@ fn animate_views(
         let frame = units.get(body.0).and_then(|u| {
             let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
             let still = !u.aboard.and_then(|v| map.0.vehicle(v)).is_some_and(crate::vehicles::under_way);
-            sprites.frame_for(u, worship, still, rig.yaw, &clock, *now)
+            sprites.frame_for(u, worship, still, rig.yaw, &clock, *now, map.0.outcome.is_some())
         });
         if let Some(f) = frame {
             height.0 = f.size.y * PIXEL;
