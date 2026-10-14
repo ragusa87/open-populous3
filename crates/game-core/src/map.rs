@@ -379,7 +379,7 @@ impl GameMap {
     /// for tribe 1 (red, no shaman) in a row to the east, all in view of the starting camera (south
     /// of the site), and a pond to the north to walk around. Further south in the same columns, one of
     /// each kind per marker drawn over people (`SANDBOX_MARKERS`): low health, shielded, bloodlust,
-    /// hypnotised, then all of them at once.
+    /// hypnotised, then all of them at once. Two empty balloons by the firewarrior column, to board.
     pub fn sandbox_units() -> Self {
         const C: i32 = MAP_SIZE as i32 / 2;
         const ISLAND: i32 = 24;
@@ -405,6 +405,12 @@ impl GameMap {
             for (n, marked) in SANDBOX_MARKERS.iter().enumerate() {
                 let u = map.spawn(0, kind, at(-5 - 2 * row, 5 + 2 * n as i32));
                 marked(u);
+            }
+        }
+        {
+            use crate::vehicle::{Vehicle, VehicleKind};
+            for dz in [-1, 1] {
+                map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at(-15, dz), crate::angle::Angle::ZERO));
             }
         }
         map
