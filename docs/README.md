@@ -20,6 +20,7 @@
   - [constants.md](specs/constants.md): balance values (`constant.dat`), its XOR encoding and text format.
   - [pop3-rev-analysis.md](specs/pop3-rev-analysis.md): original engine internals from the executable: unit model, tribes, constant table, mana.
   - [worship.md](specs/worship.md): praying at pyramids of knowledge and totems, their gauges and rewards.
+  - [outcome.md](specs/outcome.md): winning and losing, tribes and alliances, Armageddon.
   - [tooltips.md](specs/tooltips.md): what the game shows about the thing under the mouse: slot rows, bars, toggle.
   - [language.md](specs/language.md): original `langNN.dat` texts, numbered, per language.
   - [sound.md](specs/sound.md): original `.SDT` sound, drum and music banks.

@@ -125,6 +125,26 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Healing (combat.md "Health"): no healing while struck by lightning once it has its own state; the angel of death never heals; the original lets life go past full by up to one heal (ours stops at full).
 
 ## Spells ([spells.md](docs/specs/spells.md))
+- [ ] Armageddon (full mechanic, `crates/game-core/src/armageddon.rs`; design in `docs/plans/spells.md`
+      "Armageddon"; v1 only pauses, cancels fights, and settles instantly by combined headcount):
+  - [ ] Clear the map: remove every building/totem/vehicle globally; clear trees within the arena radius only.
+  - [ ] Tally headcount by kind before the wipe; spawn that many fresh fighters per tribe directly in the arena
+        (grouped by team/wedge), not by teleporting each existing unit; relocate (don't respawn) each tribe's
+        shaman.
+  - [ ] Two-phase `ArmageddonMatch`: `Gathering` (camera orbit, combat held off) then `Fighting`.
+  - [ ] Per-tribe permanent shield (`WorldEvent::Shield`, continuously refreshed) while a tribe's own fighters live.
+  - [ ] Lightning-kill-without-reincarnation when a tribe's own fighters hit zero: `WorldEvent::Shield{steps:0}` +
+        `WorldEvent::RemoveSite` + the existing `WorldEvent::Damage`/`DamageKind::Lightning`.
+  - [ ] Related fix needed by the above: `Unit::tick`'s `Action::Dead` branch gets stuck forever (never
+        reincarnates, never dies) when there's no `ReincarnationSite` for that owner — should fall through to
+        `Action::Spirit` instead. Independent bug, not Armageddon-specific, but required before the lightning-kill
+        can work.
+  - [ ] Client: an `armageddon.rs` plugin beyond the v1 camera/lock — cast-confirmed screen flash, arena atmosphere
+        tint, per-tribe survivor HUD bars (headcount visible as the decider), the continuous camera orbit (v1 only
+        flies to the target and holds).
+  - [ ] Dev/test hooks: `ARMAGEDDON_TICKS=N` to preview the full sequence headlessly (`just shot`/`just video`).
+  - [ ] Replace `armageddon::best_side`'s placeholder "highest combined headcount wins instantly" decision rule
+        with the real one (last side standing after the fight actually plays out).
 - [ ] Bloodlust (hidden spell, model 20; in the book, no effect yet): its cast (the 6 nearest own followers, `status::bloodlust`), and which levels give it (header bit 20 is among levels 1 and 2's leftover bits, so only discoveries give it today).
 - [ ] Spell icons for `--no-original` (`assets/spell-hud`, `hud::spells::generated_glyph_path`): 14 of 20 drawn and wired in; still missing Convert, Volcano, Armageddon, Magical Shield, Teleport and Bloodlust (their names stand in). Building icons for `--no-original` are still unstarted.
 - [ ] Find Magical Shield's and Bloodlust's original panel icons (none in `hfx0-0.dat` 1057-1074; Bloodlust's looks like a crane, in no PSFB bank nor the old `.DAT`/`.TAB` pairs; their names stand in with the original files too).
@@ -157,12 +177,20 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   `build_books` by owner).
 
 ## Winning and losing
-- [ ] Conditions to win or lose a level: find them in the original (tribes wiped out, the shaman unable to reincarnate, level scripts and triggers), then end the game with a victory or defeat screen.
+- [x] A generic, hookable `Outcome` (`game_core::outcome`): a tribe/side wiped out (by current owner, team-aware
+  via `tribes.rs`) is detected automatically every tick and declares a winner (or a draw); `GameMap::declare_outcome`
+  is the one entry point anything else (Armageddon, below, or a future level-script interpreter) can also call.
+- [ ] Level scripts and triggers also ending the game (`TRIGGER_LEVEL_WON`/`LOST`, timers) — needs the PopScript
+  interpreter below; will call the same `GameMap::declare_outcome` hook, not a separate mechanism.
+- [ ] A victory/defeat screen in the client (currently: nothing shows `GameMap::outcome` to the player yet).
 
 ## Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
 - [ ] Start camera from the header's start position (cell) and angle (2048ths) instead of looking at the shaman.
 - [ ] Level flags: fog of war (0x01, levels 9 and 18), shaman omni (0x02, level 25; `GameMap::shaman_omni`: spells start from the view and have no range, the rest of god mode to find), no guest spells (0x10), no reincarnation time (0x20).
-- [ ] Default allies per tribe (`.hdr` 92): alliances in the simulation (no attacking allies), e.g. level 14's three tribes against blue.
+- [x] Default allies per tribe (`.hdr` 92) read into `game_core::tribes::Tribes` and used for: elimination/win-lose
+  grouping by side, and the two places that gate whether an attack may start (`attack::attack_goal`,
+  `spotting::first_seen`) — allies no longer spot or attack each other. Still open: the rest of the alliance-aware
+  nuances below (Blast's own friend-sparing rules, spotting during orders, preacher conversion targeting).
 - [ ] `NoAccessSquares` (non-zero only in levl2002 and levl2079): probably cells nobody walks on; check them on the map and feed them to the `path` blocked mask.
 - [ ] Load the object bank the level header names (byte 97: 6 for levels 3, 5, 16, 22, 2120; 7 for 2110; 2 for 2127) instead of always bank 0 (`original_models`): either load bank N with the index table of objects.md, or stay on bank 0 (trees already picked by bank, `tree_object_in_bank`).
 - [ ] Other original objects (trees, camp fire logs, reincarnation site stones) are still drawn from both sides: cull their back faces like buildings (objects.md "facs"), checking each for holes.
