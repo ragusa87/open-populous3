@@ -31,6 +31,9 @@ pub enum EffectKind {
     Smoke,
     /// Only seen (`ground_fire`).
     GroundFire,
+    /// Its own kill tally (`swamp`); the killing itself is `GameMap::tend_swamps`, not its own turn: unlike every
+    /// other effect it must see every other swamp at once, to settle whose claim an overlapping cell counts for.
+    Swamp(crate::swamp::Swamp),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -46,6 +49,9 @@ pub enum DamageKind {
     /// A firewarrior's bolt: a magical ranged attack, so the shield stops it too (combat.md "Firebolts"; reported,
     /// not traced).
     Fire,
+    /// A swamp's kill (`swamp`): outright, any tribe (even the caster's own), shield or no shield — `hurts` never
+    /// gates it (TODO.md "Mana": unlike blast, lightning, swarm or hypnotise, a shielded unit still drowns).
+    Swamp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,7 +76,7 @@ impl Effect {
             EffectKind::LandBridge(ref mut bridge) => bridge.turn(),
             EffectKind::Lightning(ref mut strike) => strike.turn((self.x, self.z), self.owner, world),
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
-            EffectKind::Smoke | EffectKind::GroundFire => Vec::new(),
+            EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
         };
@@ -87,22 +93,23 @@ impl Effect {
         match self.kind {
             EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
             EffectKind::Flatten(ref flatten) => flatten.reshaping(terrain),
-            EffectKind::SimpleBlast(_) | EffectKind::Lightning(_) | EffectKind::Smoke | EffectKind::GroundFire => Vec::new(),
+            EffectKind::SimpleBlast(_) | EffectKind::Lightning(_) | EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }
     }
 }
 
-/// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow, a firewarrior's
-/// bolt stopped like any other magical attack (pop3-rev-analysis.md "Per spell", Shield; reported, not traced); a
-/// blast spares the caster's own tribe (no alliances yet), lightning only the caster's own shaman.
+/// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow or a swamp (it
+/// still drowns: TODO.md "Mana"), a firewarrior's bolt stopped like any other magical attack (pop3-rev-analysis.md
+/// "Per spell", Shield; reported, not traced); a blast spares the caster's own tribe (no alliances yet), lightning
+/// only the caster's own shaman, a swamp spares no one, not even its own caster.
 pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
-    if !u.is_alive() || (u.statuses.shield.is_on() && kind != DamageKind::Melee) {
+    if !u.is_alive() || (u.statuses.shield.is_on() && !matches!(kind, DamageKind::Melee | DamageKind::Swamp)) {
         return false;
     }
     match kind {
-        DamageKind::Melee | DamageKind::Fire => true,
+        DamageKind::Melee | DamageKind::Fire | DamageKind::Swamp => true,
         DamageKind::Blast => from != Some(u.owner),
         DamageKind::Lightning => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman),
     }

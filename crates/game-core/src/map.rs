@@ -4,7 +4,7 @@ use crate::building::{buildings_from_level, Building, BuildingId, BuildingKind};
 use crate::campfire::{self, Campfire};
 use crate::command::Command;
 use crate::coordinator::{Coordinators, Link};
-use crate::effect::{DamageKind, Effect, TerrainChange};
+use crate::effect::{DamageKind, Effect, EffectKind, TerrainChange};
 use crate::event::{run_in_order, WorldEvent};
 use crate::path::{Ground, Mobility, Walled, Walls};
 use crate::id::{Id, Registry};
@@ -13,7 +13,7 @@ use crate::spell::Spell;
 use crate::build_book::{BuildAvailability, BuildBook};
 use crate::mana::ManaPool;
 use crate::spell_book::{SpellBook, SpellKind};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use crate::tree::{scatter, Tree};
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
@@ -25,7 +25,7 @@ use crate::unit::{torus_delta, Action, Order, Target, Unit, UnitEvent, UnitId, U
 use crate::wood::WoodPiece;
 use pop3_format::header::TRIBES;
 use pop3_format::{Level, LevelHeader, MAP_SIZE, WORLD_UNITS_PER_CELL};
-use crate::time::{Tick, Ticks};
+use crate::time::{Countdown, Tick, Ticks};
 use std::path::Path;
 
 #[derive(Clone, Debug)]
@@ -670,7 +670,7 @@ impl GameMap {
         };
         match *spell {
             Spell::Teleport { to } => Some(to),
-            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } => Some(at),
+            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
             Spell::Flatten { at } => Some(world(at, 0)),
             Spell::Erode { .. } | Spell::Raise { .. } => None,
@@ -743,6 +743,10 @@ impl GameMap {
             }
             Spell::Lightning { at } => {
                 self.add_effect(crate::lightning::effect(player, at));
+                None
+            }
+            Spell::Swamp { at } => {
+                self.add_effect(crate::swamp::effect(player, at));
                 None
             }
             Spell::LandBridge { from, to } => {
@@ -971,6 +975,7 @@ impl GameMap {
         self.tend_reloads();
         let hits = self.tend_bolts();
         dirty.extend(self.apply_events(hits));
+        dirty.extend(self.tend_swamps());
         dirty.extend(self.tend_effects());
         dirty.extend(self.tend_fires());
         dirty.extend(self.tend_building_wear());
@@ -1147,6 +1152,47 @@ impl GameMap {
         let id = self.new_id_of();
         self.effects.insert(id, e);
         id
+    }
+
+    /// Every swamp's kill check (`swamp::KILL_EVERY`, phase 0: every swamp at once), before `tend_effects` so a
+    /// swamp whose tally ends it this turn is already gone when the generic removal runs: for each cell at least
+    /// one swamp covers, the most recently cast one among them (`Registry`'s ids only grow, so the highest is the
+    /// newest) is credited with whoever dies there now — any tribe, even its own, shielded or not
+    /// (`DamageKind::Swamp` is never gated by `effect::hurts`), inside a building there too, unlike lightning.
+    fn tend_swamps(&mut self) -> Vec<DirtyRect> {
+        if !crate::swamp::KILL_EVERY.fires(self.now, 0) {
+            return Vec::new();
+        }
+        let size = self.terrain.size() as i32;
+        let mut claims: HashMap<(i32, i32), Id<Effect>> = HashMap::new();
+        for (id, e) in self.effects.iter() {
+            if !matches!(e.kind, EffectKind::Swamp(_)) {
+                continue;
+            }
+            for cell in crate::swamp::cells((e.x, e.z), size) {
+                claims.entry(cell).and_modify(|claimer| *claimer = (*claimer).max(id)).or_insert(id);
+            }
+        }
+        if claims.is_empty() {
+            return Vec::new();
+        }
+        let mut tally: HashMap<Id<Effect>, u32> = HashMap::new();
+        let mut events = Vec::new();
+        for u in self.units.iter().filter(|u| u.is_alive()) {
+            let Some(&claimer) = claims.get(&u.cell()) else { continue };
+            let owner = self.effects.get(claimer).map_or(u.owner, |e| e.owner);
+            events.push(WorldEvent::Damage { unit: u.id, amount: u16::MAX, kind: DamageKind::Swamp, from: Some(owner) });
+            *tally.entry(claimer).or_insert(0) += 1;
+        }
+        for (id, killed) in tally {
+            let Some(e) = self.effects.get_mut(id) else { continue };
+            let EffectKind::Swamp(ref mut swamp) = e.kind else { continue };
+            swamp.processed += killed;
+            if swamp.processed >= crate::swamp::SWAMP_NUM_PEOPLE {
+                e.left = Countdown::with_left(e.left.total(), Ticks::ZERO);
+            }
+        }
+        self.apply_events(events)
     }
 
     /// Each effect's turn, in order, reading the map as it was before any of them; finished ones go. Then their

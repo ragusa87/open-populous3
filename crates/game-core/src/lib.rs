@@ -51,6 +51,7 @@ pub mod spell;
 pub mod spell_book;
 pub mod spotting;
 pub mod status;
+pub mod swamp;
 pub mod terrain;
 pub mod time;
 pub mod totem;

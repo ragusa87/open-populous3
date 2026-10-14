@@ -20,6 +20,8 @@ pub enum Spell {
     Blast { at: (u16, u16) },
     /// A bolt at `at` (world units): `lightning::effect`.
     Lightning { at: (u16, u16) },
+    /// A swamp at `at` (world units): `swamp::effect`.
+    Swamp { at: (u16, u16) },
     /// Stops the match and settles it (`GameMap::start_armageddon`), centred on `at` (world units).
     Armageddon { at: (u16, u16) },
 }
@@ -31,6 +33,7 @@ impl Spell {
             Spell::Teleport { .. } => Some(SpellKind::Teleport),
             Spell::Blast { .. } => Some(SpellKind::Blast),
             Spell::Lightning { .. } => Some(SpellKind::Lightning),
+            Spell::Swamp { .. } => Some(SpellKind::Swamp),
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
             Spell::Flatten { .. } => Some(SpellKind::Flatten),
             Spell::Armageddon { .. } => Some(SpellKind::Armageddon),
@@ -45,7 +48,7 @@ impl Spell {
             Spell::Flatten { at } => terrain.flatten(at, 4),
             Spell::Erode { at } => terrain.raise(at, 4, -120),
             Spell::Raise { at } => terrain.raise(at, 3, 64),
-            Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } => return None,
+            Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } | Spell::Swamp { .. } => return None,
         })
     }
 }

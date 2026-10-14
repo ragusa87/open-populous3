@@ -55,7 +55,7 @@ pub fn encode(msg: &Message) -> Vec<u8> {
     b
 }
 
-/// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport, Blast, Lightning, Armageddon: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
+/// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport, Blast, Lightning, Armageddon, Swamp: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
 /// for a unit order `u32 unit id` then the order, for lighting or putting out a camp fire `u16 x, z`,
 /// for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`, for a self cast `spell u8`
 /// (its place in `SpellKind::ALL`), for pausing one `spell u8, paused u8`, for moving a vehicle `u32 vehicle id, u16 x, z`,
@@ -64,11 +64,12 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
             b.extend([0, *player]);
-            if let Spell::Teleport { to: at } | Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } = spell {
+            if let Spell::Teleport { to: at } | Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } = spell {
                 b.push(match spell {
                     Spell::Teleport { .. } => 4,
                     Spell::Blast { .. } => 5,
                     Spell::Armageddon { .. } => 7,
+                    Spell::Swamp { .. } => 8,
                     _ => 6,
                 });
                 b.extend(at.0.to_le_bytes());
@@ -80,7 +81,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                 Spell::Flatten { at } => (1, std::slice::from_ref(at)),
                 Spell::Erode { at } => (2, std::slice::from_ref(at)),
                 Spell::Raise { at } => (3, std::slice::from_ref(at)),
-                Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } => unreachable!("encoded above"),
+                Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } | Spell::Swamp { .. } => unreachable!("encoded above"),
             };
             b.push(tag);
             for (x, z) in cells {
@@ -223,6 +224,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
                 5 => Spell::Blast { at: (c.u16()?, c.u16()?) },
                 6 => Spell::Lightning { at: (c.u16()?, c.u16()?) },
                 7 => Spell::Armageddon { at: (c.u16()?, c.u16()?) },
+                8 => Spell::Swamp { at: (c.u16()?, c.u16()?) },
                 _ => return None,
             };
             Some(Command::Cast { player, spell })
