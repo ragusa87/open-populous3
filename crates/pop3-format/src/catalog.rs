@@ -284,8 +284,12 @@ pub enum WildmanAnim {
     Stand,
     /// Walking (4 frames).
     Walk,
-    /// Sitting on the ground (1 frame): used for praying.
+    /// Eating fruit at a tree (3 frames): not drawn by anything yet.
+    Eat,
+    /// Drinking water, still (1 frame): used for praying.
     Sit,
+    /// Drinking water, animated (3 frames): not drawn by anything yet, `Sit` is a single still frame of it.
+    Drink,
     /// Flung through the air, arms spread (4 frames): also used for drowning.
     Flung,
     /// Falling down a slope, tumbling (4 frames): also used for dying (no death anim known).
@@ -297,7 +301,9 @@ impl WildmanAnim {
         match self {
             WildmanAnim::Stand => 1,
             WildmanAnim::Walk => 0,
+            WildmanAnim::Eat => 2,
             WildmanAnim::Sit => 3,
+            WildmanAnim::Drink => 4,
             WildmanAnim::Flung => 31,
             WildmanAnim::Tumble => 47,
         }
@@ -353,6 +359,13 @@ mod tests {
         assert_eq!(ShamanAnim::Walk.anim(1), 78);
         assert_eq!(ShamanAnim::Fall.anim(2), 87);
         assert_eq!(ShamanAnim::Kneel.anim(3), 96);
+    }
+
+    #[test]
+    fn wildman_anims_match_the_identified_indices() {
+        assert_eq!((WildmanAnim::Walk.anim(), WildmanAnim::Stand.anim()), (0, 1));
+        assert_eq!((WildmanAnim::Eat.anim(), WildmanAnim::Sit.anim(), WildmanAnim::Drink.anim()), (2, 3, 4));
+        assert_eq!((WildmanAnim::Flung.anim(), WildmanAnim::Tumble.anim()), (31, 47));
     }
 
     #[test]
