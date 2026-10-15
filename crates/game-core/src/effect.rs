@@ -41,6 +41,8 @@ pub enum EffectKind {
     Convert(crate::convert::Convert),
     /// A one-turn effect (`hypnotism`): the nearest eligible people of other tribes around it join the caster's.
     Hypnotism(crate::hypnotism::Hypnotism),
+    /// A fixed set of hot cells (`lava`), shared by Earthquake's fissure and Volcano's flow.
+    Lava(crate::lava::Lava),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -59,6 +61,10 @@ pub enum DamageKind {
     /// A swamp's kill (`swamp`): outright, any tribe (even the caster's own), shield or no shield — `hurts` never
     /// gates it (TODO.md "Mana": unlike blast, lightning, swarm or hypnotise, a shielded unit still drowns).
     Swamp,
+    /// Standing on a hot lava cell (`lava`): outright, any tribe (even the caster's own) and shield or no shield —
+    /// a landscape-style kill like Swamp's, sparing only the caster's own shaman (pop3-rev-analysis.md "Lava",
+    /// "Friendly fire").
+    Lava,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +92,7 @@ impl Effect {
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
             EffectKind::Convert(ref mut convert) => convert.turn((self.x, self.z), self.owner, world),
             EffectKind::Hypnotism(ref mut hypnotism) => hypnotism.turn((self.x, self.z), self.owner, world),
+            EffectKind::Lava(ref lava) => lava.turn(self.owner, world),
             EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
@@ -103,25 +110,33 @@ impl Effect {
         match self.kind {
             EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
             EffectKind::Flatten(ref flatten) => flatten.reshaping(terrain),
-            EffectKind::SimpleBlast(_) | EffectKind::PanickingBlast(_) | EffectKind::Lightning(_) | EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) | EffectKind::Convert(_) | EffectKind::Hypnotism(_) => Vec::new(),
+            EffectKind::SimpleBlast(_)
+            | EffectKind::PanickingBlast(_)
+            | EffectKind::Lightning(_)
+            | EffectKind::Smoke
+            | EffectKind::GroundFire
+            | EffectKind::Swamp(_)
+            | EffectKind::Convert(_)
+            | EffectKind::Hypnotism(_)
+            | EffectKind::Lava(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }
     }
 }
 
-/// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow or a swamp (it
-/// still drowns: TODO.md "Mana"), a firewarrior's bolt stopped like any other magical attack (pop3-rev-analysis.md
-/// "Per spell", Shield; reported, not traced); a blast spares the caster's own tribe (no alliances yet), lightning
-/// only the caster's own shaman, a swamp spares no one, not even its own caster.
+/// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow, a swamp or
+/// lava (those still drown/burn: TODO.md "Mana"), a firewarrior's bolt stopped like any other magical attack
+/// (pop3-rev-analysis.md "Per spell", Shield; reported, not traced); a blast spares the caster's own tribe (no
+/// alliances yet), lightning and lava only the caster's own shaman, a swamp spares no one, not even its own caster.
 pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
-    if !u.is_alive() || (u.statuses.shield.is_on() && !matches!(kind, DamageKind::Melee | DamageKind::Swamp)) {
+    if !u.is_alive() || (u.statuses.shield.is_on() && !matches!(kind, DamageKind::Melee | DamageKind::Swamp | DamageKind::Lava)) {
         return false;
     }
     match kind {
         DamageKind::Melee | DamageKind::Fire | DamageKind::Swamp => true,
         DamageKind::Blast => from != Some(u.owner),
-        DamageKind::Lightning => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman),
+        DamageKind::Lightning | DamageKind::Lava => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman),
     }
 }
 

@@ -32,6 +32,7 @@ pub mod hypnotism;
 pub mod id;
 pub mod kind_stats;
 pub mod land_bridge;
+pub mod lava;
 pub mod lightning;
 pub mod mana;
 pub mod map;
