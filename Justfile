@@ -35,6 +35,15 @@ shot out *args:
 video *args:
     HEADLESS=1 VIDEO=${VIDEO:-5} cargo run -p game-client -- {{args}}
 
+# Headless video of the Volcano spell cast at x,z (cells, 64,64 by default), opened once done.
+# VOLCANO_TICKS starts it mid-rumble (50 by default), well clear of the terrain-freeze bug
+# (TODO.md) a late instant jump can trigger; VIDEO then runs long enough (26s by default) to
+# play the rise, the turn-110 destruction and the crater's lava through in real time, when the
+# terrain keeps updating correctly. FOCUS/DISTANCE/PITCH/YAW overridable, same as `just shot`.
+volcano at="64,64":
+    VOLCANO={{at}} VOLCANO_TICKS=${VOLCANO_TICKS:-50} FOCUS=${FOCUS:-{{at}}} DISTANCE=${DISTANCE:-10} PITCH=${PITCH:-40} YAW=${YAW:-20} HEADLESS=1 VIDEO=${VIDEO:-26} cargo run -p game-client --
+    xdg-open target/video.mp4
+
 # Per-system timings of a headless video run (same setup vars, VIDEO=secs, 2 by default): target/trace.json (open in
 # ui.perfetto.dev), its most expensive spans printed (tools/trace_top.py target/trace.json 40 game_client: ours only)
 profile *args:
