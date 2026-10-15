@@ -33,6 +33,14 @@ This project is currently licensed under the [MIT License](LICENSE).
 - *Populous: The Beginning* and its files are Bullfrog / Electronic Arts property: they are never shipped
   here, only read from your own install (and `--no-original` runs without them).
 
+## Clean room
+This is a clean-room reimplementation: it never ships original data (models, textures, sprites, sounds, level
+dumps, renders or screenshots made with the original files) and never quotes original text (level names,
+briefings, UI strings). Reverse engineering of the original executable (disassembly, live memory reads) is done in
+separate sessions whose only output is [docs/specs/pop3-rev-analysis.md](docs/specs/pop3-rev-analysis.md); the
+implementation itself is written from that documentation, never from disassembling, tracing or running the
+original. See [AGENTS.md](AGENTS.md#licence-and-original-data) for the full rules.
+
 ## References
 File formats are reverse-engineered from the original files; community tools are used to cross-check them
 (read only, no code copied, the files win when they disagree):
