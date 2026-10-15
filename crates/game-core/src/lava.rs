@@ -6,8 +6,8 @@
 //! no shield, any tribe but the caster's own shaman — pop3-rev-analysis.md "Friendly fire"); every building on its
 //! cells not already burning catches fire (`WorldEvent::SetFire`, the ordinary fire/evacuation path in `fire.rs`
 //! then runs its course); every tree on its cells with wood left burns (`WorldEvent::BurnTrees`). Its own ground
-//! look is `crates/game-client/src/lava.rs` (procedural lava/crust/basalt/ash textures), not wired to a
-//! `views::WorldView` yet.
+//! look (`crates/game-client/src/lava.rs`'s `LavaView`, procedural lava/crust/basalt/ash textures draped over
+//! `cells`) reads `cells` back through the accessor below.
 
 use crate::effect::{DamageKind, Effect, EffectKind};
 use crate::event::WorldEvent;
@@ -34,6 +34,11 @@ fn cell_centre((x, z): (i32, i32), size: i32) -> (u16, u16) {
 }
 
 impl Lava {
+    /// Its fixed cells, for whatever draws them (`crates/game-client/src/lava.rs`'s `LavaView`).
+    pub fn cells(&self) -> &[(i32, i32)] {
+        &self.cells
+    }
+
     /// One turn, cast by `owner`: everyone standing on its cells dies, every building and tree there catches fire.
     pub fn turn(&self, owner: u8, world: &GameMap) -> Vec<WorldEvent> {
         let size = world.terrain.size() as i32;

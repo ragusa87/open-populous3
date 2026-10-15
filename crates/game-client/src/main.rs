@@ -115,7 +115,7 @@ fn main() {
             (camera_debug::CameraDebugPlugin, debug_overlay::DebugOverlayPlugin),
             object_scale::ObjectScalePlugin,
             chimney::ChimneyPlugin,
-            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin, armageddon::ArmageddonPlugin, swamp::SwampPlugin, volcano_rocks::VolcanoRocksPlugin),
+            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin, armageddon::ArmageddonPlugin, swamp::SwampPlugin, volcano_rocks::VolcanoRocksPlugin, lava::LavaPlugin),
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();
