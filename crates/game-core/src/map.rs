@@ -697,7 +697,7 @@ impl GameMap {
         };
         match *spell {
             Spell::Teleport { to } => Some(to),
-            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } | Spell::Convert { at } | Spell::Hypnotism { at } => Some(at),
+            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } | Spell::Convert { at } | Spell::Hypnotism { at } | Spell::Volcano { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
             Spell::Flatten { at } => Some(world(at, 0)),
             Spell::Erode { .. } | Spell::Raise { .. } | Spell::MagicalShield | Spell::Bloodlust | Spell::Invisibility => None,
@@ -809,6 +809,10 @@ impl GameMap {
             }
             Spell::Hypnotism { at } => {
                 self.add_effect(crate::hypnotism::effect(player, at));
+                None
+            }
+            Spell::Volcano { at } => {
+                self.add_effect(crate::volcano::effect(player, at, &self.terrain));
                 None
             }
             Spell::LandBridge { from, to } => {
@@ -1354,6 +1358,7 @@ impl GameMap {
                 self.set_fire(building);
                 None
             }
+            WorldEvent::Destroy { building } => self.burn_down(building).pop(),
             WorldEvent::BurnTrees { cell } => {
                 self.trees.iter_mut().filter(|t| t.cell() == cell).for_each(|t| {
                     t.ignite();
@@ -1375,6 +1380,7 @@ impl GameMap {
             WorldEvent::Terrain(TerrainChange::Raise { at, radius, by }) => Some(self.terrain.raise(at, radius, by)),
             WorldEvent::Terrain(TerrainChange::Flatten { at, height, turn }) => Some(crate::flatten::apply(&mut self.terrain, at, height, turn)),
             WorldEvent::Terrain(TerrainChange::Bridge { from, to, heights, turn }) => Some(crate::land_bridge::apply(&mut self.terrain, from, to, heights, turn)),
+            WorldEvent::Terrain(TerrainChange::Volcano { at, ground, turn }) => Some(crate::volcano::apply(&mut self.terrain, at, ground, turn)),
             WorldEvent::Placed { unit, at } => {
                 if let Some(u) = self.unit_mut(unit) {
                     u.placed(at);

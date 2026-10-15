@@ -43,6 +43,8 @@ pub enum EffectKind {
     Hypnotism(crate::hypnotism::Hypnotism),
     /// A fixed set of hot cells (`lava`), shared by Earthquake's fissure and Volcano's flow.
     Lava(crate::lava::Lava),
+    /// The multi-phase controller (`volcano`): rumbles, rises, destroys, then spawns lava and fireballs.
+    Volcano(crate::volcano::Volcano),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -74,6 +76,8 @@ pub enum TerrainChange {
     Flatten { at: Cell, height: u16, turn: u32 },
     /// One turn of a land bridge (`land_bridge::apply`).
     Bridge { from: Cell, to: Cell, heights: (u16, u16), turn: u32 },
+    /// One turn of a volcano's cone rising (`volcano::apply`): `ground`, the centre's own height when cast.
+    Volcano { at: Cell, ground: u16, turn: u32 },
 }
 
 impl Effect {
@@ -93,6 +97,7 @@ impl Effect {
             EffectKind::Convert(ref mut convert) => convert.turn((self.x, self.z), self.owner, world),
             EffectKind::Hypnotism(ref mut hypnotism) => hypnotism.turn((self.x, self.z), self.owner, world),
             EffectKind::Lava(ref lava) => lava.turn(self.owner, world),
+            EffectKind::Volcano(ref mut volcano) => volcano.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
@@ -110,6 +115,7 @@ impl Effect {
         match self.kind {
             EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
             EffectKind::Flatten(ref flatten) => flatten.reshaping(terrain),
+            EffectKind::Volcano(ref volcano) => volcano.reshaping((self.x, self.z), terrain),
             EffectKind::SimpleBlast(_)
             | EffectKind::PanickingBlast(_)
             | EffectKind::Lightning(_)

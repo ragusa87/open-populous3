@@ -144,6 +144,7 @@ pub fn ground_spell(kind: SpellKind, at: (u16, u16), origin: (u16, u16)) -> Opti
         SpellKind::Swamp => Some(Spell::Swamp { at }),
         SpellKind::Convert => Some(Spell::Convert { at }),
         SpellKind::Hypnotism => Some(Spell::Hypnotism { at }),
+        SpellKind::Volcano => Some(Spell::Volcano { at }),
         SpellKind::LandBridge => Some(Spell::LandBridge { from: cell(origin), to: cell(at) }),
         SpellKind::Flatten => Some(Spell::Flatten { at: game_core::flatten::nearest_point(at) }),
         _ => None,

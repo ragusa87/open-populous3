@@ -188,6 +188,16 @@ pub fn hypnotism_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -
     true
 }
 
+/// `VOLCANO=x,z` (cells): the player's Volcano effect there, then `ticks` run at once (with `GAME_SPEED=0`: its
+/// rumble/rise/destruction/lava/fireball phases over the run). False when `at` does not parse.
+pub fn volcano_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
+    let at = world_units(Vec2::new(x, z));
+    map.add_effect(game_core::volcano::effect(PLAYER, at, &map.terrain.clone()));
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
 /// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there (needs it known/charged, e.g. the Spells sandbox's
 /// `SpellBook::unlimited`), then `ticks` run at once — v1 settles almost immediately (`docs/specs/outcome.md`
 /// "Armageddon"); with `GAME_SPEED=0`, a shot can catch the brief camera-takeover/lock window. False when `at`
@@ -512,6 +522,10 @@ fn screenshot(
             let ticks = std::env::var("HYPNOTISM_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             hypnotism_demo(&mut map.0, &at, ticks);
         }
+        if let Ok(at) = std::env::var("VOLCANO") {
+            let ticks = std::env::var("VOLCANO_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            volcano_demo(&mut map.0, &at, ticks);
+        }
         if let Ok(at) = std::env::var("ARMAGEDDON") {
             let ticks = std::env::var("ARMAGEDDON_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             armageddon_demo(&mut map.0, &at, ticks);
@@ -695,6 +709,14 @@ mod tests {
         let captured = map.units.iter().find(|u| u.owner == PLAYER && u.statuses.hypnotized.is_on()).unwrap();
         assert_eq!(captured.statuses.hypnotized_from, Some(PLAYER + 1));
         assert!(!hypnotism_demo(&mut map, "here", 0));
+    }
+
+    #[test]
+    fn volcano_demo_adds_the_controller_effect_and_shapes_the_ground_once_run() {
+        let mut map = game_core::map::GameMap::sandbox_walk();
+        assert!(volcano_demo(&mut map, "10,10", game_core::volcano::RUMBLE_TURNS + game_core::volcano::RISE_TURNS));
+        assert_eq!(map.terrain.get(10, 10), 0, "the crater floor, fully risen");
+        assert!(!volcano_demo(&mut map, "here", 0));
     }
 
     #[test]

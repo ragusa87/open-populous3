@@ -38,6 +38,8 @@ pub enum Spell {
     /// The `HYPNO_NUM_PEOPLE` nearest people of other tribes around `at` (world units) join the caster's tribe for
     /// a while: `hypnotism::effect`.
     Hypnotism { at: (u16, u16) },
+    /// A volcano at `at` (world units): `volcano::effect`.
+    Volcano { at: (u16, u16) },
     /// Stops the match and settles it (`GameMap::start_armageddon`), centred on `at` (world units).
     Armageddon { at: (u16, u16) },
 }
@@ -55,6 +57,7 @@ impl Spell {
             Spell::Invisibility => Some(SpellKind::Invisibility),
             Spell::Convert { .. } => Some(SpellKind::Convert),
             Spell::Hypnotism { .. } => Some(SpellKind::Hypnotism),
+            Spell::Volcano { .. } => Some(SpellKind::Volcano),
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
             Spell::Flatten { .. } => Some(SpellKind::Flatten),
             Spell::Armageddon { .. } => Some(SpellKind::Armageddon),
@@ -78,7 +81,8 @@ impl Spell {
             | Spell::Bloodlust
             | Spell::Invisibility
             | Spell::Convert { .. }
-            | Spell::Hypnotism { .. } => return None,
+            | Spell::Hypnotism { .. }
+            | Spell::Volcano { .. } => return None,
         })
     }
 }

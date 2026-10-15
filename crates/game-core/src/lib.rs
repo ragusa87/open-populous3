@@ -66,6 +66,7 @@ pub mod tribes;
 pub mod unit;
 pub mod vault;
 pub mod vehicle;
+pub mod volcano;
 pub mod wood;
 pub mod work;
 pub mod worship;

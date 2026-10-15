@@ -20,6 +20,10 @@ pub enum WorldEvent {
     Panic { unit: UnitId },
     Raid { building: BuildingId },
     SetFire { building: BuildingId },
+    /// Removes the building outright, bypassing the normal wood/wear-down model (`GameMap::burn_down`): Volcano's
+    /// turn-110 destruction (docs/plans/spells.md "Volcano"), accepted as simpler than modelling a dedicated
+    /// instant-destruction path through `fire`/`wreck`.
+    Destroy { building: BuildingId },
     /// Sets the trees of the cell on fire (`Tree::ignite`).
     BurnTrees { cell: (i32, i32) },
     /// A new effect, ticking from the next turn; its id is given then.
