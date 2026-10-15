@@ -8,12 +8,16 @@
 //!
 //! Motion is our own invented stand-in, not the original's: the trace has no launch at all ("no initial
 //! velocity ... it falls", already created at rest at its landing point) — ours instead visibly ejects each rock
-//! from the crater's own centre, arcing out to that same landing point (`FLIGHT_SECS`, a plain `peak * 4t(1-t)`
-//! parabola, the same shape `units::mod.rs`'s boarding hops use) before it settles and fades after `REST_SECS`
-//! ("about 10.7 s", the trace's own rest-before-deletion timer).
+//! from the crater's own centre, arcing out to that same landing point under gravity (`FLIGHT_SECS`, a `peak *
+//! 4t(1-t)` parabolic rise added on top of the actual ground it flies over, scaled by how far it's thrown), then
+//! rolls downhill (`downhill_at`, a finite difference on the terrain under its landing point — steeper ground
+//! rolls it farther, flat ground barely at all, the same spirit as the trace's own "slides while the slope is
+//! above 24" without its exact per-triangle physics) before settling and fading after `REST_SECS` ("about 10.7 s",
+//! the trace's own rest-before-deletion timer). `Grounded` re-samples the real terrain height under it at every
+//! step of both, so it genuinely falls and rolls over the land's own shape, not a flat plane.
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
-use crate::grounded::{render_pos, Grounded};
+use crate::grounded::{mesh_height, render_pos, Grounded};
 use crate::sim_time::{seed, SimNow};
 use crate::units::art::Frame;
 use crate::units::{toward_eye, upload_frame, FrameAsset};
@@ -24,6 +28,7 @@ use bevy::prelude::*;
 use game_core::effect::{Effect, EffectKind};
 use game_core::id::Id;
 use game_core::map::GameMap;
+use game_core::terrain::Heightmap;
 use game_core::time::{Tick, TICKS_PER_SECOND};
 use pop3_format::catalog::{EFFECT_SPRITE_FILE, VOLCANO_ROCK_SPRITES};
 use pop3_format::{Picture, SpriteBank, Theme, WORLD_UNITS_PER_CELL};
@@ -37,19 +42,27 @@ const COUNT: u32 = 26;
 const MIN_DIST: f32 = 1536.0;
 const MAX_DIST: f32 = 2558.0;
 /// Our own invented ejection (see module doc): rises then falls over this long, arcing from the crater centre to
-/// its landing point; `FLIGHT_PEAK` is how high above the ground it gets at the arc's midpoint (render units).
+/// its landing point; how high above the ground it gets at the arc's midpoint (render units) scales with how far
+/// it's thrown, between `FLIGHT_PEAK_MIN` (the closest rocks) and `FLIGHT_PEAK_MAX` (the farthest).
 const FLIGHT_SECS: f32 = 0.9;
-const FLIGHT_PEAK: f32 = 1.1;
-/// A short settle-roll once it lands, before coming fully to rest (our own feel, same spirit as the original's
-/// "slides downhill" — not its exact slope physics).
-const ROLL_SECS: f32 = 0.6;
-const ROLL_DIST: f32 = 0.18;
+const FLIGHT_PEAK_MIN: f32 = 0.6;
+const FLIGHT_PEAK_MAX: f32 = 1.6;
+/// A settle-roll once it lands, before coming fully to rest: downhill, by `downhill_at`'s slope at the landing
+/// point, scaled between `ROLL_DIST_MIN` (near-flat ground) and `ROLL_DIST_MAX` (as steep as the volcano's own
+/// slopes, `SLOPE_REF`, height units per cell) — our own feel, same spirit as the trace's own "slides while the
+/// slope is above 24", not its exact per-triangle physics. `ROLL_DECAY` shapes the friction-like ease-out.
+const ROLL_SECS: f32 = 1.1;
+const ROLL_DIST_MIN: f32 = 0.03;
+const ROLL_DIST_MAX: f32 = 0.55;
+const SLOPE_REF: f32 = 300.0;
+const ROLL_DECAY: f32 = 4.0;
 /// At rest this long before it vanishes (pop3-rev-analysis.md: "128 turns to live", 10.7 s).
 const REST_SECS: f32 = 128.0 / TICKS_PER_SECOND as f32;
 /// How far the sprite is pulled towards the camera so nearby ground does not cut it (`wood.rs`).
 const PULL_TO_EYE: f32 = 0.25;
 
-/// One rock's fixed-at-spawn placement and timing.
+/// One rock's fixed-at-spawn placement, timing and landing physics (flight peak and roll both
+/// derived once at spawn from how far it's thrown and the real terrain slope under where it lands).
 #[derive(Component, Clone, Copy)]
 pub struct Rock {
     /// The volcano effect it belongs to: looked up each frame for its own start tick.
@@ -59,7 +72,26 @@ pub struct Rock {
     /// Where it's ejected from (the crater centre) and where it lands, both in cells.
     from: Vec2,
     at: Vec2,
-    spin_phase: f32,
+    /// How high its flight arcs above the ground (render units), scaled by throw distance.
+    peak: f32,
+    /// Downhill direction and distance (cells) it settle-rolls after landing (`downhill_at`).
+    roll_dir: Vec2,
+    roll_dist: f32,
+}
+
+/// Steepest-descent direction (unit vector, zero on flat ground) and slope magnitude (height units
+/// dropped per cell) at `at` (cell coords), sampled the same way the terrain mesh draws it
+/// (`grounded::mesh_height`) so a rock's roll follows the ground it's actually rendered on.
+fn downhill_at(terrain: &Heightmap, at: Vec2) -> (Vec2, f32) {
+    const H: f32 = 0.5;
+    let y = |ox: f32, oz: f32| mesh_height(terrain, at.x + ox, at.y + oz);
+    let grad = Vec2::new((y(H, 0.0) - y(-H, 0.0)) / (2.0 * H), (y(0.0, H) - y(0.0, -H)) / (2.0 * H));
+    let mag = grad.length();
+    if mag < 1e-3 {
+        (Vec2::ZERO, 0.0)
+    } else {
+        (-grad / mag, mag)
+    }
 }
 
 #[derive(Component)]
@@ -88,9 +120,10 @@ impl WorldView for VolcanoRocks {
         id.raw()
     }
 
-    fn spawn((id, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (_, assets): &mut SystemParamItem<Self::Params>) -> Option<Self> {
+    fn spawn((id, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (map, assets): &mut SystemParamItem<Self::Params>) -> Option<Self> {
         let raw = id.raw();
         let centre = Vec2::new(e.x as f32, e.z as f32) / WORLD_UNITS_PER_CELL as f32;
+        let (min_dist, max_dist) = (MIN_DIST / WORLD_UNITS_PER_CELL as f32, MAX_DIST / WORLD_UNITS_PER_CELL as f32);
         view.insert((Transform::default(), Visibility::Hidden));
         view.with_children(|v| {
             for i in 0..COUNT {
@@ -98,12 +131,18 @@ impl WorldView for VolcanoRocks {
                 let angle = s(1) * TAU;
                 let dist = (MIN_DIST + s(2) * (MAX_DIST - MIN_DIST)) / WORLD_UNITS_PER_CELL as f32;
                 let dir = Vec2::new(angle.cos(), angle.sin());
+                let at = centre + dir * dist;
+                let thrown = ((dist - min_dist) / (max_dist - min_dist)).clamp(0.0, 1.0);
+                let (downhill, slope) = downhill_at(&map.0.terrain, at);
+                let roll_dir = if downhill == Vec2::ZERO { Vec2::from_angle(s(4) * TAU) } else { downhill };
                 let rock = Rock {
                     effect: *id,
                     born: (FIRST_TURN + i) as f32 / TICKS_PER_SECOND as f32,
                     from: centre,
-                    at: centre + dir * dist,
-                    spin_phase: s(3) * TAU,
+                    at,
+                    peak: FLIGHT_PEAK_MIN + (FLIGHT_PEAK_MAX - FLIGHT_PEAK_MIN) * thrown,
+                    roll_dir,
+                    roll_dist: ROLL_DIST_MIN + (ROLL_DIST_MAX - ROLL_DIST_MIN) * (slope / SLOPE_REF).min(1.0),
                 };
                 let frame = &assets.frames[0];
                 v.spawn((rock, Grounded { at: rock.at, half: 0.0 }, Transform::default(), Visibility::Hidden, crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), crate::hover::NoOutline))
@@ -209,12 +248,11 @@ fn pose_rocks(
         *vis = Visibility::Visible;
         let (xz, height) = if age < FLIGHT_SECS {
             let t = age / FLIGHT_SECS;
-            (rock.from.lerp(rock.at, t), FLIGHT_PEAK * 4.0 * t * (1.0 - t))
+            (rock.from.lerp(rock.at, t), rock.peak * 4.0 * t * (1.0 - t))
         } else {
             let roll_t = ((age - FLIGHT_SECS) / ROLL_SECS).clamp(0.0, 1.0);
-            let eased = 1.0 - (1.0 - roll_t) * (1.0 - roll_t);
-            let dir = Vec2::from_angle(rock.spin_phase);
-            (rock.at + dir * ROLL_DIST * eased, 0.0)
+            let eased = 1.0 - (-ROLL_DECAY * roll_t).exp();
+            (rock.at + rock.roll_dir * rock.roll_dist * eased, 0.0)
         };
         grounded.at = xz;
         let Some(feet) = render_pos(&map.0.terrain, &grounded, rig.focus, &params.0) else {
@@ -276,5 +314,23 @@ mod tests {
         let frames: Vec<usize> = (0..4).map(|k| frame_at((k * 64, 0))).collect();
         assert_eq!(frames, [0, 1, 2, 3]);
         assert_eq!(frame_at((256, 0)), frame_at((0, 0)), "wraps every 4 steps");
+    }
+
+    #[test]
+    fn downhill_at_points_away_from_rising_ground() {
+        let size = 8;
+        let heights: Vec<u16> = (0..size * size).map(|i| (i % size) as u16 * 100).collect();
+        let terrain = Heightmap::from_heights(size, heights);
+        let (dir, slope) = downhill_at(&terrain, Vec2::new(4.0, 4.0));
+        assert!(dir.x < 0.0, "rolls towards lower x, where the ground is lower: {dir}");
+        assert!(slope > 0.0);
+    }
+
+    #[test]
+    fn downhill_at_is_zero_on_flat_ground() {
+        let terrain = Heightmap::new(8);
+        let (dir, slope) = downhill_at(&terrain, Vec2::new(4.0, 4.0));
+        assert_eq!(dir, Vec2::ZERO);
+        assert_eq!(slope, 0.0);
     }
 }
