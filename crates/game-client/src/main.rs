@@ -27,6 +27,7 @@ mod grounded;
 mod hover;
 mod hud;
 mod keymap;
+mod lava;
 mod lightning;
 mod menu;
 mod nature;
