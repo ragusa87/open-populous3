@@ -32,6 +32,9 @@ pub enum Spell {
     /// Turns the `INVIS_NUM_PEOPLE` nearest own followers around the shaman invisible (self-cast, see
     /// `MagicalShield`).
     Invisibility,
+    /// The nearest wildman within range of `at` (world units) becomes a brave of the caster, every few turns for a
+    /// while: `convert::effect`.
+    Convert { at: (u16, u16) },
     /// Stops the match and settles it (`GameMap::start_armageddon`), centred on `at` (world units).
     Armageddon { at: (u16, u16) },
 }
@@ -47,6 +50,7 @@ impl Spell {
             Spell::MagicalShield => Some(SpellKind::MagicalShield),
             Spell::Bloodlust => Some(SpellKind::Bloodlust),
             Spell::Invisibility => Some(SpellKind::Invisibility),
+            Spell::Convert { .. } => Some(SpellKind::Convert),
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
             Spell::Flatten { .. } => Some(SpellKind::Flatten),
             Spell::Armageddon { .. } => Some(SpellKind::Armageddon),
@@ -68,7 +72,8 @@ impl Spell {
             | Spell::Swamp { .. }
             | Spell::MagicalShield
             | Spell::Bloodlust
-            | Spell::Invisibility => return None,
+            | Spell::Invisibility
+            | Spell::Convert { .. } => return None,
         })
     }
 }

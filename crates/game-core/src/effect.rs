@@ -34,6 +34,9 @@ pub enum EffectKind {
     /// Its own kill tally (`swamp`); the killing itself is `GameMap::tend_swamps`, not its own turn: unlike every
     /// other effect it must see every other swamp at once, to settle whose claim an overlapping cell counts for.
     Swamp(crate::swamp::Swamp),
+    /// Its own turns-to-next-chance (`convert`): the nearest wildman in range becomes a brave of the caster, every
+    /// few turns, for a fixed lifetime regardless of success.
+    Convert(crate::convert::Convert),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -76,6 +79,7 @@ impl Effect {
             EffectKind::LandBridge(ref mut bridge) => bridge.turn(),
             EffectKind::Lightning(ref mut strike) => strike.turn((self.x, self.z), self.owner, world),
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
+            EffectKind::Convert(ref mut convert) => convert.turn((self.x, self.z), self.owner, world),
             EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
@@ -93,7 +97,7 @@ impl Effect {
         match self.kind {
             EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
             EffectKind::Flatten(ref flatten) => flatten.reshaping(terrain),
-            EffectKind::SimpleBlast(_) | EffectKind::Lightning(_) | EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
+            EffectKind::SimpleBlast(_) | EffectKind::Lightning(_) | EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) | EffectKind::Convert(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }

@@ -166,6 +166,17 @@ pub fn swamp_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bo
     true
 }
 
+/// `CONVERT=x,z` (cells): the player's Convert effect there, with a wildman placed next to it to show the
+/// conversion, then `ticks` run at once. False when `at` does not parse.
+pub fn convert_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
+    let at = world_units(Vec2::new(x, z));
+    map.spawn(255, game_core::unit::UnitKind::Wildman, (at.0.wrapping_add(50), at.1));
+    map.add_effect(game_core::convert::effect(PLAYER, at));
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
 /// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there (needs it known/charged, e.g. the Spells sandbox's
 /// `SpellBook::unlimited`), then `ticks` run at once — v1 settles almost immediately (`docs/specs/outcome.md`
 /// "Armageddon"); with `GAME_SPEED=0`, a shot can catch the brief camera-takeover/lock window. False when `at`
@@ -482,6 +493,10 @@ fn screenshot(
             let ticks = std::env::var("SWAMP_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             swamp_demo(&mut map.0, &at, ticks);
         }
+        if let Ok(at) = std::env::var("CONVERT") {
+            let ticks = std::env::var("CONVERT_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            convert_demo(&mut map.0, &at, ticks);
+        }
         if let Ok(at) = std::env::var("ARMAGEDDON") {
             let ticks = std::env::var("ARMAGEDDON_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             armageddon_demo(&mut map.0, &at, ticks);
@@ -647,6 +662,15 @@ mod tests {
         assert!(blast_demo(&mut map, &at, 2));
         assert!(map.units[s].motion.airborne());
         assert!(!blast_demo(&mut map, "here", 0));
+    }
+
+    #[test]
+    fn convert_demo_places_a_wildman_and_converts_it() {
+        let mut map = game_core::map::GameMap::sandbox_walk();
+        assert!(convert_demo(&mut map, "10,10", game_core::convert::CHECK_EVERY.get()));
+        let wildman = map.units.iter().find(|u| u.kind == game_core::unit::UnitKind::Brave && u.owner == PLAYER).unwrap();
+        assert_eq!(wildman.owner, PLAYER);
+        assert!(!convert_demo(&mut map, "here", 0));
     }
 
     #[test]

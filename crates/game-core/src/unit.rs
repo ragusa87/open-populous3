@@ -1011,10 +1011,16 @@ impl Unit {
     }
 
     /// Joins `tribe`, as a new person in its place would: its plans, orders, work and wood gone, full health, no
-    /// status, standing idle (combat.md "Sermon").
+    /// status, standing idle (combat.md "Sermon"). Keeps its kind (preacher conversion: a warrior stays a
+    /// warrior) — except a wildman, which has no tribe by definition and becomes a brave (the Convert spell,
+    /// `convert::effect`; the free welcome at a reincarnation site spawns its braves directly instead, never
+    /// calling this on an existing wildman).
     pub fn change_owner(&mut self, tribe: u8) {
         self.drop_plans();
         self.owner = tribe;
+        if self.kind == UnitKind::Wildman {
+            self.kind = UnitKind::Brave;
+        }
         self.health = Health::full(self.kind.max_health());
         (self.statuses, self.motion, self.carrying, self.reload) = (Statuses::default(), Motion::STILL, 0, 0);
         self.action = Action::Idle;
@@ -1316,6 +1322,17 @@ pub fn isqrt(n: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn change_owner_keeps_a_kind_but_turns_a_wildman_into_a_brave() {
+        let mut warrior = Unit::new(Id::from_raw(1), 255, UnitKind::Warrior, (0, 0));
+        warrior.change_owner(0);
+        assert_eq!((warrior.owner, warrior.kind), (0, UnitKind::Warrior), "keeps its kind");
+        let mut wildman = Unit::new(Id::from_raw(2), 255, UnitKind::Wildman, (0, 0));
+        wildman.change_owner(1);
+        assert_eq!((wildman.owner, wildman.kind), (1, UnitKind::Brave), "a wildman has no tribe of its own: becomes a brave");
+        assert!(wildman.health.is_full() && wildman.health.max() == UnitKind::Brave.max_health(), "health set from its new kind");
+    }
 
     fn land() -> Heightmap {
         let mut t = Heightmap::new(128);

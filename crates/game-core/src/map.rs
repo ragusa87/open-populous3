@@ -695,7 +695,7 @@ impl GameMap {
         };
         match *spell {
             Spell::Teleport { to } => Some(to),
-            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } => Some(at),
+            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } | Spell::Convert { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
             Spell::Flatten { at } => Some(world(at, 0)),
             Spell::Erode { .. } | Spell::Raise { .. } | Spell::MagicalShield | Spell::Bloodlust | Spell::Invisibility => None,
@@ -784,6 +784,10 @@ impl GameMap {
             }
             Spell::Invisibility => {
                 self.cast_nearest_status(player, crate::status::INVIS_NUM_PEOPLE, |u| u.statuses.invisible = crate::status::Timed::steps(crate::status::INVIS_STEPS));
+                None
+            }
+            Spell::Convert { at } => {
+                self.add_effect(crate::convert::effect(player, at));
                 None
             }
             Spell::LandBridge { from, to } => {

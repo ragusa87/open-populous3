@@ -16,6 +16,7 @@ pub mod challenge;
 pub mod cast_range;
 pub mod combat;
 pub mod command;
+pub mod convert;
 pub mod coordinator;
 pub mod effect;
 pub mod event;
