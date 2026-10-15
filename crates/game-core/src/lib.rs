@@ -40,6 +40,7 @@ pub mod motion;
 pub mod nearest;
 pub mod occupancy;
 pub mod outcome;
+pub mod panicking_blast;
 pub mod path;
 pub mod physics;
 pub mod placement;

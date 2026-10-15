@@ -24,6 +24,8 @@ pub struct Effect {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EffectKind {
     SimpleBlast(crate::blast::SimpleBlast),
+    /// A blast that also panics everyone it hits (`panicking_blast`): a fireball, Firestorm's or Volcano's.
+    PanickingBlast(crate::panicking_blast::PanickingBlast),
     LandBridge(crate::land_bridge::LandBridge),
     Lightning(crate::lightning::Strike),
     Flatten(crate::flatten::Flatten),
@@ -78,6 +80,7 @@ impl Effect {
     pub fn tick(&mut self, now: Tick, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         let events = match self.kind {
             EffectKind::SimpleBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units, &world.vehicles),
+            EffectKind::PanickingBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units, &world.vehicles),
             EffectKind::LandBridge(ref mut bridge) => bridge.turn(),
             EffectKind::Lightning(ref mut strike) => strike.turn((self.x, self.z), self.owner, world),
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
@@ -100,7 +103,7 @@ impl Effect {
         match self.kind {
             EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
             EffectKind::Flatten(ref flatten) => flatten.reshaping(terrain),
-            EffectKind::SimpleBlast(_) | EffectKind::Lightning(_) | EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) | EffectKind::Convert(_) | EffectKind::Hypnotism(_) => Vec::new(),
+            EffectKind::SimpleBlast(_) | EffectKind::PanickingBlast(_) | EffectKind::Lightning(_) | EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) | EffectKind::Convert(_) | EffectKind::Hypnotism(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }
