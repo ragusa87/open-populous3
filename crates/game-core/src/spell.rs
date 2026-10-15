@@ -29,6 +29,9 @@ pub enum Spell {
     /// Bloodlusts the `BLOODLUST_NUM_PEOPLE` nearest own followers around the shaman (self-cast, see
     /// `MagicalShield`).
     Bloodlust,
+    /// Turns the `INVIS_NUM_PEOPLE` nearest own followers around the shaman invisible (self-cast, see
+    /// `MagicalShield`).
+    Invisibility,
     /// Stops the match and settles it (`GameMap::start_armageddon`), centred on `at` (world units).
     Armageddon { at: (u16, u16) },
 }
@@ -43,6 +46,7 @@ impl Spell {
             Spell::Swamp { .. } => Some(SpellKind::Swamp),
             Spell::MagicalShield => Some(SpellKind::MagicalShield),
             Spell::Bloodlust => Some(SpellKind::Bloodlust),
+            Spell::Invisibility => Some(SpellKind::Invisibility),
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
             Spell::Flatten { .. } => Some(SpellKind::Flatten),
             Spell::Armageddon { .. } => Some(SpellKind::Armageddon),
@@ -57,7 +61,14 @@ impl Spell {
             Spell::Flatten { at } => terrain.flatten(at, 4),
             Spell::Erode { at } => terrain.raise(at, 4, -120),
             Spell::Raise { at } => terrain.raise(at, 3, 64),
-            Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } | Spell::Swamp { .. } | Spell::MagicalShield | Spell::Bloodlust => return None,
+            Spell::Teleport { .. }
+            | Spell::Blast { .. }
+            | Spell::Lightning { .. }
+            | Spell::Armageddon { .. }
+            | Spell::Swamp { .. }
+            | Spell::MagicalShield
+            | Spell::Bloodlust
+            | Spell::Invisibility => return None,
         })
     }
 }

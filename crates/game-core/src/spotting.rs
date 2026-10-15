@@ -85,7 +85,9 @@ impl GameMap {
     }
 
     /// The first enemy unit `i` sees, cell by cell: a person to fight, else (when idle) one already fighting or a
-    /// building.
+    /// building. An invisible person is skipped entirely (traced, pop3-rev-analysis.md "Per spell" 6): this is
+    /// auto-targeting only, a player who already has their id can still order an attack on them directly
+    /// (`attack::may_attack`, untraced either way).
     fn first_seen(&self, i: usize, grid: &UnitGrid) -> Option<Target> {
         let u = &self.units[i];
         let sight = self.looking(u)?;
@@ -93,7 +95,7 @@ impl GameMap {
         let idle = matches!(u.action, Action::Idle | Action::Holding { .. }) && !throws;
         let size = self.terrain.size() as i32;
         square(u.cell(), sight, size).find_map(|cell| {
-            let people = grid.at(cell).filter_map(|id| self.unit(id)).filter(|t| crate::attack::may_attack(u, t) && !t.locked() && !self.tribes.allied(u.owner, t.owner));
+            let people = grid.at(cell).filter_map(|id| self.unit(id)).filter(|t| crate::attack::may_attack(u, t) && !t.locked() && !t.statuses.invisible.is_on() && !self.tribes.allied(u.owner, t.owner));
             let mut fighting = None;
             for t in people {
                 match self.linked(t) {

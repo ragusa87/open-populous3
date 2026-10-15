@@ -82,7 +82,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                 Spell::Erode { at } => (2, std::slice::from_ref(at)),
                 Spell::Raise { at } => (3, std::slice::from_ref(at)),
                 Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } | Spell::Swamp { .. } => unreachable!("encoded above"),
-                Spell::MagicalShield | Spell::Bloodlust => unreachable!("self-cast: never built from a Command::Cast, see Command::CastSelf"),
+                Spell::MagicalShield | Spell::Bloodlust | Spell::Invisibility => unreachable!("self-cast: never built from a Command::Cast, see Command::CastSelf"),
             };
             b.push(tag);
             for (x, z) in cells {

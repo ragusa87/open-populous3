@@ -136,6 +136,7 @@ fn self_cast_spell(kind: SpellKind) -> Option<Spell> {
     match kind {
         SpellKind::MagicalShield => Some(Spell::MagicalShield),
         SpellKind::Bloodlust => Some(Spell::Bloodlust),
+        SpellKind::Invisibility => Some(Spell::Invisibility),
         _ => None,
     }
 }
@@ -697,7 +698,7 @@ impl GameMap {
             Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
             Spell::Flatten { at } => Some(world(at, 0)),
-            Spell::Erode { .. } | Spell::Raise { .. } | Spell::MagicalShield | Spell::Bloodlust => None,
+            Spell::Erode { .. } | Spell::Raise { .. } | Spell::MagicalShield | Spell::Bloodlust | Spell::Invisibility => None,
         }
     }
 
@@ -779,6 +780,10 @@ impl GameMap {
             }
             Spell::Bloodlust => {
                 self.cast_nearest_status(player, crate::status::BLOODLUST_NUM_PEOPLE, |u| u.statuses.bloodlust = crate::status::Timed::steps(crate::status::BLOODLUST_STEPS));
+                None
+            }
+            Spell::Invisibility => {
+                self.cast_nearest_status(player, crate::status::INVIS_NUM_PEOPLE, |u| u.statuses.invisible = crate::status::Timed::steps(crate::status::INVIS_STEPS));
                 None
             }
             Spell::LandBridge { from, to } => {
@@ -2035,6 +2040,55 @@ mod tests {
         let after_fire = map.unit(enemy).unwrap().health.current();
         map.damage(enemy, 80, DamageKind::Blast, Some(0));
         assert_eq!(map.unit(enemy).unwrap().health.current(), after_fire - 80, "a blast: full amount, bloodlust only softens a fight");
+    }
+
+    #[test]
+    fn invisibility_turns_the_nearest_own_followers_invisible_once_the_cast_releases() {
+        let mut m = GameMap::sandbox_walk();
+        m.spell_books[0].set(SpellKind::Invisibility, crate::spell_book::Availability::Unlimited);
+        let shaman = m.units[0].id;
+        let at = (m.units[0].x, m.units[0].z);
+        let near: Vec<UnitId> = (0..crate::status::INVIS_NUM_PEOPLE).map(|k| m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(k as u16 * 20), at.1)).id).collect();
+        let far = m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(4000), at.1)).id;
+        m.apply(&Command::CastSelf { player: 0, kind: SpellKind::Invisibility });
+        m.run(crate::unit::CAST_RELEASE);
+        assert!(near.iter().all(|&id| m.unit(id).unwrap().statuses.invisible.is_on()), "the 6 nearest, invisible");
+        assert!(!m.unit(far).unwrap().statuses.invisible.is_on(), "too far: not among the 6 nearest");
+        assert!(!m.unit(shaman).unwrap().statuses.invisible.is_on(), "never the shaman herself");
+    }
+
+    fn invisibility_duel() -> (GameMap, UnitId, UnitId) {
+        let mut map = GameMap::sandbox_units();
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(1024), s.z);
+        let a = map.spawn(0, UnitKind::Brave, at).id;
+        let t = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(6 * 512), at.1)).id;
+        (map, a, t)
+    }
+
+    #[test]
+    fn an_invisible_enemy_is_never_auto_spotted_but_a_player_can_still_order_the_attack() {
+        let (mut map, a, t) = invisibility_duel();
+        map.unit_mut(t).unwrap().statuses.invisible = crate::status::Timed::steps(crate::status::INVIS_STEPS);
+        let found = (0..300).find(|_| {
+            map.tick();
+            matches!(map.unit(a).unwrap().action, Action::Attacking { .. })
+        });
+        assert!(found.is_none(), "never spotted: invisible to auto-targeting");
+        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Attack { target: Target::Unit(t) } });
+        assert!(matches!(map.unit(a).unwrap().action, Action::Attacking { .. }), "a player who already knows its id can still order the attack");
+    }
+
+    #[test]
+    fn attacking_ends_the_attackers_own_invisibility_but_walking_does_not() {
+        let (mut map, a, t) = invisibility_duel();
+        map.unit_mut(a).unwrap().statuses.invisible = crate::status::Timed::steps(crate::status::INVIS_STEPS);
+        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::MoveTo { x: map.unit(a).unwrap().x.wrapping_add(50), z: map.unit(a).unwrap().z } });
+        map.run(Ticks::new(5));
+        assert!(map.unit(a).unwrap().statuses.invisible.is_on(), "walking does not end it");
+        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Attack { target: Target::Unit(t) } });
+        assert!(matches!(map.unit(a).unwrap().action, Action::Attacking { .. }));
+        assert!(!map.unit(a).unwrap().statuses.invisible.is_on(), "attacking ends its own invisibility");
     }
 
     #[test]

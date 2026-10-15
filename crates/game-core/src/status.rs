@@ -11,10 +11,13 @@ pub const SHIELD_STEPS: u8 = 180;
 pub const BLOODLUST_STEPS: u8 = 180;
 /// The marker blinks while this many steps or fewer are left: the last 120 turns, 10 s.
 pub const BLINK_STEPS: u8 = 15;
-/// `SHIELD_NUM_PEOPLE`, `BLOODLUST_NUM_PEOPLE` (file 6 each): nearest own followers touched per cast
-/// (docs/specs/spells.md).
+/// `INVISIBLE_COUNT_X8` (file and exe 180): about 120 s, same length as Shield and Bloodlust (docs/specs/spells.md).
+pub const INVIS_STEPS: u8 = 180;
+/// `SHIELD_NUM_PEOPLE`, `BLOODLUST_NUM_PEOPLE`, `INVIS_NUM_PEOPLE` (file 6 each): nearest own followers touched
+/// per cast (docs/specs/spells.md).
 pub const SHIELD_NUM_PEOPLE: u32 = 6;
 pub const BLOODLUST_NUM_PEOPLE: u32 = 6;
+pub const INVIS_NUM_PEOPLE: u32 = 6;
 /// `BLOODLUST_HEALTH_X` (file and exe 3): a bloodlusted defender takes `>> 3` (÷8) of an incoming blow or bolt
 /// (combat.md "Fight numbers"); the attacker's own ×3 (`combat::BLOODLUST_STRENGTH`, `firebolt::BLOODLUST_DAMAGE`)
 /// and this apply independently when both sides are bloodlusted (confirmed, docs/plans/spells.md).
@@ -50,7 +53,9 @@ impl Timed {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Statuses {
-    pub invisible: bool,
+    /// Ends early on its own (`attack::go_attack`: attacking breaks it, walking does not — a guess, not traced,
+    /// TODO.md), besides running out like Shield and Bloodlust.
+    pub invisible: Timed,
     pub shield: Timed,
     pub bloodlust: Timed,
     pub hypnotized: bool,
@@ -68,6 +73,7 @@ impl Statuses {
         if STEP.fires(now, phase) {
             self.shield.step();
             self.bloodlust.step();
+            self.invisible.step();
         }
     }
 }
