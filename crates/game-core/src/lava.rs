@@ -1,5 +1,5 @@
 //! Lava (pop3-rev-analysis.md "Components" "Lava"), an effect (`effect::EffectKind::Lava`): no terrain change of
-//! its own, no single kill cap like Swamp — a fixed set of cells, hot for its whole lifetime. Shared between
+//! its own, no single kill cap like Swamp — a set of cells, hot for its whole lifetime. Shared between
 //! Earthquake's fissure and Volcano's flow (docs/plans/spells.md "Earthquake"), each giving it its own cells and
 //! lifetime at construction, rather than two separate implementations. Every turn, every living person on its
 //! cells (open or inside a building) dies outright (`DamageKind::Lava`: `effect::hurts` never gates it, shield or
@@ -7,7 +7,14 @@
 //! cells not already burning catches fire (`WorldEvent::SetFire`, the ordinary fire/evacuation path in `fire.rs`
 //! then runs its course); every tree on its cells with wood left burns (`WorldEvent::BurnTrees`). Its own ground
 //! look (`crates/game-client/src/lava.rs`'s `LavaView`, procedural lava/crust/basalt/ash textures draped over
-//! `cells`) reads `cells` back through the accessor below.
+//! `cells`) reads `cells` back through the accessor below, live each frame, so a growing `flowing` patch is drawn
+//! correctly without the client knowing anything about it.
+//!
+//! pop3-rev-analysis.md's own effect-type dump (around "lava flow 33, lava square 38") names "lava flow" as a
+//! *distinct* effect from this one ("lava square") and has Volcano use it, not traced any further (no shape or
+//! spread speed given). `flowing` is our own invented stand-in for it, a guess tagged as such: the hot area simply
+//! grows outward from a starting radius to a larger one over part of its life, rather than the fixed patch `effect`
+//! gives Earthquake's fissure — to be replaced once a spec session traces the original's actual "lava flow".
 
 use crate::effect::{DamageKind, Effect, EffectKind};
 use crate::event::WorldEvent;
@@ -19,12 +26,42 @@ use pop3_format::WORLD_UNITS_PER_CELL;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Lava {
     cells: Vec<(i32, i32)>,
+    flow: Option<Flow>,
+}
+
+/// `flowing`'s own growth, advanced one tick at a time (see the module doc: our own invented guess). Radii are
+/// kept ×10 so no float is stored (`AGENTS.md`: deterministic state stays integers), only used transiently in
+/// `radius` to recompute `cells` each turn.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Flow {
+    at: (u16, u16),
+    size: i32,
+    start_x10: i32,
+    max_x10: i32,
+    grow_ticks: u32,
+    elapsed: u32,
+}
+
+impl Flow {
+    fn radius(&self) -> f32 {
+        let t = (self.elapsed as f32 / self.grow_ticks.max(1) as f32).min(1.0);
+        (self.start_x10 as f32 + (self.max_x10 - self.start_x10) as f32 * t) / 10.0
+    }
 }
 
 /// Lit by tribe `owner` at `at` (world units, its nominal position for the map/effect list only: what actually
 /// burns is `cells`), covering `cells`, for `lifetime`.
 pub fn effect(owner: u8, at: (u16, u16), cells: Vec<(i32, i32)>, lifetime: Countdown) -> Effect {
-    Effect::new(owner, at, lifetime, EffectKind::Lava(Lava { cells }))
+    Effect::new(owner, at, lifetime, EffectKind::Lava(Lava { cells, flow: None }))
+}
+
+/// Our own invented "flowing out of the crater" variant (see the module doc): starts as a `start`-cell-radius
+/// disc around `at` and grows to `max` cells radius over `grow_ticks`, then holds there for the rest of
+/// `lifetime`.
+pub fn flowing(owner: u8, at: (u16, u16), start: f32, max: f32, grow_ticks: u32, size: i32, lifetime: Countdown) -> Effect {
+    let flow = Flow { at, size, start_x10: (start * 10.0).round() as i32, max_x10: (max * 10.0).round() as i32, grow_ticks, elapsed: 0 };
+    let cells = disc(at, flow.radius(), size);
+    Effect::new(owner, at, lifetime, EffectKind::Lava(Lava { cells, flow: Some(flow) }))
 }
 
 /// The world-unit centre of cell `(x, z)`, wrapped to `size` cells.
@@ -34,13 +71,19 @@ fn cell_centre((x, z): (i32, i32), size: i32) -> (u16, u16) {
 }
 
 impl Lava {
-    /// Its fixed cells, for whatever draws them (`crates/game-client/src/lava.rs`'s `LavaView`).
+    /// Its current cells (growing, for `flowing`), for whatever draws them
+    /// (`crates/game-client/src/lava.rs`'s `LavaView`).
     pub fn cells(&self) -> &[(i32, i32)] {
         &self.cells
     }
 
-    /// One turn, cast by `owner`: everyone standing on its cells dies, every building and tree there catches fire.
-    pub fn turn(&self, owner: u8, world: &GameMap) -> Vec<WorldEvent> {
+    /// One turn, cast by `owner`: grows `cells` first if it's a `flowing` patch, then everyone standing on them
+    /// dies, every building and tree there catches fire.
+    pub fn turn(&mut self, owner: u8, world: &GameMap) -> Vec<WorldEvent> {
+        if let Some(flow) = &mut self.flow {
+            flow.elapsed += 1;
+            self.cells = disc(flow.at, flow.radius(), flow.size);
+        }
         let size = world.terrain.size() as i32;
         let mut events = Vec::new();
         for &cell in &self.cells {
@@ -123,5 +166,41 @@ mod tests {
         map.tick();
         assert!(map.building(hut).unwrap().burning.is_some(), "the building catches fire");
         assert_eq!(map.trees[0].wood(), 0, "the tree is burning: no wood while it does");
+    }
+
+    fn lava_cells(map: &GameMap, id: Id<Effect>) -> Vec<(i32, i32)> {
+        let EffectKind::Lava(lava) = &map.effects.get(id).unwrap().kind else { panic!("not lava") };
+        lava.cells().to_vec()
+    }
+
+    #[test]
+    fn flowing_starts_at_the_start_radius_and_grows_to_the_max_one() {
+        let mut map = bare();
+        let id = map.add_effect(flowing(0, AT, 1.0, 3.0, 10, 128, Countdown::new(Ticks::new(20))));
+        assert_eq!(lava_cells(&map, id), disc(AT, 1.0, 128), "starts small, before any turn runs");
+        for _ in 0..10 {
+            map.tick();
+        }
+        assert_eq!(lava_cells(&map, id), disc(AT, 3.0, 128), "fully grown after grow_ticks turns");
+    }
+
+    #[test]
+    fn flowing_holds_at_the_max_radius_once_grown() {
+        let mut map = bare();
+        let id = map.add_effect(flowing(0, AT, 1.0, 3.0, 4, 128, Countdown::new(Ticks::new(20))));
+        for _ in 0..10 {
+            map.tick();
+        }
+        assert_eq!(lava_cells(&map, id), disc(AT, 3.0, 128), "stays at the max once reached, not beyond");
+    }
+
+    #[test]
+    fn a_fixed_patch_from_effect_never_grows() {
+        let mut map = bare();
+        let id = map.add_effect(effect(0, AT, disc(AT, 1.0, 128), Countdown::new(Ticks::new(20))));
+        for _ in 0..10 {
+            map.tick();
+        }
+        assert_eq!(lava_cells(&map, id), disc(AT, 1.0, 128), "effect() gives a fixed patch, unlike flowing()");
     }
 }

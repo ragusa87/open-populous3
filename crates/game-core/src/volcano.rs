@@ -45,6 +45,10 @@ pub const SLOPE_RADIUS_CELLS: f32 = 5.0;
 pub const CRATER_FLOOR: u16 = 0;
 /// "up to 16 s".
 pub const LAVA_LIFETIME: Ticks = Ticks::secs(16);
+/// Our own invented guess for the lava "flowing out" further as it lives (`lava`'s own module doc: the
+/// original's distinct "lava flow" effect is named but not traced any further yet): from the crater's own rim
+/// out to the foot of its built slope, over half its lifetime, then holding there for the rest.
+pub const LAVA_FLOW_TICKS: u32 = LAVA_LIFETIME.get() / 2;
 /// "about 22 small and 6 big fireballs": 28 total, not mechanically distinguished (see module doc).
 pub const FIREBALLS: u32 = 22 + 6;
 
@@ -83,7 +87,7 @@ impl Volcano {
             events.extend(destroy_and_kill(cell, owner, world, size));
         }
         if self.turn == SHAPING_TURNS {
-            events.push(WorldEvent::SpawnEffect(crate::lava::effect(owner, at, crate::lava::disc(at, RIM_RADIUS_CELLS, size), Countdown::new(LAVA_LIFETIME))));
+            events.push(WorldEvent::SpawnEffect(crate::lava::flowing(owner, at, RIM_RADIUS_CELLS, SLOPE_RADIUS_CELLS, LAVA_FLOW_TICKS, size, Countdown::new(LAVA_LIFETIME))));
         }
         if self.turn >= SHAPING_TURNS {
             let ticks_left = TOTAL_TURNS.saturating_sub(self.turn).max(1);

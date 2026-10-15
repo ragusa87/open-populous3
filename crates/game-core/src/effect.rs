@@ -96,7 +96,7 @@ impl Effect {
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
             EffectKind::Convert(ref mut convert) => convert.turn((self.x, self.z), self.owner, world),
             EffectKind::Hypnotism(ref mut hypnotism) => hypnotism.turn((self.x, self.z), self.owner, world),
-            EffectKind::Lava(ref lava) => lava.turn(self.owner, world),
+            EffectKind::Lava(ref mut lava) => lava.turn(self.owner, world),
             EffectKind::Volcano(ref mut volcano) => volcano.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
