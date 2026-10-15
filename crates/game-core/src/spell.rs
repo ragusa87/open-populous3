@@ -22,6 +22,10 @@ pub enum Spell {
     Lightning { at: (u16, u16) },
     /// A swamp at `at` (world units): `swamp::effect`.
     Swamp { at: (u16, u16) },
+    /// Shields the `SHIELD_NUM_PEOPLE` nearest own followers around the shaman, as she stands when it releases
+    /// (self-cast, never wire-encoded as a `Spell`: `Command::CastSelf` carries its `SpellKind` instead, see
+    /// `game-net`).
+    MagicalShield,
     /// Stops the match and settles it (`GameMap::start_armageddon`), centred on `at` (world units).
     Armageddon { at: (u16, u16) },
 }
@@ -34,6 +38,7 @@ impl Spell {
             Spell::Blast { .. } => Some(SpellKind::Blast),
             Spell::Lightning { .. } => Some(SpellKind::Lightning),
             Spell::Swamp { .. } => Some(SpellKind::Swamp),
+            Spell::MagicalShield => Some(SpellKind::MagicalShield),
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
             Spell::Flatten { .. } => Some(SpellKind::Flatten),
             Spell::Armageddon { .. } => Some(SpellKind::Armageddon),
@@ -48,7 +53,7 @@ impl Spell {
             Spell::Flatten { at } => terrain.flatten(at, 4),
             Spell::Erode { at } => terrain.raise(at, 4, -120),
             Spell::Raise { at } => terrain.raise(at, 3, 64),
-            Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } | Spell::Swamp { .. } => return None,
+            Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } | Spell::Swamp { .. } | Spell::MagicalShield => return None,
         })
     }
 }

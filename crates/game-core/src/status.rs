@@ -11,6 +11,8 @@ pub const SHIELD_STEPS: u8 = 180;
 pub const BLOODLUST_STEPS: u8 = 180;
 /// The marker blinks while this many steps or fewer are left: the last 120 turns, 10 s.
 pub const BLINK_STEPS: u8 = 15;
+/// `SHIELD_NUM_PEOPLE` (file 6): nearest own followers shielded per cast (docs/specs/spells.md).
+pub const SHIELD_NUM_PEOPLE: u32 = 6;
 
 /// A status that runs out: the steps left, none when off.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

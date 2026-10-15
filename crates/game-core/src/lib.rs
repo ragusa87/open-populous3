@@ -35,6 +35,7 @@ pub mod mana;
 pub mod map;
 pub mod melee;
 pub mod motion;
+pub mod nearest;
 pub mod occupancy;
 pub mod outcome;
 pub mod path;

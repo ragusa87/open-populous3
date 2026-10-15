@@ -130,6 +130,15 @@ fn per_player<T: Clone>(t: T) -> Vec<T> {
     vec![t; TRIBES]
 }
 
+/// The self-cast spell (`Command::CastSelf`, no ground target) `kind` releases, if it is one of those; None for an
+/// aimed spell or one not implemented yet (`Command::CastSelf` then just plays the cast animation, as before).
+fn self_cast_spell(kind: SpellKind) -> Option<Spell> {
+    match kind {
+        SpellKind::MagicalShield => Some(Spell::MagicalShield),
+        _ => None,
+    }
+}
+
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes). `tribes` (its roster, not
     /// its alliances, which these maps have no header to set) comes straight from `sites`: 1:1 for every map built
@@ -648,6 +657,20 @@ impl GameMap {
         crate::cast_range::within((shaman.x, shaman.z), to, range)
     }
 
+    /// The nearest own followers (`UnitKind::FOLLOWERS`, not the shaman or a wildman, nor already a Ghost Army
+    /// copy) around `player`'s shaman, as she stands when the cast releases, each touched by `set` (`release`'s
+    /// `MagicalShield`/`Bloodlust`/`Invisibility` arms, `nearest::nearest_n`, the shared selector,
+    /// pop3-rev-analysis.md 0x515E30).
+    fn cast_nearest_status(&mut self, player: u8, n: u32, set: impl Fn(&mut Unit)) {
+        let Some(at) = self.shaman_of(player).map(|u| (u.x, u.z)) else { return };
+        let pred = |u: &Unit| u.owner == player && UnitKind::FOLLOWERS.contains(&u.kind) && u.is_alive() && !u.statuses.ghost;
+        for id in crate::nearest::nearest_n(&self.units, at, n as usize, pred) {
+            if let Some(u) = self.unit_mut(id) {
+                set(u);
+            }
+        }
+    }
+
     /// `spell` as it takes effect: a land bridge starts at the caster's shaman, as she stands when the command
     /// runs, unless the player is a god (then where it was aimed from, the view).
     fn from_caster(&self, player: u8, spell: Spell) -> Spell {
@@ -673,7 +696,7 @@ impl GameMap {
             Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
             Spell::Flatten { at } => Some(world(at, 0)),
-            Spell::Erode { .. } | Spell::Raise { .. } => None,
+            Spell::Erode { .. } | Spell::Raise { .. } | Spell::MagicalShield => None,
         }
     }
 
@@ -749,6 +772,10 @@ impl GameMap {
                 self.add_effect(crate::swamp::effect(player, at));
                 None
             }
+            Spell::MagicalShield => {
+                self.cast_nearest_status(player, crate::status::SHIELD_NUM_PEOPLE, |u| u.statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS));
+                None
+            }
             Spell::LandBridge { from, to } => {
                 self.add_effect(crate::land_bridge::effect(player, from, to, &self.terrain));
                 None
@@ -797,7 +824,14 @@ impl GameMap {
             }
             Command::CastSelf { player, kind } => {
                 if !self.shaman_locked(player) && self.use_charge(player, Some(kind)) {
-                    self.order(player, Order::Cast);
+                    match self_cast_spell(kind) {
+                        Some(spell) => {
+                            if let Some(u) = self.shaman_mut(player) {
+                                u.cast_spell(spell);
+                            }
+                        }
+                        None => self.order(player, Order::Cast),
+                    }
                 }
                 None
             }
@@ -1944,6 +1978,25 @@ mod tests {
         m.apply(&Command::Order { player: 0, order: Order::Stop });
         m.run(Ticks::secs(10));
         assert!(m.effects.is_empty() && m.units[0].action == Action::Idle, "another order drops the cast");
+    }
+
+    #[test]
+    fn magical_shield_shields_the_nearest_own_followers_around_the_shaman_once_the_cast_releases() {
+        let mut m = GameMap::sandbox_walk();
+        m.spell_books[0].set(SpellKind::MagicalShield, crate::spell_book::Availability::Unlimited);
+        let shaman = m.units[0].id;
+        let at = (m.units[0].x, m.units[0].z);
+        let near: Vec<UnitId> = (0..crate::status::SHIELD_NUM_PEOPLE).map(|k| m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(k as u16 * 20), at.1)).id).collect();
+        let far = m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(4000), at.1)).id;
+        let enemy = m.spawn(1, UnitKind::Brave, (at.0.wrapping_add(10), at.1)).id;
+        let wildman = m.spawn(0, UnitKind::Wildman, (at.0.wrapping_add(10), at.1)).id;
+        m.apply(&Command::CastSelf { player: 0, kind: SpellKind::MagicalShield });
+        assert!(near.iter().all(|&id| !m.unit(id).unwrap().statuses.shield.is_on()), "not yet, still casting");
+        m.run(crate::unit::CAST_RELEASE);
+        assert!(near.iter().all(|&id| m.unit(id).unwrap().statuses.shield.is_on()), "the 6 nearest, shielded");
+        for id in [far, enemy, wildman, shaman] {
+            assert!(!m.unit(id).unwrap().statuses.shield.is_on(), "spared: too far, another tribe, a wildman, or the shaman herself");
+        }
     }
 
     #[test]
