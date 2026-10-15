@@ -21,6 +21,9 @@ pub const BLOODLUST_SPRITES: std::ops::RangeInclusive<usize> = 1478..=1487;
 pub const HYPNOSIS_SPRITES: std::ops::RangeInclusive<usize> = 1553..=1563;
 /// The yellow down arrow over the player's selected people (9 x 7, opaque).
 pub const SELECTED_ARROW_SPRITE: usize = 53;
+/// Volcano's decorative rolling rocks (pop3-rev-analysis.md "Volcano rocks"): 4 opaque frames in
+/// `EFFECT_SPRITE_FILE`, picked by position (`346 + ((x >> 6) + (z >> 6)) & 3`) so it seems to roll.
+pub const VOLCANO_ROCK_SPRITES: std::ops::RangeInclusive<usize> = 346..=349;
 /// Teal unit figures (16 x 23) in `EFFECT_SPRITE_FILE`, in unit model order: brave, warrior, preacher,
 /// spy, firewarrior, shaman. Identified by eye.
 pub const UNIT_FIGURES: std::ops::RangeInclusive<usize> = 75..=80;

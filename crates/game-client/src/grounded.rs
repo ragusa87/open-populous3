@@ -139,7 +139,7 @@ fn tilt_grounded(
     }
 }
 
-fn place_grounded(
+pub(crate) fn place_grounded(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
     params: Res<CurveParamsRes>,
