@@ -29,9 +29,10 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
   preacher, spy 1; warrior, shaman 2; firewarrior 3: the lower gives way in a full melee), a pace (turns per
   animation frame: the firewarrior 2, so its moves last twice as long) [exe, measured]. Wildmen never fight;
   firewarriors never join a melee already going on, but fight when challenged [exe].
-- A blow hits `max(32, strength × life / max_life)`, × 3 when the attacker is bloodlusted (`combat::strength`) [exe].
-  Not yet: the original's damage taken by a bloodlusted person (>> 3) is not placed in the hit; per-person
-  maximum life ("Measured": not always the kind's).
+- A blow hits `max(32, strength × life / max_life)`, × 3 when the attacker is bloodlusted (`combat::strength`) [exe];
+  a bloodlusted defender then takes `>> BLOODLUST_HEALTH_SHIFT` (÷8) of that, and of a firewarrior's bolt too
+  (`GameMap::damage`, independently of the attacker's own multiplier). Not yet: per-person maximum life
+  ("Measured": not always the kind's).
 - Move lengths in turns (`combat::move_turns`), × pace [exe, measured]:
 
 | Move | Followers | Shaman |

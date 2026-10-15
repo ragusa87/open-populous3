@@ -298,7 +298,7 @@ impl SpellBook {
     }
 
     /// Every spell, Teleport too, cast at will (Sandbox > Spells); not Bloodlust, which would hide Ghost Army's tile
-    /// and does nothing yet.
+    /// (`STAND_INS`, hud/spells.rs) in a loadout meant to show every tile at once.
     pub fn unlimited() -> Self {
         let mut b = SpellBook::new();
         for k in SpellKind::ALL.into_iter().filter(|&k| k != SpellKind::Bloodlust) {

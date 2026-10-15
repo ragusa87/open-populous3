@@ -11,8 +11,14 @@ pub const SHIELD_STEPS: u8 = 180;
 pub const BLOODLUST_STEPS: u8 = 180;
 /// The marker blinks while this many steps or fewer are left: the last 120 turns, 10 s.
 pub const BLINK_STEPS: u8 = 15;
-/// `SHIELD_NUM_PEOPLE` (file 6): nearest own followers shielded per cast (docs/specs/spells.md).
+/// `SHIELD_NUM_PEOPLE`, `BLOODLUST_NUM_PEOPLE` (file 6 each): nearest own followers touched per cast
+/// (docs/specs/spells.md).
 pub const SHIELD_NUM_PEOPLE: u32 = 6;
+pub const BLOODLUST_NUM_PEOPLE: u32 = 6;
+/// `BLOODLUST_HEALTH_X` (file and exe 3): a bloodlusted defender takes `>> 3` (÷8) of an incoming blow or bolt
+/// (combat.md "Fight numbers"); the attacker's own ×3 (`combat::BLOODLUST_STRENGTH`, `firebolt::BLOODLUST_DAMAGE`)
+/// and this apply independently when both sides are bloodlusted (confirmed, docs/plans/spells.md).
+pub const BLOODLUST_HEALTH_SHIFT: u16 = 3;
 
 /// A status that runs out: the steps left, none when off.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -26,6 +26,9 @@ pub enum Spell {
     /// (self-cast, never wire-encoded as a `Spell`: `Command::CastSelf` carries its `SpellKind` instead, see
     /// `game-net`).
     MagicalShield,
+    /// Bloodlusts the `BLOODLUST_NUM_PEOPLE` nearest own followers around the shaman (self-cast, see
+    /// `MagicalShield`).
+    Bloodlust,
     /// Stops the match and settles it (`GameMap::start_armageddon`), centred on `at` (world units).
     Armageddon { at: (u16, u16) },
 }
@@ -39,6 +42,7 @@ impl Spell {
             Spell::Lightning { .. } => Some(SpellKind::Lightning),
             Spell::Swamp { .. } => Some(SpellKind::Swamp),
             Spell::MagicalShield => Some(SpellKind::MagicalShield),
+            Spell::Bloodlust => Some(SpellKind::Bloodlust),
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
             Spell::Flatten { .. } => Some(SpellKind::Flatten),
             Spell::Armageddon { .. } => Some(SpellKind::Armageddon),
@@ -53,7 +57,7 @@ impl Spell {
             Spell::Flatten { at } => terrain.flatten(at, 4),
             Spell::Erode { at } => terrain.raise(at, 4, -120),
             Spell::Raise { at } => terrain.raise(at, 3, 64),
-            Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } | Spell::Swamp { .. } | Spell::MagicalShield => return None,
+            Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } | Spell::Swamp { .. } | Spell::MagicalShield | Spell::Bloodlust => return None,
         })
     }
 }

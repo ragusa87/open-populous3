@@ -135,6 +135,7 @@ fn per_player<T: Clone>(t: T) -> Vec<T> {
 fn self_cast_spell(kind: SpellKind) -> Option<Spell> {
     match kind {
         SpellKind::MagicalShield => Some(Spell::MagicalShield),
+        SpellKind::Bloodlust => Some(Spell::Bloodlust),
         _ => None,
     }
 }
@@ -696,7 +697,7 @@ impl GameMap {
             Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
             Spell::Flatten { at } => Some(world(at, 0)),
-            Spell::Erode { .. } | Spell::Raise { .. } | Spell::MagicalShield => None,
+            Spell::Erode { .. } | Spell::Raise { .. } | Spell::MagicalShield | Spell::Bloodlust => None,
         }
     }
 
@@ -774,6 +775,10 @@ impl GameMap {
             }
             Spell::MagicalShield => {
                 self.cast_nearest_status(player, crate::status::SHIELD_NUM_PEOPLE, |u| u.statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS));
+                None
+            }
+            Spell::Bloodlust => {
+                self.cast_nearest_status(player, crate::status::BLOODLUST_NUM_PEOPLE, |u| u.statuses.bloodlust = crate::status::Timed::steps(crate::status::BLOODLUST_STEPS));
                 None
             }
             Spell::LandBridge { from, to } => {
@@ -1384,11 +1389,15 @@ impl GameMap {
         (changed, Vec::new())
     }
 
-    /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`); true
-    /// when that kills it.
+    /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`); a
+    /// bloodlusted target takes a blow or a bolt `>> BLOODLUST_HEALTH_SHIFT` (independently of the attacker's own
+    /// bloodlust, already folded into `amount` by `combat::strength`/`firebolt`). True when this kills it.
     pub(crate) fn damage(&mut self, unit: UnitId, amount: u16, kind: DamageKind, from: Option<u8>) -> bool {
         match self.unit_index(unit).filter(|&i| crate::effect::hurts(&self.units[i], kind, from)) {
-            Some(i) => self.units[i].take_damage(amount),
+            Some(i) => {
+                let lessened = matches!(kind, DamageKind::Melee | DamageKind::Fire) && self.units[i].statuses.bloodlust.is_on();
+                self.units[i].take_damage(if lessened { amount >> crate::status::BLOODLUST_HEALTH_SHIFT } else { amount })
+            }
             None => false,
         }
     }
@@ -1997,6 +2006,35 @@ mod tests {
         for id in [far, enemy, wildman, shaman] {
             assert!(!m.unit(id).unwrap().statuses.shield.is_on(), "spared: too far, another tribe, a wildman, or the shaman herself");
         }
+    }
+
+    #[test]
+    fn bloodlust_bloodlusts_the_nearest_own_followers_around_the_shaman_once_the_cast_releases() {
+        let mut m = GameMap::sandbox_walk();
+        m.spell_books[0].set(SpellKind::Bloodlust, crate::spell_book::Availability::Unlimited);
+        let at = (m.units[0].x, m.units[0].z);
+        let near: Vec<UnitId> = (0..crate::status::BLOODLUST_NUM_PEOPLE).map(|k| m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(k as u16 * 20), at.1)).id).collect();
+        let far = m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(4000), at.1)).id;
+        m.apply(&Command::CastSelf { player: 0, kind: SpellKind::Bloodlust });
+        m.run(crate::unit::CAST_RELEASE);
+        assert!(near.iter().all(|&id| m.unit(id).unwrap().statuses.bloodlust.is_on()), "the 6 nearest, bloodlusted");
+        assert!(!m.unit(far).unwrap().statuses.bloodlust.is_on(), "too far: not among the 6 nearest");
+    }
+
+    #[test]
+    fn a_bloodlusted_defender_takes_an_eighth_of_a_blow_or_a_bolt_but_not_of_a_blast() {
+        let mut map = GameMap::sandbox_walk();
+        let enemy = map.spawn(1, UnitKind::Brave, (map.units[0].x.wrapping_add(1024), map.units[0].z)).id;
+        let max = map.unit(enemy).unwrap().health.max();
+        map.unit_mut(enemy).unwrap().statuses.bloodlust = crate::status::Timed::steps(crate::status::BLOODLUST_STEPS);
+        map.damage(enemy, 80, DamageKind::Melee, Some(0));
+        assert_eq!(map.unit(enemy).unwrap().health.current(), max - (80 >> crate::status::BLOODLUST_HEALTH_SHIFT), "a blow, lessened");
+        let after_melee = map.unit(enemy).unwrap().health.current();
+        map.damage(enemy, 80, DamageKind::Fire, Some(0));
+        assert_eq!(map.unit(enemy).unwrap().health.current(), after_melee - (80 >> crate::status::BLOODLUST_HEALTH_SHIFT), "a bolt, lessened too");
+        let after_fire = map.unit(enemy).unwrap().health.current();
+        map.damage(enemy, 80, DamageKind::Blast, Some(0));
+        assert_eq!(map.unit(enemy).unwrap().health.current(), after_fire - 80, "a blast: full amount, bloodlust only softens a fight");
     }
 
     #[test]
