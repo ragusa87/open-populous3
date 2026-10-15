@@ -661,12 +661,14 @@ impl GameMap {
 
     /// The nearest own followers (`UnitKind::FOLLOWERS`, not the shaman or a wildman, nor already a Ghost Army
     /// copy) around `player`'s shaman, as she stands when the cast releases, each touched by `set` (`release`'s
-    /// `MagicalShield`/`Bloodlust`/`Invisibility` arms, `nearest::nearest_n`, the shared selector,
-    /// pop3-rev-analysis.md 0x515E30).
-    fn cast_nearest_status(&mut self, player: u8, n: u32, set: impl Fn(&mut Unit)) {
+    /// `MagicalShield`/`Bloodlust`/`Invisibility` arms). One not already `fresh` for this spell sorts after every
+    /// one that is (`nearest::nearest_n_fresh_first`, the shared selector, pop3-rev-analysis.md 0x515E30): a recast
+    /// reaches fresh followers first, and only refreshes an already-touched one's timer once there is nobody fresh
+    /// left among the nearest `n` (confirmed, docs/specs/spells.md "Magical Shield").
+    fn cast_nearest_status(&mut self, player: u8, n: u32, fresh: impl Fn(&Unit) -> bool, set: impl Fn(&mut Unit)) {
         let Some(at) = self.shaman_of(player).map(|u| (u.x, u.z)) else { return };
         let pred = |u: &Unit| u.owner == player && UnitKind::FOLLOWERS.contains(&u.kind) && u.is_alive() && !u.statuses.ghost;
-        for id in crate::nearest::nearest_n(&self.units, at, n as usize, pred) {
+        for id in crate::nearest::nearest_n_fresh_first(&self.units, at, n as usize, pred, fresh) {
             if let Some(u) = self.unit_mut(id) {
                 set(u);
             }
@@ -775,15 +777,30 @@ impl GameMap {
                 None
             }
             Spell::MagicalShield => {
-                self.cast_nearest_status(player, crate::status::SHIELD_NUM_PEOPLE, |u| u.statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS));
+                self.cast_nearest_status(
+                    player,
+                    crate::status::SHIELD_NUM_PEOPLE,
+                    |u| !u.statuses.shield.is_on(),
+                    |u| u.statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS),
+                );
                 None
             }
             Spell::Bloodlust => {
-                self.cast_nearest_status(player, crate::status::BLOODLUST_NUM_PEOPLE, |u| u.statuses.bloodlust = crate::status::Timed::steps(crate::status::BLOODLUST_STEPS));
+                self.cast_nearest_status(
+                    player,
+                    crate::status::BLOODLUST_NUM_PEOPLE,
+                    |u| !u.statuses.bloodlust.is_on(),
+                    |u| u.statuses.bloodlust = crate::status::Timed::steps(crate::status::BLOODLUST_STEPS),
+                );
                 None
             }
             Spell::Invisibility => {
-                self.cast_nearest_status(player, crate::status::INVIS_NUM_PEOPLE, |u| u.statuses.invisible = crate::status::Timed::steps(crate::status::INVIS_STEPS));
+                self.cast_nearest_status(
+                    player,
+                    crate::status::INVIS_NUM_PEOPLE,
+                    |u| !u.statuses.invisible.is_on(),
+                    |u| u.statuses.invisible = crate::status::Timed::steps(crate::status::INVIS_STEPS),
+                );
                 None
             }
             Spell::Convert { at } => {
@@ -2024,6 +2041,31 @@ mod tests {
         for id in [far, enemy, wildman, shaman] {
             assert!(!m.unit(id).unwrap().statuses.shield.is_on(), "spared: too far, another tribe, a wildman, or the shaman herself");
         }
+    }
+
+    #[test]
+    fn recasting_magical_shield_reaches_fresh_followers_before_refreshing_an_already_shielded_one() {
+        let mut m = GameMap::sandbox_walk();
+        m.spell_books[0].set(SpellKind::MagicalShield, crate::spell_book::Availability::Unlimited);
+        let at = (m.units[0].x, m.units[0].z);
+        // The closest one already has a shield about to run out; 6 fresh ones stand a little farther, within the
+        // same cast's reach.
+        let stale = m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(5), at.1)).id;
+        // Comfortably above 0 so it is still clearly on (not accidentally expired by its own `STEP` tick) through
+        // the cast's `CAST_RELEASE`-turn animation, yet well under `SHIELD_STEPS` so a refresh is visible.
+        m.unit_mut(stale).unwrap().statuses.shield = crate::status::Timed::steps(10);
+        let fresh: Vec<UnitId> = (0..crate::status::SHIELD_NUM_PEOPLE).map(|k| m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(50 + k as u16 * 20), at.1)).id).collect();
+        m.apply(&Command::CastSelf { player: 0, kind: SpellKind::MagicalShield });
+        m.run(crate::unit::CAST_RELEASE);
+        assert!(fresh.iter().all(|&id| m.unit(id).unwrap().statuses.shield.steps_left() == crate::status::SHIELD_STEPS), "the 6 fresh ones, not the closer stale one");
+        let left = m.unit(stale).unwrap().statuses.shield.steps_left();
+        assert!(left > 0 && left < crate::status::SHIELD_STEPS, "left untouched (just ticked down some): there was room for everyone fresh");
+
+        // Everyone nearby is shielded now (nobody left fresh): a recast falls back to plain distance, reaching the
+        // closest one again and resetting its timer to a new full duration, rather than refusing to touch it again.
+        m.apply(&Command::CastSelf { player: 0, kind: SpellKind::MagicalShield });
+        m.run(crate::unit::CAST_RELEASE);
+        assert_eq!(m.unit(stale).unwrap().statuses.shield.steps_left(), crate::status::SHIELD_STEPS, "the closest, refreshed");
     }
 
     #[test]

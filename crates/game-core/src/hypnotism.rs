@@ -1,15 +1,19 @@
 //! Hypnotism (pop3-rev-analysis.md "Per spell" 7), an effect (`effect::EffectKind::Hypnotism`): aimed at a point
 //! like a blast. On its one turn, the `HYPNO_NUM_PEOPLE` nearest people of other tribes around it — not a
-//! wildman, not a shaman, not a shielded one (`nearest::nearest_n`, the shared selector, pop3-rev-analysis.md
-//! 0x515E30) — join the caster's tribe for `status::HYPNO_STEPS` steps (`WorldEvent::Hypnotize`, `GameMap::
-//! hypnotize`). Once that runs out, each one reverts to its own original tribe (`GameMap::
-//! revert_expired_hypnosis`), unless that tribe is wiped out by then, when the change stays permanent (confirmed,
-//! docs/specs/spells.md: "if their tribe is gone, they stay").
+//! wildman, not a shaman, not a shielded one — join the caster's tribe for `status::HYPNO_STEPS` steps
+//! (`WorldEvent::Hypnotize`, `GameMap::hypnotize`); one not already hypnotised sorts before one that is, regardless
+//! of distance (`nearest::nearest_n_fresh_first`, the shared selector, pop3-rev-analysis.md 0x515E30): a cast
+//! reaches fresh captives first, recapturing an already-hypnotised one only to fill what's left (confirmed,
+//! docs/specs/spells.md "Magical Shield"). Once `HYPNO_STEPS` runs out, each one reverts to its own *original*
+//! tribe (`GameMap::revert_expired_hypnosis`) — the one before its first capture, even through several recaptures
+//! by different tribes in between (confirmed: recasting on an already-hypnotised unit changes who controls it and
+//! restarts its timer, but never who it reverts to) — unless that tribe is wiped out by then, when the change
+//! stays permanent (confirmed: "if their tribe is gone, they stay").
 
 use crate::effect::{Effect, EffectKind};
 use crate::event::WorldEvent;
 use crate::map::GameMap;
-use crate::nearest::nearest_n;
+use crate::nearest::nearest_n_fresh_first;
 use crate::status::HYPNO_NUM_PEOPLE;
 use crate::time::{Countdown, Ticks};
 use crate::unit::{Unit, UnitKind};
@@ -26,19 +30,23 @@ pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
 }
 
 impl Hypnotism {
-    /// Its one turn at `at`, cast by `owner`: the nearest `HYPNO_NUM_PEOPLE` eligible people join `owner`'s tribe.
+    /// Its one turn at `at`, cast by `owner`: the nearest `HYPNO_NUM_PEOPLE` eligible people join `owner`'s tribe,
+    /// a not-yet-hypnotised one taking priority over one already captured by somebody.
     pub fn turn(&mut self, at: (u16, u16), owner: u8, world: &GameMap) -> Vec<WorldEvent> {
         let pred = |u: &Unit| u.owner != owner && u.kind != UnitKind::Wildman && u.kind != UnitKind::Shaman && u.is_alive() && !u.statuses.shield.is_on();
-        nearest_n(&world.units, at, HYPNO_NUM_PEOPLE as usize, pred).into_iter().map(|unit| WorldEvent::Hypnotize { unit, tribe: owner }).collect()
+        let fresh = |u: &Unit| !u.statuses.hypnotized.is_on();
+        nearest_n_fresh_first(&world.units, at, HYPNO_NUM_PEOPLE as usize, pred, fresh).into_iter().map(|unit| WorldEvent::Hypnotize { unit, tribe: owner }).collect()
     }
 }
 
 impl GameMap {
-    /// The unit `unit` joins `tribe` like `change_owner`, but remembers its own original tribe
-    /// (`status::Statuses.hypnotized_from`) and starts its `HYPNO_STEPS` countdown (`status::Statuses.hypnotized`).
+    /// The unit `unit` joins `tribe` like `change_owner`, restarting its `HYPNO_STEPS` countdown
+    /// (`status::Statuses.hypnotized`). Its `hypnotized_from` keeps the tribe it had *before its first capture*: a
+    /// unit already hypnotised that gets recast on (by its current captor or anyone else) changes hands and its
+    /// timer restarts, but what it reverts to never changes mid-chain.
     pub(crate) fn hypnotize(&mut self, unit: crate::unit::UnitId, tribe: u8) {
         let Some(u) = self.unit_mut(unit).filter(|u| u.is_alive()) else { return };
-        let original = u.owner;
+        let original = u.statuses.hypnotized_from.unwrap_or(u.owner);
         u.change_owner(tribe);
         if let Some(u) = self.unit_mut(unit) {
             u.statuses.hypnotized = crate::status::Timed::steps(crate::status::HYPNO_STEPS);
@@ -114,6 +122,20 @@ mod tests {
     }
 
     #[test]
+    fn a_recast_reaches_fresh_enemies_before_recapturing_an_already_hypnotised_one() {
+        let mut map = bare();
+        // Already captured by tribe 2, closer to the cast than everyone else.
+        let captured = map.spawn(1, UnitKind::Spy, (AT.0.wrapping_add(5), AT.1)).id;
+        map.hypnotize(captured, 2);
+        // 6 fresh enemies, a little farther out: still reached first.
+        let fresh: Vec<UnitId> = (0..HYPNO_NUM_PEOPLE).map(|k| map.spawn(1, UnitKind::Spy, (AT.0.wrapping_add(50 + k as u16 * 10), AT.1)).id).collect();
+        map.add_effect(effect(0, AT));
+        map.tick();
+        assert!(fresh.iter().all(|&id| map.unit(id).unwrap().owner == 0), "the 6 fresh ones, not the closer captured one");
+        assert_eq!(map.unit(captured).unwrap().owner, 2, "left with its captor: there was room for everyone fresh");
+    }
+
+    #[test]
     fn reverts_to_the_original_tribe_once_hypnotism_runs_out() {
         let mut map = bare();
         // Spies (`sight: 0`) never look for a fight on their own, so a newly captured one and the decoys left
@@ -134,6 +156,28 @@ mod tests {
         });
         assert!(reverted.is_some(), "back to its own tribe within HYPNO_STEPS, phase aside");
         assert_eq!(map.unit(enemy).unwrap().statuses.hypnotized_from, None);
+    }
+
+    #[test]
+    fn recapturing_an_already_hypnotised_unit_changes_hands_but_keeps_its_true_original_tribe() {
+        let mut map = bare();
+        let enemy = map.spawn(1, UnitKind::Spy, AT).id;
+        // Tribe 1 keeps another unit alive elsewhere so it is never wiped out and this stays a plain revert.
+        map.spawn(1, UnitKind::Spy, (AT.0.wrapping_add(20_000), AT.1));
+        map.hypnotize(enemy, 0);
+        assert_eq!((map.unit(enemy).unwrap().owner, map.unit(enemy).unwrap().statuses.hypnotized_from), (0, Some(1)));
+        // Tribe 2 recaptures it from tribe 0 before its timer runs out.
+        map.hypnotize(enemy, 2);
+        assert_eq!(
+            (map.unit(enemy).unwrap().owner, map.unit(enemy).unwrap().statuses.hypnotized_from),
+            (2, Some(1)),
+            "controlled by the latest caster, but still remembers tribe 1, not tribe 0"
+        );
+        let reverted = (0..500).find(|_| {
+            map.tick();
+            map.unit(enemy).unwrap().owner == 1
+        });
+        assert!(reverted.is_some(), "reverts to tribe 1 in the end, never to tribe 0 who held it in between");
     }
 
     #[test]

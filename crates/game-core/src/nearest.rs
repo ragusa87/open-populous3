@@ -6,10 +6,18 @@
 use crate::unit::{torus_delta, Unit, UnitId};
 
 pub fn nearest_n(units: &[Unit], at: (u16, u16), n: usize, pred: impl Fn(&Unit) -> bool) -> Vec<UnitId> {
-    let mut found: Vec<(u32, UnitId)> = units.iter().filter(|u| pred(u)).map(|u| (distance_sq(at, (u.x, u.z)), u.id)).collect();
-    found.sort_by_key(|&(d, id)| (d, id));
+    nearest_n_fresh_first(units, at, n, pred, |_| true)
+}
+
+/// Like `nearest_n`, but a candidate `fresh` of the spell's own effect (not already shielded, bloodlusted,
+/// invisible or hypnotised) sorts before one that already has it, regardless of distance: a recast reaches new
+/// targets first, and only re-touches (refreshing its timer to full) one that already has it once there is
+/// nobody fresh left within the nearest `n` (confirmed, docs/specs/spells.md "Magical Shield").
+pub fn nearest_n_fresh_first(units: &[Unit], at: (u16, u16), n: usize, pred: impl Fn(&Unit) -> bool, fresh: impl Fn(&Unit) -> bool) -> Vec<UnitId> {
+    let mut found: Vec<(bool, u32, UnitId)> = units.iter().filter(|u| pred(u)).map(|u| (!fresh(u), distance_sq(at, (u.x, u.z)), u.id)).collect();
+    found.sort_by_key(|&(stale, d, id)| (stale, d, id));
     found.truncate(n);
-    found.into_iter().map(|(_, id)| id).collect()
+    found.into_iter().map(|(_, _, id)| id).collect()
 }
 
 fn distance_sq(a: (u16, u16), b: (u16, u16)) -> u32 {
@@ -49,5 +57,16 @@ mod tests {
     fn wraps_across_the_torus_edge() {
         let units = [person(1, (65530, 0))];
         assert_eq!(nearest_n(&units, (10, 0), 1, |_| true), [Id::from_raw(1)], "close the other way round");
+    }
+
+    #[test]
+    fn fresh_first_prefers_untouched_candidates_over_closer_already_touched_ones() {
+        let units = [person(1, (0, 10)), person(2, (0, 20)), person(3, (0, 30))];
+        let fresh_except_1 = |u: &Unit| u.id != Id::from_raw(1);
+        // #1 is closest but already has it; #2 and #3 are fresh and farther: still picked first.
+        assert_eq!(nearest_n_fresh_first(&units, (0, 0), 2, |_| true, fresh_except_1), [Id::from_raw(2), Id::from_raw(3)]);
+        // Not enough fresh ones to fill 2 slots: the closest already-touched one fills the rest.
+        let fresh_only_3 = |u: &Unit| u.id == Id::from_raw(3);
+        assert_eq!(nearest_n_fresh_first(&units, (0, 0), 2, |_| true, fresh_only_3), [Id::from_raw(3), Id::from_raw(1)]);
     }
 }
