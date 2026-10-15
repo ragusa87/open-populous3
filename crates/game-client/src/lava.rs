@@ -282,7 +282,15 @@ pub fn lava_material(seed: u32, images: &mut Assets<Image>, materials: &mut Asse
         min_filter: ImageFilterMode::Linear,
         ..default()
     });
-    materials.add(StandardMaterial { base_color_texture: Some(images.add(image)), unlit: true, ..default() })
+    materials.add(StandardMaterial {
+        base_color_texture: Some(images.add(image)),
+        unlit: true,
+        // Seen from either side, like `blueprint`'s own ground-draped mark: a steep flank can turn a cell's
+        // triangle away from the camera. `depth_bias` keeps it from z-fighting the terrain it sits flush on.
+        cull_mode: None,
+        depth_bias: 20.0,
+        ..default()
+    })
 }
 
 /// How far above the true ground the patch sits, so it never z-fights with the terrain under it (`blueprint.rs`'s
@@ -294,6 +302,10 @@ const LIFT: f32 = 0.02;
 /// not flat, so a single flat quad would float or bury itself across the patch. UVs are absolute cell
 /// coordinates, not `0..1` per quad, so the repeating material (`lava_material`) tiles seamlessly across the
 /// whole patch regardless of which cells are lit.
+///
+/// Each quad is split along the (1,0)-(0,1) diagonal, the same fold `terrain_mesh::build` uses for its own
+/// cells: matching all 4 corners isn't enough on a slope — the other diagonal bends the quad's interior away
+/// from the terrain's own triangle there, so it reads as sunk under the ground on one half of the cell.
 fn ground_mesh(cells: &[(i32, i32)], terrain: &Heightmap, focus: Vec2, params: &crate::terrain_mesh::CurveParams) -> MeshData {
     let mut m = MeshData::default();
     for &(cx, cz) in cells {
@@ -305,7 +317,7 @@ fn ground_mesh(cells: &[(i32, i32)], terrain: &Heightmap, focus: Vec2, params: &
             m.normals.push([0.0, 1.0, 0.0]);
             m.uvs.push([cx as f32 + ox, cz as f32 + oz]);
         }
-        m.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        m.indices.extend([base, base + 1, base + 3, base + 1, base + 2, base + 3]);
     }
     m
 }
@@ -437,6 +449,18 @@ mod tests {
         assert_eq!(m.positions.len(), 8, "4 corners per cell");
         assert_eq!(m.indices.len(), 12, "2 triangles per cell");
         assert!(m.uvs.contains(&[3.0, 4.0]) && m.uvs.contains(&[4.0, 6.0]), "uv matches absolute cell coords");
+    }
+
+    #[test]
+    fn ground_mesh_splits_cells_along_the_terrain_s_own_diagonal() {
+        // Corners come out in order (0,0), (1,0), (1,1), (0,1) (indices 0-3): `terrain_mesh::build` folds
+        // every cell along (1,0)-(0,1) (indices 1 and 3), not (0,0)-(1,1) — matching all 4 corners to the real
+        // terrain isn't enough on a slope if the two meshes fold their quads along different diagonals, since
+        // then their interiors disagree away from the corners.
+        let terrain = Heightmap::new(16);
+        let params = crate::terrain_mesh::CurveParams::default();
+        let m = ground_mesh(&[(0, 0)], &terrain, Vec2::ZERO, &params);
+        assert_eq!(m.indices, vec![0, 1, 3, 1, 2, 3]);
     }
 
     #[test]
