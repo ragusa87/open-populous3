@@ -13,11 +13,14 @@ pub const BLOODLUST_STEPS: u8 = 180;
 pub const BLINK_STEPS: u8 = 15;
 /// `INVISIBLE_COUNT_X8` (file and exe 180): about 120 s, same length as Shield and Bloodlust (docs/specs/spells.md).
 pub const INVIS_STEPS: u8 = 180;
-/// `SHIELD_NUM_PEOPLE`, `BLOODLUST_NUM_PEOPLE`, `INVIS_NUM_PEOPLE` (file 6 each): nearest own followers touched
-/// per cast (docs/specs/spells.md).
+/// `HYPNO_COUNT_X8` (file and exe 55): 440 turns, 36.7 s (docs/specs/spells.md).
+pub const HYPNO_STEPS: u8 = 55;
+/// `SHIELD_NUM_PEOPLE`, `BLOODLUST_NUM_PEOPLE`, `INVIS_NUM_PEOPLE`, `HYPNO_NUM_PEOPLE` (file 6 each): nearest
+/// people touched per cast (docs/specs/spells.md).
 pub const SHIELD_NUM_PEOPLE: u32 = 6;
 pub const BLOODLUST_NUM_PEOPLE: u32 = 6;
 pub const INVIS_NUM_PEOPLE: u32 = 6;
+pub const HYPNO_NUM_PEOPLE: u32 = 6;
 /// `BLOODLUST_HEALTH_X` (file and exe 3): a bloodlusted defender takes `>> 3` (÷8) of an incoming blow or bolt
 /// (combat.md "Fight numbers"); the attacker's own ×3 (`combat::BLOODLUST_STRENGTH`, `firebolt::BLOODLUST_DAMAGE`)
 /// and this apply independently when both sides are bloodlusted (confirmed, docs/plans/spells.md).
@@ -58,7 +61,11 @@ pub struct Statuses {
     pub invisible: Timed,
     pub shield: Timed,
     pub bloodlust: Timed,
-    pub hypnotized: bool,
+    pub hypnotized: Timed,
+    /// The tribe to revert to once `hypnotized` runs out (`GameMap::revert_expired_hypnosis`), unless that tribe
+    /// is wiped out by then (`GameMap::tribe_wiped_out`), when the change stays permanent. Only meaningful while
+    /// `hypnotized.is_on()`; `change_owner` (hypnotized away again, or for any other reason) clears both together.
+    pub hypnotized_from: Option<u8>,
     /// A Ghost Army copy: no real unit.
     pub ghost: bool,
 }
@@ -74,6 +81,7 @@ impl Statuses {
             self.shield.step();
             self.bloodlust.step();
             self.invisible.step();
+            self.hypnotized.step();
         }
     }
 }

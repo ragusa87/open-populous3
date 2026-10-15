@@ -35,6 +35,9 @@ pub enum Spell {
     /// The nearest wildman within range of `at` (world units) becomes a brave of the caster, every few turns for a
     /// while: `convert::effect`.
     Convert { at: (u16, u16) },
+    /// The `HYPNO_NUM_PEOPLE` nearest people of other tribes around `at` (world units) join the caster's tribe for
+    /// a while: `hypnotism::effect`.
+    Hypnotism { at: (u16, u16) },
     /// Stops the match and settles it (`GameMap::start_armageddon`), centred on `at` (world units).
     Armageddon { at: (u16, u16) },
 }
@@ -51,6 +54,7 @@ impl Spell {
             Spell::Bloodlust => Some(SpellKind::Bloodlust),
             Spell::Invisibility => Some(SpellKind::Invisibility),
             Spell::Convert { .. } => Some(SpellKind::Convert),
+            Spell::Hypnotism { .. } => Some(SpellKind::Hypnotism),
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
             Spell::Flatten { .. } => Some(SpellKind::Flatten),
             Spell::Armageddon { .. } => Some(SpellKind::Armageddon),
@@ -73,7 +77,8 @@ impl Spell {
             | Spell::MagicalShield
             | Spell::Bloodlust
             | Spell::Invisibility
-            | Spell::Convert { .. } => return None,
+            | Spell::Convert { .. }
+            | Spell::Hypnotism { .. } => return None,
         })
     }
 }

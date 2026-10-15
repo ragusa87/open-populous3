@@ -35,6 +35,10 @@ pub enum WorldEvent {
     StartMelee { attacker: UnitId, target: UnitId },
     /// The unit joins `tribe`, converted (`GameMap::change_owner`).
     ChangeOwner { unit: UnitId, tribe: u8 },
+    /// The unit joins `tribe` like `ChangeOwner`, but remembers its own original tribe and reverts to it once
+    /// `status::Statuses.hypnotized` runs out (`GameMap::hypnotize`, `GameMap::revert_expired_hypnosis`) — unless
+    /// that tribe is wiped out by then, when the change stays permanent.
+    Hypnotize { unit: UnitId, tribe: u8 },
     /// The unit leaves the coordinator `from` (`Unit::release`); nothing if it is in another one by now, or in none.
     Release { unit: UnitId, from: crate::coordinator::Link },
     /// The unit attacks `at` back: a firewarrior hit by its bolt, a listener whose preacher was attacked. At once on

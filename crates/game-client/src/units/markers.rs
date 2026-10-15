@@ -55,7 +55,7 @@ pub fn shown(m: Marker, u: &Unit, player: u8, selected: bool, original: bool, no
         && match m {
             Marker::LowHealth => original && u.health.is_low(),
             Marker::Bloodlust => u.statuses.bloodlust.shown(now, u.id.raw()),
-            Marker::Hypnotised => u.statuses.hypnotized,
+            Marker::Hypnotised => u.statuses.hypnotized.is_on(),
             Marker::Selected => original && selected && u.owner == player,
             Marker::Shield(_) => u.statuses.shield.shown(now, u.id.raw()),
         }
@@ -279,7 +279,7 @@ mod tests {
         let mut u = brave(0);
         assert!(SLOTS.iter().all(|&m| !shown(m, &u, 0, false, true, Tick::ZERO)), "nothing on a healthy plain brave");
         u.statuses.shield = Timed::steps(SHIELD_STEPS);
-        u.statuses.hypnotized = true;
+        u.statuses.hypnotized = Timed::steps(game_core::status::HYPNO_STEPS);
         assert!(shown(Marker::Shield(2), &u, 0, false, false, Tick::ZERO) && shown(Marker::Hypnotised, &u, 0, false, false, Tick::ZERO));
         assert!(!shown(Marker::Bloodlust, &u, 0, false, true, Tick::ZERO));
         u.health.damage(u.health.max() * 3 / 4);

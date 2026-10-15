@@ -28,6 +28,7 @@ pub mod gauge;
 pub mod ground_fire;
 pub mod headcount;
 pub mod health;
+pub mod hypnotism;
 pub mod id;
 pub mod kind_stats;
 pub mod land_bridge;

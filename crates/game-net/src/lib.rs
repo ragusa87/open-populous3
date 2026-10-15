@@ -56,7 +56,7 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 }
 
 /// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport, Blast, Lightning, Armageddon, Swamp,
-/// Convert: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
+/// Convert, Hypnotism: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
 /// for a unit order `u32 unit id` then the order, for lighting or putting out a camp fire `u16 x, z`,
 /// for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`, for a self cast `spell u8`
 /// (its place in `SpellKind::ALL`), for pausing one `spell u8, paused u8`, for moving a vehicle `u32 vehicle id, u16 x, z`,
@@ -65,13 +65,21 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
             b.extend([0, *player]);
-            if let Spell::Teleport { to: at } | Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } | Spell::Convert { at } = spell {
+            if let Spell::Teleport { to: at }
+            | Spell::Blast { at }
+            | Spell::Lightning { at }
+            | Spell::Armageddon { at }
+            | Spell::Swamp { at }
+            | Spell::Convert { at }
+            | Spell::Hypnotism { at } = spell
+            {
                 b.push(match spell {
                     Spell::Teleport { .. } => 4,
                     Spell::Blast { .. } => 5,
                     Spell::Armageddon { .. } => 7,
                     Spell::Swamp { .. } => 8,
                     Spell::Convert { .. } => 9,
+                    Spell::Hypnotism { .. } => 10,
                     _ => 6,
                 });
                 b.extend(at.0.to_le_bytes());
@@ -83,9 +91,13 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                 Spell::Flatten { at } => (1, std::slice::from_ref(at)),
                 Spell::Erode { at } => (2, std::slice::from_ref(at)),
                 Spell::Raise { at } => (3, std::slice::from_ref(at)),
-                Spell::Teleport { .. } | Spell::Blast { .. } | Spell::Lightning { .. } | Spell::Armageddon { .. } | Spell::Swamp { .. } | Spell::Convert { .. } => {
-                    unreachable!("encoded above")
-                }
+                Spell::Teleport { .. }
+                | Spell::Blast { .. }
+                | Spell::Lightning { .. }
+                | Spell::Armageddon { .. }
+                | Spell::Swamp { .. }
+                | Spell::Convert { .. }
+                | Spell::Hypnotism { .. } => unreachable!("encoded above"),
                 Spell::MagicalShield | Spell::Bloodlust | Spell::Invisibility => unreachable!("self-cast: never built from a Command::Cast, see Command::CastSelf"),
             };
             b.push(tag);
@@ -235,6 +247,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
                 7 => Spell::Armageddon { at: (c.u16()?, c.u16()?) },
                 8 => Spell::Swamp { at: (c.u16()?, c.u16()?) },
                 9 => Spell::Convert { at: (c.u16()?, c.u16()?) },
+                10 => Spell::Hypnotism { at: (c.u16()?, c.u16()?) },
                 _ => return None,
             };
             Some(Command::Cast { player, spell })
@@ -341,6 +354,7 @@ mod tests {
                 Command::Cast { player: 2, spell: Spell::Lightning { at: (512, 7) } },
                 Command::Cast { player: 3, spell: Spell::Armageddon { at: (1, 65535) } },
                 Command::Cast { player: 1, spell: Spell::Convert { at: (100, 65500) } },
+                Command::Cast { player: 2, spell: Spell::Hypnotism { at: (65500, 300) } },
                 Command::Order { player: 2, order: Order::MoveTo { x: 65535, z: 300 } },
                 Command::Order { player: 0, order: Order::Cast },
                 Command::Order { player: 1, order: Order::Stop },

@@ -695,7 +695,7 @@ impl GameMap {
         };
         match *spell {
             Spell::Teleport { to } => Some(to),
-            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } | Spell::Convert { at } => Some(at),
+            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } | Spell::Convert { at } | Spell::Hypnotism { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
             Spell::Flatten { at } => Some(world(at, 0)),
             Spell::Erode { .. } | Spell::Raise { .. } | Spell::MagicalShield | Spell::Bloodlust | Spell::Invisibility => None,
@@ -788,6 +788,10 @@ impl GameMap {
             }
             Spell::Convert { at } => {
                 self.add_effect(crate::convert::effect(player, at));
+                None
+            }
+            Spell::Hypnotism { at } => {
+                self.add_effect(crate::hypnotism::effect(player, at));
                 None
             }
             Spell::LandBridge { from, to } => {
@@ -1062,6 +1066,7 @@ impl GameMap {
         self.release_orphans();
         self.tend_vehicles();
         self.units.iter_mut().for_each(|u| u.statuses.tick(now, u.id.raw()));
+        self.revert_expired_hypnosis();
         if crate::unit::HEAL_EVERY.fires(now, 0) {
             self.units.iter_mut().for_each(Unit::heal);
         }
@@ -1148,7 +1153,7 @@ pub const SANDBOX_MARKERS: [fn(&mut Unit); 5] = [
     },
     |u| u.statuses.shield = Timed::steps(crate::status::SHIELD_STEPS),
     |u| u.statuses.bloodlust = Timed::steps(crate::status::BLOODLUST_STEPS),
-    |u| u.statuses.hypnotized = true,
+    |u| u.statuses.hypnotized = Timed::steps(crate::status::HYPNO_STEPS),
     |u| SANDBOX_MARKERS[..4].iter().for_each(|marked| marked(u)),
 ];
 
@@ -1365,6 +1370,10 @@ impl GameMap {
             }
             WorldEvent::ChangeOwner { unit, tribe } => {
                 self.change_owner(unit, tribe);
+                None
+            }
+            WorldEvent::Hypnotize { unit, tribe } => {
+                self.hypnotize(unit, tribe);
                 None
             }
             WorldEvent::StartMelee { attacker, target } => {
@@ -2241,7 +2250,7 @@ mod tests {
         for kind in &UnitKind::FOLLOWERS {
             assert_eq!((count(0, *kind), count(1, *kind)), (3 + SANDBOX_MARKERS.len(), 1), "{kind:?}");
             let marked: Vec<&Unit> = m.units.iter().filter(|u| u.owner == 0 && u.kind == *kind).skip(3).collect();
-            let markers = |u: &Unit| [u.health.is_low(), u.statuses.shield.is_on(), u.statuses.bloodlust.is_on(), u.statuses.hypnotized];
+            let markers = |u: &Unit| [u.health.is_low(), u.statuses.shield.is_on(), u.statuses.bloodlust.is_on(), u.statuses.hypnotized.is_on()];
             assert_eq!(marked.iter().map(|u| markers(u)).collect::<Vec<_>>(), [
                 [true, false, false, false],
                 [false, true, false, false],
