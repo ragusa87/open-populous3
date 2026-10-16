@@ -18,6 +18,10 @@ pub enum WorldEvent {
     /// Throws the unit (`Unit::fling`), unless its `kind` of push spares it (`effect::pushes`).
     Push { unit: UnitId, vel: Velocity, kind: PushKind },
     Panic { unit: UnitId },
+    /// Catches fire (`Unit::catch_fire`, pop3-rev-analysis.md "Volcano lava flow"): lava's own per-turn burn and
+    /// Volcano's own turn-110 destruction alike — confirmed: the original never kills outright there, only sets
+    /// this flag and lets it run its course.
+    Ignite { unit: UnitId },
     Raid { building: BuildingId },
     SetFire { building: BuildingId },
     /// Removes the building outright, bypassing the normal wood/wear-down model (`GameMap::burn_down`): Volcano's
@@ -26,6 +30,9 @@ pub enum WorldEvent {
     Destroy { building: BuildingId },
     /// Sets the trees of the cell on fire (`Tree::ignite`).
     BurnTrees { cell: (i32, i32) },
+    /// A lava flow finished (`lava::Lava`, pop3-rev-analysis.md "Volcano lava flow"): its whole reached footprint
+    /// becomes a permanent building-ash scorch mark (`GameMap::ashes`, the same as a destroyed building's own).
+    Scorch { cells: Vec<(i32, i32)> },
     /// A new effect, ticking from the next turn; its id is given then.
     SpawnEffect(Effect),
     Terrain(TerrainChange),

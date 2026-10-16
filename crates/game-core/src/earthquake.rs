@@ -3,9 +3,9 @@
 //! within `SINK_RADIUS_CELLS` (8) sinks by up to `SINK_AMOUNT` (600), reusing the existing `raise` brush
 //! (`WorldEvent::Terrain(TerrainChange::Raise)`, `by: -SINK_AMOUNT`) rather than the trace's own distinct
 //! `600 × (4096 − d) / 4096` falloff — an approximation, the same call Erode already makes with the same brush — and
-//! a lava fissure opens at the centre (`lava::effect`, the fixed patch this module names it for, see its own doc)
-//! over `FISSURE_RADIUS_CELLS` (2, a guess: no size given) for `FISSURE_LIFETIME` ("short-lived", a guess, no
-//! number given either).
+//! a lava fissure opens at the centre (`lava::effect`, the "lava square" patch this module names it for, see its
+//! own doc: it decays and self-destructs on its own, no lifetime of our own to guess any more) over
+//! `FISSURE_RADIUS_CELLS` (2, a guess: no size given).
 //!
 //! Not yet: the three building-shake checks at turns 24, 56 and 88 (20/128 chance per building in 16 × 16 cells,
 //! occupants out, a partial explosion) — they need `Raid` (`event.rs`), itself still a stub; and the trace's
@@ -22,8 +22,6 @@ pub const SINK_AT: u32 = 60;
 pub const SINK_RADIUS_CELLS: i32 = 8;
 pub const SINK_AMOUNT: i32 = 600;
 pub const FISSURE_RADIUS_CELLS: f32 = 2.0;
-/// "Short-lived" (a guess, no number given): a little longer than Volcano's own fireball shots live.
-pub const FISSURE_LIFETIME: Ticks = Ticks::secs(5);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Earthquake {
@@ -45,7 +43,7 @@ impl Earthquake {
             events.push(WorldEvent::Terrain(TerrainChange::Raise { at: cell, radius: SINK_RADIUS_CELLS, by: -SINK_AMOUNT }));
             let size = world.terrain.size() as i32;
             let fissure = crate::lava::disc(at, FISSURE_RADIUS_CELLS, size);
-            events.push(WorldEvent::SpawnEffect(crate::lava::effect(owner, at, fissure, Countdown::new(FISSURE_LIFETIME))));
+            events.push(WorldEvent::SpawnEffect(crate::lava::effect(owner, at, fissure)));
         }
         self.turn += 1;
         events

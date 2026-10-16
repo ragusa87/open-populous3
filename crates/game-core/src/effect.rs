@@ -67,9 +67,10 @@ pub enum DamageKind {
     /// A swamp's kill (`swamp`): outright, any tribe (even the caster's own), shield or no shield — `hurts` never
     /// gates it (TODO.md "Mana": unlike blast, lightning, swarm or hypnotise, a shielded unit still drowns).
     Swamp,
-    /// Standing on a hot lava cell (`lava`): outright, any tribe (even the caster's own) and shield or no shield —
-    /// a landscape-style kill like Swamp's, sparing only the caster's own shaman (pop3-rev-analysis.md "Lava",
-    /// "Friendly fire").
+    /// Not an outright kill (confirmed, pop3-rev-analysis.md "Volcano lava flow"): used only as `hurts`'s own
+    /// eligibility check for who a hot lava cell (`lava`) or Volcano's own turn-110 destruction catches fire
+    /// (`WorldEvent::Ignite`) — any tribe (even the caster's own) and shield or no shield, sparing only the
+    /// caster's own shaman.
     Lava,
 }
 

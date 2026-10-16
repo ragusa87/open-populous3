@@ -330,17 +330,18 @@ fn set_ground_mesh(mesh: &mut Mesh, data: MeshData) {
 }
 
 /// One lava effect's own ground patch: a draped, textured mesh rebuilt every frame (like `blueprint`'s
-/// footprint mark) so it tracks the camera's own live focus and the torus wrap, over cells fixed for the
-/// effect's whole life (`Lava::cells`) — no `Grounded` here, its vertices are already render-space positions.
+/// footprint mark) so it tracks the camera's own live focus and the torus wrap, and the live cell set
+/// (`Lava::cells`, which grows and later shrinks to nothing as the effect lives out its own lifecycle) — no
+/// `Grounded` here, its vertices are already render-space positions.
 #[derive(Component)]
 pub struct LavaView {
     mesh: Handle<Mesh>,
 }
 
-fn effect_cells(e: &Effect) -> &[(i32, i32)] {
+fn effect_cells(e: &Effect) -> Vec<(i32, i32)> {
     match &e.kind {
         EffectKind::Lava(lava) => lava.cells(),
-        _ => &[],
+        _ => Vec::new(),
     }
 }
 
@@ -362,7 +363,7 @@ impl WorldView for LavaView {
             return None;
         }
         let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-        set_ground_mesh(&mut mesh, ground_mesh(cells, &map.0.terrain, rig.focus, &params.0));
+        set_ground_mesh(&mut mesh, ground_mesh(&cells, &map.0.terrain, rig.focus, &params.0));
         let mesh = meshes.add(mesh);
         let material = lava_material(id.raw(), images, mats);
         view.insert((Mesh3d(mesh.clone()), MeshMaterial3d(material), Transform::default(), Visibility::Visible, NotShadowCaster, crate::hover::NoOutline));
@@ -372,7 +373,7 @@ impl WorldView for LavaView {
     fn update(&self, (_, e): &(Id<Effect>, Effect), _now: SimNow, (map, rig, params, meshes, _, _): &mut SystemParamItem<Self::Params>) {
         let cells = effect_cells(e);
         if let Some(mut m) = meshes.get_mut(&self.mesh) {
-            set_ground_mesh(&mut m, ground_mesh(cells, &map.0.terrain, rig.focus, &params.0));
+            set_ground_mesh(&mut m, ground_mesh(&cells, &map.0.terrain, rig.focus, &params.0));
         }
     }
 }

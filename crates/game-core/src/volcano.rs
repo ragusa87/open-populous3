@@ -10,10 +10,10 @@
 //!   `SLOPE_RADIUS_CELLS` (5).
 //! - At `DESTROY_AT` (110, 30 turns into the rise): every building in `DESTROY_AREA_CELLS` (6×6) cells is destroyed
 //!   outright (`WorldEvent::Destroy`, bypassing the normal wood/wear-down model, accepted per the plan) and every
-//!   person there (open or inside, but the caster's own shaman) dies (`DamageKind::Lava`, the same landscape-kill
-//!   `lava` itself uses).
-//! - Once shaping ends (`SHAPING_TURNS`), a `lava` effect is spawned over the crater's own cells for `LAVA_LIFETIME`
-//!   ("up to 16 s"), and `FIREBALLS` (28, "about 22 small and 6 big": mechanically identical here, the split is
+//!   person there (open or inside, but the caster's own shaman) catches fire (`WorldEvent::Ignite`, confirmed: not
+//!   an outright kill either, same correction as `lava`'s own doc).
+//! - Once shaping ends (`SHAPING_TURNS`), a `lava` flow is spawned over the crater's own cells (`lava::flowing`,
+//!   its own growth/fade/ash lifecycle, up to 208 turns), and `FIREBALLS` (28, "about 22 small and 6 big": mechanically identical here, the split is
 //!   visual only and not given a damage difference) land one `panicking_blast` at a time at random points in the
 //!   6×6 area, spread evenly (ceiling division) over the turns left in the controller's own `TOTAL_TURNS` — a pure
 //!   scheduler for its own sub-effects from here on, same spirit as Firestorm's (docs/plans/spells.md "Firestorm").
@@ -43,12 +43,6 @@ pub const RIM_RADIUS_CELLS: f32 = 2.5;
 pub const SLOPE_RADIUS_CELLS: f32 = 5.0;
 /// The crater's own floor (a guess, not given a number: mirrors `MAX_HEIGHT`, the rim's own absolute extreme).
 pub const CRATER_FLOOR: u16 = 0;
-/// "up to 16 s".
-pub const LAVA_LIFETIME: Ticks = Ticks::secs(16);
-/// Our own invented guess for the lava "flowing out" further as it lives (`lava`'s own module doc: the
-/// original's distinct "lava flow" effect is named but not traced any further yet): from the crater's own rim
-/// out to the foot of its built slope, over half its lifetime, then holding there for the rest.
-pub const LAVA_FLOW_TICKS: u32 = LAVA_LIFETIME.get() / 2;
 /// "about 22 small and 6 big fireballs": 28 total, not mechanically distinguished (see module doc).
 pub const FIREBALLS: u32 = 22 + 6;
 
@@ -84,10 +78,10 @@ impl Volcano {
         }
         if self.turn == DESTROY_AT && !self.destroyed {
             self.destroyed = true;
-            events.extend(destroy_and_kill(cell, owner, world, size));
+            events.extend(destroy_and_ignite(cell, owner, world, size));
         }
         if self.turn == SHAPING_TURNS {
-            events.push(WorldEvent::SpawnEffect(crate::lava::flowing(owner, at, RIM_RADIUS_CELLS, SLOPE_RADIUS_CELLS, LAVA_FLOW_TICKS, size, Countdown::new(LAVA_LIFETIME))));
+            events.push(WorldEvent::SpawnEffect(crate::lava::flowing(owner, at, size)));
         }
         if self.turn >= SHAPING_TURNS {
             let ticks_left = TOTAL_TURNS.saturating_sub(self.turn).max(1);
@@ -121,13 +115,14 @@ impl Volcano {
     }
 }
 
-/// Everyone in the `DESTROY_AREA_CELLS` square around `cell` (open or inside) dies but the caster's own shaman
-/// (`DamageKind::Lava`); every building there is destroyed outright.
-fn destroy_and_kill(cell: Cell, owner: u8, world: &GameMap, size: i32) -> Vec<WorldEvent> {
+/// Everyone in the `DESTROY_AREA_CELLS` square around `cell` (open or inside) catches fire, but the caster's own
+/// shaman (`effect::hurts`, `DamageKind::Lava`'s own shaman-sparing rule, reused here too); every building there
+/// is destroyed outright.
+fn destroy_and_ignite(cell: Cell, owner: u8, world: &GameMap, size: i32) -> Vec<WorldEvent> {
     let area: Vec<Cell> = square(cell, DESTROY_AREA_CELLS, size).collect();
     let mut events = Vec::new();
-    for u in world.units.iter().filter(|u| u.is_alive() && area.contains(&u.cell())) {
-        events.push(WorldEvent::Damage { unit: u.id, amount: u16::MAX, kind: DamageKind::Lava, from: Some(owner) });
+    for u in world.units.iter().filter(|u| area.contains(&u.cell()) && crate::effect::hurts(u, DamageKind::Lava, Some(owner))) {
+        events.push(WorldEvent::Ignite { unit: u.id });
     }
     for b in world.buildings.iter().filter(|b| area.iter().any(|&c| b.covers(cell_centre(c, size), 0))) {
         events.push(WorldEvent::Destroy { building: b.id });
@@ -254,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn destroys_every_building_and_kills_everyone_in_the_6x6_area_at_turn_110_but_spares_the_casters_shaman() {
+    fn destroys_every_building_and_ignites_everyone_in_the_6x6_area_at_turn_110_but_spares_the_casters_shaman() {
         let mut map = bare();
         map.add_effect(effect(0, AT, &map.terrain.clone()));
         let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 1, AT.0, AT.1, 0));
@@ -267,9 +262,9 @@ mod tests {
         map.run(Ticks::new(DESTROY_AT + 1));
         assert!(map.building(hut).is_none(), "destroyed outright");
         for id in [victim, shielded, inside] {
-            assert!(!map.unit(id).unwrap().is_alive(), "killed: {id:?}");
+            assert!(matches!(map.unit(id).unwrap().action, crate::unit::Action::OnFire { .. }), "caught fire, not killed outright: {id:?}");
         }
-        assert!(map.unit(shaman).unwrap().is_alive(), "the caster's own shaman is spared");
+        assert!(!matches!(map.unit(shaman).unwrap().action, crate::unit::Action::OnFire { .. }), "the caster's own shaman is spared");
     }
 
     #[test]

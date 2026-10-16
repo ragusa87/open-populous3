@@ -195,6 +195,8 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Attacking { .. } if carrying => Pose::CarryWalk,
         Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } | Action::Attacking { .. } => Pose::Walk,
         Action::Panicking { .. } => Pose::Panic,
+        // No burning pose traced or drawn yet (unit-art.md): Panic's own stands in, since OnFire reuses its movement.
+        Action::OnFire { .. } => Pose::Panic,
         Action::Hacking { .. } => Pose::Hack,
         Action::Throwing { .. } => Pose::Throw,
         Action::Listening { .. } => Pose::Listen,

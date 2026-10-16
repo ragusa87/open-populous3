@@ -1373,10 +1373,18 @@ impl GameMap {
                 });
                 None
             }
+            WorldEvent::Scorch { cells } => self.ashes.add(cells).pop(),
             WorldEvent::Panic { unit } => {
                 let away = crate::unit::panic_heading(self.rng.next_u32(), self.rng.next_u32());
                 if let Some(u) = self.unit_mut(unit) {
                     u.panic(away);
+                }
+                None
+            }
+            WorldEvent::Ignite { unit } => {
+                let away = crate::unit::panic_heading(self.rng.next_u32(), self.rng.next_u32());
+                if let Some(u) = self.unit_mut(unit) {
+                    u.catch_fire(away);
                 }
                 None
             }

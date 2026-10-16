@@ -107,14 +107,14 @@ pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
             crate::vehicle::VehicleKind::Balloon => State::InBalloon,
         });
     }
-    let leaving = matches!(unit.action, Action::Walking { .. } | Action::Stranded { .. } | Action::Panicking { .. });
+    let leaving = matches!(unit.action, Action::Walking { .. } | Action::Stranded { .. } | Action::Panicking { .. } | Action::OnFire { .. });
     if let Some(inside) = unit.inside.filter(|_| !leaving) {
         let hut = map.building(inside.building).is_some_and(|b| matches!(b.kind, BuildingKind::Hut { .. }) && b.stage() == Stage::Built);
         return Some(if hut { State::Housed } else { State::Working });
     }
     let working = match unit.action {
         Action::Chopping { .. } | Action::PickingUpWood { .. } | Action::Holding { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Entering { .. } | Action::Hammering | Action::Worshipping { .. } | Action::AroundFire { .. } | Action::Attacking { .. } | Action::Challenge { .. } | Action::Melee { .. } | Action::Hacking { .. } | Action::Throwing { .. } | Action::Preaching | Action::Queuing { .. } => true,
-        Action::Idle | Action::Listening { .. } | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Boarding { .. } | Action::Alighting { .. } | Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => false,
+        Action::Idle | Action::Listening { .. } | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Boarding { .. } | Action::Alighting { .. } | Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::OnFire { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => false,
         #[cfg(test)]
         Action::Gathered { .. } => true,
     };

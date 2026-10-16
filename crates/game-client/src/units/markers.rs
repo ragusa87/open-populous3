@@ -8,11 +8,13 @@
 use super::art::{alpha_picture_frame, picture_frame, Frame};
 use super::selection::Selection;
 use super::{hidden_inside, upload_frame, FrameAsset, UnitView};
+use crate::flame;
+use crate::original_models::to_mesh;
 use crate::sim_time::SimNow;
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
 use game_core::time::Tick;
-use game_core::unit::Unit;
+use game_core::unit::{Action, Unit};
 use pop3_format::blend::AlphaTable;
 use pop3_format::catalog::{BLOODLUST_SPRITES, EFFECT_SPRITE_FILE, HYPNOSIS_SPRITES, LOW_HEALTH_SPRITES, SELECTED_ARROW_SPRITE, SHIELD_SPRITES, TRIBES};
 use pop3_format::{Picture, SpriteBank, Theme};
@@ -27,13 +29,20 @@ pub enum Marker {
     Selected,
     /// Shield ring 0 (bright), 1 or 2 (faint), each one step behind the previous.
     Shield(u8),
+    /// A small flame over a burning person (`Unit::catch_fire`, pop3-rev-analysis.md "Volcano lava flow"): no
+    /// original sprite identified for it, so this always uses the generated flame (`flame::generated_tile`),
+    /// unlike the other markers' original-art-when-available choice.
+    Burning,
 }
 
 /// One slot per marker in each unit's view.
-pub const SLOTS: [Marker; 7] = [Marker::LowHealth, Marker::Bloodlust, Marker::Hypnotised, Marker::Selected, Marker::Shield(0), Marker::Shield(1), Marker::Shield(2)];
+pub const SLOTS: [Marker; 8] = [Marker::LowHealth, Marker::Bloodlust, Marker::Hypnotised, Marker::Selected, Marker::Shield(0), Marker::Shield(1), Marker::Shield(2), Marker::Burning];
 
 /// A shield ring's path ("Status markers over people"): its size (0-4) and height in eighths of the body, rising
 /// from the feet to the head over 8 steps and back, largest at mid-height.
+/// The burning flame's own size (cells), like the camp fire's own (`campfire::SIZE`) but a bit smaller.
+const BURN_SIZE: f32 = 0.25;
+
 pub const SHIELD_PATH: [(usize, u8); 16] =
     [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (3, 5), (2, 6), (1, 7), (0, 8), (1, 7), (2, 6), (3, 5), (4, 4), (3, 3), (2, 2), (1, 1)];
 
@@ -58,6 +67,7 @@ pub fn shown(m: Marker, u: &Unit, player: u8, selected: bool, original: bool, no
             Marker::Hypnotised => u.statuses.hypnotized.is_on(),
             Marker::Selected => original && selected && u.owner == player,
             Marker::Shield(_) => u.statuses.shield.shown(now, u.id.raw()),
+            Marker::Burning => matches!(u.action, Action::OnFire { .. }),
         }
 }
 
@@ -73,6 +83,8 @@ pub fn pose(m: Marker, n: u32, phase: u32) -> (usize, f32) {
             let (size, eighths) = SHIELD_PATH[i];
             (size + 5 * k as usize, (1.0 + eighths as f32 * 7.0 / 8.0) / 8.0)
         }
+        // One new frame a tick: close enough to flame::FPS's own pacing for a secondary status cue.
+        Marker::Burning => ((n as usize + phase as usize) % flame::FRAMES, 0.55),
     }
 }
 
@@ -88,6 +100,7 @@ pub struct MarkerArt {
     shield: Vec<FrameAsset>,
     /// The shield frames' materials tinted in each tribe's colour.
     shield_tribes: Vec<Vec<Handle<StandardMaterial>>>,
+    burning: Vec<FrameAsset>,
 }
 
 impl MarkerArt {
@@ -99,6 +112,7 @@ impl MarkerArt {
             Marker::Hypnotised => &self.hypnosis,
             Marker::Selected => &self.arrow,
             Marker::Shield(_) => &self.shield,
+            Marker::Burning => &self.burning,
         };
         let f = frames.get(i)?;
         let material = match m {
@@ -216,7 +230,15 @@ fn load_art(levels: Res<LevelList>, mut commands: Commands, mut images: ResMut<A
                 .collect()
         })
         .collect();
-    commands.insert_resource(MarkerArt { original: is_original, low_health, bloodlust, hypnosis, arrow, shield, shield_tribes });
+    // Always generated (no original "burning person" sprite identified, unit-art.md): a small flame mesh, like
+    // the camp fire's own (`flame::crossed_boards`), cycling through the same generated flame picture's frames.
+    let flame_mesh = meshes.add(to_mesh(flame::crossed_boards(BURN_SIZE)));
+    let flame_picture = flame::flame_rgba(&flame::generated_tile(), &flame::fallback_alpha_rgba());
+    let burning: Vec<FrameAsset> = flame::frame_materials(&flame_picture, &mut images, &mut mats)
+        .into_iter()
+        .map(|material| FrameAsset { image: Handle::default(), mesh: flame_mesh.clone(), material, size: Vec2::ZERO, origin: Vec2::ZERO })
+        .collect();
+    commands.insert_resource(MarkerArt { original: is_original, low_health, bloodlust, hypnosis, arrow, shield, shield_tribes, burning });
 }
 
 /// Poses every unit's marker slots at the drawn tick, over its body frame.

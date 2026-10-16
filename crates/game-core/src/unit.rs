@@ -65,6 +65,10 @@ pub const PANIC_TICKS: Ticks = Ticks::new(64);
 pub const PANIC_SPEED: i32 = 110;
 /// Length of a panic heading (`panic_heading`), world units: beyond a step, so a step never reaches its end.
 const PANIC_REACH: i32 = 1024;
+/// On fire (pop3-rev-analysis.md "Volcano lava flow", person state 31): the run's length in turns, confirmed.
+pub const BURN_TICKS: Ticks = Ticks::new(70);
+/// On fire: lost a turn is its own max health divided by this, confirmed.
+pub const BURN_DIVISOR: u16 = 32;
 
 /// A unit's stable id (`GameMap::new_id_of`).
 pub type UnitId = Id<Unit>;
@@ -148,6 +152,11 @@ pub enum Action {
     /// Running in panic towards `away` (a heading, `panic_heading`) at `PANIC_SPEED`, out by the door first when
     /// inside: no orders until `left` runs out.
     Panicking { away: (i16, i16), left: Countdown },
+    /// On fire (pop3-rev-analysis.md "Volcano lava flow", person state 31): losing `BURN_DIVISOR` of its own max
+    /// health a turn for up to `BURN_TICKS`, almost always dead well before then. Moves like `Panicking` towards
+    /// `away` while it burns — the trace only says "runs about", no numbers of its own, so this reuses Panic's own
+    /// movement as a guess, tagged here rather than traced.
+    OnFire { away: (i16, i16), left: Countdown },
     /// Falling down dead.
     Dying { left: Countdown },
     /// The shaman, lying dead: waiting to reincarnate at her site.
@@ -215,6 +224,7 @@ impl Action {
             Action::Drowning => "Drowning",
             Action::Tumbling => "Tumbling",
             Action::Panicking { .. } => "Panicking",
+            Action::OnFire { .. } => "Burning",
             Action::Dying { .. } => "Dying",
             Action::Dead { .. } => "Dead",
             Action::Spirit { .. } => "Dead",
@@ -278,7 +288,7 @@ impl Action {
     }
 
     pub(crate) fn can_take_orders(&self) -> bool {
-        !matches!(self, Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::Listening { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
+        !matches!(self, Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::OnFire { .. } | Action::Listening { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
     }
 }
 
@@ -848,6 +858,17 @@ impl Unit {
                 }
                 self.action = Action::Panicking { away: self.run_in_panic(away, ground), left };
             }
+            Action::OnFire { away, mut left } => {
+                if self.health.damage(self.health.max() / BURN_DIVISOR) {
+                    self.die();
+                    return Some(UnitEvent::Died);
+                }
+                if left.tick() {
+                    self.action = Action::Idle;
+                    return None;
+                }
+                self.action = Action::OnFire { away: self.run_in_panic(away, ground), left };
+            }
             #[cfg(test)]
             Action::Gathered { .. } => {}
             Action::Tumbling => {
@@ -896,7 +917,7 @@ impl Unit {
         self.kind.stats().heal.is_some()
             && self.is_alive()
             && !self.motion.airborne()
-            && !matches!(self.action, Action::Drowning | Action::Stranded { .. })
+            && !matches!(self.action, Action::Drowning | Action::Stranded { .. } | Action::OnFire { .. })
     }
 
     /// Its turn of healing (`HEAL_EVERY`), if it `heals`.
@@ -925,6 +946,18 @@ impl Unit {
         }
         self.drop_plans();
         self.action = Action::Panicking { away, left: Countdown::new(PANIC_TICKS) };
+    }
+
+    /// Catches fire (lava, pop3-rev-analysis.md "Volcano lava flow"): drops its plans and burns for a fresh
+    /// `BURN_TICKS`, regardless of what it was doing — unlike `panic`, this also re-arms an already-burning unit
+    /// (it is "set on fire... every turn it stays on a hot cell"), so it is gated on `is_alive` and not already
+    /// falling/dead rather than on `takes_orders` (which `OnFire` itself is excluded from).
+    pub fn catch_fire(&mut self, away: (i16, i16)) {
+        if !self.is_alive() || matches!(self.action, Action::Tumbling | Action::Drowning) || self.motion.airborne() {
+            return;
+        }
+        self.drop_plans();
+        self.action = Action::OnFire { away, left: Countdown::new(BURN_TICKS) };
     }
 
     /// Leaves its coordinator, if it is in one: back to Idle (`WorldEvent::Release`, or its coordinator gone).
@@ -1816,8 +1849,47 @@ mod tests {
         let drowning = Unit { action: Action::Drowning, ..hurt.clone() };
         let stranded = Unit { action: Action::Stranded { to: (0, 0) }, ..hurt.clone() };
         let dying = Unit { action: Action::Dying { left: Countdown::new(DYING_TICKS) }, ..hurt.clone() };
+        let burning = Unit { action: Action::OnFire { away: (0, 0), left: Countdown::new(BURN_TICKS) }, ..hurt.clone() };
         assert!(hurt.heals());
-        assert!([flung, drowning, stranded, dying].iter().all(|u| !u.heals()));
+        assert!([flung, drowning, stranded, dying, burning].iter().all(|u| !u.heals()));
+    }
+
+    #[test]
+    fn catching_fire_loses_max_over_32_health_a_turn_ignoring_orders_until_dead() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.catch_fire((PANIC_REACH as i16, 0));
+        assert_eq!(u.action, Action::OnFire { away: (PANIC_REACH as i16, 0), left: Countdown::new(BURN_TICKS) });
+        u.order(Order::MoveTo { x: 0, z: 0 });
+        run(&mut u, &t, &site, 1);
+        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH - SHAMAN_MAX_HEALTH / BURN_DIVISOR, "no orders while burning");
+        let events = run(&mut u, &t, &site, BURN_TICKS.get() as usize);
+        assert_eq!((events, u.health.current(), u.is_alive()), (vec![UnitEvent::Died], 0, false), "dead well before the 70 turns run out");
+    }
+
+    #[test]
+    fn burns_out_on_its_own_once_the_countdown_ends_if_kept_alive() {
+        // 70 turns losing max/32 a turn is always fatal first (confirmed: "dies in about 32 turns") — so this
+        // isolates the countdown's own end from the damage by topping health back up externally each turn.
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.catch_fire((PANIC_REACH as i16, 0));
+        for k in 1..=BURN_TICKS.get() {
+            u.health = Health::full(SHAMAN_MAX_HEALTH);
+            u.tick(Tick::from_wire(k), &t, Some(&site));
+        }
+        assert_eq!(u.action, Action::Idle, "the countdown ran out on its own");
+    }
+
+    #[test]
+    fn re_ignites_an_already_burning_unit_instead_of_being_ignored() {
+        let (mut u, _) = shaman_at((10, 10));
+        u.catch_fire((PANIC_REACH as i16, 0));
+        let Action::OnFire { mut left, .. } = u.action else { unreachable!() };
+        left.tick();
+        u.action = Action::OnFire { away: (PANIC_REACH as i16, 0), left };
+        u.catch_fire((0, PANIC_REACH as i16));
+        assert_eq!(u.action, Action::OnFire { away: (0, PANIC_REACH as i16), left: Countdown::new(BURN_TICKS) }, "re-armed, not left alone");
     }
 
     #[test]

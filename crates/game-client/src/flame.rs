@@ -194,7 +194,7 @@ fn original_picture(levels: &LevelList, theme: u8) -> Option<Vec<u8>> {
 
 /// The frames as one unlit, blended material each (the original draws alpha pixels as their tint
 /// over the background by their strength).
-fn frame_materials(picture: &[u8], images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> Vec<Handle<StandardMaterial>> {
+pub(crate) fn frame_materials(picture: &[u8], images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> Vec<Handle<StandardMaterial>> {
     frames(picture)
         .into_iter()
         .map(|rgba| {
