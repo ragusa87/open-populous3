@@ -45,8 +45,10 @@ pub struct ShowGrid(pub bool);
 #[derive(Component)]
 struct TerrainMesh;
 
+/// The baked ground material (`rebuild_terrain`'s own texture): shared with `ground_shake.rs`'s overlay patch so
+/// a shaking cell reads as the ground itself trembling, not a separate effect.
 #[derive(Resource)]
-struct TerrainMaterial(Handle<StandardMaterial>);
+pub struct TerrainMaterial(pub Handle<StandardMaterial>);
 
 impl LevelList {
     /// No original data at all: maps and themes are generated, PgUp/PgDn change the seed.
