@@ -1,6 +1,8 @@
 //! A headless video (`VIDEO=secs`, `dev::Capture::Video`): each captured frame's pixels are piped raw into an
-//! `ffmpeg` child encoding `VIDEO_PATH`, no image written per frame. Screenshots are read back asynchronously, so
-//! frames are put back in order (`InOrder`) before they are written.
+//! `ffmpeg` child encoding to a temp file, no image written per frame. Screenshots are read back asynchronously, so
+//! frames are put back in order (`InOrder`) before they are written. The temp file is renamed onto `VIDEO_PATH`
+//! only once ffmpeg exits successfully, so a file opened at that path mid-recording is always the previous,
+//! complete video rather than a still-being-written one.
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::ScreenshotCaptured;
@@ -12,6 +14,10 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 pub const FPS: u32 = 30;
 /// Where the video goes, overwritten each time (git-ignored).
 pub const VIDEO_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/video.mp4");
+/// ffmpeg writes here and it is renamed onto `VIDEO_PATH` only once complete, so opening `VIDEO_PATH`
+/// mid-recording (a run takes well over its own length in wall time) never sees a moov-less, undecodable file.
+/// Kept with a `.mp4` extension: ffmpeg picks its output format (muxer) from it.
+const VIDEO_TMP_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/video.tmp.mp4");
 
 /// Frames numbered from 1, arriving in any order, handed out in order.
 #[derive(Default)]
@@ -46,7 +52,7 @@ impl Video {
     fn start(width: u32, height: u32) -> std::io::Result<(Child, ChildStdin)> {
         let mut child = Command::new("ffmpeg")
             .args(["-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", &format!("{width}x{height}"), "-r", &FPS.to_string(), "-i", "-"])
-            .args(["-pix_fmt", "yuv420p", VIDEO_PATH])
+            .args(["-pix_fmt", "yuv420p", VIDEO_TMP_PATH])
             .stdin(Stdio::piped())
             .spawn()?;
         let stdin = child.stdin.take().ok_or_else(|| std::io::Error::other("no stdin"))?;
@@ -83,7 +89,10 @@ impl Video {
         if let Some((mut child, stdin)) = self.ffmpeg.take() {
             drop(stdin);
             match child.wait() {
-                Ok(status) if status.success() => info!("video saved to {VIDEO_PATH}"),
+                Ok(status) if status.success() => match std::fs::rename(VIDEO_TMP_PATH, VIDEO_PATH) {
+                    Ok(()) => info!("video saved to {VIDEO_PATH}"),
+                    Err(e) => error!("video: cannot move {VIDEO_TMP_PATH} to {VIDEO_PATH}: {e}"),
+                },
                 Ok(status) => error!("video: ffmpeg {status}"),
                 Err(e) => error!("video: {e}"),
             }
