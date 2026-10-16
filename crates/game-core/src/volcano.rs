@@ -13,7 +13,9 @@
 //! - At `DESTROY_AT` (110, 30 turns into the rise): every building in `DESTROY_AREA_CELLS` (6×6) cells is destroyed
 //!   outright (`WorldEvent::Destroy`, bypassing the normal wood/wear-down model, accepted per the plan) and every
 //!   person there (open or inside, but the caster's own shaman) catches fire (`WorldEvent::Ignite`, confirmed: not
-//!   an outright kill either, same correction as `lava`'s own doc).
+//!   an outright kill either, same correction as `lava`'s own doc) — otherwise invisible until the crater finishes
+//!   rising, so the area glows first (`pre_glow`, below, drawn client-side by `lava.rs` [client] reusing its own
+//!   molten look at partial strength): a guess, untraced, the trace gives no such cue.
 //! - Once shaping ends (`SHAPING_TURNS`), a `lava` flow is spawned over the crater's own cells (`lava::flowing`,
 //!   its own growth/fade/ash lifecycle, up to 208 turns), and `FIREBALLS` (28, "about 22 small and 6 big": mechanically identical here, the split is
 //!   visual only and not given a damage difference) land one `panicking_blast` at a time at random points in the
@@ -49,6 +51,10 @@ pub const CRATER_FLOOR: u16 = 0;
 pub const FIREBALLS: u32 = 22 + 6;
 /// How far the pre-eruption rumble (`ground_shake`) is felt (a guess, untraced: roughly twice `DESTROY_AREA_CELLS`).
 pub const SHAKE_RADIUS_CELLS: f32 = 6.0;
+/// How long the pre-eruption glow (`pre_glow`) ramps up before `DESTROY_AT`, and fades out after it (a guess,
+/// untraced: a visual cue for the otherwise invisible instant ignite there, the trace gives no such cue).
+const GLOW_BEFORE: u32 = 10;
+const GLOW_AFTER: u32 = 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Volcano {
@@ -126,6 +132,18 @@ impl Volcano {
             crate::effect::GroundShake { radius_cells: SHAKE_RADIUS_CELLS, intensity: p.powf(1.6) }
         })
     }
+
+    /// How strongly the `DESTROY_AREA_CELLS` square glows right now, 0 (nothing) to 1 (peak): ramping up over
+    /// `GLOW_BEFORE` turns before `DESTROY_AT`, then fading out over `GLOW_AFTER` after it — a visual cue for the
+    /// turn-110 destruction, otherwise invisible until the crater finishes rising and the real lava appears.
+    pub fn pre_glow(&self) -> Option<f32> {
+        let since = self.turn as i64 - DESTROY_AT as i64;
+        if since < -(GLOW_BEFORE as i64) || since > GLOW_AFTER as i64 {
+            return None;
+        }
+        let intensity = if since < 0 { 1.0 - (-since as f32 / GLOW_BEFORE as f32) } else { 1.0 - (since as f32 / GLOW_AFTER as f32) };
+        Some(intensity.clamp(0.0, 1.0))
+    }
 }
 
 /// Everyone in the `DESTROY_AREA_CELLS` square around `cell` (open or inside) catches fire, but the caster's own
@@ -153,8 +171,9 @@ pub(crate) fn random_point_in_area(cell: Cell, radius_cells: i32, size: i32, rng
     (in_cell(x, rng.next_u32()), in_cell(z, rng.next_u32()))
 }
 
-/// The `2 * radius` × `2 * radius` cells around `centre` (wrapped), `radius` either side.
-fn square(centre: Cell, radius: i32, size: i32) -> impl Iterator<Item = Cell> {
+/// The `2 * radius` × `2 * radius` cells around `centre` (wrapped), `radius` either side. `pub`: also the
+/// footprint `lava.rs` [client]'s pre-eruption glow (`pre_glow`, below) drapes over `DESTROY_AREA_CELLS` with.
+pub fn square(centre: Cell, radius: i32, size: i32) -> impl Iterator<Item = Cell> {
     (-radius..radius).flat_map(move |dz| (-radius..radius).map(move |dx| ((centre.0 + dx).rem_euclid(size), (centre.1 + dz).rem_euclid(size))))
 }
 
@@ -260,6 +279,20 @@ mod tests {
         assert!(last > first, "builds towards the rise");
         volcano.turn = RUMBLE_TURNS;
         assert!(volcano.ground_shake().is_none(), "no more rumble once it starts rising");
+    }
+
+    #[test]
+    fn pre_glow_peaks_right_at_the_destruction_and_fades_out_either_side() {
+        let mut volcano = Volcano { ground: 500, turn: DESTROY_AT, destroyed: false, fireballs: 0 };
+        assert_eq!(volcano.pre_glow(), Some(1.0), "full strength the moment it destroys everything");
+        volcano.turn = DESTROY_AT - GLOW_BEFORE;
+        assert_eq!(volcano.pre_glow(), Some(0.0), "just starting to ramp up");
+        volcano.turn = DESTROY_AT - GLOW_BEFORE - 1;
+        assert_eq!(volcano.pre_glow(), None, "too early");
+        volcano.turn = DESTROY_AT + GLOW_AFTER;
+        assert_eq!(volcano.pre_glow(), Some(0.0), "just finished fading");
+        volcano.turn = DESTROY_AT + GLOW_AFTER + 1;
+        assert_eq!(volcano.pre_glow(), None, "too late");
     }
 
     #[test]

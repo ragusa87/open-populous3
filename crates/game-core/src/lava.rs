@@ -123,6 +123,13 @@ impl Lava {
         self.cells.iter().map(|c| c.pos).collect()
     }
 
+    /// The same cells with how hot each one still is (0-255, `MATURE_BLEND` full strength): a freshly seeded or
+    /// cooling edge cell is dimmer than an established one, for `LavaView`'s own alpha fade (no more popping a
+    /// cell to full strength the instant it's added, or off the instant it's removed).
+    pub fn cells_lit(&self) -> Vec<((i32, i32), u8)> {
+        self.cells.iter().map(|c| (c.pos, c.blend)).collect()
+    }
+
     /// One turn, cast by `owner`: grows or fades, then ignites whoever (or whatever) stands on a still-hot cell.
     pub fn turn(&mut self, owner: u8, world: &GameMap) -> Vec<WorldEvent> {
         let size = world.terrain.size() as i32;
@@ -296,6 +303,14 @@ mod tests {
         let id = map.add_effect(effect(0, AT, vec![(10, 20)]));
         map.run(Ticks::new(STATIC_LIFETIME_TURNS));
         assert!(!map.effects.contains(id), "decayed away");
+    }
+
+    #[test]
+    fn cells_lit_reports_each_cell_s_own_blend_starting_at_mature() {
+        let mut map = bare();
+        let id = map.add_effect(effect(0, AT, vec![(10, 20)]));
+        let lit = { let EffectKind::Lava(lava) = &map.effects.get(id).unwrap().kind else { panic!("not lava") }; lava.cells_lit() };
+        assert_eq!(lit, vec![((10, 20), MATURE_BLEND)]);
     }
 
     #[test]
