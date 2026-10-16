@@ -138,6 +138,25 @@ impl Effect {
             EffectKind::Probe(_) => Vec::new(),
         }
     }
+
+    /// The ground shake (`ground_shake.rs` [client]) still playing under it, if any: Volcano's own pre-eruption
+    /// rumble and Earthquake's whole tremor (pop3-rev-analysis.md "rumbling"/"shake" — neither traced to a
+    /// magnitude or reach, `GroundShake`'s own fields are our best guess, see each kind's `ground_shake` method).
+    pub fn ground_shake(&self) -> Option<GroundShake> {
+        match self.kind {
+            EffectKind::Volcano(ref volcano) => volcano.ground_shake(),
+            EffectKind::Earthquake(ref earthquake) => earthquake.ground_shake(),
+            _ => None,
+        }
+    }
+}
+
+/// How much the ground is trembling right now, and how far it reaches (`Effect::ground_shake`): `intensity` 0
+/// (still) to 1 (peak), `radius_cells` where it fades to nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GroundShake {
+    pub radius_cells: f32,
+    pub intensity: f32,
 }
 
 /// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow, a swamp or

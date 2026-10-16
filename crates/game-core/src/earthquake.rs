@@ -5,7 +5,10 @@
 //! `600 × (4096 − d) / 4096` falloff — an approximation, the same call Erode already makes with the same brush — and
 //! a lava fissure opens at the centre (`lava::effect`, the "lava square" patch this module names it for, see its
 //! own doc: it decays and self-destructs on its own, no lifetime of our own to guess any more) over
-//! `FISSURE_RADIUS_CELLS` (2, a guess: no size given).
+//! `FISSURE_RADIUS_CELLS` (2, a guess: no size given). The "shake" itself is drawn client-side only
+//! (`ground_shake.rs` [client], `ground_shake`, below): a trembling patch of ground, shared with Volcano's own
+//! pre-eruption rumble the same way `lava` is shared by their aftermaths — its magnitude and reach are our own
+//! guess, untraced.
 //!
 //! Not yet: the three building-shake checks at turns 24, 56 and 88 (20/128 chance per building in 16 × 16 cells,
 //! occupants out, a partial explosion) — they need `Raid` (`event.rs`), itself still a stub; and the trace's
@@ -22,6 +25,10 @@ pub const SINK_AT: u32 = 60;
 pub const SINK_RADIUS_CELLS: i32 = 8;
 pub const SINK_AMOUNT: i32 = 600;
 pub const FISSURE_RADIUS_CELLS: f32 = 2.0;
+/// Fraction of `DURATION_TURNS` the shake (`ground_shake`) takes to ramp up to, and back down from, full
+/// intensity (a guess, untraced: a quick attack/release around an otherwise steady tremor).
+const SHAKE_ATTACK: f32 = 0.06;
+const SHAKE_RELEASE: f32 = 0.08;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Earthquake {
@@ -48,6 +55,25 @@ impl Earthquake {
         self.turn += 1;
         events
     }
+
+    /// The tremor (`effect::GroundShake`) running for the whole effect: a quick ramp up, a steady shake, a quick
+    /// ramp down (a guess, untraced: the trace only says "shake").
+    pub fn ground_shake(&self) -> Option<crate::effect::GroundShake> {
+        let p = self.turn as f32 / DURATION_TURNS as f32;
+        let intensity = if p < SHAKE_ATTACK {
+            smoothstep(0.0, SHAKE_ATTACK, p)
+        } else if p > 1.0 - SHAKE_RELEASE {
+            smoothstep(1.0, 1.0 - SHAKE_RELEASE, p)
+        } else {
+            1.0
+        };
+        Some(crate::effect::GroundShake { radius_cells: SINK_RADIUS_CELLS as f32, intensity })
+    }
+}
+
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 #[cfg(test)]
@@ -68,6 +94,16 @@ mod tests {
             }
         }
         GameMap::bare("earthquake-test", terrain, Vec::new())
+    }
+
+    #[test]
+    fn ground_shake_ramps_up_then_holds_then_ramps_down() {
+        let mut quake = Earthquake::default();
+        assert_eq!(quake.ground_shake().unwrap().intensity, 0.0, "stands still the very first turn");
+        quake.turn = DURATION_TURNS / 2;
+        assert_eq!(quake.ground_shake().unwrap().intensity, 1.0, "full tremor at the midpoint");
+        quake.turn = DURATION_TURNS - 1;
+        assert!(quake.ground_shake().unwrap().intensity < 1.0, "easing off right before it ends");
     }
 
     #[test]

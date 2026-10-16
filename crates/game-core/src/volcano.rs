@@ -1,7 +1,9 @@
 //! Volcano (pop3-rev-analysis.md "Per spell" 16), a multi-phase controller effect (docs/plans/spells.md "Volcano":
 //! "should be structured as a multi-phase stateful effect ... same spirit as `LandBridge`/`Flatten` ... just with
 //! more phases"), `TOTAL_TURNS` (160) long:
-//! - `RUMBLE_TURNS` (80): rumbling only, no terrain change yet.
+//! - `RUMBLE_TURNS` (80): rumbling only, no terrain change yet — drawn client-side as a trembling ground patch
+//!   (`ground_shake.rs` [client], `ground_shake`, below, shared with Earthquake's own shake the same way `lava`
+//!   is shared by their aftermaths; its magnitude and reach are our own guess, untraced).
 //! - The next `RISE_TURNS` (59), ending at `SHAPING_TURNS` (139): the cone rises, one `TerrainChange::Volcano` turn
 //!   at a time (`apply`/`step`, below) — a crater within `RIM_RADIUS_CELLS` (2.5), a real depression (not the
 //!   trace's "plug": docs/plans/spells.md's correction), down to `CRATER_FLOOR` (0, a guess: not given a number,
@@ -45,6 +47,8 @@ pub const SLOPE_RADIUS_CELLS: f32 = 5.0;
 pub const CRATER_FLOOR: u16 = 0;
 /// "about 22 small and 6 big fireballs": 28 total, not mechanically distinguished (see module doc).
 pub const FIREBALLS: u32 = 22 + 6;
+/// How far the pre-eruption rumble (`ground_shake`) is felt (a guess, untraced: roughly twice `DESTROY_AREA_CELLS`).
+pub const SHAKE_RADIUS_CELLS: f32 = 6.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Volcano {
@@ -112,6 +116,15 @@ impl Volcano {
             .filter(|&(d, (x, z))| terrain.get(x, z) != target_height(d, self.ground))
             .map(|(_, p)| p)
             .collect()
+    }
+
+    /// The pre-eruption rumble (`effect::GroundShake`), building towards the rise, while there's still ground to
+    /// shake before it (a guess, untraced: the trace only says "rumbling").
+    pub fn ground_shake(&self) -> Option<crate::effect::GroundShake> {
+        (self.turn < RUMBLE_TURNS).then(|| {
+            let p = self.turn as f32 / RUMBLE_TURNS as f32;
+            crate::effect::GroundShake { radius_cells: SHAKE_RADIUS_CELLS, intensity: p.powf(1.6) }
+        })
     }
 }
 
@@ -237,6 +250,17 @@ mod tests {
     }
 
     const AT: (u16, u16) = (64 * WORLD_UNITS_PER_CELL as u16 + 256, 64 * WORLD_UNITS_PER_CELL as u16 + 256);
+
+    #[test]
+    fn ground_shake_builds_during_the_rumble_then_stops_once_the_rise_starts() {
+        let mut volcano = Volcano { ground: 500, turn: 0, destroyed: false, fireballs: 0 };
+        let first = volcano.ground_shake().unwrap().intensity;
+        volcano.turn = RUMBLE_TURNS - 1;
+        let last = volcano.ground_shake().unwrap().intensity;
+        assert!(last > first, "builds towards the rise");
+        volcano.turn = RUMBLE_TURNS;
+        assert!(volcano.ground_shake().is_none(), "no more rumble once it starts rising");
+    }
 
     #[test]
     fn rumbles_without_touching_the_terrain_then_rises_over_the_next_59_turns() {
