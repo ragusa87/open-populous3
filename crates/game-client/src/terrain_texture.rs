@@ -53,13 +53,45 @@ pub fn coast_land(walkable: &[bool], size: usize, x: f32, z: f32) -> bool {
     top * (1.0 - fz) + bot * fz >= COAST_THRESHOLD
 }
 
+/// Merges `rects` that touch or overlap into their union, repeatedly until none do. A tick can dirty a cluster
+/// of adjacent single-cell edits (lava spreading one cell at a time, `game_core::lava`'s own `grow`): baking each
+/// separately redoes `REBAKE_MARGIN`'s neighbourhood over and over across the whole cluster, instead of once over
+/// its actual extent. Rects from the same local edit never cross the map's own wrap seam, so this compares raw
+/// coordinates and does not itself need to wrap; it only ever reduces the rect count, never a rect's own union, so
+/// skipping it (or an edit case it misses) costs performance, not correctness.
+pub fn merge_dirty_rects(rects: &[DirtyRect]) -> Vec<DirtyRect> {
+    let touches = |a: &DirtyRect, b: &DirtyRect| a.min.0 <= b.max.0 + 1 && b.min.0 <= a.max.0 + 1 && a.min.1 <= b.max.1 + 1 && b.min.1 <= a.max.1 + 1;
+    let union = |a: &DirtyRect, b: &DirtyRect| DirtyRect { min: (a.min.0.min(b.min.0), a.min.1.min(b.min.1)), max: (a.max.0.max(b.max.0), a.max.1.max(b.max.1)) };
+    let mut out = rects.to_vec();
+    loop {
+        let mut merged_any = false;
+        let mut i = 0;
+        while i < out.len() {
+            let mut j = i + 1;
+            while j < out.len() {
+                if touches(&out[i], &out[j]) {
+                    out[i] = union(&out[i], &out[j]);
+                    out.remove(j);
+                    merged_any = true;
+                } else {
+                    j += 1;
+                }
+            }
+            i += 1;
+        }
+        if !merged_any {
+            return out;
+        }
+    }
+}
+
 /// Returns RGBA8 pixels, `(size * PX_PER_CELL)²`, tiling seamlessly like the map.
 /// `row_scale` multiplies height before picking the bigfade row (1.0 = 1:1, unverified).
 pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32) -> (usize, Vec<u8>) {
     let side = map.size() * PX_PER_CELL;
     let mut out = vec![0; side * side * 4];
     let all = DirtyRect { min: (0, 0), max: (map.size() as i32, map.size() as i32) };
-    rebake(map, theme, height_scale, row_scale, false, all, &mut out);
+    rebake(map, &walkable_cells(map), theme, height_scale, row_scale, false, all, &mut out);
     (side, out)
 }
 
@@ -69,13 +101,14 @@ pub const REBAKE_MARGIN: i32 = 2;
 
 /// Bakes again, into the whole texture `pixels` (`bake`), the pixels of the cells in `rect` (wrapping) and
 /// `REBAKE_MARGIN` around them, after their heights changed; `grid`: with the cell borders (`draw_grid`).
-pub fn rebake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32, grid: bool, rect: DirtyRect, pixels: &mut [u8]) {
+/// `walkable` (`walkable_cells`) is the caller's to compute once and share: a whole-map scan, not worth repeating
+/// per rect when a single tick can dirty hundreds of them (an ongoing terrain effect).
+pub fn rebake(map: &Heightmap, walkable: &[bool], theme: &Theme, height_scale: f32, row_scale: f32, grid: bool, rect: DirtyRect, pixels: &mut [u8]) {
     let (n, side) = (map.size() as i32, map.size() * PX_PER_CELL);
     let len = (SUN[0] * SUN[0] + SUN[1] * SUN[1] + SUN[2] * SUN[2]).sqrt();
     let sun = SUN.map(|c| c / len);
     let step = 1.0 / PX_PER_CELL as f32;
     let (disp_mean, land_start) = (theme.disp_mean(), theme.land_start_row());
-    let walkable = walkable_cells(map);
     let span = |lo: i32, hi: i32| {
         let (lo, hi) = (lo - REBAKE_MARGIN, hi + REBAKE_MARGIN);
         if hi - lo >= n { 0..n } else { lo..hi }
@@ -88,7 +121,7 @@ pub fn rebake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32,
                     let (x, z) = (px as f32 * step, py as f32 * step);
                     let h = map.sample(x, z);
                     let disp = theme.disp(px, py) as i32;
-                    let row = if !coast_land(&walkable, map.size(), x, z) {
+                    let row = if !coast_land(walkable, map.size(), x, z) {
                         sea_row(theme.water(px, py))
                     } else {
                         land_row(h * row_scale, disp, disp_mean, land_start)
@@ -163,6 +196,33 @@ pub fn draw_grid(pixels: &mut [u8], side: usize) {
 mod tests {
     use super::*;
     use pop3_format::theme::{BIGFADE_ROWS, BIGFADE_WIDTH, DISP_SIZE};
+
+    #[test]
+    fn merge_dirty_rects_joins_touching_rects_but_leaves_far_ones_apart() {
+        let a = DirtyRect { min: (0, 0), max: (2, 2) };
+        let b = DirtyRect { min: (3, 0), max: (4, 2) }; // touches a: one cell past its edge
+        let far = DirtyRect { min: (50, 50), max: (51, 51) };
+        let merged = merge_dirty_rects(&[a, b, far]);
+        assert_eq!(merged.len(), 2, "a and b joined, far stays its own rect");
+        assert!(merged.contains(&DirtyRect { min: (0, 0), max: (4, 2) }));
+        assert!(merged.contains(&far));
+    }
+
+    #[test]
+    fn merge_dirty_rects_chains_through_a_middle_rect() {
+        // c only touches b, not a directly: still one rect once b pulls them both in.
+        let a = DirtyRect { min: (0, 0), max: (0, 0) };
+        let b = DirtyRect { min: (1, 0), max: (1, 0) };
+        let c = DirtyRect { min: (2, 0), max: (2, 0) };
+        assert_eq!(merge_dirty_rects(&[a, c, b]), [DirtyRect { min: (0, 0), max: (2, 0) }]);
+    }
+
+    #[test]
+    fn merge_dirty_rects_leaves_a_lone_rect_untouched() {
+        let a = DirtyRect { min: (5, 5), max: (6, 7) };
+        assert_eq!(merge_dirty_rects(&[a]), [a]);
+        assert_eq!(merge_dirty_rects(&[]), Vec::<DirtyRect>::new());
+    }
 
     #[test]
     fn grid_darkens_the_cell_borders_only() {
@@ -267,7 +327,7 @@ mod tests {
         px[far] = 7;
         m.set(15, 8, 600);
         m.set(0, 8, 600);
-        rebake(&m, &theme, 1.0 / 384.0, 1.0, true, DirtyRect { min: (15, 8), max: (17, 9) }, &mut px);
+        rebake(&m, &walkable_cells(&m), &theme, 1.0 / 384.0, 1.0, true, DirtyRect { min: (15, 8), max: (17, 9) }, &mut px);
         assert_eq!(px[far], 7, "far cells untouched");
         px[far] = 0;
         let mut full = bake(&m, &theme, 1.0 / 384.0, 1.0).1;

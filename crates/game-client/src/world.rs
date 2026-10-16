@@ -32,8 +32,9 @@ pub struct LevelList {
 #[derive(Resource, Default)]
 pub struct TerrainDirty(pub bool);
 
-/// Regions whose heights the simulation changed since the last frame: the ground texture is baked again
-/// there only (a land bridge changes a few cells every tick), unless `TerrainDirty` asks for all of it.
+/// Regions whose heights the simulation changed since the last frame: the ground texture is baked again and the
+/// terrain mesh patched (`terrain_mesh::patch`) there only (a land bridge changes a few cells every tick), unless
+/// `TerrainDirty` asks for all of it.
 #[derive(Resource, Default)]
 pub struct TerrainPatches(pub Vec<DirtyRect>);
 
@@ -221,6 +222,7 @@ pub fn original_theme(theme: Option<u8>, original: bool) -> Option<u8> {
     theme.filter(|_| original)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn rebuild_terrain(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
@@ -229,6 +231,7 @@ fn rebuild_terrain(
     mut patches: ResMut<TerrainPatches>,
     mut last_focus: Local<Option<Vec2>>,
     mut baked: Local<Option<(Theme, Handle<Image>)>>,
+    mut geometry: Local<Option<terrain_mesh::TerrainGeometry>>,
     levels: Res<LevelList>,
     material: Res<TerrainMaterial>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -241,12 +244,18 @@ fn rebuild_terrain(
     if !dirty.0 && changed.is_empty() && *last_focus == Some(rig.focus) {
         return;
     }
+    // Merged once, shared below: an ongoing effect (Volcano's rise, its lava flow) can dirty a few hundred
+    // adjacent single-cell rects a tick, each otherwise rebaking `REBAKE_MARGIN`'s neighbourhood over the same
+    // ground its touching neighbours just did.
+    let changed = crate::terrain_texture::merge_dirty_rects(&changed);
     let row_scale = row_scale();
     match baked.as_ref().filter(|_| !dirty.0) {
         Some((theme, image)) => {
             if let Some(mut image) = images.get_mut(image) && let Some(pixels) = image.data.as_mut() {
-                for rect in changed {
-                    crate::terrain_texture::rebake(&map.0.terrain, theme, params.0.height_scale, row_scale, grid.0, rect, pixels);
+                // Shared by every rect this frame: walkability is a whole-map scan, not worth repeating per rect.
+                let walkable = crate::terrain_texture::walkable_cells(&map.0.terrain);
+                for &rect in &changed {
+                    crate::terrain_texture::rebake(&map.0.terrain, &walkable, theme, params.0.height_scale, row_scale, grid.0, rect, pixels);
                     crate::terrain_texture::char_ashes(&map.0.ashes, map.0.terrain.size(), rect, pixels);
                 }
             }
@@ -264,15 +273,32 @@ fn rebuild_terrain(
             *baked = Some((theme, image));
         }
     }
+    // The camera moving needs every vertex recomputed (its curved bend is relative to the live focus); otherwise
+    // only `changed`'s own cells do, `terrain_mesh::patch` touching just those instead of the whole disc — the
+    // difference that matters while an ongoing effect (Volcano's rise, its lava flow) dirties the ground almost
+    // every tick with the camera standing still.
+    let focus_moved = dirty.0 || *last_focus != Some(rig.focus);
     dirty.0 = false;
     *last_focus = Some(rig.focus);
-    let g = terrain_mesh::build(&map.0.terrain, (rig.focus.x, rig.focus.y), &params.0);
+    let focus = (rig.focus.x, rig.focus.y);
+    let touched = if focus_moved || geometry.is_none() {
+        *geometry = Some(terrain_mesh::build(&map.0.terrain, focus, &params.0));
+        true
+    } else {
+        terrain_mesh::patch(geometry.as_mut().unwrap(), &map.0.terrain, focus, &params.0, &changed)
+    };
+    if !touched {
+        return;
+    }
+    let g = geometry.as_ref().unwrap();
     for handle in &q {
         if let Some(mut mesh) = meshes.get_mut(&handle.0) {
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, g.positions.clone());
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, g.normals.clone());
-            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, g.uvs.clone());
-            mesh.insert_indices(Indices::U32(g.indices.clone()));
+            if focus_moved {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, g.uvs.clone());
+                mesh.insert_indices(Indices::U32(g.indices.clone()));
+            }
         }
     }
 }
