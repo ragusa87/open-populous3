@@ -24,6 +24,9 @@ so a live measurement may run on it with the addresses translated.
   record and one fixed pool, each class with its own per-turn handler. A spell is a unit that spawns effect units,
   and the effects do the work. Fights, formations and guard posts are controller units that people link to, not
   person states.
+- **An order is a shared "command group", not a per-person copy** [exe]: selecting several units and giving one
+  order makes them all point at one 10-byte record (kind, flags, target, a reference count) in a fixed array of
+  800; a person just resolves and runs whichever group it currently points to. See "Command groups".
 - **Mana is a per-tribe pipeline run every turn** [exe]: income every 16 turns, then spell charging first, the
   surplus banked, a delayed reservoir for gifts. See "Mana rules".
 - **Income is busy/idle per person**, from constants that `constant.dat` cannot change. It is not the
@@ -54,8 +57,9 @@ so a live measurement may run on it with the addresses translated.
 - **Preaching rerolls a 1-in-`PREACHEE_CONV_CHANCE` (5) chance every `PREACHEE_CONV_FREQ` (500 turns, 41.7 s)**
   [exe]: on success the preachee is destroyed and a person of its own type, in the preacher's tribe, takes its
   place (capped by the preacher's tribe population); instant for a wildman or other "no breeding" tribe. The
-  order-kind link from the preacher's own look scan (0x51E7B0) to this state machine is not yet traced. See
-  "Preacher conversion".
+  preacher's own look scan (0x51E7B0) and preach order (0x43C7A0) are now traced, but neither visibly sets a
+  target's state to 3 (the state this reroll runs in); the likely missing link is a flag bit on the attack
+  order itself, not yet pinned to its setter. See "Preacher conversion".
 - **A vehicle's life is also its abandon timer** [exe]: 5000, −1 per turn, refilled every turn while it moves or
   carries anyone; blasts (50 per turn) and bolts (100) only sink an empty, still one. A boat whose cell turns to
   land is emptied, keels over and explodes 13-24 s later. Both are 3D objects 143 / 144. See "Vehicles".
@@ -148,7 +152,11 @@ So spells charge first and only the surplus is banked: the bar fills spell by sp
 
 ### Spending and other sources
 - Casting: `incoming -= cost` through `add_mana`, so it reaches the bank at the next distribution, unless the
-  tribe's "free spells" flag is set. Costs are `SPELL_<X>` (spells.md "Original balance").
+  tribe's "free spells" flag is set (confirmed this session at the cast-cost site, `init_unit_type_11`, 0x4C16D6:
+  `test tribe+0x93D,8`, skips the `add_mana` call when set; a second, unread gate on the same bit sits at
+  0x4C2947 against the per-spell constant table). Costs are `SPELL_<X>` (spells.md "Original balance"). The flag
+  is set by a player command (id 0x41 in `process_tribe_cmd`, `or tribe+0x93D,8`) - presumably a cheat/debug
+  command, never cleared by any code found, not something our implementation needs.
 - A tribe command adds a signed amount, and a PopScript opcode adds a script expression (ai-scripts.md).
 - Training buildings hold the mana they collect (+0x98, see "Training buildings"); 0x41AE60 sums it over the
   tribe's training buildings (used by the shaman death loss), and a controller type 1 tribe gets it back when a
@@ -899,9 +907,11 @@ Every person runs this check in its per-turn update; it decides who starts an at
 rhythm: when class_counter & mask == 0 (person table +0x2F: 3 → every 4 turns; preacher 1 → every 2)
 skipped: busy (0x4D44E0: in a vehicle or building unless a firewarrior, a state with flag 0x40 in 0x5A6F79,
   i.e. 2, 3, 5, 6, 9, 11, 14-16, 20, 22-29 (fight 25, pre-fight 29, panic 26), 31, 36-42, 44; and some orders)
-radius in cells (0x51FF60):
-  no order being carried out (state not 10):     person table +0x18
-  carrying out an order (state 10): per order kind, byte +3 of its record in table 0x5A7DC0 (stride 11):
+radius in cells (0x51FF60): resolves the person's active command group first (below, "Command groups"); when
+  there is none, or its flag byte +0x1 bit 0x20 is set, falls through to the "no order" row
+  no order being carried out (state not 10), or no active group, or group flag 0x20 set: person table +0x18
+  carrying out an order (state 10): per order kind, byte +3 of its 22-byte record in table 0x5A7DC0 (stride 22,
+    corrects an earlier "stride 11" here - confirmed from 0x51FF60's own index arithmetic):
     0 or 4 → no scan at all: kinds 0-5, 7-21 odd, 23, 25-31 odd, 33, 35, 37, 39 and up (4 is not handled)
     2 → +0x19: kinds 6-20 even, 24-30 even, 38
     1 → +0x18: kinds 22, 32, 34, 36
@@ -943,6 +953,42 @@ second halves of the attack (22), disguise (32), preach (34) and kind 36 keep th
   are read only by drum-tower code (0x40B450, 0x40BD20), not by this scan.
 - A preacher attacker only targets preachers and shamans (0x51EC80), angels of death are never targeted by the
   melee scan, and spies and wildmen never scan.
+
+### Command groups (the shared order record) [exe]
+Selecting several units and giving one order does not copy that order into each unit: they share one **command
+group**, a 10-byte record in a fixed array of 800 at `0x938830 + group_id × 10` (confirms and details the
+one-line guess already in "Reference": "new command group / give a group to a unit / add an order to a group").
+```text
+group record (0x938830 + id × 10):
+  +0x0 kind       the order kind (3-33, the "going"/"doing" pairs above)
+  +0x1 flags      bits OR'd in by whoever creates the order; 0x20 seen on self-issued auto-attack/scan orders
+                    (0x51FF60 skips the auto-attack radius lookup above when it is set); 0x40 seen gating
+                    "Preacher conversion" below; the rest not traced
+  +0x2 ref_count  word, how many units currently point at this group (0 = free slot)
+  +0x6 target     dword, a target unit id (word) or a packed cell position; meaning depends on kind
+
+alloc  0x436C20(): scans forward from a rotating cursor (0x96AA78) for ref_count == 0, wrapping past the array
+                    end back to id 1 (id 0 is skipped); returns the free id
+assign 0x436D00(unit, group_id, slot): ref_count += 1 (and a global active-group counter when it was 0);
+                    slot < 0  → releases the unit's current primary group (0x4364D0(unit, -1), not traced) and
+                                 sets unit+0x9B = group_id (its one primary group)
+                    slot >= 0 → sets unit+0x8B[slot] = group_id (a secondary group; purpose of more than one
+                                 not traced)
+set    0x438730(group_id, kind, target_or_pos_ptr, extra_flags): no-op if the group already has this exact kind
+                    and target; else writes kind/flags/target above, then snaps the target to a cell or a
+                    building's door point (per-kind flags dword at 0x5A7DC0 + kind × 22 + 0xA, via 0x4044B0);
+                    one of those flags (bit 0x80000) can later overwrite the group's own kind to 0xA once its
+                    target resolves to a unit with +0x9D bit 0x80 set (not traced further)
+run    order_execute (0x432590, called from unit_processing_class_1_person only while a person is in state 0xA
+                    "carrying out an order"): resolves the person's active group (+0x9B if set, else
+                    +0x8B[+0xA6]), reads its kind byte, and jumps a 31-entry table (0x432D18, kinds 3-33) to the
+                    matching handler - e.g. kinds 19 and 21 both reach the attack-order handler below, kind 33
+                    reaches the preach-order handler ("Preacher conversion"); two further redirects (group
+                    flag +0x1 bit 0x1, or the unit's own +0x13 bit 0x10) were seen but not traced
+```
+The auto-attack scan above does not reuse any existing group: it allocates a fresh one just for the attacker
+(`0x436C20` then `0x438730`) every time it starts a new order. Open: the rest of the group flag byte (only 0x20
+and 0x40 are known), what a secondary (`+0x8B`) group slot is for, and the two unread `order_execute` redirects.
 
 ### Starting a melee (the attack-order handler, 0x51A2A0)
 ```text
@@ -1073,8 +1119,10 @@ preacher's own scan (0x51E7B0), replacing the melee scan on its auto-attack turn
   candidate building
   person found (preacher or shaman only, 0x51EC80) → ordinary attack order (kind 0x15): preachers and shamans
     fight each other in melee like anyone else, no conversion on a person match
-  building found → an order at the preacher's own position (kind 0x20 pushed; unverified against the order-kind
-    table's own guess that 32 is disguise's second half, not preach - open question, see below)
+  building found → an order at the preacher's own position (kind 0x20/32 pushed); kind 32's handler is confirmed
+    to be the same one as kind 31's ("DISGUISE", 0x43A4D0: a 5-substate approach-and-RNG-idle machine with no
+    attacker-type branch in it), so the building-scan branch does not lead to conversion by itself - see
+    "Command groups" and the open questions below
 
 state 3 (0x4D5CF0), the preachee the instant it is struck: at its own position and tribe,
   spawns a 7/0x4D effect (a soul-like visual, not confirmed) and a class 10 type 0xC controller ("Soul Convert 2")
@@ -1113,16 +1161,30 @@ state 24 (0x4D8E40): the same shape as state 23 (target via `+0x89`, a check gat
   wildman or any other member of a "no breeding" tribe.
 - A converted person keeps its original type (a converted warrior stays a warrior, in the preacher's tribe), not
   the preacher's own type.
-- Open questions: what makes a preachee enter state 3 in the first place (not traced: presumably the preacher's
-  own preach order, kind 33/0x21, reaching its target, paralleling "Starting a melee"); the role of the lookup
-  table at 0x938830 (gates state 23/24 on the preacher's suborder, values 0x11/0x1F/0x20) and 0x5A707E (a per-type
-  byte read on a model-variant branch); whether order kind 0x20 from the preacher's scan is really what starts
-  this (it may instead be "disguise", per the order-kind table's existing guess - the scan's building match and
-  the preachee's state 3 have not been linked by tracing the code in between); the exact meaning of flag byte
-  0x89C668 (many unrelated systems read other bits of the same byte, so it is unlikely to be preach-specific).
-- A live check would settle the open questions and confirm the numbers: watch a preacher ordered to preach an
-  enemy brave, logging its target's state/sub-state/`+0x70` timer and tribe every turn (as `fightwatch.py` does
-  for firewarriors), until the brave disappears and a new one appears in the preacher's tribe.
+- Open questions: what makes a preachee enter state 3 in the first place is still not pinned down, but narrowed
+  this session, correcting several of this section's earlier guesses:
+  - kind 32 (0x20, the preacher's building-scan order) is now confirmed to be disguise's own second half, not a
+    separate conversion path (see above) - ruling out the building scan as a direct trigger.
+  - the player-issued preach order (kind 33, the preach-order handler 0x43C7A0) walks the preacher up to its
+    target and, on arrival, plays a sound (0x9F) on the target and sets the target's own state to **5**, not 3,
+    while chaining its command group's kind 0x98 → 0x9B → 0x99 over 40 ticks; state 5's own per-turn handler
+    (0x4D6970) reads as a generic "idle near a reference unit" behaviour (it only picks an RNG animation variant,
+    never writes the person's own state), so it looks unrelated to conversion rather than a step towards state 3.
+  - the melee target-eligibility check (0x51C3C0, called from the attack-order handler 0x51A2A0) has a gate that
+    fits exactly this gap: a preacher may only engage a non-preacher person target if the attack order's own
+    command-group flag byte `+0x1` has bit 0x40 set - otherwise a preacher can only ever fight other preachers or
+    shamans (0x51CE50, "Starting a melee"). This flag is the best remaining candidate for what turns an ordinary
+    attack into a conversion attempt, but which code sets it was not found: of `order_set`'s (0x438730) call
+    sites, only one passes 0x40, and it belongs to an unrelated per-tribe routine creating order kind 0x1C (28).
+  - the "lookup table at 0x938830" from earlier drafts of this section is not a lookup table: it is the shared
+    command-group record array ("Command groups"); whatever state 23/24 read there (values 0x11/0x1F/0x20, i.e.
+    kinds 17/31/32) is a group's own kind byte, not re-checked against this session's findings.
+  - still untraced: 0x5A707E (a per-type byte read on a model-variant branch) and the exact meaning of flag byte
+    0x89C668 (many unrelated systems read other bits of the same byte, so it is unlikely to be preach-specific).
+- A live check would settle this precisely: watch a preacher's and its target's command group (`+0x9B`, resolving
+  into `0x938830`) and the order's own `+0x1` flag byte alongside state/sub-state/`+0x70` timer and tribe every
+  turn (as `fightwatch.py` does for firewarriors), while ordering a preacher to preach an enemy brave, until the
+  brave disappears and a new one appears in the preacher's tribe.
 
 ### Attacking a building [exe]
 An attack order on an enemy building (`+0x89` the building; sub-states in `+0xA8`, 0x51A2A0):
@@ -1643,8 +1705,8 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
 - Spell order and share inside the distribution loop.
 - Auto-attack: the names of the person states (1 is probably idle) and of the order kinds (map the player commands
   in `process_tribe_cmd` to the kinds they create), whether the odd / even kinds are really going / doing, where
-  the kinds' sprites are drawn, the radius byte (0x20,
-  0x30) given to the self-issued attack order, the preacher's and firewarrior's own scans (0x51E7B0, 0x51E9A0).
+  the kinds' sprites are drawn, the firewarrior's own scan (0x51E9A0); the preacher's own scan (0x51E7B0) is now
+  traced ("Command groups", "Preacher conversion") but what `0x51F030`'s two out-params/mode flag mean is not.
 - Building ashes: the cliff rows' colours, the volcano cone's clearing, foundation sub 2's condition and its unit
   10/0x13.
 - Attacking a building: what sets building +0x9C bit 0x40, and the partial explosion's 10/7 units.
@@ -1681,8 +1743,9 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   building's second destroy reason (sub-state 2).
 - Status markers: whether `frame_counter` 0x897981 advances per rendered frame or per turn, the anchor of the
   screen position the height offsets are taken from, what the colour tables (0x87D000 + n × 0x1000) do to an alpha
-  sprite, the key behind commands 100/101 (health bars), tribe flag +0x93D bit 0x8 (sees invisible people?), and
-  what +0x3C (a colour table index −15..15, 0x468B50) tints a person for.
+  sprite, the key behind commands 100/101 (health bars), and what +0x3C (a colour table index −15..15, 0x468B50)
+  tints a person for. (Tribe +0x93D bit 0x8 is not "sees invisible people" - that guess is answered below, see
+  "Tribe record" and "Spells".)
 
 - Vehicles: where the whirlwind sets state 9 (not in its vehicle branch 0x50FA1F, which only makes a blast); the
   boarding range check and the unloading path (0x4659D0, 0x466190, 0x465C50); the 4 neighbouring points of the boat landing flag 0x1000000; cell flag 0x4;
@@ -1720,8 +1783,14 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x40BBE0 | recomputes a training building's cost |
 | 0x4EF180 | "delete_unit" |
 | 0x504BC0 | `draw_ui_panel`: building panel, training bar at 0x504FDD (values) and 0x505604 (drawing) |
-| 0x436C20 / 0x436D00 / 0x438730 | new command group / give a group to a unit / add an order to a group |
+| 0x436C20 / 0x436D00 / 0x4364D0 / 0x438730 | alloc / assign (primary or `+0x8B` slot) / release / set-kind-and-target for a command group - "Command groups" |
+| 0x432590 | `order_execute`: resolves a person's active command group and dispatches its kind - "Command groups" |
+| 0x43A4D0 | order kinds 31/32 (disguise and the preacher's building visit): shared approach-and-RNG-idle machine |
+| 0x43C7A0 | order kind 33 (preach): approaches the target, ends by setting its state to 5 - "Preacher conversion" |
 | 0x51A2A0 | a person's attack order: reach, then join a fight or start a pre-fight |
+| 0x51C3C0 | attack target eligibility by attacker type; the preacher/non-preacher gate - "Preacher conversion" |
+| 0x51CE50 | preacher/shaman-only nearest-person scan, called from 0x51C3C0 for a preacher attacker |
+| 0x4D6970 | person state 5 per-turn handler: idle near a reference unit (`+0x72`), not preach-specific |
 | 0x51E150 | "start_pre_fight(attacker, target, mode)" |
 | 0x518630 | "pre_fight_turn": approach, kick, knockback, then the fight |
 | 0x51DE60 | "start_fight(a, b)" from a pre-fight |

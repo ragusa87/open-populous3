@@ -127,10 +127,12 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Fight poses in the generated (CC0) unit sheets: strike, trade, kick, reel, shoved (`Pose::fallback` stands in: idle, fall).
 - [ ] Spotting (combat.md "Spotting"): the shaman's look during some orders, allies. Invisible people are already
   unseen by auto-targeting (`spotting::first_seen`); whether a player ordering an attack directly can still hit one
-  is untraced, left open. The untraced tribe flag (pop3-rev-analysis.md `+0x93D` bit `0x8`, "sees invisible
-  people?") stays unimplemented — no tribe ever sees through invisibility yet; a spec session should trace who
-  gets it before guessing.
-- [ ] Sermon (combat.md "Sermon"): the building variant (preaching to a building's people), the soul flying from the preacher to the converted, the halving flag of the first check. To trace (spec session): what starts a sermon (the link from the preacher's look to the preached person's state), how many listen at once and from how far; whether the preacher's sermon really plays its 5 identified phases in order (`Pose::Preach` only draws one, anim 22, a guess) or just one.
+  is untraced, left open. The tribe flag at `+0x93D` bit `0x8` traced to was a dead end for this: it is "spells
+  are free" (a cheat/debug flag, pop3-rev-analysis.md "Spending and other sources"), not "sees invisible people" -
+  no tribe flag for seeing through invisibility was found this session; nothing grants it in the exe as far as
+  traced, so there may simply be none (a live check with a revealed invisible unit against each tribe type would
+  confirm there is truly no such flag before this item is dropped).
+- [ ] Sermon (combat.md "Sermon"; pop3-rev-analysis.md "Preacher conversion" and "Command groups"): the preacher's own look scan and its preach order are now traced - the scan only ever issues an ordinary attack order or the disguise/building-visit order, never preach directly, and the preach order itself walks up to one target and ends by putting it in a generic "idle near a reference unit" state, not the "struck" state the conversion reroll actually runs in. The missing link is most likely one flag bit on the attack order that lets a preacher engage a non-preacher target at all (see "Preacher conversion"'s open questions) - still to trace (spec session): which code sets that bit, the building variant (preaching to a building's people), the soul flying from the preacher to the converted, the halving flag of the first check, how many listen at once and from how far, and whether the preacher's sermon really plays its 5 identified phases in order (`Pose::Preach` only draws one, anim 22, a guess) or just one.
 - [ ] Attackers inside a building walk out first (combat.md "Attacking": they set off from where they stand).
 - [ ] Firebolts (combat.md "Firebolts"): the line of fire, driving a vehicle towards an out-of-reach target (to trace: whether the original's halved speed of a passenger throwing aboard really slows its vehicle, ours does), the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.
 - [ ] Health, hit feedback and death animations for every unit type.
