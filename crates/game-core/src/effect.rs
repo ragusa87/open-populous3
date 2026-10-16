@@ -45,6 +45,10 @@ pub enum EffectKind {
     Lava(crate::lava::Lava),
     /// The multi-phase controller (`volcano`): rumbles, rises, destroys, then spawns lava and fireballs.
     Volcano(crate::volcano::Volcano),
+    /// A pure scheduler (`firestorm`): one fireball every few turns for its whole lifetime.
+    Firestorm(crate::firestorm::Firestorm),
+    /// A timed controller (`earthquake`): shakes, then sinks a half-disc and opens a lava fissure once.
+    Earthquake(crate::earthquake::Earthquake),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -98,6 +102,8 @@ impl Effect {
             EffectKind::Hypnotism(ref mut hypnotism) => hypnotism.turn((self.x, self.z), self.owner, world),
             EffectKind::Lava(ref mut lava) => lava.turn(self.owner, world),
             EffectKind::Volcano(ref mut volcano) => volcano.turn((self.x, self.z), self.owner, world, rng),
+            EffectKind::Firestorm(ref mut firestorm) => firestorm.turn((self.x, self.z), self.owner, world, rng),
+            EffectKind::Earthquake(ref mut earthquake) => earthquake.turn((self.x, self.z), self.owner, world),
             EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
@@ -124,7 +130,9 @@ impl Effect {
             | EffectKind::Swamp(_)
             | EffectKind::Convert(_)
             | EffectKind::Hypnotism(_)
-            | EffectKind::Lava(_) => Vec::new(),
+            | EffectKind::Lava(_)
+            | EffectKind::Firestorm(_)
+            | EffectKind::Earthquake(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }

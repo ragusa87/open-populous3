@@ -198,6 +198,26 @@ pub fn volcano_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> 
     true
 }
 
+/// `FIRESTORM=x,z` (cells): another tribe's Firestorm effect there, then `ticks` run at once (with `GAME_SPEED=0`:
+/// its fireballs landing over the run). False when `at` does not parse.
+pub fn firestorm_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
+    let at = world_units(Vec2::new(x, z));
+    map.add_effect(game_core::firestorm::effect(PLAYER + 1, at));
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
+/// `EARTHQUAKE=x,z` (cells): another tribe's Earthquake effect there, then `ticks` run at once (with `GAME_SPEED=0`:
+/// the shake, then its sink and lava fissure at turn 60). False when `at` does not parse.
+pub fn earthquake_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
+    let at = world_units(Vec2::new(x, z));
+    map.add_effect(game_core::earthquake::effect(PLAYER + 1, at));
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
 /// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there (needs it known/charged, e.g. the Spells sandbox's
 /// `SpellBook::unlimited`), then `ticks` run at once — v1 settles almost immediately (`docs/specs/outcome.md`
 /// "Armageddon"); with `GAME_SPEED=0`, a shot can catch the brief camera-takeover/lock window. False when `at`
@@ -526,6 +546,14 @@ fn screenshot(
             let ticks = std::env::var("VOLCANO_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             volcano_demo(&mut map.0, &at, ticks);
         }
+        if let Ok(at) = std::env::var("FIRESTORM") {
+            let ticks = std::env::var("FIRESTORM_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            firestorm_demo(&mut map.0, &at, ticks);
+        }
+        if let Ok(at) = std::env::var("EARTHQUAKE") {
+            let ticks = std::env::var("EARTHQUAKE_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            earthquake_demo(&mut map.0, &at, ticks);
+        }
         if let Ok(at) = std::env::var("ARMAGEDDON") {
             let ticks = std::env::var("ARMAGEDDON_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             armageddon_demo(&mut map.0, &at, ticks);
@@ -717,6 +745,27 @@ mod tests {
         assert!(volcano_demo(&mut map, "10,10", game_core::volcano::RUMBLE_TURNS + game_core::volcano::RISE_TURNS));
         assert_eq!(map.terrain.get(10, 10), 0, "the crater floor, fully risen");
         assert!(!volcano_demo(&mut map, "here", 0));
+    }
+
+    #[test]
+    fn firestorm_demo_adds_the_scheduler_effect_and_drops_a_fireball_once_run() {
+        let mut map = game_core::map::GameMap::sandbox_walk();
+        assert!(firestorm_demo(&mut map, "10,10", game_core::firestorm::FIREBALL_EVERY.get()));
+        assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, game_core::effect::EffectKind::PanickingBlast(_))));
+        assert!(!firestorm_demo(&mut map, "here", 0));
+    }
+
+    #[test]
+    fn earthquake_demo_adds_the_controller_effect_and_sinks_the_ground_once_run() {
+        let mut map = game_core::map::GameMap::sandbox_walk();
+        // The player's own site, at the island's centre: on land, unlike an arbitrary cell.
+        let s = map.units.iter().position(|u| u.owner == PLAYER).unwrap();
+        let cell = |v: u16| v as f32 / 512.0;
+        let at = format!("{},{}", cell(map.units[s].x), cell(map.units[s].z));
+        let before = map.terrain.get((map.units[s].x / 512) as i32, (map.units[s].z / 512) as i32);
+        assert!(earthquake_demo(&mut map, &at, game_core::earthquake::SINK_AT + 1));
+        assert!(map.terrain.get((map.units[s].x / 512) as i32, (map.units[s].z / 512) as i32) < before, "the centre sank");
+        assert!(!earthquake_demo(&mut map, "here", 0));
     }
 
     #[test]

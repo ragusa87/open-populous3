@@ -697,7 +697,7 @@ impl GameMap {
         };
         match *spell {
             Spell::Teleport { to } => Some(to),
-            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } | Spell::Convert { at } | Spell::Hypnotism { at } | Spell::Volcano { at } => Some(at),
+            Spell::Blast { at } | Spell::Lightning { at } | Spell::Armageddon { at } | Spell::Swamp { at } | Spell::Convert { at } | Spell::Hypnotism { at } | Spell::Volcano { at } | Spell::Firestorm { at } | Spell::Earthquake { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
             Spell::Flatten { at } => Some(world(at, 0)),
             Spell::Erode { .. } | Spell::Raise { .. } | Spell::MagicalShield | Spell::Bloodlust | Spell::Invisibility => None,
@@ -813,6 +813,14 @@ impl GameMap {
             }
             Spell::Volcano { at } => {
                 self.add_effect(crate::volcano::effect(player, at, &self.terrain));
+                None
+            }
+            Spell::Firestorm { at } => {
+                self.add_effect(crate::firestorm::effect(player, at));
+                None
+            }
+            Spell::Earthquake { at } => {
+                self.add_effect(crate::earthquake::effect(player, at));
                 None
             }
             Spell::LandBridge { from, to } => {

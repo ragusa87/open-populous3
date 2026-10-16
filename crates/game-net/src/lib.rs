@@ -56,7 +56,7 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 }
 
 /// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport, Blast, Lightning, Armageddon, Swamp,
-/// Convert, Hypnotism, Volcano: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
+/// Convert, Hypnotism, Volcano, Firestorm, Earthquake: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
 /// for a unit order `u32 unit id` then the order, for lighting or putting out a camp fire `u16 x, z`,
 /// for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`, for a self cast `spell u8`
 /// (its place in `SpellKind::ALL`), for pausing one `spell u8, paused u8`, for moving a vehicle `u32 vehicle id, u16 x, z`,
@@ -72,7 +72,9 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             | Spell::Swamp { at }
             | Spell::Convert { at }
             | Spell::Hypnotism { at }
-            | Spell::Volcano { at } = spell
+            | Spell::Volcano { at }
+            | Spell::Firestorm { at }
+            | Spell::Earthquake { at } = spell
             {
                 b.push(match spell {
                     Spell::Teleport { .. } => 4,
@@ -82,6 +84,8 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                     Spell::Convert { .. } => 9,
                     Spell::Hypnotism { .. } => 10,
                     Spell::Volcano { .. } => 11,
+                    Spell::Firestorm { .. } => 12,
+                    Spell::Earthquake { .. } => 13,
                     _ => 6,
                 });
                 b.extend(at.0.to_le_bytes());
@@ -100,7 +104,9 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                 | Spell::Swamp { .. }
                 | Spell::Convert { .. }
                 | Spell::Hypnotism { .. }
-                | Spell::Volcano { .. } => unreachable!("encoded above"),
+                | Spell::Volcano { .. }
+                | Spell::Firestorm { .. }
+                | Spell::Earthquake { .. } => unreachable!("encoded above"),
                 Spell::MagicalShield | Spell::Bloodlust | Spell::Invisibility => unreachable!("self-cast: never built from a Command::Cast, see Command::CastSelf"),
             };
             b.push(tag);
@@ -252,6 +258,8 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
                 9 => Spell::Convert { at: (c.u16()?, c.u16()?) },
                 10 => Spell::Hypnotism { at: (c.u16()?, c.u16()?) },
                 11 => Spell::Volcano { at: (c.u16()?, c.u16()?) },
+                12 => Spell::Firestorm { at: (c.u16()?, c.u16()?) },
+                13 => Spell::Earthquake { at: (c.u16()?, c.u16()?) },
                 _ => return None,
             };
             Some(Command::Cast { player, spell })
@@ -360,6 +368,8 @@ mod tests {
                 Command::Cast { player: 1, spell: Spell::Convert { at: (100, 65500) } },
                 Command::Cast { player: 2, spell: Spell::Hypnotism { at: (65500, 300) } },
                 Command::Cast { player: 1, spell: Spell::Volcano { at: (12, 34) } },
+                Command::Cast { player: 2, spell: Spell::Firestorm { at: (56, 78) } },
+                Command::Cast { player: 3, spell: Spell::Earthquake { at: (90, 11) } },
                 Command::Order { player: 2, order: Order::MoveTo { x: 65535, z: 300 } },
                 Command::Order { player: 0, order: Order::Cast },
                 Command::Order { player: 1, order: Order::Stop },

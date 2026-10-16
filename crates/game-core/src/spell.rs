@@ -40,6 +40,10 @@ pub enum Spell {
     Hypnotism { at: (u16, u16) },
     /// A volcano at `at` (world units): `volcano::effect`.
     Volcano { at: (u16, u16) },
+    /// A firestorm at `at` (world units): `firestorm::effect`.
+    Firestorm { at: (u16, u16) },
+    /// An earthquake at `at` (world units): `earthquake::effect`.
+    Earthquake { at: (u16, u16) },
     /// Stops the match and settles it (`GameMap::start_armageddon`), centred on `at` (world units).
     Armageddon { at: (u16, u16) },
 }
@@ -58,6 +62,8 @@ impl Spell {
             Spell::Convert { .. } => Some(SpellKind::Convert),
             Spell::Hypnotism { .. } => Some(SpellKind::Hypnotism),
             Spell::Volcano { .. } => Some(SpellKind::Volcano),
+            Spell::Firestorm { .. } => Some(SpellKind::Firestorm),
+            Spell::Earthquake { .. } => Some(SpellKind::Earthquake),
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
             Spell::Flatten { .. } => Some(SpellKind::Flatten),
             Spell::Armageddon { .. } => Some(SpellKind::Armageddon),
@@ -82,7 +88,9 @@ impl Spell {
             | Spell::Invisibility
             | Spell::Convert { .. }
             | Spell::Hypnotism { .. }
-            | Spell::Volcano { .. } => return None,
+            | Spell::Volcano { .. }
+            | Spell::Firestorm { .. }
+            | Spell::Earthquake { .. } => return None,
         })
     }
 }

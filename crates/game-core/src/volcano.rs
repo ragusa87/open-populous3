@@ -135,8 +135,9 @@ fn destroy_and_kill(cell: Cell, owner: u8, world: &GameMap, size: i32) -> Vec<Wo
     events
 }
 
-/// A random world point in a random cell of the `radius_cells` square around `cell` (wrapped).
-fn random_point_in_area(cell: Cell, radius_cells: i32, size: i32, rng: &mut Lcg) -> (u16, u16) {
+/// A random world point in a random cell of the `radius_cells` square around `cell` (wrapped). Shared with
+/// Firestorm (`crate::firestorm`), whose fireballs land the same way over its own target area.
+pub(crate) fn random_point_in_area(cell: Cell, radius_cells: i32, size: i32, rng: &mut Lcg) -> (u16, u16) {
     let side = (2 * radius_cells) as u32;
     let (dx, dz) = ((rng.next_u32() % side) as i32 - radius_cells, (rng.next_u32() % side) as i32 - radius_cells);
     let (x, z) = ((cell.0 + dx).rem_euclid(size), (cell.1 + dz).rem_euclid(size));
