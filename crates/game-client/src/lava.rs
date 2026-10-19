@@ -5,9 +5,26 @@
 //! pure functions, no Bevy, down to `generate`, like `procedural_theme`/`terrain_texture` — `LavaView` is the
 //! only Bevy-facing part, a textured mesh draped over the effect's own cells (`ground_mesh`), each cell's own
 //! alpha fading with its own heat (`cells_lit`/`blend_alpha`) rather than popping to full strength the instant
-//! it's added or off the instant it's removed. `VolcanoGlowView`, below, reuses the same look at partial
-//! strength for Volcano's own pre-eruption glow (`volcano::Volcano::pre_glow`): the turn-110 destruction is
-//! otherwise invisible until the crater finishes rising and the real lava appears.
+//! it's added or off the instant it's removed. A cell an actual spread step just added additionally flashes a
+//! brief directional "pour-in" highlight (`CellArrival`/`pour_in_alpha`) sweeping from the corner facing the
+//! neighbour it spread from, client-side only, before settling into the same blend-based fade: without it, cells
+//! only ever fade in in place, one tile after another, instead of reading as a single flow pouring downhill from
+//! tile to tile. `VolcanoGlowView`, below, reuses the same look at partial strength for Volcano's own
+//! pre-eruption glow (`volcano::Volcano::pre_glow`): the turn-110 destruction is otherwise invisible until the
+//! crater finishes rising and the real lava appears.
+//!
+//! A cell doesn't just light up and sit still: for as long as it carries a `CellArrival` (i.e. it arrived by an
+//! actual spread step, not the initial seed disc), `flow_offset` keeps scrolling its own UVs upstream, into the
+//! neighbour it arrived from, for as long as it stays in `Lava::cells` — the same procedural texture sampled at a
+//! drifting coordinate, so the molten pattern itself visibly creeps downhill the whole time a cell is hot, not
+//! only in the brief `pour_in_alpha` flash right as it arrives. Client-side only, same "our own invented
+//! flight/look" spirit as `volcano_rocks.rs`: no original lava tile exists to trace a real flow speed from.
+//!
+//! `game_core::lava::Lava::grow` pushes each mature cell into only its single steepest downhill neighbour (true
+//! to the trace: a real finger/channel spread, not a filled disc), which can leave a checkerboard of plain,
+//! untouched ground cells fully surrounded by hot ones. `fill_gaps` draws those too, client-side only — each at
+//! its hottest touching neighbour's own alpha and drift, not a dimmed-down guess — so the patch reads as solid
+//! lava rather than the simulation's own thin single-direction spread; the simulation itself is untouched.
 
 use crate::camera::{CameraRig, CurveParamsRes};
 use crate::grounded::ground_point;
@@ -24,7 +41,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use game_core::effect::{Effect, EffectKind};
 use game_core::id::Id;
-use game_core::lava::MATURE_BLEND;
+use game_core::lava::{CellArrival, MATURE_BLEND};
 use game_core::map::GameMap;
 use game_core::terrain::Heightmap;
 use game_core::volcano;
@@ -319,27 +336,130 @@ fn blend_alpha(blend: u8) -> f32 {
     (blend as f32 / MATURE_BLEND as f32).clamp(0.0, 1.0)
 }
 
-/// One quad per cell at its own `alpha` (`blend_alpha`, or a controller's own uniform fade for `VolcanoGlowView`),
-/// each corner draped on the real terrain (`grounded::ground_point`, the same technique `blueprint::grid_mark`
-/// uses for its footprint preview): the crater's funnel and the fissure's sunk disc are not flat, so a single
-/// flat quad would float or bury itself across the patch. UVs are absolute cell coordinates, not `0..1` per quad,
-/// so the repeating material (`lava_material`) tiles seamlessly across the whole patch regardless of which cells
-/// are lit.
+/// `ground_mesh`'s own corner order (`(ox, oz)`, 0 or 1 each).
+const CORNERS: [(i32, i32); 4] = [(0, 0), (1, 0), (1, 1), (0, 1)];
+
+/// The "pour-in" flourish's own length (seconds): independent of `TICKS_PER_SECOND`/`BLEND_GAIN`'s ramp cadence
+/// — a short, client-only flourish layered on top of whatever `blend_alpha` is already doing, never a
+/// replacement for it. Our own feel, not a traced number (the original has no lava tile at all to trace,
+/// docs/specs/terrain-textures.md).
+const POUR_SECS: f32 = 0.4;
+/// How wide (in sweep-progress units, `age_secs / POUR_SECS`) the travelling highlight is on either side of a
+/// corner's own arrival moment.
+const PULSE_WIDTH: f32 = 0.35;
+
+/// How close corner `(ox, oz)` (0 or 1 each) is to the entry edge for an arrival direction `from` (`-1..=1`
+/// each, never both zero, pointing from the new cell back toward the neighbour it arrived from): `1.0` at the
+/// corner(s) right on the entry edge, `-1.0` at the corner(s) on the far edge, `0.0` at a side corner on a
+/// diagonal arrival.
+fn corner_entry(ox: i32, oz: i32, from: (i32, i32)) -> f32 {
+    let (cx, cz) = (ox as f32 - 0.5, oz as f32 - 0.5);
+    let dot = cx * from.0 as f32 + cz * from.1 as f32;
+    dot / (0.5 * (from.0.abs() + from.1.abs()) as f32)
+}
+
+/// Where in the sweep (`0` = lit immediately, `1` = lit only once the sweep finishes crossing the quad) corner
+/// `(ox, oz)` sits for arrival direction `from`.
+fn corner_arrival_t(ox: i32, oz: i32, from: (i32, i32)) -> f32 {
+    (1.0 - corner_entry(ox, oz, from)) / 2.0
+}
+
+/// The travelling highlight's own brightness on a corner at sweep position `progress` (`age_secs / POUR_SECS`,
+/// left unclamped: the pulse already fades back to 0 well away from `t_corner` on either side, both before it
+/// arrives and after it has passed).
+fn pour_boost(t_corner: f32, progress: f32) -> f32 {
+    (1.0 - (progress - t_corner).abs() / PULSE_WIDTH).clamp(0.0, 1.0)
+}
+
+/// One corner's own alpha during a fresh arrival: `settle` (`blend_alpha(blend)`) boosted toward `1.0` while the
+/// pour's own highlight is passing over that corner — regardless of how low `settle` still is this early, the
+/// "pours onto it" cue — then easing back to `settle` once the highlight has passed.
+fn pour_in_alpha(settle: f32, from: (i32, i32), ox: i32, oz: i32, age_secs: f32) -> f32 {
+    let boost = pour_boost(corner_arrival_t(ox, oz, from), age_secs / POUR_SECS);
+    settle + (1.0 - settle) * boost
+}
+
+/// A cell's own 4 corner alphas, `ground_mesh`'s own corner order (`CORNERS`): plain `blend_alpha(blend)` on all
+/// 4 with no arrival to animate; `pour_in_alpha` per corner while one is still fresh, settling back into the
+/// plain look well before `age_secs` grows much past `POUR_SECS`.
+fn cell_alphas(blend: u8, arrival: Option<CellArrival>, now: SimNow) -> [f32; 4] {
+    let settle = blend_alpha(blend);
+    match arrival {
+        None => [settle; 4],
+        Some(a) => {
+            let age = now.secs_since(a.born);
+            std::array::from_fn(|i| {
+                let (ox, oz) = CORNERS[i];
+                pour_in_alpha(settle, a.from, ox, oz, age)
+            })
+        }
+    }
+}
+
+/// How fast a flowing cell's own texture coordinates drift upstream, cells per second (our own feel, not a
+/// traced number: no original lava tile exists to measure a real flow speed from, like `POUR_SECS`).
+const FLOW_SPEED_CELLS_PER_SEC: f32 = 0.5;
+
+/// A flowing cell's own UV drift right now: zero with no `arrival` (the initial seed disc, or `Mode::Static`'s
+/// fixed fissure, both with nothing to flow from), otherwise a steady creep upstream (`-from`, the direction it
+/// actually spread *from* source to target) that only ever grows with `age_secs` — unlike `pour_in_alpha`'s own
+/// brief flash, this keeps going for as long as the cell carries its `arrival` (effectively its whole life: `grow`
+/// never clears it), so the molten pattern itself visibly slides downhill the whole time, not just on arrival.
+fn flow_offset(arrival: Option<CellArrival>, now: SimNow) -> Vec2 {
+    match arrival {
+        None => Vec2::ZERO,
+        Some(a) => Vec2::new(-a.from.0 as f32, -a.from.1 as f32).normalize_or_zero() * FLOW_SPEED_CELLS_PER_SEC * now.secs_since(a.born),
+    }
+}
+
+/// `game_core::lava::Lava::grow` pushes each mature cell into only its single steepest downhill neighbour (true
+/// to the trace: a real finger/channel spread, not a filled disc) — so a cell can sit fully surrounded by hot
+/// ones yet never be pushed into itself, and reads as a checkerboard of plain, untouched ground inside the flow.
+/// `fill_gaps` papers over that, client-side only, not in the simulation: any such gap is drawn exactly like its
+/// hottest touching neighbour — same alpha, same drift, so it reads as that neighbour's own patch spilling over
+/// rather than a dimmer, obviously-fake in-between tile.
+fn fill_gaps(lit: &[((i32, i32), u8, Option<CellArrival>)], now: SimNow, size: i32) -> Vec<((i32, i32), f32, Vec2)> {
+    let hot: std::collections::HashSet<(i32, i32)> = lit.iter().map(|&(pos, ..)| pos).collect();
+    let mut gaps: std::collections::HashMap<(i32, i32), (f32, Vec2)> = std::collections::HashMap::new();
+    for &(pos, blend, arrival) in lit {
+        let (alpha, drift) = (blend_alpha(blend), flow_offset(arrival, now));
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                if (dx, dz) == (0, 0) {
+                    continue;
+                }
+                let n = ((pos.0 + dx).rem_euclid(size), (pos.1 + dz).rem_euclid(size));
+                if !hot.contains(&n) {
+                    gaps.entry(n).and_modify(|e| if alpha > e.0 { *e = (alpha, drift) }).or_insert((alpha, drift));
+                }
+            }
+        }
+    }
+    gaps.into_iter().map(|(pos, (alpha, drift))| (pos, alpha, drift)).collect()
+}
+
+/// One quad per cell at its own `alpha` (`blend_alpha`, or a controller's own uniform fade for `VolcanoGlowView`)
+/// and its own UV drift (`flow_offset`, zero outside `LavaView`), each corner draped on the real terrain
+/// (`grounded::ground_point`, the same technique `blueprint::grid_mark` uses for its footprint preview): the
+/// crater's funnel and the fissure's sunk disc are not flat, so a single flat quad would float or bury itself
+/// across the patch. UVs are absolute cell coordinates plus that drift, not `0..1` per quad, so the repeating
+/// material (`lava_material`) tiles seamlessly across the whole patch regardless of which cells are lit or how
+/// far each one has drifted.
 ///
 /// Each quad is split along the (1,0)-(0,1) diagonal, the same fold `terrain_mesh::build` uses for its own
 /// cells: matching all 4 corners isn't enough on a slope — the other diagonal bends the quad's interior away
 /// from the terrain's own triangle there, so it reads as sunk under the ground on one half of the cell.
-fn ground_mesh(cells: &[((i32, i32), f32)], terrain: &Heightmap, focus: Vec2, params: &crate::terrain_mesh::CurveParams) -> MeshData {
+fn ground_mesh(cells: &[((i32, i32), [f32; 4], Vec2)], terrain: &Heightmap, focus: Vec2, params: &crate::terrain_mesh::CurveParams) -> MeshData {
     let mut m = MeshData::default();
-    for &((cx, cz), alpha) in cells {
+    for &((cx, cz), alphas, drift) in cells {
         let base = m.positions.len() as u32;
-        for (ox, oz) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] {
-            let at = Vec2::new(cx as f32 + ox, cz as f32 + oz);
+        for (k, (ox, oz)) in CORNERS.into_iter().enumerate() {
+            let at = Vec2::new(cx as f32 + ox as f32, cz as f32 + oz as f32);
             let p = ground_point(terrain, focus, params, at) + Vec3::Y * LIFT;
             m.positions.push(p.into());
             m.normals.push([0.0, 1.0, 0.0]);
-            m.uvs.push([cx as f32 + ox, cz as f32 + oz]);
-            m.colors.push([1.0, 1.0, 1.0, alpha]);
+            m.uvs.push([at.x + drift.x, at.y + drift.y]);
+            m.colors.push([1.0, 1.0, 1.0, alphas[k]]);
         }
         m.indices.extend([base, base + 1, base + 3, base + 1, base + 2, base + 3]);
     }
@@ -363,9 +483,15 @@ pub struct LavaView {
     mesh: Handle<Mesh>,
 }
 
-fn effect_cells(e: &Effect) -> Vec<((i32, i32), f32)> {
+fn effect_cells(e: &Effect, now: SimNow, size: i32) -> Vec<((i32, i32), [f32; 4], Vec2)> {
     match &e.kind {
-        EffectKind::Lava(lava) => lava.cells_lit().into_iter().map(|(pos, blend)| (pos, blend_alpha(blend))).collect(),
+        EffectKind::Lava(lava) => {
+            let lit = lava.cells_lit();
+            let mut cells: Vec<((i32, i32), [f32; 4], Vec2)> =
+                lit.iter().map(|&(pos, blend, arrival)| (pos, cell_alphas(blend, arrival, now), flow_offset(arrival, now))).collect();
+            cells.extend(fill_gaps(&lit, now, size).into_iter().map(|(pos, alpha, drift)| (pos, [alpha; 4], drift)));
+            cells
+        }
         _ => Vec::new(),
     }
 }
@@ -383,7 +509,11 @@ impl WorldView for LavaView {
     }
 
     fn spawn((id, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (map, rig, params, meshes, mats, images): &mut SystemParamItem<Self::Params>) -> Option<Self> {
-        let cells = effect_cells(e);
+        // `spawn` only ever sees a freshly-created effect, whose cells are always the initial seed (never an
+        // actual spread step yet) — so every one carries `arrival: None`, and `cell_alphas`/`flow_offset` never
+        // read `now` on this path: a placeholder is safe here. `update` (below) passes its own real `now`.
+        let size = map.0.terrain.size() as i32;
+        let cells = effect_cells(e, SimNow::default(), size);
         if cells.is_empty() {
             return None;
         }
@@ -395,8 +525,9 @@ impl WorldView for LavaView {
         Some(LavaView { mesh })
     }
 
-    fn update(&self, (_, e): &(Id<Effect>, Effect), _now: SimNow, (map, rig, params, meshes, _, _): &mut SystemParamItem<Self::Params>) {
-        let cells = effect_cells(e);
+    fn update(&self, (_, e): &(Id<Effect>, Effect), now: SimNow, (map, rig, params, meshes, _, _): &mut SystemParamItem<Self::Params>) {
+        let size = map.0.terrain.size() as i32;
+        let cells = effect_cells(e, now, size);
         if let Some(mut m) = meshes.get_mut(&self.mesh) {
             set_ground_mesh(&mut m, ground_mesh(&cells, &map.0.terrain, rig.focus, &params.0));
         }
@@ -406,11 +537,11 @@ impl WorldView for LavaView {
 /// The `DESTROY_AREA_CELLS` square a Volcano effect's own pre-eruption glow (`Volcano::pre_glow`) covers right
 /// now, each cell at the controller's own current intensity (uniform across the whole square, unlike `LavaView`'s
 /// own per-cell heat: there's no lava yet, just the ground about to erupt warming up together).
-fn glow_cells(e: &Effect, size: i32) -> Vec<((i32, i32), f32)> {
+fn glow_cells(e: &Effect, size: i32) -> Vec<((i32, i32), [f32; 4], Vec2)> {
     let EffectKind::Volcano(ref v) = e.kind else { return Vec::new() };
     let Some(intensity) = v.pre_glow() else { return Vec::new() };
     let centre = (cell_of(e.x), cell_of(e.z));
-    volcano::square(centre, volcano::DESTROY_AREA_CELLS, size).map(|c| (c, intensity)).collect()
+    volcano::square(centre, volcano::DESTROY_AREA_CELLS, size).map(|c| (c, [intensity; 4], Vec2::ZERO)).collect()
 }
 
 /// Volcano's own pre-eruption glow: the same draped, textured look as `LavaView`, reused at partial strength over
@@ -469,6 +600,7 @@ impl Plugin for LavaPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use game_core::time::{Tick, TICKS_PER_SECOND};
 
     #[test]
     fn rng_is_deterministic_and_in_range() {
@@ -525,11 +657,20 @@ mod tests {
     fn ground_mesh_is_one_quad_per_cell_with_absolute_cell_uvs() {
         let terrain = Heightmap::new(16);
         let params = crate::terrain_mesh::CurveParams::default();
-        let cells = [((3, 4), 1.0), ((3, 5), 1.0)];
+        let cells = [((3, 4), [1.0; 4], Vec2::ZERO), ((3, 5), [1.0; 4], Vec2::ZERO)];
         let m = ground_mesh(&cells, &terrain, Vec2::ZERO, &params);
         assert_eq!(m.positions.len(), 8, "4 corners per cell");
         assert_eq!(m.indices.len(), 12, "2 triangles per cell");
         assert!(m.uvs.contains(&[3.0, 4.0]) && m.uvs.contains(&[4.0, 6.0]), "uv matches absolute cell coords");
+    }
+
+    #[test]
+    fn ground_mesh_drifts_uvs_by_each_cell_s_own_flow_offset() {
+        let terrain = Heightmap::new(16);
+        let params = crate::terrain_mesh::CurveParams::default();
+        let m = ground_mesh(&[((3, 4), [1.0; 4], Vec2::new(0.5, -0.25))], &terrain, Vec2::ZERO, &params);
+        assert!(m.uvs.contains(&[3.5, 3.75]), "corner (0,0) shifted by the drift");
+        assert!(m.uvs.contains(&[4.5, 4.75]), "corner (1,1) shifted the same way");
     }
 
     #[test]
@@ -540,7 +681,7 @@ mod tests {
         // then their interiors disagree away from the corners.
         let terrain = Heightmap::new(16);
         let params = crate::terrain_mesh::CurveParams::default();
-        let m = ground_mesh(&[((0, 0), 1.0)], &terrain, Vec2::ZERO, &params);
+        let m = ground_mesh(&[((0, 0), [1.0; 4], Vec2::ZERO)], &terrain, Vec2::ZERO, &params);
         assert_eq!(m.indices, vec![0, 1, 3, 1, 2, 3]);
     }
 
@@ -548,16 +689,24 @@ mod tests {
     fn ground_mesh_lifts_every_corner_off_flat_ground() {
         let terrain = Heightmap::new(16);
         let params = crate::terrain_mesh::CurveParams { curvature: 0.0, ..crate::terrain_mesh::CurveParams::default() };
-        let m = ground_mesh(&[((0, 0), 1.0)], &terrain, Vec2::ZERO, &params);
+        let m = ground_mesh(&[((0, 0), [1.0; 4], Vec2::ZERO)], &terrain, Vec2::ZERO, &params);
         assert!(m.positions.iter().all(|p| (p[1] - LIFT).abs() < 1e-4), "flat, uncurved ground: every corner at exactly LIFT");
     }
 
     #[test]
-    fn ground_mesh_carries_each_cell_s_own_alpha_to_every_corner() {
+    fn ground_mesh_carries_each_cell_s_own_uniform_alpha_to_every_corner() {
         let terrain = Heightmap::new(16);
         let params = crate::terrain_mesh::CurveParams::default();
-        let m = ground_mesh(&[((0, 0), 0.4)], &terrain, Vec2::ZERO, &params);
+        let m = ground_mesh(&[((0, 0), [0.4; 4], Vec2::ZERO)], &terrain, Vec2::ZERO, &params);
         assert!(m.colors.iter().all(|c| *c == [1.0, 1.0, 1.0, 0.4]));
+    }
+
+    #[test]
+    fn ground_mesh_carries_distinct_per_corner_alphas_in_order() {
+        let terrain = Heightmap::new(16);
+        let params = crate::terrain_mesh::CurveParams::default();
+        let m = ground_mesh(&[((0, 0), [0.1, 0.2, 0.3, 0.4], Vec2::ZERO)], &terrain, Vec2::ZERO, &params);
+        assert_eq!(m.colors, vec![[1.0, 1.0, 1.0, 0.1], [1.0, 1.0, 1.0, 0.2], [1.0, 1.0, 1.0, 0.3], [1.0, 1.0, 1.0, 0.4]]);
     }
 
     #[test]
@@ -567,5 +716,121 @@ mod tests {
         assert_eq!(blend_alpha(0), 0.0);
         let half = blend_alpha(MATURE_BLEND / 2);
         assert!(half > 0.0 && half < 1.0, "fades in between: {half}");
+    }
+
+    #[test]
+    fn corner_arrival_t_runs_from_the_entry_edge_to_the_far_edge() {
+        // Source due west: the west edge corners (ox=0) are the entry, the east edge (ox=1) is the far edge.
+        assert_eq!(corner_arrival_t(0, 0, (-1, 0)), 0.0);
+        assert_eq!(corner_arrival_t(0, 1, (-1, 0)), 0.0);
+        assert_eq!(corner_arrival_t(1, 0, (-1, 0)), 1.0);
+        assert_eq!(corner_arrival_t(1, 1, (-1, 0)), 1.0);
+        // A diagonal arrival (from the south-west): the two corners off that axis sit halfway through the sweep.
+        assert_eq!(corner_arrival_t(0, 0, (-1, -1)), 0.0);
+        assert_eq!(corner_arrival_t(1, 1, (-1, -1)), 1.0);
+        assert_eq!(corner_arrival_t(1, 0, (-1, -1)), 0.5);
+        assert_eq!(corner_arrival_t(0, 1, (-1, -1)), 0.5);
+    }
+
+    #[test]
+    fn pour_in_alpha_lights_the_entry_corner_first_and_leaves_the_far_corner_alone_at_first() {
+        let (settle, from) = (0.2, (-1, 0));
+        assert!(pour_in_alpha(settle, from, 0, 0, 0.0) > 0.9, "the entry corner is already near its brightest");
+        assert_eq!(pour_in_alpha(settle, from, 1, 0, 0.0), settle, "the far corner hasn't been reached yet");
+    }
+
+    #[test]
+    fn pour_in_alpha_settles_back_to_blend_alpha_well_past_pour_secs() {
+        let (settle, from) = (0.3, (-1, -1));
+        for (ox, oz) in CORNERS {
+            assert_eq!(pour_in_alpha(settle, from, ox, oz, POUR_SECS * 5.0), settle, "long since settled: {ox},{oz}");
+        }
+    }
+
+    #[test]
+    fn pour_in_alpha_never_leaves_settle_to_one() {
+        for from in [(-1, 0), (1, 0), (0, -1), (1, 1), (-1, -1)] {
+            for (ox, oz) in CORNERS {
+                for t in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.8, 1.2, 2.0] {
+                    let a = pour_in_alpha(0.15, from, ox, oz, t * POUR_SECS);
+                    assert!((0.15..=1.0).contains(&a), "out of range: {a} at {ox},{oz} t={t} from={from:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cell_alphas_is_the_plain_uniform_look_without_an_arrival() {
+        assert_eq!(cell_alphas(MATURE_BLEND / 2, None, SimNow::default()), [blend_alpha(MATURE_BLEND / 2); 4]);
+    }
+
+    #[test]
+    fn flow_offset_is_zero_without_an_arrival() {
+        assert_eq!(flow_offset(None, SimNow { tick: Tick::from_wire(50), frac: 0.0 }), Vec2::ZERO);
+    }
+
+    #[test]
+    fn flow_offset_is_zero_the_instant_a_cell_arrives() {
+        let arrival = CellArrival { born: Tick::from_wire(10), from: (-1, 0) };
+        assert_eq!(flow_offset(Some(arrival), SimNow { tick: Tick::from_wire(10), frac: 0.0 }), Vec2::ZERO);
+    }
+
+    #[test]
+    fn flow_offset_grows_with_age_towards_the_direction_it_actually_spread() {
+        // `from` points back toward the neighbour it arrived from (due west, here), so the flow itself
+        // (source -> target) runs east: a positive x drift.
+        let arrival = CellArrival { born: Tick::from_wire(0), from: (-1, 0) };
+        let early = flow_offset(Some(arrival), SimNow { tick: Tick::from_wire(1), frac: 0.0 });
+        let later = flow_offset(Some(arrival), SimNow { tick: Tick::from_wire(10), frac: 0.0 });
+        assert!(early.x > 0.0 && early.y == 0.0, "drifts east, not north/south: {early:?}");
+        assert!(later.x > early.x, "keeps drifting further the longer it's been hot: {early:?} then {later:?}");
+    }
+
+    #[test]
+    fn flow_offset_is_a_unit_direction_even_on_a_diagonal_arrival() {
+        let arrival = CellArrival { born: Tick::from_wire(0), from: (-1, -1) };
+        let d = flow_offset(Some(arrival), SimNow { tick: Tick::from_wire(TICKS_PER_SECOND), frac: 0.0 });
+        assert!((d.length() - FLOW_SPEED_CELLS_PER_SEC).abs() < 1e-4, "one second in, drifted exactly one second's worth, not more for being diagonal: {d:?}");
+    }
+
+    #[test]
+    fn fill_gaps_draws_every_neighbour_of_a_hot_cell_but_not_the_hot_cell_itself() {
+        let lit = [((10, 10), MATURE_BLEND, None)];
+        let gaps = fill_gaps(&lit, SimNow::default(), 128);
+        assert_eq!(gaps.len(), 8, "all 8 neighbours, none of them already hot");
+        assert!(gaps.iter().all(|&(pos, alpha, _)| pos != (10, 10) && alpha == blend_alpha(MATURE_BLEND)), "full strength, not dimmed");
+    }
+
+    #[test]
+    fn fill_gaps_never_redraws_a_cell_thats_already_hot() {
+        let lit = [((10, 10), MATURE_BLEND, None), ((11, 10), MATURE_BLEND, None)];
+        let gaps = fill_gaps(&lit, SimNow::default(), 128);
+        assert!(!gaps.iter().any(|&(pos, ..)| lit.iter().any(|&(hot, ..)| hot == pos)), "already-hot cells aren't redrawn");
+    }
+
+    #[test]
+    fn fill_gaps_takes_the_brightest_of_several_touching_hot_neighbours() {
+        let lit = [((10, 10), MATURE_BLEND, None), ((12, 10), MATURE_BLEND / 4, None)];
+        let gaps = fill_gaps(&lit, SimNow::default(), 128);
+        let gap = (11, 10);
+        let alpha = gaps.iter().find(|&&(pos, ..)| pos == gap).unwrap().1;
+        assert_eq!(alpha, blend_alpha(MATURE_BLEND), "the full-strength neighbour wins over the dim one");
+    }
+
+    #[test]
+    fn fill_gaps_carries_its_source_neighbour_s_own_drift_too() {
+        let arrival = CellArrival { born: Tick::from_wire(0), from: (-1, 0) };
+        let lit = [((10, 10), MATURE_BLEND, Some(arrival))];
+        let now = SimNow { tick: Tick::from_wire(TICKS_PER_SECOND), frac: 0.0 };
+        let gaps = fill_gaps(&lit, now, 128);
+        let expected = flow_offset(Some(arrival), now);
+        assert!(gaps.iter().all(|&(_, _, drift)| drift == expected), "the gap cell flows along with the neighbour it's filling in for");
+    }
+
+    #[test]
+    fn fill_gaps_wraps_on_the_torus() {
+        let lit = [((0, 0), MATURE_BLEND, None)];
+        let gaps = fill_gaps(&lit, SimNow::default(), 16);
+        assert!(gaps.iter().any(|&(pos, ..)| pos == (15, 15)), "wraps to the far edge");
     }
 }

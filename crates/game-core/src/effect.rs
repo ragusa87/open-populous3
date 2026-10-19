@@ -91,7 +91,6 @@ impl Effect {
     }
 
     /// One turn at `now`: its work on its own rhythm, then one turn less to go.
-    #[allow(unused_variables)]
     pub fn tick(&mut self, now: Tick, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         let events = match self.kind {
             EffectKind::SimpleBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units, &world.vehicles),
@@ -101,7 +100,7 @@ impl Effect {
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
             EffectKind::Convert(ref mut convert) => convert.turn((self.x, self.z), self.owner, world),
             EffectKind::Hypnotism(ref mut hypnotism) => hypnotism.turn((self.x, self.z), self.owner, world),
-            EffectKind::Lava(ref mut lava) => lava.turn(self.owner, world),
+            EffectKind::Lava(ref mut lava) => lava.turn(now, self.owner, world),
             EffectKind::Volcano(ref mut volcano) => volcano.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Firestorm(ref mut firestorm) => firestorm.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Earthquake(ref mut earthquake) => earthquake.turn((self.x, self.z), self.owner, world),

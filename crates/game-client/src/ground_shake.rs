@@ -1,26 +1,21 @@
-//! Ground Shake: the trembling ground under Volcano's own pre-eruption rumble and Earthquake's own tremor
-//! (`game_core::effect::GroundShake`, shared between the two the same way `lava` is shared by their aftermaths).
-//! A draped overlay patch (`ground_mesh`, the same per-cell draping `lava.rs`'s own patch uses) wearing the real
-//! terrain's own baked material (`world::TerrainMaterial`), so it reads as the ground itself trembling rather
-//! than a separate effect sitting on top of it. Peak lift (`LIFT`) and the jitter shape are our own invention,
-//! picked by eye against a throwaway prototype: the trace gives no magnitude for either's own "rumbling"/"shake".
+//! Ground Shake: a camera shake for Volcano's own pre-eruption rumble and Earthquake's own tremor
+//! (`game_core::effect::GroundShake`, shared between the two the same way `lava` is shared by their aftermaths)
+//! — a kick and a roll on the camera itself, not a trembling terrain mesh: screen shake is the standard way games
+//! sell "the ground is shaking" without the terrain itself looking like it's glitching underfoot. Peak kick
+//! (`CAMERA_KICK`/`CAMERA_ROLL`) and the jitter shape are our own invention, picked by eye against a throwaway
+//! prototype: the trace gives no magnitude for either's own "rumbling"/"shake".
+//!
+//! `camera_shake` runs right after `camera::apply_rig` (`camera::CameraPlugin`'s own chain): `apply_rig` is the
+//! only system that writes the camera's `Transform`, and it reads back its own previous frame's `Transform` to
+//! lerp 25% toward a freshly computed pose each frame — a shake folded into that system, or into `CameraRig`
+//! itself (lerped and read by other systems besides), would partly feed back into next frame's own smoothing
+//! instead of being a clean, one-way offset on top of the pose `apply_rig` already settled on.
 
-use crate::camera::{CameraRig, CurveParamsRes};
-use crate::grounded::ground_point;
-use crate::original_models::MeshData;
-use crate::sim_time::{seed, SimNow};
-use crate::terrain_mesh::CurveParams;
-use crate::views::{sync_views, WorldView};
-use crate::world::{CurrentMap, TerrainMaterial};
-use bevy::asset::RenderAssetUsages;
-use bevy::ecs::system::SystemParamItem;
-use bevy::light::NotShadowCaster;
-use bevy::mesh::{Indices, PrimitiveTopology};
+use crate::camera::{CameraRig, GameCamera};
+use crate::sim_time::seed;
+use crate::world::CurrentMap;
 use bevy::prelude::*;
-use game_core::effect::{Effect, GroundShake};
-use game_core::id::Id;
-use game_core::map::GameMap;
-use game_core::terrain::Heightmap;
+use game_core::effect::GroundShake;
 use game_core::time::TICKS_PER_SECOND;
 use pop3_format::WORLD_UNITS_PER_CELL;
 use std::f32::consts::TAU;
@@ -30,13 +25,13 @@ fn cell_of(v: u16) -> i32 {
     (v as u32 / WORLD_UNITS_PER_CELL) as i32
 }
 
-/// Peak lift at full intensity, right at the epicentre (render units): picked by eye against a POC, not an
-/// original-game number.
-const LIFT: f32 = 0.3;
-/// How fast a shaking vertex trembles (Hz): same reasoning as `LIFT`.
+/// How far the camera kicks (render units) and rolls (radians) at full combined strength, right at an
+/// epicentre: picked by eye against a POC, not an original-game number — small enough to read as a tremor, not a
+/// disorienting lurch.
+const CAMERA_KICK: f32 = 0.08;
+const CAMERA_ROLL: f32 = 0.015;
+/// How fast the camera trembles (Hz): same reasoning.
 const FREQ: f32 = 2.2;
-/// How far above the true ground the patch sits (`lava.rs`'s own `LIFT`, same reason: no z-fighting).
-const HOVER: f32 = 0.02;
 
 fn clamp01(x: f32) -> f32 {
     x.clamp(0.0, 1.0)
@@ -46,106 +41,67 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// How much `at` (cell corner, unwrapped) is still trembling: `shake.intensity` at `centre`, fading to 0 by
-/// `shake.radius_cells`.
-fn strength_at(shake: GroundShake, centre: (i32, i32), at: (i32, i32)) -> f32 {
-    let d = (((at.0 - centre.0).pow(2) + (at.1 - centre.1).pow(2)) as f32).sqrt();
+/// How much `at` (cell coordinates, continuous: the camera's own focus, not a mesh corner) is still trembling:
+/// `shake.intensity` at `centre`, fading to 0 by `shake.radius_cells` — you feel the shake if you're looking near
+/// the quake, not if you're looking clear across the map.
+fn strength_at(shake: GroundShake, centre: (i32, i32), at: Vec2) -> f32 {
+    let d = ((at.x - centre.0 as f32).powi(2) + (at.y - centre.1 as f32).powi(2)).sqrt();
     shake.intensity * (1.0 - smoothstep(shake.radius_cells * 0.45, shake.radius_cells, d))
 }
 
-/// A corner's own trembling, in `[-1, 1]`: two summed sines out of phase per corner (`sim_time::seed`, the same
-/// stable per-id phase every other view uses) so neighbours don't move in lockstep.
-fn jitter(corner: (i32, i32), elapsed_secs: f32) -> f32 {
-    let key = (corner.0 as u32).wrapping_mul(0x27D4_EB2F) ^ (corner.1 as u32).wrapping_mul(0x9E37_79B9);
-    let phase = seed(key) * TAU;
+/// One shake's own trembling, in `[-1, 1]`: two summed sines out of phase per `key` (`sim_time::seed`, the same
+/// stable per-id phase every other view uses) so two different keys (an effect's own two axes, or two
+/// simultaneous shakes) don't move in lockstep.
+fn jitter(key: (i32, i32), elapsed_secs: f32) -> f32 {
+    let k = (key.0 as u32).wrapping_mul(0x27D4_EB2F) ^ (key.1 as u32).wrapping_mul(0x9E37_79B9);
+    let phase = seed(k) * TAU;
     0.6 * (elapsed_secs * FREQ * TAU + phase).sin() + 0.4 * (elapsed_secs * FREQ * TAU * 2.13 + phase * 1.7 + 1.3).sin()
 }
 
-/// One quad per cell, draped on the real terrain like `lava.rs`'s own `ground_mesh`, each corner lifted by its
-/// own trembling on top of the true height. UVs match `terrain_mesh::build`'s own scheme (absolute coordinates
-/// over the map's size), not a repeating `0..1` per quad like `lava.rs`'s own patch: this one wears the single,
-/// whole-map baked ground texture (`TerrainMaterial`), not a small repeating tile.
-fn ground_mesh(cells: &[(i32, i32)], shake: GroundShake, centre: (i32, i32), elapsed_secs: f32, terrain: &Heightmap, focus: Vec2, params: &CurveParams) -> MeshData {
-    let size = terrain.size() as f32;
-    let mut m = MeshData::default();
-    for &(cx, cz) in cells {
-        let base = m.positions.len() as u32;
-        for (ox, oz) in [(0, 0), (1, 0), (1, 1), (0, 1)] {
-            let corner = (cx + ox, cz + oz);
-            let lift = LIFT * strength_at(shake, centre, corner) * jitter(corner, elapsed_secs);
-            let at = Vec2::new(corner.0 as f32, corner.1 as f32);
-            let p = ground_point(terrain, focus, params, at) + Vec3::Y * (HOVER + lift);
-            m.positions.push(p.into());
-            m.normals.push([0.0, 1.0, 0.0]);
-            m.uvs.push([corner.0 as f32 / size, corner.1 as f32 / size]);
+/// The camera's own combined kick (render units, in its own right/up plane) and roll (radians, about its own
+/// forward axis) at `at` (the camera's live focus): summed over every `active` shake (its own id, `GroundShake`,
+/// centre cell and elapsed seconds) — two simultaneous quakes shake harder together, not just two independent,
+/// overlapping trembles. Each shake's own two axes (and so two simultaneous shakes themselves) move out of phase
+/// (`jitter`'s own per-key phase, keyed by the effect's id and an axis index: no new jitter shape needed).
+pub(crate) fn shake_offset(active: &[(u32, GroundShake, (i32, i32), f32)], at: Vec2) -> (Vec2, f32) {
+    let mut kick = Vec2::ZERO;
+    let mut roll = 0.0;
+    for &(id, shake, centre, elapsed) in active {
+        let strength = strength_at(shake, centre, at);
+        if strength <= 0.0 {
+            continue;
         }
-        m.indices.extend([base, base + 1, base + 3, base + 1, base + 2, base + 3]);
+        let (jx, jy) = (jitter((id as i32, 0), elapsed), jitter((id as i32, 1), elapsed));
+        kick += Vec2::new(jx, jy) * strength;
+        roll += jx * strength;
     }
-    m
+    (kick * CAMERA_KICK, roll * CAMERA_ROLL)
 }
 
-fn set_ground_mesh(mesh: &mut Mesh, data: MeshData) {
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, data.positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs);
-    mesh.insert_indices(Indices::U32(data.indices));
+/// Every currently active `GroundShake` effect: its id, shake, centre cell and seconds elapsed since it started.
+fn active_shakes(map: &game_core::map::GameMap) -> Vec<(u32, GroundShake, (i32, i32), f32)> {
+    map.effects
+        .entries()
+        .filter_map(|(id, e)| {
+            let shake = e.ground_shake()?;
+            let elapsed = e.left.done().get() as f32 / TICKS_PER_SECOND as f32;
+            Some((id.raw(), shake, (cell_of(e.x), cell_of(e.z)), elapsed))
+        })
+        .collect()
 }
 
-/// The effect's own current shake, its cell footprint, centre and how long it's been running, if it has one.
-fn effect_shake(e: &Effect, size: i32) -> Option<(GroundShake, Vec<(i32, i32)>, (i32, i32), f32)> {
-    let shake = e.ground_shake()?;
-    let elapsed_secs = e.left.done().get() as f32 / TICKS_PER_SECOND as f32;
-    let centre = (cell_of(e.x), cell_of(e.z));
-    let cells = game_core::lava::disc((e.x, e.z), shake.radius_cells, size);
-    Some((shake, cells, centre, elapsed_secs))
-}
-
-/// One effect's own trembling patch: a draped mesh rebuilt every frame (like `LavaView`'s own) so it tracks the
-/// camera's live focus and the torus wrap.
-#[derive(Component)]
-pub struct GroundShakeView {
-    mesh: Handle<Mesh>,
-}
-
-impl WorldView for GroundShakeView {
-    type Model = (Id<Effect>, Effect);
-    type Params = (Res<'static, CurrentMap>, Res<'static, CameraRig>, Res<'static, CurveParamsRes>, Res<'static, TerrainMaterial>, ResMut<'static, Assets<Mesh>>);
-
-    fn models(map: &GameMap) -> impl Iterator<Item = &(Id<Effect>, Effect)> {
-        map.effects.entries().filter(|(_, e)| e.ground_shake().is_some())
+/// Shakes the camera itself: summed over every currently active `GroundShake` effect, on top of whatever
+/// `camera::apply_rig` just settled the `Transform` on (see the module doc for why it must run strictly after).
+pub(crate) fn camera_shake(map: Res<CurrentMap>, rig: Res<CameraRig>, mut cam: Query<&mut Transform, With<GameCamera>>) {
+    let active = active_shakes(&map.0);
+    if active.is_empty() {
+        return;
     }
-
-    fn id((id, _): &(Id<Effect>, Effect)) -> u32 {
-        id.raw()
-    }
-
-    fn spawn((_, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (map, rig, params, material, meshes): &mut SystemParamItem<Self::Params>) -> Option<Self> {
-        let size = map.0.terrain.size() as i32;
-        let (shake, cells, centre, elapsed) = effect_shake(e, size)?;
-        if cells.is_empty() {
-            return None;
-        }
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-        set_ground_mesh(&mut mesh, ground_mesh(&cells, shake, centre, elapsed, &map.0.terrain, rig.focus, &params.0));
-        let mesh = meshes.add(mesh);
-        view.insert((Mesh3d(mesh.clone()), MeshMaterial3d(material.0.clone()), Transform::default(), Visibility::Visible, NotShadowCaster, crate::hover::NoOutline));
-        Some(GroundShakeView { mesh })
-    }
-
-    fn update(&self, (_, e): &(Id<Effect>, Effect), _now: SimNow, (map, rig, params, _material, meshes): &mut SystemParamItem<Self::Params>) {
-        let size = map.0.terrain.size() as i32;
-        let Some((shake, cells, centre, elapsed)) = effect_shake(e, size) else { return };
-        if let Some(mut m) = meshes.get_mut(&self.mesh) {
-            set_ground_mesh(&mut m, ground_mesh(&cells, shake, centre, elapsed, &map.0.terrain, rig.focus, &params.0));
-        }
-    }
-}
-
-pub struct GroundShakePlugin;
-
-impl Plugin for GroundShakePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, sync_views::<GroundShakeView>.after(crate::units::run_ticks));
+    let (kick, roll) = shake_offset(&active, rig.focus);
+    for mut t in &mut cam {
+        let (right, up) = (t.rotation * Vec3::X, t.rotation * Vec3::Y);
+        t.translation += right * kick.x + up * kick.y;
+        t.rotation *= Quat::from_rotation_z(roll);
     }
 }
 
@@ -157,33 +113,51 @@ mod tests {
 
     #[test]
     fn strength_is_full_at_the_centre_and_gone_at_the_radius() {
-        assert_eq!(strength_at(SHAKE, (0, 0), (0, 0)), 1.0);
-        assert_eq!(strength_at(SHAKE, (0, 0), (8, 0)), 0.0);
-        let mid = strength_at(SHAKE, (0, 0), (4, 0));
+        assert_eq!(strength_at(SHAKE, (0, 0), Vec2::ZERO), 1.0);
+        assert_eq!(strength_at(SHAKE, (0, 0), Vec2::new(8.0, 0.0)), 0.0);
+        let mid = strength_at(SHAKE, (0, 0), Vec2::new(4.0, 0.0));
         assert!(mid > 0.0 && mid < 1.0, "fades in between: {mid}");
     }
 
     #[test]
     fn strength_scales_with_intensity() {
         let half = GroundShake { radius_cells: 8.0, intensity: 0.5 };
-        assert_eq!(strength_at(half, (0, 0), (0, 0)), 0.5);
+        assert_eq!(strength_at(half, (0, 0), Vec2::ZERO), 0.5);
     }
 
     #[test]
-    fn jitter_stays_in_range_and_differs_between_neighbours() {
+    fn jitter_stays_in_range_and_differs_between_keys() {
         for t in [0.0, 0.3, 1.7, 6.4] {
-            let j = jitter((5, 5), t);
+            let j = jitter((5, 0), t);
             assert!((-1.0..=1.0).contains(&j), "out of range: {j}");
         }
-        assert_ne!(jitter((5, 5), 1.0), jitter((6, 5), 1.0), "neighbours don't move in lockstep");
+        assert_ne!(jitter((5, 0), 1.0), jitter((5, 1), 1.0), "an effect's two axes don't move in lockstep");
+        assert_ne!(jitter((5, 0), 1.0), jitter((6, 0), 1.0), "two different shakes don't move in lockstep");
     }
 
     #[test]
-    fn ground_mesh_is_one_quad_per_cell() {
-        let terrain = Heightmap::new(16);
-        let params = CurveParams::default();
-        let m = ground_mesh(&[(0, 0), (1, 0)], SHAKE, (0, 0), 0.0, &terrain, Vec2::ZERO, &params);
-        assert_eq!(m.positions.len(), 8);
-        assert_eq!(m.indices.len(), 12);
+    fn no_active_shakes_means_no_offset() {
+        assert_eq!(shake_offset(&[], Vec2::ZERO), (Vec2::ZERO, 0.0));
+    }
+
+    #[test]
+    fn a_shake_far_outside_its_radius_gives_no_offset() {
+        let far = [(1, SHAKE, (0, 0), 1.0)];
+        assert_eq!(shake_offset(&far, Vec2::new(100.0, 0.0)), (Vec2::ZERO, 0.0));
+    }
+
+    #[test]
+    fn two_shakes_at_the_same_spot_move_the_camera_more_than_one_alone() {
+        let one = [(1, SHAKE, (0, 0), 1.0)];
+        let two = [(1, SHAKE, (0, 0), 1.0), (2, SHAKE, (0, 0), 1.0)];
+        let (kick_one, _) = shake_offset(&one, Vec2::ZERO);
+        let (kick_two, _) = shake_offset(&two, Vec2::ZERO);
+        assert!(kick_two.length() > kick_one.length(), "two quakes together shake harder: {kick_one} vs {kick_two}");
+    }
+
+    #[test]
+    fn shake_offset_is_deterministic() {
+        let active = [(1, SHAKE, (0, 0), 0.7)];
+        assert_eq!(shake_offset(&active, Vec2::new(1.0, 2.0)), shake_offset(&active, Vec2::new(1.0, 2.0)));
     }
 }

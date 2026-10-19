@@ -27,9 +27,15 @@ pub struct Patch {
 }
 
 impl Patch {
-    /// The ground to draw again when it changes: its cells.
-    fn dirty(&self) -> impl Iterator<Item = DirtyRect> + '_ {
-        self.cells.iter().map(|&(x, z)| DirtyRect { min: (x, z), max: (x + 1, z + 1) })
+    /// The ground to draw again when it changes: one rectangle bounding all its cells (not one per cell — a
+    /// `WorldEvent` can only carry a single `DirtyRect` out of `GameMap::apply_event`, so a patch spread over many
+    /// cells, like a cooled lava flow's, must fit in one rect or most of it would never get rebaked).
+    fn dirty(&self) -> DirtyRect {
+        let xs = self.cells.iter().map(|&(x, _)| x);
+        let zs = self.cells.iter().map(|&(_, z)| z);
+        let (min_x, max_x) = (xs.clone().min().unwrap_or(0), xs.max().unwrap_or(0));
+        let (min_z, max_z) = (zs.clone().min().unwrap_or(0), zs.max().unwrap_or(0));
+        DirtyRect { min: (min_x, min_z), max: (max_x + 1, max_z + 1) }
     }
 }
 
@@ -44,10 +50,10 @@ impl Ashes {
     pub fn add(&mut self, cells: Vec<(i32, i32)>) -> Vec<DirtyRect> {
         let mut dirty = Vec::new();
         if self.patches.len() >= ASHES_SLOTS {
-            dirty.extend(self.patches.remove(0).dirty());
+            dirty.push(self.patches.remove(0).dirty());
         }
         let patch = Patch { cells, age: 0, darkness: DARK };
-        dirty.extend(patch.dirty());
+        dirty.push(patch.dirty());
         self.patches.push(patch);
         dirty
     }
@@ -63,7 +69,7 @@ impl Ashes {
             p.age += ASHES_EVERY.period();
             if p.age >= ASHES_FULL_TICKS {
                 p.darkness = p.darkness.saturating_sub(FADE_STEP);
-                dirty.extend(p.dirty());
+                dirty.push(p.dirty());
             }
         }
         self.patches.retain(|p| p.darkness > FADED);
@@ -127,9 +133,16 @@ mod tests {
         let dirty: Vec<DirtyRect> = (0..60).flat_map(|_| map.tick()).collect();
         assert!(map.building(hut).is_none(), "burnt down");
         assert!(cells.iter().all(|&c| !map.ashes.buildable(c)));
-        assert!(cells.iter().all(|&(x, z)| dirty.iter().any(|d| d.min == (x, z))), "drawn again");
+        assert!(cells.iter().all(|&(x, z)| dirty.iter().any(|d| (d.min.0..d.max.0).contains(&x) && (d.min.1..d.max.1).contains(&z))), "drawn again");
         let plan = Building::site(BuildingKind::Hut { size: 1 }, 1, corner.0, corner.1, 0);
         assert!(!crate::placement::can_place(&map, &plan), "not on ashes");
+    }
+
+    #[test]
+    fn a_spread_out_patch_dirties_one_rect_covering_every_cell_not_just_one() {
+        let mut ashes = Ashes::default();
+        let dirty = ashes.add(vec![(3, 4), (9, 4), (3, 11)]);
+        assert_eq!(dirty, vec![DirtyRect { min: (3, 4), max: (10, 12) }], "one rect bounding them all, not one per cell");
     }
 
     #[test]
