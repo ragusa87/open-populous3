@@ -6,6 +6,7 @@
 use crate::map::GameMap;
 use crate::status::{Timed, SHIELD_STEPS};
 use crate::time::Tick;
+use crate::unit::Action;
 
 /// Why the match ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,12 +29,19 @@ pub struct Outcome {
 
 impl GameMap {
     /// Declares the match's result, once. `false` (no-op) if one was already declared — nothing can un-declare or
-    /// relabel a result afterwards (the "hookable into scripts" entry point).
+    /// relabel a result afterwards (the "hookable into scripts" entry point). Every unit still acting stands down to
+    /// Idle right away (a death already in train — `Dying`, `Dead`, `Spirit` — finishes on its own; the shaman still
+    /// doesn't get a last-stand reincarnation out of it, `GameMap::tick`'s own freeze below).
     pub fn declare_outcome(&mut self, winner: Option<u8>, reason: Reason) -> bool {
         if self.outcome.is_some() {
             return false;
         }
         self.outcome = Some(Outcome { winner, reason, at: self.now });
+        for u in self.units.iter_mut() {
+            if !matches!(u.action, Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. }) {
+                u.action = Action::Idle;
+            }
+        }
         true
     }
 
@@ -57,15 +65,23 @@ impl GameMap {
         }
     }
 
-    /// Once the match has ended, nothing can hurt anyone any more: every living unit's Magical Shield is kept
-    /// topped up, every tick, for as long as the game keeps running past that point — a no-op before `outcome` is
-    /// set. "Permanent" by being continuously refreshed, the same trick a real Armageddon shield will need
-    /// (`docs/plans/spells.md` "Armageddon"), not a new status kind.
+    /// Whether `tribe` is on the winning side once the match has ended: the winner itself, or one of its allies
+    /// (`Tribes::same_team`). `false` before `outcome` is set and after a draw (`winner: None`) — a draw is a win
+    /// for nobody. The one place a client-side "victory lap" effect (the happy jump, the celebrating pose) should
+    /// read to decide who gets to celebrate.
+    pub fn on_winning_side(&self, tribe: u8) -> bool {
+        self.outcome.and_then(|o| o.winner).is_some_and(|winner| self.tribes.same_team(tribe, winner))
+    }
+
+    /// Once the match has ended, nothing can hurt the winning side's units any more: every one of theirs still alive
+    /// gets its Magical Shield kept topped up, every tick, for as long as the game keeps running past that point —
+    /// a no-op before `outcome` is set, and on a draw, nobody is shielded. "Permanent" by being continuously
+    /// refreshed, the same trick a real Armageddon shield will need (`docs/plans/spells.md` "Armageddon"), not a
+    /// new status kind.
     pub(crate) fn shield_everyone_once_ended(&mut self) {
-        if self.outcome.is_none() {
-            return;
-        }
-        for u in self.units.iter_mut().filter(|u| u.is_alive()) {
+        let Some(winner) = self.outcome.and_then(|o| o.winner) else { return };
+        let tribes = &self.tribes;
+        for u in self.units.iter_mut().filter(|u| u.is_alive() && tribes.same_team(u.owner, winner)) {
             u.statuses.shield = Timed::steps(SHIELD_STEPS);
         }
     }
@@ -75,7 +91,7 @@ impl GameMap {
 mod tests {
     use crate::map::GameMap;
     use crate::tribes::Tribes;
-    use crate::unit::UnitKind;
+    use crate::unit::{Action, UnitKind};
 
     /// `GameMap::generate` already gives two real tribes (0 and 1), each with a living shaman and `tribes` set
     /// from their sites.
@@ -147,13 +163,51 @@ mod tests {
     }
 
     #[test]
-    fn every_living_unit_is_shielded_once_the_match_ends_and_stays_shielded() {
+    fn the_winning_sides_living_units_are_shielded_once_the_match_ends_and_stay_shielded() {
         let mut map = two_tribes();
         map.declare_outcome(Some(0), super::Reason::Eliminated);
         map.run(crate::time::Ticks::new(1));
-        assert!(map.units.iter().filter(|u| u.is_alive()).all(|u| u.statuses.shield.is_on()));
+        assert!(map.units.iter().filter(|u| u.owner == 0 && u.is_alive()).all(|u| u.statuses.shield.is_on()));
+        assert!(map.units.iter().filter(|u| u.owner == 1 && u.is_alive()).all(|u| !u.statuses.shield.is_on()), "the losing side gets no victory shield");
         map.run(crate::time::Ticks::secs(130)); // longer than SHIELD_STEPS' own duration
-        assert!(map.units.iter().filter(|u| u.is_alive()).all(|u| u.statuses.shield.is_on()), "continuously refreshed, not a one-shot");
+        assert!(map.units.iter().filter(|u| u.owner == 0 && u.is_alive()).all(|u| u.statuses.shield.is_on()), "continuously refreshed, not a one-shot");
+    }
+
+    #[test]
+    fn nobody_is_shielded_on_a_draw() {
+        let mut map = two_tribes();
+        map.declare_outcome(None, super::Reason::Eliminated);
+        map.run(crate::time::Ticks::new(1));
+        assert!(map.units.iter().all(|u| !u.statuses.shield.is_on()), "a draw is a win for nobody");
+    }
+
+    #[test]
+    fn an_allys_units_are_shielded_too() {
+        let mut map = two_tribes();
+        map.tribes = Tribes::from_owners([0, 1]).with_allies([0b11, 0b11, 0, 0]);
+        map.declare_outcome(Some(0), super::Reason::Eliminated);
+        map.run(crate::time::Ticks::new(1));
+        assert!(map.units.iter().filter(|u| u.is_alive()).all(|u| u.statuses.shield.is_on()), "tribe 1 is allied with the winner");
+    }
+
+    #[test]
+    fn declaring_the_outcome_stands_every_acting_unit_down_to_idle() {
+        let mut map = two_tribes();
+        let brave = map.spawn(0, UnitKind::Brave, (10_000, 10_000)).id;
+        map.unit_mut(brave).unwrap().action = Action::Walking { to: (20_000, 20_000) };
+        map.declare_outcome(Some(0), super::Reason::Eliminated);
+        assert_eq!(map.unit(brave).unwrap().action, Action::Idle);
+    }
+
+    #[test]
+    fn a_lone_shaman_never_reincarnates_once_the_match_has_ended() {
+        let mut map = two_tribes();
+        let shaman = map.shaman_of(1).unwrap().id;
+        map.unit_mut(shaman).unwrap().take_damage(u16::MAX);
+        map.tick();
+        assert_eq!(map.outcome.unwrap().winner, Some(0), "tribe 1 had no other unit left");
+        map.run(crate::time::Ticks::secs(10)); // well past her dying + respawn countdowns
+        assert!(matches!(map.unit(shaman).unwrap().action, Action::Dead { .. }), "no last-stand comeback once the match is over");
     }
 
     #[test]

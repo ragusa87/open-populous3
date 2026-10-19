@@ -253,6 +253,18 @@ mod tests {
     }
 
     #[test]
+    fn hacking_stops_the_instant_the_match_has_ended() {
+        let (mut map, hut, a) = siege(UnitKind::Warrior);
+        until(&mut map, 300, |m| matches!(m.unit(a).unwrap().action, Action::Hacking { .. })).expect("hacking");
+        map.declare_outcome(Some(0), crate::outcome::Reason::Eliminated);
+        assert_eq!(map.unit(a).unwrap().action, Action::Idle, "stood down the instant the match ended");
+        let wear = map.building(hut).unwrap().wear;
+        map.run(crate::time::Ticks::new(500));
+        assert_eq!(map.building(hut).unwrap().wear, wear, "no more wear once the match has ended");
+        assert_eq!(map.unit(a).unwrap().action, Action::Idle, "never resumes hacking");
+    }
+
+    #[test]
     fn people_inside_are_pulled_out_and_challenged() {
         let (mut map, hut, a) = siege(UnitKind::Brave);
         let door = map.building(hut).unwrap().door();

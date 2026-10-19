@@ -204,14 +204,20 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [x] A victory/defeat screen in the client (`game_end.rs`, `AppState::Ended`): headline, reason, every tribe's
   survivor count; `GAME_END=victory|defeat|draw` and `GAME_END=eliminate:<tribe>` dev hooks. Wording/art are our
   own (AGENTS.md licence) — not traced from or compared against the original's screens.
-- [x] Once the match ends, the simulation keeps running (not frozen) and every living unit is shielded
-  (`GameMap::shield_everyone_once_ended`, `outcome.rs`) — directly sets `Unit::statuses.shield`, not a real cast of
-  Magical Shield (now implemented, `GameMap::cast_nearest_status`, docs/specs/spells.md). Left as a direct status
-  poke rather than reusing the spell's own cast path, since this epilogue shields *everyone* at once, not the
-  nearest 6: a different shape, not the same mechanic under another name.
-- [x] A "victory lap" visual once the match ends: every unit plays a small repeating happy jump
-  (`units/mod.rs::victory_bounce`, added to `pull_to_eye`'s lift) — there's no such animation traced in the
-  original's identified sprites, so this is our own invented stand-in, not a reproduction.
+- [x] Once the match ends, every unit still acting stands down to Idle right away (a death already under way
+  finishes on its own, and a lone shaman never gets a last-stand reincarnation out of it, `GameMap::tick`'s own
+  freeze) and the economy/combat/wrecking/reincarnation ticks stop for the rest of the game (`outcome.rs`,
+  `map.rs`'s `frozen`, same freeze `armageddon.rs` already used) — corrects the earlier "keeps running, not
+  frozen". Only the winning side's living units (and its allies, `Tribes::same_team`) are kept shielded
+  (`GameMap::shield_everyone_once_ended`/`on_winning_side`, `outcome.rs`) — directly sets `Unit::statuses.shield`,
+  not a real cast of Magical Shield (now implemented, `GameMap::cast_nearest_status`, docs/specs/spells.md); the
+  losing side gets none, and a draw shields nobody. Left as a direct status poke rather than reusing the spell's
+  own cast path, since this epilogue shields a whole side at once, not the nearest 6: a different shape, not the
+  same mechanic under another name.
+- [x] A "victory lap" visual once the match ends: every unit on the winning side (`GameMap::on_winning_side`) plays
+  a small repeating happy jump (`units/mod.rs::victory_bounce`/`bounce_start`, added to `pull_to_eye`'s lift) — the
+  losing side doesn't celebrate. There's no such animation traced in the original's identified sprites, so this is
+  our own invented stand-in, not a reproduction.
 - [ ] The client assumes the local player is always tribe 0/blue (`units::PLAYER`, `units/mod.rs:36`) throughout —
   multiplayer needs this determined per-session instead; affects win/lose presentation (`game_end::verdict`'s
   `local`), spell casting, camera, and HUD alike. Pre-existing, not introduced by the win/lose work above.

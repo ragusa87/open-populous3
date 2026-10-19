@@ -205,9 +205,10 @@ impl UnitSprites {
     /// The frame showing `unit` from a camera at `yaw`; praying towards `worship` when it
     /// worships its shaman (`worship::worship_facing`).
     /// `still`: the vehicle it is aboard is not under way, so its pedalling holds its first frame.
-    /// `celebrating`: the match has ended (`GameMap::outcome`) — an otherwise-idle unit's victory bounce
-    /// (`victory_bounce`) is shown arms-up (`Pose::Stranded`) instead of just standing there, our own stand-in: no
-    /// real "happy" pose is traced in the original. A unit mid-action keeps its own pose unchanged. The shaman has
+    /// `celebrating`: the match has ended and this unit is on the winning side (`GameMap::on_winning_side`) — an
+    /// otherwise-idle unit's victory bounce (`victory_bounce`) is shown arms-up (`Pose::Stranded`) instead of just
+    /// standing there, our own stand-in: no real "happy" pose is traced in the original. A unit mid-action keeps its
+    /// own pose unchanged. The shaman has
     /// no Stranded art at all (`sheets::plays`, she's "never stranded"); she gets her own cast pose instead (the
     /// closest thing to "excited" she has) — forced with no `Action::Casting` under it, so `frame_index` loops it
     /// by time instead of a one-shot countdown, same as Stranded already does for everyone else.
@@ -501,15 +502,22 @@ const HOP: f32 = 0.3;
 /// How long one little victory jump takes, seconds.
 const VICTORY_HOP_SECS: f32 = 0.6;
 
-/// Every unit's small happy jump once the match has ended (`start`: `GameMap::outcome.at`) — our own invented
-/// stand-in for a "victory lap", since no such animation is traced in the original's identified sprites. Loops
-/// every `VICTORY_HOP_SECS` on the same arc a vehicle boarding jump uses (`HOP`), each unit's own phase offset by
-/// its stable id (`sim_time::seed`, never its list index) so they don't all hop in lockstep. Zero before `start`.
+/// A winning-side unit's small happy jump once the match has ended (`start`: `GameMap::outcome.at`) — our own
+/// invented stand-in for a "victory lap", since no such animation is traced in the original's identified sprites.
+/// Loops every `VICTORY_HOP_SECS` on the same arc a vehicle boarding jump uses (`HOP`), each unit's own phase
+/// offset by its stable id (`sim_time::seed`, never its list index) so they don't all hop in lockstep. Zero before
+/// `start`.
 fn victory_bounce(now: SimNow, start: Option<game_core::time::Tick>, id: u32) -> f32 {
     let Some(start) = start else { return 0.0 };
     let period = game_core::time::Ticks::new((VICTORY_HOP_SECS / TICK_SECS).round() as u32);
     let t = (now.secs_in(start, period) / VICTORY_HOP_SECS + crate::sim_time::seed(id)).fract();
     HOP * 4.0 * t * (1.0 - t)
+}
+
+/// `victory_bounce`'s `start`, gated to the winning side (`GameMap::on_winning_side`): nobody on the losing side
+/// gets a happy jump.
+fn bounce_start(map: &game_core::map::GameMap, owner: u8) -> Option<game_core::time::Tick> {
+    map.on_winning_side(owner).then(|| map.outcome.map(|o| o.at)).flatten()
 }
 
 /// How far through a timed jump `left` the drawn moment is, 0..1 (one tick behind, gliding with `alpha`).
@@ -584,7 +592,7 @@ fn animate_views(
         let frame = units.get(body.0).and_then(|u| {
             let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
             let still = !u.aboard.and_then(|v| map.0.vehicle(v)).is_some_and(crate::vehicles::under_way);
-            sprites.frame_for(u, worship, still, rig.yaw, &clock, *now, map.0.outcome.is_some())
+            sprites.frame_for(u, worship, still, rig.yaw, &clock, *now, map.0.on_winning_side(u.owner))
         });
         if let Some(f) = frame {
             height.0 = f.size.y * PIXEL;
@@ -662,7 +670,7 @@ fn pull_to_eye(
         let pull = if perch.is_some() { PERCH_PULL } else if riding.is_some() { 0.0 } else { PULL_TO_EYE };
         let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, pull);
         let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale));
-        let bounce = u.map_or(0.0, |u| victory_bounce(*now, map.0.outcome.map(|o| o.at), u.id.raw()));
+        let bounce = u.map_or(0.0, |u| victory_bounce(*now, bounce_start(&map.0, u.owner), u.id.raw()));
         let shown = perch.or(riding.map(|r| r / sizes.get(ObjectGroup::Units))).unwrap_or_default();
         let local = view.rotation.inverse() * (offset + shown) + Vec3::Y * (lift + bounce) * scale;
         for &child in children {
@@ -716,6 +724,14 @@ mod tests {
             victory_bounce(at(100), Some(start), 2),
             "different units are out of phase (not guaranteed never equal by height, but true for these seeds)"
         );
+    }
+
+    #[test]
+    fn bounce_start_is_none_for_the_losing_side() {
+        let mut map = game_core::map::GameMap::generate(1);
+        map.declare_outcome(Some(0), game_core::outcome::Reason::Eliminated);
+        assert_eq!(bounce_start(&map, 0), Some(map.outcome.unwrap().at), "the winner celebrates");
+        assert_eq!(bounce_start(&map, 1), None, "the loser doesn't");
     }
 
     #[test]

@@ -1061,8 +1061,11 @@ impl GameMap {
         let mut dirty = Vec::new();
         // Armageddon (armageddon.rs): while a match is active, the economy and combat-seeking are suspended —
         // nothing to tend to (buildings/totems/vehicles are gone once the full mechanic lands) and nothing should
-        // start a fresh fight before the match's own resolution decides things.
+        // start a fresh fight before the match's own resolution decides things. Once the match has ended
+        // (outcome.rs), everyone already stood down to Idle the instant it was declared, so the same freeze applies
+        // for the rest of the game: nothing trains, builds, wrecks, fights or reincarnates in the "victory lap".
         let armageddon = self.armageddon().is_some();
+        let frozen = armageddon || self.outcome.is_some();
         self.update_walls();
         let (buildings, now) = (&self.buildings, self.now);
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now));
@@ -1075,7 +1078,7 @@ impl GameMap {
         dirty.extend(self.tend_building_wear());
         dirty.extend(self.ashes.tick(now));
         self.tend_campfires();
-        if !armageddon {
+        if !frozen {
             self.tend_vaults();
             self.tend_totems();
             self.tend_queues();
@@ -1085,11 +1088,11 @@ impl GameMap {
         // Coordinators, before the units, so that one ending this turn is gone when its units tick (coordinators.md):
         // a. scans that start coordinators or add units to them; b. each one's turn, kind after kind; c. the finished
         // ones removed; d. their events applied in order; e. units whose coordinator is gone released.
-        if !armageddon {
+        if !frozen {
             self.spot_enemies();
             self.tend_attacks();
+            self.tend_wrecking();
         }
-        self.tend_wrecking();
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
         self.release_orphans();
@@ -1102,6 +1105,11 @@ impl GameMap {
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing)).collect();
         let (mut events, mut gone) = (Vec::new(), Vec::new());
         for (i, unit) in self.units.iter_mut().enumerate() {
+            // Frozen: a lone shaman's pending reincarnation never gets to matter (outcome.md "Automatic
+            // elimination") — once the match has ended, Dead stays Dead instead of coming back.
+            if frozen && matches!(unit.action, Action::Dead { .. }) {
+                continue;
+            }
             let site = self.sites.iter().find(|s| s.owner == unit.owner);
             let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: unit.inside.map(|i| i.building) };
             match unit.tick(now, &ground, site) {
@@ -1131,11 +1139,13 @@ impl GameMap {
                 }
             }
         }
-        self.start_chained();
-        dirty.extend(self.work());
-        self.drop_wood();
+        if !frozen {
+            self.start_chained();
+            dirty.extend(self.work());
+            self.drop_wood();
+        }
         self.count_inside();
-        if !armageddon {
+        if !frozen {
             let buildings = &mut self.buildings;
             for (player, (pool, book)) in self.mana.iter_mut().zip(&mut self.spell_books).enumerate() {
                 let mut stores: Vec<&mut crate::production::Production> = buildings.iter_mut().filter(|b| b.owner as usize == player).filter_map(|b| b.production.as_mut()).collect();
