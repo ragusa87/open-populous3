@@ -147,22 +147,47 @@ pub fn rebake(map: &Heightmap, walkable: &[bool], theme: &Theme, height_scale: f
 const ASH: [f32; 3] = [38.0, 33.0, 30.0];
 const ASH_COVER: f32 = 0.75;
 
-/// Chars the pixels of the cells under ashes around `rect` (as `rebake` spans it), by their darkness: call it after
-/// baking those cells.
+/// `cell`'s own ash coverage, 0 (no ashes there) to `ASH_COVER` (as dark as ashes ever get): sampled at that one
+/// cell directly, no averaging with neighbours yet (pop3-rev-analysis.md "Building ashes": "each corner samples
+/// that ONE cell's own [blend] directly") — `char_ashes` is what blends it into its neighbours.
+fn ash_k(ashes: &Ashes, cell: (i32, i32)) -> f32 {
+    ashes.darkness(cell).map_or(0.0, |dark| ASH_COVER * dark.saturating_sub(FADED) as f32 / (DARK - FADED) as f32)
+}
+
+/// `ash_k` bilinearly interpolated between the 4 cells around the point `(x, z)` (cell coordinates, fractional,
+/// wrapped), the exact same technique `Heightmap::sample`/`land_row`'s own height lookup already uses: this
+/// per-pixel smoothing, not anything ash-specific, is what gives a patch its soft, organic-looking edge instead
+/// of a hard-edged block per cell — the very same mechanism `lava.rs` [client]'s own `ground_mesh_grid` uses for
+/// still-molten lava, so a patch keeps the identical shape as it cools from one into the other (module doc there).
+fn ash_k_bilinear(ashes: &Ashes, size: i32, x: f32, z: f32) -> f32 {
+    let (x0, z0) = (x.floor(), z.floor());
+    let (fx, fz) = (x - x0, z - z0);
+    let (x0, z0) = (x0 as i32, z0 as i32);
+    let k = |dx: i32, dz: i32| ash_k(ashes, ((x0 + dx).rem_euclid(size), (z0 + dz).rem_euclid(size)));
+    let top = k(0, 0) * (1.0 - fx) + k(1, 0) * fx;
+    let bot = k(0, 1) * (1.0 - fx) + k(1, 1) * fx;
+    top * (1.0 - fz) + bot * fz
+}
+
+/// Chars the pixels of the cells under ashes around `rect` (as `rebake` spans it), per pixel by `ash_k_bilinear`:
+/// call it after baking those cells.
 pub fn char_ashes(ashes: &Ashes, size: usize, rect: DirtyRect, pixels: &mut [u8]) {
     let (n, side) = (size as i32, size * PX_PER_CELL);
+    let step = 1.0 / PX_PER_CELL as f32;
     let span = |lo: i32, hi: i32| {
         let (lo, hi) = (lo - REBAKE_MARGIN, hi + REBAKE_MARGIN);
         if hi - lo >= n { 0..n } else { lo..hi }
     };
     for cz in span(rect.min.1, rect.max.1) {
         for cx in span(rect.min.0, rect.max.0) {
-            let (cx, cz) = (cx.rem_euclid(n), cz.rem_euclid(n));
-            let Some(dark) = ashes.darkness((cx, cz)) else { continue };
-            let k = ASH_COVER * (dark.saturating_sub(FADED)) as f32 / (DARK - FADED) as f32;
-            let (cx, cz) = (cx as usize, cz as usize);
+            let (cx, cz) = (cx.rem_euclid(n) as usize, cz.rem_euclid(n) as usize);
             for py in cz * PX_PER_CELL..(cz + 1) * PX_PER_CELL {
                 for px in cx * PX_PER_CELL..(cx + 1) * PX_PER_CELL {
+                    let (x, z) = (px as f32 * step, py as f32 * step);
+                    let k = ash_k_bilinear(ashes, n, x, z);
+                    if k <= 0.0 {
+                        continue;
+                    }
                     let i = (py * side + px) * 4;
                     for (c, ash) in pixels[i..i + 3].iter_mut().zip(ASH) {
                         *c = (*c as f32 * (1.0 - k) + ash * k).round() as u8;
@@ -302,18 +327,47 @@ mod tests {
         let mut m = Heightmap::new(8);
         (0..8).for_each(|z| (0..8).for_each(|x| m.set(x, z, 500)));
         let (side, mut px) = bake(&m, &test_theme(), 1.0 / 384.0, 1.0);
-        let at = |px: &[u8], cell: usize| px[(cell * PX_PER_CELL * side + cell * PX_PER_CELL + 2) * 4 + 1];
+        // Exactly at a cell's own grid point: `ash_k_bilinear`'s peak there, no blending with any neighbour.
+        let at = |px: &[u8], cell: usize| px[(cell * PX_PER_CELL * side + cell * PX_PER_CELL) * 4 + 1];
         let ground = at(&px, 3);
         let mut ashes = Ashes::default();
         ashes.add(vec![(3, 3)]);
         let all = DirtyRect { min: (0, 0), max: (8, 8) };
         char_ashes(&ashes, 8, all, &mut px);
-        assert!(at(&px, 3) < ground / 2, "charred");
-        assert_eq!(at(&px, 5), ground, "only its cells");
+        assert!(at(&px, 3) < ground / 2, "charred, right at its own peak");
+        assert_eq!(at(&px, 5), ground, "untouched, far from any ash cell");
         let (_, mut faded) = bake(&m, &test_theme(), 1.0 / 384.0, 1.0);
         ashes.patches[0].darkness = FADED + 4;
         char_ashes(&ashes, 8, all, &mut faded);
         assert!(at(&faded, 3) > at(&px, 3) && at(&faded, 3) < ground, "fading");
+    }
+
+    #[test]
+    fn ash_k_is_zero_without_ashes_and_full_strength_right_at_a_fresh_patch_s_own_cell() {
+        let ashes = Ashes::default();
+        assert_eq!(ash_k(&ashes, (3, 3)), 0.0);
+        let mut ashes = Ashes::default();
+        ashes.add(vec![(3, 3)]);
+        assert_eq!(ash_k(&ashes, (3, 3)), ASH_COVER, "a fresh patch starts at DARK, the darkest it gets");
+    }
+
+    #[test]
+    fn ash_k_bilinear_blends_smoothly_from_an_ash_cell_towards_its_untouched_neighbour() {
+        let mut ashes = Ashes::default();
+        ashes.add(vec![(3, 3)]);
+        let size = 16;
+        assert_eq!(ash_k_bilinear(&ashes, size, 3.0, 3.0), ASH_COVER, "right at the ash cell's own point");
+        assert_eq!(ash_k_bilinear(&ashes, size, 4.0, 3.0), 0.0, "right at the untouched neighbour's own point");
+        let halfway = ash_k_bilinear(&ashes, size, 3.5, 3.0);
+        assert!(halfway > 0.0 && halfway < ASH_COVER, "a graded step in between, not a hard edge: {halfway}");
+    }
+
+    #[test]
+    fn ash_k_bilinear_wraps_on_the_torus() {
+        let mut ashes = Ashes::default();
+        ashes.add(vec![(0, 0)]);
+        assert_eq!(ash_k_bilinear(&ashes, 16, 15.5, 0.0), ash_k_bilinear(&ashes, 16, -0.5, 0.0));
+        assert!(ash_k_bilinear(&ashes, 16, 15.5, 0.0) > 0.0, "the far edge wraps right back to the ash cell");
     }
 
     #[test]

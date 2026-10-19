@@ -15,9 +15,12 @@
 //! −2, target height +4, target `blend += BLEND_GAIN`) or, flat, deepens itself (height +10) — our own reading of
 //! the per-cell downhill direction from the live terrain, since the original's own field source for it is not
 //! traced ("Open"). An accumulator tracks how much spreading happened (+16 a push, −8 a flat step); growth ends at
-//! `GROWTH_TURNS` or once the accumulator passes `ACCUMULATOR_CAP`, whichever first, then `FADE_TURNS` of fading
-//! (`blend -= FADE_STEP` only, no more spread or burning), then the whole footprint becomes ash the same way, in
-//! one shot, and the effect goes idle until its own (worst-case) outer lifetime ends it.
+//! `GROWTH_TURNS` or once the accumulator passes `ACCUMULATOR_CAP`, whichever first — at that same moment, with
+//! the footprint now fixed (no more spreading), the whole patch is scorched into permanent ash (`WorldEvent::Scorch`)
+//! right away, not once fading finishes: the cells then spend `FADE_TURNS` only visually cooling (`blend -=
+//! FADE_STEP`, no more spread or burning) before going idle, which lets `LavaView`'s own alpha fade (client-side,
+//! `Lava::fade_progress`) reveal the already-existing ash mark underneath as it fades, instead of bare ground that
+//! only turns to ash on the last tick. The effect itself goes idle until its own (worst-case) outer lifetime ends it.
 //!
 //! A still-hot cell also panics anyone within `PANIC_RADIUS_CELLS` of it, not only whoever actually stands on one
 //! (`panic_nearby`): our own addition, not confirmed in pop3-rev-analysis.md (only catching fire is).
@@ -67,14 +70,13 @@ const SELF_DEEPEN: i32 = 10;
 const ACC_SPREAD: i32 = 16;
 const ACC_FLAT: i32 = 8;
 
-/// When and which way a flowing cell arrived (`Lava::cells_lit`, client-side only): the tick it was first pushed
-/// into, and the direction back toward the neighbour it spread from (`-1..=1` each, never both zero). `None` for
-/// a cell already present at a tick's start: the initial seed disc (`flowing`) and `Mode::Static`'s fixed fissure
-/// (`effect`) both start at `MATURE_BLEND` with nothing to pour from; only an actual spread step (`grow`) sets it.
+/// When a flowing cell arrived (`Lava::cells_lit`, client-side only): the tick it was first pushed into. `None`
+/// for a cell already present at a tick's start: the initial seed disc (`flowing`) and `Mode::Static`'s fixed
+/// fissure (`effect`) both start at `MATURE_BLEND` with nothing to pour from; only an actual spread step (`grow`)
+/// sets it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellArrival {
     pub born: Tick,
-    pub from: (i32, i32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,19 +129,15 @@ fn cell_centre((x, z): (i32, i32), size: i32) -> (u16, u16) {
 
 /// Our own reading of which way lava at `pos` flows (the original's own per-cell downhill field is not traced:
 /// "Open" in pop3-rev-analysis.md "Volcano lava flow"): the lowest of its 8 neighbours on the real terrain, if
-/// lower than `pos` itself (the target cell, and the pre-wrap `(dx, dz)` offset used to reach it — the caller's
-/// own `CellArrival::from` is derived from this offset directly, not by re-subtracting two wrapped positions,
-/// which would get the sign wrong right at the torus seam); None when `pos` is a local low point (flat, by the
-/// trace's own terms).
-fn downhill(world: &GameMap, pos: (i32, i32), size: i32) -> Option<((i32, i32), (i32, i32))> {
+/// lower than `pos` itself; None when `pos` is a local low point (flat, by the trace's own terms).
+fn downhill(world: &GameMap, pos: (i32, i32), size: i32) -> Option<(i32, i32)> {
     let h = world.terrain.get(pos.0, pos.1);
     (-1..=1)
         .flat_map(|dz| (-1..=1).map(move |dx| (dx, dz)))
         .filter(|&d| d != (0, 0))
-        .map(|(dx, dz)| ((dx, dz), ((pos.0 + dx).rem_euclid(size), (pos.1 + dz).rem_euclid(size))))
-        .min_by_key(|&(_, (x, z))| world.terrain.get(x, z))
-        .filter(|&(_, (x, z))| world.terrain.get(x, z) < h)
-        .map(|(d, target)| (target, d))
+        .map(|(dx, dz)| ((pos.0 + dx).rem_euclid(size), (pos.1 + dz).rem_euclid(size)))
+        .min_by_key(|&(x, z)| world.terrain.get(x, z))
+        .filter(|&(x, z)| world.terrain.get(x, z) < h)
 }
 
 impl Lava {
@@ -149,12 +147,27 @@ impl Lava {
     }
 
     /// The same cells with how hot each one still is (0-255, `MATURE_BLEND` full strength) and, for a cell an
-    /// actual spread step added, when and which way it arrived (`CellArrival`, client-side only: `LavaView`'s own
-    /// "pour-in" flourish, `pour_in_alpha`) — a freshly seeded or cooling edge cell is dimmer than an established
-    /// one, for `LavaView`'s own alpha fade (no more popping a cell to full strength the instant it's added, or
-    /// off the instant it's removed).
+    /// actual spread step added, when it arrived (`CellArrival`, client-side only: `LavaView`'s own "pour-in"
+    /// flourish — a freshly seeded or cooling edge cell is dimmer than an established one, for `LavaView`'s own
+    /// alpha fade, no more popping a cell to full strength the instant it's added).
     pub fn cells_lit(&self) -> Vec<((i32, i32), u8, Option<CellArrival>)> {
         self.cells.iter().map(|c| (c.pos, c.blend, c.arrival)).collect()
+    }
+
+    /// How far through its own fixed-length cooling fade the whole patch is right now, `0.0` the turn it starts to
+    /// `1.0` the turn its cells disappear for good: `None` outside `Mode::Flowing(Phase::Fading)` (still growing,
+    /// already gone, or `Mode::Static`, whose own `blend` already decays smoothly all the way down to `GONE_BLEND`
+    /// on its own, nothing extra needed). `Phase::Fading` only ever drops every cell's `blend` by a fixed
+    /// `FADE_STEP * FADE_TURNS` total, so a cell that grew hot enough (close to `u8::MAX`) can still read as
+    /// nearly full strength the turn before it abruptly vanishes — `LavaView`'s own cue, client-side only, to
+    /// visibly fade the whole patch's own alpha out in step with that fixed countdown instead of relying on
+    /// `blend` alone; the permanent ash mark underneath already exists this whole time (`Scorch` fires the moment
+    /// `Phase::Fading` begins, module doc), so fading this alpha out reveals it rather than bare ground.
+    pub fn fade_progress(&self) -> Option<f32> {
+        match &self.mode {
+            Mode::Flowing(Phase::Fading { left }) => Some(1.0 - left.left().get() as f32 / FADE_TURNS as f32),
+            _ => None,
+        }
     }
 
     /// One turn at `now`, cast by `owner`: grows or fades, then ignites whoever (or whatever) stands on a
@@ -173,7 +186,10 @@ impl Lava {
             Mode::Flowing(Phase::Growing { accumulator, left }) => {
                 if left.tick() || *accumulator >= ACCUMULATOR_CAP {
                     self.mode = Mode::Flowing(Phase::Fading { left: Countdown::new(Ticks::new(FADE_TURNS)) });
-                    Vec::new()
+                    // The footprint is fixed from here on (no more spreading), so the permanent ash mark can
+                    // exist from the moment cooling starts rather than waiting for it to finish: see this
+                    // function's own module-doc note on why.
+                    vec![WorldEvent::Scorch { cells: self.cells.iter().map(|c| c.pos).collect() }]
                 } else {
                     self.grow(now, world, size)
                 }
@@ -183,12 +199,10 @@ impl Lava {
                     c.blend = c.blend.saturating_sub(FADE_STEP);
                 }
                 if left.tick() {
-                    let cells = self.cells.drain(..).map(|c| c.pos).collect();
+                    self.cells.clear();
                     self.mode = Mode::Flowing(Phase::Done);
-                    vec![WorldEvent::Scorch { cells }]
-                } else {
-                    Vec::new()
                 }
+                Vec::new()
             }
             Mode::Flowing(Phase::Done) => Vec::new(),
         };
@@ -203,12 +217,12 @@ impl Lava {
         let mature: Vec<(i32, i32)> = self.cells.iter().filter(|c| c.blend >= MATURE_BLEND).map(|c| c.pos).collect();
         for pos in mature {
             match downhill(world, pos, size) {
-                Some((target, dir)) => {
+                Some(target) => {
                     events.push(WorldEvent::Terrain(TerrainChange::Raise { at: pos, radius: 0, by: -SPREAD_SOURCE_DROP }));
                     events.push(WorldEvent::Terrain(TerrainChange::Raise { at: target, radius: 0, by: SPREAD_TARGET_RISE }));
                     match self.cells.iter_mut().find(|c| c.pos == target) {
                         Some(c) => c.blend = c.blend.saturating_add(BLEND_GAIN),
-                        None => self.cells.push(FlowCell { pos: target, blend: BLEND_GAIN, arrival: Some(CellArrival { born: now, from: (-dir.0, -dir.1) }) }),
+                        None => self.cells.push(FlowCell { pos: target, blend: BLEND_GAIN, arrival: Some(CellArrival { born: now }) }),
                     }
                     gained += ACC_SPREAD;
                 }
@@ -416,18 +430,18 @@ mod tests {
     }
 
     #[test]
-    fn a_cell_added_by_an_actual_spread_step_records_its_own_born_tick_and_entry_direction() {
+    fn a_cell_added_by_an_actual_spread_step_records_its_own_born_tick() {
         let mut map = bare();
         let (cx, cz) = (cell_of(AT.0), cell_of(AT.1));
         // `INITIAL_RADIUS_CELLS` (1.5) seeds the whole 3x3 block around the centre, so only a target reachable
-        // from exactly one of its cells gives an unambiguous entry direction: the seed's own SE corner,
+        // from exactly one of its cells is unambiguously an actual spread step: the seed's own SE corner,
         // (cx+1, cz+1), is the only seeded cell with (cx+2, cz+2) among its 8 neighbours.
         map.terrain.set(cx + 2, cz + 2, 300);
         let id = map.add_effect(flowing(0, AT, 128));
         map.tick();
         let lit = { let EffectKind::Lava(lava) = &map.effects.get(id).unwrap().kind else { panic!("not lava") }; lava.cells_lit() };
         let (_, _, arrival) = lit.iter().find(|&&(pos, ..)| pos == (cx + 2, cz + 2)).expect("spread there");
-        assert_eq!(*arrival, Some(CellArrival { born: map.now, from: (-1, -1) }), "arrived from the seed's own SE corner, the tick it was pushed into");
+        assert_eq!(*arrival, Some(CellArrival { born: map.now }), "the tick it was pushed into");
     }
 
     #[test]
@@ -481,5 +495,58 @@ mod tests {
         let cell = (cell_of(AT.0), cell_of(AT.1));
         map.run(Ticks::new(TOTAL_FLOW_TURNS));
         assert!(!map.ashes.buildable(cell), "ash left behind, nothing builds there");
+    }
+
+    fn lava_fade_progress(map: &GameMap, id: crate::id::Id<Effect>) -> Option<f32> {
+        let EffectKind::Lava(lava) = &map.effects.get(id).unwrap().kind else { panic!("not lava") };
+        lava.fade_progress()
+    }
+
+    #[test]
+    fn the_ash_mark_exists_the_moment_fading_starts_not_once_it_ends() {
+        // So the lava's own client-side alpha fade (`fade_progress`) reveals the already-existing ash mark as it
+        // fades, instead of bare ground that only turns to ash on the very last tick (module doc).
+        let mut map = bare();
+        let id = map.add_effect(flowing(0, AT, 128));
+        let cell = (cell_of(AT.0), cell_of(AT.1));
+        for _ in 0..=GROWTH_TURNS {
+            if lava_fade_progress(&map, id).is_some() {
+                break;
+            }
+            map.tick();
+        }
+        assert_eq!(lava_fade_progress(&map, id), Some(0.0), "fading just started");
+        assert!(!map.ashes.buildable(cell), "the ash mark is already there, well before fading finishes");
+    }
+
+    #[test]
+    fn fade_progress_is_none_while_still_growing_or_static() {
+        let mut map = bare();
+        let flow = map.add_effect(flowing(0, AT, 128));
+        assert_eq!(lava_fade_progress(&map, flow), None, "still growing");
+        let fissure = map.add_effect(effect(0, AT, vec![(10, 20)]));
+        map.tick();
+        assert_eq!(lava_fade_progress(&map, fissure), None, "static mode never uses this at all");
+    }
+
+    #[test]
+    fn fade_progress_runs_from_zero_to_one_across_the_fade_then_goes_back_to_none() {
+        let mut map = bare();
+        let id = map.add_effect(flowing(0, AT, 128));
+        // Growth ends at `GROWTH_TURNS` at the latest (it can end sooner via the accumulator cap): tick one at a
+        // time until fading actually starts, rather than assuming exactly which turn that is.
+        for _ in 0..=GROWTH_TURNS {
+            if lava_fade_progress(&map, id).is_some() {
+                break;
+            }
+            map.tick();
+        }
+        let start = lava_fade_progress(&map, id).expect("fading by now");
+        assert_eq!(start, 0.0, "fading just started");
+        map.run(Ticks::new(FADE_TURNS - 1));
+        let late = lava_fade_progress(&map, id).unwrap();
+        assert!(late > 0.9 && late < 1.0, "almost done fading: {late}");
+        map.tick();
+        assert_eq!(lava_fade_progress(&map, id), None, "turned to ash: done, not fading any more");
     }
 }

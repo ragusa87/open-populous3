@@ -14,8 +14,8 @@
 //!   outright (`WorldEvent::Destroy`, bypassing the normal wood/wear-down model, accepted per the plan) and every
 //!   person there (open or inside, but the caster's own shaman) catches fire (`WorldEvent::Ignite`, confirmed: not
 //!   an outright kill either, same correction as `lava`'s own doc) — otherwise invisible until the crater finishes
-//!   rising, so the area glows first (`pre_glow`, below, drawn client-side by `lava.rs` [client] reusing its own
-//!   molten look at partial strength): a guess, untraced, the trace gives no such cue.
+//!   rising and the real lava appears: the trace gives no earlier cue, and an invented one (a patch of "lava"
+//!   glowing over a crater that doesn't exist yet, before shaping even ends) read worse than nothing.
 //! - Once shaping ends (`SHAPING_TURNS`), a `lava` flow is spawned over the crater's own cells (`lava::flowing`,
 //!   its own growth/fade/ash lifecycle, up to 208 turns).
 //! - `FIREBALLS` (28, "about 22 small and 6 big": mechanically identical here, the split is visual only and not
@@ -59,10 +59,13 @@ pub const FIREBALL_END: u32 = 150;
 const _: () = assert!(FIREBALL_START < SHAPING_TURNS, "fireballs begin while the cone is still rising");
 /// How far the pre-eruption rumble (`ground_shake`) is felt (a guess, untraced: roughly twice `DESTROY_AREA_CELLS`).
 pub const SHAKE_RADIUS_CELLS: f32 = 6.0;
-/// How long the pre-eruption glow (`pre_glow`) ramps up before `DESTROY_AT`, and fades out after it (a guess,
-/// untraced: a visual cue for the otherwise invisible instant ignite there, the trace gives no such cue).
-const GLOW_BEFORE: u32 = 10;
-const GLOW_AFTER: u32 = 20;
+/// How many turns into the rise `reshaping`'s own sparkle keeps twinkling (`sparkles::SparkleView`), on top of the
+/// whole `RUMBLE_TURNS`: it starts the moment the spell is cast (so the player sees something right away, long
+/// before the rumble becomes the rise) and the cone's own rise is visible on its own well before `RISE_TURNS` (59)
+/// is up, so the twinkle only needs to carry a little way past where the rise actually starts — our own feel for
+/// how long that's worth, not traced (the original has no such marker at all for any terrain spell, `sparkles.rs`'s
+/// own module doc).
+const SPARKLE_TURNS: u32 = 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Volcano {
@@ -115,10 +118,13 @@ impl Volcano {
         events
     }
 
-    /// The cone's height points (cells, unwrapped) not yet at their target on `terrain`, while it's still rising
-    /// (`sparkles::SparkleView`, the terrain spells' twinkle, same as `LandBridge`/`Flatten`).
+    /// The cone's height points (cells, unwrapped) not yet at their target on `terrain`, from the moment it's cast
+    /// up through the first `SPARKLE_TURNS` of the rise (`sparkles::SparkleView`, the terrain spells' twinkle,
+    /// same as `LandBridge`/`Flatten`) — nothing once the rise has been visibly under way for a while, unlike
+    /// `LandBridge`/`Flatten`, which sparkle their own cells right up to the end: a volcano's own rise is large
+    /// and slow enough to read as "still growing" on its own well before it actually finishes.
     pub fn reshaping(&self, at: (u16, u16), terrain: &Heightmap) -> Vec<Cell> {
-        if self.turn >= SHAPING_TURNS {
+        if self.turn >= RUMBLE_TURNS + SPARKLE_TURNS {
             return Vec::new();
         }
         let cell = (cell_of(at.0), cell_of(at.1));
@@ -141,17 +147,6 @@ impl Volcano {
         })
     }
 
-    /// How strongly the `DESTROY_AREA_CELLS` square glows right now, 0 (nothing) to 1 (peak): ramping up over
-    /// `GLOW_BEFORE` turns before `DESTROY_AT`, then fading out over `GLOW_AFTER` after it — a visual cue for the
-    /// turn-110 destruction, otherwise invisible until the crater finishes rising and the real lava appears.
-    pub fn pre_glow(&self) -> Option<f32> {
-        let since = self.turn as i64 - DESTROY_AT as i64;
-        if since < -(GLOW_BEFORE as i64) || since > GLOW_AFTER as i64 {
-            return None;
-        }
-        let intensity = if since < 0 { 1.0 - (-since as f32 / GLOW_BEFORE as f32) } else { 1.0 - (since as f32 / GLOW_AFTER as f32) };
-        Some(intensity.clamp(0.0, 1.0))
-    }
 }
 
 /// Everyone in the `DESTROY_AREA_CELLS` square around `cell` (open or inside) catches fire, but the caster's own
@@ -179,9 +174,8 @@ pub(crate) fn random_point_in_area(cell: Cell, radius_cells: i32, size: i32, rng
     (in_cell(x, rng.next_u32()), in_cell(z, rng.next_u32()))
 }
 
-/// The `2 * radius` × `2 * radius` cells around `centre` (wrapped), `radius` either side. `pub`: also the
-/// footprint `lava.rs` [client]'s pre-eruption glow (`pre_glow`, below) drapes over `DESTROY_AREA_CELLS` with.
-pub fn square(centre: Cell, radius: i32, size: i32) -> impl Iterator<Item = Cell> {
+/// The `2 * radius` × `2 * radius` cells around `centre` (wrapped), `radius` either side.
+fn square(centre: Cell, radius: i32, size: i32) -> impl Iterator<Item = Cell> {
     (-radius..radius).flat_map(move |dz| (-radius..radius).map(move |dx| ((centre.0 + dx).rem_euclid(size), (centre.1 + dz).rem_euclid(size))))
 }
 
@@ -290,17 +284,21 @@ mod tests {
     }
 
     #[test]
-    fn pre_glow_peaks_right_at_the_destruction_and_fades_out_either_side() {
-        let mut volcano = Volcano { ground: 500, turn: DESTROY_AT, destroyed: false, fireballs: 0 };
-        assert_eq!(volcano.pre_glow(), Some(1.0), "full strength the moment it destroys everything");
-        volcano.turn = DESTROY_AT - GLOW_BEFORE;
-        assert_eq!(volcano.pre_glow(), Some(0.0), "just starting to ramp up");
-        volcano.turn = DESTROY_AT - GLOW_BEFORE - 1;
-        assert_eq!(volcano.pre_glow(), None, "too early");
-        volcano.turn = DESTROY_AT + GLOW_AFTER;
-        assert_eq!(volcano.pre_glow(), Some(0.0), "just finished fading");
-        volcano.turn = DESTROY_AT + GLOW_AFTER + 1;
-        assert_eq!(volcano.pre_glow(), None, "too late");
+    fn reshaping_sparkles_from_the_moment_its_cast_through_the_first_sparkle_turns_of_the_rise() {
+        let map = bare();
+        let mut volcano = Volcano { ground: 500, turn: 0, destroyed: false, fireballs: 0 };
+        let terrain = map.terrain.clone();
+        assert!(!volcano.reshaping(AT, &terrain).is_empty(), "sparkles right away, even while still rumbling");
+        volcano.turn = RUMBLE_TURNS - 1;
+        assert!(!volcano.reshaping(AT, &terrain).is_empty(), "still rumbling, still sparkling");
+        volcano.turn = RUMBLE_TURNS;
+        assert!(!volcano.reshaping(AT, &terrain).is_empty(), "the rise just started");
+        volcano.turn = RUMBLE_TURNS + SPARKLE_TURNS - 1;
+        assert!(!volcano.reshaping(AT, &terrain).is_empty(), "still within the sparkle window");
+        volcano.turn = RUMBLE_TURNS + SPARKLE_TURNS;
+        assert!(volcano.reshaping(AT, &terrain).is_empty(), "past it: visibly growing on its own by now");
+        volcano.turn = SHAPING_TURNS - 1;
+        assert!(volcano.reshaping(AT, &terrain).is_empty(), "still gone this late in the rise");
     }
 
     #[test]
