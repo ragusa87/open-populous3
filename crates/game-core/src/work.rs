@@ -60,7 +60,7 @@ impl GameMap {
     }
 
     /// Switches dismantling of `player`'s building `building` (id), flat and taking wood. On, everyone
-    /// inside walks out and its braves stop building it (taking it apart comes later); off, it is built
+    /// inside walks out and its assigned braves take it apart instead (`dismantle_step`); off, it is built
     /// again: braves bring its missing wood back.
     pub fn set_dismantling(&mut self, player: u8, building: BuildingId, on: bool) {
         let Some(b) = self.building_index(building).filter(|&b| self.buildings[b].owner == player && self.buildings[b].flat && self.buildings[b].kind.wood_cost() > 0) else { return };
@@ -145,7 +145,8 @@ impl GameMap {
             .count()
     }
 
-    /// A jump landed or a piece is built in: the site of unit `i` changes. The ground a jump moved.
+    /// A jump landed or a piece is built in (or, while dismantling, pulled out): the site of unit `i`
+    /// changes. The ground a jump moved.
     pub(crate) fn work_event(&mut self, i: usize, event: UnitEvent) -> Option<DirtyRect> {
         let b = self.building_index(self.units[i].work?)?;
         match event {
@@ -158,6 +159,7 @@ impl GameMap {
                 self.terrain.set(at.0, at.1, h);
                 Some(DirtyRect { min: (at.0 - 1, at.1 - 1), max: at })
             }
+            UnitEvent::Built if self.buildings[b].dismantling => self.dismantle_piece(self.buildings[b].id),
             UnitEvent::Built => {
                 let b = &mut self.buildings[b];
                 b.used = (b.used + 1).min(b.kind.wood_cost());
@@ -169,6 +171,23 @@ impl GameMap {
             }
             _ => None,
         }
+    }
+
+    /// One piece pulled out of `id` while it is being dismantled (`UnitEvent::Built`, from the same
+    /// `Action::Building` round building uses, `dismantle_step`): dropped as a real `WoodPiece` near its door
+    /// (`Building::pile_point`), `used` one lower. Unlike a destroyed building (`burn_down`), no ashes once
+    /// none is left — the ground (and any tree it covered) is free right away (buildings.md "Dismantling").
+    fn dismantle_piece(&mut self, id: BuildingId) -> Option<DirtyRect> {
+        let b = self.building_index(id)?;
+        let building = self.buildings[b].clone();
+        let left = building.used.saturating_sub(1);
+        let at = building.pile_point(left);
+        self.wood.push(WoodPiece::new(at.0, at.1));
+        self.buildings[b].used = left;
+        if left == 0 {
+            self.remove_building(b);
+        }
+        None
     }
 
     /// Everyone inside the building `building` is released and walks out by its `door` to a free spot
@@ -196,7 +215,8 @@ impl GameMap {
                 continue;
             }
             match self.building_index(building).filter(|&b| self.buildings[b].stage() != Stage::Built || self.crewed(b)) {
-                Some(b) if self.buildings[b].dismantling || self.buildings[b].repair_delay.is_some() => {}
+                Some(b) if self.buildings[b].repair_delay.is_some() => {}
+                Some(b) if self.buildings[b].dismantling => dirty.extend(self.dismantle_step(i, b)),
                 Some(b) => dirty.extend(self.work_on(i, b)),
                 None => self.units[i].work = None,
             }
@@ -254,6 +274,27 @@ impl GameMap {
             self.units[i].action = Action::Hammering;
         } else if torus_dist2(me, door) <= DELIVER_RADIUS * DELIVER_RADIUS {
             self.units[i].enter(Inside { building: site, door }, work_point(&building, id));
+        } else {
+            self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
+        }
+        None
+    }
+
+    /// Free brave `i` takes building `b` apart: in by the door (same spot as building it, `work_point`), then
+    /// a round of `Action::Building` (reused, no "unbuilding" pose traced in the original either) before
+    /// `dismantle_piece` pulls the next one out. No wood to fetch: nothing is brought in, only taken out.
+    fn dismantle_step(&mut self, i: usize, b: usize) -> Option<DirtyRect> {
+        let building = self.buildings[b].clone();
+        if building.used == 0 {
+            return None; // nothing built in yet to take apart; switching back to Build resumes from here
+        }
+        let (me, id) = ((self.units[i].x, self.units[i].z), self.units[i].id);
+        let door = building.door();
+        if self.units[i].inside.is_some_and(|ins| ins.building == building.id) {
+            self.units[i].action = Action::Building { left: Countdown::new(BUILD_TICKS) };
+            self.units[i].facing = facing_to(me, building.centre());
+        } else if torus_dist2(me, door) <= DELIVER_RADIUS * DELIVER_RADIUS {
+            self.units[i].enter(Inside { building: building.id, door }, work_point(&building, id));
         } else {
             self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
         }
@@ -533,6 +574,21 @@ mod tests {
         assert!(matches!(map.units[k].action, Action::Walking { .. }), "walks out");
         map.apply(&Command::Dismantle { player: 0, building: site, on: false });
         assert_eq!(map.buildings[hut].stage(), Stage::Built);
+    }
+
+    #[test]
+    fn dismantling_pulls_its_wood_out_one_piece_at_a_time_then_removes_the_building() {
+        let mut map = sandbox();
+        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
+        let (site, corner, cell) = (map.buildings[hut].id, (map.buildings[hut].x, map.buildings[hut].z), map.buildings[hut].walled_cells(128)[0]);
+        let brave = braves(&map, 1)[0];
+        map.apply(&Command::Dismantle { player: 0, building: site, on: true });
+        map.apply(&Command::OrderUnit { player: 0, unit: brave, order: Order::Build { site: corner } });
+        let wood_before = map.wood.len();
+        run_until(&mut map, 2000, |m| m.building(site).is_none()).expect("dismantled away");
+        assert_eq!(map.wood.len(), wood_before + 3, "all 3 pieces dropped on the ground, one at a time");
+        assert!(map.ashes.buildable(cell), "no ashes once dismantled, unlike a destroyed building");
+        assert_eq!(map.units.iter().find(|u| u.id == brave).unwrap().work, None, "released");
     }
 
     #[test]
