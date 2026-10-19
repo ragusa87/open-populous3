@@ -7,8 +7,16 @@ use crate::keymap::{DevMode, Shortcut, Shortcuts};
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::challenge::{FIGHT_REACH, SHOVE_REACH};
+use game_core::convert::RANGE_CELLS as CONVERT_RANGE_CELLS;
+use game_core::earthquake::SINK_RADIUS_CELLS;
+use game_core::effect::EffectKind;
+use game_core::firestorm::AREA_CELLS as FIRESTORM_AREA_CELLS;
+use game_core::flatten::RADIUS_SQ as FLATTEN_RADIUS_SQ;
 use game_core::melee::{MELEE_LEASH, RING_RADIUS};
+use game_core::nearest::BLOCK_HALF_CELLS;
+use game_core::swamp::HALF as SWAMP_HALF;
 use game_core::unit::Action;
+use game_core::volcano::{RIM_RADIUS_CELLS, SHAKE_RADIUS_CELLS, SLOPE_RADIUS_CELLS};
 use pop3_format::WORLD_UNITS_PER_CELL;
 use std::f32::consts::TAU;
 
@@ -23,6 +31,7 @@ const SERMON: Color = Color::srgb(0.75, 0.4, 1.0);
 const WEAR: Color = Color::srgb(0.85, 0.1, 0.1);
 const SIGHT: Color = Color::srgb(1.0, 0.9, 0.2);
 const BOLT: Color = Color::srgb(0.3, 0.6, 1.0);
+const SPELL: Color = Color::srgb(0.6, 0.9, 0.3);
 const ASHES: Color = Color::srgb(0.6, 0.6, 0.6);
 const WEAR_BACK: Color = Color::srgb(0.3, 0.3, 0.3);
 /// The wear bar: its height over the ground and its length, cells.
@@ -88,6 +97,34 @@ fn draw(
     let map = &map.0;
     let on_ground = |p: Vec2| ground_point(&map.terrain, rig.focus, &params.0, p) + Vec3::Y * LIFT;
     let mut outline = |points: Vec<Vec2>, color: Color| gizmos.linestrip(points.into_iter().map(on_ground), color);
+    for (_, e) in map.effects.iter() {
+        let at = cells((e.x, e.z));
+        match &e.kind {
+            EffectKind::SimpleBlast(b) => {
+                if let Some(r) = b.radius_cells() {
+                    outline(outline_circle(at, r), SPELL);
+                }
+            }
+            EffectKind::PanickingBlast(b) => {
+                if let Some(r) = b.radius_cells() {
+                    outline(outline_circle(at, r), SPELL);
+                }
+            }
+            EffectKind::Flatten(_) => outline(outline_circle(at, (FLATTEN_RADIUS_SQ as f32).sqrt()), SPELL),
+            EffectKind::Swamp(_) => outline(outline_square(at, SWAMP_HALF as f32 + 0.5), SPELL),
+            EffectKind::Convert(_) => outline(outline_circle(at, CONVERT_RANGE_CELLS as f32), SPELL),
+            EffectKind::Hypnotism(_) => outline(outline_square(at, BLOCK_HALF_CELLS), SPELL),
+            EffectKind::Volcano(_) => {
+                outline(outline_circle(at, RIM_RADIUS_CELLS), SPELL);
+                outline(outline_circle(at, SLOPE_RADIUS_CELLS), SPELL.with_alpha(0.6));
+                outline(outline_circle(at, SHAKE_RADIUS_CELLS), SPELL.with_alpha(0.3));
+            }
+            EffectKind::Earthquake(_) => outline(outline_circle(at, SINK_RADIUS_CELLS as f32), SPELL),
+            EffectKind::Firestorm(_) => outline(outline_square(at, FIRESTORM_AREA_CELLS as f32), SPELL),
+            EffectKind::Lightning(_) => outline(outline_square(at, 0.5), SPELL),
+            EffectKind::LandBridge(_) | EffectKind::Lava(_) | EffectKind::Smoke | EffectKind::GroundFire => {}
+        }
+    }
     for (_, c) in map.coordinators.challenges.iter() {
         let (Some(a), Some(t)) = (map.unit(c.attacker), map.unit(c.target)) else { continue };
         let (a, t) = (cells((a.x, a.z)), cells((t.x, t.z)));

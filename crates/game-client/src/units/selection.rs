@@ -331,6 +331,24 @@ pub fn hovered_site(map: &game_core::map::GameMap, hovered: Option<crate::hover:
     }
 }
 
+/// Where a spell aimed at the ground should land (world units) when the cursor has something highlit: its
+/// current position, read fresh every frame so a cast follows the mouse onto and off of it, but never tracked
+/// afterwards once cast — a moving target just happens to be wherever it was the moment the click landed, not
+/// homed in on. Broader than `hovered_site` (also a unit, vehicle, wood pile or tree — everything `Hoverable`
+/// gives a halo, `hover.rs`): that one stays narrow because it also resolves a left-click's move/work order,
+/// where a tree or a unit under the cursor already has its own, different click handling (`units/mod.rs`'s
+/// `tree.tree`/`unit_at`) that must run first. A swamp has no single point to aim at (`HoverTarget::Swamp`'s own
+/// "no halo" comment): falls through to `None`, the ground under the cursor instead.
+pub fn hovered_aim_point(map: &game_core::map::GameMap, hovered: Option<crate::hover::HoverTarget>) -> Option<(u16, u16)> {
+    match hovered? {
+        crate::hover::HoverTarget::Unit(i) => map.units.get(i).map(|u| (u.x, u.z)),
+        crate::hover::HoverTarget::Vehicle(id) => map.vehicle(id).map(|v| (v.x, v.z)),
+        crate::hover::HoverTarget::Wood(i) => map.wood.get(i).map(|w| (w.x, w.z)),
+        crate::hover::HoverTarget::Tree(i) => map.trees.get(i).map(|t| (t.x, t.z)),
+        other => hovered_site(map, Some(other)),
+    }
+}
+
 /// The people aboard the player's vehicle under the cursor, for a left click on it with nothing selected: they
 /// get selected (then a click elsewhere moves their vehicle). None otherwise.
 pub fn crew_click(map: &game_core::map::GameMap, selected: &[UnitId], hovered: Option<crate::hover::HoverTarget>) -> Option<Vec<UnitId>> {
@@ -544,6 +562,22 @@ mod tests {
         assert_eq!(hovered_site(&map, Some(HoverTarget::Tree(0))), None);
         let orders = building_click(&map, &[brave], hovered_site(&map, Some(HoverTarget::Totem(0))).unwrap()).unwrap();
         assert!(matches!(orders[..], [Command::OrderUnit { order: Order::Worship { site: s }, .. }] if s == site));
+    }
+
+    #[test]
+    fn a_spell_aimed_at_a_highlit_unit_tree_wood_pile_or_vehicle_lands_on_it() {
+        use crate::hover::HoverTarget;
+        let mut map = game_core::map::GameMap::sandbox_units();
+        map.wood.push(game_core::wood::WoodPiece::new(7000, 8000));
+        let unit = &map.units[0];
+        assert_eq!(hovered_aim_point(&map, Some(HoverTarget::Unit(0))), Some((unit.x, unit.z)));
+        let tree = &map.trees[0];
+        assert_eq!(hovered_aim_point(&map, Some(HoverTarget::Tree(0))), Some((tree.x, tree.z)));
+        assert_eq!(hovered_aim_point(&map, Some(HoverTarget::Wood(0))), Some((7000, 8000)));
+        let &(vehicle, ref v) = map.vehicles.entries().next().unwrap();
+        assert_eq!(hovered_aim_point(&map, Some(HoverTarget::Vehicle(vehicle))), Some((v.x, v.z)));
+        assert_eq!(hovered_aim_point(&map, Some(HoverTarget::Unit(9999))), None, "gone: no fallback point of its own");
+        assert_eq!(hovered_aim_point(&map, None), None);
     }
 
     #[test]

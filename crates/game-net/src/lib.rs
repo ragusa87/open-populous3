@@ -56,11 +56,12 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 }
 
 /// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport, Blast, Lightning, Armageddon, Swamp,
-/// Convert, Hypnotism, Volcano, Firestorm, Earthquake: `u16 x, z`), for an order `order tag u8 [+ u16 x, z]`,
-/// for a unit order `u32 unit id` then the order, for lighting or putting out a camp fire `u16 x, z`,
-/// for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`, for a self cast `spell u8`
-/// (its place in `SpellKind::ALL`), for pausing one `spell u8, paused u8`, for moving a vehicle `u32 vehicle id, u16 x, z`,
-/// for unloading one `u32 vehicle id`, for clearing a swamp `u32 effect id`.
+/// Convert, Hypnotism, Volcano, Firestorm, Earthquake, MagicalShield, Bloodlust, Invisibility: `u16 x, z`), for an
+/// order `order tag u8 [+ u16 x, z]`, for a unit order `u32 unit id` then the order, for lighting or putting out a
+/// camp fire `u16 x, z`, for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`, for
+/// a self cast (a spell not aimed on a spot yet) `spell u8` (its place in `SpellKind::ALL`), for pausing one
+/// `spell u8, paused u8`, for moving a vehicle `u32 vehicle id, u16 x, z`, for unloading one `u32 vehicle id`, for
+/// clearing a swamp `u32 effect id`.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -74,7 +75,10 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             | Spell::Hypnotism { at }
             | Spell::Volcano { at }
             | Spell::Firestorm { at }
-            | Spell::Earthquake { at } = spell
+            | Spell::Earthquake { at }
+            | Spell::MagicalShield { at }
+            | Spell::Bloodlust { at }
+            | Spell::Invisibility { at } = spell
             {
                 b.push(match spell {
                     Spell::Teleport { .. } => 4,
@@ -86,6 +90,9 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                     Spell::Volcano { .. } => 11,
                     Spell::Firestorm { .. } => 12,
                     Spell::Earthquake { .. } => 13,
+                    Spell::MagicalShield { .. } => 14,
+                    Spell::Bloodlust { .. } => 15,
+                    Spell::Invisibility { .. } => 16,
                     _ => 6,
                 });
                 b.extend(at.0.to_le_bytes());
@@ -106,8 +113,10 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                 | Spell::Hypnotism { .. }
                 | Spell::Volcano { .. }
                 | Spell::Firestorm { .. }
-                | Spell::Earthquake { .. } => unreachable!("encoded above"),
-                Spell::MagicalShield | Spell::Bloodlust | Spell::Invisibility => unreachable!("self-cast: never built from a Command::Cast, see Command::CastSelf"),
+                | Spell::Earthquake { .. }
+                | Spell::MagicalShield { .. }
+                | Spell::Bloodlust { .. }
+                | Spell::Invisibility { .. } => unreachable!("encoded above"),
             };
             b.push(tag);
             for (x, z) in cells {
@@ -260,6 +269,9 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
                 11 => Spell::Volcano { at: (c.u16()?, c.u16()?) },
                 12 => Spell::Firestorm { at: (c.u16()?, c.u16()?) },
                 13 => Spell::Earthquake { at: (c.u16()?, c.u16()?) },
+                14 => Spell::MagicalShield { at: (c.u16()?, c.u16()?) },
+                15 => Spell::Bloodlust { at: (c.u16()?, c.u16()?) },
+                16 => Spell::Invisibility { at: (c.u16()?, c.u16()?) },
                 _ => return None,
             };
             Some(Command::Cast { player, spell })
@@ -370,6 +382,9 @@ mod tests {
                 Command::Cast { player: 1, spell: Spell::Volcano { at: (12, 34) } },
                 Command::Cast { player: 2, spell: Spell::Firestorm { at: (56, 78) } },
                 Command::Cast { player: 3, spell: Spell::Earthquake { at: (90, 11) } },
+                Command::Cast { player: 0, spell: Spell::MagicalShield { at: (23, 45) } },
+                Command::Cast { player: 1, spell: Spell::Bloodlust { at: (65, 87) } },
+                Command::Cast { player: 2, spell: Spell::Invisibility { at: (109, 131) } },
                 Command::Order { player: 2, order: Order::MoveTo { x: 65535, z: 300 } },
                 Command::Order { player: 0, order: Order::Cast },
                 Command::Order { player: 1, order: Order::Stop },

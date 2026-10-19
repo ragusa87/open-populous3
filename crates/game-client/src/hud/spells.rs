@@ -4,8 +4,12 @@
 //! right click pauses / resumes a known spell's recharge (it then takes no mana).
 //! Spells cast on a spot (`ground_spell`, Teleport) are aimed with the mouse: the cursor shows the
 //! spell, grayed where it cannot apply; left click casts and puts the spell away (back to the arrow
-//! and the units' selection), right click puts it away without casting. The other
-//! spells are cast with C (demo: uses a charge, the shaman jumps).
+//! and the units' selection), right click puts it away without casting. Whatever the cursor has
+//! highlit (a unit, vehicle, wood pile, tree, building or totem — `hover.rs`) is aimed at its own
+//! position rather than the raw ground point under the mouse (`units::selection::hovered_aim_point`),
+//! read fresh every frame right up to the click: a moving target is not tracked afterwards, only
+//! wherever it stood the moment the cast landed. The other spells are cast with C (demo: uses a
+//! charge, the shaman jumps).
 
 use super::panel::{TabContent, DARK_BROWN, INK, PANEL_WIDTH};
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
@@ -149,6 +153,9 @@ pub fn ground_spell(kind: SpellKind, at: (u16, u16), origin: (u16, u16)) -> Opti
         SpellKind::Earthquake => Some(Spell::Earthquake { at }),
         SpellKind::LandBridge => Some(Spell::LandBridge { from: cell(origin), to: cell(at) }),
         SpellKind::Flatten => Some(Spell::Flatten { at: game_core::flatten::nearest_point(at) }),
+        SpellKind::MagicalShield => Some(Spell::MagicalShield { at }),
+        SpellKind::Bloodlust => Some(Spell::Bloodlust { at }),
+        SpellKind::Invisibility => Some(Spell::Invisibility { at }),
         _ => None,
     }
 }
@@ -508,7 +515,7 @@ fn aim_and_cast(
     } else {
         map.0.shaman_of(PLAYER).map_or((0, 0), |u| (u.x, u.z))
     };
-    let target = crate::units::selection::hovered_site(&map.0, hovered.0).or_else(|| pick(c).map(world_units));
+    let target = crate::units::selection::hovered_aim_point(&map.0, hovered.0).or_else(|| pick(c).map(world_units));
     let spell = target.and_then(|at| ground_spell(kind, at, origin));
     let ready = player_book(&map.0).slot(kind).is_some_and(|s| s.can_cast());
     let valid = spell.filter(|s| ready && map.0.can_cast(PLAYER, s));
@@ -703,6 +710,9 @@ mod tests {
         assert_eq!(ground_spell(SpellKind::LandBridge, (5 * 512 + 9, 6 * 512), (512, 1023)), Some(Spell::LandBridge { from: (1, 1), to: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::Lightning, (700, 900), (0, 0)), Some(Spell::Lightning { at: (700, 900) }));
         assert_eq!(ground_spell(SpellKind::Flatten, (5 * 512 + 300, 6 * 512 + 9), (0, 0)), Some(Spell::Flatten { at: (6, 6) }), "the nearest height point");
+        assert_eq!(ground_spell(SpellKind::MagicalShield, (5, 6), (0, 0)), Some(Spell::MagicalShield { at: (5, 6) }));
+        assert_eq!(ground_spell(SpellKind::Bloodlust, (5, 6), (0, 0)), Some(Spell::Bloodlust { at: (5, 6) }));
+        assert_eq!(ground_spell(SpellKind::Invisibility, (5, 6), (0, 0)), Some(Spell::Invisibility { at: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::Swarm, (5, 6), (0, 0)), None);
     }
 

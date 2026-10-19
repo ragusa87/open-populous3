@@ -1,19 +1,20 @@
 //! Hypnotism (pop3-rev-analysis.md "Per spell" 7), an effect (`effect::EffectKind::Hypnotism`): aimed at a point
-//! like a blast. On its one turn, the `HYPNO_NUM_PEOPLE` nearest people of other tribes around it — not a
-//! wildman, not a shaman, not a shielded one — join the caster's tribe for `status::HYPNO_STEPS` steps
-//! (`WorldEvent::Hypnotize`, `GameMap::hypnotize`); one not already hypnotised sorts before one that is, regardless
-//! of distance (`nearest::nearest_n_fresh_first`, the shared selector, pop3-rev-analysis.md 0x515E30): a cast
-//! reaches fresh captives first, recapturing an already-hypnotised one only to fill what's left (confirmed,
-//! docs/specs/spells.md "Magical Shield"). Once `HYPNO_STEPS` runs out, each one reverts to its own *original*
-//! tribe (`GameMap::revert_expired_hypnosis`) — the one before its first capture, even through several recaptures
-//! by different tribes in between (confirmed: recasting on an already-hypnotised unit changes who controls it and
+//! like a blast. On its one turn, the `HYPNO_NUM_PEOPLE` nearest people of other tribes in its 3 × 3 cells
+//! (`nearest::in_block`, pop3-rev-analysis.md "Components" "Nearest-N selector") — not a wildman, not a shaman, not
+//! a shielded one — join the caster's tribe for `status::HYPNO_STEPS` steps (`WorldEvent::Hypnotize`,
+//! `GameMap::hypnotize`); one not already hypnotised sorts before one that is, regardless of distance
+//! (`nearest::nearest_n_fresh_first`, the shared selector, pop3-rev-analysis.md 0x515E30): a cast reaches fresh
+//! captives first, recapturing an already-hypnotised one only to fill what's left (confirmed, docs/specs/spells.md
+//! "Magical Shield"). Once `HYPNO_STEPS` runs out, each one reverts to its own *original* tribe
+//! (`GameMap::revert_expired_hypnosis`) — the one before its first capture, even through several recaptures by
+//! different tribes in between (confirmed: recasting on an already-hypnotised unit changes who controls it and
 //! restarts its timer, but never who it reverts to) — unless that tribe is wiped out by then, when the change
 //! stays permanent (confirmed: "if their tribe is gone, they stay").
 
 use crate::effect::{Effect, EffectKind};
 use crate::event::WorldEvent;
 use crate::map::GameMap;
-use crate::nearest::nearest_n_fresh_first;
+use crate::nearest::{in_block, nearest_n_fresh_first};
 use crate::status::HYPNO_NUM_PEOPLE;
 use crate::time::{Countdown, Ticks};
 use crate::unit::{Unit, UnitKind};
@@ -30,10 +31,13 @@ pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
 }
 
 impl Hypnotism {
-    /// Its one turn at `at`, cast by `owner`: the nearest `HYPNO_NUM_PEOPLE` eligible people join `owner`'s tribe,
-    /// a not-yet-hypnotised one taking priority over one already captured by somebody.
+    /// Its one turn at `at`, cast by `owner`: the nearest `HYPNO_NUM_PEOPLE` eligible people within its 3 × 3 cells
+    /// join `owner`'s tribe, a not-yet-hypnotised one taking priority over one already captured by somebody.
     pub fn turn(&mut self, at: (u16, u16), owner: u8, world: &GameMap) -> Vec<WorldEvent> {
-        let pred = |u: &Unit| u.owner != owner && u.kind != UnitKind::Wildman && u.kind != UnitKind::Shaman && u.is_alive() && !u.statuses.shield.is_on();
+        let size = world.terrain.size() as i32;
+        let pred = |u: &Unit| {
+            u.owner != owner && u.kind != UnitKind::Wildman && u.kind != UnitKind::Shaman && u.is_alive() && !u.statuses.shield.is_on() && in_block(at, (u.x, u.z), size)
+        };
         let fresh = |u: &Unit| !u.statuses.hypnotized.is_on();
         nearest_n_fresh_first(&world.units, at, HYPNO_NUM_PEOPLE as usize, pred, fresh).into_iter().map(|unit| WorldEvent::Hypnotize { unit, tribe: owner }).collect()
     }
@@ -122,6 +126,17 @@ mod tests {
     }
 
     #[test]
+    fn never_reaches_past_its_3x3_cells_even_with_room_to_spare() {
+        let mut map = bare();
+        // Only one other candidate on the whole map, well outside the cast's 3 × 3 cells: with room for 5 more,
+        // an unbounded nearest-first pick would still reach it, but the selector's own area must stop it first.
+        let far = map.spawn(1, UnitKind::Brave, (AT.0.wrapping_add(2000), AT.1)).id;
+        map.add_effect(effect(0, AT));
+        map.tick();
+        assert_eq!(map.unit(far).unwrap().owner, 1, "outside the 3 × 3 cells: spared");
+    }
+
+    #[test]
     fn a_recast_reaches_fresh_enemies_before_recapturing_an_already_hypnotised_one() {
         let mut map = bare();
         // Already captured by tribe 2, closer to the cast than everyone else.
@@ -141,9 +156,8 @@ mod tests {
         // Spies (`sight: 0`) never look for a fight on their own, so a newly captured one and the decoys left
         // behind in its old tribe never end up skirmishing while this test just watches the revert timer.
         let enemy = map.spawn(1, UnitKind::Spy, AT).id;
-        // `nearest_n` has no maximum range, so a lone tribe-1 unit far away would be swept up by the same cast and
-        // leave tribe 1 wiped out too (that's the other test, below): enough closer decoys keep some of tribe 1
-        // out of the nearest 6 and so still alive, letting this test the revert itself, not the permanent case.
+        // Enough closer decoys (all still in the 3 × 3 block) keep some of tribe 1 out of the nearest 6 and so
+        // still alive, letting this test the revert itself, not the permanent case (that's the other test, below).
         for k in 1..=10u16 {
             map.spawn(1, UnitKind::Spy, (AT.0.wrapping_add(k * 50), AT.1));
         }

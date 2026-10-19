@@ -22,16 +22,13 @@ pub enum Spell {
     Lightning { at: (u16, u16) },
     /// A swamp at `at` (world units): `swamp::effect`.
     Swamp { at: (u16, u16) },
-    /// Shields the `SHIELD_NUM_PEOPLE` nearest own followers around the shaman, as she stands when it releases
-    /// (self-cast, never wire-encoded as a `Spell`: `Command::CastSelf` carries its `SpellKind` instead, see
-    /// `game-net`).
-    MagicalShield,
-    /// Bloodlusts the `BLOODLUST_NUM_PEOPLE` nearest own followers around the shaman (self-cast, see
-    /// `MagicalShield`).
-    Bloodlust,
-    /// Turns the `INVIS_NUM_PEOPLE` nearest own followers around the shaman invisible (self-cast, see
-    /// `MagicalShield`).
-    Invisibility,
+    /// Shields the `SHIELD_NUM_PEOPLE` nearest own followers in the 3 × 3 cells around `at` (world units), as they
+    /// stand when it releases (`GameMap::cast_nearest_status`).
+    MagicalShield { at: (u16, u16) },
+    /// Bloodlusts the `BLOODLUST_NUM_PEOPLE` nearest own followers around `at` (world units; see `MagicalShield`).
+    Bloodlust { at: (u16, u16) },
+    /// Turns the `INVIS_NUM_PEOPLE` nearest own followers around `at` (world units) invisible (see `MagicalShield`).
+    Invisibility { at: (u16, u16) },
     /// The nearest wildman within range of `at` (world units) becomes a brave of the caster, every few turns for a
     /// while: `convert::effect`.
     Convert { at: (u16, u16) },
@@ -56,9 +53,9 @@ impl Spell {
             Spell::Blast { .. } => Some(SpellKind::Blast),
             Spell::Lightning { .. } => Some(SpellKind::Lightning),
             Spell::Swamp { .. } => Some(SpellKind::Swamp),
-            Spell::MagicalShield => Some(SpellKind::MagicalShield),
-            Spell::Bloodlust => Some(SpellKind::Bloodlust),
-            Spell::Invisibility => Some(SpellKind::Invisibility),
+            Spell::MagicalShield { .. } => Some(SpellKind::MagicalShield),
+            Spell::Bloodlust { .. } => Some(SpellKind::Bloodlust),
+            Spell::Invisibility { .. } => Some(SpellKind::Invisibility),
             Spell::Convert { .. } => Some(SpellKind::Convert),
             Spell::Hypnotism { .. } => Some(SpellKind::Hypnotism),
             Spell::Volcano { .. } => Some(SpellKind::Volcano),
@@ -83,9 +80,9 @@ impl Spell {
             | Spell::Lightning { .. }
             | Spell::Armageddon { .. }
             | Spell::Swamp { .. }
-            | Spell::MagicalShield
-            | Spell::Bloodlust
-            | Spell::Invisibility
+            | Spell::MagicalShield { .. }
+            | Spell::Bloodlust { .. }
+            | Spell::Invisibility { .. }
             | Spell::Convert { .. }
             | Spell::Hypnotism { .. }
             | Spell::Volcano { .. }

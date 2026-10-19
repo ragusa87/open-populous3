@@ -9,6 +9,7 @@ mod campfire;
 mod chimney;
 mod debug_overlay;
 mod explosion;
+mod fireball_shot;
 mod firebolts;
 mod camera;
 mod camera_debug;
@@ -115,7 +116,7 @@ fn main() {
             cursor_debug::CursorDebugPlugin,
             (camera_debug::CameraDebugPlugin, debug_overlay::DebugOverlayPlugin),
             object_scale::ObjectScalePlugin,
-            chimney::ChimneyPlugin,
+            (chimney::ChimneyPlugin, fireball_shot::FireballShotPlugin),
             (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin, armageddon::ArmageddonPlugin, swamp::SwampPlugin, volcano_rocks::VolcanoRocksPlugin, lava::LavaPlugin, ground_shake::GroundShakePlugin),
         ))
         .add_systems(Update, toggle_fullscreen)

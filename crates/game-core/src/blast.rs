@@ -39,6 +39,12 @@ pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
 }
 
 impl SimpleBlast {
+    /// Its current (or, between ticks, next) turn's radius, cells (`RADII`): for the debug overlay, `None` once
+    /// it's run its course.
+    pub fn radius_cells(&self) -> Option<f32> {
+        RADII.get(self.turn as usize).map(|&r| r as f32 / WORLD_UNITS_PER_CELL as f32)
+    }
+
     /// One turn of the blast at `at` cast by `owner`: the pushes and damage it deals now.
     pub fn turn(&mut self, at: (u16, u16), owner: u8, units: &[Unit], vehicles: &Registry<Vehicle>) -> Vec<WorldEvent> {
         let Some(&radius) = RADII.get(self.turn as usize) else { return Vec::new() };

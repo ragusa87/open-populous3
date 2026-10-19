@@ -13,6 +13,13 @@ use crate::id::Registry;
 use crate::time::{Countdown, Ticks};
 use crate::unit::{Unit, UnitId, UnitKind};
 use crate::vehicle::Vehicle;
+use pop3_format::WORLD_UNITS_PER_CELL;
+
+/// The effect's own life, longer than the blast's 3 active turns (`RADII`): the idle turns past it are a no-op for
+/// `turn` (already short-circuits once `self.turn` runs past `RADII`'s bounds) but keep the effect, and so its
+/// client-side fireball-shot view (`fireball_shot.rs` [client]), around long enough to fall, trail and burst
+/// (pop3-rev-analysis.md "Firestorm fireballs", TODO.md).
+pub const VISUAL_TICKS: Ticks = Ticks::secs(1);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PanickingBlast {
@@ -24,10 +31,16 @@ pub struct PanickingBlast {
 
 /// A panicking blast cast by tribe `owner` at `at` (world units).
 pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
-    Effect::new(owner, at, Countdown::new(Ticks::new(RADII.len() as u32)), EffectKind::PanickingBlast(PanickingBlast::default()))
+    Effect::new(owner, at, Countdown::new(VISUAL_TICKS), EffectKind::PanickingBlast(PanickingBlast::default()))
 }
 
 impl PanickingBlast {
+    /// Its current (or, between ticks, next) turn's radius, cells (`RADII`): for the debug overlay, `None` once
+    /// it's run its course.
+    pub fn radius_cells(&self) -> Option<f32> {
+        RADII.get(self.turn as usize).map(|&r| r as f32 / WORLD_UNITS_PER_CELL as f32)
+    }
+
     /// One turn of the blast at `at` cast by `owner`: the pushes, damage and panic it deals now.
     pub fn turn(&mut self, at: (u16, u16), owner: u8, units: &[Unit], vehicles: &Registry<Vehicle>) -> Vec<WorldEvent> {
         let Some(&radius) = RADII.get(self.turn as usize) else { return Vec::new() };
