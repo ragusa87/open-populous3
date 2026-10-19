@@ -16,6 +16,14 @@ game's z mirrored (architecture.md "Handedness", `game_frame`): map cell (x, z) 
 Current implementation rebuilds the mesh on CPU when focus or terrain changes (~16k vertices, cheap).
 To scale: static grid + vertex shader sampling an R16 height texture with wrapped UVs.
 
+The sim ticks at 12 Hz, rendering at ~60 fps: on the camera-still incremental-patch path, a dirty rect's
+cells glide from their height before the tick that touched them to their live height over `SimClock::alpha()`
+(`world::TerrainGlide`, `terrain_mesh::patch`'s `glide` parameter), the same prev/current + alpha treatment
+`units::SimClock` already gives unit position and height. Without it a fast multi-cell change (Volcano's
+rise) would jump straight to its new height once every ~5 frames instead of rising smoothly. A camera move
+or a forced rebuild (`TerrainDirty`, level switch) still snaps instantly through `terrain_mesh::build`, never
+gliding — the same exemption a unit's own "jump" gets from its glide.
+
 ## Brushes
 `apply_brush(center, radius, op)` with integer falloff 0..256, returns a `DirtyRect`.
 `raise`, `flatten`, `land_bridge` (shortest path around the torus) are built on it.

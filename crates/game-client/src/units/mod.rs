@@ -17,7 +17,7 @@ pub mod worship;
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{render_pos, Grounded};
-use crate::world::{CurrentMap, LevelList, TerrainPatches};
+use crate::world::{CurrentMap, LevelList, TerrainGlide, TerrainPatches};
 use art::{frame_index, sprite_dir, Frame, Pose};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
@@ -388,6 +388,7 @@ pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<M
     upload_prepared(prepare_frame(f), images, meshes, mats)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_ticks(
     time: Res<Time>,
     speed: Res<GameSpeed>,
@@ -395,6 +396,7 @@ pub(crate) fn run_ticks(
     mut schedule: ResMut<GameSchedule>,
     mut map: ResMut<CurrentMap>,
     mut patches: ResMut<TerrainPatches>,
+    mut glide: ResMut<TerrainGlide>,
     mut drawn: ResMut<SimNow>,
 ) {
     let due = clock.steps_due(time.delta_secs(), *speed);
@@ -404,6 +406,7 @@ pub(crate) fn run_ticks(
         clock.prev_ids = map.units.iter().map(|u| u.id).collect();
         clock.prev = map.units.iter().map(|u| (u.x, u.z)).collect();
         clock.prev_heights = map.units.iter().map(|u| u.motion.height).collect();
+        glide.prev = Some(map.terrain.clone());
         while ran < due {
             let now = map.now;
             schedule.0.close_local(now);
@@ -420,6 +423,12 @@ pub(crate) fn run_ticks(
         clock.stalled();
     }
     drawn.set_if_neq(clock.now(map.0.now));
+    if due > 0 {
+        // Merged once here, not re-merged every reglide frame in `rebuild_terrain`: an ongoing effect (Volcano's
+        // rise, lava flow) can hand back a few hundred adjacent small rects a tick, and this set gets walked by
+        // `terrain_mesh::patch` on every one of the ~5 render frames the glide is in-flight for, not just once.
+        glide.rects = crate::terrain_texture::merge_dirty_rects(&levelled);
+    }
     if !levelled.is_empty() {
         patches.0.extend(levelled);
         map.set_changed();
@@ -762,6 +771,7 @@ mod tests {
             .init_resource::<SimNow>()
             .init_resource::<GameSchedule>()
             .init_resource::<TerrainPatches>()
+            .init_resource::<TerrainGlide>()
             .insert_resource(GameSpeed { paused: true, times: 1 })
             .insert_resource(CurrentMap(game_core::map::GameMap::sandbox_walk()));
         let tick_time = |app: &mut App| {

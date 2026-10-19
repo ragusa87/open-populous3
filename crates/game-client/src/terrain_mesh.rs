@@ -55,6 +55,12 @@ pub fn drop_at(params: &CurveParams, dx: f32, dz: f32) -> f32 {
     params.curvature * (dx * dx + dz * dz)
 }
 
+/// `a` at `t=0`, `b` at `t=1`, clamped: how `patch` glides a vertex's drawn height from a `TerrainGlide`
+/// snapshot towards its current value, same shape unit motion already glides (`units::SimClock`).
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t.clamp(0.0, 1.0)
+}
+
 /// Rendered height of the focus point (used to aim the camera).
 pub fn focus_height(map: &Heightmap, focus: (f32, f32), params: &CurveParams) -> f32 {
     map.sample(focus.0, focus.1) * params.height_scale
@@ -133,7 +139,14 @@ fn offsets_in_range(c: i32, anchor: i32, radius: i32, size: i32) -> impl Iterato
 /// on the anchor and the grid's own topology, neither of which moved. Returns whether anything in the drawn disc
 /// was actually touched, so a caller can skip re-uploading the mesh entirely when every dirty cell lies outside it
 /// (an effect running off-screen).
-pub fn patch(g: &mut TerrainGeometry, map: &Heightmap, focus: (f32, f32), params: &CurveParams, dirty: &[DirtyRect]) -> bool {
+///
+/// `glide = Some((prev, alpha))` draws each touched vertex's height as the blend between `prev`'s heightmap (the
+/// map as it stood before the tick that produced `dirty`) and `map`'s own live value, at `alpha` (`SimClock`'s
+/// fraction of the current tick elapsed): the sim ticks at 12 Hz while rendering runs at ~60 fps, so without this
+/// a fast multi-cell change (Volcano's rise) would otherwise jump straight to its new height once every ~5
+/// frames instead of rising smoothly. `alpha = 1.0` reproduces the plain `glide = None` result exactly. `None` is
+/// `build`'s own case too: a camera move or a forced rebuild is an instantaneous snap, never gliding.
+pub fn patch(g: &mut TerrainGeometry, map: &Heightmap, focus: (f32, f32), params: &CurveParams, dirty: &[DirtyRect], glide: Option<(&Heightmap, f32)>) -> bool {
     let r = params.radius;
     let n = (2 * r + 1) as usize;
     let size = map.size() as i32;
@@ -158,8 +171,15 @@ pub fn patch(g: &mut TerrainGeometry, map: &Heightmap, focus: (f32, f32), params
 
     for &(i, j) in &touched {
         let (dx, dz) = (i as f32 - fx, j as f32 - fz);
-        let h = map.get(bx + i, bz + j);
-        let y = h as f32 * params.height_scale - drop_at(params, dx, dz);
+        let now_h = map.get(bx + i, bz + j);
+        let now_y = now_h as f32 * params.height_scale - drop_at(params, dx, dz);
+        let y = match glide {
+            Some((prev_map, alpha)) => {
+                let prev_h = prev_map.get(bx + i, bz + j);
+                lerp(prev_h as f32 * params.height_scale - drop_at(params, dx, dz), now_y, alpha)
+            }
+            None => now_y,
+        };
         g.positions[(j + r) as usize * n + (i + r) as usize] = Vec3::from(GamePos::ground(dx, y, dz)).into();
     }
 
@@ -256,7 +276,7 @@ mod tests {
         let mut g = build(&map, focus, &p);
         map.set(17, 15, 900);
         let dirty = [DirtyRect { min: (17, 15), max: (17, 15) }];
-        assert!(patch(&mut g, &map, focus, &p, &dirty), "the edit lands inside the drawn disc");
+        assert!(patch(&mut g, &map, focus, &p, &dirty, None), "the edit lands inside the drawn disc");
         let rebuilt = build(&map, focus, &p);
         assert_eq!(g.positions, rebuilt.positions);
         assert_eq!(g.normals, rebuilt.normals);
@@ -272,7 +292,7 @@ mod tests {
         let mut g = build(&map, focus, &p);
         let before = (g.positions.clone(), g.normals.clone());
         let dirty = [DirtyRect { min: (0, 0), max: (0, 0) }];
-        assert!(!patch(&mut g, &map, focus, &p, &dirty), "far outside the radius-4 disc");
+        assert!(!patch(&mut g, &map, focus, &p, &dirty, None), "far outside the radius-4 disc");
         assert_eq!((g.positions, g.normals), before, "left untouched");
     }
 
@@ -284,9 +304,79 @@ mod tests {
         let mut g = build(&map, focus, &p);
         map.set(0, 8, 300); // cell (16, 8) from the focus's own side: wraps to (0, 8)
         let dirty = [DirtyRect { min: (0, 8), max: (0, 8) }];
-        assert!(patch(&mut g, &map, focus, &p, &dirty));
+        assert!(patch(&mut g, &map, focus, &p, &dirty, None));
         let rebuilt = build(&map, focus, &p);
         assert_eq!(g.positions, rebuilt.positions, "matches a full rebuild across the wrap");
+        assert_eq!(g.normals, rebuilt.normals);
+    }
+
+    #[test]
+    fn lerp_clamps_and_interpolates() {
+        assert_eq!(lerp(0.0, 10.0, 0.5), 5.0);
+        assert_eq!(lerp(0.0, 10.0, -1.0), 0.0, "clamps below 0");
+        assert_eq!(lerp(0.0, 10.0, 2.0), 10.0, "clamps above 1");
+    }
+
+    #[test]
+    fn patch_glides_a_touched_vertex_between_prev_and_now() {
+        let mut map = Heightmap::new(32);
+        for z in 0..32 {
+            for x in 0..32 {
+                map.set(x, z, 200);
+            }
+        }
+        let p = CurveParams { radius: 6, curvature: 0.01, ..Default::default() };
+        let focus = (16.0, 16.0);
+        let prev = map.clone();
+        let mut g = build(&map, focus, &p);
+        let untouched_before = g.positions[0];
+        map.set(17, 15, 900);
+        let dirty = [DirtyRect { min: (17, 15), max: (17, 15) }];
+        assert!(patch(&mut g, &map, focus, &p, &dirty, Some((&prev, 0.5))));
+
+        let (dx, dz) = (17.0 - 16.0, 15.0 - 16.0);
+        let prev_y = 200.0 * p.height_scale - drop_at(&p, dx, dz);
+        let now_y = 900.0 * p.height_scale - drop_at(&p, dx, dz);
+        let expected = lerp(prev_y, now_y, 0.5);
+        let r = p.radius;
+        let n = (2 * r + 1) as usize;
+        let idx = ((dz as i32 + r) as usize) * n + (dx as i32 + r) as usize;
+        assert!((g.positions[idx][1] - expected).abs() < 1e-5, "touched vertex sits at the midpoint");
+        assert_eq!(g.positions[0], untouched_before, "untouched vertex ignores alpha");
+    }
+
+    #[test]
+    fn patch_glide_at_alpha_one_matches_a_full_rebuild() {
+        let mut map = Heightmap::new(32);
+        for z in 0..32 {
+            for x in 0..32 {
+                map.set(x, z, 200);
+            }
+        }
+        let p = CurveParams { radius: 6, curvature: 0.01, ..Default::default() };
+        let focus = (16.0, 16.0);
+        let prev = map.clone();
+        let mut g = build(&map, focus, &p);
+        map.set(17, 15, 900);
+        let dirty = [DirtyRect { min: (17, 15), max: (17, 15) }];
+        assert!(patch(&mut g, &map, focus, &p, &dirty, Some((&prev, 1.0))));
+        let rebuilt = build(&map, focus, &p);
+        assert_eq!(g.positions, rebuilt.positions);
+        assert_eq!(g.normals, rebuilt.normals);
+    }
+
+    #[test]
+    fn patch_glide_wraps_the_same_way_as_patch() {
+        let mut map = Heightmap::new(16);
+        let p = CurveParams { radius: 2, curvature: 0.0, ..Default::default() }.with_relief(1.0);
+        let focus = (15.0, 8.0);
+        let prev = map.clone();
+        let mut g = build(&map, focus, &p);
+        map.set(0, 8, 300); // cell (16, 8) from the focus's own side: wraps to (0, 8)
+        let dirty = [DirtyRect { min: (0, 8), max: (0, 8) }];
+        assert!(patch(&mut g, &map, focus, &p, &dirty, Some((&prev, 1.0))));
+        let rebuilt = build(&map, focus, &p);
+        assert_eq!(g.positions, rebuilt.positions, "matches a full rebuild across the wrap, snapshot wraps the same way");
         assert_eq!(g.normals, rebuilt.normals);
     }
 }

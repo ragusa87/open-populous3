@@ -3,6 +3,7 @@
 use crate::camera::{CameraRig, CurveParamsRes};
 use crate::terrain_mesh;
 use bevy::asset::RenderAssetUsages;
+use bevy::ecs::system::SystemParam;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -11,6 +12,15 @@ use game_core::map::GameMap;
 use game_core::terrain::DirtyRect;
 use pop3_format::Theme;
 use std::path::{Path, PathBuf};
+
+/// The GPU-side assets `rebuild_terrain` writes into, bundled so the system stays under the 16-param
+/// `SystemParam` tuple limit now that it also takes `TerrainGlide`/`SimClock`.
+#[derive(SystemParam)]
+struct TerrainAssets<'w> {
+    meshes: ResMut<'w, Assets<Mesh>>,
+    mats: ResMut<'w, Assets<StandardMaterial>>,
+    images: ResMut<'w, Assets<Image>>,
+}
 
 #[derive(Resource)]
 pub struct CurrentMap(pub GameMap);
@@ -37,6 +47,17 @@ pub struct TerrainDirty(pub bool);
 /// `TerrainDirty` asks for all of it.
 #[derive(Resource, Default)]
 pub struct TerrainPatches(pub Vec<DirtyRect>);
+
+/// Heightmap state to glide the terrain mesh from, while `SimClock::alpha()` is still short of 1 for the tick
+/// window that produced it (the sim ticks at 12 Hz, rendering at ~60 fps, so a terrain edit's cells would
+/// otherwise jump straight to their new height once every ~5 frames instead of rising smoothly, unlike every
+/// other world visual). Set once per tick-running frame by `units::run_ticks` (mirrors `SimClock::prev*`),
+/// cleared by `rebuild_terrain` once the glide has caught up.
+#[derive(Resource, Default)]
+pub struct TerrainGlide {
+    pub prev: Option<game_core::terrain::Heightmap>,
+    pub rects: Vec<DirtyRect>,
+}
 
 /// Cell borders drawn on the ground: on in the sandboxes, G toggles it.
 #[derive(Resource, Default)]
@@ -161,10 +182,11 @@ impl Plugin for WorldPlugin {
             .insert_resource(levels)
             .insert_resource(TerrainDirty(true))
             .init_resource::<TerrainPatches>()
+            .init_resource::<TerrainGlide>()
             .init_resource::<ShowGrid>()
             .init_resource::<CurveParamsRes>()
             .add_systems(Startup, spawn_terrain)
-            .add_systems(Update, ((switch_level, toggle_grid).in_set(crate::menu::Gameplay), rebuild_terrain).chain());
+            .add_systems(Update, ((switch_level, toggle_grid).in_set(crate::menu::Gameplay), rebuild_terrain.after(crate::units::SimStep)).chain());
     }
 }
 
@@ -224,6 +246,13 @@ pub fn original_theme(theme: Option<u8>, original: bool) -> Option<u8> {
     theme.filter(|_| original)
 }
 
+/// Whether `rebuild_terrain` has anything to do this frame: a forced rebuild (`dirty`), new patches
+/// (`!changed_is_empty`), the focus moved, or a still-in-flight glide (`gliding`) that needs re-drawing towards
+/// its target even though nothing landed this frame.
+fn terrain_needs_rebuild(dirty: bool, changed_is_empty: bool, focus_moved: bool, gliding: bool) -> bool {
+    dirty || !changed_is_empty || focus_moved || gliding
+}
+
 #[allow(clippy::too_many_arguments)]
 fn rebuild_terrain(
     rig: Res<CameraRig>,
@@ -231,19 +260,20 @@ fn rebuild_terrain(
     params: Res<CurveParamsRes>,
     mut dirty: ResMut<TerrainDirty>,
     mut patches: ResMut<TerrainPatches>,
+    mut glide: ResMut<TerrainGlide>,
+    clock: Res<crate::units::SimClock>,
     mut last_focus: Local<Option<Vec2>>,
     mut baked: Local<Option<(Theme, Handle<Image>)>>,
     mut geometry: Local<Option<terrain_mesh::TerrainGeometry>>,
     levels: Res<LevelList>,
     material: Res<TerrainMaterial>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
+    mut assets: TerrainAssets,
     q: Query<&Mesh3d, With<TerrainMesh>>,
     grid: Res<ShowGrid>,
 ) {
     let changed = std::mem::take(&mut patches.0);
-    if !dirty.0 && changed.is_empty() && *last_focus == Some(rig.focus) {
+    let gliding = glide.prev.is_some() && !glide.rects.is_empty();
+    if !terrain_needs_rebuild(dirty.0, changed.is_empty(), *last_focus != Some(rig.focus), gliding) {
         return;
     }
     // Merged once, shared below: an ongoing effect (Volcano's rise, its lava flow) can dirty a few hundred
@@ -253,7 +283,9 @@ fn rebuild_terrain(
     let row_scale = row_scale();
     match baked.as_ref().filter(|_| !dirty.0) {
         Some((theme, image)) => {
-            if let Some(mut image) = images.get_mut(image) && let Some(pixels) = image.data.as_mut() {
+            // Skipped on a pure reglide frame (nothing new in `changed`): the texture needs no gliding, and
+            // `walkable_cells` is a whole-map scan that must not run on every one of the ~5 reglide frames a tick.
+            if !changed.is_empty() && let Some(mut image) = assets.images.get_mut(image) && let Some(pixels) = image.data.as_mut() {
                 // Shared by every rect this frame: walkability is a whole-map scan, not worth repeating per rect.
                 let walkable = crate::terrain_texture::walkable_cells(&map.0.terrain);
                 for &rect in &changed {
@@ -267,8 +299,8 @@ fn rebuild_terrain(
                 Theme::load(&levels.data_dir, t).map_err(|e| warn!("theme {t}: {e}")).ok()
             });
             let theme = original.unwrap_or_else(|| crate::procedural_theme::generate(levels.index as u32 + 1));
-            let image = images.add(theme_image(&map.0, &theme, params.0.height_scale, row_scale, grid.0));
-            if let Some(mut m) = mats.get_mut(&material.0) {
+            let image = assets.images.add(theme_image(&map.0, &theme, params.0.height_scale, row_scale, grid.0));
+            if let Some(mut m) = assets.mats.get_mut(&material.0) {
                 m.unlit = true;
                 m.base_color_texture = Some(image.clone());
             }
@@ -287,14 +319,23 @@ fn rebuild_terrain(
         *geometry = Some(terrain_mesh::build(&map.0.terrain, focus, &params.0));
         true
     } else {
-        terrain_mesh::patch(geometry.as_mut().unwrap(), &map.0.terrain, focus, &params.0, &changed)
+        // `changed` is already merged above; `glide.rects` was merged once at capture time in `run_ticks`, so
+        // neither branch here needs to merge again. While nothing landed this frame, the last tick's rects keep
+        // getting re-patched towards the same target as `clock.alpha()` climbs, until the glide catches up.
+        let touch_set: &[DirtyRect] = if !changed.is_empty() { &changed } else { &glide.rects };
+        let glide_src = glide.prev.as_ref().filter(|_| gliding).map(|prev| (prev, clock.alpha()));
+        terrain_mesh::patch(geometry.as_mut().unwrap(), &map.0.terrain, focus, &params.0, touch_set, glide_src)
     };
+    if gliding && clock.alpha() >= 1.0 {
+        glide.prev = None;
+        glide.rects.clear();
+    }
     if !touched {
         return;
     }
     let g = geometry.as_ref().unwrap();
     for handle in &q {
-        if let Some(mut mesh) = meshes.get_mut(&handle.0) {
+        if let Some(mut mesh) = assets.meshes.get_mut(&handle.0) {
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, g.positions.clone());
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, g.normals.clone());
             if focus_moved {
@@ -342,6 +383,15 @@ mod tests {
         assert_eq!(original_theme(Some(3), true), Some(3));
         assert_eq!(original_theme(Some(3), false), None);
         assert_eq!(original_theme(None, true), None);
+    }
+
+    #[test]
+    fn terrain_rebuild_gate() {
+        assert!(!terrain_needs_rebuild(false, true, false, false), "nothing changed, nothing to do");
+        assert!(terrain_needs_rebuild(true, true, false, false), "forced dirty");
+        assert!(terrain_needs_rebuild(false, false, false, false), "new patches");
+        assert!(terrain_needs_rebuild(false, true, true, false), "focus moved");
+        assert!(terrain_needs_rebuild(false, true, false, true), "still gliding");
     }
 
     #[test]
