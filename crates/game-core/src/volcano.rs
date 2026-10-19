@@ -17,11 +17,14 @@
 //!   rising, so the area glows first (`pre_glow`, below, drawn client-side by `lava.rs` [client] reusing its own
 //!   molten look at partial strength): a guess, untraced, the trace gives no such cue.
 //! - Once shaping ends (`SHAPING_TURNS`), a `lava` flow is spawned over the crater's own cells (`lava::flowing`,
-//!   its own growth/fade/ash lifecycle, up to 208 turns), and `FIREBALLS` (28, "about 22 small and 6 big": mechanically identical here, the split is
-//!   visual only and not given a damage difference) land one `panicking_blast` at a time at random points in the
-//!   6×6 area, spread evenly (ceiling division) over the turns left in the controller's own `TOTAL_TURNS` — a pure
-//!   scheduler for its own sub-effects from here on, same spirit as Firestorm's (docs/plans/spells.md "Firestorm").
-//!   Both outlive the controller itself once it ends.
+//!   its own growth/fade/ash lifecycle, up to 208 turns).
+//! - `FIREBALLS` (28, "about 22 small and 6 big": mechanically identical here, the split is visual only and not
+//!   given a damage difference) land one `panicking_blast` at a time at random points in the 6×6 area, spread
+//!   evenly (ceiling division) over `FIREBALL_START`-`FIREBALL_END` (cast turns 115-150: pop3-rev-analysis.md
+//!   "Volcano rocks", `ebp` in `[0x23,0x46]` + the 80-turn offset) — overlapping but not identical to the rocks'
+//!   own 105-130 window below, and starting while the cone is still rising (before `SHAPING_TURNS`). A pure
+//!   scheduler for its own sub-effects from here on, same spirit as Firestorm's (docs/plans/spells.md
+//!   "Firestorm"); both the lava and every fireball outlive the controller itself once it ends.
 //!
 //! The 26 decorative rocks (pop3-rev-analysis.md "Volcano rocks"), turns 105-130, are drawn client-side only: no
 //! effect spawned, no damage, nothing for the simulation to do.
@@ -49,6 +52,11 @@ pub const SLOPE_RADIUS_CELLS: f32 = 5.0;
 pub const CRATER_FLOOR: u16 = 0;
 /// "about 22 small and 6 big fireballs": 28 total, not mechanically distinguished (see module doc).
 pub const FIREBALLS: u32 = 22 + 6;
+/// Cast turns 115-150 (`ebp` 35-70 + 80, pop3-rev-analysis.md "Volcano rocks"): overlaps but does not match the
+/// rocks' own 105-130 window (`volcano_rocks.rs` [client]).
+pub const FIREBALL_START: u32 = 115;
+pub const FIREBALL_END: u32 = 150;
+const _: () = assert!(FIREBALL_START < SHAPING_TURNS, "fireballs begin while the cone is still rising");
 /// How far the pre-eruption rumble (`ground_shake`) is felt (a guess, untraced: roughly twice `DESTROY_AREA_CELLS`).
 pub const SHAKE_RADIUS_CELLS: f32 = 6.0;
 /// How long the pre-eruption glow (`pre_glow`) ramps up before `DESTROY_AT`, and fades out after it (a guess,
@@ -93,8 +101,8 @@ impl Volcano {
         if self.turn == SHAPING_TURNS {
             events.push(WorldEvent::SpawnEffect(crate::lava::flowing(owner, at, size)));
         }
-        if self.turn >= SHAPING_TURNS {
-            let ticks_left = TOTAL_TURNS.saturating_sub(self.turn).max(1);
+        if (FIREBALL_START..=FIREBALL_END).contains(&self.turn) {
+            let ticks_left = (FIREBALL_END - self.turn + 1).max(1);
             let remaining = FIREBALLS - self.fireballs;
             let now = remaining.div_ceil(ticks_left).min(remaining);
             for _ in 0..now {
@@ -333,18 +341,27 @@ mod tests {
     }
 
     #[test]
-    fn schedules_all_28_fireballs_by_the_controllers_own_end() {
+    fn schedules_all_28_fireballs_over_the_115_150_window() {
         // Each fireball is its own short-lived `PanickingBlast` (3 turns), so counting what's still alive in
         // `map.effects` at one moment undercounts them; drive the controller directly and sum every spawn instead.
         let map = bare();
-        let mut volcano = Volcano { ground: 500, turn: SHAPING_TURNS, destroyed: true, fireballs: 0 };
+        let mut volcano = Volcano { ground: 500, turn: FIREBALL_START, destroyed: true, fireballs: 0 };
         let mut rng = map.rng;
         let mut spawned = 0;
-        for _ in SHAPING_TURNS..TOTAL_TURNS {
+        for _ in FIREBALL_START..=FIREBALL_END {
             let events = volcano.turn(AT, 0, &map, &mut rng);
             spawned += events.iter().filter(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::PanickingBlast(_)))).count();
         }
         assert_eq!(spawned as u32, FIREBALLS);
+    }
+
+    #[test]
+    fn fireballs_start_before_shaping_ends_overlapping_but_not_matching_the_rocks_window() {
+        let map = bare();
+        let mut volcano = Volcano { ground: 500, turn: FIREBALL_START, destroyed: true, fireballs: 0 };
+        let mut rng = map.rng;
+        let events = volcano.turn(AT, 0, &map, &mut rng);
+        assert!(events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::PanickingBlast(_)))), "the first fireball lands right at FIREBALL_START");
     }
 
     #[test]
