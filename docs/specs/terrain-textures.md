@@ -66,8 +66,23 @@ sprites and fog of war (PopResourceEditor: "shadows or Fog of War").
 ## cliff
 `cliff[level * 128 + colour]`, colour = a land colour (bigfade output, < 128). Row 0 is the identity,
 rows 1..16 stay about 75% identity, from about row 20 colours turn to rock (theme range 129..157 and a few
-dark land colours at row 63). PopResourceEditor: "damaged ground, lava and similar". What picks the row
-(slope? damage?) is unknown.
+dark land colours at row 63). PopResourceEditor: "damaged ground, lava and similar".
+
+**What picks the row, confirmed from the exe this session** (pop3-rev-analysis.md "Building ashes"
+"Drawn"): not slope and not a damage flag directly, but the SAME
+per-map-cell "blend" byte (0..255) already traced for the simulation's own lava/ash state — `row = blend / 4`.
+Blend is normally a slope measure (`clamp((max neighbour height − min) / 8, 1, 127)`, recomputed after every
+height edit), which is why ordinary cliffs pick it up too; "Volcano lava flow" pushes it past that normal
+range, up to 255 (row 63, "glowing"), and "Building ashes" forces it to 127 (row 31) on a building lost to fire
+or attack, decaying 2/turn once its 6000-turn hold ends. Each quad's 4 corners sample their own cell's blend
+directly (no neighbour-averaging at this step) and are then interpolated smoothly across the quad like any
+other vertex colour, same as the brightness column below - this, not a separate glow effect, is why adjoining
+hot cells read as linked, roughly round blobs rather than hard-edged tiles. Separately, a non-zero blend also
+adds 75 to that corner's own index into a distinct, 1022-entry height-based colour gradient (also
+corner-sampled and interpolated the same way) - two different lookups stacked, not one. The table itself is
+loaded once at level load and never rewritten, so there is no separate time-based flicker: the "glow" rising
+and fading over a lava cell's life is the blend byte's own value doing so, read straight into this lookup
+every frame.
 
 ## Our bake (`game-client/src/terrain_texture.rs`)
 Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cell / 128):

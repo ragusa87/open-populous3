@@ -796,6 +796,13 @@ only the state-31 fire/evacuation mechanic (already implemented) does. "Lava squ
 static cell: no spreading, blend decays −2/turn below its 0xC4 starting value, self-destructs once it drops
 below 0x7F, same per-turn fire-only notify while blend > 0x9F.
 
+The rendered "glowing, linked blobs" look (confirmed this session, see "Building ashes" "Drawn" for the mechanism
+in full) is this same blend byte, nothing lava-specific: each cell's +0xA feeds straight into the landscape's
+ordinary per-corner colour interpolation, so a hot cell peaks at its own corners and fades toward cold
+neighbours (reading as a soft round-ish glow) while two adjacent hot cells keep a bright, undipped shared edge
+(reading as linked) - and the brighten-then-fade over a cell's life is +0xA itself rising to 0xFF then cooling
+back to 0x7F exactly as traced above, not a separate animation.
+
 **The downhill-direction field is frozen at height-change time, not read live, and is a general terrain
 property shared by the whole engine, not computed for lava** (confirmed this session): lava's own spread
 (0x512A60) only ever reads map-cell +0xE; it never writes it. The write lives in `level_land_processing_2`
@@ -1743,11 +1750,26 @@ placement 0x44EE50: a cell with flags & 0x4010000 cannot be built on
 ```
 - Durations: 6000 turns (500 s, ±15 from the 16-turn check) of full ashes, then a 288-turn (24 s) fade, 127 to 91
   in 18 steps of 2; the building ban lasts about 6290 turns (8 min 44 s) per cell.
-- Drawn (`set_texture_landscape_main` 0x4BE330, texels 0x4BEC09-0x4BECB1): +0xA, interpolated over the cell's
-  corners, / 4 picks one of the 64 rows of the 128-wide table 0x5D45CC (8 KB, named `set_cliff_palette`, probably
-  `data/cliff0-N.dat`, guessed from its size); a non-zero +0xA also adds 0x4B to the altitude colour index (max
-  0x3FE). Ashes are row 31, the darkest a normal slope reaches; lava goes up to 0xFF (rows 32-63, presumably
-  glowing) and cools back to 127. The row colours were not checked. Only other visual: the long damage smoke.
+- Drawn (`set_texture_landscape_main` 0x4BE330, texels 0x4BEC09-0x4BECB1): for each rendered quad (the 4 cells at
+  (x,z), (x+2,z), (x+2,z+2), (x,z+2)), each corner samples that ONE cell's own +0xA directly (no averaging across
+  neighbours at this step) - +0xA / 4 picks one of the 64 rows of the 128-wide table 0x5D45CC (8 KB, named
+  `set_cliff_palette`, probably `data/cliff0-N.dat`, guessed from its size); a non-zero +0xA also adds 0x4B to
+  that corner's own altitude colour index (height + 0x4B, max 0x3FE). Both values are then interpolated smoothly
+  across the quad like any other vertex colour (the code computes per-corner deltas scaled by 0x1000 for the
+  fill) - **this, not any lava-specific effect, is why adjoining hot cells visually read as a soft round blob
+  per cell that fuses into a connected glow where two hot cells share an edge**: a single hot cell peaks at its
+  own corners and fades toward cold neighbours, while two adjacent hot cells keep their shared edge bright, with
+  no dip between them. The SAME mechanism colours every slope/cliff/ash tile; lava is just the fastest-moving,
+  highest-contrast case of it. Ashes are row 31, the darkest a normal slope reaches; lava goes up to 0xFF (rows
+  32-63, presumably glowing) and cools back to 127. **No animation exists in this draw path or the palette
+  table itself** (confirmed: `set_cliff_palette`/0x4BDB50 has only 2 call sites, both one-shot level-asset
+  loaders - `load_al0`, `load_bigf0_cliff0_disp0` - never called again per frame or per turn, and nothing in
+  `set_texture_landscape_main` reads the turn counter, a PRNG or any oscillator) - **the "brighter, then fading"
+  look is the blend byte's own real value doing exactly what "Volcano lava flow" and the ash table above already
+  describe** (rising to 0xFF as a cell matures and spreads, falling 8/turn over its 16-turn wind-down, then 2/turn
+  as the resulting permanent ash cools from 0xFF back to 127), reflected straight into this same per-cell colour
+  lookup every frame - not a separate pulsing/flicker effect layered on top. The row colours themselves were not
+  checked. Only other visual: the long damage smoke.
 - Ashes or not:
 
 | Destroyed by | Path | Ashes |
@@ -2543,6 +2565,8 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x5018C0, 0x501AB0, 0x501000 | join/create a formation, find a compatible one, per-turn formation controller |
 | 0x443B40 | ring a tribe's buildings of one type with a kind-0x1E "alarm" order (process_tribe_cmd's one order-related case) |
 | 0x4BC500, 0x4BC660 | volcano fireball (shot 8/7 small, 8/8 big) init and per-turn (state 7): shared flight, size-specific trail/landing effects ("Volcano fireballs") |
+| 0x4BE330 | `set_texture_landscape_main`: per-quad blend/altitude-colour sampling and interpolation ("Building ashes") |
+| 0x4BDB50 | `set_cliff_palette`: builds the 64-row cliff/lava colour table at level load, never again (no animation) |
 | 0x512A00, 0x512A60 | lava flow (effect 34/state 33) init and per-turn: downhill spread, then fade, then ash ("Volcano lava flow") |
 | 0x5134C0, 0x513570 | lava square (state 38) init and per-turn: a static, decaying hot cell |
 | 0x44DDF0 | `land_level_processing_1`: queues a cell after a height change, flushes to 0x44DF40 at 0x400 queued |
