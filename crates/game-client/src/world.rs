@@ -197,11 +197,13 @@ fn spawn_terrain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut m
     commands.spawn((TerrainMesh, Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn switch_level(
     keys: crate::keymap::Shortcuts,
     mut levels: ResMut<LevelList>,
     mut map: ResMut<CurrentMap>,
     mut dirty: ResMut<TerrainDirty>,
+    mut glide: ResMut<TerrainGlide>,
     mut selected: ResMut<crate::hud::spells::SelectedSpell>,
     mut blueprint: ResMut<crate::blueprint::Blueprint>,
     mut schedule: ResMut<crate::units::GameSchedule>,
@@ -222,6 +224,10 @@ fn switch_level(
     selected.0 = None;
     blueprint.put_away();
     dirty.0 = true;
+    // A glide in flight would otherwise keep blending towards/from the old level's heightmap once `clock`'s
+    // alpha resets near 0 for the new game.
+    glide.prev = None;
+    glide.rects.clear();
 }
 
 fn toggle_grid(keys: crate::keymap::Shortcuts, mut grid: ResMut<ShowGrid>, mut dirty: ResMut<TerrainDirty>) {
@@ -268,6 +274,7 @@ fn rebuild_terrain(
     levels: Res<LevelList>,
     material: Res<TerrainMaterial>,
     mut assets: TerrainAssets,
+    mut walkable_cache: Local<Vec<bool>>,
     q: Query<&Mesh3d, With<TerrainMesh>>,
     grid: Res<ShowGrid>,
 ) {
@@ -281,15 +288,22 @@ fn rebuild_terrain(
     // ground its touching neighbours just did.
     let changed = crate::terrain_texture::merge_dirty_rects(&changed);
     let row_scale = row_scale();
+    // `changed` is already merged above; `glide.rects` was merged once at capture time in `run_ticks`, so neither
+    // branch here needs to merge again. While nothing landed this frame, the last tick's rects keep getting
+    // re-touched towards the same target as `clock.alpha()` climbs, until the glide catches up — shared by the
+    // texture bake below and the geometry patch further down.
+    let touch_set: &[DirtyRect] = if !changed.is_empty() { &changed } else { &glide.rects };
+    let glide_src = glide.prev.as_ref().filter(|_| gliding).map(|prev| (prev, clock.alpha()));
     match baked.as_ref().filter(|_| !dirty.0) {
         Some((theme, image)) => {
-            // Skipped on a pure reglide frame (nothing new in `changed`): the texture needs no gliding, and
-            // `walkable_cells` is a whole-map scan that must not run on every one of the ~5 reglide frames a tick.
-            if !changed.is_empty() && let Some(mut image) = assets.images.get_mut(image) && let Some(pixels) = image.data.as_mut() {
-                // Shared by every rect this frame: walkability is a whole-map scan, not worth repeating per rect.
-                let walkable = crate::terrain_texture::walkable_cells(&map.0.terrain);
-                for &rect in &changed {
-                    crate::terrain_texture::rebake(&map.0.terrain, &walkable, theme, params.0.height_scale, row_scale, grid.0, rect, pixels);
+            // `walkable_cells` is a whole-map scan: refreshed only on a real tick, reused as-is on a pure reglide
+            // frame (the coastline doesn't move while a rim rises above it) so it never runs every reglide frame.
+            if !changed.is_empty() {
+                *walkable_cache = crate::terrain_texture::walkable_cells(&map.0.terrain);
+            }
+            if (!changed.is_empty() || gliding) && let Some(mut image) = assets.images.get_mut(image) && let Some(pixels) = image.data.as_mut() {
+                for &rect in touch_set {
+                    crate::terrain_texture::rebake(&map.0.terrain, &walkable_cache, theme, params.0.height_scale, row_scale, grid.0, rect, pixels, glide_src);
                     crate::terrain_texture::char_ashes(&map.0.ashes, map.0.terrain.size(), rect, pixels);
                 }
             }
@@ -319,11 +333,6 @@ fn rebuild_terrain(
         *geometry = Some(terrain_mesh::build(&map.0.terrain, focus, &params.0));
         true
     } else {
-        // `changed` is already merged above; `glide.rects` was merged once at capture time in `run_ticks`, so
-        // neither branch here needs to merge again. While nothing landed this frame, the last tick's rects keep
-        // getting re-patched towards the same target as `clock.alpha()` climbs, until the glide catches up.
-        let touch_set: &[DirtyRect] = if !changed.is_empty() { &changed } else { &glide.rects };
-        let glide_src = glide.prev.as_ref().filter(|_| gliding).map(|prev| (prev, clock.alpha()));
         terrain_mesh::patch(geometry.as_mut().unwrap(), &map.0.terrain, focus, &params.0, touch_set, glide_src)
     };
     if gliding && clock.alpha() >= 1.0 {

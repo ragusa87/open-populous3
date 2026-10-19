@@ -91,7 +91,7 @@ pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32) -
     let side = map.size() * PX_PER_CELL;
     let mut out = vec![0; side * side * 4];
     let all = DirtyRect { min: (0, 0), max: (map.size() as i32, map.size() as i32) };
-    rebake(map, &walkable_cells(map), theme, height_scale, row_scale, false, all, &mut out);
+    rebake(map, &walkable_cells(map), theme, height_scale, row_scale, false, all, &mut out, None);
     (side, out)
 }
 
@@ -99,11 +99,58 @@ pub fn bake(map: &Heightmap, theme: &Theme, height_scale: f32, row_scale: f32) -
 /// and one cell around each point.
 pub const REBAKE_MARGIN: i32 = 2;
 
+/// One pixel's shaded colour at world point `(x, z)` (cells), sampling `map`'s heightmap: shared by `rebake`'s
+/// live pass and its glide blend (sampling a `TerrainGlide` snapshot instead of `map`).
+#[allow(clippy::too_many_arguments)]
+fn pixel_rgb(
+    map: &Heightmap,
+    walkable: &[bool],
+    theme: &Theme,
+    height_scale: f32,
+    row_scale: f32,
+    disp_mean: i32,
+    land_start: usize,
+    sun: [f32; 3],
+    x: f32,
+    z: f32,
+    px: usize,
+    py: usize,
+) -> [u8; 3] {
+    let h = map.sample(x, z);
+    let disp = theme.disp(px, py) as i32;
+    let row = if !coast_land(walkable, map.size(), x, z) {
+        sea_row(theme.water(px, py))
+    } else {
+        land_row(h * row_scale, disp, disp_mean, land_start)
+    };
+    let gx = (map.sample(x + 0.5, z) - map.sample(x - 0.5, z)) * height_scale;
+    let gz = (map.sample(x, z + 0.5) - map.sample(x, z - 0.5)) * height_scale;
+    let n_len = (gx * gx + 1.0 + gz * gz).sqrt();
+    let lambert = ((-gx * sun[0] + sun[1] - gz * sun[2]) / n_len).max(0.0);
+    let brightness = ((1.0 - (0.3 + 0.7 * lambert)) * 255.0).clamp(0.0, 255.0) as u8;
+    theme.shade(row, brightness)
+}
+
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t.clamp(0.0, 1.0)).round().clamp(0.0, 255.0) as u8
+}
+
+fn lerp_rgb(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+    [lerp_u8(a[0], b[0], t), lerp_u8(a[1], b[1], t), lerp_u8(a[2], b[2], t)]
+}
+
 /// Bakes again, into the whole texture `pixels` (`bake`), the pixels of the cells in `rect` (wrapping) and
 /// `REBAKE_MARGIN` around them, after their heights changed; `grid`: with the cell borders (`draw_grid`).
 /// `walkable` (`walkable_cells`) is the caller's to compute once and share: a whole-map scan, not worth repeating
 /// per rect when a single tick can dirty hundreds of them (an ongoing terrain effect).
-pub fn rebake(map: &Heightmap, walkable: &[bool], theme: &Theme, height_scale: f32, row_scale: f32, grid: bool, rect: DirtyRect, pixels: &mut [u8]) {
+///
+/// `glide = Some((prev, alpha))` blends each touched pixel's colour between `prev`'s heightmap (as it stood
+/// before the tick that produced `rect`) and `map`'s own live value, at `alpha` (`SimClock`'s fraction of the
+/// current tick elapsed) — the texture-side counterpart of `terrain_mesh::patch`'s own `glide` parameter, so the
+/// ground colour (e.g. a volcano rim crossing into the snow band) glides as smoothly as the geometry beneath it
+/// instead of popping once per tick. `alpha = 1.0` reproduces the plain `glide = None` result exactly.
+#[allow(clippy::too_many_arguments)]
+pub fn rebake(map: &Heightmap, walkable: &[bool], theme: &Theme, height_scale: f32, row_scale: f32, grid: bool, rect: DirtyRect, pixels: &mut [u8], glide: Option<(&Heightmap, f32)>) {
     let (n, side) = (map.size() as i32, map.size() * PX_PER_CELL);
     let len = (SUN[0] * SUN[0] + SUN[1] * SUN[1] + SUN[2] * SUN[2]).sqrt();
     let sun = SUN.map(|c| c / len);
@@ -119,19 +166,14 @@ pub fn rebake(map: &Heightmap, walkable: &[bool], theme: &Theme, height_scale: f
             for py in cz * PX_PER_CELL..(cz + 1) * PX_PER_CELL {
                 for px in cx * PX_PER_CELL..(cx + 1) * PX_PER_CELL {
                     let (x, z) = (px as f32 * step, py as f32 * step);
-                    let h = map.sample(x, z);
-                    let disp = theme.disp(px, py) as i32;
-                    let row = if !coast_land(walkable, map.size(), x, z) {
-                        sea_row(theme.water(px, py))
-                    } else {
-                        land_row(h * row_scale, disp, disp_mean, land_start)
+                    let now = pixel_rgb(map, walkable, theme, height_scale, row_scale, disp_mean, land_start, sun, x, z, px, py);
+                    let mut rgb = match glide {
+                        Some((prev, alpha)) => {
+                            let before = pixel_rgb(prev, walkable, theme, height_scale, row_scale, disp_mean, land_start, sun, x, z, px, py);
+                            lerp_rgb(before, now, alpha)
+                        }
+                        None => now,
                     };
-                    let gx = (map.sample(x + 0.5, z) - map.sample(x - 0.5, z)) * height_scale;
-                    let gz = (map.sample(x, z + 0.5) - map.sample(x, z - 0.5)) * height_scale;
-                    let n_len = (gx * gx + 1.0 + gz * gz).sqrt();
-                    let lambert = ((-gx * sun[0] + sun[1] - gz * sun[2]) / n_len).max(0.0);
-                    let brightness = ((1.0 - (0.3 + 0.7 * lambert)) * 255.0).clamp(0.0, 255.0) as u8;
-                    let mut rgb = theme.shade(row, brightness);
                     if grid && (px % PX_PER_CELL == 0 || py % PX_PER_CELL == 0) {
                         rgb = rgb.map(grid_shade);
                     }
@@ -381,12 +423,67 @@ mod tests {
         px[far] = 7;
         m.set(15, 8, 600);
         m.set(0, 8, 600);
-        rebake(&m, &walkable_cells(&m), &theme, 1.0 / 384.0, 1.0, true, DirtyRect { min: (15, 8), max: (17, 9) }, &mut px);
+        rebake(&m, &walkable_cells(&m), &theme, 1.0 / 384.0, 1.0, true, DirtyRect { min: (15, 8), max: (17, 9) }, &mut px, None);
         assert_eq!(px[far], 7, "far cells untouched");
         px[far] = 0;
         let mut full = bake(&m, &theme, 1.0 / 384.0, 1.0).1;
         draw_grid(&mut full, side);
         full[far] = 0;
         assert_eq!(px, full, "across the map's edge too");
+    }
+
+    #[test]
+    fn lerp_rgb_clamps_and_interpolates() {
+        assert_eq!(lerp_u8(0, 10, 0.5), 5);
+        assert_eq!(lerp_u8(0, 10, -1.0), 0, "clamps below 0");
+        assert_eq!(lerp_u8(0, 10, 2.0), 10, "clamps above 1");
+        assert_eq!(lerp_rgb([0, 10, 20], [10, 20, 0], 0.5), [5, 15, 10]);
+    }
+
+    #[test]
+    fn rebake_glide_blends_between_prev_and_now_colour() {
+        let mut m = Heightmap::new(16);
+        for z in 0..16 {
+            for x in 0..16 {
+                m.set(x, z, 400);
+            }
+        }
+        let theme = test_theme();
+        let prev = m.clone();
+        let walk = walkable_cells(&m);
+        m.set(8, 8, 900);
+        let rect = DirtyRect { min: (8, 8), max: (8, 8) };
+
+        let (side, mut before_px) = bake(&prev, &theme, 1.0 / 384.0, 1.0);
+        let mut now_px = before_px.clone();
+        rebake(&m, &walk, &theme, 1.0 / 384.0, 1.0, false, rect, &mut now_px, None);
+        let mut blended_px = before_px.clone();
+        rebake(&m, &walk, &theme, 1.0 / 384.0, 1.0, false, rect, &mut blended_px, Some((&prev, 0.5)));
+
+        let i = (8 * PX_PER_CELL * side + 8 * PX_PER_CELL) * 4;
+        let expected = lerp_rgb([before_px[i], before_px[i + 1], before_px[i + 2]], [now_px[i], now_px[i + 1], now_px[i + 2]], 0.5);
+        assert_eq!([blended_px[i], blended_px[i + 1], blended_px[i + 2]], expected);
+    }
+
+    #[test]
+    fn rebake_glide_at_alpha_one_matches_a_plain_rebake() {
+        let mut m = Heightmap::new(16);
+        for z in 0..16 {
+            for x in 0..16 {
+                m.set(x, z, 400);
+            }
+        }
+        let theme = test_theme();
+        let prev = m.clone();
+        let walk = walkable_cells(&m);
+        m.set(8, 8, 900);
+        let rect = DirtyRect { min: (8, 8), max: (8, 8) };
+
+        let (_, base) = bake(&prev, &theme, 1.0 / 384.0, 1.0);
+        let mut plain = base.clone();
+        rebake(&m, &walk, &theme, 1.0 / 384.0, 1.0, false, rect, &mut plain, None);
+        let mut glided = base;
+        rebake(&m, &walk, &theme, 1.0 / 384.0, 1.0, false, rect, &mut glided, Some((&prev, 1.0)));
+        assert_eq!(glided, plain);
     }
 }
