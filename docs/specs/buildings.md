@@ -171,7 +171,7 @@ plans included, a box above it with the kind's name; for the player's buildings 
 (braves assigned while a plan or site, the people inside once built: huts, drum towers, a training hut's
 trainee; a click adds one to the selection) and a wood row (provided / cost, then the wood in it, what dismantling
 gives back); a pyramid also names what it teaches. Other tribes' buildings show their name only. A right click on
-the building shows it at once. To do: the Dismantle toggle (see "Dismantling").
+the building shows it at once.
 
 ### Orders and selection
 - Any new order to an assigned brave (`Command::OrderUnit`: move, pray, stop...) unassigns it from the site,
@@ -221,7 +221,7 @@ the building shows it at once. To do: the Dismantle toggle (see "Dismantling").
   Braves bringing wood (`wood_on_the_way`): carrying, fetching or cutting, or building a piece taken off the
   pile.
 - `Command::CancelBuilding { player, at }`: the player's plan (not flat) whose footprint holds `at` is removed,
-  its braves stop, the wood brought is lost. Once flat it can only be dismantled (not done).
+  its braves stop, the wood brought is lost. Once flat it can only be dismantled.
 - A hut with 3 braves and wood around (Sandbox > Buildings) takes about 20 s.
 - Client: a left click on one of the player's sites (within `AROUND`) with units selected sends braves to it
   (`selection::ground_click`); Shift + right click on a plan cancels it (`shift_right_click`, after the camp
@@ -233,8 +233,8 @@ the building shows it at once. To do: the Dismantle toggle (see "Dismantling").
   or out, they are. Dev: `BUILD=hut@90,62 BUILD_TICKS=150` places a plan
   with all the player's braves and runs that many ticks before the shot.
 
-Not done yet: the gathering look, dismantling, the tooltip's brave icons and Dismantle toggle, wood claimed by
-braves of another site, and a jump per point being the game's rule (to check).
+Not done yet: the gathering look, the tooltip's brave icons, wood claimed by braves of another site, and a jump
+per point being the game's rule (to check).
 
 ### Building it (design, deterministic, integer state)
 1. Gather: assigned braves walk to the site edge and stand looking at it for a short while.
@@ -264,11 +264,18 @@ On screen (as in the game):
 - Dismantling and damage go the other way (parts back to wood, then removed).
 
 ### Dismantling
-Switched by the tooltip's toggle (tooltips.md). On a built building it stops working and the people inside walk
-out first. With Dismantle on (on a built building or one under construction), braves assigned to it take it apart: after a while it loses one piece of wood, which
-is dropped on the ground near the door as a wood piece (a pile of logs on the ground, `GameMap::wood`, see trees.md,
-usable by any construction). Once all its wood is out, the building is removed and its ground is free again (a
-covered tree grows back). Switching back to Build makes braves rebuild it with wood again.
+Switched by the tooltip's toggle (tooltips.md, `Command::Dismantle`/`GameMap::set_dismantling`). On a built
+building it stops working and the people inside walk out first. With Dismantle on (on a built building or one
+under construction), a brave still assigned to it (`Order::Build`, same assignment as normal construction) goes
+in and, after a round of `Action::Building` (`GameMap::dismantle_step`, same pose and `BUILD_TICKS` as building —
+no "unbuilding" animation is traced either), one piece of wood is pulled out (`GameMap::dismantle_piece`): dropped
+on the ground near the door as a wood piece (`Building::pile_point`, a real `WoodPiece`, see trees.md, usable by
+any construction) — nothing is fetched or carried in, unlike building up. A building switched on with nothing
+built in yet (`used == 0`, e.g. a freshly flattened plan) sits untouched: there is nothing to take apart. Once all
+its wood is out, the building is removed (`GameMap::remove_building`, releasing every assigned brave) and its
+ground is free again right away, no ashes (a covered tree grows back, unlike a building destroyed by wear or
+fire, `ashes.rs`). Switching back to Build makes braves rebuild it with wood again, from wherever dismantling left
+it.
 
 ### Explosion (drawn)
 A building that blows up is drawn only, the simulation just removes it (`game-client` `explosion`): a

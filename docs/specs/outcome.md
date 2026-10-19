@@ -4,12 +4,17 @@
 (`None`: a draw), `reason` (`Eliminated`, `Armageddon`, or `Scripted` — reserved for a future level-script
 interpreter, [TODO.md](../../TODO.md) "Level scripting"), and the tick it was declared. `GameMap::declare_outcome`
 is the single write path, idempotent: the first call wins, every later one is a no-op, so nothing can un-declare or
-relabel a result once set. `GameMap::tick` never stops or branches once `outcome` is set — the simulation keeps
-running exactly as before, it's just that nothing reads `outcome` a second time. `GameMap::apply` rejects every
-`Command` once `outcome` is set, same as while an Armageddon match is active (below) — the match keeps running as a
-"victory lap" epilogue (every living unit permanently shielded, `shield_everyone_once_ended`; the client plays a
-small happy jump on every unit, `units/mod.rs::victory_bounce`, our own invented stand-in, not traced from the
-original), but nothing can act on it any more.
+relabel a result once set. The instant it succeeds, every unit still acting stands down to `Idle` (a death already
+in train — `Dying`, `Dead`, `Spirit` — finishes on its own instead of being cut short). From the next tick on,
+`GameMap::tick` freezes the same systems an Armageddon match suspends (below) — training, building work, wrecking,
+spotting/attacking, mana/spellbooks — plus a `Dead` shaman's reincarnation, so nothing trains, builds, demolishes,
+fights or comes back from the dead once the result is in; `GameMap::apply` rejects every `Command` on top of that,
+same as while an Armageddon match is active. What keeps running past that point is purely cosmetic, and only for the
+winning side — the winner and its allies, `GameMap::on_winning_side` (`Tribes::same_team`); on a draw (`winner:
+None`) nobody gets it: every living unit of theirs permanently shielded (`shield_everyone_once_ended`) and,
+client-side, a small happy jump and celebrating pose on every one of theirs (`units/mod.rs::victory_bounce`,
+`bounce_start`, our own invented stand-in, not traced from the original) — the "victory lap" epilogue. The losing
+side's survivors just stand there, frozen like everyone else, not celebrating.
 
 Client-side, the win/lose dialog (`game_end.rs`, `AppState::Ended`) shows once a short hold lets the final blow's
 animation finish; unlike `AppState::Paused`, `Ended` does **not** freeze the simulation or rendering (`menu::Gameplay`
@@ -22,8 +27,8 @@ Checked once at the very end of every `GameMap::tick` (`check_elimination`, afte
 mana effect that turn has already applied): a tribe counts as wiped out the instant it has no living unit of any
 kind, right now (`GameMap::tribe_wiped_out`, an instantaneous snapshot by current owner — not an
 original-tribe/permanent-death mechanic). A tribe reduced to only a `Dead`-and-respawning shaman is wiped out
-immediately: there is no last-stand reincarnation comeback. This is intentional, not a bug: her still-pending
-reincarnation simply never gets to matter, because the match has already ended.
+immediately: there is no last-stand reincarnation comeback — and, per the freeze above, she now never actually comes
+back either, so the sole unit a spectator sees stays down.
 
 Elimination is resolved per **side** (alliance group, [`tribes.rs`](#tribes-and-alliances)), not per raw tribe:
 allied tribes with no enemies left win together. The check is skipped entirely on single-tribe maps (every

@@ -157,7 +157,8 @@ SitDown, StandUp, SwordSlash, Victory, Walk, Walk_Carry), no props, and hand bon
 | 51 | pedalling a vehicle (`Pose::Pedal`, used) | all | SitDown end, legs still (the `pray` sheet stands in) | none (no pedalling clip) |
 | 52 | running from bees | all | Run (loop) | none |
 | 16 / 19, 37 | tilted in a tornado / tumbling | all | Idle or Death frame, turned by the renderer | rotate the model about its feet per frame |
-| 40 | drowning, spirit rising | all | Death last frame, sunk | a see-through copy rising, drawn in post (alpha sprite) |
+| 38 | spirit rising, calm (the ordinary case: not drowning) | followers | Death last frame, sunk | a see-through copy rising, drawn in post (alpha sprite), 4 clip-turns only (not a long rise) |
+| 40 | spirit rising, climbing (dying while drowning - always for a wildman, regardless of cause of death; others only if they died in a drowning-eligible spot) | followers, wild | Death last frame, lifted | a REAL rising copy (not drawn in post): continuous upward motion for the full clip, no alpha fade needed since it already reads as "leaving"; for a wildman only, also spin the copy about its vertical axis every frame (pop3-rev-analysis.md "Death and the spirit rise") |
 | 97 | carbonized by lightning | brave | Death or Idle frame | every material black in post (like the magenta key) |
 | 89, 90/91, 92, 48 | itching, push-ups, juggling, hiding the eyes | brave, warrior, spy | none | new clips authored in Blender |
 

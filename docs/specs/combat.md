@@ -139,8 +139,10 @@ one removed any other way (a plan cancelled) leaves none.
 - Nothing is built on a cell with ashes (`placement::Blocked::Ashes`).
 - Drawn: the terrain texture chars those cells (`terrain_texture::char_ashes`, our colour), less as they fade; the
   map's dirty rects redraw them when a patch comes, fades a step or goes.
-- Not yet: the hover text over ashes; the long damage smoke at the ashes; the whirlwind's destruction; lava and
-  earthquake ground, which share the mark in the original.
+- Lava and earthquake ground share the same mark once they cool/fade (`lava::Lava::turn`, `WorldEvent::Scorch`):
+  Volcano's flowing lava, its whole footprint in one shot once fading ends; Earthquake's static fissure, all its
+  cells at once (they share one blend clock) once they drop below `GONE_BLEND`.
+- Not yet: the hover text over ashes; the long damage smoke at the ashes; the whirlwind's destruction.
 
 ## Spotting
 `crate::spotting` ("Auto-attack" [exe]): people who see an enemy attack it on their own, before the attacks are

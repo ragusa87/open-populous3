@@ -63,6 +63,28 @@ so a live measurement may run on it with the addresses translated.
 - **A vehicle's life is also its abandon timer** [exe]: 5000, −1 per turn, refilled every turn while it moves or
   carries anyone; blasts (50 per turn) and bolts (100) only sink an empty, still one. A boat whose cell turns to
   land is emptied, keels over and explodes 13-24 s later. Both are 3D objects 143 / 144. See "Vehicles".
+- **A group order is one shared target, not spread units** [exe]: every unit in a selected group gets the
+  identical point or target id; the only thing that can space units out is the separate "formation" system,
+  wired to the move order (kind 3) but not the attack order (kinds 19/21). See "Order kinds and formations".
+- **"Idle" is not one state** [exe]: a person cycles a short state-1 hand-off into state 10 ("carrying out an
+  order, or nothing"), which does nothing at all - no wandering, no autonomous wood-gathering was found - when
+  no command group is assigned. Only wildmen are confirmed to cycle idle-fidget animations (state 8 -> 5) on
+  their own; this was not found for ordinary followers. See "Idle behaviour".
+- **Lava flow spreads downhill, one cell at a time, for a fixed 16 s** [exe]: a per-cell precomputed downhill
+  direction decides where each "mature" lava cell pushes next; it never kills outright, only sets people on
+  fire (state 31) every turn a cell is hot; after growth it fades for 16 more turns, then becomes ordinary
+  building-ash scorch. The direction field itself is a general terrain property (map-cell +0xE), frozen at the
+  last height edit rather than read live, shared with ordinary terrain-shaping and level load, not lava-only.
+  See "Volcano lava flow".
+- **Wildmen seek a tree first, the shore otherwise, and never respawn** [exe]: unable to take orders, they search
+  for a nearby tree/plant to idle beside (state 5, "eating") and, failing that, deliberately walk to a shore cell
+  to idle there instead (states 6/16, "drinking") - confirmed from the exe's own scenery-type and coastal-shape
+  tables, not a random destination. No hunger/thirst/age stat exists even so, and the only way to create a
+  wildman is a one-shot level-placement routine, never a per-turn spawn. They are also immune to ordinary units'
+  auto-attack (tribeless, tribe 0xFF). Idling at the shore genuinely drowns them sometimes (the shore search is
+  only cell-grained, drowning is checked pixel-grained, every turn, no timer), and whatever kills a wildman, its
+  death always plays the rare "climbing + spinning" spirit-rise variant everyone else only gets by drowning too -
+  never the calm rising-ghost pose. See "Wildmen", "Death and the spirit rise".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
 
@@ -571,8 +593,8 @@ not again when the command is executed.
 |---|---|---|
 | Simple blast | 7/0x01, 0x4E (spell blast), 0x38 | 3 turns; radius 2, 4, 5 cells. Each turn every non-allied person within the radius takes `BLAST_DAMAGE_PERSON` (exe 50, not in the file), so up to 150; pushed each turn within 2.5 cells, cumulatively (140 outward, +98 up, × (1280 − d) / 1280, scaled by the slope: "Blast push and flight"). Buildings take `BLAST_DAMAGE_BLDG` (exe 40) once, vehicles 50 per turn. Allies: no damage, at most `BLAST_FRIEND_AFFECT` (5) pushed, on the last turn. Not pushed: own shaman, angel of death; immune: shielded units. Ghosts in the centre cell are removed. |
 | Burn cell | 7/0x05 | Once, on the target cell: trees, plants, wood piles and fires start burning. No damage to people. |
-| Lightning | 7/0x1E (0x511AE0) | On its first turn, at the strike point: sets the building on that cell on fire (0x408CB0, so its occupants come out 8 turns later), burns the trees of the cell or else lights a fire (7/0x0A), and a simple blast. |
-| Fireball shots | 8/4 (blast, firestorm), 8/7 and 8/8 (volcano) | Fly or fall to a point; on impact a simple blast (firestorm's also panics everyone it hits), smoke, and a short fire. |
+| Lightning | 7/0x1E (0x511AE0) | On its first turn, at the strike point: sets the building on that cell on fire (0x408CB0, so its occupants come out 8 turns later), burns the trees of the cell or else lights a fire (5/0xA, a scenery object - corrects this row's own earlier "7/0x0A"), and a simple blast. |
+| Fireball shots | 8/4 (blast, firestorm), 8/7 and 8/8 (volcano) | Fly or fall to a point; on arrival a caller-configured impact effect (not hardcoded in the shot itself - "Fireball impact"): Firestorm's own is a land/water branch (ground-fire 5/0xA plus a 5-cell simple blast, or an unnamed splash 7/0x2B) and, if a building is there, 0x408CB0 same as Lightning. A second, shot-flag-gated burst of 4 smoke puffs (7/3) at the landing point exists in the same code but is OFF for Firestorm's own shot. |
 | Smoke, explosions, sparkles, strands, gloops | 7/0x03, 0x26, 0x27, 0x2A, 0x3C, 0x3E, 0x3F, 0x40 | Visual only. |
 | Nearest-N selector | function 0x515E30 | The 3 × 3 cells around the target; applies an action to the N closest units passing a filter. |
 | Lava | 7/0x22 flow, 0x28 square | Hot cells set people on fire (state 31) and set buildings and trees burning; the caster's own people too, only the caster's shaman is spared. |
@@ -580,7 +602,26 @@ not again when the command is executed.
 Shared person and building states:
 - **Panic** (person state 0x1A): runs at a random heading at speed 110, screaming, for 64 turns (5.3 s).
 - **On fire** (person state 31): runs about and loses `LIFE_<type>` / 32 per turn for 70 turns, so dies in about
-  32 turns (2.7 s).
+  32 turns (2.7 s). Entered from the person's own life step (0x4D43A0) whenever its status word `+0xC` has bit
+  0x8 set and it is not already in state 31 ("Health and healing"). **What actually sets that bit, checked across
+  every one of `notify_area`'s (0x44F2F0) 15 call sites exe-wide: only lava (flow mode 3, square mode 2,
+  "Volcano lava flow") ever passes the fire bit** - every other terrain-changing effect (land bridge, the
+  earthquake's sink, volcano's own ground-moved notify, flatten, erosion) only ever passes mode 1 (ground moved,
+  no fire). Lightning's own strike code (0x511AE0, read directly) ignites the struck cell's BUILDING (0x408CB0,
+  "Burning building" below - occupants thrown out and panicking, not set alight themselves) or its tree/ground
+  fire, never a person's own status bit; this is why "Burn cell" above is separately noted as doing no damage to
+  people. **Lava and the volcano's own turn-110 area strike are, so far, the only confirmed ways a person catches
+  fire autonomously** - not lightning, not firestorm's fireballs (their "short fire" is the same scenery/building
+  ignition, not a person status). The volcano's strike is now traced (confirmed this session, resolving the
+  earlier "not yet reconciled" note): `process_volcano`'s per-turn code (0x50E060-0x50E9DE) walks every unit in a
+  6×6-cell area once, at a single local-counter value (`ebp == 0x1E`, see "Volcano rocks" below for what `ebp`
+  is), and for each person present ORs the same `+0xC` bit `0x8` directly (it does not go through `notify_area`,
+  which is why the 15-site survey above missed it) - the caster's own shaman (type 7, same tribe) is the only
+  exemption, any other tribe's shaman included. **There is no separate kill path**: this is the ordinary state-31
+  fire (32 turns to die), just lit by one direct scan instead of per-turn `notify_area` pressure, contradicting
+  the earlier "plausibly a one-shot kill" guess. Buildings in the same scan (unless already in state 3) go
+  through the already-documented destruction state 3/sub 1 (0x50E5FB, "partial explosion and a blast 7/1" -
+  "Building ashes"), once each, not a direct kill either.
 - **Fall**: landing at vertical speed ≤ −100 raises dust and a sound; ≤ −200 costs `FALL_OUT_OF_WW_DAMAGE` (exe 700,
   not in the file), except on cells whose terrain has flag 2 (probably water). Gravity 32 per turn.
 - **Burning building** (building state 4, set by 0x408CB0; per turn 0x408AB0): 127 turns (10.6 s), then back to
@@ -635,7 +676,7 @@ Worked examples (hand estimates, flat ground, not measured):
 | 5 | Insect plague (40 000, 6144, 4) | 60 insects for 200 turns (16.7 s), at most 6 cells from the target. Every 8 turns, enemies in its 3 × 3 cells take `SWARM_PERSON_DAMAGE` (100) and panic; shamans and angels immune; ghosts destroyed. Up to 3 times it raids an enemy building: occupants thrown out, damaged and panicked. |
 | 6 | Invisibility (50 000, 4096, 4) | The `INVIS_NUM_PEOPLE` (file 6) nearest own followers (not the shaman), for `INVISIBLE_COUNT_X8` × 8 turns (120 s). Enemy auto-targeting skips them; some actions end it early. |
 | 7 | Hypnotism (85 000, 4096, 3) | The `HYPNO_NUM_PEOPLE` (file 6) nearest persons of other tribes (not wildmen, shamans, angels) are recreated in the caster's tribe for `HYPNO_COUNT_X8` × 8 turns (file 440, 36.7 s), then return. If their tribe is gone, they stay. Ghosts are destroyed. |
-| 8 | Firestorm (400 000, 4096, 2) | `FIRESTORM_DURATION` (file 220 turns, 18.3 s); one fireball every 4 turns (about 55) falling on a random point of a 6 × 6-cell square around the target. Each: simple blast that panics, a short fire, and sets fire to a building on that cell. |
+| 8 | Firestorm (400 000, 4096, 2) | `FIRESTORM_DURATION` (file 220 turns, 18.3 s); one fireball every 4 turns (about 55) falling on a random point of a 6 × 6-cell square around the target. Each, on a land cell: a 5-cell simple blast that panics plus a ground-fire scenery object (same as Lightning's); on water: an unnamed splash effect instead, no fire; either way, a building there is set alight (0x408CB0, same as Lightning). No terrain height or blend change ("Fireball impact"). |
 | 9 | Ghost army (18 000, 4096, 4) | Copies the best own unit type near the target (shaman > firewarrior > preacher > spy > warrior > brave): 6 brave ghosts, 3 specialists or 1 shaman; at most 60 per tribe. No expiry found. They attack only enemy ghosts and shamans, their shots do nothing; melee untested. Blast and insects destroy them. |
 | 10 | Erosion (210 000, 4096, 2) | 63 hydraulic-erosion passes, one per turn (5.25 s), on an 8 × 8-cell window jittered around the target: ground washed downhill. No direct effect on units. |
 | 11 | Swamp (100 000, 4096, 3) | No terrain change. Lasts 32 000 turns (44 min). Every 4 turns it kills outright every person on its 3 × 3 cells, any tribe, until `SWAMP_NUM_PEOPLE` (exe 10) are dead. At most 30 per tribe (the oldest goes). Removed when most of its cells are unsuitable. |
@@ -643,7 +684,7 @@ Worked examples (hand estimates, flat ground, not measured):
 | 13 | Angel of death (510 000, 3072, 1) | A meteor, then an angel (person type 8, `LIFE_AOD` 10 000) hunts the nearest enemy on the whole map, shamans included, pulling people out of buildings; carries and throws each victim to death, about one per 28 turns (2.3 s). Ends after `AOD_KILL_COUNT` (40) kills or `AOD_DURATION` (2500 turns, 208 s). Two angels fight by health. |
 | 14 | Earthquake (175 000, 4096, 2) | 120 turns (10 s) of shake. At turns 24, 56 and 88 each building in 16 × 16 cells has a 20/128 chance to be shaken (occupants out, partial explosion). At turn 60, a half-disc of radius 8 cells sinks by up to 600 (`600 × (4096 − d) / 4096`), with a lava fissure of short-lived lava squares and possibly two lava flows. |
 | 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point. |
-| 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow (up to 16 s); about 22 small and 6 big fireballs (simple blasts) and 26 decorative rocks ("Volcano rocks"). |
+| 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow, 16 s growth + 1.3 s fade ("Volcano lava flow"); about 22 small and 6 big fireballs (simple blasts) and 26 decorative rocks ("Volcano rocks"). |
 | 17 | Convert wild (10 000, 8192, 4) | Every 8 turns the nearest wildman within 2 cells becomes a brave of the caster (if the tribe is under 200); ends 18 turns after the last conversion. |
 | 18 | Armageddon (hidden) | Clears the map, turns every building into one person, gathers every tribe on an arena around the target and makes them fight; the weakest shaman is struck by blast or lightning at intervals; anyone more than 9 cells away dies. |
 | 19 | Shield (60 000, 4096, 4) | The `SHIELD_NUM_PEOPLE` (file 6) nearest own followers (not shaman, wildmen, angels, ghosts) for 120 s: immune to blast and whirlwind, other damage ignored too, except melee; deflects burn, blast, lightning, whirlwind and insect shots. |
@@ -655,8 +696,17 @@ insects do not damage allies. Lightning and swamp kill regardless of health.
 
 ### Volcano rocks [exe]
 Purely decorative: the volcano's per-turn function (0x50E060) makes one scenery 13 ("rock", `create_unit(5, 13)`
-0x4ED8A0, at 0x50E2A2) per turn on volcano turns 105-130 (26 in all). No level places one; the volcano is their only
-creator.
+0x4ED8A0, at 0x50E34B) per turn on volcano turns 105-130 (26 in all). No level places one; the volcano is their
+only creator.
+
+`process_volcano`'s own local counter `ebp` (used by this, the fireball windows below, and the turn-110 strike
+above) is `160 - (turns left on the effect's own countdown, +0x6C)`: confirmed this session by converting its
+windows to absolute cast-turns and matching the figures already on record from elsewhere - `ebp` in `[0x19,0x32]`
+(25-50) + 80 reproduces this section's own "105-130", and `ebp == 0x1E` (30) + 80 reproduces "turn 110" above, so
+`ebp + 80` is turns since cast (the 80-turn offset itself - most likely the rumbling phase ending before this
+handler starts counting - is inferred from the match, not read directly off an init). The fireballs below spawn
+on `ebp` in `[0x23,0x46]` (35-70), i.e. cast-turns 115-150, not the same window as these rocks (they overlap but
+are not identical - correcting this session's own earlier note that treated all three as one shared window).
 - Placement: a random angle (`rand & 0x7FF`) and distance `(rand & 0x1FF) × 2 + 0x600` (1536-2558 units, 3-5 cells:
   the cone's outer slope) from the centre, then a random point in that cell (scenery init 0x4A5EF0, model 13 at
   0x4A604A), at the crater's height when cast.
@@ -677,6 +727,212 @@ creator.
   frames, animator 0x4EE7B0), made by the rising reincarnation pillars. "Rock explosion" 7/0x3F (init 0x50A278) is the
   16-turn fire blast where a big volcano fireball 8/8 lands (alpha hfx 1194-1209, sound 0xB2); small 8/7 ones make
   7/0x3E instead.
+
+### Volcano fireballs [exe]
+The small (8/7) and big (8/8) fireballs spawned by 0x50E461/0x50E47F (above) share one init function (0x4BC500,
+both types' slot in `init_unit_type_8`'s table) and one per-turn function (0x4BC660, state 7, a state neither
+Blast's nor Firestorm's own fireball shot - 8/4, state 4, 0x4BB440 - ever enters): the two sizes fly identically
+and differ only in which effects they spawn.
+```text
+init (0x4BC500), both sizes alike:
+  state = 7; draw class 29 (a single camera-facing sprite, same class the shot 8/6 ball uses), sprite = hfx 1120
+    for type 7 (small - the SAME ball sprite as the firewarrior's own bolt, "The shot 8/6"), hfx 1248 for type 8
+    (big) - the only difference at this stage
+  launch kick, same formula both sizes: horizontal speed 96-223 (random), random direction (0-2047), vertical
+    speed 256-383 (random) - sets off at a random angle and strength from the crater, not aimed; sound 0xBC
+
+per turn (0x4BC660), while flying:
+  height -= 32 (gravity, same as elsewhere); land once height <= ground
+  every turn, 4 trailing puffs along the path travelled since last turn (interpolated):
+    type 7 (small): effect 7/0x03, the plain grey smoke puff (hfx 314-321, 4-turn life - "The shot 8/6",
+      the SAME puff the firewarrior's own bolt trails)
+    type 8 (big): effect 7/0x42 (newly traced this session: state 53, 16-turn life, draw class 44, hfx 1224) -
+      a distinct, longer-lived trail, not just a bigger smoke puff; each of the 4 per-turn instances gets an
+      incrementing sprite-frame offset (+4 each) and the "hot" render flag
+
+on landing, both sizes alike:
+  effect 7/0x05 (Burn cell) at the impact cell
+  one more trail puff at the impact point (7/0x03 small, 7/0x42 big, same as the per-turn trail above)
+  a simple blast (0x50B6F0, the same 140/98 magic constants as "Blast push and flight" - size-independent)
+  the size-specific burst: 7/0x3E small, 7/0x3F big (16-turn fire blast, alpha hfx 1194-1209, sound 0xB2 -
+    "Volcano rocks" above)
+  the shot deletes itself (0x4EDCF0) the following turn
+```
+So **the big fireball is not a scaled-up small one in flight or physics** - same arc, same random launch kick,
+same gravity, same 4-puffs-a-turn cadence - it only renders bigger: a different ball sprite (hfx 1248 vs 1120),
+a distinct 16-turn trail effect (7/0x42, not traced before this session) instead of the shared 4-turn smoke
+puff, and the already-documented bigger impact burst (7/0x3F vs 7/0x3E). Effect 7/0x42's own look (beyond its
+sprite index and duration) was not decoded from `hfx0-0.dat` this session.
+
+### Volcano lava flow [exe]
+Effect type 34 ("lava flow", state 33, init 0x512A00, per turn 0x512A60) is spawned once when the cone finishes
+rising. It is a downhill-following spread, not a disc interpolated between two radii:
+```text
+init: radius (+0x74) = 3 internal units (1.5 cells), growth timer (+0x70) = 192, accumulator (+0x76) = 0
+
+growing (state_2 = 0), every turn, no rhythm gate:
+  scan a (2×radius+1)² window of cells around the cast point
+  for each cell with blend > 0xC4 (196, "mature"):
+    d = that cell's precomputed downhill direction (map-cell +0xE high nibble, 0 flat, 1-8 the 8 compass dirs)
+    flat (d = 0): deepen the cell itself, height += 10 (no spread)
+    sloped: push lava one cell in direction d: source height -= 2, target blend += 32, target height += 4,
+      both flagged lava + damaged ground; radius grows to cover the farthest point actually reached
+    accumulator += 16 per spread step, -= 8 per flat (no-spread) step
+  ends (→ state_2 = 1) when the timer hits 0 (192 turns, 16.0 s) OR the accumulator exceeds 0x20000 (131072),
+    whichever first - a volcano spreading fast downhill can finish under 16 s; flat ground around the cone
+    hits the 16 s cap instead
+fading (state_2 = 1), 16 turns (1.3 s): blend -= 8/turn only, no more spread, no more burning
+finished: the whole reached footprint becomes an ordinary building-ash scorch record (scorch_add, kind 2
+  rectangle, the same 6000-turn hold + 288-turn fade as a destroyed building's ashes - "Building ashes"),
+  then the effect frees itself
+
+every turn a cell's blend > 0x9F (159): notify_area(mode 3 = ground-moved + set-on-fire, 0x44F2F0) - the
+  caster's own shaman is exempt from the fire bit; every other unit of any tribe (including the caster's own
+  people) is set on fire (state 31) every turn it stays on a hot cell; no shield check found in this function
+```
+Total life: up to 208 turns (~17.3 s) from the cast's end to becoming permanent ash. **It never kills outright**:
+only the state-31 fire/evacuation mechanic (already implemented) does. "Lava square" (effect state 38, init
+0x5134C0, per turn 0x513570, used e.g. by Earthquake's own fissure) is the same flag/burn mechanics on a single,
+static cell: no spreading, blend decays −2/turn below its 0xC4 starting value, self-destructs once it drops
+below 0x7F, same per-turn fire-only notify while blend > 0x9F.
+
+**The downhill-direction field is frozen at height-change time, not read live, and is a general terrain
+property shared by the whole engine, not computed for lava** (confirmed this session): lava's own spread
+(0x512A60) only ever reads map-cell +0xE; it never writes it. The write lives in `level_land_processing_2`
+(0x44DF40), the same function that recomputes the blend byte above, reached through `land_level_processing_1`
+(0x44DDF0, "recompute the landscape after a height change" - lava's own call to it, right after each spread step,
+is what keeps the field current around a growing flow). 0x44DF40 is called from about 32 sites exe-wide having
+nothing to do with lava - ordinary terrain-shaping (`landscape_move_2` 0x4043CB, `set_level_height_100` 0x49838F),
+level load (`load_level2` 0x484C29), and other effects (firecloud 0x50C618) - so every cell's direction nibble
+exists independently of lava and can go briefly stale exactly as our own code worried: it is whatever it was set
+to the last time *any* height edit touched that cell or (for untouched cells) at level load, not recomputed every
+turn.
+```text
+for the cell and its 8 neighbours, compass order N, E, S, W, NE, SE, SW, NW (the engine's standard ±2-unit
+  3x3 walk, same one the blend recompute above uses):
+    start: minimum = the cell's own height, direction = 0 (flat)
+    for each of the 8 neighbours in that fixed order:
+      if neighbour height < minimum: minimum = neighbour height, direction = that neighbour's number (1-8)
+  store: cell +0xE = (cell +0xE & 0xF) | (direction << 4)        # low nibble (another, untraced field) kept
+```
+No slope-magnitude threshold exists: a neighbour even 1 unit lower than the running minimum wins, so "flat"
+means only "no neighbour is strictly lower", not "the terrain here is actually level". Ties are broken purely by
+scan order, never randomly: the cell's own height beats every neighbour (a tie keeps "flat"), and among
+neighbours of equal height the fixed order above wins - N beats E beats S beats W beats NE beats SE beats SW
+beats NW. (A defensive `clamp(direction, ..., 15)` in the same code is never reached: only 9 candidates are ever
+compared, so the result is always 0-8.)
+
+Open: **A magical shield does not block catching fire**, now confirmed on both ends: no shield check (+0x14 bit
+0x8000) in `notify_area` (0x44F2F0, where the fire flag is set) nor in the person's own life step (0x4D43A0,
+where it is consumed into state 31 - "Components"). Still open: the volcano controller's own rock/fireball spawn
+windows (0x50E34B/0x50E461/0x50E47F, counted against a local per-function turn counter not yet reconciled with
+the absolute cast turn, so the existing "turns 105-130" / "~22 small, 6 big" figures are not yet cross-checked
+against this session's `[35,70]`/`[40,160]` windows); an extra, unnamed effect (type 0x40, state 51) spawned both
+probabilistically by the lava's own spread (~1/128 per hot cell per turn) and deterministically by the volcano
+controller - role not traced.
+
+### Firestorm fireballs [exe]
+Per-turn (state 23, per-turn 0x511640 - Ghidra's own name `process_firestorm` is correct here; init pushes
+state 23 then loads `FIRESTORM_DURATION` straight from its named address into the duration counter +0x6C, a
+direct constant reference, not a coincidental immediate):
+```text
+every turn: duration -= 1; 0 -> end (0x4EDCF0)
+sub-state (+0x2D): 0 -> += 1, return (one turn of nothing right after the cast); 1 -> continue
+only when (duration & 3) == 0 (one call in four - this traces, not just infers, "about 55 over 220 turns"):
+  two PRNG draws (0x89D178, "x = ror(x*0x9E3D+0x24DF,13)"), each reduced mod 0xC00 (3072) and recentred by
+    -0x600 (-1536): an offset up to +-1536 units (+-3 cells) on each axis from the effect's own position - a
+    random point in a 6x6-cell square, matching "Per spell" above
+  create_unit(class 8, type 4, tribe, point) - the fireball shot ("Fireball shots" in Components); sound 0xB3
+  the new shot: speed (+0x5F) = 250, start position (+0x70/+0x74) = the jittered point, aim height (+0x76/+0x7A)
+    = ground height there (0x44E940) minus 20 (so the homing check below lands it slightly into the ground);
+    flags +0x6E: bit 0 cleared, bit 1 set (the self-attached flame below; NOT the impact smoke burst - see
+    "Drawn"); impact spec +0x7C/+0x7D/+0x7E = 7/0x1C/4 and params +0x80/+0x82/+0x84/+0x86 = 80/8/32/0 - what
+    effect the shot creates on arrival, read by 0x4BB290 ("Fireball impact" below) - corrects an earlier draft
+    of this row, which called these four bytes "movement-arc fields": they were never read as a trajectory, only
+    by the impact dispatcher
+```
+Drawn (the fireball shot itself, 0x4BB440, shared with Blast's own fireball shot - "Fireball shots" in
+Components): a dynamic ground light under it while it flies (`sunlight_update_unit_landscape` 0x4010B0, the
+same mechanism the firewarrior's own bolt carries, "Drawn" under "The shot 8/6" above); up to 4 trailing
+effect 7/0x0A instances, one spawned per turn of flight (clamped 0-4, unconditional) - a distinct ember/particle
+trail, not the plain grey smoke puff (7/3) the firewarrior's bolt leaves; and a self-attached effect 7/0x4F
+riding the shot itself (a flame/glow, its sprite cached into the shot's own +0x94) when the shot's flags (+0x6E
+bit 1) ask for it - true for Firestorm's own shot, confirmed above. A second, separate burst of 4 randomly
+jittered plain smoke puffs (7/3) scattered right at the landing point exists in this same function, gated by
++0x6E bit 0 - **Firestorm's own shot has that bit cleared, so it does not get this burst** (corrects "Fireball
+shots" in Components, which describes "smoke" as shared by both Blast and Firestorm; whether Blast's own shot
+sets bit 0 was not checked this session).
+
+### Fireball impact (Firestorm, Blast) [exe]
+On arrival (0x4BB440's own sub-state 2), before the shot deletes itself next turn: 0x4BB290 reads the shot's own
++0x7C/+0x7D/+0x7E (class, type, "has extra params" flag) and, when that flag is set, first copies +0x80/+0x82/
++0x84/+0x86 into the shared creation-parameter queue (0x892443, already known from `init_unit_type_11`'s own
+cast-cost parameter) - then `create_unit(class, type, tribe, pos)`, i.e. **the shot does not hardcode what
+happens on impact: the caster's own cast code configures it per spell**. For Firestorm (type 0x1C, init 0x511800):
+```text
+read the impact cell's terrain-type nibble (map-cell +0xC) and look up table 0x5AA328 (14 bytes/record, the
+  same coastal-shape table "Wildmen" uses) bit 0x2 - water:
+  water: create_unit(7, 0x2B, tribe, pos) - an unnamed splash/hiss effect (state 40, draw class 32, hfx 1152,
+    sound 0x55); not traced further
+  land: push params [1, 0, 32, 0] to the queue, then create_unit(5, 0xA, tribe, pos) - a ground-fire SCENERY
+    object (the exact same object Lightning's own strike creates, "Lightning" in Components - the Components
+    table's own "7/0x0A" for that case is a typo for "5/0xA", this class/type), then 0x4A8C60(fire, 0x16) to
+    set its own burn-length countdown (fields and exact turns not decoded this session) and sound 0xB6
+  either way: create_unit(7, 1, tribe, pos) - a "simple blast" effect, its own fields set directly rather than
+    through its usual init: radius (+0x6C) = 5 cells (1280 units, matching R in "Blast push and flight") and the
+    same push constants 140/98 from that section - this is the "fireball's own simple-blast-that-panics" already
+    named in "Per spell" and spells.md, now pinned to exact numbers
+  either way, regardless of the branch above: if the impact cell holds a building, 0x408CB0(building, tribe) -
+    the SAME call Lightning's own strike uses to set a building burning (occupants out 8 turns later)
+```
+**No terrain height or blend write happens anywhere in this chain** - the only read of the terrain is the
+water/land check above. "The ground is altered" is, concretely, a scenery object placed on top of it (the
+ground-fire) plus whatever that building call or the blast's own push/damage do to what's standing there; the
+landscape's own heightmap and blend are untouched by Firestorm, unlike Volcano/Earthquake/lava or the land-change
+spells. 0x50CCD0 (called at the very start of the impact effect's own init, before the water check, to read the
+queue back into local fields) looked like a shared "spawn N debris fragments from queued params" helper common
+to several effects - not followed further, since it only affects a debris burst, not terrain.
+
+This session also decoded `hfx0-0.dat` locally to check sprites.md's "by eye, unconfirmed" notes against the
+real art (`pal0-0.dat` is 4 bytes/entry - R, G, B, flag - not 3; decoding it as 3 misreads every colour past
+the first few, the pitfall that first made these look wrong):
+- hfx 1120-1123 (the "shot" sprite already cited under "The shot 8/6") is now confirmed by eye: a small round
+  bright ball, shrinking through 1124-1127 down to a single pixel - the flying fireball itself, not a ground
+  patch;
+- hfx 90-93 is confirmed by eye: a standing, opaque 4-frame upward flame lick - this is the ground-fire scenery
+  object's own sprite (class 5 type 0xA, "Fireball impact" above), not a separate "short fire" effect;
+- hfx ~1180-1210 are confirmed by eye as a growing/fading smoke cloud then a separate explosion burst - an
+  impact effect, distinct from the flying ball.
+
+Net: the authentic look is dozens of small bright balls, each with its own light, ember trail and self-flame,
+falling one at a time to scattered points across a several-cell square over about 18 s, each landing in a
+brief burst and leaving a small standing flame behind - never a single persistent ground-fire patch. Impact on
+our specs: if our own view renders firestorm as one static fire effect instead of a stream of individually
+falling, lit, trailed fireball objects, that view (not the already-correct scheduling in `firestorm`/
+`EffectKind::Firestorm`, spells.md) is where the "rain of fire" look is missing.
+
+### Erosion passes [exe]
+Per-turn (state 24, per-turn 0x50FF30 - Ghidra's own name `process_erosion` is correct, despite sitting in the
+same code area as the shot handlers; init pushes state 24 then sets the duration counter +0x6C to a bare 64,
+not a named constant):
+```text
+every turn: duration -= 1; 0 -> end
+  two PRNG draws, each "& 7, - 4": a jitter of -4..+3 half-cells on each axis around the effect's own position
+  call 0x4983A0(jittered point, 4) - one hydraulic-erosion pass
+```
+0x4983A0 (write-back magnitude not traced) scans a window of cells around the jittered point and, per cell,
+compares its height against each of its 8 neighbours - the 4 diagonals weighted by 0xB505/0x10000 (~=0.707, a
+genuine distance correction) - keeping the steepest downhill one and accumulating a flow amount before
+(unread) applying a height change. This is a real steepest-descent slope pick, a different algorithm from
+land bridge/flatten's "converge toward a target height": erosion looks at local slope only, confirming
+"ground washed downhill" literally rather than as a figure of speech.
+
+Impact on our specs: ours applies one instant, flat, radius-4, -120 height drop (spells.md); the original
+instead runs 64 of these small, locally-slope-following passes (one per turn, 5.3 s total), each jittered
+within a few cells of the target and touching only a small window, following the real local slope rather than
+a fixed radius and depth - a visibly gradual, small-footprint erosion, never a sudden crater. The exact
+per-pass height delta is still open (next step: finish tracing 0x4983A0's write-back, or measure live - cast
+Erosion on flat ground in a test level and sample the target cell's height every turn with `livemem.py`).
 
 ### Swamp: drawing, and the reedy-grass / mist ground dressing [exe]
 The Swamp spell's effect (7/18, init 0x511340 → 0x511400 for the kill state, "Per spell" above) sets its own
@@ -880,6 +1136,168 @@ otherwise:
 - Example: an earthquake's drop of up to 600 under a person: it falls for about 6 turns (0.5 s) and lands at
   about −190, below the fall-damage threshold even in the blown mode.
 
+## Idle behaviour [exe]
+A person's per-turn state dispatch (`unit_processing_class_1_person`, table at 0x4D3D18, keyed by `+0x2C − 1`,
+decoded in full: 44 entries, state N's handler at row N−1) was read end to end for the states below.
+
+### The idle hand-off: state 1, then state 10
+State 1 is **not** the persistent idle state (correcting the earlier unconfirmed guess). Its handler (0x4D3386)
+only counts down `+0x70`; on expiry (or global flag byte 0x89D17C bit 0x2 forcing it early, not traced) it reads
+the person's type (`+0x2B`) into a 9-row table at 0x5A7064 (byte 0) for the next state:
+
+| Type | wild | brave..shaman (types 2-7) | angel |
+|---|---|---|---|
+| Next state | **8** | **10** | 28 (not traced) |
+
+Every ordinary tribe person lands in **state 10**, which is a one-line forward to `order_execute` (0x432590,
+"Command groups"): if the person's command group resolves to nothing at all, `order_execute` does only minor
+facing/cell housekeeping and returns "no change" - **the person does nothing observable, forever, until
+something external assigns it a group**. No wandering and no autonomous order-taking (wood-gathering included)
+was found in this path. State 10 completing a group's order returns to state 1, forming a short 1 ⇄ 10 cycle.
+
+Only one non-player, non-combat source of an autonomous command-group assignment was found: a training
+building's own per-turn code (0x405B80, "Training buildings") gives a handful of its occupants a kind-3 "go to a
+position" order from a per-building-type zone table - read so far as occupant/queue positioning (a training or
+worship spot), not a wood-fetch assignment; its own "doing it" handler (kind 4, 0x433800) is not yet read, so
+this is inferred, not proven. No caller of the gather-wood state (0x495D70, "Chopping") was found outside the
+player's own `Order::FetchWood`/`CutTree`-equivalent command path.
+
+### Idle-fidget animations: confirmed for wildmen, not (yet) for followers
+Wildmen (type 1) alone reach **state 8** (0x4D60D0) from state 1. Every turn it runs its own LCG (seed 0x89BC72,
+the same `x*0x9E3D+0x24DF; ror 13` shape as the shared 0x89D178 generator) for a ~1-in-256 chance of an ambient
+sound; every 4 turns it ticks two sub-timers (`+0x7B`/`+0x7C`); every 16 turns, once either hits 0, it looks for
+a nearby "reference unit" (0x4D48E0) and on success enters **state 5** (0x4D6970, already traced as "idle near a
+reference unit"), which on its own timer picks a per-type animation/sound id from the same 0x5A7064 table (bytes
+3+, the odds table already named "0x5A7067") scaled by its own RNG roll - the confirmed idle-fidget-variant
+picker, on a 16-turn (1.33 s) re-roll rhythm. On failure to find a reference unit it instead tries a second
+search (0x4D4A00) and may enter state 6 - now fully traced, see "Wildmen".
+
+Whether an ordinary follower (brave, warrior, ...) ever reaches state 5 on its own was **not confirmed**: no
+write of state 5 was found inside `order_execute` or its kind-3/kind-6 handlers, only inside the preach-order
+handler (0x43C7A0, setting the *target's* state, already flagged as probably unrelated to conversion) and about
+seven other call sites across the exe that were not read this session. So the fidget-picking mechanism itself is
+real and precisely rhythm-gated, but as traced it is wildman-only; whether followers share it is open.
+
+## Wildmen [exe]
+A wildman (person type 1) cannot be given an order: state 1's per-type next-state table ("Idle behaviour") routes
+only types 2-7 to state 10 (`order_execute`) - type 1 alone goes to state 8, and no wildman-reachable state ever
+touches the command-group machinery. Wildmen are also always tribe `0xFF` (tribeless).
+
+### Two deliberate destinations: a tree/plant first, the shore otherwise
+**Correcting an earlier draft of this section, which wrongly called the destination "random, not a deliberate
+resource target"** - re-reading both search functions in full, and the scenery-type flags table they key off,
+directly from the exe shows both searches are deliberately targeted, not random:
+
+From state 8, it first calls **0x4D48E0** - a ring search, radius 18 cells (per-type table 0x5A7069), over
+nearby cells' unit lists, matching the first **scenery (class 5) object whose type has bit 0 set** in a per-type
+flags table at **0x5A79C4** (24 bytes/record, read directly from the exe):
+
+| Scenery type (`pop3-rev/docs/unit_types`) | Bit 0 |
+|---|---|
+| 1-3 mass/special tree | set |
+| 4-6 mass/special fruit tree | set |
+| 7-8 plant 1/2 | set |
+| 9 head, 0xA fire, 0xB wood pile, 0xC pillar, 0xD rock, 0xE portal, 0xF island, 0x10 bridge, 0x12/0x13 scenery | clear |
+
+Only the 6 tree variants and 2 plant types are flagged; nothing else is, and a class-1 person is never matched by
+this loop. On success both the wildman and the found tree/plant transition to **state 5** (0x4D6970,
+"Idle-fidget animations") - **this is the "eating" stop**, deliberately beside a tree or plant.
+
+Only if no tree/plant is found within 18 cells does state 8 fall back to **0x4D4A00** - a second, separate ring
+search, fixed radius 12 cells (scalar byte 0x5A709B), that **rejects** any candidate cell whose coastal-shape
+class (table 0x5AA328, 14 bytes/record - the SAME table `is_land_at`/0x44F980 uses for a cell's coast shape,
+"Parking and the shore") lacks bits 0x3C (straight-coast/corner/bay/opposite-corners), rejects the
+opposite-corners class alone, and requires a parallel sanity table (0x5AA32C, confirmed 1 for shapes 2-13, 0 for
+0/1/14/15) to be nonzero, plus a walkability/occupancy flag. **Net effect, confirmed from the raw exe tables:
+only straight-coast/corner/bay SHORE cells are ever returned - pure inland and pure open-sea cells are explicitly
+rejected.** This is the "drinking" destination: the wildman writes it to `+0x4F` and enters **state 6**
+(0x4D342A):
+```text
+state 6, every turn:
+  0x4D66E0 ("notice something nearby", unrelated to the tree/shore search above): pick one random cell at a
+    -2/0/+2-per-axis offset, scan its unit list
+    scenery class 5 type 9 ("head", docs/unit_types - not a tree) or vehicle class 4 type 3 (identity
+      unconfirmed) → accept at once
+    a person of a DIFFERENT tribe → accept with 18.75% (24/128) chance; a same-tribe person is always skipped
+    on accept: both units' state → 0x22 (34, untraced - the natural next trace), cross-linked via +0x72
+      (same reciprocal shape as state 5's binding); state 6 itself does not change this turn
+  otherwise, decrement +0x70; while time remains:
+    the destination +0x4F is re-checked against the SAME coastal-shape-class test as the 0x4D4A00 search itself
+      (0x405050 + table 0x5AA328 bits 0x3C) - not generic walkability: if the cell ever stops being shore-shaped,
+      that is treated as "done", same as a timeout, not "keep walking toward now-invalid terrain"
+    not yet arrived (0x432DA0, within 56 units both axes) → keep walking there (generic movement system)
+    arrived → reroll +0x7C (0x4D4870) → state 16 (below)
+    invalid terrain, or +0x70 runs out → give up, fall back to the per-type default next state (0x5A7064
+      byte 0) → state 8 for wildmen
+```
+**State 16** (0x4D6E40, the "at the shore" idle): while its own `+0x70` runs, cycles a sub-state in [8..19] every
+few turns through **0x4D4040** - read in full and confirmed to be a generic "set the unit's secondary attached
+prop" routine (called from ~80 unrelated combat/order/construction sites exe-wide), **not** an animation-id
+table as an earlier draft assumed - toggling between two near-identical descriptor records (table 0x5A6858
+entries 3/4, object ids 32/24) by comparing `+0x33` to `ds:0x5A6864`; no terrain/scenery read happens in this
+specific toggle. State 16 also rolls its own ~50% per-turn ambient-sound chance (the same 0x89BC72 LCG seed as
+state 8); on timeout, the same per-type fallback closes the loop back to **state 8**.
+
+The full cycle observed in play is **1 → 8 → (5 or 6) → 16 → 8 → ...**: an idle tick that checks for a tree/plant
+first (state 5, beside it) and only wanders to the shore (state 6 → 16) when none is near. **Confirmed in play
+[observed]: it is always fruit-eating at state 5 (the tree/plant stop) and always drinking at state 16 (the
+shore stop), never the other way round or ambiguous** - the animation is not a separate choice at all, it falls
+out of which search succeeded: state 5 only ever triggers beside a tree/plant, so whatever it plays IS the eat
+animation; state 16 only ever triggers at the shore, so whatever it plays IS the drink animation. What is still
+not pinned to a specific line of code is the literal VSTART id each state resolves to for wildmen (already known
+from sprite inspection: eat-fruit = 2, drink = 4) - `0x4D4040`'s own 3/4 toggle looks too generic/cosmetic to be
+it (it is reused ~80 times elsewhere for unrelated props), so that specific animation-id lookup likely lives in
+the main VSTART/VFRA system (the per-type `[action × 9 + type]` table at 0x5A6D50, "Fight") rather than this
+`+0x33` "attached object" system - open, not confirmed either way.
+
+### No hunger or thirst stat, but drowning at the shore is real and common
+No field read by any wildman-reachable state (1, 5, 6, 8, 16) is ever compared against a "starved"/"aged-out"
+threshold, and none of them touch the health field `+0x6E` at all - **confirmed absent, not merely untraced**:
+visiting a tree or the shore never consumes anything, it only picks where an idle animation plays.
+
+**But a wildman parked at its shore spot (state 16) does genuinely, and fairly often, drown** [observed] - this
+is not a special wildman mechanic, it falls out of two mismatched granularities. The shore SEARCH (`0x4D4A00`)
+only checks the coarse, per-CELL coastal shape; the generic drowning check (`0x4EEFF0`, "Drowning") re-tests the
+FINE, per-pixel shape at the unit's *exact* position every single turn, with no bias toward the dry side -
+and a "shore-shaped" cell is by construction part land, part sea at that fine grain. A wildman idling there is
+effectively re-rolling whether its exact spot counts as water every turn, with no timer and no special-casing by
+type. Besides that, a wildman's health drops the same way anyone else's does: melee (`melee_hit`/0x4A39C0) or an
+area-damage spell (0x514579/0x514732, health-gated, no type check) - both call the shared "dies" function
+(0x4F3190, 4 call sites in the whole exe). Wildmen remain **harder to reach via ordinary combat**: the
+auto-attack melee scan's target-eligibility check (inside 0x51EAB0) explicitly treats a candidate as not-an-enemy
+whenever either side's tribe is `0xFF` - since a wildman always is, **no ordinary unit ever auto-initiates combat
+against one**; only an explicit player attack order, an untargeted area spell, or drowning at the shore can hurt
+it. Whether an explicit attack order itself also respects that tribe filter was not confirmed this session (live
+check below).
+
+**Whatever kills it, a wildman's death always looks different from everyone else's** - see "Death and the
+spirit rise": it unconditionally gets the long, spinning, straight-up "climbing" spirit variant (reusing the
+already-documented "flung in the air" tumble sprite), never the brief calm rising-ghost pose followers normally
+get. Death anim 47 ("falling down a slope", TODO.md) is the shared combat-DYING animation group with warrior/
+preacher (the fall itself, before the spirit rises) - the spirit-rise AFTER that is where the wildman-specific
+difference actually is.
+
+### Population: fixed per level, no respawn
+The only code found that creates a wildman is **`effect_place_wild_man`** (0x514330): scatters up to
+`LSME_WILDS_PER_SHOT` (exe default 5) wildmen in a circle around a point, via `alloc_unit(class 1, type 1,
+tribe 0xFF, pos)` - confirmed the only hardcoded class-1/type-1 allocation among all 188 `alloc_unit` call sites
+in the exe (register-passed sites were not individually re-derived, so this is strong but not airtight). Its only
+caller is a level/scenario placement-marker dispatch (`init_unit_type_7`, alongside `place_shaman` and
+`clear_unit`, paired with the identical "scatter trees" constant family) - a one-shot map-population tool, not a
+spell or a per-turn routine. **No periodic or per-turn creator was found anywhere**: a level's wildman population
+can only shrink (Convert, Hypnotism's temporary flip, or death), never regrow on its own.
+
+Open: state 0x22 (what "noticing" a 0x4D66E0-matched head/vehicle/enemy actually produces); the identity of
+vehicle type 3 in 0x4D66E0's accept list; which exact sub-state(8..19)/toggle in state 16 (or a different,
+not-yet-found animation system) actually selects the eat-fruit(2)/drink(4) VSTART ids; whether an explicit
+attack order on a wildman is accepted in the original (live check: `livemem.py` watch a wildman's `+0x6E` health
+and `+0x2C` state while (a) parking an idle enemy nearby for a long time - health should never move - and (b)
+issuing an explicit attack order at it); whether wildman creation can ever be re-triggered mid-level rather than
+only at load (live check: watch the unit pool's wildman count, `+0x2A==1 && +0x2B==1` over the pool at 0x8E0428,
+across a long session); live confirmation of the tree/shore targeting itself (watch a wildman's `+0x72`
+reference-unit field on entering state 5 and read the pointed object's class/type live; watch `+0x4F`'s terrain
+coast-shape byte on entering state 6).
+
 ## Combat [exe]
 - Internal controller units (class 10):
 
@@ -954,6 +1372,62 @@ second halves of the attack (22), disguise (32), preach (34) and kind 36 keep th
 - A preacher attacker only targets preachers and shamans (0x51EC80), angels of death are never targeted by the
   melee scan, and spies and wildmen never scan.
 
+### Order kinds and player commands [exe]
+`process_tribe_cmd` (0x43E8E0, "Commands") is **not** the move/attack order path (correcting the earlier
+assumption in "Open questions"): its ~76 cases are cheats, debug toggles and engine/multiplayer options (reseed
+the shared RNG, give mana, pull a person out of a building, toggle screen/speed settings, ring a tribe's
+buildings with an "alarm" order); only that last case touches the order-group machinery at all. The real
+"give one unit an order" entry points are eight small, separate routines at 0x43B180-0x43BB54, each hard-coding
+one kind and building its target from its own arguments, then releasing the unit's old groups and assigning the
+new one into its *secondary* slot (`+0x8B[+0xA6]`, not the primary `+0x9B`):
+
+| Kind | Helper | Target built from | Handler |
+|---|---|---|---|
+| 8 (enter building) | 0x43B180 | building id | 0x434610 `go_into_building` |
+| 3 (move) | 0x43B2A0 | a packed position | 0x4336C0 |
+| 6 | 0x43B3C0 | unit/building id + own cell; gated by a per-type capability table (0x5A7E48) | 0x495520 |
+| 0x13/19 (attack, generic) | 0x43B540 | a unit id | 0x51A2A0 "Starting a melee" |
+| 0x1C/28 | 0x43B670 | a unit id | inline in `order_execute` |
+| 0x11/17 | 0x43B790 | a cell rounded to a corner grid | 0x43A4D0 (shared with 30, 31) |
+| 0xF/15 | 0x43B8E0 | a door/throw point (0x404420) | 0x439D30 |
+| 0x16/22 (attack, "doing" half) | 0x43BA10 | a unit id + own cell | 0x435160 |
+
+Kind 3 is the only one of these confirmed to be a plain "move to a point". Kinds 19 and 21 both reach the
+attack-order handler but are not a go/do pair of each other: **kind 19** is this generic, externally-issued
+attack order (its ~9 confirmed callers are all spell-effect code; the literal UI attack-click call site was not
+located); **kind 21** is issued only by the auto-attack scan's own self-order, never by anything else. Kind 22
+(above) is confirmed as 21's "doing" half, keeping the full auto-attack radius once an attack is under way. The
+~25-call-site kind-3 helper (0x43B2A0) is by far the most used of the eight, mostly from spell-effect code - the
+player's own ground-click and attack-click call sites were not located in this pass either; map them with a live
+breakpoint on 0x43B2A0/0x43B540 if needed.
+
+### Formations [exe]
+A group move does **not** spread its units across different points: every unit in the same command group reads
+the identical target out of the shared record (above). The only spacing mechanism is a **formation**, a class-10
+controller (type 1/6, `process_formation_unit` 0x501000) that a unit joins or creates for itself
+(`add_unit_to_formation`, 0x5018C0) whenever **both**: a global flag (0x895DA6 bit 0x4, read-only everywhere
+found - not traced where it is set, plausibly a per-level/option byte) is set, and the unit's own `+0x76` bit 0x8
+is set, which `order_execute`'s shared tail copies (0x432DF0) from bit 0x10 of byte+0xA of the *current* order
+kind's 22-byte flags record (0x5A7DC0, indexed by the **raw** kind value, not kind−3 as the code-dispatch table
+is).
+```text
+"wants formation" (0x5A7DC0 byte+0xA bit 0x10) is SET for kinds: 3, 4, 7, 9, 20, 22, 25-30, 41, 42
+                                                  CLEAR for kinds: 8, 19, 21 (enter building, both attack kinds)
+```
+So **move** (kind 3) can trigger formation spacing; **attack** (19/21) never does - confirming our own attack
+dispatch (giving every selected attacker the identical target, no spreading) already matches the original, while
+our move dispatch (grid-based spot search, "Impact on our specs") does not model formations at all.
+
+`add_unit_to_formation`'s preconditions: not already in one (`+0x76` bit 0x20), a 24-turn retry cooldown
+(`+0xAB`) at 0, `+0x5F` nonzero, `+0xD` bit 0x8 clear. It looks for a compatible existing controller
+(`find_formation_for_unit`, 0x501AB0, search criteria not read) or creates one, seeded from the unit's own order
+target. `process_formation_unit` then holds up to 12 members at a fixed `(dx, dz) × 16`-unit slot offset around
+the controller's own position, dropping a member that strays ≥ 568 units off its slot with a bad heading and an
+unreachable path (0x450450), jittering the controller's own heading periodically. Whether several units given
+one move order are placed into the SAME new formation together, or join one at a time as each clears its own
+cooldown, is not traced (live check: give several units one move order where the flag is on, and watch whether
+`+0x76` bit 0x20 flips for all of them on the same turn).
+
 ### Command groups (the shared order record) [exe]
 Selecting several units and giving one order does not copy that order into each unit: they share one **command
 group**, a 10-byte record in a fixed array of 800 at `0x938830 + group_id × 10` (confirms and details the
@@ -987,8 +1461,11 @@ run    order_execute (0x432590, called from unit_processing_class_1_person only 
                     flag +0x1 bit 0x1, or the unit's own +0x13 bit 0x10) were seen but not traced
 ```
 The auto-attack scan above does not reuse any existing group: it allocates a fresh one just for the attacker
-(`0x436C20` then `0x438730`) every time it starts a new order. Open: the rest of the group flag byte (only 0x20
-and 0x40 are known), what a secondary (`+0x8B`) group slot is for, and the two unread `order_execute` redirects.
+(`0x436C20` then `0x438730`) every time it starts a new order. A secondary (`+0x8B`) group slot is confirmed to
+be where the eight "give one unit an order" helpers ("Order kinds and player commands") assign their orders
+(always the secondary slot, never the primary `+0x9B`); why a unit would ever need more than one secondary slot
+at once is still open. Open: the rest of the group flag byte (only 0x20 and 0x40 are known), and the two unread
+`order_execute` redirects.
 
 ### Starting a melee (the attack-order handler, 0x51A2A0)
 ```text
@@ -1080,6 +1557,16 @@ join(person, fight)                                                    (0x51DDC0
   then split (0x51DF90): both tribes with 2 or more people → the last of each leaves for a new 1-to-1 fight
     at the same place
 ```
+- **Witnessing and joining a fight**: there is no free-standing "anyone within some fixed reach joins"
+  rule - all six call sites of `join` are inside the attack/pre-fight/fight code itself. A person only notices a
+  fight on its own **auto-attack scan rhythm** (the melee scan's "a fight controller to join" match category,
+  flag 0x8 on the matched unit's state - re-derived this session, unchanged: states 1, 13, 17-19, 21, 30, 57, 58),
+  which only runs while that person has no order, or an order whose kind is not in the no-scan bucket
+  ("Auto-attack"); once a person is itself mid-attack (kinds 19/21, both no-scan) it stops scanning and only
+  joins if its *own* target happens to already be the one fighting. What flag 0x8 itself means is still open:
+  neither state 25 (fight) nor 29 (pre-fight) carries it, and several of its state numbers are reused with
+  unrelated meaning by other unit classes, so it may be a loosely-reused generic table rather than a
+  purpose-built "in combat" flag.
 - The fight is a series of exchanges, not a kick/guard toggle: the attacker plays one of three attack moves and
   the target one of two hit reactions. Move 2 (anim 15, also the pre-fight kick) knocks a non-shaman target back;
   moves 2 and 3 trade blows (both lose health); move 4 lands without a return blow. A shaman is never knocked
@@ -1233,7 +1720,8 @@ its darkest "cliff" colour row there. Mouse-over text: "Damaged Ground: Cannot b
 ```text
 map cells: 0x8A03E4, 16 bytes, 128 per row; +0 flags (0x2 units, 0x10000 reincarnation site, 0x4000000 damaged
   ground, 0x8000000 lava), +4 height, +0xA blend byte (normally clamp((max neighbour height − min) / 8, 1, 127),
-  0 at height 0, from level_land_processing_2 0x44DF40, which skips flagged cells)
+  0 at height 0, from level_land_processing_2 0x44DF40, which skips flagged cells), +0xE high nibble downhill
+  direction (0 flat, 1-8 compass, low nibble untouched here) - same 0x44DF40, see "Volcano lava flow"
 
 a building losing its last wood (wood +0x96 <= 0 on its shape +0x82):
   attack accumulator 0x4092A0 (branch 0x409498), fire 0x408AB0 (0x408C38), whirlwind 0x4980A0 → 0x40B130
@@ -1434,6 +1922,63 @@ low health (+0x14 bit 0x1000, the sparkles) = life <= max_life / 4
   the same +4 (brave, preacher) and +6 (warrior, firewarrior) on the turns that are multiples of 8, inside fights.
 - Being thrown delays death: a person at life ≤ 0 keeps moving until it lands (the capture's runner at −144 for 11
   turns was flung by a firewarrior's bolt).
+
+### Drowning [exe]
+The life step's very first call, every turn, is a drowning predicate (`0x4EEFF0`), which defaults to "yes,
+drowning" and only a handful of specific conditions escape it:
+```text
+not drowning if: flags +0xC bit 0x2; a per-instance exemption table (0x5A7BA8, bit 0x2 - checked, no person
+    type is ever exempt via it); airborne (+0xC bit 0x80000); standing ABOVE the real ground/water height
+    (calc_point_height 0x44E940 vs +0x41, e.g. a boat deck); is_land_at (0x44F980) true - solid support; inside
+    something (+0x9F != 0)
+otherwise, re-derive the FINE per-pixel coastal shape (the same table 0x5AA328 used elsewhere for a cell's
+    coast shape, but testing only byte+0 bits 0x3C - no "is this really a shore shape" gate) at the unit's
+    EXACT current position:
+  shape 0 (pure land) or 1 (pure sea)  → drowning
+  any boundary shape (2-15)            → drowning unless flags +0x10 bit 0x1000000 is set
+```
+This runs **every turn, with no timer**: a unit's exact sub-cell position decides drowning fresh each turn, at a
+finer grain than the per-cell coastal-shape class used to pick a destination elsewhere (e.g. "Wildmen"'s shore
+search). A "shore-shaped" cell is, by construction, part land and part sea at this fine grain - standing
+anywhere in one is not inherently safe, it depends on exactly where in the cell.
+
+### Death and the spirit rise [exe]
+Death (state 3, `0x4D5CF0`, entered when life ≤ 0) does the shaman-specific mana-loss ("Shaman death") inline,
+pushes the corpse's own pointer onto a small global one-slot-per-death LIFO (`0x892443`), spawns a 7/0x4D
+death-puff effect, and allocates a **new class-10 object** - the "spirit" - which is not a state on the dying
+unit itself but a separate controller that only references the corpse for cosmetic lookups.
+
+The spirit's own setup (`0x502910`) pops the corpse off the LIFO and picks one of (at least) two different rise
+variants for class-10 state 12 (dispatch `0x5029D0`, by its own sub-state `+0x2D`):
+```text
+sub-state = 3 ("climbing") if the corpse's type is WILD (1) - unconditionally, regardless of cause of death
+sub-state = 3 ("climbing") if any OTHER type, but only when 0x4EEFF0 (the drowning predicate above) is
+    currently true for the corpse - i.e. it died while standing in a drowning-eligible spot
+sub-state = 0 ("calm") for any other type, otherwise
+```
+```text
+sub-state 0, "calm" (0x5029EF): 4-turn timer; a per-type object id (table 0x5A6EA6) → VSTART 38 for every
+    follower type (tint only differs by draw class), 85 for the shaman. No altitude change: a stationary rise.
+sub-state 3, "climbing" (0x502BA3): 32-turn timer; a per-type object id (table 0x5A6EB8) → VSTART 31 for a
+    wildman (the SAME clip already documented as the "flung in the air" blast-knockback tumble animation), 40
+    for a follower, 45 for the shaman. Every turn: altitude += 40 world units (no gravity, no deceleration - a
+    real, sustained, roughly 2.5-cell vertical launch over the full 32 turns); when the copied type is
+    specifically wild, ALSO spins facing by 91/2048 every turn - a continuous spin found nowhere else.
+```
+**So a wildman's death always looks like a straight, spinning launch into the sky, reusing the tumble/flung
+sprite - never the calm rising-ghost pose everyone else normally gets.** Anyone else only gets that same
+launch (without the spin) if they happen to die while standing in a drowning-eligible spot; otherwise they get
+the brief, stationary, per-type-tinted "ghost" variant. This directly answers "why does a wildman's death look
+different" and is a different claim from the existing art-reference note that spirit rising is "a see-through
+copy rising, drawn in post" for everyone alike (true-ish for the calm variant, not for the climbing one, which
+is a real sprite object with real upward velocity).
+
+Open: sub-states 1, 2, 4, 5 and 6 of the same dispatch (0x502A5C/0x502AEA/0x502CDB/0x502D7E/0x502E7A) were not
+read; what finally removes the spirit object (presumably one of those); whether `DROWN_DAMAGE` is really 60 per
+turn (not independently re-confirmed this session); a live check to directly observe timing:
+`livemem.py` watch a dying unit's new class-10 object's `+0x2C`/`+0x2D`/`+0x41` (altitude)/`+0x74` (copied type)
+for ~40 turns, comparing a wildman dying on dry land (expect climb+spin immediately) against a follower dying on
+dry land (expect the brief calm variant) and a follower dying in shallow water (expect climb, no spin).
 
 ## Vehicles [exe]
 Class 4: types 1, 2 boat, 3, 4 balloon (airship). Init `init_unit_class_4` 0x463370 (state entry, jump table
@@ -1686,6 +2231,56 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
 - TODO "Warriors: about 3-4x a brave's combat strength": with `constant.dat` a warrior hits 6 times as hard
   (360 against 60) with 1.8 times the life (1800 against 1000); the exe defaults give 3 times (180).
 - TODO "Firewarriors throw fire": firewarriors never take a melee slot; their attack is a separate ranged path.
+- `slots.rs` (`dispatch`/`free_spots_near`), the group-move spot spreading: the original has no such thing for
+  the order itself (every unit in a group gets the identical target). Any spacing is a separate **formation**
+  system (class-10 controllers, "Formations") wired to the move order (kind 3) but never the attack order
+  (kinds 19/21), gated by a still-untraced global flag (0x895DA6 bit 0x4); our grid-based spot search has no
+  equivalent concept and isn't gated by anything. The group **attack** dispatch (`units/selection.rs`, identical
+  target for every selected attacker, no spreading) already matches the original as traced.
+- `melee.rs` (`join_melees`) and `spotting.rs` (`sight_now`): both already match the traced mechanics reasonably
+  well - joining is gated on a unit already ordered to attack a target that's now fighting, within the
+  documented 224-unit reach, and `Action::Walking | Action::Attacking => Some(0)` matches the original's
+  no-auto-attack-scan bucket for exactly the move (kind 3) and attack (19/21) kinds asked about. The original has
+  a third, reduced-but-nonzero scan bucket (radius 1 cell, several other order kinds) that our two-bucket model
+  (0 or full `sight_at_work`) doesn't reproduce for those other actions (`Queuing`, `Building`, `Worshipping`,
+  ...) - out of scope here, worth a TODO if those are revisited.
+- `command.rs`'s `Command::OrderUnit`/`QueueOrder` give each selected unit its own independent order copy; the
+  original's shared 10-byte group record is mostly an implementation detail EXCEPT that several units can share
+  live, mutable per-order state in the original (the group record can be rewritten under them) in a way our
+  per-unit copies cannot express - moot unless a future spec item needs "all N units retarget at once mid-walk".
+- `unit.rs`'s `Action::Idle`: a single, unified rest state with no autonomous behaviour at all, matching what was
+  found for ordinary followers in the original (state 10, "Idle behaviour": does nothing when no command group
+  is assigned - no wandering, no autonomous wood-gathering found). What's missing is the confirmed, rhythm-gated
+  idle-fidget-animation picker (state 8 → 5, per-type RNG-weighted, ~16-turn cadence) - confirmed only for
+  wildmen in the original, not (yet) for followers, so this is lower priority than it first appears; `art.rs` /
+  `sheets.rs` have exactly one static idle pose with no variant system to connect it to either way.
+- Wildmen (no AI in our code today; "Wildmen"): the original drives them through a confirmed 1 → 8 → (5 or 6) →
+  16 → 8 loop - first search nearby (18 cells) for a tree or plant and idle beside it if found (state 5); only
+  if none is near, walk to a nearby shore cell instead (states 6/16, explicitly rejecting inland and open-sea
+  cells) and idle there with ambient sound. Both destinations are deliberate, keyed off the exe's own
+  scenery-type and coastal-shape tables - not a random point. No hunger/thirst/age stat exists even so; nothing
+  is actually consumed at either stop, it only decides where the idle animation plays.
+  `attack.rs`'s `wildmen_never_fight_and_nobody_attacks_its_own` test makes wildmen entirely unattackable; the
+  original only confirms the *automatic* proximity scan skips them (tribe 0xFF is never treated as an enemy) -
+  whether an explicit player attack order also respects that filter is still open, so our blanket rule may be
+  stricter than the original. No periodic wildman spawner exists in the original (a one-shot level-placement
+  routine is the only creator) - confirms there should be none in ours either.
+- `unit.rs`'s `Action::Drowning`/`DROWN_DAMAGE` ("Drowning"): the mechanism now matches (a generic, type-agnostic,
+  per-turn re-check with no timer), but the original re-tests the unit's EXACT fine-grained position every turn
+  (not a coarser "is this tile water" test), which is specifically why idling at a chosen "shore" cell (any
+  destination search that only checks the coarse per-cell shape, as ours does too) can drown a unit sitting
+  still - worth keeping in mind for any future autonomous-wandering or boat-docking logic that targets "shore"
+  cells by the coarse shape alone.
+- `unit.rs`'s `Action::Spirit`/`SPIRIT_TICKS` (explicitly commented "a guess"; "Death and the spirit rise"):
+  confirmed wrong as a single constant/pose. The original has at least two structurally different variants - a
+  brief (4-turn) stationary "calm" rise for an ordinary death, and a 32-turn, continuously-ascending (40 world
+  units/turn, no gravity) "climbing" rise for anyone who died in a drowning-eligible spot, reusing the
+  already-documented "flung in the air" tumble sprite rather than a translucent copy of the death pose. A
+  wildman ALWAYS gets the climbing variant, with an extra continuous spin (91/2048 facing per turn) found
+  nowhere else - the visual the user described as "flying into the sky." None of this (the duration split, the
+  real upward velocity, or the wildman-specific spin) exists in our single `Action::Spirit` today. Also:
+  `unit-art.md`'s "a see-through copy rising, drawn in post (alpha sprite)" note describes the calm variant
+  reasonably but not the climbing one, which is a distinct sprite object with real velocity.
 - TODO "Vehicles" and assets.md "Vehicles" (none in our code): the original's boat and balloon are 3D objects
   143 / 144 of the banks 2-7 layout (bank 0: `catalog::BOAT`, `AIRSHIP`), turned by a pitch and a
   roll for sinking and keeling over, no sprites. Life `VEHICLE_LIFE_*` = 5000 turns (one tick each), refilled
@@ -1696,6 +2291,22 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
 - units.md `Mobility::Sail` ("open sea only, boats") and `path::nearest_reachable` (boats unloading at a shore):
   the original parks a boat on open sea or on a coast cell with the landing flag (four neighbouring points at
   height 0, no building next to it, not a bay corner); only an all-land cell strands it.
+- `lava.rs`/`volcano.rs` ("Volcano lava flow"): `Lava::turn` deals an instant kill every turn to anyone on a lava
+  cell; the original only ever sets the fire flag (state 31) and lets the existing fire/evacuation mechanic run
+  its course - the module's own doc comment already says this correctly while the code does the opposite.
+  `LAVA_FLOW_TICKS` (half of `LAVA_LIFETIME`, then holding) should instead be: growth for the *entire* 16 s
+  (with an early-stop accumulator), a further 1.3 s fade, then conversion to permanent building-ash scorch, not
+  an indefinite hold. `RIM_RADIUS_CELLS`/`SLOPE_RADIUS_CELLS` (the crater cone's own shape) don't correspond to
+  the lava's real starting/measured radius and shouldn't be reused for it. The growth shape itself (`disc()`, a
+  uniform expanding circle) should instead follow a per-cell precomputed downhill-direction field, spreading one
+  cell at a time outward from the crater along the real slope, not uniformly. The original's field is frozen at
+  the last height edit (recomputed by the general terrain cascade, not by lava, and not every turn - "Volcano
+  lava flow"); `game_core::lava::downhill` instead reads the steepest-of-8-neighbours live off the current
+  heightmap every turn, so a cell's chosen direction can drift as nearby cells rise or fall while ours would
+  hold it fixed - worth checking against the channel-stability symptom (thin radial channels, bare ground
+  between them) if it recurs, though the trace doesn't show it changing the broad shape (channels one cell wide,
+  not a flood fill, either way). `Lava::effect()` (Earthquake's static fissure) matches "lava square" structurally
+  but has the same instant-kill issue and no decay-then-self-destruct-then-ash behaviour.
 
 ## Open questions
 - Where `MANA_F_<PERSON>`, `MANA_F_HOUSED/WORKING/TRAINING` and `MANA_F_HUT_LEVEL_1..3` are applied. Only the max
@@ -1703,10 +2314,18 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
 - What "busy" means (unit+0xE bit 7, unit+0xA7), and the preacher's extra check.
 - The controller types of tribe+0xC1F (2 is human; 1 gets full mana).
 - Spell order and share inside the distribution loop.
-- Auto-attack: the names of the person states (1 is probably idle) and of the order kinds (map the player commands
-  in `process_tribe_cmd` to the kinds they create), whether the odd / even kinds are really going / doing, where
-  the kinds' sprites are drawn, the firewarrior's own scan (0x51E9A0); the preacher's own scan (0x51E7B0) is now
+- Auto-attack: where the kinds' sprites are drawn (the record+6 offset could not be reproduced this session -
+  unverified, not disproven), the firewarrior's own scan (0x51E9A0); the preacher's own scan (0x51E7B0) is now
   traced ("Command groups", "Preacher conversion") but what `0x51F030`'s two out-params/mode flag mean is not.
+  The player's own UI → order call sites were not located ("Order kinds and player commands": the kind-giving
+  helpers at 0x43B180-0x43BB54 are confirmed, but which exact code calls them from a mouse click is not); what
+  flag 0x8 on a matched unit's state actually represents is still open (it may be a loosely-reused generic state
+  table, not a purpose-built "in combat" flag - "Fight"); what sets global flag 0x895DA6 bit 0x4 (gates
+  formations - "Formations") and what `find_formation_for_unit`/`0x501C00` match several units heading to the
+  same place on; whether ordinary followers (not wildmen) ever reach the idle-fidget state 5 on their own
+  ("Idle behaviour"), what order kind (if any) leads a person into the gather-wood state autonomously, and
+  `0x405B80`'s own kind-4 "doing it" handler (0x433800, not yet read, would settle what its autonomous
+  assignment actually produces).
 - Building ashes: the cliff rows' colours, the volcano cone's clearing, foundation sub 2's condition and its unit
   10/0x13.
 - Attacking a building: what sets building +0x9C bit 0x40, and the partial explosion's 10/7 units.
@@ -1752,6 +2371,14 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   `+0xC` bit 0x100000 (no stranding, no destruction); the movement passes and the state-7 destination
   searches (0x464AE0, 0x4651B0); 0x466FC0; table +0x6 (838 / 839); whether a parked balloon's passengers can be
   hit; what a passenger put out over water does (drowns?). Live check of the 5000-turn abandon life.
+- Volcano lava flow: the unnamed type-0x40 effect's (state 51) own role - spawned deterministically by the
+  controller throughout cast-turns 120-240 (`ebp` 40-160, "Volcano rocks") as well as probabilistically by the
+  lava spread, but what it actually does once alive is still untraced; the map-cell +0xE low nibble's own meaning
+  (untouched by the downhill-direction write, not traced this session).
+- Wildmen: state 0x22 (what "noticing" a nearby scenery-type-9 object or vehicle-type-3 object leads to) and the
+  identity of those two types; the sub-state(8..19) → animation-id mapping in state 16; whether an explicit
+  player attack order on a wildman is honoured in the original (only the automatic proximity scan is confirmed
+  to skip them); whether wildman creation can ever retrigger mid-level rather than only at load.
 
 ## Reference
 
@@ -1854,6 +2481,9 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4C1D10 | spell unit per turn: sub-state 3 waits 6 turns, launches the shot (0x4C21E0), sub-state 2 deflects or spawns the effects (0x4C1EA0) |
 | 0x4C2E30 | cast range with altitude bands; 0x4C24F0 can-cast check |
 | 0x4BAF00, 0x4BB440 | standard shot and fireball shot per turn |
+| 0x4BB290 | fireball impact: creates the shot's own caller-configured effect (class/type/queued params from the shot's own +0x7C-0x86), see "Fireball impact" |
+| 0x511800 | Firestorm's own impact effect (type 0x1C) init: land/water branch, ground-fire or splash, a blast, building ignite |
+| 0x4A8C60 | sets a scenery's own burn-length countdown from a band table (exact fields/turns not decoded) |
 | 0x50A750 | effect per turn: switch on +0x2C (table 0x50AFD4); effect init by type: table 0x50A59C |
 | 0x50B630, 0x50B6F0, 0x50B740 | simple blast: default init, init with parameters, per turn |
 | 0x515E30 | nearest-N selector (invisibility, shield, bloodlust, hypnotism) |
@@ -1867,6 +2497,9 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4D4F40, 0x4D6660 | walk speed: `SPEED + rand % (SPEED / 4)`, doubled when bloodlusted, to unit+0x5F |
 | 0x4E6A70 | move a position by length and angle |
 | 0x50EE00, 0x50ECC0 | land bridge: per turn, per cell (smoke, height step, refresh, notify) |
+| 0x511640 | firestorm per turn (state 23, Ghidra's `process_firestorm` is correct): gated spawn, see "Firestorm fireballs" |
+| 0x50FF30 | erosion per turn (state 24, Ghidra's `process_erosion` is correct, despite living in the shot code area): jitter + one pass via 0x4983A0, see "Erosion passes" |
+| 0x4983A0 | one hydraulic-erosion pass over a window: per cell, steepest of its 8 neighbours (diagonals weighted 0xB505/0x10000); write-back magnitude not traced |
 | 0x44DDF0 | recompute the landscape around a cell after a height change |
 | 0x44F2F0 | notify units and buildings around a cell: mode 1 "ground moved", mode 2 "set on fire" |
 | 0x408080 | building foundation check: re-level the footprint or collapse |
@@ -1896,6 +2529,25 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4D41F2 | translucent / hidden flags for ghosts and invisible people |
 | 0x4D92B0 | "hypnosis_tick": every 8 turns counts +0xAC down, then restores the person to tribe +0xAD |
 | 0x516270 | select the colour table for the next sprite draw (0x974560 = none) |
+| 0x4D3386 | person state 1: counts down +0x70, then next-state by type from table 0x5A7064 byte 0 ("Idle behaviour") |
+| 0x5A7064 | 9×50-byte per-type table: byte 0 state-1's next state, bytes 3+ state-5's fidget-odds (0x5A7067) |
+| 0x4D60D0 | person state 8 (wildmen only): picks a "reference unit", may enter state 5 (fidget) or 6 ("Idle behaviour") |
+| 0x4D48E0 | wildman "find a nearby tree/plant" search (18 cells, scenery-type flags table 0x5A79C4) - state 5 |
+| 0x4D4A00 | wildman shore-destination search (12 cells, coastal-shape table 0x5AA328, rejects land/open sea) |
+| 0x4D342A, 0x4D6E40 | wildman states 6 (walk to the shore destination) and 16 (idle/ambient animation there) ("Wildmen") |
+| 0x4D66E0 | wildman state 6's "notice a nearby object/vehicle/enemy" check, binds into untraced state 0x22 |
+| 0x4D4040 | `unit_set_object`: generic attached-prop setter, ~80 callers exe-wide; not an animation-id table |
+| 0x514330 | `effect_place_wild_man`: one-shot level-placement scatter of up to 5 wildmen - the only wildman creator |
+| 0x43B180-0x43BA10 | eight "give one unit an order" helpers, one kind each ("Order kinds and player commands") |
+| 0x432DF0 | copies order-kind flags byte+0xA bit 0x10 ("wants formation") into person+0x76 bit 0x8 |
+| 0x5018C0, 0x501AB0, 0x501000 | join/create a formation, find a compatible one, per-turn formation controller |
+| 0x443B40 | ring a tribe's buildings of one type with a kind-0x1E "alarm" order (process_tribe_cmd's one order-related case) |
+| 0x4BC500, 0x4BC660 | volcano fireball (shot 8/7 small, 8/8 big) init and per-turn (state 7): shared flight, size-specific trail/landing effects ("Volcano fireballs") |
+| 0x512A00, 0x512A60 | lava flow (effect 34/state 33) init and per-turn: downhill spread, then fade, then ash ("Volcano lava flow") |
+| 0x5134C0, 0x513570 | lava square (state 38) init and per-turn: a static, decaying hot cell |
+| 0x44DDF0 | `land_level_processing_1`: queues a cell after a height change, flushes to 0x44DF40 at 0x400 queued |
+| 0x44DF40 | `level_land_processing_2`: per cell, recomputes blend (+0xA) and the downhill-direction nibble (+0xE) |
+| 0x44F2F0 | notify_area(mode bitmask, cell, radius, tribe): bit 0 ground-moved, bit 1 set-on-fire (shaman exempt) |
 
 Timing globals: turn counter 0x89D188 (u32), `turns_per_sec` 0x89D161 (u8, copied from the option at 0x98F712),
 `next_turn_time` 0x5CD92C, `step_ms` 0x5CD930 (83 in the exe image), `extra_turns` 0x895DAC (i8). Under Wine the
@@ -1926,7 +2578,9 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
 - Effect state (+0x2C) per component, for the per-turn table: simple blast 1, smoke 3, burn cell 6, ghost army
   13, invisibility 14, earthquake 15, volcano 16, hypnotism 17, lightning bolt 18, swamp 19, angel of death 20,
   whirlwind 21, insect plague 22, firestorm 23, erosion 24, land bridge 25, lightning 30, flatten 31, lava flow
-  33, lava square 38, convert wild 60, shield 68, armageddon 71, bloodlust 72, teleport 73.
+  33, lava square 38, convert wild 60, shield 68, armageddon 71, bloodlust 72, teleport 73 (33/38 now confirmed,
+  not just matched by guess - "Volcano lava flow"); state 51 (effect type 0x40) exists and is spawned by both
+  the volcano controller and lava flow's own spread, but is otherwise unnamed - open.
 - Person statuses: invisible +0x10 bit 0x1000 (timer +0xA3), shield +0x14 bit 0x8000 (timer +0xA5), bloodlust
   +0x14 bit 0x80000 (timer +0xB1), hypnotised +0x10 bit 0x4000 (timer +0xAC, original tribe +0xAD), ghost +0x10
   bit 0x800, low health +0x14 bit 0x1000; the timers count down every 8 turns. On fire: +0xC bit 0x8 leads to

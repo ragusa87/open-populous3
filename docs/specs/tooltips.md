@@ -86,8 +86,6 @@ At the top right of the tooltip, on the name's line (`tooltip::Toggle`, on the p
 wood; a plan not flat yet is cancelled instead). Pressed, it sends `Command::Dismantle`. With the original files
 (`hfx0-0.dat`, sprites.md, `catalog::DISMANTLE_BUTTON`, `REBUILD_BUTTON`): dismantle 49, 51 hovered, 50 pressed;
 undo (build it again) 46, 48 hovered, 47 pressed. Without them, a small "Dismantle" / "Rebuild" text button.
-Today dismantling empties the building (people walk out) and its braves stop building it; taking it apart piece
-by piece is still to do (buildings.md "Dismantling").
 
 ## Unload button [player]
 A vehicle has no toggle but a button in the same place: pressed, everyone aboard gets off. It is disabled while
