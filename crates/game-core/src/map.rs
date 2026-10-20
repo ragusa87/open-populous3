@@ -20,6 +20,7 @@ use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::totem::{totems_from_level, Totem, TotemKind};
 use crate::status::Timed;
 use crate::outcome::Outcome;
+use crate::shading::{CellShading, SunParams};
 use crate::tribes::Tribes;
 use crate::unit::{torus_delta, Action, Order, Target, Unit, UnitEvent, UnitId, UnitKind};
 use crate::wood::WoodPiece;
@@ -82,6 +83,10 @@ pub struct GameMap {
     pub vehicles: Registry<crate::vehicle::Vehicle>,
     /// Ground left in ashes by destroyed buildings (`crate::ashes`).
     pub ashes: crate::ashes::Ashes,
+    /// Per-cell blend/light/downhill, derived from `terrain` (+ `ashes`/active lava), kept current by
+    /// `recompute_shading` (`shading.rs`); the client's terrain texture bake reads it, nothing in the
+    /// simulation does.
+    pub shading: CellShading,
     /// The match's result, once declared (`outcome.rs`): never unset, never relabelled.
     pub outcome: Option<Outcome>,
     /// Ticks run since the map was made (`tick`).
@@ -136,7 +141,8 @@ impl GameMap {
     /// this way.
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), bolts: Registry::default(), vehicles: Registry::default(), ashes: Default::default(), outcome: None, now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        let shading = CellShading::new(terrain.size(), SunParams::default());
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), bolts: Registry::default(), vehicles: Registry::default(), ashes: Default::default(), shading, outcome: None, now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -176,6 +182,7 @@ impl GameMap {
             bolts: Registry::default(),
             vehicles: Registry::default(),
             ashes: Default::default(),
+            shading: CellShading::new(MAP_SIZE, SunParams::from_sunlight(level.sunlight)),
             outcome: None,
             now: Tick::ZERO,
             next_id: 1,
@@ -185,6 +192,7 @@ impl GameMap {
         .with_building_ground()
         .with_shamans()
         .with_people(level)
+        .with_shading()
     }
 
     /// The level's people other than shamans (who spawn at their sites), where they are placed.
@@ -200,6 +208,32 @@ impl GameMap {
             self.spawn(owner, kind, (t.x, t.z));
         }
         self
+    }
+
+    /// Every constructor's last step, once its terrain is in its final shape: a full `shading` recompute (`bare`
+    /// itself does not, so test-only maps built straight from `bare`/`sandbox_bare` stay cheap).
+    fn with_shading(mut self) -> Self {
+        self.recompute_shading_all();
+        self
+    }
+
+    /// `shading`'s own recompute, for the cells `touched` reaches: called from the two places `GameMap` already
+    /// assembles its `DirtyRect` output (`apply`, `tick`), so no future spell/effect author has to remember it.
+    fn recompute_shading(&mut self, touched: &[DirtyRect]) {
+        let lava_blend: HashMap<(i32, i32), u8> = self
+            .effects
+            .iter()
+            .filter_map(|(_, e)| if let EffectKind::Lava(lava) = &e.kind { Some(lava.cells_lit()) } else { None })
+            .flatten()
+            .map(|(pos, blend, _)| (pos, blend))
+            .collect();
+        self.shading.recompute(&self.terrain, &self.ashes, &lava_blend, touched);
+    }
+
+    /// The whole map: constructors' own last step (`with_shading`), once their terrain is in its final shape.
+    fn recompute_shading_all(&mut self) {
+        let whole = DirtyRect { min: (0, 0), max: (self.terrain.size() as i32, self.terrain.size() as i32) };
+        self.recompute_shading(std::slice::from_ref(&whole));
     }
 
     fn with_buildings(mut self, buildings: Vec<Building>) -> Self {
@@ -269,7 +303,7 @@ impl GameMap {
             terrain.set(x, z, v);
         }
         let sites = generated_sites(&terrain);
-        GameMap::bare(format!("Generated #{seed}"), terrain, sites).with_shamans().with_trees(seed, 60)
+        GameMap::bare(format!("Generated #{seed}"), terrain, sites).with_shamans().with_trees(seed, 60).with_shading()
     }
 
     /// Test ground for walking: a small flat island around the player's site at the centre, a gentle
@@ -296,7 +330,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        GameMap::sandbox_bare("Sandbox: walk", terrain, sites).with_shamans().with_trees(1, 150)
+        GameMap::sandbox_bare("Sandbox: walk", terrain, sites).with_shamans().with_trees(1, 150).with_shading()
     }
 
     /// Test ground for buildings: a flat island with the player's site at the centre.
@@ -371,6 +405,7 @@ impl GameMap {
                 map.apply(&c);
             }
         }
+        map.recompute_shading_all();
         map
     }
 
@@ -394,7 +429,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap::sandbox_bare("Sandbox: units", terrain, sites).with_shamans().with_trees(2, 150);
+        let mut map = GameMap::sandbox_bare("Sandbox: units", terrain, sites).with_shamans().with_trees(2, 150).with_shading();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         for (row, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
             let row = row as i32;
@@ -433,7 +468,7 @@ impl GameMap {
             }
         }
         let sites = vec![ReincarnationSite::at_cell(0, (C, C))];
-        let mut map = GameMap::sandbox_bare("Sandbox: worship", terrain, sites).with_shamans();
+        let mut map = GameMap::sandbox_bare("Sandbox: worship", terrain, sites).with_shamans().with_shading();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let mut vault = Building::new(BuildingKind::Vault, 255, (C * 512) as u16, ((C + 8) * 512) as u16, 0);
         vault.vault = Some(crate::vault::Vault::new(Some(crate::building::Reward::Building(BuildingKind::Temple)), crate::vault::DEFAULT_PRAY_TIME));
@@ -512,6 +547,7 @@ impl GameMap {
         map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at(3, -4), crate::angle::Angle::ZERO));
         map.add_vehicle(boat(1, (0, 16)));
         map.update_walls();
+        map.recompute_shading_all();
         map
     }
 }
@@ -571,6 +607,7 @@ impl GameMap {
         map.trees.retain(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 512)));
         map.update_walls();
         map.count_inside();
+        map.recompute_shading_all();
         map
     }
 
@@ -849,6 +886,14 @@ impl GameMap {
     /// the match has ended (`outcome`) — the simulation itself keeps running past that point (the "victory lap"
     /// epilogue, `outcome.rs`), but nothing can act on it any more.
     pub fn apply(&mut self, command: &Command) -> Option<DirtyRect> {
+        let dirty = self.apply_inner(command);
+        if let Some(rect) = dirty {
+            self.recompute_shading(&[rect]);
+        }
+        dirty
+    }
+
+    fn apply_inner(&mut self, command: &Command) -> Option<DirtyRect> {
         if self.armageddon().is_some() || self.outcome.is_some() {
             return None;
         }
@@ -1154,6 +1199,7 @@ impl GameMap {
         self.units.retain(|u| !gone.contains(&u.id));
         self.check_elimination();
         self.shield_everyone_once_ended();
+        self.recompute_shading(&dirty);
         dirty
     }
 }
@@ -1305,8 +1351,16 @@ impl GameMap {
         let (mut effects, mut rng) = (std::mem::take(&mut self.effects), self.rng);
         let events: Vec<WorldEvent> = effects.iter_mut().flat_map(|(_, e)| e.tick(self.now, self, &mut rng)).collect();
         effects.retain(|_, e| !e.is_over());
+        // A lava effect's own blend decays every turn even on a turn it fires no `WorldEvent` (still growing with
+        // nothing mature to spread, or quietly fading/cooling): without its own dirty rect here, `shading`'s
+        // blend-driven cliff glow would only ever update on the turns something else also changed.
+        let lava_cells: Vec<(i32, i32)> = effects.iter().filter_map(|(_, e)| if let EffectKind::Lava(lava) = &e.kind { Some(lava.cells()) } else { None }).flatten().collect();
         (self.effects, self.rng) = (effects, rng);
-        self.apply_events(events)
+        let mut dirty = self.apply_events(events);
+        if !lava_cells.is_empty() {
+            dirty.push(DirtyRect::bounding(lava_cells));
+        }
+        dirty
     }
 
     /// Scans that start coordinators or add units to them, one per kind in `Coordinators::tick`'s order.
@@ -2289,6 +2343,49 @@ mod tests {
         assert!(m.in_cast_range(0, SpellKind::LandBridge, m.spell_target(&Spell::LandBridge { from: (c, c), to: past_lake }).unwrap()));
         m.run(crate::time::Ticks::new(crate::land_bridge::DURATION));
         assert!(!m.terrain.is_water(lake.0, lake.1), "the lake raised under the bridge");
+    }
+
+    #[test]
+    fn raising_ground_updates_shading_incrementally_matching_a_full_recompute() {
+        let mut m = GameMap::sandbox_walk();
+        let c = MAP_SIZE as i32 / 2;
+        let before = m.shading.blend(c, c);
+        let rect = m.terrain.raise((c, c), 2, 300);
+        m.recompute_shading(&[rect]);
+        assert_ne!(m.shading.blend(c, c), before, "the edit changed the local slope");
+        let mut from_scratch = m.shading.clone();
+        let whole = DirtyRect { min: (0, 0), max: (MAP_SIZE as i32, MAP_SIZE as i32) };
+        from_scratch.recompute(&m.terrain, &m.ashes, &HashMap::new(), &[whole]);
+        assert_eq!(m.shading.blend(c, c), from_scratch.blend(c, c));
+        assert_eq!(m.shading.light(c, c), from_scratch.light(c, c));
+    }
+
+    #[test]
+    fn a_lit_lava_cells_shading_blend_matches_its_own_current_blend() {
+        let mut m = GameMap::sandbox_walk();
+        let c = MAP_SIZE as i32 / 2;
+        let at = ((c as u16) * 512 + 256, (c as u16) * 512 + 256);
+        m.add_effect(crate::lava::effect(0, at, vec![(c, c)]));
+        m.tick();
+        let lit = m.effects.iter().find_map(|(_, e)| match &e.kind {
+            EffectKind::Lava(lava) => Some(lava.cells_lit()),
+            _ => None,
+        });
+        let (_, blend, _) = lit.unwrap().into_iter().find(|&(pos, ..)| pos == (c, c)).unwrap();
+        assert_eq!(m.shading.blend(c, c), blend, "shading tracks the lava effect's own current blend, not the slope");
+    }
+
+    #[test]
+    fn an_ash_covered_cell_with_no_lava_takes_its_shading_blend_from_the_ashes() {
+        let mut m = GameMap::sandbox_walk();
+        let hut = m.add_building(Building { used: 1, ..Building::new(BuildingKind::Hut { size: 1 }, 1, MAP_SIZE as u16 / 2 * 512, MAP_SIZE as u16 / 2 * 512, 0) });
+        m.set_fire(hut);
+        for _ in 0..60 {
+            m.tick();
+        }
+        assert!(m.building(hut).is_none(), "burnt down");
+        let &cell = m.ashes.patches.last().unwrap().cells.first().unwrap();
+        assert_eq!(m.shading.blend(cell.0, cell.1), crate::ashes::DARK);
     }
 
     #[test]
