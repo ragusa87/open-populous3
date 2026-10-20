@@ -166,54 +166,60 @@ loaded once at level load and never rewritten, so there is no separate time-base
 and fading over a lava cell's life is the blend byte's own value doing so, read straight into this lookup
 every frame.
 
-## Our bake (`game-client/src/terrain_texture.rs`)
-Implemented to match the traced exe formula (see "bigfade"/"disp"/"cliff" above), not the old flat-scale guess
-this section used to describe. **A deliberate structural divergence from the original**, worth stating plainly
-(pop3-rev-analysis.md "Terrain land colour", 2026-10-20): the exe has no baked ground texture at all -
-`set_texture_landscape_main` recomputes the formula below fresh, per rendered screen pixel, every frame, at
-whatever resolution the quad is currently drawn at (`landscape_texture_32`/`16`/`16_fade`, pure CPU rasterization,
-no D3D texture involved). We instead bake the formula once into a single fixed-resolution colour texture
-(8 px/cell, below) and let the GPU sample/filter/magnify/minify it like an ordinary texture-mapped surface - far
-cheaper, but it means our texture needs its own mip/filtering care that the original's architecture never
-required in the first place (TODO.md "Terrain"). Per pixel (8 px per cell, texture tiles with a repeat sampler,
-UV = absolute cell / 128):
+## Our bake, now a shader (`game-client/src/ground_material.rs`, `ground.wgsl`, `terrain_texture.rs`)
+Matches the traced exe formula (see "bigfade"/"disp"/"cliff" above) **and**, since 2026-10-20, its architecture:
+the exe has no baked ground texture at all - `set_texture_landscape_main` recomputes the formula below fresh, per
+rendered screen pixel, every frame, at whatever resolution the quad is currently drawn at
+(`landscape_texture_32`/`16`/`16_fade`, pure CPU rasterization, no D3D texture involved). A previous version of
+this bake instead pre-baked the formula into one fixed-resolution (8 px/cell) RGBA texture and let the GPU
+filter/minify it like an ordinary texture-mapped surface — cheaper to write, but it needed its own mip chain to
+avoid minification aliasing at distance (TODO.md "Terrain", the mip-chain entry, now fixed) that the exe's own
+architecture never needed. `ground.wgsl` instead evaluates the formula per fragment, at the engine's own output
+resolution, same as the exe: `terrain_texture.rs` only prepares small per-cell scalar buffers (`bake_cells`/
+`rebake_cells`), `ground_material.rs` uploads them as GPU textures the shader bilinear/`textureLoad`-samples.
+UV = absolute cell / map size, same mapping the old baked texture used; the shader reads an integer cell
+coordinate as a half-texel-offset UV (`ground.wgsl`'s own doc comment) so ordinary hardware bilinear filtering of
+a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written corner bilinear exactly.
 - `game_core::shading::CellShading` (`GameMap::shading`) holds the per-cell `blend`/`light`/`downhill` the
   formula below reads, recomputed after every height edit (`GameMap::recompute_shading`, hooked into `apply` and
-  `tick` centrally) rather than derived from the rendered mesh at bake time.
-- row = water (outside the coast, below): `watdisp * 128 / 256` (`sea_row`, the whole water band; `disp` when the
-  file is missing, generated noise in the procedural theme); land: each corner's own `altitude_index =
-  clamp(height + 75 + (75 if blend != 0 else 0), 0, 1022)` (no averaging), bilinearly interpolated across the
-  quad, then floored at `land_start` (`Theme::land_start_row`, the first row from 128 up where most columns are
-  neither water colours nor sea-like, `pixel_rgb`'s own doc comment) — a renderer-side safety net, not in the
-  traced formula itself, so a freshly flattened low platform (`blend` 0, no second +75) still reads as ground. A
-  pixel's own `disp` sample (signed) then jitters the row by `(disp_sensitivity(row) * disp) >> 10`
-  (`pop3_format::theme::disp_sensitivity`), added straight into the flat `bigfade` index alongside the brightness
-  column (`Theme::bigfade_flat`) — a large jitter or brightness can legitimately roll into the next row, as in
-  the original.
-- coast (`coast_land`): walkers cross every cell not sea on all four corners (`is_sea`), so the coast is
-  drawn round those cells, not where the bilinear height reaches 1 (that left most of a shore cell blue
-  and units looked like they walked on water). Field = 1 at the centre of each walkable cell, 0 at sea,
-  bilinear between centres; ground where it reaches 0.2 (`COAST_THRESHOLD`). Covers a lone walkable
-  cell's corner (0.25 there), puts straight coasts 0.3 cell past the walkable edge and rounds the corners.
-  Ground there, even at height 0, takes the lowest land row.
-- brightness column: `shading.light` (sunlight-derived, bilinear-interpolated per corner like `blend`) plus a
-  small extra perturbation from `disp`'s own row-to-row difference, clamped 0..255 — not a baked Lambert light of
-  the rendered mesh slope any more (`pixel_rgb`). `game_core::shading::SunParams::default` is the sun vector:
-  live-measured and disassembly-traced (pop3-rev-analysis.md "Terrain land colour"), `sunX`/`sunZ`/`sunBase` are a
-  flat hardcoded `147`/`147`/`147` in normal play, independent of the level's own
-  `ShadeStart`/`ShadeRange`/`Inclination` (`pop3_format::level::Sunlight`) entirely (confirmed identical across two
-  levels with different on-disk `Inclination`), so the level's sunlight block is read and stored but no longer
-  feeds `SunParams` at all.
+  `tick` centrally) rather than derived from the rendered mesh at bake time; `terrain_texture::rebake_cells`
+  copies `blend`/`light` (and ash coverage, and the walkable flag) into the shader's `channels` texture (RGBA8)
+  one texel per cell, no pixel-level work at all any more.
+- row = water (outside the coast, below): `watdisp * 128 / 256` (`sea_row` in `ground.wgsl`, the whole water
+  band; `disp` when the file is missing, generated noise in the procedural theme); land: each corner's own
+  `altitude_index = clamp(height + 75 + (75 if blend != 0 else 0), 0, 1022)` (`terrain_texture::altitude_cell`,
+  no averaging), bilinearly sampled from the shader's `altitude` texture (one half-float per cell), then floored
+  at `land_start` (`Theme::land_start_row`, the first row from 128 up where most columns are neither water
+  colours nor sea-like) — a renderer-side safety net, not in the traced formula itself, so a freshly flattened
+  low platform (`blend` 0, no second +75) still reads as ground. A pixel's own `disp` sample (signed) then
+  jitters the row by `(disp_sensitivity(row) * disp) >> 10` (`pop3_format::theme::disp_sensitivity`), added
+  straight into the flat `bigfade` index alongside the brightness column — a large jitter or brightness can
+  legitimately roll into the next row, as in the original.
+- coast: walkers cross every cell not sea on all four corners (`terrain_texture::walkable_cells`, `is_sea`), so
+  the coast is drawn round those cells, not where the bilinear height reaches 1 (that left most of a shore cell
+  blue and units looked like they walked on water). The `channels` texture's A channel is 1 at a walkable cell's
+  own texel, 0 at sea, bilinearly sampled; ground where it reaches 0.2 (`COAST_THRESHOLD` in `ground.wgsl`).
+  Covers a lone walkable cell's corner (0.25 there), puts straight coasts 0.3 cell past the walkable edge and
+  rounds the corners. Ground there, even at height 0, takes the lowest land row.
+- brightness column: `shading.light` (sunlight-derived, bilinearly sampled per corner like `blend`) plus a small
+  extra perturbation from `disp`'s own row-to-row difference, clamped 0..255 — not a baked Lambert light of the
+  rendered mesh slope any more. `game_core::shading::SunParams::default` is the sun vector: live-measured and
+  disassembly-traced (pop3-rev-analysis.md "Terrain land colour"), `sunX`/`sunZ`/`sunBase` are a flat hardcoded
+  `147`/`147`/`147` in normal play, independent of the level's own `ShadeStart`/`ShadeRange`/`Inclination`
+  (`pop3_format::level::Sunlight`) entirely (confirmed identical across two levels with different on-disk
+  `Inclination`), so the level's sunlight block is read and stored but no longer feeds `SunParams` at all.
 - colour = `palette[cliff[blend / 4][bigfade[row][column]]]`: the bigfade lookup, then remapped through the
-  cliff table (`Theme::cliff`, bilinear-interpolated `blend` picks the row) before the palette lookup -
-  identity at `blend < 4`.
-- `terrain_texture::char_ashes` (a flat RGB darken) and `game-client/src/lava.rs`'s `LavaView` overlay mesh stay
-  wired alongside this for now, pending further visual verification against more original levels and effects
-  before they're removed (TODO.md "Terrain").
+  cliff table (bilinearly-sampled `blend` picks the row) before the palette lookup - identity at `blend < 4`.
+  Ash charring (a flat RGB darken towards a fixed dark colour, by the same bilinearly-sampled per-cell coverage
+  the old `char_ashes` used) happens after, in the same fragment; `game-client/src/lava.rs`'s `LavaView` overlay
+  mesh stays wired alongside this for now, pending further visual verification against more original levels and
+  effects before it's removed (TODO.md "Terrain").
 - When the simulation changes heights (`GameMap::step`'s `DirtyRect`s, kept in `world::TerrainPatches`), only
-  those cells and 2 around them (`REBAKE_MARGIN`: slope light and coast read up to a cell around) are baked again
-  into the texture (`rebake`), with the theme loaded once per level: a full bake is ~0.4 s, a land bridge changes
-  cells every tick.
+  those cells and 2 around them (`REBAKE_MARGIN`: `CellShading::recompute`'s own neighbour reach) get their
+  texel rewritten (`rebake_cells`), with the theme's LUT textures uploaded once per level. Height gliding
+  mid-tick (`world::TerrainGlide`) now lerps the one `altitude` scalar that feeds the shader, not the finished
+  RGB colour the old pixel-level glide used to blend — same documented simplification (`blend`/`light` are not
+  themselves glided), moved to the input instead of the output.
 
 Fallback (no data, or `--no-original`): `procedural_theme::generate(seed)` builds a palette
 (8 bands x 32 brightness), a jittered bigfade and tileable value-noise disp with the same
@@ -224,17 +230,11 @@ were never recalibrated for how much further the real, unscaled height + blend f
 table (TODO.md "Terrain": both need their own pass).
 
 ## Next
-See TODO.md ("Terrain") for the open follow-ups: removing `char_ashes`/`LavaView` once visually verified,
-switching `lava::downhill` to the precomputed field, the procedural `BANDS`/`synthetic_cliff` recalibration, the
-theme-aware snow band, and consuming `fade0-X.dat` (loaded, nothing reads it yet).
-- Curvature in a vertex shader over a static height texture (TODO.md "Performance"/"Terrain").
-- Mipmaps: not just distant aliasing in general - diagnosed this session as the likely cause of the
-  blocky/pixelated look and stark white speckles reported against the original's screenshots (TODO.md
-  "Terrain"). The runtime-baked `Image` (`world.rs`'s `theme_image`) has `mip_level_count: 1` despite a
-  `Linear` sampler; at the game's usual pitched-down, zoomed-out camera, many baked texels map to one screen
-  pixel, which single-mip linear filtering can't area-average - this also turns `pixel_rgb`'s faithful,
-  unclamped `row_jitter` noise (occasional bright texels, intentional per the exe's own formula) into visible
-  popping speckles instead of fine grain. Lava and swamp layers still to do too.
+See TODO.md ("Terrain") for the open follow-ups: removing the ash-charring shader step/`LavaView` once visually
+verified, switching `lava::downhill` to the precomputed field, the procedural `BANDS`/`synthetic_cliff`
+recalibration, the theme-aware snow band, and consuming `fade0-X.dat` (loaded, nothing reads it yet).
+- Curvature in a vertex shader over a static height texture (TODO.md "Performance"/"Terrain") - geometry, not
+  colour: still unaddressed, `terrain_mesh.rs` still computes curved vertex positions CPU-side every rebuild.
 - Free theme packs for redistribution (the original files must not be shipped). The community packs on
   thebeginning.uk/textures have no licence (site: "All rights reserved") and keep Bullfrog data (palette
   128..255, some ship the original `BL320`): fine to load from the user's `data/`, not to bundle.
