@@ -975,6 +975,84 @@ designers place directly (not spawned by casting the spell): 7/84 "reedy grass" 
   specific frame not yet checked, or a different system (level editor decoration, generated-map flora) not
   traced here.
 
+### Insect plague ("Swarm"): the cloud itself is invisible, drawn only by its own spawned bee-dots [exe]
+Traced this session (2026-10-20) to answer "how are the bees rendered", complementing the already-documented
+mechanics in "Per spell" row 5 (60 insects, 200 turns, 6-cell leash). The spell's single effect byte (spell
+record, model 5, `base = 0x5A80D0 + model*0x3E`, the per-type effect byte at `+0x28`) is class-7 type 0x15; its
+init thunk (table 0x50A59C, index `type−1`) is a one-liner forwarding to a dedicated function, `0x510020`
+(the cloud's own setup) — not the generic drawable path every other traced class-7 type above uses:
+```text
+init 0x510020:
+  height = ground(cast point) + 200          # hovers 200 units above the ground, not on it
+  speed  = 80                                # SPEED, already cross-confirmed ("Walking speed")
+  duration (+0x6C) = 200                     # 16.7 s - matches "Per spell"'s 200 turns exactly
+  insects-left (+0x72) = 60                  # matches "Per spell"'s "60 insects" exactly - this is that counter
+  home position (+0x75) = the cast point     # its own anchor, read back every turn (below)
+  heading (+0x57) = random 0..2047; re-aim timer (+0x70) = random 0..31 turns
+  5 target slots (+0x79..+0x89) cleared; a "flying/no-collision"-style flag (+0xC bit 0x80) set
+```
+**It never calls `0x4EE700`, the usual drawable setter, anywhere in its init or its per-turn code** (checked the
+full body of both) - so it keeps whatever the shared class-7 init (`0x50BCD0`, run before every type's own init)
+already set: `0x4EE700(&unit+0x33, index=0, class=0)`, the same "class-7 default" the Swamp write-up above
+names and confirms draws nothing. The swarm's own wandering point is therefore invisible in the world, same
+convention as Swamp's own body - not an oversight unique to this session's trace, a shared pattern for effects
+whose role is pure simulation, not a drawn shape.
+
+Per turn (state 0x16/22, not 23 - an easy off-by-one trap in this table, see the Reference row below -
+`0x510120`, Ghidra's own name `process_insect_plague` is correct):
+```text
+every turn: play ambient sound 0xA4 (unconditional unless a flag is set) - the only direct audible trace
+sub-state 0 (the first 4-ish turns after cast): just a delay, then falls into the main loop below
+main loop, every turn:
+  d2 = squared distance from home (+0x75) to current position
+  if d2 > 0x900000 (~6 cells, matching "at most 6 cells from the target"):
+      heading = angle(current -> home) (0x586074) + a small random jitter (±63)   # steers back toward the cast point
+  else, once every re-aim timer expiry (random 0..31 turns): heading = a fresh random angle
+  move one step at speed 80 along the current heading (the standard move helper, 0x4E6A70)
+  every 64 turns (duration's own low 6 bits == 0): look for a nearby enemy to "raid" (not re-traced this
+    session - the kill/panic/building-raid mechanics are already in "Per spell" row 5)
+  while insects-left (+0x72) > 0: spawn one class-7 type-0x1B "bee-dot" (below) at a random offset up to about
+    ±320 world units (roughly half a cell) from its own current position, on every tick this runs (0x510D40)
+```
+The visible "bees" are these separately-spawned type-0x1B instances, not the cloud itself - up to 60 of them
+over the spell's life, matching "Per spell"'s own count. Type 0x1B's init (table index 0x1A, `0x509E19`) DOES
+call the normal drawable setter: `0x4EE700(&unit+0x33, index=0, class=0x1A)` (table `0x5A6AF8` row 26, renderer
+byte 0x0D - not one of the already-named renderer bytes 0/1/3 elsewhere in this doc, so its exact visual
+(a single hfx sprite id? a special multi-point renderer?) is not identified this session), hovering 50 units
+above the ground. Its own per-turn (`0x510CB0`) idles for its first 4 sub-states, then cycles a ~19-step
+sub-state loop (wrapping at 23): while it holds a "reference unit" (+0x74, the same per-unit target-tracking
+field style as the wildmen's own "idle near a reference unit", "Wildmen") it repositions itself each step
+relative to THAT unit's current position (`0x49BCF0`) rather than its own spawn point - i.e. once the cloud has
+picked a victim, its bee-dots visibly orbit the victim, not the cloud's own wandering point. Not confirmed this
+session: whether the spawner (`0x510D40`) copies the cloud's own current target into each new bee-dot's `+0x74`
+at spawn (plausible from the shared field convention, the actual write wasn't single-stepped), and the bee-dot's
+own expiry condition (its own duration field wasn't read this session).
+
+**A few bee-dots ARE tribe-coloured, confirmed (2026-10-20, following up a direct question):** right after
+`0x510D40` allocates each new bee-dot, one more LCG draw (`& 0xF`) gives a 1-in-16 chance (about 6%); on that
+roll it reads the new bee-dot's own tribe (`+0x2F`, inherited from the caster at `alloc_unit` time) into a
+per-tribe byte table at `0x5A89CA` (stride 5) and stores the result in the bee-dot's own `+0x8A`; the other
+15/16 of spawns instead store one fixed global byte (`0x89C6F5`, not tribe-dependent) there. `0x5A89CA` is the
+SAME underlying table "Status markers over people" already names as `0x5A89CB` for the shield rings' own
+`tribe_colour[tribe]` (that code reads the record's byte+1; the swarm reads byte+0 - one shared 5-byte-per-tribe
+struct, two different fields, not two tables) - **and byte+0, read directly against the shipped `pal0-0.dat`
+this session, is each tribe's own flag-coloured palette index**: tribe 0 `0xDA` → RGB (35, 51, 111) dark blue,
+tribe 1 `0xF2` → (95, 7, 7) dark red, tribe 2 `0xEC` → (163, 119, 19) mustard/gold, tribe 3 `0xE2` → (23, 103, 63)
+dark green - an exact match to the four player colours. `draw_polygons` (`0x46AE3D`) reads a unit's own `+0x8A`
+back, multiplies by 4 into a small cached RGB table (`0x87EFF8`, runtime-built, not static exe data - likely a
+fast palette-index→RGB cache shared with other flat-colour draws, not bee-specific) and passes the result to a
+dedicated flat-coloured-point draw call (`0x4B7F90`), distinct from the ordinary textured hfx billboard path -
+strong circumstantial fit (it is reached reading the SAME `+0x3A`/table-`0x5A6AF8`-row fields the bee-dot's own
+init sets, right in the same code neighbourhood) but the exact dispatch value that selects this specific branch
+over `draw_polygons`'s many other small per-kind cases was not pinned down this session. Net picture: roughly one
+spawned bee-dot in sixteen flashes the caster's own tribe colour as a plain coloured point, the rest share one
+fixed neutral tint - matching "probably a few are coloured" exactly, not an all-or-nothing effect.
+- Impact on our specs: TODO.md "Spells" - Swarm isn't implemented client-side yet; when it is, the original's
+  own look is a diffuse, slow-wandering scatter of ~60 small point-sprites hovering above the ground (clustering
+  around a current victim once one is picked), not one big cloud sprite or a ground-level mist like Swamp's own
+  (deliberately absent) rendering - with roughly 1 in 16 of those points recoloured to the caster's own tribe
+  colour (the same four flag colours `0x5A89CA` gives, see above), the rest a fixed neutral tint.
+
 ### Status markers over people [exe]
 All drawn with the person's sprite in `draw_polygons` (0x468B3F-0x4694F2), straight from the status flags: no
 effect unit. Sprites are `hfx0-0.dat` (table `[0x59DF14]`); `h` is the height of the person's current frame (VFRA
@@ -2678,7 +2756,7 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4BB290 | fireball impact: creates the shot's own caller-configured effect (class/type/queued params from the shot's own +0x7C-0x86), see "Fireball impact" |
 | 0x511800 | Firestorm's own impact effect (type 0x1C) init: land/water branch, ground-fire or splash, a blast, building ignite |
 | 0x4A8C60 | sets a scenery's own burn-length countdown from a band table (exact fields/turns not decoded) |
-| 0x50A750 | effect per turn: switch on +0x2C (table 0x50AFD4); effect init by type: table 0x50A59C |
+| 0x50A750 | effect per turn: switch on +0x2C (table 0x50AFD4); effect init by type: table 0x50A59C. Both tables are indexed `state−1`/`type−1` (`dec eax` before the bounds check and `jmp [eax*4+table]` in both dispatchers, confirmed by reading them directly, 2026-10-20) - an off-by-one trap when computing a row's address by hand, see "Insect plague" for a worked example |
 | 0x50B630, 0x50B6F0, 0x50B740 | simple blast: default init, init with parameters, per turn |
 | 0x515E30 | nearest-N selector (invisibility, shield, bloodlust, hypnotism) |
 | 0x4DA080 | person damage (unit, tribe, amount, ignore_shield) |
@@ -2693,6 +2771,13 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x50EE00, 0x50ECC0 | land bridge: per turn, per cell (smoke, height step, refresh, notify) |
 | 0x511640 | firestorm per turn (state 23, Ghidra's `process_firestorm` is correct): gated spawn, see "Firestorm fireballs" |
 | 0x50FF30 | erosion per turn (state 24, Ghidra's `process_erosion` is correct, despite living in the shot code area): jitter + one pass via 0x4983A0, see "Erosion passes" |
+| 0x510020 | insect plague (swarm) effect 7/0x15 init: height/speed/duration/insect-budget/home position/heading, never sets a drawable - "Insect plague" |
+| 0x510120 | `process_insect_plague` (Ghidra's own name is correct), state 0x16 (22) per turn: sound, home-leash steering, bee-dot spawning - "Insect plague" |
+| 0x510D40 | insect plague's bee-dot spawner (its own sub-state 0): `alloc_unit(7, 0x1B, ...)` at a jittered point near the cloud, gated by the insect-budget counter +0x72; also, 1-in-16, tints the new bee-dot with its tribe's own colour (+0x8A, from table 0x5A89CA) - "Insect plague" |
+| 0x509E19 | bee-dot effect 7/0x1B init: the ONE drawable call in this whole chain, `0x4EE700(&unit+0x33, 0, 0x1A)` (table 0x5A6AF8 row 26, renderer byte 0x0D, not otherwise identified this session) - "Insect plague" |
+| 0x510CB0 | bee-dot per turn: a ~19-step sub-state cycle, repositioning relative to a held reference unit (+0x74) once set - "Insect plague" |
+| 0x5A89CA | per-tribe 5-byte struct (same table "Status markers over people" calls 0x5A89CB for the shield's tribe_colour, a different field of the same record): byte+0 is the tribe's own flag-colour palette index (blue/red/gold/green for tribes 0-3, confirmed against pal0-0.dat), read by the bee-dot tint roll - "Insect plague" |
+| 0x46AE3D | `draw_polygons`: reads a unit's own +0x8A tint byte, looks it up (×4) in a runtime-built RGB cache (0x87EFF8), and draws a flat-coloured point via 0x4B7F90 - the bee-dot's likely real blit, not fully pinned to its exact dispatch case - "Insect plague" |
 | 0x4983A0 | one hydraulic-erosion pass over a window: per cell, steepest of its 8 neighbours (diagonals weighted 0xB505/0x10000); write-back magnitude not traced |
 | 0x44DDF0 | recompute the landscape around a cell after a height change |
 | 0x44F2F0 | notify units and buildings around a cell: mode 1 "ground moved", mode 2 "set on fire" |
