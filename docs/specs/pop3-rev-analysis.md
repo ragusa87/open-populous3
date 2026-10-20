@@ -85,6 +85,12 @@ so a live measurement may run on it with the addresses translated.
   only cell-grained, drowning is checked pixel-grained, every turn, no timer), and whatever kills a wildman, its
   death always plays the rare "climbing + spinning" spirit-rise variant everyone else only gets by drowning too -
   never the calm rising-ghost pose. See "Wildmen", "Death and the spirit rise".
+- **Land colour's brightness is a precomputed per-cell byte fed by the level's sunlight block; its row is pure
+  height + blend, no sunlight** [exe]: `bigf0-X.dat`'s row comes from `height + 75 (+75 again if the cell isn't
+  perfectly flat)`, clamped to 1022, jittered by `disp0-X.dat` noise scaled by a fixed altitude-dependent
+  sensitivity curve (320 on low/flat ground, up to 1024 high up) - no per-theme constant; the column comes from a
+  map-cell byte (+0xD) precomputed from each cell's own height gradient dotted against a sun vector the level's
+  `ShadeStart`/`ShadeRange`/`Inclination` set up, recomputed live on every height edit. See "Terrain land colour".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
 
@@ -1087,6 +1093,87 @@ screen = (x', y') · (1 << (S + 16)) / z'             # S = 0x87CA68, then a per
 - Defaults set by 0x416F50 (render block) and 0x46DFB0 (draw state); `clear_land_draw_state` 0x46E700 copies the
   block into the draw state before each frame.
 
+## Terrain land colour: the bigfade row and brightness [exe]
+The missing half of `set_texture_landscape_main` (0x4BE330): "Building ashes" "Drawn" already covers the
+blend-driven cliff/lava/ash row (`cliff[(blend/4)*128 + colour]`); this is the ordinary land colour that
+feeds `colour` into that lookup - the `bigf0-X.dat` row/column pick, terrain-textures.md "bigfade"/"disp"'s
+open questions.
+
+Besides height and the already-documented blend byte, two more per-map-cell fields drive it (table 0x8A03E4, 16
+bytes/cell, same record as height/blend/downhill):
+```text
++0xA blend   (already documented)
++0xD light   - a precomputed BRIGHTNESS byte, 0..255, NOT read live from a sun vector at draw time
++0xE downhill direction, high nibble (already documented); low nibble - also already-precomputed, feeds light
+```
+`+0xD` is written by a small function family (`compute_cell_light` 0x4BE230, sibling 0x4BE0B0 for the opposite
+neighbour pair, a bulk whole-map variant ending at 0x4BDE94 for level load) - called from the SAME per-dirty-cell
+pass that recomputes blend and downhill-direction after every height edit (`level_land_processing_2` 0x44DF40,
+from 0x44E7C9/0x44E7D1), so lighting tracks terrain edits live, not baked once at load:
+```text
+dx = height(cell) - height(cell at x+2, same z)        # height drop to the +x neighbour 2 units over
+dz = height(cell at same x, z+2) - height(cell)         # height rise to the +z neighbour 2 units over
+light = clamp( (sunBase + dz*sunZ - dx*sunX) / 350 + (low_nibble(+0xE) + 8) * 16,  0, 255 )
+```
+`sunX`, `sunZ`, `sunBase` are three signed 16-bit globals (0x937AA8, 0x937AAA, 0x937AAC) set once per level from
+the level's own sunlight block, not computed per draw call - **this is the confirmation that the level `.dat`
+sunlight block feeds the brightness column, not the bigfade row**: `ShadeStart`/`ShadeRange`/`Inclination`
+(level-format.md) are read straight into exe globals 0x937AAE/0x937AAF/0x937AB0, whose exe defaults (0x1C=28,
+0xF=15, 0x20=32) are byte-for-byte the three sunlight values level-format.md already measured; `0x401790` then
+builds angle-keyed tables from them via the sin/cos tables (0x5DDDE8/0x5DE5E8) and `0x401920` is one concrete
+Inclination=0x40(64) init path into `sunX`/`sunBase` - the generic arbitrary-Inclination derivation was not
+individually re-traced this session, only confirmed the three globals feeding `compute_cell_light` are
+sun-derived and level-sourced, not slope-of-the-rendered-vertex computed at draw time as "Our bake" (and
+terrain-textures.md) currently guesses. The `+0xE` low nibble (previously unidentified, see "Open questions")
+is this same precomputed ambient term, untouched by the downhill-direction write to the high nibble.
+
+The row itself is purely height + blend, same inputs as the already-documented cliff path, no sunlight:
+```text
+altitude_index = height(cell)                                 # the SAME cell the corner sits on, no averaging
+altitude_index += 0x4B                                         # +75, unconditional
+if blend != 0: altitude_index += 0x4B                          # +75 again (blend is 0 only on a perfectly flat
+                                                                #   cell with all 8 neighbours equal height)
+altitude_index = clamp(altitude_index, 0, 0x3FE)                # 1022 of bigfade's 1152 rows
+```
+Each of a quad's 4 corners gets its own `altitude_index` and `light` this way (no cross-cell averaging at this
+step, same as blend); both are then interpolated across the quad with the same Gouraud setup as the cliff path
+(value << 16 at the corners, per-step delta << 12). Per rendered pixel:
+```text
+sensitivity = DISP_SENSITIVITY[round_down(interpolated altitude_index)]   # table 0x5D45B8, 1152 signed i16 entries,
+                                                                           #   built once at level load:
+                                                                           #   clamp(3 * index - 64, 320, 1024)
+                                                                           #   (flat 320 below index 129, a +3/index
+                                                                           #   ramp to 1022 at index 362, flat 1024
+                                                                           #   above - i.e. disp noise barely moves
+                                                                           #   the row on low/flat ground and moves
+                                                                           #   it up to ~3.2x as much on high ground)
+row_jitter  = (sensitivity * disp_sample) >> 10                 # disp_sample: SIGNED byte from disp0-X.dat (movsx,
+                                                                 #   never treated as unsigned or re-centred by a
+                                                                 #   theme constant - a theme's own narrow byte
+                                                                 #   range, e.g. file 1's 45..127 vs file 5's
+                                                                 #   130..193, already IS the per-theme bias once
+                                                                 #   read as signed, no separate constant needed)
+row_fraction = (interpolated altitude_index fixed-point value) >> 8   # the interpolation's own sub-row precision,
+                                                                       #   folded in as extra column units (see below)
+brightness  = clamp( ((disp_sample_at_next_tile_row - disp_sample) >> 2) + (interpolated_light_fixed_point >> 16),
+                     0, 255 )                                   # `light` (the +0xD field above) interpolated the
+                                                                 #   same way, nudged by disp's OWN row-to-row
+                                                                 #   difference - a second, smaller use of disp
+index = row_jitter + row_fraction*256 + brightness               # one flat offset: a large `brightness` can
+                                                                   #   legitimately roll over into the next row,
+                                                                   #   this is not guarded against
+colour = bigf0-X.dat[index]                                      # 0..111 land colour, same byte then fed into
+                                                                   # cliff[(blend/4)*128 + colour] (Building ashes)
+```
+- No per-theme or per-level constant exists anywhere in this path beyond the loaded `bigf0-X.dat`/`disp0-X.dat`
+  files and the sunlight-derived `sunX`/`sunZ`/`sunBase`: `POP3_ROW_SCALE`'s single global multiplier has no
+  counterpart - the original's disp sensitivity is a fixed, altitude-dependent CURVE (320..1024, the table
+  above), not a flat per-theme or per-level scale, and it is multiplicative on disp, not on height.
+- `light`'s divide-by-350 and the `(low_nibble + 8) * 16` ambient term were not independently cross-checked
+  against a live measurement this session (mark as traced, not verified): worth a `livemem.py` read of a known
+  flat cell's +0xD next to its neighbours' heights if the exact scale matters later.
+- Impact on our specs: see terrain-textures.md "bigfade"/"disp"/"Our bake" and TODO.md "Terrain".
+
 ## Walking speed [exe]
 Each person type has a movement profile (table 0x5A7B90, 26 bytes each, picked by unit+0x30) whose speed at +4 is
 a named constant. When a person starts a walk (0x4D4F40, 0x4D6660):
@@ -1727,8 +1814,10 @@ its darkest "cliff" colour row there. Mouse-over text: "Damaged Ground: Cannot b
 ```text
 map cells: 0x8A03E4, 16 bytes, 128 per row; +0 flags (0x2 units, 0x10000 reincarnation site, 0x4000000 damaged
   ground, 0x8000000 lava), +4 height, +0xA blend byte (normally clamp((max neighbour height − min) / 8, 1, 127),
-  0 at height 0, from level_land_processing_2 0x44DF40, which skips flagged cells), +0xE high nibble downhill
-  direction (0 flat, 1-8 compass, low nibble untouched here) - same 0x44DF40, see "Volcano lava flow"
+  0 at height 0, from level_land_processing_2 0x44DF40, which skips flagged cells), +0xD precomputed brightness
+  byte for the landscape texture (see "Terrain land colour"), +0xE high nibble downhill direction (0 flat, 1-8
+  compass, low nibble a precomputed ambient-light term, also "Terrain land colour") - same 0x44DF40, see
+  "Volcano lava flow"
 
 a building losing its last wood (wood +0x96 <= 0 on its shape +0x82):
   attack accumulator 0x4092A0 (branch 0x409498), fire 0x408AB0 (0x408C38), whirlwind 0x4980A0 → 0x40B130
@@ -1770,6 +1859,10 @@ placement 0x44EE50: a cell with flags & 0x4010000 cannot be built on
   as the resulting permanent ash cools from 0xFF back to 127), reflected straight into this same per-cell colour
   lookup every frame - not a separate pulsing/flicker effect layered on top. The row colours themselves were not
   checked. Only other visual: the long damage smoke.
+- No elevation-vs-theme override sits anywhere above this mechanism: both lookups (bigfade row, cliff row) are
+  keyed by height/blend into whichever table the level's own theme loaded once, never by a global height band
+  independent of theme (see terrain-textures.md "bigfade"/"cliff" and TODO.md "Terrain" for the reimplementation
+  gap this explains - a hardcoded universal "snow at high elevation" band with no counterpart here).
 - Ashes or not:
 
 | Destroyed by | Path | Ashes |
@@ -2240,6 +2333,12 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   default `POP3_CURVATURE` 0.008 is too gentle, the earlier 0.012 was close), measured in camera space. The
   original height scale is 1/256 cell per unit (max 1024 = 4 cells), not "about 2 cells"; our 1/384 (2.7 cells)
   is flatter than the original. The original camera pitch is fixed at about 20°, 25 cells behind the focus.
+- terrain-textures.md "bigfade"/"disp"/"Our bake" ("Terrain land colour"): the original's row is `height + 75
+  (+75 again unless perfectly flat), clamp 1022`, no `POP3_ROW_SCALE`-like flat multiplier; `disp` noise is
+  signed and scaled by a fixed altitude-dependent curve (320..1024), not centred/offset by a theme constant; the
+  brightness column is a precomputed per-cell byte fed by the level's own sunlight block (`ShadeStart`/
+  `ShadeRange`/`Inclination`), not a baked Lambert light of the rendered heightmap slope as `terrain_texture.rs`
+  currently computes it.
 - units.md `statuses` / unit drawing: our drawing has no status marker yet. The original shows low health
   (sparkles, `hfx0-0.dat` 1489-1498), shield (three tribe-coloured rings, 1538-1552), bloodlust (red bubbles,
   1478-1487) and hypnosis (a halo, 1553-1563); invisible and ghost people of the player are drawn translucent,
@@ -2395,8 +2494,7 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   hit; what a passenger put out over water does (drowns?). Live check of the 5000-turn abandon life.
 - Volcano lava flow: the unnamed type-0x40 effect's (state 51) own role - spawned deterministically by the
   controller throughout cast-turns 120-240 (`ebp` 40-160, "Volcano rocks") as well as probabilistically by the
-  lava spread, but what it actually does once alive is still untraced; the map-cell +0xE low nibble's own meaning
-  (untouched by the downhill-direction write, not traced this session).
+  lava spread, but what it actually does once alive is still untraced.
 - Wildmen: state 0x22 (what "noticing" a nearby scenery-type-9 object or vehicle-type-3 object leads to) and the
   identity of those two types; the sub-state(8..19) → animation-id mapping in state 16; whether an explicit
   player attack order on a wildman is honoured in the original (only the automatic proximity scan is confirmed
@@ -2565,12 +2663,18 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x5018C0, 0x501AB0, 0x501000 | join/create a formation, find a compatible one, per-turn formation controller |
 | 0x443B40 | ring a tribe's buildings of one type with a kind-0x1E "alarm" order (process_tribe_cmd's one order-related case) |
 | 0x4BC500, 0x4BC660 | volcano fireball (shot 8/7 small, 8/8 big) init and per-turn (state 7): shared flight, size-specific trail/landing effects ("Volcano fireballs") |
-| 0x4BE330 | `set_texture_landscape_main`: per-quad blend/altitude-colour sampling and interpolation ("Building ashes") |
+| 0x4BE330 | `set_texture_landscape_main`: per-quad blend/altitude-colour and bigfade row/brightness sampling and interpolation ("Building ashes", "Terrain land colour") |
 | 0x4BDB50 | `set_cliff_palette`: builds the 64-row cliff/lava colour table at level load, never again (no animation) |
+| 0x4BD760 | `alloc_mem_1` (part of): builds `DISP_SENSITIVITY` (table 0x5D45B8, 1152 signed i16, `clamp(3*index-64, 320, 1024)`) at level load ("Terrain land colour") |
+| 0x4BE230 | `compute_cell_light`: map-cell `+0xD` brightness byte from the cell's own height gradient dotted against the sun vector (0x937AA8/AA/AC) plus an ambient term from `+0xE`'s low nibble, clamp 0..255; called from `level_land_processing_2` per dirty cell ("Terrain land colour") |
+| 0x4BE0B0 | sibling of `compute_cell_light` for the opposite pair of neighbour cells (same formula) |
+| 0x4BDE94 | tail of a third, whole-map bulk variant of the same `+0xD` computation, run at level load (start address not reverified this session) |
+| 0x401040, 0x401790 | sunlight init: `ShadeStart`/`ShadeRange`/`Inclination` (0x937AAE/AF/B0, exe defaults 28/15/32) into the sun vector via the sin/cos tables (0x5DDDE8/0x5DE5E8); also builds two unrelated 1024-entry angle-keyed shade tables (0x89BC8E, 0x89C08D) not re-examined this session |
+| 0x401920 | one concrete Inclination=64 init path into `sunX`/`sunBase` (0x937AA8/AC) via trig tables 0x5DE9E8/0x5DE1E8; the generic arbitrary-Inclination path not individually traced |
 | 0x512A00, 0x512A60 | lava flow (effect 34/state 33) init and per-turn: downhill spread, then fade, then ash ("Volcano lava flow") |
 | 0x5134C0, 0x513570 | lava square (state 38) init and per-turn: a static, decaying hot cell |
 | 0x44DDF0 | `land_level_processing_1`: queues a cell after a height change, flushes to 0x44DF40 at 0x400 queued |
-| 0x44DF40 | `level_land_processing_2`: per cell, recomputes blend (+0xA) and the downhill-direction nibble (+0xE) |
+| 0x44DF40 | `level_land_processing_2`: per cell, recomputes blend (+0xA), the downhill-direction nibble (+0xE) and, via `compute_cell_light` 0x4BE230, the light byte (+0xD) |
 | 0x44F2F0 | notify_area(mode bitmask, cell, radius, tribe): bit 0 ground-moved, bit 1 set-on-fire (shaman exempt) |
 
 Timing globals: turn counter 0x89D188 (u32), `turns_per_sec` 0x89D161 (u8, copied from the option at 0x98F712),

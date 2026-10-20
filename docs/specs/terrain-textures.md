@@ -18,9 +18,63 @@ Every file is raw, no header, row-major.
 | `watdisp.dat` | 65 536 | one file for all themes: 256 x 256 water displacement, unsigned (6..248) |
 | `plscv0-X` / `plsft0-X` / `plspl0-X.dat` | 24 576 / 16 384 / 1024 | not decoded (globe view?) |
 
-Themes seen: `0` desert orange, `5` sand/orange, `c` water-sand-olive-green-snow.
-Themes used by the 41 shipped levels: 1, 4-6, 8-13, 16-19, 21-25, 28-30 (never 0). Some files are shared
-between themes (22 distinct disp files, 32 bigfade, 32 sky).
+Themes used by the 41 shipped levels: 1, 4-6, 8-13, 16-19, 21-25, 28-30 (never 0) - numeric theme ids, which map
+to the file-name chars as `0-9` then `a-z` for 10-35, i.e. chars `1, 4-6, 8, 9, a-d, g-j, l-p, s-u`. Some files
+are shared between themes (22 distinct disp files, 32 bigfade, 32 sky; e.g. `v`/`w`/`x`/`y`/`z` are identical
+bigfade/palette data).
+
+**Rough colour-family catalogue, all 36 `pal0-X.dat`/`bigf0-X.dat` files, this session** (sampling a handful of
+mid-brightness land rows at low/mid height and near the 1152-row ceiling; a first pass, not exhaustive - static
+data-file analysis only, no exe trace, see "bigfade" above for how these rows are actually reached in play):
+
+| Theme | Low/mid land colour | Near the row ceiling |
+|---|---|---|
+| `0` | desert orange | same, desert orange |
+| `1` | desert orange/tan | same |
+| `2` | desert orange/tan | same, a little muddier |
+| `3` | desert orange/tan | same |
+| `4` | desert orange | same |
+| `5` | sand/orange (already known) | same, deeper orange |
+| `6` | desert tan, one green patch | desert tan |
+| `7` | desert/olive mix | blue-grey to olive-green (damp, jungle-ish) |
+| `8` | desert/olive/green mix | green to grey-green (jungle/rock) |
+| `9` | grey-green, muddy | grey, some green (rocky upland) |
+| `a` | desert tan/olive | tan fading to grey-green (rock) |
+| `b` | desert orange, one olive patch | desert orange/brown |
+| `c` | blue-grey water patch then olive/green (already known: "water-sand-olive-green-snow") | muddy orange/grey mix |
+| `d` | desert orange, some pink/mixed | green to grey (rock), one mixed |
+| `e` | desert orange/tan | desert orange |
+| `f` | desert/olive/green mix | desert orange, one mixed |
+| `g` | desert tan, one pale patch | pale pinkish-grey/haze, all "mixed" - possibly a hazy highland, not clearly snow |
+| `h` | mixed pale tan, one pale blue | **pale blue trending to near-white near the very top rows - the clearest snow/ice-style theme found** |
+| `i` | blue/lavender throughout | pale blue/lavender, brighter near the top - a distinct blue-toned theme, not snow-white |
+| `j` | desert tan to green | pale green (savanna-like), consistently |
+| `k` | desert/olive/grey mix | pale blue-green near the top (icy lake highland?) |
+| `l` | desert orange/tan | desert orange, deeper |
+| `m` | desert orange/tan | desert orange |
+| `n` | desert orange/tan | desert orange |
+| `o` | pale desert/sand | pale desert/sand, one mixed |
+| `p` | pale desert/sand, one green | green (highland) then back to orange at the very top |
+| `q` | desert/olive | desert orange |
+| `r` | green throughout | blue-green to green |
+| `s` | desert orange/tan | desert/mixed brown |
+| `t` | muddy grey/mixed | grey (rock/mountain theme) |
+| `u` | pale pink/tan, mixed | mixed pink/grey/blue, one orange |
+| `v`,`w`,`x`,`y`,`z` | desert tan to green (identical files) | desert orange/brown (identical files) |
+
+Caveat: only one column (64, a medium brightness) was sampled per row here, so a theme can have a near-white
+colour hiding at a brighter column on a row this pass called "mixed"/"desert" - confirmed for `c` itself:
+column 0 (brightest), row ~200 (low ground) is near-white `(242, 232, 223)`, which is presumably that theme's
+"snow" in its existing qualitative description, not a row-ceiling effect - brightness, not just height, matters
+to whether a cell reads as snow-like. Treat this table as a rough first pass (one column, a handful of rows),
+not a verified per-theme palette audit.
+
+Of the themes checked at the row ceiling specifically, only `h` goes clearly near-white there (TODO.md
+"Terrain", `procedural_theme.rs`'s universal top "snow" band at row 960 for every theme); `i` and `k` lean pale
+blue near the top instead, everything else stays in its own desert/green/rock family all the way up - this still
+confirms the TODO item's premise (a universal top-row "snow" band has no basis in most themes), while showing the
+real picture is theme- and brightness-dependent, not simply "row 960 is snow" for the handful of themes that do
+go pale up there.
 
 ## Palette regions
 - `0..111`: land colours, per theme. bigfade uses only these (themes 1-z use all 112; theme 0 1..100).
@@ -42,21 +96,49 @@ How the original maps it (scrolling backdrop?) is not checked. Generated maps ke
 
 ## bigfade
 - Columns: brightness, 0 bright -> 255 dark (theme 1, row 600: luminance 186 -> 40).
-- Rows: 1152 = 1024 (max height) + 128. Rows 0..127 water/shore, land from 128 (fits, not proven).
+- Rows: 1152 = 1024 (max height) + 128.
 - PopResourceEditor's level preview (its own approximation, not the game) uses row `height + 140`,
   column 64 as neutral light, +-16 for slope lighting, -16 on cliffs (|dh| > 10), and draws sea cells
   (height 0) as `bigfade[watdisp[x, y]]` (row 0).
-- Level `.dat` sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32 or 64, see level-format.md)
-  is probably the game's lighting input: unverified. The ALACN world editor doesn't use it: it colours land from
-  its own height ramp and zeroes the block when saving.
+- **Row formula, traced from the exe this session** (pop3-rev-analysis.md "Terrain land colour"):
+  `row = clamp(height + 75 + (75 if blend != 0 else 0), 0, 1022)`, the
+  SAME per-cell `blend` byte as "cliff" below (so almost every non-dead-flat cell gets the second +75: blend is
+  0 only when a cell and all 8 neighbours share the same height) — no cell averaging, each of a quad's 4 corners
+  reads its own cell directly, then the 4 values are interpolated across the quad the same way as blend (see
+  "cliff"). This explains, rather than hardcodes, the old "rows 0..127 water/shore" guess: a flat sea cell
+  (height 0, blend 0) lands at row 75, squarely in that band, while almost any land cell (blend != 0 the moment
+  it isn't perfectly flat) jumps straight past 127 even at height 1 (75+75+1=151) — the split falls out of the
+  formula, it isn't a separate rule. `disp` noise (below) then jitters this per-pixel; the final flat
+  `bigf0-X.dat` index also folds in the brightness column (a large brightness value can legitimately roll over
+  into the next row — not guarded against in the original).
+- Level `.dat` sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32 or 64, see level-format.md) does
+  **not** feed the row: traced this session into the brightness column instead (pop3-rev-analysis.md "Terrain
+  land colour"). The ALACN world editor doesn't use it either: it colours land from its own height ramp and
+  zeroes the block when saving.
+- No elevation-vs-theme override exists anywhere in the traced exe path (see "cliff" below): a row is picked
+  purely from height (+ noise) or from the per-cell `blend` byte, then looked up in whichever `bigf0-X.dat`/
+  `cliff0-X.dat` the level's theme loaded once at level start. Nothing re-keys the colour by a global height
+  band independent of that per-theme table. A theme's top rows look however that theme's own file draws them
+  (near-white only for the few themes whose file actually goes pale up there, e.g. `h`/`i`/`k` - see "Themes
+  seen" above) — it is theme data, not a rule.
 
 ## disp
 - PopResourceEditor treats it as signed (shows `v + 128`). No file crosses 127/128, so the files can't
   tell signed from unsigned.
 - The ranges are narrow and differ per theme: theme 1 45..127 (mean 87), 5 130..193 (mean 161),
-  7 150..170, c 73..106, 0/w/x/y/z 0..255. So the values are **not centred on 128**: `(d - 128) / 2`
-  shifts every row by a theme constant (about -20 rows for theme 1, +17 for theme 5). Our bake subtracts the file
-  mean to keep only the detail; how the game uses it is unknown.
+  7 150..170, c 73..106, 0/w/x/y/z 0..255.
+- **Confirmed from the exe this session** (pop3-rev-analysis.md "Terrain land colour"): the game reads the byte
+  as SIGNED (no re-centring, no per-theme constant) and uses it twice. (1) As the bigfade row's jitter, scaled by
+  a fixed altitude-dependent sensitivity curve baked once at level load (one value per row, `clamp(3 * row_index -
+  64, 320, 1024)`: flat 320 below row index 129, a +3/index ramp to 1022 at 362, flat 1024 above — see
+  pop3-rev-analysis.md "Terrain land colour" for the table itself) — so the SAME raw disp byte moves the row much
+  more on high ground than on low/flat ground, not a flat scale. (2) As a small extra brightness perturbation,
+  from the difference between two
+  vertically-adjacent disp texel samples. So each theme's own narrow, off-centre byte range (e.g. file 1 always
+  below 128 i.e. always a small positive signed value, file 5 always above 128 i.e. always a negative one) IS
+  the per-theme bias once read as signed — there is no separate exe-side per-theme constant to find; our bake's
+  own "subtract the file mean" is solving a different problem (keeping the width of the noise comparable across
+  themes for `POP3_ROW_SCALE`), not reproducing this.
 
 ## fade
 `fade[level * 256 + colour]`. Row 32 is the identity, rows below darken (0: about 0.27x luminance,
@@ -102,19 +184,31 @@ Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cel
   bilinear between centres; ground where it reaches 0.2 (`COAST_THRESHOLD`). Covers a lone walkable
   cell's corner (0.25 there), puts straight coasts 0.3 cell past the walkable edge and rounds the corners.
   Ground there, even at height 0, takes the lowest land row.
-- brightness column from baked Lambert lighting of the heightmap slope (`SUN`), material is unlit.
+- brightness column from baked Lambert lighting of the heightmap slope (`SUN`), material is unlit. The original
+  instead reads a precomputed per-cell brightness byte fed by the level's own sunlight block, recomputed
+  live on every height edit rather than derived from the rendered/bilinear slope at bake time (pop3-rev-analysis.md
+  "Terrain land colour") — close in spirit (both are a height-gradient dot a light direction) but a different
+  input (raw per-cell neighbour heights, not the baked mesh normal) and update timing.
 - colour = `palette[bigfade[row][column]]`.
 - When the simulation changes heights (`GameMap::step`'s `DirtyRect`s, kept in `world::TerrainPatches`), only those
   cells and 2 around them (`REBAKE_MARGIN`: slope light and coast read up to a cell around) are baked again into the
   texture (`rebake`), with the theme loaded once per level: a full bake is ~0.4 s, a land bridge changes cells
   every tick.
 
-Unverified guesses to tune against the real game (see disp above): the height -> row scale (`POP3_ROW_SCALE`, default 1.0;
-x3-x4 turns level 1 olive/green but washes level 5 peaks out; level 1, all
-below height 100, comes out sandy), how `disp` is applied, the brightness curve.
+Now traced against the real game (see "bigfade"/"disp" above): the original has no flat `POP3_ROW_SCALE`-like
+height multiplier at all — row is `height + 75 (+75 again unless the cell is dead flat)`, clamped to 1022, and
+`disp`'s effect on the row is scaled by a fixed altitude-dependent curve (320..1024), not a constant. Our single
+global `POP3_ROW_SCALE` is the wrong shape of knob: it should be replaced by the `height + 75[+75]` formula
+directly (no scale to tune), with `disp`'s multiplier following the same 320..1024 altitude curve instead of a
+single factor. The brightness curve is also now traced (a per-cell precomputed byte from local height gradient
+dotted against the level's sun vector, not a baked Lambert light of the mesh slope) — see the bullet above.
 Fallback (no data, or `--no-original`): `procedural_theme::generate(seed)` builds a palette
 (8 bands x 32 brightness), a jittered bigfade and tileable value-noise disp with the same
-shapes as the original files, so the same bake is used in both modes.
+shapes as the original files, so the same bake is used in both modes. Its `BANDS` table hardcodes the same
+8 bands, in the same order, for every theme/seed — including a top "snow" band starting at row 960 applied
+unconditionally. That has no basis in the original (see "Themes seen" above: only a few themes, e.g. `h`, go
+near-white that high up, and it's theme data, not an elevation rule) and is why the reimplementation shows snow
+at high elevation on every theme when running without the original asset files. See TODO.md "Terrain".
 
 ## Next
 See TODO.md ("Terrain"): fade and cliff loading (`pop3_format::theme` loads pal, bigf, disp, watdisp and the
