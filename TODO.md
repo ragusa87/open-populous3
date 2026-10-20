@@ -34,6 +34,17 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Measure the windowed release build too (`cargo run --release`): the numbers above are the dev build under
   tracing. The simulation only matters with many units: every walker replans A* on any terrain write
   ("Replanning" in Units).
+- [ ] Loading screen freezes near the end: two unyielded main-thread stalls, both reading as "the bar reaches
+  100% then hangs". `boot::poll_job` (`boot/mod.rs`) runs each `BootJob`'s CPU work off-thread, but once it
+  finishes, `J::install(output, world)` (GPU uploads, resource inserts) runs synchronously with no progress
+  reporting, and `BootStatus::fraction()` caps a job at 0.99 while running, so the bar sits near 100% for the
+  whole `install` (the `"boot: {label} installed in {ms}"` log line says which job's `install` is slow). Separately,
+  `menu::begin_game`/`boot::GameStep` is explicitly documented as blocking ("then built, which holds the main
+  thread"): after `SHOW_FRAMES` the map is built synchronously (`LevelList::load_current`: parse, build `GameMap`,
+  recompute shading), zero progress reporting, no frames drawn until it returns - likely the dominant freeze for a
+  real original level. Fix direction: make a slow `install` (or the map build) incremental, a bounded chunk of work
+  per frame via a small state machine, instead of one unyielded call. Separate from the existing stale-terrain-
+  during-instant-bulk-tick bug above (that one is post-load desync, not a loading-time stall).
 
 ## Menu and sandboxes ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Sandbox Spells: test ground to cast every spell freely (no mana, no charges).
