@@ -1289,9 +1289,28 @@ colour = bigf0-X.dat[index]                                      # 0..111 land c
   flooring to 0 - consistent with the formula and the flat 147/147/147 sun vector above. A live spot-check on
   sloped cells did not reproduce the formula from a naive `base + (z*128+x)*16` cell-address read; `compute_cell_
   light` (0x4BE230) builds its map-cell address with `x`/`z` masked by `0xFE`/`0xFE00` before scaling
-  (pop3-rev/docs/functions.tsv), which a plain row-major calc does not reproduce bit-for-bit - a live tool that
-  reproduces that exact packed-index addressing would be needed to verify sloped cells numerically; the formula
-  itself is re-confirmed correct from the disassembly regardless (pop3-rev/docs/functions.tsv 0x4BE230/0x4BE0B0).
+  (pop3-rev/docs/functions.tsv), which a plain row-major calc does not reproduce bit-for-bit.
+  **First pass 2026-10-20 claimed this was inert and the neighbour distance matched - that was WRONG, caught
+  and corrected the same session.** The error: treating `compute_cell_light`'s own raw `x`/`z` argument as if
+  it were the same unit as open-populous's real 0..127 file-cell coordinate, when it provably is not.
+  **Corrected, cross-checked against `load_level2`'s height-table populate loop** (0x484C9A-0x484CB8,
+  pop3-rev/docs/functions.tsv): that loop runs exactly 0x4000 (16384 = 128*128) iterations, advances the
+  `0x8A03E4` table pointer by a flat `+0x10` (16 bytes) on **every** iteration, and reads the level file's
+  height values sequentially in the file's own `(z*128+x)` order - i.e. the table's real, ground-truth layout
+  is `base + 16*(z_real*128 + x_real)`, one record per real file cell, `x_real`/`z_real` each 0..127, no
+  doubling, no skipping. For `compute_cell_light`'s own address formula (`base + (x&0xFE)*8 + (z&0xFE)*1024`)
+  to land on that same record, its raw inputs must satisfy `x_raw = 2*x_real`, `z_raw = 2*z_real` - its x/z
+  are provably DOUBLE the real file-cell coordinate, not equal to it. So its internal `+2` neighbour step
+  (`x_raw -> x_raw+2`) lands on real cell `x_real+1` - the immediately adjacent real cell, a ONE-cell step.
+  open-populous's `height(x, z)` takes real 0..127 file-cell coordinates directly (confirmed separately,
+  byte-for-byte, against `levl2001.dat`'s own `(z*128+x)*2`-byte layout), so `height(x, z) - height(x+2, z)`
+  measures across TWO real cells where the original measures across ONE - the overshoot the original
+  hypothesis suspected, now proven from the load-loop's address formula rather than a block-granularity guess.
+  Re-read `0x4BE0B0` the same session regardless: identical single formula, identical `+2` raw-unit step inside
+  a nested x/z loop over a rectangular range (a bulk sweep, not a second diagonal pass whose result needs
+  combining with `0x4BE230`'s) - that part of the first pass still holds. Net: `cell_light`'s neighbour should
+  read `height(x+1, z)` / `height(x, z+1)` in open-populous's own (undoubled) coordinate convention, not `+2` -
+  see TODO.md "Terrain".
 - Impact on our specs: see terrain-textures.md "bigfade"/"disp"/"Our bake" and TODO.md "Terrain" - in particular,
   `game_core::shading::SunParams::default` now ships the flat 147/147/147 confirmed above, not the
   `ShadeRange`/`ShadeStart`-scaled guess it used to.

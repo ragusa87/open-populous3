@@ -307,6 +307,32 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   the gated day/night sun-angle tick (0x401350) or the fixed-Inclination-64 path (0x401920) ever actually run in
   some mode (both measured OFF this session); how the original maps its sky (backdrop scrolling with the
   camera?), not traced this session either.
+- [x] `game_core::shading::cell_light`'s slope sample overshot: it read `height(x, z) - height(x + 2, z)` /
+  `height(x, z + 2) - height(x, z)`, a two-real-cell baseline, where the original's `compute_cell_light`
+  (0x4BE230) reads a one-real-cell baseline (pop3-rev-analysis.md "Terrain land colour", 2026-10-20 correction —
+  proven from `load_level2`'s height-table load loop, not assumed) — fixed, now `height(x + 1, z)` /
+  `height(x, z + 1)`. Confirmed independently correct (unit tests updated, `just test` passes), but on
+  `levl2001.dat`'s own decorative hill (theme `c`) the near-white shoreline band this was found from is only
+  partly better after the fix: raw heights there are steep even over a single real cell (z=11: x=9..12 is
+  412, 353, 191, 0), so some clamping still happens, and separately `bigf0-c.dat` rows 128-139 (the
+  `land_start_row()`-floored "lowest dry land" band) are pale/sandy-grey across most of the realistic
+  brightness range, not just at the clamped extremes - any shore cell floored into that band reads pale
+  regardless of `cell_light`. See the next entry: `land_start_row()`'s own floor has no original basis at all,
+  and is the more likely remaining source of this paleness, not a miscalibrated value to retune.
+- [ ] `pop3_format::theme::Theme::land_start_row()`'s floor has NO counterpart in the original at all (checked
+  2026-10-20, exe-side, pop3-rev's `0x4BE330` corner-computation trace): the only fields the original's row
+  formula reads are height(+4)/blend(+0xA)/light(+0xD), clamped only to `0..0x3FE` - no per-theme/per-shape
+  minimum row anywhere. Shape (+0xC) is read exactly once, earlier in the function's vertex preamble, purely
+  as a binary "is this vertex open sea, skip land-colour entirely" gate - a shore cell that passes that gate
+  runs the exact same `height+75(+75 if blend)` formula as ordinary dry land, no distinction, no floor. So the
+  "flat low platform reads sea-like" case `land_start` was invented to patch is apparently accepted, unguarded
+  behaviour in the real game too - not a case of picking a better floor value per theme, but of flooring at all
+  being a deviation. The pale rows 128-139 the hill repro hit are very likely just what theme `c` legitimately
+  looks like at a natural near-sea-level row (e.g. height 0 + saturated blend -> row 150 by the bare formula,
+  already above `land_start`'s current 137 floor) - meaning `land_start_row()` reading pale isn't itself the
+  bug; check instead whether it's overriding a correctly-computed higher row somewhere, or being applied to
+  cells the original would never floor at all. Try removing the floor entirely against a real level with a
+  flattened low platform before re-adding any shore-specific special case.
 - [x] Baked terrain texture minification aliasing (blocky look and bright-speckle `row_jitter` at distance,
   since a single-mip baked 8 px/cell texture can't area-average many texels into one screen pixel): fixed by the
   structurally faithful route this entry already pointed at — the ground colour formula (terrain-textures.md

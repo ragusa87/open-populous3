@@ -103,6 +103,23 @@ pub struct GroundCells {
     pub altitude: Vec<f32>,
 }
 
+/// Insets `shading.light`'s stored byte away from the hard 0/255 ends it's otherwise free to reach on a
+/// pathologically steep slope (`CellShading`'s own `cell_light`, confirmed bit-exact to the traced exe this
+/// session, pop3-rev-analysis.md "Terrain land colour": the masking that looked like it might give a gentler
+/// neighbour distance turned out to be a no-op, and the original would clamp identically on an equally steep
+/// slope). A `land_start`-floored low row at a clamped-to-0 brightness lands on a theme's own near-white palette
+/// entry (confirmed on level 1's decorative hill, theme c: `(242, 232, 223)` at row ~130, brightness 0-10) -
+/// visually jarring on a small, sharply-sloped feature even though the colour pick itself is faithful. This is a
+/// deliberate, renderer-only visual deviation from the traced formula, not a correctness fix: `shading.light`
+/// itself (the simulation-facing value) is untouched, only the byte this client bakes into the GPU texture. See
+/// TODO.md "Terrain".
+const LIGHT_SOFT_MIN: u8 = 32;
+const LIGHT_SOFT_MAX: u8 = 223;
+
+fn soften_light(light: u8) -> u8 {
+    light.clamp(LIGHT_SOFT_MIN, LIGHT_SOFT_MAX)
+}
+
 /// Every cell of `map`, from scratch.
 pub fn bake_cells(map: &Heightmap, shading: &CellShading, ashes: &Ashes, walkable: &[bool]) -> GroundCells {
     let side = map.size();
@@ -134,7 +151,7 @@ pub fn rebake_cells(map: &Heightmap, shading: &CellShading, ashes: &Ashes, walka
             let blend = shading.blend(cx, cz);
             let walk = walkable[i];
             channels[i * 4] = blend;
-            channels[i * 4 + 1] = shading.light(cx, cz);
+            channels[i * 4 + 1] = soften_light(shading.light(cx, cz));
             channels[i * 4 + 2] = (ash_coverage(ashes, (cx, cz)) * 255.0).round() as u8;
             channels[i * 4 + 3] = if walk { 255 } else { 0 };
             let now = altitude_cell(map.get(cx, cz), blend);
@@ -258,11 +275,18 @@ mod tests {
         assert_eq!(cells.side, 8);
         let i = 4 * 8 + 4;
         assert_eq!(cells.channels[i * 4], shading.blend(4, 4));
-        assert_eq!(cells.channels[i * 4 + 1], shading.light(4, 4));
+        assert_eq!(cells.channels[i * 4 + 1], soften_light(shading.light(4, 4)));
         assert_eq!(cells.channels[i * 4 + 2], (ASH_COVER * 255.0).round() as u8, "freshly ashed");
         assert_eq!(cells.channels[i * 4 + 3], 255, "walkable");
         assert_eq!(cells.channels[3], 0, "sea corner (cell 0,0), not walkable");
         assert_eq!(cells.altitude[i], altitude_cell(500, shading.blend(4, 4)));
+    }
+
+    #[test]
+    fn soften_light_insets_the_hard_clamp_ends_but_leaves_the_middle_alone() {
+        assert_eq!(soften_light(0), LIGHT_SOFT_MIN, "a pathologically steep slope's clamped-to-0 light");
+        assert_eq!(soften_light(255), LIGHT_SOFT_MAX);
+        assert_eq!(soften_light(128), 128, "an ordinary flat-cell light value is untouched");
     }
 
     #[test]

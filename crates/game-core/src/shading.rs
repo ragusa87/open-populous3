@@ -64,12 +64,16 @@ fn downhill_of(terrain: &Heightmap, x: i32, z: i32) -> u8 {
 }
 
 /// The precomputed sunlight-derived brightness byte (pop3-rev-analysis.md "Terrain land colour"): raw neighbour
-/// height deltas, 2 cells over on each axis (not the 8-neighbour slope `blend`/`downhill` use - a different,
-/// coarser original function), dotted against the level's own sun vector, plus an ambient term from
+/// height deltas, the immediately adjacent cell on each axis (not the 8-neighbour slope `blend`/`downhill` use -
+/// a different, coarser original function), dotted against the level's own sun vector, plus an ambient term from
 /// `ambient_nibble` (the `+0xE` low nibble: a placeholder 0 today, see `CellShading::downhill`'s doc).
+/// `compute_cell_light`'s own raw `x`/`z` are double open-populous's real file-cell coordinate (proven against
+/// `load_level2`'s height-table load loop, not assumed), so its `+2`-in-its-own-units neighbour step is a
+/// one-real-cell step here, not two - reading two real cells over doubles the gradient and over-clamps `light`
+/// on steep terrain (a hard-clamped near-white patch on a level 1 hill, found and corrected 2026-10-20).
 fn cell_light(terrain: &Heightmap, sun: &SunParams, ambient_nibble: u8, x: i32, z: i32) -> u8 {
-    let dx = terrain.get(x, z) as i32 - terrain.get(x + 2, z) as i32;
-    let dz = terrain.get(x, z + 2) as i32 - terrain.get(x, z) as i32;
+    let dx = terrain.get(x, z) as i32 - terrain.get(x + 1, z) as i32;
+    let dz = terrain.get(x, z + 1) as i32 - terrain.get(x, z) as i32;
     let ambient = (ambient_nibble as i32 + 8) * 16;
     ((sun.base + dz * sun.z - dx * sun.x) / 350 + ambient).clamp(0, 255) as u8
 }
@@ -112,7 +116,7 @@ impl CellShading {
     }
 
     /// Recomputes `blend`/`light`/`downhill` for every cell touched by `dirty` plus a 2-cell margin (covers
-    /// `blend`/`downhill`'s own 8-neighbour reach and `light`'s own 2-cells-away one), wrapping on the torus.
+    /// `blend`/`downhill`'s own 8-neighbour reach and `light`'s own 1-cell-away one), wrapping on the torus.
     /// `lava_blend` (a lit lava cell's own current blend, `lava::Lava::cells_lit`) takes priority over
     /// `ashes` (`Ashes::darkness`), which takes priority over the general slope measure - the same priority the
     /// original's own recompute gives its blend-flagged cells (pop3-rev-analysis.md "Building ashes" "Drawn":
@@ -219,7 +223,7 @@ mod tests {
     #[test]
     fn light_reacts_to_a_slope_along_each_axis() {
         let mut terrain = flat(8, 100);
-        terrain.set(6, 4, 900); // steep rise 2 cells to the east of (4,4): dx = 100 - 900 = -800 (negative)
+        terrain.set(5, 4, 900); // steep rise 1 cell to the east of (4,4): dx = 100 - 900 = -800 (negative)
         let sun = SunParams { x: 100, z: 100, base: 0 };
         let flat_light = cell_light(&terrain, &sun, 0, 1, 1);
         let sloped_light = cell_light(&terrain, &sun, 0, 4, 4);

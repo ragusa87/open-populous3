@@ -198,7 +198,12 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   no averaging), bilinearly sampled from the shader's `altitude` texture (one half-float per cell), then floored
   at `land_start` (`Theme::land_start_row`, the first row from 128 up where most columns are neither water
   colours nor sea-like) — a renderer-side safety net, not in the traced formula itself, so a freshly flattened
-  low platform (`blend` 0, no second +75) still reads as ground. A pixel's own `disp` sample (signed) then
+  low platform (`blend` 0, no second +75) still reads as ground. **Checked exe-side 2026-10-20 (pop3-rev
+  `0x4BE330` corner-computation trace, TODO.md "Terrain"): the original has no such floor at all** - its row
+  formula only ever reads height/blend/light, clamped 0..1022, with no per-theme or per-shape minimum; a flat
+  low platform reads sea-like in the original too, unguarded. `land_start` is a pure invention with no original
+  basis, not a faithful reproduction of a real mechanism - see TODO.md for the open question on whether it
+  should be removed outright. A pixel's own `disp` sample (signed) then
   jitters the row by `(disp_sensitivity(row) * disp) / 1024` (`pop3_format::theme::disp_sensitivity`), added
   straight into the flat `bigfade` index alongside the brightness column — a large jitter or brightness can
   legitimately roll into the next row, as in the original.
@@ -236,6 +241,13 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   `147`/`147`/`147` in normal play, independent of the level's own `ShadeStart`/`ShadeRange`/`Inclination`
   (`pop3_format::level::Sunlight`) entirely (confirmed identical across two levels with different on-disk
   `Inclination`), so the level's sunlight block is read and stored but no longer feeds `SunParams` at all.
+  `shading.light`'s own neighbour reads were briefly a 2-real-cell baseline (`height(x, z) - height(x + 2, z)`,
+  read off `compute_cell_light`'s raw argument literally) before a 2026-10-20 correction: that argument is double
+  open-populous's real file-cell coordinate (proven against `load_level2`'s height-table load loop,
+  pop3-rev-analysis.md "Terrain land colour"), so the real baseline is one real cell - `height(x + 1, z)` /
+  `height(x, z + 1)`, as `game_core::shading::cell_light` now reads. A renderer-only `soften_light` inset
+  (`terrain_texture.rs`, `LIGHT_SOFT_MIN`/`MAX` 32..223) still caps how close the stored byte gets to the hard
+  0/255 clamp ends, kept as a deliberate visual safety net independent of that fix (TODO.md "Terrain").
 - colour = `palette[cliff[blend / 4][bigfade[row][column]]]`: the bigfade lookup, then remapped through the
   cliff table (bilinearly-sampled `blend` picks the row) before the palette lookup - identity at `blend < 4`.
   Ash charring (a flat RGB darken towards a fixed dark colour, by the same bilinearly-sampled per-cell coverage
