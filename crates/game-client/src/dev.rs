@@ -75,7 +75,13 @@ impl Plugin for DevPlugin {
 struct OffscreenTarget(Handle<Image>);
 
 fn render_to_image(mut commands: Commands, mut images: ResMut<Assets<Image>>, cams: Query<Entity, With<Camera>>) {
-    let image = images.add(Image::new_target_texture(1280, 720, TextureFormat::Rgba8UnormSrgb, None));
+    // SHOT_RESOLUTION=WxH overrides the hardcoded 1280x720, e.g. to compare a screenshot at the
+    // original's own period resolution against our default.
+    let (w, h) = std::env::var("SHOT_RESOLUTION")
+        .ok()
+        .and_then(|s| s.split_once('x').map(|(w, h)| (w.parse().ok(), h.parse().ok())).and_then(|(w, h)| Some((w?, h?))))
+        .unwrap_or((1280, 720));
+    let image = images.add(Image::new_target_texture(w, h, TextureFormat::Rgba8UnormSrgb, None));
     for cam in &cams {
         commands.entity(cam).insert(RenderTarget::Image(image.clone().into()));
     }
