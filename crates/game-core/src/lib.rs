@@ -51,6 +51,7 @@ pub mod production;
 pub mod schedule;
 pub mod send_in;
 pub mod sermon;
+pub mod shading;
 pub mod site;
 pub mod slots;
 pub mod smoke;

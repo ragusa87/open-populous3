@@ -260,6 +260,12 @@ pub struct Sunlight {
     pub inclination: u8,
 }
 
+impl Sunlight {
+    /// The exe's own global default (pop3-rev-analysis.md "Terrain land colour": 0x1C/0xF/0x20), for
+    /// generated maps and sandboxes, which have no level header of their own.
+    pub const EXE_DEFAULT: Sunlight = Sunlight { shade_start: 28, shade_range: 15, inclination: 32 };
+}
+
 /// Access rights entry (all zero in the shipped levels).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AccessInfo {
