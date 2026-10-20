@@ -78,14 +78,17 @@ impl LevelList {
         LevelList::default()
     }
 
-    /// `arg` may be a level file, a levels directory, or nothing: then `$POP3_LEVELS`, else the
-    /// `levels/` of the install (`$POP3_INSTALL` or the usual Wine / `C:\` locations). Nothing
-    /// found: fully generated, like `--no-original`.
+    /// `arg` may be a level file, a levels directory, a bare filename to find inside the install's own
+    /// `levels/` (`just shot out.png levl2001.dat`, run from anywhere - not necessarily that directory), or
+    /// nothing: then `$POP3_LEVELS`, else the `levels/` of the install (`$POP3_INSTALL` or the usual Wine /
+    /// `C:\` locations). Nothing found: fully generated, like `--no-original`.
     pub fn discover(arg: Option<&str>) -> Self {
         let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
-        let path = arg.map(PathBuf::from).or_else(|| env("POP3_LEVELS")).or_else(|| {
-            pop3_format::install::find_install().map(|i| pop3_format::install::subdir(&i, "levels"))
-        });
+        let fallback_dir = env("POP3_LEVELS").or_else(|| pop3_format::install::find_install().map(|i| pop3_format::install::subdir(&i, "levels")));
+        let path = match arg {
+            Some(a) => Some(resolve_arg_path(a, fallback_dir.as_deref(), &|p| p.exists())),
+            None => fallback_dir,
+        };
         let Some(path) = path else {
             info!("no original install found (set POP3_INSTALL): using generated maps and art");
             return LevelList::generated_only();
@@ -95,8 +98,12 @@ impl LevelList {
         } else {
             (path, None)
         };
-        info!("original levels: {}", dir.display());
         let files = list_levels(&dir);
+        if files.is_empty() {
+            warn!("no level files found in {} - falling back to generated maps/art", dir.display());
+        } else {
+            info!("original levels: {} ({} found)", dir.display(), files.len());
+        }
         let index = selected.and_then(|s| files.iter().position(|f| *f == s)).unwrap_or(0);
         let (data_sibling, objects_sibling) = sibling_dirs(&dir);
         let data_dir = env("POP3_DATA").unwrap_or(data_sibling);
@@ -104,15 +111,51 @@ impl LevelList {
         LevelList { data_dir, objects_dir, original: true, files, index }
     }
 
-    /// The current level, as a new game (`new_game`).
+    /// The current level, as a new game (`new_game`): always logs plainly which one happened, so a silent
+    /// fallback (an unresolved level file, a bad parse) never masquerades as the real thing (AH: a prior
+    /// session lost real time to exactly this - a bare filename arg not found fell back to a generated map
+    /// with no indication at all).
     pub fn load_current(&self) -> GameMap {
-        let map = self
-            .files
-            .get(self.index)
-            .and_then(|p| GameMap::load_original(p).map_err(|e| warn!("{}: {e}", p.display())).ok())
-            .unwrap_or_else(|| GameMap::generate(self.index as u32 + 1));
+        let map = match self.files.get(self.index) {
+            Some(p) => match GameMap::load_original(p) {
+                Ok(map) => {
+                    info!("loaded original level: {}", p.display());
+                    map
+                }
+                Err(e) => {
+                    warn!("{}: {e} - falling back to a generated map", p.display());
+                    GameMap::generate(self.index as u32 + 1)
+                }
+            },
+            None => {
+                warn!("no original level at index {} ({} found) - falling back to a generated map", self.index, self.files.len());
+                GameMap::generate(self.index as u32 + 1)
+            }
+        };
         new_game(map)
     }
+}
+
+/// `arg` resolved against the current directory first (a level file or levels directory of its own, found
+/// as given - the flexible cases `discover`'s own doc comment already covers), falling back to looking for it
+/// by filename inside `fallback_dir` (the auto-detected install's own `levels/`, or `$POP3_LEVELS`) when it
+/// doesn't exist as given. Without this fallback, the common case - `just shot out.png levl2001.dat`, run from
+/// the repository root, not the install's own `levels/` directory - silently treated the bare filename as a
+/// (nonexistent) directory and fell all the way through to a fully generated map, with nothing in `discover`
+/// itself to say so (`load_current`'s own logging now covers that half; this is the other half, resolving the
+/// path correctly in the first place). `exists` abstracts the filesystem check so this stays pure/testable.
+fn resolve_arg_path(arg: &str, fallback_dir: Option<&Path>, exists: &dyn Fn(&Path) -> bool) -> PathBuf {
+    let p = PathBuf::from(arg);
+    if exists(&p) {
+        return p;
+    }
+    if let Some(dir) = fallback_dir {
+        let joined = dir.join(arg);
+        if exists(&joined) {
+            return joined;
+        }
+    }
+    p
 }
 
 /// `map` as a new game, with its own seed: `GAME_SEED` if set (to replay a game), else drawn from the clock.
@@ -404,5 +447,31 @@ mod tests {
     fn generated_only_lists_nothing() {
         let l = LevelList::generated_only();
         assert!(l.files.is_empty() && !l.original);
+    }
+
+    #[test]
+    fn resolve_arg_path_uses_the_arg_as_given_when_it_already_exists() {
+        let exists = |p: &Path| p == Path::new("/cwd/levl2001.dat");
+        let p = resolve_arg_path("/cwd/levl2001.dat", Some(Path::new("/install/levels")), &exists);
+        assert_eq!(p, PathBuf::from("/cwd/levl2001.dat"), "found as given: never even looks at the fallback dir");
+    }
+
+    #[test]
+    fn resolve_arg_path_finds_a_bare_filename_inside_the_fallback_dir() {
+        let exists = |p: &Path| p == Path::new("/install/levels/levl2001.dat");
+        let p = resolve_arg_path("levl2001.dat", Some(Path::new("/install/levels")), &exists);
+        assert_eq!(p, PathBuf::from("/install/levels/levl2001.dat"), "not found in cwd, found by filename in the install's levels dir");
+    }
+
+    #[test]
+    fn resolve_arg_path_falls_back_to_the_bare_arg_when_nothing_resolves() {
+        let p = resolve_arg_path("levl2001.dat", Some(Path::new("/install/levels")), &|_| false);
+        assert_eq!(p, PathBuf::from("levl2001.dat"), "same degrade-to-empty-listing behaviour as before this fix, not a crash");
+    }
+
+    #[test]
+    fn resolve_arg_path_without_a_fallback_dir_just_returns_the_arg() {
+        let p = resolve_arg_path("levl2001.dat", None, &|_| false);
+        assert_eq!(p, PathBuf::from("levl2001.dat"));
     }
 }
