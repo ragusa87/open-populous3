@@ -318,7 +318,7 @@ fn rebuild_terrain(
             *walkable_cache = crate::terrain_texture::walkable_cells(&map.0.terrain);
             let cells = crate::terrain_texture::bake_cells(&map.0.terrain, &map.0.shading, &map.0.ashes, &walkable_cache);
             if let Some(mut m) = assets.mats.get_mut(&material.0) {
-                crate::ground_material::fill(&mut m, &mut assets.images, &cells, &theme, theme.land_start_row(), grid.0);
+                crate::ground_material::fill(&mut m, &mut assets.images, &cells, &theme, grid.0);
             }
             *baked = Some((theme, cells));
         }

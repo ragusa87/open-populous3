@@ -13,11 +13,11 @@ use bevy::shader::ShaderRef;
 use pop3_format::theme::{BIGFADE_ROWS, BIGFADE_WIDTH, CLIFF_ROWS, CLIFF_WIDTH, DISP_SIZE};
 use pop3_format::Theme;
 
-/// x: map size (cells), y: land_start row, z: grid overlay on/off (0/1), w: `PX_PER_CELL` (the shader's own
-/// `px`/`py` integer pixel coordinates per cell, `disp`/`water`'s lookup granularity) — a uniform, not a WGSL
-/// constant, so this one Rust constant is the only place it's spelled out.
-pub fn params(size: usize, land_start: usize, grid: bool) -> Vec4 {
-    Vec4::new(size as f32, land_start as f32, if grid { 1.0 } else { 0.0 }, crate::terrain_texture::PX_PER_CELL as f32)
+/// x: map size (cells), y: grid overlay on/off (0/1), z: `PX_PER_CELL` (the shader's own `px`/`py` integer pixel
+/// coordinates per cell, `disp`/`water`'s lookup granularity) — a uniform, not a WGSL constant, so this one Rust
+/// constant is the only place it's spelled out. w: unused.
+pub fn params(size: usize, grid: bool) -> Vec4 {
+    Vec4::new(size as f32, if grid { 1.0 } else { 0.0 }, crate::terrain_texture::PX_PER_CELL as f32, 0.0)
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -144,8 +144,8 @@ pub fn placeholder(images: &mut Assets<Image>) -> GroundMaterial {
 
 /// Replaces every texture (a new theme or level: `world::rebuild_terrain`'s own "no bake yet" branch) and the
 /// uniform params.
-pub fn fill(material: &mut GroundMaterial, images: &mut Assets<Image>, cells: &GroundCells, theme: &Theme, land_start: usize, grid: bool) {
-    material.params = params(cells.side, land_start, grid);
+pub fn fill(material: &mut GroundMaterial, images: &mut Assets<Image>, cells: &GroundCells, theme: &Theme, grid: bool) {
+    material.params = params(cells.side, grid);
     material.channels = images.add(channels_image(cells));
     material.altitude = images.add(altitude_image(cells));
     material.palette = images.add(palette_image(theme));
@@ -180,9 +180,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn params_packs_size_land_start_grid_flag_and_px_per_cell() {
-        assert_eq!(params(128, 130, true), Vec4::new(128.0, 130.0, 1.0, crate::terrain_texture::PX_PER_CELL as f32));
-        assert_eq!(params(128, 130, false).z, 0.0);
+    fn params_packs_size_grid_flag_and_px_per_cell() {
+        assert_eq!(params(128, true), Vec4::new(128.0, 1.0, crate::terrain_texture::PX_PER_CELL as f32, 0.0));
+        assert_eq!(params(128, false).y, 0.0);
     }
 
     #[test]

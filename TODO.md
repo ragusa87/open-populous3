@@ -309,9 +309,9 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   altitude-dependent sensitivity curve (`pop3_format::theme::disp_sensitivity`), and the brightness column comes
   from a precomputed per-cell `light` byte (`game_core::shading::CellShading`, a height-gradient dot the level's
   sunlight-derived vector, fed by `pop3_format::level::Sunlight`) instead of a baked Lambert light of the
-  rendered mesh slope. `land_start`'s own floor is kept, deliberately, as a renderer-side safety net on top of
-  the faithful formula (`terrain_texture::pixel_rgb`'s doc comment): a freshly flattened, perfectly flat low
-  platform has blend 0, so the bare formula alone can still read close to the sea's own rows there.
+  rendered mesh slope. `land_start`'s own floor was kept at first as a renderer-side safety net on top of the
+  faithful formula (a freshly flattened, perfectly flat low platform has blend 0, so the bare formula alone can
+  read close to the sea's own rows there) - since removed, see below.
   `SunParams::default` now returns the live-measured, disassembly-confirmed flat constant `sunX = sunZ = sunBase
   = 147` (pop3-rev-analysis.md "Terrain land colour", 2026-10-20) instead of scaling `ShadeRange`/`ShadeStart` -
   the level's sunlight block plays no role in it, matching the exe's `sunlight_init_default`. Left open: whether
@@ -330,7 +330,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   brightness range, not just at the clamped extremes - any shore cell floored into that band reads pale
   regardless of `cell_light`. See the next entry: `land_start_row()`'s own floor has no original basis at all,
   and is the more likely remaining source of this paleness, not a miscalibrated value to retune.
-- [ ] `pop3_format::theme::Theme::land_start_row()`'s floor has NO counterpart in the original at all (checked
+- [ ] `pop3_format::theme::Theme::land_start_row()`'s floor had NO counterpart in the original at all (checked
   2026-10-20, exe-side, pop3-rev's `0x4BE330` corner-computation trace): the only fields the original's row
   formula reads are height(+4)/blend(+0xA)/light(+0xD), clamped only to `0..0x3FE` - no per-theme/per-shape
   minimum row anywhere. Shape (+0xC) is read exactly once, earlier in the function's vertex preamble, purely
@@ -340,10 +340,14 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   behaviour in the real game too - not a case of picking a better floor value per theme, but of flooring at all
   being a deviation. The pale rows 128-139 the hill repro hit are very likely just what theme `c` legitimately
   looks like at a natural near-sea-level row (e.g. height 0 + saturated blend -> row 150 by the bare formula,
-  already above `land_start`'s current 137 floor) - meaning `land_start_row()` reading pale isn't itself the
-  bug; check instead whether it's overriding a correctly-computed higher row somewhere, or being applied to
-  cells the original would never floor at all. Try removing the floor entirely against a real level with a
-  flattened low platform before re-adding any shore-specific special case.
+  already above `land_start`'s old 137 floor) - meaning `land_start_row()` reading pale wasn't itself the
+  bug. **Removed 2026-10-20** (`land_start_row`/`sea_like`/`MAX_SHORE_ROWS` deleted from `pop3_format::theme`,
+  the `land_start` uniform dropped from `ground.wgsl`/`ground_material.rs`/`world.rs`): builds clean, `just test`
+  passes in full, but **not yet visually re-verified** against the level 1 repro (does it fix the remaining pale
+  band, or does a flat low platform now read sea-like again, the original problem this floor was invented for -
+  check against a level/spell that flattens land to height 0, e.g. a land bridge or flatten spell) before treating
+  this as done. See docs/plans/terrain-white-patch.md (gitignored, local) for the fuller write-up and a bisect
+  plan if this alone doesn't fully explain the remaining paleness.
 - [x] Baked terrain texture minification aliasing (blocky look and bright-speckle `row_jitter` at distance,
   since a single-mip baked 8 px/cell texture can't area-average many texels into one screen pixel): fixed by the
   structurally faithful route this entry already pointed at — the ground colour formula (terrain-textures.md

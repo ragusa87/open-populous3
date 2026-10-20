@@ -7,7 +7,7 @@
 // steep, high terrain where `disp_sensitivity` is near its max - see `GroundMaterial::disp`'s own doc comment).
 #import bevy_pbr::forward_io::VertexOutput
 
-// x: map size (cells), y: land_start row, z: grid overlay on/off, w: PX_PER_CELL.
+// x: map size (cells), y: grid overlay on/off, z: PX_PER_CELL, w: unused.
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> params: vec4<f32>;
 // R blend, G light, B ash coverage, A walkable (0/1): bilinear, repeat-wrapped, grid-vertex-aligned.
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var channels_tex: texture_2d<f32>;
@@ -89,9 +89,8 @@ fn palette_rgb(index: u32) -> vec3<f32> {
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let size = params.x;
-    let land_start = params.y;
-    let grid_on = params.z;
-    let px_per_cell = params.w;
+    let grid_on = params.y;
+    let px_per_cell = params.z;
 
     let x = in.uv.x * size;
     let z = in.uv.y * size;
@@ -125,9 +124,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // altitude's own fractional part sits between (`row`/`row + 1`), the same thing hardware bilinear
         // filtering would do if bigfade were addressable as a filterable texture along its row axis.
         let altitude = textureSample(altitude_tex, altitude_samp, cell_uv).r;
-        let altitude_floored = max(altitude, land_start);
-        let row = i32(floor(altitude_floored));
-        let frac = fract(altitude_floored);
+        let row = i32(floor(altitude));
+        let frac = fract(altitude);
         let row_jitter = i32(round(disp_sensitivity(row) * d_here / 1024.0));
         let blend = i32(round(ch.r * 255.0));
         let cliff_row = blend / 4;

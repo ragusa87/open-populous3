@@ -104,12 +104,10 @@ pub struct GroundCells {
 }
 
 /// Insets `shading.light`'s stored byte away from the hard 0/255 ends it's otherwise free to reach on a
-/// pathologically steep slope (`CellShading`'s own `cell_light`, confirmed bit-exact to the traced exe this
-/// session, pop3-rev-analysis.md "Terrain land colour": the masking that looked like it might give a gentler
-/// neighbour distance turned out to be a no-op, and the original would clamp identically on an equally steep
-/// slope). A `land_start`-floored low row at a clamped-to-0 brightness lands on a theme's own near-white palette
-/// entry (confirmed on level 1's decorative hill, theme c: `(242, 232, 223)` at row ~130, brightness 0-10) -
-/// visually jarring on a small, sharply-sloped feature even though the colour pick itself is faithful. This is a
+/// pathologically steep slope (`CellShading`'s own `cell_light`): even after its neighbour-distance fix
+/// (pop3-rev-analysis.md "Terrain land colour", 2026-10-20), a genuinely steep single-cell drop can still clamp.
+/// A clamped-to-0 brightness at a low row can land on a theme's own near-white palette entry (seen on level 1's
+/// decorative hill, theme c) - visually jarring even though the colour pick itself is faithful. This is a
 /// deliberate, renderer-only visual deviation from the traced formula, not a correctness fix: `shading.light`
 /// itself (the simulation-facing value) is untouched, only the byte this client bakes into the GPU texture. See
 /// TODO.md "Terrain".

@@ -10,9 +10,6 @@ pub const BIGFADE_WIDTH: usize = 256;
 pub const BIGFADE_ROWS: usize = 1152;
 /// Rows below this are water/shore; land starts here.
 pub const BIGFADE_LAND_ROW: usize = 128;
-/// The first rows above `BIGFADE_LAND_ROW` still look like water in most themes (`land_start_row`),
-/// never more than this many.
-pub const MAX_SHORE_ROWS: usize = 32;
 pub const DISP_SIZE: usize = 256;
 /// `cliff0-X.dat` (terrain-textures.md "cliff"): `cliff[row * CLIFF_WIDTH + colour]`, row = blend / 4 (0..63),
 /// colour a land colour (bigfade output, < `CLIFF_WIDTH`).
@@ -150,27 +147,10 @@ impl Theme {
         (self.disp.iter().map(|&d| d as u64).sum::<u64>() / self.disp.len().max(1) as u64) as i32
     }
 
-    /// The first row from `BIGFADE_LAND_ROW` up where most columns are neither water colours
-    /// (colours of rows 0..127) nor sea-like ones (`sea_like`), at most `MAX_SHORE_ROWS` above it:
-    /// the lowest ground drawn as land.
-    pub fn land_start_row(&self) -> usize {
-        let water: std::collections::BTreeSet<u8> = self.bigfade[..BIGFADE_LAND_ROW * BIGFADE_WIDTH].iter().copied().collect();
-        let land = |c: &&u8| !water.contains(c) && !sea_like(self.palette[**c as usize]);
-        (BIGFADE_LAND_ROW..BIGFADE_LAND_ROW + MAX_SHORE_ROWS)
-            .find(|&r| self.bigfade[r * BIGFADE_WIDTH..(r + 1) * BIGFADE_WIDTH].iter().filter(land).count() > BIGFADE_WIDTH / 2)
-            .unwrap_or(BIGFADE_LAND_ROW + MAX_SHORE_ROWS)
-    }
-
     /// Sea noise, wraps.
     pub fn water(&self, x: usize, y: usize) -> u8 {
         self.water[(y % DISP_SIZE) * DISP_SIZE + x % DISP_SIZE]
     }
-}
-
-/// Blue over green over red: the wet grey-blue of the lowest rows (theme c: 77, 99, 102), not
-/// the purple or blue land some themes have (theme i: 92, 88, 173).
-pub fn sea_like([r, g, b]: [u8; 3]) -> bool {
-    b > g && g >= r
 }
 
 /// A theme's sky: a tiling cloud layer, RGB row-major.
@@ -213,33 +193,12 @@ mod tests {
     }
 
     #[test]
-    fn land_starts_past_the_watery_rows() {
-        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
-        big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..].fill(1);
-        big[..BIGFADE_WIDTH].fill(5);
-        for r in BIGFADE_LAND_ROW..BIGFADE_LAND_ROW + 6 {
-            big[r * BIGFADE_WIDTH..r * BIGFADE_WIDTH + 200].fill(5);
-        }
+    fn disp_mean_is_the_files_own_average_not_assumed_centred_on_128() {
         let mut disp = vec![60u8; DISP_SIZE * DISP_SIZE];
         disp[0] = 60 + 128;
+        let big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
         let t = Theme::parse(&[0; 1024], &big, &disp).unwrap();
-        assert_eq!(t.land_start_row(), BIGFADE_LAND_ROW + 6);
         assert_eq!(t.disp_mean(), 60);
-        big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..].fill(5);
-        let all_water = Theme::parse(&[0; 1024], &big, &disp).unwrap();
-        assert_eq!(all_water.land_start_row(), BIGFADE_LAND_ROW + MAX_SHORE_ROWS, "capped");
-    }
-
-    #[test]
-    fn sea_like_rows_are_not_land() {
-        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
-        big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..].fill(2);
-        big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..(BIGFADE_LAND_ROW + 3) * BIGFADE_WIDTH].fill(1);
-        let mut pal = vec![0u8; 1024];
-        pal[4..7].copy_from_slice(&[77, 99, 102]);
-        pal[8..11].copy_from_slice(&[92, 88, 173]);
-        let t = Theme::parse(&pal, &big, &vec![128; DISP_SIZE * DISP_SIZE]).unwrap();
-        assert_eq!(t.land_start_row(), BIGFADE_LAND_ROW + 3, "grey-blue skipped, purple land kept");
     }
 
     #[test]
