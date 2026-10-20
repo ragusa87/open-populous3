@@ -14,6 +14,14 @@ pub const BIGFADE_LAND_ROW: usize = 128;
 /// never more than this many.
 pub const MAX_SHORE_ROWS: usize = 32;
 pub const DISP_SIZE: usize = 256;
+/// `cliff0-X.dat` (terrain-textures.md "cliff"): `cliff[row * CLIFF_WIDTH + colour]`, row = blend / 4 (0..63),
+/// colour a land colour (bigfade output, < `CLIFF_WIDTH`).
+pub const CLIFF_ROWS: usize = 64;
+pub const CLIFF_WIDTH: usize = 128;
+/// `fade0-X.dat` (terrain-textures.md "fade"): a palette-space light table for object/sprite shading and fog of
+/// war, loaded but not consumed by this renderer yet (TODO.md "Terrain").
+pub const FADE_ROWS: usize = 64;
+pub const FADE_WIDTH: usize = 256;
 /// Water displacement, shared by every theme (same size as `disp`).
 pub const WATER_FILE: &str = "watdisp.dat";
 /// `sky0-X.dat`: 512 x 512 values 0..15, colour `palette[SKY_PALETTE + v]`.
@@ -30,11 +38,25 @@ pub struct Theme {
     pub disp: Vec<u8>,
     /// Sea noise (`watdisp.dat`, 256 x 256), picks the water row; `disp` when the file is missing.
     pub water: Vec<u8>,
+    /// `CLIFF_ROWS` rows of `CLIFF_WIDTH` land-colour remaps ("cliff" above); identity (every row the same as
+    /// row 0, `colour -> colour`) until `with_cliff` loads the real file.
+    pub cliff: Vec<u8>,
+    /// `FADE_ROWS` rows of `FADE_WIDTH` palette-index remaps ("fade" above), loaded but not consumed by this
+    /// renderer yet; identity until `with_fade` loads the real file.
+    pub fade: Vec<u8>,
 }
 
 /// Theme index (from the level header) to its file suffix: 0-9 then a-z.
 pub fn theme_char(index: u8) -> char {
     std::char::from_digit(index as u32 % 36, 36).unwrap_or('0')
+}
+
+/// How much the `disp` noise jitters a bigfade row at that altitude index (terrain-textures.md "disp",
+/// pop3-rev-analysis.md "Terrain land colour"): flat 320 below row 129, a +3/row ramp to 1024 at row 362, flat
+/// above - the same raw `disp` byte barely moves the row on low/flat ground and up to ~3.2x as much on high
+/// ground. A fixed curve baked once at level load in the original, a pure function of `row` here.
+pub fn disp_sensitivity(row: usize) -> i32 {
+    (3 * row as i32 - 64).clamp(320, 1024)
 }
 
 impl Theme {
@@ -45,11 +67,14 @@ impl Theme {
         check(pal, 1024)?;
         check(bigfade, BIGFADE_WIDTH * BIGFADE_ROWS)?;
         check(disp, DISP_SIZE * DISP_SIZE)?;
+        let identity = |width: usize, rows: usize| (0..rows * width).map(|i| (i % width) as u8).collect();
         Ok(Theme {
             palette: pal.chunks_exact(4).take(256).map(|c| [c[0], c[1], c[2]]).collect(),
             bigfade: bigfade[..BIGFADE_WIDTH * BIGFADE_ROWS].to_vec(),
             disp: disp[..DISP_SIZE * DISP_SIZE].to_vec(),
             water: disp[..DISP_SIZE * DISP_SIZE].to_vec(),
+            cliff: identity(CLIFF_WIDTH, CLIFF_ROWS),
+            fade: identity(FADE_WIDTH, FADE_ROWS),
         })
     }
 
@@ -59,10 +84,30 @@ impl Theme {
         Ok(Theme { water: water.to_vec(), ..self })
     }
 
+    /// Uses `cliff0-X.dat` for the cliff/lava/ash remap (terrain-textures.md "cliff").
+    pub fn with_cliff(self, data: &[u8]) -> Result<Self, LevelError> {
+        let cliff = data.get(..CLIFF_WIDTH * CLIFF_ROWS).ok_or(LevelError::BadSize { expected: CLIFF_WIDTH * CLIFF_ROWS, got: data.len() })?;
+        Ok(Theme { cliff: cliff.to_vec(), ..self })
+    }
+
+    /// Uses `fade0-X.dat` (terrain-textures.md "fade"), loaded but not consumed yet.
+    pub fn with_fade(self, data: &[u8]) -> Result<Self, LevelError> {
+        let fade = data.get(..FADE_WIDTH * FADE_ROWS).ok_or(LevelError::BadSize { expected: FADE_WIDTH * FADE_ROWS, got: data.len() })?;
+        Ok(Theme { fade: fade.to_vec(), ..self })
+    }
+
     pub fn load(data_dir: &Path, index: u8) -> Result<Self, LevelError> {
         let c = theme_char(index);
         let read = |p: &str| std::fs::read(data_dir.join(format!("{p}0-{c}.dat")));
         let theme = Self::parse(&read("pal")?, &read("bigf")?, &read("disp")?)?;
+        let theme = match read("cliff") {
+            Ok(d) => theme.with_cliff(&d)?,
+            Err(_) => theme,
+        };
+        let theme = match read("fade") {
+            Ok(d) => theme.with_fade(&d)?,
+            Err(_) => theme,
+        };
         match crate::find_file(data_dir, WATER_FILE).map(std::fs::read) {
             Some(Ok(w)) => theme.with_water(&w),
             _ => Ok(theme),
@@ -73,6 +118,26 @@ impl Theme {
     pub fn shade(&self, row: usize, brightness: u8) -> [u8; 3] {
         let row = row.min(BIGFADE_ROWS - 1);
         self.palette[self.bigfade[row * BIGFADE_WIDTH + brightness as usize] as usize]
+    }
+
+    /// `bigfade` read as one flat array (terrain-textures.md "bigfade"/"Our bake"): the original's own row-jitter
+    /// is added directly to this flat index rather than to the row alone, so a large jitter or brightness value
+    /// can legitimately roll over into the next row - not guarded against there, so not guarded against here
+    /// either, only clamped to the table's own bounds.
+    pub fn bigfade_flat(&self, index: i32) -> u8 {
+        let max = (self.bigfade.len() - 1) as i32;
+        self.bigfade[index.clamp(0, max) as usize]
+    }
+
+    /// The cliff/lava/ash remap (terrain-textures.md "cliff"): `row` = blend / 4 (0..63), `colour` a land colour
+    /// (a `shade`/`bigfade_flat` output < `CLIFF_WIDTH`) - anything else (a water colour) passes through
+    /// unchanged, the table has no entry for it.
+    pub fn cliff(&self, row: usize, colour: u8) -> u8 {
+        if colour as usize >= CLIFF_WIDTH {
+            return colour;
+        }
+        let row = row.min(CLIFF_ROWS - 1);
+        self.cliff[row * CLIFF_WIDTH + colour as usize]
     }
 
     /// Detail noise, wraps.
@@ -206,5 +271,51 @@ mod tests {
         let t = t.with_water(&wat).unwrap();
         assert_eq!((t.water(3, 4), t.water(3 + DISP_SIZE, 4), t.disp(3, 4)), (200, 200, 0));
         assert!(t.with_water(&[1, 2]).is_err());
+    }
+
+    #[test]
+    fn cliff_is_identity_until_a_real_file_is_loaded() {
+        let t = Theme::parse(&[0; 1024], &vec![0; BIGFADE_WIDTH * BIGFADE_ROWS], &[0; DISP_SIZE * DISP_SIZE]).unwrap();
+        assert_eq!((t.cliff(0, 5), t.cliff(63, 5)), (5, 5), "identity row, every row the same");
+        assert_eq!(t.cliff(0, 200), 200, "not a land colour (>= CLIFF_WIDTH): passed through");
+    }
+
+    #[test]
+    fn with_cliff_loads_the_real_table_rows_clamp_and_sizes_are_checked() {
+        let t = Theme::parse(&[0; 1024], &vec![0; BIGFADE_WIDTH * BIGFADE_ROWS], &[0; DISP_SIZE * DISP_SIZE]).unwrap();
+        let mut data = vec![0u8; CLIFF_WIDTH * CLIFF_ROWS];
+        data[5 * CLIFF_WIDTH + 7] = 99;
+        data[(CLIFF_ROWS - 1) * CLIFF_WIDTH + 7] = 42;
+        let t = t.with_cliff(&data).unwrap();
+        assert_eq!(t.cliff(5, 7), 99);
+        assert_eq!(t.cliff(500, 7), 42, "row clamps to the last one");
+        assert!(Theme::parse(&[0; 1024], &vec![0; BIGFADE_WIDTH * BIGFADE_ROWS], &[0; DISP_SIZE * DISP_SIZE]).unwrap().with_cliff(&[1, 2]).is_err());
+    }
+
+    #[test]
+    fn with_fade_checks_its_size_but_nothing_reads_it_yet() {
+        let t = Theme::parse(&[0; 1024], &vec![0; BIGFADE_WIDTH * BIGFADE_ROWS], &[0; DISP_SIZE * DISP_SIZE]).unwrap();
+        assert!(t.clone().with_fade(&vec![0; FADE_WIDTH * FADE_ROWS]).is_ok());
+        assert!(t.with_fade(&[1, 2]).is_err());
+    }
+
+    #[test]
+    fn bigfade_flat_reads_the_table_as_one_array_and_clamps_at_its_bounds() {
+        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
+        big[300] = 9;
+        big[BIGFADE_WIDTH * BIGFADE_ROWS - 1] = 77;
+        let t = Theme::parse(&[0; 1024], &big, &[0; DISP_SIZE * DISP_SIZE]).unwrap();
+        assert_eq!(t.bigfade_flat(300), 9);
+        assert_eq!(t.bigfade_flat(-5), t.bigfade_flat(0), "clamps below zero");
+        assert_eq!(t.bigfade_flat(1_000_000), 77, "clamps past the end, a large jitter rolls no further");
+    }
+
+    #[test]
+    fn disp_sensitivity_is_flat_below_129_ramps_then_flat_above_362() {
+        assert_eq!(disp_sensitivity(0), 320);
+        assert_eq!(disp_sensitivity(128), 320);
+        assert_eq!(disp_sensitivity(200), 3 * 200 - 64);
+        assert_eq!(disp_sensitivity(362), 1022);
+        assert_eq!(disp_sensitivity(1000), 1024);
     }
 }

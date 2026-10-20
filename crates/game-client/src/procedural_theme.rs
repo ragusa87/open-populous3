@@ -2,7 +2,7 @@
 //! (palette + bigfade + disp + water noise), so the texture bake is identical with or
 //! without the original game data.
 
-use pop3_format::theme::{Theme, BIGFADE_LAND_ROW, BIGFADE_ROWS, BIGFADE_WIDTH, DISP_SIZE};
+use pop3_format::theme::{Theme, BIGFADE_LAND_ROW, BIGFADE_ROWS, BIGFADE_WIDTH, CLIFF_ROWS, CLIFF_WIDTH, DISP_SIZE, FADE_ROWS, FADE_WIDTH};
 
 /// Palette = 8 colour bands x 32 brightness levels.
 const LEVELS: usize = 32;
@@ -35,7 +35,28 @@ pub fn generate(seed: u32) -> Theme {
             bigfade.push((band * LEVELS + col * LEVELS / BIGFADE_WIDTH) as u8);
         }
     }
-    Theme { palette, bigfade, disp: disp_noise(seed), water: disp_noise(seed ^ 0x5EA) }
+    Theme { palette, bigfade, disp: disp_noise(seed), water: disp_noise(seed ^ 0x5EA), cliff: synthetic_cliff(), fade: identity_fade() }
+}
+
+/// Our own shape, not traced data (terrain-textures.md "cliff": row 0 identity, higher rows shift toward
+/// rockier colours), only loosely following the original file's description: `Theme::cliff`'s own land-colour
+/// guard (`colour < CLIFF_WIDTH`) means only this generator's water/sand/light-grass bands (palette indices
+/// 0..127, see `BANDS`) are ever reachable through it - lower fidelity here than the original-data path, as
+/// elsewhere in `--no-original` mode.
+fn synthetic_cliff() -> Vec<u8> {
+    let mut cliff = Vec::with_capacity(CLIFF_WIDTH * CLIFF_ROWS);
+    for row in 0..CLIFF_ROWS {
+        let strength = ((row as i32 - 16).max(0) as f32 / (CLIFF_ROWS - 16) as f32).min(1.0);
+        for colour in 0..CLIFF_WIDTH {
+            cliff.push((colour + (strength * 40.0) as usize).min(CLIFF_WIDTH - 1) as u8);
+        }
+    }
+    cliff
+}
+
+/// Identity: nothing reads `fade` yet (terrain-textures.md "fade", TODO.md "Terrain").
+fn identity_fade() -> Vec<u8> {
+    (0..FADE_ROWS * FADE_WIDTH).map(|i| (i % FADE_WIDTH) as u8).collect()
 }
 
 /// Band for a (jittered) row; water and land never bleed into each other.
