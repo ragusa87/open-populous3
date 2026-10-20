@@ -29,6 +29,24 @@ pub struct DirtyRect {
     pub max: (i32, i32),
 }
 
+impl DirtyRect {
+    /// One rectangle bounding every cell in `cells` (empty: a zero-size rect at the origin).
+    pub fn bounding(cells: impl IntoIterator<Item = (i32, i32)>) -> Self {
+        let mut min = (i32::MAX, i32::MAX);
+        let mut max = (i32::MIN, i32::MIN);
+        let mut any = false;
+        for (x, z) in cells {
+            any = true;
+            min = (min.0.min(x), min.1.min(z));
+            max = (max.0.max(x), max.1.max(z));
+        }
+        if !any {
+            return DirtyRect { min: (0, 0), max: (0, 0) };
+        }
+        DirtyRect { min, max: (max.0 + 1, max.1 + 1) }
+    }
+}
+
 /// A world offset (from a building's centre) in the building's own frame, turned by
 /// `quarter_turns` (the inverse of its turn).
 pub fn to_local((wx, wz): (i32, i32), quarter_turns: u8) -> (i32, i32) {
@@ -269,6 +287,13 @@ impl Heightmap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounding_covers_every_cell_in_one_rect() {
+        let rect = DirtyRect::bounding([(3, 4), (9, 4), (3, 11)]);
+        assert_eq!(rect, DirtyRect { min: (3, 4), max: (10, 12) });
+        assert_eq!(DirtyRect::bounding(std::iter::empty()), DirtyRect { min: (0, 0), max: (0, 0) });
+    }
 
     #[test]
     fn height_at_blends_the_cell_corners() {

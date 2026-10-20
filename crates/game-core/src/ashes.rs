@@ -31,11 +31,7 @@ impl Patch {
     /// `WorldEvent` can only carry a single `DirtyRect` out of `GameMap::apply_event`, so a patch spread over many
     /// cells, like a cooled lava flow's, must fit in one rect or most of it would never get rebaked).
     fn dirty(&self) -> DirtyRect {
-        let xs = self.cells.iter().map(|&(x, _)| x);
-        let zs = self.cells.iter().map(|&(_, z)| z);
-        let (min_x, max_x) = (xs.clone().min().unwrap_or(0), xs.max().unwrap_or(0));
-        let (min_z, max_z) = (zs.clone().min().unwrap_or(0), zs.max().unwrap_or(0));
-        DirtyRect { min: (min_x, min_z), max: (max_x + 1, max_z + 1) }
+        DirtyRect::bounding(self.cells.iter().copied())
     }
 }
 
