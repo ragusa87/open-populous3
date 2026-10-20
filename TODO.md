@@ -301,9 +301,15 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   rendered mesh slope. `land_start`'s own floor is kept, deliberately, as a renderer-side safety net on top of
   the faithful formula (`terrain_texture::pixel_rgb`'s doc comment): a freshly flattened, perfectly flat low
   platform has blend 0, so the bare formula alone can still read close to the sea's own rows there. Left open:
-  `SunParams::from_sunlight`'s own sunX/sunZ/sunBase values are a labelled GUESS, not the traced exe values (see
-  pop3-rev-analysis.md "Open questions"); how the original maps its sky (backdrop scrolling with the camera?),
-  not traced this session either.
+  `SunParams::from_sunlight` still derives sunX/sunZ/sunBase by scaling `ShadeRange`/`ShadeStart` - live-measured
+  and disassembly-confirmed wrong (pop3-rev-analysis.md "Terrain land colour", 2026-10-20): in normal play the
+  exe sets a flat, hardcoded `sunX = sunZ = sunBase = 147`, independent of the level's sunlight block entirely
+  (confirmed identical across two levels with different on-disk `Inclination`) - `from_sunlight` should return
+  that flat constant unconditionally, not a `ShadeRange`/`ShadeStart`-scaled value; likely a meaningful chunk of
+  why our terrain currently reads flatter/lower-contrast than the original (weak brightness swing from the
+  guessed vector's wrong magnitude). Also still open: whether the gated day/night sun-angle tick (0x401350) or
+  the fixed-Inclination-64 path (0x401920) ever actually run in some mode (both measured OFF this session); how
+  the original maps its sky (backdrop scrolling with the camera?), not traced this session either.
 - [ ] Snow appears at high elevation in every theme today, which the original never does: `procedural_theme.rs`'s `BANDS` table hardcodes a universal top band (`[236, 236, 240]` "snow", row 960) applied regardless of theme/seed whenever the procedural fallback runs (no original data, or `--no-original`) — a project invention, not traced original behaviour. A rough first-pass catalogue of all 36 `pal0-X.dat`/`bigf0-X.dat` files now exists (terrain-textures.md "Themes seen"): of the themes sampled, only `h` clearly goes near-white right at the row ceiling the way the fallback assumes, `i`/`k` lean pale blue there instead, and theme `c`'s own "snow" shows up at a brighter column on LOW ground, not the row ceiling at all — i.e. whether a cell reads as snow-like depends on the brightness column too, not just height. Fix: make the fallback's top band(s) theme-aware (or at least not force "snow" universally) instead of one fixed palette for every theme; the catalogue is a first pass (one column, a handful of rows per theme), not a verified per-theme palette audit, so re-check a theme's own file before hardcoding its family. Now also sits on a much wider live row range than when this was written (see the new bullet below on `BANDS`'s own calibration) — worth doing together.
 - [ ] `procedural_theme.rs`'s `BANDS` row boundaries (0/64/128/180/320/560/760/960, chosen to roughly span
   0..`BIGFADE_ROWS` for whatever row the old, flat `POP3_ROW_SCALE`-scaled height produced) were never

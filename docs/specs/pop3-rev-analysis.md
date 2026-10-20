@@ -85,12 +85,15 @@ so a live measurement may run on it with the addresses translated.
   only cell-grained, drowning is checked pixel-grained, every turn, no timer), and whatever kills a wildman, its
   death always plays the rare "climbing + spinning" spirit-rise variant everyone else only gets by drowning too -
   never the calm rising-ghost pose. See "Wildmen", "Death and the spirit rise".
-- **Land colour's brightness is a precomputed per-cell byte fed by the level's sunlight block; its row is pure
-  height + blend, no sunlight** [exe]: `bigf0-X.dat`'s row comes from `height + 75 (+75 again if the cell isn't
-  perfectly flat)`, clamped to 1022, jittered by `disp0-X.dat` noise scaled by a fixed altitude-dependent
-  sensitivity curve (320 on low/flat ground, up to 1024 high up) - no per-theme constant; the column comes from a
-  map-cell byte (+0xD) precomputed from each cell's own height gradient dotted against a sun vector the level's
-  `ShadeStart`/`ShadeRange`/`Inclination` set up, recomputed live on every height edit. See "Terrain land colour".
+- **Land colour's brightness is a precomputed per-cell byte fed by a sun vector that, live-confirmed, is a flat
+  constant in normal play - not the level's sunlight block; its row is pure height + blend, no sunlight** [exe,
+  measured]: `bigf0-X.dat`'s row comes from `height + 75 (+75 again if the cell isn't perfectly flat)`, clamped
+  to 1022, jittered by `disp0-X.dat` noise scaled by a fixed altitude-dependent sensitivity curve (320 on
+  low/flat ground, up to 1024 high up) - no per-theme constant; the column comes from a map-cell byte (+0xD)
+  precomputed from each cell's own height gradient dotted against a sun vector, recomputed live on every height
+  edit - but that vector is `sunX=sunZ=sunBase=147` always (`sunlight_init_default` 0x401040's hardcoded
+  constant), NOT derived from the level's `ShadeStart`/`ShadeRange`/`Inclination`, confirmed live on two levels
+  with different on-disk `Inclination`. See "Terrain land colour".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
 
@@ -1115,17 +1118,31 @@ dx = height(cell) - height(cell at x+2, same z)        # height drop to the +x n
 dz = height(cell at same x, z+2) - height(cell)         # height rise to the +z neighbour 2 units over
 light = clamp( (sunBase + dz*sunZ - dx*sunX) / 350 + (low_nibble(+0xE) + 8) * 16,  0, 255 )
 ```
-`sunX`, `sunZ`, `sunBase` are three signed 16-bit globals (0x937AA8, 0x937AAA, 0x937AAC) set once per level from
-the level's own sunlight block, not computed per draw call - **this is the confirmation that the level `.dat`
-sunlight block feeds the brightness column, not the bigfade row**: `ShadeStart`/`ShadeRange`/`Inclination`
-(level-format.md) are read straight into exe globals 0x937AAE/0x937AAF/0x937AB0, whose exe defaults (0x1C=28,
-0xF=15, 0x20=32) are byte-for-byte the three sunlight values level-format.md already measured; `0x401790` then
-builds angle-keyed tables from them via the sin/cos tables (0x5DDDE8/0x5DE5E8) and `0x401920` is one concrete
-Inclination=0x40(64) init path into `sunX`/`sunBase` - the generic arbitrary-Inclination derivation was not
-individually re-traced this session, only confirmed the three globals feeding `compute_cell_light` are
-sun-derived and level-sourced, not slope-of-the-rendered-vertex computed at draw time as "Our bake" (and
-terrain-textures.md) currently guesses. The `+0xE` low nibble (previously unidentified, see "Open questions")
-is this same precomputed ambient term, untouched by the downhill-direction write to the high nibble.
+`sunX`, `sunZ`, `sunBase` are three signed 16-bit globals (0x937AA8, 0x937AAA, 0x937AAC), not computed per draw
+call - confirming the earlier guess that this, not the bigfade row, is where sunlight feeds in. But **they are
+NOT derived from the level's own `ShadeStart`/`ShadeRange`/`Inclination` sunlight block** as a prior pass of this
+section assumed: `sunlight_init_default` (0x401040) sets all three to the literal immediate **0x93 (147)**, a
+flat hardcoded constant, independent of the level data - `ShadeStart`/`ShadeRange`/`Inclination`
+(0x937AAE/0x937AAF/0x937AB0, exe defaults 0x1C=28/0xF=15/0x20=32, level-format.md's own measured values) are
+still read from the level and stored, but nothing in the live-measured path uses them to shape `sunX`/`sunZ`/
+`sunBase`. **Live-measured this session**, two running levels with different on-disk `Inclination` (0x40 and
+0x20, both `ShadeStart`=28/`ShadeRange`=15): `sunX=sunZ=sunBase=147` in both, confirming the constant is
+level-independent in practice. `0x401790` (`sunlight_init_2`) does not set the vector either - it only *reads*
+the already-set `sunX`/`sunZ`/`sunBase` to build two unrelated 1024-entry angle-keyed shade tables (0x89BC8E,
+0x89C08D, still not re-examined). Two other paths exist that could move the vector away from 147, both gated
+behind the same flag bit (`0x895DA5 & 0x8`), live-confirmed OFF this session (`Inclination` on both measured
+levels sat unchanged at its on-disk value after 77+ turns, 9+ of the 8-turn checks below):
+- `0x401350`, a per-turn tick: when the turn counter's low 3 bits are all set (every 8th turn), increments
+  `Inclination` by 1 and recomputes `sunX`/`sunBase` from the REAL sin/cos tables (0x5DE5E8/0x5DDDE8, indexed by
+  the new `Inclination`) - the exe's actual day/night-style sun-angle animation, not the level's static block.
+- `0x401920`: unconditionally forces `Inclination` to 0x40 (64, overwriting the level's own value) and
+  `sunX`/`sunBase` from two FIXED scalar memory cells (0x5DE9E8/0x5DE1E8) - not an array indexed by
+  `Inclination` despite the name suggesting a per-angle branch (no write to either address exists anywhere in
+  the exe's code, so they are build-time data, not computed from the level).
+Net effect, confirmed live: for ordinary single-level play, terrain brightness contrast from slope is driven by
+a **fixed** sun vector (147/147/147), not one that varies with a level's declared sunlight. The `+0xE` low
+nibble (previously unidentified, see "Open questions") is this same precomputed ambient term, untouched by the
+downhill-direction write to the high nibble.
 
 The row itself is purely height + blend, same inputs as the already-documented cliff path, no sunlight:
 ```text
@@ -1169,10 +1186,17 @@ colour = bigf0-X.dat[index]                                      # 0..111 land c
   files and the sunlight-derived `sunX`/`sunZ`/`sunBase`: `POP3_ROW_SCALE`'s single global multiplier has no
   counterpart - the original's disp sensitivity is a fixed, altitude-dependent CURVE (320..1024, the table
   above), not a flat per-theme or per-level scale, and it is multiplicative on disp, not on height.
-- `light`'s divide-by-350 and the `(low_nibble + 8) * 16` ambient term were not independently cross-checked
-  against a live measurement this session (mark as traced, not verified): worth a `livemem.py` read of a known
-  flat cell's +0xD next to its neighbours' heights if the exact scale matters later.
-- Impact on our specs: see terrain-textures.md "bigfade"/"disp"/"Our bake" and TODO.md "Terrain".
+- `light`'s divide-by-350 and the `(low_nibble + 8) * 16` ambient term are now live-verified on a flat cell (`dx
+  = dz = 0`): measured `light = 128` exactly, matching `clamp(147/350 + 128, 0, 255)` with the `147/350` term
+  flooring to 0 - consistent with the formula and the flat 147/147/147 sun vector above. A live spot-check on
+  sloped cells did not reproduce the formula from a naive `base + (z*128+x)*16` cell-address read; `compute_cell_
+  light` (0x4BE230) builds its map-cell address with `x`/`z` masked by `0xFE`/`0xFE00` before scaling
+  (pop3-rev/docs/functions.tsv), which a plain row-major calc does not reproduce bit-for-bit - a live tool that
+  reproduces that exact packed-index addressing would be needed to verify sloped cells numerically; the formula
+  itself is re-confirmed correct from the disassembly regardless (pop3-rev/docs/functions.tsv 0x4BE230/0x4BE0B0).
+- Impact on our specs: see terrain-textures.md "bigfade"/"disp"/"Our bake" and TODO.md "Terrain" - in particular,
+  `game_core::shading::SunParams::from_sunlight`'s `ShadeRange`/`ShadeStart`-scaled guess should be replaced with
+  the flat 147/147/147 confirmed above, not a different scaling formula.
 
 ## Walking speed [exe]
 Each person type has a movement profile (table 0x5A7B90, 26 bytes each, picked by unit+0x30) whose speed at +4 is
@@ -2449,13 +2473,16 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   assignment actually produces).
 - Building ashes: the cliff rows' colours, the volcano cone's clearing, foundation sub 2's condition and its unit
   10/0x13.
-- Terrain land colour (2026-10-20): `sunX`/`sunZ`/`sunBase`'s actual derivation from `ShadeStart`/`ShadeRange`/
-  `Inclination` via the sin/cos tables (0x5DDDE8/0x5DE5E8, `0x401790`/`0x401920`) - no concrete resulting value was
-  recovered for any Inclination this session, only the general shape and the three input bytes' own exe defaults
-  (28/15/32); `game_core::shading::SunParams::from_sunlight` ships a labelled guess in the meantime. Also open: the
-  `+0xE` low nibble's own derivation (the ambient term `cell_light` adds, `(low_nibble + 8) * 16`) - kept as a
-  constant 0 placeholder. A `livemem.py` read of a known flat cell's `+0xD`/`+0xE` next to its neighbours' heights,
-  for a level using Inclination 32 and one using 64, would settle both.
+- Terrain land colour (2026-10-20, resolved): `sunX`/`sunZ`/`sunBase` do NOT derive from `ShadeStart`/
+  `ShadeRange`/`Inclination` in normal play - `sunlight_init_default` (0x401040) sets all three to a flat
+  hardcoded 0x93 (147), live-confirmed identical on a level with on-disk `Inclination` 0x40 and one with 0x20.
+  The day/night-style tick that would vary them (0x401350) and the alternate fixed-value path (0x401920) are
+  both gated behind flag `0x895DA5 & 0x8`, live-confirmed off (`Inclination` unchanged after 77+ turns on both
+  test levels). `game_core::shading::SunParams::from_sunlight` should ship the flat 147/147/147 confirmed here,
+  not the `ShadeRange`/`ShadeStart`-scaled guess it has today. Still open: the `+0xE` low nibble's own derivation
+  (the ambient term `cell_light` adds, `(low_nibble + 8) * 16`) - kept as a constant 0 placeholder; and whether
+  flag `0x895DA5 & 0x8` is ever set in some game mode (multiplayer, a specific level, a graphics setting) where
+  the day/night tick or the fixed-Inclination-64 path would actually run.
 - Attacking a building: what sets building +0x9C bit 0x40, and the partial explosion's 10/7 units.
 - Firewarrior fire: the line-of-fire test, whether a building stops the bolts (5 throws at a still preacher did nothing), what sets the reload
   byte to 252-255 (third capture), what the +0x10 bit 0x400000 set on own people under a passing shot does,
@@ -2674,10 +2701,13 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4BDB50 | `set_cliff_palette`: builds the 64-row cliff/lava colour table at level load, never again (no animation) |
 | 0x4BD760 | `alloc_mem_1` (part of): builds `DISP_SENSITIVITY` (table 0x5D45B8, 1152 signed i16, `clamp(3*index-64, 320, 1024)`) at level load ("Terrain land colour") |
 | 0x4BE230 | `compute_cell_light`: map-cell `+0xD` brightness byte from the cell's own height gradient dotted against the sun vector (0x937AA8/AA/AC) plus an ambient term from `+0xE`'s low nibble, clamp 0..255; called from `level_land_processing_2` per dirty cell ("Terrain land colour") |
-| 0x4BE0B0 | sibling of `compute_cell_light` for the opposite pair of neighbour cells (same formula) |
+| 0x4BE0B0 | bulk/loop-restructured copy of `compute_cell_light`'s own formula (re-disassembled 2026-10-20: bit-for-bit the same dx/dz/÷350/ambient/clamp math, same sun-vector reads, same `+0xD` write), for a multi-cell sweep rather than a single call - not a different formula or neighbour convention |
 | 0x4BDE94 | tail of a third, whole-map bulk variant of the same `+0xD` computation, run at level load (start address not reverified this session) |
-| 0x401040, 0x401790 | sunlight init: `ShadeStart`/`ShadeRange`/`Inclination` (0x937AAE/AF/B0, exe defaults 28/15/32) into the sun vector via the sin/cos tables (0x5DDDE8/0x5DE5E8); also builds two unrelated 1024-entry angle-keyed shade tables (0x89BC8E, 0x89C08D) not re-examined this session |
-| 0x401920 | one concrete Inclination=64 init path into `sunX`/`sunBase` (0x937AA8/AC) via trig tables 0x5DE9E8/0x5DE1E8; the generic arbitrary-Inclination path not individually traced |
+| 0x401040 | `sunlight_init_default`: sets `ShadeStart`/`ShadeRange`/`Inclination` (0x937AAE/AF/B0) to the exe defaults 28/15/32, and `sunX`/`sunZ`/`sunBase` (0x937AA8/AA/AC) to the literal immediate 0x93 (147) - a flat constant, NOT derived from `ShadeStart`/`ShadeRange`/`Inclination`; live-confirmed on two levels with different on-disk `Inclination` |
+| 0x401090 | near-duplicate of part of `sunlight_init_default`: resets `sunX`/`sunZ`/`sunBase` to the same flat 147 without touching `ShadeStart`/`ShadeRange`/`Inclination`, then falls into `sunlight_init_2` |
+| 0x401790 | `sunlight_init_2`: reads the already-set `sunX`/`sunZ`/`sunBase` (does not set them) to build two unrelated 1024-entry angle-keyed shade tables (0x89BC8E, 0x89C08D) via the sin/cos tables (0x5DDDE8/0x5DE5E8), not re-examined this session |
+| 0x401350 | per-turn sun-angle tick, gated behind flag `0x895DA5 & 0x8` (live-confirmed OFF in normal play, 2026-10-20): when set and every 8th turn, increments `Inclination` and recomputes `sunX`/`sunBase` from the real sin/cos tables - the exe's actual day/night-style animation, distinct from the level's static sunlight block |
+| 0x401920 | unconditionally forces `Inclination` to 0x40 (64, overwriting the level's value) and `sunX`/`sunBase` (0x937AA8/AC) from two FIXED scalar memory cells (0x5DE9E8/0x5DE1E8) - not an array indexed by `Inclination` (no write to either address found in the exe's code, i.e. build-time data, not level-derived); gated behind the same `0x895DA5 & 0x8` flag as 0x401350 |
 | 0x512A00, 0x512A60 | lava flow (effect 34/state 33) init and per-turn: downhill spread, then fade, then ash ("Volcano lava flow") |
 | 0x5134C0, 0x513570 | lava square (state 38) init and per-turn: a static, decaying hot cell |
 | 0x44DDF0 | `land_level_processing_1`: queues a cell after a height change, flushes to 0x44DF40 at 0x400 queued |
