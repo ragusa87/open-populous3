@@ -287,7 +287,6 @@ fn rebuild_terrain(
     // adjacent single-cell rects a tick, each otherwise rebaking `REBAKE_MARGIN`'s neighbourhood over the same
     // ground its touching neighbours just did.
     let changed = crate::terrain_texture::merge_dirty_rects(&changed);
-    let row_scale = row_scale();
     // `changed` is already merged above; `glide.rects` was merged once at capture time in `run_ticks`, so neither
     // branch here needs to merge again. While nothing landed this frame, the last tick's rects keep getting
     // re-touched towards the same target as `clock.alpha()` climbs, until the glide catches up — shared by the
@@ -303,7 +302,7 @@ fn rebuild_terrain(
             }
             if (!changed.is_empty() || gliding) && let Some(mut image) = assets.images.get_mut(image) && let Some(pixels) = image.data.as_mut() {
                 for &rect in touch_set {
-                    crate::terrain_texture::rebake(&map.0.terrain, &walkable_cache, theme, params.0.height_scale, row_scale, grid.0, rect, pixels, glide_src);
+                    crate::terrain_texture::rebake(&map.0.terrain, &map.0.shading, &walkable_cache, theme, grid.0, rect, pixels, glide_src);
                     crate::terrain_texture::char_ashes(&map.0.ashes, map.0.terrain.size(), rect, pixels);
                 }
             }
@@ -313,7 +312,7 @@ fn rebuild_terrain(
                 Theme::load(&levels.data_dir, t).map_err(|e| warn!("theme {t}: {e}")).ok()
             });
             let theme = original.unwrap_or_else(|| crate::procedural_theme::generate(levels.index as u32 + 1));
-            let image = assets.images.add(theme_image(&map.0, &theme, params.0.height_scale, row_scale, grid.0));
+            let image = assets.images.add(theme_image(&map.0, &theme, grid.0));
             if let Some(mut m) = assets.mats.get_mut(&material.0) {
                 m.unlit = true;
                 m.base_color_texture = Some(image.clone());
@@ -355,12 +354,8 @@ fn rebuild_terrain(
     }
 }
 
-fn row_scale() -> f32 {
-    std::env::var("POP3_ROW_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0)
-}
-
-fn theme_image(map: &GameMap, theme: &Theme, height_scale: f32, row_scale: f32, grid: bool) -> Image {
-    let (side, mut pixels) = crate::terrain_texture::bake(&map.terrain, theme, height_scale, row_scale);
+fn theme_image(map: &GameMap, theme: &Theme, grid: bool) -> Image {
+    let (side, mut pixels) = crate::terrain_texture::bake(&map.terrain, &map.shading, theme);
     if grid {
         crate::terrain_texture::draw_grid(&mut pixels, side);
     }
