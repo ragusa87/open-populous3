@@ -188,21 +188,31 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
 - row = water (outside the coast, below): `watdisp * 128 / 256` (`sea_row` in `ground.wgsl`, the whole water
   band; `disp` when the file is missing, generated noise in the procedural theme); land: each corner's own
   `altitude_index = clamp(height + 75 + (75 if blend != 0 else 0), 0, 1022)` (`terrain_texture::altitude_cell`,
-  no averaging), bilinearly sampled from the shader's `altitude` texture (one half-float per cell) — **crucially,
-  kept as the continuous, bilinearly-interpolated value all the way to the flat `bigfade` index, never truncated
-  to an integer row first** (pop3-rev-analysis.md "Terrain land colour": `row_fraction = (interpolated altitude
-  fixed-point value) >> 8`, i.e. `floor(continuous_altitude * 256)` - the exe's own sub-row fraction, folded in
-  as extra column units). An earlier version of this shader truncated to an integer row before combining it with
-  `brightness`, which loses exactly this mechanism and showed up as harsh, blocky light/dark edges wherever the
-  row changed from one fragment to the next on steep terrain — not a GPU/baking artifact, a straightforward
-  mis-port of the formula (fixed 2026-10-20). `land_start` (`Theme::land_start_row`, the first row from 128 up
-  where most columns are neither water colours nor sea-like) floors the continuous altitude the same way, before
-  the fraction is taken — a renderer-side safety net, not in the traced formula itself, so a freshly flattened
-  low platform (`blend` 0, no second +75) still reads as ground. The disp-sensitivity table lookup is the one
-  place that *does* truncate early (`round_down(interpolated altitude_index)`, matching the exe). A pixel's own
-  `disp` sample (signed) then jitters the row by `(disp_sensitivity(row) * disp) / 1024`
-  (`pop3_format::theme::disp_sensitivity`), added straight into the flat `bigfade` index alongside the
-  brightness column — a large jitter or brightness can legitimately roll into the next row, as in the original.
+  no averaging), bilinearly sampled from the shader's `altitude` texture (one half-float per cell), then floored
+  at `land_start` (`Theme::land_start_row`, the first row from 128 up where most columns are neither water
+  colours nor sea-like) — a renderer-side safety net, not in the traced formula itself, so a freshly flattened
+  low platform (`blend` 0, no second +75) still reads as ground. A pixel's own `disp` sample (signed) then
+  jitters the row by `(disp_sensitivity(row) * disp) / 1024` (`pop3_format::theme::disp_sensitivity`), added
+  straight into the flat `bigfade` index alongside the brightness column — a large jitter or brightness can
+  legitimately roll into the next row, as in the original.
+- Unlike the deleted CPU bake, the `bigfade`/`cliff`/`palette` chain here is a `textureLoad` every fragment at
+  full render resolution (categorical, no filtering): an exact row pick shows a hard edge wherever `row` changes
+  between neighbouring fragments, which the old baked 8 px/cell texture never did (the GPU's own bilinear
+  *magnification* blended neighbouring already-baked colours for free). `ground.wgsl` reproduces that blend
+  directly instead: the two colours the continuous altitude's own fractional part sits between (`row`/
+  `row + 1`, same `brightness`/jitter) are each resolved through `cliff`/`palette` and linearly mixed by that
+  fraction — the same thing hardware bilinear filtering would do if `bigfade` were addressable as a filterable
+  texture along its row axis. (An earlier attempt instead tried folding the row's own fraction directly into the
+  flat `bigfade` index as the exe's disassembly pseudocode seemed to describe; that reading turned out to be
+  mis-derived — it made the colour cycle through a full brightness sweep every single height unit, a dense,
+  clearly-wrong contour/zigzag pattern, reverted 2026-10-20.)
+- **A pale/near-white patch on a slope is not necessarily a bug**: verified directly against `data/cliff0-s.dat`/
+  `pal0-s.dat` (theme 28/`s`, level 2) this session — land-colour 106 maps to palette index 129 (229, 220, 214,
+  an intentional pale "weathered rock" theme colour) at every nonzero cliff row, so *any* sloped cell whose
+  `bigfade` lookup happens to land on colour 106 shows this pale tone; the un-shader'd `main` renderer shows the
+  same patches in the same places, just blurred by its own baked-texture magnification. Before treating a pale
+  patch as a rendering bug, check the theme's own `cliff`/`palette` files for a legitimate near-white entry
+  first.
   `disp`/`water` are bilinearly sampled (continuous `px`/`py`, not floored first) rather than `textureLoad`-exact
   like `bigfade`/`cliff`, matching their own noise being a smooth, continuously-tiling signal rather than a
   categorical table (`GroundMaterial::disp`'s own doc comment).

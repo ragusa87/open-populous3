@@ -117,23 +117,23 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let idx = bigfade_flat(row * BIGFADE_WIDTH + brightness);
         colour = palette_rgb(idx);
     } else {
-        // pop3-rev-analysis.md "Terrain land colour": the exe never truncates the interpolated altitude to an
-        // integer row before combining it into the flat `bigfade` index - it keeps the row's own sub-integer
-        // fraction and folds it in directly as extra column units (`row_fraction = fixed_point_altitude >> 8`,
-        // i.e. `continuous_altitude * BIGFADE_WIDTH`, truncated only at the very end). That, not any GPU-side
-        // blurring, is what gives a smooth colour ramp across a row boundary in the original: losing it (an
-        // earlier version of this shader truncated to an integer row first) showed up as harsh, blocky
-        // light/dark edges on steep terrain where the row changes quickly from one fragment to the next.
+        // The bigfade/cliff/palette lookup is categorical (a `textureLoad`, not filtered): an exact per-fragment
+        // row pick shows a hard edge wherever `row` changes between neighbouring fragments, which on steep
+        // terrain (many rows crossed over a short distance) reads as harsh, blocky patches - the old baked
+        // 8 px/cell texture never showed this because the GPU's own bilinear magnification blended neighbouring
+        // *already-computed* baked colours. Reproduced here directly: blend the two colours the continuous
+        // altitude's own fractional part sits between (`row`/`row + 1`), the same thing hardware bilinear
+        // filtering would do if bigfade were addressable as a filterable texture along its row axis.
         let altitude = textureSample(altitude_tex, altitude_samp, cell_uv).r;
         let altitude_floored = max(altitude, land_start);
-        // `round_down(interpolated altitude_index)`: only the disp-sensitivity table lookup truncates early.
-        let sensitivity_row = i32(floor(altitude_floored));
-        let row_jitter = i32(round(disp_sensitivity(sensitivity_row) * d_here / 1024.0));
-        let row_fraction = i32(floor(altitude_floored * f32(BIGFADE_WIDTH)));
-        let land_colour = bigfade_flat(row_fraction + brightness + row_jitter);
+        let row = i32(floor(altitude_floored));
+        let frac = fract(altitude_floored);
+        let row_jitter = i32(round(disp_sensitivity(row) * d_here / 1024.0));
         let blend = i32(round(ch.r * 255.0));
-        let remapped = cliff_remap(blend / 4, land_colour);
-        colour = palette_rgb(remapped);
+        let cliff_row = blend / 4;
+        let colour_lo = palette_rgb(cliff_remap(cliff_row, bigfade_flat(row * BIGFADE_WIDTH + brightness + row_jitter)));
+        let colour_hi = palette_rgb(cliff_remap(cliff_row, bigfade_flat((row + 1) * BIGFADE_WIDTH + brightness + row_jitter)));
+        colour = mix(colour_lo, colour_hi, frac);
         let ash_k = ch.b;
         colour = mix(colour, ASH_COLOUR, ash_k);
     }
