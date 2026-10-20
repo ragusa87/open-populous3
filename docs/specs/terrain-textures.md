@@ -143,7 +143,14 @@ How the original maps it (scrolling backdrop?) is not checked. Generated maps ke
 ## fade
 `fade[level * 256 + colour]`. Row 32 is the identity, rows below darken (0: about 0.27x luminance,
 16: 0.52x), rows above brighten (48: 1.6x, 63: 2x). A palette-space light table, for shading objects /
-sprites and fog of war (PopResourceEditor: "shadows or Fog of War").
+sprites and fog of war (PopResourceEditor: "shadows or Fog of War") - **confirmed unrelated to ground/terrain
+rendering from the exe itself (2026-10-20)**: all three of `set_texture_landscape_main`'s own pixel-fill
+dispatch targets (`landscape_texture_32`/`16`/`16_fade`, pop3-rev/docs/functions.tsv) were checked for any
+reference to a distinct 64x256 table and found none - all three read only the already-documented
+`bigf0-X.dat`/cliff/`DISP_SENSITIVITY` tables; `landscape_texture_16_fade`'s own "_fade" name is a 16-bit-surface
+colour-dithering step, not a use of this file. So implementing `fade0-X.dat` consumption would not touch ground
+colour at all, faithful or otherwise - it would only matter for whatever does read it on objects/sprites/fog of
+war (not yet traced), a separate, unrelated TODO item from the ground brightness/contrast issue below.
 
 ## cliff
 `cliff[level * 128 + colour]`, colour = a land colour (bigfade output, < 128). Row 0 is the identity,
@@ -241,6 +248,26 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   mid-tick (`world::TerrainGlide`) now lerps the one `altitude` scalar that feeds the shader, not the finished
   RGB colour the old pixel-level glide used to blend — same documented simplification (`blend`/`light` are not
   themselves glided), moved to the input instead of the output.
+- **Colour-space bug, fixed (2026-10-20):** the rendered ground read uniformly too bright/washed-out next to the
+  original, with the shoreline's darker, rockier "cracked" look (the `cliff` table's normal effect wherever
+  `blend` is high, which a coastline's own big land/seabed height delta makes true almost everywhere along a
+  shore, see "cliff" above) barely visible, and a stray near-white patch on ground next to a shore. Bevy's
+  tonemapping was ruled out as the cause: the game camera (`camera::spawn_camera`) never adds the `Hdr` marker
+  component, and `bevy_core_pipeline`'s tonemapping node itself no-ops without it (`if !camera.hdr { return; }`),
+  confirmed by reading the installed `bevy_core_pipeline`/`bevy_render` 0.19 source directly, not assumed. Actual
+  cause: `ground_material.rs::palette_image` stored the palette LUT as `TextureFormat::Rgba8Unorm` - every
+  *other* texture in the codebase built from the original's own palette-derived pixel data (`sky.rs`,
+  `original_models.rs`, `units/mod.rs`, `lightning.rs`, `sparkles.rs`, `flame.rs`, `lava.rs`'s overlay,
+  `tooltip.rs`) uses `Rgba8UnormSrgb` instead, so this was the one outlier, with no comment explaining why.
+  `ground.wgsl`'s `palette_rgb` then `textureLoad`s that LUT and returns the raw byte/255 straight as the
+  fragment's output colour; since the swapchain target is itself sRGB-formatted and GPUs encode a shader's output
+  through the sRGB curve on store to an `Rgba8UnormSrgb` target, a palette byte that is already gamma-encoded
+  (meant to be shown as-is) got a second sRGB encode applied on top - which lifts darker values much more than
+  bright ones (compounding, not additive), exactly matching "too bright everywhere" and lost shadow/cliff
+  contrast, and turned a moderately dark cliff/rock colour pale enough to read as a white patch against grass.
+  Confirmed by a `just shot` before/after on level 1: storing `palette_image` (and its placeholder) as
+  `Rgba8UnormSrgb` instead visibly restores ground contrast and the shoreline's darker, rockier look, replacing
+  the near-uniform pale sand.
 
 Fallback (no data, or `--no-original`): `procedural_theme::generate(seed)` builds a palette
 (8 bands x 32 brightness), a jittered bigfade and tileable value-noise disp with the same

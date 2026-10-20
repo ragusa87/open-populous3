@@ -1217,6 +1217,16 @@ colour = bigf0-X.dat[index]                                      # 0..111 land c
 - Impact on our specs: see terrain-textures.md "bigfade"/"disp"/"Our bake" and TODO.md "Terrain" - in particular,
   `game_core::shading::SunParams::default` now ships the flat 147/147/147 confirmed above, not the
   `ShadeRange`/`ShadeStart`-scaled guess it used to.
+- Re-read 2026-10-20: `set_texture_landscape_main`'s own preamble, before the corner/quad math above, walks the
+  mesh's vertex-grid points and for each one reads its cell's coastal shape (`+0xC` low nibble, table 0x5AA328,
+  the same field "Parking and the shore" documents) and skips the whole land-colour computation only when the
+  shape's class byte has bit 0x2 set ("open sea", shape 1). Confirms land cells AND shore cells (shapes 0, 2-15
+  alike) both go through the ordinary blend/bigfade/cliff pipeline above - a coastline's own steep land-to-seabed
+  height delta (the heightmap is per-vertex and continues under the water, level-format.md) legitimately pushes
+  `blend` high almost everywhere along a shore, which is why the original shows a visibly rockier/"cracked"
+  cliff-table colour right at the coastline: it falls out of the existing blend/cliff formula at a steep edge,
+  not a separate shore-specific decal or texture. Only pure open sea is excluded from this pipeline and drawn
+  separately (its own water surface, not traced this session).
 
 ## Walking speed [exe]
 Each person type has a movement profile (table 0x5A7B90, 26 bytes each, picked by unit+0x30) whose speed at +4 is
@@ -2502,7 +2512,17 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   the `ShadeRange`/`ShadeStart`-scaled guess it used to have. Still open: the `+0xE` low nibble's own derivation
   (the ambient term `cell_light` adds, `(low_nibble + 8) * 16`) - kept as a constant 0 placeholder; and whether
   flag `0x895DA5 & 0x8` is ever set in some game mode (multiplayer, a specific level, a graphics setting) where
-  the day/night tick or the fixed-Inclination-64 path would actually run.
+  the day/night tick or the fixed-Inclination-64 path would actually run. Re-checked 2026-10-20 (prompted by a
+  report that our render looks too bright overall): re-read both candidate write sites byte for byte
+  (`level_land_processing_2` 0x44DF40 and the bulk level-load light pass 0x4BDD40) - both only ever READ this
+  nibble (`and dl, 0xf` before folding it into the ambient term), never write it, and the level `.dat` file itself
+  carries no separate per-cell field that could seed it (level-format.md: only per-vertex heights plus
+  `LandBlocks`/`LandOrients`, byte-identical across all 41 levels, and `NoAccessSquares`). Nothing found this
+  session writes it anywhere - raises confidence the placeholder 0 is actually right, not just unverified, though
+  still not a positive proof (a write via some bulk memcpy/initialisation path not yet located would still be
+  possible). The "too bright" report's cause turned out to be on our own rendering side, not this
+  field - see TODO.md "Terrain" and terrain-textures.md "Our bake" (a palette texture colour-space bug, confirmed
+  and fixed).
 - Attacking a building: what sets building +0x9C bit 0x40, and the partial explosion's 10/7 units.
 - Firewarrior fire: the line-of-fire test, whether a building stops the bolts (5 throws at a still preacher did nothing), what sets the reload
   byte to 252-255 (third capture), what the +0x10 bit 0x400000 set on own people under a passing shot does,

@@ -343,6 +343,16 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   `GameMap::shading.downhill_dir` instead, now that the same precomputed field exists (more faithful to the
   original's frozen, precomputed downhill direction; needs its own check against `lava.rs`'s existing spread-shape
   tests first). `fade0-X.dat` is loaded but still not consumed by anything (object/sprite shading, fog of war).
+- [x] Ground rendered too bright/washed-out next to the original, with the shoreline's darker "cracked" look
+  barely visible and a stray near-white patch next to a shore (reported from a level-1 screenshot comparison,
+  2026-10-20; terrain-textures.md "Our bake" has the full writeup): fixed — `ground_material.rs::palette_image`
+  was the only original-palette colour texture in the codebase stored as `Rgba8Unorm` rather than `Rgba8UnormSrgb`
+  (every sibling - `sky.rs`, `original_models.rs`, `units/mod.rs`, `lightning.rs`, `sparkles.rs`, `flame.rs`,
+  `lava.rs`, `tooltip.rs` - uses the sRGB format for the same kind of data), so `ground.wgsl`'s `palette_rgb`
+  returned an already gamma-encoded byte as if it were linear, which the sRGB swapchain target then encoded a
+  second time - compounding, so darker colours lifted far more than bright ones, flattening contrast and washing
+  out exactly the shoreline's own dark/rocky colouring. Confirmed with a `just shot` before/after on level 1
+  (storing `palette_image`, and its placeholder, as `Rgba8UnormSrgb` restores ground contrast).
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Building icons, tooltips (spell icons done: `assets/spell-hud`).

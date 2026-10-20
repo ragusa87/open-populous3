@@ -107,7 +107,7 @@ fn altitude_image(cells: &GroundCells) -> Image {
 }
 
 fn palette_image(theme: &Theme) -> Image {
-    image((256, 1), TextureFormat::Rgba8Unorm, crate::terrain_texture::palette_rgba(theme), lut_sampler())
+    image((256, 1), TextureFormat::Rgba8UnormSrgb, crate::terrain_texture::palette_rgba(theme), lut_sampler())
 }
 
 fn bigfade_image(theme: &Theme) -> Image {
@@ -134,7 +134,7 @@ pub fn placeholder(images: &mut Assets<Image>) -> GroundMaterial {
         params: Vec4::ZERO,
         channels: images.add(image((1, 1), TextureFormat::Rgba8Unorm, vec![0, 0, 0, 255], lut_sampler())),
         altitude: images.add(image((1, 1), TextureFormat::R16Float, vec![0, 0], filterable_sampler())),
-        palette: images.add(image((1, 1), TextureFormat::Rgba8Unorm, vec![0, 0, 0, 255], lut_sampler())),
+        palette: images.add(image((1, 1), TextureFormat::Rgba8UnormSrgb, vec![0, 0, 0, 255], lut_sampler())),
         bigfade: images.add(image((1, 1), TextureFormat::R8Uint, vec![0], lut_sampler())),
         cliff: images.add(image((1, 1), TextureFormat::R8Uint, vec![0], lut_sampler())),
         disp: images.add(image((1, 1), TextureFormat::R8Snorm, vec![0], filterable_sampler())),
