@@ -182,7 +182,7 @@ impl GameMap {
             bolts: Registry::default(),
             vehicles: Registry::default(),
             ashes: Default::default(),
-            shading: CellShading::new(MAP_SIZE, SunParams::from_sunlight(level.sunlight)),
+            shading: CellShading::new(MAP_SIZE, SunParams::default()),
             outcome: None,
             now: Tick::ZERO,
             next_id: 1,

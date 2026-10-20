@@ -8,11 +8,10 @@
 
 use crate::ashes::Ashes;
 use crate::terrain::{DirtyRect, Heightmap};
-use pop3_format::level::Sunlight;
 use std::collections::HashMap;
 
-/// Three level-global values derived once from the level's own sunlight block: feeds `light` only, never the
-/// bigfade row (terrain-textures.md "bigfade": the row is height + blend alone).
+/// Three level-global values feeding `light` only, never the bigfade row (terrain-textures.md "bigfade": the row
+/// is height + blend alone).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SunParams {
     pub x: i32,
@@ -20,26 +19,14 @@ pub struct SunParams {
     pub base: i32,
 }
 
-impl SunParams {
-    /// GUESS, not traced (pop3-rev-analysis.md "Open questions"): the exe derives these three signed globals
-    /// from `ShadeStart`/`ShadeRange`/`Inclination` via sin/cos tables, but no concrete resulting value was
-    /// recovered this session for any Inclination - only the formula's general shape (`cell_light`) and the
-    /// three input bytes' own exe defaults (28/15/32) are confirmed. A fixed horizontal bearing (matching this
-    /// renderer's previous invented light direction, `terrain_texture::SUN`) stands in for whatever azimuth the
-    /// exe actually bakes in, since the level data carries no separate azimuth field at all; `shade_range` scales
-    /// its strength (a wider range reads as more contrast between slopes) and `shade_start` sets the base level.
-    /// `inclination` plays no role here yet, for lack of a traced effect to reproduce. Replace with the real
-    /// values once a spec session reads 0x937AA8/AA/AC live.
-    pub fn from_sunlight(s: Sunlight) -> Self {
-        let scale = s.shade_range as i32 * 20;
-        SunParams { x: scale * 3 / 5, z: scale * 3 / 4, base: s.shade_start as i32 * 10 }
-    }
-}
-
 impl Default for SunParams {
-    /// For generated maps and sandboxes, which have no level header of their own.
+    /// Live-measured and disassembly-confirmed (pop3-rev-analysis.md "Terrain land colour"): `sunlight_init_default`
+    /// hardcodes sunX = sunZ = sunBase = 147 in normal play, independent of the level's own
+    /// `ShadeStart`/`ShadeRange`/`Inclination` block (confirmed identical across two levels with different
+    /// on-disk `Inclination`) - the two paths that could move it off 147 are both gated behind a flag measured OFF
+    /// this session.
     fn default() -> Self {
-        Self::from_sunlight(Sunlight::EXE_DEFAULT)
+        SunParams { x: 147, z: 147, base: 147 }
     }
 }
 

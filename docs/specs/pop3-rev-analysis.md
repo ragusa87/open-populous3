@@ -1195,8 +1195,8 @@ colour = bigf0-X.dat[index]                                      # 0..111 land c
   reproduces that exact packed-index addressing would be needed to verify sloped cells numerically; the formula
   itself is re-confirmed correct from the disassembly regardless (pop3-rev/docs/functions.tsv 0x4BE230/0x4BE0B0).
 - Impact on our specs: see terrain-textures.md "bigfade"/"disp"/"Our bake" and TODO.md "Terrain" - in particular,
-  `game_core::shading::SunParams::from_sunlight`'s `ShadeRange`/`ShadeStart`-scaled guess should be replaced with
-  the flat 147/147/147 confirmed above, not a different scaling formula.
+  `game_core::shading::SunParams::default` now ships the flat 147/147/147 confirmed above, not the
+  `ShadeRange`/`ShadeStart`-scaled guess it used to.
 
 ## Walking speed [exe]
 Each person type has a movement profile (table 0x5A7B90, 26 bytes each, picked by unit+0x30) whose speed at +4 is
@@ -2478,8 +2478,8 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   hardcoded 0x93 (147), live-confirmed identical on a level with on-disk `Inclination` 0x40 and one with 0x20.
   The day/night-style tick that would vary them (0x401350) and the alternate fixed-value path (0x401920) are
   both gated behind flag `0x895DA5 & 0x8`, live-confirmed off (`Inclination` unchanged after 77+ turns on both
-  test levels). `game_core::shading::SunParams::from_sunlight` should ship the flat 147/147/147 confirmed here,
-  not the `ShadeRange`/`ShadeStart`-scaled guess it has today. Still open: the `+0xE` low nibble's own derivation
+  test levels). `game_core::shading::SunParams::default` now ships the flat 147/147/147 confirmed here, replacing
+  the `ShadeRange`/`ShadeStart`-scaled guess it used to have. Still open: the `+0xE` low nibble's own derivation
   (the ambient term `cell_light` adds, `(low_nibble + 8) * 16`) - kept as a constant 0 placeholder; and whether
   flag `0x895DA5 & 0x8` is ever set in some game mode (multiplayer, a specific level, a graphics setting) where
   the day/night tick or the fixed-Inclination-64 path would actually run.

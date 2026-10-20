@@ -191,13 +191,12 @@ this section used to describe. Per pixel (8 px per cell, texture tiles with a re
   Ground there, even at height 0, takes the lowest land row.
 - brightness column: `shading.light` (sunlight-derived, bilinear-interpolated per corner like `blend`) plus a
   small extra perturbation from `disp`'s own row-to-row difference, clamped 0..255 — not a baked Lambert light of
-  the rendered mesh slope any more (`pixel_rgb`). `game_core::shading::SunParams::from_sunlight` derives the sun
-  vector from the level's own `ShadeStart`/`ShadeRange`/`Inclination` (`pop3_format::level::Sunlight`) - **this is
-  now confirmed wrong, not just unverified**: live-measured and disassembly-traced this session
-  (pop3-rev-analysis.md "Terrain land colour"), `sunX`/`sunZ`/`sunBase` are a flat hardcoded `147`/`147`/`147` in
-  normal play, independent of `ShadeStart`/`ShadeRange`/`Inclination` entirely (confirmed identical across two
-  levels with different on-disk `Inclination`) - `SunParams::from_sunlight` should return that flat constant, not
-  a `ShadeRange`/`ShadeStart`-scaled value. See TODO.md "Terrain".
+  the rendered mesh slope any more (`pixel_rgb`). `game_core::shading::SunParams::default` is the sun vector:
+  live-measured and disassembly-traced (pop3-rev-analysis.md "Terrain land colour"), `sunX`/`sunZ`/`sunBase` are a
+  flat hardcoded `147`/`147`/`147` in normal play, independent of the level's own
+  `ShadeStart`/`ShadeRange`/`Inclination` (`pop3_format::level::Sunlight`) entirely (confirmed identical across two
+  levels with different on-disk `Inclination`), so the level's sunlight block is read and stored but no longer
+  feeds `SunParams` at all.
 - colour = `palette[cliff[blend / 4][bigfade[row][column]]]`: the bigfade lookup, then remapped through the
   cliff table (`Theme::cliff`, bilinear-interpolated `blend` picks the row) before the palette lookup -
   identity at `blend < 4`.
@@ -220,8 +219,7 @@ table (TODO.md "Terrain": both need their own pass).
 ## Next
 See TODO.md ("Terrain") for the open follow-ups: removing `char_ashes`/`LavaView` once visually verified,
 switching `lava::downhill` to the precomputed field, the procedural `BANDS`/`synthetic_cliff` recalibration, the
-theme-aware snow band, applying the sun vector's now-confirmed flat value (147/147/147, replacing
-`SunParams::from_sunlight`'s guess), and consuming `fade0-X.dat` (loaded, nothing reads it yet).
+theme-aware snow band, and consuming `fade0-X.dat` (loaded, nothing reads it yet).
 - Curvature in a vertex shader over a static height texture (TODO.md "Performance"/"Terrain").
 - Mipmaps (distant aliasing), lava and swamp layers.
 - Free theme packs for redistribution (the original files must not be shipped). The community packs on
