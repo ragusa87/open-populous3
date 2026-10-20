@@ -153,7 +153,10 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   - [ ] Related fix needed by the above: `Unit::tick`'s `Action::Dead` branch gets stuck forever (never
         reincarnates, never dies) when there's no `ReincarnationSite` for that owner — should fall through to
         `Action::Spirit` instead. Independent bug, not Armageddon-specific, but required before the lightning-kill
-        can work.
+        can work. Not just a hypothetical Armageddon state either: `DO SET_REINCARNATION OFF` is a real PopScript
+        command a tribe's own AI script runs at turn 0 (confirmed in level 1's red script, ai-scripts.md "Worked
+        example: level 1's opening flyby") — once script interpretation below exists, an ordinary campaign tribe
+        can reach the "no site for this owner" state outside Armageddon too, so this fix is load-bearing sooner.
   - [ ] Client: an `armageddon.rs` plugin beyond the v1 camera/lock — cast-confirmed screen flash, arena atmosphere
         tint, per-tribe survivor HUD bars (headcount visible as the decider), the continuous camera orbit (v1 only
         flies to the target and holds).
@@ -198,6 +201,14 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   (header byte 88: 1v1, 1v1v1, 2v1...), allies (header byte 92, see "Default allies" below), human / computer,
   defeated; holding the player's mana pool, spell book and build book (today `GameMap::mana`, `spell_books`,
   `build_books` by owner).
+  - Reported: red has no reincarnation site on `levl2001.dat` (level 1) in play, suspected to be this same gap
+    (header byte 88 unread). Level data itself does place a red (owner 1) shaman Thing (`#38 model 7 kind 1
+    owner 1 at (2304,7424)`, alongside blue's `#35 owner 0`) - `site::sites_from_level` takes any owner with a
+    placed shaman Thing with no regard for which tribes the header's own byte 88 (`tribes` field, read as `2`
+    for this level, i.e. a 1v1 code) actually selects, so if that byte means a specific pair of slots rather
+    than "first 2 owners found", we may be including/excluding the wrong one. AI scripts (blue/red/yellow/green)
+    read `[0, 10, 4, 5]` for this level - 3 non-zero, more than a "1v1" would suggest are active. Not root-caused
+    this session; needs byte 88 actually decoded and cross-checked against which owners the original instantiates.
 
 ## Winning and losing
 - [x] A generic, hookable `Outcome` (`game_core::outcome`): a tribe/side wiped out (by current owner, team-aware

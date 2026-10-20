@@ -613,7 +613,10 @@ Other ON/OFF switches:
     - `FLYBY_SET_EVENT_ANGLE angle start duration` (shortest way)
     - `FLYBY_SET_EVENT_ZOOM z start duration`, with z from -100 (out) to 100 (in)
     - `FLYBY_SET_EVENT_TOOLTIP x z idx start duration`
-  - `FLYBY_SET_END_TARGET` is unknown (?).
+  - `FLYBY_SET_END_TARGET x z angle ?`: in the one occurrence decoded below its `x z angle` are bit-for-bit the
+    same as the flyby's last `FLYBY_SET_EVENT_POS`/`FLYBY_SET_EVENT_ANGLE` - plausibly where the camera parks once
+    the flyby ends (by finishing or by `FLYBY_ALLOW_INTERRUPT`-ed skip); the 4th field (0 here) is still unknown,
+    possibly a marker index to snap to instead (single sample, needs a second script to confirm).
   - `FLYBY_START` and `FLYBY_STOP`.
 - Tutorial UI:
   - `DISABLE_USER_INPUTS` and `ENABLE_USER_INPUTS`.
@@ -626,6 +629,58 @@ Other ON/OFF switches:
   - The `BLUE`-named queries (`COUNT_BLUE_SHAPES`, `COUNT_BLUE_IN_HOUSES`, `IS_BLUE_SHAMAN_SELECTED`...) watch
     what the human does. `MOVE_SHAMAN_TO_MARKER`, `SEND_BLUE_PEOPLE_TO_MARKER` and `DESELECT_ALL_BLUE_PEOPLE`
     act on the human's units.
+
+### Worked example: level 1's opening flyby (cpscr010, red) [files]
+Decoded word-for-word (own decoder built from the grammar/token tables above, not checked in anywhere - see the
+clean-room note at the top of this repo's `AGENTS.md`). Level 1's `.hdr` gives red script 010, yellow 004 (a
+stub), 2 tribes; `cpscr010.dat`'s turn-0 setup block (see "Code" for its first few words) opens with
+`DO SET_REINCARNATION OFF` then `DO DISABLE_USER_INPUTS`, before any state is turned on - red starts the level
+with no reincarnation site and the human locked out of giving orders. This is the mechanism behind "red's shaman
+has no reincarnation site on level 1": a script command the AI runs for itself at turn 0, not a level-file flag or
+a missing shaman thing (level 1's `.dat` places a shaman thing for red like any other tribe - `SET_REINCARNATION`
+is a pure runtime switch, independent of whether a shaman/site thing exists).
+- The lock is lifted and the flyby fires from one `EVERY 7` block, gated by `IF (INT_GAME_TURN > 70) { IF ($57
+  == 0) { ... SET $57 1 } }` - a once-only latch 70+ turns in (about 6 s at the exe's 12 turns/s, ai-scripts.md
+  "How a script runs"):
+  ```
+  DO CREATE_MSG_INFORMATION 78
+  DO SET_MSG_AUTO_OPEN_DLG
+  DO SET_MSG_DELETE_ON_OK
+  DO ENABLE_USER_INPUTS
+  SET $57 1
+  DO FLYBY_CREATE_NEW
+  DO FLYBY_ALLOW_INTERRUPT ON
+  DO FLYBY_SET_EVENT_POS 8 28 4 80
+  DO FLYBY_SET_EVENT_POS 2 28 81 44
+  DO FLYBY_SET_EVENT_POS 252 254 126 45
+  DO FLYBY_SET_EVENT_POS 12 238 181 30
+  DO FLYBY_SET_EVENT_POS 20 216 221 45
+  DO FLYBY_SET_EVENT_ANGLE 0 5 35
+  DO FLYBY_SET_EVENT_ANGLE 1072 46 40
+  DO FLYBY_SET_EVENT_ANGLE 681 87 45
+  DO FLYBY_SET_EVENT_ANGLE 744 134 35
+  DO FLYBY_SET_EVENT_ANGLE 54 170 48
+  DO FLYBY_SET_EVENT_ANGLE 1438 219 45
+  DO FLYBY_SET_EVENT_ZOOM -100 10 35
+  DO FLYBY_SET_EVENT_ZOOM 10 67 25
+  DO FLYBY_SET_EVENT_ZOOM 80 165 36
+  DO FLYBY_SET_EVENT_ZOOM 0 202 63
+  DO FLYBY_SET_EVENT_TOOLTIP 12 26 1 60 71
+  DO FLYBY_SET_EVENT_TOOLTIP 2 250 1 132 60
+  DO FLYBY_SET_EVENT_TOOLTIP 18 246 0 193 60
+  DO FLYBY_SET_END_TARGET 20 216 1438 0
+  DO FLYBY_START
+  ```
+- Reading order is build-then-start: every `FLYBY_SET_EVENT_*` after `FLYBY_CREATE_NEW` queues one timed keyframe
+  (own `start`/`duration` pair in turns, independent per channel - 5 position waypoints, 6 angle keyframes, 4 zoom
+  keyframes, 3 tooltip pop-ins), and nothing animates until `FLYBY_START`; `FLYBY_ALLOW_INTERRUPT ON` is set once,
+  before the first event, and is what lets Space cancel this specific flyby (shortcuts.md) - the engine likely
+  owns the blinking "press space to skip" prompt itself (shown whenever an interruptible flyby is running), since
+  no script command here writes any such text.
+- The info message (idx 78, into `language/lang00.dat`) is queued, auto-opened and deletes on OK *before*
+  `ENABLE_USER_INPUTS` and the flyby commands - so the sequence at turn 70+ is: the turn-0 lockout ends, a
+  one-off dialog the player must dismiss appears, then the camera tour runs (or is skipped) while input stays
+  enabled throughout.
 
 ### Attributes (`INT_ATTR_*`)
 | Attribute | Meaning, usual values |
