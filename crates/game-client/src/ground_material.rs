@@ -36,8 +36,20 @@ pub struct GroundMaterial {
     pub bigfade: Handle<Image>,
     #[texture(7, sample_type = "u_int")]
     pub cliff: Handle<Image>,
-    #[texture(8, sample_type = "u_int")]
-    pub dispwater: Handle<Image>,
+    /// Signed (R8Snorm, the raw on-disk byte reinterpreted bit-for-bit as i8/127.0 — exactly the signed read
+    /// `pop3_format::theme::Theme::disp` always meant): bilinear, repeat-wrapped, unlike `bigfade`/`cliff`'s exact
+    /// `textureLoad`. A `textureLoad`-only lookup here (as `bigfade`/`cliff` use) reproduced the per-pixel jitter
+    /// faithfully but with none of the smoothing the old baked-texture pipeline got for free from the GPU's own
+    /// bilinear *magnification* of its coarse 8 px/cell texture — on steep, high terrain (`disp_sensitivity` near
+    /// its max) that showed up as harsh, blocky light/dark patches a real screen pixel's neighbour never had
+    /// before. Bilinear sampling here restores that smoothing while staying per-fragment.
+    #[texture(8)]
+    #[sampler(9)]
+    pub disp: Handle<Image>,
+    /// Unsigned (R8Unorm, the raw on-disk `watdisp.dat` byte): bilinear for the same reason as `disp`.
+    #[texture(10)]
+    #[sampler(11)]
+    pub water: Handle<Image>,
 }
 
 impl Material for GroundMaterial {
@@ -106,8 +118,12 @@ fn cliff_image(theme: &Theme) -> Image {
     image((CLIFF_WIDTH as u32, CLIFF_ROWS as u32), TextureFormat::R8Uint, theme.cliff.clone(), lut_sampler())
 }
 
-fn dispwater_image(theme: &Theme) -> Image {
-    image((DISP_SIZE as u32, DISP_SIZE as u32), TextureFormat::Rg8Uint, crate::terrain_texture::dispwater_rg(theme), lut_sampler())
+fn disp_image(theme: &Theme) -> Image {
+    image((DISP_SIZE as u32, DISP_SIZE as u32), TextureFormat::R8Snorm, theme.disp.clone(), filterable_sampler())
+}
+
+fn water_image(theme: &Theme) -> Image {
+    image((DISP_SIZE as u32, DISP_SIZE as u32), TextureFormat::R8Unorm, theme.water.clone(), filterable_sampler())
 }
 
 /// A material whose texture handles are all valid (1x1 stand-ins) so it can be attached to the terrain mesh
@@ -121,7 +137,8 @@ pub fn placeholder(images: &mut Assets<Image>) -> GroundMaterial {
         palette: images.add(image((1, 1), TextureFormat::Rgba8Unorm, vec![0, 0, 0, 255], lut_sampler())),
         bigfade: images.add(image((1, 1), TextureFormat::R8Uint, vec![0], lut_sampler())),
         cliff: images.add(image((1, 1), TextureFormat::R8Uint, vec![0], lut_sampler())),
-        dispwater: images.add(image((1, 1), TextureFormat::Rg8Uint, vec![0, 0], lut_sampler())),
+        disp: images.add(image((1, 1), TextureFormat::R8Snorm, vec![0], filterable_sampler())),
+        water: images.add(image((1, 1), TextureFormat::R8Unorm, vec![0], filterable_sampler())),
     }
 }
 
@@ -134,7 +151,8 @@ pub fn fill(material: &mut GroundMaterial, images: &mut Assets<Image>, cells: &G
     material.palette = images.add(palette_image(theme));
     material.bigfade = images.add(bigfade_image(theme));
     material.cliff = images.add(cliff_image(theme));
-    material.dispwater = images.add(dispwater_image(theme));
+    material.disp = images.add(disp_image(theme));
+    material.water = images.add(water_image(theme));
 }
 
 /// Pushes `cells`'s current content to the GPU (a tick's worth of `terrain_texture::rebake_cells` dirty-rect

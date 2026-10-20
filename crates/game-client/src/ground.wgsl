@@ -1,6 +1,10 @@
 // Ground colour, per fragment (docs/specs/terrain-textures.md "Our bake", "bigfade"/"disp"/"cliff"): the exact
 // same formula the deleted CPU `pixel_rgb` evaluated per baked texel, now evaluated per output pixel instead -
-// see `terrain_texture.rs`'s module doc for why.
+// see `terrain_texture.rs`'s module doc for why. One deliberate deviation: `disp`/`water` (the detail-noise
+// lookups, below) are bilinearly sampled rather than `textureLoad`-exact like `bigfade`/`cliff` - the old baked
+// texture got equivalent smoothing for free from the GPU's own bilinear magnification of its coarse 8 px/cell
+// bake, which an exact per-fragment lookup here would lose (visible as harsh, blocky light/dark patches on
+// steep, high terrain where `disp_sensitivity` is near its max - see `GroundMaterial::disp`'s own doc comment).
 #import bevy_pbr::forward_io::VertexOutput
 
 // x: map size (cells), y: land_start row, z: grid overlay on/off, w: PX_PER_CELL.
@@ -18,15 +22,20 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var bigfade_tex: texture_2d<u32>;
 // 128x64 R8Uint: cliff[row][land colour] -> remapped palette index.
 @group(#{MATERIAL_BIND_GROUP}) @binding(7) var cliff_tex: texture_2d<u32>;
-// 256x256 Rg8Uint: R disp, G water (same size, always read together).
-@group(#{MATERIAL_BIND_GROUP}) @binding(8) var dispwater_tex: texture_2d<u32>;
+// 256x256 R8Snorm: the signed detail noise (terrain-textures.md "disp"). Bilinear, repeat-wrapped: see its own
+// doc comment on `GroundMaterial::disp` for why this one isn't `textureLoad`-exact like `bigfade`/`cliff`.
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var disp_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(9) var disp_samp: sampler;
+// 256x256 R8Unorm: the sea's own noise (`watdisp.dat`), unsigned. Bilinear, repeat-wrapped, same reason.
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var water_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var water_samp: sampler;
 
 const BIGFADE_WIDTH: i32 = 256;
 const BIGFADE_ROWS: i32 = 1152;
 const BIGFADE_LAND_ROW: i32 = 128;
 const CLIFF_WIDTH: i32 = 128;
 const CLIFF_ROWS: i32 = 64;
-const DISP_SIZE: i32 = 256;
+const DISP_SIZE: f32 = 256.0;
 // Where walkers cross every cell not sea on all four corners (`coast_land`'s own threshold in the deleted CPU
 // path): the `channels` texture's bilinearly-sampled A (walkable) channel reaching this is "ground".
 const COAST_THRESHOLD: f32 = 0.2;
@@ -35,24 +44,23 @@ const ASH_COLOUR: vec3<f32> = vec3<f32>(38.0 / 255.0, 33.0 / 255.0, 30.0 / 255.0
 // original behaviour): matches the deleted CPU path's `GRID_SHADE`/`PX_PER_CELL`.
 const GRID_SHADE: f32 = 190.0 / 255.0;
 
-fn wrap256(v: i32) -> i32 {
-    return ((v % DISP_SIZE) + DISP_SIZE) % DISP_SIZE;
+// `disp`'s own raw byte, read signed (pop3-rev-analysis.md "Terrain land colour": no re-centring, no per-theme
+// constant - the game reads it straight as i8), bilinearly sampled at the continuous (pxf, pyf) pixel coordinate
+// (`GroundMaterial::disp`'s own doc comment): the texture is R8Snorm, so the signed decode is free, and the
+// result is a continuous float rather than the single discrete byte `textureLoad` would give.
+fn disp_at(pxf: f32, pyf: f32) -> f32 {
+    let uv = vec2<f32>(pxf + 0.5, pyf + 0.5) / DISP_SIZE;
+    return textureSample(disp_tex, disp_samp, uv).r * 127.0;
 }
-
-// `disp`/`water`'s own raw byte, read signed (pop3-rev-analysis.md "Terrain land colour": no re-centring, no
-// per-theme constant - the game reads it straight as i8).
-fn disp_at(px: i32, py: i32) -> i32 {
-    let v = i32(textureLoad(dispwater_tex, vec2<i32>(wrap256(px), wrap256(py)), 0).r);
-    return select(v, v - 256, v >= 128);
-}
-fn water_at(px: i32, py: i32) -> i32 {
-    return i32(textureLoad(dispwater_tex, vec2<i32>(wrap256(px), wrap256(py)), 0).g);
+fn water_at(pxf: f32, pyf: f32) -> f32 {
+    let uv = vec2<f32>(pxf + 0.5, pyf + 0.5) / DISP_SIZE;
+    return textureSample(water_tex, water_samp, uv).r * 255.0;
 }
 
 // How much `disp` jitters a bigfade row at that altitude (`pop3_format::theme::disp_sensitivity`): flat 320
 // below row 129, a +3/row ramp to 1024 at row 362, flat above.
-fn disp_sensitivity(row: i32) -> i32 {
-    return clamp(3 * row - 64, 320, 1024);
+fn disp_sensitivity(row: i32) -> f32 {
+    return clamp(3.0 * f32(row) - 64.0, 320.0, 1024.0);
 }
 
 // `bigfade` read as one flat array (terrain-textures.md "bigfade"/"Our bake"): a large jitter or brightness can
@@ -93,25 +101,25 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // sampler already does the same interpolation that function spelled out by hand).
     let cell_uv = vec2<f32>(x + 0.5, z + 0.5) / size;
 
-    let px = i32(floor(x * px_per_cell));
-    let py = i32(floor(z * px_per_cell));
-    let d_here = disp_at(px, py);
-    let d_below = disp_at(px, py + 1);
+    let pxf = x * px_per_cell;
+    let pyf = z * px_per_cell;
+    let d_here = disp_at(pxf, pyf);
+    let d_below = disp_at(pxf, pyf + 1.0);
 
     let ch = textureSample(channels_tex, channels_samp, cell_uv);
     let light = ch.g * 255.0;
-    let brightness = clamp(((d_below - d_here) >> 2u) + i32(round(light)), 0, 255);
+    let brightness = clamp(i32(round((d_below - d_here) / 4.0 + light)), 0, 255);
 
     let walk = ch.a;
     var colour: vec3<f32>;
     if (walk < COAST_THRESHOLD) {
-        let row = water_at(px, py) * BIGFADE_LAND_ROW / 256;
+        let row = i32(round(water_at(pxf, pyf) * f32(BIGFADE_LAND_ROW) / 256.0));
         let idx = bigfade_flat(row * BIGFADE_WIDTH + brightness);
         colour = palette_rgb(idx);
     } else {
         let altitude = textureSample(altitude_tex, altitude_samp, cell_uv).r;
         let row = max(i32(altitude), land_start);
-        let row_jitter = (disp_sensitivity(row) * d_here) >> 10u;
+        let row_jitter = i32(round(disp_sensitivity(row) * d_here / 1024.0));
         let land_colour = bigfade_flat(row * BIGFADE_WIDTH + brightness + row_jitter);
         let blend = i32(round(ch.r * 255.0));
         let remapped = cliff_remap(blend / 4, land_colour);

@@ -192,9 +192,14 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   at `land_start` (`Theme::land_start_row`, the first row from 128 up where most columns are neither water
   colours nor sea-like) — a renderer-side safety net, not in the traced formula itself, so a freshly flattened
   low platform (`blend` 0, no second +75) still reads as ground. A pixel's own `disp` sample (signed) then
-  jitters the row by `(disp_sensitivity(row) * disp) >> 10` (`pop3_format::theme::disp_sensitivity`), added
+  jitters the row by `(disp_sensitivity(row) * disp) / 1024` (`pop3_format::theme::disp_sensitivity`), added
   straight into the flat `bigfade` index alongside the brightness column — a large jitter or brightness can
-  legitimately roll into the next row, as in the original.
+  legitimately roll into the next row, as in the original. `disp`/`water` are the one deliberate deviation from
+  an exact per-pixel lookup: bilinearly sampled (continuous `px`/`py`, not floored first) rather than
+  `textureLoad`-exact like `bigfade`/`cliff`, because an exact lookup here showed up as harsh, blocky light/dark
+  patches on steep, high terrain (`disp_sensitivity` near its max) that the old baked 8 px/cell texture never
+  had — the GPU's own bilinear *magnification* of that coarse bake smoothed the same jitter for free, which a
+  literal per-fragment port of the formula loses (`GroundMaterial::disp`'s own doc comment, 2026-10-20).
 - coast: walkers cross every cell not sea on all four corners (`terrain_texture::walkable_cells`, `is_sea`), so
   the coast is drawn round those cells, not where the bilinear height reaches 1 (that left most of a shore cell
   blue and units looked like they walked on water). The `channels` texture's A channel is 1 at a walkable cell's

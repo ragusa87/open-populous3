@@ -159,18 +159,6 @@ pub fn palette_rgba(theme: &Theme) -> Vec<u8> {
     out
 }
 
-/// `disp` and `water` interleaved as RG8 (same size, always read together, terrain-textures.md "disp"):
-/// `ground.wgsl`'s `dispwater` texture.
-pub fn dispwater_rg(theme: &Theme) -> Vec<u8> {
-    let n = pop3_format::theme::DISP_SIZE * pop3_format::theme::DISP_SIZE;
-    let mut out = vec![0u8; n * 2];
-    for i in 0..n {
-        out[i * 2] = theme.disp[i];
-        out[i * 2 + 1] = theme.water[i];
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,12 +351,4 @@ mod tests {
         assert_eq!(&out[0..4], &[10, 20, 30, 255]);
     }
 
-    #[test]
-    fn dispwater_interleaves_disp_and_water() {
-        let theme = test_theme();
-        let out = dispwater_rg(&theme);
-        assert_eq!(out.len(), pop3_format::theme::DISP_SIZE * pop3_format::theme::DISP_SIZE * 2);
-        assert_eq!((out[0], out[1]), (theme.disp[0], theme.water[0]));
-        assert_eq!((out[2], out[3]), (theme.disp[1], theme.water[1]));
-    }
 }
