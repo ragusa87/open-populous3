@@ -307,6 +307,23 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   the gated day/night sun-angle tick (0x401350) or the fixed-Inclination-64 path (0x401920) ever actually run in
   some mode (both measured OFF this session); how the original maps its sky (backdrop scrolling with the
   camera?), not traced this session either.
+- [ ] Baked terrain texture (`world.rs`'s `theme_image`/`rebake`) has no mip chain: `Image::new` defaults to
+  `mip_level_count: 1` and nothing generates one afterward, even though the sampler is set to `mag_filter`/
+  `min_filter: Linear`. With the camera pitched/zoomed out over a whole hill, many baked texels (8 px/cell) map
+  to one screen pixel; linear filtering with a single mip can only blend the 4 nearest texels, not area-average
+  the many it should — textbook minification aliasing, giving the blocky/pixelated look at distance, and making
+  `pixel_rgb`'s per-pixel `row_jitter` noise (terrain-textures.md "Our bake", a faithful, unclamped reproduction
+  of the exe's own roll-over-prone formula) read as stark white/bright speckles instead of fine grain, since
+  there's no mip level to blend an occasional bright jitter texel into its neighbours. **But the original doesn't
+  have this problem because it has no comparable texture to mip in the first place**
+  (pop3-rev-analysis.md "Terrain land colour", 2026-10-20): `set_texture_landscape_main` recomputes the
+  `bigfade`/`disp`/`cliff` formula fresh per rendered screen pixel, at the quad's own on-screen resolution, every
+  frame (pure CPU rasterization, no D3D texture sampling at all) - there is no fixed-resolution intermediate
+  bitmap to minify. A mip chain on our baked texture is a legitimate, cheap patch for the symptom, but the
+  structurally faithful fix is evaluating the same formula per fragment in a shader at the engine's own output
+  resolution instead of pre-baking it into one coarse (8 px/cell) texture - which also matches this section's own
+  already-planned "Curvature in a vertex shader over a static height texture" direction (see "Performance"
+  below); a shader-based rewrite would make the mip-chain patch moot rather than needed.
 - [ ] Snow appears at high elevation in every theme today, which the original never does: `procedural_theme.rs`'s `BANDS` table hardcodes a universal top band (`[236, 236, 240]` "snow", row 960) applied regardless of theme/seed whenever the procedural fallback runs (no original data, or `--no-original`) — a project invention, not traced original behaviour. A rough first-pass catalogue of all 36 `pal0-X.dat`/`bigf0-X.dat` files now exists (terrain-textures.md "Themes seen"): of the themes sampled, only `h` clearly goes near-white right at the row ceiling the way the fallback assumes, `i`/`k` lean pale blue there instead, and theme `c`'s own "snow" shows up at a brighter column on LOW ground, not the row ceiling at all — i.e. whether a cell reads as snow-like depends on the brightness column too, not just height. Fix: make the fallback's top band(s) theme-aware (or at least not force "snow" universally) instead of one fixed palette for every theme; the catalogue is a first pass (one column, a handful of rows per theme), not a verified per-theme palette audit, so re-check a theme's own file before hardcoding its family. Now also sits on a much wider live row range than when this was written (see the new bullet below on `BANDS`'s own calibration) — worth doing together.
 - [ ] `procedural_theme.rs`'s `BANDS` row boundaries (0/64/128/180/320/560/760/960, chosen to roughly span
   0..`BIGFADE_ROWS` for whatever row the old, flat `POP3_ROW_SCALE`-scaled height produced) were never

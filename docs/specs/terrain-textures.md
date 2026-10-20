@@ -168,8 +168,15 @@ every frame.
 
 ## Our bake (`game-client/src/terrain_texture.rs`)
 Implemented to match the traced exe formula (see "bigfade"/"disp"/"cliff" above), not the old flat-scale guess
-this section used to describe. Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cell
-/ 128):
+this section used to describe. **A deliberate structural divergence from the original**, worth stating plainly
+(pop3-rev-analysis.md "Terrain land colour", 2026-10-20): the exe has no baked ground texture at all -
+`set_texture_landscape_main` recomputes the formula below fresh, per rendered screen pixel, every frame, at
+whatever resolution the quad is currently drawn at (`landscape_texture_32`/`16`/`16_fade`, pure CPU rasterization,
+no D3D texture involved). We instead bake the formula once into a single fixed-resolution colour texture
+(8 px/cell, below) and let the GPU sample/filter/magnify/minify it like an ordinary texture-mapped surface - far
+cheaper, but it means our texture needs its own mip/filtering care that the original's architecture never
+required in the first place (TODO.md "Terrain"). Per pixel (8 px per cell, texture tiles with a repeat sampler,
+UV = absolute cell / 128):
 - `game_core::shading::CellShading` (`GameMap::shading`) holds the per-cell `blend`/`light`/`downhill` the
   formula below reads, recomputed after every height edit (`GameMap::recompute_shading`, hooked into `apply` and
   `tick` centrally) rather than derived from the rendered mesh at bake time.
@@ -221,7 +228,13 @@ See TODO.md ("Terrain") for the open follow-ups: removing `char_ashes`/`LavaView
 switching `lava::downhill` to the precomputed field, the procedural `BANDS`/`synthetic_cliff` recalibration, the
 theme-aware snow band, and consuming `fade0-X.dat` (loaded, nothing reads it yet).
 - Curvature in a vertex shader over a static height texture (TODO.md "Performance"/"Terrain").
-- Mipmaps (distant aliasing), lava and swamp layers.
+- Mipmaps: not just distant aliasing in general - diagnosed this session as the likely cause of the
+  blocky/pixelated look and stark white speckles reported against the original's screenshots (TODO.md
+  "Terrain"). The runtime-baked `Image` (`world.rs`'s `theme_image`) has `mip_level_count: 1` despite a
+  `Linear` sampler; at the game's usual pitched-down, zoomed-out camera, many baked texels map to one screen
+  pixel, which single-mip linear filtering can't area-average - this also turns `pixel_rgb`'s faithful,
+  unclamped `row_jitter` noise (occasional bright texels, intentional per the exe's own formula) into visible
+  popping speckles instead of fine grain. Lava and swamp layers still to do too.
 - Free theme packs for redistribution (the original files must not be shipped). The community packs on
   thebeginning.uk/textures have no licence (site: "All rights reserved") and keep Bullfrog data (palette
   128..255, some ship the original `BL320`): fine to load from the user's `data/`, not to bundle.

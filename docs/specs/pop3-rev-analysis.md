@@ -1102,6 +1102,26 @@ blend-driven cliff/lava/ash row (`cliff[(blend/4)*128 + colour]`); this is the o
 feeds `colour` into that lookup - the `bigf0-X.dat` row/column pick, terrain-textures.md "bigfade"/"disp"'s
 open questions.
 
+**How the original actually draws this, confirmed from the exe (2026-10-20): there is no baked ground texture
+at all.** `set_texture_landscape_main` computes each quad's 4 corner values (height/blend/light below), then
+dispatches to one of three pixel-fill routines by colour depth - `landscape_texture_32` (0x4BF860, 32-bit
+surfaces), `landscape_texture_16` (0x4C0380), `landscape_texture_16_fade` (0x4C0EC0) - that rasterize the quad
+at its OWN current on-screen pixel span. `landscape_texture_32` re-reads the same 4 corner cells itself and
+sizes its scratch buffer to the quad's live screen extent, not a fixed tile; none of the three makes a single
+Direct3D (or any other vtable/COM) call - the whole landscape colour pipeline is CPU software rasterization,
+even in this Direct3D-build exe, evaluating the `bigfade`/`disp`/`cliff` formula below **fresh, per rendered
+output pixel, every frame**, at whatever resolution the quad is actually drawn at (near or far, zoomed in or
+out). There is no intermediate fixed-resolution "landscape texture" surface anywhere in this path to mip-map,
+filter, or otherwise manage at draw time - the concept doesn't apply, because the original never samples a
+pre-rendered bitmap for land colour; it recomputes the formula per pixel instead. The `disp0-X.dat` noise term
+(below) is still a raw, unfiltered point-sample of a small 256x256 tiling table at each pixel's own tile
+coordinate - so the original's own grain is always evaluated at native output resolution (reading as fine,
+consistent dithering, part of the intended "weathered ground" look) rather than upsampled/downsampled from a
+lower-resolution source. Impact on our implementation: see terrain-textures.md "Our bake" and TODO.md "Terrain" -
+baking into one coarse, fixed-resolution colour texture up front (ours: 8 px/cell) and then having the GPU
+magnify/minify it is a reasonable performance shortcut, but it is the reason that texture needs its own mip/
+filtering care at all; the original's own architecture never has that problem in the first place.
+
 Besides height and the already-documented blend byte, two more per-map-cell fields drive it (table 0x8A03E4, 16
 bytes/cell, same record as height/blend/downhill):
 ```text
