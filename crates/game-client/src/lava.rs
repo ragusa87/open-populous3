@@ -34,8 +34,8 @@
 //! cell's `blend` alone isn't enough for that (it only ever drops by a fixed total over that fade, so a cell that
 //! grew hot enough can still read as nearly full strength the turn before it abruptly turns to permanent ash) —
 //! so the whole patch visibly fades away in step with that same countdown, handing off to the ash mark
-//! underneath (`terrain_texture::char_ashes`, now blended the same organic way, module doc there) instead of
-//! popping.
+//! underneath (`ground.wgsl`'s own ash-charring step, blended the same organic way, docs/specs/terrain-textures.md
+//! "Our bake") instead of popping.
 
 use crate::camera::{CameraRig, CurveParamsRes};
 use crate::grounded::ground_point;

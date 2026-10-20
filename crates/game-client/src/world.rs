@@ -1,11 +1,10 @@
 //! Map loading/switching and the curved terrain entity.
 
 use crate::camera::{CameraRig, CurveParamsRes};
+use crate::ground_material::GroundMaterial;
 use crate::terrain_mesh;
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::system::SystemParam;
-use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use game_core::map::GameMap;
@@ -18,7 +17,7 @@ use std::path::{Path, PathBuf};
 #[derive(SystemParam)]
 struct TerrainAssets<'w> {
     meshes: ResMut<'w, Assets<Mesh>>,
-    mats: ResMut<'w, Assets<StandardMaterial>>,
+    mats: ResMut<'w, Assets<GroundMaterial>>,
     images: ResMut<'w, Assets<Image>>,
 }
 
@@ -66,10 +65,12 @@ pub struct ShowGrid(pub bool);
 #[derive(Component)]
 struct TerrainMesh;
 
-/// The baked ground material (`rebuild_terrain`'s own texture): shared with `ground_shake.rs`'s overlay patch so
-/// a shaking cell reads as the ground itself trembling, not a separate effect.
+/// The terrain's one ground material (`ground_material.rs`): created once with placeholder textures
+/// (`spawn_terrain`), filled with the real per-level data on `rebuild_terrain`'s first pass and every level
+/// switch, and synced a dirty rect at a time after that — never swapped for a new handle, so the mesh's own
+/// `MeshMaterial3d` component is set once and left alone.
 #[derive(Resource)]
-pub struct TerrainMaterial(pub Handle<StandardMaterial>);
+pub struct TerrainMaterial(pub Handle<GroundMaterial>);
 
 impl LevelList {
     /// No original data at all: maps and themes are generated, PgUp/PgDn change the seed.
@@ -190,9 +191,9 @@ impl Plugin for WorldPlugin {
     }
 }
 
-fn spawn_terrain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
+fn spawn_terrain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<GroundMaterial>>, mut images: ResMut<Assets<Image>>) {
     let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    let material = mats.add(StandardMaterial { perceptual_roughness: 0.95, ..default() });
+    let material = mats.add(crate::ground_material::placeholder(&mut images));
     commands.insert_resource(TerrainMaterial(material.clone()));
     commands.spawn((TerrainMesh, Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
 }
@@ -269,7 +270,7 @@ fn rebuild_terrain(
     mut glide: ResMut<TerrainGlide>,
     clock: Res<crate::units::SimClock>,
     mut last_focus: Local<Option<Vec2>>,
-    mut baked: Local<Option<(Theme, Handle<Image>)>>,
+    mut baked: Local<Option<(Theme, crate::terrain_texture::GroundCells)>>,
     mut geometry: Local<Option<terrain_mesh::TerrainGeometry>>,
     levels: Res<LevelList>,
     material: Res<TerrainMaterial>,
@@ -293,17 +294,19 @@ fn rebuild_terrain(
     // texture bake below and the geometry patch further down.
     let touch_set: &[DirtyRect] = if !changed.is_empty() { &changed } else { &glide.rects };
     let glide_src = glide.prev.as_ref().filter(|_| gliding).map(|prev| (prev, clock.alpha()));
-    match baked.as_ref().filter(|_| !dirty.0) {
-        Some((theme, image)) => {
+    match baked.as_mut().filter(|_| !dirty.0) {
+        Some((_, cells)) => {
             // `walkable_cells` is a whole-map scan: refreshed only on a real tick, reused as-is on a pure reglide
             // frame (the coastline doesn't move while a rim rises above it) so it never runs every reglide frame.
             if !changed.is_empty() {
                 *walkable_cache = crate::terrain_texture::walkable_cells(&map.0.terrain);
             }
-            if (!changed.is_empty() || gliding) && let Some(mut image) = assets.images.get_mut(image) && let Some(pixels) = image.data.as_mut() {
+            if !changed.is_empty() || gliding {
                 for &rect in touch_set {
-                    crate::terrain_texture::rebake(&map.0.terrain, &map.0.shading, &walkable_cache, theme, grid.0, rect, pixels, glide_src);
-                    crate::terrain_texture::char_ashes(&map.0.ashes, map.0.terrain.size(), rect, pixels);
+                    crate::terrain_texture::rebake_cells(&map.0.terrain, &map.0.shading, &map.0.ashes, &walkable_cache, rect, &mut cells.channels, &mut cells.altitude, glide_src);
+                }
+                if let Some(m) = assets.mats.get(&material.0) {
+                    crate::ground_material::sync(m, &mut assets.images, cells);
                 }
             }
         }
@@ -312,12 +315,12 @@ fn rebuild_terrain(
                 Theme::load(&levels.data_dir, t).map_err(|e| warn!("theme {t}: {e}")).ok()
             });
             let theme = original.unwrap_or_else(|| crate::procedural_theme::generate(levels.index as u32 + 1));
-            let image = assets.images.add(theme_image(&map.0, &theme, grid.0));
+            *walkable_cache = crate::terrain_texture::walkable_cells(&map.0.terrain);
+            let cells = crate::terrain_texture::bake_cells(&map.0.terrain, &map.0.shading, &map.0.ashes, &walkable_cache);
             if let Some(mut m) = assets.mats.get_mut(&material.0) {
-                m.unlit = true;
-                m.base_color_texture = Some(image.clone());
+                crate::ground_material::fill(&mut m, &mut assets.images, &cells, &theme, theme.land_start_row(), grid.0);
             }
-            *baked = Some((theme, image));
+            *baked = Some((theme, cells));
         }
     }
     // The camera moving needs every vertex recomputed (its curved bend is relative to the live focus); otherwise
@@ -352,30 +355,6 @@ fn rebuild_terrain(
             }
         }
     }
-}
-
-fn theme_image(map: &GameMap, theme: &Theme, grid: bool) -> Image {
-    let (side, mut pixels) = crate::terrain_texture::bake(&map.terrain, &map.shading, theme);
-    if grid {
-        crate::terrain_texture::draw_grid(&mut pixels, side);
-    }
-    let all = DirtyRect { min: (0, 0), max: (map.terrain.size() as i32, map.terrain.size() as i32) };
-    crate::terrain_texture::char_ashes(&map.ashes, map.terrain.size(), all, &mut pixels);
-    let mut image = Image::new(
-        Extent3d { width: side as u32, height: side as u32, depth_or_array_layers: 1 },
-        TextureDimension::D2,
-        pixels,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        mag_filter: ImageFilterMode::Linear,
-        min_filter: ImageFilterMode::Linear,
-        ..default()
-    });
-    image
 }
 
 #[cfg(test)]

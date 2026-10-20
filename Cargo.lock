@@ -2654,6 +2654,7 @@ dependencies = [
  "game-core",
  "game-net",
  "gltf",
+ "half",
  "pop3-format",
  "unit-atlas",
 ]

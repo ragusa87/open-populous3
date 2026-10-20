@@ -1,62 +1,42 @@
-//! Bake the ground texture the way the original does it (pop3-rev-analysis.md "Terrain land colour", "Building
-//! ashes" "Drawn"): per pixel, height plus the per-cell `blend` byte (`game_core::shading`) picks a `bigfade`
-//! altitude index - the SAME `blend` also picks a `cliff` row, remapping the colour for slopes, lava and ash
-//! ground; the precomputed `light` byte (sunlight-derived, not drawn from the rendered mesh's own slope) picks
-//! the brightness column; the sea uses its own `watdisp` noise over the water rows instead. Land, however low,
-//! is clamped past the theme's watery shore rows (`land_start`, a renderer-side safety net: see `pixel_rgb`) so
-//! it never looks like the sea the simulation does not see there, and the coast is drawn round every walkable
-//! cell (`coast_land`). Pure function, no Bevy.
+//! Per-cell ground data (pop3-rev-analysis.md "Terrain land colour", "Building ashes" "Drawn"): small buffers fed
+//! to `ground_material.rs`'s GPU textures, which `ground.wgsl` samples per fragment to compute the final colour —
+//! a `blend` byte (a general slope measure, pushed into their own ranges by lava and building ashes), a `light`
+//! byte (precomputed sunlight-derived brightness), an ash coverage and a walkable flag, bilinearly sampled by
+//! ordinary hardware texture filtering; height+blend is precombined into one `altitude` value per cell before
+//! upload, since blend's effect on it is a step function, not something linear interpolation could apply after
+//! the fact. Pure functions, no Bevy: the GPU-side wiring (building/updating `Image`s from these buffers, the
+//! `Material`, the shader) lives in `ground_material.rs`.
+//!
+//! **Why a shader, not a baked texture** (TODO.md "Terrain", 2026-10-20 entry, docs/specs/terrain-textures.md
+//! "Our bake"): the exe has no baked ground texture at all — it recomputes this same formula fresh, per rendered
+//! screen pixel, every frame (pure CPU rasterization, no D3D texture). A previous version of this module instead
+//! baked the formula once into a fixed 8 px/cell RGBA texture and let the GPU filter/magnify/minify it like an
+//! ordinary texture — cheaper to write, but it needed its own mip chain to avoid minification aliasing at
+//! distance, which the exe's architecture never needed in the first place. Evaluating the formula per fragment in
+//! `ground.wgsl` instead (at the engine's own output resolution) matches the exe's own approach and makes that
+//! mip-chain problem moot rather than needing a patch; see git history for the deleted `bake`/`rebake`/
+//! `pixel_rgb` CPU path this replaces (not unit-testable here any more — no GPU in `cargo test` — verified
+//! visually instead, `just shot`/`just profile`).
 
 use game_core::ashes::{Ashes, DARK, FADED};
 use game_core::shading::CellShading;
 use game_core::terrain::{DirtyRect, Heightmap};
 use game_core::unit::is_sea;
-use pop3_format::theme::{disp_sensitivity, Theme, BIGFADE_LAND_ROW, BIGFADE_WIDTH};
+use pop3_format::theme::Theme;
 
+/// How many of the shader's `px`/`py` integer pixel coordinates (the old baked texture's own resolution,
+/// `disp`/`water`'s lookup granularity, terrain-textures.md "disp") fall inside one cell: matches the deleted
+/// baked texture's own 8 px/cell, kept so the detail-noise granularity reads the same as before.
 pub const PX_PER_CELL: usize = 8;
 
-/// The water row (below `BIGFADE_LAND_ROW`) for a sea pixel's noise.
-pub fn sea_row(water: u8) -> usize {
-    water as usize * BIGFADE_LAND_ROW / 256
-}
-
-/// Bilinearly interpolated between the 4 integer corners around `(x, z)` (cell coordinates, fractional): the same
-/// technique `Heightmap::sample` uses for height, shared here by the altitude index, `blend` and `light` (all
-/// corner-sampled per cell, then interpolated across the quad, pop3-rev-analysis.md "Terrain land colour").
-fn bilinear(corner: impl Fn(i32, i32) -> f32, x: f32, z: f32) -> f32 {
-    let (x0, z0) = (x.floor(), z.floor());
-    let (fx, fz) = (x - x0, z - z0);
-    let (x0, z0) = (x0 as i32, z0 as i32);
-    let top = corner(x0, z0) * (1.0 - fx) + corner(x0 + 1, z0) * fx;
-    let bot = corner(x0, z0 + 1) * (1.0 - fx) + corner(x0 + 1, z0 + 1) * fx;
-    top * (1.0 - fz) + bot * fz
-}
-
-/// Where the walkable-cell field (1 at the centre of a cell walkers may cross, 0 at sea)
-/// starts counting as ground: low enough to cover the corner of a lone walkable cell (0.25 there),
-/// so the coast passes 0.3 cell past the walkable edge and rounds the corners.
-pub const COAST_THRESHOLD: f32 = 0.2;
+/// A fresh ash patch's own coverage (`channels` texture's B channel, 0 none .. this fully charred): never more
+/// than this even at a patch's own darkest (`ash_coverage`).
+pub const ASH_COVER: f32 = 0.75;
 
 /// Per cell (row-major), whether walkers may cross it: not sea on all four corners.
 pub fn walkable_cells(map: &Heightmap) -> Vec<bool> {
     let n = map.size() as i32;
     (0..n * n).map(|i| !is_sea(map, (i % n, i / n))).collect()
-}
-
-/// Whether the point `(x, z)` (cells) is drawn as ground: the walkable field, bilinear between
-/// cell centres, reaches `COAST_THRESHOLD`.
-pub fn coast_land(walkable: &[bool], size: usize, x: f32, z: f32) -> bool {
-    let (x, z) = (x - 0.5, z - 0.5);
-    let (x0, z0) = (x.floor(), z.floor());
-    let (fx, fz) = (x - x0, z - z0);
-    let n = size as i32;
-    let w = |dx: i32, dz: i32| {
-        let (cx, cz) = ((x0 as i32 + dx).rem_euclid(n), (z0 as i32 + dz).rem_euclid(n));
-        walkable[(cz * n + cx) as usize] as u8 as f32
-    };
-    let top = w(0, 0) * (1.0 - fx) + w(1, 0) * fx;
-    let bot = w(0, 1) * (1.0 - fx) + w(1, 1) * fx;
-    top * (1.0 - fz) + bot * fz >= COAST_THRESHOLD
 }
 
 /// Merges `rects` that touch or overlap into their union, repeatedly until none do. A tick can dirty a cluster
@@ -91,180 +71,110 @@ pub fn merge_dirty_rects(rects: &[DirtyRect]) -> Vec<DirtyRect> {
     }
 }
 
-/// Returns RGBA8 pixels, `(size * PX_PER_CELL)²`, tiling seamlessly like the map.
-pub fn bake(map: &Heightmap, shading: &CellShading, theme: &Theme) -> (usize, Vec<u8>) {
-    let side = map.size() * PX_PER_CELL;
-    let mut out = vec![0; side * side * 4];
-    let all = DirtyRect { min: (0, 0), max: (map.size() as i32, map.size() as i32) };
-    rebake(map, shading, &walkable_cells(map), theme, false, all, &mut out, None);
-    (side, out)
-}
-
-/// Cells around a height change whose pixels it reaches: the slope light and the coast read half a cell
-/// and one cell around each point.
+/// Cells around a height change whose `blend`/`light` shading values it reaches (`CellShading::recompute`'s own
+/// neighbour margin): a dirty rect's channel/altitude texels are rewritten this far past its edge too, so a
+/// neighbour whose shading changed without itself being in the rect still gets its new value uploaded.
 pub const REBAKE_MARGIN: i32 = 2;
 
-/// One pixel's shaded colour at world point `(x, z)` (cells), sampling `map`'s heightmap and `shading`'s
-/// precomputed per-cell blend/light: shared by `rebake`'s live pass and its glide blend (sampling a
-/// `TerrainGlide` snapshot heightmap instead of `map` for the height term only - `shading` itself is not
-/// glided, so a fast multi-cell change's blend/light-driven colour settles on its final value a tick early
-/// rather than interpolating smoothly like height does; a documented simplification, not traced behaviour
-/// either way).
-#[allow(clippy::too_many_arguments)]
-fn pixel_rgb(map: &Heightmap, shading: &CellShading, walkable: &[bool], theme: &Theme, land_start: usize, x: f32, z: f32, px: usize, py: usize) -> [u8; 3] {
-    let disp = |px: usize, py: usize| theme.disp(px, py) as i8 as i32; // signed, no per-theme re-centring (pop3-rev-analysis.md "Terrain land colour")
-    let light = bilinear(|cx, cz| shading.light(cx, cz) as f32, x, z);
-    let brightness = (((disp(px, py + 1) - disp(px, py)) >> 2) + light.round() as i32).clamp(0, 255) as u8;
-    if !coast_land(walkable, map.size(), x, z) {
-        return theme.shade(sea_row(theme.water(px, py)), brightness);
-    }
-    // The altitude index: each corner reads its own cell's height and blend directly (no averaging), the +75
-    // (doubled unless perfectly flat) folded in per corner before the whole thing is bilinearly interpolated.
-    let altitude = |cx: i32, cz: i32| {
-        let blend = shading.blend(cx, cz);
-        (map.get(cx, cz) as i32 + 75 + if blend != 0 { 75 } else { 0 }).clamp(0, 1022) as f32
-    };
-    // `land_start`: our own renderer-side floor (not in the traced formula), so a freshly flattened, perfectly
-    // flat platform at a low height (blend 0, no second +75) still reads as ground, not the sea's own rows.
-    let row = bilinear(altitude, x, z).max(land_start as f32) as i32;
-    let row_jitter = (disp_sensitivity(row as usize) * disp(px, py)) >> 10;
-    let flat_index = row * BIGFADE_WIDTH as i32 + brightness as i32 + row_jitter;
-    let colour = theme.bigfade_flat(flat_index);
-    let blend = bilinear(|cx, cz| shading.blend(cx, cz) as f32, x, z) as usize;
-    theme.palette[theme.cliff(blend / 4, colour) as usize]
+/// The altitude index one cell's own corner contributes before bilinear interpolation (terrain-textures.md
+/// "bigfade"): height plus 75, doubled unless the cell is perfectly flat (`blend == 0`) — ported into
+/// `ground.wgsl`'s `altitude` texture, bilinearly sampled there exactly as this was bilinearly interpolated by
+/// hand before (same reasoning as the deleted `pixel_rgb`: blend's effect is a step function per corner, so it
+/// must be folded in before interpolation, not after).
+pub fn altitude_cell(height: u16, blend: u8) -> f32 {
+    (height as i32 + 75 + if blend != 0 { 75 } else { 0 }).clamp(0, 1022) as f32
 }
-
-fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
-    (a as f32 + (b as f32 - a as f32) * t.clamp(0.0, 1.0)).round().clamp(0.0, 255.0) as u8
-}
-
-fn lerp_rgb(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
-    [lerp_u8(a[0], b[0], t), lerp_u8(a[1], b[1], t), lerp_u8(a[2], b[2], t)]
-}
-
-/// Bakes again, into the whole texture `pixels` (`bake`), the pixels of the cells in `rect` (wrapping) and
-/// `REBAKE_MARGIN` around them, after their heights changed; `grid`: with the cell borders (`draw_grid`).
-/// `walkable` (`walkable_cells`) is the caller's to compute once and share: a whole-map scan, not worth repeating
-/// per rect when a single tick can dirty hundreds of them (an ongoing terrain effect).
-///
-/// `glide = Some((prev, alpha))` blends each touched pixel's colour between `prev`'s heightmap (as it stood
-/// before the tick that produced `rect`) and `map`'s own live value, at `alpha` (`SimClock`'s fraction of the
-/// current tick elapsed) — the texture-side counterpart of `terrain_mesh::patch`'s own `glide` parameter, so the
-/// ground colour (e.g. a volcano rim crossing into the snow band) glides as smoothly as the geometry beneath it
-/// instead of popping once per tick. `alpha = 1.0` reproduces the plain `glide = None` result exactly.
-#[allow(clippy::too_many_arguments)]
-pub fn rebake(map: &Heightmap, shading: &CellShading, walkable: &[bool], theme: &Theme, grid: bool, rect: DirtyRect, pixels: &mut [u8], glide: Option<(&Heightmap, f32)>) {
-    let (n, side) = (map.size() as i32, map.size() * PX_PER_CELL);
-    let step = 1.0 / PX_PER_CELL as f32;
-    let land_start = theme.land_start_row();
-    let span = |lo: i32, hi: i32| {
-        let (lo, hi) = (lo - REBAKE_MARGIN, hi + REBAKE_MARGIN);
-        if hi - lo >= n { 0..n } else { lo..hi }
-    };
-    for cz in span(rect.min.1, rect.max.1) {
-        for cx in span(rect.min.0, rect.max.0) {
-            let (cx, cz) = (cx.rem_euclid(n) as usize, cz.rem_euclid(n) as usize);
-            for py in cz * PX_PER_CELL..(cz + 1) * PX_PER_CELL {
-                for px in cx * PX_PER_CELL..(cx + 1) * PX_PER_CELL {
-                    let (x, z) = (px as f32 * step, py as f32 * step);
-                    let now = pixel_rgb(map, shading, walkable, theme, land_start, x, z, px, py);
-                    let mut rgb = match glide {
-                        Some((prev, alpha)) => {
-                            let before = pixel_rgb(prev, shading, walkable, theme, land_start, x, z, px, py);
-                            lerp_rgb(before, now, alpha)
-                        }
-                        None => now,
-                    };
-                    if grid && (px % PX_PER_CELL == 0 || py % PX_PER_CELL == 0) {
-                        rgb = rgb.map(grid_shade);
-                    }
-                    let i = (py * side + px) * 4;
-                    pixels[i..i + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
-                }
-            }
-        }
-    }
-}
-
-/// Our colour of ashes, and how much of it covers the ground at its darkest.
-const ASH: [f32; 3] = [38.0, 33.0, 30.0];
-const ASH_COVER: f32 = 0.75;
 
 /// `cell`'s own ash coverage, 0 (no ashes there) to `ASH_COVER` (as dark as ashes ever get): sampled at that one
-/// cell directly, no averaging with neighbours yet (pop3-rev-analysis.md "Building ashes": "each corner samples
-/// that ONE cell's own [blend] directly") — `char_ashes` is what blends it into its neighbours.
-fn ash_k(ashes: &Ashes, cell: (i32, i32)) -> f32 {
+/// cell directly, no averaging with neighbours (pop3-rev-analysis.md "Building ashes": "each corner samples that
+/// ONE cell's own [blend] directly") — bilinear sampling of the `channels` texture this feeds does the
+/// neighbour-blending instead, same as `blend`/`light`.
+fn ash_coverage(ashes: &Ashes, cell: (i32, i32)) -> f32 {
     ashes.darkness(cell).map_or(0.0, |dark| ASH_COVER * dark.saturating_sub(FADED) as f32 / (DARK - FADED) as f32)
 }
 
-/// `ash_k` bilinearly interpolated between the 4 cells around the point `(x, z)` (cell coordinates, fractional,
-/// wrapped), the exact same technique `Heightmap::sample`/`land_row`'s own height lookup already uses: this
-/// per-pixel smoothing, not anything ash-specific, is what gives a patch its soft, organic-looking edge instead
-/// of a hard-edged block per cell — the very same mechanism `lava.rs` [client]'s own `ground_mesh_grid` uses for
-/// still-molten lava, so a patch keeps the identical shape as it cools from one into the other (module doc there).
-fn ash_k_bilinear(ashes: &Ashes, size: i32, x: f32, z: f32) -> f32 {
-    let (x0, z0) = (x.floor(), z.floor());
-    let (fx, fz) = (x - x0, z - z0);
-    let (x0, z0) = (x0 as i32, z0 as i32);
-    let k = |dx: i32, dz: i32| ash_k(ashes, ((x0 + dx).rem_euclid(size), (z0 + dz).rem_euclid(size)));
-    let top = k(0, 0) * (1.0 - fx) + k(1, 0) * fx;
-    let bot = k(0, 1) * (1.0 - fx) + k(1, 1) * fx;
-    top * (1.0 - fz) + bot * fz
+/// The per-cell data `ground_material.rs` uploads as GPU textures: `channels` (RGBA8, R blend / G light / B ash
+/// coverage / A walkable, `side²`) and `altitude` (one f32 per cell, `side²`) — both bilinearly sampled in
+/// `ground.wgsl`, reproducing the old hand-written `bilinear(corner_fn, x, z)` exactly via ordinary hardware
+/// texture filtering (a linear, repeat-wrapped sampler over grid-vertex-aligned texels).
+pub struct GroundCells {
+    pub side: usize,
+    pub channels: Vec<u8>,
+    pub altitude: Vec<f32>,
 }
 
-/// Chars the pixels of the cells under ashes around `rect` (as `rebake` spans it), per pixel by `ash_k_bilinear`:
-/// call it after baking those cells.
-pub fn char_ashes(ashes: &Ashes, size: usize, rect: DirtyRect, pixels: &mut [u8]) {
-    let (n, side) = (size as i32, size * PX_PER_CELL);
-    let step = 1.0 / PX_PER_CELL as f32;
+/// Every cell of `map`, from scratch.
+pub fn bake_cells(map: &Heightmap, shading: &CellShading, ashes: &Ashes, walkable: &[bool]) -> GroundCells {
+    let side = map.size();
+    let mut channels = vec![0u8; side * side * 4];
+    let mut altitude = vec![0f32; side * side];
+    let all = DirtyRect { min: (0, 0), max: (side as i32, side as i32) };
+    rebake_cells(map, shading, ashes, walkable, all, &mut channels, &mut altitude, None);
+    GroundCells { side, channels, altitude }
+}
+
+/// Rewrites `channels`/`altitude` (`bake_cells`'s own buffers, or the live ones `ground_material.rs` keeps) for
+/// the cells in `rect` (wrapping) and `REBAKE_MARGIN` around them, after their heights/shading changed.
+///
+/// `glide = Some((prev, alpha))` blends each touched cell's own `altitude` value between `prev`'s heightmap (as
+/// it stood before the tick that produced `rect`) and `map`'s own live value, at `alpha` (`SimClock`'s fraction
+/// of the current tick elapsed) — the same documented simplification the old pixel-level glide used (blend/light
+/// are not themselves glided, only read from `shading` as it already stands), moved to the one scalar that now
+/// feeds the shader instead of to the finished RGB colour it used to blend directly.
+pub fn rebake_cells(map: &Heightmap, shading: &CellShading, ashes: &Ashes, walkable: &[bool], rect: DirtyRect, channels: &mut [u8], altitude: &mut [f32], glide: Option<(&Heightmap, f32)>) {
+    let n = map.size() as i32;
     let span = |lo: i32, hi: i32| {
         let (lo, hi) = (lo - REBAKE_MARGIN, hi + REBAKE_MARGIN);
         if hi - lo >= n { 0..n } else { lo..hi }
     };
     for cz in span(rect.min.1, rect.max.1) {
         for cx in span(rect.min.0, rect.max.0) {
-            let (cx, cz) = (cx.rem_euclid(n) as usize, cz.rem_euclid(n) as usize);
-            for py in cz * PX_PER_CELL..(cz + 1) * PX_PER_CELL {
-                for px in cx * PX_PER_CELL..(cx + 1) * PX_PER_CELL {
-                    let (x, z) = (px as f32 * step, py as f32 * step);
-                    let k = ash_k_bilinear(ashes, n, x, z);
-                    if k <= 0.0 {
-                        continue;
-                    }
-                    let i = (py * side + px) * 4;
-                    for (c, ash) in pixels[i..i + 3].iter_mut().zip(ASH) {
-                        *c = (*c as f32 * (1.0 - k) + ash * k).round() as u8;
-                    }
+            let (ux, uz) = (cx.rem_euclid(n) as usize, cz.rem_euclid(n) as usize);
+            let i = uz * map.size() + ux;
+            let blend = shading.blend(cx, cz);
+            let walk = walkable[i];
+            channels[i * 4] = blend;
+            channels[i * 4 + 1] = shading.light(cx, cz);
+            channels[i * 4 + 2] = (ash_coverage(ashes, (cx, cz)) * 255.0).round() as u8;
+            channels[i * 4 + 3] = if walk { 255 } else { 0 };
+            let now = altitude_cell(map.get(cx, cz), blend);
+            altitude[i] = match glide {
+                Some((prev, alpha)) => {
+                    let before = altitude_cell(prev.get(cx, cz), blend);
+                    before + (now - before) * alpha.clamp(0.0, 1.0)
                 }
-            }
+                None => now,
+            };
         }
     }
 }
 
-/// Brightness (out of 256) of the cell borders `draw_grid` darkens.
-const GRID_SHADE: u16 = 190;
-
-fn grid_shade(c: u8) -> u8 {
-    (c as u16 * GRID_SHADE / 256) as u8
+/// The palette as RGBA8 (A unused, padding for a 4-byte-aligned texel): `ground.wgsl`'s `palette` texture.
+pub fn palette_rgba(theme: &Theme) -> Vec<u8> {
+    let mut out = vec![0u8; 256 * 4];
+    for (i, &[r, g, b]) in theme.palette.iter().take(256).enumerate() {
+        out[i * 4..i * 4 + 3].copy_from_slice(&[r, g, b]);
+        out[i * 4 + 3] = 255;
+    }
+    out
 }
 
-/// Darkens the first row and column of pixels of every cell: a grid along the cell borders.
-pub fn draw_grid(pixels: &mut [u8], side: usize) {
-    for (i, px) in pixels.chunks_exact_mut(4).enumerate() {
-        let (x, y) = (i % side, i / side);
-        if x % PX_PER_CELL == 0 || y % PX_PER_CELL == 0 {
-            for c in &mut px[..3] {
-                *c = grid_shade(*c);
-            }
-        }
+/// `disp` and `water` interleaved as RG8 (same size, always read together, terrain-textures.md "disp"):
+/// `ground.wgsl`'s `dispwater` texture.
+pub fn dispwater_rg(theme: &Theme) -> Vec<u8> {
+    let n = pop3_format::theme::DISP_SIZE * pop3_format::theme::DISP_SIZE;
+    let mut out = vec![0u8; n * 2];
+    for i in 0..n {
+        out[i * 2] = theme.disp[i];
+        out[i * 2 + 1] = theme.water[i];
     }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use game_core::shading::SunParams;
-    use pop3_format::theme::{BIGFADE_ROWS, BIGFADE_WIDTH, DISP_SIZE, MAX_SHORE_ROWS};
     use std::collections::HashMap;
 
     /// A theme's heightmap fully shaded from scratch: the fixture a test starts from.
@@ -288,7 +198,6 @@ mod tests {
 
     #[test]
     fn merge_dirty_rects_chains_through_a_middle_rect() {
-        // c only touches b, not a directly: still one rect once b pulls them both in.
         let a = DirtyRect { min: (0, 0), max: (0, 0) };
         let b = DirtyRect { min: (1, 0), max: (1, 0) };
         let c = DirtyRect { min: (2, 0), max: (2, 0) };
@@ -303,275 +212,163 @@ mod tests {
     }
 
     #[test]
-    fn grid_darkens_the_cell_borders_only() {
-        let side = 2 * PX_PER_CELL;
-        let mut px = vec![200u8; side * side * 4];
-        draw_grid(&mut px, side);
-        let at = |x: usize, y: usize| px[(y * side + x) * 4];
-        assert!(at(0, 3) < 200 && at(PX_PER_CELL, 5) < 200 && at(4, PX_PER_CELL) < 200);
-        assert_eq!(at(3, 3), 200);
-        assert_eq!(px[3], 200, "alpha kept");
-    }
-
-    /// Palette index = row band (0 water, 1 land) so we can check the row choice.
-    fn test_theme() -> Theme {
-        let mut pal = vec![0u8; 1024];
-        pal[4..7].copy_from_slice(&[0, 200, 0]);
-        pal[0..3].copy_from_slice(&[0, 0, 200]);
-        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
-        big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..].fill(1);
-        Theme::parse(&pal, &big, &vec![128; DISP_SIZE * DISP_SIZE]).unwrap()
-    }
-
-    #[test]
-    fn a_dead_flat_low_cell_is_floored_at_land_start_not_the_bare_height_plus_75_row() {
-        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
-        big[BIGFADE_LAND_ROW * BIGFADE_WIDTH..(BIGFADE_LAND_ROW + 1) * BIGFADE_WIDTH].fill(5);
-        let mut pal = vec![0u8; 1024];
-        pal[4 * 5..4 * 5 + 3].copy_from_slice(&[9, 9, 9]); // not sea-like: b == g, so "b > g" is false
-        let theme = Theme::parse(&pal, &big, &[0; DISP_SIZE * DISP_SIZE]).unwrap();
-        assert_eq!(theme.land_start_row(), BIGFADE_LAND_ROW, "row 128 alone already qualifies as land");
-        let mut m = Heightmap::new(8);
-        for z in 0..8 {
-            for x in 0..8 {
-                m.set(x, z, 1); // dead flat: blend 0 everywhere, the bare formula alone gives row 1 + 75 = 76
-            }
-        }
-        let walk = walkable_cells(&m);
-        let shading = shading_for(&m);
-        let rgb = pixel_rgb(&m, &shading, &walk, &theme, theme.land_start_row(), 4.0, 4.0, 0, 0);
-        assert_eq!(rgb, [9, 9, 9], "floored up to land_start (128), not left at the bare row (76)");
-    }
-
-    #[test]
-    fn a_blend_from_a_single_steeper_neighbour_lifts_the_altitude_row_by_75() {
-        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
-        big[175 * BIGFADE_WIDTH..176 * BIGFADE_WIDTH].fill(5); // flat: height 100 + 75
-        big[250 * BIGFADE_WIDTH..251 * BIGFADE_WIDTH].fill(9); // blended: height 100 + 75 + 75
-        let mut pal = vec![0u8; 1024];
-        pal[4 * 5..4 * 5 + 3].copy_from_slice(&[1, 2, 3]);
-        pal[4 * 9..4 * 9 + 3].copy_from_slice(&[4, 5, 6]);
-        let theme = Theme::parse(&pal, &big, &[0; DISP_SIZE * DISP_SIZE]).unwrap();
-        assert_eq!(theme.land_start_row(), BIGFADE_LAND_ROW + MAX_SHORE_ROWS, "nothing in the shore window qualifies");
-        let mut m = Heightmap::new(8);
-        for z in 0..8 {
-            for x in 0..8 {
-                m.set(x, z, 100);
-            }
-        }
-        m.set(5, 4, 200); // a single steeper neighbour of (4,4), (1,1) stays untouched and flat
-        let walk = walkable_cells(&m);
-        let shading = shading_for(&m);
-        assert_eq!(shading.blend(1, 1), 0, "far from the one raised cell");
-        assert_ne!(shading.blend(4, 4), 0, "next to it");
-        let land_start = theme.land_start_row();
-        let flat = pixel_rgb(&m, &shading, &walk, &theme, land_start, 1.0, 1.0, 0, 0);
-        let blended = pixel_rgb(&m, &shading, &walk, &theme, land_start, 4.0, 4.0, 0, 0);
-        assert_eq!(flat, [1, 2, 3], "flat: height 100 + 75");
-        assert_eq!(blended, [4, 5, 6], "blended: height 100 + 75 + 75");
-    }
-
-    #[test]
-    fn a_nonzero_blend_remaps_the_colour_through_the_cliff_table() {
-        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
-        // Both the flat and the blended cell's altitude index (175 and 250, height 100 + 75 [+ 75]) read the same
-        // bigfade colour, so the only difference between them below is the cliff remap, driven by blend alone.
-        big[175 * BIGFADE_WIDTH..176 * BIGFADE_WIDTH].fill(5);
-        big[250 * BIGFADE_WIDTH..251 * BIGFADE_WIDTH].fill(5);
-        let mut pal = vec![0u8; 1024];
-        pal[4 * 5..4 * 5 + 3].copy_from_slice(&[1, 2, 3]); // the plain slope colour
-        pal[4 * 6..4 * 6 + 3].copy_from_slice(&[7, 8, 9]); // the cliff-remapped colour
-        let theme = Theme::parse(&pal, &big, &[0; DISP_SIZE * DISP_SIZE]).unwrap();
-        let mut cliff = vec![0u8; pop3_format::theme::CLIFF_WIDTH * pop3_format::theme::CLIFF_ROWS];
-        for row in 0..pop3_format::theme::CLIFF_ROWS {
-            cliff[row * pop3_format::theme::CLIFF_WIDTH + 5] = if row == 0 { 5 } else { 6 };
-        }
-        let theme = theme.with_cliff(&cliff).unwrap();
-        let mut m = Heightmap::new(8);
-        for z in 0..8 {
-            for x in 0..8 {
-                m.set(x, z, 100);
-            }
-        }
-        m.set(5, 4, 200);
-        let walk = walkable_cells(&m);
-        let shading = shading_for(&m);
-        let land_start = theme.land_start_row();
-        assert_eq!(pixel_rgb(&m, &shading, &walk, &theme, land_start, 1.0, 1.0, 0, 0), [1, 2, 3], "flat: cliff row 0 is the identity");
-        assert_eq!(pixel_rgb(&m, &shading, &walk, &theme, land_start, 4.0, 4.0, 0, 0), [7, 8, 9], "blended: remapped by its own nonzero cliff row");
-    }
-
-    #[test]
-    fn coast_covers_every_walkable_cell_and_rounds_its_corners() {
+    fn coast_covers_every_walkable_cell() {
         let mut m = Heightmap::new(8);
         m.set(4, 4, 500);
         let walk = walkable_cells(&m);
-        let land = |x, z| coast_land(&walk, 8, x, z);
-        assert_eq!(walk.iter().filter(|&&w| w).count(), 4, "the four cells around the peak");
-        for (x, z) in [(3.0, 3.0), (5.0, 5.0), (3.0, 5.0), (4.0, 4.0), (3.01, 4.0), (4.99, 4.0)] {
-            assert!(land(x, z), "walkable point ({x}, {z}) drawn as ground");
-        }
-        assert!(land(2.8, 4.0), "the coast passes a little past the walkable edge");
-        assert!(!land(2.5, 4.0) && !land(4.0, 6.5));
-        assert!(!land(2.75, 2.75), "convex corner rounded off");
+        assert_eq!(walk.iter().filter(|&&w| w).count(), 4, "the four cells whose own footprint touches the peak corner");
+        // A cell (x, z)'s own footprint is corners (x, z)..(x+1, z+1): the peak at corner (4,4) touches cells
+        // (3,3), (4,3), (3,4) and (4,4).
+        assert!(walk[3 * 8 + 3] && walk[3 * 8 + 4] && walk[4 * 8 + 3] && walk[4 * 8 + 4]);
+        assert!(!walk[0]);
     }
 
     #[test]
-    fn sea_rows_span_the_water_rows() {
-        assert_eq!((sea_row(0), sea_row(128), sea_row(255)), (0, 64, BIGFADE_LAND_ROW - 1));
+    fn altitude_floors_dead_flat_ground_at_height_plus_75() {
+        assert_eq!(altitude_cell(1, 0), 76.0);
     }
 
     #[test]
-    fn sea_takes_the_water_noise() {
-        let mut pal = vec![0u8; 1024];
-        pal[4 * 9..4 * 9 + 3].copy_from_slice(&[9, 9, 9]);
-        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
-        big[sea_row(250) * BIGFADE_WIDTH..(sea_row(250) + 1) * BIGFADE_WIDTH].fill(9);
-        let theme = Theme::parse(&pal, &big, &vec![0; DISP_SIZE * DISP_SIZE]).unwrap().with_water(&vec![250; DISP_SIZE * DISP_SIZE]).unwrap();
-        let m = Heightmap::new(4);
-        let (_, px) = bake(&m, &shading_for(&m), &theme);
-        assert_eq!(&px[0..3], &[9, 9, 9], "watdisp picks the sea row, not disp");
+    fn altitude_adds_another_75_when_blended() {
+        assert_eq!(altitude_cell(100, 0), 175.0);
+        assert_eq!(altitude_cell(100, 16), 250.0, "a nonzero blend lifts the row by 75 more");
     }
 
     #[test]
-    fn water_and_land_use_their_rows() {
-        let mut m = Heightmap::new(4);
-        m.set(2, 2, 500);
-        let (side, px) = bake(&m, &shading_for(&m), &test_theme());
-        assert_eq!(side, 4 * PX_PER_CELL);
-        assert_eq!(&px[0..3], &[0, 0, 200], "cell (0,0) is water");
-        let j = (PX_PER_CELL * side + PX_PER_CELL + 1) * 4;
-        assert_eq!(&px[j..j + 3], &[0, 200, 0], "a walkable cell's height-0 corner is ground");
-        let i = (2 * PX_PER_CELL * side + 2 * PX_PER_CELL) * 4;
-        assert_eq!(&px[i..i + 3], &[0, 200, 0], "cell (2,2) is land");
+    fn altitude_clamps_to_1022() {
+        assert_eq!(altitude_cell(u16::MAX, 16), 1022.0);
     }
 
     #[test]
-    fn ashes_char_their_cells_less_as_they_fade() {
-        let mut m = Heightmap::new(8);
-        (0..8).for_each(|z| (0..8).for_each(|x| m.set(x, z, 500)));
-        let shading = shading_for(&m);
-        let (side, mut px) = bake(&m, &shading, &test_theme());
-        // Exactly at a cell's own grid point: `ash_k_bilinear`'s peak there, no blending with any neighbour.
-        let at = |px: &[u8], cell: usize| px[(cell * PX_PER_CELL * side + cell * PX_PER_CELL) * 4 + 1];
-        let ground = at(&px, 3);
-        let mut ashes = Ashes::default();
-        ashes.add(vec![(3, 3)]);
-        let all = DirtyRect { min: (0, 0), max: (8, 8) };
-        char_ashes(&ashes, 8, all, &mut px);
-        assert!(at(&px, 3) < ground / 2, "charred, right at its own peak");
-        assert_eq!(at(&px, 5), ground, "untouched, far from any ash cell");
-        let (_, mut faded) = bake(&m, &shading, &test_theme());
-        ashes.patches[0].darkness = FADED + 4;
-        char_ashes(&ashes, 8, all, &mut faded);
-        assert!(at(&faded, 3) > at(&px, 3) && at(&faded, 3) < ground, "fading");
-    }
-
-    #[test]
-    fn ash_k_is_zero_without_ashes_and_full_strength_right_at_a_fresh_patch_s_own_cell() {
+    fn ash_coverage_is_zero_without_ashes_and_full_strength_right_at_a_fresh_patch() {
         let ashes = Ashes::default();
-        assert_eq!(ash_k(&ashes, (3, 3)), 0.0);
+        assert_eq!(ash_coverage(&ashes, (3, 3)), 0.0);
         let mut ashes = Ashes::default();
         ashes.add(vec![(3, 3)]);
-        assert_eq!(ash_k(&ashes, (3, 3)), ASH_COVER, "a fresh patch starts at DARK, the darkest it gets");
+        assert_eq!(ash_coverage(&ashes, (3, 3)), ASH_COVER, "a fresh patch starts at DARK, the darkest it gets");
     }
 
     #[test]
-    fn ash_k_bilinear_blends_smoothly_from_an_ash_cell_towards_its_untouched_neighbour() {
+    fn ash_coverage_fades_as_the_patch_ages() {
         let mut ashes = Ashes::default();
         ashes.add(vec![(3, 3)]);
-        let size = 16;
-        assert_eq!(ash_k_bilinear(&ashes, size, 3.0, 3.0), ASH_COVER, "right at the ash cell's own point");
-        assert_eq!(ash_k_bilinear(&ashes, size, 4.0, 3.0), 0.0, "right at the untouched neighbour's own point");
-        let halfway = ash_k_bilinear(&ashes, size, 3.5, 3.0);
-        assert!(halfway > 0.0 && halfway < ASH_COVER, "a graded step in between, not a hard edge: {halfway}");
+        let fresh = ash_coverage(&ashes, (3, 3));
+        ashes.patches[0].darkness = FADED + 4;
+        let faded = ash_coverage(&ashes, (3, 3));
+        assert!(faded > 0.0 && faded < fresh);
     }
 
     #[test]
-    fn ash_k_bilinear_wraps_on_the_torus() {
+    fn bake_cells_reads_blend_light_ash_and_walkable_into_their_own_channel() {
+        let mut m = Heightmap::new(8);
+        m.set(4, 4, 500);
+        let shading = shading_for(&m);
         let mut ashes = Ashes::default();
-        ashes.add(vec![(0, 0)]);
-        assert_eq!(ash_k_bilinear(&ashes, 16, 15.5, 0.0), ash_k_bilinear(&ashes, 16, -0.5, 0.0));
-        assert!(ash_k_bilinear(&ashes, 16, 15.5, 0.0) > 0.0, "the far edge wraps right back to the ash cell");
+        ashes.add(vec![(4, 4)]);
+        let walk = walkable_cells(&m);
+        let cells = bake_cells(&m, &shading, &ashes, &walk);
+        assert_eq!(cells.side, 8);
+        let i = 4 * 8 + 4;
+        assert_eq!(cells.channels[i * 4], shading.blend(4, 4));
+        assert_eq!(cells.channels[i * 4 + 1], shading.light(4, 4));
+        assert_eq!(cells.channels[i * 4 + 2], (ASH_COVER * 255.0).round() as u8, "freshly ashed");
+        assert_eq!(cells.channels[i * 4 + 3], 255, "walkable");
+        assert_eq!(cells.channels[3], 0, "sea corner (cell 0,0), not walkable");
+        assert_eq!(cells.altitude[i], altitude_cell(500, shading.blend(4, 4)));
     }
 
     #[test]
     fn rebaking_a_change_matches_a_full_bake_and_leaves_the_rest() {
         let mut m = Heightmap::new(16);
         m.set(4, 4, 500);
-        let theme = test_theme();
-        let (side, mut px) = bake(&m, &shading_for(&m), &theme);
-        draw_grid(&mut px, side);
-        let far = (4 * PX_PER_CELL * side + 4 * PX_PER_CELL + 3) * 4;
-        px[far] = 7;
+        let ashes = Ashes::default();
+        let shading = shading_for(&m);
+        let walk = walkable_cells(&m);
+        let mut cells = bake_cells(&m, &shading, &ashes, &walk);
+        let far = 9 * 16 + 9;
+        cells.channels[far * 4] = 7;
         m.set(15, 8, 600);
         m.set(0, 8, 600);
         // As in the real pipeline (`GameMap::recompute_shading`, run before the texture is ever rebaked): `shading`
-        // already reflects the fully-committed edit by the time `rebake` reads it.
+        // already reflects the fully-committed edit by the time `rebake_cells` reads it.
         let shading = shading_for(&m);
-        rebake(&m, &shading, &walkable_cells(&m), &theme, true, DirtyRect { min: (15, 8), max: (17, 9) }, &mut px, None);
-        assert_eq!(px[far], 7, "far cells untouched");
-        px[far] = 0;
-        let mut full = bake(&m, &shading, &theme).1;
-        draw_grid(&mut full, side);
-        full[far] = 0;
-        assert_eq!(px, full, "across the map's edge too");
+        let walk = walkable_cells(&m);
+        rebake_cells(&m, &shading, &ashes, &walk, DirtyRect { min: (15, 8), max: (17, 9) }, &mut cells.channels, &mut cells.altitude, None);
+        assert_eq!(cells.channels[far * 4], 7, "far cell untouched");
+        cells.channels[far * 4] = 0;
+        let mut full = bake_cells(&m, &shading, &ashes, &walk);
+        full.channels[far * 4] = 0;
+        assert_eq!(cells.channels, full.channels, "across the map's edge too");
+        assert_eq!(cells.altitude, full.altitude);
     }
 
     #[test]
-    fn lerp_rgb_clamps_and_interpolates() {
-        assert_eq!(lerp_u8(0, 10, 0.5), 5);
-        assert_eq!(lerp_u8(0, 10, -1.0), 0, "clamps below 0");
-        assert_eq!(lerp_u8(0, 10, 2.0), 10, "clamps above 1");
-        assert_eq!(lerp_rgb([0, 10, 20], [10, 20, 0], 0.5), [5, 15, 10]);
-    }
-
-    #[test]
-    fn rebake_glide_blends_between_prev_and_now_colour() {
-        let mut m = Heightmap::new(16);
-        for z in 0..16 {
-            for x in 0..16 {
+    fn rebake_glide_blends_the_altitude_between_prev_and_now() {
+        let mut m = Heightmap::new(8);
+        for z in 0..8 {
+            for x in 0..8 {
                 m.set(x, z, 400);
             }
         }
-        let theme = test_theme();
         let prev = m.clone();
+        let ashes = Ashes::default();
         let walk = walkable_cells(&m);
-        m.set(8, 8, 900);
+        m.set(4, 4, 900);
         let shading = shading_for(&m);
-        let rect = DirtyRect { min: (8, 8), max: (8, 8) };
-
-        let (side, before_px) = bake(&prev, &shading, &theme);
-        let mut now_px = before_px.clone();
-        rebake(&m, &shading, &walk, &theme, false, rect, &mut now_px, None);
-        let mut blended_px = before_px.clone();
-        rebake(&m, &shading, &walk, &theme, false, rect, &mut blended_px, Some((&prev, 0.5)));
-
-        let i = (8 * PX_PER_CELL * side + 8 * PX_PER_CELL) * 4;
-        let expected = lerp_rgb([before_px[i], before_px[i + 1], before_px[i + 2]], [now_px[i], now_px[i + 1], now_px[i + 2]], 0.5);
-        assert_eq!([blended_px[i], blended_px[i + 1], blended_px[i + 2]], expected);
+        let mut cells = bake_cells(&prev, &shading_for(&prev), &ashes, &walk);
+        let rect = DirtyRect { min: (4, 4), max: (4, 4) };
+        rebake_cells(&m, &shading, &ashes, &walk, rect, &mut cells.channels, &mut cells.altitude, Some((&prev, 0.5)));
+        let i = 4 * 8 + 4;
+        let before = altitude_cell(400, shading.blend(4, 4));
+        let now = altitude_cell(900, shading.blend(4, 4));
+        assert_eq!(cells.altitude[i], before + (now - before) * 0.5);
     }
 
     #[test]
     fn rebake_glide_at_alpha_one_matches_a_plain_rebake() {
-        let mut m = Heightmap::new(16);
-        for z in 0..16 {
-            for x in 0..16 {
+        let mut m = Heightmap::new(8);
+        for z in 0..8 {
+            for x in 0..8 {
                 m.set(x, z, 400);
             }
         }
-        let theme = test_theme();
         let prev = m.clone();
+        let ashes = Ashes::default();
         let walk = walkable_cells(&m);
-        m.set(8, 8, 900);
+        m.set(4, 4, 900);
         let shading = shading_for(&m);
-        let rect = DirtyRect { min: (8, 8), max: (8, 8) };
+        let rect = DirtyRect { min: (4, 4), max: (4, 4) };
 
-        let (_, base) = bake(&prev, &shading, &theme);
-        let mut plain = base.clone();
-        rebake(&m, &shading, &walk, &theme, false, rect, &mut plain, None);
-        let mut glided = base;
-        rebake(&m, &shading, &walk, &theme, false, rect, &mut glided, Some((&prev, 1.0)));
-        assert_eq!(glided, plain);
+        let mut plain = bake_cells(&prev, &shading_for(&prev), &ashes, &walk);
+        rebake_cells(&m, &shading, &ashes, &walk, rect, &mut plain.channels, &mut plain.altitude, None);
+        let mut glided = bake_cells(&prev, &shading_for(&prev), &ashes, &walk);
+        rebake_cells(&m, &shading, &ashes, &walk, rect, &mut glided.channels, &mut glided.altitude, Some((&prev, 1.0)));
+        assert_eq!(glided.altitude, plain.altitude);
+    }
+
+    fn test_theme() -> Theme {
+        let big = vec![0u8; pop3_format::theme::BIGFADE_WIDTH * pop3_format::theme::BIGFADE_ROWS];
+        let disp: Vec<u8> = (0..pop3_format::theme::DISP_SIZE * pop3_format::theme::DISP_SIZE).map(|i| (i % 256) as u8).collect();
+        let water: Vec<u8> = (0..pop3_format::theme::DISP_SIZE * pop3_format::theme::DISP_SIZE).map(|i| ((i + 1) % 256) as u8).collect();
+        let mut pal = vec![0u8; 1024];
+        pal[0..4].copy_from_slice(&[10, 20, 30, 0]);
+        Theme::parse(&pal, &big, &disp).unwrap().with_water(&water).unwrap()
+    }
+
+    #[test]
+    fn palette_rgba_packs_rgb_with_full_alpha() {
+        let theme = test_theme();
+        let out = palette_rgba(&theme);
+        assert_eq!(out.len(), 256 * 4);
+        assert_eq!(&out[0..4], &[10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn dispwater_interleaves_disp_and_water() {
+        let theme = test_theme();
+        let out = dispwater_rg(&theme);
+        assert_eq!(out.len(), pop3_format::theme::DISP_SIZE * pop3_format::theme::DISP_SIZE * 2);
+        assert_eq!((out[0], out[1]), (theme.disp[0], theme.water[0]));
+        assert_eq!((out[2], out[3]), (theme.disp[1], theme.water[1]));
     }
 }

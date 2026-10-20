@@ -24,6 +24,7 @@ mod game_end;
 mod game_frame;
 mod game_speed;
 mod generated_buildings;
+mod ground_material;
 mod ground_shake;
 mod grounded;
 mod hover;
@@ -89,7 +90,8 @@ fn main() {
     }
     app
         .add_plugins((
-            (world::WorldPlugin { level_arg: opts.level_arg, use_original: opts.use_original },
+            ((world::WorldPlugin { level_arg: opts.level_arg, use_original: opts.use_original },
+            ground_material::GroundMaterialPlugin),
             camera::CameraPlugin,
             virtual_cursor::VirtualCursorPlugin,
             grounded::GroundedPlugin,
