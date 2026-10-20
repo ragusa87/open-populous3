@@ -167,53 +167,58 @@ and fading over a lava cell's life is the blend byte's own value doing so, read 
 every frame.
 
 ## Our bake (`game-client/src/terrain_texture.rs`)
-Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cell / 128):
-- `h` = bilinear height; `d` = `disp` texel.
-- row = water (outside the coast, below): `watdisp * 128 / 256` (`sea_row`, the whole water band; `disp` when the file is
-  missing, generated noise in the procedural theme); land: `land_row` =
-  `max(start, start + h + (d - mean(disp)) / 2)`. `start` = `Theme::land_start_row`, the first row from 128 up
-  where most columns are neither water colours (colours of rows 0..127) nor sea-like (`sea_like`:
-  blue > green >= red, the wet grey-blue of theme c's rows 134..136; purple land like theme i's stays land), at most 160: rows 128..~145 are still blue
-  in most themes (theme 1: 146, 5: 136, m: 137; theme g reuses water colours up to row 475, hence the cap).
-  So low ground (the simulation's land, height >= 1) never looks like the sea (level 5's reincarnation site
-  used to), and centring `disp` on the file's mean keeps the detail without shifting the bands by a theme
-  constant.
+Implemented to match the traced exe formula (see "bigfade"/"disp"/"cliff" above), not the old flat-scale guess
+this section used to describe. Per pixel (8 px per cell, texture tiles with a repeat sampler, UV = absolute cell
+/ 128):
+- `game_core::shading::CellShading` (`GameMap::shading`) holds the per-cell `blend`/`light`/`downhill` the
+  formula below reads, recomputed after every height edit (`GameMap::recompute_shading`, hooked into `apply` and
+  `tick` centrally) rather than derived from the rendered mesh at bake time.
+- row = water (outside the coast, below): `watdisp * 128 / 256` (`sea_row`, the whole water band; `disp` when the
+  file is missing, generated noise in the procedural theme); land: each corner's own `altitude_index =
+  clamp(height + 75 + (75 if blend != 0 else 0), 0, 1022)` (no averaging), bilinearly interpolated across the
+  quad, then floored at `land_start` (`Theme::land_start_row`, the first row from 128 up where most columns are
+  neither water colours nor sea-like, `pixel_rgb`'s own doc comment) — a renderer-side safety net, not in the
+  traced formula itself, so a freshly flattened low platform (`blend` 0, no second +75) still reads as ground. A
+  pixel's own `disp` sample (signed) then jitters the row by `(disp_sensitivity(row) * disp) >> 10`
+  (`pop3_format::theme::disp_sensitivity`), added straight into the flat `bigfade` index alongside the brightness
+  column (`Theme::bigfade_flat`) — a large jitter or brightness can legitimately roll into the next row, as in
+  the original.
 - coast (`coast_land`): walkers cross every cell not sea on all four corners (`is_sea`), so the coast is
   drawn round those cells, not where the bilinear height reaches 1 (that left most of a shore cell blue
   and units looked like they walked on water). Field = 1 at the centre of each walkable cell, 0 at sea,
   bilinear between centres; ground where it reaches 0.2 (`COAST_THRESHOLD`). Covers a lone walkable
   cell's corner (0.25 there), puts straight coasts 0.3 cell past the walkable edge and rounds the corners.
   Ground there, even at height 0, takes the lowest land row.
-- brightness column from baked Lambert lighting of the heightmap slope (`SUN`), material is unlit. The original
-  instead reads a precomputed per-cell brightness byte fed by the level's own sunlight block, recomputed
-  live on every height edit rather than derived from the rendered/bilinear slope at bake time (pop3-rev-analysis.md
-  "Terrain land colour") — close in spirit (both are a height-gradient dot a light direction) but a different
-  input (raw per-cell neighbour heights, not the baked mesh normal) and update timing.
-- colour = `palette[bigfade[row][column]]`.
-- When the simulation changes heights (`GameMap::step`'s `DirtyRect`s, kept in `world::TerrainPatches`), only those
-  cells and 2 around them (`REBAKE_MARGIN`: slope light and coast read up to a cell around) are baked again into the
-  texture (`rebake`), with the theme loaded once per level: a full bake is ~0.4 s, a land bridge changes cells
-  every tick.
+- brightness column: `shading.light` (sunlight-derived, bilinear-interpolated per corner like `blend`) plus a
+  small extra perturbation from `disp`'s own row-to-row difference, clamped 0..255 — not a baked Lambert light of
+  the rendered mesh slope any more (`pixel_rgb`). `game_core::shading::SunParams::from_sunlight` derives the sun
+  vector from the level's own `ShadeStart`/`ShadeRange`/`Inclination` (`pop3_format::level::Sunlight`), though its
+  exact values are a labelled guess pending a spec session (pop3-rev-analysis.md "Open questions").
+- colour = `palette[cliff[blend / 4][bigfade[row][column]]]`: the bigfade lookup, then remapped through the
+  cliff table (`Theme::cliff`, bilinear-interpolated `blend` picks the row) before the palette lookup -
+  identity at `blend < 4`.
+- `terrain_texture::char_ashes` (a flat RGB darken) and `game-client/src/lava.rs`'s `LavaView` overlay mesh stay
+  wired alongside this for now, pending further visual verification against more original levels and effects
+  before they're removed (TODO.md "Terrain").
+- When the simulation changes heights (`GameMap::step`'s `DirtyRect`s, kept in `world::TerrainPatches`), only
+  those cells and 2 around them (`REBAKE_MARGIN`: slope light and coast read up to a cell around) are baked again
+  into the texture (`rebake`), with the theme loaded once per level: a full bake is ~0.4 s, a land bridge changes
+  cells every tick.
 
-Now traced against the real game (see "bigfade"/"disp" above): the original has no flat `POP3_ROW_SCALE`-like
-height multiplier at all — row is `height + 75 (+75 again unless the cell is dead flat)`, clamped to 1022, and
-`disp`'s effect on the row is scaled by a fixed altitude-dependent curve (320..1024), not a constant. Our single
-global `POP3_ROW_SCALE` is the wrong shape of knob: it should be replaced by the `height + 75[+75]` formula
-directly (no scale to tune), with `disp`'s multiplier following the same 320..1024 altitude curve instead of a
-single factor. The brightness curve is also now traced (a per-cell precomputed byte from local height gradient
-dotted against the level's sun vector, not a baked Lambert light of the mesh slope) — see the bullet above.
 Fallback (no data, or `--no-original`): `procedural_theme::generate(seed)` builds a palette
 (8 bands x 32 brightness), a jittered bigfade and tileable value-noise disp with the same
-shapes as the original files, so the same bake is used in both modes. Its `BANDS` table hardcodes the same
-8 bands, in the same order, for every theme/seed — including a top "snow" band starting at row 960 applied
-unconditionally. That has no basis in the original (see "Themes seen" above: only a few themes, e.g. `h`, go
-near-white that high up, and it's theme data, not an elevation rule) and is why the reimplementation shows snow
-at high elevation on every theme when running without the original asset files. See TODO.md "Terrain".
+shapes as the original files, plus a synthetic `cliff`/identity `fade` (`synthetic_cliff`/`identity_fade`), so
+the same bake is used in both modes. Its `BANDS` table hardcodes the same 8 bands, in the same order, for every
+theme/seed — including a top "snow" band starting at row 960 applied unconditionally, and row boundaries that
+were never recalibrated for how much further the real, unscaled height + blend formula now reaches into the
+table (TODO.md "Terrain": both need their own pass).
 
 ## Next
-See TODO.md ("Terrain"): fade and cliff loading (`pop3_format::theme` loads pal, bigf, disp, watdisp and the
-sky).
-- Re-bake only the dirty rect after edits (now the whole 1024² texture is re-baked).
+See TODO.md ("Terrain") for the open follow-ups: removing `char_ashes`/`LavaView` once visually verified,
+switching `lava::downhill` to the precomputed field, the procedural `BANDS`/`synthetic_cliff` recalibration, the
+theme-aware snow band, the sun vector's real traced values, and consuming `fade0-X.dat` (loaded, nothing reads
+it yet).
+- Curvature in a vertex shader over a static height texture (TODO.md "Performance"/"Terrain").
 - Mipmaps (distant aliasing), lava and swamp layers.
 - Free theme packs for redistribution (the original files must not be shipped). The community packs on
   thebeginning.uk/textures have no licence (site: "All rights reserved") and keep Bullfrog data (palette

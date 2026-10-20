@@ -138,7 +138,10 @@ one removed any other way (a plan cancelled) leaves none.
   (127 when fresh) drops by 2 each time; at 92 or below the patch is gone: 6000 turns dark, then 18 steps (288 turns).
 - Nothing is built on a cell with ashes (`placement::Blocked::Ashes`).
 - Drawn: the terrain texture chars those cells (`terrain_texture::char_ashes`, our colour), less as they fade; the
-  map's dirty rects redraw them when a patch comes, fades a step or goes.
+  map's dirty rects redraw them when a patch comes, fades a step or goes. The base terrain texture itself now also
+  reflects an ashed cell's darkness through the shared blend/cliff mechanism (`game_core::shading`,
+  terrain-textures.md "cliff") feeding `Theme::cliff`'s remap — `char_ashes` stays wired alongside it for now,
+  pending visual verification before removal (TODO.md "Terrain").
 - Lava and earthquake ground share the same mark once they cool/fade (`lava::Lava::turn`, `WorldEvent::Scorch`):
   Volcano's flowing lava, its whole footprint in one shot once fading ends; Earthquake's static fissure, all its
   cells at once (they share one blend clock) once they drop below `GONE_BLEND`.

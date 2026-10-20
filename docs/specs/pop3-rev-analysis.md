@@ -2449,6 +2449,13 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   assignment actually produces).
 - Building ashes: the cliff rows' colours, the volcano cone's clearing, foundation sub 2's condition and its unit
   10/0x13.
+- Terrain land colour (2026-10-20): `sunX`/`sunZ`/`sunBase`'s actual derivation from `ShadeStart`/`ShadeRange`/
+  `Inclination` via the sin/cos tables (0x5DDDE8/0x5DE5E8, `0x401790`/`0x401920`) - no concrete resulting value was
+  recovered for any Inclination this session, only the general shape and the three input bytes' own exe defaults
+  (28/15/32); `game_core::shading::SunParams::from_sunlight` ships a labelled guess in the meantime. Also open: the
+  `+0xE` low nibble's own derivation (the ambient term `cell_light` adds, `(low_nibble + 8) * 16`) - kept as a
+  constant 0 placeholder. A `livemem.py` read of a known flat cell's `+0xD`/`+0xE` next to its neighbours' heights,
+  for a level using Inclination 32 and one using 64, would settle both.
 - Attacking a building: what sets building +0x9C bit 0x40, and the partial explosion's 10/7 units.
 - Firewarrior fire: the line-of-fire test, whether a building stops the bolts (5 throws at a still preacher did nothing), what sets the reload
   byte to 252-255 (third capture), what the +0x10 bit 0x400000 set on own people under a passing shot does,

@@ -292,20 +292,43 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 ## Terrain ([terrain.md](docs/specs/terrain.md), [terrain-textures.md](docs/specs/terrain-textures.md))
 - [ ] Curvature in a vertex shader sampling an R16 height texture (static grid).
 - [ ] Dirty-rect re-bake of the texture/normals instead of full rebuilds.
-- [ ] Height -> colour row scale, now traced (pop3-rev-analysis.md "Terrain land colour", terrain-textures.md
-  "bigfade"/"disp"): drop `POP3_ROW_SCALE` as a flat multiplier, it has no counterpart. The original's row is
-  `clamp(height + 75 + (75 if blend != 0 else 0), 0, 1022)` (no height scale at all), and `disp`'s row-jitter is
-  scaled by a fixed altitude-dependent curve baked per level (flat ×320/1024 below row index 129, ramping to
-  ×1024/1024 above row index 362), not a constant — so the same raw `disp` byte should move the row far more on
-  high ground than on low/flat ground. The brightness column should come from a per-cell value derived the same
-  way the original's precomputed per-cell brightness byte is (a height-gradient dot the level's sunlight-derived
-  vector, divided by 350, plus an ambient term; see pop3-rev-analysis.md "Terrain land colour" for the exact
-  formula and struct layout), not from a baked Lambert light of the
-  rendered mesh slope - this is also where the level `.dat` sunlight block (`ShadeStart`/`ShadeRange`/
-  `Inclination`) plugs in, confirmed to feed brightness, not the row. Also check how the original maps its sky
-  (backdrop scrolling with the camera?), not traced this session.
-- [ ] Snow appears at high elevation in every theme today, which the original never does: `procedural_theme.rs`'s `BANDS` table hardcodes a universal top band (`[236, 236, 240]` "snow", row 960) applied regardless of theme/seed whenever the procedural fallback runs (no original data, or `--no-original`) — a project invention, not traced original behaviour. A rough first-pass catalogue of all 36 `pal0-X.dat`/`bigf0-X.dat` files now exists (terrain-textures.md "Themes seen"): of the themes sampled, only `h` clearly goes near-white right at the row ceiling the way the fallback assumes, `i`/`k` lean pale blue there instead, and theme `c`'s own "snow" shows up at a brighter column on LOW ground, not the row ceiling at all — i.e. whether a cell reads as snow-like depends on the brightness column too, not just height. Fix: make the fallback's top band(s) theme-aware (or at least not force "snow" universally) instead of one fixed palette for every theme; the catalogue is a first pass (one column, a handful of rows per theme), not a verified per-theme palette audit, so re-check a theme's own file before hardcoding its family.
-- [ ] Cliffs, lava and ash share one mechanism we don't implement yet (`cliff0-X.dat`, 64 rows): confirmed this session (pop3-rev-analysis.md "Building ashes" "Drawn", terrain-textures.md "cliff") — the row is `blend / 4`, a per-CELL "blend" byte the original keeps for every cell (normally `clamp((max neighbour height − min) / 8, 1, 127)`, a general slope measure recomputed after every height edit — nothing like it exists in `game_core::terrain` today, only `lava::FlowCell`'s own local, lava-scoped `blend`), corner-sampled and interpolated across each quad exactly like `bigfade`'s own brightness column; a separate 1022-entry altitude-colour index (height + 75, +75 again if blend != 0) is stacked on top the same way. No animation in the original: the table loads once per level, the "glow" is just blend rising (up to 255, lava) or forced to 127 then decaying (ash) read straight into this lookup. Once a real per-cell blend field exists and the table is loaded (`fade0-X.dat` too, a palette light table for object/sprite shading and fog of war — load both in `pop3_format::theme`), this one path can replace our two current stand-ins: `terrain_texture.rs`'s `char_ashes` (a flat RGB darken toward a fixed ash colour, used only for the permanent post-flow `Ashes` patch) and `game-client/src/lava.rs`'s separate `LavaView` 3D overlay mesh (which the base terrain texture never reflects at all while a flow is actively hot) — neither is how the original renders it, both are invented stand-ins for a feature that was simply missing, not bugs in an existing translation.
+- [x] Height -> colour row scale (pop3-rev-analysis.md "Terrain land colour", terrain-textures.md "bigfade"/
+  "disp"/"Our bake"): fixed — `POP3_ROW_SCALE` is gone; the row is now `clamp(height + 75 + (75 if blend != 0
+  else 0), 0, 1022)` (`game_core::shading`'s per-cell `blend`, see below), `disp`'s row-jitter follows the
+  altitude-dependent sensitivity curve (`pop3_format::theme::disp_sensitivity`), and the brightness column comes
+  from a precomputed per-cell `light` byte (`game_core::shading::CellShading`, a height-gradient dot the level's
+  sunlight-derived vector, fed by `pop3_format::level::Sunlight`) instead of a baked Lambert light of the
+  rendered mesh slope. `land_start`'s own floor is kept, deliberately, as a renderer-side safety net on top of
+  the faithful formula (`terrain_texture::pixel_rgb`'s doc comment): a freshly flattened, perfectly flat low
+  platform has blend 0, so the bare formula alone can still read close to the sea's own rows there. Left open:
+  `SunParams::from_sunlight`'s own sunX/sunZ/sunBase values are a labelled GUESS, not the traced exe values (see
+  pop3-rev-analysis.md "Open questions"); how the original maps its sky (backdrop scrolling with the camera?),
+  not traced this session either.
+- [ ] Snow appears at high elevation in every theme today, which the original never does: `procedural_theme.rs`'s `BANDS` table hardcodes a universal top band (`[236, 236, 240]` "snow", row 960) applied regardless of theme/seed whenever the procedural fallback runs (no original data, or `--no-original`) — a project invention, not traced original behaviour. A rough first-pass catalogue of all 36 `pal0-X.dat`/`bigf0-X.dat` files now exists (terrain-textures.md "Themes seen"): of the themes sampled, only `h` clearly goes near-white right at the row ceiling the way the fallback assumes, `i`/`k` lean pale blue there instead, and theme `c`'s own "snow" shows up at a brighter column on LOW ground, not the row ceiling at all — i.e. whether a cell reads as snow-like depends on the brightness column too, not just height. Fix: make the fallback's top band(s) theme-aware (or at least not force "snow" universally) instead of one fixed palette for every theme; the catalogue is a first pass (one column, a handful of rows per theme), not a verified per-theme palette audit, so re-check a theme's own file before hardcoding its family. Now also sits on a much wider live row range than when this was written (see the new bullet below on `BANDS`'s own calibration) — worth doing together.
+- [ ] `procedural_theme.rs`'s `BANDS` row boundaries (0/64/128/180/320/560/760/960, chosen to roughly span
+  0..`BIGFADE_ROWS` for whatever row the old, flat `POP3_ROW_SCALE`-scaled height produced) were never
+  recalibrated after the row scale was dropped above: ordinary terrain now reaches a much higher raw-height row
+  far more easily (e.g. height 400 + blend alone already reaches row ~550, "dark grass"/"rock" territory),
+  observed as unexpectedly dark, near-black patches on steep or tall `--no-original` terrain (a small sandbox
+  mesa, `sandbox_walk`) that look fine with real `bigf0-X.dat` data loaded. The fallback is lower-fidelity by
+  design, but its own bands should still track the same height range the real formula now uses; needs its own
+  pass (band boundaries, and `procedural_theme::synthetic_cliff`'s shape) rather than being guessed further here.
+- [x] Cliffs, lava and ash share one mechanism (`cliff0-X.dat`, 64 rows): fixed — a general per-cell `blend` byte
+  now exists (`game_core::shading::CellShading`, pop3-rev-analysis.md "Building ashes" "Drawn"), normally
+  `clamp((max neighbour height − min) / 8, 1, 127)` over the cell and its 8 neighbours, recomputed after every
+  height edit (`GameMap::recompute_shading`, hooked into `apply`/`tick` centrally, never left to an individual
+  spell/effect author to call); lava (`lava::Lava::cells_lit`) and building ashes (`ashes::Ashes::darkness`) take
+  priority over it for their own cells, exactly as the original's own recompute skips flagged cells. `cliff0-X.dat`/
+  `fade0-X.dat` are now loaded (`pop3_format::theme::Theme::with_cliff`/`with_fade`, a synthetic identity-ish
+  table in `--no-original` mode), and `terrain_texture::pixel_rgb` remaps the bigfade colour through
+  `Theme::cliff(blend / 4, colour)`. Left for a follow-up, once this is visually verified further (`just shot`/
+  `just video` against more original levels and effects): removing the two stand-ins this was meant to replace -
+  `terrain_texture::char_ashes`/`ash_k`/`ash_k_bilinear` (a flat RGB darken, still wired alongside the new path)
+  and `game-client/src/lava.rs`'s separate `LavaView` 3D overlay mesh (its own module doc already calls it a
+  stand-in for exactly this) - and switching `game_core::lava::downhill`'s own live 8-neighbour recompute to read
+  `GameMap::shading.downhill_dir` instead, now that the same precomputed field exists (more faithful to the
+  original's frozen, precomputed downhill direction; needs its own check against `lava.rs`'s existing spread-shape
+  tests first). `fade0-X.dat` is loaded but still not consumed by anything (object/sprite shading, fog of war).
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Building icons, tooltips (spell icons done: `assets/spell-hud`).

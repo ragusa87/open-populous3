@@ -11,7 +11,9 @@
   optional Blender contact sheet, tribe accents and timber construction frames. All named building kinds covered.
 - Reproducible generated building surface textures (clay, wood, thatch, stone, cloth), one atlas linked from every GLB;
   shared mipmapped atlas in the client, including partially constructed buildings and scaffolds.
-- Ground textured from the original theme files (palette + bigfade + disp), per level theme.
+- Ground textured from the original theme files (palette + bigfade + disp + cliff + fade), per level theme: a
+  per-cell blend/light/downhill cache (`game_core::shading`) recomputed after every height edit drives the
+  faithful height+blend bigfade row, the sunlight-derived brightness column, and the cliff/lava/ash colour remap.
 - Shaman: simulated (walk, pray, cast jump, drowning, death, reincarnation at her site), drawn as a sprite
   from the original animations or generated art, health bar, panel preview, right-click orders.
 - Coordinators infrastructure (fights, sermons and formations to come): typed ids and registries, world events shared
