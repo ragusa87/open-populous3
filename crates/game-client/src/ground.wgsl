@@ -89,7 +89,7 @@ fn palette_rgb(index: u32) -> vec3<f32> {
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let size = params.x;
-    let land_start = i32(params.y);
+    let land_start = params.y;
     let grid_on = params.z;
     let px_per_cell = params.w;
 
@@ -117,10 +117,20 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let idx = bigfade_flat(row * BIGFADE_WIDTH + brightness);
         colour = palette_rgb(idx);
     } else {
+        // pop3-rev-analysis.md "Terrain land colour": the exe never truncates the interpolated altitude to an
+        // integer row before combining it into the flat `bigfade` index - it keeps the row's own sub-integer
+        // fraction and folds it in directly as extra column units (`row_fraction = fixed_point_altitude >> 8`,
+        // i.e. `continuous_altitude * BIGFADE_WIDTH`, truncated only at the very end). That, not any GPU-side
+        // blurring, is what gives a smooth colour ramp across a row boundary in the original: losing it (an
+        // earlier version of this shader truncated to an integer row first) showed up as harsh, blocky
+        // light/dark edges on steep terrain where the row changes quickly from one fragment to the next.
         let altitude = textureSample(altitude_tex, altitude_samp, cell_uv).r;
-        let row = max(i32(altitude), land_start);
-        let row_jitter = i32(round(disp_sensitivity(row) * d_here / 1024.0));
-        let land_colour = bigfade_flat(row * BIGFADE_WIDTH + brightness + row_jitter);
+        let altitude_floored = max(altitude, land_start);
+        // `round_down(interpolated altitude_index)`: only the disp-sensitivity table lookup truncates early.
+        let sensitivity_row = i32(floor(altitude_floored));
+        let row_jitter = i32(round(disp_sensitivity(sensitivity_row) * d_here / 1024.0));
+        let row_fraction = i32(floor(altitude_floored * f32(BIGFADE_WIDTH)));
+        let land_colour = bigfade_flat(row_fraction + brightness + row_jitter);
         let blend = i32(round(ch.r * 255.0));
         let remapped = cliff_remap(blend / 4, land_colour);
         colour = palette_rgb(remapped);
