@@ -313,7 +313,16 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 
 ## Terrain ([terrain.md](docs/specs/terrain.md), [terrain-textures.md](docs/specs/terrain-textures.md))
 - [ ] Curvature in a vertex shader sampling an R16 height texture (static grid).
-- [ ] Dirty-rect re-bake of the texture/normals instead of full rebuilds.
+- [x] Dirty-rect re-bake of the texture/normals instead of full rebuilds: mostly already true -
+  `terrain_texture::rebake_cells` (channels/altitude) and `terrain_mesh::patch` (vertices, and the normals of
+  every touched vertex plus its 4 neighbours) were both already dirty-rect-limited, only falling back to a full
+  `bake_cells`/`build` on a level switch or a camera move (legitimately need the whole visible disc). The one
+  remaining full-map scan was `terrain_texture::walkable_cells` (the channels texture's own walkable/coastal
+  flag), re-run over the entire 128x128 map every tick that touched terrain at all (an ongoing Volcano rise or
+  lava flow dirties a handful of cells almost every tick). **Fixed 2026-10-21**: `rewalkable_cells` updates just
+  the cells whose own `is_sea` (corners `(x,z)..(x+1,z+1)`) could have changed from a dirty rect - one cell short
+  of it on the min side, two new unit tests proving it matches a full recompute and leaves cells outside its
+  reach untouched. Wired into `world.rs::rebuild_terrain` in place of the old whole-map call.
 - [x] `terrain-textures.md` "disp"'s per-theme byte ranges (theme 1 45..127, 5 130..193, 7 150..170, c 73..106)
   were measured against a corrupted install (`AppData/Local/Bullfrog/Populous/data/`, a leftover from a
   badly-uninstalled texture-pack extension - deleted). **Re-measured 2026-10-21, all 36 `disp0-X.dat` files
