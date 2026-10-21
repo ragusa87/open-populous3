@@ -2619,7 +2619,24 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   still not a positive proof (a write via some bulk memcpy/initialisation path not yet located would still be
   possible). The "too bright" report's cause turned out to be on our own rendering side, not this
   field - see TODO.md "Terrain" and terrain-textures.md "Our bake" (a palette texture colour-space bug, confirmed
-  and fixed).
+  and fixed). **Correction, 2026-10-21: the "nothing writes it" conclusion above was wrong** - it only checked
+  terrain-specific functions. A live read on `levl2001.dat` (the white-patch repro level) found this nibble
+  nonzero (6) at the one cell under/near the hill's temple, zero everywhere else nearby, reproducible across a
+  full game restart - so it is neither always 0 nor stale garbage. The real writers live in unit/object-movement
+  code: `landscape_move_1` (0x403A00) and `landscape_set_unit_shadow` (0x403C10) both do
+  `cell[+0xE] = (cell[+0xE] & 0xF0) | clamp(calc_unit_shade_value(cell), 0, 0xF)`, i.e. they replace only this
+  low nibble, preserving the downhill-direction high nibble. `calc_unit_shade_value` (0x450D50) walks the things
+  placed on/near that cell (via two separate thing-index fields in the cell record, +0x6 and +0x8, into the
+  global thing-pointer table 0x890390) and sums a per-object-type/size shadow contribution (tables at 0x5A7271/
+  0x5A725D/0x5A79C3) for every non-person thing found, clamped to 15. **So this nibble is not an ambient light
+  constant at all - it's a dynamic 0-15 shadow intensity cast onto the ground by standing buildings/trees/
+  scenery**, recomputed whenever an object is placed or moves, which is exactly why it's nonzero only under this
+  hill's temple. `game_core::shading::CellShading`'s hardcoded `ambient_nibble = 0` is a real gap on any cell
+  near a building, tree, or other scenery object, separate from (and unrelated to) the divisor/clamp question
+  resolved just above - see `pop3-rev/docs/functions.tsv` rows `0x403a00`/`0x403c10`/`0x450d50`, and
+  `pop3-rev/docs/plans/terrain-white-patch.md`. Not yet traced: what distinguishes the two thing-index roles
+  (+0x6 vs +0x8) on the same cell, or the exact object-class/sub-kind values the weighting tables key on - left
+  for a future session.
 - Attacking a building: what sets building +0x9C bit 0x40, and the partial explosion's 10/7 units.
 - Firewarrior fire: the line-of-fire test, whether a building stops the bolts (5 throws at a still preacher did nothing), what sets the reload
   byte to 252-255 (third capture), what the +0x10 bit 0x400000 set on own people under a passing shot does,
@@ -2868,6 +2885,12 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
 - Fight links: controller id +0x9D (pre-fight or fight), state saved on entering one +0x7D, fight opponent +0x72.
 - Fields: `unit_class` +0x2A, `unit_type` +0x2B, `state` +0x2C, `state_2` +0x2D, `tribe_index` +0x2F, `unit_obj`
   (model or sprite) +0x33, `pos` +0x3D, last attacker's tribe +0xB0.
+- `pos` (6 bytes, confirmed from the person physics step, 0x4E6D00/0x4e6d1d-0x4e6d7b): `x` (i16, low word of the
+  dword at +0x3D), `z` (i16, high word of that same dword, i.e. +0x3F), `height`/altitude (i16, +0x41) - the same
+  x/z-packed-plus-height convention as the tribe's reincarnation site (+0x911/+0x915). Confirmed live (a blown
+  unit's `height` moves by exactly its `vel.y` each turn, `x`/`z` by `vel.x`/`vel.z`). Six bytes follow (+0x43 to
+  +0x48, before velocity starts at +0x49) that live-tracked the same values as velocity in one trial - not a
+  separately confirmed field, open.
 - Training building fields: occupants +0x86 (6 × u16 unit ids, the type's +0x20 used), training cost +0x96 (u16),
   stored mana +0x98 (u16), training on +0x9C bit 0x80, next training building in the distribution list +0xA0.
 - Queue fields (buildings with type flag 0x800): queue head id +0xA2, inside count +0xA6, admission gate +0xAB
