@@ -116,30 +116,30 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let idx = bigfade_flat(row * BIGFADE_WIDTH + brightness);
         colour = palette_rgb(idx);
     } else {
-        // pop3-rev-analysis.md "Terrain land colour": the exe never truncates the interpolated altitude to an
-        // integer row before combining it into the flat `bigfade` index - it keeps the row's own sub-integer
-        // fraction and folds it in directly as extra COLUMN units (`row_fraction = fixed_point_altitude >> 8`,
-        // i.e. `continuous_altitude * BIGFADE_WIDTH`, truncated only at the very end), never blending two
-        // different rows' own RGB. Confirmed directly (docs/plans/terrain-white-patch.md): implementing this
-        // literally resolves the pale/white patch on this hill's steep shore to ordinary dark earthy colours -
-        // the row/row+1 RGB blend it replaces averages two visually-unrelated discrete rows together, which is
-        // what produced the pale patch, not a faithful reproduction of anything the exe does. Known trade-off,
-        // accepted: `row_jitter` (from `disp`, a raw per-output-pixel noise sample) swings widely between
-        // neighbouring screen pixels on steep terrain, and folding it straight into this same continuous index
-        // lands neighbouring pixels in visually unrelated parts of the table - a dense per-pixel "needle"/
-        // hedgehog noise pattern across steep terrain generally, confirmed independent of output resolution.
-        // Smoother-looking alternatives (this row/row+1 blend, a single truncated row) were tried and kept the
-        // pale patch instead, so this stays even with the noise until a spec session settles whether the exe's
-        // own `landscape_texture_16_fade` dithering pass, its native resolution, or its usual camera distance
-        // explains why the original doesn't show this same noise.
+        // pop3-rev-analysis.md "Terrain land colour" (instruction-level re-read, 2026-10-21, all three pixel-fill
+        // dispatch targets 0x4C0EC0/0x4BF860/0x4C0380): the exe reads `bigf0-X.dat` exactly once per pixel, at a
+        // single flat index - no row+1 read, no blend, ever. The row component is a hard floor of the interpolated
+        // altitude: the exe masks the fixed-point value's own sub-integer fraction byte away (`and e?x,
+        // 0xFFFF00FF`) right before the shift that builds this term, so no fractional precision survives into the
+        // index at all - the same floored integer already used for the `disp_sensitivity` lookup. This rules out
+        // BOTH earlier attempts: the row/row+1 RGB blend this replaces (averaging two visually-unrelated discrete
+        // rows, which is what produced the pale/white patch on steep shores) and the "fold the live fraction into
+        // columns" attempt before that (kept per-pixel entropy the exe explicitly discards, producing a dense
+        // zigzag/"hedgehog" noise pattern) - see docs/plans/terrain-white-patch.md.
+        //
+        // `row_jitter` is itself ROW-scale, not column-scale (TODO.md "Terrain", 2026-10-21): the exe's own
+        // `and ecx,0xFFFFFC03; sar ecx,0x2` right after `sensitivity*disp_sample` always equals `(quotient) << 8`
+        // - disp noise shifts which ROW gets picked (up to dozens of rows on steep/high terrain near
+        // `disp_sensitivity`'s 1024 ceiling), not a small perturbation alongside `brightness`. Summing it
+        // unscaled here (the previous bug) under-moved the row by 256x, leaving a hill's whole altitude-driven
+        // row range - and whichever of a theme's rows are pale - far more static/exposed than the original.
         let altitude = textureSample(altitude_tex, altitude_samp, cell_uv).r;
-        // `round_down(interpolated altitude_index)`: only the disp-sensitivity table lookup truncates early.
-        let sensitivity_row = i32(floor(altitude));
-        let row_jitter = i32(round(disp_sensitivity(sensitivity_row) * d_here / 1024.0));
-        let row_fraction = i32(floor(altitude * f32(BIGFADE_WIDTH)));
+        let altitude_int = i32(floor(altitude));
+        let row_jitter = i32(round(disp_sensitivity(altitude_int) * d_here / 1024.0));
+        let row = altitude_int + row_jitter;
         let blend = i32(round(ch.r * 255.0));
         let cliff_row = blend / 4;
-        colour = palette_rgb(cliff_remap(cliff_row, bigfade_flat(row_fraction + brightness + row_jitter)));
+        colour = palette_rgb(cliff_remap(cliff_row, bigfade_flat(row * BIGFADE_WIDTH + brightness)));
         let ash_k = ch.b;
         colour = mix(colour, ASH_COLOUR, ash_k);
     }
