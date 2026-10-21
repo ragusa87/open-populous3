@@ -410,6 +410,22 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   `ambient_nibble = 0` is wrong on any cell near such an object (this hill's temple included). Separate from the
   now-resolved divisor/clamp question above; needs a coding/spec session to read `calc_unit_shade_value`'s
   per-object-type weighting (not fully traced) and wire a real per-cell shadow source instead of the constant.
+  **Row/row+1 blend identified and tried as the cause, reverted, 2026-10-21**: `pop3-rev-analysis.md`'s own traced
+  pseudocode folds the altitude's sub-row fraction in as extra COLUMN units of a single row's flat index, never
+  blending two different rows' RGB - implementing that literally fixed every pale pixel found in this hill's repro
+  (resolved to ordinary dark earthy colours, matching the user's own recollection of the original), confirming
+  `7a6d98d`'s row/row+1 RGB blend (reverting an earlier attempt at this same single-index approach) as the actual
+  cause. **But reverted**: the single-index formula makes the *entire* terrain surface show a dense "needle"/
+  hedgehog noise pattern, visibly worse than the current pale-patch bug at a normal (non-close-up) camera
+  distance, confirmed independent of output resolution (640x480 and 1280x720 alike) - `row_jitter` (from `disp`,
+  a raw per-output-pixel noise sample) swings by up to ~90 table entries between neighbouring screen pixels, far
+  more than the old brightness-only jitter, landing in visually unrelated parts of the 256-wide table even when
+  the two nearest entries are blended smoothly instead of rounded. Current `HEAD` (the pale-patch bug) stays, as
+  the smoother of the two known-bad options. See docs/plans/terrain-white-patch.md (gitignored, local) "Tried and
+  reverted" for the full write-up, screenshots and next steps (does the exe's own `landscape_texture_16_fade`
+  dithering pass explain this away, does it only show at the original's much lower native resolution, or only at
+  a far greater camera distance than tested here - none confirmed yet, needs a spec session and/or further
+  testing, not a guess).
 - [x] Baked terrain texture minification aliasing (blocky look and bright-speckle `row_jitter` at distance,
   since a single-mip baked 8 px/cell texture can't area-average many texels into one screen pixel): fixed by the
   structurally faithful route this entry already pointed at — the ground colour formula (terrain-textures.md
