@@ -1262,24 +1262,59 @@ sensitivity = DISP_SENSITIVITY[round_down(interpolated altitude_index)]   # tabl
                                                                            #   above - i.e. disp noise barely moves
                                                                            #   the row on low/flat ground and moves
                                                                            #   it up to ~3.2x as much on high ground)
-row_jitter  = (sensitivity * disp_sample) >> 10                 # disp_sample: SIGNED byte from disp0-X.dat (movsx,
+row_jitter_rows = (sensitivity * disp_sample) >> 10              # disp_sample: SIGNED byte from disp0-X.dat (movsx,
                                                                  #   never treated as unsigned or re-centred by a
                                                                  #   theme constant - a theme's own narrow byte
                                                                  #   range, e.g. file 1's 45..127 vs file 5's
                                                                  #   130..193, already IS the per-theme bias once
-                                                                 #   read as signed, no separate constant needed)
-row_fraction = (interpolated altitude_index fixed-point value) >> 8   # the interpolation's own sub-row precision,
-                                                                       #   folded in as extra column units (see below)
+                                                                 #   read as signed, no separate constant needed).
+                                                                 #   A signed ROW-COUNT jitter, not a small raw
+                                                                 #   value - see the correction note below.
+altitude_int = (interpolated altitude_index fixed-point value) >> 16   # plain floor - the SAME integer
+                                                                        #   DISP_SENSITIVITY was indexed by above;
+                                                                        #   no fraction retained past this point
+row = altitude_int + row_jitter_rows                              # the TRUE effective row: an integer altitude
+                                                                   #   index, shifted by a potentially large
+                                                                   #   disp-driven jitter on steep/high terrain
 brightness  = clamp( ((disp_sample_at_next_tile_row - disp_sample) >> 2) + (interpolated_light_fixed_point >> 16),
                      0, 255 )                                   # `light` (the +0xD field above) interpolated the
                                                                  #   same way, nudged by disp's OWN row-to-row
                                                                  #   difference - a second, smaller use of disp
-index = row_jitter + row_fraction*256 + brightness               # one flat offset: a large `brightness` can
+index = row*256 + brightness                                     # one flat offset: a large `brightness` can
                                                                    #   legitimately roll over into the next row,
                                                                    #   this is not guarded against
 colour = bigf0-X.dat[index]                                      # 0..111 land colour, same byte then fed into
                                                                    # cliff[(blend/4)*128 + colour] (Building ashes)
 ```
+**Correction 2026-10-21 (spec-session follow-up, instruction-level re-read of `row_jitter`/`brightness`'s own
+shifts, pop3-rev docs/functions.tsv 0x4C0EC0/0x4BF860/0x4C0380 - the same depth of care that found the masking
+below): `row_jitter` carries the SAME undocumented masking-before-shift trick `row_fraction`/`altitude_int` does,
+previously missed.** The exe builds it as `imul ecx,ebp` (= `sensitivity*disp_sample`, call it `P`), then
+`and ecx,0xFFFFFC03; sar ecx,0x2` - verified algebraically and numerically (signed 32-bit, both positive and
+negative `P`) that this ALWAYS equals `(P>>10)<<8`, not `P>>10` as a prose-only reading of the shift amount
+suggested: the AND clears bits 2:9 of `P` (the same "clear a bit-window, then shift" idiom `altitude_int`'s own
+masking uses, just a narrower window ahead of a smaller shift) before the `sar 2`, so the result always lands
+pre-multiplied by 256 - in **row** units, exactly like `altitude_int`, not in small raw-value units comparable to
+`brightness`. The pseudocode above is written with that already divided back out (`row_jitter_rows`, the quotient
+before the implicit x256) folded into `row` alongside `altitude_int`, then multiplied by 256 once, explicitly, to
+avoid the ambiguity the original "`row_jitter + row_fraction*256 + brightness`" phrasing had (both `row_jitter`
+and the old `row_fraction` are, as the exe actually computes them, ALREADY multiples of 256 - summing one of them
+again `*256` would have doubled that scaling). Net effect: disp noise genuinely jitters the ROW by up to roughly
+`sensitivity*disp_sample/1024` - on high terrain where `DISP_SENSITIVITY` reaches its 1024 ceiling and a theme's
+`disp` byte is near its extreme, this can be dozens of rows, not a small sub-row perturbation. `brightness`'s own
+two shifts (the disp-row-difference `>>2`, `light_fixed>>16`) have NO preceding AND anywhere in any of the three
+functions - confirmed plain, undoctored shifts in all three; `brightness`'s formula was already accurate.
+**Confirmed 2026-10-21 (instruction-level re-read, pop3-rev docs/functions.tsv 0x4C0EC0/0x4BF860/0x4C0380): this
+`bigf0-X.dat` read happens EXACTLY ONCE per pixel, at this one flat `index` - there is no second read at an
+adjacent row and no weighted blend of two rows anywhere in any of the three pixel-fill functions.** The row a
+pixel lands on is a hard floor of the interpolated altitude (the same truncated integer used for the
+`DISP_SENSITIVITY` lookup above), not a value blended with its neighbour - open-populous's own row/row+1 RGB
+blend (`terrain-textures.md` "Our bake") has no basis in the traced exe, and the "fraction" in `row_fraction`
+above is explicitly discarded by the exe's own masking before it ever reaches this index, which is also why
+feeding that same fraction into the column axis directly (the earlier reverted attempt, terrain-textures.md "Our
+bake") produced a wrong, dense zigzag: it kept live, per-pixel-changing sub-row entropy that the real game
+throws away at this exact step. See terrain-textures.md "Our bake" and TODO.md "Terrain" for the reimplementation
+fix this resolves.
 - No per-theme or per-level constant exists anywhere in this path beyond the loaded `bigf0-X.dat`/`disp0-X.dat`
   files and the sunlight-derived `sunX`/`sunZ`/`sunBase`: `POP3_ROW_SCALE`'s single global multiplier has no
   counterpart - the original's disp sensitivity is a fixed, altitude-dependent CURVE (320..1024, the table

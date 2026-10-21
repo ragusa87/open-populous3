@@ -111,6 +111,13 @@ How the original maps it (scrolling backdrop?) is not checked. Generated maps ke
   formula, it isn't a separate rule. `disp` noise (below) then jitters this per-pixel; the final flat
   `bigf0-X.dat` index also folds in the brightness column (a large brightness value can legitimately roll over
   into the next row — not guarded against in the original).
+- **Confirmed 2026-10-21, instruction-level (pop3-rev `docs/functions.tsv` 0x4C0EC0/0x4BF860/0x4C0380, all three
+  pixel-fill dispatch targets): the `bigf0-X.dat` read is a single, un-blended lookup at one flat index, always.**
+  No row+1 read exists anywhere in any of the three functions. The row component of that index is a hard floor of
+  the interpolated altitude (`(altitude_fixed >> 16) << 8`, the exe explicitly zeroes the fixed-point value's own
+  sub-integer fraction byte with an `and e?x, 0xFFFF00FF` right before the `>> 8` that builds this term) — the
+  same truncated integer already used for the `DISP_SENSITIVITY` lookup, with zero fractional precision surviving
+  into the bigfade index. See "Our bake" below for what this settles.
 - Level `.dat` sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32 or 64, see level-format.md) does
   **not** feed the row: traced this session into the brightness column instead (pop3-rev-analysis.md "Terrain
   land colour"). The ALACN world editor doesn't use it either: it colours land from its own height ramp and
@@ -139,6 +146,20 @@ How the original maps it (scrolling backdrop?) is not checked. Generated maps ke
   the per-theme bias once read as signed — there is no separate exe-side per-theme constant to find; our bake's
   own "subtract the file mean" is solving a different problem (keeping the width of the noise comparable across
   themes for `POP3_ROW_SCALE`), not reproducing this.
+- **Corrected 2026-10-21, instruction-level (pop3-rev `docs/functions.tsv` 0x4C0EC0/0x4BF860/0x4C0380): the row
+  jitter term's own shift hid the same kind of masking-before-shift trick `bigfade`'s row-index masking did,
+  changing its effective SCALE, not just whether it's a blend.** `pop3_format::theme::disp_sensitivity`'s
+  `(sensitivity * disp) / 1024` reads correctly as the per-row QUOTIENT, but the exe never uses that quotient
+  directly at raw scale: it's computed via `and ecx, 0xFFFFFC03; sar ecx, 0x2` right after the multiply, which
+  (verified algebraically and numerically, signed 32-bit, both signs of the product) always equals exactly
+  `(quotient_by_1024) << 8` before being summed into the flat `bigfade` index — i.e. it's already expressed in
+  row units (a multiple of 256) at the point it's added, the same way the row index itself is, not a small raw
+  value comparable to the brightness column. Net: "moves the row much more on high ground" above is accurate in
+  direction, but the actual magnitude can be large — on high terrain where `disp_sensitivity` reaches its 1024
+  ceiling and a theme's own `disp` byte sits near its extreme, this term alone can shift the picked row by dozens
+  of rows, not a handful. `game_core::shading`/`terrain_texture`'s own jitter must be added at the SAME scale as
+  `row`, not at the scale of `brightness` — see "Our bake" below and `pop3-rev-analysis.md` "Terrain land colour"
+  for the corrected, explicitly-scaled formula.
 
 ## fade
 `fade[level * 256 + colour]`. Row 32 is the identity, rows below darken (0: about 0.27x luminance,
@@ -206,7 +227,13 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   should be removed outright. A pixel's own `disp` sample (signed) then
   jitters the row by `(disp_sensitivity(row) * disp) / 1024` (`pop3_format::theme::disp_sensitivity`), added
   straight into the flat `bigfade` index alongside the brightness column — a large jitter or brightness can
-  legitimately roll into the next row, as in the original.
+  legitimately roll into the next row, as in the original. **Fixed 2026-10-21 ("disp" above, "bigfade" above):
+  "alongside the brightness column" was the bug** - the exe's own masking makes this term always a multiple of
+  256 before it's summed, i.e. it moves the *row* (by up to dozens on steep/high terrain), not the column.
+  `ground.wgsl` now computes `row = floor(altitude) + row_jitter_quotient` and multiplies the whole thing by
+  `BIGFADE_WIDTH` once, instead of adding the raw quotient next to `brightness` - this, together with dropping
+  the row/row+1 blend just below, is what actually resolved the white/pale patch on steep slopes (TODO.md
+  "Terrain", docs/plans/terrain-white-patch.md).
 - Unlike the deleted CPU bake, the `bigfade`/`cliff`/`palette` chain here is a `textureLoad` every fragment at
   full render resolution (categorical, no filtering): an exact row pick shows a hard edge wherever `row` changes
   between neighbouring fragments, which the old baked 8 px/cell texture never did (the GPU's own bilinear
@@ -218,6 +245,25 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   flat `bigfade` index as the exe's disassembly pseudocode seemed to describe; that reading turned out to be
   mis-derived — it made the colour cycle through a full brightness sweep every single height unit, a dense,
   clearly-wrong contour/zigzag pattern, reverted 2026-10-20.)
+  **Resolved 2026-10-21, instruction-level (pop3-rev `docs/functions.tsv` 0x4C0EC0/0x4BF860/0x4C0380 — the open
+  question TODO.md "Terrain" left pending, asking whether `landscape_texture_16_fade`'s own dithering pass or the
+  original's typical camera distance/pitch is what hides this seam in practice): neither — the real game shows no
+  seam because it never blends row with row+1 at all, in any of the three pixel-fill dispatch targets.** The
+  "fraction" the original attempt tried to fold into the column axis is explicitly discarded by the exe itself:
+  right before the shift that builds the row's contribution to the flat `bigf0-X.dat` index, the exe does
+  `and e?x, 0xFFFF00FF` on the interpolated altitude's 16.16 fixed-point value — zeroing bits 15:8, the one byte
+  that holds the interpolation's own live, per-pixel sub-integer fraction — so that term always comes out to
+  exactly `(altitude_fixed >> 16) << 8`: the same floored integer already used for the `DISP_SENSITIVITY`/
+  `row_jitter` lookup, times 256, with zero fractional precision surviving. The earlier reverted attempt's zigzag
+  bug was almost certainly keeping that fraction alive (real per-pixel entropy, changing every few pixels as the
+  Gouraud interpolation carries) instead of masking it away the way the exe explicitly does. `landscape_texture_
+  16_fade`'s own "_fade" naming is a red herring here too: the identical masking, and the identical single,
+  un-blended `bigf0-X.dat` read, is present byte-for-byte in `landscape_texture_32` (a 32-bit, non-"_fade"
+  surface) and both code paths of `landscape_texture_16` — this is shared row-index arithmetic, not a dithering
+  effect specific to the 16-bit "_fade" variant. **Our bake's own fix, then, is not "pick a correct blend" but
+  "do no blend at all"**: drop the `row`/`row + 1` bilinear mix entirely and use a single, hard-floored row index
+  — `row = floor(altitude)`, the same integer `disp_sensitivity` already keys off, with no interpolation of the
+  row axis beyond what the ordinary Gouraud/bilinear altitude sampling already gives it. See TODO.md "Terrain".
 - **A pale/near-white patch on a slope is not necessarily a bug**: verified directly against `data/cliff0-s.dat`/
   `pal0-s.dat` (theme 28/`s`, level 2) this session — land-colour 106 maps to palette index 129 (229, 220, 214,
   an intentional pale "weathered rock" theme colour) at every nonzero cliff row, so *any* sloped cell whose
