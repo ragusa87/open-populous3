@@ -396,6 +396,14 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   the theme LUT packing); the colour formula itself moved to WGSL and isn't unit-tested any more (no GPU in
   `cargo test`) — verified visually instead (`just shot`/`just profile`). Still separate: "Curvature in a vertex
   shader over a static height texture" below (geometry, not colour).
+  A **different** aliasing surfaced later (2026-10-21), once the white/pale patch fix above removed the
+  row/row+1 RGB blend: that blend had been incidentally smoothing the `bigfade`/`cliff`/`palette` chain's own
+  categorical `textureLoad` (no filtering), so a faithful single hard-floored row showed a visible hard edge
+  wherever `row`/`row_jitter` changes between neighbouring fragments on steep ground - this is a genuine
+  per-fragment aliasing issue, not a mip/distance one, so the "nothing left to mip" framing above doesn't cover
+  it. Fixed with a renderer-only anti-aliasing pass (`ground.wgsl::land_colour`, factored out and evaluated at a
+  small jittered 2x2 sub-pixel grid per fragment, averaged) rather than reintroducing any row-blending into the
+  formula itself - same spirit as `soften_light`, confirmed by the user visually.
 - [ ] Snow appears at high elevation in every theme today, which the original never does: `procedural_theme.rs`'s `BANDS` table hardcodes a universal top band (`[236, 236, 240]` "snow", row 960) applied regardless of theme/seed whenever the procedural fallback runs (no original data, or `--no-original`) — a project invention, not traced original behaviour. A rough first-pass catalogue of all 36 `pal0-X.dat`/`bigf0-X.dat` files now exists (terrain-textures.md "Themes seen"): of the themes sampled, only `h` clearly goes near-white right at the row ceiling the way the fallback assumes, `i`/`k` lean pale blue there instead, and theme `c`'s own "snow" shows up at a brighter column on LOW ground, not the row ceiling at all — i.e. whether a cell reads as snow-like depends on the brightness column too, not just height. Fix: make the fallback's top band(s) theme-aware (or at least not force "snow" universally) instead of one fixed palette for every theme; the catalogue is a first pass (one column, a handful of rows per theme), not a verified per-theme palette audit, so re-check a theme's own file before hardcoding its family. Now also sits on a much wider live row range than when this was written (see the new bullet below on `BANDS`'s own calibration) — worth doing together.
 - [ ] `procedural_theme.rs`'s `BANDS` row boundaries (0/64/128/180/320/560/760/960, chosen to roughly span
   0..`BIGFADE_ROWS` for whatever row the old, flat `POP3_ROW_SCALE`-scaled height produced) were never
