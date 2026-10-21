@@ -613,6 +613,49 @@ impl GameMap {
         map
     }
 
+    /// Islands of `GameMap::sandbox_bridge`: centre offset from the map's middle and radius, cells. Bigger and
+    /// further apart than `SPELL_ISLANDS`' own pair, for a realistic-looking Land Bridge cast (not a teleport-range
+    /// demo): a proper 6-cell stretch of open sea between their facing shores.
+    const BRIDGE_ISLANDS: [((i32, i32), i32); 2] = [((-18, 0), 16), ((18, 0), 14)];
+    /// Flat island height: modest (not `SPELL_ISLANDS`' sea-level 64), enough to lift `SpellKind::LandBridge`'s
+    /// range (`cast_range::range`) from its sea-level ~8.5 cells to ~9.7, comfortable margin over the 8-cell
+    /// crossing below without the sheer, mesa-like cliff a much taller flat island renders as.
+    const BRIDGE_ISLAND_HEIGHT: u16 = 220;
+    /// The shaman's spawn cell: 2 cells inland of the home island's own facing (east) shore.
+    const BRIDGE_SITE_CELL_OFFSET: (i32, i32) = (-4, 0);
+    /// A target cell right at the far island's facing (west) shore, 8 cells from the shaman's spawn - within
+    /// `BRIDGE_ISLAND_HEIGHT`'s cast range with margin (`sandbox_bridge_crosses_the_sea_within_cast_range`).
+    pub const BRIDGE_TARGET_CELL_OFFSET: (i32, i32) = (4, 0);
+    /// Level 1's own theme (`theme_char(12)` = 'c'): a real, already-validated texture set (ground_material.rs's
+    /// sRGB fix and terrain-textures.md "Our bake" were both checked against it), used here (unlike the other
+    /// sandboxes' `theme: None`) when an original install is found, for original-asset screenshots/videos.
+    const BRIDGE_THEME: u8 = 12;
+
+    /// Sandbox for the Land Bridge spell (`POP3_START=sandbox-bridge`, or Sandbox > Bridge in the menu) - two
+    /// islands (`BRIDGE_ISLANDS`) a realistic stretch of open sea apart, the
+    /// player's shaman alone on the home island's shore. Cast with (cells, `BRIDGE_TARGET_CELL_OFFSET` added to
+    /// the map's middle): `POP3_START=sandbox-bridge BRIDGE=68,64 BRIDGE_TICKS=0 GAME_SPEED=1 just video`, 64
+    /// ticks (`land_bridge::DURATION`) at `TICKS_PER_SECOND` = ~5.3 s to watch it finish; `BRIDGE_TICKS=51` for a
+    /// stopped-at-80% screenshot instead. Textured with `BRIDGE_THEME` when an original install is found
+    /// (`--no-original` still falls back to the procedural theme, `world::original_theme`).
+    pub fn sandbox_bridge() -> Self {
+        const C: i32 = MAP_SIZE as i32 / 2;
+        let mut terrain = Heightmap::new(MAP_SIZE);
+        for z in 0..MAP_SIZE as i32 {
+            for x in 0..MAP_SIZE as i32 {
+                if Self::BRIDGE_ISLANDS.iter().any(|&((ox, oz), r)| (x - C - ox).pow(2) + (z - C - oz).pow(2) <= r * r) {
+                    terrain.set(x, z, Self::BRIDGE_ISLAND_HEIGHT);
+                }
+            }
+        }
+        let site_cell = (C + Self::BRIDGE_SITE_CELL_OFFSET.0, C + Self::BRIDGE_SITE_CELL_OFFSET.1);
+        let sites = vec![ReincarnationSite::at_cell(0, site_cell, terrain.get(site_cell.0, site_cell.1))];
+        let mut map = GameMap { theme: Some(Self::BRIDGE_THEME), spell_books: per_player(SpellBook::unlimited()), ..GameMap::bare("Sandbox: bridge", terrain, sites) }.with_shamans();
+        map.trees = scatter(&map.terrain, 3, &[site_cell], 20);
+        map.recompute_shading_all();
+        map
+    }
+
     pub fn site_of(&self, owner: u8) -> Option<&ReincarnationSite> {
         self.sites.iter().find(|s| s.owner == owner)
     }
@@ -2587,6 +2630,25 @@ mod tests {
                 assert!(m.units.iter().filter(|u| u.kind != kind && u.inside.is_none()).all(|u| group.iter().all(|&c| (c.0 - u.cell().0).abs().max((c.1 - u.cell().1).abs()) >= 3)), "apart from the others");
             }
         }
+    }
+
+    #[test]
+    fn sandbox_bridge_crosses_the_sea_within_cast_range() {
+        let m = GameMap::sandbox_bridge();
+        assert!(m.spell_books[0].slot(SpellKind::LandBridge).is_some_and(|s| s.can_cast()));
+        assert_eq!(m.units.len(), 1, "just the one shaman");
+        let shaman = m.shaman_of(0).unwrap();
+        assert!(!m.terrain.is_water(shaman.cell().0, shaman.cell().1), "spawns on dry land");
+        assert!(m.terrain.is_water(65, 20), "open sea between the two islands (x alone already clears both circles)");
+        let (ox, oz) = GameMap::BRIDGE_TARGET_CELL_OFFSET;
+        let target_cell = (64 + ox, 64 + oz);
+        assert!(!m.terrain.is_water(target_cell.0, target_cell.1), "the far shore is dry land");
+        let world = |c: i32| (c.rem_euclid(MAP_SIZE as i32) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
+        let target = (world(target_cell.0), world(target_cell.1));
+        let range = m.cast_range(0, SpellKind::LandBridge).unwrap();
+        assert!(m.in_cast_range(0, SpellKind::LandBridge, target), "the far shore is within range");
+        let crossing2 = torus_dist2((shaman.x, shaman.z), target);
+        assert!((crossing2 as f64).sqrt() < range as f64 * 0.9, "cast with margin, not right at the limit: {} of {range}", (crossing2 as f64).sqrt());
     }
 
     #[test]
