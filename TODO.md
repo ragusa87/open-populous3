@@ -300,6 +300,25 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Training huts (huts-and-training.md "Done"): the queue's ripple (2 turns per rank) and those already of the building's kind letting the others pass, five trained together (the exe's count; ours holds one), queued orders carried over, damage cancelling the queue and sending the trainee out.
 - [ ] Training as in the original, what is left (pop3-rev-analysis.md "Training buildings"): the computer players' cost (`CP_` 1000) once tribes have a controller; the trainee's queued orders given to the new unit; the training time to measure in the game.
 - [ ] Reincarnation sites from pop3-rev-analysis.md "Reincarnation sites": the ground levelled to the site height over a 5-cell disc in about 21 turns (ours: radius 3, blend 4) with its effects on enemies, wildmen, trees and swamps; pillars rising out of the ground, deleted and moved; the 32 sparkles.
+  **Related bug found and partly fixed, 2026-10-21** (TODO.md "Terrain", `docs/archived-plans/terrain-white-patch.md`):
+  `ReincarnationSite` had no stored height at all - `flatten_for_spawn` recomputed a *live average* of the
+  surrounding ground every time (floored at a too-low `MIN_SPAWN_HEIGHT=32`), not the exe's own fixed, captured-
+  once `tribe+0x915` (measured 127-128 in the spec). A site whose local average happened to be low/flat could
+  read as water once `row_jitter` became a genuine row-scale mover - reported on `sandbox_spells` and real
+  level 10. **Fixed**: added `ReincarnationSite::height`, captured once from the real terrain at site creation
+  (`sites_from_level`/`generated_sites`/every sandbox), `flatten_for_spawn` levels to it (`MIN_SPAWN_HEIGHT` now
+  only a last-resort floor). Confirmed on level 10: the player's site at (18,126) now correctly captures its
+  real height (88), not a floored average.
+  **Tried and reverted, same session**: widening `SPAWN_FLAT_RADIUS`/`SPAWN_BLEND_RADIUS` from 3/4 to 5/6 to
+  match the 5-cell disc above (the user still saw a nearby house on water after the height fix alone) -
+  broke `placement::the_original_levels_boat_huts_fit_the_shore_rule`: on `levl2010.dat`, the player's own site
+  is exactly 5 cells from an unrelated boat hut's own shore *only* via the map's torus wrap (123 cells the other
+  way), and the wider radius hard-levelled solid dry land over the open sea that boat hut's dock placement
+  depends on. Reverted rather than trade one visual bug for a functional regression on a real, already-validated
+  level. Left open: does the real exe's own 5-cell effect also reach across this exact wrap (needs a spec
+  session - clean room) - if not, something else about how we apply it in one shot instead of growing it over
+  21 turns is likely the real difference, in which case the animated-growth half of this same TODO item might
+  fix both the "house on water" symptom and this radius question together, rather than a flat radius bump.
 - [ ] Houses, see [huts-and-training.md](docs/specs/huts-and-training.md): green (birth) and red (grow) bars in the tooltip, a star animation at birth; capacity 3/4/5, supply 3/5/7 (cap min(supply, 200)), breeding by occupants and population band, mana from the people inside.
 - [ ] Houses grow (small -> medium -> large: `villager_hut` sizes): red bar to 100 %, then if the population has room braves fetch wood and the hut becomes a construction site of the next size, still usable (huts-and-training.md rule 6). Growing takes 3 pieces (1 consumed, 2 added to the hut). Settle the red bar speed, the wood per size (3/5/7?) and who works on it before implementing.
 - [ ] `game_core::balance`: `Turns` (original game turns) converted to ticks, `Balance::ours()` defaults, later `Balance::from_constants`; every rule reads it from `GameMap` (huts-and-training.md "Balance and game turns").
