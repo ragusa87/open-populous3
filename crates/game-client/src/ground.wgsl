@@ -86,6 +86,32 @@ fn palette_rgb(index: u32) -> vec3<f32> {
     return textureLoad(palette_tex, vec2<i32>(i32(index), 0), 0).rgb;
 }
 
+// The land branch's full per-fragment formula (pop3-rev-analysis.md "Terrain land colour": a single hard-floored
+// row, `row_jitter` folded in at row scale, no row+1 blend - see `fragment`'s own doc comment on why there's no
+// blend). Factored out so `fragment` can evaluate it at several jittered sub-pixel positions and average the
+// results: the `bigfade`/`cliff`/`palette` chain is categorical (`textureLoad`, not filtered), so an exact
+// per-fragment row pick shows a hard edge wherever `row` changes between neighbouring fragments - harsher now
+// that it's a true single row instead of the old (unfaithful) row/row+1 blend that incidentally smoothed it.
+fn land_colour(x: f32, z: f32, size: f32, px_per_cell: f32) -> vec3<f32> {
+    let cell_uv = vec2<f32>(x + 0.5, z + 0.5) / size;
+    let pxf = x * px_per_cell;
+    let pyf = z * px_per_cell;
+    let d_here = disp_at(pxf, pyf);
+    let d_below = disp_at(pxf, pyf + 1.0);
+    let ch = textureSample(channels_tex, channels_samp, cell_uv);
+    let light = ch.g * 255.0;
+    let brightness = clamp(i32(round((d_below - d_here) / 4.0 + light)), 0, 255);
+    let altitude = textureSample(altitude_tex, altitude_samp, cell_uv).r;
+    let altitude_int = i32(floor(altitude));
+    let row_jitter = i32(round(disp_sensitivity(altitude_int) * d_here / 1024.0));
+    let row = altitude_int + row_jitter;
+    let blend = i32(round(ch.r * 255.0));
+    let cliff_row = blend / 4;
+    var colour = palette_rgb(cliff_remap(cliff_row, bigfade_flat(row * BIGFADE_WIDTH + brightness)));
+    colour = mix(colour, ASH_COLOUR, ch.b);
+    return colour;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let size = params.x;
@@ -116,32 +142,23 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let idx = bigfade_flat(row * BIGFADE_WIDTH + brightness);
         colour = palette_rgb(idx);
     } else {
-        // pop3-rev-analysis.md "Terrain land colour" (instruction-level re-read, 2026-10-21, all three pixel-fill
-        // dispatch targets 0x4C0EC0/0x4BF860/0x4C0380): the exe reads `bigf0-X.dat` exactly once per pixel, at a
-        // single flat index - no row+1 read, no blend, ever. The row component is a hard floor of the interpolated
-        // altitude: the exe masks the fixed-point value's own sub-integer fraction byte away (`and e?x,
-        // 0xFFFF00FF`) right before the shift that builds this term, so no fractional precision survives into the
-        // index at all - the same floored integer already used for the `disp_sensitivity` lookup. This rules out
-        // BOTH earlier attempts: the row/row+1 RGB blend this replaces (averaging two visually-unrelated discrete
-        // rows, which is what produced the pale/white patch on steep shores) and the "fold the live fraction into
-        // columns" attempt before that (kept per-pixel entropy the exe explicitly discards, producing a dense
-        // zigzag/"hedgehog" noise pattern) - see docs/plans/terrain-white-patch.md.
-        //
-        // `row_jitter` is itself ROW-scale, not column-scale (TODO.md "Terrain", 2026-10-21): the exe's own
-        // `and ecx,0xFFFFFC03; sar ecx,0x2` right after `sensitivity*disp_sample` always equals `(quotient) << 8`
-        // - disp noise shifts which ROW gets picked (up to dozens of rows on steep/high terrain near
-        // `disp_sensitivity`'s 1024 ceiling), not a small perturbation alongside `brightness`. Summing it
-        // unscaled here (the previous bug) under-moved the row by 256x, leaving a hill's whole altitude-driven
-        // row range - and whichever of a theme's rows are pale - far more static/exposed than the original.
-        let altitude = textureSample(altitude_tex, altitude_samp, cell_uv).r;
-        let altitude_int = i32(floor(altitude));
-        let row_jitter = i32(round(disp_sensitivity(altitude_int) * d_here / 1024.0));
-        let row = altitude_int + row_jitter;
-        let blend = i32(round(ch.r * 255.0));
-        let cliff_row = blend / 4;
-        colour = palette_rgb(cliff_remap(cliff_row, bigfade_flat(row * BIGFADE_WIDTH + brightness)));
-        let ash_k = ch.b;
-        colour = mix(colour, ASH_COLOUR, ash_k);
+        // `land_colour` (above) is a single, hard-floored, categorical row pick with no row+1 blend
+        // (pop3-rev-analysis.md "Terrain land colour": the exe never blends two rows either - see its own doc
+        // comment). Faithful, but a `textureLoad`, not filtered: on steep ground `row` (and `row_jitter`, now
+        // correctly row-scale - TODO.md "Terrain", 2026-10-21) can change between neighbouring fragments, which
+        // reads as aliasing - harsher than before fixing the white/pale patch, since the old row/row+1 blend
+        // (wrong, and the actual cause of that patch) incidentally smoothed this for free. Supersampled here
+        // instead: a small jittered 2x2 grid within this fragment's own footprint (`fwidth`), averaged - a
+        // renderer-only anti-aliasing pass, same spirit as `soften_light`/the `disp` bilinear sampling above, not
+        // a formula change (every sample runs the exact same per-pixel formula, just at a slightly offset
+        // position each time).
+        let dx = fwidth(x) * 0.25;
+        let dz = fwidth(z) * 0.25;
+        let c0 = land_colour(x - dx, z - dz, size, px_per_cell);
+        let c1 = land_colour(x + dx, z - dz, size, px_per_cell);
+        let c2 = land_colour(x - dx, z + dz, size, px_per_cell);
+        let c3 = land_colour(x + dx, z + dz, size, px_per_cell);
+        colour = (c0 + c1 + c2 + c3) * 0.25;
     }
 
     if (grid_on > 0.5) {
