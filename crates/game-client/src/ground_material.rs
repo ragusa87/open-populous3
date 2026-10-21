@@ -20,6 +20,15 @@ pub fn params(size: usize, grid: bool) -> Vec4 {
     Vec4::new(size as f32, if grid { 1.0 } else { 0.0 }, crate::terrain_texture::PX_PER_CELL as f32, 0.0)
 }
 
+/// `GroundMaterial::highlight` for the cell the mouse hovers, `None` when there is none to show (not dev mode,
+/// the grid is off, or the cursor isn't over the map).
+pub fn highlight_uniform(cell: Option<(i32, i32)>) -> Vec4 {
+    match cell {
+        Some((x, z)) => Vec4::new(x as f32, z as f32, 1.0, 0.0),
+        None => Vec4::ZERO,
+    }
+}
+
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct GroundMaterial {
     #[uniform(0)]
@@ -50,6 +59,10 @@ pub struct GroundMaterial {
     #[texture(10)]
     #[sampler(11)]
     pub water: Handle<Image>,
+    /// The dev-mode grid's hovered cell (`cell_debug.rs`), for `ground.wgsl`'s highlight tint: x, y its own
+    /// coordinates, z 1.0/0.0 on or off, w unused. `highlight_uniform` packs it.
+    #[uniform(12)]
+    pub highlight: Vec4,
 }
 
 impl Material for GroundMaterial {
@@ -139,6 +152,7 @@ pub fn placeholder(images: &mut Assets<Image>) -> GroundMaterial {
         cliff: images.add(image((1, 1), TextureFormat::R8Uint, vec![0], lut_sampler())),
         disp: images.add(image((1, 1), TextureFormat::R8Snorm, vec![0], filterable_sampler())),
         water: images.add(image((1, 1), TextureFormat::R8Unorm, vec![0], filterable_sampler())),
+        highlight: Vec4::ZERO,
     }
 }
 
@@ -153,6 +167,7 @@ pub fn fill(material: &mut GroundMaterial, images: &mut Assets<Image>, cells: &G
     material.cliff = images.add(cliff_image(theme));
     material.disp = images.add(disp_image(theme));
     material.water = images.add(water_image(theme));
+    material.highlight = Vec4::ZERO;
 }
 
 /// Pushes `cells`'s current content to the GPU (a tick's worth of `terrain_texture::rebake_cells` dirty-rect
@@ -183,6 +198,12 @@ mod tests {
     fn params_packs_size_grid_flag_and_px_per_cell() {
         assert_eq!(params(128, true), Vec4::new(128.0, 1.0, crate::terrain_texture::PX_PER_CELL as f32, 0.0));
         assert_eq!(params(128, false).y, 0.0);
+    }
+
+    #[test]
+    fn highlight_uniform_packs_the_cell_and_an_on_off_flag() {
+        assert_eq!(highlight_uniform(Some((12, 70))), Vec4::new(12.0, 70.0, 1.0, 0.0));
+        assert_eq!(highlight_uniform(None), Vec4::ZERO);
     }
 
     #[test]

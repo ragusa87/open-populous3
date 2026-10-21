@@ -29,6 +29,9 @@
 // 256x256 R8Unorm: the sea's own noise (`watdisp.dat`), unsigned. Bilinear, repeat-wrapped, same reason.
 @group(#{MATERIAL_BIND_GROUP}) @binding(10) var water_tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(11) var water_samp: sampler;
+// The dev-mode grid's hovered cell (`cell_debug.rs`, `GroundMaterial::highlight`): x, y its own coordinates, z
+// 1.0/0.0 on or off, w unused.
+@group(#{MATERIAL_BIND_GROUP}) @binding(12) var<uniform> highlight: vec4<f32>;
 
 const BIGFADE_WIDTH: i32 = 256;
 const BIGFADE_ROWS: i32 = 1152;
@@ -43,6 +46,9 @@ const ASH_COLOUR: vec3<f32> = vec3<f32>(38.0 / 255.0, 33.0 / 255.0, 30.0 / 255.0
 // Brightness (out of 256) the grid overlay darkens a cell's own first 1/8th (dev-only, our own invention, not
 // original behaviour): matches the deleted CPU path's `GRID_SHADE`/`PX_PER_CELL`.
 const GRID_SHADE: f32 = 190.0 / 255.0;
+// The hovered-cell tint (dev-only, our own invention): a warm highlight mixed in at this strength.
+const HIGHLIGHT_COLOUR: vec3<f32> = vec3<f32>(1.0, 0.95, 0.4);
+const HIGHLIGHT_STRENGTH: f32 = 0.35;
 
 // `disp`'s own raw byte, read signed (pop3-rev-analysis.md "Terrain land colour": no re-centring, no per-theme
 // constant - the game reads it straight as i8), bilinearly sampled at the continuous (pxf, pyf) pixel coordinate
@@ -84,6 +90,17 @@ fn cliff_remap(row: i32, colour: u32) -> u32 {
 
 fn palette_rgb(index: u32) -> vec3<f32> {
     return textureLoad(palette_tex, vec2<i32>(i32(index), 0), 0).rgb;
+}
+
+// `d`'s shortest-path signed distance on a torus of circumference `size` (same idea as `grounded.rs`'s own
+// `wrap`): the disc's cell coordinates are absolute and unwrapped (`terrain_mesh::build`'s own doc comment), so a
+// cell picked by its wrapped coordinates (`cell_debug.rs`) still matches every fragment that draws it.
+fn wrap_signed(d: f32, size: f32) -> f32 {
+    var w = (d + size * 0.5) % size;
+    if (w < 0.0) {
+        w = w + size;
+    }
+    return w - size * 0.5;
 }
 
 // The land branch's full per-fragment formula (pop3-rev-analysis.md "Terrain land colour": a single hard-floored
@@ -169,6 +186,16 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let ex = 1.0 - smoothstep(0.125 - wx, 0.125 + wx, gx);
         let ez = 1.0 - smoothstep(0.125 - wz, 0.125 + wz, gz);
         colour = colour * (1.0 - max(ex, ez) * (1.0 - GRID_SHADE));
+    }
+
+    if (highlight.z > 0.5) {
+        let lx = wrap_signed(x - highlight.x, size);
+        let lz = wrap_signed(z - highlight.y, size);
+        let wx = max(fwidth(x), 0.0001);
+        let wz = max(fwidth(z), 0.0001);
+        let inx = smoothstep(-wx, wx, lx) * (1.0 - smoothstep(1.0 - wx, 1.0 + wx, lx));
+        let inz = smoothstep(-wz, wz, lz) * (1.0 - smoothstep(1.0 - wz, 1.0 + wz, lz));
+        colour = mix(colour, HIGHLIGHT_COLOUR, inx * inz * HIGHLIGHT_STRENGTH);
     }
 
     return vec4<f32>(colour, 1.0);
