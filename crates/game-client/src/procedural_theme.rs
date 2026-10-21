@@ -6,21 +6,37 @@ use pop3_format::theme::{Theme, BIGFADE_LAND_ROW, BIGFADE_ROWS, BIGFADE_WIDTH, C
 
 /// Palette = 8 colour bands x 32 brightness levels.
 const LEVELS: usize = 32;
-/// sRGB base colour per band and the first bigfade row where it starts.
-const BANDS: [([u8; 3], usize); 8] = [
-    ([18, 52, 88], 0),     // deep water
-    ([36, 92, 118], 64),   // shallow water
-    ([206, 186, 128], BIGFADE_LAND_ROW), // sand
-    ([138, 160, 72], 180), // light grass
-    ([84, 128, 52], 320),  // grass
-    ([60, 92, 40], 560),   // dark grass
-    ([118, 104, 88], 760), // rock
-    ([236, 236, 240], 960), // snow
+/// First bigfade row where each of the 8 fallback bands starts (terrain-textures.md "Themes seen", TODO.md
+/// "Terrain" — recalibrated 2026-10-21 for the real `height + 75 + (75 if blend != 0)` row formula, which the
+/// old `POP3_ROW_SCALE`-era boundaries below were never updated for: `blend` alone adds ~150 to almost any
+/// non-flat land cell, so ordinary modest terrain (height a few hundred, not a mountain) now reaches rows these
+/// boundaries used to reserve for steep/tall ground, reading unexpectedly dark/near-black. Shifted so "grass"
+/// (not "dark grass"/"rock") covers the bulk of ordinary terrain, and the top band only the genuine high end —
+/// `altitude_cell` clamps the row actually picked per-cell to 1022, so nothing above that ever triggers from
+/// height alone (only `row_jitter`'s own roll-over can still reach further into the table).
+const BAND_STARTS: [usize; 8] = [0, 64, BIGFADE_LAND_ROW, 170, 260, 620, 860, 990];
+
+/// Base colour per band, same order as `BAND_STARTS`. The last (highest) band is deliberately not a fixed
+/// "snow white": real themes diverge a lot at the row ceiling (terrain-textures.md "Themes seen" — only one of
+/// the sampled themes clearly goes near-white there, others lean pale blue or don't peak at all, TODO.md
+/// "Terrain"), so a generated world picks one of a few plausible extreme-ground tones per seed instead of
+/// guaranteeing snow every time, same spirit as the rest of this generator being "a theme", not "the theme".
+const HIGH_GROUND: [[u8; 3]; 4] = [
+    [236, 236, 240], // pale snow
+    [190, 200, 210], // pale blue-grey rock
+    [168, 150, 120], // sun-bleached sandy rock
+    [140, 130, 122], // plain weathered rock, barely lighter than the band below
 ];
 
+fn band_colours(seed: u32) -> [[u8; 3]; 8] {
+    let high = HIGH_GROUND[(hash01(0xC0FFEE, 0, seed) * HIGH_GROUND.len() as f32) as usize % HIGH_GROUND.len()];
+    [[18, 52, 88], [36, 92, 118], [206, 186, 128], [138, 160, 72], [84, 128, 52], [60, 92, 40], [118, 104, 88], high]
+}
+
 pub fn generate(seed: u32) -> Theme {
+    let colours = band_colours(seed);
     let mut palette = Vec::with_capacity(256);
-    for (band, (rgb, _)) in BANDS.iter().enumerate() {
+    for (band, rgb) in colours.iter().enumerate() {
         for level in 0..LEVELS {
             let light = 1.0 - level as f32 / (LEVELS - 1) as f32 * 0.85;
             let tint = 0.94 + 0.06 * hash01(band as u32, level as u32, seed);
@@ -63,7 +79,7 @@ fn identity_fade() -> Vec<u8> {
 fn band_for(jittered: i32, row: usize) -> usize {
     let is_land = row >= BIGFADE_LAND_ROW;
     let r = if is_land { jittered.max(BIGFADE_LAND_ROW as i32) } else { jittered.min(BIGFADE_LAND_ROW as i32 - 1) };
-    BANDS.iter().rposition(|&(_, start)| r >= start as i32).unwrap_or(0)
+    BAND_STARTS.iter().rposition(|&start| r >= start as i32).unwrap_or(0)
 }
 
 /// Tileable value noise, 4 octaves, centred on 128.
@@ -123,8 +139,37 @@ mod tests {
         assert!(b > r, "water is blue");
         let [r, _, b] = t.shade(BIGFADE_LAND_ROW + 2, 0);
         assert!(r > b, "shore is sand");
-        let [r, g, b] = t.shade(BIGFADE_ROWS - 1, 0);
-        assert!(r > 200 && g > 200 && b > 200, "peaks are snow");
+    }
+
+    #[test]
+    fn the_high_ground_band_is_not_always_snow_white() {
+        // Not every seed should land on the one pure-white `HIGH_GROUND` entry (terrain-textures.md "Themes
+        // seen": only one sampled theme clearly does this in the real game) - a handful of seeds should land on
+        // every other entry too.
+        let distinct: std::collections::HashSet<_> = (0..40).map(|seed| band_colours(seed)[7]).collect();
+        assert!(distinct.len() > 1, "varies across seeds instead of being hardcoded");
+    }
+
+    #[test]
+    fn the_high_ground_band_still_reads_lighter_than_rock_below_it() {
+        for seed in 0..10 {
+            let t = generate(seed);
+            let sum = |c: [u8; 3]| c.iter().map(|&v| v as u32).sum::<u32>();
+            assert!(
+                sum(t.shade(BIGFADE_ROWS - 1, 0)) > sum(t.shade(860, 0)),
+                "seed {seed}: the top band should still read lighter than rock, whichever tone it picked"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_modest_terrain_reads_as_grass_not_rock() {
+        // The real row formula (`height + 75 + 75 if blend != 0`) adds ~150 to almost any non-flat land cell -
+        // a modest hill (height 300) should still land in "grass", not the "dark grass"/"rock" bands the old,
+        // uncalibrated boundaries pushed it into (TODO.md "Terrain").
+        let row = 300 + 150; // altitude_cell's own formula, blend != 0
+        let band = band_for(row as i32, row);
+        assert_eq!(band, 4, "row {row} should fall in the \"grass\" band (index 4), not dark grass/rock");
     }
 
     #[test]

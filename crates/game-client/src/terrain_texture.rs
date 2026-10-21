@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn rewalkable_cells_leaves_cells_outside_its_one_cell_margin_untouched() {
-        let mut m = Heightmap::new(8);
+        let m = Heightmap::new(8);
         let mut walk = walkable_cells(&m);
         walk[0] = true; // a stray true far from the dirty rect: must survive untouched
         let dirty = DirtyRect { min: (4, 4), max: (4, 4) };
