@@ -463,6 +463,23 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   separate `water_noise` (unsigned, unchanged) and a `disp_noise` centred on the signed zero instead, with its
   own `DISP_AMPLITUDE` (0.35) taming the swing directly. Two new unit tests, verified visually (`POP3_START=
   sandbox-spells`): clean sandy ground, no water patch, no vein pattern, real shoreline still reads as water.
+- [ ] Same "flat, low platform dips into bigfade's own water-coloured rows" class as the `sandbox_spells` entry
+  above, now also seen on a **real level/theme** where there is no equivalent lever: `levl2010.dat` (theme 25),
+  reincarnation site at cell (18,126), stored height 88. The plaza cells around it (roughly x=17..19, z=122..125)
+  render patches of the same sea-like colours (`cell_debug.rs`'s new hover readout can point at the exact cell;
+  `levl2010.dat` reported fresh "corners" at 88/88/88/88, so not a coast/`is_sea` case - this is the land branch
+  picking a water-authored row). Confirmed this is raw, *unmodified* level data, not our own `flatten_for_spawn`
+  reshaping it: the level author's own height table already reads flat 88 there before any site leveling runs
+  (checked both against `Level::height` pre-flatten and `GameMap::terrain` post-flatten - identical in this
+  region). With blend 0 (perfectly flat) and height 88, `altitude_cell` = 163, only 35 rows above
+  `BIGFADE_LAND_ROW`; `disp_sensitivity(163)` = 425, so a per-pixel `disp` byte below roughly -85 (about a sixth
+  of the signed range) alone drags the picked row under 128 - measured 60-96% of one cell's own 8x8 sub-pixel
+  grid dipping there, matching the visible blue blotches. Unlike `sandbox_spells`, there is no per-theme table
+  here that's ours to retune (theme 25's `bigf0-*.dat` is the original 1998 file, unmodified, and "Our bake"
+  above already confirms from the exe trace that a flat low platform reads sea-like in the original too, with no
+  floor guarding it) - so this may simply be faithful to what the real exe also shows at this exact spot, not a
+  remaining bug in `ground.wgsl`. Left open for a spec session to confirm against the real exe (clean room: a
+  coding session doesn't run/trace it itself) before concluding either way.
 - [x] Cliffs, lava and ash share one mechanism (`cliff0-X.dat`, 64 rows): fixed — a general per-cell `blend` byte
   now exists (`game_core::shading::CellShading`, pop3-rev-analysis.md "Building ashes" "Drawn"), normally
   `clamp((max neighbour height − min) / 8, 1, 127)` over the cell and its 8 neighbours, recomputed after every
