@@ -600,7 +600,7 @@ not again when the command is executed.
 ### Components
 | Component | Effect | What it does |
 |---|---|---|
-| Simple blast | 7/0x01, 0x4E (spell blast), 0x38 | 3 turns; radius 2, 4, 5 cells. Each turn every non-allied person within the radius takes `BLAST_DAMAGE_PERSON` (exe 50, not in the file), so up to 150; pushed each turn within 2.5 cells, cumulatively (140 outward, +98 up, × (1280 − d) / 1280, scaled by the slope: "Blast push and flight"). Buildings take `BLAST_DAMAGE_BLDG` (exe 40) once, vehicles 50 per turn. Allies: no damage, at most `BLAST_FRIEND_AFFECT` (5) pushed, on the last turn. Not pushed: own shaman, angel of death; immune: shielded units. Ghosts in the centre cell are removed. |
+| Simple blast | 7/0x01, 0x4E (spell blast), 0x38 | 3 turns; radius 2, 4, 5 cells. Each turn every non-allied person within the radius takes `BLAST_DAMAGE_PERSON` (exe 50, not in the file; live-confirmed exactly, 5 separate turns across 3 persons, including while already airborne), so up to 150; pushed each turn within 2.5 cells, cumulatively (140 outward, +98 up, × (1280 − d) / 1280, scaled by the slope: "Blast push and flight"). Buildings take `BLAST_DAMAGE_BLDG` (exe 40) once, vehicles 50 per turn. Allies: no damage, at most `BLAST_FRIEND_AFFECT` (5) pushed, on the last turn. Not pushed: own shaman, angel of death; immune: shielded units. Ghosts in the centre cell are removed. |
 | Burn cell | 7/0x05 | Once, on the target cell: trees, plants, wood piles and fires start burning. No damage to people. |
 | Lightning | 7/0x1E (0x511AE0) | On its first turn, at the strike point: sets the building on that cell on fire (0x408CB0, so its occupants come out 8 turns later), burns the trees of the cell or else lights a fire (5/0xA, a scenery object - corrects this row's own earlier "7/0x0A"), and a simple blast. |
 | Fireball shots | 8/4 (blast, firestorm), 8/7 and 8/8 (volcano) | Fly or fall to a point; on arrival a caller-configured impact effect (not hardcoded in the shot itself - "Fireball impact"): Firestorm's own is a land/water branch (ground-fire 5/0xA plus a 5-cell simple blast, or an unnamed splash 7/0x2B) and, if a building is there, 0x408CB0 same as Lightning. A second, shot-flag-gated burst of 4 smoke puffs (7/3) at the landing point exists in the same code but is OFF for Firestorm's own shot. |
@@ -648,18 +648,25 @@ per turn: timer -= 1
 ```
 
 ### Blast push and flight
-Each turn of a simple blast (0x50B740), for every person it may push in its current radius:
+Each turn of a simple blast (0x50B740), for every person it may push in its current radius (disassembled
+this session, `0x50b9a6`-`0x50ba05`; `edi` is the blast instance, `esi` the candidate person):
 ```text
-d     = horizontal distance to the centre (2D, wrapping, square root; 0x4503F0), clamped to 0..R    R = 1280
+d     = horizontal distance to the centre (2D, wrapping, square root; 0x4503F0), clamped to 0..R
+R     = the blast instance's OWN radius field (+0x6C, i32) - NOT a fixed 1280; read fresh every turn
 f     = (R − d) / R                               # 1 at the centre, 0 from 2.5 cells on: no push, damage only
 angle = direction from the centre to the unit     # straight outward, no randomness
-len   = 140 × f, then the slope rule              # 0x4E93F0
+len   = push_k × f, then the slope rule           # push_k = blast instance +0x74 (i16, "140"); slope rule 0x4E93F0
 h     = ground(unit) − ground(unit + 32 units along the push)
 len  += len × clamp(|h|, 1, 16) / 16 if h ≥ 0 else −that; at least 3
 vel.x += len × sin(angle); vel.z += len × cos(angle)        # added to the velocity, not replacing it
-vel.y += 98 × f
+vel.y += vert_k × f                               # vert_k = blast instance +0x78 (i16, "98"); no slope rule here
 flags  : airborne (+0xC |= 0x2000 | 0x80000)
 ```
+`push_k`/`vert_k`/`R` are per-instance config, not immediates in this shared code - set by whichever spell
+creates the blast (Blast, Firestorm's fireball, Volcano's), so "140"/"98"/"1280" are this spell's own
+defaults, not universal constants of the function itself. The slope rule's `0x4E93F0` call only ever touches
+`vel.x`/`vel.z` (it's passed `len` and writes through a pointer into those two fields) - the vertical term is
+a plain `add`, confirming the slope rule is horizontal-only.
 - The slope rule gives ×1.06 on flat ground, up to ×2 when the ground falls away along the push, and almost
   nothing (3) against a rising one.
 - The pushes add up: a person still within 2.5 cells on the 2nd and 3rd turn is pushed again, less as it got
@@ -674,6 +681,59 @@ Worked examples (hand estimates, flat ground, not measured):
 - At the centre on all 3 turns: the vertical kicks add up (98, then about 153, then about 196); it rises about
   950 and lands at about −220: 700 fall damage on top of the 150 blast damage, 850 of a brave's 1000. Horizontal
   speed reaches the 192 cap.
+
+Live-measured (two sessions, 11 pushed persons total, pop3-rev/docs/cheat.md "Live memory: measuring a
+Blast"): the downstream physics this section hands off to ("Person physics") matched exactly - gravity
+-32/turn and air drag -2/turn on velocity while airborne, zero exceptions across ~150 logged turns, and the
+192 horizontal velocity cap, seen both untouched (192 itself, on two axes at once) and one drag-tick later
+(190) - cross-checked against the movement-profile table on disk, not just live memory. Direct damage while
+already blown is confirmed too: exactly **-50** life on five separate turns across three persons (even while
+still rising, not just once grounded) matches `BLAST_DAMAGE_PERSON` exactly, and exactly **-700** life on
+three separate landings (persons 1666, 1694, 1320) matches `FALL_OUT_OF_WW_DAMAGE` exactly, applied the turn
+after `height` first reaches the ground rather than the same turn.
+
+Third session, logging every person every turn unconditionally (not just already-blown ones, 192 persons,
+14 real casts): finally caught the push itself pre-to-post, and found a processing-order detail this section
+didn't have - **a pushed person's position and velocity stay completely frozen for the blast's own 3 active
+turns**, even sitting exactly at the impact point throughout; the push (and the blown flags) only becomes
+visible the turn *after* the blast effect itself disappears. Externally, the 3-turn effect commits as a
+single step, not three incremental ones. Direction is confirmed clean: across ~15 detections, the push points
+from the centre to the person to within 0-10°, matching "straight outward, no randomness" exactly.
+
+Fourth session, a controlled flat-ground trial (15 units, 3 casts, every turn logged, no gaps): on flat
+ground, horizontal push vs. predicted `140 × f` lands at **0.97-1.04x** on the cleanest single-push
+detections - essentially an exact match (the small excess matches the slope rule's own flat-ground floor,
+×1.0625). But vertical push at the centre (`f = 1`) measured **exactly 132, not 98 - reproduced identically
+across this session and the third one**, different persons, different casts both times. Away from `f = 1`
+the vertical readings get noisy (confounded by at least one unit's own unrelated vel.y wobble, unconnected
+to any blast). The ~2x horizontal outliers seen both sessions are not a second push: since the slope rule
+is horizontal-only (see the formula above), a bigger slope multiplier explains a ~2x horizontal ratio
+sitting next to an unchanged ~1x vertical one, which a doubled push could not. "98"/"140" are independently
+confirmed as real, used values: "Vehicles"/"Life, damage and destruction" already cites a destroyed boat's own
+land-explosion call as `0x50B6F0 with 3, 2, 5, 0x62, 0x8C, 1, 0` - `0x62` = 98, `0x8C` = 140 decimal, passed
+as literal init params to the very same shared function. So 98/140 are correct for at least that call site;
+the Blast spell's own cast measuring 132 instead is consistent with the disassembly (every caller sets its
+own `push_k`/`vert_k`), not a doc error - still worth reading `vert_k` straight off a live `kind=blast` row
+(now logged by `measure_blast.py`) to confirm which spell's instance uses which value.
+
+**What happens to a person landing in water, confirmed**: a blown person whose landing point is water
+doesn't just land - height stays at the water surface (`0`, locally) for one extra turn, then its blown flag
+(+0xC bit `0x80000`) clears and a *sinking* sub-state takes over: flags gain bits `0x2`/`0x10000`/`0x100000`/
+`0x40000000`, and height now drops by a fixed **-16/turn regardless of the stored velocity** (which freezes,
+unused) for exactly **16 turns**, reaching **-256**, at which point life is forced to exactly **0** (a clean
+kill, not a subtraction) and the flags lose bit `0x2`. Confirmed identically 3 times (persons 1827, 1831,
+1272 across two sessions) - same -16/turn rate, same 16-turn count, same -256 kill depth, every time. This is
+independent of the ordinary hard-landing fall damage (`FALL_OUT_OF_WW_DAMAGE` 700, conditional on vel.y ≤
+-200 the turn height first reaches 0): person 1827 took both (-700 first, then drowned 17 turns later),
+while 1831 and 1272 touched down too gently for the fall damage (vel.y -188, -188) but still drowned on
+schedule - drowning here looks unconditional on impact speed, only on the landing point being water. This
+mirrors a destroyed boat's own sinking ("Vehicles", height -8/turn, deleted at -192) - the same kind of
+fixed-rate sink-then-remove mechanic, different per-thing-type constants.
+
+Still not measured precisely: the very first `BLAST_DAMAGE_PERSON` tick that turns a standing person into a
+blown one (invisible to a blown-only filter; the person's velocity jump these sessions caught is the
+*committed* push already past that point) - see the open item under "Open
+questions" ("Blast") for what a corrected trial needs to catch instead.
 
 ### Per spell
 | # | Spell (file cost, range, charges) | Mechanism |
@@ -1407,7 +1467,7 @@ otherwise:
 | Gravity | 32 per turn off the vertical speed (profile +0x12), while above the ground |
 | Air drag | 2 per turn off each horizontal axis, towards 0 (falling and blown) |
 | Blown, in the air | the unit spins: its heading turns by 147 (of 2048, about 26°) per turn; a scream when it takes off (one sound for the player's shaman, another for other shamans, a third for others rising faster than 90) |
-| Blown, landing | vertical speed ≤ −100: dust (7/3) and a sound; ≤ −200: `FALL_OUT_OF_WW_DAMAGE` (700, ignoring the shield), not on terrain with flag 2 |
+| Blown, landing | vertical speed ≤ −100: dust (7/3) and a sound; ≤ −200: `FALL_OUT_OF_WW_DAMAGE` (700, ignoring the shield), not on terrain with flag 2 - live-confirmed exactly (-700 life, the turn after `height` reaches ground), 3 separate landings, pop3-rev/docs/cheat.md |
 | Blown, on the ground | a slope vector (gradient over ±76 units, 0x4EBC20) is added: the unit slides downhill; friction takes 28 per turn off each horizontal axis (profile +0x14), 72 on terrain with flags 0x3E (+0x16); the unit faces where it slides |
 | Ordinary fall | ground dropping under a person (earthquake, erosion, flatten lowering) makes it fall with gravity and drag; the fall damage above is only in the blown mode, so an ordinary fall seems harmless (unverified: the grounded path also calls a landing routine, 0x4E9950, not read) |
 
@@ -2238,6 +2298,13 @@ otherwise, re-derive the FINE per-pixel coastal shape (the same table 0x5AA328 u
   shape 0 (pure land) or 1 (pure sea)  → drowning
   any boundary shape (2-15)            → drowning unless flags +0x10 bit 0x1000000 is set
 ```
+This is the shore case (a person standing/walking somewhere water-eligible); a person **blown into open water**
+by a blast goes through a different, dedicated mechanic instead - see "Blast push and flight": sink at a fixed
+-16/turn for 16 turns, forced to exactly 0 life at -256. That mechanic sets flags +0xC bit `0x2` while
+sinking - almost certainly exactly to exempt it from this per-turn predicate (bit `0x2` above means "not
+drowning", i.e. "already being handled elsewhere") while its own dedicated sink-and-die sequence runs; the bit
+clears again at the moment of death.
+
 This runs **every turn, with no timer**: a unit's exact sub-cell position decides drowning fresh each turn, at a
 finer grain than the per-cell coastal-shape class used to pick a destination elsewhere (e.g. "Wildmen"'s shore
 search). A "shore-shaped" cell is, by construction, part land and part sea at this fine grain - standing
@@ -2695,8 +2762,19 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
 
 - Physics: what the grounded landing routine 0x4E9950 does, so whether ordinary falls ever hurt.
-- Blast: what happens to a person landing in water, and measured flights (position, velocity and life per turn of
-  a blown brave) to check the estimates of "Blast push and flight".
+- Blast: whether this spell's own `push_k`/`vert_k`/`R` instance fields (+0x74/+0x78/+0x6c, "Blast push and
+  flight") are really 140/98/1280 or something else - the live horizontal figure checks out (140 confirmed
+  to ~1.04x on flat ground) but the vertical one measured 132, not 98, twice (98/140 ARE independently
+  confirmed real values, just for a different call site - a destroyed boat's land explosion, "Vehicles"); and
+  the very first `BLAST_DAMAGE_PERSON` tick is still unseen. What happens to a person landing in water is now
+  answered (see "Blast push and flight": sinks at -16/turn for 16 turns, dies outright at -256, independent
+  of the ordinary fall-damage check). Four live sessions (pop3-rev/docs/cheat.md "Live memory: measuring a
+  Blast") confirmed "Person physics" exactly (gravity, drag, the 192 horizontal velocity cap, ground friction,
+  `FALL_OUT_OF_WW_DAMAGE` 700, `BLAST_DAMAGE_PERSON` 50/turn) and the push's direction (radial, 0-10° off),
+  timing (frozen through the blast's own 3 turns, committed in one jump right after), and that the slope rule
+  is horizontal-only (confirmed by disassembly, `0x50b9a6`-`0x50ba05`). Next step is simplest now: read
+  `+0x74`/`+0x78`/`+0x6c` straight off a live `kind=blast` row (`measure_blast.py` already logs them) rather
+  than inferring them from a pushed person's velocity.
 - Walking: whether slopes change the speed, and the speeds of wildmen, the angel of death and creatures.
 - Projection: the per-axis screen scale (0xAFC2F4 + 0xCF8 / 0xCFC), which decides the on-screen height ratio, and
   which views (zoom levels, cut scenes) change the render block.
