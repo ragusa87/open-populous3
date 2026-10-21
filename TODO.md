@@ -415,15 +415,21 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   it. Fixed with a renderer-only anti-aliasing pass (`ground.wgsl::land_colour`, factored out and evaluated at a
   small jittered 2x2 sub-pixel grid per fragment, averaged) rather than reintroducing any row-blending into the
   formula itself - same spirit as `soften_light`, confirmed by the user visually.
-- [ ] Snow appears at high elevation in every theme today, which the original never does: `procedural_theme.rs`'s `BANDS` table hardcodes a universal top band (`[236, 236, 240]` "snow", row 960) applied regardless of theme/seed whenever the procedural fallback runs (no original data, or `--no-original`) — a project invention, not traced original behaviour. A rough first-pass catalogue of all 36 `pal0-X.dat`/`bigf0-X.dat` files now exists (terrain-textures.md "Themes seen"): of the themes sampled, only `h` clearly goes near-white right at the row ceiling the way the fallback assumes, `i`/`k` lean pale blue there instead, and theme `c`'s own "snow" shows up at a brighter column on LOW ground, not the row ceiling at all — i.e. whether a cell reads as snow-like depends on the brightness column too, not just height. Fix: make the fallback's top band(s) theme-aware (or at least not force "snow" universally) instead of one fixed palette for every theme; the catalogue is a first pass (one column, a handful of rows per theme), not a verified per-theme palette audit, so re-check a theme's own file before hardcoding its family. Now also sits on a much wider live row range than when this was written (see the new bullet below on `BANDS`'s own calibration) — worth doing together.
-- [ ] `procedural_theme.rs`'s `BANDS` row boundaries (0/64/128/180/320/560/760/960, chosen to roughly span
-  0..`BIGFADE_ROWS` for whatever row the old, flat `POP3_ROW_SCALE`-scaled height produced) were never
-  recalibrated after the row scale was dropped above: ordinary terrain now reaches a much higher raw-height row
-  far more easily (e.g. height 400 + blend alone already reaches row ~550, "dark grass"/"rock" territory),
-  observed as unexpectedly dark, near-black patches on steep or tall `--no-original` terrain (a small sandbox
-  mesa, `sandbox_walk`) that look fine with real `bigf0-X.dat` data loaded. The fallback is lower-fidelity by
-  design, but its own bands should still track the same height range the real formula now uses; needs its own
-  pass (band boundaries, and `procedural_theme::synthetic_cliff`'s shape) rather than being guessed further here.
+- [x] Snow appears at high elevation in every theme today + `BANDS` row boundaries never recalibrated after the
+  row scale changed - tackled together (2026-10-21), as this entry's own earlier note asked: `procedural_theme.rs`
+  renamed `BANDS` to `BAND_STARTS` (row boundaries only) with a separate `band_colours(seed)`. Row boundaries
+  recalibrated for the real `height + 75 + (75 if blend != 0)` formula (`blend` alone adds ~150 to almost any
+  non-flat cell, which the old 0/64/128/180/320/560/760/960 boundaries - picked for the since-dropped
+  `POP3_ROW_SCALE` - never accounted for, pushing ordinary modest terrain into "dark grass"/"rock" and reading as
+  unexpected near-black patches): now 0/64/128/170/260/620/860/990, so "grass" covers the bulk of ordinary
+  terrain instead. The top band is no longer a hardcoded white "snow" - `band_colours` picks one of 4 plausible
+  extreme-ground tones (pale snow, pale blue-grey rock, sun-bleached sandy rock, plain weathered rock) per seed,
+  matching that real themes diverge a lot at the row ceiling (terrain-textures.md "Themes seen" - only one
+  sampled theme clearly goes near-white there). Four new/updated unit tests (varies across seeds, still reads
+  lighter than rock whichever tone, ordinary modest terrain lands in "grass"). Verified visually (`AERIAL=1 just
+  shot --no-original`): ordinary green terrain with sand shorelines, no near-black patches, no forced snow caps.
+  Left for later, not addressed here: `procedural_theme::synthetic_cliff`'s own shape (a separate, `blend`-driven
+  axis, not height/row - this entry's "needs its own pass" was about both, only the row/band half is done).
 - [x] Cliffs, lava and ash share one mechanism (`cliff0-X.dat`, 64 rows): fixed — a general per-cell `blend` byte
   now exists (`game_core::shading::CellShading`, pop3-rev-analysis.md "Building ashes" "Drawn"), normally
   `clamp((max neighbour height − min) / 8, 1, 127)` over the cell and its 8 neighbours, recomputed after every
