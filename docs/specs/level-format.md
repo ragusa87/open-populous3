@@ -37,7 +37,14 @@ Everything is checked on the 41 shipped levels. Tags:
 - Player start info is a placeholder in every level ((1,1), (2,2), (3,3), (4,4), futures 0). Access info is all
   zero.
 - Sunlight is always ShadeStart 28, ShadeRange 15, Inclination 64 (29 levels) or 32 (12). Probably the terrain
-  lighting input (see terrain-textures.md); the editor doesn't use it.
+  lighting input (see terrain-textures.md); the editor doesn't use it. The PopRe wiki's
+  [Dat Format](https://wiki.popre.net/Dat_Format) page independently corroborates this: it documents the same 3
+  bytes but calls the first two (`ShadeStart`, `ShadeRange`) unused/ignored and only the third (`Inclination`)
+  meaningful - matching pop3-rev-analysis.md "Terrain land colour"'s exe trace that the live sun vector is a flat
+  147/147/147 constant regardless of this block.
+- The same wiki page also separately documents a higher "walkable" height cap of 1408 (vs. the 1024 this corpus's own
+  shipped levels ever reach): probably a generous engine/build-time ceiling above anything a real level uses,
+  not contradicting the 1024 observed here.
 
 The editor rewrites LandBlocks, LandOrients, NoAccessSquares, start info, sunlight and access info as zeros when
 it saves [editor]. So the game probably doesn't need them, but keep the sunlight when writing.

@@ -77,6 +77,8 @@ File formats are reverse-engineered from the original files; community tools are
   [constants.md](docs/specs/constants.md).
 - The PopRe wiki page [Keyboard Shortcuts](https://wiki.popre.net/Keyboard_Shortcuts): the original's keyboard and
   mouse shortcuts, see [shortcuts.md](docs/specs/shortcuts.md).
+- The PopRe wiki page [Dat Format](https://wiki.popre.net/Dat_Format): corroborates the `.dat` layout (land
+  heights, blocks, orients, no-access squares, sunlight, objects), see [level-format.md](docs/specs/level-format.md).
 
 Only facts about the file formats are taken from the GPL and unlicensed tools, never their code, so the MIT
 licence is kept.
