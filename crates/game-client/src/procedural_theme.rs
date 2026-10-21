@@ -14,7 +14,17 @@ const LEVELS: usize = 32;
 /// (not "dark grass"/"rock") covers the bulk of ordinary terrain, and the top band only the genuine high end —
 /// `altitude_cell` clamps the row actually picked per-cell to 1022, so nothing above that ever triggers from
 /// height alone (only `row_jitter`'s own roll-over can still reach further into the table).
-const BAND_STARTS: [usize; 8] = [0, 64, BIGFADE_LAND_ROW, 170, 260, 620, 860, 990];
+///
+/// "Sand" starts well *below* `BIGFADE_LAND_ROW` (128), not at it (found 2026-10-21, `sandbox_spells`'
+/// reincarnation site reading as deep water): `row_jitter`'s own scale fix (TODO.md "Terrain") made it a
+/// genuine per-ROW mover, and this generator's low-frequency `disp_noise` commonly dips tens of rows negative
+/// across a *whole region*, not just scattered pixels - flat land just above the threshold (height 64, blend 0,
+/// `altitude` 139) can read dozens of rows lower than its own altitude across its entire footprint, landing
+/// solidly in rows `BAND_STARTS` used to call "shallow water". Since `ground.wgsl`'s shared formula must stay
+/// exe-faithful (no clamp to add there) and this fallback's own bigfade table is the one thing fully ours to
+/// shape, rows 100..127 - reachable by both the dedicated water lookup and an unlucky land jitter - are "sand"
+/// now, so a land cell that dips there reads as a plausible wet shore, not committed ocean.
+const BAND_STARTS: [usize; 8] = [0, 32, 100, 170, 260, 620, 860, 990];
 
 /// Base colour per band, same order as `BAND_STARTS`. The last (highest) band is deliberately not a fixed
 /// "snow white": real themes diverge a lot at the row ceiling (terrain-textures.md "Themes seen" — only one of
@@ -51,7 +61,7 @@ pub fn generate(seed: u32) -> Theme {
             bigfade.push((band * LEVELS + col * LEVELS / BIGFADE_WIDTH) as u8);
         }
     }
-    Theme { palette, bigfade, disp: disp_noise(seed), water: disp_noise(seed ^ 0x5EA), cliff: synthetic_cliff(), fade: identity_fade() }
+    Theme { palette, bigfade, disp: disp_noise(seed, DISP_AMPLITUDE), water: water_noise(seed ^ 0x5EA), cliff: synthetic_cliff(), fade: identity_fade() }
 }
 
 /// Our own shape, not traced data (terrain-textures.md "cliff": row 0 identity, higher rows shift toward
@@ -82,21 +92,47 @@ fn band_for(jittered: i32, row: usize) -> usize {
     BAND_STARTS.iter().rposition(|&start| r >= start as i32).unwrap_or(0)
 }
 
-/// Tileable value noise, 4 octaves, centred on 128.
-fn disp_noise(seed: u32) -> Vec<u8> {
-    let mut out = Vec::with_capacity(DISP_SIZE * DISP_SIZE);
-    for y in 0..DISP_SIZE {
-        for x in 0..DISP_SIZE {
-            let mut v = 0.0;
-            let mut amp = 0.5;
-            for (octave, period) in [64usize, 32, 16, 4].into_iter().enumerate() {
-                v += amp * value_noise(x, y, period, seed.wrapping_add(octave as u32));
-                amp *= 0.5;
-            }
-            out.push((v / 0.9375 * 255.0) as u8);
-        }
+/// How far `disp`'s own noise swings from a *signed* zero, as a fraction of the full signed range (TODO.md
+/// "Terrain", 2026-10-21, `sandbox_spells`' reincarnation site): at the full range, `row_jitter`'s now-faithful
+/// row scale (fixed from the old column-scale bug) swings flat, walkable land near the water threshold down
+/// across the bigfade table's own water rows, visible as a fine vein pattern threading through otherwise-dry
+/// ground - `disp_sensitivity`'s own 320 floor (never smaller, even on the lowest/flattest land) means there is
+/// no "gentle near the shore" built into the shared, faithful formula to lean on instead. A value noise "centred
+/// on 128" (the UNSIGNED byte's own midpoint) is actually centred on the SIGNED range's own *extreme* once read
+/// as `i8` (raw 128 decodes to signed -128, not a small value - signed-near-zero needs raw bytes near 0 or near
+/// 255), so taming it has to shrink the signed swing directly, not just narrow how close the raw byte gets to
+/// 128. `water` keeps the full, uncompressed range (its own `water_noise`) - it isn't vulnerable to this, reads
+/// the byte unsigned, not signed, and the sea's own colour variety (shallow vs. deep) wants the contrast.
+const DISP_AMPLITUDE: f32 = 0.35;
+
+/// `water`'s own noise: unsigned, full range, centred on the unsigned midpoint 128 (`water_at`'s own reading is
+/// a plain 0..255 unsigned byte, no sign reinterpretation) - see `disp_noise`'s own doc comment for why `disp`
+/// needs a different mapping instead of reusing this one at a smaller scale.
+fn water_noise(seed: u32) -> Vec<u8> {
+    (0..DISP_SIZE * DISP_SIZE).map(|i| (noise01(i % DISP_SIZE, i / DISP_SIZE, seed) * 255.0) as u8).collect()
+}
+
+/// `disp`'s own noise: signed, centred on the signed zero (raw byte 0, wrapping to 255 going negative), swinging
+/// `amplitude` (0..1) of the full signed range before wrapping into a raw byte - see the doc comment on
+/// `DISP_AMPLITUDE` for why this is a different centring than `water_noise`'s, not just a smaller version of it.
+fn disp_noise(seed: u32, amplitude: f32) -> Vec<u8> {
+    (0..DISP_SIZE * DISP_SIZE)
+        .map(|i| {
+            let centred = noise01(i % DISP_SIZE, i / DISP_SIZE, seed) * 2.0 - 1.0; // -1..1
+            (centred * 127.0 * amplitude) as i32 as u8
+        })
+        .collect()
+}
+
+/// Tileable value noise, 4 octaves, in 0..1.
+fn noise01(x: usize, y: usize, seed: u32) -> f32 {
+    let mut v = 0.0;
+    let mut amp = 0.5;
+    for (octave, period) in [64usize, 32, 16, 4].into_iter().enumerate() {
+        v += amp * value_noise(x, y, period, seed.wrapping_add(octave as u32));
+        amp *= 0.5;
     }
-    out
+    v / 0.9375
 }
 
 fn value_noise(x: usize, y: usize, period: usize, seed: u32) -> f32 {
@@ -170,6 +206,17 @@ mod tests {
         let row = 300 + 150; // altitude_cell's own formula, blend != 0
         let band = band_for(row as i32, row);
         assert_eq!(band, 4, "row {row} should fall in the \"grass\" band (index 4), not dark grass/rock");
+    }
+
+    #[test]
+    fn a_flat_land_cells_own_jitter_undershoot_still_reads_sandy_not_deep_water() {
+        // sandbox_spells' reincarnation site (TODO.md "Terrain", 2026-10-21): flat land just above the
+        // land/water threshold (height 64, blend 0 -> altitude 139) whose own `row_jitter` dips tens of rows
+        // negative (this generator's low-frequency `disp_noise` commonly does, across a whole region, not just
+        // scattered pixels) must not land on a row that reads as deep/shallow water - band index 0 or 1.
+        let row = 139 - 35; // altitude 139, a realistic jitter undershoot observed in practice
+        let band = band_for(row as i32, row);
+        assert!(band >= 2, "row {row} (band {band}) should read as sand or better, not water");
     }
 
     #[test]
