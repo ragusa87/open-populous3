@@ -50,6 +50,20 @@ never committed — it carries no history and is not shared by cloning the repo.
   in the plan: move them over as each piece lands.
 - Delete the plan file once its task is fully committed. Nothing enforces this (it's gitignored, so it never shows
   up as a diff) — leaving it behind just litters the working copy with stale instructions for next time.
+- If the task took real time or iteration (a multi-session investigation, several false starts, a bug hunt worth
+  remembering how it was found) — worth keeping as a record, not just deleting. Move it to `docs/archived-plans/
+  <topic>.md` instead: that directory is tracked (committed, not gitignored, unlike `docs/plans/`), so commit it
+  as its own small step. Before moving it:
+  - Add a short header noting it's archived (resolved, read as history not current state) and pointing at the
+    final outcome (commits, the spec/TODO entries it fed) so a reader doesn't stop at a stale "not yet decided".
+  - Make it standalone: it must read correctly with no access to `docs/plans/` (gitignored, and the original file
+    will be gone) — fix any internal cross-reference to the plan's own old `docs/plans/<topic>.md` path, and
+    correct (don't silently rewrite) anything the plan said that later turned out wrong, the same way
+    `pop3-rev-analysis.md` appends corrections rather than editing history away.
+  - Update every other tracked file that pointed at `docs/plans/<topic>.md` (`grep -rl` for the path) to the new
+    `docs/archived-plans/<topic>.md` location, so nothing tracked references a path that no longer exists.
+  A plan that was just scratch bookkeeping for a routine task (most of them) still gets deleted outright — archive
+  the ones worth a reader finding again, not every plan by default.
 
 ## Commands
 - `just test` (or `cargo test --workspace`): must pass before committing.

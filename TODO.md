@@ -322,7 +322,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   73..106). `bigf0-X.dat`/`pal0-X.dat`/level `.dat` files were confirmed byte-identical between the two installs,
   so only `disp` itself needs re-measuring. Re-check every theme's real range against the 1998 install before
   trusting this table for anything (`disp_sensitivity`'s own curve, row-jitter magnitude reasoning, "Our bake"'s
-  theme-bias claims) - see docs/plans/terrain-white-patch.md (gitignored, local) "Corrected, 2026-10-21" for the
+  theme-bias claims) - see docs/archived-plans/terrain-white-patch.md "Corrected, 2026-10-21" for the
   fuller write-up.
 - [x] Height -> colour row scale (pop3-rev-analysis.md "Terrain land colour", terrain-textures.md "bigfade"/
   "disp"/"Our bake"): fixed — `POP3_ROW_SCALE` is gone; the row is now `clamp(height + 75 + (75 if blend != 0
@@ -375,8 +375,8 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   by the user against the real 1998 install. Two earlier wrong attempts along the way, both reverted: folding the
   altitude's live fraction into the column axis (produces a dense zigzag - the exe explicitly discards that
   fraction with its own mask) and accepting that same zigzag as a "hedgehog noise" trade-off (unnecessary once
-  `row_jitter`'s scale was fixed instead). Full blow-by-blow: `docs/plans/terrain-white-patch.md` (gitignored,
-  local, delete once this is fully committed per AGENTS.md "Plans").
+  `row_jitter`'s scale was fixed instead). Full blow-by-blow: `docs/archived-plans/terrain-white-patch.md`
+  (archived per AGENTS.md "Plans" - this investigation took real time and iteration).
   Also found along the way, still open, separate from the above:
   - `game_core::shading::CellShading`'s `ambient_nibble` is hardcoded `0`, but it's really a dynamic 0-15 shadow
     cast by buildings/trees/scenery on or near a cell (`landscape_move_1` 0x403A00, `landscape_set_unit_shadow`

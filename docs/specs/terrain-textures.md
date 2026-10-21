@@ -233,7 +233,7 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   `ground.wgsl` now computes `row = floor(altitude) + row_jitter_quotient` and multiplies the whole thing by
   `BIGFADE_WIDTH` once, instead of adding the raw quotient next to `brightness` - this, together with dropping
   the row/row+1 blend just below, is what actually resolved the white/pale patch on steep slopes (TODO.md
-  "Terrain", docs/plans/terrain-white-patch.md).
+  "Terrain", docs/archived-plans/terrain-white-patch.md).
 - Unlike the deleted CPU bake, the `bigfade`/`cliff`/`palette` chain here is a `textureLoad` every fragment at
   full render resolution (categorical, no filtering): an exact row pick shows a hard edge wherever `row` changes
   between neighbouring fragments, which the old baked 8 px/cell texture never did (the GPU's own bilinear
