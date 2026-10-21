@@ -116,22 +116,30 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let idx = bigfade_flat(row * BIGFADE_WIDTH + brightness);
         colour = palette_rgb(idx);
     } else {
-        // The bigfade/cliff/palette lookup is categorical (a `textureLoad`, not filtered): an exact per-fragment
-        // row pick shows a hard edge wherever `row` changes between neighbouring fragments, which on steep
-        // terrain (many rows crossed over a short distance) reads as harsh, blocky patches - the old baked
-        // 8 px/cell texture never showed this because the GPU's own bilinear magnification blended neighbouring
-        // *already-computed* baked colours. Reproduced here directly: blend the two colours the continuous
-        // altitude's own fractional part sits between (`row`/`row + 1`), the same thing hardware bilinear
-        // filtering would do if bigfade were addressable as a filterable texture along its row axis.
+        // pop3-rev-analysis.md "Terrain land colour": the exe never truncates the interpolated altitude to an
+        // integer row before combining it into the flat `bigfade` index - it keeps the row's own sub-integer
+        // fraction and folds it in directly as extra COLUMN units (`row_fraction = fixed_point_altitude >> 8`,
+        // i.e. `continuous_altitude * BIGFADE_WIDTH`, truncated only at the very end), never blending two
+        // different rows' own RGB. Confirmed directly (docs/plans/terrain-white-patch.md): implementing this
+        // literally resolves the pale/white patch on this hill's steep shore to ordinary dark earthy colours -
+        // the row/row+1 RGB blend it replaces averages two visually-unrelated discrete rows together, which is
+        // what produced the pale patch, not a faithful reproduction of anything the exe does. Known trade-off,
+        // accepted: `row_jitter` (from `disp`, a raw per-output-pixel noise sample) swings widely between
+        // neighbouring screen pixels on steep terrain, and folding it straight into this same continuous index
+        // lands neighbouring pixels in visually unrelated parts of the table - a dense per-pixel "needle"/
+        // hedgehog noise pattern across steep terrain generally, confirmed independent of output resolution.
+        // Smoother-looking alternatives (this row/row+1 blend, a single truncated row) were tried and kept the
+        // pale patch instead, so this stays even with the noise until a spec session settles whether the exe's
+        // own `landscape_texture_16_fade` dithering pass, its native resolution, or its usual camera distance
+        // explains why the original doesn't show this same noise.
         let altitude = textureSample(altitude_tex, altitude_samp, cell_uv).r;
-        let row = i32(floor(altitude));
-        let frac = fract(altitude);
-        let row_jitter = i32(round(disp_sensitivity(row) * d_here / 1024.0));
+        // `round_down(interpolated altitude_index)`: only the disp-sensitivity table lookup truncates early.
+        let sensitivity_row = i32(floor(altitude));
+        let row_jitter = i32(round(disp_sensitivity(sensitivity_row) * d_here / 1024.0));
+        let row_fraction = i32(floor(altitude * f32(BIGFADE_WIDTH)));
         let blend = i32(round(ch.r * 255.0));
         let cliff_row = blend / 4;
-        let colour_lo = palette_rgb(cliff_remap(cliff_row, bigfade_flat(row * BIGFADE_WIDTH + brightness + row_jitter)));
-        let colour_hi = palette_rgb(cliff_remap(cliff_row, bigfade_flat((row + 1) * BIGFADE_WIDTH + brightness + row_jitter)));
-        colour = mix(colour_lo, colour_hi, frac);
+        colour = palette_rgb(cliff_remap(cliff_row, bigfade_flat(row_fraction + brightness + row_jitter)));
         let ash_k = ch.b;
         colour = mix(colour, ASH_COLOUR, ash_k);
     }
