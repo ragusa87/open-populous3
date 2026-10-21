@@ -314,16 +314,18 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 ## Terrain ([terrain.md](docs/specs/terrain.md), [terrain-textures.md](docs/specs/terrain-textures.md))
 - [ ] Curvature in a vertex shader sampling an R16 height texture (static grid).
 - [ ] Dirty-rect re-bake of the texture/normals instead of full rebuilds.
-- [ ] `terrain-textures.md` "disp"'s per-theme byte ranges (theme 1 45..127, 5 130..193, 7 150..170, c 73..106)
-  were very likely measured against a corrupted install (2026-10-21: found the `AppData/Local/Bullfrog/Populous/`
-  install's `data/` dir was leftover from a badly-uninstalled texture-pack extension - deleted on the user's own
-  confirmation; every `disp0-X.dat` in it differed from the genuine 1998-dated `Program Files (x86)/Bullfrog/
-  Populous - A l'aube de la création/` install, e.g. theme c's real file spans the full 0..255, not a narrow
-  73..106). `bigf0-X.dat`/`pal0-X.dat`/level `.dat` files were confirmed byte-identical between the two installs,
-  so only `disp` itself needs re-measuring. Re-check every theme's real range against the 1998 install before
-  trusting this table for anything (`disp_sensitivity`'s own curve, row-jitter magnitude reasoning, "Our bake"'s
-  theme-bias claims) - see docs/archived-plans/terrain-white-patch.md "Corrected, 2026-10-21" for the
-  fuller write-up.
+- [x] `terrain-textures.md` "disp"'s per-theme byte ranges (theme 1 45..127, 5 130..193, 7 150..170, c 73..106)
+  were measured against a corrupted install (`AppData/Local/Bullfrog/Populous/data/`, a leftover from a
+  badly-uninstalled texture-pack extension - deleted). **Re-measured 2026-10-21, all 36 `disp0-X.dat` files
+  against the genuine 1998-dated `Program Files (x86)/Bullfrog/Populous - A l'aube de la création/` install:
+  every single theme spans the full raw byte range 0..255** (one, `f`, 0..254) - none is narrow, none stays on
+  one side of 128 either, so the old "no file crosses 127/128"/"narrow off-centre range is the bias" reasoning in
+  terrain-textures.md was wrong too, not just the numbers. Real means differ per theme (82.9 `s` to 167.5 `g`/`i`)
+  - a gentler distributional skew, not a hard range restriction. Several theme letters share one file byte-for-
+  byte: `0`/`q`/`v`/`w`/`x`/`y`/`z` (placeholder for unused slots), `c`/`d`, `l`/`m`. No code change needed -
+  `pop3_format::theme::disp_mean()` is already dead code (called only by its own unit test). `bigf0-X.dat`/
+  `pal0-X.dat`/level `.dat` files were confirmed byte-identical between the two installs, so this was `disp`-only.
+  terrain-textures.md "disp" updated with the corrected figures.
 - [x] Height -> colour row scale (pop3-rev-analysis.md "Terrain land colour", terrain-textures.md "bigfade"/
   "disp"/"Our bake"): fixed — `POP3_ROW_SCALE` is gone; the row is now `clamp(height + 75 + (75 if blend != 0
   else 0), 0, 1022)` (`game_core::shading`'s per-cell `blend`, see below), `disp`'s row-jitter follows the

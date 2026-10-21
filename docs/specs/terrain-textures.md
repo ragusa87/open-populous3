@@ -134,6 +134,19 @@ How the original maps it (scrolling backdrop?) is not checked. Generated maps ke
   tell signed from unsigned.
 - The ranges are narrow and differ per theme: theme 1 45..127 (mean 87), 5 130..193 (mean 161),
   7 150..170, c 73..106, 0/w/x/y/z 0..255.
+- **Corrected 2026-10-21: every one of these was measured against a corrupted install, not the genuine original
+  (TODO.md "Terrain" - the `AppData/Local/Bullfrog/Populous/data/` leftover from a badly-uninstalled texture-pack
+  extension, since deleted).** Re-measured all 36 `disp0-X.dat` files against the genuine 1998-dated
+  `Program Files (x86)/Bullfrog/Populous - A l'aube de la création/` install: **every single theme spans the full
+  raw byte range 0..255** (one, `disp0-f.dat`, 0..254) - none is narrow, and none stays on one side of 128 either,
+  so the "no file crosses 127/128" claim above and the per-theme "narrow, off-centre range IS the bias" reasoning
+  below are both wrong, not just the specific numbers. What *does* differ per theme is the raw mean, 82.9 (`s`) to
+  167.5 (`g`/`i`) - a real but much gentler distributional skew than a hard range restriction, not strong evidence
+  of a deliberate per-theme bias either way. Several theme letters share one file byte-for-byte (not independently
+  authored per slot): `0`/`q`/`v`/`w`/`x`/`y`/`z` (a shared placeholder for unused slots), `c`/`d`, `l`/`m`. No
+  code change needed - `pop3_format::theme::disp_mean()` (the thing "our bake's own 'subtract the file mean'"
+  below refers to) is already dead code, called only by its own unit test, not from any live bake/shader path -
+  but see "Our bake" for what, if anything, downstream reasoning assumed the old narrow ranges.
 - **Confirmed from the exe this session** (pop3-rev-analysis.md "Terrain land colour"): the game reads the byte
   as SIGNED (no re-centring, no per-theme constant) and uses it twice. (1) As the bigfade row's jitter, scaled by
   a fixed altitude-dependent sensitivity curve baked once at level load (one value per row, `clamp(3 * row_index -
