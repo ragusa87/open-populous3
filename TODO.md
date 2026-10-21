@@ -351,81 +351,40 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   brightness range, not just at the clamped extremes - any shore cell floored into that band reads pale
   regardless of `cell_light`. See the next entry: `land_start_row()`'s own floor has no original basis at all,
   and is the more likely remaining source of this paleness, not a miscalibrated value to retune.
-- [ ] `pop3_format::theme::Theme::land_start_row()`'s floor had NO counterpart in the original at all (checked
-  2026-10-20, exe-side, pop3-rev's `0x4BE330` corner-computation trace): the only fields the original's row
-  formula reads are height(+4)/blend(+0xA)/light(+0xD), clamped only to `0..0x3FE` - no per-theme/per-shape
-  minimum row anywhere. Shape (+0xC) is read exactly once, earlier in the function's vertex preamble, purely
-  as a binary "is this vertex open sea, skip land-colour entirely" gate - a shore cell that passes that gate
-  runs the exact same `height+75(+75 if blend)` formula as ordinary dry land, no distinction, no floor. So the
-  "flat low platform reads sea-like" case `land_start` was invented to patch is apparently accepted, unguarded
-  behaviour in the real game too - not a case of picking a better floor value per theme, but of flooring at all
-  being a deviation. The pale rows 128-139 the hill repro hit are very likely just what theme `c` legitimately
-  looks like at a natural near-sea-level row (e.g. height 0 + saturated blend -> row 150 by the bare formula,
-  already above `land_start`'s old 137 floor) - meaning `land_start_row()` reading pale wasn't itself the
-  bug. **Removed 2026-10-20** (`land_start_row`/`sea_like`/`MAX_SHORE_ROWS` deleted from `pop3_format::theme`,
-  the `land_start` uniform dropped from `ground.wgsl`/`ground_material.rs`/`world.rs`): builds clean, `just test`
-  passes in full, but **not yet visually re-verified** against the level 1 repro (does it fix the remaining pale
-  band, or does a flat low platform now read sea-like again, the original problem this floor was invented for -
-  check against a level/spell that flattens land to height 0, e.g. a land bridge or flatten spell) before treating
-  this as done. **Re-verified 2026-10-21: does not fix it** - the pale band is still clearly visible at `HEAD`
-  with the floor gone. A bisect (`origin/main` good, `HEAD` bad) then isolated the real cause to a single commit,
-  `be5318d`, and further isolation within it (swapping just its new brightness term back to the old pre-rewrite
-  Lambert mesh-gradient formula, keeping its row/cliff changes) made the patch disappear: the cause is
-  `game_core::shading::cell_light`'s brightness formula, which dots a **raw, unscaled** neighbour height delta
-  against the sun vector and hard-clamps to `0..255`, with no normalization by local slope steepness (the old
-  Lambert formula divided by the gradient vector's own length before clamping) - so a genuinely steep real slope
-  saturates to white regardless of the already-fixed 1-vs-2-cell neighbour offset (`56eea02`) or the `land_start`
-  floor removal above, neither of which touch this clamp. `terrain_texture::soften_light` (32..223) already softens
-  it somewhat in the live shader path (confirmed wired, not a leftover), but `ground.wgsl`'s own `disp`-driven
-  jitter term is added back on top of the softened value and can still reach the hard 255 ceiling, and the bigfade
-  rows a steep shore cell's altitude lands in are independently already pale (see above), so even a value in the
-  low 200s reads as white. **Re-checked 2026-10-21 against `pop3-rev-analysis.md` "Terrain land colour" (already
-  committed `4e88bfb`, before this bisect): the clamp-with-no-normalization is the exe-traced pseudocode itself**,
-  and every other step of our pipeline (`altitude_cell`, `disp_sensitivity`, `row_jitter`, brightness, the
-  row/row+1 blend) matches it too - no implementation bug found. But the user directly confirmed the real hill
-  looked "normal, green, just a very very little bit darker" in the original, nothing like this pale band, so it
-  **is** a real divergence despite matching the traced formula. Best lead: the spec's only live numeric check of
-  the `/350` divisor is on a **flat** cell (`light = 128`), which can't actually distinguish 350 from any larger
-  divisor (both floor `147/x` to 0) - if the real divisor is substantially bigger (e.g. a misread hex immediate,
-  `0x350` = 848), that alone would soften steep-slope saturation with no normalization term needed. Needs a spec
-  session: re-check the literal divisor against the disassembly bytes at `compute_cell_light` (0x4BE230), and
-  live-measure its `light` output on a genuinely steep slope (this hill: `z=11`, `x=9..12` = `412, 353, 191, 0`)
-  to diff against our own formula's output for the same inputs. See docs/plans/terrain-white-patch.md (gitignored,
-  local) for the full bisect/isolation write-up and this continuation. **Resolved (exe side), 2026-10-21: the
-  divisor really is 350** (`mov esi/ebx,0x15e` right before a true `idiv`, not a hex `0x350`=848 misread, not a
-  multiply-by-reciprocal), and a live measurement of `compute_cell_light`'s real output on this exact hill's
-  steep row (z=11, x=9..12) matched our formula's prediction **exactly** for all four cells (109/109, 165/165,
-  54/54, 128/128) - none of them anywhere near the 0/255 clamp. So `cell_light`'s formula, divisor and clamp are
-  faithful and are NOT the cause of the white band after all, overturning the theory above. The real divergence
-  must be downstream (bigfade row/disp/cliff remap, or the row/row+1 blend) or on a steeper row this sample
-  didn't cover - needs a fresh coding/spec session to re-open that search rather than assume `cell_light` is
-  guilty. Full trace: `pop3-rev/docs/functions.tsv` row `0x4be230`, `pop3-rev` `docs/plans/terrain-white-patch.md`
-  "Resolved (exe side)". **New gap found during that same live measurement, 2026-10-21**: the map-cell +0xE low
-  nibble (`ambient_nibble` in `cell_light`) read nonzero (6) at the one cell under this hill's temple in the live
-  game, not 0 as `pop3-rev-analysis.md`'s "Terrain land colour" previously concluded ("nothing writes it,
-  probably right") - that conclusion only checked terrain-specific write sites and missed the real ones, in
-  unit/object-movement code (`landscape_move_1` 0x403A00, `landscape_set_unit_shadow` 0x403C10, both calling
-  `calc_unit_shade_value` 0x450D50). It's a dynamic 0-15 shadow cast onto a cell by the buildings/trees/scenery
-  placed on or near it, not a static ambient term - so `game_core::shading::CellShading`'s hardcoded
-  `ambient_nibble = 0` is wrong on any cell near such an object (this hill's temple included). Separate from the
-  now-resolved divisor/clamp question above; needs a coding/spec session to read `calc_unit_shade_value`'s
-  per-object-type weighting (not fully traced) and wire a real per-cell shadow source instead of the constant.
-  **Row/row+1 blend identified and tried as the cause, reverted, 2026-10-21**: `pop3-rev-analysis.md`'s own traced
-  pseudocode folds the altitude's sub-row fraction in as extra COLUMN units of a single row's flat index, never
-  blending two different rows' RGB - implementing that literally fixed every pale pixel found in this hill's repro
-  (resolved to ordinary dark earthy colours, matching the user's own recollection of the original), confirming
-  `7a6d98d`'s row/row+1 RGB blend (reverting an earlier attempt at this same single-index approach) as the actual
-  cause. **But reverted**: the single-index formula makes the *entire* terrain surface show a dense "needle"/
-  hedgehog noise pattern, visibly worse than the current pale-patch bug at a normal (non-close-up) camera
-  distance, confirmed independent of output resolution (640x480 and 1280x720 alike) - `row_jitter` (from `disp`,
-  a raw per-output-pixel noise sample) swings by up to ~90 table entries between neighbouring screen pixels, far
-  more than the old brightness-only jitter, landing in visually unrelated parts of the 256-wide table even when
-  the two nearest entries are blended smoothly instead of rounded. Current `HEAD` (the pale-patch bug) stays, as
-  the smoother of the two known-bad options. See docs/plans/terrain-white-patch.md (gitignored, local) "Tried and
-  reverted" for the full write-up, screenshots and next steps (does the exe's own `landscape_texture_16_fade`
-  dithering pass explain this away, does it only show at the original's much lower native resolution, or only at
-  a far greater camera distance than tested here - none confirmed yet, needs a spec session and/or further
-  testing, not a guess).
+- [x] `pop3_format::theme::Theme::land_start_row()`'s floor had no counterpart in the original (`0x4BE330`
+  corner trace): removed (`land_start_row`/`sea_like`/`MAX_SHORE_ROWS` gone from `pop3_format::theme`, the
+  `land_start` uniform dropped from `ground.wgsl`/`ground_material.rs`/`world.rs`). Didn't fix the white/pale
+  patch on levl2001.dat's hill (theme `c`) by itself - see below.
+- [x] **White/pale patch on steep slopes, root-caused and fixed 2026-10-21** (`crates/game-client/src/
+  ground.wgsl`, "Our bake" below, pop3-rev-analysis.md "Terrain land colour"): two compounding implementation bugs
+  in the land branch, both confirmed against instruction-level disassembly (`pop3-rev/docs/functions.tsv`
+  0x4C0EC0/0x4BF860/0x4C0380) rather than guessed:
+  1. The `row`/`row + 1` bilinear RGB blend (`7a6d98d`) had no basis in the exe at all - it reads `bigf0-X.dat`
+     exactly once per pixel, at a single flat index, never blending two rows. Fixed: a single hard-floored
+     `row = floor(altitude)`, no blend.
+  2. `row_jitter` (disp's own row-moving term) was being summed directly alongside `brightness` as if it were
+     column-scale, but the exe's `and ecx,0xFFFFFC03; sar ecx,0x2` masking-before-shift makes it always a
+     multiple of 256 - i.e. it moves the picked **row**, not the column, by up to dozens of rows on steep/high
+     terrain. Under-scaling it by 256x left a steep hill's whole altitude-driven row range far more static/
+     exposed than the original, which is what kept the patch visible even after fix 1. Fixed: `row = altitude_int
+     + row_jitter_rows`, multiplied by `BIGFADE_WIDTH` once.
+  `cell_light`'s own formula/divisor/clamp were separately confirmed faithful along the way (not the cause) - a
+  live measurement of a known steep row matched our prediction exactly (109/109, 165/165, 54/54, 128/128).
+  Verified both by a pixel-level Rust-side replica of the shader against the real `levl2001.dat`/theme `c` data
+  (pale-pixel count in the repro's own hotspot: 32 -> 0, the few remaining hits relocated far away) and visually
+  by the user against the real 1998 install. Two earlier wrong attempts along the way, both reverted: folding the
+  altitude's live fraction into the column axis (produces a dense zigzag - the exe explicitly discards that
+  fraction with its own mask) and accepting that same zigzag as a "hedgehog noise" trade-off (unnecessary once
+  `row_jitter`'s scale was fixed instead). Full blow-by-blow: `docs/plans/terrain-white-patch.md` (gitignored,
+  local, delete once this is fully committed per AGENTS.md "Plans").
+  Also found along the way, still open, separate from the above:
+  - `game_core::shading::CellShading`'s `ambient_nibble` is hardcoded `0`, but it's really a dynamic 0-15 shadow
+    cast by buildings/trees/scenery on or near a cell (`landscape_move_1` 0x403A00, `landscape_set_unit_shadow`
+    0x403C10, `calc_unit_shade_value` 0x450D50) - wrong on any cell near such an object. Needs
+    `calc_unit_shade_value`'s per-object-type weighting traced and a real per-cell source wired in.
+  - A runtime table at 0x96EAE0/0x970AE0, read once more after `cliff0-X.dat`, indexed by the cliff output plus a
+    fourth, unidentified per-corner fixed-point attribute (present in `landscape_texture_32` too, not 16-bit-depth
+    specific) - untraced, role and whether our ground shader needs it both unknown.
 - [x] Baked terrain texture minification aliasing (blocky look and bright-speckle `row_jitter` at distance,
   since a single-mip baked 8 px/cell texture can't area-average many texels into one screen pixel): fixed by the
   structurally faithful route this entry already pointed at — the ground colour formula (terrain-textures.md
