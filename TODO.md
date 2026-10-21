@@ -430,6 +430,20 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   shot --no-original`): ordinary green terrain with sand shorelines, no near-black patches, no forced snow caps.
   Left for later, not addressed here: `procedural_theme::synthetic_cliff`'s own shape (a separate, `blend`-driven
   axis, not height/row - this entry's "needs its own pass" was about both, only the row/band half is done).
+  **Regression found and fixed, 2026-10-21**: `sandbox_spells`' reincarnation site (flat land, height 64, blend 0
+  -> altitude 139, just 11 rows above `BIGFADE_LAND_ROW`) rendered as deep water, then as a fine blue "vein"
+  pattern threading through otherwise-dry ground after a first attempt. Root cause: `row_jitter`'s own scale fix
+  (above) made it a genuine per-ROW mover, and `disp_sensitivity`'s shared, faithful 320 floor (never smaller,
+  even on the lowest/flattest land) means there's no "gentle near the shore" to lean on - any land near the
+  water threshold can dip into bigfade's own water-authored rows. Fixed in `procedural_theme.rs` only (the one
+  thing fully ours to shape; `ground.wgsl`'s shared formula must stay exe-faithful, no clamp to add there):
+  `BAND_STARTS`'s own "sand" moved well below `BIGFADE_LAND_ROW` (100, not 128) so a dip still reads as sand, not
+  water; and - the real fix for the vein pattern - `disp_noise` was found to be centring its output on the
+  *unsigned* midpoint 128, which is actually the *signed* range's own extreme once read as `i8` (raw 128 decodes
+  to -128, not a small value), so "narrowing" it that way never shrank the signed jitter at all. Reworked into a
+  separate `water_noise` (unsigned, unchanged) and a `disp_noise` centred on the signed zero instead, with its
+  own `DISP_AMPLITUDE` (0.35) taming the swing directly. Two new unit tests, verified visually (`POP3_START=
+  sandbox-spells`): clean sandy ground, no water patch, no vein pattern, real shoreline still reads as water.
 - [x] Cliffs, lava and ash share one mechanism (`cliff0-X.dat`, 64 rows): fixed — a general per-cell `blend` byte
   now exists (`game_core::shading::CellShading`, pop3-rev-analysis.md "Building ashes" "Drawn"), normally
   `clamp((max neighbour height − min) / 8, 1, 127)` over the cell and its 8 neighbours, recomputed after every
