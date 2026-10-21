@@ -1378,7 +1378,7 @@ mod tests {
     }
 
     fn shaman_at(cell: (i32, i32)) -> (Unit, ReincarnationSite) {
-        let site = ReincarnationSite::at_cell(0, cell);
+        let site = ReincarnationSite::at_cell(0, cell, 0);
         (Unit::shaman(Id::from_raw(1), &site), site)
     }
 

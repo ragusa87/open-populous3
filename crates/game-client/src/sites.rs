@@ -166,13 +166,13 @@ mod tests {
 
     #[test]
     fn site_centre_is_cell_centre() {
-        let s = ReincarnationSite::at_cell(0, (8, 107));
+        let s = ReincarnationSite::at_cell(0, (8, 107), 0);
         assert_eq!(site_cell_pos(&s), Vec2::new(8.5, 107.5));
     }
 
     #[test]
     fn stones_face_the_centre() {
-        let s = ReincarnationSite::at_cell(0, (10, 20));
+        let s = ReincarnationSite::at_cell(0, (10, 20), 0);
         let centre = site_cell_pos(&s);
         for p in &site_parts(&s) {
             let front = Quat::from_rotation_y(p.yaw.0) * Vec3::NEG_Z;
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn stones_stand_on_the_octagons_cell_centres() {
-        let s = ReincarnationSite::at_cell(1, (10, 20));
+        let s = ReincarnationSite::at_cell(1, (10, 20), 0);
         let parts = site_parts(&s);
         assert_eq!(parts.len(), SLOTS.len());
         for (p, &(dx, dz)) in parts.iter().zip(&SLOTS) {

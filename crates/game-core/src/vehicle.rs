@@ -1218,7 +1218,7 @@ mod tests {
     #[test]
     fn a_shaman_in_a_balloon_is_flown_into_range_then_casts() {
         let mut map = coast();
-        map.sites = vec![crate::site::ReincarnationSite::at_cell(0, (C - 30, C))];
+        map.sites = vec![crate::site::ReincarnationSite::at_cell(0, (C - 30, C), 0)];
         map.spell_books = vec![crate::spell_book::SpellBook::sandbox(); 4];
         let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at((C - 20, C)), Angle::ZERO));
         let shaman = map.spawn(0, UnitKind::Shaman, at((C - 20, C))).id;

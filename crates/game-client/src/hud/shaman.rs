@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn status_shows_action_and_health() {
-        let mut u = Unit::shaman(game_core::id::Id::from_raw(1), &ReincarnationSite::at_cell(0, (1, 1)));
+        let mut u = Unit::shaman(game_core::id::Id::from_raw(1), &ReincarnationSite::at_cell(0, (1, 1), 0));
         u.health = game_core::health::Health::new(800, u.health.max());
         let s = status(Some(&u));
         assert_eq!((s.title.as_str(), s.health, s.health_text.as_str()), ("Idle", 0.4, "800/2000"));

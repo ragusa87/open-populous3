@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn starts_on_player_site() {
         let mut map = game_core::map::GameMap::generate(3);
-        map.sites = vec![game_core::site::ReincarnationSite::at_cell(0, (9, 99))];
+        map.sites = vec![game_core::site::ReincarnationSite::at_cell(0, (9, 99), 0)];
         assert_eq!(start_cell(&map), (9, 99));
         map.sites.clear();
         assert_eq!(start_cell(&map), map.terrain.lowland_cell());

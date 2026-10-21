@@ -13,12 +13,20 @@ pub struct ReincarnationSite {
     /// Centre in world units (512 per cell), wraps at 65536.
     pub x: u16,
     pub z: u16,
+    /// The ground height the site is kept levelled to, every time its shaman spawns or respawns
+    /// (pop3-rev-analysis.md "Reincarnation sites": `tribe+0x915`, measured 127-128 around a site at 128) - a
+    /// fixed value captured once (the terrain's own height at the site's cell, before any flattening), not
+    /// recomputed from whatever the surrounding ground happens to be at each respawn. `flatten_for_spawn` floors
+    /// it at `MIN_SPAWN_HEIGHT` only as a last-resort safety net (a site placed on a sea cell), not as the
+    /// everyday target - that was the bug (TODO.md "Terrain", 2026-10-21): flooring a *live average* at a low 32
+    /// let an otherwise-dry site read as water once `row_jitter` became a genuine row-scale mover.
+    pub height: u16,
 }
 
 impl ReincarnationSite {
-    pub fn at_cell(owner: u8, (x, z): (i32, i32)) -> Self {
+    pub fn at_cell(owner: u8, (x, z): (i32, i32), height: u16) -> Self {
         let unit = |c: i32| (c.rem_euclid(128) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
-        ReincarnationSite { owner, x: unit(x), z: unit(z) }
+        ReincarnationSite { owner, x: unit(x), z: unit(z), height }
     }
 
     /// Cell containing the site centre.
@@ -46,6 +54,18 @@ impl ReincarnationSite {
 
 /// Ground made flat around a site when its shaman spawns. The stones stand 1.3 cells out and are
 /// ~0.5 wide; the triangles under them have corners up to ~2.9 cells from the centre.
+///
+/// Tried widening this to 5 (pop3-rev-analysis.md "Reincarnation sites": "the ground levelled to the site
+/// height over a 5-cell disc"), 2026-10-21 - **reverted**: on `levl2010.dat`, the player's own site is exactly
+/// 5 cells from an unrelated boat hut's shore, *only* via the map's own torus wrap (123 cells apart the other
+/// way) - widening hard-levelled solid dry land over the open sea that boat hut's dock depends on
+/// (`placement::shore_ok`), breaking a previously-passing, real-level-validated test. Reproducing the real
+/// radius faithfully needs either confirming the exe's own effect never crosses the wrap wall this way (not
+/// checked - clean room, a spec-session question) or some other difference (ours may touch cells the original's
+/// own disc-growth animation never actually reaches, since ours is applied in one shot, not grown over 21
+/// turns - TODO.md "Terrain" #302 tracks the full animated version this keeps approximating with a radius
+/// instead). Left at the original value until one of those settles it, rather than trade one visual bug for a
+/// functional regression on a real level.
 pub const SPAWN_FLAT_RADIUS: i32 = 3;
 /// Ring around it pulled halfway towards the flat height, so the platform has no cliff.
 pub const SPAWN_BLEND_RADIUS: i32 = 4;
@@ -65,19 +85,23 @@ impl ReincarnationSite {
         })
     }
 
-    /// Level the ground for a spawning shaman: the inner disc takes its average height (at least
-    /// `MIN_SPAWN_HEIGHT`, so never water), the ring around is blended halfway.
+    /// Level the ground for a spawning shaman: the inner disc takes the site's own fixed `height` (at least
+    /// `MIN_SPAWN_HEIGHT`, a last-resort floor, not the everyday target - a site placed on a sea cell), the ring
+    /// around is blended halfway.
     pub fn flatten_for_spawn(&self, terrain: &mut Heightmap) -> DirtyRect {
-        terrain.level_around(self.spawn_point(), SPAWN_FLAT_RADIUS, SPAWN_BLEND_RADIUS, MIN_SPAWN_HEIGHT)
+        terrain.level_around_to(self.spawn_point(), SPAWN_FLAT_RADIUS, SPAWN_BLEND_RADIUS, self.height.max(MIN_SPAWN_HEIGHT))
     }
 }
 
-/// One site per tribe, at its shaman's start position; first shaman wins, sorted by owner.
-pub fn sites_from_level(level: &Level) -> Vec<ReincarnationSite> {
+/// One site per tribe, at its shaman's start position; first shaman wins, sorted by owner. `height` is
+/// captured once from `terrain`'s own value at the site's cell - the *original*, unmodified level terrain, not
+/// recomputed later (`ReincarnationSite::height`'s own doc comment).
+pub fn sites_from_level(level: &Level, terrain: &Heightmap) -> Vec<ReincarnationSite> {
     let mut sites: Vec<ReincarnationSite> = Vec::new();
     for t in level.things.iter().filter(|t| t.is_shaman()) {
         if !sites.iter().any(|s| s.owner == t.owner) {
-            sites.push(ReincarnationSite { owner: t.owner, x: t.x, z: t.z });
+            let height = terrain.get((t.x as u32 / WORLD_UNITS_PER_CELL) as i32, (t.z as u32 / WORLD_UNITS_PER_CELL) as i32);
+            sites.push(ReincarnationSite { owner: t.owner, x: t.x, z: t.z, height });
         }
     }
     sites.sort_by_key(|s| s.owner);
@@ -97,8 +121,8 @@ pub fn generated_sites(terrain: &Heightmap) -> Vec<ReincarnationSite> {
         .map(|i| (i % s, i / s))
         .filter(|&(x, z)| !terrain.is_water(x, z))
         .max_by_key(|&(x, z)| (torus(x, first.0).pow(2) + torus(z, first.1).pow(2), -(z * s + x)));
-    let mut sites = vec![ReincarnationSite::at_cell(0, first)];
-    sites.extend(second.filter(|&c| c != first).map(|c| ReincarnationSite::at_cell(1, c)));
+    let mut sites = vec![ReincarnationSite::at_cell(0, first, terrain.get(first.0, first.1))];
+    sites.extend(second.filter(|&c| c != first).map(|c| ReincarnationSite::at_cell(1, c, terrain.get(c.0, c.1))));
     sites
 }
 
@@ -108,7 +132,7 @@ mod tests {
 
     #[test]
     fn welcomes_the_ring_around_it_across_the_edge() {
-        let site = ReincarnationSite::at_cell(0, (0, 46));
+        let site = ReincarnationSite::at_cell(0, (0, 46), 0);
         assert!(site.welcomes((0, 46)) && site.welcomes((127, 45)) && site.welcomes((1, 47)));
         assert!(!site.welcomes((2, 46)) && !site.welcomes((0, 48)));
     }
@@ -131,46 +155,57 @@ mod tests {
             [PERSON_SHAMAN, KIND_PERSON, 0, 0x00, 0x11, 0x00, 0xd7],
             [PERSON_SHAMAN, KIND_PERSON, 1, 0x00, 0x20, 0x00, 0x20],
         ]);
-        let sites = sites_from_level(&lvl);
+        let terrain = Heightmap::from_heights(pop3_format::MAP_SIZE, lvl.heights.clone());
+        let sites = sites_from_level(&lvl, &terrain);
         assert_eq!(
             sites,
             vec![
-                ReincarnationSite { owner: 0, x: 0x1100, z: 0xd700 },
-                ReincarnationSite { owner: 1, x: 0x0900, z: 0x1d00 },
+                ReincarnationSite { owner: 0, x: 0x1100, z: 0xd700, height: 0 },
+                ReincarnationSite { owner: 1, x: 0x0900, z: 0x1d00, height: 0 },
             ]
         );
         assert_eq!(sites[0].cell(), (8, 107));
     }
 
     #[test]
+    fn sites_from_level_captures_the_original_terrain_height() {
+        let lvl = level_with(&[[PERSON_SHAMAN, KIND_PERSON, 0, 0x00, 0x11, 0x00, 0xd7]]);
+        let mut terrain = Heightmap::from_heights(pop3_format::MAP_SIZE, lvl.heights.clone());
+        terrain.set(8, 107, 200);
+        let sites = sites_from_level(&lvl, &terrain);
+        assert_eq!(sites[0].height, 200);
+    }
+
+    #[test]
     fn at_cell_is_cell_centre_and_wraps() {
-        let s = ReincarnationSite::at_cell(2, (-1, 3));
+        let s = ReincarnationSite::at_cell(2, (-1, 3), 0);
         assert_eq!((s.x, s.z), (127 * 512 + 256, 3 * 512 + 256));
         assert_eq!(s.cell(), (127, 3));
         assert_eq!(s.spawn_point(), (s.x, s.z));
     }
 
     #[test]
-    fn spawn_flattens_the_ring_to_its_average() {
+    fn spawn_flattens_the_ring_to_the_sites_own_stored_height() {
+        // Not a live average of the surrounding ground (the bug, TODO.md "Terrain", 2026-10-21: a flooded site
+        // or an unlucky `row_jitter` could then read as water) - the site's own fixed `height`, same every time.
         let mut t = Heightmap::new(32);
-        let site = ReincarnationSite::at_cell(0, (10, 10));
-        t.raise((10, 10), 6, 400);
+        let site = ReincarnationSite::at_cell(0, (10, 10), 200);
+        t.raise((10, 10), 6, 400); // the surrounding ground is quite different from the site's own height
         let before = t.clone();
         site.flatten_for_spawn(&mut t);
         let inner: Vec<_> = site.corners_within(SPAWN_FLAT_RADIUS).map(|(c, _)| c).collect();
-        let h = t.get(10, 10);
-        assert!(inner.iter().all(|&(x, z)| t.get(x, z) == h), "inner disc is flat");
+        assert!(inner.iter().all(|&(x, z)| t.get(x, z) == 200), "inner disc is flat, at the site's own height");
         assert!(inner.contains(&(8, 10)) && inner.contains(&(12, 12)), "covers the stone ring");
         assert!(!inner.contains(&(7, 10)));
         let edge = before.get(7, 10);
-        assert_eq!(t.get(7, 10), (edge + h) / 2, "blend ring");
+        assert_eq!(t.get(7, 10), (edge + 200) / 2, "blend ring");
         assert_eq!(t.get(2, 2), before.get(2, 2), "far ground untouched");
     }
 
     #[test]
     fn flooded_site_becomes_land_across_the_map_edge() {
         let mut t = Heightmap::new(32);
-        let site = ReincarnationSite::at_cell(1, (0, 31));
+        let site = ReincarnationSite::at_cell(1, (0, 31), 0); // height 0: MIN_SPAWN_HEIGHT's own floor kicks in
         site.flatten_for_spawn(&mut t);
         for (x, z) in [(0, 31), (1, 0), (31, 30), (2, 1)] {
             assert_eq!(t.get(x, z), MIN_SPAWN_HEIGHT, "({x},{z}) wraps and is land");

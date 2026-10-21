@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn allies_default_to_their_own_tribe_only() {
-        let t = Tribes::from_sites(&[ReincarnationSite::at_cell(0, (0, 0)), ReincarnationSite::at_cell(1, (1, 1))]);
+        let t = Tribes::from_sites(&[ReincarnationSite::at_cell(0, (0, 0), 0), ReincarnationSite::at_cell(1, (1, 1), 0)]);
         assert!(t.allied(0, 0) && t.allied(1, 1));
         assert!(!t.allied(0, 1) && !t.allied(1, 0));
         assert_eq!(t.count(), 2);

@@ -644,9 +644,9 @@ mod tests {
     fn keeps_only_the_players_living_units() {
         use game_core::site::ReincarnationSite;
         use game_core::unit::Action;
-        let mine = Unit::shaman(Id::from_raw(1), &ReincarnationSite::at_cell(PLAYER, (1, 1)));
-        let theirs = Unit::shaman(Id::from_raw(2), &ReincarnationSite::at_cell(1, (5, 5)));
-        let mut dead = Unit::shaman(Id::from_raw(3), &ReincarnationSite::at_cell(PLAYER, (1, 1)));
+        let mine = Unit::shaman(Id::from_raw(1), &ReincarnationSite::at_cell(PLAYER, (1, 1), 0));
+        let theirs = Unit::shaman(Id::from_raw(2), &ReincarnationSite::at_cell(1, (5, 5), 0));
+        let mut dead = Unit::shaman(Id::from_raw(3), &ReincarnationSite::at_cell(PLAYER, (1, 1), 0));
         dead.action = Action::Dead { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) };
         let mut s = sel(&[1, 2, 3, 4].map(Id::from_raw));
         s.retain(&[mine, theirs, dead]);

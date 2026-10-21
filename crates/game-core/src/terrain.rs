@@ -194,6 +194,30 @@ impl Heightmap {
     /// cells take their average height (at least `min`, so never sea), those out to `blend` cells
     /// are pulled halfway towards it, so the platform has no cliff. Integer, deterministic.
     pub fn level_around(&mut self, centre: (u16, u16), flat: i32, blend: i32, min: u16) -> DirtyRect {
+        let (corners, within_flat, rect) = Self::disc_corners(centre, flat, blend);
+        let inner: Vec<_> = corners.iter().filter(|c| c.1 <= within_flat).map(|c| c.0).collect();
+        let sum: u32 = inner.iter().map(|&(x, z)| self.get(x, z) as u32).sum();
+        let target = ((sum / inner.len().max(1) as u32) as u16).max(min);
+        self.level_corners(&corners, within_flat, target);
+        rect
+    }
+
+    /// Level the ground around `centre` to a fixed `target` height instead of the surrounding average
+    /// (`level_around`'s own one): height points within `flat` cells all become exactly `target`, those out to
+    /// `blend` cells are pulled halfway towards it, so the platform has no cliff. For a reincarnation site, kept
+    /// levelled to the same height every time its shaman spawns or respawns (`ReincarnationSite::height`,
+    /// pop3-rev-analysis.md "Reincarnation sites") - not recomputed from whatever the ground happens to be at
+    /// each respawn, the bug `level_around`'s own live average had for this one caller.
+    pub fn level_around_to(&mut self, centre: (u16, u16), flat: i32, blend: i32, target: u16) -> DirtyRect {
+        let (corners, within_flat, rect) = Self::disc_corners(centre, flat, blend);
+        self.level_corners(&corners, within_flat, target);
+        rect
+    }
+
+    /// Shared geometry for `level_around`/`level_around_to`: every corner within `blend` cells of `centre`
+    /// (world units, 512 per cell) with its own squared distance, the squared-distance threshold marking the
+    /// "inner" (`flat`) disc among them, and the `DirtyRect` the touched footprint needs.
+    fn disc_corners(centre: (u16, u16), flat: i32, blend: i32) -> (Vec<((i32, i32), i64)>, i64, DirtyRect) {
         const UNIT: i64 = 512;
         let (cx, cz) = ((centre.0 as i64 / UNIT) as i32, (centre.1 as i64 / UNIT) as i32);
         let r = blend + 1;
@@ -203,16 +227,20 @@ impl Heightmap {
                 let (dx, dz) = (x as i64 * UNIT - centre.0 as i64, z as i64 * UNIT - centre.1 as i64);
                 ((x, z), dx * dx + dz * dz)
             })
+            .filter(|&(_, d2)| d2 <= (blend as i64 * UNIT).pow(2))
             .collect();
-        let within = |radius: i32| (radius as i64 * UNIT).pow(2);
-        let inner: Vec<(i32, i32)> = corners.iter().filter(|c| c.1 <= within(flat)).map(|c| c.0).collect();
-        let sum: u32 = inner.iter().map(|&(x, z)| self.get(x, z) as u32).sum();
-        let target = ((sum / inner.len().max(1) as u32) as u16).max(min);
-        for &((x, z), d2) in corners.iter().filter(|c| c.1 <= within(blend)) {
-            let h = if d2 <= within(flat) { target } else { ((self.get(x, z) as u32 + target as u32) / 2) as u16 };
+        let within_flat = (flat as i64 * UNIT).pow(2);
+        let rect = DirtyRect { min: (cx - r, cz - r), max: (cx + r + 1, cz + r + 1) };
+        (corners, within_flat, rect)
+    }
+
+    /// Sets every corner in `corners` to `target` if within `within_flat` (squared distance), else halfway
+    /// towards it from its own current height.
+    fn level_corners(&mut self, corners: &[((i32, i32), i64)], within_flat: i64, target: u16) {
+        for &((x, z), d2) in corners {
+            let h = if d2 <= within_flat { target } else { ((self.get(x, z) as u32 + target as u32) / 2) as u16 };
             self.set(x, z, h);
         }
-        DirtyRect { min: (cx - r, cz - r), max: (cx + r + 1, cz + r + 1) }
     }
 
     /// The height points of a building's footprint (see `level_rect`), unwrapped cell coordinates:
