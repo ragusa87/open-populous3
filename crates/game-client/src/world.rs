@@ -339,10 +339,11 @@ fn rebuild_terrain(
     let glide_src = glide.prev.as_ref().filter(|_| gliding).map(|prev| (prev, clock.alpha()));
     match baked.as_mut().filter(|_| !dirty.0) {
         Some((_, cells)) => {
-            // `walkable_cells` is a whole-map scan: refreshed only on a real tick, reused as-is on a pure reglide
-            // frame (the coastline doesn't move while a rim rises above it) so it never runs every reglide frame.
-            if !changed.is_empty() {
-                *walkable_cache = crate::terrain_texture::walkable_cells(&map.0.terrain);
+            // Dirty-rect limited (`rewalkable_cells`), not a whole-map scan: refreshed only on a real tick,
+            // reused as-is on a pure reglide frame (the coastline doesn't move while a rim rises above it) so it
+            // never runs every reglide frame either.
+            for &rect in &changed {
+                crate::terrain_texture::rewalkable_cells(&map.0.terrain, rect, &mut walkable_cache);
             }
             if !changed.is_empty() || gliding {
                 for &rect in touch_set {

@@ -39,6 +39,22 @@ pub fn walkable_cells(map: &Heightmap) -> Vec<bool> {
     (0..n * n).map(|i| !is_sea(map, (i % n, i / n))).collect()
 }
 
+/// Rewrites `walkable`'s own cells whose `is_sea` could have changed after a height edit in `rect` (a
+/// `DirtyRect` in the same vertex coordinates terrain edits report): a cell's own footprint is corners
+/// `(x, z)..(x + 1, z + 1)` (`walkable_cells`'s own doc comment), so a changed vertex at `(x, z)` can move the
+/// four cells `(x - 1, z - 1)..(x, z)` - one cell short of `rect` on the min side, already covered by it on the
+/// max side. Keeps `walkable_cells`'s own full scan for the one legitimate "no existing cache yet" case (a level
+/// switch, the first bake) instead of dirty-rect-limiting that too.
+pub fn rewalkable_cells(map: &Heightmap, rect: DirtyRect, walkable: &mut [bool]) {
+    let n = map.size() as i32;
+    for z in rect.min.1 - 1..=rect.max.1 {
+        for x in rect.min.0 - 1..=rect.max.0 {
+            let (ux, uz) = (x.rem_euclid(n) as usize, z.rem_euclid(n) as usize);
+            walkable[uz * n as usize + ux] = !is_sea(map, (x, z));
+        }
+    }
+}
+
 /// Merges `rects` that touch or overlap into their union, repeatedly until none do. A tick can dirty a cluster
 /// of adjacent single-cell edits (lava spreading one cell at a time, `game_core::lava`'s own `grow`): baking each
 /// separately redoes `REBAKE_MARGIN`'s neighbourhood over and over across the whole cluster, instead of once over
@@ -224,6 +240,26 @@ mod tests {
         // (3,3), (4,3), (3,4) and (4,4).
         assert!(walk[3 * 8 + 3] && walk[3 * 8 + 4] && walk[4 * 8 + 3] && walk[4 * 8 + 4]);
         assert!(!walk[0]);
+    }
+
+    #[test]
+    fn rewalkable_cells_only_the_dirty_rect_matches_a_full_recompute_from_scratch() {
+        let mut m = Heightmap::new(8);
+        let mut walk = walkable_cells(&m); // all sea
+        m.set(4, 4, 500);
+        let dirty = DirtyRect { min: (4, 4), max: (4, 4) };
+        rewalkable_cells(&m, dirty, &mut walk);
+        assert_eq!(walk, walkable_cells(&m), "incremental update matches a full rebuild after the same edit");
+    }
+
+    #[test]
+    fn rewalkable_cells_leaves_cells_outside_its_one_cell_margin_untouched() {
+        let mut m = Heightmap::new(8);
+        let mut walk = walkable_cells(&m);
+        walk[0] = true; // a stray true far from the dirty rect: must survive untouched
+        let dirty = DirtyRect { min: (4, 4), max: (4, 4) };
+        rewalkable_cells(&m, dirty, &mut walk);
+        assert!(walk[0], "cell (0,0) is well outside the peak's one-cell reach, left alone");
     }
 
     #[test]
