@@ -154,7 +154,47 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   looker leaves a melee alone, and whether a non-idle looker should also skip a challenge target the same way it
   skips a melee one instead of attacking it directly - needs a live check (two units challenging while a third,
   idle and then busy, watches from within sight).
-- [ ] Sermon (combat.md "Sermon"; pop3-rev-analysis.md "Preacher conversion" and "Command groups"): the preacher's own look scan and its preach order are now traced - the scan only ever issues an ordinary attack order or the disguise/building-visit order, never preach directly, and the preach order itself walks up to one target and ends by putting it in a generic "idle near a reference unit" state, not the "struck" state the conversion reroll actually runs in. The missing link is most likely one flag bit on the attack order that lets a preacher engage a non-preacher target at all (see "Preacher conversion"'s open questions) - still to trace (spec session): which code sets that bit, the building variant (preaching to a building's people), the soul flying from the preacher to the converted, the halving flag of the first check, how many listen at once and from how far, and whether the preacher's sermon really plays its 5 identified phases in order (`Pose::Preach` only draws one, anim 22, a guess) or just one.
+- [ ] Sermon (combat.md "Sermon"; pop3-rev-analysis.md "Preacher conversion" and "Command groups"): **correction, a
+  later session**: the line that used to stand here (claiming `preacher_strike_scan`/state 23 was confirmed to
+  convert ordinary followers, and that the type-4/6-only target table reading was "the wrong one") is itself wrong
+  - re-verified both ways this session: the raw table bytes still read type-4/6-only, and an exhaustive exe-wide
+  search found exactly one place in the whole exe that ever writes person state 23 (inside preacher_strike_scan
+  itself, gated by that same table). A type-2/3 (brave/warrior) person cannot reach state 23 at all, so the 7
+  live GONE/NEW brave/warrior pairs that originally motivated that claim were NOT produced by this mechanism -
+  what actually produced them is unknown again, see "Preacher conversion"'s own reopened contradiction note for
+  the two live-GONE/NEW-pair hypotheses still to check. Separately, still confirmed either way: **a failed
+  conversion roll never falls back to melee against the preacher** - the original's
+  own roll-failure branch only ever continues a choreographed approach → face-and-hold → listening-animation →
+  effect-burst → idle sequence on the candidate (see "Preacher conversion"'s "sermon's candidate sub-state
+  (0-6)"), or reverts the candidate to its ordinary per-type default behaviour if the preacher becomes
+  unavailable mid-sermon; it never issues an attack order or writes a combat state. Confirmed live this session
+  (`preachwatch5.py`/`DIAG8.TXT`, ~70 sermons watched turn by turn): conversion success always lands at exactly
+  the tick the resist timer expires, independent of how far the candidate's own approach/listen sequence has
+  progressed - but **state 23 is not a blanket combat immunity**: 8 of 71 observed sermons ended with the
+  candidate pulled straight into an ordinary pre-fight (person state 29) by a THIRD-PARTY attacker, and 1 into
+  outright death, bypassing the sermon's own "revert to default" exit entirely. This is very likely the real
+  mechanism behind the original user account ("if the preaching doesn't pass it's then close range combat"): not
+  the sermon's own roll failing and escalating (confirmed false, see above), but an unrelated attacker engaging
+  the candidate while it happens to be mid-sermon. Our own sermon-ending rule (a freed listener strikes back at
+  once, `WorldEvent::StrikeBack`) covers exactly this case reasonably well, just via the preacher's own
+  eligibility rather than a direct third-party engagement of the listener - worth re-checking that our own combat
+  targeting can actually reach a listener mid-sermon the same way, rather than always treating it as untouchable
+  until freed. Still open: the player-issued
+  preach order (kind 33) walks up to one target and sets it to a different, seemingly unconnected state (5, "idle
+  near a reference unit") - a second, unreconciled preacher mechanism; the building variant (preaching to a
+  building's people); the soul flying from the preacher to the converted; the halving flag of the first check;
+  how many listen at once and from how far; whether the preacher's sermon really plays its 5 identified phases in
+  order (`Pose::Preach` only draws one, anim 22, a guess) or just one; and (corrected this session: `+0x2E` bits
+  0-3 are not an "interrupted" flag at all, live-confirmed to be the ordinary `class_counter` rhythm field used
+  all over this codebase) what the candidate-side mechanism, if any, actually detects a disturbance mid-sermon -
+  live data shows none exists inside the sub-state machine itself, the candidate is just pulled into a different
+  person state from outside it (see above). Also newly resolved this session: candidate selection in
+  `preacher_strike_scan` never favours "whoever is currently attacking the striker" - it's pure proximity plus the
+  static per-type/tribe/state eligibility gates, confirmed by a full re-read of the scan loop; and the
+  previously-unidentified `0x4D850C` branch (a successful roll sometimes destroying the candidate with no
+  replacement) is now fully understood as two distinct cases - a still-unidentified per-candidate flag that skips
+  straight to destruction, and the tribe's population cap (200, exact) which instead skips both destruction and
+  replacement entirely - see "Preacher conversion" for both.
 - [ ] Resuming a fight cut short by a push (combat.md "Melee" rule 1: a fighter farther than `MELEE_LEASH` leaves;
   pop3-rev-analysis.md "Resuming a fight cut short by a push", now fully traced): the original never cancels an
   attacker's order when it enters a fight - starting/joining one only changes the person's state, its original

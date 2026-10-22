@@ -57,9 +57,10 @@ so a live measurement may run on it with the addresses translated.
 - **Preaching rerolls a 1-in-`PREACHEE_CONV_CHANCE` (5) chance every `PREACHEE_CONV_FREQ` (500 turns, 41.7 s)**
   [exe]: on success the preachee is destroyed and a person of its own type, in the preacher's tribe, takes its
   place (capped by the preacher's tribe population); instant for a wildman or other "no breeding" tribe. The
-  preacher's own look scan (0x51E7B0) and preach order (0x43C7A0) are now traced, but neither visibly sets a
-  target's state to 3 (the state this reroll runs in); the likely missing link is a flag bit on the attack
-  order itself, not yet pinned to its setter. See "Preacher conversion".
+  reroll's own entry trigger is now found: `preacher_strike_scan` (0x43ABF0), called from the shared handler for
+  order kinds 17/31/32 - **not preacher-exclusive** (kind 31 "disguise" is issued to brave/warrior/spy, never a
+  preacher), and its own per-type target table restricts valid targets to enemy preachers/firewarriors only,
+  which contradicts the ordinary-follower conversion seen in play - open, see "Preacher conversion".
 - **A vehicle's life is also its abandon timer** [exe]: 5000, −1 per turn, refilled every turn while it moves or
   carries anyone; blasts (50 per turn) and bolts (100) only sink an empty, still one. A boat whose cell turns to
   land is emptied, keels over and explodes 13-24 s later. Both are 3D objects 143 / 144. See "Vehicles".
@@ -770,7 +771,7 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 | 10 | Erosion (210 000, 4096, 2) | 63 hydraulic-erosion passes, one per turn (5.25 s), on an 8 × 8-cell window jittered around the target: ground washed downhill. No direct effect on units. |
 | 11 | Swamp (100 000, 4096, 3) | No terrain change. Lasts 32 000 turns (44 min). Every 4 turns it kills outright every person on its 3 × 3 cells, any tribe, until `SWAMP_NUM_PEOPLE` (exe 10) are dead. At most 30 per tribe (the oldest goes). Removed when most of its cells are unsuitable. |
 | 12 | Land bridge (70 000, 5120, 4) | From the caster to the target, 4 cells wide (−1, 0, +1, +2 across the line), heights on a straight slope between both ends (at least 90): each turn `h += clamp(T − h, ±LAND_BRIDGE_MAX_CHANGE) / (64 − turn)` (`LAND_BRIDGE_MAX_CHANGE` 256, 64 being `LAND_BRIDGE_DURATION`), so every cell reaches its height after 62 turns (5.2 s) when the gap is small: the cap makes large gaps fall short (gap 256: 251 reached, 500: 488, 800: 759, 1000: 900); sea cells raised too; a smoke puff on every bridge cell every turn. Buildings left on ground uneven by more than 200 collapse ("Terrain changes: what reacts"). |
-| 13 | Angel of death (510 000, 3072, 1) | A meteor, then an angel (person type 8, `LIFE_AOD` 10 000) hunts the nearest enemy on the whole map, shamans included, pulling people out of buildings; carries and throws each victim to death, about one per 28 turns (2.3 s). Ends after `AOD_KILL_COUNT` (40) kills or `AOD_DURATION` (2500 turns, 208 s). Two angels fight by health. |
+| 13 | Angel of death (510 000, 3072, 1) | A meteor, then an angel (person type 8, `LIFE_AOD` 10 000) hunts the nearest enemy on the whole map, shamans included, pulling people out of buildings; carries and throws each victim to death, about one per 28 turns (2.3 s). Ends after `AOD_KILL_COUNT` (40) kills or `AOD_DURATION` (2500 turns, 208 s). Two angels fight by health. Its hunting AI is person **state 28** (`0x4DB980`, found this session while chasing unrelated preacher questions - the per-type default-fallback table `0x5A7064` maps type 8, and only type 8, to state 28): on entry, if it has no live target yet, allocates a class-6 type-8 helper object with model id `0x45` (plausibly a cosmetic marker/trail, not confirmed) and plays a sound once; scans for a nearby ENEMY angel first (matching "two angels fight by health"), else falls back to a per-tribe reference scan sharing the SAME attacker/candidate type-pairing eligibility rule ordinary combat uses (`0x51C4C0`) - duplicated here, not combat-specific code; not fully traced beyond that (a large multi-substate approach/engage machine, `+0x2D` substate, `+0x4F`/`+0x51` target position pair, `+0xA8` a second sub-state layer resembling "Attacking a building"'s own field). |
 | 14 | Earthquake (175 000, 4096, 2) | 120 turns (10 s) of shake. At turns 24, 56 and 88 each building in 16 × 16 cells has a 20/128 chance to be shaken (occupants out, partial explosion). At turn 60, a half-disc of radius 8 cells sinks by up to 600 (`600 × (4096 − d) / 4096`), with a lava fissure of short-lived lava squares and possibly two lava flows. |
 | 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point. |
 | 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow, 16 s growth + 1.3 s fade ("Volcano lava flow"); about 22 small and 6 big fireballs (simple blasts) and 26 decorative rocks ("Volcano rocks"). |
@@ -1748,10 +1749,14 @@ coast-shape byte on entering state 6).
 
 | Type | Role |
 |---|---|
-| 10/8, 10/9 | fight, pre-fight |
+| 10/8, 10/9 | fight, pre-fight ("Starting a melee", "Pre-fight (per turn 0x518630...)") |
 | 10/1, 10/6 | formations (`process_formation_unit`, `add_unit_to_formation`) |
-| 10/0xA | guard control |
-| 10/4, 10/0xC | soul convert (created at 0x4D5E78 for type 0xC, from the preachee's own state 3): "Preacher conversion" |
+| 10/0xA | order kind 11's own "melee ring" companion object (`0x519F10`, person sub-state `+0xa9` 0-3: fresh/walking to slot/holding slot/performing a move) - confirmed this is a THIRD combat-adjacent controller, distinct from fight (10/8) and pre-fight (10/9); supersedes the earlier "guard control" guess, not yet reconciled with it |
+| 10/4, 10/0xC | spirit-rise controller (type 0xC created by the universal death handler, `0x4D5CF0`/person state 3, for ANY death, not preacher-specific - corrects this row's previous "from the preachee's own state 3... Preacher conversion" framing, see that section); type 4's own creation site not found |
+| 10/0x13 | building-sinking stand-in, created by the foundation check's flooding destroy path ("Building sinking (flooded destruction)") |
+
+- **Preacher conversion (person state 23) creates no class-10 controller at all** - unlike every row above, it is
+  pure person-state bookkeeping on the candidate and striker themselves, see "Preacher conversion".
 
 - Per person type, the constants hold `LIFE_`, `FIGHT_DAMAGE_`, `CONV_`, `SW_BLAST_DAMAGE_` and the tower detection
   radius (see "Constant table").
@@ -1846,6 +1851,47 @@ located); **kind 21** is issued only by the auto-attack scan's own self-order, n
 player's own ground-click and attack-click call sites were not located in this pass either; map them with a live
 breakpoint on 0x43B2A0/0x43B540 if needed.
 
+**A whole separate subsystem was traced this session and then RULED OUT as a candidate for the click
+dispatcher - a per-tribe "command queue":**
+```text
+0x8979D3  per-tribe queue header, stride 0x5E2 (1506) bytes: +0x0 write-cursor word, +0x4 "slot
+            busy" word, +0x6 onward a 100-entry x 15-byte ring buffer
+0x897997  per-tribe STAGING record, stride 0xF (15) bytes - the actual pending-command content,
+            copied verbatim into the ring buffer when flushed
+tribe+0xC1F   per-tribe "staging record ready" byte
+0x89D18C  per-tribe "active THIS TURN" slot, stride 0xF (15) bytes - what process_tribe_cmd (above)
+            actually reads at its own +0xC
+
+inc_tribes_commands (0x43E320): flushes the LOCAL PLAYER's staging record into their own ring
+  buffer (skip if already busy)
+copy_tribe_commands_from_buffer (0x43E3C0): flushes EVERY tribe's staging record whose own
+  tribe+0xC1F "ready" flag is set, gated by an extra AI-pacing modulo check on a global
+  (0x8928FD) - reads as the AI's/network peers' own flush path, distinct from the player's
+mld_function_3 (0x43E480), the main loop's per-turn-boundary gate: pops the ring buffer's front
+  entry into the active slot each turn - this is what process_tribes_cmd (0x43E890, iterates
+  exactly 4 tribe slots) then dispatches via process_tribe_cmd
+```
+Checked EVERY writer that could feed this pipeline on an ordinary turn (9 call sites of
+`inc_tribes_commands`, the single writer of `tribe+0xC1F`): every one is level-load/session-start
+code (`load_level_3`/`_4`/`_upper`, one "game just started" branch of `draw_main`), never an ongoing
+per-frame handler. **This queue is tribe-wide, coarse-grained event plumbing (session lifecycle,
+and very plausibly the AI/network command channel) - it is not how per-unit move/attack orders are
+issued.** Ordinary orders go straight through `group_alloc`/`order_set` as already documented above;
+the player's actual click→order translation remains unlocated, now with a large neighbourhood of the
+exe ruled out as its location. Next place to look: mouse/cursor-polling code, not yet approached
+from this angle.
+
+**A related, unresolved thread**: what makes a unit unselectable while being preached at (a real
+in-game rule: the preacher stays selectable, the person being preached at does not) was also chased
+this session and not settled. The one "can select" gate found, `can_select(unit, mode)` (0x4E3430,
+tested only by `unit+0x10` bits 0x80/0x800), is called from ~18 sites, all inside `process_tribe_cmd`'s
+own range (so itself not the general selection path either). Of the 8 places in the whole exe that
+set those two bits, one is inside the kind-33 preach handler (0x43C7A0) - but it sets the bit on the
+PREACHER, not the target, while the preacher is in its approach/face substates - which contradicts the
+observed rule rather than explaining it. None of the 8 sites fall inside any fight/pre-fight function
+or inside state-5/state-23's own per-turn handlers either. Left open (kept to static analysis); a live
+check (watch `+0x10`/`+0x7A` on both participants across a real sermon) would settle it quickly.
+
 **All 31 kinds**, decoded this session from `order_execute`'s own dispatch table (0x432D18 - most entries are a
 trampoline that calls out to a separate handler; "inline" means the trampoline IS the whole handler):
 
@@ -1924,8 +1970,10 @@ and corrects the previous draft in several places (noted inline).
 group record (0x938830 + id × 10):
   +0x0 kind       the order kind (3-33)
   +0x1 flags      bits OR'd in by whoever creates the order; 0x20 seen on self-issued auto-attack/scan orders
-                    (0x51FF60 skips the auto-attack radius lookup above when it is set); 0x40 seen gating
-                    "Preacher conversion" below; bit 0x1 marks a slot stale/not a real pending order (consumed
+                    (0x51FF60 skips the auto-attack radius lookup above when it is set); 0x40 gates a kind-0x1C
+                    attack-eligibility check (0x51C3C0/0x51FCE0) - traced this session to a dead end for
+                    "Preacher conversion" (its only setter, 0x41CC20, is an unrelated per-tribe building sweep
+                    that never issues kind 33); bit 0x1 marks a slot stale/not a real pending order (consumed
                     by order_advance below, which garbage-collects it instead of running it); the rest not traced
   +0x2 ref_count  word, how many units currently point at this group (0 = free slot)
   +0x4 helper     word, NOT padding (corrects the previous draft, which didn't give it a role): a disposable
@@ -2210,84 +2258,289 @@ Not traced this session (ordinary attack-order behaviour, not fight-specific): h
 keeps chasing before giving up on its own, if at all - that is whatever 0x51A2A0's own ordinary termination
 rules already do for any attack order that can't reach its target, not a special case added for this.
 
-### Preacher conversion ("soul convert") [exe]
-The preacher does not convert in the melee scan: `unit_processing_class_1_person`'s state dispatch (table at
-0x4D3D18, keyed by person state `+0x2C`; cross-checked against the known fight = state 25 and pre-fight = state 29)
-sends state 3 to `0x4D5CF0`, state 23 to `0x4D83B0` and state 24 to `0x4D8E40`. Roles below are inferred from field
-use (population cap on the tribe at `+0x89` beyond; "no breeding" tribe flag; the melee scan's own exclusion of
-state 23 targets) and not yet watched live.
+### Preacher conversion ("soul convert") [exe, measured]
+**Correction this session, replacing the previous model below almost entirely**: the earlier draft assumed a
+struck preachee passed through person state 3 ("struck") before reaching state 23 (the conversion roll), and that
+state 24 was conversion's own "building occupant" variant. Both are now disproven by direct, independent reads:
+state 3 is `0x4D5CF0`, which is reached only from the universal life-step (`0x4D43A0`, life ≤ 0) and is ordinary
+**death** (the spirit-rise controller every death gets, not preach-specific - see "Combat"'s own 10/0xC row, which
+needs the same correction); state 24 is `0x4D8E40`, confirmed this session (exhaustive search for every literal
+"set state to 24" in the exe) to be **Whirlwind's own lift state and nothing else** ("Whirlwind mechanics"). State
+23 is entered directly, with no state-3 step in between, by a dedicated scan function - traced this session.
 ```text
-preacher's own scan (0x51E7B0), replacing the melee scan on its auto-attack turn (same rhythm/radius as the melee
-  scan; "Auto-attack"): scans its square twice (0x51F030, not fully read) for an enemy person and, separately, a
-  candidate building
-  person found (preacher or shaman only, 0x51EC80) → ordinary attack order (kind 0x15): preachers and shamans
-    fight each other in melee like anyone else, no conversion on a person match
-  building found → an order at the preacher's own position (kind 0x20/32 pushed); kind 32's handler is confirmed
-    to be the same one as kind 31's ("DISGUISE", 0x43A4D0: a 5-substate approach-and-RNG-idle machine with no
-    attacker-type branch in it), so the building-scan branch does not lead to conversion by itself - see
-    "Command groups" and the open questions below
+preacher_strike_scan (0x43ABF0), fn(striker, radius_byte, out_angle_ptr) -> bool found, called from
+  order_building_approach (0x43A4D0) on an RNG-roll success (same substate-4 roll "Auto-attack" already documents,
+  odds table 0x59DF44 by type) - and order_building_approach is NOT preacher-specific: it is the shared handler
+  for order kinds 17, 31 AND 32 alike, with no attacker-type branch anywhere in it (re-verified this session)
+  kind 32 "preacher building-visit": issued only by preacher_auto_scan (0x51E7B0), which DOES check
+    `self.type == 4` explicitly before considering it - this one IS preacher-exclusive
+  kind 31 "disguise": issued by 0x4D6F90, gated by a per-type table (0x5A7091 bit 0x4) read directly from the exe
+    this session - set for brave/warrior/spy, CLEAR for preacher/firewarrior/shaman/angel/wildman. **[game, user-
+    confirmed]: disguise is a spy-only command (select the spy, right-click a tribe's HUD icon; a short
+    vulnerable transition, then the unit counts as that tribe - no auto-attack on it - until another spy spots it
+    or the player explicitly orders an attack on it, which un-disguises it); it never strikes or converts anyone.**
+    `order_building_approach`'s substates 1-4 (walk to a spot, wait, RNG roll) read as that vulnerable transition,
+    and the roll success setting a "disguise" flag (`+0xB2` bit 0) plus an ~840-turn/70 s duration matches "takes a
+    short time" and the disguised period itself. The trailing call to preacher_strike_scan on that same success is
+    real at the code level but is a NO-OP in the overwhelming common case (its own target table, below, only ever
+    matches an enemy preacher or firewarrior standing right there) - incidental plumbing reuse, not a second
+    gameplay effect of disguising. The exact trigger for the PLAYER'S disguise command specifically (as opposed to
+    0x4D6F90's own per-type gate, which may also be reached by a different, non-player trigger for brave/warrior)
+    was not pinned down this session - a related function, 0x4DEFF0, reaches the same kinds 17/31 but gated to
+    `self.type == 4` (preacher), so it is a different thing, not the disguise command either.
+  kind 17: issued by 0x43B790, itself called from an untraced per-tribe/per-candidate dispatcher (0x4CE2C0), AND
+    (as kind 17's own default, see 0x4DEFF0) by a preacher-gated function reached from `init_unit_class_1`
+    (0x4D2740, a per-new-state hook, dispatch key not fully traced) - neither issuer's own trigger condition was
+    pinned down this session
+  → so, at the code level, a disguising brave/warrior/spy (kind 31) and a visiting preacher (kind 32) reach the
+    SAME strike scan - but see the disguise note just above for why this doesn't mean disguise strikes anyone in
+    practice
+  scans an expanding square of cells around the striker (same per-cell "other object" list "Terrain land
+    colour"'s shadow code also walks) for a class-1 (person) candidate passing every one of:
+    a per-type table (0x5A7090 byte+0, stride 50/type, bit 0x20) - read directly from the exe this session:
+      **set ONLY for type 4 (preacher) and type 6 (firewarrior)**, clear for brave/warrior/spy/shaman/angel/
+      wildman - see the open question below, this contradicts observed play
+    not the striker's own tribe; a per-state table (0x5A6F79, stride 5/state, bit 0x20); a tribe-relations
+      bitmask (table 0x9608B6, by striker tribe then candidate tribe) unless either tribe is 0xFF or they match;
+      candidate +0x16 bit 0x8 clear; candidate +0x9F == 0 (not already claimed by another striker); a mutual
+      shield check (0x4DE7B0); candidate +0xE bit 0x10 clear (not already being removed)
+  first candidate to pass: **struck immediately** - set candidate state to 23 (0x4D83B0), seed candidate +0x89
+    with the striker's own id (the "who's affecting me" reference read back below); if the candidate's own tribe
+    is 0 (the human player) also raises a camera-alert marker (global flag 0x89DB05 bit 0x80000000, position word
+    0x98CECC); notifies both tribes (0x431EA0, mode 2 - mode 1 is a fight starting, "Combat")
+  no candidate struck, kind 32 specifically, and the wait timer (+0x70) exceeds 32 turns: calls 0x43AEC0 (a
+    sibling scan) which instead REVERTS any OTHER nearby person already in state 23 back to its default state -
+    a stuck-roll cleanup, plausibly for when the original striker died or walked off mid-roll
 
-state 3 (0x4D5CF0), the preachee the instant it is struck: at its own position and tribe,
-  spawns a 7/0x4D effect (a soul-like visual, not confirmed) and a class 10 type 0xC controller ("Soul Convert 2")
-
-state 23 (0x4D83B0), the preachee while a conversion is in progress; `+0x89` the preacher, `+0x70` the timer:
-  abort (idle) if the preacher is gone, or not carrying out an order (state != 0xA) and not itself preaching
-    (state != 0x21/33)
+state 23 (0x4D83B0), the candidate while a roll is in progress; `+0x89` the striker, `+0x70` the timer:
+  abort (idle) if the striker is gone, or not carrying out an order (state != 0xA/10) and not itself preaching
+    (state != 0x21/33); **then independently requires the striker's own active command-group kind to be
+    0x11/0x1F/0x20 (17/31/32)** - confirmed this session to be the exact same three kinds preacher_strike_scan's
+    own caller handles, with no person-type check anywhere in this function either. **Re-read in full this
+    session** (chasing `0x43AEC0`, see below): the striker's "active command-group kind" is resolved as the
+    primary group reference at striker `+0x9B` if nonzero, else a secondary-group array at striker `+0x8B`
+    indexed by a byte at striker `+0xA6` (the same `+0x8B` slot the command-group assign helper, `0x436D00`,
+    documents as its own "primary or `+0x8B` slot" choice). Also requires striker `+0x5F == 0` - this is not an
+    unidentified field, it is the striker's own WALK SPEED (already in "Unit record": "walk speed `+0x5F`") -
+    i.e. **the striker must be standing completely still** for a roll to even be attempted, matching the
+    in-game picture of a preacher stopping in place to preach rather than converting on the move.
   every turn: timer -= 1
-  timer < 0, OR the preachee's own tribe has the "no breeding" flag (tribe +0x941 bit 6: set for, at least,
+  timer < 0, OR the candidate's own tribe has the "no breeding" flag (tribe +0x941 bit 6: set for, at least,
     wildmen) which forces a roll every turn regardless of the timer:
     rearm the timer: PREACHEE_CONV_FREQ (exe 500 turns), halved to 250 unless global flag byte 0x89C668 bit 2 is
       set (meaning/scope of that byte not traced: many unrelated bits of it are read all over the exe), jittered
       by the pop3 PRNG by roughly ± (freq / 16) turns
-    roll: success if rng() % PREACHEE_CONV_CHANCE (exe 5) == 1, or flag 0x89C668 bit 2 is set, or the preachee's
+    roll: success if rng() % PREACHEE_CONV_CHANCE (exe 5) == 1, or flag 0x89C668 bit 2 is set, or the candidate's
       tribe has the bit-6 "no breeding" flag (both make every roll succeed)
-    roll failed → rearm the timer again at the full PREACHEE_CONV_FREQ (not halved this time) and continue
+    roll failed → rearm the timer again at the full PREACHEE_CONV_FREQ (not halved this time), and continue running
+      the sermon's own "being preached to" animation sequence below (0x4D880A) - **this never escalates to combat**,
+      see "The sermon's candidate sub-state (0-6)" just below
     roll succeeded:
-      the preacher's tribe is at its population cap (tribe +0x89DAE5 array >= 200, "Village growth") and the
-        preachee's tribe does not have the bit-6 flag → nothing happens this turn, try again later
-      else → queue a trailing visual (particle list 0x892443, `[0x892443]` += 0x14 per entry) at the preachee's
-        position; spawn a person of the preachee's own type in the preacher's tribe, at the preachee's position,
-        with a random short-range offset and a movement-profile-scaled random speed; copy the preacher's facing
-        bits; play a sound (0x48A050(preacher, 5, 0)); spawn a class 7 type 0x3A ("soul") effect at the
-        preacher's position and link it to the new person (`+0x72` = the new person's id, presumably so the
-        effect's own per-turn routine flies the sprite from the preacher to the new body - not traced)
-      destroy the preachee (0x4D4B50) either way once a roll has succeeded this check
-
-state 24 (0x4D8E40): the same shape as state 23 (target via `+0x89`, a check gated the same way), but increments
-  a second counter at the target `+0x2D` (capped at 0x13/19) instead of rolling a chance - not fully read; likely
-  the building-occupant variant paired with the class 10 type 0xC controller, the counterpart of state 23's
-  type 4 (unverified: no creation site for type 4, only for type 0xC at 0x4D5E78, was found)
+      the striker's tribe is at its population cap (tribe +0x89DAE5 array >= 200, "Village growth") and the
+        candidate's tribe does not have the bit-6 flag → nothing happens this turn, try again later
+      else → queue a trailing visual (particle list 0x892443, `[0x892443]` += 0x14 per entry) at the candidate's
+        position; spawn a person of the candidate's own type in the striker's tribe, at the candidate's position,
+        with a random short-range offset and a movement-profile-scaled random speed; copy the striker's facing
+        bits; play a sound (0x48A050(striker, 5, 0)); spawn a class 7 type 0x3A ("soul") effect at the striker's
+        position and link it to the new person (`+0x72` = the new person's id, presumably so the effect's own
+        per-turn routine flies the sprite from the striker to the new body - not traced)
+      destroy the candidate (0x4D4B50) either way once a roll has succeeded this check
 ```
+#### The sermon's candidate sub-state (0-6) [exe]
+Every tick that does not end this check in a successful roll (whether the timer hasn't expired yet this tick, or
+it has and the roll itself failed), `0x4D83B0` falls through to `0x4D880A`, which re-arms the timer (above) then
+runs a SEPARATE 0-6 sub-state byte on the candidate (own field, independent of person state 23 itself) that
+choreographs the visible "being preached to" sequence - confirmed this session to never include any order-set,
+attack call or fight-related state write anywhere in it:
+```text
+0: walk to a spot near the striker (direction from the wrapped striker-candidate delta; on failure, falls back to
+   the candidate's own per-type default animation and stays at 0) → 1
+1: rhythm gate, runs only on even ticks (`+0x2E` bit 0, the ordinary `class_counter` field, NOT a disturbance
+   flag - see the correction below); on a tick it runs: wait for arrival within 112 units on both axes, then
+   snap into position facing the striker and spawn a placement visual, or reset to 0 to retry the approach calc
+2: compute and lock a facing angle toward the striker (`+0x57`); hold still → 3 (same tick)
+3: rhythm gate, runs only once every 16 ticks (`+0x2E & 0xF == 0`), AND a 50% RNG coin flip within that tick;
+   on pass, start a per-type "listening" animation and arm a countdown → 4
+4: wait out the countdown; once it expires, start a second per-type animation and spawn a looping burst of
+   small visual-effect objects at the candidate's own position (one every few ticks, via the SAME alloc_unit
+   the conversion success path itself uses) → 5
+5: steady "just keep listening" loop (literally the function's own do-nothing tail) - unblocked only by the
+   independent roll above eventually succeeding (conversion), or state 23 being left some other way
+6: rhythm gate, runs only on even ticks (same `+0x2E` bit 0 as sub-state 1); once arrival/settle conditions are
+   met, finishes cell-placement bookkeeping and reverts the candidate to its per-type DEFAULT behaviour state
+   (table 0x5A7064, the same per-type fallback table every other "done" state in this codebase uses) - this is
+   also exactly what happens at every other exit from `0x4D83B0` (striker gone, busy fighting, or no longer
+   running an order kind 17/31/32 approach): a plain revert to ordinary behaviour, never a forced attack order
+```
+**Correction, confirmed live this session (`preachwatch5.py`, `DIAG8.TXT`, ~760 turns of logged activity, 70+
+sermons watched end to end)**: candidate `+0x2E` bits 0-3, which an earlier read of this session called an
+"interrupted" flag that aborts the sub-state machine for a tick when set, is NOT a disturbance flag at all - it
+is the ordinary per-unit `class_counter` field already documented elsewhere in this doc ("Unit record", `+0x2E`,
+"+1 per turn for every unit whose state is not 0"). Live proof: watching it on every tracked candidate, every
+"cleared" reading is exactly 0 and every "set" reading is exactly 1, the gap from clear to the next set is
+ALWAYS exactly 1 turn, and the gap between consecutive sets is 16 turns in 309 of 330 measured cases (the rest
+are small multiples of 16, from gaps while a candidate wasn't being tracked) - textbook evidence of a counter
+that increments by 1 every turn and wraps mod 16, not a flag that toggles in response to an event. So
+`test [candidate+0x2E],0x1`/`0xF` in sub-states 1/3/6 are plain **rhythm gates** (run this step only every 2, or
+every 16, ticks), the exact same `class_counter & mask == 0` idiom "Auto-attack" and others already document -
+there is no disturbance-detection mechanism inside this sub-state machine at all.
+
+**Settles a long-open question: a failed conversion roll never falls back to melee combat against the striker**
+[game, the user's own account re-tested against this trace: "if the preaching doesn't pass it's then close range"
+is NOT what the code does]. Nowhere in this sub-state machine, nor in any of `0x4D83B0`'s other exits, is there a
+call into the order system or a write of a combat-related state; every exit is either a no-op/retry, a further
+choreography step, or a revert to the candidate's own ordinary default behaviour. This matches two independently
+traced facts elsewhere in this doc: `0x51D0B0` (firewarrior/angel ranged scan) and `0x4DB980` (Angel of Death's
+hunting AI) both explicitly SKIP any candidate currently in state 23 from their own targeting - state 23 reads as
+structurally excluded from THEIR combat consideration, not a gateway into it.
+
+**However, live data shows state 23 is NOT a blanket combat immunity**: of 71 sermons that ended during the
+`DIAG8.TXT` capture, 8 ended in a direct transition to person **state 29 (pre-fight)** and 1 to **state 3
+(death)** - the candidate was pulled straight out of state 23 into ordinary melee or killed outright, with no
+state-10 "default" step in between. The remaining 46 reverted to the ordinary default (state 10) and 8 vanished
+entirely (conversion success, see "Numbers confirmed live" below). **This resolves the open question below about
+`0x51C4C0`** (the generic attacker-eligibility path used by anyone except a preacher or firewarrior): unlike
+`0x51D0B0`, it does NOT exclude state-23 candidates - an ordinary brave/warrior/spy/shaman attacker can engage a
+mid-sermon candidate directly, dropping it out of state 23 into pre-fight. This is very likely the real mechanism
+behind the user's original account ("if the preaching doesn't pass it's then close range combat"): not the
+*sermon's own failed roll* escalating to melee (confirmed false above), but a **third party attacking the
+candidate while it's mid-sermon**, unrelated to whether any conversion roll on it is currently succeeding or
+failing.
+
+**Numbers confirmed live**: all 8 conversions (candidate vanished, not reverted) happened at exactly `timer == -1`
+(i.e. the very tick the resist timer crosses below 0 and a roll is attempted), independent of the candidate's own
+sub-state - 7 of 8 from the steady sub-state 5 ("just keep listening") and 1 from sub-state 3 (a candidate stuck
+retrying its listening-animation roll for ~100 turns) - confirming the success roll is entirely independent of
+how far the 0-6 choreography has progressed, exactly as the static read above describes.
+
+**`0x43AEC0` re-read in full this session, confirms the original description, does NOT just reset sub-state**:
+it scans an expanding square of cells around the striker (same `0x8A03E4+0x6` cell-list convention as elsewhere)
+for a DIFFERENT class-1 person whose own tribe differs from the striker's, type is not 4/7 (preacher/shaman), and
+whose state is exactly 23 - i.e. exactly "some other stuck conversion-roll candidate nearby", matching the
+existing description. On a match (after a guard call to `0x4E9B40`, not traced, and an "not already being
+removed" `+0xE` bit-0x10 check): saves the candidate's current state into `+0x7D` (the SAME field "a fight/
+pre-fight controller saves the state you had on entering" documents elsewhere, reused here too), then runs the
+exact generic `set_state`-style sequence (`0x4ED6F0` remove-from-list, write the per-type default from table
+0x5A7064 into `+0x2C`, `0x4ED640` re-add-to-list) - this is a full eviction from person state 23 to the
+candidate's own ordinary default behaviour, byte for byte the same pattern `0x401B10` uses elsewhere. It never
+touches `+0x2D` (the sub-state byte) directly at all.
+
+This means the live-observed "sub-state resets back to 0 while still counted as state 23" (27 cases, mostly
+several candidates under the same still-live striker) are NOT `0x43AEC0` resetting a sub-state in place - they
+are most likely a full evict-by-`0x43AEC0`-then-immediately-re-struck-by-the-same-preacher's-own-scan cycle that
+completes within a single turn: `preachwatch5.py` only samples once per turn boundary, so a candidate leaving
+state 23 and re-entering it (sub-state 0) within that same turn is indistinguishable in the log from a plain
+sub-state reset. This fits the data better than a hidden in-place reset: the SAME striker id is present before
+and after in nearly every case, consistent with one preacher managing several claimed listeners and periodically
+cycling a stuck one back out (via `0x43AEC0`) and a fresh one back in (via its own `preacher_strike_scan` pass
+moments later), both inside one 83 ms turn.
+
 - Numbers: with the file default (12 turns/s), `PREACHEE_CONV_FREQ` 500 is 41.7 s between checks (20.8 s with
   flag 0x89C668 bit 2 set), each with a 1 in `PREACHEE_CONV_CHANCE` (5) chance: about 5 checks (3.5 min at the
-  full interval, worst case) on average per conversion once a preacher has engaged a target, instantly for a
-  wildman or any other member of a "no breeding" tribe.
-- A converted person keeps its original type (a converted warrior stays a warrior, in the preacher's tribe), not
-  the preacher's own type.
-- Open questions: what makes a preachee enter state 3 in the first place is still not pinned down, but narrowed
-  this session, correcting several of this section's earlier guesses:
-  - kind 32 (0x20, the preacher's building-scan order) is now confirmed to be disguise's own second half, not a
-    separate conversion path (see above) - ruling out the building scan as a direct trigger.
-  - the player-issued preach order (kind 33, the preach-order handler 0x43C7A0) walks the preacher up to its
-    target and, on arrival, plays a sound (0x9F) on the target and sets the target's own state to **5**, not 3,
-    while chaining its command group's kind 0x98 → 0x9B → 0x99 over 40 ticks; state 5's own per-turn handler
-    (0x4D6970) reads as a generic "idle near a reference unit" behaviour (it only picks an RNG animation variant,
-    never writes the person's own state), so it looks unrelated to conversion rather than a step towards state 3.
-  - the melee target-eligibility check (0x51C3C0, called from the attack-order handler 0x51A2A0) has a gate that
-    fits exactly this gap: a preacher may only engage a non-preacher person target if the attack order's own
-    command-group flag byte `+0x1` has bit 0x40 set - otherwise a preacher can only ever fight other preachers or
-    shamans (0x51CE50, "Starting a melee"). This flag is the best remaining candidate for what turns an ordinary
-    attack into a conversion attempt, but which code sets it was not found: of `order_set`'s (0x438730) call
-    sites, only one passes 0x40, and it belongs to an unrelated per-tribe routine creating order kind 0x1C (28).
-  - the "lookup table at 0x938830" from earlier drafts of this section is not a lookup table: it is the shared
-    command-group record array ("Command groups"); whatever state 23/24 read there (values 0x11/0x1F/0x20, i.e.
-    kinds 17/31/32) is a group's own kind byte, not re-checked against this session's findings.
+  full interval, worst case) on average per conversion once a roll is in progress, instantly for a wildman or any
+  other member of a "no breeding" tribe. These numbers are unaffected by this session's correction.
+- A converted person keeps its original type (a converted warrior stays a warrior, in the striker's tribe), not
+  the striker's own type.
+- **Former "open contradiction", now RESOLVED [exe, measured]**: an earlier session read the per-type target
+  table above (0x5A7090 bit 0x20) as "only enemy preachers and firewarriors can ever be struck into state 23",
+  contradicting `combat.md`'s own `may_preach` rule (ordinary followers, never preachers/shamans, from the user's
+  confirmed account of real play). A dedicated live watcher (`preachwatch4.py`, tracking GONE/NEW unit ids per
+  turn by type/tribe/position rather than assuming a same-id tribe flip) caught 7 clean conversions during real
+  play: every one an ORDINARY follower (type 2 brave or type 3 warrior), exact position match, tribe flipped
+  (enemy → the converting preacher's tribe), type preserved, e.g. `turn 16722: GONE #1749 tr3 type2 pos=0xdc710723
+  <-> NEW #1074 tr0 type2 pos=0xdc710723`. The previous write-up here called this "settled" in favour of
+  preacher_strike_scan/state 23 and declared the table 0x5A7090 bit 0x20 reading "the wrong one" - **that
+  conclusion is itself wrong, found by a later session that went back to re-verify it.** Two independent checks
+  this session both confirm the ORIGINAL static reading, not the live-data override: (1) the raw table bytes at
+  0x5A7090 were read directly from the exe again (stride 50, byte 0, bit 0x20) - set ONLY for type 4 (preacher)
+  and type 6 (firewarrior), clear for every other type including 2 (brave) and 3 (warrior); (2) an exhaustive
+  exe-wide search for every literal `mov BYTE PTR [reg+0x2C],0x17` (the only way to write person state 23) found
+  exactly ONE site in the whole exe - `0x43AD67`, inside preacher_strike_scan itself, reached only after that same
+  type-4/6-only gate. **State 23 is therefore provably unreachable for a type-2/3 person - the 7 GONE/NEW
+  brave/warrior pairs in `diag6.txt` cannot have gone through preacher_strike_scan or 0x4D83B0 at all**, whatever
+  they actually are. The kind-33 player-issued preach order was re-checked as the other candidate and ruled out
+  too (see its own bullet below - it never calls `alloc_unit` anywhere in its body). So **neither of the two known
+  preacher mechanisms can produce what `diag6.txt` recorded - the real cause of those 7 live pairs is an open
+  question again**, not settled by either preacher pathway found so far. Two working hypotheses, neither checked
+  yet: (a) an entirely separate, not-yet-located mechanism (a spell such as the shaman's Convert, or a
+  building-capture/occupant-reassignment path) that happens to kill-and-replace a person under a new tribe with
+  the same type/position signature, coincidentally active during that capture session; (b) a fresh live capture
+  that logs the GONE record's own `+0x2C` state (not just type/tribe/position) in the same line as the GONE/NEW
+  position match, plus whatever spell/building activity the converting tribe had running at the time. Until then,
+  `combat.md`'s `may_preach` rule (ordinary followers convert, never preachers/shamans) and the exe's own
+  type-4/6-only candidate table are BOTH independently well-evidenced and BOTH cannot be describing the same
+  conversion event - don't assume they are. The kill-and-replace mechanism itself (kill old record, allocate a new
+  one under the new tribe at the same position, not an in-place tribe-byte flip) stays confirmed regardless of
+  which mechanism is doing it: two earlier watcher designs (same-id tribe-diff; filtering only on state==5
+  "listeners") saw nothing despite real conversions happening, because both assumed the wrong model. Bit 0x20's
+  real role for preacher_strike_scan's own candidates (enemy preachers/firewarriors, not ordinary followers) is
+  still open, but it is now known this table is NOT single-purpose: `fight_pick_slot` (`0x51DCC0`, "Fight")
+  independently reads the SAME table's bit 0x40 for an unrelated purpose ("can this person type join a melee ring
+  at all") - a different bit, a different per-type eligibility rule entirely, on the same 50-byte-stride record.
+  Bit 0x20 plausibly gates something equally unrelated to preach-targeting, not yet re-derived.
+- **Closed this session**: does preacher_strike_scan's candidate selection ever favour "whoever is currently
+  attacking the striker", as opposed to pure proximity? No - re-read the whole scan loop (the expanding-square
+  cell walk plus every per-candidate gate) specifically for this; nothing in it reads a candidate's own order,
+  order target, or any "who's attacking me" back-reference. Selection is proximity (nearest eligible cell found
+  first, radius capped by the caller's own `radius_byte` argument) plus the static eligibility gates already
+  listed above, full stop - independent of whether the candidate is currently fighting someone else or not.
+- Other open questions:
+  - kind 17's own issuer (0x4CE2C0) and its own caller are not traced - reopened along with the contradiction
+    above (no longer safe to assume it's irrelevant to "ordinary follower" conversion just because
+    preacher_strike_scan/state 23 is type-4/6-only; the issuer itself is still unknown either way).
   - still untraced: 0x5A707E (a per-type byte read on a model-variant branch) and the exact meaning of flag byte
     0x89C668 (many unrelated systems read other bits of the same byte, so it is unlikely to be preach-specific).
-- A live check would settle this precisely: watch a preacher's and its target's command group (`+0x9B`, resolving
-  into `0x938830`) and the order's own `+0x1` flag byte alongside state/sub-state/`+0x70` timer and tribe every
-  turn (as `fightwatch.py` does for firewarriors), while ordering a preacher to preach an enemy brave, until the
-  brave disappears and a new one appears in the preacher's tribe.
+  - **`0x4D850C` now fully resolved** (`test candidate+0x11,0x8; jne 0x4D87E8`): on a roll SUCCESS there are two
+    distinct "no new unit" outcomes, not one, both read in full this session. (a) this bit set on the candidate
+    skips straight to destroying it via `0x4D4B50` with nothing spawned - confirmed real code, but
+    `candidate+0x11` bit 0x8's own meaning is still not pinned down (tested as a bail/exemption flag in at least
+    three unrelated functions exe-wide - including preacher_strike_scan bailing on the STRIKER having it set - but
+    never found being set at runtime anywhere; every direct write to this byte found this session is a whole-byte
+    `mov`, mostly zeroing it, so it looks like a per-type/per-scenario value baked in at allocation rather than
+    something toggled in play). (b) separately, just before the spirit-rise push: a per-tribe population counter
+    at `[tribe*4+0x89DAE5]` is compared against `0xC8` (200) - at or over that cap, with the force-success tribe
+    flag clear, the roll succeeds but NEITHER the old record is destroyed NOR a new one spawned (presumably
+    retried on a later tick) - this is the literal mechanism and exact 200-head number behind this section's own
+    "capped by the preacher's tribe population" line above, not previously connected to it. Neither path has been
+    directly observed live (all 7 real conversions captured so far had a clean GONE+NEW pair), but (b) is now a
+    fully understood, confirmed-to-exist mechanic either way, not just a hypothesis.
+  - the candidate sub-state 4 effect burst above (the "sermon's candidate sub-state" subsection) allocates
+    `alloc_unit(class=5, type=0xB, tribe=0xFF, pos)` - class 5 is scenery, and `pop3-rev/docs/unit_types` lists
+    scenery type 0xB as "wood pile", which does not fit a transient per-tick visual effect at all. Either that
+    catalog entry is wrong/stale, or scenery type 0xB is overloaded (a genuine wood pile when placed normally at
+    level load, a reused type id for a short-lived visual when spawned this way with `tribe=0xFF`) - not resolved
+    this session, worth checking what `init_unit_type_5`'s own per-type dispatch (untraced) does for type 0xB
+    specifically before trusting either reading.
+  - the player-issued preach order (kind 33, the preach-order handler 0x43C7A0) walks the preacher up to its
+    target and, on arrival, plays a sound (0x9F) on the target and sets the target's own state to 5, chaining its
+    command group's kind 0x98 → 0x9B → 0x99 over 40 ticks; state 5's own per-turn handler (0x4D6970) reads as a
+    generic "idle near a reference unit" behaviour and never writes the person's own state - this still looks
+    unconnected to state 23/preacher_strike_scan, a third, separate preacher mechanism, not reconciled this
+    session either.
+  - **`preach_order_handler` (0x43C7A0) never calls `alloc_unit` (0x4ED8A0)** - unlike fight/pre-fight (class-10
+    controller types 8/9), the sermon/listening mechanism creates no controller object at all; it is pure
+    person-state bookkeeping (the preacher's own substates, state 5 on the listener). Our own `combat.md`
+    "Sermon" coordinator (`Sermon{preacher,listener,left}`) is plausibly not a faithful structural mirror of this -
+    flagged for whoever next reconciles combat.md against this section.
+  - **Ordinary attack-eligibility (0x51C4C0, used by brave/warrior/spy/shaman attacking anyone) vs. the
+    firewarrior/angel ranged scan (0x51D0B0): RESOLVED live this session**, see the "However, live data shows
+    state 23 is NOT a blanket combat immunity" note above (`DIAG8.TXT`) - `0x51C4C0` does NOT exclude state-23
+    candidates (8 of 71 observed sermons ended with the candidate pulled straight into pre-fight, state 29);
+    only `0x51D0B0` (firewarrior/angel) explicitly does. So "a preacher is attackable unless preaching, and only
+    another preacher/shaman can close in to disturb it" does not hold as a general rule either - an ORDINARY
+    attacker (not just preacher/shaman) can disturb a mid-sermon candidate directly. The per-candidate-STATE
+    table lookup (0x5A6F79, byte offset +1, feeding `candidate+0x11` bit 0x4) that looked like a plausible
+    "state changes whether you're attackable" mechanism is now a dead end for explaining this specifically, since
+    the live data shows ordinary attacks reaching state-23 candidates regardless; its true role (table layout
+    still not re-derived, cross-check against 0x4D3B21's byte+0 bit 0x1 use and 0x41CC20's byte+1 bit 0x20 use)
+    is still open, just not for this question. **Correction**: candidate `+0x2E` bits 0-3 are NOT an
+    "interrupted" flag at all - confirmed live to be the ordinary `class_counter` rhythm field, see the
+    correction above; there is no disturbance-detection mechanism found anywhere inside the state-23 sub-state
+    machine itself - the disturbance plainly comes from outside it, via ordinary combat targeting pulling the
+    candidate into a different person state altogether (29 or 3), which the sub-state machine never gets a
+    chance to react to since it stops running the moment state 23 ends. Still not looked at: whether listener(s)
+    in the OTHER, seemingly-unconnected sermon mechanism (person state 5, set by the player-issued preach order
+    `0x43C7A0`) have any equivalent re-engage behaviour.
 
 ### Attacking a building [exe]
 An attack order on an enemy building (`+0x89` the building; sub-states in `+0xA8`, 0x51A2A0):
@@ -3109,10 +3362,15 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x504BC0 | `draw_ui_panel`: building panel, training bar at 0x504FDD (values) and 0x505604 (drawing) |
 | 0x436C20 / 0x436D00 / 0x4364D0 / 0x438730 | alloc / assign (primary or `+0x8B` slot) / release / set-kind-and-target for a command group - "Command groups" |
 | 0x432590 / 0x432D18 / 0x4366B0 | `order_execute` / its 31-entry kind table / `order_advance` (picks what a unit runs next once its current order finishes) - "Command groups" |
-| 0x43A4D0 | order kinds 31/32 (disguise and the preacher's building visit): shared approach-and-RNG-idle machine |
-| 0x43C7A0 | order kind 33 (preach): approaches the target, ends by setting its state to 5 - "Preacher conversion" |
+| 0x43A4D0 | `order_building_approach`: shared approach-and-RNG-idle machine for order kinds 17/31/32, calls preacher_strike_scan on a roll success - "Preacher conversion" |
+| 0x43ABF0 | `preacher_strike_scan`: the real trigger into person state 23 (the conversion roll), NOT preacher-exclusive despite the name - "Preacher conversion" |
+| 0x43AEC0 | sibling of 0x43ABF0: reverts a nearby stuck state-23 roll after a failed kind-32 visit times out |
+| 0x4D6F90 | issues order kind 31 ("disguise" [game, user-confirmed: spy-only, no striking]); gated by a per-type table to brave/warrior/spy, never preacher; exact player-command trigger not pinned down - "Preacher conversion" |
+| 0x4DEFF0 | issues order kind 17 (default) or 31, gated to `self.type == 4` (preacher) - a different thing from the disguise command above, reached from `init_unit_class_1` (0x4D2740) - "Preacher conversion" |
+| 0x43B790 | "give this unit an order" helper for kind 17, called from an untraced dispatcher (0x4CE2C0) - "Preacher conversion" |
+| 0x43C7A0 | order kind 33 (preach): approaches the target, ends by setting its state to 5 - "Preacher conversion" (a separate mechanism from the above, not reconciled) |
 | 0x51A2A0 | a person's attack order: reach, then join a fight or start a pre-fight |
-| 0x51C3C0 | attack target eligibility by attacker type; the preacher/non-preacher gate - "Preacher conversion" |
+| 0x51C3C0 | attack target eligibility by attacker type; a preacher/non-preacher gate on order kind 0x1C specifically - a dead end for "Preacher conversion", see that section |
 | 0x51CE50 | preacher/shaman-only nearest-person scan, called from 0x51C3C0 for a preacher attacker |
 | 0x4D6970 | person state 5 per-turn handler: idle near a reference unit (`+0x72`), not preach-specific |
 | 0x51E150 | "start_pre_fight(attacker, target, mode)" |
@@ -3129,12 +3387,12 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4D4690 | auto-attack check (rhythm, busy test 0x4D44E0, per-type scan) |
 | 0x51FF60 | auto-attack radius in cells (by order kind, type, height for firewarriors) |
 | 0x51E5E0, 0x51EAB0 | melee auto-attack scan: square of cells, first enemy found |
-| 0x51E7B0 | preacher's own auto-attack scan (person or building; replaces the melee scan) |
+| 0x51E7B0 | `preacher_auto_scan`: person-or-building auto-attack scan, explicitly checks `self.type == 4` before the building branch - confirms order kind 32 is preacher-exclusive at issuance, "Preacher conversion" |
 | 0x51F030 | scan helper used by 0x51E7B0 (two out-params; mode flag; not fully read) |
 | 0x4D3D18 | person per-turn state dispatch table (`unit_processing_class_1_person`, keyed by `+0x2C − 1`) |
-| 0x4D5CF0 | person state 3: a preachee struck - spawns a 7/0x4D effect and a 10/0xC controller at its own place |
-| 0x4D83B0 | person state 23: a preachee's conversion roll ("Preacher conversion") |
-| 0x4D8E40 | person state 24: the same shape as state 23, increments the target's `+0x2D` instead (not fully read) |
+| 0x4D5CF0 | person state 3: universal DEATH, reached from the life-step (0x4D43A0, life <= 0), NOT preach-specific - spawns a 7/0x4D effect and a 10/0xC spirit controller at its own place, corrects this row's previous "a preachee struck" |
+| 0x4D83B0 | person state 23: the conversion roll, entered directly by preacher_strike_scan (0x43ABF0), requires the striker's own order kind to be 17/31/32 - "Preacher conversion" |
+| 0x4D8E40 | person state 24: Whirlwind's own lift state and nothing else (confirmed this session, exhaustive search), NOT linked to conversion - "Whirlwind mechanics" |
 | 0x4D4B50 | destroy a unit (called on the preachee once its conversion roll succeeds) |
 | 0x500E20, 0x500EC0 | class 10 controller init and per-turn dispatch (by state `+0x2C`; generic housekeeping) |
 | 0x409140, 0x409200 | building damage: add to its accumulator `+0x9E` (per attacker turn, or an amount) |
@@ -3313,6 +3571,13 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
 - Global lists: `wild_units`, `fight_units`, `pre_fight_units`, `guard_control_units`, `boat_units`,
   `airship_units`, `trigger_units`, `head_units`, `swamp_effect_units`.
 - Each class has `init_unit_type_N`, `init_unit_class_N` and a per-turn `unit_processing_class_N_*`.
+- Full catalogs of each class's own `+0x2C` per-turn state (number, name, status, handler, role) are kept
+  separately, one file per class, not duplicated here: `pop3-rev/docs/person_states.tsv` (class 1, states like 3
+  "death" or 23 "the conversion roll"), `pop3-rev/docs/effect_states.csv` (class 7, states like 21 "whirlwind" or
+  38 "lava square"), `pop3-rev/docs/controller_states.csv` (class 10, states like 12 "post-death spirit" or 18
+  "sinking-building animation"). **These are three SEPARATE numbering spaces** - the same number means something
+  different in each class (e.g. person state 24 is Whirlwind's own lift state, while effect state 24 is erosion,
+  and controller states only go up to 18) - always say which class a bare "state N" refers to.
 
 | Class | Kind | Class | Kind |
 |---|---|---|---|
