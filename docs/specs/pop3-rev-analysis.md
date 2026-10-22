@@ -673,6 +673,26 @@ a plain `add`, confirming the slope rule is horizontal-only.
   farther. Not pushed: the caster's shaman, angels of death, shielded units, units inside something (+0x9F);
   allies only on the last turn, at most `BLAST_FRIEND_AFFECT` (5).
 
+**The fire trail, traced this session**: right before the push above, a per-instance blast flag (+0x7A bit
+0x1 - not confirmed which blast callers set it, plausibly tied to Blast's own "burn cell" component, since the
+same shared blast code also serves callers that clearly shouldn't ignite anyone, e.g. a destroyed boat's land
+explosion) puts a pushed person not already there into a new, purely cosmetic **state 26** ("scorched by a
+blast") and sets a trailing-effect counter (+0xA4) to **24**. That counter is read by a single shared function
+(`trail_effect_tick`, 0x4D9200) called for every person every turn its own +0xA4 is nonzero, independent of
+state: it always spawns a short-lived grey smoke puff (the same "7/3" effect documented as the firewarrior
+bolt's own trail puff) at the person's position, and - only while the counter is still above 8 - ALSO spawns
+the SAME trail effect a flying fireball shot leaves (0x50C410): **hfx 1120, confirmed by eye elsewhere in this
+doc as "a 16x16 white-yellow fireball"** - not a dim ember, a trail of small bright fireball-coloured sprites.
+With state 26 starting the counter at 24, that means the first several turns of being airborne get both the
+grey smoke puff and the bright fireball-sprite trail together - **the bright trail is what actually reads as
+"fire"**, tapering to smoke-only as the counter drops to 8 or below, then nothing once it reaches 0. **This is
+purely visual**: state 26 deals no damage of its own (the damage is the already-documented
+`BLAST_DAMAGE_PERSON` ticks) and is a different mechanism from actually being on fire (state 31, "Person
+physics" below) - a scorched-by-blast person is not thereby burning in the damage sense, even though the
+smoke-puff part of this same shared counter/function is also what an ACTUALLY burning person uses (state 31
+resets the same +0xA4 to 4 each tick - always ≤ 8, so ordinary burning never gets the bright trail, only
+intermittent smoke).
+
 Then the person physics moves it every turn ("Person physics", blown mode).
 
 Worked examples (hand estimates, flat ground, not measured):
@@ -930,8 +950,11 @@ only when (duration & 3) == 0 (one call in four - this traces, not just infers, 
 Drawn (the fireball shot itself, 0x4BB440, shared with Blast's own fireball shot - "Fireball shots" in
 Components): a dynamic ground light under it while it flies (`sunlight_update_unit_landscape` 0x4010B0, the
 same mechanism the firewarrior's own bolt carries, "Drawn" under "The shot 8/6" above); up to 4 trailing
-effect 7/0x0A instances, one spawned per turn of flight (clamped 0-4, unconditional) - a distinct ember/particle
-trail, not the plain grey smoke puff (7/3) the firewarrior's bolt leaves; and a self-attached effect 7/0x4F
+effect 7/0x0A instances, one spawned per turn of flight (clamped 0-4, unconditional) - traced this session
+(0x50C410): **hfx 1120, draw class 29, the EXACT SAME sprite the fireball's own glowing ball uses** (confirmed
+by eye elsewhere in this doc as "a 16x16 white-yellow fireball") - not a separate dim ember sprite, a trail of
+small bright fireball-coloured sprites left behind every turn; not the plain grey smoke puff (7/3) the
+firewarrior's bolt leaves; and a self-attached effect 7/0x4F
 riding the shot itself (a flame/glow, its sprite cached into the shot's own +0x94) when the shot's flags (+0x6E
 bit 1) ask for it - true for Firestorm's own shot, confirmed above. A second, separate burst of 4 randomly
 jittered plain smoke puffs (7/3) scattered right at the landing point exists in this same function, gated by
@@ -1006,11 +1029,13 @@ described, and it runs both ways (reverts the same way coming back over land).
 single thing occupies the funnel's own current cell:
 - **A person** (any tribe, not an angel, not shielded, not already airborne): pulled out of a building first if
   it's inside one (the same eviction helper combat uses), then set to **person state 24** - genuinely lifted,
-  confirmed this session to be the SAME state preacher conversion uses for "held by a reference thing" (0x4D8E40,
-  its own row corrects the previous "preacher-specific" read) - up to 19 ticks (matching "12-19 turns" exactly),
-  then thrown: a 192-unit push at a random angle plus a flat 230 vertical velocity, which is what the ordinary
-  fall physics then turns into `FALL_OUT_OF_WW_DAMAGE` (700) on a hard landing - the "WW" in that already-known
-  constant name is "whirlwind", now confirmed.
+  up to 19 ticks (matching "12-19 turns" exactly), then thrown: a 192-unit push at a random angle plus a flat
+  230 vertical velocity, which is what the ordinary fall physics then turns into `FALL_OUT_OF_WW_DAMAGE` (700)
+  on a hard landing - the "WW" in that already-known constant name is "whirlwind", now confirmed. State 24 looks
+  generic ("held by/orbiting a reference thing", 0x4D8E40) and the previous draft guessed it was shared with
+  preacher conversion - re-checked this session with an exhaustive exe-wide search for every literal "set state
+  to 24": **Whirlwind is the only thing that ever puts a person there**; preacher conversion's own state-23
+  handler never writes it, and no per-type default-state table entry resolves to it either (0x4D8E40's row).
 - **A building**: never lifted. Same 25%/turn wood-pull already documented, through the same code path attacks
   and fire use; once a pull removes no wood (it's already at its floor), the building is destroyed outright with
   the same mesh-shatters-into-debris sequence the "uneven ground" destroy reason uses ("Terrain changes: what
