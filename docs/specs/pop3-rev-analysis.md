@@ -1494,7 +1494,36 @@ fix this resolves.
   `blend` high almost everywhere along a shore, which is why the original shows a visibly rockier/"cracked"
   cliff-table colour right at the coastline: it falls out of the existing blend/cliff formula at a steep edge,
   not a separate shore-specific decal or texture. Only pure open sea is excluded from this pipeline and drawn
-  separately (its own water surface, not traced this session).
+  separately - its own water surface, traced this session below.
+
+## Water rendering (watdisp.dat) [exe]
+A separate, global asset from the per-theme terrain tables above: `data\watdisp.dat`, 65536 bytes (256x256,
+same size class as `disp0-X.dat`'s own noise table), but with **no theme suffix** - one single file shared by
+every level, confirmed by its only 4 call sites all being level lifecycle functions (`load_level`,
+`load_level_conditional`, and two others) rather than the per-theme asset loaders `al0`/`bigf0`/`cliff0`/`disp0`
+use. Loaded (and the water buffers rebuilt) on every level load, not once at engine start.
+```text
+load: malloc 0x10000 bytes, read the whole file into it, keep the pointer at a fixed global (0x5D45BC) -
+  a small state machine (one Ghidra-named function with 3 entry points, plus a 4th separate "load_watdisp_2")
+  also allocates two much larger derived caches on the same trigger (0x80000 and 0x28000 bytes, exactly
+  65536 x 8-byte and 16384 x 10-byte entries) and fills them with an invalid sentinel - what they are actually
+  FOR was not traced this session (not read anywhere in the water-drawing code below); candidates are a
+  per-cell wave/foam lookup or a dirty-rect cache, given the first one's entry count matches watdisp.dat's own
+  byte count 1:1
+draw (main_landscape_mesh_generation, 0x46CB90's per-vertex body): a vertex whose cell is pure open sea (the
+  same coastal-shape test "Parking and the shore"/"is_land_at" uses - land and shore vertices take the real
+  heightmap value instead, no watdisp involved) reads watdisp.dat TWICE:
+    index  = cell_coord x8 -+ (turn % 256) x 257, wrapped to 0..65535      # cell_coord packs (x, z) into one word
+    sample1 = watdisp[index with "-"]; sample2 = watdisp[index with "+"]  # scrolling in opposite diagonals
+    height_offset = (sample1 + sample2) / 8                                # the ripple
+    light        = clamp((sample1 + sample2) / 16 + 16, 1, 32)             # the shimmer
+```
+No fluid simulation: the "wave" look is two reads of one static 256x256 noise texture, scrolling diagonally in
+opposite directions as the turn counter advances (wrapping every 256 turns, ~21 s), summed into a small height
+perturbation and a brightness value - cheap, fully data-driven, and the reason the pattern both ripples and
+visibly "flows" without the engine ever simulating water. `turn % 256 x 257` shifts the sampled texel by (1, 1)
+per turn in the packed coordinate space, i.e. the two layers drift along the texture's own diagonal at a
+constant rate, one each way - not random per-frame jitter.
 
 ## Walking speed [exe]
 Each person type has a movement profile (table 0x5A7B90, 26 bytes each, picked by unit+0x30) whose speed at +4 is
