@@ -340,7 +340,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Villager hut style (3 styles in the objects, style 0 always drawn): find what picks it.
 - [ ] Check the facing of the other kinds against the game (boat huts are settled: jetty local +z, door -z, from the 11 in the levels), and the cells a footprint takes (used by the walking mask).
 - [ ] General model 9 "building add-on" (one near each of 91 medium/large huts): find what it is (hut extension?) and draw it.
-- [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold.
+- [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold. **Partially addressed 2026-10-23, render-only**: `terrain_texture::looks_like_sea`/`VISUAL_SEA_HEIGHT` (4, a guess, not the confirmed threshold) now makes the GROUND SHADER treat height <= 4 as "sea" for its land/water branch choice, separately from `game_core::unit::is_sea` (still exactly `SEA_LEVEL` for all of pathing/drowning/building placement, untouched) - reported (level 38, original assets): a coastal cell at very low but nonzero height was rendering through `land_colour`'s own `cliff` remap instead of as water, reading as lava/rock (a steep drop to the seabed there legitimately pushes `blend` high, and that theme's own cliff table apparently has reddish "damaged ground" entries at high blend - terrain-textures.md "cliff"). The real threshold (and whether it's even a flat height cutoff rather than something else) is still unconfirmed - `VISUAL_SEA_HEIGHT` is picked to clearly cover the one concretely cited case (height 1) with a little margin, nothing more.
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
 - [ ] Attacking buildings (combat.md "Attacking a building"): enemies on a plan's cells count as its people; blasts (40) and firewarrior bolts (100) add wear; the flying faces of the partial explosion; the original's jitter is ±2 units (ours tilts); the player warned once.
 - [ ] Ashes (combat.md "Ashes"): the hover text ("damaged ground", our words), the long damage smoke over them, the whirlwind's destruction. Lava and earthquake ground sharing the mark is done (`lava.rs`'s `WorldEvent::Scorch`, both `Mode::Static` and `Mode::Flowing`).
@@ -570,6 +570,129 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   second time - compounding, so darker colours lifted far more than bright ones, flattening contrast and washing
   out exactly the shoreline's own dark/rocky colouring. Confirmed with a `just shot` before/after on level 1
   (storing `palette_image`, and its placeholder, as `Rgba8UnormSrgb` restores ground contrast).
+- [x] The sea's own ripple (pop3-rev-analysis.md "Water rendering (watdisp.dat)"), after several same-day
+  attempts (2026-10-22) each reported as still looking wrong - full history, so a future session doesn't repeat
+  it:
+  1. Drove colour straight from the exe pseudocode's own `height_offset`/`light` (a sum of two `watdisp` reads
+     scrolled in opposite directions as `turn % 256` advances): stayed anchored in place at first (summing
+     cancels the translation - looked frozen, "a different rotation" only between separate level loads); once
+     fixed to scroll a single sample instead, it swept into a theme's own shore-coloured `bigfade` rows (tan
+     patches afloat in open sea) and read too dark against the coast ("coast water color is correct... the water
+     is too dark").
+  2. A synthetic time-only "boiling" brightness nudge (each cell's own fixed `watdisp` byte seeding a per-cell
+     sine phase): genuinely not a scroll (cross-correlating far-apart video frames gave an optimal alignment
+     shift of exactly `(0, 0)`), but still read as motion with no real geometric basis ("do you alter the water
+     altitude... do it way slower").
+  3. A real vertex-shader height displacement with an ad-hoc slope-driven brightness nudge: reported as still
+     looking like motion, and reverted to fully static (no time input anywhere) on that report - verified by
+     cross-diffing every frame of a recorded video, zero pixel change in the sea region across 8 real seconds.
+  4. A static watdisp.dat ripple texture (sampled at a single fixed position, no time input) layered onto the
+     static brightness, after "insert the water0.bin effect... read as a flat 256x256 byte grid, it resolves into
+     a smooth, periodic 2D field".
+
+  **Root cause of 1-3 reading as wrong, found: the user's own recollection that the real game's sea never visibly
+  moves was itself mistaken** - corrected by the user citing a third-party source, [peterderivaz/populous](
+  https://github.com/peterderivaz/populous) (README "References"), which explains the real mechanism in detail:
+  the sea IS rendered with vertex altitude and lighting that change continuously, via the exact two-counter-
+  scrolling-sample formula attempt 1 and 3 already used - the source explains WHY two samples, not one: a single
+  scrolling sample would show a fixed wave pattern moving in a fixed direction (an obvious prevailing wind);
+  summing two samples scrolling in OPPOSITE directions cancels that net directional drift while still producing
+  "lots of local swirls and seemingly non-uniform motion". So attempts 1 and 3 were not wrong to animate the sea -
+  attempt 1's bug was only ever picking colour from a shifted sample (mathematically a scroll regardless of
+  intent, terrain-textures.md has the detail) and attempt 3's row/lighting formula were ad-hoc guesses, not what
+  made the animation itself wrong.
+
+  **Final implementation, matching the confirmed mechanism**: `GroundMaterial` has a real vertex shader
+  (`ground.wgsl`'s `vertex`, `Material::vertex_shader`) that displaces each pure-sea vertex's own `y` by
+  `water_height_offset` (the two-counter-scrolling-sample formula, mirroring `Theme::water_shimmer`'s
+  `height_offset = sum / 8`), converted via the live `terrain_mesh::CurveParams::height_scale` (`ground_material::
+  set_height_scale`, kept in sync every frame by `world.rs::animate_water` alongside `set_turn`) and faded to zero
+  approaching the coast. The normal is tilted by that height field's own local slope; `water_colour`'s brightness
+  (`water_light`) now mirrors `game_core::shading::cell_light`'s own formula exactly (same sun constants, same
+  ambient term) fed the live ripple height instead of the real terrain height - "the dynamic lighting is based on
+  the adjusted altitudes instead of being distance based", replacing the land's precomputed `light` sample for
+  this one purpose rather than nudging it. Row stays fixed at 0 (never a shore colour, any theme). Verified: no
+  shader errors; cross-correlating far-apart video frames finds only a marginal improvement at a nonzero shift
+  (not the dramatic drop a real net scroll would show) - no overall directional motion; consecutive frames show
+  real, moderate, ongoing local variation (10-40% of sea pixels changing a few units each, every quarter second) -
+  genuine animation, not frozen, not a uniform flow either. Left open:
+  - Not yet re-confirmed against the original's own files - no original install is available in this environment;
+    checked only against the procedural theme here and against peterderivaz/populous's written description, not
+    the real game directly.
+  - The exact bit layout of `cell_coord x8 -+ (turn % 256) x 257` (pop3-rev-analysis.md's own pseudocode) isn't
+    pinned down - `Theme::water_shimmer`'s/`ground.wgsl`'s own reading (a plain diagonal pixel shift, reusing the
+    existing `px`/`py` `PX_PER_CELL` coordinate space) reproduces the doc's own stated property ("(1,1) per turn")
+    but doesn't claim the original's bit-for-bit packed-word addressing. A spec session could pin this down from
+    the disassembly directly.
+  - `water_light`'s own formula (mirroring `game_core::shading::cell_light`, sun constants 147/147/147) has since
+    been replaced entirely by a continuous normal/slope shading - see the next entry.
+
+- [x] The sea's own colour banded into hard, concentric contour rings instead of the original's soft diffuse
+  shading, and its ripple pattern read as a few giant smooth blobs instead of choppy water - both confirmed
+  against a clean-room visual description of a real screenshot (terrain-textures.md "Water: visual reference",
+  2026-10-23, kept deliberately independent of this session's own implementation knowledge): individual features
+  measured 150-300 screen px across in a comparably-framed shot of ours, 30-50x larger than the reference's own
+  3-8 px, and "only two colours are visible, with crisp edges between them" - textbook symptoms of (1) a sampled
+  pattern tiled far too coarsely and (2) colour quantised/thresholded before shading rather than lit continuously
+  from the surface slope. Both confirmed as bugs, not readings of real original behaviour: (1) `water_height_offset`
+  was sampled at `PX_PER_CELL`'s own per-cell granularity (tiling the 256-texel `watdisp` once every ~32 cells)
+  with no further scaling; (2) `water_colour` rounded its brightness to an integer and looked it up through the
+  same discrete `bigfade`/`palette` chain land uses - categorical by construction, so adjacent fragments whose
+  brightness crossed an integer boundary did show a hard edge, same mechanism `land_colour` already needs
+  supersampling to hide, but applied here to a signal with enough contrast to read as rings rather than subtle
+  aliasing. Fixed: `WATER_FREQUENCY` (24x) tiles the pattern well below one cell; `water_normal` (a centred finite
+  difference, more accurate than the one-sided difference the vertex displacement still uses for itself) builds a
+  continuous surface normal, lit by a fixed direction and mixed smoothly between two colours - no palette/row
+  lookup for water's colour at all any more, so nothing left to band. Caught a second bug applying the fix: the
+  two mix colours are sRGB (gamma) values, like any hex code read off a screenshot, but were first used directly
+  as linear values - the swapchain target being itself sRGB meant the GPU encoded them through the sRGB curve a
+  second time on store, washing the water out much paler than the intended deep navy (confirmed visually: a
+  washed-out pale blue, not reasoned from first principles) - fixed with an explicit `srgb_to_linear` conversion,
+  the same class of bug "Our bake"'s own "Colour-space bug, fixed" entry already covers for the palette texture.
+  Verified: measured pixel colours land in the reference's own colour family and order of magnitude (not pixel-
+  perfect - the reference's own figures are approximate, and lighting/zoom weren't identically reproduced); a
+  close shot shows fine mottled texture with no banding; the "no net directional motion, local swirls" property
+  from the previous entry still holds with the new frequency/normal-scale constants.
+
+- [x] The sea's two shading colours were universal constants (measured off one reference screenshot) - reported
+  as visibly clashing with a generated theme whose own land colours happened to be teal/brown, not blue-adjacent:
+  a fixed water hue can't harmonise with every theme's own, independently-chosen palette. Tried sourcing both
+  colours from the THEME's own `bigfade` row 0 instead (the historical "sea row" convention, never confirmed
+  against the exe) with a "fall back to a fixed blue unless the theme's own colour is actually blue-dominant"
+  guard against a theme whose row 0 isn't water-coloured - reported as the wrong fix in turn: on another level
+  (38) the water rendered red, which turned out NOT to be `water_colour` reading a bad theme colour at all, but a
+  separate, already-documented class of bug (very-low-but-nonzero ground reading as land, not sea - the "Sea
+  level" entry above, since fixed). Left as: both endpoints come from the theme's own `bigfade` row 0 at two fixed
+  brightness columns (`WATER_DARK_BRIGHTNESS`/`WATER_LIGHT_BRIGHTNESS`), no fallback guard - the guard was solving
+  a problem that didn't originate in this function, and reintroducing it without evidence it's still needed would
+  just be guessing twice. If a genuinely bad per-theme row 0 turns up again (as opposed to a misclassified cell
+  reaching this function at all), revisit then with that concrete case in hand.
+
+- [x] Small/coastal water visibly rippled when it shouldn't have, fixed twice the same day:
+  1. Reported: a small 2x2 pond; confirmed, level 8 cell 89/90 - a coast cell, not deep sea. Root cause:
+     `vertex`'s own coast fade (`sea = 1.0 - smoothstep(0.0, COAST_THRESHOLD, walk)`) reused `COAST_THRESHOLD`
+     (0.2), a value tuned purely for the land/water COLOUR boundary's own shape - but `walk` (a bilinear average
+     of up to 4 corners' own walkable flag) only ever takes the exact values 0, 0.25, 0.5, 0.75, 1.0, so ANY
+     land-adjacent vertex (walk >= 0.25) already sat well clear of that 0.2 margin and still got a small but
+     visible fraction of the full ripple - wrong by the exe's own documented rule (pop3-rev-analysis.md "Water
+     rendering": "land and shore vertices take the real heightmap value instead, no watdisp involved" - a hard
+     per-vertex binary, not a graded fade). Fixed: a separate, much tighter `WATER_ANIMATION_MARGIN` (0.02) gated
+     both the vertex displacement/normal-tilt and the fragment's own lighting off the SAME single-point `walk`
+     value. Verified at the time: individual near-shore water pixels varied only by GPU dithering noise across 10
+     consecutive frames, the same magnitude flat land shows; deep water still animated.
+  2. Reported again: a small pond kept changing elevation even inside its own shore (level 1, cell 6/101) - a
+     single point's own `walk` value can't tell "deep ocean" from "the interior of a small pond, fully surrounded
+     by water-classified neighbours at this one point", since both read `walk == 0` there. Fixed:
+     `water_sea_factor` replaces the single-point test with a coarse multi-sample one - a ring of 8 points
+     `WATER_OPENNESS_RADIUS` (3) cells out, plus the centre; only when EVERY one of those is also still "sea"
+     does the ripple reach full strength, so a body of water has to be open for several cells around a point, not
+     just at that exact point. Approximate (a ring can miss a thin obstacle between two sampled directions, and
+     this measures "no land at roughly this radius", not the water body's true size/shape) but much closer to
+     "only open ocean ripples". Verified: confirmed near-shore water pixels at zero variation across a fixed-seed,
+     20 s capture; a confirmed-deep ocean region (identified from an aerial shot, several cells from any island)
+     still shows substantial ongoing change over that same window (11.7% of pixels, mean nonzero delta ~7, max
+     122) - a short capture window can under-sample how fast a specific deep-water location's own local swirl
+     phase happens to be changing, so use a window of several seconds, not under two, when checking this again.
 
 ## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Building icons, tooltips (spell icons done: `assets/spell-hud`).

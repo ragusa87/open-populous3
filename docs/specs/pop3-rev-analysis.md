@@ -1526,6 +1526,20 @@ visibly "flows" without the engine ever simulating water. `turn % 256 x 257` shi
 per turn in the packed coordinate space, i.e. the two layers drift along the texture's own diagonal at a
 constant rate, one each way - not random per-frame jitter.
 
+**What consumes `height_offset`/`light` downstream, confirmed by [peterderivaz/populous](
+https://github.com/peterderivaz/populous)** (a third-party reverse-engineering writeup, not traced independently
+this session - README "References"): the sea is drawn through the same static per-cell lighting algorithm the
+land uses, EXCEPT both its vertex altitudes and its lighting are different - the vertices' altitude is adjusted
+by `height_offset` (not the real heightmap value, confirming "pure open sea... takes... no watdisp involved" above
+is about LAND/shore vertices only, not that sea skips watdisp - it reads watdisp INSTEAD of the heightmap), and
+the lighting there is computed from those adjusted altitudes rather than the land's own (distance/slope-derived)
+scheme - i.e. `light` is a genuine per-vertex dynamic lighting term reacting to the live ripple height, not a
+static value. The writeup also explains WHY two counter-scrolling samples, not one: a single scrolling sample
+would show "a fixed wave pattern moving in a fixed direction" (a visible prevailing wind); summing two samples
+scrolling in opposite directions cancels that net directional drift while still producing "lots of local swirls
+and seemingly non-uniform motion" - the sea should read as animated and swirling, never as a frozen static
+surface, but never as a simple flow in one direction either.
+
 ## Walking speed [exe]
 Each person type has a movement profile (table 0x5A7B90, 26 bytes each, picked by unit+0x30) whose speed at +4 is
 a named constant. When a person starts a walk (0x4D4F40, 0x4D6660):

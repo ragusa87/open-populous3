@@ -66,6 +66,10 @@ File formats are reverse-engineered from the original files; community tools are
   - [PopScript Upgrader](https://github.com/TylerTheFox/popscript-upgraderi) (MIT)
 - The [PopScript Wiki](https://ts.popre.net/archive/Downloads/Docs/PopScript_Wiki_HTML_Help_File.htm) (Megafont,
   2006): the AI script language, its commands and attributes, see [ai-scripts.md](docs/specs/ai-scripts.md).
+- [peterderivaz/populous](https://github.com/peterderivaz/populous) (no licence checked): confirmed the sea's own
+  rendering mechanism (`watdisp.dat` sampled twice, scrolling in opposite directions, driving both the sea
+  vertices' altitude and a dynamic lighting response to it, instead of the land's static per-cell lighting) - see
+  pop3-rev-analysis.md "Water rendering (watdisp.dat)", [terrain-textures.md](docs/specs/terrain-textures.md).
 - [popscript-upgrader](https://github.com/TylerTheFox/popscript-upgrader) (MIT, checked at
   `f2bd401`): the mapping of PopScript to Populous: Reincarnated's Lua API, see
   [ai-scripts.md](docs/specs/ai-scripts.md).
