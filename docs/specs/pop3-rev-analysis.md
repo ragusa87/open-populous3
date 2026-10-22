@@ -741,7 +741,7 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 | 1 | Burn (exe 12 000; not castable) | Standard shot, burn cell, smoke, explosion. No damage to people. |
 | 2 | Blast (10 000, 3072, 4) | Fireball shot, then simple blast, burn cell, smoke, explosion. No thrown state: people are pushed (see "Blast push and flight"), and only a hard landing hurts them. |
 | 3 | Lightning (80 000, 6144, 4) | Kills outright up to `LIGHTNING_NUM_KILLS` + 1 (file 7) people in the single target cell, any tribe except the caster's shaman, angels of death and shielded units: own followers and enemy shamans die too (0x511F70, walking the cell's unit list). People inside a building are not in that list (leaving a hut puts a person back into it, 0x4D80E0 → `insert_unit_into_land_tile`), so they are not killed (inferred): the building catches fire and throws them out, panicking, 8 turns later. Plus the lightning component. |
-| 4 | Whirlwind (90 000, 4096, 3) | 200 + 24 turns (18.7 s), 120 units per turn. Wanders around the target for 100 turns, then drifts away. Lifts every person in its own cell, any tribe, for 12-19 turns, then throws them: the landing costs 700. Each turn a building in its cell has a 25 % chance to lose 100 wood (a hut survives 3, a temple 8); trees lose 100 wood (50 %); library and prison immune; vehicles get a simple blast. |
+| 4 | Whirlwind (90 000, 4096, 3) | 200 + 24 turns (18.7 s), 120 units per turn. Wanders around the target for 100 turns, then drifts away. Lifts every person in its own cell, any tribe, for 12-19 turns, then throws them: the landing costs 700. Each turn a building in its cell has a 25 % chance to lose 100 wood (a hut survives 3, a temple 8); trees lose 100 wood (50 %); library and prison immune; vehicles get a simple blast. Fully traced this session - mechanism, colour, and exactly what can be lifted: "Whirlwind mechanics" below. |
 | 5 | Insect plague (40 000, 6144, 4) | 60 insects for 200 turns (16.7 s), at most 6 cells from the target. Every 8 turns, enemies in its 3 × 3 cells take `SWARM_PERSON_DAMAGE` (100) and panic; shamans and angels immune; ghosts destroyed. Up to 3 times it raids an enemy building: occupants thrown out, damaged and panicked. |
 | 6 | Invisibility (50 000, 4096, 4) | The `INVIS_NUM_PEOPLE` (file 6) nearest own followers (not the shaman), for `INVISIBLE_COUNT_X8` × 8 turns (120 s). Enemy auto-targeting skips them; some actions end it early. |
 | 7 | Hypnotism (85 000, 4096, 3) | The `HYPNO_NUM_PEOPLE` (file 6) nearest persons of other tribes (not wildmen, shamans, angels) are recreated in the caster's tribe for `HYPNO_COUNT_X8` × 8 turns (file 440, 36.7 s), then return. If their tribe is gone, they stay. Ghosts are destroyed. |
@@ -986,6 +986,49 @@ brief burst and leaving a small standing flame behind - never a single persisten
 our specs: if our own view renders firestorm as one static fire effect instead of a stream of individually
 falling, lit, trailed fireball objects, that view (not the already-correct scheduling in `firestorm`/
 `EffectKind::Firestorm`, spells.md) is where the "rain of fire" look is missing.
+
+### Whirlwind mechanics [exe]
+`process_whirlwind` (0x50F490, effect state 21), traced in full this session. Two timers: +0x72 counts down the
+active "scanning and damaging" phase; once it hits 0 the effect switches to a quieter "drifting" phase instead of
+ending outright (ending itself is a separate, not-re-traced branch reached later). Every call, regardless of
+phase, walks and recolours a linked chain of its own effect objects (+0x74, a "next" pointer) - this chain is the
+funnel's own visual.
+
+**The water-colour effect, mechanism found**: for each link in the chain, the cell underneath is read (the
+ordinary map-cell blend byte, +0xA of 0x8A03E4 - "Terrain land colour"'s own table) and a colour/intensity byte
+(+0x3C) is picked: **open sea gets its own dedicated colour class**, distinct from three blend-range classes used
+over land/shore. Critically, each link's NEW colour is computed only after first copying the PREVIOUS link's
+colour into it - so a transition cascades one link at a time up the chain rather than recolouring every segment
+on the same tick. That one-tick-per-link lag is exactly the "changes progressively, not instantly" look you
+described, and it runs both ways (reverts the same way coming back over land).
+
+**What gets lifted, and what doesn't** - only the active ("scanning") phase does this, by looking at whatever
+single thing occupies the funnel's own current cell:
+- **A person** (any tribe, not an angel, not shielded, not already airborne): pulled out of a building first if
+  it's inside one (the same eviction helper combat uses), then set to **person state 24** - genuinely lifted,
+  confirmed this session to be the SAME state preacher conversion uses for "held by a reference thing" (0x4D8E40,
+  its own row corrects the previous "preacher-specific" read) - up to 19 ticks (matching "12-19 turns" exactly),
+  then thrown: a 192-unit push at a random angle plus a flat 230 vertical velocity, which is what the ordinary
+  fall physics then turns into `FALL_OUT_OF_WW_DAMAGE` (700) on a hard landing - the "WW" in that already-known
+  constant name is "whirlwind", now confirmed.
+- **A building**: never lifted. Same 25%/turn wood-pull already documented, through the same code path attacks
+  and fire use; once a pull removes no wood (it's already at its floor), the building is destroyed outright with
+  the same mesh-shatters-into-debris sequence the "uneven ground" destroy reason uses ("Terrain changes: what
+  reacts") - worn down and eventually shattered, not flung into the air.
+- **A tree**: never lifted either. Same 50%/turn wood loss already documented; while it still has at least 100
+  wood left, this ALSO spawns a small flying effect object at its position (carrying the tornado's own id) -
+  **this is the closest thing to "lifted cut wood" in the whole mechanic**: a loose debris/chip puffed visibly
+  off the tree, not the tree itself going airborne.
+- **Loose scenery of a couple of specific types** (plausibly wood already lying on the ground, not independently
+  confirmed): deleted outright - sucked away with no flying visual at all, unlike a tree's own chip effect.
+- **A vehicle**: never lifted - hit with an ordinary simple blast (same radius/push numbers as Blast, Lightning,
+  and building destruction elsewhere).
+
+So to directly answer "can only units and cut wood be lifted": **persons are the only thing that is actually
+lifted** (state 24, carried, thrown). Loose/cut wood is never carried along bodily - a tree sheds a small flying
+debris effect while being worn down, and ground-lying wood piles are simply deleted, which might be what reads
+as "the wood gets lifted away" in play. Buildings, trees and vehicles are all affected in place (wood loss,
+destruction, or a blast) without ever leaving the ground.
 
 ### Erosion passes [exe]
 Per-turn (state 24, per-turn 0x50FF30 - Ghidra's own name `process_erosion` is correct, despite sitting in the
