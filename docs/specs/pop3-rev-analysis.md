@@ -1735,7 +1735,7 @@ new one into its *secondary* slot (`+0x8B[+0xA6]`, not the primary `+0x9B`):
 | 3 (move) | 0x43B2A0 | a packed position | 0x4336C0 |
 | 6 | 0x43B3C0 | unit/building id + own cell; gated by a per-type capability table (0x5A7E48) | 0x495520 |
 | 0x13/19 (attack, generic) | 0x43B540 | a unit id | 0x51A2A0 "Starting a melee" |
-| 0x1C/28 | 0x43B670 | a unit id | inline in `order_execute` |
+| 0x1C/28 | 0x43B670 | a unit id | 0x51FCE0 - CORRECTS the previous draft's "inline in order_execute": kind 28's own dispatch-table trampoline is a real out-of-line call, not traced further this session |
 | 0x11/17 | 0x43B790 | a cell rounded to a corner grid | 0x43A4D0 (shared with 30, 31) |
 | 0xF/15 | 0x43B8E0 | a door/throw point (0x404420) | 0x439D30 |
 | 0x16/22 (attack, "doing" half) | 0x43BA10 | a unit id + own cell | 0x435160 |
@@ -1749,13 +1749,54 @@ located); **kind 21** is issued only by the auto-attack scan's own self-order, n
 player's own ground-click and attack-click call sites were not located in this pass either; map them with a live
 breakpoint on 0x43B2A0/0x43B540 if needed.
 
+**All 31 kinds**, decoded this session from `order_execute`'s own dispatch table (0x432D18 - most entries are a
+trampoline that calls out to a separate handler; "inline" means the trampoline IS the whole handler):
+
+| Kind | Handler | What it does |
+|---|---|---|
+| 3 move | 0x4336C0 | arrival check against the group's own target (above) |
+| 4 | 0x433800 | the training building's own "doing it" half of its own kind-3 zone-positioning order (0x405B80's note); not independently traced |
+| 5 | inline | unconditionally "done" - a no-op placeholder |
+| 6 "go near X" | 0x495520 | reusable approach utility, allocates its own fresh kind-3 order |
+| 7 | 0x4340A0 | not traced |
+| 8 enter building | 0x434610 `go_into_building` | |
+| 9 | inline | arrival check against a SECOND position pair (+0x4F/+0x51, distinct from the group's own target), gated by a turn-parity bit; optionally calls 0x4D58C0 on arrival - "reached an alternate/work position", pairs with kind 10 as its "doing" half |
+| 10 | 0x497A30 | not traced (paired with 9 above) |
+| 11 "join/hold a melee ring" | 0x519F10 | traced this session - see "Melee ring order (kind 11)" below |
+| 12 | none | jumps straight to the shared tail - a true no-op kind |
+| 13 | 0x439A00 | not traced |
+| 14 | inline | unconditionally "done" |
+| 15 | 0x439D30 | door/throw point |
+| 16 | inline | reads a byte from the group's own target, passes it to 0x4DE760; if the unit's own +0x9F resolves to another live unit, calls 0x4DE740 and writes its result into THAT unit's own tribe field (+0x2F) - a strong, not independently confirmed lead for Convert/Hypnotism's actual "switch tribe" application |
+| 17 | 0x43A4D0 | cell-rounded approach, shared with 31/32 below |
+| 18 | 0x433A10 | not traced |
+| 19 attack (generic) | 0x51A2A0 | "Starting a melee" |
+| 20 | inline | unconditionally "done" |
+| 21 attack (auto-scan) | 0x51A2A0 | same handler as 19 |
+| 22 attack "doing" half | 0x435160 | |
+| 23 | inline-ish | unconditionally calls 0x435550(unit, group-target, extra=1) then always "done" - single-shot, fire-and-forget; address falls near the attack-order code |
+| 24 | inline | unconditionally "done" |
+| 25 | inline | re-runs kind 3's own arrival check first; on arrival, walks a linked chain of class/type 10/0x10 controllers clearing one's own +0x70 field on a match - "arrive, then detach from whatever controller (formation/vehicle/worship group) is tracking you" |
+| 26 | inline | unconditionally "done" |
+| 27 | 0x43BCC0 | not traced |
+| 28 | 0x51FCE0 | see the table above (0x1C) |
+| 29 | inline | turn-parity-gated reposition, plus an occasional "within range of a reference point" check that calls 0x4D4EE0 on success - a "keep near/facing a moving reference point" utility, not linked to a specific behaviour |
+| 30 "alarm" | 0x43DAA0 | given to a tribe's buildings by 0x443B40; completing one has a worship-adjacent side effect in `group_release` (above) |
+| 31/32 disguise & building-visit | 0x43A4D0 | shared with 17 above |
+| 33 preach | 0x43C7A0 | "Preacher conversion" |
+
+A free slot's kind byte is 0 (kinds 0-2 never occur - below the dispatch table's range).
+
 ### Formations [exe]
 A group move does **not** spread its units across different points: every unit in the same command group reads
 the identical target out of the shared record (above). The only spacing mechanism is a **formation**, a class-10
 controller (type 1/6, `process_formation_unit` 0x501000) that a unit joins or creates for itself
 (`add_unit_to_formation`, 0x5018C0) whenever **both**: a global flag (0x895DA6 bit 0x4, read-only everywhere
-found - not traced where it is set, plausibly a per-level/option byte) is set, and the unit's own `+0x76` bit 0x8
-is set, which `order_execute`'s shared tail copies (0x432DF0) from bit 0x10 of byte+0xA of the *current* order
+found - not traced where it is set, plausibly a per-level/option byte) is **CLEAR** (corrects the previous
+draft, which had this backwards - verified against the raw opcode this session: the code jumps PAST the join
+call when the bit is tested nonzero, i.e. it reads as a "formations off" switch, normally clear), and the unit's
+own `+0x76` bit 0x8 is set, which `order_execute`'s shared tail copies (0x432DF0) from bit 0x10 of byte+0xA of
+the *current* order
 kind's 22-byte flags record (0x5A7DC0, indexed by the **raw** kind value, not kind−3 as the code-dispatch table
 is).
 ```text
@@ -1780,40 +1821,90 @@ cooldown, is not traced (live check: give several units one move order where the
 Selecting several units and giving one order does not copy that order into each unit: they share one **command
 group**, a 10-byte record in a fixed array of 800 at `0x938830 + group_id × 10` (confirms and details the
 one-line guess already in "Reference": "new command group / give a group to a unit / add an order to a group").
+This session fully re-traced the add/remove machinery and the kind-dispatch table - the picture below replaces
+and corrects the previous draft in several places (noted inline).
 ```text
 group record (0x938830 + id × 10):
-  +0x0 kind       the order kind (3-33, the "going"/"doing" pairs above)
+  +0x0 kind       the order kind (3-33)
   +0x1 flags      bits OR'd in by whoever creates the order; 0x20 seen on self-issued auto-attack/scan orders
                     (0x51FF60 skips the auto-attack radius lookup above when it is set); 0x40 seen gating
-                    "Preacher conversion" below; the rest not traced
+                    "Preacher conversion" below; bit 0x1 marks a slot stale/not a real pending order (consumed
+                    by order_advance below, which garbage-collects it instead of running it); the rest not traced
   +0x2 ref_count  word, how many units currently point at this group (0 = free slot)
+  +0x4 helper     word, NOT padding (corrects the previous draft, which didn't give it a role): a disposable
+                    "helper unit" id, deleted (delete_unit, 0x4EF180) the moment ref_count reaches 0 - zeroed by
+                    every "give an order" helper on allocation; which order kinds actually populate it is open
   +0x6 target     dword, a target unit id (word) or a packed cell position; meaning depends on kind
 
-alloc  0x436C20(): scans forward from a rotating cursor (0x96AA78) for ref_count == 0, wrapping past the array
-                    end back to id 1 (id 0 is skipped); returns the free id
-assign 0x436D00(unit, group_id, slot): ref_count += 1 (and a global active-group counter when it was 0);
-                    slot < 0  → releases the unit's current primary group (0x4364D0(unit, -1), not traced) and
-                                 sets unit+0x9B = group_id (its one primary group)
-                    slot >= 0 → sets unit+0x8B[slot] = group_id (a secondary group; purpose of more than one
-                                 not traced)
-set    0x438730(group_id, kind, target_or_pos_ptr, extra_flags): no-op if the group already has this exact kind
-                    and target; else writes kind/flags/target above, then snaps the target to a cell or a
-                    building's door point (per-kind flags dword at 0x5A7DC0 + kind × 22 + 0xA, via 0x4044B0);
-                    one of those flags (bit 0x80000) can later overwrite the group's own kind to 0xA once its
-                    target resolves to a unit with +0x9D bit 0x80 set (not traced further)
-run    order_execute (0x432590, called from unit_processing_class_1_person only while a person is in state 0xA
-                    "carrying out an order"): resolves the person's active group (+0x9B if set, else
+alloc    0x436C20(): scans forward from a rotating cursor (0x96AA78) for ref_count == 0, wrapping past the array
+                    end back to id 1 (id 0 is skipped); returns the free id. The eight "give an order" helpers
+                    (below) each inline this same scan themselves rather than calling it.
+assign   0x436D00(unit, group_id, slot): ref_count += 1 (and a global active-group counter when it was 0);
+                    slot < 0  → releases the unit's current primary group (0x4364D0(unit, -1)) and
+                                 sets unit+0x9B = group_id (its one, exclusive primary group - always wins over
+                                 any secondary slot)
+                    slot >= 0 → sets unit+0x8B[slot] = group_id (one of 8 secondary slots, confirmed count this
+                                 session - see below for what the slot array is actually for)
+release  0x4364D0(unit, slot), traced this session (was a stub before): resolves the group the same way as
+                    assign; if there is one, tells the UI about it when the unit is player-visible (0x4DA1D0) -
+                    resolves the unit's own "target" word (+0x89) to a live unit and calls 0x51FF40 on it, a
+                    completion reaction/sound/deselect, not traced further; two per-KIND side effects before the
+                    generic cleanup - kind 7 sets the unit's own +0x77 bit 0x80 (meaning not traced), kind 30
+                    ("alarm") decrements a per-tribe counter and, on it reaching 0, rerolls a building's own
+                    +0x5F field (a worship-adjacent side effect of an alarm order completing, not traced
+                    further); then always: ref_count -= 1, and if that reaches 0, frees the +0x4 helper unit (see
+                    above) and decrements the global active-group counter (0x96AA7A); finally zeroes the unit's
+                    own +0x9B or +0x8B[slot], clears +0xA7 (a cached copy of the kind just released, read by
+                    order_advance below) and calls 0x501BE0 (plausibly "leave formation", not traced)
+set      0x438730 `order_set`(group_id, kind, target_or_pos_ptr, extra_flags): no-op if the group already has
+                    this exact kind and target; else writes kind/flags/target above, then snaps the target to a
+                    cell or a building's door point (per-kind flags dword at 0x5A7DC0 + kind × 22 + 0xA, via
+                    0x4044B0); one of those flags (bit 0x80000) can later overwrite the group's own kind to 0xA
+                    once its target resolves to a unit with +0x9D bit 0x80 set (not traced further)
+run      order_execute (0x432590, called from unit_processing_class_1_person only while a person is in state
+                    0xA "carrying out an order"): resolves the person's active group (+0x9B if set, else
                     +0x8B[+0xA6]), reads its kind byte, and jumps a 31-entry table (0x432D18, kinds 3-33) to the
-                    matching handler - e.g. kinds 19 and 21 both reach the attack-order handler below, kind 33
-                    reaches the preach-order handler ("Preacher conversion"); two further redirects (group
-                    flag +0x1 bit 0x1, or the unit's own +0x13 bit 0x10) were seen but not traced
+                    matching handler - full kind list in "Order kinds and player commands" below. CORRECTS the
+                    previous draft's "two further redirects (group flag +0x1 bit 0x1, or the unit's own +0x13
+                    bit 0x10) were seen but not traced": those addresses are not per-kind branches at all - every
+                    one of the 31 handlers returns a "done" boolean that flows into this SAME shared tail, which:
+                    (1) joins/creates a formation (`add_unit_to_formation`, below) when eligible; (2) if the
+                    handler reported done, releases the group from whichever slot held it (0x4364D0, above)
+                    unless the kind's own flags record says not to (bit 0x80 at 0x5A7DC0+kind×22+0xB - a few
+                    self-managing kinds skip auto-release); (3) calls `order_advance` (below) to pick what runs
+                    next; only if THAT finds nothing does the generic "settle and go idle" code run (snap
+                    position/facing, maybe stop the current animation, then 0x4E32A0 picks default idle
+                    behaviour)
+advance  0x4366B0 `order_advance`, traced this session (not in the previous draft at all): called right after a
+                    finished order's group is released, decides what the unit runs next. For an ordinary kind
+                    (flags bit 0x80 clear): scans the 8 secondary slots starting right after the current cursor
+                    (+0xA6), wrapping, for the first one holding a group whose own flags byte bit 0x1 is clear -
+                    garbage-collecting (releasing) any stale/flagged one it passes along the way; if none found,
+                    falls back to two built-in "is there autonomous work?" checks (0x43D2F0, then 0x43D0E0,
+                    neither traced) which can point the cursor at slot 0 instead. For a self-managing kind (flags
+                    bit 0x80 set): a different, narrower rule - look for ANOTHER secondary slot whose group kind
+                    also has that bit set and matches the kind just finished, sweeping every other populated slot
+                    (including the primary) clean along the way if nothing matches. Either way, a slot found is
+                    written to +0xA6 and re-derives the formation-eligibility flag (0x432DF0) for the newly
+                    active kind.
 ```
-The auto-attack scan above does not reuse any existing group: it allocates a fresh one just for the attacker
-(`0x436C20` then `0x438730`) every time it starts a new order. A secondary (`+0x8B`) group slot is confirmed to
-be where the eight "give one unit an order" helpers ("Order kinds and player commands") assign their orders
-(always the secondary slot, never the primary `+0x9B`); why a unit would ever need more than one secondary slot
-at once is still open. Open: the rest of the group flag byte (only 0x20 and 0x40 are known), and the two unread
-`order_execute` redirects.
+**What "adding an order" actually does** (traced this session from two of the eight "give an order" helpers,
+0x43B180 and 0x43B2A0, byte-identical preambles): allocate/reuse a free group, write the order into it
+(`order_set`), then **release every slot the unit currently holds - all 8 secondary slots AND the primary, if
+set** - before installing the fresh group into secondary slot 0 (the cursor +0xA6 is reset to 0 first). A
+directly-given order is not appended to a queue: it wipes everything the unit was doing and becomes the one and
+only thing it's doing, confirmed identically on both helpers checked. The auto-attack scan does the same (it
+allocates a fresh group for the attacker every time it starts a new order, via the same inlined alloc).
+
+So the 8-secondary-slot array plus its rotating cursor is not a sequential, player-authored task queue in the
+way a "shift-click to chain three moves" UI might suggest - it is **several independent systems each able to
+hold one standing order on the same unit at once without clobbering each other's slot** (a spell effect, a
+building's own autonomous assignment such as 0x405B80's occupant positioning, the auto-attack scanner, and
+whatever else calls `order_set`/`assign` directly rather than through one of the eight wipe-everything helpers),
+with the unit round-robining between whichever of those are still populated only once its *currently active* one
+finishes (`order_advance`), falling back to a couple of built-in autonomous-behaviour checks and finally true
+idle only when every slot is empty. Open: exactly which non-player systems populate a secondary slot directly
+(bypassing the wipe), and the two "autonomous work" checks (0x43D2F0/0x43D0E0).
 
 ### Starting a melee (the attack-order handler, 0x51A2A0)
 ```text
@@ -1828,7 +1919,33 @@ mode 2: the target is at its building (target +0x72 is the building on its cell)
 Both people take state 29 (their previous state saved in `+0x7D`); the pre-fight keeps the attacker (`+0x6A`),
 the target (`+0x6C`), their tribes (`+0x6E`, `+0x6F`) and, for modes 1-2, the building (`+0x68`). A pre-fight or
 a fight involving the player's tribe sets 0x89D167 = 2 (probably the fight music or alert, unverified), and
-0x431EA0 is called on every new controller (an alert to both tribes, unverified).
+0x431EA0 is called on every new controller (an alert to both tribes, confirmed this session, body not read).
+
+**Creation, traced this session (`start_pre_fight`, 0x51E150, and `start_fight`, 0x51DE60):** both are class
+10 (`alloc_unit`), tribe 255 (no owner) - pre-fight type 9, fight type 8 - and both are created, and every
+precondition/position checked, off the **target**, never the attacker: `start_pre_fight` bails if the target
+already has a controller (its own `+0x9D`) and spawns at the *target's* position; `start_fight` (called from
+pre-fight's own sub-state 8, after pre_fight_turn clears both participants' `+0x9D` back to 0) does the same -
+bails if the target still has one, spawns at the *target's* position, and the target becomes the fight's
+initial **centre person** (`+0x6C`) and ring slot 0 (`+0x70`), with the attacker as slot 1 (`+0x72`) - not the
+other way around, despite "attacker" being named first in both function signatures. Both participants get the
+new controller's own id written into their `+0x9D` right away (the field every other check in this system reads
+to mean "my current combat controller"). Fight additionally starts `+0x68` (its member count) at exactly 2,
+rolls a random ring angle (0-359°) into `+0x26`, and immediately runs `0x519D10` once (the "move to suitable
+ground" check, confirming it really does run "on creation" as the Fight section below already said) before the
+alert call. A person can be checked/reused by neither of these two until it already has an opponent *resolved*
+to nothing (`+0x9D == 0`) - there is no separate "is anyone else already about to start a pre-fight with this
+target" lock beyond that field itself.
+
+**Joining an existing fight** (`fight_pick_slot`/`fight_join`, 0x51DCC0/0x51DDC0, traced this session - reached
+from 0x51A2A0 when a unit's own target already resolves to a type-8 fight): fails outright if the joiner's
+tribe is neither of the fight's own two, or if a per-unit-type table (0x5A7090 bit 0x40) marks that type as
+unable to melee at all. Otherwise prefers an **empty** ring slot; failing that (the joiner's own tribe already
+holds all 3 of its allowed slots - **the ring is capped at 3 per side even though the array holds 6**), it can
+**bump an existing same-tribe occupant** whose own unit type ranks lower on a per-type priority table (0x5A7077)
+than the joiner's - the bumped unit is ejected (0x4A3920) rather than the count (`+0x68`) changing; the count
+only grows on a genuine new addition. Either way the joiner takes state 25, its id goes into the chosen slot,
+and the fight's own id goes into its `+0x9D`.
 
 ### Pre-fight (per turn 0x518630; person sub-state `+0x2D`, timer `+0x70`)
 ```text
@@ -1857,8 +1974,10 @@ So the opening kick exists: a knockback without damage, once per pair, before th
 gathered: a pre-fight is always one attacker and one target.
 
 ### Fight (per turn 0x518FB0)
-Controller fields: count `+0x68` (≤ 6), the two tribes `+0x69` / `+0x6A`, winner tribe `+0x6B`, the centre
-person `+0x6C`, the 6 people `+0x70` (u16 ids), ring angle `+0x26`. A person's opponent is in its `+0x72`.
+Controller fields: count `+0x68` (≤ 6, exactly 2 at creation), the two tribes `+0x69` (the original target's)
+/ `+0x6A` (the original attacker's), winner tribe `+0x6B`, the centre person `+0x6C` (the target at creation,
+traced this session - see "Starting a melee" above), the 6 people `+0x70` (u16 ids, slot 0 = the target, slot 1
+= the attacker at creation), ring angle `+0x26`. A person's opponent is in its `+0x72`.
 ```text
 every turn:
   drop a person who is gone, not linked any more, dead, in a state without flag 0x10 (state table 0x5A6F79),
@@ -1915,6 +2034,24 @@ join(person, fight)                                                    (0x51DDC0
   neither state 25 (fight) nor 29 (pre-fight) carries it, and several of its state numbers are reused with
   unrelated meaning by other unit classes, so it may be a loosely-reused generic table rather than a
   purpose-built "in combat" flag.
+- **Melee ring order (kind 11, 0x519F10)**: a per-fighter order kind, traced this session, that is a close
+  numeric match to the per-person state-25 machine just above - same shape (walk to a slot, then hold it, then
+  a scripted move), and the EXACT SAME 12-unit arrival threshold for "reached my slot" - but tracked through a
+  different pair of fields (the order's own sub-state byte +0xA9, not the person's state/sub-state +0x2C/+0x2D)
+  and a different companion object: sub-state 0 (fresh) calls the SAME attack-order handler (0x51A2A0) kinds
+  19/21 use, then (success) moves to 1; sub-state 1 walks to the unit's own +0x4F/+0x51 position (within 12
+  units -> 2); sub-state 2 holds that position, facing around a shared companion object (allocated once per
+  order group, class 10 **type 0xA** - not the documented pre-fight (10/9) or fight (10/8), a third,
+  not-yet-cross-referenced controller type) and drifting back to sub-state 1 if it strays too far from a
+  radius stored on that companion object (+0x72); sub-state 3 plays a type-specific move animation for an
+  RNG-rolled duration (from the same per-type odds table, 0x59DF44, the disguise/building-visit order 0x43A4D0
+  also rolls against) then reverts to 2. **Resolved this session**: pre-fight (10/9) and fight (10/8) are
+  created by two dedicated functions, `start_pre_fight` (0x51E150) and `start_fight` (0x51DE60) - neither lives
+  inside 0x51A2A0 itself, which is why the earlier search of that function's own body came up empty (see
+  "Starting a melee" above for both). Kind 11's type-0xA companion is confirmed a genuinely separate, third
+  object, not a mis-identification of either - what it's actually for (a melee ring recruiter staged before the
+  real fight/pre-fight, something else entirely, e.g. a Guard Post sentry or CONTEXT.md's "Challenge" stage
+  under a different internal name) is still open.
 - The fight is a series of exchanges, not a kick/guard toggle: the attacker plays one of three attack moves and
   the target one of two hit reactions. Move 2 (anim 15, also the pre-fight kick) knocks a non-shaman target back;
   moves 2 and 3 trade blows (both lose health); move 4 lands without a return blow. A shaman is never knocked
@@ -1941,6 +2078,40 @@ join(person, fight)                                                    (0x51DDC0
   6 frames there, 7 in the other directions): a brave's exchange is 6-7 turns (0.5-0.6 s), a shaman's 4-5. An
   idle person in sub 1 attacks again at once if its opponent is ready, so the rhythm is about one blow per
   0.6 s per pair (estimate, not measured).
+
+### Resuming a fight cut short by a push [exe]
+TODO.md asked whether an attacker whose target is blasted out of reach chases it via a chained/queued order, a
+dedicated pursuit state, or stored "last seen" data. Traced this session: **none of those** - it's simpler, and
+falls out of two things already covered above working together.
+
+1. **Nothing about starting or joining a fight ever releases a participant's own command group.** `start_fight`
+   (0x51DE60), `start_pre_fight` (0x51E150) and `fight_join` (0x51DDC0) only ever change the person's *state*
+   (to 25 or 29) and write the controller's id into `+0x9D` - none of them call `group_release` (0x4364D0). An
+   attacker's original attack order (kind 19/21, "Order kinds and player commands") is still sitting in whichever
+   slot it was given. It simply goes dormant: `order_execute` only runs for a person in state 0xA, and fighting
+   means state 25/29 instead, so the order is paused, not cancelled, for as long as the fight lasts.
+2. **Leaving the fight falls back to the person's own per-type default state - which, for an ordinary fighter,
+   is state 0xA.** Every turn, state 25's and state 29's entire per-turn body (both reached through the generic
+   per-state dispatch table, 0x4D3D18) is one call to 0x518560: if the person's own `+0x9D` still resolves to a
+   live controller, nothing happens (stay). If not - dropped by the fight's own roster check (0x519A70, below)
+   or by pre-fight ending - it returns the person's per-type fallback from the same table (0x5A7064) state 1's
+   handler already uses for "what do I do with nothing assigned": types 2-7 (brave..shaman) fall back to
+   **state 0xA**, i.e. straight back into `order_execute`.
+
+Put together: a blast knocks the target out of the ring; next turn, the fight's own roster check (0x519A70,
+called first thing by `0x518FB0`) notices it can no longer path back to the ring's own position (`0x450450`,
+the same reachability helper formations use to drop a strayed member - this, not a raw distance constant read
+anywhere in the function, is the traced identity of the "a fighter farther than some leash leaves" rule) and
+drops it: its slot and its own `+0x9D` are both zeroed right there. On that unit's own next turn, `0x518560`
+notices `+0x9D` is empty and returns it to state 0xA. `order_execute` resumes - with the SAME, never-touched
+attack order, same target id - and the attacker just walks back towards wherever that target actually is now,
+because that is exactly what an ordinary, uninterrupted attack order does. **It is the original order quietly
+surviving the whole fight, not a new one.** A target with no order of its own (the common case) just goes idle
+instead, since it had nothing queued to resume.
+
+Not traced this session (ordinary attack-order behaviour, not fight-specific): how long/far the resumed order
+keeps chasing before giving up on its own, if at all - that is whatever 0x51A2A0's own ordinary termination
+rules already do for any attack order that can't reach its target, not a special case added for this.
 
 ### Preacher conversion ("soul convert") [exe]
 The preacher does not convert in the melee scan: `unit_processing_class_1_person`'s state dispatch (table at
@@ -2840,7 +3011,7 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4EF180 | "delete_unit" |
 | 0x504BC0 | `draw_ui_panel`: building panel, training bar at 0x504FDD (values) and 0x505604 (drawing) |
 | 0x436C20 / 0x436D00 / 0x4364D0 / 0x438730 | alloc / assign (primary or `+0x8B` slot) / release / set-kind-and-target for a command group - "Command groups" |
-| 0x432590 | `order_execute`: resolves a person's active command group and dispatches its kind - "Command groups" |
+| 0x432590 / 0x432D18 / 0x4366B0 | `order_execute` / its 31-entry kind table / `order_advance` (picks what a unit runs next once its current order finishes) - "Command groups" |
 | 0x43A4D0 | order kinds 31/32 (disguise and the preacher's building visit): shared approach-and-RNG-idle machine |
 | 0x43C7A0 | order kind 33 (preach): approaches the target, ends by setting its state to 5 - "Preacher conversion" |
 | 0x51A2A0 | a person's attack order: reach, then join a fight or start a pre-fight |
