@@ -286,7 +286,8 @@ and lies where it landed, then every polygon shrinks away; gone 3 s after the bl
 tick and the drawn moment, seeded by the building's id. The buildings sandbox has a row of built huts (sizes 1-3),
 training units (not the temple), vehicle huts and the prison (`SANDBOX_BLASTS`, south) that blows up in a loop: it
 stands 2 s, blows up, and is built again (new ids, so each round flies its own way) once the explosion is over.
-Started by that loop and the dev hook `EXPLODE=building:N` until the foundation check exists (TODO "Destruction of buildings on uneven/flooded ground").
+Started by that loop, the dev hook `EXPLODE=building:N`, and for real by a building's own foundation check
+shattering it on uneven ground ("Foundation" below).
 
 ### Damage and repair
 The level files store every building as a finished one (level-format.md, building union), but in level 10 the
@@ -306,10 +307,38 @@ The original's reaction to moved ground does not explain it (pop3-rev-analysis.m
 after a terrain change near it, a building only re-levels its footprint towards its average height, or collapses
 when a footprint cell is more than 200 away; it never loses part of its wood. The island's lost pieces must come
 from elsewhere: the atlantis effects (89/90) themselves, a partial explosion like the earthquake's (effect 14), or
-the building's second destroy reason (sub-state 2, not traced). Ours: the foundation check will go where terrain
-changes are applied (`WorldEvent::Terrain` in `GameMap::apply_event`). Only effects change terrain that way today:
-cast terrain spells (`GameMap::apply`, `Spell::cast`) and the editor brushes write the heightmap directly, and must go
-through it too so every change triggers the check (TODO "Destruction of buildings on uneven/flooded ground").
+the building's second destroy reason (sub-state 2, now implemented below, but still not traced as the cause of
+this specific case).
+
+#### Foundation (done: `game_core::foundation`)
+A standing building (`Stage::Built`) checks its own footprint on its own rhythm (`foundation::CHECK_EVERY`, 4
+turns; every turn for a water-sited kind, `BuildingKind::is_water_sited`, today only the boat hut): it re-levels
+towards its base (`Building::level`, repurposed from its construction-time target: recomputed as the average of
+its footprint's height points, or - water-sited - just clamped to a floor, `WATER_BASE_MIN`, never averaged), or
+collapses:
+- **Too-steep ground**: the first footprint height point found more than `PULL_RANGE` (200) from the base
+  shatters the building on the spot (`Collapse::Shattering`) instead of being pulled back - never checked for a
+  water-sited kind (no single target height to diverge from). Removed the tick after (one tick left standing so
+  the client can still catch it and play the ordinary building-explosion visual, `explosion::BuildingExploded` -
+  `buildings.rs`'s `respawn_buildings` fires it the instant it sees the transition).
+- **Flooding** (ordinary buildings only): before the per-point pass, if more than `FLOOD_FRACTION` (5/8) of the
+  footprint's fine cells (`Building::walled_cells`) are at or below sea level, it starts sinking
+  (`Collapse::Sinking`, `foundation::SINK_TICKS` = 80 turns) instead - a water-sited kind is immune, it just sits
+  there. Drawn client-side (`buildings.rs`'s `sink_and_rock`): it drops lower on an accelerating curve (every 8
+  turns, `sink_depth`) and tilts with a decaying wobble (`sink_tilt`) - the original's own compass-histogram lean
+  target and oscillator formula are not confirmed (pop3-rev-analysis.md "Building sinking (flooded
+  destruction)"), so the wobble here is our own approximation, `[ours]`.
+- Otherwise, every point within range is pulled `PULL_RATE` (2) towards its target each time the check fires - a
+  water-sited building's own water-side footprint points target sea level instead of its base.
+
+Neither collapse reason leaves ashes (`GameMap::remove_building`, not `burn_down`), unlike wear or fire
+destruction; occupants are put out first either way (`GameMap::throw_out`).
+
+**[ours] A periodic per-building scan, not a reactive hook on every terrain write** (`WorldEvent::Terrain` in
+`GameMap::apply_event`, this doc's own earlier plan): simpler, and it reacts to the ground under a building
+exactly as it is whenever its own rhythm fires, whatever changed it (a spell, erosion, construction settling, a
+reincarnation site's own re-levelling) - at the cost of up to `CHECK_EVERY`'s own latency (0.33 s) before it
+notices, against the original's own likely-reactive design.
 
 Attackers wear buildings down and burnt or worn-down buildings leave ashes: combat.md "Attacking a building",
 "Ashes".
