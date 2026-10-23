@@ -142,14 +142,15 @@ fn draw(
         gizmos.line(lift_bar(start), lift_bar(start + right * BAR_LENGTH), WEAR_BACK);
         gizmos.line(lift_bar(start), lift_bar(start + fill), WEAR);
     }
-    // A listener's progress to its next conversion chance (`Sermon::left`, sermon.rs): fills up, then resets;
-    // a tick above the bar per check already missed, so a sermon stuck resetting still reads as making progress.
-    for (_, sermon) in map.coordinators.sermons.iter() {
-        let Some(l) = map.unit(sermon.listener) else { continue };
-        let (start, fill) = bar(cells((l.x, l.z)), sermon.left.done().get(), sermon.left.total().get(), right);
+    // A listener's progress to its next conversion chance (`Action::Listening::left`, sermon.rs): fills up, then
+    // resets; a tick above the bar per check already missed, so a sermon stuck resetting still reads as making
+    // progress.
+    for l in &map.units {
+        let Action::Listening { left, attempts, .. } = l.action else { continue };
+        let (start, fill) = bar(cells((l.x, l.z)), left.done().get(), left.total().get(), right);
         gizmos.line(lift_bar(start), lift_bar(start + right * BAR_LENGTH), WEAR_BACK);
         gizmos.line(lift_bar(start), lift_bar(start + fill), SERMON);
-        for n in 0..sermon.attempts {
+        for n in 0..attempts {
             let base = lift_bar(start + right * (ATTEMPT_SPACING * n as f32 + ATTEMPT_SPACING / 2.0));
             gizmos.line(base, base + Vec3::Y * ATTEMPT_TICK, SERMON);
         }
@@ -175,8 +176,9 @@ fn draw(
             outline(outline_square(Vec2::new(x as f32 + 0.5, z as f32 + 0.5), 0.5), ASHES.with_alpha(0.3 + 0.7 * fade));
         }
     }
-    for (_, sermon) in map.coordinators.sermons.iter() {
-        let (Some(p), Some(l)) = (map.unit(sermon.preacher), map.unit(sermon.listener)) else { continue };
+    for l in &map.units {
+        let Action::Listening { preacher, .. } = l.action else { continue };
+        let Some(p) = map.unit(preacher) else { continue };
         let p = cells((p.x, p.z));
         outline(vec![p, p + torus_delta_cells(p, cells((l.x, l.z)))], SERMON);
     }

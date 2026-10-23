@@ -4,9 +4,9 @@
 //! ```compile_fail
 //! use game_core::id::Id;
 //! struct Fight;
-//! struct Sermon;
+//! struct Melee;
 //! let fight: Id<Fight> = Id::from_raw(1);
-//! let sermon: Id<Sermon> = fight;
+//! let melee: Id<Melee> = fight;
 //! ```
 
 use std::cmp::Ordering;

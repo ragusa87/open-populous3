@@ -1,16 +1,13 @@
 //! Sermons (docs/specs/combat.md "Sermon"): a preacher sits the enemies it sees down and preaches to them; now and
-//! then one of them joins the preacher's tribe. A coordinator per listener (docs/specs/coordinators.md), as the
-//! original keeps a state per preached person ("Preacher conversion" [exe]).
+//! then one of them joins the preacher's tribe. Not a coordinator (docs/specs/coordinators.md): the original keeps
+//! no backing object for preaching either, just a sub-state on the preacher and a resist timer carried directly on
+//! the listener itself ("Preacher conversion" [exe]) - here, `Action::Listening` on the listener.
 
-use crate::coordinator::{Coordinator, Link, Step};
 use crate::event::WorldEvent;
 use crate::headcount::MAX_POPULATION;
-use crate::id::Id;
 use crate::map::{GameMap, Lcg};
-use crate::time::{Countdown, Tick, Ticks};
+use crate::time::{Countdown, Ticks};
 use crate::unit::{Action, Target, Unit, UnitId, UnitKind};
-
-pub type SermonId = Id<Sermon>;
 
 /// Turns between two chances of conversion, and before the first (constant.dat value, halved for the first:
 /// "Preacher conversion" [exe]).
@@ -21,16 +18,6 @@ pub const CONV_CHANCE: u32 = 5;
 /// Sitting down to listen: the sit-down animation's 6 frames, one turn each ("Combat" [exe]: one turn per frame).
 pub const SIT_TICKS: Ticks = Ticks::new(6);
 
-/// One listener's sermon: who preaches, who listens, the turns to its next chance of conversion, and the
-/// checks so far that missed (debug overlay: shows it is still trying, not stuck).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Sermon {
-    pub preacher: UnitId,
-    pub listener: UnitId,
-    pub left: Countdown,
-    pub attempts: u32,
-}
-
 /// `base` turns, give or take a sixteenth of them ("Preacher conversion" [exe]).
 pub fn jittered(base: u32, rng: &mut Lcg) -> Countdown {
     let spread = base / 16;
@@ -39,7 +26,7 @@ pub fn jittered(base: u32, rng: &mut Lcg) -> Countdown {
 
 /// Whether `preacher` may preach to `target` ("Preacher conversion" [exe]; who is spared [game]): an enemy that fights,
 /// alive, on the ground in the open (never aboard a vehicle), not a preacher or a shaman (those it fights), never a
-/// wildman, and not taken by anything else already.
+/// wildman, not already listening to a sermon, and not taken by anything else already.
 pub fn may_preach(preacher: &Unit, target: &Unit) -> bool {
     preacher.kind == UnitKind::Preacher
         && target.kind.stats().fights
@@ -48,46 +35,13 @@ pub fn may_preach(preacher: &Unit, target: &Unit) -> bool {
         && target.is_alive()
         && target.in_the_open()
         && !target.thrown()
+        && !matches!(target.action, Action::Listening { .. })
         && target.action.link().is_none()
 }
 
 /// Whether `u` stands preaching.
 fn preaching(u: &Unit) -> bool {
     u.action == Action::Preaching
-}
-
-impl Coordinator for Sermon {
-    fn link_of(u: &Unit) -> Option<Id<Self>> {
-        match u.action.link()? {
-            Link::Sermon(id) => Some(id),
-            _ => None,
-        }
-    }
-
-    fn tick(&mut self, id: Id<Self>, members: &[UnitId], _now: Tick, world: &GameMap, rng: &mut Lcg) -> Step {
-        let end = |listener| Step { finished: true, events: vec![WorldEvent::Release { unit: listener, from: Link::Sermon(id) }] };
-        let (Some(p), Some(l)) = (world.unit(self.preacher), world.unit(self.listener)) else { return end(self.listener) };
-        if !members.contains(&l.id) || !l.is_alive() || !p.is_alive() || p.owner == l.owner {
-            return end(l.id);
-        }
-        if p.thrown() || matches!(p.action, Action::Challenge { .. } | Action::Melee { .. }) {
-            let mut step = end(l.id);
-            step.events.push(WorldEvent::StrikeBack { unit: l.id, at: p.id });
-            return step;
-        }
-        if !preaching(p) {
-            return end(l.id);
-        }
-        if !self.left.tick() {
-            return Step::default();
-        }
-        if rng.next_u32() % CONV_CHANCE == 1 && world.housing(p.owner).population < MAX_POPULATION {
-            return Step { finished: true, events: vec![WorldEvent::ChangeOwner { unit: l.id, tribe: p.owner }] };
-        }
-        self.attempts += 1;
-        self.left = jittered(CONV_CHECK, rng);
-        Step::default()
-    }
 }
 
 impl GameMap {
@@ -98,7 +52,14 @@ impl GameMap {
     /// the look rhythm: the gap it still has to close can otherwise vanish into the target's own melee reach before
     /// the preacher's next look turn [game]. A preacher with no listener left stands idle again.
     pub(crate) fn start_sermons(&mut self) {
-        let listened: Vec<UnitId> = self.coordinators.sermons.iter().map(|(_, s)| s.preacher).collect();
+        let listened: Vec<UnitId> = self
+            .units
+            .iter()
+            .filter_map(|u| match u.action {
+                Action::Listening { preacher, .. } => Some(preacher),
+                _ => None,
+            })
+            .collect();
         for u in self.units.iter_mut().filter(|u| preaching(u) && !listened.contains(&u.id)) {
             u.action = Action::Idle;
         }
@@ -142,27 +103,65 @@ impl GameMap {
         let preacher = p.id;
         let first = (self.units[listeners[0]].x, self.units[listeners[0]].z);
         for &j in listeners {
-            let id = self.new_id_of();
             let left = jittered(CONV_FIRST_CHECK, &mut self.rng);
-            self.coordinators.sermons.insert(id, Sermon { preacher, listener: self.units[j].id, left, attempts: 0 });
-            self.sit_down(j, id, at);
+            self.sit_down(j, preacher, left, at);
         }
         let p = &mut self.units[i];
         p.face(first);
         p.join_preaching();
     }
 
-    /// Unit `j` sits down to listen to the sermon `id` of the preacher at `preacher`: a brave puts down the wood it
-    /// carries [game].
-    fn sit_down(&mut self, j: usize, id: SermonId, preacher: (u16, u16)) {
+    /// Unit `j` sits down to listen to `preacher` (its place): a brave puts down the wood it carries [game].
+    fn sit_down(&mut self, j: usize, preacher: UnitId, left: Countdown, at: (u16, u16)) {
         let u = &mut self.units[j];
         if u.carrying > 0 {
             u.carrying = 0;
             self.wood.push(crate::wood::WoodPiece::new(u.x, u.z));
         }
         let u = &mut self.units[j];
-        u.face(preacher);
-        u.join(Action::Listening { sermon: id, sitting: Countdown::new(SIT_TICKS) });
+        u.face(at);
+        u.join(Action::Listening { preacher, sitting: Countdown::new(SIT_TICKS), left, attempts: 0 });
+    }
+
+    /// Every listener's turn ("Preacher conversion" [exe]): the preacher gone, dead or no longer enemy frees it; the
+    /// preacher thrown or fighting ends its sermon and sends it straight after the preacher (`WorldEvent::StrikeBack`);
+    /// no longer preaching (an order took it) frees it quietly; otherwise its clock ticks down to another conversion
+    /// roll, 1 in `CONV_CHANCE` once it reaches zero, gated on `MAX_POPULATION` - a miss reschedules it.
+    pub(crate) fn tend_sermons(&mut self) -> Vec<WorldEvent> {
+        let mut events = Vec::new();
+        for i in 0..self.units.len() {
+            let Action::Listening { preacher, sitting, mut left, attempts } = self.units[i].action else { continue };
+            let (l, owner) = (self.units[i].id, self.units[i].owner);
+            let Some(p) = self.unit(preacher) else {
+                self.units[i].action = Action::Idle;
+                continue;
+            };
+            let (p_alive, p_owner, p_thrown, p_fighting, p_preaching) =
+                (p.is_alive(), p.owner, p.thrown(), matches!(p.action, Action::Challenge { .. } | Action::Melee { .. }), preaching(p));
+            if !p_alive || p_owner == owner {
+                self.units[i].action = Action::Idle;
+                continue;
+            }
+            if p_thrown || p_fighting {
+                self.units[i].action = Action::Idle;
+                events.push(WorldEvent::StrikeBack { unit: l, at: preacher });
+                continue;
+            }
+            if !p_preaching {
+                self.units[i].action = Action::Idle;
+                continue;
+            }
+            if !left.tick() {
+                self.units[i].action = Action::Listening { preacher, sitting, left, attempts };
+                continue;
+            }
+            if self.rng.next_u32() % CONV_CHANCE == 1 && self.housing(p_owner).population < MAX_POPULATION {
+                events.push(WorldEvent::ChangeOwner { unit: l, tribe: p_owner });
+                continue;
+            }
+            self.units[i].action = Action::Listening { preacher, sitting, left: jittered(CONV_CHECK, &mut self.rng), attempts: attempts + 1 };
+        }
+        events
     }
 
     /// The unit `unit` joins `tribe` (`WorldEvent::ChangeOwner`): as the original's new person in its place, it keeps
@@ -274,11 +273,11 @@ mod tests {
         until(&mut map, 4, |m| others.iter().all(|&u| listening(m, u))).expect("both listen");
         challenged(&mut map, others[0]);
         map.tick();
-        assert_eq!(map.coordinators.sermons.len(), 1, "its sermon ended");
+        assert!(!listening(&map, others[0]), "its sermon ended");
         assert!(listening(&map, others[1]), "the other one listens on");
         challenged(&mut map, p);
         map.tick();
-        assert!(map.coordinators.sermons.is_empty() && !listening(&map, others[1]), "the preacher attacked: every sermon ends");
+        assert!(!listening(&map, others[1]), "the preacher attacked: every sermon ends");
         assert!(matches!(map.unit(others[1]).unwrap().action, Action::Attacking { target: Target::Unit(t), .. } if t == p), "its listener turns on it");
     }
 

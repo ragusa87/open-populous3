@@ -158,7 +158,8 @@ impl Coordinator for Challenge {
 
 impl GameMap {
     /// Attackers within reach of a free target challenge it (`Challenge`); the charge's speed is drawn here. A
-    /// target already in a fight is left alone for now, a shaman in her cast jump until it ends.
+    /// target already in a fight is left alone for now, a shaman in her cast jump until it ends - a listener
+    /// (sermon.rs: locked but linked to no coordinator) is free, so attacking one still takes it out of its sermon.
     pub(crate) fn start_challenges(&mut self) {
         for i in 0..self.units.len() {
             let a = &self.units[i];
@@ -168,7 +169,7 @@ impl GameMap {
             }
             let Some(j) = self.unit_index(target) else { continue };
             let t = &self.units[j];
-            let free = matches!(self.linked(t), None | Some(Link::Sermon(_)));
+            let free = self.linked(t).is_none();
             if !free || t.thrown() || !crate::attack::may_attack(a, t) || matches!(t.action, Action::Casting { .. }) || !t.in_the_open() || !in_reach((a.x, a.z), (t.x, t.z)) {
                 continue;
             }

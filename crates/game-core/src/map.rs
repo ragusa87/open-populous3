@@ -1415,12 +1415,14 @@ impl GameMap {
         self.join_melees();
     }
 
-    /// Every coordinator's turn, reading the map as it was before any of them; the finished ones removed; then their
-    /// events apply in order. The ground they changed.
+    /// Every coordinator's turn, reading the map as it was before any of them, plus every sermon's (not a
+    /// coordinator: `tend_sermons`, sermon.rs); the finished ones removed; then their events apply in order. The
+    /// ground they changed.
     fn tend_coordinators(&mut self) -> Vec<DirtyRect> {
         let (mut coordinators, mut rng) = (std::mem::take(&mut self.coordinators), self.rng);
-        let events = coordinators.tick(self.now, self, &mut rng);
+        let mut events = coordinators.tick(self.now, self, &mut rng);
         (self.coordinators, self.rng) = (coordinators, rng);
+        events.extend(self.tend_sermons());
         self.apply_events(events)
     }
 

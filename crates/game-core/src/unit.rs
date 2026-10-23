@@ -201,8 +201,9 @@ pub enum Action {
     Hacking { building: crate::building::BuildingId, left: Countdown, at_door: bool },
     /// Waiting in the queue of the training unit `building` (training.rs), standing at or walking to its spot `at`.
     Queuing { building: crate::building::BuildingId, at: (u16, u16) },
-    /// Sitting, listening to a preacher in the sermon `sermon` (sermon.rs): locked until converted or the sermon ends.
-    Listening { sermon: crate::sermon::SermonId, sitting: Countdown },
+    /// Sitting, listening to `preacher` (sermon.rs): `left` to its next conversion chance, `attempts` so far
+    /// missed (debug overlay); locked until converted or the sermon ends.
+    Listening { preacher: UnitId, sitting: Countdown, left: Countdown, attempts: u32 },
     /// A preacher standing, preaching to its listeners (sermon.rs).
     Preaching,
     /// Fighting in the melee `melee` (melee.rs): its place in the ring, its stance.
@@ -249,12 +250,12 @@ impl Action {
         }
     }
 
-    /// The coordinator this action takes part in, if any (coordinator.rs).
+    /// The coordinator this action takes part in, if any (coordinator.rs). `Listening` is locked the same way but
+    /// backed by no coordinator (sermon.rs), so it never links.
     pub fn link(&self) -> Option<crate::coordinator::Link> {
         match *self {
             Action::Challenge { challenge, .. } => return Some(crate::coordinator::Link::Challenge(challenge)),
             Action::Melee { melee, .. } => return Some(crate::coordinator::Link::Melee(melee)),
-            Action::Listening { sermon, .. } => return Some(crate::coordinator::Link::Sermon(sermon)),
             _ => {}
         }
         #[cfg(test)]
@@ -759,9 +760,9 @@ impl Unit {
             }
             Action::Challenge { challenge, role } => self.action = Action::Challenge { challenge, role: self.play(role, ground) },
             Action::Melee { melee, place, stance } => self.action = Action::Melee { melee, place, stance: self.fight(place, stance, ground) },
-            Action::Listening { sermon, mut sitting } => {
+            Action::Listening { preacher, mut sitting, left, attempts } => {
                 sitting.tick();
-                self.action = Action::Listening { sermon, sitting };
+                self.action = Action::Listening { preacher, sitting, left, attempts };
             }
             Action::Preaching => {}
             Action::Entering { to } => {
@@ -1059,10 +1060,10 @@ impl Unit {
         self.action = Action::Idle;
     }
 
-    /// Joins a coordinator with `action` (one that links to it), leaving its way, its chained orders and the spell
-    /// it was to cast.
+    /// Joins a coordinator, or a sermon's `Listening` (locked the same way but backed by no coordinator), with
+    /// `action`, leaving its way, its chained orders and the spell it was to cast.
     pub(crate) fn join(&mut self, action: Action) {
-        debug_assert!(action.link().is_some());
+        debug_assert!(action.link().is_some() || matches!(action, Action::Listening { .. }));
         (self.route, self.planned_on, self.teleport_to, self.spell) = (Vec::new(), None, None, None);
         self.queue.clear();
         self.action = action;

@@ -494,7 +494,12 @@ mod tests {
     fn a_listener_sits_down_once_then_stays_seated() {
         use game_core::sermon::SIT_TICKS;
         use game_core::time::{Countdown, Ticks};
-        let listening = |left| Action::Listening { sermon: game_core::id::Id::from_raw(1), sitting: Countdown::with_left(SIT_TICKS, Ticks::new(left)) };
+        let listening = |left| Action::Listening {
+            preacher: game_core::id::Id::from_raw(1),
+            sitting: Countdown::with_left(SIT_TICKS, Ticks::new(left)),
+            left: Countdown::new(Ticks::new(1)),
+            attempts: 0,
+        };
         assert_eq!(frame_index(Pose::Listen, 6, &listening(SIT_TICKS.get()), at(0.0), 0.0), 0, "starting to sit");
         for secs in [0.0, 1.3, 7.0, 42.5] {
             assert_eq!(frame_index(Pose::Listen, 6, &listening(0), at(secs), 0.5), 5, "seated, never up again");

@@ -223,9 +223,10 @@ join a melee on their own attack (they still fight when challenged).
 - A sermon per listener, kept as state on the two units involved rather than a separate coordinator object - the
   original does the same: no backing object of any kind, just a sub-state on the preacher and a resist-timer and
   striker reference carried directly on the listener itself [exe]. `Action::Listening { preacher, sitting, left,
-  attempts }` on the listener carries everything a sermon needs (TODO.md: removing the `sermon::Sermon` coordinator
-  to match this). The listener sits (anim 18) and is locked [game]: no orders, dropped from its player's selection,
-  until converted, freed or dead; a brave puts down the wood it carries [game]. It still heals and can be attacked:
+  attempts }` on the listener carries everything a sermon needs, ticked by `GameMap::tend_sermons`
+  (docs/specs/coordinators.md), not a coordinator. The listener sits (anim 18) and is locked [game]: no orders,
+  dropped from its player's selection, until converted, freed or dead; a brave puts down the wood it carries
+  [game]. It still heals and can be attacked:
   an attacker challenges it as anyone, which takes it out of its sermon, the others listen on [game]. More listeners
   on one preacher convert faster only in the aggregate, never individually: each listener's own countdown and roll
   are entirely independent of every other listener's - this is a plain property of several independent timers

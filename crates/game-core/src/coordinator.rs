@@ -2,8 +2,9 @@
 //! invisible "internal" things (class 10: fights, formations, guard control...). Units link to one through their
 //! action, one way; the coordinator keeps no list of them. It ticks before the units, returns `WorldEvent`s, and is
 //! removed when its situation ends; its units then find its id gone and are released (`GameMap::release_orphans`).
-//! Kinds: `challenge::Challenge`, `melee::Melee`, `sermon::Sermon`, `armageddon::ArmageddonMatch` (global: no unit
-//! ever links to it); a test-only `Gathering` proves the pattern.
+//! Kinds: `challenge::Challenge`, `melee::Melee`, `armageddon::ArmageddonMatch` (global: no unit ever links to it);
+//! a test-only `Gathering` proves the pattern. A sermon is deliberately not one of these (sermon.rs): just state on
+//! the preacher and the listener directly, like the original.
 
 use crate::event::WorldEvent;
 use crate::id::{Id, Registry};
@@ -32,7 +33,6 @@ pub trait Coordinator: Sized {
 pub enum Link {
     Challenge(crate::challenge::ChallengeId),
     Melee(crate::melee::MeleeId),
-    Sermon(crate::sermon::SermonId),
     #[cfg(test)]
     Gathering(Id<tests::Gathering>),
 }
@@ -42,7 +42,6 @@ pub enum Link {
 pub struct Coordinators {
     pub challenges: Registry<crate::challenge::Challenge>,
     pub melees: Registry<crate::melee::Melee>,
-    pub sermons: Registry<crate::sermon::Sermon>,
     /// Armageddon's match, if one is active (`armageddon.rs`): global, no unit ever links to it.
     pub armageddons: Registry<crate::armageddon::ArmageddonMatch>,
     #[cfg(test)]
@@ -55,7 +54,6 @@ impl Coordinators {
         match link {
             Link::Challenge(id) => self.challenges.contains(id),
             Link::Melee(id) => self.melees.contains(id),
-            Link::Sermon(id) => self.sermons.contains(id),
             #[cfg(test)]
             Link::Gathering(id) => self.gatherings.contains(id),
         }
@@ -67,7 +65,6 @@ impl Coordinators {
         let mut events = Vec::new();
         tick_kind(&mut self.challenges, now, world, rng, &mut events);
         tick_kind(&mut self.melees, now, world, rng, &mut events);
-        tick_kind(&mut self.sermons, now, world, rng, &mut events);
         tick_kind(&mut self.armageddons, now, world, rng, &mut events);
         #[cfg(test)]
         tick_kind(&mut self.gatherings, now, world, rng, &mut events);

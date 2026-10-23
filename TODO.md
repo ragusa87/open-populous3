@@ -227,42 +227,6 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   replacement) is now fully understood as two distinct cases - a still-unidentified per-candidate flag that skips
   straight to destruction, and the tribe's population cap (200, exact) which instead skips both destruction and
   replacement entirely - see "Preacher conversion" for both.
-- [ ] Remove the `sermon::Sermon` coordinator, replacing it with plain state on the two units involved - the
-  original never backs preaching with any object at all (unlike Fight/Pre-Fight/Formation, which do get one): just
-  a sub-state on the preacher and a resist-timer plus striker reference carried directly on the listener
-  (pop3-rev-analysis.md "Preacher conversion"). Every piece of data and logic `Sermon::tick` currently owns already
-  reads and writes nothing but `self.preacher`/`self.listener` via `world.unit(..)` - it never reaches into any
-  other sermon or needs the registry for anything but being invoked - so this is a mechanical, behaviour-preserving
-  move, not a redesign:
-  - `Sermon { preacher: UnitId, listener: UnitId, left: Countdown, attempts: u32 }` (today, one instance per
-    listener in `Coordinators::sermons: Registry<Sermon>`) → folded directly into the listener's own
-    `Action::Listening { preacher: UnitId, sitting: Countdown, left: Countdown, attempts: u32 }` (today:
-    `Action::Listening { sermon: SermonId, sitting }`, indirecting through the registry by id). The listener then
-    carries everything a sermon needs itself, with no id/link indirection.
-  - `Coordinator::tick()` (invoked once per sermon id via `tick_kind`/`Coordinators::tick`): the exact same checks
-    (preacher/listener still alive and enemies, preacher thrown or in a `Challenge`/`Melee` → release + emit
-    `WorldEvent::StrikeBack`, preacher no longer `Action::Preaching` → plain release, tick `left`, roll conversion
-    at `CONV_CHANCE` 1-in-5 once `left` hits zero gated on `MAX_POPULATION`, else reschedule) move to run inline as
-    part of the listener's own ordinary per-unit tick, in the same place `sitting.tick()` already runs today.
-  - `Coordinators::sermons` and the `participants()` reverse index for this kind: removed - nothing to register,
-    the unit's own `Action::Listening` payload *is* the state; same for `Link::Sermon(id)` and `Action::link()`'s
-    `Listening => Link::Sermon(..)` arm (`Listening` no longer links to anything coordinator-shaped), and for
-    `GameMap::release_orphans` ever needing to notice a vanished `Sermon` (there is no separate object to vanish).
-  - `start_sermons`'s "any `Preaching` unit not among existing sermons' `preacher` fields → `Idle`" check (built
-    today by scanning the `Sermon` registry) inverts to scanning units instead: a `Preaching` unit checks, each
-    turn, whether any other unit's `Action::Listening{preacher, ..}` still names it - same linear cost, just moved
-    to a different collection. This is the one place the logic's *shape* changes, not its behaviour.
-  - `WorldEvent::Release{unit, from: Link::Sermon(id)}` becomes a plain `Release{unit}` (or just setting
-    `Action::Idle` inline) - there's no coordinator existence check left to make it conditional on.
-  - Not a separate mechanism and needs no new state: "more listeners on one preacher converts faster overall" is a
-    plain emergent property of several independent per-listener timers/rolls running in parallel (the first
-    success among N independent waiting times lands sooner than any one alone) - no single listener converts
-    faster with more listeners around it, and nothing above needs to account for it.
-  - Unaffected either way (none of this touches the coordinator): `Action::Preaching` itself, `may_preach`,
-    `begin_sermon`'s sit-down scan, `sit_down`'s wood-drop/animation setup, `Unit::change_owner`, every drawn
-    detail (anim 18/22, the dev overlay's preacher→listener lines).
-  - Correctness bar: `sermon.rs`'s existing test module should pass unchanged against the new shape - none of its
-    tests assert on `Sermon`/`SermonId` by name in a way that would need to change.
 - [ ] Resuming a fight cut short by a push (combat.md "Melee" rule 1: a fighter farther than `MELEE_LEASH` leaves;
   pop3-rev-analysis.md "Resuming a fight cut short by a push", now fully traced): the original never cancels an
   attacker's order when it enters a fight - starting/joining one only changes the person's state, its original

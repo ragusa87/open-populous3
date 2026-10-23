@@ -4,9 +4,9 @@ Short-lived simulation objects that coordinate several units: a fight, a formati
 control. The infrastructure is `game_core::coordinator`; kinds: the challenge and the melee (combat.md "Challenge",
 "Melee"). Each kind has its own spec and rules on top of this.
 
-A sermon is deliberately **not** one of these (TODO.md: removing `sermon::Sermon`) - the original keeps no backing
-object for preaching at all, just state on the preacher and the listener directly (combat.md "Sermon"), and ours
-should match that rather than using this coordinator machinery for it.
+A sermon is deliberately **not** one of these - the original keeps no backing object for preaching at all, just
+state on the preacher and the listener directly (combat.md "Sermon"), and ours matches that (`sermon.rs`'s
+`tend_sermons`, not a `Coordinator` impl) rather than using this coordinator machinery for it.
 
 Tags: **[exe]** the original executable (pop3-rev-analysis.md), **[wiki]** the Populous Wiki (Object Data),
 **[ours]** a choice made here.
@@ -82,6 +82,10 @@ In `GameMap::tick`, after camp fires, vaults and totems, before units (architect
 3. the finished ones removed;
 4. their events applied in order;
 5. `release_orphans`: units whose coordinator is gone back to Idle.
+
+`tend_coordinators` also runs `sermon::tend_sermons` on the same map snapshot, folding its events into the same
+batch - a sermon rides this phase without being a coordinator kind itself (no registry, no `Link`, nothing for
+`release_orphans` to notice).
 
 Then the units tick: a coordinator that ends this turn is already gone, and its units already free.
 
