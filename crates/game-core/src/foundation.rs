@@ -217,21 +217,19 @@ mod tests {
 
     #[test]
     fn a_spread_over_200_shatters_even_though_neither_point_alone_strays_from_the_average() {
-        // A reported live case: footprint corners at heights 128, 266 and 64 - the two extremes 202 apart
-        // from each other, though each stays within 200 of the recomputed average (close to 128 with enough
-        // other points near it): still too uneven, caught by the footprint-wide spread, not a per-point
-        // deviation from that average.
+        // A reported live case: footprint corners (95,60)=128, (94,61)=266, (94,59)=64 - the two extremes
+        // 202 apart from each other, though each stays within 200 of the recomputed average (~153, with
+        // enough other points near 128): still too uneven, caught by the footprint-wide spread, not a
+        // per-point deviation from that average.
         let mut m = GameMap::sandbox_walk();
-        let id = m.add_building(Building::new(BuildingKind::Vault, 0, 40 * 512, 40 * 512, 0));
+        let id = m.add_building(Building::new(BuildingKind::Temple, 0, 95 * 512, 60 * 512, 0));
         let points = m.building(id).unwrap().ground_points();
-        assert!(points.len() >= 3, "{points:?}");
+        assert!([(95, 60), (94, 61), (94, 59)].iter().all(|p| points.contains(p)), "{points:?}");
         for &(x, z) in &points {
             m.terrain.set(x, z, 128);
         }
-        let (hx, hz) = points[0];
-        let (lx, lz) = points[points.len() - 1];
-        m.terrain.set(hx, hz, 266);
-        m.terrain.set(lx, lz, 64);
+        m.terrain.set(94, 61, 266);
+        m.terrain.set(94, 59, 64);
         run(&mut m, 4);
         assert_eq!(m.building(id).unwrap().collapse, Some(Collapse::Shattering));
     }
