@@ -34,6 +34,7 @@ const BOLT: Color = Color::srgb(0.3, 0.6, 1.0);
 const SPELL: Color = Color::srgb(0.6, 0.9, 0.3);
 const ASHES: Color = Color::srgb(0.6, 0.6, 0.6);
 const WEAR_BACK: Color = Color::srgb(0.3, 0.3, 0.3);
+const PATROL: Color = Color::srgb(0.3, 0.9, 0.9);
 /// The wear bar: its height over the ground and its length, cells.
 const BAR_LIFT: f32 = 1.2;
 const BAR_LENGTH: f32 = 1.0;
@@ -194,6 +195,25 @@ fn draw(
                 outline(vec![cells((u.x, u.z)), cells((u.x, u.z)) + torus_delta_cells(cells((u.x, u.z)), cells(place))], MELEE.with_alpha(0.6));
             }
         }
+    }
+    for u in &map.units {
+        let points: Vec<Vec2> = u.queued_patrol().iter().filter_map(|id| patrol_point_at(map, id)).map(cells).collect();
+        for &p in &points {
+            outline(outline_circle(p, PLACE_MARK), PATROL);
+        }
+        if let Some(&first) = points.first() {
+            outline(points.iter().copied().chain([first]).collect(), PATROL);
+        }
+    }
+}
+
+/// Where a patrol point currently is, to draw it: a `GoTo`'s hidden point, or a live `Attack` target's
+/// current position (a unit or a building); None if either is gone (pruned next tick regardless).
+fn patrol_point_at(map: &game_core::map::GameMap, id: game_core::patrol::PatrolPointId) -> Option<(u16, u16)> {
+    match map.patrol_points.get(id)?.action {
+        game_core::patrol::PatrolAction::GoTo(hp) => map.hidden_points.get(hp).map(|p| (p.x, p.z)),
+        game_core::patrol::PatrolAction::Attack(game_core::unit::Target::Unit(target)) => map.unit(target).map(|u| (u.x, u.z)),
+        game_core::patrol::PatrolAction::Attack(game_core::unit::Target::Building(target)) => map.building(target).map(game_core::building::Building::centre),
     }
 }
 
