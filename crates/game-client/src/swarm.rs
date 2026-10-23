@@ -1,9 +1,10 @@
 //! Swarm (insect plague, `game_core::swarm`): the cloud itself is invisible to the simulation (no terrain
 //! change, no drawable body of its own — same convention as `volcano_rocks.rs`'s own "nothing for the
 //! simulation to do"), so everything here is drawn from the effect's id and its live wandering position
-//! alone: `BEE_COUNT` small camera-facing dots scattered around it, about 1 in 16 tinted the caster's
-//! tribe colour (pop3-rev-analysis.md "Insect plague": "roughly one spawned bee-dot in sixteen"; the exact
-//! neutral tint for the rest was never decoded, so that colour is our own guess, `[ours]`), trickling in
+//! alone: `BEE_COUNT` small camera-facing dots scattered around it, `TRIBE_CHANCE` tinted the caster's
+//! tribe colour (pop3-rev-analysis.md "Insect plague" traces "roughly one spawned bee-dot in sixteen", but
+//! that reads as near-invisible at the size a dot actually renders at, so the odds are bumped well past it
+//! for legibility, `[ours]`; the exact neutral tint for the rest was never decoded either, also `[ours]`), trickling in
 //! over the first turns of the effect's life rather than popping in all at once (`volcano_rocks.rs`'s own
 //! `Visibility::Hidden`-until-born idiom, standing in for the trace's own "one new bee-dot every tick" —
 //! a reasoned simplification, not a re-trace, since tracking 60 individually-timed dots buys nothing here).
@@ -24,20 +25,29 @@ use game_core::time::{Tick, TICKS_PER_SECOND};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// "A few bees", per the ask.
-const BEE_COUNT: u32 = 8;
+const BEE_COUNT: u32 = 24;
 /// Spread over this many of the effect's own first ticks so they trickle in (our own stand-in, see module doc).
 const SPAWN_SPREAD_TICKS: u32 = 30;
-/// Chance (per bee) of the caster's own tribe colour rather than the shared neutral tint.
-const TRIBE_CHANCE: f32 = 1.0 / 16.0;
-const NEUTRAL: Color = Color::srgb(0.85, 0.82, 0.3);
-/// How far out from the cloud's live centre a bee buzzes, cells.
+/// Chance (per bee) of the caster's own tribe colour rather than the shared neutral tint: the trace's own
+/// "roughly one in sixteen" reads as near-invisible at the small sizes a dot actually renders at, so this is
+/// bumped well past that for legibility (`[ours]`, a deliberate deviation, not a re-trace).
+const TRIBE_CHANCE: f32 = 0.25;
+const NEUTRAL: Color = Color::srgb(0.03, 0.03, 0.03);
+/// How far out from the cloud's live centre a bee flies, cells.
 const RADIUS: f32 = 0.6;
-/// Buzzing speed, radians/sec, two phase-shifted wobbles per bee.
+/// Each bee loops an oval, not a circle (`buzz`): its long axis is `major`, short axis `major * OVAL_RATIO` —
+/// reads as a bird banking around the flock rather than a single uniform spiral.
+const OVAL_RATIO: f32 = 0.35;
+/// Looping speed, radians/sec.
 const BUZZ_SPEED: f32 = 5.5;
 const BOB_SPEED: f32 = 8.0;
-const BOB_HEIGHT: f32 = 0.08;
-/// Dot size, cells, and how far it's pulled towards the camera (`units::toward_eye`, `dust.rs`'s own idiom).
-const DOT_SIZE: f32 = 0.09;
+const BOB_HEIGHT: f32 = 0.18;
+/// Base height a bee hovers at (cells above the ground), `bob` added on top of this, not around zero: flying
+/// insects read as flying, not skimming the grass.
+const HOVER_HEIGHT: f32 = 0.55;
+/// Dot size, cells, and how far it's pulled towards the camera (`units::toward_eye`, `dust.rs`'s own idiom):
+/// bigger than a literal insect so it still reads once the camera pulls back.
+const DOT_SIZE: f32 = 0.22;
 const PULL_TO_EYE: f32 = 0.15;
 const TEXTURE: usize = 16;
 
@@ -54,14 +64,19 @@ pub fn bee_texture(size: usize) -> Vec<u8> {
         .collect()
 }
 
-/// A bee's own buzzing offset (cells, around the cloud's centre) and bob (render units) at `age` seconds
-/// into the effect's life: a pure function of `(age, seed)`, matching every other world visual.
-fn buzz(age: f32, seed: f32) -> (Vec2, f32) {
+/// A bee's own oval flight offset (cells, around the cloud's centre) and bob (render units) at `age` seconds
+/// into the effect's life: a pure function of `(age, seed, heading)`, matching every other world visual.
+/// `heading` (radians) turns the oval's own long axis, so different bees swoop on different lines rather
+/// than all tracing the same circle.
+fn buzz(age: f32, seed: f32, heading: f32) -> (Vec2, f32) {
     let phase = seed * std::f32::consts::TAU;
-    let amp = RADIUS * (0.5 + 0.5 * seed);
+    let major = RADIUS * (0.6 + 0.4 * seed);
+    let minor = major * OVAL_RATIO;
     let angle = age * BUZZ_SPEED + phase;
-    let offset = Vec2::new(angle.cos(), angle.sin()) * amp;
-    let bob = BOB_HEIGHT + (age * BOB_SPEED + phase * 2.0).sin() * BOB_HEIGHT;
+    let local = Vec2::new(angle.cos() * major, angle.sin() * minor);
+    let (sin_h, cos_h) = heading.sin_cos();
+    let offset = Vec2::new(local.x * cos_h - local.y * sin_h, local.x * sin_h + local.y * cos_h);
+    let bob = HOVER_HEIGHT + (age * BOB_SPEED + phase * 2.0).sin() * BOB_HEIGHT;
     (offset, bob)
 }
 
@@ -75,12 +90,24 @@ struct Bee {
     effect: Id<Effect>,
     born: f32,
     seed: f32,
+    heading: f32,
 }
+
+/// `sites::tribe_color`'s own 4 named tribes plus its fallback, so every owner value has a slot.
+const TRIBE_SLOTS: usize = 5;
 
 #[derive(Resource)]
 pub struct SwarmAssets {
     quad: Handle<Mesh>,
-    texture: Handle<Image>,
+    neutral: Handle<StandardMaterial>,
+    /// One material per owner (`tribe_material`, clamped into `TRIBE_SLOTS`), built once so every bee of
+    /// every swarm reuses the same handful of handles — same mesh, same material, batches on the GPU —
+    /// instead of a fresh `StandardMaterial` asset per bee.
+    tribes: [Handle<StandardMaterial>; TRIBE_SLOTS],
+}
+
+fn tribe_material(assets: &SwarmAssets, owner: u8) -> Handle<StandardMaterial> {
+    assets.tribes[(owner as usize).min(TRIBE_SLOTS - 1)].clone()
 }
 
 #[derive(Component)]
@@ -88,7 +115,7 @@ pub struct SwarmView;
 
 impl WorldView for SwarmView {
     type Model = (Id<Effect>, Effect);
-    type Params = (Res<'static, CurrentMap>, Res<'static, SwarmAssets>, ResMut<'static, Assets<StandardMaterial>>);
+    type Params = (Res<'static, CurrentMap>, Res<'static, SwarmAssets>);
 
     fn models(map: &GameMap) -> impl Iterator<Item = &(Id<Effect>, Effect)> {
         map.effects.entries().filter(|(_, e)| matches!(e.kind, EffectKind::Swarm(_)))
@@ -98,23 +125,20 @@ impl WorldView for SwarmView {
         id.raw()
     }
 
-    fn spawn((id, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (_, assets, mats): &mut SystemParamItem<Self::Params>) -> Option<Self> {
+    fn spawn((id, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (_, assets): &mut SystemParamItem<Self::Params>) -> Option<Self> {
         let raw = id.raw();
-        let colour = tribe_color(e.owner);
+        let tribe_material = tribe_material(assets, e.owner);
         view.insert((Transform::default(), Visibility::Hidden));
         view.with_children(|v| {
             for k in 0..BEE_COUNT {
                 let s = |salt: u32| seed(raw.wrapping_mul(97).wrapping_add(k.wrapping_mul(181)).wrapping_add(salt));
-                let tribe_coloured = s(1) < TRIBE_CHANCE;
-                let material = mats.add(StandardMaterial {
-                    base_color_texture: Some(assets.texture.clone()),
-                    base_color: if tribe_coloured { colour } else { NEUTRAL },
-                    alpha_mode: AlphaMode::Blend,
-                    unlit: true,
-                    cull_mode: None,
-                    ..default()
-                });
-                let bee = Bee { effect: *id, born: (s(2) * SPAWN_SPREAD_TICKS as f32) / TICKS_PER_SECOND as f32, seed: s(3) };
+                let material = if s(1) < TRIBE_CHANCE { tribe_material.clone() } else { assets.neutral.clone() };
+                let bee = Bee {
+                    effect: *id,
+                    born: (s(2) * SPAWN_SPREAD_TICKS as f32) / TICKS_PER_SECOND as f32,
+                    seed: s(3),
+                    heading: s(4) * std::f32::consts::TAU,
+                };
                 v.spawn((bee, Grounded { at: Vec2::new(e.x as f32, e.z as f32) / WORLD_UNITS_PER_CELL as f32, half: 0.0 }, Transform::default(), Visibility::Hidden, crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), crate::hover::NoOutline))
                     .with_child((Mesh3d(assets.quad.clone()), MeshMaterial3d(material), Transform::default()));
             }
@@ -128,17 +152,25 @@ impl WorldView for SwarmView {
     fn update(&self, _model: &(Id<Effect>, Effect), _now: SimNow, _params: &mut SystemParamItem<Self::Params>) {}
 }
 
-fn load_assets(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: ResMut<Assets<Mesh>>) {
+fn load_assets(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     use bevy::asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-    let texture = Image::new(
+    let image = Image::new(
         Extent3d { width: TEXTURE as u32, height: TEXTURE as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
         bee_texture(TEXTURE),
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     );
-    commands.insert_resource(SwarmAssets { quad: meshes.add(Rectangle::new(DOT_SIZE, DOT_SIZE)), texture: images.add(texture) });
+    let texture = images.add(image);
+    let mut material = |base_color: Color| {
+        mats.add(StandardMaterial { base_color_texture: Some(texture.clone()), base_color, alpha_mode: AlphaMode::Blend, unlit: true, cull_mode: None, ..default() })
+    };
+    commands.insert_resource(SwarmAssets {
+        quad: meshes.add(Rectangle::new(DOT_SIZE, DOT_SIZE)),
+        neutral: material(NEUTRAL),
+        tribes: std::array::from_fn(|i| material(tribe_color(i as u8))),
+    });
 }
 
 /// Every bee's buzzing motion around its swarm's live wandering position, facing the camera; hidden
@@ -172,17 +204,17 @@ fn pose_bees(
         *vis = Visibility::Visible;
         let (x, z) = swarm.pos();
         let centre = Vec2::new(x as f32, z as f32) / WORLD_UNITS_PER_CELL as f32;
-        let (offset, bob) = buzz(age - bee.born, bee.seed);
+        let (offset, bob) = buzz(age - bee.born, bee.seed, bee.heading);
         grounded.at = centre + offset;
         let Some(feet) = render_pos(&map.0.terrain, &grounded, rig.focus, &params.0) else {
             *vis = Visibility::Hidden;
             continue;
         };
         root.translation = feet;
-        let (pull, scale) = toward_eye(feet + Vec3::Y * bob, eye.translation, PULL_TO_EYE);
+        let (pull, scale) = toward_eye(feet, eye.translation, PULL_TO_EYE);
         for &child in children {
             if let Ok(mut t) = bodies.get_mut(child) {
-                t.translation = facing.inverse() * pull;
+                t.translation = facing.inverse() * (pull + Vec3::Y * bob * scale);
                 t.rotation = facing;
                 t.scale = Vec3::splat(scale);
             }
@@ -220,24 +252,32 @@ mod tests {
     }
 
     #[test]
-    fn buzz_is_a_pure_function_of_age_and_seed() {
-        assert_eq!(buzz(1.5, 0.3), buzz(1.5, 0.3));
-        assert_ne!(buzz(1.5, 0.3), buzz(1.5, 0.7), "differs by seed");
-        assert_ne!(buzz(1.5, 0.3), buzz(2.0, 0.3), "differs by age");
+    fn buzz_is_a_pure_function_of_age_seed_and_heading() {
+        assert_eq!(buzz(1.5, 0.3, 1.0), buzz(1.5, 0.3, 1.0));
+        assert_ne!(buzz(1.5, 0.3, 1.0), buzz(1.5, 0.7, 1.0), "differs by seed");
+        assert_ne!(buzz(1.5, 0.3, 1.0), buzz(2.0, 0.3, 1.0), "differs by age");
+        assert_ne!(buzz(1.5, 0.3, 1.0), buzz(1.5, 0.3, 2.0), "differs by heading");
+    }
+
+    #[test]
+    fn buzz_traces_an_oval_not_a_perfect_circle() {
+        let radii: Vec<f32> = (0..20).map(|i| buzz(i as f32 * 0.3, 0.4, 0.0).0.length()).collect();
+        let (min, max) = (radii.iter().cloned().fold(f32::MAX, f32::min), radii.iter().cloned().fold(f32::MIN, f32::max));
+        assert!(max - min > 0.05, "a circle would keep a constant radius, an oval does not: {min}..{max}");
     }
 
     #[test]
     fn buzz_stays_within_its_radius() {
         for i in 0..200 {
-            let (offset, _) = buzz(i as f32 * 0.37, (i as f32 * 0.123).fract());
+            let (offset, _) = buzz(i as f32 * 0.37, (i as f32 * 0.123).fract(), i as f32 * 0.51);
             assert!(offset.length() <= RADIUS + 1e-3, "{offset} too far out");
         }
     }
 
     #[test]
-    fn tribe_colour_roll_lands_around_one_in_sixteen() {
+    fn tribe_colour_roll_lands_around_its_own_chance() {
         let hits = (0..4096u32).filter(|&raw| seed(raw.wrapping_mul(97).wrapping_add(3u32.wrapping_mul(181)).wrapping_add(1)) < TRIBE_CHANCE).count();
         let rate = hits as f32 / 4096.0;
-        assert!((rate - TRIBE_CHANCE).abs() < 0.03, "rate {rate} should be close to 1/16");
+        assert!((rate - TRIBE_CHANCE).abs() < 0.03, "rate {rate} should be close to {TRIBE_CHANCE}");
     }
 }
