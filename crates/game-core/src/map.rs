@@ -2918,6 +2918,39 @@ mod tests {
     }
 
     #[test]
+    fn patrolling_warriors_go_back_and_forth_and_kill_an_enemy_crossing_their_path() {
+        let mut m = GameMap::sandbox_walk();
+        m.trees.clear();
+        let c = MAP_SIZE as i32 / 2;
+        let ids: Vec<UnitId> = (0..2).map(|n| m.spawn(0, UnitKind::Warrior, slots::cell_centre((c - 3, c + n))).id).collect();
+        let (a, b) = (slots::cell_centre((c + 3, c)), slots::cell_centre((c + 9, c)));
+        m.apply(&Command::SetPatrol { player: 0, units: ids.clone(), at: a });
+        m.apply(&Command::AddPatrolPoint { player: 0, units: ids.clone(), at: b });
+        let (mut seen_a, mut seen_b) = (0, 0);
+        for _ in 0..300 {
+            m.tick();
+            for &id in &ids {
+                let cell = m.unit(id).unwrap().cell();
+                seen_a += u32::from(cell == (c + 3, c));
+                seen_b += u32::from(cell == (c + 9, c));
+            }
+        }
+        assert!(seen_a >= 2 && seen_b >= 2, "goes back and forth more than once: {seen_a} {seen_b}");
+        // An enemy brave walks into the middle of the patrol leg and stops there: the next warrior
+        // passing through its exact cell, even just walking through (not idle), spots and kills it.
+        let enemy = m.spawn(1, UnitKind::Brave, slots::cell_centre((c + 6, c + 10))).id;
+        let mid = slots::cell_centre((c + 6, c));
+        m.apply(&Command::OrderUnit { player: 1, unit: enemy, order: Order::MoveTo { x: mid.0, z: mid.1 } });
+        for _ in 0..600 {
+            m.tick();
+            if !m.unit(enemy).unwrap().is_alive() {
+                break;
+            }
+        }
+        assert!(!m.unit(enemy).unwrap().is_alive(), "a patrolling warrior killed the enemy crossing its path");
+    }
+
+    #[test]
     fn release_patrol_prunes_both_registries_next_tick() {
         let mut m = GameMap::sandbox_walk();
         m.trees.clear();
