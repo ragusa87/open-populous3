@@ -9,7 +9,7 @@ use game_core::id::Id;
 use game_core::spell::Spell;
 use game_core::spell_book::SpellKind;
 use game_core::time::Tick;
-use game_core::unit::{Order, Target};
+use game_core::unit::{Order, Target, UnitId};
 use std::io::{self, Read, Write};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,7 +61,9 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 /// camp fire `u16 x, z`, for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`, for
 /// a self cast (a spell not aimed on a spot yet) `spell u8` (its place in `SpellKind::ALL`), for pausing one
 /// `spell u8, paused u8`, for moving a vehicle `u32 vehicle id, u16 x, z`, for unloading one `u32 vehicle id`, for
-/// clearing a swamp `u32 effect id`.
+/// clearing a swamp `u32 effect id`, for a patrol command `u8 unit count` then that many `u32` unit ids, then
+/// `u16 x, z` (`SetPatrol`/`AddPatrolPoint`) or a target tag `u8` (0 unit, 1 building) + `u32` id
+/// (`SetPatrolTarget`/`AddPatrolTargetPoint`), or nothing more (`ReleasePatrol`).
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -180,12 +182,60 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             b.extend([13, *player]);
             put_id(b, *swamp);
         }
+        Command::SetPatrol { player, units, at } => {
+            b.extend([14, *player]);
+            put_units(b, units);
+            b.extend(at.0.to_le_bytes());
+            b.extend(at.1.to_le_bytes());
+        }
+        Command::SetPatrolTarget { player, units, target } => {
+            b.extend([15, *player]);
+            put_units(b, units);
+            put_target(b, *target);
+        }
+        Command::AddPatrolPoint { player, units, at } => {
+            b.extend([16, *player]);
+            put_units(b, units);
+            b.extend(at.0.to_le_bytes());
+            b.extend(at.1.to_le_bytes());
+        }
+        Command::AddPatrolTargetPoint { player, units, target } => {
+            b.extend([17, *player]);
+            put_units(b, units);
+            put_target(b, *target);
+        }
+        Command::ReleasePatrol { player, units } => {
+            b.extend([18, *player]);
+            put_units(b, units);
+        }
     }
 }
 
 /// An id on the wire: `u32` LE.
 fn put_id<T>(b: &mut Vec<u8>, id: Id<T>) {
     b.extend(id.raw().to_le_bytes());
+}
+
+/// A unit list on the wire: `u8` count, then that many `u32` ids.
+fn put_units(b: &mut Vec<u8>, units: &[UnitId]) {
+    b.push(units.len() as u8);
+    for &unit in units {
+        put_id(b, unit);
+    }
+}
+
+/// An attack target on the wire: tag `u8` (0 unit, 1 building) + `u32` id.
+fn put_target(b: &mut Vec<u8>, target: Target) {
+    match target {
+        Target::Unit(id) => {
+            b.push(0);
+            put_id(b, id);
+        }
+        Target::Building(id) => {
+            b.push(1);
+            put_id(b, id);
+        }
+    }
 }
 
 /// A spell kind as its place in `SpellKind::ALL` (Teleport has no panel model).
@@ -289,6 +339,26 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         11 => Some(Command::MoveVehicle { player, vehicle: c.id()?, to: (c.u16()?, c.u16()?) }),
         12 => Some(Command::Unload { player, vehicle: c.id()? }),
         13 => Some(Command::ClearSwamp { player, swamp: c.id()? }),
+        14 => Some(Command::SetPatrol { player, units: get_units(c)?, at: (c.u16()?, c.u16()?) }),
+        15 => Some(Command::SetPatrolTarget { player, units: get_units(c)?, target: get_target(c)? }),
+        16 => Some(Command::AddPatrolPoint { player, units: get_units(c)?, at: (c.u16()?, c.u16()?) }),
+        17 => Some(Command::AddPatrolTargetPoint { player, units: get_units(c)?, target: get_target(c)? }),
+        18 => Some(Command::ReleasePatrol { player, units: get_units(c)? }),
+        _ => None,
+    }
+}
+
+/// A unit list from the wire: `u8` count, then that many `u32` ids.
+fn get_units(c: &mut Cursor) -> Option<Vec<UnitId>> {
+    let n = c.u8()?;
+    (0..n).map(|_| c.id()).collect()
+}
+
+/// An attack target from the wire: tag `u8` (0 unit, 1 building) + `u32` id.
+fn get_target(c: &mut Cursor) -> Option<Target> {
+    match c.u8()? {
+        0 => Some(Target::Unit(c.id()?)),
+        1 => Some(Target::Building(c.id()?)),
         _ => None,
     }
 }
@@ -412,6 +482,11 @@ mod tests {
                 Command::MoveVehicle { player: 2, vehicle: Id::from_raw(8), to: (65535, 3) },
                 Command::Unload { player: 0, vehicle: Id::from_raw(u32::MAX) },
                 Command::OrderUnit { player: 3, unit: Id::from_raw(6), order: Order::GetOff },
+                Command::SetPatrol { player: 0, units: vec![Id::from_raw(1), Id::from_raw(2), Id::from_raw(3)], at: (65535, 7) },
+                Command::SetPatrolTarget { player: 1, units: vec![Id::from_raw(4)], target: Target::Unit(Id::from_raw(70_000)) },
+                Command::AddPatrolPoint { player: 2, units: Vec::new(), at: (0, 65535) },
+                Command::AddPatrolTargetPoint { player: 3, units: vec![Id::from_raw(5), Id::from_raw(6)], target: Target::Building(Id::from_raw(9)) },
+                Command::ReleasePatrol { player: 1, units: vec![Id::from_raw(1), Id::from_raw(2), Id::from_raw(3)] },
             ],
         }
     }
