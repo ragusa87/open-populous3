@@ -994,8 +994,7 @@ impl Unit {
             return None;
         }
         let cell = self.cell();
-        let standing = ground.passable(self.mobility(), cell);
-        if (standing && self.health.is_zero()) || (!standing && is_sea(ground.terrain(), cell)) {
+        if self.health.is_zero() || is_sea(ground.terrain(), cell) {
             self.die();
             return Some(UnitEvent::Died);
         }
@@ -1813,6 +1812,20 @@ mod tests {
         u.fling(Velocity::new(0, 40, 0), 100);
         run(&mut u, &t, &site, 4);
         assert_eq!(u.action, Action::Idle, "on a cliff: stands up for now");
+    }
+
+    #[test]
+    fn landing_with_no_health_left_dies_even_on_a_cliff() {
+        // A fatal hit taken mid-flight (`take_damage`'s `!airborne` guard) only calls `die` on landing
+        // (`touch_down`): landing anywhere neither standing ground nor sea must still kill it, not just
+        // the two terrain-specific cases, or a zero-health unit silently comes back to life as Idle.
+        let mut t = land();
+        let (mut u, site) = shaman_at((20, 20));
+        t.set(u.cell().0 + 1, u.cell().1, 1000);
+        u.health = Health::new(0, SHAMAN_MAX_HEALTH);
+        u.fling(Velocity::new(0, 40, 0), 100);
+        assert_eq!(run(&mut u, &t, &site, 4), [UnitEvent::Died]);
+        assert!(matches!(u.action, Action::Dying { .. }), "dies on landing, cliff or not");
     }
 
     #[test]
