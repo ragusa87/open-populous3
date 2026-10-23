@@ -716,7 +716,7 @@ mod tests {
         assert_eq!(ground_spell(SpellKind::MagicalShield, (5, 6), (0, 0)), Some(Spell::MagicalShield { at: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::Bloodlust, (5, 6), (0, 0)), Some(Spell::Bloodlust { at: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::Invisibility, (5, 6), (0, 0)), Some(Spell::Invisibility { at: (5, 6) }));
-        assert_eq!(ground_spell(SpellKind::Swarm, (5, 6), (0, 0)), None);
+        assert_eq!(ground_spell(SpellKind::Swarm, (5, 6), (0, 0)), Some(Spell::Swarm { at: (5, 6) }));
     }
 
     #[test]

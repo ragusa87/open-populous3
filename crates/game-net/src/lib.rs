@@ -80,7 +80,8 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             | Spell::Earthquake { at }
             | Spell::MagicalShield { at }
             | Spell::Bloodlust { at }
-            | Spell::Invisibility { at } = spell
+            | Spell::Invisibility { at }
+            | Spell::Swarm { at } = spell
             {
                 b.push(match spell {
                     Spell::Teleport { .. } => 4,
@@ -95,6 +96,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                     Spell::MagicalShield { .. } => 14,
                     Spell::Bloodlust { .. } => 15,
                     Spell::Invisibility { .. } => 16,
+                    Spell::Swarm { .. } => 17,
                     _ => 6,
                 });
                 b.extend(at.0.to_le_bytes());
@@ -118,7 +120,8 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                 | Spell::Earthquake { .. }
                 | Spell::MagicalShield { .. }
                 | Spell::Bloodlust { .. }
-                | Spell::Invisibility { .. } => unreachable!("encoded above"),
+                | Spell::Invisibility { .. }
+                | Spell::Swarm { .. } => unreachable!("encoded above"),
             };
             b.push(tag);
             for (x, z) in cells {
@@ -322,6 +325,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
                 14 => Spell::MagicalShield { at: (c.u16()?, c.u16()?) },
                 15 => Spell::Bloodlust { at: (c.u16()?, c.u16()?) },
                 16 => Spell::Invisibility { at: (c.u16()?, c.u16()?) },
+                17 => Spell::Swarm { at: (c.u16()?, c.u16()?) },
                 _ => return None,
             };
             Some(Command::Cast { player, spell })

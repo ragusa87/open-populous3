@@ -48,6 +48,7 @@ mod ground_fire;
 mod burning_trees;
 mod smoke;
 mod swamp;
+mod swarm;
 mod terrain_mesh;
 mod terrain_texture;
 mod tooltip;
@@ -120,7 +121,7 @@ fn main() {
             (camera_debug::CameraDebugPlugin, cell_debug::CellDebugPlugin, debug_overlay::DebugOverlayPlugin),
             object_scale::ObjectScalePlugin,
             (chimney::ChimneyPlugin, fireball_shot::FireballShotPlugin),
-            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin, armageddon::ArmageddonPlugin, swamp::SwampPlugin, volcano_rocks::VolcanoRocksPlugin, lava::LavaPlugin),
+            (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin, armageddon::ArmageddonPlugin, swamp::SwampPlugin, swarm::SwarmPlugin, volcano_rocks::VolcanoRocksPlugin, lava::LavaPlugin),
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();
