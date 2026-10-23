@@ -1063,26 +1063,49 @@ destruction, or a blast) without ever leaving the ground.
 
 ### Erosion passes [exe]
 Per-turn (state 24, per-turn 0x50FF30 - Ghidra's own name `process_erosion` is correct, despite sitting in the
-same code area as the shot handlers; init pushes state 24 then sets the duration counter +0x6C to a bare 64,
-not a named constant):
+same code area as the shot handlers; init at 0x509DC8, the class-7 type 0x17 case of `init_unit_type_7`'s
+dispatch table, pushes state 24 then sets the duration counter +0x6C to a bare 64, not a named constant):
 ```text
-every turn: duration -= 1; 0 -> end
-  two PRNG draws, each "& 7, - 4": a jitter of -4..+3 half-cells on each axis around the effect's own position
-  call 0x4983A0(jittered point, 4) - one hydraulic-erosion pass
+every turn: duration -= 1; duration == 0 -> end (teardown, no pass this tick)
+  else: two PRNG draws, each "& 7, - 4": a jitter of -4..+3 half-cells on each axis around the own position
+        call 0x4983A0(jittered point, 4) - one hydraulic-erosion pass
 ```
-0x4983A0 (write-back magnitude not traced) scans a window of cells around the jittered point and, per cell,
-compares its height against each of its 8 neighbours - the 4 diagonals weighted by 0xB505/0x10000 (~=0.707, a
-genuine distance correction) - keeping the steepest downhill one and accumulating a flow amount before
-(unread) applying a height change. This is a real steepest-descent slope pick, a different algorithm from
-land bridge/flatten's "converge toward a target height": erosion looks at local slope only, confirming
-"ground washed downhill" literally rather than as a figure of speech.
+Decrement happens before the end check, so the effect runs 64 ticks (5.33 s) but only **63 actual passes**
+(the 64th tick just ends it) - 5.25 s of visible erosion, matching the per-spell table above.
+
+0x4983A0 scans an 8 x 8-cell window centred on the jittered point (the `4` argument is doubled internally to
+the window's full side length) and, per cell, compares its height against each of its 8 neighbours - the 4
+diagonals weighted by 0xB505/0x10000 (~=0.707, a genuine distance correction), the 4 orthogonal ones
+unweighted - keeping the steepest downhill one and the count of neighbouring cells that flow into it. That
+per-cell flow count is normalised against the single largest flow count found anywhere in the window this
+pass (divide 1.0 by the max, in 16.16 fixed point), then combined with a per-cell factor and randomised
+multiplicative terms (constants 0xC350 = 50000 and 0xFA0 = 4000, plus a `(prng & 0x7FFF) + 0xC000` term, i.e.
+roughly a 0.75-1.0x jitter) to get the actual height change applied to that cell, all carried internally in
+16.16 fixed point. **The exact closed-form combination of those terms (and so the literal height-per-pass
+number) is still open** - this session traced as far as identifying the pieces (next step: finish reading
+0x498741-0x498883's fixed-point chain, or measure live - cast Erosion on a sloped area in a test level and
+sample several cells' heights every turn with `livemem.py`, which would settle it faster than finishing the
+static trace).
+
+Two things are now confirmed that were open before: the write-back **floors each cell at height 0** (`cmp
+[cell],0 / jge / else set 0` immediately before the store, 0x4988EA-0x4988EF) - ground never goes negative,
+it erodes down to sea level and stops, confirming "it can go down to 0 (water)" literally; and the result is
+converted back from 16.16 fixed point (`sar ebx, 0x10`) and written as a plain integer into the live
+heightmap, then followed by the same two calls every terrain-changing effect ends a cell change with -
+`0x44DDF0(cell, r, 1)` (landscape recompute) and `0x44F2F0(1, cell, r, -1)` ("ground moved" flag, "Terrain
+changes: what reacts") - so persons/buildings/vehicles on eroded ground react exactly as they do to any other
+terrain change, nothing erosion-specific.
+
+This is a real steepest-descent slope pick, a different algorithm from land bridge/flatten's "converge toward
+a target height": erosion looks at local slope only, confirming "ground washed downhill" literally rather
+than as a figure of speech.
 
 Impact on our specs: ours applies one instant, flat, radius-4, -120 height drop (spells.md); the original
-instead runs 64 of these small, locally-slope-following passes (one per turn, 5.3 s total), each jittered
-within a few cells of the target and touching only a small window, following the real local slope rather than
-a fixed radius and depth - a visibly gradual, small-footprint erosion, never a sudden crater. The exact
-per-pass height delta is still open (next step: finish tracing 0x4983A0's write-back, or measure live - cast
-Erosion on flat ground in a test level and sample the target cell's height every turn with `livemem.py`).
+instead runs 63 of these small, locally-slope-following passes over 64 ticks (5.25 s), each jittered within a
+few cells of the target and touching only an 8 x 8-cell window, following the real local slope (diagonal
+neighbours weighted ~0.707) rather than a fixed radius and depth, with each cell individually floored at 0 -
+a visibly gradual, small-footprint erosion that approaches sea level and stops, never a sudden crater and
+never undershoots into negative height. The exact per-pass height delta is still open (see above).
 
 ### Swamp: drawing, and the reedy-grass / mist ground dressing [exe]
 The Swamp spell's effect (7/18, init 0x511340 → 0x511400 for the kill state, "Per spell" above) sets its own
@@ -3865,7 +3888,8 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4E6A70 | move a position by length and angle |
 | 0x50EE00, 0x50ECC0 | land bridge: per turn, per cell (smoke, height step, refresh, notify) |
 | 0x511640 | firestorm per turn (state 23, Ghidra's `process_firestorm` is correct): gated spawn, see "Firestorm fireballs" |
-| 0x50FF30 | erosion per turn (state 24, Ghidra's `process_erosion` is correct, despite living in the shot code area): jitter + one pass via 0x4983A0, see "Erosion passes" |
+| 0x509DC8 | erosion init (class-7 type 0x17 case of `init_unit_type_7`'s dispatch): state -> 24, duration +0x6C -> 64 |
+| 0x50FF30 | erosion per turn (state 24, Ghidra's `process_erosion` is correct, despite living in the shot code area): jitter + one pass via 0x4983A0, 63 passes over 64 ticks, see "Erosion passes" |
 | 0x510020 | insect plague (swarm) effect 7/0x15 init: height/speed/duration/insect-budget/home position/heading, never sets a drawable - "Insect plague" |
 | 0x510120 | `process_insect_plague` (Ghidra's own name is correct), state 0x16 (22) per turn: sound, home-leash steering, bee-dot spawning - "Insect plague" |
 | 0x510D40 | insect plague's bee-dot spawner (its own sub-state 0): `alloc_unit(7, 0x1B, ...)` at a jittered point near the cloud, gated by the insect-budget counter +0x72; also, 1-in-16, tints the new bee-dot with its tribe's own colour (+0x8A, from table 0x5A89CA) - "Insect plague" |
@@ -3873,7 +3897,7 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x510CB0 | bee-dot per turn: a ~19-step sub-state cycle, repositioning relative to a held reference unit (+0x74) once set - "Insect plague" |
 | 0x5A89CA | per-tribe 5-byte struct (same table "Status markers over people" calls 0x5A89CB for the shield's tribe_colour, a different field of the same record): byte+0 is the tribe's own flag-colour palette index (blue/red/gold/green for tribes 0-3, confirmed against pal0-0.dat), read by the bee-dot tint roll - "Insect plague" |
 | 0x46AE3D | `draw_polygons`: reads a unit's own +0x8A tint byte, looks it up (×4) in a runtime-built RGB cache (0x87EFF8), and draws a flat-coloured point via 0x4B7F90 - the bee-dot's likely real blit, not fully pinned to its exact dispatch case - "Insect plague" |
-| 0x4983A0 | one hydraulic-erosion pass over a window: per cell, steepest of its 8 neighbours (diagonals weighted 0xB505/0x10000); write-back magnitude not traced |
+| 0x4983A0 | one hydraulic-erosion pass over an 8x8-cell window: per cell, steepest of its 8 neighbours (diagonals weighted 0xB505/0x10000), flow normalised against the window's own max then scaled by a per-cell factor and randomised terms (0xC350, 0xFA0, prng), floored at 0, written back to the live heightmap, then the usual 0x44DDF0/0x44F2F0 notify pair; exact magnitude formula not fully traced |
 | 0x44DDF0 | recompute the landscape around a cell after a height change |
 | 0x44F2F0 | notify units and buildings around a cell: mode 1 "ground moved", mode 2 "set on fire" |
 | 0x408080 | building foundation check: re-level the footprint or collapse |

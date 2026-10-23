@@ -1,5 +1,5 @@
 //! Dev helpers driven by env vars, so screenshots can be taken without a window:
-//! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|cast|drown|teleport|worship] game-client [level]`.
+//! `SCREENSHOT=out.png [HEADLESS=1] [AERIAL=1] [SHOT_FRAME=90] [SHAMAN=walk|cast|teleport|worship] game-client [level]`.
 //! `SHAMAN=worship` sends her to pray at the map's first vault of knowledge; `BRAVES=totem:N` sends
 //! every brave of the player to pray at totem N.
 //! `SHAMAN` gives the player's shaman an order at start, to check each pose; `BRAVES=cut|carry` sends
@@ -96,7 +96,6 @@ pub fn demo_commands(name: &str, shaman: &Unit) -> Vec<Command> {
         "walk" => order(Order::MoveTo { x: shaman.x.wrapping_add(3 * 512), z: shaman.z }),
         "cast" => order(Order::Cast),
         "teleport" => vec![Command::Cast { player: PLAYER, spell: Spell::Teleport { to: (shaman.x.wrapping_add(3 * 512), shaman.z) } }],
-        "drown" => vec![Command::Cast { player: PLAYER, spell: Spell::Erode { at: shaman.cell() } }; 6],
         _ => Vec::new(),
     }
 }
@@ -263,6 +262,16 @@ pub fn flatten_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> 
     let Some(at) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<i32>().ok()?, z.trim().parse::<i32>().ok()?))) else { return false };
     let flatten = game_core::flatten::effect(PLAYER + 1, at, &map.terrain);
     map.add_effect(flatten);
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
+/// `ERODE=x,z` (height point): another tribe's erosion there (no cast jump), then `ticks` run at once. False when
+/// `at` does not parse.
+pub fn erode_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some(at) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<i32>().ok()?, z.trim().parse::<i32>().ok()?))) else { return false };
+    let erode = game_core::erode::effect(PLAYER + 1, at, &map.terrain);
+    map.add_effect(erode);
     map.run(game_core::time::Ticks::new(ticks));
     true
 }
@@ -585,6 +594,10 @@ fn screenshot(
         if let Ok(at) = std::env::var("FLATTEN") {
             let ticks = std::env::var("FLATTEN_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             dirty.0 |= flatten_demo(&mut map.0, &at, ticks);
+        }
+        if let Ok(at) = std::env::var("ERODE") {
+            let ticks = std::env::var("ERODE_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            dirty.0 |= erode_demo(&mut map.0, &at, ticks);
         }
         if let Some(phase) = std::env::var("VAULT").ok().and_then(|v| parse_vault(&v)) {
             map.0.buildings.iter_mut().filter_map(|b| b.vault.as_mut()).for_each(|v| v.phase = phase);
