@@ -151,6 +151,32 @@ impl Theme {
     pub fn water(&self, x: usize, y: usize) -> u8 {
         self.water[(y % DISP_SIZE) * DISP_SIZE + x % DISP_SIZE]
     }
+
+    /// The sea's own ripple/shimmer (pop3-rev-analysis.md "Water rendering (watdisp.dat)"): two reads of `water`,
+    /// each scrolled `turn % 256` texels along the texture's own diagonal, in opposite directions, summed -
+    /// `(x, y)` the same per-pixel coordinate `disp`/`water` are already sampled at elsewhere (`terrain_texture::
+    /// PX_PER_CELL`). Returns `(height_offset, light)`: a small ripple height and a brightness-like "shimmer"
+    /// clamped 1..32, the only two values the traced exe pseudocode computes directly.
+    ///
+    /// Confirmed by [peterderivaz/populous](https://github.com/peterderivaz/populous) (README "References") what
+    /// consumes them: `height_offset` displaces the sea's own vertex altitude (`ground.wgsl`'s `vertex`, via
+    /// `water_height_offset` - a `textureSampleLevel`-based mirror of this same formula, since this Rust function
+    /// itself is never called by the renderer, no GPU in `cargo test`), and the sea's lighting is then computed
+    /// from THAT adjusted altitude instead of the land's real (flat, for open sea) terrain height - the same
+    /// `game_core::shading::cell_light` formula, just fed a different height field (`ground.wgsl`'s `water_light`
+    /// mirrors it directly, not this struct's own `light` return value, which stays a left-over of the original
+    /// pseudocode trace rather than what the shader actually uses for brightness).
+    ///
+    /// Reads `water` unsigned, like `Theme::water` always has (terrain-textures.md "watdisp.dat": measured
+    /// unsigned, 6..248) - so `light`'s own lower clamp (1) is never actually reached, 16 (sum == 0) is the real
+    /// floor; only relevant if a future trace finds the exe reads these two bytes signed instead, as it does for
+    /// `disp`.
+    pub fn water_shimmer(&self, x: i32, y: i32, turn: u32) -> (i32, i32) {
+        let shift = (turn % 256) as i32;
+        let at = |x: i32, y: i32| self.water(x.rem_euclid(DISP_SIZE as i32) as usize, y.rem_euclid(DISP_SIZE as i32) as usize) as i32;
+        let sum = at(x - shift, y - shift) + at(x + shift, y + shift);
+        (sum / 8, (sum / 16 + 16).clamp(1, 32))
+    }
 }
 
 /// A theme's sky: a tiling cloud layer, RGB row-major.
@@ -267,6 +293,44 @@ mod tests {
         assert_eq!(t.bigfade_flat(300), 9);
         assert_eq!(t.bigfade_flat(-5), t.bigfade_flat(0), "clamps below zero");
         assert_eq!(t.bigfade_flat(1_000_000), 77, "clamps past the end, a large jitter rolls no further");
+    }
+
+    #[test]
+    fn water_shimmer_at_turn_zero_reads_the_same_texel_twice() {
+        let mut big = vec![0u8; BIGFADE_WIDTH * BIGFADE_ROWS];
+        big[0] = 0;
+        let mut wat = vec![0u8; DISP_SIZE * DISP_SIZE];
+        wat[4 * DISP_SIZE + 3] = 200;
+        let t = Theme::parse(&[0; 1024], &big, &[0; DISP_SIZE * DISP_SIZE]).unwrap().with_water(&wat).unwrap();
+        assert_eq!(t.water_shimmer(3, 4, 0), (200 * 2 / 8, (200 * 2 / 16 + 16i32).clamp(1, 32)));
+    }
+
+    #[test]
+    fn water_shimmer_scrolls_diagonally_one_texel_per_turn_in_opposite_directions() {
+        let mut wat = vec![0u8; DISP_SIZE * DISP_SIZE];
+        wat[4 * DISP_SIZE + 3] = 10; // (x=3, y=4)
+        wat[6 * DISP_SIZE + 5] = 20; // (x=5, y=6): one turn's shift away from (4,5) on the diagonal
+        let t = Theme::parse(&[0; 1024], &vec![0; BIGFADE_WIDTH * BIGFADE_ROWS], &[0; DISP_SIZE * DISP_SIZE]).unwrap().with_water(&wat).unwrap();
+        // At (4, 5), turn 1: sample "-" reads (3, 4) (= 10), sample "+" reads (5, 6) (= 20).
+        assert_eq!(t.water_shimmer(4, 5, 1), ((10 + 20) / 8, ((10 + 20) / 16 + 16i32).clamp(1, 32)));
+    }
+
+    #[test]
+    fn water_shimmer_wraps_every_256_turns() {
+        let mut wat = vec![0u8; DISP_SIZE * DISP_SIZE];
+        wat[7 * DISP_SIZE + 7] = 55;
+        let t = Theme::parse(&[0; 1024], &vec![0; BIGFADE_WIDTH * BIGFADE_ROWS], &[0; DISP_SIZE * DISP_SIZE]).unwrap().with_water(&wat).unwrap();
+        assert_eq!(t.water_shimmer(10, 10, 5), t.water_shimmer(10, 10, 5 + 256), "turn % 256 repeats");
+    }
+
+    #[test]
+    fn water_shimmer_light_is_16_at_its_lowest_and_clamps_at_32() {
+        // Both reads unsigned (terrain-textures.md "watdisp.dat": unsigned), so `sum` never goes negative and
+        // the formula's own lower clamp (1) is never actually reached - 16 (sum == 0) is the real floor.
+        let t = Theme::parse(&[0; 1024], &vec![0; BIGFADE_WIDTH * BIGFADE_ROWS], &vec![0; DISP_SIZE * DISP_SIZE]).unwrap().with_water(&vec![0; DISP_SIZE * DISP_SIZE]).unwrap();
+        assert_eq!(t.water_shimmer(0, 0, 0), (0, 16), "sum 0: height_offset 0, light at its own floor");
+        let t = t.with_water(&vec![255; DISP_SIZE * DISP_SIZE]).unwrap();
+        assert_eq!(t.water_shimmer(0, 0, 0).1, 32, "sum 510: light ceils at 32");
     }
 
     #[test]

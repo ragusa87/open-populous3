@@ -15,9 +15,27 @@ use pop3_format::Theme;
 
 /// x: map size (cells), y: grid overlay on/off (0/1), z: `PX_PER_CELL` (the shader's own `px`/`py` integer pixel
 /// coordinates per cell, `disp`/`water`'s lookup granularity) — a uniform, not a WGSL constant, so this one Rust
-/// constant is the only place it's spelled out. w: unused.
+/// constant is the only place it's spelled out. w: the sea's own scroll phase, `set_turn`'s own field - starts at
+/// 0 here, `world.rs::animate_water` drives it every frame after.
 pub fn params(size: usize, grid: bool) -> Vec4 {
     Vec4::new(size as f32, if grid { 1.0 } else { 0.0 }, crate::terrain_texture::PX_PER_CELL as f32, 0.0)
+}
+
+/// `params.w` (pop3-rev-analysis.md "Water rendering (watdisp.dat)", confirmed by peterderivaz/populous, README
+/// "References"): `turn % 256`, the sea's own diagonal scroll phase (two counter-scrolling samples, so there is
+/// no net drift in any direction - only local swirls). Set every frame (`world.rs::animate_water`), independently
+/// of `fill`/`sync` - the sea must keep rippling even on a frame `rebuild_terrain` skips entirely because nothing
+/// else changed.
+pub fn set_turn(material: &mut GroundMaterial, turn: u32) {
+    material.params.w = (turn % 256) as f32;
+}
+
+/// `water_params.x` (`ground.wgsl`'s vertex stage): the live `terrain_mesh::CurveParams::height_scale` (the
+/// same height-units-to-render-units conversion the CPU mesh build already uses, `camera::CurveParamsRes` - a
+/// relief slider can change it at runtime, `hud/view_menu.rs`), so the sea's own ripple displacement stays in the
+/// same units as everything else instead of a separately-guessed constant. Set every frame alongside `set_turn`.
+pub fn set_height_scale(material: &mut GroundMaterial, height_scale: f32) {
+    material.water_params.x = height_scale;
 }
 
 /// `GroundMaterial::highlight` for the cell the mouse hovers, `None` when there is none to show (not dev mode,
@@ -55,7 +73,9 @@ pub struct GroundMaterial {
     #[texture(8)]
     #[sampler(9)]
     pub disp: Handle<Image>,
-    /// Unsigned (R8Unorm, the raw on-disk `watdisp.dat` byte): bilinear for the same reason as `disp`.
+    /// Unsigned (R8Unorm, the raw on-disk `watdisp.dat` byte): bilinear, same reason as `disp`. A precomputed
+    /// ripple/sine-like pattern, not noise (`ground.wgsl`'s `water_height_offset` doc comment, confirmed by
+    /// peterderivaz/populous): two counter-scrolling reads drive the sea's own vertex altitude and lighting.
     #[texture(10)]
     #[sampler(11)]
     pub water: Handle<Image>,
@@ -63,9 +83,18 @@ pub struct GroundMaterial {
     /// coordinates, z 1.0/0.0 on or off, w unused. `highlight_uniform` packs it.
     #[uniform(12)]
     pub highlight: Vec4,
+    /// x: `terrain_mesh::CurveParams::height_scale`, `set_height_scale`'s own field - the sea's vertex-stage
+    /// ripple displacement (`ground.wgsl`'s `vertex`) converts into the same render units the CPU-built mesh
+    /// already uses. y, z, w: unused.
+    #[uniform(13)]
+    pub water_params: Vec4,
 }
 
 impl Material for GroundMaterial {
+    fn vertex_shader() -> ShaderRef {
+        "embedded://game_client/ground.wgsl".into()
+    }
+
     fn fragment_shader() -> ShaderRef {
         "embedded://game_client/ground.wgsl".into()
     }
@@ -153,6 +182,7 @@ pub fn placeholder(images: &mut Assets<Image>) -> GroundMaterial {
         disp: images.add(image((1, 1), TextureFormat::R8Snorm, vec![0], filterable_sampler())),
         water: images.add(image((1, 1), TextureFormat::R8Unorm, vec![0], filterable_sampler())),
         highlight: Vec4::ZERO,
+        water_params: Vec4::new(crate::terrain_mesh::BASE_HEIGHT_SCALE, 0.0, 0.0, 0.0),
     }
 }
 
@@ -198,6 +228,37 @@ mod tests {
     fn params_packs_size_grid_flag_and_px_per_cell() {
         assert_eq!(params(128, true), Vec4::new(128.0, 1.0, crate::terrain_texture::PX_PER_CELL as f32, 0.0));
         assert_eq!(params(128, false).y, 0.0);
+    }
+
+    fn test_material() -> GroundMaterial {
+        GroundMaterial {
+            params: params(128, true),
+            channels: Handle::default(),
+            altitude: Handle::default(),
+            palette: Handle::default(),
+            bigfade: Handle::default(),
+            cliff: Handle::default(),
+            disp: Handle::default(),
+            water: Handle::default(),
+            highlight: Vec4::ZERO,
+            water_params: Vec4::ZERO,
+        }
+    }
+
+    #[test]
+    fn set_turn_wraps_every_256_and_leaves_the_rest_of_params_alone() {
+        let mut material = test_material();
+        set_turn(&mut material, 5);
+        assert_eq!(material.params, Vec4::new(128.0, 1.0, crate::terrain_texture::PX_PER_CELL as f32, 5.0));
+        set_turn(&mut material, 5 + 256);
+        assert_eq!(material.params.w, 5.0, "wraps every 256 turns");
+    }
+
+    #[test]
+    fn set_height_scale_sets_only_water_params_x() {
+        let mut material = test_material();
+        set_height_scale(&mut material, 0.5);
+        assert_eq!(material.water_params, Vec4::new(0.5, 0.0, 0.0, 0.0));
     }
 
     #[test]

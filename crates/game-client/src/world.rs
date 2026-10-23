@@ -230,7 +230,8 @@ impl Plugin for WorldPlugin {
             .init_resource::<ShowGrid>()
             .init_resource::<CurveParamsRes>()
             .add_systems(Startup, spawn_terrain)
-            .add_systems(Update, ((switch_level, toggle_grid).in_set(crate::menu::Gameplay), rebuild_terrain.after(crate::units::SimStep)).chain());
+            .add_systems(Update, ((switch_level, toggle_grid).in_set(crate::menu::Gameplay), rebuild_terrain.after(crate::units::SimStep)).chain())
+            .add_systems(Update, animate_water.in_set(crate::menu::Gameplay));
     }
 }
 
@@ -398,6 +399,16 @@ fn rebuild_terrain(
                 mesh.insert_indices(Indices::U32(g.indices.clone()));
             }
         }
+    }
+}
+
+/// Drives the sea's own ripple (`ground_material::set_turn`/`set_height_scale`, `ground.wgsl`'s vertex/fragment
+/// stages) every frame, independently of `rebuild_terrain`: that system skips most frames outright (nothing else
+/// changed), but the sea must keep rippling regardless.
+fn animate_water(map: Res<CurrentMap>, curve: Res<CurveParamsRes>, material: Res<TerrainMaterial>, mut mats: ResMut<Assets<GroundMaterial>>) {
+    if let Some(mut m) = mats.get_mut(&material.0) {
+        crate::ground_material::set_turn(&mut m, map.0.now.to_wire());
+        crate::ground_material::set_height_scale(&mut m, curve.0.height_scale);
     }
 }
 
