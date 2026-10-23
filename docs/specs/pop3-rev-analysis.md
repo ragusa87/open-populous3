@@ -147,7 +147,11 @@ distribute(tribe)                                      # see Distribution
 | wild, angel of death | 0 | 0 | |
 
   The busy/idle values are exe defaults; those constants are not in `constant.dat`. "Busy" is probably "inside a
-  building" or "working" (unverified).
+  building" or "working" (unverified). **Note for whoever chases this next**: busy generates MORE mana than idle
+  (15 vs 4 for a brave) - the opposite of "stay idle to generate mana" - so if "busy" does turn out to mean
+  "currently running an order/state other than plain idle" (state 10 with no group at all, "Idle behaviour"), the
+  economic incentive this creates is "get idle units into SOME task quickly", not "let them sit idle for income";
+  not confirmed this session which field/state the income routine actually reads for this flag.
 - `gain = sum * adjust >> 8`, `adjust` being `HUMAN_MANA_ADJUST` for a human tribe and `COMPUTER_MANA_ADJUST`
   otherwise, in 8.8 (file: 125 % and 50 %; exe: 200 % and 25 %).
 - `incoming += gain`, `last_income = gain`.
@@ -1616,12 +1620,139 @@ facing/cell housekeeping and returns "no change" - **the person does nothing obs
 something external assigns it a group**. No wandering and no autonomous order-taking (wood-gathering included)
 was found in this path. State 10 completing a group's order returns to state 1, forming a short 1 ⇄ 10 cycle.
 
-Only one non-player, non-combat source of an autonomous command-group assignment was found: a training
+**Corrected a later session - this was only checking state 10's own per-turn body, not the fallback `order_advance`
+(0x4366B0) itself runs once a unit's own order queue is empty**: that fallback calls two functions, both now
+traced (previously just "neither traced" placeholders in "Command groups"):
+```text
+0x43D0E0, fn(unit) -> bool: reads the unit's own remembered TARGET CELL (`+0x83`, setter not found this session);
+  if none, no-op. Else resolves whichever unit currently occupies that cell (via the map-cell's own unit-list head
+  and the global id table 0x890390) and requires it be the SAME TRIBE as this unit (any class, not person-only);
+  on a match, auto-issues either:
+    kind 8 "enter building" (target the occupant's own `+0x24` id) IF that occupant is itself in person/building
+      state 2 AND the cell's own flags byte+1 bit 0x2 is set (a "this is a structure cell" marker, the same bit
+      family the preach-order handler's own door-point lookup reads)
+    kind 6 "go near X" (target the occupant's own position) otherwise
+  gated by a per-kind eligibility table (0x5A7DC4/0x5A7DCD, two more fields of the already-documented 22-byte
+  kind-flags record at 0x5A7DC0); either way the remembered cell (`+0x83`) is cleared once this runs, hit or miss.
+  **This reads exactly as "if you remember a spot with one of your own tribe's buildings/units on it and have
+  nothing else to do, go rejoin it - enter it if it's a ready building, otherwise just walk over and stand near
+  it"** - a strong match for the in-game behaviour of an idle follower walking itself into a nearby hut. Not a
+  general "search for the nearest house" though: it only ever acts on this ONE remembered cell, never searches.
+
+  **`+0x83`'s writer(s), traced a later session, chasing the user's own follow-up question**: it turns out to be a
+  heavily overloaded word, reused for at least four unrelated purposes across the exe (per-state/per-function
+  scratch is clearly a common idiom here) - only one of which is the "remembered cell" `0x43D0E0` reads:
+  ```text
+  group_assign (0x436D00), the ONLY confirmed writer of the "remembered cell" meaning: on a SECONDARY-slot
+    assignment, unconditionally ZEROES `+0x83`; on a PRIMARY-slot assignment (`slot=-1`, confirmed exclusive to
+    the 5 self-issued autonomous scanners - "Command groups"), UNLESS a flag (`unit+0x17` bit 0x2, setter not
+    found) is set, STAMPS `+0x83` with the unit's own CURRENT CELL at that exact moment (packed from `+0x3D`/
+    `+0x3F`, the same `>>8 & 0xFE` idiom used for cell coordinates everywhere else in this codebase). So the
+    field is not "my assigned home" at all - it's **"where I was standing the moment my last autonomous order
+    began"**, and `0x43D0E0` then reads as "once that autonomous task is done and you're otherwise idle, drift
+    back toward wherever you started it from" - which, if a unit happened to be standing right by (or about to
+    re-enter) its home hut when an auto-attack/auto-scan function grabbed it, looks exactly like "idle unit walks
+    itself back into the nearest hut".
+  unit_processing_class_1_person (~0x4D3719-0x4D3775), gated to AI-CONTROLLED TRIBES ONLY (reads the person's own
+    tribe's controller-type byte, `tribe_struct+0xC1F == 1`, the same byte "Preacher conversion" already uses for
+    its own AI-only gates) - runs every turn regardless of the person's own state: INCREMENTS `+0x83` as a plain
+    counter, and once it exceeds `(unit+0x24 & 0xFF) + 0x400` (roughly 1024-1279 turns, 85-107 s) resets it to 0
+    and calls a new function, `0x4D9B50` (exempts shamans, type 7, outright). **This is a second, independent,
+    more direct autonomous work-assignment mechanism**: it walks a GLOBAL linked list of class-9 objects (not yet
+    identified by name - plausibly worship/work-site markers, one of the few remaining uncatalogued object
+    classes), filters to the unit's own tribe, and for the first one whose own building-type-indexed capacity
+    field (a new field in the canonical building-type table, `+0x14`, halved twice before use) exceeds its current
+    occupant count (`+0x9A`, the SAME occupancy field "Training buildings" already documents) - **self-issues the
+    unit a kind-6 "go near X" order targeting that work site** (via `0x43B3C0`, the kind-6 "give an order" helper
+    itself traced earlier this session). This is a MUCH more direct match for "an idle unit periodically looks for
+    a workplace with room and walks itself there" than the remembered-cell theory above, but it is exclusively an
+    AI-tribe mechanism - for a human-controlled tribe, this whole block never runs, so `+0x83` stays available for
+    `group_assign`'s own "remembered cell" meaning instead. **So there are two distinct, non-overlapping causes for
+    "idle unit autonomously heads to a building"**, selected by which tribe's controller type the unit belongs to:
+    `0x43D0E0`/`group_assign` for human-controlled tribes (passive, only returns to a spot it was already at),
+    `0x4D9B50` for AI-controlled ones (active, periodically searches for free capacity and relocates there) - worth
+    confirming live which one the user is actually observing (their own tribe vs. an AI one).
+  Angel of Death's own state-28 handler (`0x4DB980`, already documented) separately writes literal constants
+    (0x1F4/500, 0x258/600) into `+0x83` as its own countdown scratch - unrelated to either mechanism above, just
+    the same offset reused by a totally different state.
+  The gather-wood state handler (`0x495D70`, "Chopping") takes `&unit+0x83` as a transient 2-byte scratch buffer
+    for an internal helper call, never persisting a meaningful value there across turns - also unrelated.
+  A handful of other sites (`0x4DAB60`, `0x4DDB30`, `0x4E5FD0`, `0x4E66E0`) read/write `+0x83` too and were not
+    chased this session; `find_formation_for_unit`'s own read of a SIGNED BYTE at `+0x83` is a different struct
+    entirely (a formation CONTROLLER, class 10, not a person) and is unrelated by construction.
+  ```
+  So: no, this is not "go fetch wood to grow a building" in the sense of a dedicated wood-gathering AI - the
+  gather-wood state itself (`0x495D70`) still has no autonomous caller found anywhere. It's either "drift back to
+  wherever you were last doing something" (human tribes) or "periodically relocate to any work site with spare
+  capacity" (AI tribes) - neither one specifically about wood, though both would visibly look like "idle unit
+  walks into a nearby hut".
+
+  **A candidate explanation for the
+  user-observed "idle units tend to form small circles together"**: this fallback's kind-6 branch is the ordinary
+  move-family order used all over the exe, and "Formations" above documents several move-ish kinds joining a
+  shared formation controller (`add_unit_to_formation`) via a per-kind "wants formation" table bit - if kind 6 is
+  one of them, several idle units all autonomously walking toward the same reference point via this fallback would
+  naturally cluster at fixed slot offsets around a shared controller, which would look exactly like a loose circle.
+  **Not confirmed**: an attempted direct read of kind 6's own "wants formation" bit this session did not reproduce
+  the already-documented SET/CLEAR pattern for the kinds that session DID verify (3/4/7/9/20/22 SET, 8/19/21
+  CLEAR) even for those same kinds, so the read was against either the wrong address/field or a different
+  table-access instruction than the one `0x432DF0` (the actual bit-copy site, itself only partially re-read this
+  session) really uses - left as an open hypothesis, not a finding, until that's resolved properly.
+0x43D2F0, fn(unit) -> bool: a SEPARATE fallback, reads a different remembered REFERENCE OBJECT (`+0xA1`); if it
+  resolves to a live unit of CLASS 4 (**vehicle**, not building - "docs/unit_types" class list) of an
+  eligible per-type-table-gated type, same or compatible tribe, with room (0x465750) and not already
+  boarded/claimed (0x5178D0) and within reach (0x4503F0 <= 0x3000 units), auto-issues kind 0x16 (the "attack,
+  doing half" kind, same handler, 0x435160, already catalogued for ordinary combat) targeting it. Despite sharing
+  a handler with combat, the actual precondition chain here (class-4/vehicle, room, reachability) reads as
+  "return to / board your remembered vehicle", not combat - worth a second look at 0x435160 itself to see whether
+  it is generic "approach and interact with a referenced unit" rather than attack-specific, since this call site
+  doesn't fit "attack" at all.
+```
+
+**The idle-dispatch cycle, confirmed (user-requested summary) [exe]**: when a unit's own group (primary or
+secondary) finishes and `order_advance` finds every secondary slot empty, it does NOT just leave the unit idle -
+it runs the save/dispatch/return cycle traced above:
+```text
+save:     whenever a PRIMARY (autonomous) order is newly assigned, group_assign stamps the unit's CURRENT cell
+            into +0x83 (its "last known spot") - unless unit+0x17 bit 0x2 suppresses it
+dispatch: the autonomous order runs (see the action list below)
+return:   once nothing else is queued, order_advance's own fallbacks re-read +0x83 (or +0xA1 for a vehicle) and
+            issue a fresh secondary-slot-0 order back to that remembered spot - entering it if it resolves to a
+            same-tribe BUILDING in state 2, otherwise just walking over and standing beside whatever is there
+clear:    the remembered field is zeroed the moment this fallback runs, whether or not anything was found
+```
+This is confirmed code, not a guess - but it's exclusively the HUMAN-tribe path (`0x43D0E0`/`0x43D2F0`); AI tribes
+instead get the more deliberate, periodic `0x4D9B50` work-site search (also landing in secondary slot 0, also
+clearing/reusing the same `+0x83` field) - see above.
+
+**Known actions that can occupy PRIMARY and so trigger this save/return cycle (not exhaustive - todo: keep
+extending as more are traced)**:
+| Issuer | Kind issued | What it does |
+|---|---|---|
+| `preacher_auto_scan` (0x51E7B0), preacher only | 0x15 (21) attack, or 0x20 (32) building-visit | "Preacher conversion" |
+| per-type auto-attack scanner inside `0x4F0460` | 0x15 (21) attack | ordinary auto-attack, not preacher-specific |
+| firewarrior ranged auto-attack, near `0x51E9A0` | 0x15 (21) attack | ranged variant of the above |
+| `0x40BD20`, trigger not pinned down this session | 0x13 (19) attack | self-issue condition not traced |
+| `0x520480`, trigger not pinned down this session | not captured this session | gated on `unit+0xA7 == 0` ("no cached order kind yet") |
+Followed, once idle, by the return-cycle fallbacks themselves (landing in SECONDARY, not primary, but still
+autonomously dispatched): `0x43D0E0` → kind 8 (enter building) or kind 6 (go near X); `0x43D2F0` → kind 0x16
+(return to/board a vehicle); `0x4D9B50` (AI tribes only) → kind 6 via `0x43B3C0` (go to a work site with room).
+Only one other non-player, non-combat source of an autonomous command-group assignment was found: a training
 building's own per-turn code (0x405B80, "Training buildings") gives a handful of its occupants a kind-3 "go to a
 position" order from a per-building-type zone table - read so far as occupant/queue positioning (a training or
 worship spot), not a wood-fetch assignment; its own "doing it" handler (kind 4, 0x433800) is not yet read, so
 this is inferred, not proven. No caller of the gather-wood state (0x495D70, "Chopping") was found outside the
 player's own `Order::FetchWood`/`CutTree`-equivalent command path.
+
+**On the idle pose itself (e.g. a warrior's push-ups) [exe]**: `order_execute`'s OTHER fallback - reached only
+when a unit has no group at all, not even a stale one, the generic "settle and go idle" path - calls `0x4E32A0`,
+traced this session: it returns a fixed id `0x29` (41) for one specific condition (the unit's tribe matches a
+global byte at `0x89C6F0`, under a couple of other global flag bits - plausibly "the human player's own tribe,
+under some display/option setting", not confirmed), and otherwise returns a **per-type default idle pose id from
+a newly-identified field in the canonical person-type table, `+5`** (`0x5A7065` = base `0x5A7060` + 5) - a sibling
+of the already-documented `+4` (next-state) and `+7` (fidget-odds) fields in that same 50-byte record. So yes, the
+per-type idle pose (push-ups for a warrior, etc.) is table-driven exactly as it looks in play; what the special
+`0x29` case actually displays, and what the two global flag bytes gating it mean, were not chased further.
 
 ### Idle-fidget animations: confirmed for wildmen, not (yet) for followers
 Wildmen (type 1) alone reach **state 8** (0x4D60D0) from state 1. Every turn it runs its own LCG (seed 0x89BC72,
@@ -1767,6 +1898,7 @@ coast-shape byte on entering state 6).
 | 10/8, 10/9 | fight, pre-fight ("Starting a melee", "Pre-fight (per turn 0x518630...)") |
 | 10/1, 10/6 | formations (`process_formation_unit`, `add_unit_to_formation`) |
 | 10/0xA | order kind 11's own "melee ring" companion object (`0x519F10`, person sub-state `+0xa9` 0-3: fresh/walking to slot/holding slot/performing a move) - confirmed this is a THIRD combat-adjacent controller, distinct from fight (10/8) and pre-fight (10/9); supersedes the earlier "guard control" guess, not yet reconciled with it |
+| guard_control_units (0x890360) | **Started this session, chasing "guard between markers"**: a genuinely Ghidra-named global list (`backup/backup.xml`, `SYMBOL ADDRESS="00890360" NAME="guard_control_units"`), walked by the main turn loop right after `fight_units`/`pre_fight_units` (same cluster, ~0x4EC7F0-0x4ED340) via a per-CLASS dispatch (byte table `0x4ECA80`, jump table `0x4ECA6C`): class 2 (building) → the ordinary building per-turn function (`unit_processing_class_2_bldg`/0x403280, already documented); classes 3/4/5/6/9 → no-op (skipped); class 7 (effect) → `0x478EE0` (unread); class 8 (shot) → `0x4BBF30` (unread); class 10 (controller) → `unit_processing_class_10_internal_2`/0x5028B0 (Ghidra's own name). **That class-10 handler dispatches by controller TYPE 6 vs. not-6** - i.e. it reads as acting on FORMATION controllers specifically (type 6 is the already-documented formation type, "Formations"), calling `0x51EAB0` (type 6) or `0x51F470` (otherwise), both unread - NOT a dedicated "guard post" controller type of its own. So `guard_control_units` looks like a mixed bag of objects needing a periodic "still being guarded/watched" re-check (buildings, effects, shots, and formation controllers) rather than a single dedicated guard-coordinator object. **Resolved, a later session: this list is NOT the movement/patrol mechanism at all.** The actual "patrol/guard between markers" movement is `0x4BA9B0` (see its own `functions.tsv` row and "Command groups" above) - the confirmed "patrol points, up to 8" implementation (shortcuts.md), which fills multiple secondary command-group slots with kind-6/kind-0xB waypoints that `order_advance`'s existing round-robin logic then cycles through. `guard_control_units`/`0x51EAB0`/`0x51F470` is a SEPARATE, parallel concern - periodically checking for a nearby enemy to react to while guarding/patrolling - not yet traced to completion (still open: `0x51EAB0`/`0x51F470`'s own bodies past the enemy-scan preamble, what inserts an object into this list, and the AI script's own `GUARD_AT_MARKER`/`SET_MARKER_ENTRY` opcodes' exact call path - plausibly they call `0x4BA9B0` directly or an equivalent, not yet confirmed). **The patrol-point mechanism itself is now fully traced and written up address-free in `docs/specs/units.md` ("Patrol orders") - see `0x4BA9B0`'s own `functions.tsv` row for the full exe-level trace this was built from.** |
 | 10/4, 10/0xC | spirit-rise controller (type 0xC created by the universal death handler, `0x4D5CF0`/person state 3, for ANY death, not preacher-specific - corrects this row's previous "from the preachee's own state 3... Preacher conversion" framing, see that section); type 4's own creation site not found |
 | 10/0x13 | building-sinking stand-in, created by the foundation check's flooding destroy path ("Building sinking (flooded destruction)") |
 
@@ -1873,23 +2005,33 @@ dispatcher - a per-tribe "command queue":**
             busy" word, +0x6 onward a 100-entry x 15-byte ring buffer
 0x897997  per-tribe STAGING record, stride 0xF (15) bytes - the actual pending-command content,
             copied verbatim into the ring buffer when flushed
-tribe+0xC1F   per-tribe "staging record ready" byte
+tribe+0xC1F   per-tribe controller-type byte (1 computer/AI, 2 human - see "Preacher conversion" for a
+                third, independent confirmation of this reading)
 0x89D18C  per-tribe "active THIS TURN" slot, stride 0xF (15) bytes - what process_tribe_cmd (above)
             actually reads at its own +0xC
 
 inc_tribes_commands (0x43E320): flushes the LOCAL PLAYER's staging record into their own ring
   buffer (skip if already busy)
-copy_tribe_commands_from_buffer (0x43E3C0): flushes EVERY tribe's staging record whose own
-  tribe+0xC1F "ready" flag is set, gated by an extra AI-pacing modulo check on a global
-  (0x8928FD) - reads as the AI's/network peers' own flush path, distinct from the player's
+copy_tribe_commands_from_buffer (0x43E3C0): loops every tribe (stride 0xC65, bound by the active-
+  tribe-count global 0x96EAC0 - re-read this session, confirmed a real loop, not a single fixed
+  tribe as an earlier pass's wording implied), flushing whichever ones have tribe+0xC1F == 1
+  (computer/AI - not a separate "ready" flag, see the Reference table's +0xC1F row), gated by an
+  extra AI-pacing modulo check on a global (0x8928FD) - this IS the AI's own flush path, now
+  confirmed by the controller-type value itself rather than just the "AI/network" framing guessed
+  from context
 mld_function_3 (0x43E480), the main loop's per-turn-boundary gate: pops the ring buffer's front
   entry into the active slot each turn - this is what process_tribes_cmd (0x43E890, iterates
   exactly 4 tribe slots) then dispatches via process_tribe_cmd
 ```
 Checked EVERY writer that could feed this pipeline on an ordinary turn (9 call sites of
-`inc_tribes_commands`, the single writer of `tribe+0xC1F`): every one is level-load/session-start
-code (`load_level_3`/`_4`/`_upper`, one "game just started" branch of `draw_main`), never an ongoing
-per-frame handler. **This queue is tribe-wide, coarse-grained event plumbing (session lifecycle,
+`inc_tribes_commands`): every one is level-load/session-start code (`load_level_3`/`_4`/`_upper`,
+one "game just started" branch of `draw_main`), never an ongoing per-frame handler. **Correction
+this session**: `inc_tribes_commands` (0x43E320) itself was re-read in full and writes no byte
+anywhere near `tribe+0xC1F` - it only touches the queue header's busy word and write-cursor and the
+staging record; the earlier "the single writer of tribe+0xC1F" phrasing was wrong (or referred to
+something found near one of its 9 call sites rather than inside the function), and `tribe+0xC1F`'s
+actual writer is still not located - its value is set per-tribe at scenario load from the level
+file's own player-type data, not written by this queue machinery. **This queue is tribe-wide, coarse-grained event plumbing (session lifecycle,
 and very plausibly the AI/network command channel) - it is not how per-unit move/attack orders are
 issued.** Ordinary orders go straight through `group_alloc`/`order_set` as already documented above;
 the player's actual click→order translation remains unlocated, now with a large neighbourhood of the
@@ -1938,7 +2080,7 @@ trampoline that calls out to a separate handler; "inline" means the trampoline I
 | 26 | inline | unconditionally "done" |
 | 27 | 0x43BCC0 | not traced |
 | 28 | 0x51FCE0 | see the table above (0x1C) |
-| 29 | inline | turn-parity-gated reposition, plus an occasional "within range of a reference point" check that calls 0x4D4EE0 on success - a "keep near/facing a moving reference point" utility, not linked to a specific behaviour |
+| 29 | inline (0x432961) | **Fully traced a later session, chasing "guard between markers"**: target is a UNIT ID (not a position) - on first entry, computes a destination from that reference unit's CURRENT position ONCE (snapping to its building's door point if it's standing on one), then just waits; every other tick, checks arrival within 56 units and, on success, stops the unit and plays a per-type "arrived" pose (`0x4D4EE0`). Done once the REFERENCE unit's own `+0x7A` becomes nonzero (meaning not traced). Reads as "go to wherever unit X currently is, settle, until X signals something" - a general escort/regroup primitive, NOT a continuous follow (the destination is never re-read after the first tick) and not itself a multi-waypoint patrol. Its own issuer could not be found (checked all 38 literal `order_set` kinds, the multi-unit spell utility, and the one other dynamic-kind call site - none produce kind 29) - still open. See "Guard controller" below for why this doesn't settle guard/patrol either. |
 | 30 "alarm" | 0x43DAA0 | given to a tribe's buildings by 0x443B40; completing one has a worship-adjacent side effect in `group_release` (above) |
 | 31/32 disguise & building-visit | 0x43A4D0 | shared with 17 above |
 | 33 preach | 0x43C7A0 | "Preacher conversion" |
@@ -1981,6 +2123,70 @@ group**, a 10-byte record in a fixed array of 800 at `0x938830 + group_id × 10`
 one-line guess already in "Reference": "new command group / give a group to a unit / add an order to a group").
 This session fully re-traced the add/remove machinery and the kind-dispatch table - the picture below replaces
 and corrects the previous draft in several places (noted inline).
+
+**The queue model, consolidated across several sessions' findings (user-requested summary) [exe]**: each unit
+holds exactly **2 kinds of slot**, not a single queue:
+```text
+PRIMARY   unit+0x9B, ONE slot. Reserved exclusively for self-issued "always-on" autonomous scanning (confirmed
+            exhaustively: of 41 group_assign call sites exe-wide, only 5 ever pass slot=-1, and all 5 are
+            per-type auto-attack/auto-scan functions - preacher_auto_scan and its 4 siblings). order_execute
+            ALWAYS runs primary over secondary when both are populated - primary outranks, it does not erase
+            whatever is parked in secondary.
+SECONDARY unit+0x8B[0..7], EIGHT independent slots plus a rotating cursor unit+0xA6 (not a FIFO queue of
+            sequential tasks from one source - several unrelated systems CAN each hold one standing order
+            without clobbering each other). order_execute only ever runs the slot the cursor points at;
+            order_advance (0x4366B0), once that slot's order finishes, scans forward from the cursor for the
+            next populated, non-stale slot.
+```
+**Correction, a later session (user asked directly: is slot N always the same mechanism, or does each mechanism
+pick its own slot?) - neither, mostly - but one confirmed exception exists.** Surveyed every writer found
+exe-wide: ALL 8 numbered player/spell helpers, both idle-dispatch fallbacks (`0x43D0E0`/`0x43D2F0`), the AI
+work-scan (`0x4D9B50`), and the per-tribe sweep (`0x41CC20`) hardcode **literal slot 0** (after resetting the
+cursor to 0 first) - none of them search for a free slot, and none of them is "reserved" to a slot other than 0.
+Non-zero literal slots used across SEVERAL DIFFERENT UNITS (`0x405585`-`0x4055A5`'s 0/1/2, the training building's
+own `0x406310` loop) aren't one unit's own second task either - they're one shared group handed to several
+different units, each at its own index.
+
+**The one genuine exception, found a later session by chasing shortcuts.md's "Ctrl+Alt + left click (with
+followers): patrol points, up to 8" row - `0x4BA9B0`, called from `process_tribe_cmd` (0x440857)**: a per-tribe
+counter (`tribe+0xC5C`, capped at 8 - the literal "up to 8") tracks how many patrol points have been set so far.
+On the FIRST point of a new sequence (counter == 0), every currently-selected unit (`+0x7A` bit 0x80) has its
+ENTIRE order state wiped (`0x436CA0`, the same full wipe the 8 numbered helpers inline). Every call then allocates
+ONE shared group (kind 6 "go near X", or kind 0xB/11 "melee ring" reused for a unit-targeted point, depending on
+whether the click hit a unit or open ground) and assigns it into **secondary slot `tribe+0xC5C` specifically -
+without wiping the other slots first**, for every selected unit; the counter increments afterward. So repeated
+Ctrl+Alt+clicks genuinely populate DISTINCT secondary slots (0, 1, 2, …) on the same units, and `order_advance`'s
+own already-documented round-robin scan (starting right after the cursor, wrapping at 8) is what then cycles the
+unit through all of them in sequence, wrapping back to the start once it passes slot 7 - **this is the real
+"guard/patrol between markers" implementation**, not `guard_control_units` (whose own class-10 dispatch turned out
+to be formation-controller enemy-scanning, not movement - see the Guard controller note elsewhere in this
+section). Not yet pinned down: the exact unit-vs-ground boolean semantics, what `tribe+0x931` (a precondition this
+function also checks) gates, or when/how `tribe+0xC5C` resets for a later, unrelated direct order to the same
+units. So: outside this one confirmed mechanism, essentially everything else funnels through secondary slot 0; the
+other 7 slots are NOT generally unused headroom as an earlier draft of this note concluded - they are exactly how
+patrol points work, just not used by anything else found so far.
+**There is no "replace primary and clear secondary" helper** - no confirmed code path ever writes a fresh,
+player-facing order into primary. Every "give this unit an order" path found anywhere in the exe - all 8 numbered
+player/spell helpers (0x43B180-0x43BB54), the multi-unit spell-target utility, the per-tribe sweep, AND
+`order_advance`'s own idle-dispatch fallbacks below - targets SECONDARY instead, via one of two patterns:
+```text
+"replace everything" (all 8 numbered helpers, the multi-unit spell utility): reset cursor to 0, release ALL 8
+  secondary slots AND primary if set, THEN install the fresh group into secondary slot 0. From the player's
+  perspective this looks exactly like "my new order replaces whatever I was doing" - it does, but structurally
+  it's "wipe then occupy slot 0", not a write to a literal primary field. A primary-slot autonomous order, if one
+  is active, survives this wipe untouched and keeps outranking the freshly-wiped secondary order (see "Preacher
+  conversion" for the concrete case).
+"insert without wiping" (order_advance's own idle-dispatch fallbacks, 0x43D0E0/0x43D2F0, and the AI-only work
+  scan 0x4D9B50 via 0x43B3C0): reset cursor to 0, write slot 0 directly, no release pass over the other 7 slots
+  first. In practice this only matters if some OTHER system already parked something in a secondary slot other
+  than 0 - slot 0 itself still gets overwritten either way.
+```
+So: think of it as **one always-on "combat reflex" layer (primary) sitting on top of one "current task" slot
+(secondary slot 0 - the only secondary slot any confirmed single-unit mechanism actually writes to) with 7 more
+slots that exist as unused structural headroom**, not a primary/secondary pair where either side can "chain or
+queue", and not 8 actively-scheduled roles either. Shift-clicking several destinations is not modelled by this
+array at all - a direct order is always a full replacement, never an append (already confirmed, "What 'adding an
+order' actually does" below).
 ```text
 group record (0x938830 + id × 10):
   +0x0 kind       the order kind (3-33)
@@ -2055,18 +2261,39 @@ advance  0x4366B0 `order_advance`, traced this session (not in the previous draf
 (`order_set`), then **release every slot the unit currently holds - all 8 secondary slots AND the primary, if
 set** - before installing the fresh group into secondary slot 0 (the cursor +0xA6 is reset to 0 first). A
 directly-given order is not appended to a queue: it wipes everything the unit was doing and becomes the one and
-only thing it's doing, confirmed identically on both helpers checked. The auto-attack scan does the same (it
-allocates a fresh group for the attacker every time it starts a new order, via the same inlined alloc).
+only thing it's doing, confirmed identically on both helpers checked.
+
+**Correction, a later session (re-read while chasing "Preacher conversion"'s kind-33 pre-emption question)**: "the
+auto-attack scan does the same" above is wrong - re-read `preacher_auto_scan` (0x51E7B0) and its direct siblings
+(the ordinary per-type auto-attack issuer inside 0x4F0460, the firewarrior ranged-auto-attack issuer near
+0x51E9A0, two further "if genuinely idle, self-issue something" functions at 0x40BD20 and 0x520480) end to end:
+none of them run the 8-iteration wipe loop at all. Each calls `order_set` then `group_assign(unit, group, -1)`
+directly, with nothing in between - and `group_assign`'s own `slot<0` branch only ever releases whatever is
+CURRENTLY in the PRIMARY slot (`0x4364D0(unit, -1)`), never touching the 8 secondary slots. **A full, exe-wide
+survey of every `group_assign` (0x436D00) call site this session (41 total) found a clean, total split**: every
+self-issued autonomous-behaviour scanner (the five functions just listed) passes `slot=-1` (primary) and ONLY
+those do; every other order-issuing path found anywhere in the exe - all 8 numbered "give an order" helpers
+(0x43B180-0x43BB54, re-verified for all 8 this session, not just the 2 originally spot-checked), the multi-unit
+spell-target assigners, the per-tribe sweep (0x41CC20), and every other one-off issuer - targets a secondary slot,
+overwhelmingly slot 0 after the wipe. So primary (`+0x9B`) is reserved exclusively for self-issued autonomous
+behaviour, and it pre-empts by outranking, not by wiping: `order_execute`'s own resolve step (`0x4325A7`-`0x4325DF`,
+re-verified this session) checks primary first and runs ONLY that group when it's nonzero, so an autonomous order
+claiming primary leaves whatever is sitting in a secondary slot untouched but completely inert until primary frees
+up again - see "Preacher conversion" for the concrete case (a self-issued kind-32 building-visit order silently
+out-prioritizing an in-progress player-issued kind-33 preach order without destroying it).
 
 So the 8-secondary-slot array plus its rotating cursor is not a sequential, player-authored task queue in the
 way a "shift-click to chain three moves" UI might suggest - it is **several independent systems each able to
 hold one standing order on the same unit at once without clobbering each other's slot** (a spell effect, a
-building's own autonomous assignment such as 0x405B80's occupant positioning, the auto-attack scanner, and
-whatever else calls `order_set`/`assign` directly rather than through one of the eight wipe-everything helpers),
-with the unit round-robining between whichever of those are still populated only once its *currently active* one
+building's own autonomous assignment such as 0x405B80's occupant positioning, and whatever else calls
+`order_set`/`assign` directly rather than through one of the eight wipe-everything helpers - the auto-attack
+scanner is NOT one of these: it always runs in primary, outside this round-robin entirely), with the unit
+round-robining between whichever secondary slots are still populated only once its *currently active* one
 finishes (`order_advance`), falling back to a couple of built-in autonomous-behaviour checks and finally true
 idle only when every slot is empty. Open: exactly which non-player systems populate a secondary slot directly
-(bypassing the wipe), and the two "autonomous work" checks (0x43D2F0/0x43D0E0).
+(bypassing the wipe). The two "autonomous work" checks are now traced - see "Idle behaviour": 0x43D0E0 returns a
+unit to a remembered cell's own occupant (enter a building in state 2, else walk over and stand near it); 0x43D2F0
+returns it to a remembered class-4 (vehicle) reference instead.
 
 ### Starting a melee (the attack-order handler, 0x51A2A0)
 ```text
@@ -2555,12 +2782,38 @@ moments later), both inside one 83 ms turn.
     separate behaviour from the attack branch, not "attack" and not confirmed as "defend the building" either.
     `0x4DF0E0` ("preacher's extra check") gates whether a preacher instead falls through toward that SAME attack
     branch later in the same function. Still open: where the position/reference parameters threaded through this
-    whole chain actually originate (an enemy sighting? an attacker reference?), and whether kind 17 is EVER issued
-    to a player-controlled preacher through some other, not-yet-found path (this one entry point being AI-only
-    would mean a human player's preacher never runs an unprompted kind-17 approach, only kind 32 via
-    `preacher_auto_scan`, or kind 31 via the player's own disguise command).
+    whole chain actually originate (an enemy sighting? an attacker reference?).
+    **Resolved, a later session, tracing `maybe_ai_func_1` itself**: `maybe_ai_func_1` (0x4623E0) and its
+    "decide a new goal" sibling (0x4625E0) are both called only from `process_tribe_2`'s own per-tribe turn
+    processing (0x4615F0), and `process_tribe_2`'s own caller, `process_tribe_1` (0x461510, re-read this
+    session), explicitly gates which per-tribe function runs on `tribe+0xC1F == 1` (the controller-type byte,
+    see the Reference table and its own "Order kinds" subsection - 1 is computer/AI, 2 human, set once per
+    tribe at level load by `clear_tribe`/0x42B660): a tribe with `0xC1F == 1` gets `process_tribe_2` (which
+    ticks `maybe_ai_func_1`'s whole task-slot scheduler, 10 slots/tribe, 29 possible task types including this
+    kind-17 dispatcher at task id 20); any other value (in practice 2, human) instead gets `0x4F6C20` directly
+    as its ONLY per-turn work from this dispatcher, never `process_tribe_2`/the AI tick. (`0x4F6C20` itself, a
+    per-building housekeeping pass unrelated to AI task slots, is not human-exclusive - `process_tribe_2` also
+    calls it, near its own end, for the AI-tribe case; only the AI task-slot machinery above is gated.) **So
+    a human-controlled tribe's preacher can never receive an unprompted kind-17 approach through this path at
+    all** - it structurally only runs for computer-controlled tribes. A human player's preacher is left with kind
+    32 via `preacher_auto_scan` (self-issued auto-attack/building-visit) or kind 31 via the player's own disguise
+    command, exactly as this section already concluded, now confirmed rather than inferred from the chain's
+    "AI-only" look. See `pop3-rev/docs/functions.tsv`'s rows for `0x461662`/`0x4623E0`/`0x4625E0` for the full
+    scheduler trace.
   - still untraced: 0x5A707E (a per-type byte read on a model-variant branch) and the exact meaning of flag byte
     0x89C668 (many unrelated systems read other bits of the same byte, so it is unlikely to be preach-specific).
+  - **Checked this session: the Ghidra project export (`backup/backup.xml`) adds nothing new to any open question
+    here.** None of `preacher_strike_scan` (0x43ABF0), its sibling (0x43AEC0), state 23's handler (0x4D83B0), the
+    player-issued preach order (0x43C7A0) or state 5's handler (0x4D6970) have a real (non-auto-generated) name or
+    comment anywhere in the export - all four are plain `FUN_<addr>`, and the address ranges they cover carry zero
+    `<COMMENT>` entries (checked directly). The one relevant cross-check it does offer: its independently-built
+    `unit_type_person` structure (50 bytes, never actually applied to a data address in the export, so it's a
+    standalone type recovery, not a placement) assigns real field names lining up exactly with this doc's own
+    already-derived offsets into the person-type table at 0x5A7060 - `next_state` at +0x4 (the already-documented
+    "0x5A7064" per-type fallback-state table used throughout this section and "Combat"/Whirlwind) and `flags` at
+    +0x30 (this section's own preacher/firewarrior target-eligibility byte, bit 0x20) - folded into the reference
+    table above. No bit-level names, no help on `candidate+0x11` bit 0x8, the 0x89C668 byte, or the kind-33/state-5
+    reconciliation below.
   - **`0x4D850C` now fully resolved** (`test candidate+0x11,0x8; jne 0x4D87E8`): on a roll SUCCESS there are two
     distinct "no new unit" outcomes, not one, both read in full this session. (a) this bit set on the candidate
     skips straight to destroying it via `0x4D4B50` with nothing spawned - confirmed real code, but
@@ -2594,8 +2847,89 @@ moments later), both inside one 83 ms turn.
     target and, on arrival, plays a sound (0x9F) on the target and sets the target's own state to 5, chaining its
     command group's kind 0x98 → 0x9B → 0x99 over 40 ticks; state 5's own per-turn handler (0x4D6970) reads as a
     generic "idle near a reference unit" behaviour and never writes the person's own state - this still looks
-    unconnected to state 23/preacher_strike_scan, a third, separate preacher mechanism, not reconciled this
-    session either.
+    unconnected to state 23/preacher_strike_scan, a third, separate preacher mechanism.
+    **Re-read end to end this session, both this function and state 5's handler, instruction by instruction (all
+    9 of 0x43C7A0's own sub-states plus its cleanup tail, and the whole of 0x4D6970) - confirms the disconnect is
+    total, not a tracing gap**: neither function ever calls `alloc_unit`, writes person state 23, or issues order
+    kind 17/31/32 anywhere, and state 5 itself is a short, self-expiring 40-tick "face the preacher, play an
+    idle-fidget animation from the per-type odds table (0x5A7067, already catalogued under "0x5A7064's" own row)"
+    state with no re-arm - once its own `+0x70` timer or the preacher reference runs out it unconditionally reverts
+    to the candidate's per-type default (table 0x5A7064), regardless of anything else, exactly like every other
+    "give up" exit in this document. Two more findings from the same pass: (1) `preach_order_handler`'s target
+    validity check only requires `target+0x2A` (`unit_class`) to be nonzero, never checking for class 1 specifically,
+    and its own sub-state 2→3 gate reads `target+0x96`/`target+0x9A` - the same occupant-count/capacity pair
+    documented elsewhere as a BUILDING's own occupancy fields - so the kind-33 order's code path is shared,
+    unconditionally, with a "preach at a building" target, not a person-only mechanic requiring a separate branch
+    (the long-flagged "building variant" TODO item is this same function, not a separate one, though the exact
+    gameplay meaning of that occupancy check as applied to a building target is still unconfirmed); (2) the moment a
+    target is actually pushed into state 5 (both at sub-state 8's own write and in the cleanup tail's unconditional
+    fallback), `target+0xA7` is also set to `0x28` (40) - the same generic "busy" field this document's own open
+    questions list elsewhere ("What 'busy' means (unit+0xE bit 7, unit+0xA7)") has never pinned a concrete setter
+    for; this is the first confirmed write site found for it.
+
+    **The actual reconciliation, found this session by chasing the OTHER side - what calls `preacher_auto_scan`
+    (0x51E7B0, kind 32's issuer) and when**: `preacher_auto_scan` is reached from the generic per-person
+    auto-attack rhythm scan (`0x4D4690`→`0x4D4723` for a type-4 unit, already catalogued at 0x4D4690's own row,
+    re-read this session for this specific question) which runs for EVERY person every eligible tick regardless of
+    its current order - **it is not gated on being idle**. Inside the preacher branch, it skips calling
+    `preacher_auto_scan` for exactly one case: the preacher's own active (primary, else secondary) command group has
+    kind 0x11/0x1F/0x20 (17/31/32) AND a flag bit (`self+0x76` bit 0x40, setter not traced) is set; for every other
+    active kind - including 33 - it calls `preacher_auto_scan` unconditionally. **So a preacher running the
+    player's kind-33 preach order keeps getting `preacher_auto_scan` evaluated on it every eligible tick, exactly as
+    if it had no order at all.** `preacher_auto_scan` itself consults a second, previously-uncatalogued check,
+    `0x4DF140` (traced this session - see its own new row below) to pick between its two modes: that check returns
+    true only when the preacher's active group is ALREADY kind 17/31/32, past its own first sub-state, and
+    standing still (`+0x5F == 0`) - conditions a kind-33 order never satisfies (its own group kind is 33) - so a
+    mid-sermon preacher always falls into `preacher_auto_scan`'s "mode B" (building-candidate only, per that
+    function's own row). If `0x51F030`'s building scan finds an eligible candidate, `preacher_auto_scan` allocates a
+    brand-new group and assigns it to the preacher's PRIMARY slot via `group_assign(preacher, group, slot=-1)`
+    (confirmed from the raw push order at its own call site, matching `group_assign`'s already-documented
+    `slot<0` → primary convention).
+
+    **Refined this session, having now surveyed every `group_assign` (0x436D00) call site in the exe (41 total) to
+    settle exactly what "pre-empt" means here**: `group_assign(unit, group, -1)` only releases whatever group is
+    CURRENTLY sitting in the unit's own PRIMARY slot (`+0x9B`) - it never touches the secondary-slot array at all.
+    The player's kind-33 preach order does not live in primary to begin with: **every "give this unit an order"
+    path that isn't a self-issued autonomous scan - all 8 of the numbered player/spell order-issuing helpers at
+    0x43B180-0x43BB54 (confirmed this session for all 8, not just the 2 previously spot-checked: every one reads
+    its own `+0xA6` cursor, just reset to 0, and passes THAT as the slot argument), plus every other one-off
+    order-issuing site found in this survey (spell effects, building logic, the per-tribe sweep at 0x41CC20) -
+    targets a SECONDARY slot, overwhelmingly slot 0 after the universal "wipe everything first" idiom. The ONLY
+    call sites in the whole exe that ever pass `slot=-1` (primary) are self-issued autonomous behaviour scanners:
+    `preacher_auto_scan` and its direct siblings for other person types (the ordinary auto-attack issuer inside
+    0x4F0460, the firewarrior ranged-auto-attack issuer inside 0x51E9A0/nearby, and two further "if genuinely idle,
+    self-issue something" functions at 0x40BD20 and 0x520480) - a clean, exe-wide split between "autonomous
+    behaviour always claims primary" and "every directed/externally-triggered order always claims a secondary
+    slot". kind 33's own issuer was not located this session (none of the 41 `order_set`/0x438730 call sites pass
+    a literal kind of 0x21; it must come from one of the small number of call sites that forward a kind value from
+    a register/struct field instead of a literal, not chased further), but every other directed-order path in the
+    exe uses a secondary slot, so there is no reason to expect kind 33 to be the one exception - it almost
+    certainly lives in a secondary slot too, not primary.
+
+    **So the correct picture is "outranked and parked", not "destroyed and replaced"**: a self-issued kind-32
+    order claims PRIMARY without touching whatever secondary slot holds the kind-33 group, but `order_execute`'s
+    own resolve step (re-verified this session, `0x4325A7`-`0x4325DF`) always checks primary first and runs ONLY
+    that group when primary is nonzero - so the kind-33 group sits alive but completely inert in its secondary
+    slot for as long as the autonomous order occupies primary. Per `order_advance`'s own already-documented
+    behaviour (above), once that autonomous primary order finishes and releases, `order_advance` scans the
+    secondary slots from the cursor and would find the still-live kind-33 group there, making it primary-eligible
+    again (i.e. the sermon would resume on its own, not restart from a fresh player click) - PROVIDED nothing else
+    wrote over that secondary slot in the meantime. One real wrinkle this doesn't resolve: `preach_order_handler`'s
+    own sub-state counter lives at the UNIT's `+0x2D`, a field this document already established elsewhere is a
+    generic, shared "current order's own scratch" byte, not a per-group field - and `order_building_approach`
+    (kind 32's handler) uses that SAME byte for its own sub-state while it runs as primary. So even though the
+    kind-33 GROUP record survives untouched, the PREACHER's own `+0x2D` progress marker for it does not - whatever
+    sub-state the sermon had reached is clobbered by the interim kind-32 approach, and what `preach_order_handler`
+    sees on resuming (sub-state 0, since nothing was found resetting `+0x2D` back to 0 between orders, so it is
+    most likely whatever kind-32 left behind) was not pinned down this session. This resolves the standing question
+    of how an explicit player preach command can ever result in a real conversion despite kind 33 itself never
+    touching state 23: **it can't, directly - any conversion that follows a player's preach order is actually
+    produced by that same preacher's own concurrent autonomous auto-scan, which keeps running throughout, claims
+    execution priority over the manual order without destroying it, and is the only path that ever reaches
+    `preacher_strike_scan`/state 23.** This is a fully traced, static mechanism; none of it (the pre-emption, the
+    later resume, or the `+0x2D` collision) has been confirmed against live play this session, and `0x51F030`'s own
+    building-candidate scan radius/eligibility remains unread, so how OFTEN this actually fires in a typical sermon
+    is still open.
   - **`preach_order_handler` (0x43C7A0) never calls `alloc_unit` (0x4ED8A0)** - unlike fight/pre-fight (class-10
     controller types 8/9), the sermon/listening mechanism creates no controller object at all; it is pure
     person-state bookkeeping (the preacher's own substates, state 5 on the listener). Our own `combat.md`
@@ -3294,7 +3628,6 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
 - Where `MANA_F_<PERSON>`, `MANA_F_HOUSED/WORKING/TRAINING` and `MANA_F_HUT_LEVEL_1..3` are applied. Only the max
   of the three activity percentages is stored, and its readers are not traced.
 - What "busy" means (unit+0xE bit 7, unit+0xA7), and the preacher's extra check.
-- The controller types of tribe+0xC1F (2 is human; 1 gets full mana).
 - Spell order and share inside the distribution loop.
 - Auto-attack: where the kinds' sprites are drawn (the record+6 offset could not be reproduced this session -
   unverified, not disproven), the firewarrior's own scan (0x51E9A0); the preacher's own scan (0x51E7B0) is now
@@ -3699,7 +4032,7 @@ class are in `pop3-rev/docs/unit_types`.
 | +0xA05, +0xA07 | reservoir `delay` and `rate` |
 | +0x911, +0x915 | reincarnation site position (x, z) and height |
 | +0xA0D + 2·slot | the site's 8 pillar unit ids |
-| +0xC1F | controller type: 2 human, 1 full mana, others unknown |
+| +0xC1F | controller type: 2 human, 1 computer/AI (confirmed, "Preacher conversion" - gates the whole per-tribe AI tick, not just mana), others unknown |
 | +0xC22 | tribe number |
 
 Other globals: the per-tribe level header `struct_56B` (0x38 bytes per tribe at 0x96070A) holds the spells:
@@ -3718,8 +4051,8 @@ of 0x89C661.
 
 | Table | Base | Stride | Fields |
 |---|---|---|---|
-| person types | 0x5A7060 | 0x32 | `HUMAN_TRAIN_MANA_` +0x24, `CP_TRAIN_MANA_` +0x28, `MANA_F_` +0xE, `LIFE_` +0x10, `WOOD_` +0x14, `FIGHT_DAMAGE_` +0x1B, chop time (u8, not a named constant) +0x1D, `CONV_` +0x1F, tower detection radius +0x22, `SW_BLAST_DAMAGE_` +0x2C |
-| building types | 0x5A7228 | 0x4C | slots +0x20 (u8), output person +0x31 (u8), `CONV_TIME_` +0x2C, `WOOD_` +0x1A, next size +0x34 (u8), growth target +0x36 (2400, not a named constant), mana factor +0x38, `MAX_POP_VALUE__HUT_` +0x3A, `HUT_SPROG_TIME` +0x3C, flags +0x48 (bit 0: trains; bit 10: breeds; bit 6: holds wood), foundation re-level rate +0x44 (2) and tolerance +0x46 (200) |
+| person types | 0x5A7060 | 0x32 | `HUMAN_TRAIN_MANA_` +0x24, `CP_TRAIN_MANA_` +0x28, `MANA_F_` +0xE, `LIFE_` +0x10, `WOOD_` +0x14, `FIGHT_DAMAGE_` +0x1B, chop time (u8, not a named constant) +0x1D, `CONV_` +0x1F, tower detection radius +0x22, `SW_BLAST_DAMAGE_` +0x2C, per-type default/fallback next-state (the table elsewhere in this doc addressed as "0x5A7064") +0x4, flags +0x30 (bit 0x20: preacher/firewarrior-only conversion-target eligible, "Preacher conversion"'s `preacher_strike_scan`; bit 0x40: melee-ring eligible, `fight_pick_slot`/0x51DCC0, "Fight" - same byte, two unrelated readers), disguise-gate flags +0x31 (bit 0x4: brave/warrior/spy only, clear for preacher/firewarrior/shaman/angel/wildman - "Preacher conversion"), per-type auto-scan rhythm mask +0x2F (`class_counter` tested against this byte to gate the generic auto-attack-rhythm check, 0x4D4690 - "Preacher conversion"), default idle pose id +0x5 (read by `order_execute`'s "settle and go idle" fallback, 0x4E32A0 - "Idle behaviour") |
+| building types | 0x5A7228 | 0x4C | slots +0x20 (u8), output person +0x31 (u8), `CONV_TIME_` +0x2C, `WOOD_` +0x1A, next size +0x34 (u8), growth target +0x36 (2400, not a named constant), mana factor +0x38, `MAX_POP_VALUE__HUT_` +0x3A, `HUT_SPROG_TIME` +0x3C, flags +0x48 (bit 0: trains; bit 10: breeds; bit 6: holds wood), foundation re-level rate +0x44 (2) and tolerance +0x46 (200), work-site capacity (u16, >>2 before use) +0x14 ("Idle behaviour" - `0x4D9B50`'s AI work-assignment scan) |
 | scenery types | 0x5A79B0 | 0x18 | object +0x0A (12: 30), `TREE_WOOD_VALUE` +0x4, `TREE_WOOD_GROW` +0x6, `TREE_DORMANT_TIME` +0x8, flags +0x14 |
 | movement profiles | 0x5A7B90 | 0x1A | speed +0x4 (`<TYPE>_SPEED`: brave profile 2, warrior 14, preacher 15, spy 16, firewarrior 17, shaman 18), velocity caps +0x8 / +0xA and +0xC / +0xE (horizontal / vertical: 192 / 512 for persons), `WALK_ALT_DIFF2` +0x10 (copied for flagged profiles), gravity +0x12 (32), ground friction +0x14 (28) / +0x16 (72), flags +0x18 |
 | spells | 0x5A80D0 | 0x3E | kind +0x00 (1 normal, 2 hidden), cost (u32) +0x4, id +0x8, flags +0x1A (bit 0 castable) and +0x1B (0x40 homing), `SP_W_RANGE_` +0x1E, mode-0x20 range +0x22, shot without shaman +0x26, shot from shaman +0x27, effects +0x28..+0x2C, `SP_1_OFF_MAX_` +0x2D, mode-0x20 charges (`LSME_1_OFF_MAX_`) +0x2E, deflectable +0x2F, sound +0x30, enemy-cast alert +0x35/+0x36, `OPT_S` +0x3A |

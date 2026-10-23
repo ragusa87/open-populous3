@@ -103,6 +103,58 @@ target: going round a camp fire is endless (a tended fire never goes out) until 
 then the chain goes on; praying will be at a totem and end when it is gone (today it never ends on its own).
 Internal moves (stepping off a taken spot on arrival, a fire put out) use `Unit::start`, which keeps the chain.
 
+## Patrol orders (not done)
+A unit, or several selected together, can be given up to **8 patrol points**
+(`Ctrl+Alt + left click`, shortcuts.md) instead of one destination, as long as at least one unit is
+currently selected. Once more than one point is set, the unit cycles through them forever — arrive
+at point 1, move to point 2, ... point N, then back to point 1 — a continuous loop, not a one-shot
+sequence. With a single point set this reads as a stationary guard post; with several, a
+back-and-forth or circuit patrol.
+
+- **The first point of a new sequence replaces everything**, exactly like any other direct order:
+  it clears whatever the unit was doing before starting the new one. Every point added after that
+  **appends** instead — the one exception, across every order-giving path in the original, to "a
+  new order always replaces the old one."
+- **"First point" is tracked per tribe, not per selection — a real quirk to reproduce.** How many
+  points have been placed so far is one running count for the whole tribe, not reset just because
+  a different unit or group is now selected. So setting a single new point on a freshly-selected
+  group does not reliably start a fresh sequence at point 1 unless the sequence was explicitly
+  released first (below) — it continues wherever the tribe's own counter currently stands, even if
+  that has nothing to do with the newly-selected units' own prior orders.
+- **A dedicated "release" command resets that counter to zero** (`N`: release the held followers,
+  shortcuts.md) — the only way the count returns to the start, clearing the way for a genuinely
+  fresh sequence.
+- **Any ordinary direct order cancels the whole sequence for that unit.** Moving, attacking,
+  entering a building, or giving any other normal order to a unit mid-patrol wipes its own patrol
+  points outright, the same as it would wipe a single standing order (this does not touch the
+  tribe-wide point counter above, which only the release command resets).
+- **Each point is an ordinary move or attack order — nothing patrol-specific happens at a point
+  itself.** Clicking open ground sets a **move** point: internally, a permanent, invisible marker
+  is placed at that exact spot and the point targets the marker, so the order machinery never
+  needs to special-case "a bare position" versus "a unit" — every point targets *something with an
+  id*. Clicking a unit instead sets an **attack** point: it reuses the same order the game's
+  ordinary "attack as a group" command uses, so the unit (or every unit sharing that point) tries
+  to fight whoever was clicked when the circuit reaches it — not a passive escort or follow. A
+  failed attempt (target unreachable, gone, etc.) does not give up and move on: it keeps retrying
+  every tick for as long as the circuit sits on that point.
+- **Points set on a group of selected units are shared, not copied — and this isn't special to
+  patrol points.** Every order the game issues, to one unit or a hundred, is always a reference to
+  one shared, reference-counted record — ordering one unit alone still creates one of these records
+  for just that unit. A patrol point is the same mechanism, just occupying one of several slots
+  instead of the usual one, and (when set on several selected units at once) referenced by every
+  one of them. Reference-counted in the ordinary way: giving one member of the group a new order
+  only drops that unit's own reference; the rest of the group keeps patrolling via the same
+  still-alive record, unaffected, and the record itself only goes away once every unit ever pointed
+  at it has moved on.
+- **[ours] While patrolling, the whole group engages an enemy together**, rather than reproducing
+  the original's own (only partially traced) incidental mechanism: a multi-unit move-type patrol
+  forms up as an ordinary Formation while walking (move is a formation-eligible order), and
+  Formations in the original separately get a periodic "is there a nearby enemy" scan as a side
+  effect of just existing — not of patrolling specifically — whose outcome once it finds something
+  was never confirmed. We don't reproduce that chain: instead, one patrol-group member spotting an
+  enemy pulls the rest of the group sharing that same patrol point into the fight with it, which
+  already matches "a patrol point is one shared record several units refer to" above.
+
 ## Wood (done: braves only)
 - A brave carries at most one piece of wood (`Unit::carrying`, 0 or 1).
 - `Order::CutTree { tree }` (left click on a tree with braves selected, `GameMap::cut_orders`; other kinds

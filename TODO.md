@@ -136,7 +136,8 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Coordinators: the infrastructure is done ([coordinators.md](docs/specs/coordinators.md)); each kind to specify and implement (preacher's sermon, formation, guard control, soul convert - see pop3-rev-analysis.md "Preacher conversion" for soul convert's traced numbers (`PREACHEE_CONV_FREQ`/`_CHANCE`, the population cap, the "no breeding" tribe bypass); the challenge and the melee are done), with its scan in `GameMap::detect_coordinators`.
 - [ ] The hurt path (`GameMap::damage`): the last attacker, the death cause, and death held off while tumbling, so no emitter repeats them.
 - [ ] Internal model 10/6 (and 10/1) resolved: they are a **formation** system (pop3-rev-analysis.md "Formations"), not Preacher Attract. A unit joins/creates one (`add_unit_to_formation`) whenever a global flag (now traced: a "formations off" switch, normally clear) is clear and its current order kind "wants formation" - true for plain move (kind 3), false for attack (kinds 19/21). Up to 12 members are held at fixed per-slot offsets around a controller that jitters its own heading periodically. Not implemented at all today; `slots.rs`'s grid-based spot search for a group move has no equivalent in the original and isn't gated by anything - either replace it with (or gate it behind) a formation-shaped system, or keep it as a documented simplification.
-- [ ] Order model: the original's "unit order queue" (pop3-rev-analysis.md "Command groups", now fully traced) is structurally different from `Unit::queue` (`crates/game-core/src/unit.rs`). Ours is a single `Vec<Order>` FIFO of future player-authored steps (push/pop, cleared by a fresh direct order). The original instead gives a unit one exclusive "primary" order plus 8 independent "secondary" slots that different systems (spell effects, a building's own autonomous assignment, the auto-attack scanner) can each occupy at once without clobbering each other; a unit round-robins between whichever secondary slots are still populated only once its *currently active* one finishes, falling back to built-in autonomous-behaviour checks before truly idling - it is not a sequential multi-step queue in our sense. A freshly given direct order (move/attack/etc.) wipes everything in every one of the 8 "give an order" entry points checked, matching our "a direct order replaces the chained ones" - that part already lines up. Nothing to fix unless a feature needs a unit to hold more than one standing order from different sources at once (the original's actual use case for the 8 slots, not yet needed by anything we've built).
+- [ ] Order model: the original's "unit order queue" (pop3-rev-analysis.md "Command groups", now fully traced across several sessions) is structurally different from `Unit::queue` (`crates/game-core/src/unit.rs`). Ours is a single `Vec<Order>` FIFO of future player-authored steps (push/pop, cleared by a fresh direct order). The original instead gives a unit one exclusive "primary" order - reserved EXCLUSIVELY for self-issued autonomous behaviour (auto-attack/auto-scan, confirmed exhaustively: only 5 functions in the whole exe ever use it) and always outranking secondary when both are populated, without erasing it - plus 8 independent "secondary" slots. A freshly given direct order (move/attack/etc., all 8 "give an order" entry points) wipes everything and lands in secondary slot 0 - in solo play this is functionally equivalent to our own "a direct order replaces the chained ones", so that part already lines up.
+  **However**: a later session found a genuine, confirmed exception that IS a missing feature - `0x4BA9B0` (called from `process_tribe_cmd`), the real implementation of shortcuts.md's own `Ctrl+Alt + left click (with followers): patrol points, up to 8` row (listed there as an original-game feature, "-" for ours, i.e. not implemented at all today). Fully traced and written up address-free in `docs/specs/units.md` "Patrol orders" (fills secondary slots one at a time without wiping earlier ones, the point counter is tribe-wide not per-selection, `N` releases it, each point is an ordinary move-via-invisible-marker or attack-via-melee-ring order, points set on several selected units share one reference-counted record). NOT a separate `guard_control_units` controller object - that turned out to be an unrelated, incidental "formations get a periodic nearby-enemy scan" mechanism, whose outcome was never confirmed; **we deliberately do not reproduce that chain** - see units.md's own `[ours]` note: one patrol-group member engaging an enemy pulls the rest of the group sharing that point into the fight instead. This is a real gap: `Unit::queue`'s own FIFO doesn't model "cycle forever through N saved points", only "do these steps once then stop". Implementing it needs: a new `Order` variant or a dedicated patrol list on `Unit` (up to 8 points), a way to set points incrementally without clearing earlier ones (distinct from today's "any new order replaces the queue" rule), and the cycle-forever-on-completion behaviour. Still open on the exe side: how the AI script's own `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/`SET_MARKER_ENTRY` (docs/specs/ai-scripts.md) drives this same mechanism for computer tribes.
 
 ## Combat
 - [ ] Melee (combat.md "Melee"): the ground check moving the middle off unsuitable ground, the winner's count and the killed count per tribe, the moves' sounds, the original's option with no shove, the third approach (a target at its building), the fight music or alert.
@@ -188,10 +189,32 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   once, `WorldEvent::StrikeBack`) covers exactly this case reasonably well, just via the preacher's own
   eligibility rather than a direct third-party engagement of the listener - worth re-checking that our own combat
   targeting can actually reach a listener mid-sermon the same way, rather than always treating it as untouchable
-  until freed. Still open: the player-issued
-  preach order (kind 33) walks up to one target and sets it to a different, seemingly unconnected state (5, "idle
-  near a reference unit") - a second, unreconciled preacher mechanism; the building variant (preaching to a
-  building's people); the soul flying from the preacher to the converted; the halving flag of the first check;
+  until freed. **Reconciled a later session**: the player-issued preach order (kind 33) walks up to one target
+  and sets it to a different state (5, "idle near a reference unit") that never itself produces a conversion -
+  exhaustively re-read both functions involved and confirmed neither ever reaches state 23. The actual link: the
+  same preacher's own autonomous auto-scan (the generic per-person rhythm check, 0x4D4690, running every eligible
+  tick regardless of current order) is suppressed only while the preacher already has an active, stopped kind
+  17/31/32 order - never for kind 33 - so it keeps firing throughout a manual preach command and can freshly
+  self-issue a kind-32 order, which IS the one that reaches `preacher_strike_scan`/state 23. **Refined a later
+  session, after surveying every `group_assign` call site in the exe**: the kind-33 order itself lives in a
+  secondary slot (like every other directed/spell-issued order found anywhere in the exe), while the self-issued
+  kind-32 order claims the PRIMARY slot (`slot=-1`, confirmed exclusive to autonomous scanners exe-wide) - and
+  `group_assign`'s own `slot<0` path only releases whatever was PREVIOUSLY in primary, never a secondary slot. So
+  the manual order isn't destroyed/replaced, it's out-prioritized: `order_execute` always runs primary over any
+  secondary when both are populated, so the kind-33 order goes dormant (but intact) for as long as the auto-issued
+  order occupies primary, and should resume on its own once that finishes and `order_advance` re-scans the
+  secondary slots - though the preacher's own order sub-state counter (`+0x2D`) is a shared, not per-group, field
+  that the interim kind-32 order also uses for its own bookkeeping, so whether the sermon truly resumes from where
+  it left off (vs. restarting its approach) is unconfirmed. So a manual preach command never converts anyone
+  directly; any conversion that follows one is actually produced by the preacher's own concurrent autonomous
+  behaviour taking over mid-sermon - see pop3-rev-analysis.md "Preacher conversion" and "Command groups" for the
+  full trace. Not confirmed against live play (e.g. watching a manual order visibly get out-prioritized). Our own
+  sermon/soul-convert coordinators should probably model this as "the preacher's autonomous conversion behaviour
+  runs regardless of a manual preach order and can override it", not as the manual order itself rolling anything.
+  Still open: the building variant (preaching to a building's people - `preach_order_handler`'s own target can be
+  any unit class, not gated to persons, and reads what looks like a building occupancy pair at a key transition,
+  but the gameplay meaning of that gate on a building target is unconfirmed); the soul flying from the preacher to
+  the converted; the halving flag of the first check;
   how many listen at once and from how far; whether the preacher's sermon really plays its 5 identified phases in
   order (`Pose::Preach` only draws one, anim 22, a guess) or just one; and (corrected this session: `+0x2E` bits
   0-3 are not an "interrupted" flag at all, live-confirmed to be the ordinary `class_counter` rhythm field used
@@ -204,6 +227,42 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   replacement) is now fully understood as two distinct cases - a still-unidentified per-candidate flag that skips
   straight to destruction, and the tribe's population cap (200, exact) which instead skips both destruction and
   replacement entirely - see "Preacher conversion" for both.
+- [ ] Remove the `sermon::Sermon` coordinator, replacing it with plain state on the two units involved - the
+  original never backs preaching with any object at all (unlike Fight/Pre-Fight/Formation, which do get one): just
+  a sub-state on the preacher and a resist-timer plus striker reference carried directly on the listener
+  (pop3-rev-analysis.md "Preacher conversion"). Every piece of data and logic `Sermon::tick` currently owns already
+  reads and writes nothing but `self.preacher`/`self.listener` via `world.unit(..)` - it never reaches into any
+  other sermon or needs the registry for anything but being invoked - so this is a mechanical, behaviour-preserving
+  move, not a redesign:
+  - `Sermon { preacher: UnitId, listener: UnitId, left: Countdown, attempts: u32 }` (today, one instance per
+    listener in `Coordinators::sermons: Registry<Sermon>`) → folded directly into the listener's own
+    `Action::Listening { preacher: UnitId, sitting: Countdown, left: Countdown, attempts: u32 }` (today:
+    `Action::Listening { sermon: SermonId, sitting }`, indirecting through the registry by id). The listener then
+    carries everything a sermon needs itself, with no id/link indirection.
+  - `Coordinator::tick()` (invoked once per sermon id via `tick_kind`/`Coordinators::tick`): the exact same checks
+    (preacher/listener still alive and enemies, preacher thrown or in a `Challenge`/`Melee` → release + emit
+    `WorldEvent::StrikeBack`, preacher no longer `Action::Preaching` → plain release, tick `left`, roll conversion
+    at `CONV_CHANCE` 1-in-5 once `left` hits zero gated on `MAX_POPULATION`, else reschedule) move to run inline as
+    part of the listener's own ordinary per-unit tick, in the same place `sitting.tick()` already runs today.
+  - `Coordinators::sermons` and the `participants()` reverse index for this kind: removed - nothing to register,
+    the unit's own `Action::Listening` payload *is* the state; same for `Link::Sermon(id)` and `Action::link()`'s
+    `Listening => Link::Sermon(..)` arm (`Listening` no longer links to anything coordinator-shaped), and for
+    `GameMap::release_orphans` ever needing to notice a vanished `Sermon` (there is no separate object to vanish).
+  - `start_sermons`'s "any `Preaching` unit not among existing sermons' `preacher` fields → `Idle`" check (built
+    today by scanning the `Sermon` registry) inverts to scanning units instead: a `Preaching` unit checks, each
+    turn, whether any other unit's `Action::Listening{preacher, ..}` still names it - same linear cost, just moved
+    to a different collection. This is the one place the logic's *shape* changes, not its behaviour.
+  - `WorldEvent::Release{unit, from: Link::Sermon(id)}` becomes a plain `Release{unit}` (or just setting
+    `Action::Idle` inline) - there's no coordinator existence check left to make it conditional on.
+  - Not a separate mechanism and needs no new state: "more listeners on one preacher converts faster overall" is a
+    plain emergent property of several independent per-listener timers/rolls running in parallel (the first
+    success among N independent waiting times lands sooner than any one alone) - no single listener converts
+    faster with more listeners around it, and nothing above needs to account for it.
+  - Unaffected either way (none of this touches the coordinator): `Action::Preaching` itself, `may_preach`,
+    `begin_sermon`'s sit-down scan, `sit_down`'s wood-drop/animation setup, `Unit::change_owner`, every drawn
+    detail (anim 18/22, the dev overlay's preacher→listener lines).
+  - Correctness bar: `sermon.rs`'s existing test module should pass unchanged against the new shape - none of its
+    tests assert on `Sermon`/`SermonId` by name in a way that would need to change.
 - [ ] Resuming a fight cut short by a push (combat.md "Melee" rule 1: a fighter farther than `MELEE_LEASH` leaves;
   pop3-rev-analysis.md "Resuming a fight cut short by a push", now fully traced): the original never cancels an
   attacker's order when it enters a fight - starting/joining one only changes the person's state, its original

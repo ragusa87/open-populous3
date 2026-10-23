@@ -1,8 +1,12 @@
 # Coordinators
 
-Short-lived simulation objects that coordinate several units: a sermon, a fight, a formation, a guard post's
-control. The infrastructure is `game_core::coordinator`; kinds: the challenge, the melee and the sermon (combat.md "Challenge", "Melee", "Sermon"). Each kind
-has its own spec and rules on top of this.
+Short-lived simulation objects that coordinate several units: a fight, a formation, a guard post's
+control. The infrastructure is `game_core::coordinator`; kinds: the challenge and the melee (combat.md "Challenge",
+"Melee"). Each kind has its own spec and rules on top of this.
+
+A sermon is deliberately **not** one of these (TODO.md: removing `sermon::Sermon`) - the original keeps no backing
+object for preaching at all, just state on the preacher and the listener directly (combat.md "Sermon"), and ours
+should match that rather than using this coordinator machinery for it.
 
 Tags: **[exe]** the original executable (pop3-rev-analysis.md), **[wiki]** the Populous Wiki (Object Data),
 **[ours]** a choice made here.
@@ -14,9 +18,9 @@ computer, pop3-rev-analysis.md "Mana rules"), and will name whoever plays an AI 
 
 ## The pattern [ours]
 - **A stable id**, typed (`id::Id<C>` from `GameMap::new_id_of`), never given again.
-- **Created when a situation starts** (an enemy in a preacher's range, two enemies meeting), by a scan of the map
+- **Created when a situation starts** (two enemies meeting, a challenge turning into a melee), by a scan of the map
   (step a below).
-- **Units link to it one way**, through their action (e.g. `Action::Listening { sermon }`;
+- **Units link to it one way**, through their action (e.g. `Action::Challenge { challenge, .. }`;
   `Action::link` returns it as a `coordinator::Link`). The coordinator stores no list of its units: "the units of
   X" is computed when needed (`coordinator::participants`).
 - **Ticked each turn**: it checks its own conditions, decides, and returns a `Step { finished, events }`. It reads
@@ -27,7 +31,7 @@ computer, pop3-rev-analysis.md "Mana rules"), and will name whoever plays an AI 
 ## Types
 | Type | Where | What |
 |---|---|---|
-| `Id<T>` | `id.rs` | `u32` with the kind in its type: an `Id<Fight>` does not fit where an `Id<Sermon>` is expected. `raw` / `from_raw` for the wire and tests. |
+| `Id<T>` | `id.rs` | `u32` with the kind in its type: an `Id<Fight>` does not fit where an `Id<Challenge>` is expected. `raw` / `from_raw` for the wire and tests. |
 | `Registry<T>` | `id.rs` | Objects of one kind by id, a `Vec` sorted by id: `insert` (a fresh id only), `get`, `get_mut`, `contains`, `iter` in id order, `retain`. Clone and PartialEq, no HashMap. Effects use it too. |
 | `Coordinator` | `coordinator.rs` | The trait of a kind: `link_of(&Unit)` (its units' link) and `tick(&mut self, id, members, now, &GameMap, &mut Lcg) -> Step`; `members` are found once per kind and turn (`tick_kind`). |
 | `Coordinators` | `coordinator.rs` | `GameMap::coordinators`: one `Registry` per kind. `tick` runs the kinds in one written order (`tick_kind` per kind); `exists(Link)`. |
@@ -55,7 +59,7 @@ for each variant:
 | `Shove { attacker }` | `GameMap::shove`: the challenger starts its shove |
 | `Struck { attacker, target, blow, knock }` | `GameMap::struck`: the attacker strikes, a target on guard reels (and is thrown back after) |
 | `StartMelee { attacker, target }` | `GameMap::start_melee`: a new melee, both in it |
-| `Release { unit, from }` | the unit leaves the coordinator `from`: back to Idle (`Unit::release`); nothing if it is gone, in none, or taken by another one meanwhile (a listener challenged the same turn its sermon ends stays in the challenge) |
+| `Release { unit, from }` | the unit leaves the coordinator `from`: back to Idle (`Unit::release`); nothing if it is gone, in none, or taken by another one meanwhile |
 | `StrikeBack { unit, at }` | the unit attacks `at` back (`GameMap::go_attack`, chained after landing when thrown): a firewarrior hit by a bolt, a listener whose preacher was attacked |
 | `ChangeOwner { unit, tribe }` | `GameMap::change_owner`: a converted person joins the tribe, starting afresh (combat.md "Sermon") |
 
@@ -102,7 +106,7 @@ from the executable (pop3-rev-analysis.md "Combat").
 | 7 | Object Face | name only | unknown |
 | 8 | Fight | up to 6 people in a ring around one centre person alone on its side; all melee damage [exe] | a fight coordinator |
 | 9 | Pre-Fight | one attacker and one target: run-up, damage-free kick, run-up, then a fight [exe] | a pre-fight coordinator starting fights |
-| 10 | Guard Control | guard control [exe] | a guard post's control |
+| 10 | Guard Control | not a dedicated coordinator after all: "guard/patrol between markers" turned out to be ordinary move/attack orders stashed across several of a unit's own order slots, units.md "Patrol orders" [exe] | superseded - no new coordinator kind needed for this |
 | 11 | Bridge Control | name only | unknown (land bridge?) |
 | 12 | Soul Convert 2 | soul convert [exe]: created when a preachee enters state 3 (pop3-rev-analysis.md "Preacher conversion"), at its own position and tribe | conversion |
 | 13 | DT Beacon | name only (drum tower?) | unknown |

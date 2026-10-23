@@ -220,11 +220,16 @@ join a melee on their own attack (they still fight when challenged).
   idle [game]. Ordered at someone further, it also checks that one target every turn rather than only on its look
   turn, so the target's own spotting cannot challenge it first while the preacher is between look turns [game]. It
   then stands `Action::Preaching`, facing a listener, and goes idle again once it has no listener left.
-- A sermon per listener (a coordinator, `Sermon { preacher, listener, left }`), as the original keeps a state per
-  preached person [exe]. The listener sits (`Action::Listening`, anim 18) and is locked [game]: no orders, dropped
-  from its player's selection, until converted, freed or dead; a brave puts down the wood it carries [game]. It still
-  heals and can be attacked: an attacker challenges it as anyone, which takes it out of its sermon, the others listen
-  on [game].
+- A sermon per listener, kept as state on the two units involved rather than a separate coordinator object - the
+  original does the same: no backing object of any kind, just a sub-state on the preacher and a resist-timer and
+  striker reference carried directly on the listener itself [exe]. `Action::Listening { preacher, sitting, left,
+  attempts }` on the listener carries everything a sermon needs (TODO.md: removing the `sermon::Sermon` coordinator
+  to match this). The listener sits (anim 18) and is locked [game]: no orders, dropped from its player's selection,
+  until converted, freed or dead; a brave puts down the wood it carries [game]. It still heals and can be attacked:
+  an attacker challenges it as anyone, which takes it out of its sermon, the others listen on [game]. More listeners
+  on one preacher convert faster only in the aggregate, never individually: each listener's own countdown and roll
+  are entirely independent of every other listener's - this is a plain property of several independent timers
+  running at once, not a group bonus.
 - Each turn the sermon ends (the listener freed) when the preacher is gone, dead or no longer preaching (an order took
   it, or it was attacked or thrown (a bolt, a blast): every one of its sermons ends [game], and each freed listener attacks it back at once,
   `WorldEvent::StrikeBack` [game]; nothing else protects them: whether the preacher, free again, sits them down before
