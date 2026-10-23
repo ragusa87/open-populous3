@@ -232,8 +232,8 @@ could.
   horizon from perspective. No obvious tiling repeat visible within the frame. The shading is consistent with a
   mesh with gentle height variation rather than a flat textured plane, though a still image can't confirm that on
   its own.
-- **Shoreline**: no foam band - the water meets the land directly along an irregular edge, fairly hard-edged,
-  with little blending; the land side has a pale sandy or snowy rim.
+- **Shoreline**: no foam band - the water meets the land directly along an irregular edge; the land side has a pale
+  sandy or snowy rim.
 - **Objects on the water** (sizes at screenshot scale, for context - not specifically about the water surface
   itself): a single boat (hull + blue triangular sail) about 28x30 px; a pair of boats together about 65x40 px
   (each roughly 30-35 px wide); a splash/impact effect (small white/pale particles ~2-4 px each, a few tiny
@@ -303,6 +303,13 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   be open for several cells around a point, not just at that exact point. Approximate (a ring can miss a thin
   obstacle between two sampled directions, and this measures "no land at roughly this radius", not the water
   body's true size or shape) but much closer to "only open ocean ripples" than a single point ever could be.
+  **Fixed 2026-10-23**: that ring (and a denser filled-disc variant tried along the way) still traced a visibly
+  facetted/octagonal edge next to the coastline's own smooth, bilinearly-rounded one (reported, level 1, cell
+  9/102) - a `max` of any fixed set of samples is a facetted shape by construction. `water_sea_factor` now computes
+  an actual Euclidean distance to the nearest land-like sample within the same disc neighbourhood and smoothsteps
+  on that distance instead of on a `max` of raw `walk` values - a true distance field's level sets are circular
+  arcs around a convex corner, so its edge now reads as one coherent, smoothly-rounded coast alongside the colour
+  boundary's own, not two incompatible shapes.
   `water_colour` (below) takes the fragment's own `water_sea_factor` value (computed once, passed in) and gates
   the SAME way (mixing its own normal towards flat "up" where it's low) so the shading goes still exactly where
   the geometry already does - verified: confirmed near-shore water pixels show zero variation over a fixed-seed,
@@ -399,6 +406,11 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   height now also reads as "sea" for this one purpose (height <= `VISUAL_SEA_HEIGHT`, a guess), so it renders as
   water instead of through `land_colour`'s own `cliff` remap, while staying exactly as walkable as before for
   everything gameplay (pathing, drowning, building placement all still read `is_sea` directly, untouched).
+  **Fixed 2026-10-23**: `fragment`'s branch on `COAST_THRESHOLD` used to snap instantly between `water_colour`
+  and `land_colour` with no blend at all. `fragment` now blends `land_colour`/`water_colour` over a band of `walk`
+  values around `COAST_THRESHOLD` (`COAST_BLEND_WIDTH`, `ground.wgsl`), its own centre perturbed by the same `disp`
+  noise `land_colour` already reads so the line wobbles organically rather than tracing a uniform curve
+  (`COAST_BLEND_JITTER`).
 - brightness column: `shading.light` (sunlight-derived, bilinearly sampled per corner like `blend`) plus a small
   extra perturbation from `disp`'s own row-to-row difference, clamped 0..255 — not a baked Lambert light of the
   rendered mesh slope any more. `game_core::shading::SunParams::default` is the sun vector: live-measured and
