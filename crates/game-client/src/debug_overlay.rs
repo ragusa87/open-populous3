@@ -10,11 +10,13 @@ use game_core::challenge::{FIGHT_REACH, SHOVE_REACH};
 use game_core::convert::RANGE_CELLS as CONVERT_RANGE_CELLS;
 use game_core::earthquake::SINK_RADIUS_CELLS;
 use game_core::effect::EffectKind;
+use game_core::erode::{JITTER_CELLS as ERODE_JITTER_CELLS, RADIUS_CELLS as ERODE_RADIUS_CELLS};
 use game_core::firestorm::AREA_CELLS as FIRESTORM_AREA_CELLS;
 use game_core::flatten::RADIUS_SQ as FLATTEN_RADIUS_SQ;
 use game_core::melee::{MELEE_LEASH, RING_RADIUS};
 use game_core::nearest::BLOCK_HALF_CELLS;
 use game_core::swamp::HALF as SWAMP_HALF;
+use game_core::swarm::LEASH_CELLS as SWARM_LEASH_CELLS;
 use game_core::unit::Action;
 use game_core::volcano::{RIM_RADIUS_CELLS, SHAKE_RADIUS_CELLS, SLOPE_RADIUS_CELLS};
 use pop3_format::WORLD_UNITS_PER_CELL;
@@ -112,6 +114,7 @@ fn draw(
                 }
             }
             EffectKind::Flatten(_) => outline(outline_circle(at, (FLATTEN_RADIUS_SQ as f32).sqrt()), SPELL),
+            EffectKind::Erode(_) => outline(outline_square(at, (ERODE_JITTER_CELLS + ERODE_RADIUS_CELLS) as f32), SPELL),
             EffectKind::Swamp(_) => outline(outline_square(at, SWAMP_HALF as f32 + 0.5), SPELL),
             EffectKind::Convert(_) => outline(outline_circle(at, CONVERT_RANGE_CELLS as f32), SPELL),
             EffectKind::Hypnotism(_) => outline(outline_square(at, BLOCK_HALF_CELLS), SPELL),
@@ -123,6 +126,10 @@ fn draw(
             EffectKind::Earthquake(_) => outline(outline_circle(at, SINK_RADIUS_CELLS as f32), SPELL),
             EffectKind::Firestorm(_) => outline(outline_square(at, FIRESTORM_AREA_CELLS as f32), SPELL),
             EffectKind::Lightning(_) => outline(outline_square(at, 0.5), SPELL),
+            EffectKind::Swarm(s) => {
+                outline(outline_circle(at, SWARM_LEASH_CELLS as f32), SPELL.with_alpha(0.4));
+                outline(outline_square(cells(s.pos()), 1.5), SPELL);
+            }
             EffectKind::LandBridge(_) | EffectKind::Lava(_) | EffectKind::Smoke | EffectKind::GroundFire => {}
         }
     }

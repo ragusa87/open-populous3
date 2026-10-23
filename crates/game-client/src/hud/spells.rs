@@ -146,6 +146,7 @@ pub fn ground_spell(kind: SpellKind, at: (u16, u16), origin: (u16, u16)) -> Opti
         SpellKind::Lightning => Some(Spell::Lightning { at }),
         SpellKind::Armageddon => Some(Spell::Armageddon { at }),
         SpellKind::Swamp => Some(Spell::Swamp { at }),
+        SpellKind::Swarm => Some(Spell::Swarm { at }),
         SpellKind::Convert => Some(Spell::Convert { at }),
         SpellKind::Hypnotism => Some(Spell::Hypnotism { at }),
         SpellKind::Volcano => Some(Spell::Volcano { at }),
@@ -153,6 +154,7 @@ pub fn ground_spell(kind: SpellKind, at: (u16, u16), origin: (u16, u16)) -> Opti
         SpellKind::Earthquake => Some(Spell::Earthquake { at }),
         SpellKind::LandBridge => Some(Spell::LandBridge { from: cell(origin), to: cell(at) }),
         SpellKind::Flatten => Some(Spell::Flatten { at: game_core::flatten::nearest_point(at) }),
+        SpellKind::Erosion => Some(Spell::Erode { at: cell(at) }),
         SpellKind::MagicalShield => Some(Spell::MagicalShield { at }),
         SpellKind::Bloodlust => Some(Spell::Bloodlust { at }),
         SpellKind::Invisibility => Some(Spell::Invisibility { at }),
@@ -710,6 +712,7 @@ mod tests {
         assert_eq!(ground_spell(SpellKind::LandBridge, (5 * 512 + 9, 6 * 512), (512, 1023)), Some(Spell::LandBridge { from: (1, 1), to: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::Lightning, (700, 900), (0, 0)), Some(Spell::Lightning { at: (700, 900) }));
         assert_eq!(ground_spell(SpellKind::Flatten, (5 * 512 + 300, 6 * 512 + 9), (0, 0)), Some(Spell::Flatten { at: (6, 6) }), "the nearest height point");
+        assert_eq!(ground_spell(SpellKind::Erosion, (5 * 512 + 9, 6 * 512), (0, 0)), Some(Spell::Erode { at: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::MagicalShield, (5, 6), (0, 0)), Some(Spell::MagicalShield { at: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::Bloodlust, (5, 6), (0, 0)), Some(Spell::Bloodlust { at: (5, 6) }));
         assert_eq!(ground_spell(SpellKind::Invisibility, (5, 6), (0, 0)), Some(Spell::Invisibility { at: (5, 6) }));

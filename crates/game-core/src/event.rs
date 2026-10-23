@@ -22,7 +22,12 @@ pub enum WorldEvent {
     /// Volcano's own turn-110 destruction alike — confirmed: the original never kills outright there, only sets
     /// this flag and lets it run its course.
     Ignite { unit: UnitId },
+    /// The building's occupants are thrown out and panicked (`GameMap::throw_out`): a swarm's own raid.
     Raid { building: BuildingId },
+    /// Everyone aboard gets out, onto nearby land if the vehicle is close enough to some (`GameMap::unload`),
+    /// else where it is (`GameMap::put_out`: falls from a balloon, drowns off a boat at sea): a swarm's own
+    /// sting on a vehicle (TODO.md "Units").
+    PutOut { vehicle: VehicleId },
     SetFire { building: BuildingId },
     /// Removes the building outright, bypassing the normal wood/wear-down model (`GameMap::burn_down`): Volcano's
     /// turn-110 destruction (docs/plans/spells.md "Volcano"), accepted as simpler than modelling a dedicated

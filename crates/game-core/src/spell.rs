@@ -12,7 +12,10 @@ pub enum Spell {
     LandBridge { from: Cell, to: Cell },
     /// Level the ground around the height point `at` to its height (`flatten`); `cast`: the editor's instant brush.
     Flatten { at: Cell },
+    /// Erode the ground around the height point `at` towards sea level over time (`erode`); `cast`: the editor's
+    /// instant brush.
     Erode { at: Cell },
+    /// Editor-only instant brush (`cast`), never cast from a book.
     Raise { at: Cell },
     /// Move the caster's shaman to `to` (world units), only onto ground she can walk.
     Teleport { to: (u16, u16) },
@@ -43,10 +46,12 @@ pub enum Spell {
     Earthquake { at: (u16, u16) },
     /// Stops the match and settles it (`GameMap::start_armageddon`), centred on `at` (world units).
     Armageddon { at: (u16, u16) },
+    /// An insect plague at `at` (world units): `swarm::effect`.
+    Swarm { at: (u16, u16) },
 }
 
 impl Spell {
-    /// The book spell this cast uses; None for the terrain brushes (editor and dev tools, not cast from a book yet).
+    /// The book spell this cast uses; None for `Raise`, the one remaining editor/dev-only terrain brush.
     pub fn kind(&self) -> Option<SpellKind> {
         match self {
             Spell::Teleport { .. } => Some(SpellKind::Teleport),
@@ -64,7 +69,9 @@ impl Spell {
             Spell::LandBridge { .. } => Some(SpellKind::LandBridge),
             Spell::Flatten { .. } => Some(SpellKind::Flatten),
             Spell::Armageddon { .. } => Some(SpellKind::Armageddon),
-            Spell::Erode { .. } | Spell::Raise { .. } => None,
+            Spell::Erode { .. } => Some(SpellKind::Erosion),
+            Spell::Swarm { .. } => Some(SpellKind::Swarm),
+            Spell::Raise { .. } => None,
         }
     }
 
@@ -87,7 +94,8 @@ impl Spell {
             | Spell::Hypnotism { .. }
             | Spell::Volcano { .. }
             | Spell::Firestorm { .. }
-            | Spell::Earthquake { .. } => return None,
+            | Spell::Earthquake { .. }
+            | Spell::Swarm { .. } => return None,
         })
     }
 }

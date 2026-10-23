@@ -29,6 +29,7 @@ pub enum EffectKind {
     LandBridge(crate::land_bridge::LandBridge),
     Lightning(crate::lightning::Strike),
     Flatten(crate::flatten::Flatten),
+    Erode(crate::erode::Erode),
     /// Only seen (`smoke`).
     Smoke,
     /// Only seen (`ground_fire`).
@@ -49,6 +50,9 @@ pub enum EffectKind {
     Firestorm(crate::firestorm::Firestorm),
     /// A timed controller (`earthquake`): shakes, then sinks a half-disc and opens a lava fissure once.
     Earthquake(crate::earthquake::Earthquake),
+    /// An invisible, wandering cloud (`swarm`): stings whoever it currently covers on its own rhythms; drawn
+    /// only by its own separately-spawned bee-dots, client-side.
+    Swarm(crate::swarm::Swarm),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -72,6 +76,10 @@ pub enum DamageKind {
     /// (`WorldEvent::Ignite`) — any tribe (even the caster's own) and shield or no shield, sparing only the
     /// caster's own shaman.
     Lava,
+    /// A swarm's own sting (`swarm`, pop3-rev-analysis.md "Per spell" 5): spares the caster's own tribe (like
+    /// a blast) and, more broadly than Lightning/Lava's own "only the caster's shaman", every shaman of any
+    /// tribe. Blocked by a shield like a blast or lightning.
+    Swarm,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +91,8 @@ pub enum TerrainChange {
     Bridge { from: Cell, to: Cell, heights: (u16, u16), turn: u32 },
     /// One turn of a volcano's cone rising (`volcano::apply`): `ground`, the centre's own height when cast.
     Volcano { at: Cell, ground: u16, turn: u32 },
+    /// One jittered pass of an erosion (`erode::apply`): a flat per-pass amount, no `turn` to ease towards a target.
+    Erode { at: Cell },
 }
 
 impl Effect {
@@ -98,12 +108,14 @@ impl Effect {
             EffectKind::LandBridge(ref mut bridge) => bridge.turn(),
             EffectKind::Lightning(ref mut strike) => strike.turn((self.x, self.z), self.owner, world),
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
+            EffectKind::Erode(ref mut erode) => erode.turn(world.terrain.size() as i32, rng),
             EffectKind::Convert(ref mut convert) => convert.turn((self.x, self.z), self.owner, world),
             EffectKind::Hypnotism(ref mut hypnotism) => hypnotism.turn((self.x, self.z), self.owner, world),
             EffectKind::Lava(ref mut lava) => lava.turn(now, self.owner, world),
             EffectKind::Volcano(ref mut volcano) => volcano.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Firestorm(ref mut firestorm) => firestorm.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Earthquake(ref mut earthquake) => earthquake.turn((self.x, self.z), self.owner, world),
+            EffectKind::Swarm(ref mut swarm) => swarm.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
@@ -122,6 +134,7 @@ impl Effect {
             EffectKind::LandBridge(ref bridge) => bridge.reshaping(terrain),
             EffectKind::Flatten(ref flatten) => flatten.reshaping(terrain),
             EffectKind::Volcano(ref volcano) => volcano.reshaping((self.x, self.z), terrain),
+            EffectKind::Erode(ref erode) => erode.reshaping(terrain),
             EffectKind::SimpleBlast(_)
             | EffectKind::PanickingBlast(_)
             | EffectKind::Lightning(_)
@@ -132,7 +145,8 @@ impl Effect {
             | EffectKind::Hypnotism(_)
             | EffectKind::Lava(_)
             | EffectKind::Firestorm(_)
-            | EffectKind::Earthquake(_) => Vec::new(),
+            | EffectKind::Earthquake(_)
+            | EffectKind::Swarm(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }
@@ -160,8 +174,9 @@ pub struct GroundShake {
 
 /// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow, a swamp or
 /// lava (those still drown/burn: TODO.md "Mana"), a firewarrior's bolt stopped like any other magical attack
-/// (pop3-rev-analysis.md "Per spell", Shield; reported, not traced); a blast spares the caster's own tribe (no
-/// alliances yet), lightning and lava only the caster's own shaman, a swamp spares no one, not even its own caster.
+/// (pop3-rev-analysis.md "Per spell", Shield; reported, not traced); a blast and a swarm spare the caster's own
+/// tribe (no alliances yet), lightning and lava only the caster's own shaman, a swarm every shaman of any tribe,
+/// a swamp spares no one, not even its own caster.
 pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
     if !u.is_alive() || (u.statuses.shield.is_on() && !matches!(kind, DamageKind::Melee | DamageKind::Swamp | DamageKind::Lava)) {
         return false;
@@ -170,6 +185,7 @@ pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
         DamageKind::Melee | DamageKind::Fire | DamageKind::Swamp => true,
         DamageKind::Blast => from != Some(u.owner),
         DamageKind::Lightning | DamageKind::Lava => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman),
+        DamageKind::Swarm => from != Some(u.owner) && u.kind != crate::unit::UnitKind::Shaman,
     }
 }
 

@@ -766,7 +766,7 @@ impl GameMap {
     }
 
     /// Where `spell` is aimed, world units: the centre of a target cell, a target height point itself; None for the
-    /// terrain brushes.
+    /// editor's own Raise brush (not cast from a book).
     pub fn spell_target(&self, spell: &Spell) -> Option<(u16, u16)> {
         let n = self.terrain.size() as i32;
         let world = |(x, z): crate::spell::Cell, centre: u32| {
@@ -784,12 +784,13 @@ impl GameMap {
             | Spell::Volcano { at }
             | Spell::Firestorm { at }
             | Spell::Earthquake { at }
+            | Spell::Swarm { at }
             | Spell::MagicalShield { at }
             | Spell::Bloodlust { at }
             | Spell::Invisibility { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
-            Spell::Flatten { at } => Some(world(at, 0)),
-            Spell::Erode { .. } | Spell::Raise { .. } => None,
+            Spell::Flatten { at } | Spell::Erode { at } => Some(world(at, 0)),
+            Spell::Raise { .. } => None,
         }
     }
 
@@ -865,6 +866,10 @@ impl GameMap {
                 self.add_effect(crate::swamp::effect(player, at));
                 None
             }
+            Spell::Swarm { at } => {
+                self.add_effect(crate::swarm::effect(player, at));
+                None
+            }
             Spell::MagicalShield { at } => {
                 self.cast_nearest_status(
                     at,
@@ -921,6 +926,10 @@ impl GameMap {
             }
             Spell::Flatten { at } => {
                 self.add_effect(crate::flatten::effect(player, at, &self.terrain));
+                None
+            }
+            Spell::Erode { at } => {
+                self.add_effect(crate::erode::effect(player, at, &self.terrain));
                 None
             }
             Spell::Armageddon { at } => {
@@ -1486,6 +1495,7 @@ impl GameMap {
 
     /// The one rule for each kind of event: the ground it changed, and the events it causes. Things gone are skipped.
     pub(crate) fn apply_event(&mut self, event: WorldEvent) -> (Option<DirtyRect>, Vec<WorldEvent>) {
+        let mut follow_ups = Vec::new();
         let changed = match event {
             WorldEvent::Damage { unit, amount, kind, from } => {
                 self.damage(unit, amount, kind, from);
@@ -1532,7 +1542,18 @@ impl GameMap {
                 }
                 None
             }
-            WorldEvent::Raid { .. } => None,
+            WorldEvent::Raid { building } => {
+                follow_ups = self.throw_out(building);
+                None
+            }
+            WorldEvent::PutOut { vehicle } => {
+                if self.can_unload(vehicle) {
+                    self.unload(vehicle);
+                } else {
+                    self.put_out(vehicle);
+                }
+                None
+            }
             WorldEvent::SpawnEffect(e) => {
                 self.add_effect(e);
                 None
@@ -1541,6 +1562,7 @@ impl GameMap {
             WorldEvent::Terrain(TerrainChange::Flatten { at, height, turn }) => Some(crate::flatten::apply(&mut self.terrain, at, height, turn)),
             WorldEvent::Terrain(TerrainChange::Bridge { from, to, heights, turn }) => Some(crate::land_bridge::apply(&mut self.terrain, from, to, heights, turn)),
             WorldEvent::Terrain(TerrainChange::Volcano { at, ground, turn }) => Some(crate::volcano::apply(&mut self.terrain, at, ground, turn)),
+            WorldEvent::Terrain(TerrainChange::Erode { at }) => Some(crate::erode::apply(&mut self.terrain, at)),
             WorldEvent::Placed { unit, at } => {
                 if let Some(u) = self.unit_mut(unit) {
                     u.placed(at);
@@ -1587,7 +1609,7 @@ impl GameMap {
                 None
             }
         };
-        (changed, Vec::new())
+        (changed, follow_ups)
     }
 
     /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`); a
@@ -1920,6 +1942,41 @@ mod tests {
         assert_eq!(map.effects.len(), effects, "no charge left");
         map.apply(&Command::CastSelf { player: 0, kind: SpellKind::Convert });
         assert_eq!(charges(&map, 0, SpellKind::Convert), 1, "2 from the demo loadout, one used");
+    }
+
+    #[test]
+    fn raid_throws_a_buildings_occupants_out_and_panics_them() {
+        let mut map = GameMap::sandbox_buildings();
+        let hut = map.buildings.iter().find(|b| b.stage() == crate::building::Stage::Built && b.kind.capacity() > 0).unwrap().id;
+        let door = map.building(hut).unwrap().door();
+        let inside = map.spawn(1, UnitKind::Brave, door).id;
+        map.unit_mut(inside).unwrap().inside = Some(crate::unit::Inside { building: hut, door });
+        let i = map.building_index(hut).unwrap();
+        map.buildings[i].inside = 1;
+        assert_eq!(map.apply_event(WorldEvent::Raid { building: hut }), (None, vec![WorldEvent::Panic { unit: inside }]));
+        assert!(matches!(map.unit(inside).unwrap().action, Action::Walking { .. }), "sent walking out by the door");
+    }
+
+    #[test]
+    fn put_out_unloads_near_shore_else_puts_passengers_out_where_the_vehicle_is() {
+        use crate::vehicle::{Vehicle, VehicleKind};
+        let mut map = GameMap::sandbox_vehicles();
+        let shore = map.buildings.iter().find(|b| b.kind == crate::building::BuildingKind::BoatHut).unwrap().door();
+        let near_shore = map.add_vehicle(Vehicle::new(VehicleKind::Boat, 1, shore, crate::angle::Angle::ZERO));
+        let aboard = map.spawn(1, UnitKind::Brave, shore).id;
+        map.unit_mut(aboard).unwrap().aboard = Some(near_shore);
+        map.vehicles.get_mut(near_shore).unwrap().passengers.push(aboard);
+        assert!(map.can_unload(near_shore), "set up by the boat hut's own shore");
+        map.apply_event(WorldEvent::PutOut { vehicle: near_shore });
+        assert!(map.unit(aboard).unwrap().aboard.is_none() && map.unit(aboard).unwrap().is_alive(), "got off onto the ground");
+
+        let at_sea = map.add_vehicle(Vehicle::new(VehicleKind::Boat, 1, (0, 0), crate::angle::Angle::ZERO));
+        let drowning = map.spawn(1, UnitKind::Brave, (0, 0)).id;
+        map.unit_mut(drowning).unwrap().aboard = Some(at_sea);
+        map.vehicles.get_mut(at_sea).unwrap().passengers.push(drowning);
+        assert!(!map.can_unload(at_sea), "the open sea: nowhere to get off");
+        map.apply_event(WorldEvent::PutOut { vehicle: at_sea });
+        assert!(map.unit(drowning).unwrap().aboard.is_none(), "put out where it is instead");
     }
 
     #[test]
