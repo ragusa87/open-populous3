@@ -25,7 +25,9 @@ use bevy::light::NotShadowCaster;
 use bevy::mesh::PrimitiveTopology;
 use bevy::render::render_resource::Face;
 use bevy::prelude::*;
+use crate::explosion::BuildingExploded;
 use game_core::building::{Building, BuildingId, BuildingKind, Stage};
+use game_core::foundation::Collapse;
 use game_core::time::{Countdown, Tick, Ticks};
 use pop3_format::catalog::{self, villager_hut, Building as Object};
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
@@ -45,6 +47,10 @@ const SHAKE: f32 = 0.012;
 const BLOW: f32 = 0.7;
 /// Ten blows: the shake's loop in whole ticks (`SimNow::secs_in`).
 const BLOWS_LOOP: Ticks = Ticks::secs(7);
+/// A sinking building's rocking amplitude at the start, radians (the trace's own "up to 56" of 2048 a turn).
+const TILT_MAX: f32 = 56.0 / 2048.0 * std::f32::consts::TAU;
+/// A sinking building's rocking frequency, a guess.
+const TILT_HZ: f32 = 1.5;
 /// Colour of the generated pyramid's door slab.
 const SLAB_STONE: Color = Color::srgb(0.42, 0.4, 0.36);
 /// Height of the white mark of a blueprint above the ground (render units).
@@ -125,6 +131,10 @@ struct Fire(Tick);
 #[derive(Component)]
 struct Shaking(BuildingId);
 
+/// The part of a view that sinks and rocks (the building with this id is flooded, `Collapse::Sinking`).
+#[derive(Component)]
+struct Sinking(BuildingId);
+
 /// The name over a stand-in box, following its building on screen.
 #[derive(Component)]
 struct BuildingLabel(Entity);
@@ -139,7 +149,7 @@ impl Plugin for BuildingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ModelHeights>()
             .add_systems(Update, (respawn_buildings.in_set(RespawnBuildings), place_labels).chain())
-            .add_systems(Update, (shake_walls, burn_down))
+            .add_systems(Update, (shake_walls, burn_down, sink_and_rock))
             .add_systems(PostUpdate, draw_site_marks);
     }
 }
@@ -237,9 +247,18 @@ fn respawn_buildings(
     mut heights: ResMut<ModelHeights>,
     mut chimneys: ResMut<crate::chimney::Chimneys>,
     mut flame_frames: ResMut<FlameFrames>,
+    now: Res<SimNow>,
+    mut exploded: MessageWriter<BuildingExploded>,
 ) {
     if !map.is_changed() && same_look(&drawn, &map.0.buildings) {
         return;
+    }
+    // A building just marked `Shattering` (this tick, not last): its view still exists below, so the
+    // explosion can still copy its mesh before `respawn_buildings` despawns it.
+    for b in map.0.buildings.iter().filter(|b| b.collapse == Some(Collapse::Shattering)) {
+        if !drawn.iter().any(|d| d.id == b.id && d.collapse == Some(Collapse::Shattering)) {
+            exploded.write(BuildingExploded { building: b.id, start: now.tick });
+        }
     }
     drawn.clone_from(&map.0.buildings);
     heights.0.clear();
@@ -358,6 +377,9 @@ fn respawn_buildings(
             if b.shaking > 0 {
                 body.insert(Shaking(b.id));
             }
+            if matches!(b.collapse, Some(Collapse::Sinking { .. })) {
+                body.insert(Sinking(b.id));
+            }
         });
         if stand_in {
             commands.spawn((
@@ -400,6 +422,42 @@ fn shake_walls(now: Res<SimNow>, mut bodies: Query<(&Shaking, &mut Transform)>) 
     for (shaking, mut tf) in &mut bodies {
         tf.rotation = shake_at(*now, shaking.0.raw());
     }
+}
+
+/// A flooded building sinks and rocks (`Collapse::Sinking`, pop3-rev-analysis.md "Building sinking (flooded
+/// destruction)") for as long as it has left: dropping lower on the ramping curve, tilting with a decaying
+/// wobble (the original's own oscillator formula not confirmed, so this is an approximation, `[ours]`).
+fn sink_and_rock(map: Res<CurrentMap>, mut bodies: Query<(&Sinking, &mut Transform)>) {
+    for (sinking, mut tf) in &mut bodies {
+        let Some(Collapse::Sinking { left }) = map.0.building(sinking.0).and_then(|b| b.collapse) else { continue };
+        let elapsed = left.done();
+        tf.translation.y = -sink_depth(elapsed);
+        tf.rotation = sink_tilt(elapsed, sinking.0.raw());
+    }
+}
+
+/// How far it has dropped so far, cells: every 8 turns a ramping step (growing by 2, capped at 20) is
+/// subtracted from its base height, accelerating from a slow start [exe].
+fn sink_depth(elapsed: Ticks) -> f32 {
+    let mut depth = 0;
+    let mut step = 0;
+    for _ in 0..elapsed.get() / 8 {
+        step = (step + 2).min(20);
+        depth += step;
+    }
+    depth as f32 / WORLD_UNITS_PER_CELL as f32
+}
+
+/// Its rocking tilt `elapsed` into the sink, seeded by its id: a wobble decaying linearly to nothing by
+/// `SINK_TICKS`, its direction fixed per building (`[ours]`: the original's own compass-histogram lean target
+/// and oscillator math are not confirmed, pop3-rev-analysis.md "Building sinking (flooded destruction)").
+fn sink_tilt(elapsed: Ticks, id: u32) -> Quat {
+    use std::f32::consts::TAU;
+    let decay = (1.0 - elapsed.get() as f32 / game_core::foundation::SINK_TICKS.get() as f32).max(0.0);
+    let t = elapsed.get() as f32 * TICK_SECS;
+    let angle = decay * TILT_MAX * (t * TILT_HZ * TAU + seed(id) * TAU).sin();
+    let dir = seed(id) * TAU;
+    Quat::from_rotation_x(angle * dir.cos()) * Quat::from_rotation_z(angle * dir.sin())
 }
 
 /// The walls' tilt of building `id` at `now`.
@@ -464,7 +522,11 @@ pub fn fire_bases(kind: BuildingKind, top: f32) -> Vec<[f32; 3]> {
 /// nor the people inside (`chimney` smokes), nor how long a fire has left or a blow shakes it (only whether),
 /// nor its wear and repair delay, nor a training unit's mana.
 pub fn same_look(drawn: &[Building], now: &[Building]) -> bool {
-    let look = |b: &Building| Building { vault: None, inside: 0, production: None, shaking: (b.shaking > 0) as u16, wear: 0, repair_delay: None, burning: b.burning.map(|c| Countdown::new(c.total())), ..b.clone() };
+    let collapse = |c: Collapse| match c {
+        Collapse::Shattering => c,
+        Collapse::Sinking { left } => Collapse::Sinking { left: Countdown::new(left.total()) },
+    };
+    let look = |b: &Building| Building { vault: None, inside: 0, production: None, shaking: (b.shaking > 0) as u16, wear: 0, repair_delay: None, burning: b.burning.map(|c| Countdown::new(c.total())), collapse: b.collapse.map(collapse), ..b.clone() };
     drawn.len() == now.len() && drawn.iter().zip(now).all(|(a, b)| look(a) == look(b))
 }
 
@@ -481,6 +543,30 @@ mod tests {
         later.burn();
         assert!(same_look(&[burning.clone()], &[later]));
         assert!(!same_look(&[Building { burning: None, ..burning.clone() }], &[burning]));
+    }
+
+    #[test]
+    fn a_sinking_countdown_ticking_down_does_not_rebuild_the_views_either() {
+        let hut = Building { collapse: Some(Collapse::Sinking { left: Countdown::new(game_core::foundation::SINK_TICKS) }), ..Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0) };
+        let mut later = hut.clone();
+        let Some(Collapse::Sinking { left }) = &mut later.collapse else { unreachable!() };
+        left.tick();
+        assert!(same_look(std::slice::from_ref(&hut), &[later]));
+        assert!(!same_look(&[Building { collapse: None, ..hut.clone() }], &[hut]), "starting to sink does rebuild");
+    }
+
+    #[test]
+    fn sinks_lower_on_an_accelerating_curve() {
+        use game_core::time::Ticks;
+        assert_eq!(sink_depth(Ticks::new(0)), 0.0);
+        let (at8, at16, at80) = (sink_depth(Ticks::new(8)), sink_depth(Ticks::new(16)), sink_depth(Ticks::new(80)));
+        assert!(at8 > 0.0 && at16 > 2.0 * at8, "accelerating, not linear");
+        assert!(at80 > at16);
+    }
+
+    #[test]
+    fn tilt_decays_to_nothing_by_the_end() {
+        assert_eq!(sink_tilt(game_core::foundation::SINK_TICKS, 7), Quat::IDENTITY, "settled: no more rocking once it is gone");
     }
 
     #[test]
