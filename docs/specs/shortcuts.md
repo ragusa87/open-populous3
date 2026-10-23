@@ -13,8 +13,9 @@ right, printed to stdout too). The pause menu's Shortcuts page lists the keymap 
 - Dev mode: the "Ours" column below.
 - Off: the original's keys, for what we have: Up/Down and numpad 8/2 move, Ctrl+Left/Right and numpad 4/6 scroll
   sideways, Left/Right and numpad 7/9 rotate, `+`/`-` (and the numpad's) zoom, Enter aerial, `>` (the character,
-  any layout) to the shaman, H to the site, Space turns a held plan, P pause, Shift + `+`/`-` game speed. No level switch, grid, editor, view presets,
-  tilt keys, stop or self cast keys; the editor and the view presets menu close.
+  any layout) to the shaman, H to the site, Space turns a held plan, P pause, Shift + `+`/`-` game speed, N releases
+  a held patrol. No level switch, grid, editor, view presets, tilt keys, stop or self cast keys; the editor and the
+  view presets menu close.
 A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a character binding ignores Shift.
 
 ## Game and view
@@ -70,9 +71,9 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | Ctrl + left click (with followers) | queue orders, up to 8 | chained orders (units.md) |
 | Shift + left click (with followers) | force the order | - |
 | Alt + left click (with followers) | toggle auto-select for this order | - |
-| Ctrl+Alt + left click (with followers) | patrol points, up to 8 | - |
+| Ctrl+Alt + left click (with followers) | patrol points, up to 8 | same (units.md) |
 | Ctrl + left click after patrol points | hold the orders | - |
-| N | release the held followers | - |
+| N | release the held followers | same |
 | G (with followers) / G | guard the shaman / stop guarding | toggles the cell grid |
 | Ctrl + left click on a follower icon | select 5 of that type | - |
 | Shift + left click on a follower icon | select all of that type, spies included | - |

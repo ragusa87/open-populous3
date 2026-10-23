@@ -103,13 +103,25 @@ target: going round a camp fire is endless (a tended fire never goes out) until 
 then the chain goes on; praying will be at a totem and end when it is gone (today it never ends on its own).
 Internal moves (stepping off a taken spot on arrival, a fire put out) use `Unit::start`, which keeps the chain.
 
-## Patrol orders (not done)
+## Patrol orders (done: `game_core::patrol`, `game_core::hidden_point`)
 A unit, or several selected together, can be given up to **8 patrol points**
 (`Ctrl+Alt + left click`, shortcuts.md) instead of one destination, as long as at least one unit is
 currently selected. Once more than one point is set, the unit cycles through them forever — arrive
 at point 1, move to point 2, ... point N, then back to point 1 — a continuous loop, not a one-shot
 sequence. With a single point set this reads as a stationary guard post; with several, a
 back-and-forth or circuit patrol.
+
+Simulation: `Unit::patrol` (a `patrol::PatrolQueue`, separate from the chained-order `queue`), ids
+shared through `GameMap::patrol_points`/`hidden_points` (`Registry`s, minted by `new_patrol_point`/
+`add_hidden_point`); `GameMap::advance_patrols` (next to `start_chained`, `GameMap::tick`) moves a free
+patrolling unit on to its next point, `prune_patrol_points`/`prune_hidden_points` (next to
+`release_orphans`) drop what no living unit's patrol still references — no reference count, derived
+fresh every tick the same way `coordinator::participants` is. `Command::SetPatrol`/`SetPatrolTarget`
+(first point)/`AddPatrolPoint`/`AddPatrolTargetPoint`/`ReleasePatrol` carry the whole group in one
+command (not one per unit like other orders: the point they mint is shared, minted exactly once).
+Client: Ctrl+Alt+click (`units/selection.rs`'s `patrol_click`, gated by a `PatrolSession` tracking
+whether the current selection already started a sequence) and `N` (`Shortcut::ReleasePatrol`); the
+debug overlay (`F4`) draws a patrolling unit's route and points.
 
 - **The first point of a new sequence replaces everything**, exactly like any other direct order:
   it clears whatever the unit was doing before starting the new one. Every point added after that
@@ -155,14 +167,17 @@ back-and-forth or circuit patrol.
   only drops that unit's own reference; the rest of the group keeps patrolling via the same
   still-alive record, unaffected, and the record itself only goes away once every unit ever pointed
   at it has moved on.
-- **[ours] While patrolling, the whole group engages an enemy together**, rather than reproducing
-  the original's own (only partially traced) incidental mechanism: a multi-unit move-type patrol
-  forms up as an ordinary Formation while walking (move is a formation-eligible order), and
-  Formations in the original separately get a periodic "is there a nearby enemy" scan as a side
-  effect of just existing — not of patrolling specifically — whose outcome once it finds something
-  was never confirmed. We don't reproduce that chain: instead, one patrol-group member spotting an
-  enemy pulls the rest of the group sharing that same patrol point into the fight with it, which
-  already matches "a patrol point is one shared record several units refer to" above.
+- **[ours, not done] "While patrolling, the whole group engages an enemy together" was the intended
+  design** (rather than reproducing the original's own, only partially traced incidental mechanism: a
+  multi-unit move-type patrol forms up as an ordinary Formation while walking, and Formations in the
+  original separately get a periodic "is there a nearby enemy" scan as a side effect of just existing
+  — not of patrolling specifically — whose outcome once it finds something was never confirmed; we
+  don't reproduce that chain). **Not implemented**: today, each patrolling unit only has the ordinary
+  auto-attack scan (`spotting::spot_enemies`), which acts on that unit alone — spotting an enemy pulls
+  only the spotter in (and, while it fights, only it stops cycling; TODO.md "Units"), not its
+  co-patrollers sharing the same point, who keep going. Worth revisiting once a patrol-point-aware hook
+  into `spot_enemies`/`first_seen` is written (pull in every unit whose `queued_patrol().front()` equals
+  the spotter's).
 
 ## Wood (done: braves only)
 - A brave carries at most one piece of wood (`Unit::carrying`, 0 or 1).
