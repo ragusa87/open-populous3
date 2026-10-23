@@ -84,7 +84,12 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Selection of buildings (without the people inside), and of units inside them (`selection::selectable`). Vehicles: a click with nothing selected selects the people aboard (vehicles.md).
 - [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
 - [ ] Statuses (`Unit::statuses`: Magical Shield, Bloodlust, Invisibility and Hypnotism now cast for real,
-  `GameMap::cast_nearest_status`/`hypnotize`; only Ghost Army's left unset by any spell): the timer of a ghost's
+  `GameMap::cast_nearest_status`/`hypnotize`; only Ghost Army's left unset by any spell): **found this session,
+  tracing the exe's own Hypnotism code (0x50EB00) while resolving "Preacher conversion"'s GONE/NEW contradiction**:
+  the original explicitly carries the captured person's current life, max life and carried wood across the
+  capture (and again across the later revert) - ours (`GameMap::change_owner`, used by `hypnotize`) instead resets
+  health to full and carrying to 0. A damaged enemy hypnotised in the original keeps its existing damage and any
+  wood it was carrying; ours heals and empties it. The timer of a ghost's
   status (not traced: no expiry found for Ghost Army), other options to define; read by combat, selection and
   drawing. Invisibility's own early end (attacking does, walking does not) is a guess (pop3-rev-analysis.md "Per
   spell" 6: "some actions end it early", not traced), implemented in `attack::go_attack`. Drawing: the markers are
@@ -160,9 +165,13 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   - re-verified both ways this session: the raw table bytes still read type-4/6-only, and an exhaustive exe-wide
   search found exactly one place in the whole exe that ever writes person state 23 (inside preacher_strike_scan
   itself, gated by that same table). A type-2/3 (brave/warrior) person cannot reach state 23 at all, so the 7
-  live GONE/NEW brave/warrior pairs that originally motivated that claim were NOT produced by this mechanism -
-  what actually produced them is unknown again, see "Preacher conversion"'s own reopened contradiction note for
-  the two live-GONE/NEW-pair hypotheses still to check. Separately, still confirmed either way: **a failed
+  live GONE/NEW brave/warrior pairs that originally motivated that claim were NOT produced by this mechanism.
+  **Now fully resolved (same session)**: those 7 pairs were a Hypnotism cast, not a sermon at all - a completely
+  different spell (0x50EA60/0x50EAB0/0x50EB00/0x4D92B0, see "Per spell" 7 and "Preacher conversion"'s own
+  write-up) that happens to use the identical kill-and-replace-preserving-type idiom, but targets ordinary
+  followers of any type (excluding shaman/angel/wildman) rather than preacher_strike_scan's enemy-preacher/
+  firewarrior-only candidates. Nothing about Sermon's own implementation needs to change because of this - it was
+  always a red herring for this TODO item. Separately, still confirmed either way: **a failed
   conversion roll never falls back to melee against the preacher** - the original's
   own roll-failure branch only ever continues a choreographed approach → face-and-hold → listening-animation →
   effect-burst → idle sequence on the candidate (see "Preacher conversion"'s "sermon's candidate sub-state

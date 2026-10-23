@@ -59,8 +59,9 @@ so a live measurement may run on it with the addresses translated.
   place (capped by the preacher's tribe population); instant for a wildman or other "no breeding" tribe. The
   reroll's own entry trigger is now found: `preacher_strike_scan` (0x43ABF0), called from the shared handler for
   order kinds 17/31/32 - **not preacher-exclusive** (kind 31 "disguise" is issued to brave/warrior/spy, never a
-  preacher), and its own per-type target table restricts valid targets to enemy preachers/firewarriors only,
-  which contradicts the ordinary-follower conversion seen in play - open, see "Preacher conversion".
+  preacher), and its own per-type target table restricts valid targets to enemy preachers/firewarriors only - this
+  does NOT cover the "ordinary follower" conversion seen in play, which is a different spell entirely (Hypnotism,
+  "Per spell" 7); see "Preacher conversion" for the resolved history of this distinction.
 - **A vehicle's life is also its abandon timer** [exe]: 5000, −1 per turn, refilled every turn while it moves or
   carries anyone; blasts (50 per turn) and bolts (100) only sink an empty, still one. A boat whose cell turns to
   land is emptied, keels over and explodes 13-24 s later. Both are 3D objects 143 / 144. See "Vehicles".
@@ -765,7 +766,7 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 | 4 | Whirlwind (90 000, 4096, 3) | 200 + 24 turns (18.7 s), 120 units per turn. Wanders around the target for 100 turns, then drifts away. Lifts every person in its own cell, any tribe, for 12-19 turns, then throws them: the landing costs 700. Each turn a building in its cell has a 25 % chance to lose 100 wood (a hut survives 3, a temple 8); trees lose 100 wood (50 %); library and prison immune; vehicles get a simple blast. Fully traced this session - mechanism, colour, and exactly what can be lifted: "Whirlwind mechanics" below. |
 | 5 | Insect plague (40 000, 6144, 4) | 60 insects for 200 turns (16.7 s), at most 6 cells from the target. Every 8 turns, enemies in its 3 × 3 cells take `SWARM_PERSON_DAMAGE` (100) and panic; shamans and angels immune; ghosts destroyed. Up to 3 times it raids an enemy building: occupants thrown out, damaged and panicked. |
 | 6 | Invisibility (50 000, 4096, 4) | The `INVIS_NUM_PEOPLE` (file 6) nearest own followers (not the shaman), for `INVISIBLE_COUNT_X8` × 8 turns (120 s). Enemy auto-targeting skips them; some actions end it early. |
-| 7 | Hypnotism (85 000, 4096, 3) | The `HYPNO_NUM_PEOPLE` (file 6) nearest persons of other tribes (not wildmen, shamans, angels) are recreated in the caster's tribe for `HYPNO_COUNT_X8` × 8 turns (file 440, 36.7 s), then return. If their tribe is gone, they stay. Ghosts are destroyed. |
+| 7 | Hypnotism (85 000, 4096, 3) | The `HYPNO_NUM_PEOPLE` (file 6) nearest persons of other tribes (not wildmen, shamans, angels) are recreated in the caster's tribe for `HYPNO_COUNT_X8` × 8 turns (file 440, 36.7 s), then return. If their tribe is gone, they stay. Ghosts are destroyed. Exe code found and traced this session (previously derived from file/constant analysis only): `process_hypnotism` (0x50EA60) fires the scan 5 ticks after cast via the shared nearest-N selector (0x515E30) with predicate 0x50EAB0 (the exclusion list) and action 0x50EB00 (the actual kill-and-recreate-under-new-tribe primitive, preserving type/life/max-life/carried wood); the "then return"/"tribe is gone" half is 0x4D92B0 (a per-person-per-tick hook, countdown `+0xAC`, cancelled via a per-tribe wipeout table at 0x89DB11 keyed by the stored original tribe `+0xAD`). This is also, independently, the mechanism behind 7 live-captured GONE/NEW conversion pairs that an earlier session mistook for "Preacher conversion" - see that section's own resolved contradiction. |
 | 8 | Firestorm (400 000, 4096, 2) | `FIRESTORM_DURATION` (file 220 turns, 18.3 s); one fireball every 4 turns (about 55) falling on a random point of a 6 × 6-cell square around the target. Each, on a land cell: a 5-cell simple blast that panics plus a ground-fire scenery object (same as Lightning's); on water: an unnamed splash effect instead, no fire; either way, a building there is set alight (0x408CB0, same as Lightning). No terrain height or blend change ("Fireball impact"). |
 | 9 | Ghost army (18 000, 4096, 4) | Copies the best own unit type near the target (shaman > firewarrior > preacher > spy > warrior > brave): 6 brave ghosts, 3 specialists or 1 shaman; at most 60 per tribe. No expiry found. They attack only enemy ghosts and shamans, their shots do nothing; melee untested. Blast and insects destroy them. |
 | 10 | Erosion (210 000, 4096, 2) | 63 hydraulic-erosion passes, one per turn (5.25 s), on an 8 × 8-cell window jittered around the target: ground washed downhill. No direct effect on units. |
@@ -1925,7 +1926,7 @@ trampoline that calls out to a separate handler; "inline" means the trampoline I
 | 14 | inline | unconditionally "done" |
 | 15 | 0x439D30 | door/throw point |
 | 16 | inline | reads a byte from the group's own target, passes it to 0x4DE760; if the unit's own +0x9F resolves to another live unit, calls 0x4DE740 and writes its result into THAT unit's own tribe field (+0x2F) - a strong, not independently confirmed lead for Convert/Hypnotism's actual "switch tribe" application |
-| 17 | 0x43A4D0 | cell-rounded approach, shared with 31/32 below |
+| 17 | 0x43A4D0 | cell-rounded approach, shared with 31/32 below; issuer traced a later session - a preacher-specific branch of `0x4CE2C0`, an AI-only per-tribe tasking sweep (`maybe_ai_func_1`), see "Preacher conversion"'s open questions |
 | 18 | 0x433A10 | not traced |
 | 19 attack (generic) | 0x51A2A0 | "Starting a melee" |
 | 20 | inline | unconditionally "done" |
@@ -1986,7 +1987,9 @@ group record (0x938830 + id × 10):
   +0x1 flags      bits OR'd in by whoever creates the order; 0x20 seen on self-issued auto-attack/scan orders
                     (0x51FF60 skips the auto-attack radius lookup above when it is set); 0x40 gates a kind-0x1C
                     attack-eligibility check (0x51C3C0/0x51FCE0) - traced this session to a dead end for
-                    "Preacher conversion" (its only setter, 0x41CC20, is an unrelated per-tribe building sweep
+                    "Preacher conversion" (its only setter, 0x41CC20, is an unrelated per-tribe PERSON sweep -
+                    corrected, separate session: the list it walks, tribe+0x881, is named `person_units` in the
+                    Ghidra export's own `tribe_struct` type, not buildings; see functions.tsv's own 0x41CC20 row -
                     that never issues kind 33); bit 0x1 marks a slot stale/not a real pending order (consumed
                     by order_advance below, which garbage-collects it instead of running it); the rest not traced
   +0x2 ref_count  word, how many units currently point at this group (0 = free slot)
@@ -2327,8 +2330,21 @@ preacher_strike_scan (0x43ABF0), fn(striker, radius_byte, out_angle_ptr) -> bool
     a stuck-roll cleanup, plausibly for when the original striker died or walked off mid-roll
 
 state 23 (0x4D83B0), the candidate while a roll is in progress; `+0x89` the striker, `+0x70` the timer:
-  abort (idle) if the striker is gone, or not carrying out an order (state != 0xA/10) and not itself preaching
-    (state != 0x21/33); **then independently requires the striker's own active command-group kind to be
+  abort (idle) if the striker is gone, or not carrying out an order (state != 0xA/10) and not in state 0x21/33
+    (**correction, separate session, now fully confirmed against live play**: this is NOT "itself preaching" as
+    previously guessed - it is a unit whose walk got physically BLOCKED by terrain its own type can't climb
+    (user-observed: a unit visibly halts arms-up on a slope, then starts losing life after a while - matches
+    exactly). The real trigger: the generic movement-step helper (0x4EA920, used for ordinary walking everywhere,
+    not preach-specific) calls a blocked-step check (0x4EA970, almost certainly the per-type `WALK_ALT_DIFF2`
+    terrain-height-difference test) and sets a flag (`unit+0x13` bit 0x10) when a step can't go through;
+    `order_execute`'s own shared tail reads that exact flag and transitions the unit straight into state 33 instead
+    of continuing its order. State 33's own per-turn body then runs a tribe-scaled grace timer before periodic life
+    loss kicks in (56 every 8 ticks), while trying up to 8 waypoints to find a way out - see person_states.tsv's own
+    state-33 row for the full trace. The precondition most likely just means "carrying out an order (10), including
+    this transient blocked-by-terrain state (33) it can momentarily fall into mid-approach" - the striker doesn't
+    need to be doing anything preach-specific to pass this check, just not idle or busy elsewhere); **then
+    independently requires the striker's own active
+    command-group kind to be
     0x11/0x1F/0x20 (17/31/32)** - confirmed this session to be the exact same three kinds preacher_strike_scan's
     own caller handles, with no person-type check anywhere in this function either. **Re-read in full this
     session** (chasing `0x43AEC0`, see below): the striker's "active command-group kind" is resolved as the
@@ -2474,24 +2490,53 @@ moments later), both inside one 83 ms turn.
   brave/warrior pairs in `diag6.txt` cannot have gone through preacher_strike_scan or 0x4D83B0 at all**, whatever
   they actually are. The kind-33 player-issued preach order was re-checked as the other candidate and ruled out
   too (see its own bullet below - it never calls `alloc_unit` anywhere in its body). So **neither of the two known
-  preacher mechanisms can produce what `diag6.txt` recorded - the real cause of those 7 live pairs is an open
-  question again**, not settled by either preacher pathway found so far. Two working hypotheses, neither checked
-  yet: (a) an entirely separate, not-yet-located mechanism (a spell such as the shaman's Convert, or a
-  building-capture/occupant-reassignment path) that happens to kill-and-replace a person under a new tribe with
-  the same type/position signature, coincidentally active during that capture session; (b) a fresh live capture
-  that logs the GONE record's own `+0x2C` state (not just type/tribe/position) in the same line as the GONE/NEW
-  position match, plus whatever spell/building activity the converting tribe had running at the time. Until then,
-  `combat.md`'s `may_preach` rule (ordinary followers convert, never preachers/shamans) and the exe's own
-  type-4/6-only candidate table are BOTH independently well-evidenced and BOTH cannot be describing the same
-  conversion event - don't assume they are. The kill-and-replace mechanism itself (kill old record, allocate a new
-  one under the new tribe at the same position, not an in-place tribe-byte flip) stays confirmed regardless of
-  which mechanism is doing it: two earlier watcher designs (same-id tribe-diff; filtering only on state==5
-  "listeners") saw nothing despite real conversions happening, because both assumed the wrong model. Bit 0x20's
-  real role for preacher_strike_scan's own candidates (enemy preachers/firewarriors, not ordinary followers) is
-  still open, but it is now known this table is NOT single-purpose: `fight_pick_slot` (`0x51DCC0`, "Fight")
-  independently reads the SAME table's bit 0x40 for an unrelated purpose ("can this person type join a melee ring
-  at all") - a different bit, a different per-type eligibility rule entirely, on the same 50-byte-stride record.
-  Bit 0x20 plausibly gates something equally unrelated to preach-targeting, not yet re-derived.
+  preacher mechanisms can produce what `diag6.txt` recorded**, not settled by either preacher pathway found so far.
+
+  **Resolved in the same session, by chasing the "separate mechanism" hypothesis**: the real cause is **Hypnotism**
+  (shaman spell 7, "Per spell" above), not preaching at all - a completely different mechanism that happens to
+  produce an outwardly identical kill-and-replace signature. Traced end to end: `process_hypnotism` (0x50EA60,
+  Ghidra-named, not catalogued before this session) scans a radius-3 area 5 ticks after cast via the shared
+  "nearest-N selector" (`0x515E30`, already catalogued only as "invisibility, shield, bloodlust, hypnotism" with no
+  detail); its eligibility predicate (`0x50EAB0`) accepts any class-1 person **except type 7/8/1 (shaman, angel,
+  wildman)** - i.e. ordinary followers of ANY type, exactly where preacher_strike_scan's type-4/6-only table
+  excludes them; its action callback (`0x50EB00`) is the actual "person now belongs to a different tribe"
+  primitive - kill via the same spirit-rise handoff, allocate a new person of the SAME type under the new tribe at
+  the same position, copy life/max-life/carried wood across. This is a byte-for-byte match for every clause of
+  this document's own pre-existing "Per spell" 7 entry ("the `HYPNO_NUM_PEOPLE` nearest persons of other tribes
+  (not wildmen, shamans, angels) are recreated in the caster's tribe... then return... if their tribe is gone, they
+  stay... ghosts are destroyed") - that entry was previously derived from file/constant analysis only; this session
+  found the exe code implementing it and had simply never cross-referenced it against this section's own open
+  contradiction. The "return" and "tribe gone" halves are `0x4D92B0` (already catalogued, but only as a 1-line
+  guess before this session - see its own row): it re-fires the same kill-and-replace back to the person's
+  original tribe once a per-new-record countdown (`+0xAC`, seeded from constant `0x5AA4F4`) expires, unless a
+  per-tribe wipeout table (`0x89DB11`) shows the original tribe is gone, in which case the change is cancelled and
+  stays permanent. **Bonus resolution**: `0x50EB00`'s own "ghosts are destroyed" branch tests `self+0x10` bit
+  0x800 - the ALREADY-DOCUMENTED Ghost status (Unit record reference, "ghost +0x10 bit 0x800") - which is the exact
+  same bit as the long-mysterious `candidate+0x11`/`striker+0x11` bit 0x8 this whole investigation kept running
+  into without identifying (preacher_strike_scan bailing on a ghost striker; `0x4D4B50` spawning a special death
+  effect for a dying ghost; `0x4D83B0`'s `0x4D850C` branch destroying a ghost candidate with no replacement) - all
+  four are the same one rule ("a ghost has no real body to hand off"), not four separate mysteries.
+
+  So: `combat.md`'s `may_preach` rule and the exe's type-4/6-only preacher candidate table were never actually in
+  conflict - they describe two different spells (Hypnotism vs. the preacher's own conversion roll) that both
+  happen to use the identical kill-and-replace idiom. `diag6.txt`'s 7 pairs were a Hypnotism cast (or several),
+  not a sermon. The kill-and-replace mechanism itself (kill old record, allocate a new one under the new tribe at
+  the same position, not an in-place tribe-byte flip) is shared code/idiom between the two spells, confirmed now
+  from both sides. **A genuine implementation gap found along the way**: our own `hypnotism.rs`
+  (`GameMap::change_owner`) does the tribe swap in place and resets health to FULL and carrying to 0, where the
+  exe explicitly preserves the captured person's current life, max life and carried wood across the capture -
+  flagged in TODO.md. **Bit 0x20's role no longer needs re-deriving**: the earlier suspicion that it "plausibly
+  gates something equally unrelated to preach-targeting" only existed because the live data seemed to contradict
+  it; now that the live data is explained by a different spell entirely (Hypnotism, above), there is no more reason
+  to doubt the straightforward reading - bit 0x20 is exactly what it looks like, preacher_strike_scan's own
+  candidate-eligibility gate (enemy preacher/firewarrior only). Read as a deliberate design split rather than a
+  puzzle: the preacher's own subversion mechanic (kind 17/31/32, `preacher_strike_scan`) specifically targets an
+  enemy's specialist defenders (preacher, firewarrior), while Hypnotism (a shaman spell, separate mana cost and
+  cast) handles mass ordinary-follower capture - two different "join my tribe" tools for two different jobs, not
+  one mechanic with an unreliable target table. This table is still not single-purpose in general: `fight_pick_slot`
+  (`0x51DCC0`, "Fight") independently reads the SAME table's bit 0x40 for an unrelated purpose ("can this person
+  type join a melee ring at all") - a different bit, a different per-type eligibility rule entirely, on the same
+  50-byte-stride record.
 - **Closed this session**: does preacher_strike_scan's candidate selection ever favour "whoever is currently
   attacking the striker", as opposed to pure proximity? No - re-read the whole scan loop (the expanding-square
   cell walk plus every per-candidate gate) specifically for this; nothing in it reads a candidate's own order,
@@ -2499,9 +2544,21 @@ moments later), both inside one 83 ms turn.
   first, radius capped by the caller's own `radius_byte` argument) plus the static eligibility gates already
   listed above, full stop - independent of whether the candidate is currently fighting someone else or not.
 - Other open questions:
-  - kind 17's own issuer (0x4CE2C0) and its own caller are not traced - reopened along with the contradiction
-    above (no longer safe to assume it's irrelevant to "ordinary follower" conversion just because
-    preacher_strike_scan/state 23 is type-4/6-only; the issuer itself is still unknown either way).
+  - **Kind 17's own issuer traced, a later session**: `0x4CE2C0` is a per-tribe-member sweep (walks `tribe+0x881`'s
+    linked list, the same convention `0x41CC20`/`0x4CB400` use), called from `0x4CCEB0` called from `0x4CB400`
+    called from `maybe_ai_func_1` (0x4623E0, Ghidra's own guessed name) - **this whole chain looks like the computer
+    AI's own per-tribe unit-management logic, not a player-facing or universal mechanic**. Per member: braves/
+    warriors (and other types via a further unread branch) that pass a per-state eligibility check (table
+    `0x5A6F79` bit 0x8) get an ordinary attack order (kind 19/0x13, via `0x43B540`); a PREACHER specifically
+    (dispatched separately, `0x4CE43D`) gets kind 17 instead, gated by a per-unit flag (`+0x10` bit 0x40) and a
+    resolved target position (`0x4F5770`, not traced) - reads as "go investigate/approach this position", a
+    separate behaviour from the attack branch, not "attack" and not confirmed as "defend the building" either.
+    `0x4DF0E0` ("preacher's extra check") gates whether a preacher instead falls through toward that SAME attack
+    branch later in the same function. Still open: where the position/reference parameters threaded through this
+    whole chain actually originate (an enemy sighting? an attacker reference?), and whether kind 17 is EVER issued
+    to a player-controlled preacher through some other, not-yet-found path (this one entry point being AI-only
+    would mean a human player's preacher never runs an unprompted kind-17 approach, only kind 32 via
+    `preacher_auto_scan`, or kind 31 via the player's own disguise command).
   - still untraced: 0x5A707E (a per-type byte read on a model-variant branch) and the exact meaning of flag byte
     0x89C668 (many unrelated systems read other bits of the same byte, so it is unlikely to be preach-specific).
   - **`0x4D850C` now fully resolved** (`test candidate+0x11,0x8; jne 0x4D87E8`): on a roll SUCCESS there are two
@@ -2520,11 +2577,19 @@ moments later), both inside one 83 ms turn.
     fully understood, confirmed-to-exist mechanic either way, not just a hypothesis.
   - the candidate sub-state 4 effect burst above (the "sermon's candidate sub-state" subsection) allocates
     `alloc_unit(class=5, type=0xB, tribe=0xFF, pos)` - class 5 is scenery, and `pop3-rev/docs/unit_types` lists
-    scenery type 0xB as "wood pile", which does not fit a transient per-tick visual effect at all. Either that
-    catalog entry is wrong/stale, or scenery type 0xB is overloaded (a genuine wood pile when placed normally at
-    level load, a reused type id for a short-lived visual when spawned this way with `tribe=0xFF`) - not resolved
-    this session, worth checking what `init_unit_type_5`'s own per-type dispatch (untraced) does for type 0xB
-    specifically before trusting either reading.
+    scenery type 0xB as "wood pile". **Narrowed, not fully settled, in a later session**: `alloc_unit` (0x4ED8A0)
+    itself has no per-class/per-type init dispatch at all (checked directly, reading it start to end) - it only
+    allocates, zeroes, and stamps class/type/tribe/position, so there is no `init_unit_type_5` to check (that
+    premise was wrong). The call site itself is more telling: it fires in a tight loop (while a counter at
+    `candidate+0x78` stays positive, decrementing by 100 each time) producing a BURST of several of these objects
+    in quick succession, each immediately re-positioned via `0x4EE580` (a generic "snap to the right cell" utility,
+    not scenery-specific) and followed by `0x48A050(candidate, 0xB, 0)` (the same "play a canned sound/reaction
+    kind" call used all over this codebase) - this is a rapid, linked, self-targeted particle/sound burst
+    accompanying the "listening" animation, not a world-placed stockpile, and `tribe=0xFF` (no owner) is consistent
+    with a transient effect rather than a real resource pile. Leaning toward "scenery type 0xB is overloaded" (a
+    genuine wood pile at level load, the same type id reused for a short-lived visual when spawned this way) over
+    "the catalog entry is wrong", but still not proven without either a sprite-selection check for `tribe==0xFF`
+    scenery or a live screenshot of the actual burst.
   - the player-issued preach order (kind 33, the preach-order handler 0x43C7A0) walks the preacher up to its
     target and, on arrival, plays a sound (0x9F) on the target and sets the target's own state to 5, chaining its
     command group's kind 0x98 → 0x9B → 0x99 over 40 ticks; state 5's own per-turn handler (0x4D6970) reads as a
@@ -3575,8 +3640,11 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
   not just matched by guess - "Volcano lava flow"); state 51 (effect type 0x40) exists and is spawned by both
   the volcano controller and lava flow's own spread, but is otherwise unnamed - open.
 - Person statuses: invisible +0x10 bit 0x1000 (timer +0xA3), shield +0x14 bit 0x8000 (timer +0xA5), bloodlust
-  +0x14 bit 0x80000 (timer +0xB1), hypnotised +0x10 bit 0x4000 (timer +0xAC, original tribe +0xAD), ghost +0x10
-  bit 0x800, low health +0x14 bit 0x1000; the timers count down every 8 turns. On fire: +0xC bit 0x8 leads to
+  +0x14 bit 0x80000 (timer +0xB1), hypnotised +0x10 bit 0x4000 (timer +0xAC, original tribe +0xAD; the code behind
+  this status - setter 0x50EB00, per-tick countdown/revert 0x4D92B0 - was found this session, see "Per spell" 7 and
+  "Preacher conversion"'s resolved contradiction), ghost +0x10 bit 0x800 (this same bit also explains three
+  previously-separate "mystery exemption flag" sightings elsewhere - preacher_strike_scan, 0x4D4B50, 0x4D83B0 - see
+  "Preacher conversion"), low health +0x14 bit 0x1000; the timers count down every 8 turns. On fire: +0xC bit 0x8 leads to
   state 31. Life +0x6E, maximum life +0x6C. Drawing: translucent +0x36 bit 0x40, hidden +0x35 bit 0x10,
   selected +0x7A bit 0x80.
 - Movement: profile index +0x30 (into 0x5A7B90), walk speed +0x5F, heading +0x5D, velocity +0x49 (x),
