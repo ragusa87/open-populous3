@@ -81,6 +81,10 @@ pub struct GameMap {
     pub bolts: Registry<crate::firebolt::Firebolt>,
     /// Boats and balloons (`crate::vehicle`).
     pub vehicles: Registry<crate::vehicle::Vehicle>,
+    /// Shared patrol points (`crate::patrol`), referenced by zero or more units' own `patrol` queue.
+    pub patrol_points: Registry<crate::patrol::PatrolPoint>,
+    /// Invisible, stationary markers a move-type patrol point targets (`crate::hidden_point`).
+    pub hidden_points: Registry<crate::hidden_point::HiddenPoint>,
     /// Ground left in ashes by destroyed buildings (`crate::ashes`).
     pub ashes: crate::ashes::Ashes,
     /// Per-cell blend/light/downhill, derived from `terrain` (+ `ashes`/active lava), kept current by
@@ -142,7 +146,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), bolts: Registry::default(), vehicles: Registry::default(), ashes: Default::default(), shading, outcome: None, now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -183,6 +187,8 @@ impl GameMap {
             coordinators: Coordinators::default(),
             bolts: Registry::default(),
             vehicles: Registry::default(),
+            patrol_points: Registry::default(),
+            hidden_points: Registry::default(),
             ashes: Default::default(),
             shading: CellShading::new(MAP_SIZE, SunParams::default()),
             outcome: None,
@@ -942,7 +948,7 @@ impl GameMap {
         if self.armageddon().is_some() || self.outcome.is_some() {
             return None;
         }
-        match *command {
+        match command.clone() {
             Command::Cast { player, spell } if self.out_of_range(player, &spell).is_some() => {
                 self.walk_to_cast(player, spell);
                 None
@@ -990,12 +996,14 @@ impl GameMap {
                         return None;
                     }
                     self.units[i].clear_queue();
+                    self.units[i].clear_patrol();
                     self.start_order(i, order);
                 }
                 None
             }
             Command::QueueOrder { player, unit, order } => {
                 if let Some(i) = self.unit_index(unit).filter(|&i| self.units[i].owner == player && !self.locked(i) && self.units[i].aboard.is_none()) {
+                    self.units[i].clear_patrol();
                     if self.units[i].is_free() && self.units[i].queued().is_empty() {
                         self.start_order(i, order);
                     } else {
@@ -1038,6 +1046,28 @@ impl GameMap {
             }
             Command::ClearSwamp { player, swamp } => {
                 self.clear_swamp(player, swamp);
+                None
+            }
+            Command::SetPatrol { player, units, at } => {
+                let action = crate::patrol::PatrolAction::GoTo(self.add_hidden_point(at.0, at.1));
+                self.set_patrol(player, &units, action);
+                None
+            }
+            Command::SetPatrolTarget { player, units, target } => {
+                self.set_patrol(player, &units, crate::patrol::PatrolAction::Attack(target));
+                None
+            }
+            Command::AddPatrolPoint { player, units, at } => {
+                let action = crate::patrol::PatrolAction::GoTo(self.add_hidden_point(at.0, at.1));
+                self.add_patrol_point_to(player, &units, action);
+                None
+            }
+            Command::AddPatrolTargetPoint { player, units, target } => {
+                self.add_patrol_point_to(player, &units, crate::patrol::PatrolAction::Attack(target));
+                None
+            }
+            Command::ReleasePatrol { player, units } => {
+                self.release_patrol(player, &units);
                 None
             }
         }
@@ -1185,6 +1215,8 @@ impl GameMap {
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
         self.release_orphans();
+        self.prune_patrol_points();
+        self.prune_hidden_points();
         self.tend_vehicles();
         self.units.iter_mut().for_each(|u| u.statuses.tick(now, u.id.raw()));
         self.revert_expired_hypnosis();
@@ -1230,6 +1262,7 @@ impl GameMap {
         }
         if !frozen {
             self.start_chained();
+            self.advance_patrols();
             dirty.extend(self.work());
             self.drop_wood();
         }
@@ -1621,7 +1654,7 @@ impl GameMap {
     /// Starts `order` for unit `i`, keeping its chained orders; it leaves the building it worked on.
     /// Wood and build orders are for braves only (others ignore them) and pick their tree, piece or
     /// building here, where the map is known.
-    fn start_order(&mut self, i: usize, order: Order) {
+    pub(crate) fn start_order(&mut self, i: usize, order: Order) {
         self.unassign(i);
         match order {
             Order::Build { site } => self.assign(i, site),
@@ -2841,6 +2874,80 @@ mod tests {
             m.units
         };
         assert_eq!(play(), play());
+    }
+
+    #[test]
+    fn set_patrol_shares_one_point_a_direct_order_drops_only_its_own() {
+        let mut m = GameMap::sandbox_walk();
+        m.trees.clear();
+        let c = MAP_SIZE as i32 / 2;
+        let ids: Vec<UnitId> = (0..3).map(|n| m.spawn(0, UnitKind::Brave, slots::cell_centre((c - 3, c + n))).id).collect();
+        let at = slots::cell_centre((c + 3, c));
+        m.apply(&Command::SetPatrol { player: 0, units: ids.clone(), at });
+        assert_eq!(m.patrol_points.len(), 1, "one shared point, not one per unit");
+        assert_eq!(m.hidden_points.len(), 1);
+        let point = m.patrol_points.ids().next().unwrap();
+        for &id in &ids {
+            assert_eq!(m.unit(id).unwrap().queued_patrol().iter().collect::<Vec<_>>(), [point]);
+        }
+        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::Stop });
+        assert!(m.unit(ids[0]).unwrap().queued_patrol().is_empty(), "its own patrol dropped at once");
+        for &id in &ids[1..] {
+            assert_eq!(m.unit(id).unwrap().queued_patrol().iter().collect::<Vec<_>>(), [point], "the others keep patrolling");
+        }
+        assert!(m.patrol_points.contains(point), "still referenced by the other two");
+    }
+
+    #[test]
+    fn a_patrol_of_two_points_cycles_between_them() {
+        let mut m = GameMap::sandbox_walk();
+        m.trees.clear();
+        let c = MAP_SIZE as i32 / 2;
+        let id = m.spawn(0, UnitKind::Brave, slots::cell_centre((c, c))).id;
+        let (a, b) = (slots::cell_centre((c + 3, c)), slots::cell_centre((c + 3, c + 3)));
+        m.apply(&Command::SetPatrol { player: 0, units: vec![id], at: a });
+        m.apply(&Command::AddPatrolPoint { player: 0, units: vec![id], at: b });
+        let (mut seen_a, mut seen_b) = (0, 0);
+        for _ in 0..400 {
+            m.tick();
+            let cell = m.unit(id).unwrap().cell();
+            seen_a += u32::from(cell == (c + 3, c));
+            seen_b += u32::from(cell == (c + 3, c + 3));
+        }
+        assert!(seen_a >= 2 && seen_b >= 2, "cycles back and forth more than once: {seen_a} {seen_b}");
+    }
+
+    #[test]
+    fn release_patrol_prunes_both_registries_next_tick() {
+        let mut m = GameMap::sandbox_walk();
+        m.trees.clear();
+        let c = MAP_SIZE as i32 / 2;
+        let id = m.spawn(0, UnitKind::Brave, slots::cell_centre((c, c))).id;
+        let at = slots::cell_centre((c + 3, c));
+        m.apply(&Command::SetPatrol { player: 0, units: vec![id], at });
+        assert_eq!((m.patrol_points.len(), m.hidden_points.len()), (1, 1));
+        m.apply(&Command::ReleasePatrol { player: 0, units: vec![id] });
+        assert!(m.unit(id).unwrap().queued_patrol().is_empty());
+        m.tick();
+        assert_eq!((m.patrol_points.len(), m.hidden_points.len()), (0, 0), "nothing references them any more");
+    }
+
+    #[test]
+    fn killing_a_unit_mid_patrol_frees_the_point_only_once_it_was_the_last_reference() {
+        let mut m = GameMap::sandbox_walk();
+        m.trees.clear();
+        let c = MAP_SIZE as i32 / 2;
+        let ids: Vec<UnitId> = (0..2).map(|n| m.spawn(0, UnitKind::Brave, slots::cell_centre((c - 3, c + n))).id).collect();
+        let at = slots::cell_centre((c + 3, c));
+        m.apply(&Command::SetPatrol { player: 0, units: ids.clone(), at });
+        let i0 = m.unit_index(ids[0]).unwrap();
+        m.units[i0].take_damage(u16::MAX);
+        m.tick();
+        assert_eq!(m.patrol_points.len(), 1, "the other co-patroller still references it");
+        let i1 = m.unit_index(ids[1]).unwrap();
+        m.units[i1].take_damage(u16::MAX);
+        m.tick();
+        assert_eq!(m.patrol_points.len(), 0, "pruned once it was the last reference");
     }
 
     /// Sandbox walk with no trees but `trees`, and braves of tribe 0 at `braves` (cells); their ids.

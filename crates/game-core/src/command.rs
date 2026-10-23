@@ -5,10 +5,10 @@ use crate::effect::Effect;
 use crate::id::Id;
 use crate::spell::Spell;
 use crate::spell_book::SpellKind;
-use crate::unit::{Order, UnitId};
+use crate::unit::{Order, Target, UnitId};
 use crate::vehicle::VehicleId;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     /// A spell aimed at a spot: uses a charge of the player's book (`Spell::kind`), ignored without one.
     Cast { player: u8, spell: Spell },
@@ -47,4 +47,23 @@ pub enum Command {
     /// Ends the player's own swamp `swamp` early, like a blueprint put away (right click + Ctrl); ignored for
     /// one not theirs (`GameMap::clear_swamp`).
     ClearSwamp { player: u8, swamp: Id<Effect> },
+    /// Ctrl+Alt + left click on the ground, the first point of a new patrol sequence (units.md "Patrol
+    /// orders"): clears each of `units`' order and whole patrol, shares one new move-type point on all
+    /// of them, starts it at once.
+    ///
+    /// Carries the whole group, unlike every other order command (which resolve a shared target into
+    /// one `Command::OrderUnit` per unit before the command exists at all): this one mints a single new
+    /// shared point across the group inside one deterministic `apply` call, the same way `PlaceBuilding`
+    /// mints one new id, which a one-command-per-unit shape could not do atomically.
+    SetPatrol { player: u8, units: Vec<UnitId>, at: (u16, u16) },
+    /// Ctrl+Alt + left click on an enemy, the first point of a new patrol sequence: as `SetPatrol`, an
+    /// attack-type point instead.
+    SetPatrolTarget { player: u8, units: Vec<UnitId>, target: Target },
+    /// Ctrl+Alt + left click on the ground after a first point: appends a fresh shared move-type point
+    /// to each of `units`' existing patrol instead of replacing it (a no-op per unit already at 8).
+    AddPatrolPoint { player: u8, units: Vec<UnitId>, at: (u16, u16) },
+    /// Ctrl+Alt + left click on an enemy after a first point: as `AddPatrolPoint`, an attack-type point.
+    AddPatrolTargetPoint { player: u8, units: Vec<UnitId>, target: Target },
+    /// `N`: releases `units`' whole patrol (its points are pruned once nothing still refers to them).
+    ReleasePatrol { player: u8, units: Vec<UnitId> },
 }

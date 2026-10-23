@@ -398,6 +398,9 @@ pub struct Unit {
     to_vehicle: Option<crate::vehicle::VehicleId>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
+    /// Patrol points to cycle through forever once more than one is set (units.md "Patrol orders"),
+    /// independent of `queue`: a point is a shared id (`crate::patrol`), not an owned `Order`.
+    patrol: crate::patrol::PatrolQueue,
     /// The building (id) this brave is assigned to, `Order::Build`.
     pub work: Option<BuildingId>,
     /// The building the unit is in: it walks out by its door before going anywhere.
@@ -457,6 +460,7 @@ impl Unit {
             to_shrine: None,
             to_vehicle: None,
             queue: Vec::new(),
+            patrol: crate::patrol::PatrolQueue::default(),
             work: None,
             inside: None,
             aboard: None,
@@ -568,12 +572,13 @@ impl Unit {
         }
     }
 
-    /// A direct order: replaces the chained ones. Ignored while drowning, dying or dead.
+    /// A direct order: replaces the chained ones and the whole patrol. Ignored while drowning, dying or dead.
     pub fn order(&mut self, order: Order) {
         if !self.takes_orders() {
             return;
         }
         self.queue.clear();
+        self.patrol.clear();
         self.start(order);
     }
 
@@ -659,6 +664,29 @@ impl Unit {
     /// Chained orders still to come, next first.
     pub fn queued(&self) -> &[Order] {
         &self.queue
+    }
+
+    /// Patrol points still to cycle through, next (the one just reached) first.
+    pub fn queued_patrol(&self) -> &crate::patrol::PatrolQueue {
+        &self.patrol
+    }
+
+    /// Forgets the whole patrol (any ordinary order, direct or chained, cancels it the same way).
+    pub(crate) fn clear_patrol(&mut self) {
+        if self.action.can_take_orders() {
+            self.patrol.clear();
+        }
+    }
+
+    /// Appends `point` to the patrol (a new point in an existing sequence, or the first one started
+    /// right after); whether it fit (`PatrolQueue::push_back`, false past `PATROL_CAPACITY`).
+    pub(crate) fn add_patrol_point(&mut self, point: crate::patrol::PatrolPointId) -> bool {
+        self.action.can_take_orders() && self.patrol.push_back(point)
+    }
+
+    /// The point just reached moves to the back of the patrol; the new front (`GameMap::advance_patrols`).
+    pub(crate) fn patrol_advance(&mut self) -> Option<crate::patrol::PatrolPointId> {
+        self.patrol.advance()
     }
 
     /// Chains `order` after the current action and the orders already chained.
@@ -1009,6 +1037,7 @@ impl Unit {
         (self.route, self.planned_on, self.teleport_to, self.spell, self.to_fire) = (Vec::new(), None, None, None, None);
         (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle) = (None, None, None, None, None);
         self.queue.clear();
+        self.patrol.clear();
         self.work = None;
     }
 
