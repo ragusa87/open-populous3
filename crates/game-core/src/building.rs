@@ -228,9 +228,14 @@ pub struct Building {
     pub burning: Option<crate::time::Countdown>,
     /// Pieces of wood brought to the pile by its door, not built in yet.
     pub stock: u8,
-    /// Height its footprint is flattened to (a blueprint's: the average when placed, at least
-    /// `MIN_GROUND`).
+    /// Height its footprint is flattened to: a blueprint's (the average when placed, at least
+    /// `MIN_GROUND`), then, once built, its foundation's own base (`crate::foundation`, recomputed
+    /// periodically from the ground's current average - or, a water-sited kind, just clamped to
+    /// `foundation::WATER_BASE_MIN`, never averaged).
     pub level: u16,
+    /// On its way out from its own foundation check (`crate::foundation`), not combat or fire -
+    /// never both. No orders reach it, no wear, no construction, no further foundation check.
+    pub collapse: Option<crate::foundation::Collapse>,
     /// A plan's height points (cells, unwrapped as `ground_points`) jumped on so far: each needs a
     /// jump, even when already level.
     pub jumped: Vec<(i32, i32)>,
@@ -270,7 +275,7 @@ pub enum Reward {
 impl Building {
     /// A finished building, as the levels store them.
     pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
-        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, stock: 0, level: 0, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)), production: None, queue: Vec::new(), queue_spots: Vec::new(), spots_on: None, admitted: Vec::new(), admit_gate: 0, launch: None }
+        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, stock: 0, level: 0, collapse: None, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)), production: None, queue: Vec::new(), queue_spots: Vec::new(), spots_on: None, admitted: Vec::new(), admit_gate: 0, launch: None }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.

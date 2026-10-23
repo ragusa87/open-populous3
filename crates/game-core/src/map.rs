@@ -1195,6 +1195,7 @@ impl GameMap {
         dirty.extend(self.tend_effects());
         dirty.extend(self.tend_fires());
         dirty.extend(self.tend_building_wear());
+        dirty.extend(self.tend_building_foundations());
         dirty.extend(self.ashes.tick(now));
         self.tend_campfires();
         if !frozen {
