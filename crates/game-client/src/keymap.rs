@@ -45,15 +45,16 @@ pub enum Shortcut {
     Pause,
     Faster,
     Slower,
+    ReleasePatrol,
 }
 
 impl Shortcut {
-    pub const ALL: [Shortcut; 28] = {
+    pub const ALL: [Shortcut; 29] = {
         use Shortcut::*;
         [
             Forward, Back, StrafeLeft, StrafeRight, RotateLeft, RotateRight, TiltUp, TiltDown, ZoomIn, ZoomOut, FovWider,
             FovNarrower, Aerial, LookAtShaman, LookAtSite, TurnPlan, Stop, CastSelf, NextLevel, PreviousLevel, Grid,
-            DebugOverlay, Editor, ViewPresets, CameraReadout, Pause, Faster, Slower,
+            DebugOverlay, Editor, ViewPresets, CameraReadout, Pause, Faster, Slower, ReleasePatrol,
         ]
     };
 
@@ -89,6 +90,7 @@ impl Shortcut {
             Pause => "Pause the game",
             Faster => "Game faster",
             Slower => "Game slower",
+            ReleasePatrol => "Release the held followers' patrol",
         }
     }
 }
@@ -164,16 +166,18 @@ pub enum Input {
     Char(&'static str),
 }
 
-/// Modifiers held, Alt ignored.
+/// Modifiers held. `alt` is read only by `Shortcuts::mods()`'s caller (`Ctrl+Alt+click`, units.md
+/// "Patrol orders"); a `Binding` itself still ignores it, as every original key combo does.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Mods {
     pub ctrl: bool,
     pub shift: bool,
+    pub alt: bool,
 }
 
-const NONE: Mods = Mods { ctrl: false, shift: false };
-const CTRL: Mods = Mods { ctrl: true, shift: false };
-const SHIFT: Mods = Mods { ctrl: false, shift: true };
+const NONE: Mods = Mods { ctrl: false, shift: false, alt: false };
+const CTRL: Mods = Mods { ctrl: true, shift: false, alt: false };
+const SHIFT: Mods = Mods { ctrl: false, shift: true, alt: false };
 
 /// An input with exactly these modifiers; a `Char` ignores Shift, which the layout may need to type it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,10 +193,12 @@ macro_rules! key {
 }
 
 impl Binding {
+    /// Alt is never part of a binding's own modifiers (shortcuts.md: "Alt ignored"): only `mods.ctrl`
+    /// and `mods.shift` are compared, whatever `mods.alt` is.
     pub fn matches(&self, down: impl Fn(Input) -> bool, mods: Mods) -> bool {
         let mods_ok = match self.input {
             Input::Char(_) => mods.ctrl == self.mods.ctrl,
-            Input::Code(_) => mods == self.mods,
+            Input::Code(_) => mods.ctrl == self.mods.ctrl && mods.shift == self.mods.shift,
         };
         mods_ok && down(self.input)
     }
@@ -221,6 +227,7 @@ fn original_bindings(shortcut: Shortcut) -> &'static [Binding] {
         Pause => &[key!(KeyP, NONE)],
         Faster => &[key!(Equal, SHIFT), key!(NumpadAdd, SHIFT)],
         Slower => &[key!(Minus, SHIFT), key!(NumpadSubtract, SHIFT)],
+        ReleasePatrol => &[key!(KeyN, NONE)],
         TiltUp | TiltDown | FovWider | FovNarrower | Stop | CastSelf | NextLevel | PreviousLevel | Grid | DebugOverlay | Editor
         | ViewPresets | CameraReadout => &[],
     }
@@ -257,6 +264,7 @@ fn dev_bindings(shortcut: Shortcut) -> &'static [Binding] {
         Pause => &[key!(KeyP, NONE)],
         Faster => &[key!(Equal, SHIFT), key!(NumpadAdd, SHIFT)],
         Slower => &[key!(Minus, SHIFT), key!(NumpadSubtract, SHIFT)],
+        ReleasePatrol => &[key!(KeyN, NONE)],
     }
 }
 
@@ -277,6 +285,7 @@ impl Shortcuts<'_> {
         Mods {
             ctrl: self.codes.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]),
             shift: self.codes.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
+            alt: self.codes.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]),
         }
     }
 
@@ -317,7 +326,7 @@ impl Plugin for KeymapPlugin {
 mod tests {
     use super::*;
 
-    const ALL: [Shortcut; 28] = Shortcut::ALL;
+    const ALL: [Shortcut; 29] = Shortcut::ALL;
 
     fn fires(dev: bool, shortcut: Shortcut, input: Input, mods: Mods) -> bool {
         bindings(dev, shortcut).iter().any(|b| b.matches(|i| i == input, mods))

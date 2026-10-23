@@ -17,6 +17,7 @@ use crate::camera::{CameraRig, CurveParamsRes};
 use crate::grounded::pick_ground;
 use crate::hud::PANEL_WIDTH;
 use crate::world::CurrentMap;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use game_core::command::Command;
 use game_core::unit::{Order, PickableUnit, Target, Unit, UnitId};
@@ -35,6 +36,15 @@ const BOX_FILL: Color = Color::srgba(1.0, 1.0, 0.95, 0.08);
 pub struct Selection {
     pub units: Vec<UnitId>,
 }
+
+/// Which selection the in-progress patrol build covers (units.md "Patrol orders"), so a second
+/// Ctrl+Alt+click on the same, unchanged selection appends a point instead of starting a fresh
+/// sequence. Cleared to `None` wherever `Selection` is deliberately reassigned by the player (a click,
+/// a box, a deselect, boarding crew), not just when its content differs from this: reselecting an
+/// identical group later still starts fresh rather than silently resuming an old one. Purely a
+/// client-side UI decision (which `Command` to send next), not simulation state, like `Mods`.
+#[derive(Resource, Default)]
+pub struct PatrolSession(Option<Vec<UnitId>>);
 
 /// A unit the player could pick (hover, select), as seen on screen. Only made from a `PickableUnit`:
 /// a flung or lifted unit is never on screen to pick.
@@ -183,7 +193,7 @@ pub struct SelectionPlugin;
 
 impl Plugin for SelectionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Selection>().init_resource::<Drag>().add_systems(Startup, spawn_overlays).add_systems(Update, draw_overlays.after(select_and_order).in_set(crate::menu::Gameplay));
+        app.init_resource::<Selection>().init_resource::<Drag>().init_resource::<PatrolSession>().add_systems(Startup, spawn_overlays).add_systems(Update, draw_overlays.after(select_and_order).in_set(crate::menu::Gameplay));
     }
 }
 
@@ -228,6 +238,14 @@ pub fn on_screen(
         .collect()
 }
 
+/// `Selection` and its in-progress patrol build together, as one system parameter (Bevy's own system
+/// functions cap how many it accepts; `select_and_order` already needs every one of the others).
+#[derive(SystemParam)]
+pub(super) struct SelectionInput<'w> {
+    selection: ResMut<'w, Selection>,
+    patrol: ResMut<'w, PatrolSession>,
+}
+
 /// Left/right mouse and P/X: selection changes and orders to the selection.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn select_and_order(
@@ -241,18 +259,24 @@ pub(super) fn select_and_order(
     params: Res<CurveParamsRes>,
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
-    mut selection: ResMut<Selection>,
+    mut sel: SelectionInput,
     mut drag: ResMut<Drag>,
     spell: Res<crate::hud::spells::SelectedSpell>,
     blueprint: Res<crate::blueprint::Blueprint>,
     tree: Res<crate::nature::HoveredTree>,
     hovered: Res<crate::hover::Hovered>,
 ) {
+    let selection = &mut sel.selection;
+    let patrol_session = &mut sel.patrol;
+    let before = selection.units.clone();
     selection.retain(&map.0.units);
+    if selection.units != before {
+        patrol_session.0 = None;
+    }
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
     let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && spell.0.is_none() && !blueprint.is_active());
-    let crate::keymap::Mods { ctrl: add, shift } = shortcuts.mods();
+    let crate::keymap::Mods { ctrl: add, shift, alt } = shortcuts.mods();
     let mut moves = Vec::new();
     // Shift + right click removes what is under the cursor (a camp fire) and keeps the selection; a
     // right click on a tree shows its wood (`nature`) and keeps it too.
@@ -261,7 +285,10 @@ pub(super) fn select_and_order(
         let ground = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction));
         match ground.and_then(|cell| shift_right_click(&map.0, world_units(cell), shift)) {
             Some(command) => moves.push(command),
-            None if tree.tree.is_none() => selection.clear(),
+            None if tree.tree.is_none() => {
+                selection.clear();
+                patrol_session.0 = None;
+            }
             None => {}
         }
     }
@@ -280,16 +307,25 @@ pub(super) fn select_and_order(
     if let Some(cam) = gesture.and_then(|_| cams.iter().next()) {
         let units = on_screen(&map.0, &views, cam);
         match gesture {
-            Some(Gesture::Box(a, b)) => selection.select_box(&in_box(a, b, &units), add),
+            Some(Gesture::Box(a, b)) => {
+                selection.select_box(&in_box(a, b, &units), add);
+                patrol_session.0 = None;
+            }
             Some(Gesture::Click(c)) => match unit_at(c, &units) {
-                Some(u) => selection.click(u.id, add),
+                Some(u) => {
+                    selection.click(u.id, add);
+                    patrol_session.0 = None;
+                }
                 None => {
                     let ray = cam.0.viewport_to_world(cam.1, c).ok();
                     let at = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)).map(world_units);
-                    // One of the player's buildings wins over a tree in front of or behind it; a building or a
-                    // totem is clicked anywhere on its model (as hovered), not only on its footprint.
-                    if let Some(people) = crew_click(&map.0, &selection.units, hovered.0) {
+                    if add && alt && !selection.units.is_empty() {
+                        moves = patrol_click(&map.0, &selection.units, patrol_session, hovered.0, at);
+                    } else if let Some(people) = crew_click(&map.0, &selection.units, hovered.0) {
+                        // One of the player's buildings wins over a tree in front of or behind it; a building or a
+                        // totem is clicked anywhere on its model (as hovered), not only on its footprint.
                         selection.units = people;
+                        patrol_session.0 = None;
                     } else if let Some(orders) = vehicle_click(&map.0, &selection.units, hovered.0) {
                         moves = orders;
                     } else if let Some(orders) = attack_click(&map.0, &selection.units, hovered.0) {
@@ -314,6 +350,9 @@ pub(super) fn select_and_order(
     }
     if shortcuts.just_pressed(crate::keymap::Shortcut::Stop) {
         orders.push(Order::Stop);
+    }
+    if shortcuts.just_pressed(crate::keymap::Shortcut::ReleasePatrol) && !selection.units.is_empty() {
+        moves.push(Command::ReleasePatrol { player: PLAYER, units: selection.units.clone() });
     }
     let commands = orders.into_iter().flat_map(|order| selection.commands(order));
     let commands: Vec<Command> = if add { chained(commands.collect()) } else { commands.collect() };
@@ -364,6 +403,31 @@ pub fn vehicle_click(map: &game_core::map::GameMap, selected: &[UnitId], hovered
     let boarding = selected.iter().filter_map(|&id| map.unit(id)).filter(|u| u.owner == PLAYER && u.is_alive() && u.aboard != Some(vehicle));
     let orders: Vec<Command> = boarding.map(|u| Command::OrderUnit { player: PLAYER, unit: u.id, order: Order::Board { vehicle } }).collect();
     (!orders.is_empty()).then_some(orders)
+}
+
+/// Commands for Ctrl+Alt + left click with `selected` units (non-empty, checked by the caller): a unit
+/// under the cursor (`hovered`) sets/adds an attack-type point, else `at` (the ground under the
+/// cursor) a move-type one. `session` decides the first point of a new sequence (`SetPatrol`/
+/// `SetPatrolTarget`, replacing) from a later one (`AddPatrolPoint`/`AddPatrolTargetPoint`, appending):
+/// a different selection from what it last recorded is always a fresh first point (units.md "Patrol
+/// orders"). Building targets are not resolved here yet (scope decision, TODO.md "Order model").
+pub fn patrol_click(map: &game_core::map::GameMap, selected: &[UnitId], session: &mut PatrolSession, hovered: Option<crate::hover::HoverTarget>, at: Option<(u16, u16)>) -> Vec<Command> {
+    let mut units = selected.to_vec();
+    units.sort();
+    units.dedup();
+    let first = session.0.as_ref() != Some(&units);
+    session.0 = Some(units.clone());
+    let target = match hovered {
+        Some(crate::hover::HoverTarget::Unit(i)) => map.units.get(i).map(|u| Target::Unit(u.id)),
+        _ => None,
+    };
+    match (target, at) {
+        (Some(target), _) if first => vec![Command::SetPatrolTarget { player: PLAYER, units, target }],
+        (Some(target), _) => vec![Command::AddPatrolTargetPoint { player: PLAYER, units, target }],
+        (None, Some(at)) if first => vec![Command::SetPatrol { player: PLAYER, units, at }],
+        (None, Some(at)) => vec![Command::AddPatrolPoint { player: PLAYER, units, at }],
+        (None, None) => Vec::new(),
+    }
 }
 
 /// Commands for a left click on the enemy person or building under the cursor (`hovered`) with `selected` units:
@@ -496,6 +560,44 @@ mod tests {
         assert_eq!(attack_click(&map, &[], Some(HoverTarget::Unit(enemy))), None);
         map.units[enemy].kind = UnitKind::Wildman;
         assert_eq!(attack_click(&map, &[brave], Some(HoverTarget::Unit(enemy))), None, "wildmen never fight");
+    }
+
+    #[test]
+    fn patrol_click_sets_the_first_point_then_adds_for_the_same_selection() {
+        use game_core::unit::UnitKind;
+        let map = game_core::map::GameMap::sandbox_units();
+        let mut ids: Vec<UnitId> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == UnitKind::Brave).map(|u| u.id).collect();
+        ids.sort();
+        let mut session = PatrolSession::default();
+        let first = patrol_click(&map, &ids, &mut session, None, Some((10, 20)));
+        assert_eq!(first, [Command::SetPatrol { player: PLAYER, units: ids.clone(), at: (10, 20) }]);
+        let second = patrol_click(&map, &ids, &mut session, None, Some((30, 40)));
+        assert_eq!(second, [Command::AddPatrolPoint { player: PLAYER, units: ids.clone(), at: (30, 40) }]);
+        assert_eq!(patrol_click(&map, &ids, &mut session, None, None), Vec::new(), "nothing under the cursor at all");
+    }
+
+    #[test]
+    fn patrol_click_on_an_enemy_sets_an_attack_point() {
+        use crate::hover::HoverTarget;
+        use game_core::unit::UnitKind;
+        let map = game_core::map::GameMap::sandbox_units();
+        let brave = map.units.iter().find(|u| u.owner == PLAYER && u.kind == UnitKind::Brave).unwrap().id;
+        let enemy = map.units.iter().position(|u| u.owner != PLAYER).unwrap();
+        let target = Target::Unit(map.units[enemy].id);
+        let mut session = PatrolSession::default();
+        let commands = patrol_click(&map, &[brave], &mut session, Some(HoverTarget::Unit(enemy)), Some((1, 2)));
+        assert_eq!(commands, [Command::SetPatrolTarget { player: PLAYER, units: vec![brave], target }], "a unit under the cursor wins over the ground");
+    }
+
+    #[test]
+    fn patrol_click_starts_fresh_once_the_session_is_cleared_even_for_the_same_group() {
+        let ids = vec![Id::from_raw(1), Id::from_raw(2)];
+        let map = game_core::map::GameMap::sandbox_units();
+        let mut session = PatrolSession::default();
+        patrol_click(&map, &ids, &mut session, None, Some((10, 20)));
+        session.0 = None;
+        let commands = patrol_click(&map, &ids, &mut session, None, Some((30, 40)));
+        assert_eq!(commands, [Command::SetPatrol { player: PLAYER, units: ids, at: (30, 40) }], "a fresh sequence, not appended");
     }
 
     #[test]
