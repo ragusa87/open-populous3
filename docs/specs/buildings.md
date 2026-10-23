@@ -316,9 +316,13 @@ turns; every turn for a water-sited kind, `BuildingKind::is_water_sited`, today 
 towards its base (`Building::level`, repurposed from its construction-time target: recomputed as the average of
 its footprint's height points, or - water-sited - just clamped to a floor, `WATER_BASE_MIN`, never averaged), or
 collapses:
-- **Too-steep ground**: the first footprint height point found more than `PULL_RANGE` (200) from the base
-  shatters the building on the spot (`Collapse::Shattering`) instead of being pulled back - never checked for a
-  water-sited kind (no single target height to diverge from). Removed the tick after (one tick left standing so
+- **Too-steep ground**: its footprint's height points spread more than `PULL_RANGE` (200, highest minus lowest)
+  shatters the building on the spot (`Collapse::Shattering`) instead of being pulled back, the same spread
+  `placement::too_steep` already refuses to place a blueprint on - never checked for a water-sited kind (no
+  single target height to diverge from). **A footprint-wide spread, not a deviation from the recomputed
+  average**: a live case (two footprint corners 202 apart, each individually within 200 of their shared
+  average) confirmed a per-point "distance from the average" reading of the trace's own wording does not
+  actually destroy a building that uneven - the spread does. Removed the tick after (one tick left standing so
   the client can still catch it and play the ordinary building-explosion visual, `explosion::BuildingExploded` -
   `buildings.rs`'s `respawn_buildings` fires it the instant it sees the transition).
 - **Flooding** (ordinary buildings only): before the per-point pass, if more than `FLOOD_FRACTION` (5/8) of the

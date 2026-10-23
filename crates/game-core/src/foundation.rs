@@ -17,8 +17,13 @@ use crate::time::{Countdown, Every, Ticks};
 pub const CHECK_EVERY: Every = Every::new(4);
 /// A water-sited building (a boat hut) rechecks every turn instead [exe].
 pub const CHECK_EVERY_WATER: Every = Every::new(1);
-/// A footprint height point within this of its target is pulled towards it instead of destroying the
-/// building [exe].
+/// Its footprint's height points (coarse grid, `Building::ground_points`) spread more than this (highest
+/// minus lowest) destroys it on the spot ("too steep"), matching `placement::too_steep`'s own placement-time
+/// check; within it, every point is instead pulled towards the footprint's average [exe/ours: the trace's own
+/// wording ("the first cell found more than 200 away from its target") reads as a per-point deviation from
+/// the recomputed average, which a live case showed does not actually destroy a building whose two most
+/// extreme points alone already differ by this much - a footprint-wide spread, not a deviation from a shared
+/// target, is what matches, so that is what this checks].
 pub const PULL_RANGE: i32 = 200;
 /// How fast a footprint height point is pulled towards its target, a turn [exe].
 pub const PULL_RATE: i32 = 2;
@@ -106,32 +111,28 @@ impl crate::map::GameMap {
                     continue;
                 }
             }
+            let points = self.buildings[i].ground_points();
+            let heights: Vec<i32> = points.iter().map(|&(x, z)| self.terrain.get(x, z) as i32).collect();
+            if !water && heights.iter().max().unwrap_or(&0) - heights.iter().min().unwrap_or(&0) > PULL_RANGE {
+                self.buildings[i].collapse = Some(Collapse::Shattering);
+                continue;
+            }
             self.buildings[i].level = if water {
                 self.buildings[i].level.max(WATER_BASE_MIN)
             } else {
-                let points = self.buildings[i].ground_points();
-                let sum: u32 = points.iter().map(|&(x, z)| self.terrain.get(x, z) as u32).sum();
-                (sum / points.len().max(1) as u32) as u16
+                (heights.iter().sum::<i32>() / heights.len().max(1) as i32) as u16
             };
-            let points = self.buildings[i].ground_points();
             let mut touched = Vec::new();
-            let mut shatters = false;
             for &(x, z) in &points {
                 let target = self.buildings[i].pull_target(&self.terrain, (x, z)) as i32;
                 let h = self.terrain.get(x, z) as i32;
                 let diff = target - h;
-                if !water && diff.abs() > PULL_RANGE {
-                    shatters = true;
-                    break;
-                }
                 if diff != 0 {
                     self.terrain.set(x, z, (h + diff.signum() * diff.abs().min(PULL_RATE)) as u16);
                     touched.push((x, z));
                 }
             }
-            if shatters {
-                self.buildings[i].collapse = Some(Collapse::Shattering);
-            } else if !touched.is_empty() {
+            if !touched.is_empty() {
                 dirty.push(DirtyRect::bounding(touched));
             }
         }
@@ -212,6 +213,27 @@ mod tests {
             assert!(m.building(id).is_none(), "{kind:?}: gone the tick after");
             assert!(m.ashes.buildable(cell), "{kind:?}: no ashes, unlike wear or fire destruction");
         }
+    }
+
+    #[test]
+    fn a_spread_over_200_shatters_even_though_neither_point_alone_strays_from_the_average() {
+        // A reported live case: footprint corners at heights 128, 266 and 64 - the two extremes 202 apart
+        // from each other, though each stays within 200 of the recomputed average (close to 128 with enough
+        // other points near it): still too uneven, caught by the footprint-wide spread, not a per-point
+        // deviation from that average.
+        let mut m = GameMap::sandbox_walk();
+        let id = m.add_building(Building::new(BuildingKind::Vault, 0, 40 * 512, 40 * 512, 0));
+        let points = m.building(id).unwrap().ground_points();
+        assert!(points.len() >= 3, "{points:?}");
+        for &(x, z) in &points {
+            m.terrain.set(x, z, 128);
+        }
+        let (hx, hz) = points[0];
+        let (lx, lz) = points[points.len() - 1];
+        m.terrain.set(hx, hz, 266);
+        m.terrain.set(lx, lz, 64);
+        run(&mut m, 4);
+        assert_eq!(m.building(id).unwrap().collapse, Some(Collapse::Shattering));
     }
 
     #[test]
