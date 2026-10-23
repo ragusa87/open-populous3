@@ -137,6 +137,15 @@ back-and-forth or circuit patrol.
   to fight whoever was clicked when the circuit reaches it — not a passive escort or follow. A
   failed attempt (target unreachable, gone, etc.) does not give up and move on: it keeps retrying
   every tick for as long as the circuit sits on that point.
+  **Flagged, not re-verified**: a later session's doubt (not yet chased down) is whether the
+  original really lets a player deliberately set one of the 8 slots to "attack this specific unit"
+  at all, as opposed to units just walking plain move-only waypoints and *opportunistically*
+  engaging whatever they come across along the way, breaking off and resuming the route afterwards
+  — a reactive behaviour rather than a stored target. Separately and more narrowly, whether an
+  attack-type point (however it works) can ever target a **building** rather than only a unit is
+  unconfirmed either way — this section never actually traced a building case, only a unit one.
+  Before leaning on either claim as load-bearing, re-check against the exe trace that originally
+  produced this section (TODO.md "Order model").
 - **Points set on a group of selected units are shared, not copied — and this isn't special to
   patrol points.** Every order the game issues, to one unit or a hundred, is always a reference to
   one shared, reference-counted record — ordering one unit alone still creates one of these records
