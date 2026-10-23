@@ -324,10 +324,16 @@ collapses:
 - **Flooding** (ordinary buildings only): before the per-point pass, if more than `FLOOD_FRACTION` (5/8) of the
   footprint's fine cells (`Building::walled_cells`) are at or below sea level, it starts sinking
   (`Collapse::Sinking`, `foundation::SINK_TICKS` = 80 turns) instead - a water-sited kind is immune, it just sits
-  there. Drawn client-side (`buildings.rs`'s `sink_and_rock`): it drops lower on an accelerating curve (every 8
-  turns, `sink_depth`) and tilts with a decaying wobble (`sink_tilt`) - the original's own compass-histogram lean
-  target and oscillator formula are not confirmed (pop3-rev-analysis.md "Building sinking (flooded
-  destruction)"), so the wobble here is our own approximation, `[ours]`.
+  there. Drawn client-side (`buildings.rs`'s `sink_and_rock`), `[ours]` throughout (the original's own compass-
+  histogram lean target and oscillator formula are not confirmed, pop3-rev-analysis.md "Building sinking
+  (flooded destruction)", and its own "units" don't translate cleanly to ours): it drops on an accelerating curve
+  to `SINK_DEPTH` (2.4 cells, enough to clearly go under) and shrinks to `SINK_SHRINK` of its size, both by the
+  time it is gone; rather than the trace's own back-and-forth oscillation (read as mere shaking in practice), it
+  keels steadily towards its footprint's own lowest, most-flooded side (`lean_direction`, weighted by how far
+  each height point sits below its base) up to `TILT_MAX` (0.45 rad); a ripple (`Ripple`, a soft generated ring)
+  pulses outward and fades around it, looping on `RIPPLE_PERIOD` seconds, standing in for the original's own
+  "something spawned along the final spiral path - plausibly a splash/bubble" (not independently confirmed
+  either).
 - Otherwise, every point within range is pulled `PULL_RATE` (2) towards its target each time the check fires - a
   water-sited building's own water-side footprint points target sea level instead of its base.
 

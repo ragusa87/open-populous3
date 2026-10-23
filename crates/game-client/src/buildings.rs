@@ -21,9 +21,10 @@ use crate::sim_time::{seed, ticks_f32, SimNow, TICK_SECS};
 use crate::sites::tribe_color;
 use crate::world::{CurrentMap, LevelList};
 use bevy::asset::RenderAssetUsages;
+use bevy::ecs::system::SystemParam;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::PrimitiveTopology;
-use bevy::render::render_resource::Face;
+use bevy::render::render_resource::{Extent3d, Face, TextureDimension, TextureFormat};
 use bevy::prelude::*;
 use crate::explosion::BuildingExploded;
 use game_core::building::{Building, BuildingId, BuildingKind, Stage};
@@ -47,10 +48,20 @@ const SHAKE: f32 = 0.012;
 const BLOW: f32 = 0.7;
 /// Ten blows: the shake's loop in whole ticks (`SimNow::secs_in`).
 const BLOWS_LOOP: Ticks = Ticks::secs(7);
-/// A sinking building's rocking amplitude at the start, radians (the trace's own "up to 56" of 2048 a turn).
-const TILT_MAX: f32 = 56.0 / 2048.0 * std::f32::consts::TAU;
-/// A sinking building's rocking frequency, a guess.
-const TILT_HZ: f32 = 1.5;
+/// A sinking building's total list by the time it is gone, radians: `[ours]`, a steady keel towards its
+/// flooded side rather than the trace's own back-and-forth oscillation (reads better: see buildings.md
+/// "Foundation").
+const TILT_MAX: f32 = 0.45;
+/// A sinking building's total drop by the time it is gone, cells: enough to clearly go under: `[ours]`, the
+/// trace's own units ("20 a turn" at full ramp) don't translate cleanly to ours here.
+const SINK_DEPTH: f32 = 2.4;
+/// A sinking building shrinks to this fraction of its size by the time it is gone, on top of sinking:
+/// `[ours]`, reads as it settling into the water rather than just dropping through the ground.
+const SINK_SHRINK: f32 = 0.5;
+/// A ripple around a sinking building pulses outward on this period, seconds: `[ours]`.
+const RIPPLE_PERIOD: f32 = 1.8;
+/// A ripple's size, cells, at the peak of its pulse.
+const RIPPLE_SIZE: f32 = 3.5;
 /// Colour of the generated pyramid's door slab.
 const SLAB_STONE: Color = Color::srgb(0.42, 0.4, 0.36);
 /// Height of the white mark of a blueprint above the ground (render units).
@@ -135,6 +146,17 @@ struct Shaking(BuildingId);
 #[derive(Component)]
 struct Sinking(BuildingId);
 
+/// A ripple pulsing around a sinking building, at the waterline (`Collapse::Sinking`).
+#[derive(Component)]
+struct Ripple(BuildingId);
+
+/// The ripple's shared mesh and material, made once.
+#[derive(Resource)]
+struct RippleAssets {
+    quad: Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+}
+
 /// The name over a stand-in box, following its building on screen.
 #[derive(Component)]
 struct BuildingLabel(Entity);
@@ -148,10 +170,43 @@ pub struct RespawnBuildings;
 impl Plugin for BuildingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ModelHeights>()
+            .add_systems(Startup, load_ripple_assets)
             .add_systems(Update, (respawn_buildings.in_set(RespawnBuildings), place_labels).chain())
-            .add_systems(Update, (shake_walls, burn_down, sink_and_rock))
+            .add_systems(Update, (shake_walls, burn_down, sink_and_rock, pulse_ripples))
             .add_systems(PostUpdate, draw_site_marks);
     }
+}
+
+/// A soft ring, bright at its radius, transparent at the centre and past the edge (RGBA, `size` x `size`).
+fn ripple_texture(size: usize) -> Vec<u8> {
+    let c = (size as f32 - 1.0) / 2.0;
+    (0..size * size)
+        .flat_map(|i| {
+            let (x, y) = ((i % size) as f32 - c, (i / size) as f32 - c);
+            let r = (x * x + y * y).sqrt() / c;
+            let band = (1.0 - ((r - 0.75) / 0.25).abs()).clamp(0.0, 1.0);
+            [220u8, 230, 240, (band * 200.0) as u8]
+        })
+        .collect()
+}
+
+fn load_ripple_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, mut mats: ResMut<Assets<StandardMaterial>>) {
+    const TEXTURE: usize = 32;
+    let texture = Image::new(
+        Extent3d { width: TEXTURE as u32, height: TEXTURE as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        ripple_texture(TEXTURE),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    let material = mats.add(StandardMaterial {
+        base_color_texture: Some(images.add(texture)),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        cull_mode: None,
+        ..default()
+    });
+    commands.insert_resource(RippleAssets { quad: meshes.add(Rectangle::new(1.0, 1.0)), material });
 }
 
 /// The theme atlas as a material, None without original files.
@@ -231,6 +286,16 @@ fn kit_staged(cache: &mut KitMeshes, kind: BuildingKind, owner: u8, pieces: Opti
     Some(staged)
 }
 
+/// Resources `respawn_buildings` needs besides its many queries and assets, bundled into one system
+/// parameter (Bevy caps how many a system function takes).
+#[derive(SystemParam)]
+struct BuildingExtras<'w> {
+    heights: ResMut<'w, ModelHeights>,
+    chimneys: ResMut<'w, crate::chimney::Chimneys>,
+    flame_frames: ResMut<'w, FlameFrames>,
+    ripple: Res<'w, RippleAssets>,
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn respawn_buildings(
     mut commands: Commands,
@@ -244,9 +309,7 @@ fn respawn_buildings(
     mut kit_skin: Local<Option<Handle<StandardMaterial>>>,
     mut kit: Local<KitMeshes>,
     mut drawn: Local<Vec<Building>>,
-    mut heights: ResMut<ModelHeights>,
-    mut chimneys: ResMut<crate::chimney::Chimneys>,
-    mut flame_frames: ResMut<FlameFrames>,
+    mut extras: BuildingExtras,
     now: Res<SimNow>,
     mut exploded: MessageWriter<BuildingExploded>,
 ) {
@@ -261,8 +324,8 @@ fn respawn_buildings(
         }
     }
     drawn.clone_from(&map.0.buildings);
-    heights.0.clear();
-    chimneys.0.clear();
+    extras.heights.0.clear();
+    extras.chimneys.0.clear();
     for e in &existing {
         commands.entity(e).despawn();
     }
@@ -320,7 +383,7 @@ fn respawn_buildings(
         let flames = if b.burning.is_some() { flame::crossed_boards_at(&fire_bases(kind, look.top.y), FIRE_FLAME) } else { flames };
         let flames = ((stage == Stage::Built || b.burning.is_some()) && !flames.indices.is_empty()).then(|| {
             let offset = (b.x as usize + b.z as usize) * 3 % flame::FRAMES;
-            let frame = flame_frames.get(&levels, theme, &mut images, &mut mats)[offset].clone();
+            let frame = extras.flame_frames.get(&levels, theme, &mut images, &mut mats)[offset].clone();
             (Flame { offset }, Mesh3d(meshes.add(to_mesh(flames))), MeshMaterial3d(frame), NotShadowCaster, crate::hover::NoOutline)
         });
         let fire = b.lit_at(map.0.now).map(Fire);
@@ -347,9 +410,9 @@ fn respawn_buildings(
         };
         let inner = look.inner.map(|mesh| (mesh, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, cull_mode: Some(Face::Front), double_sided: true, ..default() })));
         let top = look.top;
-        heights.0.insert(b.id, top.y);
+        extras.heights.0.insert(b.id, top.y);
         if stage == Stage::Built && kind.capacity() > 0 {
-            chimneys.0.insert(b.id, top);
+            extras.chimneys.0.insert(b.id, top);
         }
         view.with_children(|v| {
             let mut body = v.spawn((Transform::default(), Visibility::Inherited));
@@ -379,6 +442,13 @@ fn respawn_buildings(
             }
             if matches!(b.collapse, Some(Collapse::Sinking { .. })) {
                 body.insert(Sinking(b.id));
+                v.spawn((
+                    Ripple(b.id),
+                    Mesh3d(extras.ripple.quad.clone()),
+                    MeshMaterial3d(extras.ripple.material.clone()),
+                    Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+                    NotShadowCaster,
+                ));
             }
         });
         if stand_in {
@@ -424,40 +494,65 @@ fn shake_walls(now: Res<SimNow>, mut bodies: Query<(&Shaking, &mut Transform)>) 
     }
 }
 
-/// A flooded building sinks and rocks (`Collapse::Sinking`, pop3-rev-analysis.md "Building sinking (flooded
-/// destruction)") for as long as it has left: dropping lower on the ramping curve, tilting with a decaying
-/// wobble (the original's own oscillator formula not confirmed, so this is an approximation, `[ours]`).
+/// A flooded building sinks for as long as it has left (`Collapse::Sinking`, pop3-rev-analysis.md "Building
+/// sinking (flooded destruction)"): dropping and shrinking, keeling steadily towards its flooded side (`[ours]`:
+/// a steady list reads better than the trace's own back-and-forth oscillation, buildings.md "Foundation").
 fn sink_and_rock(map: Res<CurrentMap>, mut bodies: Query<(&Sinking, &mut Transform)>) {
     for (sinking, mut tf) in &mut bodies {
-        let Some(Collapse::Sinking { left }) = map.0.building(sinking.0).and_then(|b| b.collapse) else { continue };
-        let elapsed = left.done();
-        tf.translation.y = -sink_depth(elapsed);
-        tf.rotation = sink_tilt(elapsed, sinking.0.raw());
+        let Some(b) = map.0.building(sinking.0) else { continue };
+        let Some(Collapse::Sinking { left }) = b.collapse else { continue };
+        let p = (left.done().get() as f32 / game_core::foundation::SINK_TICKS.get() as f32).clamp(0.0, 1.0);
+        tf.translation.y = -SINK_DEPTH * p * p;
+        tf.scale = Vec3::splat(1.0 - SINK_SHRINK * p);
+        tf.rotation = sink_tilt(lean_direction(b, &map.0.terrain), p);
     }
 }
 
-/// How far it has dropped so far, cells: every 8 turns a ramping step (growing by 2, capped at 20) is
-/// subtracted from its base height, accelerating from a slow start [exe].
-fn sink_depth(elapsed: Ticks) -> f32 {
-    let mut depth = 0;
-    let mut step = 0;
-    for _ in 0..elapsed.get() / 8 {
-        step = (step + 2).min(20);
-        depth += step;
+/// The direction (its own local frame, x/z) its footprint leans towards: weighted towards whichever of its
+/// height points sit lowest under its base, `[ours]`, standing in for the original's own compass-histogram
+/// lean target (pop3-rev-analysis.md "Building sinking (flooded destruction)").
+fn lean_direction(b: &Building, terrain: &game_core::terrain::Heightmap) -> Vec2 {
+    let (cx, cz) = b.centre();
+    let (cx, cz) = (cx as f32 / WORLD_UNITS_PER_CELL as f32, cz as f32 / WORLD_UNITS_PER_CELL as f32);
+    let mut dir = Vec2::ZERO;
+    for (x, z) in b.ground_points() {
+        let below = (b.level as f32 - terrain.get(x, z) as f32).max(0.0);
+        dir += Vec2::new(x as f32 - cx, z as f32 - cz) * below;
     }
-    depth as f32 / WORLD_UNITS_PER_CELL as f32
+    to_local_dir(dir, b.facing / 2).normalize_or_zero()
 }
 
-/// Its rocking tilt `elapsed` into the sink, seeded by its id: a wobble decaying linearly to nothing by
-/// `SINK_TICKS`, its direction fixed per building (`[ours]`: the original's own compass-histogram lean target
-/// and oscillator math are not confirmed, pop3-rev-analysis.md "Building sinking (flooded destruction)").
-fn sink_tilt(elapsed: Ticks, id: u32) -> Quat {
-    use std::f32::consts::TAU;
-    let decay = (1.0 - elapsed.get() as f32 / game_core::foundation::SINK_TICKS.get() as f32).max(0.0);
-    let t = elapsed.get() as f32 * TICK_SECS;
-    let angle = decay * TILT_MAX * (t * TILT_HZ * TAU + seed(id) * TAU).sin();
-    let dir = seed(id) * TAU;
-    Quat::from_rotation_x(angle * dir.cos()) * Quat::from_rotation_z(angle * dir.sin())
+/// A world-frame direction (x, z) turned into a building's own local frame, `BuildingKind::footprint`'s
+/// convention (`game_core::terrain::to_local`, generalised to a plain direction).
+fn to_local_dir(dir: Vec2, quarter_turns: u8) -> Vec2 {
+    match quarter_turns % 4 {
+        0 => dir,
+        1 => Vec2::new(-dir.y, dir.x),
+        2 => Vec2::new(-dir.x, -dir.y),
+        _ => Vec2::new(dir.y, -dir.x),
+    }
+}
+
+/// Its keel towards `lean` (its own local frame, x/z; the game's z mirrors into render z): grows steadily to
+/// `TILT_MAX` by `p` (0..1) of the way through its sinking, no lean once its footprint sits flat.
+fn sink_tilt(lean: Vec2, p: f32) -> Quat {
+    if lean == Vec2::ZERO {
+        return Quat::IDENTITY;
+    }
+    let axis = Vec3::new(lean.y, 0.0, -lean.x).normalize();
+    Quat::from_axis_angle(axis, TILT_MAX * p)
+}
+
+/// A ripple around each sinking building, pulsing outward and fading: looping on `RIPPLE_PERIOD` seconds of
+/// game time, each building its own phase.
+fn pulse_ripples(now: Res<SimNow>, mut ripples: Query<(&Ripple, &mut Transform, &MeshMaterial3d<StandardMaterial>)>, mut mats: ResMut<Assets<StandardMaterial>>) {
+    for (ripple, mut tf, material) in &mut ripples {
+        let p = (now.secs_since(Tick::ZERO) / RIPPLE_PERIOD + seed(ripple.0.raw())).fract();
+        tf.scale = Vec3::splat(RIPPLE_SIZE * p);
+        if let Some(mut mat) = mats.get_mut(&material.0) {
+            mat.base_color = Color::srgba(1.0, 1.0, 1.0, (1.0 - p) * 0.8);
+        }
+    }
 }
 
 /// The walls' tilt of building `id` at `now`.
@@ -557,16 +652,35 @@ mod tests {
 
     #[test]
     fn sinks_lower_on_an_accelerating_curve() {
-        use game_core::time::Ticks;
-        assert_eq!(sink_depth(Ticks::new(0)), 0.0);
-        let (at8, at16, at80) = (sink_depth(Ticks::new(8)), sink_depth(Ticks::new(16)), sink_depth(Ticks::new(80)));
-        assert!(at8 > 0.0 && at16 > 2.0 * at8, "accelerating, not linear");
-        assert!(at80 > at16);
+        let depth = |p: f32| SINK_DEPTH * p * p;
+        assert_eq!(depth(0.0), 0.0);
+        assert!(depth(0.5) > 0.0 && depth(1.0) > 2.0 * depth(0.5), "accelerating, not linear");
+        assert_eq!(depth(1.0), SINK_DEPTH, "fully under by the end");
     }
 
     #[test]
-    fn tilt_decays_to_nothing_by_the_end() {
-        assert_eq!(sink_tilt(game_core::foundation::SINK_TICKS, 7), Quat::IDENTITY, "settled: no more rocking once it is gone");
+    fn no_lean_keeps_it_upright_a_lean_grows_steadily_towards_tilt_max() {
+        assert_eq!(sink_tilt(Vec2::ZERO, 1.0), Quat::IDENTITY, "a flat footprint never keels");
+        assert_eq!(sink_tilt(Vec2::X, 0.0), Quat::IDENTITY, "just started: no keel yet");
+        let half = sink_tilt(Vec2::X, 0.5).to_axis_angle().1;
+        let full = sink_tilt(Vec2::X, 1.0).to_axis_angle().1;
+        assert!((half - TILT_MAX / 2.0).abs() < 1e-5 && (full - TILT_MAX).abs() < 1e-5, "steady, not oscillating");
+    }
+
+    #[test]
+    fn leans_towards_the_footprints_lowest_points() {
+        let mut m = game_core::map::GameMap::sandbox_walk();
+        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 40 * 512, 40 * 512, 0);
+        hut.level = 100;
+        for &(x, z) in &hut.ground_points() {
+            m.terrain.set(x, z, 100);
+        }
+        // The +x side of its footprint is flooded: it should lean that way, not the opposite.
+        for &(x, z) in hut.ground_points().iter().filter(|&&(x, _)| x as f32 > hut.centre().0 as f32 / WORLD_UNITS_PER_CELL as f32) {
+            m.terrain.set(x, z, 0);
+        }
+        let lean = lean_direction(&hut, &m.terrain);
+        assert!(lean.x > 0.0, "leans towards +x, its flooded side: {lean:?}");
     }
 
     #[test]
