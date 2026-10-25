@@ -3,156 +3,12 @@
 What is left to implement. Tick or remove an item in the commit that does it, add new ones as they
 come up. Details live in the linked specs; done work is summarised in [docs/roadmap.md](docs/roadmap.md).
 
-## Performance (60 fps)
-Measured with `just profile` (units sandbox, dev build, headless, tracing on): about 73 ms a frame. The simulation
-(`run_ticks`) takes 0.014 ms a frame and all our systems together about 1 ms: the time goes to Bevy's own CPU work
-around rendering (render app about 43 ms, extract and asset preparation about 10 ms, transform propagation in
-PostUpdate about 5 ms), driven by how we hand it the world:
-- [ ] Unit sprites: one image, material and quad mesh per animation frame (`units::upload_frame`), so each unit is its
-  own draw call and bind group, nothing batches. One atlas texture and material per kind and tribe (frames as UV
-  rects in a sprite material, instanced); the same for markers, dust and wood. Biggest win expected.
-- [ ] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
-  prepared again each frame; write only when the colour changes, or share a material per colour step.
-- [ ] Some image is prepared again every frame (`prepare_assets<GpuImage>` about 3 ms, its extract 1.6 ms): find which
-  (the UI text atlas of readouts changing every frame? the cursor? the offscreen target?).
-- [ ] Mesh allocator about 3 ms a frame: meshes rewritten every frame (range ring `put` while shown, blueprint marks)
-  and the 129 x 129 terrain mesh rebuilt on every camera move (`world::rebuild_terrain`): rewrite only on change;
-  the planet curve could move to the vertex shader over a static grid.
-- [ ] Transforms written every frame for everything grounded (`grounded::place_grounded`) and every unit part
-  (`units::pull_to_eye`), so Bevy propagates all trees, buildings and unit parts each frame: write with
-  `set_if_neq`, or only when the camera or the thing moved.
-- [ ] Unit views carry 7 marker slots and a health bar each, hidden most of the time: spawn markers when shown.
-- [ ] Whole-world respawn on terrain changes: when the simulation levels ground (land bridge, flatten, braves
-  flattening a site, every few ticks) `run_ticks` marks `CurrentMap` changed, and trees (re-reading their original
-  meshes), sites, buildings, unit views, shadows and totems all despawn and rebuild. Those views should only
-  re-ground on `world::TerrainPatches`, and rebuild on a real change of their list.
-- [ ] Startup: the unit sprites take about 6.5 s (Scale2x twice on every frame of every kind and tribe), now a boot job
-  off the main thread behind the loading screen (`units::UnitSpritesJob`); still to shorten: one job per kind to use
-  every core, recolour tribes in the shader or a palette swap, or cache the result. Other loaders could become boot
-  jobs (markers, dust, wood, tooltip icons, cursor: each under 10 ms today), and the map's own work at a game start
-  (terrain bake, tree meshes) too.
-- [ ] Measure the windowed release build too (`cargo run --release`): the numbers above are the dev build under
-  tracing. The simulation only matters with many units: every walker replans A* on any terrain write
-  ("Replanning" in Units).
-- [ ] Loading screen freezes near the end: two unyielded main-thread stalls, both reading as "the bar reaches
-  100% then hangs". `boot::poll_job` (`boot/mod.rs`) runs each `BootJob`'s CPU work off-thread, but once it
-  finishes, `J::install(output, world)` (GPU uploads, resource inserts) runs synchronously with no progress
-  reporting, and `BootStatus::fraction()` caps a job at 0.99 while running, so the bar sits near 100% for the
-  whole `install` (the `"boot: {label} installed in {ms}"` log line says which job's `install` is slow). Separately,
-  `menu::begin_game`/`boot::GameStep` is explicitly documented as blocking ("then built, which holds the main
-  thread"): after `SHOW_FRAMES` the map is built synchronously (`LevelList::load_current`: parse, build `GameMap`,
-  recompute shading), zero progress reporting, no frames drawn until it returns - likely the dominant freeze for a
-  real original level. Fix direction: make a slow `install` (or the map build) incremental, a bounded chunk of work
-  per frame via a small state machine, instead of one unyielded call. Separate from the existing stale-terrain-
-  during-instant-bulk-tick bug above (that one is post-load desync, not a loading-time stall).
+Priorities (2026-10-25): sections below are grouped into six rough tiers, highest first. A tier is a priority ordering, not a gate - later tiers (especially 2 and 5) can and should progress in parallel. Re-group as priorities shift; this is a living ordering, not a plan.
 
-## Menu and sandboxes ([ui-and-editor.md](docs/specs/ui-and-editor.md))
-- [ ] Sandbox Spells: test ground to cast every spell freely (no mana, no charges).
-- [ ] Sandbox Buildings: placing and constructing buildings on its free ground (braves, wood and trees are there; every model and every construction stage are shown).
-- [ ] More sandboxes as features come (combat...).
-- [ ] Sandbox Worship: totems are drawn but nothing can be prayed at yet; the generated stand-ins are identical pillars.
-- [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
+## Priority 1 — core gameplay correctness
+What a match plays through today: combat, orders/the tick, units, spells, buildings, worship. Bugs and gaps here are the most visible, and other tiers build on top of them (the AI tier drives units through the same orders/coordinators as a human; the content tier dresses up the same spells and buildings).
 
-## Camp fire ([buildings.md](docs/specs/buildings.md) "Camp fire")
-- [ ] Guard posts' torches (objects 190-193, blended tile 92): draw them with `flame.rs` once guard posts have an original object (the firewarrior and prayer huts' torches burn).
-- [ ] Generated firewarrior hut: drop the static ember cone from its braziers (tools/generate_buildings.py) now that an animated flame stands on them.
-- [ ] Check in the game: what a camp fire is for (people gathering? mana?), its burn time when left alone (`ABANDON_TICKS`, 60 s guessed), the ring size, the flatness rule, and when object 12 (other logs) is used.
-- [ ] Hover/selection of a camp fire (tooltip with who is around it), a hover cursor when units are selected over one.
-
-## Units ([units.md](docs/specs/units.md))
-- [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the drowning and stranded rates (`DROWN_DAMAGE`, `STRANDED_DAMAGE`, scaled x20 from our old 100 HP guesses).
-- [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
-- [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
-- [ ] Walk animation rate could follow the slope speed (slower steps uphill).
-- [ ] Replanning: every walker replans on any terrain write; only replan when the change touches its route (`DirtyRect`) once there are many units. Group moves could share a flow field.
-- [ ] Worshipping the shaman: check in the game the range (3 cells guessed) and the states she must be in (idle or walking today).
-- [ ] Stranded units: find the game's anim (frame 1 of anim 12, the flattening jump, stands in today).
-- [ ] Boarding vehicles: people of the same group within 440 units join the vehicle's group (pop3-rev-analysis.md "Boarding and driving"); the original's boarding clip (our jump uses the `Jump` pose, unit-art.md).
-- [ ] Open-source units: models closer to the original look (feathers and staff for the shaman, tribal outfits); a prayer clip (SitDown's end stands in) and a swim/drown clip (RecieveHit sunk stands in). CC0 poses to render as each action lands: [unit-art.md, Planned poses](docs/specs/unit-art.md#planned-poses-cc0-stand-ins).
-- [ ] CC0 sheets for the wood poses (`chop`, `carry_walk`, `carry_idle`: axe and log props, unit-art.md "Planned poses"); the braves show idle / walk meanwhile.
-- [ ] CC0 sheets for tumbling (`flung`: in the air, arms spread; `tumble`: falling down a slope); the fall loops meanwhile.
-- [ ] Wildmen: find their death anim (47, falling down a slope, stands in) - confirmed shared with warrior/preacher's death-anim group, not tied to any wildman-specific lifecycle (pop3-rev-analysis.md "Wildmen").
-- [ ] Load open-source unit sheets (`assets/units/<kind>/<pose>.png`, see [unit-art.md](docs/specs/unit-art.md)): 64x64 cells, feet at (32, 58), 5 directions mirrored to 8, magenta key ramp swapped per tribe; fall back to the generated figure per missing sheet.
-- [ ] `just bake-units` is not bit-reproducible: two bakes differ by 1-2 edge pixels in a few frames (GPU rasterisation), so there is no `--check` like the building kit's; render on the CPU or compare with a tolerance.
-- [ ] Original unit animations: who the pointed-helmet attacker of 20-24 is, and anim 13; use the fighting anims (pop3-rev-analysis.md "Combat": 15 move 2 and the opening blow, 13 move 3, 25 move 4, 14 hit, 16 struck before the flight; taunts 48/49/50 while waiting), throw-fire (7), spy fire-setting (17), tornado tilt (16), pedalling (51), running from bees (52) anims once those actions exist; idle for too long: braves scratch (89), warriors do push-ups (90/91) - traced as far as a confirmed, rhythm-gated (16-turn) RNG-weighted picker (pop3-rev-analysis.md "Idle behaviour"), but only confirmed for wildmen (state 8 → 5) this session; whether ordinary followers share it is still open, so scope any implementation to wildmen first and extend if a later check confirms followers too. `Action::Idle` today has no animation-variant state or rhythm counter at all (`unit.rs`).
-- [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
-- [ ] Spies: the player can disguise one in another tribe's colour; it then walks through that tribe unnoticed, except when hovered (spy indicator) or when it passes by a spy of the tribe it imitates. Its attack on a building: it sets a fire (anim 17), walks away, the building then takes damage; the spy stays unnoticed and can attack again later.
-- [ ] Death: `SPIRIT_TICKS` (currently one guessed 3 s constant, `unit.rs`) is confirmed wrong as a single variant (pop3-rev-analysis.md "Death and the spirit rise"). The original spawns a separate spirit object with TWO variants, chosen by whether the corpse died in a drowning-eligible spot: a brief 4-turn (0.33 s) stationary "calm" rise (object id → VSTART 38 for followers, 85 shaman - not drawn in post as a translucent copy for this one specifically, re-check), or - unconditionally for a wildman regardless of cause of death, and for anyone else only if drowning - a 32-turn (2.67 s) "climbing" rise with a REAL continuous upward velocity (40 world units/turn, no gravity, VSTART 31 for a wildman reusing the "flung in the air" tumble clip, 40 followers, 45 shaman) plus, for a wildman only, a continuous spin (91/2048 facing per turn) found nowhere else - this is the "flying into the sky" look. Implement both variants and the wildman-always/others-if-drowning split; `DYING_TICKS` (the fall before the spirit spawns) was not re-examined this session. Unit views are indexed by unit position and rebuilt whenever a unit leaves the map: key them by unit id once there are many units.
-- [ ] Wildmen (neutral "gaia" braves, spawned from the levels, standing still today): the original (pop3-rev-analysis.md "Wildmen") runs a confirmed, fully traced loop, state 1 → 8 → (5 or 6) → 16 → 8 → ...: from the idle tick (state 8) it FIRST searches up to 18 cells for a tree or plant (scenery types 1-6/7-8 specifically, confirmed from the exe's own scenery-type flags table) and, if one is found, idles beside it (state 5) - this is the "eating" stop. Only if no tree/plant is nearby does it fall back to a SECOND, also deliberate search (radius 12) for a shore cell (the same coastal-shape table used elsewhere for `is_land_at`, explicitly rejecting pure inland and pure open-sea cells), walks there (state 6, re-validating every turn that the destination is still shore-shaped) and idles there (state 16) - this is the "drinking" stop. There is still no hunger/thirst/food resource or stat anywhere - both searches only ever decide a DESTINATION for an idle/ambient animation, nothing is consumed. (Corrects an earlier, wrong pass through this code that called the destination "random, not a tree or water object" - it is deliberately one or the other.) Confirmed in play [observed]: always eating at the tree stop (state 5), always drinking at the shore stop (state 16) - the animation isn't a separate choice, it follows from which search succeeded; only the literal VSTART id each state resolves to for wildmen (already known from sprite inspection: eat-fruit=2, drink=4) is still not pinned to a specific line of code. The Convert spell turns them into the caster's braves (unchanged). No hunger/thirst/age death exists, but a wildman idling at its shore spot genuinely drowns fairly often [observed and traced] - not a special mechanic, the shore search only checks the coarse per-cell shape while the generic drowning check re-tests the unit's exact fine-grained position every turn with no bias toward the dry side (pop3-rev-analysis.md "Drowning"). Ordinary units' automatic auto-attack scan never targets a wildman (tribeless, tribe 0xFF) - only an explicit attack order, an area spell, or drowning at the shore can hurt one; whether an explicit attack order is honoured by the original is still open (see our blanket "unattackable" rule below). No periodic respawn exists in the original either: wildmen are placed once at level load and only ever decrease. Whatever kills it, a wildman's death always plays the "climbing + spinning" spirit-rise variant, never the calm ghost pose - see the new item below.
-- [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation. Done at level start without animation (`ReincarnationSite::welcomes`); check the range in the game (the levels only use the ring of 8 cells) and whether it happens on every reincarnation.
-- [ ] Animate the wildmen: eating fruit (2) and drinking (4), wandering around their spot, instead of standing still.
-- [ ] Selection of buildings (without the people inside), and of units inside them (`selection::selectable`). Vehicles: a click with nothing selected selects the people aboard (vehicles.md).
-- [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
-- [ ] Statuses (`Unit::statuses`: Magical Shield, Bloodlust, Invisibility and Hypnotism now cast for real,
-  `GameMap::cast_nearest_status`/`hypnotize`; only Ghost Army's left unset by any spell): **found this session,
-  tracing the exe's own Hypnotism code (0x50EB00) while resolving "Preacher conversion"'s GONE/NEW contradiction**:
-  the original explicitly carries the captured person's current life, max life and carried wood across the
-  capture (and again across the later revert) - ours (`GameMap::change_owner`, used by `hypnotize`) instead resets
-  health to full and carrying to 0. A damaged enemy hypnotised in the original keeps its existing damage and any
-  wood it was carrying; ours heals and empties it. The timer of a ghost's
-  status (not traced: no expiry found for Ghost Army), other options to define; read by combat, selection and
-  drawing. Invisibility's own early end (attacking does, walking does not) is a guess (pop3-rev-analysis.md "Per
-  spell" 6: "some actions end it early", not traced), implemented in `attack::go_attack`. Drawing: the markers are
-  done (`units/markers.rs`); left: the low-health looping sound 0xCF, own invisible and ghost people translucent
-  (invisible flickering faster near the end) and invisible enemies hidden (sprite, shadow, hover, selection), the
-  original's colour tables (our shield tint is a guess), the optional health bar over own damaged people (commands
-  100/101).
-- [ ] Physics (`game_core::physics::step`: velocity, gravity 32, touchdown; landing in the sea or on walkable ground done, `Unit::touch_down`), to the original's rules (pop3-rev-analysis.md "Blast push and flight"): velocity caps (192 per horizontal axis, 512 vertical), air drag 2 per turn per horizontal axis, the unit spinning 26° per turn in the air, a scream on take-off; landing: dust and a sound at a vertical speed <= -100, `FALL_OUT_OF_WW_DAMAGE` 700 at <= -200 (`Touchdown::speed`), none on water cells; on the ground: sliding down the slope (gradient over ±76 units) with friction 28 per turn per axis (72 on special terrain), facing where it slides (`Tumble` pose; a grounded tumbling unit does not move yet). Speeds are per original turn: convert to our ticks (`game_core::balance`). Ordinary falls (ground dropping under a standing or walking person: earthquake, erosion, flatten) fall with the same gravity and drag, without fall damage; rising ground lifts people. Still open: landing on a cliff or a building (stands up meanwhile), what the original does to a unit landing in water (ours dies at once), boats landing on the sea once vehicles exist, bumping into buildings and cliffs, a task dropped or kept when flung.
-- [ ] Flying: units thrown by Whirlwind / Blast / explosions follow a ballistic or carried path (flying 61, tumbling 73 anims), land with damage, drown if they land in the sea.
-- [ ] Vehicle huts (vehicles.md "Vehicle huts", done with guesses): check in the game the crew size (4), the work per vehicle (1200 crew-turns), whether mana is spent, where the vehicle appears, and a hut's queue at the door (types 13-16 have one, pop3-rev-analysis.md "The queue at the door").
-- [ ] Whirlwind spell (to implement), on a vehicle: everyone aboard is put out, it spins (roll +204, pitch +153 /2048 per tick) for 10 ticks (boat; ends early when the ground reaches it) or 2 (balloon), then explodes like a destroyed boat on land (pop3-rev-analysis.md "Life, damage and destruction", state 9).
-- [ ] Vehicle destruction (vehicles.md; health, damage from blasts and bolts, sinking, rising and exploding done): the partial explosion of a boat on land (its faces flying off, `explosion.rs`).
-- [ ] Balloons: bobbing while moving, and the original's climb rate and look-ahead; check the hover over trees and totems in the game (450 guessed; buildings 560 from the exe) (vehicles.md).
-- [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
-- [ ] The shaman can cast only some spells from a vehicle: Land Bridge is refused (done); check the others in the game (fire-type probably yes).
-- [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
-- [ ] Use the shaman's wand gesture (81-84), the conversion sit (18), the spy's juggling idle (92), the carbonized brave (97) for lightning; check the tribe layer flag `0x10` mapping.
-
-- [ ] The shaman's reincarnation is not instant: ours waits a fixed `RESPAWN_TICKS` (3 s). Find in the original how long she waits and what it depends on (her tribe's mana, its population, or both), then compute it from that.
-- [ ] Training units: followers turned into warriors, preachers, spies and firewarriors in the training huts (see "Buildings": training huts and training lines).
-
-## Praying (worship) ([worship.md](docs/specs/worship.md))
-- [ ] Prayer gauge on the original's rhythm and curve (pop3-rev-analysis.md "The gauge"): every 4 turns, `C² / (C − n + 1)²` per update, drain `C²`; today it steps every tick with `STEP · (n/C)²`.
-- [ ] Contested totems: keep one gauge per tribe (our choice; the original has one per trigger, driven by the tribe with the most prayers), but the gifts are shared: a totem's `NumOccurences` counts across all tribes, so a one-gift totem rewards only the first tribe to fill its gauge, and the other gauges stop. Once `NumOccurences` is reached by any tribe, the totem sinks back into the ground for everyone and every tribe's prayers are sent away (`Totem::is_exhausted`: one shared sink, whoever took the last gift). Check `Totem::given` does this and test it with two tribes.
-- [ ] Totems: ids (`GameMap::new_id`) and removal from `GameMap::totems` once sunk (exhausted after their gifts, `NumOccurences` times; infinite ones stay), then `Order::Worship` / `Action::Worshipping` by id.
-- [ ] Stone totem: check in the game what it does after a completion that is not its last, the timings (turn 2 s, hold 1 s, sink 4 s) and the smoke; other turns to try are listed in worship.md.
-- [ ] Totem gifts not handled yet (logged as `Reward::Unhandled`): effects (land bridge, lightning...), revealed scenery and triggers, vehicles, the Angel of Death of type 5 totems; mana once mana exists. Check what `NumOccurences` 0 means.
-- [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); check `PrayTime`'s unit and the drain speed in the game.
-- [ ] Prisons: levels where the shaman starts imprisoned; she is locked inside (units.md "Locked units") until freed.
-- [ ] Generated pyramid: fold its capstone like the original's top (a separate mesh in `tools/generate_buildings.py`).
-- [ ] Pyramids: draw the reward as an icon at the top (cursor sprites 38-57 spells, 58-65 buildings), gone once the reward is granted.
-- [ ] HUD: show the gauge over the totem/pyramid and who is praying.
-
-## The tick ([architecture.md](docs/architecture.md) "The tick")
-- [ ] Find the original's order of work inside a turn (people, buildings, effects, shots, mana; income comes before spell charging): ours is a guess.
-- [ ] Rhythms still on per-object counters or missing: stranded hurt (`STRANDED_HURT_EVERY`, rate unknown), hut breeding every 4 turns and growth every 16 (pop3-rev-analysis.md "Huts: breeding and growth"), mana income every 16 (`MANA_UPDATE_FREQ`), the other status timers every 8 (shield and bloodlust done).
-- [ ] World events without behaviour yet: `Raid` (occupants thrown out; also needed for Earthquake's own building-shake, spells.md). Panic: the screaming, and how the original turns at an obstacle.
-- [ ] Burning buildings (`fire`): the igniter's tribe and the destroyed-building count (`stats[tribe][7]`), the fire sound.
-- [ ] Shots (fireballs 8/4, 8/7, 8/8): a typed list ticked before effects like `GameMap::bolts`, integer flight, spawning a simple blast on arrival.
-- [ ] World views (architecture.md "Client: world visuals"): the landing dust (`units::dust`) as a `WorldView` once
-  touchdowns are kept in game-core (a unit's landing tick), so a rejoining client draws it too; the sinking totem's
-  smoke once totems have ids; units, building views and the unit glide (`SimClock::prev_ids`) still keyed by index.
-- [ ] Coordinators: the infrastructure is done ([coordinators.md](docs/specs/coordinators.md)); each kind to specify and implement (preacher's sermon, formation, soul convert - see pop3-rev-analysis.md "Preacher conversion" for soul convert's traced numbers (`PREACHEE_CONV_FREQ`/`_CHANCE`, the population cap, the "no breeding" tribe bypass); the challenge and the melee are done), with its scan in `GameMap::detect_coordinators`. Guard control is **not** one of these any more (coordinators.md's own table, row 10): it turned out to be ordinary move/attack orders stashed across a unit's own order slots, not a dedicated controller - see "Order model" below.
-- [ ] Hardening, optional, found while tracing the above: `Melee`/`Sermon` both still manually re-check `is_alive()` on every member inside their own `tick()` rather than relying on `tick_kind`/`participants()` to have already filtered dead members out of `members` - a convention, not something the shared infrastructure enforces today. Teaching `tick_kind` to pre-filter would let every future `Coordinator` impl, this one included, drop its own by-hand check.
-- [ ] The hurt path (`GameMap::damage`): the last attacker, the death cause, and death held off while tumbling, so no emitter repeats them.
-- [ ] Internal model 10/6 (and 10/1) resolved: they are a **formation** system (pop3-rev-analysis.md "Formations"), not Preacher Attract. A unit joins/creates one (`add_unit_to_formation`) whenever a global flag (now traced: a "formations off" switch, normally clear) is clear and its current order kind "wants formation" - true for plain move (kind 3), false for attack (kinds 19/21). Up to 12 members are held at fixed per-slot offsets around a controller that jitters its own heading periodically. Not implemented at all today; `slots.rs`'s grid-based spot search for a group move has no equivalent in the original and isn't gated by anything - either replace it with (or gate it behind) a formation-shaped system, or keep it as a documented simplification.
-- [ ] Order model: the original's "unit order queue" (pop3-rev-analysis.md "Command groups", now fully traced across several sessions) is structurally different from `Unit::queue` (`crates/game-core/src/unit.rs`). Ours is a single `Vec<Order>` FIFO of future player-authored steps (push/pop, cleared by a fresh direct order). The original instead gives a unit one exclusive "primary" order - reserved EXCLUSIVELY for self-issued autonomous behaviour (auto-attack/auto-scan, confirmed exhaustively: only 5 functions in the whole exe ever use it) and always outranking secondary when both are populated, without erasing it - plus 8 independent "secondary" slots. A freshly given direct order (move/attack/etc., all 8 "give an order" entry points) wipes everything and lands in secondary slot 0 - in solo play this is functionally equivalent to our own "a direct order replaces the chained ones", so that part already lines up.
-  **Implemented** (`game_core::patrol`, `game_core::hidden_point`; `docs/specs/units.md` "Patrol
-  orders"): `0x4BA9B0`'s behaviour (fills secondary slots one at a time without wiping earlier ones,
-  `N` releases the held group, each point an ordinary move-via-invisible-marker or attack order, points
-  set on several selected units share one id) without the tribe-wide point counter, deliberately not
-  reproduced (scoped per-selection instead, client-side `PatrolSession`, units/selection.rs). Still
-  open: whether the original really has a deliberate "attack this specific unit" patrol slot at all
-  (vs. reactive, non-stored engagement along plain waypoints), and separately whether an attack-type
-  point can ever target a *building* rather than only a unit - unverified either way (units.md's own
-  caveat); a follow-up clean-room pass against the exe trace should settle this. Also still open, an
-  `[ours]` idea not followed through on: "the whole patrol group engages an enemy together" once one
-  member spots it - today only the spotter itself breaks off (`spotting::spot_enemies`, unaffected by
-  this work), its co-patrollers keep cycling obliviously; needs a patrol-point-aware hook there. How the
-  AI script's own `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/`SET_MARKER_ENTRY` (docs/specs/ai-scripts.md)
-  drives this same mechanism for computer tribes is also still open.
-
-## Combat
+### Combat
 - [ ] Melee (combat.md "Melee"): the ground check moving the middle off unsuitable ground, the winner's count and the killed count per tribe, the moves' sounds, the original's option with no shove, the third approach (a target at its building), the fight music or alert.
 - [ ] Challenge (combat.md "Challenge"): the target facing the attacker and its taunts (client, 1 in 8 per turn while waiting), ground sliding instead of `SHOVE_LIFT`.
 - [ ] Fight poses in the generated (CC0) unit sheets: strike, trade, kick, reel, shoved (`Pose::fallback` stands in: idle, fall).
@@ -264,7 +120,88 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Health, hit feedback and death animations for every unit type.
 - [ ] Healing (combat.md "Health"): no healing while struck by lightning once it has its own state; the angel of death never heals; the original lets life go past full by up to one heal (ours stops at full).
 
-## Spells ([spells.md](docs/specs/spells.md))
+### The tick ([architecture.md](docs/architecture.md) "The tick")
+- [ ] Find the original's order of work inside a turn (people, buildings, effects, shots, mana; income comes before spell charging): ours is a guess.
+- [ ] Rhythms still on per-object counters or missing: stranded hurt (`STRANDED_HURT_EVERY`, rate unknown), hut breeding every 4 turns and growth every 16 (pop3-rev-analysis.md "Huts: breeding and growth"), mana income every 16 (`MANA_UPDATE_FREQ`), the other status timers every 8 (shield and bloodlust done).
+- [ ] World events without behaviour yet: `Raid` (occupants thrown out; also needed for Earthquake's own building-shake, spells.md). Panic: the screaming, and how the original turns at an obstacle.
+- [ ] Burning buildings (`fire`): the igniter's tribe and the destroyed-building count (`stats[tribe][7]`), the fire sound.
+- [ ] Shots (fireballs 8/4, 8/7, 8/8): a typed list ticked before effects like `GameMap::bolts`, integer flight, spawning a simple blast on arrival.
+- [ ] World views (architecture.md "Client: world visuals"): the landing dust (`units::dust`) as a `WorldView` once
+  touchdowns are kept in game-core (a unit's landing tick), so a rejoining client draws it too; the sinking totem's
+  smoke once totems have ids; units, building views and the unit glide (`SimClock::prev_ids`) still keyed by index.
+- [ ] Coordinators: the infrastructure is done ([coordinators.md](docs/specs/coordinators.md)); each kind to specify and implement (preacher's sermon, formation, soul convert - see pop3-rev-analysis.md "Preacher conversion" for soul convert's traced numbers (`PREACHEE_CONV_FREQ`/`_CHANCE`, the population cap, the "no breeding" tribe bypass); the challenge and the melee are done), with its scan in `GameMap::detect_coordinators`. Guard control is **not** one of these any more (coordinators.md's own table, row 10): it turned out to be ordinary move/attack orders stashed across a unit's own order slots, not a dedicated controller - see "Order model" below.
+- [ ] Hardening, optional, found while tracing the above: `Melee`/`Sermon` both still manually re-check `is_alive()` on every member inside their own `tick()` rather than relying on `tick_kind`/`participants()` to have already filtered dead members out of `members` - a convention, not something the shared infrastructure enforces today. Teaching `tick_kind` to pre-filter would let every future `Coordinator` impl, this one included, drop its own by-hand check.
+- [ ] The hurt path (`GameMap::damage`): the last attacker, the death cause, and death held off while tumbling, so no emitter repeats them.
+- [ ] Internal model 10/6 (and 10/1) resolved: they are a **formation** system (pop3-rev-analysis.md "Formations"), not Preacher Attract. A unit joins/creates one (`add_unit_to_formation`) whenever a global flag (now traced: a "formations off" switch, normally clear) is clear and its current order kind "wants formation" - true for plain move (kind 3), false for attack (kinds 19/21). Up to 12 members are held at fixed per-slot offsets around a controller that jitters its own heading periodically. Not implemented at all today; `slots.rs`'s grid-based spot search for a group move has no equivalent in the original and isn't gated by anything - either replace it with (or gate it behind) a formation-shaped system, or keep it as a documented simplification.
+- [ ] Order model: the original's "unit order queue" (pop3-rev-analysis.md "Command groups", now fully traced across several sessions) is structurally different from `Unit::queue` (`crates/game-core/src/unit.rs`). Ours is a single `Vec<Order>` FIFO of future player-authored steps (push/pop, cleared by a fresh direct order). The original instead gives a unit one exclusive "primary" order - reserved EXCLUSIVELY for self-issued autonomous behaviour (auto-attack/auto-scan, confirmed exhaustively: only 5 functions in the whole exe ever use it) and always outranking secondary when both are populated, without erasing it - plus 8 independent "secondary" slots. A freshly given direct order (move/attack/etc., all 8 "give an order" entry points) wipes everything and lands in secondary slot 0 - in solo play this is functionally equivalent to our own "a direct order replaces the chained ones", so that part already lines up.
+  **Implemented** (`game_core::patrol`, `game_core::hidden_point`; `docs/specs/units.md` "Patrol
+  orders"): `0x4BA9B0`'s behaviour (fills secondary slots one at a time without wiping earlier ones,
+  `N` releases the held group, each point an ordinary move-via-invisible-marker or attack order, points
+  set on several selected units share one id) without the tribe-wide point counter, deliberately not
+  reproduced (scoped per-selection instead, client-side `PatrolSession`, units/selection.rs). Still
+  open: whether the original really has a deliberate "attack this specific unit" patrol slot at all
+  (vs. reactive, non-stored engagement along plain waypoints), and separately whether an attack-type
+  point can ever target a *building* rather than only a unit - unverified either way (units.md's own
+  caveat); a follow-up clean-room pass against the exe trace should settle this. Also still open, an
+  `[ours]` idea not followed through on: "the whole patrol group engages an enemy together" once one
+  member spots it - today only the spotter itself breaks off (`spotting::spot_enemies`, unaffected by
+  this work), its co-patrollers keep cycling obliviously; needs a patrol-point-aware hook there. How the
+  AI script's own `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/`SET_MARKER_ENTRY` (docs/specs/ai-scripts.md)
+  drives this same mechanism for computer tribes is also still open.
+
+### Units ([units.md](docs/specs/units.md))
+- [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the drowning and stranded rates (`DROWN_DAMAGE`, `STRANDED_DAMAGE`, scaled x20 from our old 100 HP guesses).
+- [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
+- [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
+- [ ] Walk animation rate could follow the slope speed (slower steps uphill).
+- [ ] Replanning: every walker replans on any terrain write; only replan when the change touches its route (`DirtyRect`) once there are many units. Group moves could share a flow field.
+- [ ] Worshipping the shaman: check in the game the range (3 cells guessed) and the states she must be in (idle or walking today).
+- [ ] Stranded units: find the game's anim (frame 1 of anim 12, the flattening jump, stands in today).
+- [ ] Boarding vehicles: people of the same group within 440 units join the vehicle's group (pop3-rev-analysis.md "Boarding and driving"); the original's boarding clip (our jump uses the `Jump` pose, unit-art.md).
+- [ ] Open-source units: models closer to the original look (feathers and staff for the shaman, tribal outfits); a prayer clip (SitDown's end stands in) and a swim/drown clip (RecieveHit sunk stands in). CC0 poses to render as each action lands: [unit-art.md, Planned poses](docs/specs/unit-art.md#planned-poses-cc0-stand-ins).
+- [ ] CC0 sheets for the wood poses (`chop`, `carry_walk`, `carry_idle`: axe and log props, unit-art.md "Planned poses"); the braves show idle / walk meanwhile.
+- [ ] CC0 sheets for tumbling (`flung`: in the air, arms spread; `tumble`: falling down a slope); the fall loops meanwhile.
+- [ ] Wildmen: find their death anim (47, falling down a slope, stands in) - confirmed shared with warrior/preacher's death-anim group, not tied to any wildman-specific lifecycle (pop3-rev-analysis.md "Wildmen").
+- [ ] Load open-source unit sheets (`assets/units/<kind>/<pose>.png`, see [unit-art.md](docs/specs/unit-art.md)): 64x64 cells, feet at (32, 58), 5 directions mirrored to 8, magenta key ramp swapped per tribe; fall back to the generated figure per missing sheet.
+- [ ] `just bake-units` is not bit-reproducible: two bakes differ by 1-2 edge pixels in a few frames (GPU rasterisation), so there is no `--check` like the building kit's; render on the CPU or compare with a tolerance.
+- [ ] Original unit animations: who the pointed-helmet attacker of 20-24 is, and anim 13; use the fighting anims (pop3-rev-analysis.md "Combat": 15 move 2 and the opening blow, 13 move 3, 25 move 4, 14 hit, 16 struck before the flight; taunts 48/49/50 while waiting), throw-fire (7), spy fire-setting (17), tornado tilt (16), pedalling (51), running from bees (52) anims once those actions exist; idle for too long: braves scratch (89), warriors do push-ups (90/91) - traced as far as a confirmed, rhythm-gated (16-turn) RNG-weighted picker (pop3-rev-analysis.md "Idle behaviour"), but only confirmed for wildmen (state 8 → 5) this session; whether ordinary followers share it is still open, so scope any implementation to wildmen first and extend if a later check confirms followers too. `Action::Idle` today has no animation-variant state or rhythm counter at all (`unit.rs`).
+- [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
+- [ ] Spies: the player can disguise one in another tribe's colour; it then walks through that tribe unnoticed, except when hovered (spy indicator) or when it passes by a spy of the tribe it imitates. Its attack on a building: it sets a fire (anim 17), walks away, the building then takes damage; the spy stays unnoticed and can attack again later.
+- [ ] Death: `SPIRIT_TICKS` (currently one guessed 3 s constant, `unit.rs`) is confirmed wrong as a single variant (pop3-rev-analysis.md "Death and the spirit rise"). The original spawns a separate spirit object with TWO variants, chosen by whether the corpse died in a drowning-eligible spot: a brief 4-turn (0.33 s) stationary "calm" rise (object id → VSTART 38 for followers, 85 shaman - not drawn in post as a translucent copy for this one specifically, re-check), or - unconditionally for a wildman regardless of cause of death, and for anyone else only if drowning - a 32-turn (2.67 s) "climbing" rise with a REAL continuous upward velocity (40 world units/turn, no gravity, VSTART 31 for a wildman reusing the "flung in the air" tumble clip, 40 followers, 45 shaman) plus, for a wildman only, a continuous spin (91/2048 facing per turn) found nowhere else - this is the "flying into the sky" look. Implement both variants and the wildman-always/others-if-drowning split; `DYING_TICKS` (the fall before the spirit spawns) was not re-examined this session. Unit views are indexed by unit position and rebuilt whenever a unit leaves the map: key them by unit id once there are many units.
+- [ ] Wildmen (neutral "gaia" braves, spawned from the levels, standing still today): the original (pop3-rev-analysis.md "Wildmen") runs a confirmed, fully traced loop, state 1 → 8 → (5 or 6) → 16 → 8 → ...: from the idle tick (state 8) it FIRST searches up to 18 cells for a tree or plant (scenery types 1-6/7-8 specifically, confirmed from the exe's own scenery-type flags table) and, if one is found, idles beside it (state 5) - this is the "eating" stop. Only if no tree/plant is nearby does it fall back to a SECOND, also deliberate search (radius 12) for a shore cell (the same coastal-shape table used elsewhere for `is_land_at`, explicitly rejecting pure inland and pure open-sea cells), walks there (state 6, re-validating every turn that the destination is still shore-shaped) and idles there (state 16) - this is the "drinking" stop. There is still no hunger/thirst/food resource or stat anywhere - both searches only ever decide a DESTINATION for an idle/ambient animation, nothing is consumed. (Corrects an earlier, wrong pass through this code that called the destination "random, not a tree or water object" - it is deliberately one or the other.) Confirmed in play [observed]: always eating at the tree stop (state 5), always drinking at the shore stop (state 16) - the animation isn't a separate choice, it follows from which search succeeded; only the literal VSTART id each state resolves to for wildmen (already known from sprite inspection: eat-fruit=2, drink=4) is still not pinned to a specific line of code. The Convert spell turns them into the caster's braves (unchanged). No hunger/thirst/age death exists, but a wildman idling at its shore spot genuinely drowns fairly often [observed and traced] - not a special mechanic, the shore search only checks the coarse per-cell shape while the generic drowning check re-tests the unit's exact fine-grained position every turn with no bias toward the dry side (pop3-rev-analysis.md "Drowning"). Ordinary units' automatic auto-attack scan never targets a wildman (tribeless, tribe 0xFF) - only an explicit attack order, an area spell, or drowning at the shore can hurt one; whether an explicit attack order is honoured by the original is still open (see our blanket "unattackable" rule below). No periodic respawn exists in the original either: wildmen are placed once at level load and only ever decrease. Whatever kills it, a wildman's death always plays the "climbing + spinning" spirit-rise variant, never the calm ghost pose - see the new item below.
+- [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation. Done at level start without animation (`ReincarnationSite::welcomes`); check the range in the game (the levels only use the ring of 8 cells) and whether it happens on every reincarnation.
+- [ ] Animate the wildmen: eating fruit (2) and drinking (4), wandering around their spot, instead of standing still.
+- [ ] Selection of buildings (without the people inside), and of units inside them (`selection::selectable`). Vehicles: a click with nothing selected selects the people aboard (vehicles.md).
+- [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
+- [ ] Statuses (`Unit::statuses`: Magical Shield, Bloodlust, Invisibility and Hypnotism now cast for real,
+  `GameMap::cast_nearest_status`/`hypnotize`; only Ghost Army's left unset by any spell): **found this session,
+  tracing the exe's own Hypnotism code (0x50EB00) while resolving "Preacher conversion"'s GONE/NEW contradiction**:
+  the original explicitly carries the captured person's current life, max life and carried wood across the
+  capture (and again across the later revert) - ours (`GameMap::change_owner`, used by `hypnotize`) instead resets
+  health to full and carrying to 0. A damaged enemy hypnotised in the original keeps its existing damage and any
+  wood it was carrying; ours heals and empties it. The timer of a ghost's
+  status (not traced: no expiry found for Ghost Army), other options to define; read by combat, selection and
+  drawing. Invisibility's own early end (attacking does, walking does not) is a guess (pop3-rev-analysis.md "Per
+  spell" 6: "some actions end it early", not traced), implemented in `attack::go_attack`. Drawing: the markers are
+  done (`units/markers.rs`); left: the low-health looping sound 0xCF, own invisible and ghost people translucent
+  (invisible flickering faster near the end) and invisible enemies hidden (sprite, shadow, hover, selection), the
+  original's colour tables (our shield tint is a guess), the optional health bar over own damaged people (commands
+  100/101).
+- [ ] Physics (`game_core::physics::step`: velocity, gravity 32, touchdown; landing in the sea or on walkable ground done, `Unit::touch_down`), to the original's rules (pop3-rev-analysis.md "Blast push and flight"): velocity caps (192 per horizontal axis, 512 vertical), air drag 2 per turn per horizontal axis, the unit spinning 26° per turn in the air, a scream on take-off; landing: dust and a sound at a vertical speed <= -100, `FALL_OUT_OF_WW_DAMAGE` 700 at <= -200 (`Touchdown::speed`), none on water cells; on the ground: sliding down the slope (gradient over ±76 units) with friction 28 per turn per axis (72 on special terrain), facing where it slides (`Tumble` pose; a grounded tumbling unit does not move yet). Speeds are per original turn: convert to our ticks (`game_core::balance`). Ordinary falls (ground dropping under a standing or walking person: earthquake, erosion, flatten) fall with the same gravity and drag, without fall damage; rising ground lifts people. Still open: landing on a cliff or a building (stands up meanwhile), what the original does to a unit landing in water (ours dies at once), boats landing on the sea once vehicles exist, bumping into buildings and cliffs, a task dropped or kept when flung.
+- [ ] Flying: units thrown by Whirlwind / Blast / explosions follow a ballistic or carried path (flying 61, tumbling 73 anims), land with damage, drown if they land in the sea.
+- [ ] Vehicle huts (vehicles.md "Vehicle huts", done with guesses): check in the game the crew size (4), the work per vehicle (1200 crew-turns), whether mana is spent, where the vehicle appears, and a hut's queue at the door (types 13-16 have one, pop3-rev-analysis.md "The queue at the door").
+- [ ] Whirlwind spell (to implement), on a vehicle: everyone aboard is put out, it spins (roll +204, pitch +153 /2048 per tick) for 10 ticks (boat; ends early when the ground reaches it) or 2 (balloon), then explodes like a destroyed boat on land (pop3-rev-analysis.md "Life, damage and destruction", state 9).
+- [ ] Vehicle destruction (vehicles.md; health, damage from blasts and bolts, sinking, rising and exploding done): the partial explosion of a boat on land (its faces flying off, `explosion.rs`).
+- [ ] Balloons: bobbing while moving, and the original's climb rate and look-ahead; check the hover over trees and totems in the game (450 guessed; buildings 560 from the exe) (vehicles.md).
+- [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
+- [ ] The shaman can cast only some spells from a vehicle: Land Bridge is refused (done); check the others in the game (fire-type probably yes).
+- [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
+- [ ] Use the shaman's wand gesture (81-84), the conversion sit (18), the spy's juggling idle (92), the carbonized brave (97) for lightning; check the tribe layer flag `0x10` mapping.
+
+- [ ] The shaman's reincarnation is not instant: ours waits a fixed `RESPAWN_TICKS` (3 s). Find in the original how long she waits and what it depends on (her tribe's mana, its population, or both), then compute it from that.
+- [ ] Training units: followers turned into warriors, preachers, spies and firewarriors in the training huts (see "Buildings": training huts and training lines).
+
+### Spells ([spells.md](docs/specs/spells.md))
 - [ ] Armageddon (full mechanic, `crates/game-core/src/armageddon.rs`; design in `docs/plans/spells.md`
       "Armageddon"; v1 only pauses, cancels fights, and settles instantly by combined headcount):
   - [ ] Clear the map: remove every building/totem/vehicle globally; clear trees within the arena radius only.
@@ -324,7 +261,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Level spells: keep each discovery's availability (permanent / this level / one shot) for when it is discovered; `SpellsAvailableLevel` / `SpellsNotCharging` and `SpellsAvailableOnce`.
 - [ ] A "once" spell discovery should give a single shot (`Provided { shots: 1 }`) when found (e.g. Convert in levels 4 and 5).
 
-## Mana ([spells.md](docs/specs/spells.md) "Mana")
+### Mana ([spells.md](docs/specs/spells.md) "Mana")
 - [ ] Mana bar in the HUD for the player (`GameMap::mana`: `bank`, `received`, `used`).
 - [ ] Generated by every follower, busy or idle (huts-and-training.md rule 7), instead of the fixed `mana::INCOME`.
 - [ ] Delayed reservoir (gifts, shaman kills), shaman death losses (pop3-rev-analysis.md "Mana rules").
@@ -342,69 +279,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Swamp (`swamp`): its kill and overlap-claiming (ours: the most recently cast one on a contested cell) are done; still missing is the 30-per-tribe, oldest-goes bookkeeping and ending once most of its cells are unsuitable (pop3-rev-analysis.md "Per spell" 11), and any world or aerial-map mark (no sprite, hfx 81; pop3-rev-analysis.md "Swamp: drawing, and the reedy-grass / mist ground dressing") — client only.
 - [ ] Bug, client only, found wiring up `lava::LavaView`: `just shot`/`HEADLESS=1 SCREENSHOT=...` with a dev var that instantly runs many ticks at once (e.g. `VOLCANO_TICKS=139` or more) can leave the terrain's own ground mesh and texture (`world.rs`'s `rebuild_terrain`) frozen on its pre-cast, flat state forever, while anything reading `CurrentMap` live (confirmed with `LavaView`'s own draped mesh) correctly shows the real, risen terrain — so the two visibly disagree (a textured lava patch floating over flat "ocean"). Confirmed: the simulation's own `GameMap.terrain` is correct and stable the whole time (direct `GameMap`-only test, no client); `just video` from a live-ticking start does not show it (its terrain updates correctly as Volcano rises, `target/video.mp4` frames checked). Only reproduced via the instant bulk `map.run(N)` dev-var path with a static `FOCUS`; happens consistently right around `volcano::SHAPING_TURNS` regardless of `VOLCANO_TICKS`'s exact value, survives disabling Volcano's lava/fireball spawn there (so it's not those effects specifically), and persists at `SHOT_FRAME` up to 200. Likely in `rebuild_terrain`'s dirty-tracking (`TerrainDirty`/`TerrainPatches`, `TerrainPatches` itself is otherwise never written anywhere) or in how `dev.rs`'s per-var instant catch-up interacts with the normal per-frame `SimClock` catch-up, not yet root-caused.
 
-## Tribes
-- [ ] A tribe model in game-core: `TribeId` instead of bare `u8` owners (blue 0 .. green 3, wildmen 255), its colour
-  in the engine instead of the client's `sites::tribe_color` / `procedural::tribe_rgb`, the tribes playing the level
-  (header byte 88: 1v1, 1v1v1, 2v1...), allies (header byte 92, see "Default allies" below), human / computer,
-  defeated; holding the player's mana pool, spell book and build book (today `GameMap::mana`, `spell_books`,
-  `build_books` by owner).
-  - Reported: red has no reincarnation site on `levl2001.dat` (level 1) in play, suspected to be this same gap
-    (header byte 88 unread). Level data itself does place a red (owner 1) shaman Thing (`#38 model 7 kind 1
-    owner 1 at (2304,7424)`, alongside blue's `#35 owner 0`) - `site::sites_from_level` takes any owner with a
-    placed shaman Thing with no regard for which tribes the header's own byte 88 (`tribes` field, read as `2`
-    for this level, i.e. a 1v1 code) actually selects, so if that byte means a specific pair of slots rather
-    than "first 2 owners found", we may be including/excluding the wrong one. AI scripts (blue/red/yellow/green)
-    read `[0, 10, 4, 5]` for this level - 3 non-zero, more than a "1v1" would suggest are active. Not root-caused
-    this session; needs byte 88 actually decoded and cross-checked against which owners the original instantiates.
-
-## Winning and losing
-- [x] A generic, hookable `Outcome` (`game_core::outcome`): a tribe/side wiped out (by current owner, team-aware
-  via `tribes.rs`) is detected automatically every tick and declares a winner (or a draw); `GameMap::declare_outcome`
-  is the one entry point anything else (Armageddon, below, or a future level-script interpreter) can also call.
-- [ ] Level scripts and triggers also ending the game (`TRIGGER_LEVEL_WON`/`LOST`, timers) — needs the PopScript
-  interpreter below; will call the same `GameMap::declare_outcome` hook, not a separate mechanism.
-- [x] A victory/defeat screen in the client (`game_end.rs`, `AppState::Ended`): headline, reason, every tribe's
-  survivor count; `GAME_END=victory|defeat|draw` and `GAME_END=eliminate:<tribe>` dev hooks. Wording/art are our
-  own (AGENTS.md licence) — not traced from or compared against the original's screens.
-- [x] Once the match ends, every unit still acting stands down to Idle right away (a death already under way
-  finishes on its own, and a lone shaman never gets a last-stand reincarnation out of it, `GameMap::tick`'s own
-  freeze) and the economy/combat/wrecking/reincarnation ticks stop for the rest of the game (`outcome.rs`,
-  `map.rs`'s `frozen`, same freeze `armageddon.rs` already used) — corrects the earlier "keeps running, not
-  frozen". Only the winning side's living units (and its allies, `Tribes::same_team`) are kept shielded
-  (`GameMap::shield_everyone_once_ended`/`on_winning_side`, `outcome.rs`) — directly sets `Unit::statuses.shield`,
-  not a real cast of Magical Shield (now implemented, `GameMap::cast_nearest_status`, docs/specs/spells.md); the
-  losing side gets none, and a draw shields nobody. Left as a direct status poke rather than reusing the spell's
-  own cast path, since this epilogue shields a whole side at once, not the nearest 6: a different shape, not the
-  same mechanic under another name.
-- [x] A "victory lap" visual once the match ends: every unit on the winning side (`GameMap::on_winning_side`) plays
-  a small repeating happy jump (`units/mod.rs::victory_bounce`/`bounce_start`, added to `pull_to_eye`'s lift) — the
-  losing side doesn't celebrate. There's no such animation traced in the original's identified sprites, so this is
-  our own invented stand-in, not a reproduction.
-- [ ] The client assumes the local player is always tribe 0/blue (`units::PLAYER`, `units/mod.rs:36`) throughout —
-  multiplayer needs this determined per-session instead; affects win/lose presentation (`game_end::verdict`'s
-  `local`), spell casting, camera, and HUD alike. Pre-existing, not introduced by the win/lose work above.
-
-## Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
-- [ ] Start camera from the header's start position (cell) and angle (2048ths) instead of looking at the shaman.
-- [ ] Level flags: fog of war (0x01, levels 9 and 18), shaman omni (0x02, level 25; `GameMap::shaman_omni`: spells start from the view and have no range, the rest of god mode to find), no guest spells (0x10), no reincarnation time (0x20).
-- [x] Default allies per tribe (`.hdr` 92) read into `game_core::tribes::Tribes` and used for: elimination/win-lose
-  grouping by side, and the two places that gate whether an attack may start (`attack::attack_goal`,
-  `spotting::first_seen`) — allies no longer spot or attack each other. Still open: the rest of the alliance-aware
-  nuances below (Blast's own friend-sparing rules, spotting during orders, preacher conversion targeting).
-- [ ] `NoAccessSquares` (non-zero only in levl2002 and levl2079): probably cells nobody walks on; check them on the map and feed them to the `path` blocked mask.
-- [ ] Load the object bank the level header names (byte 97: 6 for levels 3, 5, 16, 22, 2120; 7 for 2110; 2 for 2127) instead of always bank 0 (`original_models`): either load bank N with the index table of objects.md, or stay on bank 0 (trees already picked by bank, `tree_object_in_bank`).
-- [ ] Other original objects (trees, camp fire logs, reincarnation site stones) are still drawn from both sides: cull their back faces like buildings (objects.md "facs"), checking each for holes.
-- [ ] Level names instead of the header's "Level N": `pop3_format::language` reads the texts ([language.md](docs/specs/language.md)); find which text number names each level (open there), find the install's `language/` dir like `data/`, pick the language (a setting, English by default).
-- [ ] Our own texts in Fluent (`assets/lang/<lang>.ftl`, named keys), a key -> original text number table, lookup from `langNN.dat` with the original files and from our `.ftl` otherwise ([language.md](docs/specs/language.md) "Our texts and the fallback"); when the game first shows translatable text.
-- [ ] Sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32/64): find whether it drives the terrain lighting. `LandBlocks` / `LandOrients` are identical stale data: ignore them.
-
-## Level scripting (triggers)
-- [ ] Trigger semantics (layout and types known, level-format.md): what each type waits for (proximity, timed, player death, shaman proximity, library, shaman + angel of death), how `TriggerCount`, `NumOccurences`, `PrayTime` and `InactiveTime` play, and what activating a target does (discovery granted, effect fired, hidden thing revealed).
-- [ ] Praying totems, stone heads (scenery 9), vault of knowledge: which trigger/discovery each uses, once or repeatedly.
-- [ ] Level 5: a countdown (about 15 min) starts at some point; the winged death totem must be prayed at before it reaches 0. In the level: trigger #98, type 5 (shaman only, brings an Angel of Death), on cell 83, 65 (the start cell, marker 11), `PrayTime` 10, `CreatePlayerOwned` 1, targets effect 91 (same cell) and effect 88 (cell 106, 116). The timer is not in the level things: probably red's script cpscr058 (`SET_TIMER_GOING`, `HAS_TIMER_REACHED_ZERO`; the spec says level 5's script ends the level as won). Decompile it (`ai_script` above) to learn when the timer starts, what reaching 0 does and how the totem stops it; then implement its reward (not done yet, unlike the other totems).
-- [ ] Implement the triggers and discoveries as deterministic simulation (through `Command`/state, no floats); AI scripts can fire them too (`TRIGGER_THING`).
-
-## Buildings ([buildings.md](docs/specs/buildings.md))
+### Buildings ([buildings.md](docs/specs/buildings.md))
 - [x] Generated building kit (AI-written script) instead of labelled boxes for every named kind in generated mode: 16 reproducible GLBs, tribe accents, timber construction frames; see [kit workflow](assets/3d/buildings/README.md). Unknown IDs remain labelled boxes; see Sandbox > Buildings.
 - [x] Generated procedural building textures: clay, timber grain, straw, stone and cloth; shared mipmapped atlas linked from every GLB, UVs preserved during construction.
 - [ ] Generated buildings: coherent part-by-part assembly instead of height-sorted triangles, damage/fire/rubble, working-production animation, hut style variants and building add-ons.
@@ -472,14 +347,77 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Houses grow (small -> medium -> large: `villager_hut` sizes): red bar to 100 %, then if the population has room braves fetch wood and the hut becomes a construction site of the next size, still usable (huts-and-training.md rule 6). Growing takes 3 pieces (1 consumed, 2 added to the hut). Settle the red bar speed, the wood per size (3/5/7?) and who works on it before implementing.
 - [ ] `game_core::balance`: `Turns` (original game turns) converted to ticks, `Balance::ours()` defaults, later `Balance::from_constants`; every rule reads it from `GameMap` (huts-and-training.md "Balance and game turns").
 
-## Wood ([trees.md](docs/specs/trees.md))
+### Wood ([trees.md](docs/specs/trees.md))
 - [ ] Original scenery models 7 plant 1, 8 plant 2: not drawn yet. Scenery 9 (the totems, 98 in the levels) is drawn as the stone head (object 82), a guess: find its real model. Trees have no size in the thing record: full size is right.
 - [ ] Wood for repair and hut growth, like construction (`game_core::work`: assigned braves fetch, carry to the door, build). Cutting, carrying, fetching and construction are done (units.md "Wood", buildings.md "Construction").
 - [ ] Check in the game whether a brave ordered on a tree with no wood to spare goes to another one.
 - [ ] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible) trees.
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.
 
-## Terrain ([terrain.md](docs/specs/terrain.md), [terrain-textures.md](docs/specs/terrain-textures.md))
+### Praying (worship) ([worship.md](docs/specs/worship.md))
+- [ ] Prayer gauge on the original's rhythm and curve (pop3-rev-analysis.md "The gauge"): every 4 turns, `C² / (C − n + 1)²` per update, drain `C²`; today it steps every tick with `STEP · (n/C)²`.
+- [ ] Contested totems: keep one gauge per tribe (our choice; the original has one per trigger, driven by the tribe with the most prayers), but the gifts are shared: a totem's `NumOccurences` counts across all tribes, so a one-gift totem rewards only the first tribe to fill its gauge, and the other gauges stop. Once `NumOccurences` is reached by any tribe, the totem sinks back into the ground for everyone and every tribe's prayers are sent away (`Totem::is_exhausted`: one shared sink, whoever took the last gift). Check `Totem::given` does this and test it with two tribes.
+- [ ] Totems: ids (`GameMap::new_id`) and removal from `GameMap::totems` once sunk (exhausted after their gifts, `NumOccurences` times; infinite ones stay), then `Order::Worship` / `Action::Worshipping` by id.
+- [ ] Stone totem: check in the game what it does after a completion that is not its last, the timings (turn 2 s, hold 1 s, sink 4 s) and the smoke; other turns to try are listed in worship.md.
+- [ ] Totem gifts not handled yet (logged as `Reward::Unhandled`): effects (land bridge, lightning...), revealed scenery and triggers, vehicles, the Angel of Death of type 5 totems; mana once mana exists. Check what `NumOccurences` 0 means.
+- [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); check `PrayTime`'s unit and the drain speed in the game.
+- [ ] Prisons: levels where the shaman starts imprisoned; she is locked inside (units.md "Locked units") until freed.
+- [ ] Generated pyramid: fold its capstone like the original's top (a separate mesh in `tools/generate_buildings.py`).
+- [ ] Pyramids: draw the reward as an icon at the top (cursor sprites 38-57 spells, 58-65 buildings), gone once the reward is granted.
+- [ ] HUD: show the gauge over the totem/pyramid and who is praying.
+
+## Priority 2 — `--no-original` asset completeness (copyright safety)
+AGENTS.md's own bar is that everything shippable works with `--no-original`. Sound is a hard zero today (format reverse-engineered, no playback, no CC0 assets sourced at all); several spell VFX, building/spell icons and ritual scenery are still original-only. Largely independent of the other tiers, so it can run in parallel with them rather than waiting its turn.
+
+### Sound ([sound.md](docs/specs/sound.md))
+- [ ] `pop3_format::sound`: SDT banks (count, offsets, 40-byte headers), signed 16-bit PCM mono/stereo, the 4 looping sounds, `0x80` placeholders skipped; music `PopDrones22.SDT` as MPEG Layer II.
+- [ ] Play SFX in the client (Bevy audio): spells, chopping, building, follower voices, ambiences; drums and music. Free sounds for `--no-original`.
+
+### Art ([assets.md](docs/specs/assets.md))
+- [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).
+- [ ] Next open art: building icons, ritual scenery/reincarnation stones, vehicles and worker action clips (inventory P1). CC0 trees/unit sheets, the generated building kit and 14 of 20 spell icons already ship.
+
+### Original sprites and blending ([sprites.md](docs/specs/sprites.md))
+- [ ] Spell effects from the alpha sprites (`hfx0-0.dat`, decoded by `blend::AlphaTable`, blended on the GPU): map each effect to its frames (sprites.md).
+- [ ] Ghost table `ghost0-X.dat` (66% mix) for see-through units (Invisibility).
+- [ ] `sprites` parser: test the empty (0 x 0) entries and the `0x7F` trailer seen in the real banks.
+
+## Priority 3 — computer players (AI) and what it needs
+The single biggest remaining system, and the one that turns this from a sandbox/multiplayer tech demo into an actual single-player game. Sequenced after priority 1 on purpose: AI scripts can invoke any spell/building/unit action through the same order/coordinator machinery, so building the interpreter against still-incomplete systems means repeated rework. Tribes and level scripting are its direct prerequisites (per-tribe state, triggers the scripts fire).
+
+### Tribes
+- [ ] A tribe model in game-core: `TribeId` instead of bare `u8` owners (blue 0 .. green 3, wildmen 255), its colour
+  in the engine instead of the client's `sites::tribe_color` / `procedural::tribe_rgb`, the tribes playing the level
+  (header byte 88: 1v1, 1v1v1, 2v1...), allies (header byte 92, see "Default allies" below), human / computer,
+  defeated; holding the player's mana pool, spell book and build book (today `GameMap::mana`, `spell_books`,
+  `build_books` by owner).
+  - Reported: red has no reincarnation site on `levl2001.dat` (level 1) in play, suspected to be this same gap
+    (header byte 88 unread). Level data itself does place a red (owner 1) shaman Thing (`#38 model 7 kind 1
+    owner 1 at (2304,7424)`, alongside blue's `#35 owner 0`) - `site::sites_from_level` takes any owner with a
+    placed shaman Thing with no regard for which tribes the header's own byte 88 (`tribes` field, read as `2`
+    for this level, i.e. a 1v1 code) actually selects, so if that byte means a specific pair of slots rather
+    than "first 2 owners found", we may be including/excluding the wrong one. AI scripts (blue/red/yellow/green)
+    read `[0, 10, 4, 5]` for this level - 3 non-zero, more than a "1v1" would suggest are active. Not root-caused
+    this session; needs byte 88 actually decoded and cross-checked against which owners the original instantiates.
+
+### Level scripting (triggers)
+- [ ] Trigger semantics (layout and types known, level-format.md): what each type waits for (proximity, timed, player death, shaman proximity, library, shaman + angel of death), how `TriggerCount`, `NumOccurences`, `PrayTime` and `InactiveTime` play, and what activating a target does (discovery granted, effect fired, hidden thing revealed).
+- [ ] Praying totems, stone heads (scenery 9), vault of knowledge: which trigger/discovery each uses, once or repeatedly.
+- [ ] Level 5: a countdown (about 15 min) starts at some point; the winged death totem must be prayed at before it reaches 0. In the level: trigger #98, type 5 (shaman only, brings an Angel of Death), on cell 83, 65 (the start cell, marker 11), `PrayTime` 10, `CreatePlayerOwned` 1, targets effect 91 (same cell) and effect 88 (cell 106, 116). The timer is not in the level things: probably red's script cpscr058 (`SET_TIMER_GOING`, `HAS_TIMER_REACHED_ZERO`; the spec says level 5's script ends the level as won). Decompile it (`ai_script` above) to learn when the timer starts, what reaching 0 does and how the totem stops it; then implement its reward (not done yet, unlike the other totems).
+- [ ] Implement the triggers and discoveries as deterministic simulation (through `Command`/state, no floats); AI scripts can fire them too (`TRIGGER_THING`).
+
+### Computer players (AI)
+- [ ] AI for the computer-controlled tribes: their shaman and followers act on their own through `Command`s (deterministic, like a player's input): gather wood, build and grow the village, train units, pray, cast spells, attack and defend.
+- [ ] `pop3_format::ai_script`: parse `cpscrNNN.dat` (12 552 B only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md) (grammar, token, parameter and internal variable tables are there), with a decompiled listing; `cpatr` name and masks. Then `just level-info` prints the scripts of the level's tribes decompiled next to its things, triggers and markers, so a level's events can be read in one place.
+- [ ] `pop3_format::constants`: decode `levels/constant.dat` (XOR key, 2-byte marker, `P3CONST_` lines, duplicate `CONV_SPY` kept in order) per [constants.md](docs/specs/constants.md); then use the real balance values (spell costs, charges and cast range scaled by altitude band, see spells.md; unit life, speed and damage, wood, hut breeding) when an install is present, with our own defaults in generated mode.
+- [ ] Script interpreter in `game-core`: user variables, internal variables read from the simulation (`headcount`: units by state and kind, `housing`), `EVERY n m` firing when `(turn + m) % n == 0` (stored minus 1), DO commands mapped to AI states and `Command`s; start with the states, `ATTACK` and `SET_SPELL_ENTRY`. Levels 2100, 2110, 2131 name missing scripts: fall back to no script.
+- [ ] Script timing: measure the original turn rate (wiki: about 8 turns/s) against our 10 ticks/s, and whether `EVERY` adds a per-tribe phase, before porting script timings (see [ai-scripts.md](docs/specs/ai-scripts.md) "What this means here").
+- [ ] Script side effects outside the AI: messages, flybys, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`, `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
+
+## Priority 4 — remaining fidelity and content
+Level/world correctness that is mostly stable already (terrain especially: extensive, but most of it recently fixed) rather than blocking anything above.
+
+### Terrain ([terrain.md](docs/specs/terrain.md), [terrain-textures.md](docs/specs/terrain-textures.md))
 - [ ] Curvature in a vertex shader sampling an R16 height texture (static grid).
 - [x] Dirty-rect re-bake of the texture/normals instead of full rebuilds: mostly already true -
   `terrain_texture::rebake_cells` (channels/altitude) and `terrain_mesh::patch` (vertices, and the normals of
@@ -779,13 +717,57 @@ PostUpdate about 5 ms), driven by how we hand it the world:
      122) - a short capture window can under-sample how fast a specific deep-water location's own local swirl
      phase happens to be changing, so use a window of several seconds, not under two, when checking this again.
 
-## UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
+### Winning and losing
+- [x] A generic, hookable `Outcome` (`game_core::outcome`): a tribe/side wiped out (by current owner, team-aware
+  via `tribes.rs`) is detected automatically every tick and declares a winner (or a draw); `GameMap::declare_outcome`
+  is the one entry point anything else (Armageddon, below, or a future level-script interpreter) can also call.
+- [ ] Level scripts and triggers also ending the game (`TRIGGER_LEVEL_WON`/`LOST`, timers) — needs the PopScript
+  interpreter below; will call the same `GameMap::declare_outcome` hook, not a separate mechanism.
+- [x] A victory/defeat screen in the client (`game_end.rs`, `AppState::Ended`): headline, reason, every tribe's
+  survivor count; `GAME_END=victory|defeat|draw` and `GAME_END=eliminate:<tribe>` dev hooks. Wording/art are our
+  own (AGENTS.md licence) — not traced from or compared against the original's screens.
+- [x] Once the match ends, every unit still acting stands down to Idle right away (a death already under way
+  finishes on its own, and a lone shaman never gets a last-stand reincarnation out of it, `GameMap::tick`'s own
+  freeze) and the economy/combat/wrecking/reincarnation ticks stop for the rest of the game (`outcome.rs`,
+  `map.rs`'s `frozen`, same freeze `armageddon.rs` already used) — corrects the earlier "keeps running, not
+  frozen". Only the winning side's living units (and its allies, `Tribes::same_team`) are kept shielded
+  (`GameMap::shield_everyone_once_ended`/`on_winning_side`, `outcome.rs`) — directly sets `Unit::statuses.shield`,
+  not a real cast of Magical Shield (now implemented, `GameMap::cast_nearest_status`, docs/specs/spells.md); the
+  losing side gets none, and a draw shields nobody. Left as a direct status poke rather than reusing the spell's
+  own cast path, since this epilogue shields a whole side at once, not the nearest 6: a different shape, not the
+  same mechanic under another name.
+- [x] A "victory lap" visual once the match ends: every unit on the winning side (`GameMap::on_winning_side`) plays
+  a small repeating happy jump (`units/mod.rs::victory_bounce`/`bounce_start`, added to `pull_to_eye`'s lift) — the
+  losing side doesn't celebrate. There's no such animation traced in the original's identified sprites, so this is
+  our own invented stand-in, not a reproduction.
+- [ ] The client assumes the local player is always tribe 0/blue (`units::PLAYER`, `units/mod.rs:36`) throughout —
+  multiplayer needs this determined per-session instead; affects win/lose presentation (`game_end::verdict`'s
+  `local`), spell casting, camera, and HUD alike. Pre-existing, not introduced by the win/lose work above.
+
+### Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
+- [ ] Start camera from the header's start position (cell) and angle (2048ths) instead of looking at the shaman.
+- [ ] Level flags: fog of war (0x01, levels 9 and 18), shaman omni (0x02, level 25; `GameMap::shaman_omni`: spells start from the view and have no range, the rest of god mode to find), no guest spells (0x10), no reincarnation time (0x20).
+- [x] Default allies per tribe (`.hdr` 92) read into `game_core::tribes::Tribes` and used for: elimination/win-lose
+  grouping by side, and the two places that gate whether an attack may start (`attack::attack_goal`,
+  `spotting::first_seen`) — allies no longer spot or attack each other. Still open: the rest of the alliance-aware
+  nuances below (Blast's own friend-sparing rules, spotting during orders, preacher conversion targeting).
+- [ ] `NoAccessSquares` (non-zero only in levl2002 and levl2079): probably cells nobody walks on; check them on the map and feed them to the `path` blocked mask.
+- [ ] Load the object bank the level header names (byte 97: 6 for levels 3, 5, 16, 22, 2120; 7 for 2110; 2 for 2127) instead of always bank 0 (`original_models`): either load bank N with the index table of objects.md, or stay on bank 0 (trees already picked by bank, `tree_object_in_bank`).
+- [ ] Other original objects (trees, camp fire logs, reincarnation site stones) are still drawn from both sides: cull their back faces like buildings (objects.md "facs"), checking each for holes.
+- [ ] Level names instead of the header's "Level N": `pop3_format::language` reads the texts ([language.md](docs/specs/language.md)); find which text number names each level (open there), find the install's `language/` dir like `data/`, pick the language (a setting, English by default).
+- [ ] Our own texts in Fluent (`assets/lang/<lang>.ftl`, named keys), a key -> original text number table, lookup from `langNN.dat` with the original files and from our `.ftl` otherwise ([language.md](docs/specs/language.md) "Our texts and the fallback"); when the game first shows translatable text.
+- [ ] Sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32/64): find whether it drives the terrain lighting. `LandBlocks` / `LandOrients` are identical stale data: ignore them.
+
+## Priority 5 — presentation and UX polish
+Additive and mostly independent of the tiers above: chip away at these alongside anything else.
+
+### UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
 - [ ] Building icons, tooltips (spell icons done: `assets/spell-hud`).
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 - [ ] Original keymap ([shortcuts.md](docs/specs/shortcuts.md), dev mode off): add the missing shortcuts (F1, S status, groups 1-6, camera points Z/X/C/V, `\\` track, Shift+Enter, Space skips the fly-by), and a way to stop and cast self spells without the dev keys.
 - [ ] Debug overlay (`F4`, `crates/game-client/src/debug_overlay.rs`): reported bug, not yet found - "invisible overlay across the globe". A read-only audit of `draw()` itself this session found nothing wrong (every unit-to-cell conversion and every `torus_delta_cells` usage checked out), so the cause is elsewhere; next suspects, not yet investigated: `crates/game-client/src/grounded.rs`'s `ground_point()`, `CurrentMap`/map-loading staleness, or a `rig.focus`/`CurveParamsRes` mesh-to-cell scale mismatch. Pre-existing and unrelated to the patrol-points work above (Units, "Order model") - check this independently before/alongside adding the patrol visualization there, since that addition reuses `draw()`'s existing helpers and would inherit the same bug if it's actually in one of them after all.
 
-## Tooltips ([tooltips.md](docs/specs/tooltips.md))
+### Tooltips ([tooltips.md](docs/specs/tooltips.md))
 - [ ] Rendered tooltip: done for buildings, trees and totems (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks, right click at once); the toggle to add.
 - [ ] People rows filled: totems' counted prayers (once praying exists), the trainee. Vehicles and vehicle huts are done. Buildings, pyramids and totems' places are done, a click adds the unit to the selection.
 - [ ] Wood rows: the pieces still needed on a growing house (once growth exists). Plans, sites, built buildings and trees are done.
@@ -794,29 +776,68 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).
 - [ ] Editor: smooth brush and the raise/lower levelling step of the ALACN editor (ui-and-editor.md).
 
-## Computer players (AI)
-- [ ] AI for the computer-controlled tribes: their shaman and followers act on their own through `Command`s (deterministic, like a player's input): gather wood, build and grow the village, train units, pray, cast spells, attack and defend.
-- [ ] `pop3_format::ai_script`: parse `cpscrNNN.dat` (12 552 B only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md) (grammar, token, parameter and internal variable tables are there), with a decompiled listing; `cpatr` name and masks. Then `just level-info` prints the scripts of the level's tribes decompiled next to its things, triggers and markers, so a level's events can be read in one place.
-- [ ] `pop3_format::constants`: decode `levels/constant.dat` (XOR key, 2-byte marker, `P3CONST_` lines, duplicate `CONV_SPY` kept in order) per [constants.md](docs/specs/constants.md); then use the real balance values (spell costs, charges and cast range scaled by altitude band, see spells.md; unit life, speed and damage, wood, hut breeding) when an install is present, with our own defaults in generated mode.
-- [ ] Script interpreter in `game-core`: user variables, internal variables read from the simulation (`headcount`: units by state and kind, `housing`), `EVERY n m` firing when `(turn + m) % n == 0` (stored minus 1), DO commands mapped to AI states and `Command`s; start with the states, `ATTACK` and `SET_SPELL_ENTRY`. Levels 2100, 2110, 2131 name missing scripts: fall back to no script.
-- [ ] Script timing: measure the original turn rate (wiki: about 8 turns/s) against our 10 ticks/s, and whether `EVERY` adds a per-tribe phase, before porting script timings (see [ai-scripts.md](docs/specs/ai-scripts.md) "What this means here").
-- [ ] Script side effects outside the AI: messages, flybys, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`, `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
+### Menu and sandboxes ([ui-and-editor.md](docs/specs/ui-and-editor.md))
+- [ ] Sandbox Spells: test ground to cast every spell freely (no mana, no charges).
+- [ ] Sandbox Buildings: placing and constructing buildings on its free ground (braves, wood and trees are there; every model and every construction stage are shown).
+- [ ] More sandboxes as features come (combat...).
+- [ ] Sandbox Worship: totems are drawn but nothing can be prayed at yet; the generated stand-ins are identical pillars.
+- [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
 
-## Multiplayer ([multiplayer.md](docs/specs/multiplayer.md))
+### Camp fire ([buildings.md](docs/specs/buildings.md) "Camp fire")
+- [ ] Guard posts' torches (objects 190-193, blended tile 92): draw them with `flame.rs` once guard posts have an original object (the firewarrior and prayer huts' torches burn).
+- [ ] Generated firewarrior hut: drop the static ember cone from its braziers (tools/generate_buildings.py) now that an animated flame stands on them.
+- [ ] Check in the game: what a camp fire is for (people gathering? mana?), its burn time when left alone (`ABANDON_TICKS`, 60 s guessed), the ring size, the flatness rule, and when object 12 (other logs) is used.
+- [ ] Hover/selection of a camp fire (tooltip with who is around it), a hover cursor when units are selected over one.
+
+## Priority 6 — infrastructure with no dependents
+Real work, but nothing else in this file waits on it and neither has an immediate player-facing payoff until the tiers above are further along: performance only matters once there is more to render/simulate at once, and multiplayer's lockstep codec already works in tests with no UI or dependents yet.
+
+### Performance (60 fps)
+Measured with `just profile` (units sandbox, dev build, headless, tracing on): about 73 ms a frame. The simulation
+(`run_ticks`) takes 0.014 ms a frame and all our systems together about 1 ms: the time goes to Bevy's own CPU work
+around rendering (render app about 43 ms, extract and asset preparation about 10 ms, transform propagation in
+PostUpdate about 5 ms), driven by how we hand it the world:
+- [ ] Unit sprites: one image, material and quad mesh per animation frame (`units::upload_frame`), so each unit is its
+  own draw call and bind group, nothing batches. One atlas texture and material per kind and tribe (frames as UV
+  rects in a sprite material, instanced); the same for markers, dust and wood. Biggest win expected.
+- [ ] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
+  prepared again each frame; write only when the colour changes, or share a material per colour step.
+- [ ] Some image is prepared again every frame (`prepare_assets<GpuImage>` about 3 ms, its extract 1.6 ms): find which
+  (the UI text atlas of readouts changing every frame? the cursor? the offscreen target?).
+- [ ] Mesh allocator about 3 ms a frame: meshes rewritten every frame (range ring `put` while shown, blueprint marks)
+  and the 129 x 129 terrain mesh rebuilt on every camera move (`world::rebuild_terrain`): rewrite only on change;
+  the planet curve could move to the vertex shader over a static grid.
+- [ ] Transforms written every frame for everything grounded (`grounded::place_grounded`) and every unit part
+  (`units::pull_to_eye`), so Bevy propagates all trees, buildings and unit parts each frame: write with
+  `set_if_neq`, or only when the camera or the thing moved.
+- [ ] Unit views carry 7 marker slots and a health bar each, hidden most of the time: spawn markers when shown.
+- [ ] Whole-world respawn on terrain changes: when the simulation levels ground (land bridge, flatten, braves
+  flattening a site, every few ticks) `run_ticks` marks `CurrentMap` changed, and trees (re-reading their original
+  meshes), sites, buildings, unit views, shadows and totems all despawn and rebuild. Those views should only
+  re-ground on `world::TerrainPatches`, and rebuild on a real change of their list.
+- [ ] Startup: the unit sprites take about 6.5 s (Scale2x twice on every frame of every kind and tribe), now a boot job
+  off the main thread behind the loading screen (`units::UnitSpritesJob`); still to shorten: one job per kind to use
+  every core, recolour tribes in the shader or a palette swap, or cache the result. Other loaders could become boot
+  jobs (markers, dust, wood, tooltip icons, cursor: each under 10 ms today), and the map's own work at a game start
+  (terrain bake, tree meshes) too.
+- [ ] Measure the windowed release build too (`cargo run --release`): the numbers above are the dev build under
+  tracing. The simulation only matters with many units: every walker replans A* on any terrain write
+  ("Replanning" in Units).
+- [ ] Loading screen freezes near the end: two unyielded main-thread stalls, both reading as "the bar reaches
+  100% then hangs". `boot::poll_job` (`boot/mod.rs`) runs each `BootJob`'s CPU work off-thread, but once it
+  finishes, `J::install(output, world)` (GPU uploads, resource inserts) runs synchronously with no progress
+  reporting, and `BootStatus::fraction()` caps a job at 0.99 while running, so the bar sits near 100% for the
+  whole `install` (the `"boot: {label} installed in {ms}"` log line says which job's `install` is slow). Separately,
+  `menu::begin_game`/`boot::GameStep` is explicitly documented as blocking ("then built, which holds the main
+  thread"): after `SHOW_FRAMES` the map is built synchronously (`LevelList::load_current`: parse, build `GameMap`,
+  recompute shading), zero progress reporting, no frames drawn until it returns - likely the dominant freeze for a
+  real original level. Fix direction: make a slow `install` (or the map build) incremental, a bounded chunk of work
+  per frame via a small state machine, instead of one unyielded call. Separate from the existing stale-terrain-
+  during-instant-bulk-tick bug above (that one is post-load desync, not a loading-time stall).
+
+### Multiplayer ([multiplayer.md](docs/specs/multiplayer.md))
 - [ ] Network driver: send `Schedule::close_local`'s turn as `Message::Tick` every tick, feed peers' turns to `receive`, 2-3 ticks of delay (the schedule is done, single player only today).
 - [ ] Host/join UI, lobby, reconnect.
 - [ ] Desync checksum of heightmap + units.
 - [ ] Pause and game speed as `Command`s, so every peer agrees (single player only today, `game_speed.rs`).
 
-## Original sprites and blending ([sprites.md](docs/specs/sprites.md))
-- [ ] Spell effects from the alpha sprites (`hfx0-0.dat`, decoded by `blend::AlphaTable`, blended on the GPU): map each effect to its frames (sprites.md).
-- [ ] Ghost table `ghost0-X.dat` (66% mix) for see-through units (Invisibility).
-- [ ] `sprites` parser: test the empty (0 x 0) entries and the `0x7F` trailer seen in the real banks.
-
-## Sound ([sound.md](docs/specs/sound.md))
-- [ ] `pop3_format::sound`: SDT banks (count, offsets, 40-byte headers), signed 16-bit PCM mono/stereo, the 4 looping sounds, `0x80` placeholders skipped; music `PopDrones22.SDT` as MPEG Layer II.
-- [ ] Play SFX in the client (Bevy audio): spells, chopping, building, follower voices, ambiences; drums and music. Free sounds for `--no-original`.
-
-## Art ([assets.md](docs/specs/assets.md))
-- [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).
-- [ ] Next open art: building icons, ritual scenery/reincarnation stones, vehicles and worker action clips (inventory P1). CC0 trees/unit sheets, the generated building kit and 14 of 20 spell icons already ship.
