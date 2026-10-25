@@ -254,7 +254,12 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   idle. Fixing it means NOT clearing the unit's standing attack order on entering combat (only its movement
   route/queue of future steps), and re-issuing/resuming that attack order when `release()` drops it from the
   coordinator - still open: exactly how long the resumed order keeps trying before giving up is ordinary
-  attack-order behaviour (0x51A2A0), not something special to trace for this.
+  attack-order behaviour (0x51A2A0), not something special to trace for this. **Reported, 2026-10-25**: live play
+  describes fights as short, with units "forgetting" they were attacked and not fighting back or walking back to
+  where the fight was - this gap is the likely single cause (our own units going idle instead of resuming the
+  same attack order), ahead of anything in "Melee" or "Challenge" themselves (which already match the trace below).
+  No new measurement needed for this one: implement the fix above first, then re-watch live play before trying to
+  explain the rest of the "combat doesn't last" impression some other way.
 - [ ] Firebolts (combat.md "Firebolts"): the line of fire, driving a vehicle towards an out-of-reach target (to trace: whether the original's halved speed of a passenger throwing aboard really slows its vehicle, ours does), the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.
 - [ ] Health, hit feedback and death animations for every unit type.
 - [ ] Healing (combat.md "Health"): no healing while struck by lightning once it has its own state; the angel of death never heals; the original lets life go past full by up to one heal (ours stops at full).
@@ -291,6 +296,28 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Aim the other spells on the terrain like Teleport, Blast and Land Bridge (`hud::spells::ground_spell`), within the cast range (`GameMap::in_cast_range`, done: `SP_W_RANGE` by altitude band, +1/3 in a drum tower, none on god levels).
 - [ ] Every spell flies from the shaman as a shot before it takes effect (6 turns into the cast; standard shot 1400 units per turn, blast's fireball 1000), homing on a targeted unit for the spells that follow one; burn, blast, lightning, whirlwind and insect shots are deflected 8 cells away by a shielded enemy on the target cell. A 1 s cooldown after any human cast, no per-spell cooldown (`SPELL_x_OPT_S` is not one).
 - [ ] Blast (`game_core::blast`): the cumulative, slope-scaled push and the allies-only-on-the-last-turn rule are done (pop3-rev-analysis.md "Blast push and flight"). Still to the original: the fireball shot flying from the shaman first (1000 units per turn, 6 turns into the cast, TODO.md "Shots" above); buildings 40 once (buildings have no health yet); angels of death and ghosts (neither spell/unit kind exists yet); the burn cell, smoke and explosion.
+  - **Reported, 2026-10-25**: live play feels blast as inconsistent, "sometimes too powerful, sometimes not
+    enough". Two of the still-missing pieces above are the likely explanation rather than wrong numbers: no
+    building damage yet (a blast against/near a building does nothing where the original would wear it down, read
+    as "too weak") and no fireball-flight-first (ours applies the full effect the instant the cast releases, no
+    6-turn travel window, which could read as "too sudden/too strong" compared to a flight players may remember
+    giving targets time to react or flee). Before changing any number: audit our own `blast::effect` against the
+    "Simple blast" row in "Components" and "Blast push and flight" turn by turn (radius 2/4/5 cells across the 3
+    turns, `BLAST_DAMAGE_PERSON` 50/turn up to 150 total near the centre, push only within 2.5 cells/`PUSH_RANGE`
+    1280 cumulative, ally push only the last turn) - this is a verify-matches-trace pass, not a new measurement,
+    since the exact numbers are already live-confirmed there. Only once that audit comes back clean should a
+    fresh live check of the original's own blast be requested, and only for whatever the audit can't explain.
+- [ ] Lightning panic, open question (not yet traced either way): **reported, 2026-10-25**, live play describes
+  lightning as "less effective" than remembered, specifically fewer panicking units around the strike. Per the
+  current trace (pop3-rev-analysis.md "Per spell" row 3 and "Components"), neither Lightning's own strike (an
+  outright kill in the target cell, a building set alight, trees burnt/ground fire) nor its companion "simple
+  blast" causes panic - panic is only traced for Firestorm/Volcano's *panicking* fireballs, Swarm's stings, and
+  occupants thrown from a burning or raided building (a delayed effect, not an immediate ring around the strike).
+  So either: (a) the player's expectation is carrying over Firestorm/Volcano/Swarm's panic onto Lightning, nothing
+  to fix; or (b) the original's Lightning strike (or its companion blast specifically) does panic nearby survivors
+  and the current trace is incomplete. Needs a live check in a spec session (watch an original Lightning cast with
+  several followers standing just outside the kill cell) before assuming either way - do not guess a panic radius
+  into `EffectKind::Lightning` without it.
 - [ ] Spell cursors: confirm 40 = Armageddon and 43 = Ghost Army in the game (`virtual_cursor::spell_sprite`); check the gold arrow's frame order and speed against the game; the pause menu releases the mouse, so it shows the system cursor, not the gold arrow.
 - [ ] Burn (1), bloodlust (20) and the original teleport (21), now traced (pop3-rev-analysis.md "Per spell"): burn sets the target cell's trees alight and is not castable; bloodlust (hidden) gives the 6 nearest own followers ×3 damage, /8 damage taken and faster firewarrior reloads for 120 s; teleport (hidden) moves the caster's own shaman. Decide which ones we expose.
 - [ ] Flatten: trace the original's per-turn curve (ours divides the gap by the turns left) and whether the disc is centred on a point or a cell. The land bridge raises a smoke puff on every bridge cell every turn while it builds (a `WorldView` of the effect); balloons rise with it; its steps do not re-level or collapse buildings yet.
@@ -381,6 +408,19 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [x] Generated building kit (AI-written script) instead of labelled boxes for every named kind in generated mode: 16 reproducible GLBs, tribe accents, timber construction frames; see [kit workflow](assets/3d/buildings/README.md). Unknown IDs remain labelled boxes; see Sandbox > Buildings.
 - [x] Generated procedural building textures: clay, timber grain, straw, stone and cloth; shared mipmapped atlas linked from every GLB, UVs preserved during construction.
 - [ ] Generated buildings: coherent part-by-part assembly instead of height-sorted triangles, damage/fire/rubble, working-production animation, hut style variants and building add-ons.
+  - **Reported, 2026-10-25**: live play reads construction and destruction as "off" compared to the original -
+    the generated kit's progressive reveal is already specced (buildings.md "Building it": "more and more parts of
+    the real model show and replace the wood", pieces used / wood needed picking how many parts; "Dismantling and
+    damage go the other way: parts back to wood, then removed") but today is approximated by sorting the whole
+    model's triangles by height and revealing them bottom-up, not by swapping in or hiding the kit's own named
+    parts - so a part can appear half-cut instead of whole, and nothing reads as a distinct, recognisable stage of
+    the building. No new original measurement needed for the *mechanism* (the reveal order above is already
+    traced-adjacent/specced); what's missing is implementation: give the generated kit real per-part meshes keyed
+    to the same piece count the simulation already tracks (`Building`'s wood used/needed), reveal/hide whole parts
+    in that order both ways (building up and dismantling/damage down), and only then layer the separate
+    damage/fire/rubble visual states (buildings.md "Damage and repair", "Explosion") on top, which do need their
+    own live checks per that section's own open questions (e.g. the island's lost-wood-piece rule, the lean/
+    oscillator shape of flooded sinking - "Foundation").
 - [ ] Check temple = prayer hut object. Reconversion, wall, gate, guard post have no object and no use in the levels: the generated models stand in even with the original files (objects.md).
 - [ ] Villager hut style (3 styles in the objects, style 0 always drawn): find what picks it.
 - [ ] Check the facing of the other kinds against the game (boat huts are settled: jetty local +z, door -z, from the 11 in the levels), and the cells a footprint takes (used by the walking mask).
