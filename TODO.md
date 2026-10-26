@@ -44,24 +44,16 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   gameplay meaning; the soul flying from preacher to convert; the halving flag of the first check; how many listen
   at once and from how far; whether the preacher's sermon plays its 5 identified phases in order or just one
   (`Pose::Preach` only draws one, anim 22, a guess).
-- [ ] Resuming a fight cut short by a push (combat.md "Melee" rule 1: a fighter farther than `MELEE_LEASH` leaves;
-  full trace in pop3-rev-analysis.md "Resuming a fight cut short by a push"): the original never cancels an
-  attacker's order when it enters a fight - it just goes dormant (released only when the fight's own roster check
-  drops the member) and `order_execute` resumes the SAME still-intact order once the fighter falls back to its
-  per-type default state, so it walks back towards the same original target. Not a dedicated pursuit state or
-  stored "last seen" data, just an ordinary order that survived the fight unreleased. **This is a real gap in our
-  own code**: `Unit::join`
-  (`crates/game-core/src/unit.rs`) explicitly clears `self.queue`/`self.route`/`self.spell` when entering a
-  Melee or Challenge coordinator, so a unit we knock out of a fight has nothing left to resume and just goes
-  idle. Fixing it means NOT clearing the unit's standing attack order on entering combat (only its movement
-  route/queue of future steps), and re-issuing/resuming that attack order when `release()` drops it from the
-  coordinator - still open: exactly how long the resumed order keeps trying before giving up is ordinary
-  attack-order behaviour (0x51A2A0), not something special to trace for this. **Reported, 2026-10-25**: live play
-  describes fights as short, with units "forgetting" they were attacked and not fighting back or walking back to
-  where the fight was - this gap is the likely single cause (our own units going idle instead of resuming the
-  same attack order), ahead of anything in "Melee" or "Challenge" themselves (which already match the trace below).
-  No new measurement needed for this one: implement the fix above first, then re-watch live play before trying to
-  explain the rest of the "combat doesn't last" impression some other way.
+- [ ] Resuming a fight cut short by a push (combat.md "Melee" rule 1, pop3-rev-analysis.md "Resuming a fight cut
+  short by a push"): implemented - a fighter's standing attack order now survives a fight (`Unit::join`) and
+  resumes, same target, whenever the fight lets go of it, whether through the ordinary roster check or a blast's
+  push knocking it clean out (`Unit::release`/`Unit::go_idle`/`resume_attack`, `crates/game-core/src/melee.rs`
+  tests `a_fighter_pushed_out_of_leash_resumes_its_attack_order`,
+  `a_warrior_blasted_out_of_sight_resumes_its_attack_order`). Still open: exactly how long the resumed order keeps
+  trying before giving up is ordinary attack-order behaviour (0x51A2A0), not something special to trace for this.
+  **Reported, 2026-10-25**: live play described fights as short, with units "forgetting" they were attacked - this
+  gap was the likely single cause; re-watch live play now that it's fixed before trying to explain any of the
+  remaining "combat doesn't last" impression some other way.
 - [ ] Firebolts (combat.md "Firebolts"): the line of fire, driving a vehicle towards an out-of-reach target (to trace: whether the original's halved speed of a passenger throwing aboard really slows its vehicle, ours does), the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.
 - [ ] Health, hit feedback and death animations for every unit type.
 - [ ] Healing (combat.md "Health"): no healing while struck by lightning once it has its own state; the angel of death never heals; the original lets life go past full by up to one heal (ours stops at full).

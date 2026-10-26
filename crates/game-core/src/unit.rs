@@ -398,6 +398,11 @@ pub struct Unit {
     to_vehicle: Option<crate::vehicle::VehicleId>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
+    /// The attack order a fight (`Unit::join` into a `Challenge` or `Melee`) put on hold, to pick back up
+    /// (`Unit::release`) where it left off once the fight is behind it, even a fight cut short by a blast's push
+    /// (pop3-rev-analysis.md "Resuming a fight cut short by a push"): entering or being flung out of a fight
+    /// never clears it, only dying or changing tribe do.
+    resume_attack: Option<Target>,
     /// Patrol points to cycle through forever once more than one is set (units.md "Patrol orders"),
     /// independent of `queue`: a point is a shared id (`crate::patrol`), not an owned `Order`.
     patrol: crate::patrol::PatrolQueue,
@@ -460,6 +465,7 @@ impl Unit {
             to_shrine: None,
             to_vehicle: None,
             queue: Vec::new(),
+            resume_attack: None,
             patrol: crate::patrol::PatrolQueue::default(),
             work: None,
             inside: None,
@@ -989,10 +995,23 @@ impl Unit {
         self.action = Action::OnFire { away, left: Countdown::new(BURN_TICKS) };
     }
 
-    /// Leaves its coordinator, if it is in one: back to Idle (`WorldEvent::Release`, or its coordinator gone).
+    /// Leaves its coordinator, if it is in one: back to Idle (`WorldEvent::Release`, or its coordinator gone),
+    /// `go_idle`.
     pub fn release(&mut self) {
         if self.action.link().is_some() {
-            self.action = Action::Idle;
+            self.go_idle();
+        }
+    }
+
+    /// Falls back to Idle - with an attack order a fight put on hold (`resume_attack`), straight back onto it
+    /// instead (same target, same walk back to it), never a fresh one: shared by `release` (a coordinator drops
+    /// it) and `touch_down` (it lands still holding one, e.g. a blast's push knocked it clean out of its fight
+    /// first) because the original falls back to its per-type default state the same way regardless of which of
+    /// the two emptied `+0x9D` (pop3-rev-analysis.md "Resuming a fight cut short by a push").
+    fn go_idle(&mut self) {
+        self.action = Action::Idle;
+        if let Some(target) = self.resume_attack.take() {
+            self.queue.insert(0, Order::Attack { target });
         }
     }
 
@@ -1011,6 +1030,7 @@ impl Unit {
 
     fn die(&mut self) {
         self.drop_plans();
+        self.resume_attack = None;
         self.action = Action::Dying { left: Countdown::new(DYING_TICKS) };
     }
 
@@ -1027,7 +1047,7 @@ impl Unit {
             return Some(UnitEvent::Died);
         }
         if self.action.link().is_none() {
-            self.action = Action::Idle;
+            self.go_idle();
         }
         None
     }
@@ -1042,7 +1062,10 @@ impl Unit {
     }
 
     /// Thrown by a spell: `push` adds to its velocity, it leaves the ground (`ground`: the height under it) and
-    /// tumbles, forgetting its plans. Nothing for the dead.
+    /// tumbles, forgetting its plans - except a standing attack order a fight already put on hold
+    /// (`resume_attack`): a blast throwing a fighter out of its ring is exactly the push this survives for
+    /// (pop3-rev-analysis.md "Resuming a fight cut short by a push"), same as nothing in the original touches it
+    /// either. Nothing for the dead.
     pub fn fling(&mut self, push: Velocity, ground: i32) {
         if !self.is_alive() {
             return;
@@ -1079,6 +1102,7 @@ impl Unit {
     /// calling this on an existing wildman).
     pub fn change_owner(&mut self, tribe: u8) {
         self.drop_plans();
+        self.resume_attack = None;
         self.owner = tribe;
         if self.kind == UnitKind::Wildman {
             self.kind = UnitKind::Brave;
@@ -1089,9 +1113,15 @@ impl Unit {
     }
 
     /// Joins a coordinator, or a sermon's `Listening` (locked the same way but backed by no coordinator), with
-    /// `action`, leaving its way, its chained orders and the spell it was to cast.
+    /// `action`, leaving its way, its chained orders and the spell it was to cast. An attacker's own standing
+    /// attack order is not one of those: it goes dormant instead (`resume_attack`, picked up again by
+    /// `release`), surviving the fight the same way the original's never touches it (pop3-rev-analysis.md
+    /// "Resuming a fight cut short by a push").
     pub(crate) fn join(&mut self, action: Action) {
         debug_assert!(action.link().is_some() || matches!(action, Action::Listening { .. }));
+        if let Action::Attacking { target, .. } = self.action {
+            self.resume_attack = Some(target);
+        }
         (self.route, self.planned_on, self.teleport_to, self.spell) = (Vec::new(), None, None, None);
         self.queue.clear();
         self.action = action;

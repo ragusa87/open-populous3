@@ -108,6 +108,11 @@ middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `
   are fewer than 6; with 3 or more of its tribe there it joins only by replacing the one of lowest rank below its
   own (released). Then, both sides with 2 or more, the last of each leaves for a new one-to-one melee at the same
   place: a melee stays one against several ("Fight" [exe, measured]).
+- A fighter released from the melee (rule 1, or the fight ending) does not simply go idle if it had come from its
+  own standing attack order: that order goes dormant for as long as the fight lasts and resumes, same target, once
+  it is back on its feet (`Unit::join`/`Unit::release`, `resume_attack`) - this is how a target blasted out of
+  reach gets chased again instead of forgotten (pop3-rev-analysis.md "Resuming a fight cut short by a push"). A
+  target with no attack order of its own (the common case) still just goes idle.
 - Not yet: the ground check moving the middle off unsuitable ground, the winner's
   count, the move's sounds.
 
