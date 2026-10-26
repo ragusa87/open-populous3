@@ -53,6 +53,14 @@ shaman, over the supply of its built huts, 3 / 5 / 7 by size, at most 200) [ours
 - Both read `GameMap::housing(tribe)` (`game_core::headcount::Housing`: built huts per size, population, `room()`,
   `full()`), which the computer players read too.
 
+### Mana (`hud/mana.rs`) [ours]
+A strip under the population strip, on every tab: a "Mana" label (no original icon identified for it, so text
+stands in the way the population strip's own fallback does), the player's bank amount grouped by thousands, and a
+bar filling with its share of `MAX_MANA` (`GameMap::mana[PLAYER]`, spells.md "Mana": `bank`, `received`, `used` -
+only `bank` is shown; `received`/`used` are available to add to it later, e.g. as a tooltip, if that turns out to be
+wanted). No blinking at the cap (unlike the population strip): running out of room is a problem a player should
+notice, running out of mana to spend is not.
+
 ### Spells tab (`hud/spells.rs`)
 Draws the player's `game_core::spell_book::SpellBook` from the map (`player_book` = `GameMap::spell_books[PLAYER]`),
 no copy of its own. An original level brings its own loadout: the header's spells known and full, its spell
@@ -92,7 +100,7 @@ the curtain jumps up; none for spells without a range nor on god levels), left c
 the spell away (arrow cursor, clicks go back to the units' selection), right click puts it away without casting; meanwhile clicks do not select or move units. The others: `C`
 casts the selected spell (`Command::CastSelf`: the engine uses a charge and the shaman does her cast jump). Every
 cast goes through a command; the engine uses the charge and recharges the spells from the player's mana (spells.md
-"Mana"). No mana bar yet.
+"Mana"), shown in its own strip under the population strip ("Mana" above).
 Next: icons (Kenney game-icons), casting on the terrain, mana from followers, tooltips, Build tab icons
 
 ### Build tab (`hud/build.rs`)
