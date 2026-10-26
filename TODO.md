@@ -29,82 +29,28 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   looker leaves a melee alone, and whether a non-idle looker should also skip a challenge target the same way it
   skips a melee one instead of attacking it directly - needs a live check (two units challenging while a third,
   idle and then busy, watches from within sight).
-- [ ] Sermon (combat.md "Sermon"; pop3-rev-analysis.md "Preacher conversion" and "Command groups"): **correction, a
-  later session**: the line that used to stand here (claiming `preacher_strike_scan`/state 23 was confirmed to
-  convert ordinary followers, and that the type-4/6-only target table reading was "the wrong one") is itself wrong
-  - re-verified both ways this session: the raw table bytes still read type-4/6-only, and an exhaustive exe-wide
-  search found exactly one place in the whole exe that ever writes person state 23 (inside preacher_strike_scan
-  itself, gated by that same table). A type-2/3 (brave/warrior) person cannot reach state 23 at all, so the 7
-  live GONE/NEW brave/warrior pairs that originally motivated that claim were NOT produced by this mechanism.
-  **Now fully resolved (same session)**: those 7 pairs were a Hypnotism cast, not a sermon at all - a completely
-  different spell (0x50EA60/0x50EAB0/0x50EB00/0x4D92B0, see "Per spell" 7 and "Preacher conversion"'s own
-  write-up) that happens to use the identical kill-and-replace-preserving-type idiom, but targets ordinary
-  followers of any type (excluding shaman/angel/wildman) rather than preacher_strike_scan's enemy-preacher/
-  firewarrior-only candidates. Nothing about Sermon's own implementation needs to change because of this - it was
-  always a red herring for this TODO item. Separately, still confirmed either way: **a failed
-  conversion roll never falls back to melee against the preacher** - the original's
-  own roll-failure branch only ever continues a choreographed approach → face-and-hold → listening-animation →
-  effect-burst → idle sequence on the candidate (see "Preacher conversion"'s "sermon's candidate sub-state
-  (0-6)"), or reverts the candidate to its ordinary per-type default behaviour if the preacher becomes
-  unavailable mid-sermon; it never issues an attack order or writes a combat state. Confirmed live this session
-  (`preachwatch5.py`/`DIAG8.TXT`, ~70 sermons watched turn by turn): conversion success always lands at exactly
-  the tick the resist timer expires, independent of how far the candidate's own approach/listen sequence has
-  progressed - but **state 23 is not a blanket combat immunity**: 8 of 71 observed sermons ended with the
-  candidate pulled straight into an ordinary pre-fight (person state 29) by a THIRD-PARTY attacker, and 1 into
-  outright death, bypassing the sermon's own "revert to default" exit entirely. This is very likely the real
-  mechanism behind the original user account ("if the preaching doesn't pass it's then close range combat"): not
-  the sermon's own roll failing and escalating (confirmed false, see above), but an unrelated attacker engaging
-  the candidate while it happens to be mid-sermon. Our own sermon-ending rule (a freed listener strikes back at
-  once, `WorldEvent::StrikeBack`) covers exactly this case reasonably well, just via the preacher's own
-  eligibility rather than a direct third-party engagement of the listener - worth re-checking that our own combat
-  targeting can actually reach a listener mid-sermon the same way, rather than always treating it as untouchable
-  until freed. **Reconciled a later session**: the player-issued preach order (kind 33) walks up to one target
-  and sets it to a different state (5, "idle near a reference unit") that never itself produces a conversion -
-  exhaustively re-read both functions involved and confirmed neither ever reaches state 23. The actual link: the
-  same preacher's own autonomous auto-scan (the generic per-person rhythm check, 0x4D4690, running every eligible
-  tick regardless of current order) is suppressed only while the preacher already has an active, stopped kind
-  17/31/32 order - never for kind 33 - so it keeps firing throughout a manual preach command and can freshly
-  self-issue a kind-32 order, which IS the one that reaches `preacher_strike_scan`/state 23. **Refined a later
-  session, after surveying every `group_assign` call site in the exe**: the kind-33 order itself lives in a
-  secondary slot (like every other directed/spell-issued order found anywhere in the exe), while the self-issued
-  kind-32 order claims the PRIMARY slot (`slot=-1`, confirmed exclusive to autonomous scanners exe-wide) - and
-  `group_assign`'s own `slot<0` path only releases whatever was PREVIOUSLY in primary, never a secondary slot. So
-  the manual order isn't destroyed/replaced, it's out-prioritized: `order_execute` always runs primary over any
-  secondary when both are populated, so the kind-33 order goes dormant (but intact) for as long as the auto-issued
-  order occupies primary, and should resume on its own once that finishes and `order_advance` re-scans the
-  secondary slots - though the preacher's own order sub-state counter (`+0x2D`) is a shared, not per-group, field
-  that the interim kind-32 order also uses for its own bookkeeping, so whether the sermon truly resumes from where
-  it left off (vs. restarting its approach) is unconfirmed. So a manual preach command never converts anyone
-  directly; any conversion that follows one is actually produced by the preacher's own concurrent autonomous
-  behaviour taking over mid-sermon - see pop3-rev-analysis.md "Preacher conversion" and "Command groups" for the
-  full trace. Not confirmed against live play (e.g. watching a manual order visibly get out-prioritized). Our own
-  sermon/soul-convert coordinators should probably model this as "the preacher's autonomous conversion behaviour
-  runs regardless of a manual preach order and can override it", not as the manual order itself rolling anything.
-  Still open: the building variant (preaching to a building's people - `preach_order_handler`'s own target can be
-  any unit class, not gated to persons, and reads what looks like a building occupancy pair at a key transition,
-  but the gameplay meaning of that gate on a building target is unconfirmed); the soul flying from the preacher to
-  the converted; the halving flag of the first check;
-  how many listen at once and from how far; whether the preacher's sermon really plays its 5 identified phases in
-  order (`Pose::Preach` only draws one, anim 22, a guess) or just one; and (corrected this session: `+0x2E` bits
-  0-3 are not an "interrupted" flag at all, live-confirmed to be the ordinary `class_counter` rhythm field used
-  all over this codebase) what the candidate-side mechanism, if any, actually detects a disturbance mid-sermon -
-  live data shows none exists inside the sub-state machine itself, the candidate is just pulled into a different
-  person state from outside it (see above). Also newly resolved this session: candidate selection in
-  `preacher_strike_scan` never favours "whoever is currently attacking the striker" - it's pure proximity plus the
-  static per-type/tribe/state eligibility gates, confirmed by a full re-read of the scan loop; and the
-  previously-unidentified `0x4D850C` branch (a successful roll sometimes destroying the candidate with no
-  replacement) is now fully understood as two distinct cases - a still-unidentified per-candidate flag that skips
-  straight to destruction, and the tribe's population cap (200, exact) which instead skips both destruction and
-  replacement entirely - see "Preacher conversion" for both.
+- [ ] Sermon (combat.md "Sermon"; full trace, settled across several sessions, in pop3-rev-analysis.md "Preacher
+  conversion" and "Command groups" - summary here is the still-open residue only): a failed conversion roll never
+  falls back to melee on its own - the roll-failure branch only continues the candidate's listening choreography
+  or reverts it to its ordinary default behaviour. The "if the preaching doesn't pass it's then close range
+  combat" impression is a third-party attacker engaging the candidate mid-sermon (confirmed live: 8 of 71 observed
+  sermons), not the sermon's own exit. A manual preach order (kind 33) never itself converts anyone: the
+  preacher's own autonomous auto-scan can self-issue a kind-32 order that out-prioritizes (not destroys) it, and
+  that autonomous path is what actually reaches the conversion roll. Our own sermon-ending rule (a freed listener
+  strikes back at once, `WorldEvent::StrikeBack`) approximates the third-party-attack case via the preacher's own
+  eligibility - worth checking our combat targeting can reach a listener mid-sermon the same way. Model sermon/
+  soul-convert as "the preacher's autonomous conversion runs regardless of a manual preach order and can override
+  it", not as the manual order itself rolling anything. Still open (same sections): the building-target variant's
+  gameplay meaning; the soul flying from preacher to convert; the halving flag of the first check; how many listen
+  at once and from how far; whether the preacher's sermon plays its 5 identified phases in order or just one
+  (`Pose::Preach` only draws one, anim 22, a guess).
 - [ ] Resuming a fight cut short by a push (combat.md "Melee" rule 1: a fighter farther than `MELEE_LEASH` leaves;
-  pop3-rev-analysis.md "Resuming a fight cut short by a push", now fully traced): the original never cancels an
-  attacker's order when it enters a fight - starting/joining one only changes the person's state, its original
-  attack order (kind 19/21) just goes dormant (order_execute doesn't run outside state 0xA) rather than being
-  released. When the fight's own roster check drops a member that can no longer path back to the ring (the
-  traced identity of `MELEE_LEASH`), that person falls back to its per-type default state - state 0xA for an
-  ordinary fighter - and `order_execute` simply resumes the SAME still-intact order, so the attacker walks back
-  towards the same original target. It is not a dedicated pursuit state or stored "last seen" data, just an
-  ordinary order that survived the fight unreleased. **This is a real gap in our own code**: `Unit::join`
+  full trace in pop3-rev-analysis.md "Resuming a fight cut short by a push"): the original never cancels an
+  attacker's order when it enters a fight - it just goes dormant (released only when the fight's own roster check
+  drops the member) and `order_execute` resumes the SAME still-intact order once the fighter falls back to its
+  per-type default state, so it walks back towards the same original target. Not a dedicated pursuit state or
+  stored "last seen" data, just an ordinary order that survived the fight unreleased. **This is a real gap in our
+  own code**: `Unit::join`
   (`crates/game-core/src/unit.rs`) explicitly clears `self.queue`/`self.route`/`self.spell` when entering a
   Melee or Challenge coordinator, so a unit we knock out of a fight has nothing left to resume and just goes
   idle. Fixing it means NOT clearing the unit's standing attack order on entering combat (only its movement
@@ -168,7 +114,18 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
 - [ ] Spies: the player can disguise one in another tribe's colour; it then walks through that tribe unnoticed, except when hovered (spy indicator) or when it passes by a spy of the tribe it imitates. Its attack on a building: it sets a fire (anim 17), walks away, the building then takes damage; the spy stays unnoticed and can attack again later.
 - [ ] Death: `SPIRIT_TICKS` (currently one guessed 3 s constant, `unit.rs`) is confirmed wrong as a single variant (pop3-rev-analysis.md "Death and the spirit rise"). The original spawns a separate spirit object with TWO variants, chosen by whether the corpse died in a drowning-eligible spot: a brief 4-turn (0.33 s) stationary "calm" rise (object id → VSTART 38 for followers, 85 shaman - not drawn in post as a translucent copy for this one specifically, re-check), or - unconditionally for a wildman regardless of cause of death, and for anyone else only if drowning - a 32-turn (2.67 s) "climbing" rise with a REAL continuous upward velocity (40 world units/turn, no gravity, VSTART 31 for a wildman reusing the "flung in the air" tumble clip, 40 followers, 45 shaman) plus, for a wildman only, a continuous spin (91/2048 facing per turn) found nowhere else - this is the "flying into the sky" look. Implement both variants and the wildman-always/others-if-drowning split; `DYING_TICKS` (the fall before the spirit spawns) was not re-examined this session. Unit views are indexed by unit position and rebuilt whenever a unit leaves the map: key them by unit id once there are many units.
-- [ ] Wildmen (neutral "gaia" braves, spawned from the levels, standing still today): the original (pop3-rev-analysis.md "Wildmen") runs a confirmed, fully traced loop, state 1 → 8 → (5 or 6) → 16 → 8 → ...: from the idle tick (state 8) it FIRST searches up to 18 cells for a tree or plant (scenery types 1-6/7-8 specifically, confirmed from the exe's own scenery-type flags table) and, if one is found, idles beside it (state 5) - this is the "eating" stop. Only if no tree/plant is nearby does it fall back to a SECOND, also deliberate search (radius 12) for a shore cell (the same coastal-shape table used elsewhere for `is_land_at`, explicitly rejecting pure inland and pure open-sea cells), walks there (state 6, re-validating every turn that the destination is still shore-shaped) and idles there (state 16) - this is the "drinking" stop. There is still no hunger/thirst/food resource or stat anywhere - both searches only ever decide a DESTINATION for an idle/ambient animation, nothing is consumed. (Corrects an earlier, wrong pass through this code that called the destination "random, not a tree or water object" - it is deliberately one or the other.) Confirmed in play [observed]: always eating at the tree stop (state 5), always drinking at the shore stop (state 16) - the animation isn't a separate choice, it follows from which search succeeded; only the literal VSTART id each state resolves to for wildmen (already known from sprite inspection: eat-fruit=2, drink=4) is still not pinned to a specific line of code. The Convert spell turns them into the caster's braves (unchanged). No hunger/thirst/age death exists, but a wildman idling at its shore spot genuinely drowns fairly often [observed and traced] - not a special mechanic, the shore search only checks the coarse per-cell shape while the generic drowning check re-tests the unit's exact fine-grained position every turn with no bias toward the dry side (pop3-rev-analysis.md "Drowning"). Ordinary units' automatic auto-attack scan never targets a wildman (tribeless, tribe 0xFF) - only an explicit attack order, an area spell, or drowning at the shore can hurt one; whether an explicit attack order is honoured by the original is still open (see our blanket "unattackable" rule below). No periodic respawn exists in the original either: wildmen are placed once at level load and only ever decrease. Whatever kills it, a wildman's death always plays the "climbing + spinning" spirit-rise variant, never the calm ghost pose - see the new item below.
+- [ ] Wildmen (neutral "gaia" braves, spawned from the levels, standing still today): implement the original's
+  confirmed, fully traced idle loop (pop3-rev-analysis.md "Wildmen", "Drowning"): state 1 → 8 → (5 "eating" at a
+  tree/plant within 18 cells, or 6/16 "drinking" at a shore cell within 12 cells if none found) → 8 → ...; no
+  hunger/thirst resource exists anywhere, both searches only ever pick a destination for an idle animation. A
+  wildman idling at its shore spot genuinely drowns fairly often - no special mechanic, the shore search only
+  checks the coarse per-cell shape while the fine-grained per-turn drowning check has no bias toward the dry side.
+  The Convert spell turns them into the caster's braves (unchanged); no periodic respawn exists, they only ever
+  decrease. A wildman's death always plays the "climbing + spinning" spirit-rise variant, never the calm ghost
+  pose (see the death/spirit item below). Still open: the literal VSTART id each state resolves to (eat-fruit=2,
+  drink=4, already known from sprite inspection, not yet pinned to a line of code); whether an explicit attack
+  order is honoured by the original despite its auto-attack-scan exclusion (see the
+  `wildmen_never_fight_and_nobody_attacks_its_own` item above).
 - [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation. Done at level start without animation (`ReincarnationSite::welcomes`); check the range in the game (the levels only use the ring of 8 cells) and whether it happens on every reincarnation.
 - [ ] Animate the wildmen: eating fruit (2) and drinking (4), wandering around their spot, instead of standing still.
 - [ ] Selection of buildings (without the people inside), and of units inside them (`selection::selectable`). Vehicles: a click with nothing selected selects the people aboard (vehicles.md).
