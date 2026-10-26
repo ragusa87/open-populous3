@@ -66,4 +66,9 @@ pub enum Command {
     AddPatrolTargetPoint { player: u8, units: Vec<UnitId>, target: Target },
     /// `N`: releases `units`' whole patrol (its points are pruned once nothing still refers to them).
     ReleasePatrol { player: u8, units: Vec<UnitId> },
+    /// A plain group move order (`GameMap::move_orders`, more than one walker): `units` (already given their own
+    /// standing spot near `to`) space themselves into one new formation (formation.rs) instead of each aiming
+    /// straight at it. Carries the whole group for the same reason `SetPatrol` does: the formation is one new
+    /// shared object, minted inside one deterministic `apply` call.
+    Formation { player: u8, units: Vec<UnitId>, to: (u16, u16) },
 }

@@ -1127,13 +1127,18 @@ impl Unit {
         self.action = action;
     }
 
-    /// Its coordinator sends it to `at` (`WorldEvent::Placed`).
+    /// Its coordinator sends it to `at` (`WorldEvent::Placed`): a charger's goal, a fighter's place in its melee, or
+    /// (not a coordinator: formation.rs) a walker's own slot in its formation.
     pub fn placed(&mut self, at: (u16, u16)) {
         match self.action {
             Action::Challenge { challenge, role: crate::challenge::Role::Charging { speed, .. } } => {
                 self.action = Action::Challenge { challenge, role: crate::challenge::Role::Charging { to: at, speed } };
             }
             Action::Melee { melee, stance, .. } => self.action = Action::Melee { melee, place: at, stance },
+            Action::Walking { to } if to != at => {
+                self.action = Action::Walking { to: at };
+                self.planned_on = None;
+            }
             _ => {}
         }
     }

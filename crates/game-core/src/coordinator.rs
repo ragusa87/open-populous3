@@ -4,7 +4,9 @@
 //! removed when its situation ends; its units then find its id gone and are released (`GameMap::release_orphans`).
 //! Kinds: `challenge::Challenge`, `melee::Melee`, `armageddon::ArmageddonMatch` (global: no unit ever links to it);
 //! a test-only `Gathering` proves the pattern. A sermon is deliberately not one of these (sermon.rs): just state on
-//! the preacher and the listener directly, like the original.
+//! the preacher and the listener directly, like the original. A formation (formation.rs) is not one either: it does
+//! not own what its members are doing, only nudges where they walk, so it keeps its own member list and is its own
+//! typed list on `GameMap` instead.
 
 use crate::event::WorldEvent;
 use crate::id::{Id, Registry};

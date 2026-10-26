@@ -27,6 +27,7 @@ pub mod enter;
 pub mod fire;
 pub mod firebolt;
 pub mod firestorm;
+pub mod formation;
 pub mod foundation;
 pub mod gauge;
 pub mod ground_fire;

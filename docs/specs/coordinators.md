@@ -101,7 +101,7 @@ from the executable (pop3-rev-analysis.md "Combat").
 
 | Model | Name [wiki] | What we know | Will become |
 |---|---|---|---|
-| 1 | Formation | its own per-turn routine [exe] | a formation coordinator (group moves) |
+| 1 | Formation | its own per-turn routine [exe] | implemented (`formation.rs`), not as a `Coordinator` kind: membership isn't owned through a unit's own action the way a fight or challenge is, so it keeps its own member list and ticks as its own typed list instead (see "The pattern" above) |
 | 2 | Beacon | heads a list of its own in the tribe struct [exe] | unknown |
 | 3 | Thing Info Display | name only | probably nothing (display) |
 | 4 | Soul Convert | soul convert [exe]; no creation site found, only for 0xC below | conversion (with `ChangeOwner`) |

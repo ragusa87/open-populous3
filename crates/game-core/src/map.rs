@@ -77,6 +77,9 @@ pub struct GameMap {
     pub effects: Registry<Effect>,
     /// Objects coordinating several units, one registry per kind (coordinator.rs).
     pub coordinators: Coordinators,
+    /// Groups of units spacing themselves while walking to one shared move order's target (formation.rs); unlike
+    /// `coordinators`, membership is not owned through the units' own action, so this is its own typed list.
+    pub formations: Vec<crate::formation::Formation>,
     /// Firebolts in flight (`crate::firebolt`).
     pub bolts: Registry<crate::firebolt::Firebolt>,
     /// Boats and balloons (`crate::vehicle`).
@@ -146,7 +149,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -185,6 +188,7 @@ impl GameMap {
             shaman_omni: false,
             effects: Registry::default(),
             coordinators: Coordinators::default(),
+            formations: Vec::new(),
             bolts: Registry::default(),
             vehicles: Registry::default(),
             patrol_points: Registry::default(),
@@ -1079,6 +1083,26 @@ impl GameMap {
                 self.release_patrol(player, &units);
                 None
             }
+            Command::Formation { player, units, to } => {
+                self.form_up(player, &units, to);
+                None
+            }
+        }
+    }
+
+    /// `Command::Formation`: the player's own units among `units` still walking (so not already busy with
+    /// something else by the time this applies) and not already in one, up to `formation::MAX_MEMBERS`, become one
+    /// new formation seeded at `to` ("Formations" [exe]). A lone walker needs no spacing: a no-op below two.
+    fn form_up(&mut self, player: u8, units: &[UnitId], to: (u16, u16)) {
+        let members: Vec<UnitId> = units
+            .iter()
+            .copied()
+            .filter(|&id| self.unit(id).is_some_and(|u| u.owner == player && matches!(u.action, Action::Walking { .. })))
+            .filter(|id| !self.formations.iter().any(|f| f.members.contains(id)))
+            .take(crate::formation::MAX_MEMBERS)
+            .collect();
+        if members.len() > 1 {
+            self.formations.push(crate::formation::Formation::new(player, to, members));
         }
     }
 
@@ -1216,7 +1240,9 @@ impl GameMap {
         }
         // Coordinators, before the units, so that one ending this turn is gone when its units tick (coordinators.md):
         // a. scans that start coordinators or add units to them; b. each one's turn, kind after kind; c. the finished
-        // ones removed; d. their events applied in order; e. units whose coordinator is gone released.
+        // ones removed; d. their events applied in order; e. units whose coordinator is gone released. Formations
+        // (formation.rs) tick right after, for the same reason, though they are not coordinators themselves
+        // (membership isn't owned through the units' own action).
         if !frozen {
             self.spot_enemies();
             self.tend_attacks();
@@ -1225,6 +1251,7 @@ impl GameMap {
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
         self.release_orphans();
+        dirty.extend(self.tend_formations());
         self.prune_patrol_points();
         self.prune_hidden_points();
         self.tend_vehicles();
@@ -1466,6 +1493,21 @@ impl GameMap {
         let mut events = coordinators.tick(self.now, self, &mut rng);
         (self.coordinators, self.rng) = (coordinators, rng);
         events.extend(self.tend_sermons());
+        self.apply_events(events)
+    }
+
+    /// Every formation's turn (formation.rs), reading the map as it was before any of them: each one drops its own
+    /// members no longer walking (arrived, reassigned, dead, or stranded) and nudges the rest towards their own
+    /// slot; the finished ones (no members left) removed, their events applied in order.
+    fn tend_formations(&mut self) -> Vec<DirtyRect> {
+        let (mut formations, mut rng) = (std::mem::take(&mut self.formations), self.rng);
+        let mut events = Vec::new();
+        formations.retain_mut(|f| {
+            let (finished, step_events) = f.tick(self.now, self, &mut rng);
+            events.extend(step_events);
+            !finished
+        });
+        (self.formations, self.rng) = (formations, rng);
         self.apply_events(events)
     }
 
@@ -2638,6 +2680,36 @@ mod tests {
         assert_eq!(distinct.len(), spots.len(), "one spot each: {spots:?}");
         let cells: Vec<_> = m.units.iter().filter(|u| u.owner == 0).map(Unit::cell).collect();
         assert!(cells.iter().all(|&(x, z)| (x - c - 2).abs() <= 2 && (z - c - 6).abs() <= 2), "16 units within 2 cells: {cells:?}");
+    }
+
+    #[test]
+    fn a_plain_group_move_order_forms_up_and_clears_up_once_everyone_arrives() {
+        let mut m = GameMap::sandbox_units();
+        m.trees.clear();
+        let c = MAP_SIZE as i32 / 2;
+        let to = slots::cell_centre((c + 2, c + 6));
+        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
+        for cmd in m.move_orders(0, &group, to) {
+            m.apply(&cmd);
+        }
+        assert_eq!(m.formations.len(), 1, "one shared formation for the whole group");
+        assert_eq!(m.formations[0].members.len(), group.len().min(crate::formation::MAX_MEMBERS), "up to MAX_MEMBERS joined it");
+        for _ in 0..600 {
+            m.tick();
+        }
+        assert!(m.units.iter().filter(|u| u.owner == 0).all(|u| u.action == Action::Idle), "all arrived");
+        assert!(m.formations.is_empty(), "cleared up once nobody is still walking");
+    }
+
+    #[test]
+    fn a_lone_walker_never_forms_up() {
+        let mut m = GameMap::sandbox_units();
+        let lone = m.units.iter().find(|u| u.owner == 0 && u.kind != UnitKind::Shaman).unwrap().id;
+        let to = slots::cell_centre((MAP_SIZE as i32 / 2, MAP_SIZE as i32 / 2));
+        for cmd in m.move_orders(0, &[lone], to) {
+            m.apply(&cmd);
+        }
+        assert!(m.formations.is_empty());
     }
 
     #[test]
