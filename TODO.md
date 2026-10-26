@@ -193,6 +193,17 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
     1280 cumulative, ally push only the last turn) - this is a verify-matches-trace pass, not a new measurement,
     since the exact numbers are already live-confirmed there. Only once that audit comes back clean should a
     fresh live check of the original's own blast be requested, and only for whatever the audit can't explain.
+  - Open question, not traced either way: does getting hit by an offensive spell (Blast first, but the same
+    question applies to Lightning/Swarm/etc.) make an otherwise-idle person fight back against the caster, the
+    way a firewarrior hit by a bolt does (`firebolt::fires_back` - but that is narrowly firewarrior-only, not a
+    general rule, and nothing in "Auto-attack" [exe] ties a hit to an immediate scan: the passive look only runs
+    on its own `look_every` rhythm regardless of being struck)? combat.md "Spotting" only says a preacher
+    "defends itself like anyone when attacked", which reads as the melee case (being struck there), not a ranged
+    spell hitting someone with no order at all. Today a blasted idle person just goes idle (pop3-rev-analysis.md
+    "Resuming a fight cut short by a push": "a target with no order of its own just goes idle instead") and only
+    picks a fight later if its own ordinary passive scan happens to spot the caster - needs a live check (hit an
+    idle, far-from-everyone follower with a blast and watch whether it turns to attack the caster) before
+    guessing either way.
 - [ ] Lightning panic, open question (not yet traced either way): **reported, 2026-10-25**, live play describes
   lightning as "less effective" than remembered, specifically fewer panicking units around the strike. Per the
   current trace (pop3-rev-analysis.md "Per spell" row 3 and "Components"), neither Lightning's own strike (an
