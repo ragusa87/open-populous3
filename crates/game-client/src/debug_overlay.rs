@@ -37,6 +37,7 @@ const SPELL: Color = Color::srgb(0.6, 0.9, 0.3);
 const ASHES: Color = Color::srgb(0.6, 0.6, 0.6);
 const WEAR_BACK: Color = Color::srgb(0.3, 0.3, 0.3);
 const PATROL: Color = Color::srgb(0.3, 0.9, 0.9);
+const FORMATION: Color = Color::srgb(0.95, 0.6, 0.95);
 /// The wear bar: its height over the ground and its length, cells.
 const BAR_LIFT: f32 = 1.2;
 const BAR_LENGTH: f32 = 1.0;
@@ -201,6 +202,19 @@ fn draw(
                 outline(outline_circle(cells(place), PLACE_MARK), MELEE);
                 outline(vec![cells((u.x, u.z)), cells((u.x, u.z)) + torus_delta_cells(cells((u.x, u.z)), cells(place))], MELEE.with_alpha(0.6));
             }
+        }
+    }
+    // A formation (formation.rs): the controller's own reference point, then each member's own slot and a line to
+    // it from where that member currently stands.
+    for f in &map.formations {
+        let at = cells(f.at);
+        outline(outline_circle(at, PLACE_MARK * 2.0), FORMATION);
+        for (k, &id) in f.members.iter().enumerate() {
+            let Some(u) = map.unit(id) else { continue };
+            let pos = cells((u.x, u.z));
+            let slot = cells(f.slot(k));
+            outline(outline_circle(slot, PLACE_MARK), FORMATION);
+            outline(vec![pos, pos + torus_delta_cells(pos, slot)], FORMATION.with_alpha(0.6));
         }
     }
     for u in &map.units {

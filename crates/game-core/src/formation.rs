@@ -60,8 +60,9 @@ impl Formation {
 
     /// Where the `k`-th member stands in the formation: a fixed slot around `at`, turned by the controller's own
     /// heading. The grid (`SLOT_COLS` columns) is not the original's own layout (not in the trace): a guess, picked
-    /// only to keep up to `MAX_MEMBERS` apart and roughly centred on `at`.
-    fn slot(&self, k: usize) -> (u16, u16) {
+    /// only to keep up to `MAX_MEMBERS` apart and roughly centred on `at`. Public for the client's debug overlay
+    /// (F4), which draws every member's own slot.
+    pub fn slot(&self, k: usize) -> (u16, u16) {
         let k = k as i32;
         let rows = MAX_MEMBERS as i32 / SLOT_COLS;
         let (row, col) = (k / SLOT_COLS, k % SLOT_COLS);
