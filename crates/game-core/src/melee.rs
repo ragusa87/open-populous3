@@ -507,6 +507,21 @@ mod tests {
         );
     }
 
+    /// The resume is for an order the fight put on hold, not a reflex of being blasted: a warrior that was never
+    /// given one (idle, never fought) has nothing to pick back up, same as the common case in pop3-rev-analysis.md
+    /// "Resuming a fight cut short by a push" ("a target with no order of its own just goes idle instead").
+    #[test]
+    fn an_idle_warrior_blasted_away_has_nothing_to_resume() {
+        let mut map = GameMap::sandbox_walk().seeded(1);
+        let s = map.shaman_of(0).unwrap();
+        let w = map.spawn(1, UnitKind::Warrior, (s.x.wrapping_add(1024), s.z)).id;
+        let blast_at = { let u = map.unit(w).unwrap(); (u.x.wrapping_add(512), u.z) };
+        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at: blast_at } });
+        map.run(crate::unit::CAST_RELEASE);
+        until(&mut map, 300, |m| !matches!(m.unit(w).unwrap().action, Action::Tumbling)).expect("back on its feet");
+        assert_eq!(map.unit(w).unwrap().action, Action::Idle, "nothing to resume: stays idle, not Attacking anyone");
+    }
+
     /// `kind` of `tribe` going for `target`, standing next to it.
     fn attacker(map: &mut GameMap, tribe: u8, kind: UnitKind, target: UnitId) -> UnitId {
         let t = map.unit(target).unwrap();
