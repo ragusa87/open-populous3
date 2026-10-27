@@ -79,6 +79,12 @@ pub fn outline_circle(centre: Vec2, radius: f32) -> Vec<Vec2> {
     (0..=CIRCLE_POINTS).map(|k| centre + Vec2::from_angle(k as f32 * TAU / CIRCLE_POINTS as f32) * radius).collect()
 }
 
+/// A straight segment from `a` to `a + delta` (cells), sampled along its length so it follows the ground instead
+/// of just interpolating the height between its two ends.
+pub fn line_cells(a: Vec2, delta: Vec2) -> Vec<Vec2> {
+    (0..=SIDE_POINTS).map(|k| a + delta * (k as f32 / SIDE_POINTS as f32)).collect()
+}
+
 /// The closed outline of the square `half` each side of `centre`, sampled along its sides to follow the ground.
 pub fn outline_square(centre: Vec2, half: f32) -> Vec<Vec2> {
     let corners = [Vec2::new(-half, -half), Vec2::new(half, -half), Vec2::new(half, half), Vec2::new(-half, half), Vec2::new(-half, -half)];
@@ -137,8 +143,7 @@ fn draw(
     for (_, c) in map.coordinators.challenges.iter() {
         let (Some(a), Some(t)) = (map.unit(c.attacker), map.unit(c.target)) else { continue };
         let (a, t) = (cells((a.x, a.z)), cells((t.x, t.z)));
-        let toward = a + torus_delta_cells(a, t);
-        outline(vec![a, toward], CHALLENGE);
+        outline(line_cells(a, torus_delta_cells(a, t)), CHALLENGE);
         outline(outline_circle(t, cells_of(FIGHT_REACH)), CHALLENGE);
         outline(outline_square(t, cells_of(SHOVE_REACH)), CHALLENGE.with_alpha(0.5));
     }
@@ -177,7 +182,7 @@ fn draw(
     }
     for (_, b) in map.bolts.iter() {
         let at = cells(b.at);
-        outline(vec![at, at + torus_delta_cells(at, cells((b.aim.0, b.aim.1)))], BOLT);
+        outline(line_cells(at, torus_delta_cells(at, cells((b.aim.0, b.aim.1)))), BOLT);
     }
     for p in &map.ashes.patches {
         let fade = (p.darkness - game_core::ashes::FADED) as f32 / (game_core::ashes::DARK - game_core::ashes::FADED) as f32;
@@ -189,7 +194,7 @@ fn draw(
         let Action::Listening { preacher, .. } = l.action else { continue };
         let Some(p) = map.unit(preacher) else { continue };
         let p = cells((p.x, p.z));
-        outline(vec![p, p + torus_delta_cells(p, cells((l.x, l.z)))], SERMON);
+        outline(line_cells(p, torus_delta_cells(p, cells((l.x, l.z)))), SERMON);
     }
     for (id, m) in map.coordinators.melees.iter() {
         let at = cells(m.at);
@@ -200,7 +205,8 @@ fn draw(
                 && melee == id
             {
                 outline(outline_circle(cells(place), PLACE_MARK), MELEE);
-                outline(vec![cells((u.x, u.z)), cells((u.x, u.z)) + torus_delta_cells(cells((u.x, u.z)), cells(place))], MELEE.with_alpha(0.6));
+                let pos = cells((u.x, u.z));
+                outline(line_cells(pos, torus_delta_cells(pos, cells(place))), MELEE.with_alpha(0.6));
             }
         }
     }
@@ -214,7 +220,7 @@ fn draw(
             let pos = cells((u.x, u.z));
             let slot = cells(f.slot(k));
             outline(outline_circle(slot, PLACE_MARK), FORMATION);
-            outline(vec![pos, pos + torus_delta_cells(pos, slot)], FORMATION.with_alpha(0.6));
+            outline(line_cells(pos, torus_delta_cells(pos, slot)), FORMATION.with_alpha(0.6));
         }
     }
     for u in &map.units {
@@ -269,6 +275,15 @@ mod tests {
         assert_eq!(s.len(), 4 * SIDE_POINTS + 1);
         assert!(s.iter().all(|p| p.x.abs().max(p.y.abs()) == 1.0), "on the square's sides");
         assert_eq!((s[0], *s.last().unwrap()), (Vec2::new(-1.0, -1.0), Vec2::new(-1.0, -1.0)));
+    }
+
+    #[test]
+    fn a_line_is_sampled_along_its_length_not_just_its_ends() {
+        let l = line_cells(Vec2::new(2.0, 2.0), Vec2::new(8.0, 0.0));
+        assert_eq!(l.len(), SIDE_POINTS + 1);
+        assert_eq!(l[0], Vec2::new(2.0, 2.0), "starts at a");
+        assert_eq!(*l.last().unwrap(), Vec2::new(10.0, 2.0), "ends at a + delta");
+        assert_eq!(l[SIDE_POINTS / 2], Vec2::new(6.0, 2.0), "passes through points in between");
     }
 
     #[test]
