@@ -131,6 +131,20 @@ impl SpellKind {
         }
     }
 
+    /// `SPELL_<X>_OPT_S` (spells.md "Original balance"): the original's own "advisor" pacing, in seconds, for
+    /// this spell to reach full charge (`pop3-rev-analysis.md` "The mana bar (HUD)").
+    pub fn advisor_seconds(self) -> u32 {
+        match self {
+            SpellKind::Blast => 30,
+            SpellKind::GhostArmy | SpellKind::Armageddon => 60,
+            SpellKind::Swarm => 45,
+            SpellKind::Invisibility | SpellKind::MagicalShield | SpellKind::Bloodlust | SpellKind::Teleport => 120,
+            SpellKind::Lightning | SpellKind::Whirlwind | SpellKind::Firestorm | SpellKind::Swamp | SpellKind::LandBridge => 180,
+            SpellKind::Hypnotism | SpellKind::Erosion | SpellKind::Earthquake | SpellKind::Flatten => 240,
+            SpellKind::AngelOfDeath | SpellKind::Volcano | SpellKind::Convert => 300,
+        }
+    }
+
     /// How far the shaman casts it at the middle altitude band (`SP_W_RANGE`, world units, `cast_range`);
     /// None: no limit (Teleport's 65 536 is the whole torus, Armageddon has none).
     pub fn range(self) -> Option<u32> {
@@ -336,6 +350,14 @@ impl SpellBook {
         if self.slot(kind).is_some_and(|s| s.availability == Availability::Discoverable) {
             self.set(kind, Availability::Known);
         }
+    }
+
+    /// The spell the mana bar's "advisor" pacing estimate is read from: the first charging spell
+    /// (`SpellSlot::takes_mana`), in book order — the same set `charge` splits mana between
+    /// (`pop3-rev-analysis.md` "The mana bar (HUD)": "pick a candidate spell the same way the distribution
+    /// loop itself does").
+    pub fn charging_candidate(&self) -> Option<SpellKind> {
+        self.slots.iter().find(|s| s.takes_mana()).map(|s| s.kind)
     }
 
     /// Share `mana` evenly between the spells that take it (`SpellSlot::takes_mana`); a spell filled up passes
