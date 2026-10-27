@@ -105,7 +105,11 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
 - Once placed, the door is closed: object 192 [player, objects.md "Pyramid of knowledge frames"].
 - She prays (sits) at the door until its gauge is full [player]. Until the reward, the gauge behaves exactly like a
   totem's: it builds up while she prays, stops when she is attacked or leaves, and goes down while nobody prays
-  [player].
+  [player]. **Confirmed live** (pop3-rev-analysis.md "The vault (`TriggerType` 4, 'library')"): it is literally the
+  same shared gauge engine as a totem's, just with `TriggerCount` fixed at 1 (her own slot) - full speed is the
+  totem formula's degenerate `n = C = 1` case, measured filling at exactly +1/4 turns with zero gaps. There is a
+  real ~3 s travel/approach delay between the order being given and the gauge actually starting to move - the
+  gauge only starts once she is genuinely praying at the door, not from the order.
 - The door then opens, sliding up (points 192 -> 191), for a short time; she walks in; reaching the middle grants
   the reward (permanent spell or building) [player]. She walks out, the door closes.
 - The top (petals) stays open the whole time, through the door opening for her [player].
@@ -148,5 +152,8 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   [player]. The icon goes away once the reward is granted [player].
 
 ## Open
-- `PrayTime`'s unit, the drain rate (linear; as fast as a full fill [ours]), and whether the soft curve
-  matches the game.
+- `PrayTime`'s unit for a **vault** is confirmed (pop3-rev-analysis.md "The vault"): the same 4-turn tick as a
+  totem's gauge, cap = `PrayTime` directly (since a vault's `TriggerCount` is always 1). Still open: a vault's
+  drain rate with nobody praying (not observed live yet - the one live trial prayed straight through to full), and
+  whether a totem's own soft curve (`n < TriggerCount`) matches the game (only the vault's trivial `n = C = 1` case
+  has been checked live so far).

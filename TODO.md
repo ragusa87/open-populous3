@@ -136,8 +136,13 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   (invisible flickering faster near the end) and invisible enemies hidden (sprite, shadow, hover, selection), the
   original's colour tables (our shield tint is a guess), the optional health bar over own damaged people (commands
   100/101).
-- [ ] Physics (`game_core::physics::step`: velocity, gravity 32, touchdown; landing in the sea or on walkable ground done, `Unit::touch_down`), to the original's rules (pop3-rev-analysis.md "Blast push and flight"): velocity caps (192 per horizontal axis, 512 vertical), air drag 2 per turn per horizontal axis, the unit spinning 26° per turn in the air, a scream on take-off; landing: dust and a sound at a vertical speed <= -100, `FALL_OUT_OF_WW_DAMAGE` 700 at <= -200 (`Touchdown::speed`), none on water cells; on the ground: sliding down the slope (gradient over ±76 units) with friction 28 per turn per axis (72 on special terrain), facing where it slides (`Tumble` pose; a grounded tumbling unit does not move yet). Speeds are per original turn: convert to our ticks (`game_core::balance`). Ordinary falls (ground dropping under a standing or walking person: earthquake, erosion, flatten) fall with the same gravity and drag, without fall damage; rising ground lifts people. Still open: landing on a cliff or a building (stands up meanwhile), what the original does to a unit landing in water (ours dies at once), boats landing on the sea once vehicles exist, bumping into buildings and cliffs, a task dropped or kept when flung.
+- [ ] Physics (`game_core::physics::step`: velocity, gravity 32, touchdown; landing in the sea or on walkable ground done, `Unit::touch_down`), to the original's rules (pop3-rev-analysis.md "Blast push and flight"): velocity caps (192 per horizontal axis, 512 vertical), air drag 2 per turn per horizontal axis, the unit spinning 26° per turn in the air, a scream on take-off; landing: dust and a sound at a vertical speed <= -100, `FALL_OUT_OF_WW_DAMAGE` 700 at <= -200 (`Touchdown::speed`), none on water cells; on the ground: sliding down the slope (gradient over ±76 units) with friction 28 per turn per axis (72 on special terrain), facing where it slides (`Tumble` pose; a grounded tumbling unit does not move yet). Speeds are per original turn: convert to our ticks (`game_core::balance`). Ordinary falls (ground dropping under a standing or walking person: earthquake, erosion, flatten) fall with the same gravity and drag, without fall damage; rising ground lifts people. **Resolved this session (pop3-rev-analysis.md "Person physics"): landing on a building gets no special handling at all.** The original's `ground(pos)` (`0x44E940`) is a pure terrain-mesh height interpolation (a cell's 4 corner heights, diagonal-split-aware) with no building/unit/class check anywhere in it - a cliff is just handled correctly as steep terrain (same function), but a building sitting on the landing cell is invisible to it. A thrown person's touchdown height is always the raw ground height there, same as open ground - no "stands up on the roof" behaviour exists to port; a landing that happens to fall on a building's footprint should just land at ground level (through/inside the building's base), matching ours needing no special case either. Still open: what the original does to a unit landing in water (ours dies at once), boats landing on the sea once vehicles exist, bumping into buildings and cliffs, a task dropped or kept when flung.
 - [ ] Flying: units thrown by Whirlwind / Blast / explosions follow a ballistic or carried path (flying 61, tumbling 73 anims), land with damage, drown if they land in the sea.
+- [ ] Ground recovery after landing (person state 19, pop3-rev-analysis.md "Tumbling and ground recovery", live-checked 2026-10-27): the original does not go straight from a grounded tumble back to Idle - it stays locked (no orders) for anywhere from a handful to several dozen turns (longer with bad luck on two small-odds per-32-turn rerolls) while it picks a nearby clear spot and settles, before resuming its ordinary per-type behaviour. No new animation asset needed - it plays ordinary Idle/Walk poses throughout (resolved from `0x5A6D50`'s action table, statically, not confirmed on the one live trial so far), switching to holding-wood/walk-with-wood instead if the person happens to be carrying wood (`+0x78`) at the time, with a few dropped-wood debris puffs along the way (one per 100 wood) if so. Visually this likely just reads as the person standing/walking around unresponsive, not visibly struggling on the ground. Ours (units.md "Tumbling") goes idle (and responsive) the instant it stops moving - should add a short randomized locked/unresponsive grace period instead. Not measured: real-world duration distribution (only one live trial so far, ~90 turns on a mild landing).
+  - **Follow-up live check needed**: blast/tumble a brave that is actively carrying wood (`+0x78` nonzero) and watch
+    whether it (a) shows the holding-wood/walk-with-wood pose instead of plain idle/walk while relocating, and (b)
+    drops a small debris puff with a sound once per 100 wood while settling, down to 0. The one live trial done so
+    far did not confirm this - the unit's wood status wasn't logged, so this is a static-table reading only.
 - [ ] Vehicle huts (vehicles.md "Vehicle huts", done with guesses): check in the game the crew size (4), the work per vehicle (1200 crew-turns), whether mana is spent, where the vehicle appears, and a hut's queue at the door (types 13-16 have one, pop3-rev-analysis.md "The queue at the door").
 - [ ] Whirlwind spell (to implement), on a vehicle: everyone aboard is put out, it spins (roll +204, pitch +153 /2048 per tick) for 10 ticks (boat; ends early when the ground reaches it) or 2 (balloon), then explodes like a destroyed boat on land (pop3-rev-analysis.md "Life, damage and destruction", state 9).
 - [ ] Vehicle destruction (vehicles.md; health, damage from blasts and bolts, sinking, rising and exploding done): the partial explosion of a boat on land (its faces flying off, `explosion.rs`).
@@ -193,17 +198,17 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
     1280 cumulative, ally push only the last turn) - this is a verify-matches-trace pass, not a new measurement,
     since the exact numbers are already live-confirmed there. Only once that audit comes back clean should a
     fresh live check of the original's own blast be requested, and only for whatever the audit can't explain.
-  - Open question, not traced either way: does getting hit by an offensive spell (Blast first, but the same
-    question applies to Lightning/Swarm/etc.) make an otherwise-idle person fight back against the caster, the
-    way a firewarrior hit by a bolt does (`firebolt::fires_back` - but that is narrowly firewarrior-only, not a
-    general rule, and nothing in "Auto-attack" [exe] ties a hit to an immediate scan: the passive look only runs
-    on its own `look_every` rhythm regardless of being struck)? combat.md "Spotting" only says a preacher
-    "defends itself like anyone when attacked", which reads as the melee case (being struck there), not a ranged
-    spell hitting someone with no order at all. Today a blasted idle person just goes idle (pop3-rev-analysis.md
-    "Resuming a fight cut short by a push": "a target with no order of its own just goes idle instead") and only
-    picks a fight later if its own ordinary passive scan happens to spot the caster - needs a live check (hit an
-    idle, far-from-everyone follower with a blast and watch whether it turns to attack the caster) before
-    guessing either way.
+  - **Resolved, live-checked 2026-10-27** (pop3-rev-analysis.md "A blasted person fighting back"): no, there is no
+    spell-specific or caster-specific "fight back" mechanism, and the guess already in this TODO was right - it is
+    nothing but the generic Auto-attack scan (`look_every` rhythm, independent of being struck) happening to find
+    an enemy once the person lands from the push. Watched a brave hit by two separate Blast casts: the first
+    landed it nowhere near anyone and it just sat idle for 90 turns with no order; the second landed it a few
+    cells from an enemy shaman, and ~4 turns later the ordinary auto-attack scan self-issued a cell-targeted
+    attack order (not caster-targeted - it walked to whichever enemy the scan's square found, which here happened
+    to be the shaman) that resolved into a real melee. Today's implementation already matches this (a blasted idle
+    person goes idle and only re-engages via its own passive scan) - no code change needed here. Same mechanism
+    should hold for Lightning/Swarm/Whirlwind (being idle-with-no-order after any push/stun, not Blast-specific),
+    not separately re-checked.
 - [ ] Lightning panic, open question (not yet traced either way): **reported, 2026-10-25**, live play describes
   lightning as "less effective" than remembered, specifically fewer panicking units around the strike. Per the
   current trace (pop3-rev-analysis.md "Per spell" row 3 and "Components"), neither Lightning's own strike (an
@@ -225,6 +230,13 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [x] Mana bar in the HUD for the player (`GameMap::mana`: `bank`, `received`, `used`): `hud/mana.rs`, a strip under
   the population strip showing the bank against `MAX_MANA`; `received`/`used` aren't drawn yet, only available for
   later (e.g. a tooltip) if wanted.
+- [ ] The bar's own fill rule doesn't match the original (pop3-rev-analysis.md "The mana bar (HUD)"): it isn't
+  `bank` against `MAX_MANA` at all. With no spell charging the original bar is always full regardless of `bank`;
+  with one charging, it shows last turn's income against an "advisor" pacing estimate for that spell (so a short
+  bar means income fell behind the estimate, not that the bank is low). It's also a two-colour fill/track bar
+  (tribe-accent colour filled, a fixed colour for the rest) with a separate flat-colour flash condition, not a
+  single solid colour. `ManaView`/`mana_view` would need `last_income` and a per-spell pacing estimate, neither
+  of which `ManaPool` tracks today.
 - [ ] Generated by every follower, busy or idle (huts-and-training.md rule 7), instead of the fixed `mana::INCOME`.
 - [ ] Delayed reservoir (gifts, shaman kills), shaman death losses (pop3-rev-analysis.md "Mana rules").
 - [ ] Shaman-death mana dispatch (pop3-rev-analysis.md "Shaman death"): not implemented at all yet (no code in
@@ -330,7 +342,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Totems: ids (`GameMap::new_id`) and removal from `GameMap::totems` once sunk (exhausted after their gifts, `NumOccurences` times; infinite ones stay), then `Order::Worship` / `Action::Worshipping` by id.
 - [ ] Stone totem: check in the game what it does after a completion that is not its last, the timings (turn 2 s, hold 1 s, sink 4 s) and the smoke; other turns to try are listed in worship.md.
 - [ ] Totem gifts not handled yet (logged as `Reward::Unhandled`): effects (land bridge, lightning...), revealed scenery and triggers, vehicles, the Angel of Death of type 5 totems; mana once mana exists. Check what `NumOccurences` 0 means.
-- [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); check `PrayTime`'s unit and the drain speed in the game.
+- [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); `PrayTime`'s unit is now confirmed live (worship.md "Open", pop3-rev-analysis.md "The vault"): the same 4-turn tick as a totem's gauge, cap = `PrayTime` directly. Still to check in the game: the drain speed with nobody praying (not observed live yet).
 - [ ] Prisons: levels where the shaman starts imprisoned; she is locked inside (units.md "Locked units") until freed.
 - [ ] Generated pyramid: fold its capstone like the original's top (a separate mesh in `tools/generate_buildings.py`).
 - [ ] Pyramids: draw the reward as an icon at the top (cursor sprites 38-57 spells, 58-65 buildings), gone once the reward is granted.

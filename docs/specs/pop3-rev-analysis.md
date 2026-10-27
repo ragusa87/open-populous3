@@ -31,6 +31,9 @@ so a live measurement may run on it with the addresses translated.
   surplus banked, a delayed reservoir for gifts. See "Mana rules".
 - **Income is busy/idle per person**, from constants that `constant.dat` cannot change. It is not the
   `MANA_F_<PERSON>` × activity % model of huts-and-training.md. See "Impact on our specs".
+- **The HUD mana bar is not `bank / MAX_MANA`** [exe]: with nothing charging it is full by construction; with a
+  spell charging it shows last turn's income against an "advisor" pacing estimate for that spell, so a short bar
+  means income fell behind the estimate, not that the bank is low. See "The mana bar (HUD)".
 - **Chopping is a countdown, then one transfer** [exe, measured]: 20 turns next to the tree, then a whole load
   (100 wood, one of our pieces) moves at once. A wood pile takes 3 turns. See "Wood rules".
 - **A hut has two independent counters** [exe]: breeding (a brave at the door, slower as the tribe grows) and
@@ -200,7 +203,9 @@ So spells charge first and only the surplus is banked: the bar fills spell by sp
   training ends.
 - The bank (+0x94D) is written in the distribution only on the controller type 1 path (0x41AD1C); the other tribes'
   path ends with `incoming = 0` (0x41AD57) after the spells and training buildings. How their surplus reaches the
-  bank is not traced.
+  bank is not traced - one partial answer found: when a pass finds no training building that needed funding that
+  turn (0x41AB63), the leftover is not banked there either, just discarded with `incoming`, alongside firing the
+  one-shot advisor message "The mana bar (HUD)" describes.
 
 ### Shaman death
 - `base = bank`; for a human tribe (controller type 2), `base = needed + stored building mana`.
@@ -212,6 +217,43 @@ So spells charge first and only the surplus is banked: the bar fills spell by sp
 ### Start
 - `bank = START_MANA` (file 30 000, exe 42 000).
 - `CONVERT_MANA` (exe 6000) and `SOUL_GRAB` (exe 30 000) exist, but no reader is found yet.
+
+### The mana bar (HUD)
+The spell tab's one HUD mana bar (`draw_mana_bar` 0x49E8B0), between the population strip and the spell list,
+always for the local player's own tribe. It is not `bank` against `MAX_MANA`: it shows how well last turn's
+income kept pace with an "advisor" estimate of what the currently-charging spell needs.
+```text
+advisor_eta = tribe.advisor_eta                   # +0x961; 0 when no learned/unblocked/not-full spell is picked
+if advisor_eta <= 0:
+    value, scale = 256, 256                       # => always full
+else:
+    scale = advisor_eta * 456 / 256                # advisor_eta x ~1.78
+    value = min(last_income, scale)
+fraction = value / scale
+```
+- `advisor_eta` (0x41A850, inside the distribution turn, "Distribution") is recomputed every income turn: pick a
+  candidate spell the same way the distribution loop itself does (0x41AD70), read its `SPELL_<spell>_OPT_S`
+  constant ("Charges and mana"), scale it by a global byte (0x89D161, not identified) over one more than the
+  constant this file elsewhere guesses is `MANA_UPDATE_FREQ` (0x5AA44C, "Reference"), then by the spell's own cost
+  over the picker's returned share. Written only for the local player's tribe - the only reader found anywhere of
+  `SPELL_<X>_OPT_S`.
+- So with nothing charging, the bar is always full by construction (`fraction = 1`), not because `bank` happens to
+  be full. With a spell charging, a full bar means last turn's income kept pace with the advisor's own estimate
+  for that spell; a short bar means it fell behind - correlates with the tribe's busy/idle mix that turn ("Income"),
+  since fewer busy (or more idle) followers lower `last_income` directly.
+- Fill colour: left of the fill point, the tribe's own UI-accent colour (0x89C6F5, the same 5-byte per-tribe
+  palette record used elsewhere, "Status markers over people"); right of it, a second, tribe-independent colour
+  from a small fixed table - a plain fill/track bar, not two tracked quantities.
+- A separate draw path paints the whole bar one flat colour instead of the fill above, gated by a per-tribe flag
+  (0x89C66D bit 0, set/cleared once per tribe inside the same distribution turn) and a second byte (0x89798B)
+  being 0 - two bytes from the training bar's own documented blink flag (0x897989, "The panel's training bar"),
+  so plausibly the same blink-timer family rather than an unrelated second blink; not confirmed to be literally
+  the same flag. Suppressed entirely in the sandbox's "landscape shaping" mode.
+- A separate, confirmed mechanism in the same distribution turn (0x41AB63): when a pass finds no training
+  building that needed funding that turn, it fires a one-shot advisor message/sound (the same helper other tips
+  use, 0x499D90), debounced so it only fires once. A genuine "mana had nowhere to go this turn" detector in the
+  original, but debounced rather than a per-frame condition - not confirmed to be the same signal as the flat-
+  colour flash above.
 
 ## Wood rules [exe]
 Wood is an amount, in units of 100 per load (one of our pieces). Four kinds of units hold it:
@@ -530,6 +572,39 @@ Example, a totem needing 8 (C 8) with `PrayTime` 64 (level 3's stone head):
 At full count, the levels' totems (`PrayTime` 15-1000) take 5 s to 5 min 33 s, and the shaman-only triggers
 (5-35) take 1.7 s to 12 s.
 
+### The vault (`TriggerType` 4, "library") [exe, measured]
+Traced this session (previously "not traced" above) and checked live with `pyramid_fight_watch.py` against level 1's
+pyramid of knowledge - this is the answer to TODO.md's "check `PrayTime`'s unit and the drain speed in the game"
+for vaults specifically.
+
+- The type-4 branch of the trigger handler (`0x4fb813`) does its own preamble - record the driving tribe at
+  `trigger+0xA0` from a global per-tribe loop counter, then validate a single referenced object (`trigger+0x92`) is
+  still a live, intact building in the right state - **but `trigger+0x92` is the vault's own BUILDING id, constant
+  for the trigger's whole life, not a tracked "current occupant" person id** (an earlier in-session reading of this
+  preamble guessed the latter; live data disproved it: the object at `+0x92` was unit #628, person-type byte 18 -
+  `docs/unit_types`'s building type 18, "vault" - sitting still with `hp0`, `tribe255`, the whole session, including
+  before the shaman ever started walking there). Who is actually praying is tracked by the gauge engine below, not
+  by this field.
+- Past that preamble, a vault falls into the **same shared gauge engine as totems** (the gauge table, `+0x72`'s
+  10-slot occupant array, the `+0x96`/`+0x9A` counter/cap and `0x4fbd20`'s add/remove calls) - this is literally the
+  totem formula above with `C` (`TriggerCount`) at its degenerate value of 1 (one shaman slot), which collapses
+  `C²/(C−n+1)²` to exactly 1 (full speed) whenever she's praying there and 0 otherwise - no vault-specific math.
+- **Live-confirmed, cleanly**: `trigger+0x96` (gauge) rose by exactly 1 every 4 turns, 32 times in a row with zero
+  gaps or skips, until it hit `trigger+0x9A` (cap) = 32 and stopped. 32 turns × 4 turns/step = 128 turns = 10.67 s
+  at 12 turns/s - matches "`PrayTime / 3` seconds" above exactly (`PrayTime` = 32 for this vault, cap = `PrayTime`
+  directly since `C² = 1`). **`PrayTime`'s unit is confirmed the same 4-turn tick as the totem formula, not
+  something vault-specific** - answers the open-populous question directly.
+- Before the gauge itself starts moving, there is real travel time: the order (self-issued? by the player - not
+  traced which) appeared on the shaman (`+0xA7` order-kind-cache = **33**, a correction/addition to "Order kinds"
+  above where 33 was only guessed as preacher's own "PREACH" banner - live, a shaman walking to and entering a
+  vault of knowledge carries the same kind-cache value, so kind 33 looks like a shared "stand and perform a
+  stationary ritual at a target building" primitive, not preach-specific; not traced further) 36 turns (3 s) before
+  the gauge took its first step, consistent with "fills ... while she prays at the door" (worship.md) rather than
+  from the moment the order was given.
+- Not measured this session: the drain rate with nobody praying (no drain happened in this trial - she prayed
+  straight through to full) and whether it matches the totem's "same time as filling at full speed" claim for a
+  vault too.
+
 ## Reincarnation sites [exe, measured]
 No level file has pillars (scenery 12): the game creates them when the level loads, for each tribe that has a
 site. The site (tribe+0x911) is on a cell centre; its height is kept at tribe+0x915.
@@ -596,7 +671,7 @@ not again when the command is executed.
 - Mana income is shared evenly between the learned, unblocked spells that are not full; a spell gains a charge
   when its share reaches its cost, up to `SP_1_OFF_MAX` (see "Mana rules").
 - Casting from a charge costs no mana. No per-spell cooldown exists; `SPELL_<X>_OPT_S` is only read by the
-  advisor's mana bookkeeping.
+  advisor's mana bookkeeping - this is the HUD mana bar's own fill value, see "The mana bar (HUD)".
 - Hidden spells (record +0x00 = 2: armageddon, bloodlust, teleport) are not offered in normal play. Burn is not
   castable (record +0x1A bit 0 clear).
 - A timed "landscape shaping" mode (global 0x89D17C bit 0x20, `LSME_DURATION_SECS`, file 120 s) uses record
@@ -1623,6 +1698,24 @@ otherwise:
   changes: what reacts").
 - Example: an earthquake's drop of up to 600 under a person: it falls for about 6 turns (0.5 s) and lands at
   about −190, below the fall-damage threshold even in the blown mode.
+- **`ground(pos)` identified and traced this session, answering TODO.md's open "landing on a cliff or a building"
+  question: `0x44E940`.** It is a pure TERRAIN-MESH height query - bilinear interpolation of a cell's 4 corner
+  heights (read straight from the per-cell struct at `0x8A03E4`, picking the diagonal split from the cell's own
+  flag bit, falling back to an edge-interpolation table `0x8A03E8` when the position straddles a cell boundary) -
+  **with no class, building, or unit check anywhere in it.** So: a cliff is handled correctly for free (it's just
+  steep terrain, the same interpolation everywhere), but **a building gets no special treatment at all** - a
+  falling/thrown person's touchdown height is always the raw ground height of the cell, regardless of whether a
+  building sits on it. There is no "stands up on the roof" behaviour to trace; if a blown person's flight carries
+  it over a building's footprint, it lands at ground level there exactly as it would on open ground (visually
+  passing through/landing inside the building's base, not on top of it) - this resolves that TODO item as "no
+  special handling exists", not as "not yet found".
+- The landing-effects block (dust/sound at vel.y ≤ −100, `FALL_OUT_OF_WW_DAMAGE` at ≤ −200) is gated by the
+  landing cell's own terrain-shape-class byte (table `0x5AA328`, bit `0x2`) skipping it entirely on that one shape
+  class (not identified further this session) - on top of the already-documented "none on water cells". The scream
+  on touchdown (not to be confused with the take-off scream above) is per-type: a shaman plays sound group `0x1B`,
+  a wildman stays silent, everyone else plays group `9` - only when life is still above 0 after any fall damage.
+  The fall-damage amount itself is read from a named tunable, `0x5AA534` (`FALL_OUT_OF_WW_DAMAGE`, matching the
+  live-measured 700 exactly), applied via `0x4DA080` with no attacker (−1).
 
 ## Idle behaviour [exe]
 A person's per-turn state dispatch (`unit_processing_class_1_person`, table at 0x4D3D18, keyed by `+0x2C − 1`,
@@ -2524,6 +2617,132 @@ instead, since it had nothing queued to resume.
 Not traced this session (ordinary attack-order behaviour, not fight-specific): how long/far the resumed order
 keeps chasing before giving up on its own, if at all - that is whatever 0x51A2A0's own ordinary termination
 rules already do for any attack order that can't reach its target, not a special case added for this.
+
+### A blasted person fighting back [exe, measured]
+TODO.md asked whether getting hit by an offensive spell (Blast specifically) makes an otherwise-idle person fight
+back against the caster, the way a struck firewarrior does, or via some other "remember who hit me" mechanism.
+Watched live this session with `pyramid_fight_watch.py` (follows a person's state/order fields for turns after any
+life-loss or newly-set BLOWN flag): **there is no such mechanism, and the question's own guess was right** - it is
+nothing but the already-documented generic Auto-attack scan (`0x4D4690`, above) running into a person who happens
+to have landed near an enemy.
+
+Trial: a tribe-1 brave (person state 1, flags `+0xC` bit 0x80000 = BLOWN) was hit by two separate Blast casts.
+- First cast: 2 damage ticks (-50 each), tumbling (person **state 19**, substate cycling through its flung/landing
+  sub-poses - not previously catalogued, see `person_states.tsv`), lands with no enemy nearby. It then sits idle
+  for ~90 turns (7.5 s) doing nothing - no order, no target, exactly "a target with no order of its own just goes
+  idle instead" from "Resuming a fight cut short by a push" above.
+- Second cast on the same brave, ~90 turns later: 3 more damage ticks, tumbles again, and this time lands a few
+  cells from an enemy shaman. Four turns after landing, the brave's **primary** order slot (`unit+0x9B`) gets
+  populated with a fresh group, **kind 21** (`0x15`, "attack around that cell" - confirmed self-issued: the group's
+  `flags` word is `0x30`, matching the doc's own "0x20 seen on self-issued auto-attack/scan orders"), its `target`
+  field a packed **cell position** (`0x404f8fe`), not a unit id - matches "Auto-attack"'s own wording exactly: the
+  scan targets a cell, not a remembered attacker. One turn later the brave's resolved target (`+0x89`) becomes the
+  shaman's own id, state goes to 10 (`order_execute`), and it walks straight to her; by turn 20 it is in a fight
+  (state 25) and dies in it ~170 turns later (state 3, "death"), having done comparatively little damage back
+  (the shaman's `LIFE_SHAMAN` dwarfs a brave's, confirming "Shaman has by far the highest HP" live).
+
+So: **a blasted person's only path back into a fight is the same passive, rhythm-gated scan everyone always runs**
+(the first cast's landing spot simply had nobody in range, the second one did) - not a spell-specific reaction, not
+a stored "last attacker", and not targeted at the caster in particular: whichever enemy the scan's square happens
+to contain first. This resolves TODO.md's open question for Blast; the same should hold for any spell that moves
+or stuns a person without giving it an order (Lightning, Swarm, Whirlwind), since the mechanism is generic to being
+idle-with-no-order, not Blast-specific.
+
+### Tumbling and ground recovery (person state 19) [exe, measured]
+Traced this session, following up on "A blasted person fighting back" above: state 19's dispatch-table entry
+(`0x4D36F1`, trampoline) leads to its real body, **`0x4D73E0`** (not previously catalogued; Ghidra's own function
+range for this address, ending at `0x4D80B9`, is wrong - a different, unrelated function, the death/spirit-rise
+record push also used by state 3, actually starts at `0x4D7FD0`, well inside that claimed range).
+
+- **No velocity, height or gravity field (`+0x49`/`+0x4B`/`+0x4D`/`+0x41`) is read anywhere in this function.**
+  Confirms the actual ballistic flight (gravity, drag, friction, velocity caps - "Person physics", "Blast push and
+  flight") runs entirely in the separate, universal per-unit physics step (`0x4E6D1D`/`0x4E6D6D`, already cited by
+  `measure_blast.py`), independent of the per-state dispatch. **State 19 itself is the GROUND recovery choreography
+  that runs once a blown/tumbling person has landed and physics has gone quiet - not the fall itself.**
+- Its own sub-state (`+0x2D`) is a two-layer machine: an initial 0/1/2 arrival phase (checks the person's position
+  against a reference point - probably where it's meant to end up standing - within a 48-unit, then a 216-unit,
+  threshold on each axis) feeds into a second 8-way jump table for sub-states 3-10, matching exactly the substate
+  values seen live in "A blasted person fighting back" (4, 5, 6, 7, 10 observed cycling for ~90 turns while the
+  unit sat still).
+- That 8-way machine picks a clear nearby resting cell (an 8-direction offset table, `0x895ED9`, indexed by a
+  facing nibble, with a default at `0x895EF1`, added to a reference position and moved to via `0x4E9DD0` -
+  the same low-level "place a unit" primitive used elsewhere) and waits short randomized timers (`+0x70`, 4-31
+  turns, rolled off the shared LCG at `0x89D178` - the same generator used for ambient idle rolls elsewhere).
+- **Correction (the live trial did not actually exercise this - caught after presenting it as settled): `+0x78` is
+  NOT a trailing-effect counter - the Reference table above already documents it as a person's plain **carried
+  wood** amount ("Wood fields"), an earlier draft of this note wrongly equated it with state 26's own counter
+  (that one is `+0xA4`, a different field entirely). Read correctly, this handler's two checks on `+0x78`
+  (threshold `< 1`) are simply "is this person currently carrying wood" - picking the matching Idle/Walk vs.
+  holding-wood/Walk-with-wood pose pair (see the animation note below) so a wood-carrying brave still looks like
+  it's carrying wood while it relocates. Separately, in the branch reached once the first wait timer expires with
+  wood still carried (same `+0x78`), it spawns a small class-5 type-0xB debris effect once per **exactly 100**
+  wood decremented from `+0x78` (the standard one-load unit, "Wood rules") until it reaches 0, playing a sound each
+  time - read as **the person spilling/dropping its carried wood in a small debris puff per load** as part of
+  settling, not a generic "effect burst" (the same `+0x78`-countdown-by-100-while-spawning-type-0xB-effects pattern
+  also appears, unexplained at the time, in "Preacher conversion"'s sub-state 4 - almost certainly the same
+  wood-drop mechanic there too, now that `+0x78`'s real meaning is pinned down). **Not actually observed live**:
+  the one live trial (the brave above) never logged `+0x78`/wood, so whether this specific brave was carrying wood
+  - and so whether the holding-wood pose or the wood-drop puffs ever fired for it - is unknown; a carrying brave
+  specifically would be needed to confirm this branch live.
+- **Animations, resolved this session from the exe's own static tables (not from the live trial - see correction
+  above)**: this phase has no dedicated "lying down" sprite of its own. It calls the same generic per-person
+  animation picker everything else uses (`0x4D3FF0(person, action)`, `[action × 9 + type]` at `0x5A6D50`, "Fight"
+  above) with actions **1/5** (the already-documented Walk / Walk-with-wood pair, picked by the `+0x78` wood check)
+  while moving to the picked spot, and **0/4** while settling - resolved directly from `0x5A6D50`/`0x5A6858`
+  (cross-checked against the 7 already-confirmed action values in "Fight"'s own table, all matching exactly):
+  action 0 is plain **Idle** (VSTART 6/53, already named), action 4 is **VSTART 10**, already named too ("standing
+  still, holding wood", brave-specific) - both picked precisely when the person is carrying wood, not arbitrarily.
+  So the visible read during this whole recovery window is most likely an ordinary standing/idle (or, if carrying
+  wood, holding-wood) person that simply isn't taking orders yet, with a few dropped-wood debris puffs along the
+  way if it had any - not a visibly prolonged "struggling on the ground" animation, correcting this write-up's own
+  first-pass framing below and in units.md/TODO.md.
+- **While grounded, every 32 turns it rerolls the shared LCG twice more** and, with roughly 13/32 odds, kicks back
+  into sub-state 6, or with roughly 3/64 odds into sub-state 10 (both also setting flags `+0xC` bit `0x40000000`,
+  the same bit cheat.md's live drowning trace already found set on entering the water-sink sequence - this looks
+  like a general "lying/struggling" pose-variant bit reused by this handler, not a water-exclusive signal, but that
+  is not confirmed independently here) - **this is why the live log showed substates wandering non-monotonically
+  (4→5→10→5→6→7…) rather than counting through a fixed sequence**: it is a randomized "still down, shifting around"
+  idle loop, not a linear recovery animation.
+- A later sub-state (7, "getting up") rerolls a new facing and a fresh wait timer before looping back into the
+  resting sub-states again, so a person can cycle through several more rounds of this before actually standing.
+- **Exit**: two return epilogues at the function's end return a next-state value exactly like state 1's own
+  per-type-default lookup (`table 0x5A7064`, `type*50 + offset 0`, same formula/table already documented for
+  `0x4D3386`) - confirming state 19 eventually hands off to the person's ordinary per-type state (10 for
+  brave..shaman) once recovery finishes, matching units.md's "back to Idle once on the ground and still". A third
+  epilogue returns a fixed state `0x27` (39) for the shaman's own global debug-mode override, the same pattern
+  already documented for `0x518560` and others.
+- **Gap against our implementation** (units.md "Tumbling"): ours goes straight from flung/off-the-ground back to
+  Idle the instant it lands and stops moving. The original instead stays locked (no orders) for a visible stretch
+  of time (tens of turns, longer with bad luck on the 1-in-several rerolls) while it picks a clear spot and settles
+  - visually an ordinary Idle/Walk/holding-wood person, per the animation note above, just unresponsive - before
+  resuming its ordinary per-type behaviour. Worth adding as a short, randomized "locked, settling" grace period
+  rather than an instant recovery; no new animation asset is needed for it. See TODO.md.
+- **Traced this session, following a question about whether this is specifically about avoiding landing on a
+  building**: `0x4D5420` (the "is this candidate spot OK" check, called from the sub-state-3 case above) does
+  **not** check for buildings at all - it walks the candidate cell's own per-cell linked list (`0x8A03E4`) filtering
+  strictly for CLASS-1 (person) entries, checking only (a) the per-type terrain-climbability limit
+  (`WALK_ALT_DIFF2`, movement-profile table `0x5A7B90+0x10`, the same field "blocked (stuck on terrain)"/state 33
+  already uses) against the candidate cell's height, and (b) whether another living person is already claiming the
+  exact same resting spot (same stored target word, same facing group, not itself). A building (class 2) sitting
+  on that cell is invisible to this particular check - it only ever matches/skips over class-1 entries.
+- The OTHER untraced function from the initial arrival dispatch, `0x4D5120`, is more involved and does surface one
+  new, unconfirmed lead worth flagging: it reads a per-CELL linked-list HEADER flag (`[cell_list_head+0x1]` bit
+  `0x2`, not a per-object field) and, when set, re-places something via `0x4044B0` (the same cell-linked-list
+  placement primitive "Preacher conversion"'s success path uses) before continuing - plausibly "this cell is
+  occupied by something solid" (a building footprint is the obvious candidate, but scenery or a different unit
+  class would fit equally well), not confirmed either way this session.
+- **Resolved, same session, by tracing the physics/landing step itself ("Person physics" below): landing on a
+  building gets no special handling at all.** `ground(pos)` (`0x44E940`) is a pure terrain-mesh height
+  interpolation with no building/class check anywhere in it - a cliff is handled correctly as steep terrain (same
+  function), but a building sitting on the cell is simply invisible to it. So a thrown person lands at raw ground
+  height there regardless, same as open ground; this state's own spot-picking logic (confirmed above, person-only)
+  was never going to be the place building-awareness lived, and now neither is the landing step - there just isn't
+  any. Not
+  traced further this session: the exact semantics of the two closeness thresholds (48/216 units) and what the
+  "reference point" they check against actually is (a pre-fall position? a nearby clear cell picked at the moment
+  of landing? not confirmed), the precise facing/sprite calls (`0x4EA460`), the new cell-header flag `0x2` lead
+  above, and whether `0x895ED9`'s table is shared with any other "pick a free adjacent cell" code elsewhere in the
+  exe.
 
 ### Preacher conversion ("soul convert") [exe, measured]
 **Correction this session, replacing the previous model below almost entirely**: the earlier draft assumed a
@@ -3457,6 +3676,10 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   coast cells (shapes 2-15) are not stranded.
 
 ## Impact on our specs
+- `hud/mana.rs`'s strip (`mana_view`, `pool.bank` against `MAX_MANA`) does not match "The mana bar (HUD)": the
+  original's bar is full whenever nothing is charging regardless of `bank`, and otherwise shows `last_income`
+  against an advisor pacing estimate for the charging spell, not `bank`'s own share of `MAX_MANA`. It is also a
+  plain single-colour fill with no fill/track two-tone and no flash.
 - huts-and-training.md rule 7 (`MANA_F[kind]` × `HOUSED`/`WORKING`/`TRAINING` %, × `HUT_LEVEL`) is not what the
   income routine does: it uses the busy/idle constants above. The `MANA_F_<PERSON>` and activity % values are read
   somewhere else, not found yet. Brave 15 and specialists 4 happen to equal the busy and idle defaults.
@@ -3652,6 +3875,12 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   of the three activity percentages is stored, and its readers are not traced.
 - What "busy" means (unit+0xE bit 7, unit+0xA7), and the preacher's extra check.
 - Spell order and share inside the distribution loop.
+- Mana bar (HUD): what global byte `0x89D161` (scales `advisor_eta`, "The mana bar (HUD)") actually tracks -
+  looked like a game-speed setting, not confirmed; what tribe index `0x759E9C` is compared against for the
+  bar's flat-colour flash, and `0x89798B`'s own role versus the training bar's documented blink byte `0x897989`
+  (plausibly the same blink-timer family, two bytes apart, not confirmed); whether that flash and the debounced
+  "no training building needed funding" advisor message (0x41AB63) are the same "mana wasted" signal or two
+  independent ones.
 - Auto-attack: where the kinds' sprites are drawn (the record+6 offset could not be reproduced this session -
   unverified, not disproven), the firewarrior's own scan (0x51E9A0); the preacher's own scan (0x51E7B0) is now
   traced ("Command groups", "Preacher conversion") but what `0x51F030`'s two out-params/mode flag mean is not.
@@ -3780,6 +4009,9 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x41A500 | "give_mana_delayed(tribe_index, amount)" |
 | 0x41A550 | calls the distribution for each active tribe, every turn |
 | 0x41A590 | "tribe_distribute_mana"; its refill loop at 0x41ACCB |
+| 0x41AD70 | picks a learned/unblocked/not-full spell to fund (and its share); feeds both the distribution loop and the advisor estimate below |
+| 0x415F70 | looks up a render colour by index from a system palette |
+| 0x49E8B0 | "draw_mana_bar": the HUD mana bar; see "The mana bar (HUD)" |
 | 0x41AEB0 | charge reset (callers 0x44139B, 0x50AFAC) |
 | 0x4C2D50 | `charges(spell)`: `SP_1_OFF_MAX` |
 | 0x41AE60 | sum of stored training building mana |
@@ -4048,6 +4280,7 @@ class are in `pop3-rev/docs/unit_types`.
 | +0x955 | `incoming` |
 | +0x959 | `needed` |
 | +0x95D | `last_income` |
+| +0x961 | `advisor_eta`, player tribe only: see "The mana bar (HUD)" |
 | +0x969 + 4·spell | `charge[spell]`, spells 1-21 |
 | +0xA27 + 2·type | number of people per person type (rebuilt each turn) |
 | +0xB7D + 2·type | number of huts per hut type (1-3), for the capacity |
