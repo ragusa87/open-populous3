@@ -100,12 +100,14 @@ hut (max size) hides the red bar, it does not show it at 0.
 
    Wood held by size [ours, to check]: grows with the size, about +2 per size: small 3, medium 5, large 7
    (`BuildingKind::wood_cost` is 3 for every hut size today).
-7. **Mana** [exe] (every `MANA_UPDATE_FREQ` + 1 = 16 turns), per tribe: sum over its people of busy or idle
+7. **Mana** [exe] (`GameMap::mana_income`, headcount.rs; every `MANA_UPDATE_FREQ` + 1 = 16 turns), per tribe: sum over its people of busy or idle
    mana (brave 15 / 4, warrior, spy, firewarrior and preacher 5 / 4, shaman 30 always, wildmen and angel 0), then
-   x `HUMAN_` or `COMPUTER_MANA_ADJUST` (8.8 fixed point). "Busy" is probably inside a building or working: [ours]
-   inside a hut, working on a building or fetching wood. The income charges the spells first, the rest goes to
-   the tribe's mana, capped at `MAX_MANA` (pop3-rev-analysis.md "Mana rules"). Praying at a totem is its own
-   gauge (TODO "Praying"), not mana.
+   x `HUMAN_` or `COMPUTER_MANA_ADJUST` (8.8 fixed point) - ours always uses `HUMAN_` (×1.25): no AI/controller
+   type exists yet to pick `COMPUTER_` instead (same gap `training.rs`'s `train_cost` already has). "Busy" is
+   probably inside a building or working: [ours] inside a hut, working on a building or fetching wood
+   (`headcount::State::Housed`/`Working`). The income charges the spells first, the rest goes to the tribe's mana,
+   capped at `MAX_MANA` (pop3-rev-analysis.md "Mana rules"). Praying at a totem is its own gauge (TODO "Praying"),
+   not mana.
 
 ## Training huts
 | Building | Trains | Cost (human) |

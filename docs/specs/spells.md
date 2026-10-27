@@ -65,18 +65,18 @@ only), uses no book. The view only reads it (ui-and-editor.md).
 Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, used, advisor_eta }`, amounts as
 `Mana`. As in the original [exe] (pop3-rev-analysis.md "Mana rules"), two entry points:
 - `add(amount)`: mana gained during the turn (a reward) only goes to `incoming`;
-- `tick(now, book, stores)`, once per turn from `GameMap::tick`: the income every 16 turns (`MANA_EVERY`, a fixed
-  `INCOME` guessed until income from people), recomputing `advisor_eta` from `book` at the same time (below), then
-  `distribute`: a training building making nothing refunds its store first (`Production::refund`); half of
-  `incoming` offers the training buildings still making something a share each (`production::charge`,
-  huts-and-training.md "Mana"); what they do not take, plus the other half, charges the spells first
-  (`SpellBook::charge`); with every spell full, a second share tops the stores back up (`production::top_up`); what
-  is left banks (capped at `MAX_MANA`). Only this changes the bank, the charges and the stores.
+- `tick(now, income, book, stores)`, once per turn from `GameMap::tick`: `income` (`GameMap::mana_income`,
+  huts-and-training.md "Mana" rule 7) every 16 turns (`MANA_EVERY`), recomputing `advisor_eta` from `book` at the
+  same time (below), then `distribute`: a training building making nothing refunds its store first
+  (`Production::refund`); half of `incoming` offers the training buildings still making something a share each
+  (`production::charge`, huts-and-training.md "Mana"); what they do not take, plus the other half, charges the
+  spells first (`SpellBook::charge`); with every spell full, a second share tops the stores back up
+  (`production::top_up`); what is left banks (capped at `MAX_MANA`). Only this changes the bank, the charges and
+  the stores.
 
-`received` is the last income, `used` what went into spells since then. Starts at `START_MANA`. Not done: income
-from people (huts-and-training.md "Mana" rule 7), the delayed reservoir, a cast's own cost (`incoming -= cost` in
-the original, on top of our prepaid charges?), a negative `incoming` taking mana back from the training stores, and
-the stores counted in the shaman death loss.
+`received` is the last income, `used` what went into spells since then. Starts at `START_MANA`. Not done: the
+delayed reservoir, a cast's own cost (`incoming -= cost` in the original, on top of our prepaid charges?), a
+negative `incoming` taking mana back from the training stores, and the stores counted in the shaman death loss.
 
 The HUD mana bar (`hud/mana.rs`, `ManaPool::advisor_fraction`) is not `bank` against `MAX_MANA`
 (pop3-rev-analysis.md "The mana bar (HUD)"): always full with nothing charging (`advisor_eta` zero, from
@@ -86,7 +86,18 @@ estimate by an undecoded global byte (`0x89D161`); lacking it, `advisor_eta` spr
 `SpellKind::advisor_seconds` (`SPELL_<X>_OPT_S`) over that many income periods against our own placeholder
 `cost()`, not the exe's own "share the picker returns" against its own mana scale. A fill/track bar: the tribe's
 own accent colour (`sites::tribe_color`) filled, a fixed colour for the rest; no flash (two more undecoded flags,
-not confirmed to even be the same signal as each other).
+not confirmed to even be the same signal as each other). A side effect of the placeholder-cost gap: a cheap
+spell's own `cost / periods` rounds down to 1-2 mana, so almost any income clears it and the bar reads full well
+before the spell is near its real charge count — cosmetic only, `advisor_fraction` doesn't drive the actual
+charging (`GameMap::mana_income` below does).
+
+`GameMap::mana_income(tribe)` (`headcount.rs`, huts-and-training.md "Mana" rule 7): sums each living follower's
+busy or idle rate (`MANA_BUSY_BRAVES`/`_IDLE_BRAVES` 15/4, `MANA_BUSY_SPECIALS`/`_IDLE_SPECIALS` 5/4 for warrior,
+spy, firewarrior, preacher; busy `[ours]` meaning housed or working, `headcount::state_of`) plus the shaman's own
+flat `MANA_F_SHAMEN` 30 regardless, then scales by `HUMAN_MANA_ADJUST` (×1.25) — every tribe, human or not: no
+AI/controller type exists yet to read `COMPUTER_MANA_ADJUST` instead (same gap as `training.rs`'s `train_cost`).
+Replaces the old fixed `mana::INCOME` placeholder, which charged every spell in a single income tick regardless of
+population.
 
 `SpellBook::from_level(header, level)`: the header's `SpellsAvailable` panel spells are Known with full charges
 (how charged the original starts them is not checked), the spell discoveries (`DiscoveryType 11`) not already

@@ -1321,10 +1321,11 @@ impl GameMap {
         }
         self.count_inside();
         if !frozen {
+            let incomes: Vec<crate::mana::Mana> = (0..self.mana.len()).map(|player| self.mana_income(player as u8)).collect();
             let buildings = &mut self.buildings;
-            for (player, (pool, book)) in self.mana.iter_mut().zip(&mut self.spell_books).enumerate() {
+            for (player, ((pool, book), &income)) in self.mana.iter_mut().zip(&mut self.spell_books).zip(&incomes).enumerate() {
                 let mut stores: Vec<&mut crate::production::Production> = buildings.iter_mut().filter(|b| b.owner as usize == player).filter_map(|b| b.production.as_mut()).collect();
-                pool.tick(now, book, &mut stores);
+                pool.tick(now, income, book, &mut stores);
             }
         }
         self.units.retain(|u| !gone.contains(&u.id));
@@ -1983,6 +1984,13 @@ pub fn showcase_states(kind: BuildingKind) -> Vec<Building> {
 mod tests {
     use super::*;
 
+    /// Mana actually banked into a slot so far: its full charges plus the partial one in progress — unlike
+    /// `charges` alone, strictly increases as soon as any mana reaches it, even short of a whole new charge.
+    fn spell_progress(map: &GameMap, player: u8, kind: SpellKind) -> u32 {
+        let s = map.spell_books[player as usize].slot(kind).unwrap();
+        s.charges as u32 * kind.cost() + s.recharge
+    }
+
     fn charges(map: &GameMap, player: u8, kind: SpellKind) -> u8 {
         map.spell_books[player as usize].slot(kind).unwrap().charges
     }
@@ -2043,11 +2051,17 @@ mod tests {
     #[test]
     fn the_tick_charges_spells_from_mana_except_paused_ones() {
         let mut map = GameMap::sandbox_walk();
+        // sandbox_walk only sites player 0 (one shaman, a deliberately small income): give player 1 a
+        // population too, big enough that Swarm (cost 120) clears a charge within the 2s below.
+        for _ in 0..25 {
+            map.spawn(1, UnitKind::Brave, (0, 0));
+        }
         map.apply(&Command::PauseSpell { player: 0, kind: SpellKind::Swarm, paused: true });
         let swarm = map.spell_books[0].slot(SpellKind::Swarm).unwrap().recharge;
+        let convert = spell_progress(&map, 0, SpellKind::Convert);
         map.run(Ticks::secs(2));
         assert_eq!(map.spell_books[0].slot(SpellKind::Swarm).unwrap().recharge, swarm, "paused");
-        assert_eq!(charges(&map, 0, SpellKind::Convert), crate::spell_book::MAX_CHARGES);
+        assert!(spell_progress(&map, 0, SpellKind::Convert) > convert, "not paused: still gains mana");
         assert!(charges(&map, 1, SpellKind::Swarm) > charges(&map, 0, SpellKind::Swarm), "another player's is not paused");
         assert!(map.mana[0].received > crate::mana::Mana::ZERO);
     }

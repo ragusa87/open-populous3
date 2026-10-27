@@ -42,9 +42,6 @@ pub const MAX_MANA: Mana = Mana(1_000_000);
 pub const START_MANA: Mana = Mana(30_000);
 /// Income rhythm: `MANA_UPDATE_FREQ` 15, every 16 turns.
 pub const MANA_EVERY: Every = Every::new(16);
-/// Income per update, a guess until income from people (huts-and-training.md rule 7): about what five
-/// recharging spells got before.
-pub const INCOME: Mana = Mana(560);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ManaPool {
@@ -72,12 +69,13 @@ impl ManaPool {
         self.incoming += amount;
     }
 
-    /// The turn's update ("Every turn, per tribe"): the income on update turns, then `distribute`.
-    pub fn tick(&mut self, now: Tick, book: &mut SpellBook, stores: &mut [&mut Production]) {
+    /// The turn's update ("Every turn, per tribe"): `income` (`GameMap::mana_income`, huts-and-training.md
+    /// rule 7) on update turns, then `distribute`.
+    pub fn tick(&mut self, now: Tick, income: Mana, book: &mut SpellBook, stores: &mut [&mut Production]) {
         if MANA_EVERY.fires(now, 0) {
-            self.received = INCOME;
+            self.received = income;
             self.used = Mana::ZERO;
-            self.incoming += INCOME;
+            self.incoming += income;
             self.advisor_eta = advisor_eta(book);
         }
         self.distribute(book, stores);
@@ -128,6 +126,9 @@ fn advisor_eta(book: &SpellBook) -> Mana {
 mod tests {
     use super::*;
     use crate::spell_book::{Availability, SpellKind};
+
+    /// A plausible income, for tests that only care about the tick's own timing, not `GameMap::mana_income`.
+    const TEST_INCOME: Mana = Mana(560);
 
     fn book(known: &[SpellKind]) -> SpellBook {
         let mut b = SpellBook::new();
@@ -189,8 +190,8 @@ mod tests {
         let mut pool = ManaPool::default();
         pool.add(Mana(40));
         assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 0);
-        pool.tick(Tick::ZERO.next(), &mut b, &mut []);
-        assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 1);
+        pool.tick(Tick::ZERO.next(), TEST_INCOME, &mut b, &mut []);
+        assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 1, "tick 1 is not an income turn: just the added 40");
     }
 
     #[test]
@@ -200,18 +201,18 @@ mod tests {
         let mut now = Tick::ZERO;
         for _ in 0..32 {
             now = now.next();
-            pool.tick(now, &mut b, &mut []);
+            pool.tick(now, TEST_INCOME, &mut b, &mut []);
         }
-        assert_eq!((pool.bank, pool.received), (Mana(2 * INCOME.0), INCOME));
+        assert_eq!((pool.bank, pool.received), (Mana(2 * TEST_INCOME.0), TEST_INCOME));
     }
 
     #[test]
     fn used_counts_since_the_last_income() {
         let mut b = book(&[SpellKind::Swarm]);
         let mut pool = ManaPool { bank: Mana::ZERO, ..ManaPool::default() };
-        pool.tick(Tick::ZERO, &mut b, &mut []);
+        pool.tick(Tick::ZERO, TEST_INCOME, &mut b, &mut []);
         assert_eq!((pool.used, pool.bank), (Mana(480), Mana(80)), "4 swarm charges of 120");
-        pool.tick(Tick::ZERO.next(), &mut b, &mut []);
+        pool.tick(Tick::ZERO.next(), TEST_INCOME, &mut b, &mut []);
         assert_eq!(pool.used, Mana(480), "kept between incomes");
     }
 
@@ -231,7 +232,7 @@ mod tests {
     #[test]
     fn advisor_eta_is_zero_with_no_charging_spell() {
         let mut pool = ManaPool::default();
-        pool.tick(Tick::ZERO, &mut SpellBook::new(), &mut []);
+        pool.tick(Tick::ZERO, TEST_INCOME, &mut SpellBook::new(), &mut []);
         assert_eq!(pool.advisor_eta, Mana::ZERO);
     }
 
@@ -239,7 +240,7 @@ mod tests {
     fn advisor_eta_is_spread_from_the_charging_candidate() {
         let mut b = book(&[SpellKind::Blast]);
         let mut pool = ManaPool::default();
-        pool.tick(Tick::ZERO, &mut b, &mut []);
+        pool.tick(Tick::ZERO, TEST_INCOME, &mut b, &mut []);
         assert_eq!(pool.advisor_eta, Mana(1), "blast: cost 40 over 30s / 16 turns = 22 periods");
     }
 }

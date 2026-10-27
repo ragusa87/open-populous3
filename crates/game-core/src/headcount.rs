@@ -1,8 +1,9 @@
 //! A tribe's people counted by what they do and by kind (the Stats tab, docs/specs/ui-and-editor.md,
-//! and the computer players), which unit a pick adds next, and the tribe's housing: its population
-//! against the room its huts give (docs/specs/huts-and-training.md rule 4).
+//! and the computer players), which unit a pick adds next, the tribe's housing (its population against
+//! the room its huts give, docs/specs/huts-and-training.md rule 4), and its mana income (rule 7).
 
 use crate::building::{BuildingKind, Stage};
+use crate::mana::Mana;
 use crate::map::GameMap;
 use crate::unit::{Action, Unit, UnitId, UnitKind};
 
@@ -169,6 +170,48 @@ impl GameMap {
         }
         housing
     }
+
+    /// The tribe's mana income this turn (huts-and-training.md rule 7, pop3-rev-analysis.md "Income"): busy
+    /// or idle followers (`mana_rate`) plus the shaman, always at her own flat rate, scaled by
+    /// `HUMAN_MANA_ADJUST` (×1.25) — every tribe is treated as human until AI tribes exist (training.rs's
+    /// `train_cost` has the same gap: "the computer players' 1000 once tribes have a controller").
+    pub fn mana_income(&self, tribe: u8) -> Mana {
+        let sum: u32 = self
+            .units
+            .iter()
+            .filter(|u| u.owner == tribe && u.is_alive())
+            .map(|u| match u.kind {
+                UnitKind::Wildman => 0,
+                UnitKind::Shaman => mana_rate(UnitKind::Shaman, true),
+                _ => mana_rate(u.kind, matches!(state_of(self, u), Some(State::Housed) | Some(State::Working))),
+            })
+            .sum();
+        Mana(sum * 5 / 4)
+    }
+}
+
+/// Mana per busy/idle person (`MANA_BUSY_BRAVES`/`MANA_IDLE_BRAVES`, `MANA_BUSY_SPECIALS`/`MANA_IDLE_SPECIALS`,
+/// `MANA_F_SHAMEN`; huts-and-training.md rule 7): the shaman's own `busy` is always `true`, she gives the same
+/// either way.
+fn mana_rate(kind: UnitKind, busy: bool) -> u32 {
+    match kind {
+        UnitKind::Brave => {
+            if busy {
+                15
+            } else {
+                4
+            }
+        }
+        UnitKind::Warrior | UnitKind::Spy | UnitKind::Firewarrior | UnitKind::Preacher => {
+            if busy {
+                5
+            } else {
+                4
+            }
+        }
+        UnitKind::Shaman => 30,
+        UnitKind::Wildman => 0,
+    }
 }
 
 #[cfg(test)]
@@ -304,5 +347,36 @@ mod tests {
         add(&mut map, 0, UnitKind::Warrior);
         assert!(map.housing(0).full(), "at the room");
         assert_eq!(Housing { huts: [0, 0, 29], population: 0 }.room(), MAX_POPULATION);
+    }
+
+    #[test]
+    fn mana_income_is_zero_with_no_population() {
+        let map = empty();
+        assert_eq!(map.mana_income(0), Mana::ZERO);
+    }
+
+    #[test]
+    fn the_shaman_alone_still_gives_her_own_flat_rate() {
+        let mut map = empty();
+        add(&mut map, 0, UnitKind::Shaman);
+        assert_eq!(map.mana_income(0), Mana(37), "30 shaman mana x1.25 human adjust, truncated");
+    }
+
+    #[test]
+    fn a_busy_follower_gives_more_than_an_idle_one() {
+        let mut map = empty();
+        let idle = add(&mut map, 0, UnitKind::Brave);
+        assert_eq!(map.mana_income(0), Mana(5), "4 idle brave mana x1.25");
+        let site = hut(&mut map, 0, 1, 10 * 512);
+        map.units[idle].inside = Some(Inside { building: site, door: (0, 0) });
+        assert_eq!(map.mana_income(0), Mana(18), "15 busy (housed) brave mana x1.25");
+    }
+
+    #[test]
+    fn wildmen_and_other_tribes_do_not_count() {
+        let mut map = empty();
+        add(&mut map, 0, UnitKind::Wildman);
+        add(&mut map, 1, UnitKind::Brave);
+        assert_eq!(map.mana_income(0), Mana::ZERO);
     }
 }
