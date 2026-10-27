@@ -1498,6 +1498,7 @@ impl GameMap {
     fn detect_coordinators(&mut self) {
         self.start_sermons();
         self.start_challenges();
+        self.escalate_challenges();
         self.join_melees();
     }
 

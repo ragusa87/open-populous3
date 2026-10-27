@@ -24,11 +24,14 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   also someone in a melee (to join it)"): `spotting::first_seen` only special-cases a target already linked to a
   `Link::Melee` (skipped unless the looker is idle, then joined); a target only in a `Link::Challenge` (the
   pre-fight shove-and-charge) falls through to the ordinary case and is attacked directly regardless of whether the
-  looker is idle. Unconfirmed against the original either way: whether an idle unit that merely sees a challenge
-  (not yet a full melee) also joins in once it reaches melee, or whether a challenge is left alone like a non-idle
-  looker leaves a melee alone, and whether a non-idle looker should also skip a challenge target the same way it
-  skips a melee one instead of attacking it directly - needs a live check (two units challenging while a third,
-  idle and then busy, watches from within sight).
+  looker is idle - fine now that doing so escalates the challenge into a melee at once (`GameMap::escalate_challenges`,
+  combat.md "Challenge"/"Melee", added to fix units ordered onto an already-challenged target otherwise standing in
+  reach doing nothing for the duel's whole charge-shove-charge cycle), itself a guess, not traced against the
+  original. Still unconfirmed: whether an idle unit that merely sees a challenge from outside sight range should
+  also hold off and only join once it becomes a melee instead of attacking straight in (the way it already leaves an
+  ongoing melee's target alone unless idle), and whether a non-idle looker should likewise skip a challenge target
+  the same way it skips a melee one - needs a live check (two units challenging while a third, idle and then busy,
+  watches from within sight).
 - [ ] Sermon (combat.md "Sermon"; full trace, settled across several sessions, in pop3-rev-analysis.md "Preacher
   conversion" and "Command groups" - summary here is the still-open residue only): a failed conversion roll never
   falls back to melee on its own - the roll-failure branch only continues the candidate's listening choreography

@@ -276,6 +276,28 @@ impl GameMap {
 }
 
 impl GameMap {
+    /// A third attacker closing on either member of an ongoing challenge turns it into a melee at once, instead of
+    /// standing in reach doing nothing while the duel plays out its own charge-shove-charge cycle on its own time
+    /// (combat.md "Spotting", TODO.md "Joining a fight already starting"): guessed, not traced against the
+    /// original - `join_melees`, called right after, is what actually brings this attacker (and anyone else in
+    /// reach) into the fresh melee, under its usual tribe/rank/capacity rules.
+    pub(crate) fn escalate_challenges(&mut self) {
+        for i in 0..self.units.len() {
+            let a = &self.units[i];
+            let Action::Attacking { target: crate::unit::Target::Unit(target), .. } = a.action else { continue };
+            let Some(j) = self.unit_index(target) else { continue };
+            let t = &self.units[j];
+            let Some(Link::Challenge(id)) = self.linked(t) else { continue };
+            if t.thrown() || !crate::attack::may_attack(a, t) || !t.in_the_open() || !crate::challenge::in_reach((a.x, a.z), (t.x, t.z)) {
+                continue;
+            }
+            let Some(challenge) = self.coordinators.challenges.get(id) else { continue };
+            let (attacker, target) = (challenge.attacker, challenge.target);
+            self.coordinators.challenges.retain(|cid, _| cid != id);
+            self.start_melee(attacker, target);
+        }
+    }
+
     /// Attackers within reach of a target already in a melee join it ("Fight" [exe]): one of its two tribes only,
     /// never a firewarrior, up to `MAX_FIGHTERS`; a tribe with 3 or more there is joined only by replacing one of
     /// lower rank, who leaves. Then the melee splits if both sides have 2 or more.
@@ -442,6 +464,49 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `attacker` and `target` already locked in a challenge, `target`'s place.
+    fn challenging(map: &mut GameMap, attacker: UnitId, target: UnitId) -> crate::challenge::ChallengeId {
+        let id = map.new_id_of();
+        map.coordinators.challenges.insert(id, crate::challenge::Challenge::new(attacker, target));
+        let to = map.unit(target).map(|u| (u.x, u.z)).unwrap();
+        map.unit_mut(attacker).unwrap().action = Action::Challenge { challenge: id, role: crate::challenge::Role::Charging { to, speed: 100 } };
+        map.unit_mut(target).unwrap().action = Action::Challenge { challenge: id, role: crate::challenge::Role::Waiting };
+        id
+    }
+
+    #[test]
+    fn a_third_attacker_turns_an_ongoing_challenge_into_a_melee_at_once() {
+        let mut map = GameMap::sandbox_units().seeded(5);
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(1024), s.z.wrapping_add(2048));
+        let a = map.spawn(0, UnitKind::Brave, at).id;
+        let t = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
+        challenging(&mut map, a, t);
+        let b = attacker(&mut map, 0, UnitKind::Brave, t);
+        map.escalate_challenges();
+        assert!(map.coordinators.challenges.is_empty(), "the challenge escalated into a melee at once");
+        assert_eq!(map.coordinators.melees.len(), 1);
+        assert!([a, t].iter().all(|&u| matches!(map.unit(u).unwrap().action, Action::Melee { .. })));
+        map.join_melees();
+        let ring = melee_of(&map, t);
+        assert_eq!(melee_of(&map, b), ring, "the third joins the same turn, no standing around in reach");
+    }
+
+    #[test]
+    fn a_distant_attacker_does_not_escalate_a_challenge() {
+        let mut map = GameMap::sandbox_units().seeded(5);
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(1024), s.z.wrapping_add(2048));
+        let a = map.spawn(0, UnitKind::Brave, at).id;
+        let t = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
+        let id = challenging(&mut map, a, t);
+        let far = map.spawn(0, UnitKind::Brave, (at.0.wrapping_add(20 * 512), at.1)).id;
+        map.unit_mut(far).unwrap().action = Action::Attacking { target: crate::unit::Target::Unit(t), to: (at.0.wrapping_add(20 * 512), at.1) };
+        map.escalate_challenges();
+        assert!(map.coordinators.challenges.contains(id), "out of reach: the challenge runs on");
+        assert!(map.coordinators.melees.is_empty());
     }
 
     #[test]
