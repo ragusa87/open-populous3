@@ -89,12 +89,14 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   this work), its co-patrollers keep cycling obliviously; needs a patrol-point-aware hook there. How the
   AI script's own `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/`SET_MARKER_ENTRY` (docs/specs/ai-scripts.md)
   drives this same mechanism for computer tribes is also still open.
-- [ ] Guard the shaman (**G**, reported: selected followers regroup next to the shaman and turn to face her;
-  not implemented). pop3-rev-analysis.md "Guard the shaman (G key)": traced the trigger half this session - G
-  forces the tribe's own shaman into a new person state (38) that makes HER walk to a muster point and settle
-  into a "standing guard" pose. The followers' own "walk to and face her" half was NOT located - most likely a
-  separate reactive per-person check (same architecture as the melee auto-attack scan), not yet traced. Treat
-  the exe section's own open leads as the starting point for whoever picks this up.
+- [ ] Guard the shaman (**G** with followers selected: they regroup next to the shaman and turn to face her; **G**
+  with nothing selected: cancels it; not implemented). pop3-rev-analysis.md "Guard the shaman (G key)": fully
+  traced and live-confirmed this session (an earlier in-session guess, a different command touching a new
+  person state 38, was live-tested and ruled out - corrected in the same section). G gives each selected
+  follower a continuous "stay within ~824 units of the shaman, re-targeting her live position every tick" escort
+  order (one shared command group, a secondary order slot per follower, auto-deselecting them); with nothing
+  selected it instead cancels any unit already on that order. Implement as: an order/behavior that keeps a
+  follower loosely orbiting a reference unit's current position (not a one-shot walk-to-point).
 
 ### Units ([units.md](docs/specs/units.md))
 - [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the drowning and stranded rates (`DROWN_DAMAGE`, `STRANDED_DAMAGE`, scaled x20 from our old 100 HP guesses).
@@ -462,7 +464,15 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   the resolved values into the handshake; `game-net` doesn't touch `SpellBook`/`Constants` at all yet.
 - [ ] Script interpreter in `game-core`: user variables, internal variables read from the simulation (`headcount`: units by state and kind, `housing`), `EVERY n m` firing when `(turn + m) % n == 0` (stored minus 1), DO commands mapped to AI states and `Command`s; start with the states, `ATTACK` and `SET_SPELL_ENTRY`. Levels 2100, 2110, 2131 name missing scripts: fall back to no script.
 - [ ] Script timing: measure the original turn rate (wiki: about 8 turns/s) against our 10 ticks/s, and whether `EVERY` adds a per-tribe phase, before porting script timings (see [ai-scripts.md](docs/specs/ai-scripts.md) "What this means here").
-- [ ] Script side effects outside the AI: messages, flybys, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`, `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
+- [x] Flybys: `FLYBY_CREATE_NEW..=FLYBY_START` drives the camera for real now
+  (`game_core::ai_script::ScriptEnv::on_flyby` -> `GameMap::active_flyby`, `crates/game-client/src/flyby.rs`
+  reads it to pose `CameraRig` and show the "Flyby"/"Cancelled flyby" banner; Space sends
+  `Command::CancelFlyby` when `FLYBY_ALLOW_INTERRUPT` is on, ai-scripts.md "Flybys"). Not done:
+  `FLYBY_SET_EVENT_TOOLTIP` popups (parsed and resolved, nothing draws them); the exact keyframe
+  easing/overlap and the zoom -100..100 -> camera distance scale are our own guesses, unspecified in the
+  files.
+- [ ] Script side effects outside the AI still open: messages, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`,
+  `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
 
 ## Priority 4 — remaining fidelity and content
 Level/world correctness that is mostly stable already (terrain especially: extensive, but most of it recently fixed) rather than blocking anything above.

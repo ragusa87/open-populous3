@@ -617,6 +617,12 @@ Other ON/OFF switches:
     same as the flyby's last `FLYBY_SET_EVENT_POS`/`FLYBY_SET_EVENT_ANGLE` - plausibly where the camera parks once
     the flyby ends (by finishing or by `FLYBY_ALLOW_INTERRUPT`-ed skip); the 4th field (0 here) is still unknown,
     possibly a marker index to snap to instead (single sample, needs a second script to confirm).
+    **Implemented differently for the "by skip" half, on the user's explicit direction, not a correction of the
+    above** (`game_core::ai_script`/`crates/game-client/src/flyby.rs`): finishing on its own just holds the
+    camera at its last keyframe (so `end_target` is redundant there, matching the one sample); cancelling
+    restores the camera to wherever it was *before* the flyby started instead of snapping to `end_target` - the
+    player gets their own view back, not the cutscene's framing. `end_target` itself is parsed/resolved but
+    unused.
   - `FLYBY_START` and `FLYBY_STOP`.
 - Tutorial UI:
   - `DISABLE_USER_INPUTS` and `ENABLE_USER_INPUTS`.
@@ -1085,17 +1091,27 @@ end
 ## What this means here
 - `crates/pop3-ai-script` parses `cpscr` into the statement tree above (`ast.rs`), folds a recognized
   `FLYBY_CREATE_NEW..=FLYBY_START` run into one `Stmt::Flyby` (`flyby.rs`), and runs the tree's control flow
-  (`IF`/`EVERY`/`SET`/`INCREMENT`/`DECREMENT`/`MULTIPLY`/`DIVIDE`) through `interp::Interpreter`, which hands
-  every `DO` command to an `interp::Env` trait undecided.
+  (`IF`/`EVERY`/`SET`/`INCREMENT`/`DECREMENT`/`MULTIPLY`/`DIVIDE`) through `interp::Interpreter`, which resolves
+  a `Flyby`'s keyframe fields (`Const`/`UserVar`/`Internal`) into a plain-number `interp::ResolvedFlyby` before
+  calling `Env::on_flyby` (the only way to read a user variable is through the interpreter, so `Env` never sees
+  a raw `Field`), and hands every `DO` command to an `interp::Env` trait undecided.
   - Use integers only. `INT_RANDOM_100` comes from `map::Lcg`.
   - Effects go through `Command`, so lockstep replays match.
 - `game_core::ai_script` is the real `Env`, once per computer tribe: `load_tribe_scripts` reads a tribe's
   `cpscrNNN.dat` (`LevelHeader::ai_scripts`) in `GameMap::load_original`, runs its turn-0 setup block once right
   there, then `GameMap::tend_ai_scripts` runs it again every later `tick()` (the `ELSE { EVERY ... }` branch) —
-  the same function either way, no special-casing for turn 0. So far only `DO SET_REINCARNATION ON/OFF` has
-  real behaviour (`GameMap::remove_reincarnation`/`restore_reincarnation`, `WorldEvent::RemoveSite`/`RestoreSite`,
-  site.rs's `ReincarnationSite::enabled`); every other `DO` command still reaches `ScriptEnv::do_call` and does
-  nothing, and `int_var` only backs `INT_GAME_TURN` (everything else reads 0).
+  the same function either way, no special-casing for turn 0. Real so far:
+  - `DO SET_REINCARNATION ON/OFF` (`GameMap::remove_reincarnation`/`restore_reincarnation`,
+    `WorldEvent::RemoveSite`/`RestoreSite`, site.rs's `ReincarnationSite::enabled`).
+  - A flyby (`ScriptEnv::on_flyby` -> `WorldEvent::StartFlyby` -> `GameMap::active_flyby`,
+    `GameMap::tend_flyby` clearing it once finished or past its cancel grace period): the client
+    (`crates/game-client/src/flyby.rs`) poses `CameraRig` from its keyframes each frame, shows a
+    "Flyby"/"Cancelled flyby" banner, and sends `Command::CancelFlyby` for Space when
+    `FLYBY_ALLOW_INTERRUPT` is on — camera only, matching the worked example's own
+    `ENABLE_USER_INPUTS` before `FLYBY_CREATE_NEW` (nothing else locks). `FLYBY_SET_EVENT_TOOLTIP` is
+    resolved but nothing draws it yet.
+  - Every other `DO` command still reaches `ScriptEnv::do_call` and does nothing, and `int_var` only
+    backs `INT_GAME_TURN` (everything else reads 0).
 - Keep the AI behaviours (states, attributes, marker and spell entries, attacks) as plain simulation data that
   the script sets. A future native or Lua-like scripting layer can then drive the same data, the way Script4
   wraps the original functions.

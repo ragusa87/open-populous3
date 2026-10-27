@@ -58,6 +58,12 @@ impl SimNow {
         (self.tick.since(start) as f32 + self.frac) * TICK_SECS
     }
 
+    /// Turns (not seconds) since `start`, negative before it: the unit a flyby's own keyframes
+    /// (`start`/`duration`) are given in.
+    pub fn turns_since(self, start: Tick) -> f32 {
+        self.tick.since(start) as f32 + self.frac
+    }
+
     /// Seconds into a loop of `period` started at `start` (0 before it started).
     pub fn secs_in(self, start: Tick, period: Ticks) -> f32 {
         let since = self.tick.since(start);
@@ -94,6 +100,8 @@ mod tests {
         let now = SimNow { tick: Tick::from_wire(30), frac: 0.5 };
         assert!((now.secs_since(Tick::from_wire(18)) - 12.5 * TICK_SECS).abs() < 1e-6);
         assert!(now.secs_since(Tick::from_wire(40)) < 0.0, "not started yet");
+        assert!((now.turns_since(Tick::from_wire(18)) - 12.5).abs() < 1e-6, "turns, not seconds");
+        assert!(now.turns_since(Tick::from_wire(40)) < 0.0, "not started yet");
         let period = Ticks::new(24);
         let long = SimNow { tick: Tick::from_wire(30 + 24 * 1_000_000), frac: 0.5 };
         assert_eq!(now.secs_in(Tick::ZERO, period), long.secs_in(Tick::ZERO, period), "no precision lost in long games");

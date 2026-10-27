@@ -1,12 +1,14 @@
 //! A computer tribe's own script (`cpscrNNN.dat`, docs/specs/ai-scripts.md), bridged to `GameMap`
-//! through `pop3_ai_script::interp::Env`. Only `SET_REINCARNATION` has real behaviour so far
-//! (`ScriptEnv::do_call`); every other `DO` command reaches the bridge and is deliberately ignored,
-//! same as `pop3-ai-script`'s own "an interpreter abstraction, not the AI" framing.
+//! through `pop3_ai_script::interp::Env`. `SET_REINCARNATION` (`ScriptEnv::do_call`) and
+//! `FLYBY_CREATE_NEW..=FLYBY_START` (`ScriptEnv::on_flyby`) have real behaviour so far; every other
+//! `DO` command reaches the bridge and is deliberately ignored, same as `pop3-ai-script`'s own "an
+//! interpreter abstraction, not the AI" framing.
 
 use crate::map::GameMap;
+use crate::time::Tick;
 use pop3_ai_script::ast::{self, Call, Script};
 use pop3_ai_script::field::InternalVar;
-use pop3_ai_script::interp::{Env, Interpreter};
+use pop3_ai_script::interp::{Env, Interpreter, ResolvedFlyby};
 use pop3_ai_script::raw::RawScript;
 use pop3_ai_script::token::Arg;
 use pop3_format::header::TRIBES;
@@ -20,6 +22,16 @@ pub(crate) struct TribeScript {
     pub owner: u8,
     script: Script,
     interp: Interpreter,
+}
+
+/// A flyby playing or just finished (`GameMap::active_flyby`): `start`/`interrupted_at` are ticks, so
+/// every peer agrees on exactly when it started and (if cancelled) when. The client reads this to pose
+/// its own camera and show the "Flyby"/"Cancelled flyby" banner — `game-core` never touches a camera.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveFlyby {
+    pub flyby: ResolvedFlyby,
+    pub start: Tick,
+    pub interrupted_at: Option<Tick>,
 }
 
 /// Loads and parses each computer tribe's assigned script, next to `dat` (same directory as the
@@ -71,6 +83,10 @@ impl Env for ScriptEnv<'_> {
         }
         // Every other DO command: not implemented yet, left as a no-op on purpose.
     }
+
+    fn on_flyby(&mut self, flyby: &ResolvedFlyby) {
+        self.map.apply_events(vec![crate::event::WorldEvent::StartFlyby(flyby.clone())]);
+    }
 }
 
 impl GameMap {
@@ -87,7 +103,37 @@ impl GameMap {
         }
         self.tribe_scripts = tribe_scripts;
     }
+
+    /// Marks the current flyby cancelled (`Command::CancelFlyby`, Space): a no-op unless one is
+    /// active, interruptible, and not already cancelled.
+    pub(crate) fn cancel_flyby(&mut self) {
+        if let Some(active) = &mut self.active_flyby
+            && active.flyby.allow_interrupt
+            && active.interrupted_at.is_none()
+        {
+            active.interrupted_at = Some(self.now);
+        }
+    }
+
+    /// Clears a flyby once it's over: finished on its own (the camera is already sitting at its last
+    /// keyframe, nothing to restore) or cancelled and past its grace period
+    /// (`FLYBY_CANCEL_GRACE_TICKS`) — the client takes `active_flyby` disappearing as "restore the
+    /// pre-flyby camera and give control back".
+    pub(crate) fn tend_flyby(&mut self) {
+        let Some(active) = &self.active_flyby else { return };
+        let done = match active.interrupted_at {
+            Some(at) => self.now.since(at) >= FLYBY_CANCEL_GRACE_TICKS.get() as i32,
+            None => self.now.since(active.start) >= active.flyby.total_turns(),
+        };
+        if done {
+            self.active_flyby = None;
+        }
+    }
 }
+
+/// How long "Cancelled flyby" shows before the camera restores and the player regains control
+/// (`GameMap::tend_flyby`): undocumented in the original, our own guess for "a few ticks".
+pub const FLYBY_CANCEL_GRACE_TICKS: crate::time::Ticks = crate::time::Ticks::secs(1);
 
 #[cfg(test)]
 mod tests {
@@ -176,5 +222,69 @@ mod tests {
         map.tribe_scripts = vec![TribeScript { owner: 0, script, interp: Interpreter::new() }];
         map.tend_ai_scripts();
         assert!(map.site_of(0).is_some(), "an unimplemented DO command leaves the site untouched");
+    }
+
+    #[test]
+    fn a_flyby_statement_sets_active_flyby_resolved() {
+        use pop3_ai_script::flyby::{Flyby, PosKeyframe};
+        let flyby = Flyby {
+            allow_interrupt: true,
+            positions: vec![PosKeyframe { x: Field::Const(8), z: Field::Const(28), start: Field::Const(4), duration: Field::Const(80) }],
+            ..Flyby::default()
+        };
+        let script = Script {
+            version: 12,
+            block: Block(vec![Stmt::If {
+                cond: Cond::Cmp { op: pop3_ai_script::token::CmpOp::Eq, a: Field::Internal(INT_GAME_TURN), b: Field::Const(0) },
+                then_: Block(vec![Stmt::Flyby(flyby)]),
+                else_: None,
+            }]),
+        };
+        let mut map = map_with_a_site(100);
+        map.tribe_scripts = vec![TribeScript { owner: 1, script, interp: Interpreter::new() }];
+        map.tend_ai_scripts();
+        let active = map.active_flyby.as_ref().unwrap();
+        assert!(active.flyby.allow_interrupt);
+        assert_eq!(active.flyby.positions, vec![pop3_ai_script::interp::ResolvedPos { x: 8, z: 28, start: 4, duration: 80 }]);
+        assert_eq!((active.start, active.interrupted_at), (map.now, None));
+    }
+
+    #[test]
+    fn tend_flyby_clears_once_finished_not_before() {
+        use pop3_ai_script::interp::{ResolvedFlyby, ResolvedPos};
+        let flyby = ResolvedFlyby { positions: vec![ResolvedPos { x: 0, z: 0, start: 0, duration: 10 }], ..ResolvedFlyby::default() };
+        let mut map = map_with_a_site(100);
+        map.active_flyby = Some(ActiveFlyby { flyby, start: Tick::from_wire(5), interrupted_at: None });
+        map.now = Tick::from_wire(14); // 9 turns elapsed, total_turns is 10
+        map.tend_flyby();
+        assert!(map.active_flyby.is_some(), "not finished yet");
+        map.now = Tick::from_wire(15); // 10 turns elapsed
+        map.tend_flyby();
+        assert!(map.active_flyby.is_none());
+    }
+
+    #[test]
+    fn tend_flyby_clears_after_the_cancel_grace_period_not_before() {
+        use pop3_ai_script::interp::ResolvedFlyby;
+        let flyby = ResolvedFlyby { allow_interrupt: true, ..ResolvedFlyby::default() };
+        let mut map = map_with_a_site(100);
+        map.active_flyby = Some(ActiveFlyby { flyby, start: Tick::from_wire(0), interrupted_at: Some(Tick::from_wire(5)) });
+        map.now = Tick::from_wire(5 + FLYBY_CANCEL_GRACE_TICKS.get() - 1);
+        map.tend_flyby();
+        assert!(map.active_flyby.is_some(), "grace period not over yet");
+        map.now = Tick::from_wire(5 + FLYBY_CANCEL_GRACE_TICKS.get());
+        map.tend_flyby();
+        assert!(map.active_flyby.is_none());
+    }
+
+    #[test]
+    fn cancel_flyby_is_a_no_op_without_allow_interrupt_or_nothing_active() {
+        use pop3_ai_script::interp::ResolvedFlyby;
+        let mut map = map_with_a_site(100);
+        map.cancel_flyby(); // nothing active
+        assert!(map.active_flyby.is_none());
+        map.active_flyby = Some(ActiveFlyby { flyby: ResolvedFlyby { allow_interrupt: false, ..ResolvedFlyby::default() }, start: Tick::ZERO, interrupted_at: None });
+        map.cancel_flyby();
+        assert_eq!(map.active_flyby.as_ref().unwrap().interrupted_at, None, "not interruptible");
     }
 }

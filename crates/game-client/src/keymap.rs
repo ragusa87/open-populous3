@@ -46,15 +46,16 @@ pub enum Shortcut {
     Faster,
     Slower,
     ReleasePatrol,
+    CancelFlyby,
 }
 
 impl Shortcut {
-    pub const ALL: [Shortcut; 29] = {
+    pub const ALL: [Shortcut; 30] = {
         use Shortcut::*;
         [
             Forward, Back, StrafeLeft, StrafeRight, RotateLeft, RotateRight, TiltUp, TiltDown, ZoomIn, ZoomOut, FovWider,
             FovNarrower, Aerial, LookAtShaman, LookAtSite, TurnPlan, Stop, CastSelf, NextLevel, PreviousLevel, Grid,
-            DebugOverlay, Editor, ViewPresets, CameraReadout, Pause, Faster, Slower, ReleasePatrol,
+            DebugOverlay, Editor, ViewPresets, CameraReadout, Pause, Faster, Slower, ReleasePatrol, CancelFlyby,
         ]
     };
 
@@ -91,6 +92,7 @@ impl Shortcut {
             Faster => "Game faster",
             Slower => "Game slower",
             ReleasePatrol => "Release the held followers' patrol",
+            CancelFlyby => "Cancel the current flyby",
         }
     }
 }
@@ -224,6 +226,7 @@ fn original_bindings(shortcut: Shortcut) -> &'static [Binding] {
         LookAtShaman => &[Binding { input: Input::Char(">"), mods: NONE }],
         LookAtSite => &[key!(KeyH, NONE)],
         TurnPlan => &[key!(Space, NONE)],
+        CancelFlyby => &[key!(Space, NONE)],
         Pause => &[key!(KeyP, NONE)],
         Faster => &[key!(Equal, SHIFT), key!(NumpadAdd, SHIFT)],
         Slower => &[key!(Minus, SHIFT), key!(NumpadSubtract, SHIFT)],
@@ -252,6 +255,7 @@ fn dev_bindings(shortcut: Shortcut) -> &'static [Binding] {
         LookAtShaman => &[key!(Space, NONE)],
         LookAtSite => &[key!(KeyH, NONE)],
         TurnPlan => &[key!(Space, NONE)],
+        CancelFlyby => &[key!(Space, NONE)],
         Stop => &[key!(KeyX, NONE), key!(KeyX, CTRL)],
         CastSelf => &[key!(KeyC, NONE)],
         NextLevel => &[key!(PageDown, NONE)],
@@ -326,7 +330,7 @@ impl Plugin for KeymapPlugin {
 mod tests {
     use super::*;
 
-    const ALL: [Shortcut; 29] = Shortcut::ALL;
+    const ALL: [Shortcut; 30] = Shortcut::ALL;
 
     fn fires(dev: bool, shortcut: Shortcut, input: Input, mods: Mods) -> bool {
         bindings(dev, shortcut).iter().any(|b| b.matches(|i| i == input, mods))
@@ -374,7 +378,11 @@ mod tests {
 
     #[test]
     fn no_key_does_two_things_in_one_keymap() {
-        let shared = [(Shortcut::LookAtShaman, Shortcut::TurnPlan)];
+        let shared = [
+            (Shortcut::LookAtShaman, Shortcut::TurnPlan),
+            (Shortcut::LookAtShaman, Shortcut::CancelFlyby),
+            (Shortcut::TurnPlan, Shortcut::CancelFlyby),
+        ];
         for dev in [false, true] {
             for (i, &a) in ALL.iter().enumerate() {
                 for &b in &ALL[i + 1..] {

@@ -75,6 +75,9 @@ pub enum WorldEvent {
     /// the live terrain (unless it's underwater, `GameMap::restore_reincarnation`). `DO
     /// SET_REINCARNATION ON`.
     RestoreSite { tribe: u8 },
+    /// A script's `FLYBY_CREATE_NEW..=FLYBY_START` run started (`ai_script::ScriptEnv::on_flyby`):
+    /// takes over the camera until it finishes or is cancelled (`GameMap::active_flyby`).
+    StartFlyby(pop3_ai_script::interp::ResolvedFlyby),
 }
 
 /// What throws a unit, for its immunities.

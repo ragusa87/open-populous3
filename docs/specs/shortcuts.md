@@ -13,7 +13,8 @@ right, printed to stdout too). The pause menu's Shortcuts page lists the keymap 
 - Dev mode: the "Ours" column below.
 - Off: the original's keys, for what we have: Up/Down and numpad 8/2 move, Ctrl+Left/Right and numpad 4/6 scroll
   sideways, Left/Right and numpad 7/9 rotate, `+`/`-` (and the numpad's) zoom, Enter aerial, `>` (the character,
-  any layout) to the shaman, H to the site, Space turns a held plan, P pause, Shift + `+`/`-` game speed, N releases
+  any layout) to the shaman, H to the site, Space skips a flyby in progress or turns a held plan, P pause,
+  Shift + `+`/`-` game speed, N releases
   a held patrol. No level switch, grid, editor, view presets, tilt keys, stop or self cast keys; the editor and the
   view presets menu close.
 A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a character binding ignores Shift.
@@ -28,7 +29,7 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | F1 | encyclopedia | - |
 | Enter | world view / normal view | toggles aerial view |
 | Shift+Enter | quick toggle world / normal view | - |
-| Space | skip the level fly-by | looks at the shaman |
+| Space | skip the level fly-by | same (if one is playing and interruptible); looks at the shaman otherwise, in dev mode |
 | S | level status | camera back (WASD) |
 | L | toggle the commanded unit ("commandee") | - |
 | `>` | camera to the shaman | - (Space) |

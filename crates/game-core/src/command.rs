@@ -71,4 +71,8 @@ pub enum Command {
     /// straight at it. Carries the whole group for the same reason `SetPatrol` does: the formation is one new
     /// shared object, minted inside one deterministic `apply` call.
     Formation { player: u8, units: Vec<UnitId>, to: (u16, u16) },
+    /// Space: skips the current flyby, if one is playing and interruptible (`GameMap::cancel_flyby`,
+    /// ai-scripts.md `FLYBY_ALLOW_INTERRUPT`). There is one shared camera/cutscene, so `player` is not
+    /// checked against anything.
+    CancelFlyby { player: u8 },
 }

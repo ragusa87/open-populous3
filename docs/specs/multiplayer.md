@@ -45,5 +45,8 @@ Frame: `u32 LE` length + payload. Payload tag byte:
   - kind 10 `PauseSpell`: `u8` spell as kind 9, `u8` paused (1) or resumed (0).
   - kind 11 `MoveVehicle`: `u32` vehicle id, `u16` x, z in world units.
   - kind 12 `Unload`: `u32` vehicle id.
+  - kind 20 `CancelFlyby`: no extra payload (Space, skips the current flyby if interruptible,
+    ai-scripts.md). Kinds 13-19 (`ClearSwamp`/the patrol/formation commands) aren't documented here yet,
+    a pre-existing gap.
 
 Implemented: codec + TCP round trip test. To do: host/join, sending and receiving the turns, reconnect, lobby UI.

@@ -218,6 +218,9 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             b.extend(to.0.to_le_bytes());
             b.extend(to.1.to_le_bytes());
         }
+        Command::CancelFlyby { player } => {
+            b.extend([20, *player]);
+        }
     }
 }
 
@@ -356,6 +359,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         17 => Some(Command::AddPatrolTargetPoint { player, units: get_units(c)?, target: get_target(c)? }),
         18 => Some(Command::ReleasePatrol { player, units: get_units(c)? }),
         19 => Some(Command::Formation { player, units: get_units(c)?, to: (c.u16()?, c.u16()?) }),
+        20 => Some(Command::CancelFlyby { player }),
         _ => None,
     }
 }
@@ -500,6 +504,7 @@ mod tests {
                 Command::AddPatrolTargetPoint { player: 3, units: vec![Id::from_raw(5), Id::from_raw(6)], target: Target::Building(Id::from_raw(9)) },
                 Command::ReleasePatrol { player: 1, units: vec![Id::from_raw(1), Id::from_raw(2), Id::from_raw(3)] },
                 Command::Formation { player: 0, units: vec![Id::from_raw(1), Id::from_raw(2)], to: (65535, 512) },
+                Command::CancelFlyby { player: 2 },
             ],
         }
     }

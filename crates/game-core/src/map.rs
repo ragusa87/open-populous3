@@ -110,6 +110,9 @@ pub struct GameMap {
     /// Each computer tribe's own script (`ai_script.rs`), one per tribe with a `cpscrNNN.dat` assigned
     /// (`LevelHeader::ai_scripts`); empty on generated maps and sandboxes.
     pub(crate) tribe_scripts: Vec<crate::ai_script::TribeScript>,
+    /// A script's flyby playing or just finished (`ai_script.rs`), read by the client to pose its own
+    /// camera and HUD; `game-core` never touches a camera. At most one at a time.
+    pub active_flyby: Option<crate::ai_script::ActiveFlyby>,
 }
 
 /// Generated maps and sandboxes are laid out for a camera on their south side looking north (towards -z):
@@ -157,7 +160,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new() }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), active_flyby: None }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -210,6 +213,7 @@ impl GameMap {
             next_id: 1,
             rng: Lcg(0),
             tribe_scripts: Vec::new(),
+            active_flyby: None,
         }
         .with_buildings(buildings_from_level(level))
         .with_building_ground()
@@ -1141,6 +1145,10 @@ impl GameMap {
                 self.form_up(player, &units, to);
                 None
             }
+            Command::CancelFlyby { .. } => {
+                self.cancel_flyby();
+                None
+            }
         }
     }
 
@@ -1309,6 +1317,7 @@ impl GameMap {
         // (formation.rs) tick right after, for the same reason, though they are not coordinators themselves
         // (membership isn't owned through the units' own action).
         if !frozen {
+            self.tend_flyby();
             self.tend_ai_scripts();
             self.spot_enemies();
             self.tend_attacks();
@@ -1745,6 +1754,10 @@ impl GameMap {
             }
             WorldEvent::RestoreSite { tribe } => {
                 self.restore_reincarnation(tribe);
+                None
+            }
+            WorldEvent::StartFlyby(flyby) => {
+                self.active_flyby = Some(crate::ai_script::ActiveFlyby { flyby, start: self.now, interrupted_at: None });
                 None
             }
         };

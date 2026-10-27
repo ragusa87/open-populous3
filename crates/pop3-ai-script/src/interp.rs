@@ -20,8 +20,81 @@ pub trait Env {
     fn random_100(&mut self) -> i32;
     /// A `DO` call, exactly as parsed: command id and its typed args, undecided by this crate.
     fn do_call(&mut self, call: &Call);
-    /// A recognized `FLYBY_CREATE_NEW..=FLYBY_START` run. Default: ignored.
-    fn on_flyby(&mut self, _flyby: &Flyby) {}
+    /// A recognized `FLYBY_CREATE_NEW..=FLYBY_START` run, with every keyframe field already resolved
+    /// to a plain number (a `Flyby`'s fields can be user variables; only the interpreter can read
+    /// those, so `Env` never sees a raw `Field`). Default: ignored.
+    fn on_flyby(&mut self, _flyby: &ResolvedFlyby) {}
+}
+
+/// A `PosKeyframe` with every `Field` resolved to a plain number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedPos {
+    pub x: i32,
+    pub z: i32,
+    pub start: i32,
+    pub duration: i32,
+}
+
+/// An `AngleKeyframe` with every `Field` resolved to a plain number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedAngle {
+    pub angle: i32,
+    pub start: i32,
+    pub duration: i32,
+}
+
+/// A `ZoomKeyframe` with every `Field` resolved to a plain number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedZoom {
+    pub zoom: i32,
+    pub start: i32,
+    pub duration: i32,
+}
+
+/// A `TooltipKeyframe` with every `Field` resolved to a plain number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedTooltip {
+    pub x: i32,
+    pub z: i32,
+    pub text: i32,
+    pub start: i32,
+    pub duration: i32,
+}
+
+/// An `EndTarget` with every `Field` resolved to a plain number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedEndTarget {
+    pub x: i32,
+    pub z: i32,
+    pub angle: i32,
+    pub unknown: i32,
+}
+
+/// A `Flyby` with every keyframe's `Field`s resolved to plain numbers, built by `Interpreter` right
+/// before calling `Env::on_flyby` (see `exec_stmt`'s `Stmt::Flyby` arm).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResolvedFlyby {
+    pub allow_interrupt: bool,
+    pub positions: Vec<ResolvedPos>,
+    pub angles: Vec<ResolvedAngle>,
+    pub zooms: Vec<ResolvedZoom>,
+    pub tooltips: Vec<ResolvedTooltip>,
+    pub end_target: Option<ResolvedEndTarget>,
+}
+
+impl ResolvedFlyby {
+    /// Turns from the flyby's own start until the scripted path is over: the latest `start +
+    /// duration` across every channel (0 if it has none at all).
+    pub fn total_turns(&self) -> i32 {
+        self.positions
+            .iter()
+            .map(|k| k.start + k.duration)
+            .chain(self.angles.iter().map(|k| k.start + k.duration))
+            .chain(self.zooms.iter().map(|k| k.start + k.duration))
+            .chain(self.tooltips.iter().map(|k| k.start + k.duration))
+            .max()
+            .unwrap_or(0)
+    }
 }
 
 /// Runs a `Script`'s control flow, one call per game turn. Owns only what the format itself says
@@ -61,7 +134,10 @@ impl Interpreter {
     fn exec_stmt(&mut self, stmt: &Stmt, turn: u32, env: &mut impl Env) {
         match stmt {
             Stmt::Do(call) => env.do_call(call),
-            Stmt::Flyby(flyby) => env.on_flyby(flyby),
+            Stmt::Flyby(flyby) => {
+                let resolved = self.resolve_flyby(env, flyby);
+                env.on_flyby(&resolved);
+            }
             Stmt::Every { period, offset, block } => {
                 if every_fires(turn, *period, *offset) {
                     self.exec_block(block, turn, env);
@@ -131,6 +207,39 @@ impl Interpreter {
             Field::Const(_) => unreachable!("the parser only ever produces a user var or INT_ATTR_* destination"),
         }
     }
+
+    fn resolve_flyby(&self, env: &impl Env, flyby: &Flyby) -> ResolvedFlyby {
+        ResolvedFlyby {
+            allow_interrupt: flyby.allow_interrupt,
+            positions: flyby
+                .positions
+                .iter()
+                .map(|k| ResolvedPos { x: self.resolve(env, k.x), z: self.resolve(env, k.z), start: self.resolve(env, k.start), duration: self.resolve(env, k.duration) })
+                .collect(),
+            angles: flyby
+                .angles
+                .iter()
+                .map(|k| ResolvedAngle { angle: self.resolve(env, k.angle), start: self.resolve(env, k.start), duration: self.resolve(env, k.duration) })
+                .collect(),
+            zooms: flyby
+                .zooms
+                .iter()
+                .map(|k| ResolvedZoom { zoom: self.resolve(env, k.zoom), start: self.resolve(env, k.start), duration: self.resolve(env, k.duration) })
+                .collect(),
+            tooltips: flyby
+                .tooltips
+                .iter()
+                .map(|k| ResolvedTooltip {
+                    x: self.resolve(env, k.x),
+                    z: self.resolve(env, k.z),
+                    text: self.resolve(env, k.text),
+                    start: self.resolve(env, k.start),
+                    duration: self.resolve(env, k.duration),
+                })
+                .collect(),
+            end_target: flyby.end_target.as_ref().map(|e| ResolvedEndTarget { x: self.resolve(env, e.x), z: self.resolve(env, e.z), angle: self.resolve(env, e.angle), unknown: self.resolve(env, e.unknown) }),
+        }
+    }
 }
 
 /// `EVERY period offset` fires on turns where `(turn + offset) % period == 0` (spec: "`EVERY n m`
@@ -155,6 +264,7 @@ mod tests {
         game_turn: i32,
         calls: Vec<CommandId>,
         flybys: usize,
+        last_flyby: Option<ResolvedFlyby>,
     }
 
     impl Env for MockEnv {
@@ -168,8 +278,9 @@ mod tests {
         fn do_call(&mut self, call: &Call) {
             self.calls.push(call.id);
         }
-        fn on_flyby(&mut self, _flyby: &Flyby) {
+        fn on_flyby(&mut self, flyby: &ResolvedFlyby) {
             self.flybys += 1;
+            self.last_flyby = Some(flyby.clone());
         }
     }
 
@@ -258,5 +369,31 @@ mod tests {
         let mut env = MockEnv::default();
         interp.run_turn(1, &script, &mut env);
         assert_eq!(env.flybys, 1);
+    }
+
+    #[test]
+    fn a_flybys_fields_are_resolved_not_handed_over_raw() {
+        use crate::flyby::{Flyby, PosKeyframe};
+        let flyby = Flyby {
+            positions: vec![PosKeyframe { x: Field::UserVar(UserVar(0)), z: Field::Const(5), start: Field::Const(1), duration: Field::Const(2) }],
+            ..Flyby::default()
+        };
+        let script = Script { version: 12, block: Block(vec![Stmt::Flyby(flyby)]) };
+        let mut interp = Interpreter::new();
+        interp.user_vars[0] = 42;
+        let mut env = MockEnv::default();
+        interp.run_turn(1, &script, &mut env);
+        assert_eq!(env.last_flyby.unwrap().positions, vec![ResolvedPos { x: 42, z: 5, start: 1, duration: 2 }]);
+    }
+
+    #[test]
+    fn total_turns_is_the_latest_start_plus_duration_across_every_channel() {
+        let flyby = ResolvedFlyby {
+            positions: vec![ResolvedPos { x: 0, z: 0, start: 4, duration: 80 }, ResolvedPos { x: 0, z: 0, start: 81, duration: 44 }],
+            angles: vec![ResolvedAngle { angle: 0, start: 219, duration: 45 }],
+            ..ResolvedFlyby::default()
+        };
+        assert_eq!(flyby.total_turns(), 264);
+        assert_eq!(ResolvedFlyby::default().total_turns(), 0);
     }
 }

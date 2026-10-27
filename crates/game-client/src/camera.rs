@@ -180,7 +180,13 @@ impl Plugin for CameraPlugin {
             .add_systems(Update, frame_new_map.run_if(resource_changed::<crate::world::LevelList>))
             .add_systems(
                 Update,
-                ((camera_input.run_if(not(crate::armageddon::input_locked)), fly).in_set(crate::menu::Gameplay), apply_rig, crate::ground_shake::camera_shake, sky_color).chain(),
+                (
+                    (camera_input.run_if(not(crate::armageddon::input_locked)).run_if(not(crate::flyby::flyby_active)), fly, crate::flyby::drive_camera).in_set(crate::menu::Gameplay),
+                    apply_rig,
+                    crate::ground_shake::camera_shake,
+                    sky_color,
+                )
+                    .chain(),
             );
     }
 }
