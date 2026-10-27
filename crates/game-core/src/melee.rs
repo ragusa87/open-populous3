@@ -10,8 +10,10 @@ use crate::event::WorldEvent;
 use crate::id::Id;
 use crate::map::{GameMap, Lcg};
 use crate::motion::Velocity;
+use crate::path::{Ground, Mobility};
+use crate::slots;
 use crate::time::{Countdown, Every, Tick, Ticks};
-use crate::unit::{isqrt, torus_delta, Action, Unit, UnitId, UnitKind};
+use crate::unit::{cell_of, isqrt, torus_delta, Action, Unit, UnitId, UnitKind};
 
 pub type MeleeId = Id<Melee>;
 
@@ -123,6 +125,38 @@ impl Melee {
         let candidates: Vec<&Fighter> = fighters.iter().filter(alone).collect();
         candidates.iter().find(|f| Some(f.unit.id) == self.centre).or(candidates.first()).map(|f| f.unit.id)
     }
+
+    /// Moves the fight off unsuitable ground - water, a cliff, or inside a building's walls ("Fight" [exe]: the
+    /// original's own test, `0x51E4B0`, is unread; this stands in with the walk test everything else already
+    /// uses) - to that building's door, or else the nearest walkable cell (`nearest_passable`, standing in for
+    /// the exe's own spiral search, `0x49A2F0`).
+    fn relocate(&mut self, world: &GameMap) {
+        let ground = world.ground();
+        let cell = (cell_of(self.at.0), cell_of(self.at.1));
+        if ground.passable(Mobility::Walk, cell) {
+            return;
+        }
+        if let Some(to) = world.walls.at(cell).and_then(|id| world.building(id)).map(|b| b.door()) {
+            self.at = to;
+        } else if let Some(c) = nearest_passable(&ground, cell, world.terrain.size() as i32) {
+            self.at = slots::cell_centre(c);
+        }
+    }
+}
+
+/// The nearest cell to `from` passable to a walker, rings outward up to `max_radius` cells (standing in for the
+/// exe's own spiral search, `0x49A2F0`); `from` itself may be returned at radius 0.
+fn nearest_passable(ground: &impl Ground, from: (i32, i32), max_radius: i32) -> Option<(i32, i32)> {
+    (0..=max_radius).flat_map(|r| ring(from, r)).find(|&c| ground.passable(Mobility::Walk, c))
+}
+
+/// Every cell exactly `r` rings from `at` (`r == 0`: just `at`).
+fn ring(at: (i32, i32), r: i32) -> impl Iterator<Item = (i32, i32)> {
+    let side = 2 * r + 1;
+    (0..side * side).filter_map(move |i| {
+        let (dx, dz) = (i % side - r, i / side - r);
+        (dx.abs().max(dz.abs()) == r).then_some((at.0 + dx, at.1 + dz))
+    })
 }
 
 impl Coordinator for Melee {
@@ -147,6 +181,9 @@ impl Coordinator for Melee {
         let sides = fighters.iter().filter(|f| f.unit.owner != fighters[0].unit.owner).count();
         if fighters.len() < 2 || sides == 0 {
             events.extend(fighters.iter().map(|f| WorldEvent::Release { unit: f.unit.id, from: Link::Melee(id) }));
+            if let Some(winner) = fighters.first().map(|f| f.unit.owner) {
+                events.push(WorldEvent::FightWon { tribe: winner });
+            }
             return Step { finished: true, events };
         }
         self.centre = self.find_centre(&fighters);
@@ -154,6 +191,7 @@ impl Coordinator for Melee {
             self.at = (c.x, c.z);
         }
         if RING_TURN.fires(now, id.raw()) {
+            self.relocate(world);
             self.angle += angle::TURN / 2;
             if rng.next_u32().is_multiple_of(2) {
                 let extra = RING_EXTRA.0 + rng.next_u32() % RING_EXTRA.1;
@@ -244,7 +282,8 @@ impl GameMap {
         if !(a.is_alive() && t.is_alive()) {
             return;
         }
-        let melee = Melee::new(a, t, angle);
+        let mut melee = Melee::new(a, t, angle);
+        melee.relocate(self);
         let ring = ring_place(melee.at, melee.angle, 2, 0);
         let id = self.new_id_of();
         let at = melee.at;
@@ -444,6 +483,52 @@ mod tests {
         let alive = [a, t].iter().filter(|&&u| map.unit(u).is_some_and(Unit::is_alive)).count();
         assert_eq!(alive, 1, "one fell");
         assert!([a, t].iter().filter_map(|&u| map.unit(u)).filter(|u| u.is_alive()).all(|u| u.action == Action::Idle));
+    }
+
+    /// The fight ending tallies a win for the surviving tribe and a death for the fallen one's own
+    /// (combat.md "Melee" rule 2, "Fight" [exe] `stats[winner][0]`/`stats[dead's own tribe][1]`).
+    #[test]
+    fn a_duel_ending_tallies_the_winner_and_the_dead() {
+        let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Brave);
+        let (owner_a, owner_t) = (map.unit(a).unwrap().owner, map.unit(t).unwrap().owner);
+        until(&mut map, 3000, |m| m.coordinators.melees.is_empty()).expect("over");
+        let winner = if map.unit(a).is_some_and(Unit::is_alive) { owner_a } else { owner_t };
+        let loser = if winner == owner_a { owner_t } else { owner_a };
+        assert_eq!(map.melee_wins[winner as usize], 1, "the winner's tribe is tallied once");
+        assert_eq!(map.melee_wins[loser as usize], 0);
+        assert_eq!(map.melee_deaths[loser as usize], 1, "the loser's tribe took the death");
+        assert_eq!(map.melee_deaths[winner as usize], 0);
+    }
+
+    /// `Melee::relocate` moves the fight off unsuitable ground (here: flooded) onto the nearest walkable spot
+    /// ("Fight" [exe]: every `RING_TURN`, and on creation, `GameMap::start_melee`).
+    #[test]
+    fn relocate_moves_the_fight_off_flooded_ground() {
+        let mut map = GameMap::sandbox_units().seeded(1);
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(2048), s.z.wrapping_add(2048));
+        let cell = (cell_of(at.0), cell_of(at.1));
+        for cz in cell.1 - 1..=cell.1 + 2 {
+            for cx in cell.0 - 1..=cell.0 + 2 {
+                map.terrain.set(cx, cz, 0);
+            }
+        }
+        let mut melee = Melee { tribes: (0, 1), at, angle: 0, centre: None };
+        melee.relocate(&map);
+        assert_ne!(melee.at, at, "moved off the flooded cell");
+        let moved_cell = (cell_of(melee.at.0), cell_of(melee.at.1));
+        assert!(map.ground().passable(Mobility::Walk, moved_cell), "onto walkable ground");
+    }
+
+    /// Ground still suitable: `relocate` leaves the fight where it is.
+    #[test]
+    fn relocate_leaves_suitable_ground_alone() {
+        let map = GameMap::sandbox_units().seeded(1);
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(2048), s.z.wrapping_add(2048));
+        let mut melee = Melee { tribes: (0, 1), at, angle: 0, centre: None };
+        melee.relocate(&map);
+        assert_eq!(melee.at, at);
     }
 
     #[test]

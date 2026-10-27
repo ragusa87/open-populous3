@@ -67,11 +67,22 @@ pub struct Challenge {
     pub target: UnitId,
     pub approach: Approach,
     pub phase: Phase,
+    /// The last turn the waiting target taunted ("Pre-fight" [exe]): no art or pose for it yet (TODO.md "Units"),
+    /// kept for when there is.
+    pub taunted: Option<Tick>,
+}
+
+/// The target taunts on this chance per turn while waiting ("Pre-fight" [exe], confirmed).
+pub const TAUNT_CHANCE: u32 = 8;
+
+/// Whether the draw `r` taunts: 1 chance in `TAUNT_CHANCE`.
+pub fn taunts(r: u32) -> bool {
+    r.is_multiple_of(TAUNT_CHANCE)
 }
 
 impl Challenge {
     pub fn new(attacker: UnitId, target: UnitId) -> Self {
-        Challenge { attacker, target, approach: Approach::Open, phase: Phase::Charge { left: Countdown::new(CHARGE_TICKS) } }
+        Challenge { attacker, target, approach: Approach::Open, phase: Phase::Charge { left: Countdown::new(CHARGE_TICKS) }, taunted: None }
     }
 
     fn end(&self, id: ChallengeId) -> Step {
@@ -115,7 +126,7 @@ impl Coordinator for Challenge {
         }
     }
 
-    fn tick(&mut self, id: Id<Self>, members: &[UnitId], _now: Tick, world: &GameMap, rng: &mut Lcg) -> Step {
+    fn tick(&mut self, id: Id<Self>, members: &[UnitId], now: Tick, world: &GameMap, rng: &mut Lcg) -> Step {
         let (Some(a), Some(t)) = (world.unit(self.attacker), world.unit(self.target)) else { return self.end(id) };
         let linked = members.contains(&a.id) && members.contains(&t.id);
         if !linked || !a.is_alive() || !t.is_alive() || a.owner == t.owner {
@@ -124,6 +135,12 @@ impl Coordinator for Challenge {
         let (Some(charger), Some(waiting)) = (role_of(a), role_of(t)) else { return self.end(id) };
         let mut events = Vec::new();
         let target_at = (t.x, t.z);
+        if waiting == Role::Waiting {
+            events.push(WorldEvent::Face { unit: t.id, at: (a.x, a.z) });
+            if taunts(rng.next_u32()) {
+                self.taunted = Some(now);
+            }
+        }
         match self.phase {
             Phase::Charge { ref mut left } | Phase::Recharge { ref mut left } => {
                 if let Role::Charging { to, .. } = charger
@@ -198,7 +215,7 @@ mod tests {
     use super::*;
     use crate::command::Command;
     use crate::effect::DamageKind;
-    use crate::unit::{Order, Target, UnitKind};
+    use crate::unit::{octant, Order, Target, UnitKind};
 
     /// A brave of tribe 0 and one of tribe 1 `gap` cells east of it, both near the player's shaman.
     fn pair(gap: i32) -> (GameMap, UnitId, UnitId) {
@@ -300,5 +317,26 @@ mod tests {
             (map.units, map.coordinators, map.rng)
         };
         assert_eq!(run(), run());
+    }
+
+    /// 1 chance in `TAUNT_CHANCE`: exactly one of every `TAUNT_CHANCE` consecutive draws taunts
+    /// ("Pre-fight" [exe], confirmed).
+    #[test]
+    fn taunts_one_draw_in_eight() {
+        assert_eq!((0..TAUNT_CHANCE * 4).filter(|&r| taunts(r)).count(), 4);
+        assert!(taunts(0));
+        assert!(!taunts(1));
+    }
+
+    #[test]
+    fn a_waiting_target_faces_its_attacker() {
+        let (mut map, a, t) = pair(3);
+        until(&mut map, 200, |m| role(m, t) == Some(Role::Waiting)).expect("waiting");
+        map.tick();
+        if role(&map, t) != Some(Role::Waiting) {
+            return; // shoved at once: already in reach, nothing left to check this turn
+        }
+        let (tu, au) = (map.unit(t).unwrap(), map.unit(a).unwrap());
+        assert_eq!(tu.facing, octant(torus_delta(tu.x, au.x), torus_delta(tu.z, au.z)));
     }
 }

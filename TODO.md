@@ -9,9 +9,9 @@ Priorities (2026-10-25): sections below are grouped into six rough tiers, highes
 What a match plays through today: combat, orders/the tick, units, spells, buildings, worship. Bugs and gaps here are the most visible, and other tiers build on top of them (the AI tier drives units through the same orders/coordinators as a human; the content tier dresses up the same spells and buildings).
 
 ### Combat
-- [ ] Melee (combat.md "Melee"): the ground check moving the middle off unsuitable ground, the winner's count and the killed count per tribe, the moves' sounds, the original's option with no shove, the third approach (a target at its building), the fight music or alert.
-- [ ] Challenge (combat.md "Challenge"): the target facing the attacker and its taunts (client, 1 in 8 per turn while waiting), ground sliding instead of `SHOVE_LIFT`.
-- [ ] Fight poses in the generated (CC0) unit sheets: strike, trade, kick, reel, shoved (`Pose::fallback` stands in: idle, fall).
+- [x] Melee (combat.md "Melee", traced in full - pop3-rev-analysis.md "Fight"): the ground check moving the middle off unsuitable ground (`Melee::relocate`) and the per-tribe winner's count and death tally (`GameMap::melee_wins`/`melee_deaths`) are in. Left: the moves' sounds (scoped out for now). Still genuinely open, not traced: what the original's local-player-involved alert flag (`0x89D167`) actually triggers (fight music, an alert, or both) - scoped out for now too.
+- [x] Challenge (combat.md "Challenge", traced in full - pop3-rev-analysis.md "Pre-fight"): the target facing the attacker and its taunts (1 in 8 per turn while waiting, confirmed) are in (`WorldEvent::Face`, `challenge::taunts`/`Challenge::taunted` - no pose for the taunt yet, see "Units" below). The earlier "third approach, a target at its building" item is resolved: it is the same `Approach::PulledOut` building pull-out already covered under "Attacking a building", not a separate case. Still open, left for later: the original's no-shove option (a real level/script switch, not a cheat - also disables Melee's own knockback) and ground sliding instead of `SHOVE_LIFT` (not traced at the exe level).
+- [ ] Fight poses in the generated (CC0) unit sheets: strike, trade, kick, reel, shoved, and a challenge's taunt (3 animations, `Challenge::taunted` already tracks when - combat.md "Challenge") (`Pose::fallback` stands in: idle, fall).
 - [ ] `attack.rs`'s `wildmen_never_fight_and_nobody_attacks_its_own` test makes a wildman entirely unattackable, by anyone, any way. The original (pop3-rev-analysis.md "Wildmen") only confirms its *automatic* proximity auto-attack scan skips a tribeless (0xFF) target - whether an explicit player attack order also refuses a wildman target is unconfirmed; if the original does let a direct attack order through, our blanket rule is stricter than the original and should be relaxed to allow explicit attacks while keeping the auto-scan exclusion.
 - [ ] Spotting (combat.md "Spotting"): the shaman's look during some orders, allies. Invisible people are already
   unseen by auto-targeting (`spotting::first_seen`); whether a player ordering an attack directly can still hit one
@@ -783,6 +783,16 @@ Level/world correctness that is mostly stable already (terrain especially: exten
 Additive and mostly independent of the tiers above: chip away at these alongside anything else.
 
 ### UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
+- [ ] Notifications (ui-and-editor.md "Notifications", reported, nothing implemented yet): a stacking icon area
+  right of the panels - information notices open a modal dialog, "preaching" and enemy-spell-cast notices jump
+  the camera to the event instead (enemy-spell ones also show a small vertical bar in the casting tribe's own
+  colour), and a separate tower alert (sound only) plays when an occupied tower/building spots a nearby enemy.
+  pop3-rev-analysis.md "Notifications" has the exe-traced advisor-message system (`fire_advisor_message_once`, a
+  plausible match for the plain "information" dialogs) and the now fully-read `0x44D7F0` (10 categories, one of
+  which draws a per-tribe-coloured bar - a strong match for the enemy-spell indicator) - but its trigger for an
+  automatic "an enemy just cast a spell" alert wasn't found (only reached from the level-script interpreter so
+  far), nor was whoever draws the stacking icon itself from the record it writes. The tower alert and the preach
+  notice's own trigger still need tracing before this can be built.
 - [ ] Building icons, tooltips (spell icons done: `assets/spell-hud`).
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 - [ ] Original keymap ([shortcuts.md](docs/specs/shortcuts.md), dev mode off): add the missing shortcuts (F1, S status, groups 1-6, camera points Z/X/C/V, `\\` track, Shift+Enter, Space skips the fly-by), and a way to stop and cast self spells without the dev keys.

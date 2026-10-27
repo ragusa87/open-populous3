@@ -147,6 +147,31 @@ The player's units at a glance, as a matrix in the panel's width (204 px), and a
   wood, a door, a place to pray or a fire), or inside a building that is not a built hut. A unit walking on a plain
   move, or out of a hut, is idle.
 
+## Notifications (reported, not yet implemented)
+A notification area to the right of the panels (ours: not started). New notices fall in as a small square icon
+and pile up vertically; an older one is dismissed, probably by category, as new ones arrive. Two broad
+behaviours on click:
+- **Information**: opens a modal dialog with the message.
+- **Event, jumps the camera to where it happened** instead of opening a dialog: a "preaching" notice (one of the
+  player's own units has started listening to a sermon), an enemy spell cast (its own spell icon, e.g. Volcano
+  or Angel of Death) - an enemy-spell notice additionally carries a small vertical bar tinted in the casting
+  tribe's own colour.
+- A separate **tower alert**: a sound (no icon reported) played when an occupied tower/building spots a nearby
+  enemy.
+
+pop3-rev-analysis.md "Notifications" has what the exe trace confirms so far: an advisor-message system
+(`fire_advisor_message_once`, 0x499D90) that plausibly backs the plain "information" dialogs (debounced to
+once-ever by default, with its own message-slot array that would back the "pile up vertically" stacking), and a
+SEPARATE, now fully-read registration function (0x44D7F0, 10 categories) a handful of message ids route through
+instead of the plain banner - one category draws a per-tribe-coloured bar, a strong match for the reported
+enemy-spell indicator, but it is only confirmed reached from the level-script interpreter so far, not from an
+automatic "an enemy just cast a spell" scan; another category chases a linked "head"/trigger scenery object, a
+guess (not confirmed) for the preach notice rather than a worship-trigger message. Whoever actually DRAWS the
+falling/stacking icon from the shared record these write was not located either. The tower alert and the
+preach/enemy-spell automatic triggers themselves were not located this session; `0x89D167` (set once when a new
+fight/pre-fight starts involving the local player, and continuously while one is ongoing - combat.md "Melee")
+is a plausible general "you're in combat" signal but not confirmed to be the tower-specific one.
+
 ## Loading screen (`boot/`)
 `AppState::Loading` is where the client starts, and where it goes when a game or sandbox starts: a title, a bar and
 the current step (`boot::screen::screen_text`), on the menu's backdrop with the game camera off. At launch the boot

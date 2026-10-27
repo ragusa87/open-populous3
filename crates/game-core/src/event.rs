@@ -43,12 +43,17 @@ pub enum WorldEvent {
     Terrain(TerrainChange),
     /// A coordinator tells one of its units where to go (a charge's target, a melee's place).
     Placed { unit: UnitId, at: (u16, u16) },
+    /// A coordinator holds one of its units looking at a point, apart from its own movement facing (a challenge's
+    /// waiting target looking at its attacker; combat.md "Challenge").
+    Face { unit: UnitId, at: (u16, u16) },
     /// The attacker of a challenge starts its shove (`GameMap::shove`).
     Shove { attacker: UnitId },
     /// A blow in a melee (`GameMap::struck`); `knock`: the one struck is thrown back so, once it has reeled.
     Struck { attacker: UnitId, target: UnitId, blow: crate::combat::Blow, knock: Option<Velocity> },
     /// A challenge won: the two fight in a new melee (`GameMap::start_melee`).
     StartMelee { attacker: UnitId, target: UnitId },
+    /// A melee ended with one tribe left standing ("Fight" [exe]: `stats[winner][0] += 1`, `GameMap::melee_wins`).
+    FightWon { tribe: u8 },
     /// The unit joins `tribe`, converted (`GameMap::change_owner`).
     ChangeOwner { unit: UnitId, tribe: u8 },
     /// The unit joins `tribe` like `ChangeOwner`, but remembers its own original tribe and reverts to it once

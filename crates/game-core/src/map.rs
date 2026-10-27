@@ -96,6 +96,11 @@ pub struct GameMap {
     pub shading: CellShading,
     /// The match's result, once declared (`outcome.rs`): never unset, never relabelled.
     pub outcome: Option<Outcome>,
+    /// Fights won, by tribe (combat.md "Melee", "Fight" [exe] `stats[tribe][0]`).
+    pub melee_wins: [u32; TRIBES],
+    /// Own deaths suffered in a fight, by tribe (combat.md "Melee", "Fight" [exe] `stats[tribe][1]`): only a
+    /// `DamageKind::Melee` blow, which only ever comes from one, counts here - not every death.
+    pub melee_deaths: [u32; TRIBES],
     /// Ticks run since the map was made (`tick`).
     pub now: Tick,
     /// The next id `new_id` gives: units, buildings and effects share it, an id is never given twice.
@@ -149,7 +154,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -196,6 +201,8 @@ impl GameMap {
             ashes: Default::default(),
             shading: CellShading::new(MAP_SIZE, SunParams::default()),
             outcome: None,
+            melee_wins: [0; TRIBES],
+            melee_deaths: [0; TRIBES],
             now: Tick::ZERO,
             next_id: 1,
             rng: Lcg(0),
@@ -1573,7 +1580,13 @@ impl GameMap {
         let mut follow_ups = Vec::new();
         let changed = match event {
             WorldEvent::Damage { unit, amount, kind, from } => {
-                self.damage(unit, amount, kind, from);
+                let owner = self.unit(unit).map(|u| u.owner);
+                if self.damage(unit, amount, kind, from)
+                    && kind == DamageKind::Melee
+                    && let Some(owner) = owner
+                {
+                    self.melee_deaths[owner as usize] += 1;
+                }
                 None
             }
             WorldEvent::DamageVehicle { vehicle, amount, from } => {
@@ -1644,6 +1657,12 @@ impl GameMap {
                 }
                 None
             }
+            WorldEvent::Face { unit, at } => {
+                if let Some(u) = self.unit_mut(unit) {
+                    u.face(at);
+                }
+                None
+            }
             WorldEvent::Struck { attacker, target, blow, knock } => {
                 self.struck(attacker, target, blow, knock);
                 None
@@ -1658,6 +1677,10 @@ impl GameMap {
             }
             WorldEvent::StartMelee { attacker, target } => {
                 self.start_melee(attacker, target);
+                None
+            }
+            WorldEvent::FightWon { tribe } => {
+                self.melee_wins[tribe as usize] += 1;
                 None
             }
             WorldEvent::Shove { attacker } => {

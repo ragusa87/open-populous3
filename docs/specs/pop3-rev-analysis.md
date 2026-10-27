@@ -2419,7 +2419,8 @@ attacker within reach of the target (0x439850(person, 224)):
   else                                         → new pre-fight(attacker, target, mode)
 mode 0: both in the open
 mode 1: the attacker is in an enemy building and pulls one occupant out (0x407490)
-mode 2: the target is at its building (target +0x72 is the building on its cell)   (meaning unverified)
+mode 2: the target is at its building (target +0x72 is the building on its cell) - a slower lead-in to the
+    SAME pull-out-and-throw mode 1 reaches directly, see "Pre-fight" below (which caller uses which mode: open)
 ```
 Both people take state 29 (their previous state saved in `+0x7D`); the pre-fight keeps the attacker (`+0x6A`),
 the target (`+0x6C`), their tribes (`+0x6E`, `+0x6F`) and, for modes 1-2, the building (`+0x68`). A pre-fight or
@@ -2457,8 +2458,9 @@ and the fight's own id goes into its `+0x9D`.
 ends (both freed, +0x9D = 0) when a person is gone, both are of one tribe, a person leaves state 29,
 or the attacker's approach timer runs out
 mode 0: attacker sub 5, target sub 4
-4 target stands: stops, faces the attacker, idle (6); while idle, 1 chance in 8 per turn of a taunt
-    (48, 49 or 50 at random); waits as long as the pre-fight lasts
+4 target stands: stops, faces the attacker (a held look-at angle, `+0x57`, separate from the person's own
+    movement facing `+0x26` - it keeps looking at the attacker even if something else turns its body), idle (6);
+    while idle, 1 chance in 8 per turn of a taunt (48, 49 or 50 at random); waits as long as the pre-fight lasts
 5 attacker runs: walks (anim 5, 9 carrying wood; walking speed + rand(speed / 4)), 40-turn timer (3.3 s)
     reached when |dx| < 315 and |dz| < 315 (0.6 cell) and the target is in sub 4 → attacker sub 6
 6 attacker kicks: speed 0, anim 15 (shaman 57), faces the target; 6 turns (shaman 4)
@@ -2468,7 +2470,10 @@ mode 0: attacker sub 5, target sub 4
     stays idle, 53) for the first 2 turns of the flight; stopped (+0xE bit 0x8 clear) → sub 4
 8 attacker runs again (as 5, a new 40-turn timer); reached and the target in sub 4 → the fight starts:
     a fight 10/8 at the target's place, both in state 25, placed by 0x519D10 (below)
-global flag 0x89D17C bit 0x40 (an option, not traced): no kick, reaching the target starts the fight
+global flag 0x89D17C bit 0x40: no kick, reaching the target starts the fight - traced this session to its
+    source, a level/script option (set from a token read at 0x48E3D5: token 0x3FF sets it, 0x3FE clears it,
+    nowhere else writes it), not a debug/cheat switch; the same flag also suppresses the ordinary knockback
+    variant of Melee's own Reeling (see "Fight" below), so it reads as a single "no pushing in combat" option
 mode 1 (pulled out of a building): both sub 3; the target is thrown out of the door (0x4044B0, 0x404420):
     speed 100, ×12/16 per turn while ≥ 40 (floor 30), from the door outwards; after 6 turns or on landing
     → target sub 4, attacker sub 5 (then as mode 0)
@@ -3675,6 +3680,99 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
 - This is what Raise Land, Land Bridge, Earthquake and the like do to a boat whose cell becomes land; boats on
   coast cells (shapes 2-15) are not stranded.
 
+## Notifications (advisor messages & alerts) [exe]
+**Reported baseline (player observation, not yet independently confirmed in full against the running game this
+session)**: a notification area sits to the right of the side panels. New notifications fall in as a small
+square icon and pile up vertically (older ones get dismissed, probably by category/type). Clicking one of two
+kinds opens a modal dialog ("information" notices); clicking a "preaching" one (a unit has started listening to
+a sermon) or an enemy-spell-cast one (volcano, Angel of Death, etc. - shown with the spell's own icon) moves the
+camera to the event's location instead; enemy-spell notices also carry a small vertical bar tinted in the
+casting tribe's own colour. A separate "tower alert" (a sound, when an occupied tower/building spots a nearby
+enemy) was also described, distinct from the icon stack.
+
+**The advisor-message system, traced this session (`fire_advisor_message_once`, 0x499D90, `fn(debounce_bit,
+message_id)`)**: this is very likely the *"information"* bucket of the reported system above (plain tips the
+player can dismiss, debounced to once-ever by default).
+```text
+bail if: landscape-shaping mode (0x89D17C bit 0x20) or 0x98F746 bit 0x10 or Pre-fight's own "no kick" option
+  (0x89D17C bit 0x2) or 0x89C664 bits 0x2/0x4 are set, or `debounce_bit` is already set in the
+  "already shown" mask (0x89B739)
+decode `debounce_bit` (0x499F40): a literal bitmask -> (category 0/3..10, a bool, a "repeatable" bool, a word)
+  only 8 distinct bitmasks are recognised (0x8000/0x10000 -> 3/4, 0x20000/0x40000 -> 5/6, 0x80000/0x100000 -> 7/8,
+  0x200000 -> 9, 0x8000000 -> 10, 0x4000000 -> a 9th, special "always repeatable" category); any other bitmask
+  decodes to category 0 (unrecognised)
+category 0 (unrecognised bitmask) and the "repeat" bit (0x89C66D bit 0x8) not overriding it -> bail
+else: mark `debounce_bit` as shown (0x89B739) unless the decode said "repeatable"
+category 0 (unrecognised)   -> the generic TEXT-BANNER path (0x499E31): allocate/configure a message SLOT -
+    a per-slot struct array at 0x683BB3 (stride ~0x48, holds flag bits and, per 0x683BAE, a countdown word set to
+    `-duration`) - set its text (0x430E40), optionally an icon/sound (0x430F30), and (OPEN: not traced this
+    session) its own on-screen stacking/fall-in animation and dismissal
+category 1 (one of the 8 recognised ones) -> a DIFFERENT path (0x499F16): reads a layout constant (0x5CA850)
+    and calls 0x44D7F0(category, 0, scaled_value) - a 10-case dispatch (0x44D7F0, read in full this session,
+    see below), writing a SHARED notification record (0x68B6A1/0x68C6xx: a position, a dword, a "kind" byte, a
+    formatted text string) that whatever draws the reported icon almost certainly reads - the drawing code
+    itself (whoever reads this record each frame) was not located
+```
+`0x44D7F0`'s 10 categories, as far as traced (its own address is reached from `fire_advisor_message_once` for
+categories 3-10, but categories 1-2 are reached ONLY from two OTHER callers, both tied to the level-SCRIPT
+interpreter - 0x44A030, a tiny wrapper reading a literal 3-byte script data record, and an inlined call at
+0x490D05-0x490D28 inside a function that visibly steps its own script instruction pointer `[+0x3104] += 2`):
+```text
+1 (0x44D861): walks a linked chain of objects (class 5 / type 9, "head" scenery - docs/unit_types) via each
+    object's own "next" field until a head is found (else no message); text built from the head's own data -
+    a worship/trigger-head event (ai-scripts.md "TRIGGER_THING"/"GET_HEAD_TRIGGER_COUNT") is the best guess,
+    NOT confirmed as the reported "preach" alert
+2 (0x44D8F6): resolves an object from a packed id; when the caller also flags it and the object has a real
+    tribe, additionally pulls a 10-byte PER-TRIBE record (table 0x8A035C) and draws it - **a strong match for
+    the reported enemy-spell notice's small vertical tribe-coloured indicator**
+3, 5, 6, 7, 8 (one shared handler): bail unless the LOCAL PLAYER's tribe has a living shaman (table 0x89DA65),
+    else show one of 4 literal "about your shaman" text ids - none of these 5 is reached by any of the 11 known
+    advisor-message call sites, so they may be unused in the shipped levels, or reached from an unfound caller
+4, 10 (one shared handler): plain text only, positioned at the map centre - the two known call sites are both
+    "you can't go/build there" tips (see the table below), not an enemy-spell notice as first guessed this
+    session - correcting that initial hypothesis
+9: reads a position-like global and a small counter into the record, then plays sound 0xE1 - matches its one
+    known call site (0x4D9580's local-player, recent-event notice, which also plays 0xE1/0xE2 itself first)
+```
+Reached this way, category 1/2's trigger is most likely a level-script `DO` command (plausibly one of
+`CREATE_MSG_INFORMATION`/`CREATE_MSG_INFORMATION_ZOOM`/`CREATE_MSG_NARRATIVE`, ai-scripts.md "Level events"),
+not an automatic runtime scan - though the engine could in principle also call `0x44D7F0` directly with
+category 1/2 the same way it does for categories 3-10, which would make it a built-in alert too; which literal
+opcode maps to which category wasn't confirmed (the script interpreter's own opcode table wasn't read).
+11 call sites found this session, each with its own literal `(debounce_bit, message_id)` pair - most fall
+through the generic/unrecognised path (plain text tips), only three decode to a recognised category:
+
+| Call site | debounce_bit | message_id | category | Context (not traced beyond what's shown) |
+|---|---|---|---|---|
+| 0x41AB9C | 0x4000000 | 0x4A3 (1187) | special/repeatable | the already-documented "mana wasted" tip (spells.md) |
+| 0x4D963B | 0x200000 | 0x25B (603) | 9 | a person per-turn handler (0x4D9580) that, only for the LOCAL PLAYER's own tribe and within 2 turns of some other counter (0x89BC22), plays sound 0xE1 (or 0xE2 for a shaman) right before this call - 0x44D7F0's own category-9 handler plays 0xE1 again and builds its text from a position-like global, consistent with a death/loss notice, not confirmed by name |
+| 0x4C27BB | 0x8000000 | 0x261 (609) | 10 | a destination-cell validity check (0x4C24F0, shared with the plain-tip sibling at 0x4C278B/msg 0x255/cat 4 just above it) against the coastal-shape table (0x5AA328) - reads as "you can't go/build there", NOT an enemy-spell-cast notice as first guessed - **correction of this session's own initial hypothesis**; category 4 and 10 share the same 0x44D7F0 handler (plain text at the map centre) |
+| 0x40B259 | 0x4000 | 0x253 (595) | 0 (plain tip) | gated on a unit/building type == 0x13 (19) |
+| 0x41A905 | 0x800000 | 0x25D (605) | 0 (plain tip) | gated on the turn counter >= 0x5A0 (1440 turns, 120 s) |
+| 0x43F3CF | 0x2000 | 0x252 (594) | 0 (plain tip) | gated on a tribe-index comparison |
+| 0x499D2B | 0x10000 | 0x256 (598) | 0 (plain tip) | |
+| 0x4AC1C8 | 0x200 | 0x24B (587) | 0 (plain tip) | |
+| 0x4C278B | 0x8000 | 0x255 (597) | 0 (plain tip) | the "invalid destination" sibling of 0x4C27BB above |
+| 0x4D5EDA | 0x1000 | 0x251 (593) | 0 (plain tip) | gated on global flag 0x89DB07 bit 0x1 |
+| 0x4ECDCC | 0x1000000 | 0x24F (591) | 0 (plain tip) | gated on a counter >= 0xC8 (200) |
+
+**`0x89D167`, a strong candidate for a general "you are in combat" alert** (separate from the message system
+above): two different writers. `pre_fight_turn` (0x518630) and `fight_turn`'s own creation path set it
+unconditionally to 2 every turn a fight/pre-fight involves the local player's own tribe (a continuous "currently
+in a fight" signal). `0x51A2A0` ("Starting a melee") instead writes it edge-triggered - only when it is
+currently 0 and a brand-new fight/pre-fight is about to involve the local player's own tribe does it get set
+(to a different value than 2, not decoded this session) - a one-shot "a new fight involving you just started"
+trigger, the shape an alarm/alert-sound trigger would need. One confirmed reader, `0x4ECA2D`: copies the byte
+into `+0x8` of a struct pointed to by global `0x895DBB` (gated on that pointer being non-null) - plausibly a HUD
+widget's own state field, not traced further. **Not confirmed to be specifically the reported "tower sees an
+enemy" alarm** - it fires for ANY fight/pre-fight touching the player, not from a guard-post/tower's own sighting
+range; the tower-specific scan+sound was not located this session (see "Open questions").
+
+**Correction**: order kind 30 (0x1E), catalogued as "alarm" in `pop3-rev/docs/functions.tsv` from its Ghidra-
+adjacent name, turns out on reading its handler (0x43DAA0) to be an ordinary "walk to this building" unit order
+(an arrival check against a building, no sound or notification anywhere in it) - the "alarm" label looks like a
+guess, not confirmed sentry/tower behaviour; left as-is in the catalog with a note, not renamed outright.
+
 ## Impact on our specs
 - `hud/mana.rs`'s strip (`mana_view`, `pool.bank` against `MAX_MANA`) does not match "The mana bar (HUD)": the
   original's bar is full whenever nothing is charging regardless of `bank`, and otherwise shows `last_income`
@@ -3881,6 +3979,16 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   (plausibly the same blink-timer family, two bytes apart, not confirmed); whether that flash and the debounced
   "no training building needed funding" advisor message (0x41AB63) are the same "mana wasted" signal or two
   independent ones.
+- Notifications: `0x44D7F0` is now read in full (10 categories - "Notifications" above); still open: whoever
+  reads the shared notification record it writes (`0x68B6A1`/`0x68C6xx`) and actually draws the reported falling/
+  stacking icon - not located; which level-script `DO` command(s) map to its categories 1 and 2 (the script
+  interpreter's own opcode dispatch table wasn't read); whether category 1's "head"-chasing is really the
+  reported "preach" alert (unconfirmed guess) or something else (worship/trigger-head is the stronger reading of
+  the code itself); the generic text-banner slot array's own stacking/fall-in/dismissal visuals (0x683BB3); the
+  guard-post/tower "spots a nearby enemy" scan and its sound - not located, so not confirmed to be `0x89D167` at
+  all, nor confirmed to route through `0x44D7F0`; the enemy-spell-cast alert's own TRIGGER (category 2's tribe-
+  coloured-bar drawing is traced, but nothing was found that calls it automatically when an enemy casts a spell -
+  category 2 is only confirmed reached from the script interpreter so far).
 - Auto-attack: where the kinds' sprites are drawn (the record+6 offset could not be reproduced this session -
   unverified, not disproven), the firewarrior's own scan (0x51E9A0); the preacher's own scan (0x51E7B0) is now
   traced ("Command groups", "Preacher conversion") but what `0x51F030`'s two out-params/mode flag mean is not.
@@ -3938,8 +4046,9 @@ the life step then counts the 160-287 turns down (13-24 s): state 5 on land, the
   whether hfx 1124-1127 is the shot's fade, and the approach sub-states (10, 11) before the throw.
 - Combat: where a person's maximum life (`+0x6C`) comes from when it is not `LIFE_<type>`, whether a taunt (48-50) plays to its end (0x4D4DA0
   resets a non-idle person to idle the next turn; the per-person `+0x7E` it sets may hold it),
-  what option flag 0x89D17C bit 0x40 is (no kick, no knockback),
-  the meaning of pre-fight mode 2, the ground test of a fight's place (0x51E4B0), the attacker's sub-state 8 when
+  why pre-fight mode 2 exists as a slower lead-in to the same pull-out-and-throw mode 1 reaches directly (which
+  caller passes which mode was not checked), the ground test of a fight's place (0x51E4B0, its own body unread -
+  only its usage, "called periodically, false means relocate", is confirmed), the attacker's sub-state 8 when
   its target is already in a pre-fight, and the firewarriors' ranged attack (attack-order sub-states 10, 11).
 - Training buildings: whether 5 trainees really go in together in play (the exe says so; live: queue 5 braves
   into a warrior training building and watch +0xA6), the queue spots past one lap, the meaning of

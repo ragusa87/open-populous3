@@ -79,8 +79,19 @@ A coordinator (`challenge::Challenge`, coordinators.md) for one attacker and one
   damage. Still again, it waits. The attacker charges again; reaching it again ends the challenge with `StartMelee`: a melee
   at the target's place.
 - Already in reach when it starts, the attacker shoves at once.
-- Not yet: the target facing the attacker and its taunts; the original's option with no shove; a target at its
-  building (the third approach, unverified).
+- While waiting, the target faces the attacker (`WorldEvent::Face`, `Unit::face`: ours has no separate "held
+  look-at" field - with nothing else moving its body while it only waits, setting the one `facing` field each turn
+  reads the same) and taunts on a 1 in 8 chance per turn (`challenge::taunts`; pop3-rev-analysis.md "Pre-fight",
+  confirmed): kept on `Challenge::taunted` (the last turn it fired) for when there is a pose and the three taunt
+  animations to show for it (TODO.md "Units").
+- Not yet: the original's option with no shove (a real level/script option, not a cheat - the same flag also
+  disables Melee's own knockback variant, see "Melee" below); ground sliding instead of `SHOVE_LIFT` (push
+  mechanics unread at the exe level either way). The "third approach, a target at its building" is not a separate
+  case: it is the same
+  `Approach::PulledOut` building-occupant pull-out already described under "Attacking a building" below, just
+  reached through a slower wait-then-approach-the-door lead-in instead of being thrown out immediately
+  (pop3-rev-analysis.md "Pre-fight", modes 1/2) - nothing left to implement here beyond what `PulledOut` already
+  covers.
 
 
 ## Melee
@@ -90,10 +101,19 @@ middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `
   [guess: the original's first angle is not traced].
 - Each turn, in this order:
   1. fighters gone, dead, unlinked or farther than `MELEE_LEASH` (2048) from the middle leave (`Release`);
-  2. fewer than 2 left or one tribe left: it ends, everyone released (the winner's count: TODO);
+  2. fewer than 2 left or one tribe left: it ends, everyone released, and the surviving tribe's win is tallied
+     (`WorldEvent::FightWon`, `GameMap::melee_wins`: "Fight" [exe] `stats[winner][0] += 1`), separate from a
+     per-tribe death tally a death increments for its OWN tribe (`GameMap::melee_deaths`, counted straight off a
+     killing `DamageKind::Melee` blow in `apply_event` - the only source of that kind, so equivalent to the
+     exe's own blow-resolution-step count: `stats[dead's own tribe][1] += 1`, pop3-rev-analysis.md "Fight" - it
+     counts losses suffered, not kills scored);
   3. the middle is the fighter alone on its side (the last one first) and follows it;
-  4. on `RING_TURN` (every 32 turns, at its own phase) the ring turns half a turn, then by 1 chance in 2 another
-     20° to 80° either way (`RING_EXTRA`);
+  4. on `RING_TURN` (every 32 turns, at its own phase): the fight relocates off unsuitable ground (`Melee::relocate`
+     - water, a cliff, or inside a building's walls, to that building's door or else the nearest walkable cell; the
+     exe's own suitability test, `0x51E4B0`, is unread, so this stands in with the walk-passability test everything
+     else already uses, and the spiral search for the nearest cell, `0x49A2F0`, is a plain ring search outward -
+     also run once when the fight/pre-fight is created, `GameMap::start_melee`), then the ring turns half a turn,
+     then by 1 chance in 2 another 20° to 80° either way (`RING_EXTRA`);
   5. places (`ring_place`): the middle, the others at `RING_RADIUS` (180) around it at the ring's turn, + 90° with
      3 people, + 120° and 240° with 4, the 5th and 6th in the middle; `Placed` only when a place changed;
   6. each fighter on guard draws 0..16 and picks its opponent (the middle one any of the ring, the ring the
@@ -119,8 +139,12 @@ middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `
   it is back on its feet (`Unit::join`/`Unit::release`, `resume_attack`) - this is how a target blasted out of
   reach gets chased again instead of forgotten (pop3-rev-analysis.md "Resuming a fight cut short by a push"). A
   target with no attack order of its own (the common case) still just goes idle.
-- Not yet: the ground check moving the middle off unsuitable ground, the winner's
-  count, the move's sounds.
+- Not yet: the move's sounds (a generic catch-all for two of the six per-fighter stance values, plus for Striking
+  specifically: a warrior-vs-warrior "clang", a warrior-vs-non-warrior sound, a non-warrior's own blow sound, and a
+  sound layered on the receiving opponent whenever a warrior lands a blow regardless of its own type -
+  pop3-rev-analysis.md "Fight" has the exact ids). Still genuinely open: what the original's `0x89D167` flag (set
+  whenever a fight/pre-fight involves the local player's own tribe) actually triggers - plausibly the fight music or
+  an alert, unconfirmed.
 
 ## Attacking a building
 `crate::wreck` ("Attacking a building" [exe]); the attacker's own work, no coordinator except the pull-out.
