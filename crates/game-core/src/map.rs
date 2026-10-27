@@ -1657,11 +1657,12 @@ impl GameMap {
     /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`); a
     /// bloodlusted target takes a blow or a bolt `>> BLOODLUST_HEALTH_SHIFT` (independently of the attacker's own
     /// bloodlust, already folded into `amount` by `combat::strength`/`firebolt`). True when this kills it.
+    /// `Unit::take_hit` remembers `from` and, if it kills, `kind` (`hurt.rs`).
     pub(crate) fn damage(&mut self, unit: UnitId, amount: u16, kind: DamageKind, from: Option<u8>) -> bool {
         match self.unit_index(unit).filter(|&i| crate::effect::hurts(&self.units[i], kind, from)) {
             Some(i) => {
                 let lessened = matches!(kind, DamageKind::Melee | DamageKind::Fire) && self.units[i].statuses.bloodlust.is_on();
-                self.units[i].take_damage(if lessened { amount >> crate::status::BLOODLUST_HEALTH_SHIFT } else { amount })
+                self.units[i].take_hit(if lessened { amount >> crate::status::BLOODLUST_HEALTH_SHIFT } else { amount }, kind, from)
             }
             None => false,
         }

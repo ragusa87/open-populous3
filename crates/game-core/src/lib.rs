@@ -34,6 +34,7 @@ pub mod ground_fire;
 pub mod headcount;
 pub mod health;
 pub mod hidden_point;
+pub mod hurt;
 pub mod hypnotism;
 pub mod id;
 pub mod kind_stats;

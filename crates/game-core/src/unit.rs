@@ -4,7 +4,9 @@
 
 use crate::building::BuildingId;
 use crate::campfire;
+use crate::effect::DamageKind;
 use crate::health::Health;
+use crate::hurt::Hurt;
 use crate::id::Id;
 use crate::motion::{Motion, Velocity};
 use crate::path::{self, Ground, Mobility};
@@ -368,6 +370,8 @@ pub struct Unit {
     /// Heading in eighths of a turn: 0 = +z, 2 = +x, 4 = -z, 6 = -x.
     pub facing: u8,
     pub health: Health,
+    /// Who hurt it last, and why if that killed it (`GameMap::damage`'s own bookkeeping, `hurt.rs`).
+    hurt: Hurt,
     /// Free motion when flung or falling (still while walking or standing).
     pub motion: Motion,
     pub statuses: Statuses,
@@ -449,6 +453,7 @@ impl Unit {
             z,
             facing: 0,
             health: Health::full(kind.max_health()),
+            hurt: Hurt::default(),
             motion: Motion::STILL,
             statuses: Statuses::default(),
             action: Action::Idle,
@@ -491,6 +496,16 @@ impl Unit {
 
     pub fn is_alive(&self) -> bool {
         !matches!(self.action, Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
+    }
+
+    /// The tribe that last hit it through `GameMap::damage`, if any and not healed away since.
+    pub fn last_attacker(&self) -> Option<u8> {
+        self.hurt.attacker()
+    }
+
+    /// What killed it, once it has (`GameMap::damage`'s own `kind`).
+    pub fn death_cause(&self) -> Option<DamageKind> {
+        self.hurt.cause()
     }
 
     /// Flung (tumbling) or off the ground: it cannot be picked, nor taken on.
@@ -955,9 +970,14 @@ impl Unit {
             && !matches!(self.action, Action::Drowning | Action::Stranded { .. } | Action::OnFire { .. })
     }
 
-    /// Its turn of healing (`HEAL_EVERY`), if it `heals`.
+    /// Its turn of healing (`HEAL_EVERY`), if it `heals`: already full, it instead forgets the last attacker
+    /// (pop3-rev-analysis.md "Health and healing": "else: last attacker (+0xB0) = none").
     pub fn heal(&mut self) {
         if let Some(points) = self.kind.stats().heal.filter(|_| self.heals()) {
+            if self.health.is_full() {
+                self.hurt.healed();
+                return;
+            }
             self.health.heal(points);
         }
     }
@@ -1015,15 +1035,31 @@ impl Unit {
         }
     }
 
-    /// Loses `amount` health (`GameMap::damage` decides whether it is hurt at all); true when that kills it. In the
-    /// air it falls on: death comes on landing (`touch_down`; pop3-rev-analysis.md "Health and healing").
+    /// Loses `amount` health (`GameMap::damage` decides whether it is hurt at all); true when that kills it. Thrown
+    /// (in the air, or still tumbling to a halt on the ground it fell on) it falls dead on: death comes once it
+    /// settles (`touch_down`, the `Action::Tumbling` tick arm; pop3-rev-analysis.md "Health and healing").
     pub fn take_damage(&mut self, amount: u16) -> bool {
         if !self.is_alive() {
             return false;
         }
         let dead = self.health.damage(amount);
-        if dead && !self.motion.airborne() {
+        if dead && !self.thrown() {
             self.die();
+        }
+        dead
+    }
+
+    /// The one way `GameMap::damage` hurts a unit: remembers who did it and, if the hit kills, what kind
+    /// (`hurt.rs`), so no emitter has to track either on its own (docs/specs/coordinators.md "World events"); the
+    /// health loss and death itself are `take_damage`'s, unchanged.
+    pub(crate) fn take_hit(&mut self, amount: u16, kind: DamageKind, from: Option<u8>) -> bool {
+        if !self.is_alive() {
+            return false;
+        }
+        self.hurt.hit(from);
+        let dead = self.take_damage(amount);
+        if dead {
+            self.hurt.died_from(kind);
         }
         dead
     }
@@ -1108,6 +1144,7 @@ impl Unit {
             self.kind = UnitKind::Brave;
         }
         self.health = Health::full(self.kind.max_health());
+        self.hurt = Hurt::default();
         (self.statuses, self.motion, self.carrying, self.reload) = (Statuses::default(), Motion::STILL, 0, 0);
         self.action = Action::Idle;
     }
@@ -1920,6 +1957,19 @@ mod tests {
     }
 
     #[test]
+    fn healing_back_to_full_forgets_the_last_attacker() {
+        let (s, _) = shaman_at((10, 10));
+        let mut u = Unit { health: Health::new(SHAMAN_MAX_HEALTH - 1, SHAMAN_MAX_HEALTH), ..s };
+        u.take_hit(0, DamageKind::Melee, Some(1));
+        assert_eq!(u.last_attacker(), Some(1));
+        u.heal();
+        assert!(u.health.is_full(), "one heal step was enough to top it up");
+        assert_eq!(u.last_attacker(), Some(1), "still remembered: it only just became full");
+        u.heal();
+        assert_eq!(u.last_attacker(), None, "already full: the next heal step forgets the attacker");
+    }
+
+    #[test]
     fn no_healing_in_the_air_drowning_stranded_or_dead() {
         let (s, _) = shaman_at((10, 10));
         let hurt = Unit { health: Health::new(100, SHAMAN_MAX_HEALTH), ..s };
@@ -1980,6 +2030,27 @@ mod tests {
         assert_eq!(u.action, Action::Tumbling, "still flying");
         let fall = run_until(&mut u, &t, &site, |u| !u.is_alive());
         assert!(fall > 1 && !u.motion.airborne(), "dead once landed, after {fall} ticks");
+    }
+
+    #[test]
+    fn death_held_off_while_still_tumbling_on_the_ground() {
+        // Landing can leave a unit grounded (not airborne) but still in `Action::Tumbling`, settling to a halt -
+        // a fatal hit arriving in that window must not cut the pose short, same as one taken mid-flight.
+        let (mut u, _) = shaman_at((10, 10));
+        u.motion = Motion::STILL;
+        u.action = Action::Tumbling;
+        assert!(u.take_damage(SHAMAN_MAX_HEALTH), "a fatal hit");
+        assert_eq!((u.action, u.health.is_zero()), (Action::Tumbling, true), "still tumbling, dying held off");
+    }
+
+    #[test]
+    fn take_hit_remembers_the_attacker_and_only_the_cause_that_kills() {
+        let (mut u, _) = shaman_at((10, 10));
+        assert_eq!((u.last_attacker(), u.death_cause()), (None, None));
+        assert!(!u.take_hit(10, DamageKind::Melee, Some(1)), "hurt, not killed");
+        assert_eq!((u.last_attacker(), u.death_cause()), (Some(1), None), "no cause recorded: it survived");
+        assert!(u.take_hit(u16::MAX, DamageKind::Lightning, Some(0)), "the kill");
+        assert_eq!((u.last_attacker(), u.death_cause()), (Some(0), Some(DamageKind::Lightning)));
     }
 
     #[test]
