@@ -441,12 +441,14 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   - `cpscr081`/`cpscr099`'s smaller layouts, if ever needed (no active level slot uses them).
   - the actual AI: most `DO` commands still reach `game_core::ai_script::ScriptEnv::do_call` and do
     nothing (see the next item for the one that's real so far).
-- [x] First real `DO` command, end to end: `game_core::ai_script` (`load_tribe_scripts`,
+- [x] First real `DO` commands, end to end: `game_core::ai_script` (`load_tribe_scripts`,
   `ScriptEnv`, `GameMap::tend_ai_scripts`) loads each computer tribe's `cpscrNNN.dat`
   (`LevelHeader::ai_scripts`) in `GameMap::load_original`, runs its "turn 0" setup block once right
   there, then once more per later `tick()` (the `ELSE { EVERY ... }` branch) - `DO SET_REINCARNATION
   ON/OFF` is wired to `GameMap::remove_reincarnation`/`restore_reincarnation`
-  (`WorldEvent::RemoveSite`/`RestoreSite`). Every other `DO` command is still a no-op (previous
+  (`WorldEvent::RemoveSite`/`RestoreSite`) for the script's own owner, and `DO SET_NO_BLUE_REINC`
+  (the human/blue equivalent, no on/off argument, always targets owner 0 regardless of which computer
+  tribe's script calls it) to the same `RemoveSite`. Every other `DO` command is still a no-op (previous
   item). `ScriptEnv::int_var` only backs `INT_GAME_TURN` so far; `INT_ATTR_*` and every other
   internal variable read as 0.
 - [x] `pop3_format::constants`: decode `levels/constant.dat` (XOR key, 2-byte marker, `P3CONST_` lines) per

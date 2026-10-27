@@ -1,8 +1,8 @@
 //! A computer tribe's own script (`cpscrNNN.dat`, docs/specs/ai-scripts.md), bridged to `GameMap`
-//! through `pop3_ai_script::interp::Env`. `SET_REINCARNATION` (`ScriptEnv::do_call`) and
-//! `FLYBY_CREATE_NEW..=FLYBY_START` (`ScriptEnv::on_flyby`) have real behaviour so far; every other
-//! `DO` command reaches the bridge and is deliberately ignored, same as `pop3-ai-script`'s own "an
-//! interpreter abstraction, not the AI" framing.
+//! through `pop3_ai_script::interp::Env`. `SET_REINCARNATION`, `SET_NO_BLUE_REINC` (both in
+//! `ScriptEnv::do_call`) and `FLYBY_CREATE_NEW..=FLYBY_START` (`ScriptEnv::on_flyby`) have real
+//! behaviour so far; every other `DO` command reaches the bridge and is deliberately ignored, same as
+//! `pop3-ai-script`'s own "an interpreter abstraction, not the AI" framing.
 
 use crate::map::GameMap;
 use crate::time::Tick;
@@ -80,6 +80,11 @@ impl Env for ScriptEnv<'_> {
         {
             let event = if *on { crate::event::WorldEvent::RestoreSite { tribe: self.owner } } else { crate::event::WorldEvent::RemoveSite { tribe: self.owner } };
             self.map.apply_events(vec![event]);
+        } else if call.id.name() == "SET_NO_BLUE_REINC" {
+            // The human player's equivalent of `SET_REINCARNATION OFF`: one-way, always targets blue
+            // (owner 0) regardless of which computer tribe's script calls it (ai-scripts.md "this AI
+            // gets a reincarnation site at the start. SET_NO_BLUE_REINC is the human equivalent").
+            self.map.apply_events(vec![crate::event::WorldEvent::RemoveSite { tribe: 0 }]);
         }
         // Every other DO command: not implemented yet, left as a no-op on purpose.
     }
@@ -210,6 +215,24 @@ mod tests {
         map.terrain.set(10, 10, crate::terrain::SEA_LEVEL);
         run_once(&mut map, true);
         assert_eq!(map.site_of(0).unwrap().height, 100);
+    }
+
+    #[test]
+    fn set_no_blue_reinc_removes_blues_site_regardless_of_the_scripts_own_owner() {
+        // A green tribe's script (owner 2) calling SET_NO_BLUE_REINC disables blue's (tribe 0) site,
+        // not its own - unlike SET_REINCARNATION, which always targets self.owner.
+        let script = Script {
+            version: 12,
+            block: Block(vec![Stmt::If {
+                cond: Cond::Cmp { op: pop3_ai_script::token::CmpOp::Eq, a: Field::Internal(INT_GAME_TURN), b: Field::Const(0) },
+                then_: Block(vec![Stmt::Do(Call { id: CommandId::from_name("SET_NO_BLUE_REINC").unwrap(), args: vec![] })]),
+                else_: None,
+            }]),
+        };
+        let mut map = map_with_a_site(100);
+        map.tribe_scripts = vec![TribeScript { owner: 2, script, interp: Interpreter::new() }];
+        map.tend_ai_scripts();
+        assert!(map.site_of(0).is_none());
     }
 
     #[test]
