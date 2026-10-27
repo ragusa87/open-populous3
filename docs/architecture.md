@@ -3,6 +3,9 @@
 ```
 crates/
   pop3-format   pure parsers for original files (no engine). Reusable by tools/editor.
+  pop3-ai-script parser, statement tree and interpreter abstraction for the original computer-player
+                scripts (PopScript, docs/specs/ai-scripts.md). No Bevy, no game logic: `Env::do_call`
+                hands every `DO` command to its caller undecided. Not consumed by game-core yet.
   game-core     deterministic simulation: terrain (Heightmap), map, spell, effect, blast, unit, vehicle, physics, command, vault; query layers
                 over the map (occupancy: who fills a building; headcount: units by state and kind, housing).
                 Integers only in state. No Bevy.

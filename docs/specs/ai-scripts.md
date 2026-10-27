@@ -1083,14 +1083,18 @@ end
   - Its single-file mode is broken.
 
 ## What this means here
-- Parse `cpscr` into the statement tree above, then interpret it in `game-core` once per turn and per computer
-  tribe.
+- `crates/pop3-ai-script` parses `cpscr` into the statement tree above (`ast.rs`), folds a recognized
+  `FLYBY_CREATE_NEW..=FLYBY_START` run into one `Stmt::Flyby` (`flyby.rs`), and runs the tree's control flow
+  (`IF`/`EVERY`/`SET`/`INCREMENT`/`DECREMENT`/`MULTIPLY`/`DIVIDE`) through `interp::Interpreter`, which hands
+  every `DO` command to an `interp::Env` trait undecided — no command has real game behaviour yet.
   - Use integers only. `INT_RANDOM_100` comes from `map::Lcg`.
   - Effects go through `Command`, so lockstep replays match.
 - Keep the AI behaviours (states, attributes, marker and spell entries, attacks) as plain simulation data that
   the script sets. A future native or Lua-like scripting layer can then drive the same data, the way Script4
   wraps the original functions.
-- Open before implementing:
+- Open before implementing the actual AI (an `Env` giving every `DO` command real behaviour, wired into
+  `game-core` once per turn and per computer tribe):
+  - a decompiled-listing pretty-printer (`TODO.md` "Computer players (AI)")
   - the `EVERY` off-by-one and whether there is a per-tribe phase
   - what `SET_ATTACK_VARIABLE` receives
   - the unknown states and commands marked "-" or "?" above

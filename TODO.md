@@ -408,12 +408,23 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 ### Level scripting (triggers)
 - [ ] Trigger semantics (layout and types known, level-format.md): what each type waits for (proximity, timed, player death, shaman proximity, library, shaman + angel of death), how `TriggerCount`, `NumOccurences`, `PrayTime` and `InactiveTime` play, and what activating a target does (discovery granted, effect fired, hidden thing revealed).
 - [ ] Praying totems, stone heads (scenery 9), vault of knowledge: which trigger/discovery each uses, once or repeatedly.
-- [ ] Level 5: a countdown (about 15 min) starts at some point; the winged death totem must be prayed at before it reaches 0. In the level: trigger #98, type 5 (shaman only, brings an Angel of Death), on cell 83, 65 (the start cell, marker 11), `PrayTime` 10, `CreatePlayerOwned` 1, targets effect 91 (same cell) and effect 88 (cell 106, 116). The timer is not in the level things: probably red's script cpscr058 (`SET_TIMER_GOING`, `HAS_TIMER_REACHED_ZERO`; the spec says level 5's script ends the level as won). Decompile it (`ai_script` above) to learn when the timer starts, what reaching 0 does and how the totem stops it; then implement its reward (not done yet, unlike the other totems).
+- [ ] Level 5: a countdown (about 15 min) starts at some point; the winged death totem must be prayed at before it reaches 0. In the level: trigger #98, type 5 (shaman only, brings an Angel of Death), on cell 83, 65 (the start cell, marker 11), `PrayTime` 10, `CreatePlayerOwned` 1, targets effect 91 (same cell) and effect 88 (cell 106, 116). The timer is not in the level things: probably red's script cpscr058 (`SET_TIMER_GOING`, `HAS_TIMER_REACHED_ZERO`; the spec says level 5's script ends the level as won). Decompile it (`pop3-ai-script` above) to learn when the timer starts, what reaching 0 does and how the totem stops it; then implement its reward (not done yet, unlike the other totems).
 - [ ] Implement the triggers and discoveries as deterministic simulation (through `Command`/state, no floats); AI scripts can fire them too (`TRIGGER_THING`).
 
 ### Computer players (AI)
 - [ ] AI for the computer-controlled tribes: their shaman and followers act on their own through `Command`s (deterministic, like a player's input): gather wood, build and grow the village, train units, pray, cast spells, attack and defend.
-- [ ] `pop3_format::ai_script`: parse `cpscrNNN.dat` (12 552 B only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md) (grammar, token, parameter and internal variable tables are there), with a decompiled listing; `cpatr` name and masks. Then `just level-info` prints the scripts of the level's tribes decompiled next to its things, triggers and markers, so a level's events can be read in one place.
+- [x] `pop3-ai-script` (its own crate, not a `pop3-format` module): parses `cpscrNNN.dat` (12 552 B
+  only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md) (grammar,
+  token, parameter and internal variable tables are there), folds a recognized
+  `FLYBY_CREATE_NEW..=FLYBY_START` run into one `Stmt::Flyby` (`flyby.rs`), and runs the tree's
+  control flow (`IF`/`EVERY`/`SET`/`INCREMENT`/`DECREMENT`/`MULTIPLY`/`DIVIDE`) through an
+  `interp::Env` trait that every `DO` command is handed to undecided; `cpatr` name and masks
+  (`cpatr.rs`). Still open:
+  - a decompiled-listing pretty-printer, so `just level-info` can print the level's tribes'
+    scripts decompiled next to its things, triggers and markers.
+  - `cpscr081`/`cpscr099`'s smaller layouts, if ever needed (no active level slot uses them).
+  - the actual AI: an `Env` implementation wired into `game-core` giving every `DO` command real
+    behaviour (see "Computer players (AI)" above).
 - [x] `pop3_format::constants`: decode `levels/constant.dat` (XOR key, 2-byte marker, `P3CONST_` lines) per
   [constants.md](docs/specs/constants.md) into a plain `name -> value` map (`Constants::parse`/`load`,
   `[ours]`-tagged guess at which of the two forms — encoded or the community's plain text — a given file is
@@ -791,8 +802,17 @@ Additive and mostly independent of the tiers above: chip away at these alongside
   plausible match for the plain "information" dialogs) and the now fully-read `0x44D7F0` (10 categories, one of
   which draws a per-tribe-coloured bar - a strong match for the enemy-spell indicator) - but its trigger for an
   automatic "an enemy just cast a spell" alert wasn't found (only reached from the level-script interpreter so
-  far), nor was whoever draws the stacking icon itself from the record it writes. The tower alert and the preach
-  notice's own trigger still need tracing before this can be built.
+  far), nor was whoever draws the stacking icon itself from the record it writes. The preach notice's own trigger
+  still needs tracing. The **tower alert is now traced** ("Watchtower sentry scan and alarm", 0x40BD20): an
+  occupied-by-warrior tower scans a radius (per-occupant `<TYPE>_DT_RADIUS` plus a height bonus) for one visible
+  hostile enemy and, on finding one, rallies nearby own units/buildings into an attack order rather than playing
+  a sound directly - that order's handler is what sets `0x89D167`, the same byte already identified as a general
+  "you're in combat" signal, confirming it as the tower alert's real trigger. The scan is not an unconditional
+  per-turn check, but it IS triggered the same way in every game mode: by the player's own **B** keybind
+  (shortcuts.md), queued and drained like any other player command regardless of singleplayer/multiplayer - a
+  level-script opcode can also fire it but is used in only one level total, so it is not the general mechanism.
+  Still open: what UI code reads `0x89D167` to actually play the sound, and where the scan's building-type
+  argument (always "tower" in practice) gets set, since the keypress itself doesn't supply it.
 - [ ] Building icons, tooltips (spell icons done: `assets/spell-hud`).
 - [ ] Spies: hovering one shows a "spy indicator" (in the original a cursor with a punch, to check) instead of its disguise.
 - [ ] Original keymap ([shortcuts.md](docs/specs/shortcuts.md), dev mode off): add the missing shortcuts (F1, S status, groups 1-6, camera points Z/X/C/V, `\\` track, Shift+Enter, Space skips the fly-by), and a way to stop and cast self spells without the dev keys.
