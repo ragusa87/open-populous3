@@ -215,7 +215,7 @@ fn draw(
     for f in &map.formations {
         let at = cells(f.at);
         outline(outline_circle(at, PLACE_MARK * 2.0), FORMATION);
-        for (k, &id) in f.members.iter().enumerate() {
+        for &(id, k) in &f.members {
             let Some(u) = map.unit(id) else { continue };
             let pos = cells((u.x, u.z));
             let slot = cells(f.slot(k));

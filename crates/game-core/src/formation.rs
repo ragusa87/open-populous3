@@ -50,11 +50,16 @@ pub struct Formation {
     pub at: (u16, u16),
     /// The controller's own heading, of `angle::TURN`, jittering on `JITTER_EVERY`.
     pub heading: u32,
-    pub members: Vec<UnitId>,
+    /// Each member with the slot it was given when it joined (`slot`), fixed for as long as it stays: a member
+    /// dropping out must never shift its neighbours into a different slot, or they would abandon whatever
+    /// progress they had made towards the old one and walk towards the new one instead - repeatedly, as each
+    /// further departure reshuffled the rest again.
+    pub members: Vec<(UnitId, usize)>,
 }
 
 impl Formation {
     pub(crate) fn new(owner: u8, at: (u16, u16), members: Vec<UnitId>) -> Self {
+        let members = members.into_iter().enumerate().map(|(k, id)| (id, k)).collect();
         Formation { owner, at, heading: 0, members }
     }
 
@@ -81,14 +86,13 @@ impl Formation {
         let before = std::mem::take(&mut self.members);
         self.members = before
             .into_iter()
-            .enumerate()
-            .filter_map(|(k, id)| {
+            .filter_map(|(id, k)| {
                 let Action::Walking { to } = world.unit(id)?.action else { return None };
                 let slot = self.slot(k);
                 if to != slot {
                     events.push(WorldEvent::Placed { unit: id, at: slot });
                 }
-                Some(id)
+                Some((id, k))
             })
             .collect();
         if JITTER_EVERY.fires(now, 0) {
@@ -138,8 +142,23 @@ mod tests {
         let mut f = Formation::new(0, to, units.clone());
         map.unit_mut(units[0]).unwrap().action = Action::Idle;
         let (finished, _) = f.tick(map.now, &map, &mut Lcg(0));
-        assert_eq!(f.members, vec![units[1]], "the idle one is gone, the walker stays");
+        assert_eq!(f.members, vec![(units[1], 1)], "the idle one is gone, the walker stays");
         assert!(!finished);
+    }
+
+    #[test]
+    fn a_member_dropping_out_does_not_reshuffle_the_rest_into_new_slots() {
+        let mut map = GameMap::sandbox_units();
+        let units = braves(&mut map, 3);
+        let to = (map.terrain.size() as u16 * 256, map.terrain.size() as u16 * 256);
+        let mut f = Formation::new(0, to, units.clone());
+        // Everyone is already walking to its own slot, like after a first tick nudged it there.
+        for k in 0..units.len() {
+            walking(&mut map, &units[k..=k], f.slot(k));
+        }
+        map.unit_mut(units[0]).unwrap().action = Action::Idle;
+        let (_, events) = f.tick(map.now, &map, &mut Lcg(0));
+        assert!(events.is_empty(), "units 1 and 2 were already on their own slots; dropping unit 0 must not move them: {events:?}");
     }
 
     #[test]

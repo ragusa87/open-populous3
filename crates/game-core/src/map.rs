@@ -1091,19 +1091,30 @@ impl GameMap {
     }
 
     /// `Command::Formation`: the player's own units among `units` still walking (so not already busy with
-    /// something else by the time this applies) and not already in one, up to `formation::MAX_MEMBERS`, become one
-    /// new formation seeded at `to` ("Formations" [exe]). A lone walker needs no spacing: a no-op below two.
+    /// something else by the time this applies), up to `formation::MAX_MEMBERS`, become one new formation seeded at
+    /// `to` ("Formations" [exe]). A lone walker needs no spacing: a no-op below two. Each walker's own move order
+    /// (`move_orders`, applied before this one) already took it out of whatever formation it was in through
+    /// `start_order`'s `leave_formation` - a unit reassigned elsewhere leaves its old formation right away rather
+    /// than having to finish walking to its old slot first.
     fn form_up(&mut self, player: u8, units: &[UnitId], to: (u16, u16)) {
         let members: Vec<UnitId> = units
             .iter()
             .copied()
             .filter(|&id| self.unit(id).is_some_and(|u| u.owner == player && matches!(u.action, Action::Walking { .. })))
-            .filter(|id| !self.formations.iter().any(|f| f.members.contains(id)))
             .take(crate::formation::MAX_MEMBERS)
             .collect();
         if members.len() > 1 {
             self.formations.push(crate::formation::Formation::new(player, to, members));
         }
+    }
+
+    /// Leaves the formation it was part of, if any (`start_order`: a new order takes it over, so it must not keep
+    /// being nudged back towards its old slot). A formation left with nobody in it is removed right away.
+    fn leave_formation(&mut self, id: UnitId) {
+        for f in &mut self.formations {
+            f.members.retain(|&(m, _)| m != id);
+        }
+        self.formations.retain(|f| !f.members.is_empty());
     }
 
     /// Ends the player's own swamp `swamp` early (right click + Ctrl on it, like a blueprint put away): as if
@@ -1287,8 +1298,13 @@ impl GameMap {
             }
         }
         dirty.extend(self.cast_when_in_range());
+        let in_formation = |id: UnitId| self.formations.iter().any(|f| f.members.iter().any(|&(m, _)| m == id));
         for (i, &arrived) in arriving.iter().enumerate() {
-            if arrived && self.units[i].action == Action::Idle && self.units[i].in_the_open() {
+            // A formation member keeps the spot it was nudged onto even if another unit already stands there
+            // (formation.rs slots are not spot.rs aware): relocating it here would only have the formation nudge it
+            // straight back next turn, forever. It leaves the formation once idle like any other member; nothing
+            // moves it again until a new order does.
+            if arrived && self.units[i].action == Action::Idle && self.units[i].in_the_open() && !in_formation(self.units[i].id) {
                 let u = &self.units[i];
                 let (taken, spot) = (self.taken_spots(&[u.id]), slots::spot_of((u.x, u.z)));
                 if taken.contains(&spot) && let Some(&free) = slots::free_spots_near(&self.ground(), spot, &taken, 1).first() {
@@ -1722,6 +1738,7 @@ impl GameMap {
     /// building here, where the map is known.
     pub(crate) fn start_order(&mut self, i: usize, order: Order) {
         self.unassign(i);
+        self.leave_formation(self.units[i].id);
         match order {
             Order::Build { site } => self.assign(i, site),
             Order::Enter { site } => self.go_in(i, site),
@@ -2700,6 +2717,25 @@ mod tests {
         }
         assert!(m.units.iter().filter(|u| u.owner == 0).all(|u| u.action == Action::Idle), "all arrived");
         assert!(m.formations.is_empty(), "cleared up once nobody is still walking");
+    }
+
+    #[test]
+    fn a_member_reassigned_elsewhere_leaves_its_formation_right_away() {
+        let mut m = GameMap::sandbox_units();
+        m.trees.clear();
+        let c = MAP_SIZE as i32 / 2;
+        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == 0).take(3).map(|u| u.id).collect();
+        for cmd in m.move_orders(0, &group, slots::cell_centre((c + 2, c + 6))) {
+            m.apply(&cmd);
+        }
+        assert_eq!(m.formations[0].members.len(), 3);
+        let elsewhere = slots::cell_centre((c - 6, c - 2));
+        m.apply(&Command::OrderUnit { player: 0, unit: group[0], order: Order::MoveTo { x: elsewhere.0, z: elsewhere.1 } });
+        assert!(
+            m.formations[0].members.iter().all(|&(id, _)| id != group[0]),
+            "reassigned right away, not left to finish walking to its old slot first"
+        );
+        assert_eq!(m.units.iter().find(|u| u.id == group[0]).unwrap().action, Action::Walking { to: elsewhere }, "its new order stands");
     }
 
     #[test]
