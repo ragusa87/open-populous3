@@ -107,7 +107,9 @@ fn spawn_banner(mut commands: Commands) {
         Text::new(""),
         TextFont { font_size: FontSize::Px(16.0), ..default() },
         TextLayout::justify(Justify::Right),
-        Node { position_type: PositionType::Absolute, bottom: px(32), right: px(10), ..default() },
+        // `camera_debug`'s own readout sits right below (bottom: px(8)), up to 4 lines tall in dev
+        // mode (on by default) - clear of it, not stacked on top of it.
+        Node { position_type: PositionType::Absolute, bottom: px(100), right: px(10), ..default() },
         Visibility::Hidden,
     ));
 }
