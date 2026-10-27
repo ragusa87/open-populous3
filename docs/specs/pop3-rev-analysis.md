@@ -101,6 +101,12 @@ so a live measurement may run on it with the addresses translated.
   with different on-disk `Inclination`. See "Terrain land colour".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
+- **The camera's pitch is fixed only while the player drives it - an AI-script flyby animates pitch
+  independently of yaw** [exe, measured, partial]: level 1's opening flyby was measured dipping pitch to about
+  55° mid-flight before returning, while `flyby.rs` currently never varies pitch. The camera's rotation matrix
+  itself turned out to live inside the active player's own tribe record, not a separate struct. See "Camera
+  flyby state (tribe_struct)" - most of its candidate fields (position, distance, raw pitch, interpolation
+  progress) are still unconfirmed, this investigation is ongoing.
 
 ## Turns and timing [exe]
 ```text
@@ -1400,7 +1406,7 @@ screen = (x', y') · (1 << (S + 16)) / z'             # S = 0x87CA68, then a per
 | K | render block +0x0 (0x88F004), copied to 0x87CA5C | 46 000 (0xB3B0), constant while playing | bend: drop = `4 d² K / 2³²` render units = **0.01097 × d² cells** (d in cells) |
 | D | render block +0x10 | 6500 | camera 6500 render units (25.4 cells) behind the focus |
 | S | render block +0x14 | 11 | perspective shift |
-| M | 0x74A354 | pure rotation (column norms 16 384) | yaw follows the player; **pitch fixed at about 20.4°** (cos 15 357/16 384, sin 5709/16 384) |
+| M | 0x74A354 | pure rotation (column norms 16 384) | yaw follows the player; **pitch fixed at about 20.4°** (cos 15 357/16 384, sin 5709/16 384) **while the player drives the camera** - varies during AI-script flybys, see "Camera flyby state" below |
 
 - The bend is measured in view space (the camera's horizontal and depth axes after rotation), not around the
   focus point on the ground; with a 20° pitch the two are close.
@@ -1413,6 +1419,57 @@ screen = (x', y') · (1 << (S + 16)) / z'             # S = 0x87CA68, then a per
   (including levels 3 and 24), while rotating and zooming: it is not a per-level setting.
 - Defaults set by 0x416F50 (render block) and 0x46DFB0 (draw state); `clear_land_draw_state` 0x46E700 copies the
   block into the draw state before each frame.
+- M decoded in full (column order `M00 M01 M02 / M10 M11 M12 / M20 M21 M22`, slots at +0x00, +0x04, ... +0x20):
+  `M00=cosY, M02=sinY, M10=sinP·sinY, M11=cosP, M12=-sinP·cosY, M20=-cosP·sinY, M21=sinP, M22=cosP·cosY` - so
+  `yaw = atan2(M02, M00)` and `pitch = asin(M21/16384)` read straight off the matrix, live, every frame.
+
+## Camera flyby state (tribe_struct) [exe, partial]
+Where the matrix actually comes from, and how it behaves during an AI-script flyby (ai-scripts.md "Worked
+example: level 1's opening flyby") rather than normal play. Confirmed:
+- `clear_land_draw_state` copies the matrix from a pointer at 0x74A350, rebuilt each frame as
+  `tribe_struct_base(local player's own tribe)`, i.e. `0x89D1C8 + tribe*0xC65` ("Reference" "Tribe record") with
+  the tribe index read from 0x89C6F0 - the matrix is the ACTIVE PLAYER's own tribe record's first 36 bytes, not
+  a separate camera struct. Fits a hot-seat design (each tribe keeps its own last camera orientation); means any
+  further camera-path fields live inside tribe_struct too, not elsewhere.
+- Pitch is not a fixed per-game constant - it's only fixed while the player drives the camera (the 20.4° figure
+  above). Measured live through level 1's opening flyby: pitch swings from that idle 20.4° down to about 55°
+  (measured turn ~130-140 after the flyby starts) and back, then holds flat for a long stretch (about 7s) while
+  yaw keeps changing continuously underneath it - yaw and pitch are driven independently during a flyby, not
+  locked together.
+- `FLYBY_START`'s own turn is anchored to about turn 77-80 after level start (±15, not exact), from three
+  independent lines of evidence: the first `FLYBY_SET_EVENT_ANGLE 0 5 35` keyframe's predicted completion turn
+  (`start+duration` after `FLYBY_START`) lands almost exactly on an observed yaw plateau; the reincarnation
+  centre's own intro animation (turns 0 to about 70) ends right before; and the `POS`/`ZOOM` channels' own hold
+  windows (see next point) land in the same range once fitted.
+
+Candidates, NOT yet confirmed - tribe_struct fields right after the matrix (`+0x24` on; the struct's own known
+fields resume at `+0x881`, "Reference" "Tribe record"), found by diffing the whole range live during a flyby:
+
+| Offset | Shape observed | Candidate | Confidence |
+|---|---|---|---|
+| `+0x24` | packed dword, two 16-bit halves move independently | camera focus x (low half), z (high half) | direction of x vs z confirmed by a joint fit against the script's `POS` keyframes' x/z; exact scale/offset not |
+| `+0x28` hi 16 bits | wraps like a cyclic angle; flat exactly when pitch is flat even while yaw keeps moving | raw pitch angle | shape strongly correlates with pitch; raw-to-degrees transform not solved (tried simple ratios, inconsistent) |
+| `+0x2c` | smoothly monotonic, always a multiple of 0x10000 in this capture | camera distance/zoom | correlates with the script's `ZOOM` channel's hold windows; exact scale/offset not fitted |
+| `+0x30` | ramps between 0 and exactly 0x1000000 (2³⁴ / 2¹⁰ = 2²⁴), direction flips at each transition | per-segment interpolation progress (8.24 fixed, 0.0-1.0) | plausible shape, not cross-checked against a known progress value |
+| `+0x34` | grows with an almost-constant second difference (quadratic) during transitions | easing/acceleration counter | least certain; could be unrelated |
+
+A joint least-squares fit (grid search on `FLYBY_START`'s turn, affine regression per channel) of `+0x2c` against
+the `ZOOM` channel and `+0x24`'s two halves against the `POS` channel's x/z gives R² of 0.1-0.6 depending on the
+channel and candidate start turn - clearly the right general shape, not a solved formula; linear interpolation
+fit marginally better than smoothstep easing at every candidate turn tried, but not decisively. ai-scripts.md
+"Flybys" notes `FLYBY_SET_EVENT_ANGLE` goes "the shortest way" - one measurement during this investigation saw
+yaw take what looked like the long way round, but since yaw is a confound of this `ANGLE` channel and the `POS`
+channel's own continuous re-aiming (not yet separated), that is not a solid refutation of "shortest way" either.
+
+**D3D axis caveat**: D3D's coordinate convention is left-handed, differing from this engine's own on at least the
+Z axis - any of the above values, once their scale/offset is pinned down, need an explicit axis/handedness
+conversion before they inform `flyby.rs` or any other spec. One concrete instance already found: the matrix's
+pitch sign is flipped relative to how this section used to state the pitch constants (now corrected above).
+
+Not yet done, see TODO.md "Camera flyby state": pin `FLYBY_START`'s turn exactly (find the AI script's own
+per-tribe flyby-active flag, the `$57`-equivalent variable the script sets right before `FLYBY_START`, instead of
+curve-fitting camera motion), solve `+0x28`'s raw-to-pitch transform, decode the `POS` channel's own coordinate
+units, and apply the axis caveat once the above is solid enough to change `flyby.rs`.
 
 ## Terrain land colour: the bigfade row and brightness [exe]
 The missing half of `set_texture_landscape_main` (0x4BE330): "Building ashes" "Drawn" already covers the
@@ -2081,7 +2138,8 @@ second halves of the attack (22), disguise (32), preach (34) and kind 36 keep th
 | angel of death | 7 | 7 × 7 cells (3 each side) | 7 |
 
 - Not named constants: `constant.dat` cannot change them. The `<TYPE>_DT_RADIUS` constants (person table +0x22)
-  are read only by drum-tower code (0x40B450, 0x40BD20), not by this scan.
+  are read only by drum-tower code (0x40B450, 0x40BD20 - see "Watchtower sentry scan and alarm" below), not by
+  this scan.
 - A preacher attacker only targets preachers and shamans (0x51EC80), angels of death are never targeted by the
   melee scan, and spies and wildmen never scan.
 
@@ -3764,14 +3822,113 @@ currently 0 and a brand-new fight/pre-fight is about to involve the local player
 (to a different value than 2, not decoded this session) - a one-shot "a new fight involving you just started"
 trigger, the shape an alarm/alert-sound trigger would need. One confirmed reader, `0x4ECA2D`: copies the byte
 into `+0x8` of a struct pointed to by global `0x895DBB` (gated on that pointer being non-null) - plausibly a HUD
-widget's own state field, not traced further. **Not confirmed to be specifically the reported "tower sees an
-enemy" alarm** - it fires for ANY fight/pre-fight touching the player, not from a guard-post/tower's own sighting
-range; the tower-specific scan+sound was not located this session (see "Open questions").
+widget's own state field, not traced further.
+
+### Watchtower sentry scan and alarm (0x40BD20) [exe]
+Found this session, tracing from the already-known `<TYPE>_DT_RADIUS` constants ("Constant table") through their
+only two readers (`0x40B450`, `0x40BD20`) - **the exe-side mechanism behind the reported "Tower alert"**.
+```text
+fn(building): only for building+0x2b==4 ("tower", docs/unit_types) AND occupied (+0xa6!=0) AND its first valid
+  garrisoned occupant (+0x86, via 0x890390) is specifically TYPE 3 (warrior) - a tower manned only by a brave,
+  priest etc. never arms this check
+radius = DT_RADIUS[occupant type] (person-type table 0x5a7060/stride 0x32 +0x22; defaults 4/7/5/5/8/3 for
+  brave/warrior/religious/spy/super_warrior/medicine_man) + a small building-height bonus (+0x41)
+  (0x40B450 computes this same radius standalone - read by two unrelated range-display consumers,
+  `add_tribe_unit_to_globe`/0x41F16C and `set_landscape_pos_fields_2`/0x502136 - neither is the scan itself)
+scan the (radius+1)x(radius+1) cell square (shared cell-walker, same family as the person melee-scan) for ONE
+  eligible enemy: different tribe, hostile relationship (both ways), alive, visible (LOS check, not hidden,
+  not mid-conversion, not already preaching/attached), and the SAME attacker/candidate type-pairing rule used
+  by the melee scan and the Angel of Death's hunting AI - for a plain warrior sentry this means it never
+  detects an Angel of Death
+found → a SECOND pass over the same cells flags (a bit on +0x14) every OWN unit and OWN building (of a type
+  flagged "reacts" in its own type table) in range, then gives each of them (skipping any already busy with an
+  excluded order) order KIND 19 ("attack (generic)", `attack_order_handler`/0x51A2A0) via one SHARED command
+  group - i.e. a rally-to-defend call, not a direct sound/icon trigger
+```
+**No sound or notification-record write exists anywhere in this function.** Kind 19's own handler, `0x51A2A0`,
+is exactly where `0x89D167` above gets edge-set - so the tower does not play its own siren: it forces a fight to
+start, and that pre-existing generic "a fight involving you just started" alert is what actually fires, same as
+any other new fight. This **confirms `0x89D167` as the tower alert's trigger after all** - not because it is
+tower-specific, but because the tower's own response *is* "start a fight", which is the one thing `0x89D167`
+already watches for.
+
+**Correction of this session's own first pass**: `0x40BD20` is never reached from an unconditional "for every
+tower, every turn" loop - its only call path is through a small per-[tribe][type] worklist walker (`0x40BCE0`),
+which in turn has exactly two callers: `process_tribe_cmd` (0x44191C, raw command id 0x7C) and the level-script
+interpreter (`interpret_script`, 0x48E2B7, opcode `CALL_TO_ARMS`/1198 per ai-scripts.md). The first draft of this
+section called the `process_tribe_cmd` path "a debug/cheat case" and concluded the whole mechanism was
+"script/command-triggered per level, not a native always-on engine check" - **that was wrong, caught when the
+user pointed out the alarm also happens in multiplayer, where campaign-style level scripting doesn't apply.**
+Tracing further: `process_tribe_cmd`'s command id 0x7C is drained every turn for whichever of the 4 tribe slots
+has one queued (`process_tribes_cmd`/0x43E890 - runs in every game mode, not campaign-specific), and that command
+is queued by an ordinary **player hotkey**: `process_cmd` (the UI command dispatcher, own command id 0xBF) calls
+`set_tribe_command` (0x479CF0) with literal opcode 0x7C for the local player's own tribe - almost certainly
+shortcuts.md's already-documented "**B** (double tower alarm): nearby followers help the tower", which this
+session hadn't cross-checked before writing the first draft. So the real mechanism is a plain player-triggered
+command available in any mode, not level-script content; `CALL_TO_ARMS` is a secondary, rarely-used (1 level
+total, per ai-scripts.md's own usage count) way to invoke the identical engine primitive for scripted campaign
+moments. Still open: that keypress's own two command args are both 0 (no building-type choice made at the
+keypress) while `0x40BCE0`/`0x40BD20` read the type to scan from `tribe+0xc22` - where that field gets its "4"
+(tower) from was not traced; and the "Space" half of the shortcut ("camera to the tower under attack") wasn't
+re-examined this round, though it reads as a plausible consumer of the already-traced `0x89D167`/`0x895DBB+8`
+state.
 
 **Correction**: order kind 30 (0x1E), catalogued as "alarm" in `pop3-rev/docs/functions.tsv` from its Ghidra-
 adjacent name, turns out on reading its handler (0x43DAA0) to be an ordinary "walk to this building" unit order
 (an arrival check against a building, no sound or notification anywhere in it) - the "alarm" label looks like a
 guess, not confirmed sentry/tower behaviour; left as-is in the catalog with a note, not renamed outright.
+
+### Guard the shaman (G key) [exe, measured]
+**Reported (player observation)**: pressing G with followers selected makes them regroup next to the shaman and
+turn to face her; pressing G with nothing selected cancels it.
+
+**First pass of this session's own tracing was wrong, caught by a live memory trace.** A static reading
+identified `ui_cmd 0x6D -> tribe_cmd 0x6E` (living-shaman gate, writes a position/mode onto the shaman, sets her
+own person state to 38) as a strong-looking candidate for G. A live watch of the running game (`watch_guard2/
+3/4.txt`, following the shaman's own fields and every selected unit's command-group slots at 50 Hz) proved this
+candidate never fires on an actual G press - a coincidental false lead, not G. State 38 is real, traced code
+(left in `person_states.tsv` under a corrected name, trigger unidentified), just not this.
+
+**The real mechanism, confirmed live both ways:**
+```text
+ui_cmd 0xC1 (process_cmd, Ghidra caseD_c1) -> tribe_cmd 0x82 (process_tribe_cmd, caseD_82, 0x441FA3)
+  -> 0x443B40(tribe_idx, bool_arg)
+```
+`0x443B40` walks the tribe's own person list (not buildings - an earlier pass of this analysis, inherited from
+before this session, wrongly called it "rings a tribe's buildings with an alarm order"):
+```text
+any non-shaman unit currently selected (+0x7A bit 0x80)?
+  yes -> give each one order KIND 30 (0x1E) targeting the shaman (the value at her own +0x24 field, plausibly
+    her own cached id), sharing one command group, into each follower's SECONDARY group slot (not primary);
+    then clear that follower's own selected flag
+  no  -> instead scan the whole person list for anyone already in state 10 with +0xA7==0x1E (a "currently
+    escorting" marker) and CANCEL that order - "stop guarding"
+```
+Order kind 30 itself (`0x43DAA0`, also corrected this session - an earlier pass called it an inert one-shot
+"walk to a building" order) is a genuine **continuous escort**: every tick it re-reads the reference unit's
+*current* live position (not a frozen target), keeps the follower within ~824 units of it on both axes, and
+never reports itself done while the reference stays alive. Live-confirmed exactly: a selected follower given
+this order continuously circled the stationary shaman at a ~200-unit working radius, matching "regroup next to
+the shaman" - the "turn to face her" half (facing/orientation) wasn't separately instrumented but is consistent
+with ordinary walk-facing toward a moving destination. The player also confirmed live that G with no selection
+cancels an active guard, matching the second branch above exactly.
+
+Two open items, both low priority given the mechanism itself is now solid: what the shaman's own `+0x24` field
+actually is (read as her target id - plausibly a self-reference, not independently confirmed), and whether the
+unread `0x433490`/`0x4999D0`-sourced `bool_arg` changes anything in either branch.
+
+**The shaman is NOT protected from attack while guarded - live-tested and disproven.** The player's own
+hypothesis ("an attack on the shaman is absorbed by a guard instead of her") was checked by watching the
+shaman's and every guard's own person state for entry into fight/pre-fight (25/29) on a live level with several
+guards active (`guard1.txt`). She entered state 25 (an ordinary Fight, not merely a pre-fight) at the exact same
+moment as two of her own guards, all three going straight to state 25 together while a fourth unit (not on a
+guard order at the time) had gone through the normal pre-fight (29) moments earlier - i.e. she joined the SAME
+fight ring as her guards, she was not excluded from it. This reads as the already-documented auto-attack/melee-
+scan rule applying normally to her too: one nearby unit's scan starts a fight, and other eligible units nearby -
+guards and the shaman alike - then match the scan's own "a fight controller to join" result (Reference,
+"Auto-attack") and join the same ring (up to 6 participants) rather than her being specially redirected around.
+So guards appearing to "take the hit" in practice is better read as "whoever the attacker's scan reaches first
+starts the fight, then everyone nearby piles into the same ring" - not a deliberate protection mechanic.
 
 ## Impact on our specs
 - `hud/mana.rs`'s strip (`mana_view`, `pool.bank` against `MAX_MANA`) does not match "The mana bar (HUD)": the
@@ -3871,7 +4028,12 @@ guess, not confirmed sentry/tower behaviour; left as-is in the catalog with a no
 - terrain.md "Planet illusion" and ui-and-editor.md view tuning: the original bend is k = 0.011 per cell² (our
   default `POP3_CURVATURE` 0.008 is too gentle, the earlier 0.012 was close), measured in camera space. The
   original height scale is 1/256 cell per unit (max 1024 = 4 cells), not "about 2 cells"; our 1/384 (2.7 cells)
-  is flatter than the original. The original camera pitch is fixed at about 20°, 25 cells behind the focus.
+  is flatter than the original. The original camera pitch is fixed at about 20°, 25 cells behind the focus,
+  **but only while the player drives the camera** - during an AI-script flyby it animates independently of
+  yaw (measured dipping to about 55° mid-flyby in level 1's opening flyby), see "Camera flyby state
+  (tribe_struct)". `game-client/src/flyby.rs`'s `drive_camera` never touches `CameraRig.pitch` during a
+  flyby (only `focus.x/y`, `yaw`, `distance`) - confirmed gap, not yet fixable precisely (the raw pitch
+  field found live, tribe_struct `+0x28` hi 16 bits, doesn't have a solved scale yet).
 - terrain-textures.md "bigfade"/"disp"/"Our bake" ("Terrain land colour"): the original's row is `height + 75
   (+75 again unless perfectly flat), clamp 1022`, no `POP3_ROW_SCALE`-like flat multiplier; `disp` noise is
   signed and scaled by a fixed altitude-dependent curve (320..1024), not centred/offset by a theme constant; the
@@ -3981,14 +4143,22 @@ guess, not confirmed sentry/tower behaviour; left as-is in the catalog with a no
   independent ones.
 - Notifications: `0x44D7F0` is now read in full (10 categories - "Notifications" above); still open: whoever
   reads the shared notification record it writes (`0x68B6A1`/`0x68C6xx`) and actually draws the reported falling/
-  stacking icon - not located; which level-script `DO` command(s) map to its categories 1 and 2 (the script
-  interpreter's own opcode dispatch table wasn't read); whether category 1's "head"-chasing is really the
+  stacking icon - not located; which level-script `DO` command(s) map to its categories 1 and 2, OR to the
+  watchtower scan's own type argument (the script interpreter's own opcode dispatch table wasn't read, so none
+  of these are pinned to a named PopScript command yet); whether category 1's "head"-chasing is really the
   reported "preach" alert (unconfirmed guess) or something else (worship/trigger-head is the stronger reading of
   the code itself); the generic text-banner slot array's own stacking/fall-in/dismissal visuals (0x683BB3); the
-  guard-post/tower "spots a nearby enemy" scan and its sound - not located, so not confirmed to be `0x89D167` at
-  all, nor confirmed to route through `0x44D7F0`; the enemy-spell-cast alert's own TRIGGER (category 2's tribe-
-  coloured-bar drawing is traced, but nothing was found that calls it automatically when an enemy casts a spell -
-  category 2 is only confirmed reached from the script interpreter so far).
+  enemy-spell-cast alert's own TRIGGER (category 2's tribe-coloured-bar drawing is traced, but nothing was found
+  that calls it automatically when an enemy casts a spell - category 2 is only confirmed reached from the script
+  interpreter so far). **Resolved this session**: the guard-post/tower "spots a nearby enemy" scan is `0x40BD20`
+  ("Watchtower sentry scan and alarm") - it doesn't play a sound itself, it issues a rally/attack order whose
+  handler is the same `0x51A2A0` that edge-triggers `0x89D167`, confirming that byte as the tower alert's actual
+  trigger path. It is queued by the player's own **B** hotkey (shortcuts.md), not level-script content (an
+  earlier draft of this section wrongly called it script/cheat-only - corrected in "Watchtower sentry scan and
+  alarm" above after the player pointed out the alert also happens in multiplayer). Still open: exactly what UI
+  code reads `0x89D167`/`0x895DBB+8` to draw the icon and play a sound; where `tribe+0xc22` (the scan's own
+  building-TYPE argument) gets set to 4, since the B-key command's own args are both 0; and whether **Space**'s
+  "camera to the tower under attack" half reads that same state.
 - Auto-attack: where the kinds' sprites are drawn (the record+6 offset could not be reproduced this session -
   unverified, not disproven), the firewarrior's own scan (0x51E9A0); the preacher's own scan (0x51E7B0) is now
   traced ("Command groups", "Preacher conversion") but what `0x51F030`'s two out-params/mode flag mean is not.
@@ -4102,6 +4272,12 @@ guess, not confirmed sentry/tower behaviour; left as-is in the catalog with a no
   identity of those two types; the sub-state(8..19) → animation-id mapping in state 16; whether an explicit
   player attack order on a wildman is honoured in the original (only the automatic proximity scan is confirmed
   to skip them); whether wildman creation can ever retrigger mid-level rather than only at load.
+- Camera flyby state (tribe_struct, see that section): `FLYBY_START`'s exact turn (anchored to only ±15 by
+  curve-fitting camera motion against level 1's opening flyby script; the AI script's own per-tribe flag it sets
+  right before `FLYBY_START` would pin it exactly, not yet found); `+0x28`'s raw-to-pitch-degrees transform;
+  `+0x24`/`+0x2c`/`+0x30`/`+0x34`'s exact scale/offset (direction of `+0x24`'s x/z halves confirmed, nothing
+  else); whether `FLYBY_SET_EVENT_ANGLE`'s documented "shortest way" rule is really contradicted by one
+  long-way measurement, or whether that's just the `POS` channel's own confound on yaw (not yet separated).
 
 ## Reference
 
@@ -4380,6 +4556,8 @@ class are in `pop3-rev/docs/unit_types`.
 
 | Offset | Meaning |
 |---|---|
+| +0x00 .. +0x23 | camera rotation matrix (the active player's own tribe only - "Camera flyby state (tribe_struct)") |
+| +0x24, +0x28, +0x2c, +0x30, +0x34 | candidate camera path fields (position, pitch, distance, interpolation progress) - see "Camera flyby state (tribe_struct)", none of their exact scale/offset confirmed |
 | +0x881 .. +0x899 | heads of the person, building, shape, formation and beacon lists |
 | +0x89D | shaman |
 | +0x91D | number of people (reaching 200 calls 0x499D90, probably an error or limit report) |

@@ -374,6 +374,9 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Totem gifts not handled yet (logged as `Reward::Unhandled`): effects (land bridge, lightning...), revealed scenery and triggers, vehicles, the Angel of Death of type 5 totems; mana once mana exists. Check what `NumOccurences` 0 means.
 - [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); `PrayTime`'s unit is now confirmed live (worship.md "Open", pop3-rev-analysis.md "The vault"): the same 4-turn tick as a totem's gauge, cap = `PrayTime` directly. Still to check in the game: the drain speed with nobody praying (not observed live yet).
 - [ ] Prisons: levels where the shaman starts imprisoned; she is locked inside (units.md "Locked units") until freed.
+  Level 15 has one (so far the only level seen with a prison). Observed live: a pyrotechnic hit knocked the
+  imprisoned shaman outside the prison and killed her, so being locked inside does not make her unattackable/
+  unkillable as assumed - check what actually protects her (if anything) and what ejects her from the building.
 - [ ] Generated pyramid: fold its capstone like the original's top (a separate mesh in `tools/generate_buildings.py`).
 - [ ] Pyramids: draw the reward as an icon at the top (cursor sprites 38-57 spells, 58-65 buildings), gone once the reward is granted.
 - [ ] HUD: show the gauge over the totem/pyramid and who is praying.
@@ -479,6 +482,14 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   where the player was before it started. Not done: `FLYBY_SET_EVENT_TOOLTIP` popups (parsed and resolved,
   nothing draws them); the exact keyframe easing/overlap and the zoom -100..100 -> camera distance scale
   are our own guesses, unspecified in the files.
+- [ ] Camera flyby state: continue the pop3-rev-analysis.md "Camera flyby state (tribe_struct)" investigation
+  (mid-investigation, several fields still candidate/unconfirmed - see that section). Confirmed so far: the
+  original's camera pitch is NOT fixed during a flyby (it animates independently of yaw, dipping well below
+  the normal-play default), but `flyby.rs`'s `drive_camera` never varies `CameraRig.pitch` - a real gap, not
+  yet fixable precisely since the live pitch field's scale isn't solved. Also open: `FLYBY_START`'s exact
+  turn (only anchored to ±15 so far), the zoom-channel and position-channel's exact scale/offset (direction
+  confirmed, not the numbers), and whether `FLYBY_SET_EVENT_ANGLE`'s documented "shortest way" rule holds up
+  once separated from the position channel's own confound on yaw.
 - [ ] Script side effects outside the AI still open: messages, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`,
   `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
 

@@ -167,10 +167,25 @@ instead of the plain banner - one category draws a per-tribe-coloured bar, a str
 enemy-spell indicator, but it is only confirmed reached from the level-script interpreter so far, not from an
 automatic "an enemy just cast a spell" scan; another category chases a linked "head"/trigger scenery object, a
 guess (not confirmed) for the preach notice rather than a worship-trigger message. Whoever actually DRAWS the
-falling/stacking icon from the shared record these write was not located either. The tower alert and the
-preach/enemy-spell automatic triggers themselves were not located this session; `0x89D167` (set once when a new
-fight/pre-fight starts involving the local player, and continuously while one is ongoing - combat.md "Melee")
-is a plausible general "you're in combat" signal but not confirmed to be the tower-specific one.
+falling/stacking icon from the shared record these write was not located either; the preach/enemy-spell
+automatic triggers themselves were not located this session.
+
+The **tower alert** IS now traced (pop3-rev-analysis.md "Watchtower sentry scan and alarm", 0x40BD20): an
+occupied tower garrisoned specifically by a warrior scans a radius (driven by the occupant's own named
+`<TYPE>_DT_RADIUS` constant plus a building-height bonus) for one visible, hostile, living enemy; on finding one
+it doesn't play a sound itself - it rallies nearby own units/buildings with an "attack (generic)" order, and
+that order's handler is the exact code that edge-sets `0x89D167` (set once when a new fight/pre-fight starts
+involving the local player, and continuously while one is ongoing - combat.md "Melee") - **so `0x89D167` is
+confirmed as the tower alert's actual trigger path after all**, by virtue of the tower forcing a fight to start,
+not because the byte is tower-specific. The scan itself is never run automatically for every tower every turn -
+but (correcting a first-pass guess that this made it script/cheat-only) its trigger is the player's own **B**
+keybind (shortcuts.md "Space (tower alarm) / B (double tower alarm)"), queued like any other player command and
+drained every turn for every tribe regardless of game mode - so it works identically in singleplayer and
+multiplayer, matching what was actually observed in play; a level-script opcode (`CALL_TO_ARMS`) can also invoke
+the same primitive but is barely used (one level total). Still open: which UI code actually reads `0x89D167` to
+play the sound/show whatever's shown (no icon was reported for this one); where the scan's own building-TYPE
+argument (always 4/tower in practice) actually gets set, since the B-key command doesn't supply it; and whether
+**Space**'s own "camera to the tower under attack" half reads the same state.
 
 ## Loading screen (`boot/`)
 `AppState::Loading` is where the client starts, and where it goes when a game or sandbox starts: a title, a bar and
