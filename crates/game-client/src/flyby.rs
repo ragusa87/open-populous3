@@ -2,10 +2,12 @@
 //! not yet interrupted, this drives the camera along its scripted keyframes instead of the player
 //! (`camera::camera_input` is suppressed the same way `armageddon::input_locked` already suppresses
 //! it) and a "Flyby" banner blinks bottom-right. Space (if `allow_interrupt`) sends
-//! `Command::CancelFlyby`: the banner switches to "Cancelled flyby" for a short grace period
-//! (`game_core::ai_script::FLYBY_CANCEL_GRACE_TICKS`), then the camera returns to exactly where it
-//! was before the flyby and the player regains control — both read straight off `active_flyby`
-//! disappearing, no separate client-side timer.
+//! `Command::CancelFlyby`: the banner switches to "Cancelled flyby" and the camera eases, over a
+//! short grace period (`game_core::ai_script::FLYBY_CANCEL_GRACE_TICKS`), from wherever it was at
+//! that moment to the flyby's own last position (`end_target` if the script set one, else each
+//! channel's own last keyframe) — the same place it would have settled at had it been let play out,
+//! just reached early. Once the grace period is up the player regains control, read straight off
+//! `active_flyby` disappearing (`GameMap::tend_flyby`), no separate client-side timer.
 //!
 //! The zoom (-100..100) -> `distance` mapping and the per-keyframe easing are both unspecified in the
 //! spec, so both are our own guesses, same spirit as `camera.rs`'s own `DEFAULT_FOV` comment.
@@ -16,7 +18,9 @@ use crate::sim_time::SimNow;
 use crate::units::{GameSchedule, PLAYER};
 use crate::world::CurrentMap;
 use bevy::prelude::*;
+use game_core::ai_script::FLYBY_CANCEL_GRACE_TICKS;
 use game_core::command::Command;
+use pop3_ai_script::interp::ResolvedFlyby;
 use std::f32::consts::TAU;
 
 /// Blinks per second ("Flyby" while playing).
@@ -36,46 +40,48 @@ pub fn flyby_active(map: Res<CurrentMap>) -> bool {
     map.0.active_flyby.as_ref().is_some_and(|f| f.interrupted_at.is_none())
 }
 
-/// Poses `rig` from the active flyby's keyframes at `now`. Once it disappears
-/// (`GameMap::tend_flyby`: finished on its own, or its cancel grace period over), restores `rig` to
-/// its own pre-flyby state *only* if it was ever cancelled — a flyby that ran to the end instead
-/// just holds wherever its last keyframe left the camera, `active_flyby` carries no "how did it end"
-/// flag of its own once gone, so the last-seen `interrupted_at` (remembered here, alongside the
-/// snapshot) is what this reads instead.
-pub fn drive_camera(map: Res<CurrentMap>, now: Res<SimNow>, mut rig: ResMut<CameraRig>, mut pre: Local<Option<(CameraRig, bool)>>) {
+/// What's remembered across frames while a flyby plays: the camera as it was the moment the flyby
+/// began (the "prev" value `channel_value` eases from, before a channel's first keyframe), and, once
+/// cancelled, the camera as it was at that exact moment (what the cancel-grace easing eases *from*).
+pub(crate) struct Playback {
+    start: CameraRig,
+    cancel_from: Option<CameraRig>,
+}
+
+/// Poses `rig` from the active flyby's keyframes at `now`; once cancelled, eases it instead from
+/// wherever it was at that moment towards the flyby's own last position (`final_pose`) over
+/// `FLYBY_CANCEL_GRACE_TICKS`. Forgets everything the moment the flyby disappears
+/// (`GameMap::tend_flyby`): by then the camera has already eased to (finished on its own) or towards
+/// (cancelled) that same last position, so there's nothing left to restore.
+pub fn drive_camera(map: Res<CurrentMap>, now: Res<SimNow>, mut rig: ResMut<CameraRig>, mut state: Local<Option<Playback>>) {
     let Some(active) = &map.0.active_flyby else {
-        if let Some((snapshot, was_interrupted)) = pre.take()
-            && was_interrupted
-        {
-            *rig = snapshot;
-        }
+        *state = None;
         return;
     };
-    let interrupted = active.interrupted_at.is_some();
-    let snapshot = match &mut *pre {
-        Some((snapshot, seen_interrupted)) => {
-            *seen_interrupted = interrupted;
-            snapshot.clone()
-        }
-        None => {
-            let snapshot = rig.clone();
-            *pre = Some((snapshot.clone(), interrupted));
-            snapshot
-        }
-    };
-    if interrupted {
-        return;
-    }
-    let t = now.turns_since(active.start);
+    let playback = state.get_or_insert_with(|| Playback { start: rig.clone(), cancel_from: None });
     let map_size = pop3_format::MAP_SIZE as f32;
-    let xs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (k.x as f32, k.start, k.duration)).collect();
-    let zs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (k.z as f32, k.start, k.duration)).collect();
-    let angles: Vec<(f32, i32, i32)> = active.flyby.angles.iter().map(|k| (crate::nature::angle_yaw(k.angle.rem_euclid(2048) as u16).render(), k.start, k.duration)).collect();
-    let zooms: Vec<(f32, i32, i32)> = active.flyby.zooms.iter().map(|k| (zoom_to_distance(k.zoom as f32), k.start, k.duration)).collect();
-    rig.focus.x = channel_value(snapshot.focus.x, &xs, t, Some(map_size)).rem_euclid(map_size);
-    rig.focus.y = channel_value(snapshot.focus.y, &zs, t, Some(map_size)).rem_euclid(map_size);
-    rig.yaw = channel_value(snapshot.yaw, &angles, t, Some(TAU));
-    rig.distance = channel_value(snapshot.distance, &zooms, t, None);
+    match active.interrupted_at {
+        None => {
+            let t = now.turns_since(active.start);
+            let xs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (k.x as f32, k.start, k.duration)).collect();
+            let zs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (k.z as f32, k.start, k.duration)).collect();
+            let angles: Vec<(f32, i32, i32)> = active.flyby.angles.iter().map(|k| (render_yaw(k.angle), k.start, k.duration)).collect();
+            let zooms: Vec<(f32, i32, i32)> = active.flyby.zooms.iter().map(|k| (zoom_to_distance(k.zoom as f32), k.start, k.duration)).collect();
+            rig.focus.x = channel_value(playback.start.focus.x, &xs, t, Some(map_size)).rem_euclid(map_size);
+            rig.focus.y = channel_value(playback.start.focus.y, &zs, t, Some(map_size)).rem_euclid(map_size);
+            rig.yaw = channel_value(playback.start.yaw, &angles, t, Some(TAU));
+            rig.distance = channel_value(playback.start.distance, &zooms, t, None);
+        }
+        Some(at) => {
+            let from = playback.cancel_from.get_or_insert_with(|| rig.clone()).clone();
+            let (tx, tz, tyaw, tdist) = final_pose(&active.flyby, &playback.start);
+            let p = now.turns_since(at) / FLYBY_CANCEL_GRACE_TICKS.get() as f32;
+            rig.focus.x = ease_to(from.focus.x, tx, p, Some(map_size)).rem_euclid(map_size);
+            rig.focus.y = ease_to(from.focus.y, tz, p, Some(map_size)).rem_euclid(map_size);
+            rig.yaw = ease_to(from.yaw, tyaw, p, Some(TAU));
+            rig.distance = ease_to(from.distance, tdist, p, None);
+        }
+    }
 }
 
 /// `-100 (out) .. 100 (in)` onto `DISTANCE_RANGE`, reversed: our own guess, the spec gives no scale
@@ -83,6 +89,28 @@ pub fn drive_camera(map: Res<CurrentMap>, now: Res<SimNow>, mut rig: ResMut<Came
 fn zoom_to_distance(z: f32) -> f32 {
     let t = (z.clamp(-100.0, 100.0) + 100.0) / 200.0;
     DISTANCE_RANGE.1 + (DISTANCE_RANGE.0 - DISTANCE_RANGE.1) * t
+}
+
+/// A raw `FLYBY_SET_EVENT_ANGLE` value (2048ths of a turn) as a render yaw (`nature::angle_yaw`).
+fn render_yaw(raw: i32) -> f32 {
+    crate::nature::angle_yaw(raw.rem_euclid(2048) as u16).render()
+}
+
+/// Where the camera would end up if the flyby played all the way through: `end_target` if the script
+/// set one, else each channel's own last keyframe, else (no data at all) wherever the camera already
+/// was when the flyby began (`start`). `end_target` carries no zoom (ai-scripts.md "Flybys"), so
+/// distance always falls back to the last zoom keyframe regardless.
+fn final_pose(flyby: &ResolvedFlyby, start: &CameraRig) -> (f32, f32, f32, f32) {
+    let (x, z, yaw) = match &flyby.end_target {
+        Some(end) => (end.x as f32, end.z as f32, render_yaw(end.angle)),
+        None => (
+            flyby.positions.last().map_or(start.focus.x, |k| k.x as f32),
+            flyby.positions.last().map_or(start.focus.y, |k| k.z as f32),
+            flyby.angles.last().map_or(start.yaw, |k| render_yaw(k.angle)),
+        ),
+    };
+    let distance = flyby.zooms.last().map_or(start.distance, |k| zoom_to_distance(k.zoom as f32));
+    (x, z, yaw, distance)
 }
 
 /// One channel's value at turn `t`: finds the keyframe with the greatest `start <= t` and eases from
@@ -201,5 +229,39 @@ mod tests {
     #[test]
     fn empty_keyframes_hold_at_prev() {
         assert_eq!(channel_value(42.0, &[], 1000.0, None), 42.0);
+    }
+
+    use pop3_ai_script::interp::{ResolvedEndTarget, ResolvedPos, ResolvedZoom};
+
+    #[test]
+    fn final_pose_prefers_end_target_over_the_last_keyframe() {
+        let flyby = ResolvedFlyby {
+            positions: vec![ResolvedPos { x: 1, z: 1, start: 0, duration: 1 }],
+            end_target: Some(ResolvedEndTarget { x: 20, z: 21, angle: 0, unknown: 0 }),
+            ..ResolvedFlyby::default()
+        };
+        let (x, z, _, _) = final_pose(&flyby, &CameraRig::default());
+        assert_eq!((x, z), (20.0, 21.0));
+    }
+
+    #[test]
+    fn final_pose_falls_back_to_the_last_keyframe_without_an_end_target() {
+        let flyby = ResolvedFlyby {
+            positions: vec![ResolvedPos { x: 1, z: 1, start: 0, duration: 1 }, ResolvedPos { x: 9, z: 8, start: 10, duration: 1 }],
+            zooms: vec![ResolvedZoom { zoom: 100, start: 0, duration: 1 }],
+            ..ResolvedFlyby::default()
+        };
+        let (x, z, _, dist) = final_pose(&flyby, &CameraRig::default());
+        assert_eq!((x, z), (9.0, 8.0), "the last position keyframe, not the first");
+        assert_eq!(dist, DISTANCE_RANGE.0, "the last zoom keyframe");
+    }
+
+    #[test]
+    fn final_pose_with_no_data_at_all_is_wherever_it_started() {
+        let mut start = CameraRig::default();
+        start.focus = Vec2::new(5.0, 6.0);
+        start.yaw = 1.0;
+        start.distance = 50.0;
+        assert_eq!(final_pose(&ResolvedFlyby::default(), &start), (5.0, 6.0, 1.0, 50.0));
     }
 }

@@ -617,12 +617,12 @@ Other ON/OFF switches:
     same as the flyby's last `FLYBY_SET_EVENT_POS`/`FLYBY_SET_EVENT_ANGLE` - plausibly where the camera parks once
     the flyby ends (by finishing or by `FLYBY_ALLOW_INTERRUPT`-ed skip); the 4th field (0 here) is still unknown,
     possibly a marker index to snap to instead (single sample, needs a second script to confirm).
-    **Implemented differently for the "by skip" half, on the user's explicit direction, not a correction of the
-    above** (`game_core::ai_script`/`crates/game-client/src/flyby.rs`): finishing on its own just holds the
-    camera at its last keyframe (so `end_target` is redundant there, matching the one sample); cancelling
-    restores the camera to wherever it was *before* the flyby started instead of snapping to `end_target` - the
-    player gets their own view back, not the cutscene's framing. `end_target` itself is parsed/resolved but
-    unused.
+    **Implemented following this inference for both halves** (`game_core::ai_script`/
+    `crates/game-client/src/flyby.rs`): finishing on its own just holds the camera at its last
+    keyframe (so `end_target` is redundant there, matching the one sample); cancelling eases the
+    camera, over `FLYBY_CANCEL_GRACE_TICKS`, from wherever it was at that moment to `end_target` if the
+    script set one, else each channel's own last keyframe - the same place either way, just reached
+    early instead of played out. Not implemented: snapping to a marker (the 4th field).
   - `FLYBY_START` and `FLYBY_STOP`.
 - Tutorial UI:
   - `DISABLE_USER_INPUTS` and `ENABLE_USER_INPUTS`.

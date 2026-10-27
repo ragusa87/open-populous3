@@ -96,7 +96,11 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   follower a continuous "stay within ~824 units of the shaman, re-targeting her live position every tick" escort
   order (one shared command group, a secondary order slot per follower, auto-deselecting them); with nothing
   selected it instead cancels any unit already on that order. Implement as: an order/behavior that keeps a
-  follower loosely orbiting a reference unit's current position (not a one-shot walk-to-point).
+  follower loosely orbiting a reference unit's current position (not a one-shot walk-to-point). **Live-tested
+  and disproven**: the shaman is NOT protected/untargetable while guarded - she joins the same fight ring as her
+  guards when a fight starts nearby (pop3-rev-analysis.md's own section has the trace). No "guards absorb
+  attacks meant for her" rule needed or wanted; the existing auto-attack/"join a nearby fight" behavior already
+  covers the observed effect once guards stand near her.
 
 ### Units ([units.md](docs/specs/units.md))
 - [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the drowning and stranded rates (`DROWN_DAMAGE`, `STRANDED_DAMAGE`, scaled x20 from our old 100 HP guesses).
@@ -467,10 +471,12 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 - [x] Flybys: `FLYBY_CREATE_NEW..=FLYBY_START` drives the camera for real now
   (`game_core::ai_script::ScriptEnv::on_flyby` -> `GameMap::active_flyby`, `crates/game-client/src/flyby.rs`
   reads it to pose `CameraRig` and show the "Flyby"/"Cancelled flyby" banner; Space sends
-  `Command::CancelFlyby` when `FLYBY_ALLOW_INTERRUPT` is on, ai-scripts.md "Flybys"). Not done:
-  `FLYBY_SET_EVENT_TOOLTIP` popups (parsed and resolved, nothing draws them); the exact keyframe
-  easing/overlap and the zoom -100..100 -> camera distance scale are our own guesses, unspecified in the
-  files.
+  `Command::CancelFlyby` when `FLYBY_ALLOW_INTERRUPT` is on, ai-scripts.md "Flybys"). Finishing on its own
+  holds at the last keyframe; cancelling eases the camera (over `FLYBY_CANCEL_GRACE_TICKS`) to the same
+  place (`end_target` if the script set one, else each channel's own last keyframe) instead of back to
+  where the player was before it started. Not done: `FLYBY_SET_EVENT_TOOLTIP` popups (parsed and resolved,
+  nothing draws them); the exact keyframe easing/overlap and the zoom -100..100 -> camera distance scale
+  are our own guesses, unspecified in the files.
 - [ ] Script side effects outside the AI still open: messages, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`,
   `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
 

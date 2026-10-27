@@ -2655,6 +2655,7 @@ dependencies = [
  "game-net",
  "gltf",
  "half",
+ "pop3-ai-script",
  "pop3-format",
  "unit-atlas",
 ]
