@@ -2,6 +2,7 @@
 //! level's name, the editor's brushes while it is on; the keys are on the pause menu's Shortcuts page).
 
 pub mod build;
+mod mana;
 mod panel;
 mod population;
 mod shaman;
@@ -23,7 +24,7 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((panel::PanelPlugin, shaman::ShamanPreviewPlugin, spells::SpellsPlugin, build::BuildPlugin, view_menu::ViewMenuPlugin, population::PopulationPlugin, stats::StatsPlugin))
+        app.add_plugins((panel::PanelPlugin, shaman::ShamanPreviewPlugin, spells::SpellsPlugin, build::BuildPlugin, view_menu::ViewMenuPlugin, population::PopulationPlugin, mana::ManaPlugin, stats::StatsPlugin))
             .add_systems(Startup, spawn_info)
             .add_systems(Update, update_info);
     }

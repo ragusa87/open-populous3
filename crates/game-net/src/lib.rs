@@ -63,7 +63,8 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 /// `spell u8, paused u8`, for moving a vehicle `u32 vehicle id, u16 x, z`, for unloading one `u32 vehicle id`, for
 /// clearing a swamp `u32 effect id`, for a patrol command `u8 unit count` then that many `u32` unit ids, then
 /// `u16 x, z` (`SetPatrol`/`AddPatrolPoint`) or a target tag `u8` (0 unit, 1 building) + `u32` id
-/// (`SetPatrolTarget`/`AddPatrolTargetPoint`), or nothing more (`ReleasePatrol`).
+/// (`SetPatrolTarget`/`AddPatrolTargetPoint`), or nothing more (`ReleasePatrol`); for a formation command, `u8` unit
+/// count then that many `u32` unit ids, then `u16 x, z` (`Formation`).
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -211,6 +212,12 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             b.extend([18, *player]);
             put_units(b, units);
         }
+        Command::Formation { player, units, to } => {
+            b.extend([19, *player]);
+            put_units(b, units);
+            b.extend(to.0.to_le_bytes());
+            b.extend(to.1.to_le_bytes());
+        }
     }
 }
 
@@ -348,6 +355,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         16 => Some(Command::AddPatrolPoint { player, units: get_units(c)?, at: (c.u16()?, c.u16()?) }),
         17 => Some(Command::AddPatrolTargetPoint { player, units: get_units(c)?, target: get_target(c)? }),
         18 => Some(Command::ReleasePatrol { player, units: get_units(c)? }),
+        19 => Some(Command::Formation { player, units: get_units(c)?, to: (c.u16()?, c.u16()?) }),
         _ => None,
     }
 }
@@ -491,6 +499,7 @@ mod tests {
                 Command::AddPatrolPoint { player: 2, units: Vec::new(), at: (0, 65535) },
                 Command::AddPatrolTargetPoint { player: 3, units: vec![Id::from_raw(5), Id::from_raw(6)], target: Target::Building(Id::from_raw(9)) },
                 Command::ReleasePatrol { player: 1, units: vec![Id::from_raw(1), Id::from_raw(2), Id::from_raw(3)] },
+                Command::Formation { player: 0, units: vec![Id::from_raw(1), Id::from_raw(2)], to: (65535, 512) },
             ],
         }
     }

@@ -276,6 +276,28 @@ impl GameMap {
 }
 
 impl GameMap {
+    /// A third attacker closing on either member of an ongoing challenge turns it into a melee at once, instead of
+    /// standing in reach doing nothing while the duel plays out its own charge-shove-charge cycle on its own time
+    /// (combat.md "Spotting", TODO.md "Joining a fight already starting"): guessed, not traced against the
+    /// original - `join_melees`, called right after, is what actually brings this attacker (and anyone else in
+    /// reach) into the fresh melee, under its usual tribe/rank/capacity rules.
+    pub(crate) fn escalate_challenges(&mut self) {
+        for i in 0..self.units.len() {
+            let a = &self.units[i];
+            let Action::Attacking { target: crate::unit::Target::Unit(target), .. } = a.action else { continue };
+            let Some(j) = self.unit_index(target) else { continue };
+            let t = &self.units[j];
+            let Some(Link::Challenge(id)) = self.linked(t) else { continue };
+            if t.thrown() || !crate::attack::may_attack(a, t) || !t.in_the_open() || !crate::challenge::in_reach((a.x, a.z), (t.x, t.z)) {
+                continue;
+            }
+            let Some(challenge) = self.coordinators.challenges.get(id) else { continue };
+            let (attacker, target) = (challenge.attacker, challenge.target);
+            self.coordinators.challenges.retain(|cid, _| cid != id);
+            self.start_melee(attacker, target);
+        }
+    }
+
     /// Attackers within reach of a target already in a melee join it ("Fight" [exe]): one of its two tribes only,
     /// never a firewarrior, up to `MAX_FIGHTERS`; a tribe with 3 or more there is joined only by replacing one of
     /// lower rank, who leaves. Then the melee splits if both sides have 2 or more.
@@ -338,6 +360,15 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::Command;
+    use crate::unit::{Order, Target};
+
+    fn until(map: &mut GameMap, turns: u32, done: impl Fn(&GameMap) -> bool) -> Option<u32> {
+        (1..=turns).find(|_| {
+            map.tick();
+            done(map)
+        })
+    }
 
     /// Two braves of tribes 0 and 1 already in a melee, a cell apart.
     fn duel(attacker: UnitKind, target: UnitKind) -> (GameMap, UnitId, UnitId) {
@@ -355,6 +386,18 @@ mod tests {
             Action::Melee { stance, .. } => Some(stance),
             _ => None,
         }
+    }
+
+    /// A warrior's blow (360 at full life) so outweighs a shaman's (60) that it wins every one of 200 seeds tried
+    /// (never the shaman, never a draw), in well under 200 turns - far too fast for her healing (32 every 8
+    /// turns, `HEAL_EVERY`) to keep up. Not traced against the original (combat.md "Fight numbers" gives no
+    /// winner's odds): this only checks our own numbers play out the way they read, consistently.
+    #[test]
+    fn a_warrior_beats_a_shaman_in_a_fair_fight() {
+        let (mut map, warrior, shaman) = duel(UnitKind::Warrior, UnitKind::Shaman);
+        until(&mut map, 300, |m| m.coordinators.melees.is_empty()).expect("the fight ends");
+        assert!(map.unit(warrior).is_some_and(Unit::is_alive), "the warrior's far harder blow should win before she can out-heal it");
+        assert!(!map.unit(shaman).is_some_and(Unit::is_alive), "the shaman should fall");
     }
 
     #[test]
@@ -423,6 +466,49 @@ mod tests {
         }
     }
 
+    /// `attacker` and `target` already locked in a challenge, `target`'s place.
+    fn challenging(map: &mut GameMap, attacker: UnitId, target: UnitId) -> crate::challenge::ChallengeId {
+        let id = map.new_id_of();
+        map.coordinators.challenges.insert(id, crate::challenge::Challenge::new(attacker, target));
+        let to = map.unit(target).map(|u| (u.x, u.z)).unwrap();
+        map.unit_mut(attacker).unwrap().action = Action::Challenge { challenge: id, role: crate::challenge::Role::Charging { to, speed: 100 } };
+        map.unit_mut(target).unwrap().action = Action::Challenge { challenge: id, role: crate::challenge::Role::Waiting };
+        id
+    }
+
+    #[test]
+    fn a_third_attacker_turns_an_ongoing_challenge_into_a_melee_at_once() {
+        let mut map = GameMap::sandbox_units().seeded(5);
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(1024), s.z.wrapping_add(2048));
+        let a = map.spawn(0, UnitKind::Brave, at).id;
+        let t = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
+        challenging(&mut map, a, t);
+        let b = attacker(&mut map, 0, UnitKind::Brave, t);
+        map.escalate_challenges();
+        assert!(map.coordinators.challenges.is_empty(), "the challenge escalated into a melee at once");
+        assert_eq!(map.coordinators.melees.len(), 1);
+        assert!([a, t].iter().all(|&u| matches!(map.unit(u).unwrap().action, Action::Melee { .. })));
+        map.join_melees();
+        let ring = melee_of(&map, t);
+        assert_eq!(melee_of(&map, b), ring, "the third joins the same turn, no standing around in reach");
+    }
+
+    #[test]
+    fn a_distant_attacker_does_not_escalate_a_challenge() {
+        let mut map = GameMap::sandbox_units().seeded(5);
+        let s = map.shaman_of(0).unwrap();
+        let at = (s.x.wrapping_add(1024), s.z.wrapping_add(2048));
+        let a = map.spawn(0, UnitKind::Brave, at).id;
+        let t = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
+        let id = challenging(&mut map, a, t);
+        let far = map.spawn(0, UnitKind::Brave, (at.0.wrapping_add(20 * 512), at.1)).id;
+        map.unit_mut(far).unwrap().action = Action::Attacking { target: crate::unit::Target::Unit(t), to: (at.0.wrapping_add(20 * 512), at.1) };
+        map.escalate_challenges();
+        assert!(map.coordinators.challenges.contains(id), "out of reach: the challenge runs on");
+        assert!(map.coordinators.melees.is_empty());
+    }
+
     #[test]
     fn a_fighter_walked_far_away_leaves_and_fighters_heal() {
         let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Brave);
@@ -432,6 +518,73 @@ mod tests {
         assert_eq!(map.unit(t).unwrap().action, Action::Idle);
         let (map, a, t) = duel(UnitKind::Firewarrior, UnitKind::Brave);
         assert!([a, t].iter().all(|&u| map.unit(u).unwrap().heals()), "fighting, they heal"); 
+    }
+
+    #[test]
+    fn a_fighter_pushed_out_of_leash_resumes_its_attack_order() {
+        let (mut map, _, t) = duel(UnitKind::Brave, UnitKind::Brave);
+        let b = attacker(&mut map, 0, UnitKind::Brave, t);
+        map.join_melees();
+        assert!(melee_of(&map, b).is_some(), "joined the melee from its own attack order");
+        map.unit_mut(b).unwrap().x = map.unit(b).unwrap().x.wrapping_add(10 * 512);
+        map.tick();
+        assert_eq!(melee_of(&map, b), None, "farther than MELEE_LEASH: left");
+        assert!(
+            matches!(map.unit(b).unwrap().action, Action::Attacking { target: crate::unit::Target::Unit(id), .. } if id == t),
+            "the attack order survived the fight and resumed, not idle: {:?}",
+            map.unit(b).unwrap().action
+        );
+    }
+
+    /// pop3-rev-analysis.md "Resuming a fight cut short by a push": a blast knocks the attacker clean out of its
+    /// own melee and its own auto-scan square, yet it walks straight back to the same target once it is back on
+    /// its feet - its own standing attack order, quietly surviving the fight, not a fresh one from spotting the
+    /// defender again. The caster is a separate, uninvolved shaman: casting is its own order and would otherwise
+    /// take a fighting shaman out of her own melee too (combat.md "Challenge"), a distraction from this test.
+    #[test]
+    fn a_warrior_blasted_out_of_sight_resumes_its_attack_order() {
+        let mut map = GameMap::sandbox_walk().seeded(1);
+        let defender = map.spawn(0, UnitKind::Brave, (map.shaman_of(0).unwrap().x.wrapping_add(1024), map.shaman_of(0).unwrap().z)).id;
+        let attacker = map.spawn(1, UnitKind::Warrior, (map.unit(defender).unwrap().x.wrapping_add(512), map.unit(defender).unwrap().z)).id;
+        map.apply(&Command::OrderUnit { player: 1, unit: attacker, order: Order::Attack { target: Target::Unit(defender) } });
+        until(&mut map, 400, |m| matches!(m.unit(attacker).unwrap().action, Action::Melee { .. })).expect("in a melee");
+
+        // Beyond the attacker, away from the defender along the same line: the push (away from `blast_at`)
+        // carries the attacker further from its target, not back onto it.
+        let blast_at = {
+            let (defender, attacker) = (map.unit(defender).unwrap(), map.unit(attacker).unwrap());
+            let (dx, dz) = (torus_delta(defender.x, attacker.x), torus_delta(defender.z, attacker.z));
+            (attacker.x.wrapping_add(dx as u16), attacker.z.wrapping_add(dz as u16))
+        };
+        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at: blast_at } });
+        map.run(crate::unit::CAST_RELEASE);
+        until(&mut map, 300, |m| !matches!(m.unit(attacker).unwrap().action, Action::Tumbling | Action::Melee { .. } | Action::Challenge { .. }))
+            .expect("back on its feet");
+
+        let (attacker_cell, defender_cell) = (map.unit(attacker).unwrap().cell(), map.unit(defender).unwrap().cell());
+        let size = map.terrain.size() as i32;
+        let seen = crate::spotting::square(attacker_cell, UnitKind::Warrior.stats().sight, size).any(|c| c == defender_cell);
+        assert!(!seen, "blasted past its own auto-scan square: attacker {attacker_cell:?}, defender {defender_cell:?}");
+        assert!(
+            matches!(map.unit(attacker).unwrap().action, Action::Attacking { target: Target::Unit(id), .. } if id == defender),
+            "the attack order survived the fight and resumed on its own, not idle: {:?}",
+            map.unit(attacker).unwrap().action
+        );
+    }
+
+    /// The resume is for an order the fight put on hold, not a reflex of being blasted: a warrior that was never
+    /// given one (idle, never fought) has nothing to pick back up, same as the common case in pop3-rev-analysis.md
+    /// "Resuming a fight cut short by a push" ("a target with no order of its own just goes idle instead").
+    #[test]
+    fn an_idle_warrior_blasted_away_has_nothing_to_resume() {
+        let mut map = GameMap::sandbox_walk().seeded(1);
+        let s = map.shaman_of(0).unwrap();
+        let w = map.spawn(1, UnitKind::Warrior, (s.x.wrapping_add(1024), s.z)).id;
+        let blast_at = { let u = map.unit(w).unwrap(); (u.x.wrapping_add(512), u.z) };
+        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at: blast_at } });
+        map.run(crate::unit::CAST_RELEASE);
+        until(&mut map, 300, |m| !matches!(m.unit(w).unwrap().action, Action::Tumbling)).expect("back on its feet");
+        assert_eq!(map.unit(w).unwrap().action, Action::Idle, "nothing to resume: stays idle, not Attacking anyone");
     }
 
     /// `kind` of `tribe` going for `target`, standing next to it.

@@ -4,7 +4,9 @@
 
 use crate::building::BuildingId;
 use crate::campfire;
+use crate::effect::DamageKind;
 use crate::health::Health;
+use crate::hurt::Hurt;
 use crate::id::Id;
 use crate::motion::{Motion, Velocity};
 use crate::path::{self, Ground, Mobility};
@@ -368,6 +370,8 @@ pub struct Unit {
     /// Heading in eighths of a turn: 0 = +z, 2 = +x, 4 = -z, 6 = -x.
     pub facing: u8,
     pub health: Health,
+    /// Who hurt it last, and why if that killed it (`GameMap::damage`'s own bookkeeping, `hurt.rs`).
+    hurt: Hurt,
     /// Free motion when flung or falling (still while walking or standing).
     pub motion: Motion,
     pub statuses: Statuses,
@@ -398,6 +402,11 @@ pub struct Unit {
     to_vehicle: Option<crate::vehicle::VehicleId>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
+    /// The attack order a fight (`Unit::join` into a `Challenge` or `Melee`) put on hold, to pick back up
+    /// (`Unit::release`) where it left off once the fight is behind it, even a fight cut short by a blast's push
+    /// (pop3-rev-analysis.md "Resuming a fight cut short by a push"): entering or being flung out of a fight
+    /// never clears it, only dying or changing tribe do.
+    resume_attack: Option<Target>,
     /// Patrol points to cycle through forever once more than one is set (units.md "Patrol orders"),
     /// independent of `queue`: a point is a shared id (`crate::patrol`), not an owned `Order`.
     patrol: crate::patrol::PatrolQueue,
@@ -444,6 +453,7 @@ impl Unit {
             z,
             facing: 0,
             health: Health::full(kind.max_health()),
+            hurt: Hurt::default(),
             motion: Motion::STILL,
             statuses: Statuses::default(),
             action: Action::Idle,
@@ -460,6 +470,7 @@ impl Unit {
             to_shrine: None,
             to_vehicle: None,
             queue: Vec::new(),
+            resume_attack: None,
             patrol: crate::patrol::PatrolQueue::default(),
             work: None,
             inside: None,
@@ -485,6 +496,16 @@ impl Unit {
 
     pub fn is_alive(&self) -> bool {
         !matches!(self.action, Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
+    }
+
+    /// The tribe that last hit it through `GameMap::damage`, if any and not healed away since.
+    pub fn last_attacker(&self) -> Option<u8> {
+        self.hurt.attacker()
+    }
+
+    /// What killed it, once it has (`GameMap::damage`'s own `kind`).
+    pub fn death_cause(&self) -> Option<DamageKind> {
+        self.hurt.cause()
     }
 
     /// Flung (tumbling) or off the ground: it cannot be picked, nor taken on.
@@ -949,9 +970,14 @@ impl Unit {
             && !matches!(self.action, Action::Drowning | Action::Stranded { .. } | Action::OnFire { .. })
     }
 
-    /// Its turn of healing (`HEAL_EVERY`), if it `heals`.
+    /// Its turn of healing (`HEAL_EVERY`), if it `heals`: already full, it instead forgets the last attacker
+    /// (pop3-rev-analysis.md "Health and healing": "else: last attacker (+0xB0) = none").
     pub fn heal(&mut self) {
         if let Some(points) = self.kind.stats().heal.filter(|_| self.heals()) {
+            if self.health.is_full() {
+                self.hurt.healed();
+                return;
+            }
             self.health.heal(points);
         }
     }
@@ -989,28 +1015,58 @@ impl Unit {
         self.action = Action::OnFire { away, left: Countdown::new(BURN_TICKS) };
     }
 
-    /// Leaves its coordinator, if it is in one: back to Idle (`WorldEvent::Release`, or its coordinator gone).
+    /// Leaves its coordinator, if it is in one: back to Idle (`WorldEvent::Release`, or its coordinator gone),
+    /// `go_idle`.
     pub fn release(&mut self) {
         if self.action.link().is_some() {
-            self.action = Action::Idle;
+            self.go_idle();
         }
     }
 
-    /// Loses `amount` health (`GameMap::damage` decides whether it is hurt at all); true when that kills it. In the
-    /// air it falls on: death comes on landing (`touch_down`; pop3-rev-analysis.md "Health and healing").
+    /// Falls back to Idle - with an attack order a fight put on hold (`resume_attack`), straight back onto it
+    /// instead (same target, same walk back to it), never a fresh one: shared by `release` (a coordinator drops
+    /// it) and `touch_down` (it lands still holding one, e.g. a blast's push knocked it clean out of its fight
+    /// first) because the original falls back to its per-type default state the same way regardless of which of
+    /// the two emptied `+0x9D` (pop3-rev-analysis.md "Resuming a fight cut short by a push").
+    fn go_idle(&mut self) {
+        self.action = Action::Idle;
+        if let Some(target) = self.resume_attack.take() {
+            self.queue.insert(0, Order::Attack { target });
+        }
+    }
+
+    /// Loses `amount` health (`GameMap::damage` decides whether it is hurt at all); true when that kills it. Thrown
+    /// (in the air, or still tumbling to a halt on the ground it fell on) it falls dead on: death comes once it
+    /// settles (`touch_down`, the `Action::Tumbling` tick arm; pop3-rev-analysis.md "Health and healing").
     pub fn take_damage(&mut self, amount: u16) -> bool {
         if !self.is_alive() {
             return false;
         }
         let dead = self.health.damage(amount);
-        if dead && !self.motion.airborne() {
+        if dead && !self.thrown() {
             self.die();
+        }
+        dead
+    }
+
+    /// The one way `GameMap::damage` hurts a unit: remembers who did it and, if the hit kills, what kind
+    /// (`hurt.rs`), so no emitter has to track either on its own (docs/specs/coordinators.md "World events"); the
+    /// health loss and death itself are `take_damage`'s, unchanged.
+    pub(crate) fn take_hit(&mut self, amount: u16, kind: DamageKind, from: Option<u8>) -> bool {
+        if !self.is_alive() {
+            return false;
+        }
+        self.hurt.hit(from);
+        let dead = self.take_damage(amount);
+        if dead {
+            self.hurt.died_from(kind);
         }
         dead
     }
 
     fn die(&mut self) {
         self.drop_plans();
+        self.resume_attack = None;
         self.action = Action::Dying { left: Countdown::new(DYING_TICKS) };
     }
 
@@ -1027,7 +1083,7 @@ impl Unit {
             return Some(UnitEvent::Died);
         }
         if self.action.link().is_none() {
-            self.action = Action::Idle;
+            self.go_idle();
         }
         None
     }
@@ -1042,7 +1098,10 @@ impl Unit {
     }
 
     /// Thrown by a spell: `push` adds to its velocity, it leaves the ground (`ground`: the height under it) and
-    /// tumbles, forgetting its plans. Nothing for the dead.
+    /// tumbles, forgetting its plans - except a standing attack order a fight already put on hold
+    /// (`resume_attack`): a blast throwing a fighter out of its ring is exactly the push this survives for
+    /// (pop3-rev-analysis.md "Resuming a fight cut short by a push"), same as nothing in the original touches it
+    /// either. Nothing for the dead.
     pub fn fling(&mut self, push: Velocity, ground: i32) {
         if !self.is_alive() {
             return;
@@ -1079,31 +1138,44 @@ impl Unit {
     /// calling this on an existing wildman).
     pub fn change_owner(&mut self, tribe: u8) {
         self.drop_plans();
+        self.resume_attack = None;
         self.owner = tribe;
         if self.kind == UnitKind::Wildman {
             self.kind = UnitKind::Brave;
         }
         self.health = Health::full(self.kind.max_health());
+        self.hurt = Hurt::default();
         (self.statuses, self.motion, self.carrying, self.reload) = (Statuses::default(), Motion::STILL, 0, 0);
         self.action = Action::Idle;
     }
 
     /// Joins a coordinator, or a sermon's `Listening` (locked the same way but backed by no coordinator), with
-    /// `action`, leaving its way, its chained orders and the spell it was to cast.
+    /// `action`, leaving its way, its chained orders and the spell it was to cast. An attacker's own standing
+    /// attack order is not one of those: it goes dormant instead (`resume_attack`, picked up again by
+    /// `release`), surviving the fight the same way the original's never touches it (pop3-rev-analysis.md
+    /// "Resuming a fight cut short by a push").
     pub(crate) fn join(&mut self, action: Action) {
         debug_assert!(action.link().is_some() || matches!(action, Action::Listening { .. }));
+        if let Action::Attacking { target, .. } = self.action {
+            self.resume_attack = Some(target);
+        }
         (self.route, self.planned_on, self.teleport_to, self.spell) = (Vec::new(), None, None, None);
         self.queue.clear();
         self.action = action;
     }
 
-    /// Its coordinator sends it to `at` (`WorldEvent::Placed`).
+    /// Its coordinator sends it to `at` (`WorldEvent::Placed`): a charger's goal, a fighter's place in its melee, or
+    /// (not a coordinator: formation.rs) a walker's own slot in its formation.
     pub fn placed(&mut self, at: (u16, u16)) {
         match self.action {
             Action::Challenge { challenge, role: crate::challenge::Role::Charging { speed, .. } } => {
                 self.action = Action::Challenge { challenge, role: crate::challenge::Role::Charging { to: at, speed } };
             }
             Action::Melee { melee, stance, .. } => self.action = Action::Melee { melee, place: at, stance },
+            Action::Walking { to } if to != at => {
+                self.action = Action::Walking { to: at };
+                self.planned_on = None;
+            }
             _ => {}
         }
     }
@@ -1885,6 +1957,19 @@ mod tests {
     }
 
     #[test]
+    fn healing_back_to_full_forgets_the_last_attacker() {
+        let (s, _) = shaman_at((10, 10));
+        let mut u = Unit { health: Health::new(SHAMAN_MAX_HEALTH - 1, SHAMAN_MAX_HEALTH), ..s };
+        u.take_hit(0, DamageKind::Melee, Some(1));
+        assert_eq!(u.last_attacker(), Some(1));
+        u.heal();
+        assert!(u.health.is_full(), "one heal step was enough to top it up");
+        assert_eq!(u.last_attacker(), Some(1), "still remembered: it only just became full");
+        u.heal();
+        assert_eq!(u.last_attacker(), None, "already full: the next heal step forgets the attacker");
+    }
+
+    #[test]
     fn no_healing_in_the_air_drowning_stranded_or_dead() {
         let (s, _) = shaman_at((10, 10));
         let hurt = Unit { health: Health::new(100, SHAMAN_MAX_HEALTH), ..s };
@@ -1945,6 +2030,27 @@ mod tests {
         assert_eq!(u.action, Action::Tumbling, "still flying");
         let fall = run_until(&mut u, &t, &site, |u| !u.is_alive());
         assert!(fall > 1 && !u.motion.airborne(), "dead once landed, after {fall} ticks");
+    }
+
+    #[test]
+    fn death_held_off_while_still_tumbling_on_the_ground() {
+        // Landing can leave a unit grounded (not airborne) but still in `Action::Tumbling`, settling to a halt -
+        // a fatal hit arriving in that window must not cut the pose short, same as one taken mid-flight.
+        let (mut u, _) = shaman_at((10, 10));
+        u.motion = Motion::STILL;
+        u.action = Action::Tumbling;
+        assert!(u.take_damage(SHAMAN_MAX_HEALTH), "a fatal hit");
+        assert_eq!((u.action, u.health.is_zero()), (Action::Tumbling, true), "still tumbling, dying held off");
+    }
+
+    #[test]
+    fn take_hit_remembers_the_attacker_and_only_the_cause_that_kills() {
+        let (mut u, _) = shaman_at((10, 10));
+        assert_eq!((u.last_attacker(), u.death_cause()), (None, None));
+        assert!(!u.take_hit(10, DamageKind::Melee, Some(1)), "hurt, not killed");
+        assert_eq!((u.last_attacker(), u.death_cause()), (Some(1), None), "no cause recorded: it survived");
+        assert!(u.take_hit(u16::MAX, DamageKind::Lightning, Some(0)), "the kill");
+        assert_eq!((u.last_attacker(), u.death_cause()), (Some(0), Some(DamageKind::Lightning)));
     }
 
     #[test]

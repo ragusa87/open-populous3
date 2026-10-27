@@ -63,9 +63,13 @@ A coordinator (`challenge::Challenge`, coordinators.md) for one attacker and one
 - Started in `detect_coordinators` (`GameMap::start_challenges`): an attacker within `FIGHT_REACH` (224) of a
   target that is in no coordinator, outside and on the ground. Both join it (`Unit::join`): the attacker
   `Role::Charging` at its walking speed + a draw below a quarter of it, the target `Role::Waiting`. A target already
-  in a challenge or a melee is left alone for now (joining a melee comes with it), a shaman in her cast jump until it
-  ends: a cast during a fight takes her out of it (an order), goes off, and the attacker challenges her again [ours:
-  the original's rule for casting in a fight is not traced]. Joining drops a spell she held (`Unit::join`).
+  in a melee is left alone for now (joining it comes with it); a target already in a challenge instead turns that
+  challenge straight into a melee at once (`GameMap::escalate_challenges`, right after `start_challenges` in
+  `detect_coordinators`, before `join_melees` brings the new attacker and anyone else in reach into it) - guessed,
+  not traced against the original (see "Spotting" and TODO.md "Joining a fight already starting"). A shaman in her
+  cast jump until it ends: a cast during a fight takes her out of it (an order), goes off, and the attacker
+  challenges her again [ours: the original's rule for casting in a fight is not traced]. Joining drops a spell she
+  held (`Unit::join`).
 - Each turn: it ends, both released, when one is gone, dead, no longer linked (an order took it away) or of the same
   tribe, or when a charge lasts `CHARGE_TICKS` (40). The charger runs straight at the target (`Placed` gives the
   target's place when it moved). Within `SHOVE_REACH` (315) on both axes of a waiting target: `Shove`, 6 turns
@@ -103,11 +107,18 @@ middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `
   against an on-guard follower (never the shaman) throws it back after it reeled: 35 + a draw below 70 per turn,
   away from the attacker, along the ground (`Staggering` until still).
 - Fighters heal as anyone (see "Health").
-- Joining (`GameMap::join_melees`, in `detect_coordinators` after the challenges): an attacker within
-  `FIGHT_REACH` of a target in a melee joins it if it is of one of its two tribes and not a firewarrior, while there
-  are fewer than 6; with 3 or more of its tribe there it joins only by replacing the one of lowest rank below its
-  own (released). Then, both sides with 2 or more, the last of each leaves for a new one-to-one melee at the same
-  place: a melee stays one against several ("Fight" [exe, measured]).
+- Joining (`GameMap::join_melees`, in `detect_coordinators` after the challenges and after `escalate_challenges`): an
+  attacker within `FIGHT_REACH` of a target in a melee joins it if it is of one of its two tribes and not a
+  firewarrior, while there are fewer than 6; with 3 or more of its tribe there it joins only by replacing the one of
+  lowest rank below its own (released). Then, both sides with 2 or more, the last of each leaves for a new
+  one-to-one melee at the same place: a melee stays one against several ("Fight" [exe, measured]). A target reached
+  while still only in a challenge (not yet a melee) is turned into one at once instead ("Challenge" above), so a
+  third attacker joins the same turn rather than waiting out the duel's own pace.
+- A fighter released from the melee (rule 1, or the fight ending) does not simply go idle if it had come from its
+  own standing attack order: that order goes dormant for as long as the fight lasts and resumes, same target, once
+  it is back on its feet (`Unit::join`/`Unit::release`, `resume_attack`) - this is how a target blasted out of
+  reach gets chased again instead of forgotten (pop3-rev-analysis.md "Resuming a fight cut short by a push"). A
+  target with no attack order of its own (the common case) still just goes idle.
 - Not yet: the ground check moving the middle off unsuitable ground, the winner's
   count, the move's sounds.
 

@@ -77,6 +77,9 @@ pub struct GameMap {
     pub effects: Registry<Effect>,
     /// Objects coordinating several units, one registry per kind (coordinator.rs).
     pub coordinators: Coordinators,
+    /// Groups of units spacing themselves while walking to one shared move order's target (formation.rs); unlike
+    /// `coordinators`, membership is not owned through the units' own action, so this is its own typed list.
+    pub formations: Vec<crate::formation::Formation>,
     /// Firebolts in flight (`crate::firebolt`).
     pub bolts: Registry<crate::firebolt::Firebolt>,
     /// Boats and balloons (`crate::vehicle`).
@@ -146,7 +149,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -185,6 +188,7 @@ impl GameMap {
             shaman_omni: false,
             effects: Registry::default(),
             coordinators: Coordinators::default(),
+            formations: Vec::new(),
             bolts: Registry::default(),
             vehicles: Registry::default(),
             patrol_points: Registry::default(),
@@ -286,7 +290,16 @@ impl GameMap {
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| dat.file_stem().unwrap_or_default().to_string_lossy().into_owned());
         let map = Self::from_level(&level, name, header.as_ref().map(|h| h.theme));
-        let spell_books = header.as_ref().map_or(map.spell_books.clone(), |h| per_player(SpellBook::from_level(h, &level)));
+        let mut spell_books = header.as_ref().map_or(map.spell_books.clone(), |h| per_player(SpellBook::from_level(h, &level)));
+        // The install's own balance numbers (constants.md "Use here"), never shipped: silently keep the
+        // defaults (`SpellStats::default_for`) when the file is missing or doesn't parse, same as the `.hdr`
+        // above.
+        if let Ok(raw) = pop3_format::Constants::load(dat.with_file_name("constant.dat")) {
+            for book in spell_books.iter_mut() {
+                book.apply_constants(&raw);
+                book.fill();
+            }
+        }
         let build_books = header.as_ref().map_or(map.build_books.clone(), |h| per_player(BuildBook::from_level(h, &level)));
         let start_camera = header.as_ref().and_then(StartCamera::from_header);
         let object_bank = header.as_ref().map_or(0, |h| h.object_bank);
@@ -715,11 +728,17 @@ impl GameMap {
         height.clamp(0, MAX_HEIGHT as i32) as u16
     }
 
+    /// `kind`'s own base range (`SpellSlot::stats`, spells.md "Original balance"), read through `player`'s
+    /// own book since that's where the resolved `SpellStats` live (`SpellBook::apply_constants`).
+    fn spell_base_range(&self, player: u8, kind: SpellKind) -> Option<u32> {
+        self.spell_books.get(player as usize)?.slot(kind)?.stats.range
+    }
+
     /// How far `player`'s shaman casts `kind` from where she stands (`cast_range`): None when there is no
     /// limit (the spell has none, or the player is a god), or no shaman free to cast (dead or `locked`: off the
     /// ground she casts nothing until she lands).
     pub fn cast_range(&self, player: u8, kind: SpellKind) -> Option<u32> {
-        let base = kind.range().filter(|_| !self.shaman_omni)?;
+        let base = self.spell_base_range(player, kind).filter(|_| !self.shaman_omni)?;
         let shaman = self.shaman_of(player).filter(|u| u.is_alive() && !self.shaman_locked(player))?;
         let in_tower = shaman.inside.and_then(|i| self.building(i.building)).is_some_and(|b| b.kind == BuildingKind::DrumTower && b.stage() == crate::building::Stage::Built);
         Some(crate::cast_range::range(base, self.altitude(shaman), in_tower))
@@ -729,7 +748,7 @@ impl GameMap {
     /// for a spell without a limit or on a level where the player is a god; never without a shaman free to
     /// cast otherwise.
     pub fn in_cast_range(&self, player: u8, kind: SpellKind, to: (u16, u16)) -> bool {
-        if self.shaman_omni || kind.range().is_none() {
+        if self.shaman_omni || self.spell_base_range(player, kind).is_none() {
             return true;
         }
         let (Some(shaman), Some(range)) = (self.shaman_of(player), self.cast_range(player, kind)) else { return false };
@@ -1079,7 +1098,38 @@ impl GameMap {
                 self.release_patrol(player, &units);
                 None
             }
+            Command::Formation { player, units, to } => {
+                self.form_up(player, &units, to);
+                None
+            }
         }
+    }
+
+    /// `Command::Formation`: the player's own units among `units` still walking (so not already busy with
+    /// something else by the time this applies), up to `formation::MAX_MEMBERS`, become one new formation seeded at
+    /// `to` ("Formations" [exe]). A lone walker needs no spacing: a no-op below two. Each walker's own move order
+    /// (`move_orders`, applied before this one) already took it out of whatever formation it was in through
+    /// `start_order`'s `leave_formation` - a unit reassigned elsewhere leaves its old formation right away rather
+    /// than having to finish walking to its old slot first.
+    fn form_up(&mut self, player: u8, units: &[UnitId], to: (u16, u16)) {
+        let members: Vec<UnitId> = units
+            .iter()
+            .copied()
+            .filter(|&id| self.unit(id).is_some_and(|u| u.owner == player && matches!(u.action, Action::Walking { .. })))
+            .take(crate::formation::MAX_MEMBERS)
+            .collect();
+        if members.len() > 1 {
+            self.formations.push(crate::formation::Formation::new(player, to, members));
+        }
+    }
+
+    /// Leaves the formation it was part of, if any (`start_order`: a new order takes it over, so it must not keep
+    /// being nudged back towards its old slot). A formation left with nobody in it is removed right away.
+    fn leave_formation(&mut self, id: UnitId) {
+        for f in &mut self.formations {
+            f.members.retain(|&(m, _)| m != id);
+        }
+        self.formations.retain(|f| !f.members.is_empty());
     }
 
     /// Ends the player's own swamp `swamp` early (right click + Ctrl on it, like a blueprint put away): as if
@@ -1216,7 +1266,9 @@ impl GameMap {
         }
         // Coordinators, before the units, so that one ending this turn is gone when its units tick (coordinators.md):
         // a. scans that start coordinators or add units to them; b. each one's turn, kind after kind; c. the finished
-        // ones removed; d. their events applied in order; e. units whose coordinator is gone released.
+        // ones removed; d. their events applied in order; e. units whose coordinator is gone released. Formations
+        // (formation.rs) tick right after, for the same reason, though they are not coordinators themselves
+        // (membership isn't owned through the units' own action).
         if !frozen {
             self.spot_enemies();
             self.tend_attacks();
@@ -1225,6 +1277,7 @@ impl GameMap {
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
         self.release_orphans();
+        dirty.extend(self.tend_formations());
         self.prune_patrol_points();
         self.prune_hidden_points();
         self.tend_vehicles();
@@ -1260,8 +1313,13 @@ impl GameMap {
             }
         }
         dirty.extend(self.cast_when_in_range());
+        let in_formation = |id: UnitId| self.formations.iter().any(|f| f.members.iter().any(|&(m, _)| m == id));
         for (i, &arrived) in arriving.iter().enumerate() {
-            if arrived && self.units[i].action == Action::Idle && self.units[i].in_the_open() {
+            // A formation member keeps the spot it was nudged onto even if another unit already stands there
+            // (formation.rs slots are not spot.rs aware): relocating it here would only have the formation nudge it
+            // straight back next turn, forever. It leaves the formation once idle like any other member; nothing
+            // moves it again until a new order does.
+            if arrived && self.units[i].action == Action::Idle && self.units[i].in_the_open() && !in_formation(self.units[i].id) {
                 let u = &self.units[i];
                 let (taken, spot) = (self.taken_spots(&[u.id]), slots::spot_of((u.x, u.z)));
                 if taken.contains(&spot) && let Some(&free) = slots::free_spots_near(&self.ground(), spot, &taken, 1).first() {
@@ -1278,10 +1336,11 @@ impl GameMap {
         }
         self.count_inside();
         if !frozen {
+            let incomes: Vec<crate::mana::Mana> = (0..self.mana.len()).map(|player| self.mana_income(player as u8)).collect();
             let buildings = &mut self.buildings;
-            for (player, (pool, book)) in self.mana.iter_mut().zip(&mut self.spell_books).enumerate() {
+            for (player, ((pool, book), &income)) in self.mana.iter_mut().zip(&mut self.spell_books).zip(&incomes).enumerate() {
                 let mut stores: Vec<&mut crate::production::Production> = buildings.iter_mut().filter(|b| b.owner as usize == player).filter_map(|b| b.production.as_mut()).collect();
-                pool.tick(now, book, &mut stores);
+                pool.tick(now, income, book, &mut stores);
             }
         }
         self.units.retain(|u| !gone.contains(&u.id));
@@ -1455,6 +1514,7 @@ impl GameMap {
     fn detect_coordinators(&mut self) {
         self.start_sermons();
         self.start_challenges();
+        self.escalate_challenges();
         self.join_melees();
     }
 
@@ -1466,6 +1526,21 @@ impl GameMap {
         let mut events = coordinators.tick(self.now, self, &mut rng);
         (self.coordinators, self.rng) = (coordinators, rng);
         events.extend(self.tend_sermons());
+        self.apply_events(events)
+    }
+
+    /// Every formation's turn (formation.rs), reading the map as it was before any of them: each one drops its own
+    /// members no longer walking (arrived, reassigned, dead, or stranded) and nudges the rest towards their own
+    /// slot; the finished ones (no members left) removed, their events applied in order.
+    fn tend_formations(&mut self) -> Vec<DirtyRect> {
+        let (mut formations, mut rng) = (std::mem::take(&mut self.formations), self.rng);
+        let mut events = Vec::new();
+        formations.retain_mut(|f| {
+            let (finished, step_events) = f.tick(self.now, self, &mut rng);
+            events.extend(step_events);
+            !finished
+        });
+        (self.formations, self.rng) = (formations, rng);
         self.apply_events(events)
     }
 
@@ -1615,11 +1690,12 @@ impl GameMap {
     /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`); a
     /// bloodlusted target takes a blow or a bolt `>> BLOODLUST_HEALTH_SHIFT` (independently of the attacker's own
     /// bloodlust, already folded into `amount` by `combat::strength`/`firebolt`). True when this kills it.
+    /// `Unit::take_hit` remembers `from` and, if it kills, `kind` (`hurt.rs`).
     pub(crate) fn damage(&mut self, unit: UnitId, amount: u16, kind: DamageKind, from: Option<u8>) -> bool {
         match self.unit_index(unit).filter(|&i| crate::effect::hurts(&self.units[i], kind, from)) {
             Some(i) => {
                 let lessened = matches!(kind, DamageKind::Melee | DamageKind::Fire) && self.units[i].statuses.bloodlust.is_on();
-                self.units[i].take_damage(if lessened { amount >> crate::status::BLOODLUST_HEALTH_SHIFT } else { amount })
+                self.units[i].take_hit(if lessened { amount >> crate::status::BLOODLUST_HEALTH_SHIFT } else { amount }, kind, from)
             }
             None => false,
         }
@@ -1679,6 +1755,7 @@ impl GameMap {
     /// building here, where the map is known.
     pub(crate) fn start_order(&mut self, i: usize, order: Order) {
         self.unassign(i);
+        self.leave_formation(self.units[i].id);
         match order {
             Order::Build { site } => self.assign(i, site),
             Order::Enter { site } => self.go_in(i, site),
@@ -1922,8 +1999,58 @@ pub fn showcase_states(kind: BuildingKind) -> Vec<Building> {
 mod tests {
     use super::*;
 
+    /// Mana actually banked into a slot so far: its full charges plus the partial one in progress — unlike
+    /// `charges` alone, strictly increases as soon as any mana reaches it, even short of a whole new charge.
+    fn spell_progress(map: &GameMap, player: u8, kind: SpellKind) -> u32 {
+        let s = map.spell_books[player as usize].slot(kind).unwrap();
+        s.charges as u32 * s.stats.cost + s.recharge
+    }
+
     fn charges(map: &GameMap, player: u8, kind: SpellKind) -> u8 {
         map.spell_books[player as usize].slot(kind).unwrap().charges
+    }
+
+    /// A scratch directory under the OS temp dir, removed on drop (mirrors `pop3_format::install`'s own
+    /// `TempTree` test helper).
+    struct TempTree(std::path::PathBuf);
+
+    impl TempTree {
+        fn new(tag: &str) -> Self {
+            let root = std::env::temp_dir().join(format!("game-core-map-test-{tag}-{}", std::process::id()));
+            std::fs::create_dir_all(&root).unwrap();
+            TempTree(root)
+        }
+    }
+
+    impl Drop for TempTree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A minimal, all-zero but correctly-sized level file (same baseline `level.rs`'s own tests parse).
+    fn blank_level_bytes() -> Vec<u8> {
+        vec![0u8; pop3_format::level::DAT_SIZE]
+    }
+
+    #[test]
+    fn load_original_reads_spell_costs_from_a_sibling_constant_dat() {
+        let dir = TempTree::new("constants-hit");
+        let dat = dir.0.join("levl0001.dat");
+        std::fs::write(&dat, blank_level_bytes()).unwrap();
+        std::fs::write(dir.0.join("constant.dat"), "P3CONST_SPELL_BLAST = 12345\n").unwrap();
+        let map = GameMap::load_original(&dat).unwrap();
+        assert_eq!(map.spell_books[0].slot(SpellKind::Blast).unwrap().stats.cost, 12_345, "overridden by the file");
+    }
+
+    #[test]
+    fn load_original_keeps_the_default_cost_without_a_constant_dat() {
+        let dir = TempTree::new("constants-miss");
+        let dat = dir.0.join("levl0001.dat");
+        std::fs::write(&dat, blank_level_bytes()).unwrap();
+        let map = GameMap::load_original(&dat).unwrap();
+        let default_cost = crate::spell_book::SpellStats::default_for(SpellKind::Blast).cost;
+        assert_eq!(map.spell_books[0].slot(SpellKind::Blast).unwrap().stats.cost, default_cost, "no file: our own default");
     }
 
     #[test]
@@ -1982,11 +2109,17 @@ mod tests {
     #[test]
     fn the_tick_charges_spells_from_mana_except_paused_ones() {
         let mut map = GameMap::sandbox_walk();
+        // sandbox_walk only sites player 0 (one shaman, a deliberately small income): give player 1 a
+        // population too, big enough that Swarm (cost 120) clears a charge within the 2s below.
+        for _ in 0..25 {
+            map.spawn(1, UnitKind::Brave, (0, 0));
+        }
         map.apply(&Command::PauseSpell { player: 0, kind: SpellKind::Swarm, paused: true });
         let swarm = map.spell_books[0].slot(SpellKind::Swarm).unwrap().recharge;
+        let convert = spell_progress(&map, 0, SpellKind::Convert);
         map.run(Ticks::secs(2));
         assert_eq!(map.spell_books[0].slot(SpellKind::Swarm).unwrap().recharge, swarm, "paused");
-        assert_eq!(charges(&map, 0, SpellKind::Convert), crate::spell_book::MAX_CHARGES);
+        assert!(spell_progress(&map, 0, SpellKind::Convert) > convert, "not paused: still gains mana");
         assert!(charges(&map, 1, SpellKind::Swarm) > charges(&map, 0, SpellKind::Swarm), "another player's is not paused");
         assert!(map.mana[0].received > crate::mana::Mana::ZERO);
     }
@@ -2638,6 +2771,55 @@ mod tests {
         assert_eq!(distinct.len(), spots.len(), "one spot each: {spots:?}");
         let cells: Vec<_> = m.units.iter().filter(|u| u.owner == 0).map(Unit::cell).collect();
         assert!(cells.iter().all(|&(x, z)| (x - c - 2).abs() <= 2 && (z - c - 6).abs() <= 2), "16 units within 2 cells: {cells:?}");
+    }
+
+    #[test]
+    fn a_plain_group_move_order_forms_up_and_clears_up_once_everyone_arrives() {
+        let mut m = GameMap::sandbox_units();
+        m.trees.clear();
+        let c = MAP_SIZE as i32 / 2;
+        let to = slots::cell_centre((c + 2, c + 6));
+        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
+        for cmd in m.move_orders(0, &group, to) {
+            m.apply(&cmd);
+        }
+        assert_eq!(m.formations.len(), 1, "one shared formation for the whole group");
+        assert_eq!(m.formations[0].members.len(), group.len().min(crate::formation::MAX_MEMBERS), "up to MAX_MEMBERS joined it");
+        for _ in 0..600 {
+            m.tick();
+        }
+        assert!(m.units.iter().filter(|u| u.owner == 0).all(|u| u.action == Action::Idle), "all arrived");
+        assert!(m.formations.is_empty(), "cleared up once nobody is still walking");
+    }
+
+    #[test]
+    fn a_member_reassigned_elsewhere_leaves_its_formation_right_away() {
+        let mut m = GameMap::sandbox_units();
+        m.trees.clear();
+        let c = MAP_SIZE as i32 / 2;
+        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == 0).take(3).map(|u| u.id).collect();
+        for cmd in m.move_orders(0, &group, slots::cell_centre((c + 2, c + 6))) {
+            m.apply(&cmd);
+        }
+        assert_eq!(m.formations[0].members.len(), 3);
+        let elsewhere = slots::cell_centre((c - 6, c - 2));
+        m.apply(&Command::OrderUnit { player: 0, unit: group[0], order: Order::MoveTo { x: elsewhere.0, z: elsewhere.1 } });
+        assert!(
+            m.formations[0].members.iter().all(|&(id, _)| id != group[0]),
+            "reassigned right away, not left to finish walking to its old slot first"
+        );
+        assert_eq!(m.units.iter().find(|u| u.id == group[0]).unwrap().action, Action::Walking { to: elsewhere }, "its new order stands");
+    }
+
+    #[test]
+    fn a_lone_walker_never_forms_up() {
+        let mut m = GameMap::sandbox_units();
+        let lone = m.units.iter().find(|u| u.owner == 0 && u.kind != UnitKind::Shaman).unwrap().id;
+        let to = slots::cell_centre((MAP_SIZE as i32 / 2, MAP_SIZE as i32 / 2));
+        for cmd in m.move_orders(0, &[lone], to) {
+            m.apply(&cmd);
+        }
+        assert!(m.formations.is_empty());
     }
 
     #[test]

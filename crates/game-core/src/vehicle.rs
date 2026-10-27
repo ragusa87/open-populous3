@@ -663,7 +663,8 @@ impl GameMap {
 
     /// Orders sending the player's `units` to `to`: those aboard move their vehicle there (one order per vehicle), or
     /// get off (each its `Order::GetOff`; the others aboard stay) when it is stopped and `to` is walkable ground right
-    /// next to it (`gets_off_at`); the others walk there (`dispatch`).
+    /// next to it (`gets_off_at`); the others walk there (`dispatch`), spacing themselves into one shared formation
+    /// (`Command::Formation`, formation.rs) when there is more than one of them.
     pub fn move_orders(&self, player: u8, units: &[UnitId], to: (u16, u16)) -> Vec<Command> {
         let mut vehicles: Vec<VehicleId> = Vec::new();
         let (mut walkers, mut getting_off) = (Vec::new(), Vec::new());
@@ -676,7 +677,9 @@ impl GameMap {
             }
         }
         let moves = vehicles.into_iter().map(|vehicle| Command::MoveVehicle { player, vehicle, to });
-        getting_off.into_iter().chain(moves).chain(if walkers.is_empty() { Vec::new() } else { self.dispatch(player, &walkers, to) }).collect()
+        let dispatched = if walkers.is_empty() { Vec::new() } else { self.dispatch(player, &walkers, to) };
+        let formation = (walkers.len() > 1).then_some(Command::Formation { player, units: walkers, to });
+        getting_off.into_iter().chain(moves).chain(dispatched).chain(formation).collect()
     }
 
     /// Whether a click at `to` gets the people aboard `id` off rather than moving it: it is stopped (parked: a boat by

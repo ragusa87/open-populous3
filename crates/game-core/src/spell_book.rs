@@ -3,7 +3,7 @@
 
 use crate::mana::Mana;
 use pop3_format::level::{ThingData, KIND_SPELL};
-use pop3_format::{Level, LevelHeader};
+use pop3_format::{Constants, Level, LevelHeader};
 
 pub const MAX_CHARGES: u8 = 4;
 
@@ -116,57 +116,155 @@ impl SpellKind {
         }
     }
 
-    /// Mana needed to regain one charge.
-    pub fn cost(self) -> u32 {
-        match self {
-            SpellKind::Teleport => 1,
-            SpellKind::Blast | SpellKind::Convert => 40,
-            SpellKind::Swarm | SpellKind::Invisibility | SpellKind::LandBridge | SpellKind::GhostArmy => 120,
-            SpellKind::MagicalShield | SpellKind::Bloodlust => 200,
-            SpellKind::Hypnotism | SpellKind::Whirlwind | SpellKind::Lightning | SpellKind::Flatten => 200,
-            SpellKind::Erosion | SpellKind::Swamp => 300,
-            SpellKind::Earthquake | SpellKind::Firestorm => 500,
-            SpellKind::AngelOfDeath | SpellKind::Volcano => 800,
-            SpellKind::Armageddon => 1500,
-        }
-    }
-
-    /// How far the shaman casts it at the middle altitude band (`SP_W_RANGE`, world units, `cast_range`);
-    /// None: no limit (Teleport's 65 536 is the whole torus, Armageddon has none).
-    pub fn range(self) -> Option<u32> {
-        match self {
-            SpellKind::Teleport | SpellKind::Armageddon => None,
-            SpellKind::Blast | SpellKind::AngelOfDeath | SpellKind::Volcano => Some(3072),
-            SpellKind::LandBridge => Some(5120),
-            SpellKind::Lightning | SpellKind::Swarm => Some(6144),
-            SpellKind::Convert => Some(8192),
-            SpellKind::Whirlwind
-            | SpellKind::Invisibility
-            | SpellKind::Hypnotism
-            | SpellKind::Firestorm
-            | SpellKind::GhostArmy
-            | SpellKind::Erosion
-            | SpellKind::Swamp
-            | SpellKind::Earthquake
-            | SpellKind::Flatten
-            | SpellKind::MagicalShield
-            | SpellKind::Bloodlust => Some(4096),
-        }
-    }
-
     /// Spells that start at the caster and reach towards the target (land bridge): their origin is the
     /// shaman, or the view on a level where the player is a god (`GameMap::shaman_omni`).
     pub fn has_origin(self) -> bool {
         self == SpellKind::LandBridge
     }
 
-    /// The most charges this spell can hold (big spells hold fewer).
-    pub fn max_charges(self) -> u8 {
-        match self.cost() {
-            0..=200 => MAX_CHARGES,
-            201..=500 => 2,
-            _ => 1,
+    /// The constant.dat suffix for this spell (`SPELL_<suffix>`, `SP_1_OFF_MAX_<suffix>`,
+    /// `SPELL_<suffix>_OPT_S`, `SP_W_RANGE_<suffix>`; spells.md "Original balance") — except Convert's own
+    /// cost, which the file keys under `SPELL_CONVERT_WILD` instead (`SpellStats::from_constants`).
+    fn file_suffix(self) -> &'static str {
+        match self {
+            SpellKind::Blast => "BLAST",
+            SpellKind::Lightning => "BOLT",
+            SpellKind::Whirlwind => "WWIND",
+            SpellKind::Swarm => "PLAGUE",
+            SpellKind::Invisibility => "INVIS",
+            SpellKind::Hypnotism => "HYPNO",
+            SpellKind::Firestorm => "FIREST",
+            SpellKind::GhostArmy => "GARMY",
+            SpellKind::Erosion => "EROSION",
+            SpellKind::Swamp => "SWAMP",
+            SpellKind::LandBridge => "LBRIDGE",
+            SpellKind::AngelOfDeath => "AOD",
+            SpellKind::Earthquake => "QUAKE",
+            SpellKind::Flatten => "FLATTEN",
+            SpellKind::Volcano => "VOLCANO",
+            SpellKind::Convert => "CONVERT",
+            SpellKind::Armageddon => "ARMAGEDDON",
+            SpellKind::MagicalShield => "SHIELD",
+            SpellKind::Bloodlust => "BLOODLUST",
+            SpellKind::Teleport => "TELEPORT",
         }
+    }
+}
+
+/// A spell's balance: the same for every player all match long (`constant.dat` is per-install, not
+/// per-tribe, "Use here"). Resolved once when its `SpellSlot` is built (`default_for`), possibly corrected
+/// from a real install's file straight after (`from_constants`, `SpellBook::apply_constants`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SpellStats {
+    /// Mana needed to regain one charge. `[ours]`: kept on our own placeholder scale even when a real file
+    /// loads (docs/specs/constants.md "Use here": generated mode keeps its own defaults, written by us, not
+    /// copied from the file).
+    pub cost: u32,
+    /// The most charges this spell can hold (`SP_1_OFF_MAX_<X>`; big spells hold fewer).
+    pub max_charges: u8,
+    /// `SPELL_<X>_OPT_S` (spells.md "Original balance"): the original's own "advisor" pacing, in seconds, for
+    /// this spell to reach full charge (`pop3-rev-analysis.md` "The mana bar (HUD)").
+    pub advisor_seconds: u32,
+    /// How far the shaman casts it at the middle altitude band (`SP_W_RANGE`, world units, `cast_range`);
+    /// None: no limit (Teleport's 65 536 is the whole torus, Armageddon has none).
+    pub range: Option<u32>,
+}
+
+impl SpellStats {
+    /// Our own numbers, used until (or unless) a real `constant.dat` overrides them.
+    pub fn default_for(kind: SpellKind) -> SpellStats {
+        SpellStats { cost: default_cost(kind), max_charges: default_max_charges(kind), advisor_seconds: default_advisor_seconds(kind), range: default_range(kind) }
+    }
+
+    /// `default_for(kind)`, with each field replaced by `raw`'s own value where `kind`'s constant.dat key is
+    /// present — so a partial or modded file only overrides what it actually defines (Armageddon and
+    /// Bloodlust have no `SPELL_<X>` cost entry in the file at all: they simply keep their default cost).
+    pub fn from_constants(kind: SpellKind, raw: &Constants) -> SpellStats {
+        let mut stats = SpellStats::default_for(kind);
+        let suffix = kind.file_suffix();
+        let cost_suffix = if kind == SpellKind::Convert { "CONVERT_WILD" } else { suffix };
+        if let Some(v) = raw.get(&format!("SPELL_{cost_suffix}")) {
+            stats.cost = v;
+        }
+        if let Some(v) = raw.get(&format!("SP_1_OFF_MAX_{suffix}")) {
+            stats.max_charges = v as u8;
+        }
+        if let Some(v) = raw.get(&format!("SPELL_{suffix}_OPT_S")) {
+            stats.advisor_seconds = v;
+        }
+        if let Some(v) = raw.get(&format!("SP_W_RANGE_{suffix}")) {
+            stats.range = Some(v);
+        }
+        stats
+    }
+}
+
+/// `[ours]`: a placeholder scale, kept as the default for generated/no-original mode (`SpellStats::cost`).
+fn default_cost(kind: SpellKind) -> u32 {
+    match kind {
+        SpellKind::Teleport => 1,
+        SpellKind::Blast | SpellKind::Convert => 40,
+        SpellKind::Swarm | SpellKind::Invisibility | SpellKind::LandBridge | SpellKind::GhostArmy => 120,
+        SpellKind::MagicalShield | SpellKind::Bloodlust => 200,
+        SpellKind::Hypnotism | SpellKind::Whirlwind | SpellKind::Lightning | SpellKind::Flatten => 200,
+        SpellKind::Erosion | SpellKind::Swamp => 300,
+        SpellKind::Earthquake | SpellKind::Firestorm => 500,
+        SpellKind::AngelOfDeath | SpellKind::Volcano => 800,
+        SpellKind::Armageddon => 1500,
+    }
+}
+
+/// `SP_1_OFF_MAX_<X>` (spells.md "Original balance"), unconditionally: unlike `cost`, a charge count has no
+/// "our own economy" interpretation, so there's no reason to keep the old cost-banded derivation (already
+/// documented wrong for Whirlwind/Hypnotism/Swamp/Flatten) as a separate "no install" default.
+fn default_max_charges(kind: SpellKind) -> u8 {
+    match kind {
+        SpellKind::Blast
+        | SpellKind::Lightning
+        | SpellKind::Swarm
+        | SpellKind::Invisibility
+        | SpellKind::LandBridge
+        | SpellKind::Convert
+        | SpellKind::MagicalShield
+        | SpellKind::Bloodlust
+        | SpellKind::Teleport
+        | SpellKind::GhostArmy => MAX_CHARGES,
+        SpellKind::Whirlwind | SpellKind::Hypnotism | SpellKind::Swamp | SpellKind::Flatten => 3,
+        SpellKind::Firestorm | SpellKind::Erosion | SpellKind::Earthquake => 2,
+        SpellKind::AngelOfDeath | SpellKind::Volcano | SpellKind::Armageddon => 1,
+    }
+}
+
+fn default_advisor_seconds(kind: SpellKind) -> u32 {
+    match kind {
+        SpellKind::Blast => 30,
+        SpellKind::GhostArmy | SpellKind::Armageddon => 60,
+        SpellKind::Swarm => 45,
+        SpellKind::Invisibility | SpellKind::MagicalShield | SpellKind::Bloodlust | SpellKind::Teleport => 120,
+        SpellKind::Lightning | SpellKind::Whirlwind | SpellKind::Firestorm | SpellKind::Swamp | SpellKind::LandBridge => 180,
+        SpellKind::Hypnotism | SpellKind::Erosion | SpellKind::Earthquake | SpellKind::Flatten => 240,
+        SpellKind::AngelOfDeath | SpellKind::Volcano | SpellKind::Convert => 300,
+    }
+}
+
+fn default_range(kind: SpellKind) -> Option<u32> {
+    match kind {
+        SpellKind::Teleport | SpellKind::Armageddon => None,
+        SpellKind::Blast | SpellKind::AngelOfDeath | SpellKind::Volcano => Some(3072),
+        SpellKind::LandBridge => Some(5120),
+        SpellKind::Lightning | SpellKind::Swarm => Some(6144),
+        SpellKind::Convert => Some(8192),
+        SpellKind::Whirlwind
+        | SpellKind::Invisibility
+        | SpellKind::Hypnotism
+        | SpellKind::Firestorm
+        | SpellKind::GhostArmy
+        | SpellKind::Erosion
+        | SpellKind::Swamp
+        | SpellKind::Earthquake
+        | SpellKind::Flatten
+        | SpellKind::MagicalShield
+        | SpellKind::Bloodlust => Some(4096),
     }
 }
 
@@ -189,15 +287,18 @@ pub struct SpellSlot {
     pub kind: SpellKind,
     pub availability: Availability,
     pub charges: u8,
-    /// Mana accumulated toward the next charge, `0..kind.cost()`.
+    /// Mana accumulated toward the next charge, `0..stats.cost`.
     pub recharge: u32,
     /// Switched off by the player: it takes no mana and keeps its charges (known spells only).
     pub paused: bool,
+    /// This spell's balance, resolved once at construction (`SpellStats::default_for`), possibly corrected
+    /// afterwards by `SpellBook::apply_constants` from a real install.
+    pub stats: SpellStats,
 }
 
 impl SpellSlot {
     pub fn new(kind: SpellKind, availability: Availability) -> Self {
-        SpellSlot { kind, availability, charges: 0, recharge: 0, paused: false }
+        SpellSlot { kind, availability, charges: 0, recharge: 0, paused: false, stats: SpellStats::default_for(kind) }
     }
 
     pub fn can_cast(&self) -> bool {
@@ -211,7 +312,7 @@ impl SpellSlot {
 
     /// Known and not full: it would take mana, unless paused (`takes_mana`).
     pub fn is_recharging(&self) -> bool {
-        self.availability == Availability::Known && self.charges < self.kind.max_charges()
+        self.availability == Availability::Known && self.charges < self.stats.max_charges
     }
 
     pub fn takes_mana(&self) -> bool {
@@ -221,11 +322,11 @@ impl SpellSlot {
     /// Adds `mana` toward the next charges; returns what is left once full.
     fn give(&mut self, mana: u32) -> u32 {
         self.recharge += mana;
-        while self.recharge >= self.kind.cost() && self.charges < self.kind.max_charges() {
-            self.recharge -= self.kind.cost();
+        while self.recharge >= self.stats.cost && self.charges < self.stats.max_charges {
+            self.recharge -= self.stats.cost;
             self.charges += 1;
         }
-        if self.charges < self.kind.max_charges() {
+        if self.charges < self.stats.max_charges {
             return 0;
         }
         std::mem::take(&mut self.recharge)
@@ -310,8 +411,17 @@ impl SpellBook {
     /// Every known spell at full charges.
     pub fn fill(&mut self) {
         for s in self.slots.iter_mut().filter(|s| s.availability == Availability::Known) {
-            s.charges = s.kind.max_charges();
+            s.charges = s.stats.max_charges;
             s.recharge = 0;
+        }
+    }
+
+    /// Corrects every slot's `stats` from a real install's `constant.dat` (`SpellStats::from_constants`),
+    /// called once right after construction (`GameMap::load_original`); callers should `fill()` again
+    /// afterwards so `charges` reflects any corrected `max_charges` before play starts.
+    pub fn apply_constants(&mut self, raw: &Constants) {
+        for s in self.slots.iter_mut() {
+            s.stats = SpellStats::from_constants(s.kind, raw);
         }
     }
 
@@ -336,6 +446,14 @@ impl SpellBook {
         if self.slot(kind).is_some_and(|s| s.availability == Availability::Discoverable) {
             self.set(kind, Availability::Known);
         }
+    }
+
+    /// The spell the mana bar's "advisor" pacing estimate is read from: the first charging spell
+    /// (`SpellSlot::takes_mana`), in book order — the same set `charge` splits mana between
+    /// (`pop3-rev-analysis.md` "The mana bar (HUD)": "pick a candidate spell the same way the distribution
+    /// loop itself does").
+    pub fn charging_candidate(&self) -> Option<SpellStats> {
+        self.slots.iter().find(|s| s.takes_mana()).map(|s| s.stats)
     }
 
     /// Share `mana` evenly between the spells that take it (`SpellSlot::takes_mana`); a spell filled up passes
@@ -389,10 +507,11 @@ mod tests {
 
     #[test]
     fn ranges_from_the_original_table() {
-        assert_eq!(SpellKind::Blast.range(), Some(3072));
-        assert_eq!(SpellKind::LandBridge.range(), Some(5120));
-        assert_eq!(SpellKind::Convert.range(), Some(8192));
-        assert_eq!(SpellKind::Teleport.range(), None);
+        let range = |k| SpellStats::default_for(k).range;
+        assert_eq!(range(SpellKind::Blast), Some(3072));
+        assert_eq!(range(SpellKind::LandBridge), Some(5120));
+        assert_eq!(range(SpellKind::Convert), Some(8192));
+        assert_eq!(range(SpellKind::Teleport), None);
         assert!(SpellKind::LandBridge.has_origin() && !SpellKind::Blast.has_origin());
     }
 
@@ -471,6 +590,15 @@ mod tests {
     }
 
     #[test]
+    fn apply_constants_updates_every_slot_in_the_book() {
+        let mut b = SpellBook::new();
+        let raw = Constants::parse(b"P3CONST_SPELL_BLAST = 55555\n").unwrap();
+        b.apply_constants(&raw);
+        assert_eq!(b.slot(SpellKind::Blast).unwrap().stats.cost, 55_555);
+        assert_eq!(b.slot(SpellKind::Swamp).unwrap().stats, SpellStats::default_for(SpellKind::Swamp), "no key for it: default kept");
+    }
+
+    #[test]
     fn mana_is_shared_and_a_full_spell_passes_its_share_on() {
         let mut b = SpellBook::new();
         b.set(SpellKind::Blast, Availability::Known);
@@ -484,8 +612,30 @@ mod tests {
 
     #[test]
     fn big_spells_hold_fewer_charges() {
-        assert_eq!(SpellKind::Armageddon.max_charges(), 1);
-        assert_eq!(SpellKind::Swamp.max_charges(), 2);
+        let max_charges = |k| SpellStats::default_for(k).max_charges;
+        assert_eq!(max_charges(SpellKind::Armageddon), 1);
+        assert_eq!(max_charges(SpellKind::Swamp), 3, "SP_1_OFF_MAX_SWAMP, not the old cost-banded guess of 2");
+    }
+
+    #[test]
+    fn from_constants_overrides_only_the_keys_a_file_actually_has() {
+        let raw = Constants::parse(b"P3CONST_SPELL_BLAST = 99999\nP3CONST_SP_1_OFF_MAX_BLAST = 2\n").unwrap();
+        let stats = SpellStats::from_constants(SpellKind::Blast, &raw);
+        let default = SpellStats::default_for(SpellKind::Blast);
+        assert_eq!((stats.cost, stats.max_charges), (99_999, 2), "both keys present, both overridden");
+        assert_eq!((stats.advisor_seconds, stats.range), (default.advisor_seconds, default.range), "no key: kept default");
+    }
+
+    #[test]
+    fn convert_reads_its_cost_under_its_own_wild_suffix() {
+        let raw = Constants::parse(b"P3CONST_SPELL_CONVERT_WILD = 42\nP3CONST_SPELL_CONVERT = 7777\n").unwrap();
+        assert_eq!(SpellStats::from_constants(SpellKind::Convert, &raw).cost, 42, "SPELL_CONVERT_WILD, not SPELL_CONVERT");
+    }
+
+    #[test]
+    fn a_spell_absent_from_the_file_keeps_every_default() {
+        let raw = Constants::parse(b"P3CONST_SPELL_BLAST = 1\n").unwrap();
+        assert_eq!(SpellStats::from_constants(SpellKind::Armageddon, &raw), SpellStats::default_for(SpellKind::Armageddon));
     }
 
     #[test]

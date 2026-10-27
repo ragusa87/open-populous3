@@ -62,21 +62,54 @@ rewards go to their tribe's book. The one remaining terrain brush, `Raise` (`Spe
 only), uses no book. The view only reads it (ui-and-editor.md).
 
 ## Mana (`game_core::mana`)
-Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, used }`, amounts as `Mana`. As in the
-original [exe] (pop3-rev-analysis.md "Mana rules"), two entry points:
+Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, used, advisor_eta }`, amounts as
+`Mana`. As in the original [exe] (pop3-rev-analysis.md "Mana rules"), two entry points:
 - `add(amount)`: mana gained during the turn (a reward) only goes to `incoming`;
-- `tick(now, book, stores)`, once per turn from `GameMap::tick`: the income every 16 turns (`MANA_EVERY`, a fixed
-  `INCOME` guessed until income from people), then `distribute`: a training building making nothing refunds its
-  store first (`Production::refund`); half of `incoming` offers the training buildings still making something a
-  share each (`production::charge`, huts-and-training.md "Mana"); what they do not take, plus the other half,
-  charges the spells first (`SpellBook::charge`); with every spell full, a second share tops the stores back up
+- `tick(now, income, book, stores)`, once per turn from `GameMap::tick`: `income` (`GameMap::mana_income`,
+  huts-and-training.md "Mana" rule 7) every 16 turns (`MANA_EVERY`), recomputing `advisor_eta` from `book` at the
+  same time (below), then `distribute`: a training building making nothing refunds its store first
+  (`Production::refund`); half of `incoming` offers the training buildings still making something a share each
+  (`production::charge`, huts-and-training.md "Mana"); what they do not take, plus the other half, charges the
+  spells first (`SpellBook::charge`); with every spell full, a second share tops the stores back up
   (`production::top_up`); what is left banks (capped at `MAX_MANA`). Only this changes the bank, the charges and
   the stores.
 
-`received` is the last income, `used` what went into spells since then: with `bank`, what a mana bar shows.
-Starts at `START_MANA`. Not done: income from people (huts-and-training.md "Mana" rule 7), the delayed reservoir, a
-cast's own cost (`incoming -= cost` in the original, on top of our prepaid charges?), a negative `incoming` taking
-mana back from the training stores, and the stores counted in the shaman death loss.
+`received` is the last income, `used` what went into spells since then. Starts at `START_MANA`. Not done: the
+delayed reservoir, a cast's own cost (`incoming -= cost` in the original, on top of our prepaid charges?), a
+negative `incoming` taking mana back from the training stores, and the stores counted in the shaman death loss.
+
+The HUD mana bar (`hud/mana.rs`, `ManaPool::advisor_fraction`) is not `bank` against `MAX_MANA`
+(pop3-rev-analysis.md "The mana bar (HUD)"): always full with nothing charging (`advisor_eta` zero, from
+`SpellBook::charging_candidate`, returning the first charging spell's `SpellStats`), otherwise `received`
+against `advisor_eta` scaled ~1.78x (`456 / 256`, confirmed). `advisor_eta` itself is `[ours]`: the exe scales
+its own estimate by an undecoded global byte (`0x89D161`); lacking it, `advisor_eta` spreads the candidate's
+`advisor_seconds` (`SPELL_<X>_OPT_S`) over that many income periods against its own `cost`, not the exe's own
+"share the picker returns" against its own mana scale. A fill/track bar: the tribe's own accent colour
+(`sites::tribe_color`) filled, a fixed colour for the rest; no flash (two more undecoded flags, not confirmed
+to even be the same signal as each other). In generated/no-original mode `cost` is still our own tiny
+placeholder (`SpellStats::default_for`, "Original balance" above), so a cheap spell's own `cost / periods`
+still rounds down to 1-2 mana and the bar reads full well before the spell is near its real charge count —
+cosmetic only there, `advisor_fraction` doesn't drive the actual charging (`GameMap::mana_income` below does).
+With a real install's `constant.dat` loaded (`SpellBook::apply_constants`), `cost` is the real number and this
+mostly goes away.
+
+`GameMap::mana_income(tribe)` (`headcount.rs`, huts-and-training.md "Mana" rule 7): sums each living follower's
+busy or idle rate (`MANA_BUSY_BRAVES`/`_IDLE_BRAVES` 15/4, `MANA_BUSY_SPECIALS`/`_IDLE_SPECIALS` 5/4 for warrior,
+spy, firewarrior, preacher; busy `[ours]` meaning housed or working, `headcount::state_of`) plus the shaman's own
+flat `MANA_F_SHAMEN` 30 regardless, then scales by `HUMAN_MANA_ADJUST` (×1.25) — every tribe, human or not: no
+AI/controller type exists yet to read `COMPUTER_MANA_ADJUST` instead (same gap as `training.rs`'s `train_cost`).
+Replaces the old fixed `mana::INCOME` placeholder, which charged every spell in a single income tick regardless of
+population.
+
+`SpellStats` (`cost`, `max_charges`, `advisor_seconds`, `range`): a spell's balance, resolved once per
+`SpellSlot` at construction (`SpellStats::default_for`, our own numbers — "Original balance" above except
+`cost`, kept as a placeholder, constants.md "Use here"). `GameMap::load_original` then tries the sibling
+`constant.dat` next to the level's own `.dat` (`pop3_format::constants::Constants::load`, silently keeping
+the defaults on any failure — missing file, wrong format); when it parses, `SpellBook::apply_constants`
+corrects every slot's `stats` from the real file (`SpellStats::from_constants`, a key-by-key override: a
+partial or modded file only changes what it actually defines), then `fill()` runs again so starting charges
+reflect any corrected `max_charges`. No other constructor touches this, so `--no-original` always gets the
+defaults.
 
 `SpellBook::from_level(header, level)`: the header's `SpellsAvailable` panel spells are Known with full charges
 (how charged the original starts them is not checked), the spell discoveries (`DiscoveryType 11`) not already
@@ -107,8 +140,9 @@ world editor, checked against the campaign's discoveries, see level-format.md):
 `SpellKind::model()` / `SpellKind::from_model()` map them; `from_model` returns every spell but Teleport (model 21,
 kept only for reference: our `Teleport` is a sandbox spell) and Burn (model 1, no `SpellKind` of its own): models
 2-19 are the panel's 18 spells, plus Bloodlust (20) so a discovery thing can still grant it, even though
-`known_in_header` keeps the header's own mask from ever giving it (TODO.md "Bloodlust"). Our costs are placeholders
-on another scale (blast 40); the original ones are under "Original balance".
+`known_in_header` keeps the header's own mask from ever giving it (TODO.md "Bloodlust"). Our costs
+(`SpellStats::cost`, "Mana" below) are placeholders on another scale (blast 40) even when a real install's
+numbers load, by design; the original ones are under "Original balance".
 
 The editor also names models 23-30 (hill, rise, valley, dip, place tree, clear mapwho, place shaman, place
 wild) but can't place them: unverified.
@@ -157,9 +191,10 @@ Reading the columns:
     `HUMAN_MANA_ADJUST` 125 % for humans and `COMPUTER_MANA_ADJUST` 50 % for computer players.
   - A shaman's death loses 25 % of her tribe's mana, and her killer gains 25 % (`SHAMEN_DEAD_MANA_%_LOST/GAIN`),
     after a 1000-turn delay [exe].
-- Charges: `SP_1_OFF_MAX` ("one-off max") is how many charges a spell holds, the panel's 1-4 count [exe]. Our
-  `SpellKind::max_charges()` derives 4/2/1 from the cost instead, which gets tornado, hypnotism, swamp and
-  flatten (3 in the file) wrong.
+- Charges: `SP_1_OFF_MAX` ("one-off max") is how many charges a spell holds, the panel's 1-4 count [exe]. Fixed:
+  `SpellStats::default_for`'s `max_charges` now reads this table directly (`game_core::spell_book`), no longer
+  derived from the cost (which used to get tornado, hypnotism, swamp and flatten wrong, at 4/4/2/4 instead
+  of the file's 3 each).
 - `_OPT_S` is in seconds per the comments. It is not a recharge or cooldown time: the original only reads it in the
   advisor's mana bookkeeping, and no per-spell cooldown exists, only a 1 s cooldown after any human cast [exe].
 - Range is the cast distance from the shaman in world units (512 per cell).

@@ -2,10 +2,14 @@
 //! `incoming` (`add`); once per turn `tick` adds the income, feeds the training
 //! units (`crate::production`), charges the spells and banks the rest. Only `tick` changes the bank, the
 //! spell charges and the training units' stores.
+//!
+//! `advisor_eta`/`advisor_fraction` are the HUD mana bar's own basis (pop3-rev-analysis.md "The mana bar
+//! (HUD)"): the bar is not `bank / MAX_MANA` at all, it is `received` (last turn's income) against a pacing
+//! estimate for whatever spell is currently charging, always full with nothing charging.
 
 use crate::production::{self, Production};
 use crate::spell_book::{SpellBook, SpellSlot};
-use crate::time::{Every, Tick};
+use crate::time::{Every, Tick, Ticks};
 
 /// An amount of mana.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -38,9 +42,6 @@ pub const MAX_MANA: Mana = Mana(1_000_000);
 pub const START_MANA: Mana = Mana(30_000);
 /// Income rhythm: `MANA_UPDATE_FREQ` 15, every 16 turns.
 pub const MANA_EVERY: Every = Every::new(16);
-/// Income per update, a guess until income from people (huts-and-training.md rule 7): about what five
-/// recharging spells got before.
-pub const INCOME: Mana = Mana(560);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ManaPool {
@@ -51,11 +52,14 @@ pub struct ManaPool {
     pub received: Mana,
     /// Charged into spells since the last income.
     pub used: Mana,
+    /// The HUD mana bar's own target (pop3-rev-analysis.md "The mana bar (HUD)", `advisor_fraction`):
+    /// `Mana::ZERO` when no spell is charging. Recomputed every income turn from the charging candidate.
+    pub advisor_eta: Mana,
 }
 
 impl Default for ManaPool {
     fn default() -> Self {
-        ManaPool { bank: START_MANA, incoming: Mana::ZERO, received: Mana::ZERO, used: Mana::ZERO }
+        ManaPool { bank: START_MANA, incoming: Mana::ZERO, received: Mana::ZERO, used: Mana::ZERO, advisor_eta: Mana::ZERO }
     }
 }
 
@@ -65,14 +69,28 @@ impl ManaPool {
         self.incoming += amount;
     }
 
-    /// The turn's update ("Every turn, per tribe"): the income on update turns, then `distribute`.
-    pub fn tick(&mut self, now: Tick, book: &mut SpellBook, stores: &mut [&mut Production]) {
+    /// The turn's update ("Every turn, per tribe"): `income` (`GameMap::mana_income`, huts-and-training.md
+    /// rule 7) on update turns, then `distribute`.
+    pub fn tick(&mut self, now: Tick, income: Mana, book: &mut SpellBook, stores: &mut [&mut Production]) {
         if MANA_EVERY.fires(now, 0) {
-            self.received = INCOME;
+            self.received = income;
             self.used = Mana::ZERO;
-            self.incoming += INCOME;
+            self.incoming += income;
+            self.advisor_eta = advisor_eta(book);
         }
         self.distribute(book, stores);
+    }
+
+    /// The HUD mana bar's own fill fraction (`0.0..=1.0`, "The mana bar (HUD)"): always full with nothing
+    /// charging (`advisor_eta` zero); otherwise how well `received` kept pace with `advisor_eta`'s estimate,
+    /// scaled the same ~1.78x the exe does (`456 / 256`).
+    pub fn advisor_fraction(&self) -> f32 {
+        if self.advisor_eta == Mana::ZERO {
+            return 1.0;
+        }
+        let scale = ((self.advisor_eta.0 as u64 * 456 / 256) as u32).max(1);
+        let value = self.received.0.min(scale);
+        value as f32 / scale as f32
     }
 
     /// The distribution ("Distribution"): the training units' `stores` making nothing give some back; those
@@ -95,10 +113,22 @@ impl ManaPool {
     }
 }
 
+/// `[ours]`: the exe scales its own advisor estimate by an undecoded global byte (`0x89D161`,
+/// pop3-rev-analysis.md "The mana bar (HUD)"). Lacking it, this reads `SpellStats::advisor_seconds` as "the
+/// candidate should be full in about this long" and spreads its own cost over that many income periods.
+fn advisor_eta(book: &SpellBook) -> Mana {
+    let Some(stats) = book.charging_candidate() else { return Mana::ZERO };
+    let periods = (Ticks::secs(stats.advisor_seconds).get() / MANA_EVERY.period()).max(1);
+    Mana(stats.cost / periods)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::spell_book::{Availability, SpellKind};
+
+    /// A plausible income, for tests that only care about the tick's own timing, not `GameMap::mana_income`.
+    const TEST_INCOME: Mana = Mana(560);
 
     fn book(known: &[SpellKind]) -> SpellBook {
         let mut b = SpellBook::new();
@@ -160,8 +190,8 @@ mod tests {
         let mut pool = ManaPool::default();
         pool.add(Mana(40));
         assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 0);
-        pool.tick(Tick::ZERO.next(), &mut b, &mut []);
-        assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 1);
+        pool.tick(Tick::ZERO.next(), TEST_INCOME, &mut b, &mut []);
+        assert_eq!(b.slot(SpellKind::Blast).unwrap().charges, 1, "tick 1 is not an income turn: just the added 40");
     }
 
     #[test]
@@ -171,18 +201,46 @@ mod tests {
         let mut now = Tick::ZERO;
         for _ in 0..32 {
             now = now.next();
-            pool.tick(now, &mut b, &mut []);
+            pool.tick(now, TEST_INCOME, &mut b, &mut []);
         }
-        assert_eq!((pool.bank, pool.received), (Mana(2 * INCOME.0), INCOME));
+        assert_eq!((pool.bank, pool.received), (Mana(2 * TEST_INCOME.0), TEST_INCOME));
     }
 
     #[test]
     fn used_counts_since_the_last_income() {
         let mut b = book(&[SpellKind::Swarm]);
         let mut pool = ManaPool { bank: Mana::ZERO, ..ManaPool::default() };
-        pool.tick(Tick::ZERO, &mut b, &mut []);
+        pool.tick(Tick::ZERO, TEST_INCOME, &mut b, &mut []);
         assert_eq!((pool.used, pool.bank), (Mana(480), Mana(80)), "4 swarm charges of 120");
-        pool.tick(Tick::ZERO.next(), &mut b, &mut []);
+        pool.tick(Tick::ZERO.next(), TEST_INCOME, &mut b, &mut []);
         assert_eq!(pool.used, Mana(480), "kept between incomes");
+    }
+
+    #[test]
+    fn advisor_fraction_is_full_with_nothing_charging() {
+        assert_eq!(ManaPool::default().advisor_fraction(), 1.0);
+    }
+
+    #[test]
+    fn advisor_fraction_reflects_how_income_kept_pace() {
+        let short = ManaPool { advisor_eta: Mana(100), received: Mana(50), ..ManaPool::default() };
+        assert!((short.advisor_fraction() - 50.0 / 178.0).abs() < 0.001, "scale = 100 * 456 / 256 = 178");
+        let caught_up = ManaPool { advisor_eta: Mana(100), received: Mana(1000), ..ManaPool::default() };
+        assert_eq!(caught_up.advisor_fraction(), 1.0, "never past a full bar");
+    }
+
+    #[test]
+    fn advisor_eta_is_zero_with_no_charging_spell() {
+        let mut pool = ManaPool::default();
+        pool.tick(Tick::ZERO, TEST_INCOME, &mut SpellBook::new(), &mut []);
+        assert_eq!(pool.advisor_eta, Mana::ZERO);
+    }
+
+    #[test]
+    fn advisor_eta_is_spread_from_the_charging_candidate() {
+        let mut b = book(&[SpellKind::Blast]);
+        let mut pool = ManaPool::default();
+        pool.tick(Tick::ZERO, TEST_INCOME, &mut b, &mut []);
+        assert_eq!(pool.advisor_eta, Mana(1), "blast: cost 40 over 30s / 16 turns = 22 periods");
     }
 }
