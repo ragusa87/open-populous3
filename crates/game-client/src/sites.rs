@@ -130,7 +130,7 @@ fn respawn_markers(
         (stone, mats.add(mat))
     });
     let block_mesh = meshes.add(Cuboid::from_size(STONE));
-    for site in &map.0.sites {
+    for site in map.0.sites.iter().filter(|s| s.enabled) {
         let (mesh, mat, lift) = match &original {
             Some((obj, mat)) => (meshes.add(to_mesh(object_mesh(obj, site.owner))), mat.clone(), 0.0),
             None => {

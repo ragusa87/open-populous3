@@ -6,3 +6,4 @@ license = "MIT"
 
 [dependencies]
 pop3-format = { version = "0.1.0", path = "../pop3-format" }
+pop3-ai-script = { version = "0.1.0", path = "../pop3-ai-script" }

@@ -107,6 +107,9 @@ pub struct GameMap {
     next_id: u32,
     /// The game's random draws while it runs (effects), the same on every peer: seeded per game (`seeded`).
     pub rng: Lcg,
+    /// Each computer tribe's own script (`ai_script.rs`), one per tribe with a `cpscrNNN.dat` assigned
+    /// (`LevelHeader::ai_scripts`); empty on generated maps and sandboxes.
+    pub(crate) tribe_scripts: Vec<crate::ai_script::TribeScript>,
 }
 
 /// Generated maps and sandboxes are laid out for a camera on their south side looking north (towards -z):
@@ -154,7 +157,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0) }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new() }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -206,6 +209,7 @@ impl GameMap {
             now: Tick::ZERO,
             next_id: 1,
             rng: Lcg(0),
+            tribe_scripts: Vec::new(),
         }
         .with_buildings(buildings_from_level(level))
         .with_building_ground()
@@ -222,7 +226,7 @@ impl GameMap {
         for t in people {
             let Some(kind) = UnitKind::from_person_model(t.model) else { continue };
             let cell = ((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32);
-            let welcomed = (kind == UnitKind::Wildman).then(|| self.sites.iter().find(|s| s.welcomes(cell))).flatten();
+            let welcomed = (kind == UnitKind::Wildman).then(|| self.sites.iter().find(|s| s.enabled && s.welcomes(cell))).flatten();
             let (owner, kind) = welcomed.map_or((t.owner, kind), |s| (s.owner, UnitKind::Brave));
             self.spawn(owner, kind, (t.x, t.z));
         }
@@ -312,7 +316,13 @@ impl GameMap {
         let object_bank = header.as_ref().map_or(0, |h| h.object_bank);
         let shaman_omni = header.as_ref().is_some_and(|h| h.flags.has(pop3_format::header::LevelFlags::SHAMAN_OMNI));
         let tribes = header.as_ref().map_or(map.tribes.clone(), |h| map.tribes.clone().with_allies(h.allies));
-        Ok(GameMap { spell_books, build_books, start_camera, object_bank, shaman_omni, tribes, ..map })
+        let tribe_scripts = header.as_ref().map_or(Vec::new(), |h| crate::ai_script::load_tribe_scripts(dat, h.ai_scripts));
+        let mut map = GameMap { spell_books, build_books, start_camera, object_bank, shaman_omni, tribes, tribe_scripts, ..map };
+        // "Turn 0" (ai-scripts.md "How a script runs"): a real script's setup block, run once here
+        // while `now` is still `Tick::ZERO`, before the game truly starts. `tick()`'s own later calls
+        // to `tend_ai_scripts` (turns 1, 2, 3, ...) run the `ELSE { EVERY ... }` branch from then on.
+        map.tend_ai_scripts();
+        Ok(map)
     }
 
     /// Deterministic island map from a seed (fallback when no original data exists).
@@ -683,7 +693,29 @@ impl GameMap {
     }
 
     pub fn site_of(&self, owner: u8) -> Option<&ReincarnationSite> {
-        self.sites.iter().find(|s| s.owner == owner)
+        self.sites.iter().find(|s| s.owner == owner && s.enabled)
+    }
+
+    /// Disables `owner`'s reincarnation site in place: its position never moves, so there's nothing
+    /// to remember for `restore_reincarnation` to bring back later. A no-op if already disabled, or if
+    /// `owner` never had a site at all.
+    pub(crate) fn remove_reincarnation(&mut self, owner: u8) {
+        if let Some(s) = self.sites.iter_mut().find(|s| s.owner == owner) {
+            s.enabled = false;
+        }
+    }
+
+    /// Re-enables a site disabled by `remove_reincarnation`, re-reading its height from the live
+    /// terrain (the ground may have changed while it was off) unless that cell is underwater now, in
+    /// which case the site keeps whatever height it last had rather than reincarnating into the sea.
+    /// A no-op if it wasn't disabled (including: never existed at all).
+    pub(crate) fn restore_reincarnation(&mut self, owner: u8) {
+        let Some(i) = self.sites.iter().position(|s| s.owner == owner && !s.enabled) else { return };
+        let (x, z) = self.sites[i].cell();
+        if !self.terrain.is_water(x, z) {
+            self.sites[i].height = self.terrain.get(x, z);
+        }
+        self.sites[i].enabled = true;
     }
 
     pub fn shaman_of(&self, owner: u8) -> Option<&Unit> {
@@ -1277,6 +1309,7 @@ impl GameMap {
         // (formation.rs) tick right after, for the same reason, though they are not coordinators themselves
         // (membership isn't owned through the units' own action).
         if !frozen {
+            self.tend_ai_scripts();
             self.spot_enemies();
             self.tend_attacks();
             self.tend_wrecking();
@@ -1301,7 +1334,7 @@ impl GameMap {
             if frozen && matches!(unit.action, Action::Dead { .. }) {
                 continue;
             }
-            let site = self.sites.iter().find(|s| s.owner == unit.owner);
+            let site = self.sites.iter().find(|s| s.owner == unit.owner && s.enabled);
             let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: unit.inside.map(|i| i.building) };
             match unit.tick(now, &ground, site) {
                 Some(UnitEvent::Reincarnated) => dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain))),
@@ -1704,6 +1737,14 @@ impl GameMap {
             }
             WorldEvent::Declare { winner, reason } => {
                 self.declare_outcome(winner, reason);
+                None
+            }
+            WorldEvent::RemoveSite { tribe } => {
+                self.remove_reincarnation(tribe);
+                None
+            }
+            WorldEvent::RestoreSite { tribe } => {
+                self.restore_reincarnation(tribe);
                 None
             }
         };
@@ -2248,6 +2289,22 @@ mod tests {
         for s in &a.sites {
             assert!(!a.terrain.is_water(s.cell().0, s.cell().1), "spawn ground is land");
         }
+    }
+
+    #[test]
+    fn remove_and_restore_reincarnation_only_touch_the_given_tribe() {
+        let mut m = GameMap::generate(42);
+        assert_eq!(m.sites.len(), 2, "test assumes two tribes");
+        let other = m.sites.iter().find(|s| s.owner != 0).unwrap().owner;
+        m.remove_reincarnation(0);
+        assert!(m.site_of(0).is_none());
+        assert!(m.site_of(other).is_some(), "the other tribe's site is untouched");
+        m.remove_reincarnation(0); // a no-op, already disabled
+        assert!(m.site_of(0).is_none());
+        m.restore_reincarnation(0);
+        assert!(m.site_of(0).is_some());
+        m.restore_reincarnation(99); // a no-op, no site for that owner at all
+        assert!(m.site_of(99).is_none());
     }
 
     #[test]

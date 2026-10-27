@@ -67,6 +67,14 @@ pub enum WorldEvent {
     StrikeBack { unit: UnitId, at: UnitId },
     /// Declares the match's result (`GameMap::declare_outcome`), the hookable "the match ended" entry point.
     Declare { winner: Option<u8>, reason: crate::outcome::Reason },
+    /// Disables `tribe`'s reincarnation site (`GameMap::remove_reincarnation`): its shaman no longer
+    /// comes back. `DO SET_REINCARNATION OFF` (ai-scripts.md); later also Armageddon's lightning-kill
+    /// (TODO.md "Armageddon").
+    RemoveSite { tribe: u8 },
+    /// Re-enables a site `RemoveSite` disabled, at its same position but with its height re-read from
+    /// the live terrain (unless it's underwater, `GameMap::restore_reincarnation`). `DO
+    /// SET_REINCARNATION ON`.
+    RestoreSite { tribe: u8 },
 }
 
 /// What throws a unit, for its immunities.

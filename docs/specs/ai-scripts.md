@@ -1086,14 +1086,20 @@ end
 - `crates/pop3-ai-script` parses `cpscr` into the statement tree above (`ast.rs`), folds a recognized
   `FLYBY_CREATE_NEW..=FLYBY_START` run into one `Stmt::Flyby` (`flyby.rs`), and runs the tree's control flow
   (`IF`/`EVERY`/`SET`/`INCREMENT`/`DECREMENT`/`MULTIPLY`/`DIVIDE`) through `interp::Interpreter`, which hands
-  every `DO` command to an `interp::Env` trait undecided — no command has real game behaviour yet.
+  every `DO` command to an `interp::Env` trait undecided.
   - Use integers only. `INT_RANDOM_100` comes from `map::Lcg`.
   - Effects go through `Command`, so lockstep replays match.
+- `game_core::ai_script` is the real `Env`, once per computer tribe: `load_tribe_scripts` reads a tribe's
+  `cpscrNNN.dat` (`LevelHeader::ai_scripts`) in `GameMap::load_original`, runs its turn-0 setup block once right
+  there, then `GameMap::tend_ai_scripts` runs it again every later `tick()` (the `ELSE { EVERY ... }` branch) —
+  the same function either way, no special-casing for turn 0. So far only `DO SET_REINCARNATION ON/OFF` has
+  real behaviour (`GameMap::remove_reincarnation`/`restore_reincarnation`, `WorldEvent::RemoveSite`/`RestoreSite`,
+  site.rs's `ReincarnationSite::enabled`); every other `DO` command still reaches `ScriptEnv::do_call` and does
+  nothing, and `int_var` only backs `INT_GAME_TURN` (everything else reads 0).
 - Keep the AI behaviours (states, attributes, marker and spell entries, attacks) as plain simulation data that
   the script sets. A future native or Lua-like scripting layer can then drive the same data, the way Script4
   wraps the original functions.
-- Open before implementing the actual AI (an `Env` giving every `DO` command real behaviour, wired into
-  `game-core` once per turn and per computer tribe):
+- Open before implementing the rest of the actual AI (giving every other `DO` command real behaviour):
   - a decompiled-listing pretty-printer (`TODO.md` "Computer players (AI)")
   - the `EVERY` off-by-one and whether there is a per-tribe phase
   - what `SET_ATTACK_VARIABLE` receives

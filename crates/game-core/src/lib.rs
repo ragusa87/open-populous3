@@ -2,6 +2,7 @@
 //!
 //! Everything here must give identical results on every lockstep peer.
 
+pub mod ai_script;
 pub mod angle;
 pub mod armageddon;
 pub mod ashes;

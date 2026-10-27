@@ -953,9 +953,16 @@ impl Unit {
                     self.action = Action::Dead { left };
                     return None;
                 }
-                let site = site?;
-                *self = Unit { facing: self.facing, ..Unit::shaman(self.id, site) };
-                return Some(UnitEvent::Reincarnated);
+                match site {
+                    Some(site) => {
+                        *self = Unit { facing: self.facing, ..Unit::shaman(self.id, site) };
+                        return Some(UnitEvent::Reincarnated);
+                    }
+                    // No reincarnation site for this owner (`DO SET_REINCARNATION OFF`,
+                    // ai-scripts.md): same fallback as `Dying`'s own non-shaman case just above,
+                    // instead of staying stuck in `Dead` forever.
+                    None => self.action = Action::Spirit { left: Countdown::new(SPIRIT_TICKS) },
+                }
             }
         }
         None
@@ -1820,6 +1827,17 @@ mod tests {
         assert!(matches!(brave.action, Action::Spirit { .. }), "its spirit rises, no reincarnation");
         assert_eq!(run(&mut brave, &t, &site, SPIRIT_TICKS.get() as usize), [UnitEvent::Gone]);
         assert!(ticks > 1 && brave.kind == UnitKind::Brave);
+    }
+
+    #[test]
+    fn a_dead_shaman_with_no_site_rises_as_a_spirit_instead_of_staying_stuck() {
+        // `DO SET_REINCARNATION OFF` (ai-scripts.md) reaches exactly this: no site for this owner.
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.action = Action::Dead { left: Countdown::new(Ticks::new(1)) };
+        assert_eq!(u.tick(Tick::ZERO, &t, None), None);
+        assert!(matches!(u.action, Action::Spirit { .. }), "falls through to Spirit, not stuck in Dead");
+        assert_eq!(run(&mut u, &t, &site, SPIRIT_TICKS.get() as usize), [UnitEvent::Gone]);
     }
 
     #[test]

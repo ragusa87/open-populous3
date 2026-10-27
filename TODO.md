@@ -89,6 +89,12 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   this work), its co-patrollers keep cycling obliviously; needs a patrol-point-aware hook there. How the
   AI script's own `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/`SET_MARKER_ENTRY` (docs/specs/ai-scripts.md)
   drives this same mechanism for computer tribes is also still open.
+- [ ] Guard the shaman (**G**, reported: selected followers regroup next to the shaman and turn to face her;
+  not implemented). pop3-rev-analysis.md "Guard the shaman (G key)": traced the trigger half this session - G
+  forces the tribe's own shaman into a new person state (38) that makes HER walk to a muster point and settle
+  into a "standing guard" pose. The followers' own "walk to and face her" half was NOT located - most likely a
+  separate reactive per-person check (same architecture as the melee auto-attack scan), not yet traced. Treat
+  the exe section's own open leads as the starting point for whoever picks this up.
 
 ### Units ([units.md](docs/specs/units.md))
 - [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the drowning and stranded rates (`DROWN_DAMAGE`, `STRANDED_DAMAGE`, scaled x20 from our old 100 HP guesses).
@@ -168,14 +174,13 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   - [ ] Two-phase `ArmageddonMatch`: `Gathering` (camera orbit, combat held off) then `Fighting`.
   - [ ] Per-tribe permanent shield (`WorldEvent::Shield`, continuously refreshed) while a tribe's own fighters live.
   - [ ] Lightning-kill-without-reincarnation when a tribe's own fighters hit zero: `WorldEvent::Shield{steps:0}` +
-        `WorldEvent::RemoveSite` + the existing `WorldEvent::Damage`/`DamageKind::Lightning`.
-  - [ ] Related fix needed by the above: `Unit::tick`'s `Action::Dead` branch gets stuck forever (never
-        reincarnates, never dies) when there's no `ReincarnationSite` for that owner — should fall through to
-        `Action::Spirit` instead. Independent bug, not Armageddon-specific, but required before the lightning-kill
-        can work. Not just a hypothetical Armageddon state either: `DO SET_REINCARNATION OFF` is a real PopScript
-        command a tribe's own AI script runs at turn 0 (confirmed in level 1's red script, ai-scripts.md "Worked
-        example: level 1's opening flyby") — once script interpretation below exists, an ordinary campaign tribe
-        can reach the "no site for this owner" state outside Armageddon too, so this fix is load-bearing sooner.
+        `WorldEvent::RemoveSite` (now implemented, `GameMap::remove_reincarnation`, see "Computer players (AI)"
+        below - just not emitted by Armageddon yet) + the existing `WorldEvent::Damage`/`DamageKind::Lightning`.
+  - [x] Related fix, done ahead of Armageddon itself: `Unit::tick`'s `Action::Dead` branch no longer gets stuck
+        forever when there's no `ReincarnationSite` for that owner - it falls through to `Action::Spirit`, same as
+        `Dying`'s own non-shaman case (`unit.rs`). Not just a hypothetical Armageddon state: `DO SET_REINCARNATION
+        OFF` is a real PopScript command a tribe's own script runs at turn 0 (level 1's red script, ai-scripts.md
+        "Worked example: level 1's opening flyby"), now wired end to end (see "Computer players (AI)" below).
   - [ ] Client: an `armageddon.rs` plugin beyond the v1 camera/lock — cast-confirmed screen flash, arena atmosphere
         tint, per-tribe survivor HUD bars (headcount visible as the decider), the continuous camera orbit (v1 only
         flies to the target and holds).
@@ -404,6 +409,11 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     than "first 2 owners found", we may be including/excluding the wrong one. AI scripts (blue/red/yellow/green)
     read `[0, 10, 4, 5]` for this level - 3 non-zero, more than a "1v1" would suggest are active. Not root-caused
     this session; needs byte 88 actually decoded and cross-checked against which owners the original instantiates.
+    **The reincarnation-site part of this is now explained and implemented, not a bug**: red's script here is
+    010, and cpscr010's own turn-0 setup opens with `DO SET_REINCARNATION OFF` (ai-scripts.md "Worked example:
+    level 1's opening flyby") - `game_core::ai_script` now runs that for real (see "Computer players (AI)"), so
+    red having no site on level 1 is the intended, scripted behaviour. The byte 88/tribe-selection question above
+    is separate and still open.
 
 ### Level scripting (triggers)
 - [ ] Trigger semantics (layout and types known, level-format.md): what each type waits for (proximity, timed, player death, shaman proximity, library, shaman + angel of death), how `TriggerCount`, `NumOccurences`, `PrayTime` and `InactiveTime` play, and what activating a target does (discovery granted, effect fired, hidden thing revealed).
@@ -423,8 +433,16 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   - a decompiled-listing pretty-printer, so `just level-info` can print the level's tribes'
     scripts decompiled next to its things, triggers and markers.
   - `cpscr081`/`cpscr099`'s smaller layouts, if ever needed (no active level slot uses them).
-  - the actual AI: an `Env` implementation wired into `game-core` giving every `DO` command real
-    behaviour (see "Computer players (AI)" above).
+  - the actual AI: most `DO` commands still reach `game_core::ai_script::ScriptEnv::do_call` and do
+    nothing (see the next item for the one that's real so far).
+- [x] First real `DO` command, end to end: `game_core::ai_script` (`load_tribe_scripts`,
+  `ScriptEnv`, `GameMap::tend_ai_scripts`) loads each computer tribe's `cpscrNNN.dat`
+  (`LevelHeader::ai_scripts`) in `GameMap::load_original`, runs its "turn 0" setup block once right
+  there, then once more per later `tick()` (the `ELSE { EVERY ... }` branch) - `DO SET_REINCARNATION
+  ON/OFF` is wired to `GameMap::remove_reincarnation`/`restore_reincarnation`
+  (`WorldEvent::RemoveSite`/`RestoreSite`). Every other `DO` command is still a no-op (previous
+  item). `ScriptEnv::int_var` only backs `INT_GAME_TURN` so far; `INT_ATTR_*` and every other
+  internal variable read as 0.
 - [x] `pop3_format::constants`: decode `levels/constant.dat` (XOR key, 2-byte marker, `P3CONST_` lines) per
   [constants.md](docs/specs/constants.md) into a plain `name -> value` map (`Constants::parse`/`load`,
   `[ours]`-tagged guess at which of the two forms — encoded or the community's plain text — a given file is

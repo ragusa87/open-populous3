@@ -5,7 +5,9 @@ crates/
   pop3-format   pure parsers for original files (no engine). Reusable by tools/editor.
   pop3-ai-script parser, statement tree and interpreter abstraction for the original computer-player
                 scripts (PopScript, docs/specs/ai-scripts.md). No Bevy, no game logic: `Env::do_call`
-                hands every `DO` command to its caller undecided. Not consumed by game-core yet.
+                hands every `DO` command to its caller undecided. A real dependency of game-core now
+                (`game-core/src/ai_script.rs`'s `ScriptEnv`), though only `SET_REINCARNATION` is wired
+                to real behaviour so far - everything else still a no-op.
   game-core     deterministic simulation: terrain (Heightmap), map, spell, effect, blast, unit, vehicle, physics, command, vault; query layers
                 over the map (occupancy: who fills a building; headcount: units by state and kind, housing).
                 Integers only in state. No Bevy.
@@ -43,7 +45,8 @@ each kind of object in a fixed, written order. The original's order inside a tur
    effects (`tend_effects`): before anything they act on, so units react the same turn;
 3. fires, buildings' wear (`tend_building_wear`), ashes (`Ashes::tick`), camp fires, vaults, totems, training,
    vehicle huts (`tend_vehicle_huts`);
-4. spotting (`spot_enemies`), attacks followed (`tend_attacks`) and buildings hacked (`tend_wrecking`) (combat.md);
+4. each computer tribe's own script (`tend_ai_scripts`, `ai_script.rs`, docs/specs/ai-scripts.md), then
+   spotting (`spot_enemies`), attacks followed (`tend_attacks`) and buildings hacked (`tend_wrecking`) (combat.md);
 5. coordinators (docs/specs/coordinators.md): scans that start them (challenges, melees joined), their turns, the
    finished ones removed, their events, then the units whose coordinator is gone released, so a coordinator ending
    now is gone when its units tick;

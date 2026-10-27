@@ -1,5 +1,8 @@
 //! Reincarnation sites: where each tribe's shaman spawns and respawns.
-//! Fixed for the whole game and indestructible: no command removes or moves them.
+//! Position is fixed for the whole game: no command moves one. Whether it's currently active can be
+//! toggled at runtime (`GameMap::remove_reincarnation`/`restore_reincarnation`, `DO SET_REINCARNATION
+//! ON/OFF`, ai-scripts.md) - a disabled site is simply skipped by `GameMap::site_of` and everything
+//! built on it (no respawn, not drawn), without losing its place in `GameMap::sites`.
 
 use crate::terrain::{DirtyRect, Heightmap};
 use pop3_format::{Level, WORLD_UNITS_PER_CELL};
@@ -20,13 +23,19 @@ pub struct ReincarnationSite {
     /// it at `MIN_SPAWN_HEIGHT` only as a last-resort safety net (a site placed on a sea cell), not as the
     /// everyday target - that was the bug (TODO.md "Terrain", 2026-10-21): flooring a *live average* at a low 32
     /// let an otherwise-dry site read as water once `row_jitter` became a genuine row-scale mover.
+    /// `GameMap::restore_reincarnation` is the one exception: re-enabling a disabled site re-reads this
+    /// from the live terrain then (unless it's underwater), since the ground may have changed while it
+    /// was off.
     pub height: u16,
+    /// Whether this tribe's shaman can currently reincarnate here (`GameMap::site_of` skips a disabled
+    /// one). Always `true` until `DO SET_REINCARNATION OFF`/`GameMap::remove_reincarnation` disables it.
+    pub enabled: bool,
 }
 
 impl ReincarnationSite {
     pub fn at_cell(owner: u8, (x, z): (i32, i32), height: u16) -> Self {
         let unit = |c: i32| (c.rem_euclid(128) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
-        ReincarnationSite { owner, x: unit(x), z: unit(z), height }
+        ReincarnationSite { owner, x: unit(x), z: unit(z), height, enabled: true }
     }
 
     /// Cell containing the site centre.
@@ -101,7 +110,7 @@ pub fn sites_from_level(level: &Level, terrain: &Heightmap) -> Vec<Reincarnation
     for t in level.things.iter().filter(|t| t.is_shaman()) {
         if !sites.iter().any(|s| s.owner == t.owner) {
             let height = terrain.get((t.x as u32 / WORLD_UNITS_PER_CELL) as i32, (t.z as u32 / WORLD_UNITS_PER_CELL) as i32);
-            sites.push(ReincarnationSite { owner: t.owner, x: t.x, z: t.z, height });
+            sites.push(ReincarnationSite { owner: t.owner, x: t.x, z: t.z, height, enabled: true });
         }
     }
     sites.sort_by_key(|s| s.owner);
@@ -160,8 +169,8 @@ mod tests {
         assert_eq!(
             sites,
             vec![
-                ReincarnationSite { owner: 0, x: 0x1100, z: 0xd700, height: 0 },
-                ReincarnationSite { owner: 1, x: 0x0900, z: 0x1d00, height: 0 },
+                ReincarnationSite { owner: 0, x: 0x1100, z: 0xd700, height: 0, enabled: true },
+                ReincarnationSite { owner: 1, x: 0x0900, z: 0x1d00, height: 0, enabled: true },
             ]
         );
         assert_eq!(sites[0].cell(), (8, 107));
