@@ -114,12 +114,12 @@ impl ManaPool {
 }
 
 /// `[ours]`: the exe scales its own advisor estimate by an undecoded global byte (`0x89D161`,
-/// pop3-rev-analysis.md "The mana bar (HUD)"). Lacking it, this reads `SpellKind::advisor_seconds` as "the
+/// pop3-rev-analysis.md "The mana bar (HUD)"). Lacking it, this reads `SpellStats::advisor_seconds` as "the
 /// candidate should be full in about this long" and spreads its own cost over that many income periods.
 fn advisor_eta(book: &SpellBook) -> Mana {
-    let Some(kind) = book.charging_candidate() else { return Mana::ZERO };
-    let periods = (Ticks::secs(kind.advisor_seconds()).get() / MANA_EVERY.period()).max(1);
-    Mana(kind.cost() / periods)
+    let Some(stats) = book.charging_candidate() else { return Mana::ZERO };
+    let periods = (Ticks::secs(stats.advisor_seconds).get() / MANA_EVERY.period()).max(1);
+    Mana(stats.cost / periods)
 }
 
 #[cfg(test)]

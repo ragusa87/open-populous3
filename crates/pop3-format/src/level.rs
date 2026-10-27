@@ -52,6 +52,9 @@ pub const SCENERY_TREES: std::ops::RangeInclusive<u8> = 1..=6;
 pub enum LevelError {
     Io(std::io::Error),
     BadSize { expected: usize, got: usize },
+    /// A file that doesn't parse as its own format at all (`constants.rs`'s `constant.dat`: neither the
+    /// expected encoded marker nor plain text).
+    BadFormat(String),
 }
 
 impl fmt::Display for LevelError {
@@ -61,6 +64,7 @@ impl fmt::Display for LevelError {
             LevelError::BadSize { expected, got } => {
                 write!(f, "bad level size: expected {expected} bytes, got {got}")
             }
+            LevelError::BadFormat(msg) => write!(f, "bad format: {msg}"),
         }
     }
 }

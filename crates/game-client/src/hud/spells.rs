@@ -71,7 +71,7 @@ fn dots(dot: Dot, loaded: u8, room: u8) -> Vec<Dot> {
 
 pub fn tile_view(slot: &SpellSlot) -> TileView {
     let label = short_label(slot.kind);
-    let room = slot.kind.max_charges();
+    let room = slot.stats.max_charges;
     let base = TileView { style: TileStyle::Empty, label: "", dots: Vec::new(), progress: None, badge: None };
     match slot.availability {
         Availability::Hidden => base,
@@ -82,7 +82,7 @@ pub fn tile_view(slot: &SpellSlot) -> TileView {
             style: TileStyle::Own,
             label,
             dots: dots(Dot::Loaded, slot.charges, room),
-            progress: slot.is_recharging().then(|| (slot.recharge, slot.kind.cost())),
+            progress: slot.is_recharging().then_some((slot.recharge, slot.stats.cost)),
             badge: slot.paused.then(|| "paused".into()),
         },
     }
@@ -99,14 +99,14 @@ pub fn describe(slot: &SpellSlot) -> String {
         }
         Availability::Unlimited => format!("{name}\nUnlimited uses."),
         Availability::Known => {
-            let max = slot.kind.max_charges();
-            let percent = 100.0 * slot.recharge as f32 / slot.kind.cost() as f32;
+            let max = slot.stats.max_charges;
+            let percent = 100.0 * slot.recharge as f32 / slot.stats.cost as f32;
             let state = match (slot.paused, slot.is_recharging()) {
                 (true, _) => format!("paused at {percent:.0}% (right click to resume)"),
                 (false, true) => format!("recharging {percent:.0}% (right click to pause)"),
                 (false, false) => "full".into(),
             };
-            format!("{name}\n{}/{max} charges, {state}. Cost {} mana.", slot.charges, slot.kind.cost())
+            format!("{name}\n{}/{max} charges, {state}. Cost {} mana.", slot.charges, slot.stats.cost)
         }
     }
 }

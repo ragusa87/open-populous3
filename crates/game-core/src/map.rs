@@ -290,7 +290,16 @@ impl GameMap {
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| dat.file_stem().unwrap_or_default().to_string_lossy().into_owned());
         let map = Self::from_level(&level, name, header.as_ref().map(|h| h.theme));
-        let spell_books = header.as_ref().map_or(map.spell_books.clone(), |h| per_player(SpellBook::from_level(h, &level)));
+        let mut spell_books = header.as_ref().map_or(map.spell_books.clone(), |h| per_player(SpellBook::from_level(h, &level)));
+        // The install's own balance numbers (constants.md "Use here"), never shipped: silently keep the
+        // defaults (`SpellStats::default_for`) when the file is missing or doesn't parse, same as the `.hdr`
+        // above.
+        if let Ok(raw) = pop3_format::Constants::load(dat.with_file_name("constant.dat")) {
+            for book in spell_books.iter_mut() {
+                book.apply_constants(&raw);
+                book.fill();
+            }
+        }
         let build_books = header.as_ref().map_or(map.build_books.clone(), |h| per_player(BuildBook::from_level(h, &level)));
         let start_camera = header.as_ref().and_then(StartCamera::from_header);
         let object_bank = header.as_ref().map_or(0, |h| h.object_bank);
@@ -719,11 +728,17 @@ impl GameMap {
         height.clamp(0, MAX_HEIGHT as i32) as u16
     }
 
+    /// `kind`'s own base range (`SpellSlot::stats`, spells.md "Original balance"), read through `player`'s
+    /// own book since that's where the resolved `SpellStats` live (`SpellBook::apply_constants`).
+    fn spell_base_range(&self, player: u8, kind: SpellKind) -> Option<u32> {
+        self.spell_books.get(player as usize)?.slot(kind)?.stats.range
+    }
+
     /// How far `player`'s shaman casts `kind` from where she stands (`cast_range`): None when there is no
     /// limit (the spell has none, or the player is a god), or no shaman free to cast (dead or `locked`: off the
     /// ground she casts nothing until she lands).
     pub fn cast_range(&self, player: u8, kind: SpellKind) -> Option<u32> {
-        let base = kind.range().filter(|_| !self.shaman_omni)?;
+        let base = self.spell_base_range(player, kind).filter(|_| !self.shaman_omni)?;
         let shaman = self.shaman_of(player).filter(|u| u.is_alive() && !self.shaman_locked(player))?;
         let in_tower = shaman.inside.and_then(|i| self.building(i.building)).is_some_and(|b| b.kind == BuildingKind::DrumTower && b.stage() == crate::building::Stage::Built);
         Some(crate::cast_range::range(base, self.altitude(shaman), in_tower))
@@ -733,7 +748,7 @@ impl GameMap {
     /// for a spell without a limit or on a level where the player is a god; never without a shaman free to
     /// cast otherwise.
     pub fn in_cast_range(&self, player: u8, kind: SpellKind, to: (u16, u16)) -> bool {
-        if self.shaman_omni || kind.range().is_none() {
+        if self.shaman_omni || self.spell_base_range(player, kind).is_none() {
             return true;
         }
         let (Some(shaman), Some(range)) = (self.shaman_of(player), self.cast_range(player, kind)) else { return false };
@@ -1988,11 +2003,54 @@ mod tests {
     /// `charges` alone, strictly increases as soon as any mana reaches it, even short of a whole new charge.
     fn spell_progress(map: &GameMap, player: u8, kind: SpellKind) -> u32 {
         let s = map.spell_books[player as usize].slot(kind).unwrap();
-        s.charges as u32 * kind.cost() + s.recharge
+        s.charges as u32 * s.stats.cost + s.recharge
     }
 
     fn charges(map: &GameMap, player: u8, kind: SpellKind) -> u8 {
         map.spell_books[player as usize].slot(kind).unwrap().charges
+    }
+
+    /// A scratch directory under the OS temp dir, removed on drop (mirrors `pop3_format::install`'s own
+    /// `TempTree` test helper).
+    struct TempTree(std::path::PathBuf);
+
+    impl TempTree {
+        fn new(tag: &str) -> Self {
+            let root = std::env::temp_dir().join(format!("game-core-map-test-{tag}-{}", std::process::id()));
+            std::fs::create_dir_all(&root).unwrap();
+            TempTree(root)
+        }
+    }
+
+    impl Drop for TempTree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A minimal, all-zero but correctly-sized level file (same baseline `level.rs`'s own tests parse).
+    fn blank_level_bytes() -> Vec<u8> {
+        vec![0u8; pop3_format::level::DAT_SIZE]
+    }
+
+    #[test]
+    fn load_original_reads_spell_costs_from_a_sibling_constant_dat() {
+        let dir = TempTree::new("constants-hit");
+        let dat = dir.0.join("levl0001.dat");
+        std::fs::write(&dat, blank_level_bytes()).unwrap();
+        std::fs::write(dir.0.join("constant.dat"), "P3CONST_SPELL_BLAST = 12345\n").unwrap();
+        let map = GameMap::load_original(&dat).unwrap();
+        assert_eq!(map.spell_books[0].slot(SpellKind::Blast).unwrap().stats.cost, 12_345, "overridden by the file");
+    }
+
+    #[test]
+    fn load_original_keeps_the_default_cost_without_a_constant_dat() {
+        let dir = TempTree::new("constants-miss");
+        let dat = dir.0.join("levl0001.dat");
+        std::fs::write(&dat, blank_level_bytes()).unwrap();
+        let map = GameMap::load_original(&dat).unwrap();
+        let default_cost = crate::spell_book::SpellStats::default_for(SpellKind::Blast).cost;
+        assert_eq!(map.spell_books[0].slot(SpellKind::Blast).unwrap().stats.cost, default_cost, "no file: our own default");
     }
 
     #[test]

@@ -3,7 +3,10 @@
 The game's balance values (mana, spell costs, unit life and speed, wood, training, hut breeding, spell ranges...)
 live in one obfuscated text file. Decoded here [files]; names and the plain-text form are confirmed by the
 community: PopRe wiki page "Constant" and Brandan Lasley's `New_Constants.dat` (2012), whose 231 integer
-values all match ours. Not parsed by `pop3-format` yet.
+values all match ours. Parsed by `pop3_format::constants::Constants` (`Constants::parse`/`load`, reusing
+`LevelError`) — only the spell-balance group is actually read today, by `game_core::spell_book`'s
+`SpellStats::from_constants`/`SpellBook::apply_constants` (`GameMap::load_original`); every other group below
+(units, wood, training, huts) is parsed into the same map but nothing reads it yet (TODO.md).
 
 ## Encoding [files]
 - `levels/constant.dat`, 11 712 bytes in the install checked here (French release, 1998).
@@ -14,6 +17,11 @@ values all match ours. Not parsed by `pop3-format` yet.
   the byte sum, a CRC-32's low half or the length. Unverified.
 - The community edits a plain-text `constant.dat` that the game also accepts (wiki), so the loader probably
   tests the marker and decodes only when it is present. Unverified here.
+- `Constants::parse` follows that same guess, `[ours]`, since the real loader's own test is unconfirmed: XOR
+  decode first; if the result starts `9F C1`, strip it and read the rest as text; otherwise, if the *raw*
+  bytes already look like plain text (nothing but printable ASCII/tab/CR/LF), read those directly; otherwise
+  it's neither, an error. A line that isn't `NAME = integer` (or whose name lacks `P3CONST_`) is skipped, not
+  fatal — lenient, matching the format's own community-editable intent.
 
 ## Text format [files]
 ```
@@ -62,8 +70,16 @@ Units:
 
 ## Use here
 - Read it from the original install when one is present, and never ship it. Generated mode needs its own
-  defaults, written by us, not copied.
+  defaults, written by us, not copied. Done for the spell group: `GameMap::load_original` loads the sibling
+  `constant.dat` next to the level's own `.dat` (`Constants::load`, silently falling back to our own
+  defaults on any failure, same as the `.hdr`'s own `.ok()` right beside it); every other constructor
+  (`from_level` alone, `bare`, every `sandbox_*`) never touches a `Constants` at all, so it always gets our
+  own defaults (`SpellStats::default_for`) — exactly `--no-original`'s existing contract.
 - Our spell and unit placeholders (spells.md, units.md, buildings.md) can then be checked against the real
   values. The per-spell table (cost, charges, range, altitude bands, effects) is in spells.md "Original balance".
 - The spell costs here are the same numbers the AI scripts read through `INT_M_SPELL_*_COST` (ai-scripts.md).
   Whether those are adjusted, e.g. by `COMPUTER_MANA_ADJUST`, is unknown.
+- Lockstep note, not solved here: two peers with different installs (or one with, one without) would resolve
+  different `SpellStats` for the same spell and silently diverge — the same class of problem as any other
+  install-dependent content, just newly able to affect the simulation (spell costs) rather than only
+  cosmetics. `game-net` doesn't check for this yet (TODO.md).

@@ -98,6 +98,14 @@ never committed — it carries no history and is not shared by cloning the repo.
   units link to it one way, it ticks before them and is removed when its situation ends.
 - A new spell is a recipe of effects: an `EffectKind` variant reading the map and returning `WorldEvent`s; units
   are hurt only through `GameMap::damage`.
+- A game-balance number that exists in `levels/constant.dat` (docs/specs/constants.md) is read through
+  `pop3_format::constants::Constants` (loaded from the player's own install, e.g. `GameMap::load_original`;
+  never shipped), not hardcoded a second time as a new placeholder. Keep a code-level default for
+  generated/no-original mode (written by us, not copied from the real numbers, constants.md "Use here") —
+  except where the value has no "our own economy" to protect (ranges, charge counts, timings: just facts),
+  in which case the default can be the real number outright. `game_core::spell_book::SpellStats` is the
+  precedent to follow for a new group (units life/speed/damage, training costs, wood, hut breeding, ...:
+  TODO.md still has these on their own hardcoded numbers).
 - World visuals follow simulation time (`sim_time::SimNow`), computed from a start tick and never accumulated per
   frame, seeded by stable ids; UI, camera and mouse feedback stay on `Res<Time>`. A new kind of visual for a
   game-core object is a `views::WorldView` with its own plugin (docs/architecture.md "Client: world visuals").
