@@ -36,19 +36,34 @@ pub fn flyby_active(map: Res<CurrentMap>) -> bool {
     map.0.active_flyby.as_ref().is_some_and(|f| f.interrupted_at.is_none())
 }
 
-/// Poses `rig` from the active flyby's keyframes at `now`, or restores it to its own pre-flyby state
-/// the moment the flyby disappears (finished or its cancel grace period over,
-/// `GameMap::tend_flyby`). Held (untouched) while interrupted but not yet cleared, so the camera
-/// stays exactly where it was at the moment of cancellation.
-pub fn drive_camera(map: Res<CurrentMap>, now: Res<SimNow>, mut rig: ResMut<CameraRig>, mut pre: Local<Option<CameraRig>>) {
+/// Poses `rig` from the active flyby's keyframes at `now`. Once it disappears
+/// (`GameMap::tend_flyby`: finished on its own, or its cancel grace period over), restores `rig` to
+/// its own pre-flyby state *only* if it was ever cancelled — a flyby that ran to the end instead
+/// just holds wherever its last keyframe left the camera, `active_flyby` carries no "how did it end"
+/// flag of its own once gone, so the last-seen `interrupted_at` (remembered here, alongside the
+/// snapshot) is what this reads instead.
+pub fn drive_camera(map: Res<CurrentMap>, now: Res<SimNow>, mut rig: ResMut<CameraRig>, mut pre: Local<Option<(CameraRig, bool)>>) {
     let Some(active) = &map.0.active_flyby else {
-        if let Some(snapshot) = pre.take() {
+        if let Some((snapshot, was_interrupted)) = pre.take()
+            && was_interrupted
+        {
             *rig = snapshot;
         }
         return;
     };
-    let snapshot = pre.get_or_insert_with(|| rig.clone()).clone();
-    if active.interrupted_at.is_some() {
+    let interrupted = active.interrupted_at.is_some();
+    let snapshot = match &mut *pre {
+        Some((snapshot, seen_interrupted)) => {
+            *seen_interrupted = interrupted;
+            snapshot.clone()
+        }
+        None => {
+            let snapshot = rig.clone();
+            *pre = Some((snapshot.clone(), interrupted));
+            snapshot
+        }
+    };
+    if interrupted {
         return;
     }
     let t = now.turns_since(active.start);
