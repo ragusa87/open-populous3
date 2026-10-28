@@ -48,30 +48,49 @@ each — is tracked in [docs/specs/assets.md](docs/specs/assets.md).
 everything. [docs/roadmap.md](docs/roadmap.md) summarises what's already done. See
 [docs/](docs/README.md) for the full architecture and specs.
 
-## Running it
+## Compilation
+
+The workspace is plain Cargo underneath; [`Justfile`](Justfile) just wraps the common recipes:
 
 ```
-just run                      # original install auto-detected (Wine / C:\Program Files), or $POP3_INSTALL
-just run path/to/levl2005.dat
+just build [--release]         # cargo build --workspace: compile everything, don't run it
+just test                      # cargo test --workspace, plus the Python asset-generator checks
+just run [levl2005.dat]        # cargo run -p game-client: windowed game
 just run-generated             # --no-original: never read game files, all generated
-just shot /tmp/x.png          # headless screenshot (no window, no focus steal)
-just test
+just shot /tmp/x.png           # headless screenshot (no window, no focus steal)
 ```
+
+Run `just` with no arguments (or open the `Justfile`) for the full recipe list, including
+`just bake-units`, `just generate-buildings`, `just video`, `just profile` and `just level-info`.
+Without `just` installed, any recipe's underlying `cargo` command works the same way directly.
 
 Controls: push the mouse against the window edges to scroll (Esc frees the cursor), Left/Right rotate, Up/Down or WASD move (A/D strafe), middle-drag rotate, Home/End tilt, Ctrl+PgUp/PgDn zoom, Shift+PgUp/PgDn field of view, **Enter** aerial view,
 PgUp/PgDn change level, Tab editor mode (R/F/T/M/B brushes), F11 fullscreen.
 
-Without original data (or with `--no-original` / `POP3_NO_ORIGINAL=1`) maps and the ground
-theme are generated deterministically and objects (reincarnation site stones) use generated
-shapes; PgUp/PgDn then changes the seed.
-Without the original files, buildings use a generated low-poly kit: 16 models made by an AI-written script
-(procedural surface textures, tribe accents and construction frames).
-Preview them with `POP3_START=sandbox-buildings just run-generated`.
+## Original assets bootstrap
+
+By default the game looks for your own legitimately-owned install of the original and reads its
+levels, textures, sprites and 3D models from it at runtime (see
+[Assets](#assets-original-today-open-source-growing-in) above) — nothing is downloaded or bundled.
+
+**Where it scans:** `pop3_format::install::find_install` ([crates/pop3-format/src/install.rs](crates/pop3-format/src/install.rs))
+looks for a folder containing a `levels/` sub-directory (any case), in order:
+1. `$POP3_INSTALL`, if set — used as-is, no further scanning.
+2. Otherwise, the first install found under, on Unix: `$WINEPREFIX/drive_c`, then `~/.wine/drive_c`
+   (checking `Program Files (x86)/Bullfrog`, `Program Files/Bullfrog` and `GOG Games` under each, and
+   their immediate sub-directories); on Windows: the same folders under `C:\`.
+
+**Per-folder overrides**, each independent of the others and of the auto-detected install:
+`$POP3_LEVELS` (the `levels/` folder), `$POP3_DATA` (`data/`, themes and sprites) and
+`$POP3_OBJECTS` (`objects/`, 3D models) — see [crates/game-client/src/world.rs](crates/game-client/src/world.rs).
+
+**Skipping it entirely:** pass `--no-original`, or set `POP3_NO_ORIGINAL=1`, and no original file is
+read at all: maps and the ground theme are generated deterministically, and objects (buildings,
+trees, reincarnation site stones) fall back to their open/generated equivalents.
+`just run-generated` does this for you. PgUp/PgDn then changes the generation seed instead of the
+level. Preview the generated building kit with `POP3_START=sandbox-buildings just run-generated`.
 See the [missing-asset inventory](docs/specs/assets.md) and
-[building generator / Blender workflow](assets/3d/buildings/README.md).
-Original install: `$POP3_INSTALL` (the folder holding `levels/`, `data/`, `objects/`), else the first
-`Bullfrog/<game>/` found under `$WINEPREFIX`, `~/.wine` (`drive_c/Program Files*`, `GOG Games`) or, on
-Windows, `C:\`. Overrides: `$POP3_LEVELS`, `$POP3_DATA`, `$POP3_OBJECTS`.
+[building generator / Blender workflow](assets/3d/buildings/README.md) for what's open-source today.
 
 ## License
 This project is currently licensed under the [MIT License](LICENSE).
