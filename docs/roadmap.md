@@ -49,15 +49,7 @@ trace notes.
 
 Burn (model 1) and Raise (the editor's own terrain brush) are internal mechanics, not player-cast panel spells, and aren't tracked above.
 
-## Priority 2 — `--no-original` asset completeness (copyright safety)
-
-| Area | Status | Notes |
-|---|---|---|
-| Sound | Todo | Format reverse-engineered but not yet parsed/loaded; no playback and no CC0 sound assets sourced at all. See [sound.md](specs/sound.md). |
-| Non-original (CC0) assets | Partial, de-prioritized | Generated building kit, textures, and CC0 trees/unit sheets ship. Still original-only: building icons, ritual scenery (reincarnation stones), vehicles, worker action clips. See [assets.md](specs/assets.md). |
-| Original sprites / blending | Partial | Alpha sprite table decoded and blended on GPU; per-effect frame mapping and the ghost (see-through) table still open. See [sprites.md](specs/sprites.md). |
-
-## Priority 3 — computer players (AI) and what it needs
+## Priority 2 — computer players (AI) and what it needs
 
 | Area | Status | Notes |
 |---|---|---|
@@ -65,15 +57,15 @@ Burn (model 1) and Raise (the editor's own terrain brush) are internal mechanics
 | Level scripting (triggers) | Todo | Trigger layout is parsed; semantics (what each type waits for, what activating one does) not implemented. |
 | Computer players (AI) | Todo — scripts parsed, not yet driving behaviour | `pop3-ai-script` fully parses `cpscrNNN.dat` and runs its control flow; flybys work end to end. Almost every `DO` command is still a no-op — only reincarnation on/off is wired to real behaviour. No AI actually plays a tribe yet. See [ai-scripts.md](specs/ai-scripts.md). |
 
-## Priority 4 — remaining fidelity and content
+## Priority 3 — remaining fidelity and content
 
 | Area | Status | Notes |
 |---|---|---|
 | Terrain / world engine | Partial | Original levels parse and render: wrapping heightmap, curved "planet" mesh, theme-accurate ground textures, dirty-rect re-bakes. Known disparities still to address: projection, cell/selection highlighting, beatbox and flyleaf effects. **Frog and war frog are not implemented.** See [terrain.md](specs/terrain.md), [terrain-textures.md](specs/terrain-textures.md). |
-| Winning and losing | Done (core) | Automatic elimination/outcome detection, victory/defeat screen, end-of-match freeze and winner's shield all implemented. Level-script-triggered win/lose waits on the scripting interpreter (Priority 3). |
+| Winning and losing | Done (core) | Automatic elimination/outcome detection, victory/defeat screen, end-of-match freeze and winner's shield all implemented. Level-script-triggered win/lose waits on the scripting interpreter (Priority 2). |
 | Things and level data | Partial | Things and triggers partially parsed and placed. Open: level names/language texts, object banks other than 0, start camera from the header, sunlight block. See [level-format.md](specs/level-format.md), [objects.md](specs/objects.md). |
 
-## Priority 5 — presentation and UX polish
+## Priority 4 — presentation and UX polish
 
 | Area | Status | Notes |
 |---|---|---|
@@ -82,12 +74,31 @@ Burn (model 1) and Raise (the editor's own terrain brush) are internal mechanics
 | Menu and sandboxes | Partial | Main menu exists but does not stick to the original's own layout/flow; per-feature sandboxes (walk/units/buildings/worship/spells/vehicles/bridge) exist for dev use. **Not implemented: tutorial and credits screen.** |
 | Camp fire | Todo | Not implemented. See [buildings.md](specs/buildings.md) "Camp fire". |
 
-## Priority 6 — infrastructure with no dependents
+## Priority 5 — performance and engine infrastructure
 
 | Area | Status | Notes |
 |---|---|---|
 | Effects (VFX) | Partial, mostly de-prioritized | Construction, vehicle and status visuals exist. Spell/combat effects — fire trail, smoke, explosion, lightning bolt look, whirlwind — are largely placeholder or missing; original alpha-sprite effects not yet mapped frame-by-frame. See [sprites.md](specs/sprites.md). |
 | Performance (60 fps) | Partial, ongoing | Dirty-rect terrain texture/mesh/walkability rebakes landed. Broader scaling work (many units, flow fields) still open. |
+
+## Priority 6 — `--no-original` asset completeness (copyright safety)
+
+De-prioritized: lower priority than the gameplay/content/UX tiers above, since `--no-original` mode already
+runs, just with some original-only art/audio left.
+
+| Area | Status | Notes |
+|---|---|---|
+| Sound | Todo | Format reverse-engineered but not yet parsed/loaded; no playback and no CC0 sound assets sourced at all. See [sound.md](specs/sound.md). |
+| Non-original (CC0) assets | Partial, de-prioritized | Generated building kit, textures, and CC0 trees/unit sheets ship. Still original-only: building icons, ritual scenery (reincarnation stones), vehicles, worker action clips. See [assets.md](specs/assets.md). |
+| Original sprites / blending | Partial | Alpha sprite table decoded and blended on GPU; per-effect frame mapping and the ghost (see-through) table still open. See [sprites.md](specs/sprites.md). |
+
+## Priority 7 — multiplayer
+
+Lowest priority: the lockstep codec already works in tests with no UI or dependents yet, and multiplayer
+only matters once the single-player game above it is in better shape.
+
+| Area | Status | Notes |
+|---|---|---|
 | Multiplayer | Todo — skeleton only | Lockstep wire codec and a TCP round-trip test exist, single-player only. No network driver, lobby/reconnect UI, desync checksum, or synced pause/speed yet. See [multiplayer.md](specs/multiplayer.md). |
 
 ## Next

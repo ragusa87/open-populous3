@@ -3,7 +3,7 @@
 What is left to implement. Tick or remove an item in the commit that does it, add new ones as they
 come up. Details live in the linked specs; done work is summarised in [docs/roadmap.md](docs/roadmap.md).
 
-Priorities (2026-10-25): sections below are grouped into six rough tiers, highest first. A tier is a priority ordering, not a gate - later tiers (especially 2 and 5) can and should progress in parallel. Re-group as priorities shift; this is a living ordering, not a plan.
+Priorities (2026-10-28): sections below are grouped into seven rough tiers, highest first. A tier is a priority ordering, not a gate - later tiers (especially 4 and 6) can and should progress in parallel. Re-group as priorities shift; this is a living ordering, not a plan.
 
 ## Priority 1 — core gameplay correctness
 What a match plays through today: combat, orders/the tick, units, spells, buildings, worship. Bugs and gaps here are the most visible, and other tiers build on top of them (the AI tier drives units through the same orders/coordinators as a human; the content tier dresses up the same spells and buildings).
@@ -385,23 +385,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   the reward itself does, e.g. a spell appearing in the book). Needs a live check of what the original actually
   shows at the moment of the grant before implementing anything beyond a placeholder.
 
-## Priority 2 — `--no-original` asset completeness (copyright safety)
-AGENTS.md's own bar is that everything shippable works with `--no-original`. Sound is a hard zero today (format reverse-engineered, no playback, no CC0 assets sourced at all); several spell VFX, building/spell icons and ritual scenery are still original-only. Largely independent of the other tiers, so it can run in parallel with them rather than waiting its turn.
-
-### Sound ([sound.md](docs/specs/sound.md))
-- [ ] `pop3_format::sound`: SDT banks (count, offsets, 40-byte headers), signed 16-bit PCM mono/stereo, the 4 looping sounds, `0x80` placeholders skipped; music `PopDrones22.SDT` as MPEG Layer II.
-- [ ] Play SFX in the client (Bevy audio): spells, chopping, building, follower voices, ambiences; drums and music. Free sounds for `--no-original`.
-
-### Art ([assets.md](docs/specs/assets.md))
-- [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).
-- [ ] Next open art: building icons, ritual scenery/reincarnation stones, vehicles and worker action clips (inventory P1). CC0 trees/unit sheets, the generated building kit and 14 of 20 spell icons already ship.
-
-### Original sprites and blending ([sprites.md](docs/specs/sprites.md))
-- [ ] Spell effects from the alpha sprites (`hfx0-0.dat`, decoded by `blend::AlphaTable`, blended on the GPU): map each effect to its frames (sprites.md).
-- [ ] Ghost table `ghost0-X.dat` (66% mix) for see-through units (Invisibility).
-- [ ] `sprites` parser: test the empty (0 x 0) entries and the `0x7F` trailer seen in the real banks.
-
-## Priority 3 — computer players (AI) and what it needs
+## Priority 2 — computer players (AI) and what it needs
 The single biggest remaining system, and the one that turns this from a sandbox/multiplayer tech demo into an actual single-player game. Sequenced after priority 1 on purpose: AI scripts can invoke any spell/building/unit action through the same order/coordinator machinery, so building the interpreter against still-incomplete systems means repeated rework. Tribes and level scripting are its direct prerequisites (per-tribe state, triggers the scripts fire).
 
 ### Tribes
@@ -493,7 +477,7 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 - [ ] Script side effects outside the AI still open: messages, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`,
   `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
 
-## Priority 4 — remaining fidelity and content
+## Priority 3 — remaining fidelity and content
 Level/world correctness that is mostly stable already (terrain especially: extensive, but most of it recently fixed) rather than blocking anything above.
 
 ### Terrain ([terrain.md](docs/specs/terrain.md), [terrain-textures.md](docs/specs/terrain-textures.md))
@@ -837,7 +821,7 @@ Level/world correctness that is mostly stable already (terrain especially: exten
 - [ ] Our own texts in Fluent (`assets/lang/<lang>.ftl`, named keys), a key -> original text number table, lookup from `langNN.dat` with the original files and from our `.ftl` otherwise ([language.md](docs/specs/language.md) "Our texts and the fallback"); when the game first shows translatable text.
 - [ ] Sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32/64): find whether it drives the terrain lighting. `LandBlocks` / `LandOrients` are identical stale data: ignore them.
 
-## Priority 5 — presentation and UX polish
+## Priority 4 — presentation and UX polish
 Additive and mostly independent of the tiers above: chip away at these alongside anything else.
 
 ### UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
@@ -887,8 +871,8 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 - [ ] Check in the game: what a camp fire is for (people gathering? mana?), its burn time when left alone (`ABANDON_TICKS`, 60 s guessed), the ring size, the flatness rule, and when object 12 (other logs) is used.
 - [ ] Hover/selection of a camp fire (tooltip with who is around it), a hover cursor when units are selected over one.
 
-## Priority 6 — infrastructure with no dependents
-Real work, but nothing else in this file waits on it and neither has an immediate player-facing payoff until the tiers above are further along: performance only matters once there is more to render/simulate at once, and multiplayer's lockstep codec already works in tests with no UI or dependents yet.
+## Priority 5 — performance (infrastructure with no dependents)
+Real work, but nothing else in this file waits on it and it has no immediate player-facing payoff until the tiers above are further along: performance only matters once there is more to render/simulate at once.
 
 ### Performance (60 fps)
 Measured with `just profile` (units sandbox, dev build, headless, tracing on): about 73 ms a frame. The simulation
@@ -932,6 +916,25 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   real original level. Fix direction: make a slow `install` (or the map build) incremental, a bounded chunk of work
   per frame via a small state machine, instead of one unyielded call. Separate from the existing stale-terrain-
   during-instant-bulk-tick bug above (that one is post-load desync, not a loading-time stall).
+
+## Priority 6 — `--no-original` asset completeness (copyright safety)
+AGENTS.md's own bar is that everything shippable works with `--no-original`. Sound is a hard zero today (format reverse-engineered, no playback, no CC0 assets sourced at all); several spell VFX, building/spell icons and ritual scenery are still original-only. Largely independent of the other tiers, so it can run in parallel with them rather than waiting its turn.
+
+### Sound ([sound.md](docs/specs/sound.md))
+- [ ] `pop3_format::sound`: SDT banks (count, offsets, 40-byte headers), signed 16-bit PCM mono/stereo, the 4 looping sounds, `0x80` placeholders skipped; music `PopDrones22.SDT` as MPEG Layer II.
+- [ ] Play SFX in the client (Bevy audio): spells, chopping, building, follower voices, ambiences; drums and music. Free sounds for `--no-original`.
+
+### Art ([assets.md](docs/specs/assets.md))
+- [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).
+- [ ] Next open art: building icons, ritual scenery/reincarnation stones, vehicles and worker action clips (inventory P1). CC0 trees/unit sheets, the generated building kit and 14 of 20 spell icons already ship.
+
+### Original sprites and blending ([sprites.md](docs/specs/sprites.md))
+- [ ] Spell effects from the alpha sprites (`hfx0-0.dat`, decoded by `blend::AlphaTable`, blended on the GPU): map each effect to its frames (sprites.md).
+- [ ] Ghost table `ghost0-X.dat` (66% mix) for see-through units (Invisibility).
+- [ ] `sprites` parser: test the empty (0 x 0) entries and the `0x7F` trailer seen in the real banks.
+
+## Priority 7 — multiplayer
+Lowest priority: the lockstep codec already works in tests with no UI or dependents yet, and multiplayer only matters once the single-player game above it is in better shape.
 
 ### Multiplayer ([multiplayer.md](docs/specs/multiplayer.md))
 - [ ] Network driver: send `Schedule::close_local`'s turn as `Message::Tick` every tick, feed peers' turns to `receive`, 2-3 ticks of delay (the schedule is done, single player only today).
