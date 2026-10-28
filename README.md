@@ -73,12 +73,24 @@ By default the game looks for your own legitimately-owned install of the origina
 levels, textures, sprites and 3D models from it at runtime (see
 [Assets](#assets-original-today-open-source-growing-in) above) — nothing is downloaded or bundled.
 
-**Where it scans:** `pop3_format::install::find_install` ([crates/pop3-format/src/install.rs](crates/pop3-format/src/install.rs))
-looks for a folder containing a `levels/` sub-directory (any case), in order:
-1. `$POP3_INSTALL`, if set — used as-is, no further scanning.
-2. Otherwise, the first install found under, on Unix: `$WINEPREFIX/drive_c`, then `~/.wine/drive_c`
-   (checking `Program Files (x86)/Bullfrog`, `Program Files/Bullfrog` and `GOG Games` under each, and
-   their immediate sub-directories); on Windows: the same folders under `C:\`.
+**Where it scans:** `pop3_format::install::find_install` ([crates/pop3-format/src/install.rs](crates/pop3-format/src/install.rs)).
+If `$POP3_INSTALL` is set it's used as-is and nothing else is scanned. Otherwise, each location below
+is checked in order (itself, then its immediate sub-folders in name order, e.g.
+`.../Bullfrog/Populous - The Beginning/levels`) and the first one containing a `levels/`
+sub-directory (any case) wins:
+
+- Linux / macOS, if `$WINEPREFIX` is set:
+  - `$WINEPREFIX/drive_c/Program Files (x86)/Bullfrog`
+  - `$WINEPREFIX/drive_c/Program Files/Bullfrog`
+  - `$WINEPREFIX/drive_c/GOG Games`
+- Linux / macOS, always also:
+  - `~/.wine/drive_c/Program Files (x86)/Bullfrog`
+  - `~/.wine/drive_c/Program Files/Bullfrog`
+  - `~/.wine/drive_c/GOG Games`
+- Windows:
+  - `C:\Program Files (x86)\Bullfrog`
+  - `C:\Program Files\Bullfrog`
+  - `C:\GOG Games`
 
 **Per-folder overrides**, each independent of the others and of the auto-detected install:
 `$POP3_LEVELS` (the `levels/` folder), `$POP3_DATA` (`data/`, themes and sprites) and
