@@ -52,7 +52,7 @@ trace notes.
 |---|---|---|
 | UI and editor | Partial | HUD tabs and UX flows (build/spell panels, editor brushes) are implemented. **Not implemented: the visual design does not yet vary between the proprietary (original-asset) and open-source (generated) look** — same layout/art treatment today regardless of mode. Also not implemented: the "?" indicator for a not-yet-unlocked discovery on the Build tab. Notifications, building icons/tooltips and several original shortcuts are also still open. See [ui-and-editor.md](specs/ui-and-editor.md). |
 | Tooltips | Partial | Core hover tooltips exist; coverage against the original is incomplete. See [tooltips.md](specs/tooltips.md). |
-| Menu and sandboxes | Partial | Main menu and per-feature sandboxes (walk/units/buildings/worship/spells/vehicles/bridge) exist for dev use. |
+| Menu and sandboxes | Partial | Main menu exists but does not stick to the original's own layout/flow; per-feature sandboxes (walk/units/buildings/worship/spells/vehicles/bridge) exist for dev use. **Not implemented: tutorial and credits screen.** |
 | Camp fire | Todo | Not implemented. See [buildings.md](specs/buildings.md) "Camp fire". |
 
 ## Priority 6 — infrastructure with no dependents
