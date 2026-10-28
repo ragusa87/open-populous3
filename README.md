@@ -74,23 +74,27 @@ levels, textures, sprites and 3D models from it at runtime (see
 [Assets](#assets-original-today-open-source-growing-in) above) — nothing is downloaded or bundled.
 
 **Where it scans:** `pop3_format::install::find_install` ([crates/pop3-format/src/install.rs](crates/pop3-format/src/install.rs)).
-If `$POP3_INSTALL` is set it's used as-is and nothing else is scanned. Otherwise, each location below
-is checked in order (itself, then its immediate sub-folders in name order, e.g.
-`.../Bullfrog/Populous - The Beginning/levels`) and the first one containing a `levels/`
-sub-directory (any case) wins:
+If `$POP3_INSTALL` is set it's used as-is and nothing else is scanned. Otherwise, each base folder
+below is checked (itself, then its immediate sub-folders in name order), and the first one
+containing a `levels/` sub-directory (any case) wins — in practice that's the game's own install
+folder, e.g. `Populous - The Beginning`, under one of these bases:
 
 - Linux / macOS, if `$WINEPREFIX` is set:
-  - `$WINEPREFIX/drive_c/Program Files (x86)/Bullfrog`
-  - `$WINEPREFIX/drive_c/Program Files/Bullfrog`
-  - `$WINEPREFIX/drive_c/GOG Games`
+  - `$WINEPREFIX/drive_c/Program Files (x86)/Bullfrog/Populous - The Beginning`
+  - `$WINEPREFIX/drive_c/Program Files/Bullfrog/Populous - The Beginning`
+  - `$WINEPREFIX/drive_c/GOG Games/Populous - The Beginning`
 - Linux / macOS, always also:
-  - `~/.wine/drive_c/Program Files (x86)/Bullfrog`
-  - `~/.wine/drive_c/Program Files/Bullfrog`
-  - `~/.wine/drive_c/GOG Games`
+  - `~/.wine/drive_c/Program Files (x86)/Bullfrog/Populous - The Beginning`
+  - `~/.wine/drive_c/Program Files/Bullfrog/Populous - The Beginning`
+  - `~/.wine/drive_c/GOG Games/Populous - The Beginning`
 - Windows:
-  - `C:\Program Files (x86)\Bullfrog`
-  - `C:\Program Files\Bullfrog`
-  - `C:\GOG Games`
+  - `C:\Program Files (x86)\Bullfrog\Populous - The Beginning`
+  - `C:\Program Files\Bullfrog\Populous - The Beginning`
+  - `C:\GOG Games\Populous - The Beginning`
+
+The exact sub-folder name isn't assumed — any name works, and `Bullfrog`/`GOG Games` themselves
+qualify too if they directly hold `levels/` — `Populous - The Beginning` above is just what a
+typical install calls it.
 
 **Per-folder overrides**, each independent of the others and of the auto-detected install:
 `$POP3_LEVELS` (the `levels/` folder), `$POP3_DATA` (`data/`, themes and sprites) and
