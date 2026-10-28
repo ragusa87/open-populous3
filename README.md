@@ -92,9 +92,10 @@ folder, e.g. `Populous - The Beginning`, under one of these bases:
   - `C:\Program Files\Bullfrog\Populous - The Beginning`
   - `C:\GOG Games\Populous - The Beginning`
 
-The exact sub-folder name isn't assumed — any name works, and `Bullfrog`/`GOG Games` themselves
-qualify too if they directly hold `levels/` — `Populous - The Beginning` above is just what a
-typical install calls it.
+The exact sub-folder name isn't assumed — any name works (a localized install folder, e.g. the
+French `Populous : Les Origines`, scans the same as the English one), and `Bullfrog`/`GOG Games`
+themselves qualify too if they directly hold `levels/` — `Populous - The Beginning` above is just
+what a typical English install calls it.
 
 **Per-folder overrides**, each independent of the others and of the auto-detected install:
 `$POP3_LEVELS` (the `levels/` folder), `$POP3_DATA` (`data/`, themes and sprites) and
