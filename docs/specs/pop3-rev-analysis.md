@@ -101,12 +101,29 @@ so a live measurement may run on it with the addresses translated.
   with different on-disk `Inclination`. See "Terrain land colour".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
-- **The camera's pitch is fixed only while the player drives it - an AI-script flyby animates pitch
-  independently of yaw** [exe, measured, partial]: level 1's opening flyby was measured dipping pitch to about
-  55° mid-flight before returning, while `flyby.rs` currently never varies pitch. The camera's rotation matrix
-  itself turned out to live inside the active player's own tribe record, not a separate struct. See "Camera
-  flyby state (tribe_struct)" - most of its candidate fields (position, distance, raw pitch, interpolation
-  progress) are still unconfirmed, this investigation is ongoing.
+- **The camera's pitch is fixed only at the idle zoom level - manual zoom input AND an AI-script flyby both
+  animate it independently of yaw** [exe, measured]: level 1's opening flyby was measured dipping pitch to
+  about 55° mid-flight before returning; live-confirmed manual zoom (`+`/`-` in normal play) swings the same
+  pitch field continuously from ~-10.5° (zoomed furthest in) to ~-88.6° (the whole-planet globe view), while
+  `flyby.rs` currently never varies pitch. The camera's rotation matrix itself turned out to live inside the
+  active player's own tribe record, not a separate struct. See "Camera flyby state (tribe_struct)" - most of
+  its candidate fields (position, distance, raw pitch, interpolation progress) are still unconfirmed, this
+  investigation is ongoing.
+- **The manual mouse-drag camera moves by reusing the current yaw by default** (forward along it, strafe at
+  yaw-90°), separate code from the flyby and confirms the camera-yaw field as the raw yaw cell. See "Manual
+  camera pan/rotate (mouse drag)" - matches our own `CameraRig::move_by`/`forward`/`right` already, no gap.
+- **All three of the flyby's primary channels (`ZOOM`/`POS`/`ANGLE`) are now traced end to end** [exe], from
+  the AI-script opcode down to the exact field each one writes - `POS` drives the camera-focus field
+  (`world=(cell+1)*256`, map wraps), `ANGLE` drives the camera-yaw field (shortest-way, confirmed in code),
+  `ZOOM` blends two named camera presets' render parameters (bend etc.), never touching actual camera
+  distance - confirmed live for manual zoom too (same mechanism, camera distance never moves). What actually
+  drives the "camera gets closer/farther" impression during a flyby is still unfound (none of the five
+  channels write it), and `flyby.rs`'s `zoom_to_distance` needs rethinking (pitch-driven, not distance-driven)
+  rather than just a scale fix - almost certainly why our flyby camera's elevation looks wrong next to the
+  original. See "Camera flyby state (tribe_struct)".
+- **Level 1's opening `FLYBY_START` is turn 72, exactly** [files]: read straight from the compiled
+  `cpscr010.dat` script's own gating logic via `cargo run -p pop3-ai-script --example ai_script_info`,
+  instead of curve-fitting camera motion - no live memory needed. See "Camera flyby state (tribe_struct)".
 
 ## Turns and timing [exe]
 ```text
@@ -1389,87 +1406,206 @@ What the flooding destroy reason above (sub-state 2) actually spawns: a class-10
 Not traced further this session: the exact oscillator math (a handful of small trig/angle helpers, 0x586074/0x4E9BA0/0x4E9B70/0x4E6C80 - their role is clear enough from how the result is used above, just not their internal formulas) and the object spawned during the final spiral (0x4EE580, plausibly a splash/bubble particle).
 
 ## Landscape projection [exe, measured]
-The landscape is drawn as a grid of vertices around the camera: ±0x6E00 render units (±55 cells), built in 220
-strips (`draw_land` 0x467130, `main_landscape_mesh_generation` 0x46CB90). Render units are world units / 2, so
-**256 per cell**; a vertex stores its camera-relative x, z and the cell height unscaled (0..1024).
+(Exact exe addresses for every function/field named below: pop3-rev `docs/functions.tsv` and `docs/camera.md` -
+kept out of this file by the clean-room boundary (AGENTS.md); this is the behavioural spec, pop3-rev is the
+reverse-engineering reference.)
 
-Each vertex is then projected (0x46DE00; the same code at 0x46DC40 for the other buffer):
+The landscape is drawn as a grid of vertices around the camera (±55 cells), built in 220 strips. Render units are
+world units / 2, so **256 per cell**; a vertex stores its camera-relative x, z and the cell height unscaled
+(0..1024).
+
+Each vertex is then projected:
 ```text
-(x', y', z') = M · (x, height, z) >> 14             # camera rotation, 14-bit fixed point (0x74A354..0x74A374)
-y'  -= ((2x')² + (2z')²) · K >> 32                    # the planet bend, K at 0x87CA5C
-z'  += D                                             # camera distance, 0x87CA64
-screen = (x', y') · (1 << (S + 16)) / z'             # S = 0x87CA68, then a per-axis screen scale
+(x', y', z') = M · (x, height, z) >> 14             # camera rotation, 14-bit fixed point
+y'  -= ((2x')² + (2z')²) · K >> 32                    # the planet bend
+z'  += D                                             # camera distance
+screen = (x', y') · (1 << (S + 16)) / z'             # S = perspective shift, then a per-axis screen scale
 ```
 
-| Value | Where | Default / measured | Meaning |
-|---|---|---|---|
-| K | render block +0x0 (0x88F004), copied to 0x87CA5C | 46 000 (0xB3B0), constant while playing | bend: drop = `4 d² K / 2³²` render units = **0.01097 × d² cells** (d in cells) |
-| D | render block +0x10 | 6500 | camera 6500 render units (25.4 cells) behind the focus |
-| S | render block +0x14 | 11 | perspective shift |
-| M | 0x74A354 | pure rotation (column norms 16 384) | yaw follows the player; **pitch fixed at about 20.4°** (cos 15 357/16 384, sin 5709/16 384) **while the player drives the camera** - varies during AI-script flybys, see "Camera flyby state" below |
+| Value | Default / measured | Meaning |
+|---|---|---|
+| K | 46 000, constant at the idle zoom level | bend: drop = `4 d² K / 2³²` render units = **0.01097 × d² cells** (d in cells) |
+| D | 6500 | camera distance: 6500 render units (25.4 cells) behind the focus |
+| S | 11 | perspective shift |
+| M | pure rotation (column norms 16 384) | yaw follows the player; pitch sits at ~20.4° (cos 15 357/16 384, sin 5709/16 384) only at the **idle zoom level** - confirmed live (pop3-rev `docs/camera.md` "Manual zoom is a pitch+bend orbit") to vary continuously with manual zoom input too, from ~-10.5° (zoomed furthest in) down to ~-88.6° (the whole-planet globe view), not just during AI-script flybys - see "Camera flyby state" below |
 
 - The bend is measured in view space (the camera's horizontal and depth axes after rotation), not around the
   focus point on the ground; with a 20° pitch the two are close.
 - Examples: 1.1 cells of drop at 10 cells, 4.4 at 20, 33 at the 55-cell edge of the grid.
 - Heights share the horizontal scale (the matrix is a pure rotation), so the highest ground (1024) is **4 cells**
-  above the sea, assuming the screen scales both axes alike (per-axis shifts at 0xAFC2F4 + 0xCF8 / 0xCFC, not
-  checked).
-- K can change: camera transitions (0x417510, 0x41C700) blend the whole render block, K included, towards a
-  target block. During normal play it stayed at 46 000, with the same distance, shift and pitch, on three levels
-  (including levels 3 and 24), while rotating and zooming: it is not a per-level setting.
-- Defaults set by 0x416F50 (render block) and 0x46DFB0 (draw state); `clear_land_draw_state` 0x46E700 copies the
-  block into the draw state before each frame.
-- M decoded in full (column order `M00 M01 M02 / M10 M11 M12 / M20 M21 M22`, slots at +0x00, +0x04, ... +0x20):
+  above the sea, assuming the screen scales both axes alike (per-axis screen shifts not checked).
+- K can change: a camera-preset blend mechanism (two variants - a multi-frame ease and a single-step blend, see
+  the AI-script `ZOOM` channel below) reshapes K and a few other render parameters towards a target preset.
+  During normal play it stayed at 46 000 on three levels (including levels 3 and 24) while rotating, and while
+  idle: it is not a per-level setting. **Correction, a later session**: it does change while actually zooming
+  (an earlier pass through this measurement apparently never exercised live zoom input) - live-confirmed (pop3-rev
+  `docs/camera.md`) that `K` and pitch move together, continuously and reversibly, across the entire manual zoom
+  range (idle 46 000/-20.4° down to 0/-88.6° at the whole-planet globe view, and up to 58 800/-10.5° zoomed in
+  past idle), while **`D` (camera distance) and `S` never move at all** - manual zoom is a pitch+bend orbit
+  around a constant-radius arc, not a distance dolly, the same architecture already traced for the AI-script
+  flyby's own `ZOOM` channel below.
+- Defaults are set once by a render-block-defaults function and a draw-state-defaults function, then copied into
+  the live draw state every frame by a dedicated copy function.
+- M decoded in full (column order `M00 M01 M02 / M10 M11 M12 / M20 M21 M22`):
   `M00=cosY, M02=sinY, M10=sinP·sinY, M11=cosP, M12=-sinP·cosY, M20=-cosP·sinY, M21=sinP, M22=cosP·cosY` - so
   `yaw = atan2(M02, M00)` and `pitch = asin(M21/16384)` read straight off the matrix, live, every frame.
 
 ## Camera flyby state (tribe_struct) [exe, partial]
 Where the matrix actually comes from, and how it behaves during an AI-script flyby (ai-scripts.md "Worked
 example: level 1's opening flyby") rather than normal play. Confirmed:
-- `clear_land_draw_state` copies the matrix from a pointer at 0x74A350, rebuilt each frame as
-  `tribe_struct_base(local player's own tribe)`, i.e. `0x89D1C8 + tribe*0xC65` ("Reference" "Tribe record") with
-  the tribe index read from 0x89C6F0 - the matrix is the ACTIVE PLAYER's own tribe record's first 36 bytes, not
-  a separate camera struct. Fits a hot-seat design (each tribe keeps its own last camera orientation); means any
-  further camera-path fields live inside tribe_struct too, not elsewhere.
+- The matrix is copied each frame from the active player's own tribe record's first bytes - not a separate
+  camera struct (pop3-rev `docs/cheat.md` "Relevant addresses" for the tribe-record layout). Fits a hot-seat
+  design (each tribe keeps its own last camera orientation); means any further camera-path fields live inside
+  the tribe record too, not elsewhere.
 - Pitch is not a fixed per-game constant - it's only fixed while the player drives the camera (the 20.4° figure
   above). Measured live through level 1's opening flyby: pitch swings from that idle 20.4° down to about 55°
   (measured turn ~130-140 after the flyby starts) and back, then holds flat for a long stretch (about 7s) while
   yaw keeps changing continuously underneath it - yaw and pitch are driven independently during a flyby, not
   locked together.
-- `FLYBY_START`'s own turn is anchored to about turn 77-80 after level start (±15, not exact), from three
-  independent lines of evidence: the first `FLYBY_SET_EVENT_ANGLE 0 5 35` keyframe's predicted completion turn
-  (`start+duration` after `FLYBY_START`) lands almost exactly on an observed yaw plateau; the reincarnation
-  centre's own intro animation (turns 0 to about 70) ends right before; and the `POS`/`ZOOM` channels' own hold
-  windows (see next point) land in the same range once fitted.
+- **`FLYBY_START`'s own turn is now known exactly: turn 72** - read directly from the compiled script
+  (`cpscr010.dat`, level 1's AI script number per its `.hdr` byte 89) via
+  `cargo run -p pop3-ai-script --example ai_script_info -- <path>`, rather than curve-fitting camera motion.
+  The script's own gate: `Every{period:8}` (checked only on turns where `turn % 8 == 0`) wrapping
+  `IF INT_GAME_TURN > 70` wrapping `IF $57 == 0` - the first turn satisfying both is 72, and that exact tick
+  also pops the reincarnation-centre's intro message (`CREATE_MSG_INFORMATION`), calls `ENABLE_USER_INPUTS`,
+  sets `$57 = 1`, and starts the flyby, all together.
 
-Candidates, NOT yet confirmed - tribe_struct fields right after the matrix (`+0x24` on; the struct's own known
-fields resume at `+0x881`, "Reference" "Tribe record"), found by diffing the whole range live during a flyby:
+Candidate fields found by diffing the tribe record's still-undocumented range live during a flyby (exact offsets:
+pop3-rev `docs/camera.md`):
 
-| Offset | Shape observed | Candidate | Confidence |
+| Field | Shape observed | Role | Confidence |
 |---|---|---|---|
-| `+0x24` | packed dword, two 16-bit halves move independently | camera focus x (low half), z (high half) | direction of x vs z confirmed by a joint fit against the script's `POS` keyframes' x/z; exact scale/offset not |
-| `+0x28` hi 16 bits | wraps like a cyclic angle; flat exactly when pitch is flat even while yaw keeps moving | raw pitch angle | shape strongly correlates with pitch; raw-to-degrees transform not solved (tried simple ratios, inconsistent) |
-| `+0x2c` | smoothly monotonic, always a multiple of 0x10000 in this capture | camera distance/zoom | correlates with the script's `ZOOM` channel's hold windows; exact scale/offset not fitted |
-| `+0x30` | ramps between 0 and exactly 0x1000000 (2³⁴ / 2¹⁰ = 2²⁴), direction flips at each transition | per-segment interpolation progress (8.24 fixed, 0.0-1.0) | plausible shape, not cross-checked against a known progress value |
-| `+0x34` | grows with an almost-constant second difference (quadratic) during transitions | easing/acceleration counter | least certain; could be unrelated |
+| Camera focus (x low half, z high half) | packed value, two halves move independently | directly written by the `POS` channel's tick callback; world units = `(cell+1)*256` - see "The AI-script POS and ANGLE channels" below | confirmed |
+| Raw-pitch candidate | wraps like a cyclic angle; flat exactly when pitch is flat even while yaw keeps moving | shape strongly correlates with pitch; raw-to-degrees transform not solved (tried simple ratios, inconsistent) | unconfirmed |
+| Unidentified render parameter | smoothly monotonic, quantised steps in this capture | correlates with the script's `ZOOM` timing but NOT written by the zoom channel (traced fully below) or any of the other four flyby channels - mechanism still unfound, pop3-rev `docs/camera.md` "Open questions" | unconfirmed |
+| Interpolation-progress candidate | ramps between 0 and its max, direction flips at each transition | per-segment interpolation progress (0.0-1.0) | plausible shape, not cross-checked against a known progress value |
+| Zoom-channel accumulator | live signed Q14 fixed-point accumulator (16384 = 1.0, same scale as the rotation matrix), clamped to ±16384, stepped every turn while a zoom keyframe is active | see "The AI-script zoom channel, traced end to end" below | confirmed |
 
-A joint least-squares fit (grid search on `FLYBY_START`'s turn, affine regression per channel) of `+0x2c` against
-the `ZOOM` channel and `+0x24`'s two halves against the `POS` channel's x/z gives R² of 0.1-0.6 depending on the
-channel and candidate start turn - clearly the right general shape, not a solved formula; linear interpolation
-fit marginally better than smoothstep easing at every candidate turn tried, but not decisively. ai-scripts.md
-"Flybys" notes `FLYBY_SET_EVENT_ANGLE` goes "the shortest way" - one measurement during this investigation saw
-yaw take what looked like the long way round, but since yaw is a confound of this `ANGLE` channel and the `POS`
-channel's own continuous re-aiming (not yet separated), that is not a solid refutation of "shortest way" either.
+A joint least-squares fit (grid search on `FLYBY_START`'s turn, affine regression per channel) of the unidentified
+render parameter against the `ZOOM` channel and the camera-focus field's two halves against the `POS` channel's
+x/z gives R² of 0.1-0.6 depending on the channel and candidate start turn - clearly the right general shape, not
+a solved formula; linear interpolation fit marginally better than smoothstep easing at every candidate turn
+tried, but not decisively. ai-scripts.md "Flybys" notes `FLYBY_SET_EVENT_ANGLE` goes "the shortest way" - one
+measurement during this investigation saw yaw take what looked like the long way round, but since yaw is a
+confound of this `ANGLE` channel and the `POS` channel's own continuous re-aiming (not yet separated), that is
+not a solid refutation of "shortest way" either.
+
+### The AI-script zoom channel, traced end to end [exe]
+Traced the level-script bytecode VM's handling of `FLYBY_SET_EVENT_ZOOM` all the way from the opcode to its
+on-screen effect (pop3-rev `docs/camera.md` "The real AI-script zoom chain", pop3-rev `docs/functions.tsv` for
+every function involved):
+
+```text
+script value (-100..100) --rescale--> Q8.8, sign-flipped: q8 = -(value * 256) / 100
+at the keyframe's `start` turn: q14 = q8 << 6                     # Q8.8 -> Q14 (16384 = 1.0)
+                                 target_delta = q14 - zoom_accumulator
+every turn while active:        zoom_accumulator += per-tick-increment(target_delta, duration)
+                                 clamp zoom_accumulator to [-16384, +16384]
+                                 preset_blend_by_fraction(zoom_accumulator, 16384)
+```
+
+`preset_blend_by_fraction` picks the tribe's CURRENT named camera preset and the adjacent one in the zoom-out
+(positive value) or zoom-in (negative value) direction, then linearly interpolates `result = A + (B - A) *
+|value| / 16384` into a handful of fields of the live render block used for landscape projection ("Landscape
+projection" above) - confirmed fields: K/bend, plus 3 more not yet named. **It does NOT touch D, the actual
+camera-distance field that formula uses**, and it does NOT write the still-unidentified render parameter from
+the candidates table above either (a different structure, despite sharing a similarly small offset by
+coincidence).
+
+**Impact on our specs**: this means the original's "zoom" during a flyby is not a continuous change to camera
+distance at all - it blends between two preset views' render parameters (bend and a few others). `flyby.rs`'s
+`zoom_to_distance` (mapping the script's -100..100 directly onto `CameraRig.distance`) may be the wrong shape
+entirely, not just missing a scale/offset constant - worth reconsidering once the preset table's own fields are
+understood, rather than just tuning `zoom_to_distance`'s existing curve. Separately, whatever actually produces
+the unidentified render parameter's own measured motion during a flyby (the thing that actually reads as "the
+camera gets closer/farther" - pop3-rev `docs/camera.md` "Zoom channel...") is still unexplained - see below, it
+is now ruled out from all three of the flyby's primary channels, not just `ZOOM`.
+
+### The AI-script POS and ANGLE channels, also traced end to end [exe]
+Same per-kind dispatch as the `ZOOM` channel above (pop3-rev `docs/camera.md` "POS and ANGLE channels", every
+function in pop3-rev `docs/functions.tsv`):
+
+- **`POS`**: the script's raw x/z values are plain **0-255 cell indices** (packed into a single byte each by
+  the queueing code, which only works if they fit in 0-255 - matches the worked example's values like
+  "252 254"), converted with `world = (cell + 1) * 256` (confirms 256 render units/cell, "Landscape
+  projection"). The per-turn callback eases two independent accumulators (x, z) and writes the result
+  straight into the camera-focus field - confirms that's exactly what `POS` drives, and solves the former
+  "decode the `POS` channel's own coordinate units" open item below. The delta-to-target computation
+  explicitly handles wraparound on the 16-bit domain (shortest path across the map edge) - the world map
+  wraps, at least as far as camera-focus tracking goes.
+- **`ANGLE`**: reads the current yaw straight from the camera-yaw field (the same field the manual mouse-drag
+  rotate function uses, "Manual camera pan/rotate" above) and the event's target angle, computes both
+  possible signed deltas around the 2048-unit circle, and picks one by a per-event direction-preference flag
+  - this is the documented "goes the shortest way" rule, now seen directly in code (with an explicit
+  override, so not unconditional as the rule implied).
+- **The unidentified render parameter is ruled out of all FIVE flyby channels AND the tooltip/notification
+  pipeline now** - `INT_POINT` (a "turn to face this point" yaw channel, confirmed, but unused by level 1's
+  own script) and `TOOLTIP` (resolves to a generic advisor-notification system, not flyby-specific - its
+  `idx=0` case walks to a "head"/monument scenery object, almost certainly the reported "a building/pyramid
+  is presented" behaviour) were traced on BOTH the creation side and the per-frame rendering side; neither
+  touches it, the render-block distance field, or the camera-transition counter anywhere (pop3-rev
+  `docs/camera.md` "INT_POINT and TOOLTIP channels"). The earlier "zoom while a popup is open" hypothesis is
+  therefore ruled out too. Level 1's own `TOOLTIP` keyframe timing still correlates with this parameter's
+  motion far better than `ZOOM`'s does, but that correlation's cause is now genuinely unknown - not a code
+  path found so far.
 
 **D3D axis caveat**: D3D's coordinate convention is left-handed, differing from this engine's own on at least the
 Z axis - any of the above values, once their scale/offset is pinned down, need an explicit axis/handedness
 conversion before they inform `flyby.rs` or any other spec. One concrete instance already found: the matrix's
 pitch sign is flipped relative to how this section used to state the pitch constants (now corrected above).
 
-Not yet done, see TODO.md "Camera flyby state": pin `FLYBY_START`'s turn exactly (find the AI script's own
-per-tribe flyby-active flag, the `$57`-equivalent variable the script sets right before `FLYBY_START`, instead of
-curve-fitting camera motion), solve `+0x28`'s raw-to-pitch transform, decode the `POS` channel's own coordinate
-units, and apply the axis caveat once the above is solid enough to change `flyby.rs`.
+Not yet done, see TODO.md "Camera flyby state": solve the raw-pitch candidate's transform to degrees, find what
+actually drives the unidentified render parameter, and apply the axis caveat once the above is solid enough to
+change `flyby.rs`.
+
+## Manual camera pan/rotate (mouse drag) [exe]
+(Exact exe addresses: pop3-rev `docs/functions.tsv`.) How the player's own mouse-drag camera control works,
+separate from the AI-script flyby above (confirmed: it does **not** share any code with the flyby - see "Not
+the flyby" below).
+
+A shared primitive, `move_pos_angle_length(pos, angle, length)`: if `length` is 0, no-op; else `pos.x +=
+sin(angle)*length`, `pos.z += cos(angle)*length` (`angle` masked to an 11-bit, 2048-unit circle; both trig
+values come from one shared Q16 sine table, `cos(angle) = sin_table[angle + 512]` - the standard
+quarter-circle-offset trick, not two separate tables as the Ghidra export's naming implies). Used ~100+ times
+exe-wide for anything stepping along a heading (units, spells, buildings); not camera-specific by itself.
+
+Three sibling functions wrap it for the camera, called from the mouse-drag handler, all working on the active
+player's own tribe record:
+
+```text
+yaw = camera-yaw field                               # confirmed: the raw camera yaw, 2048-unit circle
+scaled_delta = mouse_delta_px * 12                   # per-frame cursor delta, X or Y axis
+if pan_scale_enabled: scaled_delta = scaled_delta * pan_scale_q8 / 256   # see "Pan speed scale" below
+
+cam_pan_strafe(delta_x):  move_pos_angle_length(focus, yaw - quarter_circle, scaled_delta)
+cam_pan_dolly(delta_y):   move_pos_angle_length(focus, yaw,                 scaled_delta)
+rotate_main_cam(delta):   yaw = (yaw + scaled_delta) & 0x7FF
+```
+
+- `cam_pan_strafe`/`cam_pan_dolly` are the per-axis calls during an ongoing drag; both write into the same
+  `focus` field (`+=`), so a diagonal drag composes a normal forward+strafe move relative to the camera's
+  current facing - **the angle argument always defaults to reusing the current yaw** (dolly: yaw itself;
+  strafe: yaw minus a quarter circle/90°), never an independent or absolute angle.
+- `rotate_main_cam` is a different operation entirely (an earlier pass through this file wrongly stated it also
+  calls `move_pos_angle_length`): it adds straight onto the yaw cell and wraps it, i.e. it's the rotation
+  update, fired on the drag-START transition rather than per-axis.
+- **Pan speed scale**: the Q8 pan-speed multiplier has no meaningful "default" value of its own - passing it 0
+  or 0x100 (Q8 1.0) is defined as "disable scaling" (a dedicated setter function), so the un-scaled case is the
+  normal one. One call site (a larger scene/mode-transition routine, not fully traced) forces it to a
+  deliberately slowed ~0.1875x while also snapshotting the live focus/yaw into a scratch struct - looks like
+  entering some other special camera mode, not identified.
+- **Not the flyby**: these three functions' only callers are the mouse-drag handler. The scripted flyby's
+  `POS`/`ZOOM`/`ANGLE` channels write the camera-focus, zoom-accumulator and camera-yaw fields directly from
+  time-indexed keyframes (see "Camera flyby state" above) through a still-unfound separate function - this
+  trace does not touch that gap.
+- A likely momentum/coast system was also surfaced but not traced: all three functions mirror their scaled
+  delta into one of three adjacent global words, decayed every frame by another function with fixed-constant
+  damping - plausibly why the camera keeps drifting briefly after the mouse button is released.
+
+**Impact on our specs**: `game-client/src/camera.rs`'s `CameraRig::move_by(forward, right)` already reuses
+`forward()`/`right()` (both derived from `yaw`) for exactly this decomposition, and `flyby.rs` already bypasses
+it and writes `focus`/`yaw`/`distance` directly from keyframes - both match the original's actual split. No
+code change indicated by this trace; it confirms the existing design rather than finding a gap.
 
 ## Terrain land colour: the bigfade row and brightness [exe]
 The missing half of `set_texture_landscape_main` (0x4BE330): "Building ashes" "Drawn" already covers the
@@ -4272,12 +4408,13 @@ starts the fight, then everyone nearby piles into the same ring" - not a deliber
   identity of those two types; the sub-state(8..19) → animation-id mapping in state 16; whether an explicit
   player attack order on a wildman is honoured in the original (only the automatic proximity scan is confirmed
   to skip them); whether wildman creation can ever retrigger mid-level rather than only at load.
-- Camera flyby state (tribe_struct, see that section): `FLYBY_START`'s exact turn (anchored to only ±15 by
-  curve-fitting camera motion against level 1's opening flyby script; the AI script's own per-tribe flag it sets
-  right before `FLYBY_START` would pin it exactly, not yet found); `+0x28`'s raw-to-pitch-degrees transform;
-  `+0x24`/`+0x2c`/`+0x30`/`+0x34`'s exact scale/offset (direction of `+0x24`'s x/z halves confirmed, nothing
-  else); whether `FLYBY_SET_EVENT_ANGLE`'s documented "shortest way" rule is really contradicted by one
-  long-way measurement, or whether that's just the `POS` channel's own confound on yaw (not yet separated).
+- Camera flyby state (tribe_struct, see that section): `+0x28`'s raw-to-pitch-degrees transform; `+0x30`'s
+  exact scale/offset; what actually writes `+0x2c` (confirmed NOT any of the 5 flyby channels - strongest
+  lead is a generic message/popup zoom side effect correlating with `TOOLTIP` event timing, not yet traced to
+  confirmation); whether `FLYBY_SET_EVENT_ANGLE`'s documented "shortest way" rule is really contradicted by
+  one long-way measurement, or whether that's just the `POS` channel's own confound on yaw (not yet
+  separated). (`FLYBY_START`'s turn, `+0x24`'s scale, `+0x32`'s and `+0x34`'s roles are now all confirmed -
+  removed from this list.)
 
 ## Reference
 
@@ -4557,7 +4694,9 @@ class are in `pop3-rev/docs/unit_types`.
 | Offset | Meaning |
 |---|---|
 | +0x00 .. +0x23 | camera rotation matrix (the active player's own tribe only - "Camera flyby state (tribe_struct)") |
-| +0x24, +0x28, +0x2c, +0x30, +0x34 | candidate camera path fields (position, pitch, distance, interpolation progress) - see "Camera flyby state (tribe_struct)", none of their exact scale/offset confirmed |
+| +0x24 | camera focus position (x low half, z high half) - direction confirmed by a live joint fit AND by the manual-pan code itself ("Manual camera pan/rotate"); exact scale/offset still not pinned down |
+| +0x28, +0x2c, +0x30, +0x34 | candidate camera path fields (pitch, distance, interpolation progress) - see "Camera flyby state (tribe_struct)", none of their exact scale/offset confirmed |
+| +0x32 | camera yaw, confirmed (2048-unit circle) - read/written directly by the manual mouse-drag rotate function, see "Manual camera pan/rotate (mouse drag)" |
 | +0x881 .. +0x899 | heads of the person, building, shape, formation and beacon lists |
 | +0x89D | shaman |
 | +0x91D | number of people (reaching 200 calls 0x499D90, probably an error or limit report) |

@@ -466,14 +466,53 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   where the player was before it started. Not done: `FLYBY_SET_EVENT_TOOLTIP` popups (parsed and resolved,
   nothing draws them); the exact keyframe easing/overlap and the zoom -100..100 -> camera distance scale
   are our own guesses, unspecified in the files.
-- [ ] Camera flyby state: continue the pop3-rev-analysis.md "Camera flyby state (tribe_struct)" investigation
-  (mid-investigation, several fields still candidate/unconfirmed - see that section). Confirmed so far: the
-  original's camera pitch is NOT fixed during a flyby (it animates independently of yaw, dipping well below
-  the normal-play default), but `flyby.rs`'s `drive_camera` never varies `CameraRig.pitch` - a real gap, not
-  yet fixable precisely since the live pitch field's scale isn't solved. Also open: `FLYBY_START`'s exact
-  turn (only anchored to ±15 so far), the zoom-channel and position-channel's exact scale/offset (direction
-  confirmed, not the numbers), and whether `FLYBY_SET_EVENT_ANGLE`'s documented "shortest way" rule holds up
-  once separated from the position channel's own confound on yaw.
+- [ ] Camera flyby state: continue the pop3-rev-analysis.md "Camera flyby state (tribe_struct)" investigation.
+  All three primary AI-script channels are now traced end to end (pop3-rev/docs/camera.md, pop3-rev/
+  docs/functions.tsv):
+  - `POS` drives `tribe_struct+0x24` directly: `x`/`z` are plain 0-255 cell indices, world units =
+    `(cell+1)*256` (256 render units/cell, matches "Landscape projection"), with explicit map-wraparound
+    handling on the delta. Our `flyby.rs` already treats `positions` as raw x/z onto `focus` with
+    `rem_euclid(map_size)` - worth double-checking the `(cell+1)*256`-style unit conversion and the wraparound
+    shortest-path behavior match, not just the destination.
+  - `ANGLE` drives `tribe_struct+0x32` directly (the same field the manual mouse-drag rotate code uses) -
+    confirms the documented "shortest way" rule is real but has a per-event override flag, not unconditional.
+  - `ZOOM` does NOT change camera distance at all: it blends between two named camera PRESETS' render
+    parameters (bend/K and a few other render-block fields), not a continuous world-unit zoom.
+    `flyby.rs`'s `zoom_to_distance` (-100..100 linear onto `DISTANCE_RANGE`) has the wrong shape entirely,
+    not just a wrong scale - read pop3-rev-analysis.md "The AI-script zoom channel" before changing it.
+    **Confirmed, a later session, with live round-trip data (not just the static trace above)**: manual
+    zoom (`+`/`-`, normal play) uses the same architecture and was caught live moving `K`/pitch together
+    while `D` stayed exactly constant across the ENTIRE zoom range, from idle out to the literal
+    whole-planet globe view (pop3-rev `docs/camera.md` "Manual zoom is a pitch+bend orbit"). This is
+    almost certainly why our flyby camera's elevation looks wrong ("almost sky-view") next to the
+    original: `zoom_to_distance` drives `CameraRig.distance` out to `DISTANCE_RANGE.1` (220 cells, ~8.7x
+    the real idle 25.4 cells) while pitch stays frozen at the shallow idle angle (`drive_camera` never
+    touches `rig.pitch`, see below) - the real camera instead stays at a ~constant radius and orbits
+    toward vertical. Fixing this properly means reworking `eye_offset`'s zoom model (pitch-driven, not
+    distance-driven) for both the flyby and ordinary manual zoom, not just retuning `DISTANCE_RANGE`.
+  - `INT_POINT` (look-at-a-point yaw channel, unused by level 1) and `TOOLTIP` (resolves to a generic
+    advisor-notification system; its `idx=0` case walks to a "head"/monument scenery object - almost
+    certainly the reported "a building/pyramid is presented" behaviour) were traced on both the creation and
+    per-frame rendering side - none of the 5 flyby channels, nor the tooltip/notification pipeline, write
+    `tribe_struct+0x2c`, the field a live capture shows actually moving smoothly during a flyby, matching the
+    "camera looks closer/farther" impression. The "zoom while a popup is open" hypothesis is RULED OUT.
+    Level 1's own `TOOLTIP` keyframe timing (a contiguous `[132,325]`-turn span, with `FLYBY_START` now
+    exactly turn 72) still correlates with `+0x2c`'s motion far better than `ZOOM`'s does, but the cause is
+    genuinely unknown - no code path found explains it (pop3-rev/docs/camera.md "Open questions" #6).
+  - **`FLYBY_START` is now known exactly: turn 72**, read straight from the compiled `cpscr010.dat` script
+    via `cargo run -p pop3-ai-script --example ai_script_info -- <path>` (no live memory needed) - solved,
+    see pop3-rev-analysis.md "Camera flyby state (tribe_struct)". Worth double-checking `game_core::ai_script`
+    reproduces this exact gate (`Every{period:8}` + `INT_GAME_TURN>70` + a one-shot user-var flag) rather than
+    just hardcoding turn 72 for this one level.
+  Also still open: the original's camera pitch is NOT fixed during a flyby (animates independently of yaw,
+  dipping well below the normal-play default) but `flyby.rs`'s `drive_camera` never varies `CameraRig.pitch`
+  - a real gap. The exact script-zoom-value -> pitch-degrees curve still isn't solved (no formula, just a
+  live-sampled table of points, pop3-rev `docs/camera.md`), but the mechanism and range now are: pitch
+  spans roughly -10.5° (zoomed furthest in) to -88.6° (whole-planet globe view) at a ~constant distance,
+  so even a rough interpolation across that range would already be far closer than the current frozen-pitch
+  behavior. Checked and ruled out as a lead: the manual mouse-drag pan/rotate
+  code (`move_pos_angle_length` and friends, pop3-rev-analysis.md "Manual camera pan/rotate (mouse drag)") is
+  separate from the flyby entirely - don't re-chase it for this.
 - [ ] Script side effects outside the AI still open: messages, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`,
   `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
 
