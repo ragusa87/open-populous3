@@ -16,11 +16,38 @@ trace notes.
 | The tick / coordinators | Partial | Coordinator infrastructure (fights, sermons, formations) done; order model and several tick rhythms still guessed or unported. See [coordinators.md](specs/coordinators.md), [architecture.md](architecture.md) "The tick". |
 | Units | Partial | Shaman and followers walk/pray/cast/drown/die. **Spies are not implemented** (disguise, unnoticed attacks). Braves/warriors/preachers/firewarriors still mostly stand-in behaviour. Wildmen idle loop, death/spirit variants, physics and vehicle boarding have open items. See [units.md](specs/units.md). |
 | Poses / animations | Partial | Many actions still use a fallback pose (idle/fall) instead of their own. Missing or stand-in: fight poses (strike/trade/kick/reel/shoved/taunt), wood-carrying poses, tumbling (`flung`/`tumble`), hammering, jump-for-flattening, and several transitions. See [unit-art.md](specs/unit-art.md). |
-| Spells | Partial | Most of the 20 spells work at the core-mechanic level (cast, charge, mana). Known disparities to fix: Armageddon (v1 only, real mechanic pending), Blast (no building damage, no fireball flight), Lightning panic question, spell aiming/shot-flight for most spells, 6 of 20 spell icons missing in `--no-original` mode. See [spells.md](specs/spells.md). |
+| Spells | Partial | Most spells work at the core-mechanic level (cast, charge, mana); several still lack the shaman's shot flight and the fireball/building-damage pieces. Per-spell breakdown below. See [spells.md](specs/spells.md). |
 | Mana | Partial | Pool, per-follower income, HUD bar shape all match the trace. **Not implemented: mana dispatched between tribes** (the delayed reservoir — gifts, and the shaman-death transfer to the killer's tribe). Also open: distribution-sharing nuances. See [spells.md](specs/spells.md) "Mana". |
 | Buildings | Partial | Construction, foundation collapse (uneven/flooded ground), vehicle huts and training huts implemented. Jail/prison needs work (locking, what protects the shaman). Dismantling and explosion are still an approximate whole-model reveal, not the real per-part animation. Many smaller gaps (repair, add-ons, tower effects, construction pace). See [buildings.md](specs/buildings.md). |
 | Wood / trees | Partial | Cutting, carrying and construction are done. Open: obstacle behaviour, regrowth rules, trees submerged by terrain changes. See [trees.md](specs/trees.md). |
 | Praying (worship) | Partial | Pyramids and basic totem worship work for the player. Open: contested totems, totem gift handling, prisons, HUD feedback. See [worship.md](specs/worship.md). |
+
+### Spells, per spell
+
+| Spell | Status | Notes |
+|---|---|---|
+| Blast | Partial | Push/damage/tumble physics match the trace. Missing: building damage (buildings have no health model for it yet), the fireball shot flying from the shaman first, angels of death/ghosts. |
+| Lightning | Partial | Kill, building fire and tree burn implemented. Open: whether the strike itself should panic nearby survivors (reported vs. trace mismatch, needs a live check), the carbonized-victim animation, the shaman's own shot. |
+| Whirlwind (tornado) | Todo | Not implemented at all (only specced: puts a vehicle's crew out, spins it, explodes like a destroyed boat). |
+| Swarm (insect plague) | Partial | Wandering cloud, stinging, raiding and vehicle eviction implemented. Open: the 30-per-tribe/oldest-first cap, an aerial-map icon. |
+| Invisibility | Partial | Targeting exclusion and early-end-on-attack implemented. Missing: any client-side rendering (own units translucent, enemies hidden entirely). |
+| Hypnotism | Partial | Capture, recast priority, revert-on-timeout and the "stays permanent if the original tribe is wiped out" rule are all implemented and fairly settled. |
+| Firestorm | Partial | Fireball scheduling and ground-fire/building-fire impacts implemented. Missing: the original's water-landing splash variant (we always light a fire instead). |
+| Ghost Army | Todo | Not modelled at all — no status variant wired to any spell yet. |
+| Erode | Partial | Falloff-pass approximation implemented and judged good enough, not a full per-cell hydraulic simulation. |
+| Swamp | Partial | Kill tick and contested-cell (newest-wins) handling implemented. Open: the 30-per-tribe/oldest-expires bookkeeping, ending when most cells go unsuitable, an aerial-map icon. |
+| Land Bridge | Partial | Full build-over-time raise/lower effect implemented with sparkles. Missing: re-levelling or collapsing buildings caught on it. |
+| Angel of Death | Todo | Not modelled at all. |
+| Earthquake | Partial | Shake and the lava fissure implemented. Missing: the three building-shake/occupant-raid checks during the quake. |
+| Flatten | Partial | Disc-levelling implemented. Open: the original's real per-turn curve (ours is a guess), buildings on it not re-levelled. |
+| Volcano | Partial | Extensively implemented (rumble, rising crater, building destruction, lava flow, fireballs, decorative rocks); several numbers and the rocks' launch physics are our own invented stand-ins, not traced. |
+| Convert | Partial | Wildman-to-brave conversion implemented. Open: giving a single-shot "once" discovery only one use when first granted. |
+| Armageddon | Partial — v1 only | Today only pauses combat and decides the winner instantly by headcount. Still to build: the real map wipe and arena respawn, the two-phase gather/fight sequence, per-tribe shields, lightning-kill-without-reincarnation, and the client presentation. |
+| Magical Shield | Partial | Targeting/recast priority and blocking blast, lightning and firewarrior bolts all implemented; close to complete. |
+| Bloodlust | Partial | Damage/defence multipliers implemented (hidden spell). Open: which levels actually grant it. |
+| Teleport | Todo — sandbox only | Exists only as a dev/sandbox command for the shaman; not wired up as a real panel spell, and which original spells (including this one) we expose is undecided. |
+
+Burn (model 1) and Raise (the editor's own terrain brush) are internal mechanics, not player-cast panel spells, and aren't tracked above.
 
 ## Priority 2 — `--no-original` asset completeness (copyright safety)
 
