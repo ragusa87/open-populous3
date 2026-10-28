@@ -1,7 +1,54 @@
 # Open Populous (POC)
 
-Rust + Bevy 0.19 sandbox inspired by *Populous: The Beginning* (Bullfrog, 1998).
-Loads original `levlXXXX.dat` maps and shows them as a small curved planet.
+An open-source, clean-room reimplementation of *Populous: The Beginning* (Bullfrog, 1998) in Rust
+and Bevy 0.19. The goal is a faithful simulation of the original's rules, written entirely from
+reverse-engineered documentation and our own open assets — never from the original's code, art or
+data — so the result can be built, run and shared under the MIT licence.
+
+## Clean room & original data
+
+*Populous: The Beginning* and all its files (models, textures, sprites, sounds, levels, UI strings)
+are Bullfrog / Electronic Arts property. This repo:
+- **never ships them.** Nothing original is committed: no models, textures, sprites, sounds, level
+  dumps, or renders/screenshots made with the original files.
+- **never quotes original text** (level names, briefings, UI strings): those are referred to by
+  their text number ([docs/specs/language.md](docs/specs/language.md)).
+- **is written from documentation, not from the executable.** Reverse engineering (disassembly, live
+  memory reads, running the original) happens only in separate, dedicated sessions whose sole output
+  is [docs/specs/pop3-rev-analysis.md](docs/specs/pop3-rev-analysis.md) — our own write-up of the
+  original engine's internals (unit model, tribes, constants, mana, combat...), itself built on prior
+  community reverse engineering such as [pop3-rev](https://github.com/hrttf111/pop3-rev) (see
+  [References](#references) below for the full list of sources). All implementation work reads that
+  document; it never disassembles, traces or runs the original executable itself.
+
+See [AGENTS.md](AGENTS.md#licence-and-original-data) for the full rules this project holds itself to.
+
+## Assets: original today, open-source growing in
+
+Right now the game **reads your own legitimately-owned install** of the original at runtime (never
+bundled, never modified) for most of its 3D models, textures, sprites and sounds — there simply
+isn't yet a complete open replacement for all of them.
+
+In parallel, every asset family is also getting an open (CC0 / generated) equivalent, so the project
+can eventually run and be fully playable **without the original files at all**:
+- `just run-generated` (or `--no-original` / `POP3_NO_ORIGINAL=1`) starts with nothing original read:
+  generated terrain, deterministic ground theme, generated objects and reincarnation markers.
+- Some families are already fully open: all 16 building kinds (a reproducible, procedurally
+  textured low-poly kit, see [assets/3d/buildings/README.md](assets/3d/buildings/README.md)), CC0
+  character models baked into unit sheets, CC0 trees, and a generated wood pile sprite.
+- Others still fall back to a placeholder or are missing outright (vehicles, scenery, spell VFX,
+  audio, campaign content...).
+
+The current state of every asset family — usable / placeholder / missing, and what's left to do for
+each — is tracked in [docs/specs/assets.md](docs/specs/assets.md).
+
+## Roadmap
+
+[TODO.md](TODO.md) is the living, prioritised list of what's left to implement — gameplay, assets,
+everything. [docs/roadmap.md](docs/roadmap.md) summarises what's already done. See
+[docs/](docs/README.md) for the full architecture and specs.
+
+## Running it
 
 ```
 just run                      # original install auto-detected (Wine / C:\Program Files), or $POP3_INSTALL
@@ -25,21 +72,12 @@ See the [missing-asset inventory](docs/specs/assets.md) and
 Original install: `$POP3_INSTALL` (the folder holding `levels/`, `data/`, `objects/`), else the first
 `Bullfrog/<game>/` found under `$WINEPREFIX`, `~/.wine` (`drive_c/Program Files*`, `GOG Games`) or, on
 Windows, `C:\`. Overrides: `$POP3_LEVELS`, `$POP3_DATA`, `$POP3_OBJECTS`.
-See [docs/](docs/README.md) for architecture and specs.
 
 ## License
 This project is currently licensed under the [MIT License](LICENSE).
 - Bundled art in `assets/` is CC0 (see [assets/CREDITS.md](assets/CREDITS.md)).
 - *Populous: The Beginning* and its files are Bullfrog / Electronic Arts property: they are never shipped
   here, only read from your own install (and `--no-original` runs without them).
-
-## Clean room
-This is a clean-room reimplementation: it never ships original data (models, textures, sprites, sounds, level
-dumps, renders or screenshots made with the original files) and never quotes original text (level names,
-briefings, UI strings). Reverse engineering of the original executable (disassembly, live memory reads) is done in
-separate sessions whose only output is [docs/specs/pop3-rev-analysis.md](docs/specs/pop3-rev-analysis.md); the
-implementation itself is written from that documentation, never from disassembling, tracing or running the
-original. See [AGENTS.md](AGENTS.md#licence-and-original-data) for the full rules.
 
 ## References
 File formats are reverse-engineered from the original files; community tools are used to cross-check them
@@ -70,12 +108,13 @@ File formats are reverse-engineered from the original files; community tools are
   rendering mechanism (`watdisp.dat` sampled twice, scrolling in opposite directions, driving both the sea
   vertices' altitude and a dynamic lighting response to it, instead of the land's static per-cell lighting) - see
   pop3-rev-analysis.md "Water rendering (watdisp.dat)", [terrain-textures.md](docs/specs/terrain-textures.md).
-- [popscript-upgrader](https://github.com/TylerTheFox/popscript-upgrader) (MIT, checked at
+- [popscript-upgrader](https://github.com/TylerTheFox/popscript-upgraderi) (MIT, checked at
   `f2bd401`): the mapping of PopScript to Populous: Reincarnated's Lua API, see
   [ai-scripts.md](docs/specs/ai-scripts.md).
 - [pop3-rev](https://github.com/hrttf111/pop3-rev) (hrttf111): reverse engineering of `D3DPopTB.exe`, which
   renders with Direct3D: the game's world is left-handed (x right, y up, z away), so we mirror z to draw it in
-  Bevy, see [architecture.md](docs/architecture.md) "Handedness".
+  Bevy, see [architecture.md](docs/architecture.md) "Handedness". Our own write-up of the engine internals this
+  and other sources feed into is [docs/specs/pop3-rev-analysis.md](docs/specs/pop3-rev-analysis.md).
 - The PopRe wiki page [Constant](https://wiki.popre.net/Constant) and Brandan Lasley's decoded
   `New_Constants.dat` (2012): the names of the balance constants, cross-checked on the decoded file, see
   [constants.md](docs/specs/constants.md).
