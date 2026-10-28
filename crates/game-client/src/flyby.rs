@@ -9,10 +9,12 @@
 //! just reached early. Once the grace period is up the player regains control, read straight off
 //! `active_flyby` disappearing (`GameMap::tend_flyby`), no separate client-side timer.
 //!
-//! The zoom (-100..100) -> `distance` mapping and the per-keyframe easing are both unspecified in the
-//! spec, so both are our own guesses, same spirit as `camera.rs`'s own `DEFAULT_FOV` comment.
+//! The zoom (-100..100) -> `pitch` mapping's endpoints are confirmed (pop3-rev-analysis.md "Landscape
+//! projection": ~10.5° zoomed in to ~88.6° at the whole-planet globe view, distance held constant
+//! throughout); the shape in between and the per-keyframe easing are both still our own guesses, same
+//! spirit as `camera.rs`'s own `DEFAULT_FOV` comment.
 
-use crate::camera::{CameraRig, DISTANCE_RANGE};
+use crate::camera::{CameraRig, PITCH_RANGE};
 use crate::keymap::{Shortcut, Shortcuts};
 use crate::sim_time::SimNow;
 use crate::units::{GameSchedule, PLAYER};
@@ -66,29 +68,30 @@ pub fn drive_camera(map: Res<CurrentMap>, now: Res<SimNow>, mut rig: ResMut<Came
             let xs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (k.x as f32, k.start, k.duration)).collect();
             let zs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (k.z as f32, k.start, k.duration)).collect();
             let angles: Vec<(f32, i32, i32)> = active.flyby.angles.iter().map(|k| (render_yaw(k.angle), k.start, k.duration)).collect();
-            let zooms: Vec<(f32, i32, i32)> = active.flyby.zooms.iter().map(|k| (zoom_to_distance(k.zoom as f32), k.start, k.duration)).collect();
+            let zooms: Vec<(f32, i32, i32)> = active.flyby.zooms.iter().map(|k| (zoom_to_pitch(k.zoom as f32), k.start, k.duration)).collect();
             rig.focus.x = channel_value(playback.start.focus.x, &xs, t, Some(map_size)).rem_euclid(map_size);
             rig.focus.y = channel_value(playback.start.focus.y, &zs, t, Some(map_size)).rem_euclid(map_size);
             rig.yaw = channel_value(playback.start.yaw, &angles, t, Some(TAU));
-            rig.distance = channel_value(playback.start.distance, &zooms, t, None);
+            rig.pitch = channel_value(playback.start.pitch, &zooms, t, None);
         }
         Some(at) => {
             let from = playback.cancel_from.get_or_insert_with(|| rig.clone()).clone();
-            let (tx, tz, tyaw, tdist) = final_pose(&active.flyby, &playback.start);
+            let (tx, tz, tyaw, tpitch) = final_pose(&active.flyby, &playback.start);
             let p = now.turns_since(at) / FLYBY_CANCEL_GRACE_TICKS.get() as f32;
             rig.focus.x = ease_to(from.focus.x, tx, p, Some(map_size)).rem_euclid(map_size);
             rig.focus.y = ease_to(from.focus.y, tz, p, Some(map_size)).rem_euclid(map_size);
             rig.yaw = ease_to(from.yaw, tyaw, p, Some(TAU));
-            rig.distance = ease_to(from.distance, tdist, p, None);
+            rig.pitch = ease_to(from.pitch, tpitch, p, None);
         }
     }
 }
 
-/// `-100 (out) .. 100 (in)` onto `DISTANCE_RANGE`, reversed: our own guess, the spec gives no scale
-/// (ai-scripts.md "Flybys": "z from -100 (out) to 100 (in)").
-fn zoom_to_distance(z: f32) -> f32 {
+/// `-100 (out) .. 100 (in)` onto `PITCH_RANGE`, reversed: confirmed endpoints, guessed shape in between
+/// (ai-scripts.md "Flybys": "z from -100 (out) to 100 (in)"; pop3-rev-analysis.md "Landscape projection"
+/// for the pitch range itself). Distance is left alone, same as manual zoom (`camera::adjust_view`).
+fn zoom_to_pitch(z: f32) -> f32 {
     let t = (z.clamp(-100.0, 100.0) + 100.0) / 200.0;
-    DISTANCE_RANGE.1 + (DISTANCE_RANGE.0 - DISTANCE_RANGE.1) * t
+    PITCH_RANGE.1 + (PITCH_RANGE.0 - PITCH_RANGE.1) * t
 }
 
 /// A raw `FLYBY_SET_EVENT_ANGLE` value (2048ths of a turn) as a render yaw (`nature::angle_yaw`).
@@ -99,7 +102,7 @@ fn render_yaw(raw: i32) -> f32 {
 /// Where the camera would end up if the flyby played all the way through: `end_target` if the script
 /// set one, else each channel's own last keyframe, else (no data at all) wherever the camera already
 /// was when the flyby began (`start`). `end_target` carries no zoom (ai-scripts.md "Flybys"), so
-/// distance always falls back to the last zoom keyframe regardless.
+/// pitch always falls back to the last zoom keyframe regardless.
 fn final_pose(flyby: &ResolvedFlyby, start: &CameraRig) -> (f32, f32, f32, f32) {
     let (x, z, yaw) = match &flyby.end_target {
         Some(end) => (end.x as f32, end.z as f32, render_yaw(end.angle)),
@@ -109,8 +112,8 @@ fn final_pose(flyby: &ResolvedFlyby, start: &CameraRig) -> (f32, f32, f32, f32) 
             flyby.angles.last().map_or(start.yaw, |k| render_yaw(k.angle)),
         ),
     };
-    let distance = flyby.zooms.last().map_or(start.distance, |k| zoom_to_distance(k.zoom as f32));
-    (x, z, yaw, distance)
+    let pitch = flyby.zooms.last().map_or(start.pitch, |k| zoom_to_pitch(k.zoom as f32));
+    (x, z, yaw, pitch)
 }
 
 /// One channel's value at turn `t`: finds the keyframe with the greatest `start <= t` and eases from
@@ -195,10 +198,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn zoom_maps_in_to_near_and_out_to_far() {
-        assert_eq!(zoom_to_distance(100.0), DISTANCE_RANGE.0);
-        assert_eq!(zoom_to_distance(-100.0), DISTANCE_RANGE.1);
-        assert_eq!(zoom_to_distance(0.0), (DISTANCE_RANGE.0 + DISTANCE_RANGE.1) / 2.0);
+    fn zoom_maps_in_to_shallow_and_out_to_the_globe_view() {
+        assert!((zoom_to_pitch(100.0) - PITCH_RANGE.0).abs() < 1e-6);
+        assert!((zoom_to_pitch(-100.0) - PITCH_RANGE.1).abs() < 1e-6);
+        assert!((zoom_to_pitch(0.0) - (PITCH_RANGE.0 + PITCH_RANGE.1) / 2.0).abs() < 1e-6);
     }
 
     #[test]
@@ -251,9 +254,9 @@ mod tests {
             zooms: vec![ResolvedZoom { zoom: 100, start: 0, duration: 1 }],
             ..ResolvedFlyby::default()
         };
-        let (x, z, _, dist) = final_pose(&flyby, &CameraRig::default());
+        let (x, z, _, pitch) = final_pose(&flyby, &CameraRig::default());
         assert_eq!((x, z), (9.0, 8.0), "the last position keyframe, not the first");
-        assert_eq!(dist, DISTANCE_RANGE.0, "the last zoom keyframe");
+        assert!((pitch - PITCH_RANGE.0).abs() < 1e-6, "the last zoom keyframe");
     }
 
     #[test]
@@ -261,7 +264,7 @@ mod tests {
         let mut start = CameraRig::default();
         start.focus = Vec2::new(5.0, 6.0);
         start.yaw = 1.0;
-        start.distance = 50.0;
-        assert_eq!(final_pose(&ResolvedFlyby::default(), &start), (5.0, 6.0, 1.0, 50.0));
+        start.pitch = 0.9;
+        assert_eq!(final_pose(&ResolvedFlyby::default(), &start), (5.0, 6.0, 1.0, 0.9));
     }
 }

@@ -114,7 +114,7 @@ fn follow_eye(
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
     let Ok(eye) = eye.single() else { return };
-    let alpha = 1.0 - space_fade(rig.distance);
+    let alpha = 1.0 - space_fade(rig.pitch);
     for (mut t, mut vis, material) in &mut dome {
         t.translation = eye.translation;
         *vis = if alpha > 0.0 { Visibility::Inherited } else { Visibility::Hidden };

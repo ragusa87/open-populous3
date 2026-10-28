@@ -21,7 +21,7 @@ pub const GROUND_VIEW: (f32, f32) = (GROUND_PITCH_DEG * std::f32::consts::PI / 1
 /// Scroll speeds in camera-distances per second (mouse = at full push).
 pub const MOUSE_SPEED: f32 = 2.2;
 pub const KEY_SPEED: f32 = 3.0;
-/// Tilt in radians/s and zoom as fraction of distance per second.
+/// Tilt in radians/s and zoom as fraction of the pitch range per second.
 pub const TILT_SPEED: f32 = 0.6;
 pub const ZOOM_SPEED: f32 = 1.2;
 /// Vertical field of view: not traced in the original (its screen scale is open); 35° frames at 25.4 cells what a
@@ -29,12 +29,16 @@ pub const ZOOM_SPEED: f32 = 1.2;
 pub const DEFAULT_FOV: f32 = 35.0 * std::f32::consts::PI / 180.0;
 pub const FOV_RANGE: (f32, f32) = (0.3, 2.2);
 pub const FOV_SPEED: f32 = 0.6;
-/// Per wheel notch: zoom (fraction of distance), tilt (radians, Ctrl) and field of view (radians, Shift).
+/// Per wheel notch: zoom (fraction of the pitch range), tilt (radians, Ctrl) and field of view (radians, Shift).
 pub const WHEEL_ZOOM: f32 = 0.12;
 pub const WHEEL_TILT: f32 = 0.04;
 pub const WHEEL_FOV: f32 = 0.05;
-pub const PITCH_RANGE: (f32, f32) = (0.05, 1.5);
+/// Confirmed live, manually zooming: the original holds distance constant and instead swings pitch
+/// from ~10.5° (zoomed in past idle) to ~88.6° (the whole-planet globe view) - a pitch+bend orbit, not
+/// a distance dolly (pop3-rev-analysis.md "Landscape projection" / "Camera flyby state").
+pub const PITCH_RANGE: (f32, f32) = (10.5 * DEG, 88.6 * DEG);
 pub const DISTANCE_RANGE: (f32, f32) = (3.0, 220.0);
+const DEG: f32 = std::f32::consts::PI / 180.0;
 /// The eye never goes lower than the map's highest ground plus this (cells), like the original's
 /// fixed camera elevation: low ground near the sea cannot hide it behind a cliff.
 pub const EYE_CLEARANCE: f32 = 1.5;
@@ -129,10 +133,13 @@ impl CameraRig {
         self.saved = (self.pitch, self.distance);
     }
 
-    /// Tilt (radians, positive = look more downward) and zoom (positive = closer, fraction).
+    /// Tilt (radians, positive = look more downward) and zoom (positive = closer, fraction of the
+    /// pitch range): a pitch+bend orbit at constant distance, not a distance dolly - "closer" shallows
+    /// the pitch towards `PITCH_RANGE.0`, "farther" steepens it towards the whole-planet `PITCH_RANGE.1`
+    /// (pop3-rev-analysis.md "Landscape projection").
     pub fn adjust_view(&mut self, tilt: f32, zoom: f32) {
-        self.pitch = (self.pitch + tilt).clamp(PITCH_RANGE.0, PITCH_RANGE.1);
-        self.distance = (self.distance * (1.0 - zoom)).clamp(DISTANCE_RANGE.0, DISTANCE_RANGE.1);
+        let span = PITCH_RANGE.1 - PITCH_RANGE.0;
+        self.pitch = (self.pitch + tilt - zoom * span).clamp(PITCH_RANGE.0, PITCH_RANGE.1);
     }
 
     /// Wheel `notches` (positive = away from the user): zoom in, or tilt down with Ctrl, or widen the
@@ -168,6 +175,13 @@ impl CameraRig {
     pub fn eye_offset(&self) -> Vec3 {
         let horiz = self.pitch.cos() * self.distance;
         Vec3::new(self.yaw.sin() * horiz, self.pitch.sin() * self.distance, self.yaw.cos() * horiz)
+    }
+
+    /// The eye's height above the focus: distance alone stays fixed while zooming (`adjust_view`), but
+    /// a steeper pitch still lifts the eye higher and reveals more ground, so panning (`camera_input`)
+    /// scales by this instead of by the now near-constant `distance`.
+    pub fn altitude(&self) -> f32 {
+        self.pitch.sin() * self.distance
     }
 }
 
@@ -272,7 +286,7 @@ fn camera_input(
         .map_or(Vec2::ZERO, |w| push.update(cursor.effective(w.cursor_position()), w.size(), motion.delta, dt));
     let keys_move = key_move(|s| keys.pressed(s)) * KEY_SPEED;
     let speed = (edge * MOUSE_SPEED + keys_move).clamp(Vec2::splat(-KEY_SPEED), Vec2::splat(KEY_SPEED));
-    let scale = rig.distance.max(10.0) * dt;
+    let scale = rig.altitude().max(10.0) * dt;
     rig.move_by(speed.x * scale, speed.y * scale);
 
     if mouse.pressed(MouseButton::Middle) {
@@ -328,18 +342,20 @@ fn apply_rig(
     }
 }
 
-/// How far the view has gone from the sky to space (0 near the ground, 1 looking at the planet).
-pub fn space_fade(distance: f32) -> f32 {
-    ((distance - 30.0) / 60.0).clamp(0.0, 1.0)
+/// How far the view has gone from the sky to space (0 at the idle ground pitch, 1 at the whole-planet
+/// globe view): zooming out steepens `pitch` at an almost-constant distance (`adjust_view`), so the
+/// fade keys off pitch now, not distance.
+pub fn space_fade(pitch: f32) -> f32 {
+    ((pitch - GROUND_VIEW.0) / (PITCH_RANGE.1 - GROUND_VIEW.0)).clamp(0.0, 1.0)
 }
 
 /// Blue sky near the ground, black space when zoomed out to the planet.
-pub fn sky_for_distance(distance: f32) -> Color {
-    SKY.mix(&SPACE, space_fade(distance))
+pub fn sky_for_pitch(pitch: f32) -> Color {
+    SKY.mix(&SPACE, space_fade(pitch))
 }
 
 fn sky_color(rig: Res<CameraRig>, mut clear: ResMut<ClearColor>) {
-    clear.0 = sky_for_distance(rig.distance);
+    clear.0 = sky_for_pitch(rig.pitch);
 }
 
 #[derive(Resource)]
@@ -495,13 +511,16 @@ mod tests {
     }
 
     #[test]
-    fn adjust_view_tilts_zooms_and_clamps() {
+    fn adjust_view_tilts_zooms_pitch_and_leaves_distance_be() {
         let mut rig = CameraRig::default();
-        rig.adjust_view(0.1, 0.5);
-        assert!((rig.pitch - (GROUND_VIEW.0 + 0.1)).abs() < 1e-6);
-        assert!((rig.distance - GROUND_VIEW.1 * 0.5).abs() < 1e-6);
-        rig.adjust_view(10.0, 0.99);
-        assert_eq!((rig.pitch, rig.distance), (PITCH_RANGE.1, DISTANCE_RANGE.0));
+        let span = PITCH_RANGE.1 - PITCH_RANGE.0;
+        rig.adjust_view(0.1, 0.1);
+        assert!((rig.pitch - (GROUND_VIEW.0 + 0.1 - 0.1 * span)).abs() < 1e-6, "tilt and zoom both move pitch");
+        assert_eq!(rig.distance, GROUND_VIEW.1, "zoom never touches distance");
+        rig.adjust_view(0.0, -10.0);
+        assert_eq!((rig.pitch, rig.distance), (PITCH_RANGE.1, GROUND_VIEW.1), "clamped to the globe-view pitch");
+        rig.adjust_view(0.0, 10.0);
+        assert_eq!(rig.pitch, PITCH_RANGE.0, "clamped to the zoomed-in pitch");
     }
 
     #[test]
@@ -509,7 +528,7 @@ mod tests {
         let base = CameraRig::default();
         let mut rig = base.clone();
         rig.wheel(1.0, false, false);
-        assert!(rig.distance < base.distance && rig.pitch == base.pitch && rig.fov == base.fov, "away: closer");
+        assert!(rig.pitch < base.pitch && rig.distance == base.distance && rig.fov == base.fov, "away: closer, shallower pitch, same distance");
         let mut rig = base.clone();
         rig.wheel(-1.0, true, false);
         assert!(rig.pitch < base.pitch && rig.distance == base.distance, "Ctrl: tilt");
@@ -522,8 +541,8 @@ mod tests {
 
     #[test]
     fn sky_fades_to_space() {
-        assert_eq!(sky_for_distance(GROUND_VIEW.1), SKY);
-        assert_eq!(sky_for_distance(200.0), SPACE);
+        assert_eq!(sky_for_pitch(GROUND_VIEW.0), SKY);
+        assert_eq!(sky_for_pitch(PITCH_RANGE.1), SPACE);
     }
 
     #[test]

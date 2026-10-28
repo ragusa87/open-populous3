@@ -504,15 +504,20 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     see pop3-rev-analysis.md "Camera flyby state (tribe_struct)". Worth double-checking `game_core::ai_script`
     reproduces this exact gate (`Every{period:8}` + `INT_GAME_TURN>70` + a one-shot user-var flag) rather than
     just hardcoding turn 72 for this one level.
-  Also still open: the original's camera pitch is NOT fixed during a flyby (animates independently of yaw,
-  dipping well below the normal-play default) but `flyby.rs`'s `drive_camera` never varies `CameraRig.pitch`
-  - a real gap. The exact script-zoom-value -> pitch-degrees curve still isn't solved (no formula, just a
-  live-sampled table of points, pop3-rev `docs/camera.md`), but the mechanism and range now are: pitch
-  spans roughly -10.5° (zoomed furthest in) to -88.6° (whole-planet globe view) at a ~constant distance,
-  so even a rough interpolation across that range would already be far closer than the current frozen-pitch
-  behavior. Checked and ruled out as a lead: the manual mouse-drag pan/rotate
-  code (`move_pos_angle_length` and friends, pop3-rev-analysis.md "Manual camera pan/rotate (mouse drag)") is
-  separate from the flyby entirely - don't re-chase it for this.
+  [x] The original's camera pitch is NOT fixed during a flyby or manual zoom (animates independently of yaw) and
+  distance never moves at all - `flyby.rs`'s `zoom_to_pitch` (was `zoom_to_distance`) and `camera::adjust_view`
+  (the player's own wheel/key zoom) now both drive `CameraRig.pitch` across the confirmed `PITCH_RANGE`
+  (~10.5° zoomed in to ~88.6° at the whole-planet globe view) at constant distance, fixing the "almost sky-view"
+  elevation the flyby used to end up at; the sky/space fade (`camera::space_fade`) now keys off pitch too, since
+  distance no longer grows when zooming out. The exact script-zoom-value -> pitch-degrees curve still isn't
+  solved (no formula, just a live-sampled table of points, pop3-rev `docs/camera.md`) - linear interpolation
+  across the confirmed endpoints is still our own guess, same as before. Not done: the K/bend render-parameter
+  blend itself (`terrain_mesh::CurveParams::curvature` stays a fixed constant, not yet tied to zoom) - the
+  preset-table fields it blends aren't identified well enough to implement with confidence, and baking it in
+  would mean rebuilding the terrain mesh far more often (see the mesh-rebuild-cost item below). Checked and
+  ruled out as a lead: the manual mouse-drag pan/rotate code (`move_pos_angle_length` and friends,
+  pop3-rev-analysis.md "Manual camera pan/rotate (mouse drag)") is separate from zoom entirely - don't re-chase
+  it for this.
 - [ ] Script side effects outside the AI still open: messages, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`,
   `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
 
