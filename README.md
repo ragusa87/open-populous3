@@ -64,9 +64,6 @@ Run `just` with no arguments (or open the `Justfile`) for the full recipe list, 
 `just bake-units`, `just generate-buildings`, `just video`, `just profile` and `just level-info`.
 Without `just` installed, any recipe's underlying `cargo` command works the same way directly.
 
-Controls: push the mouse against the window edges to scroll (Esc frees the cursor), Left/Right rotate, Up/Down or WASD move (A/D strafe), middle-drag rotate, Home/End tilt, Ctrl+PgUp/PgDn zoom, Shift+PgUp/PgDn field of view, **Enter** aerial view,
-PgUp/PgDn change level, Tab editor mode (R/F/T/M/B brushes), F11 fullscreen.
-
 ## Original assets bootstrap
 
 By default the game looks for your own legitimately-owned install of the original and reads its
