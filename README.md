@@ -17,7 +17,7 @@ are Bullfrog / Electronic Arts property. This repo:
   memory reads, running the original) happens only in separate, dedicated sessions whose sole output
   is [docs/specs/pop3-rev-analysis.md](docs/specs/pop3-rev-analysis.md) — our own write-up of the
   original engine's internals (unit model, tribes, constants, mana, combat...), itself built on prior
-  community reverse engineering such as [pop3-rev](https://github.com/hrttf111/pop3-rev) (see
+  community reverse engineering such as [pop3-rev](https://github.com/ragusa87/pop3-rev) (see
   [References](#references) below for the full list of sources). All implementation work reads that
   document; it never disassembles, traces or runs the original executable itself.
 
@@ -111,7 +111,7 @@ File formats are reverse-engineered from the original files; community tools are
 - [popscript-upgrader](https://github.com/TylerTheFox/popscript-upgraderi) (MIT, checked at
   `f2bd401`): the mapping of PopScript to Populous: Reincarnated's Lua API, see
   [ai-scripts.md](docs/specs/ai-scripts.md).
-- [pop3-rev](https://github.com/hrttf111/pop3-rev) (hrttf111): reverse engineering of `D3DPopTB.exe`, which
+- [pop3-rev](https://github.com/ragusa87/pop3-rev) (hrttf111, forked here): reverse engineering of `D3DPopTB.exe`, which
   renders with Direct3D: the game's world is left-handed (x right, y up, z away), so we mirror z to draw it in
   Bevy, see [architecture.md](docs/architecture.md) "Handedness". Our own write-up of the engine internals this
   and other sources feed into is [docs/specs/pop3-rev-analysis.md](docs/specs/pop3-rev-analysis.md).
