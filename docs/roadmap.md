@@ -17,7 +17,7 @@ trace notes.
 | Units | Partial | Shaman and followers walk/pray/cast/drown/die. **Spies are not implemented** (disguise, unnoticed attacks). Braves/warriors/preachers/firewarriors still mostly stand-in behaviour. Wildmen idle loop, death/spirit variants, physics and vehicle boarding have open items. See [units.md](specs/units.md). |
 | Poses / animations | Partial | Many actions still use a fallback pose (idle/fall) instead of their own. Missing or stand-in: fight poses (strike/trade/kick/reel/shoved/taunt), wood-carrying poses, tumbling (`flung`/`tumble`), hammering, jump-for-flattening, and several transitions. See [unit-art.md](specs/unit-art.md). |
 | Spells | Partial | Most of the 20 spells work at the core-mechanic level (cast, charge, mana). Known disparities to fix: Armageddon (v1 only, real mechanic pending), Blast (no building damage, no fireball flight), Lightning panic question, spell aiming/shot-flight for most spells, 6 of 20 spell icons missing in `--no-original` mode. See [spells.md](specs/spells.md). |
-| Mana | Done | Pool, per-follower income, HUD bar shape all match the trace. Open: delayed reservoir / shaman-death mana dispatch, distribution-sharing nuances. See [spells.md](specs/spells.md) "Mana". |
+| Mana | Partial | Pool, per-follower income, HUD bar shape all match the trace. **Not implemented: mana dispatched between tribes** (the delayed reservoir — gifts, and the shaman-death transfer to the killer's tribe). Also open: distribution-sharing nuances. See [spells.md](specs/spells.md) "Mana". |
 | Buildings | Partial | Construction, foundation collapse (uneven/flooded ground), vehicle huts and training huts implemented. Jail/prison needs work (locking, what protects the shaman). Dismantling and explosion are still an approximate whole-model reveal, not the real per-part animation. Many smaller gaps (repair, add-ons, tower effects, construction pace). See [buildings.md](specs/buildings.md). |
 | Wood / trees | Partial | Cutting, carrying and construction are done. Open: obstacle behaviour, regrowth rules, trees submerged by terrain changes. See [trees.md](specs/trees.md). |
 | Praying (worship) | Partial | Pyramids and basic totem worship work for the player. Open: contested totems, totem gift handling, prisons, HUD feedback. See [worship.md](specs/worship.md). |
@@ -50,7 +50,7 @@ trace notes.
 
 | Area | Status | Notes |
 |---|---|---|
-| UI and editor | Partial | HUD tabs, build/spell panels and editor brushes exist; many icons and original-accurate layouts still open. See [ui-and-editor.md](specs/ui-and-editor.md). |
+| UI and editor | Partial | HUD tabs and UX flows (build/spell panels, editor brushes) are implemented. **Not implemented: the visual design does not yet vary between the proprietary (original-asset) and open-source (generated) look** — same layout/art treatment today regardless of mode. Also not implemented: the "?" indicator for a not-yet-unlocked discovery on the Build tab. Notifications, building icons/tooltips and several original shortcuts are also still open. See [ui-and-editor.md](specs/ui-and-editor.md). |
 | Tooltips | Partial | Core hover tooltips exist; coverage against the original is incomplete. See [tooltips.md](specs/tooltips.md). |
 | Menu and sandboxes | Partial | Main menu and per-feature sandboxes (walk/units/buildings/worship/spells/vehicles/bridge) exist for dev use. |
 | Camp fire | Todo | Not implemented. See [buildings.md](specs/buildings.md) "Camp fire". |
