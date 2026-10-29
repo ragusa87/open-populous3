@@ -119,6 +119,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] `just bake-units` is not bit-reproducible: two bakes differ by 1-2 edge pixels in a few frames (GPU rasterisation), so there is no `--check` like the building kit's; render on the CPU or compare with a tolerance.
 - [ ] Original unit animations: who the pointed-helmet attacker of 20-24 is, and anim 13; use the fighting anims (pop3-rev-analysis.md "Combat": 15 move 2 and the opening blow, 13 move 3, 25 move 4, 14 hit, 16 struck before the flight; taunts 48/49/50 while waiting), throw-fire (7), spy fire-setting (17), tornado tilt (16), pedalling (51), running from bees (52) anims once those actions exist; idle for too long: braves scratch (89), warriors do push-ups (90/91) - traced as far as a confirmed, rhythm-gated (16-turn) RNG-weighted picker (pop3-rev-analysis.md "Idle behaviour"), but only confirmed for wildmen (state 8 → 5) this session; whether ordinary followers share it is still open, so scope any implementation to wildmen first and extend if a later check confirms followers too. `Action::Idle` today has no animation-variant state or rhythm counter at all (`unit.rs`).
 - [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
+- [ ] State transitions: `Unit::panic`/`Unit::catch_fire` (`unit.rs`) both call `drop_plans()`, cancelling the route, destination, teleport/spell targets, every pending "go do X" field, the order queue, the patrol list and any work assignment outright. **Confirmed, not just suspected, as a real divergence** (pop3-rev-analysis.md "Resuming a fight cut short by a push", addendum): the original's state-transition mechanism itself has no generic "forget your plans" step anywhere (`0x4ED6F0`, always called on any transition, is a no-op; `0x4ED640` only runs the new state's own entry case), Fight is independently confirmed to never release a participant's command group, and person states 26 (panic) and 31 (on fire) were each read exhaustively, start to finish, this session - neither touches the order/command-group slot (`+0x9B`/`+0x8B`/`+0xA6`) or calls `group_release` anywhere. Fix: `panic`/`catch_fire` should stop calling the full `drop_plans()` and instead just interrupt the current task the way Fight already does (`resume_attack`-style), so it resumes unprompted afterward instead of leaving the person with nothing queued. Also resolve the existing inconsistency this surfaced: the `Drowning` transition (`unit.rs` `tick()`) does a hand-picked partial reset (`teleport_to`/`spell` only) rather than calling `drop_plans()` at all - whichever way `panic`/`catch_fire` are fixed, make `Drowning`'s own reset consistent with it rather than its own third, narrower variant. (Unrelated to the above but found alongside it: on-fire's own entry in the original also forces the SAME random run panic does, for the whole 70-turn burn, gated by a ghost-check rather than panic's blast flag - `catch_fire`'s existing `run_in_panic`-for-the-whole-burn already matches this, no change needed there.)
 - [ ] Spies: the player can disguise one in another tribe's colour; it then walks through that tribe unnoticed, except when hovered (spy indicator) or when it passes by a spy of the tribe it imitates. Its attack on a building: it sets a fire (anim 17), walks away, the building then takes damage; the spy stays unnoticed and can attack again later.
 - [ ] Death: `SPIRIT_TICKS` (currently one guessed 3 s constant, `unit.rs`) is confirmed wrong as a single variant (pop3-rev-analysis.md "Death and the spirit rise"). The original spawns a separate spirit object with TWO variants, chosen by whether the corpse died in a drowning-eligible spot: a brief 4-turn (0.33 s) stationary "calm" rise (object id → VSTART 38 for followers, 85 shaman - not drawn in post as a translucent copy for this one specifically, re-check), or - unconditionally for a wildman regardless of cause of death, and for anyone else only if drowning - a 32-turn (2.67 s) "climbing" rise with a REAL continuous upward velocity (40 world units/turn, no gravity, VSTART 31 for a wildman reusing the "flung in the air" tumble clip, 40 followers, 45 shaman) plus, for a wildman only, a continuous spin (91/2048 facing per turn) found nowhere else - this is the "flying into the sky" look. Implement both variants and the wildman-always/others-if-drowning split; `DYING_TICKS` (the fall before the spirit spawns) was not re-examined this session. Unit views are indexed by unit position and rebuilt whenever a unit leaves the map: key them by unit id once there are many units.
 - [ ] Wildmen (neutral "gaia" braves, spawned from the levels, standing still today): implement the original's
@@ -223,17 +224,32 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
     person goes idle and only re-engages via its own passive scan) - no code change needed here. Same mechanism
     should hold for Lightning/Swarm/Whirlwind (being idle-with-no-order after any push/stun, not Blast-specific),
     not separately re-checked.
-- [ ] Lightning panic, open question (not yet traced either way): **reported, 2026-10-25**, live play describes
-  lightning as "less effective" than remembered, specifically fewer panicking units around the strike. Per the
-  current trace (pop3-rev-analysis.md "Per spell" row 3 and "Components"), neither Lightning's own strike (an
-  outright kill in the target cell, a building set alight, trees burnt/ground fire) nor its companion "simple
-  blast" causes panic - panic is only traced for Firestorm/Volcano's *panicking* fireballs, Swarm's stings, and
-  occupants thrown from a burning or raided building (a delayed effect, not an immediate ring around the strike).
-  So either: (a) the player's expectation is carrying over Firestorm/Volcano/Swarm's panic onto Lightning, nothing
-  to fix; or (b) the original's Lightning strike (or its companion blast specifically) does panic nearby survivors
-  and the current trace is incomplete. Needs a live check in a spec session (watch an original Lightning cast with
-  several followers standing just outside the kill cell) before assuming either way - do not guess a panic radius
-  into `EffectKind::Lightning` without it.
+- [x] Lightning panic, open question: **resolved via static tracing, 2026-10-29** (no live check needed - and a
+  same-day false start corrected in place, see below). "Panic" (person state 0x1A/26) is real: entering it forces
+  a 64-turn random-heading run at speed 110 (`init_unit_class_1`'s own per-state ENTER dispatch, not just the
+  cosmetic scorched/fire-trail visual a first pass this session found in the per-turn tick body and wrongly
+  concluded was the whole story - see `pop3-rev/docs/person_states.tsv` row 26 for the full citation and the
+  correction). **The actual answer to the reported gap**: this forced run is gated per-caller by a blast
+  instance's own `+0x7A` flag, confirmed SET by Firestorm's own impact blast (`0x511800`) and confirmed NOT set
+  by Lightning's own companion blast (`0x511AE0`) - a real, deliberate difference between the two spells, not a
+  trace gap. So Lightning's own strike and companion blast still do not panic anyone near the strike cell (that
+  part of the original trace was right, just for an incompletely-understood reason) - the only panic a Lightning
+  cast can cause is the building-eviction case (unconditional, "Burning building" below), 8 turns after it sets a
+  building alight, not an immediate ring effect. No panic radius needed for `EffectKind::Lightning`. Firestorm's
+  own panic ("Per spell" row 8) is confirmed as this same mechanism. Swarm's own panic (row 5) is now also traced,
+  2026-10-29, and is NOT the same `+0x7A` mechanism at all - a third, independent gate: insect plague's per-turn
+  handler (`process_insect_plague`/`0x510120`) does two separate things, both using the same unconditional
+  `0x4ED6F0`/state=0x1A/`0x4ED640` transition as the building-eviction case (no `+0x7A` check anywhere in this
+  spell's own code). Every 64 turns it raids a nearby enemy building (occupants evicted one at a time, forced to
+  panic, then damaged - "up to 3 times" matches); every 8 turns it scans its own 3x3-cell neighbourhood for enemy
+  persons (shamans/angels excluded by a type table, matching "immune") and, for each one whose own `+0xe` bit
+  `0x10` is clear (an unconfirmed per-victim flag, not Blast's own `+0x7A`) and who isn't a ghost (ghosts are
+  deleted outright instead, matching "ghosts destroyed"), forces the same panic then applies exactly
+  `SWARM_PERSON_DAMAGE` (100, confirmed via `0x5AA514`) - matching "Per spell" row 5's "100 damage and panic"
+  precisely. Full citation: `pop3-rev/docs/functions.tsv`'s `0x510120` row. Volcano's own fireballs (row 16, "22
+  small and 6 big fireballs (simple blasts)") were not re-checked against their own code this session, nor was
+  Blast's own direct spell-cast blast (row 2) - worth confirming whether they set the same `+0x7A` trigger
+  Firestorm does before relying on their "panics" wording.
 - [ ] Spell cursors: confirm 40 = Armageddon and 43 = Ghost Army in the game (`virtual_cursor::spell_sprite`); check the gold arrow's frame order and speed against the game; the pause menu releases the mouse, so it shows the system cursor, not the gold arrow.
 - [ ] Burn (1), bloodlust (20) and the original teleport (21), now traced (pop3-rev-analysis.md "Per spell"): burn sets the target cell's trees alight and is not castable; bloodlust (hidden) gives the 6 nearest own followers ×3 damage, /8 damage taken and faster firewarrior reloads for 120 s; teleport (hidden) moves the caster's own shaman. Decide which ones we expose.
 - [ ] Flatten: trace the original's per-turn curve (ours divides the gap by the turns left) and whether the disc is centred on a point or a cell. The land bridge raises a smoke puff on every bridge cell every turn while it builds (a `WorldView` of the effect); balloons rise with it; its steps do not re-level or collapse buildings yet.

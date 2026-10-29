@@ -713,7 +713,23 @@ not again when the command is executed.
 | Lava | 7/0x22 flow, 0x28 square | Hot cells set people on fire (state 31) and set buildings and trees burning; the caster's own people too, only the caster's shaman is spared. |
 
 Shared person and building states:
-- **Panic** (person state 0x1A): runs at a random heading at speed 110, screaming, for 64 turns (5.3 s).
+- **"Panic" (person state 0x1A), corrected a second time, 2026-10-29 - the same-day correction above was itself
+  incomplete.** That pass checked only the per-turn TICK dispatch (`switchD_004d337f`) and concluded state 26 was
+  "purely cosmetic, no movement of its own" - but class-1 persons also have a SEPARATE per-state ENTER dispatch
+  (`init_unit_class_1`/0x4D2740, `switchD_004d290b` - the same two-dispatch architecture already confirmed for
+  class 10 in `init_unit_class_10`), which that pass didn't check. Its case 0x1a (state 26) genuinely DOES set
+  speed `+0x5F = 110`, a duration timer `+0x70 = 64`, and a fresh random heading (`+0x57`, the standard RNG), once
+  on entry - **a real "runs at a random heading at speed 110 for 64 turns" effect does exist**, almost exactly the
+  original claim, just not as a separate state from "scorched by a blast", and with no scream sound found
+  anywhere (only the ambient crackle, sound 0x51) - "screaming" remains unconfirmed. See
+  `pop3-rev/docs/person_states.tsv` row 26 for the full citation. **Gating, confirmed by direct comparison between
+  two spells' own blast-creation code**: a blast's push (`0x50B740`) only forces this run on a pushed person when
+  that BLAST INSTANCE's own `+0x7A` bit 0x1 is set - confirmed SET by Firestorm's own impact blast (`0x511800`)
+  and confirmed NOT set by Lightning's own companion blast (`0x511AE0`): genuinely different, not a trace gap -
+  Firestorm's blast forces the run, Lightning's does not. The burning-building eviction path
+  (`0x408AB0`/`0x408B39`, "Burning building" below) is UNCONDITIONAL - it sets state 26 directly, never passing
+  through `0x50B740`'s own gate - so every evicted occupant gets the forced run regardless, matching that
+  section's original "and panics" wording exactly as first written.
 - **On fire** (person state 31): runs about and loses `LIFE_<type>` / 32 per turn for 70 turns, so dies in about
   32 turns (2.7 s). Entered from the person's own life step (0x4D43A0) whenever its status word `+0xC` has bit
   0x8 set and it is not already in state 31 ("Health and healing"). **What actually sets that bit, checked across
@@ -744,7 +760,8 @@ Shared person and building states:
 on fire:  timer +0xA7 = 127
 per turn: timer -= 1
   timer 119 (turn 8, 0.67 s): every occupant (6 slots at +0x86) is thrown out (`remove_person_from_hut`
-    0x407490) and panics (person state 0x1A)
+    0x407490) and panics (person state 0x1A/26, `0x408B39` - a real forced-run effect, confirmed unconditional
+    for this trigger, see "Panic" above)
   timer > 79: fire sound 0x53
   timer 79 (turn 48, 4 s): one structural hit of 100 wood (0x4BA2C0(shape, −100)) with damage smoke;
     no wood left → the building is destroyed, stats[tribe][7] += 1
@@ -778,10 +795,12 @@ a plain `add`, confirming the slope rule is horizontal-only.
   allies only on the last turn, at most `BLAST_FRIEND_AFFECT` (5).
 
 **The fire trail, traced this session**: right before the push above, a per-instance blast flag (+0x7A bit
-0x1 - not confirmed which blast callers set it, plausibly tied to Blast's own "burn cell" component, since the
-same shared blast code also serves callers that clearly shouldn't ignite anyone, e.g. a destroyed boat's land
-explosion) puts a pushed person not already there into a new, purely cosmetic **state 26** ("scorched by a
-blast") and sets a trailing-effect counter (+0xA4) to **24**. That counter is read by a single shared function
+0x1 - **confirmed 2026-10-29: SET by Firestorm's own impact blast (0x511800), NOT set by Lightning's own
+companion blast (0x511AE0)** - still not checked for Blast's own direct spell-cast blast or a destroyed boat's
+land explosion, both of which also share this code) puts a pushed person not already there into **state 26**
+("scorched by a blast") - which, besides the trailing visual below, ALSO forces a 64-turn random-heading run at
+speed 110 on entry (`init_unit_class_1`'s own per-state ENTER dispatch, see "Panic" above - NOT purely cosmetic,
+correcting this section's own former wording) - and sets a trailing-effect counter (+0xA4) to **24**. That counter is read by a single shared function
 (`trail_effect_tick`, 0x4D9200) called for every person every turn its own +0xA4 is nonzero, independent of
 state: it always spawns a short-lived grey smoke puff (the same "7/3" effect documented as the firewarrior
 bolt's own trail puff) at the person's position, and - only while the counter is still above 8 - ALSO spawns
@@ -2230,7 +2249,8 @@ Every person runs this check in its per-turn update; it decides who starts an at
 ```text
 rhythm: when class_counter & mask == 0 (person table +0x2F: 3 → every 4 turns; preacher 1 → every 2)
 skipped: busy (0x4D44E0: in a vehicle or building unless a firewarrior, a state with flag 0x40 in 0x5A6F79,
-  i.e. 2, 3, 5, 6, 9, 11, 14-16, 20, 22-29 (fight 25, pre-fight 29, panic 26), 31, 36-42, 44; and some orders)
+  i.e. 2, 3, 5, 6, 9, 11, 14-16, 20, 22-29 (fight 25, pre-fight 29, panic/scorched-by-a-blast 26 - see "Panic"
+  above), 31, 36-42, 44; and some orders)
 radius in cells (0x51FF60): resolves the person's active command group first (below, "Command groups"); when
   there is none, or its flag byte +0x1 bit 0x20 is set, falls through to the "no order" row
   no order being carried out (state not 10), or no active group, or group flag 0x20 set: person table +0x18
@@ -2816,6 +2836,38 @@ instead, since it had nothing queued to resume.
 Not traced this session (ordinary attack-order behaviour, not fight-specific): how long/far the resumed order
 keeps chasing before giving up on its own, if at all - that is whatever 0x51A2A0's own ordinary termination
 rules already do for any attack order that can't reach its target, not a special case added for this.
+
+**This "orders pause, they are never cancelled by a forced state" pattern is not Fight-specific - it is how the
+original's state machine works in general, traced further this session.** The state-transition mechanism itself
+(every "set this person's state" site in the exe: `push unit; call 0x4ED6F0; mov state; push unit; call
+0x4ED640`) has no generic "forget your plans" step at all: `0x4ED6F0` (always called first) is a confirmed no-op
+(a single `ret`), and `0x4ED640` only dispatches into the NEW state's own entry case - there is no shared,
+state-agnostic cleanup anywhere in this pair, by design or by omission. Each state's own entry case resets only
+what it specifically needs to - **exhaustively confirmed this session for both forced states, not just inferred**:
+person state 26 ("scorched by a blast", the forced panic run, `0x4D2D74`) and state 31 ("on fire", `0x4D8FC0`,
+which turns out to run the exact same forced-random-run setup as panic, not just damage-over-time as this doc
+previously had it) were each read start to finish. Between them they touch: a cosmetic per-type prop, physics
+flags (`+0xC`/`+0x10`), speed, a heading roll, a duration timer, and a "clear my own selected-UI highlight" call
+(`0x445750`, also read in full - confirmed to only touch `+0x7A`/`+0x14` selection flags and UI-selection globals).
+**Neither one anywhere touches the person's own command-group slot (`+0x9B`/`+0x8B`/`+0xA6`) or calls
+`group_release` (`0x4364D0`)** - the same slot Fight leaves alone. So this is no longer an inference from Fight's
+own proven behaviour alone: **the original's forced-interruption states (Fight, Panic, and On-fire, all three now
+independently confirmed) pause a person's current task, they do not cancel it** - the task resumes automatically,
+unmodified, the moment the person falls back to its per-type default state (table `0x5A7064`, the same one
+`order_execute`'s own fallback and state 1's idle hand-off both already use). `person_states.tsv`'s own rows 26/31
+carry the full citation.
+
+**Our own `Unit::panic`/`Unit::catch_fire` (`unit.rs`) both call `drop_plans()`** - a full cancel: route, planned
+destination, teleport target, pending spell, every "go do X" field (`to_fire`/`to_tree`/`to_wood`/`to_house`/
+`to_shrine`/`to_vehicle`), the order queue, the patrol list and any work assignment, all cleared outright. This is
+now a confirmed divergence from the original, not just a suspected one: a person who panics or catches fire in
+the original keeps its current order queued, exactly like a fighter blasted out of its ring, and resumes it
+unprompted once the forced state ends - ours instead sends it back to a genuinely blank slate. (One thing already
+right: `catch_fire`'s own forced run, `run_in_panic` applied for the whole burn, already matches the original's
+newly-confirmed on-fire-forces-a-run behaviour - only the `drop_plans()` call is the actual gap.) `Unit::die` calling `drop_plans()` is unaffected by this - a dead person has nothing to
+resume, and the original's own universal death state (3) does push the body onto the spirit-rise handoff and
+otherwise tear it down, so clearing everything there is correct either way. See TODO.md "Units" for the concrete
+follow-up.
 
 ### A blasted person fighting back [exe, measured]
 TODO.md asked whether getting hit by an offensive spell (Blast specifically) makes an otherwise-idle person fight
