@@ -87,7 +87,7 @@ pub fn blueprint_at(kind: BuildingKind, facing: u8, cell: Vec2) -> Building {
 pub fn place_command(map: &GameMap, kind: BuildingKind, facing: u8, cell: Vec2) -> Option<Command> {
     let b = blueprint_at(kind, facing, cell);
     let b = Building { facing: best_facing(map, &b, facing), ..b };
-    can_place(map, &b).then_some(Command::PlaceBuilding { player: PLAYER, kind, at: (b.x, b.z), facing: b.facing })
+    can_place(map, &b, None).then_some(Command::PlaceBuilding { player: PLAYER, kind, at: (b.x, b.z), facing: b.facing })
 }
 
 /// A point of the building's own frame (cells) turned by `facing` into map axes, the same way
@@ -302,7 +302,7 @@ fn draw_blueprint(
     let centre = Vec2::new(cx as f32, cz as f32) / unit;
     let all_red = too_steep(&map.0, &b) || !shore_ok(&map.0, &b);
     // A map position (cells) -> render position and colour.
-    let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at)).is_some() { RED } else { WHITE });
+    let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at), None).is_some() { RED } else { WHITE });
     let mark = mark_mesh(kind, b.facing, centre, vertex);
     look.set_if_neq(CursorLook::Building { plan, valid: !mark.colours.contains(&RED) });
     put_mark(&mut commands, mark_entity, mesh, &mut meshes, mark);

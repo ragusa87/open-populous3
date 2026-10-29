@@ -108,7 +108,7 @@ pub fn can_place(map: &GameMap, (cx, cz): (i32, i32)) -> bool {
     let unit = WORLD_UNITS_PER_CELL as i32;
     let at = |fx: i32, fz: i32| (((cx * unit + fx).rem_euclid(128 * unit)) as u16, ((cz * unit + fz).rem_euclid(128 * unit)) as u16);
     let q = unit / 4;
-    [at(unit / 2, unit / 2), at(q, q), at(unit - q, q), at(q, unit - q), at(unit - q, unit - q)].into_iter().all(|p| blocked_at(map, p).is_none())
+    [at(unit / 2, unit / 2), at(q, q), at(unit - q, q), at(q, unit - q), at(unit - q, unit - q)].into_iter().all(|p| blocked_at(map, p, None).is_none())
 }
 
 #[cfg(test)]

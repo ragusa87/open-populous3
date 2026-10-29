@@ -131,7 +131,7 @@ mod tests {
         assert!(cells.iter().all(|&c| !map.ashes.buildable(c)));
         assert!(cells.iter().all(|&(x, z)| dirty.iter().any(|d| (d.min.0..d.max.0).contains(&x) && (d.min.1..d.max.1).contains(&z))), "drawn again");
         let plan = Building::site(BuildingKind::Hut { size: 1 }, 1, corner.0, corner.1, 0);
-        assert!(!crate::placement::can_place(&map, &plan), "not on ashes");
+        assert!(!crate::placement::can_place(&map, &plan, None), "not on ashes");
     }
 
     #[test]

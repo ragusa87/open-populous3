@@ -47,7 +47,7 @@ each kind of object in a fixed, written order. The original's order inside a tur
 2. firewarriors' reloads and their bolts in flight (`tend_reloads`, `tend_bolts`, combat.md "Firebolts"), then
    effects (`tend_effects`): before anything they act on, so units react the same turn;
 3. fires, buildings' wear (`tend_building_wear`), ashes (`Ashes::tick`), camp fires, vaults, totems, training,
-   vehicle huts (`tend_vehicle_huts`);
+   vehicle huts (`tend_vehicle_huts`), huts' own breeding and growth (`tend_huts`, huts-and-training.md "Huts");
 4. a script's flyby playing or cancelled, cleared once it's over (`tend_flyby`, `ai_script.rs`), then each
    computer tribe's own script (`tend_ai_scripts`, docs/specs/ai-scripts.md), then
    spotting (`spot_enemies`), attacks followed (`tend_attacks`), buildings hacked (`tend_wrecking`) (combat.md),

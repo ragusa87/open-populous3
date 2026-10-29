@@ -74,32 +74,51 @@ hut (max size) hides the red bar, it does not show it at 0.
 3. **Auto-housing** [ours]: an idle brave of the tribe with no order for `HOUSE_DELAY` (10 s) walks into the
    nearest built hut with room within 8 cells. Other kinds only enter when ordered.
 4. **Population**: every living unit of the tribe except the shaman, inside or out. Cap = sum of the supply of
-   its built huts at their current size (a hut being grown counts its old size), at most 200. Units over the cap (level start, conversions) stay; only breeding stops.
-5. **Breeding** (green bar): each built hut, every update, adds `occupants + 1` to `breed` (half steps: 0 inside =
-   0.5, 1 = 1.0, 2 = 1.5..., up to 3.0 for 5). At 100 % (`breed >= 2 * SPROG_TIME[level] * band / 100`, with
-   `band` from the tribe's population as a % of its cap) a brave is born at the front door, idle, and `breed`
-   restarts at 0. At the cap (population full), `breed` stops at 100 % and the brave comes as soon as there is room. A newly built hut
-   starts with `breed` full. Later: a small star animation where the brave appears (client).
-6. **Growing** (red bar, the need to grow): `grow` rises with time, even when the hut is empty, a little faster
-   with people inside: every update `GROW_STEP` x (100 + `GROW_BONUS` x occupants) / 100 [ours: no constant for it
-   in `constant.dat`, maybe one of the "extended" constants of the executable, constants.md]. At 100 %, if the
-   tribe's population has room (below its cap), the hut grows, as in the game:
-   1. some braves of the hut fetch 3 pieces of wood and put them inside: 1 is the cost of growing (consumed), 2 go
-      into the hut (given back when it is dismantled);
-   2. the hut becomes a construction site of the next size (if there is one: large huts do not grow), with the
-      wood of its current size already in it;
-   3. a few braves work on it (as a construction, buildings.md) while the others inside keep resting: the hut stays
-      usable all along (people inside, breeding);
-   4. once built, it is the bigger hut: more wood in it and more room for people; `grow` restarts at 0.
-   If the population is saturated (population = cap), the red bar stays at 100 % and blinks (client) until there
-   is room.
+   its built huts (`headcount::Housing::room`), at most 200 - a hut mid-growth (below) counts neither its old
+   nor its new size for the brief window it is a construction site rather than `Stage::Built`, `[ours]`,
+   simpler than the trace's own per-tribe base offset (`tribe+0x921`, not modelled) or tracking a shadow
+   "previous size" through that window. Units over the cap (level start, conversions) stay; only breeding stops.
+5. **Breeding** (green bar, done - `hut_growth.rs`): every `BREED_EVERY` (4 turns [exe]), each built hut adds
+   `BREED_STEP` (2) x (occupants + 1) to `breed` [exe, confirmed - not the half-steps this entry's own earlier
+   draft guessed]. At its target (`HUT<n>_SPROG_TIME` x `SPROG%[band]` / 100 - `SPROG_TIME` 4000/3000/2000 by
+   level [files]; `band` is `(population + 1) / 10` clamped to 0-19, **flat bands of 10 people, not a % of the
+   tribe's cap** as this entry's own earlier draft guessed [exe, confirmed]; `SPROG%` 30 at band 0 to 200 at
+   band 19 [files] - only those two ends are individually confirmed this session, the 18 between are `[ours]`,
+   linearly interpolated, not the real (close but not exactly linear) stairstep) a brave is born at the front
+   door, idle, and `breed` restarts at 0. Without room (population + 1 at or past the cap) breeding does not
+   even accumulate: `breed` resets to 0 every such turn instead of holding at its target [exe, confirmed - not
+   "stops at 100 %" as this entry's own earlier draft guessed]. A freshly completed hut (construction finishing,
+   `work::work_event`'s own `UnitEvent::Built`) starts with a head start, not a cold 0 nor an instantly full bar:
+   `target - 54` [exe, confirmed "the first brave comes quickly"] - computed at band 0 (the fastest) as a small,
+   documented simplification, since the real population at that exact moment isn't threaded through to there;
+   the very next breeding tick recomputes the real target anyway. Later: a small star animation where the brave
+   appears (client).
+6. **Growing** (red bar, done - `hut_growth.rs`): every `GROW_EVERY` (16 turns [exe]), a small or medium hut (a
+   large one has no next size) with nobody inside is left alone (kept, not reset [exe, confirmed]); otherwise
+   `grow` gains `GROW_STEP` (8) x occupants [exe, confirmed - not this entry's own earlier "a little faster with
+   people inside" guessed formula]. At `GROW_TARGET` (2400, exe-only, no `constant.dat` entry [exe, confirmed]),
+   if the next size's footprint fits where the hut already stands (`placement::can_place`, excluding the hut's
+   own current footprint) it becomes that size outright:
+   1. `kind` changes in place, same id - whoever is inside just stays "inside" that same id, so "move the people
+      inside into it" falls out for free, matching the original's own "the hut stays usable all along (people
+      inside, breeding)";
+   2. seeded with 1 of its `wood_cost` pieces already in (the trace's own "100 wood" - **not** this entry's
+      earlier guess of braves fetching and consuming 3 pieces up front; the real mechanism seeds 1 piece
+      directly and lets the ordinary construction system fetch the rest, same as any other building under
+      construction);
+   3. `grow` back to 0.
+   If the footprint does not fit, `grow` stays clamped at `GROW_TARGET` and is retried every future growth tick
+   - simpler than the trace's own "retried every 128 turns" detail, `[ours]`, since nothing is lost by checking
+   more often. Every hut size shares one footprint today (`BuildingKind::footprint`), so in practice this almost
+   never blocks growth - a real per-size footprint is a separate, unimplemented gap (buildings.md).
 
-   Damage while growing [ours, unsure]: the growing part takes the damage first, like extra health on top of the
-   hut; once it is gone, the hut falls back to its size before growing (the growth is lost) and then takes damage
-   like any building.
+   Damage while growing [ours, unsure, not traced]: the growing part takes the damage first, like extra health
+   on top of the hut; once it is gone, the hut falls back to its size before growing (the growth is lost) and
+   then takes damage like any building. Not implemented.
 
-   Wood held by size [ours, to check]: grows with the size, about +2 per size: small 3, medium 5, large 7
-   (`BuildingKind::wood_cost` is 3 for every hut size today).
+   Wood held by size: uniform, not "+2 per size" as this entry's own earlier draft guessed to check - the
+   trace's own "WOOD_HUT_2/_3 300" confirms every size costs the same 3 pieces / 300 wood
+   (`BuildingKind::wood_cost`, already 3 for every hut size).
 7. **Mana** [exe] (`GameMap::mana_income`, headcount.rs; every `MANA_UPDATE_FREQ` + 1 = 16 turns), per tribe: sum over its people of busy or idle
    mana (brave 15 / 4, warrior, spy, firewarrior and preacher 5 / 4, shaman 30 always, wildmen and angel 0), then
    x `HUMAN_` or `COMPUTER_MANA_ADJUST` (8.8 fixed point) - ours always uses `HUMAN_` (×1.25): no AI/controller

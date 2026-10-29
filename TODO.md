@@ -396,8 +396,14 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   session - clean room) - if not, something else about how we apply it in one shot instead of growing it over
   21 turns is likely the real difference, in which case the animated-growth half of this same TODO item might
   fix both the "house on water" symptom and this radius question together, rather than a flat radius bump.
-- [ ] Houses, see [huts-and-training.md](docs/specs/huts-and-training.md): green (birth) and red (grow) bars in the tooltip, a star animation at birth; capacity 3/4/5, supply 3/5/7 (cap min(supply, 200)), breeding by occupants and population band, mana from the people inside.
-- [ ] Houses grow (small -> medium -> large: `villager_hut` sizes): red bar to 100 %, then if the population has room braves fetch wood and the hut becomes a construction site of the next size, still usable (huts-and-training.md rule 6). Growing takes 3 pieces (1 consumed, 2 added to the hut). Settle the red bar speed, the wood per size (3/5/7?) and who works on it before implementing.
+- [x] Houses breeding and growth implemented (`game_core::hut_growth`, huts-and-training.md rules 5-6, fully
+  traced `[exe]` and corrected where this entry's own earlier draft had guessed wrong - the band formula, the
+  "stops at 100%" vs "resets to 0" behaviour, and growing's own wood seeding). Capacity 3/4/5, supply 3/5/7
+  (cap min(supply, 200)) were already done (`BuildingKind::capacity`, `headcount::{SUPPLY,Housing}`). Mana from
+  people inside was already done too (rule 7, `GameMap::mana_income`). Left for the client: the tooltip's green
+  (`breed`) and red (`grow`) bars, and a star animation where a bred brave appears. `SPROG%`'s own 18
+  un-individually-confirmed band values are `[ours]`, linearly interpolated between the two confirmed ends (30
+  at band 0, 200 at band 19) - a later session with the full file dump should replace the table outright.
 - [ ] `game_core::balance`: `Turns` (original game turns) converted to ticks, `Balance::ours()` defaults, later `Balance::from_constants`; every rule reads it from `GameMap` (huts-and-training.md "Balance and game turns").
 
 ### Wood ([trees.md](docs/specs/trees.md))
