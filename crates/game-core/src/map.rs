@@ -2457,8 +2457,8 @@ mod tests {
         let other = map.spawn(0, UnitKind::Brave, (x.wrapping_add(1024), z)).id;
         map.unit_mut(dead).unwrap().action = Action::Dying { left: crate::time::Countdown::new(crate::unit::DYING_TICKS) };
         map.run(crate::unit::DYING_TICKS);
-        assert!(matches!(map.unit(dead).unwrap().action, Action::Spirit { .. }));
-        map.run(crate::unit::SPIRIT_TICKS);
+        assert!(matches!(map.unit(dead).unwrap().action, Action::Spirit { climbing: false, .. }), "on dry land: the calm variant");
+        map.run(crate::unit::SPIRIT_CALM_TICKS);
         assert!(map.unit(dead).is_none(), "removed");
         assert!(map.unit(other).is_some(), "the others kept");
         assert!(map.spawn(0, UnitKind::Brave, (x, z)).id > other, "an id is never given twice");

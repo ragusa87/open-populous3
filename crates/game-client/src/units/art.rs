@@ -616,7 +616,7 @@ mod tests {
     #[test]
     fn the_spirit_rises_from_the_body() {
         use game_core::time::{Countdown, Ticks};
-        let spirit = |left| Action::Spirit { left: Countdown::with_left(Ticks::new(10), Ticks::new(left)) };
+        let spirit = |left| Action::Spirit { left: Countdown::with_left(Ticks::new(10), Ticks::new(left)), climbing: false };
         assert_eq!(pose_for(&spirit(10), false, false), Pose::Spirit);
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Spirit, 0), (40, Some(OUTFIT_WARRIOR), None), "lying, its spirit rising");
         assert_eq!(original_anim(UnitKind::Wildman, Pose::Spirit, 0), (47, None, Some(3)), "no spirit anim: lies still");

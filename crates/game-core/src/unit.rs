@@ -47,8 +47,14 @@ pub const LANDING_DROP: i32 = 256;
 /// The fall when dying, and the shaman's wait before reincarnation.
 pub const DYING_TICKS: Ticks = Ticks::millis(1500);
 pub const RESPAWN_TICKS: Ticks = Ticks::secs(3);
-/// Others' spirit rising from the body after the fall, before they are gone (a guess).
-pub const SPIRIT_TICKS: Ticks = Ticks::secs(3);
+/// Others' spirit rising from the body after the fall, before they are gone: two variants
+/// (pop3-rev-analysis.md "Death and the spirit rise") - a brief, stationary "calm" rise, or, for a wildman
+/// always and anyone else only if it died in a drowning-eligible spot, a longer "climbing" one with a real
+/// sustained upward velocity (`SPIRIT_CLIMB_RATE`) [exe, confirmed].
+pub const SPIRIT_CALM_TICKS: Ticks = Ticks::new(4);
+pub const SPIRIT_CLIMB_TICKS: Ticks = Ticks::new(32);
+/// The climbing variant's own upward speed, terrain height units per tick: no gravity, no deceleration [exe].
+pub const SPIRIT_CLIMB_RATE: i32 = 40;
 /// Chopping one piece of wood off a tree: the original's `CHOP_TIME` at a tree (pop3-rev-analysis.md "Chopping").
 pub const CHOP_TICKS: Ticks = Ticks::new(20);
 /// Picking up a piece of wood lying on the ground: the original's `CHOP_TIME` at a wood pile.
@@ -163,8 +169,9 @@ pub enum Action {
     Dying { left: Countdown },
     /// The shaman, lying dead: waiting to reincarnate at her site.
     Dead { left: Countdown },
-    /// Anyone else after the fall: its spirit rises from the body, then the unit is gone from the map.
-    Spirit { left: Countdown },
+    /// Anyone else after the fall: its spirit rises from the body, then the unit is gone from the map. `climbing`:
+    /// a real sustained rise (`motion.height`, `SPIRIT_CLIMB_RATE`) rather than the brief stationary "calm" one.
+    Spirit { left: Countdown, climbing: bool },
     /// Going round the camp fire at `fire` (its centre), last at its ring point `point`
     /// (`campfire::ring_point`), at `AROUND_FIRE_PACE` of her walking speed.
     AroundFire { fire: (u16, u16), point: u8 },
@@ -282,7 +289,7 @@ impl Action {
         match *self {
             Action::Casting { left }
             | Action::Dying { left }
-            | Action::Spirit { left }
+            | Action::Spirit { left, .. }
             | Action::Dead { left }
             | Action::Chopping { left, .. }
             | Action::PickingUpWood { left, .. }
@@ -783,7 +790,10 @@ impl Unit {
     /// One simulation step. `site` is where the unit reincarnates.
     pub fn tick(&mut self, now: Tick, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
         let terrain = ground.terrain();
-        if self.motion.airborne() {
+        // A climbing spirit is airborne too (`motion.height`, for the client's own existing lift-drawing) but
+        // never subject to gravity or a touchdown - it has its own, simpler, ungoverned rise in its own branch
+        // below instead of going through the general physics step meant for a thrown or falling person.
+        if self.motion.airborne() && !matches!(self.action, Action::Spirit { .. }) {
             let below = |(x, z): (u16, u16)| terrain.height_at(x as u32, z as u32, WORLD_UNITS_PER_CELL);
             let touchdown;
             ((self.x, self.z), self.motion, touchdown) = physics::step((self.x, self.z), self.motion, below);
@@ -975,14 +985,17 @@ impl Unit {
                 self.action = match left.tick() {
                     false => Action::Dying { left },
                     true if self.kind == UnitKind::Shaman => Action::Dead { left: Countdown::new(RESPAWN_TICKS) },
-                    true => Action::Spirit { left: Countdown::new(SPIRIT_TICKS) },
+                    true => self.new_spirit(terrain),
                 };
             }
-            Action::Spirit { mut left } => {
+            Action::Spirit { mut left, climbing } => {
+                if climbing {
+                    self.motion.height = self.motion.height.map(|h| h + SPIRIT_CLIMB_RATE);
+                }
                 if left.tick() {
                     return Some(UnitEvent::Gone);
                 }
-                self.action = Action::Spirit { left };
+                self.action = Action::Spirit { left, climbing };
             }
             Action::Dead { mut left } => {
                 if !left.tick() {
@@ -997,7 +1010,7 @@ impl Unit {
                     // No reincarnation site for this owner (`DO SET_REINCARNATION OFF`,
                     // ai-scripts.md): same fallback as `Dying`'s own non-shaman case just above,
                     // instead of staying stuck in `Dead` forever.
-                    None => self.action = Action::Spirit { left: Countdown::new(SPIRIT_TICKS) },
+                    None => self.action = self.new_spirit(terrain),
                 }
             }
         }
@@ -1105,6 +1118,21 @@ impl Unit {
             self.hurt.died_from(kind);
         }
         dead
+    }
+
+    /// Which spirit-rise variant starts now (pop3-rev-analysis.md "Death and the spirit rise") [exe, confirmed]:
+    /// a wildman always, anyone else only if it died in a drowning-eligible spot (`is_sea` on its own cell -
+    /// the same test `Action::Drowning` itself starts from), gets the longer "climbing" rise with a real
+    /// sustained upward velocity, set here at the body's own ground height; everyone else gets the brief,
+    /// stationary "calm" one.
+    fn new_spirit(&mut self, terrain: &Heightmap) -> Action {
+        let climbing = self.kind == UnitKind::Wildman || is_sea(terrain, self.cell());
+        let left = Countdown::new(if climbing { SPIRIT_CLIMB_TICKS } else { SPIRIT_CALM_TICKS });
+        if climbing {
+            let (cx, cz) = self.cell();
+            self.motion = Motion::flying(Velocity::new(0, SPIRIT_CLIMB_RATE as i16, 0), terrain.get(cx, cz) as i32);
+        }
+        Action::Spirit { left, climbing }
     }
 
     fn die(&mut self) {
@@ -1875,8 +1903,8 @@ mod tests {
         let ticks = run_until(&mut brave, &t, &site, |u| !u.is_alive());
         assert!(matches!(brave.action, Action::Dying { .. }));
         run(&mut brave, &t, &site, DYING_TICKS.get() as usize);
-        assert!(matches!(brave.action, Action::Spirit { .. }), "its spirit rises, no reincarnation");
-        assert_eq!(run(&mut brave, &t, &site, SPIRIT_TICKS.get() as usize), [UnitEvent::Gone]);
+        assert!(matches!(brave.action, Action::Spirit { climbing: true, .. }), "its spirit rises (climbing: died on a sea cell), no reincarnation");
+        assert_eq!(run(&mut brave, &t, &site, SPIRIT_CLIMB_TICKS.get() as usize), [UnitEvent::Gone]);
         assert!(ticks > 1 && brave.kind == UnitKind::Brave);
     }
 
@@ -1887,8 +1915,45 @@ mod tests {
         let (mut u, site) = shaman_at((10, 10));
         u.action = Action::Dead { left: Countdown::new(Ticks::new(1)) };
         assert_eq!(u.tick(Tick::ZERO, &t, None), None);
-        assert!(matches!(u.action, Action::Spirit { .. }), "falls through to Spirit, not stuck in Dead");
-        assert_eq!(run(&mut u, &t, &site, SPIRIT_TICKS.get() as usize), [UnitEvent::Gone]);
+        assert!(matches!(u.action, Action::Spirit { climbing: false, .. }), "falls through to Spirit (calm: on dry land), not stuck in Dead");
+        assert_eq!(run(&mut u, &t, &site, SPIRIT_CALM_TICKS.get() as usize), [UnitEvent::Gone]);
+    }
+
+    #[test]
+    fn a_wildman_always_climbs_even_dying_on_dry_land() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.kind = UnitKind::Wildman;
+        u.die();
+        run(&mut u, &t, &site, DYING_TICKS.get() as usize);
+        assert!(matches!(u.action, Action::Spirit { climbing: true, .. }), "a wildman always climbs, whatever killed it or where");
+    }
+
+    #[test]
+    fn a_follower_dying_on_dry_land_gets_the_calm_rise_not_climbing() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.kind = UnitKind::Brave;
+        u.die();
+        run(&mut u, &t, &site, DYING_TICKS.get() as usize);
+        assert!(matches!(u.action, Action::Spirit { climbing: false, .. }));
+    }
+
+    #[test]
+    fn climbing_rises_at_a_steady_rate_with_no_gravity_calm_never_leaves_the_ground() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.kind = UnitKind::Wildman;
+        u.die();
+        run(&mut u, &t, &site, DYING_TICKS.get() as usize);
+        let ground = u.motion.height.expect("already rising, set at its own ground height");
+        run(&mut u, &t, &site, 5);
+        assert_eq!(u.motion.height, Some(ground + 5 * SPIRIT_CLIMB_RATE), "steady rate, no gravity to slow it");
+
+        u.kind = UnitKind::Brave;
+        u.die();
+        run(&mut u, &t, &site, DYING_TICKS.get() as usize + 3);
+        assert_eq!(u.motion.height, None, "the calm variant never leaves the ground");
     }
 
     #[test]
