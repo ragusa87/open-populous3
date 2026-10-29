@@ -150,20 +150,19 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
 - [ ] Spies: the player can disguise one in another tribe's colour; it then walks through that tribe unnoticed, except when hovered (spy indicator) or when it passes by a spy of the tribe it imitates. Its attack on a building: it sets a fire (anim 17), walks away, the building then takes damage; the spy stays unnoticed and can attack again later.
 - [ ] Death: `SPIRIT_TICKS` (currently one guessed 3 s constant, `unit.rs`) is confirmed wrong as a single variant (pop3-rev-analysis.md "Death and the spirit rise"). The original spawns a separate spirit object with TWO variants, chosen by whether the corpse died in a drowning-eligible spot: a brief 4-turn (0.33 s) stationary "calm" rise (object id → VSTART 38 for followers, 85 shaman - not drawn in post as a translucent copy for this one specifically, re-check), or - unconditionally for a wildman regardless of cause of death, and for anyone else only if drowning - a 32-turn (2.67 s) "climbing" rise with a REAL continuous upward velocity (40 world units/turn, no gravity, VSTART 31 for a wildman reusing the "flung in the air" tumble clip, 40 followers, 45 shaman) plus, for a wildman only, a continuous spin (91/2048 facing per turn) found nowhere else - this is the "flying into the sky" look. Implement both variants and the wildman-always/others-if-drowning split; `DYING_TICKS` (the fall before the spirit spawns) was not re-examined this session. Unit views are indexed by unit position and rebuilt whenever a unit leaves the map: key them by unit id once there are many units.
-- [ ] Wildmen (neutral "gaia" braves, spawned from the levels, standing still today): implement the original's
-  confirmed, fully traced idle loop (pop3-rev-analysis.md "Wildmen", "Drowning"): state 1 → 8 → (5 "eating" at a
-  tree/plant within 18 cells, or 6/16 "drinking" at a shore cell within 12 cells if none found) → 8 → ...; no
-  hunger/thirst resource exists anywhere, both searches only ever pick a destination for an idle animation. A
-  wildman idling at its shore spot genuinely drowns fairly often - no special mechanic, the shore search only
-  checks the coarse per-cell shape while the fine-grained per-turn drowning check has no bias toward the dry side.
-  The Convert spell turns them into the caster's braves (unchanged); no periodic respawn exists, they only ever
-  decrease. A wildman's death always plays the "climbing + spinning" spirit-rise variant, never the calm ghost
-  pose (see the death/spirit item below). Still open: the literal VSTART id each state resolves to (eat-fruit=2,
-  drink=4, already known from sprite inspection, not yet pinned to a line of code); whether an explicit attack
-  order is honoured by the original despite its auto-attack-scan exclusion (see the
-  `wildmen_never_fight_and_nobody_attacks_its_own` item above).
+- [x] Wildmen idle loop implemented (`game_core::wildman`, units.md "From the levels"): state 1 → 8 → (5 "eating"
+  at a tree within `TREE_SEARCH_RADIUS_CELLS` (18), or 6/16 "drinking" at a shore cell within
+  `SHORE_SEARCH_RADIUS_CELLS` (12) if none found) → 8 → ..., `Action::Grazing`, anims 2/4 wired
+  (`Pose::Eat`/`Pose::Drink`, original-asset only, CC0 falls back to idle). No plant scenery (types 7/8) is
+  modelled in this engine at all, so only trees are searched - a narrower destination set than the original's own,
+  `[ours]`; "shore" substitutes `wildman::is_shore_cell`'s own neighbour-based approximation for the original's
+  untranslated coastal-shape table, also `[ours]`. `wildman::SEEK_EVERY` (how often it looks) and `GRAZE_TICKS`
+  (how long it lingers) are both guesses: the trace gives neither a number. Drowning at the shore needs no code
+  of its own, confirmed to fall out of the generic per-turn check already. Still open, unrelated to the loop
+  itself: the literal VSTART id each state resolves to was already known and is now wired (eat=2, drink=4); a
+  wildman's death spirit-rise variant (see the death/spirit item below); whether an explicit attack order is
+  honoured (see the wildman-attack item above, now resolved as a guess).
 - [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation. Done at level start without animation (`ReincarnationSite::welcomes`); check the range in the game (the levels only use the ring of 8 cells) and whether it happens on every reincarnation.
-- [ ] Animate the wildmen: eating fruit (2) and drinking (4), wandering around their spot, instead of standing still.
 - [ ] Selection of buildings (without the people inside), and of units inside them (`selection::selectable`). Vehicles: a click with nothing selected selects the people aboard (vehicles.md).
 - [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
 - [ ] Statuses (`Unit::statuses`: Magical Shield, Bloodlust, Invisibility and Hypnotism now cast for real,
@@ -358,7 +357,10 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Site visuals: views are redone whenever any building changes; update them per building (stable ids) instead; compare the part order (from the ground up) and the structure with the original; chimney position per hut model; busy look for the other kinds; the pile by the door could be drawn as a stack rather than loose pieces.
 - [ ] Wood pieces lying on the ground (`GameMap::wood`, drawn): picked up by any construction; hovering one could show "Wood". Maybe draw the original's shadow under them (`hfx0-0.dat` 22, unconfirmed).
 - [x] Destruction of buildings on uneven/flooded ground: implemented (`game_core::foundation`, docs/specs/buildings.md "Foundation"), both destroy reasons, matching the trace (pop3-rev-analysis.md "Terrain changes: what reacts", "Building sinking (flooded destruction)"). **[ours] a periodic per-building scan** (every `CHECK_EVERY` turns, every turn for a water-sited kind) instead of a reactive hook on `WorldEvent::Terrain` - this doc's own earlier plan - so it never needed routing every direct `Heightmap` write (`Spell::Erode`/`Raise`, construction settling, a reincarnation site's own re-levelling) through that event first; it just re-reads the ground under each building whenever its own rhythm fires, up to `CHECK_EVERY`'s own latency (0.33 s) behind whatever changed it. Sub-state 1 (uneven) shatters at once (`Collapse::Shattering`, removed the tick after so the client can still catch it for `explosion::BuildingExploded` - no more need for `EXPLODE=building:N` to be the only way there, though the dev hook still works); sub-state 2 (flooding) sinks over 80 turns (`Collapse::Sinking`), drawn client-side dropping on the ramping curve and tilting with a decaying wobble (`buildings.rs`'s `sink_depth`/`sink_tilt`) - **the original's own compass-histogram lean target, oscillator formula and final spiral/splash flourish are still not traced**, so the wobble is our own approximation and the flourish isn't drawn at all. Neither reason leaves ashes, matching the trace.
-- [ ] A tree whose cell becomes water after any terrain change (land bridge, flatten, erosion, earthquake...) must drop to size 0 (dormant/invisible, like a burnt one) and not grow back while submerged (reported, not traced): `Tree::tick` (`tree.rs`) takes no terrain/water input today, unlike the building check above; needs the heightmap threaded in, likely alongside the same `WorldEvent::Terrain` handling in `GameMap::apply_event`.
+- [x] A tree whose cell becomes water drops to size 0 and stops regrowing while submerged, done (trees.md
+  "Simulation"): `Tree::tick` now takes a per-turn `submerged` flag (`GameMap::tick`, `unit::is_sea` against the
+  live heightmap), the same periodic-recheck shape as the building foundation check above rather than routing
+  through `WorldEvent::Terrain`.
 - [ ] Damage from moving ground: check in the game what sets the damage (level 10's atlantis island comes back with its buildings missing 1 to 3 pieces of wood, no common percentage), and whether repairs need fetched wood ([buildings.md#damage-and-repair](docs/specs/buildings.md)).
 - [ ] Effects 89 atlantis set / 90 atlantis invoke (level 10): sink the island at start, raise it back when the stone head trigger fires; 83 boat hut repair.
 - [ ] Towers (drum tower): hold one unit (going in is done, `game_core::enter`), which gets a longer range from there: firewarriors throw farther, the shaman casts spells farther, a preacher converts enemies around the tower. No other tower effect.

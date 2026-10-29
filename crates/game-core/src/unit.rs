@@ -168,6 +168,9 @@ pub enum Action {
     /// Going round the camp fire at `fire` (its centre), last at its ring point `point`
     /// (`campfire::ring_point`), at `AROUND_FIRE_PACE` of her walking speed.
     AroundFire { fire: (u16, u16), point: u8 },
+    /// A wildman eating beside a tree, or (`drink`) drinking at the shore (pop3-rev-analysis.md "Wildmen"), `left`
+    /// ticks before it wanders off again.
+    Grazing { drink: bool, left: Countdown },
     /// A brave cutting one piece of wood off the tree at `tree` (its position), `left` ticks to go.
     Chopping { tree: (u16, u16), left: Countdown },
     /// A brave picking up the piece of wood at `at` (its position), `left` ticks to go: the original's same
@@ -232,6 +235,8 @@ impl Action {
             Action::Dead { .. } => "Dead",
             Action::Spirit { .. } => "Dead",
             Action::AroundFire { .. } => "Around the fire",
+            Action::Grazing { drink: false, .. } => "Eating",
+            Action::Grazing { drink: true, .. } => "Drinking",
             Action::Chopping { .. } => "Cutting wood",
             Action::PickingUpWood { .. } => "Picking up wood",
             Action::Holding { .. } => "Holding wood",
@@ -394,6 +399,8 @@ pub struct Unit {
     spell: Option<Spell>,
     /// The camp fire (centre) and ring point she is walking to, to go round it once there.
     to_fire: Option<((u16, u16), u8)>,
+    /// A wildman's own walk to eat (`false`) or drink (`true`) once there (`wildman::tend_wildmen`).
+    to_graze: Option<bool>,
     /// The tree (position) she is walking to, to cut it once there.
     to_tree: Option<(u16, u16)>,
     /// The piece of wood (position) she is walking to, to pick it up once there.
@@ -469,6 +476,7 @@ impl Unit {
             teleport_to: None,
             spell: None,
             to_fire: None,
+            to_graze: None,
             to_tree: None,
             to_wood: None,
             to_house: None,
@@ -634,6 +642,15 @@ impl Unit {
         }
     }
 
+    /// A wildman's own walk to `at`, then eats (`drink` false) or drinks (`drink` true) there
+    /// (`wildman::tend_wildmen`).
+    pub fn go_graze(&mut self, at: (u16, u16), drink: bool) {
+        self.start(Order::MoveTo { x: at.0, z: at.1 });
+        if self.action.can_take_orders() {
+            self.to_graze = Some(drink);
+        }
+    }
+
     /// Walks to `door`, then goes into the building `building` (id, `UnitEvent::AtDoor`).
     pub fn go_enter(&mut self, building: BuildingId, door: (u16, u16)) {
         self.start(Order::MoveTo { x: door.0, z: door.1 });
@@ -740,7 +757,7 @@ impl Unit {
             return;
         }
         (self.route, self.planned_on, self.teleport_to, self.spell, self.to_fire) = (Vec::new(), None, None, None, None);
-        (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle) = (None, None, None, None, None);
+        (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle, self.to_graze) = (None, None, None, None, None, None);
         self.action = match order {
             Order::MoveTo { x, z } => Action::Walking { to: (x, z) },
             Order::Campfire { fire, point } => {
@@ -847,11 +864,16 @@ impl Unit {
                             self.action = Action::Worshipping { site };
                         } else if let Some(vehicle) = self.to_vehicle.take() {
                             return Some(UnitEvent::AtVehicle { vehicle });
+                        } else if let Some(drink) = self.to_graze.take() {
+                            self.action = Action::Grazing { drink, left: Countdown::new(crate::wildman::GRAZE_TICKS) };
                         }
                     }
                 } else if self.hurt(now) {
                     return Some(UnitEvent::Died);
                 }
+            }
+            Action::Grazing { drink, mut left } => {
+                self.action = if left.tick() { Action::Idle } else { Action::Grazing { drink, left } };
             }
             Action::Holding { mut left } => {
                 if left.tick() {
@@ -1103,7 +1125,7 @@ impl Unit {
     /// Forgets where it was going, what it was to do there and its work.
     fn drop_plans(&mut self) {
         (self.route, self.planned_on, self.teleport_to, self.spell, self.to_fire) = (Vec::new(), None, None, None, None);
-        (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle) = (None, None, None, None, None);
+        (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle, self.to_graze) = (None, None, None, None, None, None);
         self.queue.clear();
         self.patrol.clear();
         self.work = None;

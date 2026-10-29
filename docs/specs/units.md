@@ -74,6 +74,22 @@ tribe this way, level 3 has 12). The conversion animation is not drawn.
 Wildmen are neutral (not selectable), drawn with their original anims (0 walk, 1 stand, 3 sit, 31 flung, 47 down)
 or else a generated figure in a hide with a mane, or the brave's rendered sheets in a hide colour.
 
+Idle wildmen wander, fully traced (pop3-rev-analysis.md "Wildmen"): on their own rhythm (`wildman::SEEK_EVERY`, a
+guess - the trace gives state 8 no rhythm of its own), an idle one looks for a tree within
+`TREE_SEARCH_RADIUS_CELLS` (18, confirmed) to walk to and eat beside (`Action::Grazing { drink: false, .. }`,
+`Pose::Eat`, original anim 2); failing that, a shore cell within `SHORE_SEARCH_RADIUS_CELLS` (12, confirmed) to
+walk to and drink at (`Action::Grazing { drink: true, .. }`, `Pose::Drink`, anim 4) - both original-asset only,
+CC0 art falls back to idle. No plant scenery (types 7/8) is modelled yet, so only trees are searched; "shore" is
+`wildman::is_shore_cell`'s own neighbour-based approximation (dry, walkable, a sea cell among its 4 neighbours),
+standing in for the original's own untranslated coastal-shape table - **both `[ours]`**. It lingers
+`wildman::GRAZE_TICKS` (a guess, the trace gives no timer either) before going idle and searching again. No
+hunger or thirst stat exists anywhere, confirmed absent: both searches only ever pick where an idle animation
+plays, nothing is consumed. A wildman idling at its shore spot genuinely drowns fairly often - no special
+mechanic, just the ordinary per-turn drowning check re-testing the exact fine-grained spot every turn with no
+bias toward the dry side; needs no code of its own here. The original's own ambient sounds and state 16's cosmetic
+prop-toggle sub-animation are not implemented (no audio engine, and not an animation table - confirmed from the
+trace).
+
 ## Unit kinds (simulation: walking only)
 `UnitKind::ALL`: Shaman, Brave, Warrior, Preacher, Spy, Firewarrior, built with `Unit::new(id, owner, kind, pos)`.
 `max_health` is the original's `LIFE_<P>` (constants.md, fixed values until the file is parsed); wildmen have no

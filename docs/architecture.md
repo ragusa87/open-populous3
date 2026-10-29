@@ -50,7 +50,8 @@ each kind of object in a fixed, written order. The original's order inside a tur
    vehicle huts (`tend_vehicle_huts`);
 4. a script's flyby playing or cancelled, cleared once it's over (`tend_flyby`, `ai_script.rs`), then each
    computer tribe's own script (`tend_ai_scripts`, docs/specs/ai-scripts.md), then
-   spotting (`spot_enemies`), attacks followed (`tend_attacks`) and buildings hacked (`tend_wrecking`) (combat.md);
+   spotting (`spot_enemies`), attacks followed (`tend_attacks`), buildings hacked (`tend_wrecking`) (combat.md),
+   and idle wildmen sent off to eat or drink (`tend_wildmen`, pop3-rev-analysis.md "Wildmen");
 5. coordinators (docs/specs/coordinators.md): scans that start them (challenges, melees joined), their turns, the
    finished ones removed, their events, then the units whose coordinator is gone released, so a coordinator ending
    now is gone when its units tick;

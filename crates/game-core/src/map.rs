@@ -1292,8 +1292,8 @@ impl GameMap {
         let armageddon = self.armageddon().is_some();
         let frozen = armageddon || self.outcome.is_some();
         self.update_walls();
-        let (buildings, now) = (&self.buildings, self.now);
-        self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now));
+        let (buildings, now, terrain) = (&self.buildings, self.now, &self.terrain);
+        self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now, crate::unit::is_sea(terrain, t.cell())));
         self.tend_reloads();
         let hits = self.tend_bolts();
         dirty.extend(self.apply_events(hits));
@@ -1322,6 +1322,7 @@ impl GameMap {
             self.spot_enemies();
             self.tend_attacks();
             self.tend_wrecking();
+            self.tend_wildmen();
         }
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
@@ -2056,7 +2057,7 @@ pub(crate) fn torus_dist2(a: (u16, u16), b: (u16, u16)) -> i64 {
 }
 
 /// Cells between two world points along the farther axis, the short way around the torus.
-fn torus_cells(a: (u16, u16), b: (u16, u16)) -> i32 {
+pub(crate) fn torus_cells(a: (u16, u16), b: (u16, u16)) -> i32 {
     torus_delta(a.0, b.0).abs().max(torus_delta(a.1, b.1).abs()) / 512
 }
 
@@ -2178,6 +2179,25 @@ mod tests {
         map.buildings[i].inside = 1;
         assert_eq!(map.apply_event(WorldEvent::Raid { building: hut }), (None, vec![WorldEvent::Panic { unit: inside }]));
         assert!(matches!(map.unit(inside).unwrap().action, Action::Walking { .. }), "sent walking out by the door");
+    }
+
+    #[test]
+    fn a_tick_drops_a_trees_cell_that_has_become_open_sea_to_size_0() {
+        let mut terrain = crate::terrain::Heightmap::new(64);
+        for z in 0..64 {
+            for x in 0..64 {
+                terrain.set(x, z, 64);
+            }
+        }
+        let mut map = GameMap::bare("submerge-test", terrain, Vec::new());
+        map.trees = vec![crate::tree::Tree::new((10, 10), 0, crate::tree::MAX_SIZE)];
+        map.tick();
+        assert_eq!(map.trees[0].size, crate::tree::MAX_SIZE, "still dry: untouched");
+        for &(x, z) in &[(10, 10), (11, 10), (10, 11), (11, 11)] {
+            map.terrain.set(x, z, 0);
+        }
+        map.tick();
+        assert_eq!(map.trees[0].size, 0, "its cell is now open sea");
     }
 
     #[test]

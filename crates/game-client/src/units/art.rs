@@ -71,10 +71,14 @@ pub enum Pose {
     TauntWave,
     /// A challenge's waiting target crouching then punching: one of 3 taunts.
     TauntPunch,
+    /// A wildman eating beside a tree (pop3-rev-analysis.md "Wildmen").
+    Eat,
+    /// A wildman drinking at the shore.
+    Drink,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 30] = [
+    pub const ALL: [Pose; 32] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -105,6 +109,8 @@ impl Pose {
         Pose::TauntHide,
         Pose::TauntWave,
         Pose::TauntPunch,
+        Pose::Eat,
+        Pose::Drink,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -121,6 +127,7 @@ impl Pose {
             Pose::Pedal | Pose::Listen | Pose::Preach => Pose::Pray,
             Pose::Carbonized => Pose::Fall,
             Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => Pose::Idle,
+            Pose::Eat | Pose::Drink => Pose::Idle,
             pose => pose,
         }
     }
@@ -159,6 +166,8 @@ impl Pose {
             // puts her in one, but every pose still needs a loop to build (`Originals::art`'s own check).
             Pose::Carbonized => ShamanAnim::Fall,
             Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => ShamanAnim::Idle,
+            // Never actually shown for her either (wildman-only, `pose_of`): exhaustiveness only.
+            Pose::Eat | Pose::Drink => ShamanAnim::Idle,
         }
     }
 }
@@ -251,6 +260,8 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Tumbling => Pose::Tumble,
         Action::Dying { .. } | Action::Dead { .. } => Pose::Fall,
         Action::Spirit { .. } => Pose::Spirit,
+        Action::Grazing { drink: false, .. } => Pose::Eat,
+        Action::Grazing { drink: true, .. } => Pose::Drink,
     }
 }
 
@@ -390,6 +401,8 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Drown | Pose::Flung | Pose::Shoved => WildmanAnim::Flung,
                 Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack | Pose::Throw => WildmanAnim::Stand,
                 Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => WildmanAnim::Stand,
+                Pose::Eat => WildmanAnim::Eat,
+                Pose::Drink => WildmanAnim::Drink,
             };
             // No spirit anim known: the body lies still (the fall's last frame).
             (anim.anim(), None, (pose == Pose::Spirit).then_some(3))
@@ -433,6 +446,8 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::TauntHide => PersonAnim::TauntHide,
                 Pose::TauntWave => PersonAnim::TauntWave,
                 Pose::TauntPunch => PersonAnim::TauntPunch,
+                // Wildman-only (`pose_of`): never actually shown for any other kind.
+                Pose::Eat | Pose::Drink => PersonAnim::Stand,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }

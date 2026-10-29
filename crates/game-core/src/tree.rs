@@ -78,12 +78,16 @@ impl Tree {
         self.burning.map(|c| Tick::from_wire(now.to_wire().wrapping_sub(c.done().get())))
     }
 
-    /// One turn: its fire burns on, burning it to nothing when out; else on the original's growth turns, `grow`.
-    pub fn tick(&mut self, now: Tick) {
+    /// One turn: its fire burns on, burning it to nothing when out; else, if its cell has become open sea (a land
+    /// bridge, flatten, erosion, earthquake...), it drops to size 0 at once and stays dormant, like a burnt one -
+    /// `[ours]`, reported but not traced; else on the original's growth turns, `grow`.
+    pub fn tick(&mut self, now: Tick, submerged: bool) {
         if let Some(fire) = self.burning.as_mut() {
             if fire.tick() {
                 (self.burning, self.size, self.growth) = (None, 0, 0);
             }
+        } else if submerged {
+            (self.size, self.growth) = (0, 0);
         } else if GROW_EVERY.fires(now, 0) {
             self.grow();
         }
@@ -170,7 +174,7 @@ mod tests {
 
     fn run(t: &mut Tree, turns: std::ops::RangeInclusive<u32>) {
         for n in turns {
-            t.tick(Tick::from_wire(n));
+            t.tick(Tick::from_wire(n), false);
         }
     }
 
@@ -200,6 +204,19 @@ mod tests {
         assert_eq!(t.growth, WOOD_GROW);
         run(&mut t, 32..=32);
         assert_eq!(t.growth, 2 * WOOD_GROW);
+    }
+
+    #[test]
+    fn a_submerged_tree_drops_to_size_0_at_once_and_does_not_regrow_while_wet() {
+        let mut t = Tree::new((5, 5), 0, MAX_SIZE);
+        t.tick(Tick::from_wire(1), true);
+        assert_eq!((t.size, t.growth, t.cell()), (0, 0, (5, 5)), "dormant at once, same spot");
+        for n in 2..=800 {
+            t.tick(Tick::from_wire(n), true);
+        }
+        assert_eq!(t.size, 0, "would have grown back by now if it weren't still wet");
+        run(&mut t, 801..=2600);
+        assert!(t.size >= 1, "grows normally again once dry");
     }
 
     #[test]
