@@ -1683,6 +1683,12 @@ impl GameMap {
                 self.set_fire(building);
                 None
             }
+            WorldEvent::Wear { building, amount } => {
+                if let Some(i) = self.building_index(building) {
+                    self.buildings[i].wear_down(amount);
+                }
+                None
+            }
             WorldEvent::Destroy { building } => self.burn_down(building).pop(),
             WorldEvent::BurnTrees { cell } => {
                 self.trees.iter_mut().filter(|t| t.cell() == cell).for_each(|t| {

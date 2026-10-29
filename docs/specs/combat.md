@@ -166,9 +166,10 @@ middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `
   and gates 16 000; the prison 22 000; a vault never) the wear drops by the limit and it loses a piece of wood
   (`lose_a_piece`): damage smoke, a large building's people thrown out [which kinds are large: guess], no repairs
   for `REPAIR_DELAY` (1200 turns); with no wood left it is destroyed (its people thrown out) and leaves ashes.
-- Not yet: enemies standing on a plan counting as its people, blasts' and firewarriors' wear, the flying faces of
-  the partial explosion, the player warned once, the attack going on from where it stands when no way leads to its
-  spot.
+- Firewarrior bolts and Blast's own blast add wear too (`BLAST_DAMAGE_BLDG` 40 per turn in range, `firebolt::TARGET_DAMAGE`
+  100 when a bolt's own target is the building), feeding the same accumulator as hacking.
+- Not yet: enemies standing on a plan counting as its people, the flying faces of the partial explosion, the player
+  warned once, the attack going on from where it stands when no way leads to its spot.
 
 ## Ashes
 `crate::ashes` ("Building ashes" [exe]): a building destroyed by losing its last piece of wood (worn down by

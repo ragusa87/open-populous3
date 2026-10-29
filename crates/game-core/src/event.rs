@@ -30,6 +30,9 @@ pub enum WorldEvent {
     /// sting on a vehicle (TODO.md "Units").
     PutOut { vehicle: VehicleId },
     SetFire { building: BuildingId },
+    /// `amount` of wear, through the same accumulator "Attacking a building" hacking and firewarrior bolts feed
+    /// (`Building::wear_down`): a blast's own `BLAST_DAMAGE_BLDG` (combat.md "Attacking a building").
+    Wear { building: BuildingId, amount: u16 },
     /// Removes the building outright, bypassing the normal wood/wear-down model (`GameMap::burn_down`): Volcano's
     /// turn-110 destruction (docs/plans/spells.md "Volcano"), accepted as simpler than modelling a dedicated
     /// instant-destruction path through `fire`/`wreck`.
