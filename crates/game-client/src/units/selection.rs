@@ -559,7 +559,11 @@ mod tests {
         assert_eq!(attack_click(&map, &[warrior], Some(HoverTarget::Unit(own))), None, "not its own");
         assert_eq!(attack_click(&map, &[], Some(HoverTarget::Unit(enemy))), None);
         map.units[enemy].kind = UnitKind::Wildman;
-        assert_eq!(attack_click(&map, &[brave], Some(HoverTarget::Unit(enemy))), None, "wildmen never fight");
+        assert_eq!(
+            attack_click(&map, &[brave], Some(HoverTarget::Unit(enemy))),
+            Some(vec![Command::OrderUnit { player: PLAYER, unit: brave, order: Order::Attack { target } }]),
+            "a direct click may attack a wildman, only the automatic scan excludes it (attack.rs)"
+        );
     }
 
     #[test]

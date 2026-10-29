@@ -48,7 +48,9 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
 ## Attacking
 - `Order::Attack { target }` (`Target::Unit` or `Target::Building`), from a left click on an enemy person or
   building with own people selected (`units::selection::attack_click`). Only those that may attack it go
-  (`attack::may_attack`): both fight (never a wildman), other tribes, the target alive. A building only if it
+  (`attack::may_attack`): both fight, other tribes, the target alive. A wildman is a valid target here (not for
+  the automatic proximity scan, below): the original only confirms that scan skips it, whether an explicit
+  player order also refuses one is untraced either way - a guess that it does not (TODO.md "Units"). A building only if it
   belongs to another tribe and wears down (`may_attack_building`): never a neutral one (a vault of knowledge, a
   totem), which is prayed at; a click on it gives the prayer orders as before. A firewarrior's attack throws fire
   from afar ("Firebolts").
@@ -82,8 +84,12 @@ A coordinator (`challenge::Challenge`, coordinators.md) for one attacker and one
 - While waiting, the target faces the attacker (`WorldEvent::Face`, `Unit::face`: ours has no separate "held
   look-at" field - with nothing else moving its body while it only waits, setting the one `facing` field each turn
   reads the same) and taunts on a 1 in 8 chance per turn (`challenge::taunts`; pop3-rev-analysis.md "Pre-fight",
-  confirmed): kept on `Challenge::taunted` (the last turn it fired) for when there is a pose and the three taunt
-  animations to show for it (TODO.md "Units").
+  confirmed): kept on `Challenge::taunted` (the last turn it fired, and which of the 3 - `WorldEvent::Taunted`
+  copies both onto the target's own `Unit::taunted` so the client's pose can read them without the coordinator).
+  Drawn when it fires: one of the 3 original anims (48/49/50, animations.md - brave only, `Pose::TauntHide/Wave/
+  Punch`, `units::art::original_anim`; other kinds and CC0 art fall back to idle), held for a short guessed window
+  (`units::art::TAUNT_DISPLAY`) - *which* of the 3 plays is only confirmed "at random" [exe], the second draw that
+  picks one here is not itself traced.
 - Not yet: the original's option with no shove (a real level/script option, not a cheat - the same flag also
   disables Melee's own knockback variant, see "Melee" below); ground sliding instead of `SHOVE_LIFT` (push
   mechanics unread at the exe level either way). The "third approach, a target at its building" is not a separate
@@ -200,10 +206,13 @@ followed each turn (`GameMap::spot_enemies`).
   cell; busy (fighting, panicking, thrown, casting, drowning, entering, inside, dead), no look at all [the order
   kinds' split is the analysis' guess].
 - What: the square of cells (sight rounded down to even, + 1) around it, row by row from a corner (`square`); the
-  first match wins, not the nearest: an enemy person it may attack, alive, outside, on the ground, not thrown and
-  not listening to a sermon [guess: not traced, but it would undo the preacher's sit-down on its very next look],
-  and not in a melee; when idle, also someone in a melee (to join it) or an enemy building it can wear down. It then
-  attacks it (`Order::Attack`'s path) [ours: the original gives itself an "attack around this cell" order].
+  first match wins, not the nearest: an enemy person it may attack and that is not a wildman (0xFF tribeless,
+  confirmed - pop3-rev-analysis.md "Wildmen"; `attack::may_attack` itself no longer excludes one on its own, an
+  explicit player order is let through, so this scan filters it separately), alive, outside, on the ground, not
+  thrown and not listening to a sermon [guess: not traced, but it would undo the preacher's sit-down on its very
+  next look], and not in a melee; when idle, also someone in a melee (to join it) or an enemy building it can wear
+  down. It then attacks it (`Order::Attack`'s path) [ours: the original gives itself an "attack around this cell"
+  order].
 - `UnitGrid`: the living people outside by cell, sorted, built only on a look turn.
 
 ## Firebolts

@@ -1705,6 +1705,12 @@ impl GameMap {
                 }
                 None
             }
+            WorldEvent::Taunted { unit, at, variant } => {
+                if let Some(u) = self.unit_mut(unit) {
+                    u.taunt(at, variant);
+                }
+                None
+            }
             WorldEvent::Struck { attacker, target, blow, knock } => {
                 self.struck(attacker, target, blow, knock);
                 None

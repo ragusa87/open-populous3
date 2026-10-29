@@ -213,7 +213,7 @@ impl UnitSprites {
     /// closest thing to "excited" she has) — forced with no `Action::Casting` under it, so `frame_index` loops it
     /// by time instead of a one-shot countdown, same as Stranded already does for everyone else.
     pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, still: bool, yaw: f32, clock: &SimClock, now: SimNow, celebrating: bool) -> Option<&FrameAsset> {
-        let (mut pose, facing) = worship.map_or((art::pose_of(unit), unit.facing), |f| (Pose::Pray, f));
+        let (mut pose, facing) = worship.map_or((art::pose_of(unit, now.tick), unit.facing), |f| (Pose::Pray, f));
         if celebrating && matches!(pose, Pose::Idle | Pose::CarryIdle) {
             pose = if sheets::plays(unit.kind, Pose::Stranded) {
                 Pose::Stranded

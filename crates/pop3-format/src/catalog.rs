@@ -247,6 +247,16 @@ pub enum PersonAnim {
     /// sermon has 4 more identified phases around it (animations.md "`HSPR0-0.DAT` by index", anims 20,
     /// 21, 23, 24) not wired up here [guess: picked as the best single standing, looping phase].
     Preach,
+    /// Struck by lightning, carbonized (4 frames, brave only - unit-art.md): every material drawn black
+    /// in post, like the magenta key.
+    Carbonized,
+    /// A challenge's waiting target hiding its eyes (8 frames): one of 3 taunts, brave only (`Pose::Taunt*`).
+    TauntHide,
+    /// A challenge's waiting target waving an arm (9 frames): one of 3 taunts, brave only.
+    TauntWave,
+    /// A challenge's waiting target crouching then punching, not a fight move (7 frames): one of 3
+    /// taunts, brave only.
+    TauntPunch,
 }
 
 /// The frame of `PersonAnim::ArmsUp` standing with both arms up.
@@ -276,6 +286,10 @@ impl PersonAnim {
             PersonAnim::Pedal => 51,
             PersonAnim::Listen => 18,
             PersonAnim::Preach => 22,
+            PersonAnim::Carbonized => 97,
+            PersonAnim::TauntHide => 48,
+            PersonAnim::TauntWave => 49,
+            PersonAnim::TauntPunch => 50,
         }
     }
 }

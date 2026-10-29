@@ -67,13 +67,17 @@ pub struct Challenge {
     pub target: UnitId,
     pub approach: Approach,
     pub phase: Phase,
-    /// The last turn the waiting target taunted ("Pre-fight" [exe]): no art or pose for it yet (TODO.md "Units"),
-    /// kept for when there is.
-    pub taunted: Option<Tick>,
+    /// The last turn the waiting target taunted, and which of the 3 (anims 48-50, animations.md) - a
+    /// guess which one is picked how (confirmed only that it is "at random" [exe]; a second draw here,
+    /// not traced against the original beyond that).
+    pub taunted: Option<(Tick, u8)>,
 }
 
 /// The target taunts on this chance per turn while waiting ("Pre-fight" [exe], confirmed).
 pub const TAUNT_CHANCE: u32 = 8;
+
+/// How many different taunts there are (animations.md 48-50).
+pub const TAUNT_VARIANTS: u32 = 3;
 
 /// Whether the draw `r` taunts: 1 chance in `TAUNT_CHANCE`.
 pub fn taunts(r: u32) -> bool {
@@ -138,7 +142,9 @@ impl Coordinator for Challenge {
         if waiting == Role::Waiting {
             events.push(WorldEvent::Face { unit: t.id, at: (a.x, a.z) });
             if taunts(rng.next_u32()) {
-                self.taunted = Some(now);
+                let variant = (rng.next_u32() % TAUNT_VARIANTS) as u8;
+                self.taunted = Some((now, variant));
+                events.push(WorldEvent::Taunted { unit: t.id, at: now, variant });
             }
         }
         match self.phase {

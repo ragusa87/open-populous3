@@ -3,6 +3,7 @@
 //! everything else generated (`procedural`). Which frame to show is decided here from the simulated action.
 
 use crate::sim_time::{progress, SimNow};
+use game_core::effect::DamageKind;
 use game_core::time::{Tick, Ticks};
 use game_core::unit::{Action, UnitKind};
 use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
@@ -62,10 +63,18 @@ pub enum Pose {
     Listen,
     /// Preaching to a sermon's listeners.
     Preach,
+    /// Struck by lightning, charred (combat.md "Firebolts"; `Unit::death_cause`).
+    Carbonized,
+    /// A challenge's waiting target hiding its eyes: one of 3 taunts (combat.md "Challenge").
+    TauntHide,
+    /// A challenge's waiting target waving an arm: one of 3 taunts.
+    TauntWave,
+    /// A challenge's waiting target crouching then punching: one of 3 taunts.
+    TauntPunch,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 26] = [
+    pub const ALL: [Pose; 30] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -92,6 +101,10 @@ impl Pose {
         Pose::Pedal,
         Pose::Listen,
         Pose::Preach,
+        Pose::Carbonized,
+        Pose::TauntHide,
+        Pose::TauntWave,
+        Pose::TauntPunch,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -106,13 +119,16 @@ impl Pose {
             Pose::Throw => Pose::Cast,
             Pose::Shoved => Pose::Fall,
             Pose::Pedal | Pose::Listen | Pose::Preach => Pose::Pray,
+            Pose::Carbonized => Pose::Fall,
+            Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => Pose::Idle,
             pose => pose,
         }
     }
 
-    /// Only braves have original art for it (the wood and flattening poses).
+    /// Only braves have original art for it (the wood and flattening poses, the carbonize and taunt
+    /// anims - unit-art.md).
     fn brave_only(self) -> bool {
-        matches!(self, Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer)
+        matches!(self, Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Carbonized | Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch)
     }
 
     /// Frames per second of looping poses.
@@ -139,6 +155,10 @@ impl Pose {
             Pose::Kick => ShamanAnim::Kick,
             Pose::Reel | Pose::Shoved | Pose::Hack => ShamanAnim::Idle,
             Pose::Throw => ShamanAnim::Cast,
+            // She has no art of her own for these brave-only anims (unit-art.md): `pose_of` never actually
+            // puts her in one, but every pose still needs a loop to build (`Originals::art`'s own check).
+            Pose::Carbonized => ShamanAnim::Fall,
+            Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => ShamanAnim::Idle,
         }
     }
 }
@@ -172,9 +192,14 @@ fn challenge_pose(role: game_core::challenge::Role, carrying: bool) -> Pose {
     }
 }
 
-/// The pose `u` is drawn in: aboard a vehicle and idle or waiting to throw, pedalling it; else by its action
-/// (`pose_for`).
-pub fn pose_of(u: &game_core::unit::Unit) -> Pose {
+/// How long a taunt (combat.md "Challenge") holds its pose once it fires: a guess, roughly the length
+/// of the shortest of the 3 original anims (animations.md 48-50) at an ordinary 6 fps.
+const TAUNT_DISPLAY: Ticks = Ticks::new(12);
+
+/// The pose `u` is drawn in: aboard a vehicle and idle or waiting to throw, pedalling it; killed by
+/// lightning, carbonized until its spirit rises; waiting in a challenge and recently taunted, one of 3;
+/// else by its action (`pose_for`). `now`: the drawn moment, for the taunt's own short display window.
+pub fn pose_of(u: &game_core::unit::Unit, now: Tick) -> Pose {
     if u.aboard.is_some() && matches!(u.action, Action::Idle | Action::Attacking { .. }) {
         return Pose::Pedal;
     }
@@ -182,6 +207,15 @@ pub fn pose_of(u: &game_core::unit::Unit) -> Pose {
         && (u.x, u.z) != at
     {
         return if u.carrying > 0 { Pose::CarryWalk } else { Pose::Walk };
+    }
+    if matches!(u.action, Action::Dying { .. } | Action::Dead { .. }) && u.death_cause() == Some(DamageKind::Lightning) {
+        return Pose::Carbonized;
+    }
+    if let Action::Challenge { role: game_core::challenge::Role::Waiting, .. } = u.action
+        && let Some((at, variant)) = u.taunted()
+        && (0..TAUNT_DISPLAY.get() as i32).contains(&now.since(at))
+    {
+        return [Pose::TauntHide, Pose::TauntWave, Pose::TauntPunch][variant as usize % 3];
     }
     pose_for(&u.action, u.carrying > 0, u.motion.airborne())
 }
@@ -352,9 +386,10 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Idle | Pose::Cast | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Jump | Pose::Hammer => WildmanAnim::Stand,
                 Pose::Walk | Pose::CarryWalk | Pose::Panic => WildmanAnim::Walk,
                 Pose::Pray | Pose::Pedal | Pose::Listen | Pose::Preach => WildmanAnim::Sit,
-                Pose::Fall | Pose::Tumble | Pose::Spirit => WildmanAnim::Tumble,
+                Pose::Fall | Pose::Tumble | Pose::Spirit | Pose::Carbonized => WildmanAnim::Tumble,
                 Pose::Drown | Pose::Flung | Pose::Shoved => WildmanAnim::Flung,
                 Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack | Pose::Throw => WildmanAnim::Stand,
+                Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => WildmanAnim::Stand,
             };
             // No spirit anim known: the body lies still (the fall's last frame).
             (anim.anim(), None, (pose == Pose::Spirit).then_some(3))
@@ -394,6 +429,10 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Pedal => PersonAnim::Pedal,
                 Pose::Listen => PersonAnim::Listen,
                 Pose::Preach => PersonAnim::Preach,
+                Pose::Carbonized => PersonAnim::Carbonized,
+                Pose::TauntHide => PersonAnim::TauntHide,
+                Pose::TauntWave => PersonAnim::TauntWave,
+                Pose::TauntPunch => PersonAnim::TauntPunch,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }

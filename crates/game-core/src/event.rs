@@ -4,6 +4,7 @@
 use crate::building::BuildingId;
 use crate::effect::{DamageKind, Effect, TerrainChange};
 use crate::motion::Velocity;
+use crate::time::Tick;
 use crate::unit::UnitId;
 use crate::vehicle::VehicleId;
 use std::collections::VecDeque;
@@ -48,6 +49,8 @@ pub enum WorldEvent {
     Face { unit: UnitId, at: (u16, u16) },
     /// The attacker of a challenge starts its shove (`GameMap::shove`).
     Shove { attacker: UnitId },
+    /// A challenge's waiting target taunts, one of 3 (`combat::challenge::taunts`, combat.md "Challenge").
+    Taunted { unit: UnitId, at: Tick, variant: u8 },
     /// A blow in a melee (`GameMap::struck`); `knock`: the one struck is thrown back so, once it has reeled.
     Struck { attacker: UnitId, target: UnitId, blow: crate::combat::Blow, knock: Option<Velocity> },
     /// A challenge won: the two fight in a new melee (`GameMap::start_melee`).

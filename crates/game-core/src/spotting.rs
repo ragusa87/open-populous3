@@ -87,7 +87,9 @@ impl GameMap {
     /// The first enemy unit `i` sees, cell by cell: a person to fight, else (when idle) one already fighting or a
     /// building. An invisible person is skipped entirely (traced, pop3-rev-analysis.md "Per spell" 6): this is
     /// auto-targeting only, a player who already has their id can still order an attack on them directly
-    /// (`attack::may_attack`, untraced either way).
+    /// (`attack::may_attack`, untraced either way). A wildman (0xFF tribeless) is excluded here too, confirmed
+    /// (pop3-rev-analysis.md "Wildmen"): `attack::may_attack` itself no longer excludes one, since an explicit
+    /// player order is allowed through, so the scan must filter it out on its own.
     fn first_seen(&self, i: usize, grid: &UnitGrid) -> Option<Target> {
         let u = &self.units[i];
         let sight = self.looking(u)?;
@@ -95,7 +97,10 @@ impl GameMap {
         let idle = matches!(u.action, Action::Idle | Action::Holding { .. }) && !throws;
         let size = self.terrain.size() as i32;
         square(u.cell(), sight, size).find_map(|cell| {
-            let people = grid.at(cell).filter_map(|id| self.unit(id)).filter(|t| crate::attack::may_attack(u, t) && !t.locked() && !t.statuses.invisible.is_on() && !self.tribes.allied(u.owner, t.owner));
+            let people = grid
+                .at(cell)
+                .filter_map(|id| self.unit(id))
+                .filter(|t| crate::attack::may_attack(u, t) && t.kind != UnitKind::Wildman && !t.locked() && !t.statuses.invisible.is_on() && !self.tribes.allied(u.owner, t.owner));
             let mut fighting = None;
             for t in people {
                 match self.linked(t) {
@@ -149,6 +154,14 @@ mod tests {
         let (mut map, a, _) = watch(3);
         map.run(Ticks::new(4));
         assert_eq!(attacking(&map, a), None);
+    }
+
+    #[test]
+    fn the_automatic_scan_never_picks_a_wildman_even_in_reach() {
+        let (mut map, a, t) = watch(1);
+        map.unit_mut(t).unwrap().kind = UnitKind::Wildman;
+        map.run(Ticks::new(4));
+        assert_eq!(attacking(&map, a), None, "the scan skips it, unlike an explicit order (attack.rs)");
     }
 
     #[test]

@@ -62,6 +62,9 @@ pub fn frame_count(pose: Pose) -> usize {
         Pose::Idle | Pose::Pray | Pose::Drown | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Shoved | Pose::Hack | Pose::Throw | Pose::Pedal | Pose::Listen | Pose::Preach => 4,
         Pose::Walk | Pose::Fall | Pose::CarryWalk | Pose::Panic => 8,
         Pose::Cast | Pose::Jump => 12,
+        // No CC0 clip authored yet (unit-art.md "Planned poses"): the fallback pose's own frame count.
+        Pose::Carbonized => frame_count(Pose::Fall),
+        Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => frame_count(Pose::Idle),
     }
 }
 
@@ -163,6 +166,9 @@ fn body(pose: Pose, view: View, f: usize) -> Body {
             let k = (f % 2) as f32 * 3.0;
             Body { hands: [(-8.0, 26.0 + k), (8.0, 29.0 - k)], lift: -8.0 - (f % 2) as f32, ..base }
         }
+        // No CC0 clip authored yet (unit-art.md "Planned poses"): the fallback pose's own figure.
+        Pose::Carbonized => body(Pose::Fall, view, f),
+        Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => body(Pose::Idle, view, f),
     }
 }
 

@@ -372,6 +372,10 @@ pub struct Unit {
     pub health: Health,
     /// Who hurt it last, and why if that killed it (`GameMap::damage`'s own bookkeeping, `hurt.rs`).
     hurt: Hurt,
+    /// The last turn it taunted while waiting in a challenge, and which of the 3 taunts
+    /// (combat.md "Challenge"): a short display window for the client's pose, not cleared once it
+    /// passes - `pose_of` must check recency itself.
+    taunted: Option<(Tick, u8)>,
     /// Free motion when flung or falling (still while walking or standing).
     pub motion: Motion,
     pub statuses: Statuses,
@@ -454,6 +458,7 @@ impl Unit {
             facing: 0,
             health: Health::full(kind.max_health()),
             hurt: Hurt::default(),
+            taunted: None,
             motion: Motion::STILL,
             statuses: Statuses::default(),
             action: Action::Idle,
@@ -1193,6 +1198,15 @@ impl Unit {
         if (dx, dz) != (0, 0) {
             self.facing = octant(dx, dz);
         }
+    }
+
+    /// One of the 3 taunts (combat.md "Challenge"), the turn it started.
+    pub fn taunted(&self) -> Option<(Tick, u8)> {
+        self.taunted
+    }
+
+    pub(crate) fn taunt(&mut self, at: Tick, variant: u8) {
+        self.taunted = Some((at, variant));
     }
 
     /// One turn of its stance in a melee: to its place, on guard, striking, reeling then thrown back.
