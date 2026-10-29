@@ -912,6 +912,19 @@ impl GameMap {
         dirty
     }
 
+    /// A shaman's own death (pop3-rev-analysis.md "Shaman death"): her tribe loses `SHAMEN_DEAD_MANA_PCT_LOST`
+    /// (25 %, exe-confirmed) of `base` from its bank. `base` is the bank itself here - the file's own "needed +
+    /// stored building mana" alternative only applies to a controller-type-2 ("human") tribe, and no controller
+    /// type is modelled yet (the same gap `training::train_cost` already has). The killer's own share
+    /// (`SHAMEN_DEAD_MANA_PCT_GAIN`) is exe-confirmed 0 %, not the file's 25 % - always nothing to deliver, so the
+    /// delayed reservoir it would go through (TODO.md "Mana") is left unimplemented rather than built to move 0.
+    fn shaman_died(&mut self, i: usize) {
+        let owner = self.units[i].owner as usize;
+        let Some(pool) = self.mana.get_mut(owner) else { return };
+        let base = pool.bank;
+        pool.bank = pool.bank.saturating_sub(crate::mana::Mana(base.0 * crate::mana::SHAMEN_DEAD_MANA_PCT_LOST as u32 / 100));
+    }
+
     /// `spell` cast by `player` takes effect now: its effect starts (ticking from the next turn), or the terrain
     /// brush applies (the region it changed).
     fn release(&mut self, player: u8, spell: Spell) -> Option<DirtyRect> {
@@ -1291,6 +1304,10 @@ impl GameMap {
         // for the rest of the game: nothing trains, builds, wrecks, fights or reincarnates in the "victory lap".
         let armageddon = self.armageddon().is_some();
         let frozen = armageddon || self.outcome.is_some();
+        // Caught at the end of this turn, whatever killed her this turn (melee, a spell, drowning, stranded,
+        // lava...): `Unit::die` sets `Action::Dying` synchronously wherever damage is dealt, not through a
+        // tick-returned event, so there is no single call site to hook a "just died" check into instead.
+        let shamans_alive: Vec<bool> = self.units.iter().map(|u| u.kind == UnitKind::Shaman && u.is_alive()).collect();
         self.update_walls();
         let (buildings, now, terrain) = (&self.buildings, self.now, &self.terrain);
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now, crate::unit::is_sea(terrain, t.cell())));
@@ -1385,6 +1402,11 @@ impl GameMap {
             self.drop_wood();
         }
         self.count_inside();
+        for (i, &was_alive) in shamans_alive.iter().enumerate() {
+            if was_alive && !self.units[i].is_alive() {
+                self.shaman_died(i);
+            }
+        }
         if !frozen {
             let incomes: Vec<crate::mana::Mana> = (0..self.mana.len()).map(|player| self.mana_income(player as u8)).collect();
             let buildings = &mut self.buildings;
@@ -2179,6 +2201,43 @@ mod tests {
         map.buildings[i].inside = 1;
         assert_eq!(map.apply_event(WorldEvent::Raid { building: hut }), (None, vec![WorldEvent::Panic { unit: inside }]));
         assert!(matches!(map.unit(inside).unwrap().action, Action::Walking { .. }), "sent walking out by the door");
+    }
+
+    #[test]
+    fn a_shamans_death_costs_her_tribe_a_quarter_of_its_bank() {
+        let mut map = GameMap::sandbox_walk();
+        let before = map.mana[0].bank;
+        assert!(before > crate::mana::Mana::ZERO, "test setup: something to lose");
+        let i = map.unit_index(map.shaman_of(0).unwrap().id).unwrap();
+        map.shaman_died(i);
+        assert_eq!(map.mana[0].bank, before.saturating_sub(crate::mana::Mana(before.0 / 4)), "lost a quarter");
+    }
+
+    #[test]
+    fn a_shaman_killed_mid_tick_is_caught_the_same_tick_whatever_the_cause() {
+        // A real kill (unlike calling `damage` directly before `tick`, which would already show her dead by the
+        // time the tick's own before/after snapshot runs - `Unit::die` sets `Action::Dying` synchronously, not
+        // through a tick-returned event): an effect resolved from inside `tick` itself, same as any spell.
+        let mut map = GameMap::sandbox_walk();
+        let shaman = map.shaman_of(0).unwrap();
+        let (owner, at) = (shaman.owner, (shaman.x, shaman.z));
+        let before = map.mana[owner as usize].bank;
+        map.add_effect(crate::lightning::effect(1, at));
+        map.tick();
+        assert!(map.shaman_of(0).is_none_or(|s| !s.is_alive()), "test setup: the lightning killed her");
+        assert_eq!(map.mana[owner as usize].bank, before.saturating_sub(crate::mana::Mana(before.0 / 4)), "caught within the same tick the lightning killed her");
+    }
+
+    #[test]
+    fn a_living_shaman_or_another_kinds_death_costs_the_tribe_nothing() {
+        let mut map = GameMap::sandbox_units();
+        let before = map.mana[0].bank;
+        map.tick();
+        assert_eq!(map.mana[0].bank, before, "nobody died");
+        let brave = map.units.iter().find(|u| u.owner == 0 && u.kind != UnitKind::Shaman).unwrap().id;
+        map.damage(brave, u16::MAX, DamageKind::Lightning, None);
+        map.tick();
+        assert_eq!(map.mana[0].bank, before, "not the shaman");
     }
 
     #[test]

@@ -297,14 +297,17 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   a single income tick regardless of population - checked live: a lone shaman now takes Blast (4 charges, cost 40)
   about 11 s, not instantly.
 - [ ] Delayed reservoir (gifts, shaman kills), shaman death losses (pop3-rev-analysis.md "Mana rules").
-- [ ] Shaman-death mana dispatch (pop3-rev-analysis.md "Shaman death"): not implemented at all yet (no code in
-  `mana.rs`). The tribe loses `base * SHAMEN_DEAD_MANA_%_LOST` (`base` = bank, or `needed + stored building mana`
-  for a human tribe); if the shaman's last attacker (now tracked, `Unit::last_attacker`/`hurt.rs`) is another
-  tribe, that tribe is owed `base * SHAMEN_DEAD_MANA_%_GAIN` through the delayed reservoir above (`give_mana_delayed`,
-  1000 turns/83 s). Note the file/exe split already caught in the trace: the level file declares 25 %/25 % for
-  `_LOST`/`_GAIN`, but the exe's own disassembly-confirmed value is 25 %/**0 %** - spells.md's current summary line
-  only cites the file's 25 %/25 % and should be corrected once this lands, since matching the exe faithfully means
-  no mana ever actually reaches the killer.
+- [x] Shaman-death mana dispatch done for the loss side (`GameMap::shaman_died`, spells.md "Mana"): the tribe
+  loses `base * SHAMEN_DEAD_MANA_PCT_LOST` (25 %, file and exe agree; `base` = bank only - the file's own "needed
+  + stored building mana" alternative for a human/controller-type-2 tribe is still the same unmodelled-controller
+  gap `training::train_cost` already has). Caught by comparing every shaman's alive-before/alive-after across a
+  tick (`Unit::die` sets `Action::Dying` synchronously wherever damage lands, not through a tick-returned event,
+  so there is no single call site to hook instead) - this catches every cause (melee, a spell, drowning,
+  stranded, lava...), not just combat. The killer's own share (`SHAMEN_DEAD_MANA_PCT_GAIN`) is exe-confirmed
+  **0 %, not the file's 25 %** - spells.md corrected to the exe's own 25 %/0 % split. Left deliberately
+  unimplemented: the delayed reservoir (`give_mana_delayed`, 1000 turns/83 s) the killer's share would go
+  through - with the exe's own 0 % it would always move nothing, so building it now would be dead code; revisit
+  if a later session finds the file's 25 % is what actually governs instead.
 - [ ] A cast's mana cost: the original also takes the cost from `incoming` when casting; our charges are prepaid. Check whether a cast takes both.
 - [ ] Spell share inside the distribution: the original also splits evenly between the learned, unblocked spells that are not full (pop3-rev-analysis.md "Distribution"); check where it puts the odd mana (ours: the first ones in book order).
 - [ ] Spell charges from `SP_1_OFF_MAX` instead of `max_charges()` from the cost.

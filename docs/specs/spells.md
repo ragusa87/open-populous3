@@ -74,9 +74,19 @@ Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, us
   (`production::top_up`); what is left banks (capped at `MAX_MANA`). Only this changes the bank, the charges and
   the stores.
 
-`received` is the last income, `used` what went into spells since then. Starts at `START_MANA`. Not done: the
-delayed reservoir, a cast's own cost (`incoming -= cost` in the original, on top of our prepaid charges?), a
-negative `incoming` taking mana back from the training stores, and the stores counted in the shaman death loss.
+`received` is the last income, `used` what went into spells since then. Starts at `START_MANA`.
+
+Shaman death (`GameMap::shaman_died`, pop3-rev-analysis.md "Shaman death"): caught at the end of whatever tick
+kills her (melee, a spell, drowning, stranded, lava...) by comparing alive-before/alive-after, since `Unit::die`
+sets `Action::Dying` synchronously wherever damage is dealt rather than through a tick-returned event. Her tribe
+loses `SHAMEN_DEAD_MANA_PCT_LOST` (25 %, file and exe agree) of `base` from its bank - `base` is the bank alone
+here; the file's own "needed + stored building mana" alternative applies only to a controller-type-2 ("human")
+tribe, and no controller type is modelled yet (the same gap `training::train_cost` has). The killer's own share
+(`SHAMEN_DEAD_MANA_PCT_GAIN`) is exe-confirmed **0 %, not the file's 25 %** - matching the exe faithfully means no
+mana ever actually reaches the killer, so the delayed reservoir it would go through (1000 turns) is left
+unimplemented rather than built to move nothing. Not done: a cast's own cost (`incoming -= cost` in the original,
+on top of our prepaid charges?), a negative `incoming` taking mana back from the training stores, and the stores
+counted into the shaman death loss's own `base` for a human tribe.
 
 The HUD mana bar (`hud/mana.rs`, `ManaPool::advisor_fraction`) is not `bank` against `MAX_MANA`
 (pop3-rev-analysis.md "The mana bar (HUD)"): always full with nothing charging (`advisor_eta` zero, from

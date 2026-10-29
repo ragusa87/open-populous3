@@ -42,6 +42,12 @@ pub const MAX_MANA: Mana = Mana(1_000_000);
 pub const START_MANA: Mana = Mana(30_000);
 /// Income rhythm: `MANA_UPDATE_FREQ` 15, every 16 turns.
 pub const MANA_EVERY: Every = Every::new(16);
+/// `SHAMEN_DEAD_MANA_%_LOST`: the tribe's own share of `base` lost when its shaman dies (pop3-rev-analysis.md
+/// "Shaman death"). File and exe agree: 25.
+pub const SHAMEN_DEAD_MANA_PCT_LOST: u32 = 25;
+/// `SHAMEN_DEAD_MANA_%_GAIN`: the killer tribe's own share, through a delayed reservoir (1000 turns) not
+/// implemented yet - exe-confirmed 0, not the file's 25, so there is nothing to deliver either way.
+pub const SHAMEN_DEAD_MANA_PCT_GAIN: u32 = 0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ManaPool {
