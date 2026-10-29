@@ -969,6 +969,13 @@ impl Unit {
             Action::Gathered { .. } => {}
             Action::Tumbling => {
                 if self.motion.is_still() {
+                    // A fatal hit taken mid-tumble is held off (`take_damage`'s own `!self.thrown()` guard,
+                    // `thrown()` true for the whole of `Action::Tumbling`) rather than lost: catch up on it now
+                    // that the hold-off itself is ending, instead of settling back to Idle at zero health.
+                    if self.health.is_zero() {
+                        self.die();
+                        return Some(UnitEvent::Died);
+                    }
                     self.action = Action::Idle;
                 }
             }
@@ -2175,6 +2182,18 @@ mod tests {
         u.action = Action::Tumbling;
         assert!(u.take_damage(SHAMAN_MAX_HEALTH), "a fatal hit");
         assert_eq!((u.action, u.health.is_zero()), (Action::Tumbling, true), "still tumbling, dying held off");
+    }
+
+    #[test]
+    fn a_held_off_death_catches_up_once_tumbling_actually_settles_not_lost_to_idle() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.motion = Motion::STILL;
+        u.action = Action::Tumbling;
+        assert!(u.take_damage(SHAMAN_MAX_HEALTH), "a fatal hit, held off while tumbling");
+        let events = run(&mut u, &t, &site, 1);
+        assert_eq!(events, [UnitEvent::Died], "caught up now that it has actually settled, not silently dropped");
+        assert!(matches!(u.action, Action::Dying { .. }), "not left idle at zero health");
     }
 
     #[test]
