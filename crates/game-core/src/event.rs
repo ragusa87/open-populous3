@@ -51,6 +51,9 @@ pub enum WorldEvent {
     Shove { attacker: UnitId },
     /// A challenge's waiting target taunts, one of 3 (`combat::challenge::taunts`, combat.md "Challenge").
     Taunted { unit: UnitId, at: Tick, variant: u8 },
+    /// Earthquake's own building-shake (`earthquake::Earthquake::shake`): one piece of wood lost outright, a large
+    /// building's occupants out regardless, a partial explosion only if that was its last piece.
+    Shake { building: BuildingId },
     /// A blow in a melee (`GameMap::struck`); `knock`: the one struck is thrown back so, once it has reeled.
     Struck { attacker: UnitId, target: UnitId, blow: crate::combat::Blow, knock: Option<Velocity> },
     /// A challenge won: the two fight in a new melee (`GameMap::start_melee`).

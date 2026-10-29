@@ -1676,6 +1676,19 @@ impl GameMap {
                 follow_ups = self.throw_out(building);
                 None
             }
+            WorldEvent::Shake { building } => {
+                let Some(i) = self.building_index(building) else { return (None, follow_ups) };
+                let destroyed = self.buildings[i].lose_a_piece();
+                let b = &self.buildings[i];
+                follow_ups.push(WorldEvent::SpawnEffect(crate::smoke::damage(b.owner, b.centre())));
+                if destroyed {
+                    follow_ups.extend(self.throw_out(building));
+                    return (self.burn_down(building).pop(), follow_ups);
+                } else if crate::wreck::large(b.kind) {
+                    follow_ups.extend(self.throw_out(building));
+                }
+                None
+            }
             WorldEvent::PutOut { vehicle } => {
                 if self.can_unload(vehicle) {
                     self.unload(vehicle);
