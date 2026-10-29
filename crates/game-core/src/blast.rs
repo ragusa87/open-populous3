@@ -5,10 +5,11 @@
 //! stays in range, scaled by the ground's own slope ("Blast push and flight"): allies (the caster's own tribe,
 //! never the caster's shaman) only on the last turn, at most `BLAST_FRIEND_AFFECT`. Each turn every vehicle in the
 //! radius takes `DAMAGE_PERSON` too (`GameMap::damage_vehicle` spares the caster's tribe; pop3-rev-analysis.md
-//! "Life, damage and destruction"). Each turn every building whose centre is in the radius takes `DAMAGE_BLDG`
-//! wear, feeding the same accumulator hacking and firewarrior bolts do (combat.md "Attacking a building").
+//! "Life, damage and destruction"). Every building whose centre ever enters the radius across the blast's 3
+//! turns takes `DAMAGE_BLDG` wear once (confirmed: unlike people/vehicles, not repeated every turn it stays in
+//! range), feeding the same accumulator hacking and firewarrior bolts do (combat.md "Attacking a building").
 
-use crate::building::Building;
+use crate::building::{Building, BuildingId};
 use crate::effect::{DamageKind, Effect, EffectKind};
 use crate::event::{PushKind, WorldEvent};
 use crate::motion::Velocity;
@@ -29,8 +30,8 @@ pub const PUSH_OUT: i32 = 140;
 pub const PUSH_UP: i32 = 98;
 /// `BLAST_DAMAGE_PERSON` (exe 50, not in the file): each turn, to each person in the radius.
 pub const DAMAGE_PERSON: u16 = 50;
-/// `BLAST_DAMAGE_BLDG` (exe 40, pop3-rev-analysis.md "Attacking a building"): each turn, to each building in the
-/// radius, feeding its wear accumulator.
+/// `BLAST_DAMAGE_BLDG` (exe 40, pop3-rev-analysis.md "Components"/"Attacking a building"): once, to each building
+/// the blast ever reaches, feeding its wear accumulator.
 pub const DAMAGE_BLDG: u16 = 40;
 /// `BLAST_FRIEND_AFFECT` (exe 5): at most this many of the caster's own followers are pushed, on the last turn
 /// only. Which ones, when more are in range, is not traced: a guess, kept to iteration order.
@@ -40,6 +41,8 @@ pub const BLAST_FRIEND_AFFECT: u8 = 5;
 pub struct SimpleBlast {
     /// Turns done.
     turn: u8,
+    /// Buildings already charged `DAMAGE_BLDG`: it is once per building, not every turn it stays in range.
+    worn: Vec<BuildingId>,
 }
 
 /// A blast cast by tribe `owner` at `at` (world units).
@@ -79,8 +82,10 @@ impl SimpleBlast {
         for (vehicle, _) in vehicles.iter().filter(|(_, v)| push(at, (v.x, v.z), radius).is_some()) {
             events.push(WorldEvent::DamageVehicle { vehicle, amount: DAMAGE_PERSON, from: owner });
         }
-        for b in buildings.iter().filter(|b| offset(at, b.centre()).2 <= radius) {
-            events.push(WorldEvent::Wear { building: b.id, amount: DAMAGE_BLDG });
+        let newly_reached: Vec<BuildingId> = buildings.iter().filter(|b| offset(at, b.centre()).2 <= radius && !self.worn.contains(&b.id)).map(|b| b.id).collect();
+        for building in newly_reached {
+            events.push(WorldEvent::Wear { building, amount: DAMAGE_BLDG });
+            self.worn.push(building);
         }
         events
     }
@@ -282,13 +287,13 @@ mod tests {
     }
 
     #[test]
-    fn a_building_at_the_centre_wears_down_by_damage_bldg_each_turn() {
+    fn a_building_at_the_centre_wears_down_by_damage_bldg_once_not_every_turn() {
         let mut map = crate::map::GameMap::sandbox_walk();
         let s = &map.units[0];
         let at = (s.x.wrapping_add(2048), s.z);
         let building = map.add_building(crate::building::Building::new(crate::building::BuildingKind::Hut { size: 1 }, 1, at.0, at.1, 0));
         map.add_effect(effect(0, at));
         map.run(Ticks::new(RADII.len() as u32));
-        assert_eq!(map.building(building).unwrap().wear, 3 * DAMAGE_BLDG, "one DAMAGE_BLDG per turn, fed into the same accumulator hacking uses");
+        assert_eq!(map.building(building).unwrap().wear, DAMAGE_BLDG, "once for the whole blast, unlike people/vehicles which take it every turn in range");
     }
 }
