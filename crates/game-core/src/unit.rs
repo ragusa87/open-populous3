@@ -198,6 +198,10 @@ pub enum Action {
     Worshipping { site: (u16, u16) },
     /// On its way to attack `target`, whose place it last aimed at is `to` (`GameMap::tend_attacks` keeps it up to date).
     Attacking { target: Target, to: (u16, u16) },
+    /// Escorting the tribe's shaman (`G` key, pop3-rev-analysis.md "Guard the shaman"): stays within `GUARD_RANGE`
+    /// of her current position on both axes, last aimed at `to` (`GameMap::tend_guards` keeps it up to date, same
+    /// shape as `Attacking`); never reports itself done on its own while she lives.
+    Guarding { shaman: UnitId, to: (u16, u16) },
     /// Its `role` in the challenge `challenge` (challenge.rs).
     Challenge { challenge: crate::challenge::ChallengeId, role: crate::challenge::Role },
     /// A firewarrior throwing fire at `target` (firebolt.rs), `left` turns to go; then back to its attack.
@@ -247,6 +251,7 @@ impl Action {
             Action::Alighting { .. } => "Getting off",
             Action::Hammering => "Hammering",
             Action::Attacking { .. } => "Attacking",
+            Action::Guarding { .. } => "Guarding",
             Action::Challenge { .. } | Action::Melee { .. } => "Fighting",
             Action::Listening { .. } => "Listening",
             Action::Queuing { .. } => "Queuing",
@@ -330,6 +335,8 @@ pub enum Order {
     Board { vehicle: crate::vehicle::VehicleId },
     /// Aboard a vehicle: get off it, if there is ground to get off on (`GameMap::get_off`, vehicles.md).
     GetOff,
+    /// Followers (not the shaman): escort her continuously (`G`, `GameMap::go_guard`).
+    Guard,
 }
 
 /// What an attack is aimed at.
@@ -765,7 +772,7 @@ impl Unit {
                 Action::Walking { to: campfire::ring_point(fire, point) }
             }
             Order::Cast => Action::Casting { left: Countdown::new(CAST_TICKS) },
-            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } | Order::GetOff => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } | Order::GetOff | Order::Guard => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
                 Action::Walking { to: tree }
@@ -815,6 +822,7 @@ impl Unit {
                 }
             }
             Action::Attacking { to, .. } if self.in_the_open() => self.approach(to, ground),
+            Action::Guarding { to, .. } if self.in_the_open() => self.approach(to, ground),
             Action::Queuing { at, .. } => {
                 self.approach(at, ground);
                 if self.route.is_empty() && (self.x, self.z) != at && self.planned_on == Some(ground.revision()) {
@@ -822,6 +830,7 @@ impl Unit {
                 }
             }
             Action::Attacking { .. } => {}
+            Action::Guarding { .. } => {}
             Action::Hacking { .. } => {}
             Action::Throwing { target, mut left } => {
                 self.action = match left.tick() {
@@ -1337,11 +1346,17 @@ impl Unit {
     /// The target of its attack moved to `to`: aims there, planning again once it is a cell away from where it
     /// aimed.
     pub fn retarget(&mut self, to: (u16, u16)) {
-        if let Action::Attacking { target, to: aimed } = self.action
-            && (torus_delta(aimed.0, to.0).abs() >= WORLD_UNITS_PER_CELL as i32 || torus_delta(aimed.1, to.1).abs() >= WORLD_UNITS_PER_CELL as i32)
-        {
-            self.action = Action::Attacking { target, to };
-            self.planned_on = None;
+        let moved = |aimed: (u16, u16)| torus_delta(aimed.0, to.0).abs() >= WORLD_UNITS_PER_CELL as i32 || torus_delta(aimed.1, to.1).abs() >= WORLD_UNITS_PER_CELL as i32;
+        match self.action {
+            Action::Attacking { target, to: aimed } if moved(aimed) => {
+                self.action = Action::Attacking { target, to };
+                self.planned_on = None;
+            }
+            Action::Guarding { shaman, to: aimed } if moved(aimed) => {
+                self.action = Action::Guarding { shaman, to };
+                self.planned_on = None;
+            }
+            _ => {}
         }
     }
 

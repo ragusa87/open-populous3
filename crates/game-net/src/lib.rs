@@ -64,7 +64,8 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 /// clearing a swamp `u32 effect id`, for a patrol command `u8 unit count` then that many `u32` unit ids, then
 /// `u16 x, z` (`SetPatrol`/`AddPatrolPoint`) or a target tag `u8` (0 unit, 1 building) + `u32` id
 /// (`SetPatrolTarget`/`AddPatrolTargetPoint`), or nothing more (`ReleasePatrol`); for a formation command, `u8` unit
-/// count then that many `u32` unit ids, then `u16 x, z` (`Formation`).
+/// count then that many `u32` unit ids, then `u16 x, z` (`Formation`); for cancelling a guard, nothing more
+/// (`CancelGuard`); an order tag of `Order::Guard` takes no payload either.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -221,6 +222,9 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         Command::CancelFlyby { player } => {
             b.extend([20, *player]);
         }
+        Command::CancelGuard { player } => {
+            b.extend([21, *player]);
+        }
     }
 }
 
@@ -310,6 +314,7 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             put_id(b, *vehicle);
         }
         Order::GetOff => b.push(14),
+        Order::Guard => b.push(15),
     }
 }
 
@@ -360,6 +365,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         18 => Some(Command::ReleasePatrol { player, units: get_units(c)? }),
         19 => Some(Command::Formation { player, units: get_units(c)?, to: (c.u16()?, c.u16()?) }),
         20 => Some(Command::CancelFlyby { player }),
+        21 => Some(Command::CancelGuard { player }),
         _ => None,
     }
 }
@@ -395,6 +401,7 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         12 => Order::Attack { target: Target::Building(c.id()?) },
         13 => Order::Board { vehicle: c.id()? },
         14 => Order::GetOff,
+        15 => Order::Guard,
         _ => return None,
     })
 }
@@ -505,6 +512,8 @@ mod tests {
                 Command::ReleasePatrol { player: 1, units: vec![Id::from_raw(1), Id::from_raw(2), Id::from_raw(3)] },
                 Command::Formation { player: 0, units: vec![Id::from_raw(1), Id::from_raw(2)], to: (65535, 512) },
                 Command::CancelFlyby { player: 2 },
+                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Guard },
+                Command::CancelGuard { player: 1 },
             ],
         }
     }

@@ -32,6 +32,7 @@ pub mod formation;
 pub mod foundation;
 pub mod gauge;
 pub mod ground_fire;
+pub mod guard;
 pub mod headcount;
 pub mod health;
 pub mod hidden_point;

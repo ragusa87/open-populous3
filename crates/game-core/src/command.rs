@@ -66,6 +66,11 @@ pub enum Command {
     AddPatrolTargetPoint { player: u8, units: Vec<UnitId>, target: Target },
     /// `N`: releases `units`' whole patrol (its points are pruned once nothing still refers to them).
     ReleasePatrol { player: u8, units: Vec<UnitId> },
+    /// `G` with nothing selected: stops every one of the player's own units currently escorting the shaman
+    /// (`GameMap::tend_guards`, pop3-rev-analysis.md "Guard the shaman") - a tribe-wide scan-and-cancel, unlike
+    /// every other order command, since the player does not (and in the original does not either) name which
+    /// units are guarding to call them off.
+    CancelGuard { player: u8 },
     /// A plain group move order (`GameMap::move_orders`, more than one walker): `units` (already given their own
     /// standing spot near `to`) space themselves into one new formation (formation.rs) instead of each aiming
     /// straight at it. Carries the whole group for the same reason `SetPatrol` does: the formation is one new

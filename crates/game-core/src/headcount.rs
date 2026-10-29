@@ -115,7 +115,7 @@ pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
     }
     let working = match unit.action {
         Action::Chopping { .. } | Action::PickingUpWood { .. } | Action::Holding { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Entering { .. } | Action::Hammering | Action::Worshipping { .. } | Action::AroundFire { .. } | Action::Attacking { .. } | Action::Challenge { .. } | Action::Melee { .. } | Action::Hacking { .. } | Action::Throwing { .. } | Action::Preaching | Action::Queuing { .. } | Action::Grazing { .. } => true,
-        Action::Idle | Action::Listening { .. } | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Boarding { .. } | Action::Alighting { .. } | Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::OnFire { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => false,
+        Action::Idle | Action::Listening { .. } | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Boarding { .. } | Action::Alighting { .. } | Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::OnFire { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } | Action::Guarding { .. } => false,
         #[cfg(test)]
         Action::Gathered { .. } => true,
     };

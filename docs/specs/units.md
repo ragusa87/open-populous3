@@ -196,6 +196,24 @@ debug overlay (`F4`) draws a patrolling unit's route and points.
   into `spot_enemies`/`first_seen` is written (pull in every unit whose `queued_patrol().front()` equals
   the spotter's).
 
+## Guard the shaman (done: `game_core::guard`, `GameMap::go_guard`/`tend_guards`)
+`G` (pop3-rev-analysis.md "Guard the shaman", fully traced): with followers selected, each non-shaman one escorts
+the tribe's shaman continuously (`Order::Guard`, `Action::Guarding { shaman, to }`), then the selection clears
+(auto-deselected, matching the original). Each tick, a guard re-reads her *current* live position and walks
+towards it whenever it is more than `GUARD_RANGE` (824 units [exe]) away on either axis - same shape as
+`Action::Attacking`'s own re-aiming (`GameMap::tend_guards`/`Unit::retarget`), never reporting itself done on its
+own while she is alive; stops (back to Idle) once she is not. `G` with nothing selected, or with only the shaman
+selected, instead stops every one of the player's own units currently guarding (`Command::CancelGuard`, a
+tribe-wide scan rather than a per-unit order, since the original does not name which units are guarding either).
+Any other direct order given to a guarding unit cancels it like any other action (`Unit::can_take_orders`'s own
+default). Bound to `G` in the original keymap; dev mode uses Shift+G instead, since plain `G` there is already
+the cell grid toggle (`keymap.rs`, `shortcuts.md`).
+
+**Live-tested and disproven**: the shaman is NOT protected or untargetable while guarded - she joins the same
+fight ring as her guards once a fight starts nearby, through the ordinary auto-attack/melee-join rule already
+covering everyone nearby, not a dedicated protection mechanic. No code needed for this; it already falls out of
+existing combat behaviour.
+
 ## Wood (done: braves only)
 - A brave carries at most one piece of wood (`Unit::carrying`, 0 or 1).
 - `Order::CutTree { tree }` (left click on a tree with braves selected, `GameMap::cut_orders`; other kinds

@@ -1154,6 +1154,14 @@ impl GameMap {
                 self.release_patrol(player, &units);
                 None
             }
+            Command::CancelGuard { player } => {
+                for i in 0..self.units.len() {
+                    if self.units[i].owner == player && matches!(self.units[i].action, Action::Guarding { .. }) {
+                        self.units[i].action = Action::Idle;
+                    }
+                }
+                None
+            }
             Command::Formation { player, units, to } => {
                 self.form_up(player, &units, to);
                 None
@@ -1341,6 +1349,7 @@ impl GameMap {
             self.tend_attacks();
             self.tend_wrecking();
             self.tend_wildmen();
+            self.tend_guards();
         }
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
@@ -1885,6 +1894,7 @@ impl GameMap {
             Order::PickUp { at } => self.pick_up(i, at),
             Order::Attack { target } => self.go_attack(i, target),
             Order::Board { vehicle } => self.go_board(i, vehicle),
+            Order::Guard => self.go_guard(i),
             order => self.units[i].start(order),
         }
     }
@@ -1916,6 +1926,37 @@ impl GameMap {
         let spots = slots::free_spots_near(&self.ground(), slots::spot_of(tree), &taken, 8);
         if let Some(stand) = spots.iter().map(|&s| slots::spot_centre(s)).min_by_key(|&p| torus_dist2(me, p)) {
             self.units[i].go_cut(tree, stand);
+        }
+    }
+
+    /// `i` (any non-shaman follower) starts escorting its tribe's shaman (`G`, pop3-rev-analysis.md "Guard the
+    /// shaman"); a no-op without one (she is dead/reincarnating, or `i` is itself the shaman).
+    fn go_guard(&mut self, i: usize) {
+        if self.units[i].kind == UnitKind::Shaman {
+            return;
+        }
+        let Some(shaman) = self.shaman_of(self.units[i].owner).map(|s| s.id) else { return };
+        let at = self.unit(shaman).map_or((self.units[i].x, self.units[i].z), |s| (s.x, s.z));
+        self.units[i].start(Order::Stop);
+        if self.units[i].action.can_take_orders() {
+            self.units[i].action = Action::Guarding { shaman, to: at };
+        }
+    }
+
+    /// Every unit escorting its tribe's shaman: stays within `crate::guard::GUARD_RANGE` of her current position
+    /// on both axes, re-aimed every tick (same shape as `tend_attacks`); stops guarding (back to Idle) once she
+    /// is gone, reincarnating or not alive.
+    pub(crate) fn tend_guards(&mut self) {
+        for i in 0..self.units.len() {
+            let Action::Guarding { shaman, .. } = self.units[i].action else { continue };
+            let Some((sx, sz)) = self.unit(shaman).filter(|s| s.is_alive()).map(|s| (s.x, s.z)) else {
+                self.units[i].action = Action::Idle;
+                continue;
+            };
+            let u = &self.units[i];
+            if torus_delta(u.x, sx).abs() > crate::guard::GUARD_RANGE || torus_delta(u.z, sz).abs() > crate::guard::GUARD_RANGE {
+                self.units[i].retarget((sx, sz));
+            }
         }
     }
 
@@ -2171,6 +2212,62 @@ mod tests {
         let map = GameMap::load_original(&dat).unwrap();
         let default_cost = crate::spell_book::SpellStats::default_for(SpellKind::Blast).cost;
         assert_eq!(map.spell_books[0].slot(SpellKind::Blast).unwrap().stats.cost, default_cost, "no file: our own default");
+    }
+
+    #[test]
+    fn a_guard_order_walks_towards_the_shaman_until_within_range() {
+        let mut map = GameMap::sandbox_units();
+        let shaman = map.shaman_of(0).unwrap();
+        let (sx, sz) = (shaman.x, shaman.z);
+        let brave = map.units.iter().find(|u| u.owner == 0 && u.kind == UnitKind::Brave).unwrap().id;
+        map.apply(&Command::OrderUnit { player: 0, unit: brave, order: Order::Guard });
+        assert!(matches!(map.unit(brave).unwrap().action, Action::Guarding { .. }), "guarding at once");
+        let arrived = (0..400).find(|_| {
+            map.tick();
+            let u = map.unit(brave).unwrap();
+            torus_delta(u.x, sx).abs() <= crate::guard::GUARD_RANGE && torus_delta(u.z, sz).abs() <= crate::guard::GUARD_RANGE
+        });
+        assert!(arrived.is_some(), "walked within range");
+        assert!(matches!(map.unit(brave).unwrap().action, Action::Guarding { .. }), "still guarding: never done on its own");
+    }
+
+    #[test]
+    fn the_shaman_herself_cannot_be_ordered_to_guard() {
+        let mut map = GameMap::sandbox_units();
+        let shaman = map.shaman_of(0).unwrap().id;
+        map.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::Guard });
+        assert_eq!(map.unit(shaman).unwrap().action, Action::Idle);
+    }
+
+    #[test]
+    fn guarding_ends_once_the_shaman_is_no_longer_alive() {
+        let mut map = GameMap::sandbox_units();
+        let shaman = map.shaman_of(0).unwrap().id;
+        let brave = map.units.iter().find(|u| u.owner == 0 && u.kind == UnitKind::Brave).unwrap().id;
+        map.apply(&Command::OrderUnit { player: 0, unit: brave, order: Order::Guard });
+        map.damage(shaman, u16::MAX, DamageKind::Lightning, None);
+        map.tick();
+        assert_eq!(map.unit(brave).unwrap().action, Action::Idle, "nothing left to escort");
+    }
+
+    #[test]
+    fn cancel_guard_stops_every_one_of_that_player_guarding_but_not_another_players() {
+        let mut map = GameMap::sandbox_units();
+        // sandbox_units only sets up a reincarnation site (and so a shaman) for tribe 0; spawn tribe 1's own
+        // directly so its brave has someone to guard too.
+        map.spawn(1, UnitKind::Shaman, (60 * 512, 60 * 512));
+        let braves: Vec<_> = map.units.iter().filter(|u| u.owner == 0 && u.kind == UnitKind::Brave).map(|u| u.id).take(2).collect();
+        assert_eq!(braves.len(), 2, "test setup: two braves of the player");
+        let other = map.units.iter().find(|u| u.owner == 1 && u.kind == UnitKind::Brave).unwrap().id;
+        for &b in &braves {
+            map.apply(&Command::OrderUnit { player: 0, unit: b, order: Order::Guard });
+        }
+        map.apply(&Command::OrderUnit { player: 1, unit: other, order: Order::Guard });
+        map.apply(&Command::CancelGuard { player: 0 });
+        for &b in &braves {
+            assert_eq!(map.unit(b).unwrap().action, Action::Idle, "{b:?} stood down");
+        }
+        assert!(matches!(map.unit(other).unwrap().action, Action::Guarding { .. }), "another player's own guard is untouched");
     }
 
     #[test]

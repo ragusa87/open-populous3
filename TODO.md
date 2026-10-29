@@ -118,18 +118,14 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   this work), its co-patrollers keep cycling obliviously; needs a patrol-point-aware hook there. How the
   AI script's own `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/`SET_MARKER_ENTRY` (docs/specs/ai-scripts.md)
   drives this same mechanism for computer tribes is also still open.
-- [ ] Guard the shaman (**G** with followers selected: they regroup next to the shaman and turn to face her; **G**
-  with nothing selected: cancels it; not implemented). pop3-rev-analysis.md "Guard the shaman (G key)": fully
-  traced and live-confirmed this session (an earlier in-session guess, a different command touching a new
-  person state 38, was live-tested and ruled out - corrected in the same section). G gives each selected
-  follower a continuous "stay within ~824 units of the shaman, re-targeting her live position every tick" escort
-  order (one shared command group, a secondary order slot per follower, auto-deselecting them); with nothing
-  selected it instead cancels any unit already on that order. Implement as: an order/behavior that keeps a
-  follower loosely orbiting a reference unit's current position (not a one-shot walk-to-point). **Live-tested
-  and disproven**: the shaman is NOT protected/untargetable while guarded - she joins the same fight ring as her
-  guards when a fight starts nearby (pop3-rev-analysis.md's own section has the trace). No "guards absorb
-  attacks meant for her" rule needed or wanted; the existing auto-attack/"join a nearby fight" behavior already
-  covers the observed effect once guards stand near her.
+- [x] Guard the shaman implemented (units.md "Guard the shaman", `game_core::guard`): `G` with followers selected
+  gives each non-shaman one a continuous escort order (`Order::Guard`/`Action::Guarding`, `GameMap::go_guard`/
+  `tend_guards`), re-aiming at her live position every tick, within `GUARD_RANGE` (824 units [exe]); selection
+  clears, matching the original. `G` with nothing selected (or only her) instead cancels every one of the
+  player's own guards (`Command::CancelGuard`). Bound to `G` in the original keymap; dev mode uses Shift+G
+  instead, since plain `G` there is already the cell grid toggle (`keymap.rs`). The shaman is confirmed NOT protected while guarded
+  (joins the same fight ring as her guards); no protection logic needed, already covered by ordinary
+  auto-attack/melee-join behaviour.
 
 ### Units ([units.md](docs/specs/units.md))
 - [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the drowning and stranded rates (`DROWN_DAMAGE`, `STRANDED_DAMAGE`, scaled x20 from our old 100 HP guesses).
