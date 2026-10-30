@@ -1,13 +1,14 @@
 //! The interpreter abstraction (docs/specs/ai-scripts.md "How a script runs", "What this means
 //! here"): a tree-walking runner for the control-flow grammar only. No `DO` command is given real
-//! behaviour here — each one is handed to `Env::do_call` verbatim, so this crate stays "a parser
-//! and an interpreter abstraction", not the AI itself.
+//! behaviour here — each one is handed to `Env::do_call` with its `Field` arguments already resolved
+//! to plain numbers (command identity and argument shape otherwise untouched), so this crate stays "a
+//! parser and an interpreter abstraction", not the AI itself.
 
 use crate::ast::{AssignOp, BinOp, Call, Cond, Script, Stmt};
 use crate::field::{Field, InternalVar, UserVar};
 use crate::flyby::Flyby;
 use crate::raw::USER_VAR_COUNT;
-use crate::token::CmpOp;
+use crate::token::{Arg, CmpOp, Team, TeamWild};
 
 /// The seam a future `game-core` consumer implements: everything the interpreter itself cannot
 /// know (live game state) or must not decide (what a `DO` command means).
@@ -16,9 +17,16 @@ pub trait Env {
     fn int_var(&self, var: InternalVar) -> i32;
     /// Writes an `INT_ATTR_*` attribute (`SET`/`INCREMENT`/`DECREMENT`/`MULTIPLY`/`DIVIDE` on one).
     fn write_attr(&mut self, var: InternalVar, value: i32);
+    /// Writes a query command's result into a user variable (its last parameter, a `var_field`):
+    /// `COUNT_PEOPLE_IN_MARKER`, `GET_HEIGHT_AT_POS`, `NAV_CHECK`... Default: discarded, same spirit
+    /// as `do_call`'s own "undecided" default.
+    fn write_user_var(&mut self, _var: UserVar, _value: i32) {}
     /// `INT_RANDOM_100`: a random 0..99 (spec: "Here it must come from `map::Lcg`").
     fn random_100(&mut self) -> i32;
-    /// A `DO` call, exactly as parsed: command id and its typed args, undecided by this crate.
+    /// A `DO` call, with every `Field`-bearing argument already resolved to a plain
+    /// `Field::Const` (a `$variable` or `INT_ATTR_*` reference read through `int_var`/the
+    /// interpreter's own user-variable storage, since `Env` itself owns neither) — command identity
+    /// and argument shape are otherwise exactly as parsed, undecided by this crate.
     fn do_call(&mut self, call: &Call);
     /// A recognized `FLYBY_CREATE_NEW..=FLYBY_START` run, with every keyframe field already resolved
     /// to a plain number (a `Flyby`'s fields can be user variables; only the interpreter can read
@@ -133,7 +141,10 @@ impl Interpreter {
 
     fn exec_stmt(&mut self, stmt: &Stmt, turn: u32, env: &mut impl Env) {
         match stmt {
-            Stmt::Do(call) => env.do_call(call),
+            Stmt::Do(call) => {
+                let resolved = self.resolve_call(env, call);
+                env.do_call(&resolved);
+            }
             Stmt::Flyby(flyby) => {
                 let resolved = self.resolve_flyby(env, flyby);
                 env.on_flyby(&resolved);
@@ -208,6 +219,23 @@ impl Interpreter {
         }
     }
 
+    /// `call` with every `Field` it carries (including one nested in a `Team`/`TeamWild` argument)
+    /// resolved to a plain `Field::Const`, the same way `resolve_flyby` does for flyby keyframes.
+    /// `Arg::VarField` is left alone: it names where a query command's result goes, not a value to
+    /// read.
+    fn resolve_call(&self, env: &impl Env, call: &Call) -> Call {
+        Call { id: call.id, args: call.args.iter().map(|&a| self.resolve_arg(env, a)).collect() }
+    }
+
+    fn resolve_arg(&self, env: &impl Env, arg: Arg) -> Arg {
+        match arg {
+            Arg::Field(f) => Arg::Field(Field::Const(self.resolve(env, f))),
+            Arg::Team(Team::Field(f)) => Arg::Team(Team::Field(Field::Const(self.resolve(env, f)))),
+            Arg::TeamWild(TeamWild::Team(Team::Field(f))) => Arg::TeamWild(TeamWild::Team(Team::Field(Field::Const(self.resolve(env, f))))),
+            other => other,
+        }
+    }
+
     fn resolve_flyby(&self, env: &impl Env, flyby: &Flyby) -> ResolvedFlyby {
         ResolvedFlyby {
             allow_interrupt: flyby.allow_interrupt,
@@ -263,6 +291,7 @@ mod tests {
     struct MockEnv {
         game_turn: i32,
         calls: Vec<CommandId>,
+        last_call_args: Vec<Arg>,
         flybys: usize,
         last_flyby: Option<ResolvedFlyby>,
     }
@@ -277,6 +306,7 @@ mod tests {
         }
         fn do_call(&mut self, call: &Call) {
             self.calls.push(call.id);
+            self.last_call_args = call.args.clone();
         }
         fn on_flyby(&mut self, flyby: &ResolvedFlyby) {
             self.flybys += 1;
@@ -369,6 +399,22 @@ mod tests {
         let mut env = MockEnv::default();
         interp.run_turn(1, &script, &mut env);
         assert_eq!(env.flybys, 1);
+    }
+
+    #[test]
+    fn a_do_calls_field_arguments_are_resolved_not_handed_over_raw() {
+        let script = Script {
+            version: 12,
+            block: Block(vec![Stmt::Do(Call {
+                id: CommandId::from_name("TRAIN_PEOPLE_NOW").unwrap(),
+                args: vec![Arg::Field(Field::UserVar(UserVar(0))), Arg::Field(Field::Internal(InternalVar(1201)))],
+            })]),
+        };
+        let mut interp = Interpreter::new();
+        interp.user_vars[0] = 5;
+        let mut env = MockEnv { game_turn: 0, ..Default::default() };
+        interp.run_turn(0, &script, &mut env);
+        assert_eq!(env.last_call_args, vec![Arg::Field(Field::Const(5)), Arg::Field(Field::Const(0))], "a user var and an internal var both resolved to plain constants");
     }
 
     #[test]
