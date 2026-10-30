@@ -2001,12 +2001,12 @@ mod tests {
         u.motion = Motion::flying(Velocity::new(10, 40, 0), 100);
         u.order(Order::MoveTo { x: 0, z: 0 });
         run(&mut u, &t, &site, 2);
-        assert_eq!((u.action, u.motion.height, u.x), (Action::Tumbling, Some(148), x + 20), "no orders, flying");
+        assert_eq!((u.action, u.motion.height, u.x), (Action::Tumbling, Some(148), x + 14), "no orders, flying, air drag slowing the horizontal speed each tick");
         run(&mut u, &t, &site, 3);
-        assert_eq!((u.action, u.motion, (u.x, u.z)), (Action::Idle, Motion::STILL, (x + 40, z)), "landed and settled the same tick");
+        assert_eq!((u.action, u.motion, (u.x, u.z)), (Action::Idle, Motion::STILL, (x + 20, z)), "landed and settled the same tick");
         (u.action, u.motion.velocity) = (Action::Tumbling, Velocity::new(5, 0, 0));
         run(&mut u, &t, &site, 3);
-        assert_eq!((u.action, u.x), (Action::Tumbling, x + 40), "rolling on the ground: not moved, no friction yet");
+        assert_eq!((u.action, u.x), (Action::Tumbling, x + 20), "rolling on the ground: not moved, no friction yet");
     }
 
     #[test]
@@ -2030,9 +2030,9 @@ mod tests {
         assert_eq!(u.motion, Motion::flying(Velocity::new(80, 59, 0), 100), "pushes add up, the height is kept");
         let x = u.x;
         let ticks = run_until(&mut u, &t, &site, |u| u.action == Action::Idle);
-        assert_eq!((ticks, u.x), (5, x + 5 * 80), "flew, landed, then stays: the walk is forgotten");
+        assert_eq!((ticks, u.x), (5, x + 370), "flew, landed, then stays: the walk is forgotten (370, not 5 * 80: air drag)");
         run(&mut u, &t, &site, 20);
-        assert_eq!(u.x, x + 5 * 80);
+        assert_eq!(u.x, x + 370);
         let mut dead = Unit { action: Action::Dead { left: Countdown::new(RESPAWN_TICKS) }, ..u.clone() };
         dead.fling(Velocity::new(10, 10, 0), 100);
         assert!(matches!(dead.action, Action::Dead { .. }) && dead.motion == Motion::STILL);
