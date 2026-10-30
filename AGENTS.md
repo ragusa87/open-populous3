@@ -18,12 +18,15 @@ from the user's own install.
 - Clean room: reverse engineering (disassembly, tracing, live memory reads, running the original) happens only in
   separate spec sessions, whose only output is docs/specs/pop3-rev-analysis.md and its tools. A coding session never
   reads, disassembles or runs the original executable and never traces anything itself: it implements from the docs.
-  A fact the docs lack becomes a question in TODO.md for a spec session, or a guess tagged as such.
+  A fact the docs lack becomes a question in the matching `docs/todo/<slug>.md` backlog file for a spec session,
+  or a guess tagged as such.
 - Facts from the community tools (README "References") yes, their code no.
 - Everything shippable works with `--no-original` (generated or CC0 content, our own texts).
 
 ## Before starting
-Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `roadmap.md`, then the `docs/specs/*` matching the task).
+Read `README.md`, `TODO.md` (a priority-tiered index — follow its link to the matching `docs/todo/<slug>.md` file
+for the task's topic) and `docs/` (`docs/README.md`, `architecture.md`, `roadmap.md`, then the `docs/specs/*`
+matching the task).
 If `docs/plans/` has a plan for the task, read it too: it is the current approach and task breakdown, ahead of whatever
 the matching spec still says.
 
@@ -36,14 +39,17 @@ the matching spec still says.
 - `docs/`: architecture, roadmap, `docs/specs/*`. Update the matching spec when behaviour changes.
 - `docs/plans/`: WIP implementation plans, see "Plans" below. Gitignored (only `.gitignore` itself is tracked):
   local working files, never committed.
-- `TODO.md`: what is left to implement. Tick/remove items in the commit that does them, add what you leave undone or discover.
+- `TODO.md`: priority-tiered index (same tiers as `docs/roadmap.md`), one line + link per topic, into the
+  per-topic backlog files in `docs/todo/<slug>.md`. What is left to implement lives in those files, not in
+  `TODO.md` itself: tick/remove items in the matching `docs/todo/<slug>.md` in the commit that does them, add what
+  you leave undone or discover there.
 
 ## Plans
 A plan (`docs/plans/<topic>.md`) is scratch, not documentation: the approach and step breakdown for a task too large
 for one sitting, kept so the same working copy can pick up where a prior session left off. It is gitignored and
 never committed — it carries no history and is not shared by cloning the repo.
 - Start one before a multi-commit feature or refactor: what changes, in what order, open questions, which
-  `docs/specs/*.md` and `TODO.md` entries it will touch when done.
+  `docs/specs/*.md` and `docs/todo/<slug>.md` entries it will touch when done.
 - Update it as you go — ticking steps, revising the approach when reality disagrees with the plan — instead of
   letting it drift stale. A plan that no longer matches what you're doing is worse than none.
 - Facts that will outlive the task (final behaviour, formats, numbers) belong in the matching `docs/specs/*.md`, not
@@ -55,7 +61,7 @@ never committed — it carries no history and is not shared by cloning the repo.
   <topic>.md` instead: that directory is tracked (committed, not gitignored, unlike `docs/plans/`), so commit it
   as its own small step. Before moving it:
   - Add a short header noting it's archived (resolved, read as history not current state) and pointing at the
-    final outcome (commits, the spec/TODO entries it fed) so a reader doesn't stop at a stale "not yet decided".
+    final outcome (commits, the spec/docs/todo entries it fed) so a reader doesn't stop at a stale "not yet decided".
   - Make it standalone: it must read correctly with no access to `docs/plans/` (gitignored, and the original file
     will be gone) — fix any internal cross-reference to the plan's own old `docs/plans/<topic>.md` path, and
     correct (don't silently rewrite) anything the plan said that later turned out wrong, the same way
