@@ -15,6 +15,10 @@ pub const BLINK_STEPS: u8 = 15;
 pub const INVIS_STEPS: u8 = 180;
 /// `HYPNO_COUNT_X8` (file and exe 55): 440 turns, 36.7 s (docs/specs/spells.md).
 pub const HYPNO_STEPS: u8 = 55;
+/// How long a lightning survivor stops healing ("Health and healing" [exe]: state 44 "struck by lightning" blocks
+/// the life step like dying does). The original's own duration isn't traced - every lightning hit our code deals
+/// is currently a kill, so nothing alive reaches this path yet (combat.md "Health") - kept short as a guess.
+pub const LIGHTNING_STRUCK_STEPS: u8 = 4;
 /// `SHIELD_NUM_PEOPLE`, `BLOODLUST_NUM_PEOPLE`, `INVIS_NUM_PEOPLE`, `HYPNO_NUM_PEOPLE` (file 6 each): nearest
 /// people touched per cast (docs/specs/spells.md).
 pub const SHIELD_NUM_PEOPLE: u32 = 6;
@@ -62,6 +66,8 @@ pub struct Statuses {
     pub shield: Timed,
     pub bloodlust: Timed,
     pub hypnotized: Timed,
+    /// Set by a lightning hit that doesn't kill (`Unit::take_hit`); blocks healing while on (`Unit::heals`).
+    pub struck_by_lightning: Timed,
     /// The tribe to revert to once `hypnotized` runs out (`GameMap::revert_expired_hypnosis`), unless that tribe
     /// is wiped out by then (`GameMap::tribe_wiped_out`), when the change stays permanent. Only meaningful while
     /// `hypnotized.is_on()`; `change_owner` (hypnotized away again, or for any other reason) clears both together.
@@ -82,6 +88,7 @@ impl Statuses {
             self.bloodlust.step();
             self.invisible.step();
             self.hypnotized.step();
+            self.struck_by_lightning.step();
         }
     }
 }

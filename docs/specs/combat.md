@@ -20,9 +20,14 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
 
 - Everyone heals on every eighth turn of the game (`unit::HEAL_EVERY`, phase 0: the same turn for all) [exe],
   whatever it does, fighting included; not in the air, drowning, stranded or dead.
-- Never past full [ours]: the original adds the heal while below full, so life can end up to one heal over.
+- Past full by up to one heal [exe]: the original adds the heal while below full with no clamp, so life can end up
+  over max by up to one heal's worth; the next heal tick then takes the already-full branch (`Health::heal_past_max`).
 - In the air, a deadly hit does not kill at once: the unit flies on and dies on landing [exe].
-- Not yet: no healing while struck by lightning (we have no such state yet), the angel of death never heals.
+- No healing for a while after surviving a lightning hit (`Unit::statuses.struck_by_lightning`, matching the
+  original's state 44 "struck by lightning" blocking the life step like dying does): the exact duration isn't
+  traced (every lightning hit our code deals today kills outright, so nothing alive reaches this yet), kept as a
+  short, tagged guess (`status::LIGHTNING_STRUCK_STEPS`). Not yet: the angel of death never heals (that unit kind
+  doesn't exist yet).
 
 ## Fight numbers
 - Per kind (`KindStats`): a blow's strength at full life (constant.dat values: 60, the warrior 360), a rank (brave,

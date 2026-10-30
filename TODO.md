@@ -72,7 +72,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   remaining "combat doesn't last" impression some other way.
 - [ ] Firebolts (combat.md "Firebolts"): the line of fire, driving a vehicle towards an out-of-reach target (to trace: whether the original's halved speed of a passenger throwing aboard really slows its vehicle, ours does), the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.
 - [ ] Health, hit feedback and death animations for every unit type.
-- [ ] Healing (combat.md "Health"): no healing while struck by lightning once it has its own state; the angel of death never heals; the original lets life go past full by up to one heal (ours stops at full).
+- [x] Healing (combat.md "Health"): implemented - life can go past full by up to one heal (`Health::heal_past_max`), and a lightning hit that doesn't kill now blocks healing for a while (`Unit::statuses.struck_by_lightning`, a tagged guess for the duration since every lightning hit today is a kill). Still not yet: the angel of death never heals (that unit kind doesn't exist).
 
 ### The tick ([architecture.md](docs/architecture.md) "The tick")
 - [ ] Find the original's order of work inside a turn (people, buildings, effects, shots, mana; income comes before spell charging): ours is a guess.
@@ -1065,4 +1065,11 @@ Lowest priority: the lockstep codec already works in tests with no UI or depende
 - [ ] Host/join UI, lobby, reconnect.
 - [ ] Desync checksum of heightmap + units.
 - [ ] Pause and game speed as `Command`s, so every peer agrees (single player only today, `game_speed.rs`).
+
+## Tooling
+- [ ] Try [d7vk](https://github.com/WinterSnowfall/d7vk) (Direct3D7-over-Vulkan) as the original's Direct3D layer under
+  Wine, for whoever runs the original install to live-check facts for pop3-rev-analysis.md or `just shot`/`just run`
+  against it: check whether it runs the original at all and whether it's more correct/faster than Wine's own
+  built-in d3d7, document the result here either way. Spec-session/live-check scope only - a coding session never
+  runs the original (AGENTS.md "Licence and original data").
 

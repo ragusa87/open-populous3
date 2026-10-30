@@ -1024,24 +1024,26 @@ impl Unit {
         None
     }
 
-    /// Whether it heals on a `HEAL_EVERY` turn: alive and on the ground, fighting or not, but not while drowning or
-    /// stranded (losing life), nor for a kind that never heals.
+    /// Whether it heals on a `HEAL_EVERY` turn: alive and on the ground, fighting or not, but not while drowning,
+    /// stranded (losing life) or freshly struck by lightning, nor for a kind that never heals.
     pub fn heals(&self) -> bool {
         self.kind.stats().heal.is_some()
             && self.is_alive()
             && !self.motion.airborne()
             && !matches!(self.action, Action::Drowning | Action::Stranded { .. } | Action::OnFire { .. })
+            && !self.statuses.struck_by_lightning.is_on()
     }
 
-    /// Its turn of healing (`HEAL_EVERY`), if it `heals`: already full, it instead forgets the last attacker
-    /// (pop3-rev-analysis.md "Health and healing": "else: last attacker (+0xB0) = none").
+    /// Its turn of healing (`HEAL_EVERY`), if it `heals`: already full (or past it, by up to one heal, "Health and
+    /// healing"), it instead forgets the last attacker (pop3-rev-analysis.md "Health and healing": "else: last
+    /// attacker (+0xB0) = none").
     pub fn heal(&mut self) {
         if let Some(points) = self.kind.stats().heal.filter(|_| self.heals()) {
             if self.health.is_full() {
                 self.hurt.healed();
                 return;
             }
-            self.health.heal(points);
+            self.health.heal_past_max(points);
         }
     }
 
@@ -1123,6 +1125,11 @@ impl Unit {
         let dead = self.take_damage(amount);
         if dead {
             self.hurt.died_from(kind);
+        } else if kind == DamageKind::Lightning {
+            // "Health and healing": state 44 ("struck by lightning") blocks the life step like dying does; a
+            // survivor's exact duration isn't traced (every current lightning hit kills outright, TODO.md
+            // "Combat"), so this is a tagged guess kept short, reusing the status step rhythm.
+            self.statuses.struck_by_lightning = crate::status::Timed::steps(crate::status::LIGHTNING_STRUCK_STEPS);
         }
         dead
     }
@@ -2084,7 +2091,7 @@ mod tests {
     }
 
     #[test]
-    fn each_kind_heals_its_own_amount_but_never_past_full() {
+    fn each_kind_heals_its_own_amount() {
         let (s, _) = shaman_at((10, 10));
         let healed = |kind: UnitKind| {
             let mut u = Unit { kind, health: Health::new(100, kind.max_health()), ..s.clone() };
@@ -2095,6 +2102,30 @@ mod tests {
         let mut full = s.clone();
         full.heal();
         assert!(full.health.is_full());
+    }
+
+    #[test]
+    fn healing_can_overshoot_full_by_one_heal() {
+        let (s, _) = shaman_at((10, 10));
+        let mut u = Unit { health: Health::new(SHAMAN_MAX_HEALTH - 1, SHAMAN_MAX_HEALTH), ..s };
+        u.heal();
+        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH + 31, "one heal's worth over max, like the original");
+        u.heal();
+        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH + 31, "already full-and-over: heals no further");
+    }
+
+    #[test]
+    fn surviving_a_lightning_hit_blocks_healing_for_a_while() {
+        let (s, _) = shaman_at((10, 10));
+        let mut u = Unit { health: Health::new(SHAMAN_MAX_HEALTH - 100, SHAMAN_MAX_HEALTH), ..s };
+        assert!(u.heals());
+        assert!(!u.take_hit(10, DamageKind::Lightning, Some(1)), "hurt, not killed");
+        assert!(!u.heals(), "struck: no healing for a while");
+        u.heal();
+        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH - 110, "the hit's own damage, no heal added");
+        let last = 8 * u32::from(crate::status::LIGHTNING_STRUCK_STEPS);
+        (0..last).for_each(|n| u.statuses.tick(crate::time::Tick::from_wire(n), 0));
+        assert!(u.heals(), "worn off");
     }
 
     #[test]
