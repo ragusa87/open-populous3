@@ -147,12 +147,11 @@ Done:
   footprint; Site: within `SPAWN_FLAT_RADIUS` of a reincarnation site; Tree: a cell with a tree that has wood; Campfire: its cell; Totem: within
   `worship::TOTEM_MARGIN` of a totem not sunk yet, `GameMap::totem_at`),
   `too_steep` (height points under the footprint spread more than `STEEP_SPREAD` = 200, placeholder), `shore_ok`,
-  `door_blocked` [ours: not traced, a gap this session found rather than a placement rule from the original -
-  a standing building's door is only ever one specific free cell (Doors, below), and nothing in the original
-  construction system seems to make leaving by any other way possible, so leaving this open felt like asking for
-  the same stuck-worker bug rather than a deliberate choice; refine or drop if a spec session finds the original
-  actually allows it] (neither the new building nor any standing one may end up with its door cell walled by the
-  other), `can_place`.
+  `door_blocked` [ours: not traced as a rule from the original's own placement code - a one-off check this
+  session over every original level's own layout found none of its 598 standing buildings, over 43 levels, with
+  its door already walled by another, consistent with this being how the original avoids the same stuck-worker
+  bug, though it was never traced at the exe level; refine or drop if a spec session finds otherwise] (neither the
+  new building nor any standing one may end up with its door cell walled by the other), `can_place`.
 - Boat hut (`shore_ok`): its jetty is local +z, its door local -z (all 11 boat huts of the levels: only sea within
   2.5 cells past +z, land past -z). A cell past the jetty side, the middle and at least one corner must be sea (a
   loaded level's levelling lifts one corner of level 10's hut off the sea); a cell past the door side, no sea.
