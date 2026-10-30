@@ -370,8 +370,8 @@ fn draw_halo(
     if let Some(e) = sprite && let Ok((mesh, mat, _)) = shapes.get(e) {
         let made = cache.sprites.get(&mesh.0.id()).cloned().or_else(|| {
             let texture = mats.get(&mat.0)?.base_color_texture.clone()?;
-            let texels = images.get(&texture)?.width() as f32;
-            let (outline, width, frame_rect) = sprite_outline_mesh(meshes.get(&mesh.0)?, texels)?;
+            let atlas_texels = images.get(&texture)?.width() as f32;
+            let (outline, width, frame_rect) = sprite_outline_mesh(meshes.get(&mesh.0)?, atlas_texels)?;
             let made = (meshes.add(outline), sprite_mats.add(SpriteOutline { color: HALO.into(), sprite: texture, width: Vec4::new(width, 0.0, 0.0, 0.0), frame_rect }));
             cache.sprites.insert(mesh.0.id(), made.clone());
             Some(made)
@@ -427,9 +427,11 @@ fn draw_halo(
 /// A sprite quad (`units::sprite_quad`/`sprite_quad_uv`) grown by `SPRITE_MARGIN_PX` on every side, its UVs
 /// extrapolated past the frame's own rect (read from its baked `ATTRIBUTE_UV_0`, not assumed to be 0..1: a
 /// shared atlas, `upload_tribe_atlases`, bakes a sub-rect instead) so the frame keeps its place, the outline
-/// width in texels for a texture `texels` wide, and that same frame rect (`[u_min, v_min, u_max, v_max]`) for
-/// the shader to clamp against. None if the mesh is not such a quad.
-pub fn sprite_outline_mesh(quad: &Mesh, texels: f32) -> Option<(Mesh, f32, Vec4)> {
+/// width in texels for a texture `atlas_texels` wide (the frame's own pixel width when it has a dedicated
+/// texture, the whole shared atlas's otherwise - only `(u1 - u0) * atlas_texels`, this frame's own share of it,
+/// sets the texel density right), and that same frame rect (`[u_min, v_min, u_max, v_max]`) for the shader to
+/// clamp against. None if the mesh is not such a quad.
+pub fn sprite_outline_mesh(quad: &Mesh, atlas_texels: f32) -> Option<(Mesh, f32, Vec4)> {
     let Some(VertexAttributeValues::Float32x3(p)) = quad.attribute(Mesh::ATTRIBUTE_POSITION) else { return None };
     let Some(VertexAttributeValues::Float32x2(uv0)) = quad.attribute(Mesh::ATTRIBUTE_UV_0) else { return None };
     let (l, r) = p.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(v[0]), b.max(v[0])));
@@ -440,6 +442,7 @@ pub fn sprite_outline_mesh(quad: &Mesh, texels: f32) -> Option<(Mesh, f32, Vec4)
     }
     let (u0, v0) = uv0.iter().fold((f32::MAX, f32::MAX), |(au, av), uv| (au.min(uv[0]), av.min(uv[1])));
     let (u1, v1) = uv0.iter().fold((f32::MIN, f32::MIN), |(au, av), uv| (au.max(uv[0]), av.max(uv[1])));
+    let frame_texels = atlas_texels * (u1 - u0);
     let m = SPRITE_MARGIN_PX * crate::units::PIXEL;
     let (l2, r2, t2, b2) = (l - m, r + m, t + m, b - m);
     let uv = |x: f32, y: f32| [u0 + (x - l) / w * (u1 - u0), v0 + (t - y) / h * (v1 - v0)];
@@ -448,7 +451,7 @@ pub fn sprite_outline_mesh(quad: &Mesh, texels: f32) -> Option<(Mesh, f32, Vec4)
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 4])
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![uv(l2, t2), uv(r2, t2), uv(r2, b2), uv(l2, b2)])
         .with_inserted_indices(Indices::U32(vec![0, 2, 1, 0, 3, 2]));
-    Some((mesh, SPRITE_WIDTH_PX * crate::units::PIXEL * texels / w, Vec4::new(u0, v0, u1, v1)))
+    Some((mesh, SPRITE_WIDTH_PX * crate::units::PIXEL * frame_texels / w, Vec4::new(u0, v0, u1, v1)))
 }
 
 /// The mesh pushed out by `width` (its own units) along normals averaged over vertices sharing a
@@ -560,8 +563,12 @@ mod tests {
     fn a_shared_atlas_frame_keeps_its_own_sub_rect_for_the_margin_and_the_shader() {
         // A frame packed at [0.25, 0.5]x[0.6, 0.8] of a shared atlas (`upload_tribe_atlases`), not the whole image.
         let quad = crate::units::sprite_quad_uv(Vec2::new(20.0, 40.0), Vec2::new(10.0, 36.0), [0.25, 0.6, 0.5, 0.8]);
-        let (outline, _, frame_rect) = sprite_outline_mesh(&quad, 80.0).unwrap();
+        let (outline, width, frame_rect) = sprite_outline_mesh(&quad, 80.0).unwrap();
         assert_eq!(frame_rect, Vec4::new(0.25, 0.6, 0.5, 0.8), "read from the quad's own baked uv, not assumed to be 0..1");
+        assert!(
+            (width - SPRITE_WIDTH_PX * 1.0).abs() < 1e-4,
+            "texel density from this frame's own 20-texel share of the 80-texel atlas (a quarter of it) over 20 px: 1 per px, not 4 per px from the whole atlas, {width}"
+        );
         let Some(VertexAttributeValues::Float32x2(uv)) = outline.attribute(Mesh::ATTRIBUTE_UV_0) else { panic!() };
         let m = SPRITE_MARGIN_PX / 20.0 * (0.5 - 0.25);
         assert!((uv[0][0] - (0.25 - m)).abs() < 1e-5 && (uv[1][0] - (0.5 + m)).abs() < 1e-5, "margin extrapolated within the frame's own rect, not the atlas's: {uv:?}");
