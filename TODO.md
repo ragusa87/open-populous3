@@ -1146,7 +1146,15 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 AGENTS.md's own bar is that everything shippable works with `--no-original`. Sound is a hard zero today (format reverse-engineered, no playback, no CC0 assets sourced at all); several spell VFX, building/spell icons and ritual scenery are still original-only. Largely independent of the other tiers, so it can run in parallel with them rather than waiting its turn.
 
 ### Sound ([sound.md](docs/specs/sound.md))
-- [ ] `pop3_format::sound`: SDT banks (count, offsets, 40-byte headers), signed 16-bit PCM mono/stereo, the 4 looping sounds, `0x80` placeholders skipped; music `PopDrones22.SDT` as MPEG Layer II.
+- [x] `pop3_format::sound` (`crates/pop3-format/src/sound.rs`, `docs/plans/14-sound-format-parser.md`): SDT
+  container/40-byte headers (`SoundBank`/`Entry`), signed 16-bit PCM mono/stereo (`Entry::pcm`, interleaved -
+  a caller de-interleaves with `is_stereo()`), loop points in bytes (`Entry::loop_range`, `(0,0)` -> `None`),
+  `0x80`/`0x10`/`0x20` flags (`is_placeholder`/`is_compressed`/`is_music`), a drum bank's overlapping
+  placeholder entry 0 (test proving the parser reads each entry from its own table offset, never assuming
+  back-to-back packing), and `PopDrones22.SDT`'s own shorter-header `MusicBank`/`MusicEntry` with its MPEG
+  Layer II payload left as an unparsed byte range (`mpeg_data`). `examples/sound_info.rs` dumps either kind.
+  Parsing only, as scoped: `soundd2low.SDT`'s `0x10` codec is left undecoded (the spec says to ignore that
+  bank and use `Soundd2`), and Layer II decoding/playback is the next bullet, still open.
 - [ ] Play SFX in the client (Bevy audio): spells, chopping, building, follower voices, ambiences; drums and music. Free sounds for `--no-original`.
 
 ### Art ([assets.md](docs/specs/assets.md))

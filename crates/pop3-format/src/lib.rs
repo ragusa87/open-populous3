@@ -12,6 +12,7 @@ pub mod install;
 pub mod language;
 pub mod level;
 pub mod objects;
+pub mod sound;
 pub mod sprites;
 pub mod theme;
 
