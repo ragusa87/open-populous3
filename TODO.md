@@ -1094,6 +1094,15 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Unit sprites: one image, material and quad mesh per animation frame (`units::upload_frame`), so each unit is its
   own draw call and bind group, nothing batches. One atlas texture and material per kind and tribe (frames as UV
   rects in a sprite material, instanced); the same for markers, dust and wood. Biggest win expected.
+  **Groundwork landed (`docs/plans/11-batch-unit-sprite-rendering.md`)**: `units::atlas::build_atlas` packs a list
+  of `art::Frame`s into one RGBA image + a per-frame pixel rect (`AtlasRect::uv` for its normalized UV), shelf-packed,
+  unit-tested (no overlaps, every input frame placed, packed pixels match the source, UV normalization) - pure
+  pixel math, no Bevy types. The actual `UnitSprites` rework (one atlas/material per kind+tribe instead of the
+  current five-level `Vec<FrameAsset>`), the shared-quad-plus-per-instance-UV draw path, and porting markers/dust/
+  wood are still to do (the plan's steps 3-6): real GPU-instancing/regression risk, and this environment's first
+  native `cargo run -p game-client --features profile`/`cargo test -p game-client` took long enough to compile from
+  scratch (every Bevy sub-crate, no cached `target/`) that the before/after `just profile` measurement itself
+  didn't land in this pass either (step 1) - left for a follow-up with the dependency build already warm.
 - [ ] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
   prepared again each frame; write only when the colour changes, or share a material per colour step.
 - [ ] Some image is prepared again every frame (`prepare_assets<GpuImage>` about 3 ms, its extract 1.6 ms): find which

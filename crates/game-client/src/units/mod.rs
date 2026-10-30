@@ -7,6 +7,7 @@
 //! come from the original animations when allowed (`art`), else they are generated (`procedural`).
 
 pub mod art;
+pub mod atlas;
 mod dust;
 pub mod markers;
 mod procedural;
