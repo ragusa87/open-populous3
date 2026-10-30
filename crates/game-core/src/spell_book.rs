@@ -448,6 +448,29 @@ impl SpellBook {
         }
     }
 
+    /// A deterministic hash of every spell's resolved `cost`/`max_charges` (spells.md "Mana"): the two
+    /// `SpellStats` fields that actually feed simulation state (`SpellBook::charge`/`cast`, lockstep-replayed),
+    /// unlike `advisor_seconds` (HUD mana-bar pacing only) or `range` (checked locally by the caster, never
+    /// compared across peers) - a mismatch in either of those can't desync a match, so they're left out to
+    /// avoid a false "mismatch" refusal over a difference that wouldn't actually diverge anything. Two peers
+    /// with a different install (or one with none) resolve `SpellStats` independently
+    /// (`GameMap::load_original`'s `apply_constants`, or the shared code-level defaults): comparing this at
+    /// game start (`game_net::Message::Handshake`) is meant to catch that before it silently desyncs mid-match
+    /// (TODO.md "Mana"). Iterates `SpellKind::ALL` in its own fixed declaration order, not `self.slots`' own
+    /// order or any `HashMap`, so it never depends on construction order (AGENTS.md's determinism rule).
+    /// `DefaultHasher::new()` always starts from the same fixed keys (unlike `RandomState`, which is
+    /// per-process-random for `HashMap`), so this value is stable across peers and runs, not just within one.
+    pub fn constants_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for kind in SpellKind::ALL {
+            let stats = self.slot(kind).map_or_else(|| SpellStats::default_for(kind), |s| s.stats);
+            stats.cost.hash(&mut hasher);
+            stats.max_charges.hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
     pub fn slot(&self, kind: SpellKind) -> Option<&SpellSlot> {
         self.slots.iter().find(|s| s.kind == kind)
     }
@@ -636,6 +659,45 @@ mod tests {
         b.apply_constants(&raw);
         assert_eq!(b.slot(SpellKind::Blast).unwrap().stats.cost, 55_555);
         assert_eq!(b.slot(SpellKind::Swamp).unwrap().stats, SpellStats::default_for(SpellKind::Swamp), "no key for it: default kept");
+    }
+
+    #[test]
+    fn constants_hash_agrees_for_two_books_built_the_same_way() {
+        assert_eq!(SpellBook::new().constants_hash(), SpellBook::new().constants_hash());
+        assert_eq!(SpellBook::demo().constants_hash(), SpellBook::demo().constants_hash());
+    }
+
+    #[test]
+    fn constants_hash_changes_when_a_cost_or_a_charge_count_does_but_not_otherwise() {
+        let base = SpellBook::new().constants_hash();
+        let mut cost_changed = SpellBook::new();
+        cost_changed.apply_constants(&Constants::parse(b"P3CONST_SPELL_BLAST = 55555\n").unwrap());
+        assert_ne!(cost_changed.constants_hash(), base, "a changed cost must be caught");
+
+        let mut charges_changed = SpellBook::new();
+        charges_changed.apply_constants(&Constants::parse(b"P3CONST_SP_1_OFF_MAX_BLAST = 1\n").unwrap());
+        assert_ne!(charges_changed.constants_hash(), base, "a changed charge count must be caught");
+
+        let mut advisor_changed = SpellBook::new();
+        advisor_changed.apply_constants(&Constants::parse(b"P3CONST_SPELL_BLAST_OPT_S = 1\n").unwrap());
+        assert_eq!(advisor_changed.constants_hash(), base, "advisor pacing alone can't desync, left out of the hash");
+
+        let mut range_changed = SpellBook::new();
+        range_changed.apply_constants(&Constants::parse(b"P3CONST_SP_W_RANGE_BLAST = 1\n").unwrap());
+        assert_eq!(range_changed.constants_hash(), base, "cast range alone can't desync, left out of the hash");
+    }
+
+    #[test]
+    fn constants_hash_does_not_depend_on_the_order_apply_constants_is_called_in() {
+        let raw = Constants::parse(b"P3CONST_SPELL_BLAST = 55555\nP3CONST_SPELL_SWARM = 1\n").unwrap();
+        let mut a = SpellBook::new();
+        a.apply_constants(&raw);
+        // A book with the same resolved stats, reached by a different path (two separate corrections instead
+        // of one), must hash the same: the hash is keyed by `SpellKind`, not by how `slots` got built.
+        let mut b = SpellBook::new();
+        b.apply_constants(&Constants::parse(b"P3CONST_SPELL_SWARM = 1\n").unwrap());
+        b.apply_constants(&raw);
+        assert_eq!(a.constants_hash(), b.constants_hash());
     }
 
     #[test]

@@ -19,6 +19,19 @@ pub enum Message {
     Start { seed: u32 },
     /// All commands a player issues for one simulation tick (possibly none): its turn.
     Tick { tick: Tick, commands: Vec<Command> },
+    /// A peer's own resolved spell constants (`game_core::spell_book::SpellBook::constants_hash`), exchanged
+    /// at game start so a mismatch (different installs, or one with and one without `constant.dat`) is caught
+    /// before it silently desyncs mid-match instead of after (spells.md "Mana"). Not yet sent/checked by any
+    /// driver (TODO.md "Network driver"): the codec exists so that plan can send it without inventing a tag.
+    Handshake { constants_hash: u64 },
+}
+
+/// Whether two peers' `Message::Handshake` hashes agree: `false` is a fatal "cannot join: constants mismatch",
+/// never something to continue past (multiplayer.md "Wire format"). A trivial comparison today - the actual
+/// network driver that exchanges handshakes and refuses a mismatched join doesn't exist yet (TODO.md "Network
+/// driver"); this function is the contract it will call.
+pub fn constants_match(mine: u64, theirs: u64) -> bool {
+    mine == theirs
 }
 
 pub fn send(w: &mut impl Write, msg: &Message) -> io::Result<()> {
@@ -50,6 +63,10 @@ pub fn encode(msg: &Message) -> Vec<u8> {
             for command in commands {
                 encode_command(&mut b, command);
             }
+        }
+        Message::Handshake { constants_hash } => {
+            b.push(3);
+            b.extend(constants_hash.to_le_bytes());
         }
     }
     b
@@ -443,6 +460,7 @@ pub fn decode(b: &[u8]) -> Option<Message> {
             }
             Some(Message::Tick { tick, commands })
         }
+        3 => Some(Message::Handshake { constants_hash: c.u64()? }),
         _ => None,
     }
 }
@@ -463,6 +481,9 @@ impl<'a> Cursor<'a> {
     }
     fn u32(&mut self) -> Option<u32> {
         Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
+    }
+    fn u64(&mut self) -> Option<u64> {
+        Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
     }
     fn id<T>(&mut self) -> Option<Id<T>> {
         self.u32().map(Id::from_raw)
@@ -549,6 +570,14 @@ mod tests {
         assert_eq!(decode(&[9]), None);
         let start = Message::Start { seed: 0xDEAD_BEEF };
         assert_eq!(decode(&encode(&start)), Some(start));
+        let handshake = Message::Handshake { constants_hash: 0x1234_5678_9ABC_DEF0 };
+        assert_eq!(decode(&encode(&handshake)), Some(handshake));
+    }
+
+    #[test]
+    fn constants_match_is_a_plain_equality() {
+        assert!(constants_match(42, 42));
+        assert!(!constants_match(42, 43));
     }
 
     #[test]

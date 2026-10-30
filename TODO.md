@@ -580,10 +580,15 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   default, real numbers only from a loaded file). `CONV_SPY`'s own duplicate entry (unit group, then building
   group) is read "by position" per constants.md, unconfirmed and irrelevant to every group read so far:
   check if any future group actually needs position-sensitive duplicate handling before adding it.
-- [ ] Lockstep: two peers resolving different `SpellStats` for the same spell (different installs, or one
-  with and one without) would silently diverge mid-match — not checked anywhere today. Needs either a
-  same-constants precondition at game start (like level/version matching presumably already is) or hashing
-  the resolved values into the handshake; `game-net` doesn't touch `SpellBook`/`Constants` at all yet.
+- [x] Lockstep: two peers resolving different `SpellStats` would silently diverge mid-match - a hashing
+  mechanism now exists (`SpellBook::constants_hash`, every spell's resolved `cost`/`max_charges`, the two
+  fields that actually feed simulation state; `advisor_seconds`/`range` left out, neither can desync anything)
+  and a wire message to carry it (`game_net::Message::Handshake { constants_hash }`, tag 3,
+  `constants_match` helper, multiplayer.md "Wire format"; spells.md "Mana"). **Correction**: the TODO's own
+  "like level/version matching presumably already is" was wrong - `game-net` had no precondition check of any
+  kind before this (checked `Message`'s then-3 variants directly). Still open: nothing calls this yet - there
+  is no host/join flow or network driver at all (see "Network driver" below), so a real mismatch is not
+  actually refused anywhere today, only encodable/decodable and comparable.
 - [ ] Script interpreter in `game-core`: user variables, internal variables read from the simulation (`headcount`: units by state and kind, `housing`), `EVERY n m` firing when `(turn + m) % n == 0` (stored minus 1), DO commands mapped to AI states and `Command`s; start with the states, `ATTACK` and `SET_SPELL_ENTRY`. Levels 2100, 2110, 2131 name missing scripts: fall back to no script.
 - [ ] Script timing: measure the original turn rate (wiki: about 8 turns/s) against our 10 ticks/s, and whether `EVERY` adds a per-tribe phase, before porting script timings (see [ai-scripts.md](docs/specs/ai-scripts.md) "What this means here").
 - [x] Flybys: `FLYBY_CREATE_NEW..=FLYBY_START` drives the camera for real now

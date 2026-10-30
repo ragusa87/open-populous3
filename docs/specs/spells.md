@@ -121,6 +121,12 @@ partial or modded file only changes what it actually defines), then `fill()` run
 reflect any corrected `max_charges`. No other constructor touches this, so `--no-original` always gets the
 defaults.
 
+Two peers resolving `SpellStats` differently (a different install, or one with and one without) would silently
+diverge mid-match: `SpellBook::constants_hash()` hashes every spell's resolved `cost`/`max_charges` (not
+`advisor_seconds`/`range`, which can't desync anything - HUD pacing and a locally-checked cast range) for
+comparison at game start (`game_net::Message::Handshake`, multiplayer.md "Wire format"). Not yet wired into an
+actual join: there is no network driver or host/join flow to call it from yet (TODO.md "Network driver").
+
 `SpellBook::from_level(header, level)`: the header's `SpellsAvailable` panel spells are Known with full charges
 (how charged the original starts them is not checked), the spell discoveries (`DiscoveryType 11`) not already
 known are Discoverable, each slot keeping its own thing's availability (`SpellSlot::discovery_availability`, see
