@@ -116,6 +116,10 @@ pub struct GameMap {
     /// Each computer tribe's own script (`ai_script.rs`), one per tribe with a `cpscrNNN.dat` assigned
     /// (`LevelHeader::ai_scripts`); empty on generated maps and sandboxes.
     pub(crate) tribe_scripts: Vec<crate::ai_script::TribeScript>,
+    /// Each computer tribe's native AI state (`ai.rs`): one per tribe with an assigned script, the same
+    /// set `tribe_scripts` tracks ("Blue is the human player and never has one" — ai-scripts.md). Empty
+    /// on generated maps and sandboxes, same as `tribe_scripts`.
+    pub(crate) ai: Vec<crate::ai::NativeAi>,
     /// A script's flyby playing or just finished (`ai_script.rs`), read by the client to pose its own
     /// camera and HUD; `game-core` never touches a camera. At most one at a time.
     pub active_flyby: Option<crate::ai_script::ActiveFlyby>,
@@ -166,7 +170,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), active_flyby: None }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -221,6 +225,7 @@ impl GameMap {
             next_id: 1,
             rng: Lcg(0),
             tribe_scripts: Vec::new(),
+            ai: Vec::new(),
             active_flyby: None,
         }
         .with_buildings(buildings_from_level(level))
@@ -337,7 +342,8 @@ impl GameMap {
         let shaman_omni = header.as_ref().is_some_and(|h| h.flags.has(pop3_format::header::LevelFlags::SHAMAN_OMNI));
         let tribes = header.as_ref().map_or(map.tribes.clone(), |h| map.tribes.clone().with_allies(h.allies));
         let tribe_scripts = header.as_ref().map_or(Vec::new(), |h| crate::ai_script::load_tribe_scripts(dat, h.ai_scripts));
-        let mut map = GameMap { spell_books, build_books, start_camera, object_bank, shaman_omni, tribes, tribe_scripts, ..map };
+        let ai = tribe_scripts.iter().map(|ts| crate::ai::NativeAi::new(ts.owner)).collect();
+        let mut map = GameMap { spell_books, build_books, start_camera, object_bank, shaman_omni, tribes, tribe_scripts, ai, ..map };
         // "Turn 0" (ai-scripts.md "How a script runs"): a real script's setup block, run once here
         // while `now` is still `Tick::ZERO`, before the game truly starts. `tick()`'s own later calls
         // to `tend_ai_scripts` (turns 1, 2, 3, ...) run the `ELSE { EVERY ... }` branch from then on.
@@ -1395,6 +1401,7 @@ impl GameMap {
         if !frozen {
             self.tend_flyby();
             self.tend_ai_scripts();
+            self.tend_native_ai();
             self.spot_enemies();
             self.tend_attacks();
             self.tend_wrecking();

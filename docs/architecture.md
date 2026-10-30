@@ -5,12 +5,17 @@ crates/
   pop3-format   pure parsers for original files (no engine). Reusable by tools/editor.
   pop3-ai-script parser, statement tree and interpreter abstraction for the original computer-player
                 scripts (PopScript, docs/specs/ai-scripts.md). No Bevy, no game logic: `Env::do_call`
-                hands every `DO` command to its caller undecided. A real dependency of game-core now
-                (`game-core/src/ai_script.rs`'s `ScriptEnv`): `SET_REINCARNATION` and flybys
-                (`FLYBY_CREATE_NEW..=FLYBY_START`, `Env::on_flyby`) are wired to real behaviour,
-                everything else still a no-op.
+                hands every `DO` command to its caller, every `Field` argument already resolved to a
+                plain number. A real dependency of game-core now (`game-core/src/ai_script.rs`'s
+                `ScriptEnv`): `SET_REINCARNATION`, flybys (`FLYBY_CREATE_NEW..=FLYBY_START`,
+                `Env::on_flyby`), every `STATE_*` toggle, `SET_DRUM_TOWER_POS`/`BUILD_DRUM_TOWER`,
+                `TRAIN_PEOPLE_NOW` and `ATTACK` are wired to real behaviour (`game-core/src/ai.rs`'s
+                native engine, below); most other `DO` commands (markers/guard groups, spell entries,
+                vehicles, level events) are still a no-op.
   game-core     deterministic simulation: terrain (Heightmap), map, spell, effect, blast, unit, vehicle, physics, command, vault; query layers
-                over the map (occupancy: who fills a building; headcount: units by state and kind, housing).
+                over the map (occupancy: who fills a building; headcount: units by state and kind, housing);
+                `ai.rs`: a first native engine for computer-controlled tribes (construct buildings, train
+                people, post defenders, `DO ATTACK`), fed by the same per-tribe state `ai_script.rs` tunes.
                 Integers only in state. No Bevy.
   game-net      lockstep wire protocol (length-prefixed, hand-written binary) over std TCP.
   unit-atlas    text index of baked unit frames (rectangle and feet per pose, direction, frame).

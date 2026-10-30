@@ -55,7 +55,7 @@ Burn (model 1) and Raise (the editor's own terrain brush) are internal mechanics
 |---|---|---|
 | Tribes | Todo | No `TribeId` model yet (owners are still bare bytes); per-tribe state (colour, allies, human/computer, mana/books) lives ad hoc on `GameMap`. |
 | Level scripting (triggers) | Todo | Trigger layout is parsed; semantics (what each type waits for, what activating one does) not implemented. |
-| Computer players (AI) | Todo — scripts parsed, not yet driving behaviour | `pop3-ai-script` fully parses `cpscrNNN.dat` and runs its control flow; flybys work end to end. Almost every `DO` command is still a no-op — only reincarnation on/off is wired to real behaviour. No AI actually plays a tribe yet. See [ai-scripts.md](specs/ai-scripts.md). |
+| Computer players (AI) | Partial — a first opponent plays | `game-core/src/ai.rs`'s native engine runs a priority sweep for each computer tribe (construct essential buildings, train people, post defenders) and `DO ATTACK` sends fighters at a target; `ai_script.rs` wires `STATE_*`/`INT_ATTR_*`, `SET_DRUM_TOWER_POS`/`BUILD_DRUM_TOWER`, `TRAIN_PEOPLE_NOW` and `ATTACK` to it. Flybys and reincarnation on/off also wired. Still missing: shaman auto-cast, garrison/vehicle tasks, scripted patrol/guard groups (need the level markers table), the reactive counter-attack, and most other `DO` commands. See [ai-scripts.md](specs/ai-scripts.md) and TODO.md "Computer players (AI)". |
 
 ## Priority 3 — remaining fidelity and content
 
