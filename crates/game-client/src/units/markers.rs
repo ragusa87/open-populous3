@@ -236,7 +236,7 @@ fn load_art(levels: Res<LevelList>, mut commands: Commands, mut images: ResMut<A
     let flame_picture = flame::flame_rgba(&flame::generated_tile(), &flame::fallback_alpha_rgba());
     let burning: Vec<FrameAsset> = flame::frame_materials(&flame_picture, &mut images, &mut mats)
         .into_iter()
-        .map(|material| FrameAsset { image: Handle::default(), mesh: flame_mesh.clone(), material, size: Vec2::ZERO, origin: Vec2::ZERO })
+        .map(|material| FrameAsset { image: Handle::default(), mesh: flame_mesh.clone(), material, size: Vec2::ZERO, origin: Vec2::ZERO, rect: Rect::EMPTY })
         .collect();
     commands.insert_resource(MarkerArt { original: is_original, low_health, bloodlust, hypnosis, arrow, shield, shield_tribes, burning });
 }

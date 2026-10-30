@@ -194,6 +194,10 @@ pub struct FrameAsset {
     /// Size and feet in base pixels (fractional for detailed art).
     pub size: Vec2,
     pub origin: Vec2,
+    /// Where this frame sits in `image`'s own pixels (`ImageNode::rect`): the whole image when it is
+    /// this frame's own (`upload_frame`), a sub-rect when `image` is a shared atlas (`upload_tribe_atlases`,
+    /// `upload_frames`) - a 2D HUD user (`hud/shaman.rs`) must crop to this or it draws the whole atlas.
+    pub rect: Rect,
 }
 
 /// Every kind's and tribe's frames, uploaded once: `kinds[kind][tribe][pose][dir][frame]`, kinds in
@@ -443,7 +447,8 @@ fn upload_tribe_atlases(ta: TribeAtlases, images: &mut Assets<Image>, meshes: &m
                         .map(|f| {
                             let (image, material, width, height) = handles[f.atlas].as_ref().expect("a frame referencing an atlas that wasn't packed");
                             let mesh = meshes.add(sprite_quad_uv(f.size, f.origin, f.rect.uv(*width, *height)));
-                            FrameAsset { image: image.clone(), mesh, material: material.clone(), size: f.size, origin: f.origin }
+                            let rect = Rect::new(f.rect.x as f32, f.rect.y as f32, (f.rect.x + f.rect.width) as f32, (f.rect.y + f.rect.height) as f32);
+                            FrameAsset { image: image.clone(), mesh, material: material.clone(), size: f.size, origin: f.origin, rect }
                         })
                         .collect()
                 })
@@ -474,6 +479,7 @@ pub fn prepare_frame(f: &Frame) -> PreparedFrame {
 
 /// The GPU half: the image, an unlit quad anchored at the feet, cut out or blended.
 pub fn upload_prepared(p: PreparedFrame, images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> FrameAsset {
+    let rect = Rect::new(0.0, 0.0, p.pixels.width as f32, p.pixels.height as f32);
     let mut image = Image::new(
         Extent3d { width: p.pixels.width as u32, height: p.pixels.height as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
@@ -491,7 +497,7 @@ pub fn upload_prepared(p: PreparedFrame, images: &mut Assets<Image>, meshes: &mu
         double_sided: true,
         ..default()
     });
-    FrameAsset { image, mesh: meshes.add(sprite_quad(p.size, p.origin)), material, size: p.size, origin: p.origin }
+    FrameAsset { image, mesh: meshes.add(sprite_quad(p.size, p.origin)), material, size: p.size, origin: p.origin, rect }
 }
 
 /// Prepares and uploads a frame at once (`prepare_frame`, `upload_prepared`).
@@ -526,7 +532,8 @@ pub fn upload_frames(frames: &[Frame], images: &mut Assets<Image>, meshes: &mut 
         let material = mats.add(StandardMaterial { base_color_texture: Some(image.clone()), alpha_mode, unlit: true, cull_mode: None, double_sided: true, ..default() });
         for ((idx, pf), rect) in group.into_iter().zip(packed.rects.iter()) {
             let mesh = meshes.add(sprite_quad_uv(pf.size, pf.origin, rect.uv(packed.width, packed.height)));
-            assets[idx] = Some(FrameAsset { image: image.clone(), mesh, material: material.clone(), size: pf.size, origin: pf.origin });
+            let px_rect = Rect::new(rect.x as f32, rect.y as f32, (rect.x + rect.width) as f32, (rect.y + rect.height) as f32);
+            assets[idx] = Some(FrameAsset { image: image.clone(), mesh, material: material.clone(), size: pf.size, origin: pf.origin, rect: px_rect });
         }
     }
     assets.into_iter().map(|a| a.expect("every frame placed by its blended bucket")).collect()

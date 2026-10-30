@@ -98,6 +98,7 @@ fn update_preview(
         match unit.and_then(|u| sprites.frame_for(u, None, !u.aboard.and_then(|v| map.0.vehicle(v)).is_some_and(crate::vehicles::under_way), rig.yaw, &clock, *now, map.0.outcome.is_some())) {
             Some(f) => {
                 image.image = f.image.clone();
+                image.rect = Some(f.rect);
                 node.width = px(f.size.x * SCALE);
                 node.height = px(f.size.y * SCALE);
                 node.left = px(width / 2.0 - f.origin.x * SCALE);
