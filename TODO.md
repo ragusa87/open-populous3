@@ -1094,15 +1094,20 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Unit sprites: one image, material and quad mesh per animation frame (`units::upload_frame`), so each unit is its
   own draw call and bind group, nothing batches. One atlas texture and material per kind and tribe (frames as UV
   rects in a sprite material, instanced); the same for markers, dust and wood. Biggest win expected.
-  **Groundwork landed (`docs/plans/11-batch-unit-sprite-rendering.md`)**: `units::atlas::build_atlas` packs a list
-  of `art::Frame`s into one RGBA image + a per-frame pixel rect (`AtlasRect::uv` for its normalized UV), shelf-packed,
-  unit-tested (no overlaps, every input frame placed, packed pixels match the source, UV normalization) - pure
-  pixel math, no Bevy types. The actual `UnitSprites` rework (one atlas/material per kind+tribe instead of the
-  current five-level `Vec<FrameAsset>`), the shared-quad-plus-per-instance-UV draw path, and porting markers/dust/
-  wood are still to do (the plan's steps 3-6): real GPU-instancing/regression risk, and this environment's first
-  native `cargo run -p game-client --features profile`/`cargo test -p game-client` took long enough to compile from
-  scratch (every Bevy sub-crate, no cached `target/`) that the before/after `just profile` measurement itself
-  didn't land in this pass either (step 1) - left for a follow-up with the dependency build already warm.
+  **Partly done (`docs/plans/11-batch-unit-sprite-rendering.md`)**: `units::atlas::build_atlas` packs a list of
+  `art::Frame`s into one RGBA image + a per-frame pixel rect (`AtlasRect::uv`), shelf-packed, unit-tested - pure
+  pixel math, no Bevy types. `UnitSprites`' own upload path now uses it (`pack_tribe_atlases`/`upload_tribe_atlases`):
+  up to two shared atlases/materials per kind+tribe (opaque `Mask`, blended `Blend` - a `StandardMaterial` can't mix
+  both `alpha_mode`s), each frame keeping its own small UV-mapped quad into the shared atlas rather than one fully
+  shared mesh with a per-instance UV attribute - `FrameAsset`'s shape is unchanged so no caller needed touching,
+  and many more `FrameAsset`s now share one `.image`/`.material` handle (fewer bind groups/texture switches per
+  kind+tribe+alpha-mode, the actual complaint). Packing runs off the main thread (`UnitSpritesJob::run`), not
+  `install()` - an earlier version that packed in `install()` measured the "Unit sprites installed" boot step at
+  ~880 ms instead of ~23 ms. Still open: markers/dust/wood/`volcano_rocks.rs` still call the old per-frame
+  `upload_frame` (plan step 5); `animate_views`/`respawn_views` still swap `Mesh3d`/`MeshMaterial3d` handles every
+  frame rather than true per-instance-UV instancing on one shared mesh (step 4 - whether that's still worth its
+  own regression risk on top of the material sharing above needs a re-measurement first, step 6); the before/after
+  `just profile` numbers themselves (step 1/6) still don't exist for this item.
 - [ ] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
   prepared again each frame; write only when the colour changes, or share a material per colour step.
 - [ ] Some image is prepared again every frame (`prepare_assets<GpuImage>` about 3 ms, its extract 1.6 ms): find which
