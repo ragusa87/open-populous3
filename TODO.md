@@ -196,12 +196,13 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Selection of buildings (without the people inside), and of units inside them (`selection::selectable`). Vehicles: a click with nothing selected selects the people aboard (vehicles.md).
 - [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
 - [ ] Statuses (`Unit::statuses`: Magical Shield, Bloodlust, Invisibility and Hypnotism now cast for real,
-  `GameMap::cast_nearest_status`/`hypnotize`; only Ghost Army's left unset by any spell): **found this session,
-  tracing the exe's own Hypnotism code (0x50EB00) while resolving "Preacher conversion"'s GONE/NEW contradiction**:
-  the original explicitly carries the captured person's current life, max life and carried wood across the
-  capture (and again across the later revert) - ours (`GameMap::change_owner`, used by `hypnotize`) instead resets
-  health to full and carrying to 0. A damaged enemy hypnotised in the original keeps its existing damage and any
-  wood it was carrying; ours heals and empties it. The timer of a ghost's
+  `GameMap::cast_nearest_status`/`hypnotize`; only Ghost Army's left unset by any spell): **fixed** (found tracing
+  the exe's own Hypnotism code, 0x50EB00, while resolving "Preacher conversion"'s GONE/NEW contradiction): the
+  original explicitly carries the captured person's current life, max life and carried wood across the capture
+  (and again across the later revert). `Unit::change_owner_keeping_body` now does this for both `hypnotize` and
+  `revert_expired_hypnosis` (soul-convert and the Convert spell keep the ordinary full-reset `change_owner`,
+  unaffected: this was specific to Hypnotism's own capture/revert, checked at every `change_owner` caller first).
+  The timer of a ghost's
   status (not traced: no expiry found for Ghost Army), other options to define; read by combat, selection and
   drawing. Invisibility's own early end (attacking does, walking does not) is a guess (pop3-rev-analysis.md "Per
   spell" 6: "some actions end it early", not traced), implemented in `attack::go_attack`. Drawing: the markers are

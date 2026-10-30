@@ -44,14 +44,15 @@ impl Hypnotism {
 }
 
 impl GameMap {
-    /// The unit `unit` joins `tribe` like `change_owner`, restarting its `HYPNO_STEPS` countdown
+    /// The unit `unit` joins `tribe` like `change_owner`, but keeps its life and carried wood
+    /// (`Unit::change_owner_keeping_body`), and restarts its `HYPNO_STEPS` countdown
     /// (`status::Statuses.hypnotized`). Its `hypnotized_from` keeps the tribe it had *before its first capture*: a
     /// unit already hypnotised that gets recast on (by its current captor or anyone else) changes hands and its
     /// timer restarts, but what it reverts to never changes mid-chain.
     pub(crate) fn hypnotize(&mut self, unit: crate::unit::UnitId, tribe: u8) {
         let Some(u) = self.unit_mut(unit).filter(|u| u.is_alive()) else { return };
         let original = u.statuses.hypnotized_from.unwrap_or(u.owner);
-        u.change_owner(tribe);
+        u.change_owner_keeping_body(tribe);
         if let Some(u) = self.unit_mut(unit) {
             u.statuses.hypnotized = crate::status::Timed::steps(crate::status::HYPNO_STEPS);
             u.statuses.hypnotized_from = Some(original);
@@ -59,9 +60,9 @@ impl GameMap {
     }
 
     /// Every unit whose hypnotism just ran out this turn (`status::Statuses.hypnotized_from` still set, but
-    /// `hypnotized` no longer on) reverts to its original tribe, unless that tribe is wiped out by now
-    /// (`tribe_wiped_out`), in which case the change just stays as it is (`hypnotized_from` cleared either way, so
-    /// this never matches the same unit twice).
+    /// `hypnotized` no longer on) reverts to its original tribe, keeping its life and carried wood same as the
+    /// capture did, unless that tribe is wiped out by now (`tribe_wiped_out`), in which case the change just stays
+    /// as it is (`hypnotized_from` cleared either way, so this never matches the same unit twice).
     pub(crate) fn revert_expired_hypnosis(&mut self) {
         let expired: Vec<(crate::unit::UnitId, u8)> = self
             .units
@@ -74,8 +75,8 @@ impl GameMap {
                 if let Some(u) = self.unit_mut(unit) {
                     u.statuses.hypnotized_from = None;
                 }
-            } else {
-                self.change_owner(unit, original);
+            } else if let Some(u) = self.unit_mut(unit) {
+                u.change_owner_keeping_body(original);
             }
         }
     }
@@ -192,6 +193,25 @@ mod tests {
             map.unit(enemy).unwrap().owner == 1
         });
         assert!(reverted.is_some(), "reverts to tribe 1 in the end, never to tribe 0 who held it in between");
+    }
+
+    #[test]
+    fn keeps_life_and_wood_across_a_capture_and_its_later_revert() {
+        // No `map.tick()` here: an idle unit holding wood puts it down again after a while regardless of its
+        // owner (`GameMap::drop_wood`) - unrelated to this fix, and it would hide what's being tested. Calling
+        // `hypnotize`/`revert_expired_hypnosis` directly instead checks exactly what they do to the body.
+        let mut map = bare();
+        let enemy = map.spawn(1, UnitKind::Brave, AT).id;
+        map.spawn(1, UnitKind::Brave, (AT.0.wrapping_add(20_000), AT.1)); // keeps tribe 1 alive, so the revert happens
+        let u = map.unit_mut(enemy).unwrap();
+        (u.health, u.carrying) = (crate::health::Health::new(1, u.health.max()), 7);
+        map.hypnotize(enemy, 0);
+        let u = map.unit(enemy).unwrap();
+        assert_eq!((u.owner, u.health.current(), u.carrying), (0, 1, 7), "captured, but keeping its body as it was");
+        map.unit_mut(enemy).unwrap().statuses.hypnotized = Timed::default();
+        map.revert_expired_hypnosis();
+        let u = map.unit(enemy).unwrap();
+        assert_eq!((u.owner, u.health.current(), u.carrying), (1, 1, 7), "reverted, body untouched again");
     }
 
     #[test]

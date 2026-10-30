@@ -1234,6 +1234,17 @@ impl Unit {
         self.action = Action::Idle;
     }
 
+    /// Like `change_owner`, but keeps its current health and carried wood (Hypnotism's own capture and revert,
+    /// `hypnotism.rs`: confirmed live, 0x50EB00 — the captured person's life, max life and carried wood cross both
+    /// the capture and the later revert, unlike an ordinary `change_owner`/soul-convert which starts the new
+    /// person fresh). Never called on a wildman (Hypnotism never captures one), so `change_owner`'s kind-driven
+    /// life reset never actually fires here.
+    pub(crate) fn change_owner_keeping_body(&mut self, tribe: u8) {
+        let (health, carrying) = (self.health, self.carrying);
+        self.change_owner(tribe);
+        (self.health, self.carrying) = (health, carrying);
+    }
+
     /// Joins a coordinator, or a sermon's `Listening` (locked the same way but backed by no coordinator), with
     /// `action`, leaving its way, its chained orders and the spell it was to cast. An attacker's own standing
     /// attack order is not one of those: it goes dormant instead (`resume_attack`, picked up again by
