@@ -499,6 +499,39 @@ pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<M
     upload_prepared(prepare_frame(f), images, meshes, mats)
 }
 
+/// Packs and uploads a flat list of frames sharing at most two atlases (opaque/blended, same split as
+/// `pack_tribe_atlases`/`upload_tribe_atlases`) instead of one image+material per frame - for a small
+/// one-off sprite set with no (pose, direction) nesting to key by (status markers, the dust cloud, the
+/// volcano rock sprite). TODO.md "Unit sprites": "the same for markers, dust and wood" - `wood.rs`'s own
+/// single frame has nothing to batch against, so it stays on plain `upload_frame`.
+pub fn upload_frames(frames: &[Frame], images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> Vec<FrameAsset> {
+    let prepared: Vec<PreparedFrame> = frames.iter().map(prepare_frame).collect();
+    let mut assets: Vec<Option<FrameAsset>> = (0..prepared.len()).map(|_| None).collect();
+    let (blended, opaque): (Vec<_>, Vec<_>) = prepared.into_iter().enumerate().partition(|(_, pf)| pf.blended);
+    for (alpha_mode, group) in [(AlphaMode::Mask(0.5), opaque), (AlphaMode::Blend, blended)] {
+        if group.is_empty() {
+            continue;
+        }
+        let pixel_frames: Vec<Frame> = group.iter().map(|(_, pf)| pf.pixels.clone()).collect();
+        let packed = atlas::build_atlas(&pixel_frames);
+        let mut image = Image::new(
+            Extent3d { width: packed.width as u32, height: packed.height as u32, depth_or_array_layers: 1 },
+            TextureDimension::D2,
+            packed.rgba,
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::default(),
+        );
+        image.sampler = ImageSampler::linear();
+        let image = images.add(image);
+        let material = mats.add(StandardMaterial { base_color_texture: Some(image.clone()), alpha_mode, unlit: true, cull_mode: None, double_sided: true, ..default() });
+        for ((idx, pf), rect) in group.into_iter().zip(packed.rects.iter()) {
+            let mesh = meshes.add(sprite_quad_uv(pf.size, pf.origin, rect.uv(packed.width, packed.height)));
+            assets[idx] = Some(FrameAsset { image: image.clone(), mesh, material: material.clone(), size: pf.size, origin: pf.origin });
+        }
+    }
+    assets.into_iter().map(|a| a.expect("every frame placed by its blended bucket")).collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_ticks(
     time: Res<Time>,

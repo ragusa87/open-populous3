@@ -7,7 +7,7 @@
 
 use super::art::{alpha_picture_frame, picture_frame, Frame};
 use super::selection::Selection;
-use super::{hidden_inside, upload_frame, FrameAsset, UnitView};
+use super::{hidden_inside, upload_frames, FrameAsset, UnitView};
 use crate::flame;
 use crate::original_models::to_mesh;
 use crate::sim_time::SimNow;
@@ -217,7 +217,7 @@ fn load_art(levels: Res<LevelList>, mut commands: Commands, mut images: ResMut<A
     let original = levels.original.then(|| original_frames(&levels.data_dir).map_err(|e| warn!("original status markers: {e}")).ok()).flatten();
     let is_original = original.is_some();
     let [low, blood, hypno, arrow, shield] = original.unwrap_or_else(|| [Vec::new(), generated_bloodlust(), generated_hypnosis(), Vec::new(), generated_shield()]);
-    let mut upload = |frames: Vec<Frame>| frames.iter().map(|f| upload_frame(f, &mut images, &mut meshes, &mut mats)).collect::<Vec<_>>();
+    let mut upload = |frames: Vec<Frame>| upload_frames(&frames, &mut images, &mut meshes, &mut mats);
     let (low_health, bloodlust, hypnosis, arrow, shield) = (upload(low), upload(blood), upload(hypno), upload(arrow), upload(shield));
     let shield_tribes = (0..TRIBES)
         .map(|tribe| {

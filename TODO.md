@@ -1108,11 +1108,23 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   and many more `FrameAsset`s now share one `.image`/`.material` handle (fewer bind groups/texture switches per
   kind+tribe+alpha-mode, the actual complaint). Packing runs off the main thread (`UnitSpritesJob::run`), not
   `install()` - an earlier version that packed in `install()` measured the "Unit sprites installed" boot step at
-  ~880 ms instead of ~23 ms. Still open: markers/dust/wood/`volcano_rocks.rs` still call the old per-frame
-  `upload_frame` (plan step 5); `animate_views`/`respawn_views` still swap `Mesh3d`/`MeshMaterial3d` handles every
-  frame rather than true per-instance-UV instancing on one shared mesh (step 4 - whether that's still worth its
-  own regression risk on top of the material sharing above needs a re-measurement first, step 6); the before/after
-  `just profile` numbers themselves (step 1/6) still don't exist for this item.
+  ~880 ms instead of ~23 ms. **Step 5 done** for markers/dust/the volcano rock sprite: a new `units::upload_frames`
+  (same opaque/blended atlas split as `pack_tribe_atlases`, but flat - no (pose, direction) nesting to key by, so
+  it doesn't need the boot job's background-thread split either) replaces their own per-frame `upload_frame` maps
+  (`units/markers.rs`'s `load_art`, `units/dust.rs`'s `load_assets`, `volcano_rocks.rs`'s `load_assets`) - each
+  call site's own frame set now shares at most two materials instead of one per frame. `wood.rs` deliberately
+  stays on plain `upload_frame`: its one sprite has nothing to batch against. Still open: `animate_views`/
+  `respawn_views` still swap `Mesh3d`/`MeshMaterial3d` handles every frame rather than true per-instance-UV
+  instancing on one shared mesh (step 4) - attempted judging it this session: a real GPU-instancing rework (a
+  custom `Material` with per-instance vertex data, Bevy 0.19) is real regression risk for a benefit this plan
+  can't yet measure (see next), so left undone rather than rushed. The before/after `just profile` numbers (step
+  1/6) still don't exist in a form comparable to this item's own "73 ms/frame" figure: a `POP3_START=sandbox-units`
+  capture's own top entries are dominated by the headless video-capture path itself (`video::to_video`,
+  `boot::poll_job<UnitSpritesJob>`) even post-sharing, not a steady-state per-frame breakdown - our own systems
+  there (`animate_views` 0.115 ms/call, `respawn_views` 0.235 ms/call, `markers::animate_markers` 0.099 ms/call)
+  are cheap either way, consistent with the TODO's own complaint being Bevy's render-app bind-group/texture-switch
+  overhead rather than our systems' CPU time, but isolating that cleanly from this trace needs a steadier capture
+  method than `just profile`'s video path - left as the item's own remaining gap rather than guessed at.
 - [ ] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
   prepared again each frame; write only when the colour changes, or share a material per colour step.
 - [ ] Some image is prepared again every frame (`prepare_assets<GpuImage>` about 3 ms, its extract 1.6 ms): find which

@@ -5,7 +5,7 @@
 //! shown once the units drawn a step behind (`SimNow`) reach it.
 
 use super::art::alpha_picture_frame;
-use super::{toward_eye, upload_frame, FrameAsset, UnitView, PULL_TO_EYE};
+use super::{toward_eye, upload_frames, FrameAsset, UnitView, PULL_TO_EYE};
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{render_pos, Grounded};
 use crate::world::{CurrentMap, LevelList};
@@ -111,7 +111,7 @@ impl Plugin for DustPlugin {
 
 fn load_assets(levels: Res<LevelList>, mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     let frames = levels.original.then(|| original_cloud(&levels.data_dir).map_err(|e| warn!("original dust cloud: {e}")).ok()).flatten().unwrap_or_default();
-    let cloud = frames.iter().map(|f| upload_frame(f, &mut images, &mut meshes, &mut mats)).collect();
+    let cloud = upload_frames(&frames, &mut images, &mut meshes, &mut mats);
     let texture = Image::new(
         Extent3d { width: TEXTURE as u32, height: TEXTURE as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
