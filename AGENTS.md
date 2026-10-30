@@ -27,6 +27,27 @@ Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `r
 If `docs/plans/` has a plan for the task, read it too: it is the current approach and task breakdown, ahead of whatever
 the matching spec still says.
 
+## Resuming the queued plan backlog (temporary - remove this section once the queue is empty)
+`docs/plans/` currently holds a numbered backlog (`01-*.md` .. `17-*.md`), one plan per well-specified TODO.md item
+that needs no live-check or spec session first. If this file is being read at the start of a session or after a
+context reset, and the backlog is not empty: **do this before anything else the user didn't just ask for.**
+1. List `docs/plans/*.md`, excluding `.gitignore`. Pick the lowest-numbered file still present - that is the next
+   plan. If none remain, skip to step 6.
+2. Implement it fully per its own steps. Follow AGENTS.md's own rules throughout (determinism, licence, commit
+   style) same as any other task.
+3. Run `just test`; it must pass.
+4. Tick/update the TODO.md item(s) the plan names, in the same commit as the implementation (one logical step,
+   per "Commits" below).
+5. `git add`/commit, then `git push -u origin <branch>` (current branch). Delete the plan file (it's scratch,
+   gitignored, not part of the commit) now that its work is committed and pushed. Stop there for this turn/session -
+   do not start the next plan in the same pass, so each gets reviewed on its own push.
+6. Once no numbered plan file remains in `docs/plans/`, remove this whole "Resuming the queued plan backlog"
+   section from AGENTS.md as its own commit, and push it.
+If a plan turns out to need a live check, a spec/reverse-engineering session, or a decision only a person can make,
+don't block on it: narrow the plan to whatever sub-part is still codeable (ticking TODO.md honestly for the rest,
+same as any other entry there), or leave a `docs/plans/<n>-*.md` note plus a TODO.md bullet describing exactly what
+is blocked and why, and move on to the next-numbered plan instead of stopping the whole backlog.
+
 ## Layout
 - `crates/pop3-format`: pure parsers of original game files. No Bevy, no game logic.
 - `crates/game-core`: deterministic simulation (terrain, map, spell, unit, command). No Bevy, no floats in state.
