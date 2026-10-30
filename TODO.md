@@ -577,7 +577,26 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 - [ ] Implement the triggers and discoveries as deterministic simulation (through `Command`/state, no floats); AI scripts can fire them too (`TRIGGER_THING`).
 
 ### Computer players (AI)
-- [ ] AI for the computer-controlled tribes (pop3-rev-analysis.md "Native AI: how a computer-controlled tribe actually decides what to do"): their shaman and followers act on their own through `Command`s (deterministic, like a player's input): gather wood, build and grow the village, train units, pray, cast spells, attack and defend. The original's own architecture is now spec'd: one shared task-queue engine, fed both by a fixed 12-category priority list the engine itself tries every ~5 seconds (building construction always tried first) and by level scripts (PopScript's `DO` commands plug into the exact same queue, not a separate system) - build ours the same way, one engine both the autonomous priority list and any future scripting layer feed, rather than two parallel "AI" and "scripting" implementations. Reuse, don't duplicate, the original's own shared primitives: one generic "this follower now has a job" state transition (used by construction, resource-gathering, training, defence-posting and more alike), one generic "find N eligible idle workers nearby" search, and one generic "wrap up and move on from this target" sequence. Confirmed explicitly: the native AI never autonomously decides to attack under any condition (not even when losing badly) - only a script's own `DO ATTACK` ever queues one, so do NOT build a "desperation attack" trigger into the core simulation; if that behaviour is wanted later, it belongs in whatever drives AI tribes' scripted behaviour, the same place as any other conditional AI action. 24 native task types are catalogued at a design-ready level in the analysis section above (construct building, gather resources, train people, post/wander defenders, garrison staffing, scripted patrol execution, a reactive counter-attack, shaman positioning/auto-cast, and more); the exact worker-selection and site-search tie-breaking rules are still open and can be decided by our own judgement for a first pass.
+- [x] A first native engine for the computer-controlled tribes (`game_core::ai`, pop3-rev-analysis.md
+  "Native AI: how a computer-controlled tribe actually decides what to do"): `GameMap::tend_native_ai`
+  runs, per computer tribe (one `NativeAi` per tribe `LevelHeader::ai_scripts` assigns a script to,
+  same set `tribe_scripts` tracks), a priority sweep every 64 ticks (`SWEEP_EVERY`, phased by owner) —
+  construct an essential building (drum tower first, then a hut once housing is nearly full, then
+  warrior/temple/firewarrior training by population), train people towards the script's
+  `INT_ATTR_PREF_*_PEOPLE` shares, then post a spare defender up to a quota — the first that can act,
+  acts, matching "position 0 is always construct buildings". Every decision goes through `GameMap`'s
+  own public order/builder helpers (`place_building`, `build_orders`, `send_into`, `set_patrol`,
+  `apply`) exactly like a human player's input, which is also the "easily switched" seam: a different
+  engine only has to produce the same kind of calls. `DO ATTACK` (`ai::AttackGoal`, `GameMap::ai_attack`)
+  is the one task the sweep never enqueues on its own, confirming the spec's "native AI never decides
+  to attack"; it launches the chosen fighters straight at their target instead of the original's own
+  muster-at-the-drum-tower-then-march sequence (simplified, not traced). Deliberately not modelled at
+  all yet: shaman positioning/auto-cast (`SET_SPELL_ENTRY`), garrison and vehicle tasks, scripted patrol
+  groups and one-off guards (`SET_MARKER_ENTRY`/`GUARD_AT_MARKER`/...: need the level header's
+  `Markers[256]` table, not read anywhere yet), the reactive counter-attack, `ATTACK_MARKER` targets
+  (same marker-table gap), an attack's damage-then-withdraw threshold, and the real worker-selection/
+  site-search tie-breaking rules (ours: a bounded random site search, idle braves in id order). See the
+  next few items for what reaches it from a script.
 - [x] `pop3-ai-script` (its own crate, not a `pop3-format` module): parses `cpscrNNN.dat` (12 552 B
   only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md) (grammar,
   token, parameter and internal variable tables are there), folds a recognized
@@ -588,18 +607,35 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   - a decompiled-listing pretty-printer, so `just level-info` can print the level's tribes'
     scripts decompiled next to its things, triggers and markers.
   - `cpscr081`/`cpscr099`'s smaller layouts, if ever needed (no active level slot uses them).
-  - the actual AI: most `DO` commands still reach `game_core::ai_script::ScriptEnv::do_call` and do
-    nothing (see the next item for the one that's real so far).
+  - the actual AI: a growing but still partial set of `DO` commands reach real behaviour through
+    `game_core::ai_script::ScriptEnv::do_call` now (see the next item); most still don't (markers,
+    guard groups, spell entries, vehicles, level events - messages, `GIVE_ONE_SHOT`,
+    `GIVE_MANA_TO_PLAYER`, `TRIGGER_LEVEL_WON/LOST`...).
+  - `Interpreter::resolve_call` now resolves every `Field` a `DO` call carries (including one nested
+    in a `Team`/`TeamWild` argument) to a plain `Field::Const` before `do_call` ever sees it - a
+    consumer's `Env` impl doesn't own the interpreter's user-variable storage, so it had no way to
+    read a `$variable`-valued argument itself before this. `Env::write_user_var` (default: discarded)
+    is the matching other half for a query command's `var_field` output, not wired to anything real
+    yet (no query command is implemented - `COUNT_PEOPLE_IN_MARKER`, `GET_HEIGHT_AT_POS`, `NAV_CHECK`...
+    are all still no-ops).
 - [x] First real `DO` commands, end to end: `game_core::ai_script` (`load_tribe_scripts`,
   `ScriptEnv`, `GameMap::tend_ai_scripts`) loads each computer tribe's `cpscrNNN.dat`
   (`LevelHeader::ai_scripts`) in `GameMap::load_original`, runs its "turn 0" setup block once right
-  there, then once more per later `tick()` (the `ELSE { EVERY ... }` branch) - `DO SET_REINCARNATION
-  ON/OFF` is wired to `GameMap::remove_reincarnation`/`restore_reincarnation`
-  (`WorldEvent::RemoveSite`/`RestoreSite`) for the script's own owner, and `DO SET_NO_BLUE_REINC`
-  (the human/blue equivalent, no on/off argument, always targets owner 0 regardless of which computer
-  tribe's script calls it) to the same `RemoveSite`. Every other `DO` command is still a no-op (previous
-  item). `ScriptEnv::int_var` only backs `INT_GAME_TURN` so far; `INT_ATTR_*` and every other
-  internal variable read as 0.
+  there, then once more per later `tick()` (the `ELSE { EVERY ... }` branch). Real so far: `SET_REINCARNATION
+  ON/OFF` (`GameMap::remove_reincarnation`/`restore_reincarnation`,
+  `WorldEvent::RemoveSite`/`RestoreSite`, for the script's own owner), `SET_NO_BLUE_REINC` (the
+  human/blue equivalent, no on/off argument, always targets owner 0 regardless of which computer
+  tribe's script calls it, to the same `RemoveSite`), every `STATE_*` toggle (`crate::ai::state::bit_for`
+  -> `NativeAi`'s own bitset), `SET_DRUM_TOWER_POS`/`BUILD_DRUM_TOWER` (places/tops up a drum tower plan
+  right away, `GameMap::ai_build_at`) and `DELAY_MAIN_DRUM_TOWER`/`BUILD_MAIN_DRUM_TOWER` (gates the
+  native engine's own automatic one), `TRAIN_PEOPLE_NOW` (`GameMap::ai_train_now`) and `ATTACK`
+  (`GameMap::ai_attack`, `ai::AttackGoal` - `ATTACK_PERSON`/`ATTACK_BUILDING` only, `ATTACK_MARKER`
+  needs the marker table). Every other `DO` command is still a no-op. `ScriptEnv::int_var` backs
+  `INT_GAME_TURN`, `INT_MY_NUM_PEOPLE` and every `INT_ATTR_*` (round-tripped through `NativeAi`); any
+  other internal variable reads back as its own numeric token id rather than 0 - a deliberate, safe
+  default for the many purely identifier-like ones (`INT_WARRIOR`, `INT_TEMPLE`,
+  `INT_NO_SPECIFIC_BUILDING`...), which is how `do_call` recovers "which model/unit kind was named"
+  from an already-resolved `Field::Const` (see `resolve_call` above).
 - [x] `pop3_format::constants`: decode `levels/constant.dat` (XOR key, 2-byte marker, `P3CONST_` lines) per
   [constants.md](docs/specs/constants.md) into a plain `name -> value` map (`Constants::parse`/`load`,
   `[ours]`-tagged guess at which of the two forms — encoded or the community's plain text — a given file is
@@ -622,7 +658,15 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   kind before this (checked `Message`'s then-3 variants directly). Still open: nothing calls this yet - there
   is no host/join flow or network driver at all (see "Network driver" below), so a real mismatch is not
   actually refused anywhere today, only encodable/decodable and comparable.
-- [ ] Script interpreter in `game-core`: user variables, internal variables read from the simulation (`headcount`: units by state and kind, `housing`), `EVERY n m` firing when `(turn + m) % n == 0` (stored minus 1), DO commands mapped to AI states and `Command`s; start with the states, `ATTACK` and `SET_SPELL_ENTRY`. Levels 2100, 2110, 2131 name missing scripts: fall back to no script.
+- [x] Script interpreter in `game-core`, first pass: user variables (`pop3_ai_script::Interpreter`,
+  pre-existing), `INT_MY_NUM_PEOPLE`/`INT_ATTR_*` read from the simulation/`NativeAi` (not the fuller
+  `headcount`/`housing` set yet - just what `ai.rs`'s own sweep needed), `EVERY n m` firing when
+  `(turn + m) % n == 0` (pre-existing, `pop3_ai_script::interp::every_fires` - still missing the real
+  per-tribe phase ai-scripts.md itself flags as open, a different clock from the native engine's own
+  `SWEEP_EVERY` phase above), DO commands mapped to AI states and `Command`s for `STATE_*` and `ATTACK`
+  (previous item). Still open: `SET_SPELL_ENTRY` (shaman auto-cast, not modelled at all), the rest of
+  `headcount`/`housing` as internal variables, and whether levels 2100/2110/2131's missing scripts
+  (fall back to no script, unverified this falls back cleanly end to end) still need a check.
 - [ ] Script timing: measure the original turn rate (wiki: about 8 turns/s) against our 10 ticks/s, and whether `EVERY` adds a per-tribe phase, before porting script timings (see [ai-scripts.md](docs/specs/ai-scripts.md) "What this means here").
 - [x] Flybys: `FLYBY_CREATE_NEW..=FLYBY_START` drives the camera for real now
   (`game_core::ai_script::ScriptEnv::on_flyby` -> `GameMap::active_flyby`, `crates/game-client/src/flyby.rs`
