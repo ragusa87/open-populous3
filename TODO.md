@@ -997,7 +997,12 @@ Level/world correctness that is mostly stable already (terrain especially: exten
   "not verified against the game" caveat kept, not a settled trace) - see its "Banks" section. `tree_object_in_bank`
   got a doc-comment signpost for the two still-open raw-model lookups that will need the same convention (plants
   7/8, the building add-on, both separate TODO.md items below) so they don't reinvent one.
-- [ ] Other original objects (trees, camp fire logs, reincarnation site stones) are still drawn from both sides: cull their back faces like buildings (objects.md "facs"), checking each for holes.
+- [ ] Other original objects (trees, camp fire logs, reincarnation site stones): now cull their back faces like
+  buildings and totems (`nature.rs`, `campfire.rs`, `sites.rs`, `cull_mode: Some(Face::Back)`, objects.md
+  "Records"), matching the already-proven-correct pattern exactly. Still open, "checking each for holes" itself:
+  no original install was available to screenshot-verify none of the three now shows a new see-through gap (a
+  `facs` genuinely missing its back-to-back pair) - needs a `just shot`/`just video` pass at varied
+  `YAW`/`PITCH`/`AERIAL` over a tree cluster, a camp fire and a reincarnation site with an install present.
 - [ ] Level names instead of the header's "Level N": `pop3_format::language` reads the texts ([language.md](docs/specs/language.md)); find which text number names each level (open there), find the install's `language/` dir like `data/`, pick the language (a setting, English by default).
 - [ ] Our own texts in Fluent (`assets/lang/<lang>.ftl`, named keys), a key -> original text number table, lookup from `langNN.dat` with the original files and from our `.ftl` otherwise ([language.md](docs/specs/language.md) "Our texts and the fallback"); when the game first shows translatable text.
 - [ ] Sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32/64): find whether it drives the terrain lighting. `LandBlocks` / `LandOrients` are identical stale data: ignore them.

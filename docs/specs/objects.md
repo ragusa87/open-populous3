@@ -112,6 +112,16 @@ show through openings: the boat huts' (121-124) inner roof and walls sample the 
 under the roof. Flags `3` (no `0x4`) only appear on the boat huts' inner faces, the guard posts and the winged
 death (100, 107, 181): they are not what hides those faces.
 
+The client now follows this one-sided rule everywhere original objects are drawn: buildings (`buildings.rs`) and
+totems (`totems.rs`) first, trees (`nature.rs`), camp fire logs (`campfire.rs`) and the reincarnation site stones
+(`sites.rs`) culling their back faces too since (`cull_mode: Some(Face::Back)`, the three materials that
+previously overrode it to always-both-sides with no stated reason). **Not independently verified by screenshot
+in this session**: the fix follows the already-proven-correct buildings/totems pattern exactly, but confirming no
+object's own `facs` data is missing a genuine back-to-back pair (which would show up as a new hole from some
+angle) needs rendering with the real original files, not available in every environment - a `just shot`/`just
+video` pass at varied `YAW`/`PITCH`/`AERIAL` over a tree cluster, a camp fire and a reincarnation site, with an
+install present, is the remaining check.
+
 ### Blended faces (flames)
 The 144 faces with flag `0x20` all use tile 92, and only they do: the flame boards of the camp fires (0, 12),
 the prayer huts (133-136), the firewarrior training huts (137-140) and the guard posts (190-193). The flames are

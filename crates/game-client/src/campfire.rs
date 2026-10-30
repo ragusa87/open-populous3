@@ -9,6 +9,7 @@ use crate::original_models::{atlas_image, object_mesh, solid_part, to_mesh, Mesh
 use crate::world::{CurrentMap, LevelList};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy::render::render_resource::Face;
 use game_core::campfire::Campfire;
 use pop3_format::catalog::CAMP_FIRE;
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
@@ -64,8 +65,7 @@ fn original_art(levels: &LevelList, objects: &OriginalObjects, theme: u8, meshes
     let logs_material = mats.add(StandardMaterial {
         base_color_texture: Some(images.add(atlas_image(&atlas, &palette.palette))),
         perceptual_roughness: 0.95,
-        double_sided: true,
-        cull_mode: None,
+        cull_mode: Some(Face::Back),
         ..default()
     });
     Some(FireArt {
