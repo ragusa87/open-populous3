@@ -47,6 +47,10 @@ so a live measurement may run on it with the addresses translated.
   missing prayer slows the gauge sharply (`C² / (C − n + 1)²`). See "Prayer at triggers".
 - **A spell is a recipe of reusable components** [exe]: the shaman fires a shot, and on arrival the spell spawns
   effects (a shockwave, fire, a status on the N nearest...) that do the work. See "Spells".
+- **The Angel of Death drives itself; the player never touches it** [exe]: a meteor spawns a flying, never-landing
+  creature that autonomously hunts the nearest enemy (a rival angel first, shamans included), grabs and carries
+  one victim 28 turns before releasing it to die normally, and panics bystanders just by being near them - all
+  through one state machine, with no player order path into it at all. See "Angel of Death mechanics".
 - **The planet bend is a parabola of 0.011 × d² cells** [exe, measured], applied in camera space; heights are
   256 units per cell (1024 = 4 cells) and the camera looks down at a fixed 20°. See "Landscape projection".
 - **Walking speed is per type, in world units per turn** [exe]: `<TYPE>_SPEED` plus up to 25 % at random per
@@ -713,7 +717,23 @@ not again when the command is executed.
 | Lava | 7/0x22 flow, 0x28 square | Hot cells set people on fire (state 31) and set buildings and trees burning; the caster's own people too, only the caster's shaman is spared. |
 
 Shared person and building states:
-- **Panic** (person state 0x1A): runs at a random heading at speed 110, screaming, for 64 turns (5.3 s).
+- **"Panic" (person state 0x1A), corrected a second time, 2026-10-29 - the same-day correction above was itself
+  incomplete.** That pass checked only the per-turn TICK dispatch (`switchD_004d337f`) and concluded state 26 was
+  "purely cosmetic, no movement of its own" - but class-1 persons also have a SEPARATE per-state ENTER dispatch
+  (`init_unit_class_1`/0x4D2740, `switchD_004d290b` - the same two-dispatch architecture already confirmed for
+  class 10 in `init_unit_class_10`), which that pass didn't check. Its case 0x1a (state 26) genuinely DOES set
+  speed `+0x5F = 110`, a duration timer `+0x70 = 64`, and a fresh random heading (`+0x57`, the standard RNG), once
+  on entry - **a real "runs at a random heading at speed 110 for 64 turns" effect does exist**, almost exactly the
+  original claim, just not as a separate state from "scorched by a blast", and with no scream sound found
+  anywhere (only the ambient crackle, sound 0x51) - "screaming" remains unconfirmed. See
+  `pop3-rev/docs/person_states.tsv` row 26 for the full citation. **Gating, confirmed by direct comparison between
+  two spells' own blast-creation code**: a blast's push (`0x50B740`) only forces this run on a pushed person when
+  that BLAST INSTANCE's own `+0x7A` bit 0x1 is set - confirmed SET by Firestorm's own impact blast (`0x511800`)
+  and confirmed NOT set by Lightning's own companion blast (`0x511AE0`): genuinely different, not a trace gap -
+  Firestorm's blast forces the run, Lightning's does not. The burning-building eviction path
+  (`0x408AB0`/`0x408B39`, "Burning building" below) is UNCONDITIONAL - it sets state 26 directly, never passing
+  through `0x50B740`'s own gate - so every evicted occupant gets the forced run regardless, matching that
+  section's original "and panics" wording exactly as first written.
 - **On fire** (person state 31): runs about and loses `LIFE_<type>` / 32 per turn for 70 turns, so dies in about
   32 turns (2.7 s). Entered from the person's own life step (0x4D43A0) whenever its status word `+0xC` has bit
   0x8 set and it is not already in state 31 ("Health and healing"). **What actually sets that bit, checked across
@@ -744,7 +764,8 @@ Shared person and building states:
 on fire:  timer +0xA7 = 127
 per turn: timer -= 1
   timer 119 (turn 8, 0.67 s): every occupant (6 slots at +0x86) is thrown out (`remove_person_from_hut`
-    0x407490) and panics (person state 0x1A)
+    0x407490) and panics (person state 0x1A/26, `0x408B39` - a real forced-run effect, confirmed unconditional
+    for this trigger, see "Panic" above)
   timer > 79: fire sound 0x53
   timer 79 (turn 48, 4 s): one structural hit of 100 wood (0x4BA2C0(shape, −100)) with damage smoke;
     no wood left → the building is destroyed, stats[tribe][7] += 1
@@ -778,10 +799,12 @@ a plain `add`, confirming the slope rule is horizontal-only.
   allies only on the last turn, at most `BLAST_FRIEND_AFFECT` (5).
 
 **The fire trail, traced this session**: right before the push above, a per-instance blast flag (+0x7A bit
-0x1 - not confirmed which blast callers set it, plausibly tied to Blast's own "burn cell" component, since the
-same shared blast code also serves callers that clearly shouldn't ignite anyone, e.g. a destroyed boat's land
-explosion) puts a pushed person not already there into a new, purely cosmetic **state 26** ("scorched by a
-blast") and sets a trailing-effect counter (+0xA4) to **24**. That counter is read by a single shared function
+0x1 - **confirmed 2026-10-29: SET by Firestorm's own impact blast (0x511800), NOT set by Lightning's own
+companion blast (0x511AE0)** - still not checked for Blast's own direct spell-cast blast or a destroyed boat's
+land explosion, both of which also share this code) puts a pushed person not already there into **state 26**
+("scorched by a blast") - which, besides the trailing visual below, ALSO forces a 64-turn random-heading run at
+speed 110 on entry (`init_unit_class_1`'s own per-state ENTER dispatch, see "Panic" above - NOT purely cosmetic,
+correcting this section's own former wording) - and sets a trailing-effect counter (+0xA4) to **24**. That counter is read by a single shared function
 (`trail_effect_tick`, 0x4D9200) called for every person every turn its own +0xA4 is nonzero, independent of
 state: it always spawns a short-lived grey smoke puff (the same "7/3" effect documented as the firewarrior
 bolt's own trail puff) at the person's position, and - only while the counter is still above 8 - ALSO spawns
@@ -874,7 +897,7 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 | 10 | Erosion (210 000, 4096, 2) | 63 hydraulic-erosion passes, one per turn (5.25 s), on an 8 × 8-cell window jittered around the target: ground washed downhill. No direct effect on units. |
 | 11 | Swamp (100 000, 4096, 3) | No terrain change. Lasts 32 000 turns (44 min). Every 4 turns it kills outright every person on its 3 × 3 cells, any tribe, until `SWAMP_NUM_PEOPLE` (exe 10) are dead. At most 30 per tribe (the oldest goes). Removed when most of its cells are unsuitable. |
 | 12 | Land bridge (70 000, 5120, 4) | From the caster to the target, 4 cells wide (−1, 0, +1, +2 across the line), heights on a straight slope between both ends (at least 90): each turn `h += clamp(T − h, ±LAND_BRIDGE_MAX_CHANGE) / (64 − turn)` (`LAND_BRIDGE_MAX_CHANGE` 256, 64 being `LAND_BRIDGE_DURATION`), so every cell reaches its height after 62 turns (5.2 s) when the gap is small: the cap makes large gaps fall short (gap 256: 251 reached, 500: 488, 800: 759, 1000: 900); sea cells raised too; a smoke puff on every bridge cell every turn. Buildings left on ground uneven by more than 200 collapse ("Terrain changes: what reacts"). |
-| 13 | Angel of death (510 000, 3072, 1) | A meteor, then an angel (person type 8, `LIFE_AOD` 10 000) hunts the nearest enemy on the whole map, shamans included, pulling people out of buildings; carries and throws each victim to death, about one per 28 turns (2.3 s). Ends after `AOD_KILL_COUNT` (40) kills or `AOD_DURATION` (2500 turns, 208 s). Two angels fight by health. Its hunting AI is person **state 28** (`0x4DB980`, found this session while chasing unrelated preacher questions - the per-type default-fallback table `0x5A7064` maps type 8, and only type 8, to state 28): on entry, if it has no live target yet, allocates a class-6 type-8 helper object with model id `0x45` (plausibly a cosmetic marker/trail, not confirmed) and plays a sound once; scans for a nearby ENEMY angel first (matching "two angels fight by health"), else falls back to a per-tribe reference scan sharing the SAME attacker/candidate type-pairing eligibility rule ordinary combat uses (`0x51C4C0`) - duplicated here, not combat-specific code; not fully traced beyond that (a large multi-substate approach/engage machine, `+0x2D` substate, `+0x4F`/`+0x51` target position pair, `+0xA8` a second sub-state layer resembling "Attacking a building"'s own field). |
+| 13 | Angel of death (510 000, 3072, 1) | A falling meteor, then an angel (person type 8, `LIFE_AOD` 10 000, confirmed in the exe's own per-type table) appears already flying and hunts the nearest enemy on the whole map, shamans included; grabs one victim at a time, carries it a fixed 28 turns (2.3 s), then releases it to die through the ordinary death pipeline - the angel has no dedicated kill move of its own. Two angels fight each other by health instead of grabbing. Never lands (code-level: altitude is clamped above terrain every tick), is immune to a firewarrior's bolt beyond ~10% damage and to Whirlwind's lift (both re-confirmed in code); `AOD_KILL_COUNT`/`AOD_DURATION` are documented constants but their enforcement was not located in the angel's own hunting AI this session. Fully traced this session (spawn sequence, grab/carry/release, area panic, vs-angel combat, flight physics) beyond a prior session's opening-scan-only pass - see "Angel of Death mechanics" below for the complete breakdown, including what is still open (building-type exclusions, vehicle-passenger grabbing, the literal kill-count/duration check, and several outer sub-states of its hunting AI). |
 | 14 | Earthquake (175 000, 4096, 2) | 120 turns (10 s) of shake. At turns 24, 56 and 88 each building in 16 × 16 cells has a 20/128 chance to be shaken (occupants out, partial explosion). At turn 60, a half-disc of radius 8 cells sinks by up to 600 (`600 × (4096 − d) / 4096`), with a lava fissure of short-lived lava squares and possibly two lava flows. |
 | 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point. |
 | 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow, 16 s growth + 1.3 s fade ("Volcano lava flow"); about 22 small and 6 big fireballs (simple blasts) and 26 decorative rocks ("Volcano rocks"). |
@@ -1404,6 +1427,152 @@ What the flooding destroy reason above (sub-state 2) actually spawns: a class-10
 - **Rocks**: every turn, a damped oscillator (amplitude up to 56 units, reflecting - flipping sign - whenever it crosses zero) is added straight into the stand-in's own facing/yaw angle, wrapped to a full circle. This is a genuine orientation change, not a position wobble: **the building's own angle oscillates and decays, like a structure physically tipping back and forth as it founders** - confirming the original does tilt the building while it drowns, not just sink it straight down. The oscillator's target lean is picked from an 8-direction compass histogram of nearby land cells (closest shore wins), recomputed each turn until the rocking settles (both axes of a secondary shake displacement under ~56 units), at which point a short spiral/settle flourish plays (the object nudges itself along a small interpolated path, with something spawned at each point along it - plausibly a splash/bubble, not independently confirmed) before the 80-turn timer runs out and it's removed, same as the blast reason, with no ashes either way.
 
 Not traced further this session: the exact oscillator math (a handful of small trig/angle helpers, 0x586074/0x4E9BA0/0x4E9B70/0x4E6C80 - their role is clear enough from how the result is used above, just not their internal formulas) and the object spawned during the final spiral (0x4EE580, plausibly a splash/bubble particle).
+
+### Angel of Death mechanics [exe]
+Cast: no AoD-specific cast dispatch - it follows the generic cast-to-effect pipeline (shot, then the spell's own
+effect). The spell's sole component is a class-7 type `0x13` ("AoD" in `docs/unit_types`) controller effect,
+`effect_aod` (init `0x5121C0`, per turn `0x512240`, effect state 20) - itself INVISIBLE throughout (no drawable
+ever set): its init plays sound `0xAC` once (a "spell landing" cue, before anything visible happens), and its
+per-turn tick 0 spawns a class-7 type `0x48` ("meteor") effect at the cast point. **The meteor itself is also
+completely invisible** (effect state 59, init `0x50A3E2`, per turn `0x514F60`): it spawns at height 2048 and
+falls at -256 units/tick (about 8 ticks, 0.67 s) with no sprite of its own, but its very first tick spawns **36
+real, visible "orbiter" spark particles** (class 7 type `0x46`, a glowing billboard sprite, hfx `0x4BA`/1210,
+same renderer family as the already-documented bee-dot billboard) scattered around it with staggered lifetimes -
+a trailing shower of sparks around what is otherwise an invisible falling object. **The instant the meteor
+crosses the ground plane, it spawns ONE "ground shockwave" sub-effect** (class 7 type `0x45`, "ground shockwave"
+per `docs/unit_types`, effect state 56, init `0x514970`, per turn `0x5149F0`) and plays impact sound `0xDA`. This
+shockwave has no sprite either - it is a PURE TERRAIN effect: a 9-tick (0.75 s) **outward-travelling ring that
+raises the ground at its own current, growing radius by its own current, decaying amplitude (64 down to 0 in
+steps of 8), while simultaneously settling the previous, inner ring back down**, recomputing terrain every tick.
+**This is confirmed, code-level, to be a real landscape deformation** - exactly the "ground transforms first,
+like a drop hitting water, but on land" visual described: a genuine rising-then-subsiding height wave rippling
+outward from the impact point, not a sprite or decal, and not (as a prior pass of this analysis concluded) absent
+- that pass simply hadn't opened this specific sub-effect. Once the meteor itself is gone, `effect_aod` calls
+`create_aod` (0x4DD700) to spawn the real angel (class 1, type 8) at the same spot, then frees itself - the
+literal sequence is: invisible meteor falls trailing sparks, crosses the ground, the ground visibly ripples
+outward with an impact sound, the meteor vanishes, then the creature appears. The still-untraced class-7 type
+`0x5b` ("statue to AoD" in `docs/unit_types`) is NOT part of this sequence as traced and remains unexplained.
+
+`create_aod` places the angel and runs its hunting AI (person **state 28**, 0x4DB980) once, synchronously, the same frame it is created,
+setting its outer sub-state (`+0x2D`) to 13 (the dedicated spawn sub-state). That very first tick: optionally
+forces player selection/camera onto the angel (a one-shot flag, not confirmed to affect ongoing player control -
+"Open questions"); shatters its own ground-shadow companion into flying debris using the SAME mesh-shatter
+function building destruction uses; and spawns a real class-7/type-1 "simple blast" at its own position with the
+exact same push constants (140/98) Blast/Lightning/building-destruction all share - a genuine damaging impact,
+not just a visual. This is a SEPARATE, later impact from the ground-shockwave ripple above: first the meteor's
+own ground ripple (a pure terrain effect, no creature yet), then, once the real angel spawns on top of it, this
+second debris-and-blast impact. Together they are the exe's actual "meteor hits and the ground ripples, then the
+creature appears in its own small blast of debris" sequence.
+
+The angel's entire remaining lifetime runs through state 28 - the only state type 8 ever occupies (the per-type
+default-fallback table `0x5A7064` maps type 8, and only type 8, there). Its outer dispatch (`+0x2D`) has several
+cases whose bodies are not yet opened (0, 1, 3, 4, 6, 7, 8, 0xA, 0xB nested, 0xF, 0x10 - symbols only, from
+`backup.xml`'s own `switchD_`/`caseD_` entries at this function's own switch address); the dominant
+"hunting/engaged" case (5) is fully read:
+```text
+target acquisition:
+  scan for a nearby ENEMY type-8 angel first            -- "hunts a rival angel first"
+  else scan the per-tribe table (same scan ordinary combat uses)
+    type-pairing rule: self type 8 accepts ANY candidate type, including type 7 (shaman)
+    skip any candidate in state 23 (mid preacher-conversion roll)
+  lock target id into self+0x72
+
+against a non-angel locked target (+0xA8):
+  0: engagement roll (1-in-64 roar), arm alert flag; detect a tower-housed target
+     (via the target's own cell -> class-2/type-4 building link) to pick a WIDER
+     standoff (200 units) than an open target (160); wait 2 ticks
+  1: close in and GRAB: victim.+0x72 = self.id ("who holds me", unless already
+     claimed); victim -> person state 40 (held captive, below); self speed x2
+  2: carry for a fixed 28 turns (self+0x70 = 0x1C, "about one kill per 28 turns/2.3s"):
+     climb +800 height, slow down, zigzag heading +-22/2048 rad/tick
+       at countdown 8: throw destination = 400 units along the VICTIM's OWN facing;
+                       arm victim.+0x2D = 1 (release); charge self a hit-point cost
+                       (gated, unresolved - "Open questions")
+       at countdown 7: 180-degree wind-up turn, reposition, roar again
+     release -> the victim's own state-40 handler routes it into the generic death
+                pipeline (state 31) next tick - the angel has NO dedicated kill
+                function; it only immobilises and carries
+
+against a locked ANGEL target (+0xA8):
+  skip the grab sequence entirely; at a tighter range (312 units vs the open-target
+  504) run health-compared mutual damage (0x4E0830) instead - "two angels fight by
+  health"
+
+every tick, regardless of +0xA8:
+  area panic (0x4DB5E0): any eligible enemy within 8 cells is forced into person
+    state 26 (panic run) at a random heading - independent of the locked target;
+    same per-type exclusion table (0x5A7091) and +0xE bit 0x10 immunity gate
+    Insect Plague's own sting uses (shamans and angels excluded)
+  flight physics (0x4DDB30): ramp speed/heading, clamp planned altitude to at
+    least ~100 units above the real terrain underneath - no landing branch exists
+    anywhere in this function; also re-syncs the angel's own ground-shadow
+    companion object (class 6 type 8, held in self+0x89 - NOT a hunting-target
+    reference, an earlier session's misreading) to position/heading/bank
+```
+Person **state 40** ("grabbed by an Angel of Death", per-turn `0x4E0760`, ENTER case `0x4E05E0`): the ENTER case (run once, the moment a victim is grabbed) zeroes its speed, clears flags and - if it was
+inside a building - evicts it the same way combat does; **it sets no pose of any kind on the victim** - there is
+no dedicated "held horizontal, as if carried in the mouth" sprite, confirmed by reading this entry case directly.
+The victim most likely keeps whatever pose it already had while being carried. The per-turn body is then a short
+no-op hold loop - the victim does not move under its own power, the angel's own carry logic moves both of them
+together (whether the victim's carried position is offset to a fixed mouth/claw point on the angel, rather than
+simply sharing its coordinates, is not resolved) - until the carrying angel's release step arms it, at which point
+it either deletes the victim outright (the standard "ghosts are destroyed, not killed" rule) or routes it into the
+ordinary death pipeline (state 31), using a SHAMAN-SPECIFIC death pose/sound table instead of the generic one when
+the victim is a shaman - direct code confirmation that a shaman is a valid Angel of Death kill, not just an
+ordinary follower.
+
+**Visuals, confirmed from the sprite/draw-class tables (separate session)**: every drawable-setting call found in
+state 28 (`0x4DB980`) targets either the angel's own ground-shadow **companion object** (class 6 type 8, held in
+`self+0x89`) or a freshly-spawned effect - never the type-8 PERSON record itself. This strongly suggests **the
+companion object is the actual visible flying body**, with the person record driving it as logic-only (not
+exhaustively proven - a very large function, sampled rather than read byte-for-byte). The companion has at least
+three distinct pose code paths, not just the documented cruise/dive toggle: a dedicated "launching/accelerating"
+pose fires in one of the outer sub-states (a climb sequence - altitude +600, a distinct internal flag set, and its
+own direct sprite-variant call), separate from the altitude-based cruise/dive toggle - i.e. the angel does
+visibly change its flight pose when committing to a fast manoeuvre, though the exact moment this fires relative to
+"closing in on a grab target" specifically was not pinned down, and the literal hfx sprite-frame numbers behind
+each pose (how many actual wing positions a cycle shows, not just how many CODE paths select a pose) remain open.
+**No dedicated fire-breath effect was found** anywhere in state 28 or its known callees - the full set of effects
+it can spawn (the shadow companion; two ground-impact puffs; a death-path effect; the spawn-moment blast already
+described above; one facing-aligned effect that inherits the angel's own heading, a plausible but unconfirmed
+breath/exhaust candidate; and one more, unidentified) turned up nothing that reads as a sustained flame weapon -
+"breathes fire" most likely describes the spawn-moment blast rather than an ongoing attack.
+
+**The angel-vs-angel fight (`0x4E0830`) is a pure stat exchange, not a choreographed fight**: read in full this
+session (under 0x200 bytes, no movement or pose code at all). Each call compares both angels' current health; the
+healthier one's own health (scaled down) is subtracted from the WEAKER one's - a genuine mutual exchange where
+both sides always take damage, but scaled by the stronger side's own remaining health, so the stronger angel
+snowballs toward winning. The loser is then knocked back 800 world units along the WINNER's own facing, with a
+long (~11.5 s) stagger/reel timer. There is no circling, no distinct bite/claw/wing-slam animation call, no
+repositioning dance - visually this plays out as a sudden, repeated collide-and-shove exchange rather than a
+scripted duel, with the health comparison alone deciding who gets shoved and who keeps closing.
+
+**Confirmed from the exe's own per-type stats table** (`unit_type_person[8]`, 0x5A7060 stride 0x32): `life` =
+10 000, matching `LIFE_AOD` exactly; `sw_blast_damage` = 25/256 ~= 9.8%, matching the documented
+`SW_BLAST_DAMAGE_AOD` ~= 10% - a firewarrior's bolt does about a tenth of its normal damage to an angel, not zero
+("immune to other spells" is close but not literal for firewarrior fire, which is ranged combat damage, not a
+spell effect). `process_whirlwind` (0x50F490) explicitly excludes "an angel" from its person-lift branch,
+re-confirmed this session - the one spell-damage exclusion directly re-checked in code this session; the others
+(Blast, Lightning, Swamp, Insect Plague, Volcano, Earthquake) are per the existing per-spell rows above, not all
+individually re-verified against type 8 this session.
+
+**Not located this session**: a literal `AOD_KILL_COUNT` (40) or `AOD_DURATION` (2500-turn) check anywhere in
+state 28 itself - the per-kill self-damage cost charged during release (0x4E0A30) is a plausible, unconfirmed
+mechanism for the angel eventually dying of its own `LIFE_AOD` hit points instead of an explicit counter; the
+still-unopened outer sub-states remain the leading place either literal cap could be hiding. Also not located: a
+dedicated "pull a person out of a building" call (the tower-housed-target standoff-distance check above never
+actually extracts anyone - the grab mechanic is identical whether the locked target is in the open or in a
+tower), an "evict a vehicle's passengers" call, or any building-type exclusion (prison/pyramid/totem are
+user-reported as immune to attack, but no building-attack path or exclusion table was found inside state 28 at
+all - most likely it lives in the still-unopened per-tribe fallback scan's own building-candidate path, not
+reached this session). No selection/order-eligibility check for type 8 was located either - "cannot be selected
+or given orders" is the existing lore/user report, not yet re-derived from code.
+
+No AoD-specific intro/appear state was found: the angel is spawned straight into state 28's own dedicated spawn
+sub-state (13, above), not the universal state-1 idle hand-off every other fresh unit goes through - so "faces the
+camera, wings moving, before hunting" is not a bespoke intro animation, but most likely just how the spawn
+sub-state's own impact-and-settle sequence (debris shatter, blast, then falling through to its first ordinary
+flight pose) reads in play before it locks onto a target and starts actively hunting.
 
 ## Landscape projection [exe, measured]
 (Exact exe addresses for every function/field named below: pop3-rev `docs/functions.tsv` and `docs/camera.md` -
@@ -2230,7 +2399,8 @@ Every person runs this check in its per-turn update; it decides who starts an at
 ```text
 rhythm: when class_counter & mask == 0 (person table +0x2F: 3 → every 4 turns; preacher 1 → every 2)
 skipped: busy (0x4D44E0: in a vehicle or building unless a firewarrior, a state with flag 0x40 in 0x5A6F79,
-  i.e. 2, 3, 5, 6, 9, 11, 14-16, 20, 22-29 (fight 25, pre-fight 29, panic 26), 31, 36-42, 44; and some orders)
+  i.e. 2, 3, 5, 6, 9, 11, 14-16, 20, 22-29 (fight 25, pre-fight 29, panic/scorched-by-a-blast 26 - see "Panic"
+  above), 31, 36-42, 44; and some orders)
 radius in cells (0x51FF60): resolves the person's active command group first (below, "Command groups"); when
   there is none, or its flag byte +0x1 bit 0x20 is set, falls through to the "no order" row
   no order being carried out (state not 10), or no active group, or group flag 0x20 set: person table +0x18
@@ -2816,6 +2986,38 @@ instead, since it had nothing queued to resume.
 Not traced this session (ordinary attack-order behaviour, not fight-specific): how long/far the resumed order
 keeps chasing before giving up on its own, if at all - that is whatever 0x51A2A0's own ordinary termination
 rules already do for any attack order that can't reach its target, not a special case added for this.
+
+**This "orders pause, they are never cancelled by a forced state" pattern is not Fight-specific - it is how the
+original's state machine works in general, traced further this session.** The state-transition mechanism itself
+(every "set this person's state" site in the exe: `push unit; call 0x4ED6F0; mov state; push unit; call
+0x4ED640`) has no generic "forget your plans" step at all: `0x4ED6F0` (always called first) is a confirmed no-op
+(a single `ret`), and `0x4ED640` only dispatches into the NEW state's own entry case - there is no shared,
+state-agnostic cleanup anywhere in this pair, by design or by omission. Each state's own entry case resets only
+what it specifically needs to - **exhaustively confirmed this session for both forced states, not just inferred**:
+person state 26 ("scorched by a blast", the forced panic run, `0x4D2D74`) and state 31 ("on fire", `0x4D8FC0`,
+which turns out to run the exact same forced-random-run setup as panic, not just damage-over-time as this doc
+previously had it) were each read start to finish. Between them they touch: a cosmetic per-type prop, physics
+flags (`+0xC`/`+0x10`), speed, a heading roll, a duration timer, and a "clear my own selected-UI highlight" call
+(`0x445750`, also read in full - confirmed to only touch `+0x7A`/`+0x14` selection flags and UI-selection globals).
+**Neither one anywhere touches the person's own command-group slot (`+0x9B`/`+0x8B`/`+0xA6`) or calls
+`group_release` (`0x4364D0`)** - the same slot Fight leaves alone. So this is no longer an inference from Fight's
+own proven behaviour alone: **the original's forced-interruption states (Fight, Panic, and On-fire, all three now
+independently confirmed) pause a person's current task, they do not cancel it** - the task resumes automatically,
+unmodified, the moment the person falls back to its per-type default state (table `0x5A7064`, the same one
+`order_execute`'s own fallback and state 1's idle hand-off both already use). `person_states.tsv`'s own rows 26/31
+carry the full citation.
+
+**Our own `Unit::panic`/`Unit::catch_fire` (`unit.rs`) both call `drop_plans()`** - a full cancel: route, planned
+destination, teleport target, pending spell, every "go do X" field (`to_fire`/`to_tree`/`to_wood`/`to_house`/
+`to_shrine`/`to_vehicle`), the order queue, the patrol list and any work assignment, all cleared outright. This is
+now a confirmed divergence from the original, not just a suspected one: a person who panics or catches fire in
+the original keeps its current order queued, exactly like a fighter blasted out of its ring, and resumes it
+unprompted once the forced state ends - ours instead sends it back to a genuinely blank slate. (One thing already
+right: `catch_fire`'s own forced run, `run_in_panic` applied for the whole burn, already matches the original's
+newly-confirmed on-fire-forces-a-run behaviour - only the `drop_plans()` call is the actual gap.) `Unit::die` calling `drop_plans()` is unaffected by this - a dead person has nothing to
+resume, and the original's own universal death state (3) does push the body onto the spirit-rise handoff and
+otherwise tear it down, so clearing everything there is correct either way. See TODO.md "Units" for the concrete
+follow-up.
 
 ### A blasted person fighting back [exe, measured]
 TODO.md asked whether getting hit by an offensive spell (Blast specifically) makes an otherwise-idle person fight
@@ -4066,6 +4268,110 @@ guards and the shaman alike - then match the scan's own "a fight controller to j
 So guards appearing to "take the hit" in practice is better read as "whoever the attacker's scan reaches first
 starts the fight, then everyone nearby piles into the same ring" - not a deliberate protection mechanic.
 
+## Native AI: how a computer-controlled tribe actually decides what to do [exe]
+This is the ENGINE's own autonomous behaviour for a computer-controlled tribe - separate from PopScript, the
+level-author scripting language `ai-scripts.md` documents. The two interact (a script can set flags the engine
+reads, or fire a command the engine also reaches on its own), but they are different systems, and this section
+uses its own numbering throughout: a "task id" below is the native per-tribe task-queue's own type number
+(0-28ish), which is NOT the same numbering as PopScript's `STATE_*`/`CP_AT_TYPE_*` internal flag numbers
+(`ai-scripts.md`, also roughly 0-28) - the two ranges overlap by coincidence, not because they're the same
+thing. Always say "task N" or "state flag N" explicitly, never a bare number, the same rule this file already
+applies to the state catalogues elsewhere.
+
+**The architecture, confirmed directly from the exe**: a script never bypasses the engine's own continuous
+economy/AI loop, and the engine's own loop never duplicates a script's intent - they share one queue. Every
+computer tribe gets a fixed, identical 12-entry priority list, tried in the same order every tick until one of
+them actually does something: build essential buildings first, then (in between) things like training, defence
+and resource-gathering, and only as the very LAST resort, a once-per-batch housekeeping sweep that is not combat
+related at all (see below). Whichever category fires enqueues one "task" into a 10-slot round-robin queue; a
+separate dispatcher drains that queue, running whichever task is active through its own small state machine over
+however many ticks it needs. A PopScript `DO ATTACK` reaches into this exact same queue through the exact same
+"enqueue a task" mechanism an autonomous decision would use - it is a second CALLER of one shared function, not a
+parallel combat system. This matters for implementation: **the AI should be one task-queue engine that both the
+autonomous priority list and the scripting layer feed, not two separate "AI" and "scripting" subsystems that
+each need their own copy of "how to build a building" or "how to attack."**
+
+**Timing**: the whole per-tribe priority sweep runs on a slow cadence (about once every 64 turns per tribe, a
+little over 5 seconds), not every tick - which is why a computer tribe's reactions read as deliberate and
+somewhat laggy rather than instantaneous. `EVERY`'s own timing (a script's periodic block) is a different,
+unrelated clock - see `ai-scripts.md`'s "How a script runs" (now corrected there too, this session: the original
+really does add a per-tribe phase offset, exactly like the community Lua converter already guessed).
+
+**What actually decided the result, not just the mechanism**: of the 12 top-level priority categories, position 0
+(tried first, every single time) is "construct essential buildings" - confirming building construction really is
+the AI's standing top priority, not one option among equals. Position 11 (tried dead last, only if all 10 others
+declined to act) is a housekeeping sweep that has nothing to do with combat or crisis response at all: it finds
+any follower freshly created by a preacher conversion (a specific, confirmed flag set only by that mechanism) and
+resets them to an ordinary idle state, clearing any stale leftover orders. **This directly answers, and rules
+out, the commonly-reported "a tribe about to lose sends everyone to attack" folk theory as an ENGINE behaviour**:
+every one of the 12 priority categories and the ~20 lower-level decision functions beneath them was checked this
+session for anywhere that enqueues an attack task, and the only caller found anywhere in the whole native AI is
+PopScript's own `DO ATTACK` handler. The native AI genuinely never decides to attack on its own, in any
+circumstance, from a trained headcount or a losing position - the "attack when desperate" effect, if a level
+really does it, is level-script content (`IF (population < N) { DO ATTACK ... } ` as part of the same `EVERY`
+loop that already handles everything else), not a hidden engine rule. **For implementation: don't build a
+"desperation attack" trigger into the core simulation - if it's wanted, it belongs in whatever drives AI tribes'
+scripted behaviour, the same place every other conditional AI action already lives.**
+
+**A single generic person-state is reused as "this follower now has a job," everywhere.** Across every task this
+session actually opened (construction, resource gathering, defence posting, training, converted-follower
+clean-up, wandering, and more), the engine always pulls a worker out of its default idle behaviour the exact same
+way: one shared "committed, not idle" person state, confirmed in well over a dozen unrelated contexts. **This is
+a strong signal for our own implementation: model "a follower has been assigned to something" as one generic
+state transition the AI subsystem drives, not a different one per job type.** The same pattern repeats for the
+mechanics underneath each task: one shared "find N eligible nearby idle workers" search is reused by
+construction, resource-gathering and training alike (not three separate searches with three separate rules), and
+a shared 3-4-step "I'm done with this target, move on" sequence (clear old markers, notify, refocus) closes out
+at least eight different task types the same way. **Treat these as the engine's own reusable AI primitives and
+implement them once, shared, rather than duplicating "assign a worker"/"wrap up a task" logic per feature.**
+
+**The 24 confirmed native task types**, at the level of detail actually useful for implementation (full
+state-by-state detail, for whoever wants to cross-check the exact exe behaviour, is not duplicated here):
+
+- **Construct a building** (task 0): picks sensible siting parameters for whichever building model is needed,
+  searches nearby land for a valid, unobstructed spot (a bounded number of randomized nearby guesses, not a
+  flood-fill or real pathfinding search - two specific building models get an extra "must be next to water"
+  check, matching them as the boat/airship-building huts), assigns available nearby workers to it, then
+  continuously tops up staffing until it's built. Confirmed as a genuinely generic "build building model N" task,
+  reused for every building type rather than one task per building.
+- **Gather a resource, almost certainly wood** (task 1): finds up to two workers - fresh idle ones first, or
+  borrowed from a nearby building that has some to spare - and sends them to fetch it; this is what the
+  construction task's own "topping up" step spawns once its material need crosses a threshold, i.e. gathering is
+  triggered reactively by what's being built, not run on its own independent schedule.
+- **Housekeeping after a preacher conversion** (task 5): the AI's dead-last priority (see above) - resets freshly
+  converted followers to idle and clears their stale orders. Confirmed NOT any kind of crisis/desperation
+  response.
+- **Reactive counter-attack** (task 8) and **a dispatcher that triggers it, or occasionally one of two patrol/
+  defence tasks instead, based on activity near the tribe's own base** (task 9): the one place the AI reacts to
+  something happening nearby without a script telling it to, though notably this still never reaches the generic
+  attack task (20) - it is its own, separate, smaller-scale reactive response.
+- **Wander near the tribe's base** (task 11) and **post a spare defender there, gated by a defender quota**
+  (task 15): close siblings sharing the same "pick a safe nearby point" search; task 15 only acts if the tribe
+  judges itself short of posted defenders.
+- **The attack task** (task 20): the only task type EVER enqueued from `DO ATTACK` and the only task type NEVER
+  enqueued autonomously - see above.
+- **Train people** (task 26) and a closely related training-quota sibling (task 28): computes how many of each
+  follower type the tribe wants (as literal percentages of its training capacity), trims the request fairly if
+  capacity is short, and assigns workers to the matching training buildings - directly implements the "preferred
+  people" attributes PopScript already exposes.
+- **Execute a scripted patrol group** (task 24): the native runtime behind a script's own patrol-marker command -
+  confirms that command really does drive ordinary units through this same task-queue mechanism, not a separate
+  patrol subsystem.
+- A further dozen tasks (2, 3, 4, 6, 7, 13, 14, 16, 17, 18, 19, 25, 27) cover shaman positioning, a
+  synchronisation-only helper (not a behaviour of its own), defending the shaman with an escort of ghosts,
+  assembling a themed escort group around a specialist unit, garrison staffing (including actively evicting the
+  wrong occupant type), an enemy-spotted alert with no combat order attached, the shaman's own automatic
+  spell-casting, filling a drum tower's garrison, recovering a lost unit or vehicle, vehicle positioning/patrol,
+  and an unconditional mass rally to a nearby point - each confirmed as a distinct, real behaviour, though a
+  couple of the larger ones (vehicle dispatch, garrison coordination) interleave more than one job in a single
+  handler and weren't fully picked apart this session.
+
+**Open for a future session**: the exact selection criteria the shared "find N eligible workers" search uses
+(who gets picked when several idle followers qualify); the exact site-search algorithm's own placement rule
+beyond "a bounded number of random nearby tries"; and finishing the handful of tasks whose handler interleaves
+multiple distinct jobs. None of these block a first implementation of the architecture above - they refine
+behaviour at the margins, not the overall shape.
+
 ## Impact on our specs
 - `hud/mana.rs`'s strip (`mana_view`, `pool.bank` against `MAX_MANA`) does not match "The mana bar (HUD)": the
   original's bar is full whenever nothing is charging regardless of `bank`, and otherwise shows `last_income`
@@ -4143,6 +4449,18 @@ starts the fight, then everyone nearby piles into the same ring" - not a deliber
     (ours: radius 4 lowered by 120); Swamp, Earthquake and Volcano are now described in enough detail to
     implement (see "Per spell");
   - Teleport moves the caster's own shaman, as our sandbox teleport does; its range is effectively unlimited.
+
+- spells.md Blast's own "Not yet: angels of death and ghosts (neither modelled at all yet)" and TODO: the Angel
+  of Death is now spec'd in full (see "Angel of Death mechanics" above) - a meteor then a flying, never-landing
+  person (type 8, 10 000 life) that hunts the nearest enemy anywhere on the map (a rival angel first, shamans
+  included), grabs one victim, carries it 28 turns, then releases it to die through the ordinary fall/death
+  pipeline (no bespoke kill move); two angels fight each other by health instead of grabbing; it also panics
+  bystanders in an 8-cell radius just by being near them, independent of its locked target; it takes only ~10%
+  damage from a firewarrior's bolt and is excluded from Whirlwind's lift (both confirmed in the exe); it can
+  never be selected, given orders, or enter a building (lore/user-reported, not yet independently re-derived
+  from code). Not yet pinned to code: the literal `AOD_KILL_COUNT`/`AOD_DURATION` expiry check, any building-type
+  exclusion (prison/pyramid/totem reported immune to attack), and whether it can pull a person out of a vehicle
+  the way it can grab one in the open.
 
 - spells.md Blast and units.md "Physics" (`blast::effect`, `Unit::fling`, `physics::step`): ours flings each person
   once; the original pushes again on each of the 3 turns while the person is within 2.5 cells (cumulative), scales
@@ -4347,6 +4665,18 @@ starts the fight, then everyone nearby piles into the same ring" - not a deliber
   (+0x6 vs +0x8) on the same cell, or the exact object-class/sub-kind values the weighting tables key on - left
   for a future session.
 - Attacking a building: what sets building +0x9C bit 0x40, and the partial explosion's 10/7 units.
+- Angel of Death ("Angel of Death mechanics" above): the literal `AOD_KILL_COUNT`/`AOD_DURATION` expiry check
+  (not found in its hunting AI, state 28/0x4DB980 - plausibly inside the per-kill self-damage cost charged by
+  0x4E0A30, or one of the still-unopened outer `+0x2D` sub-states); any building-type exclusion for its attack
+  (prison/pyramid/totem reported immune); whether it can pull a person out of a vehicle the way it grabs one in
+  the open; the selection/order-eligibility check that makes it unselectable and unorderable; whether the visible
+  flying body is really the shadow-companion object and not the person record itself (strongly suggested, not
+  exhaustively proven); the literal hfx sprite-frame numbers behind its flight poses (cruise/dive/launch are
+  confirmed as distinct CODE paths, not yet tied to actual sprite frame counts); and whether a grabbed victim's
+  carried position is parented to a fixed mouth/claw offset on the angel (confirmed NOT a separate pose, but the
+  position-sharing mechanism itself wasn't traced). The class-7 type `0x5b` ("statue to AoD") effect remains
+  unexplained but is now confirmed NOT part of the cast/spawn sequence (the real "ground transforms first" visual
+  is the meteor's own ground-shockwave sub-effect, now fully traced and code-confirmed as a real terrain ripple).
 - Firewarrior fire: the line-of-fire test, whether a building stops the bolts (5 throws at a still preacher did nothing), what sets the reload
   byte to 252-255 (third capture), what the +0x10 bit 0x400000 set on own people under a passing shot does,
   whether hfx 1124-1127 is the shot's fade, and the approach sub-states (10, 11) before the throw.
@@ -4611,6 +4941,19 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x44DDF0 | `land_level_processing_1`: queues a cell after a height change, flushes to 0x44DF40 at 0x400 queued |
 | 0x44DF40 | `level_land_processing_2`: per cell, recomputes blend (+0xA), the downhill-direction nibble (+0xE) and, via `compute_cell_light` 0x4BE230, the light byte (+0xD) |
 | 0x44F2F0 | notify_area(mode bitmask, cell, radius, tribe): bit 0 ground-moved, bit 1 set-on-fire (shaman exempt) |
+| 0x5121C0 | `effect_aod_init`: spell cast lands (sound 0xAC), itself invisible - "Angel of Death mechanics" |
+| 0x512240 | `effect_aod` (per turn, class-7 type 0x13, effect state 20): spawns the falling meteor, then `create_aod` once it's gone - "Angel of Death mechanics" |
+| 0x50A3E2, 0x514F60 | the meteor (type 0x48, effect state 59), init/per turn: invisible, trails 36 "orbiter" spark sprites, spawns the ground shockwave on impact - "Angel of Death mechanics" |
+| 0x514970, 0x5149F0 | "ground shockwave" (type 0x45, effect state 56), init/per turn: a real expanding-then-subsiding terrain-height ring, no sprite - "Angel of Death mechanics" |
+| 0x4DD700 | `create_aod`: spawns the type-8 angel, runs its hunting AI (person state 28) once synchronously - "Angel of Death mechanics" |
+| 0x4DB980 | person state 28, the angel's entire hunting/combat/grab AI (huge, outer `+0x2D` dispatch mostly unopened) - "Angel of Death mechanics" |
+| 0x4DB5E0 | `aod_area_panic`: the angel's own nearby-bystander panic (8-cell radius, person state 26), independent of its locked target |
+| 0x4DDB30 | `aod_flight_physics`: speed/heading ramp, altitude clamped >= ~100 above terrain (never lands), syncs the shadow-companion object |
+| 0x4E0760, 0x4E05E0 | person state 40, "grabbed by an Angel of Death" (per turn, ENTER case): hold loop until release, then delete (ghost) or generic death (state 31, shaman-specific pose table); ENTER case evicts a housed victim but sets no carried pose - "Angel of Death mechanics" |
+| 0x4E0830 | `aod_vs_aod_damage`: pure health-proportional mutual damage + 800-unit knockback when the angel's locked target is itself an angel, no movement/pose code - "Angel of Death mechanics" |
+| 0x4E0A30 | `aod_release_throw`: sets the throw destination (400 units along the VICTIM's own facing), arms release, charges the angel a self-damage cost |
+| 0x4DE440 | sets a thing's drawable variant; also the angel's shadow-companion flight-pose toggle (model 0x45 cruise / 0x3E dive) |
+| 0x4E94F0 | computes a point at a given distance/heading - used by the angel's flight physics and the vs-angel knockback |
 
 Timing globals: turn counter 0x89D188 (u32), `turns_per_sec` 0x89D161 (u8, copied from the option at 0x98F712),
 `next_turn_time` 0x5CD92C, `step_ms` 0x5CD930 (83 in the exe image), `extra_turns` 0x895DAC (i8). Under Wine the
