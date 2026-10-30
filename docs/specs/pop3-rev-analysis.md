@@ -1776,6 +1776,20 @@ rotate_main_cam(delta):   yaw = (yaw + scaled_delta) & 0x7FF
 it and writes `focus`/`yaw`/`distance` directly from keyframes - both match the original's actual split. No
 code change indicated by this trace; it confirms the existing design rather than finding a gap.
 
+## Possible debug/free-camera stepper commands [exe, unconfirmed]
+A cluster of player commands manipulates a separate set of four global values, distinct from the tribe-record
+camera fields the flyby and mouse-drag camera above use - checked against pop3-rev `docs/camera.md`, no overlap
+found there as of this session:
+- A min/max BYTE pair with an enforced minimum gap of 3 between them (one floors at 2, the other ceilings at
+  50) - shape fits a near/far clip-plane pair or a zoom-distance min/max, not confirmed.
+- Two independent signed DWORD axes, each stepped ±200 per command and clamped to roughly ±28160 - shape fits a
+  camera pan/offset pair on two axes.
+- Two unclamped byte counters, incremented/decremented with no limit at all.
+All eight commands are plain inc/dec pairs reachable only through the player-command dispatcher (no script
+caller found) - most likely an original-developer free/debug camera scheme rather than anything exposed to
+players in the shipped game, but not confirmed either way. Not pursued further: no corresponding feature in our
+own `camera.rs`/`flyby.rs`, and no evidence this was ever player-facing.
+
 ## Terrain land colour: the bigfade row and brightness [exe]
 The missing half of `set_texture_landscape_main` (0x4BE330): "Building ashes" "Drawn" already covers the
 blend-driven cliff/lava/ash row (`cliff[(blend/4)*128 + colour]`); this is the ordinary land colour that
@@ -2566,6 +2580,29 @@ trampoline that calls out to a separate handler; "inline" means the trampoline I
 | 33 preach | 0x43C7A0 | "Preacher conversion" |
 
 A free slot's kind byte is 0 (kinds 0-2 never occur - below the dispatch table's range).
+
+### Hidden cheat/debug clusters within `process_tribe_cmd`'s ~76 cases [exe, unconfirmed]
+A few of the "cheats, debug toggles" cases mentioned above were pinned down further this session:
+- **A hidden developer cheat text-entry overlay** ("BYRNE", named from an already-identified unlock command):
+  two more of the ~76 cases share its exact message-template/helper call, suggesting they belong to the same
+  hidden subsystem rather than being independent player-facing settings (one of the two also carries a 0-4
+  numeric threshold byte that could otherwise look like a "game speed" option).
+- **A small cycle-forward/backward stepper** (announces its new selection by name via a message table, range
+  0-4 or 0-32 depending on a flag) with no cheat-template signature - plausibly a real, if minor,
+  cycle-through-a-list feature; what list it selects from was not identified.
+- **A start/stop pair** showing a banner through the same shared dispatcher the watchtower alarm above uses -
+  plausible real feature, but neither the banner text nor the trigger for the "start" half was identified, and
+  no caller was found for the "stop" half at all.
+- **A per-tribe flag toggle**, sibling to the already-documented "unlimited mana" cheat flag (same flags field,
+  a different bit) - round-trips cleanly through a dedicated command, but what the flag actually gates is not
+  confirmed.
+- **A 16-bit word, toggled bit-by-bit by a cluster of roughly 16 of the ~76 cases** (plus 8 more that share one
+  handler and read a bit of it back) - looks like a HUD/debug-overlay visibility bitmask (one bit per panel),
+  i.e. likely original-developer debug tooling rather than a player-facing feature. A live-memory check (toggle
+  a bit, see what (dis)appears on screen) would settle it before ruling it out for good.
+
+None of the above currently has enough identified player-facing behaviour to warrant a TODO.md entry on its own
+- flagged here in case a future session resolves what any of them actually does.
 
 ### Formations [exe]
 A group move does **not** spread its units across different points: every unit in the same command group reads
@@ -4267,6 +4304,15 @@ guards and the shaman alike - then match the scan's own "a fight controller to j
 "Auto-attack") and join the same ring (up to 6 participants) rather than her being specially redirected around.
 So guards appearing to "take the hit" in practice is better read as "whoever the attacker's scan reaches first
 starts the fight, then everyone nearby piles into the same ring" - not a deliberate protection mechanic.
+
+### Dismiss/clear all notifications [exe, unconfirmed]
+Two player commands write the same 6-byte notification-state area `0x89D167`-`0x89D16D` touches: one sets all
+six bytes to 0xFF, the other zeroes them back out (`0x89D168` is a DWORD, `+4` a WORD) - a clean "mark
+everything dismissed" / "reset" pair, consistent with the reported "clear/dismiss all notifications" UI action.
+Neither this session nor an earlier one found the literal keybind or button that queues either command, nor what
+each of the 6 individual bytes tracks beyond `0x89D167` itself (the "a fight involving you just started" signal
+documented above). Worth adding as a real action once the notification system itself is built - see TODO.md
+"Notifications".
 
 ## Native AI: how a computer-controlled tribe actually decides what to do [exe]
 This is the ENGINE's own autonomous behaviour for a computer-controlled tribe - separate from PopScript, the
