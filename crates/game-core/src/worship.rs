@@ -420,6 +420,47 @@ mod tests {
         assert_eq!(map.totem_at((x, z)), None, "sunk: gone");
     }
 
+    /// TODO.md "Praying": a shared-across-tribes `NumOccurences` with each tribe keeping its own gauge otherwise
+    /// (`Totem::gauges`, `Totem::given`/`is_exhausted`) - confirmed already correct by this test, no fix needed.
+    #[test]
+    fn two_tribes_contest_a_totem_the_first_to_fill_wins_the_gift_and_both_are_swept_once_exhausted() {
+        let mut map = GameMap::sandbox_worship();
+        // Allied so the two tribes standing shoulder to shoulder at the same totem don't just fight instead - this
+        // test is about the contested gauge/gift, not combat. A third, harmless, unallied tribe keeps `tribes.
+        // count()` at a real multi-side match (`check_elimination` is a no-op below 2) without 0 and 1 merging
+        // into the game's only side and declaring an instant win the moment they're both placed in `self.tribes`.
+        map.tribes = crate::tribes::Tribes::from_owners([0, 1, 2]).with_allies([0b011, 0b011, 0b100, 0]);
+        let safe = map.shaman_of(0).map(|s| (s.x, s.z)).unwrap();
+        // A wildman: never fights and nobody auto-attacks one (units.md), so it just sits there as a harmless
+        // third side, on dry land (the shaman's own spot) so it never drowns either.
+        map.spawn(2, UnitKind::Wildman, safe);
+        let first = totem_of(&map, 1, false);
+        map.totems[first].occurrences = 1; // a single, shared gift to contest
+        let gift = map.totems[first].gifts[0];
+        let (tx, tz) = (map.totems[first].x, map.totems[first].z);
+        let mine = braves(&map, 1);
+        // Spawned far away, so it's naturally the slower of the two to actually start praying - its own walk
+        // there is the head start that makes tribe 0's gauge unambiguously the first to reach full, rather than
+        // racing two totems started at the exact same tick to the same result. Not placed right next to the
+        // totem either: a stationary rival that close blocks tribe 0's own approach to it.
+        let rival = map.spawn(1, UnitKind::Brave, (tx.wrapping_add(8000), tz)).id;
+        pray_at(&mut map, &mine, first);
+        for c in map.totem_orders(1, &[rival], first) {
+            map.apply(&c);
+        }
+        assert!((0..1500).any(|_| {
+            map.tick();
+            !map.granted.is_empty()
+        }), "tribe 0 fills its own gauge first");
+        assert_eq!(map.granted, vec![(0, gift)], "only the tribe that filled first gets the one shared gift");
+        assert!(map.totems[first].is_exhausted(), "the one gift is spent for every tribe now, not just tribe 0's own count");
+        map.tick();
+        assert!(
+            map.units.iter().filter(|u| mine.contains(&u.id) || u.id == rival).all(|u| !matches!(u.action, Action::Worshipping { .. })),
+            "every tribe's prayers sent away once exhausted, including tribe 1's, which never filled its own gauge"
+        );
+    }
+
     #[test]
     fn a_one_shot_adds_a_cast_unless_known() {
         let mut book = SpellBook::new();
