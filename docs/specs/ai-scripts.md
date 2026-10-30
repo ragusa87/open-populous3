@@ -130,14 +130,17 @@ Neither source describes the engine loop. What follows is what both of them and 
     way.
   - Reincarnated's converter puts the whole body in a per-turn `OnTurn` hook.
   - Turn 0 runs the setup block. Every later turn runs the `ELSE` branch, where the `EVERY` blocks gate the work.
-- **`EVERY n m` fires on the turns where `(turn + m) % n == 0`**:
-  - The wiki's example: `EVERY 256 12` first fires at turn 244, then every 256 turns.
-  - `EVERY 128 28` first fires at turn 100.
+- **`EVERY n m` fires on the turns where `(turn + tribe_num + m) % n == 0`** [exe, confirmed]:
+  - The wiki's example: `EVERY 256 12` first fires at turn 244, then every 256 turns (for tribe 0).
+  - `EVERY 128 28` first fires at turn 100 (for tribe 0).
   - Offsets larger than the period (21 in the files) are then harmless.
-  - The stored operands are `n - 1` (a bit mask) and `m - 1`, so the engine probably tests
-    `(turn + stored_m + 1) & stored_n == 0`. The exact off-by-one is unverified.
-  - The converter adds the tribe index, `(turn + tribe + m) % n == 0`, so tribes sharing a script don't act on
-    the same turn [lua]. Whether the original does this is unknown.
+  - The stored operands are `n - 1` (a bit mask) and `m - 1`; the engine tests this as a bitwise AND against the
+    stored `n - 1` mask, not a true modulo - same result for the power-of-two periods this command actually uses.
+  - **Confirmed by reading the exe directly, settling what used to be an open question here**: the original DOES
+    add a real per-tribe phase, exactly like the Reincarnated Lua converter's own `(turn + tribe + m) % n == 0`
+    guess - not a converter-only correction. The value added is a genuine per-tribe-struct byte (not simply the
+    tribe's player-slot index, though it tracks it), so two tribes sharing the same script body genuinely fire
+    their `EVERY` blocks on different turns. Safe to implement exactly as the converter already does.
 - **Turn rate**: the wiki says "about 8 game turns per second"; the executable runs 12 (pop3-rev-analysis.md
   "Turns and timing"), and one of our ticks is one turn (units.md). Message timeouts and flyby times are also in
   turns, but `SET_TIMER_GOING` takes seconds.
@@ -500,7 +503,14 @@ have no token. They are probably set by the DO commands of the same name (infere
 Other ON/OFF switches:
 - `SET_REINCARNATION`: this AI gets a reincarnation site at the start. `SET_NO_BLUE_REINC` is the human
   equivalent, so the shaman's death ends the game.
-- `GIVE_UP_AND_SULK`: everyone guards the shaman, who is sent to blue's reincarnation site.
+- `GIVE_UP_AND_SULK`: **corrected from the exe this session - not literally "everyone guards the shaman."** ON
+  sets a generic per-tribe "force success" switch (the SAME flag the engine checks elsewhere to force a
+  preacher-conversion roll to succeed, and to force level-script-dictated outcomes - it is not a dedicated
+  surrender flag) and calls one more function that was not opened this session; OFF just clears the switch. The
+  actual "retreat/guard the shaman" behaviour the wiki describes, if the original really does that, must come
+  from that unopened function - not from a self-contained "surrender" routine. Treat the wiki's description as
+  unconfirmed until that callee is traced; implement the force-success side (useful on its own, e.g. for scripted
+  guaranteed conversions) even before the retreat behaviour is pinned down.
 - `FLYBY_ALLOW_INTERRUPT`: the player can skip flybys.
 - No meaning in the wiki: `SET_BUCKET_USAGE`, `SET_AUTO_BUILD`, `SET_AUTO_HOUSE`, `AUTO_MESSAGES`,
   `EXTRA_WOOD_COLLECTION` and `TURN_PUSH`.
