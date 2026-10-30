@@ -1135,17 +1135,36 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Measure the windowed release build too (`cargo run --release`): the numbers above are the dev build under
   tracing. The simulation only matters with many units: every walker replans A* on any terrain write
   ("Replanning" in Units).
-- [ ] Loading screen freezes near the end: two unyielded main-thread stalls, both reading as "the bar reaches
-  100% then hangs". `boot::poll_job` (`boot/mod.rs`) runs each `BootJob`'s CPU work off-thread, but once it
-  finishes, `J::install(output, world)` (GPU uploads, resource inserts) runs synchronously with no progress
-  reporting, and `BootStatus::fraction()` caps a job at 0.99 while running, so the bar sits near 100% for the
-  whole `install` (the `"boot: {label} installed in {ms}"` log line says which job's `install` is slow). Separately,
-  `menu::begin_game`/`boot::GameStep` is explicitly documented as blocking ("then built, which holds the main
-  thread"): after `SHOW_FRAMES` the map is built synchronously (`LevelList::load_current`: parse, build `GameMap`,
-  recompute shading), zero progress reporting, no frames drawn until it returns - likely the dominant freeze for a
-  real original level. Fix direction: make a slow `install` (or the map build) incremental, a bounded chunk of work
-  per frame via a small state machine, instead of one unyielded call. Separate from the existing stale-terrain-
-  during-instant-bulk-tick bug above (that one is post-load desync, not a loading-time stall).
+- [ ] Loading screen freezes near the end (`docs/plans/13-loading-screen-incremental-build.md`), two unyielded
+  main-thread stalls originally lumped as one item - **the map-build half is fixed, the slow-`install` half is
+  not** (left open on purpose, see below), so this stays unchecked.
+  - **Fixed**: `menu::begin_game`/`boot::GameStep` used to build a `Start::NewGame` (or sandbox) map synchronously
+    inline (`LevelList::load_current`: parse, build `GameMap`, recompute shading - "likely the dominant freeze for
+    a real original level"), zero progress, no frames drawn until it returned. `GameMap::load_original`/`generate`
+    and the `sandbox_*` constructors are plain `Send` computation with no ECS/GPU access (`game-core` has no Bevy),
+    so - unlike `BootJob`'s GPU-touching `install` - the whole build needed no phase-by-phase chunking: it now runs
+    as one worker-thread task (`menu::spawn_game_build`, `AsyncComputeTaskPool`), polled each frame
+    (`menu::poll_new_game_build`) the same way `boot::poll_job` already polls a `BootJob`'s `run`. `boot::GameStep`
+    gained a `Building` step between `Show` and `Built`; `boot::next` can't drive that transition itself (a pure
+    function has no way to poll a `Task`), so it just keeps returning `Wait` for it, same as `Show` - the poll
+    system flips it to `Built` directly once the task resolves, same pattern `poll_job` already uses for
+    `JobPhase`. All `Start` variants (not just `NewGame`) go through the same path now, including the sandboxes
+    (previously synchronous too, already fast - unaffected in practice, still correctness-checked:
+    `HEADLESS=1 POP3_START=sandbox-units` reaches `Playing` the same as before). No original install was available
+    in this environment to reproduce the "real original level" case directly; verified instead that the generated
+    fallback goes through the exact same `Building`/`poll_new_game_build` machinery end to end
+    (`HEADLESS=1 SHOT_BOOT=1`, reaches `Playing` and screenshots correctly) and that `boot/mod.rs`'s own `next()`
+    unit tests cover the new `Building` state.
+  - **Still open, the slow-`install` half**: `boot::poll_job` still runs `J::install(output, world)` in one
+    unyielded call per `BootJob`, and `BootStatus::fraction()` still caps a job at 0.99 until `install` returns.
+    The one real `BootJob` today, `UnitSpritesJob`, no longer looks like the dominant freeze this item was
+    originally written against: its own atlas-sharing rework (TODO.md "Unit sprites" above) already cut its
+    `install` to ~100-120 ms measured here (`"boot: Unit sprites installed in …ms"`, generated art, software
+    rendering) - a noticeable frame or two, not a multi-second hang. Building the generic resumable-`install`
+    plumbing (a `install` that returns `More(state)`/`Done`, called once per frame) speculatively, with no job
+    currently slow enough to justify it, was left undone rather than guessed at; revisit if a future `BootJob` (or
+    a real-install measurement against the original game's own assets, which this environment has none of) shows
+    it's still needed.
 
 ## Priority 6 — `--no-original` asset completeness (copyright safety)
 AGENTS.md's own bar is that everything shippable works with `--no-original`. Sound is a hard zero today (format reverse-engineered, no playback, no CC0 assets sourced at all); several spell VFX, building/spell icons and ritual scenery are still original-only. Largely independent of the other tiers, so it can run in parallel with them rather than waiting its turn.
