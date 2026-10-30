@@ -135,7 +135,10 @@ fn tilt_grounded(
     for (g, tilt, mut t) in &mut q {
         let at = Vec3::from(GamePos::ground(wrap(g.at.x - rig.focus.x), 0.0, wrap(g.at.y - rig.focus.y)));
         let normal = ground_normal(&map.0.terrain, rig.focus, &params.0, at.x, at.z, tilt.half);
-        t.rotation = Quat::from_rotation_arc(Vec3::Y, normal) * Quat::from(tilt.yaw);
+        let rotation = Quat::from_rotation_arc(Vec3::Y, normal) * Quat::from(tilt.yaw);
+        if t.rotation != rotation {
+            t.rotation = rotation;
+        }
     }
 }
 
@@ -148,10 +151,14 @@ pub(crate) fn place_grounded(
     for (g, mut t, mut vis) in &mut q {
         match render_pos(&map.0.terrain, g, rig.focus, &params.0) {
             Some(p) => {
-                t.translation = p;
-                *vis = Visibility::Inherited;
+                if t.translation != p {
+                    t.translation = p;
+                }
+                vis.set_if_neq(Visibility::Inherited);
             }
-            None => *vis = Visibility::Hidden,
+            None => {
+                vis.set_if_neq(Visibility::Hidden);
+            }
         }
     }
 }
