@@ -1137,6 +1137,51 @@ our specs: if our own view renders firestorm as one static fire effect instead o
 falling, lit, trailed fireball objects, that view (not the already-correct scheduling in `firestorm`/
 `EffectKind::Firestorm`, spells.md) is where the "rain of fire" look is missing.
 
+### Blast's own cast chain [exe]
+Traced this session, since the heading above only ever covered Firestorm's own impact code. The spell's own
+class-11 "cast in progress" controller (type 2, `init_unit_type_11`/0x4C14C0 for setup, `spell_unit_processing_1`/
+`_2` for its own per-turn state machine) reads its key fields straight out of the SPELL TABLE's own row
+(0x5A80D0 + type×0x3E, the already-known per-spell constant table) rather than hardcoding anything per spell:
+```text
++0x26 (byte): the shot's own class-8 type to fire               - Blast: 4 (the shared fireball ball, "Fireball
+                                                                    shots" above)
++0x28..+0x2C (5 bytes): up to 5 class-7 effect types to create   - Blast: 0x05, 0x03, 0x4E, 0x26, 0x00
+    at the controller's own position once the shot phase ends      (0x00 entries skipped)
+```
+`spell_unit_processing_2` (0x4C23E0, own row) is where this actually happens: its sub-state 5 fires the shot
+(`create_unit(8, +0x26 byte, tribe, pos)`, copying the controller's own heading into it) then switches itself to
+sub-state 1; sub-state 1 walks the 5-byte list above and `create_unit(7, each nonzero byte, tribe, pos)`. For
+Blast (type 2) that resolves the per-spell row's own "fireball shot, then simple blast, burn cell, smoke,
+explosion" line to concrete effect types: 0x05 Burn cell, 0x03 the plain grey smoke puff (hfx 314-321, "The shot
+8/6"), 0x4E "spell blast" (`docs/unit_types`) - the actual damaging/pushing simple blast, see below - and 0x26
+"explosion 1" - a dedicated visual, own init `0x509F03` (own row): a 30-frame alpha sprite burst at **hfx
+1099-1128** (`0x4EE700(ptr, 0x1E, 0x44B)`, the already-documented drawable-setter), 9-turn life, sound 0xB2, plus
+the same dynamic ground-light call the flying shot itself carries. This is a different, exact sprite range from
+this file's own earlier "by eye, unconfirmed" guess of hfx ~1180-1210 for "a growing/fading smoke cloud then a
+separate explosion burst" - that guess most likely described a different effect (a volcano fireball's own "Rock
+explosion" burst, hfx 1194-1209, already documented under "Volcano fireballs", sits right next to it and shares
+the same sound 0xB2).
+
+**"Simple blast" 0x4E's own init (`0x50A467`, own row) resolves this file's long-standing "which exact behaviour
+maps to 0x50B630/0x50B6F0/0x50B740" uncertainty**: 0x4E calls the PLAIN, no-parameters init (`0x50B630`, own row)
+- not the parametrized one a hand-tuned caller (e.g. the boat-destruction land explosion, already cited as
+`0x50B6F0 with 3,2,5,0x62,0x8C,1,0`) uses - then overwrites one extra byte, `+0x7D = 1`. `0x50B630` itself
+branches on a GLOBAL flag (`0x89C668` bit `0x4`, role not identified) rather than hardcoding a single default:
+flag set -> radius 1280 (2.5 cells), push_k 140, vert_k 98 (exactly this section's own "140"/"98"/"1280"
+defaults); flag clear -> radius 512 (1 cell), push_k 140, vert_k 30. **This means Blast's own push_k/vert_k/R are
+not fixed per-spell constants at all - they depend on a runtime flag this session didn't identify the meaning
+of**, which is a concrete new lead for the "Open questions" item below about the live-measured vert_k of 132 (it
+matches neither branch exactly, but confirms the value is config-dependent, not a simple trace error).
+
+**A second, previously untraced "trailing spark" path, gated on this same `+0x7D` byte** (`0x50B740`, the
+per-turn simple blast, around `0x50ba3b`): separately from the already-documented `+0x7A`-bit-1-gated forced
+64-turn panic run (fixed counter 24), when `+0x7D` is set AND the pushed person shares the BLAST'S OWN tribe
+(i.e. the caster's own people caught in their own Blast) AND that person has a valid tribe, the same trailing-
+effect counter (`+0xA4`) is instead set to a RANDOM value in `[16,31]` (the standard PRNG). Since `trail_effect_
+tick` (0x4D9200, "Blast push and flight") only shows the bright fireball-coloured trail while this counter is
+above 8, a caster's own people caught in their own Blast get a shorter, randomized version of the bright trail
+rather than the enemy-only fixed 24-turn one - cosmetic only, same as the rest of this mechanic.
+
 ### Whirlwind mechanics [exe]
 `process_whirlwind` (0x50F490, effect state 21), traced in full this session. Two timers: +0x72 counts down the
 active "scanning and damaging" phase; once it hits 0 the effect switches to a quieter "drifting" phase instead of
@@ -4749,7 +4794,11 @@ behaviour at the margins, not the overall shape.
 - Blast: whether this spell's own `push_k`/`vert_k`/`R` instance fields (+0x74/+0x78/+0x6c, "Blast push and
   flight") are really 140/98/1280 or something else - the live horizontal figure checks out (140 confirmed
   to ~1.04x on flat ground) but the vertical one measured 132, not 98, twice (98/140 ARE independently
-  confirmed real values, just for a different call site - a destroyed boat's land explosion, "Vehicles"); and
+  confirmed real values, just for a different call site - a destroyed boat's land explosion, "Vehicles").
+  **New lead ("Blast's own cast chain")**: Blast's own "spell blast" init (0x50A467) calls the plain,
+  no-parameters init (0x50B630), which itself branches on global flag `0x89C668` bit `0x4` between 140/98/1280
+  and 140/30/512 - so the value is config-dependent, not a single hardcoded constant; 132 matches neither
+  branch exactly, so this narrows but doesn't close the question. Still open: what sets that flag. And
   the very first `BLAST_DAMAGE_PERSON` tick is still unseen. What happens to a person landing in water is now
   answered (see "Blast push and flight": sinks at -16/turn for 16 turns, dies outright at -256, independent
   of the ordinary fall-damage check). Four live sessions (pop3-rev/docs/cheat.md "Live memory: measuring a
