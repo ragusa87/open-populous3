@@ -1110,9 +1110,13 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Mesh allocator about 3 ms a frame: meshes rewritten every frame (range ring `put` while shown, blueprint marks)
   and the 129 x 129 terrain mesh rebuilt on every camera move (`world::rebuild_terrain`): rewrite only on change;
   the planet curve could move to the vertex shader over a static grid.
-- [ ] Transforms written every frame for everything grounded (`grounded::place_grounded`) and every unit part
-  (`units::pull_to_eye`), so Bevy propagates all trees, buildings and unit parts each frame: write with
-  `set_if_neq`, or only when the camera or the thing moved.
+- [x] Transforms written every frame for everything grounded (`grounded::place_grounded`) and every unit part
+  (`units::pull_to_eye`) now skip the write when nothing changed (`docs/plans/12-change-only-transform-writes.md`):
+  `place_grounded`'s translation and `tilt_grounded`'s rotation compare before assigning, `Visibility` uses
+  `set_if_neq`; `pull_to_eye`'s per-child translation/scale do the same. Transform/Visibility are `Copy +
+  PartialEq`, so exact-equality (no epsilon) is the right check - the inputs only change when something real
+  does. Not separately re-measured with `just profile` on this pass (see the sibling "Mesh allocator"/"Whole-
+  world respawn" bullets below for the other write-every-frame costs in the same section, still open).
 - [ ] Unit views carry 7 marker slots and a health bar each, hidden most of the time: spawn markers when shown.
 - [ ] Whole-world respawn on terrain changes: when the simulation levels ground (land bridge, flatten, braves
   flattening a site, every few ticks) `run_ticks` marks `CurrentMap` changed, and trees (re-reading their original

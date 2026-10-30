@@ -686,8 +686,14 @@ fn pull_to_eye(
         for &child in children {
             if let Ok((mut t, bar, marker)) = parts.get_mut(child) {
                 let above = if bar { BAR_HEIGHT } else { marker.map_or(0.0, |m| m.above) };
-                t.translation = local + Vec3::Y * above * scale;
-                t.scale = Vec3::splat(scale);
+                let translation = local + Vec3::Y * above * scale;
+                let scale = Vec3::splat(scale);
+                if t.translation != translation {
+                    t.translation = translation;
+                }
+                if t.scale != scale {
+                    t.scale = scale;
+                }
             }
         }
     }
