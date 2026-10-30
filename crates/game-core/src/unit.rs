@@ -78,6 +78,20 @@ pub const BURN_TICKS: Ticks = Ticks::new(70);
 /// On fire: lost a turn is its own max health divided by this, confirmed.
 pub const BURN_DIVISOR: u16 = 32;
 
+/// Ground recovery (`Action::Settling`, pop3-rev-analysis.md "Tumbling and ground recovery"): each wait round is
+/// `4..=31` turns [exe, measured], rolled off the shared LCG there.
+const SETTLE_WAIT_MIN: u32 = 4;
+const SETTLE_WAIT_SPAN: u32 = 28;
+/// Odds (out of 64) of another wait round once one ends: the original's own combined 13/32 + 3/64 chance of
+/// kicking back into a resting sub-state, rather than getting up [exe, measured].
+const SETTLE_CONTINUE_ODDS: u32 = 29;
+/// How many extra rounds `settle_ticks` allows after the first, so the (rare) worst case stays a bounded "several
+/// dozen turns" rather than an unbounded tail: our own cap, not traced - the original instead rerolls forever with
+/// ever-shrinking odds of reaching any given round. Kept low: at roughly 45% odds per round, even this keeps the
+/// common case (no reroll) well under a firewarrior's own ~27-turn reload, matching "a handful" as the typical
+/// outcome and "several dozen" as the rare, unlucky tail rather than something a steady attacker hits every time.
+const SETTLE_MAX_EXTRA_ROUNDS: u32 = 1;
+
 /// A unit's stable id (`GameMap::new_id_of`).
 pub type UnitId = Id<Unit>;
 
@@ -157,6 +171,13 @@ pub enum Action {
     /// Flung through the air or rolling on the ground by a spell, moved by `Unit::velocity` at
     /// `Unit::lift`: no orders until still on the ground again.
     Tumbling,
+    /// Ground recovery after a tumble (pop3-rev-analysis.md "Tumbling and ground recovery", person state 19): once
+    /// still on the ground, locked (no orders) for `left`, playing its ordinary Idle pose, before resuming its own
+    /// per-type behaviour (`settle`). The original stays down for a randomized stretch instead of recovering at
+    /// once, picking a nearby resting spot and rerolling several more short waits along the way - our own
+    /// simplification keeps the duration's randomness but not the relocation or the per-round reroll loop
+    /// (collapsed into one upfront draw, `settle_ticks`): see TODO.md "Units".
+    Settling { left: Countdown },
     /// Running in panic towards `away` (a heading, `panic_heading`) at `PANIC_SPEED`, out by the door first when
     /// inside: no orders until `left` runs out.
     Panicking { away: (i16, i16), left: Countdown },
@@ -240,6 +261,7 @@ impl Action {
             Action::Landing => "Landing",
             Action::Drowning => "Drowning",
             Action::Tumbling => "Tumbling",
+            Action::Settling { .. } => "Settling",
             Action::Panicking { .. } => "Panicking",
             Action::OnFire { .. } => "Burning",
             Action::Dying { .. } => "Dying",
@@ -308,7 +330,7 @@ impl Action {
     }
 
     pub(crate) fn can_take_orders(&self) -> bool {
-        !matches!(self, Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::OnFire { .. } | Action::Listening { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
+        !matches!(self, Action::Drowning | Action::Tumbling | Action::Settling { .. } | Action::Panicking { .. } | Action::OnFire { .. } | Action::Listening { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
     }
 }
 
@@ -540,9 +562,10 @@ impl Unit {
         self.action == Action::Tumbling || self.motion.airborne()
     }
 
-    /// Thrown, or listening to a preacher: no order reaches it and its player cannot select it.
+    /// Thrown, settling after a tumble, or listening to a preacher: no order reaches it and its player cannot
+    /// select it.
     pub fn locked(&self) -> bool {
-        self.thrown() || matches!(self.action, Action::Listening { .. })
+        self.thrown() || matches!(self.action, Action::Listening { .. } | Action::Settling { .. })
     }
 
     /// Orders change what it does: not while drowning, tumbling, dying or dead, nor off the ground.
@@ -976,7 +999,17 @@ impl Unit {
                         self.die();
                         return Some(UnitEvent::Died);
                     }
-                    self.action = Action::Idle;
+                    return self.settle(now);
+                }
+            }
+            Action::Settling { mut left } => {
+                if left.tick() {
+                    // `go_idle`, not a direct `Action::Idle`: a standing attack order a fight put on hold
+                    // (`resume_attack`) resumes once actually back on its feet, same as `touch_down`'s other
+                    // callers (pop3-rev-analysis.md "Resuming a fight cut short by a push").
+                    self.go_idle();
+                } else {
+                    self.action = Action::Settling { left };
                 }
             }
             Action::Drowning => {
@@ -1167,10 +1200,22 @@ impl Unit {
             self.die();
             return Some(UnitEvent::Died);
         }
-        if self.action.link().is_none() {
+        // A tumble settles (`Action::Settling`, the `Action::Tumbling` tick arm below, reached the same tick: by
+        // now `self.motion` is already `Motion::STILL`) rather than going idle at once.
+        if self.action.link().is_none() && self.action != Action::Tumbling {
             self.go_idle();
         }
         None
+    }
+
+    /// Enters the ground-recovery grace period after a tumble (`Action::Settling`, `settle_ticks`). Any wood it
+    /// was carrying is put down right away - our own simplification of the original's "once per 100 wood while
+    /// settling" debris drip (we only ever carry one whole load at a time, so there is only ever one drop to make;
+    /// the debris puff itself, and the holding-wood pose while it's still carried, are left out: no such visual
+    /// exists yet, and this detail isn't confirmed live either way, TODO.md "Units").
+    fn settle(&mut self, now: Tick) -> Option<UnitEvent> {
+        self.action = Action::Settling { left: Countdown::new(settle_ticks(self.id, now)) };
+        (self.carrying > 0).then_some(UnitEvent::PutDown)
     }
 
     /// Forgets where it was going, what it was to do there and its work.
@@ -1531,6 +1576,25 @@ pub fn panic_heading(a: u32, b: u32) -> (i16, i16) {
         return (PANIC_REACH as i16, 0);
     }
     ((dx * PANIC_REACH / len) as i16, (dz * PANIC_REACH / len) as i16)
+}
+
+/// How long a tumbled unit settles before it's responsive again (`Action::Settling`): one `SETTLE_WAIT_MIN..=31`
+/// round, continuing for up to `SETTLE_MAX_EXTRA_ROUNDS` more at `SETTLE_CONTINUE_ODDS` each
+/// (pop3-rev-analysis.md "Tumbling and ground recovery"). Seeded from the unit's own id and the tick it lands on,
+/// not the shared `map::Lcg`: `Unit::tick` has no RNG of its own, and giving it one would mean threading `&mut Lcg`
+/// through every caller and test in the crate for this purely cosmetic timing detail. Still a pure function of
+/// simulation state (no wall-clock, no iteration order), so still deterministic and lockstep-safe.
+fn settle_ticks(id: UnitId, now: Tick) -> Ticks {
+    let mut rng = crate::map::Lcg(id.raw().wrapping_mul(2_654_435_761).wrapping_add(now.to_wire()));
+    let wait = |rng: &mut crate::map::Lcg| Ticks::new(SETTLE_WAIT_MIN + rng.next_u32() % SETTLE_WAIT_SPAN);
+    let mut total = wait(&mut rng);
+    for _ in 0..SETTLE_MAX_EXTRA_ROUNDS {
+        if rng.next_u32() % 64 >= SETTLE_CONTINUE_ODDS {
+            break;
+        }
+        total = total + wait(&mut rng);
+    }
+    total
 }
 
 /// Nearest of 8 headings for a direction (0 = +z, 2 = +x, 4 = -z, 6 = -x), integers only.
@@ -2003,7 +2067,11 @@ mod tests {
         run(&mut u, &t, &site, 2);
         assert_eq!((u.action, u.motion.height, u.x), (Action::Tumbling, Some(148), x + 14), "no orders, flying, air drag slowing the horizontal speed each tick");
         run(&mut u, &t, &site, 3);
-        assert_eq!((u.action, u.motion, (u.x, u.z)), (Action::Idle, Motion::STILL, (x + 20, z)), "landed and settled the same tick");
+        assert_eq!((u.motion, (u.x, u.z)), (Motion::STILL, (x + 20, z)), "landed, no longer moving");
+        let Action::Settling { left } = u.action else { panic!("settling, not idle at once: {:?}", u.action) };
+        assert!(u.locked() && u.pickable().is_some(), "locked (no orders) but still an ordinary, hoverable person");
+        run(&mut u, &t, &site, left.left().get() as usize);
+        assert_eq!((u.action, u.x), (Action::Idle, x + 20), "settled: responsive again");
         (u.action, u.motion.velocity) = (Action::Tumbling, Velocity::new(5, 0, 0));
         run(&mut u, &t, &site, 3);
         assert_eq!((u.action, u.x), (Action::Tumbling, x + 20), "rolling on the ground: not moved, no friction yet");
@@ -2029,8 +2097,11 @@ mod tests {
         u.fling(Velocity::new(10, 10, 0), 0);
         assert_eq!(u.motion, Motion::flying(Velocity::new(80, 59, 0), 100), "pushes add up, the height is kept");
         let x = u.x;
-        let ticks = run_until(&mut u, &t, &site, |u| u.action == Action::Idle);
-        assert_eq!((ticks, u.x), (5, x + 370), "flew, landed, then stays: the walk is forgotten (370, not 5 * 80: air drag)");
+        let ticks = run_until(&mut u, &t, &site, |u| !u.motion.airborne());
+        assert_eq!((ticks, u.x), (5, x + 370), "flew, landed, then settles there: the walk is forgotten (370, not 5 * 80: air drag)");
+        assert!(matches!(u.action, Action::Settling { .. }), "settling rather than idle at once: {:?}", u.action);
+        run_until(&mut u, &t, &site, |u| u.action == Action::Idle);
+        assert_eq!(u.x, x + 370, "still stays, once settled");
         run(&mut u, &t, &site, 20);
         assert_eq!(u.x, x + 370);
         let mut dead = Unit { action: Action::Dead { left: Countdown::new(RESPAWN_TICKS) }, ..u.clone() };
@@ -2062,7 +2133,7 @@ mod tests {
         let (mut u, site) = shaman_at((10, 10));
         u.fling(Velocity::new(0, 40, 0), 100);
         assert_eq!(run_until(&mut u, &t, &site, |u| !u.motion.airborne()), 4);
-        assert_eq!(u.action, Action::Idle);
+        assert!(matches!(u.action, Action::Settling { .. }), "stands up for now, settling rather than idle at once");
         u.health = Health::new(0, SHAMAN_MAX_HEALTH);
         u.fling(Velocity::new(0, 40, 0), 100);
         assert_eq!(run(&mut u, &t, &site, 4), [UnitEvent::Died]);
@@ -2071,7 +2142,7 @@ mod tests {
         t.set(u.cell().0 + 1, u.cell().1, 1000);
         u.fling(Velocity::new(0, 40, 0), 100);
         run(&mut u, &t, &site, 4);
-        assert_eq!(u.action, Action::Idle, "on a cliff: stands up for now");
+        assert!(matches!(u.action, Action::Settling { .. }), "on a cliff: stands up for now, same as open ground");
     }
 
     #[test]

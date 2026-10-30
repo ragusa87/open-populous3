@@ -2459,8 +2459,10 @@ mod tests {
         assert!(map.effects.is_empty(), "3 turns");
         map.run(Ticks::secs(2));
         let u = &map.units[i];
-        assert_eq!((u.action, u.motion.airborne(), u.z), (Action::Idle, false, start.1), "landed, on its feet");
+        assert!(matches!(u.action, Action::Settling { .. }) && !u.motion.airborne() && u.z == start.1, "landed on its feet, settling rather than idle at once");
         assert!(torus_delta(start.0, u.x) < -512, "away from the blast: {}", torus_delta(start.0, u.x));
+        map.run(Ticks::new(124)); // past the worst case of `unit::settle_ticks`
+        assert_eq!(map.units[i].action, Action::Idle, "settled");
     }
 
     #[test]

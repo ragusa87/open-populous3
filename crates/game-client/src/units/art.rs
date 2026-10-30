@@ -258,6 +258,9 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Drowning => Pose::Drown,
         Action::Tumbling if airborne => Pose::Flung,
         Action::Tumbling => Pose::Tumble,
+        // Ground recovery (units.md "Tumbling"): an ordinary Idle (or holding-wood) pose, not visibly down.
+        Action::Settling { .. } if carrying => Pose::CarryIdle,
+        Action::Settling { .. } => Pose::Idle,
         Action::Dying { .. } | Action::Dead { .. } => Pose::Fall,
         Action::Spirit { .. } => Pose::Spirit,
         Action::Grazing { drink: false, .. } => Pose::Eat,

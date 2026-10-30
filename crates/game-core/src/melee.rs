@@ -643,7 +643,7 @@ mod tests {
         };
         map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at: blast_at } });
         map.run(crate::unit::CAST_RELEASE);
-        until(&mut map, 300, |m| !matches!(m.unit(attacker).unwrap().action, Action::Tumbling | Action::Melee { .. } | Action::Challenge { .. }))
+        until(&mut map, 300, |m| !matches!(m.unit(attacker).unwrap().action, Action::Tumbling | Action::Settling { .. } | Action::Melee { .. } | Action::Challenge { .. }))
             .expect("back on its feet");
 
         let (attacker_cell, defender_cell) = (map.unit(attacker).unwrap().cell(), map.unit(defender).unwrap().cell());
@@ -680,7 +680,7 @@ mod tests {
         // The fireball still has to fly in (blast.rs "From cast to effect") before it throws her: wait for that
         // first, so this doesn't race a pre-blast auto-scan into an unrelated `Action::Attacking`.
         until(&mut map, 300, |m| matches!(m.unit(w).unwrap().action, Action::Tumbling)).expect("thrown by the blast");
-        until(&mut map, 300, |m| !matches!(m.unit(w).unwrap().action, Action::Tumbling)).expect("back on its feet");
+        until(&mut map, 300, |m| !matches!(m.unit(w).unwrap().action, Action::Tumbling | Action::Settling { .. })).expect("back on its feet");
         assert_eq!(map.unit(w).unwrap().action, Action::Idle, "nothing to resume: stays idle, not Attacking anyone");
     }
 

@@ -293,10 +293,13 @@ mod tests {
     }
 
     #[test]
-    /// The brave listens a cell away: by the time it reaches the preacher, the preacher is back on its feet (a bolt only
-    /// makes it hop, `firebolt::steady`) and its next look sits the brave down again, about 20 units before the brave
-    /// is close enough to challenge it.
-    fn a_preacher_struck_by_a_bolt_is_avenged_but_sits_the_avenger_down_again() {
+    /// The brave listens a cell away and turns on the preacher once it's struck; by the time the brave reaches it,
+    /// the preacher is still locked in its own ground-recovery grace period (a bolt's own hop, `firebolt::steady`,
+    /// now also going through `unit::settle_ticks` like any other tumble, TODO.md "Units" "Ground recovery") and
+    /// hasn't resumed preaching yet, so the brave gets there first and fights it instead of being sat back down -
+    /// the opposite of this test's own pre-fix finding (sits-it-down-again), a side effect of that fix rather than
+    /// something this test originally meant to pin down.
+    fn a_preacher_struck_by_a_bolt_is_fought_before_it_recovers_enough_to_preach_again() {
         let mut outcomes = Vec::new();
         for seed in 0..8 {
             let (mut map, p, others) = sermon_scene(&[UnitKind::Brave]);
@@ -308,9 +311,9 @@ mod tests {
             assert!(matches!(map.unit(b).unwrap().action, Action::Attacking { target: Target::Unit(t), .. } if t == p), "the brave turns on it");
             let fought = |m: &GameMap| matches!(m.unit(p).unwrap().action, Action::Challenge { .. } | Action::Melee { .. });
             let end = until(&mut map, 200, |m| listening(m, b) || fought(m));
-            outcomes.push((end.is_some(), listening(&map, b)));
+            outcomes.push((end.is_some(), fought(&map)));
         }
-        assert!(outcomes.iter().all(|&(over, sat)| over && sat), "the preacher, back on its feet, sits it down first: {outcomes:?}");
+        assert!(outcomes.iter().all(|&(over, fought)| over && fought), "{outcomes:?}");
     }
 
     #[test]
