@@ -195,6 +195,19 @@ pub fn hypnotism_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -
     true
 }
 
+/// `INVISIBLE=1`: a brave next to the player's own shaman is cast Invisible (`Command::Cast`, same path a real
+/// cast takes - granted `Unlimited` here so it works regardless of the sandbox's own loadout), then enough ticks
+/// run to clear the cast's own `CAST_RELEASE` delay and hold the brave invisible for inspection (units.md
+/// "Statuses"). False when the player has no shaman (no sandbox/level loaded one).
+pub fn invisibility_demo(map: &mut game_core::map::GameMap) -> bool {
+    let Some(at) = map.units.iter().find(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Shaman).map(|u| (u.x, u.z)) else { return false };
+    map.spawn(PLAYER, game_core::unit::UnitKind::Brave, (at.0.wrapping_add(100), at.1));
+    map.spell_books[PLAYER as usize].set(game_core::spell_book::SpellKind::Invisibility, game_core::spell_book::Availability::Unlimited);
+    map.apply(&Command::Cast { player: PLAYER, spell: game_core::spell::Spell::Invisibility { at } });
+    map.run(game_core::time::Ticks::new(20));
+    true
+}
+
 /// `VOLCANO=x,z` (cells): the player's Volcano effect there, then `ticks` run at once (with `GAME_SPEED=0`: its
 /// rumble/rise/destruction/lava/fireball phases over the run). False when `at` does not parse.
 pub fn volcano_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
@@ -588,6 +601,9 @@ fn screenshot(
         if let Ok(at) = std::env::var("HYPNOTISM") {
             let ticks = std::env::var("HYPNOTISM_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             hypnotism_demo(&mut map.0, &at, ticks);
+        }
+        if std::env::var("INVISIBLE").is_ok_and(|v| v == "1") {
+            invisibility_demo(&mut map.0);
         }
         if let Ok(at) = std::env::var("VOLCANO") {
             let ticks = std::env::var("VOLCANO_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);

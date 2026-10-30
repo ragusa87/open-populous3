@@ -25,6 +25,7 @@ use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use std::collections::HashMap;
 use crate::game_speed::GameSpeed;
 use crate::sim_time::{SimNow, TICK_SECS};
 use game_core::command::Command;
@@ -272,6 +273,7 @@ impl Plugin for UnitsPlugin {
             .init_resource::<SimNow>()
             .init_resource::<GameSchedule>()
             .init_resource::<UnitSprites>()
+            .init_resource::<GhostMaterials>()
             .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin, markers::MarkersPlugin))
             .add_plugins(crate::boot::BootJobPlugin::<UnitSpritesJob>::default())
             .add_systems(
@@ -677,6 +679,37 @@ pub fn riding(map: &game_core::map::GameMap, u: &game_core::unit::Unit, at: Vec2
     })
 }
 
+/// The sprite's own visible opacity while Invisibility (or a Ghost Army copy, `Statuses::ghost`) is on, over the
+/// local player's own units only (docs/plans/15-ghost-table-invisibility.md): `ghost0-X.dat`'s 66% mix
+/// (`pop3_format::ghost`, sprites.md "Ghost") is a palette-index blend for the original's software renderer, with
+/// no direct equivalent once sprites are RGBA textures - compositing at this alpha over whatever's behind it (the
+/// GPU's own blending) already reads as "66% toward the background", so the table itself is only decoded for the
+/// record, not replayed per pixel here. Which operand of the formula is the sprite is unresolved in the spec: 0.34
+/// (`1 - 0.66`) was picked by eye against `just shot` as the reading that looks see-through rather than solid or
+/// gone; 0.66 is the other candidate if a later look disagrees.
+const GHOST_ALPHA: f32 = 0.34;
+
+/// Translucent material clones for `GHOST_ALPHA`, keyed by the opaque/blend material's own base texture: since
+/// `upload_tribe_atlases` shares one material per kind+tribe+alpha-mode across every unit of that kind, an
+/// invisible unit can't just have its own shared material's alpha edited (that would make every other unit of the
+/// same kind and tribe translucent too) - this caches one extra material per distinct texture instead of making a
+/// fresh one every frame for every invisible unit.
+#[derive(Resource, Default)]
+struct GhostMaterials(HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>);
+
+/// The material to draw `base` with while translucent: `base`'s own cached ghost clone, built once.
+fn ghost_material(base: &Handle<StandardMaterial>, ghosts: &mut GhostMaterials, mats: &mut Assets<StandardMaterial>) -> Handle<StandardMaterial> {
+    if let Some(h) = ghosts.0.get(&base.id()) {
+        return h.clone();
+    }
+    let Some(mut ghost) = mats.get(base).cloned() else { return base.clone() };
+    ghost.alpha_mode = AlphaMode::Blend;
+    ghost.base_color = ghost.base_color.with_alpha(GHOST_ALPHA);
+    let handle = mats.add(ghost);
+    ghosts.0.insert(base.id(), handle.clone());
+    handle
+}
+
 fn animate_views(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
@@ -688,6 +721,7 @@ fn animate_views(
     mut bars: Query<(&ChildOf, &mut Visibility), (With<HealthBar>, Without<UnitSprite>)>,
     mut fills: Query<(&HealthFill, &mut Transform, &MeshMaterial3d<StandardMaterial>), Without<UnitView>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    mut ghosts: ResMut<GhostMaterials>,
     selection: Res<Selection>,
     hovered: Res<crate::hover::Hovered>,
     heights: Res<crate::buildings::ModelHeights>,
@@ -707,7 +741,8 @@ fn animate_views(
     for (body, mut height, mut mesh, mut mat, mut vis) in &mut bodies {
         let hidden = units.get(body.0).is_some_and(|u| hidden_inside(&map.0, u));
         vis.set_if_neq(if hidden { Visibility::Hidden } else { Visibility::Inherited });
-        let frame = units.get(body.0).and_then(|u| {
+        let unit = units.get(body.0);
+        let frame = unit.and_then(|u| {
             let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
             let still = !u.aboard.and_then(|v| map.0.vehicle(v)).is_some_and(crate::vehicles::under_way);
             sprites.frame_for(u, worship, still, rig.yaw, &clock, *now, map.0.on_winning_side(u.owner))
@@ -717,7 +752,14 @@ fn animate_views(
         }
         if let Some(f) = frame && mesh.0 != f.mesh {
             mesh.0 = f.mesh.clone();
-            mat.0 = f.material.clone();
+        }
+        // Not folded into the mesh-changed check above: `upload_tribe_atlases` shares one material across every
+        // frame of a kind+tribe+alpha-mode, so a unit's material can need to change (invisible turning on/off)
+        // on a tick whose mesh (its own small UV quad) doesn't - `set_if_neq` keeps this cheap either way.
+        if let Some(f) = frame {
+            let translucent = unit.is_some_and(|u| u.owner == PLAYER && (u.statuses.invisible.is_on() || u.statuses.ghost));
+            let material = if translucent { ghost_material(&f.material, &mut ghosts, &mut mats) } else { f.material.clone() };
+            mat.set_if_neq(MeshMaterial3d(material));
         }
     }
     for (parent, mut vis) in &mut bars {

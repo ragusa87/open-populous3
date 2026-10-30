@@ -330,7 +330,11 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
   times the body frame's height. Shield and bloodlust run out (`status::Timed`: 180 steps of 8
   turns, about 120 s, a step on the turns where `STEP` fires at the unit's id, `Statuses::tick` in `GameMap::tick`
   before the units) and their markers blink in the last 15 steps (10 s): 2 turns on, 2 off, phased by the unit's id
-  (as in the original). Not yet: the low-health sound, invisible and ghost people. Sandbox Units has each follower kind with each marker, then all at once.
+  (as in the original). Own invisible and ghost people are drawn translucent (`units::ghost_material`: a cached
+  alpha-blended clone of the unit's own kind+tribe+alpha-mode material at alpha 0.34, `pop3_format::ghost`'s 66%
+  mix table decoded for the record but not replayed per pixel - docs/specs/sprites.md "Ghost"). Not yet: the
+  low-health sound, invisible flickering faster near expiry, invisible enemies hidden. Sandbox Units has each
+  follower kind with each marker, then all at once.
 - Dust (`units/dust.rs`, cosmetic, simulation time: shown once the unit is drawn landed): when a unit stops landing, 10 soft generated motes spread 0.4 cell
   around its feet, rise 0.1, grow and fade over 0.8 s, facing the camera and pulled towards it like the sprites.
 - Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (original anim 40 for followers: the body lying, its spirit rising; tumbling otherwise), Fall (dying, then lies still while dead), Chop, CarryWalk, CarryIdle (braves cutting and carrying wood: original anims 11, 9, 10; other kinds, and the CC0 sheets and generated figures, which have no wood poses yet, show idle / walk instead, `Pose::fallback`), Stranded (arms up: frame 1 of original anim 12 for every follower, a stand-in, the real anim is unknown; wildmen and the shaman show their idle; the CC0 sheets loop their own arms-up `stranded` sheet).
