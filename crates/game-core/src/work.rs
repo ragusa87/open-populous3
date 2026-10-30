@@ -675,6 +675,51 @@ mod tests {
         assert!(entered >= 1, "built from inside");
     }
 
+    /// Bug repro, still open: a neighbour's house sealing a site's only door cell traps a worker inside
+    /// it for good, and no order (a formation move among them) can free it, since leaving by the door
+    /// is the only way out of a building under construction (docs/specs/buildings.md "Walking around
+    /// buildings") and nothing ever reopens or routes around a blocked door. `placement::can_place`
+    /// (`nothing_may_wall_a_door_shut_either_ones`) now stops a *new* placement from causing this, but
+    /// this test seals the door with `add_building` directly (standing for a layout already on the map,
+    /// e.g. an original level) to show that door still has no rescue once sealed - unfixed; the worker
+    /// needs its own recovery (TODO).
+    #[test]
+    #[ignore = "known bug: a worker whose door is already sealed (not by a fresh placement) has no way out"]
+    fn a_worker_trapped_when_its_only_door_cell_gets_walled_never_gets_out() {
+        let mut map = sandbox();
+        let units = braves(&map, 6);
+        let site = place(&mut map, BuildingKind::WarriorTraining, corner(24, 0), &units);
+        run_until(&mut map, 5000, |m| {
+            m.buildings[site].flat && m.units.iter().any(|u| units.contains(&u.id) && u.inside.is_some() && u.action == Action::Hammering)
+        })
+        .expect("flat and someone hammering inside");
+        let door = map.buildings[site].door();
+        let door_cell = (crate::unit::cell_of(door.0), crate::unit::cell_of(door.1));
+        assert!(map.walls.at(door_cell).is_none(), "the door is still open");
+
+        // A neighbour's house (the player's own, so nothing ever attacks or dismantles it) lands
+        // right on the one cell outside the door.
+        let house = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, corner(24, -3).0, corner(24, -3).1, 0));
+        map.tick();
+        assert_eq!(map.walls.at(door_cell), Some(house), "the door is sealed now");
+
+        let trapped: Vec<UnitId> = map.units.iter().filter(|u| units.contains(&u.id) && u.inside.is_some()).map(|u| u.id).collect();
+        assert!(!trapped.is_empty(), "at least one worker was inside when the door sealed");
+
+        let far = corner(40, 20);
+        for c in map.move_orders(0, &trapped, far) {
+            map.apply(&c);
+        }
+        for _ in 0..1000 {
+            map.tick();
+            assert!(map.buildings.iter().any(|b| b.id == house), "the house never falls on its own");
+        }
+        for &id in &trapped {
+            let u = map.units.iter().find(|u| u.id == id).unwrap();
+            assert_eq!((u.x, u.z), far, "brave {} never reached the order's target, stuck inside {:?}", id.raw(), u.inside);
+        }
+    }
+
     #[test]
     fn braves_jump_the_sandbox_mound_flat() {
         let mut map = sandbox();

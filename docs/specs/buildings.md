@@ -147,7 +147,12 @@ Done:
   footprint; Site: within `SPAWN_FLAT_RADIUS` of a reincarnation site; Tree: a cell with a tree that has wood; Campfire: its cell; Totem: within
   `worship::TOTEM_MARGIN` of a totem not sunk yet, `GameMap::totem_at`),
   `too_steep` (height points under the footprint spread more than `STEEP_SPREAD` = 200, placeholder), `shore_ok`,
-  `can_place`.
+  `door_blocked` [ours: not traced, a gap this session found rather than a placement rule from the original -
+  a standing building's door is only ever one specific free cell (Doors, below), and nothing in the original
+  construction system seems to make leaving by any other way possible, so leaving this open felt like asking for
+  the same stuck-worker bug rather than a deliberate choice; refine or drop if a spec session finds the original
+  actually allows it] (neither the new building nor any standing one may end up with its door cell walled by the
+  other), `can_place`.
 - Boat hut (`shore_ok`): its jetty is local +z, its door local -z (all 11 boat huts of the levels: only sea within
   2.5 cells past +z, land past -z). A cell past the jetty side, the middle and at least one corner must be sea (a
   loaded level's levelling lifts one corner of level 10's hut off the sea); a cell past the door side, no sea.
@@ -396,8 +401,12 @@ centre its footprint covers (`Building::walled_cells`). `path::Ground` is what m
 cross a wall (A*, straight legs, steps, standing spots, teleport landing), boats and balloons ignore walls, plans
 and the reincarnation site are not walled. A wall change bumps the walls' revision and walkers replan. A unit
 standing in a newly walled cell is inside that building (`Unit::inside`, with its door). A unit inside going
-anywhere first walks straight to the door, then plans its route; if the door is blocked it stays inside, idle. Into a building only `Unit::enter`: straight from
-the door. Design notes:
+anywhere first walks straight to the door, then plans its route; if the door is blocked it stays inside, idle, and
+keeps retrying the door, never another way out, however often it is given a new order - fine for a block that
+clears (someone else steps off the door cell), a dead end for one that never does (a second building's wall on the
+only cell outside the door): `placement::can_place` (below) now stops a *new* placement from sealing a door this
+way, but a door already sealed some other way still traps whoever is inside for good (TODO.md "Buildings", still
+open). Into a building only `Unit::enter`: straight from the door. Design notes:
 Buildings and construction sites block walking over their footprint (`BuildingKind::footprint` turned with the
 facing, the cells it covers): `path::Mobility::Walk` gets a blocked-cell mask from `GameMap` besides the terrain,
 so routes go around them, and a unit never stands inside one. Exceptions:

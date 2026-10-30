@@ -449,6 +449,17 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Construction pace: check in the game how long a jump and building one piece take (`JUMP_TICKS`, `JUMP_STEP`, `BUILD_TICKS`, guessed) and whether braves gather and watch first (a plan on level ground is flat at once today).
 - [ ] Walls: replan only walkers whose route crosses a changed wall (every walker replans today); a boat hut's jetty side stays open to boats, to check with vehicles.
 - [ ] Units inside a building are hidden but still selectable with a box; check what the original allows. Units walking out of several buildings: the door may be blocked by another wall or the sea.
+  **Partly addressed 2026-10-30** (reported: a warrior-training site's door facing a neighbouring house, its
+  workers stuck idle however they were ordered once the door was sealed): `placement::can_place` now refuses a
+  *new* placement that would wall shut a standing building's door, in either direction (`nothing_may_wall_a_door_
+  shut_either_ones`). Still open: a door sealed some other way (a layout already on the map, e.g. an original
+  level, or two plans placed before either has a door yet) still traps whoever is inside for good - no order ever
+  frees them, since `Unit::tick`'s inside-a-building branch always retries the door and never looks for another
+  way out (repro: `work::tests::a_worker_trapped_when_its_only_door_cell_gets_walled_never_gets_out`, `#[ignore]`d
+  pending this). Needs its own recovery, not just prevention - e.g. relocating a unit whose door has had no free
+  cell for some sustained time to the nearest free cell outside its building, the way `buildings.md`'s own
+  (currently unimplemented) "a unit already standing on a new site's footprint is moved to the nearest free cell"
+  design note already describes for a related case.
 - [ ] CC0 sheets: a jump pose for flattening (`Pose::Jump` falls back on arms up) and a hammer pose (`Pose::Hammer` falls back on idle).
 - [ ] Find the original hammering anim (the axe swing, anim 11, stands in for `Pose::Hammer`).
 - [ ] Huts: auto-housing of idle braves, breeding, mana from people inside, Eject (huts-and-training.md rules). No autonomous wood-gathering by an idle person was found this session (pop3-rev-analysis.md "Idle behaviour"): a person with no command group does nothing at all, forever; the one confirmed autonomous, non-player assignment (a training building's own per-turn code, 0x405B80) looks like occupant/queue positioning, not wood-fetching, pending its unread "doing it" half - don't add an idle-brave-fetches-wood behaviour without a further live check confirming it.

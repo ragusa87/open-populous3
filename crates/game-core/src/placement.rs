@@ -3,14 +3,16 @@
 //! tree that still has wood, nor on ground too steep (the braves level small unevenness). A boat hut also needs the sea
 //! a cell past its jetty side (local +z: the middle and a corner at least) and dry land at its door
 //! (local -z): in the levels, all 11 boat huts have only sea within 2.5 cells past their +z side
-//! and land past their -z side.
+//! and land past their -z side. Nor where it would wall shut another standing building's door cell, nor with its
+//! own door already walled by one: a worker caught inside once the walls go up can only ever leave by the door
+//! (buildings.md "Walking around buildings"), so a sealed one traps whoever is in there for good.
 //! Integers only.
 
-use crate::building::{Building, BuildingId, BuildingKind};
+use crate::building::{Building, BuildingId, BuildingKind, Stage};
 use crate::map::GameMap;
 use crate::terrain::to_world;
 use crate::site::SPAWN_FLAT_RADIUS;
-use crate::unit::torus_delta;
+use crate::unit::{cell_of, torus_delta};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// Largest height spread over a footprint the braves will level (placeholder to tune).
@@ -107,6 +109,22 @@ pub fn best_facing(map: &GameMap, b: &Building, preferred: u8) -> u8 {
         .unwrap_or(preferred)
 }
 
+/// The cell a building's door opens onto, wrapped.
+fn door_cell(b: &Building, size: i32) -> (i32, i32) {
+    let d = b.door();
+    (cell_of(d.0).rem_euclid(size), cell_of(d.1).rem_euclid(size))
+}
+
+/// Whether placing `b` would wall shut a door: another standing building's (`b`'s footprint would cover
+/// that door's cell) or `b`'s own (an existing building already covers where its door would open).
+/// `except`: see `blocked_at`.
+fn door_blocked(map: &GameMap, b: &Building, except: Option<BuildingId>) -> bool {
+    let size = map.terrain.size() as i32;
+    let own_door = door_cell(b, size);
+    let walled = b.walled_cells(size);
+    map.buildings.iter().any(|o| Some(o.id) != except && o.stage() != Stage::Blueprint && (walled.contains(&door_cell(o, size)) || o.walled_cells(size).contains(&own_door)))
+}
+
 /// Whether `b` could be placed: steady ground and every point of its footprint free (sampled every
 /// quarter cell). `except`: see `blocked_at`.
 pub fn can_place(map: &GameMap, b: &Building, except: Option<BuildingId>) -> bool {
@@ -116,7 +134,7 @@ pub fn can_place(map: &GameMap, b: &Building, except: Option<BuildingId>) -> boo
     let span = (f.half.0.abs() + f.offset.0.abs()).max(f.half.1.abs() + f.offset.1.abs());
     let points = (-span..=span).step_by(step as usize).flat_map(|dz| (-span..=span).step_by(step as usize).map(move |dx| (dx, dz)));
     let mut free = points.map(|(dx, dz)| (cx.wrapping_add(dx as u16), cz.wrapping_add(dz as u16))).filter(|&p| b.covers(p, 0)).all(|p| blocked_at(map, p, except).is_none());
-    free &= !too_steep(map, b) && shore_ok(map, b);
+    free &= !too_steep(map, b) && shore_ok(map, b) && !door_blocked(map, b, except);
     free
 }
 
@@ -171,6 +189,18 @@ mod tests {
         assert_eq!(blocked_at(&m, (70 * 512 + 300, 70 * 512 + 200), None), Some(Blocked::Totem));
         assert!(!can_place(&m, &hut((70, 70)), None), "over a totem");
         assert!(!crate::campfire::can_place(&m, (70, 70)), "no camp fire on a totem");
+    }
+
+    #[test]
+    fn nothing_may_wall_a_door_shut_either_ones() {
+        let mut m = map();
+        m.add_building(hut((40, 40)));
+        // The hut's door opens two cells south of its own corner (facing 0, local -z).
+        assert!(!can_place(&m, &hut((40, 37)), None), "would wall the standing hut's door shut");
+        assert!(can_place(&m, &hut((40, 30)), None), "far from its door: still fine");
+        m.buildings.clear();
+        m.add_building(hut((40, 37)));
+        assert!(!can_place(&m, &hut((40, 40)), None), "its own door would already be walled");
     }
 
     #[test]
