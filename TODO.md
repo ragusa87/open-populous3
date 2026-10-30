@@ -988,7 +988,15 @@ Level/world correctness that is mostly stable already (terrain especially: exten
   `spotting::first_seen`) — allies no longer spot or attack each other. Still open: the rest of the alliance-aware
   nuances below (Blast's own friend-sparing rules, spotting during orders, preacher conversion targeting).
 - [ ] `NoAccessSquares` (non-zero only in levl2002 and levl2079): probably cells nobody walks on; check them on the map and feed them to the `path` blocked mask.
-- [ ] Load the object bank the level header names (byte 97: 6 for levels 3, 5, 16, 22, 2120; 7 for 2110; 2 for 2127) instead of always bank 0 (`original_models`): either load bank N with the index table of objects.md, or stay on bank 0 (trees already picked by bank, `tree_object_in_bank`).
+- [x] Audited (2026-10-30): the object bank the level header names (byte 97) was never a live content bug beyond
+  what this item's own parenthetical already said. Every consumer but trees (`building_object`, `vault.rs`,
+  `vehicles.rs`, `totems.rs`, `sites.rs`) resolves its model through a fixed, named bank-0 `pop3_format::catalog`
+  constant, never a raw level-encoded index - so which bank a level's header declares makes no difference to
+  anything it draws. Trees already translate correctly per bank (`tree_object_in_bank`). objects.md's own open
+  "load bank N... or stay on bank 0" sentence is now resolved in writing in favour of staying on bank 0 (the
+  "not verified against the game" caveat kept, not a settled trace) - see its "Banks" section. `tree_object_in_bank`
+  got a doc-comment signpost for the two still-open raw-model lookups that will need the same convention (plants
+  7/8, the building add-on, both separate TODO.md items below) so they don't reinvent one.
 - [ ] Other original objects (trees, camp fire logs, reincarnation site stones) are still drawn from both sides: cull their back faces like buildings (objects.md "facs"), checking each for holes.
 - [ ] Level names instead of the header's "Level N": `pop3_format::language` reads the texts ([language.md](docs/specs/language.md)); find which text number names each level (open there), find the install's `language/` dir like `data/`, pick the language (a setting, English by default).
 - [ ] Our own texts in Fluent (`assets/lang/<lang>.ftl`, named keys), a key -> original text number table, lookup from `langNN.dat` with the original files and from our `.ftl` otherwise ([language.md](docs/specs/language.md) "Our texts and the fallback"); when the game first shows translatable text.

@@ -56,7 +56,9 @@ normal over 1 cell either side, slopes and the planet's curve, so no side sinks 
   tower, temple = prayer hut, spy/warrior/firewarrior training, boat and airship huts in the owner's colours,
   neutral ones blue; vault = pyramid of knowledge, prison), textured from the level's theme atlas (theme 0 on maps
   without one), cut-out texels see-through, faces drawn from their front only (back faces culled, objects.md
-  "facs").
+  "facs"). `building_object` is deliberately bank-invariant: it maps a `BuildingKind` to a fixed, named bank-0
+  catalog constant, never a raw level-encoded model number, so a building looks the same regardless of the
+  level's own object-bank byte (objects.md "Banks": we stay on bank 0; only trees differ per bank).
 - Otherwise, and for named types without an identified original object: the generated kit in
   `assets/3d/buildings/` (16 models: all named kinds, including hut sizes 1-3). Procedurally textured clay,
   timber, thatch and stone with only the `Tribe` material recoloured (grey when neutral).
