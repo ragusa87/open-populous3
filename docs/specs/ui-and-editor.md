@@ -202,9 +202,12 @@ Shown before the game over the first map: New game (the level from the command l
 Sandbox > Walk, Units, Buildings, Worship, Spells, Vehicles, Bridge (the ground of every sandbox shows a grid along the cell borders, `world::ShowGrid`,
 `terrain_texture::draw_grid`; levels do not) (`GameMap::sandbox_walk`: small flat island, gentle ramp east, steep hill north, lake west, mesa ringed by cliffs south-east, each a few cells past the spawn; `GameMap::sandbox_worship`: a pyramid of knowledge south of the site, door
 facing the shaman, and north one totem of each look with 8 braves, worship.md; `GameMap::sandbox_spells`: every spell
-unlimited, Teleport too (`SpellBook::unlimited`), on islands a few cells of sea apart: the player's in the middle with 3 of each follower kind of the player south and of
+unlimited, Teleport too, not Bloodlust or Armageddon (`SpellBook::unlimited`: Bloodlust would hide Ghost Army's
+tile, Armageddon's one-shot match outcome would strand every other spell behind `GameMap::outcome`'s latch), on
+islands a few cells of sea apart: the player's in the middle with 3 of each follower kind of the player south and of
 tribe 1 north, kind by kind 5 cells apart, a red
-village east with people in its huts, a hill north with a few people of tribe 2, an empty islet south-west;
+village east with people in its huts, a hill north with a few people of tribe 2, an empty islet south-west within
+Land Bridge's own cast range of the home shore (`SPELL_ISLANDS`);
 `GameMap::sandbox_vehicles`: a boat hut and an airship hut on the south coast with 8 braves and wood to crew them,
 boats on the water by the shore (one manned), one adrift at sea, a balloon by the site for the shaman, hills to fly
 over (a tall one west, a lower one east, a mound on the south island), and an empty boat of tribe 1 by an island

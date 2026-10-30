@@ -1060,7 +1060,18 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 - [ ] Editor: smooth brush and the raise/lower levelling step of the ALACN editor (ui-and-editor.md).
 
 ### Menu and sandboxes ([ui-and-editor.md](docs/specs/ui-and-editor.md))
-- [ ] Sandbox Spells: test ground to cast every spell freely (no mana, no charges).
+- [x] Sandbox Spells: already implemented (`GameMap::sandbox_spells`, `SpellBook::unlimited`) - every spell free, no
+  mana/charges (`Availability::Unlimited`'s `cast()` arm is a no-op, `ManaPool` never touched since
+  `takes_mana()` requires `Known`). Audit found two real gaps, both fixed: (1) Armageddon was included in
+  `unlimited()` and its v1 instant resolution declares `GameMap::outcome`, a one-shot latch that rejects every
+  further `Command` - stranding the whole sandbox after one cast; now excluded, same as Bloodlust, and
+  `dev::armageddon_demo` grants itself one shot directly instead of depending on the sandbox's own book
+  (`unlimited_casts_every_spell_at_will`, `armageddon_demo_casts_and_settles_within_the_run`). (2) The south-west
+  islet (meant "to bridge or teleport across") sat ~12.2 cells from the home shore, past Land Bridge's own
+  ~8.5-cell range at this island height - moved to `(-20, 16)` (~6.6-cell gap, comfortable margin), proven by
+  `sandbox_spells_land_bridge_reaches_the_south_west_islet`. The mana bar's "always full with nothing charging"
+  rule already covers an all-`Unlimited` book correctly (`charging_candidate` finds no `takes_mana` slot) - no
+  change needed there.
 - [ ] Sandbox Buildings: placing and constructing buildings on its free ground (braves, wood and trees are there; every model and every construction stage are shown).
 - [ ] More sandboxes as features come (combat...).
 - [ ] Sandbox Worship: totems are drawn but nothing can be prayed at yet; the generated stand-ins are identical pillars.

@@ -422,10 +422,13 @@ impl SpellBook {
     }
 
     /// Every spell, Teleport too, cast at will (Sandbox > Spells); not Bloodlust, which would hide Ghost Army's tile
-    /// (`STAND_INS`, hud/spells.rs) in a loadout meant to show every tile at once.
+    /// (`STAND_INS`, hud/spells.rs) in a loadout meant to show every tile at once, and not Armageddon, which
+    /// `GameMap::declare_outcome`'s one-shot latch (`outcome.rs`) would strand the whole sandbox behind once its v1
+    /// instant resolution calls it (`map.rs`'s `apply_inner` rejects every further command once `outcome` is set) -
+    /// the opposite of "test ground to cast every spell freely".
     pub fn unlimited() -> Self {
         let mut b = SpellBook::new();
-        for k in SpellKind::ALL.into_iter().filter(|&k| k != SpellKind::Bloodlust) {
+        for k in SpellKind::ALL.into_iter().filter(|&k| !matches!(k, SpellKind::Bloodlust | SpellKind::Armageddon)) {
             b.set(k, Availability::Unlimited);
         }
         b
@@ -816,9 +819,10 @@ mod tests {
     #[test]
     fn unlimited_casts_every_spell_at_will() {
         let mut b = SpellBook::unlimited();
-        for k in SpellKind::ALL.into_iter().filter(|&k| k != SpellKind::Bloodlust) {
+        for k in SpellKind::ALL.into_iter().filter(|&k| !matches!(k, SpellKind::Bloodlust | SpellKind::Armageddon)) {
             assert!(b.cast(k) && b.cast(k), "{k:?}");
         }
         assert!(!b.cast(SpellKind::Bloodlust), "left out: it would hide Ghost Army's tile");
+        assert!(!b.cast(SpellKind::Armageddon), "left out: it would strand the sandbox behind GameMap::outcome");
     }
 }

@@ -611,7 +611,12 @@ impl GameMap {
 }
 
 /// Islands of the spells sandbox (`GameMap::sandbox_spells`): centre offset from the map's middle and radius, cells.
-const SPELL_ISLANDS: [((i32, i32), i32); 4] = [((0, 0), 14), ((28, 0), 10), ((0, -30), 10), ((-24, 20), 5)];
+/// The south-west islet sits at `(-20, 16)`, not further out at its originally-placed `(-24, 20)`: that position
+/// left a ~12.2-cell gap to the home island's own near shore, past Land Bridge's own ~8.5-cell range at this
+/// island height (`sandbox_spells_land_bridge_reaches_the_south_west_islet`) - the one spell the doc comment below
+/// names this islet for. `(-20, 16)` narrows the gap to ~6.6 cells, a comfortable margin under range, the same
+/// spirit as `BRIDGE_TARGET_CELL_OFFSET`'s own margin in `sandbox_bridge`.
+const SPELL_ISLANDS: [((i32, i32), i32); 4] = [((0, 0), 14), ((28, 0), 10), ((0, -30), 10), ((-20, 16), 5)];
 
 impl GameMap {
     /// Test ground for spells, every one cast at will (`SpellBook::unlimited`, Teleport too), on islands
@@ -3267,6 +3272,31 @@ mod tests {
                 assert!(m.units.iter().filter(|u| u.kind != kind && u.inside.is_none()).all(|u| group.iter().all(|&c| (c.0 - u.cell().0).abs().max((c.1 - u.cell().1).abs()) >= 3)), "apart from the others");
             }
         }
+    }
+
+    /// The south-west islet exists "to bridge or teleport across" (`sandbox_spells`'s own doc comment): proves Land
+    /// Bridge's cast range (not just Teleport's unlimited one) actually reaches it from the closest the home
+    /// island's own shore can ever get, the same geometric-minimum-distance check `SPELL_ISLANDS`' own comment cites.
+    #[test]
+    fn sandbox_spells_land_bridge_reaches_the_south_west_islet() {
+        let mut m = GameMap::sandbox_spells();
+        const C: i32 = MAP_SIZE as i32 / 2;
+        let ((iox, ioz), islet_radius) = ((-20i32, 16i32), 5i32);
+        let dist = ((iox * iox + ioz * ioz) as f64).sqrt();
+        let (dir_x, dir_z) = (iox as f64 / dist, ioz as f64 / dist);
+        let home_radius = 14f64;
+        // The nearest the two shores can ever be: a point just inside the home circle's own edge facing the islet,
+        // and a point just inside the islet's own edge facing home, both along the line joining their centres - half
+        // a cell short of each radius so rounding to a grid cell never lands just outside the circle, into the sea.
+        let home_shore = (C + ((home_radius - 0.5) * dir_x).round() as i32, C + ((home_radius - 0.5) * dir_z).round() as i32);
+        let islet_shore = (C + iox - ((islet_radius as f64 - 0.5) * dir_x).round() as i32, C + ioz - ((islet_radius as f64 - 0.5) * dir_z).round() as i32);
+        assert!(!m.terrain.is_water(home_shore.0, home_shore.1), "the home island's own near shore is dry land");
+        assert!(!m.terrain.is_water(islet_shore.0, islet_shore.1), "the islet's own near shore is dry land");
+        let world = |c: i32| (c.rem_euclid(MAP_SIZE as i32) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
+        let shaman = m.unit_mut(m.shaman_of(0).unwrap().id).unwrap();
+        (shaman.x, shaman.z) = (world(home_shore.0), world(home_shore.1));
+        let target = (world(islet_shore.0), world(islet_shore.1));
+        assert!(m.in_cast_range(0, SpellKind::LandBridge, target), "Land Bridge reaches the south-west islet from the home island's own shore");
     }
 
     #[test]

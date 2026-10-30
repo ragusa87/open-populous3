@@ -235,13 +235,16 @@ pub fn swarm_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bo
     true
 }
 
-/// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there (needs it known/charged, e.g. the Spells sandbox's
-/// `SpellBook::unlimited`), then `ticks` run at once — v1 settles almost immediately (`docs/specs/outcome.md`
-/// "Armageddon"); with `GAME_SPEED=0`, a shot can catch the brief camera-takeover/lock window. False when `at`
-/// does not parse.
+/// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there, then `ticks` run at once — v1 settles almost
+/// immediately (`docs/specs/outcome.md` "Armageddon"); with `GAME_SPEED=0`, a shot can catch the brief
+/// camera-takeover/lock window. False when `at` does not parse. Grants itself one shot of Armageddon right before
+/// casting (`SpellBook::unlimited` deliberately leaves it unavailable, same as Bloodlust - `GameMap::outcome`'s
+/// one-shot latch would otherwise strand every other spell in the Spells sandbox once this demo settles it), so this
+/// works against any map regardless of what its own book allows.
 pub fn armageddon_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
     let at = world_units(Vec2::new(x, z));
+    map.spell_books[PLAYER as usize].set(game_core::spell_book::SpellKind::Armageddon, game_core::spell_book::Availability::Provided { shots: 1 });
     map.apply(&Command::Cast { player: PLAYER, spell: game_core::spell::Spell::Armageddon { at } });
     map.run(game_core::time::Ticks::new(ticks));
     true
@@ -822,7 +825,7 @@ mod tests {
 
     #[test]
     fn armageddon_demo_casts_and_settles_within_the_run() {
-        let mut map = game_core::map::GameMap::sandbox_spells(); // SpellBook::unlimited: Armageddon known
+        let mut map = game_core::map::GameMap::sandbox_spells(); // armageddon_demo grants itself a shot regardless
         // CAST_RELEASE (6 ticks) for the cast jump to release, then the match's own first-tick resolution.
         assert!(armageddon_demo(&mut map, "5,5", 10));
         assert!(map.outcome.is_some(), "v1 settles almost immediately once released");
