@@ -300,8 +300,10 @@ pub fn sprite_dir(facing: u8, yaw: f32) -> usize {
 }
 
 /// Frame to show: timed actions play once in step with the simulation (`alpha` = fraction of
-/// the current tick), the fall holds the lying frame (second to last); others loop on the drawn moment
-/// `now` (a loop of `frames` seconds holds whole loops at any fps).
+/// the current tick), the fall and the spirit after it hold the lying frame (second to last,
+/// unit-art.md "Death last frame": the transformation finished during the fall, so the spirit
+/// (calm or climbing) never replays it - it only ever rises or sinks, never animates again);
+/// others loop on the drawn moment `now` (a loop of `frames` seconds holds whole loops at any fps).
 pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alpha: f32) -> usize {
     if frames == 0 {
         return 0;
@@ -311,8 +313,7 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alph
     match action {
         Action::Casting { .. } | Action::Flattening { .. } | Action::Throwing { .. } | Action::Challenge { .. } | Action::Melee { .. } | Action::Listening { .. } if action.countdown().is_some() => done(frames),
         Action::Dying { .. } => done(lying + 1),
-        Action::Spirit { .. } => done(frames),
-        Action::Dead { .. } => lying,
+        Action::Spirit { .. } | Action::Dead { .. } => lying,
         _ => (now.secs_in(Tick::ZERO, Ticks::secs(frames as u32)) * pose.fps()) as usize % frames,
     }
 }
@@ -623,7 +624,11 @@ mod tests {
         assert_eq!(pose_for(&spirit(10), false, false), Pose::Spirit);
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Spirit, 0), (40, Some(OUTFIT_WARRIOR), None), "lying, its spirit rising");
         assert_eq!(original_anim(UnitKind::Wildman, Pose::Spirit, 0), (47, None, Some(3)), "no spirit anim: lies still");
-        assert_eq!((frame_index(Pose::Spirit, 5, &spirit(10), at(0.0), 0.0), frame_index(Pose::Spirit, 5, &spirit(1), at(0.0), 1.0)), (0, 4), "played once");
+        assert_eq!(
+            (frame_index(Pose::Spirit, 5, &spirit(10), at(0.0), 0.0), frame_index(Pose::Spirit, 5, &spirit(1), at(0.0), 1.0)),
+            (3, 3),
+            "holds the lying frame the fall already reached (unit-art.md \"Death last frame\"), climbing or not: no replay"
+        );
     }
 
     #[test]
