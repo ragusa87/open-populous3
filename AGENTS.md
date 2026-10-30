@@ -2,13 +2,6 @@
 
 Guidance for coding agents working on this repo (Rust + Bevy 0.19 Populous-like POC).
 
-## Resuming a TODO batch (temporary, remove once done)
-A multi-topic autonomous session is working through TODO.md in batches (round 1: commits
-`aeba1fc..4945e1e` on `ccr-4b07bb0e-qfawp1`, already landed). If you are continuing that work, read
-`docs/plans/todo-batch-2.md` next for the current round's topic list and status before doing anything
-else - it has the exact resume point. Once every topic there is committed, delete that file and this
-whole section (it is a session-continuity note, not project documentation).
-
 ## Licence and original data
 The project must stay MIT, open-sourcable as a whole. *Populous: The Beginning* belongs to Bullfrog / Electronic
 Arts: its files serve only to understand how the game works (formats, rules, numbers) and to be loaded at runtime
