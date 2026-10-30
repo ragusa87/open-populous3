@@ -2,6 +2,8 @@
 //! `--no-original` (or `POP3_NO_ORIGINAL=1`) never reads the original game files.
 
 mod armageddon;
+mod blast_fireball;
+mod blast_impact;
 mod blueprint;
 mod boot;
 mod buildings;
@@ -121,7 +123,7 @@ fn main() {
             cursor_debug::CursorDebugPlugin,
             (camera_debug::CameraDebugPlugin, cell_debug::CellDebugPlugin, debug_overlay::DebugOverlayPlugin),
             object_scale::ObjectScalePlugin,
-            (chimney::ChimneyPlugin, fireball_shot::FireballShotPlugin, flyby::FlybyPlugin),
+            (chimney::ChimneyPlugin, fireball_shot::FireballShotPlugin, blast_fireball::BlastFireballPlugin, blast_impact::BlastImpactPlugin, flyby::FlybyPlugin),
             (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin, armageddon::ArmageddonPlugin, swamp::SwampPlugin, swarm::SwarmPlugin, volcano_rocks::VolcanoRocksPlugin, lava::LavaPlugin),
         ))
         .add_systems(Update, toggle_fullscreen)

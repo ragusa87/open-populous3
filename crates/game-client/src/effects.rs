@@ -129,6 +129,23 @@ pub const DAMAGE: Puffs = Puffs {
     angle: (0.0, 2.4),
 };
 
+/// A blast's own settling smoke (`blast_impact::BlastImpactView`): dark puffs bursting out from the centre as its
+/// explosion flash fades. Kept modest on purpose, about the size of a firewarrior's bolt impact, not the blast's
+/// own multi-cell damage radius (`blast::RADII`) — drawing that literally would read as a crater, not an explosion.
+pub const BLAST: Puffs = Puffs {
+    count: 10,
+    life: 0.9,
+    emit: Emit::Burst,
+    spread: (0.1, 0.5),
+    spread_curve: Curve::EaseOut,
+    rise: (0.08, 0.5),
+    size: (0.12, 0.35),
+    opacity: (0.75, 0.0),
+    curve: Curve::EaseOut,
+    shrink: 0.0,
+    angle: (0.0, 2.4),
+};
+
 impl Puffs {
     /// How far through its life (0 to 1) puff `k` is `secs` after the puffs started; None when it is
     /// not out.
@@ -237,5 +254,13 @@ mod tests {
         let (low, high) = (SINKING.pose(0, 0.1).unwrap(), SINKING.pose(0, 1.2).unwrap());
         assert!(high.offset.y > low.offset.y && high.opacity < low.opacity);
         assert!(SINKING.pose(0, 10.0).is_none(), "over once sunk");
+    }
+
+    #[test]
+    fn blast_smoke_stays_modest_and_fades_once() {
+        let (low, high) = (BLAST.pose(0, 0.1).unwrap(), BLAST.pose(0, 0.8).unwrap());
+        assert!(high.offset.y > low.offset.y && high.offset.xz().length() > low.offset.xz().length() && high.opacity < low.opacity);
+        assert!(BLAST.spread.1 < DAMAGE.spread.1, "a small local burst, not the blast's own multi-cell damage radius");
+        assert!(BLAST.pose(0, BLAST.life + 0.01).is_none(), "once");
     }
 }

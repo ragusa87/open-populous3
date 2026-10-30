@@ -37,6 +37,12 @@ pub const DAMAGE_BLDG: u16 = 40;
 /// only. Which ones, when more are in range, is not traced: a guess, kept to iteration order.
 pub const BLAST_FRIEND_AFFECT: u8 = 5;
 
+/// The effect's own life, longer than its 3 active turns (`RADII`): same reasoning as
+/// `panicking_blast::VISUAL_TICKS` — the idle turns past it are a no-op for `turn` (already short-circuits once
+/// `self.turn` runs past `RADII`'s bounds) but keep the effect, and so its client-side views (`blast_fireball.rs`,
+/// `blast_impact.rs` [client]), around long enough for the explosion to flash and settle into smoke.
+pub const VISUAL_TICKS: Ticks = Ticks::secs(1);
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SimpleBlast {
     /// Turns done.
@@ -47,7 +53,7 @@ pub struct SimpleBlast {
 
 /// A blast cast by tribe `owner` at `at` (world units).
 pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
-    Effect::new(owner, at, Countdown::new(Ticks::new(RADII.len() as u32)), EffectKind::SimpleBlast(SimpleBlast::default()))
+    Effect::new(owner, at, Countdown::new(VISUAL_TICKS), EffectKind::SimpleBlast(SimpleBlast::default()))
 }
 
 pub type FireballId = crate::id::Id<Fireball>;
@@ -334,13 +340,15 @@ mod tests {
         map.unit_mut(shielded).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
         map.add_effect(effect(0, at));
         map.run(Ticks::new(RADII.len() as u32));
-        assert!(map.effects.is_empty());
         let health = |id| map.unit(id).unwrap().health.current();
         assert_eq!(health(enemy), 1000 - 3 * DAMAGE_PERSON);
         assert_eq!(health(mine), 1000, "the caster's brave is not hurt");
         assert!(map.unit(mine).unwrap().motion.airborne(), "but pushed (on the last turn, as an ally)");
         assert_eq!(health(shielded), 1000);
         assert!(!map.unit(shielded).unwrap().motion.airborne(), "nor pushed");
+        assert!(!map.effects.is_empty(), "the view keeps playing a little past the 3 damage turns");
+        map.run(Ticks::new(VISUAL_TICKS.get() - RADII.len() as u32));
+        assert!(map.effects.is_empty(), "gone once the idle visual ticks run out too");
     }
 
     #[test]

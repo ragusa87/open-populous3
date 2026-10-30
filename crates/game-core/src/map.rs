@@ -2505,8 +2505,8 @@ mod tests {
         map.tick();
         assert!(map.units[i].action == Action::Tumbling && map.units[i].motion.airborne(), "thrown up");
         assert_eq!(map.effects.len(), 2, "the first one's last turn to come");
-        map.run(Ticks::new(2));
-        assert!(map.effects.is_empty(), "3 turns");
+        map.run(crate::blast::VISUAL_TICKS);
+        assert!(map.effects.is_empty(), "both blasts' own 3 turns, plus the idle visual ticks past them");
         map.run(Ticks::secs(2));
         let u = &map.units[i];
         assert!(matches!(u.action, Action::Settling { .. }) && !u.motion.airborne() && u.z == start.1, "landed on its feet, settling rather than idle at once");
