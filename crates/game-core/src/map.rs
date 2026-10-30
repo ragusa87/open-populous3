@@ -82,6 +82,9 @@ pub struct GameMap {
     pub formations: Vec<crate::formation::Formation>,
     /// Firebolts in flight (`crate::firebolt`).
     pub bolts: Registry<crate::firebolt::Firebolt>,
+    /// Blast's own fireball shots in flight, from the shaman to the cast point (`crate::blast`): the general
+    /// "every spell flies from the shaman as a shot" piece (TODO.md "Shots"), done for Blast only so far.
+    pub fireballs: Registry<crate::blast::Fireball>,
     /// Boats and balloons (`crate::vehicle`).
     pub vehicles: Registry<crate::vehicle::Vehicle>,
     /// Shared patrol points (`crate::patrol`), referenced by zero or more units' own `patrol` queue.
@@ -160,7 +163,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), active_flyby: None }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), active_flyby: None }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -201,6 +204,7 @@ impl GameMap {
             coordinators: Coordinators::default(),
             formations: Vec::new(),
             bolts: Registry::default(),
+            fireballs: Registry::default(),
             vehicles: Registry::default(),
             patrol_points: Registry::default(),
             hidden_points: Registry::default(),
@@ -930,7 +934,19 @@ impl GameMap {
     fn release(&mut self, player: u8, spell: Spell) -> Option<DirtyRect> {
         match spell {
             Spell::Blast { at } => {
-                self.add_effect(crate::blast::effect(player, at));
+                let from = self.shaman_of(player).map(|u| (u.x, u.z, self.altitude(u) as i32));
+                match from {
+                    Some((x, z, height)) => {
+                        let ground_at = self.terrain.height_at(at.0 as u32, at.1 as u32, WORLD_UNITS_PER_CELL);
+                        let id = self.new_id_of();
+                        self.fireballs.insert(id, crate::blast::fireball(player, (x, z), height, at, ground_at));
+                    }
+                    // No living shaman to fly the shot from (she died between cast and release): keep the old
+                    // instant-effect behaviour rather than losing the spell.
+                    None => {
+                        self.add_effect(crate::blast::effect(player, at));
+                    }
+                }
                 None
             }
             Spell::Lightning { at } => {
@@ -1322,6 +1338,8 @@ impl GameMap {
         self.tend_reloads();
         let hits = self.tend_bolts();
         dirty.extend(self.apply_events(hits));
+        let landed = self.tend_fireballs();
+        dirty.extend(self.apply_events(landed));
         dirty.extend(self.tend_swamps());
         dirty.extend(self.tend_effects());
         dirty.extend(self.tend_fires());
@@ -2429,8 +2447,9 @@ mod tests {
         map.run(Ticks::new(crate::unit::CAST_RELEASE.get() - 1));
         assert!(map.effects.is_empty(), "her cast jump first");
         map.tick();
-        assert_eq!(map.effects.len(), 1, "released into the jump");
+        assert!(map.effects.is_empty() && map.fireballs.len() == 1, "released into the jump: the fireball flies first");
         map.tick();
+        assert_eq!(map.effects.len(), 1, "close by, the fireball lands and the blast starts the same turn");
         assert!(map.units[i].action != Action::Tumbling && !map.units[i].motion.airborne(), "the caster's own shaman is spared");
         map.apply(&Command::Cast { player: owner.wrapping_add(1), spell: Spell::Blast { at } });
         map.tick();
@@ -2665,7 +2684,7 @@ mod tests {
         assert!(crate::cast_range::within((u.x, u.z), at, m.cast_range(0, SpellKind::Blast).unwrap()), "stopped within range");
         assert!(torus_delta(z, u.z) > 6 * 512 - 512, "not farther than needed: {}", torus_delta(z, u.z));
         m.run(crate::unit::CAST_RELEASE);
-        assert_eq!(m.effects.len(), 1, "the blast");
+        assert!((1..200).any(|_| { m.tick(); m.effects.len() == 1 }), "the blast, once its fireball has flown in");
 
         let mut m = GameMap::sandbox_walk();
         m.apply(&Command::Cast { player: 0, spell: Spell::Blast { at } });

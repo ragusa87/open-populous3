@@ -50,6 +50,63 @@ pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
     Effect::new(owner, at, Countdown::new(Ticks::new(RADII.len() as u32)), EffectKind::SimpleBlast(SimpleBlast::default()))
 }
 
+pub type FireballId = crate::id::Id<Fireball>;
+
+/// Blast's own fireball shot, flying from the shaman to the cast point before the blast lands
+/// ("From cast to effect" [exe]): `FIREBALL_SPEED` (1000) world units per turn, a straight 3D line, no homing or
+/// shield deflection - the general shot machinery every other spell shares (homing, the shield-deflection repeat)
+/// is left for a later round (TODO.md "Shots").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fireball {
+    pub owner: u8,
+    /// Where it is now: world units and height.
+    pub at: (u16, u16),
+    pub height: i32,
+    /// Where it lands: world units and the ground height there, read once at cast.
+    pub aim: (u16, u16, i32),
+}
+
+/// `8/4`'s own speed ("From cast to effect" [exe]; the standard shot other spells use, 1400, is out of scope here).
+pub const FIREBALL_SPEED: i32 = 1000;
+
+/// A fireball cast by `owner`, starting at the shaman's own position (`from`, `height`) and flying to `at`, whose
+/// ground height is `ground_at`.
+pub fn fireball(owner: u8, from: (u16, u16), height: i32, at: (u16, u16), ground_at: i32) -> Fireball {
+    Fireball { owner, at: from, height, aim: (at.0, at.1, ground_at) }
+}
+
+/// The step a fireball at `at`/`h` makes towards `aim`: its next place, and whether it got there.
+pub fn fly(at: (u16, u16), h: i32, aim: (u16, u16, i32)) -> ((u16, u16), i32, bool) {
+    let (dx, dz, dy) = (torus_delta(at.0, aim.0), torus_delta(at.1, aim.1), aim.2 - h);
+    let d2 = (dx as i64).pow(2) + (dz as i64).pow(2) + (dy as i64).pow(2);
+    if d2 <= (FIREBALL_SPEED as i64).pow(2) {
+        return ((aim.0, aim.1), aim.2, true);
+    }
+    let d = isqrt(d2.min(u32::MAX as i64) as u32).max(1) as i32;
+    let step = |v: i32| v * FIREBALL_SPEED / d;
+    ((at.0.wrapping_add(step(dx) as u16), at.1.wrapping_add(step(dz) as u16)), h + step(dy), false)
+}
+
+impl crate::map::GameMap {
+    /// Every Blast fireball flies a turn towards its target; those arriving spawn the blast and are gone.
+    pub(crate) fn tend_fireballs(&mut self) -> Vec<WorldEvent> {
+        let mut fireballs = std::mem::take(&mut self.fireballs);
+        let mut arrived = Vec::new();
+        let mut events = Vec::new();
+        for (id, f) in fireballs.iter_mut() {
+            let (at, height, there) = fly(f.at, f.height, f.aim);
+            (f.at, f.height) = (at, height);
+            if there {
+                arrived.push(id);
+                events.push(WorldEvent::SpawnEffect(effect(f.owner, f.at)));
+            }
+        }
+        fireballs.retain(|id, _| !arrived.contains(&id));
+        self.fireballs = fireballs;
+        events
+    }
+}
+
 impl SimpleBlast {
     /// Its current (or, between ticks, next) turn's radius, cells (`RADII`): for the debug overlay, `None` once
     /// it's run its course.

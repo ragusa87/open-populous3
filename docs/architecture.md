@@ -44,8 +44,9 @@ crates/
 `GameMap::tick` is the one main loop: one call is one turn of the original (12 per second, `time.rs`), and it ticks
 each kind of object in a fixed, written order. The original's order inside a turn is not known yet (TODO.md); ours:
 1. walls (`update_walls`), then trees (`Tree::tick`);
-2. firewarriors' reloads and their bolts in flight (`tend_reloads`, `tend_bolts`, combat.md "Firebolts"), then
-   effects (`tend_effects`): before anything they act on, so units react the same turn;
+2. firewarriors' reloads and their bolts in flight (`tend_reloads`, `tend_bolts`, combat.md "Firebolts"), Blast's
+   own fireball shots in flight (`tend_fireballs`, spells.md "Blast"), then effects (`tend_effects`): before
+   anything they act on, so units react the same turn;
 3. fires, buildings' wear (`tend_building_wear`), ashes (`Ashes::tick`), camp fires, vaults, totems, training,
    vehicle huts (`tend_vehicle_huts`), huts' own breeding and growth (`tend_huts`, huts-and-training.md "Huts");
 4. a script's flyby playing or cancelled, cleared once it's over (`tend_flyby`, `ai_script.rs`), then each

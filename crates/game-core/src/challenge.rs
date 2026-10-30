@@ -304,15 +304,15 @@ mod tests {
         until(&mut map, 200, |m| role(m, shaman).is_some()).expect("challenged");
         map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at } });
         map.run(crate::unit::CAST_RELEASE);
-        assert_eq!(map.effects.len(), 1, "her jump not cut short");
+        assert_eq!(map.fireballs.len(), 1, "her jump not cut short: the shot flew");
         until(&mut map, 200, |m| role(m, shaman).is_some()).expect("challenged again after it");
         let casting = |m: &GameMap| matches!(m.unit(shaman).unwrap().action, Action::Casting { .. });
         assert_eq!(until(&mut map, 200, casting), None, "not cast again");
         until(&mut map, 400, |m| matches!(m.unit(shaman).unwrap().action, Action::Melee { .. })).expect("in a melee");
-        let effects = map.effects.len();
+        let fireballs = map.fireballs.len();
         map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at } });
         map.run(crate::unit::CAST_RELEASE);
-        assert_eq!(map.effects.len(), effects + 1, "blasts in a melee too");
+        assert_eq!(map.fireballs.len(), fireballs + 1, "blasts in a melee too");
     }
 
     #[test]

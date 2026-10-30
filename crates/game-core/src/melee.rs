@@ -664,10 +664,22 @@ mod tests {
     fn an_idle_warrior_blasted_away_has_nothing_to_resume() {
         let mut map = GameMap::sandbox_walk().seeded(1);
         let s = map.shaman_of(0).unwrap();
-        let w = map.spawn(1, UnitKind::Warrior, (s.x.wrapping_add(1024), s.z)).id;
-        let blast_at = { let u = map.unit(w).unwrap(); (u.x.wrapping_add(512), u.z) };
+        // Beyond the warrior's own sight but still within the shaman's cast range, so it never auto-engages the
+        // nearby enemy shaman on its own before the blast ever reaches it (which would give it a real order to
+        // legitimately resume, defeating the point of this test).
+        let sight = UnitKind::Warrior.stats().sight as u32 * 512;
+        let range = map.cast_range(0, crate::spell_book::SpellKind::Blast).unwrap();
+        assert!(range > sight, "test assumes Blast reaches farther than a warrior's own sight");
+        let offset = ((sight + range) / 2) as u16;
+        let w = map.spawn(1, UnitKind::Warrior, (s.x.wrapping_add(offset), s.z)).id;
+        // Right on the warrior itself: still within the shaman's cast range (`offset < range` above), and no
+        // nearer the shaman than that, which would shrink the sight/range gap this test relies on.
+        let blast_at = { let u = map.unit(w).unwrap(); (u.x, u.z) };
         map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at: blast_at } });
         map.run(crate::unit::CAST_RELEASE);
+        // The fireball still has to fly in (blast.rs "From cast to effect") before it throws her: wait for that
+        // first, so this doesn't race a pre-blast auto-scan into an unrelated `Action::Attacking`.
+        until(&mut map, 300, |m| matches!(m.unit(w).unwrap().action, Action::Tumbling)).expect("thrown by the blast");
         until(&mut map, 300, |m| !matches!(m.unit(w).unwrap().action, Action::Tumbling)).expect("back on its feet");
         assert_eq!(map.unit(w).unwrap().action, Action::Idle, "nothing to resume: stays idle, not Attacking anyone");
     }
