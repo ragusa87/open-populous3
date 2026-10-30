@@ -7,6 +7,7 @@
 //! come from the original animations when allowed (`art`), else they are generated (`procedural`).
 
 pub mod art;
+pub mod atlas;
 mod dust;
 pub mod markers;
 mod procedural;
@@ -24,6 +25,7 @@ use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use std::collections::HashMap;
 use crate::game_speed::GameSpeed;
 use crate::sim_time::{SimNow, TICK_SECS};
 use game_core::command::Command;
@@ -192,6 +194,10 @@ pub struct FrameAsset {
     /// Size and feet in base pixels (fractional for detailed art).
     pub size: Vec2,
     pub origin: Vec2,
+    /// Where this frame sits in `image`'s own pixels (`ImageNode::rect`): the whole image when it is
+    /// this frame's own (`upload_frame`), a sub-rect when `image` is a shared atlas (`upload_tribe_atlases`,
+    /// `upload_frames`) - a 2D HUD user (`hud/shaman.rs`) must crop to this or it draws the whole atlas.
+    pub rect: Rect,
 }
 
 /// Every kind's and tribe's frames, uploaded once: `kinds[kind][tribe][pose][dir][frame]`, kinds in
@@ -213,7 +219,7 @@ impl UnitSprites {
     /// closest thing to "excited" she has) — forced with no `Action::Casting` under it, so `frame_index` loops it
     /// by time instead of a one-shot countdown, same as Stranded already does for everyone else.
     pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, still: bool, yaw: f32, clock: &SimClock, now: SimNow, celebrating: bool) -> Option<&FrameAsset> {
-        let (mut pose, facing) = worship.map_or((art::pose_of(unit), unit.facing), |f| (Pose::Pray, f));
+        let (mut pose, facing) = worship.map_or((art::pose_of(unit, now.tick), unit.facing), |f| (Pose::Pray, f));
         if celebrating && matches!(pose, Pose::Idle | Pose::CarryIdle) {
             pose = if sheets::plays(unit.kind, Pose::Stranded) {
                 Pose::Stranded
@@ -232,15 +238,23 @@ impl UnitSprites {
     }
 }
 
-/// Quad in the sprite's rectangle (base pixels), feet at the local origin, facing +Z.
-pub fn sprite_quad(size: Vec2, origin: Vec2) -> Mesh {
+/// Quad in the sprite's rectangle (base pixels), feet at the local origin, facing +Z, `uv`
+/// (`[u_min, v_min, u_max, v_max]`) picking its sub-rect of a shared texture (a whole-texture frame
+/// passes `[0, 0, 1, 1]`, see `sprite_quad`).
+pub fn sprite_quad_uv(size: Vec2, origin: Vec2, uv: [f32; 4]) -> Mesh {
     let (l, r) = (-origin.x * PIXEL, (size.x - origin.x) * PIXEL);
     let (t, b) = (origin.y * PIXEL, (origin.y - size.y) * PIXEL);
+    let [u0, v0, u1, v1] = uv;
     Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[l, t, 0.0], [r, t, 0.0], [r, b, 0.0], [l, b, 0.0]])
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 4])
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[u0, v0], [u1, v0], [u1, v1], [u0, v1]])
         .with_inserted_indices(Indices::U32(vec![0, 2, 1, 0, 3, 2]))
+}
+
+/// Quad in the sprite's rectangle (base pixels), feet at the local origin, facing +Z, the whole texture as UV.
+pub fn sprite_quad(size: Vec2, origin: Vec2) -> Mesh {
+    sprite_quad_uv(size, origin, [0.0, 0.0, 1.0, 1.0])
 }
 
 /// Mouse selection and orders to units: spell aiming runs after it (it may put the spell away).
@@ -263,6 +277,7 @@ impl Plugin for UnitsPlugin {
             .init_resource::<SimNow>()
             .init_resource::<GameSchedule>()
             .init_resource::<UnitSprites>()
+            .init_resource::<GhostMaterials>()
             .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin, markers::MarkersPlugin))
             .add_plugins(crate::boot::BootJobPlugin::<UnitSpritesJob>::default())
             .add_systems(
@@ -289,8 +304,13 @@ pub struct UnitArtSource {
     original: Option<std::path::PathBuf>,
 }
 
-/// Every frame of every kind and tribe, prepared: `[kind][tribe][pose][dir][frame]`.
-pub type PreparedKinds = Vec<Vec<Vec<Vec<Vec<PreparedFrame>>>>>;
+/// Every kind's and tribe's frames, prepared AND already packed into their atlas buffers (`pack_tribe_atlases`):
+/// `[kind][tribe]`. The packing itself (real pixel-copy work, `atlas::build_atlas`) runs here, in `run()` on the
+/// boot job's background thread, same as `prepare_frame`'s own upscale/bleed - keeping it out of `install()`
+/// (main thread, `&mut World`) matters: an earlier version of this packed inside `install()` and measured the
+/// "Unit sprites installed" boot step at ~880 ms/call instead of ~23 ms, because the main thread was doing the
+/// atlas's pixel copying synchronously instead of just registering already-built GPU resources.
+pub type PreparedKinds = Vec<Vec<TribeAtlases>>;
 
 impl crate::boot::BootJob for UnitSpritesJob {
     const LABEL: &'static str = "Unit sprites";
@@ -318,9 +338,10 @@ impl crate::boot::BootJob for UnitSpritesJob {
                     art::generated_art(kind)
                 });
                 progress.step();
-                let prepared = tribes.iter().map(|t| t.poses.iter().map(|dirs| dirs.iter().map(|frames| frames.iter().map(prepare_frame).collect()).collect()).collect()).collect();
+                let prepared: Vec<Vec<Vec<Vec<PreparedFrame>>>> = tribes.iter().map(|t| t.poses.iter().map(|dirs| dirs.iter().map(|frames| frames.iter().map(prepare_frame).collect()).collect()).collect()).collect();
+                let packed = prepared.into_iter().map(pack_tribe_atlases).collect();
                 progress.step();
-                prepared
+                packed
             })
             .collect()
     }
@@ -329,16 +350,111 @@ impl crate::boot::BootJob for UnitSpritesJob {
         world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
             world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
                 world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {
-                    let mut upload = |f: PreparedFrame| upload_prepared(f, &mut images, &mut meshes, &mut mats);
                     let kinds = kinds
                         .into_iter()
-                        .map(|tribes| tribes.into_iter().map(|poses| poses.into_iter().map(|dirs| dirs.into_iter().map(|frames| frames.into_iter().map(&mut upload).collect()).collect()).collect()).collect())
+                        .map(|tribes| tribes.into_iter().map(|ta| upload_tribe_atlases(ta, &mut images, &mut meshes, &mut mats)).collect())
                         .collect();
                     world.resource_mut::<UnitSprites>().kinds = kinds;
                 });
             });
         });
     }
+}
+
+/// Where one already-prepared frame landed once its tribe's frames were packed (`pack_tribe_atlases`): which of
+/// `TribeAtlases::atlases` (0 opaque, 1 blended) and where in it, plus the quad geometry `upload_tribe_atlases`
+/// still needs (unaffected by atlas packing).
+struct FrameLookup {
+    atlas: usize,
+    rect: atlas::AtlasRect,
+    size: Vec2,
+    origin: Vec2,
+}
+
+/// One kind+tribe's frames packed into up to two shared atlases (TODO.md "Unit sprites", `atlas::build_atlas`)
+/// instead of a distinct image per frame: a plain cutout frame (`Mask`) and a true-alpha one (`Blend`) can't share
+/// a `StandardMaterial`'s single `alpha_mode`, so frames split into at most two atlases here (`[0]` opaque, `[1]`
+/// blended) rather than one - still a large cut from "one image/material per frame". Pure pixel/index math, no
+/// Bevy GPU types, so this can run on the boot job's background thread (`UnitSpritesJob::run`); `upload_tribe_atlases`
+/// (main thread, `install`) turns the packed result into actual `Image`/`Material`/`Mesh` assets.
+pub struct TribeAtlases {
+    /// `[opaque, blended]`; `None` when this tribe has no frame of that kind.
+    atlases: [Option<atlas::Atlas>; 2],
+    /// `[pose][dir][frame]`.
+    lookup: Vec<Vec<Vec<FrameLookup>>>,
+}
+
+fn pack_tribe_atlases(poses: Vec<Vec<Vec<PreparedFrame>>>) -> TribeAtlases {
+    let shape: Vec<Vec<usize>> = poses.iter().map(|dirs| dirs.iter().map(|fs| fs.len()).collect()).collect();
+    let mut flat = Vec::new();
+    for (pose_i, dirs) in poses.into_iter().enumerate() {
+        for (dir_i, fs) in dirs.into_iter().enumerate() {
+            for (frame_i, pf) in fs.into_iter().enumerate() {
+                flat.push((pose_i, dir_i, frame_i, pf));
+            }
+        }
+    }
+    let mut lookup: Vec<Vec<Vec<Option<FrameLookup>>>> = shape.iter().map(|dirs| dirs.iter().map(|&n| (0..n).map(|_| None).collect()).collect()).collect();
+    let mut atlases: [Option<atlas::Atlas>; 2] = [None, None];
+    let (blended, opaque): (Vec<_>, Vec<_>) = flat.into_iter().partition(|(_, _, _, pf)| pf.blended);
+    for (atlas_i, group) in [opaque, blended].into_iter().enumerate() {
+        if group.is_empty() {
+            continue;
+        }
+        let frames: Vec<Frame> = group.iter().map(|(_, _, _, pf)| pf.pixels.clone()).collect();
+        let packed = atlas::build_atlas(&frames);
+        for ((pose_i, dir_i, frame_i, pf), rect) in group.into_iter().zip(packed.rects.iter()) {
+            lookup[pose_i][dir_i][frame_i] = Some(FrameLookup { atlas: atlas_i, rect: *rect, size: pf.size, origin: pf.origin });
+        }
+        atlases[atlas_i] = Some(packed);
+    }
+    let lookup = lookup.into_iter().map(|dirs| dirs.into_iter().map(|fs| fs.into_iter().map(|f| f.expect("every frame placed by its blended bucket")).collect()).collect()).collect();
+    TribeAtlases { atlases, lookup }
+}
+
+/// The main-thread half (`install`): turns one tribe's already-packed atlases into real `Image`/`StandardMaterial`
+/// assets (cheap - no pixel copying left to do) and gives each frame its own small UV-mapped `Mesh`, so every
+/// `FrameAsset` of the same (kind, tribe, alpha mode) shares one `.image`/`.material` handle - what lets Bevy
+/// batch/instance a crowd of the same kind and tribe instead of giving each a distinct bind group.
+fn upload_tribe_atlases(ta: TribeAtlases, images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> Vec<Vec<Vec<FrameAsset>>> {
+    let handles: Vec<Option<(Handle<Image>, Handle<StandardMaterial>, usize, usize)>> = ta
+        .atlases
+        .into_iter()
+        .enumerate()
+        .map(|(i, maybe_atlas)| {
+            maybe_atlas.map(|atlas::Atlas { width, height, rgba, .. }| {
+                let mut image = Image::new(Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 }, TextureDimension::D2, rgba, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
+                image.sampler = ImageSampler::linear();
+                let image = images.add(image);
+                let material = mats.add(StandardMaterial {
+                    base_color_texture: Some(image.clone()),
+                    alpha_mode: if i == 1 { AlphaMode::Blend } else { AlphaMode::Mask(0.5) },
+                    unlit: true,
+                    cull_mode: None,
+                    double_sided: true,
+                    ..default()
+                });
+                (image, material, width, height)
+            })
+        })
+        .collect();
+    ta.lookup
+        .into_iter()
+        .map(|dirs| {
+            dirs.into_iter()
+                .map(|fs| {
+                    fs.into_iter()
+                        .map(|f| {
+                            let (image, material, width, height) = handles[f.atlas].as_ref().expect("a frame referencing an atlas that wasn't packed");
+                            let mesh = meshes.add(sprite_quad_uv(f.size, f.origin, f.rect.uv(*width, *height)));
+                            let rect = Rect::new(f.rect.x as f32, f.rect.y as f32, (f.rect.x + f.rect.width) as f32, (f.rect.y + f.rect.height) as f32);
+                            FrameAsset { image: image.clone(), mesh, material: material.clone(), size: f.size, origin: f.origin, rect }
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// A frame ready to upload: upscaled and edge-bled (`prepare_frame`, the only way to make one), with its quad's size
@@ -363,6 +479,7 @@ pub fn prepare_frame(f: &Frame) -> PreparedFrame {
 
 /// The GPU half: the image, an unlit quad anchored at the feet, cut out or blended.
 pub fn upload_prepared(p: PreparedFrame, images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> FrameAsset {
+    let rect = Rect::new(0.0, 0.0, p.pixels.width as f32, p.pixels.height as f32);
     let mut image = Image::new(
         Extent3d { width: p.pixels.width as u32, height: p.pixels.height as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
@@ -380,12 +497,46 @@ pub fn upload_prepared(p: PreparedFrame, images: &mut Assets<Image>, meshes: &mu
         double_sided: true,
         ..default()
     });
-    FrameAsset { image, mesh: meshes.add(sprite_quad(p.size, p.origin)), material, size: p.size, origin: p.origin }
+    FrameAsset { image, mesh: meshes.add(sprite_quad(p.size, p.origin)), material, size: p.size, origin: p.origin, rect }
 }
 
 /// Prepares and uploads a frame at once (`prepare_frame`, `upload_prepared`).
 pub fn upload_frame(f: &Frame, images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> FrameAsset {
     upload_prepared(prepare_frame(f), images, meshes, mats)
+}
+
+/// Packs and uploads a flat list of frames sharing at most two atlases (opaque/blended, same split as
+/// `pack_tribe_atlases`/`upload_tribe_atlases`) instead of one image+material per frame - for a small
+/// one-off sprite set with no (pose, direction) nesting to key by (status markers, the dust cloud, the
+/// volcano rock sprite). TODO.md "Unit sprites": "the same for markers, dust and wood" - `wood.rs`'s own
+/// single frame has nothing to batch against, so it stays on plain `upload_frame`.
+pub fn upload_frames(frames: &[Frame], images: &mut Assets<Image>, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> Vec<FrameAsset> {
+    let prepared: Vec<PreparedFrame> = frames.iter().map(prepare_frame).collect();
+    let mut assets: Vec<Option<FrameAsset>> = (0..prepared.len()).map(|_| None).collect();
+    let (blended, opaque): (Vec<_>, Vec<_>) = prepared.into_iter().enumerate().partition(|(_, pf)| pf.blended);
+    for (alpha_mode, group) in [(AlphaMode::Mask(0.5), opaque), (AlphaMode::Blend, blended)] {
+        if group.is_empty() {
+            continue;
+        }
+        let pixel_frames: Vec<Frame> = group.iter().map(|(_, pf)| pf.pixels.clone()).collect();
+        let packed = atlas::build_atlas(&pixel_frames);
+        let mut image = Image::new(
+            Extent3d { width: packed.width as u32, height: packed.height as u32, depth_or_array_layers: 1 },
+            TextureDimension::D2,
+            packed.rgba,
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::default(),
+        );
+        image.sampler = ImageSampler::linear();
+        let image = images.add(image);
+        let material = mats.add(StandardMaterial { base_color_texture: Some(image.clone()), alpha_mode, unlit: true, cull_mode: None, double_sided: true, ..default() });
+        for ((idx, pf), rect) in group.into_iter().zip(packed.rects.iter()) {
+            let mesh = meshes.add(sprite_quad_uv(pf.size, pf.origin, rect.uv(packed.width, packed.height)));
+            let px_rect = Rect::new(rect.x as f32, rect.y as f32, (rect.x + rect.width) as f32, (rect.y + rect.height) as f32);
+            assets[idx] = Some(FrameAsset { image: image.clone(), mesh, material: material.clone(), size: pf.size, origin: pf.origin, rect: px_rect });
+        }
+    }
+    assets.into_iter().map(|a| a.expect("every frame placed by its blended bucket")).collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -568,6 +719,37 @@ pub fn riding(map: &game_core::map::GameMap, u: &game_core::unit::Unit, at: Vec2
     })
 }
 
+/// The sprite's own visible opacity while Invisibility (or a Ghost Army copy, `Statuses::ghost`) is on, over the
+/// local player's own units only (docs/plans/15-ghost-table-invisibility.md): `ghost0-X.dat`'s 66% mix
+/// (`pop3_format::ghost`, sprites.md "Ghost") is a palette-index blend for the original's software renderer, with
+/// no direct equivalent once sprites are RGBA textures - compositing at this alpha over whatever's behind it (the
+/// GPU's own blending) already reads as "66% toward the background", so the table itself is only decoded for the
+/// record, not replayed per pixel here. Which operand of the formula is the sprite is unresolved in the spec: 0.34
+/// (`1 - 0.66`) was picked by eye against `just shot` as the reading that looks see-through rather than solid or
+/// gone; 0.66 is the other candidate if a later look disagrees.
+const GHOST_ALPHA: f32 = 0.34;
+
+/// Translucent material clones for `GHOST_ALPHA`, keyed by the opaque/blend material's own base texture: since
+/// `upload_tribe_atlases` shares one material per kind+tribe+alpha-mode across every unit of that kind, an
+/// invisible unit can't just have its own shared material's alpha edited (that would make every other unit of the
+/// same kind and tribe translucent too) - this caches one extra material per distinct texture instead of making a
+/// fresh one every frame for every invisible unit.
+#[derive(Resource, Default)]
+struct GhostMaterials(HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>);
+
+/// The material to draw `base` with while translucent: `base`'s own cached ghost clone, built once.
+fn ghost_material(base: &Handle<StandardMaterial>, ghosts: &mut GhostMaterials, mats: &mut Assets<StandardMaterial>) -> Handle<StandardMaterial> {
+    if let Some(h) = ghosts.0.get(&base.id()) {
+        return h.clone();
+    }
+    let Some(mut ghost) = mats.get(base).cloned() else { return base.clone() };
+    ghost.alpha_mode = AlphaMode::Blend;
+    ghost.base_color = ghost.base_color.with_alpha(GHOST_ALPHA);
+    let handle = mats.add(ghost);
+    ghosts.0.insert(base.id(), handle.clone());
+    handle
+}
+
 fn animate_views(
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
@@ -579,6 +761,7 @@ fn animate_views(
     mut bars: Query<(&ChildOf, &mut Visibility), (With<HealthBar>, Without<UnitSprite>)>,
     mut fills: Query<(&HealthFill, &mut Transform, &MeshMaterial3d<StandardMaterial>), Without<UnitView>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    mut ghosts: ResMut<GhostMaterials>,
     selection: Res<Selection>,
     hovered: Res<crate::hover::Hovered>,
     heights: Res<crate::buildings::ModelHeights>,
@@ -598,7 +781,8 @@ fn animate_views(
     for (body, mut height, mut mesh, mut mat, mut vis) in &mut bodies {
         let hidden = units.get(body.0).is_some_and(|u| hidden_inside(&map.0, u));
         vis.set_if_neq(if hidden { Visibility::Hidden } else { Visibility::Inherited });
-        let frame = units.get(body.0).and_then(|u| {
+        let unit = units.get(body.0);
+        let frame = unit.and_then(|u| {
             let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
             let still = !u.aboard.and_then(|v| map.0.vehicle(v)).is_some_and(crate::vehicles::under_way);
             sprites.frame_for(u, worship, still, rig.yaw, &clock, *now, map.0.on_winning_side(u.owner))
@@ -608,7 +792,14 @@ fn animate_views(
         }
         if let Some(f) = frame && mesh.0 != f.mesh {
             mesh.0 = f.mesh.clone();
-            mat.0 = f.material.clone();
+        }
+        // Not folded into the mesh-changed check above: `upload_tribe_atlases` shares one material across every
+        // frame of a kind+tribe+alpha-mode, so a unit's material can need to change (invisible turning on/off)
+        // on a tick whose mesh (its own small UV quad) doesn't - `set_if_neq` keeps this cheap either way.
+        if let Some(f) = frame {
+            let translucent = unit.is_some_and(|u| u.owner == PLAYER && (u.statuses.invisible.is_on() || u.statuses.ghost));
+            let material = if translucent { ghost_material(&f.material, &mut ghosts, &mut mats) } else { f.material.clone() };
+            mat.set_if_neq(MeshMaterial3d(material));
         }
     }
     for (parent, mut vis) in &mut bars {
@@ -685,8 +876,14 @@ fn pull_to_eye(
         for &child in children {
             if let Ok((mut t, bar, marker)) = parts.get_mut(child) {
                 let above = if bar { BAR_HEIGHT } else { marker.map_or(0.0, |m| m.above) };
-                t.translation = local + Vec3::Y * above * scale;
-                t.scale = Vec3::splat(scale);
+                let translation = local + Vec3::Y * above * scale;
+                let scale = Vec3::splat(scale);
+                if t.translation != translation {
+                    t.translation = translation;
+                }
+                if t.scale != scale {
+                    t.scale = scale;
+                }
             }
         }
     }

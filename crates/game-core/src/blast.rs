@@ -5,8 +5,11 @@
 //! stays in range, scaled by the ground's own slope ("Blast push and flight"): allies (the caster's own tribe,
 //! never the caster's shaman) only on the last turn, at most `BLAST_FRIEND_AFFECT`. Each turn every vehicle in the
 //! radius takes `DAMAGE_PERSON` too (`GameMap::damage_vehicle` spares the caster's tribe; pop3-rev-analysis.md
-//! "Life, damage and destruction").
+//! "Life, damage and destruction"). Every building whose centre ever enters the radius across the blast's 3
+//! turns takes `DAMAGE_BLDG` wear once (confirmed: unlike people/vehicles, not repeated every turn it stays in
+//! range), feeding the same accumulator hacking and firewarrior bolts do (combat.md "Attacking a building").
 
+use crate::building::{Building, BuildingId};
 use crate::effect::{DamageKind, Effect, EffectKind};
 use crate::event::{PushKind, WorldEvent};
 use crate::motion::Velocity;
@@ -27,6 +30,9 @@ pub const PUSH_OUT: i32 = 140;
 pub const PUSH_UP: i32 = 98;
 /// `BLAST_DAMAGE_PERSON` (exe 50, not in the file): each turn, to each person in the radius.
 pub const DAMAGE_PERSON: u16 = 50;
+/// `BLAST_DAMAGE_BLDG` (exe 40, pop3-rev-analysis.md "Components"/"Attacking a building"): once, to each building
+/// the blast ever reaches, feeding its wear accumulator.
+pub const DAMAGE_BLDG: u16 = 40;
 /// `BLAST_FRIEND_AFFECT` (exe 5): at most this many of the caster's own followers are pushed, on the last turn
 /// only. Which ones, when more are in range, is not traced: a guess, kept to iteration order.
 pub const BLAST_FRIEND_AFFECT: u8 = 5;
@@ -35,11 +41,70 @@ pub const BLAST_FRIEND_AFFECT: u8 = 5;
 pub struct SimpleBlast {
     /// Turns done.
     turn: u8,
+    /// Buildings already charged `DAMAGE_BLDG`: it is once per building, not every turn it stays in range.
+    worn: Vec<BuildingId>,
 }
 
 /// A blast cast by tribe `owner` at `at` (world units).
 pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
     Effect::new(owner, at, Countdown::new(Ticks::new(RADII.len() as u32)), EffectKind::SimpleBlast(SimpleBlast::default()))
+}
+
+pub type FireballId = crate::id::Id<Fireball>;
+
+/// Blast's own fireball shot, flying from the shaman to the cast point before the blast lands
+/// ("From cast to effect" [exe]): `FIREBALL_SPEED` (1000) world units per turn, a straight 3D line, no homing or
+/// shield deflection - the general shot machinery every other spell shares (homing, the shield-deflection repeat)
+/// is left for a later round (TODO.md "Shots").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fireball {
+    pub owner: u8,
+    /// Where it is now: world units and height.
+    pub at: (u16, u16),
+    pub height: i32,
+    /// Where it lands: world units and the ground height there, read once at cast.
+    pub aim: (u16, u16, i32),
+}
+
+/// `8/4`'s own speed ("From cast to effect" [exe]; the standard shot other spells use, 1400, is out of scope here).
+pub const FIREBALL_SPEED: i32 = 1000;
+
+/// A fireball cast by `owner`, starting at the shaman's own position (`from`, `height`) and flying to `at`, whose
+/// ground height is `ground_at`.
+pub fn fireball(owner: u8, from: (u16, u16), height: i32, at: (u16, u16), ground_at: i32) -> Fireball {
+    Fireball { owner, at: from, height, aim: (at.0, at.1, ground_at) }
+}
+
+/// The step a fireball at `at`/`h` makes towards `aim`: its next place, and whether it got there.
+pub fn fly(at: (u16, u16), h: i32, aim: (u16, u16, i32)) -> ((u16, u16), i32, bool) {
+    let (dx, dz, dy) = (torus_delta(at.0, aim.0), torus_delta(at.1, aim.1), aim.2 - h);
+    let d2 = (dx as i64).pow(2) + (dz as i64).pow(2) + (dy as i64).pow(2);
+    if d2 <= (FIREBALL_SPEED as i64).pow(2) {
+        return ((aim.0, aim.1), aim.2, true);
+    }
+    let d = isqrt(d2.min(u32::MAX as i64) as u32).max(1) as i32;
+    let step = |v: i32| v * FIREBALL_SPEED / d;
+    ((at.0.wrapping_add(step(dx) as u16), at.1.wrapping_add(step(dz) as u16)), h + step(dy), false)
+}
+
+impl crate::map::GameMap {
+    /// Every Blast fireball flies a turn towards its target; those arriving spawn the blast and are gone.
+    pub(crate) fn tend_fireballs(&mut self) -> Vec<WorldEvent> {
+        let mut fireballs = std::mem::take(&mut self.fireballs);
+        let mut arrived = Vec::new();
+        let mut events = Vec::new();
+        for (id, f) in fireballs.iter_mut() {
+            let (at, height, there) = fly(f.at, f.height, f.aim);
+            (f.at, f.height) = (at, height);
+            if there {
+                arrived.push(id);
+                events.push(WorldEvent::SpawnEffect(effect(f.owner, f.at)));
+            }
+        }
+        fireballs.retain(|id, _| !arrived.contains(&id));
+        self.fireballs = fireballs;
+        events
+    }
 }
 
 impl SimpleBlast {
@@ -50,7 +115,7 @@ impl SimpleBlast {
     }
 
     /// One turn of the blast at `at` cast by `owner`: the pushes and damage it deals now.
-    pub fn turn(&mut self, at: (u16, u16), owner: u8, units: &[Unit], vehicles: &Registry<Vehicle>, terrain: &Heightmap) -> Vec<WorldEvent> {
+    pub fn turn(&mut self, at: (u16, u16), owner: u8, units: &[Unit], vehicles: &Registry<Vehicle>, buildings: &[Building], terrain: &Heightmap) -> Vec<WorldEvent> {
         let Some(&radius) = RADII.get(self.turn as usize) else { return Vec::new() };
         let last_turn = self.turn as usize + 1 == RADII.len();
         self.turn += 1;
@@ -73,6 +138,11 @@ impl SimpleBlast {
         }
         for (vehicle, _) in vehicles.iter().filter(|(_, v)| push(at, (v.x, v.z), radius).is_some()) {
             events.push(WorldEvent::DamageVehicle { vehicle, amount: DAMAGE_PERSON, from: owner });
+        }
+        let newly_reached: Vec<BuildingId> = buildings.iter().filter(|b| offset(at, b.centre()).2 <= radius && !self.worn.contains(&b.id)).map(|b| b.id).collect();
+        for building in newly_reached {
+            events.push(WorldEvent::Wear { building, amount: DAMAGE_BLDG });
+            self.worn.push(building);
         }
         events
     }
@@ -153,15 +223,16 @@ mod tests {
     fn a_blast_on_the_unit_hits_and_pushes_every_turn() {
         let units = [Unit::new(Id::from_raw(1), 1, UnitKind::Brave, (5000, 5000))];
         let vehicles = Registry::default();
+        let buildings: Vec<Building> = Vec::new();
         let terrain = flat();
         let mut blast = SimpleBlast::default();
         for turn in 0..RADII.len() {
-            let events = blast.turn((5000, 5000), 0, &units, &vehicles, &terrain);
+            let events = blast.turn((5000, 5000), 0, &units, &vehicles, &buildings, &terrain);
             let pushes = events.iter().filter(|e| matches!(e, WorldEvent::Push { .. })).count();
             let damage = events.iter().filter(|e| matches!(e, WorldEvent::Damage { .. })).count();
             assert_eq!((pushes, damage), (1, 1), "turn {turn}: hit dead centre");
         }
-        assert!(blast.turn((5000, 5000), 0, &units, &vehicles, &terrain).is_empty(), "over after 3 turns");
+        assert!(blast.turn((5000, 5000), 0, &units, &vehicles, &buildings, &terrain).is_empty(), "over after 3 turns");
     }
 
     /// A blast landing next to a unit (not on it): the unit only enters the blast once the turn's own radius
@@ -175,11 +246,12 @@ mod tests {
         let unit = Unit::new(Id::from_raw(1), 1, UnitKind::Brave, (5000 + two_cells as u16 + 1, 5000));
         let units = [unit];
         let vehicles = Registry::default();
+        let buildings: Vec<Building> = Vec::new();
         let terrain = flat();
         let mut blast = SimpleBlast::default();
         let hit = |events: &[WorldEvent]| events.iter().any(|e| matches!(e, WorldEvent::Damage { .. }));
-        assert!(!hit(&blast.turn(at, 0, &units, &vehicles, &terrain)), "just outside the 2-cell radius: not yet");
-        assert!(hit(&blast.turn(at, 0, &units, &vehicles, &terrain)), "the 4-cell radius now reaches it");
+        assert!(!hit(&blast.turn(at, 0, &units, &vehicles, &buildings, &terrain)), "just outside the 2-cell radius: not yet");
+        assert!(hit(&blast.turn(at, 0, &units, &vehicles, &buildings, &terrain)), "the 4-cell radius now reaches it");
         assert!(four_cells > two_cells);
     }
 
@@ -196,8 +268,9 @@ mod tests {
         ];
         let mut blast = SimpleBlast::default();
         let vehicles = Registry::default();
+        let buildings: Vec<Building> = Vec::new();
         let terrain = flat();
-        let mut turn = || blast.turn((5000, 5000), 0, &units, &vehicles, &terrain);
+        let mut turn = || blast.turn((5000, 5000), 0, &units, &vehicles, &buildings, &terrain);
         let pushed = |events: &[WorldEvent]| events.iter().filter_map(|e| if let WorldEvent::Push { unit, .. } = e { Some(unit.raw()) } else { None }).collect::<Vec<_>>();
         let hit = |events: &[WorldEvent]| events.iter().filter_map(|e| if let WorldEvent::Damage { unit, .. } = e { Some(unit.raw()) } else { None }).collect::<Vec<_>>();
         let first = turn();
@@ -216,11 +289,12 @@ mod tests {
     fn at_most_blast_friend_affect_allies_are_pushed_on_the_last_turn() {
         let units: Vec<Unit> = (0..BLAST_FRIEND_AFFECT as u32 + 2).map(|i| Unit::new(Id::from_raw(i as u32 + 1), 0, UnitKind::Brave, (5000, 5000))).collect();
         let vehicles = Registry::default();
+        let buildings: Vec<Building> = Vec::new();
         let terrain = flat();
         let mut blast = SimpleBlast::default();
-        blast.turn((5000, 5000), 0, &units, &vehicles, &terrain);
-        blast.turn((5000, 5000), 0, &units, &vehicles, &terrain);
-        let last = blast.turn((5000, 5000), 0, &units, &vehicles, &terrain);
+        blast.turn((5000, 5000), 0, &units, &vehicles, &buildings, &terrain);
+        blast.turn((5000, 5000), 0, &units, &vehicles, &buildings, &terrain);
+        let last = blast.turn((5000, 5000), 0, &units, &vehicles, &buildings, &terrain);
         let pushed = last.iter().filter(|e| matches!(e, WorldEvent::Push { .. })).count();
         assert_eq!(pushed, BLAST_FRIEND_AFFECT as usize, "capped even though every ally is in range");
     }
@@ -267,5 +341,16 @@ mod tests {
         assert!(map.unit(mine).unwrap().motion.airborne(), "but pushed (on the last turn, as an ally)");
         assert_eq!(health(shielded), 1000);
         assert!(!map.unit(shielded).unwrap().motion.airborne(), "nor pushed");
+    }
+
+    #[test]
+    fn a_building_at_the_centre_wears_down_by_damage_bldg_once_not_every_turn() {
+        let mut map = crate::map::GameMap::sandbox_walk();
+        let s = &map.units[0];
+        let at = (s.x.wrapping_add(2048), s.z);
+        let building = map.add_building(crate::building::Building::new(crate::building::BuildingKind::Hut { size: 1 }, 1, at.0, at.1, 0));
+        map.add_effect(effect(0, at));
+        map.run(Ticks::new(RADII.len() as u32));
+        assert_eq!(map.building(building).unwrap().wear, DAMAGE_BLDG, "once for the whole blast, unlike people/vehicles which take it every turn in range");
     }
 }

@@ -15,10 +15,11 @@ use crate::game_speed::GameSpeed;
 use crate::hud::spells::SelectedSpell;
 use crate::units::selection::Selection;
 use crate::virtual_cursor::VirtualCursor;
-use crate::boot::BeginGame;
+use crate::boot::{BeginGame, GameStep, LoadTarget};
 use crate::world::{new_game, CurrentMap, LevelList, TerrainDirty};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::tasks::{block_on, poll_once, AsyncComputeTaskPool, Task};
 use game_core::map::GameMap;
 
 const BACKDROP: Color = Color::srgb(0.06, 0.04, 0.02);
@@ -223,9 +224,11 @@ impl Plugin for MenuPlugin {
         app.insert_state(AppState::Loading)
             .insert_resource(crate::boot::LoadTarget::Boot { then: start })
             .init_resource::<MenuNav>()
+            .init_resource::<NewGameBuild>()
             .configure_sets(Update, Gameplay.run_if(in_state(AppState::Playing).or_else(in_state(AppState::Ended))))
             .add_systems(Startup, spawn_menu)
             .add_systems(Update, begin_game.after(crate::boot::LoadingSystems))
+            .add_systems(Update, poll_new_game_build.before(crate::boot::LoadingSystems).run_if(in_state(AppState::Loading)))
             .add_systems(Update, pause_on_escape.before(crate::virtual_cursor::toggle_capture).in_set(Gameplay).run_if(not(in_state(AppState::Ended))))
             .add_systems(Update, menu_from_env.in_set(Gameplay).run_if(not(in_state(AppState::Ended))))
             .add_systems(
@@ -310,12 +313,50 @@ fn spawn_menu(mut commands: Commands, overlay: Single<Entity, With<OverlayCamera
         });
 }
 
-/// Builds the map of a game the loading pass starts (`boot::BeginGame`), behind the loading screen.
-fn begin_game(mut begins: MessageReader<BeginGame>, mut game: GameSetup) {
+/// A game's map, building on a worker thread (`spawn_game_build`/`poll_new_game_build`): started once
+/// `begin_game` sees a `BeginGame` message, taken once done. `GameMap::load_original`/`generate` and the
+/// `sandbox_*` constructors are plain, deterministic, `Send` computation (`game-core` has no Bevy, no ECS
+/// access), so - unlike `BootJob`'s GPU-touching `install` half - a game start's whole build fits on one
+/// worker-thread task with nothing left to chunk into frame-sized pieces (TODO.md "Loading screen freezes").
+#[derive(Resource, Default)]
+struct NewGameBuild(Option<Task<GameMap>>);
+
+/// Starts building the map of a game the loading pass wants (`boot::BeginGame`), on a worker thread so the
+/// loading screen keeps rendering frames while it runs (`poll_new_game_build` picks up the result).
+fn begin_game(mut begins: MessageReader<BeginGame>, mut build: ResMut<NewGameBuild>, levels: Res<LevelList>, mut cursor: ResMut<VirtualCursor>) {
     for BeginGame(start) in begins.read() {
-        game.begin(*start);
-        game.cursor.request = Some(true);
+        build.0 = Some(spawn_game_build(*start, levels.clone()));
+        cursor.request = Some(true);
     }
+}
+
+/// The actual per-`Start` map construction (`GameSetup::begin`'s old match arm), off the main thread.
+fn spawn_game_build(start: Start, levels: LevelList) -> Task<GameMap> {
+    AsyncComputeTaskPool::get().spawn(async move {
+        match start {
+            Start::NewGame => levels.load_current(),
+            Start::SandboxWalk => new_game(GameMap::sandbox_walk()),
+            Start::SandboxUnits => new_game(GameMap::sandbox_units()),
+            Start::SandboxBuildings => new_game(GameMap::sandbox_buildings()),
+            Start::SandboxWorship => new_game(GameMap::sandbox_worship()),
+            Start::SandboxSpells => new_game(GameMap::sandbox_spells()),
+            Start::SandboxVehicles => new_game(GameMap::sandbox_vehicles()),
+            Start::SandboxBridge => new_game(GameMap::sandbox_bridge()),
+        }
+    })
+}
+
+/// Once `NewGameBuild`'s task finishes, installs the map and moves `GameStep::Building` on to `Built` (`boot::next`
+/// cannot do this transition itself: it is a pure function with no way to poll a `Task`).
+fn poll_new_game_build(mut build: ResMut<NewGameBuild>, mut game: GameSetup) {
+    let Some(mut task) = build.0.take() else { return };
+    let Some(map) = block_on(poll_once(&mut task)) else {
+        build.0 = Some(task);
+        return;
+    };
+    let LoadTarget::Game { start, step: GameStep::Building } = *game.target else { return };
+    game.finish_begin(start, map);
+    *game.target = LoadTarget::Game { start, step: GameStep::Built };
 }
 
 /// What starting, pausing and leaving a game touch.
@@ -345,18 +386,10 @@ pub(crate) fn leave_to_menu(game: &mut GameSetup, nav: &mut MenuNav, state: &mut
 }
 
 impl GameSetup<'_> {
-    /// Loads the map a game starts on; the camera frames it (`LevelList` change).
-    fn begin(&mut self, start: Start) {
-        self.map.0 = match start {
-            Start::NewGame => self.levels.load_current(),
-            Start::SandboxWalk => new_game(GameMap::sandbox_walk()),
-            Start::SandboxUnits => new_game(GameMap::sandbox_units()),
-            Start::SandboxBuildings => new_game(GameMap::sandbox_buildings()),
-            Start::SandboxWorship => new_game(GameMap::sandbox_worship()),
-            Start::SandboxSpells => new_game(GameMap::sandbox_spells()),
-            Start::SandboxVehicles => new_game(GameMap::sandbox_vehicles()),
-            Start::SandboxBridge => new_game(GameMap::sandbox_bridge()),
-        };
+    /// Installs a game's already-built `map` (`spawn_game_build`/`poll_new_game_build`); the camera frames it
+    /// (`LevelList` change).
+    fn finish_begin(&mut self, start: Start, map: GameMap) {
+        self.map.0 = map;
         *self.schedule = crate::units::GameSchedule::default();
         self.clock.new_game();
         self.grid.0 = start != Start::NewGame;

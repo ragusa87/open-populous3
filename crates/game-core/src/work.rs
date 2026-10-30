@@ -46,7 +46,7 @@ impl GameMap {
     /// Places `player`'s plan of `kind` with its corner at `at` if it can stand there; its id.
     pub fn place_building(&mut self, player: u8, kind: BuildingKind, at: (u16, u16), facing: u8) -> Option<BuildingId> {
         let b = Building::placed(kind, player, at.0, at.1, facing % 8, &self.terrain);
-        if kind.wood_cost() == 0 || !can_place(self, &b) {
+        if kind.wood_cost() == 0 || !can_place(self, &b, None) {
             return None;
         }
         Some(self.add_building(b))
@@ -86,7 +86,7 @@ impl GameMap {
     pub fn place_orders(&self, place: &Command, units: &[UnitId]) -> Vec<Command> {
         let Command::PlaceBuilding { player, kind, at, facing } = *place else { return Vec::new() };
         let b = Building::placed(kind, player, at.0, at.1, facing % 8, &self.terrain);
-        if kind.wood_cost() == 0 || !can_place(self, &b) {
+        if kind.wood_cost() == 0 || !can_place(self, &b, None) {
             return Vec::new();
         }
         self.orders_to_build(&b, units)
@@ -164,6 +164,7 @@ impl GameMap {
                 let b = &mut self.buildings[b];
                 b.used = (b.used + 1).min(b.kind.wood_cost());
                 if b.stage() == Stage::Built {
+                    crate::hut_growth::on_completed(b);
                     let (id, door) = (b.id, b.door());
                     self.empty_building(id, door);
                 }

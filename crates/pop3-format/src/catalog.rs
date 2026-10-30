@@ -187,6 +187,13 @@ pub fn tree_object(tree_type: u8) -> usize {
 /// 97, objects.md): banks 3-6 have three trees each, bank 0's 60-62, 63-65, 66-68, 69-71; banks 2 and
 /// 7 have bank 0's 13-15; in those banks scenery models 4-6 are copies of 1-3. Bank 0 and the types
 /// past the scenery models: `tree_object`.
+///
+/// The convention to follow for any other raw scenery/model number read straight off a `Thing` and
+/// drawn with the client's fixed bank-0 catalog (objects.md "Banks": we stay on bank 0, trees are the
+/// one object kind that still needs translating per the level's own bank byte) - a future scenery
+/// models 7/8 ("plant 1, plant 2", TODO.md "Wood") or general model 9 ("building add-on", TODO.md
+/// "Buildings") lookup should add its own small `_in_bank(bank, raw) -> usize` next to this one rather
+/// than assume bank 0's own numbering always applies.
 pub fn tree_object_in_bank(bank: u8, tree_type: u8) -> usize {
     match (bank, tree_type) {
         (3..=6, 0..=5) => 60 + 3 * (bank as usize - 3) + tree_type as usize % 3,
@@ -247,6 +254,16 @@ pub enum PersonAnim {
     /// sermon has 4 more identified phases around it (animations.md "`HSPR0-0.DAT` by index", anims 20,
     /// 21, 23, 24) not wired up here [guess: picked as the best single standing, looping phase].
     Preach,
+    /// Struck by lightning, carbonized (4 frames, brave only - unit-art.md): every material drawn black
+    /// in post, like the magenta key.
+    Carbonized,
+    /// A challenge's waiting target hiding its eyes (8 frames): one of 3 taunts, brave only (`Pose::Taunt*`).
+    TauntHide,
+    /// A challenge's waiting target waving an arm (9 frames): one of 3 taunts, brave only.
+    TauntWave,
+    /// A challenge's waiting target crouching then punching, not a fight move (7 frames): one of 3
+    /// taunts, brave only.
+    TauntPunch,
 }
 
 /// The frame of `PersonAnim::ArmsUp` standing with both arms up.
@@ -276,6 +293,10 @@ impl PersonAnim {
             PersonAnim::Pedal => 51,
             PersonAnim::Listen => 18,
             PersonAnim::Preach => 22,
+            PersonAnim::Carbonized => 97,
+            PersonAnim::TauntHide => 48,
+            PersonAnim::TauntWave => 49,
+            PersonAnim::TauntPunch => 50,
         }
     }
 }

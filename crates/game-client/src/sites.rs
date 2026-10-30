@@ -10,6 +10,7 @@ use crate::grounded::Grounded;
 use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects};
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
+use bevy::render::render_resource::Face;
 use crate::units::PLAYER;
 use game_core::map::GameMap;
 use game_core::site::ReincarnationSite;
@@ -123,8 +124,7 @@ fn respawn_markers(
         let mat = StandardMaterial {
             base_color_texture: Some(images.add(image)),
             perceptual_roughness: 0.95,
-            double_sided: true,
-            cull_mode: None,
+            cull_mode: Some(Face::Back),
             ..default()
         };
         (stone, mats.add(mat))

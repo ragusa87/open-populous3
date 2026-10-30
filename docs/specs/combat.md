@@ -20,9 +20,14 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
 
 - Everyone heals on every eighth turn of the game (`unit::HEAL_EVERY`, phase 0: the same turn for all) [exe],
   whatever it does, fighting included; not in the air, drowning, stranded or dead.
-- Never past full [ours]: the original adds the heal while below full, so life can end up to one heal over.
+- Past full by up to one heal [exe]: the original adds the heal while below full with no clamp, so life can end up
+  over max by up to one heal's worth; the next heal tick then takes the already-full branch (`Health::heal_past_max`).
 - In the air, a deadly hit does not kill at once: the unit flies on and dies on landing [exe].
-- Not yet: no healing while struck by lightning (we have no such state yet), the angel of death never heals.
+- No healing for a while after surviving a lightning hit (`Unit::statuses.struck_by_lightning`, matching the
+  original's state 44 "struck by lightning" blocking the life step like dying does): the exact duration isn't
+  traced (every lightning hit our code deals today kills outright, so nothing alive reaches this yet), kept as a
+  short, tagged guess (`status::LIGHTNING_STRUCK_STEPS`). Not yet: the angel of death never heals (that unit kind
+  doesn't exist yet).
 
 ## Fight numbers
 - Per kind (`KindStats`): a blow's strength at full life (constant.dat values: 60, the warrior 360), a rank (brave,
@@ -48,7 +53,9 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
 ## Attacking
 - `Order::Attack { target }` (`Target::Unit` or `Target::Building`), from a left click on an enemy person or
   building with own people selected (`units::selection::attack_click`). Only those that may attack it go
-  (`attack::may_attack`): both fight (never a wildman), other tribes, the target alive. A building only if it
+  (`attack::may_attack`): both fight, other tribes, the target alive. A wildman is a valid target here (not for
+  the automatic proximity scan, below): the original only confirms that scan skips it, whether an explicit
+  player order also refuses one is untraced either way - a guess that it does not (TODO.md "Units"). A building only if it
   belongs to another tribe and wears down (`may_attack_building`): never a neutral one (a vault of knowledge, a
   totem), which is prayed at; a click on it gives the prayer orders as before. A firewarrior's attack throws fire
   from afar ("Firebolts").
@@ -82,8 +89,12 @@ A coordinator (`challenge::Challenge`, coordinators.md) for one attacker and one
 - While waiting, the target faces the attacker (`WorldEvent::Face`, `Unit::face`: ours has no separate "held
   look-at" field - with nothing else moving its body while it only waits, setting the one `facing` field each turn
   reads the same) and taunts on a 1 in 8 chance per turn (`challenge::taunts`; pop3-rev-analysis.md "Pre-fight",
-  confirmed): kept on `Challenge::taunted` (the last turn it fired) for when there is a pose and the three taunt
-  animations to show for it (TODO.md "Units").
+  confirmed): kept on `Challenge::taunted` (the last turn it fired, and which of the 3 - `WorldEvent::Taunted`
+  copies both onto the target's own `Unit::taunted` so the client's pose can read them without the coordinator).
+  Drawn when it fires: one of the 3 original anims (48/49/50, animations.md - brave only, `Pose::TauntHide/Wave/
+  Punch`, `units::art::original_anim`; other kinds and CC0 art fall back to idle), held for a short guessed window
+  (`units::art::TAUNT_DISPLAY`) - *which* of the 3 plays is only confirmed "at random" [exe], the second draw that
+  picks one here is not itself traced.
 - Not yet: the original's option with no shove (a real level/script option, not a cheat - the same flag also
   disables Melee's own knockback variant, see "Melee" below); ground sliding instead of `SHOVE_LIFT` (push
   mechanics unread at the exe level either way). The "third approach, a target at its building" is not a separate
@@ -160,9 +171,11 @@ middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `
   and gates 16 000; the prison 22 000; a vault never) the wear drops by the limit and it loses a piece of wood
   (`lose_a_piece`): damage smoke, a large building's people thrown out [which kinds are large: guess], no repairs
   for `REPAIR_DELAY` (1200 turns); with no wood left it is destroyed (its people thrown out) and leaves ashes.
-- Not yet: enemies standing on a plan counting as its people, blasts' and firewarriors' wear, the flying faces of
-  the partial explosion, the player warned once, the attack going on from where it stands when no way leads to its
-  spot.
+- Firewarrior bolts and Blast's own blast add wear too (`BLAST_DAMAGE_BLDG` 40 once per building the blast ever
+  reaches, `firebolt::TARGET_DAMAGE` 100 when a bolt's own target is the building), feeding the same accumulator
+  as hacking.
+- Not yet: enemies standing on a plan counting as its people, the flying faces of the partial explosion, the player
+  warned once, the attack going on from where it stands when no way leads to its spot.
 
 ## Ashes
 `crate::ashes` ("Building ashes" [exe]): a building destroyed by losing its last piece of wood (worn down by
@@ -200,10 +213,13 @@ followed each turn (`GameMap::spot_enemies`).
   cell; busy (fighting, panicking, thrown, casting, drowning, entering, inside, dead), no look at all [the order
   kinds' split is the analysis' guess].
 - What: the square of cells (sight rounded down to even, + 1) around it, row by row from a corner (`square`); the
-  first match wins, not the nearest: an enemy person it may attack, alive, outside, on the ground, not thrown and
-  not listening to a sermon [guess: not traced, but it would undo the preacher's sit-down on its very next look],
-  and not in a melee; when idle, also someone in a melee (to join it) or an enemy building it can wear down. It then
-  attacks it (`Order::Attack`'s path) [ours: the original gives itself an "attack around this cell" order].
+  first match wins, not the nearest: an enemy person it may attack and that is not a wildman (0xFF tribeless,
+  confirmed - pop3-rev-analysis.md "Wildmen"; `attack::may_attack` itself no longer excludes one on its own, an
+  explicit player order is let through, so this scan filters it separately), alive, outside, on the ground, not
+  thrown and not listening to a sermon [guess: not traced, but it would undo the preacher's sit-down on its very
+  next look], and not in a melee; when idle, also someone in a melee (to join it) or an enemy building it can wear
+  down. It then attacks it (`Order::Attack`'s path) [ours: the original gives itself an "attack around this cell"
+  order].
 - `UnitGrid`: the living people outside by cell, sorted, built only on a look turn.
 
 ## Firebolts

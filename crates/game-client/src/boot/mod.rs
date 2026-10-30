@@ -1,7 +1,9 @@
 //! Loading: the boot jobs (`BootJob`, CPU work on a worker thread then installed on the main thread), the assets
 //! Bevy loads in the background (`TrackedAssets`), and the `Loading` state that waits for both before the menu or a
 //! game. `LoadTarget` says what a loading pass is for; `Loaded` is sent when it ends, the moment captures and
-//! profiles start from (`dev`, `tools/trace_top.py`). The screen showing it is `screen.rs`.
+//! profiles start from (`dev`, `tools/trace_top.py`). The screen showing it is `screen.rs`. A game start's own map
+//! build (`GameStep::Building`) runs the same off-thread-then-polled shape as a `BootJob`, driven from `menu.rs`
+//! instead of this module (`menu::spawn_game_build`/`poll_new_game_build`) since it isn't a fixed boot-time plugin.
 
 pub mod screen;
 
@@ -162,11 +164,14 @@ pub enum LoadTarget {
     Game { start: Start, step: GameStep },
 }
 
-/// Where a game start is: its screen shown for some frames first (so "preparing the map" is drawn before the map is
-/// built, which holds the main thread), then built.
+/// Where a game start is: its screen shown for some frames first (so "preparing the map" is drawn before the map
+/// build starts), then the map built on a worker thread while the loading screen keeps rendering frames
+/// (`Building`, `menu::begin_game`/`poll_new_game_build` - unlike `BootJob`, a game start isn't a fixed boot-time
+/// plugin, so it gets its own small task instead of reusing that trait), then installed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameStep {
     Show { frames: u8 },
+    Building,
     Built,
 }
 
@@ -219,6 +224,9 @@ pub fn next(target: LoadTarget, jobs_done: bool, assets_done: bool) -> Next {
         LoadTarget::Boot { then: None } => Next::Finish(AppState::Menu),
         LoadTarget::Game { start, step: GameStep::Show { frames: 0 } } => Next::Begin(start),
         LoadTarget::Game { step: GameStep::Show { .. }, .. } => Next::Wait,
+        // Building -> Built is driven by `menu::poll_new_game_build` once its task finishes, not by this pure
+        // function (it has no way to poll a `Task`): it just keeps waiting meanwhile, same as `Show`.
+        LoadTarget::Game { step: GameStep::Building, .. } => Next::Wait,
         LoadTarget::Game { step: GameStep::Built, .. } if !assets_done => Next::Wait,
         LoadTarget::Game { step: GameStep::Built, .. } => Next::Finish(AppState::Playing),
     }
@@ -257,7 +265,7 @@ fn advance(
         }
         Next::Begin(start) => {
             begin.write(BeginGame(start));
-            *target = LoadTarget::Game { start, step: GameStep::Built };
+            *target = LoadTarget::Game { start, step: GameStep::Building };
         }
         Next::Load(start) => *target = LoadTarget::game(start),
         Next::Finish(to) => {
@@ -311,6 +319,7 @@ mod tests {
         let game = |step| LoadTarget::Game { start: Start::NewGame, step };
         assert_eq!(next(game(GameStep::Show { frames: 1 }), true, true), Next::Wait, "the screen drawn first");
         assert_eq!(next(game(GameStep::Show { frames: 0 }), true, true), Next::Begin(Start::NewGame), "shown: now build the map");
+        assert_eq!(next(game(GameStep::Building), true, true), Next::Wait, "building on a worker thread, not installed yet");
         assert_eq!(next(game(GameStep::Built), true, false), Next::Wait, "models still loading");
         assert_eq!(next(game(GameStep::Built), true, true), Next::Finish(AppState::Playing));
     }

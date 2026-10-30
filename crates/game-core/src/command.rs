@@ -28,6 +28,10 @@ pub enum Command {
     /// Put out the player's camp fire in the cell holding world point `at`; whoever went round it
     /// stops.
     RemoveCampfire { player: u8, at: (u16, u16) },
+    /// The world editor's object-placement brush: plants a tree in the cell holding world point
+    /// `at` (`tree::cell_at`), ignored if a living one is already there. `player` is unused (trees
+    /// have no owner) but carried for the same reason every other command does.
+    PlaceTree { player: u8, at: (u16, u16) },
     /// Place a building plan with its stored corner at `at` (`placement::can_place`); braves are
     /// sent to it with `Order::Build`.
     PlaceBuilding { player: u8, kind: BuildingKind, at: (u16, u16), facing: u8 },
@@ -66,6 +70,11 @@ pub enum Command {
     AddPatrolTargetPoint { player: u8, units: Vec<UnitId>, target: Target },
     /// `N`: releases `units`' whole patrol (its points are pruned once nothing still refers to them).
     ReleasePatrol { player: u8, units: Vec<UnitId> },
+    /// `G` with nothing selected: stops every one of the player's own units currently escorting the shaman
+    /// (`GameMap::tend_guards`, pop3-rev-analysis.md "Guard the shaman") - a tribe-wide scan-and-cancel, unlike
+    /// every other order command, since the player does not (and in the original does not either) name which
+    /// units are guarding to call them off.
+    CancelGuard { player: u8 },
     /// A plain group move order (`GameMap::move_orders`, more than one walker): `units` (already given their own
     /// standing spot near `to`) space themselves into one new formation (formation.rs) instead of each aiming
     /// straight at it. Carries the whole group for the same reason `SetPatrol` does: the formation is one new

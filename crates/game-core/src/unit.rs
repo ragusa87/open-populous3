@@ -16,6 +16,7 @@ use crate::spell::Spell;
 use crate::status::Statuses;
 use crate::terrain::Heightmap;
 use crate::time::{Countdown, Every, Tick, Ticks};
+use crate::totem::TotemId;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 pub const SHAMAN_MAX_HEALTH: u16 = UnitKind::Shaman.stats().life;
@@ -47,8 +48,14 @@ pub const LANDING_DROP: i32 = 256;
 /// The fall when dying, and the shaman's wait before reincarnation.
 pub const DYING_TICKS: Ticks = Ticks::millis(1500);
 pub const RESPAWN_TICKS: Ticks = Ticks::secs(3);
-/// Others' spirit rising from the body after the fall, before they are gone (a guess).
-pub const SPIRIT_TICKS: Ticks = Ticks::secs(3);
+/// Others' spirit rising from the body after the fall, before they are gone: two variants
+/// (pop3-rev-analysis.md "Death and the spirit rise") - a brief, stationary "calm" rise, or, for a wildman
+/// always and anyone else only if it died in a drowning-eligible spot, a longer "climbing" one with a real
+/// sustained upward velocity (`SPIRIT_CLIMB_RATE`) [exe, confirmed].
+pub const SPIRIT_CALM_TICKS: Ticks = Ticks::new(4);
+pub const SPIRIT_CLIMB_TICKS: Ticks = Ticks::new(32);
+/// The climbing variant's own upward speed, terrain height units per tick: no gravity, no deceleration [exe].
+pub const SPIRIT_CLIMB_RATE: i32 = 40;
 /// Chopping one piece of wood off a tree: the original's `CHOP_TIME` at a tree (pop3-rev-analysis.md "Chopping").
 pub const CHOP_TICKS: Ticks = Ticks::new(20);
 /// Picking up a piece of wood lying on the ground: the original's `CHOP_TIME` at a wood pile.
@@ -71,6 +78,20 @@ const PANIC_REACH: i32 = 1024;
 pub const BURN_TICKS: Ticks = Ticks::new(70);
 /// On fire: lost a turn is its own max health divided by this, confirmed.
 pub const BURN_DIVISOR: u16 = 32;
+
+/// Ground recovery (`Action::Settling`, pop3-rev-analysis.md "Tumbling and ground recovery"): each wait round is
+/// `4..=31` turns [exe, measured], rolled off the shared LCG there.
+const SETTLE_WAIT_MIN: u32 = 4;
+const SETTLE_WAIT_SPAN: u32 = 28;
+/// Odds (out of 64) of another wait round once one ends: the original's own combined 13/32 + 3/64 chance of
+/// kicking back into a resting sub-state, rather than getting up [exe, measured].
+const SETTLE_CONTINUE_ODDS: u32 = 29;
+/// How many extra rounds `settle_ticks` allows after the first, so the (rare) worst case stays a bounded "several
+/// dozen turns" rather than an unbounded tail: our own cap, not traced - the original instead rerolls forever with
+/// ever-shrinking odds of reaching any given round. Kept low: at roughly 45% odds per round, even this keeps the
+/// common case (no reroll) well under a firewarrior's own ~27-turn reload, matching "a handful" as the typical
+/// outcome and "several dozen" as the rare, unlucky tail rather than something a steady attacker hits every time.
+const SETTLE_MAX_EXTRA_ROUNDS: u32 = 1;
 
 /// A unit's stable id (`GameMap::new_id_of`).
 pub type UnitId = Id<Unit>;
@@ -134,6 +155,15 @@ impl UnitKind {
     }
 }
 
+/// Where `Order::Worship`/`Action::Worshipping` prays: a vault by its stored corner, a totem by its own
+/// id - worship.rs's own module doc: "A vault is keyed by its stored corner, a totem by its centre:
+/// never the same point", so the two addressing kinds are never collapsed into one shared point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorshipAt {
+    Vault { corner: (u16, u16) },
+    Totem { id: TotemId },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Idle,
@@ -151,6 +181,13 @@ pub enum Action {
     /// Flung through the air or rolling on the ground by a spell, moved by `Unit::velocity` at
     /// `Unit::lift`: no orders until still on the ground again.
     Tumbling,
+    /// Ground recovery after a tumble (pop3-rev-analysis.md "Tumbling and ground recovery", person state 19): once
+    /// still on the ground, locked (no orders) for `left`, playing its ordinary Idle pose, before resuming its own
+    /// per-type behaviour (`settle`). The original stays down for a randomized stretch instead of recovering at
+    /// once, picking a nearby resting spot and rerolling several more short waits along the way - our own
+    /// simplification keeps the duration's randomness but not the relocation or the per-round reroll loop
+    /// (collapsed into one upfront draw, `settle_ticks`): see TODO.md "Units".
+    Settling { left: Countdown },
     /// Running in panic towards `away` (a heading, `panic_heading`) at `PANIC_SPEED`, out by the door first when
     /// inside: no orders until `left` runs out.
     Panicking { away: (i16, i16), left: Countdown },
@@ -163,11 +200,15 @@ pub enum Action {
     Dying { left: Countdown },
     /// The shaman, lying dead: waiting to reincarnate at her site.
     Dead { left: Countdown },
-    /// Anyone else after the fall: its spirit rises from the body, then the unit is gone from the map.
-    Spirit { left: Countdown },
+    /// Anyone else after the fall: its spirit rises from the body, then the unit is gone from the map. `climbing`:
+    /// a real sustained rise (`motion.height`, `SPIRIT_CLIMB_RATE`) rather than the brief stationary "calm" one.
+    Spirit { left: Countdown, climbing: bool },
     /// Going round the camp fire at `fire` (its centre), last at its ring point `point`
     /// (`campfire::ring_point`), at `AROUND_FIRE_PACE` of her walking speed.
     AroundFire { fire: (u16, u16), point: u8 },
+    /// A wildman eating beside a tree, or (`drink`) drinking at the shore (pop3-rev-analysis.md "Wildmen"), `left`
+    /// ticks before it wanders off again.
+    Grazing { drink: bool, left: Countdown },
     /// A brave cutting one piece of wood off the tree at `tree` (its position), `left` ticks to go.
     Chopping { tree: (u16, u16), left: Countdown },
     /// A brave picking up the piece of wood at `at` (its position), `left` ticks to go: the original's same
@@ -190,11 +231,15 @@ pub enum Action {
     /// A brave inside a building under construction with nothing to build yet, hammering away until
     /// wood comes or it is built.
     Hammering,
-    /// The shaman praying at the door of the vault of knowledge whose stored corner is `site`
-    /// (`GameMap::tend_vaults`).
-    Worshipping { site: (u16, u16) },
+    /// Praying at a vault of knowledge (`GameMap::tend_vaults`) or a totem (`GameMap::tend_totems`),
+    /// `at` the one its `WorshipAt` addresses.
+    Worshipping { at: WorshipAt },
     /// On its way to attack `target`, whose place it last aimed at is `to` (`GameMap::tend_attacks` keeps it up to date).
     Attacking { target: Target, to: (u16, u16) },
+    /// Escorting the tribe's shaman (`G` key, pop3-rev-analysis.md "Guard the shaman"): stays within `GUARD_RANGE`
+    /// of her current position on both axes, last aimed at `to` (`GameMap::tend_guards` keeps it up to date, same
+    /// shape as `Attacking`); never reports itself done on its own while she lives.
+    Guarding { shaman: UnitId, to: (u16, u16) },
     /// Its `role` in the challenge `challenge` (challenge.rs).
     Challenge { challenge: crate::challenge::ChallengeId, role: crate::challenge::Role },
     /// A firewarrior throwing fire at `target` (firebolt.rs), `left` turns to go; then back to its attack.
@@ -226,12 +271,15 @@ impl Action {
             Action::Landing => "Landing",
             Action::Drowning => "Drowning",
             Action::Tumbling => "Tumbling",
+            Action::Settling { .. } => "Settling",
             Action::Panicking { .. } => "Panicking",
             Action::OnFire { .. } => "Burning",
             Action::Dying { .. } => "Dying",
             Action::Dead { .. } => "Dead",
             Action::Spirit { .. } => "Dead",
             Action::AroundFire { .. } => "Around the fire",
+            Action::Grazing { drink: false, .. } => "Eating",
+            Action::Grazing { drink: true, .. } => "Drinking",
             Action::Chopping { .. } => "Cutting wood",
             Action::PickingUpWood { .. } => "Picking up wood",
             Action::Holding { .. } => "Holding wood",
@@ -242,6 +290,7 @@ impl Action {
             Action::Alighting { .. } => "Getting off",
             Action::Hammering => "Hammering",
             Action::Attacking { .. } => "Attacking",
+            Action::Guarding { .. } => "Guarding",
             Action::Challenge { .. } | Action::Melee { .. } => "Fighting",
             Action::Listening { .. } => "Listening",
             Action::Queuing { .. } => "Queuing",
@@ -272,7 +321,7 @@ impl Action {
         match *self {
             Action::Casting { left }
             | Action::Dying { left }
-            | Action::Spirit { left }
+            | Action::Spirit { left, .. }
             | Action::Dead { left }
             | Action::Chopping { left, .. }
             | Action::PickingUpWood { left, .. }
@@ -291,7 +340,7 @@ impl Action {
     }
 
     pub(crate) fn can_take_orders(&self) -> bool {
-        !matches!(self, Action::Drowning | Action::Tumbling | Action::Panicking { .. } | Action::OnFire { .. } | Action::Listening { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
+        !matches!(self, Action::Drowning | Action::Tumbling | Action::Settling { .. } | Action::Panicking { .. } | Action::OnFire { .. } | Action::Listening { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
     }
 }
 
@@ -316,15 +365,17 @@ pub enum Order {
     /// Followers: walk in by the door of the hut whose stored corner is `site` and rest inside, if it
     /// has room (`GameMap::start_order`).
     Enter { site: (u16, u16) },
-    /// The shaman: walk to the door of the vault of knowledge whose stored corner is `site` and pray
-    /// there until it lets her in (`GameMap::go_worship`).
-    Worship { site: (u16, u16) },
+    /// Walk to pray at the vault of knowledge or totem `at` addresses, until it lets the shaman in
+    /// (a vault) or it is exhausted (a totem) (`GameMap::go_worship`).
+    Worship { at: WorshipAt },
     /// Fighters: attack an enemy person or building (`GameMap::go_attack`, combat.md).
     Attack { target: Target },
     /// Walk next to the vehicle `vehicle` and get on, if it has a free seat (`GameMap::go_board`, vehicles.md).
     Board { vehicle: crate::vehicle::VehicleId },
     /// Aboard a vehicle: get off it, if there is ground to get off on (`GameMap::get_off`, vehicles.md).
     GetOff,
+    /// Followers (not the shaman): escort her continuously (`G`, `GameMap::go_guard`).
+    Guard,
 }
 
 /// What an attack is aimed at.
@@ -372,6 +423,10 @@ pub struct Unit {
     pub health: Health,
     /// Who hurt it last, and why if that killed it (`GameMap::damage`'s own bookkeeping, `hurt.rs`).
     hurt: Hurt,
+    /// The last turn it taunted while waiting in a challenge, and which of the 3 taunts
+    /// (combat.md "Challenge"): a short display window for the client's pose, not cleared once it
+    /// passes - `pose_of` must check recency itself.
+    taunted: Option<(Tick, u8)>,
     /// Free motion when flung or falling (still while walking or standing).
     pub motion: Motion,
     pub statuses: Statuses,
@@ -390,14 +445,16 @@ pub struct Unit {
     spell: Option<Spell>,
     /// The camp fire (centre) and ring point she is walking to, to go round it once there.
     to_fire: Option<((u16, u16), u8)>,
+    /// A wildman's own walk to eat (`false`) or drink (`true`) once there (`wildman::tend_wildmen`).
+    to_graze: Option<bool>,
     /// The tree (position) she is walking to, to cut it once there.
     to_tree: Option<(u16, u16)>,
     /// The piece of wood (position) she is walking to, to pick it up once there.
     to_wood: Option<(u16, u16)>,
     /// The building (stored corner) she is walking to the door of, to go in once there.
     to_house: Option<BuildingId>,
-    /// The vault (stored corner) she is walking to the door of, to pray there once there.
-    to_shrine: Option<(u16, u16)>,
+    /// The vault or totem she is walking to (its door, or a free spot around it), to pray there once there.
+    to_shrine: Option<WorshipAt>,
     /// The vehicle she is walking to, to get on once there.
     to_vehicle: Option<crate::vehicle::VehicleId>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
@@ -454,6 +511,7 @@ impl Unit {
             facing: 0,
             health: Health::full(kind.max_health()),
             hurt: Hurt::default(),
+            taunted: None,
             motion: Motion::STILL,
             statuses: Statuses::default(),
             action: Action::Idle,
@@ -464,6 +522,7 @@ impl Unit {
             teleport_to: None,
             spell: None,
             to_fire: None,
+            to_graze: None,
             to_tree: None,
             to_wood: None,
             to_house: None,
@@ -513,9 +572,10 @@ impl Unit {
         self.action == Action::Tumbling || self.motion.airborne()
     }
 
-    /// Thrown, or listening to a preacher: no order reaches it and its player cannot select it.
+    /// Thrown, settling after a tumble, or listening to a preacher: no order reaches it and its player cannot
+    /// select it.
     pub fn locked(&self) -> bool {
-        self.thrown() || matches!(self.action, Action::Listening { .. })
+        self.thrown() || matches!(self.action, Action::Listening { .. } | Action::Settling { .. })
     }
 
     /// Orders change what it does: not while drowning, tumbling, dying or dead, nor off the ground.
@@ -629,6 +689,15 @@ impl Unit {
         }
     }
 
+    /// A wildman's own walk to `at`, then eats (`drink` false) or drinks (`drink` true) there
+    /// (`wildman::tend_wildmen`).
+    pub fn go_graze(&mut self, at: (u16, u16), drink: bool) {
+        self.start(Order::MoveTo { x: at.0, z: at.1 });
+        if self.action.can_take_orders() {
+            self.to_graze = Some(drink);
+        }
+    }
+
     /// Walks to `door`, then goes into the building `building` (id, `UnitEvent::AtDoor`).
     pub fn go_enter(&mut self, building: BuildingId, door: (u16, u16)) {
         self.start(Order::MoveTo { x: door.0, z: door.1 });
@@ -637,11 +706,12 @@ impl Unit {
         }
     }
 
-    /// Walks to `door`, then prays there for the vault at `site` (`Action::Worshipping`).
-    pub fn go_worship(&mut self, site: (u16, u16), door: (u16, u16)) {
-        self.start(Order::MoveTo { x: door.0, z: door.1 });
+    /// Walks to `stand` (a vault's door, or a free spot around a totem), then prays `at` it once there
+    /// (`Action::Worshipping`).
+    pub fn go_worship(&mut self, at: WorshipAt, stand: (u16, u16)) {
+        self.start(Order::MoveTo { x: stand.0, z: stand.1 });
         if self.action.can_take_orders() {
-            self.to_shrine = Some(site);
+            self.to_shrine = Some(at);
         }
     }
 
@@ -735,7 +805,7 @@ impl Unit {
             return;
         }
         (self.route, self.planned_on, self.teleport_to, self.spell, self.to_fire) = (Vec::new(), None, None, None, None);
-        (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle) = (None, None, None, None, None);
+        (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle, self.to_graze) = (None, None, None, None, None, None);
         self.action = match order {
             Order::MoveTo { x, z } => Action::Walking { to: (x, z) },
             Order::Campfire { fire, point } => {
@@ -743,7 +813,7 @@ impl Unit {
                 Action::Walking { to: campfire::ring_point(fire, point) }
             }
             Order::Cast => Action::Casting { left: Countdown::new(CAST_TICKS) },
-            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } | Order::GetOff => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } | Order::GetOff | Order::Guard => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
                 Action::Walking { to: tree }
@@ -754,7 +824,10 @@ impl Unit {
     /// One simulation step. `site` is where the unit reincarnates.
     pub fn tick(&mut self, now: Tick, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
         let terrain = ground.terrain();
-        if self.motion.airborne() {
+        // A climbing spirit is airborne too (`motion.height`, for the client's own existing lift-drawing) but
+        // never subject to gravity or a touchdown - it has its own, simpler, ungoverned rise in its own branch
+        // below instead of going through the general physics step meant for a thrown or falling person.
+        if self.motion.airborne() && !matches!(self.action, Action::Spirit { .. }) {
             let below = |(x, z): (u16, u16)| terrain.height_at(x as u32, z as u32, WORLD_UNITS_PER_CELL);
             let touchdown;
             ((self.x, self.z), self.motion, touchdown) = physics::step((self.x, self.z), self.motion, below);
@@ -793,6 +866,7 @@ impl Unit {
                 }
             }
             Action::Attacking { to, .. } if self.in_the_open() => self.approach(to, ground),
+            Action::Guarding { to, .. } if self.in_the_open() => self.approach(to, ground),
             Action::Queuing { at, .. } => {
                 self.approach(at, ground);
                 if self.route.is_empty() && (self.x, self.z) != at && self.planned_on == Some(ground.revision()) {
@@ -800,6 +874,7 @@ impl Unit {
                 }
             }
             Action::Attacking { .. } => {}
+            Action::Guarding { .. } => {}
             Action::Hacking { .. } => {}
             Action::Throwing { target, mut left } => {
                 self.action = match left.tick() {
@@ -838,15 +913,20 @@ impl Unit {
                             self.action = Action::PickingUpWood { at, left: Countdown::new(PICK_TICKS) };
                         } else if let Some(building) = self.to_house.take() {
                             return Some(UnitEvent::AtDoor { building });
-                        } else if let Some(site) = self.to_shrine.take() {
-                            self.action = Action::Worshipping { site };
+                        } else if let Some(at) = self.to_shrine.take() {
+                            self.action = Action::Worshipping { at };
                         } else if let Some(vehicle) = self.to_vehicle.take() {
                             return Some(UnitEvent::AtVehicle { vehicle });
+                        } else if let Some(drink) = self.to_graze.take() {
+                            self.action = Action::Grazing { drink, left: Countdown::new(crate::wildman::GRAZE_TICKS) };
                         }
                     }
                 } else if self.hurt(now) {
                     return Some(UnitEvent::Died);
                 }
+            }
+            Action::Grazing { drink, mut left } => {
+                self.action = if left.tick() { Action::Idle } else { Action::Grazing { drink, left } };
             }
             Action::Holding { mut left } => {
                 if left.tick() {
@@ -923,7 +1003,24 @@ impl Unit {
             Action::Gathered { .. } => {}
             Action::Tumbling => {
                 if self.motion.is_still() {
-                    self.action = Action::Idle;
+                    // A fatal hit taken mid-tumble is held off (`take_damage`'s own `!self.thrown()` guard,
+                    // `thrown()` true for the whole of `Action::Tumbling`) rather than lost: catch up on it now
+                    // that the hold-off itself is ending, instead of settling back to Idle at zero health.
+                    if self.health.is_zero() {
+                        self.die();
+                        return Some(UnitEvent::Died);
+                    }
+                    return self.settle(now);
+                }
+            }
+            Action::Settling { mut left } => {
+                if left.tick() {
+                    // `go_idle`, not a direct `Action::Idle`: a standing attack order a fight put on hold
+                    // (`resume_attack`) resumes once actually back on its feet, same as `touch_down`'s other
+                    // callers (pop3-rev-analysis.md "Resuming a fight cut short by a push").
+                    self.go_idle();
+                } else {
+                    self.action = Action::Settling { left };
                 }
             }
             Action::Drowning => {
@@ -939,14 +1036,17 @@ impl Unit {
                 self.action = match left.tick() {
                     false => Action::Dying { left },
                     true if self.kind == UnitKind::Shaman => Action::Dead { left: Countdown::new(RESPAWN_TICKS) },
-                    true => Action::Spirit { left: Countdown::new(SPIRIT_TICKS) },
+                    true => self.new_spirit(terrain),
                 };
             }
-            Action::Spirit { mut left } => {
+            Action::Spirit { mut left, climbing } => {
+                if climbing {
+                    self.motion.height = self.motion.height.map(|h| h + SPIRIT_CLIMB_RATE);
+                }
                 if left.tick() {
                     return Some(UnitEvent::Gone);
                 }
-                self.action = Action::Spirit { left };
+                self.action = Action::Spirit { left, climbing };
             }
             Action::Dead { mut left } => {
                 if !left.tick() {
@@ -961,31 +1061,33 @@ impl Unit {
                     // No reincarnation site for this owner (`DO SET_REINCARNATION OFF`,
                     // ai-scripts.md): same fallback as `Dying`'s own non-shaman case just above,
                     // instead of staying stuck in `Dead` forever.
-                    None => self.action = Action::Spirit { left: Countdown::new(SPIRIT_TICKS) },
+                    None => self.action = self.new_spirit(terrain),
                 }
             }
         }
         None
     }
 
-    /// Whether it heals on a `HEAL_EVERY` turn: alive and on the ground, fighting or not, but not while drowning or
-    /// stranded (losing life), nor for a kind that never heals.
+    /// Whether it heals on a `HEAL_EVERY` turn: alive and on the ground, fighting or not, but not while drowning,
+    /// stranded (losing life) or freshly struck by lightning, nor for a kind that never heals.
     pub fn heals(&self) -> bool {
         self.kind.stats().heal.is_some()
             && self.is_alive()
             && !self.motion.airborne()
             && !matches!(self.action, Action::Drowning | Action::Stranded { .. } | Action::OnFire { .. })
+            && !self.statuses.struck_by_lightning.is_on()
     }
 
-    /// Its turn of healing (`HEAL_EVERY`), if it `heals`: already full, it instead forgets the last attacker
-    /// (pop3-rev-analysis.md "Health and healing": "else: last attacker (+0xB0) = none").
+    /// Its turn of healing (`HEAL_EVERY`), if it `heals`: already full (or past it, by up to one heal, "Health and
+    /// healing"), it instead forgets the last attacker (pop3-rev-analysis.md "Health and healing": "else: last
+    /// attacker (+0xB0) = none").
     pub fn heal(&mut self) {
         if let Some(points) = self.kind.stats().heal.filter(|_| self.heals()) {
             if self.health.is_full() {
                 self.hurt.healed();
                 return;
             }
-            self.health.heal(points);
+            self.health.heal_past_max(points);
         }
     }
 
@@ -1067,8 +1169,28 @@ impl Unit {
         let dead = self.take_damage(amount);
         if dead {
             self.hurt.died_from(kind);
+        } else if kind == DamageKind::Lightning {
+            // "Health and healing": state 44 ("struck by lightning") blocks the life step like dying does; a
+            // survivor's exact duration isn't traced (every current lightning hit kills outright, TODO.md
+            // "Combat"), so this is a tagged guess kept short, reusing the status step rhythm.
+            self.statuses.struck_by_lightning = crate::status::Timed::steps(crate::status::LIGHTNING_STRUCK_STEPS);
         }
         dead
+    }
+
+    /// Which spirit-rise variant starts now (pop3-rev-analysis.md "Death and the spirit rise") [exe, confirmed]:
+    /// a wildman always, anyone else only if it died in a drowning-eligible spot (`is_sea` on its own cell -
+    /// the same test `Action::Drowning` itself starts from), gets the longer "climbing" rise with a real
+    /// sustained upward velocity, set here at the body's own ground height; everyone else gets the brief,
+    /// stationary "calm" one.
+    fn new_spirit(&mut self, terrain: &Heightmap) -> Action {
+        let climbing = self.kind == UnitKind::Wildman || is_sea(terrain, self.cell());
+        let left = Countdown::new(if climbing { SPIRIT_CLIMB_TICKS } else { SPIRIT_CALM_TICKS });
+        if climbing {
+            let (cx, cz) = self.cell();
+            self.motion = Motion::flying(Velocity::new(0, SPIRIT_CLIMB_RATE as i16, 0), terrain.get(cx, cz) as i32);
+        }
+        Action::Spirit { left, climbing }
     }
 
     fn die(&mut self) {
@@ -1089,16 +1211,28 @@ impl Unit {
             self.die();
             return Some(UnitEvent::Died);
         }
-        if self.action.link().is_none() {
+        // A tumble settles (`Action::Settling`, the `Action::Tumbling` tick arm below, reached the same tick: by
+        // now `self.motion` is already `Motion::STILL`) rather than going idle at once.
+        if self.action.link().is_none() && self.action != Action::Tumbling {
             self.go_idle();
         }
         None
     }
 
+    /// Enters the ground-recovery grace period after a tumble (`Action::Settling`, `settle_ticks`). Any wood it
+    /// was carrying is put down right away - our own simplification of the original's "once per 100 wood while
+    /// settling" debris drip (we only ever carry one whole load at a time, so there is only ever one drop to make;
+    /// the debris puff itself, and the holding-wood pose while it's still carried, are left out: no such visual
+    /// exists yet, and this detail isn't confirmed live either way, TODO.md "Units").
+    fn settle(&mut self, now: Tick) -> Option<UnitEvent> {
+        self.action = Action::Settling { left: Countdown::new(settle_ticks(self.id, now)) };
+        (self.carrying > 0).then_some(UnitEvent::PutDown)
+    }
+
     /// Forgets where it was going, what it was to do there and its work.
     fn drop_plans(&mut self) {
         (self.route, self.planned_on, self.teleport_to, self.spell, self.to_fire) = (Vec::new(), None, None, None, None);
-        (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle) = (None, None, None, None, None);
+        (self.to_tree, self.to_wood, self.to_house, self.to_shrine, self.to_vehicle, self.to_graze) = (None, None, None, None, None, None);
         self.queue.clear();
         self.patrol.clear();
         self.work = None;
@@ -1156,6 +1290,17 @@ impl Unit {
         self.action = Action::Idle;
     }
 
+    /// Like `change_owner`, but keeps its current health and carried wood (Hypnotism's own capture and revert,
+    /// `hypnotism.rs`: confirmed live, 0x50EB00 — the captured person's life, max life and carried wood cross both
+    /// the capture and the later revert, unlike an ordinary `change_owner`/soul-convert which starts the new
+    /// person fresh). Never called on a wildman (Hypnotism never captures one), so `change_owner`'s kind-driven
+    /// life reset never actually fires here.
+    pub(crate) fn change_owner_keeping_body(&mut self, tribe: u8) {
+        let (health, carrying) = (self.health, self.carrying);
+        self.change_owner(tribe);
+        (self.health, self.carrying) = (health, carrying);
+    }
+
     /// Joins a coordinator, or a sermon's `Listening` (locked the same way but backed by no coordinator), with
     /// `action`, leaving its way, its chained orders and the spell it was to cast. An attacker's own standing
     /// attack order is not one of those: it goes dormant instead (`resume_attack`, picked up again by
@@ -1193,6 +1338,15 @@ impl Unit {
         if (dx, dz) != (0, 0) {
             self.facing = octant(dx, dz);
         }
+    }
+
+    /// One of the 3 taunts (combat.md "Challenge"), the turn it started.
+    pub fn taunted(&self) -> Option<(Tick, u8)> {
+        self.taunted
+    }
+
+    pub(crate) fn taunt(&mut self, at: Tick, variant: u8) {
+        self.taunted = Some((at, variant));
     }
 
     /// One turn of its stance in a melee: to its place, on guard, striking, reeling then thrown back.
@@ -1301,11 +1455,17 @@ impl Unit {
     /// The target of its attack moved to `to`: aims there, planning again once it is a cell away from where it
     /// aimed.
     pub fn retarget(&mut self, to: (u16, u16)) {
-        if let Action::Attacking { target, to: aimed } = self.action
-            && (torus_delta(aimed.0, to.0).abs() >= WORLD_UNITS_PER_CELL as i32 || torus_delta(aimed.1, to.1).abs() >= WORLD_UNITS_PER_CELL as i32)
-        {
-            self.action = Action::Attacking { target, to };
-            self.planned_on = None;
+        let moved = |aimed: (u16, u16)| torus_delta(aimed.0, to.0).abs() >= WORLD_UNITS_PER_CELL as i32 || torus_delta(aimed.1, to.1).abs() >= WORLD_UNITS_PER_CELL as i32;
+        match self.action {
+            Action::Attacking { target, to: aimed } if moved(aimed) => {
+                self.action = Action::Attacking { target, to };
+                self.planned_on = None;
+            }
+            Action::Guarding { shaman, to: aimed } if moved(aimed) => {
+                self.action = Action::Guarding { shaman, to };
+                self.planned_on = None;
+            }
+            _ => {}
         }
     }
 
@@ -1427,6 +1587,25 @@ pub fn panic_heading(a: u32, b: u32) -> (i16, i16) {
         return (PANIC_REACH as i16, 0);
     }
     ((dx * PANIC_REACH / len) as i16, (dz * PANIC_REACH / len) as i16)
+}
+
+/// How long a tumbled unit settles before it's responsive again (`Action::Settling`): one `SETTLE_WAIT_MIN..=31`
+/// round, continuing for up to `SETTLE_MAX_EXTRA_ROUNDS` more at `SETTLE_CONTINUE_ODDS` each
+/// (pop3-rev-analysis.md "Tumbling and ground recovery"). Seeded from the unit's own id and the tick it lands on,
+/// not the shared `map::Lcg`: `Unit::tick` has no RNG of its own, and giving it one would mean threading `&mut Lcg`
+/// through every caller and test in the crate for this purely cosmetic timing detail. Still a pure function of
+/// simulation state (no wall-clock, no iteration order), so still deterministic and lockstep-safe.
+fn settle_ticks(id: UnitId, now: Tick) -> Ticks {
+    let mut rng = crate::map::Lcg(id.raw().wrapping_mul(2_654_435_761).wrapping_add(now.to_wire()));
+    let wait = |rng: &mut crate::map::Lcg| Ticks::new(SETTLE_WAIT_MIN + rng.next_u32() % SETTLE_WAIT_SPAN);
+    let mut total = wait(&mut rng);
+    for _ in 0..SETTLE_MAX_EXTRA_ROUNDS {
+        if rng.next_u32() % 64 >= SETTLE_CONTINUE_ODDS {
+            break;
+        }
+        total = total + wait(&mut rng);
+    }
+    total
 }
 
 /// Nearest of 8 headings for a direction (0 = +z, 2 = +x, 4 = -z, 6 = -x), integers only.
@@ -1824,8 +2003,8 @@ mod tests {
         let ticks = run_until(&mut brave, &t, &site, |u| !u.is_alive());
         assert!(matches!(brave.action, Action::Dying { .. }));
         run(&mut brave, &t, &site, DYING_TICKS.get() as usize);
-        assert!(matches!(brave.action, Action::Spirit { .. }), "its spirit rises, no reincarnation");
-        assert_eq!(run(&mut brave, &t, &site, SPIRIT_TICKS.get() as usize), [UnitEvent::Gone]);
+        assert!(matches!(brave.action, Action::Spirit { climbing: true, .. }), "its spirit rises (climbing: died on a sea cell), no reincarnation");
+        assert_eq!(run(&mut brave, &t, &site, SPIRIT_CLIMB_TICKS.get() as usize), [UnitEvent::Gone]);
         assert!(ticks > 1 && brave.kind == UnitKind::Brave);
     }
 
@@ -1836,8 +2015,45 @@ mod tests {
         let (mut u, site) = shaman_at((10, 10));
         u.action = Action::Dead { left: Countdown::new(Ticks::new(1)) };
         assert_eq!(u.tick(Tick::ZERO, &t, None), None);
-        assert!(matches!(u.action, Action::Spirit { .. }), "falls through to Spirit, not stuck in Dead");
-        assert_eq!(run(&mut u, &t, &site, SPIRIT_TICKS.get() as usize), [UnitEvent::Gone]);
+        assert!(matches!(u.action, Action::Spirit { climbing: false, .. }), "falls through to Spirit (calm: on dry land), not stuck in Dead");
+        assert_eq!(run(&mut u, &t, &site, SPIRIT_CALM_TICKS.get() as usize), [UnitEvent::Gone]);
+    }
+
+    #[test]
+    fn a_wildman_always_climbs_even_dying_on_dry_land() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.kind = UnitKind::Wildman;
+        u.die();
+        run(&mut u, &t, &site, DYING_TICKS.get() as usize);
+        assert!(matches!(u.action, Action::Spirit { climbing: true, .. }), "a wildman always climbs, whatever killed it or where");
+    }
+
+    #[test]
+    fn a_follower_dying_on_dry_land_gets_the_calm_rise_not_climbing() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.kind = UnitKind::Brave;
+        u.die();
+        run(&mut u, &t, &site, DYING_TICKS.get() as usize);
+        assert!(matches!(u.action, Action::Spirit { climbing: false, .. }));
+    }
+
+    #[test]
+    fn climbing_rises_at_a_steady_rate_with_no_gravity_calm_never_leaves_the_ground() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.kind = UnitKind::Wildman;
+        u.die();
+        run(&mut u, &t, &site, DYING_TICKS.get() as usize);
+        let ground = u.motion.height.expect("already rising, set at its own ground height");
+        run(&mut u, &t, &site, 5);
+        assert_eq!(u.motion.height, Some(ground + 5 * SPIRIT_CLIMB_RATE), "steady rate, no gravity to slow it");
+
+        u.kind = UnitKind::Brave;
+        u.die();
+        run(&mut u, &t, &site, DYING_TICKS.get() as usize + 3);
+        assert_eq!(u.motion.height, None, "the calm variant never leaves the ground");
     }
 
     #[test]
@@ -1860,12 +2076,16 @@ mod tests {
         u.motion = Motion::flying(Velocity::new(10, 40, 0), 100);
         u.order(Order::MoveTo { x: 0, z: 0 });
         run(&mut u, &t, &site, 2);
-        assert_eq!((u.action, u.motion.height, u.x), (Action::Tumbling, Some(148), x + 20), "no orders, flying");
+        assert_eq!((u.action, u.motion.height, u.x), (Action::Tumbling, Some(148), x + 14), "no orders, flying, air drag slowing the horizontal speed each tick");
         run(&mut u, &t, &site, 3);
-        assert_eq!((u.action, u.motion, (u.x, u.z)), (Action::Idle, Motion::STILL, (x + 40, z)), "landed and settled the same tick");
+        assert_eq!((u.motion, (u.x, u.z)), (Motion::STILL, (x + 20, z)), "landed, no longer moving");
+        let Action::Settling { left } = u.action else { panic!("settling, not idle at once: {:?}", u.action) };
+        assert!(u.locked() && u.pickable().is_some(), "locked (no orders) but still an ordinary, hoverable person");
+        run(&mut u, &t, &site, left.left().get() as usize);
+        assert_eq!((u.action, u.x), (Action::Idle, x + 20), "settled: responsive again");
         (u.action, u.motion.velocity) = (Action::Tumbling, Velocity::new(5, 0, 0));
         run(&mut u, &t, &site, 3);
-        assert_eq!((u.action, u.x), (Action::Tumbling, x + 40), "rolling on the ground: not moved, no friction yet");
+        assert_eq!((u.action, u.x), (Action::Tumbling, x + 20), "rolling on the ground: not moved, no friction yet");
     }
 
     #[test]
@@ -1888,10 +2108,13 @@ mod tests {
         u.fling(Velocity::new(10, 10, 0), 0);
         assert_eq!(u.motion, Motion::flying(Velocity::new(80, 59, 0), 100), "pushes add up, the height is kept");
         let x = u.x;
-        let ticks = run_until(&mut u, &t, &site, |u| u.action == Action::Idle);
-        assert_eq!((ticks, u.x), (5, x + 5 * 80), "flew, landed, then stays: the walk is forgotten");
+        let ticks = run_until(&mut u, &t, &site, |u| !u.motion.airborne());
+        assert_eq!((ticks, u.x), (5, x + 370), "flew, landed, then settles there: the walk is forgotten (370, not 5 * 80: air drag)");
+        assert!(matches!(u.action, Action::Settling { .. }), "settling rather than idle at once: {:?}", u.action);
+        run_until(&mut u, &t, &site, |u| u.action == Action::Idle);
+        assert_eq!(u.x, x + 370, "still stays, once settled");
         run(&mut u, &t, &site, 20);
-        assert_eq!(u.x, x + 5 * 80);
+        assert_eq!(u.x, x + 370);
         let mut dead = Unit { action: Action::Dead { left: Countdown::new(RESPAWN_TICKS) }, ..u.clone() };
         dead.fling(Velocity::new(10, 10, 0), 100);
         assert!(matches!(dead.action, Action::Dead { .. }) && dead.motion == Motion::STILL);
@@ -1921,7 +2144,7 @@ mod tests {
         let (mut u, site) = shaman_at((10, 10));
         u.fling(Velocity::new(0, 40, 0), 100);
         assert_eq!(run_until(&mut u, &t, &site, |u| !u.motion.airborne()), 4);
-        assert_eq!(u.action, Action::Idle);
+        assert!(matches!(u.action, Action::Settling { .. }), "stands up for now, settling rather than idle at once");
         u.health = Health::new(0, SHAMAN_MAX_HEALTH);
         u.fling(Velocity::new(0, 40, 0), 100);
         assert_eq!(run(&mut u, &t, &site, 4), [UnitEvent::Died]);
@@ -1930,7 +2153,7 @@ mod tests {
         t.set(u.cell().0 + 1, u.cell().1, 1000);
         u.fling(Velocity::new(0, 40, 0), 100);
         run(&mut u, &t, &site, 4);
-        assert_eq!(u.action, Action::Idle, "on a cliff: stands up for now");
+        assert!(matches!(u.action, Action::Settling { .. }), "on a cliff: stands up for now, same as open ground");
     }
 
     #[test]
@@ -1961,7 +2184,7 @@ mod tests {
     }
 
     #[test]
-    fn each_kind_heals_its_own_amount_but_never_past_full() {
+    fn each_kind_heals_its_own_amount() {
         let (s, _) = shaman_at((10, 10));
         let healed = |kind: UnitKind| {
             let mut u = Unit { kind, health: Health::new(100, kind.max_health()), ..s.clone() };
@@ -1972,6 +2195,30 @@ mod tests {
         let mut full = s.clone();
         full.heal();
         assert!(full.health.is_full());
+    }
+
+    #[test]
+    fn healing_can_overshoot_full_by_one_heal() {
+        let (s, _) = shaman_at((10, 10));
+        let mut u = Unit { health: Health::new(SHAMAN_MAX_HEALTH - 1, SHAMAN_MAX_HEALTH), ..s };
+        u.heal();
+        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH + 31, "one heal's worth over max, like the original");
+        u.heal();
+        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH + 31, "already full-and-over: heals no further");
+    }
+
+    #[test]
+    fn surviving_a_lightning_hit_blocks_healing_for_a_while() {
+        let (s, _) = shaman_at((10, 10));
+        let mut u = Unit { health: Health::new(SHAMAN_MAX_HEALTH - 100, SHAMAN_MAX_HEALTH), ..s };
+        assert!(u.heals());
+        assert!(!u.take_hit(10, DamageKind::Lightning, Some(1)), "hurt, not killed");
+        assert!(!u.heals(), "struck: no healing for a while");
+        u.heal();
+        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH - 110, "the hit's own damage, no heal added");
+        let last = 8 * u32::from(crate::status::LIGHTNING_STRUCK_STEPS);
+        (0..last).for_each(|n| u.statuses.tick(crate::time::Tick::from_wire(n), 0));
+        assert!(u.heals(), "worn off");
     }
 
     #[test]
@@ -2059,6 +2306,18 @@ mod tests {
         u.action = Action::Tumbling;
         assert!(u.take_damage(SHAMAN_MAX_HEALTH), "a fatal hit");
         assert_eq!((u.action, u.health.is_zero()), (Action::Tumbling, true), "still tumbling, dying held off");
+    }
+
+    #[test]
+    fn a_held_off_death_catches_up_once_tumbling_actually_settles_not_lost_to_idle() {
+        let t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.motion = Motion::STILL;
+        u.action = Action::Tumbling;
+        assert!(u.take_damage(SHAMAN_MAX_HEALTH), "a fatal hit, held off while tumbling");
+        let events = run(&mut u, &t, &site, 1);
+        assert_eq!(events, [UnitEvent::Died], "caught up now that it has actually settled, not silently dropped");
+        assert!(matches!(u.action, Action::Dying { .. }), "not left idle at zero health");
     }
 
     #[test]

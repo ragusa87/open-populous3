@@ -3,6 +3,7 @@
 //! everything else generated (`procedural`). Which frame to show is decided here from the simulated action.
 
 use crate::sim_time::{progress, SimNow};
+use game_core::effect::DamageKind;
 use game_core::time::{Tick, Ticks};
 use game_core::unit::{Action, UnitKind};
 use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
@@ -62,10 +63,22 @@ pub enum Pose {
     Listen,
     /// Preaching to a sermon's listeners.
     Preach,
+    /// Struck by lightning, charred (combat.md "Firebolts"; `Unit::death_cause`).
+    Carbonized,
+    /// A challenge's waiting target hiding its eyes: one of 3 taunts (combat.md "Challenge").
+    TauntHide,
+    /// A challenge's waiting target waving an arm: one of 3 taunts.
+    TauntWave,
+    /// A challenge's waiting target crouching then punching: one of 3 taunts.
+    TauntPunch,
+    /// A wildman eating beside a tree (pop3-rev-analysis.md "Wildmen").
+    Eat,
+    /// A wildman drinking at the shore.
+    Drink,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 26] = [
+    pub const ALL: [Pose; 32] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -92,6 +105,12 @@ impl Pose {
         Pose::Pedal,
         Pose::Listen,
         Pose::Preach,
+        Pose::Carbonized,
+        Pose::TauntHide,
+        Pose::TauntWave,
+        Pose::TauntPunch,
+        Pose::Eat,
+        Pose::Drink,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -106,13 +125,17 @@ impl Pose {
             Pose::Throw => Pose::Cast,
             Pose::Shoved => Pose::Fall,
             Pose::Pedal | Pose::Listen | Pose::Preach => Pose::Pray,
+            Pose::Carbonized => Pose::Fall,
+            Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => Pose::Idle,
+            Pose::Eat | Pose::Drink => Pose::Idle,
             pose => pose,
         }
     }
 
-    /// Only braves have original art for it (the wood and flattening poses).
+    /// Only braves have original art for it (the wood and flattening poses, the carbonize and taunt
+    /// anims - unit-art.md).
     fn brave_only(self) -> bool {
-        matches!(self, Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer)
+        matches!(self, Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Carbonized | Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch)
     }
 
     /// Frames per second of looping poses.
@@ -139,6 +162,12 @@ impl Pose {
             Pose::Kick => ShamanAnim::Kick,
             Pose::Reel | Pose::Shoved | Pose::Hack => ShamanAnim::Idle,
             Pose::Throw => ShamanAnim::Cast,
+            // She has no art of her own for these brave-only anims (unit-art.md): `pose_of` never actually
+            // puts her in one, but every pose still needs a loop to build (`Originals::art`'s own check).
+            Pose::Carbonized => ShamanAnim::Fall,
+            Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => ShamanAnim::Idle,
+            // Never actually shown for her either (wildman-only, `pose_of`): exhaustiveness only.
+            Pose::Eat | Pose::Drink => ShamanAnim::Idle,
         }
     }
 }
@@ -172,9 +201,14 @@ fn challenge_pose(role: game_core::challenge::Role, carrying: bool) -> Pose {
     }
 }
 
-/// The pose `u` is drawn in: aboard a vehicle and idle or waiting to throw, pedalling it; else by its action
-/// (`pose_for`).
-pub fn pose_of(u: &game_core::unit::Unit) -> Pose {
+/// How long a taunt (combat.md "Challenge") holds its pose once it fires: a guess, roughly the length
+/// of the shortest of the 3 original anims (animations.md 48-50) at an ordinary 6 fps.
+const TAUNT_DISPLAY: Ticks = Ticks::new(12);
+
+/// The pose `u` is drawn in: aboard a vehicle and idle or waiting to throw, pedalling it; killed by
+/// lightning, carbonized until its spirit rises; waiting in a challenge and recently taunted, one of 3;
+/// else by its action (`pose_for`). `now`: the drawn moment, for the taunt's own short display window.
+pub fn pose_of(u: &game_core::unit::Unit, now: Tick) -> Pose {
     if u.aboard.is_some() && matches!(u.action, Action::Idle | Action::Attacking { .. }) {
         return Pose::Pedal;
     }
@@ -182,6 +216,15 @@ pub fn pose_of(u: &game_core::unit::Unit) -> Pose {
         && (u.x, u.z) != at
     {
         return if u.carrying > 0 { Pose::CarryWalk } else { Pose::Walk };
+    }
+    if matches!(u.action, Action::Dying { .. } | Action::Dead { .. }) && u.death_cause() == Some(DamageKind::Lightning) {
+        return Pose::Carbonized;
+    }
+    if let Action::Challenge { role: game_core::challenge::Role::Waiting, .. } = u.action
+        && let Some((at, variant)) = u.taunted()
+        && (0..TAUNT_DISPLAY.get() as i32).contains(&now.since(at))
+    {
+        return [Pose::TauntHide, Pose::TauntWave, Pose::TauntPunch][variant as usize % 3];
     }
     pose_for(&u.action, u.carrying > 0, u.motion.airborne())
 }
@@ -192,8 +235,8 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
     match action {
         Action::Idle | Action::Landing if carrying => Pose::CarryIdle,
         Action::Idle | Action::Landing => Pose::Idle,
-        Action::Walking { .. } | Action::AroundFire { .. } | Action::Attacking { .. } if carrying => Pose::CarryWalk,
-        Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } | Action::Attacking { .. } => Pose::Walk,
+        Action::Walking { .. } | Action::AroundFire { .. } | Action::Attacking { .. } | Action::Guarding { .. } if carrying => Pose::CarryWalk,
+        Action::Walking { .. } | Action::AroundFire { .. } | Action::Entering { .. } | Action::Attacking { .. } | Action::Guarding { .. } => Pose::Walk,
         Action::Panicking { .. } => Pose::Panic,
         // No burning pose traced or drawn yet (unit-art.md): Panic's own stands in, since OnFire reuses its movement.
         Action::OnFire { .. } => Pose::Panic,
@@ -215,8 +258,13 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Drowning => Pose::Drown,
         Action::Tumbling if airborne => Pose::Flung,
         Action::Tumbling => Pose::Tumble,
+        // Ground recovery (units.md "Tumbling"): an ordinary Idle (or holding-wood) pose, not visibly down.
+        Action::Settling { .. } if carrying => Pose::CarryIdle,
+        Action::Settling { .. } => Pose::Idle,
         Action::Dying { .. } | Action::Dead { .. } => Pose::Fall,
         Action::Spirit { .. } => Pose::Spirit,
+        Action::Grazing { drink: false, .. } => Pose::Eat,
+        Action::Grazing { drink: true, .. } => Pose::Drink,
     }
 }
 
@@ -252,8 +300,10 @@ pub fn sprite_dir(facing: u8, yaw: f32) -> usize {
 }
 
 /// Frame to show: timed actions play once in step with the simulation (`alpha` = fraction of
-/// the current tick), the fall holds the lying frame (second to last); others loop on the drawn moment
-/// `now` (a loop of `frames` seconds holds whole loops at any fps).
+/// the current tick), the fall and the spirit after it hold the lying frame (second to last,
+/// unit-art.md "Death last frame": the transformation finished during the fall, so the spirit
+/// (calm or climbing) never replays it - it only ever rises or sinks, never animates again);
+/// others loop on the drawn moment `now` (a loop of `frames` seconds holds whole loops at any fps).
 pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alpha: f32) -> usize {
     if frames == 0 {
         return 0;
@@ -263,8 +313,7 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alph
     match action {
         Action::Casting { .. } | Action::Flattening { .. } | Action::Throwing { .. } | Action::Challenge { .. } | Action::Melee { .. } | Action::Listening { .. } if action.countdown().is_some() => done(frames),
         Action::Dying { .. } => done(lying + 1),
-        Action::Spirit { .. } => done(frames),
-        Action::Dead { .. } => lying,
+        Action::Spirit { .. } | Action::Dead { .. } => lying,
         _ => (now.secs_in(Tick::ZERO, Ticks::secs(frames as u32)) * pose.fps()) as usize % frames,
     }
 }
@@ -352,9 +401,12 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Idle | Pose::Cast | Pose::Stranded | Pose::Chop | Pose::CarryIdle | Pose::Jump | Pose::Hammer => WildmanAnim::Stand,
                 Pose::Walk | Pose::CarryWalk | Pose::Panic => WildmanAnim::Walk,
                 Pose::Pray | Pose::Pedal | Pose::Listen | Pose::Preach => WildmanAnim::Sit,
-                Pose::Fall | Pose::Tumble | Pose::Spirit => WildmanAnim::Tumble,
+                Pose::Fall | Pose::Tumble | Pose::Spirit | Pose::Carbonized => WildmanAnim::Tumble,
                 Pose::Drown | Pose::Flung | Pose::Shoved => WildmanAnim::Flung,
                 Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack | Pose::Throw => WildmanAnim::Stand,
+                Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => WildmanAnim::Stand,
+                Pose::Eat => WildmanAnim::Eat,
+                Pose::Drink => WildmanAnim::Drink,
             };
             // No spirit anim known: the body lies still (the fall's last frame).
             (anim.anim(), None, (pose == Pose::Spirit).then_some(3))
@@ -394,6 +446,12 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Pedal => PersonAnim::Pedal,
                 Pose::Listen => PersonAnim::Listen,
                 Pose::Preach => PersonAnim::Preach,
+                Pose::Carbonized => PersonAnim::Carbonized,
+                Pose::TauntHide => PersonAnim::TauntHide,
+                Pose::TauntWave => PersonAnim::TauntWave,
+                Pose::TauntPunch => PersonAnim::TauntPunch,
+                // Wildman-only (`pose_of`): never actually shown for any other kind.
+                Pose::Eat | Pose::Drink => PersonAnim::Stand,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }
@@ -562,11 +620,15 @@ mod tests {
     #[test]
     fn the_spirit_rises_from_the_body() {
         use game_core::time::{Countdown, Ticks};
-        let spirit = |left| Action::Spirit { left: Countdown::with_left(Ticks::new(10), Ticks::new(left)) };
+        let spirit = |left| Action::Spirit { left: Countdown::with_left(Ticks::new(10), Ticks::new(left)), climbing: false };
         assert_eq!(pose_for(&spirit(10), false, false), Pose::Spirit);
         assert_eq!(original_anim(UnitKind::Warrior, Pose::Spirit, 0), (40, Some(OUTFIT_WARRIOR), None), "lying, its spirit rising");
         assert_eq!(original_anim(UnitKind::Wildman, Pose::Spirit, 0), (47, None, Some(3)), "no spirit anim: lies still");
-        assert_eq!((frame_index(Pose::Spirit, 5, &spirit(10), at(0.0), 0.0), frame_index(Pose::Spirit, 5, &spirit(1), at(0.0), 1.0)), (0, 4), "played once");
+        assert_eq!(
+            (frame_index(Pose::Spirit, 5, &spirit(10), at(0.0), 0.0), frame_index(Pose::Spirit, 5, &spirit(1), at(0.0), 1.0)),
+            (3, 3),
+            "holds the lying frame the fall already reached (unit-art.md \"Death last frame\"), climbing or not: no replay"
+        );
     }
 
     #[test]

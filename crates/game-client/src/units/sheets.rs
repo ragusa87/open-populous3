@@ -66,16 +66,22 @@ pub fn pose_name(pose: Pose) -> &'static str {
         Pose::Pedal => "pedal",
         Pose::Listen => "listen",
         Pose::Preach => "preach",
+        Pose::Carbonized => "carbonized",
+        Pose::TauntHide => "taunt_hide",
+        Pose::TauntWave => "taunt_wave",
+        Pose::TauntPunch => "taunt_punch",
+        Pose::Eat => "eat",
+        Pose::Drink => "drink",
     }
 }
 
 /// Whether a kind's sheets have a pose: only the shaman casts, and she is never stranded; the wood
-/// jump, tumbling and panic poses are not rendered yet (`Pose::fallback` stands in).
+/// jump, tumbling, panic, carbonize and taunt poses are not rendered yet (`Pose::fallback` stands in).
 pub fn plays(kind: UnitKind, pose: Pose) -> bool {
     match pose {
         Pose::Cast => kind == UnitKind::Shaman,
         Pose::Stranded => kind != UnitKind::Shaman,
-        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Panic | Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Shoved | Pose::Hack | Pose::Throw | Pose::Pedal | Pose::Listen | Pose::Preach => false,
+        Pose::Chop | Pose::CarryWalk | Pose::CarryIdle | Pose::Jump | Pose::Hammer | Pose::Flung | Pose::Tumble | Pose::Spirit | Pose::Panic | Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Shoved | Pose::Hack | Pose::Throw | Pose::Pedal | Pose::Listen | Pose::Preach | Pose::Carbonized | Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch | Pose::Eat | Pose::Drink => false,
         _ => true,
     }
 }

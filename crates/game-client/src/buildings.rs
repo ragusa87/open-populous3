@@ -633,7 +633,7 @@ mod tests {
     fn a_fire_burning_on_does_not_rebuild_the_views_lit_or_out_does() {
         let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
         let mut burning = hut.clone();
-        burning.ignite();
+        burning.ignite(0);
         let mut later = burning.clone();
         later.burn();
         assert!(same_look(&[burning.clone()], &[later]));

@@ -67,13 +67,17 @@ pub struct Challenge {
     pub target: UnitId,
     pub approach: Approach,
     pub phase: Phase,
-    /// The last turn the waiting target taunted ("Pre-fight" [exe]): no art or pose for it yet (TODO.md "Units"),
-    /// kept for when there is.
-    pub taunted: Option<Tick>,
+    /// The last turn the waiting target taunted, and which of the 3 (anims 48-50, animations.md) - a
+    /// guess which one is picked how (confirmed only that it is "at random" [exe]; a second draw here,
+    /// not traced against the original beyond that).
+    pub taunted: Option<(Tick, u8)>,
 }
 
 /// The target taunts on this chance per turn while waiting ("Pre-fight" [exe], confirmed).
 pub const TAUNT_CHANCE: u32 = 8;
+
+/// How many different taunts there are (animations.md 48-50).
+pub const TAUNT_VARIANTS: u32 = 3;
 
 /// Whether the draw `r` taunts: 1 chance in `TAUNT_CHANCE`.
 pub fn taunts(r: u32) -> bool {
@@ -138,7 +142,9 @@ impl Coordinator for Challenge {
         if waiting == Role::Waiting {
             events.push(WorldEvent::Face { unit: t.id, at: (a.x, a.z) });
             if taunts(rng.next_u32()) {
-                self.taunted = Some(now);
+                let variant = (rng.next_u32() % TAUNT_VARIANTS) as u8;
+                self.taunted = Some((now, variant));
+                events.push(WorldEvent::Taunted { unit: t.id, at: now, variant });
             }
         }
         match self.phase {
@@ -298,15 +304,15 @@ mod tests {
         until(&mut map, 200, |m| role(m, shaman).is_some()).expect("challenged");
         map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at } });
         map.run(crate::unit::CAST_RELEASE);
-        assert_eq!(map.effects.len(), 1, "her jump not cut short");
+        assert_eq!(map.fireballs.len(), 1, "her jump not cut short: the shot flew");
         until(&mut map, 200, |m| role(m, shaman).is_some()).expect("challenged again after it");
         let casting = |m: &GameMap| matches!(m.unit(shaman).unwrap().action, Action::Casting { .. });
         assert_eq!(until(&mut map, 200, casting), None, "not cast again");
         until(&mut map, 400, |m| matches!(m.unit(shaman).unwrap().action, Action::Melee { .. })).expect("in a melee");
-        let effects = map.effects.len();
+        let fireballs = map.fireballs.len();
         map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at } });
         map.run(crate::unit::CAST_RELEASE);
-        assert_eq!(map.effects.len(), effects + 1, "blasts in a melee too");
+        assert_eq!(map.fireballs.len(), fireballs + 1, "blasts in a melee too");
     }
 
     #[test]

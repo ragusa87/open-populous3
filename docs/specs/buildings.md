@@ -56,7 +56,9 @@ normal over 1 cell either side, slopes and the planet's curve, so no side sinks 
   tower, temple = prayer hut, spy/warrior/firewarrior training, boat and airship huts in the owner's colours,
   neutral ones blue; vault = pyramid of knowledge, prison), textured from the level's theme atlas (theme 0 on maps
   without one), cut-out texels see-through, faces drawn from their front only (back faces culled, objects.md
-  "facs").
+  "facs"). `building_object` is deliberately bank-invariant: it maps a `BuildingKind` to a fixed, named bank-0
+  catalog constant, never a raw level-encoded model number, so a building looks the same regardless of the
+  level's own object-bank byte (objects.md "Banks": we stay on bank 0; only trees differ per bank).
 - Otherwise, and for named types without an identified original object: the generated kit in
   `assets/3d/buildings/` (16 models: all named kinds, including hut sizes 1-3). Procedurally textured clay,
   timber, thatch and stone with only the `Tribe` material recoloured (grey when neutral).
@@ -368,6 +370,15 @@ its braves only fetch wood and nobody builds in it. The library (vault) and the 
 frame with 9 animated flames (the torches' `flame.rs` boards, `FIRE_FLAME` 1.3 cells) over its footprint, the middle one
 half way up, going down as it burns (`fire_height`: from their full height when lit, `Building::lit_at`, to
 `FIRE_LAST` 15 % at the end, on sim time). Dev: `LIGHTNING=x,z` on a building (`POP3_START=sandbox-buildings`, a hut at 52.5,70.5).
+
+`Building::ignite` (lightning, firestorm/volcano's own fireball landings, lava, a firewarrior's bolt) now also
+takes the lighting tribe, kept on `Building::ignited_by` past the fire itself (never cleared back to `None`, same
+persistence as a unit's own `last_attacker`/`death_cause`, "Health"). When a fire finishes a building off
+(`fire::tend_fires`'s `FireTurn::Hit { destroyed: true }`), that tribe's `GameMap::fires_put_out` is tallied
+(`WorldEvent::BuildingBurnedDown`, "The tick" [exe] `stats[tribe][7]`) - fire-specific, unlike the building's own
+owner: `burn_down`/`ashes.rs` itself stays cause-agnostic and untouched, so an explosion or terrain destruction
+(`WorldEvent::Destroy`) never raises it. Not yet: the fire's own sound, and anywhere in the client reading
+`fires_put_out` (no stats tab exists yet).
 
 ### Doors
 Units enter and leave a building only through its door (the facing's side, local -z), the same way in and out:

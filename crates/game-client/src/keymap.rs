@@ -47,15 +47,16 @@ pub enum Shortcut {
     Slower,
     ReleasePatrol,
     CancelFlyby,
+    Guard,
 }
 
 impl Shortcut {
-    pub const ALL: [Shortcut; 30] = {
+    pub const ALL: [Shortcut; 31] = {
         use Shortcut::*;
         [
             Forward, Back, StrafeLeft, StrafeRight, RotateLeft, RotateRight, TiltUp, TiltDown, ZoomIn, ZoomOut, FovWider,
             FovNarrower, Aerial, LookAtShaman, LookAtSite, TurnPlan, Stop, CastSelf, NextLevel, PreviousLevel, Grid,
-            DebugOverlay, Editor, ViewPresets, CameraReadout, Pause, Faster, Slower, ReleasePatrol, CancelFlyby,
+            DebugOverlay, Editor, ViewPresets, CameraReadout, Pause, Faster, Slower, ReleasePatrol, CancelFlyby, Guard,
         ]
     };
 
@@ -93,6 +94,7 @@ impl Shortcut {
             Slower => "Game slower",
             ReleasePatrol => "Release the held followers' patrol",
             CancelFlyby => "Cancel the current flyby",
+            Guard => "Guard the shaman / stop guarding",
         }
     }
 }
@@ -114,7 +116,8 @@ pub const MOUSE: [(&str, &str); 12] = [
 ];
 
 /// Dev mode only, in the world editor (`editor.rs`).
-pub const EDITOR_KEYS: (&str, &str) = ("Editor brushes", "R raise, F lower, T flatten, M mark, B bridge");
+pub const EDITOR_KEYS: (&str, &str) =
+    ("Editor brushes", "R raise, F lower, T flatten, M mark, B bridge, [ ] radius, O plant a tree (click; right click/Esc cancels)");
 
 /// A key's name as printed on the shortcuts page.
 pub fn key_name(code: KeyCode) -> String {
@@ -231,6 +234,8 @@ fn original_bindings(shortcut: Shortcut) -> &'static [Binding] {
         Faster => &[key!(Equal, SHIFT), key!(NumpadAdd, SHIFT)],
         Slower => &[key!(Minus, SHIFT), key!(NumpadSubtract, SHIFT)],
         ReleasePatrol => &[key!(KeyN, NONE)],
+        // `G`: free here (dev mode's own grid toggle owns it there instead, `dev_bindings`).
+        Guard => &[key!(KeyG, NONE)],
         TiltUp | TiltDown | FovWider | FovNarrower | Stop | CastSelf | NextLevel | PreviousLevel | Grid | DebugOverlay | Editor
         | ViewPresets | CameraReadout => &[],
     }
@@ -269,6 +274,8 @@ fn dev_bindings(shortcut: Shortcut) -> &'static [Binding] {
         Faster => &[key!(Equal, SHIFT), key!(NumpadAdd, SHIFT)],
         Slower => &[key!(Minus, SHIFT), key!(NumpadSubtract, SHIFT)],
         ReleasePatrol => &[key!(KeyN, NONE)],
+        // `G` is already `Grid` here (a dev-only convenience): Shift+G instead, so dev mode can still reach it.
+        Guard => &[key!(KeyG, SHIFT)],
     }
 }
 
@@ -330,7 +337,7 @@ impl Plugin for KeymapPlugin {
 mod tests {
     use super::*;
 
-    const ALL: [Shortcut; 30] = Shortcut::ALL;
+    const ALL: [Shortcut; 31] = Shortcut::ALL;
 
     fn fires(dev: bool, shortcut: Shortcut, input: Input, mods: Mods) -> bool {
         bindings(dev, shortcut).iter().any(|b| b.matches(|i| i == input, mods))

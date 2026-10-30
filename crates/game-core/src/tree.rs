@@ -78,12 +78,16 @@ impl Tree {
         self.burning.map(|c| Tick::from_wire(now.to_wire().wrapping_sub(c.done().get())))
     }
 
-    /// One turn: its fire burns on, burning it to nothing when out; else on the original's growth turns, `grow`.
-    pub fn tick(&mut self, now: Tick) {
+    /// One turn: its fire burns on, burning it to nothing when out; else, if its cell has become open sea (a land
+    /// bridge, flatten, erosion, earthquake...), it drops to size 0 at once and stays dormant, like a burnt one -
+    /// `[ours]`, reported but not traced; else on the original's growth turns, `grow`.
+    pub fn tick(&mut self, now: Tick, submerged: bool) {
         if let Some(fire) = self.burning.as_mut() {
             if fire.tick() {
                 (self.burning, self.size, self.growth) = (None, 0, 0);
             }
+        } else if submerged {
+            (self.size, self.growth) = (0, 0);
         } else if GROW_EVERY.fires(now, 0) {
             self.grow();
         }
@@ -144,6 +148,11 @@ pub fn scatter(terrain: &Heightmap, seed: u32, sites: &[(i32, i32)], groves: usi
     trees
 }
 
+/// The cell a tree planted at world point `p` takes (same corner-cell mapping as `campfire::cell_at`).
+pub fn cell_at((x, z): (u16, u16)) -> (i32, i32) {
+    (crate::unit::cell_of(x), crate::unit::cell_of(z))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,7 +179,7 @@ mod tests {
 
     fn run(t: &mut Tree, turns: std::ops::RangeInclusive<u32>) {
         for n in turns {
-            t.tick(Tick::from_wire(n));
+            t.tick(Tick::from_wire(n), false);
         }
     }
 
@@ -190,6 +199,13 @@ mod tests {
     }
 
     #[test]
+    fn cell_at_matches_the_cell_a_tree_there_would_report() {
+        let p = (3 * pop3_format::WORLD_UNITS_PER_CELL as u16 + 9, 70 * pop3_format::WORLD_UNITS_PER_CELL as u16);
+        assert_eq!(cell_at(p), (3, 70));
+        assert_eq!(Tree::new(cell_at(p), 0, MAX_SIZE).cell(), (3, 70));
+    }
+
+    #[test]
     fn grows_only_on_the_original_turns() {
         let mut t = Tree::new((5, 5), 0, 0);
         run(&mut t, 1..=15);
@@ -200,6 +216,19 @@ mod tests {
         assert_eq!(t.growth, WOOD_GROW);
         run(&mut t, 32..=32);
         assert_eq!(t.growth, 2 * WOOD_GROW);
+    }
+
+    #[test]
+    fn a_submerged_tree_drops_to_size_0_at_once_and_does_not_regrow_while_wet() {
+        let mut t = Tree::new((5, 5), 0, MAX_SIZE);
+        t.tick(Tick::from_wire(1), true);
+        assert_eq!((t.size, t.growth, t.cell()), (0, 0, (5, 5)), "dormant at once, same spot");
+        for n in 2..=800 {
+            t.tick(Tick::from_wire(n), true);
+        }
+        assert_eq!(t.size, 0, "would have grown back by now if it weren't still wet");
+        run(&mut t, 801..=2600);
+        assert!(t.size >= 1, "grows normally again once dry");
     }
 
     #[test]

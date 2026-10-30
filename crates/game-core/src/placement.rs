@@ -6,7 +6,7 @@
 //! and land past their -z side.
 //! Integers only.
 
-use crate::building::{Building, BuildingKind};
+use crate::building::{Building, BuildingId, BuildingKind};
 use crate::map::GameMap;
 use crate::terrain::to_world;
 use crate::site::SPAWN_FLAT_RADIUS;
@@ -30,13 +30,14 @@ pub enum Blocked {
 }
 
 /// What blocks building on the world point `p`, if anything (the slope is checked per building,
-/// `too_steep`).
-pub fn blocked_at(map: &GameMap, p: (u16, u16)) -> Option<Blocked> {
+/// `too_steep`). `except`: a building of its own footprint never blocks itself (a hut checking the
+/// bigger footprint it would grow into, still standing on the spot - `headcount::can_grow`).
+pub fn blocked_at(map: &GameMap, p: (u16, u16), except: Option<BuildingId>) -> Option<Blocked> {
     let unit = WORLD_UNITS_PER_CELL as i64;
     let cell = ((p.0 as u32 / WORLD_UNITS_PER_CELL) as i32, (p.1 as u32 / WORLD_UNITS_PER_CELL) as i32);
     if map.terrain.is_water_at(p.0, p.1) {
         Some(Blocked::Sea)
-    } else if map.buildings.iter().any(|b| b.covers(p, 0)) {
+    } else if map.buildings.iter().any(|b| Some(b.id) != except && b.covers(p, 0)) {
         Some(Blocked::Building)
     } else if map.sites.iter().any(|s| {
         let (dx, dz) = (torus_delta(s.x, p.0) as i64, torus_delta(s.z, p.1) as i64);
@@ -107,14 +108,14 @@ pub fn best_facing(map: &GameMap, b: &Building, preferred: u8) -> u8 {
 }
 
 /// Whether `b` could be placed: steady ground and every point of its footprint free (sampled every
-/// quarter cell).
-pub fn can_place(map: &GameMap, b: &Building) -> bool {
+/// quarter cell). `except`: see `blocked_at`.
+pub fn can_place(map: &GameMap, b: &Building, except: Option<BuildingId>) -> bool {
     let f = b.kind.footprint();
     let step = WORLD_UNITS_PER_CELL as i32 / 4;
     let (cx, cz) = b.centre();
     let span = (f.half.0.abs() + f.offset.0.abs()).max(f.half.1.abs() + f.offset.1.abs());
     let points = (-span..=span).step_by(step as usize).flat_map(|dz| (-span..=span).step_by(step as usize).map(move |dx| (dx, dz)));
-    let mut free = points.map(|(dx, dz)| (cx.wrapping_add(dx as u16), cz.wrapping_add(dz as u16))).filter(|&p| b.covers(p, 0)).all(|p| blocked_at(map, p).is_none());
+    let mut free = points.map(|(dx, dz)| (cx.wrapping_add(dx as u16), cz.wrapping_add(dz as u16))).filter(|&p| b.covers(p, 0)).all(|p| blocked_at(map, p, except).is_none());
     free &= !too_steep(map, b) && shore_ok(map, b);
     free
 }
@@ -145,31 +146,44 @@ mod tests {
     #[test]
     fn free_flat_land_takes_a_building() {
         let m = map();
-        assert!(can_place(&m, &hut((30, 30))));
-        assert_eq!(blocked_at(&m, (30 * 512, 30 * 512)), None);
+        assert!(can_place(&m, &hut((30, 30)), None));
+        assert_eq!(blocked_at(&m, (30 * 512, 30 * 512), None), None);
     }
 
     #[test]
     fn sea_buildings_sites_trees_fires_and_totems_block() {
         let mut m = map();
-        assert_eq!(blocked_at(&m, (5 * 512, 30 * 512)), Some(Blocked::Sea));
-        assert!(!can_place(&m, &hut((9, 30))), "half on the sea");
+        assert_eq!(blocked_at(&m, (5 * 512, 30 * 512), None), Some(Blocked::Sea));
+        assert!(!can_place(&m, &hut((9, 30)), None), "half on the sea");
         m.add_building(hut((40, 40)));
-        assert_eq!(blocked_at(&m, (40 * 512 + 256, 40 * 512 + 256)), Some(Blocked::Building));
-        assert!(!can_place(&m, &hut((41, 41))), "overlaps");
+        assert_eq!(blocked_at(&m, (40 * 512 + 256, 40 * 512 + 256), None), Some(Blocked::Building));
+        assert!(!can_place(&m, &hut((41, 41)), None), "overlaps");
         let (sx, sz) = (m.sites[0].x, m.sites[0].z);
-        assert_eq!(blocked_at(&m, (sx + 512, sz)), Some(Blocked::Site));
+        assert_eq!(blocked_at(&m, (sx + 512, sz), None), Some(Blocked::Site));
         m.trees.push(Tree::new((50, 50), 0, 2));
-        assert_eq!(blocked_at(&m, (50 * 512 + 100, 50 * 512 + 100)), Some(Blocked::Tree));
+        assert_eq!(blocked_at(&m, (50 * 512 + 100, 50 * 512 + 100), None), Some(Blocked::Tree));
         m.trees[0] = Tree::new((50, 50), 0, 0);
-        assert_eq!(blocked_at(&m, (50 * 512 + 100, 50 * 512 + 100)), None, "a cut down tree does not block");
+        assert_eq!(blocked_at(&m, (50 * 512 + 100, 50 * 512 + 100), None), None, "a cut down tree does not block");
         m.campfires.push(crate::campfire::Campfire::new(1, 0, (60, 60)));
-        assert_eq!(blocked_at(&m, (60 * 512 + 10, 60 * 512 + 500)), Some(Blocked::Campfire));
-        assert!(!can_place(&m, &hut((60, 60))), "over a camp fire");
-        m.totems.push(crate::totem::Totem::new(crate::totem::TotemKind::Totem, (70 * 512 + 256, 70 * 512 + 256)));
-        assert_eq!(blocked_at(&m, (70 * 512 + 300, 70 * 512 + 200)), Some(Blocked::Totem));
-        assert!(!can_place(&m, &hut((70, 70))), "over a totem");
+        assert_eq!(blocked_at(&m, (60 * 512 + 10, 60 * 512 + 500), None), Some(Blocked::Campfire));
+        assert!(!can_place(&m, &hut((60, 60)), None), "over a camp fire");
+        m.add_totem(crate::totem::Totem::new(crate::totem::TotemKind::Totem, (70 * 512 + 256, 70 * 512 + 256)));
+        assert_eq!(blocked_at(&m, (70 * 512 + 300, 70 * 512 + 200), None), Some(Blocked::Totem));
+        assert!(!can_place(&m, &hut((70, 70)), None), "over a totem");
         assert!(!crate::campfire::can_place(&m, (70, 70)), "no camp fire on a totem");
+    }
+
+    #[test]
+    fn except_lets_a_building_stand_where_itself_already_does() {
+        // Every hut size shares one footprint today (`BuildingKind::footprint`), so growing a hut in place
+        // checks the very same ground its smaller self already stands on - `except` is what makes that possible.
+        let mut m = map();
+        let id = m.add_building(hut((40, 40)));
+        let grown = Building { kind: BuildingKind::Hut { size: 2 }, ..hut((40, 40)) };
+        assert!(!can_place(&m, &grown, None), "its own self still blocks without except");
+        assert!(can_place(&m, &grown, Some(id)), "excluded, so it does not block itself");
+        m.add_building(hut((41, 41)));
+        assert!(!can_place(&m, &grown, Some(id)), "a different building still blocks");
     }
 
     fn boat_hut(cell: (u16, u16), facing: u8) -> Building {
@@ -184,7 +198,7 @@ mod tests {
         // The sea is at x < 10: the jetty (+z) must point to -x, a quarter turn the other way.
         assert!(shore_ok(&m, &boat_hut((10, 30), 6)), "jetty to -x, door to +x");
         assert!(!shore_ok(&m, &boat_hut((10, 30), 2)), "door on the water");
-        assert!(can_place(&m, &boat_hut((10, 30), 6)), "the hut itself on the shore");
+        assert!(can_place(&m, &boat_hut((10, 30), 6), None), "the hut itself on the shore");
         assert_eq!(best_facing(&m, &boat_hut((10, 30), 0), 0), 6, "turned to the water");
         assert_eq!(best_facing(&m, &boat_hut((10, 30), 6), 6), 6, "kept when it fits");
         assert_eq!(best_facing(&m, &boat_hut((40, 30), 2), 2), 2, "nothing fits: as asked");
@@ -211,9 +225,9 @@ mod tests {
         let coasts = [((40, 59), 0), ((59, 40), 2), ((40, 20), 4), ((20, 40), 6)];
         for ((x, z), facing) in coasts {
             let b = boat_hut((x, z), facing);
-            assert!(can_place(&m, &b), "coast at ({x}, {z}) facing {facing}");
+            assert!(can_place(&m, &b, None), "coast at ({x}, {z}) facing {facing}");
             for wrong in [0, 2, 4, 6].into_iter().filter(|&f| f != facing) {
-                assert!(!can_place(&m, &boat_hut((x, z), wrong)), "({x}, {z}) facing {wrong}: jetty on land or door in the sea");
+                assert!(!can_place(&m, &boat_hut((x, z), wrong), None), "({x}, {z}) facing {wrong}: jetty on land or door in the sea");
             }
             for start in [0, 2, 4, 6] {
                 assert_eq!(best_facing(&m, &boat_hut((x, z), start), start), facing, "turns itself from {start}");
@@ -224,9 +238,9 @@ mod tests {
     #[test]
     fn a_boat_hut_is_refused_inland_in_the_sea_and_on_a_thin_spit() {
         let mut m = island();
-        assert!(!can_place(&m, &boat_hut((40, 40), 0)), "inland: no sea past the jetty");
-        assert!(!can_place(&m, &boat_hut((40, 70), 0)), "in the sea");
-        assert!(!can_place(&m, &boat_hut((40, 61), 0)), "the hut itself off the coast");
+        assert!(!can_place(&m, &boat_hut((40, 40), 0), None), "inland: no sea past the jetty");
+        assert!(!can_place(&m, &boat_hut((40, 70), 0), None), "in the sea");
+        assert!(!can_place(&m, &boat_hut((40, 61), 0), None), "the hut itself off the coast");
         // A spit one cell wide: sea on both ends of every turn, the door always gets wet.
         for z in 20..=60 {
             for x in 20..=60 {
@@ -257,12 +271,12 @@ mod tests {
     #[test]
     fn a_boat_hut_on_the_shore_still_minds_other_blockers() {
         let mut m = island();
-        assert!(can_place(&m, &boat_hut((40, 59), 0)));
+        assert!(can_place(&m, &boat_hut((40, 59), 0), None));
         m.add_building(hut((41, 57)));
-        assert!(!can_place(&m, &boat_hut((40, 59), 0)), "overlaps a hut");
+        assert!(!can_place(&m, &boat_hut((40, 59), 0), None), "overlaps a hut");
         m.buildings.clear();
         m.trees.push(Tree::new((40, 59), 0, 3));
-        assert!(!can_place(&m, &boat_hut((40, 59), 0)), "a tree with wood");
+        assert!(!can_place(&m, &boat_hut((40, 59), 0), None), "a tree with wood");
         assert!(shore_ok(&m, &boat_hut((40, 59), 0)), "the shore itself is fine");
     }
 
@@ -293,6 +307,6 @@ mod tests {
         assert!(!too_steep(&m, &hut((30, 30))));
         m.terrain.set(31, 31, 100 + STEEP_SPREAD + 1);
         assert!(too_steep(&m, &hut((30, 30))));
-        assert!(!can_place(&m, &hut((30, 30))));
+        assert!(!can_place(&m, &hut((30, 30)), None));
     }
 }

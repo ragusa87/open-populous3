@@ -48,6 +48,13 @@ impl Health {
     pub fn heal(&mut self, points: u16) {
         self.current = self.current.saturating_add(points).min(self.max);
     }
+
+    /// Gains `points` with no clamp (pop3-rev-analysis.md "Health and healing": the original adds the heal while
+    /// below max with no clamp, so one heal tick can leave `current` up to one heal's worth over `max`; the next
+    /// tick then takes the already-full branch and heals no further).
+    pub fn heal_past_max(&mut self, points: u16) {
+        self.current = self.current.saturating_add(points);
+    }
 }
 
 #[cfg(test)]
@@ -79,5 +86,12 @@ mod tests {
         h.heal(10);
         assert_eq!((h.current(), h.is_full()), (100, true));
         assert_eq!(Health::new(300, 100).current(), 100);
+    }
+
+    #[test]
+    fn heal_past_max_can_overshoot_by_one_heal() {
+        let mut h = Health::new(95, 100);
+        h.heal_past_max(10);
+        assert_eq!((h.current(), h.is_full()), (105, true), "over max by up to one heal's worth");
     }
 }

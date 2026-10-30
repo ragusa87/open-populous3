@@ -87,7 +87,7 @@ pub fn blueprint_at(kind: BuildingKind, facing: u8, cell: Vec2) -> Building {
 pub fn place_command(map: &GameMap, kind: BuildingKind, facing: u8, cell: Vec2) -> Option<Command> {
     let b = blueprint_at(kind, facing, cell);
     let b = Building { facing: best_facing(map, &b, facing), ..b };
-    can_place(map, &b).then_some(Command::PlaceBuilding { player: PLAYER, kind, at: (b.x, b.z), facing: b.facing })
+    can_place(map, &b, None).then_some(Command::PlaceBuilding { player: PLAYER, kind, at: (b.x, b.z), facing: b.facing })
 }
 
 /// A point of the building's own frame (cells) turned by `facing` into map axes, the same way
@@ -164,7 +164,7 @@ fn spawn_mark(mut commands: Commands, mut mats: ResMut<Assets<StandardMaterial>>
 }
 
 /// Draws `mark` into the mark's mesh, made the first time.
-fn put_mark(commands: &mut Commands, mark_entity: Entity, mesh: Option<&Mesh3d>, meshes: &mut Assets<Mesh>, mark: MarkMesh) {
+pub(crate) fn put_mark(commands: &mut Commands, mark_entity: Entity, mesh: Option<&Mesh3d>, meshes: &mut Assets<Mesh>, mark: MarkMesh) {
     match mesh {
         Some(mesh) => {
             if let Some(mut m) = meshes.get_mut(&mesh.0) {
@@ -180,13 +180,13 @@ fn put_mark(commands: &mut Commands, mark_entity: Entity, mesh: Option<&Mesh3d>,
 }
 
 /// The mouse over the map (not the panel or a button), if any.
-fn cursor_on_map(windows: &Query<&Window>, ui: &Query<&Interaction>) -> Option<Vec2> {
+pub(crate) fn cursor_on_map(windows: &Query<&Window>, ui: &Query<&Interaction>) -> Option<Vec2> {
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
     windows.iter().next().and_then(Window::cursor_position).filter(|c| c.x > PANEL_WIDTH && !over_ui)
 }
 
 /// The map position (cells) under the mouse, if it is over the map.
-fn ground_under_mouse(
+pub(crate) fn ground_under_mouse(
     windows: &Query<&Window>,
     ui: &Query<&Interaction>,
     cams: &Query<(&Camera, &GlobalTransform), With<GameCamera>>,
@@ -302,7 +302,7 @@ fn draw_blueprint(
     let centre = Vec2::new(cx as f32, cz as f32) / unit;
     let all_red = too_steep(&map.0, &b) || !shore_ok(&map.0, &b);
     // A map position (cells) -> render position and colour.
-    let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at)).is_some() { RED } else { WHITE });
+    let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at), None).is_some() { RED } else { WHITE });
     let mark = mark_mesh(kind, b.facing, centre, vertex);
     look.set_if_neq(CursorLook::Building { plan, valid: !mark.colours.contains(&RED) });
     put_mark(&mut commands, mark_entity, mesh, &mut meshes, mark);

@@ -103,7 +103,7 @@ impl Effect {
     /// One turn at `now`: its work on its own rhythm, then one turn less to go.
     pub fn tick(&mut self, now: Tick, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         let events = match self.kind {
-            EffectKind::SimpleBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units, &world.vehicles, &world.terrain),
+            EffectKind::SimpleBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units, &world.vehicles, &world.buildings, &world.terrain),
             EffectKind::PanickingBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units, &world.vehicles),
             EffectKind::LandBridge(ref mut bridge) => bridge.turn(),
             EffectKind::Lightning(ref mut strike) => strike.turn((self.x, self.z), self.owner, world),
@@ -114,7 +114,7 @@ impl Effect {
             EffectKind::Lava(ref mut lava) => lava.turn(now, self.owner, world),
             EffectKind::Volcano(ref mut volcano) => volcano.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Firestorm(ref mut firestorm) => firestorm.turn((self.x, self.z), self.owner, world, rng),
-            EffectKind::Earthquake(ref mut earthquake) => earthquake.turn((self.x, self.z), self.owner, world),
+            EffectKind::Earthquake(ref mut earthquake) => earthquake.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Swarm(ref mut swarm) => swarm.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]

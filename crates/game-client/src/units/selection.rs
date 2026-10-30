@@ -354,6 +354,13 @@ pub(super) fn select_and_order(
     if shortcuts.just_pressed(crate::keymap::Shortcut::ReleasePatrol) && !selection.units.is_empty() {
         moves.push(Command::ReleasePatrol { player: PLAYER, units: selection.units.clone() });
     }
+    if shortcuts.just_pressed(crate::keymap::Shortcut::Guard) {
+        let (commands, clear) = guard_press(&map.0, &selection.units);
+        moves.extend(commands);
+        if clear {
+            selection.clear();
+        }
+    }
     let commands = orders.into_iter().flat_map(|order| selection.commands(order));
     let commands: Vec<Command> = if add { chained(commands.collect()) } else { commands.collect() };
     for command in moves.into_iter().chain(commands) {
@@ -441,6 +448,19 @@ pub fn attack_click(map: &game_core::map::GameMap, selected: &[UnitId], hovered:
     let attackers = selected.iter().filter_map(|&id| map.unit(id)).filter(|u| map.attack_goal(u, target).is_some());
     let orders: Vec<Command> = attackers.map(|u| Command::OrderUnit { player: PLAYER, unit: u.id, order: Order::Attack { target } }).collect();
     (!orders.is_empty()).then_some(orders)
+}
+
+/// `G` (pop3-rev-analysis.md "Guard the shaman"): any non-shaman unit in `selected` escorts the shaman
+/// (`Order::Guard`), and the caller should clear the selection, matching the original auto-deselecting them
+/// once given the order; nothing but her, or nothing at all, instead stops every one of the player's own units
+/// currently guarding (`Command::CancelGuard`), and the selection stays as it is.
+fn guard_press(map: &game_core::map::GameMap, selected: &[UnitId]) -> (Vec<Command>, bool) {
+    let followers: Vec<UnitId> = selected.iter().copied().filter(|&id| map.unit(id).is_some_and(|u| u.kind != game_core::unit::UnitKind::Shaman)).collect();
+    if followers.is_empty() {
+        (vec![Command::CancelGuard { player: PLAYER }], false)
+    } else {
+        (followers.into_iter().map(|unit| Command::OrderUnit { player: PLAYER, unit, order: Order::Guard }).collect(), true)
+    }
 }
 
 /// Commands for a left click at `at` (world units) on one of the player's buildings with `selected`
@@ -559,7 +579,32 @@ mod tests {
         assert_eq!(attack_click(&map, &[warrior], Some(HoverTarget::Unit(own))), None, "not its own");
         assert_eq!(attack_click(&map, &[], Some(HoverTarget::Unit(enemy))), None);
         map.units[enemy].kind = UnitKind::Wildman;
-        assert_eq!(attack_click(&map, &[brave], Some(HoverTarget::Unit(enemy))), None, "wildmen never fight");
+        assert_eq!(
+            attack_click(&map, &[brave], Some(HoverTarget::Unit(enemy))),
+            Some(vec![Command::OrderUnit { player: PLAYER, unit: brave, order: Order::Attack { target } }]),
+            "a direct click may attack a wildman, only the automatic scan excludes it (attack.rs)"
+        );
+    }
+
+    #[test]
+    fn guard_press_orders_non_shaman_selected_units_and_clears_or_else_cancels_every_guard() {
+        use game_core::unit::UnitKind;
+        let map = game_core::map::GameMap::sandbox_units();
+        let shaman = map.shaman_of(PLAYER).unwrap().id;
+        let braves: Vec<_> = map.units.iter().filter(|u| u.owner == PLAYER && u.kind == UnitKind::Brave).map(|u| u.id).take(2).collect();
+        let (commands, clear) = guard_press(&map, &braves);
+        assert_eq!(commands, braves.iter().map(|&unit| Command::OrderUnit { player: PLAYER, unit, order: Order::Guard }).collect::<Vec<_>>());
+        assert!(clear, "auto-deselects, matching the original");
+        let (commands, clear) = guard_press(&map, &[shaman]);
+        assert_eq!(commands, vec![Command::CancelGuard { player: PLAYER }], "nothing but her: stop guarding instead");
+        assert!(!clear);
+        let (commands, clear) = guard_press(&map, &[]);
+        assert_eq!(commands, vec![Command::CancelGuard { player: PLAYER }], "nothing selected: stop guarding");
+        assert!(!clear);
+        let mixed: Vec<_> = braves.iter().copied().chain([shaman]).collect();
+        let (commands, clear) = guard_press(&map, &mixed);
+        assert_eq!(commands, braves.iter().map(|&unit| Command::OrderUnit { player: PLAYER, unit, order: Order::Guard }).collect::<Vec<_>>(), "her own selection is dropped, the rest still guard");
+        assert!(clear);
     }
 
     #[test]
@@ -655,15 +700,16 @@ mod tests {
     #[test]
     fn a_click_on_a_hovered_totem_sends_the_selection_to_pray_there() {
         use crate::hover::HoverTarget;
+        use game_core::unit::WorshipAt;
         let mut map = game_core::map::GameMap::sandbox_buildings();
         let site = (40 * 512, 40 * 512);
-        map.totems = vec![game_core::totem::Totem::new(game_core::totem::TotemKind::StoneHead, site)];
+        let totem = map.add_totem(game_core::totem::Totem::new(game_core::totem::TotemKind::StoneHead, site));
         let brave = map.units.iter().find(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave).unwrap().id;
         assert_eq!(hovered_site(&map, Some(HoverTarget::Totem(0))), Some(site));
         assert_eq!(hovered_site(&map, Some(HoverTarget::Totem(1))), None);
         assert_eq!(hovered_site(&map, Some(HoverTarget::Tree(0))), None);
         let orders = building_click(&map, &[brave], hovered_site(&map, Some(HoverTarget::Totem(0))).unwrap()).unwrap();
-        assert!(matches!(orders[..], [Command::OrderUnit { order: Order::Worship { site: s }, .. }] if s == site));
+        assert!(matches!(orders[..], [Command::OrderUnit { order: Order::Worship { at: WorshipAt::Totem { id } }, .. }] if id == totem));
     }
 
     #[test]

@@ -39,7 +39,7 @@ impl Strike {
             .into_iter()
             .map(|unit| WorldEvent::Damage { unit, amount: u16::MAX, kind: DamageKind::Lightning, from: Some(owner) })
             .collect();
-        events.extend(building.map(|building| WorldEvent::SetFire { building }));
+        events.extend(building.map(|building| WorldEvent::SetFire { building, by: owner }));
         events.push(match world.trees.iter().any(|t| t.cell() == cell && t.wood() > 0) {
             true => WorldEvent::BurnTrees { cell },
             false => WorldEvent::SpawnEffect(crate::ground_fire::effect(owner, at)),
@@ -116,7 +116,7 @@ mod tests {
     fn sets_the_building_it_hits_on_fire_and_lights_a_fire_on_bare_ground() {
         let hut = crate::building::Building { id: Id::from_raw(50), ..crate::building::Building::new(crate::building::BuildingKind::Hut { size: 1 }, 0, AT.0 - 256, AT.1 - 256, 0) };
         let events = Strike::default().turn(AT, 0, &world(vec![], vec![hut], vec![]));
-        assert_eq!(events[0], WorldEvent::SetFire { building: Id::from_raw(50) });
+        assert_eq!(events[0], WorldEvent::SetFire { building: Id::from_raw(50), by: 0 });
         let fire = crate::ground_fire::effect(0, AT);
         assert_eq!(events[1], WorldEvent::SpawnEffect(fire), "no tree: a fire");
     }

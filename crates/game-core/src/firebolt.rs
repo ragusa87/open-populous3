@@ -220,7 +220,7 @@ impl GameMap {
             Target::Building(id) => {
                 if let Some(building) = self.building_index(id) {
                     self.buildings[building].wear_down(if b.from_tower { TARGET_DAMAGE_FROM_TOWER } else { TARGET_DAMAGE });
-                    events.push(WorldEvent::SetFire { building: id });
+                    events.push(WorldEvent::SetFire { building: id, by: b.owner });
                 }
             }
             Target::Unit(id) => {
@@ -411,7 +411,12 @@ mod tests {
                 map.apply(&Command::OrderUnit { player: 1, unit: t, order: Order::MoveTo { x: to.0, z: to.1 } });
             }
             let full = life(&map, t);
-            let fired_back = (0..80).any(|_| {
+            assert!((0..100).any(|_| { map.tick(); map.unit(t).unwrap().thrown() }), "hit and thrown");
+            // One hit only: `a`'s own reload (~27-28 turns) can otherwise land again while `t` is still in its own
+            // ground-recovery grace period (`unit::settle_ticks`) and knock it right back down - a real possibility
+            // this fix introduces, not a bug, but not what this test is about (retaliation triggering at all).
+            map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Stop });
+            let fired_back = (0..200).any(|_| {
                 map.tick();
                 life(&map, t) < full && matches!(map.unit(t).map(|u| u.action), Some(Action::Attacking { target: Target::Unit(x), .. } | Action::Throwing { target: Target::Unit(x), .. }) if x == a)
             });

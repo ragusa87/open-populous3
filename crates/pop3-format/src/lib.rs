@@ -7,11 +7,13 @@ pub mod anim;
 pub mod blend;
 pub mod catalog;
 pub mod constants;
+pub mod ghost;
 pub mod header;
 pub mod install;
 pub mod language;
 pub mod level;
 pub mod objects;
+pub mod sound;
 pub mod sprites;
 pub mod theme;
 

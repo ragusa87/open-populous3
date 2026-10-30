@@ -75,7 +75,7 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | Ctrl+Alt + left click (with followers) | patrol points, up to 8 | same (units.md) |
 | Ctrl + left click after patrol points | hold the orders | - |
 | N | release the held followers | same |
-| G (with followers) / G | guard the shaman / stop guarding | toggles the cell grid |
+| G (with followers) / G | guard the shaman / stop guarding | same, Shift+G (G alone is the cell grid toggle in dev mode) |
 | Ctrl + left click on a follower icon | select 5 of that type | - |
 | Shift + left click on a follower icon | select all of that type, spies included | - |
 | Left click on an enemy tribe icon (spy selected) | the spy disguises as that tribe | - |

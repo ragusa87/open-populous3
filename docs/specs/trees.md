@@ -11,6 +11,12 @@
   turn divisible by 16 (the same turns for every tree), one size per 100 wood, so one size takes `GROW_TICKS`
   (800 turns, 67 s). A tree at size 0 stays in place, invisible, and grows back. `Tree::cut` takes one piece
   (size - 1) and keeps the wood regained toward the next size. `TREE<N>_DORMANT_TIME` is ignored.
+- Submersion (`[ours]`, reported, not traced): every tick, a tree whose cell has become open sea (land bridge,
+  flatten, erosion, earthquake, a reincarnation site's own re-levelling...) drops to size 0 at once and stops
+  regrowing - the same dormant look as a burnt one - resuming its ordinary growth once dry again. A direct
+  per-tree check each turn against the live heightmap (`GameMap::tick`, `unit::is_sea`), the same "read the
+  ground fresh, react to whatever changed it" shape as a building's own foundation check (`foundation.rs`),
+  rather than routing through `WorldEvent::Terrain`.
 - Placement (`tree::scatter`, deterministic from a seed): groves around random centres, 3-8 trees within 3 cells,
   only on ground units can walk (no sea, no cliff), never within 7 cells of a reincarnation site, one per cell,
   starting at size 1-4, of any type. Generated maps: 60 groves (seed = map seed); sandboxes: 150 attempts (most

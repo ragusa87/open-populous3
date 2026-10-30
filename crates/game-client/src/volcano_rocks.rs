@@ -20,7 +20,7 @@ use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{mesh_height, render_pos, Grounded};
 use crate::sim_time::{seed, SimNow};
 use crate::units::art::Frame;
-use crate::units::{toward_eye, upload_frame, FrameAsset};
+use crate::units::{toward_eye, upload_frames, FrameAsset};
 use crate::views::{sync_views, WorldView};
 use crate::world::{CurrentMap, LevelList};
 use bevy::ecs::system::SystemParamItem;
@@ -206,7 +206,7 @@ fn generated_frame(variant: u32) -> Frame {
 fn load_assets(levels: Res<LevelList>, mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     let original = levels.original.then(|| original_frames(&levels.data_dir).map_err(|e| warn!("original volcano rock sprite: {e}")).ok()).flatten();
     let frames = original.unwrap_or_else(generated_frames);
-    let uploaded: Vec<FrameAsset> = frames.iter().map(|f| upload_frame(f, &mut images, &mut meshes, &mut mats)).collect();
+    let uploaded: Vec<FrameAsset> = upload_frames(&frames, &mut images, &mut meshes, &mut mats);
     let Ok(frames) = uploaded.try_into() else { return };
     commands.insert_resource(RockAssets { frames });
 }

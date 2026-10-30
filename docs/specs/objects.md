@@ -65,8 +65,16 @@ Empty in banks 2-7: 6, 12, 22-29, 33-38, 48-50, 57-61, 145-148.
 So the tree look follows the object bank, not the landscape theme. Which file the game loads for a bank-N level,
 and how it indexes it, is not verified (it needs the game). A hint from the exe: vehicles set their object index
 to 143 (boat) and 144 (balloon), the banks 2-7 numbering of bank 0's 181 / 182 (pop3-rev-analysis.md "Vehicles"),
-so the loaded object table uses the banks 2-7 layout. Either load bank N with the table above, or stay on
-bank 0 and pick the trees by bank.
+so the loaded object table uses the banks 2-7 layout.
+
+**Decision: we stay on bank 0.** Every catalogued object (buildings, the reincarnation stone, vehicles, totems,
+totem poles, the knowledge pyramid, the prison, the winged death) is looked up by a fixed name/kind
+(`pop3_format::catalog`'s named constants), never by a raw bank-numbered index read off a level `Thing` - so
+which bank a level's header declares makes no difference to anything except trees, which already pick their 3
+models from bank 0 via `tree_object_in_bank` (`crates/pop3-format/src/catalog.rs`, threaded from the header's
+own object-bank byte, `crates/game-client/src/nature.rs`). This is a practical default given the current
+architecture (every other consumer would need no change even if loading per-bank files became possible), not a
+settled trace - the "not verified against the game" caveat above still stands.
 
 ### Records
 `objs` record, 54 bytes, little endian:
@@ -103,6 +111,16 @@ show through openings: the boat huts' (121-124) inner roof and walls sample the 
 (index 184) and face inwards, so from the jetty side, drawn from both sides, they looked like a black wedge
 under the roof. Flags `3` (no `0x4`) only appear on the boat huts' inner faces, the guard posts and the winged
 death (100, 107, 181): they are not what hides those faces.
+
+The client now follows this one-sided rule everywhere original objects are drawn: buildings (`buildings.rs`) and
+totems (`totems.rs`) first, trees (`nature.rs`), camp fire logs (`campfire.rs`) and the reincarnation site stones
+(`sites.rs`) culling their back faces too since (`cull_mode: Some(Face::Back)`, the three materials that
+previously overrode it to always-both-sides with no stated reason). **Not independently verified by screenshot
+in this session**: the fix follows the already-proven-correct buildings/totems pattern exactly, but confirming no
+object's own `facs` data is missing a genuine back-to-back pair (which would show up as a new hole from some
+angle) needs rendering with the real original files, not available in every environment - a `just shot`/`just
+video` pass at varied `YAW`/`PITCH`/`AERIAL` over a tree cluster, a camp fire and a reincarnation site, with an
+install present, is the remaining check.
 
 ### Blended faces (flames)
 The 144 faces with flag `0x20` all use tile 92, and only they do: the flame boards of the camp fires (0, 12),

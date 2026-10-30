@@ -7,9 +7,15 @@ use crate::unit::{Action, Target, Unit, UnitKind};
 
 /// Whether `attacker` may start a fight with `target`: both fight, of other tribes, the target alive. A preacher starts
 /// one only with a preacher or a shaman ("Auto-attack" [exe]); attacked, it defends itself like anyone.
+///
+/// A wildman counts as a valid target here even though it never fights (`KindStats::fights` false): TODO.md "Units"
+/// - only the automatic proximity scan (`spotting::first_seen`) is confirmed to skip it, whether an explicit player
+/// attack order also refuses one is untraced either way, so this is a guess that it does not, kept stricter where it
+/// matters (the scan itself excludes it separately). A wildman can still never be the attacker: `fights(attacker.kind)`.
 pub fn may_attack(attacker: &Unit, target: &Unit) -> bool {
     let preacher_may = attacker.kind != UnitKind::Preacher || matches!(target.kind, UnitKind::Preacher | UnitKind::Shaman);
-    fights(attacker.kind) && preacher_may && target.kind.stats().fights && attacker.owner != target.owner && target.is_alive()
+    let target_fights = target.kind.stats().fights || target.kind == UnitKind::Wildman;
+    fights(attacker.kind) && preacher_may && target_fights && attacker.owner != target.owner && target.is_alive()
 }
 
 /// Whether `attacker` may go for the building `b`: another tribe's, one that wears down. Never a neutral building
@@ -121,10 +127,12 @@ mod tests {
     }
 
     #[test]
-    fn wildmen_never_fight_and_nobody_attacks_its_own() {
+    fn a_direct_order_may_attack_a_wildman_but_nobody_attacks_its_own() {
+        // A guess (TODO.md "Units"): the original only confirms its automatic proximity scan skips a
+        // wildman, not an explicit player order - this is kept stricter nowhere else now.
         let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Wildman);
         attack(&mut map, a, t);
-        assert_eq!(map.unit(a).unwrap().action, Action::Idle, "a wildman is no target");
+        assert!(matches!(map.unit(a).unwrap().action, Action::Attacking { .. }), "an explicit order reaches a wildman");
         let (mut map, a, _) = duel(UnitKind::Brave, UnitKind::Brave);
         let own = map.spawn(0, UnitKind::Brave, (0, 0)).id;
         attack(&mut map, a, own);

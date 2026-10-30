@@ -8,6 +8,8 @@
 //! `TAB=spells|build|stats` opens that panel tab; `BLUEPRINT=kind@x,z` (kind as in the Build tab,
 //! e.g. `temple@64,70`) shows that blueprint at map position x,z (cells); `BUILD=kind@x,z` places that
 //! plan with every brave of the player sent to it, then runs `BUILD_TICKS` ticks (0 by default).
+//! `EDITOR_BRUSH=x,z:radius` turns on the world editor (`editor.rs`) and pins its brush ring at map
+//! position x,z (cells) with that radius, for a headless shot of it.
 //! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
 //! `EXPLODE=building:N` blows up building N (its index), as if `EXPLODE_TICKS` ticks ago (0 by default; with
 //! `GAME_SPEED=0` the shot holds it there): the explosion is drawn, then the building removed the next frame.
@@ -193,6 +195,19 @@ pub fn hypnotism_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -
     true
 }
 
+/// `INVISIBLE=1`: a brave next to the player's own shaman is cast Invisible (`Command::Cast`, same path a real
+/// cast takes - granted `Unlimited` here so it works regardless of the sandbox's own loadout), then enough ticks
+/// run to clear the cast's own `CAST_RELEASE` delay and hold the brave invisible for inspection (units.md
+/// "Statuses"). False when the player has no shaman (no sandbox/level loaded one).
+pub fn invisibility_demo(map: &mut game_core::map::GameMap) -> bool {
+    let Some(at) = map.units.iter().find(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Shaman).map(|u| (u.x, u.z)) else { return false };
+    map.spawn(PLAYER, game_core::unit::UnitKind::Brave, (at.0.wrapping_add(100), at.1));
+    map.spell_books[PLAYER as usize].set(game_core::spell_book::SpellKind::Invisibility, game_core::spell_book::Availability::Unlimited);
+    map.apply(&Command::Cast { player: PLAYER, spell: game_core::spell::Spell::Invisibility { at } });
+    map.run(game_core::time::Ticks::new(20));
+    true
+}
+
 /// `VOLCANO=x,z` (cells): the player's Volcano effect there, then `ticks` run at once (with `GAME_SPEED=0`: its
 /// rumble/rise/destruction/lava/fireball phases over the run). False when `at` does not parse.
 pub fn volcano_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
@@ -233,13 +248,16 @@ pub fn swarm_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bo
     true
 }
 
-/// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there (needs it known/charged, e.g. the Spells sandbox's
-/// `SpellBook::unlimited`), then `ticks` run at once — v1 settles almost immediately (`docs/specs/outcome.md`
-/// "Armageddon"); with `GAME_SPEED=0`, a shot can catch the brief camera-takeover/lock window. False when `at`
-/// does not parse.
+/// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there, then `ticks` run at once — v1 settles almost
+/// immediately (`docs/specs/outcome.md` "Armageddon"); with `GAME_SPEED=0`, a shot can catch the brief
+/// camera-takeover/lock window. False when `at` does not parse. Grants itself one shot of Armageddon right before
+/// casting (`SpellBook::unlimited` deliberately leaves it unavailable, same as Bloodlust - `GameMap::outcome`'s
+/// one-shot latch would otherwise strand every other spell in the Spells sandbox once this demo settles it), so this
+/// works against any map regardless of what its own book allows.
 pub fn armageddon_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
     let at = world_units(Vec2::new(x, z));
+    map.spell_books[PLAYER as usize].set(game_core::spell_book::SpellKind::Armageddon, game_core::spell_book::Availability::Provided { shots: 1 });
     map.apply(&Command::Cast { player: PLAYER, spell: game_core::spell::Spell::Armageddon { at } });
     map.run(game_core::time::Ticks::new(ticks));
     true
@@ -338,6 +356,13 @@ pub fn parse_blueprint(v: &str) -> Option<(crate::blueprint::Plan, Vec2)> {
     let plan = building.or_else(|| "campfire".starts_with(&squash(name)).then_some(Plan::Campfire).filter(|_| !name.is_empty()))?;
     let (x, z) = at.split_once(',')?;
     Some((plan, Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?)))
+}
+
+/// `x,z:radius` (`EDITOR_BRUSH`): a pinned brush position and radius, for a headless shot of the ring.
+pub fn parse_editor_brush(v: &str) -> Option<(Vec2, i32)> {
+    let (at, radius) = v.split_once(':')?;
+    let (x, z) = at.split_once(',')?;
+    Some((Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?), radius.trim().parse().ok()?))
 }
 
 /// `progress:N` (the gauge, in `PrayTime` units), `granted:T` (ticks since the reward) or `spent`: a vault phase.
@@ -494,7 +519,12 @@ fn screenshot(
     mut clock: ResMut<TimeUpdateStrategy>,
     mut video: ResMut<crate::video::Video>,
     mut exit: MessageWriter<AppExit>,
-    (mut explode, mut exploded): (MessageWriter<crate::explosion::BuildingExploded>, Local<Option<game_core::building::BuildingId>>),
+    (mut explode, mut exploded, mut editor, mut editor_pinned): (
+        MessageWriter<crate::explosion::BuildingExploded>,
+        Local<Option<game_core::building::BuildingId>>,
+        ResMut<crate::editor::EditorState>,
+        ResMut<crate::editor::PinnedAt>,
+    ),
 ) {
     let Some(capture) = Capture::from_env(|k| std::env::var(k).ok()) else { return };
     let shot = std::env::var("SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
@@ -531,6 +561,11 @@ fn screenshot(
             blueprint.pick(kind);
             pinned.0 = Some(at);
         }
+        if let Some((at, radius)) = std::env::var("EDITOR_BRUSH").ok().and_then(|v| parse_editor_brush(&v)) {
+            editor.active = true;
+            editor.brush_radius = crate::editor::clamp_radius(radius);
+            editor_pinned.0 = Some(at);
+        }
         let demo = std::env::var("SHAMAN").unwrap_or_default();
         if demo == "teleport" {
             map.0.spell_books[PLAYER as usize].set(game_core::spell_book::SpellKind::Teleport, game_core::spell_book::Availability::Unlimited);
@@ -566,6 +601,9 @@ fn screenshot(
         if let Ok(at) = std::env::var("HYPNOTISM") {
             let ticks = std::env::var("HYPNOTISM_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             hypnotism_demo(&mut map.0, &at, ticks);
+        }
+        if std::env::var("INVISIBLE").is_ok_and(|v| v == "1") {
+            invisibility_demo(&mut map.0);
         }
         if let Ok(at) = std::env::var("VOLCANO") {
             let ticks = std::env::var("VOLCANO_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -803,7 +841,7 @@ mod tests {
 
     #[test]
     fn armageddon_demo_casts_and_settles_within_the_run() {
-        let mut map = game_core::map::GameMap::sandbox_spells(); // SpellBook::unlimited: Armageddon known
+        let mut map = game_core::map::GameMap::sandbox_spells(); // armageddon_demo grants itself a shot regardless
         // CAST_RELEASE (6 ticks) for the cast jump to release, then the match's own first-tick resolution.
         assert!(armageddon_demo(&mut map, "5,5", 10));
         assert!(map.outcome.is_some(), "v1 settles almost immediately once released");

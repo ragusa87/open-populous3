@@ -13,6 +13,7 @@ use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects}
 use crate::world::{CurrentMap, LevelList};
 use bevy::gltf::GltfAssetLabel;
 use bevy::prelude::*;
+use bevy::render::render_resource::Face;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use game_core::tree::{MAX_SIZE, VARIANTS};
 use pop3_format::catalog::tree_object_in_bank;
@@ -117,8 +118,7 @@ fn original_trees(
         base_color_texture: Some(images.add(atlas_image(&atlas, &palette.palette))),
         alpha_mode: AlphaMode::Mask(0.5),
         perceptual_roughness: 0.95,
-        double_sided: true,
-        cull_mode: None,
+        cull_mode: Some(Face::Back),
         ..default()
     };
     Some((trees, mats.add(material)))

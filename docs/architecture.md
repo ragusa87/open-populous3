@@ -44,13 +44,15 @@ crates/
 `GameMap::tick` is the one main loop: one call is one turn of the original (12 per second, `time.rs`), and it ticks
 each kind of object in a fixed, written order. The original's order inside a turn is not known yet (TODO.md); ours:
 1. walls (`update_walls`), then trees (`Tree::tick`);
-2. firewarriors' reloads and their bolts in flight (`tend_reloads`, `tend_bolts`, combat.md "Firebolts"), then
-   effects (`tend_effects`): before anything they act on, so units react the same turn;
+2. firewarriors' reloads and their bolts in flight (`tend_reloads`, `tend_bolts`, combat.md "Firebolts"), Blast's
+   own fireball shots in flight (`tend_fireballs`, spells.md "Blast"), then effects (`tend_effects`): before
+   anything they act on, so units react the same turn;
 3. fires, buildings' wear (`tend_building_wear`), ashes (`Ashes::tick`), camp fires, vaults, totems, training,
-   vehicle huts (`tend_vehicle_huts`);
+   vehicle huts (`tend_vehicle_huts`), huts' own breeding and growth (`tend_huts`, huts-and-training.md "Huts");
 4. a script's flyby playing or cancelled, cleared once it's over (`tend_flyby`, `ai_script.rs`), then each
    computer tribe's own script (`tend_ai_scripts`, docs/specs/ai-scripts.md), then
-   spotting (`spot_enemies`), attacks followed (`tend_attacks`) and buildings hacked (`tend_wrecking`) (combat.md);
+   spotting (`spot_enemies`), attacks followed (`tend_attacks`), buildings hacked (`tend_wrecking`) (combat.md),
+   and idle wildmen sent off to eat or drink (`tend_wildmen`, pop3-rev-analysis.md "Wildmen");
 5. coordinators (docs/specs/coordinators.md): scans that start them (challenges, melees joined), their turns, the
    finished ones removed, their events, then the units whose coordinator is gone released, so a coordinator ending
    now is gone when its units tick;
@@ -99,7 +101,7 @@ an `EffectKind` variant carrying only its own data (`SimpleBlast`). `tend_effect
 - `Push` flings the unit (`Unit::fling`) unless it is shielded;
 - `SpawnEffect` adds a new effect, which first ticks on the next turn;
 - `Terrain` raises or flattens ground; `Panic` makes the unit run off (`Unit::panic`); `SetFire` burns a building; `BurnTrees` the trees of a cell;
-  `Raid` is routed, without behaviour yet.
+  `Raid` (`GameMap::throw_out`) empties a building, its occupants out and panicked.
 An effect never holds another object's state: a unit it affects keeps its own countdown (panic, on fire) and
 finishes it alone, even after the effect has ended.
 

@@ -47,10 +47,12 @@
 | Throwing { target, left } | a firewarrior in reach, reloaded | throws two firebolts, 5 turns, then back to its attack |
 | Challenge { challenge, role } | a challenge (coordinator) | charging, shoving, waiting or shoved (combat.md "Challenge") |
 | Melee { melee, place, stance } | a melee (coordinator) | to its place, on guard, striking, reeling, staggering (combat.md "Melee") |
-| Tumbling | flung or rolling from a spell or a firebolt | locked (no orders, not hovered, dropped from the selection, see "Locked units"), no healing, no drowning while off the ground; moved by the physics step (below) while off the ground, back to Idle once on the ground and still **today - the original instead stays locked and unresponsive for tens of turns first (occasionally longer; person state 19, pop3-rev-analysis.md "Tumbling and ground recovery") while it picks a nearby clear spot and settles, playing ordinary Idle/Walk poses throughout (no dedicated "down" sprite) before resuming normal behaviour - see TODO.md**. Drawn flung in the air (off the ground: followers 19, wildmen 31, shaman 61) or falling down a slope on the ground (followers 37, wildmen 47, shaman 73); the CC0 sheets show their fall meanwhile. `TUMBLE=air\|ground` in a shot |
+| Tumbling | flung or rolling from a spell or a firebolt | locked (no orders, not hovered, dropped from the selection, see "Locked units"), no healing, no drowning while off the ground; moved by the physics step (below) while off the ground. Once grounded and still, goes to `Settling` (person state 19, pop3-rev-analysis.md "Tumbling and ground recovery") instead of Idle at once: a fatal hit taken mid-tumble is held off rather than lost (`Unit::take_damage`'s own `thrown()` guard, true for the whole of `Action::Tumbling`) and catches up right there before the grace period starts, instead of quietly going Idle at zero health. Drawn flung in the air (off the ground: followers 19, wildmen 31, shaman 61) or falling down a slope on the ground (followers 37, wildmen 47, shaman 73); the CC0 sheets show their fall meanwhile. `TUMBLE=air\|ground` in a shot |
+| Settling | a tumble that's come to a stop (`Unit::settle`) | locked (no orders, not selectable, but still an ordinary hoverable person, unlike `Tumbling` - see "Locked units") for a randomized `left` (`settle_ticks`) before `go_idle` (so a standing attack order a fight put on hold still resumes, same as any other release - "Resuming a fight cut short by a push" below), playing its ordinary Idle (or holding-wood) pose throughout - no dedicated "down" sprite, matching the original's own static action table. Carried wood is put down right away. A scoped-down approximation of the original (which relocates to a nearby clear spot first, and reads "once per 100 wood" for the debris drop rather than our one-load-at-a-time put-down) - TODO.md "Units" has the open ends, including a fast enough attacker being able to juggle a unit through repeated tumbles indefinitely, a real possibility this introduces, not independently confirmed live either way. |
+| Panicking { away, left } | a spell (Firestorm/Volcano's fireballs, Swarm's stings), or thrown out of a raided or burning building | locked out of new orders for `PANIC_TICKS` (64 turns, 5.3 s [exe]), runs at `PANIC_SPEED` (110/turn [exe]) towards a random heading `away` (`panic_heading`, any direction, redrawn only once, at the start); inside a building first, straight to its door, then out as normal. Blocked by an obstacle (today: impassable ground only, e.g. the sea): turns a quarter turn (`(-away.1, away.0)`) and keeps running that way - **`[ours]`, not traced**: the original's own turn-at-an-obstacle rule is unconfirmed (TODO.md), this is a guess that a wall ends up walked around at all rather than, say, stood against. Idle once `left` runs out. Not yet: the original's own panic scream. |
 | Dying { left } | health reaches 0 | `DYING_TICKS` (1.5 s), falling down (the fall pose) |
 | Dead { left } | the shaman, after dying | lying, `RESPAWN_TICKS` (3 s), then reincarnates at her site at full health; the site levels its ground again |
-| Spirit { left } | anyone else, after dying | `SPIRIT_TICKS` (3 s, a guess): its spirit rises from the body (followers' anim 40, played once; wildmen lie still), then the unit is gone from `GameMap::units` (`UnitEvent::Gone`, removed at the end of the tick). The client rebuilds its unit views and shadows when the count changes and does not glide a unit from another one's place |
+| Spirit { left, climbing } | anyone else, after dying | Two variants (pop3-rev-analysis.md "Death and the spirit rise", `Unit::new_spirit` [exe, confirmed]): a wildman always, anyone else only if it died in a drowning-eligible spot (the same `is_sea` test `Action::Drowning` itself starts from), gets `climbing` - `SPIRIT_CLIMB_TICKS` (32 turns, 2.67 s), a real sustained rise of `SPIRIT_CLIMB_RATE` (40 height units/turn, no gravity, no deceleration) set directly on `motion.height` and bypassing the general physics step (no touchdown, no gravity - its own branch in `Unit::tick` instead); everyone else gets the brief, stationary `SPIRIT_CALM_TICKS` (4 turns, 0.33 s) variant. Either way the unit is gone from `GameMap::units` once `left` runs out (`UnitEvent::Gone`, removed at the end of the tick). The client rebuilds its unit views and shadows when the count changes and does not glide a unit from another one's place. Not implemented: the wildman-only continuous facing spin while climbing (91/2048 per turn [exe]) - our sprite art is 8 discrete directions, not a smoothly rotating model, so this would need its own client-only approximation, not attempted this session. |
 
 Health: 2000. Orders are ignored while drowning, dying or dead.
 
@@ -72,6 +74,22 @@ the shaman appears, no Convert spell needed (level 2: the 8 around blue's site; 
 tribe this way, level 3 has 12). The conversion animation is not drawn.
 Wildmen are neutral (not selectable), drawn with their original anims (0 walk, 1 stand, 3 sit, 31 flung, 47 down)
 or else a generated figure in a hide with a mane, or the brave's rendered sheets in a hide colour.
+
+Idle wildmen wander, fully traced (pop3-rev-analysis.md "Wildmen"): on their own rhythm (`wildman::SEEK_EVERY`, a
+guess - the trace gives state 8 no rhythm of its own), an idle one looks for a tree within
+`TREE_SEARCH_RADIUS_CELLS` (18, confirmed) to walk to and eat beside (`Action::Grazing { drink: false, .. }`,
+`Pose::Eat`, original anim 2); failing that, a shore cell within `SHORE_SEARCH_RADIUS_CELLS` (12, confirmed) to
+walk to and drink at (`Action::Grazing { drink: true, .. }`, `Pose::Drink`, anim 4) - both original-asset only,
+CC0 art falls back to idle. No plant scenery (types 7/8) is modelled yet, so only trees are searched; "shore" is
+`wildman::is_shore_cell`'s own neighbour-based approximation (dry, walkable, a sea cell among its 4 neighbours),
+standing in for the original's own untranslated coastal-shape table - **both `[ours]`**. It lingers
+`wildman::GRAZE_TICKS` (a guess, the trace gives no timer either) before going idle and searching again. No
+hunger or thirst stat exists anywhere, confirmed absent: both searches only ever pick where an idle animation
+plays, nothing is consumed. A wildman idling at its shore spot genuinely drowns fairly often - no special
+mechanic, just the ordinary per-turn drowning check re-testing the exact fine-grained spot every turn with no
+bias toward the dry side; needs no code of its own here. The original's own ambient sounds and state 16's cosmetic
+prop-toggle sub-animation are not implemented (no audio engine, and not an animation table - confirmed from the
+trace).
 
 ## Unit kinds (simulation: walking only)
 `UnitKind::ALL`: Shaman, Brave, Warrior, Preacher, Spy, Firewarrior, built with `Unit::new(id, owner, kind, pos)`.
@@ -179,6 +197,24 @@ debug overlay (`F4`) draws a patrolling unit's route and points.
   into `spot_enemies`/`first_seen` is written (pull in every unit whose `queued_patrol().front()` equals
   the spotter's).
 
+## Guard the shaman (done: `game_core::guard`, `GameMap::go_guard`/`tend_guards`)
+`G` (pop3-rev-analysis.md "Guard the shaman", fully traced): with followers selected, each non-shaman one escorts
+the tribe's shaman continuously (`Order::Guard`, `Action::Guarding { shaman, to }`), then the selection clears
+(auto-deselected, matching the original). Each tick, a guard re-reads her *current* live position and walks
+towards it whenever it is more than `GUARD_RANGE` (824 units [exe]) away on either axis - same shape as
+`Action::Attacking`'s own re-aiming (`GameMap::tend_guards`/`Unit::retarget`), never reporting itself done on its
+own while she is alive; stops (back to Idle) once she is not. `G` with nothing selected, or with only the shaman
+selected, instead stops every one of the player's own units currently guarding (`Command::CancelGuard`, a
+tribe-wide scan rather than a per-unit order, since the original does not name which units are guarding either).
+Any other direct order given to a guarding unit cancels it like any other action (`Unit::can_take_orders`'s own
+default). Bound to `G` in the original keymap; dev mode uses Shift+G instead, since plain `G` there is already
+the cell grid toggle (`keymap.rs`, `shortcuts.md`).
+
+**Live-tested and disproven**: the shaman is NOT protected or untargetable while guarded - she joins the same
+fight ring as her guards once a fight starts nearby, through the ordinary auto-attack/melee-join rule already
+covering everyone nearby, not a dedicated protection mechanic. No code needed for this; it already falls out of
+existing combat behaviour.
+
 ## Wood (done: braves only)
 - A brave carries at most one piece of wood (`Unit::carrying`, 0 or 1).
 - `Order::CutTree { tree }` (left click on a tree with braves selected, `GameMap::cut_orders`; other kinds
@@ -248,6 +284,9 @@ shaman's own orders, spells and Teleport are ignored) while it is:
 - flung (`Action::Tumbling`) or off the ground (`motion.height` set), `Unit::locked`: it is not hovered either, and
   it leaves the selection. Picking only takes a `PickableUnit`, which only `Unit::pickable` makes, None while
   locked: hover and selection (`selection::OnScreen::new`) cannot reach such a unit;
+- settling after a tumble (`Action::Settling`, `Unit::locked`) or listening to a sermon (`Action::Listening`,
+  sermon.rs): the same "no order reaches it" lock (`selection::selectable` still excludes it like any other locked
+  unit), but still an ordinary `PickableUnit` for hover/inspection, unlike `Tumbling`;
 - inside a vault of knowledge, from the moment its full gauge sends her in until she is out by the door
   (done, worship.md), so nothing breaks its sequence;
 - inside a prison, held there until freed (to do: levels where she starts imprisoned; the prison holds her).
@@ -291,7 +330,11 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
   times the body frame's height. Shield and bloodlust run out (`status::Timed`: 180 steps of 8
   turns, about 120 s, a step on the turns where `STEP` fires at the unit's id, `Statuses::tick` in `GameMap::tick`
   before the units) and their markers blink in the last 15 steps (10 s): 2 turns on, 2 off, phased by the unit's id
-  (as in the original). Not yet: the low-health sound, invisible and ghost people. Sandbox Units has each follower kind with each marker, then all at once.
+  (as in the original). Own invisible and ghost people are drawn translucent (`units::ghost_material`: a cached
+  alpha-blended clone of the unit's own kind+tribe+alpha-mode material at alpha 0.34, `pop3_format::ghost`'s 66%
+  mix table decoded for the record but not replayed per pixel - docs/specs/sprites.md "Ghost"). Not yet: the
+  low-health sound, invisible flickering faster near expiry, invisible enemies hidden. Sandbox Units has each
+  follower kind with each marker, then all at once.
 - Dust (`units/dust.rs`, cosmetic, simulation time: shown once the unit is drawn landed): when a unit stops landing, 10 soft generated motes spread 0.4 cell
   around its feet, rise 0.1, grow and fade over 0.8 s, facing the camera and pulled towards it like the sprites.
 - Pose from the action: Idle, Walk, Pray (kneeling, original anim 93), Cast (jump), Drown (original anim 40 for followers: the body lying, its spirit rising; tumbling otherwise), Fall (dying, then lies still while dead), Chop, CarryWalk, CarryIdle (braves cutting and carrying wood: original anims 11, 9, 10; other kinds, and the CC0 sheets and generated figures, which have no wood poses yet, show idle / walk instead, `Pose::fallback`), Stranded (arms up: frame 1 of original anim 12 for every follower, a stand-in, the real anim is unknown; wildmen and the shaman show their idle; the CC0 sheets loop their own arms-up `stranded` sheet).

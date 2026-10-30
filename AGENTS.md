@@ -18,12 +18,15 @@ from the user's own install.
 - Clean room: reverse engineering (disassembly, tracing, live memory reads, running the original) happens only in
   separate spec sessions, whose only output is docs/specs/pop3-rev-analysis.md and its tools. A coding session never
   reads, disassembles or runs the original executable and never traces anything itself: it implements from the docs.
-  A fact the docs lack becomes a question in TODO.md for a spec session, or a guess tagged as such.
+  A fact the docs lack becomes a question in the matching `docs/todo/<slug>.md` backlog file for a spec session,
+  or a guess tagged as such.
 - Facts from the community tools (README "References") yes, their code no.
 - Everything shippable works with `--no-original` (generated or CC0 content, our own texts).
 
 ## Before starting
-Read `README.md`, `TODO.md` and `docs/` (`docs/README.md`, `architecture.md`, `roadmap.md`, then the `docs/specs/*` matching the task).
+Read `README.md`, `TODO.md` (a priority-tiered index — follow its link to the matching `docs/todo/<slug>.md` file
+for the task's topic) and `docs/` (`docs/README.md`, `architecture.md`, `roadmap.md`, then the `docs/specs/*`
+matching the task).
 If `docs/plans/` has a plan for the task, read it too: it is the current approach and task breakdown, ahead of whatever
 the matching spec still says.
 
@@ -36,14 +39,17 @@ the matching spec still says.
 - `docs/`: architecture, roadmap, `docs/specs/*`. Update the matching spec when behaviour changes.
 - `docs/plans/`: WIP implementation plans, see "Plans" below. Gitignored (only `.gitignore` itself is tracked):
   local working files, never committed.
-- `TODO.md`: what is left to implement. Tick/remove items in the commit that does them, add what you leave undone or discover.
+- `TODO.md`: priority-tiered index (same tiers as `docs/roadmap.md`), one line + link per topic, into the
+  per-topic backlog files in `docs/todo/<slug>.md`. What is left to implement lives in those files, not in
+  `TODO.md` itself: tick/remove items in the matching `docs/todo/<slug>.md` in the commit that does them, add what
+  you leave undone or discover there.
 
 ## Plans
 A plan (`docs/plans/<topic>.md`) is scratch, not documentation: the approach and step breakdown for a task too large
 for one sitting, kept so the same working copy can pick up where a prior session left off. It is gitignored and
 never committed — it carries no history and is not shared by cloning the repo.
 - Start one before a multi-commit feature or refactor: what changes, in what order, open questions, which
-  `docs/specs/*.md` and `TODO.md` entries it will touch when done.
+  `docs/specs/*.md` and `docs/todo/<slug>.md` entries it will touch when done.
 - Update it as you go — ticking steps, revising the approach when reality disagrees with the plan — instead of
   letting it drift stale. A plan that no longer matches what you're doing is worse than none.
 - Facts that will outlive the task (final behaviour, formats, numbers) belong in the matching `docs/specs/*.md`, not
@@ -55,7 +61,7 @@ never committed — it carries no history and is not shared by cloning the repo.
   <topic>.md` instead: that directory is tracked (committed, not gitignored, unlike `docs/plans/`), so commit it
   as its own small step. Before moving it:
   - Add a short header noting it's archived (resolved, read as history not current state) and pointing at the
-    final outcome (commits, the spec/TODO entries it fed) so a reader doesn't stop at a stale "not yet decided".
+    final outcome (commits, the spec/docs/todo entries it fed) so a reader doesn't stop at a stale "not yet decided".
   - Make it standalone: it must read correctly with no access to `docs/plans/` (gitignored, and the original file
     will be gone) — fix any internal cross-reference to the plan's own old `docs/plans/<topic>.md` path, and
     correct (don't silently rewrite) anything the plan said that later turned out wrong, the same way
@@ -67,9 +73,18 @@ never committed — it carries no history and is not shared by cloning the repo.
 
 ## Commands
 - `just test` (or `cargo test --workspace`): must pass before committing.
+- A fresh container (no GPU, a minimal base image) may be missing what `game-client` needs to build and render at
+  all - if `cargo build -p game-client` fails linking against wayland/X11/alsa/udev, or a headless `shot`/`video`/
+  `profile`/`run` panics with "Unable to find a GPU"/no Vulkan adapter, install: `apt-get install -y
+  libwayland-dev libasound2-dev libudev-dev libx11-dev libxkbcommon-dev libxcursor-dev libxi-dev libxrandr-dev`
+  (winit's Linux backend, build-time) and `apt-get install -y mesa-vulkan-drivers` (lavapipe/llvmpipe, a software
+  Vulkan driver, for when there's no real GPU - the common case in a cloud session). `just video`/`just profile`
+  also pipe frames through `ffmpeg`, expected on `PATH` already (not always true outside this repo's own
+  containers). None of this is persistent across sessions in a cloud environment - add it to the environment's
+  setup script to stop paying for it every time.
 - `just run [levl.dat|dir]`: windowed game. Avoid it as an agent: it opens a window and steals focus.
 - `just shot out.png [level]` / `AERIAL=1 just shot out.png`: headless offscreen render, then exits. Use this to check visuals.
-  `FOCUS=x,z` (cells), `DISTANCE`, `PITCH`, `YAW` (degrees), `SHOT_FRAME` (frames after loading, 10 by default; `SHOT_BOOT=1`: from launch, to shoot the loading screen), `SHAMAN=walk|teleport|worship|...`, `BRAVES=cut|carry|totem:N`, `HOVER=unit:N|wood:N|tree:N|totem:N|building:N`, `VAULT=progress:N|granted:T|spent`, `TAB=spells|build|stats`, `BLUEPRINT=temple@64,70`, `AIM=blast` (a spell selected as if picked: shows its range ring), `BUILD=hut@90,62 BUILD_TICKS=150` (plan built by all the player's braves), `TUMBLE=air|ground` (the player's units tumble; add `GAME_SPEED=0` to hold them in the air), `BLAST=x,z BLAST_TICKS=N` (another tribe's blast, N ticks run; with `GAME_SPEED=0`), `BRIDGE=x,z BRIDGE_TICKS=N` (the player's land bridge from the shaman, N ticks run; with `GAME_SPEED=0`: its sparkles), `FLATTEN=x,z FLATTEN_TICKS=N` (a flatten on that height point), `ERODE=x,z ERODE_TICKS=N` (an erosion centred on that height point, N ticks run), `LIGHTNING=x,z LIGHTNING_TICKS=N` (another tribe's lightning there), `SWAMP=x,z SWAMP_TICKS=N` (another tribe's swamp there, N ticks run), `CONVERT=x,z CONVERT_TICKS=N` (the player's Convert effect there, with a wildman placed next to it), `HYPNOTISM=x,z HYPNOTISM_TICKS=N` (the player's Hypnotism effect there, with an enemy placed next to it), `VOLCANO=x,z VOLCANO_TICKS=N` (the player's volcano there), `FIRESTORM=x,z FIRESTORM_TICKS=N` (another tribe's firestorm there), `EARTHQUAKE=x,z EARTHQUAKE_TICKS=N` (another tribe's earthquake there), `SWARM=x,z SWARM_TICKS=N` (another tribe's swarm there, N ticks run), `EXPLODE=building:N EXPLODE_TICKS=N` (building N blows up, as if N ticks ago; with `GAME_SPEED=0`), `TRAIN=stored/cost[:short]` (a brave of the player inside each of their training units, making something with that much mana stored), `SELECT=own` (all the player's people selected), `CREW=building:N CREW_TICKS=N` (the player's braves on foot sent into building N, N ticks run), `VEHICLE=boat@x,z[:n]` (or `balloon`, `;` between several: the player's vehicle there with n braves aboard; `VEHICLE_TO=x,z VEHICLE_TICKS=N` sends them there and runs N ticks), `ATTACK=nearest` (the player's fighters attack the nearest enemy), `MENU=shortcuts` (paused on the pause menu's Shortcuts page), `SHOT_RESOLUTION=WxH` (overrides the default 1280x720),
+  `FOCUS=x,z` (cells), `DISTANCE`, `PITCH`, `YAW` (degrees), `SHOT_FRAME` (frames after loading, 10 by default; `SHOT_BOOT=1`: from launch, to shoot the loading screen), `SHAMAN=walk|teleport|worship|...`, `BRAVES=cut|carry|totem:N`, `HOVER=unit:N|wood:N|tree:N|totem:N|building:N`, `VAULT=progress:N|granted:T|spent`, `TAB=spells|build|stats`, `BLUEPRINT=temple@64,70`, `AIM=blast` (a spell selected as if picked: shows its range ring), `BUILD=hut@90,62 BUILD_TICKS=150` (plan built by all the player's braves), `TUMBLE=air|ground` (the player's units tumble; add `GAME_SPEED=0` to hold them in the air), `BLAST=x,z BLAST_TICKS=N` (another tribe's blast, N ticks run; with `GAME_SPEED=0`), `BRIDGE=x,z BRIDGE_TICKS=N` (the player's land bridge from the shaman, N ticks run; with `GAME_SPEED=0`: its sparkles), `FLATTEN=x,z FLATTEN_TICKS=N` (a flatten on that height point), `ERODE=x,z ERODE_TICKS=N` (an erosion centred on that height point, N ticks run), `LIGHTNING=x,z LIGHTNING_TICKS=N` (another tribe's lightning there), `SWAMP=x,z SWAMP_TICKS=N` (another tribe's swamp there, N ticks run), `CONVERT=x,z CONVERT_TICKS=N` (the player's Convert effect there, with a wildman placed next to it), `HYPNOTISM=x,z HYPNOTISM_TICKS=N` (the player's Hypnotism effect there, with an enemy placed next to it), `INVISIBLE=1` (a brave next to the player's shaman cast Invisible, to check its translucency), `VOLCANO=x,z VOLCANO_TICKS=N` (the player's volcano there), `FIRESTORM=x,z FIRESTORM_TICKS=N` (another tribe's firestorm there), `EARTHQUAKE=x,z EARTHQUAKE_TICKS=N` (another tribe's earthquake there), `SWARM=x,z SWARM_TICKS=N` (another tribe's swarm there, N ticks run), `EXPLODE=building:N EXPLODE_TICKS=N` (building N blows up, as if N ticks ago; with `GAME_SPEED=0`), `TRAIN=stored/cost[:short]` (a brave of the player inside each of their training units, making something with that much mana stored), `SELECT=own` (all the player's people selected), `CREW=building:N CREW_TICKS=N` (the player's braves on foot sent into building N, N ticks run), `VEHICLE=boat@x,z[:n]` (or `balloon`, `;` between several: the player's vehicle there with n braves aboard; `VEHICLE_TO=x,z VEHICLE_TICKS=N` sends them there and runs N ticks), `ATTACK=nearest` (the player's fighters attack the nearest enemy), `MENU=shortcuts` (paused on the pause menu's Shortcuts page), `EDITOR_BRUSH=x,z:radius` (the world editor on, its brush ring pinned there at that radius), `SHOT_RESOLUTION=WxH` (overrides the default 1280x720),
   `DEBUG_OVERLAY=1` (dev overlay: fight reaches on the ground; F4 in dev mode) set up the shot.
   Level paths with spaces or quotes break `just shot`: run `HEADLESS=1 SCREENSHOT=out.png cargo run -p game-client -- "<level>"`.
 - `just video [level]`: the same headless setup recorded as a video, `VIDEO=secs` (5 by default) from `SHOT_FRAME`,

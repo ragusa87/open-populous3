@@ -2,11 +2,14 @@
 //! `DURATION_TURNS` 220 turns, 18.3 s, file-confirmed): every `FIREBALL_EVERY` (4) turns, one `panicking_blast`
 //! fireball lands at a random point of the `AREA_CELLS` 6 × 6-cell square around the target (`volcano`'s own
 //! `random_point_in_area`, the same area shape and helper as Volcano's second half — "about 55" fireballs in all,
-//! matching 220 / 4 exactly). Each impact, beyond the fireball's own simple-blast-that-panics: "a short fire" (our
-//! own reading of the trace, a guess — no component number is cited here, unlike Lightning's — taken literally as a
-//! `ground_fire` effect at the landing point rather than Lightning's tree-burns-else-fire branch) and, if a
-//! building covers the point, it catches fire (`WorldEvent::SetFire`, the ordinary fire/evacuation path). Every
-//! fireball and its fire outlive the controller once it ends, same as Volcano's own.
+//! matching 220 / 4 exactly). Each impact, beyond the fireball's own simple-blast-that-panics: on land, a
+//! `ground_fire` effect at the landing point (confirmed, pop3-rev-analysis.md "Fireball impact": the exact same
+//! scenery object Lightning's own strike creates); on water, no fire at all - the original checks the landing
+//! cell's own coastal-shape class and plays an unnamed splash/hiss effect instead (hfx 1152, sound 0x55, "not
+//! traced further" - no sprite or sound data decoded to implement it, so this just skips the fire rather than
+//! drawing nothing in its place). Either way, if a building covers the point, it catches fire (`WorldEvent::SetFire`,
+//! the ordinary fire/evacuation path). Every fireball and its fire outlive the controller once it ends, same as
+//! Volcano's own.
 
 use crate::effect::{Effect, EffectKind};
 use crate::event::WorldEvent;
@@ -45,12 +48,16 @@ impl Firestorm {
     }
 }
 
-/// One fireball's own impact at `landing`: its simple-blast-that-panics, its short fire, and the building there (if
-/// any) catching fire too.
+/// One fireball's own impact at `landing`: its simple-blast-that-panics; on land, its ground fire (water: none,
+/// confirmed); and the building there (if any) catching fire too, either way.
 fn impact(owner: u8, landing: (u16, u16), world: &GameMap) -> Vec<WorldEvent> {
-    let mut events = vec![WorldEvent::SpawnEffect(crate::panicking_blast::effect(owner, landing)), WorldEvent::SpawnEffect(crate::ground_fire::effect(owner, landing))];
+    let mut events = vec![WorldEvent::SpawnEffect(crate::panicking_blast::effect(owner, landing))];
+    let cell = (cell_of(landing.0), cell_of(landing.1));
+    if !crate::unit::is_sea(&world.terrain, cell) {
+        events.push(WorldEvent::SpawnEffect(crate::ground_fire::effect(owner, landing)));
+    }
     if let Some(b) = world.buildings.iter().find(|b| b.covers(landing, 0)) {
-        events.push(WorldEvent::SetFire { building: b.id });
+        events.push(WorldEvent::SetFire { building: b.id, by: owner });
     }
     events
 }
@@ -67,7 +74,13 @@ mod tests {
     const AT: (u16, u16) = (64 * pop3_format::WORLD_UNITS_PER_CELL as u16 + 256, 64 * pop3_format::WORLD_UNITS_PER_CELL as u16 + 256);
 
     fn bare() -> GameMap {
-        GameMap::bare("firestorm-test", Heightmap::new(128), Vec::new())
+        let mut terrain = Heightmap::new(128);
+        for z in 0..128 {
+            for x in 0..128 {
+                terrain.set(x, z, 64);
+            }
+        }
+        GameMap::bare("firestorm-test", terrain, Vec::new())
     }
 
     #[test]
@@ -98,7 +111,7 @@ mod tests {
         let mut map = bare();
         let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 1, AT.0, AT.1, 0));
         let events = impact(0, AT, &map);
-        assert!(events.contains(&WorldEvent::SetFire { building: hut }));
+        assert!(events.contains(&WorldEvent::SetFire { building: hut, by: 0 }));
         assert!(events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::PanickingBlast(_)))));
         assert!(events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::GroundFire))));
     }
@@ -108,6 +121,18 @@ mod tests {
         let map = bare();
         let events = impact(0, AT, &map);
         assert!(!events.iter().any(|e| matches!(e, WorldEvent::SetFire { .. })));
+    }
+
+    #[test]
+    fn a_fireball_landing_on_water_starts_no_ground_fire_but_still_blasts() {
+        let mut map = bare();
+        let cell = (cell_of(AT.0), cell_of(AT.1));
+        for &(dx, dz) in &[(0, 0), (1, 0), (0, 1), (1, 1)] {
+            map.terrain.set(cell.0 + dx, cell.1 + dz, 0);
+        }
+        let events = impact(0, AT, &map);
+        assert!(!events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::GroundFire))), "no fire over open sea");
+        assert!(events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::PanickingBlast(_)))), "the blast still happens");
     }
 
     #[test]

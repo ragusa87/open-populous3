@@ -226,6 +226,10 @@ pub struct Building {
     pub repair_delay: Option<crate::time::Countdown>,
     /// Its fire, while it burns (`crate::fire`).
     pub burning: Option<crate::time::Countdown>,
+    /// The tribe that set it alight, kept past the fire itself (never cleared back to `None`),
+    /// same persistence as a unit's own `last_attacker`/`death_cause` (`hurt.rs`): `stats[tribe][7]`
+    /// [exe] reads it when the fire finishes the building off (`crate::fire`).
+    pub ignited_by: Option<u8>,
     /// Pieces of wood brought to the pile by its door, not built in yet.
     pub stock: u8,
     /// Height its footprint is flattened to: a blueprint's (the average when placed, at least
@@ -255,6 +259,12 @@ pub struct Building {
     pub admit_gate: u8,
     /// A vehicle hut's work on its next vehicle (`crate::vehicle::Launch`); None while none is under way.
     pub launch: Option<crate::vehicle::Launch>,
+    /// A hut's own breeding progress (the tooltip's green bar), huts-and-training.md rule 5: towards a fresh
+    /// brave at its door. Always 0 for every other kind.
+    pub breed: u16,
+    /// A hut's own growth progress (the tooltip's red bar), rule 6: towards the next size. Always 0 for every
+    /// other kind, and never moves for an already-large hut (no next size).
+    pub grow: u16,
 }
 
 /// What a vault of knowledge teaches the tribe praying at it, from the level.
@@ -275,7 +285,7 @@ pub enum Reward {
 impl Building {
     /// A finished building, as the levels store them.
     pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
-        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, stock: 0, level: 0, collapse: None, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)), production: None, queue: Vec::new(), queue_spots: Vec::new(), spots_on: None, admitted: Vec::new(), admit_gate: 0, launch: None }
+        Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, ignited_by: None, stock: 0, level: 0, collapse: None, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)), production: None, queue: Vec::new(), queue_spots: Vec::new(), spots_on: None, admitted: Vec::new(), admit_gate: 0, launch: None, breed: 0, grow: 0 }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.

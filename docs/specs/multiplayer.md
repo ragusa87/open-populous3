@@ -48,5 +48,15 @@ Frame: `u32 LE` length + payload. Payload tag byte:
   - kind 20 `CancelFlyby`: no extra payload (Space, skips the current flyby if interruptible,
     ai-scripts.md). Kinds 13-19 (`ClearSwamp`/the patrol/formation commands) aren't documented here yet,
     a pre-existing gap.
+- `3 Handshake { constants_hash: u64 }`: a peer's own `SpellBook::constants_hash()` (spells.md "Mana") - its
+  `cost`/`max_charges` for every spell, the two `SpellStats` fields that feed simulation state, resolved from
+  either a real install's `constant.dat` or the shared code-level defaults. Meant to be exchanged at game
+  start, alongside `Hello`: two peers with a different hash would resolve a spell's cost or charge count
+  differently and silently diverge mid-match, exactly the kind of mismatch `Start`'s own shared seed exists to
+  rule out for randomness. A mismatch here is a fatal "cannot join: constants mismatch", never something to
+  continue past. **Not yet sent or checked by anything**: there is no host/join flow or network driver wired
+  up at all yet (see "To do" below) - this message and the comparison contract exist so that work can send and
+  enforce it without inventing a new tag or policy once it lands.
 
-Implemented: codec + TCP round trip test. To do: host/join, sending and receiving the turns, reconnect, lobby UI.
+Implemented: codec (including `Handshake`) + TCP round trip test. To do: host/join, sending and receiving the
+turns, reconnect, lobby UI, and a driver that actually calls the handshake above and refuses a mismatched join.

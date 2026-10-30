@@ -25,7 +25,7 @@ struct TerrainAssets<'w> {
 pub struct CurrentMap(pub GameMap);
 
 /// Original `levl*.dat` files found on disk, PageUp/PageDown cycles through them.
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone)]
 pub struct LevelList {
     /// Original `data/` dir (themes, sprites), `$POP3_DATA` or the levels dir's sibling `data`.
     pub data_dir: PathBuf,

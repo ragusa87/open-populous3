@@ -4,6 +4,7 @@
 use crate::building::BuildingId;
 use crate::effect::{DamageKind, Effect, TerrainChange};
 use crate::motion::Velocity;
+use crate::time::Tick;
 use crate::unit::UnitId;
 use crate::vehicle::VehicleId;
 use std::collections::VecDeque;
@@ -28,11 +29,20 @@ pub enum WorldEvent {
     /// else where it is (`GameMap::put_out`: falls from a balloon, drowns off a boat at sea): a swarm's own
     /// sting on a vehicle (TODO.md "Units").
     PutOut { vehicle: VehicleId },
-    SetFire { building: BuildingId },
+    /// Sets `building` alight, lit by tribe `by` (`Building::ignite`, `GameMap::set_fire`): carried for
+    /// `stats[tribe][7]` (`BuildingBurnedDown` below) once the fire finishes it off.
+    SetFire { building: BuildingId, by: u8 },
+    /// `amount` of wear, through the same accumulator "Attacking a building" hacking and firewarrior bolts feed
+    /// (`Building::wear_down`): a blast's own `BLAST_DAMAGE_BLDG` (combat.md "Attacking a building").
+    Wear { building: BuildingId, amount: u16 },
     /// Removes the building outright, bypassing the normal wood/wear-down model (`GameMap::burn_down`): Volcano's
     /// turn-110 destruction (docs/plans/spells.md "Volcano"), accepted as simpler than modelling a dedicated
     /// instant-destruction path through `fire`/`wreck`.
     Destroy { building: BuildingId },
+    /// A fire finished a building off (`crate::fire::tend_fires`), tallied by the tribe that lit it
+    /// (`stats[tribe][7]` [exe], `GameMap::fires_put_out`). Fire-specific: `Destroy` and other
+    /// `burn_down` callers (explosions, terrain) don't raise this.
+    BuildingBurnedDown { tribe: u8 },
     /// Sets the trees of the cell on fire (`Tree::ignite`).
     BurnTrees { cell: (i32, i32) },
     /// A lava flow finished (`lava::Lava`, pop3-rev-analysis.md "Volcano lava flow"): its whole reached footprint
@@ -48,6 +58,11 @@ pub enum WorldEvent {
     Face { unit: UnitId, at: (u16, u16) },
     /// The attacker of a challenge starts its shove (`GameMap::shove`).
     Shove { attacker: UnitId },
+    /// A challenge's waiting target taunts, one of 3 (`combat::challenge::taunts`, combat.md "Challenge").
+    Taunted { unit: UnitId, at: Tick, variant: u8 },
+    /// Earthquake's own building-shake (`earthquake::Earthquake::shake`): one piece of wood lost outright, a large
+    /// building's occupants out regardless, a partial explosion only if that was its last piece.
+    Shake { building: BuildingId },
     /// A blow in a melee (`GameMap::struck`); `knock`: the one struck is thrown back so, once it has reeled.
     Struck { attacker: UnitId, target: UnitId, blow: crate::combat::Blow, knock: Option<Velocity> },
     /// A challenge won: the two fight in a new melee (`GameMap::start_melee`).

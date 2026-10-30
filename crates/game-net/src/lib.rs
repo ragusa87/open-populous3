@@ -9,7 +9,7 @@ use game_core::id::Id;
 use game_core::spell::Spell;
 use game_core::spell_book::SpellKind;
 use game_core::time::Tick;
-use game_core::unit::{Order, Target, UnitId};
+use game_core::unit::{Order, Target, UnitId, WorshipAt};
 use std::io::{self, Read, Write};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,6 +19,19 @@ pub enum Message {
     Start { seed: u32 },
     /// All commands a player issues for one simulation tick (possibly none): its turn.
     Tick { tick: Tick, commands: Vec<Command> },
+    /// A peer's own resolved spell constants (`game_core::spell_book::SpellBook::constants_hash`), exchanged
+    /// at game start so a mismatch (different installs, or one with and one without `constant.dat`) is caught
+    /// before it silently desyncs mid-match instead of after (spells.md "Mana"). Not yet sent/checked by any
+    /// driver (TODO.md "Network driver"): the codec exists so that plan can send it without inventing a tag.
+    Handshake { constants_hash: u64 },
+}
+
+/// Whether two peers' `Message::Handshake` hashes agree: `false` is a fatal "cannot join: constants mismatch",
+/// never something to continue past (multiplayer.md "Wire format"). A trivial comparison today - the actual
+/// network driver that exchanges handshakes and refuses a mismatched join doesn't exist yet (TODO.md "Network
+/// driver"); this function is the contract it will call.
+pub fn constants_match(mine: u64, theirs: u64) -> bool {
+    mine == theirs
 }
 
 pub fn send(w: &mut impl Write, msg: &Message) -> io::Result<()> {
@@ -51,6 +64,10 @@ pub fn encode(msg: &Message) -> Vec<u8> {
                 encode_command(&mut b, command);
             }
         }
+        Message::Handshake { constants_hash } => {
+            b.push(3);
+            b.extend(constants_hash.to_le_bytes());
+        }
     }
     b
 }
@@ -64,7 +81,8 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 /// clearing a swamp `u32 effect id`, for a patrol command `u8 unit count` then that many `u32` unit ids, then
 /// `u16 x, z` (`SetPatrol`/`AddPatrolPoint`) or a target tag `u8` (0 unit, 1 building) + `u32` id
 /// (`SetPatrolTarget`/`AddPatrolTargetPoint`), or nothing more (`ReleasePatrol`); for a formation command, `u8` unit
-/// count then that many `u32` unit ids, then `u16 x, z` (`Formation`).
+/// count then that many `u32` unit ids, then `u16 x, z` (`Formation`); for cancelling a guard, nothing more
+/// (`CancelGuard`); an order tag of `Order::Guard` takes no payload either.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -221,12 +239,35 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         Command::CancelFlyby { player } => {
             b.extend([20, *player]);
         }
+        Command::CancelGuard { player } => {
+            b.extend([21, *player]);
+        }
+        Command::PlaceTree { player, at } => {
+            b.extend([22, *player]);
+            b.extend(at.0.to_le_bytes());
+            b.extend(at.1.to_le_bytes());
+        }
     }
 }
 
 /// An id on the wire: `u32` LE.
 fn put_id<T>(b: &mut Vec<u8>, id: Id<T>) {
     b.extend(id.raw().to_le_bytes());
+}
+
+/// Where `Order::Worship` prays, on the wire: tag `u8` (0 a vault's stored corner, 1 a totem's id).
+fn put_worship_at(b: &mut Vec<u8>, at: WorshipAt) {
+    match at {
+        WorshipAt::Vault { corner } => {
+            b.push(0);
+            b.extend(corner.0.to_le_bytes());
+            b.extend(corner.1.to_le_bytes());
+        }
+        WorshipAt::Totem { id } => {
+            b.push(1);
+            put_id(b, id);
+        }
+    }
 }
 
 /// A unit list on the wire: `u8` count, then that many `u32` ids.
@@ -292,10 +333,9 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             b.extend(site.0.to_le_bytes());
             b.extend(site.1.to_le_bytes());
         }
-        Order::Worship { site } => {
+        Order::Worship { at } => {
             b.push(10);
-            b.extend(site.0.to_le_bytes());
-            b.extend(site.1.to_le_bytes());
+            put_worship_at(b, *at);
         }
         Order::Attack { target: Target::Unit(id) } => {
             b.push(11);
@@ -310,6 +350,7 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             put_id(b, *vehicle);
         }
         Order::GetOff => b.push(14),
+        Order::Guard => b.push(15),
     }
 }
 
@@ -360,6 +401,8 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         18 => Some(Command::ReleasePatrol { player, units: get_units(c)? }),
         19 => Some(Command::Formation { player, units: get_units(c)?, to: (c.u16()?, c.u16()?) }),
         20 => Some(Command::CancelFlyby { player }),
+        21 => Some(Command::CancelGuard { player }),
+        22 => Some(Command::PlaceTree { player, at: (c.u16()?, c.u16()?) }),
         _ => None,
     }
 }
@@ -379,6 +422,15 @@ fn get_target(c: &mut Cursor) -> Option<Target> {
     }
 }
 
+/// Where `Order::Worship` prays, from the wire: tag `u8` (0 a vault's stored corner, 1 a totem's id).
+fn get_worship_at(c: &mut Cursor) -> Option<WorshipAt> {
+    match c.u8()? {
+        0 => Some(WorshipAt::Vault { corner: (c.u16()?, c.u16()?) }),
+        1 => Some(WorshipAt::Totem { id: c.id()? }),
+        _ => None,
+    }
+}
+
 fn decode_order(c: &mut Cursor) -> Option<Order> {
     Some(match c.u8()? {
         0 => Order::MoveTo { x: c.u16()?, z: c.u16()? },
@@ -390,11 +442,12 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         7 => Order::PickUp { at: (c.u16()?, c.u16()?) },
         8 => Order::Build { site: (c.u16()?, c.u16()?) },
         9 => Order::Enter { site: (c.u16()?, c.u16()?) },
-        10 => Order::Worship { site: (c.u16()?, c.u16()?) },
+        10 => Order::Worship { at: get_worship_at(c)? },
         11 => Order::Attack { target: Target::Unit(c.id()?) },
         12 => Order::Attack { target: Target::Building(c.id()?) },
         13 => Order::Board { vehicle: c.id()? },
         14 => Order::GetOff,
+        15 => Order::Guard,
         _ => return None,
     })
 }
@@ -413,6 +466,7 @@ pub fn decode(b: &[u8]) -> Option<Message> {
             }
             Some(Message::Tick { tick, commands })
         }
+        3 => Some(Message::Handshake { constants_hash: c.u64()? }),
         _ => None,
     }
 }
@@ -433,6 +487,9 @@ impl<'a> Cursor<'a> {
     }
     fn u32(&mut self) -> Option<u32> {
         Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
+    }
+    fn u64(&mut self) -> Option<u64> {
+        Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
     }
     fn id<T>(&mut self) -> Option<Id<T>> {
         self.u32().map(Id::from_raw)
@@ -489,7 +546,8 @@ mod tests {
                 Command::Dismantle { player: 2, building: Id::from_raw(u32::MAX), on: true },
                 Command::Dismantle { player: 0, building: Id::from_raw(7), on: false },
                 Command::QueueOrder { player: 0, unit: Id::from_raw(3), order: Order::Enter { site: (1024, 2048) } },
-                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Worship { site: (32768, 36864) } },
+                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Worship { at: WorshipAt::Vault { corner: (32768, 36864) } } },
+                Command::QueueOrder { player: 1, unit: Id::from_raw(2), order: Order::Worship { at: WorshipAt::Totem { id: Id::from_raw(42) } } },
                 Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Attack { target: Target::Unit(Id::from_raw(70_000)) } },
                 Command::QueueOrder { player: 0, unit: Id::from_raw(2), order: Order::Attack { target: Target::Building(Id::from_raw(9)) } },
                 Command::CastSelf { player: 1, kind: SpellKind::Teleport },
@@ -505,6 +563,9 @@ mod tests {
                 Command::ReleasePatrol { player: 1, units: vec![Id::from_raw(1), Id::from_raw(2), Id::from_raw(3)] },
                 Command::Formation { player: 0, units: vec![Id::from_raw(1), Id::from_raw(2)], to: (65535, 512) },
                 Command::CancelFlyby { player: 2 },
+                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Guard },
+                Command::CancelGuard { player: 1 },
+                Command::PlaceTree { player: 0, at: (40_000, 7) },
             ],
         }
     }
@@ -516,6 +577,14 @@ mod tests {
         assert_eq!(decode(&[9]), None);
         let start = Message::Start { seed: 0xDEAD_BEEF };
         assert_eq!(decode(&encode(&start)), Some(start));
+        let handshake = Message::Handshake { constants_hash: 0x1234_5678_9ABC_DEF0 };
+        assert_eq!(decode(&encode(&handshake)), Some(handshake));
+    }
+
+    #[test]
+    fn constants_match_is_a_plain_equality() {
+        assert!(constants_match(42, 42));
+        assert!(!constants_match(42, 43));
     }
 
     #[test]
