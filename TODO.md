@@ -1124,7 +1124,16 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   there (`animate_views` 0.115 ms/call, `respawn_views` 0.235 ms/call, `markers::animate_markers` 0.099 ms/call)
   are cheap either way, consistent with the TODO's own complaint being Bevy's render-app bind-group/texture-switch
   overhead rather than our systems' CPU time, but isolating that cleanly from this trace needs a steadier capture
-  method than `just profile`'s video path - left as the item's own remaining gap rather than guessed at.
+  method than `just profile`'s video path. **Step 1/6 done**: a real before/after measured on the one number this
+  work could actually move - `boot::poll_job<UnitSpritesJob>`'s own install cost, the `tools/trace_top.py` top
+  entry both before and after - by profiling the pre-atlas-sharing commit (`5bd7e15`, a worktree sharing this
+  checkout's own `CARGO_TARGET_DIR` so only the workspace crates rebuilt) against current `HEAD` under the same
+  `POP3_START=sandbox-units`/`SELECT=own`/`--no-original` capture: **532.0 ms total / 76.0 ms per call -> 123.1 ms
+  total / 17.6 ms per call, a 4.3x cut**, matching the single-run boot log line too (`"Unit sprites installed in
+  532 ms"` -> `"...123 ms"`) - the atlas/material sharing (step 2/3/5) is confirmed the real win this item's own
+  "biggest win expected" was about, not the still-undone per-instance-UV meshing (step 4). Per-frame steady-state
+  systems were never the bottleneck either way (both traces agree, same numbers as above) - step 4's own remaining
+  value is real but smaller and riskier than what's already landed, left open rather than forced.
 - [ ] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
   prepared again each frame; write only when the colour changes, or share a material per colour step.
 - [ ] Some image is prepared again every frame (`prepare_assets<GpuImage>` about 3 ms, its extract 1.6 ms): find which
