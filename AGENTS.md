@@ -47,6 +47,10 @@ If a plan turns out to need a live check, a spec/reverse-engineering session, or
 don't block on it: narrow the plan to whatever sub-part is still codeable (ticking TODO.md honestly for the rest,
 same as any other entry there), or leave a `docs/plans/<n>-*.md` note plus a TODO.md bullet describing exactly what
 is blocked and why, and move on to the next-numbered plan instead of stopping the whole backlog.
+Original assets the files don't actually ship (an icon/model/sound/pose TODO.md or a spec already flags as "none
+in ...", "not identified" or "not traced") are out of scope for this backlog: don't hunt for or guess a
+replacement - leave the existing fallback/stand-in as is and move on with whatever part of the plan doesn't depend
+on it.
 
 ## Layout
 - `crates/pop3-format`: pure parsers of original game files. No Bevy, no game logic.
