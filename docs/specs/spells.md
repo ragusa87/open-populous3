@@ -123,7 +123,12 @@ defaults.
 
 `SpellBook::from_level(header, level)`: the header's `SpellsAvailable` panel spells are Known with full charges
 (how charged the original starts them is not checked), the spell discoveries (`DiscoveryType 11`) not already
-known are Discoverable. Their availability (permanent / this level / once) is not kept yet. Given to every
+known are Discoverable, each slot keeping its own thing's availability (`SpellSlot::discovery_availability`, see
+"Discovery things" below for the byte) for `discover` to read once it is actually found: a `Once` discovery
+becomes `Provided { shots: 1 }` (a single free use, same as Volcano's own `demo()` loadout), `Permanent` and
+`ThisLevel` both become `Known` - there is no cross-level save/progression system yet to make them differ from
+each other, so a discovery's `Known` state today never survives past the level it was found on regardless of
+which of the two it is. Given to every
 player of an original level (`GameMap::spell_books`); generated maps and levels without a header get
 `SpellBook::demo` (every tile state), the sandboxes `SpellBook::sandbox` (plus Teleport, unlimited). Armageddon (bit 18) is special: the
 campaign's last spell, discovered in levels 17 and 18 and in the masks from level 19 on, always with Convert (17).

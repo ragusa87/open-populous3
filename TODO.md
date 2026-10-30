@@ -308,8 +308,19 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Spell cursors: confirm 40 = Armageddon and 43 = Ghost Army in the game (`virtual_cursor::spell_sprite`); check the gold arrow's frame order and speed against the game; the pause menu releases the mouse, so it shows the system cursor, not the gold arrow.
 - [ ] Burn (1), bloodlust (20) and the original teleport (21), now traced (pop3-rev-analysis.md "Per spell"): burn sets the target cell's trees alight and is not castable; bloodlust (hidden) gives the 6 nearest own followers ×3 damage, /8 damage taken and faster firewarrior reloads for 120 s; teleport (hidden) moves the caster's own shaman. Decide which ones we expose.
 - [ ] Flatten: trace the original's per-turn curve (ours divides the gap by the turns left) and whether the disc is centred on a point or a cell. The land bridge raises a smoke puff on every bridge cell every turn while it builds (a `WorldView` of the effect); balloons rise with it; its steps do not re-level or collapse buildings yet.
-- [ ] Level spells: keep each discovery's availability (permanent / this level / one shot) for when it is discovered; `SpellsAvailableLevel` / `SpellsNotCharging` and `SpellsAvailableOnce`.
-- [ ] A "once" spell discovery should give a single shot (`Provided { shots: 1 }`) when found (e.g. Convert in levels 4 and 5).
+- [x] Level spells: keep each discovery's availability (permanent / this level / one shot) for when it is
+  discovered: implemented (`SpellSlot::discovery_availability`, `SpellBook::from_level`/`discover`, spells.md
+  "Spell book"). **Correction**: the TODO's own `SpellsAvailableLevel`/`SpellsNotCharging`/`SpellsAvailableOnce`
+  pointer named the wrong data source - those are level-header fields, confirmed always 0 in every campaign
+  level (level-format.md); the real per-discovery availability is `pop3_format::level::Discovery::availability`
+  on the discovery thing itself (already parsed, `DiscoveryType 11`), which is what's wired up now. Permanent and
+  ThisLevel both still resolve to `Known` and are indistinguishable in practice: there is no cross-level save/
+  progression system to carry a discovery's `Known` state into a later level, so this is a real, explicitly
+  deferred gap, not a bug.
+- [x] A "once" spell discovery should give a single shot (`Provided { shots: 1 }`) when found (e.g. Convert in
+  levels 4 and 5): implemented as part of the same fix - `discover` now branches on `discovery_availability`
+  (`spell_book.rs` tests `discover_applies_the_level_s_own_discovery_availability`,
+  `level_loadout_from_header_and_discoveries`).
 
 ### Mana ([spells.md](docs/specs/spells.md) "Mana")
 - [x] Mana bar in the HUD for the player (`GameMap::mana`: `bank`, `received`, `used`): `hud/mana.rs`, a strip under

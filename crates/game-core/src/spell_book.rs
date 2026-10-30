@@ -294,11 +294,23 @@ pub struct SpellSlot {
     /// This spell's balance, resolved once at construction (`SpellStats::default_for`), possibly corrected
     /// afterwards by `SpellBook::apply_constants` from a real install.
     pub stats: SpellStats,
+    /// What a level's own discovery thing said this spell becomes once found (permanent / this level / once);
+    /// `None` outside `from_level` (`demo()`, `sandbox()`, ...), which keeps today's "discovering always gives
+    /// `Known`" behaviour. Read only by `discover` (spells.md "Spell book").
+    pub discovery_availability: Option<pop3_format::level::Availability>,
 }
 
 impl SpellSlot {
     pub fn new(kind: SpellKind, availability: Availability) -> Self {
-        SpellSlot { kind, availability, charges: 0, recharge: 0, paused: false, stats: SpellStats::default_for(kind) }
+        SpellSlot {
+            kind,
+            availability,
+            charges: 0,
+            recharge: 0,
+            paused: false,
+            stats: SpellStats::default_for(kind),
+            discovery_availability: None,
+        }
     }
 
     pub fn can_cast(&self) -> bool {
@@ -359,12 +371,23 @@ impl SpellBook {
     /// are not known yet are "?".
     pub fn from_level(header: &LevelHeader, level: &Level) -> Self {
         let mut book = SpellBook::new();
-        let discoveries = level.things.iter().filter_map(|t| match t.data() {
-            ThingData::Discovery(d) if d.kind == KIND_SPELL => SpellKind::from_model(d.model),
-            _ => None,
-        });
-        for kind in discoveries {
+        // Keyed by `SpellKind`, not file order: a level with two discovery things for the same spell (not seen
+        // in the campaign) would otherwise depend on which one `things` lists first.
+        let discoveries: std::collections::HashMap<SpellKind, pop3_format::level::Availability> = level
+            .things
+            .iter()
+            .filter_map(|t| match t.data() {
+                ThingData::Discovery(d) if d.kind == KIND_SPELL => {
+                    SpellKind::from_model(d.model).map(|k| (k, d.availability))
+                }
+                _ => None,
+            })
+            .collect();
+        for (&kind, &availability) in &discoveries {
             book.set(kind, Availability::Discoverable);
+            if let Some(s) = book.slots.iter_mut().find(|s| s.kind == kind) {
+                s.discovery_availability = Some(availability);
+            }
         }
         for kind in SpellKind::ALL.iter().copied().filter(|k| SpellKind::from_model(k.model()) == Some(*k)) {
             if known_in_header(header, kind) {
@@ -442,10 +465,22 @@ impl SpellBook {
         }
     }
 
+    /// Applies the discovery's own availability (spells.md "Spell book"): a `Once` discovery is a single free
+    /// use (`Provided { shots: 1 }`); `Permanent`/`ThisLevel`/an unseen byte/no discovery data at all (`demo()`,
+    /// `sandbox()`, ...) all give `Known` — Permanent and ThisLevel are indistinguishable today, with no
+    /// cross-level save/progression system to tell them apart.
     pub fn discover(&mut self, kind: SpellKind) {
-        if self.slot(kind).is_some_and(|s| s.availability == Availability::Discoverable) {
-            self.set(kind, Availability::Known);
+        let Some(s) = self.slots.iter_mut().find(|s| s.kind == kind) else { return };
+        if s.availability != Availability::Discoverable {
+            return;
         }
+        s.availability = match s.discovery_availability {
+            Some(pop3_format::level::Availability::Once) => Availability::Provided { shots: 1 },
+            Some(pop3_format::level::Availability::Permanent)
+            | Some(pop3_format::level::Availability::ThisLevel)
+            | Some(pop3_format::level::Availability::Unknown(_))
+            | None => Availability::Known,
+        };
     }
 
     /// The spell the mana bar's "advisor" pacing estimate is read from: the first charging spell
@@ -536,20 +571,25 @@ mod tests {
         hdr[0..4].copy_from_slice(&mask.to_le_bytes());
         let header = LevelHeader::parse(&hdr);
         let mut dat = vec![0u8; pop3_format::level::DAT_SIZE];
-        let thing = |dat: &mut Vec<u8>, slot: usize, kind: u8, model: u8| {
+        let thing = |dat: &mut Vec<u8>, slot: usize, kind: u8, model: u8, availability_byte: u8| {
             let t = 81_987 + slot * 55;
             dat[t..t + 2].copy_from_slice(&[pop3_format::level::GENERAL_DISCOVERY, pop3_format::level::KIND_GENERAL]);
-            dat[t + 7..t + 10].copy_from_slice(&[kind, model, 3]);
+            dat[t + 7..t + 10].copy_from_slice(&[kind, model, availability_byte]);
         };
-        thing(&mut dat, 0, KIND_SPELL, 17);
-        thing(&mut dat, 1, KIND_SPELL, 5);
-        thing(&mut dat, 2, 2, 4);
+        thing(&mut dat, 0, KIND_SPELL, 17, 3);
+        thing(&mut dat, 1, KIND_SPELL, 5, 1);
+        thing(&mut dat, 2, 2, 4, 3);
         let book = SpellBook::from_level(&header, &Level::parse(&dat).unwrap());
         let avail = |k| book.slot(k).unwrap().availability;
         assert_eq!(avail(SpellKind::Blast), Availability::Known);
         assert_eq!(book.slot(SpellKind::Blast).unwrap().charges, MAX_CHARGES, "starts charged");
         assert_eq!(avail(SpellKind::Swarm), Availability::Known, "known wins over its discovery");
         assert_eq!(avail(SpellKind::Convert), Availability::Discoverable);
+        assert_eq!(
+            book.slot(SpellKind::Convert).unwrap().discovery_availability,
+            Some(pop3_format::level::Availability::Once),
+            "availability byte 3, carried through even though the slot is still Discoverable"
+        );
         assert_eq!(avail(SpellKind::Whirlwind), Availability::Hidden, "a building discovery");
         assert_eq!(avail(SpellKind::Teleport), Availability::Hidden, "model 21 is not the sandbox teleport");
         let known = book.slots.iter().filter(|s| s.availability == Availability::Known).count();
@@ -658,6 +698,31 @@ mod tests {
         b.discover(SpellKind::Flatten);
         b.charge(Mana(200));
         assert!(b.cast(SpellKind::Flatten));
+    }
+
+    #[test]
+    fn discover_applies_the_level_s_own_discovery_availability() {
+        let discoverable_with = |kind, availability| {
+            let mut b = SpellBook::new();
+            b.set(kind, Availability::Discoverable);
+            b.slots.iter_mut().find(|s| s.kind == kind).unwrap().discovery_availability = availability;
+            b
+        };
+        let mut once = discoverable_with(SpellKind::Flatten, Some(pop3_format::level::Availability::Once));
+        once.discover(SpellKind::Flatten);
+        assert_eq!(once.slot(SpellKind::Flatten).unwrap().availability, Availability::Provided { shots: 1 });
+
+        let mut permanent = discoverable_with(SpellKind::Lightning, Some(pop3_format::level::Availability::Permanent));
+        permanent.discover(SpellKind::Lightning);
+        assert_eq!(permanent.slot(SpellKind::Lightning).unwrap().availability, Availability::Known);
+
+        let mut this_level = discoverable_with(SpellKind::Swarm, Some(pop3_format::level::Availability::ThisLevel));
+        this_level.discover(SpellKind::Swarm);
+        assert_eq!(
+            this_level.slot(SpellKind::Swarm).unwrap().availability,
+            Availability::Known,
+            "Permanent and ThisLevel are indistinguishable today: no cross-level state to tell them apart"
+        );
     }
 
     #[test]
