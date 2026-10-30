@@ -8,6 +8,8 @@
 //! `TAB=spells|build|stats` opens that panel tab; `BLUEPRINT=kind@x,z` (kind as in the Build tab,
 //! e.g. `temple@64,70`) shows that blueprint at map position x,z (cells); `BUILD=kind@x,z` places that
 //! plan with every brave of the player sent to it, then runs `BUILD_TICKS` ticks (0 by default).
+//! `EDITOR_BRUSH=x,z:radius` turns on the world editor (`editor.rs`) and pins its brush ring at map
+//! position x,z (cells) with that radius, for a headless shot of it.
 //! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
 //! `EXPLODE=building:N` blows up building N (its index), as if `EXPLODE_TICKS` ticks ago (0 by default; with
 //! `GAME_SPEED=0` the shot holds it there): the explosion is drawn, then the building removed the next frame.
@@ -340,6 +342,13 @@ pub fn parse_blueprint(v: &str) -> Option<(crate::blueprint::Plan, Vec2)> {
     Some((plan, Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?)))
 }
 
+/// `x,z:radius` (`EDITOR_BRUSH`): a pinned brush position and radius, for a headless shot of the ring.
+pub fn parse_editor_brush(v: &str) -> Option<(Vec2, i32)> {
+    let (at, radius) = v.split_once(':')?;
+    let (x, z) = at.split_once(',')?;
+    Some((Vec2::new(x.trim().parse().ok()?, z.trim().parse().ok()?), radius.trim().parse().ok()?))
+}
+
 /// `progress:N` (the gauge, in `PrayTime` units), `granted:T` (ticks since the reward) or `spent`: a vault phase.
 pub fn parse_vault(v: &str) -> Option<game_core::vault::VaultPhase> {
     use game_core::vault::VaultPhase;
@@ -494,7 +503,12 @@ fn screenshot(
     mut clock: ResMut<TimeUpdateStrategy>,
     mut video: ResMut<crate::video::Video>,
     mut exit: MessageWriter<AppExit>,
-    (mut explode, mut exploded): (MessageWriter<crate::explosion::BuildingExploded>, Local<Option<game_core::building::BuildingId>>),
+    (mut explode, mut exploded, mut editor, mut editor_pinned): (
+        MessageWriter<crate::explosion::BuildingExploded>,
+        Local<Option<game_core::building::BuildingId>>,
+        ResMut<crate::editor::EditorState>,
+        ResMut<crate::editor::PinnedAt>,
+    ),
 ) {
     let Some(capture) = Capture::from_env(|k| std::env::var(k).ok()) else { return };
     let shot = std::env::var("SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
@@ -530,6 +544,11 @@ fn screenshot(
         if let Some((kind, at)) = std::env::var("BLUEPRINT").ok().and_then(|v| parse_blueprint(&v)) {
             blueprint.pick(kind);
             pinned.0 = Some(at);
+        }
+        if let Some((at, radius)) = std::env::var("EDITOR_BRUSH").ok().and_then(|v| parse_editor_brush(&v)) {
+            editor.active = true;
+            editor.brush_radius = crate::editor::clamp_radius(radius);
+            editor_pinned.0 = Some(at);
         }
         let demo = std::env::var("SHAMAN").unwrap_or_default();
         if demo == "teleport" {

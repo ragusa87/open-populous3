@@ -51,8 +51,11 @@ fn update_info(
         0 => "generated".to_string(),
         n => format!("level {}/{n}", levels.index + 1),
     };
-    let mode = if editor.active { "EDITOR  R raise  F lower  T flatten  M mark  B bridge" } else { "" };
-    let s = format!("{} ({level})\n{mode}", map.0.name);
+    let mode = editor.active.then(|| {
+        let brush = if editor.placing_tree { "O: click to plant a tree (right click/Esc cancels)".to_string() } else { format!("R raise  F lower  T flatten  M mark  B bridge  [ ] radius ({})  O tree", editor.brush_radius) };
+        format!("EDITOR  {brush}")
+    });
+    let s = format!("{} ({level})\n{}", map.0.name, mode.unwrap_or_default());
     for (mut t, mut v) in &mut q {
         v.set_if_neq(shown);
         if t.0 != s {

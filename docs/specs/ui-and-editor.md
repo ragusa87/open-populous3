@@ -259,9 +259,26 @@ The hovered unit also shows its health bar (units.md). A building rested on for 
 (buildings.md "Tooltip"). Every tooltip, done and planned, is in [tooltips.md](tooltips.md).
 
 ## World editor (`editor.rs`)
-Tab toggles edit mode. Brushes at the camera focus: R raise, F lower (Erode), T flatten,
-M mark + B land bridge from mark. Next: mouse picking on the curved surface, brush radius UI,
-object placement, saving back to `.dat` (inverse of `pop3-format`; what to write is in level-format.md).
+Tab toggles edit mode. Brushes follow the mouse (`grounded::pick_ground`, the same curved-surface ray pick
+`blueprint.rs` uses for buildings/campfires), falling back to the camera focus when the cursor is off the
+terrain or over the panel, so a keyboard-only brush still works: R raise, F lower (Erode), T flatten, M mark
++ B land bridge from mark. A gold ring on the ground shows the brush's footprint (size `EditorState.brush_radius`,
+default 4, matching the old hardcoded values); `[`/`]` shrink/grow it (1..=12), and the info line also shows the
+current radius. R/F/T call `Heightmap::raise`/`flatten` directly with that radius instead of going through
+`Spell::cast`'s own hardcoded one (`Spell::Flatten`/`Erode` still exist and are used, unchanged, for real spell
+casting via `flatten::effect`/`erode::effect`; only the editor's own instant brush stopped going through
+`Spell::cast` for them - `Spell::Raise`, which existed only for that instant brush, is no longer constructed
+anywhere but the wire codec's own decode arm, kept for schema completeness). M/B still build a `Spell::LandBridge`
+and call `.cast()` as before (its own radius is a separate TODO.md item).
+
+Object placement: O toggles planting a tree under the mouse (left click plants one via `Command::PlaceTree` -
+`GameMap::place_tree`, which skips a cell already holding a living tree; right click or Esc cancels). Scoped to
+trees for v1, since `GameMap::trees` is the only registry-backed scenery kind with no owner to decide; a second
+kind (e.g. camp fires, already a `Command`) is a follow-up, not built here. `EDITOR_BRUSH=x,z:radius` (dev var,
+mirroring `BLUEPRINT`) pins the ring for a headless `just shot`.
+
+Still open, separate TODO.md items: saving back to `.dat` (inverse of `pop3-format`; what to write is in
+level-format.md), and a smooth/levelling brush step (see "Reference" below).
 
 ### Reference: the ALACN world editor (PopRe), tools worth copying
 Behaviour of the community editor (no licence, behaviour only, not checked against the game):

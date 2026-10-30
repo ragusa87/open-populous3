@@ -14,7 +14,7 @@ use crate::build_book::{BuildAvailability, BuildBook};
 use crate::mana::ManaPool;
 use crate::spell_book::{SpellBook, SpellKind};
 use std::collections::{BTreeSet, HashMap};
-use crate::tree::{scatter, Tree};
+use crate::tree::{self, scatter, Tree};
 use crate::site::{generated_sites, sites_from_level, ReincarnationSite};
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::totem::{totems_from_level, Totem, TotemKind};
@@ -1132,6 +1132,10 @@ impl GameMap {
                 self.remove_campfire(player, at);
                 None
             }
+            Command::PlaceTree { at, .. } => {
+                self.place_tree(tree::cell_at(at));
+                None
+            }
             Command::PlaceBuilding { player, kind, at, facing } => {
                 self.place_building(player, kind, at, facing);
                 None
@@ -1245,6 +1249,17 @@ impl GameMap {
         let id = self.campfires.iter().map(|f| f.id).max().unwrap_or(0) + 1;
         self.campfires.push(Campfire::new(id, player, cell));
         Some(id)
+    }
+
+    /// Plants a tree in `cell` for the world editor's object-placement brush (`Command::PlaceTree`); false
+    /// (nothing done) when a living tree (not size 0) is already there - no building/shore check yet, this is
+    /// an editor-only tool, not real placement rules.
+    pub fn place_tree(&mut self, cell: (i32, i32)) -> bool {
+        if self.trees.iter().any(|t| t.cell() == cell && t.is_visible()) {
+            return false;
+        }
+        self.trees.push(Tree::new(cell, 0, tree::MAX_SIZE));
+        true
     }
 
     /// Puts out `player`'s camp fire whose cell holds world point `p`, if any: the units going to it
@@ -3341,6 +3356,18 @@ mod tests {
         assert_eq!(m.campfire_at(at(84, 70)).map(|f| f.id), m.campfires.last().map(|f| f.id));
         let ids: Vec<u32> = m.campfires.iter().map(|f| f.id).collect();
         assert!(ids.windows(2).all(|w| w[0] < w[1]), "unique ids");
+    }
+
+    #[test]
+    fn the_editor_plants_a_tree_by_command_but_not_twice_on_a_living_one() {
+        let mut m = GameMap::sandbox_buildings();
+        let before = m.trees.len();
+        let at = |x: i32, z: i32| ((x * 512 + 100) as u16, (z * 512 + 100) as u16);
+        m.apply(&Command::PlaceTree { player: 0, at: at(10, 10) });
+        assert_eq!(m.trees.len(), before + 1);
+        assert_eq!(m.trees.last().map(|t| (t.cell(), t.size)), Some(((10, 10), crate::tree::MAX_SIZE)));
+        m.apply(&Command::PlaceTree { player: 0, at: at(10, 10) });
+        assert_eq!(m.trees.len(), before + 1, "a living tree is already there");
     }
 
     #[test]

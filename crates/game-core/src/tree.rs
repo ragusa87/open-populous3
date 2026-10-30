@@ -148,6 +148,11 @@ pub fn scatter(terrain: &Heightmap, seed: u32, sites: &[(i32, i32)], groves: usi
     trees
 }
 
+/// The cell a tree planted at world point `p` takes (same corner-cell mapping as `campfire::cell_at`).
+pub fn cell_at((x, z): (u16, u16)) -> (i32, i32) {
+    (crate::unit::cell_of(x), crate::unit::cell_of(z))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +196,13 @@ mod tests {
         assert_eq!(t.size, MAX_SIZE);
         run(&mut t, 3201..=6400);
         assert_eq!((t.size, t.growth), (MAX_SIZE, 0));
+    }
+
+    #[test]
+    fn cell_at_matches_the_cell_a_tree_there_would_report() {
+        let p = (3 * pop3_format::WORLD_UNITS_PER_CELL as u16 + 9, 70 * pop3_format::WORLD_UNITS_PER_CELL as u16);
+        assert_eq!(cell_at(p), (3, 70));
+        assert_eq!(Tree::new(cell_at(p), 0, MAX_SIZE).cell(), (3, 70));
     }
 
     #[test]

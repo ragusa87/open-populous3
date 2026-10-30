@@ -242,6 +242,11 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         Command::CancelGuard { player } => {
             b.extend([21, *player]);
         }
+        Command::PlaceTree { player, at } => {
+            b.extend([22, *player]);
+            b.extend(at.0.to_le_bytes());
+            b.extend(at.1.to_le_bytes());
+        }
     }
 }
 
@@ -397,6 +402,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         19 => Some(Command::Formation { player, units: get_units(c)?, to: (c.u16()?, c.u16()?) }),
         20 => Some(Command::CancelFlyby { player }),
         21 => Some(Command::CancelGuard { player }),
+        22 => Some(Command::PlaceTree { player, at: (c.u16()?, c.u16()?) }),
         _ => None,
     }
 }
@@ -559,6 +565,7 @@ mod tests {
                 Command::CancelFlyby { player: 2 },
                 Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Guard },
                 Command::CancelGuard { player: 1 },
+                Command::PlaceTree { player: 0, at: (40_000, 7) },
             ],
         }
     }

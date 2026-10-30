@@ -28,6 +28,10 @@ pub enum Command {
     /// Put out the player's camp fire in the cell holding world point `at`; whoever went round it
     /// stops.
     RemoveCampfire { player: u8, at: (u16, u16) },
+    /// The world editor's object-placement brush: plants a tree in the cell holding world point
+    /// `at` (`tree::cell_at`), ignored if a living one is already there. `player` is unused (trees
+    /// have no owner) but carried for the same reason every other command does.
+    PlaceTree { player: u8, at: (u16, u16) },
     /// Place a building plan with its stored corner at `at` (`placement::can_place`); braves are
     /// sent to it with `Order::Build`.
     PlaceBuilding { player: u8, kind: BuildingKind, at: (u16, u16), facing: u8 },

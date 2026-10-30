@@ -116,7 +116,8 @@ pub const MOUSE: [(&str, &str); 12] = [
 ];
 
 /// Dev mode only, in the world editor (`editor.rs`).
-pub const EDITOR_KEYS: (&str, &str) = ("Editor brushes", "R raise, F lower, T flatten, M mark, B bridge");
+pub const EDITOR_KEYS: (&str, &str) =
+    ("Editor brushes", "R raise, F lower, T flatten, M mark, B bridge, [ ] radius, O plant a tree (click; right click/Esc cancels)");
 
 /// A key's name as printed on the shortcuts page.
 pub fn key_name(code: KeyCode) -> String {

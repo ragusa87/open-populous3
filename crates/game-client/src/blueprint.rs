@@ -164,7 +164,7 @@ fn spawn_mark(mut commands: Commands, mut mats: ResMut<Assets<StandardMaterial>>
 }
 
 /// Draws `mark` into the mark's mesh, made the first time.
-fn put_mark(commands: &mut Commands, mark_entity: Entity, mesh: Option<&Mesh3d>, meshes: &mut Assets<Mesh>, mark: MarkMesh) {
+pub(crate) fn put_mark(commands: &mut Commands, mark_entity: Entity, mesh: Option<&Mesh3d>, meshes: &mut Assets<Mesh>, mark: MarkMesh) {
     match mesh {
         Some(mesh) => {
             if let Some(mut m) = meshes.get_mut(&mesh.0) {
@@ -180,13 +180,13 @@ fn put_mark(commands: &mut Commands, mark_entity: Entity, mesh: Option<&Mesh3d>,
 }
 
 /// The mouse over the map (not the panel or a button), if any.
-fn cursor_on_map(windows: &Query<&Window>, ui: &Query<&Interaction>) -> Option<Vec2> {
+pub(crate) fn cursor_on_map(windows: &Query<&Window>, ui: &Query<&Interaction>) -> Option<Vec2> {
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
     windows.iter().next().and_then(Window::cursor_position).filter(|c| c.x > PANEL_WIDTH && !over_ui)
 }
 
 /// The map position (cells) under the mouse, if it is over the map.
-fn ground_under_mouse(
+pub(crate) fn ground_under_mouse(
     windows: &Query<&Window>,
     ui: &Query<&Interaction>,
     cams: &Query<(&Camera, &GlobalTransform), With<GameCamera>>,

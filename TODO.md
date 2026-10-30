@@ -1045,7 +1045,17 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 - [ ] People rows filled: totems' counted prayers (once praying exists), the trainee. Vehicles and vehicle huts are done. Buildings, pyramids and totems' places are done, a click adds the unit to the selection.
 - [ ] Wood rows: the pieces still needed on a growing house (once growth exists). Plans, sites, built buildings and trees are done.
 - [ ] Bars fed by the simulation: totem prayer progress (once praying exists), house growth and birth, house growth and birth. The widget, its blinking, the pyramid's prayer bar and the training bar (double fill from `GameMap::production`) are done
-- [ ] Editor: brushes under the mouse (`grounded::pick_ground` exists), brush radius UI, object placement.
+- [x] Editor: brushes now follow the mouse (`grounded::pick_ground`, mirroring `blueprint.rs`'s own
+  cursor-ray-pick, falling back to the camera focus when the cursor is off the terrain or over the panel);
+  a configurable brush radius (`EditorState.brush_radius`, `[`/`]`, 1..=12, default 4) shown as a ring on the
+  ground and on the info line, R/F/T now calling `Heightmap::raise`/`flatten` directly instead of through
+  `Spell::cast`'s own hardcoded radius; object placement scoped to trees for v1 (O toggles, left click plants
+  one via the new `Command::PlaceTree`/`GameMap::place_tree`, right click/Esc cancels) - see
+  [ui-and-editor.md](docs/specs/ui-and-editor.md) "World editor". `EDITOR_BRUSH=x,z:radius` dev var for a
+  headless check, confirmed with a screenshot (the ring draped correctly over sloped ground around the
+  player's reincarnation site). Left for a follow-up: a second placeable kind (camp fires, already a
+  `Command`, per the spec's own note), and the editor's own `Spell::LandBridge`/`B` radius (still the
+  original hardcoded 32, a separate concern from this item's brush radius).
 - [ ] Editor: save back to the original `.dat`/`.hdr`/`.ver` (rules in level-format.md "Writing levels": things packed from slot 0, 1-based trigger links, buildings on corners).
 - [ ] Editor: smooth brush and the raise/lower levelling step of the ALACN editor (ui-and-editor.md).
 
