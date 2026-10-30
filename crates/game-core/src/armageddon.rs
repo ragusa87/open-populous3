@@ -1,16 +1,19 @@
 //! Armageddon (docs/plans/spells.md "Armageddon"; `TODO.md` for what's left): a v1 placeholder only — casting it
 //! pauses the economy and combat-seeking (`map.rs::tick`), cancels any fight in progress, and settles the match
-//! immediately by comparing each side's combined headcount. The full mechanic (clearing the map, gathering every
-//! tribe into a real arena by headcount, per-tribe shields, a lightning-killed loser, a continuous camera takeover)
-//! is deliberately not implemented here.
+//! immediately by comparing each side's combined headcount, lightning-killing every losing tribe's shaman without
+//! reincarnation (`WorldEvent::RemoveSite`/`DamageKind::Lightning`, the "fighters hit zero" moment collapsed into
+//! the instant the match resolves, since v1 never lets anyone actually fight it out first). The rest of the full
+//! mechanic (clearing the map, gathering every tribe into a real arena by headcount, a per-tribe shield while its
+//! fighters live, a continuous camera takeover) is deliberately not implemented here.
 
 use crate::coordinator::{Coordinator, Step};
+use crate::effect::DamageKind;
 use crate::event::WorldEvent;
 use crate::id::Id;
 use crate::map::{GameMap, Lcg};
 use crate::outcome::Reason;
 use crate::time::Tick;
-use crate::unit::{Action, Unit, UnitId};
+use crate::unit::{Action, Unit, UnitId, UnitKind};
 
 /// Armageddon's match. Just the cast target today (for the client's camera, `GameMap::armageddon`) — headcount is
 /// already final the instant fighting stops (nothing in this first pass makes anyone fight afterwards), so it
@@ -31,8 +34,30 @@ impl Coordinator for ArmageddonMatch {
 
     fn tick(&mut self, _id: Id<Self>, _members: &[UnitId], _now: Tick, world: &GameMap, _rng: &mut Lcg) -> Step {
         let winner = best_side(world);
-        Step { finished: true, events: vec![WorldEvent::Declare { winner, reason: Reason::Armageddon }] }
+        let mut events = vec![WorldEvent::Declare { winner, reason: Reason::Armageddon }];
+        if let Some(winner) = winner {
+            events.extend(losers(world, winner));
+        }
+        Step { finished: true, events }
     }
+}
+
+/// Every tribe not on `winner`'s side hits zero fighters the instant the match resolves (v1 never lets anyone
+/// actually fight it out - "Armageddon" above): its reincarnation is disabled for good (`WorldEvent::RemoveSite`)
+/// and its shaman, if still alive, is struck by lightning (`DamageKind::Lightning`, the ordinary path: blocked by
+/// a shield same as any other lightning strike, pop3-rev-analysis.md "Per spell" 3) - a permanent exit from the
+/// match, not just standing down like `declare_outcome` already does for everyone.
+fn losers(world: &GameMap, winner: u8) -> Vec<WorldEvent> {
+    world
+        .tribes
+        .all()
+        .filter(|&tribe| !world.tribes.same_team(tribe, winner))
+        .flat_map(|tribe| {
+            let shaman = world.units.iter().find(|u| u.owner == tribe && u.kind == UnitKind::Shaman && u.is_alive());
+            std::iter::once(WorldEvent::RemoveSite { tribe })
+                .chain(shaman.map(|u| WorldEvent::Damage { unit: u.id, amount: u16::MAX, kind: DamageKind::Lightning, from: None }))
+        })
+        .collect()
 }
 
 /// Placeholder decision rule for v1: the side (alliance group, `Tribes::teams`) with the highest combined headcount
@@ -62,9 +87,10 @@ impl GameMap {
 
     /// Armageddon takes effect at `at`: cancels any fight in progress (every unit mid-combat returns to Idle — the
     /// "pause the simulation" this first pass delivers) and starts `ArmageddonMatch`, which settles the match by
-    /// headcount. Not implemented yet (docs/plans/spells.md "Armageddon", TODO.md): clearing the map, gathering
-    /// everyone into a real arena, the per-tribe shield and lightning-struck loser. `at` is unused by this first
-    /// pass beyond being carried for the camera — the full version needs it as the arena's centre too.
+    /// headcount, lightning-killing every losing tribe's shaman without reincarnation (`losers`). Not implemented
+    /// yet (docs/plans/spells.md "Armageddon", TODO.md): clearing the map, gathering everyone into a real arena,
+    /// the per-tribe shield while its own fighters live. `at` is unused by this first pass beyond being carried
+    /// for the camera — the full version needs it as the arena's centre too.
     pub(crate) fn start_armageddon(&mut self, at: (u16, u16)) {
         for u in &mut self.units {
             if matches!(u.action, Action::Attacking { .. } | Action::Melee { .. } | Action::Challenge { .. }) {
@@ -169,6 +195,44 @@ mod tests {
         assert_eq!(map.outcome.unwrap().reason, Reason::Armageddon);
         assert_eq!(map.outcome.unwrap().winner, Some(0));
         assert!(map.coordinators.armageddons.is_empty());
+    }
+
+    #[test]
+    fn the_losing_tribes_shaman_is_struck_down_without_reincarnation_the_winner_untouched() {
+        let mut map = two_tribes();
+        map.spawn(0, UnitKind::Brave, (0, 0)); // tribe 0 outnumbers tribe 1: it wins
+        map.start_armageddon((1, 1));
+        map.tick();
+        assert_eq!(map.outcome.unwrap().winner, Some(0));
+        let loser = map.units.iter().find(|u| u.owner == 1 && u.kind == UnitKind::Shaman).unwrap();
+        assert!(matches!(loser.action, Action::Dying { .. }), "struck down: {:?}", loser.action);
+        assert!(!map.sites.iter().find(|s| s.owner == 1).unwrap().enabled, "no coming back for tribe 1");
+        let winner = map.units.iter().find(|u| u.owner == 0 && u.kind == UnitKind::Shaman).unwrap();
+        assert!(winner.is_alive() && winner.action == Action::Idle, "the winner's shaman is untouched");
+        assert!(map.sites.iter().find(|s| s.owner == 0).unwrap().enabled, "and still reincarnates if it ever needs to");
+    }
+
+    #[test]
+    fn a_shielded_losing_shaman_survives_the_strike_same_as_any_other_lightning() {
+        let mut map = two_tribes();
+        map.spawn(0, UnitKind::Brave, (0, 0));
+        let i = map.units.iter().position(|u| u.owner == 1 && u.kind == UnitKind::Shaman).unwrap();
+        map.units[i].statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
+        map.start_armageddon((1, 1));
+        map.tick();
+        let loser = map.units.iter().find(|u| u.owner == 1 && u.kind == UnitKind::Shaman).unwrap();
+        assert!(loser.is_alive() && loser.action == Action::Idle, "shielded: spared the strike");
+        assert!(!map.sites.iter().find(|s| s.owner == 1).unwrap().enabled, "still loses its reincarnation either way");
+    }
+
+    #[test]
+    fn a_draw_strikes_nobody_down() {
+        let mut map = two_tribes();
+        map.start_armageddon((1, 1));
+        map.tick();
+        assert_eq!(map.outcome.unwrap().winner, None);
+        assert!(map.units.iter().all(|u| u.is_alive() && u.action == Action::Idle));
+        assert!(map.sites.iter().all(|s| s.enabled));
     }
 
     #[test]

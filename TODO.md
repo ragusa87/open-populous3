@@ -243,9 +243,16 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
         shaman.
   - [ ] Two-phase `ArmageddonMatch`: `Gathering` (camera orbit, combat held off) then `Fighting`.
   - [ ] Per-tribe permanent shield (`WorldEvent::Shield`, continuously refreshed) while a tribe's own fighters live.
-  - [ ] Lightning-kill-without-reincarnation when a tribe's own fighters hit zero: `WorldEvent::Shield{steps:0}` +
-        `WorldEvent::RemoveSite` (now implemented, `GameMap::remove_reincarnation`, see "Computer players (AI)"
-        below - just not emitted by Armageddon yet) + the existing `WorldEvent::Damage`/`DamageKind::Lightning`.
+        **Correction**: `WorldEvent::Shield{steps:0}` named below as an already-existing event does **not** exist -
+        checked, only `Unit::statuses.shield`, a per-unit `Timed` status set directly by `cast_nearest_status`/
+        similar; this needs new plumbing (a `WorldEvent` variant, or a direct per-tick status refresh inside
+        `armageddon.rs`) once it's built, not a quick wire-up like the item below.
+  - [x] Lightning-kill-without-reincarnation when a tribe's own fighters hit zero: **implemented** (`armageddon.rs`
+        `losers`) - wired into v1's existing instant-resolution instead of a real ongoing fight (there isn't one
+        yet, see the two-phase item above): the moment the match resolves, every tribe not on the winning side has
+        its reincarnation disabled (`WorldEvent::RemoveSite`/`GameMap::remove_reincarnation`) and its shaman, if
+        still alive, struck by the ordinary `WorldEvent::Damage`/`DamageKind::Lightning` path (so a shield still
+        blocks it, same as any other lightning strike) - a draw (`best_side` returns `None`) strikes nobody down.
   - [x] Related fix, done ahead of Armageddon itself: `Unit::tick`'s `Action::Dead` branch no longer gets stuck
         forever when there's no `ReincarnationSite` for that owner - it falls through to `Action::Spirit`, same as
         `Dying`'s own non-shaman case (`unit.rs`). Not just a hypothetical Armageddon state: `DO SET_REINCARNATION
