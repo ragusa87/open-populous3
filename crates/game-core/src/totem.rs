@@ -4,6 +4,7 @@
 //! and the Worship sandbox shows every candidate.
 
 use crate::building::{BuildingKind, Reward};
+use crate::id::Id;
 use crate::spell_book::SpellKind;
 use crate::time::Ticks;
 use crate::unit::UnitId;
@@ -57,8 +58,13 @@ impl TotemKind {
     }
 }
 
+/// A totem's stable id (`GameMap::new_id_of`).
+pub type TotemId = Id<Totem>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Totem {
+    /// Given by `GameMap::add_totem`, never twice on a map (0 until then).
+    pub id: TotemId,
     pub kind: TotemKind,
     /// Centre, world units (512 per cell).
     pub x: u16,
@@ -88,7 +94,7 @@ pub struct Totem {
 impl Totem {
     /// A totem any one unit fills in `DEFAULT_PRAY_TIME`.
     pub fn new(kind: TotemKind, (x, z): (u16, u16)) -> Self {
-        Totem { kind, x, z, prayers: 1, shaman_only: false, summons_angel: false, pray_time: DEFAULT_PRAY_TIME, gifts: Vec::new(), occurrences: 0, given: 0, gauges: [0; TRIBES], queue: Vec::new(), since_given: 0 }
+        Totem { id: Id::from_raw(0), kind, x, z, prayers: 1, shaman_only: false, summons_angel: false, pray_time: DEFAULT_PRAY_TIME, gifts: Vec::new(), occurrences: 0, given: 0, gauges: [0; TRIBES], queue: Vec::new(), since_given: 0 }
     }
 
     /// The totem of `thing` with what `trigger` asks for and gives (its targets in `level`); the

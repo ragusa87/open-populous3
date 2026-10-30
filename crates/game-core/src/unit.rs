@@ -16,6 +16,7 @@ use crate::spell::Spell;
 use crate::status::Statuses;
 use crate::terrain::Heightmap;
 use crate::time::{Countdown, Every, Tick, Ticks};
+use crate::totem::TotemId;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 pub const SHAMAN_MAX_HEALTH: u16 = UnitKind::Shaman.stats().life;
@@ -154,6 +155,15 @@ impl UnitKind {
     }
 }
 
+/// Where `Order::Worship`/`Action::Worshipping` prays: a vault by its stored corner, a totem by its own
+/// id - worship.rs's own module doc: "A vault is keyed by its stored corner, a totem by its centre:
+/// never the same point", so the two addressing kinds are never collapsed into one shared point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorshipAt {
+    Vault { corner: (u16, u16) },
+    Totem { id: TotemId },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Idle,
@@ -221,9 +231,9 @@ pub enum Action {
     /// A brave inside a building under construction with nothing to build yet, hammering away until
     /// wood comes or it is built.
     Hammering,
-    /// The shaman praying at the door of the vault of knowledge whose stored corner is `site`
-    /// (`GameMap::tend_vaults`).
-    Worshipping { site: (u16, u16) },
+    /// Praying at a vault of knowledge (`GameMap::tend_vaults`) or a totem (`GameMap::tend_totems`),
+    /// `at` the one its `WorshipAt` addresses.
+    Worshipping { at: WorshipAt },
     /// On its way to attack `target`, whose place it last aimed at is `to` (`GameMap::tend_attacks` keeps it up to date).
     Attacking { target: Target, to: (u16, u16) },
     /// Escorting the tribe's shaman (`G` key, pop3-rev-analysis.md "Guard the shaman"): stays within `GUARD_RANGE`
@@ -355,9 +365,9 @@ pub enum Order {
     /// Followers: walk in by the door of the hut whose stored corner is `site` and rest inside, if it
     /// has room (`GameMap::start_order`).
     Enter { site: (u16, u16) },
-    /// The shaman: walk to the door of the vault of knowledge whose stored corner is `site` and pray
-    /// there until it lets her in (`GameMap::go_worship`).
-    Worship { site: (u16, u16) },
+    /// Walk to pray at the vault of knowledge or totem `at` addresses, until it lets the shaman in
+    /// (a vault) or it is exhausted (a totem) (`GameMap::go_worship`).
+    Worship { at: WorshipAt },
     /// Fighters: attack an enemy person or building (`GameMap::go_attack`, combat.md).
     Attack { target: Target },
     /// Walk next to the vehicle `vehicle` and get on, if it has a free seat (`GameMap::go_board`, vehicles.md).
@@ -443,8 +453,8 @@ pub struct Unit {
     to_wood: Option<(u16, u16)>,
     /// The building (stored corner) she is walking to the door of, to go in once there.
     to_house: Option<BuildingId>,
-    /// The vault (stored corner) she is walking to the door of, to pray there once there.
-    to_shrine: Option<(u16, u16)>,
+    /// The vault or totem she is walking to (its door, or a free spot around it), to pray there once there.
+    to_shrine: Option<WorshipAt>,
     /// The vehicle she is walking to, to get on once there.
     to_vehicle: Option<crate::vehicle::VehicleId>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
@@ -696,11 +706,12 @@ impl Unit {
         }
     }
 
-    /// Walks to `door`, then prays there for the vault at `site` (`Action::Worshipping`).
-    pub fn go_worship(&mut self, site: (u16, u16), door: (u16, u16)) {
-        self.start(Order::MoveTo { x: door.0, z: door.1 });
+    /// Walks to `stand` (a vault's door, or a free spot around a totem), then prays `at` it once there
+    /// (`Action::Worshipping`).
+    pub fn go_worship(&mut self, at: WorshipAt, stand: (u16, u16)) {
+        self.start(Order::MoveTo { x: stand.0, z: stand.1 });
         if self.action.can_take_orders() {
-            self.to_shrine = Some(site);
+            self.to_shrine = Some(at);
         }
     }
 
@@ -902,8 +913,8 @@ impl Unit {
                             self.action = Action::PickingUpWood { at, left: Countdown::new(PICK_TICKS) };
                         } else if let Some(building) = self.to_house.take() {
                             return Some(UnitEvent::AtDoor { building });
-                        } else if let Some(site) = self.to_shrine.take() {
-                            self.action = Action::Worshipping { site };
+                        } else if let Some(at) = self.to_shrine.take() {
+                            self.action = Action::Worshipping { at };
                         } else if let Some(vehicle) = self.to_vehicle.take() {
                             return Some(UnitEvent::AtVehicle { vehicle });
                         } else if let Some(drink) = self.to_graze.take() {

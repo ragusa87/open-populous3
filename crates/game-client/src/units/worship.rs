@@ -75,7 +75,7 @@ mod tests {
         assert_eq!(worship_facing(&busy, Some(&her)), None, "not idle");
         her.action = Action::Walking { to: (0, 0) };
         assert!(worship_facing(&brave, Some(&her)).is_some(), "she walks past");
-        for action in [Action::Worshipping { site: (0, 0) }, Action::Casting { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, Action::Dead { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }] {
+        for action in [Action::Worshipping { at: game_core::unit::WorshipAt::Vault { corner: (0, 0) } }, Action::Casting { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, Action::Dead { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }] {
             her.action = action;
             assert_eq!(worship_facing(&brave, Some(&her)), None, "{action:?}");
         }

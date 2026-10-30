@@ -51,7 +51,8 @@ impl GameMap {
                     (crate::vehicle::CREW as u16, self.workers(b.id).map(|u| u.id).collect())
                 } else if b.stage() == Stage::Built {
                     let room = if b.vault.is_some_and(|v| v.is_spent()) { 0 } else { room(b.kind) };
-                    let praying = self.units.iter().filter(|u| u.is_alive() && u.action == crate::unit::Action::Worshipping { site });
+                    let at = crate::unit::WorshipAt::Vault { corner: site };
+                    let praying = self.units.iter().filter(|u| u.is_alive() && u.action == crate::unit::Action::Worshipping { at });
                     (room, self.units_inside(b.id).chain(praying).map(|u| u.id).collect())
                 } else if b.kind.wood_cost() > 0 {
                     (b.kind.max_braves() as u16, self.workers(b.id).map(|u| u.id).collect())

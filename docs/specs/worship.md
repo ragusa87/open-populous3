@@ -40,6 +40,13 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   curve with its counted prayers and drains linearly without any (`gauge::step`). Full, the tribe gets the
   totem's gifts (`Totem::gifts`, logged in `GameMap::granted`), its gauge starts again; once it gave
   `occurrences` times (0: no limit, a guess) its prayers are sent away (stop) and it takes no more.
+- Each totem carries a stable id (`TotemId`, `GameMap::add_totem`, the same `new_id_of` convention as
+  buildings and units), and `Order::Worship`/`Action::Worshipping` address it (or a vault, by its stored
+  corner) through a `WorshipAt` payload rather than a bare world point: `GameMap::go_worship` resolves the
+  exact totem an order named by that id, never by re-deriving "which totem" from a shared position. This is
+  what makes the level 23 same-cell case below actually resolve to the totem an order was sent to, not just
+  whichever totem happens to live at that point first (`worship.rs`'s
+  `two_totems_sharing_one_point_are_each_reachable_by_their_own_id`).
 - The stone totem (object 1, "Totem rocks" in objects.md) [player]: its rock layers are out of line on purpose
   (each turned about 20° from the one under it). Once completed, every slab's bottom ring turns about the
   centre axis (the way object 3 turns it) until it is turned **64°** from object 1 [player, picked with a slider;
@@ -56,7 +63,8 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
     of the rings (2 or 3, over a longer time); spinning fast and slowing down into place; overshooting 64° and
     springing back; a ratchet of short clicks (4 × 16°) with pauses; a rumble (the totem shaking) while it sinks.
   Done: the timeline is in the simulation (`Totem::since_given`; `TURN_TICKS` 2 s, `HOLD_TICKS` 1 s, `SINK_TICKS`
-  4 s; `Totem::is_gone`, then nothing finds it: `GameMap::totem_at`); the client poses the rings from objects 1
+  4 s; `Totem::is_gone`, then it is dropped from `GameMap::totems` outright, `GameMap::tend_totems`'s own
+  `retain` - not just unfindable through `GameMap::totem_at`, actually gone); the client poses the rings from objects 1
   and 3 (`totems::twisted`, `turn_fraction`, eased and smoothed between ticks), lowers the body
   (`sink_fraction`) with puffs of smoke (`effects::SINKING`) and hides it once gone. The generated stack of blocks turns its
   blocks above the base by the same amount.
@@ -86,7 +94,9 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   them probably the Angel of Death).
 - In the levels [files]: 96 of the 98 totems have exactly one trigger on their cell; level 23 has two totems and
   two triggers on one cell (30, 84), paired in slot order [ours]. Type 0 needs 1-8 units (6 for 41 totems, 1 for
-  17); the 21 type 3 totems need 1.
+  17); the 21 type 3 totems need 1. The two totems sharing that one cell are two distinct `Totem`s, each with its
+  own id: an order sent to either one resolves to that exact totem (`WorshipAt::Totem { id }` above), not
+  whichever of the two a position-only lookup would have hit first.
 - More may be assigned than `TriggerCount`: e.g. 12 on a totem of 8. Only `TriggerCount` count; the gauge goes
   no faster with more [player].
 - Every assigned unit takes the prayer pose, counted or not; none of them is idle [player].

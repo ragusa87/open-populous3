@@ -13,8 +13,8 @@ use crate::command::Command;
 use crate::map::GameMap;
 use crate::mana::Mana;
 use crate::spell_book::{Availability, SpellBook, SpellKind};
-use crate::totem::TRIBES;
-use crate::unit::{torus_delta, Action, Inside, Order, UnitId, UnitKind};
+use crate::totem::{TotemId, TRIBES};
+use crate::unit::{torus_delta, Action, Inside, Order, UnitId, UnitKind, WorshipAt};
 
 /// Within this many world units of the vault's middle she has reached it.
 const MIDDLE: i32 = 64;
@@ -32,8 +32,8 @@ impl GameMap {
     /// she is among them.
     pub fn worship_orders(&self, player: u8, units: &[UnitId], vault: usize) -> Vec<Command> {
         let Some(b) = self.buildings.get(vault).filter(|b| b.kind == BuildingKind::Vault) else { return Vec::new() };
-        let site = (b.x, b.z);
-        self.units.iter().filter(|u| u.owner == player && u.kind == UnitKind::Shaman && units.contains(&u.id)).map(|u| Command::OrderUnit { player, unit: u.id, order: Order::Worship { site } }).collect()
+        let at = WorshipAt::Vault { corner: (b.x, b.z) };
+        self.units.iter().filter(|u| u.owner == player && u.kind == UnitKind::Shaman && units.contains(&u.id)).map(|u| Command::OrderUnit { player, unit: u.id, order: Order::Worship { at } }).collect()
     }
 
     /// The totem within `TOTEM_MARGIN` of world point `at` (on the torus).
@@ -46,28 +46,29 @@ impl GameMap {
     /// exhausted totem.
     pub fn totem_orders(&self, player: u8, units: &[UnitId], totem: usize) -> Vec<Command> {
         let Some(t) = self.totems.get(totem).filter(|t| !t.is_exhausted()) else { return Vec::new() };
-        let site = (t.x, t.z);
+        let at = WorshipAt::Totem { id: t.id };
         let may = |kind: UnitKind| if t.shaman_only { kind == UnitKind::Shaman } else { kind != UnitKind::Wildman };
-        self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id) && may(u.kind)).map(|u| Command::OrderUnit { player, unit: u.id, order: Order::Worship { site } }).collect()
+        self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id) && may(u.kind)).map(|u| Command::OrderUnit { player, unit: u.id, order: Order::Worship { at } }).collect()
     }
 
     /// Unit `i` takes `Order::Worship`: at a vault the living shaman walks to its door, at a totem a
     /// unit allowed to pray there walks to a free spot around it, to pray there.
-    pub(crate) fn go_worship(&mut self, i: usize, site: (u16, u16)) {
-        if let Some(t) = self.totems.iter().position(|t| (t.x, t.z) == site) {
-            self.go_pray_at_totem(i, t);
-            return;
+    pub(crate) fn go_worship(&mut self, i: usize, at: WorshipAt) {
+        match at {
+            WorshipAt::Totem { id } => self.go_pray_at_totem(i, id),
+            WorshipAt::Vault { corner } => {
+                let Some(b) = self.building_at_corner(corner).map(|k| &self.buildings[k]) else { return };
+                if self.units[i].kind != UnitKind::Shaman || b.vault.is_none_or(|v| v.is_spent()) {
+                    return;
+                }
+                let door = b.door();
+                self.units[i].go_worship(at, door);
+            }
         }
-        let Some(b) = self.building_at_corner(site).map(|k| &self.buildings[k]) else { return };
-        if self.units[i].kind != UnitKind::Shaman || b.vault.is_none_or(|v| v.is_spent()) {
-            return;
-        }
-        let door = b.door();
-        self.units[i].go_worship(site, door);
     }
 
-    fn go_pray_at_totem(&mut self, i: usize, totem: usize) {
-        let t = &self.totems[totem];
+    fn go_pray_at_totem(&mut self, i: usize, totem: TotemId) {
+        let Some(t) = self.totems.iter().find(|t| t.id == totem) else { return };
         let u = &self.units[i];
         let allowed = if t.shaman_only { u.kind == UnitKind::Shaman } else { u.kind != UnitKind::Wildman };
         if !allowed || !u.is_alive() || t.is_exhausted() {
@@ -78,7 +79,7 @@ impl GameMap {
         let taken = self.taken_spots(&[id]);
         let spots = crate::slots::free_spots_near(&self.ground(), crate::slots::spot_of(site), &taken, t.prayers as usize + 8);
         if let Some(stand) = spots.iter().map(|&s| crate::slots::spot_centre(s)).filter(|&p| p != site).min_by_key(|&p| crate::map::torus_dist2(me, p)) {
-            self.units[i].go_worship(site, stand);
+            self.units[i].go_worship(WorshipAt::Totem { id: totem }, stand);
         }
     }
 
@@ -88,8 +89,8 @@ impl GameMap {
     /// sends its prayers away.
     pub(crate) fn tend_totems(&mut self) {
         for k in 0..self.totems.len() {
-            let site = (self.totems[k].x, self.totems[k].z);
-            let praying: Vec<UnitId> = self.units.iter().filter(|u| u.is_alive() && u.action == Action::Worshipping { site }).map(|u| u.id).collect();
+            let at = WorshipAt::Totem { id: self.totems[k].id };
+            let praying: Vec<UnitId> = self.units.iter().filter(|u| u.is_alive() && u.action == Action::Worshipping { at }).map(|u| u.id).collect();
             let totem = &mut self.totems[k];
             if totem.given > 0 {
                 totem.since_given = totem.since_given.saturating_add(1);
@@ -128,6 +129,10 @@ impl GameMap {
                 }
             }
         }
+        // By the time a totem sinks (`is_gone`, well after `is_exhausted`), its queue was already
+        // emptied and every assigned unit sent `Order::Stop` above: no `Action::Worshipping { at:
+        // WorshipAt::Totem { id } }` can still be pointing at it, so it is safe to drop here.
+        self.totems.retain(|t| !t.is_gone());
     }
 
     /// Unit `i` is locked (`Unit::locked`: tumbling or lifted) or inside a vault (walking in, at its
@@ -153,8 +158,9 @@ impl GameMap {
             let Some(vault) = self.buildings[k].vault else { continue };
             let b = &self.buildings[k];
             let (site, id, door) = ((b.x, b.z), b.id, b.door());
+            let at = WorshipAt::Vault { corner: site };
             let middle = b.centre();
-            let praying = self.units.iter().position(|u| u.is_alive() && u.action == Action::Worshipping { site });
+            let praying = self.units.iter().position(|u| u.is_alive() && u.action == Action::Worshipping { at });
             let inside = self.units.iter().position(|u| u.is_alive() && u.inside.is_some_and(|ins| ins.building == id));
             let mut vault = vault;
             vault.tick((praying.is_some() || inside.is_some()) as u16);
@@ -402,6 +408,7 @@ mod tests {
     fn an_exhausted_totem_sends_its_prayers_away() {
         let mut map = GameMap::sandbox_worship();
         let first = totem_of(&map, 1, false);
+        let gone_id = map.totems[first].id;
         map.totems[first].occurrences = 1;
         let units = braves(&map, 3);
         pray_at(&mut map, &units, first);
@@ -416,8 +423,34 @@ mod tests {
         let (x, z) = (map.totems[first].x, map.totems[first].z);
         assert_eq!(map.totem_at((x, z)), Some(first), "still there while it turns and sinks");
         map.run(crate::totem::TURN_TICKS + crate::totem::HOLD_TICKS + crate::totem::SINK_TICKS);
-        assert!(map.totems[first].is_gone());
         assert_eq!(map.totem_at((x, z)), None, "sunk: gone");
+        assert!(map.totems.iter().all(|t| t.id != gone_id), "dropped from `totems`, not just flagged `is_gone`");
+    }
+
+    /// worship.md: level 23 has two totems sharing one cell, point for point. Before a totem carried a
+    /// stable id, `GameMap::go_worship` resolved "which totem" by an exact-position match
+    /// (`self.totems.iter().position(|t| (t.x, t.z) == site)`), which always landed on whichever of the
+    /// two came first - here the shaman-only one - no matter which totem an order actually named. A
+    /// follower ordered to the second, open totem would silently resolve against the first (shaman-only)
+    /// one instead and never start praying.
+    #[test]
+    fn two_totems_sharing_one_point_are_each_reachable_by_their_own_id() {
+        let mut map = GameMap::sandbox_worship();
+        let point = map.shaman_of(0).map(|s| (s.x, s.z)).unwrap();
+        map.add_totem(crate::totem::Totem { shaman_only: true, ..crate::totem::Totem::new(crate::totem::TotemKind::Totem, point) });
+        let open = map.add_totem(crate::totem::Totem { shaman_only: false, ..crate::totem::Totem::new(crate::totem::TotemKind::StoneHead, point) });
+        let open_index = map.totems.iter().position(|t| t.id == open).unwrap();
+        let brave = braves(&map, 1)[0];
+        let cmds = map.totem_orders(0, &[brave], open_index);
+        assert_eq!(cmds.len(), 1, "a follower may pray at the open totem");
+        for c in cmds {
+            map.apply(&c);
+        }
+        let started = (0..600).any(|_| {
+            map.tick();
+            matches!(map.units.iter().find(|u| u.id == brave).unwrap().action, Action::Worshipping { at: WorshipAt::Totem { id } } if id == open)
+        });
+        assert!(started, "resolved to the totem it was actually ordered to, not whichever totem shares its point");
     }
 
     /// TODO.md "Praying": a shared-across-tribes `NumOccurences` with each tribe keeping its own gauge otherwise

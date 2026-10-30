@@ -190,7 +190,7 @@ impl GameMap {
                 .collect(),
             buildings: Vec::new(),
             granted: Vec::new(),
-            totems: totems_from_level(level),
+            totems: Vec::new(),
             wood: Vec::new(),
             mana: per_player(ManaPool::default()),
             spell_books: per_player(SpellBook::demo()),
@@ -220,6 +220,7 @@ impl GameMap {
             active_flyby: None,
         }
         .with_buildings(buildings_from_level(level))
+        .with_totems(totems_from_level(level))
         .with_building_ground()
         .with_shamans()
         .with_people(level)
@@ -270,6 +271,13 @@ impl GameMap {
     fn with_buildings(mut self, buildings: Vec<Building>) -> Self {
         for b in buildings {
             self.add_building(b);
+        }
+        self
+    }
+
+    fn with_totems(mut self, totems: Vec<Totem>) -> Self {
+        for t in totems {
+            self.add_totem(t);
         }
         self
     }
@@ -523,7 +531,7 @@ impl GameMap {
             let (prayers, shaman_only, summons_angel) = SANDBOX_TOTEMS[k];
             // The stone totem gives once, to show it turning, sinking and gone; the others give again and again.
             let occurrences = u8::from(kind == TotemKind::Totem);
-            map.totems.push(Totem { prayers, shaman_only, summons_angel, gifts: vec![sandbox_gift(k)], occurrences, ..Totem::new(kind, at(-12 + 4 * k as i32, -12)) });
+            map.add_totem(Totem { prayers, shaman_only, summons_angel, gifts: vec![sandbox_gift(k)], occurrences, ..Totem::new(kind, at(-12 + 4 * k as i32, -12)) });
         }
         for n in 0..8 {
             map.spawn(0, UnitKind::Brave, at(-7 + 2 * n, -7));
@@ -1544,6 +1552,20 @@ impl GameMap {
         self.building_index(id).map(|i| &self.buildings[i])
     }
 
+    /// Adds `t` with a fresh id, last in `totems` (which stays sorted by id); its id.
+    pub fn add_totem(&mut self, mut t: Totem) -> crate::totem::TotemId {
+        t.id = self.new_id_of();
+        let id = t.id;
+        self.totems.push(t);
+        id
+    }
+
+    /// Where the totem `id` is in `totems` (stays sorted by id: `retain` keeps relative order); None
+    /// once it is gone.
+    pub fn totem_index(&self, id: crate::totem::TotemId) -> Option<usize> {
+        self.totems.binary_search_by_key(&id, |t| t.id).ok()
+    }
+
     /// Adds `e` with a fresh id, last in `effects`; its id.
     pub fn add_effect(&mut self, e: Effect) -> Id<Effect> {
         let id = self.new_id_of();
@@ -1912,7 +1934,7 @@ impl GameMap {
         match order {
             Order::Build { site } => self.assign(i, site),
             Order::Enter { site } => self.go_in(i, site),
-            Order::Worship { site } => self.go_worship(i, site),
+            Order::Worship { at } => self.go_worship(i, at),
             Order::CutTree { tree } => self.go_cut(i, tree),
             Order::FetchWood => self.fetch_wood(i),
             Order::PickUp { at } => self.pick_up(i, at),
@@ -3200,6 +3222,7 @@ mod tests {
         }
         assert!(m.shaman_of(0).is_some());
         assert_eq!(m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == 0).count(), 8);
+        assert!(m.totems.windows(2).all(|w| w[0].id < w[1].id), "distinct, increasing ids, same as buildings/units");
     }
 
     #[test]

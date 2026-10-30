@@ -700,15 +700,16 @@ mod tests {
     #[test]
     fn a_click_on_a_hovered_totem_sends_the_selection_to_pray_there() {
         use crate::hover::HoverTarget;
+        use game_core::unit::WorshipAt;
         let mut map = game_core::map::GameMap::sandbox_buildings();
         let site = (40 * 512, 40 * 512);
-        map.totems = vec![game_core::totem::Totem::new(game_core::totem::TotemKind::StoneHead, site)];
+        let totem = map.add_totem(game_core::totem::Totem::new(game_core::totem::TotemKind::StoneHead, site));
         let brave = map.units.iter().find(|u| u.owner == PLAYER && u.kind == game_core::unit::UnitKind::Brave).unwrap().id;
         assert_eq!(hovered_site(&map, Some(HoverTarget::Totem(0))), Some(site));
         assert_eq!(hovered_site(&map, Some(HoverTarget::Totem(1))), None);
         assert_eq!(hovered_site(&map, Some(HoverTarget::Tree(0))), None);
         let orders = building_click(&map, &[brave], hovered_site(&map, Some(HoverTarget::Totem(0))).unwrap()).unwrap();
-        assert!(matches!(orders[..], [Command::OrderUnit { order: Order::Worship { site: s }, .. }] if s == site));
+        assert!(matches!(orders[..], [Command::OrderUnit { order: Order::Worship { at: WorshipAt::Totem { id } }, .. }] if id == totem));
     }
 
     #[test]

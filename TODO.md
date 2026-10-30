@@ -462,7 +462,22 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 ### Praying (worship) ([worship.md](docs/specs/worship.md))
 - [ ] Prayer gauge on the original's rhythm and curve (pop3-rev-analysis.md "The gauge"): every 4 turns, `C² / (C − n + 1)²` per update, drain `C²`; today it steps every tick with `STEP · (n/C)²`.
 - [x] Contested totems: keep one gauge per tribe (our choice; the original has one per trigger, driven by the tribe with the most prayers), but the gifts are shared: a totem's `NumOccurences` counts across all tribes, so a one-gift totem rewards only the first tribe to fill its gauge, and the other gauges stop. Once `NumOccurences` is reached by any tribe, the totem sinks back into the ground for everyone and every tribe's prayers are sent away (`Totem::is_exhausted`: one shared sink, whoever took the last gift). **Truth sweep: already correct** (`Totem::given`/`is_exhausted`, `GameMap::tend_totems`) - confirmed and pinned down with a two-tribe test (`worship.rs` `two_tribes_contest_a_totem_the_first_to_fill_wins_the_gift_and_both_are_swept_once_exhausted`), no fix needed.
-- [ ] Totems: ids (`GameMap::new_id`) and removal from `GameMap::totems` once sunk (exhausted after their gifts, `NumOccurences` times; infinite ones stay), then `Order::Worship` / `Action::Worshipping` by id.
+- [x] Totems: ids and removal implemented (worship.md "Totems"). `TotemId`/`GameMap::add_totem` give every
+  totem a stable id, the same `new_id_of` convention as buildings/units (`totems_from_level` stays a pure
+  `Level -> Vec<Totem>` function, assigned ids only once added via `with_totems`/`add_totem`). `Order::Worship`/
+  `Action::Worshipping` now carry a `WorshipAt` (`Vault { corner }` or `Totem { id }`) instead of a bare world
+  point, and `GameMap::go_worship` resolves the exact totem/vault an order named instead of re-deriving "which
+  one" from a shared position. `GameMap::tend_totems` drops a totem from `GameMap::totems` outright once
+  `Totem::is_gone()` (`worship.rs`'s `an_exhausted_totem_sends_its_prayers_away`), safe without extra
+  bookkeeping since exhaustion already clears its queue and stops every assigned unit well before sink
+  finishes. Incidentally fixes a real bug: level 23's two totems sharing one cell (worship.md) were previously
+  indistinguishable by `go_worship`'s exact-position match, so an order to the second totem always resolved to
+  the first instead - proven fixed by `worship.rs`'s
+  `two_totems_sharing_one_point_are_each_reachable_by_their_own_id`. `game-net`'s wire codec updated to encode/
+  decode `WorshipAt` (tag byte: 0 vault corner, 1 totem id). Left out of scope: the client's `totems.rs`
+  `TotemView` still keys by `Vec` index, not the new id - not a correctness bug (it is fully rebuilt on any map
+  change), just the same known "key views by stable id" cleanup already flagged elsewhere in this file for
+  buildings/units.
 - [ ] Stone totem: check in the game what it does after a completion that is not its last, the timings (turn 2 s, hold 1 s, sink 4 s) and the smoke; other turns to try are listed in worship.md.
 - [ ] Totem gifts not handled yet (logged as `Reward::Unhandled`): effects (land bridge, lightning...), revealed scenery and triggers, vehicles, the Angel of Death of type 5 totems; mana once mana exists. Check what `NumOccurences` 0 means.
 - [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); `PrayTime`'s unit is now confirmed live (worship.md "Open", pop3-rev-analysis.md "The vault"): the same 4-turn tick as a totem's gauge, cap = `PrayTime` directly. Still to check in the game: the drain speed with nobody praying (not observed live yet).

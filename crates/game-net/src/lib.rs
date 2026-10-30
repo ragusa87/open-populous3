@@ -9,7 +9,7 @@ use game_core::id::Id;
 use game_core::spell::Spell;
 use game_core::spell_book::SpellKind;
 use game_core::time::Tick;
-use game_core::unit::{Order, Target, UnitId};
+use game_core::unit::{Order, Target, UnitId, WorshipAt};
 use std::io::{self, Read, Write};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -233,6 +233,21 @@ fn put_id<T>(b: &mut Vec<u8>, id: Id<T>) {
     b.extend(id.raw().to_le_bytes());
 }
 
+/// Where `Order::Worship` prays, on the wire: tag `u8` (0 a vault's stored corner, 1 a totem's id).
+fn put_worship_at(b: &mut Vec<u8>, at: WorshipAt) {
+    match at {
+        WorshipAt::Vault { corner } => {
+            b.push(0);
+            b.extend(corner.0.to_le_bytes());
+            b.extend(corner.1.to_le_bytes());
+        }
+        WorshipAt::Totem { id } => {
+            b.push(1);
+            put_id(b, id);
+        }
+    }
+}
+
 /// A unit list on the wire: `u8` count, then that many `u32` ids.
 fn put_units(b: &mut Vec<u8>, units: &[UnitId]) {
     b.push(units.len() as u8);
@@ -296,10 +311,9 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
             b.extend(site.0.to_le_bytes());
             b.extend(site.1.to_le_bytes());
         }
-        Order::Worship { site } => {
+        Order::Worship { at } => {
             b.push(10);
-            b.extend(site.0.to_le_bytes());
-            b.extend(site.1.to_le_bytes());
+            put_worship_at(b, *at);
         }
         Order::Attack { target: Target::Unit(id) } => {
             b.push(11);
@@ -385,6 +399,15 @@ fn get_target(c: &mut Cursor) -> Option<Target> {
     }
 }
 
+/// Where `Order::Worship` prays, from the wire: tag `u8` (0 a vault's stored corner, 1 a totem's id).
+fn get_worship_at(c: &mut Cursor) -> Option<WorshipAt> {
+    match c.u8()? {
+        0 => Some(WorshipAt::Vault { corner: (c.u16()?, c.u16()?) }),
+        1 => Some(WorshipAt::Totem { id: c.id()? }),
+        _ => None,
+    }
+}
+
 fn decode_order(c: &mut Cursor) -> Option<Order> {
     Some(match c.u8()? {
         0 => Order::MoveTo { x: c.u16()?, z: c.u16()? },
@@ -396,7 +419,7 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         7 => Order::PickUp { at: (c.u16()?, c.u16()?) },
         8 => Order::Build { site: (c.u16()?, c.u16()?) },
         9 => Order::Enter { site: (c.u16()?, c.u16()?) },
-        10 => Order::Worship { site: (c.u16()?, c.u16()?) },
+        10 => Order::Worship { at: get_worship_at(c)? },
         11 => Order::Attack { target: Target::Unit(c.id()?) },
         12 => Order::Attack { target: Target::Building(c.id()?) },
         13 => Order::Board { vehicle: c.id()? },
@@ -496,7 +519,8 @@ mod tests {
                 Command::Dismantle { player: 2, building: Id::from_raw(u32::MAX), on: true },
                 Command::Dismantle { player: 0, building: Id::from_raw(7), on: false },
                 Command::QueueOrder { player: 0, unit: Id::from_raw(3), order: Order::Enter { site: (1024, 2048) } },
-                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Worship { site: (32768, 36864) } },
+                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Worship { at: WorshipAt::Vault { corner: (32768, 36864) } } },
+                Command::QueueOrder { player: 1, unit: Id::from_raw(2), order: Order::Worship { at: WorshipAt::Totem { id: Id::from_raw(42) } } },
                 Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Attack { target: Target::Unit(Id::from_raw(70_000)) } },
                 Command::QueueOrder { player: 0, unit: Id::from_raw(2), order: Order::Attack { target: Target::Building(Id::from_raw(9)) } },
                 Command::CastSelf { player: 1, kind: SpellKind::Teleport },

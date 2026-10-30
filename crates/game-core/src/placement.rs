@@ -167,7 +167,7 @@ mod tests {
         m.campfires.push(crate::campfire::Campfire::new(1, 0, (60, 60)));
         assert_eq!(blocked_at(&m, (60 * 512 + 10, 60 * 512 + 500), None), Some(Blocked::Campfire));
         assert!(!can_place(&m, &hut((60, 60)), None), "over a camp fire");
-        m.totems.push(crate::totem::Totem::new(crate::totem::TotemKind::Totem, (70 * 512 + 256, 70 * 512 + 256)));
+        m.add_totem(crate::totem::Totem::new(crate::totem::TotemKind::Totem, (70 * 512 + 256, 70 * 512 + 256)));
         assert_eq!(blocked_at(&m, (70 * 512 + 300, 70 * 512 + 200), None), Some(Blocked::Totem));
         assert!(!can_place(&m, &hut((70, 70)), None), "over a totem");
         assert!(!crate::campfire::can_place(&m, (70, 70)), "no camp fire on a totem");

@@ -276,7 +276,7 @@ mod tests {
         map.units[carrying].carrying = 1;
         map.units[carrying].action = Action::Walking { to: (0, 0) };
         let praying = add(&mut map, 0, UnitKind::Brave);
-        map.units[praying].action = Action::Worshipping { site: (0, 0) };
+        map.units[praying].action = Action::Worshipping { at: crate::unit::WorshipAt::Vault { corner: (0, 0) } };
         let walking = add(&mut map, 0, UnitKind::Brave);
         map.units[walking].action = Action::Walking { to: (0, 0) };
         let leaving = add(&mut map, 0, UnitKind::Brave);
@@ -294,9 +294,9 @@ mod tests {
     #[test]
     fn praying_at_a_totem_is_working() {
         let mut map = empty();
-        map.totems = vec![Totem::new(TotemKind::StoneHead, (0, 0))];
+        let totem = map.add_totem(Totem::new(TotemKind::StoneHead, (0, 0)));
         let u = add(&mut map, 0, UnitKind::Preacher);
-        map.units[u].action = Action::Worshipping { site: (0, 0) };
+        map.units[u].action = Action::Worshipping { at: crate::unit::WorshipAt::Totem { id: totem } };
         assert_eq!(map.headcount(0).get(State::Working, UnitKind::Preacher), 1);
     }
 
