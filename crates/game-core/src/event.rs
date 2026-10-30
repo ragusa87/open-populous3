@@ -29,7 +29,9 @@ pub enum WorldEvent {
     /// else where it is (`GameMap::put_out`: falls from a balloon, drowns off a boat at sea): a swarm's own
     /// sting on a vehicle (TODO.md "Units").
     PutOut { vehicle: VehicleId },
-    SetFire { building: BuildingId },
+    /// Sets `building` alight, lit by tribe `by` (`Building::ignite`, `GameMap::set_fire`): carried for
+    /// `stats[tribe][7]` (`BuildingBurnedDown` below) once the fire finishes it off.
+    SetFire { building: BuildingId, by: u8 },
     /// `amount` of wear, through the same accumulator "Attacking a building" hacking and firewarrior bolts feed
     /// (`Building::wear_down`): a blast's own `BLAST_DAMAGE_BLDG` (combat.md "Attacking a building").
     Wear { building: BuildingId, amount: u16 },
@@ -37,6 +39,10 @@ pub enum WorldEvent {
     /// turn-110 destruction (docs/plans/spells.md "Volcano"), accepted as simpler than modelling a dedicated
     /// instant-destruction path through `fire`/`wreck`.
     Destroy { building: BuildingId },
+    /// A fire finished a building off (`crate::fire::tend_fires`), tallied by the tribe that lit it
+    /// (`stats[tribe][7]` [exe], `GameMap::fires_put_out`). Fire-specific: `Destroy` and other
+    /// `burn_down` callers (explosions, terrain) don't raise this.
+    BuildingBurnedDown { tribe: u8 },
     /// Sets the trees of the cell on fire (`Tree::ignite`).
     BurnTrees { cell: (i32, i32) },
     /// A lava flow finished (`lava::Lava`, pop3-rev-analysis.md "Volcano lava flow"): its whole reached footprint

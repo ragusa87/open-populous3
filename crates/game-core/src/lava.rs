@@ -249,7 +249,7 @@ impl Lava {
             }
             let at = cell_centre(pos, size);
             if let Some(b) = world.buildings.iter().find(|b| b.covers(at, 0) && b.burning.is_none()) {
-                events.push(WorldEvent::SetFire { building: b.id });
+                events.push(WorldEvent::SetFire { building: b.id, by: owner });
             }
             if world.trees.iter().any(|t| t.cell() == pos && t.wood() > 0) {
                 events.push(WorldEvent::BurnTrees { cell: pos });

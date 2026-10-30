@@ -220,7 +220,7 @@ impl GameMap {
             Target::Building(id) => {
                 if let Some(building) = self.building_index(id) {
                     self.buildings[building].wear_down(if b.from_tower { TARGET_DAMAGE_FROM_TOWER } else { TARGET_DAMAGE });
-                    events.push(WorldEvent::SetFire { building: id });
+                    events.push(WorldEvent::SetFire { building: id, by: b.owner });
                 }
             }
             Target::Unit(id) => {

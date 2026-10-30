@@ -94,7 +94,14 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   "Panicking" row, newly added - the table had no row for it at all): a quarter turn away from the blocking
   heading, **`[ours]`, not traced** - the original's own rule is still unconfirmed either way. Left open, needing
   the whole audio system first, out of scope here: the original's own panic scream.
-- [ ] Burning buildings (`fire`): the igniter's tribe and the destroyed-building count (`stats[tribe][7]`), the fire sound.
+- [x] Burning buildings (`fire`): the igniter's tribe and the destroyed-building count are in - `Building::ignite`
+  now takes the lighting tribe (`ignited_by`, kept past the fire itself like a unit's own `last_attacker`), and
+  `fire::tend_fires`'s `FireTurn::Hit { destroyed: true }` tallies it into `GameMap::fires_put_out` via
+  `WorldEvent::BuildingBurnedDown` ("The tick" [exe] `stats[tribe][7]`, mirroring `FightWon`/`melee_wins`;
+  `fire.rs` test `a_building_burnt_down_tallies_the_igniting_tribe_s_fires_put_out`). `burn_down`/`ashes.rs` itself
+  stays untouched (cause-agnostic: an explosion or terrain destruction never raises it). Left: the fire sound
+  (needs the whole audio system, `pop3_format::sound` below, not written yet) and a stats-tab reading
+  `fires_put_out` (nothing surfaces the number yet, same gap as `melee_wins`/`melee_deaths`).
 - [x] Shots, Blast's own cast-to-effect fireball (8/4) only: `blast::Fireball`/`GameMap::fireballs`, a typed list ticked before effects like `GameMap::bolts` (`GameMap::tend_fireballs`), integer 3D flight at `FIREBALL_SPEED` 1000 units/turn from the shaman's own position, spawning the simple blast on arrival - the "+6 turns: a shot flies from the shaman" piece of pop3-rev-analysis.md "From cast to effect", previously missing entirely (the blast landed the instant the cast released). This item originally lumped three shot ids together (8/4, 8/7, 8/8), but they turn out to be two different mechanisms: Firestorm's and Volcano's own fireball rain (8/4 shared with Blast for Firestorm's, 8/7+8/8 for Volcano's two sizes) are each a `panicking_blast` scheduled instantly by their own effect every few turns (`firestorm::Firestorm::turn`, `volcano::Volcano`) - confirmed-correct scheduling already, no per-fireball flight ever modelled, by design (pop3-rev-analysis.md: "the already-correct scheduling... is not where the rain-of-fire look is missing", only the client's own visual is). Blast's own single shot, flying once from the shaman to the cast point, was the only piece with no implementation at all - that's what this item covers now. The general shot machinery every OTHER spell (not Blast/Firestorm/Volcano) shares for its own single cast-to-effect shot - homing on a targeted unit, the shielded-enemy deflection - is still open (the item below).
 - [ ] World views (architecture.md "Client: world visuals"): the landing dust (`units::dust`) as a `WorldView` once
   touchdowns are kept in game-core (a unit's landing tick), so a rejoining client draws it too; the sinking totem's

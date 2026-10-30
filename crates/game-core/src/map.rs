@@ -104,6 +104,9 @@ pub struct GameMap {
     /// Own deaths suffered in a fight, by tribe (combat.md "Melee", "Fight" [exe] `stats[tribe][1]`): only a
     /// `DamageKind::Melee` blow, which only ever comes from one, counts here - not every death.
     pub melee_deaths: [u32; TRIBES],
+    /// Buildings a fire finished off, by the tribe that lit it ("The tick" [exe] `stats[tribe][7]`,
+    /// `WorldEvent::BuildingBurnedDown`, `crate::fire::tend_fires`): fire-specific, not every destruction.
+    pub fires_put_out: [u32; TRIBES],
     /// Ticks run since the map was made (`tick`).
     pub now: Tick,
     /// The next id `new_id` gives: units, buildings and effects share it, an id is never given twice.
@@ -163,7 +166,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), active_flyby: None }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), active_flyby: None }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -213,6 +216,7 @@ impl GameMap {
             outcome: None,
             melee_wins: [0; TRIBES],
             melee_deaths: [0; TRIBES],
+            fires_put_out: [0; TRIBES],
             now: Tick::ZERO,
             next_id: 1,
             rng: Lcg(0),
@@ -1719,8 +1723,8 @@ impl GameMap {
                 }
                 None
             }
-            WorldEvent::SetFire { building } => {
-                self.set_fire(building);
+            WorldEvent::SetFire { building, by } => {
+                self.set_fire(building, by);
                 None
             }
             WorldEvent::Wear { building, amount } => {
@@ -1821,6 +1825,10 @@ impl GameMap {
             }
             WorldEvent::FightWon { tribe } => {
                 self.melee_wins[tribe as usize] += 1;
+                None
+            }
+            WorldEvent::BuildingBurnedDown { tribe } => {
+                self.fires_put_out[tribe as usize] += 1;
                 None
             }
             WorldEvent::Shove { attacker } => {
@@ -2988,7 +2996,7 @@ mod tests {
     fn an_ash_covered_cell_with_no_lava_takes_its_shading_blend_from_the_ashes() {
         let mut m = GameMap::sandbox_walk();
         let hut = m.add_building(Building { used: 1, ..Building::new(BuildingKind::Hut { size: 1 }, 1, MAP_SIZE as u16 / 2 * 512, MAP_SIZE as u16 / 2 * 512, 0) });
-        m.set_fire(hut);
+        m.set_fire(hut, 1);
         for _ in 0..60 {
             m.tick();
         }

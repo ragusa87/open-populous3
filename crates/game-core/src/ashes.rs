@@ -125,7 +125,7 @@ mod tests {
         let mut map = crate::map::GameMap::sandbox_units();
         let hut = map.add_building(Building { used: 1, ..Building::new(BuildingKind::Hut { size: 1 }, 1, 70 * 512, 70 * 512, 0) });
         let (corner, cells) = map.building(hut).map(|b| ((b.x, b.z), b.walled_cells(128))).unwrap();
-        map.set_fire(hut);
+        map.set_fire(hut, 1);
         let dirty: Vec<DirtyRect> = (0..60).flat_map(|_| map.tick()).collect();
         assert!(map.building(hut).is_none(), "burnt down");
         assert!(cells.iter().all(|&c| !map.ashes.buildable(c)));

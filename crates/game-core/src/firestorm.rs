@@ -57,7 +57,7 @@ fn impact(owner: u8, landing: (u16, u16), world: &GameMap) -> Vec<WorldEvent> {
         events.push(WorldEvent::SpawnEffect(crate::ground_fire::effect(owner, landing)));
     }
     if let Some(b) = world.buildings.iter().find(|b| b.covers(landing, 0)) {
-        events.push(WorldEvent::SetFire { building: b.id });
+        events.push(WorldEvent::SetFire { building: b.id, by: owner });
     }
     events
 }
@@ -111,7 +111,7 @@ mod tests {
         let mut map = bare();
         let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 1, AT.0, AT.1, 0));
         let events = impact(0, AT, &map);
-        assert!(events.contains(&WorldEvent::SetFire { building: hut }));
+        assert!(events.contains(&WorldEvent::SetFire { building: hut, by: 0 }));
         assert!(events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::PanickingBlast(_)))));
         assert!(events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::GroundFire))));
     }

@@ -369,6 +369,15 @@ frame with 9 animated flames (the torches' `flame.rs` boards, `FIRE_FLAME` 1.3 c
 half way up, going down as it burns (`fire_height`: from their full height when lit, `Building::lit_at`, to
 `FIRE_LAST` 15 % at the end, on sim time). Dev: `LIGHTNING=x,z` on a building (`POP3_START=sandbox-buildings`, a hut at 52.5,70.5).
 
+`Building::ignite` (lightning, firestorm/volcano's own fireball landings, lava, a firewarrior's bolt) now also
+takes the lighting tribe, kept on `Building::ignited_by` past the fire itself (never cleared back to `None`, same
+persistence as a unit's own `last_attacker`/`death_cause`, "Health"). When a fire finishes a building off
+(`fire::tend_fires`'s `FireTurn::Hit { destroyed: true }`), that tribe's `GameMap::fires_put_out` is tallied
+(`WorldEvent::BuildingBurnedDown`, "The tick" [exe] `stats[tribe][7]`) - fire-specific, unlike the building's own
+owner: `burn_down`/`ashes.rs` itself stays cause-agnostic and untouched, so an explosion or terrain destruction
+(`WorldEvent::Destroy`) never raises it. Not yet: the fire's own sound, and anywhere in the client reading
+`fires_put_out` (no stats tab exists yet).
+
 ### Doors
 Units enter and leave a building only through its door (the facing's side, local -z), the same way in and out:
 - Entering: walk to the door, then from the door to the building's centre.
