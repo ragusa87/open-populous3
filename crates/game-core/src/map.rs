@@ -1407,6 +1407,9 @@ impl GameMap {
             self.tend_flyby();
             self.tend_ai_scripts();
             self.tend_native_ai();
+            self.tend_ai_spellcasting();
+            self.tend_ai_defense();
+            self.tend_ai_sorties();
             self.spot_enemies();
             self.tend_attacks();
             self.tend_wrecking();
@@ -1737,10 +1740,11 @@ impl GameMap {
         let changed = match event {
             WorldEvent::Damage { unit, amount, kind, from } => {
                 let owner = self.unit(unit).map(|u| u.owner);
-                if self.damage(unit, amount, kind, from)
-                    && kind == DamageKind::Melee
-                    && let Some(tribe) = owner.and_then(Owner::tribe)
-                {
+                let died = self.damage(unit, amount, kind, from);
+                if let Some(attacker) = from.and_then(Owner::tribe) {
+                    self.ai_record_sortie_damage(attacker, unit, amount);
+                }
+                if died && kind == DamageKind::Melee && let Some(tribe) = owner.and_then(Owner::tribe) {
                     self.melee_deaths[tribe.as_usize()] += 1;
                 }
                 None
