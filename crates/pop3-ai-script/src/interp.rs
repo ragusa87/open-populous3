@@ -17,17 +17,17 @@ pub trait Env {
     fn int_var(&self, var: InternalVar) -> i32;
     /// Writes an `INT_ATTR_*` attribute (`SET`/`INCREMENT`/`DECREMENT`/`MULTIPLY`/`DIVIDE` on one).
     fn write_attr(&mut self, var: InternalVar, value: i32);
-    /// Writes a query command's result into a user variable (its last parameter, a `var_field`):
-    /// `COUNT_PEOPLE_IN_MARKER`, `GET_HEIGHT_AT_POS`, `NAV_CHECK`... Default: discarded, same spirit
-    /// as `do_call`'s own "undecided" default.
-    fn write_user_var(&mut self, _var: UserVar, _value: i32) {}
     /// `INT_RANDOM_100`: a random 0..99 (spec: "Here it must come from `map::Lcg`").
     fn random_100(&mut self) -> i32;
     /// A `DO` call, with every `Field`-bearing argument already resolved to a plain
     /// `Field::Const` (a `$variable` or `INT_ATTR_*` reference read through `int_var`/the
     /// interpreter's own user-variable storage, since `Env` itself owns neither) — command identity
-    /// and argument shape are otherwise exactly as parsed, undecided by this crate.
-    fn do_call(&mut self, call: &Call);
+    /// and argument shape are otherwise exactly as parsed, undecided by this crate. For a query
+    /// command (one whose last argument is a `var_field`), returns its result; the interpreter writes
+    /// that into the named user variable itself (`Env` owns no variable storage of its own). `None`
+    /// for every other command, and the right answer for a query not implemented yet too — same
+    /// "undecided" default as not matching the command at all.
+    fn do_call(&mut self, call: &Call) -> Option<i32>;
     /// A recognized `FLYBY_CREATE_NEW..=FLYBY_START` run, with every keyframe field already resolved
     /// to a plain number (a `Flyby`'s fields can be user variables; only the interpreter can read
     /// those, so `Env` never sees a raw `Field`). Default: ignored.
@@ -143,7 +143,11 @@ impl Interpreter {
         match stmt {
             Stmt::Do(call) => {
                 let resolved = self.resolve_call(env, call);
-                env.do_call(&resolved);
+                if let Some(value) = env.do_call(&resolved)
+                    && let Some(&Arg::VarField(UserVar(i))) = resolved.args.last()
+                {
+                    self.user_vars[i as usize] = value;
+                }
             }
             Stmt::Flyby(flyby) => {
                 let resolved = self.resolve_flyby(env, flyby);
@@ -304,9 +308,10 @@ mod tests {
         fn random_100(&mut self) -> i32 {
             0
         }
-        fn do_call(&mut self, call: &Call) {
+        fn do_call(&mut self, call: &Call) -> Option<i32> {
             self.calls.push(call.id);
             self.last_call_args = call.args.clone();
+            None
         }
         fn on_flyby(&mut self, flyby: &ResolvedFlyby) {
             self.flybys += 1;
