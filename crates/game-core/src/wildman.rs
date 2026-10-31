@@ -83,6 +83,7 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::Owner;
     use crate::terrain::Heightmap;
     use crate::time::Ticks as T;
 
@@ -101,7 +102,7 @@ mod tests {
     #[test]
     fn an_idle_wildman_walks_to_the_nearest_tree_in_reach_then_eats() {
         let mut map = map_with(64);
-        let w = map.spawn(255, UnitKind::Wildman, AT).id;
+        let w = map.spawn(Owner::Wild, UnitKind::Wildman, AT).id;
         map.trees = vec![crate::tree::Tree::new((35, 32), 0, 3)];
         let tree_pos = (map.trees[0].x, map.trees[0].z);
         map.run(T::new(SEEK_EVERY.period()));
@@ -122,7 +123,7 @@ mod tests {
                 map.terrain.set(x, z, 0);
             }
         }
-        let w = map.spawn(255, UnitKind::Wildman, AT).id;
+        let w = map.spawn(Owner::Wild, UnitKind::Wildman, AT).id;
         map.run(T::new(SEEK_EVERY.period()));
         let arrived = (0..400).find(|_| {
             map.run(T::new(1));
@@ -134,7 +135,7 @@ mod tests {
     #[test]
     fn it_wanders_off_again_after_grazing_a_while() {
         let mut map = map_with(64);
-        let w = map.spawn(255, UnitKind::Wildman, AT).id;
+        let w = map.spawn(Owner::Wild, UnitKind::Wildman, AT).id;
         map.trees = vec![crate::tree::Tree::new((35, 32), 0, 3)];
         map.run(T::new(SEEK_EVERY.period()));
         (0..300).find(|_| {

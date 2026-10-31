@@ -15,6 +15,7 @@ use crate::mana::Mana;
 use crate::spell_book::{Availability, SpellBook, SpellKind};
 use crate::totem::{TotemId, TRIBES};
 use crate::unit::{torus_delta, Action, Inside, Order, UnitId, UnitKind, WorshipAt};
+use crate::tribes::TribeId;
 
 /// Within this many world units of the vault's middle she has reached it.
 const MIDDLE: i32 = 64;
@@ -30,7 +31,7 @@ impl GameMap {
 
     /// The order sending the player's shaman among `units` to pray at the vault `vault` (index), if
     /// she is among them.
-    pub fn worship_orders(&self, player: u8, units: &[UnitId], vault: usize) -> Vec<Command> {
+    pub fn worship_orders(&self, player: TribeId, units: &[UnitId], vault: usize) -> Vec<Command> {
         let Some(b) = self.buildings.get(vault).filter(|b| b.kind == BuildingKind::Vault) else { return Vec::new() };
         let at = WorshipAt::Vault { corner: (b.x, b.z) };
         self.units.iter().filter(|u| u.owner == player && u.kind == UnitKind::Shaman && units.contains(&u.id)).map(|u| Command::OrderUnit { player, unit: u.id, order: Order::Worship { at } }).collect()
@@ -44,7 +45,7 @@ impl GameMap {
     /// Orders sending the player's units among `units` that may pray at totem `totem` (index) there:
     /// the shaman only for a shaman-only totem, else the followers and the shaman; none at an
     /// exhausted totem.
-    pub fn totem_orders(&self, player: u8, units: &[UnitId], totem: usize) -> Vec<Command> {
+    pub fn totem_orders(&self, player: TribeId, units: &[UnitId], totem: usize) -> Vec<Command> {
         let Some(t) = self.totems.get(totem).filter(|t| !t.is_exhausted()) else { return Vec::new() };
         let at = WorshipAt::Totem { id: t.id };
         let may = |kind: UnitKind| if t.shaman_only { kind == UnitKind::Shaman } else { kind != UnitKind::Wildman };
@@ -103,10 +104,10 @@ impl GameMap {
             }
             let mut full = Vec::new();
             for tribe in 0..TRIBES {
-                let count = totem.queue.iter().filter(|id| self.units.iter().any(|u| u.id == **id && u.owner as usize == tribe)).count() as u16;
+                let count = totem.queue.iter().filter(|id| self.units.iter().any(|u| u.id == **id && u.owner == TribeId::ALL[tribe])).count() as u16;
                 totem.gauges[tribe] = crate::gauge::step(totem.gauges[tribe], count, totem.prayers, totem.full());
                 if count > 0 && totem.gauges[tribe] == totem.full() {
-                    full.push(tribe as u8);
+                    full.push(TribeId::ALL[tribe]);
                 }
             }
             for tribe in full {
@@ -114,7 +115,7 @@ impl GameMap {
                     break;
                 }
                 let totem = &mut self.totems[k];
-                totem.gauges[tribe as usize] = 0;
+                totem.gauges[tribe.as_usize()] = 0;
                 totem.given += 1;
                 totem.since_given = 0;
                 for gift in totem.gifts.clone() {
@@ -146,7 +147,7 @@ impl GameMap {
     }
 
     /// `player`'s shaman is `locked`: inside a vault, tumbling or lifted.
-    pub fn shaman_locked(&self, player: u8) -> bool {
+    pub fn shaman_locked(&self, player: TribeId) -> bool {
         self.units.iter().position(|u| u.owner == player && u.kind == UnitKind::Shaman).is_some_and(|i| self.locked(i))
     }
 
@@ -167,8 +168,9 @@ impl GameMap {
             match (praying, inside) {
                 (Some(i), None) if vault.is_full() => self.units[i].enter(Inside { building: id, door }, middle),
                 (_, Some(i)) if self.units[i].action == Action::Idle && near(self.units[i].x, self.units[i].z, middle) => {
-                    if let Some(reward) = vault.grant() {
-                        let owner = self.units[i].owner;
+                    if let Some(reward) = vault.grant()
+                        && let Some(owner) = self.units[i].owner.tribe()
+                    {
                         self.give(owner, reward);
                     }
                     self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
@@ -180,9 +182,9 @@ impl GameMap {
     }
 
     /// `reward` goes to tribe `owner`: kept in `granted` and made available in its books or added to its mana.
-    fn give(&mut self, owner: u8, reward: Reward) {
+    fn give(&mut self, owner: TribeId, reward: Reward) {
         self.granted.push((owner, reward));
-        let i = owner as usize;
+        let i = owner.as_usize();
         match reward {
             Reward::Spell(kind) => {
                 if let Some(book) = self.spell_books.get_mut(i) {
@@ -226,13 +228,14 @@ fn near(x: u16, z: u16, to: (u16, u16)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::Owner;
     use crate::vault::{VaultPhase, CLOSE_TICKS, OPEN_TICKS};
 
     #[test]
     fn a_reward_goes_to_its_tribe_only() {
         let mut map = GameMap::sandbox_worship();
-        map.give(1, Reward::Spell(SpellKind::Volcano));
-        map.give(1, Reward::Mana(500));
+        map.give(TribeId::Red, Reward::Spell(SpellKind::Volcano));
+        map.give(TribeId::Red, Reward::Mana(500));
         let volcano = |p: usize| map.spell_books[p].slot(SpellKind::Volcano).unwrap().availability;
         assert_eq!((volcano(0), volcano(1)), (Availability::Provided { shots: 1 }, Availability::Known));
         assert_eq!((map.mana[0].incoming, map.mana[1].incoming), (Mana::ZERO, Mana(500)));
@@ -241,7 +244,7 @@ mod tests {
     fn sandbox() -> (GameMap, usize, UnitId) {
         let map = GameMap::sandbox_worship();
         let vault = map.buildings.iter().position(|b| b.kind == BuildingKind::Vault).unwrap();
-        let shaman = map.shaman_of(0).unwrap().id;
+        let shaman = map.shaman_of(TribeId::Blue).unwrap().id;
         (map, vault, shaman)
     }
 
@@ -250,7 +253,7 @@ mod tests {
     }
 
     fn send(map: &mut GameMap, shaman: UnitId, vault: usize) {
-        for c in map.worship_orders(0, &[shaman], vault) {
+        for c in map.worship_orders(TribeId::Blue, &[shaman], vault) {
             map.apply(&c);
         }
     }
@@ -272,7 +275,7 @@ mod tests {
             !map.granted.is_empty()
         });
         assert!(granted.is_some(), "the gauge filled, she walked in");
-        assert_eq!(map.granted, vec![(0, Reward::Building(BuildingKind::Temple))]);
+        assert_eq!(map.granted, vec![(TribeId::Blue, Reward::Building(BuildingKind::Temple))]);
         let out = (0..(OPEN_TICKS + CLOSE_TICKS).get() as usize).find(|_| {
             map.tick();
             map.units[s].inside.is_none()
@@ -298,7 +301,7 @@ mod tests {
             matches!(phase(&map, vault), VaultPhase::Praying { progress } if progress == 10 * crate::gauge::STEP)
         });
         let (x, z) = (map.units[s].x, map.units[s].z.wrapping_sub(1024));
-        map.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::MoveTo { x, z } });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: shaman, order: Order::MoveTo { x, z } });
         for _ in 0..4 {
             map.tick();
         }
@@ -316,17 +319,17 @@ mod tests {
         });
         assert!(map.locked(s), "walking in");
         let before = map.units[s].action;
-        map.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::Stop });
-        map.apply(&Command::Order { player: 0, order: Order::Cast });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: shaman, order: Order::Stop });
+        map.apply(&Command::Order { player: TribeId::Blue, order: Order::Cast });
         assert_eq!(map.units[s].action, before, "ignored");
     }
 
     fn braves(map: &GameMap, n: usize) -> Vec<UnitId> {
-        map.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == 0).take(n).map(|u| u.id).collect()
+        map.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == Owner::Tribe(TribeId::Blue)).take(n).map(|u| u.id).collect()
     }
 
     fn pray_at(map: &mut GameMap, units: &[UnitId], totem: usize) {
-        for c in map.totem_orders(0, units, totem) {
+        for c in map.totem_orders(TribeId::Blue, units, totem) {
             map.apply(&c);
         }
     }
@@ -347,7 +350,7 @@ mod tests {
             !map.granted.is_empty()
         });
         assert!(done.is_some(), "filled");
-        assert_eq!(map.granted, vec![(0, gift)]);
+        assert_eq!(map.granted, vec![(TribeId::Blue, gift)]);
         assert_eq!((map.totems[head].given, map.totems[head].gauges[0]), (1, 0), "given once, its gauge starts again");
     }
 
@@ -367,7 +370,7 @@ mod tests {
         let leaver = counted[0];
         let u = map.units.iter().find(|u| u.id == leaver).unwrap();
         let (x, z) = (u.x, u.z.wrapping_add(2048));
-        map.apply(&Command::OrderUnit { player: 0, unit: leaver, order: Order::MoveTo { x, z } });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: leaver, order: Order::MoveTo { x, z } });
         map.tick();
         let now = map.people_slots(crate::occupancy::Holder::Totem(pole)).unwrap().filled;
         assert_eq!(now.len(), 2, "still two counted");
@@ -388,7 +391,7 @@ mod tests {
         map.tick();
         assert_eq!(map.totems[head].gauges[0] - before, crate::gauge::gain(1, 8), "1 of 8: the soft curve");
         let id = map.totems[head].queue[0];
-        map.apply(&Command::OrderUnit { player: 0, unit: id, order: Order::Stop });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: id, order: Order::Stop });
         let held = map.totems[head].gauges[0];
         map.tick();
         assert_eq!(map.totems[head].gauges[0], held.saturating_sub(crate::gauge::DRAIN));
@@ -398,9 +401,9 @@ mod tests {
     fn a_shaman_only_totem_takes_only_her() {
         let map = GameMap::sandbox_worship();
         let pole = totem_of(&map, 1, true);
-        let shaman = map.shaman_of(0).unwrap().id;
-        assert!(map.totem_orders(0, &braves(&map, 3), pole).is_empty());
-        assert_eq!(map.totem_orders(0, &[shaman], pole).len(), 1);
+        let shaman = map.shaman_of(TribeId::Blue).unwrap().id;
+        assert!(map.totem_orders(TribeId::Blue, &braves(&map, 3), pole).is_empty());
+        assert_eq!(map.totem_orders(TribeId::Blue, &[shaman], pole).len(), 1);
         assert_eq!(map.totem_at((map.totems[pole].x + 100, map.totems[pole].z)), Some(pole));
     }
 
@@ -419,7 +422,7 @@ mod tests {
         assert!(map.totems[first].is_exhausted());
         map.tick();
         assert!(map.units.iter().filter(|u| units.contains(&u.id)).all(|u| !matches!(u.action, Action::Worshipping { .. })));
-        assert!(map.totem_orders(0, &units, first).is_empty(), "no more");
+        assert!(map.totem_orders(TribeId::Blue, &units, first).is_empty(), "no more");
         let (x, z) = (map.totems[first].x, map.totems[first].z);
         assert_eq!(map.totem_at((x, z)), Some(first), "still there while it turns and sinks");
         map.run(crate::totem::TURN_TICKS + crate::totem::HOLD_TICKS + crate::totem::SINK_TICKS);
@@ -436,12 +439,12 @@ mod tests {
     #[test]
     fn two_totems_sharing_one_point_are_each_reachable_by_their_own_id() {
         let mut map = GameMap::sandbox_worship();
-        let point = map.shaman_of(0).map(|s| (s.x, s.z)).unwrap();
+        let point = map.shaman_of(TribeId::Blue).map(|s| (s.x, s.z)).unwrap();
         map.add_totem(crate::totem::Totem { shaman_only: true, ..crate::totem::Totem::new(crate::totem::TotemKind::Totem, point) });
         let open = map.add_totem(crate::totem::Totem { shaman_only: false, ..crate::totem::Totem::new(crate::totem::TotemKind::StoneHead, point) });
         let open_index = map.totems.iter().position(|t| t.id == open).unwrap();
         let brave = braves(&map, 1)[0];
-        let cmds = map.totem_orders(0, &[brave], open_index);
+        let cmds = map.totem_orders(TribeId::Blue, &[brave], open_index);
         assert_eq!(cmds.len(), 1, "a follower may pray at the open totem");
         for c in cmds {
             map.apply(&c);
@@ -462,11 +465,11 @@ mod tests {
         // test is about the contested gauge/gift, not combat. A third, harmless, unallied tribe keeps `tribes.
         // count()` at a real multi-side match (`check_elimination` is a no-op below 2) without 0 and 1 merging
         // into the game's only side and declaring an instant win the moment they're both placed in `self.tribes`.
-        map.tribes = crate::tribes::Tribes::from_owners([0, 1, 2]).with_allies([0b011, 0b011, 0b100, 0]);
-        let safe = map.shaman_of(0).map(|s| (s.x, s.z)).unwrap();
+        map.tribes = crate::tribes::Tribes::from_owners([crate::tribes::TribeId::Blue, crate::tribes::TribeId::Red, crate::tribes::TribeId::Yellow]).with_allies([0b011, 0b011, 0b100, 0]);
+        let safe = map.shaman_of(TribeId::Blue).map(|s| (s.x, s.z)).unwrap();
         // A wildman: never fights and nobody auto-attacks one (units.md), so it just sits there as a harmless
         // third side, on dry land (the shaman's own spot) so it never drowns either.
-        map.spawn(2, UnitKind::Wildman, safe);
+        map.spawn(TribeId::Yellow, UnitKind::Wildman, safe);
         let first = totem_of(&map, 1, false);
         map.totems[first].occurrences = 1; // a single, shared gift to contest
         let gift = map.totems[first].gifts[0];
@@ -476,16 +479,16 @@ mod tests {
         // there is the head start that makes tribe 0's gauge unambiguously the first to reach full, rather than
         // racing two totems started at the exact same tick to the same result. Not placed right next to the
         // totem either: a stationary rival that close blocks tribe 0's own approach to it.
-        let rival = map.spawn(1, UnitKind::Brave, (tx.wrapping_add(8000), tz)).id;
+        let rival = map.spawn(TribeId::Red, UnitKind::Brave, (tx.wrapping_add(8000), tz)).id;
         pray_at(&mut map, &mine, first);
-        for c in map.totem_orders(1, &[rival], first) {
+        for c in map.totem_orders(TribeId::Red, &[rival], first) {
             map.apply(&c);
         }
         assert!((0..1500).any(|_| {
             map.tick();
             !map.granted.is_empty()
         }), "tribe 0 fills its own gauge first");
-        assert_eq!(map.granted, vec![(0, gift)], "only the tribe that filled first gets the one shared gift");
+        assert_eq!(map.granted, vec![(TribeId::Blue, gift)], "only the tribe that filled first gets the one shared gift");
         assert!(map.totems[first].is_exhausted(), "the one gift is spent for every tribe now, not just tribe 0's own count");
         map.tick();
         assert!(
@@ -509,7 +512,7 @@ mod tests {
     fn only_the_shaman_worships() {
         let (map, vault, _) = sandbox();
         let brave = map.units.iter().find(|u| u.kind == UnitKind::Brave).unwrap().id;
-        assert!(map.worship_orders(0, &[brave], vault).is_empty());
+        assert!(map.worship_orders(TribeId::Blue, &[brave], vault).is_empty());
         assert_eq!(map.vault_at(map.buildings[vault].centre()), Some(vault));
     }
 }

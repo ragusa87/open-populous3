@@ -9,6 +9,7 @@ use crate::spell::Cell;
 use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::time::{Countdown, Ticks};
 use pop3_format::WORLD_UNITS_PER_CELL;
+use crate::tribes::Owner;
 
 /// `LAND_BRIDGE_MAX_CHANGE` (exe and file 256): the most a height point moves in one turn, before the division.
 pub const MAX_CHANGE: i32 = 256;
@@ -30,7 +31,7 @@ pub struct LandBridge {
 }
 
 /// A land bridge cast by tribe `owner` from `from` to `to` (height points) on `terrain`.
-pub fn effect(owner: u8, from: Cell, to: Cell, terrain: &Heightmap) -> Effect {
+pub fn effect(owner: impl Into<Owner>, from: Cell, to: Cell, terrain: &Heightmap) -> Effect {
     let end = |(x, z): Cell| terrain.get(x, z).max(MIN_HEIGHT);
     let bridge = LandBridge { from, to, heights: (end(from), end(to)), turn: 0 };
     let at = |c: i32| (c.rem_euclid(terrain.size() as i32) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
@@ -99,9 +100,10 @@ pub fn apply(terrain: &mut Heightmap, from: Cell, to: Cell, heights: (u16, u16),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
 
     fn build(terrain: &mut Heightmap, from: Cell, to: Cell, turns: u32) -> LandBridge {
-        let Effect { kind: EffectKind::LandBridge(mut bridge), .. } = effect(0, from, to, terrain) else { unreachable!() };
+        let Effect { kind: EffectKind::LandBridge(mut bridge), .. } = effect(TribeId::Blue, from, to, terrain) else { unreachable!() };
         for _ in 0..turns {
             for e in bridge.turn() {
                 if let WorldEvent::Terrain(TerrainChange::Bridge { from, to, heights, turn }) = e {

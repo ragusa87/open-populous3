@@ -6,6 +6,7 @@
 use crate::building::{BuildingId, Stage};
 use crate::command::Command;
 use crate::map::GameMap;
+use crate::tribes::TribeId;
 use crate::unit::{Action, Inside, Order, Unit, UnitId, UnitKind};
 use crate::work::work_point;
 
@@ -15,13 +16,13 @@ pub const ENTER_MARGIN: i32 = 128;
 impl GameMap {
     /// The player's built building with room for people (`BuildingKind::capacity`) whose footprint,
     /// grown by `ENTER_MARGIN`, holds `at`: a click there sends followers in.
-    pub fn shelter_at(&self, player: u8, at: (u16, u16)) -> Option<usize> {
+    pub fn shelter_at(&self, player: TribeId, at: (u16, u16)) -> Option<usize> {
         self.buildings.iter().position(|b| b.owner == player && b.stage() == Stage::Built && b.kind.capacity() > 0 && b.covers(at, ENTER_MARGIN))
     }
 
     /// Orders sending the player's followers among `units` into the building `house` (index), in id
     /// order; the shaman walks to its door.
-    pub fn enter_orders(&self, player: u8, units: &[UnitId], house: usize) -> Vec<Command> {
+    pub fn enter_orders(&self, player: TribeId, units: &[UnitId], house: usize) -> Vec<Command> {
         let Some(b) = self.buildings.get(house).filter(|b| b.owner == player) else { return Vec::new() };
         let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
         let mut going: Vec<UnitId> = self.units.iter().filter(mine).filter(|u| can_enter(u.kind)).map(|u| u.id).collect();
@@ -99,6 +100,7 @@ fn can_enter(kind: UnitKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::Owner;
     use crate::building::BuildingKind;
 
     fn corner(dx: i32, dz: i32) -> (u16, u16) {
@@ -119,10 +121,10 @@ mod tests {
     #[test]
     fn followers_rest_in_a_hut_up_to_its_room() {
         let mut map = GameMap::sandbox_buildings();
-        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside == 0).unwrap();
+        let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside == 0).unwrap();
         let id = map.buildings[hut].id;
         let units = braves(&map, 5);
-        for c in map.enter_orders(0, &units, hut) {
+        for c in map.enter_orders(TribeId::Blue, &units, hut) {
             map.apply(&c);
         }
         run_until(&mut map, 600, |m| m.units.iter().filter(|u| units.contains(&u.id)).all(|u| u.action == Action::Idle)).expect("arrived");
@@ -133,7 +135,7 @@ mod tests {
         assert_eq!(outside, 2, "the others wait at the door");
         let resting = map.units.iter().find(|u| u.inside.is_some_and(|i| i.building == id)).unwrap().id;
         assert!(walled.contains(&map.unit(resting).unwrap().cell()));
-        map.apply(&Command::OrderUnit { player: 0, unit: resting, order: Order::MoveTo { x: corner(20, 10).0, z: corner(20, 10).1 } });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: resting, order: Order::MoveTo { x: corner(20, 10).0, z: corner(20, 10).1 } });
         map.tick();
         assert_eq!(map.buildings[hut].inside, 2, "leaving");
     }
@@ -141,10 +143,10 @@ mod tests {
     #[test]
     fn a_drum_tower_holds_one() {
         let mut map = GameMap::sandbox_buildings();
-        let tower = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::DrumTower && b.stage() == Stage::Built && b.inside == 0).unwrap();
+        let tower = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::DrumTower && b.stage() == Stage::Built && b.inside == 0).unwrap();
         let units = braves(&map, 2);
-        assert_eq!(map.shelter_at(0, map.buildings[tower].centre()), Some(tower));
-        for c in map.enter_orders(0, &units, tower) {
+        assert_eq!(map.shelter_at(TribeId::Blue, map.buildings[tower].centre()), Some(tower));
+        for c in map.enter_orders(TribeId::Blue, &units, tower) {
             map.apply(&c);
         }
         run_until(&mut map, 800, |m| m.units.iter().filter(|u| units.contains(&u.id)).all(|u| u.action == Action::Idle)).expect("arrived");

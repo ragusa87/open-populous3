@@ -4,6 +4,7 @@
 use crate::building::BuildingId;
 use crate::effect::{DamageKind, Effect, TerrainChange};
 use crate::motion::Velocity;
+use crate::tribes::{Owner, TribeId};
 use crate::time::Tick;
 use crate::unit::UnitId;
 use crate::vehicle::VehicleId;
@@ -13,9 +14,9 @@ use std::collections::VecDeque;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WorldEvent {
     /// Hurts through `GameMap::damage`, the one hurt path; `from` is the attacker's tribe, if any.
-    Damage { unit: UnitId, amount: u16, kind: DamageKind, from: Option<u8> },
+    Damage { unit: UnitId, amount: u16, kind: DamageKind, from: Option<Owner> },
     /// Wears a vehicle down (`GameMap::damage_vehicle`): only an enemy's.
-    DamageVehicle { vehicle: VehicleId, amount: u16, from: u8 },
+    DamageVehicle { vehicle: VehicleId, amount: u16, from: Owner },
     /// Throws the unit (`Unit::fling`), unless its `kind` of push spares it (`effect::pushes`).
     Push { unit: UnitId, vel: Velocity, kind: PushKind },
     Panic { unit: UnitId },
@@ -31,7 +32,7 @@ pub enum WorldEvent {
     PutOut { vehicle: VehicleId },
     /// Sets `building` alight, lit by tribe `by` (`Building::ignite`, `GameMap::set_fire`): carried for
     /// `stats[tribe][7]` (`BuildingBurnedDown` below) once the fire finishes it off.
-    SetFire { building: BuildingId, by: u8 },
+    SetFire { building: BuildingId, by: Owner },
     /// `amount` of wear, through the same accumulator "Attacking a building" hacking and firewarrior bolts feed
     /// (`Building::wear_down`): a blast's own `BLAST_DAMAGE_BLDG` (combat.md "Attacking a building").
     Wear { building: BuildingId, amount: u16 },
@@ -42,7 +43,7 @@ pub enum WorldEvent {
     /// A fire finished a building off (`crate::fire::tend_fires`), tallied by the tribe that lit it
     /// (`stats[tribe][7]` [exe], `GameMap::fires_put_out`). Fire-specific: `Destroy` and other
     /// `burn_down` callers (explosions, terrain) don't raise this.
-    BuildingBurnedDown { tribe: u8 },
+    BuildingBurnedDown { tribe: Owner },
     /// Sets the trees of the cell on fire (`Tree::ignite`).
     BurnTrees { cell: (i32, i32) },
     /// A lava flow finished (`lava::Lava`, pop3-rev-analysis.md "Volcano lava flow"): its whole reached footprint
@@ -68,28 +69,28 @@ pub enum WorldEvent {
     /// A challenge won: the two fight in a new melee (`GameMap::start_melee`).
     StartMelee { attacker: UnitId, target: UnitId },
     /// A melee ended with one tribe left standing ("Fight" [exe]: `stats[winner][0] += 1`, `GameMap::melee_wins`).
-    FightWon { tribe: u8 },
+    FightWon { tribe: Owner },
     /// The unit joins `tribe`, converted (`GameMap::change_owner`).
-    ChangeOwner { unit: UnitId, tribe: u8 },
+    ChangeOwner { unit: UnitId, tribe: TribeId },
     /// The unit joins `tribe` like `ChangeOwner`, but remembers its own original tribe and reverts to it once
     /// `status::Statuses.hypnotized` runs out (`GameMap::hypnotize`, `GameMap::revert_expired_hypnosis`) — unless
     /// that tribe is wiped out by then, when the change stays permanent.
-    Hypnotize { unit: UnitId, tribe: u8 },
+    Hypnotize { unit: UnitId, tribe: TribeId },
     /// The unit leaves the coordinator `from` (`Unit::release`); nothing if it is in another one by now, or in none.
     Release { unit: UnitId, from: crate::coordinator::Link },
     /// The unit attacks `at` back: a firewarrior hit by its bolt, a listener whose preacher was attacked. At once on
     /// its feet, else once it has landed.
     StrikeBack { unit: UnitId, at: UnitId },
     /// Declares the match's result (`GameMap::declare_outcome`), the hookable "the match ended" entry point.
-    Declare { winner: Option<u8>, reason: crate::outcome::Reason },
+    Declare { winner: Option<TribeId>, reason: crate::outcome::Reason },
     /// Disables `tribe`'s reincarnation site (`GameMap::remove_reincarnation`): its shaman no longer
     /// comes back. `DO SET_REINCARNATION OFF` (ai-scripts.md); later also Armageddon's lightning-kill
     /// (TODO.md "Armageddon").
-    RemoveSite { tribe: u8 },
+    RemoveSite { tribe: TribeId },
     /// Re-enables a site `RemoveSite` disabled, at its same position but with its height re-read from
     /// the live terrain (unless it's underwater, `GameMap::restore_reincarnation`). `DO
     /// SET_REINCARNATION ON`.
-    RestoreSite { tribe: u8 },
+    RestoreSite { tribe: TribeId },
     /// A script's `FLYBY_CREATE_NEW..=FLYBY_START` run started (`ai_script::ScriptEnv::on_flyby`):
     /// takes over the camera until it finishes or is cancelled (`GameMap::active_flyby`).
     StartFlyby(pop3_ai_script::interp::ResolvedFlyby),

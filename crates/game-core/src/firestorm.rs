@@ -16,6 +16,7 @@ use crate::event::WorldEvent;
 use crate::map::{GameMap, Lcg};
 use crate::time::{Countdown, Ticks};
 use crate::unit::cell_of;
+use crate::tribes::Owner;
 
 pub const DURATION_TURNS: u32 = 220;
 pub const FIREBALL_EVERY: Ticks = Ticks::new(4);
@@ -29,14 +30,14 @@ pub struct Firestorm {
 }
 
 /// Cast by tribe `owner` at `at` (world units).
-pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: (u16, u16)) -> Effect {
     let firestorm = Firestorm { next: Countdown::new(FIREBALL_EVERY) };
     Effect::new(owner, at, Countdown::new(Ticks::new(DURATION_TURNS)), EffectKind::Firestorm(firestorm))
 }
 
 impl Firestorm {
     /// One turn at `at`, cast by `owner`: every `FIREBALL_EVERY` turns, a fireball lands somewhere in the area.
-    pub fn turn(&mut self, at: (u16, u16), owner: u8, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
+    pub fn turn(&mut self, at: (u16, u16), owner: Owner, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         if !self.next.tick() {
             return Vec::new();
         }
@@ -50,7 +51,7 @@ impl Firestorm {
 
 /// One fireball's own impact at `landing`: its simple-blast-that-panics; on land, its ground fire (water: none,
 /// confirmed); and the building there (if any) catching fire too, either way.
-fn impact(owner: u8, landing: (u16, u16), world: &GameMap) -> Vec<WorldEvent> {
+fn impact(owner: Owner, landing: (u16, u16), world: &GameMap) -> Vec<WorldEvent> {
     let mut events = vec![WorldEvent::SpawnEffect(crate::panicking_blast::effect(owner, landing))];
     let cell = (cell_of(landing.0), cell_of(landing.1));
     if !crate::unit::is_sea(&world.terrain, cell) {
@@ -65,6 +66,7 @@ fn impact(owner: u8, landing: (u16, u16), world: &GameMap) -> Vec<WorldEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::building::{Building, BuildingKind};
     use crate::command::Command;
     use crate::spell::Spell;
@@ -86,7 +88,7 @@ mod tests {
     #[test]
     fn drops_a_fireball_every_4_turns_and_nothing_between() {
         let mut map = bare();
-        map.add_effect(effect(0, AT));
+        map.add_effect(effect(TribeId::Blue, AT));
         map.run(Ticks::new(3));
         assert!(map.effects.entries().filter(|(_, e)| matches!(e.kind, EffectKind::PanickingBlast(_))).count() == 0, "not yet");
         map.tick();
@@ -100,7 +102,7 @@ mod tests {
         let mut rng = map.rng;
         let mut spawned = 0;
         for _ in 0..DURATION_TURNS {
-            let events = firestorm.turn(AT, 0, &map, &mut rng);
+            let events = firestorm.turn(AT, Owner::Tribe(TribeId::Blue), &map, &mut rng);
             spawned += events.iter().filter(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::PanickingBlast(_)))).count();
         }
         assert_eq!(spawned, (DURATION_TURNS / FIREBALL_EVERY.get()) as usize);
@@ -109,9 +111,9 @@ mod tests {
     #[test]
     fn sets_a_building_on_fire_when_a_fireball_lands_on_it() {
         let mut map = bare();
-        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 1, AT.0, AT.1, 0));
-        let events = impact(0, AT, &map);
-        assert!(events.contains(&WorldEvent::SetFire { building: hut, by: 0 }));
+        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, AT.0, AT.1, 0));
+        let events = impact(Owner::Tribe(TribeId::Blue), AT, &map);
+        assert!(events.contains(&WorldEvent::SetFire { building: hut, by: Owner::Tribe(TribeId::Blue) }));
         assert!(events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::PanickingBlast(_)))));
         assert!(events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::GroundFire))));
     }
@@ -119,7 +121,7 @@ mod tests {
     #[test]
     fn no_building_there_means_no_set_fire() {
         let map = bare();
-        let events = impact(0, AT, &map);
+        let events = impact(Owner::Tribe(TribeId::Blue), AT, &map);
         assert!(!events.iter().any(|e| matches!(e, WorldEvent::SetFire { .. })));
     }
 
@@ -130,7 +132,7 @@ mod tests {
         for &(dx, dz) in &[(0, 0), (1, 0), (0, 1), (1, 1)] {
             map.terrain.set(cell.0 + dx, cell.1 + dz, 0);
         }
-        let events = impact(0, AT, &map);
+        let events = impact(Owner::Tribe(TribeId::Blue), AT, &map);
         assert!(!events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::GroundFire))), "no fire over open sea");
         assert!(events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::PanickingBlast(_)))), "the blast still happens");
     }
@@ -140,7 +142,7 @@ mod tests {
         let mut map = GameMap::sandbox_walk();
         map.spell_books[0].set(SpellKind::Firestorm, Availability::Unlimited);
         let at = (map.units[0].x, map.units[0].z);
-        map.apply(&Command::Cast { player: 0, spell: Spell::Firestorm { at } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Firestorm { at } });
         map.run(crate::unit::CAST_RELEASE);
         assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, EffectKind::Firestorm(_))));
     }

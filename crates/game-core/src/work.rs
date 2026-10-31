@@ -21,6 +21,7 @@ use crate::slots;
 use crate::terrain::DirtyRect;
 use crate::time::Countdown;
 use crate::unit::{Action, Inside, Order, Unit, UnitEvent, UnitId, UnitKind, BUILD_TICKS, JUMP_TICKS};
+use crate::tribes::TribeId;
 
 /// Height a brave's jump moves a height point towards the site's level.
 pub const JUMP_STEP: u16 = 32;
@@ -39,12 +40,12 @@ impl GameMap {
 
     /// The player's building still to be built (plan or under construction) whose footprint, grown by
     /// `AROUND`, holds world point `at`.
-    pub fn site_at(&self, player: u8, at: (u16, u16)) -> Option<usize> {
+    pub fn site_at(&self, player: TribeId, at: (u16, u16)) -> Option<usize> {
         self.buildings.iter().position(|b| b.owner == player && b.stage() != Stage::Built && b.covers(at, AROUND))
     }
 
     /// Places `player`'s plan of `kind` with its corner at `at` if it can stand there; its id.
-    pub fn place_building(&mut self, player: u8, kind: BuildingKind, at: (u16, u16), facing: u8) -> Option<BuildingId> {
+    pub fn place_building(&mut self, player: TribeId, kind: BuildingKind, at: (u16, u16), facing: u8) -> Option<BuildingId> {
         let b = Building::placed(kind, player, at.0, at.1, facing % 8, &self.terrain);
         if kind.wood_cost() == 0 || !can_place(self, &b, None) {
             return None;
@@ -54,7 +55,7 @@ impl GameMap {
 
     /// Removes `player`'s plan (not flat yet) whose footprint holds `at`: its braves stop, the wood
     /// brought is lost.
-    pub fn cancel_building(&mut self, player: u8, at: (u16, u16)) {
+    pub fn cancel_building(&mut self, player: TribeId, at: (u16, u16)) {
         let Some(i) = self.buildings.iter().position(|b| b.owner == player && b.stage() == Stage::Blueprint && b.covers(at, 0)) else { return };
         self.remove_building(i);
     }
@@ -62,7 +63,7 @@ impl GameMap {
     /// Switches dismantling of `player`'s building `building` (id), flat and taking wood. On, everyone
     /// inside walks out and its assigned braves take it apart instead (`dismantle_step`); off, it is built
     /// again: braves bring its missing wood back.
-    pub fn set_dismantling(&mut self, player: u8, building: BuildingId, on: bool) {
+    pub fn set_dismantling(&mut self, player: TribeId, building: BuildingId, on: bool) {
         let Some(b) = self.building_index(building).filter(|&b| self.buildings[b].owner == player && self.buildings[b].flat && self.buildings[b].kind.wood_cost() > 0) else { return };
         if self.buildings[b].dismantling == on {
             return;
@@ -76,7 +77,7 @@ impl GameMap {
 
     /// Orders for the player's `units` clicked on the building `site` (index): braves work on it (in
     /// id order, the first ones up to its maximum are assigned), the others walk next to its door.
-    pub fn build_orders(&self, player: u8, units: &[UnitId], site: usize) -> Vec<Command> {
+    pub fn build_orders(&self, player: TribeId, units: &[UnitId], site: usize) -> Vec<Command> {
         let Some(b) = self.buildings.get(site).filter(|b| b.owner == player) else { return Vec::new() };
         self.orders_to_build(b, units)
     }
@@ -93,7 +94,7 @@ impl GameMap {
     }
 
     fn orders_to_build(&self, b: &Building, units: &[UnitId]) -> Vec<Command> {
-        let player = b.owner;
+        let Some(player) = b.owner.tribe() else { return Vec::new() };
         let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
         let mut braves: Vec<UnitId> = self.units.iter().filter(mine).filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
         braves.sort_unstable();
@@ -413,6 +414,7 @@ fn facing_to(from: (u16, u16), to: (u16, u16)) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::Owner;
     use crate::map::GameMap;
 
     const C: i32 = 64;
@@ -431,9 +433,9 @@ mod tests {
     }
 
     fn place(map: &mut GameMap, kind: BuildingKind, at: (u16, u16), units: &[UnitId]) -> usize {
-        map.apply(&Command::PlaceBuilding { player: 0, kind, at, facing: 0 });
+        map.apply(&Command::PlaceBuilding { player: TribeId::Blue, kind, at, facing: 0 });
         let site = map.building_at_corner(at).expect("placed");
-        for c in map.build_orders(0, units, site) {
+        for c in map.build_orders(TribeId::Blue, units, site) {
             map.apply(&c);
         }
         site
@@ -451,12 +453,12 @@ mod tests {
         let mut map = sandbox();
         let mut units = braves(&map, 3);
         units.push(map.units.iter().find(|u| u.kind == UnitKind::Shaman).unwrap().id);
-        let place = Command::PlaceBuilding { player: 0, kind: BuildingKind::Hut { size: 1 }, at: corner(24, 0), facing: 0 };
+        let place = Command::PlaceBuilding { player: TribeId::Blue, kind: BuildingKind::Hut { size: 1 }, at: corner(24, 0), facing: 0 };
         let before = map.place_orders(&place, &units);
         assert_eq!(before.len(), 4, "the braves build, the shaman goes to the door");
         map.apply(&place);
         let site = map.building_at_corner(corner(24, 0)).unwrap();
-        assert_eq!(before, map.build_orders(0, &units, site));
+        assert_eq!(before, map.build_orders(TribeId::Blue, &units, site));
         assert!(map.place_orders(&place, &units).is_empty(), "the place is taken now");
     }
 
@@ -464,11 +466,11 @@ mod tests {
     fn a_plan_is_placed_only_where_it_can_stand() {
         let mut map = sandbox();
         let n = map.buildings.len();
-        assert!(map.place_building(0, BuildingKind::Hut { size: 1 }, corner(24, 0), 0).is_some());
+        assert!(map.place_building(TribeId::Blue, BuildingKind::Hut { size: 1 }, corner(24, 0), 0).is_some());
         assert_eq!(map.buildings[n].stage(), Stage::Blueprint);
-        assert!(map.place_building(0, BuildingKind::Hut { size: 1 }, corner(24, 0), 0).is_none(), "taken");
-        assert!(map.place_building(0, BuildingKind::Vault, corner(30, 10), 0).is_none(), "never built");
-        assert!(map.place_building(0, BuildingKind::Hut { size: 1 }, corner(60, 0), 0).is_none(), "sea");
+        assert!(map.place_building(TribeId::Blue, BuildingKind::Hut { size: 1 }, corner(24, 0), 0).is_none(), "taken");
+        assert!(map.place_building(TribeId::Blue, BuildingKind::Vault, corner(30, 10), 0).is_none(), "never built");
+        assert!(map.place_building(TribeId::Blue, BuildingKind::Hut { size: 1 }, corner(60, 0), 0).is_none(), "sea");
     }
 
     #[test]
@@ -511,7 +513,7 @@ mod tests {
     fn extra_braves_beyond_the_maximum_are_not_assigned() {
         let mut map = sandbox();
         for k in 0..6u16 {
-            map.spawn(0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1));
+            map.spawn(TribeId::Blue, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1));
         }
         let units: Vec<UnitId> = map.units.iter().filter(|u| u.kind == UnitKind::Brave).map(|u| u.id).collect();
         assert!(units.len() > 6);
@@ -533,7 +535,7 @@ mod tests {
         let at = b.id;
         run_until(&mut map, 400, |m| matches!(m.units.iter().find(|u| u.id == units[0]).unwrap().action, Action::Building { .. })).expect("builds");
         assert_eq!(map.buildings[site].stock, 0);
-        map.apply(&Command::OrderUnit { player: 0, unit: units[0], order: Order::Stop });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: units[0], order: Order::Stop });
         assert_eq!((map.buildings[site].stock, map.workers(at).count()), (1, 0));
     }
 
@@ -545,46 +547,46 @@ mod tests {
         map.buildings[site].stock = 1;
         let centre = map.buildings[site].centre();
         let n = map.buildings.len();
-        map.apply(&Command::CancelBuilding { player: 1, at: centre });
+        map.apply(&Command::CancelBuilding { player: TribeId::Red, at: centre });
         assert_eq!(map.buildings.len(), n, "not theirs");
         map.buildings[site].flat = true;
-        map.apply(&Command::CancelBuilding { player: 0, at: centre });
+        map.apply(&Command::CancelBuilding { player: TribeId::Blue, at: centre });
         assert_eq!(map.buildings.len(), n, "flat: only dismantled");
         map.buildings[site].flat = false;
         let wood = map.wood.len();
-        map.apply(&Command::CancelBuilding { player: 0, at: centre });
+        map.apply(&Command::CancelBuilding { player: TribeId::Blue, at: centre });
         assert_eq!((map.buildings.len(), map.wood.len()), (n - 1, wood));
         assert!(map.units.iter().all(|u| u.work.is_none()));
         let gone = BuildingId::from_raw(map.buildings.iter().map(|b| b.id.raw()).max().unwrap() + 1);
-        let again = map.place_building(0, BuildingKind::DrumTower, corner(24, 0), 0).unwrap();
+        let again = map.place_building(TribeId::Blue, BuildingKind::DrumTower, corner(24, 0), 0).unwrap();
         assert!(again > gone && map.building(gone).is_none(), "same corner, new id");
     }
 
     #[test]
     fn dismantling_empties_a_built_building_until_switched_back() {
         let mut map = sandbox();
-        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
+        let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
         let site = map.buildings[hut].id;
         let resting = braves(&map, 1)[0];
         let k = map.units.iter().position(|u| u.id == resting).unwrap();
         map.units[k].inside = Some(Inside { building: site, door: map.buildings[hut].door() });
-        map.apply(&Command::Dismantle { player: 1, building: site, on: true });
+        map.apply(&Command::Dismantle { player: TribeId::Red, building: site, on: true });
         assert!(!map.buildings[hut].dismantling, "not theirs");
-        map.apply(&Command::Dismantle { player: 0, building: site, on: true });
+        map.apply(&Command::Dismantle { player: TribeId::Blue, building: site, on: true });
         assert_eq!(map.buildings[hut].stage(), Stage::Dismantling { used: 3, of: 3 });
         assert!(matches!(map.units[k].action, Action::Walking { .. }), "walks out");
-        map.apply(&Command::Dismantle { player: 0, building: site, on: false });
+        map.apply(&Command::Dismantle { player: TribeId::Blue, building: site, on: false });
         assert_eq!(map.buildings[hut].stage(), Stage::Built);
     }
 
     #[test]
     fn dismantling_pulls_its_wood_out_one_piece_at_a_time_then_removes_the_building() {
         let mut map = sandbox();
-        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
+        let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
         let (site, corner, cell) = (map.buildings[hut].id, (map.buildings[hut].x, map.buildings[hut].z), map.buildings[hut].walled_cells(128)[0]);
         let brave = braves(&map, 1)[0];
-        map.apply(&Command::Dismantle { player: 0, building: site, on: true });
-        map.apply(&Command::OrderUnit { player: 0, unit: brave, order: Order::Build { site: corner } });
+        map.apply(&Command::Dismantle { player: TribeId::Blue, building: site, on: true });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: brave, order: Order::Build { site: corner } });
         let wood_before = map.wood.len();
         run_until(&mut map, 2000, |m| m.building(site).is_none()).expect("dismantled away");
         assert_eq!(map.wood.len(), wood_before + 3, "all 3 pieces dropped on the ground, one at a time");
@@ -600,12 +602,12 @@ mod tests {
         let b = &mut map.buildings[plan];
         (b.flat, b.stock) = (true, 1);
         let at = b.id;
-        map.apply(&Command::Dismantle { player: 0, building: at, on: true });
+        map.apply(&Command::Dismantle { player: TribeId::Blue, building: at, on: true });
         for _ in 0..300 {
             map.tick();
         }
         assert_eq!((map.buildings[plan].used, map.buildings[plan].stock), (0, 1), "nobody builds it");
-        map.apply(&Command::Dismantle { player: 0, building: at, on: false });
+        map.apply(&Command::Dismantle { player: TribeId::Blue, building: at, on: false });
         run_until(&mut map, 600, |m| m.buildings[plan].used > 0).expect("built again");
     }
 
@@ -624,7 +626,7 @@ mod tests {
     fn walkers_go_around_a_building_never_through_a_plan_is_walked_on() {
         let mut map = sandbox();
         let units = braves(&map, 1);
-        let site = map.place_building(0, BuildingKind::Temple, corner(24, 0), 0).and_then(|id| map.building_index(id)).unwrap();
+        let site = map.place_building(TribeId::Blue, BuildingKind::Temple, corner(24, 0), 0).and_then(|id| map.building_index(id)).unwrap();
         map.tick();
         assert!(map.walls.at((C + 24, C)).is_none(), "a plan has no walls");
         map.buildings[site].flat = true;
@@ -635,7 +637,7 @@ mod tests {
         (map.units[u].x, map.units[u].z) = (corner(19, 0).0 + 256, corner(19, 0).1 + 256);
         map.units[u].inside = None;
         let to = (corner(29, 0).0 + 256, corner(29, 0).1 + 256);
-        map.apply(&Command::OrderUnit { player: 0, unit: units[0], order: Order::MoveTo { x: to.0, z: to.1 } });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: units[0], order: Order::MoveTo { x: to.0, z: to.1 } });
         for _ in 0..400 {
             map.tick();
             assert!(!walled.contains(&map.units[u].cell()), "crossed the temple at {:?}", map.units[u].cell());
@@ -699,7 +701,7 @@ mod tests {
 
         // A neighbour's house (the player's own, so nothing ever attacks or dismantles it) lands
         // right on the one cell outside the door.
-        let house = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, corner(24, -3).0, corner(24, -3).1, 0));
+        let house = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, corner(24, -3).0, corner(24, -3).1, 0));
         map.tick();
         assert_eq!(map.walls.at(door_cell), Some(house), "the door is sealed now");
 
@@ -707,7 +709,7 @@ mod tests {
         assert!(!trapped.is_empty(), "at least one worker was inside when the door sealed");
 
         let far = corner(40, 20);
-        for c in map.move_orders(0, &trapped, far) {
+        for c in map.move_orders(TribeId::Blue, &trapped, far) {
             map.apply(&c);
         }
         for _ in 0..1000 {
@@ -756,7 +758,7 @@ mod tests {
         let mut map = sandbox();
         let at = corner(24, 0);
         map.trees.push(crate::tree::Tree::new((C + 24, C), 0, 0));
-        let site = map.place_building(0, BuildingKind::Hut { size: 1 }, at, 0).and_then(|id| map.building_index(id)).unwrap();
+        let site = map.place_building(TribeId::Blue, BuildingKind::Hut { size: 1 }, at, 0).and_then(|id| map.building_index(id)).unwrap();
         assert!(map.buildings[site].covers((map.trees.last().unwrap().x, map.trees.last().unwrap().z), 0));
         map.run(crate::tree::GROW_TICKS * 2);
         assert_eq!(map.trees.last().unwrap().size, 0);
@@ -766,7 +768,7 @@ mod tests {
     fn six_braves_on_a_hut_never_stand_idle_once_flat_the_waiting_ones_hammer_inside() {
         let mut map = sandbox();
         for k in 0..2u16 {
-            map.spawn(0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1));
+            map.spawn(TribeId::Blue, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1));
         }
         let mut units = braves(&map, 5);
         units.push(map.units.last().unwrap().id);
@@ -791,7 +793,7 @@ mod tests {
     fn braves_taken_off_a_site_for_another_reach_it() {
         let mut map = sandbox();
         for k in 0..2u16 {
-            map.spawn(0, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1));
+            map.spawn(TribeId::Blue, UnitKind::Brave, (corner(20, 6).0 + 170 * k, corner(20, 6).1));
         }
         let mut units = braves(&map, 5);
         units.push(map.units.last().unwrap().id);
@@ -857,9 +859,9 @@ mod tests {
                 for _ in 0..wait {
                     map.tick();
                 }
-                map.apply(&Command::PlaceBuilding { player: 0, kind: BuildingKind::Temple, at: corner(26 + dx, 2 + dz), facing: 0 });
+                map.apply(&Command::PlaceBuilding { player: TribeId::Blue, kind: BuildingKind::Temple, at: corner(26 + dx, 2 + dz), facing: 0 });
                 let Some(second) = map.building_at_corner(corner(26 + dx, 2 + dz)) else { continue };
-                for c in map.build_orders(0, &units, second) {
+                for c in map.build_orders(TribeId::Blue, &units, second) {
                     map.apply(&c);
                 }
                 for t in 0..1000 {

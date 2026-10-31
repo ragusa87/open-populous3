@@ -5,6 +5,7 @@
 use crate::cast_range::{ALT_BAND_PERCENT, BAND_HEIGHT};
 use crate::effect::DamageKind;
 use crate::event::{PushKind, WorldEvent};
+use crate::tribes::Owner;
 use crate::id::Id;
 use crate::map::GameMap;
 use crate::motion::Velocity;
@@ -45,7 +46,7 @@ pub const HOP: i16 = 36;
 /// One firebolt in flight.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Firebolt {
-    pub owner: u8,
+    pub owner: Owner,
     pub thrower: UnitId,
     pub target: Target,
     /// Where it is: world units and height.
@@ -242,6 +243,7 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::command::Command;
     use crate::unit::Order;
 
@@ -277,11 +279,11 @@ mod tests {
     /// A firewarrior of tribe 0 and a `kind` of tribe 1 `gap` cells east, away from the sandbox's people.
     fn duel(kind: UnitKind, gap: i32) -> (GameMap, UnitId, UnitId) {
         let mut map = GameMap::sandbox_units().seeded(4);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z.wrapping_sub(15 * 512));
-        let a = map.spawn(0, UnitKind::Firewarrior, at).id;
-        let t = map.spawn(1, kind, (at.0.wrapping_add((gap * 512) as u16), at.1)).id;
-        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Attack { target: Target::Unit(t) } });
+        let a = map.spawn(TribeId::Blue, UnitKind::Firewarrior, at).id;
+        let t = map.spawn(TribeId::Red, kind, (at.0.wrapping_add((gap * 512) as u16), at.1)).id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: a, order: Order::Attack { target: Target::Unit(t) } });
         (map, a, t)
     }
 
@@ -318,13 +320,13 @@ mod tests {
     fn from_a_drum_tower_it_throws_further_harder_and_slower() {
         let (mut map, a, t) = duel(UnitKind::Brave, 6);
         let at = map.unit(a).map(|u| (u.x, u.z)).unwrap();
-        let tower = map.add_building(crate::building::Building::new(crate::building::BuildingKind::DrumTower, 0, at.0.wrapping_sub(256), at.1.wrapping_sub(256), 0));
+        let tower = map.add_building(crate::building::Building::new(crate::building::BuildingKind::DrumTower, TribeId::Blue, at.0.wrapping_sub(256), at.1.wrapping_sub(256), 0));
         let door = map.building(tower).unwrap().door();
         map.unit_mut(a).unwrap().inside = Some(crate::unit::Inside { building: tower, door });
         let u = map.unit(a).unwrap().clone();
         assert!(map.in_tower(&u));
         assert_eq!(map.bolt_reach_of(&u), bolt_reach(map.altitude(&u), false) + 4 * 256, "4 cells more across");
-        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Attack { target: Target::Unit(t) } });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: a, order: Order::Attack { target: Target::Unit(t) } });
         let full = life(&map, t);
         (1..60).find(|_| {
             map.tick();
@@ -342,8 +344,8 @@ mod tests {
         let (boat, at) = map.vehicles.iter().find(|(_, v)| v.kind == crate::vehicle::VehicleKind::Boat && !v.passengers.is_empty()).map(|(id, v)| (id, (v.x, v.z))).unwrap();
         let crew = map.vehicle(boat).unwrap().passengers[0];
         map.unit_mut(crew).unwrap().kind = UnitKind::Firewarrior;
-        let foe = map.spawn(1, UnitKind::Brave, (at.0, at.1.wrapping_sub(2 * 512))).id;
-        map.apply(&Command::OrderUnit { player: 0, unit: crew, order: Order::Attack { target: Target::Unit(foe) } });
+        let foe = map.spawn(TribeId::Red, UnitKind::Brave, (at.0, at.1.wrapping_sub(2 * 512))).id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: crew, order: Order::Attack { target: Target::Unit(foe) } });
         let full = life(&map, foe);
         (1..60).find(|_| {
             map.tick();
@@ -378,8 +380,8 @@ mod tests {
     fn two_firewarriors_on_one_brave_take_400() {
         let (mut map, a, t) = duel(UnitKind::Brave, 3);
         let at = map.unit(a).map(|u| (u.x, u.z.wrapping_add(200))).unwrap();
-        let b = map.spawn(0, UnitKind::Firewarrior, at).id;
-        map.apply(&Command::OrderUnit { player: 0, unit: b, order: Order::Attack { target: Target::Unit(t) } });
+        let b = map.spawn(TribeId::Blue, UnitKind::Firewarrior, at).id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: b, order: Order::Attack { target: Target::Unit(t) } });
         let full = life(&map, t);
         (0..20).for_each(|_| _ = map.tick());
         assert_eq!(full - life(&map, t), 400);
@@ -408,14 +410,14 @@ mod tests {
             let (mut map, a, t) = duel(UnitKind::Firewarrior, 5);
             if walking {
                 let to = map.unit(t).map(|u| (u.x, u.z.wrapping_add(8 * 512))).unwrap();
-                map.apply(&Command::OrderUnit { player: 1, unit: t, order: Order::MoveTo { x: to.0, z: to.1 } });
+                map.apply(&Command::OrderUnit { player: TribeId::Red, unit: t, order: Order::MoveTo { x: to.0, z: to.1 } });
             }
             let full = life(&map, t);
             assert!((0..100).any(|_| { map.tick(); map.unit(t).unwrap().thrown() }), "hit and thrown");
             // One hit only: `a`'s own reload (~27-28 turns) can otherwise land again while `t` is still in its own
             // ground-recovery grace period (`unit::settle_ticks`) and knock it right back down - a real possibility
             // this fix introduces, not a bug, but not what this test is about (retaliation triggering at all).
-            map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Stop });
+            map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: a, order: Order::Stop });
             let fired_back = (0..200).any(|_| {
                 map.tick();
                 life(&map, t) < full && matches!(map.unit(t).map(|u| u.action), Some(Action::Attacking { target: Target::Unit(x), .. } | Action::Throwing { target: Target::Unit(x), .. }) if x == a)

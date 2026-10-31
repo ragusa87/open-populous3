@@ -13,6 +13,7 @@
 use crate::effect::{Effect, EffectKind};
 use crate::time::{Countdown, Every, Ticks};
 use crate::unit::cell_of;
+use crate::tribes::Owner;
 
 /// `SWAMP_NUM_PEOPLE` (exe 10): a swamp's own kills, after which it ends early.
 pub const SWAMP_NUM_PEOPLE: u32 = 10;
@@ -30,7 +31,7 @@ pub struct Swamp {
 }
 
 /// A swamp cast by tribe `owner` at `at` (world units).
-pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: (u16, u16)) -> Effect {
     Effect::new(owner, at, Countdown::new(LIFETIME), EffectKind::Swamp(Swamp::default()))
 }
 
@@ -43,6 +44,7 @@ pub fn cells((x, z): (u16, u16), size: i32) -> Vec<(i32, i32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::map::GameMap;
     use crate::status::{Timed, SHIELD_STEPS};
     use crate::terrain::Heightmap;
@@ -64,12 +66,12 @@ mod tests {
     #[test]
     fn kills_everyone_on_its_cells_every_four_turns_any_tribe_shielded_or_inside_a_building() {
         let mut map = bare();
-        map.add_effect(effect(0, AT));
-        let own = map.spawn(0, UnitKind::Brave, AT).id;
-        let foe = map.spawn(1, UnitKind::Brave, AT).id;
-        let shielded = map.spawn(1, UnitKind::Brave, AT).id;
+        map.add_effect(effect(TribeId::Blue, AT));
+        let own = map.spawn(TribeId::Blue, UnitKind::Brave, AT).id;
+        let foe = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
+        let shielded = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
         map.unit_mut(shielded).unwrap().statuses.shield = Timed::steps(SHIELD_STEPS);
-        let inside = map.spawn(1, UnitKind::Brave, AT).id;
+        let inside = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
         map.unit_mut(inside).unwrap().inside = Some(crate::unit::Inside { building: crate::id::Id::from_raw(50), door: AT });
         let all = [own, foe, shielded, inside];
         map.run(Ticks::new(3));
@@ -81,9 +83,9 @@ mod tests {
     #[test]
     fn the_later_cast_swamp_claims_an_overlapping_cell_and_its_tally_grows() {
         let mut map = bare();
-        let first = map.add_effect(effect(0, AT));
-        let second = map.add_effect(effect(1, AT));
-        map.spawn(2, UnitKind::Brave, AT);
+        let first = map.add_effect(effect(TribeId::Blue, AT));
+        let second = map.add_effect(effect(TribeId::Red, AT));
+        map.spawn(TribeId::Yellow, UnitKind::Brave, AT);
         map.run(Ticks::new(4));
         let processed = |e: &GameMap, id| match e.effects.get(id).map(|e| &e.kind) {
             Some(EffectKind::Swamp(s)) => s.processed,
@@ -95,9 +97,9 @@ mod tests {
     #[test]
     fn ends_once_its_own_tally_reaches_swamp_num_people_short_of_its_full_lifetime() {
         let mut map = bare();
-        let id = map.add_effect(effect(0, AT));
+        let id = map.add_effect(effect(TribeId::Blue, AT));
         for n in 0..SWAMP_NUM_PEOPLE {
-            map.spawn(1, UnitKind::Brave, (AT.0.wrapping_add(n as u16), AT.1));
+            map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(n as u16), AT.1));
         }
         map.run(Ticks::new(4));
         assert!(!map.effects.contains(id), "ended early, long before its 32 000-turn lifetime");

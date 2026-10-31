@@ -260,6 +260,7 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::{Owner, TribeId};
     use crate::unit::{Action, UnitId};
 
     #[test]
@@ -279,12 +280,12 @@ mod tests {
     }
 
     fn training_hut(map: &GameMap) -> usize {
-        map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::WarriorTraining && b.stage() == Stage::Built && b.inside == 0).unwrap()
+        map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::WarriorTraining && b.stage() == Stage::Built && b.inside == 0).unwrap()
     }
 
     fn send_brave(map: &mut GameMap, hut: usize) -> UnitId {
-        let brave = map.units.iter().find(|u| u.owner == 0 && u.kind == UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).unwrap().id;
-        for c in map.enter_orders(0, &[brave], hut) {
+        let brave = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).unwrap().id;
+        for c in map.enter_orders(TribeId::Blue, &[brave], hut) {
             map.apply(&c);
         }
         let id = map.buildings[hut].id;
@@ -300,7 +301,7 @@ mod tests {
     fn a_brave_inside_comes_out_a_warrior_once_the_store_is_full() {
         let mut map = GameMap::sandbox_buildings();
         let hut = training_hut(&map);
-        let warriors = map.units.iter().filter(|u| u.owner == 0 && u.kind == UnitKind::Warrior).count();
+        let warriors = map.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Warrior).count();
         let brave = send_brave(&mut map, hut);
         map.tick();
         let p = map.buildings[hut].production.unwrap();
@@ -314,7 +315,7 @@ mod tests {
         assert_eq!(map.buildings[hut].production.map(|p| (p.stored, p.cost)), Some((0, 0)));
         let made = map.units.last().unwrap();
         let building = map.buildings[hut].id;
-        assert_eq!((made.owner, made.kind, made.inside.map(|i| i.building)), (0, UnitKind::Warrior, Some(building)), "made inside, where the brave was");
+        assert_eq!((made.owner, made.kind, made.inside.map(|i| i.building)), (Owner::Tribe(TribeId::Blue), UnitKind::Warrior, Some(building)), "made inside, where the brave was");
         assert!(made.health.current() == made.health.max(), "full life");
         let id = made.id;
         (0..200).find(|_| {
@@ -332,7 +333,7 @@ mod tests {
         map.tick();
         map.buildings[hut].production.as_mut().unwrap().stored = 250;
         let (x, z) = map.buildings[hut].door();
-        map.apply(&crate::command::Command::OrderUnit { player: 0, unit: brave, order: Order::MoveTo { x: x.wrapping_add(2048), z } });
+        map.apply(&crate::command::Command::OrderUnit { player: TribeId::Blue, unit: brave, order: Order::MoveTo { x: x.wrapping_add(2048), z } });
         (0..300).find(|_| {
             map.tick();
             map.buildings[hut].production.unwrap().stored == 0
@@ -344,7 +345,7 @@ mod tests {
 
     #[test]
     fn the_queue_goes_round_the_walls_from_the_door_then_further_out() {
-        let b = Building::new(BuildingKind::WarriorTraining, 0, 64 * 512, 64 * 512, 0);
+        let b = Building::new(BuildingKind::WarriorTraining, TribeId::Blue, 64 * 512, 64 * 512, 0);
         assert_ne!(queue_spot(&b, 0), b.door(), "the doorway stays free");
         assert!(crate::map::torus_dist2(queue_spot(&b, 0), b.door()) <= (QUEUE_STEP as i64).pow(2), "the head waits beside it");
         let f = b.kind.footprint();
@@ -363,8 +364,8 @@ mod tests {
         let mut map = GameMap::sandbox_buildings();
         let hut = training_hut(&map);
         let id = map.buildings[hut].id;
-        let braves: Vec<UnitId> = map.units.iter().filter(|u| u.owner == 0 && u.kind == UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).take(4).map(|u| u.id).collect();
-        for c in map.enter_orders(0, &braves, hut) {
+        let braves: Vec<UnitId> = map.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).take(4).map(|u| u.id).collect();
+        for c in map.enter_orders(TribeId::Blue, &braves, hut) {
             map.apply(&c);
         }
         (0..600).find(|_| {
@@ -389,7 +390,7 @@ mod tests {
             assert_eq!(u.facing, crate::unit::octant(dx, dz), "rank {r} faces the one ahead");
         }
         let leaving = queued[0];
-        map.apply(&crate::command::Command::OrderUnit { player: 0, unit: leaving, order: Order::Stop });
+        map.apply(&crate::command::Command::OrderUnit { player: TribeId::Blue, unit: leaving, order: Order::Stop });
         map.tick();
         assert_eq!(map.buildings[hut].queue, queued[1..], "one ordered off leaves, the others move up");
         (0..600).find(|_| {
@@ -399,7 +400,7 @@ mod tests {
         .expect("the first one inside, training");
         let inside = map.units_inside(id).next().map(|u| u.id).unwrap();
         let (x, z) = map.buildings[hut].door();
-        map.apply(&crate::command::Command::OrderUnit { player: 0, unit: inside, order: Order::MoveTo { x: x.wrapping_add(2048), z } });
+        map.apply(&crate::command::Command::OrderUnit { player: TribeId::Blue, unit: inside, order: Order::MoveTo { x: x.wrapping_add(2048), z } });
         let walked_in = (0..300).find(|_| {
             map.tick();
             map.units_inside(id).any(|u| u.id == queued[1])
@@ -411,9 +412,9 @@ mod tests {
     fn a_crowd_queues_round_a_hut_hemmed_in_by_others_each_on_a_walkable_spot_of_its_own() {
         use crate::path::Ground;
         let mut map = GameMap::sandbox_buildings();
-        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::WarriorTraining).unwrap();
-        let braves: Vec<UnitId> = map.units.iter().filter(|u| u.owner == 0 && u.kind == UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).map(|u| u.id).collect();
-        for c in map.enter_orders(0, &braves, hut) {
+        let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::WarriorTraining).unwrap();
+        let braves: Vec<UnitId> = map.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).map(|u| u.id).collect();
+        for c in map.enter_orders(TribeId::Blue, &braves, hut) {
             map.apply(&c);
         }
         (0..1500).for_each(|_| _ = map.tick());

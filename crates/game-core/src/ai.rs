@@ -27,6 +27,7 @@ use crate::headcount::State as HeadcountState;
 use crate::map::{torus_dist2, GameMap};
 use crate::send_in::Destination;
 use crate::time::Every;
+use crate::tribes::TribeId;
 use crate::unit::{Order, Target, UnitId, UnitKind};
 use pop3_ai_script::field::InternalVar;
 
@@ -100,7 +101,7 @@ pub(crate) mod state {
 /// settings").
 #[derive(Clone, Debug)]
 pub(crate) struct NativeAi {
-    pub owner: u8,
+    pub owner: TribeId,
     attrs: [i32; ATTR_COUNT],
     states: u32,
     /// `SET_DRUM_TOWER_POS`/`BUILD_DRUM_TOWER`: where this tribe's base is, read-only state from the
@@ -113,7 +114,7 @@ pub(crate) struct NativeAi {
 }
 
 impl NativeAi {
-    pub fn new(owner: u8) -> Self {
+    pub fn new(owner: TribeId) -> Self {
         NativeAi { owner, attrs: default_attrs(), states: 0, drum_tower_pos: None, delay_main_drum_tower: false }
     }
 
@@ -178,37 +179,37 @@ pub(crate) enum AttackGoal {
 const SWEEP_EVERY: Every = Every::new(64);
 
 impl GameMap {
-    fn ai_index(&self, owner: u8) -> Option<usize> {
+    fn ai_index(&self, owner: TribeId) -> Option<usize> {
         self.ai.iter().position(|a| a.owner == owner)
     }
 
-    pub(crate) fn ai_state(&self, owner: u8, bit: u32) -> bool {
+    pub(crate) fn ai_state(&self, owner: TribeId, bit: u32) -> bool {
         self.ai_index(owner).is_some_and(|i| self.ai[i].state(bit))
     }
 
-    pub(crate) fn ai_set_state(&mut self, owner: u8, bit: u32, on: bool) {
+    pub(crate) fn ai_set_state(&mut self, owner: TribeId, bit: u32, on: bool) {
         if let Some(i) = self.ai_index(owner) {
             self.ai[i].set_state(bit, on);
         }
     }
 
-    pub(crate) fn ai_attr(&self, owner: u8, var: InternalVar) -> i32 {
+    pub(crate) fn ai_attr(&self, owner: TribeId, var: InternalVar) -> i32 {
         self.ai_index(owner).map_or(0, |i| self.ai[i].attr(var))
     }
 
-    pub(crate) fn ai_set_attr(&mut self, owner: u8, var: InternalVar, value: i32) {
+    pub(crate) fn ai_set_attr(&mut self, owner: TribeId, var: InternalVar, value: i32) {
         if let Some(i) = self.ai_index(owner) {
             self.ai[i].set_attr(var, value);
         }
     }
 
-    pub(crate) fn ai_set_drum_tower_pos(&mut self, owner: u8, at: (u16, u16)) {
+    pub(crate) fn ai_set_drum_tower_pos(&mut self, owner: TribeId, at: (u16, u16)) {
         if let Some(i) = self.ai_index(owner) {
             self.ai[i].drum_tower_pos = Some(at);
         }
     }
 
-    pub(crate) fn ai_set_delay_main_drum_tower(&mut self, owner: u8, delay: bool) {
+    pub(crate) fn ai_set_delay_main_drum_tower(&mut self, owner: TribeId, delay: bool) {
         if let Some(i) = self.ai_index(owner) {
             self.ai[i].delay_main_drum_tower = delay;
         }
@@ -217,7 +218,7 @@ impl GameMap {
     /// `BUILD_DRUM_TOWER x z` (and any other direct scripted placement, same shape): places `kind`
     /// exactly at `at`, if it can stand there, and sets idle braves to building it right away — unlike
     /// `ai_construct_building`'s own randomized site search, the script already chose the spot.
-    pub(crate) fn ai_build_at(&mut self, owner: u8, kind: BuildingKind, at: (u16, u16)) -> bool {
+    pub(crate) fn ai_build_at(&mut self, owner: TribeId, kind: BuildingKind, at: (u16, u16)) -> bool {
         let Some(id) = self.place_building(owner, kind, at, 0) else { return false };
         let Some(site) = self.building_index(id) else { return false };
         let workers: Vec<UnitId> = self.idle_braves(owner).into_iter().take(kind.max_braves() as usize).collect();
@@ -231,7 +232,7 @@ impl GameMap {
 
     /// `TRAIN_PEOPLE_NOW n model`: sends up to `n` idle braves into a built training building for
     /// `kind` right away, overriding the sweep's own `INT_ATTR_PREF_*_PEOPLE` pacing for this one call.
-    pub(crate) fn ai_train_now(&mut self, owner: u8, kind: UnitKind, n: usize) {
+    pub(crate) fn ai_train_now(&mut self, owner: TribeId, kind: UnitKind, n: usize) {
         let Some(building_kind) = training_building_for(kind) else { return };
         let workers: Vec<UnitId> = self.idle_braves(owner).into_iter().take(n).collect();
         if workers.is_empty() {
@@ -246,7 +247,7 @@ impl GameMap {
     /// tower spot if one was set, else its reincarnation site, else any building it already owns.
     /// `None` only for a computer tribe with nothing placed at all yet (just spawned, no script setup
     /// ran) — `construct_building`/`post_defender` simply do nothing that sweep.
-    fn ai_base(&self, owner: u8) -> Option<(u16, u16)> {
+    fn ai_base(&self, owner: TribeId) -> Option<(u16, u16)> {
         let drum_tower = self.ai_index(owner).and_then(|i| self.ai[i].drum_tower_pos);
         drum_tower.or_else(|| self.site_of(owner).map(|s| (s.x, s.z))).or_else(|| self.buildings.iter().find(|b| b.owner == owner).map(|b| (b.x, b.z)))
     }
@@ -256,9 +257,9 @@ impl GameMap {
     /// first category below that can act, does — construction always tried first, matching "position 0
     /// is always construct essential buildings" (pop3-rev-analysis.md "Native AI").
     pub(crate) fn tend_native_ai(&mut self) {
-        let owners: Vec<u8> = self.ai.iter().map(|a| a.owner).collect();
+        let owners: Vec<TribeId> = self.ai.iter().map(|a| a.owner).collect();
         for owner in owners {
-            if !SWEEP_EVERY.fires(self.now, owner as u32) {
+            if !SWEEP_EVERY.fires(self.now, owner.as_u8() as u32) {
                 continue;
             }
             if self.ai_construct_building(owner) {
@@ -274,7 +275,7 @@ impl GameMap {
     /// Idle braves of `owner`: alive, nothing to do, not aboard a vehicle — the pool every task below
     /// draws from (pop3-rev-analysis.md "one shared 'find N eligible idle workers' search", our own
     /// simplified version of it: no "borrow from a building with some to spare" case yet).
-    fn idle_braves(&self, owner: u8) -> Vec<UnitId> {
+    fn idle_braves(&self, owner: TribeId) -> Vec<UnitId> {
         self.units.iter().filter(|u| u.owner == owner && u.kind == UnitKind::Brave && u.is_alive() && u.is_free() && u.work.is_none() && u.aboard.is_none() && u.queued_patrol().is_empty()).map(|u| u.id).collect()
     }
 
@@ -282,7 +283,7 @@ impl GameMap {
     /// economy needs, if any, gets a plan (reusing an unfinished one of the same kind rather than
     /// placing a second) and whatever idle braves are around. Our own guessed thresholds, not the
     /// original's real `INT_ATTR_HOUSE_PERCENTAGE`-driven rule (TODO.md).
-    fn ai_construct_building(&mut self, owner: u8) -> bool {
+    fn ai_construct_building(&mut self, owner: TribeId) -> bool {
         if !self.ai_state(owner, state::CONSTRUCT_BUILDING) {
             return false;
         }
@@ -304,7 +305,7 @@ impl GameMap {
     /// Our own guessed building priority: a hut once housing is nearly full, else the next essential
     /// kind this tribe doesn't have yet, gated by a population floor so a brand new tribe builds a drum
     /// tower before a temple (AGENTS.md: "our own economy" defaults, not the real numbers).
-    fn ai_next_building(&self, owner: u8) -> Option<BuildingKind> {
+    fn ai_next_building(&self, owner: TribeId) -> Option<BuildingKind> {
         let has = |k: BuildingKind| self.buildings.iter().any(|b| b.owner == owner && b.kind == k);
         let delayed_drum_tower = self.ai_index(owner).is_some_and(|i| self.ai[i].delay_main_drum_tower);
         if !delayed_drum_tower && !has(BuildingKind::DrumTower) {
@@ -323,7 +324,7 @@ impl GameMap {
     /// A bounded number of randomized nearby spots around this tribe's base (pop3-rev-analysis.md: "a
     /// bounded number of randomized nearby guesses, not a flood-fill or real pathfinding search"), the
     /// first that `can_place` accepts.
-    fn ai_place_building(&mut self, owner: u8, kind: BuildingKind) -> Option<usize> {
+    fn ai_place_building(&mut self, owner: TribeId, kind: BuildingKind) -> Option<usize> {
         let base = self.ai_base(owner)?;
         let size = self.terrain.size() as i32;
         for _ in 0..24 {
@@ -341,7 +342,7 @@ impl GameMap {
     /// Task 26, "train people" (pop3-rev-analysis.md): tops idle braves up into whichever trained kind
     /// is furthest under its `INT_ATTR_PREF_*_PEOPLE` share of the tribe's population, through a built
     /// training building of the matching kind — the same `send_into` a human's Build-tab click uses.
-    fn ai_train_people(&mut self, owner: u8) -> bool {
+    fn ai_train_people(&mut self, owner: TribeId) -> bool {
         if !self.ai_state(owner, state::TRAIN_PEOPLE) {
             return false;
         }
@@ -361,7 +362,7 @@ impl GameMap {
         true
     }
 
-    fn ai_next_trainee(&self, owner: u8) -> Option<UnitKind> {
+    fn ai_next_trainee(&self, owner: TribeId) -> Option<UnitKind> {
         let Some(i) = self.ai_index(owner) else { return None };
         let headcount = self.headcount(owner);
         let population = headcount.total().max(1) as i32;
@@ -379,7 +380,7 @@ impl GameMap {
     /// (`INT_ATTR_MAX_DEFENSIVE_ACTIONS`, our own reuse of that attribute), an idle fighter is sent to
     /// stand guard near the base — a single-point patrol, the stationary guard post `patrol.rs` already
     /// describes.
-    fn ai_post_defender(&mut self, owner: u8) -> bool {
+    fn ai_post_defender(&mut self, owner: TribeId) -> bool {
         if !self.ai_state(owner, state::DEFEND_BASE) {
             return false;
         }
@@ -407,7 +408,7 @@ impl GameMap {
     /// on its own (pop3-rev-analysis.md: "the native AI genuinely never decides to attack on its own").
     /// Simplified from the original's own muster-then-march sequence: the chosen fighters set off for
     /// their target right away instead of gathering at the drum tower first (TODO.md).
-    pub(crate) fn ai_attack(&mut self, owner: u8, target_team: u8, count: i32, goal: AttackGoal) {
+    pub(crate) fn ai_attack(&mut self, owner: TribeId, target_team: TribeId, count: i32, goal: AttackGoal) {
         if !self.ai_state(owner, state::AUTO_ATTACK) || self.ai_attr(owner, InternalVar(1025)) <= 0 {
             return; // STATE_AUTO_ATTACK off, or INT_ATTR_MAX_ATTACKS 0 ("0 ignores every attack")
         }
@@ -424,7 +425,7 @@ impl GameMap {
         }
     }
 
-    fn ai_attack_target(&self, owner: u8, target_team: u8, goal: AttackGoal) -> Option<Target> {
+    fn ai_attack_target(&self, owner: TribeId, target_team: TribeId, goal: AttackGoal) -> Option<Target> {
         match goal {
             AttackGoal::Shaman => self.units.iter().find(|u| u.owner == target_team && u.kind == UnitKind::Shaman && u.is_alive()).map(|u| Target::Unit(u.id)),
             AttackGoal::Building(kind) => {
@@ -455,7 +456,7 @@ mod tests {
     use super::*;
     use crate::terrain::Heightmap;
 
-    fn map_with_ai(owner: u8) -> GameMap {
+    fn map_with_ai(owner: TribeId) -> GameMap {
         let mut terrain = Heightmap::new(64);
         for dz in -10..=10 {
             for dx in -10..=10 {
@@ -474,8 +475,8 @@ mod tests {
 
     #[test]
     fn a_state_off_by_default_keeps_the_sweep_from_acting() {
-        let mut map = map_with_ai(0);
-        map.ai_set_state(0, state::CONSTRUCT_BUILDING, false);
+        let mut map = map_with_ai(TribeId::Blue);
+        map.ai_set_state(TribeId::Blue, state::CONSTRUCT_BUILDING, false);
         let before = map.buildings.len();
         for _ in 0..200 {
             map.tick();
@@ -485,80 +486,80 @@ mod tests {
 
     #[test]
     fn a_computer_tribe_builds_a_drum_tower_and_assigns_idle_braves() {
-        let mut map = map_with_ai(0);
+        let mut map = map_with_ai(TribeId::Blue);
         for _ in 0..5 {
-            map.spawn(0, UnitKind::Brave, (32 * 512, 32 * 512));
+            map.spawn(TribeId::Blue, UnitKind::Brave, (32 * 512, 32 * 512));
         }
         for _ in 0..SWEEP_EVERY.period() as usize + 5 {
             map.tick();
         }
-        let tower = map.buildings.iter().find(|b| b.owner == 0 && b.kind == BuildingKind::DrumTower);
+        let tower = map.buildings.iter().find(|b| b.owner == TribeId::Blue && b.kind == BuildingKind::DrumTower);
         assert!(tower.is_some(), "a drum tower plan appears");
         assert!(map.workers(tower.unwrap().id).count() > 0, "idle braves were put to work on it");
     }
 
     #[test]
     fn a_computer_tribe_trains_towards_its_preferred_people_once_housed() {
-        let mut map = map_with_ai(0);
-        map.ai_set_state(0, state::CONSTRUCT_BUILDING, false); // isolate training from the construction category
+        let mut map = map_with_ai(TribeId::Blue);
+        map.ai_set_state(TribeId::Blue, state::CONSTRUCT_BUILDING, false); // isolate training from the construction category
         map.terrain.set(40, 32, 100);
-        let tower = map.place_building(0, BuildingKind::WarriorTraining, (40 * 512, 32 * 512), 0).unwrap();
+        let tower = map.place_building(TribeId::Blue, BuildingKind::WarriorTraining, (40 * 512, 32 * 512), 0).unwrap();
         let b = map.building_index(tower).unwrap();
         map.buildings[b].flat = true;
         map.buildings[b].used = map.buildings[b].kind.wood_cost();
         for _ in 0..5 {
-            map.spawn(0, UnitKind::Brave, (32 * 512, 32 * 512));
+            map.spawn(TribeId::Blue, UnitKind::Brave, (32 * 512, 32 * 512));
         }
         for _ in 0..SWEEP_EVERY.period() as usize + 400 {
             map.tick();
         }
-        assert!(map.units.iter().any(|u| u.owner == 0 && u.inside.is_some_and(|i| i.building == tower)), "a brave went in to train");
+        assert!(map.units.iter().any(|u| u.owner == TribeId::Blue && u.inside.is_some_and(|i| i.building == tower)), "a brave went in to train");
     }
 
     #[test]
     fn a_computer_tribe_posts_a_defender_up_to_its_quota() {
-        let mut map = map_with_ai(0);
-        map.ai_set_state(0, state::CONSTRUCT_BUILDING, false);
-        map.ai_set_state(0, state::TRAIN_PEOPLE, false);
-        map.ai_set_attr(0, InternalVar(1015), 1); // quota 1
-        map.spawn(0, UnitKind::Warrior, (32 * 512, 32 * 512));
-        map.spawn(0, UnitKind::Warrior, (32 * 512, 32 * 512));
+        let mut map = map_with_ai(TribeId::Blue);
+        map.ai_set_state(TribeId::Blue, state::CONSTRUCT_BUILDING, false);
+        map.ai_set_state(TribeId::Blue, state::TRAIN_PEOPLE, false);
+        map.ai_set_attr(TribeId::Blue, InternalVar(1015), 1); // quota 1
+        map.spawn(TribeId::Blue, UnitKind::Warrior, (32 * 512, 32 * 512));
+        map.spawn(TribeId::Blue, UnitKind::Warrior, (32 * 512, 32 * 512));
         for _ in 0..SWEEP_EVERY.period() as usize * 2 {
             map.tick();
         }
-        let posted = map.units.iter().filter(|u| u.owner == 0 && !u.queued_patrol().is_empty()).count();
+        let posted = map.units.iter().filter(|u| u.owner == TribeId::Blue && !u.queued_patrol().is_empty()).count();
         assert_eq!(posted, 1, "exactly the quota, not every warrior");
     }
 
     #[test]
     fn ai_attack_sends_fighters_at_the_target_tribes_shaman() {
-        let mut map = map_with_ai(0);
+        let mut map = map_with_ai(TribeId::Blue);
         let mut terrain = Heightmap::new(64);
         terrain.set(32, 32, 100);
         terrain.set(40, 32, 100);
         map.terrain = terrain;
-        map.sites.push(crate::site::ReincarnationSite::at_cell(1, (40, 32), 100));
+        map.sites.push(crate::site::ReincarnationSite::at_cell(TribeId::Red, (40, 32), 100));
         map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
-        let enemy_shaman = map.spawn(1, UnitKind::Shaman, (40 * 512, 32 * 512)).id;
-        map.spawn(0, UnitKind::Warrior, (32 * 512, 32 * 512));
-        map.ai_attack(0, 1, 1, AttackGoal::Shaman);
-        let attacker = map.units.iter().find(|u| u.owner == 0 && u.kind == UnitKind::Warrior).unwrap();
+        let enemy_shaman = map.spawn(TribeId::Red, UnitKind::Shaman, (40 * 512, 32 * 512)).id;
+        map.spawn(TribeId::Blue, UnitKind::Warrior, (32 * 512, 32 * 512));
+        map.ai_attack(TribeId::Blue, TribeId::Red, 1, AttackGoal::Shaman);
+        let attacker = map.units.iter().find(|u| u.owner == TribeId::Blue && u.kind == UnitKind::Warrior).unwrap();
         assert!(matches!(attacker.action, crate::unit::Action::Attacking { target: Target::Unit(id), .. } if id == enemy_shaman), "{:?}", attacker.action);
     }
 
     #[test]
     fn ai_attack_does_nothing_without_auto_attack_or_max_attacks() {
-        let mut map = map_with_ai(0);
-        map.sites.push(crate::site::ReincarnationSite::at_cell(1, (40, 32), 100));
+        let mut map = map_with_ai(TribeId::Blue);
+        map.sites.push(crate::site::ReincarnationSite::at_cell(TribeId::Red, (40, 32), 100));
         map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
-        map.spawn(1, UnitKind::Shaman, (40 * 512, 32 * 512));
-        map.spawn(0, UnitKind::Warrior, (32 * 512, 32 * 512));
-        map.ai_set_state(0, state::AUTO_ATTACK, false);
-        map.ai_attack(0, 1, 5, AttackGoal::Shaman);
+        map.spawn(TribeId::Red, UnitKind::Shaman, (40 * 512, 32 * 512));
+        map.spawn(TribeId::Blue, UnitKind::Warrior, (32 * 512, 32 * 512));
+        map.ai_set_state(TribeId::Blue, state::AUTO_ATTACK, false);
+        map.ai_attack(TribeId::Blue, TribeId::Red, 5, AttackGoal::Shaman);
         assert!(map.units.iter().all(|u| !matches!(u.action, crate::unit::Action::Attacking { .. })), "state off: nothing happens");
-        map.ai_set_state(0, state::AUTO_ATTACK, true);
-        map.ai_set_attr(0, InternalVar(1025), 0);
-        map.ai_attack(0, 1, 5, AttackGoal::Shaman);
+        map.ai_set_state(TribeId::Blue, state::AUTO_ATTACK, true);
+        map.ai_set_attr(TribeId::Blue, InternalVar(1025), 0);
+        map.ai_attack(TribeId::Blue, TribeId::Red, 5, AttackGoal::Shaman);
         assert!(map.units.iter().all(|u| !matches!(u.action, crate::unit::Action::Attacking { .. })), "MAX_ATTACKS 0: nothing happens");
     }
 }

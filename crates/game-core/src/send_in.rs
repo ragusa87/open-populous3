@@ -7,6 +7,7 @@ use crate::command::Command;
 use crate::map::{torus_dist2, GameMap};
 use crate::unit::{Order, Unit, UnitId, UnitKind};
 use crate::vehicle::{VehicleKind, CREW};
+use crate::tribes::TribeId;
 
 /// Where a selection is sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,7 +69,7 @@ impl GameMap {
     /// Orders sending the player's `units` to `to` (`assign`): into their built buildings of that kind, as far as
     /// there is room (a hut's or a tower's free room, a vehicle hut's free crew places; a training unit takes
     /// everyone, the others queue at its door), or round their camp fires. Units already in one of them stay.
-    pub fn send_into(&self, player: u8, units: &[UnitId], to: Destination) -> Vec<Command> {
+    pub fn send_into(&self, player: TribeId, units: &[UnitId], to: Destination) -> Vec<Command> {
         let mine = |u: &&Unit| u.owner == player && u.is_alive() && u.aboard.is_none() && units.contains(&u.id);
         match to {
             Destination::Campfire => {
@@ -148,7 +149,7 @@ mod tests {
     #[test]
     fn braves_crew_vehicle_huts_followers_go_into_huts_and_training_units() {
         let mut map = GameMap::sandbox_buildings();
-        let player = 0;
+        let player = TribeId::Blue;
         let followers: Vec<UnitId> = map.units.iter().filter(|u| u.owner == player && u.in_the_open() && u.campfire().is_none()).map(|u| u.id).collect();
         let warrior = map.spawn(player, UnitKind::Warrior, (64 * 512, 60 * 512)).id;
         let selection: Vec<UnitId> = followers.iter().copied().chain([warrior]).collect();
@@ -160,14 +161,14 @@ mod tests {
         let id = map.add_building(Building::new(BuildingKind::Hut { size: 3 }, player, 70 * 512, 60 * 512, 0));
         let huts = map.send_into(player, &selection, Destination::Kind(BuildingKind::Hut { size: 1 }));
         assert!(huts.iter().any(|c| matches!(c, Command::OrderUnit { order: Order::Enter { site }, .. } if *site == (map.building(id).unwrap().x, map.building(id).unwrap().z))), "a hut of any size");
-        assert!(map.send_into(1, &selection, Destination::Kind(BuildingKind::BoatHut)).is_empty(), "only one's own people");
+        assert!(map.send_into(TribeId::Red, &selection, Destination::Kind(BuildingKind::BoatHut)).is_empty(), "only one's own people");
     }
 
     #[test]
     fn people_go_round_the_camp_fires() {
         let map = GameMap::sandbox_buildings();
         let braves: Vec<UnitId> = map.units.iter().filter(|u| u.kind == UnitKind::Brave && u.campfire().is_none() && u.in_the_open()).take(2).map(|u| u.id).collect();
-        let orders = map.send_into(0, &braves, Destination::Campfire);
+        let orders = map.send_into(TribeId::Blue, &braves, Destination::Campfire);
         assert_eq!(orders.len(), 2);
         assert!(orders.iter().all(|c| matches!(c, Command::OrderUnit { order: Order::Campfire { .. }, .. })));
     }

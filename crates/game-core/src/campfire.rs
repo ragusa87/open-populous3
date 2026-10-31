@@ -5,6 +5,7 @@
 
 use crate::map::GameMap;
 use crate::placement::blocked_at;
+use crate::tribes::Owner;
 use crate::time::Ticks;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
@@ -41,7 +42,7 @@ const RING_DIRS: [(i32, i32); RING_POINTS as usize] = [
 pub struct Campfire {
     /// Unique on its map (`GameMap::place_campfire`).
     pub id: u32,
-    pub owner: u8,
+    pub owner: Owner,
     /// World units, a cell's centre.
     pub x: u16,
     pub z: u16,
@@ -51,7 +52,8 @@ pub struct Campfire {
 
 impl Campfire {
     /// A camp fire at the centre of `cell`.
-    pub fn new(id: u32, owner: u8, (cx, cz): (i32, i32)) -> Self {
+    pub fn new(id: u32, owner: impl Into<Owner>, (cx, cz): (i32, i32)) -> Self {
+        let owner = owner.into();
         let centre = |c: i32| (c.rem_euclid(128) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
         Campfire { id, owner, x: centre(cx), z: centre(cz), unattended: 0 }
     }
@@ -116,6 +118,7 @@ mod tests {
     use super::*;
     use crate::building::{Building, BuildingKind};
     use crate::tree::Tree;
+    use crate::tribes::TribeId;
 
     /// Flat land at height 100, sea for x < 10, no buildings nor trees.
     fn map() -> GameMap {
@@ -154,9 +157,9 @@ mod tests {
 
     #[test]
     fn lit_at_a_cell_centre() {
-        let f = Campfire::new(1, 0, (30, 40));
+        let f = Campfire::new(1, TribeId::Blue, (30, 40));
         assert_eq!((f.x, f.z, f.cell()), (30 * 512 + 256, 40 * 512 + 256, (30, 40)));
-        assert_eq!(Campfire::new(1, 0, (-1, 128)).cell(), (127, 0), "wraps");
+        assert_eq!(Campfire::new(1, TribeId::Blue, (-1, 128)).cell(), (127, 0), "wraps");
         assert_eq!(cell_at((30 * 512 + 511, 40 * 512)), (30, 40));
     }
 
@@ -171,11 +174,11 @@ mod tests {
         assert!(can_place(&m, (42, 32)), "away from it");
         m.trees.push(Tree::new((50, 50), 0, 3));
         assert!(!can_place(&m, (50, 50)), "a tree");
-        m.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, 60 * 512, 60 * 512, 0));
+        m.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 60 * 512, 60 * 512, 0));
         assert!(!can_place(&m, (60, 60)), "a building");
         let (sx, sz) = (m.sites[0].x / 512, m.sites[0].z / 512);
         assert!(!can_place(&m, (sx as i32, sz as i32)), "the site");
-        m.campfires.push(Campfire::new(1, 0, (70, 70)));
+        m.campfires.push(Campfire::new(1, TribeId::Blue, (70, 70)));
         assert!(!can_place(&m, (70, 70)), "another camp fire");
         assert!(can_place(&m, (71, 70)), "next to it");
     }

@@ -13,6 +13,7 @@
 //! never available there to match by name).
 
 use crate::ai::AttackGoal;
+use crate::tribes::TribeId;
 use crate::building::BuildingKind;
 use crate::map::GameMap;
 use crate::time::Tick;
@@ -32,7 +33,7 @@ const INT_MY_NUM_PEOPLE: InternalVar = InternalVar(1);
 
 #[derive(Debug, Clone)]
 pub(crate) struct TribeScript {
-    pub owner: u8,
+    pub owner: TribeId,
     script: Script,
     interp: Interpreter,
 }
@@ -63,7 +64,7 @@ pub(crate) fn load_tribe_scripts(dat: &Path, ai_scripts: [u8; TRIBES]) -> Vec<Tr
             let data = std::fs::read(path).ok()?;
             let raw = RawScript::parse(&data).ok()?;
             let script = ast::parse(&raw).ok()?;
-            Some(TribeScript { owner: owner as u8, script, interp: Interpreter::new() })
+            Some(TribeScript { owner: TribeId::from_u8(owner as u8)?, script, interp: Interpreter::new() })
         })
         .collect()
 }
@@ -71,7 +72,7 @@ pub(crate) fn load_tribe_scripts(dat: &Path, ai_scripts: [u8; TRIBES]) -> Vec<Tr
 /// Bridges one tribe's `Interpreter` to the map it's deciding for.
 struct ScriptEnv<'a> {
     map: &'a mut GameMap,
-    owner: u8,
+    owner: TribeId,
 }
 
 impl Env for ScriptEnv<'_> {
@@ -117,7 +118,7 @@ impl Env for ScriptEnv<'_> {
                 // blue (owner 0) regardless of which computer tribe's script calls it (ai-scripts.md
                 // "this AI gets a reincarnation site at the start. SET_NO_BLUE_REINC is the human
                 // equivalent").
-                self.map.apply_events(vec![crate::event::WorldEvent::RemoveSite { tribe: 0 }]);
+                self.map.apply_events(vec![crate::event::WorldEvent::RemoveSite { tribe: TribeId::Blue }]);
             }
             "SET_DRUM_TOWER_POS" => {
                 if let [Arg::Field(x), Arg::Field(z)] = call.args[..] {
@@ -181,14 +182,14 @@ fn field_pos(x: pop3_ai_script::field::Field, z: pop3_ai_script::field::Field) -
 
 /// `team` resolved to an owner number: a literal colour, or an already-resolved field (ai-scripts.md
 /// "A team is a keyword or a number with blue 0, red 1, yellow 2, green 3").
-fn team_owner(team: Team) -> u8 {
+fn team_owner(team: Team) -> TribeId {
     use pop3_ai_script::token::TeamColor;
     match team {
-        Team::Color(TeamColor::Blue) => 0,
-        Team::Color(TeamColor::Red) => 1,
-        Team::Color(TeamColor::Yellow) => 2,
-        Team::Color(TeamColor::Green) => 3,
-        Team::Field(f) => field_i32(f).clamp(0, 3) as u8,
+        Team::Color(TeamColor::Blue) => TribeId::Blue,
+        Team::Color(TeamColor::Red) => TribeId::Red,
+        Team::Color(TeamColor::Yellow) => TribeId::Yellow,
+        Team::Color(TeamColor::Green) => TribeId::Green,
+        Team::Field(f) => TribeId::from_u8(field_i32(f).clamp(0, 3) as u8).unwrap_or(TribeId::Blue),
     }
 }
 
@@ -278,6 +279,7 @@ pub const FLYBY_CANCEL_GRACE_TICKS: crate::time::Ticks = crate::time::Ticks::sec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::Owner;
     use crate::site::ReincarnationSite;
     use crate::terrain::Heightmap;
     use pop3_ai_script::ast::{Block, Cond, Stmt};
@@ -305,11 +307,11 @@ mod tests {
     fn map_with_a_site(height: u16) -> GameMap {
         let mut terrain = Heightmap::new(32);
         terrain.set(10, 10, height);
-        GameMap::bare("t", terrain, vec![ReincarnationSite::at_cell(0, (10, 10), height)])
+        GameMap::bare("t", terrain, vec![ReincarnationSite::at_cell(TribeId::Blue, (10, 10), height)])
     }
 
     fn run_once(map: &mut GameMap, on: bool) {
-        map.tribe_scripts = vec![TribeScript { owner: 0, script: set_reincarnation(on), interp: Interpreter::new() }];
+        map.tribe_scripts = vec![TribeScript { owner: TribeId::Blue, script: set_reincarnation(on), interp: Interpreter::new() }];
         map.tend_ai_scripts();
     }
 
@@ -317,26 +319,26 @@ mod tests {
     fn turn_zero_off_removes_the_site() {
         let mut map = map_with_a_site(100);
         run_once(&mut map, false);
-        assert!(map.site_of(0).is_none());
+        assert!(map.site_of(TribeId::Blue).is_none());
     }
 
     #[test]
     fn turn_zero_on_is_a_no_op_restore_with_nothing_removed() {
         let mut map = map_with_a_site(100);
         run_once(&mut map, true);
-        assert!(map.site_of(0).is_some(), "ON with nothing disabled changes nothing");
+        assert!(map.site_of(TribeId::Blue).is_some(), "ON with nothing disabled changes nothing");
     }
 
     #[test]
     fn off_then_on_restores_at_the_same_position_using_the_live_terrain_height() {
         let mut map = map_with_a_site(100);
         run_once(&mut map, false);
-        assert!(map.site_of(0).is_none());
+        assert!(map.site_of(TribeId::Blue).is_none());
         // The ground changed while the site was off (a spell, erosion...) - restoring should read it
         // fresh, not reuse the stale height from before it was disabled.
         map.terrain.set(10, 10, 150);
         run_once(&mut map, true);
-        let restored = map.site_of(0).unwrap();
+        let restored = map.site_of(TribeId::Blue).unwrap();
         assert_eq!(restored.cell(), (10, 10), "same position");
         assert_eq!(restored.height, 150, "re-reads the live terrain, not the pre-disable height");
     }
@@ -349,7 +351,7 @@ mod tests {
         // the sea, so it keeps the height it last had instead of adopting the live (water) one.
         map.terrain.set(10, 10, crate::terrain::SEA_LEVEL);
         run_once(&mut map, true);
-        assert_eq!(map.site_of(0).unwrap().height, 100);
+        assert_eq!(map.site_of(TribeId::Blue).unwrap().height, 100);
     }
 
     #[test]
@@ -365,9 +367,9 @@ mod tests {
             }]),
         };
         let mut map = map_with_a_site(100);
-        map.tribe_scripts = vec![TribeScript { owner: 2, script, interp: Interpreter::new() }];
+        map.tribe_scripts = vec![TribeScript { owner: TribeId::Yellow, script, interp: Interpreter::new() }];
         map.tend_ai_scripts();
-        assert!(map.site_of(0).is_none());
+        assert!(map.site_of(TribeId::Blue).is_none());
     }
 
     #[test]
@@ -377,9 +379,9 @@ mod tests {
             version: 12,
             block: Block(vec![Stmt::Do(Call { id: CommandId::from_name("DELAY_MAIN_DRUM_TOWER").unwrap(), args: vec![] })]),
         };
-        map.tribe_scripts = vec![TribeScript { owner: 0, script, interp: Interpreter::new() }];
+        map.tribe_scripts = vec![TribeScript { owner: TribeId::Blue, script, interp: Interpreter::new() }];
         map.tend_ai_scripts();
-        assert!(map.site_of(0).is_some(), "an unimplemented DO command leaves the site untouched");
+        assert!(map.site_of(TribeId::Blue).is_some(), "an unimplemented DO command leaves the site untouched");
     }
 
     #[test]
@@ -399,7 +401,7 @@ mod tests {
             }]),
         };
         let mut map = map_with_a_site(100);
-        map.tribe_scripts = vec![TribeScript { owner: 1, script, interp: Interpreter::new() }];
+        map.tribe_scripts = vec![TribeScript { owner: TribeId::Red, script, interp: Interpreter::new() }];
         map.tend_ai_scripts();
         let active = map.active_flyby.as_ref().unwrap();
         assert!(active.flyby.allow_interrupt);
@@ -461,7 +463,7 @@ mod tests {
 
     /// A tribe `owner` with a native AI state alongside its script, like `GameMap::load_original` sets
     /// up for every tribe `LevelHeader::ai_scripts` assigns one to.
-    fn map_with_ai_and_script(owner: u8, script: Script) -> GameMap {
+    fn map_with_ai_and_script(owner: TribeId, script: Script) -> GameMap {
         let mut map = map_with_a_site(100);
         map.ai.push(crate::ai::NativeAi::new(owner));
         map.tribe_scripts = vec![TribeScript { owner, script, interp: Interpreter::new() }];
@@ -471,10 +473,10 @@ mod tests {
     #[test]
     fn a_state_toggle_command_flips_the_matching_native_ai_bit() {
         let on = turn_zero_do(Call { id: CommandId::from_name("STATE_AUTO_ATTACK").unwrap(), args: vec![Arg::OnOff(true)] });
-        let mut map = map_with_ai_and_script(0, on);
-        assert!(!map.ai_state(0, crate::ai::state::AUTO_ATTACK));
+        let mut map = map_with_ai_and_script(TribeId::Blue, on);
+        assert!(!map.ai_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK));
         map.tend_ai_scripts();
-        assert!(map.ai_state(0, crate::ai::state::AUTO_ATTACK));
+        assert!(map.ai_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK));
     }
 
     #[test]
@@ -486,14 +488,14 @@ mod tests {
                 Stmt::Assign { op: pop3_ai_script::ast::AssignOp::Increment, dest: Field::Internal(InternalVar(1025)), src: Field::Const(4) },
             ]),
         };
-        let mut map = map_with_ai_and_script(0, script);
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
         map.tend_ai_scripts();
-        assert_eq!(map.ai_attr(0, InternalVar(1025)), 7, "INT_ATTR_MAX_ATTACKS set then incremented");
+        assert_eq!(map.ai_attr(TribeId::Blue, InternalVar(1025)), 7, "INT_ATTR_MAX_ATTACKS set then incremented");
     }
 
     /// A fully flat, dry 32x32 map (unlike `map_with_a_site`, which only levels the one site cell):
     /// building placement needs its whole footprint and surroundings on dry, even ground.
-    fn flat_map(owner: u8) -> GameMap {
+    fn flat_map(owner: TribeId) -> GameMap {
         let mut terrain = Heightmap::new(32);
         for z in 0..32 {
             for x in 0..32 {
@@ -505,36 +507,36 @@ mod tests {
 
     #[test]
     fn set_drum_tower_pos_places_a_plan_there_and_build_drum_tower_assigns_workers() {
-        let mut map = flat_map(0);
-        map.ai.push(crate::ai::NativeAi::new(0));
-        map.spawn(0, UnitKind::Brave, (20 * 512, 20 * 512));
+        let mut map = flat_map(TribeId::Blue);
+        map.ai.push(crate::ai::NativeAi::new(TribeId::Blue));
+        map.spawn(TribeId::Blue, UnitKind::Brave, (20 * 512, 20 * 512));
         let script = turn_zero_do(Call { id: CommandId::from_name("BUILD_DRUM_TOWER").unwrap(), args: vec![Arg::Field(Field::Const(20)), Arg::Field(Field::Const(20))] });
-        map.tribe_scripts = vec![TribeScript { owner: 0, script, interp: Interpreter::new() }];
+        map.tribe_scripts = vec![TribeScript { owner: TribeId::Blue, script, interp: Interpreter::new() }];
         map.tend_ai_scripts();
-        let tower = map.buildings.iter().find(|b| b.owner == 0 && b.kind == BuildingKind::DrumTower).expect("a drum tower plan");
+        let tower = map.buildings.iter().find(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::DrumTower).expect("a drum tower plan");
         assert_eq!((tower.x, tower.z), (20 * 512, 20 * 512));
         assert!(map.workers(tower.id).count() > 0, "the idle brave was put to work");
     }
 
     #[test]
     fn train_people_now_sends_idle_braves_into_a_built_training_building() {
-        let mut map = flat_map(0);
-        map.ai.push(crate::ai::NativeAi::new(0));
-        let tower = map.place_building(0, BuildingKind::WarriorTraining, (20 * 512, 20 * 512), 0).unwrap();
+        let mut map = flat_map(TribeId::Blue);
+        map.ai.push(crate::ai::NativeAi::new(TribeId::Blue));
+        let tower = map.place_building(TribeId::Blue, BuildingKind::WarriorTraining, (20 * 512, 20 * 512), 0).unwrap();
         let b = map.building_index(tower).unwrap();
         map.buildings[b].flat = true;
         map.buildings[b].used = map.buildings[b].kind.wood_cost();
-        map.spawn(0, UnitKind::Brave, (20 * 512 - 512, 20 * 512));
+        map.spawn(TribeId::Blue, UnitKind::Brave, (20 * 512 - 512, 20 * 512));
         let script = turn_zero_do(Call {
             id: CommandId::from_name("TRAIN_PEOPLE_NOW").unwrap(),
             args: vec![Arg::Field(Field::Const(1)), Arg::Field(Field::Internal(InternalVar(1202)))], // 1 INT_WARRIOR
         });
-        map.tribe_scripts = vec![TribeScript { owner: 0, script, interp: Interpreter::new() }];
+        map.tribe_scripts = vec![TribeScript { owner: TribeId::Blue, script, interp: Interpreter::new() }];
         map.tend_ai_scripts();
         for _ in 0..400 {
             map.tick();
         }
-        assert!(map.units.iter().any(|u| u.owner == 0 && u.inside.is_some_and(|i| i.building == tower)), "the brave was sent to train");
+        assert!(map.units.iter().any(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.inside.is_some_and(|i| i.building == tower)), "the brave was sent to train");
     }
 
     #[test]
@@ -542,23 +544,23 @@ mod tests {
         let mut terrain = Heightmap::new(32);
         terrain.set(10, 10, 100);
         terrain.set(20, 10, 100);
-        let mut map = GameMap::bare("t", terrain, vec![ReincarnationSite::at_cell(0, (10, 10), 100), ReincarnationSite::at_cell(1, (20, 10), 100)]);
+        let mut map = GameMap::bare("t", terrain, vec![ReincarnationSite::at_cell(TribeId::Blue, (10, 10), 100), ReincarnationSite::at_cell(TribeId::Red, (20, 10), 100)]);
         map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
-        map.ai.push(crate::ai::NativeAi::new(0));
-        let enemy_shaman = map.spawn(1, UnitKind::Shaman, (20 * 512, 10 * 512)).id;
-        map.spawn(0, UnitKind::Warrior, (10 * 512, 10 * 512));
+        map.ai.push(crate::ai::NativeAi::new(TribeId::Blue));
+        let enemy_shaman = map.spawn(TribeId::Red, UnitKind::Shaman, (20 * 512, 10 * 512)).id;
+        map.spawn(TribeId::Blue, UnitKind::Warrior, (10 * 512, 10 * 512));
         let script = turn_zero_do(Call {
             id: CommandId::from_name("ATTACK").unwrap(),
             args: vec![Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Red)), Arg::Field(Field::Const(5)), Arg::TargetType(TargetType::Person), Arg::Field(Field::Internal(InternalVar(1225)))],
         });
-        map.tribe_scripts = vec![TribeScript { owner: 0, script, interp: Interpreter::new() }];
+        map.tribe_scripts = vec![TribeScript { owner: TribeId::Blue, script, interp: Interpreter::new() }];
         // STATE_AUTO_ATTACK off and INT_ATTR_MAX_ATTACKS 0 by default: the attack does nothing yet.
         map.tend_ai_scripts();
         assert!(map.units.iter().all(|u| !matches!(u.action, crate::unit::Action::Attacking { .. })));
-        map.ai_set_state(0, crate::ai::state::AUTO_ATTACK, true);
-        map.ai_set_attr(0, InternalVar(1025), 999);
+        map.ai_set_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK, true);
+        map.ai_set_attr(TribeId::Blue, InternalVar(1025), 999);
         map.tend_ai_scripts();
-        let attacker = map.units.iter().find(|u| u.owner == 0).unwrap();
+        let attacker = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue)).unwrap();
         assert!(matches!(attacker.action, crate::unit::Action::Attacking { target: crate::unit::Target::Unit(id), .. } if id == enemy_shaman));
     }
 }

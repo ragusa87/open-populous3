@@ -103,6 +103,7 @@ pub fn participants<C>(units: &[Unit], link_of: impl Fn(&Unit) -> Option<Id<C>>)
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::effect::DamageKind;
     use crate::time::{Countdown, Ticks};
     use crate::unit::{Action, UnitKind};
@@ -153,9 +154,9 @@ pub(crate) mod tests {
 
     /// `n` new braves of tribe 0, standing near its shaman.
     fn braves(map: &mut GameMap, n: usize) -> Vec<UnitId> {
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z);
-        (0..n).map(|k| map.spawn(0, UnitKind::Brave, (at.0, at.1.wrapping_add(300 * k as u16))).id).collect()
+        (0..n).map(|k| map.spawn(TribeId::Blue, UnitKind::Brave, (at.0, at.1.wrapping_add(300 * k as u16))).id).collect()
     }
 
     fn action(map: &GameMap, id: UnitId) -> Action {
