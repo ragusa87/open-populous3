@@ -609,7 +609,13 @@ pub struct UnitView(pub usize);
 #[derive(Component)]
 pub struct UnitSprite(pub usize);
 #[derive(Component)]
-struct HealthFill(usize);
+struct HealthFill {
+    unit: usize,
+    /// The fraction last written to the material: skips `mats.get_mut` (which re-prepares the material for the
+    /// GPU every time, whatever the TODO.md "Health bars" perf note) on every other tick, when health hasn't
+    /// changed.
+    shown: f32,
+}
 #[derive(Component)]
 struct HealthBar;
 
@@ -639,7 +645,7 @@ fn respawn_views(
                 v.spawn((markers::MarkerSlot { slot, above: 0.0 }, Mesh3d::default(), MeshMaterial3d::<StandardMaterial>::default(), Transform::default(), Visibility::Hidden, bevy::light::NotShadowCaster, crate::hover::NoOutline));
             }
             v.spawn((HealthBar, Mesh3d(bar.clone()), MeshMaterial3d(back.clone()), Transform::from_xyz(0.0, BAR_HEIGHT, 0.0), Visibility::Hidden))
-                .with_child((HealthFill(i), Mesh3d(fill.clone()), MeshMaterial3d(mats.add(flat(health_color(1.0)))), Transform::from_xyz(0.0, 0.0, 0.005)));
+                .with_child((HealthFill { unit: i, shown: 1.0 }, Mesh3d(fill.clone()), MeshMaterial3d(mats.add(flat(health_color(1.0)))), Transform::from_xyz(0.0, 0.0, 0.005)));
         });
     }
 }
@@ -770,7 +776,7 @@ fn animate_views(
     mut views: Query<(&UnitView, &mut Grounded, &mut Transform, &crate::hover::Hoverable), (Without<UnitSprite>, Without<HealthFill>)>,
     mut bodies: Query<(&UnitSprite, &mut markers::BodyHeight, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>, &mut Visibility), (Without<HealthFill>, Without<HealthBar>)>,
     mut bars: Query<(&ChildOf, &mut Visibility), (With<HealthBar>, Without<UnitSprite>)>,
-    mut fills: Query<(&HealthFill, &mut Transform, &MeshMaterial3d<StandardMaterial>), Without<UnitView>>,
+    mut fills: Query<(&mut HealthFill, &mut Transform, &MeshMaterial3d<StandardMaterial>), Without<UnitView>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut ghosts: ResMut<GhostMaterials>,
     selection: Res<Selection>,
@@ -822,13 +828,16 @@ fn animate_views(
         let shown = bars_on && unit.is_some_and(|u| u.is_alive() && (selection.contains(u.id) || under_mouse));
         *vis = if shown { Visibility::Inherited } else { Visibility::Hidden };
     }
-    for (fill, mut t, mat) in &mut fills {
-        let Some(u) = units.get(fill.0) else { continue };
+    for (mut fill, mut t, mat) in &mut fills {
+        let Some(u) = units.get(fill.unit) else { continue };
         let f = u.health.current() as f32 / u.health.max() as f32;
         t.scale.x = (BAR_SIZE.x - 0.03) * f;
         t.translation.x = -(BAR_SIZE.x - 0.03) * (1.0 - f) / 2.0;
-        if let Some(mut m) = mats.get_mut(&mat.0) {
-            m.base_color = health_color(f);
+        if f != fill.shown {
+            fill.shown = f;
+            if let Some(mut m) = mats.get_mut(&mat.0) {
+                m.base_color = health_color(f);
+            }
         }
     }
 }

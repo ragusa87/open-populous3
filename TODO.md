@@ -1316,8 +1316,11 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   "biggest win expected" was about, not the still-undone per-instance-UV meshing (step 4). Per-frame steady-state
   systems were never the bottleneck either way (both traces agree, same numbers as above) - step 4's own remaining
   value is real but smaller and riskier than what's already landed, left open rather than forced.
-- [ ] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
-  prepared again each frame; write only when the colour changes, or share a material per colour step.
+- [x] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
+  prepared again each frame; write only when the colour changes, or share a material per colour step. Fixed:
+  `HealthFill` now keeps the fraction it last wrote and `mats.get_mut` is only called when the health fraction
+  actually changed since (`health_color` is a pure function of it, so comparing the fraction is equivalent to
+  comparing the colour, cheaper).
 - [ ] Some image is prepared again every frame (`prepare_assets<GpuImage>` about 3 ms, its extract 1.6 ms): find which
   (the UI text atlas of readouts changing every frame? the cursor? the offscreen target?).
 - [ ] Mesh allocator about 3 ms a frame: meshes rewritten every frame (range ring `put` while shown, blueprint marks)
