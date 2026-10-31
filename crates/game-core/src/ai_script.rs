@@ -1,9 +1,15 @@
 //! A computer tribe's own script (`cpscrNNN.dat`, docs/specs/ai-scripts.md), bridged to `GameMap`
 //! through `pop3_ai_script::interp::Env`. `SET_REINCARNATION`/`SET_NO_BLUE_REINC`,
 //! `FLYBY_CREATE_NEW..=FLYBY_START` (`ScriptEnv::on_flyby`), every `STATE_*` toggle, `SET_DRUM_TOWER_POS`/
-//! `BUILD_DRUM_TOWER`/`DELAY_MAIN_DRUM_TOWER`/`BUILD_MAIN_DRUM_TOWER`, `TRAIN_PEOPLE_NOW` and `ATTACK`
-//! have real behaviour; every other `DO` command (markers/guard groups, spell entries, vehicles, level
-//! events) still reaches the bridge and is deliberately ignored (TODO.md "Computer players (AI)").
+//! `BUILD_DRUM_TOWER`/`DELAY_MAIN_DRUM_TOWER`/`BUILD_MAIN_DRUM_TOWER`, `TRAIN_PEOPLE_NOW`, `ATTACK`
+//! (including its own `damage` withdraw threshold, `ai.rs`'s `Sortie`), `SET_SPELL_ENTRY`, the level-event
+//! gifts (`GIVE_MANA_TO_PLAYER`/`GIVE_ONE_SHOT`/`GIVE_PLAYER_SPELL`/`REMOVE_PLAYER_THING`),
+//! `TRIGGER_LEVEL_WON/LOST`, the timer trio and a handful of queries
+//! (`I_HAVE_ONE_SHOT`/`IS_SHAMAN_AVAILABLE_FOR_ATTACK`/`COUNT_ANGELS`/`IS_BUILDING_NEAR`) have real
+//! behaviour; every other `DO` command (markers/guard groups, vehicles, messages/camera/tutorial UI)
+//! still reaches the bridge and is deliberately ignored (TODO.md "Computer players (AI)"). A query
+//! command returns its result instead (`Env::do_call`'s own `Option<i32>`): the interpreter writes it
+//! into the script's own `var_field` user variable, since `Env` owns no variable storage itself.
 //! `INT_ATTR_*` attributes round-trip through `crate::ai::NativeAi` (`write_attr`/`int_var`); any other
 //! internal variable this bridge doesn't model game state for (`int_var`'s fallback) reads back as its
 //! own numeric token id rather than 0 — a safe, never-colliding default for the many purely
@@ -14,15 +20,19 @@
 
 use crate::ai::AttackGoal;
 use crate::tribes::TribeId;
+use crate::build_book::BuildAvailability;
 use crate::building::BuildingKind;
 use crate::map::GameMap;
+use crate::mana::Mana;
+use crate::outcome::Reason;
+use crate::spell_book::{Availability, SpellKind};
 use crate::time::Tick;
 use crate::unit::UnitKind;
 use pop3_ai_script::ast::{self, Call, Script};
 use pop3_ai_script::field::InternalVar;
 use pop3_ai_script::interp::{Env, Interpreter, ResolvedFlyby};
 use pop3_ai_script::raw::RawScript;
-use pop3_ai_script::token::{Arg, Team, TargetType};
+use pop3_ai_script::token::{Arg, OneShotType, Team, TargetType};
 use pop3_format::header::TRIBES;
 use std::path::Path;
 
@@ -98,13 +108,13 @@ impl Env for ScriptEnv<'_> {
         (self.map.rng.next_u32() % 100) as i32
     }
 
-    fn do_call(&mut self, call: &Call) {
+    fn do_call(&mut self, call: &Call) -> Option<i32> {
         let name = call.id.name();
         if let Some(bit) = crate::ai::state::bit_for(name) {
             if let Some(Arg::OnOff(on)) = call.args.first() {
                 self.map.ai_set_state(self.owner, bit, *on);
             }
-            return;
+            return None;
         }
         match name {
             "SET_REINCARNATION" => {
@@ -112,6 +122,7 @@ impl Env for ScriptEnv<'_> {
                     let event = if *on { crate::event::WorldEvent::RestoreSite { tribe: self.owner } } else { crate::event::WorldEvent::RemoveSite { tribe: self.owner } };
                     self.map.apply_events(vec![event]);
                 }
+                None
             }
             "SET_NO_BLUE_REINC" => {
                 // The human player's equivalent of `SET_REINCARNATION OFF`: one-way, always targets
@@ -119,28 +130,40 @@ impl Env for ScriptEnv<'_> {
                 // "this AI gets a reincarnation site at the start. SET_NO_BLUE_REINC is the human
                 // equivalent").
                 self.map.apply_events(vec![crate::event::WorldEvent::RemoveSite { tribe: TribeId::Blue }]);
+                None
             }
             "SET_DRUM_TOWER_POS" => {
                 if let [Arg::Field(x), Arg::Field(z)] = call.args[..] {
                     self.map.ai_set_drum_tower_pos(self.owner, field_pos(x, z));
                 }
+                None
             }
             "BUILD_DRUM_TOWER" => {
                 if let [Arg::Field(x), Arg::Field(z)] = call.args[..] {
                     self.map.ai_build_at(self.owner, BuildingKind::DrumTower, field_pos(x, z));
                 }
+                None
             }
-            "DELAY_MAIN_DRUM_TOWER" => self.map.ai_set_delay_main_drum_tower(self.owner, true),
-            "BUILD_MAIN_DRUM_TOWER" => self.map.ai_set_delay_main_drum_tower(self.owner, false),
+            "DELAY_MAIN_DRUM_TOWER" => {
+                self.map.ai_set_delay_main_drum_tower(self.owner, true);
+                None
+            }
+            "BUILD_MAIN_DRUM_TOWER" => {
+                self.map.ai_set_delay_main_drum_tower(self.owner, false);
+                None
+            }
             "TRAIN_PEOPLE_NOW" => {
                 if let [Arg::Field(n), Arg::Field(model)] = call.args[..]
                     && let Some(kind) = unit_kind_from_model(model)
                 {
                     self.map.ai_train_now(self.owner, kind, field_i32(n).max(0) as usize);
                 }
+                None
             }
             "ATTACK" => {
-                if let (Some(Arg::Team(team)), Some(Arg::Field(count)), Some(Arg::TargetType(target_type)), Some(Arg::Field(model))) = (call.args.first(), call.args.get(1), call.args.get(2), call.args.get(3)) {
+                if let (Some(Arg::Team(team)), Some(Arg::Field(count)), Some(Arg::TargetType(target_type)), Some(Arg::Field(model)), Some(Arg::Field(damage))) =
+                    (call.args.first(), call.args.get(1), call.args.get(2), call.args.get(3), call.args.get(4))
+                {
                     let goal = match target_type {
                         TargetType::Person => Some(AttackGoal::Shaman),
                         TargetType::Building => Some(AttackGoal::Building(building_kind_from_model(*model))),
@@ -148,11 +171,127 @@ impl Env for ScriptEnv<'_> {
                     };
                     if let Some(goal) = goal {
                         let target_team = team_owner(*team);
-                        self.map.ai_attack(self.owner, target_team, field_i32(*count), goal);
+                        self.map.ai_attack(self.owner, target_team, field_i32(*count), goal, field_i32(*damage));
                     }
                 }
+                None
             }
-            _ => {} // Every other DO command: not implemented yet, left as a no-op on purpose.
+            "SET_SPELL_ENTRY" => {
+                if let [Arg::Field(entry), Arg::Field(spell), Arg::Field(_mana), Arg::Field(frequency), Arg::Field(min_people), Arg::Field(base)] = call.args[..]
+                    && let Some(kind) = spell_kind_from_model(spell)
+                {
+                    self.map.ai_set_spell_entry(self.owner, field_i32(entry).max(0) as usize, kind, field_i32(frequency), field_i32(min_people), field_i32(base) != 0);
+                }
+                None
+            }
+            "GIVE_MANA_TO_PLAYER" => {
+                if let (Some(Arg::Team(team)), Some(Arg::Field(n))) = (call.args.first(), call.args.get(1)) {
+                    let player = team_owner(*team);
+                    if let Some(pool) = self.map.mana.get_mut(player as usize) {
+                        pool.add(Mana(field_i32(*n).max(0) as u32));
+                    }
+                }
+                None
+            }
+            "GIVE_ONE_SHOT" => {
+                if let (Some(Arg::Field(spell)), Some(Arg::Team(team))) = (call.args.first(), call.args.get(1))
+                    && let Some(kind) = spell_kind_from_model(*spell)
+                {
+                    let player = team_owner(*team);
+                    if let Some(book) = self.map.spell_books.get_mut(player as usize) {
+                        crate::worship::one_more_shot(book, kind);
+                    }
+                }
+                None
+            }
+            "GIVE_PLAYER_SPELL" => {
+                if let (Some(Arg::Team(team)), Some(Arg::Field(spell))) = (call.args.first(), call.args.get(1))
+                    && let Some(kind) = spell_kind_from_model(*spell)
+                {
+                    let player = team_owner(*team);
+                    if let Some(book) = self.map.spell_books.get_mut(player as usize) {
+                        book.set(kind, Availability::Known);
+                    }
+                }
+                None
+            }
+            "REMOVE_PLAYER_THING" => {
+                if let (Some(Arg::Team(team)), Some(Arg::Field(model))) = (call.args.first(), call.args.get(1)) {
+                    let player = team_owner(*team);
+                    if let Some(kind) = spell_kind_from_model(*model) {
+                        if let Some(book) = self.map.spell_books.get_mut(player as usize) {
+                            book.set(kind, Availability::Hidden);
+                        }
+                    } else if let Some(kind) = building_kind_from_model(*model)
+                        && let Some(book) = self.map.build_books.get_mut(player as usize)
+                    {
+                        book.set(kind, BuildAvailability::Hidden);
+                    }
+                }
+                None
+            }
+            "TRIGGER_LEVEL_WON" => {
+                // The level's campaign outcome, not an elimination: the human player wins
+                // (ai-scripts.md "Level events"). Our own reading of "ends the level" as "declares it",
+                // not traced against the exe.
+                self.map.declare_outcome(Some(TribeId::Blue), Reason::Scripted);
+                None
+            }
+            "TRIGGER_LEVEL_LOST" => {
+                // The mirror case: the human loses, so this script's own tribe is left "the winner"
+                // (`Outcome::winner`'s own meaning) — our own reading, same caveat as above.
+                self.map.declare_outcome(Some(self.owner), Reason::Scripted);
+                None
+            }
+            "SET_TIMER_GOING" => {
+                if let Some(Arg::Field(seconds)) = call.args.first() {
+                    self.map.ai_set_timer(self.owner, field_i32(*seconds));
+                }
+                None
+            }
+            "REMOVE_TIMER" => {
+                self.map.ai_remove_timer(self.owner);
+                None
+            }
+            "HAS_TIMER_REACHED_ZERO" => Some(self.map.ai_timer_reached_zero(self.owner) as i32),
+            "I_HAVE_ONE_SHOT" => match call.args.first() {
+                Some(Arg::OneShotType(OneShotType::Spell)) => {
+                    let has = if let Some(Arg::Field(spell)) = call.args.get(1)
+                        && let Some(kind) = spell_kind_from_model(*spell)
+                    {
+                        self.map.spell_books.get(self.owner as usize).and_then(|b| b.slot(kind)).is_some_and(|s| matches!(s.availability, Availability::Provided { shots } if shots > 0))
+                    } else {
+                        false
+                    };
+                    Some(has as i32)
+                }
+                // The BUILDING_TYPE form's meaning is unknown (ai-scripts.md "?"): always 0, not guessed.
+                _ => Some(0),
+            },
+            "IS_SHAMAN_AVAILABLE_FOR_ATTACK" => {
+                let available = self.map.shaman_of(self.owner).is_some_and(crate::unit::Unit::is_alive) && !self.map.shaman_locked(self.owner);
+                Some(available as i32)
+            }
+            "COUNT_ANGELS" => {
+                let team = call.args.first().and_then(|a| if let Arg::Team(t) = a { Some(team_owner(*t)) } else { None });
+                let count = self.map.units.iter().filter(|u| u.kind == UnitKind::AngelOfDeath && u.is_alive() && team.is_none_or(|t| u.owner == t)).count();
+                Some(count as i32)
+            }
+            "IS_BUILDING_NEAR" => {
+                if let (Some(Arg::Field(model)), Some(Arg::Field(x)), Some(Arg::Field(z)), Some(Arg::Team(team)), Some(Arg::Field(radius))) =
+                    (call.args.first(), call.args.get(1), call.args.get(2), call.args.get(3), call.args.get(4))
+                {
+                    let kind = building_kind_from_model(*model);
+                    let team = team_owner(*team);
+                    let at = field_pos(*x, *z);
+                    let r = (field_i32(*radius).max(0) as i64) * pop3_format::WORLD_UNITS_PER_CELL as i64;
+                    let near = self.map.buildings.iter().any(|b| b.owner == team && kind.is_none_or(|k| b.kind == k) && crate::map::torus_dist2(at, (b.x, b.z)) <= r * r);
+                    Some(near as i32)
+                } else {
+                    Some(0)
+                }
+            }
+            _ => None, // Every other DO command: not implemented yet, left as a no-op on purpose.
         }
     }
 
@@ -203,6 +342,36 @@ fn unit_kind_from_model(model: pop3_ai_script::field::Field) -> Option<UnitKind>
         1204 => UnitKind::Spy,
         1205 => UnitKind::Firewarrior,
         1206 => UnitKind::Shaman,
+        _ => return None,
+    })
+}
+
+/// `INT_BLAST`..`INT_BLOODLUST` (field.rs's `INTERNAL_VAR_NAMES`): a `spell`/`model` argument naming
+/// which spell, from its `int_var` fallback's own numeric id (see the module doc). `INT_BURN` (1184,
+/// firewarriors' own fire, not a book spell) and `INT_WRATH_OF_GOD` as anything but Armageddon's own
+/// internal name are not reachable here.
+fn spell_kind_from_model(model: pop3_ai_script::field::Field) -> Option<SpellKind> {
+    Some(match field_i32(model) {
+        1185 => SpellKind::Blast,
+        1186 => SpellKind::Lightning,
+        1187 => SpellKind::Whirlwind, // INT_TORNADO
+        1188 => SpellKind::Swarm,
+        1189 => SpellKind::Invisibility,
+        1190 => SpellKind::Hypnotism,
+        1191 => SpellKind::Firestorm,
+        1192 => SpellKind::GhostArmy,
+        1193 => SpellKind::Erosion,
+        1194 => SpellKind::Swamp,
+        1195 => SpellKind::LandBridge,
+        1196 => SpellKind::AngelOfDeath,
+        1197 => SpellKind::Earthquake,
+        1198 => SpellKind::Flatten,
+        1199 => SpellKind::Volcano,
+        1200 => SpellKind::Armageddon, // INT_WRATH_OF_GOD
+        1243 => SpellKind::MagicalShield, // INT_SHIELD
+        1244 => SpellKind::Convert,
+        1245 => SpellKind::Teleport,
+        1246 => SpellKind::Bloodlust,
         _ => return None,
     })
 }
@@ -551,7 +720,7 @@ mod tests {
         map.spawn(TribeId::Blue, UnitKind::Warrior, (10 * 512, 10 * 512));
         let script = turn_zero_do(Call {
             id: CommandId::from_name("ATTACK").unwrap(),
-            args: vec![Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Red)), Arg::Field(Field::Const(5)), Arg::TargetType(TargetType::Person), Arg::Field(Field::Internal(InternalVar(1225)))],
+            args: vec![Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Red)), Arg::Field(Field::Const(5)), Arg::TargetType(TargetType::Person), Arg::Field(Field::Internal(InternalVar(1225))), Arg::Field(Field::Const(999))],
         });
         map.tribe_scripts = vec![TribeScript { owner: TribeId::Blue, script, interp: Interpreter::new() }];
         // STATE_AUTO_ATTACK off and INT_ATTR_MAX_ATTACKS 0 by default: the attack does nothing yet.
@@ -562,5 +731,146 @@ mod tests {
         map.tend_ai_scripts();
         let attacker = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue)).unwrap();
         assert!(matches!(attacker.action, crate::unit::Action::Attacking { target: crate::unit::Target::Unit(id), .. } if id == enemy_shaman));
+    }
+
+    #[test]
+    fn set_spell_entry_reaches_the_native_ai() {
+        let script = turn_zero_do(Call {
+            id: CommandId::from_name("SET_SPELL_ENTRY").unwrap(),
+            args: vec![Arg::Field(Field::Const(0)), Arg::Field(Field::Internal(InternalVar(1185))), Arg::Field(Field::Const(0)), Arg::Field(Field::Const(8)), Arg::Field(Field::Const(2)), Arg::Field(Field::Const(1))],
+        });
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        map.spawn(TribeId::Blue, UnitKind::Shaman, (10 * 512, 10 * 512));
+        map.sites.push(ReincarnationSite::at_cell(TribeId::Red, (12, 10), 100));
+        map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
+        for _ in 0..2 {
+            map.spawn(TribeId::Red, UnitKind::Brave, (12 * 512, 10 * 512));
+        }
+        map.tend_ai_scripts();
+        let before = map.spell_books[TribeId::Blue as usize].slot(SpellKind::Blast).unwrap().charges;
+        for _ in 0..20 {
+            map.tick();
+        }
+        assert!(map.spell_books[TribeId::Blue as usize].slot(SpellKind::Blast).unwrap().charges < before, "the script's slot reached the shaman's own auto-cast");
+    }
+
+    #[test]
+    fn give_mana_to_player_adds_to_the_named_players_mana_pool() {
+        let script = turn_zero_do(Call { id: CommandId::from_name("GIVE_MANA_TO_PLAYER").unwrap(), args: vec![Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Blue)), Arg::Field(Field::Const(5000))] });
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        map.tend_ai_scripts();
+        assert_eq!(map.mana[TribeId::Blue as usize].incoming, crate::mana::Mana(5000));
+    }
+
+    #[test]
+    fn give_one_shot_grants_a_free_cast_of_a_spell_not_already_known() {
+        let script = turn_zero_do(Call { id: CommandId::from_name("GIVE_ONE_SHOT").unwrap(), args: vec![Arg::Field(Field::Internal(InternalVar(1186))), Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Blue))] }); // INT_LIGHTNING
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        map.tend_ai_scripts();
+        assert_eq!(map.spell_books[TribeId::Blue as usize].slot(SpellKind::Lightning).unwrap().availability, Availability::Provided { shots: 1 });
+    }
+
+    #[test]
+    fn give_player_spell_makes_it_known() {
+        let script = turn_zero_do(Call { id: CommandId::from_name("GIVE_PLAYER_SPELL").unwrap(), args: vec![Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Blue)), Arg::Field(Field::Internal(InternalVar(1186)))] }); // INT_LIGHTNING
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        map.tend_ai_scripts();
+        assert_eq!(map.spell_books[TribeId::Blue as usize].slot(SpellKind::Lightning).unwrap().availability, Availability::Known);
+    }
+
+    #[test]
+    fn remove_player_thing_hides_a_known_spell() {
+        let script = turn_zero_do(Call { id: CommandId::from_name("REMOVE_PLAYER_THING").unwrap(), args: vec![Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Blue)), Arg::Field(Field::Internal(InternalVar(1185)))] }); // INT_BLAST, Known by demo()
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        assert_eq!(map.spell_books[TribeId::Blue as usize].slot(SpellKind::Blast).unwrap().availability, Availability::Known);
+        map.tend_ai_scripts();
+        assert_eq!(map.spell_books[TribeId::Blue as usize].slot(SpellKind::Blast).unwrap().availability, Availability::Hidden);
+    }
+
+    #[test]
+    fn trigger_level_won_declares_blue_the_winner() {
+        let script = turn_zero_do(Call { id: CommandId::from_name("TRIGGER_LEVEL_WON").unwrap(), args: vec![] });
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        map.tend_ai_scripts();
+        assert_eq!(map.outcome.map(|o| o.winner), Some(Some(TribeId::Blue)));
+    }
+
+    #[test]
+    fn trigger_level_lost_declares_the_scripts_own_tribe_the_winner() {
+        let script = turn_zero_do(Call { id: CommandId::from_name("TRIGGER_LEVEL_LOST").unwrap(), args: vec![] });
+        let mut map = map_with_ai_and_script(TribeId::Red, script);
+        map.tend_ai_scripts();
+        assert_eq!(map.outcome.map(|o| o.winner), Some(Some(TribeId::Red)));
+    }
+
+    #[test]
+    fn set_timer_going_and_has_timer_reached_zero_round_trip() {
+        let script = turn_zero_do(Call { id: CommandId::from_name("SET_TIMER_GOING").unwrap(), args: vec![Arg::Field(Field::Const(1))] });
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        map.tend_ai_scripts();
+        assert!(!map.ai_timer_reached_zero(TribeId::Blue), "not yet");
+        for _ in 0..13 {
+            map.tick();
+        }
+        assert!(map.ai_timer_reached_zero(TribeId::Blue));
+    }
+
+    #[test]
+    fn i_have_one_shot_reports_a_provided_spell_through_its_var_field() {
+        let query = Call { id: CommandId::from_name("I_HAVE_ONE_SHOT").unwrap(), args: vec![Arg::OneShotType(OneShotType::Spell), Arg::Field(Field::Internal(InternalVar(1199))), Arg::VarField(pop3_ai_script::field::UserVar(0))] }; // INT_VOLCANO, Provided{shots:1} in demo()
+        let script = Script {
+            version: 12,
+            block: Block(vec![Stmt::Do(query), Stmt::Assign { op: pop3_ai_script::ast::AssignOp::Set, dest: Field::Internal(InternalVar(1025)), src: Field::UserVar(pop3_ai_script::field::UserVar(0)) }]),
+        };
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        map.tend_ai_scripts();
+        assert_eq!(map.ai_attr(TribeId::Blue, InternalVar(1025)), 1);
+    }
+
+    #[test]
+    fn is_shaman_available_for_attack_true_when_alive_and_not_locked() {
+        let query = Call { id: CommandId::from_name("IS_SHAMAN_AVAILABLE_FOR_ATTACK").unwrap(), args: vec![Arg::VarField(pop3_ai_script::field::UserVar(0))] };
+        let script = Script {
+            version: 12,
+            block: Block(vec![Stmt::Do(query), Stmt::Assign { op: pop3_ai_script::ast::AssignOp::Set, dest: Field::Internal(InternalVar(1025)), src: Field::UserVar(pop3_ai_script::field::UserVar(0)) }]),
+        };
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        map.spawn(TribeId::Blue, UnitKind::Shaman, (10 * 512, 10 * 512));
+        map.tend_ai_scripts();
+        assert_eq!(map.ai_attr(TribeId::Blue, InternalVar(1025)), 1);
+    }
+
+    #[test]
+    fn count_angels_counts_only_the_named_tribes_own_living_angels() {
+        let query = Call { id: CommandId::from_name("COUNT_ANGELS").unwrap(), args: vec![Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Red)), Arg::VarField(pop3_ai_script::field::UserVar(0))] };
+        let script = Script {
+            version: 12,
+            block: Block(vec![Stmt::Do(query), Stmt::Assign { op: pop3_ai_script::ast::AssignOp::Set, dest: Field::Internal(InternalVar(1025)), src: Field::UserVar(pop3_ai_script::field::UserVar(0)) }]),
+        };
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        map.spawn(TribeId::Red, UnitKind::AngelOfDeath, (10 * 512, 10 * 512));
+        map.spawn(TribeId::Blue, UnitKind::AngelOfDeath, (10 * 512, 10 * 512));
+        map.tend_ai_scripts();
+        assert_eq!(map.ai_attr(TribeId::Blue, InternalVar(1025)), 1);
+    }
+
+    #[test]
+    fn is_building_near_finds_a_building_of_the_named_kind_within_radius() {
+        let mut map = flat_map(TribeId::Blue);
+        map.ai.push(crate::ai::NativeAi::new(TribeId::Blue));
+        // Away from the site at (10, 10): `SPAWN_FLAT_RADIUS` (3 cells) around it refuses any placement.
+        let placed = map.place_building(TribeId::Blue, BuildingKind::DrumTower, (21 * 512, 20 * 512), 0);
+        assert!(placed.is_some(), "test setup: the drum tower must actually get placed");
+        let query = Call {
+            id: CommandId::from_name("IS_BUILDING_NEAR").unwrap(),
+            args: vec![Arg::Field(Field::Internal(InternalVar(1210))), Arg::Field(Field::Const(20)), Arg::Field(Field::Const(20)), Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Blue)), Arg::Field(Field::Const(2)), Arg::VarField(pop3_ai_script::field::UserVar(0))],
+        }; // INT_DRUM_TOWER near (20, 20), radius 2 cells
+        let script = Script {
+            version: 12,
+            block: Block(vec![Stmt::Do(query), Stmt::Assign { op: pop3_ai_script::ast::AssignOp::Set, dest: Field::Internal(InternalVar(1025)), src: Field::UserVar(pop3_ai_script::field::UserVar(0)) }]),
+        };
+        map.tribe_scripts = vec![TribeScript { owner: TribeId::Blue, script, interp: Interpreter::new() }];
+        map.tend_ai_scripts();
+        assert_eq!(map.ai_attr(TribeId::Blue, InternalVar(1025)), 1);
     }
 }
