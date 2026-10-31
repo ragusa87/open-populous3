@@ -101,7 +101,8 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             | Spell::MagicalShield { at }
             | Spell::Bloodlust { at }
             | Spell::Invisibility { at }
-            | Spell::Swarm { at } = spell
+            | Spell::Swarm { at }
+            | Spell::AngelOfDeath { at } = spell
             {
                 b.push(match spell {
                     Spell::Teleport { .. } => 4,
@@ -117,6 +118,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                     Spell::Bloodlust { .. } => 15,
                     Spell::Invisibility { .. } => 16,
                     Spell::Swarm { .. } => 17,
+                    Spell::AngelOfDeath { .. } => 18,
                     _ => 6,
                 });
                 b.extend(at.0.to_le_bytes());
@@ -141,7 +143,8 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                 | Spell::MagicalShield { .. }
                 | Spell::Bloodlust { .. }
                 | Spell::Invisibility { .. }
-                | Spell::Swarm { .. } => unreachable!("encoded above"),
+                | Spell::Swarm { .. }
+                | Spell::AngelOfDeath { .. } => unreachable!("encoded above"),
             };
             b.push(tag);
             for (x, z) in cells {
@@ -378,6 +381,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
                 15 => Spell::Bloodlust { at: (c.u16()?, c.u16()?) },
                 16 => Spell::Invisibility { at: (c.u16()?, c.u16()?) },
                 17 => Spell::Swarm { at: (c.u16()?, c.u16()?) },
+                18 => Spell::AngelOfDeath { at: (c.u16()?, c.u16()?) },
                 _ => return None,
             };
             Some(Command::Cast { player, spell })
@@ -529,6 +533,7 @@ mod tests {
                 Command::Cast { player: TribeId::Blue, spell: Spell::MagicalShield { at: (23, 45) } },
                 Command::Cast { player: TribeId::Red, spell: Spell::Bloodlust { at: (65, 87) } },
                 Command::Cast { player: TribeId::Yellow, spell: Spell::Invisibility { at: (109, 131) } },
+                Command::Cast { player: TribeId::Blue, spell: Spell::AngelOfDeath { at: (321, 654) } },
                 Command::Order { player: TribeId::Yellow, order: Order::MoveTo { x: 65535, z: 300 } },
                 Command::Order { player: TribeId::Blue, order: Order::Cast },
                 Command::Order { player: TribeId::Red, order: Order::Stop },
