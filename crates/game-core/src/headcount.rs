@@ -117,6 +117,9 @@ pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
     let working = match unit.action {
         Action::Chopping { .. } | Action::PickingUpWood { .. } | Action::Holding { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Entering { .. } | Action::Hammering | Action::Worshipping { .. } | Action::AroundFire { .. } | Action::Attacking { .. } | Action::Challenge { .. } | Action::Melee { .. } | Action::Hacking { .. } | Action::Throwing { .. } | Action::Preaching | Action::Queuing { .. } | Action::Grazing { .. } => true,
         Action::Idle | Action::Listening { .. } | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Boarding { .. } | Action::Alighting { .. } | Action::Drowning | Action::Tumbling | Action::Settling { .. } | Action::Panicking { .. } | Action::OnFire { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } | Action::Guarding { .. } => false,
+        // Never reached for an Angel of Death itself (`kind_index` already returns None for it above); a grabbed
+        // victim isn't working either.
+        Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } => false,
         #[cfg(test)]
         Action::Gathered { .. } => true,
     };
@@ -182,7 +185,7 @@ impl GameMap {
             .iter()
             .filter(|u| u.owner == tribe && u.is_alive())
             .map(|u| match u.kind {
-                UnitKind::Wildman => 0,
+                UnitKind::Wildman | UnitKind::AngelOfDeath => 0,
                 UnitKind::Shaman => mana_rate(UnitKind::Shaman, true),
                 _ => mana_rate(u.kind, matches!(state_of(self, u), Some(State::Housed) | Some(State::Working))),
             })
@@ -211,7 +214,7 @@ fn mana_rate(kind: UnitKind, busy: bool) -> u32 {
             }
         }
         UnitKind::Shaman => 30,
-        UnitKind::Wildman => 0,
+        UnitKind::Wildman | UnitKind::AngelOfDeath => 0,
     }
 }
 

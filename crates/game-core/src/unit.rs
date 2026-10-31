@@ -107,6 +107,10 @@ pub enum UnitKind {
     Firewarrior,
     /// Neutral wild people (no tribe, owner 255 in the levels): the Convert spell makes braves of them.
     Wildman,
+    /// The spell's own creature (model 13, type 8, `angel_of_death.rs`), spawned flying, not in `ALL`: never
+    /// trained, never a tribe's headcount, never selectable or given orders, and has no sprite of its own yet
+    /// (pop3-rev-analysis.md "Angel of Death mechanics", TODO.md).
+    AngelOfDeath,
 }
 
 impl UnitKind {
@@ -138,6 +142,7 @@ impl UnitKind {
             UnitKind::Spy => "Spy",
             UnitKind::Firewarrior => "Firewarrior",
             UnitKind::Wildman => "Wildman",
+            UnitKind::AngelOfDeath => "Angel of Death",
         }
     }
 
@@ -152,6 +157,9 @@ impl UnitKind {
             UnitKind::Spy => 60,
             UnitKind::Firewarrior => 50,
             UnitKind::Warrior | UnitKind::Preacher | UnitKind::Wildman => 47,
+            // Its own flight speed (`angel_of_death::SPEED`'s single source): a guess, not traced — faster than
+            // any walker, it hunts across the whole map.
+            UnitKind::AngelOfDeath => 150,
         }
     }
 }
@@ -256,6 +264,19 @@ pub enum Action {
     Preaching,
     /// Fighting in the melee `melee` (melee.rs): its place in the ring, its stance.
     Melee { melee: crate::melee::MeleeId, place: (u16, u16), stance: crate::melee::Stance },
+    /// An Angel of Death with no target locked yet (`GameMap::tend_angels_of_death`, angel_of_death.rs).
+    Hunting,
+    /// An Angel of Death flying towards `target`, a rival angel or a victim to grab, locked until it is close
+    /// enough, dead, or no longer eligible.
+    Closing { target: UnitId },
+    /// An Angel of Death carrying `victim` (`Action::Grabbed`), `left` ticks before it releases it
+    /// (`angel_of_death::CARRY_TICKS`).
+    Carrying { victim: UnitId, left: Countdown },
+    /// An Angel of Death trading blows with the rival angel `rival` by health alone, `cooldown` ticks until the
+    /// next exchange (angel_of_death.rs).
+    Fighting { rival: UnitId, cooldown: Countdown },
+    /// Grabbed by the Angel of Death `by`: no orders, no movement of its own, until released to die.
+    Grabbed { by: UnitId },
     /// Held by the test-only coordinator `gathering` (coordinator.rs).
     #[cfg(test)]
     Gathered { gathering: crate::id::Id<crate::coordinator::tests::Gathering> },
@@ -297,6 +318,9 @@ impl Action {
             Action::Queuing { .. } => "Queuing",
             Action::Preaching => "Preaching",
             Action::Hacking { .. } | Action::Throwing { .. } => "Attacking",
+            Action::Hunting | Action::Closing { .. } | Action::Fighting { .. } => "Hunting",
+            Action::Carrying { .. } => "Carrying",
+            Action::Grabbed { .. } => "Captured",
             #[cfg(test)]
             Action::Gathered { .. } => "Gathered",
         }
@@ -341,7 +365,24 @@ impl Action {
     }
 
     pub(crate) fn can_take_orders(&self) -> bool {
-        !matches!(self, Action::Drowning | Action::Tumbling | Action::Settling { .. } | Action::Panicking { .. } | Action::OnFire { .. } | Action::Listening { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
+        !matches!(
+            self,
+            Action::Drowning
+                | Action::Tumbling
+                | Action::Settling { .. }
+                | Action::Panicking { .. }
+                | Action::OnFire { .. }
+                | Action::Listening { .. }
+                | Action::Dying { .. }
+                | Action::Dead { .. }
+                | Action::Spirit { .. }
+                // An Angel of Death never takes orders at all; a grabbed victim moves only with its captor.
+                | Action::Hunting
+                | Action::Closing { .. }
+                | Action::Carrying { .. }
+                | Action::Fighting { .. }
+                | Action::Grabbed { .. }
+        )
     }
 }
 
@@ -474,6 +515,9 @@ pub struct Unit {
     pub inside: Option<Inside>,
     /// The vehicle carrying it (`crate::vehicle`): it stands where the vehicle is and goes nowhere on its own.
     pub aboard: Option<crate::vehicle::VehicleId>,
+    /// An Angel of Death's own flight: `None` for everyone else, always `Some` for one
+    /// (`GameMap::tend_angels_of_death`, `angel_of_death.rs`).
+    pub flight: Option<crate::angel_of_death::Flight>,
 }
 
 /// A unit on the ground and not tumbling: only `Unit::pickable` makes one, so whatever takes it can
@@ -535,6 +579,7 @@ impl Unit {
             work: None,
             inside: None,
             aboard: None,
+            flight: None,
         }
     }
 
@@ -841,7 +886,9 @@ impl Unit {
             self.action = Action::Idle;
             return None;
         }
-        if self.is_alive() && self.aboard.is_none() && !self.motion.airborne() && is_sea(terrain, self.cell()) {
+        // An Angel of Death flies its own way (`flight`, not `motion`): never subject to the ordinary
+        // drowning check. Neither is its grabbed victim: carried wherever the angel goes, including over the sea.
+        if self.is_alive() && self.aboard.is_none() && !self.motion.airborne() && self.flight.is_none() && !matches!(self.action, Action::Grabbed { .. }) && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
             (self.teleport_to, self.spell) = (None, None);
         }
@@ -877,6 +924,8 @@ impl Unit {
             Action::Attacking { .. } => {}
             Action::Guarding { .. } => {}
             Action::Hacking { .. } => {}
+            // All driven by `GameMap::tend_angels_of_death`, same shape as `Attacking`/`tend_attacks`.
+            Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } => {}
             Action::Throwing { target, mut left } => {
                 self.action = match left.tick() {
                     false => Action::Throwing { target, left },
@@ -1075,7 +1124,7 @@ impl Unit {
         self.kind.stats().heal.is_some()
             && self.is_alive()
             && !self.motion.airborne()
-            && !matches!(self.action, Action::Drowning | Action::Stranded { .. } | Action::OnFire { .. })
+            && !matches!(self.action, Action::Drowning | Action::Stranded { .. } | Action::OnFire { .. } | Action::Grabbed { .. })
             && !self.statuses.struck_by_lightning.is_on()
     }
 

@@ -38,6 +38,13 @@ const PREACHER: KindStats = KindStats { life: 1100, heal: Some(4), fight_damage:
 const SPY: KindStats = KindStats { life: 600, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
 const FIREWARRIOR: KindStats = KindStats { life: 700, heal: Some(6), fight_damage: 60, rank: 3, pace: 2, fights: true, joins_melees: false, throws: true, sabotage: 16, sight: 11, sight_at_work: 5, look_every: Every::new(4) };
 const WILDMAN: KindStats = KindStats { life: 1000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, throws: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
+/// `LIFE_AOD` (10 000, exe-confirmed). Never heals (TODO.md "Health"), never fights the ordinary way (its own
+/// grab/carry/release and angel-vs-angel exchange run entirely through `GameMap::tend_angels_of_death`, bypassing
+/// `attack`/`melee` — `fights: false` here, together with it never being `UnitKind::Wildman`, is what already
+/// keeps it out of `attack::may_attack`'s target list and spotting's own auto-attack scan, with no extra
+/// exclusion needed there) — not traced either way, a deliberate simplification over threading a new exception
+/// through the ordinary combat path for one kind.
+const ANGEL_OF_DEATH: KindStats = KindStats { life: 10_000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, throws: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
 
 impl UnitKind {
     pub const fn stats(self) -> &'static KindStats {
@@ -49,6 +56,7 @@ impl UnitKind {
             UnitKind::Spy => &SPY,
             UnitKind::Firewarrior => &FIREWARRIOR,
             UnitKind::Wildman => &WILDMAN,
+            UnitKind::AngelOfDeath => &ANGEL_OF_DEATH,
         }
     }
 }
