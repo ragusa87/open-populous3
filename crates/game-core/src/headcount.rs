@@ -177,43 +177,44 @@ impl GameMap {
 
     /// The tribe's mana income this turn (huts-and-training.md rule 7, pop3-rev-analysis.md "Income"): busy
     /// or idle followers (`mana_rate`) plus the shaman, always at her own flat rate, scaled by
-    /// `HUMAN_MANA_ADJUST` (×1.25) — every tribe is treated as human until AI tribes exist (training.rs's
+    /// `HUMAN_MANA_ADJUST` (×1.25 default) — every tribe is treated as human until AI tribes exist (training.rs's
     /// `train_cost` has the same gap: "the computer players' 1000 once tribes have a controller").
     pub fn mana_income(&self, tribe: TribeId) -> Mana {
+        let income = &self.balance.income;
         let sum: u32 = self
             .units
             .iter()
             .filter(|u| u.owner == tribe && u.is_alive())
             .map(|u| match u.kind {
                 UnitKind::Wildman | UnitKind::AngelOfDeath => 0,
-                UnitKind::Shaman => mana_rate(UnitKind::Shaman, true),
-                _ => mana_rate(u.kind, matches!(state_of(self, u), Some(State::Housed) | Some(State::Working))),
+                UnitKind::Shaman => mana_rate(income, UnitKind::Shaman, true),
+                _ => mana_rate(income, u.kind, matches!(state_of(self, u), Some(State::Housed) | Some(State::Working))),
             })
             .sum();
-        Mana(sum * 5 / 4)
+        Mana(sum * income.human_adjust_num / income.human_adjust_den)
     }
 }
 
 /// Mana per busy/idle person (`MANA_BUSY_BRAVES`/`MANA_IDLE_BRAVES`, `MANA_BUSY_SPECIALS`/`MANA_IDLE_SPECIALS`,
 /// `MANA_F_SHAMEN`; huts-and-training.md rule 7): the shaman's own `busy` is always `true`, she gives the same
 /// either way.
-fn mana_rate(kind: UnitKind, busy: bool) -> u32 {
+fn mana_rate(income: &crate::balance::Income, kind: UnitKind, busy: bool) -> u32 {
     match kind {
         UnitKind::Brave => {
             if busy {
-                15
+                income.brave_busy
             } else {
-                4
+                income.brave_idle
             }
         }
         UnitKind::Warrior | UnitKind::Spy | UnitKind::Firewarrior | UnitKind::Preacher => {
             if busy {
-                5
+                income.specialist_busy
             } else {
-                4
+                income.specialist_idle
             }
         }
-        UnitKind::Shaman => 30,
+        UnitKind::Shaman => income.shaman,
         UnitKind::Wildman | UnitKind::AngelOfDeath => 0,
     }
 }

@@ -162,10 +162,11 @@ impl GameMap {
             }
             UnitEvent::Built if self.buildings[b].dismantling => self.dismantle_piece(self.buildings[b].id),
             UnitEvent::Built => {
+                let huts = self.balance.huts;
                 let b = &mut self.buildings[b];
                 b.used = (b.used + 1).min(b.kind.wood_cost());
                 if b.stage() == Stage::Built {
-                    crate::hut_growth::on_completed(b);
+                    crate::hut_growth::on_completed(&huts, b);
                     let (id, door) = (b.id, b.door());
                     self.empty_building(id, door);
                 }

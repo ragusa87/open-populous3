@@ -3,21 +3,16 @@
 //! store reaches the cost the trainee is replaced by a new person of the building's kind at the door. Ordered out
 //! before, it leaves unchanged and the store is given back (`Production::refund`).
 
+use crate::balance::Training;
 use crate::building::{Building, BuildingId, BuildingKind, Stage, DOOR_GAP};
 use crate::map::GameMap;
 use crate::slots;
-use crate::time::Every;
 use crate::unit::{Action, Inside, Order, UnitId, UnitKind};
 
-/// The cost is recomputed on this rhythm while training ("Cost").
-pub const RECOST_EVERY: Every = Every::new(16);
 /// The queue's spots are this far apart along the walls: a quarter cell ("The queue at the door" [exe]).
 pub const QUEUE_STEP: i32 = 128;
 /// One lap of the walls full, the queue goes on this much further out [ours: past one lap is not traced].
 pub const QUEUE_ROW: i32 = 192;
-/// Turns before the next is let in after one went in, and after one came out ("The queue at the door" [exe]).
-pub const ADMIT_GAP: u8 = 16;
-pub const LEFT_GAP: u8 = 12;
 /// Coming within this of the door on both axes, someone sent in goes straight in or joins the queue ("The queue at
 /// the door" [exe]: 2.6 cells).
 pub const QUEUE_REACH: i32 = 0x538;
@@ -96,11 +91,6 @@ fn along_walls(hx: i32, hz: i32, d: i32) -> (i32, i32) {
     (x, z)
 }
 
-/// Percent of the cost by the number of that kind the tribe already has, up to each bound (`TRAIN_MANA_BAND_*`);
-/// above the last, `TOP_BAND`.
-pub const BANDS: [(usize, u32); 5] = [(3, 100), (7, 125), (11, 150), (15, 175), (20, 200)];
-pub const TOP_BAND: u32 = 250;
-
 /// The kind a building trains, None for the others.
 pub fn trains(kind: BuildingKind) -> Option<UnitKind> {
     match kind {
@@ -113,18 +103,18 @@ pub fn trains(kind: BuildingKind) -> Option<UnitKind> {
 }
 
 /// Mana to train one `kind` (`HUMAN_TRAIN_MANA_*`; the computer players' 1000 once tribes have a controller).
-pub fn train_mana(kind: UnitKind) -> u32 {
+pub fn train_mana(training: &Training, kind: UnitKind) -> u32 {
     match kind {
-        UnitKind::Warrior | UnitKind::Preacher => 3500,
-        UnitKind::Spy | UnitKind::Firewarrior => 4000,
+        UnitKind::Warrior | UnitKind::Preacher => training.warrior_preacher_mana,
+        UnitKind::Spy | UnitKind::Firewarrior => training.spy_firewarrior_mana,
         _ => 0,
     }
 }
 
 /// Mana to train one `kind` for a tribe that has `count` of them already.
-pub fn train_cost(kind: UnitKind, count: usize) -> u16 {
-    let band = BANDS.iter().find(|&&(bound, _)| count <= bound).map_or(TOP_BAND, |&(_, p)| p);
-    (train_mana(kind) * band / 100).min(u16::MAX as u32) as u16
+pub fn train_cost(training: &Training, kind: UnitKind, count: usize) -> u16 {
+    let band = training.bands.iter().find(|&&(bound, _)| count <= bound).map_or(training.top_band, |&(_, p)| p);
+    (train_mana(training, kind) * band / 100).min(u16::MAX as u32) as u16
 }
 
 impl GameMap {
@@ -185,11 +175,12 @@ impl GameMap {
                 }
             }
             let inside = self.people_inside(id) + self.buildings[k].admitted.len();
+            let admit_gap = self.balance.ticks(self.balance.training.admit_gap) as u8;
             let b = &mut self.buildings[k];
             if let (true, Some(&head)) = (built && inside < capacity && b.admit_gate == 0, b.queue.first()) {
                 b.queue.remove(0);
                 b.admitted.push(head);
-                b.admit_gate = ADMIT_GAP;
+                b.admit_gate = admit_gap;
                 if let Some(i) = self.unit_index(head) {
                     self.units[i].go_enter(id, door);
                 }
@@ -224,6 +215,8 @@ impl GameMap {
     /// trainee is replaced by a new person of its kind at the door, who walks to the nearest free spot.
     pub(crate) fn tend_training(&mut self) {
         let now = self.now;
+        let training = self.balance.training;
+        let left_gap = self.balance.ticks(training.left_gap) as u8;
         for k in 0..self.buildings.len() {
             let b = &self.buildings[k];
             let Some(output) = trains(b.kind).filter(|_| b.stage() == Stage::Built) else { continue };
@@ -235,8 +228,8 @@ impl GameMap {
                 p.cost = 0;
                 continue;
             };
-            if !p.is_active() || RECOST_EVERY.fires(now, 0) {
-                p.cost = train_cost(output, count);
+            if !p.is_active() || training.recost_every.fires(now, 0) {
+                p.cost = train_cost(&training, output, count);
             }
             if p.stored < p.cost {
                 continue;
@@ -245,7 +238,7 @@ impl GameMap {
             p.cost = 0;
             let i = self.unit_index(trainee).unwrap();
             let gone = self.units.remove(i);
-            self.buildings[k].admit_gate = LEFT_GAP;
+            self.buildings[k].admit_gate = left_gap;
             let taken = self.taken_spots(&[]);
             let spot = slots::free_spots_near(&self.ground(), slots::spot_of(door), &taken, 1).first().copied();
             let made = self.spawn(owner, output, (gone.x, gone.z));
@@ -265,12 +258,13 @@ mod tests {
 
     #[test]
     fn the_cost_grows_with_the_band() {
-        assert_eq!(train_cost(UnitKind::Warrior, 0), 3500);
-        assert_eq!(train_cost(UnitKind::Warrior, 3), 3500);
-        assert_eq!(train_cost(UnitKind::Warrior, 4), 4375);
-        assert_eq!(train_cost(UnitKind::Firewarrior, 12), 7000);
-        assert_eq!(train_cost(UnitKind::Spy, 20), 8000);
-        assert_eq!(train_cost(UnitKind::Preacher, 21), 8750);
+        let training = crate::balance::Balance::ours().training;
+        assert_eq!(train_cost(&training, UnitKind::Warrior, 0), 3500);
+        assert_eq!(train_cost(&training, UnitKind::Warrior, 3), 3500);
+        assert_eq!(train_cost(&training, UnitKind::Warrior, 4), 4375);
+        assert_eq!(train_cost(&training, UnitKind::Firewarrior, 12), 7000);
+        assert_eq!(train_cost(&training, UnitKind::Spy, 20), 8000);
+        assert_eq!(train_cost(&training, UnitKind::Preacher, 21), 8750);
     }
 
     #[test]
@@ -305,7 +299,7 @@ mod tests {
         let brave = send_brave(&mut map, hut);
         map.tick();
         let p = map.buildings[hut].production.unwrap();
-        assert_eq!(p.cost, train_cost(UnitKind::Warrior, warriors));
+        assert_eq!(p.cost, train_cost(&map.balance.training, UnitKind::Warrior, warriors));
         map.buildings[hut].production.as_mut().unwrap().stored = p.cost - 1;
         (0..32).find(|_| {
             map.tick();

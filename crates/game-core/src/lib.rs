@@ -9,6 +9,7 @@ pub mod angle;
 pub mod armageddon;
 pub mod ashes;
 pub mod attack;
+pub mod balance;
 #[cfg(test)]
 mod battle;
 pub mod blast;
