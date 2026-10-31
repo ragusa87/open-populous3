@@ -53,7 +53,7 @@ Burn (model 1) and Raise (the editor's own terrain brush) are internal mechanics
 
 | Area | Status | Notes |
 |---|---|---|
-| Tribes | Todo | No `TribeId` model yet (owners are still bare bytes); per-tribe state (colour, allies, human/computer, mana/books) lives ad hoc on `GameMap`. |
+| Tribes | Partial | `TribeId`/`Owner` replace bare-byte owners everywhere (game-core, game-client, game-net); `Tribes` (`GameMap::tribes`) holds each present tribe's allies and computer flag, the latter loaded from the level header's `ai_scripts`. Still ad hoc on `GameMap`: colour (client-side only), mana/spell/build books (separate arrays, not folded into a `Tribe`), and the header's own "tribes playing" byte. |
 | Level scripting (triggers) | Todo | Trigger layout is parsed; semantics (what each type waits for, what activating one does) not implemented. |
 | Computer players (AI) | Partial — a first opponent plays | `game-core/src/ai.rs`'s native engine runs a priority sweep for each computer tribe (construct essential buildings, train people, post defenders) and `DO ATTACK` sends fighters at a target; `ai_script.rs` wires `STATE_*`/`INT_ATTR_*`, `SET_DRUM_TOWER_POS`/`BUILD_DRUM_TOWER`, `TRAIN_PEOPLE_NOW` and `ATTACK` to it. Flybys and reincarnation on/off also wired. Still missing: shaman auto-cast, garrison/vehicle tasks, scripted patrol/guard groups (need the level markers table), the reactive counter-attack, and most other `DO` commands. See [ai-scripts.md](specs/ai-scripts.md) and TODO.md "Computer players (AI)". |
 
