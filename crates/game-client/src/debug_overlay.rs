@@ -137,7 +137,7 @@ fn draw(
                 outline(outline_circle(at, SWARM_LEASH_CELLS as f32), SPELL.with_alpha(0.4));
                 outline(outline_square(cells(s.pos()), 1.5), SPELL);
             }
-            EffectKind::LandBridge(_) | EffectKind::Lava(_) | EffectKind::Smoke | EffectKind::GroundFire => {}
+            EffectKind::LandBridge(_) | EffectKind::Lava(_) | EffectKind::Smoke | EffectKind::GroundFire | EffectKind::AngelOfDeath(_) | EffectKind::AngelOfDeathShockwave(_) => {}
         }
     }
     for (_, c) in map.coordinators.challenges.iter() {

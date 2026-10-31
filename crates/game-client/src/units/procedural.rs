@@ -212,6 +212,8 @@ fn look(kind: UnitKind) -> (Head, Held) {
         UnitKind::Spy => (Head::Cowl, Held::Dagger),
         UnitKind::Firewarrior => (Head::FireHat, Held::Flame),
         UnitKind::Wildman => (Head::Mane, Held::Nothing),
+        // Never drawn: not in `UnitKind::ALL` (no sprite of its own yet, TODO.md "Angel of Death").
+        UnitKind::AngelOfDeath => (Head::Mane, Held::Nothing),
     }
 }
 

@@ -265,6 +265,10 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Spirit { .. } => Pose::Spirit,
         Action::Grazing { drink: false, .. } => Pose::Eat,
         Action::Grazing { drink: true, .. } => Pose::Drink,
+        // An Angel of Death is never drawn (no sprite of its own yet, TODO.md "Angel of Death"), so its own 4
+        // states never reach here in practice; its grabbed victim has no dedicated "held" pose either (the
+        // trace: "it sets no pose of any kind on the victim") — `[ours]`, Idle stands in for both.
+        Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } => Pose::Idle,
     }
 }
 

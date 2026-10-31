@@ -432,6 +432,7 @@ pub fn figure_sprite(kind: UnitKind) -> Option<usize> {
         UnitKind::Firewarrior => 4,
         UnitKind::Shaman => 5,
         UnitKind::Wildman => return None,
+        UnitKind::AngelOfDeath => return None,
     };
     Some(UNIT_FIGURES.start() + k)
 }
