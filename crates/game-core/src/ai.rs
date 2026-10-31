@@ -26,13 +26,39 @@ use crate::command::Command;
 use crate::headcount::State as HeadcountState;
 use crate::map::{torus_dist2, GameMap};
 use crate::send_in::Destination;
-use crate::time::Every;
+use crate::spell::Spell;
+use crate::spell_book::SpellKind;
+use crate::time::{Every, Tick};
 use crate::tribes::TribeId;
 use crate::unit::{Order, Target, UnitId, UnitKind};
 use pop3_ai_script::field::InternalVar;
 
 /// The 48 `INT_ATTR_*` slots a script can tune (`InternalVar::ATTR_RANGE`).
 const ATTR_COUNT: usize = 48;
+
+/// How many `SET_SPELL_ENTRY` slots a tribe keeps (ai-scripts.md: "slot `entry` (from 0)"; no maximum
+/// is given, this is our own guessed cap, generous next to the handful any one script actually sets).
+const MAX_SPELL_ENTRIES: usize = 8;
+
+/// A guessed stand-in radius (world units) for the unmodelled `SET_BASE_MARKER`/`SET_BASE_RADIUS`
+/// (TODO.md: these need the level header's `Markers[256]` table, not read anywhere yet): "near the
+/// base" for `SET_SPELL_ENTRY`'s own `base` flag and the reactive base defence below.
+const AI_BASE_RADIUS_GUESS: i32 = 10 * 512;
+
+/// `SET_SPELL_ENTRY entry spell mana frequency min_people base` (ai-scripts.md "Attacks and spells"):
+/// the shaman's own automatic combat spells. `mana` is read and discarded (ai_script.rs): the spell's
+/// own book cost/charges already gate whether she can cast (`SpellSlot::can_cast`), and the wiki only
+/// says this is "normally `INT_M_SPELL_x_COST`", not a separate threshold to store. `frequency` is
+/// unknown (wiki: "?"); we read it as our own guess, a minimum tick gap between automatic casts from
+/// this slot.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SpellEntry {
+    pub spell: SpellKind,
+    pub frequency: i32,
+    pub min_people: i32,
+    /// `true`: only cast while the shaman is near the tribe's own base; `false`: only away from it.
+    pub base: bool,
+}
 
 /// Which `STATE_*` flag (editor token `1028 + i`, ai-scripts.md "States") is which, `i` indexing
 /// `NativeAi::states`. Not every bit is read by this session's engine (most aren't implemented yet,
@@ -111,11 +137,30 @@ pub(crate) struct NativeAi {
     /// drum tower on its own (ai-scripts.md: "The tower is built automatically unless
     /// `DELAY_MAIN_DRUM_TOWER` was called").
     delay_main_drum_tower: bool,
+    /// `SET_SPELL_ENTRY`'s own slots, and when each last fired (`tend_ai_spellcasting`'s own cooldown).
+    spell_entries: [Option<SpellEntry>; MAX_SPELL_ENTRIES],
+    spell_entry_last_cast: [Option<Tick>; MAX_SPELL_ENTRIES],
+    /// `DO ATTACK`'s own in-flight sorties (`ai_attack`/`tend_ai_sorties`), each tracking its target's
+    /// own `damage` threshold (ai-scripts.md: "how much damage to deal before withdrawing").
+    sorties: Vec<Sortie>,
+    /// `SET_TIMER_GOING`/`REMOVE_TIMER`/`HAS_TIMER_REACHED_ZERO` (ai-scripts.md "Level events"): when it
+    /// reaches zero, not the client-side countdown display itself (not wired up here, TODO.md).
+    timer_end: Option<Tick>,
 }
 
 impl NativeAi {
     pub fn new(owner: TribeId) -> Self {
-        NativeAi { owner, attrs: default_attrs(), states: 0, drum_tower_pos: None, delay_main_drum_tower: false }
+        NativeAi {
+            owner,
+            attrs: default_attrs(),
+            states: 0,
+            drum_tower_pos: None,
+            delay_main_drum_tower: false,
+            spell_entries: [None; MAX_SPELL_ENTRIES],
+            spell_entry_last_cast: [None; MAX_SPELL_ENTRIES],
+            sorties: Vec::new(),
+            timer_end: None,
+        }
     }
 
     fn attr(&self, var: InternalVar) -> i32 {
@@ -173,6 +218,23 @@ pub(crate) enum AttackGoal {
     Building(Option<BuildingKind>),
 }
 
+/// A `DO ATTACK` sortie in progress, enough to let `tend_ai_sorties` call it off once its own `damage`
+/// threshold is met. Damage dealt is only tracked for a `Shaman` target: the `Wear` event a building
+/// attack raises carries no attacker at all (`event.rs`), so there is nothing to attribute to one sortie
+/// over another there — a `Building` goal's sortie fights on regardless of `damage` (TODO.md).
+#[derive(Clone, Debug)]
+struct Sortie {
+    target: UnitId,
+    fighters: Vec<UnitId>,
+    /// `0..999`; `999` means fight to the death (ai-scripts.md), so never withdraw.
+    threshold: i32,
+    /// Hit points dealt to `target` since the sortie left, summed from `WorldEvent::Damage` events
+    /// whose `from` is this sortie's own owner (`GameMap::apply_event`) — shared with any other damage
+    /// the owner's tribe happens to deal that same target meanwhile, which only matters when two
+    /// sorties are attacking the same enemy shaman at once (our own simplification, not traced).
+    dealt: i32,
+}
+
 /// How often a tribe's priority sweep runs: "about once every 64 turns per tribe, a little over 5
 /// seconds" (pop3-rev-analysis.md "Native AI"), phased by owner so tribes sharing a cadence don't all
 /// act on the same tick.
@@ -213,6 +275,35 @@ impl GameMap {
         if let Some(i) = self.ai_index(owner) {
             self.ai[i].delay_main_drum_tower = delay;
         }
+    }
+
+    /// `SET_SPELL_ENTRY`: stores slot `entry` (clamped to `MAX_SPELL_ENTRIES`), silently dropped past
+    /// that (our own guessed cap, see its doc).
+    pub(crate) fn ai_set_spell_entry(&mut self, owner: TribeId, entry: usize, spell: SpellKind, frequency: i32, min_people: i32, base: bool) {
+        if let Some(i) = self.ai_index(owner)
+            && let Some(slot) = self.ai[i].spell_entries.get_mut(entry)
+        {
+            *slot = Some(SpellEntry { spell, frequency, min_people, base });
+        }
+    }
+
+    /// `SET_TIMER_GOING seconds`: not "one second short" of the UI quirk the wiki describes (not drawn
+    /// at all yet, TODO.md) — just the plain end tick.
+    pub(crate) fn ai_set_timer(&mut self, owner: TribeId, seconds: i32) {
+        if let Some(i) = self.ai_index(owner) {
+            self.ai[i].timer_end = Some(self.now + crate::time::Ticks::secs(seconds.max(0) as u32));
+        }
+    }
+
+    pub(crate) fn ai_remove_timer(&mut self, owner: TribeId) {
+        if let Some(i) = self.ai_index(owner) {
+            self.ai[i].timer_end = None;
+        }
+    }
+
+    /// `HAS_TIMER_REACHED_ZERO`: 1 once `ai_set_timer`'s end tick has passed, 0 with no timer going.
+    pub(crate) fn ai_timer_reached_zero(&self, owner: TribeId) -> bool {
+        self.ai_index(owner).is_some_and(|i| self.ai[i].timer_end.is_some_and(|end| self.now.since(end) >= 0))
     }
 
     /// `BUILD_DRUM_TOWER x z` (and any other direct scripted placement, same shape): places `kind`
@@ -270,6 +361,101 @@ impl GameMap {
             }
             self.ai_post_defender(owner);
         }
+    }
+
+    /// How often a tribe's shaman checks her `SET_SPELL_ENTRY` slots, and how often the base-defence
+    /// scan below runs: both far more often than `SWEEP_EVERY`'s build/train/defend-quota sweep, since
+    /// both only act in response to an enemy already in range — waiting a full 64 ticks would let an
+    /// attack finish before either ever reacts. Not traced, our own guess at "fairly responsive".
+    const REACTIVE_EVERY: Every = Every::new(8);
+
+    /// `SET_SPELL_ENTRY` (ai-scripts.md "Attacks and spells"): casts at most one spell per tribe per
+    /// sweep, the first configured slot (in order) whose conditions are all met.
+    pub(crate) fn tend_ai_spellcasting(&mut self) {
+        let owners: Vec<TribeId> = self.ai.iter().map(|a| a.owner).collect();
+        for owner in owners {
+            if Self::REACTIVE_EVERY.fires(self.now, owner.as_u8() as u32) {
+                self.ai_cast_if_ready(owner);
+            }
+        }
+    }
+
+    fn ai_cast_if_ready(&mut self, owner: TribeId) {
+        let Some(i) = self.ai_index(owner) else { return };
+        let Some(shaman) = self.shaman_of(owner) else { return };
+        if !shaman.is_alive() || self.shaman_locked(owner) {
+            return;
+        }
+        let shaman_pos = (shaman.x, shaman.z);
+        let near_base = self.ai_base(owner).is_some_and(|base| torus_dist2(base, shaman_pos) <= (AI_BASE_RADIUS_GUESS as i64).pow(2));
+        for entry in 0..MAX_SPELL_ENTRIES {
+            let Some(e) = self.ai[i].spell_entries[entry] else { continue };
+            if e.base != near_base {
+                continue;
+            }
+            if self.ai[i].spell_entry_last_cast[entry].is_some_and(|t| self.now.since(t) < e.frequency.max(1)) {
+                continue;
+            }
+            let Some(range) = self.cast_range(owner, e.spell) else { continue };
+            let enemies: Vec<(u16, u16)> = self.units.iter().filter(|u| u.is_alive() && !self.tribes.same_team(u.owner, owner) && crate::cast_range::within(shaman_pos, (u.x, u.z), range)).map(|u| (u.x, u.z)).collect();
+            if (enemies.len() as i32) < e.min_people.max(1) {
+                continue;
+            }
+            if !self.spell_books.get(owner as usize).is_some_and(|b| b.slot(e.spell).is_some_and(|s| s.can_cast())) {
+                continue;
+            }
+            // The nearest one in range, guaranteeing the cast point stays within range too (a centroid
+            // of several, on a torus, is not guaranteed to).
+            let at = *enemies.iter().min_by_key(|&&p| torus_dist2(shaman_pos, p)).unwrap();
+            let Some(spell) = Spell::at_point(e.spell, at) else { continue };
+            self.apply(&Command::Cast { player: owner, spell });
+            if let Some(i) = self.ai_index(owner) {
+                self.ai[i].spell_entry_last_cast[entry] = Some(self.now);
+            }
+            return;
+        }
+    }
+
+    /// Reactive base defence (ai-scripts.md "DEFEND"/"DEFEND_BASE": "every follower not at a marker or
+    /// in a hut defends the shaman" / defenders "circle the reincarnation site"), the native engine's
+    /// own "reactive counter-attack" (module doc), previously entirely unmodelled: distinct from
+    /// `spotting.rs`'s own always-on per-unit auto-engage (which only looks a handful of cells around an
+    /// already-idle unit), this pulls an idle fighter from anywhere to the nearest intruder within the
+    /// tribe's whole guessed base radius, one per sweep so a determined raid draws defenders down over
+    /// several sweeps rather than emptying the base at once.
+    pub(crate) fn tend_ai_defense(&mut self) {
+        let owners: Vec<TribeId> = self.ai.iter().map(|a| a.owner).collect();
+        for owner in owners {
+            if Self::REACTIVE_EVERY.fires(self.now, owner.as_u8() as u32) {
+                self.ai_defend_base(owner);
+            }
+        }
+    }
+
+    fn ai_defend_base(&mut self, owner: TribeId) -> bool {
+        if !self.ai_state(owner, state::DEFEND) && !self.ai_state(owner, state::DEFEND_BASE) {
+            return false;
+        }
+        let Some(base) = self.ai_base(owner) else { return false };
+        let Some(intruder) = self
+            .units
+            .iter()
+            .filter(|u| u.is_alive() && !self.tribes.same_team(u.owner, owner) && torus_dist2(base, (u.x, u.z)) <= (AI_BASE_RADIUS_GUESS as i64).pow(2))
+            .min_by_key(|u| torus_dist2(base, (u.x, u.z)))
+            .map(|u| u.id)
+        else {
+            return false;
+        };
+        let Some(defender) = self
+            .units
+            .iter()
+            .find(|u| u.owner == owner && u.is_alive() && u.kind.stats().fights && u.is_free() && u.work.is_none() && u.aboard.is_none() && u.queued_patrol().is_empty() && !matches!(u.action, crate::unit::Action::Attacking { .. }))
+            .map(|u| u.id)
+        else {
+            return false;
+        };
+        self.apply(&Command::OrderUnit { player: owner, unit: defender, order: Order::Attack { target: Target::Unit(intruder) } });
+        true
     }
 
     /// Idle braves of `owner`: alive, nothing to do, not aboard a vehicle — the pool every task below
@@ -407,8 +593,10 @@ impl GameMap {
     /// `DO ATTACK` (ai-scripts.md "Attacks and spells"): the only task the native engine never enqueues
     /// on its own (pop3-rev-analysis.md: "the native AI genuinely never decides to attack on its own").
     /// Simplified from the original's own muster-then-march sequence: the chosen fighters set off for
-    /// their target right away instead of gathering at the drum tower first (TODO.md).
-    pub(crate) fn ai_attack(&mut self, owner: TribeId, target_team: TribeId, count: i32, goal: AttackGoal) {
+    /// their target right away instead of gathering at the drum tower first (TODO.md). `damage` (0..999,
+    /// "how much damage to deal before withdrawing") only has an effect against a `Shaman` goal
+    /// (`Sortie`'s own doc).
+    pub(crate) fn ai_attack(&mut self, owner: TribeId, target_team: TribeId, count: i32, goal: AttackGoal, damage: i32) {
         if !self.ai_state(owner, state::AUTO_ATTACK) || self.ai_attr(owner, InternalVar(1025)) <= 0 {
             return; // STATE_AUTO_ATTACK off, or INT_ATTR_MAX_ATTACKS 0 ("0 ignores every attack")
         }
@@ -420,8 +608,54 @@ impl GameMap {
             .take(count.max(0) as usize)
             .map(|u| u.id)
             .collect();
-        for unit in fighters {
+        for &unit in &fighters {
             self.apply(&Command::OrderUnit { player: owner, unit, order: Order::Attack { target } });
+        }
+        if let Target::Unit(target) = target
+            && damage < 999
+            && let Some(i) = self.ai_index(owner)
+        {
+            self.ai[i].sorties.push(Sortie { target, fighters, threshold: damage, dealt: 0 });
+        }
+    }
+
+    /// Adds `amount` of damage an owner's tribe dealt to `unit` to any of that tribe's own sorties
+    /// targeting it (`Sortie`'s own doc on sharing): called from `GameMap::apply_event`'s own `Damage`
+    /// handling, the only place that knows both the attacker's tribe and the amount together.
+    pub(crate) fn ai_record_sortie_damage(&mut self, owner: TribeId, unit: UnitId, amount: u16) {
+        if let Some(i) = self.ai_index(owner) {
+            for sortie in self.ai[i].sorties.iter_mut().filter(|s| s.target == unit) {
+                sortie.dealt = sortie.dealt.saturating_add(amount as i32);
+            }
+        }
+    }
+
+    /// Calls a sortie home once it has dealt its own `damage` threshold, or drops it once nothing is
+    /// left to call home (every fighter dead, or the target itself dead) — run every tick, cheap at the
+    /// handful of sorties any one tribe has in flight at once.
+    pub(crate) fn tend_ai_sorties(&mut self) {
+        for i in 0..self.ai.len() {
+            let owner = self.ai[i].owner;
+            let base = self.ai_base(owner);
+            let mut sorties = std::mem::take(&mut self.ai[i].sorties);
+            sorties.retain(|sortie| {
+                let target_alive = self.unit(sortie.target).is_some_and(crate::unit::Unit::is_alive);
+                let withdraw = !target_alive || sortie.dealt >= sortie.threshold;
+                let survivors: Vec<UnitId> = sortie.fighters.iter().copied().filter(|&u| self.unit(u).is_some_and(crate::unit::Unit::is_alive)).collect();
+                if withdraw {
+                    if let Some(base) = base {
+                        for unit in &survivors {
+                            if matches!(self.unit(*unit).map(|u| &u.action), Some(crate::unit::Action::Attacking { .. })) {
+                                self.apply(&Command::OrderUnit { player: owner, unit: *unit, order: Order::MoveTo { x: base.0, z: base.1 } });
+                            }
+                        }
+                    }
+                    false
+                } else {
+                    !survivors.is_empty()
+                }
+            });
+            self.ai[i].sorties = sorties;
         }
     }
 
@@ -542,7 +776,7 @@ mod tests {
         map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
         let enemy_shaman = map.spawn(TribeId::Red, UnitKind::Shaman, (40 * 512, 32 * 512)).id;
         map.spawn(TribeId::Blue, UnitKind::Warrior, (32 * 512, 32 * 512));
-        map.ai_attack(TribeId::Blue, TribeId::Red, 1, AttackGoal::Shaman);
+        map.ai_attack(TribeId::Blue, TribeId::Red, 1, AttackGoal::Shaman, 999);
         let attacker = map.units.iter().find(|u| u.owner == TribeId::Blue && u.kind == UnitKind::Warrior).unwrap();
         assert!(matches!(attacker.action, crate::unit::Action::Attacking { target: Target::Unit(id), .. } if id == enemy_shaman), "{:?}", attacker.action);
     }
@@ -555,11 +789,100 @@ mod tests {
         map.spawn(TribeId::Red, UnitKind::Shaman, (40 * 512, 32 * 512));
         map.spawn(TribeId::Blue, UnitKind::Warrior, (32 * 512, 32 * 512));
         map.ai_set_state(TribeId::Blue, state::AUTO_ATTACK, false);
-        map.ai_attack(TribeId::Blue, TribeId::Red, 5, AttackGoal::Shaman);
+        map.ai_attack(TribeId::Blue, TribeId::Red, 5, AttackGoal::Shaman, 999);
         assert!(map.units.iter().all(|u| !matches!(u.action, crate::unit::Action::Attacking { .. })), "state off: nothing happens");
         map.ai_set_state(TribeId::Blue, state::AUTO_ATTACK, true);
         map.ai_set_attr(TribeId::Blue, InternalVar(1025), 0);
-        map.ai_attack(TribeId::Blue, TribeId::Red, 5, AttackGoal::Shaman);
+        map.ai_attack(TribeId::Blue, TribeId::Red, 5, AttackGoal::Shaman, 999);
         assert!(map.units.iter().all(|u| !matches!(u.action, crate::unit::Action::Attacking { .. })), "MAX_ATTACKS 0: nothing happens");
+    }
+
+    #[test]
+    fn ai_attack_withdraws_its_surviving_fighters_once_the_damage_threshold_is_dealt() {
+        let mut map = map_with_ai(TribeId::Blue);
+        let mut terrain = Heightmap::new(64);
+        terrain.set(32, 32, 100);
+        terrain.set(40, 32, 100);
+        map.terrain = terrain;
+        map.sites.push(crate::site::ReincarnationSite::at_cell(TribeId::Red, (40, 32), 100));
+        map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
+        let enemy_shaman = map.spawn(TribeId::Red, UnitKind::Shaman, (40 * 512, 32 * 512)).id;
+        let attacker = map.spawn(TribeId::Blue, UnitKind::Warrior, (32 * 512, 32 * 512)).id;
+        map.ai_attack(TribeId::Blue, TribeId::Red, 1, AttackGoal::Shaman, 20);
+        assert!(matches!(map.unit(attacker).unwrap().action, crate::unit::Action::Attacking { .. }), "sortie launched");
+        map.apply_events(vec![crate::event::WorldEvent::Damage { unit: enemy_shaman, amount: 25, kind: crate::effect::DamageKind::Melee, from: Some(crate::tribes::Owner::Tribe(TribeId::Blue)) }]);
+        map.tend_ai_sorties();
+        assert!(!matches!(map.unit(attacker).unwrap().action, crate::unit::Action::Attacking { .. }), "25 >= the 20 threshold: called home");
+    }
+
+    #[test]
+    fn ai_attack_fights_to_the_death_at_the_999_threshold() {
+        let mut map = map_with_ai(TribeId::Blue);
+        let mut terrain = Heightmap::new(64);
+        terrain.set(32, 32, 100);
+        terrain.set(40, 32, 100);
+        map.terrain = terrain;
+        map.sites.push(crate::site::ReincarnationSite::at_cell(TribeId::Red, (40, 32), 100));
+        map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
+        let enemy_shaman = map.spawn(TribeId::Red, UnitKind::Shaman, (40 * 512, 32 * 512)).id;
+        let attacker = map.spawn(TribeId::Blue, UnitKind::Warrior, (32 * 512, 32 * 512)).id;
+        map.ai_attack(TribeId::Blue, TribeId::Red, 1, AttackGoal::Shaman, 999);
+        map.apply_events(vec![crate::event::WorldEvent::Damage { unit: enemy_shaman, amount: 900, kind: crate::effect::DamageKind::Melee, from: Some(crate::tribes::Owner::Tribe(TribeId::Blue)) }]);
+        map.tend_ai_sorties();
+        assert!(matches!(map.unit(attacker).unwrap().action, crate::unit::Action::Attacking { .. }), "999 never withdraws");
+    }
+
+    #[test]
+    fn spell_entry_casts_once_enough_enemies_are_in_the_shamans_cast_range() {
+        let mut map = map_with_ai(TribeId::Blue);
+        map.spawn(TribeId::Blue, UnitKind::Shaman, (32 * 512, 32 * 512));
+        map.sites.push(crate::site::ReincarnationSite::at_cell(TribeId::Red, (34, 32), 100));
+        map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
+        for i in 0..3 {
+            map.spawn(TribeId::Red, UnitKind::Brave, ((34 * 512) as u16, (32 * 512 + i * 100) as u16));
+        }
+        map.ai_set_spell_entry(TribeId::Blue, 0, crate::spell_book::SpellKind::Blast, 1, 2, true);
+        let before = map.spell_books[TribeId::Blue as usize].slot(crate::spell_book::SpellKind::Blast).unwrap().charges;
+        for _ in 0..20 {
+            map.tick();
+        }
+        let after = map.spell_books[TribeId::Blue as usize].slot(crate::spell_book::SpellKind::Blast).unwrap().charges;
+        assert!(after < before, "the shaman cast at the enemy concentration");
+    }
+
+    #[test]
+    fn spell_entry_does_nothing_below_its_min_people() {
+        let mut map = map_with_ai(TribeId::Blue);
+        map.spawn(TribeId::Blue, UnitKind::Shaman, (32 * 512, 32 * 512));
+        map.sites.push(crate::site::ReincarnationSite::at_cell(TribeId::Red, (34, 32), 100));
+        map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
+        map.spawn(TribeId::Red, UnitKind::Brave, (34 * 512, 32 * 512));
+        map.ai_set_spell_entry(TribeId::Blue, 0, crate::spell_book::SpellKind::Blast, 1, 2, true);
+        let before = map.spell_books[TribeId::Blue as usize].slot(crate::spell_book::SpellKind::Blast).unwrap().charges;
+        for _ in 0..20 {
+            map.tick();
+        }
+        let after = map.spell_books[TribeId::Blue as usize].slot(crate::spell_book::SpellKind::Blast).unwrap().charges;
+        assert_eq!(after, before, "only one enemy in range, min_people 2: no cast");
+    }
+
+    #[test]
+    fn an_idle_defender_goes_for_an_intruder_within_the_base_radius() {
+        let mut map = map_with_ai(TribeId::Blue);
+        let mut terrain = Heightmap::new(64);
+        for dz in -10..=10 {
+            for dx in -10..=10 {
+                terrain.set(32 + dx, 32 + dz, 100);
+            }
+        }
+        map.terrain = terrain;
+        map.sites.push(crate::site::ReincarnationSite::at_cell(TribeId::Red, (36, 32), 100));
+        map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
+        let intruder = map.spawn(TribeId::Red, UnitKind::Warrior, (36 * 512, 32 * 512)).id;
+        let defender = map.spawn(TribeId::Blue, UnitKind::Warrior, (32 * 512, 32 * 512)).id;
+        for _ in 0..20 {
+            map.tick();
+        }
+        assert!(matches!(map.unit(defender).unwrap().action, crate::unit::Action::Attacking { target: Target::Unit(id), .. } if id == intruder), "{:?}", map.unit(defender).unwrap().action);
     }
 }
