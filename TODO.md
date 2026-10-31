@@ -648,6 +648,33 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   guessed base radius - distinct from `spotting.rs`'s own always-on per-unit auto-engage, which only
   looks a handful of cells around a unit already idle. None of this is traced against the exe beyond
   what ai-scripts.md already gives; every guessed number says so in its own doc comment.
+- [ ] Shaman positioning and a drum-tower rally point (live-observed on level 25: red's script builds a
+  drum tower at its `SET_DRUM_TOWER_POS`, the shaman goes inside it, and followers gather around it;
+  when it is destroyed the shaman waits beside it while braves repair it, instead of the tower staying
+  wrecked or her going elsewhere). None of this is modelled yet:
+  - `PUT_PERSON_IN_DT model x z` (ai-scripts.md "People, buildings and orders") is a recognized `DO`
+    command but still falls through `ScriptEnv::do_call`'s catch-all no-op (`ai_script.rs`) - wiring it
+    needs the native engine to treat the shaman as a unit it can order into a building at all, which it
+    currently never does (she is only ever a spellcaster, `ai_cast_if_ready`, or an attack target,
+    `ai_attack_target` - nothing issues her a move/enter order).
+  - The muster-then-march sequence `ai_attack`'s own doc already flags as simplified away ("the chosen
+    fighters set off for their target right away instead of gathering at the drum tower first"): the
+    original stages the attack force at the reincarnation site or `SET_DRUM_TOWER_POS`'s own spot first
+    (ai-scripts.md "Attacks and spells", `INT_ATTR_DONT_GROUP_AT_DT` to skip it - not read anywhere).
+    This would also be the natural rally point idle followers default to standing at, distinct from
+    `ai_post_defender`'s own single stationary guard spot.
+  - Automatic repair for a computer tribe: `wreck.rs`'s wear-down already reverts a worn building to
+    `Stage::UnderConstruction` on a `REPAIR_DELAY` once it loses a piece of wood, but once a building is
+    `Built` its workers are released (`work.rs`'s `empty_building`) and the native AI's own
+    `ai_next_building` only ever picks a kind the tribe doesn't `has()` yet - a worn-but-still-standing
+    building of a kind it already owns (the drum tower included) is never re-noticed, so nothing sends
+    braves back to it on its own. Needs `ai_next_building` (or a sibling check) to also catch "own a
+    built one of this kind, but it needs repairing" and reuse the same `build_orders` assignment
+    `ai_construct_building` already does for a fresh plan.
+  - Whether the shaman specifically stands guard beside a building under repair (vs. following whatever
+    general "defend base"/idle behaviour already puts her there) is unconfirmed - a guess either way
+    until traced; a question for a spec session (docs/todo or a new pop3-rev-analysis.md section) if not
+    already covered by "Native AI" there.
 - [x] `pop3-ai-script` (its own crate, not a `pop3-format` module): parses `cpscrNNN.dat` (12 552 B
   only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md) (grammar,
   token, parameter and internal variable tables are there), folds a recognized
