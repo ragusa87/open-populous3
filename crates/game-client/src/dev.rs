@@ -218,6 +218,17 @@ pub fn volcano_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> 
     true
 }
 
+/// `AOD=x,z` (cells): another tribe's Angel of Death cast there, then `ticks` run at once (with `GAME_SPEED=0`:
+/// its meteor fall, ground ripple and spawn blast over the run — the creature itself has no sprite yet,
+/// TODO.md "Angel of Death"). False when `at` does not parse.
+pub fn angel_of_death_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
+    let at = world_units(Vec2::new(x, z));
+    map.add_effect(game_core::angel_of_death::cast(PLAYER.next(), at));
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
 /// `FIRESTORM=x,z` (cells): another tribe's Firestorm effect there, then `ticks` run at once (with `GAME_SPEED=0`:
 /// its fireballs landing over the run). False when `at` does not parse.
 pub fn firestorm_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
@@ -609,6 +620,10 @@ fn screenshot(
             let ticks = std::env::var("VOLCANO_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             volcano_demo(&mut map.0, &at, ticks);
         }
+        if let Ok(at) = std::env::var("AOD") {
+            let ticks = std::env::var("AOD_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            angel_of_death_demo(&mut map.0, &at, ticks);
+        }
         if let Ok(at) = std::env::var("FIRESTORM") {
             let ticks = std::env::var("FIRESTORM_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             firestorm_demo(&mut map.0, &at, ticks);
@@ -816,6 +831,14 @@ mod tests {
         assert!(volcano_demo(&mut map, "10,10", game_core::volcano::RUMBLE_TURNS + game_core::volcano::RISE_TURNS));
         assert_eq!(map.terrain.get(10, 10), 0, "the crater floor, fully risen");
         assert!(!volcano_demo(&mut map, "here", 0));
+    }
+
+    #[test]
+    fn angel_of_death_demo_falls_ripples_and_spawns_the_creature_once_run() {
+        let mut map = game_core::map::GameMap::sandbox_walk();
+        assert!(angel_of_death_demo(&mut map, "10,10", game_core::angel_of_death::FALL_TICKS.get()));
+        assert!(map.units.iter().any(|u| u.kind == game_core::unit::UnitKind::AngelOfDeath), "the creature appears");
+        assert!(!angel_of_death_demo(&mut map, "here", 0));
     }
 
     #[test]
