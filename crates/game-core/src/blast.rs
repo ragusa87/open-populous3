@@ -132,7 +132,9 @@ impl SimpleBlast {
         for u in units.iter().filter(|u| u.is_alive() && u.in_the_open()) {
             let is_casters_shaman = u.owner == owner && u.kind == UnitKind::Shaman;
             let is_ally = u.owner == owner && !is_casters_shaman;
-            let pushable = !is_casters_shaman && (!is_ally || (last_turn && allies_pushed < BLAST_FRIEND_AFFECT));
+            // "Not pushed: own shaman, angel of death" (pop3-rev-analysis.md "Components"): no angel is ever
+            // pushed by a blast, not just the caster's own.
+            let pushable = !is_casters_shaman && u.kind != UnitKind::AngelOfDeath && (!is_ally || (last_turn && allies_pushed < BLAST_FRIEND_AFFECT));
             if pushable {
                 if let Some(vel) = push_scaled(terrain, at, (u.x, u.z), reach) {
                     allies_pushed += is_ally as u8;
@@ -351,6 +353,19 @@ mod tests {
         assert!(!map.effects.is_empty(), "the view keeps playing a little past the 3 damage turns");
         map.run(Ticks::new(VISUAL_TICKS.get() - RADII.len() as u32));
         assert!(map.effects.is_empty(), "gone once the idle visual ticks run out too");
+    }
+
+    #[test]
+    fn an_angel_of_death_is_never_pushed_even_the_casters_own_on_the_last_turn() {
+        let mut map = crate::map::GameMap::sandbox_walk();
+        let s = &map.units[0];
+        let at = (s.x.wrapping_add(2048), s.z);
+        let own_angel = map.spawn(TribeId::Blue, UnitKind::AngelOfDeath, at).id;
+        let enemy_angel = map.spawn(TribeId::Red, UnitKind::AngelOfDeath, at).id;
+        map.add_effect(effect(TribeId::Blue, at));
+        map.run(Ticks::new(RADII.len() as u32));
+        assert!(!map.unit(own_angel).unwrap().motion.airborne(), "not pushed, unlike an ordinary ally on the last turn");
+        assert!(!map.unit(enemy_angel).unwrap().motion.airborne(), "nor an enemy's");
     }
 
     #[test]
