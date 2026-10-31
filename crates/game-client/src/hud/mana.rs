@@ -11,6 +11,7 @@ use crate::units::PLAYER;
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::mana::{Mana, ManaPool};
+use game_core::tribes::TribeId;
 
 /// The track's colour (tribe-independent): the fill is the tribe's own accent colour.
 const TRACK: Color = Color::srgba(0.18, 0.10, 0.03, 0.35);
@@ -29,7 +30,7 @@ pub struct ManaView {
     pub fill_color: Color,
 }
 
-pub fn mana_view(pool: &ManaPool, owner: u8) -> ManaView {
+pub fn mana_view(pool: &ManaPool, owner: game_core::tribes::TribeId) -> ManaView {
     ManaView { text: format_amount(pool.bank), share: pool.advisor_fraction() * 100.0, fill_color: tribe_color(owner) }
 }
 
@@ -63,7 +64,7 @@ fn update_strip(
     mut text: Query<&mut Text, With<AmountText>>,
     mut fill: Query<(&mut Node, &mut BackgroundColor), With<Fill>>,
 ) {
-    let view = mana_view(&map.0.mana[PLAYER as usize], PLAYER);
+    let view = mana_view(&map.0.mana[PLAYER.as_usize()], PLAYER);
     for mut t in &mut text {
         if t.0 != view.text {
             t.0.clone_from(&view.text);
@@ -82,25 +83,26 @@ mod tests {
     #[test]
     fn the_strip_shows_the_bank_grouped_by_thousands() {
         let pool = ManaPool { bank: Mana(12_345), ..ManaPool::default() };
-        assert_eq!(mana_view(&pool, 0).text, "12,345");
-        assert_eq!(mana_view(&ManaPool { bank: Mana(0), ..pool }, 0).text, "0");
+        assert_eq!(mana_view(&pool, TribeId::Blue).text, "12,345");
+        assert_eq!(mana_view(&ManaPool { bank: Mana(0), ..pool }, TribeId::Blue).text, "0");
     }
 
     #[test]
     fn the_bar_is_full_with_nothing_charging_regardless_of_the_bank() {
         let pool = ManaPool { bank: Mana(1), ..ManaPool::default() };
-        assert_eq!(mana_view(&pool, 0).share, 100.0);
+        assert_eq!(mana_view(&pool, TribeId::Blue).share, 100.0);
     }
 
     #[test]
     fn the_bar_shows_the_advisor_fraction_not_the_bank() {
         let pool = ManaPool { advisor_eta: Mana(100), received: Mana(50), ..ManaPool::default() };
-        assert!((mana_view(&pool, 0).share - 100.0 * 50.0 / 178.0).abs() < 0.001);
+        assert!((mana_view(&pool, game_core::tribes::TribeId::Blue).share - 100.0 * 50.0 / 178.0).abs() < 0.001);
     }
 
     #[test]
     fn the_fill_colour_is_the_tribe_s_own_accent() {
-        assert_eq!(mana_view(&ManaPool::default(), 0).fill_color, crate::sites::tribe_color(0));
-        assert_eq!(mana_view(&ManaPool::default(), 1).fill_color, crate::sites::tribe_color(1));
+        use game_core::tribes::TribeId;
+        assert_eq!(mana_view(&ManaPool::default(), TribeId::Blue).fill_color, crate::sites::tribe_color(TribeId::Blue));
+        assert_eq!(mana_view(&ManaPool::default(), TribeId::Red).fill_color, crate::sites::tribe_color(TribeId::Red));
     }
 }

@@ -30,6 +30,7 @@ use crate::explosion::BuildingExploded;
 use game_core::building::{Building, BuildingId, BuildingKind, Stage};
 use game_core::foundation::Collapse;
 use game_core::time::{Countdown, Tick, Ticks};
+use game_core::tribes::{Owner, TribeId};
 use pop3_format::catalog::{self, villager_hut, Building as Object};
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 use std::collections::HashMap;
@@ -75,8 +76,8 @@ const FIRE_LAST: f32 = 0.15;
 
 /// The original object drawing a building of `owner`, None if not identified (neutral buildings
 /// take the blue version).
-pub fn building_object(kind: BuildingKind, owner: u8) -> Option<usize> {
-    let tribe = if owner < catalog::TRIBES { owner } else { 0 };
+pub fn building_object(kind: BuildingKind, owner: Owner) -> Option<usize> {
+    let tribe = owner.tribe().unwrap_or(TribeId::Blue).as_u8();
     Some(match kind {
         BuildingKind::Hut { size } => villager_hut(0, tribe, size),
         BuildingKind::DrumTower => Object::DrumTower.object(tribe),
@@ -261,12 +262,12 @@ fn staged(full: &MeshData, pieces: Option<(u8, u8)>, meshes: &mut Assets<Mesh>) 
 /// the built model with its chimney top, and the construction frame.
 #[derive(Default)]
 struct KitMeshes {
-    built: HashMap<(BuildingKind, u8), (Handle<Mesh>, Vec3)>,
-    frames: HashMap<(BuildingKind, u8), Handle<Mesh>>,
+    built: HashMap<(BuildingKind, Owner), (Handle<Mesh>, Vec3)>,
+    frames: HashMap<(BuildingKind, Owner), Handle<Mesh>>,
 }
 
 /// The kit's meshes of a building (see `staged`), None if the kit has no valid model for it.
-fn kit_staged(cache: &mut KitMeshes, kind: BuildingKind, owner: u8, pieces: Option<(u8, u8)>, meshes: &mut Assets<Mesh>) -> Option<Staged> {
+fn kit_staged(cache: &mut KitMeshes, kind: BuildingKind, owner: Owner, pieces: Option<(u8, u8)>, meshes: &mut Assets<Mesh>) -> Option<Staged> {
     let key = (kind, owner);
     if pieces.is_none() {
         if let std::collections::hash_map::Entry::Vacant(e) = cache.built.entry(key) {
@@ -351,7 +352,7 @@ fn respawn_buildings(
         let (x, z) = b.centre();
         let at = Vec2::new(x as f32 / cell, z as f32 / cell);
         let yaw = facing_yaw(facing);
-        let tribe = if owner < catalog::TRIBES { owner } else { 0 };
+        let tribe = owner.tribe().unwrap_or(TribeId::Blue);
         let original = bank.zip(material.as_ref()).and_then(|(bank, mat)| Some((bank.get(building_object(kind, owner)?)?, mat.clone())));
         let layers = kind.wood_cost().max(1);
         let pieces = match stage {
@@ -631,9 +632,9 @@ mod tests {
 
     #[test]
     fn a_fire_burning_on_does_not_rebuild_the_views_lit_or_out_does() {
-        let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
+        let hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0);
         let mut burning = hut.clone();
-        burning.ignite(0);
+        burning.ignite(TribeId::Blue);
         let mut later = burning.clone();
         later.burn();
         assert!(same_look(&[burning.clone()], &[later]));
@@ -642,7 +643,7 @@ mod tests {
 
     #[test]
     fn a_sinking_countdown_ticking_down_does_not_rebuild_the_views_either() {
-        let hut = Building { collapse: Some(Collapse::Sinking { left: Countdown::new(game_core::foundation::SINK_TICKS) }), ..Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0) };
+        let hut = Building { collapse: Some(Collapse::Sinking { left: Countdown::new(game_core::foundation::SINK_TICKS) }), ..Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0) };
         let mut later = hut.clone();
         let Some(Collapse::Sinking { left }) = &mut later.collapse else { unreachable!() };
         left.tick();
@@ -670,7 +671,7 @@ mod tests {
     #[test]
     fn leans_towards_the_footprints_lowest_points() {
         let mut m = game_core::map::GameMap::sandbox_walk();
-        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 40 * 512, 40 * 512, 0);
+        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 40 * 512, 40 * 512, 0);
         hut.level = 100;
         for &(x, z) in &hut.ground_points() {
             m.terrain.set(x, z, 100);
@@ -701,54 +702,54 @@ mod tests {
 
     #[test]
     fn a_vaults_phase_does_not_rebuild_the_views() {
-        let vault = Building::new(BuildingKind::Vault, 255, 0, 0, 0);
+        let vault = Building::new(BuildingKind::Vault, Owner::Wild, 0, 0, 0);
         let mut praying = vault.clone();
         praying.vault.as_mut().unwrap().phase = game_core::vault::VaultPhase::Praying { progress: 40 };
         assert!(same_look(std::slice::from_ref(&vault), &[praying]));
-        let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
+        let hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0);
         assert!(same_look(std::slice::from_ref(&hut), &[Building { inside: 2, ..hut.clone() }]), "people going in");
         let training = Building { production: Some(game_core::production::Production { stored: 109, cost: 3500, short: false }), ..hut.clone() };
         assert!(same_look(std::slice::from_ref(&hut), &[training]), "mana stored");
         let hit = Building { shaking: 40, wear: 3, ..hut.clone() };
         assert!(same_look(std::slice::from_ref(&hit), &[Building { shaking: 39, wear: 2, ..hut.clone() }]), "a shake running on");
         assert!(!same_look(std::slice::from_ref(&hut), &[hit]), "starting to shake");
-        let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
+        let hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0);
         assert!(!same_look(std::slice::from_ref(&vault), &[hut]));
         assert!(!same_look(std::slice::from_ref(&vault), &[]));
     }
 
     #[test]
     fn a_tower_lookout_is_on_its_platform() {
-        let tower = |facing| Building::new(BuildingKind::DrumTower, 0, 20 * 512, 20 * 512, facing);
+        let tower = |facing| Building::new(BuildingKind::DrumTower, TribeId::Blue, 20 * 512, 20 * 512, facing);
         let (at, lift) = perch(&tower(0), 2.45).unwrap();
         assert!((at - Vec2::new(20.5, 20.5)).length() < 1e-5 && (lift - 1.372).abs() < 1e-3);
-        assert!(perch(&Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0), 2.0).is_none(), "huts hide their people");
+        assert!(perch(&Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0), 2.0).is_none(), "huts hide their people");
     }
 
     #[test]
     fn identified_buildings_have_their_tribes_object() {
-        assert_eq!(building_object(BuildingKind::DrumTower, 2), Some(119));
-        assert_eq!(building_object(BuildingKind::Hut { size: 3 }, 1), Some(villager_hut(0, 1, 3)));
-        assert_eq!(building_object(BuildingKind::Vault, 255), Some(catalog::KNOWLEDGE_PYRAMID), "neutral");
-        assert_eq!(building_object(BuildingKind::BoatHut, 255), Some(121), "neutral: the blue one");
-        assert_eq!(building_object(BuildingKind::GuardPost, 0), None, "not identified: stand-in box");
+        assert_eq!(building_object(BuildingKind::DrumTower, Owner::Tribe(TribeId::Yellow)), Some(119));
+        assert_eq!(building_object(BuildingKind::Hut { size: 3 }, Owner::Tribe(TribeId::Red)), Some(villager_hut(0, 1, 3)));
+        assert_eq!(building_object(BuildingKind::Vault, Owner::Wild), Some(catalog::KNOWLEDGE_PYRAMID), "neutral");
+        assert_eq!(building_object(BuildingKind::BoatHut, Owner::Wild), Some(121), "neutral: the blue one");
+        assert_eq!(building_object(BuildingKind::GuardPost, Owner::Tribe(TribeId::Blue)), None, "not identified: stand-in box");
     }
 
     #[test]
     fn kit_meshes_are_shared_per_kind_and_owner_and_made_when_shown() {
         let (mut cache, mut meshes) = (KitMeshes::default(), Assets::<Mesh>::default());
         let temple = BuildingKind::Temple;
-        let built = kit_staged(&mut cache, temple, 1, None, &mut meshes).unwrap();
+        let built = kit_staged(&mut cache, temple, Owner::Tribe(TribeId::Red), None, &mut meshes).unwrap();
         assert!(built.frame.is_none() && built.inner.is_none() && cache.frames.is_empty(), "no frame painted for a built one");
-        assert_eq!(kit_staged(&mut cache, temple, 1, None, &mut meshes).unwrap().shown, built.shown);
-        assert_ne!(kit_staged(&mut cache, temple, 2, None, &mut meshes).unwrap().shown, built.shown, "owners differ");
-        let a = kit_staged(&mut cache, temple, 1, Some((1, 3)), &mut meshes).unwrap();
-        let b = kit_staged(&mut cache, temple, 1, Some((2, 3)), &mut meshes).unwrap();
+        assert_eq!(kit_staged(&mut cache, temple, Owner::Tribe(TribeId::Red), None, &mut meshes).unwrap().shown, built.shown);
+        assert_ne!(kit_staged(&mut cache, temple, Owner::Tribe(TribeId::Yellow), None, &mut meshes).unwrap().shown, built.shown, "owners differ");
+        let a = kit_staged(&mut cache, temple, Owner::Tribe(TribeId::Red), Some((1, 3)), &mut meshes).unwrap();
+        let b = kit_staged(&mut cache, temple, Owner::Tribe(TribeId::Red), Some((2, 3)), &mut meshes).unwrap();
         assert!(a.frame.is_some() && a.frame == b.frame, "one frame per kind and owner");
         assert!(a.inner.is_some() && a.shown != b.shown, "built parts follow the pieces");
-        assert!(kit_staged(&mut cache, temple, 1, Some((0, 3)), &mut meshes).unwrap().shown.is_none());
+        assert!(kit_staged(&mut cache, temple, Owner::Tribe(TribeId::Red), Some((0, 3)), &mut meshes).unwrap().shown.is_none());
         assert_eq!(meshes.len(), 7);
-        assert!(kit_staged(&mut cache, BuildingKind::Other(12), 1, None, &mut meshes).is_none());
+        assert!(kit_staged(&mut cache, BuildingKind::Other(12), Owner::Tribe(TribeId::Red), None, &mut meshes).is_none());
     }
 
     #[test]

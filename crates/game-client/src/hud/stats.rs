@@ -12,6 +12,7 @@ use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::headcount::{kinds_of, Counts, Headcount, Housing, State, KINDS, SUPPLY};
 use game_core::map::GameMap;
+use game_core::tribes::TribeId;
 use game_core::unit::{UnitId, UnitKind};
 use pop3_format::catalog::STATS_ROW_ICONS;
 
@@ -93,7 +94,7 @@ impl Cell {
     }
 
     /// The units a click adds: the next one not selected yet, or with `all` every one of them.
-    pub fn pick(self, map: &GameMap, tribe: u8, selected: &[UnitId], all: bool) -> Vec<UnitId> {
+    pub fn pick(self, map: &GameMap, tribe: TribeId, selected: &[UnitId], all: bool) -> Vec<UnitId> {
         let Row::Doing(state) = self.row else { return Vec::new() };
         if all {
             return map.units_in(tribe, state, self.kind).map(|u| u.id).filter(|id| !selected.contains(id)).collect();
@@ -102,7 +103,7 @@ impl Cell {
     }
 
     /// What hovering it says.
-    pub fn describe(self, map: &GameMap, tribe: u8, selected: &[UnitId]) -> String {
+    pub fn describe(self, map: &GameMap, tribe: TribeId, selected: &[UnitId]) -> String {
         let what = self.kind.map_or("units", |k| kind_plural(k));
         let Row::Doing(state) = self.row else { return format!("Selected {what}.") };
         let units: Vec<UnitId> = map.units_in(tribe, state, self.kind).map(|u| u.id).collect();
@@ -172,7 +173,7 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, mut ico
                 r.spawn(Node { width: px(label_w), ..default() });
                 r.spawn((Node { width: px(TOTAL_W), justify_content: JustifyContent::Center, ..default() },)).with_child(text("All", 10.0, INK));
                 for kind in KINDS {
-                    let icon = icons.get(Icon::Unit { kind, tribe: PLAYER }, &mut images);
+                    let icon = icons.get(Icon::Unit { kind, tribe: PLAYER.into() }, &mut images);
                     r.spawn((KindHeader(kind), Interaction::default(), Node { flex_grow: 1.0, flex_basis: px(0), justify_content: JustifyContent::Center, ..default() }))
                         .with_child((ImageNode::new(icon), Node { width: px(18), height: px(24), ..default() }));
                 }

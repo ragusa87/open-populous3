@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn snaps_to_the_nearest_corner_and_wraps() {
         let b = blueprint_at(BuildingKind::Hut { size: 1 }, 2, Vec2::new(10.4, 20.6));
-        assert_eq!((b.x, b.z, b.facing, b.owner), (10 * 512, 21 * 512, 2, PLAYER));
+        assert_eq!((b.x, b.z, b.facing, b.owner), (10 * 512, 21 * 512, 2, PLAYER.into()));
         assert_eq!(blueprint_at(BuildingKind::Temple, 0, Vec2::new(127.7, 0.2)).x, 0, "past the edge");
     }
 

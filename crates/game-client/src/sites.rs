@@ -55,14 +55,16 @@ fn look_at_site(keys: crate::keymap::Shortcuts, mut rig: ResMut<CameraRig>, map:
     }
 }
 
-/// Original tribe colours: blue, red, yellow, green.
-pub fn tribe_color(owner: u8) -> Color {
-    match owner {
-        0 => Color::srgb(0.15, 0.35, 0.95),
-        1 => Color::srgb(0.9, 0.15, 0.1),
-        2 => Color::srgb(0.95, 0.85, 0.15),
-        3 => Color::srgb(0.2, 0.75, 0.2),
-        _ => Color::srgb(0.6, 0.6, 0.6),
+/// Original tribe colours: blue, red, yellow, green; grey for `Owner::Wild` (a wildman, or any other
+/// non-tribe owner).
+pub fn tribe_color(owner: impl Into<game_core::tribes::Owner>) -> Color {
+    use game_core::tribes::{Owner, TribeId};
+    match owner.into() {
+        Owner::Tribe(TribeId::Blue) => Color::srgb(0.15, 0.35, 0.95),
+        Owner::Tribe(TribeId::Red) => Color::srgb(0.9, 0.15, 0.1),
+        Owner::Tribe(TribeId::Yellow) => Color::srgb(0.95, 0.85, 0.15),
+        Owner::Tribe(TribeId::Green) => Color::srgb(0.2, 0.75, 0.2),
+        Owner::Wild => Color::srgb(0.6, 0.6, 0.6),
     }
 }
 
@@ -166,13 +168,13 @@ mod tests {
 
     #[test]
     fn site_centre_is_cell_centre() {
-        let s = ReincarnationSite::at_cell(0, (8, 107), 0);
+        let s = ReincarnationSite::at_cell(game_core::tribes::TribeId::Blue, (8, 107), 0);
         assert_eq!(site_cell_pos(&s), Vec2::new(8.5, 107.5));
     }
 
     #[test]
     fn stones_face_the_centre() {
-        let s = ReincarnationSite::at_cell(0, (10, 20), 0);
+        let s = ReincarnationSite::at_cell(game_core::tribes::TribeId::Blue, (10, 20), 0);
         let centre = site_cell_pos(&s);
         for p in &site_parts(&s) {
             let front = Quat::from_rotation_y(p.yaw.0) * Vec3::NEG_Z;
@@ -183,7 +185,7 @@ mod tests {
 
     #[test]
     fn stones_stand_on_the_octagons_cell_centres() {
-        let s = ReincarnationSite::at_cell(1, (10, 20), 0);
+        let s = ReincarnationSite::at_cell(game_core::tribes::TribeId::Red, (10, 20), 0);
         let parts = site_parts(&s);
         assert_eq!(parts.len(), SLOTS.len());
         for (p, &(dx, dz)) in parts.iter().zip(&SLOTS) {

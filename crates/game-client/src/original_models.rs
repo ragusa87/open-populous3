@@ -41,7 +41,7 @@ pub struct MeshData {
 /// Flat-shaded triangles (quads split 0-1-2, 0-2-3), in cells (1 cell = 512 units), drawn mirrored like the
 /// world (`game_frame`: the objects are in the game's left-handed frame), with the
 /// tribe-coloured tiles of `tribe` (objects are stored in blue).
-pub fn object_mesh(obj: &Object, tribe: u8) -> MeshData {
+pub fn object_mesh(obj: &Object, tribe: game_core::tribes::TribeId) -> MeshData {
     let scale = 1.0 / WORLD_UNITS_PER_CELL as f32;
     let mut m = MeshData::default();
     for face in &obj.faces {
@@ -52,7 +52,7 @@ pub fn object_mesh(obj: &Object, tribe: u8) -> MeshData {
             .map(|(&i, &uv)| {
                 let p = obj.points[i as usize];
                 let at = GamePos(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) * scale);
-                (Vec3::from(at).into(), face_uv(face.tile.map(|t| tribe_tile(t, tribe)), face.colour, uv))
+                (Vec3::from(at).into(), face_uv(face.tile.map(|t| tribe_tile(t, tribe.as_u8())), face.colour, uv))
             })
             .collect();
         for tri in [mirrored([0, 1, 2]), mirrored([0, 2, 3])].iter().take(corners.len() - 2) {
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn quad_becomes_two_triangles_in_cells() {
-        let m = object_mesh(&quad(), 0);
+        let m = object_mesh(&quad(), game_core::tribes::TribeId::Blue);
         assert_eq!(m.indices.len(), 6);
         assert_eq!(m.positions[1], [1.0, 1.0, 0.0], "corners 0, 2, 1: the front kept once mirrored");
         assert_eq!(m.normals[0], [0.0, 0.0, -1.0], "facing the game's +z, drawn towards -z");
@@ -165,7 +165,7 @@ mod tests {
     fn tribe_recolours_blue_tiles() {
         let mut obj = quad();
         obj.faces[0].tile = Some(226);
-        let (blue, red) = (object_mesh(&obj, 0), object_mesh(&obj, 1));
+        let (blue, red) = (object_mesh(&obj, game_core::tribes::TribeId::Blue), object_mesh(&obj, game_core::tribes::TribeId::Red));
         assert_eq!(red.uvs[0][0] - blue.uvs[0][0], 32.0 / 256.0, "next tile to the right");
     }
 

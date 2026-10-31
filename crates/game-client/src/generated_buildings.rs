@@ -12,6 +12,7 @@ use bevy::color::ColorToComponents;
 use bevy::image::{CompressedImageFormats, Image, ImageFilterMode, ImageSampler, ImageSamplerDescriptor, ImageType};
 use bevy::render::render_resource::TextureFormat;
 use game_core::building::BuildingKind;
+use game_core::tribes::{Owner, TribeId};
 use std::sync::OnceLock;
 
 const ATLAS: &[u8] = include_bytes!("../../../assets/3d/buildings/surfaces.png");
@@ -125,13 +126,13 @@ fn index(kind: BuildingKind) -> Option<usize> {
 /// The kind's finished building with its `Tribe` material in the owner's colour, None for
 /// unknown IDs. Each GLB is decoded once. Fail back to the diagnostic box if a future asset edit
 /// breaks it; tests validate every shipped model before release.
-pub fn body(kind: BuildingKind, owner: u8) -> Option<MeshData> {
+pub fn body(kind: BuildingKind, owner: Owner) -> Option<MeshData> {
     let d = decoded(kind)?;
     Some(painted(&d.model.body, &d.tribe[0], owner))
 }
 
 /// The kind's timber construction frame, in the owner's colour like `body`.
-pub fn scaffold(kind: BuildingKind, owner: u8) -> Option<MeshData> {
+pub fn scaffold(kind: BuildingKind, owner: Owner) -> Option<MeshData> {
     let d = decoded(kind)?;
     Some(painted(&d.model.scaffold, &d.tribe[1], owner))
 }
@@ -158,7 +159,7 @@ struct Decoded {
 }
 
 /// A copy of `mesh` with the vertices flagged in `tribe` in the owner's colour.
-fn painted(mesh: &MeshData, tribe: &[bool], owner: u8) -> MeshData {
+fn painted(mesh: &MeshData, tribe: &[bool], owner: Owner) -> MeshData {
     let colour = tribe_color(owner).to_linear().to_f32_array();
     let mut out = mesh.clone();
     out.colors.iter_mut().zip(tribe).filter(|(_, t)| **t).for_each(|(c, _)| *c = colour);
@@ -234,7 +235,7 @@ mod tests {
 
     #[test]
     fn flames_sit_on_the_firewarrior_huts_braziers() {
-        let body = body(BuildingKind::FirewarriorTraining, 0).unwrap();
+        let body = body(BuildingKind::FirewarriorTraining, Owner::Tribe(TribeId::Blue)).unwrap();
         for [x, y, z] in flame_bases(BuildingKind::FirewarriorTraining) {
             let rim = body.positions.iter().filter(|p| (p[1] - y).abs() < 1e-3 && ((p[0] - x).powi(2) + (p[2] - z).powi(2)).sqrt() < 0.3);
             assert!(rim.count() > 0, "a bowl top at {x}, {y}, {z}");
@@ -250,7 +251,7 @@ mod tests {
         }
         assert_eq!(index(BuildingKind::Hut { size: 7 }), index(BuildingKind::Hut { size: 3 }));
         for kind in KINDS {
-            let model = Model { body: body(kind, 0).expect("named building must have a valid GLB"), scaffold: scaffold(kind, 0).unwrap() };
+            let model = Model { body: body(kind, Owner::Tribe(TribeId::Blue)).expect("named building must have a valid GLB"), scaffold: scaffold(kind, Owner::Tribe(TribeId::Blue)).unwrap() };
             for mesh in [&model.body, &model.scaffold] {
                 assert_eq!(mesh.positions.len(), mesh.normals.len());
                 assert_eq!(mesh.positions.len(), mesh.colors.len());
@@ -283,7 +284,7 @@ mod tests {
     #[test]
     fn construction_preserves_colours_and_grows_for_every_wood_piece() {
         for kind in game_core::build_book::BUILDABLE {
-            let full = body(kind, 0).unwrap();
+            let full = body(kind, Owner::Tribe(TribeId::Blue)).unwrap();
             let cost = kind.wood_cost();
             assert!(built_part(&full, 0, cost).indices.is_empty());
             let mut last = 0;
@@ -302,17 +303,18 @@ mod tests {
 
     #[test]
     fn only_tribe_material_changes_between_owners() {
+        let blue_owner = Owner::Tribe(TribeId::Blue);
         for kind in game_core::build_book::BUILDABLE {
-            let blue = body(kind, 0).unwrap();
-            for owner in [1, 2, 3, 255] {
+            let blue = body(kind, blue_owner).unwrap();
+            for owner in [Owner::Tribe(TribeId::Red), Owner::Tribe(TribeId::Yellow), Owner::Tribe(TribeId::Green), Owner::Wild] {
                 let other = body(kind, owner).unwrap();
                 assert_eq!(blue.positions, other.positions);
                 assert_eq!(blue.uvs, other.uvs);
                 let changed: Vec<_> = blue.colors.iter().zip(&other.colors).filter(|(a, b)| a != b).collect();
                 assert!(!changed.is_empty() && changed.len() < blue.colors.len());
-                assert!(changed.iter().all(|(a, b)| **a == tribe_color(0).to_linear().to_f32_array() && **b == tribe_color(owner).to_linear().to_f32_array()));
+                assert!(changed.iter().all(|(a, b)| **a == tribe_color(blue_owner).to_linear().to_f32_array() && **b == tribe_color(owner).to_linear().to_f32_array()));
             }
-            assert_eq!(body(kind, 0).unwrap(), blue, "painting an owner leaves the cached model untouched");
+            assert_eq!(body(kind, blue_owner).unwrap(), blue, "painting an owner leaves the cached model untouched");
         }
     }
 

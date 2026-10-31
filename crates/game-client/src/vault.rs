@@ -8,6 +8,7 @@ use crate::original_models::{object_mesh, solid_part, to_mesh, OriginalObjects};
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use crate::game_frame::GamePos;
+use game_core::tribes::TribeId;
 use game_core::vault::FULL;
 use pop3_format::catalog::{KNOWLEDGE_PYRAMID, KNOWLEDGE_PYRAMID_CLOSED, KNOWLEDGE_PYRAMID_FOLDED};
 use pop3_format::Object;
@@ -64,7 +65,7 @@ impl<'a> Frames<'a> {
 #[derive(Component)]
 pub struct VaultModel {
     pub index: usize,
-    pub tribe: u8,
+    pub tribe: TribeId,
     pub flame: Option<Entity>,
     pub shown: Option<(u16, u16)>,
 }

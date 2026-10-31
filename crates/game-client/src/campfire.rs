@@ -11,6 +11,7 @@ use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use game_core::campfire::Campfire;
+use game_core::tribes::TribeId;
 use pop3_format::catalog::CAMP_FIRE;
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 
@@ -70,7 +71,7 @@ fn original_art(levels: &LevelList, objects: &OriginalObjects, theme: u8, meshes
     });
     Some(FireArt {
         theme,
-        logs: meshes.add(to_mesh(object_mesh(&solid_part(obj), 0))),
+        logs: meshes.add(to_mesh(object_mesh(&solid_part(obj), TribeId::Blue))),
         logs_material,
         flame: meshes.add(to_mesh(flame::flame_mesh(obj))),
     })
@@ -149,7 +150,7 @@ mod tests {
 
     #[test]
     fn views_follow_the_fires_by_id() {
-        let fires = [Campfire::new(1, 0, (1, 1)), Campfire::new(4, 0, (2, 2))];
+        let fires = [Campfire::new(1, TribeId::Blue, (1, 1)), Campfire::new(4, TribeId::Blue, (2, 2))];
         assert_eq!(view_changes(&fires, &[]), (vec![0, 1], vec![]));
         assert_eq!(view_changes(&fires, &[1, 4]), (vec![], vec![]));
         assert_eq!(view_changes(&fires[1..], &[1, 4]), (vec![], vec![1]), "fire 1 went out");
