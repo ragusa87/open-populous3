@@ -15,19 +15,38 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 /// Work done once at boot: `run` on a worker thread (CPU only, no ECS access), its output then installed in the world
-/// on the main thread (GPU uploads, resources).
+/// on the main thread (GPU uploads, resources) one chunk per frame (`install_step`), so a job with a lot to install
+/// never blocks the loading screen (or the whole app: no frames drawn means no window repaint, no swapchain
+/// present, and on some drivers a long enough stall is itself what makes the game crash rather than just freeze)
+/// for longer than one chunk's worth of work (TODO.md "Loading screen freezes").
 pub trait BootJob: Send + Sync + 'static {
     /// Shown on the loading screen.
     const LABEL: &'static str;
     /// What the job needs from the world, copied out of it.
     type Input: Send + 'static;
-    /// Its result, handed to `install`.
-    type Output: Send + 'static;
+    /// Its result, handed to `install_step`. `Sync` too: `JobSlot` (a `Resource`) holds it directly while
+    /// chunking it in, between `Task<Output>`'s own poll and the last `install_step` call.
+    type Output: Send + Sync + 'static;
     fn input(world: &World) -> Self::Input;
     /// How many `Progress::step`s `run` makes.
     fn steps(input: &Self::Input) -> u32;
     fn run(input: Self::Input, progress: Progress) -> Self::Output;
-    fn install(output: Self::Output, world: &mut World);
+    /// How many `install_step` calls `output` will take, for the loading screen's own install-phase progress.
+    /// Defaults to one: a plain, unchunked install has nothing finer to report.
+    fn install_steps(output: &Self::Output) -> u32 {
+        let _ = output;
+        1
+    }
+    /// Installs one chunk of `output` into `world`; called again next frame while chunks remain, so the main
+    /// thread never does more than one chunk's install work before the next frame can draw.
+    fn install_step(output: Self::Output, world: &mut World) -> InstallProgress<Self::Output>;
+}
+
+/// What a chunked install has left to do, returned by `BootJob::install_step`.
+pub enum InstallProgress<T> {
+    /// More to install: call `install_step` again next frame with this.
+    More(T),
+    Done,
 }
 
 /// Steps a job has done: it can only go forward, one step at a time.
@@ -58,6 +77,9 @@ pub struct JobStatus {
     pub progress: Progress,
     pub total: u32,
     pub phase: JobPhase,
+    /// How many `install_step` chunks are done, once `phase` is `Installing`.
+    pub install_progress: Progress,
+    pub install_total: u32,
 }
 
 /// Every boot job's status, in the order they were registered.
@@ -65,14 +87,17 @@ pub struct JobStatus {
 pub struct BootStatus(pub Vec<JobStatus>);
 
 impl BootStatus {
-    /// How far the boot is, 0 to 1: each job weighs the same, a done one counts whole.
+    /// How far the boot is, 0 to 1: each job weighs the same, a done one counts whole. `Running` fills 0 to 0.9
+    /// of a job's own share, `Installing` the last 0.9 to 1 (by its chunks done) - so a job with real install
+    /// work to do still visibly advances instead of sitting still at a near-100% cap until it finishes.
     pub fn fraction(&self) -> f32 {
         if self.0.is_empty() {
             return 1.0;
         }
         let job = |j: &JobStatus| match j.phase {
             JobPhase::Done => 1.0,
-            _ => (j.progress.done() as f32 / j.total.max(1) as f32).min(0.99),
+            JobPhase::Installing => 0.9 + 0.1 * (j.install_progress.done() as f32 / j.install_total.max(1) as f32).min(1.0),
+            JobPhase::Running => (j.progress.done() as f32 / j.total.max(1) as f32).min(0.9),
         };
         self.0.iter().map(job).sum::<f32>() / self.0.len() as f32
     }
@@ -91,13 +116,28 @@ impl BootStatus {
             j.phase = phase;
         }
     }
+
+    /// `Running` -> `Installing`, now that `total` chunks of install work are known.
+    fn begin_install(&mut self, label: &'static str, total: u32) {
+        if let Some(j) = self.0.iter_mut().find(|j| j.label == label) {
+            j.phase = JobPhase::Installing;
+            j.install_total = total.max(1);
+        }
+    }
+
+    fn step_install(&mut self, label: &'static str) {
+        if let Some(j) = self.0.iter_mut().find(|j| j.label == label) {
+            j.install_progress.step();
+        }
+    }
 }
 
-/// A job's slot: its task while it runs.
+/// A job's slot: its task while it runs, then its output while `install_step` is chunking it in.
 #[derive(Resource)]
 enum JobSlot<J: BootJob> {
     Pending,
     Running(Task<J::Output>),
+    Installing(J::Output),
     Done,
 }
 
@@ -126,23 +166,52 @@ fn start_job<J: BootJob>(world: &mut World) {
     let input = J::input(world);
     let progress = Progress::default();
     let total = J::steps(&input);
-    world.resource_mut::<BootStatus>().0.push(JobStatus { label: J::LABEL, progress: progress.clone(), total, phase: JobPhase::Running });
+    world.resource_mut::<BootStatus>().0.push(JobStatus {
+        label: J::LABEL,
+        progress: progress.clone(),
+        total,
+        phase: JobPhase::Running,
+        install_progress: Progress::default(),
+        install_total: 1,
+    });
     let task = AsyncComputeTaskPool::get().spawn(async move { J::run(input, progress) });
     world.insert_resource(JobSlot::<J>::Running(task));
 }
 
+/// Advances job `J` by at most one step: polls its task (then starts installing once it finishes), or installs
+/// one chunk of an already-running install - never both in the same frame, and never more than one chunk, so a
+/// job with a lot of either never costs more than one frame.
 fn poll_job<J: BootJob>(world: &mut World) {
-    let finished = matches!(world.resource::<JobSlot<J>>(), JobSlot::Running(task) if task.is_finished());
-    if !finished {
-        return;
+    match std::mem::replace(&mut *world.resource_mut::<JobSlot<J>>(), JobSlot::Done) {
+        JobSlot::Running(mut task) => {
+            *world.resource_mut::<JobSlot<J>>() = match block_on(poll_once(&mut task)) {
+                Some(output) => {
+                    let total = J::install_steps(&output);
+                    world.resource_mut::<BootStatus>().begin_install(J::LABEL, total);
+                    JobSlot::Installing(output)
+                }
+                None => JobSlot::Running(task),
+            };
+        }
+        JobSlot::Installing(output) => {
+            let t = std::time::Instant::now();
+            let progress = J::install_step(output, world);
+            let ms = t.elapsed().as_secs_f32() * 1000.0;
+            world.resource_mut::<BootStatus>().step_install(J::LABEL);
+            match progress {
+                InstallProgress::More(next) => {
+                    trace!("boot: {} installed a chunk in {ms:.0} ms", J::LABEL);
+                    *world.resource_mut::<JobSlot<J>>() = JobSlot::Installing(next);
+                }
+                InstallProgress::Done => {
+                    info!("boot: {} finished installing (last chunk {ms:.0} ms)", J::LABEL);
+                    world.resource_mut::<BootStatus>().set_phase(J::LABEL, JobPhase::Done);
+                    *world.resource_mut::<JobSlot<J>>() = JobSlot::Done;
+                }
+            }
+        }
+        other => *world.resource_mut::<JobSlot<J>>() = other,
     }
-    let JobSlot::Running(mut task) = std::mem::replace(&mut *world.resource_mut::<JobSlot<J>>(), JobSlot::Done) else { return };
-    let Some(output) = block_on(poll_once(&mut task)) else { return };
-    world.resource_mut::<BootStatus>().set_phase(J::LABEL, JobPhase::Installing);
-    let t = std::time::Instant::now();
-    J::install(output, world);
-    info!("boot: {} installed in {:.0} ms", J::LABEL, t.elapsed().as_secs_f32() * 1000.0);
-    world.resource_mut::<BootStatus>().set_phase(J::LABEL, JobPhase::Done);
 }
 
 /// Handles of assets Bevy loads in the background that the boot waits for (glTF scenes).
@@ -294,7 +363,7 @@ mod tests {
     fn job(label: &'static str, done: u32, total: u32, phase: JobPhase) -> JobStatus {
         let progress = Progress::default();
         (0..done).for_each(|_| progress.step());
-        JobStatus { label, progress, total, phase }
+        JobStatus { label, progress, total, phase, install_progress: Progress::default(), install_total: 1 }
     }
 
     #[test]
@@ -355,8 +424,9 @@ mod tests {
                 n + 1
             }).sum()
         }
-        fn install(output: u32, world: &mut World) {
+        fn install_step(output: u32, world: &mut World) -> InstallProgress<u32> {
             world.insert_resource(Total(output));
+            InstallProgress::Done
         }
     }
 
@@ -383,5 +453,69 @@ mod tests {
         assert_eq!(*app.world().resource::<State<AppState>>().get(), AppState::Menu);
         let status = app.world().resource::<BootStatus>();
         assert_eq!((status.0.len(), status.0[0].progress.done(), status.is_done()), (1, 3, true));
+    }
+
+    /// Installs a `Vec<u32>` one number per frame, appending each to `Installed` - so a test can watch an
+    /// install actually spread across several `poll_job` calls instead of landing in one.
+    struct Chunks;
+
+    #[derive(Resource, Default, Debug, PartialEq)]
+    struct Installed(Vec<u32>);
+
+    impl BootJob for Chunks {
+        const LABEL: &'static str = "chunks";
+        type Input = Vec<u32>;
+        type Output = Vec<u32>;
+        fn input(_: &World) -> Vec<u32> {
+            vec![10, 20, 30]
+        }
+        fn steps(_: &Vec<u32>) -> u32 {
+            1
+        }
+        fn run(input: Vec<u32>, progress: Progress) -> Vec<u32> {
+            progress.step();
+            input
+        }
+        fn install_steps(output: &Vec<u32>) -> u32 {
+            output.len() as u32
+        }
+        fn install_step(mut output: Vec<u32>, world: &mut World) -> InstallProgress<Vec<u32>> {
+            let n = output.remove(0);
+            world.resource_mut::<Installed>().0.push(n);
+            if output.is_empty() { InstallProgress::Done } else { InstallProgress::More(output) }
+        }
+    }
+
+    #[test]
+    fn a_chunked_install_lands_one_piece_per_frame_and_the_bar_climbs_through_it() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin, AssetPlugin::default()))
+            .init_state::<AppState>()
+            .insert_resource(LoadTarget::Boot { then: None })
+            .init_resource::<BootStatus>()
+            .init_resource::<TrackedAssets>()
+            .init_resource::<Installed>()
+            .add_message::<Loaded>()
+            .add_message::<BeginGame>()
+            .add_plugins(BootJobPlugin::<Chunks>::default());
+        // Let the off-thread `run` finish, then one chunk should land per update from here on.
+        for _ in 0..50 {
+            app.update();
+            if matches!(*app.world().resource::<JobSlot<Chunks>>(), JobSlot::Installing(_)) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(matches!(*app.world().resource::<JobSlot<Chunks>>(), JobSlot::Installing(_)), "run finished, installing now");
+        assert_eq!(app.world().resource::<Installed>().0, Vec::<u32>::new(), "not chunked in yet");
+        app.update();
+        assert_eq!(app.world().resource::<Installed>().0, vec![10], "one piece this frame");
+        let mid = app.world().resource::<BootStatus>().fraction();
+        assert!(mid > 0.9 && mid < 1.0, "installing: past the run cap, not done yet: {mid}");
+        app.update();
+        assert_eq!(app.world().resource::<Installed>().0, vec![10, 20], "one more");
+        app.update();
+        assert_eq!(app.world().resource::<Installed>().0, vec![10, 20, 30], "the last piece");
+        assert!(app.world().resource::<BootStatus>().is_done());
     }
 }

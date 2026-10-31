@@ -307,8 +307,8 @@ pub struct UnitArtSource {
 
 /// Every kind's and tribe's frames, prepared AND already packed into their atlas buffers (`pack_tribe_atlases`):
 /// `[kind][tribe]`. The packing itself (real pixel-copy work, `atlas::build_atlas`) runs here, in `run()` on the
-/// boot job's background thread, same as `prepare_frame`'s own upscale/bleed - keeping it out of `install()`
-/// (main thread, `&mut World`) matters: an earlier version of this packed inside `install()` and measured the
+/// boot job's background thread, same as `prepare_frame`'s own upscale/bleed - keeping it out of `install_step`
+/// (main thread, `&mut World`) matters: an earlier version of this packed inside `install` and measured the
 /// "Unit sprites installed" boot step at ~880 ms/call instead of ~23 ms, because the main thread was doing the
 /// atlas's pixel copying synchronously instead of just registering already-built GPU resources.
 pub type PreparedKinds = Vec<Vec<TribeAtlases>>;
@@ -347,18 +347,28 @@ impl crate::boot::BootJob for UnitSpritesJob {
             .collect()
     }
 
-    fn install(kinds: PreparedKinds, world: &mut World) {
+    /// One chunk per kind: with the original art's full frame counts, uploading every kind's atlases in one
+    /// `install` call measured as a multi-second main-thread stall (TODO.md "Loading screen freezes") - long
+    /// enough to freeze the window (no frames drawn, no input polled) and, on some drivers, crash it outright
+    /// (a stalled swapchain present can trip the GPU driver's own timeout/recovery). One kind per frame keeps
+    /// each stall to a fraction of that.
+    fn install_steps(kinds: &PreparedKinds) -> u32 {
+        kinds.len() as u32
+    }
+
+    fn install_step(mut kinds: PreparedKinds, world: &mut World) -> crate::boot::InstallProgress<PreparedKinds> {
+        let Some(tribes) = (!kinds.is_empty()).then(|| kinds.remove(0)) else {
+            return crate::boot::InstallProgress::Done;
+        };
         world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
             world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
                 world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {
-                    let kinds = kinds
-                        .into_iter()
-                        .map(|tribes| tribes.into_iter().map(|ta| upload_tribe_atlases(ta, &mut images, &mut meshes, &mut mats)).collect())
-                        .collect();
-                    world.resource_mut::<UnitSprites>().kinds = kinds;
+                    let kind = tribes.into_iter().map(|ta| upload_tribe_atlases(ta, &mut images, &mut meshes, &mut mats)).collect();
+                    world.resource_mut::<UnitSprites>().kinds.push(kind);
                 });
             });
         });
+        if kinds.is_empty() { crate::boot::InstallProgress::Done } else { crate::boot::InstallProgress::More(kinds) }
     }
 }
 
