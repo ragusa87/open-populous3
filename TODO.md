@@ -551,11 +551,21 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 The single biggest remaining system, and the one that turns this from a sandbox/multiplayer tech demo into an actual single-player game. Sequenced after priority 1 on purpose: AI scripts can invoke any spell/building/unit action through the same order/coordinator machinery, so building the interpreter against still-incomplete systems means repeated rework. Tribes and level scripting are its direct prerequisites (per-tribe state, triggers the scripts fire).
 
 ### Tribes
-- [ ] A tribe model in game-core: `TribeId` instead of bare `u8` owners (blue 0 .. green 3, wildmen 255), its colour
-  in the engine instead of the client's `sites::tribe_color` / `procedural::tribe_rgb`, the tribes playing the level
-  (header byte 88: 1v1, 1v1v1, 2v1...), allies (header byte 92, see "Default allies" below), human / computer,
-  defeated; holding the player's mana pool, spell book and build book (today `GameMap::mana`, `spell_books`,
-  `build_books` by owner).
+- [x] `TribeId` (an enum: blue/red/yellow/green) instead of bare `u8` owners everywhere in game-core, game-client
+  and the game-net wire format (`Unit`/`Building`/`Command`/`WorldEvent`/mana/spell/build books), plus `Owner`
+  (`Owner::Tribe(TribeId)` or `Owner::Wild`, the wildman/neutral sentinel the old `255` stood in for) wherever a
+  unit, building or effect can be nobody's. `game_core::tribes::Tribes` (`GameMap::tribes`) holds, per tribe
+  present, its `computer` flag (`Tribes::with_ai_scripts`, loaded from the level header's `ai_scripts` in
+  `GameMap::load_original`: nonzero means a tribe is computer-controlled) and allies (`with_allies`, header byte
+  92). Left open from the original ask:
+  - [ ] The tribe colour still lives in the client (`sites::tribe_color`, taking `impl Into<Owner>`), not the
+    engine; `procedural::tribe_rgb` and the other pure sprite-recolouring helpers (shapes/frames/original_anim/
+    sheets) still take a plain `u8` index, never seeing an `Owner`/`TribeId` — left alone since nothing feeds them
+    one today.
+  - [ ] The tribes actually playing the level (header byte 88: 1v1, 1v1v1, 2v1...) are still not decoded/applied -
+    see the open report below.
+  - [ ] `GameMap::mana`/`spell_books`/`build_books` are still separate `[T; TRIBES]` arrays indexed by tribe, not
+    folded into a `Tribe` struct alongside `computer`/allies.
   - Reported: red has no reincarnation site on `levl2001.dat` (level 1) in play, suspected to be this same gap
     (header byte 88 unread). Level data itself does place a red (owner 1) shaman Thing (`#38 model 7 kind 1
     owner 1 at (2304,7424)`, alongside blue's `#35 owner 0`) - `site::sites_from_level` takes any owner with a
