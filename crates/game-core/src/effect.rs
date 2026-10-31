@@ -54,6 +54,12 @@ pub enum EffectKind {
     /// An invisible, wandering cloud (`swarm`): stings whoever it currently covers on its own rhythms; drawn
     /// only by its own separately-spawned bee-dots, client-side.
     Swarm(crate::swarm::Swarm),
+    /// The Angel of Death's own invisible cast sequence (`angel_of_death::Cast`): the meteor falls, then the real
+    /// creature appears (`WorldEvent::SpawnAngelOfDeath`) alongside its own ground shockwave and spawn blast.
+    AngelOfDeath(crate::angel_of_death::Cast),
+    /// The Angel of Death's own ground shockwave (`angel_of_death::Shockwave`): a pure terrain ripple, no
+    /// drawable of its own.
+    AngelOfDeathShockwave(crate::angel_of_death::Shockwave),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -79,8 +85,12 @@ pub enum DamageKind {
     Lava,
     /// A swarm's own sting (`swarm`, pop3-rev-analysis.md "Per spell" 5): spares the caster's own tribe (like
     /// a blast) and, more broadly than Lightning/Lava's own "only the caster's shaman", every shaman of any
-    /// tribe. Blocked by a shield like a blast or lightning.
+    /// tribe, and every Angel of Death too (TODO.md "Units": "shamans/angels excluded by a type table"). Blocked
+    /// by a shield like a blast or lightning.
     Swarm,
+    /// An Angel of Death releasing a carried victim (`angel_of_death`): outright, any tribe, shield or no shield
+    /// — the grab itself already ignored it, same spirit as `Swamp`'s own kill.
+    AngelOfDeath,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +104,9 @@ pub enum TerrainChange {
     Volcano { at: Cell, ground: u16, turn: u32 },
     /// One jittered pass of an erosion (`erode::apply`): a flat per-pass amount, no `turn` to ease towards a target.
     Erode { at: Cell },
+    /// One tick of the Angel of Death's own ground shockwave (`angel_of_death::apply_shockwave`): the ring at
+    /// `turn` cells out rises, the one at `turn - 1` settles back down.
+    AngelOfDeathShockwave { at: Cell, turn: u32 },
 }
 
 impl Effect {
@@ -117,6 +130,8 @@ impl Effect {
             EffectKind::Firestorm(ref mut firestorm) => firestorm.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Earthquake(ref mut earthquake) => earthquake.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Swarm(ref mut swarm) => swarm.turn((self.x, self.z), self.owner, world, rng),
+            EffectKind::AngelOfDeath(ref mut cast) => cast.turn((self.x, self.z), self.owner),
+            EffectKind::AngelOfDeathShockwave(ref mut wave) => wave.turn((self.x, self.z)),
             EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
@@ -147,7 +162,9 @@ impl Effect {
             | EffectKind::Lava(_)
             | EffectKind::Firestorm(_)
             | EffectKind::Earthquake(_)
-            | EffectKind::Swarm(_) => Vec::new(),
+            | EffectKind::Swarm(_)
+            | EffectKind::AngelOfDeath(_)
+            | EffectKind::AngelOfDeathShockwave(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }
@@ -183,10 +200,10 @@ pub fn hurts(u: &Unit, kind: DamageKind, from: Option<Owner>) -> bool {
         return false;
     }
     match kind {
-        DamageKind::Melee | DamageKind::Fire | DamageKind::Swamp => true,
+        DamageKind::Melee | DamageKind::Fire | DamageKind::Swamp | DamageKind::AngelOfDeath => true,
         DamageKind::Blast => from != Some(u.owner),
         DamageKind::Lightning | DamageKind::Lava => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman),
-        DamageKind::Swarm => from != Some(u.owner) && u.kind != crate::unit::UnitKind::Shaman,
+        DamageKind::Swarm => from != Some(u.owner) && !matches!(u.kind, crate::unit::UnitKind::Shaman | crate::unit::UnitKind::AngelOfDeath),
     }
 }
 

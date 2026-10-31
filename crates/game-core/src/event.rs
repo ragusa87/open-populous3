@@ -51,6 +51,9 @@ pub enum WorldEvent {
     Scorch { cells: Vec<(i32, i32)> },
     /// A new effect, ticking from the next turn; its id is given then.
     SpawnEffect(Effect),
+    /// The Angel of Death's own cast sequence (`angel_of_death::Cast`) reaches its last turn: the real creature
+    /// appears at `at`, owned by `owner` (`GameMap::tend_angels_of_death`).
+    SpawnAngelOfDeath { owner: Owner, at: (u16, u16) },
     Terrain(TerrainChange),
     /// A coordinator tells one of its units where to go (a charge's target, a melee's place).
     Placed { unit: UnitId, at: (u16, u16) },
