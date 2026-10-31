@@ -8,18 +8,19 @@ Tags: **[files]** decoded from the levels, **[player]** how the game plays, as t
 **[ours]** a choice made here, to check in the game.
 
 ## Shared: the prayer gauge
-- One gauge per place and per tribe; it fills while that tribe prays there. Full at the trigger's `PrayTime`
-  [files]; then the reward is granted. Its unit is unknown (game turns?); until measured, one `PrayTime` = one of our
-  ticks [ours].
-- Praying is slow [player].
-- The gauge fills at full speed with `TriggerCount` people praying [player]. Fewer pray slower, on a soft curve:
-  speed `(n / TriggerCount)²` with `n = min(praying, TriggerCount)` [ours, to check]. A totem of 8: 8 praying 100 %,
-  6 about 56 %, 4 25 %, 2 about 6 %, 1 about 1.6 %. In integers: the gauge counts 1/256 steps and gains
-  `256 * n² / TriggerCount²` a tick (a lone prayer on a totem of 16 still gains 1 step). Done:
-  `game_core::gauge` (`gain`, `step`, `STEP`, `DRAIN`), used by the vaults; totems will use it too.
-- Nobody praying: the gauge drains, quite quickly, **linearly**: a constant amount each tick, whatever the totem
-  needs or how full it is [player]. The rate is to measure; until then as fast as it fills at full speed, 256
-  steps (one `PrayTime` unit) a tick [ours].
+Traced in full, pop3-rev-analysis.md "The gauge" ([exe]); implemented as described there, `game_core::gauge`.
+- One gauge per place and per tribe (the original has one per trigger, driven by whichever tribe has the most
+  prayers; our per-tribe choice for contested totems is covered below); it fills while that tribe prays there.
+  Full at `PrayTime × TriggerCount²` [exe]; then the reward is granted.
+- The gauge only moves every 4 turns, not every turn [exe] (`gauge::RHYTHM`, an `Every::new(4)` at phase 0).
+- The gauge fills at full speed (`TriggerCount²` an update) with `TriggerCount` people praying. Fewer pray slower,
+  each missing prayer dividing the speed by `(TriggerCount − n + 1)²` with `n = min(praying, TriggerCount)` [exe].
+  A totem of 8 (`PrayTime` 64): 8 praying 100 %, 7 25 %, 6 about 11 %, 5 about 6 %, 4 about 3 %, 1 about 1.6 %.
+  In integers: the gauge counts 1/256 steps per `PrayTime` unit and gains `256 / (TriggerCount − n + 1)²` an
+  update (a lone prayer on a totem of 16 still gains 1 step a update). Done: `game_core::gauge` (`gain`, `step`,
+  `STEP`, `DRAIN`, `RHYTHM`), used by both the vaults and totems.
+- Nobody praying: the gauge drains **linearly**, the same `TriggerCount²` an update it gains at full speed,
+  whatever the totem needs or how full it is [exe].
 
 ## Sandbox
 Sandbox > Worship (`POP3_START=sandbox-worship`, `GameMap::sandbox_worship`): south of the player's site a

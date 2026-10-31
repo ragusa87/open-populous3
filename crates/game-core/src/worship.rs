@@ -84,11 +84,12 @@ impl GameMap {
         }
     }
 
-    /// Each tick, each totem: its queue keeps the units praying at it in the order they started;
-    /// each tribe's gauge fills with its first `prayers` of them on the soft curve, drains linearly
-    /// without any; full, the tribe gets the gifts, its gauge starts again, and an exhausted totem
-    /// sends its prayers away.
+    /// Each tick, each totem: its queue keeps the units praying at it in the order they started; on
+    /// `gauge::RHYTHM`'s ticks each tribe's gauge fills with its first `prayers` of them on the soft
+    /// curve, drains linearly without any; full, the tribe gets the gifts, its gauge starts again, and
+    /// an exhausted totem sends its prayers away.
     pub(crate) fn tend_totems(&mut self) {
+        let update = crate::gauge::RHYTHM.fires(self.now, 0);
         for k in 0..self.totems.len() {
             let at = WorshipAt::Totem { id: self.totems[k].id };
             let praying: Vec<UnitId> = self.units.iter().filter(|u| u.is_alive() && u.action == Action::Worshipping { at }).map(|u| u.id).collect();
@@ -105,7 +106,9 @@ impl GameMap {
             let mut full = Vec::new();
             for tribe in 0..TRIBES {
                 let count = totem.queue.iter().filter(|id| self.units.iter().any(|u| u.id == **id && u.owner == TribeId::ALL[tribe])).count() as u16;
-                totem.gauges[tribe] = crate::gauge::step(totem.gauges[tribe], count, totem.prayers, totem.full());
+                if update {
+                    totem.gauges[tribe] = crate::gauge::step(totem.gauges[tribe], count, totem.prayers, totem.full());
+                }
                 if count > 0 && totem.gauges[tribe] == totem.full() {
                     full.push(TribeId::ALL[tribe]);
                 }
@@ -151,10 +154,11 @@ impl GameMap {
         self.units.iter().position(|u| u.owner == player && u.kind == UnitKind::Shaman).is_some_and(|i| self.locked(i))
     }
 
-    /// Each tick, each vault: its gauge rises while its shaman prays at the door or is inside, and
-    /// drains otherwise; full, she walks in; at its middle she gets the reward (kept in `granted`,
-    /// given to the level's books) and walks out by the door.
+    /// Each tick, each vault: on `gauge::RHYTHM`'s ticks its gauge rises while its shaman prays at the
+    /// door or is inside, and drains otherwise; full, she walks in; at its middle she gets the reward
+    /// (kept in `granted`, given to the level's books) and walks out by the door.
     pub(crate) fn tend_vaults(&mut self) {
+        let update = crate::gauge::RHYTHM.fires(self.now, 0);
         for k in 0..self.buildings.len() {
             let Some(vault) = self.buildings[k].vault else { continue };
             let b = &self.buildings[k];
@@ -164,7 +168,7 @@ impl GameMap {
             let praying = self.units.iter().position(|u| u.is_alive() && u.action == Action::Worshipping { at });
             let inside = self.units.iter().position(|u| u.is_alive() && u.inside.is_some_and(|ins| ins.building == id));
             let mut vault = vault;
-            vault.tick((praying.is_some() || inside.is_some()) as u16);
+            vault.tick((praying.is_some() || inside.is_some()) as u16, update);
             match (praying, inside) {
                 (Some(i), None) if vault.is_full() => self.units[i].enter(Inside { building: id, door }, middle),
                 (_, Some(i)) if self.units[i].action == Action::Idle && near(self.units[i].x, self.units[i].z, middle) => {
@@ -270,7 +274,7 @@ mod tests {
         assert!(praying.is_some(), "at the door, praying");
         let slot = map.people_slots(crate::occupancy::Holder::Building(vault)).unwrap();
         assert_eq!(slot.filled, vec![shaman], "her place in the tooltip while she prays");
-        let granted = (0..400).find(|_| {
+        let granted = (0..1000).find(|_| {
             map.tick();
             !map.granted.is_empty()
         });
@@ -388,12 +392,13 @@ mod tests {
             !map.totems[head].queue.is_empty()
         });
         let before = map.totems[head].gauges[0];
-        map.tick();
+        // The gauge only moves on `gauge::RHYTHM`'s ticks (every 4): any 4 consecutive ticks cross exactly one.
+        map.run(crate::time::Ticks::new(4));
         assert_eq!(map.totems[head].gauges[0] - before, crate::gauge::gain(1, 8), "1 of 8: the soft curve");
         let id = map.totems[head].queue[0];
         map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: id, order: Order::Stop });
         let held = map.totems[head].gauges[0];
-        map.tick();
+        map.run(crate::time::Ticks::new(4));
         assert_eq!(map.totems[head].gauges[0], held.saturating_sub(crate::gauge::DRAIN));
     }
 

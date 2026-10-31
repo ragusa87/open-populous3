@@ -535,7 +535,10 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.
 
 ### Praying (worship) ([worship.md](docs/specs/worship.md))
-- [ ] Prayer gauge on the original's rhythm and curve (pop3-rev-analysis.md "The gauge"): every 4 turns, `C² / (C − n + 1)²` per update, drain `C²`; today it steps every tick with `STEP · (n/C)²`.
+- [x] Prayer gauge on the original's rhythm and curve (pop3-rev-analysis.md "The gauge", worship.md "Shared: the
+  prayer gauge"): moves every 4 turns (`gauge::RHYTHM`, not every tick), gains `C² / (C − n + 1)²` per update and
+  drains `C²`, scaled into our existing `STEP`-per-`PrayTime`-unit steps (`gauge::gain`/`step`); wired into both
+  `Vault::tick` (now takes an `update` flag) and `GameMap::tend_totems`.
 - [x] Contested totems: keep one gauge per tribe (our choice; the original has one per trigger, driven by the tribe with the most prayers), but the gifts are shared: a totem's `NumOccurences` counts across all tribes, so a one-gift totem rewards only the first tribe to fill its gauge, and the other gauges stop. Once `NumOccurences` is reached by any tribe, the totem sinks back into the ground for everyone and every tribe's prayers are sent away (`Totem::is_exhausted`: one shared sink, whoever took the last gift). **Truth sweep: already correct** (`Totem::given`/`is_exhausted`, `GameMap::tend_totems`) - confirmed and pinned down with a two-tribe test (`worship.rs` `two_tribes_contest_a_totem_the_first_to_fill_wins_the_gift_and_both_are_swept_once_exhausted`), no fix needed.
 - [x] Totems: ids and removal implemented (worship.md "Totems"). `TotemId`/`GameMap::add_totem` give every
   totem a stable id, the same `new_id_of` convention as buildings/units (`totems_from_level` stays a pure
