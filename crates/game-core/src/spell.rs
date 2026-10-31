@@ -53,6 +53,30 @@ pub enum Spell {
 }
 
 impl Spell {
+    /// `kind` cast straight at `at` (world units), for every spell that needs nothing else to be aimed:
+    /// no second point (land bridge), no cell rounding (flatten/erode) and no caster-relative origin.
+    /// `ai.rs`'s automatic shaman casting uses this directly; the client's `ground_spell` (`hud::spells`)
+    /// reuses it for the same cases and only adds its own handling for the rest.
+    pub fn at_point(kind: SpellKind, at: (u16, u16)) -> Option<Spell> {
+        match kind {
+            SpellKind::Teleport => Some(Spell::Teleport { to: at }),
+            SpellKind::Blast => Some(Spell::Blast { at }),
+            SpellKind::Lightning => Some(Spell::Lightning { at }),
+            SpellKind::Armageddon => Some(Spell::Armageddon { at }),
+            SpellKind::Swamp => Some(Spell::Swamp { at }),
+            SpellKind::Swarm => Some(Spell::Swarm { at }),
+            SpellKind::Convert => Some(Spell::Convert { at }),
+            SpellKind::Hypnotism => Some(Spell::Hypnotism { at }),
+            SpellKind::Volcano => Some(Spell::Volcano { at }),
+            SpellKind::Firestorm => Some(Spell::Firestorm { at }),
+            SpellKind::Earthquake => Some(Spell::Earthquake { at }),
+            SpellKind::MagicalShield => Some(Spell::MagicalShield { at }),
+            SpellKind::Bloodlust => Some(Spell::Bloodlust { at }),
+            SpellKind::Invisibility => Some(Spell::Invisibility { at }),
+            SpellKind::LandBridge | SpellKind::Flatten | SpellKind::Erosion | SpellKind::Whirlwind | SpellKind::GhostArmy | SpellKind::AngelOfDeath => None,
+        }
+    }
+
     /// The book spell this cast uses; None for `Raise`, the one remaining editor/dev-only terrain brush.
     pub fn kind(&self) -> Option<SpellKind> {
         match self {
