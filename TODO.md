@@ -1245,9 +1245,8 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Measure the windowed release build too (`cargo run --release`): the numbers above are the dev build under
   tracing. The simulation only matters with many units: every walker replans A* on any terrain write
   ("Replanning" in Units).
-- [ ] Loading screen freezes near the end (`docs/plans/13-loading-screen-incremental-build.md`), two unyielded
-  main-thread stalls originally lumped as one item - **the map-build half is fixed, the slow-`install` half is
-  not** (left open on purpose, see below), so this stays unchecked.
+- [x] Loading screen freezes near the end (`docs/plans/13-loading-screen-incremental-build.md`), two unyielded
+  main-thread stalls originally lumped as one item, both now fixed.
   - **Fixed**: `menu::begin_game`/`boot::GameStep` used to build a `Start::NewGame` (or sandbox) map synchronously
     inline (`LevelList::load_current`: parse, build `GameMap`, recompute shading - "likely the dominant freeze for
     a real original level"), zero progress, no frames drawn until it returned. `GameMap::load_original`/`generate`
@@ -1265,16 +1264,25 @@ PostUpdate about 5 ms), driven by how we hand it the world:
     fallback goes through the exact same `Building`/`poll_new_game_build` machinery end to end
     (`HEADLESS=1 SHOT_BOOT=1`, reaches `Playing` and screenshots correctly) and that `boot/mod.rs`'s own `next()`
     unit tests cover the new `Building` state.
-  - **Still open, the slow-`install` half**: `boot::poll_job` still runs `J::install(output, world)` in one
-    unyielded call per `BootJob`, and `BootStatus::fraction()` still caps a job at 0.99 until `install` returns.
-    The one real `BootJob` today, `UnitSpritesJob`, no longer looks like the dominant freeze this item was
-    originally written against: its own atlas-sharing rework (TODO.md "Unit sprites" above) already cut its
-    `install` to ~100-120 ms measured here (`"boot: Unit sprites installed in …ms"`, generated art, software
-    rendering) - a noticeable frame or two, not a multi-second hang. Building the generic resumable-`install`
-    plumbing (a `install` that returns `More(state)`/`Done`, called once per frame) speculatively, with no job
-    currently slow enough to justify it, was left undone rather than guessed at; revisit if a future `BootJob` (or
-    a real-install measurement against the original game's own assets, which this environment has none of) shows
-    it's still needed.
+  - **Fixed, the slow-`install` half**: reported in play against a real original install - the loader hanging
+    near the end, unresponsive (no mouse movement: the whole app, not just the sim), occasionally crashing
+    outright. `boot::poll_job` used to run `J::install(output, world)` in one unyielded call per `BootJob`; with
+    the original art's full frame counts (`UnitSpritesJob`'s own atlas-sharing rework, TODO.md "Unit sprites",
+    already cut the generated-art/software-rendering case measured here to ~100-120 ms, but that benchmark has
+    nothing like the original's real sprite counts) that call could run long enough to starve the window's own
+    event loop - and on some drivers, long enough without a swapchain present to trip the GPU driver's own
+    timeout/recovery, crashing the app rather than just freezing it. `BootJob::install` is now `install_step`
+    (`InstallProgress::More(output)`/`Done`), called once per frame until done instead of once for everything;
+    `JobSlot` gained an `Installing(Output)` state to hold the output between calls. `UnitSpritesJob` installs one
+    kind per call (`install_steps` = kind count) instead of all of them in one, bounding a frame's GPU-upload work
+    to one kind's atlases regardless of how large the original art makes them. `BootStatus::fraction()` now gives
+    the install phase its own climbing share (0.9 to 1.0 by chunks done) instead of a cap stuck at 0.99 until the
+    single call returned, so the bar visibly keeps moving instead of appearing to hang right before it does.
+    Covered by `boot::tests::a_chunked_install_lands_one_piece_per_frame_and_the_bar_climbs_through_it` (a
+    `BootJob` whose `install_step` is called once per fake frame, checked after each); end to end,
+    `HEADLESS=1 SHOT_BOOT=1 --no-original` still reaches `Playing` and screenshots correctly (generated art, so
+    this doesn't exercise the original's own much larger frame counts - no original install was available in this
+    environment to measure the fix's actual effect against the sizes it targets).
 
 ## Priority 6 — `--no-original` asset completeness (copyright safety)
 AGENTS.md's own bar is that everything shippable works with `--no-original`. Sound is a hard zero today (format reverse-engineered, no playback, no CC0 assets sourced at all); several spell VFX, building/spell icons and ritual scenery are still original-only. Largely independent of the other tiers, so it can run in parallel with them rather than waiting its turn.
