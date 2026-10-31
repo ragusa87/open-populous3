@@ -141,8 +141,12 @@ pub fn grid_lines(lo: f32, hi: f32) -> Vec<f32> {
 #[derive(Resource, Default)]
 pub struct PinnedAt(pub Option<Vec2>);
 
-#[derive(Component)]
-struct BlueprintMark;
+#[derive(Component, Default)]
+struct BlueprintMark {
+    /// The mesh last written (TODO.md "Mesh allocator"): `draw_blueprint` skips the GPU re-upload
+    /// `put_mark` triggers when the mouse (and everything else behind the mark) has not moved it.
+    last: Option<MarkMesh>,
+}
 
 pub struct BlueprintPlugin;
 
@@ -160,7 +164,7 @@ impl Plugin for BlueprintPlugin {
 /// The mark gets its mesh when first drawn (`put_mark`): Bevy 0.19 logs a "Use-after-free" error for
 /// a mesh without vertices.
 fn spawn_mark(mut commands: Commands, mut mats: ResMut<Assets<StandardMaterial>>) {
-    commands.spawn((BlueprintMark, MeshMaterial3d(mats.add(mark_material())), NotShadowCaster, Transform::default(), Visibility::Hidden));
+    commands.spawn((BlueprintMark::default(), MeshMaterial3d(mats.add(mark_material())), NotShadowCaster, Transform::default(), Visibility::Hidden));
 }
 
 /// Draws `mark` into the mark's mesh, made the first time.
@@ -177,6 +181,16 @@ pub(crate) fn put_mark(commands: &mut Commands, mark_entity: Entity, mesh: Optio
             commands.entity(mark_entity).insert(Mesh3d(meshes.add(m)));
         }
     }
+}
+
+/// `put_mark`, skipped when `mark` is the same as the last one written into `last` (TODO.md "Mesh
+/// allocator"): the GPU buffer re-upload `put_mark` triggers is the real cost, not computing `mark`.
+pub(crate) fn put_mark_if_changed(commands: &mut Commands, mark_entity: Entity, mesh: Option<&Mesh3d>, meshes: &mut Assets<Mesh>, last: &mut Option<MarkMesh>, mark: MarkMesh) {
+    if last.as_ref() == Some(&mark) {
+        return;
+    }
+    put_mark(commands, mark_entity, mesh, meshes, mark.clone());
+    *last = Some(mark);
 }
 
 /// The mouse over the map (not the panel or a button), if any.
@@ -263,12 +277,12 @@ fn draw_blueprint(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
     pinned: Res<PinnedAt>,
-    mut mark: Query<(Entity, Option<&Mesh3d>, &mut Visibility), With<BlueprintMark>>,
+    mut mark: Query<(Entity, Option<&Mesh3d>, &mut Visibility, &mut BlueprintMark)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut look: ResMut<CursorLook>,
     mut commands: Commands,
 ) {
-    let Ok((mark_entity, mesh, mut vis)) = mark.single_mut() else { return };
+    let Ok((mark_entity, mesh, mut vis, mut cache)) = mark.single_mut() else { return };
     let playing = *state.get() == crate::menu::AppState::Playing;
     let under_mouse = || ground_under_mouse(&windows, &ui, &cams, &map, &rig, &params);
     let ground = blueprint.plan.filter(|_| playing).and_then(|plan| Some((plan, pinned.0.or_else(under_mouse)?)));
@@ -290,7 +304,7 @@ fn draw_blueprint(
             let lo = Vec2::new(fire.0 as f32, fire.1 as f32);
             let mark = grid_mark(lo, lo + Vec2::ONE, |at| (on_ground(at), colour));
             look.set_if_neq(CursorLook::Building { plan, valid: colour == WHITE });
-            put_mark(&mut commands, mark_entity, mesh, &mut meshes, mark);
+            put_mark_if_changed(&mut commands, mark_entity, mesh, &mut meshes, &mut cache.last, mark);
             *vis = Visibility::Inherited;
             return;
         }
@@ -305,7 +319,7 @@ fn draw_blueprint(
     let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at), None).is_some() { RED } else { WHITE });
     let mark = mark_mesh(kind, b.facing, centre, vertex);
     look.set_if_neq(CursorLook::Building { plan, valid: !mark.colours.contains(&RED) });
-    put_mark(&mut commands, mark_entity, mesh, &mut meshes, mark);
+    put_mark_if_changed(&mut commands, mark_entity, mesh, &mut meshes, &mut cache.last, mark);
     *vis = Visibility::Inherited;
 }
 
@@ -349,7 +363,7 @@ pub fn grid_mark(lo: Vec2, hi: Vec2, vertex: impl Fn(Vec2) -> ([f32; 3], [f32; 4
     m
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct MarkMesh {
     pub positions: Vec<[f32; 3]>,
     pub colours: Vec<[f32; 4]>,

@@ -1323,9 +1323,14 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   comparing the colour, cheaper).
 - [ ] Some image is prepared again every frame (`prepare_assets<GpuImage>` about 3 ms, its extract 1.6 ms): find which
   (the UI text atlas of readouts changing every frame? the cursor? the offscreen target?).
-- [ ] Mesh allocator about 3 ms a frame: meshes rewritten every frame (range ring `put` while shown, blueprint marks)
-  and the 129 x 129 terrain mesh rebuilt on every camera move (`world::rebuild_terrain`): rewrite only on change;
-  the planet curve could move to the vertex shader over a static grid.
+- [ ] Mesh allocator about 3 ms a frame: meshes rewritten every frame. **Fixed in part**: the range ring's line
+  and blueprint marks now skip `put`/`put_mark` when the mesh they would write is the same as the last one
+  written (`RingMesh`/`MarkMesh` now `PartialEq`, a cache on `Ring`/`BlueprintMark`) - a stationary mouse or an
+  unmoving, already-fully-shown ring no longer re-uploads their buffers every frame. Left alone: the curtain part
+  of the range ring, which is a continuous time-based animation while shown and so has no "unchanged" state to
+  skip to begin with. Still open: the 129 x 129 terrain mesh rebuilt on every camera move
+  (`world::rebuild_terrain`) - rewrite only on change; the planet curve could move to the vertex shader over a
+  static grid.
 - [x] Transforms written every frame for everything grounded (`grounded::place_grounded`) and every unit part
   (`units::pull_to_eye`) now skip the write when nothing changed (`docs/plans/12-change-only-transform-writes.md`):
   `place_grounded`'s translation and `tilt_grounded`'s rotation compare before assigning, `Visibility` uses
