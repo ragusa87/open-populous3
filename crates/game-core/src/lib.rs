@@ -4,6 +4,7 @@
 
 pub mod ai;
 pub mod ai_script;
+pub mod angel_of_death;
 pub mod angle;
 pub mod armageddon;
 pub mod ashes;

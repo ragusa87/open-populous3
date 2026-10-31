@@ -874,6 +874,7 @@ impl GameMap {
             | Spell::Firestorm { at }
             | Spell::Earthquake { at }
             | Spell::Swarm { at }
+            | Spell::AngelOfDeath { at }
             | Spell::MagicalShield { at }
             | Spell::Bloodlust { at }
             | Spell::Invisibility { at } => Some(at),
@@ -982,6 +983,10 @@ impl GameMap {
             }
             Spell::Swarm { at } => {
                 self.add_effect(crate::swarm::effect(player, at));
+                None
+            }
+            Spell::AngelOfDeath { at } => {
+                self.add_effect(crate::angel_of_death::cast(player, at));
                 None
             }
             Spell::MagicalShield { at } => {
@@ -1406,6 +1411,7 @@ impl GameMap {
             self.tend_attacks();
             self.tend_wrecking();
             self.tend_wildmen();
+            self.tend_angels_of_death();
             self.tend_guards();
         }
         self.detect_coordinators();
@@ -1815,11 +1821,19 @@ impl GameMap {
                 self.add_effect(e);
                 None
             }
+            WorldEvent::SpawnAngelOfDeath { owner, at } => {
+                let ground = self.terrain.height_at(at.0 as u32, at.1 as u32, WORLD_UNITS_PER_CELL);
+                let u = self.spawn(owner, UnitKind::AngelOfDeath, at);
+                u.action = Action::Hunting;
+                u.flight = Some(crate::angel_of_death::Flight { heading: crate::angle::Angle::ZERO, height: ground + crate::angel_of_death::CRUISE_HEIGHT });
+                None
+            }
             WorldEvent::Terrain(TerrainChange::Raise { at, radius, by }) => Some(self.terrain.raise(at, radius, by)),
             WorldEvent::Terrain(TerrainChange::Flatten { at, height, turn }) => Some(crate::flatten::apply(&mut self.terrain, at, height, turn)),
             WorldEvent::Terrain(TerrainChange::Bridge { from, to, heights, turn }) => Some(crate::land_bridge::apply(&mut self.terrain, from, to, heights, turn)),
             WorldEvent::Terrain(TerrainChange::Volcano { at, ground, turn }) => Some(crate::volcano::apply(&mut self.terrain, at, ground, turn)),
             WorldEvent::Terrain(TerrainChange::Erode { at }) => Some(crate::erode::apply(&mut self.terrain, at)),
+            WorldEvent::Terrain(TerrainChange::AngelOfDeathShockwave { at, turn }) => Some(crate::angel_of_death::apply_shockwave(&mut self.terrain, at, turn)),
             WorldEvent::Placed { unit, at } => {
                 if let Some(u) = self.unit_mut(unit) {
                     u.placed(at);

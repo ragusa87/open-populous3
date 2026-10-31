@@ -48,6 +48,8 @@ pub enum Spell {
     Armageddon { at: (u16, u16) },
     /// An insect plague at `at` (world units): `swarm::effect`.
     Swarm { at: (u16, u16) },
+    /// An Angel of Death at `at` (world units): `angel_of_death::cast`.
+    AngelOfDeath { at: (u16, u16) },
 }
 
 impl Spell {
@@ -71,6 +73,7 @@ impl Spell {
             Spell::Armageddon { .. } => Some(SpellKind::Armageddon),
             Spell::Erode { .. } => Some(SpellKind::Erosion),
             Spell::Swarm { .. } => Some(SpellKind::Swarm),
+            Spell::AngelOfDeath { .. } => Some(SpellKind::AngelOfDeath),
             Spell::Raise { .. } => None,
         }
     }
@@ -95,7 +98,8 @@ impl Spell {
             | Spell::Volcano { .. }
             | Spell::Firestorm { .. }
             | Spell::Earthquake { .. }
-            | Spell::Swarm { .. } => return None,
+            | Spell::Swarm { .. }
+            | Spell::AngelOfDeath { .. } => return None,
         })
     }
 }
