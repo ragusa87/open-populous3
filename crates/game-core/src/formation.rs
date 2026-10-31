@@ -23,6 +23,7 @@ use crate::angle;
 use crate::event::WorldEvent;
 use crate::map::{GameMap, Lcg};
 use crate::time::{Every, Tick};
+use crate::tribes::TribeId;
 use crate::unit::{Action, UnitId};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
@@ -44,7 +45,7 @@ pub const SLOT_SPACING: i32 = (WORLD_UNITS_PER_CELL / crate::slots::PER_CELL as 
 /// turns (docs/specs/coordinators.md "The original's internal models" 1).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Formation {
-    pub owner: u8,
+    pub owner: TribeId,
     /// The order's own target, where the formation is seeded and stays for its life: the original's controller
     /// may itself advance towards it (untraced), ours does not - a guess, kept simple.
     pub at: (u16, u16),
@@ -58,7 +59,7 @@ pub struct Formation {
 }
 
 impl Formation {
-    pub(crate) fn new(owner: u8, at: (u16, u16), members: Vec<UnitId>) -> Self {
+    pub(crate) fn new(owner: TribeId, at: (u16, u16), members: Vec<UnitId>) -> Self {
         let members = members.into_iter().enumerate().map(|(k, id)| (id, k)).collect();
         Formation { owner, at, heading: 0, members }
     }
@@ -114,9 +115,9 @@ mod tests {
     }
 
     fn braves(map: &mut GameMap, n: usize) -> Vec<UnitId> {
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(2048), s.z);
-        (0..n).map(|k| map.spawn(0, crate::unit::UnitKind::Brave, (at.0, at.1.wrapping_add(300 * k as u16))).id).collect()
+        (0..n).map(|k| map.spawn(TribeId::Blue, crate::unit::UnitKind::Brave, (at.0, at.1.wrapping_add(300 * k as u16))).id).collect()
     }
 
     #[test]
@@ -125,7 +126,7 @@ mod tests {
         let units = braves(&mut map, 4);
         let to = (map.terrain.size() as u16 * 256, map.terrain.size() as u16 * 256);
         walking(&mut map, &units, to);
-        let f = Formation::new(0, to, units.clone());
+        let f = Formation::new(TribeId::Blue, to, units.clone());
         let slots: std::collections::BTreeSet<_> = (0..units.len()).map(|k| f.slot(k)).collect();
         assert_eq!(slots.len(), units.len(), "one slot each: {slots:?}");
         for s in slots {
@@ -139,7 +140,7 @@ mod tests {
         let units = braves(&mut map, 2);
         let to = (map.terrain.size() as u16 * 256, map.terrain.size() as u16 * 256);
         walking(&mut map, &units, to);
-        let mut f = Formation::new(0, to, units.clone());
+        let mut f = Formation::new(TribeId::Blue, to, units.clone());
         map.unit_mut(units[0]).unwrap().action = Action::Idle;
         let (finished, _) = f.tick(map.now, &map, &mut Lcg(0));
         assert_eq!(f.members, vec![(units[1], 1)], "the idle one is gone, the walker stays");
@@ -151,7 +152,7 @@ mod tests {
         let mut map = GameMap::sandbox_units();
         let units = braves(&mut map, 3);
         let to = (map.terrain.size() as u16 * 256, map.terrain.size() as u16 * 256);
-        let mut f = Formation::new(0, to, units.clone());
+        let mut f = Formation::new(TribeId::Blue, to, units.clone());
         // Everyone is already walking to its own slot, like after a first tick nudged it there.
         for k in 0..units.len() {
             walking(&mut map, &units[k..=k], f.slot(k));
@@ -168,7 +169,7 @@ mod tests {
         for &id in &units {
             map.unit_mut(id).unwrap().action = Action::Idle;
         }
-        let mut f = Formation::new(0, (0, 0), units);
+        let mut f = Formation::new(TribeId::Blue, (0, 0), units);
         let (finished, events) = f.tick(map.now, &map, &mut Lcg(0));
         assert!(finished && events.is_empty());
     }
@@ -179,7 +180,7 @@ mod tests {
         let units = braves(&mut map, 1);
         let to = (map.terrain.size() as u16 * 256, map.terrain.size() as u16 * 256);
         walking(&mut map, &units, (to.0.wrapping_add(50), to.1));
-        let mut f = Formation::new(0, to, units.clone());
+        let mut f = Formation::new(TribeId::Blue, to, units.clone());
         let expected = f.slot(0);
         let (_, events) = f.tick(map.now, &map, &mut Lcg(0));
         assert_eq!(events, vec![WorldEvent::Placed { unit: units[0], at: expected }]);
@@ -190,7 +191,7 @@ mod tests {
         let mut map = GameMap::sandbox_units();
         let units = braves(&mut map, 1);
         let to = (map.terrain.size() as u16 * 256, map.terrain.size() as u16 * 256);
-        let mut f = Formation::new(0, to, units.clone());
+        let mut f = Formation::new(TribeId::Blue, to, units.clone());
         walking(&mut map, &units, f.slot(0));
         let (_, events) = f.tick(map.now, &map, &mut Lcg(0));
         assert!(events.is_empty());
@@ -202,7 +203,7 @@ mod tests {
         let units = braves(&mut map, 1);
         let to = (map.terrain.size() as u16 * 256, map.terrain.size() as u16 * 256);
         map.unit_mut(units[0]).unwrap().action = Action::Stranded { to };
-        let mut f = Formation::new(0, to, units);
+        let mut f = Formation::new(TribeId::Blue, to, units);
         let (finished, events) = f.tick(map.now, &map, &mut Lcg(0));
         assert!(finished && events.is_empty(), "stranded, not walking any more: dropped");
     }

@@ -5,6 +5,7 @@
 
 use crate::id::Id;
 use crate::spell_book::SpellKind;
+use crate::tribes::Owner;
 use crate::vault::Vault;
 use pop3_format::level::KIND_BUILDING;
 use pop3_format::Level;
@@ -204,8 +205,8 @@ pub struct Building {
     /// Given by `GameMap::add_building`, never twice on a map (0 until then).
     pub id: BuildingId,
     pub kind: BuildingKind,
-    /// Tribe 0-3 (other values as found in the level).
-    pub owner: u8,
+    /// Tribe 0-3, or `Owner::Wild` (other values as found in the level — a vault of knowledge, say).
+    pub owner: Owner,
     /// World units, as placed in the level: a cell corner (`centre` is where it stands).
     pub x: u16,
     pub z: u16,
@@ -229,7 +230,7 @@ pub struct Building {
     /// The tribe that set it alight, kept past the fire itself (never cleared back to `None`),
     /// same persistence as a unit's own `last_attacker`/`death_cause` (`hurt.rs`): `stats[tribe][7]`
     /// [exe] reads it when the fire finishes the building off (`crate::fire`).
-    pub ignited_by: Option<u8>,
+    pub ignited_by: Option<Owner>,
     /// Pieces of wood brought to the pile by its door, not built in yet.
     pub stock: u8,
     /// Height its footprint is flattened to: a blueprint's (the average when placed, at least
@@ -284,12 +285,13 @@ pub enum Reward {
 
 impl Building {
     /// A finished building, as the levels store them.
-    pub fn new(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
+    pub fn new(kind: BuildingKind, owner: impl Into<Owner>, x: u16, z: u16, facing: u8) -> Self {
+        let owner = owner.into();
         Building { id: Id::from_raw(0), kind, owner, x, z, facing, used: kind.wood_cost(), flat: true, dismantling: false, inside: 0, shaking: 0, wear: 0, repair_delay: None, burning: None, ignited_by: None, stock: 0, level: 0, collapse: None, jumped: Vec::new(), vault: (kind == BuildingKind::Vault).then(|| Vault::new(None, crate::vault::DEFAULT_PRAY_TIME)), production: None, queue: Vec::new(), queue_spots: Vec::new(), spots_on: None, admitted: Vec::new(), admit_gate: 0, launch: None, breed: 0, grow: 0 }
     }
 
     /// A blueprint just placed: nothing flattened nor built yet.
-    pub fn site(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8) -> Self {
+    pub fn site(kind: BuildingKind, owner: impl Into<Owner>, x: u16, z: u16, facing: u8) -> Self {
         Building { used: 0, flat: false, ..Building::new(kind, owner, x, z, facing) }
     }
 
@@ -308,7 +310,7 @@ impl Building {
     }
 
     /// A blueprint placed on `terrain`: its footprint will be flattened to its average height.
-    pub fn placed(kind: BuildingKind, owner: u8, x: u16, z: u16, facing: u8, terrain: &crate::terrain::Heightmap) -> Self {
+    pub fn placed(kind: BuildingKind, owner: impl Into<Owner>, x: u16, z: u16, facing: u8, terrain: &crate::terrain::Heightmap) -> Self {
         let site = Building::site(kind, owner, x, z, facing);
         let points = site.ground_points();
         let sum: u32 = points.iter().map(|&(x, z)| terrain.get(x, z) as u32).sum();
@@ -397,7 +399,7 @@ pub fn buildings_from_level(level: &Level) -> Vec<Building> {
         .map(|t| {
             let kind = BuildingKind::from_model(t.model);
             let vault = (kind == BuildingKind::Vault).then(|| Vault::from_level(level, t));
-            Building { vault, ..Building::new(kind, t.owner, t.x, t.z, t.facing()) }
+            Building { vault, ..Building::new(kind, Owner::from_u8(t.owner), t.x, t.z, t.facing()) }
         })
         .collect()
 }
@@ -405,6 +407,7 @@ pub fn buildings_from_level(level: &Level) -> Vec<Building> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use pop3_format::level::{DAT_SIZE, KIND_PERSON, KIND_SPELL};
 
     #[test]
@@ -429,7 +432,7 @@ mod tests {
         d[base + 8] = 6;
         d[base + 55..base + 62].copy_from_slice(&[2, KIND_PERSON, 0, 0x00, 0x01, 0x00, 0x01]);
         let b = buildings_from_level(&Level::parse(&d).unwrap());
-        assert_eq!(b, vec![Building::new(BuildingKind::DrumTower, 2, 0x0a00, 0x1400, 6)]);
+        assert_eq!(b, vec![Building::new(BuildingKind::DrumTower, TribeId::Yellow, 0x0a00, 0x1400, 6)]);
     }
 
     /// Level bytes with `things` (raw records, each from slot 0 on) in place.
@@ -497,20 +500,20 @@ mod tests {
 
     #[test]
     fn stage_follows_the_state() {
-        let site = Building::site(BuildingKind::DrumTower, 0, 0, 0, 0);
+        let site = Building::site(BuildingKind::DrumTower, TribeId::Blue, 0, 0, 0);
         assert_eq!(site.stage(), Stage::Blueprint);
         assert_eq!(Building { used: 1, ..site.clone() }.stage(), Stage::Blueprint, "wood brought while flattening");
         let flat = Building { flat: true, ..site.clone() };
         assert_eq!(flat.stage(), Stage::UnderConstruction { used: 0, of: 5 });
         assert_eq!(Building { used: 5, ..flat.clone() }.stage(), Stage::Built);
         assert_eq!(Building { used: 3, dismantling: true, ..flat.clone() }.stage(), Stage::Dismantling { used: 3, of: 5 });
-        assert_eq!(Building::new(BuildingKind::Hut { size: 2 }, 0, 0, 0, 0).stage(), Stage::Built);
-        assert_eq!(Building::new(BuildingKind::Vault, 0, 0, 0, 0).stage(), Stage::Built, "no wood cost");
+        assert_eq!(Building::new(BuildingKind::Hut { size: 2 }, TribeId::Blue, 0, 0, 0).stage(), Stage::Built);
+        assert_eq!(Building::new(BuildingKind::Vault, TribeId::Blue, 0, 0, 0).stage(), Stage::Built, "no wood cost");
     }
 
     #[test]
     fn covers_its_turned_footprint() {
-        let temple = |facing| Building::new(BuildingKind::Temple, 0, 20 * 512, 20 * 512, facing);
+        let temple = |facing| Building::new(BuildingKind::Temple, TribeId::Blue, 20 * 512, 20 * 512, facing);
         let (cx, cz) = temple(0).centre();
         assert!(temple(0).covers((cx, cz), 0));
         assert!(temple(0).covers((cx, cz + 700), 0) && !temple(0).covers((cx + 900, cz), 0), "longer along z (950 x 800)");
@@ -524,30 +527,30 @@ mod tests {
         for (x, z) in [(20, 30), (21, 30), (20, 31), (21, 31)] {
             t.set(x, z, 200);
         }
-        let site = Building::placed(BuildingKind::DrumTower, 0, 20 * 512, 30 * 512, 0, &t);
+        let site = Building::placed(BuildingKind::DrumTower, TribeId::Blue, 20 * 512, 30 * 512, 0, &t);
         assert_eq!(site.ground_points(), vec![(20, 30), (21, 30), (20, 31), (21, 31)], "the cell at the corner");
         assert_eq!((site.level, site.stage()), (200, Stage::Blueprint));
         assert_eq!(site.wood_wanted(), 1, "one piece while flattening");
         assert_eq!(Building { stock: 1, ..site.clone() }.wood_wanted(), 0);
         let flat = Building { flat: true, stock: 1, used: 2, ..site.clone() };
         assert_eq!((flat.delivered(), flat.wood_wanted()), (3, 2));
-        assert_eq!(Building::placed(BuildingKind::DrumTower, 0, 0, 0, 0, &crate::terrain::Heightmap::new(128)).level, MIN_GROUND, "never sea");
+        assert_eq!(Building::placed(BuildingKind::DrumTower, TribeId::Blue, 0, 0, 0, &crate::terrain::Heightmap::new(128)).level, MIN_GROUND, "never sea");
     }
 
     #[test]
     fn walls_under_the_footprint_the_door_outside() {
-        let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 20 * 512, 20 * 512, 0);
+        let hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 20 * 512, 20 * 512, 0);
         let mut cells = hut.walled_cells(128);
         cells.sort();
         assert_eq!(cells, (19..=21).flat_map(|x| (19..=21).map(move |z| (x, z))).collect::<Vec<_>>(), "3 x 3 cells");
         let door = hut.door();
         assert!(!cells.contains(&((door.0 / 512) as i32, (door.1 / 512) as i32)));
-        assert_eq!(Building::new(BuildingKind::DrumTower, 0, 0, 0, 0).walled_cells(128), vec![(0, 0)], "wraps");
+        assert_eq!(Building::new(BuildingKind::DrumTower, TribeId::Blue, 0, 0, 0).walled_cells(128), vec![(0, 0)], "wraps");
     }
 
     #[test]
     fn the_door_is_out_of_the_local_minus_z_side() {
-        let hut = |facing| Building::new(BuildingKind::Hut { size: 1 }, 0, 20 * 512, 20 * 512, facing);
+        let hut = |facing| Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 20 * 512, 20 * 512, facing);
         let (cx, cz) = hut(0).centre();
         assert_eq!(hut(0).door(), (cx, cz - 600 - DOOR_GAP as u16));
         assert_eq!(hut(2).door(), (cx - 600 - DOOR_GAP as u16, cz), "a quarter turn takes -z to -x");
@@ -557,7 +560,7 @@ mod tests {
 
     #[test]
     fn centre_is_off_the_stored_corner() {
-        let at = |kind, x, z| Building::new(kind, 0, x, z, 2).centre();
+        let at = |kind, x, z| Building::new(kind, TribeId::Blue, x, z, 2).centre();
         assert_eq!(at(BuildingKind::Hut { size: 3 }, 0x0a00, 0x1400), (0x0b00, 0x1500));
         assert_eq!(at(BuildingKind::DrumTower, 0x0a00, 0x1400), (0x0b00, 0x1500));
         assert_eq!(at(BuildingKind::SpyTraining, 0x0a00, 0x1400), (0x0c00, 0x1600));
@@ -573,7 +576,7 @@ mod tests {
                 t.set(x, z, 100 + (x * 7 + z * 13) as u16 % 50);
             }
         }
-        Building::new(BuildingKind::Hut { size: 1 }, 0, 20 * 512, 30 * 512, 0).flatten(&mut t);
+        Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 20 * 512, 30 * 512, 0).flatten(&mut t);
         let h = t.get(20, 30);
         for (x, z) in [(21, 30), (20, 31), (21, 31)] {
             assert_eq!(t.get(x, z), h, "the cell at the corner, centred");

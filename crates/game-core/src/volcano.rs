@@ -37,6 +37,7 @@ use crate::terrain::{DirtyRect, Heightmap, MAX_HEIGHT};
 use crate::time::{Countdown, Ticks};
 use crate::unit::cell_of;
 use pop3_format::WORLD_UNITS_PER_CELL;
+use crate::tribes::Owner;
 
 pub const RUMBLE_TURNS: u32 = 80;
 pub const RISE_TURNS: u32 = 59;
@@ -80,7 +81,7 @@ pub struct Volcano {
 }
 
 /// Cast by tribe `owner` at `at` (world units).
-pub fn effect(owner: u8, at: (u16, u16), terrain: &Heightmap) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: (u16, u16), terrain: &Heightmap) -> Effect {
     let cell = (cell_of(at.0), cell_of(at.1));
     let ground = terrain.get(cell.0, cell.1);
     let volcano = Volcano { ground, turn: 0, destroyed: false, fireballs: 0 };
@@ -89,7 +90,7 @@ pub fn effect(owner: u8, at: (u16, u16), terrain: &Heightmap) -> Effect {
 
 impl Volcano {
     /// One turn at `at`, cast by `owner`.
-    pub fn turn(&mut self, at: (u16, u16), owner: u8, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
+    pub fn turn(&mut self, at: (u16, u16), owner: Owner, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         let cell = (cell_of(at.0), cell_of(at.1));
         let size = world.terrain.size() as i32;
         let mut events = Vec::new();
@@ -152,7 +153,7 @@ impl Volcano {
 /// Everyone in the `DESTROY_AREA_CELLS` square around `cell` (open or inside) catches fire, but the caster's own
 /// shaman (`effect::hurts`, `DamageKind::Lava`'s own shaman-sparing rule, reused here too); every building there
 /// is destroyed outright.
-fn destroy_and_ignite(cell: Cell, owner: u8, world: &GameMap, size: i32) -> Vec<WorldEvent> {
+fn destroy_and_ignite(cell: Cell, owner: Owner, world: &GameMap, size: i32) -> Vec<WorldEvent> {
     let area: Vec<Cell> = square(cell, DESTROY_AREA_CELLS, size).collect();
     let mut events = Vec::new();
     for u in world.units.iter().filter(|u| area.contains(&u.cell()) && crate::effect::hurts(u, DamageKind::Lava, Some(owner))) {
@@ -226,6 +227,7 @@ pub fn apply(terrain: &mut Heightmap, at: Cell, ground: u16, turn: u32) -> Dirty
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::building::{Building, BuildingKind};
     use crate::command::Command;
     use crate::spell::Spell;
@@ -304,7 +306,7 @@ mod tests {
     #[test]
     fn rumbles_without_touching_the_terrain_then_rises_over_the_next_59_turns() {
         let mut map = bare();
-        map.add_effect(effect(0, AT, &map.terrain.clone()));
+        map.add_effect(effect(TribeId::Blue, AT, &map.terrain.clone()));
         map.run(Ticks::new(RUMBLE_TURNS));
         assert_eq!(map.terrain.get(64, 64), 500, "no change yet: still rumbling");
         map.run(Ticks::new(RISE_TURNS));
@@ -314,13 +316,13 @@ mod tests {
     #[test]
     fn destroys_every_building_and_ignites_everyone_in_the_6x6_area_at_turn_110_but_spares_the_casters_shaman() {
         let mut map = bare();
-        map.add_effect(effect(0, AT, &map.terrain.clone()));
-        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 1, AT.0, AT.1, 0));
-        let victim = map.spawn(1, UnitKind::Brave, AT).id;
-        let shielded = map.spawn(1, UnitKind::Brave, AT).id;
+        map.add_effect(effect(TribeId::Blue, AT, &map.terrain.clone()));
+        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, AT.0, AT.1, 0));
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
+        let shielded = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
         map.unit_mut(shielded).unwrap().statuses.shield = Timed::steps(SHIELD_STEPS);
-        let shaman = map.spawn(0, UnitKind::Shaman, AT).id;
-        let inside = map.spawn(1, UnitKind::Brave, AT).id;
+        let shaman = map.spawn(TribeId::Blue, UnitKind::Shaman, AT).id;
+        let inside = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
         map.unit_mut(inside).unwrap().inside = Some(crate::unit::Inside { building: hut, door: AT });
         map.run(Ticks::new(DESTROY_AT + 1));
         assert!(map.building(hut).is_none(), "destroyed outright");
@@ -333,7 +335,7 @@ mod tests {
     #[test]
     fn spawns_lava_over_the_crater_once_shaping_ends() {
         let mut map = bare();
-        map.add_effect(effect(0, AT, &map.terrain.clone()));
+        map.add_effect(effect(TribeId::Blue, AT, &map.terrain.clone()));
         map.run(Ticks::new(SHAPING_TURNS + 1));
         assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, EffectKind::Lava(_))), "lava spawned once shaping ends");
     }
@@ -347,7 +349,7 @@ mod tests {
         let mut rng = map.rng;
         let mut spawned = 0;
         for _ in FIREBALL_START..=FIREBALL_END {
-            let events = volcano.turn(AT, 0, &map, &mut rng);
+            let events = volcano.turn(AT, Owner::Tribe(TribeId::Blue), &map, &mut rng);
             spawned += events.iter().filter(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::PanickingBlast(_)))).count();
         }
         assert_eq!(spawned as u32, FIREBALLS);
@@ -358,7 +360,7 @@ mod tests {
         let map = bare();
         let mut volcano = Volcano { ground: 500, turn: FIREBALL_START, destroyed: true, fireballs: 0 };
         let mut rng = map.rng;
-        let events = volcano.turn(AT, 0, &map, &mut rng);
+        let events = volcano.turn(AT, Owner::Tribe(TribeId::Blue), &map, &mut rng);
         assert!(events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::PanickingBlast(_)))), "the first fireball lands right at FIREBALL_START");
     }
 
@@ -367,7 +369,7 @@ mod tests {
         let mut map = GameMap::sandbox_walk();
         map.spell_books[0].set(SpellKind::Volcano, Availability::Unlimited);
         let at = (map.units[0].x, map.units[0].z);
-        map.apply(&Command::Cast { player: 0, spell: Spell::Volcano { at } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Volcano { at } });
         map.run(crate::unit::CAST_RELEASE);
         assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, EffectKind::Volcano(_))));
     }

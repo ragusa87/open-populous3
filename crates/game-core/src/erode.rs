@@ -12,6 +12,7 @@ use crate::spell::Cell;
 use crate::terrain::{DirtyRect, Heightmap, SEA_LEVEL};
 use crate::time::{Countdown, Ticks};
 use pop3_format::WORLD_UNITS_PER_CELL;
+use crate::tribes::Owner;
 
 /// Turns the effect lasts (the original's own length, traced).
 pub const DURATION: u32 = 64;
@@ -33,7 +34,7 @@ pub struct Erode {
 }
 
 /// An erosion cast by tribe `owner` on the height point `at` of `terrain`.
-pub fn effect(owner: u8, at: Cell, terrain: &Heightmap) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: Cell, terrain: &Heightmap) -> Effect {
     let erode = Erode { at, turn: 0 };
     let pos = |c: i32| (c.rem_euclid(terrain.size() as i32) as u32 * WORLD_UNITS_PER_CELL) as u16;
     Effect::new(owner, (pos(at.0), pos(at.1)), Countdown::new(Ticks::new(DURATION)), EffectKind::Erode(erode))
@@ -73,10 +74,11 @@ pub fn apply(terrain: &mut Heightmap, at: Cell) -> DirtyRect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::map::GameMap;
 
     fn build(terrain: &mut Heightmap, at: Cell, turns: u32, rng: &mut Lcg) -> (Erode, u32) {
-        let Effect { kind: EffectKind::Erode(mut erode), .. } = effect(0, at, terrain) else { unreachable!() };
+        let Effect { kind: EffectKind::Erode(mut erode), .. } = effect(TribeId::Blue, at, terrain) else { unreachable!() };
         let mut passes = 0;
         for _ in 0..turns {
             for e in erode.turn(terrain.size() as i32, rng) {
@@ -141,7 +143,7 @@ mod tests {
             }
         }
         terrain.set(16, 16, SEA_LEVEL);
-        let Effect { kind: EffectKind::Erode(mut erode), .. } = effect(0, (16, 16), &terrain) else { unreachable!() };
+        let Effect { kind: EffectKind::Erode(mut erode), .. } = effect(TribeId::Blue, (16, 16), &terrain) else { unreachable!() };
         let points = erode.reshaping(&terrain);
         assert!(!points.is_empty() && !points.contains(&(16, 16)), "already at sea level: dropped");
         erode.turn = PASSES;
@@ -158,7 +160,7 @@ mod tests {
         map.spell_books[0].set(SpellKind::Erosion, Availability::Unlimited);
         let at = (map.units[0].x, map.units[0].z);
         let cell = (crate::unit::cell_of(at.0), crate::unit::cell_of(at.1));
-        map.apply(&Command::Cast { player: 0, spell: Spell::Erode { at: cell } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Erode { at: cell } });
         map.run(crate::unit::CAST_RELEASE);
         assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, EffectKind::Erode(_))));
     }

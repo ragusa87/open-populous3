@@ -26,6 +26,7 @@ use crate::event::WorldEvent;
 use crate::map::{GameMap, Lcg};
 use crate::time::{Countdown, Ticks};
 use crate::unit::{cell_of, torus_delta};
+use crate::tribes::Owner;
 
 pub const DURATION_TURNS: u32 = 120;
 pub const SINK_AT: u32 = 60;
@@ -51,14 +52,14 @@ pub struct Earthquake {
 }
 
 /// Cast by tribe `owner` at `at` (world units).
-pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: (u16, u16)) -> Effect {
     Effect::new(owner, at, Countdown::new(Ticks::new(DURATION_TURNS)), EffectKind::Earthquake(Earthquake::default()))
 }
 
 impl Earthquake {
     /// One turn at `at`, cast by `owner`: the ground sinks and the fissure opens once, at `SINK_AT`; at each of
     /// `SHAKE_TURNS`, every building in range draws its own shake chance.
-    pub fn turn(&mut self, at: (u16, u16), owner: u8, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
+    pub fn turn(&mut self, at: (u16, u16), owner: Owner, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         if self.turn == SINK_AT {
             let cell = (cell_of(at.0), cell_of(at.1));
@@ -109,6 +110,7 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::building::{Building, BuildingKind};
     use crate::command::Command;
     use crate::spell::Spell;
@@ -140,7 +142,7 @@ mod tests {
     #[test]
     fn shakes_without_touching_the_terrain_until_turn_60() {
         let mut map = bare();
-        map.add_effect(effect(0, AT));
+        map.add_effect(effect(TribeId::Blue, AT));
         map.run(Ticks::new(SINK_AT));
         assert_eq!(map.terrain.get(64, 64), 700, "still just shaking");
     }
@@ -148,7 +150,7 @@ mod tests {
     #[test]
     fn sinks_the_centre_and_opens_a_lava_fissure_at_turn_60() {
         let mut map = bare();
-        map.add_effect(effect(0, AT));
+        map.add_effect(effect(TribeId::Blue, AT));
         map.run(Ticks::new(SINK_AT + 1));
         assert!(map.terrain.get(64, 64) < 700, "the centre sank");
         assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, EffectKind::Lava(_))), "a fissure opened");
@@ -157,7 +159,7 @@ mod tests {
     #[test]
     fn sinks_only_once_even_if_it_kept_running() {
         let mut map = bare();
-        map.add_effect(effect(0, AT));
+        map.add_effect(effect(TribeId::Blue, AT));
         map.run(Ticks::new(SINK_AT + 1));
         let sunk = map.terrain.get(64, 64);
         map.run(Ticks::new(DURATION_TURNS - SINK_AT - 1));
@@ -167,9 +169,9 @@ mod tests {
     #[test]
     fn shake_only_reaches_buildings_within_the_16x16_square() {
         let mut map = bare();
-        let near = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, AT.0, AT.1, 0));
-        let edge = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, AT.0.wrapping_add(7 * pop3_format::WORLD_UNITS_PER_CELL as u16), AT.1, 0));
-        let far = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, AT.0.wrapping_add(20 * pop3_format::WORLD_UNITS_PER_CELL as u16), AT.1, 0));
+        let near = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, AT.0, AT.1, 0));
+        let edge = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, AT.0.wrapping_add(7 * pop3_format::WORLD_UNITS_PER_CELL as u16), AT.1, 0));
+        let far = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, AT.0.wrapping_add(20 * pop3_format::WORLD_UNITS_PER_CELL as u16), AT.1, 0));
         let quake = Earthquake::default();
         let mut ever_shaken = std::collections::HashSet::new();
         for seed in 0..500u32 {
@@ -188,7 +190,7 @@ mod tests {
     /// A unit standing inside `building`, at its door.
     fn put_someone_inside(map: &mut GameMap, building: crate::building::BuildingId) -> crate::unit::UnitId {
         let door = map.building(building).unwrap().door();
-        let inside = map.spawn(1, crate::unit::UnitKind::Brave, door).id;
+        let inside = map.spawn(TribeId::Red, crate::unit::UnitKind::Brave, door).id;
         map.unit_mut(inside).unwrap().inside = Some(crate::unit::Inside { building, door });
         let i = map.building_index(building).unwrap();
         map.buildings[i].inside += 1;
@@ -198,7 +200,7 @@ mod tests {
     #[test]
     fn a_shake_costs_one_piece_outright_and_a_large_buildings_people_leave_even_short_of_destroying_it() {
         let mut map = bare();
-        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, AT.0, AT.1, 0));
+        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, AT.0, AT.1, 0));
         let i = map.building_index(hut).unwrap();
         map.buildings[i].used = 2;
         let someone = put_someone_inside(&mut map, hut);
@@ -206,7 +208,7 @@ mod tests {
         assert_eq!(map.building(hut).unwrap().used, 1, "one piece lost outright, not a wear threshold");
         assert!(!events.contains(&WorldEvent::Panic { unit: someone }), "a small hut's people stay put short of destroying it");
 
-        let temple = map.add_building(Building::new(BuildingKind::Temple, 0, AT.0, AT.1.wrapping_add(2048), 0));
+        let temple = map.add_building(Building::new(BuildingKind::Temple, TribeId::Blue, AT.0, AT.1.wrapping_add(2048), 0));
         let i = map.building_index(temple).unwrap();
         map.buildings[i].used = 2;
         let someone = put_someone_inside(&mut map, temple);
@@ -218,7 +220,7 @@ mod tests {
     #[test]
     fn a_shake_on_the_last_piece_destroys_it() {
         let mut map = bare();
-        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, AT.0, AT.1, 0));
+        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, AT.0, AT.1, 0));
         let i = map.building_index(hut).unwrap();
         map.buildings[i].used = 1;
         let someone = put_someone_inside(&mut map, hut);
@@ -233,7 +235,7 @@ mod tests {
         let mut map = GameMap::sandbox_walk();
         map.spell_books[0].set(SpellKind::Earthquake, Availability::Unlimited);
         let at = (map.units[0].x, map.units[0].z);
-        map.apply(&Command::Cast { player: 0, spell: Spell::Earthquake { at } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Earthquake { at } });
         map.run(crate::unit::CAST_RELEASE);
         assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, EffectKind::Earthquake(_))));
     }

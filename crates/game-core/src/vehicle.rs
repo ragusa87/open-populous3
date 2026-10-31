@@ -7,6 +7,7 @@
 use crate::angle::{atan2, Angle};
 use crate::building::BuildingKind;
 use crate::command::Command;
+use crate::tribes::{Owner, TribeId};
 use crate::health::Health;
 use crate::id::Id;
 use crate::map::{GameMap, Lcg};
@@ -213,7 +214,7 @@ pub enum VehicleEvent {
 pub struct Vehicle {
     pub kind: VehicleKind,
     /// The tribe of the last one who boarded it, or of the hut that made it.
-    pub owner: u8,
+    pub owner: Owner,
     pub x: u16,
     pub z: u16,
     /// Where it points, from +x towards +z.
@@ -241,7 +242,8 @@ pub struct Vehicle {
 
 impl Vehicle {
     /// A new, empty vehicle parked at `at`.
-    pub fn new(kind: VehicleKind, owner: u8, (x, z): (u16, u16), heading: Angle) -> Self {
+    pub fn new(kind: VehicleKind, owner: impl Into<Owner>, (x, z): (u16, u16), heading: Angle) -> Self {
+        let owner = owner.into();
         Vehicle { kind, owner, x, z, heading, health: Health::full(LIFE), state: State::Parked, passengers: Vec::new(), wait: Countdown::new(Ticks::ZERO), float: None, was_at: None, route: Vec::new(), planned_on: None, slowed: false }
     }
 
@@ -319,14 +321,14 @@ impl Vehicle {
 
     /// Whether a person of tribe `owner` may get on now: a free seat, not wrecked nor stranded, and empty or already
     /// that tribe's (an empty enemy vehicle becomes the boarder's).
-    pub fn welcomes(&self, owner: u8) -> bool {
-        !self.is_destroyed() && !matches!(self.state, State::Stranded { .. }) && self.free_seats() > 0 && (self.passengers.is_empty() || self.owner == owner)
+    pub fn welcomes(&self, owner: impl Into<Owner>) -> bool {
+        !self.is_destroyed() && !matches!(self.state, State::Stranded { .. }) && self.free_seats() > 0 && (self.passengers.is_empty() || self.owner == owner.into())
     }
 
     /// `unit` of tribe `owner` takes a seat: the vehicle is that tribe's now and waits `BOARD_WAIT` before moving.
-    pub fn seat(&mut self, unit: UnitId, owner: u8) {
+    pub fn seat(&mut self, unit: UnitId, owner: impl Into<Owner>) {
         self.passengers.push(unit);
-        self.owner = owner;
+        self.owner = owner.into();
         self.wait = Countdown::new(BOARD_WAIT);
     }
 
@@ -665,7 +667,7 @@ impl GameMap {
     /// get off (each its `Order::GetOff`; the others aboard stay) when it is stopped and `to` is walkable ground right
     /// next to it (`gets_off_at`); the others walk there (`dispatch`), spacing themselves into one shared formation
     /// (`Command::Formation`, formation.rs) when there is more than one of them.
-    pub fn move_orders(&self, player: u8, units: &[UnitId], to: (u16, u16)) -> Vec<Command> {
+    pub fn move_orders(&self, player: TribeId, units: &[UnitId], to: (u16, u16)) -> Vec<Command> {
         let mut vehicles: Vec<VehicleId> = Vec::new();
         let (mut walkers, mut getting_off) = (Vec::new(), Vec::new());
         for &id in units {
@@ -749,7 +751,7 @@ impl GameMap {
 
     /// The vehicle `id` loses `amount` health, unless it is of tribe `from`; at 0 it is destroyed on its next turn.
     /// Only an empty, still one stays hurt: moving or manned, it is whole again every turn.
-    pub(crate) fn damage_vehicle(&mut self, id: VehicleId, amount: u16, from: u8) {
+    pub(crate) fn damage_vehicle(&mut self, id: VehicleId, amount: u16, from: Owner) {
         if let Some(v) = self.vehicles.get_mut(id).filter(|v| v.owner != from) {
             v.health.damage(amount);
         }
@@ -857,17 +859,17 @@ mod tests {
     }
 
     fn boat(map: &mut GameMap, cell: (i32, i32)) -> VehicleId {
-        map.add_vehicle(Vehicle::new(VehicleKind::Boat, 0, at(cell), Angle::ZERO))
+        map.add_vehicle(Vehicle::new(VehicleKind::Boat, TribeId::Blue, at(cell), Angle::ZERO))
     }
 
     fn aboard(map: &mut GameMap, v: VehicleId, n: usize) -> Vec<UnitId> {
         let at = { let v = map.vehicle(v).unwrap(); (v.x, v.z) };
         (0..n)
             .map(|_| {
-                let u = map.spawn(0, UnitKind::Brave, at);
+                let u = map.spawn(TribeId::Blue, UnitKind::Brave, at);
                 u.aboard = Some(v);
                 let id = u.id;
-                map.vehicles.get_mut(v).unwrap().seat(id, 0);
+                map.vehicles.get_mut(v).unwrap().seat(id, TribeId::Blue);
                 id
             })
             .collect()
@@ -929,7 +931,7 @@ mod tests {
     #[test]
     fn a_destroyed_balloon_rises_drops_its_people_and_bursts() {
         let mut map = coast();
-        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at((C - 10, C)), Angle::ZERO));
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, TribeId::Blue, at((C - 10, C)), Angle::ZERO));
         let people = aboard(&mut map, v, 2);
         map.vehicles.get_mut(v).unwrap().health = Health::new(1, LIFE);
         run(&mut map, 1);
@@ -1024,11 +1026,11 @@ mod tests {
         assert_eq!(map.vehicle(v).unwrap().state, State::Parked);
     }
 
-    fn braves(map: &mut GameMap, owner: u8, n: i32) -> Vec<UnitId> {
+    fn braves(map: &mut GameMap, owner: TribeId, n: i32) -> Vec<UnitId> {
         (0..n).map(|k| map.spawn(owner, UnitKind::Brave, at((C - 4, C - 3 + k))).id).collect()
     }
 
-    fn order(map: &mut GameMap, player: u8, units: &[UnitId], order: crate::unit::Order) {
+    fn order(map: &mut GameMap, player: TribeId, units: &[UnitId], order: crate::unit::Order) {
         for &unit in units {
             map.apply(&Command::OrderUnit { player, unit, order });
         }
@@ -1045,8 +1047,8 @@ mod tests {
     fn people_board_up_to_its_seats_the_others_stay_ashore() {
         let mut map = coast();
         let v = boat(&mut map, (C, C));
-        let people = braves(&mut map, 0, 6);
-        order(&mut map, 0, &people, Order::Board { vehicle: v });
+        let people = braves(&mut map, TribeId::Blue, 6);
+        order(&mut map, TribeId::Blue, &people, Order::Board { vehicle: v });
         let all_still = |m: &GameMap| people.iter().all(|&p| m.unit(p).unwrap().action == Action::Idle);
         assert!(until(&mut map, 300, all_still));
         let b = map.vehicle(v).unwrap();
@@ -1054,21 +1056,21 @@ mod tests {
         let seated: Vec<UnitId> = people.iter().copied().filter(|&p| map.unit(p).unwrap().aboard == Some(v)).collect();
         assert_eq!(seated.len(), 5, "in the order they came");
         assert!(seated.iter().all(|&p| b.passengers.contains(&p) && (map.unit(p).unwrap().x, map.unit(p).unwrap().z) == (b.x, b.z)));
-        assert_eq!(map.headcount(0).get(crate::headcount::State::InBoat, UnitKind::Brave), 5);
+        assert_eq!(map.headcount(TribeId::Blue).get(crate::headcount::State::InBoat, UnitKind::Brave), 5);
     }
 
     #[test]
     fn an_empty_enemy_boat_becomes_the_boarders_a_manned_one_takes_nobody_else() {
         let mut map = coast();
         let v = boat(&mut map, (C, C));
-        map.vehicles.get_mut(v).unwrap().owner = 1;
-        let mine = braves(&mut map, 0, 1);
-        order(&mut map, 0, &mine, Order::Board { vehicle: v });
+        map.vehicles.get_mut(v).unwrap().owner = Owner::Tribe(TribeId::Red);
+        let mine = braves(&mut map, TribeId::Blue, 1);
+        order(&mut map, TribeId::Blue, &mine, Order::Board { vehicle: v });
         assert!(until(&mut map, 300, |m| m.unit(mine[0]).unwrap().aboard.is_some()));
         assert!(matches!(map.unit(mine[0]).unwrap().action, Action::Boarding { .. }), "jumping in");
-        assert_eq!(map.vehicle(v).unwrap().owner, 0);
-        let theirs = braves(&mut map, 1, 1);
-        order(&mut map, 1, &theirs, Order::Board { vehicle: v });
+        assert_eq!(map.vehicle(v).unwrap().owner, Owner::Tribe(TribeId::Blue));
+        let theirs = braves(&mut map, TribeId::Red, 1);
+        order(&mut map, TribeId::Red, &theirs, Order::Board { vehicle: v });
         until(&mut map, 300, |_| false);
         assert_eq!(map.unit(theirs[0]).unwrap().aboard, None);
         assert_eq!(map.vehicle(v).unwrap().passengers, mine);
@@ -1081,12 +1083,12 @@ mod tests {
         let people = aboard(&mut map, v, 3);
         assert!(!map.can_unload(v), "no shore within reach");
         let island = at((C + 20, C));
-        for c in map.move_orders(0, &people, island) {
+        for c in map.move_orders(TribeId::Blue, &people, island) {
             map.apply(&c);
         }
         assert!(until(&mut map, 600, |m| m.vehicle(v).unwrap().state == State::Parked));
         assert!(map.can_unload(v));
-        map.apply(&Command::Unload { player: 0, vehicle: v });
+        map.apply(&Command::Unload { player: TribeId::Blue, vehicle: v });
         assert!(map.vehicle(v).unwrap().passengers.is_empty());
         let b = map.vehicle(v).unwrap();
         for &p in &people {
@@ -1105,22 +1107,22 @@ mod tests {
         let mut map = coast();
         let v = boat(&mut map, (C + 10, C));
         let people = aboard(&mut map, v, 1);
-        map.apply(&Command::OrderUnit { player: 0, unit: people[0], order: Order::MoveTo { x: at((C + 10, C + 20)).0, z: at((C + 10, C + 20)).1 } });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: people[0], order: Order::MoveTo { x: at((C + 10, C + 20)).0, z: at((C + 10, C + 20)).1 } });
         assert!(matches!(map.vehicle(v).unwrap().state, State::Moving { .. }));
-        map.apply(&Command::OrderUnit { player: 0, unit: people[0], order: Order::FetchWood });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: people[0], order: Order::FetchWood });
         assert_eq!(map.unit(people[0]).unwrap().aboard, Some(v));
-        map.apply(&Command::MoveVehicle { player: 1, vehicle: v, to: at((C + 30, C)) });
+        map.apply(&Command::MoveVehicle { player: TribeId::Red, vehicle: v, to: at((C + 30, C)) });
         assert_eq!(map.vehicle(v).unwrap().state, State::Moving { to: at((C + 10, C + 20)) }, "not theirs");
     }
 
     #[test]
     fn people_in_a_balloon_stand_at_its_height_out_of_a_blasts_reach() {
         let mut map = coast();
-        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at((C - 10, C)), Angle::ZERO));
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, TribeId::Blue, at((C - 10, C)), Angle::ZERO));
         let people = aboard(&mut map, v, 2);
         let u = map.unit(people[0]).unwrap();
         assert_eq!(map.altitude(u), 100 + HOVER);
-        map.add_effect(crate::blast::effect(1, at((C - 10, C))));
+        map.add_effect(crate::blast::effect(TribeId::Red, at((C - 10, C))));
         run(&mut map, 3);
         assert!(people.iter().all(|&p| map.unit(p).unwrap().health.is_full() && map.unit(p).unwrap().aboard == Some(v)));
     }
@@ -1128,7 +1130,7 @@ mod tests {
     /// A built hut of `kind` on the coast, its jetty side to the sea (+x), with `wood` pieces lying inland.
     fn shipyard(kind: BuildingKind, wood: u16) -> (GameMap, usize) {
         let mut map = coast();
-        map.add_building(crate::building::Building::new(kind, 0, ((C - 2) * 512) as u16, (C * 512) as u16, 2));
+        map.add_building(crate::building::Building::new(kind, TribeId::Blue, ((C - 2) * 512) as u16, (C * 512) as u16, 2));
         for k in 0..wood {
             map.wood.push(crate::wood::WoodPiece::new(at((C - 7, C - 2)).0 + 90 * k, at((C - 7, C - 2)).1));
         }
@@ -1137,8 +1139,8 @@ mod tests {
     }
 
     fn crew(map: &mut GameMap, hut: usize, n: i32) -> Vec<UnitId> {
-        let people = braves(map, 0, n);
-        for c in map.enter_orders(0, &people, hut) {
+        let people = braves(map, TribeId::Blue, n);
+        for c in map.enter_orders(TribeId::Blue, &people, hut) {
             map.apply(&c);
         }
         people
@@ -1152,7 +1154,7 @@ mod tests {
         assert_eq!(map.workers(id).count(), 3);
         assert!(until(&mut map, 6000, |m| !m.vehicles.is_empty()), "a boat");
         let (_, boat) = map.vehicles.entries().next().unwrap();
-        assert_eq!((boat.kind, boat.owner), (VehicleKind::Boat, 0));
+        assert_eq!((boat.kind, boat.owner), (VehicleKind::Boat, Owner::Tribe(TribeId::Blue)));
         assert!(crate::unit::is_sea(&map.terrain, boat.cell()), "on the open sea");
         assert_eq!(boat.passengers.len(), 1);
         let driver = boat.passengers[0];
@@ -1193,8 +1195,8 @@ mod tests {
     fn only_braves_crew_and_only_four() {
         let (mut map, hut) = shipyard(BuildingKind::BoatHut, 0);
         let people = crew(&mut map, hut, 5);
-        let warrior = map.spawn(0, UnitKind::Warrior, at((C - 6, C + 3))).id;
-        for c in map.enter_orders(0, &[warrior], hut) {
+        let warrior = map.spawn(TribeId::Blue, UnitKind::Warrior, at((C - 6, C + 3))).id;
+        for c in map.enter_orders(TribeId::Blue, &[warrior], hut) {
             map.apply(&c);
         }
         let id = map.buildings[hut].id;
@@ -1207,11 +1209,11 @@ mod tests {
         let mut map = coast();
         let (empty, manned, own) = (boat(&mut map, (C + 6, C)), boat(&mut map, (C + 6, C + 1)), boat(&mut map, (C + 7, C)));
         aboard(&mut map, manned, 1);
-        map.vehicles.get_mut(own).unwrap().owner = 1;
+        map.vehicles.get_mut(own).unwrap().owner = Owner::Tribe(TribeId::Red);
         for v in [empty, manned, own] {
             map.vehicles.get_mut(v).unwrap().health = Health::new(140, LIFE);
         }
-        map.add_effect(crate::blast::effect(1, at((C + 6, C))));
+        map.add_effect(crate::blast::effect(TribeId::Red, at((C + 6, C))));
         run(&mut map, 3);
         assert!(matches!(map.vehicle(empty).unwrap().state, State::Sinking { .. }), "3 × 50 wore it out");
         assert_eq!(map.vehicle(manned).unwrap().state, State::Parked, "whole again every turn");
@@ -1221,14 +1223,14 @@ mod tests {
     #[test]
     fn a_shaman_in_a_balloon_is_flown_into_range_then_casts() {
         let mut map = coast();
-        map.sites = vec![crate::site::ReincarnationSite::at_cell(0, (C - 30, C), 0)];
+        map.sites = vec![crate::site::ReincarnationSite::at_cell(TribeId::Blue, (C - 30, C), 0)];
         map.spell_books = vec![crate::spell_book::SpellBook::sandbox(); 4];
-        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at((C - 20, C)), Angle::ZERO));
-        let shaman = map.spawn(0, UnitKind::Shaman, at((C - 20, C))).id;
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, TribeId::Blue, at((C - 20, C)), Angle::ZERO));
+        let shaman = map.spawn(TribeId::Blue, UnitKind::Shaman, at((C - 20, C))).id;
         map.unit_mut(shaman).unwrap().aboard = Some(v);
-        map.vehicles.get_mut(v).unwrap().seat(shaman, 0);
+        map.vehicles.get_mut(v).unwrap().seat(shaman, TribeId::Blue);
         let target = at((C + 20, C + 2));
-        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at: target } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: crate::spell::Spell::Blast { at: target } });
         assert!(matches!(map.vehicle(v).unwrap().state, State::Moving { .. }), "the balloon sets off");
         assert!(until(&mut map, 600, |m| !m.effects.is_empty()), "cast once in range");
         let b = map.vehicle(v).unwrap();
@@ -1274,21 +1276,21 @@ mod tests {
         let mut map = coast();
         map.spell_books = vec![crate::spell_book::SpellBook::sandbox(); 4];
         let v = boat(&mut map, (C + 2, C));
-        let shaman = map.spawn(0, UnitKind::Shaman, at((C - 2, C))).id;
+        let shaman = map.spawn(TribeId::Blue, UnitKind::Shaman, at((C - 2, C))).id;
         let bridge = crate::spell::Spell::LandBridge { from: (C - 2, C), to: (C - 10, C) };
-        assert!(map.can_cast(0, &bridge));
+        assert!(map.can_cast(TribeId::Blue, &bridge));
         map.unit_mut(shaman).unwrap().aboard = Some(v);
-        map.vehicles.get_mut(v).unwrap().seat(shaman, 0);
-        assert!(!map.can_cast(0, &bridge), "aboard");
+        map.vehicles.get_mut(v).unwrap().seat(shaman, TribeId::Blue);
+        assert!(!map.can_cast(TribeId::Blue, &bridge), "aboard");
         map.shaman_omni = true;
-        assert!(map.can_cast(0, &bridge), "a god bridges from the view");
+        assert!(map.can_cast(TribeId::Blue, &bridge), "a god bridges from the view");
     }
 
     #[test]
     fn a_balloon_climbs_before_a_hill_keeps_clear_of_it_and_comes_down_after() {
         let mut map = coast();
         map.terrain.raise((C - 20, C), 2, 400);
-        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at((C - 30, C)), Angle::ZERO));
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, TribeId::Blue, at((C - 30, C)), Angle::ZERO));
         aboard(&mut map, v, 1);
         map.vehicles.get_mut(v).unwrap().go(at((C - 10, C)));
         let (mut highest, mut before_hill) = (0, 0);
@@ -1319,10 +1321,10 @@ mod tests {
     #[test]
     fn a_balloon_floats_over_a_building_and_a_tree_without_bumping_into_them() {
         let mut map = coast();
-        map.add_building(crate::building::Building::new(BuildingKind::Hut { size: 1 }, 0, ((C - 20) * 512) as u16, (C * 512) as u16, 0));
+        map.add_building(crate::building::Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, ((C - 20) * 512) as u16, (C * 512) as u16, 0));
         map.trees.push(crate::tree::Tree::new((C - 27, C), 0, crate::tree::MAX_SIZE));
         map.update_walls();
-        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at((C - 40, C)), Angle::ZERO));
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, TribeId::Blue, at((C - 40, C)), Angle::ZERO));
         aboard(&mut map, v, 1);
         map.vehicles.get_mut(v).unwrap().go(at((C - 10, C)));
         let (mut over_hut, mut over_tree) = (false, false);
@@ -1372,27 +1374,27 @@ mod tests {
         let v = boat(&mut map, (C, C));
         let people = aboard(&mut map, v, 2);
         let shore = at((C - 1, C));
-        let off = |units: &[UnitId]| units.iter().map(|&unit| Command::OrderUnit { player: 0, unit, order: Order::GetOff }).collect::<Vec<_>>();
-        assert_eq!(map.move_orders(0, &people, shore), off(&people), "parked by the shore: those selected get off");
-        for c in map.move_orders(0, &people[..1], shore) {
+        let off = |units: &[UnitId]| units.iter().map(|&unit| Command::OrderUnit { player: TribeId::Blue, unit, order: Order::GetOff }).collect::<Vec<_>>();
+        assert_eq!(map.move_orders(TribeId::Blue, &people, shore), off(&people), "parked by the shore: those selected get off");
+        for c in map.move_orders(TribeId::Blue, &people[..1], shore) {
             map.apply(&c);
         }
         assert_eq!(map.unit(people[0]).unwrap().aboard, None, "the one selected is off");
         assert_eq!(map.vehicle(v).unwrap().passengers, people[1..], "the other stays aboard");
         let aboard = &people[1..];
-        assert_eq!(map.move_orders(0, aboard, at((C - 5, C))), vec![Command::MoveVehicle { player: 0, vehicle: v, to: at((C - 5, C)) }], "too far: it goes");
-        assert_eq!(map.move_orders(0, aboard, at((C + 1, C))), vec![Command::MoveVehicle { player: 0, vehicle: v, to: at((C + 1, C)) }], "on the water: it goes");
+        assert_eq!(map.move_orders(TribeId::Blue, aboard, at((C - 5, C))), vec![Command::MoveVehicle { player: TribeId::Blue, vehicle: v, to: at((C - 5, C)) }], "too far: it goes");
+        assert_eq!(map.move_orders(TribeId::Blue, aboard, at((C + 1, C))), vec![Command::MoveVehicle { player: TribeId::Blue, vehicle: v, to: at((C + 1, C)) }], "on the water: it goes");
         map.vehicles.get_mut(v).unwrap().go(at((C, C + 10)));
-        assert_eq!(map.move_orders(0, aboard, shore), vec![Command::MoveVehicle { player: 0, vehicle: v, to: shore }], "moving: it turns back");
+        assert_eq!(map.move_orders(TribeId::Blue, aboard, shore), vec![Command::MoveVehicle { player: TribeId::Blue, vehicle: v, to: shore }], "moving: it turns back");
     }
 
     #[test]
     fn a_brave_puts_his_wood_down_before_getting_on() {
         let mut map = coast();
         let v = boat(&mut map, (C, C));
-        let brave = braves(&mut map, 0, 1)[0];
+        let brave = braves(&mut map, TribeId::Blue, 1)[0];
         map.unit_mut(brave).unwrap().carrying = 1;
-        order(&mut map, 0, &[brave], Order::Board { vehicle: v });
+        order(&mut map, TribeId::Blue, &[brave], Order::Board { vehicle: v });
         assert!(until(&mut map, 300, |m| m.unit(brave).unwrap().aboard.is_some()));
         assert_eq!(map.unit(brave).unwrap().carrying, 0);
         let piece = map.wood.last().expect("left on the shore");

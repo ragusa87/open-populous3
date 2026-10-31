@@ -5,16 +5,17 @@
 //! tracking it on its own.
 
 use crate::effect::DamageKind;
+use crate::tribes::Owner;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Hurt {
-    attacker: Option<u8>,
+    attacker: Option<Owner>,
     cause: Option<DamageKind>,
 }
 
 impl Hurt {
     /// The tribe that last hit it, if any and not healed away since.
-    pub fn attacker(self) -> Option<u8> {
+    pub fn attacker(self) -> Option<Owner> {
         self.attacker
     }
 
@@ -24,7 +25,7 @@ impl Hurt {
     }
 
     /// A hit lands, from `from`'s tribe if known.
-    pub(crate) fn hit(&mut self, from: Option<u8>) {
+    pub(crate) fn hit(&mut self, from: Option<Owner>) {
         self.attacker = from;
     }
 
@@ -47,10 +48,10 @@ mod tests {
     fn tracks_the_attacker_until_healed_full_or_struck_again() {
         let mut hurt = Hurt::default();
         assert_eq!(hurt.attacker(), None);
-        hurt.hit(Some(1));
-        assert_eq!(hurt.attacker(), Some(1));
-        hurt.hit(Some(0));
-        assert_eq!(hurt.attacker(), Some(0), "the latest attacker, not the first");
+        hurt.hit(Some(Owner::Tribe(crate::tribes::TribeId::Red)));
+        assert_eq!(hurt.attacker(), Some(Owner::Tribe(crate::tribes::TribeId::Red)));
+        hurt.hit(Some(Owner::Tribe(crate::tribes::TribeId::Blue)));
+        assert_eq!(hurt.attacker(), Some(Owner::Tribe(crate::tribes::TribeId::Blue)), "the latest attacker, not the first");
         hurt.healed();
         assert_eq!(hurt.attacker(), None);
     }

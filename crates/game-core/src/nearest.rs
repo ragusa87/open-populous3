@@ -47,11 +47,12 @@ fn distance_sq(a: (u16, u16), b: (u16, u16)) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::id::Id;
     use crate::unit::UnitKind;
 
     fn person(id: u32, at: (u16, u16)) -> Unit {
-        Unit::new(Id::from_raw(id), 0, UnitKind::Brave, at)
+        Unit::new(Id::from_raw(id), TribeId::Blue, UnitKind::Brave, at)
     }
 
     #[test]

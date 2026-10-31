@@ -4,6 +4,7 @@
 //! (`TODO.md`) will be a third.
 
 use crate::map::GameMap;
+use crate::tribes::{Owner, TribeId};
 use crate::status::{Timed, SHIELD_STEPS};
 use crate::time::Tick;
 use crate::unit::Action;
@@ -22,7 +23,7 @@ pub enum Reason {
 /// The match's one and only result: the tribe left standing (`None`: a draw), why, and when.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Outcome {
-    pub winner: Option<u8>,
+    pub winner: Option<TribeId>,
     pub reason: Reason,
     pub at: Tick,
 }
@@ -32,7 +33,7 @@ impl GameMap {
     /// relabel a result afterwards (the "hookable into scripts" entry point). Every unit still acting stands down to
     /// Idle right away (a death already in train — `Dying`, `Dead`, `Spirit` — finishes on its own; the shaman still
     /// doesn't get a last-stand reincarnation out of it, `GameMap::tick`'s own freeze below).
-    pub fn declare_outcome(&mut self, winner: Option<u8>, reason: Reason) -> bool {
+    pub fn declare_outcome(&mut self, winner: Option<TribeId>, reason: Reason) -> bool {
         if self.outcome.is_some() {
             return false;
         }
@@ -49,7 +50,7 @@ impl GameMap {
     /// original-tribe/permanent-death mechanic: a unit hypnotized away from an enemy counts for us; one hypnotized
     /// away from us doesn't). `pub(crate)`, not private: Hypnotism's own already-recorded design (`docs/plans/
     /// spells.md` "unless that tribe is dead") will reuse this exact check once implemented.
-    pub(crate) fn tribe_wiped_out(&self, tribe: u8) -> bool {
+    pub(crate) fn tribe_wiped_out(&self, tribe: TribeId) -> bool {
         !self.units.iter().any(|u| u.owner == tribe && u.is_alive())
     }
 
@@ -69,8 +70,8 @@ impl GameMap {
     /// (`Tribes::same_team`). `false` before `outcome` is set and after a draw (`winner: None`) — a draw is a win
     /// for nobody. The one place a client-side "victory lap" effect (the happy jump, the celebrating pose) should
     /// read to decide who gets to celebrate.
-    pub fn on_winning_side(&self, tribe: u8) -> bool {
-        self.outcome.and_then(|o| o.winner).is_some_and(|winner| self.tribes.same_team(tribe, winner))
+    pub fn on_winning_side(&self, tribe: impl Into<Owner>) -> bool {
+        self.outcome.and_then(|o| o.winner).is_some_and(|winner| self.tribes.same_team(tribe.into(), winner))
     }
 
     /// Once the match has ended, nothing can hurt the winning side's units any more: every one of theirs still alive
@@ -90,7 +91,7 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use crate::map::GameMap;
-    use crate::tribes::Tribes;
+    use crate::tribes::{TribeId, Tribes};
     use crate::unit::{Action, UnitKind};
 
     /// `GameMap::generate` already gives two real tribes (0 and 1), each with a living shaman and `tribes` set
@@ -102,18 +103,18 @@ mod tests {
     #[test]
     fn tribe_wiped_out_is_true_the_instant_its_only_unit_starts_dying() {
         let mut map = two_tribes();
-        let shaman = map.shaman_of(0).unwrap().id;
+        let shaman = map.shaman_of(TribeId::Blue).unwrap().id;
         map.unit_mut(shaman).unwrap().take_damage(u16::MAX);
-        assert!(map.tribe_wiped_out(0));
-        assert!(!map.tribe_wiped_out(1));
+        assert!(map.tribe_wiped_out(TribeId::Blue));
+        assert!(!map.tribe_wiped_out(TribeId::Red));
     }
 
     #[test]
     fn declare_outcome_is_a_one_shot_latch() {
         let mut map = two_tribes();
-        assert!(map.declare_outcome(Some(0), super::Reason::Eliminated));
-        assert!(!map.declare_outcome(Some(1), super::Reason::Armageddon));
-        assert_eq!(map.outcome.unwrap().winner, Some(0));
+        assert!(map.declare_outcome(Some(TribeId::Blue), super::Reason::Eliminated));
+        assert!(!map.declare_outcome(Some(TribeId::Red), super::Reason::Armageddon));
+        assert_eq!(map.outcome.unwrap().winner, Some(TribeId::Blue));
     }
 
     #[test]
@@ -126,21 +127,21 @@ mod tests {
     #[test]
     fn a_three_tribe_map_waits_for_every_other_tribe_before_declaring() {
         let mut map = two_tribes();
-        map.spawn(2, UnitKind::Brave, (0, 0));
-        map.tribes = Tribes::from_owners([0, 1, 2]);
-        map.unit_mut(map.shaman_of(1).unwrap().id).unwrap().take_damage(u16::MAX);
+        map.spawn(TribeId::Yellow, UnitKind::Brave, (0, 0));
+        map.tribes = Tribes::from_owners([TribeId::Blue, TribeId::Red, TribeId::Yellow]);
+        map.unit_mut(map.shaman_of(TribeId::Red).unwrap().id).unwrap().take_damage(u16::MAX);
         map.tick();
         assert!(map.outcome.is_none(), "tribe 2 still alive");
-        let brave2 = map.units.iter().find(|u| u.owner == 2).unwrap().id;
+        let brave2 = map.units.iter().find(|u| u.owner == TribeId::Yellow).unwrap().id;
         map.unit_mut(brave2).unwrap().take_damage(u16::MAX);
         map.tick();
-        assert_eq!(map.outcome.unwrap().winner, Some(0));
+        assert_eq!(map.outcome.unwrap().winner, Some(TribeId::Blue));
     }
 
     #[test]
     fn a_simultaneous_double_wipe_declares_a_draw() {
         let mut map = two_tribes();
-        for owner in [0u8, 1] {
+        for owner in [TribeId::Blue, TribeId::Red] {
             let id = map.shaman_of(owner).unwrap().id;
             map.unit_mut(id).unwrap().take_damage(u16::MAX);
         }
@@ -151,9 +152,9 @@ mod tests {
     #[test]
     fn further_ticks_never_change_an_already_declared_outcome() {
         let mut map = two_tribes();
-        map.declare_outcome(Some(0), super::Reason::Eliminated);
+        map.declare_outcome(Some(TribeId::Blue), super::Reason::Eliminated);
         map.run(crate::time::Ticks::new(5));
-        assert_eq!(map.outcome.unwrap().winner, Some(0));
+        assert_eq!(map.outcome.unwrap().winner, Some(TribeId::Blue));
     }
 
     #[test]
@@ -165,12 +166,12 @@ mod tests {
     #[test]
     fn the_winning_sides_living_units_are_shielded_once_the_match_ends_and_stay_shielded() {
         let mut map = two_tribes();
-        map.declare_outcome(Some(0), super::Reason::Eliminated);
+        map.declare_outcome(Some(TribeId::Blue), super::Reason::Eliminated);
         map.run(crate::time::Ticks::new(1));
-        assert!(map.units.iter().filter(|u| u.owner == 0 && u.is_alive()).all(|u| u.statuses.shield.is_on()));
-        assert!(map.units.iter().filter(|u| u.owner == 1 && u.is_alive()).all(|u| !u.statuses.shield.is_on()), "the losing side gets no victory shield");
+        assert!(map.units.iter().filter(|u| u.owner == TribeId::Blue && u.is_alive()).all(|u| u.statuses.shield.is_on()));
+        assert!(map.units.iter().filter(|u| u.owner == TribeId::Red && u.is_alive()).all(|u| !u.statuses.shield.is_on()), "the losing side gets no victory shield");
         map.run(crate::time::Ticks::secs(130)); // longer than SHIELD_STEPS' own duration
-        assert!(map.units.iter().filter(|u| u.owner == 0 && u.is_alive()).all(|u| u.statuses.shield.is_on()), "continuously refreshed, not a one-shot");
+        assert!(map.units.iter().filter(|u| u.owner == TribeId::Blue && u.is_alive()).all(|u| u.statuses.shield.is_on()), "continuously refreshed, not a one-shot");
     }
 
     #[test]
@@ -184,8 +185,8 @@ mod tests {
     #[test]
     fn an_allys_units_are_shielded_too() {
         let mut map = two_tribes();
-        map.tribes = Tribes::from_owners([0, 1]).with_allies([0b11, 0b11, 0, 0]);
-        map.declare_outcome(Some(0), super::Reason::Eliminated);
+        map.tribes = Tribes::from_owners([TribeId::Blue, TribeId::Red]).with_allies([0b11, 0b11, 0, 0]);
+        map.declare_outcome(Some(TribeId::Blue), super::Reason::Eliminated);
         map.run(crate::time::Ticks::new(1));
         assert!(map.units.iter().filter(|u| u.is_alive()).all(|u| u.statuses.shield.is_on()), "tribe 1 is allied with the winner");
     }
@@ -193,19 +194,19 @@ mod tests {
     #[test]
     fn declaring_the_outcome_stands_every_acting_unit_down_to_idle() {
         let mut map = two_tribes();
-        let brave = map.spawn(0, UnitKind::Brave, (10_000, 10_000)).id;
+        let brave = map.spawn(TribeId::Blue, UnitKind::Brave, (10_000, 10_000)).id;
         map.unit_mut(brave).unwrap().action = Action::Walking { to: (20_000, 20_000) };
-        map.declare_outcome(Some(0), super::Reason::Eliminated);
+        map.declare_outcome(Some(TribeId::Blue), super::Reason::Eliminated);
         assert_eq!(map.unit(brave).unwrap().action, Action::Idle);
     }
 
     #[test]
     fn a_lone_shaman_never_reincarnates_once_the_match_has_ended() {
         let mut map = two_tribes();
-        let shaman = map.shaman_of(1).unwrap().id;
+        let shaman = map.shaman_of(TribeId::Red).unwrap().id;
         map.unit_mut(shaman).unwrap().take_damage(u16::MAX);
         map.tick();
-        assert_eq!(map.outcome.unwrap().winner, Some(0), "tribe 1 had no other unit left");
+        assert_eq!(map.outcome.unwrap().winner, Some(TribeId::Blue), "tribe 1 had no other unit left");
         map.run(crate::time::Ticks::secs(10)); // well past her dying + respawn countdowns
         assert!(matches!(map.unit(shaman).unwrap().action, Action::Dead { .. }), "no last-stand comeback once the match is over");
     }
@@ -214,8 +215,8 @@ mod tests {
     fn every_command_is_rejected_once_the_match_has_ended_even_without_an_active_armageddon() {
         let mut map = two_tribes();
         let before = map.units.clone();
-        map.declare_outcome(Some(0), super::Reason::Eliminated);
-        map.apply(&crate::command::Command::Order { player: 0, order: crate::unit::Order::Stop });
+        map.declare_outcome(Some(TribeId::Blue), super::Reason::Eliminated);
+        map.apply(&crate::command::Command::Order { player: TribeId::Blue, order: crate::unit::Order::Stop });
         assert_eq!(map.units, before);
     }
 }

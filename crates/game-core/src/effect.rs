@@ -3,6 +3,7 @@
 //! comes out as `WorldEvent`s, which `GameMap::tend_effects` applies in order (architecture.md "The tick").
 
 use crate::event::{PushKind, WorldEvent};
+use crate::tribes::Owner;
 use crate::map::{GameMap, Lcg};
 use crate::spell::Cell;
 use crate::terrain::Heightmap;
@@ -12,7 +13,7 @@ use crate::unit::Unit;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Effect {
     /// The caster's tribe.
-    pub owner: u8,
+    pub owner: Owner,
     /// Where it stands, world units.
     pub x: u16,
     pub z: u16,
@@ -96,8 +97,8 @@ pub enum TerrainChange {
 }
 
 impl Effect {
-    pub fn new(owner: u8, (x, z): (u16, u16), left: Countdown, kind: EffectKind) -> Self {
-        Effect { owner, x, z, left, kind }
+    pub fn new(owner: impl Into<Owner>, (x, z): (u16, u16), left: Countdown, kind: EffectKind) -> Self {
+        Effect { owner: owner.into(), x, z, left, kind }
     }
 
     /// One turn at `now`: its work on its own rhythm, then one turn less to go.
@@ -177,7 +178,7 @@ pub struct GroundShake {
 /// (pop3-rev-analysis.md "Per spell", Shield; reported, not traced); a blast and a swarm spare the caster's own
 /// tribe (no alliances yet), lightning and lava only the caster's own shaman, a swarm every shaman of any tribe,
 /// a swamp spares no one, not even its own caster.
-pub fn hurts(u: &Unit, kind: DamageKind, from: Option<u8>) -> bool {
+pub fn hurts(u: &Unit, kind: DamageKind, from: Option<Owner>) -> bool {
     if !u.is_alive() || (u.statuses.shield.is_on() && !matches!(kind, DamageKind::Melee | DamageKind::Swamp | DamageKind::Lava)) {
         return false;
     }
@@ -197,6 +198,7 @@ pub fn pushes(u: &Unit, kind: PushKind) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::motion::Velocity;
     use crate::time::{Every, Ticks};
     use crate::id::Id;
@@ -211,11 +213,11 @@ pub(crate) mod tests {
     }
 
     impl Probe {
-        pub(super) fn turn(&mut self, now: Tick, at: (u16, u16), owner: u8, world: &GameMap) -> Vec<WorldEvent> {
+        pub(super) fn turn(&mut self, now: Tick, at: (u16, u16), owner: Owner, world: &GameMap) -> Vec<WorldEvent> {
             let mut events = Vec::new();
             if std::mem::take(&mut self.spawn) {
                 let copy = Probe { every: self.every, spawn: false };
-                events.push(WorldEvent::SpawnEffect(Effect::new(0, at, Countdown::new(Ticks::new(5)), EffectKind::Probe(copy))));
+                events.push(WorldEvent::SpawnEffect(Effect::new(owner, at, Countdown::new(Ticks::new(5)), EffectKind::Probe(copy))));
             }
             if self.every.fires(now, 0) {
                 let near = |u: &&Unit| torus_delta(at.0, u.x).abs().max(torus_delta(at.1, u.z).abs()) <= 512;
@@ -228,7 +230,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn probe(owner: u8, at: (u16, u16), every: u32, turns: u32) -> Effect {
+    fn probe(owner: TribeId, at: (u16, u16), every: u32, turns: u32) -> Effect {
         Effect::new(owner, at, Countdown::new(Ticks::new(turns)), EffectKind::Probe(Probe { every: Every::new(every), spawn: false }))
     }
 
@@ -237,14 +239,14 @@ pub(crate) mod tests {
         let mut map = GameMap::sandbox_walk();
         let s = &map.units[0];
         let at = (s.x.wrapping_add(1024), s.z);
-        let id = map.spawn(1, UnitKind::Brave, at).id;
+        let id = map.spawn(TribeId::Red, UnitKind::Brave, at).id;
         (map, id, at)
     }
 
     #[test]
     fn works_on_its_rhythm_and_ends_after_its_length() {
         let (map, _, at) = with_enemy();
-        let mut e = probe(0, at, 4, 10);
+        let mut e = probe(TribeId::Blue, at, 4, 10);
         let mut rng = map.rng;
         let fired: Vec<u32> = (1..=10).filter(|&n| !e.tick(Tick::from_wire(n), &map, &mut rng).is_empty()).collect();
         assert_eq!(fired, [4, 8]);
@@ -254,9 +256,9 @@ pub(crate) mod tests {
     #[test]
     fn effects_end_in_order_and_hit_before_the_units_move() {
         let (mut map, enemy, at) = with_enemy();
-        let long = map.add_effect(probe(0, at, 1, 3));
-        map.add_effect(probe(0, (0, 0), 1, 1));
-        let other = map.add_effect(probe(0, (0, 0), 1, 2));
+        let long = map.add_effect(probe(TribeId::Blue, at, 1, 3));
+        map.add_effect(probe(TribeId::Blue, (0, 0), 1, 1));
+        let other = map.add_effect(probe(TribeId::Blue, (0, 0), 1, 2));
         let max = map.unit(enemy).unwrap().health.max();
         map.tick();
         assert!(map.unit(enemy).unwrap().motion.airborne(), "pushed, then its own tick flew it");
@@ -271,10 +273,10 @@ pub(crate) mod tests {
     #[test]
     fn an_id_is_never_given_again_after_its_effect_ends() {
         let (mut map, _, at) = with_enemy();
-        let first = map.add_effect(probe(0, at, 1, 1));
+        let first = map.add_effect(probe(TribeId::Blue, at, 1, 1));
         map.tick();
         assert!(map.effects.is_empty());
-        let second = map.add_effect(probe(0, at, 1, 1));
+        let second = map.add_effect(probe(TribeId::Blue, at, 1, 1));
         let other: crate::id::Id<Unit> = map.new_id_of();
         assert!(first < second && second.raw() < other.raw(), "one counter for every kind");
     }
@@ -282,7 +284,7 @@ pub(crate) mod tests {
     #[test]
     fn a_spawned_effect_ticks_from_the_next_turn() {
         let (mut map, _, at) = with_enemy();
-        let parent = map.add_effect(Effect { kind: EffectKind::Probe(Probe { every: Every::new(1), spawn: true }), ..probe(0, at, 1, 3) });
+        let parent = map.add_effect(Effect { kind: EffectKind::Probe(Probe { every: Every::new(1), spawn: true }), ..probe(TribeId::Blue, at, 1, 3) });
         map.tick();
         let (child, effect) = map.effects.iter().find(|(id, _)| *id != parent).expect("spawned");
         assert!(child > parent);
@@ -296,7 +298,7 @@ pub(crate) mod tests {
         let (mut map, _, _) = with_enemy();
         let before = map.units.clone();
         for event in [
-            WorldEvent::Damage { unit: Id::from_raw(9999), amount: 50, kind: DamageKind::Blast, from: Some(1) },
+            WorldEvent::Damage { unit: Id::from_raw(9999), amount: 50, kind: DamageKind::Blast, from: Some(Owner::Tribe(TribeId::Red)) },
             WorldEvent::Push { unit: Id::from_raw(9999), vel: Velocity::new(0, 60, 0), kind: PushKind::Spell },
             WorldEvent::Raid { building: Id::from_raw(9999) },
         ] {
@@ -310,15 +312,15 @@ pub(crate) mod tests {
         let (mut map, enemy, _) = with_enemy();
         let shaman = map.units[0].id;
         let max = map.unit(enemy).unwrap().health.max();
-        map.damage(shaman, 50, DamageKind::Blast, Some(0));
+        map.damage(shaman, 50, DamageKind::Blast, Some(Owner::Tribe(TribeId::Blue)));
         assert!(map.unit(shaman).unwrap().health.is_full(), "own tribe");
         map.unit_mut(enemy).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
-        map.damage(enemy, 50, DamageKind::Blast, Some(0));
+        map.damage(enemy, 50, DamageKind::Blast, Some(Owner::Tribe(TribeId::Blue)));
         assert_eq!(map.unit(enemy).unwrap().health.current(), max, "shielded");
         map.unit_mut(enemy).unwrap().statuses.shield = crate::status::Timed::default();
-        map.damage(enemy, 50, DamageKind::Blast, Some(0));
+        map.damage(enemy, 50, DamageKind::Blast, Some(Owner::Tribe(TribeId::Blue)));
         assert_eq!(map.unit(enemy).unwrap().health.current(), max - 50);
-        map.damage(enemy, max, DamageKind::Blast, Some(0));
+        map.damage(enemy, max, DamageKind::Blast, Some(Owner::Tribe(TribeId::Blue)));
         assert!(!map.unit(enemy).unwrap().is_alive(), "dies at 0");
     }
 
@@ -327,7 +329,7 @@ pub(crate) mod tests {
         let (mut map, enemy, _) = with_enemy();
         map.unit_mut(enemy).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
         let max = map.unit(enemy).unwrap().health.max();
-        map.damage(enemy, 50, DamageKind::Fire, Some(0));
+        map.damage(enemy, 50, DamageKind::Fire, Some(Owner::Tribe(TribeId::Blue)));
         assert_eq!(map.unit(enemy).unwrap().health.current(), max, "a magical ranged attack, stopped like a spell");
     }
 
@@ -336,7 +338,7 @@ pub(crate) mod tests {
         let (mut map, enemy, _) = with_enemy();
         map.unit_mut(enemy).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
         let max = map.unit(enemy).unwrap().health.max();
-        map.damage(enemy, 60, DamageKind::Melee, Some(0));
+        map.damage(enemy, 60, DamageKind::Melee, Some(Owner::Tribe(TribeId::Blue)));
         assert_eq!(map.unit(enemy).unwrap().health.current(), max - 60);
     }
 
@@ -344,7 +346,7 @@ pub(crate) mod tests {
     fn the_same_turns_give_the_same_map() {
         let run = || {
             let (mut map, _, at) = with_enemy();
-            map.add_effect(probe(0, at, 2, 20));
+            map.add_effect(probe(TribeId::Blue, at, 2, 20));
             map.run(Ticks::new(40));
             (map.units, map.effects, map.rng)
         };

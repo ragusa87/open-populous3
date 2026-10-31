@@ -14,6 +14,7 @@ use crate::path::{Ground, Mobility};
 use crate::slots;
 use crate::time::{Countdown, Every, Tick, Ticks};
 use crate::unit::{cell_of, isqrt, torus_delta, Action, Unit, UnitId, UnitKind};
+use crate::tribes::Owner;
 
 pub type MeleeId = Id<Melee>;
 
@@ -51,7 +52,7 @@ pub enum Stance {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Melee {
-    pub tribes: (u8, u8),
+    pub tribes: (Owner, Owner),
     /// The middle of the ring: where the one alone on its side stands.
     pub at: (u16, u16),
     /// The ring's turn, of `angle::TURN`.
@@ -378,7 +379,7 @@ impl GameMap {
     fn split(&mut self, id: MeleeId) {
         let Some(melee) = self.coordinators.melees.get(id) else { return };
         let (tribes, at) = (melee.tribes, melee.at);
-        let side = |tribe: u8| self.units.iter().filter(|u| u.owner == tribe && <Melee as Coordinator>::link_of(u) == Some(id)).map(|u| u.id).collect::<Vec<_>>();
+        let side = |tribe: Owner| self.units.iter().filter(|u| u.owner == tribe && <Melee as Coordinator>::link_of(u) == Some(id)).map(|u| u.id).collect::<Vec<_>>();
         let (first, second) = (side(tribes.0), side(tribes.1));
         if first.len() < 2 || second.len() < 2 {
             return;
@@ -399,6 +400,7 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::command::Command;
     use crate::unit::{Order, Target};
 
@@ -412,10 +414,10 @@ mod tests {
     /// Two braves of tribes 0 and 1 already in a melee, a cell apart.
     fn duel(attacker: UnitKind, target: UnitKind) -> (GameMap, UnitId, UnitId) {
         let mut map = GameMap::sandbox_units().seeded(5);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z.wrapping_add(2048));
-        let a = map.spawn(0, attacker, at).id;
-        let t = map.spawn(1, target, (at.0.wrapping_add(200), at.1)).id;
+        let a = map.spawn(TribeId::Blue, attacker, at).id;
+        let t = map.spawn(TribeId::Red, target, (at.0.wrapping_add(200), at.1)).id;
         map.start_melee(a, t);
         (map, a, t)
     }
@@ -492,12 +494,12 @@ mod tests {
         let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Brave);
         let (owner_a, owner_t) = (map.unit(a).unwrap().owner, map.unit(t).unwrap().owner);
         until(&mut map, 3000, |m| m.coordinators.melees.is_empty()).expect("over");
-        let winner = if map.unit(a).is_some_and(Unit::is_alive) { owner_a } else { owner_t };
-        let loser = if winner == owner_a { owner_t } else { owner_a };
-        assert_eq!(map.melee_wins[winner as usize], 1, "the winner's tribe is tallied once");
-        assert_eq!(map.melee_wins[loser as usize], 0);
-        assert_eq!(map.melee_deaths[loser as usize], 1, "the loser's tribe took the death");
-        assert_eq!(map.melee_deaths[winner as usize], 0);
+        let winner = (if map.unit(a).is_some_and(Unit::is_alive) { owner_a } else { owner_t }).tribe().unwrap();
+        let loser = (if Owner::Tribe(winner) == owner_a { owner_t } else { owner_a }).tribe().unwrap();
+        assert_eq!(map.melee_wins[winner.as_usize()], 1, "the winner's tribe is tallied once");
+        assert_eq!(map.melee_wins[loser.as_usize()], 0);
+        assert_eq!(map.melee_deaths[loser.as_usize()], 1, "the loser's tribe took the death");
+        assert_eq!(map.melee_deaths[winner.as_usize()], 0);
     }
 
     /// `Melee::relocate` moves the fight off unsuitable ground (here: flooded) onto the nearest walkable spot
@@ -505,7 +507,7 @@ mod tests {
     #[test]
     fn relocate_moves_the_fight_off_flooded_ground() {
         let mut map = GameMap::sandbox_units().seeded(1);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(2048), s.z.wrapping_add(2048));
         let cell = (cell_of(at.0), cell_of(at.1));
         for cz in cell.1 - 1..=cell.1 + 2 {
@@ -513,7 +515,7 @@ mod tests {
                 map.terrain.set(cx, cz, 0);
             }
         }
-        let mut melee = Melee { tribes: (0, 1), at, angle: 0, centre: None };
+        let mut melee = Melee { tribes: (Owner::Tribe(TribeId::Blue), Owner::Tribe(TribeId::Red)), at, angle: 0, centre: None };
         melee.relocate(&map);
         assert_ne!(melee.at, at, "moved off the flooded cell");
         let moved_cell = (cell_of(melee.at.0), cell_of(melee.at.1));
@@ -524,9 +526,9 @@ mod tests {
     #[test]
     fn relocate_leaves_suitable_ground_alone() {
         let map = GameMap::sandbox_units().seeded(1);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(2048), s.z.wrapping_add(2048));
-        let mut melee = Melee { tribes: (0, 1), at, angle: 0, centre: None };
+        let mut melee = Melee { tribes: (Owner::Tribe(TribeId::Blue), Owner::Tribe(TribeId::Red)), at, angle: 0, centre: None };
         melee.relocate(&map);
         assert_eq!(melee.at, at);
     }
@@ -564,12 +566,12 @@ mod tests {
     #[test]
     fn a_third_attacker_turns_an_ongoing_challenge_into_a_melee_at_once() {
         let mut map = GameMap::sandbox_units().seeded(5);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z.wrapping_add(2048));
-        let a = map.spawn(0, UnitKind::Brave, at).id;
-        let t = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
+        let a = map.spawn(TribeId::Blue, UnitKind::Brave, at).id;
+        let t = map.spawn(TribeId::Red, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
         challenging(&mut map, a, t);
-        let b = attacker(&mut map, 0, UnitKind::Brave, t);
+        let b = attacker(&mut map, TribeId::Blue, UnitKind::Brave, t);
         map.escalate_challenges();
         assert!(map.coordinators.challenges.is_empty(), "the challenge escalated into a melee at once");
         assert_eq!(map.coordinators.melees.len(), 1);
@@ -582,12 +584,12 @@ mod tests {
     #[test]
     fn a_distant_attacker_does_not_escalate_a_challenge() {
         let mut map = GameMap::sandbox_units().seeded(5);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z.wrapping_add(2048));
-        let a = map.spawn(0, UnitKind::Brave, at).id;
-        let t = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
+        let a = map.spawn(TribeId::Blue, UnitKind::Brave, at).id;
+        let t = map.spawn(TribeId::Red, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
         let id = challenging(&mut map, a, t);
-        let far = map.spawn(0, UnitKind::Brave, (at.0.wrapping_add(20 * 512), at.1)).id;
+        let far = map.spawn(TribeId::Blue, UnitKind::Brave, (at.0.wrapping_add(20 * 512), at.1)).id;
         map.unit_mut(far).unwrap().action = Action::Attacking { target: crate::unit::Target::Unit(t), to: (at.0.wrapping_add(20 * 512), at.1) };
         map.escalate_challenges();
         assert!(map.coordinators.challenges.contains(id), "out of reach: the challenge runs on");
@@ -608,7 +610,7 @@ mod tests {
     #[test]
     fn a_fighter_pushed_out_of_leash_resumes_its_attack_order() {
         let (mut map, _, t) = duel(UnitKind::Brave, UnitKind::Brave);
-        let b = attacker(&mut map, 0, UnitKind::Brave, t);
+        let b = attacker(&mut map, TribeId::Blue, UnitKind::Brave, t);
         map.join_melees();
         assert!(melee_of(&map, b).is_some(), "joined the melee from its own attack order");
         map.unit_mut(b).unwrap().x = map.unit(b).unwrap().x.wrapping_add(10 * 512);
@@ -629,9 +631,9 @@ mod tests {
     #[test]
     fn a_warrior_blasted_out_of_sight_resumes_its_attack_order() {
         let mut map = GameMap::sandbox_walk().seeded(1);
-        let defender = map.spawn(0, UnitKind::Brave, (map.shaman_of(0).unwrap().x.wrapping_add(1024), map.shaman_of(0).unwrap().z)).id;
-        let attacker = map.spawn(1, UnitKind::Warrior, (map.unit(defender).unwrap().x.wrapping_add(512), map.unit(defender).unwrap().z)).id;
-        map.apply(&Command::OrderUnit { player: 1, unit: attacker, order: Order::Attack { target: Target::Unit(defender) } });
+        let defender = map.spawn(TribeId::Blue, UnitKind::Brave, (map.shaman_of(TribeId::Blue).unwrap().x.wrapping_add(1024), map.shaman_of(TribeId::Blue).unwrap().z)).id;
+        let attacker = map.spawn(TribeId::Red, UnitKind::Warrior, (map.unit(defender).unwrap().x.wrapping_add(512), map.unit(defender).unwrap().z)).id;
+        map.apply(&Command::OrderUnit { player: TribeId::Red, unit: attacker, order: Order::Attack { target: Target::Unit(defender) } });
         until(&mut map, 400, |m| matches!(m.unit(attacker).unwrap().action, Action::Melee { .. })).expect("in a melee");
 
         // Beyond the attacker, away from the defender along the same line: the push (away from `blast_at`)
@@ -641,7 +643,7 @@ mod tests {
             let (dx, dz) = (torus_delta(defender.x, attacker.x), torus_delta(defender.z, attacker.z));
             (attacker.x.wrapping_add(dx as u16), attacker.z.wrapping_add(dz as u16))
         };
-        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at: blast_at } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: crate::spell::Spell::Blast { at: blast_at } });
         map.run(crate::unit::CAST_RELEASE);
         until(&mut map, 300, |m| !matches!(m.unit(attacker).unwrap().action, Action::Tumbling | Action::Settling { .. } | Action::Melee { .. } | Action::Challenge { .. }))
             .expect("back on its feet");
@@ -663,19 +665,19 @@ mod tests {
     #[test]
     fn an_idle_warrior_blasted_away_has_nothing_to_resume() {
         let mut map = GameMap::sandbox_walk().seeded(1);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         // Beyond the warrior's own sight but still within the shaman's cast range, so it never auto-engages the
         // nearby enemy shaman on its own before the blast ever reaches it (which would give it a real order to
         // legitimately resume, defeating the point of this test).
         let sight = UnitKind::Warrior.stats().sight as u32 * 512;
-        let range = map.cast_range(0, crate::spell_book::SpellKind::Blast).unwrap();
+        let range = map.cast_range(TribeId::Blue, crate::spell_book::SpellKind::Blast).unwrap();
         assert!(range > sight, "test assumes Blast reaches farther than a warrior's own sight");
         let offset = ((sight + range) / 2) as u16;
-        let w = map.spawn(1, UnitKind::Warrior, (s.x.wrapping_add(offset), s.z)).id;
+        let w = map.spawn(TribeId::Red, UnitKind::Warrior, (s.x.wrapping_add(offset), s.z)).id;
         // Right on the warrior itself: still within the shaman's cast range (`offset < range` above), and no
         // nearer the shaman than that, which would shrink the sight/range gap this test relies on.
         let blast_at = { let u = map.unit(w).unwrap(); (u.x, u.z) };
-        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at: blast_at } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: crate::spell::Spell::Blast { at: blast_at } });
         map.run(crate::unit::CAST_RELEASE);
         // The fireball still has to fly in (blast.rs "From cast to effect") before it throws her: wait for that
         // first, so this doesn't race a pre-blast auto-scan into an unrelated `Action::Attacking`.
@@ -685,7 +687,7 @@ mod tests {
     }
 
     /// `kind` of `tribe` going for `target`, standing next to it.
-    fn attacker(map: &mut GameMap, tribe: u8, kind: UnitKind, target: UnitId) -> UnitId {
+    fn attacker(map: &mut GameMap, tribe: TribeId, kind: UnitKind, target: UnitId) -> UnitId {
         let t = map.unit(target).unwrap();
         let at = (t.x.wrapping_add(100), t.z.wrapping_add(50));
         let u = map.spawn(tribe, kind, at);
@@ -701,8 +703,8 @@ mod tests {
     fn a_newcomer_joins_but_never_a_firewarrior() {
         let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Brave);
         let ring = melee_of(&map, t);
-        let fire = attacker(&mut map, 0, UnitKind::Firewarrior, t);
-        let brave = attacker(&mut map, 0, UnitKind::Brave, t);
+        let fire = attacker(&mut map, TribeId::Blue, UnitKind::Firewarrior, t);
+        let brave = attacker(&mut map, TribeId::Blue, UnitKind::Brave, t);
         map.join_melees();
         assert_eq!(melee_of(&map, fire), None, "a firewarrior never joins");
         assert_eq!((melee_of(&map, brave), melee_of(&map, a)), (ring, ring), "1 against 2");
@@ -711,9 +713,9 @@ mod tests {
     #[test]
     fn two_against_two_splits_in_two_duels() {
         let (mut map, a, t) = duel(UnitKind::Brave, UnitKind::Brave);
-        let b = attacker(&mut map, 0, UnitKind::Brave, t);
+        let b = attacker(&mut map, TribeId::Blue, UnitKind::Brave, t);
         map.join_melees();
-        let c = attacker(&mut map, 1, UnitKind::Brave, a);
+        let c = attacker(&mut map, TribeId::Red, UnitKind::Brave, a);
         map.join_melees();
         assert_eq!(map.coordinators.melees.len(), 2);
         let per: Vec<usize> = map.coordinators.melees.ids().map(|id| [a, t, b, c].iter().filter(|&&u| melee_of(&map, u) == Some(id)).count()).collect();
@@ -725,15 +727,15 @@ mod tests {
         let (mut map, _, t) = duel(UnitKind::Brave, UnitKind::Brave);
         let ring = melee_of(&map, t);
         for _ in 0..2 {
-            attacker(&mut map, 0, UnitKind::Brave, t);
+            attacker(&mut map, TribeId::Blue, UnitKind::Brave, t);
             map.join_melees();
         }
         let in_ring = |map: &GameMap| map.units.iter().filter(|u| melee_of(map, u.id) == ring).count();
         assert_eq!(in_ring(&map), 4, "3 braves against 1");
-        let brave = attacker(&mut map, 0, UnitKind::Brave, t);
+        let brave = attacker(&mut map, TribeId::Blue, UnitKind::Brave, t);
         map.join_melees();
         assert_eq!(melee_of(&map, brave), None, "no one of lower rank to replace");
-        let warrior = attacker(&mut map, 0, UnitKind::Warrior, t);
+        let warrior = attacker(&mut map, TribeId::Blue, UnitKind::Warrior, t);
         map.join_melees();
         assert_eq!((melee_of(&map, warrior), in_ring(&map)), (ring, 4), "a brave gave way");
     }

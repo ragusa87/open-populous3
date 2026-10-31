@@ -141,11 +141,12 @@ pub fn can_place(map: &GameMap, b: &Building, except: Option<BuildingId>) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::building::BuildingKind;
     use crate::tree::Tree;
 
     fn hut(cell: (u16, u16)) -> Building {
-        Building::new(BuildingKind::Hut { size: 1 }, 0, cell.0 * 512, cell.1 * 512, 0)
+        Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, cell.0 * 512, cell.1 * 512, 0)
     }
 
     /// Flat land at height 100 except a sea strip x < 10; the site at the centre.
@@ -182,7 +183,7 @@ mod tests {
         assert_eq!(blocked_at(&m, (50 * 512 + 100, 50 * 512 + 100), None), Some(Blocked::Tree));
         m.trees[0] = Tree::new((50, 50), 0, 0);
         assert_eq!(blocked_at(&m, (50 * 512 + 100, 50 * 512 + 100), None), None, "a cut down tree does not block");
-        m.campfires.push(crate::campfire::Campfire::new(1, 0, (60, 60)));
+        m.campfires.push(crate::campfire::Campfire::new(1, TribeId::Blue, (60, 60)));
         assert_eq!(blocked_at(&m, (60 * 512 + 10, 60 * 512 + 500), None), Some(Blocked::Campfire));
         assert!(!can_place(&m, &hut((60, 60)), None), "over a camp fire");
         m.add_totem(crate::totem::Totem::new(crate::totem::TotemKind::Totem, (70 * 512 + 256, 70 * 512 + 256)));

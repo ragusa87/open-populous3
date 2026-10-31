@@ -6,6 +6,7 @@ use crate::building::{BuildingKind, Stage};
 use crate::mana::Mana;
 use crate::map::GameMap;
 use crate::unit::{Action, Unit, UnitId, UnitKind};
+use crate::tribes::TribeId;
 
 /// What a unit is doing, as the Stats tab rows group it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -132,7 +133,7 @@ pub fn kinds_of(map: &GameMap, ids: &[UnitId]) -> Counts {
 }
 
 impl GameMap {
-    pub fn headcount(&self, tribe: u8) -> Headcount {
+    pub fn headcount(&self, tribe: TribeId) -> Headcount {
         let mut count = Headcount::default();
         for u in self.units.iter().filter(|u| u.owner == tribe) {
             if let Some(state) = state_of(self, u) {
@@ -143,7 +144,7 @@ impl GameMap {
     }
 
     /// The tribe's units doing `state`, of `kind` (any counted kind when None), in id order.
-    pub fn units_in(&self, tribe: u8, state: State, kind: Option<UnitKind>) -> impl Iterator<Item = &Unit> {
+    pub fn units_in(&self, tribe: TribeId, state: State, kind: Option<UnitKind>) -> impl Iterator<Item = &Unit> {
         let mut units: Vec<&Unit> = self.units.iter().filter(|u| u.owner == tribe && kind.is_none_or(|k| u.kind == k) && state_of(self, u) == Some(state)).collect();
         units.sort_by_key(|u| u.id);
         units.into_iter()
@@ -151,7 +152,7 @@ impl GameMap {
 
     /// The unit a pick adds: the lowest id doing `state` not in `taken`, of `kind`, or when None of the
     /// first kind in `KINDS` order with one left.
-    pub fn next_unit(&self, tribe: u8, state: State, kind: Option<UnitKind>, taken: &[UnitId]) -> Option<UnitId> {
+    pub fn next_unit(&self, tribe: TribeId, state: State, kind: Option<UnitKind>, taken: &[UnitId]) -> Option<UnitId> {
         let kinds: &[UnitKind] = match kind {
             Some(ref k) => std::slice::from_ref(k),
             None => &KINDS,
@@ -160,7 +161,7 @@ impl GameMap {
     }
 
     /// The tribe's population (living units but the shaman and wildmen) and its built huts per size.
-    pub fn housing(&self, tribe: u8) -> Housing {
+    pub fn housing(&self, tribe: TribeId) -> Housing {
         let population = self.units.iter().filter(|u| u.owner == tribe && u.is_alive() && kind_index(u.kind).is_some()).count() as u16;
         let mut housing = Housing { huts: [0; 3], population };
         for b in self.buildings.iter().filter(|b| b.owner == tribe && b.stage() == Stage::Built) {
@@ -175,7 +176,7 @@ impl GameMap {
     /// or idle followers (`mana_rate`) plus the shaman, always at her own flat rate, scaled by
     /// `HUMAN_MANA_ADJUST` (×1.25) — every tribe is treated as human until AI tribes exist (training.rs's
     /// `train_cost` has the same gap: "the computer players' 1000 once tribes have a controller").
-    pub fn mana_income(&self, tribe: u8) -> Mana {
+    pub fn mana_income(&self, tribe: TribeId) -> Mana {
         let sum: u32 = self
             .units
             .iter()
@@ -229,98 +230,98 @@ mod tests {
         map
     }
 
-    fn add(map: &mut GameMap, owner: u8, kind: UnitKind) -> usize {
+    fn add(map: &mut GameMap, owner: TribeId, kind: UnitKind) -> usize {
         map.spawn(owner, kind, (64 * 512, 64 * 512));
         map.units.len() - 1
     }
 
-    fn hut(map: &mut GameMap, owner: u8, size: u8, at: u16) -> BuildingId {
+    fn hut(map: &mut GameMap, owner: TribeId, size: u8, at: u16) -> BuildingId {
         map.add_building(Building::new(BuildingKind::Hut { size }, owner, at, at, 0))
     }
 
     #[test]
     fn an_empty_tribe_counts_nothing() {
         let map = empty();
-        assert_eq!(map.headcount(0), Headcount::default());
-        assert_eq!(map.housing(0), Housing::default());
+        assert_eq!(map.headcount(TribeId::Blue), Headcount::default());
+        assert_eq!(map.housing(TribeId::Blue), Housing::default());
     }
 
     #[test]
     fn the_shaman_wildmen_the_dead_and_other_tribes_are_not_counted() {
         let mut map = empty();
-        add(&mut map, 0, UnitKind::Shaman);
-        add(&mut map, 0, UnitKind::Wildman);
-        let dead = add(&mut map, 0, UnitKind::Brave);
+        add(&mut map, TribeId::Blue, UnitKind::Shaman);
+        add(&mut map, TribeId::Blue, UnitKind::Wildman);
+        let dead = add(&mut map, TribeId::Blue, UnitKind::Brave);
         map.units[dead].action = Action::Dying { left: crate::time::Countdown::new(crate::time::Ticks::new(3)) };
-        add(&mut map, 1, UnitKind::Warrior);
-        assert_eq!(map.headcount(0), Headcount::default());
-        assert_eq!(map.housing(0).population, 0);
-        assert_eq!(map.headcount(1).get(State::Idle, UnitKind::Warrior), 1);
-        assert_eq!((map.headcount(0).total(), map.headcount(1).total()), (0, 1));
+        add(&mut map, TribeId::Red, UnitKind::Warrior);
+        assert_eq!(map.headcount(TribeId::Blue), Headcount::default());
+        assert_eq!(map.housing(TribeId::Blue).population, 0);
+        assert_eq!(map.headcount(TribeId::Red).get(State::Idle, UnitKind::Warrior), 1);
+        assert_eq!((map.headcount(TribeId::Blue).total(), map.headcount(TribeId::Red).total()), (0, 1));
     }
 
     #[test]
     fn each_brave_in_its_row() {
         let mut map = empty();
-        let site = hut(&mut map, 0, 1, 10 * 512);
-        let site_build = map.add_building(Building { used: 0, ..Building::new(BuildingKind::DrumTower, 0, 20 * 512, 20 * 512, 0) });
-        add(&mut map, 0, UnitKind::Brave);
-        let housed = add(&mut map, 0, UnitKind::Brave);
+        let site = hut(&mut map, TribeId::Blue, 1, 10 * 512);
+        let site_build = map.add_building(Building { used: 0, ..Building::new(BuildingKind::DrumTower, TribeId::Blue, 20 * 512, 20 * 512, 0) });
+        add(&mut map, TribeId::Blue, UnitKind::Brave);
+        let housed = add(&mut map, TribeId::Blue, UnitKind::Brave);
         map.units[housed].inside = Some(Inside { building: site, door: (0, 0) });
-        let builder = add(&mut map, 0, UnitKind::Brave);
+        let builder = add(&mut map, TribeId::Blue, UnitKind::Brave);
         map.units[builder].inside = Some(Inside { building: site_build, door: (0, 0) });
         map.units[builder].action = Action::Hammering;
-        let chopping = add(&mut map, 0, UnitKind::Brave);
+        let chopping = add(&mut map, TribeId::Blue, UnitKind::Brave);
         map.units[chopping].action = Action::Chopping { tree: (0, 0), left: crate::time::Countdown::new(crate::time::Ticks::new(5)) };
-        let carrying = add(&mut map, 0, UnitKind::Brave);
+        let carrying = add(&mut map, TribeId::Blue, UnitKind::Brave);
         map.units[carrying].carrying = 1;
         map.units[carrying].action = Action::Walking { to: (0, 0) };
-        let praying = add(&mut map, 0, UnitKind::Brave);
+        let praying = add(&mut map, TribeId::Blue, UnitKind::Brave);
         map.units[praying].action = Action::Worshipping { at: crate::unit::WorshipAt::Vault { corner: (0, 0) } };
-        let walking = add(&mut map, 0, UnitKind::Brave);
+        let walking = add(&mut map, TribeId::Blue, UnitKind::Brave);
         map.units[walking].action = Action::Walking { to: (0, 0) };
-        let leaving = add(&mut map, 0, UnitKind::Brave);
+        let leaving = add(&mut map, TribeId::Blue, UnitKind::Brave);
         map.units[leaving].inside = Some(Inside { building: site, door: (0, 0) });
         map.units[leaving].action = Action::Walking { to: (0, 0) };
-        let count = map.headcount(0);
+        let count = map.headcount(TribeId::Blue);
         assert_eq!(count.get(State::Idle, UnitKind::Brave), 3, "standing, walking on a plain move, leaving the hut");
         assert_eq!(count.get(State::Housed, UnitKind::Brave), 1);
         assert_eq!(count.get(State::Working, UnitKind::Brave), 4, "builder inside a site, chopping, carrying, praying");
         assert_eq!(count.row(State::InBoat).total() + count.row(State::InBalloon).total(), 0);
         let all: u16 = State::ALL.iter().map(|&s| count.row(s).total()).sum();
-        assert_eq!(all, map.housing(0).population);
+        assert_eq!(all, map.housing(TribeId::Blue).population);
     }
 
     #[test]
     fn praying_at_a_totem_is_working() {
         let mut map = empty();
         let totem = map.add_totem(Totem::new(TotemKind::StoneHead, (0, 0)));
-        let u = add(&mut map, 0, UnitKind::Preacher);
+        let u = add(&mut map, TribeId::Blue, UnitKind::Preacher);
         map.units[u].action = Action::Worshipping { at: crate::unit::WorshipAt::Totem { id: totem } };
-        assert_eq!(map.headcount(0).get(State::Working, UnitKind::Preacher), 1);
+        assert_eq!(map.headcount(TribeId::Blue).get(State::Working, UnitKind::Preacher), 1);
     }
 
     #[test]
     fn picks_go_in_id_order_and_skip_the_taken() {
         let mut map = empty();
-        let warrior = add(&mut map, 0, UnitKind::Warrior);
-        let a = add(&mut map, 0, UnitKind::Brave);
-        let b = add(&mut map, 0, UnitKind::Brave);
+        let warrior = add(&mut map, TribeId::Blue, UnitKind::Warrior);
+        let a = add(&mut map, TribeId::Blue, UnitKind::Brave);
+        let b = add(&mut map, TribeId::Blue, UnitKind::Brave);
         let (w, a, b) = (map.units[warrior].id, map.units[a].id, map.units[b].id);
-        assert_eq!(map.next_unit(0, State::Idle, Some(UnitKind::Brave), &[]), Some(a));
-        assert_eq!(map.next_unit(0, State::Idle, Some(UnitKind::Brave), &[a]), Some(b));
-        assert_eq!(map.next_unit(0, State::Idle, Some(UnitKind::Brave), &[a, b]), None);
-        assert_eq!(map.next_unit(0, State::Idle, None, &[]), Some(a), "braves first, though the warrior's id is lower");
-        assert_eq!(map.next_unit(0, State::Idle, None, &[a, b]), Some(w));
-        assert_eq!(map.next_unit(0, State::Housed, None, &[]), None);
-        assert_eq!(map.units_in(0, State::Idle, None).map(|u| u.id).collect::<Vec<_>>(), vec![w, a, b]);
+        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, Some(UnitKind::Brave), &[]), Some(a));
+        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, Some(UnitKind::Brave), &[a]), Some(b));
+        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, Some(UnitKind::Brave), &[a, b]), None);
+        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, None, &[]), Some(a), "braves first, though the warrior's id is lower");
+        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, None, &[a, b]), Some(w));
+        assert_eq!(map.next_unit(TribeId::Blue, State::Housed, None, &[]), None);
+        assert_eq!(map.units_in(TribeId::Blue, State::Idle, None).map(|u| u.id).collect::<Vec<_>>(), vec![w, a, b]);
     }
 
     #[test]
     fn kinds_of_ignores_unknown_and_dead_ids() {
         let mut map = empty();
-        let a = add(&mut map, 0, UnitKind::Spy);
-        let dead = add(&mut map, 0, UnitKind::Spy);
+        let a = add(&mut map, TribeId::Blue, UnitKind::Spy);
+        let dead = add(&mut map, TribeId::Blue, UnitKind::Spy);
         map.units[dead].action = Action::Dead { left: crate::time::Countdown::new(crate::time::Ticks::new(3)) };
         let ids = [map.units[a].id, map.units[dead].id, crate::id::Id::from_raw(999)];
         assert_eq!(kinds_of(&map, &ids).get(UnitKind::Spy), 1);
@@ -330,53 +331,53 @@ mod tests {
     #[test]
     fn housing_counts_built_huts_by_size_up_to_two_hundred() {
         let mut map = empty();
-        assert!(map.housing(0).full(), "no hut: no room");
-        hut(&mut map, 0, 1, 512);
-        hut(&mut map, 0, 1, 2 * 512);
-        hut(&mut map, 0, 3, 3 * 512);
-        hut(&mut map, 1, 2, 4 * 512);
-        map.add_building(Building { used: 0, ..Building::new(BuildingKind::Hut { size: 2 }, 0, 5 * 512, 5 * 512, 0) });
+        assert!(map.housing(TribeId::Blue).full(), "no hut: no room");
+        hut(&mut map, TribeId::Blue, 1, 512);
+        hut(&mut map, TribeId::Blue, 1, 2 * 512);
+        hut(&mut map, TribeId::Blue, 3, 3 * 512);
+        hut(&mut map, TribeId::Red, 2, 4 * 512);
+        map.add_building(Building { used: 0, ..Building::new(BuildingKind::Hut { size: 2 }, TribeId::Blue, 5 * 512, 5 * 512, 0) });
         for _ in 0..12 {
-            add(&mut map, 0, UnitKind::Brave);
+            add(&mut map, TribeId::Blue, UnitKind::Brave);
         }
-        let housing = map.housing(0);
+        let housing = map.housing(TribeId::Blue);
         assert_eq!(housing.huts, [2, 0, 1], "built huts of the tribe only");
         assert_eq!(housing.room(), 13);
         assert_eq!(housing.population, 12);
         assert!(!housing.full());
-        add(&mut map, 0, UnitKind::Warrior);
-        assert!(map.housing(0).full(), "at the room");
+        add(&mut map, TribeId::Blue, UnitKind::Warrior);
+        assert!(map.housing(TribeId::Blue).full(), "at the room");
         assert_eq!(Housing { huts: [0, 0, 29], population: 0 }.room(), MAX_POPULATION);
     }
 
     #[test]
     fn mana_income_is_zero_with_no_population() {
         let map = empty();
-        assert_eq!(map.mana_income(0), Mana::ZERO);
+        assert_eq!(map.mana_income(TribeId::Blue), Mana::ZERO);
     }
 
     #[test]
     fn the_shaman_alone_still_gives_her_own_flat_rate() {
         let mut map = empty();
-        add(&mut map, 0, UnitKind::Shaman);
-        assert_eq!(map.mana_income(0), Mana(37), "30 shaman mana x1.25 human adjust, truncated");
+        add(&mut map, TribeId::Blue, UnitKind::Shaman);
+        assert_eq!(map.mana_income(TribeId::Blue), Mana(37), "30 shaman mana x1.25 human adjust, truncated");
     }
 
     #[test]
     fn a_busy_follower_gives_more_than_an_idle_one() {
         let mut map = empty();
-        let idle = add(&mut map, 0, UnitKind::Brave);
-        assert_eq!(map.mana_income(0), Mana(5), "4 idle brave mana x1.25");
-        let site = hut(&mut map, 0, 1, 10 * 512);
+        let idle = add(&mut map, TribeId::Blue, UnitKind::Brave);
+        assert_eq!(map.mana_income(TribeId::Blue), Mana(5), "4 idle brave mana x1.25");
+        let site = hut(&mut map, TribeId::Blue, 1, 10 * 512);
         map.units[idle].inside = Some(Inside { building: site, door: (0, 0) });
-        assert_eq!(map.mana_income(0), Mana(18), "15 busy (housed) brave mana x1.25");
+        assert_eq!(map.mana_income(TribeId::Blue), Mana(18), "15 busy (housed) brave mana x1.25");
     }
 
     #[test]
     fn wildmen_and_other_tribes_do_not_count() {
         let mut map = empty();
-        add(&mut map, 0, UnitKind::Wildman);
-        add(&mut map, 1, UnitKind::Brave);
-        assert_eq!(map.mana_income(0), Mana::ZERO);
+        add(&mut map, TribeId::Blue, UnitKind::Wildman);
+        add(&mut map, TribeId::Red, UnitKind::Brave);
+        assert_eq!(map.mana_income(TribeId::Blue), Mana::ZERO);
     }
 }

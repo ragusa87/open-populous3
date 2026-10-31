@@ -96,6 +96,7 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::building::{Building, BuildingKind};
 
     fn warrior(stored: u16) -> Production {
@@ -145,7 +146,7 @@ mod tests {
     #[test]
     fn only_a_building_making_something_has_a_production() {
         let mut map = GameMap::sandbox_buildings();
-        let id = map.add_building(Building::new(BuildingKind::WarriorTraining, 0, 0, 0, 0));
+        let id = map.add_building(Building::new(BuildingKind::WarriorTraining, TribeId::Blue, 0, 0, 0));
         let i = map.building_index(id).unwrap();
         assert_eq!(map.production(i), None);
         map.buildings[i].production = Some(Production { stored: 0, cost: 0, short: false });

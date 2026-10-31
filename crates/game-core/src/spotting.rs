@@ -127,15 +127,16 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::{Owner, TribeId};
     use crate::time::Ticks;
 
     /// A brave of tribe 0 standing idle, and one of tribe 1 `gap` cells east of it.
     fn watch(gap: i32) -> (GameMap, UnitId, UnitId) {
         let mut map = GameMap::sandbox_units();
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z.wrapping_add(3 * 512));
-        let a = map.spawn(0, UnitKind::Brave, at).id;
-        let t = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add((gap * 512) as u16), at.1)).id;
+        let a = map.spawn(TribeId::Blue, UnitKind::Brave, at).id;
+        let t = map.spawn(TribeId::Red, UnitKind::Brave, (at.0.wrapping_add((gap * 512) as u16), at.1)).id;
         (map, a, t)
     }
 
@@ -214,17 +215,17 @@ mod tests {
             Action::Throwing { target: Target::Unit(x), .. } | Action::Attacking { target: Target::Unit(x), .. } => map.unit(x),
             _ => None,
         };
-        assert!(thrown_at.is_some_and(|x| x.owner != 0), "throws at the first enemy it sees");
+        assert!(thrown_at.is_some_and(|x| x.owner != Owner::Tribe(TribeId::Blue)), "throws at the first enemy it sees");
 
     }
 
     #[test]
     fn a_listener_sitting_down_to_a_sermon_is_not_picked_as_a_target() {
         let mut map = GameMap::sandbox_units().seeded(11);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z.wrapping_sub(15 * 512));
-        map.spawn(0, UnitKind::Preacher, at);
-        let l = map.spawn(1, UnitKind::Warrior, (at.0.wrapping_add(512), at.1)).id;
+        map.spawn(TribeId::Blue, UnitKind::Preacher, at);
+        let l = map.spawn(TribeId::Red, UnitKind::Warrior, (at.0.wrapping_add(512), at.1)).id;
         let listening = |m: &GameMap| matches!(m.unit(l).map(|u| u.action), Some(Action::Listening { .. }));
         (1..10).find(|_| {
             map.tick();
@@ -232,7 +233,7 @@ mod tests {
         })
         .expect("sat down");
         let at_l = map.unit(l).map(|u| (u.x, u.z)).unwrap();
-        let a = map.spawn(0, UnitKind::Brave, (at_l.0.wrapping_add(512), at_l.1)).id;
+        let a = map.spawn(TribeId::Blue, UnitKind::Brave, (at_l.0.wrapping_add(512), at_l.1)).id;
         map.run(Ticks::new(10));
         assert!(listening(&map), "still listening");
         assert_eq!(attacking(&map, a), None, "a listener is left alone");

@@ -10,6 +10,7 @@ use crate::map::GameMap;
 use crate::terrain::DirtyRect;
 use crate::time::{Countdown, Tick, Ticks};
 use crate::unit::{Order, UnitId};
+use crate::tribes::Owner;
 
 /// 127 turns (10.6 s), the original's burning building (pop3-rev-analysis.md "Burning building").
 pub const BURN_TICKS: Ticks = Ticks::new(127);
@@ -32,7 +33,8 @@ impl Building {
     /// Sets it on fire for `BURN_TICKS`, lit by tribe `by`; false when it does not catch: fireproof
     /// (`BuildingKind::fireproof`), only a plan (ours, a guess) or already burning (its fire is not lit
     /// again, and `ignited_by` keeps whichever tribe lit it first).
-    pub fn ignite(&mut self, by: u8) -> bool {
+    pub fn ignite(&mut self, by: impl Into<Owner>) -> bool {
+        let by = by.into();
         if self.kind.fireproof() || self.stage() == Stage::Blueprint || self.burning.is_some() {
             return false;
         }
@@ -74,7 +76,7 @@ impl Building {
 
 impl GameMap {
     /// Sets the building `building` on fire, lit by tribe `by` (`Building::ignite`).
-    pub(crate) fn set_fire(&mut self, building: BuildingId, by: u8) {
+    pub(crate) fn set_fire(&mut self, building: BuildingId, by: Owner) {
         if let Some(i) = self.building_index(building) {
             self.buildings[i].ignite(by);
         }
@@ -129,6 +131,7 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::building::BuildingKind;
     use crate::unit::Action;
 
@@ -139,9 +142,9 @@ mod tests {
 
     #[test]
     fn people_out_on_turn_8_a_piece_lost_on_turn_48_out_after_127() {
-        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
-        assert!(hut.ignite(0));
-        assert!(!hut.ignite(0), "already burning");
+        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0);
+        assert!(hut.ignite(TribeId::Blue));
+        assert!(!hut.ignite(TribeId::Blue), "already burning");
         assert_eq!(hut.stage(), Stage::Built, "nothing lost yet");
         (1..BURN_TICKS.get()).for_each(|n| {
             hut.burn();
@@ -149,35 +152,35 @@ mod tests {
         });
         hut.burn();
         assert_eq!((hut.burning, hut.lit_at(Tick::from_wire(200))), (None, None));
-        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
-        hut.ignite(0);
+        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0);
+        hut.ignite(TribeId::Blue);
         assert_eq!(timeline(&mut hut), [(8, FireTurn::ThrowOut), (48, FireTurn::Hit { destroyed: false })]);
         assert_eq!(hut.stage(), Stage::UnderConstruction { used: 2, of: 3 }, "repaired like a construction");
         hut.used = 1;
-        hut.ignite(0);
+        hut.ignite(TribeId::Blue);
         assert_eq!(timeline(&mut hut)[1], (48, FireTurn::Hit { destroyed: true }), "no wood left");
     }
 
     #[test]
     fn the_library_the_prison_and_plans_never_burn() {
-        assert!(!Building::new(BuildingKind::Vault, 0, 0, 0, 0).ignite(0));
-        assert!(!Building::new(BuildingKind::Prison, 0, 0, 0, 0).ignite(0));
-        assert!(!Building::site(BuildingKind::Temple, 0, 0, 0, 0).ignite(0));
-        let mut post = Building::new(BuildingKind::GuardPost, 0, 0, 0, 0);
-        assert!(post.ignite(0));
+        assert!(!Building::new(BuildingKind::Vault, TribeId::Blue, 0, 0, 0).ignite(TribeId::Blue));
+        assert!(!Building::new(BuildingKind::Prison, TribeId::Blue, 0, 0, 0).ignite(TribeId::Blue));
+        assert!(!Building::site(BuildingKind::Temple, TribeId::Blue, 0, 0, 0).ignite(TribeId::Blue));
+        let mut post = Building::new(BuildingKind::GuardPost, TribeId::Blue, 0, 0, 0);
+        assert!(post.ignite(TribeId::Blue));
         assert_eq!(timeline(&mut post)[1], (48, FireTurn::Hit { destroyed: false }), "its wood unknown: stands");
-        let mut frame = Building { used: 0, ..Building::new(BuildingKind::Temple, 0, 0, 0, 0) };
-        assert!(frame.ignite(0));
+        let mut frame = Building { used: 0, ..Building::new(BuildingKind::Temple, TribeId::Blue, 0, 0, 0) };
+        assert!(frame.ignite(TribeId::Blue));
         assert_eq!(timeline(&mut frame)[1], (48, FireTurn::Hit { destroyed: true }), "a bare frame burns down");
     }
 
     fn sandbox_hut(map: &GameMap) -> usize {
-        map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside == 0).unwrap()
+        map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside == 0).unwrap()
     }
 
     fn rest_inside(map: &mut GameMap, hut: usize, n: usize) -> Vec<UnitId> {
-        let units: Vec<UnitId> = map.units.iter().filter(|u| u.owner == 0 && u.kind == crate::unit::UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).take(n).map(|u| u.id).collect();
-        for c in map.enter_orders(0, &units, hut) {
+        let units: Vec<UnitId> = map.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == crate::unit::UnitKind::Brave && u.inside.is_none() && u.campfire().is_none()).take(n).map(|u| u.id).collect();
+        for c in map.enter_orders(TribeId::Blue, &units, hut) {
             map.apply(&c);
         }
         let id = map.buildings[hut].id;
@@ -199,7 +202,7 @@ mod tests {
         let hut = sandbox_hut(&map);
         let id = map.buildings[hut].id;
         let people = rest_inside(&mut map, hut, 2);
-        map.apply_events(vec![WorldEvent::SetFire { building: id, by: 0 }]);
+        map.apply_events(vec![WorldEvent::SetFire { building: id, by: Owner::Tribe(TribeId::Blue) }]);
         for _ in 1..THROW_OUT_AT.get() {
             map.tick();
         }
@@ -215,7 +218,7 @@ mod tests {
         }
         assert_eq!(map.buildings[hut].stage(), Stage::UnderConstruction { used: 2, of: 3 });
         assert_eq!(panicking(&map, &people), 0, "calm again");
-        for c in map.build_orders(0, &people, hut) {
+        for c in map.build_orders(TribeId::Blue, &people, hut) {
             map.apply(&c);
         }
         let repaired = (0..4000).find(|_| {
@@ -231,7 +234,7 @@ mod tests {
         let hut = sandbox_hut(&map);
         let id = map.buildings[hut].id;
         let people = rest_inside(&mut map, hut, 2);
-        map.add_effect(crate::lightning::effect(1, map.buildings[hut].centre()));
+        map.add_effect(crate::lightning::effect(TribeId::Red, map.buildings[hut].centre()));
         for _ in 0..THROW_OUT_AT.get() {
             map.tick();
         }
@@ -247,7 +250,7 @@ mod tests {
         let hut = sandbox_hut(&map);
         let id = map.buildings[hut].id;
         map.buildings[hut].used = 1;
-        map.apply_events(vec![WorldEvent::SetFire { building: id, by: 0 }]);
+        map.apply_events(vec![WorldEvent::SetFire { building: id, by: Owner::Tribe(TribeId::Blue) }]);
         for _ in 1..HIT_AT.get() {
             map.tick();
         }
@@ -269,7 +272,7 @@ mod tests {
         let hut = sandbox_hut(&map);
         let id = map.buildings[hut].id;
         map.buildings[hut].used = 1;
-        map.apply_events(vec![WorldEvent::SetFire { building: id, by: 2 }]);
+        map.apply_events(vec![WorldEvent::SetFire { building: id, by: Owner::Tribe(TribeId::Yellow) }]);
         for _ in 0..HIT_AT.get() {
             map.tick();
         }

@@ -14,6 +14,7 @@ use crate::time::{Countdown, Ticks};
 use crate::unit::{Unit, UnitId, UnitKind};
 use crate::vehicle::Vehicle;
 use pop3_format::WORLD_UNITS_PER_CELL;
+use crate::tribes::Owner;
 
 /// The effect's own life, longer than the blast's 3 active turns (`RADII`): the idle turns past it are a no-op for
 /// `turn` (already short-circuits once `self.turn` runs past `RADII`'s bounds) but keep the effect, and so its
@@ -30,7 +31,7 @@ pub struct PanickingBlast {
 }
 
 /// A panicking blast cast by tribe `owner` at `at` (world units).
-pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: (u16, u16)) -> Effect {
     Effect::new(owner, at, Countdown::new(VISUAL_TICKS), EffectKind::PanickingBlast(PanickingBlast::default()))
 }
 
@@ -42,7 +43,7 @@ impl PanickingBlast {
     }
 
     /// One turn of the blast at `at` cast by `owner`: the pushes, damage and panic it deals now.
-    pub fn turn(&mut self, at: (u16, u16), owner: u8, units: &[Unit], vehicles: &Registry<Vehicle>) -> Vec<WorldEvent> {
+    pub fn turn(&mut self, at: (u16, u16), owner: Owner, units: &[Unit], vehicles: &Registry<Vehicle>) -> Vec<WorldEvent> {
         let Some(&radius) = RADII.get(self.turn as usize) else { return Vec::new() };
         self.turn += 1;
         let reach = radius.min(PUSH_RANGE);
@@ -70,16 +71,17 @@ impl PanickingBlast {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::id::Id;
 
     #[test]
     fn hurts_and_panics_everyone_in_reach_but_spares_a_shielded_ones_panic() {
         let shielded_id = Id::from_raw(2);
-        let mut shielded = Unit::new(shielded_id, 1, UnitKind::Brave, (5000, 5000));
+        let mut shielded = Unit::new(shielded_id, TribeId::Red, UnitKind::Brave, (5000, 5000));
         shielded.statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
-        let units = [Unit::new(Id::from_raw(1), 1, UnitKind::Brave, (5000, 5000)), shielded];
+        let units = [Unit::new(Id::from_raw(1), TribeId::Red, UnitKind::Brave, (5000, 5000)), shielded];
         let vehicles = Registry::default();
-        let events = PanickingBlast::default().turn((5000, 5000), 0, &units, &vehicles);
+        let events = PanickingBlast::default().turn((5000, 5000), Owner::Tribe(TribeId::Blue), &units, &vehicles);
         let panicked: Vec<_> = events.iter().filter_map(|e| if let WorldEvent::Panic { unit } = e { Some(*unit) } else { None }).collect();
         let damaged: Vec<_> = events.iter().filter_map(|e| if let WorldEvent::Damage { unit, .. } = e { Some(*unit) } else { None }).collect();
         assert_eq!(panicked, [Id::from_raw(1)], "only the unshielded one panics");
@@ -88,12 +90,12 @@ mod tests {
 
     #[test]
     fn three_turns_then_over() {
-        let units = [Unit::new(Id::from_raw(1), 1, UnitKind::Brave, (5000, 5000))];
+        let units = [Unit::new(Id::from_raw(1), TribeId::Red, UnitKind::Brave, (5000, 5000))];
         let vehicles = Registry::default();
         let mut blast = PanickingBlast::default();
         for _ in 0..RADII.len() {
-            assert!(!blast.turn((5000, 5000), 0, &units, &vehicles).is_empty());
+            assert!(!blast.turn((5000, 5000), Owner::Tribe(TribeId::Blue), &units, &vehicles).is_empty());
         }
-        assert!(blast.turn((5000, 5000), 0, &units, &vehicles).is_empty(), "over");
+        assert!(blast.turn((5000, 5000), Owner::Tribe(TribeId::Blue), &units, &vehicles).is_empty(), "over");
     }
 }

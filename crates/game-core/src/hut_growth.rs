@@ -93,7 +93,7 @@ impl GameMap {
     }
 
     fn tend_breeding(&mut self, i: usize) {
-        let owner = self.buildings[i].owner;
+        let Some(owner) = self.buildings[i].owner.tribe() else { return };
         let housing = self.housing(owner);
         if housing.population as u32 + 1 >= housing.room() as u32 {
             self.buildings[i].breed = 0;
@@ -148,6 +148,7 @@ pub(crate) fn on_completed(b: &mut Building) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::building::Stage;
     use crate::terrain::Heightmap;
     use crate::time::Ticks;
@@ -164,7 +165,7 @@ mod tests {
     }
 
     fn built_hut(map: &mut GameMap, size: u8, at: (u16, u16)) -> crate::building::BuildingId {
-        let mut b = Building::new(BuildingKind::Hut { size }, 0, at.0, at.1, 0);
+        let mut b = Building::new(BuildingKind::Hut { size }, TribeId::Blue, at.0, at.1, 0);
         b.flat = true;
         map.add_building(b)
     }
@@ -174,7 +175,7 @@ mod tests {
     fn house_people(map: &mut GameMap, hut: crate::building::BuildingId, n: u8) {
         let door = map.building(hut).unwrap().door();
         for _ in 0..n {
-            let id = map.spawn(0, UnitKind::Brave, door).id;
+            let id = map.spawn(TribeId::Blue, UnitKind::Brave, door).id;
             map.unit_mut(id).unwrap().inside = Some(crate::unit::Inside { building: hut, door });
         }
         map.count_inside();
@@ -213,7 +214,7 @@ mod tests {
         let hut = built_hut(&mut map, 1, (10 * 512, 10 * 512));
         map.buildings.iter_mut().find(|b| b.id == hut).unwrap().breed = 50;
         for p in 0..crate::headcount::SUPPLY[0] {
-            map.units.push(Unit::new(crate::id::Id::from_raw(1000 + p as u32), 0, UnitKind::Brave, (0, 0)));
+            map.units.push(Unit::new(crate::id::Id::from_raw(1000 + p as u32), TribeId::Blue, UnitKind::Brave, (0, 0)));
         }
         map.units.sort_by_key(|u| u.id);
         map.run(Ticks::new(BREED_EVERY.period()));
@@ -266,7 +267,7 @@ mod tests {
 
     #[test]
     fn on_completed_gives_a_small_head_start_not_an_instant_full_bar() {
-        let mut b = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
+        let mut b = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0);
         on_completed(&mut b);
         assert_eq!(b.breed, breed_target(1, 0) - FRESH_BREED_HEAD_START);
         assert!(b.breed > 0 && b.breed < breed_target(1, 0), "close to full, not instant");

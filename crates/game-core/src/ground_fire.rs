@@ -3,11 +3,12 @@
 
 use crate::effect::{Effect, EffectKind};
 use crate::time::{Countdown, Ticks};
+use crate::tribes::Owner;
 
 /// How long it burns (a guess: the original's 7/0x0A length is not traced).
 pub const TICKS: Ticks = Ticks::new(48);
 
 /// A fire lit by tribe `owner` at `at` (world units).
-pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: (u16, u16)) -> Effect {
     Effect::new(owner, at, Countdown::new(TICKS), EffectKind::GroundFire)
 }

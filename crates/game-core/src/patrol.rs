@@ -8,6 +8,7 @@
 use crate::hidden_point::HiddenPointId;
 use crate::id::Id;
 use crate::map::GameMap;
+use crate::tribes::TribeId;
 use crate::unit::{Order, Target, UnitId};
 use std::collections::{BTreeSet, VecDeque};
 
@@ -90,7 +91,7 @@ impl GameMap {
     /// `SetPatrol`/`SetPatrolTarget` (the first point of a new sequence): clears each of the player's
     /// own, not locked, not aboard `units`' order and patrol, shares one new point on all of them,
     /// starts it at once (a direct order begins immediately).
-    pub(crate) fn set_patrol(&mut self, player: u8, units: &[UnitId], action: PatrolAction) {
+    pub(crate) fn set_patrol(&mut self, player: TribeId, units: &[UnitId], action: PatrolAction) {
         let point = self.new_patrol_point(action);
         for &id in units {
             let Some(i) = self.unit_index(id).filter(|&i| self.units[i].owner == player && !self.locked(i) && self.units[i].aboard.is_none()) else { continue };
@@ -106,7 +107,7 @@ impl GameMap {
 
     /// `AddPatrolPoint`/`AddPatrolTargetPoint` (every point after the first): a fresh shared point
     /// appended to each eligible unit's existing patrol (a no-op per unit already at `PATROL_CAPACITY`).
-    pub(crate) fn add_patrol_point_to(&mut self, player: u8, units: &[UnitId], action: PatrolAction) {
+    pub(crate) fn add_patrol_point_to(&mut self, player: TribeId, units: &[UnitId], action: PatrolAction) {
         let point = self.new_patrol_point(action);
         for &id in units {
             if let Some(i) = self.unit_index(id).filter(|&i| self.units[i].owner == player && !self.locked(i) && self.units[i].aboard.is_none()) {
@@ -116,7 +117,7 @@ impl GameMap {
     }
 
     /// `ReleasePatrol` (`N`): every one of the player's own `units` drops its whole patrol.
-    pub(crate) fn release_patrol(&mut self, player: u8, units: &[UnitId]) {
+    pub(crate) fn release_patrol(&mut self, player: TribeId, units: &[UnitId]) {
         for &id in units {
             if let Some(i) = self.unit_index(id).filter(|&i| self.units[i].owner == player) {
                 self.units[i].clear_patrol();

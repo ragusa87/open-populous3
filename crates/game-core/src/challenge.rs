@@ -219,6 +219,7 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::command::Command;
     use crate::effect::DamageKind;
     use crate::unit::{octant, Order, Target, UnitKind};
@@ -226,11 +227,11 @@ mod tests {
     /// A brave of tribe 0 and one of tribe 1 `gap` cells east of it, both near the player's shaman.
     fn pair(gap: i32) -> (GameMap, UnitId, UnitId) {
         let mut map = GameMap::sandbox_units().seeded(3);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z.wrapping_add(2048));
-        let a = map.spawn(0, UnitKind::Brave, at).id;
-        let t = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add((gap * 512) as u16), at.1)).id;
-        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Attack { target: Target::Unit(t) } });
+        let a = map.spawn(TribeId::Blue, UnitKind::Brave, at).id;
+        let t = map.spawn(TribeId::Red, UnitKind::Brave, (at.0.wrapping_add((gap * 512) as u16), at.1)).id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: a, order: Order::Attack { target: Target::Unit(t) } });
         (map, a, t)
     }
 
@@ -297,12 +298,12 @@ mod tests {
     #[test]
     fn a_shaman_casting_in_a_fight_casts_once_then_fights_on() {
         let mut map = GameMap::sandbox_walk();
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let (shaman, at) = (s.id, (s.x, s.z.wrapping_add(4 * 512)));
-        let w = map.spawn(1, UnitKind::Warrior, (s.x.wrapping_add(512), s.z)).id;
-        map.apply(&Command::OrderUnit { player: 1, unit: w, order: Order::Attack { target: Target::Unit(shaman) } });
+        let w = map.spawn(TribeId::Red, UnitKind::Warrior, (s.x.wrapping_add(512), s.z)).id;
+        map.apply(&Command::OrderUnit { player: TribeId::Red, unit: w, order: Order::Attack { target: Target::Unit(shaman) } });
         until(&mut map, 200, |m| role(m, shaman).is_some()).expect("challenged");
-        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: crate::spell::Spell::Blast { at } });
         map.run(crate::unit::CAST_RELEASE);
         assert_eq!(map.fireballs.len(), 1, "her jump not cut short: the shot flew");
         until(&mut map, 200, |m| role(m, shaman).is_some()).expect("challenged again after it");
@@ -310,7 +311,7 @@ mod tests {
         assert_eq!(until(&mut map, 200, casting), None, "not cast again");
         until(&mut map, 400, |m| matches!(m.unit(shaman).unwrap().action, Action::Melee { .. })).expect("in a melee");
         let fireballs = map.fireballs.len();
-        map.apply(&Command::Cast { player: 0, spell: crate::spell::Spell::Blast { at } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: crate::spell::Spell::Blast { at } });
         map.run(crate::unit::CAST_RELEASE);
         assert_eq!(map.fireballs.len(), fireballs + 1, "blasts in a melee too");
     }

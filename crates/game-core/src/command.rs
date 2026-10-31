@@ -5,52 +5,53 @@ use crate::effect::Effect;
 use crate::id::Id;
 use crate::spell::Spell;
 use crate::spell_book::SpellKind;
+use crate::tribes::TribeId;
 use crate::unit::{Order, Target, UnitId};
 use crate::vehicle::VehicleId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     /// A spell aimed at a spot: uses a charge of the player's book (`Spell::kind`), ignored without one.
-    Cast { player: u8, spell: Spell },
+    Cast { player: TribeId, spell: Spell },
     /// A spell not aimed (C): uses a charge of `kind` and the shaman casts (its effect comes later).
-    CastSelf { player: u8, kind: SpellKind },
+    CastSelf { player: TribeId, kind: SpellKind },
     /// Stops (true) or resumes the recharge of the player's known spell `kind`.
-    PauseSpell { player: u8, kind: SpellKind, paused: bool },
+    PauseSpell { player: TribeId, kind: SpellKind, paused: bool },
     /// An order to the player's shaman.
-    Order { player: u8, order: Order },
+    Order { player: TribeId, order: Order },
     /// An order to one of the player's units (by `Unit::id`); ignored if the unit is not theirs.
-    OrderUnit { player: u8, unit: UnitId, order: Order },
+    OrderUnit { player: TribeId, unit: UnitId, order: Order },
     /// Chains `order` after the unit's current action and chained orders (Ctrl + click): it starts
     /// once the unit is idle. Ignored if the unit is not theirs.
-    QueueOrder { player: u8, unit: UnitId, order: Order },
+    QueueOrder { player: TribeId, unit: UnitId, order: Order },
     /// Light a camp fire in the cell holding world point `at` (`campfire::can_place`).
-    PlaceCampfire { player: u8, at: (u16, u16) },
+    PlaceCampfire { player: TribeId, at: (u16, u16) },
     /// Put out the player's camp fire in the cell holding world point `at`; whoever went round it
     /// stops.
-    RemoveCampfire { player: u8, at: (u16, u16) },
+    RemoveCampfire { player: TribeId, at: (u16, u16) },
     /// The world editor's object-placement brush: plants a tree in the cell holding world point
     /// `at` (`tree::cell_at`), ignored if a living one is already there. `player` is unused (trees
     /// have no owner) but carried for the same reason every other command does.
-    PlaceTree { player: u8, at: (u16, u16) },
+    PlaceTree { player: TribeId, at: (u16, u16) },
     /// Place a building plan with its stored corner at `at` (`placement::can_place`); braves are
     /// sent to it with `Order::Build`.
-    PlaceBuilding { player: u8, kind: BuildingKind, at: (u16, u16), facing: u8 },
+    PlaceBuilding { player: TribeId, kind: BuildingKind, at: (u16, u16), facing: u8 },
     /// Remove the player's building plan (not flattened yet) whose footprint holds world point
     /// `at`: its braves stop, the wood brought is lost.
-    CancelBuilding { player: u8, at: (u16, u16) },
+    CancelBuilding { player: TribeId, at: (u16, u16) },
     /// Switch dismantling of the player's building `building` (id; built or under construction, one
     /// that takes wood): on, the people inside walk out and nobody builds it; off, it is built again
     /// (`GameMap::set_dismantling`).
-    Dismantle { player: u8, building: BuildingId, on: bool },
+    Dismantle { player: TribeId, building: BuildingId, on: bool },
     /// Send the player's manned vehicle `vehicle` to `to` (world units), or as close as it gets
     /// (`GameMap::move_vehicle`).
-    MoveVehicle { player: u8, vehicle: VehicleId, to: (u16, u16) },
+    MoveVehicle { player: TribeId, vehicle: VehicleId, to: (u16, u16) },
     /// Everyone aboard the player's vehicle `vehicle` gets off, if there is ground within reach
     /// (`GameMap::unload`).
-    Unload { player: u8, vehicle: VehicleId },
+    Unload { player: TribeId, vehicle: VehicleId },
     /// Ends the player's own swamp `swamp` early, like a blueprint put away (right click + Ctrl); ignored for
     /// one not theirs (`GameMap::clear_swamp`).
-    ClearSwamp { player: u8, swamp: Id<Effect> },
+    ClearSwamp { player: TribeId, swamp: Id<Effect> },
     /// Ctrl+Alt + left click on the ground, the first point of a new patrol sequence (units.md "Patrol
     /// orders"): clears each of `units`' order and whole patrol, shares one new move-type point on all
     /// of them, starts it at once.
@@ -59,29 +60,29 @@ pub enum Command {
     /// one `Command::OrderUnit` per unit before the command exists at all): this one mints a single new
     /// shared point across the group inside one deterministic `apply` call, the same way `PlaceBuilding`
     /// mints one new id, which a one-command-per-unit shape could not do atomically.
-    SetPatrol { player: u8, units: Vec<UnitId>, at: (u16, u16) },
+    SetPatrol { player: TribeId, units: Vec<UnitId>, at: (u16, u16) },
     /// Ctrl+Alt + left click on an enemy, the first point of a new patrol sequence: as `SetPatrol`, an
     /// attack-type point instead.
-    SetPatrolTarget { player: u8, units: Vec<UnitId>, target: Target },
+    SetPatrolTarget { player: TribeId, units: Vec<UnitId>, target: Target },
     /// Ctrl+Alt + left click on the ground after a first point: appends a fresh shared move-type point
     /// to each of `units`' existing patrol instead of replacing it (a no-op per unit already at 8).
-    AddPatrolPoint { player: u8, units: Vec<UnitId>, at: (u16, u16) },
+    AddPatrolPoint { player: TribeId, units: Vec<UnitId>, at: (u16, u16) },
     /// Ctrl+Alt + left click on an enemy after a first point: as `AddPatrolPoint`, an attack-type point.
-    AddPatrolTargetPoint { player: u8, units: Vec<UnitId>, target: Target },
+    AddPatrolTargetPoint { player: TribeId, units: Vec<UnitId>, target: Target },
     /// `N`: releases `units`' whole patrol (its points are pruned once nothing still refers to them).
-    ReleasePatrol { player: u8, units: Vec<UnitId> },
+    ReleasePatrol { player: TribeId, units: Vec<UnitId> },
     /// `G` with nothing selected: stops every one of the player's own units currently escorting the shaman
     /// (`GameMap::tend_guards`, pop3-rev-analysis.md "Guard the shaman") - a tribe-wide scan-and-cancel, unlike
     /// every other order command, since the player does not (and in the original does not either) name which
     /// units are guarding to call them off.
-    CancelGuard { player: u8 },
+    CancelGuard { player: TribeId },
     /// A plain group move order (`GameMap::move_orders`, more than one walker): `units` (already given their own
     /// standing spot near `to`) space themselves into one new formation (formation.rs) instead of each aiming
     /// straight at it. Carries the whole group for the same reason `SetPatrol` does: the formation is one new
     /// shared object, minted inside one deterministic `apply` call.
-    Formation { player: u8, units: Vec<UnitId>, to: (u16, u16) },
+    Formation { player: TribeId, units: Vec<UnitId>, to: (u16, u16) },
     /// Space: skips the current flyby, if one is playing and interruptible (`GameMap::cancel_flyby`,
     /// ai-scripts.md `FLYBY_ALLOW_INTERRUPT`). There is one shared camera/cutscene, so `player` is not
     /// checked against anything.
-    CancelFlyby { player: u8 },
+    CancelFlyby { player: TribeId },
 }
