@@ -4,8 +4,9 @@
 //! its cast point ("home") for `DURATION` turns: beyond `LEASH_CELLS` of it, it steers back; otherwise it
 //! picks a fresh random heading every so many turns. On its own rhythms it stings whoever it currently
 //! covers: every `STING_EVERY` turns, enemies in its 3 x 3 cells (reusing `swamp::cells`) take
-//! `PERSON_DAMAGE` and panic (no friendly fire, shamans immune - a broader exemption than Lightning/Lava's
-//! own "only the caster's own shaman", confirmed by row 5's plain "shamans... immune"), and an enemy
+//! `PERSON_DAMAGE` and panic (no friendly fire, shamans and Angels of Death immune - a broader exemption than
+//! Lightning/Lava's own "only the caster's own shaman", confirmed by row 5's plain "shamans... immune" and,
+//! for the angel, TODO.md "Units": "shamans/angels excluded by a type table"), and an enemy
 //! vehicle there gets its passengers put out (`WorldEvent::PutOut`, TODO.md "Units" - "Swarm spell, on
 //! people aboard a vehicle"); every `RAID_EVERY` turns, while it still has one left (`MAX_RAIDS`), an enemy
 //! building there with people inside is raided (`WorldEvent::Raid`, its occupants also stung).
@@ -106,7 +107,7 @@ impl Swarm {
     fn sting_at(&self, owner: Owner, world: &GameMap) -> Vec<WorldEvent> {
         let cells = crate::swamp::cells((self.x, self.z), world.terrain.size() as i32);
         let mut events = Vec::new();
-        for u in world.units.iter().filter(|u| u.is_alive() && u.in_the_open() && u.owner != owner && u.kind != UnitKind::Shaman && cells.contains(&u.cell())) {
+        for u in world.units.iter().filter(|u| u.is_alive() && u.in_the_open() && u.owner != owner && !matches!(u.kind, UnitKind::Shaman | UnitKind::AngelOfDeath) && cells.contains(&u.cell())) {
             events.push(WorldEvent::Damage { unit: u.id, amount: PERSON_DAMAGE, kind: DamageKind::Swarm, from: Some(owner) });
             if !u.statuses.shield.is_on() {
                 events.push(WorldEvent::Panic { unit: u.id });
@@ -188,20 +189,21 @@ mod tests {
     }
 
     #[test]
-    fn stings_enemies_in_reach_spares_the_casters_tribe_and_any_shaman() {
+    fn stings_enemies_in_reach_spares_the_casters_tribe_any_shaman_and_any_angel_of_death() {
         let mut map = bare();
         let enemy = map.spawn(TribeId::Red, UnitKind::Brave, HOME).id;
         let own = map.spawn(TribeId::Blue, UnitKind::Brave, HOME).id;
         let shaman = map.spawn(TribeId::Red, UnitKind::Shaman, HOME).id;
+        let angel = map.spawn(TribeId::Red, UnitKind::AngelOfDeath, HOME).id;
         let far = map.spawn(TribeId::Red, UnitKind::Brave, (HOME.0.wrapping_add(10 * WORLD_UNITS_PER_CELL as u16), HOME.1)).id;
         let shielded = map.spawn(TribeId::Red, UnitKind::Brave, HOME).id;
         map.unit_mut(shielded).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
         let events = bare_swarm().sting_at(Owner::Tribe(TribeId::Blue), &map);
         let damaged: Vec<_> = events.iter().filter_map(|e| if let WorldEvent::Damage { unit, kind, .. } = e { Some((*unit, *kind)) } else { None }).collect();
         let panicked: Vec<_> = events.iter().filter_map(|e| if let WorldEvent::Panic { unit } = e { Some(*unit) } else { None }).collect();
-        assert_eq!(damaged, [(enemy, DamageKind::Swarm), (shielded, DamageKind::Swarm)], "only the enemy braves, not its own tribe, a shaman, or one out of reach");
+        assert_eq!(damaged, [(enemy, DamageKind::Swarm), (shielded, DamageKind::Swarm)], "only the enemy braves, not its own tribe, a shaman, an angel, or one out of reach");
         assert_eq!(panicked, [enemy], "the shielded one panics too, only `GameMap::damage` (not this) gates its actual damage");
-        assert!(!damaged.iter().any(|&(u, _)| u == own || u == shaman || u == far));
+        assert!(!damaged.iter().any(|&(u, _)| u == own || u == shaman || u == angel || u == far));
     }
 
     #[test]
