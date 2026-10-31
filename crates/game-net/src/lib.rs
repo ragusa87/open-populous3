@@ -9,12 +9,13 @@ use game_core::id::Id;
 use game_core::spell::Spell;
 use game_core::spell_book::SpellKind;
 use game_core::time::Tick;
+use game_core::tribes::TribeId;
 use game_core::unit::{Order, Target, UnitId, WorshipAt};
 use std::io::{self, Read, Write};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
-    Hello { player: u8 },
+    Hello { player: TribeId },
     /// From the host before the first turn: the game's seed (`GameMap::seeded`), the same for every peer.
     Start { seed: u32 },
     /// All commands a player issues for one simulation tick (possibly none): its turn.
@@ -51,7 +52,7 @@ pub fn recv(r: &mut impl Read) -> io::Result<Message> {
 pub fn encode(msg: &Message) -> Vec<u8> {
     let mut b = Vec::new();
     match msg {
-        Message::Hello { player } => b.extend([0, *player]),
+        Message::Hello { player } => b.extend([0, player.as_u8()]),
         Message::Start { seed } => {
             b.push(2);
             b.extend(seed.to_le_bytes());
@@ -86,7 +87,7 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
-            b.extend([0, *player]);
+            b.extend([0, player.as_u8()]);
             if let Spell::Teleport { to: at }
             | Spell::Blast { at }
             | Spell::Lightning { at }
@@ -149,101 +150,101 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             }
         }
         Command::Order { player, order } => {
-            b.extend([1, *player]);
+            b.extend([1, player.as_u8()]);
             encode_order(b, order);
         }
         Command::OrderUnit { player, unit, order } => {
-            b.extend([2, *player]);
+            b.extend([2, player.as_u8()]);
             put_id(b, *unit);
             encode_order(b, order);
         }
         Command::PlaceCampfire { player, at } => {
-            b.extend([3, *player]);
+            b.extend([3, player.as_u8()]);
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
         }
         Command::RemoveCampfire { player, at } => {
-            b.extend([4, *player]);
+            b.extend([4, player.as_u8()]);
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
         }
         Command::QueueOrder { player, unit, order } => {
-            b.extend([5, *player]);
+            b.extend([5, player.as_u8()]);
             put_id(b, *unit);
             encode_order(b, order);
         }
         Command::PlaceBuilding { player, kind, at, facing } => {
-            b.extend([6, *player, kind.model()]);
+            b.extend([6, player.as_u8(), kind.model()]);
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
             b.push(*facing);
         }
         Command::CancelBuilding { player, at } => {
-            b.extend([7, *player]);
+            b.extend([7, player.as_u8()]);
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
         }
         Command::Dismantle { player, building, on } => {
-            b.extend([8, *player]);
+            b.extend([8, player.as_u8()]);
             put_id(b, *building);
             b.push(*on as u8);
         }
-        Command::CastSelf { player, kind } => b.extend([9, *player, spell_index(*kind)]),
-        Command::PauseSpell { player, kind, paused } => b.extend([10, *player, spell_index(*kind), *paused as u8]),
+        Command::CastSelf { player, kind } => b.extend([9, player.as_u8(), spell_index(*kind)]),
+        Command::PauseSpell { player, kind, paused } => b.extend([10, player.as_u8(), spell_index(*kind), *paused as u8]),
         Command::MoveVehicle { player, vehicle, to } => {
-            b.extend([11, *player]);
+            b.extend([11, player.as_u8()]);
             put_id(b, *vehicle);
             b.extend(to.0.to_le_bytes());
             b.extend(to.1.to_le_bytes());
         }
         Command::Unload { player, vehicle } => {
-            b.extend([12, *player]);
+            b.extend([12, player.as_u8()]);
             put_id(b, *vehicle);
         }
         Command::ClearSwamp { player, swamp } => {
-            b.extend([13, *player]);
+            b.extend([13, player.as_u8()]);
             put_id(b, *swamp);
         }
         Command::SetPatrol { player, units, at } => {
-            b.extend([14, *player]);
+            b.extend([14, player.as_u8()]);
             put_units(b, units);
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
         }
         Command::SetPatrolTarget { player, units, target } => {
-            b.extend([15, *player]);
+            b.extend([15, player.as_u8()]);
             put_units(b, units);
             put_target(b, *target);
         }
         Command::AddPatrolPoint { player, units, at } => {
-            b.extend([16, *player]);
+            b.extend([16, player.as_u8()]);
             put_units(b, units);
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
         }
         Command::AddPatrolTargetPoint { player, units, target } => {
-            b.extend([17, *player]);
+            b.extend([17, player.as_u8()]);
             put_units(b, units);
             put_target(b, *target);
         }
         Command::ReleasePatrol { player, units } => {
-            b.extend([18, *player]);
+            b.extend([18, player.as_u8()]);
             put_units(b, units);
         }
         Command::Formation { player, units, to } => {
-            b.extend([19, *player]);
+            b.extend([19, player.as_u8()]);
             put_units(b, units);
             b.extend(to.0.to_le_bytes());
             b.extend(to.1.to_le_bytes());
         }
         Command::CancelFlyby { player } => {
-            b.extend([20, *player]);
+            b.extend([20, player.as_u8()]);
         }
         Command::CancelGuard { player } => {
-            b.extend([21, *player]);
+            b.extend([21, player.as_u8()]);
         }
         Command::PlaceTree { player, at } => {
-            b.extend([22, *player]);
+            b.extend([22, player.as_u8()]);
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
         }
@@ -355,7 +356,7 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
 }
 
 fn decode_command(c: &mut Cursor) -> Option<Command> {
-    let (kind, player) = (c.u8()?, c.u8()?);
+    let (kind, player) = (c.u8()?, TribeId::from_u8(c.u8()?)?);
     match kind {
         0 => {
             let spell = match c.u8()? {
@@ -455,7 +456,7 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
 pub fn decode(b: &[u8]) -> Option<Message> {
     let mut c = Cursor(b);
     match c.u8()? {
-        0 => Some(Message::Hello { player: c.u8()? }),
+        0 => Some(Message::Hello { player: TribeId::from_u8(c.u8()?)? }),
         2 => Some(Message::Start { seed: c.u32()? }),
         1 => {
             let tick = Tick::from_wire(u32::from_le_bytes(c.take(4)?.try_into().ok()?));
@@ -514,58 +515,58 @@ mod tests {
         Message::Tick {
             tick: Tick::from_wire(7),
             commands: vec![
-                Command::Cast { player: 1, spell: Spell::LandBridge { from: (1, 2), to: (120, -3) } },
-                Command::Cast { player: 0, spell: Spell::Flatten { at: (5, 6) } },
-                Command::Cast { player: 0, spell: Spell::Teleport { to: (65535, 7) } },
-                Command::Cast { player: 3, spell: Spell::Blast { at: (9, 65535) } },
-                Command::Cast { player: 2, spell: Spell::Lightning { at: (512, 7) } },
-                Command::Cast { player: 3, spell: Spell::Armageddon { at: (1, 65535) } },
-                Command::Cast { player: 1, spell: Spell::Convert { at: (100, 65500) } },
-                Command::Cast { player: 2, spell: Spell::Hypnotism { at: (65500, 300) } },
-                Command::Cast { player: 1, spell: Spell::Volcano { at: (12, 34) } },
-                Command::Cast { player: 2, spell: Spell::Firestorm { at: (56, 78) } },
-                Command::Cast { player: 3, spell: Spell::Earthquake { at: (90, 11) } },
-                Command::Cast { player: 0, spell: Spell::MagicalShield { at: (23, 45) } },
-                Command::Cast { player: 1, spell: Spell::Bloodlust { at: (65, 87) } },
-                Command::Cast { player: 2, spell: Spell::Invisibility { at: (109, 131) } },
-                Command::Order { player: 2, order: Order::MoveTo { x: 65535, z: 300 } },
-                Command::Order { player: 0, order: Order::Cast },
-                Command::Order { player: 1, order: Order::Stop },
-                Command::OrderUnit { player: 1, unit: Id::from_raw(70_000), order: Order::MoveTo { x: 3, z: 4 } },
-                Command::OrderUnit { player: 0, unit: Id::from_raw(9), order: Order::Campfire { fire: (65535, 256), point: 15 } },
-                Command::PlaceCampfire { player: 3, at: (40_000, 7) },
-                Command::RemoveCampfire { player: 1, at: (8, 65535) },
-                Command::QueueOrder { player: 2, unit: Id::from_raw(12), order: Order::Stop },
-                Command::OrderUnit { player: 0, unit: Id::from_raw(3), order: Order::CutTree { tree: (65535, 1) } },
-                Command::QueueOrder { player: 1, unit: Id::from_raw(4), order: Order::FetchWood },
-                Command::OrderUnit { player: 2, unit: Id::from_raw(5), order: Order::PickUp { at: (7, 65535) } },
-                Command::PlaceBuilding { player: 1, kind: BuildingKind::AirshipHut, at: (512, 65024), facing: 6 },
-                Command::PlaceBuilding { player: 0, kind: BuildingKind::Hut { size: 1 }, at: (0, 1024), facing: 0 },
-                Command::OrderUnit { player: 1, unit: Id::from_raw(9), order: Order::Build { site: (512, 65024) } },
-                Command::CancelBuilding { player: 3, at: (1, 2) },
-                Command::Dismantle { player: 2, building: Id::from_raw(u32::MAX), on: true },
-                Command::Dismantle { player: 0, building: Id::from_raw(7), on: false },
-                Command::QueueOrder { player: 0, unit: Id::from_raw(3), order: Order::Enter { site: (1024, 2048) } },
-                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Worship { at: WorshipAt::Vault { corner: (32768, 36864) } } },
-                Command::QueueOrder { player: 1, unit: Id::from_raw(2), order: Order::Worship { at: WorshipAt::Totem { id: Id::from_raw(42) } } },
-                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Attack { target: Target::Unit(Id::from_raw(70_000)) } },
-                Command::QueueOrder { player: 0, unit: Id::from_raw(2), order: Order::Attack { target: Target::Building(Id::from_raw(9)) } },
-                Command::CastSelf { player: 1, kind: SpellKind::Teleport },
-                Command::PauseSpell { player: 3, kind: SpellKind::Armageddon, paused: true },
-                Command::OrderUnit { player: 1, unit: Id::from_raw(4), order: Order::Board { vehicle: Id::from_raw(70_001) } },
-                Command::MoveVehicle { player: 2, vehicle: Id::from_raw(8), to: (65535, 3) },
-                Command::Unload { player: 0, vehicle: Id::from_raw(u32::MAX) },
-                Command::OrderUnit { player: 3, unit: Id::from_raw(6), order: Order::GetOff },
-                Command::SetPatrol { player: 0, units: vec![Id::from_raw(1), Id::from_raw(2), Id::from_raw(3)], at: (65535, 7) },
-                Command::SetPatrolTarget { player: 1, units: vec![Id::from_raw(4)], target: Target::Unit(Id::from_raw(70_000)) },
-                Command::AddPatrolPoint { player: 2, units: Vec::new(), at: (0, 65535) },
-                Command::AddPatrolTargetPoint { player: 3, units: vec![Id::from_raw(5), Id::from_raw(6)], target: Target::Building(Id::from_raw(9)) },
-                Command::ReleasePatrol { player: 1, units: vec![Id::from_raw(1), Id::from_raw(2), Id::from_raw(3)] },
-                Command::Formation { player: 0, units: vec![Id::from_raw(1), Id::from_raw(2)], to: (65535, 512) },
-                Command::CancelFlyby { player: 2 },
-                Command::OrderUnit { player: 0, unit: Id::from_raw(1), order: Order::Guard },
-                Command::CancelGuard { player: 1 },
-                Command::PlaceTree { player: 0, at: (40_000, 7) },
+                Command::Cast { player: TribeId::Red, spell: Spell::LandBridge { from: (1, 2), to: (120, -3) } },
+                Command::Cast { player: TribeId::Blue, spell: Spell::Flatten { at: (5, 6) } },
+                Command::Cast { player: TribeId::Blue, spell: Spell::Teleport { to: (65535, 7) } },
+                Command::Cast { player: TribeId::Green, spell: Spell::Blast { at: (9, 65535) } },
+                Command::Cast { player: TribeId::Yellow, spell: Spell::Lightning { at: (512, 7) } },
+                Command::Cast { player: TribeId::Green, spell: Spell::Armageddon { at: (1, 65535) } },
+                Command::Cast { player: TribeId::Red, spell: Spell::Convert { at: (100, 65500) } },
+                Command::Cast { player: TribeId::Yellow, spell: Spell::Hypnotism { at: (65500, 300) } },
+                Command::Cast { player: TribeId::Red, spell: Spell::Volcano { at: (12, 34) } },
+                Command::Cast { player: TribeId::Yellow, spell: Spell::Firestorm { at: (56, 78) } },
+                Command::Cast { player: TribeId::Green, spell: Spell::Earthquake { at: (90, 11) } },
+                Command::Cast { player: TribeId::Blue, spell: Spell::MagicalShield { at: (23, 45) } },
+                Command::Cast { player: TribeId::Red, spell: Spell::Bloodlust { at: (65, 87) } },
+                Command::Cast { player: TribeId::Yellow, spell: Spell::Invisibility { at: (109, 131) } },
+                Command::Order { player: TribeId::Yellow, order: Order::MoveTo { x: 65535, z: 300 } },
+                Command::Order { player: TribeId::Blue, order: Order::Cast },
+                Command::Order { player: TribeId::Red, order: Order::Stop },
+                Command::OrderUnit { player: TribeId::Red, unit: Id::from_raw(70_000), order: Order::MoveTo { x: 3, z: 4 } },
+                Command::OrderUnit { player: TribeId::Blue, unit: Id::from_raw(9), order: Order::Campfire { fire: (65535, 256), point: 15 } },
+                Command::PlaceCampfire { player: TribeId::Green, at: (40_000, 7) },
+                Command::RemoveCampfire { player: TribeId::Red, at: (8, 65535) },
+                Command::QueueOrder { player: TribeId::Yellow, unit: Id::from_raw(12), order: Order::Stop },
+                Command::OrderUnit { player: TribeId::Blue, unit: Id::from_raw(3), order: Order::CutTree { tree: (65535, 1) } },
+                Command::QueueOrder { player: TribeId::Red, unit: Id::from_raw(4), order: Order::FetchWood },
+                Command::OrderUnit { player: TribeId::Yellow, unit: Id::from_raw(5), order: Order::PickUp { at: (7, 65535) } },
+                Command::PlaceBuilding { player: TribeId::Red, kind: BuildingKind::AirshipHut, at: (512, 65024), facing: 6 },
+                Command::PlaceBuilding { player: TribeId::Blue, kind: BuildingKind::Hut { size: 1 }, at: (0, 1024), facing: 0 },
+                Command::OrderUnit { player: TribeId::Red, unit: Id::from_raw(9), order: Order::Build { site: (512, 65024) } },
+                Command::CancelBuilding { player: TribeId::Green, at: (1, 2) },
+                Command::Dismantle { player: TribeId::Yellow, building: Id::from_raw(u32::MAX), on: true },
+                Command::Dismantle { player: TribeId::Blue, building: Id::from_raw(7), on: false },
+                Command::QueueOrder { player: TribeId::Blue, unit: Id::from_raw(3), order: Order::Enter { site: (1024, 2048) } },
+                Command::OrderUnit { player: TribeId::Blue, unit: Id::from_raw(1), order: Order::Worship { at: WorshipAt::Vault { corner: (32768, 36864) } } },
+                Command::QueueOrder { player: TribeId::Red, unit: Id::from_raw(2), order: Order::Worship { at: WorshipAt::Totem { id: Id::from_raw(42) } } },
+                Command::OrderUnit { player: TribeId::Blue, unit: Id::from_raw(1), order: Order::Attack { target: Target::Unit(Id::from_raw(70_000)) } },
+                Command::QueueOrder { player: TribeId::Blue, unit: Id::from_raw(2), order: Order::Attack { target: Target::Building(Id::from_raw(9)) } },
+                Command::CastSelf { player: TribeId::Red, kind: SpellKind::Teleport },
+                Command::PauseSpell { player: TribeId::Green, kind: SpellKind::Armageddon, paused: true },
+                Command::OrderUnit { player: TribeId::Red, unit: Id::from_raw(4), order: Order::Board { vehicle: Id::from_raw(70_001) } },
+                Command::MoveVehicle { player: TribeId::Yellow, vehicle: Id::from_raw(8), to: (65535, 3) },
+                Command::Unload { player: TribeId::Blue, vehicle: Id::from_raw(u32::MAX) },
+                Command::OrderUnit { player: TribeId::Green, unit: Id::from_raw(6), order: Order::GetOff },
+                Command::SetPatrol { player: TribeId::Blue, units: vec![Id::from_raw(1), Id::from_raw(2), Id::from_raw(3)], at: (65535, 7) },
+                Command::SetPatrolTarget { player: TribeId::Red, units: vec![Id::from_raw(4)], target: Target::Unit(Id::from_raw(70_000)) },
+                Command::AddPatrolPoint { player: TribeId::Yellow, units: Vec::new(), at: (0, 65535) },
+                Command::AddPatrolTargetPoint { player: TribeId::Green, units: vec![Id::from_raw(5), Id::from_raw(6)], target: Target::Building(Id::from_raw(9)) },
+                Command::ReleasePatrol { player: TribeId::Red, units: vec![Id::from_raw(1), Id::from_raw(2), Id::from_raw(3)] },
+                Command::Formation { player: TribeId::Blue, units: vec![Id::from_raw(1), Id::from_raw(2)], to: (65535, 512) },
+                Command::CancelFlyby { player: TribeId::Yellow },
+                Command::OrderUnit { player: TribeId::Blue, unit: Id::from_raw(1), order: Order::Guard },
+                Command::CancelGuard { player: TribeId::Red },
+                Command::PlaceTree { player: TribeId::Blue, at: (40_000, 7) },
             ],
         }
     }
@@ -593,11 +594,11 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let client = std::thread::spawn(move || {
             let mut s = TcpStream::connect(addr).unwrap();
-            send(&mut s, &Message::Hello { player: 1 }).unwrap();
+            send(&mut s, &Message::Hello { player: TribeId::Red }).unwrap();
             send(&mut s, &sample_turn()).unwrap();
         });
         let (mut s, _) = listener.accept().unwrap();
-        assert_eq!(recv(&mut s).unwrap(), Message::Hello { player: 1 });
+        assert_eq!(recv(&mut s).unwrap(), Message::Hello { player: TribeId::Red });
         assert_eq!(recv(&mut s).unwrap(), sample_turn());
         client.join().unwrap();
     }
