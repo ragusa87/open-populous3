@@ -622,12 +622,32 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   is the one task the sweep never enqueues on its own, confirming the spec's "native AI never decides
   to attack"; it launches the chosen fighters straight at their target instead of the original's own
   muster-at-the-drum-tower-then-march sequence (simplified, not traced). Deliberately not modelled at
-  all yet: shaman positioning/auto-cast (`SET_SPELL_ENTRY`), garrison and vehicle tasks, scripted patrol
-  groups and one-off guards (`SET_MARKER_ENTRY`/`GUARD_AT_MARKER`/...: need the level header's
-  `Markers[256]` table, not read anywhere yet), the reactive counter-attack, `ATTACK_MARKER` targets
-  (same marker-table gap), an attack's damage-then-withdraw threshold, and the real worker-selection/
+  all yet: garrison and vehicle tasks, scripted patrol groups and one-off guards
+  (`SET_MARKER_ENTRY`/`GUARD_AT_MARKER`/...: need the level header's `Markers[256]` table, not read
+  anywhere yet), `ATTACK_MARKER` targets (same marker-table gap), and the real worker-selection/
   site-search tie-breaking rules (ours: a bounded random site search, idle braves in id order). See the
   next few items for what reaches it from a script.
+- [x] Shaman auto-cast, `ATTACK`'s damage-then-withdraw threshold, and a reactive counter-attack
+  (`game_core::ai`, previously all three "deliberately not modelled" above): `SET_SPELL_ENTRY`'s own
+  slots (`NativeAi::spell_entries`, `GameMap::ai_set_spell_entry`) are checked every `REACTIVE_EVERY` (8
+  ticks, our own guess at "fairly responsive") by `tend_ai_spellcasting`/`ai_cast_if_ready` - she casts
+  the first slot whose `min_people` enemies are within the spell's own `cast_range` of her and whose
+  `base` flag matches whether she is near the tribe's own base (`AI_BASE_RADIUS_GUESS`, a guessed
+  stand-in radius for the still-unmodelled `SET_BASE_MARKER`/`SET_BASE_RADIUS`), reusing the same
+  `Command::Cast` a human player's click issues (`Spell::at_point`, shared with the client's own
+  `hud::spells::ground_spell`). `mana`'s own argument is read and discarded: the book's own cost/charges
+  already gate casting, and the wiki never says it is a separate threshold. `ATTACK`'s `damage` parameter
+  (0..999, "how much damage to deal before withdrawing") now tracks a `Sortie` per launched force
+  (`ai_attack`, `GameMap::ai_record_sortie_damage` hooked into `WorldEvent::Damage`'s own handling,
+  `tend_ai_sorties` calling survivors home with a plain `Order::MoveTo` once the threshold is dealt or
+  the target is dead) - **only for a `Shaman` goal**: a `Building` goal's own `WorldEvent::Wear` carries
+  no attacker at all (`event.rs`), so there is nothing to attribute a building sortie's damage to yet,
+  and it still fights on regardless of `damage`. The reactive counter-attack itself is
+  `ai_defend_base`/`tend_ai_defense` (`STATE_DEFEND`/`STATE_DEFEND_BASE`): on the same `REACTIVE_EVERY`
+  rhythm, pulls one idle fighter from anywhere in the tribe to the nearest intruder within the whole
+  guessed base radius - distinct from `spotting.rs`'s own always-on per-unit auto-engage, which only
+  looks a handful of cells around a unit already idle. None of this is traced against the exe beyond
+  what ai-scripts.md already gives; every guessed number says so in its own doc comment.
 - [x] `pop3-ai-script` (its own crate, not a `pop3-format` module): parses `cpscrNNN.dat` (12 552 B
   only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md) (grammar,
   token, parameter and internal variable tables are there), folds a recognized
@@ -639,16 +659,25 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     scripts decompiled next to its things, triggers and markers.
   - `cpscr081`/`cpscr099`'s smaller layouts, if ever needed (no active level slot uses them).
   - the actual AI: a growing but still partial set of `DO` commands reach real behaviour through
-    `game_core::ai_script::ScriptEnv::do_call` now (see the next item); most still don't (markers,
-    guard groups, spell entries, vehicles, level events - messages, `GIVE_ONE_SHOT`,
-    `GIVE_MANA_TO_PLAYER`, `TRIGGER_LEVEL_WON/LOST`...).
+    `game_core::ai_script::ScriptEnv::do_call` now (see the next two items); most still don't (markers,
+    guard groups, vehicles, messages/camera/tutorial UI).
   - `Interpreter::resolve_call` now resolves every `Field` a `DO` call carries (including one nested
     in a `Team`/`TeamWild` argument) to a plain `Field::Const` before `do_call` ever sees it - a
     consumer's `Env` impl doesn't own the interpreter's user-variable storage, so it had no way to
-    read a `$variable`-valued argument itself before this. `Env::write_user_var` (default: discarded)
-    is the matching other half for a query command's `var_field` output, not wired to anything real
-    yet (no query command is implemented - `COUNT_PEOPLE_IN_MARKER`, `GET_HEIGHT_AT_POS`, `NAV_CHECK`...
-    are all still no-ops).
+    read a `$variable`-valued argument itself before this. **A query command's own `var_field` output
+    is wired now too**: `Env::do_call` returns `Option<i32>` instead of `()`, and `Interpreter::exec_stmt`
+    writes a `Some` straight into the call's own last `var_field` argument itself (the interpreter
+    already knows which one that is, from the resolved call) - replacing the old `Env::write_user_var`
+    stub, which no `Env` impl ever actually had a way to reach the interpreter's own storage through.
+    `I_HAVE_ONE_SHOT` (`SPELL_TYPE` form only; the `BUILDING_TYPE` form's meaning is still unknown),
+    `IS_SHAMAN_AVAILABLE_FOR_ATTACK`, `COUNT_ANGELS` and `IS_BUILDING_NEAR` now answer for real
+    (`ai_script.rs`). Still no-ops: every query that needs the marker table
+    (`COUNT_PEOPLE_IN_MARKER`, `GET_HEIGHT_AT_POS`, `IS_SHAMAN_IN_AREA`, `NAV_CHECK`), `GET_SPELLS_CAST`/
+    `GET_NUM_ONE_OFF_SPELLS` (no cumulative-casts counter exists yet), `SET_ATTACK_VARIABLE` (the wiki
+    itself only guesses at its meaning), `PARTIAL_BUILDING_COUNT` (toggles a count mode for
+    `INT_x_BUILDING_*` internal variables we don't model at all yet) and the many UI/human-watching
+    queries (`IS_PRISON_ON_LEVEL`'s own single use looked too uncertain to guess at - it has no
+    `var_field` in its own spec table at all, unlike every other query).
 - [x] First real `DO` commands, end to end: `game_core::ai_script` (`load_tribe_scripts`,
   `ScriptEnv`, `GameMap::tend_ai_scripts`) loads each computer tribe's `cpscrNNN.dat`
   (`LevelHeader::ai_scripts`) in `GameMap::load_original`, runs its "turn 0" setup block once right
@@ -659,9 +688,18 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   tribe's script calls it, to the same `RemoveSite`), every `STATE_*` toggle (`crate::ai::state::bit_for`
   -> `NativeAi`'s own bitset), `SET_DRUM_TOWER_POS`/`BUILD_DRUM_TOWER` (places/tops up a drum tower plan
   right away, `GameMap::ai_build_at`) and `DELAY_MAIN_DRUM_TOWER`/`BUILD_MAIN_DRUM_TOWER` (gates the
-  native engine's own automatic one), `TRAIN_PEOPLE_NOW` (`GameMap::ai_train_now`) and `ATTACK`
+  native engine's own automatic one), `TRAIN_PEOPLE_NOW` (`GameMap::ai_train_now`), `ATTACK`
   (`GameMap::ai_attack`, `ai::AttackGoal` - `ATTACK_PERSON`/`ATTACK_BUILDING` only, `ATTACK_MARKER`
-  needs the marker table). Every other `DO` command is still a no-op. `ScriptEnv::int_var` backs
+  needs the marker table; its own `damage` parameter now reaches `ai_attack` too, see above) and
+  `SET_SPELL_ENTRY` (`GameMap::ai_set_spell_entry`, see above). Also real now, the level-event gifts
+  (`GIVE_MANA_TO_PLAYER` -> `ManaPool::add`; `GIVE_ONE_SHOT` -> `worship::one_more_shot`, the same
+  helper a totem's own one-shot reward uses; `GIVE_PLAYER_SPELL` -> `SpellBook::set(.., Known)`;
+  `REMOVE_PLAYER_THING` -> hides a spell or a buildable kind, whichever `model` resolves to), the level
+  outcome (`TRIGGER_LEVEL_WON`/`TRIGGER_LEVEL_LOST` -> `GameMap::declare_outcome` with
+  `Reason::Scripted`, blue winning or the script's own tribe winning respectively - our own reading of
+  "ends the level", not traced) and the timer trio (`SET_TIMER_GOING`/`REMOVE_TIMER`/
+  `HAS_TIMER_REACHED_ZERO` -> `NativeAi::timer_end`; the UI countdown itself still isn't drawn anywhere).
+  Every other `DO` command is still a no-op (see the query ones two items up). `ScriptEnv::int_var` backs
   `INT_GAME_TURN`, `INT_MY_NUM_PEOPLE` and every `INT_ATTR_*` (round-tripped through `NativeAi`); any
   other internal variable reads back as its own numeric token id rather than 0 - a deliberate, safe
   default for the many purely identifier-like ones (`INT_WARRIOR`, `INT_TEMPLE`,
