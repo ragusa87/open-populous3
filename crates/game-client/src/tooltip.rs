@@ -19,7 +19,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use game_core::building::{BuildingId, BuildingKind, Reward};
 use game_core::map::GameMap;
 use game_core::occupancy::{Holder, People, Wood};
-use game_core::tribes::{Owner, TribeId};
+use game_core::tribes::Owner;
 use game_core::unit::{UnitId, UnitKind};
 use game_core::vehicle::VehicleId;
 use pop3_format::catalog::{DISMANTLE_BUTTON, EFFECT_SPRITE_FILE, REBUILD_BUTTON, TOOLTIP_WOOD_PER_LINE, TOOLTIP_WOOD_SPRITE, UNIT_FIGURES, UNLOAD_BUTTON};
@@ -835,6 +835,7 @@ fn select_from_slot(slots: Query<(&Interaction, &SlotUnit), Changed<Interaction>
 mod tests {
     use super::*;
     use game_core::building::Stage;
+    use game_core::tribes::TribeId;
 
     fn icons(row: &[Slot]) -> Vec<Icon> {
         row.iter().map(|s| s.icon).collect()

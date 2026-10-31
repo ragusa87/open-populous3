@@ -12,7 +12,7 @@ use bevy::color::ColorToComponents;
 use bevy::image::{CompressedImageFormats, Image, ImageFilterMode, ImageSampler, ImageSamplerDescriptor, ImageType};
 use bevy::render::render_resource::TextureFormat;
 use game_core::building::BuildingKind;
-use game_core::tribes::{Owner, TribeId};
+use game_core::tribes::Owner;
 use std::sync::OnceLock;
 
 const ATLAS: &[u8] = include_bytes!("../../../assets/3d/buildings/surfaces.png");
@@ -220,6 +220,7 @@ mod tests {
     use super::*;
     use crate::construction::built_part;
     use bevy::math::Vec3;
+    use game_core::tribes::TribeId;
 
     fn gray(values: &[u8]) -> Vec<u8> {
         values.iter().flat_map(|&v| [v, v, v, 255]).collect()

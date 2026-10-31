@@ -30,7 +30,7 @@ pub struct ManaView {
     pub fill_color: Color,
 }
 
-pub fn mana_view(pool: &ManaPool, owner: game_core::tribes::TribeId) -> ManaView {
+pub fn mana_view(pool: &ManaPool, owner: TribeId) -> ManaView {
     ManaView { text: format_amount(pool.bank), share: pool.advisor_fraction() * 100.0, fill_color: tribe_color(owner) }
 }
 
@@ -96,12 +96,11 @@ mod tests {
     #[test]
     fn the_bar_shows_the_advisor_fraction_not_the_bank() {
         let pool = ManaPool { advisor_eta: Mana(100), received: Mana(50), ..ManaPool::default() };
-        assert!((mana_view(&pool, game_core::tribes::TribeId::Blue).share - 100.0 * 50.0 / 178.0).abs() < 0.001);
+        assert!((mana_view(&pool, TribeId::Blue).share - 100.0 * 50.0 / 178.0).abs() < 0.001);
     }
 
     #[test]
     fn the_fill_colour_is_the_tribe_s_own_accent() {
-        use game_core::tribes::TribeId;
         assert_eq!(mana_view(&ManaPool::default(), TribeId::Blue).fill_color, crate::sites::tribe_color(TribeId::Blue));
         assert_eq!(mana_view(&ManaPool::default(), TribeId::Red).fill_color, crate::sites::tribe_color(TribeId::Red));
     }
