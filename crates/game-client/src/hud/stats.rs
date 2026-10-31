@@ -122,6 +122,8 @@ fn kind_plural(kind: UnitKind) -> &'static str {
         UnitKind::Spy => "spies",
         UnitKind::Shaman => "shamans",
         UnitKind::Wildman => "wildmen",
+        // Never shown: not among the trainable `KINDS` this UI lists (TODO.md "Angel of Death").
+        UnitKind::AngelOfDeath => "angels of death",
     }
 }
 

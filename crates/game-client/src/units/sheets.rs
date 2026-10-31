@@ -34,6 +34,8 @@ pub fn bundled(kind: UnitKind) -> (&'static [u8], &'static str) {
         UnitKind::Firewarrior => baked!("firewarrior"),
         // No model of their own: the brave's, in a neutral hide colour (`sheet_art`).
         UnitKind::Wildman => baked!("brave"),
+        // Never actually loaded: not in `UnitKind::ALL` (no sprite of its own yet, TODO.md "Angel of Death").
+        UnitKind::AngelOfDeath => baked!("brave"),
     }
 }
 
