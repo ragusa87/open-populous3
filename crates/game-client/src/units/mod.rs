@@ -30,12 +30,13 @@ use crate::game_speed::GameSpeed;
 use crate::sim_time::{SimNow, TICK_SECS};
 use game_core::command::Command;
 use game_core::schedule::Schedule;
+use game_core::tribes::TribeId;
 use game_core::unit::{Unit, UnitId, UnitKind};
 use selection::Selection;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// The local player's tribe.
-pub const PLAYER: u8 = 0;
+pub const PLAYER: TribeId = TribeId::Blue;
 /// Cells per sprite pixel: the ~34 px shaman stands about 0.39 cell tall, half a reincarnation
 /// stone (400 units, 0.78 cell).
 pub const PIXEL: f32 = 1.0 / 88.0;
@@ -230,8 +231,8 @@ impl UnitSprites {
             };
         }
         let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
-        // Wildmen have no tribe (owner 255): one look for all.
-        let tribe = if unit.kind == UnitKind::Wildman { 0 } else { unit.owner as usize };
+        // Wildmen have no tribe (`Owner::Wild`): one look for all.
+        let tribe = unit.owner.tribe().map_or(0, TribeId::as_usize);
         let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(sprite_dir(facing, yaw))?;
         let frame = if pose == Pose::Pedal && still { 0 } else { frame_index(pose, frames.len(), &unit.action, now, clock.alpha()) };
         frames.get(frame)
@@ -676,7 +677,7 @@ fn victory_bounce(now: SimNow, start: Option<game_core::time::Tick>, id: u32) ->
 
 /// `victory_bounce`'s `start`, gated to the winning side (`GameMap::on_winning_side`): nobody on the losing side
 /// gets a happy jump.
-fn bounce_start(map: &game_core::map::GameMap, owner: u8) -> Option<game_core::time::Tick> {
+fn bounce_start(map: &game_core::map::GameMap, owner: impl Into<game_core::tribes::Owner>) -> Option<game_core::time::Tick> {
     map.on_winning_side(owner).then(|| map.outcome.map(|o| o.at)).flatten()
 }
 
@@ -783,7 +784,7 @@ fn animate_views(
         vis.set_if_neq(if hidden { Visibility::Hidden } else { Visibility::Inherited });
         let unit = units.get(body.0);
         let frame = unit.and_then(|u| {
-            let worship = worship::worship_facing(u, shamans.get(u.owner as usize).copied().flatten());
+            let worship = worship::worship_facing(u, u.owner.tribe().and_then(|t| shamans.get(t.as_usize())).copied().flatten());
             let still = !u.aboard.and_then(|v| map.0.vehicle(v)).is_some_and(crate::vehicles::under_way);
             sprites.frame_for(u, worship, still, rig.yaw, &clock, *now, map.0.on_winning_side(u.owner))
         });
@@ -900,10 +901,10 @@ mod tests {
         use game_core::vehicle::{Vehicle, VehicleKind};
         let mut map = game_core::map::GameMap::sandbox_vehicles();
         let at = (60 * 512 + 256, 60 * 512 + 256);
-        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at, game_core::angle::Angle::ZERO));
-        let id = map.spawn(0, UnitKind::Brave, at).id;
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, TribeId::Blue, at, game_core::angle::Angle::ZERO));
+        let id = map.spawn(TribeId::Blue, UnitKind::Brave, at).id;
         map.unit_mut(id).unwrap().aboard = Some(v);
-        map.vehicles.get_mut(v).unwrap().seat(id, 0);
+        map.vehicles.get_mut(v).unwrap().seat(id, TribeId::Blue);
         let cells = Vec2::new(60.5, 60.5);
         let deck = crate::vehicles::deck(&map, map.vehicle(v).unwrap(), 0.01, 0.0);
         let (pos, h) = riding(&map, map.unit(id).unwrap(), cells, 0.0, 0.01).unwrap();
@@ -935,9 +936,9 @@ mod tests {
     #[test]
     fn bounce_start_is_none_for_the_losing_side() {
         let mut map = game_core::map::GameMap::generate(1);
-        map.declare_outcome(Some(0), game_core::outcome::Reason::Eliminated);
-        assert_eq!(bounce_start(&map, 0), Some(map.outcome.unwrap().at), "the winner celebrates");
-        assert_eq!(bounce_start(&map, 1), None, "the loser doesn't");
+        map.declare_outcome(Some(TribeId::Blue), game_core::outcome::Reason::Eliminated);
+        assert_eq!(bounce_start(&map, TribeId::Blue), Some(map.outcome.unwrap().at), "the winner celebrates");
+        assert_eq!(bounce_start(&map, TribeId::Red), None, "the loser doesn't");
     }
 
     #[test]
@@ -952,7 +953,7 @@ mod tests {
 
     #[test]
     fn no_glide_from_a_unit_gone_from_the_map() {
-        let unit = |id, x| Unit::new(game_core::id::Id::from_raw(id), 0, UnitKind::Brave, (x, 0));
+        let unit = |id, x| Unit::new(game_core::id::Id::from_raw(id), TribeId::Blue, UnitKind::Brave, (x, 0));
         let clock = SimClock { prev_ids: vec![game_core::id::Id::from_raw(1), game_core::id::Id::from_raw(2)], prev: vec![(0, 0), (512, 0)], acc: TICK_SECS / 2.0, ..default() };
         assert_eq!(clock.cell_pos(1, &unit(2, 768)), Vec2::new(1.25, 0.0), "glides");
         assert_eq!(clock.cell_pos(0, &unit(2, 768)), Vec2::new(1.5, 0.0), "unit 1 left: unit 2 moved to index 0");
@@ -1081,7 +1082,7 @@ mod tests {
         let map = game_core::map::GameMap::sandbox_buildings();
         let built = map.buildings.iter().find(|b| b.stage() == game_core::building::Stage::Built).unwrap();
         let open = map.buildings.iter().find(|b| matches!(b.stage(), game_core::building::Stage::UnderConstruction { .. })).unwrap();
-        let mut u = Unit::new(game_core::id::Id::from_raw(1), 0, UnitKind::Brave, (0, 0));
+        let mut u = Unit::new(game_core::id::Id::from_raw(1), TribeId::Blue, UnitKind::Brave, (0, 0));
         assert!(!hidden_inside(&map, &u));
         u.inside = Some(Inside { building: built.id, door: (0, 0) });
         assert!(hidden_inside(&map, &u));

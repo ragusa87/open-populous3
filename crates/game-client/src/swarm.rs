@@ -22,6 +22,7 @@ use game_core::effect::{Effect, EffectKind};
 use game_core::id::Id;
 use game_core::map::GameMap;
 use game_core::time::{Tick, TICKS_PER_SECOND};
+use game_core::tribes::{Owner, TribeId};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// "A few bees", per the ask.
@@ -106,8 +107,8 @@ pub struct SwarmAssets {
     tribes: [Handle<StandardMaterial>; TRIBE_SLOTS],
 }
 
-fn tribe_material(assets: &SwarmAssets, owner: u8) -> Handle<StandardMaterial> {
-    assets.tribes[(owner as usize).min(TRIBE_SLOTS - 1)].clone()
+fn tribe_material(assets: &SwarmAssets, owner: Owner) -> Handle<StandardMaterial> {
+    assets.tribes[owner.tribe().map_or(TRIBE_SLOTS - 1, TribeId::as_usize)].clone()
 }
 
 #[derive(Component)]
@@ -169,7 +170,7 @@ fn load_assets(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut me
     commands.insert_resource(SwarmAssets {
         quad: meshes.add(Rectangle::new(DOT_SIZE, DOT_SIZE)),
         neutral: material(NEUTRAL),
-        tribes: std::array::from_fn(|i| material(tribe_color(i as u8))),
+        tribes: std::array::from_fn(|i| material(tribe_color(TribeId::from_u8(i as u8).map_or(Owner::Wild, Owner::Tribe)))),
     });
 }
 

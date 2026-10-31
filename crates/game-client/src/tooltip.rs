@@ -19,6 +19,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use game_core::building::{BuildingId, BuildingKind, Reward};
 use game_core::map::GameMap;
 use game_core::occupancy::{Holder, People, Wood};
+use game_core::tribes::{Owner, TribeId};
 use game_core::unit::{UnitId, UnitKind};
 use game_core::vehicle::VehicleId;
 use pop3_format::catalog::{DISMANTLE_BUTTON, EFFECT_SPRITE_FILE, REBUILD_BUTTON, TOOLTIP_WOOD_PER_LINE, TOOLTIP_WOOD_SPRITE, UNIT_FIGURES, UNLOAD_BUTTON};
@@ -48,7 +49,7 @@ const ARROW_H: f32 = 6.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Icon {
     /// A unit of this kind, in its tribe's colour.
-    Unit { kind: UnitKind, tribe: u8 },
+    Unit { kind: UnitKind, tribe: Owner },
     /// An empty place for a unit of this kind (greyed).
     Placeholder(UnitKind),
     Wood,
@@ -381,7 +382,7 @@ pub fn icon_pixels(icon: Icon) -> Vec<u8> {
             }
             return px;
         }
-        Icon::Unit { kind, tribe } => (kind, rgba(crate::sites::tribe_color(if kind == UnitKind::Wildman { 4 } else { tribe }), 255)),
+        Icon::Unit { kind, tribe } => (kind, rgba(crate::sites::tribe_color(tribe), 255)),
         Icon::Placeholder(kind) => (kind, GREY),
     };
     let skin = if matches!(icon, Icon::Placeholder(_)) { GREY } else { [222, 172, 128, 255] };
@@ -867,13 +868,13 @@ mod tests {
         let mut map = GameMap::sandbox_buildings();
         let site = map.place_building(crate::units::PLAYER, BuildingKind::Hut { size: 1 }, (88 * 512, 64 * 512), 0).and_then(|id| map.building_index(id)).unwrap();
         let brave = map.units.iter().find(|u| u.kind == UnitKind::Brave).unwrap().id;
-        map.apply(&game_core::command::Command::OrderUnit { player: 0, unit: brave, order: game_core::unit::Order::Build { site: (88 * 512, 64 * 512) } });
+        map.apply(&game_core::command::Command::OrderUnit { player: TribeId::Blue, unit: brave, order: game_core::unit::Order::Build { site: (88 * 512, 64 * 512) } });
         (map.buildings[site].stock, map.buildings[site].used) = (1, 1);
         let model = building_model(&map, site, &[], false);
         assert_eq!(model.lines, vec!["Hut 1".to_string()]);
         let people = &model.rows[0];
         assert_eq!(people.len(), 6, "max braves");
-        assert_eq!(people[0], Slot { icon: Icon::Unit { kind: UnitKind::Brave, tribe: 0 }, unit: Some(brave), selected: false }, "a click selects him");
+        assert_eq!(people[0], Slot { icon: Icon::Unit { kind: UnitKind::Brave, tribe: Owner::Tribe(TribeId::Blue) }, unit: Some(brave), selected: false }, "a click selects him");
         assert!(building_model(&map, site, &[brave], false).rows[0][0].selected, "marked once selected");
         assert_eq!(people[1], Slot { icon: Icon::Placeholder(UnitKind::Brave), unit: None, selected: false });
         assert_eq!(icons(&model.rows[1]), vec![Icon::Wood, Icon::Wood, Icon::NoWood], "2 of 3 provided, nothing to select");
@@ -883,30 +884,30 @@ mod tests {
     #[test]
     fn a_full_hut_and_others_buildings() {
         let map = GameMap::sandbox_buildings();
-        let busy = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside > 0).unwrap();
+        let busy = map.buildings.iter().position(|b| b.owner == TribeId::Blue && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside > 0).unwrap();
         let model = building_model(&map, busy, &[], false);
         assert!(model.rows[0].iter().all(|s| matches!(s.icon, Icon::Unit { .. }) && s.unit.is_some()), "3 inside out of 3");
         assert_eq!(icons(&model.rows[1]), vec![Icon::Wood; 3], "the wood in it");
-        let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();
+        let red = map.buildings.iter().position(|b| b.owner == TribeId::Red).unwrap();
         assert!(building_model(&map, red, &[], false).rows.is_empty(), "not theirs: the name only");
     }
 
     #[test]
     fn a_clicked_tower_of_another_tribe_shows_who_is_in_not_selectable() {
         let mut map = GameMap::sandbox_buildings();
-        let hut = map.buildings.iter().position(|b| b.owner == 1 && b.kind != BuildingKind::DrumTower && b.stage() == Stage::Built && game_core::occupancy::room(b.kind) > 0).unwrap();
+        let hut = map.buildings.iter().position(|b| b.owner == TribeId::Red && b.kind != BuildingKind::DrumTower && b.stage() == Stage::Built && game_core::occupancy::room(b.kind) > 0).unwrap();
         assert!(building_model(&map, hut, &[], true).rows.is_empty(), "only a tower shows who is in");
         let red = map.buildings.iter().position(|b| b.kind == BuildingKind::DrumTower && b.stage() == Stage::Built).unwrap();
-        map.buildings[red].owner = 1;
+        map.buildings[red].owner = Owner::Tribe(TribeId::Red);
         let id = map.buildings[red].id;
         let model = building_model(&map, red, &[], true);
         assert_eq!(model.lines, vec![map.buildings[red].kind.name()]);
         assert!(model.rows[0].iter().all(|s| s.icon == Icon::Placeholder(UnitKind::Brave)), "empty: its places");
         let unit = map.units.iter().position(|u| u.kind == UnitKind::Brave && u.is_alive()).unwrap();
-        (map.units[unit].owner, map.units[unit].action) = (1, game_core::unit::Action::Idle);
+        (map.units[unit].owner, map.units[unit].action) = (Owner::Tribe(TribeId::Red), game_core::unit::Action::Idle);
         map.units[unit].inside = Some(game_core::unit::Inside { building: id, door: map.buildings[red].door() });
         let row = &building_model(&map, red, &[map.units[unit].id], true).rows[0];
-        assert!(matches!(row[0].icon, Icon::Unit { tribe: 1, .. }), "the unit inside");
+        assert!(matches!(row[0].icon, Icon::Unit { tribe: Owner::Tribe(TribeId::Red), .. }), "the unit inside");
         assert!(row.iter().all(|s| s.unit.is_none() && !s.selected), "not ours to select");
         assert_eq!(building_model(&map, red, &[], true).toggle, None);
     }
@@ -914,7 +915,7 @@ mod tests {
     #[test]
     fn the_players_flat_buildings_have_the_dismantle_toggle() {
         let mut map = GameMap::sandbox_buildings();
-        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
+        let hut = map.buildings.iter().position(|b| b.owner == TribeId::Blue && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
         let building = map.buildings[hut].id;
         let toggle = building_model(&map, hut, &[], false).toggle.expect("built: dismantle");
         assert_eq!(toggle, Toggle::Dismantle { building, on: false });
@@ -922,16 +923,16 @@ mod tests {
         map.apply(&toggle.command().unwrap());
         let toggle = building_model(&map, hut, &[], false).toggle.unwrap();
         assert_eq!((toggle, toggle.look()), (Toggle::Dismantle { building, on: true }, (REBUILD_BUTTON, "Rebuild")));
-        let plan = map.buildings.iter().position(|b| b.owner == 0 && b.stage() == Stage::Blueprint).unwrap();
+        let plan = map.buildings.iter().position(|b| b.owner == TribeId::Blue && b.stage() == Stage::Blueprint).unwrap();
         assert_eq!(building_model(&map, plan, &[], false).toggle, None, "a plan is cancelled instead");
-        let red = map.buildings.iter().position(|b| b.owner == 1).unwrap();
+        let red = map.buildings.iter().position(|b| b.owner == TribeId::Red).unwrap();
         assert_eq!(building_model(&map, red, &[], false).toggle, None);
     }
 
     #[test]
     fn a_vehicle_hut_shows_its_crew_the_vehicles_wood_and_its_work() {
         let mut map = GameMap::sandbox_buildings();
-        let hut = map.buildings.iter().position(|b| b.owner == 0 && b.kind == BuildingKind::BoatHut && b.stage() == Stage::Built).unwrap();
+        let hut = map.buildings.iter().position(|b| b.owner == TribeId::Blue && b.kind == BuildingKind::BoatHut && b.stage() == Stage::Built).unwrap();
         map.buildings[hut].stock = 2;
         let model = building_model(&map, hut, &[], false);
         assert_eq!(model.rows[0].len(), game_core::vehicle::CREW as usize);
@@ -950,23 +951,23 @@ mod tests {
         use game_core::vehicle::{Vehicle, VehicleKind};
         let mut map = GameMap::sandbox_buildings();
         let shore = (64 * 512 + 256, 112 * 512 + 256);
-        let boat = map.add_vehicle(Vehicle::new(VehicleKind::Boat, 0, shore, game_core::angle::Angle::ZERO));
+        let boat = map.add_vehicle(Vehicle::new(VehicleKind::Boat, TribeId::Blue, shore, game_core::angle::Angle::ZERO));
         assert_eq!(vehicle_model(&map, boat, &[]).unwrap().toggle, None, "empty: nothing to unload");
         let brave = map.units.iter().find(|u| u.kind == UnitKind::Brave && u.inside.is_none()).unwrap().id;
         map.unit_mut(brave).unwrap().aboard = Some(boat);
-        map.vehicles.get_mut(boat).unwrap().seat(brave, 0);
+        map.vehicles.get_mut(boat).unwrap().seat(brave, TribeId::Blue);
         let model = vehicle_model(&map, boat, &[]).unwrap();
         assert_eq!(model.lines, vec!["Boat".to_string()]);
-        assert_eq!(icons(&model.rows[0]), [vec![Icon::Unit { kind: UnitKind::Brave, tribe: 0 }], vec![Icon::Placeholder(UnitKind::Brave); 4]].concat());
+        assert_eq!(icons(&model.rows[0]), [vec![Icon::Unit { kind: UnitKind::Brave, tribe: Owner::Tribe(TribeId::Blue) }], vec![Icon::Placeholder(UnitKind::Brave); 4]].concat());
         let toggle = model.toggle.unwrap();
         assert_eq!((toggle, toggle.look().1), (Toggle::Unload { vehicle: boat, can: true }, "Unload"));
-        assert_eq!(toggle.command(), Some(game_core::command::Command::Unload { player: 0, vehicle: boat }));
+        assert_eq!(toggle.command(), Some(game_core::command::Command::Unload { player: TribeId::Blue, vehicle: boat }));
         map.vehicles.get_mut(boat).unwrap().x += 10 * 512;
         map.vehicles.get_mut(boat).unwrap().z += 8 * 512;
         let toggle = vehicle_model(&map, boat, &[]).unwrap().toggle.unwrap();
         assert!(!toggle.enabled(), "out at sea");
         assert_eq!(unloaded(&map, toggle), Some(vec![brave]), "the button selects everyone aboard");
-        map.vehicles.get_mut(boat).unwrap().owner = 1;
+        map.vehicles.get_mut(boat).unwrap().owner = Owner::Tribe(TribeId::Red);
         assert!(vehicle_model(&map, boat, &[]).unwrap().rows.is_empty(), "not ours: the name only");
     }
 
@@ -1053,11 +1054,11 @@ mod tests {
     #[test]
     fn icons_are_drawn_filled_or_greyed() {
         let pixels = |icon| icon_pixels(icon).chunks(4).filter(|p| p[3] > 0).count();
-        let brave = Icon::Unit { kind: UnitKind::Brave, tribe: 0 };
+        let brave = Icon::Unit { kind: UnitKind::Brave, tribe: Owner::Tribe(TribeId::Blue) };
         assert!(pixels(brave) > 30);
         assert_eq!(pixels(brave), pixels(Icon::Placeholder(UnitKind::Brave)), "same shape");
-        assert!(pixels(Icon::Unit { kind: UnitKind::Shaman, tribe: 0 }) > pixels(brave), "with her staff");
-        assert_ne!(icon_pixels(brave), icon_pixels(Icon::Unit { kind: UnitKind::Brave, tribe: 1 }), "tribe colour");
+        assert!(pixels(Icon::Unit { kind: UnitKind::Shaman, tribe: Owner::Tribe(TribeId::Blue) }) > pixels(brave), "with her staff");
+        assert_ne!(icon_pixels(brave), icon_pixels(Icon::Unit { kind: UnitKind::Brave, tribe: Owner::Tribe(TribeId::Red) }), "tribe colour");
         assert_eq!(icon_pixels(Icon::Wood).len(), WOOD_W * WOOD_H * 4);
         assert_eq!(pixels(Icon::Wood), pixels(Icon::NoWood), "same shape");
         assert!(pixels(Icon::Selected) > 0 && icon_pixels(Icon::Selected)[..12 * ICON_W * 4].iter().all(|&b| b == 0), "the arrow in the bottom rows");

@@ -10,6 +10,7 @@ use crate::terrain_mesh::{focus_height, CurveParams};
 use crate::world::CurrentMap;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
+use game_core::tribes::TribeId;
 
 const MAP: f32 = pop3_format::MAP_SIZE as f32;
 /// Default ground view tilt in degrees and distance in cells: the original's fixed pitch (cos 15 357 / 16 384) and
@@ -234,7 +235,7 @@ fn frame_new_map(map: Res<CurrentMap>, mut rig: ResMut<CameraRig>) {
 
 /// The player's (tribe 0) reincarnation site, else some low inland ground.
 pub fn start_cell(map: &game_core::map::GameMap) -> (i32, i32) {
-    map.site_of(0).map_or_else(|| map.terrain.lowland_cell(), |s| s.cell())
+    map.site_of(TribeId::Blue).map_or_else(|| map.terrain.lowland_cell(), |s| s.cell())
 }
 
 /// Where a new map's camera looks and its yaw: the level's own start camera where it gives one, else
@@ -456,7 +457,7 @@ mod tests {
     #[test]
     fn starts_on_player_site() {
         let mut map = game_core::map::GameMap::generate(3);
-        map.sites = vec![game_core::site::ReincarnationSite::at_cell(0, (9, 99), 0)];
+        map.sites = vec![game_core::site::ReincarnationSite::at_cell(TribeId::Blue, (9, 99), 0)];
         assert_eq!(start_cell(&map), (9, 99));
         map.sites.clear();
         assert_eq!(start_cell(&map), map.terrain.lowland_cell());

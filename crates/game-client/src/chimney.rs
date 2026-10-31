@@ -115,13 +115,14 @@ fn load_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
 mod tests {
     use super::*;
     use game_core::building::BuildingKind;
+    use game_core::tribes::TribeId;
 
     #[test]
     fn busy_built_huts_smoke() {
-        let hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0);
+        let hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0);
         assert!(!smokes(&hut), "nobody inside");
         assert!(smokes(&Building { inside: 1, ..hut.clone() }));
-        assert!(!smokes(&Building { inside: 1, ..Building::site(BuildingKind::Hut { size: 1 }, 0, 0, 0, 0) }), "not built");
+        assert!(!smokes(&Building { inside: 1, ..Building::site(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0) }), "not built");
     }
 
     #[test]

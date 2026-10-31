@@ -16,6 +16,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use game_core::tree::{MAX_SIZE, VARIANTS};
+use game_core::tribes::TribeId;
 use pop3_format::catalog::tree_object_in_bank;
 use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 
@@ -110,7 +111,7 @@ fn original_trees(
         .map(|v| {
             let obj = bank.get(tree_object_in_bank(object_bank, v as u8))?;
             let height = obj.points.iter().map(|p| p[1]).max().unwrap_or(0) as f32 / WORLD_UNITS_PER_CELL as f32;
-            Some((meshes.add(to_mesh(object_mesh(obj, 0))), height))
+            Some((meshes.add(to_mesh(object_mesh(obj, TribeId::Blue))), height))
         })
         .collect::<Option<Vec<_>>>()?;
     // Index-0 texels are see-through (palm leaves): cut them out.
