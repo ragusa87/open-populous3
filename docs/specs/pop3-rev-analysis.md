@@ -1594,13 +1594,38 @@ three distinct pose code paths, not just the documented cruise/dive toggle: a de
 pose fires in one of the outer sub-states (a climb sequence - altitude +600, a distinct internal flag set, and its
 own direct sprite-variant call), separate from the altitude-based cruise/dive toggle - i.e. the angel does
 visibly change its flight pose when committing to a fast manoeuvre, though the exact moment this fires relative to
-"closing in on a grab target" specifically was not pinned down, and the literal hfx sprite-frame numbers behind
-each pose (how many actual wing positions a cycle shows, not just how many CODE paths select a pose) remain open.
+"closing in on a grab target" specifically was not pinned down.
+
+**Resolved, separate session - the companion is a real 3D mesh, not a 2D sprite, and its two flight-pose models are
+identified**: the "model ids" 0x3E/0x45 passed to the companion's pose-setter (`0x4DE440`) are not sprite/hfx ids
+at all - they are literal indices into the exe's global 3D OBJECT-BANK table (`objs0_mem`, a pointer to 54-byte
+`objs0_struct` records), the SAME mesh asset class buildings and vehicles use, confirmed by the exact 54-byte
+stride the lookup computes. Via the game's existing object-bank numbering (raw ids 62-144 map to bank-0 object
+index + 38), 0x3E (62) and 0x45 (69) resolve to bank-0 objects 100 and 107 - the exe's "winged death" model family
+(bank-0 7 is a third, front-facing variant of the same model, never referenced by this code path). So **"diving"
+is the back-view winged-death mesh, "cruising" is an alternate-pose winged-death mesh** - confirming the angel's
+flying body is modelled as a genuine 3D creature mesh (like a vehicle), not the 2D sprite-chain ordinary persons
+use. The companion never snaps instantly between the two: its 0-5 "ramp" counter holds the current mesh steady
+while cycling through 3 intermediate sub-variants (a small, separate per-shape table, not pinned down further)
+for a soft blend, only committing the actual mesh swap once the ramp fully bottoms or tops out - at which point it
+also copies that mesh's own built-in `morph_index` byte (read straight off the 3D object record) onto itself,
+i.e. each pose-mesh carries its own blend-shape index rather than the code computing one. A second, independent
+confirmation that the PERSON record itself is never drawn: its own per-type default-object table entry is the
+literal sentinel "no object" for type 8, versus a real small object id for every other person type. The literal
+hfx sprite-frame numbers some earlier notes expected do not apply - there is no 2D sprite sheet here to count
+frames in.
+
 **No dedicated fire-breath effect was found** anywhere in state 28 or its known callees - the full set of effects
 it can spawn (the shadow companion; two ground-impact puffs; a death-path effect; the spawn-moment blast already
 described above; one facing-aligned effect that inherits the angel's own heading, a plausible but unconfirmed
 breath/exhaust candidate; and one more, unidentified) turned up nothing that reads as a sustained flame weapon -
 "breathes fire" most likely describes the spawn-moment blast rather than an ongoing attack.
+
+**Still unexplained, separate session**: the class-7 type `0x5b` ("statue to AoD") effect's init is now traced far
+enough to know it is gated by the game's cheat-mode flag - with cheat mode ON it deletes itself immediately and
+never appears at all; with cheat mode OFF it hands off into its own, still-unopened running state. No drawable is
+set in the init itself, and no caller for this effect type was found this session - what it actually looks like,
+and when (if ever, outside a removed/debug path) the game spawns it, remains open.
 
 **The angel-vs-angel fight (`0x4E0830`) is a pure stat exchange, not a choreographed fight**: read in full this
 session (under 0x200 bytes, no movement or pose code at all). Each call compares both angels' current health; the
@@ -4932,14 +4957,16 @@ behaviour at the margins, not the overall shape.
   (not found in its hunting AI, state 28/0x4DB980 - plausibly inside the per-kill self-damage cost charged by
   0x4E0A30, or one of the still-unopened outer `+0x2D` sub-states); any building-type exclusion for its attack
   (prison/pyramid/totem reported immune); whether it can pull a person out of a vehicle the way it grabs one in
-  the open; the selection/order-eligibility check that makes it unselectable and unorderable; whether the visible
-  flying body is really the shadow-companion object and not the person record itself (strongly suggested, not
-  exhaustively proven); the literal hfx sprite-frame numbers behind its flight poses (cruise/dive/launch are
-  confirmed as distinct CODE paths, not yet tied to actual sprite frame counts); and whether a grabbed victim's
-  carried position is parented to a fixed mouth/claw offset on the angel (confirmed NOT a separate pose, but the
-  position-sharing mechanism itself wasn't traced). The class-7 type `0x5b` ("statue to AoD") effect remains
-  unexplained but is now confirmed NOT part of the cast/spawn sequence (the real "ground transforms first" visual
-  is the meteor's own ground-shockwave sub-effect, now fully traced and code-confirmed as a real terrain ripple).
+  the open; the selection/order-eligibility check that makes it unselectable and unorderable; and whether a
+  grabbed victim's carried position is parented to a fixed mouth/claw offset on the angel (confirmed NOT a
+  separate pose, but the position-sharing mechanism itself wasn't traced). Resolved, separate session: the
+  visible flying body IS the shadow-companion object, a real 3D "winged death" mesh (not a 2D sprite, so there
+  are no hfx sprite frames to count), with two confirmed poses (back-view "diving", an alternate-pose
+  "cruising") blended through 3 intermediate sub-variants - see "Angel of Death mechanics" above. The class-7
+  type `0x5b` ("statue to AoD") effect is confirmed NOT part of the cast/spawn sequence (the real "ground
+  transforms first" visual is the meteor's own ground-shockwave sub-effect, fully traced as a real terrain
+  ripple) and is gated off entirely under cheat mode, but what it looks like and when it is ever spawned (no
+  caller found) both remain open.
 - Firewarrior fire: the line-of-fire test, whether a building stops the bolts (5 throws at a still preacher did nothing), what sets the reload
   byte to 252-255 (third capture), what the +0x10 bit 0x400000 set on own people under a passing shot does,
   whether hfx 1124-1127 is the shot's fade, and the approach sub-states (10, 11) before the throw.
@@ -5219,6 +5246,9 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4DB980 | person state 28, the angel's entire hunting/combat/grab AI (huge, outer `+0x2D` dispatch mostly unopened) - "Angel of Death mechanics" |
 | 0x4DB5E0 | `aod_area_panic`: the angel's own nearby-bystander panic (8-cell radius, person state 26), independent of its locked target |
 | 0x4DDB30 | `aod_flight_physics`: speed/heading ramp, altitude clamped >= ~100 above terrain (never lands), syncs the shadow-companion object |
+| 0x4DE440 | companion flight-pose blender: ramps its own 0-5 counter, picks a 3D "winged death" mesh (back/diving vs alt/cruising) via the object bank |
+| 0x40CC30 | queues an intermediate flight-pose sub-variant mid-ramp (called only from 0x4DE440 this session) |
+| 0x479840 | class-7 type 0x5b ("statue to AoD") init: self-deletes if cheat mode is on, else hands off to an unopened state 0x4C |
 | 0x4E0760, 0x4E05E0 | person state 40, "grabbed by an Angel of Death" (per turn, ENTER case): hold loop until release, then delete (ghost) or generic death (state 31, shaman-specific pose table); ENTER case evicts a housed victim but sets no carried pose - "Angel of Death mechanics" |
 | 0x4E0830 | `aod_vs_aod_damage`: pure health-proportional mutual damage + 800-unit knockback when the angel's locked target is itself an angel, no movement/pose code - "Angel of Death mechanics" |
 | 0x4E0A30 | `aod_release_throw`: sets the throw destination (400 units along the VICTIM's own facing), arms release, charges the angel a self-damage cost |

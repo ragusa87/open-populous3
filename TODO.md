@@ -403,7 +403,16 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [x] Earthquake and Firestorm (`spells.md`): Firestorm's scheduled `panicking_blast` fireballs are done in full; Earthquake's shake-and-sink (terrain part) and its three building-shake checks (`WorldEvent::Shake`, "The tick" above) are both done now, leaving only the trace's "possibly two lava flows". Angel of Death, Armageddon (full mechanic, see below)... still to do, as traced in pop3-rev-analysis.md "Per spell" and "Components". None of Earthquake's lava, Volcano's lava/turn-110 kill or Swamp route through `effect::hurts`/the shield check: a shielded unit still drowns or burns when the ground under it changes (reported, not traced), unlike a blast, lightning, swarm or hypnotise. Lightning is done (`lightning`), its victims now carbonized too (anim 97, "Units" above). Burning trees (`Tree::burning`, 127 turns then burnt to size 0) and the ground fire (`ground_fire`, 48 turns) have guessed lengths: the original's own ground-fire object (scenery class 5 type 0xA, not an effect — "Fireball impact") gets its burn countdown from 0x4A8C60 with param 22, the exact resulting turn count not yet decoded; trace that function and the original's scenery state 5; plants, wood piles and fires burning too (burn cell 7/0x05).
 - [x] Angel of Death (model 13, `spells.md`, pop3-rev-analysis.md "Angel of Death mechanics"): the logic is in
   (`game_core::angel_of_death`), the art is not — `UnitKind::AngelOfDeath` is deliberately left out of
-  `UnitKind::ALL`, so it's simulated but never drawn (no sprite of its own identified yet). Cast: an invisible
+  `UnitKind::ALL`, so it's simulated but never drawn. Resolved, separate session: the original draws it as a real
+  3D object-bank mesh (like a vehicle), not a 2D unit sprite — the already-catalogued "winged death" model
+  (`objects.md`/`catalog.rs`), whose `WINGED_DEATH_TOTEM`/`WINGED_DEATH_PERCHED` variants we already load for the
+  totem gift's static monument. The flying creature itself needs the OTHER two variants we don't yet reference
+  anywhere, `WINGED_DEATH_BACK` (100, used while descending/diving) and `WINGED_DEATH_ALT` (107, used while
+  cruising level), cross-blended over up to 6 ticks whenever its vertical motion changes rather than swapped
+  instantly (pop3-rev-analysis.md "Angel of Death mechanics" "Visuals" — the exact 3-step blend table isn't
+  pinned down, a straight crossfade/lerp between the two meshes over those ticks is a reasonable approximation).
+  `WINGED_DEATH` itself (7, "front") is not used by the original's own flight code and is not needed for this.
+  Cast: an invisible
   meteor falls for `FALL_TICKS` (8), then a real terrain ripple (`Shockwave`, an expanding-then-settling ring, 9
   ticks) plus a plain `blast::effect` (the same 140/98 push a building's own destruction and Lightning share) both
   fire at once, and the real creature appears (`WorldEvent::SpawnAngelOfDeath`). From there it runs entirely on
