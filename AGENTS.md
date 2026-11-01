@@ -3,7 +3,7 @@
 Guidance for coding agents working on this repo (Rust + Bevy 0.19 Populous-like POC).
 
 ## Licence and original data
-The project must stay MIT, open-sourcable as a whole. *Populous: The Beginning* belongs to Bullfrog / Electronic
+The project must stay AGPLv3, open-sourcable as a whole. *Populous: The Beginning* belongs to Bullfrog / Electronic
 Arts: its files serve only to understand how the game works (formats, rules, numbers) and to be loaded at runtime
 from the user's own install.
 - Never commit original data or anything reproducing it: models, textures, palettes, sprites, sounds, level

@@ -2,7 +2,7 @@
 """Generated Open Populous building kit. No image inputs or third-party geometry.
 
 Python 3 standard library; writes deterministic glTF 2.0 binary assets. Import a GLB
-into Blender to inspect/edit it. Code: MIT; generated artwork: CC0-1.0.
+into Blender to inspect/edit it. Code: AGPL-3.0-or-later; generated artwork: CC0-1.0.
 Coordinates: cells, Y up, door -Z. Scene 0 "Built" = Body mesh, scene 1 "Construction" = Scaffold.
 """
 

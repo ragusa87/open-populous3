@@ -80,4 +80,4 @@ production, repairs, destruction and progressive construction still need simulat
 To the extent possible under law, the contributors to this generated kit waive all copyright and
 related or neighbouring rights in the `.glb` and `surfaces.png` artwork under
 [CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
-The generator and client code remain under the repository's MIT licence.
+The generator and client code remain under the repository's AGPLv3 licence.

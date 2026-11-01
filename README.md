@@ -3,7 +3,7 @@
 An open-source, clean-room reimplementation of *Populous: The Beginning* (Bullfrog, 1998) in Rust
 and Bevy 0.19. The goal is a faithful simulation of the original's rules, written entirely from
 reverse-engineered documentation and our own open assets — never from the original's code, art or
-data — so the result can be built, run and shared under the MIT licence.
+data — so the result can be built, run and shared under the AGPLv3 licence.
 
 ## Clean room & original data
 
@@ -107,7 +107,8 @@ See the [missing-asset inventory](docs/specs/assets.md) and
 [building generator / Blender workflow](assets/3d/buildings/README.md) for what's open-source today.
 
 ## License
-This project is currently licensed under the [MIT License](LICENSE).
+This project is licensed under the [GNU Affero General Public License v3.0 or later](LICENSE):
+modified versions, including ones only run as a network service, must have their source published too.
 - Bundled art in `assets/` is CC0 (see [assets/CREDITS.md](assets/CREDITS.md)).
 - *Populous: The Beginning* and its files are Bullfrog / Electronic Arts property: they are never shipped
   here, only read from your own install (and `--no-original` runs without them).
@@ -156,5 +157,5 @@ File formats are reverse-engineered from the original files; community tools are
 - The PopRe wiki page [Dat Format](https://wiki.popre.net/Dat_Format): corroborates the `.dat` layout (land
   heights, blocks, orients, no-access squares, sunlight, objects), see [level-format.md](docs/specs/level-format.md).
 
-Only facts about the file formats are taken from the GPL and unlicensed tools, never their code, so the MIT
-licence is kept.
+Only facts about the file formats are taken from the GPL and unlicensed tools, never their code: nothing of
+theirs is incorporated here, so no code license compatibility question arises either way.
