@@ -1816,9 +1816,21 @@ Z axis - any of the above values, once their scale/offset is pinned down, need a
 conversion before they inform `flyby.rs` or any other spec. One concrete instance already found: the matrix's
 pitch sign is flipped relative to how this section used to state the pitch constants (now corrected above).
 
-Not yet done, see TODO.md "Camera flyby state": solve the raw-pitch candidate's transform to degrees, find what
-actually drives the unidentified render parameter, and apply the axis caveat once the above is solid enough to
-change `flyby.rs`.
+**Resolved for yaw specifically, a later session**: using the model `yaw_true = s*raw*360/2048 + c` (a user's
+own suggestion - one data point can't separate scale `s` from offset `c`, at least two independent raw/true-yaw
+pairs are needed), re-analysis of two already-captured full-flyby traces (pop3-rev `docs/camera.md`'s `cam5.txt`/
+`cam7.txt`) found four of the script's six `ANGLE` keyframes settle to a genuine flat hold, in script order, each
+within ~0.5-4° of `s=-1, c=0` (a pure sign flip) in BOTH captures - `s=+1` (no flip) is off by 100-150° on every
+non-trivial point, which is exactly what the earlier "~180° apart, a single data point, not proof" note above
+was seeing from the wrong sign. **`s=-1` is not a new convention to add**: `crates/game-client/src/flyby.rs`'s
+`render_yaw` already calls `nature::angle_yaw(raw).render()`, and `GameYaw::render()` (`game_frame.rs`) already
+negates as the documented general left-handed/right-handed mirror (used for trees, the level-start camera, etc.,
+not written for the flyby) - this session's live-data fit independently reproduces that same existing
+convention for the flyby `ANGLE` channel specifically. **No code change needed for yaw's sign/scale.** Full
+derivation: pop3-rev `docs/camera.md` "D3D axis caveat for YAW - RESOLVED for the ANGLE channel".
+
+Not yet done, see TODO.md "Camera flyby state": solve the raw-pitch candidate's transform to degrees, and find
+what actually drives the unidentified render parameter.
 
 ### Flyby cancel [exe, measured]
 What the camera does when the player interrupts a flyby (pressing the interrupt key, confirmed live as Space

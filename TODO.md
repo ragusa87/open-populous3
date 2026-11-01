@@ -819,6 +819,14 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     HALF-cell units".
   - `ANGLE` drives `tribe_struct+0x32` directly (the same field the manual mouse-drag rotate code uses) -
     confirms the documented "shortest way" rule is real but has a per-event override flag, not unconditional.
+  - [x] **D3D axis/handedness caveat for yaw - resolved, no code change needed**: re-analysing two already-
+    captured full-flyby traces (pop3-rev `docs/camera.md`'s `cam5.txt`/`cam7.txt`) against the script's own
+    6 `ANGLE` keyframes confirms `yaw_true = -raw * 360/2048` (mod 360) - a pure sign flip, zero offset -
+    to within ~0.5-4° on 4 independent keyframes in both captures. That's exactly what `flyby.rs`'s existing
+    `render_yaw` (-> `nature::angle_yaw(raw).render()` -> `GameYaw::render()`'s documented left-handed/
+    right-handed mirror) already computes - this was an existing, independently-motivated convention, not
+    something added to fit this data. See pop3-rev-analysis.md "D3D axis caveat" and pop3-rev `docs/
+    camera.md` "D3D axis caveat for YAW - RESOLVED".
   - `ZOOM` does NOT change camera distance at all: it blends between two named camera PRESETS' render
     parameters (bend/K and a few other render-block fields), not a continuous world-unit zoom.
     `flyby.rs`'s `zoom_to_distance` (-100..100 linear onto `DISTANCE_RANGE`) has the wrong shape entirely,
