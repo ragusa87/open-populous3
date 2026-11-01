@@ -33,17 +33,13 @@ impl Strike {
         if std::mem::replace(&mut self.struck, true) {
             return Vec::new();
         }
-        let cell = (cell_of(at.0), cell_of(at.1));
         let building = world.buildings.iter().find(|b| b.covers(at, 0)).map(|b| b.id);
         let mut events: Vec<WorldEvent> = struck(at, owner, &world.units)
             .into_iter()
             .map(|unit| WorldEvent::Damage { unit, amount: u16::MAX, kind: DamageKind::Lightning, from: Some(owner) })
             .collect();
         events.extend(building.map(|building| WorldEvent::SetFire { building, by: owner }));
-        events.push(match world.trees.iter().any(|t| t.cell() == cell && t.wood() > 0) {
-            true => WorldEvent::BurnTrees { cell },
-            false => WorldEvent::SpawnEffect(crate::ground_fire::effect(owner, at)),
-        });
+        events.push(crate::ground_fire::burn_cell(owner, at, &world.trees));
         events.push(WorldEvent::SpawnEffect(crate::blast::effect(owner, at)));
         events
     }

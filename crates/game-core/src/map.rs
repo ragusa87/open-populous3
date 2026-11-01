@@ -2493,20 +2493,23 @@ mod tests {
         let i = map.units.iter().position(|u| u.is_alive() && u.kind == UnitKind::Shaman).unwrap();
         let (owner, start) = (map.units[i].owner, (map.units[i].x, map.units[i].z));
         let at = (start.0.wrapping_add(300), start.1);
+        // Landing also spawns the burn cell and the explosion burst alongside the blast itself
+        // (`blast::impact_events`), so count the blasts specifically rather than every effect.
+        let blasts = |map: &GameMap| map.effects.iter().filter(|(_, e)| matches!(e.kind, EffectKind::SimpleBlast(_))).count();
         map.apply(&Command::Cast { player: owner, spell: Spell::Blast { at } });
         map.run(Ticks::new(crate::unit::CAST_RELEASE.get() - 1));
-        assert!(map.effects.is_empty(), "her cast jump first");
+        assert_eq!(blasts(&map), 0, "her cast jump first");
         map.tick();
-        assert!(map.effects.is_empty() && map.fireballs.len() == 1, "released into the jump: the fireball flies first");
+        assert!(blasts(&map) == 0 && map.fireballs.len() == 1, "released into the jump: the fireball flies first");
         map.tick();
-        assert_eq!(map.effects.len(), 1, "close by, the fireball lands and the blast starts the same turn");
+        assert_eq!(blasts(&map), 1, "close by, the fireball lands and the blast starts the same turn");
         assert!(map.units[i].action != Action::Tumbling && !map.units[i].motion.airborne(), "the caster's own shaman is spared");
         map.apply(&Command::Cast { player: owner.wrapping_add(1), spell: Spell::Blast { at } });
         map.tick();
         assert!(map.units[i].action == Action::Tumbling && map.units[i].motion.airborne(), "thrown up");
-        assert_eq!(map.effects.len(), 2, "the first one's last turn to come");
-        map.run(crate::blast::VISUAL_TICKS);
-        assert!(map.effects.is_empty(), "both blasts' own 3 turns, plus the idle visual ticks past them");
+        assert_eq!(blasts(&map), 2, "the first one's last turn to come");
+        map.run(Ticks::new(2));
+        assert_eq!(blasts(&map), 0, "3 turns");
         map.run(Ticks::secs(2));
         let u = &map.units[i];
         assert!(matches!(u.action, Action::Settling { .. }) && !u.motion.airborne() && u.z == start.1, "landed on its feet, settling rather than idle at once");
@@ -2736,7 +2739,8 @@ mod tests {
         assert!(crate::cast_range::within((u.x, u.z), at, m.cast_range(0, SpellKind::Blast).unwrap()), "stopped within range");
         assert!(torus_delta(z, u.z) > 6 * 512 - 512, "not farther than needed: {}", torus_delta(z, u.z));
         m.run(crate::unit::CAST_RELEASE);
-        assert!((1..200).any(|_| { m.tick(); m.effects.len() == 1 }), "the blast, once its fireball has flown in");
+        let has_blast = |m: &GameMap| m.effects.iter().any(|(_, e)| matches!(e.kind, EffectKind::SimpleBlast(_)));
+        assert!((1..200).any(|_| { m.tick(); has_blast(&m) }), "the blast, once its fireball has flown in");
 
         let mut m = GameMap::sandbox_walk();
         m.apply(&Command::Cast { player: 0, spell: Spell::Blast { at } });

@@ -34,6 +34,8 @@ pub enum EffectKind {
     Smoke,
     /// Only seen (`ground_fire`).
     GroundFire,
+    /// Only seen (`blast::explosion_effect`): Blast's own impact burst.
+    Explosion,
     /// Its own kill tally (`swamp`); the killing itself is `GameMap::tend_swamps`, not its own turn: unlike every
     /// other effect it must see every other swamp at once, to settle whose claim an overlapping cell counts for.
     Swamp(crate::swamp::Swamp),
@@ -116,7 +118,7 @@ impl Effect {
             EffectKind::Firestorm(ref mut firestorm) => firestorm.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Earthquake(ref mut earthquake) => earthquake.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::Swarm(ref mut swarm) => swarm.turn((self.x, self.z), self.owner, world, rng),
-            EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Swamp(_) => Vec::new(),
+            EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Explosion | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
         };
@@ -140,6 +142,7 @@ impl Effect {
             | EffectKind::Lightning(_)
             | EffectKind::Smoke
             | EffectKind::GroundFire
+            | EffectKind::Explosion
             | EffectKind::Swamp(_)
             | EffectKind::Convert(_)
             | EffectKind::Hypnotism(_)

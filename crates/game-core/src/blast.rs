@@ -8,6 +8,10 @@
 //! "Life, damage and destruction"). Every building whose centre ever enters the radius across the blast's 3
 //! turns takes `DAMAGE_BLDG` wear once (confirmed: unlike people/vehicles, not repeated every turn it stays in
 //! range), feeding the same accumulator hacking and firewarrior bolts do (combat.md "Attacking a building").
+//!
+//! Once the fireball lands, its own cast chain spawns this blast alongside two siblings (pop3-rev-analysis.md
+//! "Blast's own cast chain", `impact_events`): the burn cell (a tree there catches fire, or else a short ground
+//! fire) and a short explosion burst (`explosion_effect`), purely cosmetic.
 
 use crate::building::{Building, BuildingId};
 use crate::effect::{DamageKind, Effect, EffectKind};
@@ -37,12 +41,6 @@ pub const DAMAGE_BLDG: u16 = 40;
 /// only. Which ones, when more are in range, is not traced: a guess, kept to iteration order.
 pub const BLAST_FRIEND_AFFECT: u8 = 5;
 
-/// The effect's own life, longer than its 3 active turns (`RADII`): same reasoning as
-/// `panicking_blast::VISUAL_TICKS` — the idle turns past it are a no-op for `turn` (already short-circuits once
-/// `self.turn` runs past `RADII`'s bounds) but keep the effect, and so its client-side views (`blast_fireball.rs`,
-/// `blast_impact.rs` [client]), around long enough for the explosion to flash and settle into smoke.
-pub const VISUAL_TICKS: Ticks = Ticks::secs(1);
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SimpleBlast {
     /// Turns done.
@@ -53,7 +51,27 @@ pub struct SimpleBlast {
 
 /// A blast cast by tribe `owner` at `at` (world units).
 pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
-    Effect::new(owner, at, Countdown::new(VISUAL_TICKS), EffectKind::SimpleBlast(SimpleBlast::default()))
+    Effect::new(owner, at, Countdown::new(Ticks::new(RADII.len() as u32)), EffectKind::SimpleBlast(SimpleBlast::default()))
+}
+
+/// Blast's own impact burst (pop3-rev-analysis.md "Blast's own cast chain": effect 7/0x26, "explosion 1" - a
+/// 30-frame alpha sprite, hfx 1099-1128, sound 0xB2 and the same dynamic ground-light call the flying shot itself
+/// carries), an effect only seen: it does nothing to the world, the client draws it for its length
+/// (`blast_impact.rs` [client]).
+pub const EXPLOSION_TICKS: Ticks = Ticks::new(9);
+
+/// The burst lit by tribe `owner` at `at` (world units).
+pub fn explosion_effect(owner: u8, at: (u16, u16)) -> Effect {
+    Effect::new(owner, at, Countdown::new(EXPLOSION_TICKS), EffectKind::Explosion)
+}
+
+/// The sibling effects Blast's own cast chain spawns alongside the damaging blast once the fireball lands
+/// (pop3-rev-analysis.md "Blast's own cast chain"): the burn cell (a tree there catches fire, or else a short
+/// ground fire) and the explosion burst. Still missing from this list: the plain grey smoke puff (7/0x03, 4-turn
+/// life) the chain also spawns - a generic trail/puff primitive shared with the firewarrior's own bolt and other
+/// shots, not modelled yet (TODO.md "Shots").
+pub fn impact_events(owner: u8, at: (u16, u16), trees: &[crate::tree::Tree]) -> Vec<WorldEvent> {
+    vec![crate::ground_fire::burn_cell(owner, at, trees), WorldEvent::SpawnEffect(explosion_effect(owner, at))]
 }
 
 pub type FireballId = crate::id::Id<Fireball>;
@@ -105,6 +123,7 @@ impl crate::map::GameMap {
             if there {
                 arrived.push(id);
                 events.push(WorldEvent::SpawnEffect(effect(f.owner, f.at)));
+                events.extend(impact_events(f.owner, f.at, &self.trees));
             }
         }
         fireballs.retain(|id, _| !arrived.contains(&id));
@@ -340,15 +359,13 @@ mod tests {
         map.unit_mut(shielded).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
         map.add_effect(effect(0, at));
         map.run(Ticks::new(RADII.len() as u32));
+        assert!(map.effects.is_empty());
         let health = |id| map.unit(id).unwrap().health.current();
         assert_eq!(health(enemy), 1000 - 3 * DAMAGE_PERSON);
         assert_eq!(health(mine), 1000, "the caster's brave is not hurt");
         assert!(map.unit(mine).unwrap().motion.airborne(), "but pushed (on the last turn, as an ally)");
         assert_eq!(health(shielded), 1000);
         assert!(!map.unit(shielded).unwrap().motion.airborne(), "nor pushed");
-        assert!(!map.effects.is_empty(), "the view keeps playing a little past the 3 damage turns");
-        map.run(Ticks::new(VISUAL_TICKS.get() - RADII.len() as u32));
-        assert!(map.effects.is_empty(), "gone once the idle visual ticks run out too");
     }
 
     #[test]
@@ -360,5 +377,29 @@ mod tests {
         map.add_effect(effect(0, at));
         map.run(Ticks::new(RADII.len() as u32));
         assert_eq!(map.building(building).unwrap().wear, DAMAGE_BLDG, "once for the whole blast, unlike people/vehicles which take it every turn in range");
+    }
+
+    #[test]
+    fn impact_spawns_the_explosion_and_either_burns_a_tree_or_lights_a_ground_fire() {
+        let at = (1024, 1024);
+        let wooded = crate::tree::Tree::new((2, 2), 0, 3);
+        let events = impact_events(0, at, &[wooded]);
+        assert_eq!(events[0], WorldEvent::BurnTrees { cell: (2, 2) });
+        assert_eq!(events[1], WorldEvent::SpawnEffect(explosion_effect(0, at)));
+        assert_eq!(impact_events(0, at, &[]), [WorldEvent::SpawnEffect(crate::ground_fire::effect(0, at)), WorldEvent::SpawnEffect(explosion_effect(0, at))], "no tree: a ground fire instead");
+    }
+
+    #[test]
+    fn a_landed_fireball_spawns_the_blast_the_burn_cell_and_the_explosion_together() {
+        let mut map = crate::map::GameMap::sandbox_walk();
+        let (sx, sz) = (map.units[0].x, map.units[0].z);
+        let at = (sx.wrapping_add(300), sz);
+        let id = map.new_id_of();
+        map.fireballs.insert(id, fireball(0, (sx, sz), 0, at, 0));
+        map.tick();
+        let kinds: Vec<_> = map.effects.iter().map(|(_, e)| std::mem::discriminant(&e.kind)).collect();
+        assert!(kinds.contains(&std::mem::discriminant(&EffectKind::SimpleBlast(SimpleBlast::default()))));
+        assert!(kinds.contains(&std::mem::discriminant(&EffectKind::Explosion)));
+        assert!(kinds.contains(&std::mem::discriminant(&EffectKind::GroundFire)), "bare ground: no tree to burn instead");
     }
 }

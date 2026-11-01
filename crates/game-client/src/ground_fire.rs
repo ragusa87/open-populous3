@@ -19,8 +19,9 @@ use pop3_format::WORLD_UNITS_PER_CELL;
 /// The flames' size (cells) and where they stand round the fire's point.
 const SIZE: f32 = 0.45;
 const BASES: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [0.18, 0.0, 0.1], [-0.12, 0.0, -0.15]];
-/// Seconds over which the flames sink away at the end.
-const DYING: f32 = 1.0;
+/// Seconds over which the flames sink away at the end: a fraction of their own short `ground_fire::TICKS` life,
+/// so they still stand at full height for a moment before sinking rather than spawning already sunk.
+const DYING: f32 = 0.25;
 const DEFAULT_THEME: u8 = 0;
 
 /// The flames' height (of their full height) with `secs_left` to burn.
@@ -96,9 +97,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn full_until_its_last_second_then_sinking_away() {
+    fn full_until_its_last_moment_then_sinking_away() {
         assert_eq!(height(3.0), 1.0);
-        assert!(height(0.5) < 1.0 && height(0.5) > 0.0);
+        assert!(height(DYING * 0.5) < 1.0 && height(DYING * 0.5) > 0.0);
         assert_eq!(height(-0.1), 0.0);
     }
 }
