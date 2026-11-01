@@ -359,10 +359,24 @@ every 4 turns, per hut:
   wildmen. The exe defaults are 1 for a brave, 3 for a warrior, preacher or spy, and 6 for a firewarrior.
 - `band = (P + 1) / 10`, clamped to 0..19: bands of 10 people, i.e. 5 % of the 200 maximum. It is not a % of the
   tribe's cap.
-- `SPROG%` rises with the band (file: 30 % for band 0 up to 200 % for band 19), so a bigger tribe breeds slower.
+- `SPROG%` rises with the band, so a bigger tribe breeds slower. All 20 values are in `constant.dat`
+  (`P3CONST_SPROG%_POP_BAND_<lo>_<hi>%`, named as a 5 %-of-200 share of `P` - band 0 is the "00-04 %" share,
+  band 19 is "95-99 %"), confirmed, not interpolated: 30, 35, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140,
+  150, 160, 170, 180, 190, 195, 200.
 - `can_breed`: `P + 1 < cap`, where `cap = sum over huts of MAX_POP_VALUE__HUT_<n>` (3, 5, 7) plus a per-tribe base
   (tribe+0x921), at most 200. A tribe flag (tribe+0x941 bit 6) also stops it. At the cap, `breed` is reset to 0,
   not kept full.
+- **The per-tribe base is a flat, hardcoded 6** [exe, confirmed 0x42B428]: `load_level` writes `tribe+0x921 = 6`
+  for all 4 tribe slots unconditionally, in the same small init loop (stride 0xC65) that resets other per-tribe
+  fields on every level load - not read from the level file, not a `constant.dat` entry (unlike every other hut
+  number in this section), and identical whether the tribe is human, AI, or unused. So a tribe's real population
+  cap is always `min(200, 6 + sum(hut supply))`, 6 higher than what the huts alone would suggest - a brand-new
+  tribe with **no huts at all** can still breed up to 6 people before `can_breed` ever blocks it (there is of
+  course nowhere to put them without a hut, but the cap check itself does not know that). With two small huts
+  (supply 3 each, "visible" capacity 6), the true cap is 6 + 6 = 12: population keeps growing past 6 - 8, 9... -
+  until it actually reaches 12, which reads as breeding being faster/longer than the hut count alone implies if
+  the base is not accounted for. This resolves the "per-tribe base capacity (tribe+0x921)" item that was
+  previously on the open-questions list.
 
 Time to one brave, at 12 turns per second, with the file's values (`SPROG_TIME` 4000 / 3000 / 2000):
 
@@ -4510,6 +4524,17 @@ behaviour at the margins, not the overall shape.
   - at the cap the original resets `breed` to 0, where ours keeps it full and releases a brave as soon as there is
     room;
   - a new hut starts at `target - 54`, nearly full, which is close to our "full".
+  - **the cap itself is missing our flat per-tribe base of 6** (`headcount::Housing::room`, `game-core/src/headcount.rs`,
+    today `huts.iter().zip(SUPPLY).map(...).sum().min(MAX_POPULATION)` only): the original's `can_breed` cap is
+    `min(200, 6 + sum(hut supply))`, ours is `min(200, sum(hut supply))`. With no huts at all the original still
+    lets a tribe breed (nowhere to put them, but `can_breed` doesn't check that); with two small huts ours caps at
+    6 where the original caps at 12. This under-caps every tribe by exactly 6 and is the mechanism behind the
+    level 1 observation that population keeps climbing (6 to 8, and on toward 12) past what "two houses of
+    capacity 6" would suggest. `ai.rs`'s build-another-hut decision also reads `housing.room()`, so it inherits
+    the same 6-person undercount. Preacher conversion and the Convert spell are a separate exe mechanism (a flat
+    `population >= 200` check at tribe+0x89DAE5, not `can_breed`'s hut-based cap - see "Preacher conversion"),
+    so `convert.rs`'s and `sermon.rs`'s own flat `MAX_POPULATION` (200) checks already match the original and do
+    not need this fix.
 - huts-and-training.md rule 6 (growing): the original only grows with people inside (`8 × inside` every 16 turns
   to 2400), not "even when the hut is empty". No population check was seen in the growth code, only a placement
   check. The new site starts with 100 wood (one piece), so 2 more pieces are brought, not 3 with 1 consumed.
@@ -4785,8 +4810,8 @@ behaviour at the margins, not the overall shape.
 - What sets `turns_per_sec` to 14, and whether game options or multiplayer change it.
 - Which field holds the gather sub-state: +0xA8 stays 0 while chopping, so the handler's state byte is elsewhere.
 - What `TREE_DORMANT_TIME` does (maybe the time before a cut tree regrows or a new tree appears).
-- Huts: what the growth placement check tests (footprint, population?), the every-128-turns branch when it fails, and the per-tribe base
-  capacity (tribe+0x921).
+- Huts: what the growth placement check tests (footprint, population?), the every-128-turns branch when it fails.
+  (The per-tribe base capacity, tribe+0x921, is resolved - see "Huts: breeding and growth".)
 - Prayer: the vault (library trigger) branch, what the "contest" countdown at trigger+0x6F does when several tribes
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
 
@@ -5148,7 +5173,7 @@ class are in `pop3-rev/docs/unit_types`.
 | +0x969 + 4·spell | `charge[spell]`, spells 1-21 |
 | +0xA27 + 2·type | number of people per person type (rebuilt each turn) |
 | +0xB7D + 2·type | number of huts per hut type (1-3), for the capacity |
-| +0x921 | base population capacity, added to the huts' |
+| +0x921 | base population capacity, added to the huts' (confirmed flat `6` for every tribe, written by `load_level` at 0x42B428 - not level data, not in `constant.dat`) |
 | +0x941 | flags; bit 6: no breeding |
 | +0xA05, +0xA07 | reservoir `delay` and `rate` |
 | +0x911, +0x915 | reincarnation site position (x, z) and height |

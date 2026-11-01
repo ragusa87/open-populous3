@@ -525,9 +525,18 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   "stops at 100%" vs "resets to 0" behaviour, and growing's own wood seeding). Capacity 3/4/5, supply 3/5/7
   (cap min(supply, 200)) were already done (`BuildingKind::capacity`, `headcount::{SUPPLY,Housing}`). Mana from
   people inside was already done too (rule 7, `GameMap::mana_income`). Left for the client: the tooltip's green
-  (`breed`) and red (`grow`) bars, and a star animation where a bred brave appears. `SPROG%`'s own 18
-  un-individually-confirmed band values are `[ours]`, linearly interpolated between the two confirmed ends (30
-  at band 0, 200 at band 19) - a later session with the full file dump should replace the table outright.
+  (`breed`) and red (`grow`) bars, and a star animation where a bred brave appears. `SPROG%`'s full 20-band table
+  is now confirmed from `constant.dat` directly (pop3-rev-analysis.md "Huts: breeding and growth"), replacing the
+  earlier `[ours]` linear-interpolation guess - check `hut_growth.rs`'s own table against it.
+- [ ] **Population cap is missing the per-tribe base of 6** (pop3-rev-analysis.md "Huts: breeding and growth",
+  "Impact on our specs" rule 5): the original's `can_breed` cap is `min(200, 6 + sum(hut supply))` - a flat 6
+  added per tribe, hardcoded in `load_level` (0x42B428) for every tribe regardless of hut count, not in
+  `constant.dat`. `headcount::Housing::room` (`game-core/src/headcount.rs`) computes `min(200, sum(hut supply))`
+  only, with no base term, so every tribe's real cap is undercounted by 6 (e.g. two small huts: ours caps
+  breeding at 6, the original at 12). Add a `const BASE_POPULATION: u16 = 6` (or a `Balance::Huts` field) and
+  include it in `room()`; `ai.rs`'s `housing.room()` read inherits the fix automatically. Does not affect
+  `convert.rs`/`sermon.rs`'s own `MAX_POPULATION` (200) checks - those match a separate, genuinely flat exe
+  check (preacher conversion's own tribe+0x89DAE5 population counter), not `can_breed`'s hut-based cap.
 - [x] `game_core::balance`: `Turns` (original game turns) converted to ticks (`Balance::ticks`, the identity
   today), `Balance::ours()` defaults, grouped by topic (`Huts`, `Training`, `Income`), stored on `GameMap` and
   read by `hut_growth.rs`, `training.rs`, `headcount::mana_income` and `mana::ManaPool::tick` instead of their
@@ -1231,7 +1240,7 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 - [ ] Rendered tooltip: done for buildings, trees and totems (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks, right click at once); the toggle to add.
 - [ ] People rows filled: totems' counted prayers (once praying exists), the trainee. Vehicles and vehicle huts are done. Buildings, pyramids and totems' places are done, a click adds the unit to the selection.
 - [ ] Wood rows: the pieces still needed on a growing house (once growth exists). Plans, sites, built buildings and trees are done.
-- [ ] Bars fed by the simulation: totem prayer progress (once praying exists), house growth and birth, house growth and birth. The widget, its blinking, the pyramid's prayer bar and the training bar (double fill from `GameMap::production`) are done
+- [ ] Hut tooltip bars: a hut's breeding progress (`Building::breed`, `BarKind::Birth`, green, vertical) and growing progress (`Building::grow`, `BarKind::Growth`, red, vertical - huts-and-training.md rules 5-6) are modelled in `game_core::hut_growth` but `building_model` (tooltip.rs) never pushes them to `TooltipModel::bars`; wire them in the way `BarKind::Training` already is. The widget, its blinking, the pyramid's prayer bar, totem prayer progress and the training bar (double fill from `GameMap::production`) are done.
 - [x] Editor: brushes now follow the mouse (`grounded::pick_ground`, mirroring `blueprint.rs`'s own
   cursor-ray-pick, falling back to the camera focus when the cursor is off the terrain or over the panel);
   a configurable brush radius (`EditorState.brush_radius`, `[`/`]`, 1..=12, default 4) shown as a ring on the

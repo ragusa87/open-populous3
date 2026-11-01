@@ -616,13 +616,14 @@ pub fn fire_bases(kind: BuildingKind, top: f32) -> Vec<[f32; 3]> {
 
 /// Whether the views of `drawn` still show `now`: a vault's phase does not count (`vault` poses it),
 /// nor the people inside (`chimney` smokes), nor how long a fire has left or a blow shakes it (only whether),
-/// nor its wear and repair delay, nor a training unit's mana.
+/// nor its wear and repair delay, nor a training unit's mana, nor a hut's breeding or growing progress
+/// (no view of its own yet).
 pub fn same_look(drawn: &[Building], now: &[Building]) -> bool {
     let collapse = |c: Collapse| match c {
         Collapse::Shattering => c,
         Collapse::Sinking { left } => Collapse::Sinking { left: Countdown::new(left.total()) },
     };
-    let look = |b: &Building| Building { vault: None, inside: 0, production: None, shaking: (b.shaking > 0) as u16, wear: 0, repair_delay: None, burning: b.burning.map(|c| Countdown::new(c.total())), collapse: b.collapse.map(collapse), ..b.clone() };
+    let look = |b: &Building| Building { vault: None, inside: 0, production: None, shaking: (b.shaking > 0) as u16, wear: 0, repair_delay: None, burning: b.burning.map(|c| Countdown::new(c.total())), collapse: b.collapse.map(collapse), breed: 0, grow: 0, ..b.clone() };
     drawn.len() == now.len() && drawn.iter().zip(now).all(|(a, b)| look(a) == look(b))
 }
 
@@ -649,6 +650,13 @@ mod tests {
         left.tick();
         assert!(same_look(std::slice::from_ref(&hut), &[later]));
         assert!(!same_look(&[Building { collapse: None, ..hut.clone() }], &[hut]), "starting to sink does rebuild");
+    }
+
+    #[test]
+    fn breeding_and_growing_progress_does_not_rebuild_the_views() {
+        let hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0);
+        let later = Building { breed: 40, grow: 900, ..hut.clone() };
+        assert!(same_look(&[hut], &[later]));
     }
 
     #[test]
