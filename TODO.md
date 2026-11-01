@@ -802,11 +802,22 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 - [ ] Camera flyby state: continue the pop3-rev-analysis.md "Camera flyby state (tribe_struct)" investigation.
   All three primary AI-script channels are now traced end to end (pop3-rev/docs/camera.md, pop3-rev/
   docs/functions.tsv):
-  - `POS` drives `tribe_struct+0x24` directly: `x`/`z` are plain 0-255 cell indices, world units =
-    `(cell+1)*256` (256 render units/cell, matches "Landscape projection"), with explicit map-wraparound
-    handling on the delta. Our `flyby.rs` already treats `positions` as raw x/z onto `focus` with
-    `rem_euclid(map_size)` - worth double-checking the `(cell+1)*256`-style unit conversion and the wraparound
-    shortest-path behavior match, not just the destination.
+  - `POS` drives `tribe_struct+0x24` directly: `x`/`z` are raw 0-255 bytes, world units = `(cell+1)*256`
+    (256 render units/cell, matches "Landscape projection"), with explicit map-wraparound handling on the
+    delta.
+  - [x] **Confirmed bug, found via a user's screenshot comparison, now fixed**: the raw byte is at HALF-cell
+    resolution over our own 128-cell map (`actual cell = raw / 2`), not a literal cell index - evidence: all
+    11 x/z values in level 1's own script (`POS`/`TOOLTIP`/`END_TARGET`) are even (expected if the designer
+    placed waypoints on whole cells, doubled by the compiler); `FLYBY_SET_END_TARGET 20 216` halved is cell
+    `(10, 108)`, 1.5 cells from this level's own known site position `(8.5, 107.5)`
+    (`crates/game-client/src/sites.rs`'s `site_cell_pos`) - matching a screenshot of the camera parked on the
+    stone circle/shaman, where the raw byte taken 1:1 (the old code) lands at `(20, 88)`, 20+ cells off over
+    the sea. Fixed: `flyby.rs` now has a `half_cell` helper (`raw as f32 * 0.5`) used by `drive_camera`'s
+    `POS` keyframes and `final_pose`'s `end_target`/last-keyframe fallback, before the existing
+    `rem_euclid(MAP_SIZE)` wraparound. `TOOLTIP` keyframes need the same halving whenever they're implemented
+    (currently parsed/resolved but nothing draws them, above). See pop3-rev-analysis.md "The AI-script POS
+    and ANGLE channels" and pop3-rev `docs/camera.md` "Correction: POS/TOOLTIP/end-target raw x/z are
+    HALF-cell units".
   - `ANGLE` drives `tribe_struct+0x32` directly (the same field the manual mouse-drag rotate code uses) -
     confirms the documented "shortest way" rule is real but has a per-event override flag, not unconditional.
   - `ZOOM` does NOT change camera distance at all: it blends between two named camera PRESETS' render
@@ -823,6 +834,16 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     touches `rig.pitch`, see below) - the real camera instead stays at a ~constant radius and orbits
     toward vertical. Fixing this properly means reworking `eye_offset`'s zoom model (pitch-driven, not
     distance-driven) for both the flyby and ordinary manual zoom, not just retuning `DISTANCE_RANGE`.
+  - [ ] **Confirmed, from the same user comparison**: script zoom value 0 means "idle" (~20.4° pitch,
+    `camera::GROUND_PITCH_DEG`), not the arithmetic midpoint of `PITCH_RANGE` (~49.5°) that
+    `zoom_to_pitch(0)` currently returns - the idle-default raw accumulator is exactly what zoom 0 settles
+    back to ("0 really is neutral", pop3-rev `docs/camera.md` "Zoom channel (`+0x2c`) trajectory..."), and
+    that accumulator drives pitch directly. Since idle sits much closer to the "in" end of `PITCH_RANGE`
+    (10.5°) than the "out" end (88.6°), the real -100..100 -> pitch curve is asymmetric around 0, not
+    `zoom_to_pitch`'s current straight line - matches the already-documented "out"/"in" slope asymmetry in
+    the raw accumulator. Curve shape between the two endpoints and this new zoom=0 anchor still not solved
+    - see pop3-rev-analysis.md "The AI-script zoom channel" and pop3-rev `docs/camera.md` "Correction: flyby
+    zoom value 0 means 'idle'".
   - `INT_POINT` (look-at-a-point yaw channel, unused by level 1) and `TOOLTIP` (resolves to a generic
     advisor-notification system; its `idx=0` case walks to a "head"/monument scenery object - almost
     certainly the reported "a building/pyramid is presented" behaviour) were traced on both the creation and

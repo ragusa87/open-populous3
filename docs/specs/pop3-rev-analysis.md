@@ -1754,18 +1754,47 @@ the unidentified render parameter's own measured motion during a flyby (the thin
 camera gets closer/farther" - pop3-rev `docs/camera.md` "Zoom channel...") is still unexplained - see below, it
 is now ruled out from all three of the flyby's primary channels, not just `ZOOM`.
 
+**Correction (zoom value 0 means "idle", not "midpoint of `PITCH_RANGE`")**: a user comparison of level 1's own
+closing screenshot (last keyframe `FLYBY_SET_EVENT_ZOOM 0 202 63`) against our flyby found the original's end
+pitch reads as shallow, close to idle (~20.4°), not `flyby.rs::zoom_to_pitch(0)`'s ~49.5° (the arithmetic
+midpoint of `PITCH_RANGE` 10.5°..88.6°). This connects two findings already on record here: the idle-default
+raw accumulator value is exactly what script zoom 0 settles back to ("0 really is neutral, not an arbitrary
+midpoint", pop3-rev `docs/camera.md` "Zoom channel (`+0x2c`) trajectory..."), and that same accumulator/preset
+system drives pitch directly ("Manual zoom is a pitch+bend orbit", above). So script zoom 0 should map to the
+**idle pitch** (~20.4°, `camera::GROUND_PITCH_DEG`), not `PITCH_RANGE`'s arithmetic midpoint - and since idle
+sits much closer to the "in" end (10.5°) than the "out" end (88.6°), the real -100..100 -> pitch curve is
+asymmetric around 0, not the straight line `zoom_to_pitch` currently implements (consistent with the
+already-documented "out"/"in" slope asymmetry in the raw accumulator, Δraw/Δzoom ≈ +2.0 "out" vs +0.55 "in").
+**Not solved**: the curve's exact shape between the two confirmed endpoints and this zoom=0 anchor - three
+points constrain it, they don't determine it. Full write-up: pop3-rev `docs/camera.md` "Correction: flyby zoom
+value 0 means 'idle'".
+
 ### The AI-script POS and ANGLE channels, also traced end to end [exe]
 Same per-kind dispatch as the `ZOOM` channel above (pop3-rev `docs/camera.md` "POS and ANGLE channels", every
 function in pop3-rev `docs/functions.tsv`):
 
-- **`POS`**: the script's raw x/z values are plain **0-255 cell indices** (packed into a single byte each by
-  the queueing code, which only works if they fit in 0-255 - matches the worked example's values like
-  "252 254"), converted with `world = (cell + 1) * 256` (confirms 256 render units/cell, "Landscape
-  projection"). The per-turn callback eases two independent accumulators (x, z) and writes the result
-  straight into the camera-focus field - confirms that's exactly what `POS` drives, and solves the former
-  "decode the `POS` channel's own coordinate units" open item below. The delta-to-target computation
-  explicitly handles wraparound on the 16-bit domain (shortest path across the map edge) - the world map
-  wraps, at least as far as camera-focus tracking goes.
+- **`POS`**: the script's raw x/z values (0-255, packed into a single byte each by the queueing code) convert
+  with `world = (cell + 1) * 256` (confirms 256 render units/cell, "Landscape projection"). The per-turn
+  callback eases two independent accumulators (x, z) and writes the result straight into the camera-focus
+  field - confirms that's exactly what `POS` drives, and solves the former "decode the `POS` channel's own
+  coordinate units" open item below. The delta-to-target computation explicitly handles wraparound on the
+  16-bit domain (shortest path across the map edge) - the world map wraps, at least as far as camera-focus
+  tracking goes.
+  **Correction (raw byte is HALF-cell, not a literal cell index)**: an earlier pass through this file called
+  the raw byte a "cell index" directly - that can't be literal, since this level's own script uses values up
+  to 252/254 (ai-scripts.md's worked example) on a hard-confirmed 128-cell map (`pop3_format::MAP_SIZE`, fixed
+  by the real `.dat` file's own binary layout). The raw byte is at **half-cell resolution**: `actual cell =
+  raw / 2`, wrapping at raw=256/cell=128 - `(cell+1)*256` and "256 render units/cell" both already presume
+  this halving. Found by comparing a level-1 screenshot against our own flyby, then confirmed from data
+  already on hand: every one of the 11 x/z values in level 1's own script (`POS`, `TOOLTIP`, `END_TARGET`) is
+  even - expected if the designer placed waypoints on whole cells and the compiler doubled them; and
+  `FLYBY_SET_END_TARGET 20 216` halved is cell `(10, 108)`, 1.5 cells from this level's own independently-known
+  site position `(8.5, 107.5)` (`crates/game-client/src/sites.rs`'s `site_cell_pos`, read from the level
+  file's Thing record) - matching the screenshot's camera parked on the stone circle/shaman, where the raw
+  byte taken 1:1 lands at `(20, 88)`, 20+ cells off over the sea. **`flyby.rs` currently uses the raw byte
+  unscaled as a `CameraRig.focus` cell coordinate - it needs `* 0.5` applied first (TODO.md "Camera flyby
+  state").** Full cross-checks: pop3-rev `docs/camera.md` "Correction: POS/TOOLTIP/end-target raw x/z are
+  HALF-cell units".
 - **`ANGLE`**: reads the current yaw straight from the camera-yaw field (the same field the manual mouse-drag
   rotate function uses, "Manual camera pan/rotate" above) and the event's target angle, computes both
   possible signed deltas around the 2048-unit circle, and picks one by a per-event direction-preference flag

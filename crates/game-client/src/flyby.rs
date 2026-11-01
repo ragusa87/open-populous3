@@ -66,8 +66,8 @@ pub fn drive_camera(map: Res<CurrentMap>, now: Res<SimNow>, mut rig: ResMut<Came
     match active.interrupted_at {
         None => {
             let t = now.turns_since(active.start);
-            let xs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (k.x as f32, k.start, k.duration)).collect();
-            let zs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (k.z as f32, k.start, k.duration)).collect();
+            let xs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (half_cell(k.x), k.start, k.duration)).collect();
+            let zs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (half_cell(k.z), k.start, k.duration)).collect();
             let angles: Vec<(f32, i32, i32)> = active.flyby.angles.iter().map(|k| (render_yaw(k.angle), k.start, k.duration)).collect();
             let zooms: Vec<(f32, i32, i32)> = active.flyby.zooms.iter().map(|k| (zoom_to_pitch(k.zoom as f32), k.start, k.duration)).collect();
             rig.focus.x = channel_value(playback.start.focus.x, &xs, t, Some(map_size)).rem_euclid(map_size);
@@ -95,6 +95,12 @@ fn zoom_to_pitch(z: f32) -> f32 {
     PITCH_RANGE.1 + (PITCH_RANGE.0 - PITCH_RANGE.1) * t
 }
 
+/// A raw `POS`/`TOOLTIP`/`END_TARGET` x or z value is a cell index at half-cell resolution
+/// (pop3-rev-analysis.md "Correction: raw byte is HALF-cell, not a literal cell index").
+fn half_cell(raw: i32) -> f32 {
+    raw as f32 * 0.5
+}
+
 /// A raw `FLYBY_SET_EVENT_ANGLE` value (2048ths of a turn) as a render yaw (`nature::angle_yaw`).
 fn render_yaw(raw: i32) -> f32 {
     crate::nature::angle_yaw(raw.rem_euclid(2048) as u16).render()
@@ -106,10 +112,10 @@ fn render_yaw(raw: i32) -> f32 {
 /// pitch always falls back to the last zoom keyframe regardless.
 fn final_pose(flyby: &ResolvedFlyby, start: &CameraRig) -> (f32, f32, f32, f32) {
     let (x, z, yaw) = match &flyby.end_target {
-        Some(end) => (end.x as f32, end.z as f32, render_yaw(end.angle)),
+        Some(end) => (half_cell(end.x), half_cell(end.z), render_yaw(end.angle)),
         None => (
-            flyby.positions.last().map_or(start.focus.x, |k| k.x as f32),
-            flyby.positions.last().map_or(start.focus.y, |k| k.z as f32),
+            flyby.positions.last().map_or(start.focus.x, |k| half_cell(k.x)),
+            flyby.positions.last().map_or(start.focus.y, |k| half_cell(k.z)),
             flyby.angles.last().map_or(start.yaw, |k| render_yaw(k.angle)),
         ),
     };
@@ -238,14 +244,20 @@ mod tests {
     use pop3_ai_script::interp::{ResolvedEndTarget, ResolvedPos, ResolvedZoom};
 
     #[test]
+    fn half_cell_halves_the_raw_byte() {
+        assert_eq!(half_cell(20), 10.0);
+        assert_eq!(half_cell(1), 0.5);
+    }
+
+    #[test]
     fn final_pose_prefers_end_target_over_the_last_keyframe() {
         let flyby = ResolvedFlyby {
             positions: vec![ResolvedPos { x: 1, z: 1, start: 0, duration: 1 }],
-            end_target: Some(ResolvedEndTarget { x: 20, z: 21, angle: 0, unknown: 0 }),
+            end_target: Some(ResolvedEndTarget { x: 20, z: 22, angle: 0, unknown: 0 }),
             ..ResolvedFlyby::default()
         };
         let (x, z, _, _) = final_pose(&flyby, &CameraRig::default());
-        assert_eq!((x, z), (20.0, 21.0));
+        assert_eq!((x, z), (10.0, 11.0), "half-cell resolution, not a literal cell index");
     }
 
     #[test]
@@ -256,7 +268,7 @@ mod tests {
             ..ResolvedFlyby::default()
         };
         let (x, z, _, pitch) = final_pose(&flyby, &CameraRig::default());
-        assert_eq!((x, z), (9.0, 8.0), "the last position keyframe, not the first");
+        assert_eq!((x, z), (4.5, 4.0), "the last position keyframe, not the first, halved");
         assert!((pitch - PITCH_RANGE.0).abs() < 1e-6, "the last zoom keyframe");
     }
 
