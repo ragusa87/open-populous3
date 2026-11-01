@@ -402,21 +402,33 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Spent on training units: the stores are filled as in the original (`production::charge` in `ManaPool::distribute`: half of `incoming` before the spells, at most `cost / 32` each, a second share with every spell full, 100 a turn given back while making nothing). Left, each blocked rather than ready to code: a negative `incoming` (casts) taking mana back from the stores - depends on resolving the still-open "A cast's mana cost" item above (`incoming -= cost` on top of our prepaid charges, or instead of them? - a clean-room question, `Mana` has no subtraction-from-`incoming` path to extend yet); and the stores counted in the shaman death loss - the file's own "needed + stored building mana" alternative applies only to a controller-type-2 ("human") tribe, and no controller type is modelled yet (`GameMap::shaman_died` only ever reads `pool.bank` - the same tribe/controller-type gap `training::train_cost` has, see "Tribes" below).
 - [x] Earthquake and Firestorm (`spells.md`): Firestorm's scheduled `panicking_blast` fireballs are done in full; Earthquake's shake-and-sink (terrain part) and its three building-shake checks (`WorldEvent::Shake`, "The tick" above) are both done now, leaving only the trace's "possibly two lava flows". Angel of Death, Armageddon (full mechanic, see below)... still to do, as traced in pop3-rev-analysis.md "Per spell" and "Components". None of Earthquake's lava, Volcano's lava/turn-110 kill or Swamp route through `effect::hurts`/the shield check: a shielded unit still drowns or burns when the ground under it changes (reported, not traced), unlike a blast, lightning, swarm or hypnotise. Lightning is done (`lightning`), its victims now carbonized too (anim 97, "Units" above). Burning trees (`Tree::burning`, 127 turns then burnt to size 0) and the ground fire (`ground_fire`, 48 turns) have guessed lengths: the original's own ground-fire object (scenery class 5 type 0xA, not an effect — "Fireball impact") gets its burn countdown from 0x4A8C60 with param 22, the exact resulting turn count not yet decoded; trace that function and the original's scenery state 5; plants, wood piles and fires burning too (burn cell 7/0x05).
 - [x] Angel of Death (model 13, `spells.md`, pop3-rev-analysis.md "Angel of Death mechanics"): the logic is in
-  (`game_core::angel_of_death`), the art is not — `UnitKind::AngelOfDeath` is deliberately left out of
-  `UnitKind::ALL`, so it's simulated but never drawn. Resolved, separate session: the original draws it as a real
-  3D object-bank mesh (like a vehicle), not a 2D unit sprite — the already-catalogued "winged death" model
-  (`objects.md`/`catalog.rs`), whose `WINGED_DEATH_TOTEM`/`WINGED_DEATH_PERCHED` variants we already load for the
-  totem gift's static monument. The flying creature itself needs the OTHER two variants we don't yet reference
-  anywhere, `WINGED_DEATH_BACK` (100, used while descending/diving) and `WINGED_DEATH_ALT` (107, used while
-  cruising level), cross-blended over up to 6 ticks whenever its vertical motion changes rather than swapped
-  instantly (pop3-rev-analysis.md "Angel of Death mechanics" "Visuals" — the exact 3-step blend table isn't
-  pinned down, a straight crossfade/lerp between the two meshes over those ticks is a reasonable approximation).
-  `WINGED_DEATH` itself (7, "front") is not used by the original's own flight code and is not needed for this.
-  Cast: an invisible
-  meteor falls for `FALL_TICKS` (8), then a real terrain ripple (`Shockwave`, an expanding-then-settling ring, 9
-  ticks) plus a plain `blast::effect` (the same 140/98 push a building's own destruction and Lightning share) both
-  fire at once, and the real creature appears (`WorldEvent::SpawnAngelOfDeath`). From there it runs entirely on
-  its own (`GameMap::tend_angels_of_death`), never through `Command` (`Action::can_take_orders`'s own exclusion
+  (`game_core::angel_of_death`), and so is its art now (`game-client`'s own `angel_of_death.rs`/`angel_meteor.rs`,
+  separate session): `UnitKind::AngelOfDeath` is still deliberately left out of `UnitKind::ALL` (no 2D unit
+  sprite, never drawn by the ordinary `units/` pipeline), but it now has its own `views::WorldView`, drawing the
+  original's real 3D object-bank mesh instead (like a vehicle) — the already-catalogued "winged death" model
+  (`objects.md`/`catalog.rs`), whose `WINGED_DEATH_TOTEM`/`WINGED_DEATH_PERCHED` variants the totem gift's static
+  monument already loads. The flying creature itself uses the OTHER two variants, `WINGED_DEATH_BACK` (100, used
+  while descending/diving) and `WINGED_DEATH_ALT` (107, used while cruising level), cross-blended whenever its
+  vertical motion changes direction rather than swapped instantly (pop3-rev-analysis.md "Angel of Death
+  mechanics" "Visuals" — the exact 3-step blend table isn't pinned down, so `angel_of_death.rs` [client] does a
+  straight linear crossfade between the two meshes instead, `[ours]`, over `BLEND_TICKS` once its height last
+  changed direction, tracked client-side since `Flight` itself keeps no history of its own). With
+  `--no-original`, a stand-in flattened box instead (swept narrower for diving, wide for cruising). Its ground
+  shadow needed no new code: `units/shadow.rs` already casts one for every unit regardless of kind. A unit it has
+  grabbed (`Action::Grabbed`) is now drawn at its captor's own flight height too (`units::carried`), rather than
+  dragged along the ground while the angel carries it off overhead — the simulation only ever copied its `x`/`z`
+  to match, not its height. `WINGED_DEATH` itself (7, "front") is not used by the original's own flight code and
+  was not needed for this. The cast's own invisible meteor fall now trails a shower of glowing spark particles
+  around its line of fall (`angel_meteor.rs` [client], pop3-rev-analysis.md: "36... orbiter spark particles...
+  scattered around it with staggered lifetimes" — approximated as each born at its own point along the fall and
+  fading in and out over its own short life, `[ours]`, the particle-by-particle choreography not traced further).
+  The ground shockwave itself needed no client code at all: it is a real terrain change
+  (`TerrainChange::AngelOfDeathShockwave`, an expanding-then-settling ring, 9 ticks), redrawn by the terrain mesh
+  the same as any other. Still not drawn separately: the spawn-moment blast (`SimpleBlast`, like Lightning's and a
+  building's own destruction, already invisible by convention — a push/damage effect, not a decal). Cast: the
+  meteor falls for `FALL_TICKS` (8), then the ripple and the blast fire at once, and the real creature appears
+  (`WorldEvent::SpawnAngelOfDeath`). From there it runs entirely on its own (`GameMap::tend_angels_of_death`),
+  never through `Command` (`Action::can_take_orders`'s own exclusion
   list keeps it, and whoever it grabs, unorderable and unselectable): hunts a rival angel first, else the nearest
   eligible enemy anywhere on the map (shamans included); grabs it once close (`Action::Grabbed`, no orders, no
   movement of its own, no dedicated "held" pose — none was found either) and carries it `CARRY_TICKS` (28) before
