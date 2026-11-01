@@ -78,6 +78,10 @@ impl Headcount {
 pub const SUPPLY: [u16; 3] = [3, 5, 7];
 /// A tribe never has room for more, whatever its huts.
 pub const MAX_POPULATION: u16 = 200;
+/// A flat per-tribe base added on top of the huts' own supply, even with no huts at all
+/// (pop3-rev-analysis.md "Huts: breeding and growth": `load_level` writes `tribe+0x921 = 6` for every
+/// tribe unconditionally, not a `constant.dat` entry).
+pub const BASE_POPULATION: u16 = 6;
 
 /// A tribe's population and its built huts per size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -87,9 +91,9 @@ pub struct Housing {
 }
 
 impl Housing {
-    /// The room the huts give: their supply, at most `MAX_POPULATION`.
+    /// The room the huts give plus `BASE_POPULATION`, at most `MAX_POPULATION`.
     pub fn room(&self) -> u16 {
-        self.huts.iter().zip(SUPPLY).map(|(&n, s)| n * s).sum::<u16>().min(MAX_POPULATION)
+        (BASE_POPULATION + self.huts.iter().zip(SUPPLY).map(|(&n, s)| n * s).sum::<u16>()).min(MAX_POPULATION)
     }
 
     /// No room left: breeding stops.
@@ -335,19 +339,20 @@ mod tests {
     #[test]
     fn housing_counts_built_huts_by_size_up_to_two_hundred() {
         let mut map = empty();
-        assert!(map.housing(TribeId::Blue).full(), "no hut: no room");
+        assert!(!map.housing(TribeId::Blue).full(), "the flat base of 6 gives room even with no hut");
+        assert_eq!(map.housing(TribeId::Blue).room(), BASE_POPULATION);
         hut(&mut map, TribeId::Blue, 1, 512);
         hut(&mut map, TribeId::Blue, 1, 2 * 512);
         hut(&mut map, TribeId::Blue, 3, 3 * 512);
         hut(&mut map, TribeId::Red, 2, 4 * 512);
         map.add_building(Building { used: 0, ..Building::new(BuildingKind::Hut { size: 2 }, TribeId::Blue, 5 * 512, 5 * 512, 0) });
-        for _ in 0..12 {
+        for _ in 0..18 {
             add(&mut map, TribeId::Blue, UnitKind::Brave);
         }
         let housing = map.housing(TribeId::Blue);
         assert_eq!(housing.huts, [2, 0, 1], "built huts of the tribe only");
-        assert_eq!(housing.room(), 13);
-        assert_eq!(housing.population, 12);
+        assert_eq!(housing.room(), 19, "the huts' 13 plus the flat base of 6");
+        assert_eq!(housing.population, 18);
         assert!(!housing.full());
         add(&mut map, TribeId::Blue, UnitKind::Warrior);
         assert!(map.housing(TribeId::Blue).full(), "at the room");

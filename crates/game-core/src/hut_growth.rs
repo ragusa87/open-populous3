@@ -205,7 +205,8 @@ mod tests {
         let mut map = bare();
         let hut = built_hut(&mut map, 1, (10 * 512, 10 * 512));
         map.buildings.iter_mut().find(|b| b.id == hut).unwrap().breed = 50;
-        for p in 0..crate::headcount::SUPPLY[0] {
+        let room = crate::headcount::SUPPLY[0] + crate::headcount::BASE_POPULATION;
+        for p in 0..room {
             map.units.push(Unit::new(crate::id::Id::from_raw(1000 + p as u32), TribeId::Blue, UnitKind::Brave, (0, 0)));
         }
         map.units.sort_by_key(|u| u.id);

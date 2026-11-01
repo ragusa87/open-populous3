@@ -528,15 +528,14 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   (`breed`) and red (`grow`) bars, and a star animation where a bred brave appears. `SPROG%`'s full 20-band table
   is now confirmed from `constant.dat` directly (pop3-rev-analysis.md "Huts: breeding and growth"), replacing the
   earlier `[ours]` linear-interpolation guess - check `hut_growth.rs`'s own table against it.
-- [ ] **Population cap is missing the per-tribe base of 6** (pop3-rev-analysis.md "Huts: breeding and growth",
+- [x] **Population cap was missing the per-tribe base of 6** (pop3-rev-analysis.md "Huts: breeding and growth",
   "Impact on our specs" rule 5): the original's `can_breed` cap is `min(200, 6 + sum(hut supply))` - a flat 6
   added per tribe, hardcoded in `load_level` (0x42B428) for every tribe regardless of hut count, not in
-  `constant.dat`. `headcount::Housing::room` (`game-core/src/headcount.rs`) computes `min(200, sum(hut supply))`
-  only, with no base term, so every tribe's real cap is undercounted by 6 (e.g. two small huts: ours caps
-  breeding at 6, the original at 12). Add a `const BASE_POPULATION: u16 = 6` (or a `Balance::Huts` field) and
-  include it in `room()`; `ai.rs`'s `housing.room()` read inherits the fix automatically. Does not affect
-  `convert.rs`/`sermon.rs`'s own `MAX_POPULATION` (200) checks - those match a separate, genuinely flat exe
-  check (preacher conversion's own tribe+0x89DAE5 population counter), not `can_breed`'s hut-based cap.
+  `constant.dat`. Fixed: `headcount::BASE_POPULATION: u16 = 6` added and included in `Housing::room()`
+  (`game-core/src/headcount.rs`); `ai.rs`'s `housing.room()` read and the client's population strip
+  (`hud/population.rs`) inherit the fix automatically. Does not affect `convert.rs`/`sermon.rs`'s own
+  `MAX_POPULATION` (200) checks - those match a separate, genuinely flat exe check (preacher conversion's own
+  tribe+0x89DAE5 population counter), not `can_breed`'s hut-based cap.
 - [x] `game_core::balance`: `Turns` (original game turns) converted to ticks (`Balance::ticks`, the identity
   today), `Balance::ours()` defaults, grouped by topic (`Huts`, `Training`, `Income`), stored on `GameMap` and
   read by `hut_growth.rs`, `training.rs`, `headcount::mana_income` and `mana::ManaPool::tick` instead of their
