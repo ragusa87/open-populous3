@@ -426,9 +426,9 @@ impl GameMap {
     }
 
     /// Clears a flyby once it's over: finished on its own (the camera is already sitting at its last
-    /// keyframe, nothing to restore) or cancelled and past its grace period
-    /// (`FLYBY_CANCEL_GRACE_TICKS`) — the client takes `active_flyby` disappearing as "restore the
-    /// pre-flyby camera and give control back".
+    /// keyframe) or cancelled and past its grace period (`FLYBY_CANCEL_GRACE_TICKS`, the camera by
+    /// then eased to that same last keyframe) — the client takes `active_flyby` disappearing as
+    /// "give control back", nothing left to restore either way.
     pub(crate) fn tend_flyby(&mut self) {
         let Some(active) = &self.active_flyby else { return };
         let done = match active.interrupted_at {
@@ -442,8 +442,9 @@ impl GameMap {
 }
 
 /// How long "Cancelled flyby" shows before the camera restores and the player regains control
-/// (`GameMap::tend_flyby`): undocumented in the original, our own guess for "a few ticks".
-pub const FLYBY_CANCEL_GRACE_TICKS: crate::time::Ticks = crate::time::Ticks::secs(1);
+/// (`GameMap::tend_flyby`): measured live in the original at ~3 seconds (pop3-rev-analysis.md
+/// "Flyby cancel"), one interrupt point, not yet cross-checked against a second.
+pub const FLYBY_CANCEL_GRACE_TICKS: crate::time::Ticks = crate::time::Ticks::secs(3);
 
 #[cfg(test)]
 mod tests {

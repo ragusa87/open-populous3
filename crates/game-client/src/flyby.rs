@@ -3,7 +3,8 @@
 //! (`camera::camera_input` is suppressed the same way `armageddon::input_locked` already suppresses
 //! it) and a "Flyby" banner blinks bottom-right. Space (if `allow_interrupt`) sends
 //! `Command::CancelFlyby`: the banner switches to "Cancelled flyby" and the camera eases, over a
-//! short grace period (`game_core::ai_script::FLYBY_CANCEL_GRACE_TICKS`), from wherever it was at
+//! grace period (`game_core::ai_script::FLYBY_CANCEL_GRACE_TICKS`, ~3s, measured live - pop3-rev-analysis.md
+//! "Flyby cancel"), from wherever it was at
 //! that moment to the flyby's own last position (`end_target` if the script set one, else each
 //! channel's own last keyframe) — the same place it would have settled at had it been let play out,
 //! just reached early. Once the grace period is up the player regains control, read straight off
