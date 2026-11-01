@@ -673,6 +673,18 @@ fn perched(map: &game_core::map::GameMap, heights: &crate::buildings::ModelHeigh
     crate::buildings::perch(b, *heights.0.get(&b.id)?)
 }
 
+/// How high a unit grabbed by an Angel of Death (`Action::Grabbed`) is drawn over the ground under it, render
+/// units: its captor's own flight height — the simulation only copies its `x`/`z` to the angel's each tick, not
+/// its height (`game_core::angel_of_death::tend_one_angel`), so left alone it would appear dragged along the
+/// ground while its captor flies off overhead instead of carried with it.
+fn carried(map: &game_core::map::GameMap, u: &game_core::unit::Unit, height_scale: f32) -> Option<(Vec2, f32)> {
+    use game_core::unit::Action;
+    let Action::Grabbed { by } = u.action else { return None };
+    let flight = map.unit(by)?.flight?;
+    let ground = map.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
+    Some((Vec2::ZERO, (flight.height - ground).max(0) as f32 * height_scale))
+}
+
 /// How high a jump into or out of a vehicle goes over the straight line, cells.
 const HOP: f32 = 0.3;
 
@@ -885,7 +897,10 @@ fn pull_to_eye(
         // Aboard: at the deck of a hull drawn at the buildings' scale, from a view drawn at the units' (its
         // children's offsets are scaled with it).
         let riding = u.and_then(|u| riding(&map.0, u, clock.cell_pos(unit.0, u), clock.alpha(), params.0.height_scale)).map(|p| Vec3::Y * p.1 * sizes.get(ObjectGroup::Buildings));
-        let up = perch.or(riding);
+        // Grabbed by an Angel of Death: at its own flight height, drawn at the scenery scale its object-bank
+        // mesh uses (`angel_of_death::AngelOfDeathView`).
+        let carried = u.and_then(|u| carried(&map.0, u, params.0.height_scale)).map(|p| Vec3::Y * p.1 * sizes.get(ObjectGroup::Scenery));
+        let up = perch.or(riding).or(carried);
         // Aboard, not pulled at all: its hull's near side hides it as it should (seen inside, not in front).
         let pull = if perch.is_some() { PERCH_PULL } else if riding.is_some() { 0.0 } else { PULL_TO_EYE };
         let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, pull);
@@ -934,6 +949,20 @@ mod tests {
         let (pos, h) = riding(&map, map.unit(id).unwrap(), cells, 0.0, 0.01).unwrap();
         assert!((pos - Vec2::new(58.5, 60.5)).length() < 0.1 && h == 0.0, "the jump starts where it stood");
         assert_eq!(riding(&map, &map.units[0], cells, 0.0, 0.01), None, "on foot");
+    }
+
+    #[test]
+    fn a_grabbed_victim_is_drawn_at_its_captors_flight_height_not_on_the_ground() {
+        use game_core::angel_of_death::Flight;
+        let mut map = game_core::map::GameMap::sandbox_units();
+        let at = (64 * 512, 64 * 512);
+        let angel = map.spawn(TribeId::Red, UnitKind::AngelOfDeath, at).id;
+        let ground = map.terrain.height_at(at.0 as u32, at.1 as u32, 512);
+        map.unit_mut(angel).unwrap().flight = Some(Flight { heading: game_core::angle::Angle::ZERO, height: ground + 1000 });
+        let victim = map.spawn(TribeId::Blue, UnitKind::Brave, at).id;
+        assert_eq!(carried(&map, map.unit(victim).unwrap(), 0.5), None, "not grabbed yet");
+        map.unit_mut(victim).unwrap().action = Action::Grabbed { by: angel };
+        assert_eq!(carried(&map, map.unit(victim).unwrap(), 0.5), Some((Vec2::ZERO, 500.0)));
     }
 
     #[test]
