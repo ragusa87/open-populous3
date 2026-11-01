@@ -827,6 +827,9 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     right-handed mirror) already computes - this was an existing, independently-motivated convention, not
     something added to fit this data. See pop3-rev-analysis.md "D3D axis caveat" and pop3-rev `docs/
     camera.md` "D3D axis caveat for YAW - RESOLVED".
+    - [ ] Worth a regression test even though no fix is needed: the mirror negation in `render_yaw` reads like
+      an arbitrary detail someone could "simplify away" later with nothing to catch it. Assert
+      `render_yaw(raw)` within ~5° (mod 360) of `(0,0°) (681,240.29°) (744,229.22°) (1438,107.23°)`.
   - `ZOOM` does NOT change camera distance at all: it blends between two named camera PRESETS' render
     parameters (bend/K and a few other render-block fields), not a continuous world-unit zoom.
     `flyby.rs`'s `zoom_to_distance` (-100..100 linear onto `DISTANCE_RANGE`) has the wrong shape entirely,
@@ -841,16 +844,49 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     touches `rig.pitch`, see below) - the real camera instead stays at a ~constant radius and orbits
     toward vertical. Fixing this properly means reworking `eye_offset`'s zoom model (pitch-driven, not
     distance-driven) for both the flyby and ordinary manual zoom, not just retuning `DISTANCE_RANGE`.
-  - [ ] **Confirmed, from the same user comparison**: script zoom value 0 means "idle" (~20.4° pitch,
-    `camera::GROUND_PITCH_DEG`), not the arithmetic midpoint of `PITCH_RANGE` (~49.5°) that
-    `zoom_to_pitch(0)` currently returns - the idle-default raw accumulator is exactly what zoom 0 settles
-    back to ("0 really is neutral", pop3-rev `docs/camera.md` "Zoom channel (`+0x2c`) trajectory..."), and
-    that accumulator drives pitch directly. Since idle sits much closer to the "in" end of `PITCH_RANGE`
-    (10.5°) than the "out" end (88.6°), the real -100..100 -> pitch curve is asymmetric around 0, not
-    `zoom_to_pitch`'s current straight line - matches the already-documented "out"/"in" slope asymmetry in
-    the raw accumulator. Curve shape between the two endpoints and this new zoom=0 anchor still not solved
-    - see pop3-rev-analysis.md "The AI-script zoom channel" and pop3-rev `docs/camera.md` "Correction: flyby
-    zoom value 0 means 'idle'".
+  - [x] **Confirmed, calibrated, and FIXED in code**: script zoom value 0 means "idle" (~20.4° pitch,
+    `camera::GROUND_PITCH_DEG`), not the arithmetic midpoint of `PITCH_RANGE` (~49.5°) the old `zoom_to_pitch(0)`
+    returned. Re-running the yaw check's flat-hold-detection pipeline against `cam5.txt`/`cam7.txt`'s matrix
+    PITCH instead, matched to level 1's 4 `ZOOM` keyframes, gave real (zoom, pitch) pairs, tight across both
+    captures: `(-100, -55.37°) (10, -19.51°) (80, -12.70°) (0, -20.56°)` - vs. the old formula's
+    `(-100, 88.60°) (10, 45.64°) (80, 18.31°) (0, 49.55°)`, wrong by 5.6-33.2° on EVERY point. `PITCH_RANGE`
+    (10.5°-88.6°) is real but is the range reached by physically holding the manual zoom key to the
+    whole-planet globe view - a different input than the script's bounded `-100..100`; level 1's own script
+    never gets anywhere near those endpoints. `zoom_to_pitch` now uses a piecewise-linear fit through these
+    points (`KNOTS` in `flyby.rs`, zoom 80-100 extrapolated - unconfirmed, no script here exercises past 80),
+    with a regression test (`zoom_is_calibrated_against_real_flyby_pitch_traces`) pinning it within 6° so a
+    later cleanup can't flatten it back into a straight `PITCH_RANGE` span without a test catching it. See
+    pop3-rev-analysis.md "The AI-script zoom channel" and pop3-rev `docs/camera.md` "`flyby.rs::zoom_to_pitch`
+    calibrated against the same traces".
+  - [x] **SOLVED, a later session - it's FOV, confirmed, and it moves with zoom**: a user also felt camera
+    distance "should be ~10 cells" from a screenshot (distance and FOV are confounded in a still image,
+    `1/(distance*tan(fov/2))`). `D` (`GROUND_DISTANCE`=25.4 cells) is one of the best-measured constants here
+    (confirmed constant three independent ways: live manual-zoom round trip, static zoom-chain trace, and the
+    `0x417510`/`CREATE_MSG_INFORMATION_ZOOM`/`ZOOM_TO`/`TRACK_TO_MARKER` alternate-mechanism lead checked
+    against level 1's real `cpscr010.dat` via `ai_script_info` and RULED OUT - none of those opcodes appear
+    anywhere in the script, only the one known `FLYBY_SET_EVENT_ZOOM`-driven flyby). `DEFAULT_FOV` (35°), by
+    contrast, was never traced from the exe at all ("matched by eye") - confirmed the actual culprit, and it's
+    not even a single wrong constant: **the per-axis screen-scale step "Landscape projection" used to leave open
+    is now fully traced** (`focal_px = Q · 2^(S-16)`, isotropic - pop3-rev `docs/camera.md` "The per-axis screen
+    scale SOLVED"), and **`Q` is itself one of the flyby `ZOOM` channel's blended fields**, live-confirmed
+    swinging from ~40786 (idle) to ~71207 (level 1's own "zoomed in" extreme) - i.e. the original's "zoom"
+    changes effective FOV on top of pitch+bend, a real telephoto effect, not just an orbit (pop3-rev
+    `docs/camera.md` "Zoom changes effective FOV too").
+    **Fixed in code**: `flyby.rs` now has a `zoom_to_fov` next to `zoom_to_pitch`, driven by the same script
+    zoom value, both sharing one `piecewise_deg` helper. `CameraRig.fov` is the vertical FOV already
+    (window-size-independent once in degrees), so no window dimensions are needed in our own code even though
+    the original's own `focal_px = Q/32`, `FOV_y = 2*atan(half_height/focal_px)` derivation used its capture's
+    640x480 window to get there. `FOV_KNOTS`: `(-100,21.6°) (0,21.3°) (80,12.3°) (100,10.05°)` - the last point
+    extrapolates the 0..80 trace's own slope, same spirit as `PITCH_KNOTS`' own 80..100 guess (zoom 80-100 is
+    unconstrained, no level script here exercises it). Regression tests:
+    `zoom_is_calibrated_against_real_flyby_fov_traces` (pins the 3 real points within 1°) and
+    `zooming_in_narrows_the_fov_not_widens_it`. `GROUND_DISTANCE`/`D` itself did NOT change.
+    `origin_x`/`origin_y` (screen center) are also now traced (`render_block[+0x2a or +0x2c] + half_window`) -
+    Y matches live exactly, X has an unexplained constant ~50px offset not yet resolved, doesn't affect FOV -
+    not acted on in code, nothing in `flyby.rs` currently needs the screen origin.
+    **Not yet checked**: whether MANUAL zoom (not just the flyby) also moves `Q` the same way - the existing
+    "Manual zoom is a pitch+bend orbit" finding above only ever recorded `D`/`S`/`K`/the matrix, not `Q`.
+    See pop3-rev `docs/camera.md` "The per-axis screen scale SOLVED" / "Zoom changes effective FOV too".
   - `INT_POINT` (look-at-a-point yaw channel, unused by level 1) and `TOOLTIP` (resolves to a generic
     advisor-notification system; its `idx=0` case walks to a "head"/monument scenery object - almost
     certainly the reported "a building/pyramid is presented" behaviour) were traced on both the creation and

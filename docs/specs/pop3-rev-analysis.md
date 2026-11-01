@@ -1660,13 +1660,27 @@ screen = (x', y') · (1 << (S + 16)) / z'             # S = perspective shift, t
 | K | 46 000, constant at the idle zoom level | bend: drop = `4 d² K / 2³²` render units = **0.01097 × d² cells** (d in cells) |
 | D | 6500 | camera distance: 6500 render units (25.4 cells) behind the focus |
 | S | 11 | perspective shift |
+| Q | 40 786, idle default | **a later session**: the per-axis screen-scale/focal-length factor this section used to leave as "not checked" - see below |
 | M | pure rotation (column norms 16 384) | yaw follows the player; pitch sits at ~20.4° (cos 15 357/16 384, sin 5709/16 384) only at the **idle zoom level** - confirmed live (pop3-rev `docs/camera.md` "Manual zoom is a pitch+bend orbit") to vary continuously with manual zoom input too, from ~-10.5° (zoomed furthest in) down to ~-88.6° (the whole-planet globe view), not just during AI-script flybys - see "Camera flyby state" below |
 
 - The bend is measured in view space (the camera's horizontal and depth axes after rotation), not around the
   focus point on the ground; with a 20° pitch the two are close.
 - Examples: 1.1 cells of drop at 10 cells, 4.4 at 20, 33 at the 55-cell edge of the grid.
 - Heights share the horizontal scale (the matrix is a pure rotation), so the highest ground (1024) is **4 cells**
-  above the sea, assuming the screen scales both axes alike (per-axis screen shifts not checked).
+  above the sea.
+- **The per-axis screen scale, SOLVED a later session** (full derivation: pop3-rev `docs/functions.tsv`'s
+  `0x46de00`/`coord_pnts_global_convert` row, `docs/camera.md` "The per-axis screen scale SOLVED"): past the
+  `screen = (x',y')*2^(S+16)/z'` step above, each axis multiplies by a shared factor `Q` (read live off the
+  active tribe's own record) with a per-axis integer/float split (`shiftA`/`shiftB`, chosen from video-mode
+  flags) that **algebraically cancels out of the final result** - confirmed both symbolically and by hand-computing
+  a worked example. So the screen really does scale both axes alike, exactly as this section used to assume
+  without checking: `focal_px = Q · 2^(S-16)` (one real number, pixels, same for X and Y), then
+  `screen_x = origin_x + focal_px·x'/z'`, `screen_y = origin_y - focal_px·y'/z'` (Y subtracted, screen-down vs
+  math-up). At idle (`Q=40786`, `S=11`): `focal_px ≈ 1274.6`. `origin_x`/`origin_y` = screen center, computed as
+  `render_block[+0x2a or +0x2c] + screen_width_or_height/2` - live-confirmed exact for Y, off by a constant
+  ~50px for X for a reason not yet found (doesn't affect `focal_px` either way).
+- **`Q` is itself one of the flyby `ZOOM` channel's blended fields** - see "The AI-script zoom channel" below;
+  "zoom" changes effective FOV, not just pitch+bend.
 - K can change: a camera-preset blend mechanism (two variants - a multi-frame ease and a single-step blend, see
   the AI-script `ZOOM` channel below) reshapes K and a few other render parameters towards a target preset.
   During normal play it stayed at 46 000 on three levels (including levels 3 and 24) while rotating, and while
@@ -1740,10 +1754,22 @@ every turn while active:        zoom_accumulator += per-tick-increment(target_de
 `preset_blend_by_fraction` picks the tribe's CURRENT named camera preset and the adjacent one in the zoom-out
 (positive value) or zoom-in (negative value) direction, then linearly interpolates `result = A + (B - A) *
 |value| / 16384` into a handful of fields of the live render block used for landscape projection ("Landscape
-projection" above) - confirmed fields: K/bend, plus 3 more not yet named. **It does NOT touch D, the actual
-camera-distance field that formula uses**, and it does NOT write the still-unidentified render parameter from
-the candidates table above either (a different structure, despite sharing a similarly small offset by
-coincidence).
+projection" above) - confirmed fields: K/bend, **`Q` (the per-axis screen-scale/focal-length factor, named
+a later session - "Landscape projection" above)**, **the Y screen-origin offset (also named a later session)**,
+plus 2 more still not named. **It does NOT touch D, the actual camera-distance field that formula uses**, and it
+does NOT write the still-unidentified render parameter from the candidates table above either (a different
+structure, despite sharing a similarly small offset by coincidence).
+
+**New, a later session: "zoom" changes effective FOV too, confirmed live** (headless capture of level 1's own
+opening flyby, pop3-rev `docs/camera.md` "Zoom changes effective FOV too"). `Q` swings from ~40786 (idle) to
+~39251 (the already-documented -55.4° dive plateau) to ~71207 (the already-documented -12.7° "zoomed in"
+plateau, "Camera flyby state" below) - at the idle `S=11`, that's `focal_px` swinging from ~1275 (idle) to
+~1227 (dive, barely wider FOV) to ~2225 (zoomed in, noticeably NARROWER FOV, ~12-16° vs idle's ~21-28° at
+640x480). The screen's Y-origin term swings in lockstep (16 -> 103 at the same turns). **So the original's
+"zoom" is a coordinated four-way blend - pitch (the matrix), K/bend, focal-length (`Q`), and a vertical
+recenter - not just a pitch+bend orbit at a fixed FOV.** This is the real mechanism behind a "zoomed in" shot
+looking like an actual telephoto shot, more than camera distance ever could (distance is proven constant, see
+"Distance vs. FOV" / `0x41c700`'s own row above and below).
 
 **Impact on our specs**: this means the original's "zoom" during a flyby is not a continuous change to camera
 distance at all - it blends between two preset views' render parameters (bend and a few others). `flyby.rs`'s
@@ -1765,9 +1791,55 @@ system drives pitch directly ("Manual zoom is a pitch+bend orbit", above). So sc
 sits much closer to the "in" end (10.5°) than the "out" end (88.6°), the real -100..100 -> pitch curve is
 asymmetric around 0, not the straight line `zoom_to_pitch` currently implements (consistent with the
 already-documented "out"/"in" slope asymmetry in the raw accumulator, Δraw/Δzoom ≈ +2.0 "out" vs +0.55 "in").
-**Not solved**: the curve's exact shape between the two confirmed endpoints and this zoom=0 anchor - three
-points constrain it, they don't determine it. Full write-up: pop3-rev `docs/camera.md` "Correction: flyby zoom
-value 0 means 'idle'".
+**Solved, a later session, with real calibration data**: re-running the same flat-hold-detection pipeline built
+for the `ANGLE` check (above) against `cam5.txt`/`cam7.txt`'s matrix pitch instead of yaw, matched to level 1's
+4 `FLYBY_SET_EVENT_ZOOM` keyframes in script order, gives 4 real (zoom, pitch) pairs, tight across both
+independent captures (<=0.3° apart):
+
+| zoom (script) | observed pitch | current `zoom_to_pitch` | error |
+|---|---|---|---|
+| -100 ("fully out") | -55.37° | 88.60° | 33.2° |
+| 10 | -19.51° | 45.64° | 26.1° |
+| 80 | -12.70° | 18.31° | 5.6° |
+| 0 (final) | -20.56° | 49.55° | 29.0° |
+
+Every point is wrong, not just the zero-point - confirms this is a wrong SHAPE, not a wrong offset.
+`PITCH_RANGE` (10.5°-88.6°) is real (confirmed live, "Manual zoom is a pitch+bend orbit" above) but it's the
+range reached by physically holding the manual zoom key all the way to the whole-planet globe view - a
+completely different input than the AI script's bounded `-100..100` argument. Level 1's own script never drives
+the camera anywhere near that: its practical range is roughly -55.4° (script -100) to -12.7° (script 80,
+the steepest "in" value this script happens to use), through an idle default of -20.4° at script 0 - `zoom_to_pitch`
+was fit against the wrong input's range entirely, not just missing its zero-point. The already-documented
+out/in slope asymmetry in the raw zoom accumulator (ratio ~3.6) reproduces almost exactly in pitch-degree units
+too (0.35°/zoom-unit "out" vs 0.097°/zoom-unit "in", ratio ~3.6) - an independent cross-check of the same
+asymmetric curve shape, now in the units that actually matter for `flyby.rs`.
+
+**Practical fix**: replace `zoom_to_pitch`'s target values, not just retune its zero-point - a piecewise curve
+through `(-100,-55.4) (0,-20.4) (10,-19.5) (80,-12.7)` would already fit this level's own script far better than
+one linear span across `PITCH_RANGE`; more levels' own flyby scripts, run through the same pipeline, would pin
+the shape further (level 1 never exercises zoom past 80, so the curve from 80 to 100 is still unconstrained).
+Regression-test fixtures ready to use (assert `zoom_to_pitch(z).abs()` within ~6° of these):
+`(-100, 55.37), (10, 19.51), (80, 12.70), (0, 20.56)`. The negation/shape here is exactly the kind of "looks
+like an arbitrary guess" code a later cleanup could simplify away without a test pinning it down - same risk as
+`render_yaw`'s mirror, below. Full derivation: pop3-rev `docs/camera.md` "`flyby.rs::zoom_to_pitch` calibrated
+against the same traces".
+
+**Camera distance (`D`) and FOV - raised by a screenshot comparison, now SOLVED**: the user felt the camera's
+distance "should be ~10 cells," with the caveat that distance and FOV are confounded in a single screenshot
+(`1/(distance*tan(fov/2))`). `D` is one of the best-measured constants in this file (6500 render units/25.4
+cells, confirmed constant three independent ways now - a live manual-zoom round trip across the ENTIRE range,
+a static trace showing the flyby's zoom chain never touches it, and the `CREATE_MSG_INFORMATION_ZOOM`/`ZOOM_TO`/
+`TRACK_TO_MARKER` alternate-mechanism lead checked and RULED OUT against level 1's real script, `cpscr010.dat`,
+below) while `camera::DEFAULT_FOV` (35°) was, by its own code comment, never traced from the exe at all
+("matched by eye"). **The mismatch is confirmed to be FOV, not distance - and FOV itself isn't a single
+constant, it moves with zoom.** This exe's landscape renderer isn't a standard D3D perspective-matrix pipeline
+(see "Landscape projection" above, now fully solved past the `S`/per-axis-scale step) - at idle,
+`focal_px = Q·2^(S-16) ≈ 1274.6` gives `FOV_y≈21.3°`/`FOV_x≈28.2°` at a 640x480 window (narrower than
+`DEFAULT_FOV`'s 35° guess, not wider); at level 1's own "zoomed in" extreme (`Q≈71207`), `focal_px≈2225` gives
+`FOV_y≈12.3°`/`FOV_x≈16.3°` - markedly narrower still, an actual telephoto effect. **Practical fix**: `flyby.rs`
+needs a `zoom_to_fov` alongside `zoom_to_pitch`, both driven by the same script zoom value - see TODO.md "Camera
+flyby state" for calibration points and the exact formula. Full write-up: pop3-rev `docs/camera.md` "The
+per-axis screen scale SOLVED" and "Zoom changes effective FOV too".
 
 ### The AI-script POS and ANGLE channels, also traced end to end [exe]
 Same per-kind dispatch as the `ZOOM` channel above (pop3-rev `docs/camera.md` "POS and ANGLE channels", every
@@ -4909,8 +4981,11 @@ behaviour at the margins, not the overall shape.
   `+0x74`/`+0x78`/`+0x6c` straight off a live `kind=blast` row (`measure_blast.py` already logs them) rather
   than inferring them from a pushed person's velocity.
 - Walking: whether slopes change the speed, and the speeds of wildmen, the angel of death and creatures.
-- Projection: the per-axis screen scale (0xAFC2F4 + 0xCF8 / 0xCFC), which decides the on-screen height ratio, and
-  which views (zoom levels, cut scenes) change the render block.
+- ~~Projection: the per-axis screen scale (0xAFC2F4 + 0xCF8 / 0xCFC)~~ **SOLVED, a later session** - it's
+  algebraically inert (X and Y share one real scale, the split is just internal fixed-point precision), and
+  which render-block fields the flyby's `ZOOM` channel changes is now identified further too (it includes the
+  screen-scale/focal-length factor itself, not just K/bend) - see "Landscape projection" and "The AI-script
+  zoom channel" above.
 - Sites: which code creates the pillars at level load, and whether the levelling forces every cell of its disc.
 - Spells: burning trees (scenery state 5), the partial building explosion of the earthquake, whether ghosts
   expire, what starts the landscape-shaping mode, what a person does when the ground under it floods, the
