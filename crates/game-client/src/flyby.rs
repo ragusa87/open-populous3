@@ -3,18 +3,27 @@
 //! (`camera::camera_input` is suppressed the same way `armageddon::input_locked` already suppresses
 //! it) and a "Flyby" banner blinks bottom-right. Space (if `allow_interrupt`) sends
 //! `Command::CancelFlyby`: the banner switches to "Cancelled flyby" and the camera eases, over a
-//! short grace period (`game_core::ai_script::FLYBY_CANCEL_GRACE_TICKS`), from wherever it was at
+//! grace period (`game_core::ai_script::FLYBY_CANCEL_GRACE_TICKS`, ~3s, measured live - pop3-rev-analysis.md
+//! "Flyby cancel"), from wherever it was at
 //! that moment to the flyby's own last position (`end_target` if the script set one, else each
 //! channel's own last keyframe) — the same place it would have settled at had it been let play out,
 //! just reached early. Once the grace period is up the player regains control, read straight off
 //! `active_flyby` disappearing (`GameMap::tend_flyby`), no separate client-side timer.
 //!
-//! The zoom (-100..100) -> `pitch` mapping's endpoints are confirmed (pop3-rev-analysis.md "Landscape
-//! projection": ~10.5° zoomed in to ~88.6° at the whole-planet globe view, distance held constant
-//! throughout); the shape in between and the per-keyframe easing are both still our own guesses, same
-//! spirit as `camera.rs`'s own `DEFAULT_FOV` comment.
+//! The zoom (-100..100) -> `pitch` mapping is a piecewise-linear fit through real (zoom, pitch) pairs
+//! measured live off two independent flyby captures, matched to level 1's own `FLYBY_SET_EVENT_ZOOM`
+//! keyframes (pop3-rev-analysis.md "The AI-script zoom channel, traced end to end"): the script's bounded
+//! `-100..100` never reaches `PITCH_RANGE`'s own confirmed extremes (those come from physically holding the
+//! manual zoom key to the whole-planet globe view, a different input entirely) - `zoom_to_pitch` used to be
+//! fit against that wrong range. Zoom 80..100 is still a guess (no level script traced so far exercises past
+//! 80); the per-keyframe easing is a guess too, same spirit as `camera.rs`'s own `DEFAULT_FOV` comment.
+//!
+//! The original's "zoom" is a coordinated multi-field blend, not just a pitch+bend orbit at a fixed lens:
+//! `zoom_to_fov` drives `CameraRig.fov` the same way `zoom_to_pitch` drives pitch, fit to live-measured
+//! vertical FOV values at the same keyframes (pop3-rev-analysis.md "Zoom changes effective FOV too" - a real
+//! telephoto effect zoomed in, not a wider view as `camera::DEFAULT_FOV`'s own "matched by eye" guess assumed).
 
-use crate::camera::{CameraRig, PITCH_RANGE};
+use crate::camera::CameraRig;
 use crate::keymap::{Shortcut, Shortcuts};
 use crate::sim_time::SimNow;
 use crate::units::{GameSchedule, PLAYER};
@@ -65,33 +74,67 @@ pub fn drive_camera(map: Res<CurrentMap>, now: Res<SimNow>, mut rig: ResMut<Came
     match active.interrupted_at {
         None => {
             let t = now.turns_since(active.start);
-            let xs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (k.x as f32, k.start, k.duration)).collect();
-            let zs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (k.z as f32, k.start, k.duration)).collect();
+            let xs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (half_cell(k.x), k.start, k.duration)).collect();
+            let zs: Vec<(f32, i32, i32)> = active.flyby.positions.iter().map(|k| (half_cell(k.z), k.start, k.duration)).collect();
             let angles: Vec<(f32, i32, i32)> = active.flyby.angles.iter().map(|k| (render_yaw(k.angle), k.start, k.duration)).collect();
             let zooms: Vec<(f32, i32, i32)> = active.flyby.zooms.iter().map(|k| (zoom_to_pitch(k.zoom as f32), k.start, k.duration)).collect();
+            let fovs: Vec<(f32, i32, i32)> = active.flyby.zooms.iter().map(|k| (zoom_to_fov(k.zoom as f32), k.start, k.duration)).collect();
             rig.focus.x = channel_value(playback.start.focus.x, &xs, t, Some(map_size)).rem_euclid(map_size);
             rig.focus.y = channel_value(playback.start.focus.y, &zs, t, Some(map_size)).rem_euclid(map_size);
             rig.yaw = channel_value(playback.start.yaw, &angles, t, Some(TAU));
             rig.pitch = channel_value(playback.start.pitch, &zooms, t, None);
+            rig.fov = channel_value(playback.start.fov, &fovs, t, None);
         }
         Some(at) => {
             let from = playback.cancel_from.get_or_insert_with(|| rig.clone()).clone();
-            let (tx, tz, tyaw, tpitch) = final_pose(&active.flyby, &playback.start);
+            let (tx, tz, tyaw, tpitch, tfov) = final_pose(&active.flyby, &playback.start);
             let p = now.turns_since(at) / FLYBY_CANCEL_GRACE_TICKS.get() as f32;
             rig.focus.x = ease_to(from.focus.x, tx, p, Some(map_size)).rem_euclid(map_size);
             rig.focus.y = ease_to(from.focus.y, tz, p, Some(map_size)).rem_euclid(map_size);
             rig.yaw = ease_to(from.yaw, tyaw, p, Some(TAU));
             rig.pitch = ease_to(from.pitch, tpitch, p, None);
+            rig.fov = ease_to(from.fov, tfov, p, None);
         }
     }
 }
 
-/// `-100 (out) .. 100 (in)` onto `PITCH_RANGE`, reversed: confirmed endpoints, guessed shape in between
-/// (ai-scripts.md "Flybys": "z from -100 (out) to 100 (in)"; pop3-rev-analysis.md "Landscape projection"
-/// for the pitch range itself). Distance is left alone, same as manual zoom (`camera::adjust_view`).
+/// One piecewise-linear fit, in degrees, over `knots` sorted by zoom; `z` clamped to the knots' own span.
+fn piecewise_deg(knots: &[(f32, f32)], z: f32) -> f32 {
+    let z = z.clamp(knots[0].0, knots[knots.len() - 1].0);
+    let i = knots.iter().rposition(|&(k, _)| k <= z).unwrap_or(0).min(knots.len() - 2);
+    let ((z0, d0), (z1, d1)) = (knots[i], knots[i + 1]);
+    let p = (z - z0) / (z1 - z0);
+    d0 + (d1 - d0) * p
+}
+
+/// `-100 (out) .. 100 (in)` (ai-scripts.md "Flybys": "z from -100 (out) to 100 (in)") onto pitch: a
+/// piecewise-linear fit through real (zoom, pitch) pairs traced off two independent flyby captures
+/// (pop3-rev-analysis.md "The AI-script zoom channel, traced end to end"). `PITCH_KNOTS`' first 4 points are
+/// that trace; the last (100, `PITCH_RANGE.0`) extends the same slope the 10..80 trace already has out to
+/// full zoom-in - unconfirmed past 80, but it lands within half a degree of a straight extrapolation, so
+/// likely close. Distance is left alone, same as manual zoom (`camera::adjust_view`).
+const PITCH_KNOTS: [(f32, f32); 5] = [(-100.0, 55.37), (0.0, 20.56), (10.0, 19.51), (80.0, 12.70), (100.0, 10.5)];
+
 fn zoom_to_pitch(z: f32) -> f32 {
-    let t = (z.clamp(-100.0, 100.0) + 100.0) / 200.0;
-    PITCH_RANGE.1 + (PITCH_RANGE.0 - PITCH_RANGE.1) * t
+    piecewise_deg(&PITCH_KNOTS, z).to_radians()
+}
+
+/// `-100..100` onto vertical field of view: a piecewise-linear fit through live-measured FOV_y values at the
+/// same keyframes `PITCH_KNOTS` was fit from (pop3-rev-analysis.md "Zoom changes effective FOV too": the
+/// zoom channel also blends the per-axis screen-scale factor `Q`, `focal_px = Q·2^(S-16)`,
+/// `FOV_y = 2·atan(half_height/focal_px)` - window-size-independent once converted to degrees). Zoom
+/// 80..100 has no trace either; `FOV_KNOTS`' last point extends the 0..80 trace's own slope, the same
+/// extrapolation spirit as `PITCH_KNOTS`.
+const FOV_KNOTS: [(f32, f32); 4] = [(-100.0, 21.6), (0.0, 21.3), (80.0, 12.3), (100.0, 10.05)];
+
+fn zoom_to_fov(z: f32) -> f32 {
+    piecewise_deg(&FOV_KNOTS, z).to_radians()
+}
+
+/// A raw `POS`/`TOOLTIP`/`END_TARGET` x or z value is a cell index at half-cell resolution
+/// (pop3-rev-analysis.md "Correction: raw byte is HALF-cell, not a literal cell index").
+fn half_cell(raw: i32) -> f32 {
+    raw as f32 * 0.5
 }
 
 /// A raw `FLYBY_SET_EVENT_ANGLE` value (2048ths of a turn) as a render yaw (`nature::angle_yaw`).
@@ -102,18 +145,19 @@ fn render_yaw(raw: i32) -> f32 {
 /// Where the camera would end up if the flyby played all the way through: `end_target` if the script
 /// set one, else each channel's own last keyframe, else (no data at all) wherever the camera already
 /// was when the flyby began (`start`). `end_target` carries no zoom (ai-scripts.md "Flybys"), so
-/// pitch always falls back to the last zoom keyframe regardless.
-fn final_pose(flyby: &ResolvedFlyby, start: &CameraRig) -> (f32, f32, f32, f32) {
+/// pitch and fov always fall back to the last zoom keyframe regardless.
+fn final_pose(flyby: &ResolvedFlyby, start: &CameraRig) -> (f32, f32, f32, f32, f32) {
     let (x, z, yaw) = match &flyby.end_target {
-        Some(end) => (end.x as f32, end.z as f32, render_yaw(end.angle)),
+        Some(end) => (half_cell(end.x), half_cell(end.z), render_yaw(end.angle)),
         None => (
-            flyby.positions.last().map_or(start.focus.x, |k| k.x as f32),
-            flyby.positions.last().map_or(start.focus.y, |k| k.z as f32),
+            flyby.positions.last().map_or(start.focus.x, |k| half_cell(k.x)),
+            flyby.positions.last().map_or(start.focus.y, |k| half_cell(k.z)),
             flyby.angles.last().map_or(start.yaw, |k| render_yaw(k.angle)),
         ),
     };
     let pitch = flyby.zooms.last().map_or(start.pitch, |k| zoom_to_pitch(k.zoom as f32));
-    (x, z, yaw, pitch)
+    let fov = flyby.zooms.last().map_or(start.fov, |k| zoom_to_fov(k.zoom as f32));
+    (x, z, yaw, pitch, fov)
 }
 
 /// One channel's value at turn `t`: finds the keyframe with the greatest `start <= t` and eases from
@@ -196,12 +240,40 @@ fn cancel_input(keys: Shortcuts, map: Res<CurrentMap>, mut schedule: ResMut<Game
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::camera::PITCH_RANGE;
+
+    /// pop3-rev-analysis.md "The AI-script zoom channel, traced end to end": real (zoom, pitch) pairs measured
+    /// live off two independent flyby captures, matched to level 1's own `FLYBY_SET_EVENT_ZOOM` keyframes -
+    /// pinned so a later cleanup can't simplify the piecewise curve back into a straight line across
+    /// `PITCH_RANGE` (the wrong range entirely: that one comes from manual zoom's much wider physical reach)
+    /// without a test catching it.
+    #[test]
+    fn zoom_is_calibrated_against_real_flyby_pitch_traces() {
+        for &(z, expected_deg) in &[(-100.0, 55.37), (10.0, 19.51), (80.0, 12.70), (0.0, 20.56)] {
+            let got_deg = zoom_to_pitch(z).to_degrees();
+            assert!((got_deg - expected_deg).abs() < 6.0, "zoom {z}: got {got_deg}°, expected ~{expected_deg}°");
+        }
+    }
 
     #[test]
-    fn zoom_maps_in_to_shallow_and_out_to_the_globe_view() {
-        assert!((zoom_to_pitch(100.0) - PITCH_RANGE.0).abs() < 1e-6);
-        assert!((zoom_to_pitch(-100.0) - PITCH_RANGE.1).abs() < 1e-6);
-        assert!((zoom_to_pitch(0.0) - (PITCH_RANGE.0 + PITCH_RANGE.1) / 2.0).abs() < 1e-6);
+    fn full_zoom_in_still_reaches_the_confirmed_pitch_range_floor() {
+        assert!((zoom_to_pitch(100.0) - PITCH_RANGE.0).abs() < 1e-6, "unconfirmed past zoom 80, but lands here by construction");
+    }
+
+    /// pop3-rev-analysis.md "Zoom changes effective FOV too": live-measured vertical FOV at the same
+    /// keyframes `zoom_to_pitch` was calibrated from - zoomed in narrows the lens (a telephoto effect), it
+    /// does not widen it the way `camera::DEFAULT_FOV`'s "matched by eye" guess alone would suggest.
+    #[test]
+    fn zoom_is_calibrated_against_real_flyby_fov_traces() {
+        for &(z, expected_deg) in &[(-100.0, 21.6), (0.0, 21.3), (80.0, 12.3)] {
+            let got_deg = zoom_to_fov(z).to_degrees();
+            assert!((got_deg - expected_deg).abs() < 1.0, "zoom {z}: got {got_deg}°, expected ~{expected_deg}°");
+        }
+    }
+
+    #[test]
+    fn zooming_in_narrows_the_fov_not_widens_it() {
+        assert!(zoom_to_fov(80.0) < zoom_to_fov(0.0), "a telephoto effect, confirmed live");
     }
 
     #[test]
@@ -237,14 +309,20 @@ mod tests {
     use pop3_ai_script::interp::{ResolvedEndTarget, ResolvedPos, ResolvedZoom};
 
     #[test]
+    fn half_cell_halves_the_raw_byte() {
+        assert_eq!(half_cell(20), 10.0);
+        assert_eq!(half_cell(1), 0.5);
+    }
+
+    #[test]
     fn final_pose_prefers_end_target_over_the_last_keyframe() {
         let flyby = ResolvedFlyby {
             positions: vec![ResolvedPos { x: 1, z: 1, start: 0, duration: 1 }],
-            end_target: Some(ResolvedEndTarget { x: 20, z: 21, angle: 0, unknown: 0 }),
+            end_target: Some(ResolvedEndTarget { x: 20, z: 22, angle: 0, unknown: 0 }),
             ..ResolvedFlyby::default()
         };
-        let (x, z, _, _) = final_pose(&flyby, &CameraRig::default());
-        assert_eq!((x, z), (20.0, 21.0));
+        let (x, z, _, _, _) = final_pose(&flyby, &CameraRig::default());
+        assert_eq!((x, z), (10.0, 11.0), "half-cell resolution, not a literal cell index");
     }
 
     #[test]
@@ -254,9 +332,10 @@ mod tests {
             zooms: vec![ResolvedZoom { zoom: 100, start: 0, duration: 1 }],
             ..ResolvedFlyby::default()
         };
-        let (x, z, _, pitch) = final_pose(&flyby, &CameraRig::default());
-        assert_eq!((x, z), (9.0, 8.0), "the last position keyframe, not the first");
+        let (x, z, _, pitch, fov) = final_pose(&flyby, &CameraRig::default());
+        assert_eq!((x, z), (4.5, 4.0), "the last position keyframe, not the first, halved");
         assert!((pitch - PITCH_RANGE.0).abs() < 1e-6, "the last zoom keyframe");
+        assert!((fov - zoom_to_fov(100.0)).abs() < 1e-6, "the last zoom keyframe, for fov too");
     }
 
     #[test]
@@ -265,6 +344,6 @@ mod tests {
         start.focus = Vec2::new(5.0, 6.0);
         start.yaw = 1.0;
         start.pitch = 0.9;
-        assert_eq!(final_pose(&ResolvedFlyby::default(), &start), (5.0, 6.0, 1.0, 0.9));
+        assert_eq!(final_pose(&ResolvedFlyby::default(), &start), (5.0, 6.0, 1.0, 0.9, start.fov));
     }
 }

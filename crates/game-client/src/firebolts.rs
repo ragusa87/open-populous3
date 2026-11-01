@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn the_ball_flies_over_the_ground_never_under_it() {
         let map = GameMap::sandbox_units();
-        let b = Firebolt { owner: 0, thrower: game_core::id::Id::from_raw(1), target: Target::Unit(game_core::id::Id::from_raw(2)), at: (1024, 512), height: 80, aim: (0, 0, 0), hits: true, bloodlusted: false, from_tower: false };
+        let b = Firebolt { owner: game_core::tribes::Owner::Tribe(game_core::tribes::TribeId::Blue), thrower: game_core::id::Id::from_raw(1), target: Target::Unit(game_core::id::Id::from_raw(2)), at: (1024, 512), height: 80, aim: (0, 0, 0), hits: true, bloodlusted: false, from_tower: false };
         assert_eq!(cells_at(&b), Vec2::new(2.0, 1.0));
         let ground = map.terrain.height_at(1024, 512, WORLD_UNITS_PER_CELL);
         assert_eq!(lift(&map, &b, 0.5), ((80 - ground).max(0)) as f32 * 0.5);

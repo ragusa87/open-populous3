@@ -193,17 +193,24 @@ building's kind letting others pass, five inside training together (the exe's co
 damage sending the trainee out.
 
 ## Balance and game turns
-The original counts in game turns, 12 per second (pop3-rev-analysis.md "Turns and timing"); one of our ticks is one turn.
-Every number of these rules lives in one place, `game_core::balance`:
-- `Turns(u32)`: a duration in original game turns, as the constants store it. `Balance::ticks(Turns) -> u32`
-  converts with an integer ratio (`turns_per_second`, 10 until the original rate is measured, so 1 turn = 1 tick
-  today). Simulation state only holds ticks.
-- `Balance`: plain integer fields grouped by topic (mana, huts, training, wood), the durations as `Turns`.
-  `Balance::ours()` is our own defaults, written by hand (the original values for now, to tune), used in generated
-  mode and the sandboxes; `Balance::from_constants` will fill it from `constant.dat` once `pop3_format::constants`
-  exists, when an install is present.
-- Stored in `GameMap` and read by the rules, never a global: tests build their own. Lockstep peers must run with
-  the same `Balance` (part of the game setup and the desync checksum).
+The original counts in game turns, 12 per second (pop3-rev-analysis.md "Turns and timing"); one of our ticks is one
+turn. Done: most of these rules' numbers live in one place, `game_core::balance`:
+- `Turns(u32)`: a duration in original game turns, as `constant.dat` stores it. `Balance::ticks(Turns) -> u32` is
+  the identity today (one of our ticks is one original turn, confirmed [exe]) - a seam for a correction, not a
+  guessed ratio, if a session that actually dumps `constant.dat` finds its own encoding does not match ticks one
+  for one [ours, corrects this entry's own earlier draft, which guessed an unmeasured `turns_per_second` ratio
+  that would not even have been the identity it was meant to describe].
+- `Balance`: plain integer fields grouped by topic - `Huts` (rules 5-6: `breed_every`/`step`, `grow_every`/`step`/
+  `target`, the `SPROG_TIME`/`SPROG%` table, the fresh-hut head start), `Training` (the cost bands and per-kind
+  mana, `recost_every`, `admit_gap`/`left_gap` as `Turns`) and `Income` (rule 7: the update rhythm, the
+  busy/idle rates per kind, `HUMAN_MANA_ADJUST` as a fraction) - read by `hut_growth.rs`, `training.rs`,
+  `headcount::mana_income` and `mana::ManaPool::tick` instead of their own scattered constants. `Balance::ours()`
+  is our own defaults (the original values, to tune); `Balance::from_constants` will fill one from `constant.dat`
+  instead, once `pop3_format::constants` exists, when an install is present. Not yet moved in: the wood topic
+  (`BuildingKind::wood_cost`, trees' own regrowth) - those live on enum methods and free functions called from
+  many places, not a `GameMap` tick, and are left as plain constants for now.
+- Stored in `GameMap::balance` and read by the rules, never a global: tests build their own with `Balance::ours()`.
+  Lockstep peers must run with the same `Balance` (part of the game setup); not yet in the desync checksum.
 
 With the default balance, a small hut with 1 brave inside at 0-4 % population breeds every 4000 x 30 % = 1200 ticks
 (2 min); 3 inside (gain 2.0), 1 min. To measure in the game: time between two braves of a small hut with 1 inside,

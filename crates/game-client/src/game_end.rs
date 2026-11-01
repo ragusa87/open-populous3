@@ -10,6 +10,7 @@ use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::outcome::Reason;
 use game_core::time::Tick;
+use game_core::tribes::TribeId;
 
 /// How the local player should read the result: did their tribe win, lose, or is there no local tribe to judge it
 /// by yet (a future spectator case — `game-net` has no such concept today).
@@ -18,12 +19,12 @@ pub enum Verdict {
     Victory,
     Defeat,
     Draw,
-    Announced(u8),
+    Announced(TribeId),
 }
 
 /// `local: None` is the future spectator case; today the client always passes `Some(units::PLAYER)`. Compares via
 /// `same_team`, not equality, so a tribe whose ally actually won is shown `Victory`, not `Defeat`.
-pub fn verdict(winner: Option<u8>, local: Option<u8>, same_team: impl Fn(u8, u8) -> bool) -> Verdict {
+pub fn verdict(winner: Option<TribeId>, local: Option<TribeId>, same_team: impl Fn(TribeId, TribeId) -> bool) -> Verdict {
     match (winner, local) {
         (None, _) => Verdict::Draw,
         (Some(w), None) => Verdict::Announced(w),
@@ -37,10 +38,10 @@ pub fn verdict(winner: Option<u8>, local: Option<u8>, same_team: impl Fn(u8, u8)
 pub struct EndView {
     pub headline: String,
     pub subtext: String,
-    pub tribes: Vec<(u8, u16)>,
+    pub tribes: Vec<(TribeId, u16)>,
 }
 
-pub fn end_view(verdict: Verdict, reason: Reason, tribes: Vec<(u8, u16)>) -> EndView {
+pub fn end_view(verdict: Verdict, reason: Reason, tribes: Vec<(TribeId, u16)>) -> EndView {
     let headline = match verdict {
         Verdict::Victory => "Victory".to_string(),
         Verdict::Defeat => "Defeat".to_string(),
@@ -148,7 +149,7 @@ fn show_ended(state: Res<State<AppState>>, map: Res<CurrentMap>, mut root: Query
     *vis = Visibility::Inherited;
     let Some(outcome) = map.0.outcome else { return };
     let v = verdict(outcome.winner, Some(PLAYER), |a, b| map.0.tribes.same_team(a, b));
-    let tribes: Vec<(u8, u16)> = map.0.tribes.all().map(|t| (t, map.0.headcount(t).total())).collect();
+    let tribes: Vec<(TribeId, u16)> = map.0.tribes.all().map(|t| (t, map.0.headcount(t).total())).collect();
     let view = end_view(v, outcome.reason, tribes);
     if let Ok(mut t) = headline.single_mut() {
         t.0 = view.headline;
@@ -179,7 +180,7 @@ fn game_end_from_env(mut done: Local<bool>, mut map: ResMut<CurrentMap>, mut sta
         return;
     }
     let Ok(value) = std::env::var("GAME_END") else { return };
-    if let Some(tribe) = value.strip_prefix("eliminate:").and_then(|t| t.parse::<u8>().ok()) {
+    if let Some(tribe) = value.strip_prefix("eliminate:").and_then(|t| t.parse::<u8>().ok()).and_then(TribeId::from_u8) {
         map.0.units.retain(|u| u.owner != tribe);
         let ticks: u32 = std::env::var("GAME_END_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
         map.0.run(game_core::time::Ticks::new(ticks));
@@ -187,7 +188,7 @@ fn game_end_from_env(mut done: Local<bool>, mut map: ResMut<CurrentMap>, mut sta
     }
     let winner = match value.as_str() {
         "victory" => Some(PLAYER),
-        "defeat" => Some(PLAYER.wrapping_add(1)),
+        "defeat" => Some(PLAYER.next()),
         "draw" => None,
         _ => return,
     };
@@ -201,19 +202,21 @@ mod tests {
 
     #[test]
     fn verdict_compares_by_team_not_equality() {
-        assert_eq!(verdict(Some(0), Some(0), |a, b| a == b), Verdict::Victory);
-        assert_eq!(verdict(Some(1), Some(0), |a, b| a == b || (a, b) == (1, 0)), Verdict::Victory, "an ally's win still counts");
-        assert_eq!(verdict(Some(1), Some(0), |a, b| a == b), Verdict::Defeat);
-        assert_eq!(verdict(None, Some(0), |a, b| a == b), Verdict::Draw);
-        assert_eq!(verdict(Some(2), None, |_, _| false), Verdict::Announced(2));
+        use TribeId::{Blue, Red, Yellow};
+        assert_eq!(verdict(Some(Blue), Some(Blue), |a, b| a == b), Verdict::Victory);
+        assert_eq!(verdict(Some(Red), Some(Blue), |a, b| a == b || (a, b) == (Red, Blue)), Verdict::Victory, "an ally's win still counts");
+        assert_eq!(verdict(Some(Red), Some(Blue), |a, b| a == b), Verdict::Defeat);
+        assert_eq!(verdict(None, Some(Blue), |a, b| a == b), Verdict::Draw);
+        assert_eq!(verdict(Some(Yellow), None, |_, _| false), Verdict::Announced(Yellow));
     }
 
     #[test]
     fn end_view_names_the_reason_and_carries_every_tribes_count() {
-        let view = end_view(Verdict::Victory, Reason::Armageddon, vec![(0, 5), (1, 0)]);
+        use TribeId::{Blue, Red};
+        let view = end_view(Verdict::Victory, Reason::Armageddon, vec![(Blue, 5), (Red, 0)]);
         assert_eq!(view.headline, "Victory");
         assert!(view.subtext.contains("Armageddon"));
-        assert_eq!(view.tribes, vec![(0, 5), (1, 0)]);
+        assert_eq!(view.tribes, vec![(Blue, 5), (Red, 0)]);
     }
 
     #[test]

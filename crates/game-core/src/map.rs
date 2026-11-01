@@ -21,7 +21,7 @@ use crate::totem::{totems_from_level, Totem, TotemKind};
 use crate::status::Timed;
 use crate::outcome::Outcome;
 use crate::shading::{CellShading, SunParams};
-use crate::tribes::Tribes;
+use crate::tribes::{Owner, TribeId, Tribes};
 use crate::unit::{torus_delta, Action, Order, Target, Unit, UnitEvent, UnitId, UnitKind};
 use crate::wood::WoodPiece;
 use pop3_format::header::TRIBES;
@@ -47,7 +47,7 @@ pub struct GameMap {
     /// An original level's buildings (none on generated maps and sandboxes yet).
     pub buildings: Vec<Building>,
     /// Rewards granted so far, in order, with the tribe that got each (`worship`).
-    pub granted: Vec<(u8, crate::building::Reward)>,
+    pub granted: Vec<(TribeId, crate::building::Reward)>,
     /// Places to pray at: a level's scenery 9, the Worship sandbox's row.
     pub totems: Vec<Totem>,
     /// Pieces of wood lying on the ground (none in original levels).
@@ -116,9 +116,16 @@ pub struct GameMap {
     /// Each computer tribe's own script (`ai_script.rs`), one per tribe with a `cpscrNNN.dat` assigned
     /// (`LevelHeader::ai_scripts`); empty on generated maps and sandboxes.
     pub(crate) tribe_scripts: Vec<crate::ai_script::TribeScript>,
+    /// Each computer tribe's native AI state (`ai.rs`): one per tribe with an assigned script, the same
+    /// set `tribe_scripts` tracks ("Blue is the human player and never has one" — ai-scripts.md). Empty
+    /// on generated maps and sandboxes, same as `tribe_scripts`.
+    pub(crate) ai: Vec<crate::ai::NativeAi>,
     /// A script's flyby playing or just finished (`ai_script.rs`), read by the client to pose its own
     /// camera and HUD; `game-core` never touches a camera. At most one at a time.
     pub active_flyby: Option<crate::ai_script::ActiveFlyby>,
+    /// Every game-balance number the rules read (balance.rs, huts-and-training.md "Balance and game turns"):
+    /// `Balance::ours()` everywhere today, never a global - lockstep peers must agree on it.
+    pub balance: crate::balance::Balance,
 }
 
 /// Generated maps and sandboxes are laid out for a camera on their south side looking north (towards -z):
@@ -166,7 +173,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), active_flyby: None }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, balance: crate::balance::Balance::ours() }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -221,7 +228,9 @@ impl GameMap {
             next_id: 1,
             rng: Lcg(0),
             tribe_scripts: Vec::new(),
+            ai: Vec::new(),
             active_flyby: None,
+            balance: crate::balance::Balance::ours(),
         }
         .with_buildings(buildings_from_level(level))
         .with_totems(totems_from_level(level))
@@ -240,7 +249,7 @@ impl GameMap {
             let Some(kind) = UnitKind::from_person_model(t.model) else { continue };
             let cell = ((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32);
             let welcomed = (kind == UnitKind::Wildman).then(|| self.sites.iter().find(|s| s.enabled && s.welcomes(cell))).flatten();
-            let (owner, kind) = welcomed.map_or((t.owner, kind), |s| (s.owner, UnitKind::Brave));
+            let (owner, kind) = welcomed.map_or((Owner::from_u8(t.owner), kind), |s| (Owner::Tribe(s.owner), UnitKind::Brave));
             self.spawn(owner, kind, (t.x, t.z));
         }
         self
@@ -337,7 +346,8 @@ impl GameMap {
         let shaman_omni = header.as_ref().is_some_and(|h| h.flags.has(pop3_format::header::LevelFlags::SHAMAN_OMNI));
         let tribes = header.as_ref().map_or(map.tribes.clone(), |h| map.tribes.clone().with_allies(h.allies));
         let tribe_scripts = header.as_ref().map_or(Vec::new(), |h| crate::ai_script::load_tribe_scripts(dat, h.ai_scripts));
-        let mut map = GameMap { spell_books, build_books, start_camera, object_bank, shaman_omni, tribes, tribe_scripts, ..map };
+        let ai = tribe_scripts.iter().map(|ts| crate::ai::NativeAi::new(ts.owner)).collect();
+        let mut map = GameMap { spell_books, build_books, start_camera, object_bank, shaman_omni, tribes, tribe_scripts, ai, ..map };
         // "Turn 0" (ai-scripts.md "How a script runs"): a real script's setup block, run once here
         // while `now` is still `Tick::ZERO`, before the game truly starts. `tick()`'s own later calls
         // to `tend_ai_scripts` (turns 1, 2, 3, ...) run the `ELSE { EVERY ... }` branch from then on.
@@ -387,7 +397,7 @@ impl GameMap {
                 terrain.set(x, z, h as u16);
             }
         }
-        let sites = vec![ReincarnationSite::at_cell(0, (C, C), terrain.get(C, C))];
+        let sites = vec![ReincarnationSite::at_cell(TribeId::Blue, (C, C), terrain.get(C, C))];
         GameMap::sandbox_bare("Sandbox: walk", terrain, sites).with_shamans().with_trees(1, 150).with_shading()
     }
 
@@ -412,16 +422,16 @@ impl GameMap {
             }
         }
         terrain.raise((C + 26, C - 6), 3, 90);
-        let sites = vec![ReincarnationSite::at_cell(0, (C, C), terrain.get(C, C))];
+        let sites = vec![ReincarnationSite::at_cell(TribeId::Blue, (C, C), terrain.get(C, C))];
         let mut map = GameMap::sandbox_bare(SANDBOX_BUILDINGS, terrain, sites).with_shamans();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
-        let place = |owner: u8, kind: BuildingKind, (x, z): (u16, u16), facing: u8| Building::new(kind, owner, x - 256, z - 256, facing);
+        let place = |owner: TribeId, kind: BuildingKind, (x, z): (u16, u16), facing: u8| Building::new(kind, owner, x - 256, z - 256, facing);
         for model in 1..=19u8 {
             let i = model as i32 - 1;
-            map.add_building(place(0, BuildingKind::from_model(model), at(-12 + (i % 7) * 4, 6 + (i / 7) * 4), (i % 4) as u8 * 2));
+            map.add_building(place(TribeId::Blue, BuildingKind::from_model(model), at(-12 + (i % 7) * 4, 6 + (i / 7) * 4), (i % 4) as u8 * 2));
         }
         for (i, model) in [1u8, 3, 4, 7].iter().enumerate() {
-            map.add_building(place(1, BuildingKind::from_model(*model), at(-6 + i as i32 * 4, 19), 0));
+            map.add_building(place(TribeId::Red, BuildingKind::from_model(*model), at(-6 + i as i32 * 4, 19), 0));
         }
         let (cx, cz) = at(0, 3);
         for (dx, dz) in [(0, 0), (90, 40), (-80, 60), (20, -70), (-600, 100), (700, -50)] {
@@ -435,17 +445,17 @@ impl GameMap {
         }
         for (i, &kind) in SANDBOX_BLASTS.iter().enumerate() {
             let (x, z) = sandbox_blast_corner(i);
-            map.add_building(Building::new(kind, 0, x, z, 0));
+            map.add_building(Building::new(kind, TribeId::Blue, x, z, 0));
         }
         for n in 0..SANDBOX_FREE_BRAVES {
-            map.spawn(0, UnitKind::Brave, at(20 + n % 10, -2 - n / 10));
+            map.spawn(TribeId::Blue, UnitKind::Brave, at(20 + n % 10, -2 - n / 10));
         }
         // The showcase's occupied buildings get real people inside.
         let occupied: Vec<Building> = map.buildings.iter().filter(|b| b.inside > 0).cloned().collect();
         for b in occupied {
             let room = if b.kind.capacity() > 0 { b.kind.capacity() } else { b.inside };
             for _ in 0..b.inside.min(room) {
-                map.spawn(0, UnitKind::Brave, b.centre()).inside = Some(crate::unit::Inside { building: b.id, door: b.door() });
+                map.spawn(TribeId::Blue, UnitKind::Brave, b.centre()).inside = Some(crate::unit::Inside { building: b.id, door: b.door() });
             }
         }
         map.update_walls();
@@ -457,9 +467,9 @@ impl GameMap {
         for (i, (dx, dz)) in [(34, -8), (36, -5), (35, -1), (37, 3), (34, 9), (36, 12)].into_iter().enumerate() {
             map.trees.push(Tree::new((C + dx, C + dz), i as u8, crate::tree::MAX_SIZE));
         }
-        if let Some(fire) = map.place_campfire(0, (C + 21, C + 4)) {
+        if let Some(fire) = map.place_campfire(TribeId::Blue, (C + 21, C + 4)) {
             let braves: Vec<UnitId> = map.units.iter().filter(|u| u.kind == UnitKind::Brave).take(3).map(|u| u.id).collect();
-            for c in map.gather(0, &braves, fire) {
+            for c in map.gather(TribeId::Blue, &braves, fire) {
                 map.apply(&c);
             }
         }
@@ -486,24 +496,24 @@ impl GameMap {
                 }
             }
         }
-        let sites = vec![ReincarnationSite::at_cell(0, (C, C), terrain.get(C, C))];
+        let sites = vec![ReincarnationSite::at_cell(TribeId::Blue, (C, C), terrain.get(C, C))];
         let mut map = GameMap::sandbox_bare("Sandbox: units", terrain, sites).with_shamans().with_trees(2, 150).with_shading();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         for (row, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
             let row = row as i32;
             for n in 0..3 {
-                map.spawn(0, kind, at(-5 - 2 * row, 2 * n - 2));
+                map.spawn(TribeId::Blue, kind, at(-5 - 2 * row, 2 * n - 2));
             }
-            map.spawn(1, kind, at(6 + 2 * row, 0));
+            map.spawn(TribeId::Red, kind, at(6 + 2 * row, 0));
             for (n, marked) in SANDBOX_MARKERS.iter().enumerate() {
-                let u = map.spawn(0, kind, at(-5 - 2 * row, 5 + 2 * n as i32));
+                let u = map.spawn(TribeId::Blue, kind, at(-5 - 2 * row, 5 + 2 * n as i32));
                 marked(u);
             }
         }
         {
             use crate::vehicle::{Vehicle, VehicleKind};
             for dz in [-1, 1] {
-                map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at(-15, dz), crate::angle::Angle::ZERO));
+                map.add_vehicle(Vehicle::new(VehicleKind::Balloon, TribeId::Blue, at(-15, dz), crate::angle::Angle::ZERO));
             }
         }
         map
@@ -525,10 +535,10 @@ impl GameMap {
                 }
             }
         }
-        let sites = vec![ReincarnationSite::at_cell(0, (C, C), terrain.get(C, C))];
+        let sites = vec![ReincarnationSite::at_cell(TribeId::Blue, (C, C), terrain.get(C, C))];
         let mut map = GameMap::sandbox_bare("Sandbox: worship", terrain, sites).with_shamans().with_shading();
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
-        let mut vault = Building::new(BuildingKind::Vault, 255, (C * 512) as u16, ((C + 8) * 512) as u16, 0);
+        let mut vault = Building::new(BuildingKind::Vault, Owner::Wild, (C * 512) as u16, ((C + 8) * 512) as u16, 0);
         vault.vault = Some(crate::vault::Vault::new(Some(crate::building::Reward::Building(BuildingKind::Temple)), crate::vault::DEFAULT_PRAY_TIME));
         map.add_building(vault);
         for (k, &kind) in TotemKind::ALL.iter().enumerate() {
@@ -538,7 +548,7 @@ impl GameMap {
             map.add_totem(Totem { prayers, shaman_only, summons_angel, gifts: vec![sandbox_gift(k)], occurrences, ..Totem::new(kind, at(-12 + 4 * k as i32, -12)) });
         }
         for n in 0..8 {
-            map.spawn(0, UnitKind::Brave, at(-7 + 2 * n, -7));
+            map.spawn(TribeId::Blue, UnitKind::Brave, at(-7 + 2 * n, -7));
         }
         map
     }
@@ -574,16 +584,16 @@ impl GameMap {
         for (dx, dz, radius, height) in SANDBOX_VEHICLE_HILLS {
             terrain.raise((C + dx, C + dz), radius, height);
         }
-        let sites = vec![ReincarnationSite::at_cell(0, (C, C - 6), terrain.get(C, C - 6))];
+        let sites = vec![ReincarnationSite::at_cell(TribeId::Blue, (C, C - 6), terrain.get(C, C - 6))];
         let mut map = GameMap::sandbox_bare(SANDBOX_VEHICLES, terrain, sites).with_shamans();
         let corner = |dx: i32, dz: i32| (((C + dx) * 512) as u16, ((C + dz) * 512) as u16);
         let at = |dx: i32, dz: i32| crate::slots::cell_centre((C + dx, C + dz));
         let (x, z) = corner(-8, 7);
-        map.add_building(Building::new(BuildingKind::BoatHut, 0, x, z, 0));
+        map.add_building(Building::new(BuildingKind::BoatHut, TribeId::Blue, x, z, 0));
         let (x, z) = corner(5, 1);
-        map.add_building(Building::new(BuildingKind::AirshipHut, 0, x, z, 0));
+        map.add_building(Building::new(BuildingKind::AirshipHut, TribeId::Blue, x, z, 0));
         for n in 0..8 {
-            map.spawn(0, UnitKind::Brave, at(-4 + n % 4, 1 + n / 4));
+            map.spawn(TribeId::Blue, UnitKind::Brave, at(-4 + n % 4, 1 + n / 4));
         }
         let (px, pz) = at(-1, 3);
         for k in 0..10u16 {
@@ -592,18 +602,18 @@ impl GameMap {
         for (i, (dx, dz)) in [(12, -10), (14, -8), (13, -12), (15, -11)].into_iter().enumerate() {
             map.trees.push(Tree::new((C + dx, C + dz), i as u8, crate::tree::MAX_SIZE));
         }
-        let boat = |owner: u8, cell: (i32, i32)| Vehicle::new(VehicleKind::Boat, owner, at(cell.0, cell.1), crate::angle::Angle::new(512));
-        map.add_vehicle(boat(0, (-2, 9)));
-        let manned = map.add_vehicle(boat(0, (4, 9)));
+        let boat = |owner: TribeId, cell: (i32, i32)| Vehicle::new(VehicleKind::Boat, owner, at(cell.0, cell.1), crate::angle::Angle::new(512));
+        map.add_vehicle(boat(TribeId::Blue, (-2, 9)));
+        let manned = map.add_vehicle(boat(TribeId::Blue, (4, 9)));
         for _ in 0..2 {
-            let u = map.spawn(0, UnitKind::Brave, at(4, 9));
+            let u = map.spawn(TribeId::Blue, UnitKind::Brave, at(4, 9));
             u.aboard = Some(manned);
             let id = u.id;
-            map.vehicles.get_mut(manned).unwrap().seat(id, 0);
+            map.vehicles.get_mut(manned).unwrap().seat(id, TribeId::Blue);
         }
-        map.add_vehicle(boat(0, (10, 13)));
-        map.add_vehicle(Vehicle::new(VehicleKind::Balloon, 0, at(3, -4), crate::angle::Angle::ZERO));
-        map.add_vehicle(boat(1, (0, 16)));
+        map.add_vehicle(boat(TribeId::Blue, (10, 13)));
+        map.add_vehicle(Vehicle::new(VehicleKind::Balloon, TribeId::Blue, at(3, -4), crate::angle::Angle::ZERO));
+        map.add_vehicle(boat(TribeId::Red, (0, 16)));
         map.update_walls();
         map.recompute_shading_all();
         map
@@ -638,7 +648,7 @@ impl GameMap {
             }
         }
         terrain.raise((C, C - 31), 6, 420);
-        let sites = vec![ReincarnationSite::at_cell(0, (C, C), terrain.get(C, C))];
+        let sites = vec![ReincarnationSite::at_cell(TribeId::Blue, (C, C), terrain.get(C, C))];
         let mut map = GameMap { spell_books: per_player(SpellBook::unlimited()), ..GameMap::bare("Sandbox: spells", terrain, sites) }.with_shamans();
         map.trees = scatter(&map.terrain, 3, &[(C, C)], 40);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
@@ -646,25 +656,25 @@ impl GameMap {
         for (k, &kind) in UnitKind::FOLLOWERS.iter().enumerate() {
             let dx = -10 + 5 * k as i32;
             for (ox, oz) in [(0, 0), (1, 0), (0, 1)] {
-                map.spawn(0, kind, at(dx + ox, 6 + oz));
-                map.spawn(1, kind, at(dx + ox, -8 + oz));
+                map.spawn(TribeId::Blue, kind, at(dx + ox, 6 + oz));
+                map.spawn(TribeId::Red, kind, at(dx + ox, -8 + oz));
             }
         }
         let village = [(BuildingKind::Hut { size: 1 }, (25, -4), 2), (BuildingKind::Hut { size: 2 }, (31, -4), 3), (BuildingKind::Hut { size: 3 }, (25, 3), 4), (BuildingKind::DrumTower, (31, 3), 1), (BuildingKind::WarriorTraining, (28, -8), 0)];
         for (kind, (dx, dz), people) in village {
             let (x, z) = corner(dx, dz);
-            let b = Building::new(kind, 1, x, z, 4);
+            let b = Building::new(kind, TribeId::Red, x, z, 4);
             let (id, door, centre) = (map.add_building(b.clone()), b.door(), b.centre());
             for _ in 0..people {
-                map.spawn(1, UnitKind::Brave, centre).inside = Some(crate::unit::Inside { building: id, door });
+                map.spawn(TribeId::Red, UnitKind::Brave, centre).inside = Some(crate::unit::Inside { building: id, door });
             }
         }
         for n in 0..4 {
-            map.spawn(1, UnitKind::Brave, at(22 + 2 * n, 7));
-            map.spawn(1, UnitKind::Warrior, at(23 + 2 * n, 0));
+            map.spawn(TribeId::Red, UnitKind::Brave, at(22 + 2 * n, 7));
+            map.spawn(TribeId::Red, UnitKind::Warrior, at(23 + 2 * n, 0));
         }
         for (n, kind) in [UnitKind::Brave, UnitKind::Brave, UnitKind::Warrior, UnitKind::Preacher].into_iter().enumerate() {
-            map.spawn(2, kind, at(-4 + 3 * n as i32, -26));
+            map.spawn(TribeId::Yellow, kind, at(-4 + 3 * n as i32, -26));
         }
         let buildings = &map.buildings;
         map.trees.retain(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 512)));
@@ -710,21 +720,21 @@ impl GameMap {
             }
         }
         let site_cell = (C + Self::BRIDGE_SITE_CELL_OFFSET.0, C + Self::BRIDGE_SITE_CELL_OFFSET.1);
-        let sites = vec![ReincarnationSite::at_cell(0, site_cell, terrain.get(site_cell.0, site_cell.1))];
+        let sites = vec![ReincarnationSite::at_cell(TribeId::Blue, site_cell, terrain.get(site_cell.0, site_cell.1))];
         let mut map = GameMap { theme: Some(Self::BRIDGE_THEME), spell_books: per_player(SpellBook::unlimited()), ..GameMap::bare("Sandbox: bridge", terrain, sites) }.with_shamans();
         map.trees = scatter(&map.terrain, 3, &[site_cell], 20);
         map.recompute_shading_all();
         map
     }
 
-    pub fn site_of(&self, owner: u8) -> Option<&ReincarnationSite> {
+    pub fn site_of(&self, owner: TribeId) -> Option<&ReincarnationSite> {
         self.sites.iter().find(|s| s.owner == owner && s.enabled)
     }
 
     /// Disables `owner`'s reincarnation site in place: its position never moves, so there's nothing
     /// to remember for `restore_reincarnation` to bring back later. A no-op if already disabled, or if
     /// `owner` never had a site at all.
-    pub(crate) fn remove_reincarnation(&mut self, owner: u8) {
+    pub(crate) fn remove_reincarnation(&mut self, owner: TribeId) {
         if let Some(s) = self.sites.iter_mut().find(|s| s.owner == owner) {
             s.enabled = false;
         }
@@ -734,7 +744,7 @@ impl GameMap {
     /// terrain (the ground may have changed while it was off) unless that cell is underwater now, in
     /// which case the site keeps whatever height it last had rather than reincarnating into the sea.
     /// A no-op if it wasn't disabled (including: never existed at all).
-    pub(crate) fn restore_reincarnation(&mut self, owner: u8) {
+    pub(crate) fn restore_reincarnation(&mut self, owner: TribeId) {
         let Some(i) = self.sites.iter().position(|s| s.owner == owner && !s.enabled) else { return };
         let (x, z) = self.sites[i].cell();
         if !self.terrain.is_water(x, z) {
@@ -743,16 +753,16 @@ impl GameMap {
         self.sites[i].enabled = true;
     }
 
-    pub fn shaman_of(&self, owner: u8) -> Option<&Unit> {
+    pub fn shaman_of(&self, owner: TribeId) -> Option<&Unit> {
         self.units.iter().find(|u| u.owner == owner && u.kind == UnitKind::Shaman)
     }
 
-    fn shaman_mut(&mut self, owner: u8) -> Option<&mut Unit> {
+    fn shaman_mut(&mut self, owner: TribeId) -> Option<&mut Unit> {
         self.units.iter_mut().find(|u| u.owner == owner && u.kind == UnitKind::Shaman)
     }
 
     /// Uses one cast of `kind` from the player's book; false when there is none. No kind: nothing to use.
-    fn use_charge(&mut self, player: u8, kind: Option<SpellKind>) -> bool {
+    fn use_charge(&mut self, player: TribeId, kind: Option<SpellKind>) -> bool {
         let Some(kind) = kind else { return true };
         self.spell_books.get_mut(player as usize).is_some_and(|b| b.cast(kind))
     }
@@ -762,7 +772,7 @@ impl GameMap {
     /// spell starting at the caster (land bridge) needs a living shaman on her feet, never aboard a vehicle, unless the
     /// player is a god (`shaman_omni`), and a land bridge a target on land (the water on its way is raised); other spells always
     /// apply. Out of range (`in_cast_range`), she first walks into it (`walk_to_cast`).
-    pub fn can_cast(&self, player: u8, spell: &Spell) -> bool {
+    pub fn can_cast(&self, player: TribeId, spell: &Spell) -> bool {
         if self.shaman_locked(player) {
             return false;
         }
@@ -794,14 +804,14 @@ impl GameMap {
 
     /// `kind`'s own base range (`SpellSlot::stats`, spells.md "Original balance"), read through `player`'s
     /// own book since that's where the resolved `SpellStats` live (`SpellBook::apply_constants`).
-    fn spell_base_range(&self, player: u8, kind: SpellKind) -> Option<u32> {
+    fn spell_base_range(&self, player: TribeId, kind: SpellKind) -> Option<u32> {
         self.spell_books.get(player as usize)?.slot(kind)?.stats.range
     }
 
     /// How far `player`'s shaman casts `kind` from where she stands (`cast_range`): None when there is no
     /// limit (the spell has none, or the player is a god), or no shaman free to cast (dead or `locked`: off the
     /// ground she casts nothing until she lands).
-    pub fn cast_range(&self, player: u8, kind: SpellKind) -> Option<u32> {
+    pub fn cast_range(&self, player: TribeId, kind: SpellKind) -> Option<u32> {
         let base = self.spell_base_range(player, kind).filter(|_| !self.shaman_omni)?;
         let shaman = self.shaman_of(player).filter(|u| u.is_alive() && !self.shaman_locked(player))?;
         let in_tower = shaman.inside.and_then(|i| self.building(i.building)).is_some_and(|b| b.kind == BuildingKind::DrumTower && b.stage() == crate::building::Stage::Built);
@@ -811,7 +821,7 @@ impl GameMap {
     /// Whether `player` can aim `kind` at `to` (world units): within their shaman's `cast_range`, anywhere
     /// for a spell without a limit or on a level where the player is a god; never without a shaman free to
     /// cast otherwise.
-    pub fn in_cast_range(&self, player: u8, kind: SpellKind, to: (u16, u16)) -> bool {
+    pub fn in_cast_range(&self, player: TribeId, kind: SpellKind, to: (u16, u16)) -> bool {
         if self.shaman_omni || self.spell_base_range(player, kind).is_none() {
             return true;
         }
@@ -826,7 +836,7 @@ impl GameMap {
     /// pop3-rev-analysis.md 0x515E30): a recast reaches fresh followers first, and only refreshes an
     /// already-touched one's timer once there is nobody fresh left among the nearest `n` (confirmed,
     /// docs/specs/spells.md "Magical Shield").
-    fn cast_nearest_status(&mut self, at: (u16, u16), player: u8, n: u32, fresh: impl Fn(&Unit) -> bool, set: impl Fn(&mut Unit)) {
+    fn cast_nearest_status(&mut self, at: (u16, u16), player: TribeId, n: u32, fresh: impl Fn(&Unit) -> bool, set: impl Fn(&mut Unit)) {
         let size = self.terrain.size() as i32;
         let pred = |u: &Unit| u.owner == player && UnitKind::FOLLOWERS.contains(&u.kind) && u.is_alive() && !u.statuses.ghost && crate::nearest::in_block(at, (u.x, u.z), size);
         for id in crate::nearest::nearest_n_fresh_first(&self.units, at, n as usize, pred, fresh) {
@@ -838,7 +848,7 @@ impl GameMap {
 
     /// `spell` as it takes effect: a land bridge starts at the caster's shaman, as she stands when the command
     /// runs, unless the player is a god (then where it was aimed from, the view).
-    fn from_caster(&self, player: u8, spell: Spell) -> Spell {
+    fn from_caster(&self, player: TribeId, spell: Spell) -> Spell {
         match spell {
             Spell::LandBridge { to, .. } if !self.shaman_omni => match self.shaman_of(player) {
                 Some(u) => Spell::LandBridge { from: ((u.x as u32 / WORLD_UNITS_PER_CELL) as i32, (u.z as u32 / WORLD_UNITS_PER_CELL) as i32), to },
@@ -868,6 +878,7 @@ impl GameMap {
             | Spell::Firestorm { at }
             | Spell::Earthquake { at }
             | Spell::Swarm { at }
+            | Spell::AngelOfDeath { at }
             | Spell::MagicalShield { at }
             | Spell::Bloodlust { at }
             | Spell::Invisibility { at } => Some(at),
@@ -879,7 +890,7 @@ impl GameMap {
 
     /// Where `player` aims `spell` when it is beyond their living shaman's reach (`in_cast_range`). Without one the
     /// spell takes effect at once.
-    fn out_of_range(&self, player: u8, spell: &Spell) -> Option<(u16, u16)> {
+    fn out_of_range(&self, player: TribeId, spell: &Spell) -> Option<(u16, u16)> {
         self.shaman_of(player).filter(|u| u.is_alive())?;
         let (kind, to) = (spell.kind()?, self.spell_target(spell)?);
         (!self.in_cast_range(player, kind, to)).then_some(to)
@@ -890,7 +901,7 @@ impl GameMap {
     /// target as she can get, reachable or not (another island, the sea): the point nearest it of the cell nearest it
     /// among those she can get to as she moves (`Unit::mobility` on foot; aboard a vehicle, it takes her: a balloon
     /// anywhere, a boat over the sea; `path::nearest_reachable`, `path::closest_point_in_cell`).
-    fn walk_to_cast(&mut self, player: u8, spell: Spell) {
+    fn walk_to_cast(&mut self, player: TribeId, spell: Spell) {
         let charged = spell.kind().is_some_and(|k| self.spell_books.get(player as usize).and_then(|b| b.slot(k)).is_some_and(|s| s.can_cast()));
         let (Some(to), true) = (self.spell_target(&spell), charged && self.can_cast(player, &spell)) else { return };
         if let Some(vehicle) = self.shaman_of(player).and_then(|u| u.aboard) {
@@ -915,11 +926,11 @@ impl GameMap {
             Some(v) => !matches!(v.state, crate::vehicle::State::Moving { .. }),
             None => u.action == Action::Idle,
         };
-        let walking: Vec<(u8, Spell, bool)> = self
+        let walking: Vec<(TribeId, Spell, bool)> = self
             .units
             .iter()
             .filter(|u| u.kind == UnitKind::Shaman)
-            .filter_map(|u| u.walking_to_cast().map(|spell| (u.owner, spell, stopped(u))))
+            .filter_map(|u| u.walking_to_cast().map(|spell| (u.owner.tribe().expect("a shaman is never a wildman"), spell, stopped(u))))
             .collect();
         let mut dirty = Vec::new();
         for (player, spell, stopped) in walking {
@@ -940,15 +951,15 @@ impl GameMap {
     /// (`SHAMEN_DEAD_MANA_PCT_GAIN`) is exe-confirmed 0 %, not the file's 25 % - always nothing to deliver, so the
     /// delayed reservoir it would go through (TODO.md "Mana") is left unimplemented rather than built to move 0.
     fn shaman_died(&mut self, i: usize) {
-        let owner = self.units[i].owner as usize;
-        let Some(pool) = self.mana.get_mut(owner) else { return };
+        let Some(owner) = self.units[i].owner.tribe() else { return };
+        let Some(pool) = self.mana.get_mut(owner.as_usize()) else { return };
         let base = pool.bank;
         pool.bank = pool.bank.saturating_sub(crate::mana::Mana(base.0 * crate::mana::SHAMEN_DEAD_MANA_PCT_LOST as u32 / 100));
     }
 
     /// `spell` cast by `player` takes effect now: its effect starts (ticking from the next turn), or the terrain
     /// brush applies (the region it changed).
-    fn release(&mut self, player: u8, spell: Spell) -> Option<DirtyRect> {
+    fn release(&mut self, player: TribeId, spell: Spell) -> Option<DirtyRect> {
         match spell {
             Spell::Blast { at } => {
                 let from = self.shaman_of(player).map(|u| (u.x, u.z, self.altitude(u) as i32));
@@ -976,6 +987,10 @@ impl GameMap {
             }
             Spell::Swarm { at } => {
                 self.add_effect(crate::swarm::effect(player, at));
+                None
+            }
+            Spell::AngelOfDeath { at } => {
+                self.add_effect(crate::angel_of_death::cast(player, at));
                 None
             }
             Spell::MagicalShield { at } => {
@@ -1216,7 +1231,7 @@ impl GameMap {
     /// (`move_orders`, applied before this one) already took it out of whatever formation it was in through
     /// `start_order`'s `leave_formation` - a unit reassigned elsewhere leaves its old formation right away rather
     /// than having to finish walking to its old slot first.
-    fn form_up(&mut self, player: u8, units: &[UnitId], to: (u16, u16)) {
+    fn form_up(&mut self, player: TribeId, units: &[UnitId], to: (u16, u16)) {
         let members: Vec<UnitId> = units
             .iter()
             .copied()
@@ -1240,14 +1255,14 @@ impl GameMap {
     /// Ends the player's own swamp `swamp` early (right click + Ctrl on it, like a blueprint put away): as if
     /// its own tally had already reached its cap (`tend_swamps`), gone by the next tick's cleanup
     /// (`tend_effects`). Ignored for a swamp not theirs, or gone already.
-    pub(crate) fn clear_swamp(&mut self, player: u8, swamp: Id<Effect>) {
+    pub(crate) fn clear_swamp(&mut self, player: TribeId, swamp: Id<Effect>) {
         if let Some(e) = self.effects.get_mut(swamp).filter(|e| e.owner == player && matches!(e.kind, EffectKind::Swamp(_))) {
             e.left = Countdown::with_left(e.left.total(), Ticks::ZERO);
         }
     }
 
     /// Lights a camp fire for `player` in `cell` if it can be (`campfire::can_place`); its id.
-    pub fn place_campfire(&mut self, player: u8, cell: (i32, i32)) -> Option<u32> {
+    pub fn place_campfire(&mut self, player: TribeId, cell: (i32, i32)) -> Option<u32> {
         if !campfire::can_place(self, cell) {
             return None;
         }
@@ -1269,7 +1284,7 @@ impl GameMap {
 
     /// Puts out `player`'s camp fire whose cell holds world point `p`, if any: the units going to it
     /// or round it stop (idle).
-    pub fn remove_campfire(&mut self, player: u8, p: (u16, u16)) {
+    pub fn remove_campfire(&mut self, player: TribeId, p: (u16, u16)) {
         let Some(i) = self.campfires.iter().position(|f| f.owner == player && f.cell() == campfire::cell_at(p)) else { return };
         let centre = self.campfires.remove(i).centre();
         for u in self.units.iter_mut().filter(|u| u.owner == player && u.campfire() == Some(centre)) {
@@ -1285,7 +1300,7 @@ impl GameMap {
 
     /// Orders sending the player's living `units` round their own camp fire `fire`, spread evenly
     /// over its ring from the point nearest the first of them; none if the fire is not theirs.
-    pub fn gather(&self, player: u8, units: &[UnitId], fire: u32) -> Vec<Command> {
+    pub fn gather(&self, player: TribeId, units: &[UnitId], fire: u32) -> Vec<Command> {
         let Some(f) = self.campfires.iter().find(|f| f.id == fire && f.owner == player) else { return Vec::new() };
         let going: Vec<&Unit> = self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id)).collect();
         let Some(first) = going.first() else { return Vec::new() };
@@ -1302,7 +1317,7 @@ impl GameMap {
     }
 
     /// An order to the player's shaman (aboard a vehicle: `order_aboard`).
-    fn order(&mut self, player: u8, order: Order) {
+    fn order(&mut self, player: TribeId, order: Order) {
         match self.units.iter().position(|u| u.owner == player && u.kind == UnitKind::Shaman) {
             Some(i) if self.units[i].aboard.is_some() && order != Order::Cast => self.order_aboard(i, order),
             Some(i) => self.units[i].order(order),
@@ -1323,7 +1338,7 @@ impl GameMap {
 
     /// Orders sending the player's living `units` to `to`, each to a free spot of its own around it
     /// (`slots::dispatch`).
-    pub fn dispatch(&self, player: u8, units: &[UnitId], to: (u16, u16)) -> Vec<Command> {
+    pub fn dispatch(&self, player: TribeId, units: &[UnitId], to: (u16, u16)) -> Vec<Command> {
         let movers: Vec<(UnitId, (u16, u16))> =
             self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id)).map(|u| (u.id, (u.x, u.z))).collect();
         let ids: Vec<UnitId> = movers.iter().map(|m| m.0).collect();
@@ -1395,10 +1410,15 @@ impl GameMap {
         if !frozen {
             self.tend_flyby();
             self.tend_ai_scripts();
+            self.tend_native_ai();
+            self.tend_ai_spellcasting();
+            self.tend_ai_defense();
+            self.tend_ai_sorties();
             self.spot_enemies();
             self.tend_attacks();
             self.tend_wrecking();
             self.tend_wildmen();
+            self.tend_angels_of_death();
             self.tend_guards();
         }
         self.detect_coordinators();
@@ -1435,7 +1455,11 @@ impl GameMap {
                 UnitEvent::Jumped { .. } | UnitEvent::Built => dirty.extend(self.work_event(i, event)),
                 UnitEvent::AtDoor { building } => self.come_in(i, building),
                 UnitEvent::AtVehicle { vehicle } => self.board(i, vehicle),
-                UnitEvent::Released { spell } => dirty.extend(self.release(self.units[i].owner, spell)),
+                UnitEvent::Released { spell } => {
+                    if let Some(owner) = self.units[i].owner.tribe() {
+                        dirty.extend(self.release(owner, spell));
+                    }
+                }
                 _ => self.wood_event(i, event),
             }
         }
@@ -1468,11 +1492,12 @@ impl GameMap {
             }
         }
         if !frozen {
-            let incomes: Vec<crate::mana::Mana> = (0..self.mana.len()).map(|player| self.mana_income(player as u8)).collect();
+            let incomes: Vec<crate::mana::Mana> = (0..self.mana.len()).map(|player| self.mana_income(TribeId::ALL[player])).collect();
+            let update_every = self.balance.income.update_every;
             let buildings = &mut self.buildings;
             for (player, ((pool, book), &income)) in self.mana.iter_mut().zip(&mut self.spell_books).zip(&incomes).enumerate() {
-                let mut stores: Vec<&mut crate::production::Production> = buildings.iter_mut().filter(|b| b.owner as usize == player).filter_map(|b| b.production.as_mut()).collect();
-                pool.tick(now, income, book, &mut stores);
+                let mut stores: Vec<&mut crate::production::Production> = buildings.iter_mut().filter(|b| b.owner == TribeId::ALL[player]).filter_map(|b| b.production.as_mut()).collect();
+                pool.tick(now, update_every, income, book, &mut stores);
             }
         }
         self.units.retain(|u| !gone.contains(&u.id));
@@ -1540,7 +1565,7 @@ impl GameMap {
     }
 
     /// A new unit with a fresh id, last in `units` (which stays sorted by id).
-    pub fn spawn(&mut self, owner: u8, kind: UnitKind, at: (u16, u16)) -> &mut Unit {
+    pub fn spawn(&mut self, owner: impl Into<Owner>, kind: UnitKind, at: (u16, u16)) -> &mut Unit {
         let id = self.new_id_of();
         self.units.push(Unit::new(id, owner, kind, at));
         self.units.last_mut().unwrap()
@@ -1720,11 +1745,12 @@ impl GameMap {
         let changed = match event {
             WorldEvent::Damage { unit, amount, kind, from } => {
                 let owner = self.unit(unit).map(|u| u.owner);
-                if self.damage(unit, amount, kind, from)
-                    && kind == DamageKind::Melee
-                    && let Some(owner) = owner
-                {
-                    self.melee_deaths[owner as usize] += 1;
+                let died = self.damage(unit, amount, kind, from);
+                if let Some(attacker) = from.and_then(Owner::tribe) {
+                    self.ai_record_sortie_damage(attacker, unit, amount);
+                }
+                if died && kind == DamageKind::Melee && let Some(tribe) = owner.and_then(Owner::tribe) {
+                    self.melee_deaths[tribe.as_usize()] += 1;
                 }
                 None
             }
@@ -1804,11 +1830,19 @@ impl GameMap {
                 self.add_effect(e);
                 None
             }
+            WorldEvent::SpawnAngelOfDeath { owner, at } => {
+                let ground = self.terrain.height_at(at.0 as u32, at.1 as u32, WORLD_UNITS_PER_CELL);
+                let u = self.spawn(owner, UnitKind::AngelOfDeath, at);
+                u.action = Action::Hunting;
+                u.flight = Some(crate::angel_of_death::Flight { heading: crate::angle::Angle::ZERO, height: ground + crate::angel_of_death::CRUISE_HEIGHT });
+                None
+            }
             WorldEvent::Terrain(TerrainChange::Raise { at, radius, by }) => Some(self.terrain.raise(at, radius, by)),
             WorldEvent::Terrain(TerrainChange::Flatten { at, height, turn }) => Some(crate::flatten::apply(&mut self.terrain, at, height, turn)),
             WorldEvent::Terrain(TerrainChange::Bridge { from, to, heights, turn }) => Some(crate::land_bridge::apply(&mut self.terrain, from, to, heights, turn)),
             WorldEvent::Terrain(TerrainChange::Volcano { at, ground, turn }) => Some(crate::volcano::apply(&mut self.terrain, at, ground, turn)),
             WorldEvent::Terrain(TerrainChange::Erode { at }) => Some(crate::erode::apply(&mut self.terrain, at)),
+            WorldEvent::Terrain(TerrainChange::AngelOfDeathShockwave { at, turn }) => Some(crate::angel_of_death::apply_shockwave(&mut self.terrain, at, turn)),
             WorldEvent::Placed { unit, at } => {
                 if let Some(u) = self.unit_mut(unit) {
                     u.placed(at);
@@ -1844,11 +1878,15 @@ impl GameMap {
                 None
             }
             WorldEvent::FightWon { tribe } => {
-                self.melee_wins[tribe as usize] += 1;
+                if let Some(tribe) = tribe.tribe() {
+                    self.melee_wins[tribe.as_usize()] += 1;
+                }
                 None
             }
             WorldEvent::BuildingBurnedDown { tribe } => {
-                self.fires_put_out[tribe as usize] += 1;
+                if let Some(tribe) = tribe.tribe() {
+                    self.fires_put_out[tribe.as_usize()] += 1;
+                }
                 None
             }
             WorldEvent::Shove { attacker } => {
@@ -1894,7 +1932,7 @@ impl GameMap {
     /// bloodlusted target takes a blow or a bolt `>> BLOODLUST_HEALTH_SHIFT` (independently of the attacker's own
     /// bloodlust, already folded into `amount` by `combat::strength`/`firebolt`). True when this kills it.
     /// `Unit::take_hit` remembers `from` and, if it kills, `kind` (`hurt.rs`).
-    pub(crate) fn damage(&mut self, unit: UnitId, amount: u16, kind: DamageKind, from: Option<u8>) -> bool {
+    pub(crate) fn damage(&mut self, unit: UnitId, amount: u16, kind: DamageKind, from: Option<Owner>) -> bool {
         match self.unit_index(unit).filter(|&i| crate::effect::hurts(&self.units[i], kind, from)) {
             Some(i) => {
                 let lessened = matches!(kind, DamageKind::Melee | DamageKind::Fire) && self.units[i].statuses.bloodlust.is_on();
@@ -2009,7 +2047,8 @@ impl GameMap {
         if self.units[i].kind == UnitKind::Shaman {
             return;
         }
-        let Some(shaman) = self.shaman_of(self.units[i].owner).map(|s| s.id) else { return };
+        let Some(owner) = self.units[i].owner.tribe() else { return };
+        let Some(shaman) = self.shaman_of(owner).map(|s| s.id) else { return };
         let at = self.unit(shaman).map_or((self.units[i].x, self.units[i].z), |s| (s.x, s.z));
         self.units[i].start(Order::Stop);
         if self.units[i].action.can_take_orders() {
@@ -2089,7 +2128,7 @@ impl GameMap {
 
     /// Orders sending the player's `units` to the wood pile at `at`: braves with empty hands pick up
     /// a piece each, the others walk next to it.
-    pub fn pick_orders(&self, player: u8, units: &[UnitId], at: (u16, u16)) -> Vec<Command> {
+    pub fn pick_orders(&self, player: TribeId, units: &[UnitId], at: (u16, u16)) -> Vec<Command> {
         let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
         let takers: Vec<UnitId> = self.units.iter().filter(mine).filter(|u| Self::can_take_wood(u)).map(|u| u.id).collect();
         let others: Vec<UnitId> = units.iter().copied().filter(|id| !takers.contains(id)).collect();
@@ -2149,7 +2188,7 @@ impl GameMap {
 
     /// Orders sending the player's `units` to the tree `tree` (index in `trees`): braves cut it (or
     /// a neighbour), the others walk next to it.
-    pub fn cut_orders(&self, player: u8, units: &[UnitId], tree: usize) -> Vec<Command> {
+    pub fn cut_orders(&self, player: TribeId, units: &[UnitId], tree: usize) -> Vec<Command> {
         let Some(t) = self.trees.get(tree) else { return Vec::new() };
         let at = (t.x, t.z);
         let mine = |u: &&Unit| u.owner == player && u.is_alive() && units.contains(&u.id);
@@ -2214,11 +2253,11 @@ impl Lcg {
 /// the origin): blueprint; under construction with none, a third, two thirds and all but one
 /// piece in; built; dismantling at half; built and attacked (shaking); built with people inside.
 pub fn showcase_states(kind: BuildingKind) -> Vec<Building> {
-    let built = Building::new(kind, 0, 0, 0, 0);
+    let built = Building::new(kind, TribeId::Blue, 0, 0, 0);
     let of = kind.wood_cost();
     let building = |used: u8| Building { used, ..built.clone() };
     vec![
-        Building::site(kind, 0, 0, 0, 0),
+        Building::site(kind, TribeId::Blue, 0, 0, 0),
         building(0),
         building(of / 3),
         building(of * 2 / 3),
@@ -2236,12 +2275,12 @@ mod tests {
 
     /// Mana actually banked into a slot so far: its full charges plus the partial one in progress — unlike
     /// `charges` alone, strictly increases as soon as any mana reaches it, even short of a whole new charge.
-    fn spell_progress(map: &GameMap, player: u8, kind: SpellKind) -> u32 {
+    fn spell_progress(map: &GameMap, player: TribeId, kind: SpellKind) -> u32 {
         let s = map.spell_books[player as usize].slot(kind).unwrap();
         s.charges as u32 * s.stats.cost + s.recharge
     }
 
-    fn charges(map: &GameMap, player: u8, kind: SpellKind) -> u8 {
+    fn charges(map: &GameMap, player: TribeId, kind: SpellKind) -> u8 {
         map.spell_books[player as usize].slot(kind).unwrap().charges
     }
 
@@ -2291,10 +2330,10 @@ mod tests {
     #[test]
     fn a_guard_order_walks_towards_the_shaman_until_within_range() {
         let mut map = GameMap::sandbox_units();
-        let shaman = map.shaman_of(0).unwrap();
+        let shaman = map.shaman_of(TribeId::Blue).unwrap();
         let (sx, sz) = (shaman.x, shaman.z);
-        let brave = map.units.iter().find(|u| u.owner == 0 && u.kind == UnitKind::Brave).unwrap().id;
-        map.apply(&Command::OrderUnit { player: 0, unit: brave, order: Order::Guard });
+        let brave = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave).unwrap().id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: brave, order: Order::Guard });
         assert!(matches!(map.unit(brave).unwrap().action, Action::Guarding { .. }), "guarding at once");
         let arrived = (0..400).find(|_| {
             map.tick();
@@ -2308,17 +2347,17 @@ mod tests {
     #[test]
     fn the_shaman_herself_cannot_be_ordered_to_guard() {
         let mut map = GameMap::sandbox_units();
-        let shaman = map.shaman_of(0).unwrap().id;
-        map.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::Guard });
+        let shaman = map.shaman_of(TribeId::Blue).unwrap().id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: shaman, order: Order::Guard });
         assert_eq!(map.unit(shaman).unwrap().action, Action::Idle);
     }
 
     #[test]
     fn guarding_ends_once_the_shaman_is_no_longer_alive() {
         let mut map = GameMap::sandbox_units();
-        let shaman = map.shaman_of(0).unwrap().id;
-        let brave = map.units.iter().find(|u| u.owner == 0 && u.kind == UnitKind::Brave).unwrap().id;
-        map.apply(&Command::OrderUnit { player: 0, unit: brave, order: Order::Guard });
+        let shaman = map.shaman_of(TribeId::Blue).unwrap().id;
+        let brave = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave).unwrap().id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: brave, order: Order::Guard });
         map.damage(shaman, u16::MAX, DamageKind::Lightning, None);
         map.tick();
         assert_eq!(map.unit(brave).unwrap().action, Action::Idle, "nothing left to escort");
@@ -2329,15 +2368,15 @@ mod tests {
         let mut map = GameMap::sandbox_units();
         // sandbox_units only sets up a reincarnation site (and so a shaman) for tribe 0; spawn tribe 1's own
         // directly so its brave has someone to guard too.
-        map.spawn(1, UnitKind::Shaman, (60 * 512, 60 * 512));
-        let braves: Vec<_> = map.units.iter().filter(|u| u.owner == 0 && u.kind == UnitKind::Brave).map(|u| u.id).take(2).collect();
+        map.spawn(TribeId::Red, UnitKind::Shaman, (60 * 512, 60 * 512));
+        let braves: Vec<_> = map.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave).map(|u| u.id).take(2).collect();
         assert_eq!(braves.len(), 2, "test setup: two braves of the player");
-        let other = map.units.iter().find(|u| u.owner == 1 && u.kind == UnitKind::Brave).unwrap().id;
+        let other = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Red) && u.kind == UnitKind::Brave).unwrap().id;
         for &b in &braves {
-            map.apply(&Command::OrderUnit { player: 0, unit: b, order: Order::Guard });
+            map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: b, order: Order::Guard });
         }
-        map.apply(&Command::OrderUnit { player: 1, unit: other, order: Order::Guard });
-        map.apply(&Command::CancelGuard { player: 0 });
+        map.apply(&Command::OrderUnit { player: TribeId::Red, unit: other, order: Order::Guard });
+        map.apply(&Command::CancelGuard { player: TribeId::Blue });
         for &b in &braves {
             assert_eq!(map.unit(b).unwrap().action, Action::Idle, "{b:?} stood down");
         }
@@ -2349,17 +2388,17 @@ mod tests {
         let mut map = GameMap::sandbox_walk();
         let s = map.units.iter().find(|u| u.kind == UnitKind::Shaman).unwrap();
         let at = (s.x.wrapping_add(1024), s.z);
-        let before = charges(&map, 0, SpellKind::Blast);
-        map.apply(&Command::Cast { player: 0, spell: Spell::Blast { at } });
-        assert_eq!((charges(&map, 0, SpellKind::Blast), charges(&map, 1, SpellKind::Blast)), (before - 1, before));
-        while charges(&map, 0, SpellKind::Blast) > 0 {
+        let before = charges(&map, TribeId::Blue, SpellKind::Blast);
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Blast { at } });
+        assert_eq!((charges(&map, TribeId::Blue, SpellKind::Blast), charges(&map, TribeId::Red, SpellKind::Blast)), (before - 1, before));
+        while charges(&map, TribeId::Blue, SpellKind::Blast) > 0 {
             map.spell_books[0].cast(SpellKind::Blast);
         }
         let effects = map.effects.len();
-        map.apply(&Command::Cast { player: 0, spell: Spell::Blast { at } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Blast { at } });
         assert_eq!(map.effects.len(), effects, "no charge left");
-        map.apply(&Command::CastSelf { player: 0, kind: SpellKind::Convert });
-        assert_eq!(charges(&map, 0, SpellKind::Convert), 1, "2 from the demo loadout, one used");
+        map.apply(&Command::CastSelf { player: TribeId::Blue, kind: SpellKind::Convert });
+        assert_eq!(charges(&map, TribeId::Blue, SpellKind::Convert), 1, "2 from the demo loadout, one used");
     }
 
     #[test]
@@ -2367,7 +2406,7 @@ mod tests {
         let mut map = GameMap::sandbox_buildings();
         let hut = map.buildings.iter().find(|b| b.stage() == crate::building::Stage::Built && b.kind.capacity() > 0).unwrap().id;
         let door = map.building(hut).unwrap().door();
-        let inside = map.spawn(1, UnitKind::Brave, door).id;
+        let inside = map.spawn(TribeId::Red, UnitKind::Brave, door).id;
         map.unit_mut(inside).unwrap().inside = Some(crate::unit::Inside { building: hut, door });
         let i = map.building_index(hut).unwrap();
         map.buildings[i].inside = 1;
@@ -2380,7 +2419,7 @@ mod tests {
         let mut map = GameMap::sandbox_walk();
         let before = map.mana[0].bank;
         assert!(before > crate::mana::Mana::ZERO, "test setup: something to lose");
-        let i = map.unit_index(map.shaman_of(0).unwrap().id).unwrap();
+        let i = map.unit_index(map.shaman_of(TribeId::Blue).unwrap().id).unwrap();
         map.shaman_died(i);
         assert_eq!(map.mana[0].bank, before.saturating_sub(crate::mana::Mana(before.0 / 4)), "lost a quarter");
     }
@@ -2391,13 +2430,13 @@ mod tests {
         // time the tick's own before/after snapshot runs - `Unit::die` sets `Action::Dying` synchronously, not
         // through a tick-returned event): an effect resolved from inside `tick` itself, same as any spell.
         let mut map = GameMap::sandbox_walk();
-        let shaman = map.shaman_of(0).unwrap();
-        let (owner, at) = (shaman.owner, (shaman.x, shaman.z));
-        let before = map.mana[owner as usize].bank;
-        map.add_effect(crate::lightning::effect(1, at));
+        let shaman = map.shaman_of(TribeId::Blue).unwrap();
+        let (owner, at) = (shaman.owner.tribe().unwrap().as_usize(), (shaman.x, shaman.z));
+        let before = map.mana[owner].bank;
+        map.add_effect(crate::lightning::effect(TribeId::Red, at));
         map.tick();
-        assert!(map.shaman_of(0).is_none_or(|s| !s.is_alive()), "test setup: the lightning killed her");
-        assert_eq!(map.mana[owner as usize].bank, before.saturating_sub(crate::mana::Mana(before.0 / 4)), "caught within the same tick the lightning killed her");
+        assert!(map.shaman_of(TribeId::Blue).is_none_or(|s| !s.is_alive()), "test setup: the lightning killed her");
+        assert_eq!(map.mana[owner].bank, before.saturating_sub(crate::mana::Mana(before.0 / 4)), "caught within the same tick the lightning killed her");
     }
 
     #[test]
@@ -2406,7 +2445,7 @@ mod tests {
         let before = map.mana[0].bank;
         map.tick();
         assert_eq!(map.mana[0].bank, before, "nobody died");
-        let brave = map.units.iter().find(|u| u.owner == 0 && u.kind != UnitKind::Shaman).unwrap().id;
+        let brave = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind != UnitKind::Shaman).unwrap().id;
         map.damage(brave, u16::MAX, DamageKind::Lightning, None);
         map.tick();
         assert_eq!(map.mana[0].bank, before, "not the shaman");
@@ -2436,16 +2475,16 @@ mod tests {
         use crate::vehicle::{Vehicle, VehicleKind};
         let mut map = GameMap::sandbox_vehicles();
         let shore = map.buildings.iter().find(|b| b.kind == crate::building::BuildingKind::BoatHut).unwrap().door();
-        let near_shore = map.add_vehicle(Vehicle::new(VehicleKind::Boat, 1, shore, crate::angle::Angle::ZERO));
-        let aboard = map.spawn(1, UnitKind::Brave, shore).id;
+        let near_shore = map.add_vehicle(Vehicle::new(VehicleKind::Boat, TribeId::Red, shore, crate::angle::Angle::ZERO));
+        let aboard = map.spawn(TribeId::Red, UnitKind::Brave, shore).id;
         map.unit_mut(aboard).unwrap().aboard = Some(near_shore);
         map.vehicles.get_mut(near_shore).unwrap().passengers.push(aboard);
         assert!(map.can_unload(near_shore), "set up by the boat hut's own shore");
         map.apply_event(WorldEvent::PutOut { vehicle: near_shore });
         assert!(map.unit(aboard).unwrap().aboard.is_none() && map.unit(aboard).unwrap().is_alive(), "got off onto the ground");
 
-        let at_sea = map.add_vehicle(Vehicle::new(VehicleKind::Boat, 1, (0, 0), crate::angle::Angle::ZERO));
-        let drowning = map.spawn(1, UnitKind::Brave, (0, 0)).id;
+        let at_sea = map.add_vehicle(Vehicle::new(VehicleKind::Boat, TribeId::Red, (0, 0), crate::angle::Angle::ZERO));
+        let drowning = map.spawn(TribeId::Red, UnitKind::Brave, (0, 0)).id;
         map.unit_mut(drowning).unwrap().aboard = Some(at_sea);
         map.vehicles.get_mut(at_sea).unwrap().passengers.push(drowning);
         assert!(!map.can_unload(at_sea), "the open sea: nowhere to get off");
@@ -2459,15 +2498,15 @@ mod tests {
         // sandbox_walk only sites player 0 (one shaman, a deliberately small income): give player 1 a
         // population too, big enough that Swarm (cost 120) clears a charge within the 2s below.
         for _ in 0..25 {
-            map.spawn(1, UnitKind::Brave, (0, 0));
+            map.spawn(TribeId::Red, UnitKind::Brave, (0, 0));
         }
-        map.apply(&Command::PauseSpell { player: 0, kind: SpellKind::Swarm, paused: true });
+        map.apply(&Command::PauseSpell { player: TribeId::Blue, kind: SpellKind::Swarm, paused: true });
         let swarm = map.spell_books[0].slot(SpellKind::Swarm).unwrap().recharge;
-        let convert = spell_progress(&map, 0, SpellKind::Convert);
+        let convert = spell_progress(&map, TribeId::Blue, SpellKind::Convert);
         map.run(Ticks::secs(2));
         assert_eq!(map.spell_books[0].slot(SpellKind::Swarm).unwrap().recharge, swarm, "paused");
-        assert!(spell_progress(&map, 0, SpellKind::Convert) > convert, "not paused: still gains mana");
-        assert!(charges(&map, 1, SpellKind::Swarm) > charges(&map, 0, SpellKind::Swarm), "another player's is not paused");
+        assert!(spell_progress(&map, TribeId::Blue, SpellKind::Convert) > convert, "not paused: still gains mana");
+        assert!(charges(&map, TribeId::Red, SpellKind::Swarm) > charges(&map, TribeId::Blue, SpellKind::Swarm), "another player's is not paused");
         assert!(map.mana[0].received > crate::mana::Mana::ZERO);
     }
 
@@ -2475,7 +2514,7 @@ mod tests {
     fn no_order_or_spell_reaches_a_tumbling_unit() {
         let mut map = GameMap::sandbox_walk();
         let s = map.units.iter().position(|u| u.kind == UnitKind::Shaman).unwrap();
-        let (player, id) = (map.units[s].owner, map.units[s].id);
+        let (player, id) = (map.units[s].owner.tribe().unwrap(), map.units[s].id);
         map.units[s].action = Action::Tumbling;
         map.units[s].motion.velocity = crate::motion::Velocity::new(1, 0, 0);
         let to = (map.units[s].x.wrapping_add(2048), map.units[s].z);
@@ -2491,7 +2530,7 @@ mod tests {
     fn a_blast_throws_people_away_and_they_land() {
         let mut map = GameMap::sandbox_walk();
         let i = map.units.iter().position(|u| u.is_alive() && u.kind == UnitKind::Shaman).unwrap();
-        let (owner, start) = (map.units[i].owner, (map.units[i].x, map.units[i].z));
+        let (owner, start) = (map.units[i].owner.tribe().unwrap(), (map.units[i].x, map.units[i].z));
         let at = (start.0.wrapping_add(300), start.1);
         // Landing also spawns the burn cell and the explosion burst alongside the blast itself
         // (`blast::impact_events`), so count the blasts specifically rather than every effect.
@@ -2504,7 +2543,8 @@ mod tests {
         map.tick();
         assert_eq!(blasts(&map), 1, "close by, the fireball lands and the blast starts the same turn");
         assert!(map.units[i].action != Action::Tumbling && !map.units[i].motion.airborne(), "the caster's own shaman is spared");
-        map.apply(&Command::Cast { player: owner.wrapping_add(1), spell: Spell::Blast { at } });
+        let other_tribe = if owner == TribeId::Blue { TribeId::Red } else { TribeId::Blue };
+        map.apply(&Command::Cast { player: other_tribe, spell: Spell::Blast { at } });
         map.tick();
         assert!(map.units[i].action == Action::Tumbling && map.units[i].motion.airborne(), "thrown up");
         assert_eq!(blasts(&map), 2, "the first one's last turn to come");
@@ -2533,15 +2573,15 @@ mod tests {
         let mut map = GameMap::sandbox_walk();
         let s = map.units.iter().position(|u| u.kind == UnitKind::Shaman).unwrap();
         let (x, z) = (map.units[s].x, map.units[s].z);
-        let dead = map.spawn(0, UnitKind::Brave, (x.wrapping_add(512), z)).id;
-        let other = map.spawn(0, UnitKind::Brave, (x.wrapping_add(1024), z)).id;
+        let dead = map.spawn(TribeId::Blue, UnitKind::Brave, (x.wrapping_add(512), z)).id;
+        let other = map.spawn(TribeId::Blue, UnitKind::Brave, (x.wrapping_add(1024), z)).id;
         map.unit_mut(dead).unwrap().action = Action::Dying { left: crate::time::Countdown::new(crate::unit::DYING_TICKS) };
         map.run(crate::unit::DYING_TICKS);
         assert!(matches!(map.unit(dead).unwrap().action, Action::Spirit { climbing: false, .. }), "on dry land: the calm variant");
         map.run(crate::unit::SPIRIT_CALM_TICKS);
         assert!(map.unit(dead).is_none(), "removed");
         assert!(map.unit(other).is_some(), "the others kept");
-        assert!(map.spawn(0, UnitKind::Brave, (x, z)).id > other, "an id is never given twice");
+        assert!(map.spawn(TribeId::Blue, UnitKind::Brave, (x, z)).id > other, "an id is never given twice");
         map.tick();
     }
 
@@ -2574,7 +2614,7 @@ mod tests {
         assert!(hs.contains(&0));
         assert!(hs.iter().any(|&h| h > 100));
         assert_eq!(a.sites, GameMap::generate(42).sites);
-        assert!(a.site_of(0).is_some());
+        assert!(a.site_of(TribeId::Blue).is_some());
         for s in &a.sites {
             assert!(!a.terrain.is_water(s.cell().0, s.cell().1), "spawn ground is land");
         }
@@ -2584,16 +2624,16 @@ mod tests {
     fn remove_and_restore_reincarnation_only_touch_the_given_tribe() {
         let mut m = GameMap::generate(42);
         assert_eq!(m.sites.len(), 2, "test assumes two tribes");
-        let other = m.sites.iter().find(|s| s.owner != 0).unwrap().owner;
-        m.remove_reincarnation(0);
-        assert!(m.site_of(0).is_none());
+        let other = m.sites.iter().find(|s| s.owner != TribeId::Blue).unwrap().owner;
+        m.remove_reincarnation(TribeId::Blue);
+        assert!(m.site_of(TribeId::Blue).is_none());
         assert!(m.site_of(other).is_some(), "the other tribe's site is untouched");
-        m.remove_reincarnation(0); // a no-op, already disabled
-        assert!(m.site_of(0).is_none());
-        m.restore_reincarnation(0);
-        assert!(m.site_of(0).is_some());
-        m.restore_reincarnation(99); // a no-op, no site for that owner at all
-        assert!(m.site_of(99).is_none());
+        m.remove_reincarnation(TribeId::Blue); // a no-op, already disabled
+        assert!(m.site_of(TribeId::Blue).is_none());
+        m.restore_reincarnation(TribeId::Blue);
+        assert!(m.site_of(TribeId::Blue).is_some());
+        m.restore_reincarnation(TribeId::Yellow); // a no-op, no site for that owner at all
+        assert!(m.site_of(TribeId::Yellow).is_none());
     }
 
     #[test]
@@ -2602,7 +2642,7 @@ mod tests {
         let c = MAP_SIZE as i32 / 2;
         let h = |dx: i32, dz: i32| m.terrain.get(c + dx, c + dz) as i32;
         assert_eq!(m.units.len(), 1);
-        assert!(m.units[0].owner == 0 && !m.terrain.is_water(c, c));
+        assert!(m.units[0].owner == Owner::Tribe(TribeId::Blue) && !m.terrain.is_water(c, c));
         assert_eq!(h(8, 0) - h(7, 0), 30, "gentle ramp");
         assert_eq!(h(0, -8) - h(0, -7), 100, "steep hill");
         assert!(m.terrain.is_water(c - 9, c), "lake");
@@ -2618,7 +2658,7 @@ mod tests {
         let at = |dx: i32| ((c + dx) as u16 * 512 + 256, c as u16 * 512 + 256);
         let order = |m: &mut GameMap, to: (u16, u16)| {
             let unit = m.units[0].id;
-            m.apply(&Command::OrderUnit { player: 0, unit, order: Order::MoveTo { x: to.0, z: to.1 } });
+            m.apply(&Command::OrderUnit { player: TribeId::Blue, unit, order: Order::MoveTo { x: to.0, z: to.1 } });
         };
         let walk = |m: &mut GameMap| (0..400).find(|_| {
             m.tick();
@@ -2661,13 +2701,13 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         let c = MAP_SIZE as i32 / 2;
         let at = |dx: i32, dz: i32| ((c + dx) as u16 * 512 + 256, (c + dz) as u16 * 512 + 256);
-        let cast = |to| Command::Cast { player: 0, spell: Spell::Teleport { to } };
+        let cast = |to| Command::Cast { player: TribeId::Blue, spell: Spell::Teleport { to } };
         for (to, why) in [(at(-9, 0), "lake"), (at(30, 0), "sea"), (at(8, 7), "cliff of the mesa")] {
-            assert!(!m.can_cast(0, &Spell::Teleport { to }), "{why}");
+            assert!(!m.can_cast(TribeId::Blue, &Spell::Teleport { to }), "{why}");
             m.apply(&cast(to));
             assert_ne!((m.units[0].x, m.units[0].z), to, "{why}");
         }
-        assert!(!m.can_cast(1, &Spell::Teleport { to: at(0, 3) }), "no shaman for player 1");
+        assert!(!m.can_cast(TribeId::Red, &Spell::Teleport { to: at(0, 3) }), "no shaman for player 1");
         let to = at(0, -10);
         assert_eq!(m.apply(&cast(to)), None, "no terrain change");
         assert!(matches!(m.units[0].action, crate::unit::Action::Casting { .. }), "the cast jump first");
@@ -2692,10 +2732,10 @@ mod tests {
     fn a_target_she_cannot_reach_she_walks_to_the_nearest_shore_then_casts_from_there() {
         let mut m = with_island_east(90);
         let (start, target) = (m.units[0].cell(), (92, 64));
-        assert!(!crate::unit::is_sea(&m.terrain, target) && !m.in_cast_range(0, SpellKind::LandBridge, m.spell_target(&Spell::LandBridge { from: start, to: target }).unwrap()));
+        assert!(!crate::unit::is_sea(&m.terrain, target) && !m.in_cast_range(TribeId::Blue, SpellKind::LandBridge, m.spell_target(&Spell::LandBridge { from: start, to: target }).unwrap()));
         let charges = |m: &GameMap| m.spell_books[0].slot(SpellKind::LandBridge).unwrap().charges;
         let before = charges(&m);
-        m.apply(&Command::Cast { player: 0, spell: Spell::LandBridge { from: start, to: target } });
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::LandBridge { from: start, to: target } });
         assert!(matches!(m.units[0].action, Action::Walking { .. }), "on her way though the island is out of reach");
         let cast = (1..1200).find(|_| {
             m.tick();
@@ -2711,7 +2751,7 @@ mod tests {
         let (start, target) = (m.units[0].cell(), (110, 64));
         let charges = |m: &GameMap| m.spell_books[0].slot(SpellKind::LandBridge).unwrap().charges;
         let before = charges(&m);
-        m.apply(&Command::Cast { player: 0, spell: Spell::LandBridge { from: start, to: target } });
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::LandBridge { from: start, to: target } });
         m.run(Ticks::secs(30));
         let u = &m.units[0];
         assert_eq!((u.action, u.walking_to_cast(), charges(&m)), (Action::Idle, None, before), "gave up, no charge used");
@@ -2723,11 +2763,11 @@ mod tests {
     fn out_of_range_she_walks_until_in_range_then_casts_unless_ordered_otherwise() {
         let mut m = GameMap::sandbox_walk();
         let (x, z) = (m.units[0].x, m.units[0].z);
-        let range = m.cast_range(0, SpellKind::Blast).unwrap();
+        let range = m.cast_range(TribeId::Blue, SpellKind::Blast).unwrap();
         let at = (x, z.wrapping_add(range as u16 + 6 * 512));
         let blasts = |m: &GameMap| m.spell_books[0].slot(SpellKind::Blast).unwrap().charges;
         let before = blasts(&m);
-        m.apply(&Command::Cast { player: 0, spell: Spell::Blast { at } });
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Blast { at } });
         assert!(matches!(m.units[0].action, Action::Walking { .. }) && m.effects.is_empty() && blasts(&m) == before, "walks first, no charge used");
         let cast = (1..600).find(|_| {
             let charges = blasts(&m);
@@ -2736,16 +2776,16 @@ mod tests {
         });
         assert!(cast.is_some(), "casts once in range, using a charge then");
         let u = &m.units[0];
-        assert!(crate::cast_range::within((u.x, u.z), at, m.cast_range(0, SpellKind::Blast).unwrap()), "stopped within range");
+        assert!(crate::cast_range::within((u.x, u.z), at, m.cast_range(TribeId::Blue, SpellKind::Blast).unwrap()), "stopped within range");
         assert!(torus_delta(z, u.z) > 6 * 512 - 512, "not farther than needed: {}", torus_delta(z, u.z));
         m.run(crate::unit::CAST_RELEASE);
         let has_blast = |m: &GameMap| m.effects.iter().any(|(_, e)| matches!(e.kind, EffectKind::SimpleBlast(_)));
         assert!((1..200).any(|_| { m.tick(); has_blast(&m) }), "the blast, once its fireball has flown in");
 
         let mut m = GameMap::sandbox_walk();
-        m.apply(&Command::Cast { player: 0, spell: Spell::Blast { at } });
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Blast { at } });
         m.run(Ticks::new(6));
-        m.apply(&Command::Order { player: 0, order: Order::Stop });
+        m.apply(&Command::Order { player: TribeId::Blue, order: Order::Stop });
         m.run(Ticks::secs(10));
         assert!(m.effects.is_empty() && m.units[0].action == Action::Idle, "another order drops the cast");
     }
@@ -2756,11 +2796,11 @@ mod tests {
         m.spell_books[0].set(SpellKind::MagicalShield, crate::spell_book::Availability::Unlimited);
         let shaman = m.units[0].id;
         let at = (m.units[0].x, m.units[0].z);
-        let near: Vec<UnitId> = (0..crate::status::SHIELD_NUM_PEOPLE).map(|k| m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(k as u16 * 20), at.1)).id).collect();
-        let far = m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(4000), at.1)).id;
-        let enemy = m.spawn(1, UnitKind::Brave, (at.0.wrapping_add(10), at.1)).id;
-        let wildman = m.spawn(0, UnitKind::Wildman, (at.0.wrapping_add(10), at.1)).id;
-        m.apply(&Command::Cast { player: 0, spell: Spell::MagicalShield { at } });
+        let near: Vec<UnitId> = (0..crate::status::SHIELD_NUM_PEOPLE).map(|k| m.spawn(TribeId::Blue, UnitKind::Brave, (at.0.wrapping_add(k as u16 * 20), at.1)).id).collect();
+        let far = m.spawn(TribeId::Blue, UnitKind::Brave, (at.0.wrapping_add(4000), at.1)).id;
+        let enemy = m.spawn(TribeId::Red, UnitKind::Brave, (at.0.wrapping_add(10), at.1)).id;
+        let wildman = m.spawn(TribeId::Blue, UnitKind::Wildman, (at.0.wrapping_add(10), at.1)).id;
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::MagicalShield { at } });
         assert!(near.iter().all(|&id| !m.unit(id).unwrap().statuses.shield.is_on()), "not yet, still casting");
         m.run(crate::unit::CAST_RELEASE);
         assert!(near.iter().all(|&id| m.unit(id).unwrap().statuses.shield.is_on()), "the 6 nearest, shielded");
@@ -2776,9 +2816,9 @@ mod tests {
         let shaman_pos = (m.units[0].x, m.units[0].z);
         // Within cast range, but well away from the shaman herself.
         let at = (shaman_pos.0, shaman_pos.1.wrapping_add(4 * 512));
-        let near_target = m.spawn(0, UnitKind::Brave, (at.0, at.1.wrapping_add(10))).id;
-        let near_shaman = m.spawn(0, UnitKind::Brave, (shaman_pos.0, shaman_pos.1.wrapping_add(10))).id;
-        m.apply(&Command::Cast { player: 0, spell: Spell::MagicalShield { at } });
+        let near_target = m.spawn(TribeId::Blue, UnitKind::Brave, (at.0, at.1.wrapping_add(10))).id;
+        let near_shaman = m.spawn(TribeId::Blue, UnitKind::Brave, (shaman_pos.0, shaman_pos.1.wrapping_add(10))).id;
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::MagicalShield { at } });
         m.run(Ticks::secs(10));
         assert!(m.unit(near_target).unwrap().statuses.shield.is_on(), "shielded: near the cast point");
         assert!(!m.unit(near_shaman).unwrap().statuses.shield.is_on(), "spared: near the shaman, not the cast point");
@@ -2791,12 +2831,12 @@ mod tests {
         let at = (m.units[0].x, m.units[0].z);
         // The closest one already has a shield about to run out; 6 fresh ones stand a little farther, within the
         // same cast's reach.
-        let stale = m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(5), at.1)).id;
+        let stale = m.spawn(TribeId::Blue, UnitKind::Brave, (at.0.wrapping_add(5), at.1)).id;
         // Comfortably above 0 so it is still clearly on (not accidentally expired by its own `STEP` tick) through
         // the cast's `CAST_RELEASE`-turn animation, yet well under `SHIELD_STEPS` so a refresh is visible.
         m.unit_mut(stale).unwrap().statuses.shield = crate::status::Timed::steps(10);
-        let fresh: Vec<UnitId> = (0..crate::status::SHIELD_NUM_PEOPLE).map(|k| m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(50 + k as u16 * 20), at.1)).id).collect();
-        m.apply(&Command::Cast { player: 0, spell: Spell::MagicalShield { at } });
+        let fresh: Vec<UnitId> = (0..crate::status::SHIELD_NUM_PEOPLE).map(|k| m.spawn(TribeId::Blue, UnitKind::Brave, (at.0.wrapping_add(50 + k as u16 * 20), at.1)).id).collect();
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::MagicalShield { at } });
         m.run(crate::unit::CAST_RELEASE);
         assert!(fresh.iter().all(|&id| m.unit(id).unwrap().statuses.shield.steps_left() == crate::status::SHIELD_STEPS), "the 6 fresh ones, not the closer stale one");
         let left = m.unit(stale).unwrap().statuses.shield.steps_left();
@@ -2804,7 +2844,7 @@ mod tests {
 
         // Everyone nearby is shielded now (nobody left fresh): a recast falls back to plain distance, reaching the
         // closest one again and resetting its timer to a new full duration, rather than refusing to touch it again.
-        m.apply(&Command::Cast { player: 0, spell: Spell::MagicalShield { at } });
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::MagicalShield { at } });
         m.run(crate::unit::CAST_RELEASE);
         assert_eq!(m.unit(stale).unwrap().statuses.shield.steps_left(), crate::status::SHIELD_STEPS, "the closest, refreshed");
     }
@@ -2814,9 +2854,9 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         m.spell_books[0].set(SpellKind::Bloodlust, crate::spell_book::Availability::Unlimited);
         let at = (m.units[0].x, m.units[0].z);
-        let near: Vec<UnitId> = (0..crate::status::BLOODLUST_NUM_PEOPLE).map(|k| m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(k as u16 * 20), at.1)).id).collect();
-        let far = m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(4000), at.1)).id;
-        m.apply(&Command::Cast { player: 0, spell: Spell::Bloodlust { at } });
+        let near: Vec<UnitId> = (0..crate::status::BLOODLUST_NUM_PEOPLE).map(|k| m.spawn(TribeId::Blue, UnitKind::Brave, (at.0.wrapping_add(k as u16 * 20), at.1)).id).collect();
+        let far = m.spawn(TribeId::Blue, UnitKind::Brave, (at.0.wrapping_add(4000), at.1)).id;
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Bloodlust { at } });
         m.run(crate::unit::CAST_RELEASE);
         assert!(near.iter().all(|&id| m.unit(id).unwrap().statuses.bloodlust.is_on()), "the 6 nearest, bloodlusted");
         assert!(!m.unit(far).unwrap().statuses.bloodlust.is_on(), "too far: not among the 6 nearest");
@@ -2825,16 +2865,16 @@ mod tests {
     #[test]
     fn a_bloodlusted_defender_takes_an_eighth_of_a_blow_or_a_bolt_but_not_of_a_blast() {
         let mut map = GameMap::sandbox_walk();
-        let enemy = map.spawn(1, UnitKind::Brave, (map.units[0].x.wrapping_add(1024), map.units[0].z)).id;
+        let enemy = map.spawn(TribeId::Red, UnitKind::Brave, (map.units[0].x.wrapping_add(1024), map.units[0].z)).id;
         let max = map.unit(enemy).unwrap().health.max();
         map.unit_mut(enemy).unwrap().statuses.bloodlust = crate::status::Timed::steps(crate::status::BLOODLUST_STEPS);
-        map.damage(enemy, 80, DamageKind::Melee, Some(0));
+        map.damage(enemy, 80, DamageKind::Melee, Some(Owner::Tribe(TribeId::Blue)));
         assert_eq!(map.unit(enemy).unwrap().health.current(), max - (80 >> crate::status::BLOODLUST_HEALTH_SHIFT), "a blow, lessened");
         let after_melee = map.unit(enemy).unwrap().health.current();
-        map.damage(enemy, 80, DamageKind::Fire, Some(0));
+        map.damage(enemy, 80, DamageKind::Fire, Some(Owner::Tribe(TribeId::Blue)));
         assert_eq!(map.unit(enemy).unwrap().health.current(), after_melee - (80 >> crate::status::BLOODLUST_HEALTH_SHIFT), "a bolt, lessened too");
         let after_fire = map.unit(enemy).unwrap().health.current();
-        map.damage(enemy, 80, DamageKind::Blast, Some(0));
+        map.damage(enemy, 80, DamageKind::Blast, Some(Owner::Tribe(TribeId::Blue)));
         assert_eq!(map.unit(enemy).unwrap().health.current(), after_fire - 80, "a blast: full amount, bloodlust only softens a fight");
     }
 
@@ -2844,9 +2884,9 @@ mod tests {
         m.spell_books[0].set(SpellKind::Invisibility, crate::spell_book::Availability::Unlimited);
         let shaman = m.units[0].id;
         let at = (m.units[0].x, m.units[0].z);
-        let near: Vec<UnitId> = (0..crate::status::INVIS_NUM_PEOPLE).map(|k| m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(k as u16 * 20), at.1)).id).collect();
-        let far = m.spawn(0, UnitKind::Brave, (at.0.wrapping_add(4000), at.1)).id;
-        m.apply(&Command::Cast { player: 0, spell: Spell::Invisibility { at } });
+        let near: Vec<UnitId> = (0..crate::status::INVIS_NUM_PEOPLE).map(|k| m.spawn(TribeId::Blue, UnitKind::Brave, (at.0.wrapping_add(k as u16 * 20), at.1)).id).collect();
+        let far = m.spawn(TribeId::Blue, UnitKind::Brave, (at.0.wrapping_add(4000), at.1)).id;
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Invisibility { at } });
         m.run(crate::unit::CAST_RELEASE);
         assert!(near.iter().all(|&id| m.unit(id).unwrap().statuses.invisible.is_on()), "the 6 nearest, invisible");
         assert!(!m.unit(far).unwrap().statuses.invisible.is_on(), "too far: not among the 6 nearest");
@@ -2855,10 +2895,10 @@ mod tests {
 
     fn invisibility_duel() -> (GameMap, UnitId, UnitId) {
         let mut map = GameMap::sandbox_units();
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z);
-        let a = map.spawn(0, UnitKind::Brave, at).id;
-        let t = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(6 * 512), at.1)).id;
+        let a = map.spawn(TribeId::Blue, UnitKind::Brave, at).id;
+        let t = map.spawn(TribeId::Red, UnitKind::Brave, (at.0.wrapping_add(6 * 512), at.1)).id;
         (map, a, t)
     }
 
@@ -2871,7 +2911,7 @@ mod tests {
             matches!(map.unit(a).unwrap().action, Action::Attacking { .. })
         });
         assert!(found.is_none(), "never spotted: invisible to auto-targeting");
-        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Attack { target: Target::Unit(t) } });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: a, order: Order::Attack { target: Target::Unit(t) } });
         assert!(matches!(map.unit(a).unwrap().action, Action::Attacking { .. }), "a player who already knows its id can still order the attack");
     }
 
@@ -2879,10 +2919,10 @@ mod tests {
     fn attacking_ends_the_attackers_own_invisibility_but_walking_does_not() {
         let (mut map, a, t) = invisibility_duel();
         map.unit_mut(a).unwrap().statuses.invisible = crate::status::Timed::steps(crate::status::INVIS_STEPS);
-        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::MoveTo { x: map.unit(a).unwrap().x.wrapping_add(50), z: map.unit(a).unwrap().z } });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: a, order: Order::MoveTo { x: map.unit(a).unwrap().x.wrapping_add(50), z: map.unit(a).unwrap().z } });
         map.run(Ticks::new(5));
         assert!(map.unit(a).unwrap().statuses.invisible.is_on(), "walking does not end it");
-        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Attack { target: Target::Unit(t) } });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: a, order: Order::Attack { target: Target::Unit(t) } });
         assert!(matches!(map.unit(a).unwrap().action, Action::Attacking { .. }));
         assert!(!map.unit(a).unwrap().statuses.invisible.is_on(), "attacking ends its own invisibility");
     }
@@ -2892,9 +2932,9 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         let s = &m.units[0];
         let (shaman, at) = (s.id, (s.x.wrapping_add(4 * 512), s.z));
-        let crowd: Vec<UnitId> = (0..9).map(|k| m.spawn(1, UnitKind::Brave, (at.0.wrapping_add(k * 30), at.1)).id).collect();
-        let next_cell = m.spawn(1, UnitKind::Brave, (at.0.wrapping_add(512), at.1)).id;
-        m.apply(&Command::Cast { player: 0, spell: Spell::Lightning { at } });
+        let crowd: Vec<UnitId> = (0..9).map(|k| m.spawn(TribeId::Red, UnitKind::Brave, (at.0.wrapping_add(k * 30), at.1)).id).collect();
+        let next_cell = m.spawn(TribeId::Red, UnitKind::Brave, (at.0.wrapping_add(512), at.1)).id;
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Lightning { at } });
         m.run(crate::unit::CAST_RELEASE);
         let dead = |m: &GameMap, id| !m.unit(id).is_some_and(Unit::is_alive);
         assert!(crowd.iter().all(|&id| !dead(&m, id)), "released, not struck yet");
@@ -2905,7 +2945,7 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         let s = &m.units[0];
         let (shaman, at) = (s.id, (s.x, s.z));
-        m.apply(&Command::Cast { player: 0, spell: Spell::Lightning { at } });
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Lightning { at } });
         m.run(Ticks::new(crate::unit::CAST_RELEASE.get() + 2));
         assert!(m.unit(shaman).is_some_and(Unit::is_alive), "on her own cell, she is spared");
     }
@@ -2919,7 +2959,7 @@ mod tests {
         let at = (shaman.0, shaman.1 - 6);
         let level = m.terrain.get(at.0, at.1);
         assert!(crate::flatten::disc(at).any(|(x, z)| m.terrain.get(x, z) != level), "the hill's slope");
-        m.apply(&Command::Cast { player: 0, spell: Spell::Flatten { at } });
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Flatten { at } });
         assert!(m.effects.is_empty(), "her cast jump first");
         m.run(crate::unit::CAST_RELEASE);
         assert_eq!(m.effects.len(), 1, "released into the jump");
@@ -2936,7 +2976,7 @@ mod tests {
         let (aimed_from, to) = ((shaman.0 - 20, shaman.1), (shaman.0, shaman.1 - 6));
         let mut god = m.clone();
         god.shaman_omni = true;
-        let cast = Command::Cast { player: 0, spell: Spell::LandBridge { from: aimed_from, to } };
+        let cast = Command::Cast { player: TribeId::Blue, spell: Spell::LandBridge { from: aimed_from, to } };
         let bridge = |map: &GameMap| map.effects.iter().find_map(|(_, e)| match e.kind {
             crate::effect::EffectKind::LandBridge(b) => Some(b),
             _ => None,
@@ -2971,17 +3011,17 @@ mod tests {
         assert!(crate::unit::is_sea(&m.terrain, lake) && !crate::unit::is_sea(&m.terrain, past_lake), "the walk sandbox's lake, land west of it");
         let charges = |m: &GameMap| m.spell_books[0].slot(SpellKind::LandBridge).unwrap().charges;
         let before = charges(&m);
-        assert!(!m.can_cast(0, &Spell::LandBridge { from: (c, c), to: lake }));
-        m.apply(&Command::Cast { player: 0, spell: Spell::LandBridge { from: (c, c), to: lake } });
+        assert!(!m.can_cast(TribeId::Blue, &Spell::LandBridge { from: (c, c), to: lake }));
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::LandBridge { from: (c, c), to: lake } });
         assert_eq!((m.effects.iter().count(), charges(&m)), (0, before), "refused: no bridge, no charge");
-        m.apply(&Command::Cast { player: 0, spell: Spell::LandBridge { from: (c, c), to: past_lake } });
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::LandBridge { from: (c, c), to: past_lake } });
         assert_eq!(charges(&m), before, "out of range: she walks first");
         let walked = (1..600).find(|_| {
             m.tick();
             charges(&m) < before
         });
         assert!(walked.is_some_and(|t| t > 12), "then casts, once in range");
-        assert!(m.in_cast_range(0, SpellKind::LandBridge, m.spell_target(&Spell::LandBridge { from: (c, c), to: past_lake }).unwrap()));
+        assert!(m.in_cast_range(TribeId::Blue, SpellKind::LandBridge, m.spell_target(&Spell::LandBridge { from: (c, c), to: past_lake }).unwrap()));
         m.run(crate::time::Ticks::new(crate::land_bridge::DURATION));
         assert!(!m.terrain.is_water(lake.0, lake.1), "the lake raised under the bridge");
     }
@@ -3006,7 +3046,7 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         let c = MAP_SIZE as i32 / 2;
         let at = ((c as u16) * 512 + 256, (c as u16) * 512 + 256);
-        m.add_effect(crate::lava::effect(0, at, vec![(c, c)]));
+        m.add_effect(crate::lava::effect(TribeId::Blue, at, vec![(c, c)]));
         m.tick();
         let lit = m.effects.iter().find_map(|(_, e)| match &e.kind {
             EffectKind::Lava(lava) => Some(lava.cells_lit()),
@@ -3019,8 +3059,8 @@ mod tests {
     #[test]
     fn an_ash_covered_cell_with_no_lava_takes_its_shading_blend_from_the_ashes() {
         let mut m = GameMap::sandbox_walk();
-        let hut = m.add_building(Building { used: 1, ..Building::new(BuildingKind::Hut { size: 1 }, 1, MAP_SIZE as u16 / 2 * 512, MAP_SIZE as u16 / 2 * 512, 0) });
-        m.set_fire(hut, 1);
+        let hut = m.add_building(Building { used: 1, ..Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, MAP_SIZE as u16 / 2 * 512, MAP_SIZE as u16 / 2 * 512, 0) });
+        m.set_fire(hut, Owner::Tribe(TribeId::Red));
         for _ in 0..60 {
             m.tick();
         }
@@ -3033,27 +3073,27 @@ mod tests {
     fn spells_are_aimed_within_the_shamans_range() {
         let mut m = GameMap::sandbox_walk();
         let (x, z) = (m.units[0].x, m.units[0].z);
-        let range = m.cast_range(0, SpellKind::Blast).unwrap();
+        let range = m.cast_range(TribeId::Blue, SpellKind::Blast).unwrap();
         assert!((2457..=4608).contains(&range), "the blast's 3072 scaled by her altitude: {range}");
-        assert!(m.in_cast_range(0, SpellKind::Blast, (x + range as u16, z)));
-        assert!(!m.in_cast_range(0, SpellKind::Blast, (x + range as u16 + 1, z)));
-        assert!(m.in_cast_range(0, SpellKind::Teleport, (x + 20_000, z)), "teleport has no limit");
-        assert!(!m.in_cast_range(1, SpellKind::Blast, (x, z)), "no shaman for player 1");
+        assert!(m.in_cast_range(TribeId::Blue, SpellKind::Blast, (x + range as u16, z)));
+        assert!(!m.in_cast_range(TribeId::Blue, SpellKind::Blast, (x + range as u16 + 1, z)));
+        assert!(m.in_cast_range(TribeId::Blue, SpellKind::Teleport, (x + 20_000, z)), "teleport has no limit");
+        assert!(!m.in_cast_range(TribeId::Red, SpellKind::Blast, (x, z)), "no shaman for player 1");
         m.units[0].fling(crate::motion::Velocity::new(0, 98, 0), 200);
-        assert!(!m.in_cast_range(0, SpellKind::Blast, (x, z)) && !m.can_cast(0, &Spell::Blast { at: (x, z) }), "nothing in the air");
+        assert!(!m.in_cast_range(TribeId::Blue, SpellKind::Blast, (x, z)) && !m.can_cast(TribeId::Blue, &Spell::Blast { at: (x, z) }), "nothing in the air");
         m.shaman_omni = true;
-        assert_eq!(m.cast_range(0, SpellKind::Blast), None);
-        assert!(m.in_cast_range(1, SpellKind::Blast, (x + 20_000, z)), "a god casts anywhere");
+        assert_eq!(m.cast_range(TribeId::Blue, SpellKind::Blast), None);
+        assert!(m.in_cast_range(TribeId::Red, SpellKind::Blast, (x + 20_000, z)), "a god casts anywhere");
     }
 
     #[test]
     fn a_shaman_in_a_drum_tower_casts_from_its_level_a_third_farther() {
         let mut m = GameMap::sandbox_walk();
         let (x, z) = (m.units[0].x, m.units[0].z);
-        let tower = m.add_building(Building { level: 256, ..Building::new(BuildingKind::DrumTower, 0, x, z, 0) });
+        let tower = m.add_building(Building { level: 256, ..Building::new(BuildingKind::DrumTower, TribeId::Blue, x, z, 0) });
         m.units[0].inside = Some(crate::unit::Inside { building: tower, door: (x, z) });
         assert_eq!(m.altitude(&m.units[0]), 256);
-        assert_eq!(m.cast_range(0, SpellKind::Blast), Some(4096), "3072 at band 2, + 1/3");
+        assert_eq!(m.cast_range(TribeId::Blue, SpellKind::Blast), Some(4096), "3072 at band 2, + 1/3");
     }
 
     #[test]
@@ -3070,12 +3110,12 @@ mod tests {
     #[test]
     fn sandbox_units_has_every_kind_on_land() {
         let m = GameMap::sandbox_units();
-        let count = |owner: u8, kind: UnitKind| m.units.iter().filter(|u| u.owner == owner && u.kind == kind).count();
-        assert_eq!(count(0, UnitKind::Shaman), 1);
-        assert_eq!(count(1, UnitKind::Shaman), 0);
+        let count = |owner: TribeId, kind: UnitKind| m.units.iter().filter(|u| u.owner == owner && u.kind == kind).count();
+        assert_eq!(count(TribeId::Blue, UnitKind::Shaman), 1);
+        assert_eq!(count(TribeId::Red, UnitKind::Shaman), 0);
         for kind in &UnitKind::FOLLOWERS {
-            assert_eq!((count(0, *kind), count(1, *kind)), (3 + SANDBOX_MARKERS.len(), 1), "{kind:?}");
-            let marked: Vec<&Unit> = m.units.iter().filter(|u| u.owner == 0 && u.kind == *kind).skip(3).collect();
+            assert_eq!((count(TribeId::Blue, *kind), count(TribeId::Red, *kind)), (3 + SANDBOX_MARKERS.len(), 1), "{kind:?}");
+            let marked: Vec<&Unit> = m.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == *kind).skip(3).collect();
             let markers = |u: &Unit| [u.health.is_low(), u.statuses.shield.is_on(), u.statuses.bloodlust.is_on(), u.statuses.hypnotized.is_on()];
             assert_eq!(marked.iter().map(|u| markers(u)).collect::<Vec<_>>(), [
                 [true, false, false, false],
@@ -3100,8 +3140,8 @@ mod tests {
     fn orders_and_casts_go_to_the_shaman_not_the_first_unit() {
         let mut m = GameMap::sandbox_units();
         m.units.rotate_left(1);
-        m.apply(&Command::Order { player: 0, order: Order::Cast });
-        assert!(matches!(m.shaman_of(0).unwrap().action, crate::unit::Action::Casting { .. }));
+        m.apply(&Command::Order { player: TribeId::Blue, order: Order::Cast });
+        assert!(matches!(m.shaman_of(TribeId::Blue).unwrap().action, crate::unit::Action::Casting { .. }));
         assert!(m.units.iter().filter(|u| u.kind != UnitKind::Shaman).all(|u| u.action == crate::unit::Action::Idle));
     }
 
@@ -3128,18 +3168,18 @@ mod tests {
         m.trees.clear();
         let c = MAP_SIZE as i32 / 2;
         let to = slots::cell_centre((c + 2, c + 6));
-        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
-        for cmd in m.dispatch(0, &group, to) {
+        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue)).map(|u| u.id).collect();
+        for cmd in m.dispatch(TribeId::Blue, &group, to) {
             m.apply(&cmd);
         }
         for _ in 0..600 {
             m.tick();
         }
-        let spots: Vec<_> = m.units.iter().filter(|u| u.owner == 0).map(|u| slots::spot_of((u.x, u.z))).collect();
-        assert!(m.units.iter().filter(|u| u.owner == 0).all(|u| u.action == Action::Idle), "all arrived");
+        let spots: Vec<_> = m.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue)).map(|u| slots::spot_of((u.x, u.z))).collect();
+        assert!(m.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue)).all(|u| u.action == Action::Idle), "all arrived");
         let distinct: BTreeSet<_> = spots.iter().collect();
         assert_eq!(distinct.len(), spots.len(), "one spot each: {spots:?}");
-        let cells: Vec<_> = m.units.iter().filter(|u| u.owner == 0).map(Unit::cell).collect();
+        let cells: Vec<_> = m.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue)).map(Unit::cell).collect();
         assert!(cells.iter().all(|&(x, z)| (x - c - 2).abs() <= 2 && (z - c - 6).abs() <= 2), "16 units within 2 cells: {cells:?}");
     }
 
@@ -3149,8 +3189,8 @@ mod tests {
         m.trees.clear();
         let c = MAP_SIZE as i32 / 2;
         let to = slots::cell_centre((c + 2, c + 6));
-        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
-        for cmd in m.move_orders(0, &group, to) {
+        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue)).map(|u| u.id).collect();
+        for cmd in m.move_orders(TribeId::Blue, &group, to) {
             m.apply(&cmd);
         }
         assert_eq!(m.formations.len(), 1, "one shared formation for the whole group");
@@ -3158,7 +3198,7 @@ mod tests {
         for _ in 0..600 {
             m.tick();
         }
-        assert!(m.units.iter().filter(|u| u.owner == 0).all(|u| u.action == Action::Idle), "all arrived");
+        assert!(m.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue)).all(|u| u.action == Action::Idle), "all arrived");
         assert!(m.formations.is_empty(), "cleared up once nobody is still walking");
     }
 
@@ -3167,13 +3207,13 @@ mod tests {
         let mut m = GameMap::sandbox_units();
         m.trees.clear();
         let c = MAP_SIZE as i32 / 2;
-        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == 0).take(3).map(|u| u.id).collect();
-        for cmd in m.move_orders(0, &group, slots::cell_centre((c + 2, c + 6))) {
+        let group: Vec<UnitId> = m.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue)).take(3).map(|u| u.id).collect();
+        for cmd in m.move_orders(TribeId::Blue, &group, slots::cell_centre((c + 2, c + 6))) {
             m.apply(&cmd);
         }
         assert_eq!(m.formations[0].members.len(), 3);
         let elsewhere = slots::cell_centre((c - 6, c - 2));
-        m.apply(&Command::OrderUnit { player: 0, unit: group[0], order: Order::MoveTo { x: elsewhere.0, z: elsewhere.1 } });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: group[0], order: Order::MoveTo { x: elsewhere.0, z: elsewhere.1 } });
         assert!(
             m.formations[0].members.iter().all(|&(id, _)| id != group[0]),
             "reassigned right away, not left to finish walking to its old slot first"
@@ -3184,9 +3224,9 @@ mod tests {
     #[test]
     fn a_lone_walker_never_forms_up() {
         let mut m = GameMap::sandbox_units();
-        let lone = m.units.iter().find(|u| u.owner == 0 && u.kind != UnitKind::Shaman).unwrap().id;
+        let lone = m.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind != UnitKind::Shaman).unwrap().id;
         let to = slots::cell_centre((MAP_SIZE as i32 / 2, MAP_SIZE as i32 / 2));
-        for cmd in m.move_orders(0, &[lone], to) {
+        for cmd in m.move_orders(TribeId::Blue, &[lone], to) {
             m.apply(&cmd);
         }
         assert!(m.formations.is_empty());
@@ -3198,10 +3238,10 @@ mod tests {
         let c = MAP_SIZE as i32 / 2;
         m.trees = vec![Tree::new((c + 5, c), 0, 3)];
         let shaman = m.units[0].id;
-        m.spawn(0, UnitKind::Brave, slots::cell_centre((c + 6, c)));
+        m.spawn(TribeId::Blue, UnitKind::Brave, slots::cell_centre((c + 6, c)));
         for target in [(c + 5, c), (c + 6, c)] {
             let to = slots::cell_centre(target);
-            m.apply(&Command::OrderUnit { player: 0, unit: shaman, order: Order::MoveTo { x: to.0, z: to.1 } });
+            m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: shaman, order: Order::MoveTo { x: to.0, z: to.1 } });
             for _ in 0..300 {
                 m.tick();
             }
@@ -3218,7 +3258,7 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         let c = MAP_SIZE as i32 / 2;
         m.trees = vec![Tree::new((c + 4, c), 0, 4)];
-        m.apply(&Command::Cast { player: 0, spell: Spell::Teleport { to: slots::cell_centre((c + 4, c)) } });
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Teleport { to: slots::cell_centre((c + 4, c)) } });
         for _ in 0..100 {
             m.tick();
         }
@@ -3241,7 +3281,7 @@ mod tests {
     #[test]
     fn sandbox_worship_has_a_pyramid_for_the_shaman_and_every_totem_with_braves() {
         let m = GameMap::sandbox_worship();
-        let site = m.site_of(0).unwrap();
+        let site = m.site_of(TribeId::Blue).unwrap();
         let vault = m.buildings.iter().find(|b| b.kind == BuildingKind::Vault).unwrap();
         assert!(vault.vault.unwrap().reward.is_some());
         let (_, cz) = vault.centre();
@@ -3252,8 +3292,8 @@ mod tests {
         for t in &m.totems {
             assert!(!m.terrain.is_water((t.x / 512) as i32, (t.z / 512) as i32));
         }
-        assert!(m.shaman_of(0).is_some());
-        assert_eq!(m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == 0).count(), 8);
+        assert!(m.shaman_of(TribeId::Blue).is_some());
+        assert_eq!(m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == Owner::Tribe(TribeId::Blue)).count(), 8);
         assert!(m.totems.windows(2).all(|w| w[0].id < w[1].id), "distinct, increasing ids, same as buildings/units");
     }
 
@@ -3269,7 +3309,7 @@ mod tests {
         assert_eq!(m.buildings.iter().map(|b| b.inside as usize).sum::<usize>(), 10);
         assert!(m.units.iter().all(|u| !m.terrain.is_water(u.cell().0, u.cell().1)));
         assert!(m.terrain.is_water(64 + 16, 64), "sea between the home island and the village");
-        for owner in [0, 1] {
+        for owner in [TribeId::Blue, TribeId::Red] {
             for kind in UnitKind::FOLLOWERS {
                 let group: Vec<(i32, i32)> = m.units.iter().filter(|u| u.owner == owner && u.kind == kind && (u.cell().0 - 64).abs() <= 14 && (u.cell().1 - 64).abs() <= 14).map(Unit::cell).collect();
                 assert_eq!(group.len(), 3, "tribe {owner}'s {kind:?} on the home island");
@@ -3297,10 +3337,10 @@ mod tests {
         assert!(!m.terrain.is_water(home_shore.0, home_shore.1), "the home island's own near shore is dry land");
         assert!(!m.terrain.is_water(islet_shore.0, islet_shore.1), "the islet's own near shore is dry land");
         let world = |c: i32| (c.rem_euclid(MAP_SIZE as i32) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
-        let shaman = m.unit_mut(m.shaman_of(0).unwrap().id).unwrap();
+        let shaman = m.unit_mut(m.shaman_of(TribeId::Blue).unwrap().id).unwrap();
         (shaman.x, shaman.z) = (world(home_shore.0), world(home_shore.1));
         let target = (world(islet_shore.0), world(islet_shore.1));
-        assert!(m.in_cast_range(0, SpellKind::LandBridge, target), "Land Bridge reaches the south-west islet from the home island's own shore");
+        assert!(m.in_cast_range(TribeId::Blue, SpellKind::LandBridge, target), "Land Bridge reaches the south-west islet from the home island's own shore");
     }
 
     #[test]
@@ -3308,7 +3348,7 @@ mod tests {
         let m = GameMap::sandbox_bridge();
         assert!(m.spell_books[0].slot(SpellKind::LandBridge).is_some_and(|s| s.can_cast()));
         assert_eq!(m.units.len(), 1, "just the one shaman");
-        let shaman = m.shaman_of(0).unwrap();
+        let shaman = m.shaman_of(TribeId::Blue).unwrap();
         assert!(!m.terrain.is_water(shaman.cell().0, shaman.cell().1), "spawns on dry land");
         assert!(m.terrain.is_water(65, 20), "open sea between the two islands (x alone already clears both circles)");
         let (ox, oz) = GameMap::BRIDGE_TARGET_CELL_OFFSET;
@@ -3316,8 +3356,8 @@ mod tests {
         assert!(!m.terrain.is_water(target_cell.0, target_cell.1), "the far shore is dry land");
         let world = |c: i32| (c.rem_euclid(MAP_SIZE as i32) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
         let target = (world(target_cell.0), world(target_cell.1));
-        let range = m.cast_range(0, SpellKind::LandBridge).unwrap();
-        assert!(m.in_cast_range(0, SpellKind::LandBridge, target), "the far shore is within range");
+        let range = m.cast_range(TribeId::Blue, SpellKind::LandBridge).unwrap();
+        assert!(m.in_cast_range(TribeId::Blue, SpellKind::LandBridge, target), "the far shore is within range");
         let crossing2 = torus_dist2((shaman.x, shaman.z), target);
         assert!((crossing2 as f64).sqrt() < range as f64 * 0.9, "cast with margin, not right at the limit: {} of {range}", (crossing2 as f64).sqrt());
     }
@@ -3331,9 +3371,18 @@ mod tests {
         let (c, (dx, dz, _, height)) = (MAP_SIZE as i32 / 2, SANDBOX_VEHICLE_HILLS[0]);
         assert!(m.terrain.get(c + dx, c + dz) as i32 >= 64 + height / 2, "a tall hill west");
         let afloat: Vec<_> = m.vehicles.iter().map(|(_, v)| (v.kind, v.owner, resting(v.kind, &m.terrain, v.cell()))).collect();
-        assert_eq!(afloat, vec![(VehicleKind::Boat, 0, true), (VehicleKind::Boat, 0, true), (VehicleKind::Boat, 0, false), (VehicleKind::Balloon, 0, true), (VehicleKind::Boat, 1, true)]);
+        assert_eq!(
+            afloat,
+            vec![
+                (VehicleKind::Boat, Owner::Tribe(TribeId::Blue), true),
+                (VehicleKind::Boat, Owner::Tribe(TribeId::Blue), true),
+                (VehicleKind::Boat, Owner::Tribe(TribeId::Blue), false),
+                (VehicleKind::Balloon, Owner::Tribe(TribeId::Blue), true),
+                (VehicleKind::Boat, Owner::Tribe(TribeId::Red), true)
+            ]
+        );
         let braves: Vec<UnitId> = m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.aboard.is_none()).take(3).map(|u| u.id).collect();
-        for c in m.enter_orders(0, &braves, hut) {
+        for c in m.enter_orders(TribeId::Blue, &braves, hut) {
             m.apply(&c);
         }
         let before = m.vehicles.len();
@@ -3346,9 +3395,9 @@ mod tests {
     #[test]
     fn sandbox_buildings_has_every_model_on_land() {
         let m = GameMap::sandbox_buildings();
-        let models = m.buildings.iter().filter(|b| b.owner == 0 && b.stage() == crate::building::Stage::Built && b.inside == 0 && b.shaking == 0);
+        let models = m.buildings.iter().filter(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.stage() == crate::building::Stage::Built && b.inside == 0 && b.shaking == 0);
         assert_eq!(models.count(), 19 + crate::build_book::BUILDABLE.len() + SANDBOX_BLASTS.len());
-        assert!(m.buildings.iter().any(|b| b.owner == 1));
+        assert!(m.buildings.iter().any(|b| b.owner == Owner::Tribe(TribeId::Red)));
         assert!(!m.wood.is_empty(), "some wood to look at");
         for w in &m.wood {
             assert!(!m.terrain.is_water((w.x / 512) as i32, (w.z / 512) as i32));
@@ -3359,7 +3408,7 @@ mod tests {
                 assert!(std::ptr::eq(b, o) || !b.covers(o.centre(), 0), "{:?} and {:?} overlap", b.kind, o.kind);
             }
         }
-        let braves = m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == 0).count();
+        let braves = m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.owner == Owner::Tribe(TribeId::Blue)).count();
         assert!(braves >= 4 && m.wood.len() >= 10 && m.trees.len() >= 4, "something to build with");
         for t in &m.trees {
             assert!(!m.terrain.is_water(t.cell().0, t.cell().1));
@@ -3381,11 +3430,11 @@ mod tests {
     fn camp_fires_are_lit_by_command_on_free_flat_ground_only() {
         let mut m = GameMap::sandbox_buildings();
         let at = |x: i32, z: i32| ((x * 512 + 100) as u16, (z * 512 + 400) as u16);
-        m.apply(&Command::PlaceCampfire { player: 0, at: at(84, 70) });
-        assert_eq!(m.campfires.last().map(|f| (f.cell(), f.owner)), Some(((84, 70), 0)));
+        m.apply(&Command::PlaceCampfire { player: TribeId::Blue, at: at(84, 70) });
+        assert_eq!(m.campfires.last().map(|f| (f.cell(), f.owner)), Some(((84, 70), Owner::Tribe(TribeId::Blue))));
         let n = m.campfires.len();
-        m.apply(&Command::PlaceCampfire { player: 0, at: at(84, 70) });
-        m.apply(&Command::PlaceCampfire { player: 0, at: at(2, 2) });
+        m.apply(&Command::PlaceCampfire { player: TribeId::Blue, at: at(84, 70) });
+        m.apply(&Command::PlaceCampfire { player: TribeId::Blue, at: at(2, 2) });
         assert_eq!(m.campfires.len(), n, "taken, then the sea");
         assert_eq!(m.campfire_at(at(84, 70)).map(|f| f.id), m.campfires.last().map(|f| f.id));
         let ids: Vec<u32> = m.campfires.iter().map(|f| f.id).collect();
@@ -3397,10 +3446,10 @@ mod tests {
         let mut m = GameMap::sandbox_buildings();
         let before = m.trees.len();
         let at = |x: i32, z: i32| ((x * 512 + 100) as u16, (z * 512 + 100) as u16);
-        m.apply(&Command::PlaceTree { player: 0, at: at(10, 10) });
+        m.apply(&Command::PlaceTree { player: TribeId::Blue, at: at(10, 10) });
         assert_eq!(m.trees.len(), before + 1);
         assert_eq!(m.trees.last().map(|t| (t.cell(), t.size)), Some(((10, 10), crate::tree::MAX_SIZE)));
-        m.apply(&Command::PlaceTree { player: 0, at: at(10, 10) });
+        m.apply(&Command::PlaceTree { player: TribeId::Blue, at: at(10, 10) });
         assert_eq!(m.trees.len(), before + 1, "a living tree is already there");
     }
 
@@ -3409,9 +3458,9 @@ mod tests {
         use crate::campfire::{ring_point, ABANDON_TICKS, RING_POINTS};
         let mut m = GameMap::sandbox_buildings();
         m.campfires.clear();
-        let fire = m.place_campfire(0, (84, 70)).unwrap();
+        let fire = m.place_campfire(TribeId::Blue, (84, 70)).unwrap();
         let braves: Vec<UnitId> = m.units.iter().filter(|u| u.kind == UnitKind::Brave && u.campfire().is_none()).take(4).map(|u| u.id).collect();
-        let orders = m.gather(0, &braves, fire);
+        let orders = m.gather(TribeId::Blue, &braves, fire);
         let points: Vec<u8> = orders.iter().map(|c| match c {
             Command::OrderUnit { order: Order::Campfire { point, .. }, .. } => *point,
             _ => panic!("{c:?}"),
@@ -3420,7 +3469,7 @@ mod tests {
         for w in points.windows(2) {
             assert_eq!((w[1] + RING_POINTS - w[0]) % RING_POINTS, RING_POINTS / 4, "a quarter of the ring apart");
         }
-        assert!(m.gather(1, &braves, fire).is_empty(), "not red's fire");
+        assert!(m.gather(TribeId::Red, &braves, fire).is_empty(), "not red's fire");
         for c in &orders {
             m.apply(c);
         }
@@ -3443,7 +3492,7 @@ mod tests {
             }
         }
         assert!(went_round.iter().all(|&n| n > RING_POINTS as u32), "each went round at least once: {went_round:?}");
-        for c in braves.iter().map(|&unit| Command::OrderUnit { player: 0, unit, order: Order::Stop }) {
+        for c in braves.iter().map(|&unit| Command::OrderUnit { player: TribeId::Blue, unit, order: Order::Stop }) {
             m.apply(&c);
         }
         for _ in 0..ABANDON_TICKS.get() - 1 {
@@ -3468,7 +3517,7 @@ mod tests {
         let id = m.units[0].id;
         let (a, b) = (slots::cell_centre((c + 3, c)), slots::cell_centre((c + 3, c + 3)));
         for order in [Order::MoveTo { x: a.0, z: a.1 }, Order::MoveTo { x: b.0, z: b.1 }, Order::Stop] {
-            m.apply(&Command::QueueOrder { player: 0, unit: id, order });
+            m.apply(&Command::QueueOrder { player: TribeId::Blue, unit: id, order });
         }
         assert_eq!(m.units[0].action, Action::Walking { to: a }, "idle: the first one starts at once");
         assert_eq!(m.units[0].queued().len(), 2);
@@ -3479,13 +3528,13 @@ mod tests {
         }
         assert!(seen_a, "went by A");
         assert_eq!((m.units[0].cell(), m.units[0].action, m.units[0].queued().len()), ((c + 3, c + 3), Action::Idle, 0), "then B, then stops");
-        m.apply(&Command::QueueOrder { player: 0, unit: id, order: Order::MoveTo { x: a.0, z: a.1 } });
-        m.apply(&Command::QueueOrder { player: 0, unit: id, order: Order::MoveTo { x: b.0, z: b.1 } });
+        m.apply(&Command::QueueOrder { player: TribeId::Blue, unit: id, order: Order::MoveTo { x: a.0, z: a.1 } });
+        m.apply(&Command::QueueOrder { player: TribeId::Blue, unit: id, order: Order::MoveTo { x: b.0, z: b.1 } });
         assert_eq!((m.units[0].action, m.units[0].queued().len()), (Action::Walking { to: a }, 1));
-        m.apply(&Command::OrderUnit { player: 0, unit: id, order: Order::Stop });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: id, order: Order::Stop });
         run(&mut m, 50);
         assert_eq!((m.units[0].action, m.units[0].queued().len()), (Action::Idle, 0), "a direct order replaces the chain");
-        m.apply(&Command::QueueOrder { player: 1, unit: id, order: Order::MoveTo { x: a.0, z: a.1 } });
+        m.apply(&Command::QueueOrder { player: TribeId::Red, unit: id, order: Order::MoveTo { x: a.0, z: a.1 } });
         assert_eq!(m.units[0].action, Action::Idle, "not red's unit");
     }
 
@@ -3496,11 +3545,11 @@ mod tests {
         let fire = m.campfires[0].centre();
         let id = m.units.iter().find(|u| u.campfire() == Some(fire)).unwrap().id;
         let to = (fire.0.wrapping_sub(3 * 512), fire.1);
-        m.apply(&Command::QueueOrder { player: 0, unit: id, order: Order::MoveTo { x: to.0, z: to.1 } });
+        m.apply(&Command::QueueOrder { player: TribeId::Blue, unit: id, order: Order::MoveTo { x: to.0, z: to.1 } });
         run(&mut m, 100);
         let u = m.units.iter().find(|u| u.id == id).unwrap();
         assert!(matches!(u.action, Action::AroundFire { .. }), "going round a tended fire never ends");
-        m.apply(&Command::RemoveCampfire { player: 0, at: fire });
+        m.apply(&Command::RemoveCampfire { player: TribeId::Blue, at: fire });
         run(&mut m, 100);
         let u = m.units.iter().find(|u| u.id == id).unwrap();
         assert_eq!(u.action, Action::Idle);
@@ -3511,12 +3560,12 @@ mod tests {
     fn chained_orders_replay_the_same() {
         let play = || {
             let mut m = GameMap::sandbox_units();
-            let ids: Vec<UnitId> = m.units.iter().filter(|u| u.owner == 0).map(|u| u.id).collect();
+            let ids: Vec<UnitId> = m.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue)).map(|u| u.id).collect();
             let c = MAP_SIZE as i32 / 2;
             for (i, &unit) in ids.iter().enumerate() {
                 let to = slots::cell_centre((c + i as i32 % 4, c + 4));
-                m.apply(&Command::QueueOrder { player: 0, unit, order: Order::MoveTo { x: to.0, z: to.1 } });
-                m.apply(&Command::QueueOrder { player: 0, unit, order: Order::Stop });
+                m.apply(&Command::QueueOrder { player: TribeId::Blue, unit, order: Order::MoveTo { x: to.0, z: to.1 } });
+                m.apply(&Command::QueueOrder { player: TribeId::Blue, unit, order: Order::Stop });
             }
             run(&mut m, 300);
             m.units
@@ -3529,16 +3578,16 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         m.trees.clear();
         let c = MAP_SIZE as i32 / 2;
-        let ids: Vec<UnitId> = (0..3).map(|n| m.spawn(0, UnitKind::Brave, slots::cell_centre((c - 3, c + n))).id).collect();
+        let ids: Vec<UnitId> = (0..3).map(|n| m.spawn(TribeId::Blue, UnitKind::Brave, slots::cell_centre((c - 3, c + n))).id).collect();
         let at = slots::cell_centre((c + 3, c));
-        m.apply(&Command::SetPatrol { player: 0, units: ids.clone(), at });
+        m.apply(&Command::SetPatrol { player: TribeId::Blue, units: ids.clone(), at });
         assert_eq!(m.patrol_points.len(), 1, "one shared point, not one per unit");
         assert_eq!(m.hidden_points.len(), 1);
         let point = m.patrol_points.ids().next().unwrap();
         for &id in &ids {
             assert_eq!(m.unit(id).unwrap().queued_patrol().iter().collect::<Vec<_>>(), [point]);
         }
-        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::Stop });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::Stop });
         assert!(m.unit(ids[0]).unwrap().queued_patrol().is_empty(), "its own patrol dropped at once");
         for &id in &ids[1..] {
             assert_eq!(m.unit(id).unwrap().queued_patrol().iter().collect::<Vec<_>>(), [point], "the others keep patrolling");
@@ -3551,10 +3600,10 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         m.trees.clear();
         let c = MAP_SIZE as i32 / 2;
-        let id = m.spawn(0, UnitKind::Brave, slots::cell_centre((c, c))).id;
+        let id = m.spawn(TribeId::Blue, UnitKind::Brave, slots::cell_centre((c, c))).id;
         let (a, b) = (slots::cell_centre((c + 3, c)), slots::cell_centre((c + 3, c + 3)));
-        m.apply(&Command::SetPatrol { player: 0, units: vec![id], at: a });
-        m.apply(&Command::AddPatrolPoint { player: 0, units: vec![id], at: b });
+        m.apply(&Command::SetPatrol { player: TribeId::Blue, units: vec![id], at: a });
+        m.apply(&Command::AddPatrolPoint { player: TribeId::Blue, units: vec![id], at: b });
         let (mut seen_a, mut seen_b) = (0, 0);
         for _ in 0..400 {
             m.tick();
@@ -3570,10 +3619,10 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         m.trees.clear();
         let c = MAP_SIZE as i32 / 2;
-        let ids: Vec<UnitId> = (0..2).map(|n| m.spawn(0, UnitKind::Warrior, slots::cell_centre((c - 3, c + n))).id).collect();
+        let ids: Vec<UnitId> = (0..2).map(|n| m.spawn(TribeId::Blue, UnitKind::Warrior, slots::cell_centre((c - 3, c + n))).id).collect();
         let (a, b) = (slots::cell_centre((c + 3, c)), slots::cell_centre((c + 9, c)));
-        m.apply(&Command::SetPatrol { player: 0, units: ids.clone(), at: a });
-        m.apply(&Command::AddPatrolPoint { player: 0, units: ids.clone(), at: b });
+        m.apply(&Command::SetPatrol { player: TribeId::Blue, units: ids.clone(), at: a });
+        m.apply(&Command::AddPatrolPoint { player: TribeId::Blue, units: ids.clone(), at: b });
         let (mut seen_a, mut seen_b) = (0, 0);
         for _ in 0..300 {
             m.tick();
@@ -3586,9 +3635,9 @@ mod tests {
         assert!(seen_a >= 2 && seen_b >= 2, "goes back and forth more than once: {seen_a} {seen_b}");
         // An enemy brave walks into the middle of the patrol leg and stops there: the next warrior
         // passing through its exact cell, even just walking through (not idle), spots and kills it.
-        let enemy = m.spawn(1, UnitKind::Brave, slots::cell_centre((c + 6, c + 10))).id;
+        let enemy = m.spawn(TribeId::Red, UnitKind::Brave, slots::cell_centre((c + 6, c + 10))).id;
         let mid = slots::cell_centre((c + 6, c));
-        m.apply(&Command::OrderUnit { player: 1, unit: enemy, order: Order::MoveTo { x: mid.0, z: mid.1 } });
+        m.apply(&Command::OrderUnit { player: TribeId::Red, unit: enemy, order: Order::MoveTo { x: mid.0, z: mid.1 } });
         for _ in 0..600 {
             m.tick();
             if !m.unit(enemy).unwrap().is_alive() {
@@ -3603,11 +3652,11 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         m.trees.clear();
         let c = MAP_SIZE as i32 / 2;
-        let id = m.spawn(0, UnitKind::Brave, slots::cell_centre((c, c))).id;
+        let id = m.spawn(TribeId::Blue, UnitKind::Brave, slots::cell_centre((c, c))).id;
         let at = slots::cell_centre((c + 3, c));
-        m.apply(&Command::SetPatrol { player: 0, units: vec![id], at });
+        m.apply(&Command::SetPatrol { player: TribeId::Blue, units: vec![id], at });
         assert_eq!((m.patrol_points.len(), m.hidden_points.len()), (1, 1));
-        m.apply(&Command::ReleasePatrol { player: 0, units: vec![id] });
+        m.apply(&Command::ReleasePatrol { player: TribeId::Blue, units: vec![id] });
         assert!(m.unit(id).unwrap().queued_patrol().is_empty());
         m.tick();
         assert_eq!((m.patrol_points.len(), m.hidden_points.len()), (0, 0), "nothing references them any more");
@@ -3618,9 +3667,9 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         m.trees.clear();
         let c = MAP_SIZE as i32 / 2;
-        let ids: Vec<UnitId> = (0..2).map(|n| m.spawn(0, UnitKind::Brave, slots::cell_centre((c - 3, c + n))).id).collect();
+        let ids: Vec<UnitId> = (0..2).map(|n| m.spawn(TribeId::Blue, UnitKind::Brave, slots::cell_centre((c - 3, c + n))).id).collect();
         let at = slots::cell_centre((c + 3, c));
-        m.apply(&Command::SetPatrol { player: 0, units: ids.clone(), at });
+        m.apply(&Command::SetPatrol { player: TribeId::Blue, units: ids.clone(), at });
         let i0 = m.unit_index(ids[0]).unwrap();
         m.units[i0].take_damage(u16::MAX);
         m.tick();
@@ -3636,7 +3685,7 @@ mod tests {
         let mut m = GameMap::sandbox_walk();
         let c = MAP_SIZE as i32 / 2;
         m.trees = trees.iter().map(|&((x, z), size)| Tree::new((c + x, c + z), 0, size)).collect();
-        let ids = braves.iter().map(|&(x, z)| m.spawn(0, UnitKind::Brave, slots::cell_centre((c + x, c + z))).id).collect();
+        let ids = braves.iter().map(|&(x, z)| m.spawn(TribeId::Blue, UnitKind::Brave, slots::cell_centre((c + x, c + z))).id).collect();
         (m, ids)
     }
 
@@ -3658,7 +3707,7 @@ mod tests {
     fn a_brave_cuts_one_piece_and_drops_it_by_the_tree() {
         let (mut m, ids) = woodland(&[((4, 0), 4)], &[(0, 0)]);
         let tree = tree_at(&m, (4, 0));
-        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::CutTree { tree } });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::CutTree { tree } });
         let (mut chopped, mut held) = (0, 0);
         for _ in 0..200 {
             m.tick();
@@ -3684,9 +3733,9 @@ mod tests {
     fn only_braves_cut() {
         let (mut m, _) = woodland(&[((4, 0), 4)], &[]);
         let c = MAP_SIZE as i32 / 2;
-        let warrior = m.spawn(0, UnitKind::Warrior, slots::cell_centre((c, c))).id;
+        let warrior = m.spawn(TribeId::Blue, UnitKind::Warrior, slots::cell_centre((c, c))).id;
         let tree = tree_at(&m, (4, 0));
-        m.apply(&Command::OrderUnit { player: 0, unit: warrior, order: Order::CutTree { tree } });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: warrior, order: Order::CutTree { tree } });
         run(&mut m, 200);
         assert_eq!((m.trees[0].size, m.wood.len(), unit(&m, warrior).action), (4, 0, Action::Idle));
     }
@@ -3695,7 +3744,7 @@ mod tests {
     fn a_tree_takes_as_many_braves_as_it_has_wood_the_others_find_another() {
         let (mut m, ids) = woodland(&[((4, 0), 2), ((4, 5), 4)], &[(0, 0), (0, 1), (0, -1)]);
         let (small, big) = (tree_at(&m, (4, 0)), tree_at(&m, (4, 5)));
-        for cmd in m.cut_orders(0, &ids, 0) {
+        for cmd in m.cut_orders(TribeId::Blue, &ids, 0) {
             m.apply(&cmd);
         }
         let targets: Vec<_> = ids.iter().map(|&id| unit(&m, id).cutting()).collect();
@@ -3709,7 +3758,7 @@ mod tests {
     fn other_kinds_sent_to_a_tree_just_walk_next_to_it() {
         let (m, ids) = woodland(&[((4, 0), 4)], &[(0, 0)]);
         let shaman = m.units[0].id;
-        let cmds = m.cut_orders(0, &[ids[0], shaman], 0);
+        let cmds = m.cut_orders(TribeId::Blue, &[ids[0], shaman], 0);
         assert!(matches!(cmds[..], [Command::OrderUnit { order: Order::CutTree { .. }, .. }, Command::OrderUnit { order: Order::MoveTo { .. }, .. }]), "{cmds:?}");
     }
 
@@ -3719,8 +3768,8 @@ mod tests {
         let c = MAP_SIZE as i32 / 2;
         let tree = tree_at(&m, (4, 0));
         let (p, q) = (slots::cell_centre((c - 3, c)), slots::cell_centre((c, c + 4)));
-        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::CutTree { tree } });
-        m.apply(&Command::QueueOrder { player: 0, unit: ids[0], order: Order::MoveTo { x: p.0, z: p.1 } });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::CutTree { tree } });
+        m.apply(&Command::QueueOrder { player: TribeId::Blue, unit: ids[0], order: Order::MoveTo { x: p.0, z: p.1 } });
         let mut carried = false;
         for _ in 0..300 {
             m.tick();
@@ -3729,12 +3778,12 @@ mod tests {
         assert!(carried, "walked with it");
         assert_eq!(m.wood.len(), 1);
         assert!(near((m.wood[0].x, m.wood[0].z), p, 1), "dropped at P");
-        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::CutTree { tree } });
-        m.apply(&Command::QueueOrder { player: 0, unit: ids[0], order: Order::MoveTo { x: p.0, z: p.1 } });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::CutTree { tree } });
+        m.apply(&Command::QueueOrder { player: TribeId::Blue, unit: ids[0], order: Order::MoveTo { x: p.0, z: p.1 } });
         while unit(&m, ids[0]).carrying == 0 {
             m.tick();
         }
-        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::MoveTo { x: q.0, z: q.1 } });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::MoveTo { x: q.0, z: q.1 } });
         assert_eq!(unit(&m, ids[0]).carrying, 1, "a direct order keeps the piece");
         run(&mut m, 300);
         assert_eq!(m.wood.len(), 2);
@@ -3751,13 +3800,13 @@ mod tests {
         m.units[i].carrying = 1;
         m.units[i].order(Order::MoveTo { x: to.0, z: to.1 });
         for order in [Order::CutTree { tree }, Order::FetchWood] {
-            m.apply(&Command::QueueOrder { player: 0, unit: ids[0], order });
+            m.apply(&Command::QueueOrder { player: TribeId::Blue, unit: ids[0], order });
         }
-        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::CutTree { tree } });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::CutTree { tree } });
         assert_eq!((unit(&m, ids[0]).cutting(), unit(&m, ids[0]).action), (None, Action::Walking { to }), "ignored, still on its way");
         run(&mut m, 200);
         assert_eq!((m.trees[0].size, m.wood.len(), unit(&m, ids[0]).carrying), (4, 1, 0), "no cut; put down once idle");
-        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::CutTree { tree } });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::CutTree { tree } });
         run(&mut m, 200);
         assert_eq!(m.trees[0].size, 3, "empty-handed again: cuts");
     }
@@ -3770,8 +3819,8 @@ mod tests {
         m.wood.push(WoodPiece::new(piece.0, piece.1));
         let p = slots::cell_centre((c - 4, c));
         for &unit in &ids {
-            m.apply(&Command::OrderUnit { player: 0, unit, order: Order::FetchWood });
-            m.apply(&Command::QueueOrder { player: 0, unit, order: Order::MoveTo { x: p.0, z: p.1 } });
+            m.apply(&Command::OrderUnit { player: TribeId::Blue, unit, order: Order::FetchWood });
+            m.apply(&Command::QueueOrder { player: TribeId::Blue, unit, order: Order::MoveTo { x: p.0, z: p.1 } });
         }
         assert_eq!(unit(&m, ids[0]).fetching(), Some(piece), "the floor piece is nearer");
         assert_eq!(unit(&m, ids[1]).cutting(), Some(tree_at(&m, (6, 0))), "taken: on to the tree");
@@ -3794,7 +3843,7 @@ mod tests {
         m.units[i].carrying = 1;
         assert_eq!(m.wood_at((pile.0 + 50, pile.1 + 50)), Some(pile));
         assert_eq!(m.wood_at(slots::cell_centre((c + 8, c))), None, "too far");
-        let cmds = m.pick_orders(0, &ids, (pile.0 + 50, pile.1));
+        let cmds = m.pick_orders(TribeId::Blue, &ids, (pile.0 + 50, pile.1));
         assert!(matches!(cmds[..], [Command::OrderUnit { order: Order::PickUp { .. }, .. }, Command::OrderUnit { order: Order::PickUp { .. }, .. }, Command::OrderUnit { order: Order::MoveTo { .. }, .. }]), "{cmds:?}");
         for c in &cmds {
             m.apply(c);
@@ -3815,7 +3864,7 @@ mod tests {
         let c = MAP_SIZE as i32 / 2;
         let piece = slots::cell_centre((c, c + 2));
         m.wood.push(WoodPiece::new(piece.0, piece.1));
-        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::PickUp { at: piece } });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::PickUp { at: piece } });
         run_until_unit(&mut m, ids[0], |u| matches!(u.action, Action::PickingUpWood { .. }));
         m.run(Ticks::new(crate::unit::PICK_TICKS.get() - 1));
         assert_eq!(unit(&m, ids[0]).carrying, 0);
@@ -3823,7 +3872,7 @@ mod tests {
         assert_eq!((unit(&m, ids[0]).carrying, m.wood.len()), (1, 0));
         let mut m = woodland(&[((2, 0), 4)], &[(0, 0)]);
         let tree = tree_at(&m.0, (2, 0));
-        m.0.apply(&Command::OrderUnit { player: 0, unit: m.1[0], order: Order::CutTree { tree } });
+        m.0.apply(&Command::OrderUnit { player: TribeId::Blue, unit: m.1[0], order: Order::CutTree { tree } });
         run_until_unit(&mut m.0, m.1[0], |u| matches!(u.action, Action::Chopping { .. }));
         m.0.run(Ticks::new(crate::unit::CHOP_TICKS.get() - 1));
         assert_eq!(unit(&m.0, m.1[0]).carrying, 0);
@@ -3848,7 +3897,7 @@ mod tests {
         let i = m.units.iter().position(|u| u.id == ids[0]).unwrap();
         m.units[i].carrying = 1;
         let to = slots::cell_centre((c + 3, c));
-        m.apply(&Command::OrderUnit { player: 0, unit: ids[0], order: Order::MoveTo { x: to.0, z: to.1 } });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::MoveTo { x: to.0, z: to.1 } });
         for (x, z) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
             m.terrain.set(c + x, c + z, 0);
         }
@@ -3861,10 +3910,10 @@ mod tests {
         let play = || {
             let (mut m, ids) = woodland(&[((4, 0), 2), ((4, 3), 3), ((-4, 2), 1)], &[(0, 0), (0, 1), (1, 0), (1, 1)]);
             m.wood.push(WoodPiece::new(slots::cell_centre((70, 64)).0, slots::cell_centre((70, 64)).1));
-            for cmd in m.cut_orders(0, &ids[..3], 0) {
+            for cmd in m.cut_orders(TribeId::Blue, &ids[..3], 0) {
                 m.apply(&cmd);
             }
-            m.apply(&Command::OrderUnit { player: 0, unit: ids[3], order: Order::FetchWood });
+            m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[3], order: Order::FetchWood });
             run(&mut m, 400);
             (m.units, m.trees, m.wood)
         };
@@ -3880,12 +3929,12 @@ mod tests {
         let fire = m.campfires[0].centre();
         let around: Vec<UnitId> = m.units.iter().filter(|u| u.campfire() == Some(fire)).map(|u| u.id).collect();
         assert_eq!(around.len(), 3);
-        m.apply(&Command::RemoveCampfire { player: 1, at: fire });
+        m.apply(&Command::RemoveCampfire { player: TribeId::Red, at: fire });
         assert_eq!(m.campfires.len(), 1, "not red's to put out");
-        m.apply(&Command::RemoveCampfire { player: 0, at: (fire.0 + 200, fire.1 - 200) });
+        m.apply(&Command::RemoveCampfire { player: TribeId::Blue, at: (fire.0 + 200, fire.1 - 200) });
         assert!(m.campfires.is_empty(), "anywhere in its cell");
         assert!(m.units.iter().filter(|u| around.contains(&u.id)).all(|u| u.action == Action::Idle));
-        m.apply(&Command::RemoveCampfire { player: 0, at: fire });
+        m.apply(&Command::RemoveCampfire { player: TribeId::Blue, at: fire });
     }
 
     #[test]
@@ -3937,7 +3986,7 @@ mod tests {
         assert_eq!(kinds[0].2, UnitKind::Shaman);
         assert_eq!(
             kinds[1..],
-            [(2, 0, UnitKind::Warrior, 0x0b00, 0x1400), (3, 255, UnitKind::Wildman, 0x3000, 0x3000), (4, 0, UnitKind::Brave, 0x0c00, 0x1600)],
+            [(2, Owner::Tribe(TribeId::Blue), UnitKind::Warrior, 0x0b00, 0x1400), (3, Owner::Wild, UnitKind::Wildman, 0x3000, 0x3000), (4, Owner::Tribe(TribeId::Blue), UnitKind::Brave, 0x0c00, 0x1600)],
             "the wildman next to the site (cell 6, 11 by 5, 10) joins blue as a brave"
         );
     }
@@ -3958,11 +4007,11 @@ mod tests {
         let run = || {
             let mut m = GameMap::generate(7);
             let (x, z) = (m.units[0].x.wrapping_add(512), m.units[0].z);
-            m.apply(&Command::Order { player: 0, order: Order::MoveTo { x, z } });
+            m.apply(&Command::Order { player: TribeId::Blue, order: Order::MoveTo { x, z } });
             for _ in 0..3 {
                 m.tick();
             }
-            m.apply(&Command::Order { player: 0, order: Order::Cast });
+            m.apply(&Command::Order { player: TribeId::Blue, order: Order::Cast });
             m.tick();
             m
         };
@@ -3978,9 +4027,9 @@ mod tests {
         let mut m = GameMap::generate(7);
         let (mine, theirs) = (m.units[0].id, m.units[1].id);
         let to = |u: &crate::unit::Unit| Order::MoveTo { x: u.x.wrapping_add(1024), z: u.z };
-        m.apply(&Command::OrderUnit { player: 0, unit: theirs, order: to(&m.units[1]) });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: theirs, order: to(&m.units[1]) });
         assert_eq!(m.units[1].action, Action::Idle);
-        m.apply(&Command::OrderUnit { player: 0, unit: mine, order: to(&m.units[0]) });
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: mine, order: to(&m.units[0]) });
         assert!(matches!(m.units[0].action, Action::Walking { .. }));
     }
 }

@@ -7,6 +7,7 @@ use crate::spell::Cell;
 use crate::terrain::{DirtyRect, Heightmap};
 use crate::time::{Countdown, Ticks};
 use pop3_format::WORLD_UNITS_PER_CELL;
+use crate::tribes::Owner;
 
 /// Turns of levelling (the original's 15 turns).
 pub const DURATION: u32 = 15;
@@ -23,7 +24,7 @@ pub struct Flatten {
 }
 
 /// A flatten cast by tribe `owner` on the height point `at` of `terrain`.
-pub fn effect(owner: u8, at: Cell, terrain: &Heightmap) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: Cell, terrain: &Heightmap) -> Effect {
     let flatten = Flatten { at, height: terrain.get(at.0, at.1), turn: 0 };
     let pos = |c: i32| (c.rem_euclid(terrain.size() as i32) as u32 * WORLD_UNITS_PER_CELL) as u16;
     Effect::new(owner, (pos(at.0), pos(at.1)), Countdown::new(Ticks::new(DURATION)), EffectKind::Flatten(flatten))
@@ -76,9 +77,10 @@ pub fn apply(terrain: &mut Heightmap, at: Cell, height: u16, turn: u32) -> Dirty
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
 
     fn build(terrain: &mut Heightmap, at: Cell, turns: u32) -> Flatten {
-        let Effect { kind: EffectKind::Flatten(mut f), .. } = effect(0, at, terrain) else { unreachable!() };
+        let Effect { kind: EffectKind::Flatten(mut f), .. } = effect(TribeId::Blue, at, terrain) else { unreachable!() };
         for _ in 0..turns {
             for e in f.turn() {
                 if let WorldEvent::Terrain(TerrainChange::Flatten { at, height, turn }) = e {
@@ -103,7 +105,7 @@ mod tests {
         for (x, z) in [(12, 11), (8, 10), (14, 10)] {
             terrain.set(x, z, 500);
         }
-        let Effect { kind: EffectKind::Flatten(mut f), .. } = effect(0, (10, 10), &terrain) else { unreachable!() };
+        let Effect { kind: EffectKind::Flatten(mut f), .. } = effect(TribeId::Blue, (10, 10), &terrain) else { unreachable!() };
         let mut run = |turns: u32| {
             for _ in 0..turns {
                 for e in f.turn() {

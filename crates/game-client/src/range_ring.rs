@@ -105,7 +105,7 @@ pub fn palette_at(angle: f32) -> Vec3 {
     colour(PALETTE[i % PALETTE.len()]).lerp(colour(PALETTE[(i + 1) % PALETTE.len()]), t)
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct RingMesh {
     pub positions: Vec<[f32; 3]>,
     pub colours: Vec<[f32; 4]>,
@@ -184,6 +184,9 @@ struct Ring {
     /// The last range shown (cells), kept while shrinking out.
     radius: f32,
     was_casting: bool,
+    /// The curtain and line meshes last written (TODO.md "Mesh allocator"): `draw_ring` skips the GPU
+    /// re-upload `put` triggers when a part's mesh did not actually change since the last frame.
+    last: [Option<RingMesh>; 2],
 }
 
 #[derive(Component)]
@@ -217,7 +220,7 @@ fn follow_aim(time: Res<Time>, selected: Res<SelectedSpell>, map: Res<CurrentMap
 fn draw_ring(
     mut commands: Commands,
     time: Res<Time>,
-    ring: Res<Ring>,
+    mut ring: ResMut<Ring>,
     map: Res<CurrentMap>,
     rig: Res<CameraRig>,
     params: Res<CurveParamsRes>,
@@ -240,9 +243,12 @@ fn draw_ring(
     if ring.burst.0 > 0.0 {
         append(&mut line, line_mesh(|a, o| on_ground((ring.burst.radius(ring.radius) + o).max(0.0), a), Vec3::ONE, ring.burst.0));
     }
-    for ((entity, mesh, mut visibility), part) in parts.iter_mut().zip([curtain, line]) {
+    for (i, ((entity, mesh, mut visibility), part)) in parts.iter_mut().zip([curtain, line]).enumerate() {
         *visibility = Visibility::Visible;
-        put(&mut commands, entity, mesh, &mut meshes, part);
+        if ring.last[i].as_ref() != Some(&part) {
+            put(&mut commands, entity, mesh, &mut meshes, part.clone());
+            ring.last[i] = Some(part);
+        }
     }
 }
 

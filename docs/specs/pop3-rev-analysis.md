@@ -128,6 +128,11 @@ so a live measurement may run on it with the addresses translated.
 - **Level 1's opening `FLYBY_START` is turn 72, exactly** [files]: read straight from the compiled
   `cpscr010.dat` script's own gating logic via `cargo run -p pop3-ai-script --example ai_script_info`,
   instead of curve-fitting camera motion - no live memory needed. See "Camera flyby state (tribe_struct)".
+- **Cancelling a flyby skips to its own scripted end, it does not return the camera to where the player
+  started** [exe, measured]: two independent live captures - one cancelled mid-flight, one left to finish on
+  its own - settle on the same final camera orientation, confirming our `flyby.rs` design (`cancel_from` eases
+  toward `final_pose`) already matches. Only the measured grace-period length (about 3 seconds) differs from
+  ours (1 second). See "Flyby cancel" under "Camera flyby state (tribe_struct)".
 
 ## Turns and timing [exe]
 ```text
@@ -359,10 +364,24 @@ every 4 turns, per hut:
   wildmen. The exe defaults are 1 for a brave, 3 for a warrior, preacher or spy, and 6 for a firewarrior.
 - `band = (P + 1) / 10`, clamped to 0..19: bands of 10 people, i.e. 5 % of the 200 maximum. It is not a % of the
   tribe's cap.
-- `SPROG%` rises with the band (file: 30 % for band 0 up to 200 % for band 19), so a bigger tribe breeds slower.
+- `SPROG%` rises with the band, so a bigger tribe breeds slower. All 20 values are in `constant.dat`
+  (`P3CONST_SPROG%_POP_BAND_<lo>_<hi>%`, named as a 5 %-of-200 share of `P` - band 0 is the "00-04 %" share,
+  band 19 is "95-99 %"), confirmed, not interpolated: 30, 35, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140,
+  150, 160, 170, 180, 190, 195, 200.
 - `can_breed`: `P + 1 < cap`, where `cap = sum over huts of MAX_POP_VALUE__HUT_<n>` (3, 5, 7) plus a per-tribe base
   (tribe+0x921), at most 200. A tribe flag (tribe+0x941 bit 6) also stops it. At the cap, `breed` is reset to 0,
   not kept full.
+- **The per-tribe base is a flat, hardcoded 6** [exe, confirmed 0x42B428]: `load_level` writes `tribe+0x921 = 6`
+  for all 4 tribe slots unconditionally, in the same small init loop (stride 0xC65) that resets other per-tribe
+  fields on every level load - not read from the level file, not a `constant.dat` entry (unlike every other hut
+  number in this section), and identical whether the tribe is human, AI, or unused. So a tribe's real population
+  cap is always `min(200, 6 + sum(hut supply))`, 6 higher than what the huts alone would suggest - a brand-new
+  tribe with **no huts at all** can still breed up to 6 people before `can_breed` ever blocks it (there is of
+  course nowhere to put them without a hut, but the cap check itself does not know that). With two small huts
+  (supply 3 each, "visible" capacity 6), the true cap is 6 + 6 = 12: population keeps growing past 6 - 8, 9... -
+  until it actually reaches 12, which reads as breeding being faster/longer than the hut count alone implies if
+  the base is not accounted for. This resolves the "per-tribe base capacity (tribe+0x921)" item that was
+  previously on the open-questions list.
 
 Time to one brave, at 12 turns per second, with the file's values (`SPROG_TIME` 4000 / 3000 / 2000):
 
@@ -1575,13 +1594,38 @@ three distinct pose code paths, not just the documented cruise/dive toggle: a de
 pose fires in one of the outer sub-states (a climb sequence - altitude +600, a distinct internal flag set, and its
 own direct sprite-variant call), separate from the altitude-based cruise/dive toggle - i.e. the angel does
 visibly change its flight pose when committing to a fast manoeuvre, though the exact moment this fires relative to
-"closing in on a grab target" specifically was not pinned down, and the literal hfx sprite-frame numbers behind
-each pose (how many actual wing positions a cycle shows, not just how many CODE paths select a pose) remain open.
+"closing in on a grab target" specifically was not pinned down.
+
+**Resolved, separate session - the companion is a real 3D mesh, not a 2D sprite, and its two flight-pose models are
+identified**: the "model ids" 0x3E/0x45 passed to the companion's pose-setter (`0x4DE440`) are not sprite/hfx ids
+at all - they are literal indices into the exe's global 3D OBJECT-BANK table (`objs0_mem`, a pointer to 54-byte
+`objs0_struct` records), the SAME mesh asset class buildings and vehicles use, confirmed by the exact 54-byte
+stride the lookup computes. Via the game's existing object-bank numbering (raw ids 62-144 map to bank-0 object
+index + 38), 0x3E (62) and 0x45 (69) resolve to bank-0 objects 100 and 107 - the exe's "winged death" model family
+(bank-0 7 is a third, front-facing variant of the same model, never referenced by this code path). So **"diving"
+is the back-view winged-death mesh, "cruising" is an alternate-pose winged-death mesh** - confirming the angel's
+flying body is modelled as a genuine 3D creature mesh (like a vehicle), not the 2D sprite-chain ordinary persons
+use. The companion never snaps instantly between the two: its 0-5 "ramp" counter holds the current mesh steady
+while cycling through 3 intermediate sub-variants (a small, separate per-shape table, not pinned down further)
+for a soft blend, only committing the actual mesh swap once the ramp fully bottoms or tops out - at which point it
+also copies that mesh's own built-in `morph_index` byte (read straight off the 3D object record) onto itself,
+i.e. each pose-mesh carries its own blend-shape index rather than the code computing one. A second, independent
+confirmation that the PERSON record itself is never drawn: its own per-type default-object table entry is the
+literal sentinel "no object" for type 8, versus a real small object id for every other person type. The literal
+hfx sprite-frame numbers some earlier notes expected do not apply - there is no 2D sprite sheet here to count
+frames in.
+
 **No dedicated fire-breath effect was found** anywhere in state 28 or its known callees - the full set of effects
 it can spawn (the shadow companion; two ground-impact puffs; a death-path effect; the spawn-moment blast already
 described above; one facing-aligned effect that inherits the angel's own heading, a plausible but unconfirmed
 breath/exhaust candidate; and one more, unidentified) turned up nothing that reads as a sustained flame weapon -
 "breathes fire" most likely describes the spawn-moment blast rather than an ongoing attack.
+
+**Still unexplained, separate session**: the class-7 type `0x5b` ("statue to AoD") effect's init is now traced far
+enough to know it is gated by the game's cheat-mode flag - with cheat mode ON it deletes itself immediately and
+never appears at all; with cheat mode OFF it hands off into its own, still-unopened running state. No drawable is
+set in the init itself, and no caller for this effect type was found this session - what it actually looks like,
+and when (if ever, outside a removed/debug path) the game spawns it, remains open.
 
 **The angel-vs-angel fight (`0x4E0830`) is a pure stat exchange, not a choreographed fight**: read in full this
 session (under 0x200 bytes, no movement or pose code at all). Each call compares both angels' current health; the
@@ -1641,13 +1685,27 @@ screen = (x', y') · (1 << (S + 16)) / z'             # S = perspective shift, t
 | K | 46 000, constant at the idle zoom level | bend: drop = `4 d² K / 2³²` render units = **0.01097 × d² cells** (d in cells) |
 | D | 6500 | camera distance: 6500 render units (25.4 cells) behind the focus |
 | S | 11 | perspective shift |
+| Q | 40 786, idle default | **a later session**: the per-axis screen-scale/focal-length factor this section used to leave as "not checked" - see below |
 | M | pure rotation (column norms 16 384) | yaw follows the player; pitch sits at ~20.4° (cos 15 357/16 384, sin 5709/16 384) only at the **idle zoom level** - confirmed live (pop3-rev `docs/camera.md` "Manual zoom is a pitch+bend orbit") to vary continuously with manual zoom input too, from ~-10.5° (zoomed furthest in) down to ~-88.6° (the whole-planet globe view), not just during AI-script flybys - see "Camera flyby state" below |
 
 - The bend is measured in view space (the camera's horizontal and depth axes after rotation), not around the
   focus point on the ground; with a 20° pitch the two are close.
 - Examples: 1.1 cells of drop at 10 cells, 4.4 at 20, 33 at the 55-cell edge of the grid.
 - Heights share the horizontal scale (the matrix is a pure rotation), so the highest ground (1024) is **4 cells**
-  above the sea, assuming the screen scales both axes alike (per-axis screen shifts not checked).
+  above the sea.
+- **The per-axis screen scale, SOLVED a later session** (full derivation: pop3-rev `docs/functions.tsv`'s
+  `0x46de00`/`coord_pnts_global_convert` row, `docs/camera.md` "The per-axis screen scale SOLVED"): past the
+  `screen = (x',y')*2^(S+16)/z'` step above, each axis multiplies by a shared factor `Q` (read live off the
+  active tribe's own record) with a per-axis integer/float split (`shiftA`/`shiftB`, chosen from video-mode
+  flags) that **algebraically cancels out of the final result** - confirmed both symbolically and by hand-computing
+  a worked example. So the screen really does scale both axes alike, exactly as this section used to assume
+  without checking: `focal_px = Q · 2^(S-16)` (one real number, pixels, same for X and Y), then
+  `screen_x = origin_x + focal_px·x'/z'`, `screen_y = origin_y - focal_px·y'/z'` (Y subtracted, screen-down vs
+  math-up). At idle (`Q=40786`, `S=11`): `focal_px ≈ 1274.6`. `origin_x`/`origin_y` = screen center, computed as
+  `render_block[+0x2a or +0x2c] + screen_width_or_height/2` - live-confirmed exact for Y, off by a constant
+  ~50px for X for a reason not yet found (doesn't affect `focal_px` either way).
+- **`Q` is itself one of the flyby `ZOOM` channel's blended fields** - see "The AI-script zoom channel" below;
+  "zoom" changes effective FOV, not just pitch+bend.
 - K can change: a camera-preset blend mechanism (two variants - a multi-frame ease and a single-step blend, see
   the AI-script `ZOOM` channel below) reshapes K and a few other render parameters towards a target preset.
   During normal play it stayed at 46 000 on three levels (including levels 3 and 24) while rotating, and while
@@ -1721,10 +1779,22 @@ every turn while active:        zoom_accumulator += per-tick-increment(target_de
 `preset_blend_by_fraction` picks the tribe's CURRENT named camera preset and the adjacent one in the zoom-out
 (positive value) or zoom-in (negative value) direction, then linearly interpolates `result = A + (B - A) *
 |value| / 16384` into a handful of fields of the live render block used for landscape projection ("Landscape
-projection" above) - confirmed fields: K/bend, plus 3 more not yet named. **It does NOT touch D, the actual
-camera-distance field that formula uses**, and it does NOT write the still-unidentified render parameter from
-the candidates table above either (a different structure, despite sharing a similarly small offset by
-coincidence).
+projection" above) - confirmed fields: K/bend, **`Q` (the per-axis screen-scale/focal-length factor, named
+a later session - "Landscape projection" above)**, **the Y screen-origin offset (also named a later session)**,
+plus 2 more still not named. **It does NOT touch D, the actual camera-distance field that formula uses**, and it
+does NOT write the still-unidentified render parameter from the candidates table above either (a different
+structure, despite sharing a similarly small offset by coincidence).
+
+**New, a later session: "zoom" changes effective FOV too, confirmed live** (headless capture of level 1's own
+opening flyby, pop3-rev `docs/camera.md` "Zoom changes effective FOV too"). `Q` swings from ~40786 (idle) to
+~39251 (the already-documented -55.4° dive plateau) to ~71207 (the already-documented -12.7° "zoomed in"
+plateau, "Camera flyby state" below) - at the idle `S=11`, that's `focal_px` swinging from ~1275 (idle) to
+~1227 (dive, barely wider FOV) to ~2225 (zoomed in, noticeably NARROWER FOV, ~12-16° vs idle's ~21-28° at
+640x480). The screen's Y-origin term swings in lockstep (16 -> 103 at the same turns). **So the original's
+"zoom" is a coordinated four-way blend - pitch (the matrix), K/bend, focal-length (`Q`), and a vertical
+recenter - not just a pitch+bend orbit at a fixed FOV.** This is the real mechanism behind a "zoomed in" shot
+looking like an actual telephoto shot, more than camera distance ever could (distance is proven constant, see
+"Distance vs. FOV" / `0x41c700`'s own row above and below).
 
 **Impact on our specs**: this means the original's "zoom" during a flyby is not a continuous change to camera
 distance at all - it blends between two preset views' render parameters (bend and a few others). `flyby.rs`'s
@@ -1735,18 +1805,93 @@ the unidentified render parameter's own measured motion during a flyby (the thin
 camera gets closer/farther" - pop3-rev `docs/camera.md` "Zoom channel...") is still unexplained - see below, it
 is now ruled out from all three of the flyby's primary channels, not just `ZOOM`.
 
+**Correction (zoom value 0 means "idle", not "midpoint of `PITCH_RANGE`")**: a user comparison of level 1's own
+closing screenshot (last keyframe `FLYBY_SET_EVENT_ZOOM 0 202 63`) against our flyby found the original's end
+pitch reads as shallow, close to idle (~20.4°), not `flyby.rs::zoom_to_pitch(0)`'s ~49.5° (the arithmetic
+midpoint of `PITCH_RANGE` 10.5°..88.6°). This connects two findings already on record here: the idle-default
+raw accumulator value is exactly what script zoom 0 settles back to ("0 really is neutral, not an arbitrary
+midpoint", pop3-rev `docs/camera.md` "Zoom channel (`+0x2c`) trajectory..."), and that same accumulator/preset
+system drives pitch directly ("Manual zoom is a pitch+bend orbit", above). So script zoom 0 should map to the
+**idle pitch** (~20.4°, `camera::GROUND_PITCH_DEG`), not `PITCH_RANGE`'s arithmetic midpoint - and since idle
+sits much closer to the "in" end (10.5°) than the "out" end (88.6°), the real -100..100 -> pitch curve is
+asymmetric around 0, not the straight line `zoom_to_pitch` currently implements (consistent with the
+already-documented "out"/"in" slope asymmetry in the raw accumulator, Δraw/Δzoom ≈ +2.0 "out" vs +0.55 "in").
+**Solved, a later session, with real calibration data**: re-running the same flat-hold-detection pipeline built
+for the `ANGLE` check (above) against `cam5.txt`/`cam7.txt`'s matrix pitch instead of yaw, matched to level 1's
+4 `FLYBY_SET_EVENT_ZOOM` keyframes in script order, gives 4 real (zoom, pitch) pairs, tight across both
+independent captures (<=0.3° apart):
+
+| zoom (script) | observed pitch | current `zoom_to_pitch` | error |
+|---|---|---|---|
+| -100 ("fully out") | -55.37° | 88.60° | 33.2° |
+| 10 | -19.51° | 45.64° | 26.1° |
+| 80 | -12.70° | 18.31° | 5.6° |
+| 0 (final) | -20.56° | 49.55° | 29.0° |
+
+Every point is wrong, not just the zero-point - confirms this is a wrong SHAPE, not a wrong offset.
+`PITCH_RANGE` (10.5°-88.6°) is real (confirmed live, "Manual zoom is a pitch+bend orbit" above) but it's the
+range reached by physically holding the manual zoom key all the way to the whole-planet globe view - a
+completely different input than the AI script's bounded `-100..100` argument. Level 1's own script never drives
+the camera anywhere near that: its practical range is roughly -55.4° (script -100) to -12.7° (script 80,
+the steepest "in" value this script happens to use), through an idle default of -20.4° at script 0 - `zoom_to_pitch`
+was fit against the wrong input's range entirely, not just missing its zero-point. The already-documented
+out/in slope asymmetry in the raw zoom accumulator (ratio ~3.6) reproduces almost exactly in pitch-degree units
+too (0.35°/zoom-unit "out" vs 0.097°/zoom-unit "in", ratio ~3.6) - an independent cross-check of the same
+asymmetric curve shape, now in the units that actually matter for `flyby.rs`.
+
+**Practical fix**: replace `zoom_to_pitch`'s target values, not just retune its zero-point - a piecewise curve
+through `(-100,-55.4) (0,-20.4) (10,-19.5) (80,-12.7)` would already fit this level's own script far better than
+one linear span across `PITCH_RANGE`; more levels' own flyby scripts, run through the same pipeline, would pin
+the shape further (level 1 never exercises zoom past 80, so the curve from 80 to 100 is still unconstrained).
+Regression-test fixtures ready to use (assert `zoom_to_pitch(z).abs()` within ~6° of these):
+`(-100, 55.37), (10, 19.51), (80, 12.70), (0, 20.56)`. The negation/shape here is exactly the kind of "looks
+like an arbitrary guess" code a later cleanup could simplify away without a test pinning it down - same risk as
+`render_yaw`'s mirror, below. Full derivation: pop3-rev `docs/camera.md` "`flyby.rs::zoom_to_pitch` calibrated
+against the same traces".
+
+**Camera distance (`D`) and FOV - raised by a screenshot comparison, now SOLVED**: the user felt the camera's
+distance "should be ~10 cells," with the caveat that distance and FOV are confounded in a single screenshot
+(`1/(distance*tan(fov/2))`). `D` is one of the best-measured constants in this file (6500 render units/25.4
+cells, confirmed constant three independent ways now - a live manual-zoom round trip across the ENTIRE range,
+a static trace showing the flyby's zoom chain never touches it, and the `CREATE_MSG_INFORMATION_ZOOM`/`ZOOM_TO`/
+`TRACK_TO_MARKER` alternate-mechanism lead checked and RULED OUT against level 1's real script, `cpscr010.dat`,
+below) while `camera::DEFAULT_FOV` (35°) was, by its own code comment, never traced from the exe at all
+("matched by eye"). **The mismatch is confirmed to be FOV, not distance - and FOV itself isn't a single
+constant, it moves with zoom.** This exe's landscape renderer isn't a standard D3D perspective-matrix pipeline
+(see "Landscape projection" above, now fully solved past the `S`/per-axis-scale step) - at idle,
+`focal_px = Q·2^(S-16) ≈ 1274.6` gives `FOV_y≈21.3°`/`FOV_x≈28.2°` at a 640x480 window (narrower than
+`DEFAULT_FOV`'s 35° guess, not wider); at level 1's own "zoomed in" extreme (`Q≈71207`), `focal_px≈2225` gives
+`FOV_y≈12.3°`/`FOV_x≈16.3°` - markedly narrower still, an actual telephoto effect. **Practical fix**: `flyby.rs`
+needs a `zoom_to_fov` alongside `zoom_to_pitch`, both driven by the same script zoom value - see TODO.md "Camera
+flyby state" for calibration points and the exact formula. Full write-up: pop3-rev `docs/camera.md` "The
+per-axis screen scale SOLVED" and "Zoom changes effective FOV too".
+
 ### The AI-script POS and ANGLE channels, also traced end to end [exe]
 Same per-kind dispatch as the `ZOOM` channel above (pop3-rev `docs/camera.md` "POS and ANGLE channels", every
 function in pop3-rev `docs/functions.tsv`):
 
-- **`POS`**: the script's raw x/z values are plain **0-255 cell indices** (packed into a single byte each by
-  the queueing code, which only works if they fit in 0-255 - matches the worked example's values like
-  "252 254"), converted with `world = (cell + 1) * 256` (confirms 256 render units/cell, "Landscape
-  projection"). The per-turn callback eases two independent accumulators (x, z) and writes the result
-  straight into the camera-focus field - confirms that's exactly what `POS` drives, and solves the former
-  "decode the `POS` channel's own coordinate units" open item below. The delta-to-target computation
-  explicitly handles wraparound on the 16-bit domain (shortest path across the map edge) - the world map
-  wraps, at least as far as camera-focus tracking goes.
+- **`POS`**: the script's raw x/z values (0-255, packed into a single byte each by the queueing code) convert
+  with `world = (cell + 1) * 256` (confirms 256 render units/cell, "Landscape projection"). The per-turn
+  callback eases two independent accumulators (x, z) and writes the result straight into the camera-focus
+  field - confirms that's exactly what `POS` drives, and solves the former "decode the `POS` channel's own
+  coordinate units" open item below. The delta-to-target computation explicitly handles wraparound on the
+  16-bit domain (shortest path across the map edge) - the world map wraps, at least as far as camera-focus
+  tracking goes.
+  **Correction (raw byte is HALF-cell, not a literal cell index)**: an earlier pass through this file called
+  the raw byte a "cell index" directly - that can't be literal, since this level's own script uses values up
+  to 252/254 (ai-scripts.md's worked example) on a hard-confirmed 128-cell map (`pop3_format::MAP_SIZE`, fixed
+  by the real `.dat` file's own binary layout). The raw byte is at **half-cell resolution**: `actual cell =
+  raw / 2`, wrapping at raw=256/cell=128 - `(cell+1)*256` and "256 render units/cell" both already presume
+  this halving. Found by comparing a level-1 screenshot against our own flyby, then confirmed from data
+  already on hand: every one of the 11 x/z values in level 1's own script (`POS`, `TOOLTIP`, `END_TARGET`) is
+  even - expected if the designer placed waypoints on whole cells and the compiler doubled them; and
+  `FLYBY_SET_END_TARGET 20 216` halved is cell `(10, 108)`, 1.5 cells from this level's own independently-known
+  site position `(8.5, 107.5)` (`crates/game-client/src/sites.rs`'s `site_cell_pos`, read from the level
+  file's Thing record) - matching the screenshot's camera parked on the stone circle/shaman, where the raw
+  byte taken 1:1 lands at `(20, 88)`, 20+ cells off over the sea. **`flyby.rs` currently uses the raw byte
+  unscaled as a `CameraRig.focus` cell coordinate - it needs `* 0.5` applied first (TODO.md "Camera flyby
+  state").** Full cross-checks: pop3-rev `docs/camera.md` "Correction: POS/TOOLTIP/end-target raw x/z are
+  HALF-cell units".
 - **`ANGLE`**: reads the current yaw straight from the camera-yaw field (the same field the manual mouse-drag
   rotate function uses, "Manual camera pan/rotate" above) and the event's target angle, computes both
   possible signed deltas around the 2048-unit circle, and picks one by a per-event direction-preference flag
@@ -1768,9 +1913,50 @@ Z axis - any of the above values, once their scale/offset is pinned down, need a
 conversion before they inform `flyby.rs` or any other spec. One concrete instance already found: the matrix's
 pitch sign is flipped relative to how this section used to state the pitch constants (now corrected above).
 
-Not yet done, see TODO.md "Camera flyby state": solve the raw-pitch candidate's transform to degrees, find what
-actually drives the unidentified render parameter, and apply the axis caveat once the above is solid enough to
-change `flyby.rs`.
+**Resolved for yaw specifically, a later session**: using the model `yaw_true = s*raw*360/2048 + c` (a user's
+own suggestion - one data point can't separate scale `s` from offset `c`, at least two independent raw/true-yaw
+pairs are needed), re-analysis of two already-captured full-flyby traces (pop3-rev `docs/camera.md`'s `cam5.txt`/
+`cam7.txt`) found four of the script's six `ANGLE` keyframes settle to a genuine flat hold, in script order, each
+within ~0.5-4° of `s=-1, c=0` (a pure sign flip) in BOTH captures - `s=+1` (no flip) is off by 100-150° on every
+non-trivial point, which is exactly what the earlier "~180° apart, a single data point, not proof" note above
+was seeing from the wrong sign. **`s=-1` is not a new convention to add**: `crates/game-client/src/flyby.rs`'s
+`render_yaw` already calls `nature::angle_yaw(raw).render()`, and `GameYaw::render()` (`game_frame.rs`) already
+negates as the documented general left-handed/right-handed mirror (used for trees, the level-start camera, etc.,
+not written for the flyby) - this session's live-data fit independently reproduces that same existing
+convention for the flyby `ANGLE` channel specifically. **No code change needed for yaw's sign/scale.** Full
+derivation: pop3-rev `docs/camera.md` "D3D axis caveat for YAW - RESOLVED for the ANGLE channel".
+
+Not yet done, see TODO.md "Camera flyby state": solve the raw-pitch candidate's transform to degrees, and find
+what actually drives the unidentified render parameter.
+
+### Flyby cancel [exe, measured]
+What the camera does when the player interrupts a flyby (pressing the interrupt key, confirmed live as Space
+in level 1). Two live captures this session, in a headless automated session of level 1's opening flyby:
+one interrupted partway through (while the zoom channel was mid-dive, well before the flyby's own natural
+end), one left completely uninterrupted to its own scripted finish. Both captures converge on the exact same
+final camera orientation (matching yaw within half a degree, same idle pitch/zoom constants, same camera
+distance).
+
+```text
+on interrupt:
+    remaining channels do NOT reset or hold in place
+    camera (pitch/zoom and yaw together) eases smoothly toward the flyby's own final keyframe
+    the ease takes about 3 seconds (measured once, not yet cross-checked against a second interrupt point)
+    once it arrives, the camera is in the identical pose an uninterrupted flyby settles into on its own
+```
+
+So interrupting is "skip to the end of the scripted camera path", not "abort and return to the pre-flyby
+view" and not "freeze in place" - the flyby always ends up at the same place, interrupted or not, only the
+time it takes differs. Camera distance does not move during this either (consistent with "Camera flyby
+state" and "Landscape projection" above - zoom is always a pitch+bend orbit at constant distance, cancel
+included).
+
+**Impact on our specs**: this confirms `flyby.rs`'s existing cancel design (ease from `cancel_from` toward
+`final_pose` over a grace period, TODO.md "Flybys") is the right shape - no rework needed there. The one
+concrete number to fix is the grace period itself: `FLYBY_CANCEL_GRACE_TICKS` is currently 1 second; the
+measured original value is closer to 3 seconds. Not yet checked: whether the real camera-focus position
+(not just pitch/zoom/yaw) follows the same "skip to the end" rule, or whether the ease duration is constant
+regardless of how far into the flyby the player interrupts (only one interrupt point was measured).
 
 ## Manual camera pan/rotate (mouse drag) [exe]
 (Exact exe addresses: pop3-rev `docs/functions.tsv`.) How the player's own mouse-drag camera control works,
@@ -4510,6 +4696,17 @@ behaviour at the margins, not the overall shape.
   - at the cap the original resets `breed` to 0, where ours keeps it full and releases a brave as soon as there is
     room;
   - a new hut starts at `target - 54`, nearly full, which is close to our "full".
+  - **the cap itself is missing our flat per-tribe base of 6** (`headcount::Housing::room`, `game-core/src/headcount.rs`,
+    today `huts.iter().zip(SUPPLY).map(...).sum().min(MAX_POPULATION)` only): the original's `can_breed` cap is
+    `min(200, 6 + sum(hut supply))`, ours is `min(200, sum(hut supply))`. With no huts at all the original still
+    lets a tribe breed (nowhere to put them, but `can_breed` doesn't check that); with two small huts ours caps at
+    6 where the original caps at 12. This under-caps every tribe by exactly 6 and is the mechanism behind the
+    level 1 observation that population keeps climbing (6 to 8, and on toward 12) past what "two houses of
+    capacity 6" would suggest. `ai.rs`'s build-another-hut decision also reads `housing.room()`, so it inherits
+    the same 6-person undercount. Preacher conversion and the Convert spell are a separate exe mechanism (a flat
+    `population >= 200` check at tribe+0x89DAE5, not `can_breed`'s hut-based cap - see "Preacher conversion"),
+    so `convert.rs`'s and `sermon.rs`'s own flat `MAX_POPULATION` (200) checks already match the original and do
+    not need this fix.
 - huts-and-training.md rule 6 (growing): the original only grows with people inside (`8 × inside` every 16 turns
   to 2400), not "even when the hut is empty". No population check was seen in the growth code, only a placement
   check. The new site starts with 100 wood (one piece), so 2 more pieces are brought, not 3 with 1 consumed.
@@ -4760,14 +4957,16 @@ behaviour at the margins, not the overall shape.
   (not found in its hunting AI, state 28/0x4DB980 - plausibly inside the per-kill self-damage cost charged by
   0x4E0A30, or one of the still-unopened outer `+0x2D` sub-states); any building-type exclusion for its attack
   (prison/pyramid/totem reported immune); whether it can pull a person out of a vehicle the way it grabs one in
-  the open; the selection/order-eligibility check that makes it unselectable and unorderable; whether the visible
-  flying body is really the shadow-companion object and not the person record itself (strongly suggested, not
-  exhaustively proven); the literal hfx sprite-frame numbers behind its flight poses (cruise/dive/launch are
-  confirmed as distinct CODE paths, not yet tied to actual sprite frame counts); and whether a grabbed victim's
-  carried position is parented to a fixed mouth/claw offset on the angel (confirmed NOT a separate pose, but the
-  position-sharing mechanism itself wasn't traced). The class-7 type `0x5b` ("statue to AoD") effect remains
-  unexplained but is now confirmed NOT part of the cast/spawn sequence (the real "ground transforms first" visual
-  is the meteor's own ground-shockwave sub-effect, now fully traced and code-confirmed as a real terrain ripple).
+  the open; the selection/order-eligibility check that makes it unselectable and unorderable; and whether a
+  grabbed victim's carried position is parented to a fixed mouth/claw offset on the angel (confirmed NOT a
+  separate pose, but the position-sharing mechanism itself wasn't traced). Resolved, separate session: the
+  visible flying body IS the shadow-companion object, a real 3D "winged death" mesh (not a 2D sprite, so there
+  are no hfx sprite frames to count), with two confirmed poses (back-view "diving", an alternate-pose
+  "cruising") blended through 3 intermediate sub-variants - see "Angel of Death mechanics" above. The class-7
+  type `0x5b` ("statue to AoD") effect is confirmed NOT part of the cast/spawn sequence (the real "ground
+  transforms first" visual is the meteor's own ground-shockwave sub-effect, fully traced as a real terrain
+  ripple) and is gated off entirely under cheat mode, but what it looks like and when it is ever spawned (no
+  caller found) both remain open.
 - Firewarrior fire: the line-of-fire test, whether a building stops the bolts (5 throws at a still preacher did nothing), what sets the reload
   byte to 252-255 (third capture), what the +0x10 bit 0x400000 set on own people under a passing shot does,
   whether hfx 1124-1127 is the shot's fade, and the approach sub-states (10, 11) before the throw.
@@ -4785,8 +4984,8 @@ behaviour at the margins, not the overall shape.
 - What sets `turns_per_sec` to 14, and whether game options or multiplayer change it.
 - Which field holds the gather sub-state: +0xA8 stays 0 while chopping, so the handler's state byte is elsewhere.
 - What `TREE_DORMANT_TIME` does (maybe the time before a cut tree regrows or a new tree appears).
-- Huts: what the growth placement check tests (footprint, population?), the every-128-turns branch when it fails, and the per-tribe base
-  capacity (tribe+0x921).
+- Huts: what the growth placement check tests (footprint, population?), the every-128-turns branch when it fails.
+  (The per-tribe base capacity, tribe+0x921, is resolved - see "Huts: breeding and growth".)
 - Prayer: the vault (library trigger) branch, what the "contest" countdown at trigger+0x6F does when several tribes
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
 
@@ -4809,8 +5008,11 @@ behaviour at the margins, not the overall shape.
   `+0x74`/`+0x78`/`+0x6c` straight off a live `kind=blast` row (`measure_blast.py` already logs them) rather
   than inferring them from a pushed person's velocity.
 - Walking: whether slopes change the speed, and the speeds of wildmen, the angel of death and creatures.
-- Projection: the per-axis screen scale (0xAFC2F4 + 0xCF8 / 0xCFC), which decides the on-screen height ratio, and
-  which views (zoom levels, cut scenes) change the render block.
+- ~~Projection: the per-axis screen scale (0xAFC2F4 + 0xCF8 / 0xCFC)~~ **SOLVED, a later session** - it's
+  algebraically inert (X and Y share one real scale, the split is just internal fixed-point precision), and
+  which render-block fields the flyby's `ZOOM` channel changes is now identified further too (it includes the
+  screen-scale/focal-length factor itself, not just K/bend) - see "Landscape projection" and "The AI-script
+  zoom channel" above.
 - Sites: which code creates the pillars at level load, and whether the levelling forces every cell of its disc.
 - Spells: burning trees (scenery state 5), the partial building explosion of the earthquake, whether ghosts
   expire, what starts the landscape-shaping mode, what a person does when the ground under it floods, the
@@ -5044,6 +5246,9 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4DB980 | person state 28, the angel's entire hunting/combat/grab AI (huge, outer `+0x2D` dispatch mostly unopened) - "Angel of Death mechanics" |
 | 0x4DB5E0 | `aod_area_panic`: the angel's own nearby-bystander panic (8-cell radius, person state 26), independent of its locked target |
 | 0x4DDB30 | `aod_flight_physics`: speed/heading ramp, altitude clamped >= ~100 above terrain (never lands), syncs the shadow-companion object |
+| 0x4DE440 | companion flight-pose blender: ramps its own 0-5 counter, picks a 3D "winged death" mesh (back/diving vs alt/cruising) via the object bank |
+| 0x40CC30 | queues an intermediate flight-pose sub-variant mid-ramp (called only from 0x4DE440 this session) |
+| 0x479840 | class-7 type 0x5b ("statue to AoD") init: self-deletes if cheat mode is on, else hands off to an unopened state 0x4C |
 | 0x4E0760, 0x4E05E0 | person state 40, "grabbed by an Angel of Death" (per turn, ENTER case): hold loop until release, then delete (ghost) or generic death (state 31, shaman-specific pose table); ENTER case evicts a housed victim but sets no carried pose - "Angel of Death mechanics" |
 | 0x4E0830 | `aod_vs_aod_damage`: pure health-proportional mutual damage + 800-unit knockback when the angel's locked target is itself an angel, no movement/pose code - "Angel of Death mechanics" |
 | 0x4E0A30 | `aod_release_throw`: sets the throw destination (400 units along the VICTIM's own facing), arms release, charges the angel a self-damage cost |
@@ -5148,7 +5353,7 @@ class are in `pop3-rev/docs/unit_types`.
 | +0x969 + 4·spell | `charge[spell]`, spells 1-21 |
 | +0xA27 + 2·type | number of people per person type (rebuilt each turn) |
 | +0xB7D + 2·type | number of huts per hut type (1-3), for the capacity |
-| +0x921 | base population capacity, added to the huts' |
+| +0x921 | base population capacity, added to the huts' (confirmed flat `6` for every tribe, written by `load_level` at 0x42B428 - not level data, not in `constant.dat`) |
 | +0x941 | flags; bit 6: no breeding |
 | +0xA05, +0xA07 | reservoir `delay` and `rate` |
 | +0x911, +0x915 | reincarnation site position (x, z) and height |

@@ -109,11 +109,12 @@ fn load_look(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use game_core::tribes::TribeId;
 
     #[test]
     fn the_flame_flies_over_the_ground_never_under_it() {
         let map = GameMap::sandbox_units();
-        let f = Fireball { owner: 0, at: (1024, 512), height: 80, aim: (0, 0, 0) };
+        let f = Fireball { owner: TribeId::Blue.into(), at: (1024, 512), height: 80, aim: (0, 0, 0) };
         assert_eq!(cells_at(&f), Vec2::new(2.0, 1.0));
         let ground = map.terrain.height_at(1024, 512, WORLD_UNITS_PER_CELL);
         assert_eq!(lift(&map, &f, 0.5), ((80 - ground).max(0)) as f32 * 0.5);

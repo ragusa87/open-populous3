@@ -17,6 +17,7 @@ use crate::status::Statuses;
 use crate::terrain::Heightmap;
 use crate::time::{Countdown, Every, Tick, Ticks};
 use crate::totem::TotemId;
+use crate::tribes::{Owner, TribeId};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 pub const SHAMAN_MAX_HEALTH: u16 = UnitKind::Shaman.stats().life;
@@ -106,6 +107,10 @@ pub enum UnitKind {
     Firewarrior,
     /// Neutral wild people (no tribe, owner 255 in the levels): the Convert spell makes braves of them.
     Wildman,
+    /// The spell's own creature (model 13, type 8, `angel_of_death.rs`), spawned flying, not in `ALL`: never
+    /// trained, never a tribe's headcount, never selectable or given orders, and has no sprite of its own yet
+    /// (pop3-rev-analysis.md "Angel of Death mechanics", TODO.md).
+    AngelOfDeath,
 }
 
 impl UnitKind {
@@ -137,6 +142,7 @@ impl UnitKind {
             UnitKind::Spy => "Spy",
             UnitKind::Firewarrior => "Firewarrior",
             UnitKind::Wildman => "Wildman",
+            UnitKind::AngelOfDeath => "Angel of Death",
         }
     }
 
@@ -151,6 +157,9 @@ impl UnitKind {
             UnitKind::Spy => 60,
             UnitKind::Firewarrior => 50,
             UnitKind::Warrior | UnitKind::Preacher | UnitKind::Wildman => 47,
+            // Its own flight speed (`angel_of_death::SPEED`'s single source): a guess, not traced — faster than
+            // any walker, it hunts across the whole map.
+            UnitKind::AngelOfDeath => 150,
         }
     }
 }
@@ -255,6 +264,19 @@ pub enum Action {
     Preaching,
     /// Fighting in the melee `melee` (melee.rs): its place in the ring, its stance.
     Melee { melee: crate::melee::MeleeId, place: (u16, u16), stance: crate::melee::Stance },
+    /// An Angel of Death with no target locked yet (`GameMap::tend_angels_of_death`, angel_of_death.rs).
+    Hunting,
+    /// An Angel of Death flying towards `target`, a rival angel or a victim to grab, locked until it is close
+    /// enough, dead, or no longer eligible.
+    Closing { target: UnitId },
+    /// An Angel of Death carrying `victim` (`Action::Grabbed`), `left` ticks before it releases it
+    /// (`angel_of_death::CARRY_TICKS`).
+    Carrying { victim: UnitId, left: Countdown },
+    /// An Angel of Death trading blows with the rival angel `rival` by health alone, `cooldown` ticks until the
+    /// next exchange (angel_of_death.rs).
+    Fighting { rival: UnitId, cooldown: Countdown },
+    /// Grabbed by the Angel of Death `by`: no orders, no movement of its own, until released to die.
+    Grabbed { by: UnitId },
     /// Held by the test-only coordinator `gathering` (coordinator.rs).
     #[cfg(test)]
     Gathered { gathering: crate::id::Id<crate::coordinator::tests::Gathering> },
@@ -296,6 +318,9 @@ impl Action {
             Action::Queuing { .. } => "Queuing",
             Action::Preaching => "Preaching",
             Action::Hacking { .. } | Action::Throwing { .. } => "Attacking",
+            Action::Hunting | Action::Closing { .. } | Action::Fighting { .. } => "Hunting",
+            Action::Carrying { .. } => "Carrying",
+            Action::Grabbed { .. } => "Captured",
             #[cfg(test)]
             Action::Gathered { .. } => "Gathered",
         }
@@ -340,7 +365,24 @@ impl Action {
     }
 
     pub(crate) fn can_take_orders(&self) -> bool {
-        !matches!(self, Action::Drowning | Action::Tumbling | Action::Settling { .. } | Action::Panicking { .. } | Action::OnFire { .. } | Action::Listening { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. })
+        !matches!(
+            self,
+            Action::Drowning
+                | Action::Tumbling
+                | Action::Settling { .. }
+                | Action::Panicking { .. }
+                | Action::OnFire { .. }
+                | Action::Listening { .. }
+                | Action::Dying { .. }
+                | Action::Dead { .. }
+                | Action::Spirit { .. }
+                // An Angel of Death never takes orders at all; a grabbed victim moves only with its captor.
+                | Action::Hunting
+                | Action::Closing { .. }
+                | Action::Carrying { .. }
+                | Action::Fighting { .. }
+                | Action::Grabbed { .. }
+        )
     }
 }
 
@@ -414,7 +456,7 @@ pub enum UnitEvent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unit {
     pub id: UnitId,
-    pub owner: u8,
+    pub owner: Owner,
     pub kind: UnitKind,
     pub x: u16,
     pub z: u16,
@@ -473,6 +515,9 @@ pub struct Unit {
     pub inside: Option<Inside>,
     /// The vehicle carrying it (`crate::vehicle`): it stands where the vehicle is and goes nowhere on its own.
     pub aboard: Option<crate::vehicle::VehicleId>,
+    /// An Angel of Death's own flight: `None` for everyone else, always `Some` for one
+    /// (`GameMap::tend_angels_of_death`, `angel_of_death.rs`).
+    pub flight: Option<crate::angel_of_death::Flight>,
 }
 
 /// A unit on the ground and not tumbling: only `Unit::pickable` makes one, so whatever takes it can
@@ -501,10 +546,10 @@ impl Unit {
     }
 
     /// A unit standing idle at `(x, z)` (world units), at full health.
-    pub fn new(id: UnitId, owner: u8, kind: UnitKind, (x, z): (u16, u16)) -> Self {
+    pub fn new(id: UnitId, owner: impl Into<Owner>, kind: UnitKind, (x, z): (u16, u16)) -> Self {
         Unit {
             id,
-            owner,
+            owner: owner.into(),
             kind,
             x,
             z,
@@ -534,6 +579,7 @@ impl Unit {
             work: None,
             inside: None,
             aboard: None,
+            flight: None,
         }
     }
 
@@ -558,7 +604,7 @@ impl Unit {
     }
 
     /// The tribe that last hit it through `GameMap::damage`, if any and not healed away since.
-    pub fn last_attacker(&self) -> Option<u8> {
+    pub fn last_attacker(&self) -> Option<Owner> {
         self.hurt.attacker()
     }
 
@@ -840,7 +886,9 @@ impl Unit {
             self.action = Action::Idle;
             return None;
         }
-        if self.is_alive() && self.aboard.is_none() && !self.motion.airborne() && is_sea(terrain, self.cell()) {
+        // An Angel of Death flies its own way (`flight`, not `motion`): never subject to the ordinary
+        // drowning check. Neither is its grabbed victim: carried wherever the angel goes, including over the sea.
+        if self.is_alive() && self.aboard.is_none() && !self.motion.airborne() && self.flight.is_none() && !matches!(self.action, Action::Grabbed { .. }) && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
             (self.teleport_to, self.spell) = (None, None);
         }
@@ -876,6 +924,8 @@ impl Unit {
             Action::Attacking { .. } => {}
             Action::Guarding { .. } => {}
             Action::Hacking { .. } => {}
+            // All driven by `GameMap::tend_angels_of_death`, same shape as `Attacking`/`tend_attacks`.
+            Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } => {}
             Action::Throwing { target, mut left } => {
                 self.action = match left.tick() {
                     false => Action::Throwing { target, left },
@@ -1074,7 +1124,7 @@ impl Unit {
         self.kind.stats().heal.is_some()
             && self.is_alive()
             && !self.motion.airborne()
-            && !matches!(self.action, Action::Drowning | Action::Stranded { .. } | Action::OnFire { .. })
+            && !matches!(self.action, Action::Drowning | Action::Stranded { .. } | Action::OnFire { .. } | Action::Grabbed { .. })
             && !self.statuses.struck_by_lightning.is_on()
     }
 
@@ -1161,7 +1211,7 @@ impl Unit {
     /// The one way `GameMap::damage` hurts a unit: remembers who did it and, if the hit kills, what kind
     /// (`hurt.rs`), so no emitter has to track either on its own (docs/specs/coordinators.md "World events"); the
     /// health loss and death itself are `take_damage`'s, unchanged.
-    pub(crate) fn take_hit(&mut self, amount: u16, kind: DamageKind, from: Option<u8>) -> bool {
+    pub(crate) fn take_hit(&mut self, amount: u16, kind: DamageKind, from: Option<Owner>) -> bool {
         if !self.is_alive() {
             return false;
         }
@@ -1277,10 +1327,10 @@ impl Unit {
     /// warrior) — except a wildman, which has no tribe by definition and becomes a brave (the Convert spell,
     /// `convert::effect`; the free welcome at a reincarnation site spawns its braves directly instead, never
     /// calling this on an existing wildman).
-    pub fn change_owner(&mut self, tribe: u8) {
+    pub fn change_owner(&mut self, tribe: TribeId) {
         self.drop_plans();
         self.resume_attack = None;
-        self.owner = tribe;
+        self.owner = Owner::Tribe(tribe);
         if self.kind == UnitKind::Wildman {
             self.kind = UnitKind::Brave;
         }
@@ -1295,7 +1345,7 @@ impl Unit {
     /// the capture and the later revert, unlike an ordinary `change_owner`/soul-convert which starts the new
     /// person fresh). Never called on a wildman (Hypnotism never captures one), so `change_owner`'s kind-driven
     /// life reset never actually fires here.
-    pub(crate) fn change_owner_keeping_body(&mut self, tribe: u8) {
+    pub(crate) fn change_owner_keeping_body(&mut self, tribe: TribeId) {
         let (health, carrying) = (self.health, self.carrying);
         self.change_owner(tribe);
         (self.health, self.carrying) = (health, carrying);
@@ -1645,12 +1695,12 @@ mod tests {
 
     #[test]
     fn change_owner_keeps_a_kind_but_turns_a_wildman_into_a_brave() {
-        let mut warrior = Unit::new(Id::from_raw(1), 255, UnitKind::Warrior, (0, 0));
-        warrior.change_owner(0);
-        assert_eq!((warrior.owner, warrior.kind), (0, UnitKind::Warrior), "keeps its kind");
-        let mut wildman = Unit::new(Id::from_raw(2), 255, UnitKind::Wildman, (0, 0));
-        wildman.change_owner(1);
-        assert_eq!((wildman.owner, wildman.kind), (1, UnitKind::Brave), "a wildman has no tribe of its own: becomes a brave");
+        let mut warrior = Unit::new(Id::from_raw(1), Owner::Wild, UnitKind::Warrior, (0, 0));
+        warrior.change_owner(TribeId::Blue);
+        assert_eq!((warrior.owner, warrior.kind), (Owner::Tribe(TribeId::Blue), UnitKind::Warrior), "keeps its kind");
+        let mut wildman = Unit::new(Id::from_raw(2), Owner::Wild, UnitKind::Wildman, (0, 0));
+        wildman.change_owner(TribeId::Red);
+        assert_eq!((wildman.owner, wildman.kind), (Owner::Tribe(TribeId::Red), UnitKind::Brave), "a wildman has no tribe of its own: becomes a brave");
         assert!(wildman.health.is_full() && wildman.health.max() == UnitKind::Brave.max_health(), "health set from its new kind");
     }
 
@@ -1665,7 +1715,7 @@ mod tests {
     }
 
     fn shaman_at(cell: (i32, i32)) -> (Unit, ReincarnationSite) {
-        let site = ReincarnationSite::at_cell(0, cell, 0);
+        let site = ReincarnationSite::at_cell(TribeId::Blue, cell, 0);
         (Unit::shaman(Id::from_raw(1), &site), site)
     }
 
@@ -1997,7 +2047,7 @@ mod tests {
     fn only_the_shaman_reincarnates() {
         let mut t = land();
         let (shaman, site) = shaman_at((10, 10));
-        let mut brave = Unit::new(Id::from_raw(7), 0, UnitKind::Brave, (shaman.x + 20 * 512, shaman.z));
+        let mut brave = Unit::new(Id::from_raw(7), TribeId::Blue, UnitKind::Brave, (shaman.x + 20 * 512, shaman.z));
         assert_eq!(brave.health, Health::full(UnitKind::Brave.max_health()));
         sea_cell(&mut t, brave.cell());
         let ticks = run_until(&mut brave, &t, &site, |u| !u.is_alive());
@@ -2061,7 +2111,7 @@ mod tests {
         let t = land();
         let ticks = |kind: UnitKind| {
             let (s, site) = shaman_at((10, 10));
-            let mut u = Unit::new(Id::from_raw(2), 0, kind, (s.x, s.z));
+            let mut u = Unit::new(Id::from_raw(2), TribeId::Blue, kind, (s.x, s.z));
             walk(&mut u, &t, &site, (s.x + 10 * 512, s.z), 500).unwrap()
         };
         assert!(ticks(UnitKind::Spy) < ticks(UnitKind::Brave) && ticks(UnitKind::Brave) < ticks(UnitKind::Warrior));
@@ -2212,7 +2262,7 @@ mod tests {
         let (s, _) = shaman_at((10, 10));
         let mut u = Unit { health: Health::new(SHAMAN_MAX_HEALTH - 100, SHAMAN_MAX_HEALTH), ..s };
         assert!(u.heals());
-        assert!(!u.take_hit(10, DamageKind::Lightning, Some(1)), "hurt, not killed");
+        assert!(!u.take_hit(10, DamageKind::Lightning, Some(Owner::Tribe(TribeId::Red))), "hurt, not killed");
         assert!(!u.heals(), "struck: no healing for a while");
         u.heal();
         assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH - 110, "the hit's own damage, no heal added");
@@ -2225,11 +2275,11 @@ mod tests {
     fn healing_back_to_full_forgets_the_last_attacker() {
         let (s, _) = shaman_at((10, 10));
         let mut u = Unit { health: Health::new(SHAMAN_MAX_HEALTH - 1, SHAMAN_MAX_HEALTH), ..s };
-        u.take_hit(0, DamageKind::Melee, Some(1));
-        assert_eq!(u.last_attacker(), Some(1));
+        u.take_hit(0, DamageKind::Melee, Some(Owner::Tribe(TribeId::Red)));
+        assert_eq!(u.last_attacker(), Some(Owner::Tribe(TribeId::Red)));
         u.heal();
         assert!(u.health.is_full(), "one heal step was enough to top it up");
-        assert_eq!(u.last_attacker(), Some(1), "still remembered: it only just became full");
+        assert_eq!(u.last_attacker(), Some(Owner::Tribe(TribeId::Red)), "still remembered: it only just became full");
         u.heal();
         assert_eq!(u.last_attacker(), None, "already full: the next heal step forgets the attacker");
     }
@@ -2324,10 +2374,10 @@ mod tests {
     fn take_hit_remembers_the_attacker_and_only_the_cause_that_kills() {
         let (mut u, _) = shaman_at((10, 10));
         assert_eq!((u.last_attacker(), u.death_cause()), (None, None));
-        assert!(!u.take_hit(10, DamageKind::Melee, Some(1)), "hurt, not killed");
-        assert_eq!((u.last_attacker(), u.death_cause()), (Some(1), None), "no cause recorded: it survived");
-        assert!(u.take_hit(u16::MAX, DamageKind::Lightning, Some(0)), "the kill");
-        assert_eq!((u.last_attacker(), u.death_cause()), (Some(0), Some(DamageKind::Lightning)));
+        assert!(!u.take_hit(10, DamageKind::Melee, Some(Owner::Tribe(TribeId::Red))), "hurt, not killed");
+        assert_eq!((u.last_attacker(), u.death_cause()), (Some(Owner::Tribe(TribeId::Red)), None), "no cause recorded: it survived");
+        assert!(u.take_hit(u16::MAX, DamageKind::Lightning, Some(Owner::Tribe(TribeId::Blue))), "the kill");
+        assert_eq!((u.last_attacker(), u.death_cause()), (Some(Owner::Tribe(TribeId::Blue)), Some(DamageKind::Lightning)));
     }
 
     #[test]

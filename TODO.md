@@ -223,7 +223,10 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   Left otherwise: the low-health looping sound 0xCF, invisible enemies hidden (sprite, shadow, hover, selection),
   the original's colour tables (our shield tint is a guess), the optional health bar over own damaged people
   (commands 100/101).
-- [ ] Physics (`game_core::physics::step`: velocity, gravity 32, velocity caps and air drag now done too, touchdown; landing in the sea or on walkable ground done, `Unit::touch_down`), to the original's rules (pop3-rev-analysis.md "Person physics"): still open - the unit spinning 26° per turn in the air, a scream on take-off; landing: dust and a sound at a vertical speed <= -100, `FALL_OUT_OF_WW_DAMAGE` 700 at <= -200 (`Touchdown::speed`), none on water cells; on the ground: sliding down the slope (gradient over ±76 units) with friction 28 per turn per axis (72 on special terrain), facing where it slides (`Tumble` pose; a grounded tumbling unit does not move yet). **Correction found closing this item: `game_core::balance` (huts-and-training.md "Balance and game turns") doesn't exist as code - one of our ticks already is one original turn 1:1 (`time.rs`, `TICKS_PER_SECOND`), so the original's per-turn numbers (caps 192 horizontal/512 vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ordinary falls (ground dropping under a standing or walking person: earthquake, erosion, flatten) fall with the same gravity, caps and drag, without fall damage; rising ground lifts people. **Resolved this session (pop3-rev-analysis.md "Person physics"): landing on a building gets no special handling at all.** The original's `ground(pos)` (`0x44E940`) is a pure terrain-mesh height interpolation (a cell's 4 corner heights, diagonal-split-aware) with no building/unit/class check anywhere in it - a cliff is just handled correctly as steep terrain (same function), but a building sitting on the landing cell is invisible to it. A thrown person's touchdown height is always the raw ground height there, same as open ground - no "stands up on the roof" behaviour exists to port; a landing that happens to fall on a building's footprint should just land at ground level (through/inside the building's base), matching ours needing no special case either. Still open: what the original does to a unit landing in water (ours dies at once), boats landing on the sea once vehicles exist, bumping into buildings and cliffs, a task dropped or kept when flung.
+- [ ] Physics (`game_core::physics::step`: velocity, gravity 32, velocity caps and air drag now done too, touchdown; landing in the sea or on walkable ground done, `Unit::touch_down`), to the original's rules (pop3-rev-analysis.md "Person physics"): still open - the unit spinning 26° per turn in the air, a scream on take-off; landing: dust and a sound at a vertical speed <= -100, `FALL_OUT_OF_WW_DAMAGE` 700 at <= -200 (`Touchdown::speed`), none on water cells; on the ground: sliding down the slope (gradient over ±76 units) with friction 28 per turn per axis (72 on special terrain), facing where it slides (`Tumble` pose; a grounded tumbling unit does not move yet). **Correction found closing this item: `game_core::balance` did not exist as code yet at the time (it does now,
+huts-and-training.md "Balance and game turns", `Balance::ticks` the identity) - one of our ticks already is one
+original turn 1:1 (`time.rs`, `TICKS_PER_SECOND`), so the original's per-turn numbers (caps 192 horizontal/512
+vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ordinary falls (ground dropping under a standing or walking person: earthquake, erosion, flatten) fall with the same gravity, caps and drag, without fall damage; rising ground lifts people. **Resolved this session (pop3-rev-analysis.md "Person physics"): landing on a building gets no special handling at all.** The original's `ground(pos)` (`0x44E940`) is a pure terrain-mesh height interpolation (a cell's 4 corner heights, diagonal-split-aware) with no building/unit/class check anywhere in it - a cliff is just handled correctly as steep terrain (same function), but a building sitting on the landing cell is invisible to it. A thrown person's touchdown height is always the raw ground height there, same as open ground - no "stands up on the roof" behaviour exists to port; a landing that happens to fall on a building's footprint should just land at ground level (through/inside the building's base), matching ours needing no special case either. Still open: what the original does to a unit landing in water (ours dies at once), boats landing on the sea once vehicles exist, bumping into buildings and cliffs, a task dropped or kept when flung.
 - [ ] Flying: units thrown by Whirlwind / Blast / explosions follow a ballistic or carried path (flying 61, tumbling 73 anims), land with damage, drown if they land in the sea.
 - [x] Ground recovery after landing (person state 19, pop3-rev-analysis.md "Tumbling and ground recovery", live-checked 2026-10-27): **implemented as a scoped-down approximation** (`Action::Settling`, `Unit::settle`/`settle_ticks`) - a grounded tumble now locks (no orders, `Unit::locked`) for a randomized while before resuming its own per-type behaviour (`go_idle`, so a standing attack order a fight put on hold still resumes same as before), playing its ordinary Idle (or holding-wood) pose throughout, no new animation asset. Simplifications, each tagged in code/docs rather than guessed silently: the duration is one `4..=31`-turn round [exe, measured] plus up to one more at the original's own combined reroll odds (our own cap on how many rounds, not traced - kept low enough that the common case clears well under a firewarrior's own ~27-turn reload, matching "a handful" as typical and "several dozen" as the rare unlucky tail) rather than the original's own open-ended per-32-turn reroll loop; it settles in place rather than relocating to a nearby clear spot (the spot-picking logic - 48/216-unit thresholds, an 8-direction offset table - is left unimplemented); carried wood is put down immediately rather than after the first wait round, and the debris puff/sound itself isn't drawn (no such effect exists yet). Getting hit again while settling still interrupts it into a fresh tumble, same as any other hit - a locked unit can in principle get juggled this way by a sufficiently persistent attacker (seen while testing, `firebolt::tests::a_firewarrior_hit_fires_back_even_walking`), which reads as a real consequence of the traced numbers rather than a bug, but isn't independently confirmed either way live. Randomized off a per-unit/per-tick seed (`settle_ticks`), not the shared `map::Lcg`: `Unit::tick` has none of its own and giving it one would mean threading `&mut Lcg` through every caller and test in the crate for this detail alone - still deterministic and lockstep-safe (a pure function of simulation state).
   - **Follow-up live check needed**: blast/tumble a brave that is actively carrying wood (`+0x78` nonzero) and watch
@@ -398,7 +401,37 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   item's own wording was stale - there is no cost-banded `max_charges()` left anywhere to replace.
 - [ ] Spent on training units: the stores are filled as in the original (`production::charge` in `ManaPool::distribute`: half of `incoming` before the spells, at most `cost / 32` each, a second share with every spell full, 100 a turn given back while making nothing). Left, each blocked rather than ready to code: a negative `incoming` (casts) taking mana back from the stores - depends on resolving the still-open "A cast's mana cost" item above (`incoming -= cost` on top of our prepaid charges, or instead of them? - a clean-room question, `Mana` has no subtraction-from-`incoming` path to extend yet); and the stores counted in the shaman death loss - the file's own "needed + stored building mana" alternative applies only to a controller-type-2 ("human") tribe, and no controller type is modelled yet (`GameMap::shaman_died` only ever reads `pool.bank` - the same tribe/controller-type gap `training::train_cost` has, see "Tribes" below).
 - [x] Earthquake and Firestorm (`spells.md`): Firestorm's scheduled `panicking_blast` fireballs are done in full; Earthquake's shake-and-sink (terrain part) and its three building-shake checks (`WorldEvent::Shake`, "The tick" above) are both done now, leaving only the trace's "possibly two lava flows". Angel of Death, Armageddon (full mechanic, see below)... still to do, as traced in pop3-rev-analysis.md "Per spell" and "Components". None of Earthquake's lava, Volcano's lava/turn-110 kill or Swamp route through `effect::hurts`/the shield check: a shielded unit still drowns or burns when the ground under it changes (reported, not traced), unlike a blast, lightning, swarm or hypnotise. Lightning is done (`lightning`), its victims now carbonized too (anim 97, "Units" above). Burning trees (`Tree::burning`, 127 turns then burnt to size 0) and the ground fire (`ground_fire`, 48 turns) have guessed lengths: the original's own ground-fire object (scenery class 5 type 0xA, not an effect — "Fireball impact") gets its burn countdown from 0x4A8C60 with param 22, the exact resulting turn count not yet decoded; trace that function and the original's scenery state 5; plants, wood piles and fires burning too (burn cell 7/0x05).
-- [ ] Angel of Death (model 13, `spells.md`, no code yet — neither a spell cast handler nor a unit kind exists): now spec'd in full, pop3-rev-analysis.md "Angel of Death mechanics". Cast sequence: an invisible meteor falls (trailing a shower of small glowing spark particles), and the instant it hits the ground it triggers a real, visible terrain ripple — an expanding ring that raises the ground then settles it back down as it travels outward, with an impact sound — before the meteor itself vanishes and the angel appears in its own separate debris-and-blast impact. A new person kind (type 8, no player tribe control): spawned already flying. It then runs entirely on its own state machine, never through `Command`: hunts the nearest enemy anywhere on the map (preferring a rival Angel of Death over anyone else, including shamans), grabs one victim (no dedicated "held in mouth" pose was found — the victim likely just keeps its last pose while carried), carries it a fixed 28 turns, then releases it to die through the ordinary fall/death path — no bespoke damage/kill call of its own. Against a rival angel it fights by directly comparing health (both sides always take damage, scaled by the stronger side's own remaining health) plus a hard knockback — not a choreographed fight, no distinct attack animations. Every tick, independent of its target, it also forces any eligible nearby enemy (8-cell radius) to panic. It can never land (altitude is kept clamped above the terrain at all times — no landing code path exists), cannot be selected or given orders, has no fire-breath attack found (the "breathes fire" impression is most likely its one-off spawn blast), and should not route through `effect::hurts`'s normal victim-eligibility scan the way Blast/Lightning/Swarm do: only a firewarrior's bolt should do it ~10% of its normal damage, and it should be excluded from Whirlwind's lift, the same exclusions Blast/Swarm/Insect Plague already use for shamans. The actual flying body is very likely a separate companion sprite driven by the angel's own logic (not the "person" record's own drawable), with distinct cruise/dive/launch poses — worth keeping in mind for how we draw it, even though the literal sprite frames weren't pinned down. Open in the exe trace, so left to our own judgement until resolved: the literal kill-count (40)/duration (2500-turn, `AOD_DURATION`) expiry rule, whether it can attack a building at all (and if so, any exclusion for prison/pyramid/totem — user-reported, unconfirmed in code), and whether it can grab a person riding in a vehicle the same way it grabs one in the open. Also referenced by: totem gifts (`TODO.md` "Totem gifts"), trigger type 5 and level 5's winged-death totem (`TODO.md` "Trigger semantics", "Level 5").
+- [x] Angel of Death (model 13, `spells.md`, pop3-rev-analysis.md "Angel of Death mechanics"): the logic is in
+  (`game_core::angel_of_death`), the art is not — `UnitKind::AngelOfDeath` is deliberately left out of
+  `UnitKind::ALL`, so it's simulated but never drawn. Resolved, separate session: the original draws it as a real
+  3D object-bank mesh (like a vehicle), not a 2D unit sprite — the already-catalogued "winged death" model
+  (`objects.md`/`catalog.rs`), whose `WINGED_DEATH_TOTEM`/`WINGED_DEATH_PERCHED` variants we already load for the
+  totem gift's static monument. The flying creature itself needs the OTHER two variants we don't yet reference
+  anywhere, `WINGED_DEATH_BACK` (100, used while descending/diving) and `WINGED_DEATH_ALT` (107, used while
+  cruising level), cross-blended over up to 6 ticks whenever its vertical motion changes rather than swapped
+  instantly (pop3-rev-analysis.md "Angel of Death mechanics" "Visuals" — the exact 3-step blend table isn't
+  pinned down, a straight crossfade/lerp between the two meshes over those ticks is a reasonable approximation).
+  `WINGED_DEATH` itself (7, "front") is not used by the original's own flight code and is not needed for this.
+  Cast: an invisible
+  meteor falls for `FALL_TICKS` (8), then a real terrain ripple (`Shockwave`, an expanding-then-settling ring, 9
+  ticks) plus a plain `blast::effect` (the same 140/98 push a building's own destruction and Lightning share) both
+  fire at once, and the real creature appears (`WorldEvent::SpawnAngelOfDeath`). From there it runs entirely on
+  its own (`GameMap::tend_angels_of_death`), never through `Command` (`Action::can_take_orders`'s own exclusion
+  list keeps it, and whoever it grabs, unorderable and unselectable): hunts a rival angel first, else the nearest
+  eligible enemy anywhere on the map (shamans included); grabs it once close (`Action::Grabbed`, no orders, no
+  movement of its own, no dedicated "held" pose — none was found either) and carries it `CARRY_TICKS` (28) before
+  releasing it to die through the ordinary damage pipeline; against a rival angel, fights by health instead
+  (both take a cut each clash, `FIGHT_COOLDOWN` apart, the weaker knocked back) — see the module doc's own
+  "Simplified from the trace" list for exactly which choreography details (`[ours]`) aren't literal. Every tick it
+  also forces any eligible enemy within `PANIC_RADIUS_CELLS` (8) to panic, excluding shamans and other angels
+  (confirmed, see "Units" below). Never pushed by a Blast (`blast.rs`, confirmed); excluded from Swarm's own sting
+  (confirmed). Left undone, same as the trace itself leaves open: the literal kill-count/duration expiry rule
+  (`AOD_KILL_COUNT`/`AOD_DURATION`), whether it can attack a building, whether it can grab someone riding in a
+  vehicle, and the firewarrior-bolt ~10% damage factor (`fights: false` already keeps it out of the ordinary
+  attack/spotting pipeline entirely, simplest reading of "cannot be ordered" extended to "cannot be ordered to
+  attack it either"). Also still open: totem gifts' own Angel of Death reward, trigger type 5 and level 5's
+  winged-death totem (`TODO.md` "Totem gifts", "Trigger semantics", "Level 5") don't spawn one yet — nothing
+  calls `angel_of_death::cast` but the spell book/panel UI (already wired before this session) and tests.
 - [x] Firestorm's own look (pop3-rev-analysis.md "Firestorm fireballs"): fixed — `fireball_shot.rs` [client] gives `panicking_blast`'s own effect a view of its own (both Firestorm's and Volcano's fireballs, which share it): a bright ball falling from above, shrinking as it nears the ground, a few dimmer embers trailing behind it (not `smoke.rs`'s grey puffs), landing in a flash that grows and fades into a last puff of smoke; `ground_fire.rs`'s standing flame is unchanged. Our own invented flight and look throughout (the original's hfx 1120-1127/90-93/~1180-1210 sprites, confirmed by eye last session, are not traced closely enough to follow pixel for pixel). `panicking_blast::VISUAL_TICKS` keeps the effect (and so this view) alive well past its own 3-turn blast purely so the fall/trail/burst has room to play out — the blast's own damage/push/panic are unaffected (already a no-op past turn 3). Blast's own `SimpleBlast` fireball now has its own, separate pair of views instead of reusing this one (`blast_fireball.rs`, `blast_impact.rs` [client], TODO.md "Blast push and flight"): its flight is a straight line from the shaman rather than a fall from above, and its landing is sized small on purpose rather than matching the blast's own multi-cell damage radius.
 - [x] Firestorm fireballs landing on water no longer start a ground fire (`firestorm::impact`, spells.md): matches
   the original's own coastal-shape check (pop3-rev-analysis.md "Fireball impact") via `unit::is_sea` on the
@@ -501,10 +534,24 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   "stops at 100%" vs "resets to 0" behaviour, and growing's own wood seeding). Capacity 3/4/5, supply 3/5/7
   (cap min(supply, 200)) were already done (`BuildingKind::capacity`, `headcount::{SUPPLY,Housing}`). Mana from
   people inside was already done too (rule 7, `GameMap::mana_income`). Left for the client: the tooltip's green
-  (`breed`) and red (`grow`) bars, and a star animation where a bred brave appears. `SPROG%`'s own 18
-  un-individually-confirmed band values are `[ours]`, linearly interpolated between the two confirmed ends (30
-  at band 0, 200 at band 19) - a later session with the full file dump should replace the table outright.
-- [ ] `game_core::balance`: `Turns` (original game turns) converted to ticks, `Balance::ours()` defaults, later `Balance::from_constants`; every rule reads it from `GameMap` (huts-and-training.md "Balance and game turns").
+  (`breed`) and red (`grow`) bars, and a star animation where a bred brave appears. `SPROG%`'s full 20-band table
+  is now confirmed from `constant.dat` directly (pop3-rev-analysis.md "Huts: breeding and growth"), replacing the
+  earlier `[ours]` linear-interpolation guess - check `hut_growth.rs`'s own table against it.
+- [x] **Population cap was missing the per-tribe base of 6** (pop3-rev-analysis.md "Huts: breeding and growth",
+  "Impact on our specs" rule 5): the original's `can_breed` cap is `min(200, 6 + sum(hut supply))` - a flat 6
+  added per tribe, hardcoded in `load_level` (0x42B428) for every tribe regardless of hut count, not in
+  `constant.dat`. Fixed: `headcount::BASE_POPULATION: u16 = 6` added and included in `Housing::room()`
+  (`game-core/src/headcount.rs`); `ai.rs`'s `housing.room()` read and the client's population strip
+  (`hud/population.rs`) inherit the fix automatically. Does not affect `convert.rs`/`sermon.rs`'s own
+  `MAX_POPULATION` (200) checks - those match a separate, genuinely flat exe check (preacher conversion's own
+  tribe+0x89DAE5 population counter), not `can_breed`'s hut-based cap.
+- [x] `game_core::balance`: `Turns` (original game turns) converted to ticks (`Balance::ticks`, the identity
+  today), `Balance::ours()` defaults, grouped by topic (`Huts`, `Training`, `Income`), stored on `GameMap` and
+  read by `hut_growth.rs`, `training.rs`, `headcount::mana_income` and `mana::ManaPool::tick` instead of their
+  own scattered constants (huts-and-training.md "Balance and game turns"). Left: `Balance::from_constants` (needs
+  `pop3_format::constants`, not built yet), the wood topic (still plain constants - `BuildingKind::wood_cost` and
+  trees' own regrowth are enum methods/free functions called from many places, not a `GameMap` tick), and
+  `Balance` is not yet part of the lockstep desync checksum.
 
 ### Wood ([trees.md](docs/specs/trees.md))
 - [ ] Original scenery models 7 plant 1, 8 plant 2: not drawn yet. Scenery 9 (the totems, 98 in the levels) is drawn as the stone head (object 82), a guess: find its real model. Trees have no size in the thing record: full size is right.
@@ -514,7 +561,10 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.
 
 ### Praying (worship) ([worship.md](docs/specs/worship.md))
-- [ ] Prayer gauge on the original's rhythm and curve (pop3-rev-analysis.md "The gauge"): every 4 turns, `C² / (C − n + 1)²` per update, drain `C²`; today it steps every tick with `STEP · (n/C)²`.
+- [x] Prayer gauge on the original's rhythm and curve (pop3-rev-analysis.md "The gauge", worship.md "Shared: the
+  prayer gauge"): moves every 4 turns (`gauge::RHYTHM`, not every tick), gains `C² / (C − n + 1)²` per update and
+  drains `C²`, scaled into our existing `STEP`-per-`PrayTime`-unit steps (`gauge::gain`/`step`); wired into both
+  `Vault::tick` (now takes an `update` flag) and `GameMap::tend_totems`.
 - [x] Contested totems: keep one gauge per tribe (our choice; the original has one per trigger, driven by the tribe with the most prayers), but the gifts are shared: a totem's `NumOccurences` counts across all tribes, so a one-gift totem rewards only the first tribe to fill its gauge, and the other gauges stop. Once `NumOccurences` is reached by any tribe, the totem sinks back into the ground for everyone and every tribe's prayers are sent away (`Totem::is_exhausted`: one shared sink, whoever took the last gift). **Truth sweep: already correct** (`Totem::given`/`is_exhausted`, `GameMap::tend_totems`) - confirmed and pinned down with a two-tribe test (`worship.rs` `two_tribes_contest_a_totem_the_first_to_fill_wins_the_gift_and_both_are_swept_once_exhausted`), no fix needed.
 - [x] Totems: ids and removal implemented (worship.md "Totems"). `TotemId`/`GameMap::add_totem` give every
   totem a stable id, the same `new_id_of` convention as buildings/units (`totems_from_level` stays a pure
@@ -551,11 +601,21 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 The single biggest remaining system, and the one that turns this from a sandbox/multiplayer tech demo into an actual single-player game. Sequenced after priority 1 on purpose: AI scripts can invoke any spell/building/unit action through the same order/coordinator machinery, so building the interpreter against still-incomplete systems means repeated rework. Tribes and level scripting are its direct prerequisites (per-tribe state, triggers the scripts fire).
 
 ### Tribes
-- [ ] A tribe model in game-core: `TribeId` instead of bare `u8` owners (blue 0 .. green 3, wildmen 255), its colour
-  in the engine instead of the client's `sites::tribe_color` / `procedural::tribe_rgb`, the tribes playing the level
-  (header byte 88: 1v1, 1v1v1, 2v1...), allies (header byte 92, see "Default allies" below), human / computer,
-  defeated; holding the player's mana pool, spell book and build book (today `GameMap::mana`, `spell_books`,
-  `build_books` by owner).
+- [x] `TribeId` (an enum: blue/red/yellow/green) instead of bare `u8` owners everywhere in game-core, game-client
+  and the game-net wire format (`Unit`/`Building`/`Command`/`WorldEvent`/mana/spell/build books), plus `Owner`
+  (`Owner::Tribe(TribeId)` or `Owner::Wild`, the wildman/neutral sentinel the old `255` stood in for) wherever a
+  unit, building or effect can be nobody's. `game_core::tribes::Tribes` (`GameMap::tribes`) holds, per tribe
+  present, its `computer` flag (`Tribes::with_ai_scripts`, loaded from the level header's `ai_scripts` in
+  `GameMap::load_original`: nonzero means a tribe is computer-controlled) and allies (`with_allies`, header byte
+  92). Left open from the original ask:
+  - [ ] The tribe colour still lives in the client (`sites::tribe_color`, taking `impl Into<Owner>`), not the
+    engine; `procedural::tribe_rgb` and the other pure sprite-recolouring helpers (shapes/frames/original_anim/
+    sheets) still take a plain `u8` index, never seeing an `Owner`/`TribeId` — left alone since nothing feeds them
+    one today.
+  - [ ] The tribes actually playing the level (header byte 88: 1v1, 1v1v1, 2v1...) are still not decoded/applied -
+    see the open report below.
+  - [ ] `GameMap::mana`/`spell_books`/`build_books` are still separate `[T; TRIBES]` arrays indexed by tribe, not
+    folded into a `Tribe` struct alongside `computer`/allies.
   - Reported: red has no reincarnation site on `levl2001.dat` (level 1) in play, suspected to be this same gap
     (header byte 88 unread). Level data itself does place a red (owner 1) shaman Thing (`#38 model 7 kind 1
     owner 1 at (2304,7424)`, alongside blue's `#35 owner 0`) - `site::sites_from_level` takes any owner with a
@@ -577,7 +637,73 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 - [ ] Implement the triggers and discoveries as deterministic simulation (through `Command`/state, no floats); AI scripts can fire them too (`TRIGGER_THING`).
 
 ### Computer players (AI)
-- [ ] AI for the computer-controlled tribes (pop3-rev-analysis.md "Native AI: how a computer-controlled tribe actually decides what to do"): their shaman and followers act on their own through `Command`s (deterministic, like a player's input): gather wood, build and grow the village, train units, pray, cast spells, attack and defend. The original's own architecture is now spec'd: one shared task-queue engine, fed both by a fixed 12-category priority list the engine itself tries every ~5 seconds (building construction always tried first) and by level scripts (PopScript's `DO` commands plug into the exact same queue, not a separate system) - build ours the same way, one engine both the autonomous priority list and any future scripting layer feed, rather than two parallel "AI" and "scripting" implementations. Reuse, don't duplicate, the original's own shared primitives: one generic "this follower now has a job" state transition (used by construction, resource-gathering, training, defence-posting and more alike), one generic "find N eligible idle workers nearby" search, and one generic "wrap up and move on from this target" sequence. Confirmed explicitly: the native AI never autonomously decides to attack under any condition (not even when losing badly) - only a script's own `DO ATTACK` ever queues one, so do NOT build a "desperation attack" trigger into the core simulation; if that behaviour is wanted later, it belongs in whatever drives AI tribes' scripted behaviour, the same place as any other conditional AI action. 24 native task types are catalogued at a design-ready level in the analysis section above (construct building, gather resources, train people, post/wander defenders, garrison staffing, scripted patrol execution, a reactive counter-attack, shaman positioning/auto-cast, and more); the exact worker-selection and site-search tie-breaking rules are still open and can be decided by our own judgement for a first pass.
+- [x] A first native engine for the computer-controlled tribes (`game_core::ai`, pop3-rev-analysis.md
+  "Native AI: how a computer-controlled tribe actually decides what to do"): `GameMap::tend_native_ai`
+  runs, per computer tribe (one `NativeAi` per tribe `LevelHeader::ai_scripts` assigns a script to,
+  same set `tribe_scripts` tracks), a priority sweep every 64 ticks (`SWEEP_EVERY`, phased by owner) —
+  construct an essential building (drum tower first, then a hut once housing is nearly full, then
+  warrior/temple/firewarrior training by population), train people towards the script's
+  `INT_ATTR_PREF_*_PEOPLE` shares, then post a spare defender up to a quota — the first that can act,
+  acts, matching "position 0 is always construct buildings". Every decision goes through `GameMap`'s
+  own public order/builder helpers (`place_building`, `build_orders`, `send_into`, `set_patrol`,
+  `apply`) exactly like a human player's input, which is also the "easily switched" seam: a different
+  engine only has to produce the same kind of calls. `DO ATTACK` (`ai::AttackGoal`, `GameMap::ai_attack`)
+  is the one task the sweep never enqueues on its own, confirming the spec's "native AI never decides
+  to attack"; it launches the chosen fighters straight at their target instead of the original's own
+  muster-at-the-drum-tower-then-march sequence (simplified, not traced). Deliberately not modelled at
+  all yet: garrison and vehicle tasks, scripted patrol groups and one-off guards
+  (`SET_MARKER_ENTRY`/`GUARD_AT_MARKER`/...: need the level header's `Markers[256]` table, not read
+  anywhere yet), `ATTACK_MARKER` targets (same marker-table gap), and the real worker-selection/
+  site-search tie-breaking rules (ours: a bounded random site search, idle braves in id order). See the
+  next few items for what reaches it from a script.
+- [x] Shaman auto-cast, `ATTACK`'s damage-then-withdraw threshold, and a reactive counter-attack
+  (`game_core::ai`, previously all three "deliberately not modelled" above): `SET_SPELL_ENTRY`'s own
+  slots (`NativeAi::spell_entries`, `GameMap::ai_set_spell_entry`) are checked every `REACTIVE_EVERY` (8
+  ticks, our own guess at "fairly responsive") by `tend_ai_spellcasting`/`ai_cast_if_ready` - she casts
+  the first slot whose `min_people` enemies are within the spell's own `cast_range` of her and whose
+  `base` flag matches whether she is near the tribe's own base (`AI_BASE_RADIUS_GUESS`, a guessed
+  stand-in radius for the still-unmodelled `SET_BASE_MARKER`/`SET_BASE_RADIUS`), reusing the same
+  `Command::Cast` a human player's click issues (`Spell::at_point`, shared with the client's own
+  `hud::spells::ground_spell`). `mana`'s own argument is read and discarded: the book's own cost/charges
+  already gate casting, and the wiki never says it is a separate threshold. `ATTACK`'s `damage` parameter
+  (0..999, "how much damage to deal before withdrawing") now tracks a `Sortie` per launched force
+  (`ai_attack`, `GameMap::ai_record_sortie_damage` hooked into `WorldEvent::Damage`'s own handling,
+  `tend_ai_sorties` calling survivors home with a plain `Order::MoveTo` once the threshold is dealt or
+  the target is dead) - **only for a `Shaman` goal**: a `Building` goal's own `WorldEvent::Wear` carries
+  no attacker at all (`event.rs`), so there is nothing to attribute a building sortie's damage to yet,
+  and it still fights on regardless of `damage`. The reactive counter-attack itself is
+  `ai_defend_base`/`tend_ai_defense` (`STATE_DEFEND`/`STATE_DEFEND_BASE`): on the same `REACTIVE_EVERY`
+  rhythm, pulls one idle fighter from anywhere in the tribe to the nearest intruder within the whole
+  guessed base radius - distinct from `spotting.rs`'s own always-on per-unit auto-engage, which only
+  looks a handful of cells around a unit already idle. None of this is traced against the exe beyond
+  what ai-scripts.md already gives; every guessed number says so in its own doc comment.
+- [ ] Shaman positioning and a drum-tower rally point (live-observed on level 25: red's script builds a
+  drum tower at its `SET_DRUM_TOWER_POS`, the shaman goes inside it, and followers gather around it;
+  when it is destroyed the shaman waits beside it while braves repair it, instead of the tower staying
+  wrecked or her going elsewhere). None of this is modelled yet:
+  - `PUT_PERSON_IN_DT model x z` (ai-scripts.md "People, buildings and orders") is a recognized `DO`
+    command but still falls through `ScriptEnv::do_call`'s catch-all no-op (`ai_script.rs`) - wiring it
+    needs the native engine to treat the shaman as a unit it can order into a building at all, which it
+    currently never does (she is only ever a spellcaster, `ai_cast_if_ready`, or an attack target,
+    `ai_attack_target` - nothing issues her a move/enter order).
+  - The muster-then-march sequence `ai_attack`'s own doc already flags as simplified away ("the chosen
+    fighters set off for their target right away instead of gathering at the drum tower first"): the
+    original stages the attack force at the reincarnation site or `SET_DRUM_TOWER_POS`'s own spot first
+    (ai-scripts.md "Attacks and spells", `INT_ATTR_DONT_GROUP_AT_DT` to skip it - not read anywhere).
+    This would also be the natural rally point idle followers default to standing at, distinct from
+    `ai_post_defender`'s own single stationary guard spot.
+  - Automatic repair for a computer tribe: `wreck.rs`'s wear-down already reverts a worn building to
+    `Stage::UnderConstruction` on a `REPAIR_DELAY` once it loses a piece of wood, but once a building is
+    `Built` its workers are released (`work.rs`'s `empty_building`) and the native AI's own
+    `ai_next_building` only ever picks a kind the tribe doesn't `has()` yet - a worn-but-still-standing
+    building of a kind it already owns (the drum tower included) is never re-noticed, so nothing sends
+    braves back to it on its own. Needs `ai_next_building` (or a sibling check) to also catch "own a
+    built one of this kind, but it needs repairing" and reuse the same `build_orders` assignment
+    `ai_construct_building` already does for a fresh plan.
+  - Whether the shaman specifically stands guard beside a building under repair (vs. following whatever
+    general "defend base"/idle behaviour already puts her there) is unconfirmed - a guess either way
+    until traced; a question for a spec session (docs/todo or a new pop3-rev-analysis.md section) if not
+    already covered by "Native AI" there.
 - [x] `pop3-ai-script` (its own crate, not a `pop3-format` module): parses `cpscrNNN.dat` (12 552 B
   only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md) (grammar,
   token, parameter and internal variable tables are there), folds a recognized
@@ -588,18 +714,53 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   - a decompiled-listing pretty-printer, so `just level-info` can print the level's tribes'
     scripts decompiled next to its things, triggers and markers.
   - `cpscr081`/`cpscr099`'s smaller layouts, if ever needed (no active level slot uses them).
-  - the actual AI: most `DO` commands still reach `game_core::ai_script::ScriptEnv::do_call` and do
-    nothing (see the next item for the one that's real so far).
+  - the actual AI: a growing but still partial set of `DO` commands reach real behaviour through
+    `game_core::ai_script::ScriptEnv::do_call` now (see the next two items); most still don't (markers,
+    guard groups, vehicles, messages/camera/tutorial UI).
+  - `Interpreter::resolve_call` now resolves every `Field` a `DO` call carries (including one nested
+    in a `Team`/`TeamWild` argument) to a plain `Field::Const` before `do_call` ever sees it - a
+    consumer's `Env` impl doesn't own the interpreter's user-variable storage, so it had no way to
+    read a `$variable`-valued argument itself before this. **A query command's own `var_field` output
+    is wired now too**: `Env::do_call` returns `Option<i32>` instead of `()`, and `Interpreter::exec_stmt`
+    writes a `Some` straight into the call's own last `var_field` argument itself (the interpreter
+    already knows which one that is, from the resolved call) - replacing the old `Env::write_user_var`
+    stub, which no `Env` impl ever actually had a way to reach the interpreter's own storage through.
+    `I_HAVE_ONE_SHOT` (`SPELL_TYPE` form only; the `BUILDING_TYPE` form's meaning is still unknown),
+    `IS_SHAMAN_AVAILABLE_FOR_ATTACK`, `COUNT_ANGELS` and `IS_BUILDING_NEAR` now answer for real
+    (`ai_script.rs`). Still no-ops: every query that needs the marker table
+    (`COUNT_PEOPLE_IN_MARKER`, `GET_HEIGHT_AT_POS`, `IS_SHAMAN_IN_AREA`, `NAV_CHECK`), `GET_SPELLS_CAST`/
+    `GET_NUM_ONE_OFF_SPELLS` (no cumulative-casts counter exists yet), `SET_ATTACK_VARIABLE` (the wiki
+    itself only guesses at its meaning), `PARTIAL_BUILDING_COUNT` (toggles a count mode for
+    `INT_x_BUILDING_*` internal variables we don't model at all yet) and the many UI/human-watching
+    queries (`IS_PRISON_ON_LEVEL`'s own single use looked too uncertain to guess at - it has no
+    `var_field` in its own spec table at all, unlike every other query).
 - [x] First real `DO` commands, end to end: `game_core::ai_script` (`load_tribe_scripts`,
   `ScriptEnv`, `GameMap::tend_ai_scripts`) loads each computer tribe's `cpscrNNN.dat`
   (`LevelHeader::ai_scripts`) in `GameMap::load_original`, runs its "turn 0" setup block once right
-  there, then once more per later `tick()` (the `ELSE { EVERY ... }` branch) - `DO SET_REINCARNATION
-  ON/OFF` is wired to `GameMap::remove_reincarnation`/`restore_reincarnation`
-  (`WorldEvent::RemoveSite`/`RestoreSite`) for the script's own owner, and `DO SET_NO_BLUE_REINC`
-  (the human/blue equivalent, no on/off argument, always targets owner 0 regardless of which computer
-  tribe's script calls it) to the same `RemoveSite`. Every other `DO` command is still a no-op (previous
-  item). `ScriptEnv::int_var` only backs `INT_GAME_TURN` so far; `INT_ATTR_*` and every other
-  internal variable read as 0.
+  there, then once more per later `tick()` (the `ELSE { EVERY ... }` branch). Real so far: `SET_REINCARNATION
+  ON/OFF` (`GameMap::remove_reincarnation`/`restore_reincarnation`,
+  `WorldEvent::RemoveSite`/`RestoreSite`, for the script's own owner), `SET_NO_BLUE_REINC` (the
+  human/blue equivalent, no on/off argument, always targets owner 0 regardless of which computer
+  tribe's script calls it, to the same `RemoveSite`), every `STATE_*` toggle (`crate::ai::state::bit_for`
+  -> `NativeAi`'s own bitset), `SET_DRUM_TOWER_POS`/`BUILD_DRUM_TOWER` (places/tops up a drum tower plan
+  right away, `GameMap::ai_build_at`) and `DELAY_MAIN_DRUM_TOWER`/`BUILD_MAIN_DRUM_TOWER` (gates the
+  native engine's own automatic one), `TRAIN_PEOPLE_NOW` (`GameMap::ai_train_now`), `ATTACK`
+  (`GameMap::ai_attack`, `ai::AttackGoal` - `ATTACK_PERSON`/`ATTACK_BUILDING` only, `ATTACK_MARKER`
+  needs the marker table; its own `damage` parameter now reaches `ai_attack` too, see above) and
+  `SET_SPELL_ENTRY` (`GameMap::ai_set_spell_entry`, see above). Also real now, the level-event gifts
+  (`GIVE_MANA_TO_PLAYER` -> `ManaPool::add`; `GIVE_ONE_SHOT` -> `worship::one_more_shot`, the same
+  helper a totem's own one-shot reward uses; `GIVE_PLAYER_SPELL` -> `SpellBook::set(.., Known)`;
+  `REMOVE_PLAYER_THING` -> hides a spell or a buildable kind, whichever `model` resolves to), the level
+  outcome (`TRIGGER_LEVEL_WON`/`TRIGGER_LEVEL_LOST` -> `GameMap::declare_outcome` with
+  `Reason::Scripted`, blue winning or the script's own tribe winning respectively - our own reading of
+  "ends the level", not traced) and the timer trio (`SET_TIMER_GOING`/`REMOVE_TIMER`/
+  `HAS_TIMER_REACHED_ZERO` -> `NativeAi::timer_end`; the UI countdown itself still isn't drawn anywhere).
+  Every other `DO` command is still a no-op (see the query ones two items up). `ScriptEnv::int_var` backs
+  `INT_GAME_TURN`, `INT_MY_NUM_PEOPLE` and every `INT_ATTR_*` (round-tripped through `NativeAi`); any
+  other internal variable reads back as its own numeric token id rather than 0 - a deliberate, safe
+  default for the many purely identifier-like ones (`INT_WARRIOR`, `INT_TEMPLE`,
+  `INT_NO_SPECIFIC_BUILDING`...), which is how `do_call` recovers "which model/unit kind was named"
+  from an already-resolved `Field::Const` (see `resolve_call` above).
 - [x] `pop3_format::constants`: decode `levels/constant.dat` (XOR key, 2-byte marker, `P3CONST_` lines) per
   [constants.md](docs/specs/constants.md) into a plain `name -> value` map (`Constants::parse`/`load`,
   `[ours]`-tagged guess at which of the two forms — encoded or the community's plain text — a given file is
@@ -622,7 +783,15 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   kind before this (checked `Message`'s then-3 variants directly). Still open: nothing calls this yet - there
   is no host/join flow or network driver at all (see "Network driver" below), so a real mismatch is not
   actually refused anywhere today, only encodable/decodable and comparable.
-- [ ] Script interpreter in `game-core`: user variables, internal variables read from the simulation (`headcount`: units by state and kind, `housing`), `EVERY n m` firing when `(turn + m) % n == 0` (stored minus 1), DO commands mapped to AI states and `Command`s; start with the states, `ATTACK` and `SET_SPELL_ENTRY`. Levels 2100, 2110, 2131 name missing scripts: fall back to no script.
+- [x] Script interpreter in `game-core`, first pass: user variables (`pop3_ai_script::Interpreter`,
+  pre-existing), `INT_MY_NUM_PEOPLE`/`INT_ATTR_*` read from the simulation/`NativeAi` (not the fuller
+  `headcount`/`housing` set yet - just what `ai.rs`'s own sweep needed), `EVERY n m` firing when
+  `(turn + m) % n == 0` (pre-existing, `pop3_ai_script::interp::every_fires` - still missing the real
+  per-tribe phase ai-scripts.md itself flags as open, a different clock from the native engine's own
+  `SWEEP_EVERY` phase above), DO commands mapped to AI states and `Command`s for `STATE_*` and `ATTACK`
+  (previous item). Still open: `SET_SPELL_ENTRY` (shaman auto-cast, not modelled at all), the rest of
+  `headcount`/`housing` as internal variables, and whether levels 2100/2110/2131's missing scripts
+  (fall back to no script, unverified this falls back cleanly end to end) still need a check.
 - [ ] Script timing: measure the original turn rate (wiki: about 8 turns/s) against our 10 ticks/s, and whether `EVERY` adds a per-tribe phase, before porting script timings (see [ai-scripts.md](docs/specs/ai-scripts.md) "What this means here").
 - [x] Flybys: `FLYBY_CREATE_NEW..=FLYBY_START` drives the camera for real now
   (`game_core::ai_script::ScriptEnv::on_flyby` -> `GameMap::active_flyby`, `crates/game-client/src/flyby.rs`
@@ -633,16 +802,43 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   where the player was before it started. Not done: `FLYBY_SET_EVENT_TOOLTIP` popups (parsed and resolved,
   nothing draws them); the exact keyframe easing/overlap and the zoom -100..100 -> camera distance scale
   are our own guesses, unspecified in the files.
+  - [x] **Confirmed live this design is right** (pop3-rev-analysis.md "Flyby cancel"): two captures of level 1's
+    flyby, one interrupted mid-flight and one left to finish on its own, settle on the identical camera
+    orientation - cancelling really does skip to the flyby's own end rather than reverting. Fixed:
+    `FLYBY_CANCEL_GRACE_TICKS` was `Ticks::secs(1)`, now `Ticks::secs(3)` matching the measured original
+    ease (only one interrupt point measured, not cross-checked at a different point in the flyby).
 - [ ] Camera flyby state: continue the pop3-rev-analysis.md "Camera flyby state (tribe_struct)" investigation.
   All three primary AI-script channels are now traced end to end (pop3-rev/docs/camera.md, pop3-rev/
   docs/functions.tsv):
-  - `POS` drives `tribe_struct+0x24` directly: `x`/`z` are plain 0-255 cell indices, world units =
-    `(cell+1)*256` (256 render units/cell, matches "Landscape projection"), with explicit map-wraparound
-    handling on the delta. Our `flyby.rs` already treats `positions` as raw x/z onto `focus` with
-    `rem_euclid(map_size)` - worth double-checking the `(cell+1)*256`-style unit conversion and the wraparound
-    shortest-path behavior match, not just the destination.
+  - `POS` drives `tribe_struct+0x24` directly: `x`/`z` are raw 0-255 bytes, world units = `(cell+1)*256`
+    (256 render units/cell, matches "Landscape projection"), with explicit map-wraparound handling on the
+    delta.
+  - [x] **Confirmed bug, found via a user's screenshot comparison, now fixed**: the raw byte is at HALF-cell
+    resolution over our own 128-cell map (`actual cell = raw / 2`), not a literal cell index - evidence: all
+    11 x/z values in level 1's own script (`POS`/`TOOLTIP`/`END_TARGET`) are even (expected if the designer
+    placed waypoints on whole cells, doubled by the compiler); `FLYBY_SET_END_TARGET 20 216` halved is cell
+    `(10, 108)`, 1.5 cells from this level's own known site position `(8.5, 107.5)`
+    (`crates/game-client/src/sites.rs`'s `site_cell_pos`) - matching a screenshot of the camera parked on the
+    stone circle/shaman, where the raw byte taken 1:1 (the old code) lands at `(20, 88)`, 20+ cells off over
+    the sea. Fixed: `flyby.rs` now has a `half_cell` helper (`raw as f32 * 0.5`) used by `drive_camera`'s
+    `POS` keyframes and `final_pose`'s `end_target`/last-keyframe fallback, before the existing
+    `rem_euclid(MAP_SIZE)` wraparound. `TOOLTIP` keyframes need the same halving whenever they're implemented
+    (currently parsed/resolved but nothing draws them, above). See pop3-rev-analysis.md "The AI-script POS
+    and ANGLE channels" and pop3-rev `docs/camera.md` "Correction: POS/TOOLTIP/end-target raw x/z are
+    HALF-cell units".
   - `ANGLE` drives `tribe_struct+0x32` directly (the same field the manual mouse-drag rotate code uses) -
     confirms the documented "shortest way" rule is real but has a per-event override flag, not unconditional.
+  - [x] **D3D axis/handedness caveat for yaw - resolved, no code change needed**: re-analysing two already-
+    captured full-flyby traces (pop3-rev `docs/camera.md`'s `cam5.txt`/`cam7.txt`) against the script's own
+    6 `ANGLE` keyframes confirms `yaw_true = -raw * 360/2048` (mod 360) - a pure sign flip, zero offset -
+    to within ~0.5-4° on 4 independent keyframes in both captures. That's exactly what `flyby.rs`'s existing
+    `render_yaw` (-> `nature::angle_yaw(raw).render()` -> `GameYaw::render()`'s documented left-handed/
+    right-handed mirror) already computes - this was an existing, independently-motivated convention, not
+    something added to fit this data. See pop3-rev-analysis.md "D3D axis caveat" and pop3-rev `docs/
+    camera.md` "D3D axis caveat for YAW - RESOLVED".
+    - [ ] Worth a regression test even though no fix is needed: the mirror negation in `render_yaw` reads like
+      an arbitrary detail someone could "simplify away" later with nothing to catch it. Assert
+      `render_yaw(raw)` within ~5° (mod 360) of `(0,0°) (681,240.29°) (744,229.22°) (1438,107.23°)`.
   - `ZOOM` does NOT change camera distance at all: it blends between two named camera PRESETS' render
     parameters (bend/K and a few other render-block fields), not a continuous world-unit zoom.
     `flyby.rs`'s `zoom_to_distance` (-100..100 linear onto `DISTANCE_RANGE`) has the wrong shape entirely,
@@ -657,6 +853,49 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     touches `rig.pitch`, see below) - the real camera instead stays at a ~constant radius and orbits
     toward vertical. Fixing this properly means reworking `eye_offset`'s zoom model (pitch-driven, not
     distance-driven) for both the flyby and ordinary manual zoom, not just retuning `DISTANCE_RANGE`.
+  - [x] **Confirmed, calibrated, and FIXED in code**: script zoom value 0 means "idle" (~20.4° pitch,
+    `camera::GROUND_PITCH_DEG`), not the arithmetic midpoint of `PITCH_RANGE` (~49.5°) the old `zoom_to_pitch(0)`
+    returned. Re-running the yaw check's flat-hold-detection pipeline against `cam5.txt`/`cam7.txt`'s matrix
+    PITCH instead, matched to level 1's 4 `ZOOM` keyframes, gave real (zoom, pitch) pairs, tight across both
+    captures: `(-100, -55.37°) (10, -19.51°) (80, -12.70°) (0, -20.56°)` - vs. the old formula's
+    `(-100, 88.60°) (10, 45.64°) (80, 18.31°) (0, 49.55°)`, wrong by 5.6-33.2° on EVERY point. `PITCH_RANGE`
+    (10.5°-88.6°) is real but is the range reached by physically holding the manual zoom key to the
+    whole-planet globe view - a different input than the script's bounded `-100..100`; level 1's own script
+    never gets anywhere near those endpoints. `zoom_to_pitch` now uses a piecewise-linear fit through these
+    points (`KNOTS` in `flyby.rs`, zoom 80-100 extrapolated - unconfirmed, no script here exercises past 80),
+    with a regression test (`zoom_is_calibrated_against_real_flyby_pitch_traces`) pinning it within 6° so a
+    later cleanup can't flatten it back into a straight `PITCH_RANGE` span without a test catching it. See
+    pop3-rev-analysis.md "The AI-script zoom channel" and pop3-rev `docs/camera.md` "`flyby.rs::zoom_to_pitch`
+    calibrated against the same traces".
+  - [x] **SOLVED, a later session - it's FOV, confirmed, and it moves with zoom**: a user also felt camera
+    distance "should be ~10 cells" from a screenshot (distance and FOV are confounded in a still image,
+    `1/(distance*tan(fov/2))`). `D` (`GROUND_DISTANCE`=25.4 cells) is one of the best-measured constants here
+    (confirmed constant three independent ways: live manual-zoom round trip, static zoom-chain trace, and the
+    `0x417510`/`CREATE_MSG_INFORMATION_ZOOM`/`ZOOM_TO`/`TRACK_TO_MARKER` alternate-mechanism lead checked
+    against level 1's real `cpscr010.dat` via `ai_script_info` and RULED OUT - none of those opcodes appear
+    anywhere in the script, only the one known `FLYBY_SET_EVENT_ZOOM`-driven flyby). `DEFAULT_FOV` (35°), by
+    contrast, was never traced from the exe at all ("matched by eye") - confirmed the actual culprit, and it's
+    not even a single wrong constant: **the per-axis screen-scale step "Landscape projection" used to leave open
+    is now fully traced** (`focal_px = Q · 2^(S-16)`, isotropic - pop3-rev `docs/camera.md` "The per-axis screen
+    scale SOLVED"), and **`Q` is itself one of the flyby `ZOOM` channel's blended fields**, live-confirmed
+    swinging from ~40786 (idle) to ~71207 (level 1's own "zoomed in" extreme) - i.e. the original's "zoom"
+    changes effective FOV on top of pitch+bend, a real telephoto effect, not just an orbit (pop3-rev
+    `docs/camera.md` "Zoom changes effective FOV too").
+    **Fixed in code**: `flyby.rs` now has a `zoom_to_fov` next to `zoom_to_pitch`, driven by the same script
+    zoom value, both sharing one `piecewise_deg` helper. `CameraRig.fov` is the vertical FOV already
+    (window-size-independent once in degrees), so no window dimensions are needed in our own code even though
+    the original's own `focal_px = Q/32`, `FOV_y = 2*atan(half_height/focal_px)` derivation used its capture's
+    640x480 window to get there. `FOV_KNOTS`: `(-100,21.6°) (0,21.3°) (80,12.3°) (100,10.05°)` - the last point
+    extrapolates the 0..80 trace's own slope, same spirit as `PITCH_KNOTS`' own 80..100 guess (zoom 80-100 is
+    unconstrained, no level script here exercises it). Regression tests:
+    `zoom_is_calibrated_against_real_flyby_fov_traces` (pins the 3 real points within 1°) and
+    `zooming_in_narrows_the_fov_not_widens_it`. `GROUND_DISTANCE`/`D` itself did NOT change.
+    `origin_x`/`origin_y` (screen center) are also now traced (`render_block[+0x2a or +0x2c] + half_window`) -
+    Y matches live exactly, X has an unexplained constant ~50px offset not yet resolved, doesn't affect FOV -
+    not acted on in code, nothing in `flyby.rs` currently needs the screen origin.
+    **Not yet checked**: whether MANUAL zoom (not just the flyby) also moves `Q` the same way - the existing
+    "Manual zoom is a pitch+bend orbit" finding above only ever recorded `D`/`S`/`K`/the matrix, not `Q`.
+    See pop3-rev `docs/camera.md` "The per-axis screen scale SOLVED" / "Zoom changes effective FOV too".
   - `INT_POINT` (look-at-a-point yaw channel, unused by level 1) and `TOOLTIP` (resolves to a generic
     advisor-notification system; its `idx=0` case walks to a "head"/monument scenery object - almost
     certainly the reported "a building/pyramid is presented" behaviour) were traced on both the creation and
@@ -1079,7 +1318,7 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 - [ ] Rendered tooltip: done for buildings, trees and totems (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks, right click at once); the toggle to add.
 - [ ] People rows filled: totems' counted prayers (once praying exists), the trainee. Vehicles and vehicle huts are done. Buildings, pyramids and totems' places are done, a click adds the unit to the selection.
 - [ ] Wood rows: the pieces still needed on a growing house (once growth exists). Plans, sites, built buildings and trees are done.
-- [ ] Bars fed by the simulation: totem prayer progress (once praying exists), house growth and birth, house growth and birth. The widget, its blinking, the pyramid's prayer bar and the training bar (double fill from `GameMap::production`) are done
+- [ ] Hut tooltip bars: a hut's breeding progress (`Building::breed`, `BarKind::Birth`, green, vertical) and growing progress (`Building::grow`, `BarKind::Growth`, red, vertical - huts-and-training.md rules 5-6) are modelled in `game_core::hut_growth` but `building_model` (tooltip.rs) never pushes them to `TooltipModel::bars`; wire them in the way `BarKind::Training` already is. The widget, its blinking, the pyramid's prayer bar, totem prayer progress and the training bar (double fill from `GameMap::production`) are done.
 - [x] Editor: brushes now follow the mouse (`grounded::pick_ground`, mirroring `blueprint.rs`'s own
   cursor-ray-pick, falling back to the camera focus when the cursor is off the terrain or over the panel);
   a configurable brush radius (`EditorState.brush_radius`, `[`/`]`, 1..=12, default 4) shown as a ring on the
@@ -1164,13 +1403,21 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   "biggest win expected" was about, not the still-undone per-instance-UV meshing (step 4). Per-frame steady-state
   systems were never the bottleneck either way (both traces agree, same numbers as above) - step 4's own remaining
   value is real but smaller and riskier than what's already landed, left open rather than forced.
-- [ ] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
-  prepared again each frame; write only when the colour changes, or share a material per colour step.
+- [x] Health bars: `animate_views` takes every fill's material mutably every frame (`mats.get_mut`), so all of them are
+  prepared again each frame; write only when the colour changes, or share a material per colour step. Fixed:
+  `HealthFill` now keeps the fraction it last wrote and `mats.get_mut` is only called when the health fraction
+  actually changed since (`health_color` is a pure function of it, so comparing the fraction is equivalent to
+  comparing the colour, cheaper).
 - [ ] Some image is prepared again every frame (`prepare_assets<GpuImage>` about 3 ms, its extract 1.6 ms): find which
   (the UI text atlas of readouts changing every frame? the cursor? the offscreen target?).
-- [ ] Mesh allocator about 3 ms a frame: meshes rewritten every frame (range ring `put` while shown, blueprint marks)
-  and the 129 x 129 terrain mesh rebuilt on every camera move (`world::rebuild_terrain`): rewrite only on change;
-  the planet curve could move to the vertex shader over a static grid.
+- [ ] Mesh allocator about 3 ms a frame: meshes rewritten every frame. **Fixed in part**: the range ring's line
+  and blueprint marks now skip `put`/`put_mark` when the mesh they would write is the same as the last one
+  written (`RingMesh`/`MarkMesh` now `PartialEq`, a cache on `Ring`/`BlueprintMark`) - a stationary mouse or an
+  unmoving, already-fully-shown ring no longer re-uploads their buffers every frame. Left alone: the curtain part
+  of the range ring, which is a continuous time-based animation while shown and so has no "unchanged" state to
+  skip to begin with. Still open: the 129 x 129 terrain mesh rebuilt on every camera move
+  (`world::rebuild_terrain`) - rewrite only on change; the planet curve could move to the vertex shader over a
+  static grid.
 - [x] Transforms written every frame for everything grounded (`grounded::place_grounded`) and every unit part
   (`units::pull_to_eye`) now skip the write when nothing changed (`docs/plans/12-change-only-transform-writes.md`):
   `place_grounded`'s translation and `tilt_grounded`'s rotation compare before assigning, `Visibility` uses
@@ -1191,9 +1438,8 @@ PostUpdate about 5 ms), driven by how we hand it the world:
 - [ ] Measure the windowed release build too (`cargo run --release`): the numbers above are the dev build under
   tracing. The simulation only matters with many units: every walker replans A* on any terrain write
   ("Replanning" in Units).
-- [ ] Loading screen freezes near the end (`docs/plans/13-loading-screen-incremental-build.md`), two unyielded
-  main-thread stalls originally lumped as one item - **the map-build half is fixed, the slow-`install` half is
-  not** (left open on purpose, see below), so this stays unchecked.
+- [x] Loading screen freezes near the end (`docs/plans/13-loading-screen-incremental-build.md`), two unyielded
+  main-thread stalls originally lumped as one item, both now fixed.
   - **Fixed**: `menu::begin_game`/`boot::GameStep` used to build a `Start::NewGame` (or sandbox) map synchronously
     inline (`LevelList::load_current`: parse, build `GameMap`, recompute shading - "likely the dominant freeze for
     a real original level"), zero progress, no frames drawn until it returned. `GameMap::load_original`/`generate`
@@ -1211,16 +1457,25 @@ PostUpdate about 5 ms), driven by how we hand it the world:
     fallback goes through the exact same `Building`/`poll_new_game_build` machinery end to end
     (`HEADLESS=1 SHOT_BOOT=1`, reaches `Playing` and screenshots correctly) and that `boot/mod.rs`'s own `next()`
     unit tests cover the new `Building` state.
-  - **Still open, the slow-`install` half**: `boot::poll_job` still runs `J::install(output, world)` in one
-    unyielded call per `BootJob`, and `BootStatus::fraction()` still caps a job at 0.99 until `install` returns.
-    The one real `BootJob` today, `UnitSpritesJob`, no longer looks like the dominant freeze this item was
-    originally written against: its own atlas-sharing rework (TODO.md "Unit sprites" above) already cut its
-    `install` to ~100-120 ms measured here (`"boot: Unit sprites installed in …ms"`, generated art, software
-    rendering) - a noticeable frame or two, not a multi-second hang. Building the generic resumable-`install`
-    plumbing (a `install` that returns `More(state)`/`Done`, called once per frame) speculatively, with no job
-    currently slow enough to justify it, was left undone rather than guessed at; revisit if a future `BootJob` (or
-    a real-install measurement against the original game's own assets, which this environment has none of) shows
-    it's still needed.
+  - **Fixed, the slow-`install` half**: reported in play against a real original install - the loader hanging
+    near the end, unresponsive (no mouse movement: the whole app, not just the sim), occasionally crashing
+    outright. `boot::poll_job` used to run `J::install(output, world)` in one unyielded call per `BootJob`; with
+    the original art's full frame counts (`UnitSpritesJob`'s own atlas-sharing rework, TODO.md "Unit sprites",
+    already cut the generated-art/software-rendering case measured here to ~100-120 ms, but that benchmark has
+    nothing like the original's real sprite counts) that call could run long enough to starve the window's own
+    event loop - and on some drivers, long enough without a swapchain present to trip the GPU driver's own
+    timeout/recovery, crashing the app rather than just freezing it. `BootJob::install` is now `install_step`
+    (`InstallProgress::More(output)`/`Done`), called once per frame until done instead of once for everything;
+    `JobSlot` gained an `Installing(Output)` state to hold the output between calls. `UnitSpritesJob` installs one
+    kind per call (`install_steps` = kind count) instead of all of them in one, bounding a frame's GPU-upload work
+    to one kind's atlases regardless of how large the original art makes them. `BootStatus::fraction()` now gives
+    the install phase its own climbing share (0.9 to 1.0 by chunks done) instead of a cap stuck at 0.99 until the
+    single call returned, so the bar visibly keeps moving instead of appearing to hang right before it does.
+    Covered by `boot::tests::a_chunked_install_lands_one_piece_per_frame_and_the_bar_climbs_through_it` (a
+    `BootJob` whose `install_step` is called once per fake frame, checked after each); end to end,
+    `HEADLESS=1 SHOT_BOOT=1 --no-original` still reaches `Playing` and screenshots correctly (generated art, so
+    this doesn't exercise the original's own much larger frame counts - no original install was available in this
+    environment to measure the fix's actual effect against the sizes it targets).
 
 ## Priority 6 — `--no-original` asset completeness (copyright safety)
 AGENTS.md's own bar is that everything shippable works with `--no-original`. Sound is a hard zero today (format reverse-engineered, no playback, no CC0 assets sourced at all); several spell VFX, building/spell icons and ritual scenery are still original-only. Largely independent of the other tiers, so it can run in parallel with them rather than waiting its turn.

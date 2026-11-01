@@ -145,6 +145,7 @@ impl crate::map::GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::map::GameMap;
 
     #[test]
@@ -158,10 +159,10 @@ mod tests {
     fn pull_target_is_its_base_or_sea_level_for_a_water_siteds_own_water() {
         let mut m = GameMap::sandbox_walk();
         m.terrain.set(20, 20, 150);
-        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, 0, 20 * 512, 20 * 512, 0);
+        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 20 * 512, 20 * 512, 0);
         hut.level = 100;
         assert_eq!(hut.pull_target(&m.terrain, (20, 20)), 100, "an ordinary building always targets its base");
-        let mut boat = Building::new(BuildingKind::BoatHut, 0, 20 * 512, 20 * 512, 0);
+        let mut boat = Building::new(BuildingKind::BoatHut, TribeId::Blue, 20 * 512, 20 * 512, 0);
         boat.level = 100;
         assert_eq!(boat.pull_target(&m.terrain, (20, 20)), 100, "its land side still targets its base");
         m.terrain.set(20, 20, 0);
@@ -189,7 +190,7 @@ mod tests {
     fn a_terrain_change_away_from_its_footprint_leaves_a_building_alone() {
         // "Hill, tower downhill. A flatten spell on the top edge: the building should resist."
         let mut m = GameMap::sandbox_walk();
-        let tower = m.add_building(Building::new(BuildingKind::DrumTower, 0, 40 * 512, 40 * 512, 0));
+        let tower = m.add_building(Building::new(BuildingKind::DrumTower, TribeId::Blue, 40 * 512, 40 * 512, 0));
         for &(x, z) in &m.building(tower).unwrap().ground_points() {
             m.terrain.set(x, z, 100);
         }
@@ -204,7 +205,7 @@ mod tests {
         // other buildings."
         for kind in [BuildingKind::DrumTower, BuildingKind::Hut { size: 1 }] {
             let mut m = GameMap::sandbox_walk();
-            let id = m.add_building(Building::new(kind, 0, 40 * 512, 40 * 512, 0));
+            let id = m.add_building(Building::new(kind, TribeId::Blue, 40 * 512, 40 * 512, 0));
             let cell = m.building(id).unwrap().walled_cells(m.terrain.size() as i32)[0];
             spike_one_corner(&mut m, id, 100, 900);
             run(&mut m, 4);
@@ -222,7 +223,7 @@ mod tests {
         // enough other points near 128): still too uneven, caught by the footprint-wide spread, not a
         // per-point deviation from that average.
         let mut m = GameMap::sandbox_walk();
-        let id = m.add_building(Building::new(BuildingKind::Temple, 0, 95 * 512, 60 * 512, 0));
+        let id = m.add_building(Building::new(BuildingKind::Temple, TribeId::Blue, 95 * 512, 60 * 512, 0));
         let points = m.building(id).unwrap().ground_points();
         assert!([(95, 60), (94, 61), (94, 59)].iter().all(|p| points.contains(p)), "{points:?}");
         for &(x, z) in &points {
@@ -239,7 +240,7 @@ mod tests {
         // "A bridge crossing half the house from a bit higher terrain: the house should survive and flatten
         // with time."
         let mut m = GameMap::sandbox_walk();
-        let hut = m.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, 40 * 512, 40 * 512, 0));
+        let hut = m.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 40 * 512, 40 * 512, 0));
         let points = m.building(hut).unwrap().ground_points();
         for (i, &(x, z)) in points.iter().enumerate() {
             m.terrain.set(x, z, if i % 2 == 0 { 100 } else { 150 });
@@ -257,7 +258,7 @@ mod tests {
     #[test]
     fn flooding_sinks_an_ordinary_building_over_80_turns_no_ashes() {
         let mut m = GameMap::sandbox_walk();
-        let hut = m.add_building(Building::new(BuildingKind::Hut { size: 1 }, 0, 40 * 512, 40 * 512, 0));
+        let hut = m.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 40 * 512, 40 * 512, 0));
         let size = m.terrain.size() as i32;
         let cells = m.building(hut).unwrap().walled_cells(size);
         let flooded = cells.len() * FLOOD_FRACTION.0 as usize / FLOOD_FRACTION.1 as usize + 1;
@@ -279,7 +280,7 @@ mod tests {
     #[test]
     fn a_water_sited_building_is_immune_to_flooding_and_uneven_ground() {
         let mut m = GameMap::sandbox_walk();
-        let hut = m.add_building(Building::new(BuildingKind::BoatHut, 0, 40 * 512, 40 * 512, 0));
+        let hut = m.add_building(Building::new(BuildingKind::BoatHut, TribeId::Blue, 40 * 512, 40 * 512, 0));
         for &(x, z) in &m.building(hut).unwrap().walled_cells(m.terrain.size() as i32) {
             m.terrain.set(x, z, SEA_LEVEL);
         }

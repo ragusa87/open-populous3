@@ -82,10 +82,12 @@ impl Vault {
 
     /// One tick: praying, the gauge fills while the shaman holding it (`holding`: 1 when she prays at
     /// the door or is inside) prays, out of the one it needs, and drains linearly otherwise
-    /// (`gauge::step`); granted, the closing goes on whatever happens to her.
-    pub fn tick(&mut self, holding: u16) {
+    /// (`gauge::step`), moving only on `update` (`gauge::RHYTHM`); granted, the closing goes on
+    /// whatever happens to her regardless.
+    pub fn tick(&mut self, holding: u16, update: bool) {
         self.phase = match self.phase {
-            VaultPhase::Praying { progress } => VaultPhase::Praying { progress: crate::gauge::step(progress, holding, 1, self.full()) },
+            VaultPhase::Praying { progress } if update => VaultPhase::Praying { progress: crate::gauge::step(progress, holding, 1, self.full()) },
+            VaultPhase::Praying { progress } => VaultPhase::Praying { progress },
             VaultPhase::Granted { ticks } if ticks as u32 + 1 >= (OPEN_TICKS + CLOSE_TICKS).get() => VaultPhase::Spent,
             VaultPhase::Granted { ticks } => VaultPhase::Granted { ticks: ticks + 1 },
             VaultPhase::Spent => VaultPhase::Spent,
@@ -150,14 +152,14 @@ mod tests {
         assert!(v.is_spent(), "nobody goes in once granted");
         for _ in 0..OPEN_TICKS.get() {
             assert_eq!(v.door_and_top(), (FULL, FULL), "open while she walks out");
-            v.tick(0);
+            v.tick(0, true);
         }
         for _ in 0..CLOSE_TICKS.get() / 2 {
-            v.tick(0);
+            v.tick(0, true);
         }
         assert_eq!(v.door_and_top(), (500, 500), "door and top close together");
         for _ in 0..CLOSE_TICKS.get() {
-            v.tick(0);
+            v.tick(0, true);
         }
         assert_eq!((v.phase, v.door_and_top()), (VaultPhase::Spent, (0, 0)));
     }
@@ -165,15 +167,15 @@ mod tests {
     #[test]
     fn the_gauge_fills_while_held_and_drains_otherwise() {
         let mut v = praying(98);
-        v.tick(1);
-        v.tick(1);
+        v.tick(1, true);
+        v.tick(1, true);
         assert!(v.is_full());
-        v.tick(1);
+        v.tick(1, true);
         assert_eq!(v.phase, VaultPhase::Praying { progress: 100 * STEP }, "no further");
-        v.tick(0);
+        v.tick(0, true);
         assert_eq!((v.phase, v.is_full()), (VaultPhase::Praying { progress: 99 * STEP }, false), "nobody: it drains linearly");
         let mut empty = praying(0);
-        empty.tick(0);
+        empty.tick(0, true);
         assert_eq!(empty.phase, VaultPhase::Praying { progress: 0 });
     }
 

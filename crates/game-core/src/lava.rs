@@ -32,6 +32,7 @@ use crate::time::{Countdown, Tick, Ticks};
 use crate::unit::{cell_of, UnitKind};
 use pop3_format::WORLD_UNITS_PER_CELL;
 use std::collections::HashSet;
+use crate::tribes::Owner;
 
 /// A cell's starting intensity ("its own 0xC4 starting value"), and the threshold a flowing cell must reach to
 /// spread further itself.
@@ -108,14 +109,14 @@ pub struct Lava {
 
 /// Earthquake's own fissure, lit by tribe `owner` at `at` (world units, its nominal position for the map/effect
 /// list only), covering `cells` ("lava square", several approximated as one shared-blend patch: see module doc).
-pub fn effect(owner: u8, at: (u16, u16), cells: Vec<(i32, i32)>) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: (u16, u16), cells: Vec<(i32, i32)>) -> Effect {
     let cells = cells.into_iter().map(|pos| FlowCell { pos, blend: MATURE_BLEND, arrival: None }).collect();
     Effect::new(owner, at, Countdown::new(Ticks::new(STATIC_LIFETIME_TURNS)), EffectKind::Lava(Lava { cells, mode: Mode::Static }))
 }
 
 /// Volcano's own flow, lit by tribe `owner` once the cone finishes rising, seeded over `INITIAL_RADIUS_CELLS`
 /// around `at` (world units) on a `size`-cell torus.
-pub fn flowing(owner: u8, at: (u16, u16), size: i32) -> Effect {
+pub fn flowing(owner: impl Into<Owner>, at: (u16, u16), size: i32) -> Effect {
     let cells = disc(at, INITIAL_RADIUS_CELLS, size).into_iter().map(|pos| FlowCell { pos, blend: MATURE_BLEND, arrival: None }).collect();
     let phase = Phase::Growing { accumulator: 0, left: Countdown::new(Ticks::new(GROWTH_TURNS)) };
     Effect::new(owner, at, Countdown::new(Ticks::new(TOTAL_FLOW_TURNS)), EffectKind::Lava(Lava { cells, mode: Mode::Flowing(phase) }))
@@ -172,7 +173,7 @@ impl Lava {
 
     /// One turn at `now`, cast by `owner`: grows or fades, then ignites whoever (or whatever) stands on a
     /// still-hot cell.
-    pub fn turn(&mut self, now: Tick, owner: u8, world: &GameMap) -> Vec<WorldEvent> {
+    pub fn turn(&mut self, now: Tick, owner: Owner, world: &GameMap) -> Vec<WorldEvent> {
         let size = world.terrain.size() as i32;
         let mut events = match &mut self.mode {
             Mode::Static => {
@@ -240,7 +241,7 @@ impl Lava {
 
     /// Every cell still hot enough (`IGNITE_BLEND`) sets fire to whoever and whatever is on it, and scares anyone
     /// within `PANIC_RADIUS_CELLS` of it too.
-    fn ignite(&self, owner: u8, world: &GameMap, size: i32) -> Vec<WorldEvent> {
+    fn ignite(&self, owner: Owner, world: &GameMap, size: i32) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         let hot: Vec<(i32, i32)> = self.cells.iter().filter(|c| c.blend > IGNITE_BLEND).map(|c| c.pos).collect();
         for &pos in &hot {
@@ -265,7 +266,7 @@ impl Lava {
     /// themselves) but that's harmless: `Unit::panic` backs off whenever `takes_orders` is false, which `OnFire`
     /// already excludes, so it never overrides the burn. A unit that panics *out of* range and wanders back onto a
     /// hot cell catches fire there the normal way, next turn's `ignite` pass.
-    fn panic_nearby(&self, owner: u8, world: &GameMap, hot: &[(i32, i32)], size: i32) -> Vec<WorldEvent> {
+    fn panic_nearby(&self, owner: Owner, world: &GameMap, hot: &[(i32, i32)], size: i32) -> Vec<WorldEvent> {
         let halo: HashSet<(i32, i32)> = hot.iter().flat_map(|&pos| disc_cells(pos, PANIC_RADIUS_CELLS, size)).collect();
         world
             .units
@@ -297,6 +298,7 @@ pub fn disc(at: (u16, u16), radius_cells: f32, size: i32) -> Vec<(i32, i32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::building::{Building, BuildingKind};
     use crate::id::Id;
     use crate::status::{Timed, SHIELD_STEPS};
@@ -330,14 +332,14 @@ mod tests {
     #[test]
     fn ignites_everyone_on_its_cells_any_tribe_shielded_or_inside_a_building_but_spares_the_casters_shaman() {
         let mut map = bare();
-        map.add_effect(effect(0, AT, vec![(10, 20)]));
-        let own = map.spawn(0, UnitKind::Brave, AT).id;
-        let foe = map.spawn(1, UnitKind::Brave, AT).id;
-        let shielded = map.spawn(1, UnitKind::Brave, AT).id;
+        map.add_effect(effect(TribeId::Blue, AT, vec![(10, 20)]));
+        let own = map.spawn(TribeId::Blue, UnitKind::Brave, AT).id;
+        let foe = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
+        let shielded = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
         map.unit_mut(shielded).unwrap().statuses.shield = Timed::steps(SHIELD_STEPS);
-        let inside = map.spawn(1, UnitKind::Brave, AT).id;
+        let inside = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
         map.unit_mut(inside).unwrap().inside = Some(crate::unit::Inside { building: Id::from_raw(999), door: AT });
-        let shaman = map.spawn(0, UnitKind::Shaman, AT).id;
+        let shaman = map.spawn(TribeId::Blue, UnitKind::Shaman, AT).id;
         map.tick();
         for id in [own, foe, shielded, inside] {
             assert!(matches!(map.unit(id).unwrap().action, Action::OnFire { .. }), "none spared, caught fire not killed outright: {id:?}");
@@ -352,9 +354,9 @@ mod tests {
     #[test]
     fn panics_anyone_within_panic_radius_cells_of_a_hot_cell_not_only_whoever_stands_on_it() {
         let mut map = bare();
-        map.add_effect(effect(0, AT, vec![(10, 20)]));
-        let near = map.spawn(1, UnitKind::Brave, cell_pos((11, 20))).id;
-        let far = map.spawn(1, UnitKind::Brave, cell_pos((14, 20))).id;
+        map.add_effect(effect(TribeId::Blue, AT, vec![(10, 20)]));
+        let near = map.spawn(TribeId::Red, UnitKind::Brave, cell_pos((11, 20))).id;
+        let far = map.spawn(TribeId::Red, UnitKind::Brave, cell_pos((14, 20))).id;
         map.tick();
         assert!(matches!(map.unit(near).unwrap().action, Action::Panicking { .. }), "scared by the heat alone, one cell away");
         assert!(!matches!(map.unit(near).unwrap().action, Action::OnFire { .. }), "scared, not burned: never stood on the hot cell");
@@ -364,11 +366,11 @@ mod tests {
     #[test]
     fn a_shield_does_not_block_the_panic_halo_but_the_casters_own_shaman_is_still_spared() {
         let mut map = bare();
-        map.add_effect(effect(0, AT, vec![(10, 20)]));
+        map.add_effect(effect(TribeId::Blue, AT, vec![(10, 20)]));
         let near = cell_pos((11, 20));
-        let shielded = map.spawn(1, UnitKind::Brave, near).id;
+        let shielded = map.spawn(TribeId::Red, UnitKind::Brave, near).id;
         map.unit_mut(shielded).unwrap().statuses.shield = Timed::steps(SHIELD_STEPS);
-        let shaman = map.spawn(0, UnitKind::Shaman, near).id;
+        let shaman = map.spawn(TribeId::Blue, UnitKind::Shaman, near).id;
         map.tick();
         assert!(matches!(map.unit(shielded).unwrap().action, Action::Panicking { .. }), "a shield doesn't block it, like lava's own ignite");
         assert!(!matches!(map.unit(shaman).unwrap().action, Action::Panicking { .. }), "the caster's own shaman is spared");
@@ -377,8 +379,8 @@ mod tests {
     #[test]
     fn never_kills_outright_only_catches_fire() {
         let mut map = bare();
-        map.add_effect(effect(0, AT, vec![(10, 20)]));
-        let unit = map.spawn(1, UnitKind::Brave, AT).id;
+        map.add_effect(effect(TribeId::Blue, AT, vec![(10, 20)]));
+        let unit = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
         map.tick();
         assert!(map.unit(unit).unwrap().is_alive(), "set alight, not struck dead");
     }
@@ -386,9 +388,9 @@ mod tests {
     #[test]
     fn sets_a_building_and_a_tree_on_its_cells_alight() {
         let mut map = bare();
-        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 1, AT.0 - 256, AT.1 - 256, 0));
+        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, AT.0 - 256, AT.1 - 256, 0));
         map.trees.push(Tree::new((10, 20), 1, 2));
-        map.add_effect(effect(0, AT, vec![(10, 20)]));
+        map.add_effect(effect(TribeId::Blue, AT, vec![(10, 20)]));
         map.tick();
         assert!(map.building(hut).unwrap().burning.is_some(), "the building catches fire");
         assert_eq!(map.trees[0].wood(), 0, "the tree is burning: no wood while it does");
@@ -397,7 +399,7 @@ mod tests {
     #[test]
     fn a_static_patch_decays_and_is_gone_once_below_gone_blend() {
         let mut map = bare();
-        let id = map.add_effect(effect(0, AT, vec![(10, 20)]));
+        let id = map.add_effect(effect(TribeId::Blue, AT, vec![(10, 20)]));
         map.run(Ticks::new(STATIC_LIFETIME_TURNS));
         assert!(!map.effects.contains(id), "decayed away");
     }
@@ -406,7 +408,7 @@ mod tests {
     fn a_static_patch_leaves_the_same_permanent_ash_scorch_once_its_cells_cool() {
         let mut map = bare();
         let cell = (cell_of(AT.0), cell_of(AT.1));
-        map.add_effect(effect(0, AT, vec![cell]));
+        map.add_effect(effect(TribeId::Blue, AT, vec![cell]));
         let turns_to_cool = (MATURE_BLEND - GONE_BLEND) as u32 / STATIC_DECAY as u32 + 1;
         map.run(Ticks::new(turns_to_cool));
         assert!(!map.ashes.buildable(cell), "ash left behind, same as a flowing patch's own");
@@ -415,7 +417,7 @@ mod tests {
     #[test]
     fn cells_lit_reports_each_cell_s_own_blend_starting_at_mature_with_no_arrival() {
         let mut map = bare();
-        let id = map.add_effect(effect(0, AT, vec![(10, 20)]));
+        let id = map.add_effect(effect(TribeId::Blue, AT, vec![(10, 20)]));
         let lit = { let EffectKind::Lava(lava) = &map.effects.get(id).unwrap().kind else { panic!("not lava") }; lava.cells_lit() };
         assert_eq!(lit, vec![((10, 20), MATURE_BLEND, None)]);
     }
@@ -423,7 +425,7 @@ mod tests {
     #[test]
     fn the_initial_seed_disc_carries_no_arrival_data() {
         let mut map = bare();
-        let id = map.add_effect(flowing(0, AT, 128));
+        let id = map.add_effect(flowing(TribeId::Blue, AT, 128));
         let lit = { let EffectKind::Lava(lava) = &map.effects.get(id).unwrap().kind else { panic!("not lava") }; lava.cells_lit() };
         assert!(!lit.is_empty());
         assert!(lit.iter().all(|&(_, _, arrival)| arrival.is_none()), "nothing to pour from yet: the seed disc itself");
@@ -437,7 +439,7 @@ mod tests {
         // from exactly one of its cells is unambiguously an actual spread step: the seed's own SE corner,
         // (cx+1, cz+1), is the only seeded cell with (cx+2, cz+2) among its 8 neighbours.
         map.terrain.set(cx + 2, cz + 2, 300);
-        let id = map.add_effect(flowing(0, AT, 128));
+        let id = map.add_effect(flowing(TribeId::Blue, AT, 128));
         map.tick();
         let lit = { let EffectKind::Lava(lava) = &map.effects.get(id).unwrap().kind else { panic!("not lava") }; lava.cells_lit() };
         let (_, _, arrival) = lit.iter().find(|&&(pos, ..)| pos == (cx + 2, cz + 2)).expect("spread there");
@@ -447,10 +449,10 @@ mod tests {
     #[test]
     fn a_static_patch_stops_igniting_once_below_ignite_blend_but_is_not_gone_yet() {
         let mut map = bare();
-        map.add_effect(effect(0, AT, vec![(10, 20)]));
+        map.add_effect(effect(TribeId::Blue, AT, vec![(10, 20)]));
         let turns_to_cool = (MATURE_BLEND - IGNITE_BLEND) as u32 / STATIC_DECAY as u32 + 1;
         map.run(Ticks::new(turns_to_cool));
-        let unit = map.spawn(1, UnitKind::Brave, AT).id;
+        let unit = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
         map.tick();
         assert_eq!(map.unit(unit).unwrap().action, Action::Idle, "too cool to ignite by now");
     }
@@ -463,7 +465,7 @@ mod tests {
         // get added by an actual spread step, from the seed's own edge cells.
         map.terrain.set(cx + 2, cz, 300); // lower, two cells east: within reach of the seed's own eastern edge
         map.terrain.set(cx - 2, cz, 700); // higher, two cells west: never reached
-        let id = map.add_effect(flowing(0, AT, 128));
+        let id = map.add_effect(flowing(TribeId::Blue, AT, 128));
         map.tick();
         let cells = lava_cells(&map, id);
         assert!(cells.contains(&(cx + 2, cz)), "spread downhill, from the seed's own edge");
@@ -482,7 +484,7 @@ mod tests {
         // its still-flat neighbours the very next turn, so it starts spreading onto them too — flat ground does
         // not stay inert for long, confirmed by this growing (never shrinking, during growth) cell count.
         let mut map = bare();
-        let id = map.add_effect(flowing(0, AT, 128));
+        let id = map.add_effect(flowing(TribeId::Blue, AT, 128));
         let seeded = lava_cells(&map, id).len();
         map.run(Ticks::new(10));
         assert!(lava_cells(&map, id).len() > seeded, "grew past its own seed");
@@ -491,7 +493,7 @@ mod tests {
     #[test]
     fn flowing_leaves_a_permanent_ash_scorch_once_it_ends() {
         let mut map = bare();
-        map.add_effect(flowing(0, AT, 128));
+        map.add_effect(flowing(TribeId::Blue, AT, 128));
         let cell = (cell_of(AT.0), cell_of(AT.1));
         map.run(Ticks::new(TOTAL_FLOW_TURNS));
         assert!(!map.ashes.buildable(cell), "ash left behind, nothing builds there");
@@ -507,7 +509,7 @@ mod tests {
         // So the lava's own client-side alpha fade (`fade_progress`) reveals the already-existing ash mark as it
         // fades, instead of bare ground that only turns to ash on the very last tick (module doc).
         let mut map = bare();
-        let id = map.add_effect(flowing(0, AT, 128));
+        let id = map.add_effect(flowing(TribeId::Blue, AT, 128));
         let cell = (cell_of(AT.0), cell_of(AT.1));
         for _ in 0..=GROWTH_TURNS {
             if lava_fade_progress(&map, id).is_some() {
@@ -522,9 +524,9 @@ mod tests {
     #[test]
     fn fade_progress_is_none_while_still_growing_or_static() {
         let mut map = bare();
-        let flow = map.add_effect(flowing(0, AT, 128));
+        let flow = map.add_effect(flowing(TribeId::Blue, AT, 128));
         assert_eq!(lava_fade_progress(&map, flow), None, "still growing");
-        let fissure = map.add_effect(effect(0, AT, vec![(10, 20)]));
+        let fissure = map.add_effect(effect(TribeId::Blue, AT, vec![(10, 20)]));
         map.tick();
         assert_eq!(lava_fade_progress(&map, fissure), None, "static mode never uses this at all");
     }
@@ -532,7 +534,7 @@ mod tests {
     #[test]
     fn fade_progress_runs_from_zero_to_one_across_the_fade_then_goes_back_to_none() {
         let mut map = bare();
-        let id = map.add_effect(flowing(0, AT, 128));
+        let id = map.add_effect(flowing(TribeId::Blue, AT, 128));
         // Growth ends at `GROWTH_TURNS` at the latest (it can end sooner via the accumulator cap): tick one at a
         // time until fading actually starts, rather than assuming exactly which turn that is.
         for _ in 0..=GROWTH_TURNS {

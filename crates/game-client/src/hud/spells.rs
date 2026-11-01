@@ -139,25 +139,14 @@ pub fn short_label(kind: SpellKind) -> &'static str {
 /// The spell to cast when `kind` is aimed at `at` from `origin` (world units: the shaman, or the view on a
 /// god level, `cast_origin`); None for spells not cast on a spot (yet): those go with C.
 pub fn ground_spell(kind: SpellKind, at: (u16, u16), origin: (u16, u16)) -> Option<Spell> {
+    if let Some(spell) = Spell::at_point(kind, at) {
+        return Some(spell);
+    }
     let cell = |(x, z): (u16, u16)| ((x as u32 / WORLD_UNITS_PER_CELL) as i32, (z as u32 / WORLD_UNITS_PER_CELL) as i32);
     match kind {
-        SpellKind::Teleport => Some(Spell::Teleport { to: at }),
-        SpellKind::Blast => Some(Spell::Blast { at }),
-        SpellKind::Lightning => Some(Spell::Lightning { at }),
-        SpellKind::Armageddon => Some(Spell::Armageddon { at }),
-        SpellKind::Swamp => Some(Spell::Swamp { at }),
-        SpellKind::Swarm => Some(Spell::Swarm { at }),
-        SpellKind::Convert => Some(Spell::Convert { at }),
-        SpellKind::Hypnotism => Some(Spell::Hypnotism { at }),
-        SpellKind::Volcano => Some(Spell::Volcano { at }),
-        SpellKind::Firestorm => Some(Spell::Firestorm { at }),
-        SpellKind::Earthquake => Some(Spell::Earthquake { at }),
         SpellKind::LandBridge => Some(Spell::LandBridge { from: cell(origin), to: cell(at) }),
         SpellKind::Flatten => Some(Spell::Flatten { at: game_core::flatten::nearest_point(at) }),
         SpellKind::Erosion => Some(Spell::Erode { at: cell(at) }),
-        SpellKind::MagicalShield => Some(Spell::MagicalShield { at }),
-        SpellKind::Bloodlust => Some(Spell::Bloodlust { at }),
-        SpellKind::Invisibility => Some(Spell::Invisibility { at }),
         _ => None,
     }
 }

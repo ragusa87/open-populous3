@@ -150,7 +150,7 @@ pub fn explode_demo(map: &game_core::map::GameMap, what: &str, ago: u32) -> Opti
 pub fn blast_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
     let at = world_units(Vec2::new(x, z));
-    map.apply(&Command::Cast { player: PLAYER + 1, spell: game_core::spell::Spell::Blast { at } });
+    map.apply(&Command::Cast { player: PLAYER.next(), spell: game_core::spell::Spell::Blast { at } });
     map.run(game_core::time::Ticks::new(ticks));
     true
 }
@@ -159,7 +159,7 @@ pub fn blast_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bo
 /// shows them as they were). False when `at` does not parse.
 pub fn lightning_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
-    map.add_effect(game_core::lightning::effect(PLAYER + 1, world_units(Vec2::new(x, z))));
+    map.add_effect(game_core::lightning::effect(PLAYER.next(), world_units(Vec2::new(x, z))));
     map.run(game_core::time::Ticks::new(ticks));
     true
 }
@@ -168,7 +168,7 @@ pub fn lightning_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -
 /// first kill check). False when `at` does not parse.
 pub fn swamp_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
-    map.add_effect(game_core::swamp::effect(PLAYER + 1, world_units(Vec2::new(x, z))));
+    map.add_effect(game_core::swamp::effect(PLAYER.next(), world_units(Vec2::new(x, z))));
     map.run(game_core::time::Ticks::new(ticks));
     true
 }
@@ -178,7 +178,7 @@ pub fn swamp_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bo
 pub fn convert_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
     let at = world_units(Vec2::new(x, z));
-    map.spawn(255, game_core::unit::UnitKind::Wildman, (at.0.wrapping_add(50), at.1));
+    map.spawn(game_core::tribes::Owner::Wild, game_core::unit::UnitKind::Wildman, (at.0.wrapping_add(50), at.1));
     map.add_effect(game_core::convert::effect(PLAYER, at));
     map.run(game_core::time::Ticks::new(ticks));
     true
@@ -189,7 +189,7 @@ pub fn convert_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> 
 pub fn hypnotism_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
     let at = world_units(Vec2::new(x, z));
-    map.spawn(PLAYER + 1, game_core::unit::UnitKind::Brave, (at.0.wrapping_add(50), at.1));
+    map.spawn(PLAYER.next(), game_core::unit::UnitKind::Brave, (at.0.wrapping_add(50), at.1));
     map.add_effect(game_core::hypnotism::effect(PLAYER, at));
     map.run(game_core::time::Ticks::new(ticks));
     true
@@ -218,12 +218,23 @@ pub fn volcano_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> 
     true
 }
 
+/// `AOD=x,z` (cells): another tribe's Angel of Death cast there, then `ticks` run at once (with `GAME_SPEED=0`:
+/// its meteor fall, ground ripple and spawn blast over the run — the creature itself has no sprite yet,
+/// TODO.md "Angel of Death"). False when `at` does not parse.
+pub fn angel_of_death_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
+    let at = world_units(Vec2::new(x, z));
+    map.add_effect(game_core::angel_of_death::cast(PLAYER.next(), at));
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
 /// `FIRESTORM=x,z` (cells): another tribe's Firestorm effect there, then `ticks` run at once (with `GAME_SPEED=0`:
 /// its fireballs landing over the run). False when `at` does not parse.
 pub fn firestorm_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
     let at = world_units(Vec2::new(x, z));
-    map.add_effect(game_core::firestorm::effect(PLAYER + 1, at));
+    map.add_effect(game_core::firestorm::effect(PLAYER.next(), at));
     map.run(game_core::time::Ticks::new(ticks));
     true
 }
@@ -233,7 +244,7 @@ pub fn firestorm_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -
 pub fn earthquake_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
     let at = world_units(Vec2::new(x, z));
-    map.add_effect(game_core::earthquake::effect(PLAYER + 1, at));
+    map.add_effect(game_core::earthquake::effect(PLAYER.next(), at));
     map.run(game_core::time::Ticks::new(ticks));
     true
 }
@@ -243,7 +254,7 @@ pub fn earthquake_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) 
 pub fn swarm_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
     let at = world_units(Vec2::new(x, z));
-    map.add_effect(game_core::swarm::effect(PLAYER + 1, at));
+    map.add_effect(game_core::swarm::effect(PLAYER.next(), at));
     map.run(game_core::time::Ticks::new(ticks));
     true
 }
@@ -278,7 +289,7 @@ pub fn bridge_demo(map: &mut game_core::map::GameMap, to: &str, ticks: u32) -> b
 /// `at` does not parse.
 pub fn flatten_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some(at) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<i32>().ok()?, z.trim().parse::<i32>().ok()?))) else { return false };
-    let flatten = game_core::flatten::effect(PLAYER + 1, at, &map.terrain);
+    let flatten = game_core::flatten::effect(PLAYER.next(), at, &map.terrain);
     map.add_effect(flatten);
     map.run(game_core::time::Ticks::new(ticks));
     true
@@ -288,7 +299,7 @@ pub fn flatten_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> 
 /// `at` does not parse.
 pub fn erode_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some(at) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<i32>().ok()?, z.trim().parse::<i32>().ok()?))) else { return false };
-    let erode = game_core::erode::effect(PLAYER + 1, at, &map.terrain);
+    let erode = game_core::erode::effect(PLAYER.next(), at, &map.terrain);
     map.add_effect(erode);
     map.run(game_core::time::Ticks::new(ticks));
     true
@@ -609,6 +620,10 @@ fn screenshot(
             let ticks = std::env::var("VOLCANO_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             volcano_demo(&mut map.0, &at, ticks);
         }
+        if let Ok(at) = std::env::var("AOD") {
+            let ticks = std::env::var("AOD_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            angel_of_death_demo(&mut map.0, &at, ticks);
+        }
         if let Ok(at) = std::env::var("FIRESTORM") {
             let ticks = std::env::var("FIRESTORM_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             firestorm_demo(&mut map.0, &at, ticks);
@@ -806,7 +821,7 @@ mod tests {
         let mut map = game_core::map::GameMap::sandbox_walk();
         assert!(hypnotism_demo(&mut map, "10,10", 1));
         let captured = map.units.iter().find(|u| u.owner == PLAYER && u.statuses.hypnotized.is_on()).unwrap();
-        assert_eq!(captured.statuses.hypnotized_from, Some(PLAYER + 1));
+        assert_eq!(captured.statuses.hypnotized_from, Some(PLAYER.next()));
         assert!(!hypnotism_demo(&mut map, "here", 0));
     }
 
@@ -816,6 +831,14 @@ mod tests {
         assert!(volcano_demo(&mut map, "10,10", game_core::volcano::RUMBLE_TURNS + game_core::volcano::RISE_TURNS));
         assert_eq!(map.terrain.get(10, 10), 0, "the crater floor, fully risen");
         assert!(!volcano_demo(&mut map, "here", 0));
+    }
+
+    #[test]
+    fn angel_of_death_demo_falls_ripples_and_spawns_the_creature_once_run() {
+        let mut map = game_core::map::GameMap::sandbox_walk();
+        assert!(angel_of_death_demo(&mut map, "10,10", game_core::angel_of_death::FALL_TICKS.get()));
+        assert!(map.units.iter().any(|u| u.kind == game_core::unit::UnitKind::AngelOfDeath), "the creature appears");
+        assert!(!angel_of_death_demo(&mut map, "here", 0));
     }
 
     #[test]

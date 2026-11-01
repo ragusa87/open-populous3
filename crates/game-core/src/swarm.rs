@@ -4,8 +4,9 @@
 //! its cast point ("home") for `DURATION` turns: beyond `LEASH_CELLS` of it, it steers back; otherwise it
 //! picks a fresh random heading every so many turns. On its own rhythms it stings whoever it currently
 //! covers: every `STING_EVERY` turns, enemies in its 3 x 3 cells (reusing `swamp::cells`) take
-//! `PERSON_DAMAGE` and panic (no friendly fire, shamans immune - a broader exemption than Lightning/Lava's
-//! own "only the caster's own shaman", confirmed by row 5's plain "shamans... immune"), and an enemy
+//! `PERSON_DAMAGE` and panic (no friendly fire, shamans and Angels of Death immune - a broader exemption than
+//! Lightning/Lava's own "only the caster's own shaman", confirmed by row 5's plain "shamans... immune" and,
+//! for the angel, TODO.md "Units": "shamans/angels excluded by a type table"), and an enemy
 //! vehicle there gets its passengers put out (`WorldEvent::PutOut`, TODO.md "Units" - "Swarm spell, on
 //! people aboard a vehicle"); every `RAID_EVERY` turns, while it still has one left (`MAX_RAIDS`), an enemy
 //! building there with people inside is raided (`WorldEvent::Raid`, its occupants also stung).
@@ -17,6 +18,7 @@ use crate::map::{GameMap, Lcg};
 use crate::time::{Countdown, Ticks};
 use crate::unit::{cell_of, torus_delta, UnitKind};
 use pop3_format::WORLD_UNITS_PER_CELL;
+use crate::tribes::Owner;
 
 /// 200 turns, 16.7 s [exe].
 pub const DURATION: Ticks = Ticks::new(200);
@@ -48,7 +50,7 @@ pub struct Swarm {
 }
 
 /// Cast by tribe `owner` at `at` (world units): its home, and its own starting position.
-pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: (u16, u16)) -> Effect {
     let swarm = Swarm {
         x: at.0,
         z: at.1,
@@ -69,7 +71,7 @@ impl Swarm {
 
     /// One turn at `home` (its cast point), cast by `owner`: wanders one step, then stings and raids on
     /// their own rhythms.
-    pub fn turn(&mut self, home: (u16, u16), owner: u8, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
+    pub fn turn(&mut self, home: (u16, u16), owner: Owner, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         self.wander(home, rng);
         let mut events = Vec::new();
         if self.sting.tick() {
@@ -102,10 +104,10 @@ impl Swarm {
 
     /// Enemies in its current 3 x 3 cells sting (damage + panic unless shielded), spying no shaman nor the
     /// caster's own tribe; an enemy vehicle there with passengers gets them put out.
-    fn sting_at(&self, owner: u8, world: &GameMap) -> Vec<WorldEvent> {
+    fn sting_at(&self, owner: Owner, world: &GameMap) -> Vec<WorldEvent> {
         let cells = crate::swamp::cells((self.x, self.z), world.terrain.size() as i32);
         let mut events = Vec::new();
-        for u in world.units.iter().filter(|u| u.is_alive() && u.in_the_open() && u.owner != owner && u.kind != UnitKind::Shaman && cells.contains(&u.cell())) {
+        for u in world.units.iter().filter(|u| u.is_alive() && u.in_the_open() && u.owner != owner && !matches!(u.kind, UnitKind::Shaman | UnitKind::AngelOfDeath) && cells.contains(&u.cell())) {
             events.push(WorldEvent::Damage { unit: u.id, amount: PERSON_DAMAGE, kind: DamageKind::Swarm, from: Some(owner) });
             if !u.statuses.shield.is_on() {
                 events.push(WorldEvent::Panic { unit: u.id });
@@ -119,7 +121,7 @@ impl Swarm {
 
     /// An enemy building with people inside, in its current 3 x 3 cells, if any: raided (its occupants
     /// thrown out, each also stung), one fewer raid left.
-    fn raid_at(&mut self, owner: u8, world: &GameMap) -> Vec<WorldEvent> {
+    fn raid_at(&mut self, owner: Owner, world: &GameMap) -> Vec<WorldEvent> {
         if self.raids_left == 0 {
             return Vec::new();
         }
@@ -145,6 +147,7 @@ impl Swarm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::building::{Building, BuildingKind};
     use crate::command::Command;
     use crate::spell::Spell;
@@ -160,7 +163,7 @@ mod tests {
     }
 
     fn bare_swarm() -> Swarm {
-        let Effect { kind: EffectKind::Swarm(swarm), .. } = effect(0, HOME) else { unreachable!() };
+        let Effect { kind: EffectKind::Swarm(swarm), .. } = effect(TribeId::Blue, HOME) else { unreachable!() };
         swarm
     }
 
@@ -186,31 +189,32 @@ mod tests {
     }
 
     #[test]
-    fn stings_enemies_in_reach_spares_the_casters_tribe_and_any_shaman() {
+    fn stings_enemies_in_reach_spares_the_casters_tribe_any_shaman_and_any_angel_of_death() {
         let mut map = bare();
-        let enemy = map.spawn(1, UnitKind::Brave, HOME).id;
-        let own = map.spawn(0, UnitKind::Brave, HOME).id;
-        let shaman = map.spawn(1, UnitKind::Shaman, HOME).id;
-        let far = map.spawn(1, UnitKind::Brave, (HOME.0.wrapping_add(10 * WORLD_UNITS_PER_CELL as u16), HOME.1)).id;
-        let shielded = map.spawn(1, UnitKind::Brave, HOME).id;
+        let enemy = map.spawn(TribeId::Red, UnitKind::Brave, HOME).id;
+        let own = map.spawn(TribeId::Blue, UnitKind::Brave, HOME).id;
+        let shaman = map.spawn(TribeId::Red, UnitKind::Shaman, HOME).id;
+        let angel = map.spawn(TribeId::Red, UnitKind::AngelOfDeath, HOME).id;
+        let far = map.spawn(TribeId::Red, UnitKind::Brave, (HOME.0.wrapping_add(10 * WORLD_UNITS_PER_CELL as u16), HOME.1)).id;
+        let shielded = map.spawn(TribeId::Red, UnitKind::Brave, HOME).id;
         map.unit_mut(shielded).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
-        let events = bare_swarm().sting_at(0, &map);
+        let events = bare_swarm().sting_at(Owner::Tribe(TribeId::Blue), &map);
         let damaged: Vec<_> = events.iter().filter_map(|e| if let WorldEvent::Damage { unit, kind, .. } = e { Some((*unit, *kind)) } else { None }).collect();
         let panicked: Vec<_> = events.iter().filter_map(|e| if let WorldEvent::Panic { unit } = e { Some(*unit) } else { None }).collect();
-        assert_eq!(damaged, [(enemy, DamageKind::Swarm), (shielded, DamageKind::Swarm)], "only the enemy braves, not its own tribe, a shaman, or one out of reach");
+        assert_eq!(damaged, [(enemy, DamageKind::Swarm), (shielded, DamageKind::Swarm)], "only the enemy braves, not its own tribe, a shaman, an angel, or one out of reach");
         assert_eq!(panicked, [enemy], "the shielded one panics too, only `GameMap::damage` (not this) gates its actual damage");
-        assert!(!damaged.iter().any(|&(u, _)| u == own || u == shaman || u == far));
+        assert!(!damaged.iter().any(|&(u, _)| u == own || u == shaman || u == angel || u == far));
     }
 
     #[test]
     fn evicts_an_enemy_vehicles_passengers_in_reach() {
         let mut map = bare();
-        let enemy = map.add_vehicle(Vehicle::new(VehicleKind::Boat, 1, HOME, crate::angle::Angle::ZERO));
+        let enemy = map.add_vehicle(Vehicle::new(VehicleKind::Boat, TribeId::Red, HOME, crate::angle::Angle::ZERO));
         map.vehicles.get_mut(enemy).unwrap().passengers.push(crate::id::Id::from_raw(1));
-        let own = map.add_vehicle(Vehicle::new(VehicleKind::Boat, 0, HOME, crate::angle::Angle::ZERO));
+        let own = map.add_vehicle(Vehicle::new(VehicleKind::Boat, TribeId::Blue, HOME, crate::angle::Angle::ZERO));
         map.vehicles.get_mut(own).unwrap().passengers.push(crate::id::Id::from_raw(2));
-        let empty = map.add_vehicle(Vehicle::new(VehicleKind::Boat, 1, HOME, crate::angle::Angle::ZERO));
-        let events = bare_swarm().sting_at(0, &map);
+        let empty = map.add_vehicle(Vehicle::new(VehicleKind::Boat, TribeId::Red, HOME, crate::angle::Angle::ZERO));
+        let events = bare_swarm().sting_at(Owner::Tribe(TribeId::Blue), &map);
         assert_eq!(events, vec![WorldEvent::PutOut { vehicle: enemy }]);
         let _ = empty;
     }
@@ -218,39 +222,39 @@ mod tests {
     #[test]
     fn raids_an_enemy_building_with_people_inside_up_to_max_raids_times() {
         let mut map = bare();
-        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 1, HOME.0, HOME.1, 0));
-        let inside = map.spawn(1, UnitKind::Brave, HOME).id;
+        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, HOME.0, HOME.1, 0));
+        let inside = map.spawn(TribeId::Red, UnitKind::Brave, HOME).id;
         map.unit_mut(inside).unwrap().inside = Some(Inside { building: hut, door: HOME });
         let i = map.building_index(hut).unwrap();
         map.buildings[i].inside = 1;
         let mut swarm = bare_swarm();
         for n in 0..MAX_RAIDS {
-            let events = swarm.raid_at(0, &map);
-            assert_eq!(events, vec![WorldEvent::Raid { building: hut }, WorldEvent::Damage { unit: inside, amount: PERSON_DAMAGE, kind: DamageKind::Swarm, from: Some(0) }], "raid {n}");
+            let events = swarm.raid_at(Owner::Tribe(TribeId::Blue), &map);
+            assert_eq!(events, vec![WorldEvent::Raid { building: hut }, WorldEvent::Damage { unit: inside, amount: PERSON_DAMAGE, kind: DamageKind::Swarm, from: Some(Owner::Tribe(TribeId::Blue)) }], "raid {n}");
         }
         assert_eq!(swarm.raids_left, 0);
-        assert_eq!(swarm.raid_at(0, &map), Vec::new(), "none left");
+        assert_eq!(swarm.raid_at(Owner::Tribe(TribeId::Blue), &map), Vec::new(), "none left");
     }
 
     #[test]
     fn no_target_in_reach_raids_nothing() {
         let mut map = bare();
-        map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 1, HOME.0, HOME.1, 0)); // empty: nobody inside
+        map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, HOME.0, HOME.1, 0)); // empty: nobody inside
         let mut swarm = bare_swarm();
-        assert_eq!(swarm.raid_at(0, &map), Vec::new());
+        assert_eq!(swarm.raid_at(Owner::Tribe(TribeId::Blue), &map), Vec::new());
         assert_eq!(swarm.raids_left, MAX_RAIDS, "untouched: nothing to raid");
     }
 
     #[test]
     fn turning_moves_it_and_can_sting() {
         let mut map = bare();
-        let enemy = Unit::new(crate::id::Id::from_raw(900), 1, UnitKind::Brave, HOME);
+        let enemy = Unit::new(crate::id::Id::from_raw(900), TribeId::Red, UnitKind::Brave, HOME);
         map.units.push(enemy);
         let mut swarm = bare_swarm();
         let mut rng = Lcg(3);
         let mut any_events = false;
         for _ in 0..STING_EVERY.get() {
-            any_events |= !swarm.turn(HOME, 0, &map, &mut rng).is_empty();
+            any_events |= !swarm.turn(HOME, Owner::Tribe(TribeId::Blue), &map, &mut rng).is_empty();
         }
         assert!(swarm.pos() != HOME, "it moved");
         assert!(any_events, "stung on its own rhythm");
@@ -261,7 +265,7 @@ mod tests {
         let mut map = GameMap::sandbox_walk();
         map.spell_books[0].set(SpellKind::Swarm, Availability::Unlimited);
         let at = (map.units[0].x, map.units[0].z);
-        map.apply(&Command::Cast { player: 0, spell: Spell::Swarm { at } });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Swarm { at } });
         map.run(crate::unit::CAST_RELEASE);
         assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, EffectKind::Swarm(_))));
     }

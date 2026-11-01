@@ -100,7 +100,7 @@ mod tests {
     fn the_line_names_the_running_job_with_its_steps() {
         let progress = Progress::default();
         (0..12).for_each(|_| progress.step());
-        let status = BootStatus(vec![JobStatus { label: "Unit sprites", progress, total: 28, phase: JobPhase::Running }]);
+        let status = BootStatus(vec![JobStatus { label: "Unit sprites", progress, total: 28, phase: JobPhase::Running, install_progress: Progress::default(), install_total: 1 }]);
         let (fraction, line) = screen_text(Stage::Boot, &status);
         assert_eq!(line, "Unit sprites 12/28");
         assert!((fraction - 12.0 / 28.0).abs() < 1e-6);

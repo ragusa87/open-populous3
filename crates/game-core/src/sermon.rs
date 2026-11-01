@@ -8,6 +8,7 @@ use crate::headcount::MAX_POPULATION;
 use crate::map::{GameMap, Lcg};
 use crate::time::{Countdown, Ticks};
 use crate::unit::{Action, Target, Unit, UnitId, UnitKind};
+use crate::tribes::TribeId;
 
 /// Turns between two chances of conversion, and before the first (constant.dat value, halved for the first:
 /// "Preacher conversion" [exe]).
@@ -155,7 +156,10 @@ impl GameMap {
                 self.units[i].action = Action::Listening { preacher, sitting, left, attempts };
                 continue;
             }
-            if self.rng.next_u32() % CONV_CHANCE == 1 && self.housing(p_owner).population < MAX_POPULATION {
+            if let Some(p_owner) = p_owner.tribe()
+                && self.rng.next_u32() % CONV_CHANCE == 1
+                && self.housing(p_owner).population < MAX_POPULATION
+            {
                 events.push(WorldEvent::ChangeOwner { unit: l, tribe: p_owner });
                 continue;
             }
@@ -166,7 +170,7 @@ impl GameMap {
 
     /// The unit `unit` joins `tribe` (`WorldEvent::ChangeOwner`): as the original's new person in its place, it keeps
     /// its kind and place and starts afresh (`Unit::change_owner`).
-    pub(crate) fn change_owner(&mut self, unit: UnitId, tribe: u8) {
+    pub(crate) fn change_owner(&mut self, unit: UnitId, tribe: TribeId) {
         if let Some(u) = self.unit_mut(unit).filter(|u| u.is_alive()) {
             u.change_owner(tribe);
         }
@@ -176,15 +180,16 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::Owner;
 
     /// A preacher of tribe 0, and `kinds` of tribe 1 one cell east of it, in a corner of the island away from the
     /// sandbox's people.
     fn sermon_scene(kinds: &[UnitKind]) -> (GameMap, UnitId, Vec<UnitId>) {
         let mut map = GameMap::sandbox_units().seeded(11);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z.wrapping_sub(15 * 512));
-        let p = map.spawn(0, UnitKind::Preacher, at).id;
-        let others = kinds.iter().enumerate().map(|(k, &kind)| map.spawn(1, kind, (at.0.wrapping_add(512), at.1.wrapping_add(100 * k as u16))).id).collect();
+        let p = map.spawn(TribeId::Blue, UnitKind::Preacher, at).id;
+        let others = kinds.iter().enumerate().map(|(k, &kind)| map.spawn(TribeId::Red, kind, (at.0.wrapping_add(512), at.1.wrapping_add(100 * k as u16))).id).collect();
         (map, p, others)
     }
 
@@ -215,7 +220,7 @@ mod tests {
         until(&mut map, 4, |m| listening(m, w)).expect("sat down");
         assert_eq!(map.unit(p).unwrap().action, Action::Preaching);
         map.damage(w, 300, crate::effect::DamageKind::Melee, None);
-        let took = until(&mut map, 20_000, |m| m.unit(w).is_some_and(|u| u.owner == 0)).expect("converted");
+        let took = until(&mut map, 20_000, |m| m.unit(w).is_some_and(|u| u.owner == Owner::Tribe(TribeId::Blue))).expect("converted");
         assert!(took >= CONV_FIRST_CHECK - CONV_FIRST_CHECK / 16, "not before the first check");
         let u = map.unit(w).unwrap();
         assert_eq!((u.kind, u.action, u.health.is_full()), (UnitKind::Warrior, Action::Idle, true), "a warrior still, idle, as new");
@@ -227,14 +232,14 @@ mod tests {
         let b = others[0];
         until(&mut map, 4, |m| listening(m, b)).expect("sat down");
         assert!(map.unit(b).unwrap().locked());
-        map.apply(&crate::command::Command::OrderUnit { player: 1, unit: b, order: crate::unit::Order::MoveTo { x: 0, z: 0 } });
+        map.apply(&crate::command::Command::OrderUnit { player: TribeId::Red, unit: b, order: crate::unit::Order::MoveTo { x: 0, z: 0 } });
         assert!(listening(&map, b), "no order reaches it");
         let u = map.unit_mut(b).unwrap();
         u.health = crate::health::Health::new(10, u.health.max());
         u.statuses.shield = crate::status::Timed::steps(3);
-        u.change_owner(0);
+        u.change_owner(TribeId::Blue);
         let u = map.unit(b).unwrap();
-        assert_eq!((u.owner, u.action, u.health.is_full(), u.statuses.shield.is_on(), u.locked()), (0, Action::Idle, true, false, false));
+        assert_eq!((u.owner, u.action, u.health.is_full(), u.statuses.shield.is_on(), u.locked()), (Owner::Tribe(TribeId::Blue), Action::Idle, true, false, false));
     }
 
     #[test]
@@ -242,9 +247,9 @@ mod tests {
         let (mut map, _, others) = sermon_scene(&[UnitKind::Wildman, UnitKind::Brave]);
         let brave = others[1];
         let at = map.unit(brave).map(|u| (u.x, u.z)).unwrap();
-        let balloon = map.add_vehicle(crate::vehicle::Vehicle::new(crate::vehicle::VehicleKind::Balloon, 1, at, crate::angle::Angle::new(0)));
+        let balloon = map.add_vehicle(crate::vehicle::Vehicle::new(crate::vehicle::VehicleKind::Balloon, TribeId::Red, at, crate::angle::Angle::new(0)));
         map.unit_mut(brave).unwrap().aboard = Some(balloon);
-        map.vehicles.get_mut(balloon).unwrap().seat(brave, 1);
+        map.vehicles.get_mut(balloon).unwrap().seat(brave, TribeId::Red);
         map.run(Ticks::new(10));
         assert!(!listening(&map, others[0]) && !listening(&map, brave));
     }
@@ -261,7 +266,7 @@ mod tests {
     /// A warrior of tribe 2 right next to `target`, attacking it, and the challenge started at once.
     fn challenged(map: &mut GameMap, target: UnitId) {
         let at = map.unit(target).map(|u| (u.x.wrapping_add(100), u.z)).unwrap();
-        let foe = map.spawn(2, UnitKind::Warrior, at);
+        let foe = map.spawn(TribeId::Yellow, UnitKind::Warrior, at);
         foe.action = Action::Attacking { target: Target::Unit(target), to: at };
         map.start_challenges();
         assert!(matches!(map.unit(target).unwrap().action, Action::Challenge { .. }), "challenged");
@@ -282,12 +287,12 @@ mod tests {
     }
 
     /// A bolt of tribe `owner`, thrown from 20 cells west, about to strike `target`.
-    fn bolt_at(map: &mut GameMap, owner: u8, target: UnitId) {
+    fn bolt_at(map: &mut GameMap, owner: TribeId, target: UnitId) {
         let t = map.unit(target).map(|u| (u.x, u.z)).unwrap();
         let thrower = map.spawn(owner, UnitKind::Firewarrior, (t.0.wrapping_sub(20 * 512), t.1)).id;
         let height = map.terrain.height_at(t.0 as u32, t.1 as u32, pop3_format::WORLD_UNITS_PER_CELL) + crate::firebolt::BOLT_RISE;
         let at = (t.0.wrapping_sub(100), t.1);
-        let bolt = crate::firebolt::Firebolt { owner, thrower, target: Target::Unit(target), at, height, aim: (t.0, t.1, height), hits: true, bloodlusted: false, from_tower: false };
+        let bolt = crate::firebolt::Firebolt { owner: Owner::Tribe(owner), thrower, target: Target::Unit(target), at, height, aim: (t.0, t.1, height), hits: true, bloodlusted: false, from_tower: false };
         let id = map.new_id_of();
         map.bolts.insert(id, bolt);
     }
@@ -306,7 +311,7 @@ mod tests {
             map.rng = Lcg(seed);
             let b = others[0];
             until(&mut map, 4, |m| listening(m, b)).expect("sat down");
-            bolt_at(&mut map, 1, p);
+            bolt_at(&mut map, TribeId::Red, p);
             until(&mut map, 3, |m| m.unit(p).unwrap().thrown()).expect("thrown by the bolt");
             assert!(matches!(map.unit(b).unwrap().action, Action::Attacking { target: Target::Unit(t), .. } if t == p), "the brave turns on it");
             let fought = |m: &GameMap| matches!(m.unit(p).unwrap().action, Action::Challenge { .. } | Action::Melee { .. });
@@ -323,7 +328,7 @@ mod tests {
         until(&mut map, 4, |m| listening(m, b)).expect("sat down");
         let at = map.unit(p).map(|u| (u.x.wrapping_add(250), u.z)).unwrap();
         (map.unit_mut(b).unwrap().x, map.unit_mut(b).unwrap().z) = at;
-        bolt_at(&mut map, 1, p);
+        bolt_at(&mut map, TribeId::Red, p);
         let fought = |m: &GameMap| matches!(m.unit(p).unwrap().action, Action::Challenge { .. } | Action::Melee { .. });
         until(&mut map, 200, |m| listening(m, b) || fought(m)).expect("one or the other");
         assert!(fought(&map), "a preacher only hops under a bolt: the brave next to it challenges it before its next look");
@@ -345,11 +350,11 @@ mod tests {
         // even ticks), yet its ordered target is already right next to it, and that target already decided (on its
         // own, earlier) to attack the preacher back: this is the exact race the preacher must not lose.
         let mut map = GameMap::sandbox_units().seeded(11);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z.wrapping_sub(15 * 512));
-        let p = map.spawn(0, UnitKind::Preacher, at).id;
-        let brave = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
-        map.apply(&crate::command::Command::OrderUnit { player: 0, unit: p, order: crate::unit::Order::Attack { target: Target::Unit(brave) } });
+        let p = map.spawn(TribeId::Blue, UnitKind::Preacher, at).id;
+        let brave = map.spawn(TribeId::Red, UnitKind::Brave, (at.0.wrapping_add(100), at.1)).id;
+        map.apply(&crate::command::Command::OrderUnit { player: TribeId::Blue, unit: p, order: crate::unit::Order::Attack { target: Target::Unit(brave) } });
         map.unit_mut(brave).unwrap().action = Action::Attacking { target: Target::Unit(p), to: at };
         map.tick();
         assert!(listening(&map, brave), "the preacher converts it on this very tick, despite being off its look rhythm");
@@ -359,12 +364,12 @@ mod tests {
     #[test]
     fn walked_near_an_idle_enemy_on_a_plain_move_order_it_still_converts_it() {
         let mut map = GameMap::sandbox_units().seeded(11);
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z.wrapping_sub(15 * 512));
-        let p = map.spawn(0, UnitKind::Preacher, at).id;
-        let brave = map.spawn(1, UnitKind::Brave, (at.0.wrapping_add(6 * 512), at.1)).id;
+        let p = map.spawn(TribeId::Blue, UnitKind::Preacher, at).id;
+        let brave = map.spawn(TribeId::Red, UnitKind::Brave, (at.0.wrapping_add(6 * 512), at.1)).id;
         let near = (at.0.wrapping_add(5 * 512), at.1);
-        map.apply(&crate::command::Command::OrderUnit { player: 0, unit: p, order: crate::unit::Order::MoveTo { x: near.0, z: near.1 } });
+        map.apply(&crate::command::Command::OrderUnit { player: TribeId::Blue, unit: p, order: crate::unit::Order::MoveTo { x: near.0, z: near.1 } });
         let fought = |m: &GameMap| matches!(m.unit(p).unwrap().action, Action::Challenge { .. } | Action::Melee { .. });
         until(&mut map, 300, |m| listening(m, brave) || fought(m)).expect("one or the other");
         assert!(listening(&map, brave), "walked close enough to preach on a plain move order, not an attack order: the preacher must still convert it, not fight it");

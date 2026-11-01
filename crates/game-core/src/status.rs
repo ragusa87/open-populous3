@@ -71,7 +71,7 @@ pub struct Statuses {
     /// The tribe to revert to once `hypnotized` runs out (`GameMap::revert_expired_hypnosis`), unless that tribe
     /// is wiped out by then (`GameMap::tribe_wiped_out`), when the change stays permanent. Only meaningful while
     /// `hypnotized.is_on()`; `change_owner` (hypnotized away again, or for any other reason) clears both together.
-    pub hypnotized_from: Option<u8>,
+    pub hypnotized_from: Option<crate::tribes::TribeId>,
     /// A Ghost Army copy: no real unit.
     pub ghost: bool,
 }

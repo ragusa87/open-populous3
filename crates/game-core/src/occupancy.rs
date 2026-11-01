@@ -96,6 +96,7 @@ fn building_wood(b: &Building) -> Option<Wood> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::{Owner, TribeId};
     use crate::building::Building;
     use crate::totem::{Totem, TotemKind};
     use crate::unit::Order;
@@ -105,7 +106,7 @@ mod tests {
     }
 
     fn find(map: &GameMap, kind: BuildingKind, stage: impl Fn(Stage) -> bool) -> usize {
-        map.buildings.iter().position(|b| b.owner == 0 && b.kind == kind && stage(b.stage()) && b.inside == 0).unwrap()
+        map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == kind && stage(b.stage()) && b.inside == 0).unwrap()
     }
 
     #[test]
@@ -114,7 +115,7 @@ mod tests {
         let hut = find(&map, BuildingKind::Hut { size: 1 }, |s| s == Stage::Built);
         assert_eq!(map.people_slots(Holder::Building(hut)), Some(People { capacity: 3, filled: Vec::new() }));
         let braves: Vec<UnitId> = map.units.iter().filter(|u| u.kind == crate::unit::UnitKind::Brave && u.inside.is_none() && u.work.is_none()).take(2).map(|u| u.id).collect();
-        for c in map.enter_orders(0, &braves, hut) {
+        for c in map.enter_orders(TribeId::Blue, &braves, hut) {
             map.apply(&c);
         }
         (0..600).find(|_| {
@@ -129,7 +130,7 @@ mod tests {
     #[test]
     fn a_site_holds_its_builders_and_its_wood() {
         let map = sandbox();
-        let i = map.buildings.iter().position(|b| matches!(b.stage(), Stage::UnderConstruction { .. }) && b.owner == 0).unwrap();
+        let i = map.buildings.iter().position(|b| matches!(b.stage(), Stage::UnderConstruction { .. }) && b.owner == Owner::Tribe(TribeId::Blue)).unwrap();
         let b = &map.buildings[i];
         let people = map.people_slots(Holder::Building(i)).unwrap();
         assert_eq!(people.capacity, b.kind.max_braves() as u16);
@@ -138,10 +139,10 @@ mod tests {
 
     #[test]
     fn built_wood_is_all_there_and_buildings_without_wood_show_none() {
-        let built = Building::new(BuildingKind::DrumTower, 0, 0, 0, 0);
+        let built = Building::new(BuildingKind::DrumTower, TribeId::Blue, 0, 0, 0);
         let cost = BuildingKind::DrumTower.wood_cost() as u16;
         assert_eq!(building_wood(&built), Some(Wood { capacity: cost, filled: cost }));
-        assert_eq!(building_wood(&Building::new(BuildingKind::Vault, 255, 0, 0, 0)), None, "never built");
+        assert_eq!(building_wood(&Building::new(BuildingKind::Vault, Owner::Wild, 0, 0, 0)), None, "never built");
     }
 
     #[test]

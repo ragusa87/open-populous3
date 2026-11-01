@@ -21,7 +21,7 @@ pub fn may_attack(attacker: &Unit, target: &Unit) -> bool {
 /// Whether `attacker` may go for the building `b`: another tribe's, one that wears down. Never a neutral building
 /// (a vault of knowledge): those are prayed at.
 pub fn may_attack_building(attacker: &Unit, b: &Building) -> bool {
-    fights(attacker.kind) && attacker.owner != b.owner && (b.owner as usize) < crate::totem::TRIBES && crate::wreck::wear_limit(b.kind).is_some()
+    fights(attacker.kind) && attacker.owner != b.owner && b.owner.tribe().is_some() && crate::wreck::wear_limit(b.kind).is_some()
 }
 
 /// Kinds that take an attack order.
@@ -82,21 +82,22 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::{Owner, TribeId};
     use crate::command::Command;
     use crate::effect::DamageKind;
     use crate::unit::{Order, UnitId};
 
     fn duel(attacker: UnitKind, target: UnitKind) -> (GameMap, UnitId, UnitId) {
         let mut map = GameMap::sandbox_units();
-        let s = map.shaman_of(0).unwrap();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
         let at = (s.x.wrapping_add(1024), s.z);
-        let a = map.spawn(0, attacker, at).id;
-        let t = map.spawn(1, target, (at.0.wrapping_add(6 * 512), at.1)).id;
+        let a = map.spawn(TribeId::Blue, attacker, at).id;
+        let t = map.spawn(TribeId::Red, target, (at.0.wrapping_add(6 * 512), at.1)).id;
         (map, a, t)
     }
 
     fn attack(map: &mut GameMap, a: UnitId, t: UnitId) {
-        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Attack { target: Target::Unit(t) } });
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: a, order: Order::Attack { target: Target::Unit(t) } });
     }
 
     #[test]
@@ -134,7 +135,7 @@ mod tests {
         attack(&mut map, a, t);
         assert!(matches!(map.unit(a).unwrap().action, Action::Attacking { .. }), "an explicit order reaches a wildman");
         let (mut map, a, _) = duel(UnitKind::Brave, UnitKind::Brave);
-        let own = map.spawn(0, UnitKind::Brave, (0, 0)).id;
+        let own = map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0)).id;
         attack(&mut map, a, own);
         assert_eq!(map.unit(a).unwrap().action, Action::Idle);
     }
@@ -142,8 +143,8 @@ mod tests {
     #[test]
     fn neutral_buildings_are_prayed_at_not_attacked() {
         let (mut map, a, _) = duel(UnitKind::Warrior, UnitKind::Brave);
-        let vault = map.add_building(Building::new(crate::building::BuildingKind::Vault, 255, 70 * 512, 70 * 512, 0));
-        let neutral_hut = map.add_building(Building::new(crate::building::BuildingKind::Hut { size: 1 }, 255, 80 * 512, 80 * 512, 0));
+        let vault = map.add_building(Building::new(crate::building::BuildingKind::Vault, Owner::Wild, 70 * 512, 70 * 512, 0));
+        let neutral_hut = map.add_building(Building::new(crate::building::BuildingKind::Hut { size: 1 }, Owner::Wild, 80 * 512, 80 * 512, 0));
         for b in [vault, neutral_hut] {
             map.go_attack(map.unit_index(a).unwrap(), Target::Building(b));
             assert_eq!(map.unit(a).unwrap().action, Action::Idle);
@@ -171,7 +172,7 @@ mod tests {
     #[test]
     fn an_enemy_building_is_attacked_at_its_door() {
         let (mut map, a, _) = duel(UnitKind::Brave, UnitKind::Brave);
-        let id = map.add_building(Building::new(crate::building::BuildingKind::Hut { size: 1 }, 1, 70 * 512, 70 * 512, 0));
+        let id = map.add_building(Building::new(crate::building::BuildingKind::Hut { size: 1 }, TribeId::Red, 70 * 512, 70 * 512, 0));
         let door = map.building(id).unwrap().door();
         map.go_attack(map.unit_index(a).unwrap(), Target::Building(id));
         assert_eq!(map.unit(a).unwrap().action, Action::Attacking { target: Target::Building(id), to: door });

@@ -2,11 +2,14 @@
 //!
 //! Everything here must give identical results on every lockstep peer.
 
+pub mod ai;
 pub mod ai_script;
+pub mod angel_of_death;
 pub mod angle;
 pub mod armageddon;
 pub mod ashes;
 pub mod attack;
+pub mod balance;
 #[cfg(test)]
 mod battle;
 pub mod blast;

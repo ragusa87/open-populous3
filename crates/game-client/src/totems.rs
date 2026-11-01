@@ -19,6 +19,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use crate::sim_time::{ticks_f32, SimNow};
 use game_core::totem::{Totem, TotemKind, HOLD_TICKS, SINK_TICKS, TURN_TICKS};
+use game_core::tribes::TribeId;
 use pop3_format::catalog::{PRAYER_TOTEM, STONE_HEAD, TOTEM, TOTEM_ANIMATED, TOTEM_POLES, WINGED_DEATH_PERCHED, WINGED_DEATH_TOTEM};
 use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
 use std::f32::consts::TAU;
@@ -243,13 +244,13 @@ fn respawn_totems(
         for obj in parts {
             let solid = solid_part(obj);
             match t.kind {
-                TotemKind::Totem => body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&solid, 0)))), Some(StoneRocks { shown: None }), None)),
+                TotemKind::Totem => body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&solid, TribeId::Blue)))), Some(StoneRocks { shown: None }), None)),
                 TotemKind::StoneHead => {
                     let (pedestal, head) = split_head(&solid);
-                    body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&pedestal, 0)))), None, None));
-                    body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&head, 0)))), None, Some(NECK as f32 / cell)));
+                    body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&pedestal, TribeId::Blue)))), None, None));
+                    body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&head, TribeId::Blue)))), None, Some(NECK as f32 / cell)));
                 }
-                _ => body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&solid, 0)))), None, None)),
+                _ => body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&solid, TribeId::Blue)))), None, None)),
             }
             let flames = flame::flame_mesh(obj);
             if !flames.indices.is_empty() {
@@ -310,7 +311,7 @@ fn animate_totems(
                 let shown = (turn * 1000.0) as u16;
                 if r.shown != Some(shown) {
                     r.shown = Some(shown);
-                    meshes.insert(&mesh.0, to_mesh(object_mesh(&twisted(&solid_part(stored), &solid_part(turned), turn), 0))).ok();
+                    meshes.insert(&mesh.0, to_mesh(object_mesh(&twisted(&solid_part(stored), &solid_part(turned), turn), TribeId::Blue))).ok();
                 }
             }
             if let Ok((block, mut tf)) = blocks.get_mut(e) {

@@ -90,12 +90,12 @@ mod tests {
     #[test]
     fn the_strip_counts_against_the_room_and_turns_full() {
         let view = strip_view(&Housing { huts: [3, 2, 1], population: 23 });
-        assert_eq!(view.text, "23 / 26");
-        assert!((view.share - 88.46).abs() < 0.1);
+        assert_eq!(view.text, "23 / 32", "the huts' 26 plus the flat base of 6");
+        assert!((view.share - 71.875).abs() < 0.1);
         assert!(!view.full && !view.over);
-        let at = strip_view(&Housing { huts: [1, 0, 0], population: 3 });
-        assert!(at.full && !at.over);
-        let over = strip_view(&Housing { huts: [0; 3], population: 4 });
-        assert_eq!((over.text.as_str(), over.share, over.full, over.over), ("4 / 0", 100.0, true, true));
+        let at = strip_view(&Housing { huts: [1, 0, 0], population: 9 });
+        assert!(at.full && !at.over, "the hut's 3 plus the flat base of 6");
+        let over = strip_view(&Housing { huts: [0; 3], population: 7 });
+        assert_eq!((over.text.as_str(), over.share, over.full, over.over), ("7 / 6", 100.0, true, true), "the flat base alone, exceeded");
     }
 }

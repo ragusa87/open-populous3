@@ -199,6 +199,7 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::building::Stage;
     use crate::command::Command;
     use crate::time::Tick;
@@ -207,10 +208,10 @@ mod tests {
     /// A hut of tribe 1 and a warrior of tribe 0 ordered to attack it.
     fn siege(kind: UnitKind) -> (GameMap, BuildingId, UnitId) {
         let mut map = GameMap::sandbox_units().seeded(9);
-        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, 1, 70 * 512, 70 * 512, 0));
+        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, 70 * 512, 70 * 512, 0));
         let door = map.building(hut).unwrap().door();
-        let a = map.spawn(0, kind, (door.0.wrapping_add(1024), door.1)).id;
-        map.apply(&Command::OrderUnit { player: 0, unit: a, order: Order::Attack { target: Target::Building(hut) } });
+        let a = map.spawn(TribeId::Blue, kind, (door.0.wrapping_add(1024), door.1)).id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: a, order: Order::Attack { target: Target::Building(hut) } });
         (map, hut, a)
     }
 
@@ -223,7 +224,7 @@ mod tests {
 
     #[test]
     fn wear_fades_and_costs_a_piece_at_its_limit() {
-        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, 1, 0, 0, 0);
+        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, 0, 0, 0);
         let used = hut.used;
         hut.wear_down(10);
         assert_eq!((hut.tend_wear(Tick::from_wire(4)), hut.wear, hut.shaking), (Wear::Nothing, 9, SHAKE_TICKS - 1));
@@ -233,7 +234,7 @@ mod tests {
         assert_eq!(hut.tend_wear(Tick::from_wire(5)), Wear::Hit { destroyed: false });
         assert_eq!((hut.used, hut.wear), (used - 1, 9));
         assert!(hut.repair_delay.is_some());
-        let mut vault = Building::new(BuildingKind::Vault, 1, 0, 0, 0);
+        let mut vault = Building::new(BuildingKind::Vault, TribeId::Red, 0, 0, 0);
         vault.wear_down(u16::MAX);
         assert_eq!(vault.tend_wear(Tick::from_wire(5)), Wear::Nothing, "never worn down");
     }
@@ -256,7 +257,7 @@ mod tests {
     fn hacking_stops_the_instant_the_match_has_ended() {
         let (mut map, hut, a) = siege(UnitKind::Warrior);
         until(&mut map, 300, |m| matches!(m.unit(a).unwrap().action, Action::Hacking { .. })).expect("hacking");
-        map.declare_outcome(Some(0), crate::outcome::Reason::Eliminated);
+        map.declare_outcome(Some(TribeId::Blue), crate::outcome::Reason::Eliminated);
         assert_eq!(map.unit(a).unwrap().action, Action::Idle, "stood down the instant the match ended");
         let wear = map.building(hut).unwrap().wear;
         map.run(crate::time::Ticks::new(500));
@@ -268,7 +269,7 @@ mod tests {
     fn people_inside_are_pulled_out_and_challenged() {
         let (mut map, hut, a) = siege(UnitKind::Brave);
         let door = map.building(hut).unwrap().door();
-        let inside = map.spawn(1, UnitKind::Brave, door).id;
+        let inside = map.spawn(TribeId::Red, UnitKind::Brave, door).id;
         map.unit_mut(inside).unwrap().enter(crate::unit::Inside { building: hut, door }, door);
         until(&mut map, 300, |m| !m.coordinators.challenges.is_empty()).expect("pulled out");
         let (_, c) = map.coordinators.challenges.iter().next().unwrap();
@@ -278,7 +279,7 @@ mod tests {
 
     #[test]
     fn no_repairs_while_the_delay_runs() {
-        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, 1, 0, 0, 0);
+        let mut hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, 0, 0, 0);
         hut.wear_down(2000);
         hut.tend_wear(Tick::from_wire(1));
         let delay = hut.repair_delay.unwrap().left().get();

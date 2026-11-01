@@ -13,6 +13,7 @@ use crate::id::Id;
 use crate::map::{GameMap, Lcg};
 use crate::outcome::Reason;
 use crate::time::Tick;
+use crate::tribes::TribeId;
 use crate::unit::{Action, Unit, UnitId, UnitKind};
 
 /// Armageddon's match. Just the cast target today (for the client's camera, `GameMap::armageddon`) — headcount is
@@ -47,7 +48,7 @@ impl Coordinator for ArmageddonMatch {
 /// and its shaman, if still alive, is struck by lightning (`DamageKind::Lightning`, the ordinary path: blocked by
 /// a shield same as any other lightning strike, pop3-rev-analysis.md "Per spell" 3) - a permanent exit from the
 /// match, not just standing down like `declare_outcome` already does for everyone.
-fn losers(world: &GameMap, winner: u8) -> Vec<WorldEvent> {
+fn losers(world: &GameMap, winner: TribeId) -> Vec<WorldEvent> {
     world
         .tribes
         .all()
@@ -63,8 +64,8 @@ fn losers(world: &GameMap, winner: u8) -> Vec<WorldEvent> {
 /// Placeholder decision rule for v1: the side (alliance group, `Tribes::teams`) with the highest combined headcount
 /// wins; an overall tie (including no tribes at all) is a draw. Replaced by the real rule (whichever side's
 /// shaman(s) are the last standing after an actual fight) once the full mechanic lands.
-fn best_side(world: &GameMap) -> Option<u8> {
-    let mut totals: Vec<(u8, u32)> = world
+fn best_side(world: &GameMap) -> Option<TribeId> {
+    let mut totals: Vec<(TribeId, u32)> = world
         .tribes
         .teams()
         .into_iter()
@@ -105,10 +106,11 @@ impl GameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::Owner;
     use crate::command::Command;
     use crate::spell::Spell;
     use crate::time::Ticks;
-    use crate::tribes::Tribes;
+    use crate::tribes::{TribeId, Tribes};
     use crate::unit::UnitKind;
 
     fn two_tribes() -> GameMap {
@@ -118,8 +120,8 @@ mod tests {
     #[test]
     fn casting_it_cancels_fights_and_starts_exactly_one_match() {
         let mut map = two_tribes();
-        let a = map.spawn(0, UnitKind::Brave, (10_000, 10_000)).id;
-        let b = map.spawn(1, UnitKind::Brave, (10_000, 10_000)).id;
+        let a = map.spawn(TribeId::Blue, UnitKind::Brave, (10_000, 10_000)).id;
+        let b = map.spawn(TribeId::Red, UnitKind::Brave, (10_000, 10_000)).id;
         map.unit_mut(a).unwrap().action = Action::Attacking { target: crate::unit::Target::Unit(b), to: (10_000, 10_000) };
         map.start_armageddon((5_000, 5_000));
         assert_eq!(map.unit(a).unwrap().action, Action::Idle);
@@ -131,7 +133,7 @@ mod tests {
     fn a_second_cast_while_one_is_active_is_refused() {
         let mut map = two_tribes();
         map.start_armageddon((1, 1));
-        assert!(!map.can_cast(0, &Spell::Armageddon { at: (2, 2) }));
+        assert!(!map.can_cast(TribeId::Blue, &Spell::Armageddon { at: (2, 2) }));
     }
 
     #[test]
@@ -139,16 +141,16 @@ mod tests {
         let mut map = two_tribes();
         let before = map.units.clone();
         map.start_armageddon((1, 1));
-        map.apply(&Command::Order { player: 0, order: crate::unit::Order::Stop });
-        map.apply(&Command::Cast { player: 0, spell: Spell::Blast { at: (1, 1) } });
+        map.apply(&Command::Order { player: TribeId::Blue, order: crate::unit::Order::Stop });
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Blast { at: (1, 1) } });
         assert_eq!(map.units, before);
     }
 
     #[test]
     fn combat_seeking_is_suspended_for_the_whole_tick_the_match_resolves_in() {
         let mut map = two_tribes();
-        let a = map.spawn(0, UnitKind::Brave, (10_000, 10_000)).id;
-        map.spawn(1, UnitKind::Warrior, (10_000, 10_064)); // close enough to spot and attack, were it not suspended
+        let a = map.spawn(TribeId::Blue, UnitKind::Brave, (10_000, 10_000)).id;
+        map.spawn(TribeId::Red, UnitKind::Warrior, (10_000, 10_064)); // close enough to spot and attack, were it not suspended
         map.start_armageddon((1, 1));
         map.tick(); // resolves the match this same tick, but spot_enemies/tend_attacks were still suspended for it
         assert_eq!(map.unit(a).unwrap().action, Action::Idle);
@@ -157,10 +159,10 @@ mod tests {
     #[test]
     fn best_side_picks_the_higher_combined_headcount_side() {
         let mut map = two_tribes();
-        map.spawn(0, UnitKind::Brave, (0, 0));
-        map.spawn(0, UnitKind::Brave, (0, 0));
-        map.spawn(1, UnitKind::Brave, (0, 0));
-        assert_eq!(best_side(&map), Some(0));
+        map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0));
+        map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0));
+        map.spawn(TribeId::Red, UnitKind::Brave, (0, 0));
+        assert_eq!(best_side(&map), Some(TribeId::Blue));
     }
 
     #[test]
@@ -168,61 +170,61 @@ mod tests {
         let mut map = two_tribes();
         // Tribe 2 alone has more fighters than either ally individually, but less than 0 and 1 combined.
         for _ in 0..3 {
-            map.spawn(2, UnitKind::Brave, (0, 0));
+            map.spawn(TribeId::Yellow, UnitKind::Brave, (0, 0));
         }
         for _ in 0..2 {
-            map.spawn(0, UnitKind::Brave, (0, 0));
-            map.spawn(1, UnitKind::Brave, (0, 0));
+            map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0));
+            map.spawn(TribeId::Red, UnitKind::Brave, (0, 0));
         }
-        map.tribes = Tribes::from_owners([0, 1, 2]).with_allies([0b011, 0b011, 0b100, 0]);
-        assert_eq!(best_side(&map), Some(0), "0 and 1 together (4 fighters) beat lone tribe 2 (3 fighters)");
+        map.tribes = Tribes::from_owners([TribeId::Blue, TribeId::Red, TribeId::Yellow]).with_allies([0b011, 0b011, 0b100, 0]);
+        assert_eq!(best_side(&map), Some(TribeId::Blue), "0 and 1 together (4 fighters) beat lone tribe 2 (3 fighters)");
     }
 
     #[test]
     fn a_flat_tie_is_a_draw() {
         let mut map = two_tribes();
-        map.spawn(0, UnitKind::Brave, (0, 0));
-        map.spawn(1, UnitKind::Brave, (0, 0));
+        map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0));
+        map.spawn(TribeId::Red, UnitKind::Brave, (0, 0));
         assert_eq!(best_side(&map), None);
     }
 
     #[test]
     fn casting_resolves_within_the_turn_and_declares_the_outcome() {
         let mut map = two_tribes();
-        map.spawn(0, UnitKind::Brave, (0, 0));
+        map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0));
         map.start_armageddon((1, 1));
         map.tick();
         assert_eq!(map.outcome.unwrap().reason, Reason::Armageddon);
-        assert_eq!(map.outcome.unwrap().winner, Some(0));
+        assert_eq!(map.outcome.unwrap().winner, Some(TribeId::Blue));
         assert!(map.coordinators.armageddons.is_empty());
     }
 
     #[test]
     fn the_losing_tribes_shaman_is_struck_down_without_reincarnation_the_winner_untouched() {
         let mut map = two_tribes();
-        map.spawn(0, UnitKind::Brave, (0, 0)); // tribe 0 outnumbers tribe 1: it wins
+        map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0)); // tribe 0 outnumbers tribe 1: it wins
         map.start_armageddon((1, 1));
         map.tick();
-        assert_eq!(map.outcome.unwrap().winner, Some(0));
-        let loser = map.units.iter().find(|u| u.owner == 1 && u.kind == UnitKind::Shaman).unwrap();
+        assert_eq!(map.outcome.unwrap().winner, Some(TribeId::Blue));
+        let loser = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Red) && u.kind == UnitKind::Shaman).unwrap();
         assert!(matches!(loser.action, Action::Dying { .. }), "struck down: {:?}", loser.action);
-        assert!(!map.sites.iter().find(|s| s.owner == 1).unwrap().enabled, "no coming back for tribe 1");
-        let winner = map.units.iter().find(|u| u.owner == 0 && u.kind == UnitKind::Shaman).unwrap();
+        assert!(!map.sites.iter().find(|s| s.owner == TribeId::Red).unwrap().enabled, "no coming back for tribe 1");
+        let winner = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Shaman).unwrap();
         assert!(winner.is_alive() && winner.action == Action::Idle, "the winner's shaman is untouched");
-        assert!(map.sites.iter().find(|s| s.owner == 0).unwrap().enabled, "and still reincarnates if it ever needs to");
+        assert!(map.sites.iter().find(|s| s.owner == TribeId::Blue).unwrap().enabled, "and still reincarnates if it ever needs to");
     }
 
     #[test]
     fn a_shielded_losing_shaman_survives_the_strike_same_as_any_other_lightning() {
         let mut map = two_tribes();
-        map.spawn(0, UnitKind::Brave, (0, 0));
-        let i = map.units.iter().position(|u| u.owner == 1 && u.kind == UnitKind::Shaman).unwrap();
+        map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0));
+        let i = map.units.iter().position(|u| u.owner == Owner::Tribe(TribeId::Red) && u.kind == UnitKind::Shaman).unwrap();
         map.units[i].statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
         map.start_armageddon((1, 1));
         map.tick();
-        let loser = map.units.iter().find(|u| u.owner == 1 && u.kind == UnitKind::Shaman).unwrap();
+        let loser = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Red) && u.kind == UnitKind::Shaman).unwrap();
         assert!(loser.is_alive() && loser.action == Action::Idle, "shielded: spared the strike");
-        assert!(!map.sites.iter().find(|s| s.owner == 1).unwrap().enabled, "still loses its reincarnation either way");
+        assert!(!map.sites.iter().find(|s| s.owner == TribeId::Red).unwrap().enabled, "still loses its reincarnation either way");
     }
 
     #[test]
@@ -239,9 +241,9 @@ mod tests {
     fn the_same_seed_gives_the_same_result() {
         let run = || {
             let mut map = GameMap::generate(1).seeded(9);
-            map.spawn(0, UnitKind::Brave, (0, 0));
-            map.spawn(1, UnitKind::Brave, (0, 0));
-            map.spawn(1, UnitKind::Brave, (0, 0));
+            map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0));
+            map.spawn(TribeId::Red, UnitKind::Brave, (0, 0));
+            map.spawn(TribeId::Red, UnitKind::Brave, (0, 0));
             map.start_armageddon((1, 1));
             map.run(Ticks::new(3));
             map.outcome

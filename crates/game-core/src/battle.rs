@@ -4,6 +4,7 @@
 use crate::map::GameMap;
 use crate::terrain::Heightmap;
 use crate::time::Ticks;
+use crate::tribes::TribeId;
 use crate::unit::{Order, Target, UnitId, UnitKind};
 use crate::vehicle::{Vehicle, VehicleKind};
 
@@ -25,14 +26,14 @@ fn at(x: i32, z: i32) -> (u16, u16) {
 }
 
 /// `kinds` of `tribe` on foot, in a row from `(x, z)`, a cell apart.
-fn on_foot(map: &mut GameMap, tribe: u8, kinds: &[UnitKind], (x, z): (i32, i32)) {
+fn on_foot(map: &mut GameMap, tribe: TribeId, kinds: &[UnitKind], (x, z): (i32, i32)) {
     for (k, &kind) in kinds.iter().enumerate() {
         map.spawn(tribe, kind, at(x, z + k as i32));
     }
 }
 
 /// A `kind` of `tribe` aboard a vehicle of `vehicle` kind at `(x, z)`.
-fn aboard(map: &mut GameMap, tribe: u8, kind: UnitKind, vehicle: VehicleKind, (x, z): (i32, i32)) {
+fn aboard(map: &mut GameMap, tribe: TribeId, kind: UnitKind, vehicle: VehicleKind, (x, z): (i32, i32)) {
     let id = map.add_vehicle(Vehicle::new(vehicle, tribe, at(x, z), crate::angle::Angle::new(0)));
     let u = map.spawn(tribe, kind, at(x, z));
     u.aboard = Some(id);
@@ -42,13 +43,13 @@ fn aboard(map: &mut GameMap, tribe: u8, kind: UnitKind, vehicle: VehicleKind, (x
 
 /// Everyone goes for the nearest enemy it may attack or preach to.
 fn charge(map: &mut GameMap) {
-    let orders: Vec<(UnitId, u8, UnitId)> = map
+    let orders: Vec<(UnitId, TribeId, UnitId)> = map
         .units
         .iter()
         .filter_map(|u| {
             let near = |t: &&crate::unit::Unit| crate::map::torus_dist2((u.x, u.z), (t.x, t.z));
             let target = map.units.iter().filter(|t| crate::attack::may_attack(u, t) || crate::sermon::may_preach(u, t)).min_by_key(near)?;
-            Some((u.id, u.owner, target.id))
+            Some((u.id, u.owner.tribe()?, target.id))
         })
         .collect();
     for (unit, player, target) in orders {
@@ -58,7 +59,7 @@ fn charge(map: &mut GameMap) {
 
 /// Runs until one of `tribes` has no follower left, a look every `BATTLE_STEP`: the other one, or None after
 /// `max_turns`.
-fn run_battle(map: &mut GameMap, tribes: (u8, u8), max_turns: u32) -> Option<u8> {
+fn run_battle(map: &mut GameMap, tribes: (TribeId, TribeId), max_turns: u32) -> Option<TribeId> {
     for _ in 0..max_turns / BATTLE_STEP.get() {
         map.run(BATTLE_STEP);
         match (map.headcount(tribes.0).total(), map.headcount(tribes.1).total()) {
@@ -72,13 +73,13 @@ fn run_battle(map: &mut GameMap, tribes: (u8, u8), max_turns: u32) -> Option<u8>
 }
 
 /// The winner of the scene `setup` makes, over several seeds: the same every time, or the seeds' results.
-fn winner(setup: impl Fn(&mut GameMap), max_turns: u32) -> Result<u8, Vec<Option<u8>>> {
-    let results: Vec<Option<u8>> = (0..8)
+fn winner(setup: impl Fn(&mut GameMap), max_turns: u32) -> Result<TribeId, Vec<Option<TribeId>>> {
+    let results: Vec<Option<TribeId>> = (0..8)
         .map(|seed| {
             let mut map = field(seed);
             setup(&mut map);
             charge(&mut map);
-            run_battle(&mut map, (0, 1), max_turns)
+            run_battle(&mut map, (TribeId::Blue, TribeId::Red), max_turns)
         })
         .collect();
     match results[0] {
@@ -91,46 +92,46 @@ fn winner(setup: impl Fn(&mut GameMap), max_turns: u32) -> Result<u8, Vec<Option
 fn a_warrior_beats_two_braves() {
     let won = winner(
         |map| {
-            on_foot(map, 0, &[UnitKind::Warrior], (60, 64));
-            on_foot(map, 1, &[UnitKind::Brave, UnitKind::Brave], (64, 64));
+            on_foot(map, TribeId::Blue, &[UnitKind::Warrior], (60, 64));
+            on_foot(map, TribeId::Red, &[UnitKind::Brave, UnitKind::Brave], (64, 64));
         },
         3000,
     );
-    assert_eq!(won, Ok(0));
+    assert_eq!(won, Ok(TribeId::Blue));
 }
 
 #[test]
 fn a_preacher_beats_five_warriors() {
     let won = winner(
         |map| {
-            on_foot(map, 0, &[UnitKind::Preacher], (60, 64));
-            on_foot(map, 1, &[UnitKind::Warrior; 5], (66, 62));
+            on_foot(map, TribeId::Blue, &[UnitKind::Preacher], (60, 64));
+            on_foot(map, TribeId::Red, &[UnitKind::Warrior; 5], (66, 62));
         },
         12_000,
     );
-    assert_eq!(won, Ok(0));
+    assert_eq!(won, Ok(TribeId::Blue));
 }
 
 #[test]
 fn a_firewarrior_in_a_balloon_beats_five_warriors_on_foot() {
     let won = winner(
         |map| {
-            aboard(map, 0, UnitKind::Firewarrior, VehicleKind::Balloon, (60, 64));
-            on_foot(map, 1, &[UnitKind::Warrior; 5], (66, 62));
+            aboard(map, TribeId::Blue, UnitKind::Firewarrior, VehicleKind::Balloon, (60, 64));
+            on_foot(map, TribeId::Red, &[UnitKind::Warrior; 5], (66, 62));
         },
         6000,
     );
-    assert_eq!(won, Ok(0));
+    assert_eq!(won, Ok(TribeId::Blue));
 }
 
 #[test]
 fn a_firewarrior_in_a_balloon_beats_a_preacher_on_foot() {
     let won = winner(
         |map| {
-            aboard(map, 0, UnitKind::Firewarrior, VehicleKind::Balloon, (60, 64));
-            on_foot(map, 1, &[UnitKind::Preacher], (64, 64));
+            aboard(map, TribeId::Blue, UnitKind::Firewarrior, VehicleKind::Balloon, (60, 64));
+            on_foot(map, TribeId::Red, &[UnitKind::Preacher], (64, 64));
         },
         6000,
     );
-    assert_eq!(won, Ok(0));
+    assert_eq!(won, Ok(TribeId::Blue));
 }

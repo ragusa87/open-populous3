@@ -14,6 +14,7 @@ use crate::sim_time::SimNow;
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
 use game_core::time::Tick;
+use game_core::tribes::{Owner, TribeId};
 use game_core::unit::{Action, Unit};
 use pop3_format::blend::AlphaTable;
 use pop3_format::catalog::{BLOODLUST_SPRITES, EFFECT_SPRITE_FILE, HYPNOSIS_SPRITES, LOW_HEALTH_SPRITES, SELECTED_ARROW_SPRITE, SHIELD_SPRITES, TRIBES};
@@ -59,7 +60,7 @@ pub struct BodyHeight(pub f32);
 
 /// Whether `u` carries marker `m` at `now`; `selected` by the player, `original`: drawn with the original's art.
 /// Shield and bloodlust blink in their last steps (`Timed::shown`, phased by the unit's id).
-pub fn shown(m: Marker, u: &Unit, player: u8, selected: bool, original: bool, now: Tick) -> bool {
+pub fn shown(m: Marker, u: &Unit, player: TribeId, selected: bool, original: bool, now: Tick) -> bool {
     u.is_alive()
         && match m {
             Marker::LowHealth => original && u.health.is_low(),
@@ -105,7 +106,7 @@ pub struct MarkerArt {
 
 impl MarkerArt {
     /// The mesh and material of `m`'s frame `i` over a person of tribe `owner`.
-    fn frame(&self, m: Marker, i: usize, owner: u8) -> Option<(Handle<Mesh>, Handle<StandardMaterial>)> {
+    fn frame(&self, m: Marker, i: usize, owner: Owner) -> Option<(Handle<Mesh>, Handle<StandardMaterial>)> {
         let frames = match m {
             Marker::LowHealth => &self.low_health,
             Marker::Bloodlust => &self.bloodlust,
@@ -116,7 +117,7 @@ impl MarkerArt {
         };
         let f = frames.get(i)?;
         let material = match m {
-            Marker::Shield(_) => self.shield_tribes.get(owner as usize).and_then(|t| t.get(i)).cloned().unwrap_or_else(|| f.material.clone()),
+            Marker::Shield(_) => owner.tribe().and_then(|t| self.shield_tribes.get(t.as_usize())).and_then(|t| t.get(i)).cloned().unwrap_or_else(|| f.material.clone()),
             _ => f.material.clone(),
         };
         Some((f.mesh.clone(), material))
@@ -224,7 +225,7 @@ fn load_art(levels: Res<LevelList>, mut commands: Commands, mut images: ResMut<A
             shield
                 .iter()
                 .map(|f| {
-                    let tinted = StandardMaterial { base_color: crate::sites::tribe_color(tribe), ..mats.get(&f.material).cloned().unwrap_or_default() };
+                    let tinted = StandardMaterial { base_color: crate::sites::tribe_color(TribeId::from_u8(tribe as u8).unwrap()), ..mats.get(&f.material).cloned().unwrap_or_default() };
                     mats.add(tinted)
                 })
                 .collect()
@@ -292,41 +293,41 @@ mod tests {
     use game_core::status::{Timed, BLINK_STEPS, SHIELD_STEPS};
     use game_core::unit::UnitKind;
 
-    fn brave(owner: u8) -> Unit {
+    fn brave(owner: TribeId) -> Unit {
         Unit::new(game_core::id::Id::from_raw(1), owner, UnitKind::Brave, (5000, 5000))
     }
 
     #[test]
     fn markers_read_the_units_own_state() {
-        let mut u = brave(0);
-        assert!(SLOTS.iter().all(|&m| !shown(m, &u, 0, false, true, Tick::ZERO)), "nothing on a healthy plain brave");
+        let mut u = brave(TribeId::Blue);
+        assert!(SLOTS.iter().all(|&m| !shown(m, &u, TribeId::Blue, false, true, Tick::ZERO)), "nothing on a healthy plain brave");
         u.statuses.shield = Timed::steps(SHIELD_STEPS);
         u.statuses.hypnotized = Timed::steps(game_core::status::HYPNO_STEPS);
-        assert!(shown(Marker::Shield(2), &u, 0, false, false, Tick::ZERO) && shown(Marker::Hypnotised, &u, 0, false, false, Tick::ZERO));
-        assert!(!shown(Marker::Bloodlust, &u, 0, false, true, Tick::ZERO));
+        assert!(shown(Marker::Shield(2), &u, TribeId::Blue, false, false, Tick::ZERO) && shown(Marker::Hypnotised, &u, TribeId::Blue, false, false, Tick::ZERO));
+        assert!(!shown(Marker::Bloodlust, &u, TribeId::Blue, false, true, Tick::ZERO));
         u.health.damage(u.health.max() * 3 / 4);
-        assert!(shown(Marker::LowHealth, &u, 0, false, true, Tick::ZERO), "a quarter left");
-        assert!(!shown(Marker::LowHealth, &u, 0, false, false, Tick::ZERO), "only with the original's art");
+        assert!(shown(Marker::LowHealth, &u, TribeId::Blue, false, true, Tick::ZERO), "a quarter left");
+        assert!(!shown(Marker::LowHealth, &u, TribeId::Blue, false, false, Tick::ZERO), "only with the original's art");
         u.action = game_core::unit::Action::Dead { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) };
-        assert!(SLOTS.iter().all(|&m| !shown(m, &u, 0, true, true, Tick::ZERO)), "none once dead");
+        assert!(SLOTS.iter().all(|&m| !shown(m, &u, TribeId::Blue, true, true, Tick::ZERO)), "none once dead");
     }
 
     #[test]
     fn shield_and_bloodlust_blink_in_their_last_steps() {
-        let mut u = brave(0);
+        let mut u = brave(TribeId::Blue);
         u.statuses.shield = Timed::steps(BLINK_STEPS);
         u.statuses.bloodlust = Timed::steps(SHIELD_STEPS);
         let at = |n: u32| Tick::from_wire(n.wrapping_sub(u.id.raw()));
-        assert!(shown(Marker::Shield(0), &u, 0, false, false, at(0)) && !shown(Marker::Shield(0), &u, 0, false, false, at(2)), "2 on, 2 off");
-        assert!(shown(Marker::Bloodlust, &u, 0, false, false, at(2)), "steady with time left");
+        assert!(shown(Marker::Shield(0), &u, TribeId::Blue, false, false, at(0)) && !shown(Marker::Shield(0), &u, TribeId::Blue, false, false, at(2)), "2 on, 2 off");
+        assert!(shown(Marker::Bloodlust, &u, TribeId::Blue, false, false, at(2)), "steady with time left");
     }
 
     #[test]
     fn the_arrow_only_over_the_players_selected_people_with_the_originals_art() {
-        assert!(shown(Marker::Selected, &brave(0), 0, true, true, Tick::ZERO));
-        assert!(!shown(Marker::Selected, &brave(0), 0, false, true, Tick::ZERO), "not selected");
-        assert!(!shown(Marker::Selected, &brave(1), 0, true, true, Tick::ZERO), "another tribe's");
-        assert!(!shown(Marker::Selected, &brave(0), 0, true, false, Tick::ZERO), "fallback: the health bar instead");
+        assert!(shown(Marker::Selected, &brave(TribeId::Blue), TribeId::Blue, true, true, Tick::ZERO));
+        assert!(!shown(Marker::Selected, &brave(TribeId::Blue), TribeId::Blue, false, true, Tick::ZERO), "not selected");
+        assert!(!shown(Marker::Selected, &brave(TribeId::Red), TribeId::Blue, true, true, Tick::ZERO), "another tribe's");
+        assert!(!shown(Marker::Selected, &brave(TribeId::Blue), TribeId::Blue, true, false, Tick::ZERO), "fallback: the health bar instead");
     }
 
     #[test]

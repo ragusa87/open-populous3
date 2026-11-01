@@ -12,6 +12,7 @@ use crate::map::GameMap;
 use crate::time::{Countdown, Ticks};
 use crate::unit::{torus_delta, Unit, UnitId, UnitKind};
 use pop3_format::WORLD_UNITS_PER_CELL;
+use crate::tribes::Owner;
 
 /// A conversion chance every 8 turns: its own internal countdown, not a global-phase `Every` (unlike Swamp, no
 /// other Convert needs to stay in step with this one).
@@ -28,22 +29,23 @@ pub struct Convert {
 }
 
 /// Cast by tribe `owner` at `at` (world units).
-pub fn effect(owner: u8, at: (u16, u16)) -> Effect {
+pub fn effect(owner: impl Into<Owner>, at: (u16, u16)) -> Effect {
     Effect::new(owner, at, Countdown::new(LIFETIME), EffectKind::Convert(Convert { next: Countdown::new(CHECK_EVERY) }))
 }
 
 impl Convert {
     /// One turn at `at`, cast by `owner`: every `CHECK_EVERY` turns, the nearest wildman in range becomes a brave
     /// of `owner`, if its tribe has room.
-    pub fn turn(&mut self, at: (u16, u16), owner: u8, world: &GameMap) -> Vec<WorldEvent> {
+    pub fn turn(&mut self, at: (u16, u16), owner: Owner, world: &GameMap) -> Vec<WorldEvent> {
         if !self.next.tick() {
             return Vec::new();
         }
         self.next = Countdown::new(CHECK_EVERY);
-        if world.housing(owner).population >= MAX_POPULATION {
+        let Some(tribe) = owner.tribe() else { return Vec::new() };
+        if world.housing(tribe).population >= MAX_POPULATION {
             return Vec::new();
         }
-        nearest_wildman(at, &world.units).map(|unit| vec![WorldEvent::ChangeOwner { unit, tribe: owner }]).unwrap_or_default()
+        nearest_wildman(at, &world.units).map(|unit| vec![WorldEvent::ChangeOwner { unit, tribe }]).unwrap_or_default()
     }
 }
 
@@ -61,6 +63,7 @@ fn nearest_wildman(at: (u16, u16), units: &[Unit]) -> Option<UnitId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tribes::TribeId;
     use crate::id::Id;
     use crate::terrain::Heightmap;
 
@@ -73,21 +76,21 @@ mod tests {
     #[test]
     fn converts_the_nearest_wildman_in_range_every_8_turns() {
         let mut map = bare();
-        map.add_effect(effect(0, AT));
-        let near = map.spawn(255, UnitKind::Wildman, (AT.0.wrapping_add(100), AT.1)).id;
-        let far = map.spawn(255, UnitKind::Wildman, (AT.0.wrapping_add(2 * WORLD_UNITS_PER_CELL as u16), AT.1)).id;
+        map.add_effect(effect(TribeId::Blue, AT));
+        let near = map.spawn(Owner::Wild, UnitKind::Wildman, (AT.0.wrapping_add(100), AT.1)).id;
+        let far = map.spawn(Owner::Wild, UnitKind::Wildman, (AT.0.wrapping_add(2 * WORLD_UNITS_PER_CELL as u16), AT.1)).id;
         map.run(Ticks::new(7));
-        assert_eq!(map.unit(near).unwrap().owner, 255, "not yet its turn");
+        assert_eq!(map.unit(near).unwrap().owner, Owner::Wild, "not yet its turn");
         map.tick();
-        assert_eq!(map.unit(near).unwrap().owner, 0, "the nearest in range, converted");
+        assert_eq!(map.unit(near).unwrap().owner, Owner::Tribe(TribeId::Blue), "the nearest in range, converted");
         assert_eq!(map.unit(near).unwrap().kind, UnitKind::Brave);
-        assert_eq!(map.unit(far).unwrap().owner, 255, "out of range: spared");
+        assert_eq!(map.unit(far).unwrap().owner, Owner::Wild, "out of range: spared");
     }
 
     #[test]
     fn expires_after_its_lifetime_even_without_a_single_conversion() {
         let mut map = bare();
-        let id = map.add_effect(effect(0, AT));
+        let id = map.add_effect(effect(TribeId::Blue, AT));
         map.run(Ticks::new(LIFETIME.get()));
         assert!(!map.effects.contains(id), "gone regardless of success");
     }
@@ -95,21 +98,21 @@ mod tests {
     #[test]
     fn never_converts_once_the_tribe_is_full() {
         let mut map = bare();
-        map.add_effect(effect(0, AT));
+        map.add_effect(effect(TribeId::Blue, AT));
         for n in 0..MAX_POPULATION {
-            map.spawn(0, UnitKind::Brave, (0, n));
+            map.spawn(TribeId::Blue, UnitKind::Brave, (0, n));
         }
-        let wildman = map.spawn(255, UnitKind::Wildman, (AT.0.wrapping_add(10), AT.1)).id;
+        let wildman = map.spawn(Owner::Wild, UnitKind::Wildman, (AT.0.wrapping_add(10), AT.1)).id;
         map.run(Ticks::new(8));
-        assert_eq!(map.unit(wildman).unwrap().owner, 255, "no room");
+        assert_eq!(map.unit(wildman).unwrap().owner, Owner::Wild, "no room");
     }
 
     #[test]
     fn nearest_wildman_ignores_the_dead_and_other_kinds() {
-        let mut units = vec![Unit::new(Id::from_raw(1), 255, UnitKind::Brave, AT), Unit::new(Id::from_raw(2), 255, UnitKind::Wildman, AT)];
+        let mut units = vec![Unit::new(Id::from_raw(1), Owner::Wild, UnitKind::Brave, AT), Unit::new(Id::from_raw(2), Owner::Wild, UnitKind::Wildman, AT)];
         units[1].action = crate::unit::Action::Dead { left: Countdown::new(Ticks::new(3)) };
         assert_eq!(nearest_wildman(AT, &units), None, "a brave and a dead wildman: neither counts");
-        let alive = Unit::new(Id::from_raw(3), 255, UnitKind::Wildman, AT);
+        let alive = Unit::new(Id::from_raw(3), Owner::Wild, UnitKind::Wildman, AT);
         units.push(alive);
         assert_eq!(nearest_wildman(AT, &units), Some(Id::from_raw(3)));
     }

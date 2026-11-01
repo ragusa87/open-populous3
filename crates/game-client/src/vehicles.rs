@@ -15,6 +15,7 @@ use bevy::ecs::system::SystemParamItem;
 use bevy::prelude::*;
 use game_core::angle::{Angle, TURN};
 use game_core::map::GameMap;
+use game_core::tribes::{Owner, TribeId};
 use game_core::vehicle::{State, Vehicle, VehicleId, VehicleKind};
 use pop3_format::{catalog, WORLD_UNITS_PER_CELL};
 
@@ -31,7 +32,7 @@ const WOOD: Color = Color::srgb(0.45, 0.3, 0.16);
 pub struct VehicleLook {
     theme: Option<u8>,
     original: Option<Handle<StandardMaterial>>,
-    parts: Vec<((VehicleKind, u8), Vec<(Handle<Mesh>, Handle<StandardMaterial>, Transform)>)>,
+    parts: Vec<((VehicleKind, Owner), Vec<(Handle<Mesh>, Handle<StandardMaterial>, Transform)>)>,
 }
 
 /// One vehicle's view: the root (moved along the ground), its hull (lifted, turned and tilted) and what it last
@@ -49,7 +50,7 @@ pub struct Drawn {
     from: Vec2,
     to: Vec2,
     moved: game_core::time::Tick,
-    owner: u8,
+    owner: Owner,
 }
 
 impl Drawn {
@@ -150,7 +151,7 @@ pub fn hull_rotation(v: &Vehicle) -> Quat {
 
 impl VehicleLook {
     /// The parts of a `kind` of `owner`: the original object when there is one, else our stand-in.
-    fn parts(&mut self, kind: VehicleKind, owner: u8, theme: u8, levels: &LevelList, objects: &OriginalObjects, assets: &mut Assets3d) -> Vec<(Handle<Mesh>, Handle<StandardMaterial>, Transform)> {
+    fn parts(&mut self, kind: VehicleKind, owner: Owner, theme: u8, levels: &LevelList, objects: &OriginalObjects, assets: &mut Assets3d) -> Vec<(Handle<Mesh>, Handle<StandardMaterial>, Transform)> {
         if let Some((_, parts)) = self.parts.iter().find(|(k, _)| *k == (kind, owner)) {
             return parts.clone();
         }
@@ -164,7 +165,7 @@ impl VehicleLook {
             VehicleKind::Balloon => catalog::AIRSHIP,
         };
         let original = self.original.clone().zip(objects.0.as_ref().and_then(|bank| bank.get(index)));
-        let tribe = if owner < catalog::TRIBES { owner } else { 0 };
+        let tribe = owner.tribe().unwrap_or(TribeId::Blue);
         let parts = match original {
             Some((material, obj)) => vec![(assets.meshes.add(to_mesh(object_mesh(&solid_part(obj), tribe))), material, Transform::IDENTITY)],
             None => stand_in(kind, owner, assets),
@@ -175,7 +176,7 @@ impl VehicleLook {
 }
 
 /// Our own look: a hull in the tribe's colour, or a balloon in the tribe's colour over a wooden basket.
-fn stand_in(kind: VehicleKind, owner: u8, assets: &mut Assets3d) -> Vec<(Handle<Mesh>, Handle<StandardMaterial>, Transform)> {
+fn stand_in(kind: VehicleKind, owner: Owner, assets: &mut Assets3d) -> Vec<(Handle<Mesh>, Handle<StandardMaterial>, Transform)> {
     let colour = assets.materials.add(StandardMaterial { base_color: crate::sites::tribe_color(owner), perceptual_roughness: 0.8, ..default() });
     let wood = assets.materials.add(StandardMaterial { base_color: WOOD, perceptual_roughness: 0.9, ..default() });
     match kind {
@@ -274,7 +275,7 @@ mod tests {
     use super::*;
 
     fn vehicle(kind: VehicleKind, at: (u16, u16)) -> Vehicle {
-        Vehicle::new(kind, 0, at, Angle::ZERO)
+        Vehicle::new(kind, TribeId::Blue, at, Angle::ZERO)
     }
 
     #[test]
@@ -305,7 +306,7 @@ mod tests {
     #[test]
     fn it_glides_in_the_tick_it_moved_then_stays_put() {
         let tick = game_core::time::Tick::from_wire;
-        let mut d = Drawn { from: Vec2::ZERO, to: Vec2::ZERO, moved: tick(0), owner: 0 };
+        let mut d = Drawn { from: Vec2::ZERO, to: Vec2::ZERO, moved: tick(0), owner: Owner::Tribe(TribeId::Blue) };
         assert_eq!(d.glide(Vec2::new(0.2, 0.0), tick(5), 0.5), Vec2::new(0.1, 0.0), "half way through its step");
         assert!((d.glide(Vec2::new(0.2, 0.0), tick(5), 0.9) - Vec2::new(0.18, 0.0)).length() < 1e-6);
         assert_eq!(d.glide(Vec2::new(0.2, 0.0), tick(6), 0.1), Vec2::new(0.2, 0.0), "parked: still, not replaying the step");
@@ -318,7 +319,7 @@ mod tests {
         assert!(!under_way(&v), "parked");
         v.go((5000, 0));
         assert!(under_way(&v));
-        v.seat(game_core::id::Id::from_raw(3), 0);
+        v.seat(game_core::id::Id::from_raw(3), TribeId::Blue);
         assert!(!under_way(&v), "waiting after a boarding");
     }
 
