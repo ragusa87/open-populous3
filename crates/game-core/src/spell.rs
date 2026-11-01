@@ -73,7 +73,8 @@ impl Spell {
             SpellKind::MagicalShield => Some(Spell::MagicalShield { at }),
             SpellKind::Bloodlust => Some(Spell::Bloodlust { at }),
             SpellKind::Invisibility => Some(Spell::Invisibility { at }),
-            SpellKind::LandBridge | SpellKind::Flatten | SpellKind::Erosion | SpellKind::Whirlwind | SpellKind::GhostArmy | SpellKind::AngelOfDeath => None,
+            SpellKind::AngelOfDeath => Some(Spell::AngelOfDeath { at }),
+            SpellKind::LandBridge | SpellKind::Flatten | SpellKind::Erosion | SpellKind::Whirlwind | SpellKind::GhostArmy => None,
         }
     }
 
@@ -139,5 +140,11 @@ mod tests {
         let before = t.get(8, 8);
         Spell::Erode { at: (8, 8) }.cast(&mut t);
         assert!(t.get(8, 8) < before);
+    }
+
+    #[test]
+    fn angel_of_death_needs_only_a_point_like_blast_or_volcano() {
+        assert_eq!(Spell::at_point(SpellKind::AngelOfDeath, (5, 6)), Some(Spell::AngelOfDeath { at: (5, 6) }), "a copy-paste bug once lumped it in with the spells needing special targeting (land bridge/flatten/erosion), silently eating every cast");
+        assert_eq!(Spell::at_point(SpellKind::LandBridge, (5, 6)), None, "still needs its own second point, not a plain `at`");
     }
 }
