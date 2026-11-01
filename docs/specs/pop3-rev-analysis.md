@@ -128,6 +128,11 @@ so a live measurement may run on it with the addresses translated.
 - **Level 1's opening `FLYBY_START` is turn 72, exactly** [files]: read straight from the compiled
   `cpscr010.dat` script's own gating logic via `cargo run -p pop3-ai-script --example ai_script_info`,
   instead of curve-fitting camera motion - no live memory needed. See "Camera flyby state (tribe_struct)".
+- **Cancelling a flyby skips to its own scripted end, it does not return the camera to where the player
+  started** [exe, measured]: two independent live captures - one cancelled mid-flight, one left to finish on
+  its own - settle on the same final camera orientation, confirming our `flyby.rs` design (`cancel_from` eases
+  toward `final_pose`) already matches. Only the measured grace-period length (about 3 seconds) differs from
+  ours (1 second). See "Flyby cancel" under "Camera flyby state (tribe_struct)".
 
 ## Turns and timing [exe]
 ```text
@@ -1785,6 +1790,35 @@ pitch sign is flipped relative to how this section used to state the pitch const
 Not yet done, see TODO.md "Camera flyby state": solve the raw-pitch candidate's transform to degrees, find what
 actually drives the unidentified render parameter, and apply the axis caveat once the above is solid enough to
 change `flyby.rs`.
+
+### Flyby cancel [exe, measured]
+What the camera does when the player interrupts a flyby (pressing the interrupt key, confirmed live as Space
+in level 1). Two live captures this session, in a headless automated session of level 1's opening flyby:
+one interrupted partway through (while the zoom channel was mid-dive, well before the flyby's own natural
+end), one left completely uninterrupted to its own scripted finish. Both captures converge on the exact same
+final camera orientation (matching yaw within half a degree, same idle pitch/zoom constants, same camera
+distance).
+
+```text
+on interrupt:
+    remaining channels do NOT reset or hold in place
+    camera (pitch/zoom and yaw together) eases smoothly toward the flyby's own final keyframe
+    the ease takes about 3 seconds (measured once, not yet cross-checked against a second interrupt point)
+    once it arrives, the camera is in the identical pose an uninterrupted flyby settles into on its own
+```
+
+So interrupting is "skip to the end of the scripted camera path", not "abort and return to the pre-flyby
+view" and not "freeze in place" - the flyby always ends up at the same place, interrupted or not, only the
+time it takes differs. Camera distance does not move during this either (consistent with "Camera flyby
+state" and "Landscape projection" above - zoom is always a pitch+bend orbit at constant distance, cancel
+included).
+
+**Impact on our specs**: this confirms `flyby.rs`'s existing cancel design (ease from `cancel_from` toward
+`final_pose` over a grace period, TODO.md "Flybys") is the right shape - no rework needed there. The one
+concrete number to fix is the grace period itself: `FLYBY_CANCEL_GRACE_TICKS` is currently 1 second; the
+measured original value is closer to 3 seconds. Not yet checked: whether the real camera-focus position
+(not just pitch/zoom/yaw) follows the same "skip to the end" rule, or whether the ease duration is constant
+regardless of how far into the flyby the player interrupts (only one interrupt point was measured).
 
 ## Manual camera pan/rotate (mouse drag) [exe]
 (Exact exe addresses: pop3-rev `docs/functions.tsv`.) How the player's own mouse-drag camera control works,

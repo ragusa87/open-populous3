@@ -794,6 +794,11 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   where the player was before it started. Not done: `FLYBY_SET_EVENT_TOOLTIP` popups (parsed and resolved,
   nothing draws them); the exact keyframe easing/overlap and the zoom -100..100 -> camera distance scale
   are our own guesses, unspecified in the files.
+  - **Confirmed live this design is right** (pop3-rev-analysis.md "Flyby cancel"): two captures of level 1's
+    flyby, one interrupted mid-flight and one left to finish on its own, settle on the identical camera
+    orientation - cancelling really does skip to the flyby's own end rather than reverting. The one number
+    worth fixing: `FLYBY_CANCEL_GRACE_TICKS` is `Ticks::secs(1)`; the measured original ease takes closer to
+    3 seconds (only one interrupt point measured, not cross-checked at a different point in the flyby).
 - [ ] Camera flyby state: continue the pop3-rev-analysis.md "Camera flyby state (tribe_struct)" investigation.
   All three primary AI-script channels are now traced end to end (pop3-rev/docs/camera.md, pop3-rev/
   docs/functions.tsv):
