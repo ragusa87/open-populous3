@@ -9,6 +9,12 @@
 //! direction, rather than swapped instantly — the original's own "0-5 ramp... 3 intermediate sub-variants" isn't
 //! pinned down further, approximated here as a straight crossfade between the two meshes (`[ours]`). With
 //! `--no-original`, a stand-in silhouette in the tribe's colour instead.
+//!
+//! Still open, both user-reported playing it and TODO.md "Angel of Death": it only ever yaws to face its
+//! heading (`body_rotation`), never pitching or banking — the dive/cruise mesh swap is meant to carry that, but
+//! a flat slab that never noses down or banks into a turn still reads oddly; and the trace's own confirmed THIRD
+//! pose, "a dedicated 'launching/accelerating' pose... when committing to a fast manoeuvre" (pop3-rev-analysis.md
+//! "Angel of Death mechanics" "Visuals"), is not drawn at all — only the cruise/dive pair here.
 
 use crate::camera::CurveParamsRes;
 use crate::game_frame::GameYaw;

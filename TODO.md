@@ -412,7 +412,13 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   vertical motion changes direction rather than swapped instantly (pop3-rev-analysis.md "Angel of Death
   mechanics" "Visuals" — the exact 3-step blend table isn't pinned down, so `angel_of_death.rs` [client] does a
   straight linear crossfade between the two meshes instead, `[ours]`, over `BLEND_TICKS` once its height last
-  changed direction, tracked client-side since `Flight` itself keeps no history of its own). With
+  changed direction, tracked client-side since `Flight` itself keeps no history of its own). Still open, both
+  user-reported, playing it: it only ever yaws to face its heading, never pitching or banking (`body_rotation`,
+  `[ours]` — the trace's own dive/cruise mesh swap is meant to carry that, but a flat slab never nosing down or
+  banking into a turn still reads oddly, "the angle is strange"); and the trace's own confirmed THIRD pose —
+  "a dedicated 'launching/accelerating' pose... a climb sequence... when committing to a fast manoeuvre"
+  (pop3-rev-analysis.md "Angel of Death mechanics" "Visuals") — is not drawn at all, only the cruise/dive pair
+  (closest real counterpart to "flapping wings" read as missing; no literal flap cycle was ever traced). With
   `--no-original`, a stand-in flattened box instead (swept narrower for diving, wide for cruising). Its ground
   shadow needed no new code: `units/shadow.rs` already casts one for every unit regardless of kind. A unit it has
   grabbed (`Action::Grabbed`) is now drawn at its captor's own flight height too (`units::carried`), rather than
@@ -432,7 +438,14 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   list keeps it, and whoever it grabs, unorderable and unselectable): hunts a rival angel first, else the nearest
   eligible enemy anywhere on the map (shamans included); grabs it once close (`Action::Grabbed`, no orders, no
   movement of its own, no dedicated "held" pose — none was found either) and carries it `CARRY_TICKS` (28) before
-  releasing it to die through the ordinary damage pipeline; against a rival angel, fights by health instead
+  releasing it to die through the ordinary damage pipeline. User-reported, playing it, and confirmed in code: "once
+  close" (`tend_closing`'s own `GRAB_RANGE` check) is `x`/`z` distance alone, `flight.height` never factored in and
+  never deliberately lowered towards a grounded victim (only ever clamped to a *minimum* clearance above terrain,
+  `MIN_CLEARANCE`) — so it grabs someone on the ground from `CRUISE_HEIGHT` without ever visibly diving down to
+  reach them. The trace itself doesn't resolve this either way (only the separate "launching/accelerating" climb
+  pose above is confirmed, not a literal dive-to-grab manoeuvre), so whether the original actually swoops down
+  before a grab is itself an open question for a future trace session; until then this is `[ours]`, tagged rather
+  than guessed at silently. Against a rival angel, fights by health instead
   (both take a cut each clash, `FIGHT_COOLDOWN` apart, the weaker knocked back) — see the module doc's own
   "Simplified from the trace" list for exactly which choreography details (`[ours]`) aren't literal. Every tick it
   also forces any eligible enemy within `PANIC_RADIUS_CELLS` (8) to panic, excluding shamans and other angels

@@ -13,6 +13,13 @@
 //! - Flight is a straight line at a constant `SPEED`: no "self speed x2 closing in", no zigzag while carrying, no
 //!   180-degree wind-up turn before release, no victim-facing throw direction — `[ours]`. The victim is simply
 //!   killed where it hangs once `CARRY_TICKS` run out.
+//! - `tend_closing`'s own "once close enough to grab" check (`GRAB_RANGE`) is `x`/`z` distance alone: `flight.height`
+//!   is never factored into it, nor deliberately lowered towards a grounded victim (only ever clamped to a
+//!   *minimum* clearance above terrain, `MIN_CLEARANCE`) — so it grabs someone on the ground from `CRUISE_HEIGHT`
+//!   without ever visibly diving down to reach them, user-reported playing it. The trace doesn't resolve this
+//!   either way (only the separate "launching/accelerating" climb pose is confirmed, not a literal dive-to-grab
+//!   manoeuvre, pop3-rev-analysis.md "Angel of Death mechanics" "Visuals"), so whether the original actually
+//!   swoops down before a grab is itself an open question for a future trace session — `[ours]` until then.
 //! - The angel-vs-angel exchange (`fight`) is our own reading of "both sides always take damage, scaled by the
 //!   stronger side's own health, so the stronger snowballs": both lose a quarter of the winner's current health
 //!   each clash, `FIGHT_COOLDOWN` apart — `[ours]`, no literal formula was traced.
