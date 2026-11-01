@@ -219,8 +219,8 @@ pub fn volcano_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> 
 }
 
 /// `AOD=x,z` (cells): another tribe's Angel of Death cast there, then `ticks` run at once (with `GAME_SPEED=0`:
-/// its meteor fall, ground ripple and spawn blast over the run — the creature itself has no sprite yet,
-/// TODO.md "Angel of Death"). False when `at` does not parse.
+/// its meteor fall, trailing sparks, ground ripple and spawn blast over the run, then the flying creature
+/// itself, `angel_of_death.rs` [client]). False when `at` does not parse.
 pub fn angel_of_death_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
     let at = world_units(Vec2::new(x, z));

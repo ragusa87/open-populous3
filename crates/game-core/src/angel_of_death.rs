@@ -22,8 +22,10 @@
 //!   simplest reading of "cannot be selected or given orders" extended to "cannot be ordered to attack it
 //!   either" — revisit if a future session resolves either open question.
 //! - Whether it can attack a building at all, or grab someone riding in a vehicle: left undone, same as the trace.
-//! - No sprite of its own yet (`UnitKind::AngelOfDeath` is deliberately left out of `UnitKind::ALL`, so nothing
-//!   in the boot job or the generated-figure fallback ever tries to draw one): simulated, not drawn.
+//! - Still no 2D unit sprite (`UnitKind::AngelOfDeath` is deliberately left out of `UnitKind::ALL`, so nothing in
+//!   the boot job or the generated-figure fallback ever tries to draw one): it is drawn instead as a real 3D
+//!   object-bank mesh, like a vehicle (`game-client`'s own `angel_of_death.rs`, pop3-rev-analysis.md "Angel of
+//!   Death mechanics" "Visuals").
 
 use crate::angle::{self, Angle};
 use crate::effect::{DamageKind, Effect, EffectKind};

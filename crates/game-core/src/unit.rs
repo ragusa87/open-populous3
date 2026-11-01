@@ -108,8 +108,9 @@ pub enum UnitKind {
     /// Neutral wild people (no tribe, owner 255 in the levels): the Convert spell makes braves of them.
     Wildman,
     /// The spell's own creature (model 13, type 8, `angel_of_death.rs`), spawned flying, not in `ALL`: never
-    /// trained, never a tribe's headcount, never selectable or given orders, and has no sprite of its own yet
-    /// (pop3-rev-analysis.md "Angel of Death mechanics", TODO.md).
+    /// trained, never a tribe's headcount, never selectable or given orders, and has no 2D sprite of its own (it
+    /// is drawn client-side as a 3D object-bank mesh instead, `game-client`'s own `angel_of_death.rs`;
+    /// pop3-rev-analysis.md "Angel of Death mechanics", TODO.md).
     AngelOfDeath,
 }
 
