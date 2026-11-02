@@ -128,18 +128,21 @@ impl Interpreter {
     /// game turn, the whole script is evaluated once per computer player"). `turn` is used for
     /// `EVERY`'s gating; a condition that reads `INT_GAME_TURN` gets its answer from `env` instead,
     /// so the two must agree (the caller's responsibility, same as the original engine's own turn
-    /// counter and its `INT_GAME_TURN` variable being the same number).
-    pub fn run_turn(&mut self, turn: u32, script: &Script, env: &mut impl Env) {
-        self.exec_block(&script.block, turn, env);
+    /// counter and its `INT_GAME_TURN` variable being the same number). `tribe` is this script's own
+    /// tribe number (0 blue, 1 red, 2 yellow, 3 green), also folded into `EVERY`'s gating
+    /// (`every_fires`) - confirmed against the exe (ai-scripts.md "How a script runs") as a genuine
+    /// per-tribe phase, not merely a converter guess.
+    pub fn run_turn(&mut self, turn: u32, tribe: u32, script: &Script, env: &mut impl Env) {
+        self.exec_block(&script.block, turn, tribe, env);
     }
 
-    fn exec_block(&mut self, block: &crate::ast::Block, turn: u32, env: &mut impl Env) {
+    fn exec_block(&mut self, block: &crate::ast::Block, turn: u32, tribe: u32, env: &mut impl Env) {
         for stmt in &block.0 {
-            self.exec_stmt(stmt, turn, env);
+            self.exec_stmt(stmt, turn, tribe, env);
         }
     }
 
-    fn exec_stmt(&mut self, stmt: &Stmt, turn: u32, env: &mut impl Env) {
+    fn exec_stmt(&mut self, stmt: &Stmt, turn: u32, tribe: u32, env: &mut impl Env) {
         match stmt {
             Stmt::Do(call) => {
                 let resolved = self.resolve_call(env, call);
@@ -154,8 +157,8 @@ impl Interpreter {
                 env.on_flyby(&resolved);
             }
             Stmt::Every { period, offset, block } => {
-                if every_fires(turn, *period, *offset) {
-                    self.exec_block(block, turn, env);
+                if every_fires(turn, tribe, *period, *offset) {
+                    self.exec_block(block, turn, tribe, env);
                 }
             }
             Stmt::Assign { op, dest, src } => {
@@ -180,9 +183,9 @@ impl Interpreter {
             }
             Stmt::If { cond, then_, else_ } => {
                 if self.eval_cond(cond, env) {
-                    self.exec_block(then_, turn, env);
+                    self.exec_block(then_, turn, tribe, env);
                 } else if let Some(else_) = else_ {
-                    self.exec_block(else_, turn, env);
+                    self.exec_block(else_, turn, tribe, env);
                 }
             }
         }
@@ -274,15 +277,18 @@ impl Interpreter {
     }
 }
 
-/// `EVERY period offset` fires on turns where `(turn + offset) % period == 0` (spec: "`EVERY n m`
-/// fires on the turns where `(turn + m) % n == 0`"; `period`/`offset` here are already the real,
-/// `+1`-corrected values the file's `period - 1` / `offset - 1` storage decodes to). The spec flags
-/// the exact off-by-one and any per-tribe phase as unverified — this is its own best-known guess,
-/// not a new one invented here.
-fn every_fires(turn: u32, period: i32, offset: Option<i32>) -> bool {
+/// `EVERY period offset` fires on turns where `(turn + tribe + offset) % period == 0` (spec: "`EVERY
+/// n m` fires on the turns where `(turn + tribe_num + m) % n == 0`"; `period`/`offset` here are
+/// already the real, `+1`-corrected values the file's `period - 1` / `offset - 1` storage decodes
+/// to). The per-tribe phase is confirmed against the exe (ai-scripts.md "How a script runs": "the
+/// original DOES add a real per-tribe phase... safe to implement exactly as the converter already
+/// does") - the real struct byte it reads isn't simply the tribe's player-slot number, but "tracks
+/// it", so using `tribe` (0 blue, 1 red, 2 yellow, 3 green) here is the same reading the Reincarnated
+/// Lua converter itself settled on, not a new guess.
+fn every_fires(turn: u32, tribe: u32, period: i32, offset: Option<i32>) -> bool {
     let period = period as u32;
     let offset = offset.unwrap_or(0) as u32;
-    (turn + offset).is_multiple_of(period)
+    (turn + tribe + offset).is_multiple_of(period)
 }
 
 #[cfg(test)]
@@ -345,7 +351,7 @@ mod tests {
         let script = turn_zero_script();
         let mut env = MockEnv { game_turn: 0, ..Default::default() };
         let mut interp = Interpreter::new();
-        interp.run_turn(0, &script, &mut env);
+        interp.run_turn(0, 0, &script, &mut env);
         assert_eq!(env.calls, vec![CommandId::from_name("SET_REINCARNATION").unwrap()]);
     }
 
@@ -356,12 +362,35 @@ mod tests {
 
         // One turn early: the ELSE branch runs, but EVERY doesn't fire yet.
         let mut env = MockEnv { game_turn: 243, ..Default::default() };
-        interp.run_turn(243, &script, &mut env);
+        interp.run_turn(243, 0, &script, &mut env);
         assert_eq!(env.calls, vec![]);
 
         let mut env = MockEnv { game_turn: 244, ..Default::default() };
-        interp.run_turn(244, &script, &mut env);
+        interp.run_turn(244, 0, &script, &mut env);
         assert_eq!(env.calls, vec![CommandId::from_name("DELAY_MAIN_DRUM_TOWER").unwrap()]);
+    }
+
+    #[test]
+    fn every_adds_a_per_tribe_phase_so_two_tribes_sharing_a_script_fire_on_different_turns() {
+        // Same `EVERY 256 12` body as the wiki's own example, run for two different tribes: tribe 0
+        // (blue) still fires at turn 244 as above, but tribe 1 (red) fires one turn earlier
+        // (`(turn + tribe + offset) % period == 0`) - ai-scripts.md "How a script runs": "two tribes
+        // sharing the same script body genuinely fire their EVERY blocks on different turns".
+        let script = turn_zero_script();
+        let mut blue = Interpreter::new();
+        let mut red = Interpreter::new();
+
+        let mut env = MockEnv { game_turn: 244, ..Default::default() };
+        blue.run_turn(244, 0, &script, &mut env);
+        assert_eq!(env.calls, vec![CommandId::from_name("DELAY_MAIN_DRUM_TOWER").unwrap()], "blue (tribe 0): unchanged from the wiki example");
+
+        let mut env = MockEnv { game_turn: 243, ..Default::default() };
+        red.run_turn(243, 1, &script, &mut env);
+        assert_eq!(env.calls, vec![CommandId::from_name("DELAY_MAIN_DRUM_TOWER").unwrap()], "red (tribe 1): fires one turn earlier than blue");
+
+        let mut env = MockEnv { game_turn: 244, ..Default::default() };
+        red.run_turn(244, 1, &script, &mut env);
+        assert_eq!(env.calls, vec![], "red (tribe 1): already fired at 243, not again at 244");
     }
 
     #[test]
@@ -376,8 +405,8 @@ mod tests {
         };
         let mut interp = Interpreter::new();
         let mut env = MockEnv::default();
-        interp.run_turn(1, &script, &mut env);
-        interp.run_turn(2, &script, &mut env);
+        interp.run_turn(1, 0, &script, &mut env);
+        interp.run_turn(2, 0, &script, &mut env);
         assert_eq!(interp.user_vars[0], 2);
     }
 
@@ -393,7 +422,7 @@ mod tests {
             }]),
         };
         let mut interp = Interpreter::new();
-        interp.run_turn(1, &script, &mut MockEnv::default());
+        interp.run_turn(1, 0, &script, &mut MockEnv::default());
         assert_eq!(interp.user_vars[0], 42);
     }
 
@@ -402,7 +431,7 @@ mod tests {
         let script = Script { version: 12, block: Block(vec![Stmt::Flyby(Flyby::default())]) };
         let mut interp = Interpreter::new();
         let mut env = MockEnv::default();
-        interp.run_turn(1, &script, &mut env);
+        interp.run_turn(1, 0, &script, &mut env);
         assert_eq!(env.flybys, 1);
     }
 
@@ -418,7 +447,7 @@ mod tests {
         let mut interp = Interpreter::new();
         interp.user_vars[0] = 5;
         let mut env = MockEnv { game_turn: 0, ..Default::default() };
-        interp.run_turn(0, &script, &mut env);
+        interp.run_turn(0, 0, &script, &mut env);
         assert_eq!(env.last_call_args, vec![Arg::Field(Field::Const(5)), Arg::Field(Field::Const(0))], "a user var and an internal var both resolved to plain constants");
     }
 
@@ -433,7 +462,7 @@ mod tests {
         let mut interp = Interpreter::new();
         interp.user_vars[0] = 42;
         let mut env = MockEnv::default();
-        interp.run_turn(1, &script, &mut env);
+        interp.run_turn(1, 0, &script, &mut env);
         assert_eq!(env.last_flyby.unwrap().positions, vec![ResolvedPos { x: 42, z: 5, start: 1, duration: 2 }]);
     }
 

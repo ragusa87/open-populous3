@@ -832,13 +832,17 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 - [x] Script interpreter in `game-core`, first pass: user variables (`pop3_ai_script::Interpreter`,
   pre-existing), `INT_MY_NUM_PEOPLE`/`INT_ATTR_*` read from the simulation/`NativeAi` (not the fuller
   `headcount`/`housing` set yet - just what `ai.rs`'s own sweep needed), `EVERY n m` firing when
-  `(turn + m) % n == 0` (pre-existing, `pop3_ai_script::interp::every_fires` - still missing the real
-  per-tribe phase ai-scripts.md itself flags as open, a different clock from the native engine's own
-  `SWEEP_EVERY` phase above), DO commands mapped to AI states and `Command`s for `STATE_*` and `ATTACK`
+  `(turn + tribe + m) % n == 0` (`pop3_ai_script::interp::every_fires`/`run_turn`, now including the
+  real per-tribe phase, confirmed against the exe and threaded in from `GameMap::tend_ai_scripts` -
+  a different clock from the native engine's own `SWEEP_EVERY` phase above), DO commands mapped to AI
+  states and `Command`s for `STATE_*` and `ATTACK`
   (previous item). Still open: `SET_SPELL_ENTRY` (shaman auto-cast, not modelled at all), the rest of
   `headcount`/`housing` as internal variables, and whether levels 2100/2110/2131's missing scripts
   (fall back to no script, unverified this falls back cleanly end to end) still need a check.
-- [ ] Script timing: measure the original turn rate (wiki: about 8 turns/s) against our 10 ticks/s, and whether `EVERY` adds a per-tribe phase, before porting script timings (see [ai-scripts.md](docs/specs/ai-scripts.md) "What this means here").
+- [x] Script timing: the original runs 12 turns/s (not the wiki's "about 8"; pop3-rev-analysis.md "Turns and
+  timing"), matching our own one-tick-per-turn (units.md) - no rescaling needed. `EVERY`'s per-tribe phase is
+  confirmed and implemented (see the interpreter item above); message timeouts and flyby times are turns too,
+  only `SET_TIMER_GOING` takes seconds (ai-scripts.md "Turn rate").
 - [x] Flybys: `FLYBY_CREATE_NEW..=FLYBY_START` drives the camera for real now
   (`game_core::ai_script::ScriptEnv::on_flyby` -> `GameMap::active_flyby`, `crates/game-client/src/flyby.rs`
   reads it to pose `CameraRig` and show the "Flyby"/"Cancelled flyby" banner; Space sends

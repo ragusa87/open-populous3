@@ -1209,6 +1209,9 @@ end
   wraps the original functions.
 - Open before implementing the rest of the actual AI (giving every other `DO` command real behaviour):
   - a decompiled-listing pretty-printer (`TODO.md` "Computer players (AI)")
-  - the `EVERY` off-by-one and whether there is a per-tribe phase
   - what `SET_ATTACK_VARIABLE` receives
   - the unknown states and commands marked "-" or "?" above
+
+  **Resolved**: the `EVERY` off-by-one and its per-tribe phase are both confirmed against the exe
+  ("How a script runs" above) and implemented (`pop3_ai_script::interp::every_fires`/`run_turn`, now
+  threading the script's own tribe number through from `GameMap::tend_ai_scripts`).

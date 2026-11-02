@@ -454,7 +454,7 @@ impl GameMap {
         let turn = self.now.to_wire();
         for ts in tribe_scripts.iter_mut() {
             let mut env = ScriptEnv { map: self, owner: ts.owner };
-            ts.interp.run_turn(turn, &ts.script, &mut env);
+            ts.interp.run_turn(turn, ts.owner.as_u8() as u32, &ts.script, &mut env);
         }
         self.tribe_scripts = tribe_scripts;
     }
@@ -692,6 +692,33 @@ mod tests {
         assert!(!map.ai_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK));
         map.tend_ai_scripts();
         assert!(map.ai_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK));
+    }
+
+    #[test]
+    fn tend_ai_scripts_feeds_each_tribes_own_number_into_everys_phase() {
+        // Two tribes running the exact same `EVERY 4 1` script body: ai-scripts.md "How a script runs"
+        // - "two tribes sharing the same script body genuinely fire their EVERY blocks on different
+        // turns" - confirmed here through `GameMap::tend_ai_scripts`'s own wiring (`ts.owner.as_u8()`),
+        // not just the interpreter's own unit test (`pop3_ai_script::interp`'s
+        // `every_adds_a_per_tribe_phase_so_two_tribes_sharing_a_script_fire_on_different_turns`).
+        let every_auto_attack_on = Script {
+            version: 12,
+            block: Block(vec![Stmt::Every { period: 4, offset: Some(1), block: Block(vec![Stmt::Do(Call { id: CommandId::from_name("STATE_AUTO_ATTACK").unwrap(), args: vec![Arg::OnOff(true)] })]) }]),
+        };
+        let mut map = map_with_a_site(100);
+        map.ai.push(crate::ai::NativeAi::new(TribeId::Blue));
+        map.ai.push(crate::ai::NativeAi::new(TribeId::Red));
+        map.tribe_scripts = vec![
+            TribeScript { owner: TribeId::Blue, script: every_auto_attack_on.clone(), interp: Interpreter::new() },
+            TribeScript { owner: TribeId::Red, script: every_auto_attack_on, interp: Interpreter::new() },
+        ];
+        map.now = Tick::from_wire(2);
+        map.tend_ai_scripts();
+        assert!(map.ai_state(TribeId::Red, crate::ai::state::AUTO_ATTACK), "red (tribe 1): (2+1+1)%4==0, fires at turn 2");
+        assert!(!map.ai_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK), "blue (tribe 0): (2+0+1)%4!=0, not yet");
+        map.now = Tick::from_wire(3);
+        map.tend_ai_scripts();
+        assert!(map.ai_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK), "blue (tribe 0): (3+0+1)%4==0, fires at turn 3");
     }
 
     #[test]
