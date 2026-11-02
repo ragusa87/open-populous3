@@ -697,6 +697,36 @@ is a pure runtime switch, independent of whether a shaman/site thing exists).
   `ENABLE_USER_INPUTS` and the flyby commands - so the sequence at turn 70+ is: the turn-0 lockout ends, a
   one-off dialog the player must dismiss appears, then the camera tour runs (or is skipped) while input stays
   enabled throughout.
+- Red's own raid is gated on a land connection, not on turn count or provocation alone. Turn 0 also sets
+  `STATE_AUTO_ATTACK ON`, `INT_ATTR_MAX_ATTACKS 1` (one scripted raid total), `INT_ATTR_AWAY_WARRIOR 34`,
+  `STATE_DEFEND ON`/`STATE_DEFEND_BASE ON` and `ONLY_STAND_AT_MARKERS` with a 3-entry marker table - so red's
+  own people are meant to stay confined to their assigned markers until the script itself sends them out.
+  An `EVERY 32 3` block repeatedly sums `GET_HEIGHT_AT_POS` over two marker clusters near the map's edges
+  (35..40, then 25..29 once the first sum is positive) into `$50`; while that strip reads as submerged `$50`
+  stays 0. Two later blocks read `$50` as the raid's own go/no-go flag:
+  ```
+  EVERY 256 55 {
+    IF ($50 > 0) IF (INT_M_PERSON_WARRIOR > 2) IF (INT_B_PERSON_WARRIOR > 0) IF ($2 == 0) {
+      DO COUNT_PEOPLE_IN_MARKER BLUE 3 7 $8        -- blue people within 7 cells of marker 3
+      IF ($8 > 0) DO ATTACK BLUE 3 MARKER 3 999 ... NORMAL 0 -1 -1 0   -- 3 units raid marker 3
+    }                                               -- then a $0/$2 cooldown-and-retry state machine
+  }
+  EVERY 256 175 {
+    IF ($3 == 0) IF ($50 == 1) IF (INT_M_PERSON_WARRIOR == 0) IF (INT_BLUE_PEOPLE > 2 * INT_MY_NUM_PEOPLE) {
+      -- a one-off, all-in last stand: every remaining person (AWAY_* all set to 100/1) sent at blue
+      DO ATTACK BLUE INT_MY_NUM_PEOPLE BUILDING NO_SPECIFIC_BUILDING 999 ... NORMAL 0 -1 -1 0
+    }
+  }
+  ```
+  So on `levl2001.dat` (level 1) red never launches either scripted attack while the two marker clusters it
+  samples stay below water - reading those marker coordinates off the level header (`markers 25:(1,4)..29:(5,4)`,
+  `35:(1,117)..40:(6,117)`, `3:(3,125)`) against the terrain would confirm which edge this is, but the shape of
+  the check (height-sum over a short straight run, re-armed every 32 ticks) reads as "is there now land/a bridge
+  across this stretch" rather than a timer or aggro check - consistent with red staying passive until the human
+  crosses to its side. `INT_ATTR_MAX_ATTACKS 1` then caps the scripted side to that one raid (plus the separate
+  last-stand once `$50 == 1` exactly and red is wiped down to 0 warriors). **Not traced against the exe**: this
+  reading of `$50` is this session's own inference from the decoded script and the files' own marker/height
+  data, not confirmed live or in the disassembly.
 
 ### Attributes (`INT_ATTR_*`)
 | Attribute | Meaning, usual values |

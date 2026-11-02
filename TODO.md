@@ -702,6 +702,20 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   guessed base radius - distinct from `spotting.rs`'s own always-on per-unit auto-engage, which only
   looks a handful of cells around a unit already idle. None of this is traced against the exe beyond
   what ai-scripts.md already gives; every guessed number says so in its own doc comment.
+- [ ] **Reported, 2026-11-02**: level 1 (`levl2001.dat`, red = `cpscr010`) attacked the human in play; decoding
+  the actual file (ai-scripts.md "Worked example: level 1's opening flyby", now extended with the raid logic)
+  shows red's own two scripted `DO ATTACK`s are gated on a `GET_HEIGHT_AT_POS` land-connection check (`$50`,
+  stays 0 - no raid - until a specific edge strip reads as land) plus warrior-count thresholds, so the original
+  should stay passive on this level until the human bridges across. None of the commands that check (`$50`'s own
+  `GET_HEIGHT_AT_POS`, `COUNT_PEOPLE_IN_MARKER`) or constrain red's people (`ONLY_STAND_AT_MARKERS`,
+  `SET_MARKER_ENTRY`, `MARKER_ENTRIES`) are modelled yet (`ai_script.rs`'s `do_call` catch-all, same
+  `Markers[256]` gap as `ATTACK_MARKER` above) - so today's engine can't run this gate at all, scripted or not.
+  The likely actual source of what was seen: `ai_defend_base`'s own guessed base radius (above) has no
+  marker-confinement to stay narrow against, and ordinary per-unit auto-engage doesn't know red's people are
+  meant to be held back either - so a human who gets within the guessed base radius (or just within a few cells
+  of a red unit) draws it into a fight the original wouldn't allow yet on this level. Needs the marker table and
+  `GET_HEIGHT_AT_POS`/`COUNT_PEOPLE_IN_MARKER` wired (so the real gate can run) and `ONLY_STAND_AT_MARKERS`
+  modelled (so red's people stay put until then) before this is fixed rather than coincidentally avoided.
 - [ ] Shaman positioning and a drum-tower rally point (live-observed on level 25: red's script builds a
   drum tower at its `SET_DRUM_TOWER_POS`, the shaman goes inside it, and followers gather around it;
   when it is destroyed the shaman waits beside it while braves repair it, instead of the tower staying
