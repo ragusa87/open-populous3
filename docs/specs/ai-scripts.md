@@ -498,7 +498,17 @@ their meaning only comes from their name.
 | 1050, 1051 | 22 `FLATTEN_BASE`, 23 `BUILD_OUTER_DEFENCES` | - |
 
 Internal states 24-28 (`GUARD_AT_MARKER`, `SEND_ALL_TO_MARKER`, `PRAY_AT_HEAD`, `BOAT_PATROL`, `DEFEND_SHAMEN`)
-have no token. They are probably set by the DO commands of the same name (inference).
+have no token. **Corrected from the exe this session (pop3-rev, `docs/functions.tsv` rows `0x4e6440`/`0x4e66e0`/
+`0x4e68e0`/`0x4e6880`, plus the marker/guard rows above)**: these are NOT extra bits of the `STATE_*` flags word
+above (that word only ever covers bits 0-23, one per `DO STATE_x ON|OFF` token) - they are a completely separate
+numbering space, the native AI's own internal task-queue type ids, which merely happen to share digits 24-28.
+Each has its own dedicated `DO` command that enqueues that exact task type directly, with no `STATE_*` flags-word
+write at all - exactly like `DO ATTACK` already enqueues its own task type (20) directly. Confirmed:
+`GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` -> task 24 (shared with `SET_MARKER_ENTRY`/`MARKER_ENTRIES`, see
+"Markers, guards and the base"), `SEND_ALL_PEOPLE_TO_MARKER` -> task 25, `VEHICLE_PATROL` -> task 27,
+`DEFEND_SHAMEN` -> task 28. **One unresolved contradiction, not settled this session**: `PRAY_AT_HEAD`'s own call
+site also appears to enqueue task type 26, but task 26 was independently and thoroughly traced elsewhere as
+`TRAIN_PEOPLE`'s own task - left open for a future pop3-rev session rather than guessed either way.
 
 Other ON/OFF switches:
 - `SET_REINCARNATION`: this AI gets a reincarnation site at the start. `SET_NO_BLUE_REINC` is the human
@@ -557,16 +567,52 @@ Other ON/OFF switches:
 - The six `[DONT_]TARGET_*` commands showed no effect in testing (?).
 
 ### Markers, guards and the base
-- `SET_MARKER_ENTRY entry m1 m2 braves warriors firewarriors preachers` defines a patrol group: it guards
-  between `m1` and `m2`, or circles `m1` when `m2` is -1.
-  - `MARKER_ENTRIES e1 e2 e3 e4` activates up to 4 groups, and `CLEAR_GUARDING_FROM e1..e4` deactivates them
-    (-1 = unused slot).
-  - `ONLY_STAND_AT_MARKERS` makes the groups stand still instead of circling.
-  - The wiki calls this pair Bullfrog's preferred method.
-- `GUARD_AT_MARKER m b w f p GUARD_NORMAL` and `GUARD_BETWEEN_MARKERS m1 m2 b w f p GUARD_NORMAL` are one-off
-  guard orders.
-- `VEHICLE_PATROL num m1 m2 m3 m4 BOAT_TYPE|BALLOON_TYPE`: a patrol in vehicles. How the markers are used is
-  unknown (?); the examples alternate two of them.
+**Traced from the exe this session** (pop3-rev, `docs/functions.tsv` rows `0x4cedd0`/`0x48ff60`/`0x490440`/
+`0x4e6550`/`0x4e6470`/`0x4929c0`/`0x48cff3`/`0x48d00d`/`0x492090`/`0x4f3720`/`0x48d475` - a planned marker-table
+wiring task had left this one piece out of scope pending this investigation):
+
+- `SET_MARKER_ENTRY entry m1 m2 braves warriors firewarriors preachers` is **pure definition, not activation** -
+  it only writes into a flat per-tribe table of 4 slots (one per `entry`, 0-3), 8 bytes each: `m1`, `m2` (marker
+  indices, `-1`/unused as a byte sentinel) and the 4 troop-type counts, **each silently clamped to 0-100 by the
+  engine** (not previously documented). No task or behaviour starts until `MARKER_ENTRIES` activates it.
+- `MARKER_ENTRIES e1 e2 e3 e4` is the activation step, and spawns **exactly one** native guard/patrol task - not
+  one per activated entry. That one task instance carries all of `e1..e4`'s (marker-pair, troop-count) records
+  side by side, but works through them **one at a time, in sequence**: gather and dispatch the first activated
+  entry's group, then move to the next, and so on - **`MARKER_ENTRIES 0 1 2 3` does not put up 4 simultaneous
+  guard groups, it puts up one group after another.** Each entry's group guards between its own `m1`/`m2`, or
+  circles `m1` alone when `m2` is `-1`.
+  - `ONLY_STAND_AT_MARKERS` sets a **one-shot** flag that the very next `MARKER_ENTRIES` call reads once and
+    clears - **not a persistent/global toggle.** A script must call it again immediately before every
+    `MARKER_ENTRIES` activation it wants to be stand-still rather than circling; it has no effect at all on
+    `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` below (that path never reads this flag).
+  - `CLEAR_GUARDING_FROM e1 e2 e3 e4` (previously undocumented here) deactivates by **position, not by task
+    handle**: for each named, non-`-1` `SET_MARKER_ENTRY` slot, it looks up that slot's own stored marker
+    position(s) and gives a fresh, ordinary move order (to their own current spot) to whichever units are
+    currently found guarding/patrolling there - which, by the engine's general "a new order always replaces the
+    old one" rule, silently drops their guard/patrol commitment as a side effect, rather than calling a dedicated
+    "cancel" routine. Because it works by position, it has no reliable way to reach an ad-hoc
+    `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` group below (nothing was ever written to the slot table for those)
+    except by marker-position coincidence.
+  - The wiki calls the `SET_MARKER_ENTRY`/`MARKER_ENTRIES` pair Bullfrog's preferred method.
+- `GUARD_AT_MARKER m b w f p GUARD_NORMAL` and `GUARD_BETWEEN_MARKERS m1 m2 b w f p GUARD_NORMAL` are **confirmed
+  to be the exact same native mechanism as `SET_MARKER_ENTRY`/`MARKER_ENTRIES` above** (same task type, same
+  per-tick handler, same record shape), just invoked directly with no persistent entry slot - `GUARD_AT_MARKER`
+  is literally `GUARD_BETWEEN_MARKERS` with the second marker left absent. Not a separate "one-off" system, as
+  this spec previously left open. The `GUARD_NORMAL`/`GUARD_WITH_GHOSTS` token is parsed but, on this call path,
+  its value is never actually forwarded into the native call that starts the task - no behavioural difference
+  between the two was found this session (not independently live-tested).
+  - **No death/replacement mechanism was found**: once a group has been gathered and dispatched, nothing in the
+    native task handler re-gathers or tops it up - losses are not replaced (inferred from the total absence of
+    any code path back into the gathering step for an already-dispatched group; not live-confirmed, so implement
+    as the default - no auto-replace - but don't treat it as fully settled).
+  - **Open gap, not resolved this session**: the actual walk/circle movement order for a gathered group was not
+    found inside the native task handler itself (no call shaped like the player's own "patrol points" order-setter,
+    units.md "Patrol orders", turned up there) - how the group is actually made to walk a circuit between its
+    markers is still unknown. Worth a dedicated follow-up for a future pop3-rev session (one call, `0x4f2440` in
+    pop3-rev's `functions.tsv`, is flagged there as the one unexplained lead).
+- `VEHICLE_PATROL num m1 m2 m3 m4 BOAT_TYPE|BALLOON_TYPE`: a patrol in vehicles - **confirmed this session as its
+  own native task** (distinct from the person-guard task above). How the 4 markers are used is still unknown
+  (?); the examples alternate two of them.
 - `SET_BASE_MARKER m` sets the centre of the base, and `SET_BASE_RADIUS r` its radius (for wildmen
   conversion). Bullfrog always calls `RESET_BASE_MARKER` (?) just before `SET_BASE_MARKER`.
   `SET_DEFENCE_RADIUS r` is unknown (?).

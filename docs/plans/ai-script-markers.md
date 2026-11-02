@@ -72,15 +72,23 @@ session, not something traced from here.
      `ATTACK`'s `Marker` case as implemented, not just specified.
 
 ## Explicitly out of scope (needs a `pop3-rev` spec session first, not guessable from here)
-- `SET_MARKER_ENTRY`/`MARKER_ENTRIES`/`ONLY_STAND_AT_MARKERS` (patrol/guard groups): a bigger,
-  separate feature. `ai-scripts.md` has their design-level shape (patrol between two markers or
-  circle one, stand-still variant), but the circling pattern/speed and what happens when a guard
-  dies are unconfirmed - soft enough to deserve a short pop3-rev look before attempting it, logged
-  to its own `docs/todo/<slug>.md` entry rather than guessed silently here.
-- `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/`VEHICLE_PATROL`/`SET_BASE_MARKER`/`RESET_BASE_MARKER`/
-  `SET_DEFENCE_RADIUS`, and the six `[DONT_]TARGET_*` commands: `ai-scripts.md` marks these
-  outright "(?)"/"unknown"/"showed no effect in testing" - genuinely need a pop3-rev investigation,
-  not an implementation attempt.
+- **Resolved, 2026-11-02 (pop3-rev investigation)**: `SET_MARKER_ENTRY`/`MARKER_ENTRIES`/
+  `ONLY_STAND_AT_MARKERS`/`GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/`CLEAR_GUARDING_FROM` and the
+  "internal states 24-28" question are now specified - ai-scripts.md "Markers, guards and the base"
+  and its "internal states 24-28" note, both rewritten with the exe-traced mechanics (storage
+  layout, one-shot `ONLY_STAND_AT_MARKERS` flag, `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` confirmed
+  as the same mechanism as the pair above not a separate one, `CLEAR_GUARDING_FROM`'s position-based
+  cancel). Two things stayed genuinely open even after that session (the exe's own trace didn't
+  settle them, not just "not yet looked at"): the actual walk/circle movement order for a gathered
+  group (own guess needed, e.g. reusing our own patrol-point mechanism), and whether a shrunk group
+  is ever replenished (current reading: no). A future coding session can now implement this feature
+  from the spec directly rather than needing another pop3-rev look first - though the two open
+  points above still mean guessing a couple of pieces rather than reproducing the original exactly.
+- `VEHICLE_PATROL`/`SET_BASE_MARKER`/`RESET_BASE_MARKER`/`SET_DEFENCE_RADIUS`, and the six
+  `[DONT_]TARGET_*` commands: still out of scope. `ai-scripts.md` marks these outright
+  "(?)"/"unknown"/"showed no effect in testing" (`VEHICLE_PATROL` is now confirmed as its own native
+  task, but how its 4 markers are used is still unknown) - genuinely need a further pop3-rev
+  investigation, not an implementation attempt.
 - The separate, already-implemented `ai_defend_base`/`tend_ai_defense` reactive counter-attack's
   own guessed base radius (likely the actual cause of what was observed in play) is untouched by
   this plan - it doesn't depend on the marker table at all, and tightening it is a different task.

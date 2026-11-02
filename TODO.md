@@ -677,8 +677,9 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   to attack"; it launches the chosen fighters straight at their target instead of the original's own
   muster-at-the-drum-tower-then-march sequence (simplified, not traced). Deliberately not modelled at
   all yet: garrison and vehicle tasks, scripted patrol groups and one-off guards
-  (`SET_MARKER_ENTRY`/`GUARD_AT_MARKER`/...: need the level header's `Markers[256]` table, not read
-  anywhere yet), `ATTACK_MARKER` targets (same marker-table gap), and the real worker-selection/
+  (`SET_MARKER_ENTRY`/`GUARD_AT_MARKER`/... - now specified, ai-scripts.md "Markers, guards and the base":
+  need the level header's `Markers[256]` table, not read anywhere yet, plus an own-guess movement order since
+  the exe's own one wasn't found), `ATTACK_MARKER` targets (same marker-table gap), and the real worker-selection/
   site-search tie-breaking rules (ours: a bounded random site search, idle braves in id order). See the
   next few items for what reaches it from a script.
 - [x] Shaman auto-cast, `ATTACK`'s damage-then-withdraw threshold, and a reactive counter-attack
@@ -716,6 +717,14 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   of a red unit) draws it into a fight the original wouldn't allow yet on this level. Needs the marker table and
   `GET_HEIGHT_AT_POS`/`COUNT_PEOPLE_IN_MARKER` wired (so the real gate can run) and `ONLY_STAND_AT_MARKERS`
   modelled (so red's people stay put until then) before this is fixed rather than coincidentally avoided.
+  **`SET_MARKER_ENTRY`/`MARKER_ENTRIES`/`ONLY_STAND_AT_MARKERS`/`GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/
+  `CLEAR_GUARDING_FROM` are now specified** (ai-scripts.md "Markers, guards and the base", traced from the exe) -
+  enough to implement the storage/activation/one-shot-flag/cancel mechanics once the `Markers[256]` table itself
+  is wired (see the native-engine item above and `docs/plans/ai-script-markers.md`'s own scope). Two pieces are
+  still genuinely open, not just unwired: the actual walk/circle movement order for a gathered group was never
+  found in the exe trace (implement a reasonable guess - e.g. reuse our own patrol-point mechanism, units.md
+  "Patrol orders" - and flag it as such, don't block on finding the original's exact one), and whether a guard
+  group ever gets replenished after losses is unconfirmed (current best reading: no, so don't auto-replace).
 - [ ] Shaman positioning and a drum-tower rally point (live-observed on level 25: red's script builds a
   drum tower at its `SET_DRUM_TOWER_POS`, the shaman goes inside it, and followers gather around it;
   when it is destroyed the shaman waits beside it while braves repair it, instead of the tower staying
