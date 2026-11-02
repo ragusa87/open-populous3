@@ -24,7 +24,7 @@ use crate::shading::{CellShading, SunParams};
 use crate::tribes::{Owner, TribeId, Tribes};
 use crate::unit::{torus_delta, Action, Order, Target, Unit, UnitEvent, UnitId, UnitKind};
 use crate::wood::WoodPiece;
-use pop3_format::header::TRIBES;
+use pop3_format::header::{MARKERS, TRIBES};
 use pop3_format::{Level, LevelHeader, MAP_SIZE, WORLD_UNITS_PER_CELL};
 use crate::time::{Countdown, Tick, Ticks};
 use std::path::Path;
@@ -68,6 +68,10 @@ pub struct GameMap {
     /// Where the camera starts: an original level's header (None when it does not say), `OUR_MAPS_CAMERA`
     /// on generated maps and sandboxes.
     pub start_camera: Option<StartCamera>,
+    /// An original level's marker table (header `Markers[256]`), each resolved to a cell: `None` on
+    /// generated maps and sandboxes (no header at all), same as `start_camera`. ai-scripts.md "Markers,
+    /// guards and the base".
+    pub markers: Option<[(u8, u8); MARKERS]>,
     /// An original level's object bank (header byte 97): its tree style. 0 elsewhere.
     pub object_bank: u8,
     /// The player is a god (level flag "shaman omni", level 25): spells starting at the caster start at the
@@ -173,7 +177,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, balance: crate::balance::Balance::ours() }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, balance: crate::balance::Balance::ours() }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -208,6 +212,7 @@ impl GameMap {
             campfires: Vec::new(),
             walls: Walls::default(),
             start_camera: None,
+            markers: None,
             object_bank: 0,
             shaman_omni: false,
             effects: Registry::default(),
@@ -342,12 +347,13 @@ impl GameMap {
         }
         let build_books = header.as_ref().map_or(map.build_books.clone(), |h| per_player(BuildBook::from_level(h, &level)));
         let start_camera = header.as_ref().and_then(StartCamera::from_header);
+        let markers = header.as_ref().map(|h| std::array::from_fn(|i| h.marker_cell(i)));
         let object_bank = header.as_ref().map_or(0, |h| h.object_bank);
         let shaman_omni = header.as_ref().is_some_and(|h| h.flags.has(pop3_format::header::LevelFlags::SHAMAN_OMNI));
         let tribes = header.as_ref().map_or(map.tribes.clone(), |h| map.tribes.clone().with_allies(h.allies));
         let tribe_scripts = header.as_ref().map_or(Vec::new(), |h| crate::ai_script::load_tribe_scripts(dat, h.ai_scripts));
         let ai = tribe_scripts.iter().map(|ts| crate::ai::NativeAi::new(ts.owner)).collect();
-        let mut map = GameMap { spell_books, build_books, start_camera, object_bank, shaman_omni, tribes, tribe_scripts, ai, ..map };
+        let mut map = GameMap { spell_books, build_books, start_camera, markers, object_bank, shaman_omni, tribes, tribe_scripts, ai, ..map };
         // "Turn 0" (ai-scripts.md "How a script runs"): a real script's setup block, run once here
         // while `now` is still `Tick::ZERO`, before the game truly starts. `tick()`'s own later calls
         // to `tend_ai_scripts` (turns 1, 2, 3, ...) run the `ELSE { EVERY ... }` branch from then on.
@@ -755,6 +761,20 @@ impl GameMap {
 
     pub fn shaman_of(&self, owner: TribeId) -> Option<&Unit> {
         self.units.iter().find(|u| u.owner == owner && u.kind == UnitKind::Shaman)
+    }
+
+    /// Resolves an AI script's marker field to its cell (`markers`, the level header's own table):
+    /// `None` on a generated map or sandbox (no header at all) or an out-of-range index - our own guess
+    /// at a safe default, since ai-scripts.md doesn't say and the original never runs a script without
+    /// its own level's table to index.
+    pub(crate) fn marker_cell(&self, index: i32) -> Option<(u8, u8)> {
+        usize::try_from(index).ok().and_then(|i| self.markers.as_ref().and_then(|m| m.get(i))).copied()
+    }
+
+    /// `marker_cell`, converted to a world-unit position like every other cell-based position in this
+    /// crate (`WORLD_UNITS_PER_CELL` per cell).
+    pub(crate) fn marker_pos(&self, index: i32) -> Option<(u16, u16)> {
+        self.marker_cell(index).map(|(x, z)| (x as u16 * WORLD_UNITS_PER_CELL as u16, z as u16 * WORLD_UNITS_PER_CELL as u16))
     }
 
     fn shaman_mut(&mut self, owner: TribeId) -> Option<&mut Unit> {
@@ -2604,6 +2624,19 @@ mod tests {
         assert_eq!(StartCamera::from_header(&header(0, 0)), None);
         assert_eq!(StartCamera::from_header(&header(166 << 8 | 42, 1144)), Some(StartCamera { cell: Some((21, 83)), angle: 1144 }));
         assert_eq!(StartCamera::from_header(&header(0, 1016)), Some(StartCamera { cell: None, angle: 1016 }));
+    }
+
+    #[test]
+    fn marker_cell_resolves_through_the_levels_own_table_and_is_none_without_one() {
+        let mut markers = [(0u8, 0u8); MARKERS];
+        markers[3] = (21, 83);
+        let map = GameMap { markers: Some(markers), ..GameMap::bare("t", Heightmap::new(32), Vec::new()) };
+        assert_eq!(map.marker_cell(3), Some((21, 83)));
+        assert_eq!(map.marker_pos(3), Some((21 * WORLD_UNITS_PER_CELL as u16, 83 * WORLD_UNITS_PER_CELL as u16)));
+        assert_eq!(map.marker_cell(9999), None, "out of range: a safe default, not a panic");
+        assert_eq!(map.marker_cell(-1), None, "negative: a safe default, not a panic");
+        let generated = GameMap::bare("t", Heightmap::new(32), Vec::new());
+        assert_eq!(generated.marker_cell(3), None, "no header at all: a safe default");
     }
 
     #[test]

@@ -677,11 +677,12 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   to attack"; it launches the chosen fighters straight at their target instead of the original's own
   muster-at-the-drum-tower-then-march sequence (simplified, not traced). Deliberately not modelled at
   all yet: garrison and vehicle tasks, scripted patrol groups and one-off guards
-  (`SET_MARKER_ENTRY`/`GUARD_AT_MARKER`/... - now specified, ai-scripts.md "Markers, guards and the base":
-  need the level header's `Markers[256]` table, not read anywhere yet, plus an own-guess movement order since
-  the exe's own one wasn't found), `ATTACK_MARKER` targets (same marker-table gap), and the real worker-selection/
-  site-search tie-breaking rules (ours: a bounded random site search, idle braves in id order). See the
-  next few items for what reaches it from a script.
+  (`SET_MARKER_ENTRY`/`GUARD_AT_MARKER`/... - specified, ai-scripts.md "Markers, guards and the base":
+  `GameMap::markers` now threads the level header's `Markers[256]` table in (`docs/plans/ai-script-markers.md`),
+  but nothing here reads it for a standing guard/patrol task yet, plus an own-guess movement order since the
+  exe's own one wasn't found), and the real worker-selection/site-search tie-breaking rules (ours: a bounded
+  random site search, idle braves in id order). `DO ATTACK`'s own `ATTACK_MARKER` case is implemented
+  (`ai::AttackGoal::Marker`, below). See the next few items for what reaches it from a script.
 - [x] Shaman auto-cast, `ATTACK`'s damage-then-withdraw threshold, and a reactive counter-attack
   (`game_core::ai`, previously all three "deliberately not modelled" above): `SET_SPELL_ENTRY`'s own
   slots (`NativeAi::spell_entries`, `GameMap::ai_set_spell_entry`) are checked every `REACTIVE_EVERY` (8
@@ -703,28 +704,25 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   guessed base radius - distinct from `spotting.rs`'s own always-on per-unit auto-engage, which only
   looks a handful of cells around a unit already idle. None of this is traced against the exe beyond
   what ai-scripts.md already gives; every guessed number says so in its own doc comment.
-- [ ] **Reported, 2026-11-02**: level 1 (`levl2001.dat`, red = `cpscr010`) attacked the human in play; decoding
-  the actual file (ai-scripts.md "Worked example: level 1's opening flyby", now extended with the raid logic)
-  shows red's own two scripted `DO ATTACK`s are gated on a `GET_HEIGHT_AT_POS` land-connection check (`$50`,
-  stays 0 - no raid - until a specific edge strip reads as land) plus warrior-count thresholds, so the original
-  should stay passive on this level until the human bridges across. None of the commands that check (`$50`'s own
-  `GET_HEIGHT_AT_POS`, `COUNT_PEOPLE_IN_MARKER`) or constrain red's people (`ONLY_STAND_AT_MARKERS`,
-  `SET_MARKER_ENTRY`, `MARKER_ENTRIES`) are modelled yet (`ai_script.rs`'s `do_call` catch-all, same
-  `Markers[256]` gap as `ATTACK_MARKER` above) - so today's engine can't run this gate at all, scripted or not.
-  The likely actual source of what was seen: `ai_defend_base`'s own guessed base radius (above) has no
-  marker-confinement to stay narrow against, and ordinary per-unit auto-engage doesn't know red's people are
-  meant to be held back either - so a human who gets within the guessed base radius (or just within a few cells
-  of a red unit) draws it into a fight the original wouldn't allow yet on this level. Needs the marker table and
-  `GET_HEIGHT_AT_POS`/`COUNT_PEOPLE_IN_MARKER` wired (so the real gate can run) and `ONLY_STAND_AT_MARKERS`
-  modelled (so red's people stay put until then) before this is fixed rather than coincidentally avoided.
-  **`SET_MARKER_ENTRY`/`MARKER_ENTRIES`/`ONLY_STAND_AT_MARKERS`/`GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/
-  `CLEAR_GUARDING_FROM` are now specified** (ai-scripts.md "Markers, guards and the base", traced from the exe) -
-  enough to implement the storage/activation/one-shot-flag/cancel mechanics once the `Markers[256]` table itself
-  is wired (see the native-engine item above and `docs/plans/ai-script-markers.md`'s own scope). Two pieces are
-  still genuinely open, not just unwired: the actual walk/circle movement order for a gathered group was never
-  found in the exe trace (implement a reasonable guess - e.g. reuse our own patrol-point mechanism, units.md
-  "Patrol orders" - and flag it as such, don't block on finding the original's exact one), and whether a guard
-  group ever gets replenished after losses is unconfirmed (current best reading: no, so don't auto-replace).
+- [x] The level header's `Markers[256]` table is now threaded into `game-core` (`GameMap::markers`,
+  `marker_cell`/`marker_pos`, `docs/plans/ai-script-markers.md`), and `GET_HEIGHT_AT_POS`/
+  `COUNT_PEOPLE_IN_MARKER`/`IS_SHAMAN_IN_AREA` and `ATTACK`'s own `MARKER` target case (`ai::AttackGoal::Marker`)
+  are implemented on top of it (`ai_script.rs`'s `do_call`). This closes the 2026-11-02 report that level 1
+  (`levl2001.dat`, red = `cpscr010`) attacked the human in play: red's own two scripted `DO ATTACK`s are gated
+  on a `GET_HEIGHT_AT_POS` land-connection check (ai-scripts.md "Worked example: level 1's opening flyby") that
+  can now actually run (regression test: `ai_script.rs`'s
+  `a_level_1_shaped_script_withholds_its_raid_until_its_marker_cluster_is_land_bridged`).
+  **Still open, and likely the actual source of what was originally observed**: `ONLY_STAND_AT_MARKERS`/
+  `SET_MARKER_ENTRY`/`MARKER_ENTRIES`/`GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/`CLEAR_GUARDING_FROM` (specified,
+  ai-scripts.md "Markers, guards and the base", traced from the exe) are still not modelled - nothing confines
+  red's own people to their assigned markers yet, and `ai_defend_base`'s own guessed base radius still has no
+  marker-confinement to stay narrow against - so a human who gets within that radius, or near a red unit, can
+  still draw it into a fight before the script would allow on levels that rely on this. Two pieces of the
+  guard/patrol mechanic are genuinely open even once someone picks this up, not just unwired: the actual
+  walk/circle movement order for a gathered group was never found in the exe trace (implement a reasonable guess
+  - e.g. reuse our own patrol-point mechanism, units.md "Patrol orders" - and flag it as such, don't block on
+  finding the original's exact one), and whether a guard group ever gets replenished after losses is unconfirmed
+  (current best reading: no, so don't auto-replace).
 - [ ] Shaman positioning and a drum-tower rally point (live-observed on level 25: red's script builds a
   drum tower at its `SET_DRUM_TOWER_POS`, the shaman goes inside it, and followers gather around it;
   when it is destroyed the shaman waits beside it while braves repair it, instead of the tower staying

@@ -535,7 +535,9 @@ Other ON/OFF switches:
     `SET_DRUM_TOWER_POS` was used, unless `INT_ATTR_DONT_GROUP_AT_DT` is set. It leaves, regroups at `m1`
     because units walk at different speeds, then attacks.
   - `target_type`:
-    - `ATTACK_MARKER`: `model` is a marker index, and the force fights whatever is there.
+    - `ATTACK_MARKER`: `model` is a marker index, and the force fights whatever is there. **Implemented**
+      (`ai::AttackGoal::Marker`, `GameMap::ai_attack_target`): our own reading of "whatever is there" is the
+      target tribe's own unit nearest the marker's cell, not traced against the exe beyond that.
     - `ATTACK_BUILDING`: `model` is a building, or `INT_NO_SPECIFIC_BUILDING` for the nearest one. The force
       fights the occupants, then dismantles the building.
     - `ATTACK_PERSON`: in practice always the enemy shaman (`INT_TARGET_SHAMAN`).
@@ -617,9 +619,13 @@ wiring task had left this one piece out of scope pending this investigation):
   conversion). Bullfrog always calls `RESET_BASE_MARKER` (?) just before `SET_BASE_MARKER`.
   `SET_DEFENCE_RADIUS r` is unknown (?).
 - `COUNT_PEOPLE_IN_MARKER team|COUNT_WILD marker radius $v` (144 uses) and `IS_SHAMAN_IN_AREA team marker
-  radius $v`.
+  radius $v`. **Implemented** (`ai_script.rs`'s `do_call`), over `GameMap::units` within `radius` cells of the
+  marker's own cell; `COUNT_WILD` matches by `UnitKind::Wildman`, not by owner (`attack.rs`'s own wildman
+  handling).
 - `GET_HEIGHT_AT_POS marker $v` gives the ground height. It is used to notice that the water at a marker has
-  been land-bridged.
+  been land-bridged. **Implemented** (`ai_script.rs`'s `do_call`), reading `GameMap::terrain` at the marker's
+  own cell; an out-of-range marker index or a headerless map (no `Markers[256]` table at all) reads as 0 - our
+  own guessed safe default, not traced.
 
 ### People, buildings and orders
 - `TRAIN_PEOPLE_NOW n model` sends `n` braves to train, e.g. `5 INT_RELIGIOUS`.

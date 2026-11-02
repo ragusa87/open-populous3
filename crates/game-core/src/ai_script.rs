@@ -2,11 +2,13 @@
 //! through `pop3_ai_script::interp::Env`. `SET_REINCARNATION`/`SET_NO_BLUE_REINC`,
 //! `FLYBY_CREATE_NEW..=FLYBY_START` (`ScriptEnv::on_flyby`), every `STATE_*` toggle, `SET_DRUM_TOWER_POS`/
 //! `BUILD_DRUM_TOWER`/`DELAY_MAIN_DRUM_TOWER`/`BUILD_MAIN_DRUM_TOWER`, `TRAIN_PEOPLE_NOW`, `ATTACK`
-//! (including its own `damage` withdraw threshold, `ai.rs`'s `Sortie`), `SET_SPELL_ENTRY`, the level-event
+//! (including its own `damage` withdraw threshold, `ai.rs`'s `Sortie`, and its `ATTACK_MARKER` case
+//! through `GameMap::marker_cell`/`marker_pos`), `SET_SPELL_ENTRY`, the level-event
 //! gifts (`GIVE_MANA_TO_PLAYER`/`GIVE_ONE_SHOT`/`GIVE_PLAYER_SPELL`/`REMOVE_PLAYER_THING`),
 //! `TRIGGER_LEVEL_WON/LOST`, the timer trio and a handful of queries
-//! (`I_HAVE_ONE_SHOT`/`IS_SHAMAN_AVAILABLE_FOR_ATTACK`/`COUNT_ANGELS`/`IS_BUILDING_NEAR`) have real
-//! behaviour; every other `DO` command (markers/guard groups, vehicles, messages/camera/tutorial UI)
+//! (`I_HAVE_ONE_SHOT`/`IS_SHAMAN_AVAILABLE_FOR_ATTACK`/`COUNT_ANGELS`/`IS_BUILDING_NEAR`/
+//! `GET_HEIGHT_AT_POS`/`COUNT_PEOPLE_IN_MARKER`/`IS_SHAMAN_IN_AREA`) have real
+//! behaviour; every other `DO` command (guard groups, vehicles, messages/camera/tutorial UI)
 //! still reaches the bridge and is deliberately ignored (TODO.md "Computer players (AI)"). A query
 //! command returns its result instead (`Env::do_call`'s own `Option<i32>`): the interpreter writes it
 //! into the script's own `var_field` user variable, since `Env` owns no variable storage itself.
@@ -167,7 +169,7 @@ impl Env for ScriptEnv<'_> {
                     let goal = match target_type {
                         TargetType::Person => Some(AttackGoal::Shaman),
                         TargetType::Building => Some(AttackGoal::Building(building_kind_from_model(*model))),
-                        TargetType::Marker => None, // needs the level header's Markers[256] table, not read anywhere yet
+                        TargetType::Marker => Some(AttackGoal::Marker(field_i32(*model).max(0) as usize)),
                     };
                     if let Some(goal) = goal {
                         let target_team = team_owner(*team);
@@ -277,6 +279,38 @@ impl Env for ScriptEnv<'_> {
                 let count = self.map.units.iter().filter(|u| u.kind == UnitKind::AngelOfDeath && u.is_alive() && team.is_none_or(|t| u.owner == t)).count();
                 Some(count as i32)
             }
+            "GET_HEIGHT_AT_POS" => {
+                let height = match call.args.first() {
+                    // An unresolved marker (out-of-range index, or a headerless generated map/sandbox)
+                    // reads as sea level - our own guess at a safe default (ai-scripts.md doesn't say).
+                    Some(Arg::Field(marker)) => self.map.marker_cell(field_i32(*marker)).map_or(0, |(x, z)| self.map.terrain.get(x as i32, z as i32) as i32),
+                    _ => 0,
+                };
+                Some(height)
+            }
+            "COUNT_PEOPLE_IN_MARKER" => {
+                if let (Some(Arg::TeamWild(team_wild)), Some(Arg::Field(marker)), Some(Arg::Field(radius))) = (call.args.first(), call.args.get(1), call.args.get(2)) {
+                    let count = self.map.marker_pos(field_i32(*marker)).map_or(0, |at| {
+                        let r = (field_i32(*radius).max(0) as i64) * pop3_format::WORLD_UNITS_PER_CELL as i64;
+                        self.map.units.iter().filter(|u| u.is_alive() && matches_team_wild(*team_wild, u) && crate::map::torus_dist2(at, (u.x, u.z)) <= r * r).count()
+                    });
+                    Some(count as i32)
+                } else {
+                    Some(0)
+                }
+            }
+            "IS_SHAMAN_IN_AREA" => {
+                if let (Some(Arg::Team(team)), Some(Arg::Field(marker)), Some(Arg::Field(radius))) = (call.args.first(), call.args.get(1), call.args.get(2)) {
+                    let team = team_owner(*team);
+                    let found = self.map.marker_pos(field_i32(*marker)).is_some_and(|at| {
+                        let r = (field_i32(*radius).max(0) as i64) * pop3_format::WORLD_UNITS_PER_CELL as i64;
+                        self.map.units.iter().any(|u| u.is_alive() && u.owner == team && u.kind == UnitKind::Shaman && crate::map::torus_dist2(at, (u.x, u.z)) <= r * r)
+                    });
+                    Some(found as i32)
+                } else {
+                    Some(0)
+                }
+            }
             "IS_BUILDING_NEAR" => {
                 if let (Some(Arg::Field(model)), Some(Arg::Field(x)), Some(Arg::Field(z)), Some(Arg::Team(team)), Some(Arg::Field(radius))) =
                     (call.args.first(), call.args.get(1), call.args.get(2), call.args.get(3), call.args.get(4))
@@ -329,6 +363,17 @@ fn team_owner(team: Team) -> TribeId {
         Team::Color(TeamColor::Yellow) => TribeId::Yellow,
         Team::Color(TeamColor::Green) => TribeId::Green,
         Team::Field(f) => TribeId::from_u8(field_i32(f).clamp(0, 3) as u8).unwrap_or(TribeId::Blue),
+    }
+}
+
+/// A `team_wild` argument: `COUNT_WILD` counts wildmen, matched by kind like `attack.rs`'s own wildman
+/// handling (`may_attack`'s `target.kind == UnitKind::Wildman`) - not by owner, since a wildman's
+/// `Owner` is `Wild` only incidentally (`Owner::from_u8`), not what names it a wildman.
+fn matches_team_wild(team_wild: pop3_ai_script::token::TeamWild, unit: &crate::unit::Unit) -> bool {
+    use pop3_ai_script::token::TeamWild;
+    match team_wild {
+        TeamWild::Wild => unit.kind == UnitKind::Wildman,
+        TeamWild::Team(team) => unit.owner == team_owner(team),
     }
 }
 
@@ -873,5 +918,215 @@ mod tests {
         map.tribe_scripts = vec![TribeScript { owner: TribeId::Blue, script, interp: Interpreter::new() }];
         map.tend_ai_scripts();
         assert_eq!(map.ai_attr(TribeId::Blue, InternalVar(1025)), 1);
+    }
+
+    /// `flat_map` with a synthetic marker table, the same shape `GameMap::load_original` builds from a
+    /// real header (`map::tests::marker_cell_resolves_...`) - never real level bytes (`AGENTS.md`).
+    fn map_with_markers(owner: TribeId, entries: &[(usize, (u8, u8))]) -> GameMap {
+        let mut map = flat_map(owner);
+        map.ai.push(crate::ai::NativeAi::new(owner));
+        let mut markers = [(0u8, 0u8); pop3_format::header::MARKERS];
+        for &(i, cell) in entries {
+            markers[i] = cell;
+        }
+        map.markers = Some(markers);
+        map
+    }
+
+    /// `DO <query>` then `SET INT_ATTR_MAX_ATTACKS $out` - reads a query's result back through the one
+    /// attribute the native AI already round-trips (`set_and_increment_round_trip_through_native_ai_attributes`).
+    fn run_query(map: &mut GameMap, owner: TribeId, query: Call) -> i32 {
+        let out = pop3_ai_script::field::UserVar(0);
+        let script = Script {
+            version: 12,
+            block: Block(vec![Stmt::Do(query), Stmt::Assign { op: pop3_ai_script::ast::AssignOp::Set, dest: Field::Internal(InternalVar(1025)), src: Field::UserVar(out) }]),
+        };
+        map.tribe_scripts = vec![TribeScript { owner, script, interp: Interpreter::new() }];
+        map.tend_ai_scripts();
+        map.ai_attr(owner, InternalVar(1025))
+    }
+
+    #[test]
+    fn get_height_at_pos_reads_the_terrain_at_the_markers_cell() {
+        let mut map = map_with_markers(TribeId::Blue, &[(3, (7, 9))]);
+        map.terrain.set(7, 9, 42);
+        let query = Call { id: CommandId::from_name("GET_HEIGHT_AT_POS").unwrap(), args: vec![Arg::Field(Field::Const(3)), Arg::VarField(pop3_ai_script::field::UserVar(0))] };
+        assert_eq!(run_query(&mut map, TribeId::Blue, query), 42);
+    }
+
+    #[test]
+    fn get_height_at_pos_is_zero_without_a_marker_table_or_out_of_range() {
+        let mut map = flat_map(TribeId::Blue); // no header at all: map.markers is None
+        map.ai.push(crate::ai::NativeAi::new(TribeId::Blue));
+        let query = Call { id: CommandId::from_name("GET_HEIGHT_AT_POS").unwrap(), args: vec![Arg::Field(Field::Const(3)), Arg::VarField(pop3_ai_script::field::UserVar(0))] };
+        assert_eq!(run_query(&mut map, TribeId::Blue, query), 0, "headerless map: the safe default");
+
+        let mut map = map_with_markers(TribeId::Blue, &[]);
+        let query = Call { id: CommandId::from_name("GET_HEIGHT_AT_POS").unwrap(), args: vec![Arg::Field(Field::Const(9999)), Arg::VarField(pop3_ai_script::field::UserVar(0))] };
+        assert_eq!(run_query(&mut map, TribeId::Blue, query), 0, "out-of-range index: the safe default");
+    }
+
+    #[test]
+    fn count_people_in_marker_counts_the_named_teams_units_within_radius() {
+        let mut map = map_with_markers(TribeId::Blue, &[(3, (20, 20))]);
+        map.sites.push(ReincarnationSite::at_cell(TribeId::Red, (25, 20), 100));
+        map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
+        map.spawn(TribeId::Red, UnitKind::Warrior, (21 * 512, 20 * 512)); // within 2 cells of the marker
+        map.spawn(TribeId::Red, UnitKind::Warrior, (28 * 512, 20 * 512)); // outside the radius
+        let query = Call {
+            id: CommandId::from_name("COUNT_PEOPLE_IN_MARKER").unwrap(),
+            args: vec![
+                Arg::TeamWild(pop3_ai_script::token::TeamWild::Team(Team::Color(pop3_ai_script::token::TeamColor::Red))),
+                Arg::Field(Field::Const(3)),
+                Arg::Field(Field::Const(2)),
+                Arg::VarField(pop3_ai_script::field::UserVar(0)),
+            ],
+        };
+        assert_eq!(run_query(&mut map, TribeId::Blue, query), 1);
+    }
+
+    #[test]
+    fn count_people_in_marker_count_wild_counts_wildmen_by_kind_not_owner() {
+        let mut map = map_with_markers(TribeId::Blue, &[(3, (20, 20))]);
+        map.spawn(Owner::Wild, UnitKind::Wildman, (20 * 512, 20 * 512));
+        map.spawn(TribeId::Blue, UnitKind::Brave, (20 * 512, 20 * 512)); // not a wildman: not counted
+        let query = Call {
+            id: CommandId::from_name("COUNT_PEOPLE_IN_MARKER").unwrap(),
+            args: vec![Arg::TeamWild(pop3_ai_script::token::TeamWild::Wild), Arg::Field(Field::Const(3)), Arg::Field(Field::Const(1)), Arg::VarField(pop3_ai_script::field::UserVar(0))],
+        };
+        assert_eq!(run_query(&mut map, TribeId::Blue, query), 1);
+    }
+
+    #[test]
+    fn is_shaman_in_area_true_only_for_the_named_teams_shaman_in_range() {
+        let mut map = map_with_markers(TribeId::Blue, &[(3, (20, 20))]);
+        map.sites.push(ReincarnationSite::at_cell(TribeId::Red, (25, 20), 100));
+        map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
+        map.spawn(TribeId::Red, UnitKind::Warrior, (20 * 512, 20 * 512)); // in range, but not the shaman
+        let query = Call {
+            id: CommandId::from_name("IS_SHAMAN_IN_AREA").unwrap(),
+            args: vec![Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Red)), Arg::Field(Field::Const(3)), Arg::Field(Field::Const(2)), Arg::VarField(pop3_ai_script::field::UserVar(0))],
+        };
+        assert_eq!(run_query(&mut map, TribeId::Blue, query.clone()), 0, "no shaman in range yet");
+        map.spawn(TribeId::Red, UnitKind::Shaman, (21 * 512, 20 * 512));
+        assert_eq!(run_query(&mut map, TribeId::Blue, query), 1);
+    }
+
+    #[test]
+    fn attack_marker_sends_fighters_at_the_named_teams_unit_nearest_the_marker() {
+        let mut map = map_with_markers(TribeId::Blue, &[(3, (25, 20))]);
+        map.sites.push(ReincarnationSite::at_cell(TribeId::Red, (10, 10), 100));
+        map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
+        let far = map.spawn(TribeId::Red, UnitKind::Warrior, (10 * 512, 10 * 512)).id;
+        let near = map.spawn(TribeId::Red, UnitKind::Warrior, (26 * 512, 20 * 512)).id;
+        map.spawn(TribeId::Blue, UnitKind::Warrior, (20 * 512, 20 * 512));
+        map.ai_set_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK, true);
+        map.ai_set_attr(TribeId::Blue, InternalVar(1025), 999); // INT_ATTR_MAX_ATTACKS
+        let script = turn_zero_do(Call {
+            id: CommandId::from_name("ATTACK").unwrap(),
+            args: vec![Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Red)), Arg::Field(Field::Const(5)), Arg::TargetType(TargetType::Marker), Arg::Field(Field::Const(3)), Arg::Field(Field::Const(999))],
+        });
+        map.tribe_scripts = vec![TribeScript { owner: TribeId::Blue, script, interp: Interpreter::new() }];
+        map.tend_ai_scripts();
+        let attacker = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue)).unwrap();
+        assert!(
+            matches!(attacker.action, crate::unit::Action::Attacking { target: crate::unit::Target::Unit(id), .. } if id == near),
+            "goes for the enemy nearest the marker, not {far:?}"
+        );
+    }
+
+    /// Reconstructs the *shape* of level 1's own red raid gate (ai-scripts.md "Worked example: level
+    /// 1's opening flyby"): a height sum over a marker cluster gates a `COUNT_PEOPLE_IN_MARKER`-checked
+    /// `ATTACK ... MARKER` raid - built from synthetic field values and a hand-written script fragment,
+    /// never the real `cpscr010.dat`/`levl2001.dat` bytes (`AGENTS.md`'s clean-room rule).
+    #[test]
+    fn a_level_1_shaped_script_withholds_its_raid_until_its_marker_cluster_is_land_bridged() {
+        let mut terrain = Heightmap::new(32);
+        for z in 0..32 {
+            for x in 0..32 {
+                terrain.set(x, z, 100);
+            }
+        }
+        terrain.set(5, 5, 0); // the strip's two marker cells start underwater...
+        terrain.set(6, 5, 0);
+        let mut map = GameMap::bare("t", terrain, vec![ReincarnationSite::at_cell(TribeId::Blue, (10, 10), 100), ReincarnationSite::at_cell(TribeId::Red, (20, 10), 100)]);
+        map.tribes = crate::tribes::Tribes::from_sites(&map.sites);
+        map.ai.push(crate::ai::NativeAi::new(TribeId::Red));
+        let mut markers = [(0u8, 0u8); pop3_format::header::MARKERS];
+        markers[3] = (25, 20); // the raid's own target marker
+        markers[25] = (5, 5); // the submerged strip's two marker clusters
+        markers[35] = (6, 5);
+        map.markers = Some(markers);
+        let blue = map.spawn(TribeId::Blue, UnitKind::Warrior, (26 * 512, 20 * 512)).id;
+        map.spawn(TribeId::Red, UnitKind::Warrior, (20 * 512, 20 * 512));
+
+        let user_var = |i: u8| Field::UserVar(pop3_ai_script::field::UserVar(i));
+        let gt = |a: Field, b: Field| Cond::Cmp { op: pop3_ai_script::token::CmpOp::Gt, a, b };
+        let set = |dest: Field, src: Field| Stmt::Assign { op: pop3_ai_script::ast::AssignOp::Set, dest, src };
+        let increment = |dest: Field, src: Field| Stmt::Assign { op: pop3_ai_script::ast::AssignOp::Increment, dest, src };
+        let height_at = |marker: i32| Stmt::Do(Call { id: CommandId::from_name("GET_HEIGHT_AT_POS").unwrap(), args: vec![Arg::Field(Field::Const(marker)), Arg::VarField(pop3_ai_script::field::UserVar(1))] });
+        let script = Script {
+            version: 12,
+            block: Block(vec![Stmt::If {
+                cond: Cond::Cmp { op: pop3_ai_script::token::CmpOp::Eq, a: Field::Internal(INT_GAME_TURN), b: Field::Const(0) },
+                then_: Block(vec![
+                    Stmt::Do(Call { id: CommandId::from_name("STATE_AUTO_ATTACK").unwrap(), args: vec![Arg::OnOff(true)] }),
+                    set(Field::Internal(InternalVar(1025)), Field::Const(999)), // INT_ATTR_MAX_ATTACKS
+                ]),
+                else_: Some(Block(vec![Stmt::Every {
+                    period: 1,
+                    offset: None,
+                    block: Block(vec![
+                        set(user_var(0), Field::Const(0)), // $0: this pass's height sum
+                        height_at(25),
+                        increment(user_var(0), user_var(1)),
+                        height_at(35),
+                        increment(user_var(0), user_var(1)),
+                        Stmt::If {
+                            cond: gt(user_var(0), Field::Const(0)),
+                            then_: Block(vec![
+                                Stmt::Do(Call {
+                                    id: CommandId::from_name("COUNT_PEOPLE_IN_MARKER").unwrap(),
+                                    args: vec![Arg::TeamWild(pop3_ai_script::token::TeamWild::Team(Team::Color(pop3_ai_script::token::TeamColor::Blue))), Arg::Field(Field::Const(3)), Arg::Field(Field::Const(7)), Arg::VarField(pop3_ai_script::field::UserVar(2))],
+                                }),
+                                Stmt::If {
+                                    cond: gt(user_var(2), Field::Const(0)),
+                                    then_: Block(vec![Stmt::Do(Call {
+                                        id: CommandId::from_name("ATTACK").unwrap(),
+                                        args: vec![
+                                            Arg::Team(Team::Color(pop3_ai_script::token::TeamColor::Blue)),
+                                            Arg::Field(Field::Const(3)),
+                                            Arg::TargetType(TargetType::Marker),
+                                            Arg::Field(Field::Const(3)),
+                                            Arg::Field(Field::Const(999)),
+                                        ],
+                                    })]),
+                                    else_: None,
+                                },
+                            ]),
+                            else_: None,
+                        },
+                    ]),
+                }])),
+            }]),
+        };
+        map.tribe_scripts = vec![TribeScript { owner: TribeId::Red, script, interp: Interpreter::new() }];
+        map.tend_ai_scripts(); // turn 0's setup block
+
+        let red_attacking = |map: &GameMap| map.units.iter().any(|u| u.owner == Owner::Tribe(TribeId::Red) && matches!(u.action, crate::unit::Action::Attacking { .. }));
+        for _ in 0..5 {
+            map.now = map.now.next();
+            map.tend_ai_scripts();
+        }
+        assert!(!red_attacking(&map), "still submerged: red stays passive, like level 1's own gate");
+
+        map.terrain.set(5, 5, 100); // the human bridges across
+        map.terrain.set(6, 5, 100);
+        for _ in 0..5 {
+            map.now = map.now.next();
+            map.tend_ai_scripts();
+        }
+        let attacker = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Red)).unwrap();
+        assert!(matches!(attacker.action, crate::unit::Action::Attacking { target: crate::unit::Target::Unit(id), .. } if id == blue), "land-bridged: the raid fires at the marker's own target");
     }
 }

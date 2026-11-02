@@ -8,8 +8,9 @@
 //! buildings, train people, and post a defender — in that order, one action per sweep, exactly the
 //! original's own "position 0 is always construct buildings" shape. Left out for a future session (not
 //! modelled at all here): shaman positioning and auto-cast, garrison/vehicle tasks, scripted patrol
-//! groups and one-off guards (`SET_MARKER_ENTRY`, `GUARD_AT_MARKER`...: these need the level header's
-//! `Markers[256]` table, not read anywhere yet), the reactive counter-attack, and the original's own
+//! groups and one-off guards (`SET_MARKER_ENTRY`, `GUARD_AT_MARKER`...: `GameMap::markers` now threads
+//! the level header's `Markers[256]` table in for `ATTACK`'s own `Marker` goal below, but nothing here
+//! reads it for a standing guard/patrol task yet), the reactive counter-attack, and the original's own
 //! muster-then-march sequence for an attack (ours launches attackers directly at their target instead
 //! of gathering them at the drum tower first).
 //!
@@ -41,8 +42,9 @@ const ATTR_COUNT: usize = 48;
 const MAX_SPELL_ENTRIES: usize = 8;
 
 /// A guessed stand-in radius (world units) for the unmodelled `SET_BASE_MARKER`/`SET_BASE_RADIUS`
-/// (TODO.md: these need the level header's `Markers[256]` table, not read anywhere yet): "near the
-/// base" for `SET_SPELL_ENTRY`'s own `base` flag and the reactive base defence below.
+/// (TODO.md: still unimplemented, though `GameMap::markers` could now resolve `SET_BASE_MARKER`'s own
+/// marker index): "near the base" for `SET_SPELL_ENTRY`'s own `base` flag and the reactive base
+/// defence below.
 const AI_BASE_RADIUS_GUESS: i32 = 10 * 512;
 
 /// `SET_SPELL_ENTRY entry spell mana frequency min_people base` (ai-scripts.md "Attacks and spells"):
@@ -216,6 +218,10 @@ pub(crate) enum AttackGoal {
     /// The nearest building of `0` (any kind, `INT_NO_SPECIFIC_BUILDING`) or a specific kind, owned by
     /// the target tribe.
     Building(Option<BuildingKind>),
+    /// `ATTACK_MARKER`: whichever of the target tribe's own units is nearest the marker's cell -
+    /// "the force fights whatever is there" (ai-scripts.md "Attacks and spells"). The marker index
+    /// itself (`GameMap::marker_cell`'s own `i32` argument, read back from the header's `Markers[256]`).
+    Marker(usize),
 }
 
 /// A `DO ATTACK` sortie in progress, enough to let `tend_ai_sorties` call it off once its own `damage`
@@ -670,6 +676,10 @@ impl GameMap {
                     .filter(|b| kind.is_none_or(|k| b.kind == k))
                     .min_by_key(|b| torus_dist2(base, (b.x, b.z)))
                     .map(|b| Target::Building(b.id))
+            }
+            AttackGoal::Marker(index) => {
+                let at = self.marker_pos(index as i32)?;
+                self.units.iter().filter(|u| u.owner == target_team && u.is_alive()).min_by_key(|u| torus_dist2(at, (u.x, u.z))).map(|u| Target::Unit(u.id))
             }
         }
     }
