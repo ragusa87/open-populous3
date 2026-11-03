@@ -564,6 +564,19 @@ mod tests {
     }
 
     #[test]
+    fn a_damaged_building_is_repaired_like_a_fresh_construction_once_braves_are_assigned() {
+        let mut map = sandbox();
+        let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
+        map.buildings[hut].used -= 1; // a piece lost, as wear does (wreck.rs)
+        assert_eq!(map.buildings[hut].stage(), Stage::UnderConstruction { used: 2, of: 3 }, "damage puts it back under construction");
+        let units = braves(&map, 1);
+        for c in map.build_orders(TribeId::Blue, &units, hut) {
+            map.apply(&c);
+        }
+        run_until(&mut map, 2000, |m| m.buildings[hut].stage() == Stage::Built).expect("repaired by the same construction system");
+    }
+
+    #[test]
     fn dismantling_empties_a_built_building_until_switched_back() {
         let mut map = sandbox();
         let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();

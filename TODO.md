@@ -594,9 +594,17 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 
 ### Wood ([trees.md](docs/specs/trees.md))
 - [ ] Original scenery models 7 plant 1, 8 plant 2: not drawn yet. Scenery 9 (the totems, 98 in the levels) is drawn as the stone head (object 82), a guess: find its real model. Trees have no size in the thing record: full size is right.
-- [ ] Wood for repair and hut growth, like construction (`game_core::work`: assigned braves fetch, carry to the door, build). Cutting, carrying, fetching and construction are done (units.md "Wood", buildings.md "Construction").
+- [x] Wood for repair and hut growth, like construction (`game_core::work`: assigned braves fetch, carry to the door, build): **already falls out of the existing construction system, no special-casing needed** - damage (`wreck.rs`) and growth (`hut_growth.rs`) both just lower `used`/change `kind` and leave the building in `Stage::UnderConstruction`, which `work.rs`'s ordinary fetch/carry/build loop treats exactly like a fresh site once braves are assigned to it (`Command::Assign`/`Order::Build`); confirmed by a new test, `work.rs`
+  `a_damaged_building_is_repaired_like_a_fresh_construction_once_braves_are_assigned`. Left open, tracked separately
+  (huts-and-training.md "Open questions"): whether a growing hut's own occupants are assigned to the job
+  automatically or the player must send braves by hand, same as any other repair.
 - [ ] Check in the game whether a brave ordered on a tree with no wood to spare goes to another one. The gather-wood state's own code (`0x495D70`, the chop-completion branch at `0x4960CC`) has **no tree-depletion check at all once already chopping**: on countdown expiry it unconditionally calls `transfer_wood(tree, person, WOOD_<PERSON>)`, which on an empty tree just moves 0 and the brave starts the same 20-turn countdown again, forever, with no reroute logic anywhere in this function. Whether a NEW order onto an already-empty tree is refused/redirected at assignment time (a different, not-yet-traced code path, outside this per-turn state) is still open - that's where any "goes to another one" behaviour would have to live, if it exists at all.
-- [ ] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible) trees.
+- [x] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible)
+  trees: both already done and tested - `placement::blocked_at` refuses a spot with a visible tree
+  (`nothing_may_wall_a_door_shut_either_ones`'s sibling test `sea_buildings_sites_trees_fires_and_totems_block`,
+  "a cut down tree does not block"), and `work::tests::trees_under_a_building_do_not_grow_back` covers the
+  invisible tree staying put under a built hut; also already listed as done in huts-and-training.md ("Done":
+  "Trees under a building (plans included) do not grow back.") - this entry was just stale.
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.
 
 ### Praying (worship) ([worship.md](docs/specs/worship.md))
