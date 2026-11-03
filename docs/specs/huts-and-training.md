@@ -101,7 +101,11 @@ hut (max size) hides the red bar, it does not show it at 0.
    own current footprint) it becomes that size outright:
    1. `kind` changes in place, same id - whoever is inside just stays "inside" that same id, so "move the people
       inside into it" falls out for free, matching the original's own "the hut stays usable all along (people
-      inside, breeding)";
+      inside, breeding)" - **bug fixed**: that only held for the growth transition itself, since the next one
+      (`work::work_event`'s own completion handler, shared with every other construction) used to walk every
+      occupant out the door the moment the rebuild finished, same as a fresh building's own workers; it now only
+      releases whoever was actually assigned to the rebuild (`GameMap::release_builders`), so the hut's own people
+      really do stay all the way through, not just during the regrowth itself;
    2. seeded with 1 of its `wood_cost` pieces already in (the trace's own "100 wood" - **not** this entry's
       earlier guess of braves fetching and consuming 3 pieces up front; the real mechanism seeds 1 piece
       directly and lets the ordinary construction system fetch the rest, same as any other building under

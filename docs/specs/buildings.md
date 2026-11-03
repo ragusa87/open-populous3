@@ -222,8 +222,12 @@ the building shows it at once.
      inside (`Action::Building`, `BUILD_TICKS` 5 s, the hammer pose); with no pile, fetches wood under the
      dispatch rule below (out by the door first); else walks in by the door and hammers (`Action::Hammering`,
      open-ended, free for the next step) until there is wood or the building is done. No brave stands idle.
-  4. Built: the moment the last piece is in, everyone inside walks out by the door to a free spot around it
-     (`slots::dispatch` from the door) and stands idle; assigned braves are released (`work` cleared).
+  4. Built: the moment the last piece is in, the braves who worked on it (`GameMap::release_builders`: whoever is
+     inside AND still assigned, `work == Some(site)`) walk out by the door to a free spot around it
+     (`slots::dispatch` from the door), released (`work` cleared), and stand idle. Anyone else inside stays put: a
+     damaged or growing building keeps its own long-standing occupants housed throughout its repair/regrowth
+     (huts-and-training.md "the hut stays usable all along", "Damage and repair" below) - only a fresh building's
+     construction workers, the only people who could be inside one not built yet, are there to release.
   Braves bringing wood (`wood_on_the_way`): carrying, fetching or cutting, or building a piece taken off the
   pile.
 - `Command::CancelBuilding { player, at }`: the player's plan (not flat) whose footprint holds `at` is removed,
@@ -361,7 +365,13 @@ Attackers wear buildings down and burnt or worn-down buildings leave ashes: comb
 
 Model: damage takes wood out of a building (its used count drops below the kind's wood cost, the pieces are lost,
 not dropped): it is under construction again, its view goes back to the wooden frame, and braves sent to it bring it
-back up like a construction. Its wood is its health. To check in the game: whether repairs need fetched wood.
+back up like a construction - already falls out of the ordinary construction system once braves are assigned
+(`work.rs` `a_damaged_building_is_repaired_like_a_fresh_construction_once_braves_are_assigned`), no special-casing
+needed. Whoever already lives or works inside (a hut's people, a drum tower's lookout) stays put the whole time,
+released only if they are themselves a construction worker (`GameMap::release_builders`,
+`residents_stay_housed_through_a_repair_only_the_builder_is_released`) - fixed, this used to wrongly walk every
+occupant out the door the moment the repair finished, same as a fresh building's own completion. Its wood is its
+health. To check in the game: whether repairs need fetched wood.
 
 Fire (done: `game_core::fire`, `WorldEvent::SetFire`, set by lightning): a building past its plan, not already
 burning, burns for `BURN_TICKS` (127 turns, `Building::burning`). On its 8th turn (`THROW_OUT_AT`) everyone inside

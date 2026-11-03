@@ -610,6 +610,16 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   `a_damaged_building_is_repaired_like_a_fresh_construction_once_braves_are_assigned`. Left open, tracked separately
   (huts-and-training.md "Open questions"): whether a growing hut's own occupants are assigned to the job
   automatically or the player must send braves by hand, same as any other repair.
+- [x] **Bug fixed while checking the above**: reusing the construction system for repair/growth had surfaced a real
+  regression - `work::work_event`'s own completion handler (`UnitEvent::Built`) called `empty_building`, which
+  walks out *everyone* inside, not just the construction workers. Fine the first time a building goes up (nobody
+  can be a resident of one not built yet), wrong for a repair or a hut's growth: a damaged-but-occupied hut, or
+  one mid-regrowth, would have its own long-standing residents evicted the instant the rebuild finished, instead
+  of staying housed "all along" as huts-and-training.md rule 6 already says. Fixed with a narrower
+  `GameMap::release_builders` (only `u.work == Some(site)`, i.e. an actually assigned worker) used at completion,
+  keeping `empty_building` (evicts everyone) for dismantling starting and `throw_out`'s own destruction/fire/
+  collapse cases, which do mean to clear the building out entirely. Tests:
+  `work::tests::residents_stay_housed_through_a_repair_only_the_builder_is_released`.
 - [ ] Check in the game whether a brave ordered on a tree with no wood to spare goes to another one. The gather-wood state's own code (`0x495D70`, the chop-completion branch at `0x4960CC`) has **no tree-depletion check at all once already chopping**: on countdown expiry it unconditionally calls `transfer_wood(tree, person, WOOD_<PERSON>)`, which on an empty tree just moves 0 and the brave starts the same 20-turn countdown again, forever, with no reroute logic anywhere in this function. Whether a NEW order onto an already-empty tree is refused/redirected at assignment time (a different, not-yet-traced code path, outside this per-turn state) is still open - that's where any "goes to another one" behaviour would have to live, if it exists at all.
 - [x] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible)
   trees: both already done and tested - `placement::blocked_at` refuses a spot with a visible tree

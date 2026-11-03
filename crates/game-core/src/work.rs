@@ -168,7 +168,7 @@ impl GameMap {
                 if b.stage() == Stage::Built {
                     crate::hut_growth::on_completed(&huts, b);
                     let (id, door) = (b.id, b.door());
-                    self.empty_building(id, door);
+                    self.release_builders(id, door);
                 }
                 None
             }
@@ -193,10 +193,10 @@ impl GameMap {
         None
     }
 
-    /// Everyone inside the building `building` is released and walks out by its `door` to a free spot
-    /// around it, then stands idle.
-    pub(crate) fn empty_building(&mut self, building: BuildingId, door: (u16, u16)) {
-        let out: Vec<(UnitId, (u16, u16))> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building)).map(|u| (u.id, (u.x, u.z))).collect();
+    /// Those inside the building `building` matching `evict` walk out by its `door` to a free spot
+    /// around it, released, then stand idle.
+    fn send_out(&mut self, building: BuildingId, door: (u16, u16), evict: impl Fn(&Unit) -> bool) {
+        let out: Vec<(UnitId, (u16, u16))> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building) && evict(u)).map(|u| (u.id, (u.x, u.z))).collect();
         let ids: Vec<UnitId> = out.iter().map(|o| o.0).collect();
         let spots = slots::dispatch(&self.ground(), &out, door, &self.taken_spots(&ids));
         for u in self.units.iter_mut().filter(|u| ids.contains(&u.id)) {
@@ -205,6 +205,22 @@ impl GameMap {
             u.clear_queue();
             u.start(Order::MoveTo { x: to.0, z: to.1 });
         }
+    }
+
+    /// Everyone inside the building `building` is released and walks out by its `door` to a free spot
+    /// around it, then stands idle: dismantling starting, or the building destroyed, burning or
+    /// collapsing (`throw_out`) - the building itself stops holding anyone either way.
+    pub(crate) fn empty_building(&mut self, building: BuildingId, door: (u16, u16)) {
+        self.send_out(building, door, |_| true);
+    }
+
+    /// The braves working on `building` are released once its construction, repair or growth
+    /// completes: they walk out by `door`; anyone else inside - the building's own long-standing
+    /// occupants, housed there before this round of work started - stay put, matching the project's
+    /// own "the hut stays usable all along" rule for growth (huts-and-training.md rule 6) and equally
+    /// for a damaged-but-occupied building repaired the same way (buildings.md "Damage and repair").
+    fn release_builders(&mut self, building: BuildingId, door: (u16, u16)) {
+        self.send_out(building, door, |u| u.work == Some(building));
     }
 
     /// Every free assigned brave (idle, nothing chained) goes on with his building; returns the ground
@@ -561,6 +577,34 @@ mod tests {
         let gone = BuildingId::from_raw(map.buildings.iter().map(|b| b.id.raw()).max().unwrap() + 1);
         let again = map.place_building(TribeId::Blue, BuildingKind::DrumTower, corner(24, 0), 0).unwrap();
         assert!(again > gone && map.building(gone).is_none(), "same corner, new id");
+    }
+
+    #[test]
+    fn residents_stay_housed_through_a_repair_only_the_builder_is_released() {
+        let mut map = sandbox();
+        let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
+        let site_id = map.buildings[hut].id;
+        let door = map.buildings[hut].door();
+        let three = braves(&map, 3);
+        let (residents, builder) = (three[..2].to_vec(), three[2]);
+        for &r in &residents {
+            let k = map.units.iter().position(|u| u.id == r).unwrap();
+            map.units[k].inside = Some(Inside { building: site_id, door });
+        }
+        map.buildings[hut].used -= 1; // damaged, as wear does (wreck.rs): back under construction
+        for c in map.build_orders(TribeId::Blue, &[builder], hut) {
+            map.apply(&c);
+        }
+        run_until(&mut map, 2000, |m| m.buildings[hut].stage() == Stage::Built).expect("repaired");
+        for _ in 0..200 {
+            map.tick();
+        }
+        for &r in &residents {
+            let u = map.units.iter().find(|u| u.id == r).unwrap();
+            assert_eq!(u.inside, Some(Inside { building: site_id, door }), "resident {} was evicted by the repair finishing", r.raw());
+        }
+        let b = map.units.iter().find(|u| u.id == builder).unwrap();
+        assert!(b.inside.is_none() && b.work.is_none(), "the builder itself is released, same as any finished construction");
     }
 
     #[test]
