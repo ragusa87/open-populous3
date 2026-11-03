@@ -66,8 +66,6 @@ pub const UNLOAD_REACH: u16 = 1024;
 /// this speed ("Parking and the shore": 64 turns, speed 8).
 pub const DRIFT_EVERY: Every = Every::new(64);
 pub const DRIFT_SPEED: u16 = 8;
-/// Braves working in a vehicle hut at once [ours, a guess].
-pub const CREW: u8 = 4;
 /// Work for one vehicle, once its wood is there: each crew member inside adds 1 a turn (a guess: 100 s alone, 25 s
 /// with a full crew).
 pub const LAUNCH_WORK: u16 = 1200;
@@ -103,6 +101,15 @@ impl VehicleKind {
         match self {
             VehicleKind::Boat => 4,
             VehicleKind::Balloon => 3,
+        }
+    }
+
+    /// Braves working in its hut at once [player]: no free vehicle when the hut itself finishes - only
+    /// braves assigned to the hut, one of them taken aboard once a vehicle comes out.
+    pub fn crew(self) -> u8 {
+        match self {
+            VehicleKind::Boat => 4,
+            VehicleKind::Balloon => 6,
         }
     }
 
@@ -550,11 +557,12 @@ impl GameMap {
     }
 
     /// Unit `i` sent into the vehicle hut whose stored corner is `site`: a brave joins its crew (`work`) while it has
-    /// room (`CREW`), anyone else walks to its door.
+    /// room (`VehicleKind::crew`), anyone else walks to its door.
     pub(crate) fn join_crew(&mut self, i: usize, site: (u16, u16)) {
         let Some(b) = self.building_at_corner(site).map(|b| &self.buildings[b]) else { return };
-        let (id, door) = (b.id, b.door());
-        let room = self.workers(id).filter(|u| u.id != self.units[i].id).count() < CREW as usize;
+        let (id, door, kind) = (b.id, b.door(), b.kind);
+        let cap = VehicleKind::made_by(kind).map_or(0, VehicleKind::crew);
+        let room = self.workers(id).filter(|u| u.id != self.units[i].id).count() < cap as usize;
         if self.units[i].kind == UnitKind::Brave && room {
             self.units[i].start(Order::Stop);
             self.units[i].work = Some(id);
@@ -575,7 +583,7 @@ impl GameMap {
             if b.stock < kind.wood_cost() || crew.is_empty() {
                 continue;
             }
-            if !self.buildings[k].launch.get_or_insert_default().advance(crew.len().min(CREW as usize) as u8) {
+            if !self.buildings[k].launch.get_or_insert_default().advance(crew.len().min(kind.crew() as usize) as u8) {
                 continue;
             }
             let Some((at, heading)) = launch_point(&self.buildings[k], kind, &self.terrain) else { continue };

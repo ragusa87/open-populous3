@@ -47,8 +47,9 @@ impl GameMap {
             Holder::Building(i) => {
                 let b = self.buildings.get(i)?;
                 let site = (b.x, b.z);
-                let (capacity, mut filled): (u16, Vec<UnitId>) = if b.stage() == Stage::Built && crate::vehicle::VehicleKind::made_by(b.kind).is_some() {
-                    (crate::vehicle::CREW as u16, self.workers(b.id).map(|u| u.id).collect())
+                let vehicle_kind = (b.stage() == Stage::Built).then(|| crate::vehicle::VehicleKind::made_by(b.kind)).flatten();
+                let (capacity, mut filled): (u16, Vec<UnitId>) = if let Some(vk) = vehicle_kind {
+                    (vk.crew() as u16, self.workers(b.id).map(|u| u.id).collect())
                 } else if b.stage() == Stage::Built {
                     let room = if b.vault.is_some_and(|v| v.is_spent()) { 0 } else { room(b.kind) };
                     let at = crate::unit::WorshipAt::Vault { corner: site };

@@ -937,11 +937,11 @@ mod tests {
         let hut = map.buildings.iter().position(|b| b.owner == TribeId::Blue && b.kind == BuildingKind::BoatHut && b.stage() == Stage::Built).unwrap();
         map.buildings[hut].stock = 2;
         let model = building_model(&map, hut, &[], false);
-        assert_eq!(model.rows[0].len(), game_core::vehicle::CREW as usize);
+        assert_eq!(model.rows[0].len(), game_core::vehicle::VehicleKind::Boat.crew() as usize);
         assert_eq!(icons(&model.rows[1]), vec![Icon::Wood, Icon::Wood, Icon::NoWood, Icon::NoWood], "2 of a boat's 4");
         assert!(model.bars.is_empty(), "no work yet");
         let mut launch = game_core::vehicle::Launch::default();
-        launch.advance(game_core::vehicle::CREW);
+        launch.advance(game_core::vehicle::VehicleKind::Boat.crew());
         map.buildings[hut].launch = Some(launch);
         let bar = building_model(&map, hut, &[], false).bars[0];
         assert_eq!((bar.kind, bar.blocked), (BarKind::Training, true), "short of wood");

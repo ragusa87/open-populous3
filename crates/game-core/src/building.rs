@@ -156,12 +156,12 @@ impl BuildingKind {
 
     /// People it holds inside: huts 3, 4, 5 by size (huts-and-training.md), a drum tower one
     /// (buildings.md "Towers"), a training unit its trainee (`crate::training`), a vehicle hut its crew
-    /// (`crate::vehicle::CREW`); 0 for the others.
+    /// (`crate::vehicle::VehicleKind::crew`); 0 for the others.
     pub fn capacity(self) -> u8 {
         match self {
             BuildingKind::Hut { size } => 2 + size.clamp(1, 3),
             BuildingKind::DrumTower | BuildingKind::Temple | BuildingKind::SpyTraining | BuildingKind::WarriorTraining | BuildingKind::FirewarriorTraining => 1,
-            BuildingKind::BoatHut | BuildingKind::AirshipHut => crate::vehicle::CREW,
+            BuildingKind::BoatHut | BuildingKind::AirshipHut => crate::vehicle::VehicleKind::made_by(self).map_or(0, crate::vehicle::VehicleKind::crew),
             _ => 0,
         }
     }
