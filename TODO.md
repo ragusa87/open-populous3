@@ -886,9 +886,9 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     right-handed mirror) already computes - this was an existing, independently-motivated convention, not
     something added to fit this data. See pop3-rev-analysis.md "D3D axis caveat" and pop3-rev `docs/
     camera.md` "D3D axis caveat for YAW - RESOLVED".
-    - [ ] Worth a regression test even though no fix is needed: the mirror negation in `render_yaw` reads like
-      an arbitrary detail someone could "simplify away" later with nothing to catch it. Assert
-      `render_yaw(raw)` within ~5° (mod 360) of `(0,0°) (681,240.29°) (744,229.22°) (1438,107.23°)`.
+    - [x] Regression test added (`flyby.rs`'s `render_yaw_is_calibrated_against_real_flyby_traces`) so the
+      mirror negation in `render_yaw` can't be "simplified away" later with nothing to catch it: asserts
+      `render_yaw(raw)` within 5° (mod 360) of `(0,0°) (681,240.29°) (744,229.22°) (1438,107.23°)`.
   - `ZOOM` does NOT change camera distance at all: it blends between two named camera PRESETS' render
     parameters (bend/K and a few other render-block fields), not a continuous world-unit zoom.
     `flyby.rs`'s `zoom_to_distance` (-100..100 linear onto `DISTANCE_RANGE`) has the wrong shape entirely,

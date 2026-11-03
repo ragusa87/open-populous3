@@ -314,6 +314,20 @@ mod tests {
         assert_eq!(half_cell(1), 0.5);
     }
 
+    /// pop3-rev-analysis.md "D3D axis caveat": `yaw_true = -raw * 360/2048` (mod 360), confirmed against
+    /// two independently captured full-flyby traces to within ~0.5-4° on 4 keyframes each (TODO.md
+    /// "Camera flyby state") - a regression test so the mirror negation in `render_yaw` doesn't get
+    /// "simplified away" later with nothing to catch it.
+    #[test]
+    fn render_yaw_is_calibrated_against_real_flyby_traces() {
+        for &(raw, expected_deg) in &[(0, 0.0), (681, 240.29), (744, 229.22), (1438, 107.23)] {
+            let got_deg = render_yaw(raw).to_degrees().rem_euclid(360.0);
+            let diff = (got_deg - expected_deg).rem_euclid(360.0);
+            let diff = diff.min(360.0 - diff);
+            assert!(diff < 5.0, "raw {raw}: got {got_deg}°, expected ~{expected_deg}°");
+        }
+    }
+
     #[test]
     fn final_pose_prefers_end_target_over_the_last_keyframe() {
         let flyby = ResolvedFlyby {
