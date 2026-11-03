@@ -6,7 +6,7 @@ use crate::building::{BuildingKind, Stage};
 use crate::command::Command;
 use crate::map::{torus_dist2, GameMap};
 use crate::unit::{Order, Unit, UnitId, UnitKind};
-use crate::vehicle::{VehicleKind, CREW};
+use crate::vehicle::VehicleKind;
 use crate::tribes::TribeId;
 
 /// Where a selection is sent.
@@ -88,7 +88,7 @@ impl GameMap {
                 let buildings: Vec<&crate::building::Building> = self.buildings.iter().filter(|b| b.owner == player && b.stage() == Stage::Built && same_kind(b.kind, kind)).collect();
                 let room = |b: &crate::building::Building| match (crate::training::trains(b.kind), VehicleKind::made_by(b.kind)) {
                     (Some(_), _) => None,
-                    (_, Some(_)) => Some((CREW as usize).saturating_sub(self.workers(b.id).count())),
+                    (_, Some(vk)) => Some((vk.crew() as usize).saturating_sub(self.workers(b.id).count())),
                     _ => Some((b.kind.capacity() as usize).saturating_sub(self.people_inside(b.id))),
                 };
                 let places: Vec<Place> = buildings.iter().map(|b| Place { at: b.centre(), room: room(b) }).collect();

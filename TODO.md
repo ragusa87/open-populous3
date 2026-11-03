@@ -9,7 +9,7 @@ Priorities (2026-10-28): sections below are grouped into seven rough tiers, high
 What a match plays through today: combat, orders/the tick, units, spells, buildings, worship. Bugs and gaps here are the most visible, and other tiers build on top of them (the AI tier drives units through the same orders/coordinators as a human; the content tier dresses up the same spells and buildings).
 
 ### Combat
-- [x] Melee (combat.md "Melee", traced in full - pop3-rev-analysis.md "Fight"): the ground check moving the middle off unsuitable ground (`Melee::relocate`) and the per-tribe winner's count and death tally (`GameMap::melee_wins`/`melee_deaths`) are in. Left: the moves' sounds (scoped out for now). Still genuinely open, not traced: what the original's local-player-involved alert flag (`0x89D167`) actually triggers (fight music, an alert, or both) - scoped out for now too.
+- [x] Melee (combat.md "Melee", traced in full - pop3-rev-analysis.md "Fight"): the ground check moving the middle off unsuitable ground (`Melee::relocate`) and the per-tribe winner's count and death tally (`GameMap::melee_wins`/`melee_deaths`) are in. Left: the moves' sounds (scoped out for now). The local-player-involved alert flag (`0x89D167`, pop3-rev-analysis.md "Watchtower sentry scan and alarm" and the paragraph above it) is now mostly traced: a continuous "currently in a fight involving you" signal (set every turn by `pre_fight_turn`/`fight_turn`) plus an edge-triggered "a new fight involving you just started" pulse (`attack_order_handler`), copied each turn into `+0x8` of a HUD-widget-shaped struct (`0x895DBB`) - this is also confirmed to be the real mechanism behind the tower alert (manning a tower never plays its own siren; it just starts a fight via order kind 19, and this same flag fires). Still genuinely open, not traced: what actually reads that `+0x8` field to decide fight music vs. a visual alert vs. both - scoped out for now too.
 - [x] Challenge (combat.md "Challenge", traced in full - pop3-rev-analysis.md "Pre-fight"): the target facing the attacker and its taunts (1 in 8 per turn while waiting, confirmed) are in (`WorldEvent::Face`, `challenge::taunts`/`Challenge::taunted` - no pose for the taunt yet, see "Units" below). The earlier "third approach, a target at its building" item is resolved: it is the same `Approach::PulledOut` building pull-out already covered under "Attacking a building", not a separate case. Still open, left for later: the original's no-shove option (a real level/script switch, not a cheat - also disables Melee's own knockback) and ground sliding instead of `SHOVE_LIFT` (not traced at the exe level).
 - [ ] Fight poses in the generated (CC0) unit sheets: strike, trade, kick, reel, shoved, and a challenge's taunt
   (`Pose::fallback` stands in: idle, fall). The taunt's original-asset side is done (combat.md "Challenge",
@@ -40,11 +40,14 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   looker is idle - fine now that doing so escalates the challenge into a melee at once (`GameMap::escalate_challenges`,
   combat.md "Challenge"/"Melee", added to fix units ordered onto an already-challenged target otherwise standing in
   reach doing nothing for the duel's whole charge-shove-charge cycle), itself a guess, not traced against the
-  original. Still unconfirmed: whether an idle unit that merely sees a challenge from outside sight range should
-  also hold off and only join once it becomes a melee instead of attacking straight in (the way it already leaves an
-  ongoing melee's target alone unless idle), and whether a non-idle looker should likewise skip a challenge target
-  the same way it skips a melee one - needs a live check (two units challenging while a third, idle and then busy,
-  watches from within sight).
+  original. **Answered, traced this session (pop3-rev-analysis.md "Starting a melee", new paragraph)**: the
+  original does not special-case a challenge from a melee here at all - the auto-attack scan's own candidate
+  filter treats person states 25 (fight) and 29 (pre-fight/challenge) identically (neither is excluded), and the
+  scan runs every tick regardless of whether the looker itself is idle or busy. So the original's own answer is
+  the OPPOSITE of our current `Link::Melee`-only special case: a unit already challenging should be just as
+  attackable by a third party, idle or not, as one already fighting - ours should likely drop the "skipped
+  unless idle"/`Link::Melee`-only gate rather than extend it to challenges, not add a matching hold-off for
+  `Link::Challenge`. No live check needed to settle this one.
 - [ ] Sermon (combat.md "Sermon"; full trace, settled across several sessions, in pop3-rev-analysis.md "Preacher
   conversion" and "Command groups" - summary here is the still-open residue only): a failed conversion roll never
   falls back to melee on its own - the roll-failure branch only continues the candidate's listening choreography
@@ -78,8 +81,10 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Find the original's order of work inside a turn (people, buildings, effects, shots, mana; income comes before spell charging): ours is a guess.
 - [x] Audited (2026-10-29): every rhythm this item named already runs on the `Every`/phase-0 convention, most
   already done despite the item's own wording - stranded hurt (`STRANDED_HURT_EVERY`, each unit at its own phase,
-  documented intentionally, units.md; only the damage amount itself, `STRANDED_DAMAGE` 20, is unconfirmed against
-  the original - a live-check numbers question, not a rhythm one), mana income (`MANA_EVERY`, `mana.rs`), and
+  documented intentionally, units.md; the damage amount and rhythm are now known and both wrong, pop3-rev-
+  analysis.md "Stranded": the original deals 56 life every 8 turns (not 20 every 4), and only after an
+  untimed grace period first - a climbing timer up to a per-tribe ceiling of 352 or 864, ours has none),
+  mana income (`MANA_EVERY`, `mana.rs`), and
   every status timer, not just shield and bloodlust (`status::STEP`, `Statuses::tick` already steps invisible and
   hypnotized the same way). Only hut breeding (every 4) and growth (every 16) are still genuinely missing, not a
   convention slip: see "Buildings" below, "Houses growth/breeding".
@@ -92,8 +97,15 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   function-level row). Panic's obstacle turning also already existed and is tested
   (`a_panic_run_turns_away_from_the_sea_and_leaves_by_the_door_first`, `unit.rs`), now documented (units.md
   "Panicking" row, newly added - the table had no row for it at all): a quarter turn away from the blocking
-  heading, **`[ours]`, not traced** - the original's own rule is still unconfirmed either way. Left open, needing
-  the whole audio system first, out of scope here: the original's own panic scream.
+  heading, **`[ours]`, not traced** - checked this session (pop3-rev-analysis.md person_states.tsv state 26): the
+  original's entry just rolls one random heading and a fixed speed/duration, with no obstacle-turning logic of
+  its own in either the entry or per-turn code read so far - movement itself must go through the universal
+  per-unit step/block-detection shared by ordinary walking (state 33's own row), which has no "turn away"
+  behaviour, just a halt into state 33. Inferred, not proven (the exact step-execution code for a panicking unit
+  specifically wasn't traced to confirm it really is the same shared path) - a live check (push a unit toward a
+  wall/cliff with Blast via Firestorm's impact, watch whether it turns or just stops) would settle it outright.
+  Left open either way, needing the whole audio system first, out of scope here: the original's own panic
+  scream (also unconfirmed to exist at all - only an ambient crackle sound was found, see person_states.tsv).
 - [x] Burning buildings (`fire`): the igniter's tribe and the destroyed-building count are in - `Building::ignite`
   now takes the lighting tribe (`ignited_by`, kept past the fire itself like a unit's own `last_attacker`), and
   `fire::tend_fires`'s `FireTurn::Hit { destroyed: true }` tallies it into `GameMap::fires_put_out` via
@@ -157,12 +169,12 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   auto-attack/melee-join behaviour.
 
 ### Units ([units.md](docs/specs/units.md))
-- [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the drowning and stranded rates (`DROWN_DAMAGE`, `STRANDED_DAMAGE`, scaled x20 from our old 100 HP guesses).
+- [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the stranded rate (`STRANDED_DAMAGE`, scaled x20 from our old 100 HP guess, still unconfirmed). `DROWN_DAMAGE` is answered and is **not** a per-tick damage value at all (pop3-rev-analysis.md "Drowning"): the original always takes a fixed 16 turns (1.33 s) to kill once truly submerged, forcing life to exactly 0, independent of current/max health - a flat countdown, not `-60`/tick. Matters most for the shaman: her much larger health pool means ours currently lets her survive drowning far longer than the original allows.
 - [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
 - [ ] Walk animation rate could follow the slope speed (slower steps uphill).
 - [ ] Replanning: every walker replans on any terrain write; only replan when the change touches its route (`DirtyRect`) once there are many units. Group moves could share a flow field.
-- [ ] Worshipping the shaman: check in the game the range (3 cells guessed) and the states she must be in (idle or walking today).
+- [ ] Worshipping the shaman: check in the game the range (3 cells guessed) and the states she must be in (idle or walking today). Confirmed real (not invented): animations.md's pose 8 is explicitly shared between praying-at-a-structure and "worshipping the shaman nearby". The person-state-5 hypothesis from an earlier pass (the generic "idle-fidget beside a paired reference unit", `pop3-rev/docs/person_states.tsv`) was checked further and is **not supported**: a full sweep of every literal "set state to 5" write in the exe turns up only the two already-known setters (wildman-beside-tree, the preach order) - no third, shaman-specific one. So this is either a cosmetic pose roll from a genuinely different state/mechanism not yet identified, or the "worshipping the shaman" description itself needs re-checking against what the original actually shows - needs a live check (watch an idle follower near its own shaman for the kneeling pose) before any more static searching, since the state-machine angle has now been ruled out rather than just unconfirmed.
 - [ ] Stranded units: find the game's anim (frame 1 of anim 12, the flattening jump, stands in today).
 - [ ] Boarding vehicles: people of the same group within 440 units join the vehicle's group (pop3-rev-analysis.md "Boarding and driving"); the original's boarding clip (our jump uses the `Jump` pose, unit-art.md).
 - [ ] Open-source units: models closer to the original look (feathers and staff for the shaman, tribal outfits); a prayer clip (SitDown's end stands in) and a swim/drown clip (RecieveHit sunk stands in). CC0 poses to render as each action lands: [unit-art.md, Planned poses](docs/specs/unit-art.md#planned-poses-cc0-stand-ins).
@@ -238,7 +250,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
     exact per-32-turn reroll odds/cap (ours is a bounded approximation, not traced); whether getting hit again
     while settling, and the resulting "juggled indefinitely by a fast enough attacker" possibility, matches the
     original at all - unconfirmed live either way.
-- [ ] Vehicle huts (vehicles.md "Vehicle huts", done with guesses): check in the game the crew size (4), the work per vehicle (1200 crew-turns), whether mana is spent, where the vehicle appears, and a hut's queue at the door (types 13-16 have one, pop3-rev-analysis.md "The queue at the door").
+- [ ] Vehicle huts (vehicles.md "Vehicle huts", done with guesses): mostly answered this session, traced from the exe (pop3-rev-analysis.md "Vehicle huts: how the hut itself produces a vehicle"). **Work per vehicle is NOT 1200 crew-turns**: it's a plain wood-delivery cost, already in the Vehicles table (`WOOD_VEHICLE_*`) - 600 for either boat hut type, 1000 for either balloon hut type, via a per-hut accumulator compared against the vehicle's own table cost (what increments that accumulator per turn wasn't found, so a real-world rate still needs either a live watch or a further static session). **Crew size is NOT 4**: the occupant array is the generic building `+0x86` field, confirmed elsewhere as a 6-slot array (though a different already-written row describes up to ~20 on the same field for training buildings - an unresolved discrepancy, flagged in functions.tsv, not settled this session). **Where the vehicle appears**: a per-type, door-relative offset point near the hut (not an arbitrary nearest-water search), gated on a clearance check. Mana: not referenced anywhere in the traced code - the mechanism appears to be wood-only, no mana cost found (matches a [player] recollection that vehicle creation is wood-only). The door queue question (types 13-16) is untouched by this pass, still open. **Settled by a [player] description this session** (supersedes the earlier, hedged 2/6-unsure guess and the "no free vehicle" question, vehicles.md "Vehicle huts"): crew is 4 for a boat hut, 6 for an airship hut (now `VehicleKind::crew`, split from the old shared `CREW` constant) - still not independently traced from the exe, so a live check is still worth doing; no vehicle is ever free, every one including the first is crewed and paid for in wood; the crew that isn't driving the finished vehicle off keeps working and starts the next one, looping until nobody is left assigned to the hut - already how `GameMap::work`/`crew_step` behaved, so no code change was needed for the looping part.
 - [ ] Whirlwind spell (to implement), on a vehicle: everyone aboard is put out, it spins (roll +204, pitch +153 /2048 per tick) for 10 ticks (boat; ends early when the ground reaches it) or 2 (balloon), then explodes like a destroyed boat on land (pop3-rev-analysis.md "Life, damage and destruction", state 9).
 - [ ] Vehicle destruction (vehicles.md; health, damage from blasts and bolts, sinking, rising and exploding done): the partial explosion of a boat on land (its faces flying off, `explosion.rs`).
 - [ ] Balloons: bobbing while moving, and the original's climb rate and look-ahead; check the hover over trees and totems in the game (450 guessed; buildings 560 from the exe) (vehicles.md).
@@ -329,7 +341,9 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   spell's own code). Every 64 turns it raids a nearby enemy building (occupants evicted one at a time, forced to
   panic, then damaged - "up to 3 times" matches); every 8 turns it scans its own 3x3-cell neighbourhood for enemy
   persons (shamans/angels excluded by a type table, matching "immune") and, for each one whose own `+0xe` bit
-  `0x10` is clear (an unconfirmed per-victim flag, not Blast's own `+0x7A`) and who isn't a ghost (ghosts are
+  `0x10` is clear (now confirmed, not a Swarm-specific flag: a general "not already being removed this tick"
+  re-entrancy guard, pop3-rev-analysis.md's Angel-of-Death area panic and Preacher-conversion eviction both check
+  the exact same bit with the same meaning - not Blast's own `+0x7A`) and who isn't a ghost (ghosts are
   deleted outright instead, matching "ghosts destroyed"), forces the same panic then applies exactly
   `SWARM_PERSON_DAMAGE` (100, confirmed via `0x5AA514`) - matching "Per spell" row 5's "100 damage and panic"
   precisely. Full citation: `pop3-rev/docs/functions.tsv`'s `0x510120` row. Volcano's own fireballs (row 16, "22
@@ -494,7 +508,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Villager hut style (3 styles in the objects, style 0 always drawn): find what picks it.
 - [ ] Check the facing of the other kinds against the game (boat huts are settled: jetty local +z, door -z, from the 11 in the levels), and the cells a footprint takes (used by the walking mask).
 - [ ] General model 9 "building add-on" (one near each of 91 medium/large huts): find what it is (hut extension?) and draw it.
-- [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold. **Partially addressed 2026-10-23, render-only**: `terrain_texture::looks_like_sea`/`VISUAL_SEA_HEIGHT` (4, a guess, not the confirmed threshold) now makes the GROUND SHADER treat height <= 4 as "sea" for its land/water branch choice, separately from `game_core::unit::is_sea` (still exactly `SEA_LEVEL` for all of pathing/drowning/building placement, untouched) - reported (level 38, original assets): a coastal cell at very low but nonzero height was rendering through `land_colour`'s own `cliff` remap instead of as water, reading as lava/rock (a steep drop to the seabed there legitimately pushes `blend` high, and that theme's own cliff table apparently has reddish "damaged ground" entries at high blend - terrain-textures.md "cliff"). The real threshold (and whether it's even a flat height cutoff rather than something else) is still unconfirmed - `VISUAL_SEA_HEIGHT` is picked to clearly cover the one concretely cited case (height 1) with a little margin, nothing more.
+- [ ] Sea level: only height 0 is sea in the simulation, but the original draws very low ground (height 1, e.g. the inlet by level 19's boat hut) like water; find the original's threshold. **Partially addressed 2026-10-23, render-only**: `terrain_texture::looks_like_sea`/`VISUAL_SEA_HEIGHT` (4, a guess, not the confirmed threshold) now makes the GROUND SHADER treat height <= 4 as "sea" for its land/water branch choice, separately from `game_core::unit::is_sea` (still exactly `SEA_LEVEL` for all of pathing/drowning/building placement, untouched) - reported (level 38, original assets): a coastal cell at very low but nonzero height was rendering through `land_colour`'s own `cliff` remap instead of as water, reading as lava/rock (a steep drop to the seabed there legitimately pushes `blend` high, and that theme's own cliff table apparently has reddish "damaged ground" entries at high blend - terrain-textures.md "cliff"). **Confirmed this session: it is NOT a flat height cutoff at all.** `set_texture_landscape_main`'s own land/water branch (`0x4BE3F4`) tests the SAME precomputed per-cell coastal-SHAPE classification (map-cell shape nibble indexed into table `0x5AA328`) that `is_land_at`/`0x44F980` and the drowning predicate (`0x4EEFF0`) already use elsewhere - a shore cell's exact sub-cell shape, not a height threshold. `VISUAL_SEA_HEIGHT` is the wrong shape of fix: the real rule needs the terrain's own precomputed coastal-shape class (already derivable the same way our existing `is_sea`/pathing code presumably could be, or by computing the same shape classification client-side) rather than a tunable height constant - a height-based approximation will always have cases like the reported one.
 - [ ] Buildings do not heal: damaged ones need repairs by braves, using wood.
 - [ ] Attacking buildings (combat.md "Attacking a building"): enemies on a plan's cells count as its people; the flying faces of the partial explosion; the original's jitter is ±2 units (ours tilts); the player warned once. Blasts (40, `blast::DAMAGE_BLDG`) and firewarrior bolts (100, `firebolt::TARGET_DAMAGE`) adding wear is now implemented - only Blast's own `SimpleBlast` wears buildings this way (once per building it ever reaches, confirmed - not every
   turn like people/vehicles), not `panicking_blast` (Firestorm's fireball blast): the trace's "blasts
@@ -504,7 +518,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
 - [ ] Build tab: icons, discoveries unlocking "?".
 - [ ] Blueprint: tune `STEEP_SPREAD`; check the door side of the other kinds against the original objects.
-- [ ] Construction pace: check in the game how long a jump and building one piece take (`JUMP_TICKS`, `JUMP_STEP`, `BUILD_TICKS`, guessed) and whether braves gather and watch first (a plan on level ground is flat at once today).
+- [ ] Construction pace: **the overall shape is now known and is NOT a per-worker timer** (pop3-rev-analysis.md "Building construction and wear", traced this session): the original drives the building's 0-4 visual stage directly from a wood-stock counter against a per-type total cost (300/900/1100/800/200/500/1100 wood by kind, exe-confirmed) via `stage = clamp((stock*4-1)/(cost-1), 0, 3)`, not a fixed jump-then-build animation length. `JUMP_TICKS`/`BUILD_TICKS`/`JUMP_STEP` as literal per-worker durations likely don't correspond to anything in the original at all - still open is what a brave actually does moment-to-moment to deliver wood to a site (plausibly the same already-known 20-turn Chopping/transfer_wood cycle reused, `cost / 100` loads, not confirmed), and the assigned-brave cap/multi-worker throttling (a separate "plan" controller, `0x4B8BB0`, 16-tick rhythm, not fully closed - functions.tsv). Whether braves gather and watch first before flattening is untouched by this pass, still open.
 - [ ] Walls: replan only walkers whose route crosses a changed wall (every walker replans today); a boat hut's jetty side stays open to boats, to check with vehicles.
 - [ ] Units inside a building are hidden but still selectable with a box; check what the original allows. Units walking out of several buildings: the door may be blocked by another wall or the sea.
   **Partly addressed 2026-10-30** (reported: a warrior-training site's door facing a neighbouring house, its
@@ -529,11 +543,11 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   "Simulation"): `Tree::tick` now takes a per-turn `submerged` flag (`GameMap::tick`, `unit::is_sea` against the
   live heightmap), the same periodic-recheck shape as the building foundation check above rather than routing
   through `WorldEvent::Terrain`.
-- [ ] Damage from moving ground: check in the game what sets the damage (level 10's atlantis island comes back with its buildings missing 1 to 3 pieces of wood, no common percentage), and whether repairs need fetched wood ([buildings.md#damage-and-repair](docs/specs/buildings.md)).
+- [ ] Damage from moving ground: check in the game what sets the damage (level 10's atlantis island comes back with its buildings missing 1 to 3 pieces of wood, no common percentage), and whether repairs need fetched wood ([buildings.md#damage-and-repair](docs/specs/buildings.md)). Likely candidate, not independently confirmed as THIS trigger: the ordinary terrain-reaction foundation check (pop3-rev-analysis.md "Terrain changes: what reacts", `0x408080`) explicitly does no damage for its slow pull-back case (only two all-or-nothing destroy reasons, uneven/flooding - neither matches "missing a few pieces"), so a probabilistic partial loss matching "1 to 3, no common percentage" is much better explained by the Earthquake spell's own already-traced building-shake (pop3-rev-analysis.md "Per spell" 14 / Reference `0x50D9A0`/`0x50FE60`/`0x4980A0`): 3 independent 20/128 rolls (turns 24/56/88), each a flat −100 wood (one piece) on a hit - 0 to 3 pieces lost, no fixed percentage, exactly the reported shape. Atlantis rising is plausibly scripted as an actual Earthquake-type effect rather than a plain terrain write, which would make this a match - not confirmed; check the level's own script/trigger for an Earthquake effect, or live-watch for the spell's own 120-turn shake cadence during the rise.
 - [ ] Effects 89 atlantis set / 90 atlantis invoke (level 10): sink the island at start, raise it back when the stone head trigger fires; 83 boat hut repair.
 - [ ] Towers (drum tower): hold one unit (going in is done, `game_core::enter`), which gets a longer range from there: firewarriors throw farther, the shaman casts spells farther, a preacher converts enemies around the tower. No other tower effect.
-- [ ] Training huts (huts-and-training.md "Done"): the queue's ripple (2 turns per rank) and those already of the building's kind letting the others pass, five trained together (the exe's count; ours holds one), queued orders carried over, damage cancelling the queue and sending the trainee out.
-- [ ] Training as in the original, what is left (pop3-rev-analysis.md "Training buildings"): the computer players' cost (`CP_` 1000) once tribes have a controller; the trainee's queued orders given to the new unit; the training time to measure in the game.
+- [ ] Training huts (huts-and-training.md "Done"): the queue's ripple (2 turns per rank) and those already of the building's kind letting the others pass, five trained together (the exe's count; ours holds one - a [player] note, reaffirmed, says it's always one at a time in play, so this needs a live check before five-at-once is implemented), queued orders carried over, damage cancelling the queue and sending the trainee out.
+- [ ] Training as in the original, what is left (pop3-rev-analysis.md "Training buildings"): the computer players' cost (`CP_` 1000) once tribes have a controller; the trainee's queued orders given to the new unit. The training time is already answered, no live measurement needed: the original has no fixed duration at all, just the mana cost filled at `cost / 32` per 16-turn income tick (same section) - 256-512 turns (21-43 s) at best, scaling with cost like everything else in the mana-income system.
 - [ ] Reincarnation sites from pop3-rev-analysis.md "Reincarnation sites": the ground levelled to the site height over a 5-cell disc in about 21 turns (ours: radius 3, blend 4) with its effects on enemies, wildmen, trees and swamps; pillars rising out of the ground, deleted and moved; the 32 sparkles.
   **Related bug found and partly fixed, 2026-10-21** (TODO.md "Terrain", `docs/archived-plans/terrain-white-patch.md`):
   `ReincarnationSite` had no stored height at all - `flatten_for_spawn` recomputed a *live average* of the
@@ -581,7 +595,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 ### Wood ([trees.md](docs/specs/trees.md))
 - [ ] Original scenery models 7 plant 1, 8 plant 2: not drawn yet. Scenery 9 (the totems, 98 in the levels) is drawn as the stone head (object 82), a guess: find its real model. Trees have no size in the thing record: full size is right.
 - [ ] Wood for repair and hut growth, like construction (`game_core::work`: assigned braves fetch, carry to the door, build). Cutting, carrying, fetching and construction are done (units.md "Wood", buildings.md "Construction").
-- [ ] Check in the game whether a brave ordered on a tree with no wood to spare goes to another one.
+- [ ] Check in the game whether a brave ordered on a tree with no wood to spare goes to another one. The gather-wood state's own code (`0x495D70`, the chop-completion branch at `0x4960CC`) has **no tree-depletion check at all once already chopping**: on countdown expiry it unconditionally calls `transfer_wood(tree, person, WOOD_<PERSON>)`, which on an empty tree just moves 0 and the brave starts the same 20-turn countdown again, forever, with no reroute logic anywhere in this function. Whether a NEW order onto an already-empty tree is refused/redirected at assignment time (a different, not-yet-traced code path, outside this per-turn state) is still open - that's where any "goes to another one" behaviour would have to live, if it exists at all.
 - [ ] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible) trees.
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.
 
@@ -609,7 +623,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   buildings/units.
 - [ ] Stone totem: check in the game what it does after a completion that is not its last, the timings (turn 2 s, hold 1 s, sink 4 s) and the smoke; other turns to try are listed in worship.md.
 - [ ] Totem gifts not handled yet (logged as `Reward::Unhandled`): effects (land bridge, lightning...), revealed scenery and triggers, vehicles, the Angel of Death of type 5 totems; mana once mana exists. Check what `NumOccurences` 0 means.
-- [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); `PrayTime`'s unit is now confirmed live (worship.md "Open", pop3-rev-analysis.md "The vault"): the same 4-turn tick as a totem's gauge, cap = `PrayTime` directly. Still to check in the game: the drain speed with nobody praying (not observed live yet).
+- [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); `PrayTime`'s unit is now confirmed live (worship.md "Open", pop3-rev-analysis.md "The vault"): the same 4-turn tick as a totem's gauge, cap = `PrayTime` directly. The drain speed with nobody praying is also answered, from the shared gauge code itself (pop3-rev-analysis.md "Prayer at triggers" "The gauge" - `gauge -= C²` every 4-turn step when nobody counts, same magnitude as a full-staffed fill, not the `(C−n+1)²`-divided partial-attendance rate) - the vault is confirmed to run through that exact code path with no vault-specific math ("The vault"), so no separate live trial is needed to settle this one.
 - [ ] Prisons: levels where the shaman starts imprisoned; she is locked inside (units.md "Locked units") until freed.
   Level 15 has one (so far the only level seen with a prison). Observed live: a pyrotechnic hit knocked the
   imprisoned shaman outside the prison and killed her, so being locked inside does not make her unattackable/
@@ -747,9 +761,15 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     built one of this kind, but it needs repairing" and reuse the same `build_orders` assignment
     `ai_construct_building` already does for a fresh plan.
   - Whether the shaman specifically stands guard beside a building under repair (vs. following whatever
-    general "defend base"/idle behaviour already puts her there) is unconfirmed - a guess either way
-    until traced; a question for a spec session (docs/todo or a new pop3-rev-analysis.md section) if not
-    already covered by "Native AI" there.
+    general "defend base"/idle behaviour already puts her there): a shaman-SPECIFIC "stand guard" person
+    state does exist (state 39, `pop3-rev/docs/person_states.tsv`), but it's confirmed gated behind a
+    global debug/option flag (`0x89D17C` bit 2) that normal play doesn't set - without it she falls back
+    to her ordinary per-type default like anyone else, same mechanism everyone's idle fallback uses. So the
+    person-state machine itself has no shaman-specific "guard a repair site" behaviour active in a real
+    game; what's actually seen in play is more likely the generic AI positioning logic the item's own
+    "defend base" guess points at, not traced further this session - that's native-AI/ai-scripts.md
+    territory (DEFEND/guard logic), a separate and substantially bigger investigation than the person
+    states checked here.
 - [x] `pop3-ai-script` (its own crate, not a `pop3-format` module): parses `cpscrNNN.dat` (12 552 B
   only) into fields and a statement tree per [ai-scripts.md](docs/specs/ai-scripts.md) (grammar,
   token, parameter and internal variable tables are there), folds a recognized
@@ -849,8 +869,9 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   (previous item). Still open: `SET_SPELL_ENTRY` (shaman auto-cast, not modelled at all), the rest of
   `headcount`/`housing` as internal variables, and whether levels 2100/2110/2131's missing scripts
   (fall back to no script, unverified this falls back cleanly end to end) still need a check.
-- [x] Script timing: the original runs 12 turns/s (not the wiki's "about 8"; pop3-rev-analysis.md "Turns and
-  timing"), matching our own one-tick-per-turn (units.md) - no rescaling needed. `EVERY`'s per-tribe phase is
+- [x] Script timing: the original runs 12 turns/s, fixed 83 ms step [exe, measured] (pop3-rev-analysis.md
+  "Reference" / "Turns and timing", not the wiki's "about 8"), matching our own one-tick-per-turn at
+  `TICKS_PER_SECOND = 12` (units.md, `game_core::time`) - no rescaling needed. `EVERY`'s per-tribe phase is
   confirmed and implemented (see the interpreter item above); message timeouts and flyby times are turns too,
   only `SET_TIMER_GOING` takes seconds (ai-scripts.md "Turn rate").
 - [x] Flybys: `FLYBY_CREATE_NEW..=FLYBY_START` drives the camera for real now
@@ -922,7 +943,10 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     (10.5°-88.6°) is real but is the range reached by physically holding the manual zoom key to the
     whole-planet globe view - a different input than the script's bounded `-100..100`; level 1's own script
     never gets anywhere near those endpoints. `zoom_to_pitch` now uses a piecewise-linear fit through these
-    points (`KNOTS` in `flyby.rs`, zoom 80-100 extrapolated - unconfirmed, no script here exercises past 80),
+    points (`KNOTS` in `flyby.rs`, zoom 80-100 extrapolated - unconfirmed, no script here exercises past 80;
+    pop3-rev `docs/camera.md` item 11 found and decoded the real preset data source this would need, `data/
+    VCONFIG0.DAT`, no live capture required - not fully closed yet, still needs tracing what advances the
+    "current preset" index during a real zoom/flyby before the 80-100 numbers can be read off directly),
     with a regression test (`zoom_is_calibrated_against_real_flyby_pitch_traces`) pinning it within 6° so a
     later cleanup can't flatten it back into a straight `PITCH_RANGE` span without a test catching it. See
     pop3-rev-analysis.md "The AI-script zoom channel" and pop3-rev `docs/camera.md` "`flyby.rs::zoom_to_pitch`
@@ -1025,10 +1049,15 @@ Level/world correctness that is mostly stable already (terrain especially: exten
   read close to the sea's own rows there) - since removed, see below.
   `SunParams::default` now returns the live-measured, disassembly-confirmed flat constant `sunX = sunZ = sunBase
   = 147` (pop3-rev-analysis.md "Terrain land colour", 2026-10-20) instead of scaling `ShadeRange`/`ShadeStart` -
-  the level's sunlight block plays no role in it, matching the exe's `sunlight_init_default`. Left open: whether
-  the gated day/night sun-angle tick (0x401350) or the fixed-Inclination-64 path (0x401920) ever actually run in
-  some mode (both measured OFF this session); how the original maps its sky (backdrop scrolling with the
-  camera?), not traced this session either.
+  the level's sunlight block plays no role in it, matching the exe's `sunlight_init_default`. The two paths are
+  mutually exclusive on the same bit (`0x895DA5 & 0x8`, checked this session): the day/night tick (`0x401350`,
+  called every turn from the main loop) only runs its body when that bit is SET, the fixed-Inclination-64 path
+  (`0x401920`) only when it's CLEAR - but `0x401920` also has **zero call sites anywhere in the exe**, and no
+  instruction anywhere writes that bit with a literal address either (an indirect/pointer write wasn't ruled
+  out, so not airtight) - so with the bit clear, as measured, NEITHER path can ever move the sun away from the
+  flat 147 default: the day/night cycle reads as permanently dormant in the shipped game, not just off in the
+  levels tried this session. How the original maps its sky (backdrop scrolling with the camera?) is a separate,
+  still entirely untraced visual system - not related to this sun-angle code at all, needs its own session.
 - [x] `game_core::shading::cell_light`'s slope sample overshot: it read `height(x, z) - height(x + 2, z)` /
   `height(x, z + 2) - height(x, z)`, a two-real-cell baseline, where the original's `compute_cell_light`
   (0x4BE230) reads a one-real-cell baseline (pop3-rev-analysis.md "Terrain land colour", 2026-10-20 correction —
@@ -1419,7 +1448,7 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 - [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
 
 ### Camp fire ([buildings.md](docs/specs/buildings.md) "Camp fire")
-- [ ] Guard posts' torches (objects 190-193, blended tile 92): draw them with `flame.rs` once guard posts have an original object (the firewarrior and prayer huts' torches burn).
+- [ ] Guard posts' torches (objects 190-193, blended tile 92): draw them with `flame.rs` once guard posts have an original object (the firewarrior and prayer huts' torches burn). Checked this session: the only exe mechanism found that spawns a class-5/type-0xA fire scenery object on a building (pop3-rev-analysis.md "Burning building", the visible-flame addition) is specific to the burn-damage state and has exactly one caller in the whole exe - ruled out as the permanent-torch mechanism. Torches are driven by something else, not found this session.
 - [ ] Generated firewarrior hut: drop the static ember cone from its braziers (tools/generate_buildings.py) now that an animated flame stands on them.
 - [ ] Check in the game: what a camp fire is for (people gathering? mana?), its burn time when left alone (`ABANDON_TICKS`, 60 s guessed), the ring size, the flatness rule, and when object 12 (other logs) is used.
 - [ ] Hover/selection of a camp fire (tooltip with who is around it), a hover cursor when units are selected over one.
