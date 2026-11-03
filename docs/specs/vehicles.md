@@ -95,25 +95,28 @@ on.
 A boat hut makes boats, an airship hut balloons (`VehicleKind::made_by`). Built with wood like any building; then
 [ours, from the player's description - the original's way is now traced, pop3-rev-analysis.md "Vehicle huts: how
 the hut itself produces a vehicle", TODO.md]:
-- Braves sent into a built vehicle hut (`Order::Enter`, `GameMap::join_crew`) join its crew (`work`), up to `CREW`
-  4 [a guess, likely wrong - the original's occupant array is a generic 6-slot field shared with every other
-  building kind, not a vehicle-hut-specific cap]. [player, unconfirmed]: an airship hut's crew is always 2; a
-  boat hut's is probably 6 (not sure) - the boat figure would fit the generic 6-slot field exactly, the balloon
-  figure would not (so not every slot need be crew-usable per kind - still just recollection, needs a live
-  check, TODO.md). Others walk to its door. The crew fetches wood to its pile
-  (`Building::stock`) like for a site, until the pile and the wood on the way reach the vehicle's cost: 4 pieces
-  for a boat, 3 for a balloon (`WOOD_VEHICLE_BOAT1` / `_AIRSHIP_1` of constant.dat, 400 / 300, a piece being 100).
+- Braves sent into a built vehicle hut (`Order::Enter`, `GameMap::join_crew`) join its crew (`work`), up to
+  `VehicleKind::crew` [player]: 4 for a boat hut, 6 for an airship hut (superseding an earlier, hedged
+  player recollection of 2/6-unsure, and the "generic 6-slot occupant field" guess this file used to carry -
+  still not independently traced from the exe, so a live check remains open, TODO.md). Others walk to its door.
+  The crew fetches wood to its pile (`Building::stock`) like for a site, until the pile and the wood on the way
+  reach the vehicle's cost: 4 pieces for a boat, 3 for a balloon (`WOOD_VEHICLE_BOAT1` / `_AIRSHIP_1` of
+  constant.dat, 400 / 300, a piece being 100) - matches a [player] recollection of the same two numbers.
   Otherwise they work inside.
 - With the wood there, each crew member inside adds a turn of work (`Building::launch`, a `Launch`) up to
   `LAUNCH_WORK` 1200 [a guess, and likely the wrong SHAPE too: the original's own hut accumulator compares
   directly against the same wood-cost table this file already cites (600/1000 exe default, the wood cost above
   in exe units), with no separate "work" layer found on top of wood delivery - the real mechanism may just be
-  wood delivery alone, same primitive as ordinary construction, not an added per-crew-member work timer].
-  [player, unconfirmed]: the hut's own construction already produces one vehicle for free the moment it
-  finishes going up; only the ones after that cost wood, which would make "work per vehicle" just that wood
-  cost, nothing more - fits the wood-only hypothesis above, but ours currently has no free first vehicle at all
-  (TODO.md). Done: the wood is spent and the vehicle comes out, its owner the hut's, heading away from the hut, with the
-  first of the crew inside (lowest id) aboard, out of the crew.
+  wood delivery alone, same primitive as ordinary construction, not an added per-crew-member work timer]. No free
+  vehicle when the hut itself finishes going up [player, corrects an earlier player guess that there was one]:
+  every vehicle, including the first, is crewed and paid for in wood the same way. Done: the wood is spent and
+  the vehicle comes out, its owner the hut's, heading away from the hut, with the first of the crew inside
+  (lowest id) aboard, out of the crew (`work` cleared) - matches a [player] description of one brave "borrowed"
+  to drive it off. The other crew members keep working (`work` still set): once more wood reaches the hut's
+  pile they build the next vehicle the same way, on and on until none of them are left assigned
+  [player; already how `GameMap::work`/`crew_step` behaves - every free assigned brave keeps fetching and
+  building for as long as `work` is set, with no separate "last vehicle" state, so no code change was needed
+  for this one].
   A boat goes on the open sea nearest the jetty side (local +z) within `LAUNCH_SEARCH` 4 cells, and waits, done,
   while there is none; a balloon just past that side.
 - The hut's tooltip: its crew in the people row, the vehicle's wood in the wood row (`occupancy`), the work in the
