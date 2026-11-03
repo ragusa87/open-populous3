@@ -814,12 +814,22 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   for spells only so far (`game_core::spell_book::SpellStats::from_constants`/`SpellBook::apply_constants`,
   `GameMap::load_original`): cost, charge count, advisor pacing and range, with our own defaults
   (`SpellStats::default_for`) when an install isn't present or its file doesn't parse.
-- [ ] The rest of `constant.dat` (units life/speed/damage, training costs, wood, hut breeding) still uses its
+- [ ] The rest of `constant.dat` (units speed/damage, training costs, wood, hut breeding) still uses its
   own hardcoded placeholders across the codebase, not `pop3_format::constants::Constants` — reconcile one
   group at a time the same way the spell group was (`cost`'s own split stays: our placeholder scale by
   default, real numbers only from a loaded file). `CONV_SPY`'s own duplicate entry (unit group, then building
   group) is read "by position" per constants.md, unconfirmed and irrelevant to every group read so far:
   check if any future group actually needs position-sensitive duplicate handling before adding it.
+  **Units' own `life` sub-group is now done** (`balance.rs`'s new `Units`/`Balance::apply_constants`,
+  `kind_stats.rs`'s own `KindStats::life` stays the compiled-in default that `Unit::new`/`change_owner`
+  reset to; the live simulation corrects it against `LIFE_<P>` right after, in `GameMap::spawn`/
+  `with_shamans`/`change_owner`, the only three places a unit's health is ever set from its kind) - since
+  our defaults already are the traced real numbers (`kind_stats.rs`), this only matters for a modded
+  install with different ones. **`LIFE_<P>`'s own per-kind suffixes are `[ours]`, a guess** (constants.md
+  only confirms the group and two example values, not every kind's exact spelling) - worth checking
+  against a real decoded file or the community's own dump; a wrong guess is harmless (that kind's default
+  just stays, same lenient fallback as every other group here). `speed`/`damage` next would follow the
+  same shape, but need their own per-kind suffixes confirmed too.
 - [x] Lockstep: two peers resolving different `SpellStats` would silently diverge mid-match - a hashing
   mechanism now exists (`SpellBook::constants_hash`, every spell's resolved `cost`/`max_charges`, the two
   fields that actually feed simulation state; `advisor_seconds`/`range` left out, neither can desync anything)

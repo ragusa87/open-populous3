@@ -186,8 +186,11 @@ impl GameMap {
     }
 
     /// An original level: its terrain, sites, trees and buildings. Buildings level their ground
-    /// above the sea first, then the sites theirs (`with_shamans`).
-    pub fn from_level(level: &Level, name: impl Into<String>, theme: Option<u8>) -> Self {
+    /// above the sea first, then the sites theirs (`with_shamans`). `balance` is resolved by the caller
+    /// (`load_original`: `Balance::ours()`, possibly `apply_constants`-corrected first) since every
+    /// person this builds (`with_shamans`/`with_people`, below) spawns through it already - spawning
+    /// first and correcting health after, the way a shaman's own site/terrain work, would miss them.
+    pub fn from_level(level: &Level, name: impl Into<String>, theme: Option<u8>, balance: crate::balance::Balance) -> Self {
         let terrain = Heightmap::from_heights(MAP_SIZE, level.heights.clone());
         let sites = sites_from_level(level, &terrain);
         GameMap {
@@ -235,7 +238,7 @@ impl GameMap {
             tribe_scripts: Vec::new(),
             ai: Vec::new(),
             active_flyby: None,
-            balance: crate::balance::Balance::ours(),
+            balance,
         }
         .with_buildings(buildings_from_level(level))
         .with_totems(totems_from_level(level))
@@ -313,7 +316,9 @@ impl GameMap {
         for k in 0..self.sites.len() {
             self.sites[k].flatten_for_spawn(&mut self.terrain);
             let id = self.new_id_of();
-            self.units.push(Unit::shaman(id, &self.sites[k]));
+            let mut shaman = Unit::shaman(id, &self.sites[k]);
+            shaman.health = crate::health::Health::full(self.balance.units.shaman);
+            self.units.push(shaman);
         }
         self
     }
@@ -334,14 +339,20 @@ impl GameMap {
             .map(|h| h.name.clone())
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| dat.file_stem().unwrap_or_default().to_string_lossy().into_owned());
-        let map = Self::from_level(&level, name, header.as_ref().map(|h| h.theme));
+        // The install's own balance numbers (constants.md "Use here"), never shipped: silently keep our
+        // own defaults (`Balance::ours()`) when the file is missing or doesn't parse, same as the `.hdr`
+        // above. Resolved before `from_level` below: every person it places (`with_shamans`/`with_people`)
+        // spawns through `balance` already, so correcting it only after would miss them.
+        let constants = pop3_format::Constants::load(dat.with_file_name("constant.dat")).ok();
+        let mut balance = crate::balance::Balance::ours();
+        if let Some(raw) = &constants {
+            balance.apply_constants(raw);
+        }
+        let map = Self::from_level(&level, name, header.as_ref().map(|h| h.theme), balance);
         let mut spell_books = header.as_ref().map_or(map.spell_books.clone(), |h| per_player(SpellBook::from_level(h, &level)));
-        // The install's own balance numbers (constants.md "Use here"), never shipped: silently keep the
-        // defaults (`SpellStats::default_for`) when the file is missing or doesn't parse, same as the `.hdr`
-        // above.
-        if let Ok(raw) = pop3_format::Constants::load(dat.with_file_name("constant.dat")) {
+        if let Some(raw) = &constants {
             for book in spell_books.iter_mut() {
-                book.apply_constants(&raw);
+                book.apply_constants(raw);
                 book.fill();
             }
         }
@@ -1587,7 +1598,11 @@ impl GameMap {
     /// A new unit with a fresh id, last in `units` (which stays sorted by id).
     pub fn spawn(&mut self, owner: impl Into<Owner>, kind: UnitKind, at: (u16, u16)) -> &mut Unit {
         let id = self.new_id_of();
-        self.units.push(Unit::new(id, owner, kind, at));
+        let mut unit = Unit::new(id, owner, kind, at);
+        // `Unit::new`'s own health is `KindStats::life`, our compiled-in default - corrected here against
+        // the live `balance` (`Balance::apply_constants`, a real install's own `LIFE_<P>` if one loaded).
+        unit.health = crate::health::Health::full(self.balance.units.life(kind));
+        self.units.push(unit);
         self.units.last_mut().unwrap()
     }
 
@@ -2345,6 +2360,24 @@ mod tests {
         let map = GameMap::load_original(&dat).unwrap();
         let default_cost = crate::spell_book::SpellStats::default_for(SpellKind::Blast).cost;
         assert_eq!(map.spell_books[0].slot(SpellKind::Blast).unwrap().stats.cost, default_cost, "no file: our own default");
+    }
+
+    #[test]
+    fn load_original_reads_unit_life_from_a_sibling_constant_dat() {
+        let dir = TempTree::new("constants-life-hit");
+        let dat = dir.0.join("levl0001.dat");
+        std::fs::write(&dat, blank_level_bytes()).unwrap();
+        std::fs::write(dir.0.join("constant.dat"), "P3CONST_LIFE_BRAVE = 4242\n").unwrap();
+        let map = GameMap::load_original(&dat).unwrap();
+        assert_eq!(map.balance.units.brave, 4242, "overridden by the file");
+    }
+
+    #[test]
+    fn spawn_gives_a_new_unit_the_live_balances_own_life_not_just_kind_statss_default() {
+        let mut map = GameMap::sandbox_walk();
+        map.balance.units.warrior = 42;
+        let id = map.spawn(TribeId::Blue, UnitKind::Warrior, (10 * 512, 10 * 512)).id;
+        assert_eq!(map.unit(id).unwrap().health.max(), 42, "not UnitKind::Warrior.max_health()'s compiled-in 1800");
     }
 
     #[test]
@@ -3306,7 +3339,7 @@ mod tests {
         let base = d.len() - 95 - 2000 * 55;
         d[base..base + 7].copy_from_slice(&[2, KIND_SCENERY, 0, 0x00, 0x0a, 0x00, 0x14]);
         d[base + 55..base + 62].copy_from_slice(&[8, KIND_SCENERY, 0, 0x00, 0x0b, 0x00, 0x14]);
-        let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None);
+        let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None, crate::balance::Balance::ours());
         assert_eq!(m.trees.len(), 1, "a tree, not the plant");
         assert_eq!((m.trees[0].cell(), m.trees[0].variant, m.trees[0].size), ((5, 10), 1, crate::tree::MAX_SIZE));
     }
@@ -3993,7 +4026,7 @@ mod tests {
         let mut d = vec![0u8; DAT_SIZE];
         let base = 81_987;
         d[base..base + 7].copy_from_slice(&[3, KIND_BUILDING, 1, 0x00, 0x0a, 0x00, 0x14]);
-        let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None);
+        let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None, crate::balance::Balance::ours());
         for (x, z) in [(5, 10), (6, 10), (5, 11), (6, 11)] {
             assert!(!m.terrain.is_water(x, z), "({x}, {z}) under the hut centred on cell (5, 10)");
         }
@@ -4014,7 +4047,7 @@ mod tests {
         for (i, t) in things.iter().enumerate() {
             d[base + i * 55..base + i * 55 + 7].copy_from_slice(t);
         }
-        let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None);
+        let m = GameMap::from_level(&Level::parse(&d).unwrap(), "test", None, crate::balance::Balance::ours());
         let kinds: Vec<_> = m.units.iter().map(|u| (u.id.raw(), u.owner, u.kind, u.x, u.z)).collect();
         assert_eq!(kinds[0].2, UnitKind::Shaman);
         assert_eq!(

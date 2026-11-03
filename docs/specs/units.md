@@ -93,8 +93,11 @@ trace).
 
 ## Unit kinds (simulation: walking only)
 `UnitKind::ALL`: Shaman, Brave, Warrior, Preacher, Spy, Firewarrior, built with `Unit::new(id, owner, kind, pos)`.
-`max_health` is the original's `LIFE_<P>` (constants.md, fixed values until the file is parsed); wildmen have no
-constant and take a brave's. Flat-ground `speed` in world units per tick is a placeholder:
+`max_health` is the original's `LIFE_<P>` (constants.md): `kind_stats.rs`'s own `KindStats::life` is our
+compiled-in default (already the traced real numbers), corrected against a real install's own file through
+`Balance::units`/`Balance::apply_constants` (`GameMap::spawn`/`with_shamans`/`change_owner` - the only three
+places a unit's health is ever set from its kind); wildmen have no constant and take a brave's, even once
+corrected. Flat-ground `speed` in world units per tick is a placeholder:
 
 | Kind | Health | Speed |
 |---|---|---|

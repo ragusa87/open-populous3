@@ -6,7 +6,11 @@ use crate::unit::UnitKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KindStats {
-    /// Full life (constant.dat values; wildmen have none, a brave's stands in).
+    /// Full life (constant.dat values; wildmen have none, a brave's stands in). This compiled-in default
+    /// is what `Unit::new`/`Unit::change_owner` themselves still reset health to; the live simulation
+    /// corrects it against a real install's own `LIFE_<P>` right after, through `Balance::units`
+    /// (`GameMap::spawn`/`with_shamans`/`change_owner`, `balance.rs`) - everywhere else (tests, and every
+    /// other field below) still reads this table directly.
     pub life: u16,
     /// Life regained every `HEAL_EVERY` turns, None for those who never heal ("Health and healing" [exe, measured]).
     pub heal: Option<u16>,

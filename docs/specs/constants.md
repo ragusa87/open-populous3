@@ -4,9 +4,11 @@ The game's balance values (mana, spell costs, unit life and speed, wood, trainin
 live in one obfuscated text file. Decoded here [files]; names and the plain-text form are confirmed by the
 community: PopRe wiki page "Constant" and Brandan Lasley's `New_Constants.dat` (2012), whose 231 integer
 values all match ours. Parsed by `pop3_format::constants::Constants` (`Constants::parse`/`load`, reusing
-`LevelError`) — only the spell-balance group is actually read today, by `game_core::spell_book`'s
-`SpellStats::from_constants`/`SpellBook::apply_constants` (`GameMap::load_original`); every other group below
-(units, wood, training, huts) is parsed into the same map but nothing reads it yet (TODO.md).
+`LevelError`) — read today by `game_core::spell_book`'s `SpellStats::from_constants`/
+`SpellBook::apply_constants` (the whole spell-balance group) and `game_core::balance::Balance::apply_constants`
+(units' own `life` sub-group only, its exact `LIFE_<P>` suffixes `[ours]`, a guess - TODO.md "Computer players
+(AI)"), both from `GameMap::load_original`; every other group below (units' own speed/damage, wood, training,
+huts) is parsed into the same map but nothing reads it yet (TODO.md).
 
 ## Encoding [files]
 - `levels/constant.dat`, 11 712 bytes in the install checked here (French release, 1998).
@@ -70,16 +72,20 @@ Units:
 
 ## Use here
 - Read it from the original install when one is present, and never ship it. Generated mode needs its own
-  defaults, written by us, not copied. Done for the spell group: `GameMap::load_original` loads the sibling
-  `constant.dat` next to the level's own `.dat` (`Constants::load`, silently falling back to our own
-  defaults on any failure, same as the `.hdr`'s own `.ok()` right beside it); every other constructor
-  (`from_level` alone, `bare`, every `sandbox_*`) never touches a `Constants` at all, so it always gets our
-  own defaults (`SpellStats::default_for`) — exactly `--no-original`'s existing contract.
+  defaults, written by us, not copied. Done for the spell group and units' own `life`: `GameMap::load_original`
+  loads the sibling `constant.dat` next to the level's own `.dat` (`Constants::load`, silently falling back to
+  our own defaults on any failure, same as the `.hdr`'s own `.ok()` right beside it) and resolves a `Balance`
+  from it (`Balance::apply_constants`) *before* calling `from_level` — every person it places
+  (`with_shamans`/`with_people`, `GameMap::spawn`) already spawns through that corrected `balance`, not just
+  units made afterward. `from_level` itself takes the `Balance` to use as a parameter now (so a caller that
+  never resolved one, same as every `bare`/`sandbox_*` constructor, just passes `Balance::ours()`) — the
+  `--no-original` contract is unchanged, only `load_original`'s own caller can ever hand it anything else.
 - Our spell and unit placeholders (spells.md, units.md, buildings.md) can then be checked against the real
   values. The per-spell table (cost, charges, range, altitude bands, effects) is in spells.md "Original balance".
 - The spell costs here are the same numbers the AI scripts read through `INT_M_SPELL_*_COST` (ai-scripts.md).
   Whether those are adjusted, e.g. by `COMPUTER_MANA_ADJUST`, is unknown.
 - Lockstep note, not solved here: two peers with different installs (or one with, one without) would resolve
-  different `SpellStats` for the same spell and silently diverge — the same class of problem as any other
-  install-dependent content, just newly able to affect the simulation (spell costs) rather than only
+  different `SpellStats` (or, now, a different `Balance::units`) for the same spell/kind and silently diverge
+  — the same class of problem as any other install-dependent content, just newly able to affect the
+  simulation (spell costs, unit life) rather than only
   cosmetics. `game-net` doesn't check for this yet (TODO.md).
