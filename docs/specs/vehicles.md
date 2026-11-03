@@ -93,14 +93,21 @@ on.
 
 ## Vehicle huts (done in game-core)
 A boat hut makes boats, an airship hut balloons (`VehicleKind::made_by`). Built with wood like any building; then
-[ours, from the player's description, the original's way is not traced]:
+[ours, from the player's description - the original's way is now traced, pop3-rev-analysis.md "Vehicle huts: how
+the hut itself produces a vehicle", TODO.md]:
 - Braves sent into a built vehicle hut (`Order::Enter`, `GameMap::join_crew`) join its crew (`work`), up to `CREW`
-  4 [a guess]; others walk to its door. The crew fetches wood to its pile (`Building::stock`) like for a site, until
-  the pile and the wood on the way reach the vehicle's cost: 4 pieces for a boat, 3 for a balloon
-  (`WOOD_VEHICLE_BOAT1` / `_AIRSHIP_1` of constant.dat, 400 / 300, a piece being 100). Otherwise they work inside.
+  4 [a guess, likely wrong - the original's occupant array is a generic 6-slot field shared with every other
+  building kind, not a vehicle-hut-specific cap]; others walk to its door. The crew fetches wood to its pile
+  (`Building::stock`) like for a site, until the pile and the wood on the way reach the vehicle's cost: 4 pieces
+  for a boat, 3 for a balloon (`WOOD_VEHICLE_BOAT1` / `_AIRSHIP_1` of constant.dat, 400 / 300, a piece being 100).
+  Otherwise they work inside.
 - With the wood there, each crew member inside adds a turn of work (`Building::launch`, a `Launch`) up to
-  `LAUNCH_WORK` 1200 [a guess: 100 s alone, 25 s with 4]. Done: the wood is spent and the vehicle comes out, its
-  owner the hut's, heading away from the hut, with the first of the crew inside (lowest id) aboard, out of the crew.
+  `LAUNCH_WORK` 1200 [a guess, and likely the wrong SHAPE too: the original's own hut accumulator compares
+  directly against the same wood-cost table this file already cites (600/1000 exe default, the wood cost above
+  in exe units), with no separate "work" layer found on top of wood delivery - the real mechanism may just be
+  wood delivery alone, same primitive as ordinary construction, not an added per-crew-member work timer].
+  Done: the wood is spent and the vehicle comes out, its owner the hut's, heading away from the hut, with the
+  first of the crew inside (lowest id) aboard, out of the crew.
   A boat goes on the open sea nearest the jetty side (local +z) within `LAUNCH_SEARCH` 4 cells, and waits, done,
   while there is none; a balloon just past that side.
 - The hut's tooltip: its crew in the people row, the vehicle's wood in the wood row (`occupancy`), the work in the

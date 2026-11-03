@@ -338,6 +338,39 @@ Example with the file's values, at 12 turns per second:
 - a full tree is 4 loads, 80 turns (6.7 s) of chopping plus the walks; a small hut is 3 loads;
 - an emptied tree regrows one load in 800 turns (67 s), and is full again after 3200 turns (4 min 27 s).
 
+## Building construction and wear [exe]
+Resolves TODO.md's "Construction pace" question. Construction (and wear/dismantling - the same formula runs
+both ways) is wood-delivery-driven, not a per-worker animation timer the way `JUMP_TICKS`/`BUILD_TICKS` model
+it. The master primitive, `0x4BA2C0` (`fn(stock_companion, delta)`, pop3-rev `functions.tsv`'s own row has the
+full trace): every wood delivery (always ±100, one load, the same unit as Chopping's `WOOD_<PERSON>`) adds `delta`
+into a per-site stock counter, then recomputes a 0-4 visual **stage** byte from stock vs. a per-type **total
+wood cost** (building-type table `0x5A7228`+0x1A):
+```text
+stage = 4 ("built/operational")              if stock >= cost
+stage = clamp((stock*4 - 1) / (cost - 1), 0, 3)   while 0 < stock < cost
+stage = 0 ("bare/blueprint")                 if stock <= 0
+```
+Total wood cost per type (exe, every building type checked): 300 (all 3 hut sizes), 900 (tower, temple), 1100
+(spy hut, fire/firewarrior hut), 800 (warrior hut, reconversion), 200 (wall), 500 (gate), 1100 (all 4 vehicle
+huts), 0 (guard post, vault, prison - never built/dismantled by braves). A stage change is what drives the
+model showing more/fewer pieces, and re-triggers a shadow-footprint recompute.
+
+A separate, not fully closed controller - the "plan" object (`0x4B8BB0`, one per construction/repair site,
+`+0x92` referencing the managed building, `pop3-rev` `functions.tsv`'s own row has the detailed trace) - owns
+the assigned-brave roster (`+0x6A`/`+0x9A`, up to 10 workers, pruned every call for dead/reassigned/wrong-tribe
+entries) and, on a 16-tick rhythm, counts how many of those workers are currently actively working (their own
+order sub-state `== 2`) and cycles a capped number of them per window (bounded by how much is left to deliver)
+into sub-state 7. This reads as the mechanism that limits how many braves can usefully contribute to a site at
+once ("each kind has only a maximum", buildings.md), separate from the wood-delivery math above - **what
+exactly a brave "doing construction work" does moment to moment (walk to the site, flatten the footprint,
+stand and deliver) was not traced to the point of an actual per-worker duration/timer**, so there is still no
+confirmed exe number to replace `JUMP_TICKS` (800 ms) or `BUILD_TICKS` (5 s) with directly - only the strong
+structural finding that progress is wood-count-driven (0-4 stages) rather than a fixed per-worker animation
+length. A brave delivering a 100-wood load to a construction site is plausibly the exact same Chopping/
+transfer_wood primitive already documented above (a tree and a construction site's wood pile read as the same
+kind of "wood sink"), which would make the real "pace" largely the already-known 20-turn chop cycle repeated
+per load needed (`cost / 100` loads) rather than anything construction-specific - not confirmed this session.
+
 ## Huts: breeding and growth [exe]
 A hut (building types 1-3, small, medium, large) has two counters, updated by the building handler on its own
 rhythm. `inside` is the number of people in the hut.
@@ -647,9 +680,12 @@ for vaults specifically.
   stationary ritual at a target building" primitive, not preach-specific; not traced further) 36 turns (3 s) before
   the gauge took its first step, consistent with "fills ... while she prays at the door" (worship.md) rather than
   from the moment the order was given.
-- Not measured this session: the drain rate with nobody praying (no drain happened in this trial - she prayed
-  straight through to full) and whether it matches the totem's "same time as filling at full speed" claim for a
-  vault too.
+- Not measured live this session: the drain rate with nobody praying (no drain happened in this trial - she
+  prayed straight through to full). Not in doubt statically though: "The gauge" above already traces the drain
+  branch as a flat `gauge -= C²` every 4-turn step (not the `(C−n+1)²`-divided partial-attendance rate, which
+  only applies to filling), and this vault is confirmed to run the same shared code with no vault-specific math
+  - so a vault drains at the same `C²`-per-step rate as a full-staffed fill, same as any totem, without needing
+  a separate live trial.
 
 ## Reincarnation sites [exe, measured]
 No level file has pillars (scenery 12): the game creates them when the level loads, for each tribe that has a
@@ -779,6 +815,18 @@ Shared person and building states:
 - **Burning building** (building state 4, set by 0x408CB0; per turn 0x408AB0): 127 turns (10.6 s), then back to
   state 1. The library and the prison never burn (building-type flag `+0x4A` bit 0x1); a building already burning
   is not lit again (its timer is not reset). The igniter's tribe is kept in `+0xAF`.
+- **The visible flame itself, traced this session**: entering state 4 (the class-2 ENTER dispatch, same
+  per-state-ENTER-table convention already confirmed for class 1/class 10, switch at `0x4030C0` states 1-6,
+  state 4 -> `0x408840`) spawns one class-5/type-0xA "fire" scenery object (the same scenery type Firestorm's
+  and Lightning's own impact code create for their ground-fire patches, `0x511800`/`0x511AE0`) at the building's
+  own door-adjacent point - computed via the same shape/offset table (`0x59DF3C`) already used for a building's
+  door-point and a vehicle hut's spawn point, sampling real ground height there (`0x44E940`) before creating it.
+  Not independently cross-checked against `objects.md`'s own flame-board rendering for buildings-on-fire, and
+  whether this same mechanism is what lights guard post/firewarrior/prayer hut torches (TODO.md "Camp fire")
+  was not checked this session - the entry trigger (reaching building state 4) is specific to the burn-damage
+  path above, so a permanent door torch, if it uses this same primitive, would need its own separate caller
+  into `0x408840` (not found this session; only one caller exists in the whole exe, from this exact state-4
+  entry case).
 ```text
 on fire:  timer +0xA7 = 127
 per turn: timer -= 1
@@ -3085,6 +3133,18 @@ than the joiner's - the bumped unit is ejected (0x4A3920) rather than the count 
 only grows on a genuine new addition. Either way the joiner takes state 25, its id goes into the chosen slot,
 and the fight's own id goes into its `+0x9D`.
 
+**A challenge is not special-cased from a melee for a third party, settling TODO.md's open "does an idle looker
+hold off a challenge target" question**: the auto-attack proximity scan's own candidate filter (`0x51EAB0`,
+checked against the per-STATE behaviour-flags table at `0x5A6F79`, 5 bytes/state) excludes a handful of specific
+states from being scanned as a target at all (dead/dying, mid-conversion, grabbed by an Angel of Death, on fire,
+lightning-carbonized, and a few others) - **states 25 (fight) and 29 (pre-fight/challenge) are both absent from
+that exclusion list, treated identically**. And the scan that feeds it (`0x4D4690`) is confirmed to run for
+every person every eligible tick regardless of that person's current order - it is not gated on being idle
+either. So a third unit's self-issued auto-attack (kind 21) can pick a person who is already mid-challenge
+exactly as readily as one already in a full melee, whether the looker is itself idle or busy; `0x51A2A0` (above)
+then handles either outcome symmetrically ("target already in a fight -> join it", "target already in a
+pre-fight -> attacker sub-state 8"). No basis found for treating a challenge more cautiously than a melee.
+
 ### Pre-fight (per turn 0x518630; person sub-state `+0x2D`, timer `+0x70`)
 ```text
 ends (both freed, +0x9D = 0) when a person is gone, both are of one tribe, a person leaves state 29,
@@ -4151,17 +4211,48 @@ otherwise, re-derive the FINE per-pixel coastal shape (the same table 0x5AA328 u
   shape 0 (pure land) or 1 (pure sea)  → drowning
   any boundary shape (2-15)            → drowning unless flags +0x10 bit 0x1000000 is set
 ```
-This is the shore case (a person standing/walking somewhere water-eligible); a person **blown into open water**
-by a blast goes through a different, dedicated mechanic instead - see "Blast push and flight": sink at a fixed
--16/turn for 16 turns, forced to exactly 0 life at -256. That mechanic sets flags +0xC bit `0x2` while
-sinking - almost certainly exactly to exempt it from this per-turn predicate (bit `0x2` above means "not
-drowning", i.e. "already being handled elsewhere") while its own dedicated sink-and-die sequence runs; the bit
-clears again at the moment of death.
+**Correction, traced this session**: the sink-and-kill sequence described in "Blast push and flight" for a
+person **blown into open water** is not a separate, dedicated mechanic - it is this exact state (person state
+2, `pop3-rev-analysis.md`'s person_states.tsv row 2, per-turn body `0x4D5B60`). That handler's own outcome
+roll (`0x4EF140`, called with the per-type pair `0x5A706A`/`0x5A706C`) is:
+```text
+every turn while in this state:
+  if is_land_at(pos) (0x44F980 - solid support): pop back to the per-type default state (table 0x5A7064) at once
+  else: height (+0x41) -= 16                      # the per-type "sink rate", 0x5A706A
+        if height <= -256: life = 0 (forced, not a subtraction); state -> 3 (death)
+                                                    # the per-type "kill depth", 0x5A706C
+        else: no transition, stays drowning (sinks further next turn)
+```
+Checked across every person type in the exe's table (wildman through angel): **uniformly -16/turn, -256 kill
+depth for all eight** - the table is type-indexed but carries no actual per-type variation. A clean kill after
+exactly 16 turns (1.33 s at 12 turns/s) of continuous submersion, counted from the first turn `is_land_at`
+reads false - **not a per-tick damage subtraction**, and independent of the unit's current or max health (a
+high-HP unit like the shaman drowns in the same 16 turns as anyone else). This matches the three live-observed
+blast cases below exactly (same -16/turn, 16-turn count, -256 depth, forced-to-0 life), confirming it is the
+SAME code path, reached either by walking into deep water (this predicate) or by a blast-blown landing in
+water (which sets flags +0xC bit `0x2` on arrival, almost certainly to self-exempt from re-deriving this
+per-turn predicate while already locked into the state - the bit clears again at the moment of death).
 
 This runs **every turn, with no timer**: a unit's exact sub-cell position decides drowning fresh each turn, at a
 finer grain than the per-cell coastal-shape class used to pick a destination elsewhere (e.g. "Wildmen"'s shore
 search). A "shore-shaped" cell is, by construction, part land and part sea at this fine grain - standing
 anywhere in one is not inherently safe, it depends on exactly where in the cell.
+
+### Stranded [exe, measured]
+Our `Action::Stranded` (units.md) is person state 33 (`pop3-rev/docs/person_states.tsv`, `0x4D9650`, already
+traced and live-cross-checked in an earlier session - full detail there, not re-derived here). Entered when the
+generic movement-step helper finds the next step blocked by the mover's own per-type terrain-climb limit
+(`WALK_ALT_DIFF2`), with no path around it. The numbers our `STRANDED_DAMAGE`/`STRANDED_HURT_EVERY` guessed at
+are both off:
+- **A grace period exists before any damage at all**: a timer climbs by 7 every qualifying tick (same every-8
+  rhythm as invisible/shield/bloodlust/hypnotised) toward a ceiling of `0x160` (352, ~50 qualifying ticks) or
+  `0x360` (864, ~124 ticks) - which one picked by an unidentified per-tribe byte (`tribe+0xC1F`, not traced
+  further - plausibly human vs. computer). Flat 32 instead under a global debug/cheat flag. Ours deals damage
+  from the very first tick, no grace window.
+- **Damage is 56 life, not 20**, every 8 ticks once the grace ceiling is reached (not 4) - 1.5x our rhythm and
+  2.8x our amount, no clean scale factor between them.
+- Meanwhile it keeps retrying: up to 8 waypoints via the same blocked-step check, falling back to the per-type
+  default state on several exits - matches our "walks again once the terrain opens a path" already.
 
 ### Death and the spirit rise [exe]
 Death (state 3, `0x4D5CF0`, entered when life ≤ 0) does the shaman-specific mana-loss ("Shaman death") inline,
@@ -4195,8 +4286,9 @@ copy rising, drawn in post" for everyone alike (true-ish for the calm variant, n
 is a real sprite object with real upward velocity).
 
 Open: sub-states 1, 2, 4, 5 and 6 of the same dispatch (0x502A5C/0x502AEA/0x502CDB/0x502D7E/0x502E7A) were not
-read; what finally removes the spirit object (presumably one of those); whether `DROWN_DAMAGE` is really 60 per
-turn (not independently re-confirmed this session); a live check to directly observe timing:
+read; what finally removes the spirit object (presumably one of those). `DROWN_DAMAGE` (60/turn) is **not**
+what the original does - see "Drowning" above, traced this session: a fixed 16-turn/-256-depth forced kill, not
+a per-tick damage subtraction. A live check to directly observe timing:
 `livemem.py` watch a dying unit's new class-10 object's `+0x2C`/`+0x2D`/`+0x41` (altitude)/`+0x74` (copied type)
 for ~40 turns, comparing a wildman dying on dry land (expect climb+spin immediately) against a follower dying on
 dry land (expect the brief calm variant) and a follower dying in shallow water (expect climb, no spin).
@@ -4216,6 +4308,41 @@ life step 0x463CB0 every turn in every state. Vehicle table 0x5A7938, stride 0x1
 | +0xD, +0xF | 0, 0 | 560, 200 | hover heights (see "Terrain changes"; parked balloon: ground + 200) |
 | +0x13 | 600 (file 400) | 1000 (file 300) | `WOOD_VEHICLE_BOAT1` / `_AIRSHIP_1`, the hut's cost |
 | +0x15 | 0 | 1 | flag 1: flies (selects the balloon branch everywhere) |
+
+### Vehicle huts: how the hut itself produces a vehicle [exe]
+Resolves TODO.md's "Vehicle huts" crew/work/spawn questions. Traced this session from `unit_processing_class_2_bldg`'s
+(`0x403280`) own per-type-flag dispatch for state-2 ("operational") buildings (type-table `0x5A7228`+0x48 bit
+`0x40`, set only for building types 13-16): the operational handler is `0x406600` (pop3-rev `functions.tsv`'s
+own row has the full trace). Building type maps straight to vehicle type via the SAME per-type table's `+0x31`
+field - a clean 1:1, confirmed by reading the exe's own table: type 13 -> vehicle 1 (boat), 14 -> vehicle 2
+(boat), 15 -> vehicle 3 (balloon), 16 -> vehicle 4 (balloon).
+```text
+every turn:
+  validate the hut's own +0x84 reference (a transient marker object, see below), clear if stale
+  prune/count the crew array (+0x86, 6 word slots - not type-dependent, our CREW=4 guess is likely wrong):
+      each slot resolved live; an idle crew member (own +0xA9 clear) is counted separately from a busy one
+  if more than half the resolved crew would be idle: pick one idle crew member, mark it (own +0xA8=0x1F,
+      +0x76 bit 0x10 set) - reads as "assign one more idle crew member to come help", not confirmed further
+  if there is at least one idle crew member, the hut's own +0xA4 (word) is nonzero, and +0x84 is NOT already
+      set: spawn a transient class-6/type-7 marker object at a per-type offset point near the hut (door-
+      relative, through the same position table `0x59DF3C` "Training buildings"'s own row calls "none
+      decoded" - decoded here), store its id in +0x84
+  separately, gated on a clearance/pathing check (`0x4B9EF0`) at the spawn point:
+      if +0xA4 < vehicle_table[+0x13] (the wood cost above, 600 boat / 1000 balloon): do nothing more this turn
+      else: +0xA4 = 0; recompute the (possibly different) per-type spawn point; create the real vehicle
+          (class 4, the mapped type, alloc_unit); delete the +0x84 marker if one existed
+```
+**+0xA4 is the hut's own wood-delivery accumulator for the SAME `WOOD_VEHICLE_*` cost already in the table
+above** - not a separate "work in crew-turns" measure, and not the flat 1200 our own guess used: 600 for either
+boat hut type, 1000 for either balloon hut type. This reads as the vehicle-hut analogue of the generic wood-
+stock/stage primitive `0x4BA2C0` ("Building construction and wear") - a vehicle hut likely gets built normally
+through that mechanism first (reaching stage 4, "operational"), then this separate `+0xA4` accumulator tracks
+the ADDITIONAL wood spent producing each vehicle once operational - **what actually increments `+0xA4` per turn
+was not located this session** (not written anywhere inside `0x406600` itself), so the real-world rate/time to
+produce one vehicle is still open; the per-vehicle wood cost itself is now exact, though. The transient `+0x84`
+marker's own class-6/type-7 behaviour (visual? a simple delay object?) was not traced either - open-populous's
+"door queue" claim for building types 13-16 is a plausible read of the crew array above but not independently
+confirmed by this pass.
 
 ### Drawing
 - The model is a 3D object, not a sprite: `0x4EE700(&vehicle+0x33, 2, table+0x4)` sets the object index 143
@@ -4829,12 +4956,19 @@ behaviour at the margins, not the overall shape.
   whether an explicit player attack order also respects that filter is still open, so our blanket rule may be
   stricter than the original. No periodic wildman spawner exists in the original (a one-shot level-placement
   routine is the only creator) - confirms there should be none in ours either.
-- `unit.rs`'s `Action::Drowning`/`DROWN_DAMAGE` ("Drowning"): the mechanism now matches (a generic, type-agnostic,
-  per-turn re-check with no timer), but the original re-tests the unit's EXACT fine-grained position every turn
-  (not a coarser "is this tile water" test), which is specifically why idling at a chosen "shore" cell (any
-  destination search that only checks the coarse per-cell shape, as ours does too) can drown a unit sitting
-  still - worth keeping in mind for any future autonomous-wandering or boat-docking logic that targets "shore"
-  cells by the coarse shape alone.
+- `unit.rs`'s `Action::Drowning`/`DROWN_DAMAGE` ("Drowning"): the entry re-check now matches (a generic,
+  type-agnostic, per-turn re-check with no timer), and the original re-tests the unit's EXACT fine-grained
+  position every turn (not a coarser "is this tile water" test), which is specifically why idling at a chosen
+  "shore" cell (any destination search that only checks the coarse per-cell shape, as ours does too) can drown a
+  unit sitting still - worth keeping in mind for any future autonomous-wandering or boat-docking logic that
+  targets "shore" cells by the coarse shape alone. The KILL ITSELF does not match though: ours subtracts
+  `DROWN_DAMAGE` (60) HP every tick, dying once health reaches 0 - the original instead always takes a fixed
+  16 turns (1.33 s) to kill, regardless of current or max health, then forces life to exactly 0. Ours is
+  unnoticeable for a low-HP unit (dies in ~1 tick either way) but wrong for the shaman: her much larger health
+  pool lets her survive drowning far longer than the original allows (health/60 ticks instead of a flat 16
+  turns ≈ 1.3-1.6 of our own 10 Hz ticks). Porting the original rule means replacing the per-tick damage
+  subtraction with a fixed countdown (comparable to `Action::Settling`'s own `Countdown` pattern) that forces
+  death on expiry independent of health.
 - `unit.rs`'s `Action::Spirit`/`SPIRIT_TICKS` (explicitly commented "a guess"; "Death and the spirit rise"):
   confirmed wrong as a single constant/pose. The original has at least two structurally different variants - a
   brief (4-turn) stationary "calm" rise for an ordinary death, and a 32-turn, continuously-ascending (40 world
