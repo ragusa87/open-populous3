@@ -97,7 +97,10 @@ A boat hut makes boats, an airship hut balloons (`VehicleKind::made_by`). Built 
 the hut itself produces a vehicle", TODO.md]:
 - Braves sent into a built vehicle hut (`Order::Enter`, `GameMap::join_crew`) join its crew (`work`), up to `CREW`
   4 [a guess, likely wrong - the original's occupant array is a generic 6-slot field shared with every other
-  building kind, not a vehicle-hut-specific cap]; others walk to its door. The crew fetches wood to its pile
+  building kind, not a vehicle-hut-specific cap]. [player, unconfirmed]: an airship hut's crew is always 2; a
+  boat hut's is probably 6 (not sure) - the boat figure would fit the generic 6-slot field exactly, the balloon
+  figure would not (so not every slot need be crew-usable per kind - still just recollection, needs a live
+  check, TODO.md). Others walk to its door. The crew fetches wood to its pile
   (`Building::stock`) like for a site, until the pile and the wood on the way reach the vehicle's cost: 4 pieces
   for a boat, 3 for a balloon (`WOOD_VEHICLE_BOAT1` / `_AIRSHIP_1` of constant.dat, 400 / 300, a piece being 100).
   Otherwise they work inside.
@@ -106,7 +109,10 @@ the hut itself produces a vehicle", TODO.md]:
   directly against the same wood-cost table this file already cites (600/1000 exe default, the wood cost above
   in exe units), with no separate "work" layer found on top of wood delivery - the real mechanism may just be
   wood delivery alone, same primitive as ordinary construction, not an added per-crew-member work timer].
-  Done: the wood is spent and the vehicle comes out, its owner the hut's, heading away from the hut, with the
+  [player, unconfirmed]: the hut's own construction already produces one vehicle for free the moment it
+  finishes going up; only the ones after that cost wood, which would make "work per vehicle" just that wood
+  cost, nothing more - fits the wood-only hypothesis above, but ours currently has no free first vehicle at all
+  (TODO.md). Done: the wood is spent and the vehicle comes out, its owner the hut's, heading away from the hut, with the
   first of the crew inside (lowest id) aboard, out of the crew.
   A boat goes on the open sea nearest the jetty side (local +z) within `LAUNCH_SEARCH` 4 cells, and waits, done,
   while there is none; a balloon just past that side.
