@@ -2621,7 +2621,7 @@ coast-shape byte on entering state 6).
 | 10/8, 10/9 | fight, pre-fight ("Starting a melee", "Pre-fight (per turn 0x518630...)") |
 | 10/1, 10/6 | formations (`process_formation_unit`, `add_unit_to_formation`) |
 | 10/0xA | order kind 11's own "melee ring" companion object (`0x519F10`, person sub-state `+0xa9` 0-3: fresh/walking to slot/holding slot/performing a move) - confirmed this is a THIRD combat-adjacent controller, distinct from fight (10/8) and pre-fight (10/9); supersedes the earlier "guard control" guess, not yet reconciled with it |
-| guard_control_units (0x890360) | **Started this session, chasing "guard between markers"**: a genuinely Ghidra-named global list (`backup/backup.xml`, `SYMBOL ADDRESS="00890360" NAME="guard_control_units"`), walked by the main turn loop right after `fight_units`/`pre_fight_units` (same cluster, ~0x4EC7F0-0x4ED340) via a per-CLASS dispatch (byte table `0x4ECA80`, jump table `0x4ECA6C`): class 2 (building) → the ordinary building per-turn function (`unit_processing_class_2_bldg`/0x403280, already documented); classes 3/4/5/6/9 → no-op (skipped); class 7 (effect) → `0x478EE0` (unread); class 8 (shot) → `0x4BBF30` (unread); class 10 (controller) → `unit_processing_class_10_internal_2`/0x5028B0 (Ghidra's own name). **That class-10 handler dispatches by controller TYPE 6 vs. not-6** - i.e. it reads as acting on FORMATION controllers specifically (type 6 is the already-documented formation type, "Formations"), calling `0x51EAB0` (type 6) or `0x51F470` (otherwise), both unread - NOT a dedicated "guard post" controller type of its own. So `guard_control_units` looks like a mixed bag of objects needing a periodic "still being guarded/watched" re-check (buildings, effects, shots, and formation controllers) rather than a single dedicated guard-coordinator object. **Resolved, a later session: this list is NOT the movement/patrol mechanism at all.** The actual "patrol/guard between markers" movement is `0x4BA9B0` (see its own `functions.tsv` row and "Command groups" above) - the confirmed "patrol points, up to 8" implementation (shortcuts.md), which fills multiple secondary command-group slots with kind-6/kind-0xB waypoints that `order_advance`'s existing round-robin logic then cycles through. `guard_control_units`/`0x51EAB0`/`0x51F470` is a SEPARATE, parallel concern - periodically checking for a nearby enemy to react to while guarding/patrolling - not yet traced to completion (still open: `0x51EAB0`/`0x51F470`'s own bodies past the enemy-scan preamble, what inserts an object into this list, and the AI script's own `GUARD_AT_MARKER`/`SET_MARKER_ENTRY` opcodes' exact call path - plausibly they call `0x4BA9B0` directly or an equivalent, not yet confirmed). **The patrol-point mechanism itself is now fully traced and written up address-free in `docs/specs/units.md` ("Patrol orders") - see `0x4BA9B0`'s own `functions.tsv` row for the full exe-level trace this was built from.** |
+| guard_control_units (0x890360) | **Started this session, chasing "guard between markers"**: a genuinely Ghidra-named global list (`backup/backup.xml`, `SYMBOL ADDRESS="00890360" NAME="guard_control_units"`), walked by the main turn loop right after `fight_units`/`pre_fight_units` (same cluster, ~0x4EC7F0-0x4ED340) via a per-CLASS dispatch (byte table `0x4ECA80`, jump table `0x4ECA6C`): class 2 (building) → the ordinary building per-turn function (`unit_processing_class_2_bldg`/0x403280, already documented); classes 3/4/5/6/9 → no-op (skipped); class 7 (effect) → `0x478EE0` (unread); class 8 (shot) → `0x4BBF30` (unread); class 10 (controller) → `unit_processing_class_10_internal_2`/0x5028B0 (Ghidra's own name). **That class-10 handler dispatches by controller TYPE 6 vs. not-6** - i.e. it reads as acting on FORMATION controllers specifically (type 6 is the already-documented formation type, "Formations"), calling `0x51EAB0` (type 6) or `0x51F470` (otherwise), both unread - NOT a dedicated "guard post" controller type of its own. So `guard_control_units` looks like a mixed bag of objects needing a periodic "still being guarded/watched" re-check (buildings, effects, shots, and formation controllers) rather than a single dedicated guard-coordinator object. **Resolved, a later session: this list is NOT the movement/patrol mechanism at all.** The actual "patrol/guard between markers" movement is `0x4BA9B0` (see its own `functions.tsv` row and "Command groups" above) - the confirmed "patrol points, up to 8" implementation (shortcuts.md), which fills multiple secondary command-group slots with kind-6/kind-0xB waypoints that `order_advance`'s existing round-robin logic then cycles through. `guard_control_units`/`0x51EAB0`/`0x51F470` is a SEPARATE, parallel concern - periodically checking for a nearby enemy to react to while guarding/patrolling - not yet traced to completion (still open: `0x51EAB0`/`0x51F470`'s own bodies past the enemy-scan preamble, and what inserts an object into this list). **The AI script's own `GUARD_AT_MARKER`/`SET_MARKER_ENTRY` opcodes' exact call path is now confirmed, a later session**: they enqueue their own task-24 instance directly, not `0x4BA9B0` and not this list - see "PopScript's marker/guard commands, confirmed as task 24" below. **The patrol-point mechanism itself is now fully traced and written up address-free in `docs/specs/units.md` ("Patrol orders") - see `0x4BA9B0`'s own `functions.tsv` row for the full exe-level trace this was built from.** |
 | 10/4, 10/0xC | spirit-rise controller (type 0xC created by the universal death handler, `0x4D5CF0`/person state 3, for ANY death, not preacher-specific - corrects this row's previous "from the preachee's own state 3... Preacher conversion" framing, see that section); type 4's own creation site not found |
 | 10/0x13 | building-sinking stand-in, created by the foundation check's flooding destroy path ("Building sinking (flooded destruction)") |
 
@@ -3739,6 +3739,12 @@ moments later), both inside one 83 ms turn.
     "capped by the preacher's tribe population" line above, not previously connected to it. Neither path has been
     directly observed live (all 7 real conversions captured so far had a clean GONE+NEW pair), but (b) is now a
     fully understood, confirmed-to-exist mechanic either way, not just a hypothesis.
+  - **This same per-tribe force-success flag is PopScript's `GIVE_UP_AND_SULK` switch** (`ai-scripts.md`): `ON`
+    sets it - not a dedicated "surrender" flag, it also forces other level-script-dictated outcomes to succeed,
+    this preacher-roll cap bypass among them - and calls one more function not opened this session; `OFF` just
+    clears it. Whether that unopened callee implements the wiki's "everyone retreats to guard the shaman" claim
+    is still open - until it is traced, treat that specific behaviour as unconfirmed, independent of the
+    force-success switch itself, which is confirmed.
   - the candidate sub-state 4 effect burst above (the "sermon's candidate sub-state" subsection) allocates
     `alloc_unit(class=5, type=0xB, tribe=0xFF, pos)` - class 5 is scenery, and `pop3-rev/docs/unit_types` lists
     scenery type 0xB as "wood pile". **Narrowed, not fully settled, in a later session**: `alloc_unit` (0x4ED8A0)
@@ -4571,8 +4577,13 @@ each need their own copy of "how to build a building" or "how to attack."**
 **Timing**: the whole per-tribe priority sweep runs on a slow cadence (about once every 64 turns per tribe, a
 little over 5 seconds), not every tick - which is why a computer tribe's reactions read as deliberate and
 somewhat laggy rather than instantaneous. `EVERY`'s own timing (a script's periodic block) is a different,
-unrelated clock - see `ai-scripts.md`'s "How a script runs" (now corrected there too, this session: the original
-really does add a per-tribe phase offset, exactly like the community Lua converter already guessed).
+unrelated clock, confirmed directly from the exe: a block fires on turns where `(turn + tribe_num + offset) &
+(period - 1) == 0` - a bitwise AND against the stored `period - 1` mask, not a true modulo, though it gives the
+same result for the power-of-two periods PopScript actually uses - with a genuine per-tribe-struct phase byte
+added in (not simply the tribe's player-slot index, though it tracks it). This settles what used to be an open
+question here: the original really does add a per-tribe phase, exactly like the community Lua converter's own
+`(turn + tribe + m) % n == 0` guess, not a converter-only correction. See `ai-scripts.md`'s "How a script runs"
+for the PopScript-level description this confirms.
 
 **What actually decided the result, not just the mechanism**: of the 12 top-level priority categories, position 0
 (tried first, every single time) is "construct essential buildings" - confirming building construction really is
@@ -4633,21 +4644,78 @@ state-by-state detail, for whoever wants to cross-check the exact exe behaviour,
   people" attributes PopScript already exposes.
 - **Execute a scripted patrol group** (task 24): the native runtime behind a script's own patrol-marker command -
   confirms that command really does drive ordinary units through this same task-queue mechanism, not a separate
-  patrol subsystem.
+  patrol subsystem. This is PopScript's `SET_MARKER_ENTRY`/`MARKER_ENTRIES`/`GUARD_AT_MARKER`/
+  `GUARD_BETWEEN_MARKERS` group, traced end to end below ("PopScript's marker/guard commands, confirmed as
+  task 24").
 - A further dozen tasks (2, 3, 4, 6, 7, 13, 14, 16, 17, 18, 19, 25, 27) cover shaman positioning, a
   synchronisation-only helper (not a behaviour of its own), defending the shaman with an escort of ghosts,
   assembling a themed escort group around a specialist unit, garrison staffing (including actively evicting the
   wrong occupant type), an enemy-spotted alert with no combat order attached, the shaman's own automatic
-  spell-casting, filling a drum tower's garrison, recovering a lost unit or vehicle, vehicle positioning/patrol,
-  and an unconditional mass rally to a nearby point - each confirmed as a distinct, real behaviour, though a
-  couple of the larger ones (vehicle dispatch, garrison coordination) interleave more than one job in a single
-  handler and weren't fully picked apart this session.
+  spell-casting, filling a drum tower's garrison, recovering a lost unit or vehicle, vehicle positioning/patrol
+  (task 27, PopScript's `VEHICLE_PATROL`), and an unconditional mass rally to a nearby point (task 25, PopScript's
+  `SEND_ALL_PEOPLE_TO_MARKER`) - each confirmed as a distinct, real behaviour, though a couple of the larger ones
+  (vehicle dispatch, garrison coordination) interleave more than one job in a single handler and weren't fully
+  picked apart this session.
+
+**Two PopScript-side contradictions, not resolved this session** (`ai-scripts.md`'s own opcode-to-task notes
+under "States"): the script interpreter's call sites appear to enqueue task 26 from both the identity above
+(`TRAIN_PEOPLE_NOW`) and separately from `PRAY_AT_HEAD`; and task 28 from both the training-quota sibling above
+and separately from `DEFEND_SHAMEN`. Both need a future session's tracing to settle which call site is
+misidentified, rather than guessed either way here.
 
 **Open for a future session**: the exact selection criteria the shared "find N eligible workers" search uses
 (who gets picked when several idle followers qualify); the exact site-search algorithm's own placement rule
-beyond "a bounded number of random nearby tries"; and finishing the handful of tasks whose handler interleaves
-multiple distinct jobs. None of these block a first implementation of the architecture above - they refine
-behaviour at the margins, not the overall shape.
+beyond "a bounded number of random nearby tries"; finishing the handful of tasks whose handler interleaves
+multiple distinct jobs; and the two task-26/28 contradictions above. None of these block a first implementation
+of the architecture above - they refine behaviour at the margins, not the overall shape.
+
+### PopScript's marker/guard commands, confirmed as task 24 [exe]
+Chasing `ai-scripts.md`'s "Markers, guards and the base" commands inside the task-queue architecture above
+(`functions.tsv` rows `0x4cedd0`/`0x48ff60`/`0x490440`/`0x4e6550`/`0x4e6470`/`0x4929c0`/`0x48cff3`/`0x48d00d`/
+`0x492090`/`0x4f3720`/`0x48d475`):
+
+- `SET_MARKER_ENTRY` is pure definition, not activation: it only writes into a flat per-tribe table of 4 slots
+  (one per `entry`, 0-3), 8 bytes each - `m1`, `m2` (marker indices, `-1`/unused as a byte sentinel) and the 4
+  troop-type counts, each silently clamped to 0-100 by the engine (not previously documented). No task starts
+  until `MARKER_ENTRIES` activates it.
+- `MARKER_ENTRIES e1 e2 e3 e4` is the activation step and spawns exactly **one** task-24 instance, not one per
+  activated entry: that instance carries all of `e1..e4`'s records side by side but works through them one at a
+  time, in sequence (gather and dispatch the first activated entry's group, then move to the next) -
+  `MARKER_ENTRIES 0 1 2 3` puts up one guard group after another, never four simultaneously. Each entry's group
+  guards between its own `m1`/`m2`, or circles `m1` alone when `m2` is `-1`.
+  - `ONLY_STAND_AT_MARKERS` sets a one-shot flag the very next `MARKER_ENTRIES` call reads once and clears, not a
+    persistent toggle: a script must set it again immediately before every activation it wants stand-still rather
+    than circling. It has no effect on `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` below (that path never reads it).
+  - `CLEAR_GUARDING_FROM e1 e2 e3 e4` deactivates by position, not by task handle: for each named, non-`-1`
+    `SET_MARKER_ENTRY` slot it looks up that slot's own stored marker position(s) and gives a fresh, ordinary move
+    order (to their own current spot) to whichever units are currently guarding/patrolling there - which, by the
+    engine's general "a new order always replaces the old one" rule, silently drops their guard commitment as a
+    side effect rather than calling a dedicated cancel routine. Working by position, it has no reliable way to
+    reach an ad-hoc `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` group below (nothing was ever written to the slot
+    table for those) except by marker-position coincidence.
+- `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` are confirmed to be the exact same native mechanism as
+  `SET_MARKER_ENTRY`/`MARKER_ENTRIES` above (same task type, same per-tick handler, same record shape), just
+  invoked directly with no persistent entry slot - `GUARD_AT_MARKER` is literally `GUARD_BETWEEN_MARKERS` with the
+  second marker left absent, not a separate one-off system as this doc previously left open (see
+  `guard_control_units` above). The `GUARD_NORMAL`/`GUARD_WITH_GHOSTS` token is parsed but never forwarded into
+  the native call that starts the task on this path - no behavioural difference between the two was found this
+  session, not independently live-tested.
+  - No death/replacement mechanism was found: once a group is dispatched, nothing in the task handler re-gathers
+    or tops it up - inferred from the total absence of any code path back into the gathering step for an
+    already-dispatched group, not live-confirmed, so implement as the default (no auto-replace) without treating
+    it as fully settled.
+  - **Open gap, not resolved this session**: the actual walk/circle order for a gathered group was not found
+    inside the task handler itself (no call shaped like the player's own "patrol points" order-setter, units.md
+    "Patrol orders", turned up there) - how the group is actually made to walk a circuit between its markers is
+    still unknown. One call, `0x4f2440` in `functions.tsv`, is flagged there as the one unexplained lead.
+- `VEHICLE_PATROL` is confirmed this session as its own native task (task 27, distinct from the person-guard task
+  above). How its 4 markers are used is still unknown; the examples alternate two of them.
+
+This resolves the `guard_control_units` entry's own open question above about whether `GUARD_AT_MARKER`/
+`SET_MARKER_ENTRY` call `0x4BA9B0` (the confirmed "patrol points" movement, units.md "Patrol orders") or an
+equivalent: they call into task 24's own handler, a parallel mechanism, not `0x4BA9B0` and not `guard_control_units`
+itself. See `ai-scripts.md`'s "Markers, guards and the base" for the PopScript-level command reference this
+confirms.
 
 ## Impact on our specs
 - `hud/mana.rs`'s strip (`mana_view`, `pool.bank` against `MAX_MANA`) does not match "The mana bar (HUD)": the

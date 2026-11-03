@@ -11,8 +11,9 @@ The language, how it runs and what the commands do come from the community's Pop
 Populous: Reincarnated patch.
 
 Tags: **[files]** verified on the files, **[editor]** from the editor only, **[wiki]** from the wiki (players'
-experiments, not code), **[lua]** from the converter and its dump of the Lua API, **[contradicted]** a source
-disagrees with the files, the files win.
+experiments, not code), **[lua]** from the converter and its dump of the Lua API, **[exe]** confirmed by reading
+the executable - the trace itself (addresses, offsets, function names) lives only in pop3-rev-analysis.md, cited
+here by section name, **[contradicted]** a source disagrees with the files, the files win.
 
 ## What PopScript is
 - Each computer tribe (red, yellow, green) runs one compiled script. Blue is the human player and never has one
@@ -136,11 +137,9 @@ Neither source describes the engine loop. What follows is what both of them and 
   - Offsets larger than the period (21 in the files) are then harmless.
   - The stored operands are `n - 1` (a bit mask) and `m - 1`; the engine tests this as a bitwise AND against the
     stored `n - 1` mask, not a true modulo - same result for the power-of-two periods this command actually uses.
-  - **Confirmed by reading the exe directly, settling what used to be an open question here**: the original DOES
-    add a real per-tribe phase, exactly like the Reincarnated Lua converter's own `(turn + tribe + m) % n == 0`
-    guess - not a converter-only correction. The value added is a genuine per-tribe-struct byte (not simply the
-    tribe's player-slot index, though it tracks it), so two tribes sharing the same script body genuinely fire
-    their `EVERY` blocks on different turns. Safe to implement exactly as the converter already does.
+  - The per-tribe phase is real, not a converter-only guess: two tribes sharing the same script body genuinely
+    fire their `EVERY` blocks on different turns. Safe to implement exactly as the Reincarnated Lua converter
+    already does (pop3-rev-analysis.md "Native AI", the per-tribe sweep timing).
 - **Turn rate**: the wiki says "about 8 game turns per second"; the executable runs 12 (pop3-rev-analysis.md
   "Turns and timing"), and one of our ticks is one turn (units.md). Message timeouts and flyby times are also in
   turns, but `SET_TIMER_GOING` takes seconds.
@@ -498,29 +497,30 @@ their meaning only comes from their name.
 | 1050, 1051 | 22 `FLATTEN_BASE`, 23 `BUILD_OUTER_DEFENCES` | - |
 
 Internal states 24-28 (`GUARD_AT_MARKER`, `SEND_ALL_TO_MARKER`, `PRAY_AT_HEAD`, `BOAT_PATROL`, `DEFEND_SHAMEN`)
-have no token. **Corrected from the exe this session (pop3-rev, `docs/functions.tsv` rows `0x4e6440`/`0x4e66e0`/
-`0x4e68e0`/`0x4e6880`, plus the marker/guard rows above)**: these are NOT extra bits of the `STATE_*` flags word
-above (that word only ever covers bits 0-23, one per `DO STATE_x ON|OFF` token) - they are a completely separate
-numbering space, the native AI's own internal task-queue type ids, which merely happen to share digits 24-28.
-Each has its own dedicated `DO` command that enqueues that exact task type directly, with no `STATE_*` flags-word
-write at all - exactly like `DO ATTACK` already enqueues its own task type (20) directly. Confirmed:
+have no token: these are NOT extra bits of the `STATE_*` flags word above (that word only ever covers bits 0-23,
+one per `DO STATE_x ON|OFF` token) but a completely separate numbering space, the native AI's own internal
+task-queue type ids, which merely happen to share digits 24-28 [exe] (pop3-rev-analysis.md "Native AI"). Each has
+its own dedicated `DO` command that enqueues that exact task type directly, with no `STATE_*` flags-word write at
+all - exactly like `DO ATTACK` already enqueues its own task type (20) directly:
 `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` -> task 24 (shared with `SET_MARKER_ENTRY`/`MARKER_ENTRIES`, see
 "Markers, guards and the base"), `SEND_ALL_PEOPLE_TO_MARKER` -> task 25, `VEHICLE_PATROL` -> task 27,
-`DEFEND_SHAMEN` -> task 28. **One unresolved contradiction, not settled this session**: `PRAY_AT_HEAD`'s own call
-site also appears to enqueue task type 26, but task 26 was independently and thoroughly traced elsewhere as
-`TRAIN_PEOPLE`'s own task - left open for a future pop3-rev session rather than guessed either way.
+`DEFEND_SHAMEN` -> task 28. **One unresolved contradiction** [contradicted]: `PRAY_AT_HEAD`'s own call site also
+appears to enqueue task 26, independently identified elsewhere as `TRAIN_PEOPLE`'s own task, and task 28 is
+independently identified elsewhere as a training-quota task related to 26 rather than `DEFEND_SHAMEN` - left open
+for a future pop3-rev session rather than guessed either way (pop3-rev-analysis.md "Native AI", "Two
+PopScript-side contradictions").
 
 Other ON/OFF switches:
 - `SET_REINCARNATION`: this AI gets a reincarnation site at the start. `SET_NO_BLUE_REINC` is the human
   equivalent, so the shaman's death ends the game.
-- `GIVE_UP_AND_SULK`: **corrected from the exe this session - not literally "everyone guards the shaman."** ON
-  sets a generic per-tribe "force success" switch (the SAME flag the engine checks elsewhere to force a
-  preacher-conversion roll to succeed, and to force level-script-dictated outcomes - it is not a dedicated
-  surrender flag) and calls one more function that was not opened this session; OFF just clears the switch. The
-  actual "retreat/guard the shaman" behaviour the wiki describes, if the original really does that, must come
-  from that unopened function - not from a self-contained "surrender" routine. Treat the wiki's description as
-  unconfirmed until that callee is traced; implement the force-success side (useful on its own, e.g. for scripted
-  guaranteed conversions) even before the retreat behaviour is pinned down.
+- `GIVE_UP_AND_SULK`: not literally "everyone guards the shaman" [exe]. ON sets a generic per-tribe "force
+  success" switch - the same flag the engine checks elsewhere to force a preacher-conversion roll to succeed, and
+  to force level-script-dictated outcomes, not a dedicated surrender flag - and calls one more function; OFF just
+  clears the switch. The actual "retreat/guard the shaman" behaviour the wiki describes, if the original really
+  does that, must come from that other function, not from a self-contained "surrender" routine: treat the wiki's
+  description as unconfirmed, independent of the now-confirmed force-success switch (pop3-rev-analysis.md
+  "Preacher conversion"). Implement the force-success side (useful on its own, e.g. for scripted guaranteed
+  conversions) even before the retreat behaviour is pinned down.
 - `FLYBY_ALLOW_INTERRUPT`: the player can skip flybys.
 - No meaning in the wiki: `SET_BUCKET_USAGE`, `SET_AUTO_BUILD`, `SET_AUTO_HOUSE`, `AUTO_MESSAGES`,
   `EXTRA_WOOD_COLLECTION` and `TURN_PUSH`.
@@ -568,53 +568,46 @@ Other ON/OFF switches:
   `SEND_SHAMEN_DEFENDERS_HOME` releases them.
 - The six `[DONT_]TARGET_*` commands showed no effect in testing (?).
 
-### Markers, guards and the base
-**Traced from the exe this session** (pop3-rev, `docs/functions.tsv` rows `0x4cedd0`/`0x48ff60`/`0x490440`/
-`0x4e6550`/`0x4e6470`/`0x4929c0`/`0x48cff3`/`0x48d00d`/`0x492090`/`0x4f3720`/`0x48d475` - a planned marker-table
-wiring task had left this one piece out of scope pending this investigation):
+### Markers, guards and the base [exe]
+Confirmed against the exe; the full trace is in pop3-rev-analysis.md ("PopScript's marker/guard commands,
+confirmed as task 24").
 
-- `SET_MARKER_ENTRY entry m1 m2 braves warriors firewarriors preachers` is **pure definition, not activation** -
-  it only writes into a flat per-tribe table of 4 slots (one per `entry`, 0-3), 8 bytes each: `m1`, `m2` (marker
-  indices, `-1`/unused as a byte sentinel) and the 4 troop-type counts, **each silently clamped to 0-100 by the
-  engine** (not previously documented). No task or behaviour starts until `MARKER_ENTRIES` activates it.
-- `MARKER_ENTRIES e1 e2 e3 e4` is the activation step, and spawns **exactly one** native guard/patrol task - not
-  one per activated entry. That one task instance carries all of `e1..e4`'s (marker-pair, troop-count) records
-  side by side, but works through them **one at a time, in sequence**: gather and dispatch the first activated
-  entry's group, then move to the next, and so on - **`MARKER_ENTRIES 0 1 2 3` does not put up 4 simultaneous
-  guard groups, it puts up one group after another.** Each entry's group guards between its own `m1`/`m2`, or
-  circles `m1` alone when `m2` is `-1`.
-  - `ONLY_STAND_AT_MARKERS` sets a **one-shot** flag that the very next `MARKER_ENTRIES` call reads once and
-    clears - **not a persistent/global toggle.** A script must call it again immediately before every
-    `MARKER_ENTRIES` activation it wants to be stand-still rather than circling; it has no effect at all on
+- `SET_MARKER_ENTRY entry m1 m2 braves warriors firewarriors preachers` is pure definition, not activation: it
+  only writes into a flat per-tribe table of 4 slots (one per `entry`, 0-3), 8 bytes each - `m1`, `m2` (marker
+  indices, `-1`/unused as a byte sentinel) and the 4 troop-type counts, each silently clamped to 0-100 by the
+  engine. No task or behaviour starts until `MARKER_ENTRIES` activates it.
+- `MARKER_ENTRIES e1 e2 e3 e4` is the activation step, and spawns exactly one native guard/patrol task, not one
+  per activated entry: that task instance carries all of `e1..e4`'s (marker-pair, troop-count) records side by
+  side, but works through them one at a time, in sequence - gather and dispatch the first activated entry's
+  group, then move to the next. `MARKER_ENTRIES 0 1 2 3` does not put up 4 simultaneous guard groups, it puts up
+  one group after another. Each entry's group guards between its own `m1`/`m2`, or circles `m1` alone when `m2`
+  is `-1`.
+  - `ONLY_STAND_AT_MARKERS` sets a one-shot flag that the very next `MARKER_ENTRIES` call reads once and clears,
+    not a persistent/global toggle. A script must call it again immediately before every `MARKER_ENTRIES`
+    activation it wants to be stand-still rather than circling; it has no effect at all on
     `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` below (that path never reads this flag).
-  - `CLEAR_GUARDING_FROM e1 e2 e3 e4` (previously undocumented here) deactivates by **position, not by task
-    handle**: for each named, non-`-1` `SET_MARKER_ENTRY` slot, it looks up that slot's own stored marker
-    position(s) and gives a fresh, ordinary move order (to their own current spot) to whichever units are
-    currently found guarding/patrolling there - which, by the engine's general "a new order always replaces the
-    old one" rule, silently drops their guard/patrol commitment as a side effect, rather than calling a dedicated
-    "cancel" routine. Because it works by position, it has no reliable way to reach an ad-hoc
-    `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` group below (nothing was ever written to the slot table for those)
-    except by marker-position coincidence.
+  - `CLEAR_GUARDING_FROM e1 e2 e3 e4` deactivates by position, not by task handle: for each named, non-`-1`
+    `SET_MARKER_ENTRY` slot, it looks up that slot's own stored marker position(s) and gives a fresh, ordinary
+    move order (to their own current spot) to whichever units are currently found guarding/patrolling there -
+    which, by the engine's general "a new order always replaces the old one" rule, silently drops their
+    guard/patrol commitment as a side effect, rather than calling a dedicated "cancel" routine. Because it works
+    by position, it has no reliable way to reach an ad-hoc `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` group below
+    (nothing was ever written to the slot table for those) except by marker-position coincidence.
   - The wiki calls the `SET_MARKER_ENTRY`/`MARKER_ENTRIES` pair Bullfrog's preferred method.
-- `GUARD_AT_MARKER m b w f p GUARD_NORMAL` and `GUARD_BETWEEN_MARKERS m1 m2 b w f p GUARD_NORMAL` are **confirmed
-  to be the exact same native mechanism as `SET_MARKER_ENTRY`/`MARKER_ENTRIES` above** (same task type, same
-  per-tick handler, same record shape), just invoked directly with no persistent entry slot - `GUARD_AT_MARKER`
-  is literally `GUARD_BETWEEN_MARKERS` with the second marker left absent. Not a separate "one-off" system, as
-  this spec previously left open. The `GUARD_NORMAL`/`GUARD_WITH_GHOSTS` token is parsed but, on this call path,
-  its value is never actually forwarded into the native call that starts the task - no behavioural difference
-  between the two was found this session (not independently live-tested).
-  - **No death/replacement mechanism was found**: once a group has been gathered and dispatched, nothing in the
-    native task handler re-gathers or tops it up - losses are not replaced (inferred from the total absence of
-    any code path back into the gathering step for an already-dispatched group; not live-confirmed, so implement
-    as the default - no auto-replace - but don't treat it as fully settled).
-  - **Open gap, not resolved this session**: the actual walk/circle movement order for a gathered group was not
-    found inside the native task handler itself (no call shaped like the player's own "patrol points" order-setter,
-    units.md "Patrol orders", turned up there) - how the group is actually made to walk a circuit between its
-    markers is still unknown. Worth a dedicated follow-up for a future pop3-rev session (one call, `0x4f2440` in
-    pop3-rev's `functions.tsv`, is flagged there as the one unexplained lead).
-- `VEHICLE_PATROL num m1 m2 m3 m4 BOAT_TYPE|BALLOON_TYPE`: a patrol in vehicles - **confirmed this session as its
-  own native task** (distinct from the person-guard task above). How the 4 markers are used is still unknown
-  (?); the examples alternate two of them.
+- `GUARD_AT_MARKER m b w f p GUARD_NORMAL` and `GUARD_BETWEEN_MARKERS m1 m2 b w f p GUARD_NORMAL` are the exact
+  same native mechanism as `SET_MARKER_ENTRY`/`MARKER_ENTRIES` above (same task type, same per-tick handler, same
+  record shape), just invoked directly with no persistent entry slot - `GUARD_AT_MARKER` is literally
+  `GUARD_BETWEEN_MARKERS` with the second marker left absent, not a separate "one-off" system. The
+  `GUARD_NORMAL`/`GUARD_WITH_GHOSTS` token is parsed but, on this call path, never forwarded into the native call
+  that starts the task - no behavioural difference between the two was found (not independently live-tested).
+  - No death/replacement mechanism was found: once a group has been gathered and dispatched, nothing re-gathers
+    or tops it up - losses are not replaced. Implement as the default (no auto-replace), not fully settled.
+  - **Open gap**: the actual walk/circle movement order for a gathered group is still unknown - how the group is
+    made to walk a circuit between its markers is not the same mechanism as the player's own patrol points
+    (units.md "Patrol orders"). Worth a dedicated pop3-rev-analysis.md follow-up.
+- `VEHICLE_PATROL num m1 m2 m3 m4 BOAT_TYPE|BALLOON_TYPE`: a patrol in vehicles, confirmed as its own native task
+  (distinct from the person-guard task above). How the 4 markers are used is still unknown (?); the examples
+  alternate two of them.
 - `SET_BASE_MARKER m` sets the centre of the base, and `SET_BASE_RADIUS r` its radius (for wildmen
   conversion). Bullfrog always calls `RESET_BASE_MARKER` (?) just before `SET_BASE_MARKER`.
   `SET_DEFENCE_RADIUS r` is unknown (?).
