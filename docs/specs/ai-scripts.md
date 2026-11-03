@@ -11,8 +11,9 @@ The language, how it runs and what the commands do come from the community's Pop
 Populous: Reincarnated patch.
 
 Tags: **[files]** verified on the files, **[editor]** from the editor only, **[wiki]** from the wiki (players'
-experiments, not code), **[lua]** from the converter and its dump of the Lua API, **[contradicted]** a source
-disagrees with the files, the files win.
+experiments, not code), **[lua]** from the converter and its dump of the Lua API, **[exe]** confirmed by reading
+the executable - the trace itself (addresses, offsets, function names) lives only in pop3-rev-analysis.md, cited
+here by section name, **[contradicted]** a source disagrees with the files, the files win.
 
 ## What PopScript is
 - Each computer tribe (red, yellow, green) runs one compiled script. Blue is the human player and never has one
@@ -136,11 +137,9 @@ Neither source describes the engine loop. What follows is what both of them and 
   - Offsets larger than the period (21 in the files) are then harmless.
   - The stored operands are `n - 1` (a bit mask) and `m - 1`; the engine tests this as a bitwise AND against the
     stored `n - 1` mask, not a true modulo - same result for the power-of-two periods this command actually uses.
-  - **Confirmed by reading the exe directly, settling what used to be an open question here**: the original DOES
-    add a real per-tribe phase, exactly like the Reincarnated Lua converter's own `(turn + tribe + m) % n == 0`
-    guess - not a converter-only correction. The value added is a genuine per-tribe-struct byte (not simply the
-    tribe's player-slot index, though it tracks it), so two tribes sharing the same script body genuinely fire
-    their `EVERY` blocks on different turns. Safe to implement exactly as the converter already does.
+  - The per-tribe phase is real, not a converter-only guess: two tribes sharing the same script body genuinely
+    fire their `EVERY` blocks on different turns. Safe to implement exactly as the Reincarnated Lua converter
+    already does (pop3-rev-analysis.md "Native AI", the per-tribe sweep timing).
 - **Turn rate**: the wiki says "about 8 game turns per second"; the executable runs 12 (pop3-rev-analysis.md
   "Turns and timing"), and one of our ticks is one turn (units.md). Message timeouts and flyby times are also in
   turns, but `SET_TIMER_GOING` takes seconds.
@@ -498,19 +497,30 @@ their meaning only comes from their name.
 | 1050, 1051 | 22 `FLATTEN_BASE`, 23 `BUILD_OUTER_DEFENCES` | - |
 
 Internal states 24-28 (`GUARD_AT_MARKER`, `SEND_ALL_TO_MARKER`, `PRAY_AT_HEAD`, `BOAT_PATROL`, `DEFEND_SHAMEN`)
-have no token. They are probably set by the DO commands of the same name (inference).
+have no token: these are NOT extra bits of the `STATE_*` flags word above (that word only ever covers bits 0-23,
+one per `DO STATE_x ON|OFF` token) but a completely separate numbering space, the native AI's own internal
+task-queue type ids, which merely happen to share digits 24-28 [exe] (pop3-rev-analysis.md "Native AI"). Each has
+its own dedicated `DO` command that enqueues that exact task type directly, with no `STATE_*` flags-word write at
+all - exactly like `DO ATTACK` already enqueues its own task type (20) directly:
+`GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` -> task 24 (shared with `SET_MARKER_ENTRY`/`MARKER_ENTRIES`, see
+"Markers, guards and the base"), `SEND_ALL_PEOPLE_TO_MARKER` -> task 25, `VEHICLE_PATROL` -> task 27,
+`DEFEND_SHAMEN` -> task 28. **One unresolved contradiction** [contradicted]: `PRAY_AT_HEAD`'s own call site also
+appears to enqueue task 26, independently identified elsewhere as `TRAIN_PEOPLE`'s own task, and task 28 is
+independently identified elsewhere as a training-quota task related to 26 rather than `DEFEND_SHAMEN` - left open
+for a future pop3-rev session rather than guessed either way (pop3-rev-analysis.md "Native AI", "Two
+PopScript-side contradictions").
 
 Other ON/OFF switches:
 - `SET_REINCARNATION`: this AI gets a reincarnation site at the start. `SET_NO_BLUE_REINC` is the human
   equivalent, so the shaman's death ends the game.
-- `GIVE_UP_AND_SULK`: **corrected from the exe this session - not literally "everyone guards the shaman."** ON
-  sets a generic per-tribe "force success" switch (the SAME flag the engine checks elsewhere to force a
-  preacher-conversion roll to succeed, and to force level-script-dictated outcomes - it is not a dedicated
-  surrender flag) and calls one more function that was not opened this session; OFF just clears the switch. The
-  actual "retreat/guard the shaman" behaviour the wiki describes, if the original really does that, must come
-  from that unopened function - not from a self-contained "surrender" routine. Treat the wiki's description as
-  unconfirmed until that callee is traced; implement the force-success side (useful on its own, e.g. for scripted
-  guaranteed conversions) even before the retreat behaviour is pinned down.
+- `GIVE_UP_AND_SULK`: not literally "everyone guards the shaman" [exe]. ON sets a generic per-tribe "force
+  success" switch - the same flag the engine checks elsewhere to force a preacher-conversion roll to succeed, and
+  to force level-script-dictated outcomes, not a dedicated surrender flag - and calls one more function; OFF just
+  clears the switch. The actual "retreat/guard the shaman" behaviour the wiki describes, if the original really
+  does that, must come from that other function, not from a self-contained "surrender" routine: treat the wiki's
+  description as unconfirmed, independent of the now-confirmed force-success switch (pop3-rev-analysis.md
+  "Preacher conversion"). Implement the force-success side (useful on its own, e.g. for scripted guaranteed
+  conversions) even before the retreat behaviour is pinned down.
 - `FLYBY_ALLOW_INTERRUPT`: the player can skip flybys.
 - No meaning in the wiki: `SET_BUCKET_USAGE`, `SET_AUTO_BUILD`, `SET_AUTO_HOUSE`, `AUTO_MESSAGES`,
   `EXTRA_WOOD_COLLECTION` and `TURN_PUSH`.
@@ -525,7 +535,9 @@ Other ON/OFF switches:
     `SET_DRUM_TOWER_POS` was used, unless `INT_ATTR_DONT_GROUP_AT_DT` is set. It leaves, regroups at `m1`
     because units walk at different speeds, then attacks.
   - `target_type`:
-    - `ATTACK_MARKER`: `model` is a marker index, and the force fights whatever is there.
+    - `ATTACK_MARKER`: `model` is a marker index, and the force fights whatever is there. **Implemented**
+      (`ai::AttackGoal::Marker`, `GameMap::ai_attack_target`): our own reading of "whatever is there" is the
+      target tribe's own unit nearest the marker's cell, not traced against the exe beyond that.
     - `ATTACK_BUILDING`: `model` is a building, or `INT_NO_SPECIFIC_BUILDING` for the nearest one. The force
       fights the occupants, then dismantles the building.
     - `ATTACK_PERSON`: in practice always the enemy shaman (`INT_TARGET_SHAMAN`).
@@ -556,24 +568,57 @@ Other ON/OFF switches:
   `SEND_SHAMEN_DEFENDERS_HOME` releases them.
 - The six `[DONT_]TARGET_*` commands showed no effect in testing (?).
 
-### Markers, guards and the base
-- `SET_MARKER_ENTRY entry m1 m2 braves warriors firewarriors preachers` defines a patrol group: it guards
-  between `m1` and `m2`, or circles `m1` when `m2` is -1.
-  - `MARKER_ENTRIES e1 e2 e3 e4` activates up to 4 groups, and `CLEAR_GUARDING_FROM e1..e4` deactivates them
-    (-1 = unused slot).
-  - `ONLY_STAND_AT_MARKERS` makes the groups stand still instead of circling.
-  - The wiki calls this pair Bullfrog's preferred method.
-- `GUARD_AT_MARKER m b w f p GUARD_NORMAL` and `GUARD_BETWEEN_MARKERS m1 m2 b w f p GUARD_NORMAL` are one-off
-  guard orders.
-- `VEHICLE_PATROL num m1 m2 m3 m4 BOAT_TYPE|BALLOON_TYPE`: a patrol in vehicles. How the markers are used is
-  unknown (?); the examples alternate two of them.
+### Markers, guards and the base [exe]
+Confirmed against the exe; the full trace is in pop3-rev-analysis.md ("PopScript's marker/guard commands,
+confirmed as task 24").
+
+- `SET_MARKER_ENTRY entry m1 m2 braves warriors firewarriors preachers` is pure definition, not activation: it
+  only writes into a flat per-tribe table of 4 slots (one per `entry`, 0-3), 8 bytes each - `m1`, `m2` (marker
+  indices, `-1`/unused as a byte sentinel) and the 4 troop-type counts, each silently clamped to 0-100 by the
+  engine. No task or behaviour starts until `MARKER_ENTRIES` activates it.
+- `MARKER_ENTRIES e1 e2 e3 e4` is the activation step, and spawns exactly one native guard/patrol task, not one
+  per activated entry: that task instance carries all of `e1..e4`'s (marker-pair, troop-count) records side by
+  side, but works through them one at a time, in sequence - gather and dispatch the first activated entry's
+  group, then move to the next. `MARKER_ENTRIES 0 1 2 3` does not put up 4 simultaneous guard groups, it puts up
+  one group after another. Each entry's group guards between its own `m1`/`m2`, or circles `m1` alone when `m2`
+  is `-1`.
+  - `ONLY_STAND_AT_MARKERS` sets a one-shot flag that the very next `MARKER_ENTRIES` call reads once and clears,
+    not a persistent/global toggle. A script must call it again immediately before every `MARKER_ENTRIES`
+    activation it wants to be stand-still rather than circling; it has no effect at all on
+    `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` below (that path never reads this flag).
+  - `CLEAR_GUARDING_FROM e1 e2 e3 e4` deactivates by position, not by task handle: for each named, non-`-1`
+    `SET_MARKER_ENTRY` slot, it looks up that slot's own stored marker position(s) and gives a fresh, ordinary
+    move order (to their own current spot) to whichever units are currently found guarding/patrolling there -
+    which, by the engine's general "a new order always replaces the old one" rule, silently drops their
+    guard/patrol commitment as a side effect, rather than calling a dedicated "cancel" routine. Because it works
+    by position, it has no reliable way to reach an ad-hoc `GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS` group below
+    (nothing was ever written to the slot table for those) except by marker-position coincidence.
+  - The wiki calls the `SET_MARKER_ENTRY`/`MARKER_ENTRIES` pair Bullfrog's preferred method.
+- `GUARD_AT_MARKER m b w f p GUARD_NORMAL` and `GUARD_BETWEEN_MARKERS m1 m2 b w f p GUARD_NORMAL` are the exact
+  same native mechanism as `SET_MARKER_ENTRY`/`MARKER_ENTRIES` above (same task type, same per-tick handler, same
+  record shape), just invoked directly with no persistent entry slot - `GUARD_AT_MARKER` is literally
+  `GUARD_BETWEEN_MARKERS` with the second marker left absent, not a separate "one-off" system. The
+  `GUARD_NORMAL`/`GUARD_WITH_GHOSTS` token is parsed but, on this call path, never forwarded into the native call
+  that starts the task - no behavioural difference between the two was found (not independently live-tested).
+  - No death/replacement mechanism was found: once a group has been gathered and dispatched, nothing re-gathers
+    or tops it up - losses are not replaced. Implement as the default (no auto-replace), not fully settled.
+  - **Open gap**: the actual walk/circle movement order for a gathered group is still unknown - how the group is
+    made to walk a circuit between its markers is not the same mechanism as the player's own patrol points
+    (units.md "Patrol orders"). Worth a dedicated pop3-rev-analysis.md follow-up.
+- `VEHICLE_PATROL num m1 m2 m3 m4 BOAT_TYPE|BALLOON_TYPE`: a patrol in vehicles, confirmed as its own native task
+  (distinct from the person-guard task above). How the 4 markers are used is still unknown (?); the examples
+  alternate two of them.
 - `SET_BASE_MARKER m` sets the centre of the base, and `SET_BASE_RADIUS r` its radius (for wildmen
   conversion). Bullfrog always calls `RESET_BASE_MARKER` (?) just before `SET_BASE_MARKER`.
   `SET_DEFENCE_RADIUS r` is unknown (?).
 - `COUNT_PEOPLE_IN_MARKER team|COUNT_WILD marker radius $v` (144 uses) and `IS_SHAMAN_IN_AREA team marker
-  radius $v`.
+  radius $v`. **Implemented** (`ai_script.rs`'s `do_call`), over `GameMap::units` within `radius` cells of the
+  marker's own cell; `COUNT_WILD` matches by `UnitKind::Wildman`, not by owner (`attack.rs`'s own wildman
+  handling).
 - `GET_HEIGHT_AT_POS marker $v` gives the ground height. It is used to notice that the water at a marker has
-  been land-bridged.
+  been land-bridged. **Implemented** (`ai_script.rs`'s `do_call`), reading `GameMap::terrain` at the marker's
+  own cell; an out-of-range marker index or a headerless map (no `Markers[256]` table at all) reads as 0 - our
+  own guessed safe default, not traced.
 
 ### People, buildings and orders
 - `TRAIN_PEOPLE_NOW n model` sends `n` braves to train, e.g. `5 INT_RELIGIOUS`.
@@ -697,6 +742,36 @@ is a pure runtime switch, independent of whether a shaman/site thing exists).
   `ENABLE_USER_INPUTS` and the flyby commands - so the sequence at turn 70+ is: the turn-0 lockout ends, a
   one-off dialog the player must dismiss appears, then the camera tour runs (or is skipped) while input stays
   enabled throughout.
+- Red's own raid is gated on a land connection, not on turn count or provocation alone. Turn 0 also sets
+  `STATE_AUTO_ATTACK ON`, `INT_ATTR_MAX_ATTACKS 1` (one scripted raid total), `INT_ATTR_AWAY_WARRIOR 34`,
+  `STATE_DEFEND ON`/`STATE_DEFEND_BASE ON` and `ONLY_STAND_AT_MARKERS` with a 3-entry marker table - so red's
+  own people are meant to stay confined to their assigned markers until the script itself sends them out.
+  An `EVERY 32 3` block repeatedly sums `GET_HEIGHT_AT_POS` over two marker clusters near the map's edges
+  (35..40, then 25..29 once the first sum is positive) into `$50`; while that strip reads as submerged `$50`
+  stays 0. Two later blocks read `$50` as the raid's own go/no-go flag:
+  ```
+  EVERY 256 55 {
+    IF ($50 > 0) IF (INT_M_PERSON_WARRIOR > 2) IF (INT_B_PERSON_WARRIOR > 0) IF ($2 == 0) {
+      DO COUNT_PEOPLE_IN_MARKER BLUE 3 7 $8        -- blue people within 7 cells of marker 3
+      IF ($8 > 0) DO ATTACK BLUE 3 MARKER 3 999 ... NORMAL 0 -1 -1 0   -- 3 units raid marker 3
+    }                                               -- then a $0/$2 cooldown-and-retry state machine
+  }
+  EVERY 256 175 {
+    IF ($3 == 0) IF ($50 == 1) IF (INT_M_PERSON_WARRIOR == 0) IF (INT_BLUE_PEOPLE > 2 * INT_MY_NUM_PEOPLE) {
+      -- a one-off, all-in last stand: every remaining person (AWAY_* all set to 100/1) sent at blue
+      DO ATTACK BLUE INT_MY_NUM_PEOPLE BUILDING NO_SPECIFIC_BUILDING 999 ... NORMAL 0 -1 -1 0
+    }
+  }
+  ```
+  So on `levl2001.dat` (level 1) red never launches either scripted attack while the two marker clusters it
+  samples stay below water - reading those marker coordinates off the level header (`markers 25:(1,4)..29:(5,4)`,
+  `35:(1,117)..40:(6,117)`, `3:(3,125)`) against the terrain would confirm which edge this is, but the shape of
+  the check (height-sum over a short straight run, re-armed every 32 ticks) reads as "is there now land/a bridge
+  across this stretch" rather than a timer or aggro check - consistent with red staying passive until the human
+  crosses to its side. `INT_ATTR_MAX_ATTACKS 1` then caps the scripted side to that one raid (plus the separate
+  last-stand once `$50 == 1` exactly and red is wiped down to 0 warriors). **Not traced against the exe**: this
+  reading of `$50` is this session's own inference from the decoded script and the files' own marker/height
+  data, not confirmed live or in the disassembly.
 
 ### Attributes (`INT_ATTR_*`)
 | Attribute | Meaning, usual values |
@@ -1127,6 +1202,9 @@ end
   wraps the original functions.
 - Open before implementing the rest of the actual AI (giving every other `DO` command real behaviour):
   - a decompiled-listing pretty-printer (`TODO.md` "Computer players (AI)")
-  - the `EVERY` off-by-one and whether there is a per-tribe phase
   - what `SET_ATTACK_VARIABLE` receives
   - the unknown states and commands marked "-" or "?" above
+
+  **Resolved**: the `EVERY` off-by-one and its per-tribe phase are both confirmed against the exe
+  ("How a script runs" above) and implemented (`pop3_ai_script::interp::every_fires`/`run_turn`, now
+  threading the script's own tribe number through from `GameMap::tend_ai_scripts`).

@@ -691,10 +691,12 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   to attack"; it launches the chosen fighters straight at their target instead of the original's own
   muster-at-the-drum-tower-then-march sequence (simplified, not traced). Deliberately not modelled at
   all yet: garrison and vehicle tasks, scripted patrol groups and one-off guards
-  (`SET_MARKER_ENTRY`/`GUARD_AT_MARKER`/...: need the level header's `Markers[256]` table, not read
-  anywhere yet), `ATTACK_MARKER` targets (same marker-table gap), and the real worker-selection/
-  site-search tie-breaking rules (ours: a bounded random site search, idle braves in id order). See the
-  next few items for what reaches it from a script.
+  (`SET_MARKER_ENTRY`/`GUARD_AT_MARKER`/... - specified, ai-scripts.md "Markers, guards and the base":
+  `GameMap::markers` now threads the level header's `Markers[256]` table in (`docs/plans/ai-script-markers.md`),
+  but nothing here reads it for a standing guard/patrol task yet, plus an own-guess movement order since the
+  exe's own one wasn't found), and the real worker-selection/site-search tie-breaking rules (ours: a bounded
+  random site search, idle braves in id order). `DO ATTACK`'s own `ATTACK_MARKER` case is implemented
+  (`ai::AttackGoal::Marker`, below). See the next few items for what reaches it from a script.
 - [x] Shaman auto-cast, `ATTACK`'s damage-then-withdraw threshold, and a reactive counter-attack
   (`game_core::ai`, previously all three "deliberately not modelled" above): `SET_SPELL_ENTRY`'s own
   slots (`NativeAi::spell_entries`, `GameMap::ai_set_spell_entry`) are checked every `REACTIVE_EVERY` (8
@@ -716,6 +718,25 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   guessed base radius - distinct from `spotting.rs`'s own always-on per-unit auto-engage, which only
   looks a handful of cells around a unit already idle. None of this is traced against the exe beyond
   what ai-scripts.md already gives; every guessed number says so in its own doc comment.
+- [x] The level header's `Markers[256]` table is now threaded into `game-core` (`GameMap::markers`,
+  `marker_cell`/`marker_pos`, `docs/plans/ai-script-markers.md`), and `GET_HEIGHT_AT_POS`/
+  `COUNT_PEOPLE_IN_MARKER`/`IS_SHAMAN_IN_AREA` and `ATTACK`'s own `MARKER` target case (`ai::AttackGoal::Marker`)
+  are implemented on top of it (`ai_script.rs`'s `do_call`). This closes the 2026-11-02 report that level 1
+  (`levl2001.dat`, red = `cpscr010`) attacked the human in play: red's own two scripted `DO ATTACK`s are gated
+  on a `GET_HEIGHT_AT_POS` land-connection check (ai-scripts.md "Worked example: level 1's opening flyby") that
+  can now actually run (regression test: `ai_script.rs`'s
+  `a_level_1_shaped_script_withholds_its_raid_until_its_marker_cluster_is_land_bridged`).
+  **Still open, and likely the actual source of what was originally observed**: `ONLY_STAND_AT_MARKERS`/
+  `SET_MARKER_ENTRY`/`MARKER_ENTRIES`/`GUARD_AT_MARKER`/`GUARD_BETWEEN_MARKERS`/`CLEAR_GUARDING_FROM` (specified,
+  ai-scripts.md "Markers, guards and the base", traced from the exe) are still not modelled - nothing confines
+  red's own people to their assigned markers yet, and `ai_defend_base`'s own guessed base radius still has no
+  marker-confinement to stay narrow against - so a human who gets within that radius, or near a red unit, can
+  still draw it into a fight before the script would allow on levels that rely on this. Two pieces of the
+  guard/patrol mechanic are genuinely open even once someone picks this up, not just unwired: the actual
+  walk/circle movement order for a gathered group was never found in the exe trace (implement a reasonable guess
+  - e.g. reuse our own patrol-point mechanism, units.md "Patrol orders" - and flag it as such, don't block on
+  finding the original's exact one), and whether a guard group ever gets replenished after losses is unconfirmed
+  (current best reading: no, so don't auto-replace).
 - [ ] Shaman positioning and a drum-tower rally point (live-observed on level 25: red's script builds a
   drum tower at its `SET_DRUM_TOWER_POS`, the shaman goes inside it, and followers gather around it;
   when it is destroyed the shaman waits beside it while braves repair it, instead of the tower staying
@@ -813,12 +834,22 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   for spells only so far (`game_core::spell_book::SpellStats::from_constants`/`SpellBook::apply_constants`,
   `GameMap::load_original`): cost, charge count, advisor pacing and range, with our own defaults
   (`SpellStats::default_for`) when an install isn't present or its file doesn't parse.
-- [ ] The rest of `constant.dat` (units life/speed/damage, training costs, wood, hut breeding) still uses its
+- [ ] The rest of `constant.dat` (units speed/damage, training costs, wood, hut breeding) still uses its
   own hardcoded placeholders across the codebase, not `pop3_format::constants::Constants` — reconcile one
   group at a time the same way the spell group was (`cost`'s own split stays: our placeholder scale by
   default, real numbers only from a loaded file). `CONV_SPY`'s own duplicate entry (unit group, then building
   group) is read "by position" per constants.md, unconfirmed and irrelevant to every group read so far:
   check if any future group actually needs position-sensitive duplicate handling before adding it.
+  **Units' own `life` sub-group is now done** (`balance.rs`'s new `Units`/`Balance::apply_constants`,
+  `kind_stats.rs`'s own `KindStats::life` stays the compiled-in default that `Unit::new`/`change_owner`
+  reset to; the live simulation corrects it against `LIFE_<P>` right after, in `GameMap::spawn`/
+  `with_shamans`/`change_owner`, the only three places a unit's health is ever set from its kind) - since
+  our defaults already are the traced real numbers (`kind_stats.rs`), this only matters for a modded
+  install with different ones. **`LIFE_<P>`'s own per-kind suffixes are `[ours]`, a guess** (constants.md
+  only confirms the group and two example values, not every kind's exact spelling) - worth checking
+  against a real decoded file or the community's own dump; a wrong guess is harmless (that kind's default
+  just stays, same lenient fallback as every other group here). `speed`/`damage` next would follow the
+  same shape, but need their own per-kind suffixes confirmed too.
 - [x] Lockstep: two peers resolving different `SpellStats` would silently diverge mid-match - a hashing
   mechanism now exists (`SpellBook::constants_hash`, every spell's resolved `cost`/`max_charges`, the two
   fields that actually feed simulation state; `advisor_seconds`/`range` left out, neither can desync anything)
@@ -831,21 +862,18 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 - [x] Script interpreter in `game-core`, first pass: user variables (`pop3_ai_script::Interpreter`,
   pre-existing), `INT_MY_NUM_PEOPLE`/`INT_ATTR_*` read from the simulation/`NativeAi` (not the fuller
   `headcount`/`housing` set yet - just what `ai.rs`'s own sweep needed), `EVERY n m` firing when
-  `(turn + m) % n == 0` (pre-existing, `pop3_ai_script::interp::every_fires` - still missing the real
-  per-tribe phase ai-scripts.md itself flags as open, a different clock from the native engine's own
-  `SWEEP_EVERY` phase above), DO commands mapped to AI states and `Command`s for `STATE_*` and `ATTACK`
+  `(turn + tribe + m) % n == 0` (`pop3_ai_script::interp::every_fires`/`run_turn`, now including the
+  real per-tribe phase, confirmed against the exe and threaded in from `GameMap::tend_ai_scripts` -
+  a different clock from the native engine's own `SWEEP_EVERY` phase above), DO commands mapped to AI
+  states and `Command`s for `STATE_*` and `ATTACK`
   (previous item). Still open: `SET_SPELL_ENTRY` (shaman auto-cast, not modelled at all), the rest of
   `headcount`/`housing` as internal variables, and whether levels 2100/2110/2131's missing scripts
   (fall back to no script, unverified this falls back cleanly end to end) still need a check.
-- [ ] Script timing: the original runs 12 turns/s, fixed 83 ms step [exe, measured] (pop3-rev-analysis.md
-  "Reference"), against our own 10 ticks/s, and `EVERY n m` does add a per-tribe phase, confirmed as
-  `(turn + tribe_num + m) % n == 0` [exe, confirmed] (ai-scripts.md "What this means here") - both numbers this
-  item asked to measure are answered, not open any more. Still open, now that the rate gap itself is the whole
-  question: `interp::Interpreter`'s `Stmt::Every` gates on `env`'s own turn count directly (ai-scripts.md
-  "What this means here"), so an `EVERY n` from a ported script currently fires every `n` of *our* ticks - a
-  different real-world cadence than the original's `n` turns at 12/s (e.g. `EVERY 256 12` lands at our ~25.6 s
-  instead of the original's ~20.5 s) - decide whether porting should scale `period`/`offset` by 10/12 to keep
-  real-world timing, or leave it tick-for-tick and accept the drift, before any script's timings are relied on.
+- [x] Script timing: the original runs 12 turns/s, fixed 83 ms step [exe, measured] (pop3-rev-analysis.md
+  "Reference" / "Turns and timing", not the wiki's "about 8"), matching our own one-tick-per-turn at
+  `TICKS_PER_SECOND = 12` (units.md, `game_core::time`) - no rescaling needed. `EVERY`'s per-tribe phase is
+  confirmed and implemented (see the interpreter item above); message timeouts and flyby times are turns too,
+  only `SET_TIMER_GOING` takes seconds (ai-scripts.md "Turn rate").
 - [x] Flybys: `FLYBY_CREATE_NEW..=FLYBY_START` drives the camera for real now
   (`game_core::ai_script::ScriptEnv::on_flyby` -> `GameMap::active_flyby`, `crates/game-client/src/flyby.rs`
   reads it to pose `CameraRig` and show the "Flyby"/"Cancelled flyby" banner; Space sends
@@ -889,9 +917,9 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     right-handed mirror) already computes - this was an existing, independently-motivated convention, not
     something added to fit this data. See pop3-rev-analysis.md "D3D axis caveat" and pop3-rev `docs/
     camera.md` "D3D axis caveat for YAW - RESOLVED".
-    - [ ] Worth a regression test even though no fix is needed: the mirror negation in `render_yaw` reads like
-      an arbitrary detail someone could "simplify away" later with nothing to catch it. Assert
-      `render_yaw(raw)` within ~5° (mod 360) of `(0,0°) (681,240.29°) (744,229.22°) (1438,107.23°)`.
+    - [x] Regression test added (`flyby.rs`'s `render_yaw_is_calibrated_against_real_flyby_traces`) so the
+      mirror negation in `render_yaw` can't be "simplified away" later with nothing to catch it: asserts
+      `render_yaw(raw)` within 5° (mod 360) of `(0,0°) (681,240.29°) (744,229.22°) (1438,107.23°)`.
   - `ZOOM` does NOT change camera distance at all: it blends between two named camera PRESETS' render
     parameters (bend/K and a few other render-block fields), not a continuous world-unit zoom.
     `flyby.rs`'s `zoom_to_distance` (-100..100 linear onto `DISTANCE_RANGE`) has the wrong shape entirely,
@@ -1379,7 +1407,14 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 - [ ] Rendered tooltip: done for buildings, trees and totems (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks, right click at once); the toggle to add.
 - [ ] People rows filled: totems' counted prayers (once praying exists), the trainee. Vehicles and vehicle huts are done. Buildings, pyramids and totems' places are done, a click adds the unit to the selection.
 - [ ] Wood rows: the pieces still needed on a growing house (once growth exists). Plans, sites, built buildings and trees are done.
-- [ ] Hut tooltip bars: a hut's breeding progress (`Building::breed`, `BarKind::Birth`, green, vertical) and growing progress (`Building::grow`, `BarKind::Growth`, red, vertical - huts-and-training.md rules 5-6) are modelled in `game_core::hut_growth` but `building_model` (tooltip.rs) never pushes them to `TooltipModel::bars`; wire them in the way `BarKind::Training` already is. The widget, its blinking, the pyramid's prayer bar, totem prayer progress and the training bar (double fill from `GameMap::production`) are done.
+- [x] Hut tooltip bars: a hut's breeding progress (`Building::breed`, `BarKind::Birth`, green, vertical) and
+  growing progress (`Building::grow`, `BarKind::Growth`, red, vertical - huts-and-training.md rules 5-6) are
+  wired into `building_model` (tooltip.rs) now, the way `BarKind::Training` already was - fill against the
+  live target (`GameMap::hut_breed_target`/`hut_grow_target`, new in `hut_growth.rs`: the breed target moves
+  with the tribe's own population band, the grow target is `Huts::grow_target`; both `None` before the hut
+  is `Stage::Built`, same gate `tend_huts` itself uses, and `hut_grow_target` is also `None` for an
+  already-large hut with no next size). The widget, its blinking, the pyramid's prayer bar, totem prayer
+  progress and the training bar (double fill from `GameMap::production`) were already done.
 - [x] Editor: brushes now follow the mouse (`grounded::pick_ground`, mirroring `blueprint.rs`'s own
   cursor-ray-pick, falling back to the camera focus when the cursor is off the terrain or over the panel);
   a configurable brush radius (`EditorState.brush_radius`, `[`/`]`, 1..=12, default 4) shown as a ring on the

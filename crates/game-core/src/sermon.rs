@@ -171,8 +171,12 @@ impl GameMap {
     /// The unit `unit` joins `tribe` (`WorldEvent::ChangeOwner`): as the original's new person in its place, it keeps
     /// its kind and place and starts afresh (`Unit::change_owner`).
     pub(crate) fn change_owner(&mut self, unit: UnitId, tribe: TribeId) {
+        let balance = self.balance;
         if let Some(u) = self.unit_mut(unit).filter(|u| u.is_alive()) {
             u.change_owner(tribe);
+            // `Unit::change_owner`'s own health reset is `KindStats::life`, our compiled-in default -
+            // corrected here against the live `balance`, the same as `GameMap::spawn`.
+            u.health = crate::health::Health::full(balance.units.life(u.kind));
         }
     }
 }
@@ -202,6 +206,16 @@ mod tests {
             map.tick();
             done(map)
         })
+    }
+
+    #[test]
+    fn change_owner_uses_the_live_balances_own_life_for_a_wildman_turned_brave() {
+        let mut map = GameMap::sandbox_units().seeded(11);
+        map.balance.units.brave = 42;
+        let wildman = map.spawn(Owner::Wild, UnitKind::Wildman, (10 * 512, 10 * 512)).id;
+        map.change_owner(wildman, TribeId::Blue);
+        let u = map.unit(wildman).unwrap();
+        assert_eq!((u.kind, u.health.max()), (UnitKind::Brave, 42), "not UnitKind::Brave.max_health()'s compiled-in 1000");
     }
 
     #[test]
