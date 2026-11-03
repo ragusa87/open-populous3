@@ -117,6 +117,27 @@ impl GameMap {
         b.used = 1;
         b.grow = 0;
     }
+
+    /// `b.breed`'s own ceiling right now (the tooltip's green bar denominator, `tooltips.md`): depends on
+    /// the tribe's live population band, so it moves as the tribe grows. `None` for a non-hut building, or
+    /// one not `Built` yet (`tend_huts`'s own gate - breeding hasn't started, so there's nothing to show).
+    pub fn hut_breed_target(&self, b: &Building) -> Option<u16> {
+        let BuildingKind::Hut { size } = b.kind else { return None };
+        (b.stage() == crate::building::Stage::Built).then_some(())?;
+        let owner = b.owner.tribe()?;
+        let huts = self.balance.huts;
+        Some(breed_target(&huts, size, band(&huts, self.housing(owner).population)))
+    }
+
+    /// `b.grow`'s own ceiling (`Huts::grow_target`, the tooltip's red bar denominator). `None` for a
+    /// non-hut building, one not `Built` yet (same reasoning as `hut_breed_target`), or an already-large
+    /// one with no next size to grow into.
+    pub fn hut_grow_target(&self, b: &Building) -> Option<u16> {
+        let BuildingKind::Hut { size } = b.kind else { return None };
+        (b.stage() == crate::building::Stage::Built).then_some(())?;
+        next_size(size)?;
+        Some(self.balance.huts.grow_target)
+    }
 }
 
 /// Set once a hut's construction completes (`work::work_event`'s own `UnitEvent::Built` handler): "the first
@@ -185,6 +206,41 @@ mod tests {
         assert_eq!(band(&huts, 9), 1);
         assert_eq!(band(&huts, 195), 19);
         assert_eq!(band(&huts, 10_000), 19, "clamped");
+    }
+
+    #[test]
+    fn hut_breed_target_is_none_off_a_hut_and_matches_the_live_population_band_on_one() {
+        let mut map = bare();
+        let hut = built_hut(&mut map, 1, (20 * 512, 20 * 512));
+        let tower = map.add_building(Building::new(BuildingKind::DrumTower, TribeId::Blue, 10 * 512, 10 * 512, 0));
+        assert_eq!(map.hut_breed_target(map.building(tower).unwrap()), None, "not a hut");
+        assert_eq!(map.hut_breed_target(map.building(hut).unwrap()), Some(breed_target(&huts(), 1, 0)), "band 0 at zero population");
+        for p in 0..9 {
+            map.units.push(Unit::new(crate::id::Id::from_raw(1000 + p), TribeId::Blue, UnitKind::Brave, (0, 0)));
+        }
+        map.units.sort_by_key(|u| u.id);
+        assert_eq!(map.hut_breed_target(map.building(hut).unwrap()), Some(breed_target(&huts(), 1, 1)), "9 people: band 1 now");
+    }
+
+    #[test]
+    fn hut_breed_and_grow_targets_are_none_before_the_hut_is_built() {
+        let mut map = bare();
+        let plan = Building::placed(BuildingKind::Hut { size: 1 }, TribeId::Blue, 20 * 512, 20 * 512, 0, &map.terrain);
+        let id = map.add_building(plan);
+        assert_eq!(map.building(id).unwrap().stage(), Stage::Blueprint, "test setup: not built yet");
+        assert_eq!(map.hut_breed_target(map.building(id).unwrap()), None, "breeding hasn't started: nothing to show");
+        assert_eq!(map.hut_grow_target(map.building(id).unwrap()), None, "growth hasn't started: nothing to show");
+    }
+
+    #[test]
+    fn hut_grow_target_is_none_off_a_hut_and_for_an_already_large_one() {
+        let mut map = bare();
+        let small = built_hut(&mut map, 1, (20 * 512, 20 * 512));
+        let large = built_hut(&mut map, 3, (30 * 512, 30 * 512));
+        let tower = map.add_building(Building::new(BuildingKind::DrumTower, TribeId::Blue, 10 * 512, 10 * 512, 0));
+        assert_eq!(map.hut_grow_target(map.building(tower).unwrap()), None, "not a hut");
+        assert_eq!(map.hut_grow_target(map.building(small).unwrap()), Some(huts().grow_target));
+        assert_eq!(map.hut_grow_target(map.building(large).unwrap()), None, "no next size");
     }
 
     #[test]

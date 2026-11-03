@@ -1368,7 +1368,14 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 - [ ] Rendered tooltip: done for buildings, trees and totems (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks, right click at once); the toggle to add.
 - [ ] People rows filled: totems' counted prayers (once praying exists), the trainee. Vehicles and vehicle huts are done. Buildings, pyramids and totems' places are done, a click adds the unit to the selection.
 - [ ] Wood rows: the pieces still needed on a growing house (once growth exists). Plans, sites, built buildings and trees are done.
-- [ ] Hut tooltip bars: a hut's breeding progress (`Building::breed`, `BarKind::Birth`, green, vertical) and growing progress (`Building::grow`, `BarKind::Growth`, red, vertical - huts-and-training.md rules 5-6) are modelled in `game_core::hut_growth` but `building_model` (tooltip.rs) never pushes them to `TooltipModel::bars`; wire them in the way `BarKind::Training` already is. The widget, its blinking, the pyramid's prayer bar, totem prayer progress and the training bar (double fill from `GameMap::production`) are done.
+- [x] Hut tooltip bars: a hut's breeding progress (`Building::breed`, `BarKind::Birth`, green, vertical) and
+  growing progress (`Building::grow`, `BarKind::Growth`, red, vertical - huts-and-training.md rules 5-6) are
+  wired into `building_model` (tooltip.rs) now, the way `BarKind::Training` already was - fill against the
+  live target (`GameMap::hut_breed_target`/`hut_grow_target`, new in `hut_growth.rs`: the breed target moves
+  with the tribe's own population band, the grow target is `Huts::grow_target`; both `None` before the hut
+  is `Stage::Built`, same gate `tend_huts` itself uses, and `hut_grow_target` is also `None` for an
+  already-large hut with no next size). The widget, its blinking, the pyramid's prayer bar, totem prayer
+  progress and the training bar (double fill from `GameMap::production`) were already done.
 - [x] Editor: brushes now follow the mouse (`grounded::pick_ground`, mirroring `blueprint.rs`'s own
   cursor-ray-pick, falling back to the camera focus when the cursor is off the terrain or over the panel);
   a configurable brush radius (`EditorState.brush_radius`, `[`/`]`, 1..=12, default 4) shown as a ring on the

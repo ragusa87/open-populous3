@@ -144,11 +144,9 @@ impl Toggle {
 pub enum BarKind {
     /// Prayer progress of the player's tribe (pyramid, totem).
     Prayer,
-    /// A house growing to its next size (once houses grow).
-    #[allow(dead_code)]
+    /// A house growing to its next size.
     Growth,
-    /// A house making its next brave (once houses breed).
-    #[allow(dead_code)]
+    /// A house making its next brave.
     Birth,
     /// What a training unit makes: its stored mana over the cost, over the mana layer (`Bar::fine`); a vehicle
     /// hut's work on its next vehicle.
@@ -241,6 +239,8 @@ pub fn building_model(map: &GameMap, i: usize, selected: &[UnitId], revealed: bo
     model.rows.extend(map.people_slots(holder).map(|p| people_row(map, &p, UnitKind::Brave, selected)));
     model.rows.extend(map.wood_slots(holder).map(wood_row));
     model.toggle = b.flat.then_some(Toggle::Dismantle { building: b.id, on: b.dismantling });
+    model.bars.extend(map.hut_breed_target(b).map(|target| Bar { kind: BarKind::Birth, fill: (b.breed.min(target) as u32 * game_core::vault::FULL as u32 / target.max(1) as u32) as u16, blocked: false, fine: None }));
+    model.bars.extend(map.hut_grow_target(b).map(|target| Bar { kind: BarKind::Growth, fill: (b.grow.min(target) as u32 * game_core::vault::FULL as u32 / target.max(1) as u32) as u16, blocked: false, fine: None }));
     model.bars.extend(map.production(i).map(|p| Bar { kind: BarKind::Training, fill: (p.stored.min(p.cost) as u32 * game_core::vault::FULL as u32 / p.cost as u32) as u16, blocked: p.short, fine: Some((p.stored as u32, p.cost as u32)) }));
     let wood_short = map.wood_slots(holder).is_some_and(|w| w.filled < w.capacity);
     model.bars.extend(map.launch_progress(i).map(|l| {
@@ -1040,6 +1040,20 @@ mod tests {
         map.buildings[i].production = Some(game_core::production::Production { stored: 875, cost: 3500, short: true });
         let bars = building_model(&map, i, &[], false).bars;
         assert_eq!(bars, vec![Bar { kind: BarKind::Training, fill: 250, blocked: true, fine: Some((875, 3500)) }]);
+    }
+
+    #[test]
+    fn a_built_hut_shows_its_breed_and_grow_bars() {
+        let mut map = GameMap::sandbox_buildings();
+        let id = map.add_building(game_core::building::Building::new(BuildingKind::Hut { size: 1 }, crate::units::PLAYER, 40 * 512, 90 * 512, 0));
+        let i = map.building_index(id).unwrap();
+        map.buildings[i].breed = 10;
+        map.buildings[i].grow = 100;
+        let breed_target = map.hut_breed_target(&map.buildings[i]).unwrap() as u32;
+        let grow_target = map.hut_grow_target(&map.buildings[i]).unwrap() as u32;
+        let bars = building_model(&map, i, &[], false).bars;
+        assert_eq!(bars[0], Bar { kind: BarKind::Birth, fill: (10 * game_core::vault::FULL as u32 / breed_target) as u16, blocked: false, fine: None });
+        assert_eq!(bars[1], Bar { kind: BarKind::Growth, fill: (100 * game_core::vault::FULL as u32 / grow_target) as u16, blocked: false, fine: None });
     }
 
     #[test]
