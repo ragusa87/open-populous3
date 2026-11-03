@@ -576,6 +576,18 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   (`breed`) and red (`grow`) bars, and a star animation where a bred brave appears. `SPROG%`'s full 20-band table
   is now confirmed from `constant.dat` directly (pop3-rev-analysis.md "Huts: breeding and growth"), replacing the
   earlier `[ours]` linear-interpolation guess - check `hut_growth.rs`'s own table against it.
+- [ ] A hut that already exists when the map loads (an original level's starting village, not one built during
+  play) starts its breeding bar cold: `buildings_from_level` goes through the plain `Building::new` (`used:
+  kind.wood_cost(), breed: 0, ...`, `building.rs`), never `hut_growth::on_completed`'s own small head start for a
+  hut whose construction finishes mid-game ("the first brave comes quickly", huts-and-training.md rule 5) - so a
+  level's own starting huts need a full breeding cycle before their first brave, same as one just placed by a
+  player. **Guess, not traced or observed, flagging for a live check**: existing houses at map start are probably
+  already well along, maybe around 80% of their target, not freshly reset - matches the general shape of
+  `on_completed`'s "head start, not a cold 0" reasoning, just a bigger one for a hut that's presumably been
+  standing and breeding for a while already when the level opens. If confirmed, seed `breed` this way wherever a
+  hut comes from a loaded level (`buildings_from_level`), not `Building::new` generally (a freshly placed one
+  during play should stay cold, or use the existing smaller `on_completed` head start once its construction
+  finishes).
 - [x] **Population cap was missing the per-tribe base of 6** (pop3-rev-analysis.md "Huts: breeding and growth",
   "Impact on our specs" rule 5): the original's `can_breed` cap is `min(200, 6 + sum(hut supply))` - a flat 6
   added per tribe, hardcoded in `load_level` (0x42B428) for every tribe regardless of hut count, not in
