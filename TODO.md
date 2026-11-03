@@ -576,6 +576,18 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   (`breed`) and red (`grow`) bars, and a star animation where a bred brave appears. `SPROG%`'s full 20-band table
   is now confirmed from `constant.dat` directly (pop3-rev-analysis.md "Huts: breeding and growth"), replacing the
   earlier `[ours]` linear-interpolation guess - check `hut_growth.rs`'s own table against it.
+- [ ] A hut that already exists when the map loads (an original level's starting village, not one built during
+  play) starts its breeding bar cold: `buildings_from_level` goes through the plain `Building::new` (`used:
+  kind.wood_cost(), breed: 0, ...`, `building.rs`), never `hut_growth::on_completed`'s own small head start for a
+  hut whose construction finishes mid-game ("the first brave comes quickly", huts-and-training.md rule 5) - so a
+  level's own starting huts need a full breeding cycle before their first brave, same as one just placed by a
+  player. **Guess, not traced or observed, flagging for a live check**: existing houses at map start are probably
+  already well along, maybe around 80% of their target, not freshly reset - matches the general shape of
+  `on_completed`'s "head start, not a cold 0" reasoning, just a bigger one for a hut that's presumably been
+  standing and breeding for a while already when the level opens. If confirmed, seed `breed` this way wherever a
+  hut comes from a loaded level (`buildings_from_level`), not `Building::new` generally (a freshly placed one
+  during play should stay cold, or use the existing smaller `on_completed` head start once its construction
+  finishes).
 - [x] **Population cap was missing the per-tribe base of 6** (pop3-rev-analysis.md "Huts: breeding and growth",
   "Impact on our specs" rule 5): the original's `can_breed` cap is `min(200, 6 + sum(hut supply))` - a flat 6
   added per tribe, hardcoded in `load_level` (0x42B428) for every tribe regardless of hut count, not in
@@ -594,9 +606,27 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 
 ### Wood ([trees.md](docs/specs/trees.md))
 - [ ] Original scenery models 7 plant 1, 8 plant 2: not drawn yet. Scenery 9 (the totems, 98 in the levels) is drawn as the stone head (object 82), a guess: find its real model. Trees have no size in the thing record: full size is right.
-- [ ] Wood for repair and hut growth, like construction (`game_core::work`: assigned braves fetch, carry to the door, build). Cutting, carrying, fetching and construction are done (units.md "Wood", buildings.md "Construction").
+- [x] Wood for repair and hut growth, like construction (`game_core::work`: assigned braves fetch, carry to the door, build): **already falls out of the existing construction system, no special-casing needed** - damage (`wreck.rs`) and growth (`hut_growth.rs`) both just lower `used`/change `kind` and leave the building in `Stage::UnderConstruction`, which `work.rs`'s ordinary fetch/carry/build loop treats exactly like a fresh site once braves are assigned to it (`Command::Assign`/`Order::Build`); confirmed by a new test, `work.rs`
+  `a_damaged_building_is_repaired_like_a_fresh_construction_once_braves_are_assigned`. Left open, tracked separately
+  (huts-and-training.md "Open questions"): whether a growing hut's own occupants are assigned to the job
+  automatically or the player must send braves by hand, same as any other repair.
+- [x] **Bug fixed while checking the above**: reusing the construction system for repair/growth had surfaced a real
+  regression - `work::work_event`'s own completion handler (`UnitEvent::Built`) called `empty_building`, which
+  walks out *everyone* inside, not just the construction workers. Fine the first time a building goes up (nobody
+  can be a resident of one not built yet), wrong for a repair or a hut's growth: a damaged-but-occupied hut, or
+  one mid-regrowth, would have its own long-standing residents evicted the instant the rebuild finished, instead
+  of staying housed "all along" as huts-and-training.md rule 6 already says. Fixed with a narrower
+  `GameMap::release_builders` (only `u.work == Some(site)`, i.e. an actually assigned worker) used at completion,
+  keeping `empty_building` (evicts everyone) for dismantling starting and `throw_out`'s own destruction/fire/
+  collapse cases, which do mean to clear the building out entirely. Tests:
+  `work::tests::residents_stay_housed_through_a_repair_only_the_builder_is_released`.
 - [ ] Check in the game whether a brave ordered on a tree with no wood to spare goes to another one. The gather-wood state's own code (`0x495D70`, the chop-completion branch at `0x4960CC`) has **no tree-depletion check at all once already chopping**: on countdown expiry it unconditionally calls `transfer_wood(tree, person, WOOD_<PERSON>)`, which on an empty tree just moves 0 and the brave starts the same 20-turn countdown again, forever, with no reroute logic anywhere in this function. Whether a NEW order onto an already-empty tree is refused/redirected at assignment time (a different, not-yet-traced code path, outside this per-turn state) is still open - that's where any "goes to another one" behaviour would have to live, if it exists at all.
-- [ ] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible) trees.
+- [x] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible)
+  trees: both already done and tested - `placement::blocked_at` refuses a spot with a visible tree
+  (`nothing_may_wall_a_door_shut_either_ones`'s sibling test `sea_buildings_sites_trees_fires_and_totems_block`,
+  "a cut down tree does not block"), and `work::tests::trees_under_a_building_do_not_grow_back` covers the
+  invisible tree staying put under a built hut; also already listed as done in huts-and-training.md ("Done":
+  "Trees under a building (plans included) do not grow back.") - this entry was just stale.
 - [ ] Trees as obstacles for walking (around full trees?), to check against the original.
 
 ### Praying (worship) ([worship.md](docs/specs/worship.md))
@@ -1406,7 +1436,13 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 ### Tooltips ([tooltips.md](docs/specs/tooltips.md))
 - [ ] Rendered tooltip: done for buildings, trees and totems (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks, right click at once); the toggle to add.
 - [ ] People rows filled: totems' counted prayers (once praying exists), the trainee. Vehicles and vehicle huts are done. Buildings, pyramids and totems' places are done, a click adds the unit to the selection.
-- [ ] Wood rows: the pieces still needed on a growing house (once growth exists). Plans, sites, built buildings and trees are done.
+- [x] Wood rows: the pieces still needed on a growing house: **already done, no special case needed** - growth
+  exists now (`hut_growth.rs`) and just leaves the hut in `Stage::UnderConstruction` like any other site, so
+  `occupancy::building_wood`'s existing generic case already shows it as provided/cost, confirmed by a new test
+  (`occupancy::tests::a_growing_house_shows_the_ordinary_under_construction_wood_row_not_its_old_wood_plus_new`).
+  tooltips.md's older "the wood it has plus the pieces still needed" row was a guess from before growth's own
+  mechanism was exe-confirmed (huts-and-training.md rule 6: reseeded to 1 piece of the new cost, not old + new) -
+  corrected there to match. Plans, sites, built buildings and trees are done.
 - [x] Hut tooltip bars: a hut's breeding progress (`Building::breed`, `BarKind::Birth`, green, vertical) and
   growing progress (`Building::grow`, `BarKind::Growth`, red, vertical - huts-and-training.md rules 5-6) are
   wired into `building_model` (tooltip.rs) now, the way `BarKind::Training` already was - fill against the

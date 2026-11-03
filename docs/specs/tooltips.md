@@ -48,12 +48,15 @@ people slot keeps room for it, so the row does not move [ours].
 
 ### Wood rows: display only
 Nothing to select [player]. A piece is the original log (hfx 40), greyed when missing; generated logs with `--no-original` [code].
+A growing house is just another building under construction here: huts-and-training.md rule 6 settled (exe-confirmed)
+that growth reseeds `used` to 1 of the new size's wood cost and lets the ordinary site machinery fetch the rest, not
+"the old wood it had, plus however many pieces the bigger size still needs" as an earlier draft of this row guessed -
+so it shows the plain provided/cost row like any other site (`occupancy::building_wood`), no special case.
 
 | Target | Slots | Filled by |
 |---|---|---|
-| Plan, building under construction | its wood cost: `XOOO` | the wood provided (pile by the door + built in) |
+| Plan, building under construction, growing house | its wood cost: `XOOO` | the wood provided (pile by the door + built in) |
 | Built building | the wood used | all filled |
-| Growing house | the wood it has plus the pieces still needed: `XXXXOO` | the wood it has |
 | Tree | its current wood only, no placeholders (its original capacity is not known): `XXX` for 3 | all filled |
 
 A tree with no wood left is not drawn and has no tooltip (trees.md).
@@ -102,7 +105,7 @@ pressed, it sends `Command::Unload`. Without the original files, an "Unload" tex
 | Plan | assigned braves | provided / cost | | |
 | Under construction | assigned braves | provided / cost | | dismantle |
 | Built building | people inside (when it holds any) | used | | dismantle |
-| House | people inside | used (+ needed while growing) | growth, birth | dismantle |
+| House | people inside | used (provided / cost, same as "Under construction", while growing) | growth, birth | dismantle |
 | Drum tower | the unit inside | used | | dismantle |
 | Training unit | the trainee | used | training | dismantle |
 | Pyramid of knowledge | the shaman; the name of its reward under its own name | | prayer | |

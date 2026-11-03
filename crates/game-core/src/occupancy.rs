@@ -139,6 +139,16 @@ mod tests {
     }
 
     #[test]
+    fn a_growing_house_shows_the_ordinary_under_construction_wood_row_not_its_old_wood_plus_new() {
+        // hut_growth.rs rule 6, exe-confirmed: growth seeds the hut with 1 of the new size's wood_cost pieces
+        // and lets the ordinary site machinery fetch the rest - not "the old wood it had, plus however many
+        // pieces the bigger size still needs" (tooltips.md's older, now-superseded guess).
+        let grown = Building { used: 1, ..Building::new(BuildingKind::Hut { size: 2 }, TribeId::Blue, 0, 0, 0) };
+        assert_eq!(grown.stage(), Stage::UnderConstruction { used: 1, of: 3 });
+        assert_eq!(building_wood(&grown), Some(Wood { capacity: 3, filled: 1 }), "same shape as any fresh site: cost over what's in so far");
+    }
+
+    #[test]
     fn built_wood_is_all_there_and_buildings_without_wood_show_none() {
         let built = Building::new(BuildingKind::DrumTower, TribeId::Blue, 0, 0, 0);
         let cost = BuildingKind::DrumTower.wood_cost() as u16;
