@@ -1426,7 +1426,13 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 ### Tooltips ([tooltips.md](docs/specs/tooltips.md))
 - [ ] Rendered tooltip: done for buildings, trees and totems (`tooltip.rs`: name, slot rows, anchored above, sticky, clicks, right click at once); the toggle to add.
 - [ ] People rows filled: totems' counted prayers (once praying exists), the trainee. Vehicles and vehicle huts are done. Buildings, pyramids and totems' places are done, a click adds the unit to the selection.
-- [ ] Wood rows: the pieces still needed on a growing house (once growth exists). Plans, sites, built buildings and trees are done.
+- [x] Wood rows: the pieces still needed on a growing house: **already done, no special case needed** - growth
+  exists now (`hut_growth.rs`) and just leaves the hut in `Stage::UnderConstruction` like any other site, so
+  `occupancy::building_wood`'s existing generic case already shows it as provided/cost, confirmed by a new test
+  (`occupancy::tests::a_growing_house_shows_the_ordinary_under_construction_wood_row_not_its_old_wood_plus_new`).
+  tooltips.md's older "the wood it has plus the pieces still needed" row was a guess from before growth's own
+  mechanism was exe-confirmed (huts-and-training.md rule 6: reseeded to 1 piece of the new cost, not old + new) -
+  corrected there to match. Plans, sites, built buildings and trees are done.
 - [x] Hut tooltip bars: a hut's breeding progress (`Building::breed`, `BarKind::Birth`, green, vertical) and
   growing progress (`Building::grow`, `BarKind::Growth`, red, vertical - huts-and-training.md rules 5-6) are
   wired into `building_model` (tooltip.rs) now, the way `BarKind::Training` already was - fill against the
