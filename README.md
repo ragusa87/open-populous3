@@ -1,9 +1,16 @@
-# Open Populous (POC)
+# POP: Priestess Of Plenty (POC)
 
 An open-source, clean-room reimplementation of *Populous: The Beginning* (Bullfrog, 1998) in Rust
 and Bevy 0.19. The goal is a faithful simulation of the original's rules, written entirely from
 reverse-engineered documentation and our own open assets — never from the original's code, art or
 data — so the result can be built, run and shared under the AGPLv3 licence.
+
+> **Disclaimer:** to actually play right now, you need your own legitimate copy of *Populous: The
+> Beginning* — this project reads its files at runtime but never ships or replaces them (see
+> [Assets](#assets-original-today-open-source-growing-in) below). You can buy the original on GOG:
+> <https://www.gog.com/en/game/populous_the_beginning>. A fully open-source reimplementation that
+> needs none of the original's assets is the long-term goal, not yet reality — track its progress in
+> [docs/specs/assets.md](docs/specs/assets.md).
 
 ## Clean room & original data
 

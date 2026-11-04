@@ -1,7 +1,7 @@
 # Generated building kit
 
 16 low-poly models with procedural surface textures, made by an AI-written script (gpt-astra) for
-Open Populous; no original game art or external inputs. Licence below.
+POP: Priestess Of Plenty; no original game art or external inputs. Licence below.
 See [credits](../../CREDITS.md) and the [asset inventory](../../../docs/specs/assets.md).
 
 ![Generated kit, Blender contact sheet](../../../docs/images/building-kit.png)

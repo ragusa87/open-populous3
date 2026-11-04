@@ -80,7 +80,7 @@ fn main() {
     } else {
         app.add_plugins(DefaultPlugins.set(dev::asset_plugin()).set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Open Populous".into(),
+                title: "POP: Priestess Of Plenty".into(),
                 resolution: (1280, 720).into(),
                 mode: if fullscreen { WindowMode::BorderlessFullscreen(MonitorSelection::Current) } else { WindowMode::Windowed },
                 ..default()

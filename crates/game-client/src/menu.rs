@@ -94,7 +94,7 @@ pub enum Outcome {
 
 pub fn title(page: Page) -> &'static str {
     match page {
-        Page::Main => "Open Populous",
+        Page::Main => "POP: Priestess Of Plenty",
         Page::Sandbox => "Sandbox",
         Page::Paused => "Paused",
         Page::Shortcuts => "Shortcuts",
