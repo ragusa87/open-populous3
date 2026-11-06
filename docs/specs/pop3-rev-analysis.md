@@ -355,21 +355,55 @@ Total wood cost per type (exe, every building type checked): 300 (all 3 hut size
 huts), 0 (guard post, vault, prison - never built/dismantled by braves). A stage change is what drives the
 model showing more/fewer pieces, and re-triggers a shadow-footprint recompute.
 
-A separate, not fully closed controller - the "plan" object (`0x4B8BB0`, one per construction/repair site,
-`+0x92` referencing the managed building, `pop3-rev` `functions.tsv`'s own row has the detailed trace) - owns
-the assigned-brave roster (`+0x6A`/`+0x9A`, up to 10 workers, pruned every call for dead/reassigned/wrong-tribe
-entries) and, on a 16-tick rhythm, counts how many of those workers are currently actively working (their own
-order sub-state `== 2`) and cycles a capped number of them per window (bounded by how much is left to deliver)
-into sub-state 7. This reads as the mechanism that limits how many braves can usefully contribute to a site at
-once ("each kind has only a maximum", buildings.md), separate from the wood-delivery math above - **what
-exactly a brave "doing construction work" does moment to moment (walk to the site, flatten the footprint,
-stand and deliver) was not traced to the point of an actual per-worker duration/timer**, so there is still no
-confirmed exe number to replace `JUMP_TICKS` (800 ms) or `BUILD_TICKS` (5 s) with directly - only the strong
-structural finding that progress is wood-count-driven (0-4 stages) rather than a fixed per-worker animation
-length. A brave delivering a 100-wood load to a construction site is plausibly the exact same Chopping/
-transfer_wood primitive already documented above (a tree and a construction site's wood pile read as the same
-kind of "wood sink"), which would make the real "pace" largely the already-known 20-turn chop cycle repeated
-per load needed (`cost / 100` loads) rather than anything construction-specific - not confirmed this session.
+A separate controller - the "plan" object (`0x4B8BB0`, one per construction/repair site, `+0x92` referencing the
+managed building, reached via the generic class-9 dispatch when that same wood-stock companion's own sub-kind is
+2; a distinct sub-kind 1, `0x4B8470`, exists and is untraced; `pop3-rev` `functions.tsv`'s own row has the
+detailed trace) - owns the assigned-brave roster (`+0x6A`/`+0x9A`, up to 10 workers, pruned every call for
+dead/reassigned/wrong-tribe entries), bucketed by current order-kind via a helper (`0x4BA260`). Each tick, past a
+one-time startup countdown (`+0x94`, see below), it computes a budget - `max(1, floor(assigned_count / 2)) -
+(how many are already out fetching wood)`, clamped to how much wood is still needed before the site's own total
+cost - and recruits up to that many MORE idle assigned workers into the wood-fetch order. **So at most half of a
+site's currently-assigned braves (rounded down, minimum one) are ever simultaneously sent to fetch wood at
+once** - the rest stay in reserve (role not identified). A per-type table (`0x5A723E+0x16`) is read here but
+never used again: it is NOT the enforcement point for "each kind has only a maximum" (buildings.md) - that cap is
+enforced elsewhere (the Assign-brave command, not traced). No evidence a worker must go through this same budget
+to flatten or hammer - only the wood-fetch recruitment was traced.
+
+The "16-tick rhythm" this controller was previously thought to run on does not exist as a recurring cycle in
+`0x4B8BB0`: its own `+0x94` countdown is a one-time startup gate (decrements once per tick, floors at 1 via one
+code path, reaches a true 0 via a second path gated on "at least one worker assigned"), and on its single 1->0
+transition it pokes a nearby decorative effect object's own duration to exactly 16 - not a repeating
+budget-reevaluation period. The real source of a recurring "every ~16 turns" figure in construction/growth
+pacing is a different function, `0x4050C0` (huts' size-up handler, called unconditionally every turn from the
+generic building dispatcher - see "Huts: breeding and growth" below): its own probabilistic growth-accumulator
+most likely produces the observed ~16-turn average cadence (the same number as mana accrual, CONTEXT.md), not
+this controller. Treat `0x4B8BB0`'s own wood-fetch throttle as "evaluated every turn, gated once by a short
+one-time startup delay," not periodic.
+
+`0x4050C0` also seeds a freshly-created building instance's wood-stock companion with `+100` wood (one wood
+piece) immediately via `0x4BA2C0`, right after zeroing its stock (confirmed for a hut's own size-up) - matching
+the "first piece of wood is brought to the site... as in the game" line above, except the exe grants it by fiat
+at creation rather than a brave fetching it. Not confirmed whether plain initial building placement (not a hut
+upgrade) reaches this same function or a sibling for its own first piece.
+
+Wood delivery for ordinary construction goes through its own order-kind (7, handler `0x4340A0`), a separate
+implementation from vehicle-hut crew's order-kind 6 (`0x495520`, other generic "work" orders) - the two share
+only the low-level pickup primitive (`0x4A7860`/`transfer_wood`) and the per-person-type max-carry constant (100,
+table `0x5A7074`) for picking wood off a tree/pile, not the orchestrating state machine. **Critically, `0x4340A0`
+never calls `transfer_wood` a second time to deposit the carried wood into the site's own stock** (unlike the
+vehicle-hut path, `0x496750`, which does, with the hut itself as receiver; every one of the 6 total call sites of
+`0x4A7860` and all 7 of `0x4BA2C0` in the whole exe were enumerated, and none else matches "person carry ->
+construction-site stock") - instead, on reaching the building, the brave calls a separate helper (`0x4D58C0`)
+that drops its entire carry on the ground as an ordinary wood-pile object, matching the "drops the piece on the
+ground next to the door" line above. **How that dropped pile actually becomes construction progress is still
+unresolved** - two live possibilities, neither confirmed: the same order-kind-7 state machine re-targets the
+fresh pile as a resource on a later pass (wood piles are already special-cased in its own chopping state), or
+some other, unfound mechanism consumes piles near a site directly. The natural next step is a live memory check
+(watch a construction site's own wood-stock field and a nearby brave's carried-wood field across several real
+deliveries), not further static search - every call site of the two obvious candidate primitives has already
+been checked statically. So the moment-to-moment "brave doing construction work" duration (what would replace
+`JUMP_TICKS` 800 ms / `BUILD_TICKS` 5 s) is still not pinned to a confirmed exe number - only the wood-fetch
+concurrency throttle and the stage formula are.
 
 ## Huts: breeding and growth [exe]
 A hut (building types 1-3, small, medium, large) has two counters, updated by the building handler on its own
