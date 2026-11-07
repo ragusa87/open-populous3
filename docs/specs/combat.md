@@ -82,7 +82,9 @@ A coordinator (`challenge::Challenge`, coordinators.md) for one attacker and one
   target's place when it moved). Within `SHOVE_REACH` (315) on both axes of a waiting target: `Shove`, 6 turns
   (shaman 4, × pace); with 2 left the target is thrown (`Push`, `PushKind::Melee`: the shield does not stop it, the
   target stays `Shoved` in the challenge) at 100 + a draw below 100 per turn, turned a third to two thirds of a turn
-  from the way to the attacker (away from it), lift `SHOVE_LIFT` 48 [guess: ours does not slide on the ground]; no
+  from the way to the attacker (away from it), lift `SHOVE_LIFT` 48 [confirmed: pop3-rev-analysis.md
+  "Pre-fight" sub 7 - the exe's own kick sets the same BLOWN flag as a Blast push and only lands once the
+  universal physics step clears it, i.e. a true airborne lift-and-land, not a ground slide]; no
   damage. Still again, it waits. The attacker charges again; reaching it again ends the challenge with `StartMelee`: a melee
   at the target's place.
 - Already in reach when it starts, the attacker shoves at once.
@@ -95,10 +97,13 @@ A coordinator (`challenge::Challenge`, coordinators.md) for one attacker and one
   Punch`, `units::art::original_anim`; other kinds and CC0 art fall back to idle), held for a short guessed window
   (`units::art::TAUNT_DISPLAY`) - *which* of the 3 plays is only confirmed "at random" [exe], the second draw that
   picks one here is not itself traced.
-- Not yet: the original's option with no shove (a real level/script option, not a cheat - the same flag also
-  disables Melee's own knockback variant, see "Melee" below); ground sliding instead of `SHOVE_LIFT` (push
-  mechanics unread at the exe level either way). The "third approach, a target at its building" is not a separate
-  case: it is the same
+- Resolved: the original's no-shove option is a real level/script option (`0x89D17C` bit `0x40`, set/cleared by a
+  level script token at `0x48E3D5` - never a debug/cheat switch), and it also disables Melee's own knockback
+  variant, see "Melee" below (pop3-rev-analysis.md "Pre-fight"/"Fight"). Ground sliding instead of `SHOVE_LIFT`
+  is also resolved - it doesn't happen: both this shove and Melee's own knockback are genuinely airborne via the
+  same universal BLOWN push physics as a Blast knockback (pop3-rev-analysis.md, same two sections). Still open:
+  wiring the script-level no-shove option itself into our own level/script handling (nothing currently reads it).
+  The "third approach, a target at its building" is not a separate case: it is the same
   `Approach::PulledOut` building-occupant pull-out already described under "Attacking a building" below, just
   reached through a slower wait-then-approach-the-door lead-in instead of being thrown out immediately
   (pop3-rev-analysis.md "Pre-fight", modes 1/2) - nothing left to implement here beyond what `PulledOut` already

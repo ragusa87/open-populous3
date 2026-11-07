@@ -3193,7 +3193,9 @@ mode 0: attacker sub 5, target sub 4
     2 turns before the end (turn 4 of 6): target sub 7; at the end: sound 13, attacker sub 8
 7 target kicked away, at once: velocity 100 + rand(100) units per turn at (heading to the attacker) + 120°..240°
     (+0x2AB + rand(0x2AA) of 2048: away from the kicker, ±60°); no damage; anim 16 (one tilted frame; a shaman
-    stays idle, 53) for the first 2 turns of the flight; stopped (+0xE bit 0x8 clear) → sub 4
+    stays idle, 53) for the first 2 turns of the flight; stopped (+0xE bit 0x8 clear - the same BLOWN flag
+    as Fight's own stance 7 below, i.e. this kick is airborne via the universal push physics too, not a
+    ground slide) → sub 4
 8 attacker runs again (as 5, a new 40-turn timer); reached and the target in sub 4 → the fight starts:
     a fight 10/8 at the target's place, both in state 25, placed by 0x519D10 (below)
 global flag 0x89D17C bit 0x40: no kick, reaching the target starts the fight - traced this session to its
@@ -3246,7 +3248,12 @@ per person (state 25):
   5 hit and knocked: anim 14 for 4 turns (cut short), → 7
   6 hit: anim 14 for its 7 turns (a shaman: idle 53, 7 turns), → 0
   7 knocked back: velocity 35 + rand(70) units per turn backwards; after 2 turns walks (anim 5, 9 when
-    carrying wood); on landing → 0
+    carrying wood); on landing → 0 - genuinely airborne, not a ground slide: this stance sets the SAME
+    BLOWN flag (+0xC bit 0x80000, cheat.md/person_states.tsv row 19) Blast's own push uses, via the SAME
+    push-velocity primitive (0x4E93F0), and only resumes once the universal physics step clears BLOWN on
+    landing - confirmed at the exe level (resolves open-populous combat.md's own "[guess: ours does not
+    slide on the ground]"/"ground sliding instead of SHOVE_LIFT" doubt: there is no ground-slide variant,
+    it is a true lift-and-land knockback like Blast's)
 hit(target, attacker, one_sided):                                                (0x4A39C0)
   strength(p) = max(32, FIGHT_DAMAGE_<p> × life / max_life), × BLOODLUST_DAMAGE_X when bloodlusted
   target.life -= strength(attacker)
