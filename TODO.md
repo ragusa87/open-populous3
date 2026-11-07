@@ -549,6 +549,18 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Training huts (huts-and-training.md "Done"): the queue's ripple (2 turns per rank) and those already of the building's kind letting the others pass, five trained together (the exe's count; ours holds one - a [player] note, reaffirmed, says it's always one at a time in play, so this needs a live check before five-at-once is implemented), queued orders carried over, damage cancelling the queue and sending the trainee out.
 - [ ] Training as in the original, what is left (pop3-rev-analysis.md "Training buildings"): the computer players' cost (`CP_` 1000) once tribes have a controller; the trainee's queued orders given to the new unit. The training time is already answered, no live measurement needed: the original has no fixed duration at all, just the mana cost filled at `cost / 32` per 16-turn income tick (same section) - 256-512 turns (21-43 s) at best, scaling with cost like everything else in the mana-income system.
 - [ ] Reincarnation sites from pop3-rev-analysis.md "Reincarnation sites": the ground levelled to the site height over a 5-cell disc in about 21 turns (ours: radius 3, blend 4) with its effects on enemies, wildmen, trees and swamps; pillars rising out of the ground, deleted and moved; the 32 sparkles.
+- [ ] The site's build/rebuild is not instant, and is driven by the shaman, not level load directly
+  (pop3-rev-analysis.md "Build/rebuild ritual"): she walks to the anchor, settles 12 turns, triggers the ~21-turn
+  ground levelling above, then fires one projectile per pillar slot a turn apart (slot order 7..0), each pillar
+  appearing 1-3 turns after its own shot lands and rising independently from there (so up to 3 stones can be
+  mid-rise at once) - total spread about 15 turns (1.25 s) for all 8. Ours (game-client `sites.rs`) places all 8
+  stones at once with no rise or stagger at level load. The same ritual (walk/settle/flatten/fire) also runs on
+  a relocation, e.g. a new site forming at a dead shaman's last position - not just a one-time level-load step;
+  replacing a pillar in place reuses a smaller version of it (destroy with a burst, spawn the new one, a second
+  burst as a "pop-in" flash). Precondition: only run this ritual for a tribe whose site is currently enabled
+  (`ReincarnationSite::enabled`/`SET_REINCARNATION`, already implemented) - a level's own AI script can turn it
+  off before this would run, as level 1's red tribe does at turn 0 even though it has a shaman thing (ai-scripts.md
+  "Worked example: level 1's opening flyby"), so a disabled tribe must get no site and no build animation at all.
   **Related bug found and partly fixed, 2026-10-21** (TODO.md "Terrain", `docs/archived-plans/terrain-white-patch.md`):
   `ReincarnationSite` had no stored height at all - `flatten_for_spawn` recomputed a *live average* of the
   surrounding ground every time (floored at a too-low `MIN_SPAWN_HEIGHT=32`), not the exe's own fixed, captured-

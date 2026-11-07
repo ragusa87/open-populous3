@@ -742,14 +742,67 @@ site. The site (tribe+0x911) is on a cell centre; its height is kept at tribe+0x
   (7/0x33) and a sound (0x4A7EB0). So it ends 128 below the ground (256 − 8 × 16), partly buried. Hint, unverified: a
   stone at full height would probably reach a balloon floating 200 over the site (vehicle table +0xF, "Vehicles"),
   so it is sunk to stay under one. "delete rs pillars" (7/0x4D) removes them; "move rs pillar" (7/7,
-  0x50C690) replaces a slot's pillar, with an explosion at the old and the new place.
+  0x50C690) replaces a slot's pillar, with an explosion at the old and the new place - see "Build/rebuild
+  ritual" below for what actually fires it on an ordinary level load.
 - Measured on a level (live memory): blue and yellow sites, 8 pillars each at exactly these offsets and angles;
   heights 127-128 around a site at 128, except one pillar at 107 on lower ground.
+
+### Build/rebuild ritual [exe, measured]
+The 8 pillars are not simply placed at level load; they are built by the tribe's own shaman carrying out a
+dedicated order (order-kind 18 of `order_execute`'s dispatch), one shaman-side ritual that also covers a later
+relocation (e.g. after the shaman dies and a new site forms at her last position):
+
+```text
+load_level, for every active tribe (the ordinary path):
+  set_tribe_start_pos(tribe)   # snaps a start-position bookkeeping field to the shaman's coarse cell
+  clear_tribe_1(tribe)         # anchor = shaman's position, rounded to the coarse (2-cell) grid;
+                                # reserves/flattens the site's land
+  process_tribe_1(tribe)       # gives the shaman order-kind 18, target = anchor
+                                # (no-op if the tribe has no shaman, or the shaman has no active order group)
+
+order-kind 18, a 4-state task on the shaman:
+  state 0: walk to the anchor
+  state 1: 12-turn settle/face-the-site wait
+  state 2: box-clear a +/-5-cell area around the anchor, compute the platform height, spawn the
+           "prepare rs land" levelling effect below (~21 turns), wait for it to finish
+  state 3: finalise the land reservation, then fire one "standard shot" projectile per pillar slot -
+           one shot per turn, in slot order 7,6,5,4,3,2,1,0 (reverse of the slot table), each aimed at
+           that slot's own target cell
+```
+
+Each shot is an ordinary `class 8 / type 1` "standard shot" (the same projectile spells.md's "From cast to
+effect" describes, 1400 units/turn) pre-loaded with a generic "on arrival, spawn this" payload (effect class
+7 / type 7, the slot index, the target position) instead of a spell's usual damage payload - it runs through
+the same shot-arrival code every shot in the game uses, which here spawns "move rs pillar" (7/7, 0x50C690) for
+that one slot: destroy any pillar already standing there with a "sphere explode 1" burst (7/9), create the new
+pillar (the ordinary rising animation above), then a second "sphere explode 1" burst at its own position (a
+pop-in flash).
+
+Measured, one fresh level load: the 8 pillars' thing-ids appear at turns 37, 40, 41, 44, 45, 48, 49, 52 (slot 7
+first, slot 0 last - gaps of 3, 1, 3, 1, 3, 1, 3 turns, a 15-turn/1.25 s spread), each then rising
+independently (so up to 3 pillars can be mid-rise at different heights at once). The stagger is pure shot
+travel time on top of the one-per-turn firing order (the octagon's 8 slots sit at only two distances from the
+centre, 3 and 2.8 cells, so flight time alternates between two close values) - nothing polls per turn to place
+a pillar; the whole staggered "rebuild" is a side effect of firing 8 ordinary projectiles one turn apart.
+
+A second, rarer path (0x41C140/0x41C520) rebuilds all 8 pillars in one uninterrupted loop with no stagger at
+all, gated by two flags not observed set on any ordinary level load - plausibly a scripted mid-level
+reset/relocation path distinct from the first build.
+
+Precondition: a tribe only has a Reincarnation Centre at all while it's enabled for that tribe - the per-tribe
+`SET_REINCARNATION ON`/`OFF` switch ai-scripts.md documents (tribe+0x93D bit 0x10000, 0x48DC26), which a
+level's own AI script can and does turn off before this would otherwise run: level 1's red
+script opens with `DO SET_REINCARNATION OFF` at turn 0 (ai-scripts.md "Worked example: level 1's opening
+flyby") even though red does have a shaman thing on that level, so no site - and no build ritual - ever shows
+for red. Exactly where the native per-tribe loop (0x42B446) consults this flag before issuing order 18 was not
+traced this session (unverified which check it is), but a disabled site functionally cannot run this ritual,
+matching play.
 
 ### Levelling ("prepare rs land", 7/8, 0x50C840)
 Over about 21 turns (1.75 s) a disc grows by 160 world units per turn up to 2560 (5 cells), and every cell inside is
 set to the site height. Inside it, enemy braves and specialists panic and lose half their `LIFE`, wildmen are
 converted (when the effect's flag 1 is set), trees catch fire and swamps are removed; 32 sparkles orbit the site.
+Spawned by the build/rebuild ritual's own state 2, above.
 
 ## Spells [exe]
 Traced from the disassembly for all 21 spell ids. Values: "file" is `constant.dat` (wins at run time), "exe" the
@@ -4960,6 +5013,11 @@ confirms.
   cells, not turned, and flatten radius 3 (blend 4). The original: the octagon above (3 cells, 2.8 on the
   diagonals), on cell centres, each stone turned to face the centre, object 30; the ground levelled to the site
   height over a 5-cell disc, in about 21 turns.
+- Reincarnation site **construction**: ours places all 8 stones at once, instantly, with no rise and no
+  stagger. The original's shaman walks to the site, settles 12 turns, flattens the ground (~21 turns), then
+  fires the 8 pillars one per turn in slot order 7..0, each landing 1-3 turns after it's fired, every single
+  stone also rising out of the ground over 8 steps on arrival - see "Build/rebuild ritual" above. The same
+  sequence runs again on a relocation (new shaman, new last-death anchor), not just a one-time level-load step.
 - spells.md, the original spells:
   - every spell flies from the shaman as a shot first (6 turns after the cast starts, 1000 or 1400 units per
     turn) and takes effect on arrival; burn, blast, lightning, whirlwind and insects can be deflected by a
@@ -5256,7 +5314,8 @@ confirms.
   which render-block fields the flyby's `ZOOM` channel changes is now identified further too (it includes the
   screen-scale/focal-length factor itself, not just K/bend) - see "Landscape projection" and "The AI-script
   zoom channel" above.
-- Sites: which code creates the pillars at level load, and whether the levelling forces every cell of its disc.
+- Sites: whether the levelling forces every cell of its disc (which code creates/staggers the pillars at level
+  load is now answered - "Build/rebuild ritual" above).
 - Spells: burning trees (scenery state 5), the partial building explosion of the earthquake, whether ghosts
   expire, what starts the landscape-shaping mode, what a person does when the ground under it floods, the
   building's second destroy reason (sub-state 2).
@@ -5404,7 +5463,11 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4DA080 | person damage (unit, tribe, amount, ignore_shield) |
 | 0x4E6D00 | person physics, every turn: follow the ground, falling (0x4E71CD), blown mode with landing and sliding (0x4E7307) |
 | 0x4A7D80 | reincarnation pillar init: snap to the cell centre, angle from the site, rise (0x4A7EB0) |
-| 0x50C690 | "move rs pillar" (7/7): replace a slot's pillar |
+| 0x50C690 | "move rs pillar" (7/7): replace a slot's pillar, fired by the standard shots below |
+| 0x419790 | `set_tribe_start_pos`: per-tribe level-load bookkeeping, snaps to the shaman's coarse cell |
+| 0x419810 | `clear_tribe_1`: derives the RC anchor from the shaman's position, reserves/flattens its land |
+| 0x419880 | `process_tribe_1`: gives the shaman order-kind 18 "(re)build the RC", target = the anchor |
+| 0x433A10 | order-kind 18: the shaman's 4-state build/rebuild task (walk, settle, flatten, fire pillars) |
 | 0x467130, 0x46CB90 | `draw_land`, `main_landscape_mesh_generation`: the vertex grid |
 | 0x46DE00 | per-vertex projection with the planet bend |
 | 0x416F50, 0x46E700 | render block defaults (K 46 000), copy into the draw state |
@@ -5444,7 +5507,7 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4EBC20 | slope vector at a position (ground sliding) |
 | 0x4503F0 | horizontal distance between two positions (wrapping, square root) |
 | 0x50C780, 0x50C840 | "prepare rs land" (7/8): init (site height at tribe+0x915), levelling per turn |
-| 0x41C140, 0x41C520 | landscape-shaping mode start and end: sites rebuilt at the shamans, pillars from 0x5A9F10 |
+| 0x41C140, 0x41C520 | rarer, all-8-pillars-at-once site rebuild path (flag-gated, not the ordinary level-load path - see 0x419880/0x433A10 above), pillars from 0x5A9F10 |
 | 0x468E1C-0x4694F2 | in `draw_polygons`: health bar, low health, shield, bloodlust, hypnosis and selection markers |
 | 0x525450 | health bar of a person |
 | 0x4D43A0 | person regeneration and the low-health flag, every 8 turns |
