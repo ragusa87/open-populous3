@@ -143,6 +143,7 @@ fn original_stone<'a>(levels: &LevelList, objects: &'a OriginalObjects, theme: u
 fn respawn_markers(
     mut commands: Commands,
     map: Res<CurrentMap>,
+    now: Res<SimNow>,
     levels: Res<LevelList>,
     objects: Res<OriginalObjects>,
     existing: Query<Entity, With<SiteMarker>>,
@@ -175,6 +176,10 @@ fn respawn_markers(
             }
         };
         for (slot, part) in site_parts(site).into_iter().enumerate() {
+            // Starts posed at its own current `pillar_height`, not blindly at `lift`: spawning here always
+            // visible-at-rest for one frame (before `rise_site_pillars` next corrects it) would flash every
+            // not-yet-built pillar fully into view the instant a level loads.
+            let y = pillar_height(site, slot as u8, lift, *now);
             commands
                 .spawn((
                     SiteMarker,
@@ -186,7 +191,7 @@ fn respawn_markers(
                 .with_child((
                     Mesh3d(mesh.clone()),
                     MeshMaterial3d(mat.clone()),
-                    Transform::from_xyz(0.0, lift, 0.0),
+                    Transform::from_xyz(0.0, y, 0.0),
                     SitePillar { owner: site.owner, slot: slot as u8, lift },
                 ));
         }
