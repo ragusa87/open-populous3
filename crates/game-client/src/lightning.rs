@@ -22,7 +22,7 @@ use game_core::time::Tick;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// Height the bolt comes from (render units, one per cell).
-const SKY: f32 = 8.0;
+pub(crate) const SKY: f32 = 8.0;
 /// Corners of a zigzag, and how far it strays sideways (render units).
 const SEGMENTS: usize = 10;
 const STRAY: f32 = 0.45;
@@ -38,8 +38,10 @@ const FULL_SECS: f32 = 0.15;
 /// The ground glow: its size (render units) and how long it lasts.
 const GLOW_SIZE: f32 = 1.6;
 const GLOW_SECS: f32 = 0.35;
-/// Over-bright (linear, above 1) so the tone mapping leaves it white-blue rather than grey.
-const COLOUR: Color = Color::linear_rgb(3.0, 3.4, 4.5);
+/// Over-bright (linear, above 1) so the tone mapping leaves it white-blue rather than grey. Shared with
+/// `site_shot.rs`'s own crackles (the identical "lightning elem" component, pop3-rev-analysis.md "Build/
+/// rebuild ritual" - "The shot's own visual while in flight").
+pub(crate) const COLOUR: Color = Color::linear_rgb(3.0, 3.4, 4.5);
 const TEXTURE: usize = 32;
 
 /// The bolt's corners from the sky (`(0, SKY)`) to the ground (`(0, 0)`), sideways (x) and up (y), for shape `k` of
@@ -74,8 +76,8 @@ pub fn glow(secs: f32) -> f32 {
 }
 
 /// A flat ribbon along `points` (x sideways, y up, z 0), `thickness` wide, its texture's u going across it (0 on one
-/// side, 1 on the other) so `cross_texture` makes it soft-edged.
-fn ribbon(points: &[Vec2], thickness: f32) -> Mesh {
+/// side, 1 on the other) so `cross_texture` makes it soft-edged. Shared with `site_shot.rs`'s own crackles.
+pub(crate) fn ribbon(points: &[Vec2], thickness: f32) -> Mesh {
     let (mut positions, mut uvs, mut indices) = (Vec::new(), Vec::new(), Vec::new());
     for w in points.windows(2) {
         let side = (w[1] - w[0]).perp().normalize_or_zero() * thickness / 2.0;
@@ -94,8 +96,9 @@ fn ribbon(points: &[Vec2], thickness: f32) -> Mesh {
         .with_inserted_indices(Indices::U32(indices))
 }
 
-/// Across a ribbon: opaque on its centre line, clear at its edges (RGBA, `size` x 1).
-fn cross_texture(size: usize) -> Vec<u8> {
+/// Across a ribbon: opaque on its centre line, clear at its edges (RGBA, `size` x 1). Shared with
+/// `site_shot.rs`'s own crackles.
+pub(crate) fn cross_texture(size: usize) -> Vec<u8> {
     (0..size)
         .flat_map(|i| {
             let d = ((i as f32 + 0.5) / size as f32 * 2.0 - 1.0).abs();

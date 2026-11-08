@@ -620,6 +620,19 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
      notes already name the likely cause (`animate_views`/`respawn_views` swapping `Mesh3d`/`MeshMaterial3d`
      handles every frame instead of true instancing) - this session's numbers are one more data point for that
      item, not a new one of its own.
+  4. **Fixed, 2026-11-08**: the shot's own look (`site_shot.rs`) was a guess (a straight glowing ball on a
+     straight glowing rope tethered to the shaman the whole flight) against pop3-rev-analysis.md "Build/
+     rebuild ritual"'s now-traced real visual - not a smooth tether: each turn the shot hasn't yet arrived it
+     samples jittered points along its path and drops a lightning-bolt-segment effect at each, reading as a
+     scattered, crackling burst. Reworked to match: `site_shot.rs` no longer builds its own ball/rope look at
+     all, instead reusing `lightning.rs`'s own `zigzag`/`ribbon`/`cross_texture` (made `pub(crate)` for this)
+     to spawn `CRACKLES` (3) short jagged bolt segments, shrunk down (`CRACKLE_SCALE`) and scattered with fresh
+     per-tick jitter (`crackle_point`) along the shaman-to-slot line, each flickering independently
+     (`crackle_flicker`) rather than a single continuous beam - confirmed on a `levl2001.dat` video capture
+     (a small scattered crackle shows near the shaman while a shot is in flight, not a straight line). Left
+     as the original's own further nuance, not pursued: the exact 20-point density and the shot's own slight
+     per-sub-step wobble (subtle at this short range, pop3-rev-analysis.md's own "may not be worth it for the
+     visual alone").
 - [x] Houses breeding and growth implemented (`game_core::hut_growth`, huts-and-training.md rules 5-6, fully
   traced `[exe]` and corrected where this entry's own earlier draft had guessed wrong - the band formula, the
   "stops at 100%" vs "resets to 0" behaviour, and growing's own wood seeding). Capacity 3/4/5, supply 3/5/7
