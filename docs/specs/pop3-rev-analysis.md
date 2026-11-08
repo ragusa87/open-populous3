@@ -2815,6 +2815,15 @@ melee scan (0x51E5E0): r = radius rounded down to even; the square of (r + 1) ×
   order runs as in "Starting a melee"
 ```
 
+A ghosted person (`+0x11` bit `0x8`, the AI-script `SEND_GHOST_PEOPLE`/`GUARD_WITH_GHOSTS` feature ai-scripts.md
+already notes as parsed-but-unwired) runs a SEPARATE scan instead of the melee scan above, from its own current
+cell with half the normal radius: a candidate must be another ghost, or a shaman (0x51EE10) - a ghosted unit's
+self-defense targets other ghosts or enemy shamans specifically, not any nearby enemy. Not relevant until
+ghost people are modelled at all. Separately, a firewarrior's own scan can self-issue a SECOND, undocumented
+order kind (0x22/34, "found via the cell's alternate/building slot rather than a person" - 0x51F470) that has
+no dispatch entry in `order_execute` at all and so never does anything once issued: a dead end confirmed in the
+exe itself, not worth reproducing.
+
 Order kinds come in pairs: an odd kind with a sprite (`hfx0-0.dat` index at record +6) and the even kind after it.
 Our guess (not traced): the odd kind is going to the order's place, the even one doing it; the text below reads the
 kinds that way. The sprites hint at some kinds, but they are not drawn over people: in the game, a person who
