@@ -8,26 +8,44 @@ use crate::camera::CameraRig;
 use crate::game_frame::GameYaw;
 use crate::grounded::Grounded;
 use crate::original_models::{atlas_image, object_mesh, to_mesh, OriginalObjects};
+use crate::sim_time::SimNow;
 use crate::world::{CurrentMap, LevelList};
 use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use crate::units::PLAYER;
 use game_core::map::GameMap;
+pub use game_core::site::SLOTS;
 use game_core::site::ReincarnationSite;
+use game_core::tribes::TribeId;
+use game_core::unit::Action;
 use pop3_format::catalog::REINCARNATION_STONE;
 use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
 
-/// The 8 pillar slots, cells from the site's cell, in slot order (pop3-rev-analysis.md "Reincarnation site"):
-/// an octagon, 3 cells out on the axes, (2, 2) on the diagonals.
-pub const SLOTS: [(i32, i32); 8] = [(0, 3), (2, 2), (3, 0), (2, -2), (0, -3), (-2, -2), (-3, 0), (-2, 2)];
 const STONE: Vec3 = Vec3::new(0.22, 0.6, 0.22);
 /// Footprint half size of a ring stone, wide enough for the original pillar (~0.47 cell).
 const STONE_HALF: f32 = 0.24;
 /// Theme whose atlas textures the stones on maps without one (sandboxes, generated maps).
 const DEFAULT_THEME: u8 = 0;
+/// How far a pillar starts below its resting height when it rises (`rise_site_pillars`): our own guess
+/// (pop3-rev-analysis.md doesn't give the stone's own rise distance, only its appearance timing) - deep
+/// enough to clear the stone's own height so it reads as fully buried before it appears.
+const RISE_DEPTH: f32 = STONE.y;
+/// How long one pillar takes to rise once it appears: our own guess, not separately measured
+/// (pop3-rev-analysis.md "Build/rebuild ritual" only times the appearances, not each one's own rise).
+const RISE_SECS: f32 = 1.0;
 
 #[derive(Component)]
 struct SiteMarker;
+
+/// A pillar mesh's own slot, for `rise_site_pillars` to pose it from the model (`ReincarnationSite::pillar_built`)
+/// independently of the others: `lift` is the resting height set at spawn (0 for an original mesh, half the
+/// generated block's own height).
+#[derive(Component, Clone, Copy)]
+struct SitePillar {
+    owner: TribeId,
+    slot: u8,
+    lift: f32,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SitePart {
@@ -39,13 +57,25 @@ pub struct SitesPlugin;
 
 impl Plugin for SitesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, respawn_markers).add_systems(Update, look_at_site.in_set(crate::menu::Gameplay));
+        app.add_systems(Update, (respawn_markers, rise_site_pillars.after(crate::units::run_ticks))).add_systems(Update, look_at_site.in_set(crate::menu::Gameplay));
     }
 }
 
 /// Where the player's reincarnation site is (cells), if the map has one.
 pub fn player_site_cell(map: &GameMap) -> Option<Vec2> {
     map.site_of(PLAYER).map(site_cell_pos)
+}
+
+/// Whether the player's own shaman is mid build/rebuild ritual (`game_core::unit::Action::BuildingSite`,
+/// pop3-rev-analysis.md "Build/rebuild ritual").
+fn player_shaman_building(map: &GameMap) -> bool {
+    map.units.iter().any(|u| u.owner == game_core::tribes::Owner::Tribe(PLAYER) && matches!(u.action, Action::BuildingSite(_)))
+}
+
+/// The run condition `camera_input`, `select_and_order` and the spell-casting systems gate themselves on,
+/// next to `armageddon::input_locked` and `flyby::flyby_active`.
+pub fn site_build_active(map: Res<CurrentMap>) -> bool {
+    player_shaman_building(&map.0)
 }
 
 /// H flies the camera to the player's reincarnation site.
@@ -140,7 +170,7 @@ fn respawn_markers(
                 (block_mesh.clone(), mats.add(StandardMaterial { base_color: tint, perceptual_roughness: 0.9, ..default() }), STONE.y / 2.0)
             }
         };
-        for part in site_parts(site) {
+        for (slot, part) in site_parts(site).into_iter().enumerate() {
             commands
                 .spawn((
                     SiteMarker,
@@ -149,7 +179,35 @@ fn respawn_markers(
                     Transform::from_rotation(part.yaw.into()),
                     Visibility::Hidden,
                 ))
-                .with_child((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::from_xyz(0.0, lift, 0.0)));
+                .with_child((
+                    Mesh3d(mesh.clone()),
+                    MeshMaterial3d(mat.clone()),
+                    Transform::from_xyz(0.0, lift, 0.0),
+                    SitePillar { owner: site.owner, slot: slot as u8, lift },
+                ));
+        }
+    }
+}
+
+/// A pillar's own local Y at `now`: its resting `lift` once built, `RISE_DEPTH` below it before its own
+/// shot has landed (`ReincarnationSite::pillar_built`, "Build/rebuild ritual"), easing up over `RISE_SECS`
+/// in between. A non-animated site's pillars stand at `lift` at once, skipping the rise entirely rather
+/// than playing it from tick zero at map load.
+fn pillar_height(site: &ReincarnationSite, slot: u8, lift: f32, now: SimNow) -> f32 {
+    if !site.animated {
+        return lift;
+    }
+    match site.pillar_built(slot) {
+        None => lift - RISE_DEPTH,
+        Some(built) => lift - RISE_DEPTH * (1.0 - (now.secs_since(built) / RISE_SECS).clamp(0.0, 1.0)),
+    }
+}
+
+/// Poses each pillar mesh at `pillar_height`, every frame.
+fn rise_site_pillars(map: Res<CurrentMap>, now: Res<SimNow>, mut pillars: Query<(&SitePillar, &mut Transform)>) {
+    for (p, mut t) in &mut pillars {
+        if let Some(site) = map.0.sites.iter().find(|s| s.owner == p.owner) {
+            t.translation.y = pillar_height(site, p.slot, p.lift, *now);
         }
     }
 }
@@ -181,6 +239,33 @@ mod tests {
             let to_centre = (centre - p.ground.at).normalize();
             assert!(front.xz().distance(to_centre) < 1e-5, "{front:?} vs {to_centre:?}");
         }
+    }
+
+    #[test]
+    fn a_non_animated_sites_pillar_always_stands_at_its_resting_height() {
+        let site = ReincarnationSite::at_cell(game_core::tribes::TribeId::Blue, (10, 10), 0);
+        let now = SimNow { tick: game_core::time::Tick::ZERO, frac: 0.0 };
+        assert_eq!(pillar_height(&site, 3, 0.3, now), 0.3);
+    }
+
+    #[test]
+    fn an_animated_sites_pillar_is_buried_until_built_then_eases_up_to_its_resting_height() {
+        let mut site = ReincarnationSite { animated: true, ..ReincarnationSite::at_cell(game_core::tribes::TribeId::Blue, (10, 10), 0) };
+        let at = |n: u32| SimNow { tick: game_core::time::Tick::from_wire(n), frac: 0.0 };
+        assert_eq!(pillar_height(&site, 3, 0.3, at(0)), 0.3 - RISE_DEPTH, "not built yet: fully buried");
+        site.pillars[3] = Some(game_core::time::Tick::from_wire(10));
+        assert_eq!(pillar_height(&site, 3, 0.3, at(10)), 0.3 - RISE_DEPTH, "just built: still at the bottom");
+        assert_eq!(pillar_height(&site, 3, 0.3, at(10 + (RISE_SECS * crate::sim_time::TICK_SECS.recip()) as u32)), 0.3, "fully risen after RISE_SECS");
+        assert_eq!(pillar_height(&site, 2, 0.3, at(10)), 0.3 - RISE_DEPTH, "a different slot is unaffected");
+    }
+
+    #[test]
+    fn player_shaman_building_tracks_only_the_players_own_shaman() {
+        let mut map = GameMap::sandbox_walk();
+        assert!(!player_shaman_building(&map));
+        let shaman = map.units.iter_mut().find(|u| u.owner == game_core::tribes::Owner::Tribe(PLAYER) && u.kind == game_core::unit::UnitKind::Shaman).unwrap();
+        shaman.action = Action::BuildingSite(game_core::site::SiteBuildState::Settling(game_core::time::Countdown::new(game_core::time::Ticks::new(1))));
+        assert!(player_shaman_building(&map));
     }
 
     #[test]

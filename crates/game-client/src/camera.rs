@@ -196,7 +196,7 @@ impl Plugin for CameraPlugin {
             .add_systems(
                 Update,
                 (
-                    (camera_input.run_if(not(crate::armageddon::input_locked)).run_if(not(crate::flyby::flyby_active)), fly, crate::flyby::drive_camera).in_set(crate::menu::Gameplay),
+                    (camera_input.run_if(not(crate::armageddon::input_locked)).run_if(not(crate::flyby::flyby_active)).run_if(not(crate::sites::site_build_active)), fly, crate::flyby::drive_camera).in_set(crate::menu::Gameplay),
                     apply_rig,
                     crate::ground_shake::camera_shake,
                     sky_color,
