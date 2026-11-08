@@ -210,6 +210,12 @@ pub enum Action {
     Dying { left: Countdown },
     /// The shaman, lying dead: waiting to reincarnate at her site.
     Dead { left: Countdown },
+    /// The shaman carrying out her site's build/rebuild ritual (`site::SiteBuildState`,
+    /// pop3-rev-analysis.md "Build/rebuild ritual"): settles, triggers the ground levelling, then fires
+    /// one shot per pillar slot. No orders reach her until she's done (`Unit::locked`) - only ever
+    /// entered for an `animated` site (`GameMap::with_shamans`, reincarnation below), never a sandbox or
+    /// generated one.
+    BuildingSite(crate::site::SiteBuildState),
     /// Anyone else after the fall: its spirit rises from the body, then the unit is gone from the map. `climbing`:
     /// a real sustained rise (`motion.height`, `SPIRIT_CLIMB_RATE`) rather than the brief stationary "calm" one.
     Spirit { left: Countdown, climbing: bool },
@@ -299,6 +305,7 @@ impl Action {
             Action::OnFire { .. } => "Burning",
             Action::Dying { .. } => "Dying",
             Action::Dead { .. } => "Dead",
+            Action::BuildingSite(_) => "Building the site",
             Action::Spirit { .. } => "Dead",
             Action::AroundFire { .. } => "Around the fire",
             Action::Grazing { drink: false, .. } => "Eating",
@@ -376,6 +383,7 @@ impl Action {
                 | Action::Listening { .. }
                 | Action::Dying { .. }
                 | Action::Dead { .. }
+                | Action::BuildingSite(_)
                 | Action::Spirit { .. }
                 // An Angel of Death never takes orders at all; a grabbed victim moves only with its captor.
                 | Action::Hunting
@@ -452,6 +460,12 @@ pub enum UnitEvent {
     Released { spell: Spell },
     /// Next to the vehicle `vehicle` (id): the caller seats her if she may get on.
     AtVehicle { vehicle: crate::vehicle::VehicleId },
+    /// The build/rebuild ritual's settle just ended: the caller levels the site's ground
+    /// (`ReincarnationSite::flatten_for_spawn`).
+    SiteLevelled,
+    /// The build/rebuild ritual is firing pillar slot `slot`: the caller sends a standard shot there
+    /// (`GameMap::fire_site_pillar`).
+    FireSitePillar { slot: u8 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -622,7 +636,7 @@ impl Unit {
     /// Thrown, settling after a tumble, or listening to a preacher: no order reaches it and its player cannot
     /// select it.
     pub fn locked(&self) -> bool {
-        self.thrown() || matches!(self.action, Action::Listening { .. } | Action::Settling { .. })
+        self.thrown() || matches!(self.action, Action::Listening { .. } | Action::Settling { .. } | Action::BuildingSite(_))
     }
 
     /// Orders change what it does: not while drowning, tumbling, dying or dead, nor off the ground.
@@ -1099,6 +1113,38 @@ impl Unit {
                 }
                 self.action = Action::Spirit { left, climbing };
             }
+            Action::BuildingSite(state) => {
+                if site.is_none() {
+                    // The site was disabled mid-ritual (`DO SET_REINCARNATION OFF`, pop3-rev-analysis.md
+                    // "Build/rebuild ritual" precondition): abort, no pillars fired from here on - a
+                    // disabled tribe gets no site and no build animation at all.
+                    self.action = Action::Idle;
+                    return None;
+                }
+                match state {
+                    crate::site::SiteBuildState::Settling(mut left) => {
+                        if left.tick() {
+                            self.action = Action::BuildingSite(crate::site::SiteBuildState::Levelling(Countdown::new(crate::site::LEVEL_TICKS)));
+                            return Some(UnitEvent::SiteLevelled);
+                        }
+                        self.action = Action::BuildingSite(crate::site::SiteBuildState::Settling(left));
+                    }
+                    crate::site::SiteBuildState::Levelling(mut left) => {
+                        self.action = Action::BuildingSite(if left.tick() {
+                            crate::site::SiteBuildState::Firing { fired: 0 }
+                        } else {
+                            crate::site::SiteBuildState::Levelling(left)
+                        });
+                    }
+                    crate::site::SiteBuildState::Firing { fired } => {
+                        if (fired as usize) < crate::site::SLOTS.len() {
+                            self.action = Action::BuildingSite(crate::site::SiteBuildState::Firing { fired: fired + 1 });
+                            return Some(UnitEvent::FireSitePillar { slot: 7 - fired });
+                        }
+                        self.go_idle();
+                    }
+                }
+            }
             Action::Dead { mut left } => {
                 if !left.tick() {
                     self.action = Action::Dead { left };
@@ -1107,6 +1153,9 @@ impl Unit {
                 match site {
                     Some(site) => {
                         *self = Unit { facing: self.facing, ..Unit::shaman(self.id, site) };
+                        if site.animated {
+                            self.action = Action::BuildingSite(crate::site::SiteBuildState::Settling(Countdown::new(crate::site::SETTLE_TICKS)));
+                        }
                         return Some(UnitEvent::Reincarnated);
                     }
                     // No reincarnation site for this owner (`DO SET_REINCARNATION OFF`,

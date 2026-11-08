@@ -4,8 +4,11 @@
 //! ON/OFF`, ai-scripts.md) - a disabled site is simply skipped by `GameMap::site_of` and everything
 //! built on it (no respawn, not drawn), without losing its place in `GameMap::sites`.
 
+use crate::event::WorldEvent;
 use crate::terrain::{DirtyRect, Heightmap};
+use crate::time::{Countdown, Tick, Ticks};
 use crate::tribes::TribeId;
+use crate::unit::{isqrt, torus_delta};
 use pop3_format::{Level, WORLD_UNITS_PER_CELL};
 
 /// Cells (around the site's own, either axis) whose wildmen join the tribe when its shaman appears.
@@ -31,12 +34,45 @@ pub struct ReincarnationSite {
     /// Whether this tribe's shaman can currently reincarnate here (`GameMap::site_of` skips a disabled
     /// one). Always `true` until `DO SET_REINCARNATION OFF`/`GameMap::remove_reincarnation` disables it.
     pub enabled: bool,
+    /// Whether (re)spawning here runs the shaman's build/rebuild ritual (`SiteBuildState`, "Build/rebuild
+    /// ritual" below) instead of placing her and the 8 pillars instantly: `true` for a real level
+    /// (`sites_from_level`), `false` for every sandbox/generated/dev site (`at_cell`) - so none of the dev
+    /// sandboxes (`just shot SHAMAN=...` and the many tests built on them) spend their first ~40 ticks
+    /// locked out of a shaman they need usable immediately.
+    pub animated: bool,
+    /// Tick pillar slot `n` (`SLOTS`) was last (re)built by the ritual, `None` until its shot lands and
+    /// settles (`GameMap::fire_site_pillar`, `tend_site_shots`). Meaningless (ignored, `pillar_built`)
+    /// when `!animated`: such a site's 8 pillars simply always stand.
+    pub pillars: [Option<Tick>; 8],
 }
+
+/// The 8 pillar slots, cells from the site's cell, in slot order (pop3-rev-analysis.md "Reincarnation
+/// site"): an octagon, 3 cells out on the axes, (2, 2) on the diagonals. The build/rebuild ritual fires
+/// its shots in reverse of this order (slot 7 first, slot 0 last).
+pub const SLOTS: [(i32, i32); 8] = [(0, 3), (2, 2), (3, 0), (2, -2), (0, -3), (-2, -2), (-3, 0), (-2, 2)];
 
 impl ReincarnationSite {
     pub fn at_cell(owner: TribeId, (x, z): (i32, i32), height: u16) -> Self {
         let unit = |c: i32| (c.rem_euclid(128) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
-        ReincarnationSite { owner, x: unit(x), z: unit(z), height, enabled: true }
+        ReincarnationSite { owner, x: unit(x), z: unit(z), height, enabled: true, animated: false, pillars: [None; 8] }
+    }
+
+    /// World-unit centre of pillar slot `slot` (`SLOTS`), the shaman's own standard shots aim at during the
+    /// build/rebuild ritual.
+    pub fn slot_target(&self, slot: u8) -> (u16, u16) {
+        let (cx, cz) = self.cell();
+        let (dx, dz) = SLOTS[slot as usize];
+        let unit = |c: i32| (c.rem_euclid(128) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
+        (unit(cx + dx), unit(cz + dz))
+    }
+
+    /// Tick pillar `slot` last stood up, for the client's rise animation: always `Tick::ZERO` (already
+    /// standing, no animation) for a non-animated site - only an `animated` one tracks it live.
+    pub fn pillar_built(&self, slot: u8) -> Option<Tick> {
+        if !self.animated {
+            return Some(Tick::ZERO);
+        }
+        self.pillars[slot as usize]
     }
 
     /// Cell containing the site centre.
@@ -103,6 +139,97 @@ impl ReincarnationSite {
     }
 }
 
+/// Build/rebuild ritual (pop3-rev-analysis.md "Build/rebuild ritual"): what an `animated`
+/// `ReincarnationSite`'s shaman is doing before she's free, carried on her own `Action::BuildingSite`.
+/// Walking to the anchor (state 0) isn't a state of its own here: she always spawns exactly on it (no site
+/// relocation, `ReincarnationSite`'s own doc), so that leg is always zero distance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SiteBuildState {
+    /// 12-turn settle before the ground levelling (state 1).
+    Settling(Countdown),
+    /// The ground levelling runs - instantly here (`flatten_for_spawn`, TODO.md "Terrain" #302 tracks the
+    /// full animated growing disc separately); this just waits out its own ~21-turn length before the
+    /// pillars fire (state 2).
+    Levelling(Countdown),
+    /// One standard shot per pillar slot, one turn apart, slot order 7..0 (state 3). `fired`: how many
+    /// have gone out so far.
+    Firing { fired: u8 },
+}
+
+/// 12-turn settle before the levelling starts (measured).
+pub const SETTLE_TICKS: Ticks = Ticks::new(12);
+/// The ground levelling's own length (measured, "Levelling" below); only its timing is reproduced here
+/// (TODO.md "Terrain" #302), not its growing-disc visual.
+pub const LEVEL_TICKS: Ticks = Ticks::new(21);
+/// A shot's speed, world units per turn: "the standard shot other spells use" (`blast::FIREBALL_SPEED`'s
+/// own doc), 1400.
+pub const STANDARD_SHOT_SPEED: i32 = 1400;
+
+impl crate::map::GameMap {
+    /// Unit `i`, a shaman firing pillar `slot` of her own `Action::BuildingSite` (state 3): a standard shot
+    /// from where she stands to the slot's own target cell.
+    pub(crate) fn fire_site_pillar(&mut self, i: usize, slot: u8) {
+        let Some(owner) = self.units[i].owner.tribe() else { return };
+        let Some(site) = self.sites.iter().find(|s| s.owner == owner && s.enabled && s.animated) else { return };
+        let target = site.slot_target(slot);
+        let aim = (target.0, target.1, self.terrain.height_at(target.0 as u32, target.1 as u32, WORLD_UNITS_PER_CELL));
+        let (at, height) = ((self.units[i].x, self.units[i].z), self.altitude(&self.units[i]) as i32);
+        let id = self.new_id_of();
+        self.site_shots.insert(id, SiteShot { owner, slot, at, height, aim });
+    }
+
+    /// Every site shot flies a turn towards its slot; on arrival any pillar already standing there is
+    /// destroyed (a burst) and the new one appears at once (a second burst, a "pop-in" flash) - "nothing
+    /// polls per turn to place a pillar" (pop3-rev-analysis.md "Build/rebuild ritual"): the whole stagger
+    /// between slots is pure shot travel time on top of the one-per-turn firing order, same as here.
+    pub(crate) fn tend_site_shots(&mut self) -> Vec<WorldEvent> {
+        let mut shots = std::mem::take(&mut self.site_shots);
+        let mut arrived = Vec::new();
+        let mut events = Vec::new();
+        for (id, s) in shots.iter_mut() {
+            let (at, height, there) = fly(s.at, s.height, s.aim);
+            (s.at, s.height) = (at, height);
+            if there {
+                arrived.push(id);
+                let replacing = self.sites.iter().any(|site| site.owner == s.owner && site.pillars[s.slot as usize].is_some());
+                if replacing {
+                    events.push(WorldEvent::SpawnEffect(crate::blast::explosion_effect(s.owner, s.at)));
+                }
+                events.push(WorldEvent::SitePillarBuilt { owner: s.owner, slot: s.slot });
+                events.push(WorldEvent::SpawnEffect(crate::blast::explosion_effect(s.owner, s.at)));
+            }
+        }
+        shots.retain(|id, _| !arrived.contains(&id));
+        self.site_shots = shots;
+        events
+    }
+}
+
+/// One of the build/rebuild ritual's own standard shots in flight, from the shaman to one pillar slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SiteShot {
+    pub owner: TribeId,
+    pub slot: u8,
+    /// Where it is now: world units and height.
+    pub at: (u16, u16),
+    pub height: i32,
+    /// Where it lands: world units and the ground height there, read once at the shot.
+    pub aim: (u16, u16, i32),
+}
+
+/// The step a site shot at `at`/`h` makes towards `aim`: its next place, and whether it got there (same
+/// shape as `blast::fly`, at the standard shot's own speed instead of a fireball's).
+fn fly(at: (u16, u16), h: i32, aim: (u16, u16, i32)) -> ((u16, u16), i32, bool) {
+    let (dx, dz, dy) = (torus_delta(at.0, aim.0), torus_delta(at.1, aim.1), aim.2 - h);
+    let d2 = (dx as i64).pow(2) + (dz as i64).pow(2) + (dy as i64).pow(2);
+    if d2 <= (STANDARD_SHOT_SPEED as i64).pow(2) {
+        return ((aim.0, aim.1), aim.2, true);
+    }
+    let d = isqrt(d2.min(u32::MAX as i64) as u32).max(1) as i32;
+    let step = |v: i32| v * STANDARD_SHOT_SPEED / d;
+    ((at.0.wrapping_add(step(dx) as u16), at.1.wrapping_add(step(dz) as u16)), h + step(dy), false)
+}
+
 /// One site per tribe, at its shaman's start position; first shaman wins, sorted by owner. `height` is
 /// captured once from `terrain`'s own value at the site's cell - the *original*, unmodified level terrain, not
 /// recomputed later (`ReincarnationSite::height`'s own doc comment).
@@ -112,7 +239,7 @@ pub fn sites_from_level(level: &Level, terrain: &Heightmap) -> Vec<Reincarnation
         let Some(owner) = TribeId::from_u8(t.owner) else { continue };
         if !sites.iter().any(|s| s.owner == owner) {
             let height = terrain.get((t.x as u32 / WORLD_UNITS_PER_CELL) as i32, (t.z as u32 / WORLD_UNITS_PER_CELL) as i32);
-            sites.push(ReincarnationSite { owner, x: t.x, z: t.z, height, enabled: true });
+            sites.push(ReincarnationSite { owner, x: t.x, z: t.z, height, enabled: true, animated: true, pillars: [None; 8] });
         }
     }
     sites.sort_by_key(|s| s.owner);
@@ -171,8 +298,8 @@ mod tests {
         assert_eq!(
             sites,
             vec![
-                ReincarnationSite { owner: TribeId::Blue, x: 0x1100, z: 0xd700, height: 0, enabled: true },
-                ReincarnationSite { owner: TribeId::Red, x: 0x0900, z: 0x1d00, height: 0, enabled: true },
+                ReincarnationSite { owner: TribeId::Blue, x: 0x1100, z: 0xd700, height: 0, enabled: true, animated: true, pillars: [None; 8] },
+                ReincarnationSite { owner: TribeId::Red, x: 0x0900, z: 0x1d00, height: 0, enabled: true, animated: true, pillars: [None; 8] },
             ]
         );
         assert_eq!(sites[0].cell(), (8, 107));
@@ -236,5 +363,35 @@ mod tests {
         }
         let (a, b) = (sites[0].cell(), sites[1].cell());
         assert!((a.0 - b.0).abs() > 40 && (a.1 - b.1).abs() > 40, "{a:?} {b:?}");
+    }
+
+    #[test]
+    fn slot_targets_sit_on_the_octagon_around_the_site() {
+        let site = ReincarnationSite::at_cell(TribeId::Blue, (10, 20), 0);
+        let centre = (10, 20);
+        for (slot, &(dx, dz)) in SLOTS.iter().enumerate() {
+            assert_eq!(site.slot_target(slot as u8), ReincarnationSite::at_cell(TribeId::Blue, (centre.0 + dx, centre.1 + dz), 0).spawn_point());
+        }
+    }
+
+    #[test]
+    fn pillar_built_is_always_up_without_animation_only_tracked_with_it() {
+        let plain = ReincarnationSite::at_cell(TribeId::Blue, (10, 10), 0);
+        assert_eq!(plain.pillar_built(3), Some(Tick::ZERO));
+        let mut animated = ReincarnationSite { animated: true, ..plain };
+        assert_eq!(animated.pillar_built(3), None, "not built yet");
+        animated.pillars[3] = Some(Tick::from_wire(50));
+        assert_eq!(animated.pillar_built(3), Some(Tick::from_wire(50)));
+    }
+
+    #[test]
+    fn a_site_shot_reaches_its_aim_within_one_turn_at_short_range() {
+        assert_eq!(fly((0, 0), 0, (100, 0, 0)), ((100, 0), 0, true));
+    }
+
+    #[test]
+    fn a_site_shot_steps_at_its_own_speed_towards_a_far_aim() {
+        let (at, height, there) = fly((0, 0), 0, (10_000, 0, 0));
+        assert_eq!((at, height, there), ((STANDARD_SHOT_SPEED as u16, 0), 0, false));
     }
 }

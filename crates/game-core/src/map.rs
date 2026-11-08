@@ -89,6 +89,8 @@ pub struct GameMap {
     /// Blast's own fireball shots in flight, from the shaman to the cast point (`crate::blast`): the general
     /// "every spell flies from the shaman as a shot" piece (TODO.md "Shots"), done for Blast only so far.
     pub fireballs: Registry<crate::blast::Fireball>,
+    /// The build/rebuild ritual's own standard shots in flight, one per pillar slot (`crate::site`).
+    pub site_shots: Registry<crate::site::SiteShot>,
     /// Boats and balloons (`crate::vehicle`).
     pub vehicles: Registry<crate::vehicle::Vehicle>,
     /// Shared patrol points (`crate::patrol`), referenced by zero or more units' own `patrol` queue.
@@ -177,7 +179,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, balance: crate::balance::Balance::ours() }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, balance: crate::balance::Balance::ours() }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -223,6 +225,7 @@ impl GameMap {
             formations: Vec::new(),
             bolts: Registry::default(),
             fireballs: Registry::default(),
+            site_shots: Registry::default(),
             vehicles: Registry::default(),
             patrol_points: Registry::default(),
             hidden_points: Registry::default(),
@@ -311,12 +314,18 @@ impl GameMap {
         self
     }
 
-    /// Shamans spawn at game start: each site levels its ground (see `flatten_for_spawn`).
+    /// Shamans spawn at game start: an `animated` site's shaman starts her build ritual instead of
+    /// standing on already-flat, already-built ground (`Action::BuildingSite`, `site::SiteBuildState`);
+    /// every other site still levels its ground and places her idle at once (`flatten_for_spawn`).
     fn with_shamans(mut self) -> Self {
         for k in 0..self.sites.len() {
-            self.sites[k].flatten_for_spawn(&mut self.terrain);
             let id = self.new_id_of();
             let mut shaman = Unit::shaman(id, &self.sites[k]);
+            if self.sites[k].animated {
+                shaman.action = Action::BuildingSite(crate::site::SiteBuildState::Settling(Countdown::new(crate::site::SETTLE_TICKS)));
+            } else {
+                self.sites[k].flatten_for_spawn(&mut self.terrain);
+            }
             shaman.health = crate::health::Health::full(self.balance.units.shaman);
             self.units.push(shaman);
         }
@@ -1418,6 +1427,8 @@ impl GameMap {
         dirty.extend(self.apply_events(hits));
         let landed = self.tend_fireballs();
         dirty.extend(self.apply_events(landed));
+        let site_built = self.tend_site_shots();
+        dirty.extend(self.apply_events(site_built));
         dirty.extend(self.tend_swamps());
         dirty.extend(self.tend_effects());
         dirty.extend(self.tend_fires());
@@ -1475,7 +1486,10 @@ impl GameMap {
             let site = self.sites.iter().find(|s| s.owner == unit.owner && s.enabled);
             let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: unit.inside.map(|i| i.building) };
             match unit.tick(now, &ground, site) {
-                Some(UnitEvent::Reincarnated) => dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain))),
+                // An animated site's ground isn't levelled on reincarnation itself any more: the build
+                // ritual does it after its own settle (`UnitEvent::SiteLevelled`).
+                Some(UnitEvent::Reincarnated) => dirty.extend(site.filter(|s| !s.animated).map(|s| s.flatten_for_spawn(&mut self.terrain))),
+                Some(UnitEvent::SiteLevelled) => dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain))),
                 Some(UnitEvent::Gone) => gone.push(unit.id),
                 Some(event) => events.push((i, event)),
                 None => {}
@@ -1486,6 +1500,7 @@ impl GameMap {
                 UnitEvent::Jumped { .. } | UnitEvent::Built => dirty.extend(self.work_event(i, event)),
                 UnitEvent::AtDoor { building } => self.come_in(i, building),
                 UnitEvent::AtVehicle { vehicle } => self.board(i, vehicle),
+                UnitEvent::FireSitePillar { slot } => self.fire_site_pillar(i, slot),
                 UnitEvent::Released { spell } => {
                     if let Some(owner) = self.units[i].owner.tribe() {
                         dirty.extend(self.release(owner, spell));
@@ -1959,6 +1974,13 @@ impl GameMap {
                 self.active_flyby = Some(crate::ai_script::ActiveFlyby { flyby, start: self.now, interrupted_at: None });
                 None
             }
+            WorldEvent::SitePillarBuilt { owner, slot } => {
+                let now = self.now;
+                if let Some(s) = self.sites.iter_mut().find(|s| s.owner == owner) {
+                    s.pillars[slot as usize] = Some(now);
+                }
+                None
+            }
         };
         (changed, follow_ups)
     }
@@ -2370,6 +2392,48 @@ mod tests {
         std::fs::write(dir.0.join("constant.dat"), "P3CONST_LIFE_BRAVE = 4242\n").unwrap();
         let map = GameMap::load_original(&dat).unwrap();
         assert_eq!(map.balance.units.brave, 4242, "overridden by the file");
+    }
+
+    #[test]
+    fn an_animated_sites_shaman_settles_levels_then_builds_all_8_pillars_in_order_then_is_free() {
+        let mut terrain = Heightmap::new(32);
+        terrain.raise((10, 10), 6, 300);
+        let site = ReincarnationSite { animated: true, ..ReincarnationSite::at_cell(TribeId::Blue, (10, 10), 200) };
+        let mut map = GameMap::bare("t", terrain, vec![site]).with_shamans();
+        let shaman = map.units[0].id;
+        assert!(matches!(map.unit(shaman).unwrap().action, Action::BuildingSite(_)), "building, not idle, from the start");
+        assert_ne!(map.terrain.get(10, 10), 200, "not levelled to the site's own height yet: that only happens after the settle");
+        let mut built_order = Vec::new();
+        for _ in 0..120 {
+            map.tick();
+            for slot in 0..8u8 {
+                if map.sites[0].pillars[slot as usize].is_some() && !built_order.contains(&slot) {
+                    built_order.push(slot);
+                }
+            }
+            if built_order.len() == 8 {
+                break;
+            }
+        }
+        assert_eq!(built_order, vec![7, 6, 5, 4, 3, 2, 1, 0], "fired in reverse slot order, one by one");
+        assert_eq!(map.terrain.get(10, 10), 200, "levelled by the time the pillars are up");
+        assert_eq!(map.unit(shaman).unwrap().action, Action::Idle, "free once all 8 are up");
+    }
+
+    #[test]
+    fn a_site_build_ritual_aborts_without_pillars_once_its_site_is_disabled() {
+        let mut terrain = Heightmap::new(32);
+        terrain.raise((10, 10), 6, 300);
+        let site = ReincarnationSite { animated: true, ..ReincarnationSite::at_cell(TribeId::Blue, (10, 10), 200) };
+        let mut map = GameMap::bare("t", terrain, vec![site]).with_shamans();
+        let shaman = map.units[0].id;
+        map.remove_reincarnation(TribeId::Blue);
+        map.tick();
+        assert_eq!(map.unit(shaman).unwrap().action, Action::Idle, "aborted at once: no site, no build animation");
+        for _ in 0..60 {
+            map.tick();
+        }
+        assert!(map.sites[0].pillars.iter().all(Option::is_none), "never built");
     }
 
     #[test]
