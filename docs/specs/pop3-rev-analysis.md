@@ -1762,6 +1762,19 @@ never appears at all; with cheat mode OFF it hands off into its own, still-unope
 set in the init itself, and no caller for this effect type was found this session - what it actually looks like,
 and when (if ever, outside a removed/debug path) the game spawns it, remains open.
 
+**RESOLVED, a later pop3-rev session, on both fronts.** The running state (0x4C/76) is a one-shot scripted
+set-piece: a stone head/statue (class-5/type-9 "head" scenery) crumbles into flying debris over several stages
+while a real Angel-of-Death-typed apparition (spawned bypassing the usual `create_aod` path, landing in an
+unrelated outer sub-state never reached any other way) hovers and sways above it; the apparition is then
+dismissed (its own confirmed despawn sound) and the statue is marked permanently destroyed. And the alloc site:
+there isn't one in the exe's own code. Every `alloc_unit` call site that could plausibly produce class 7 type
+`0x5b` was walked (both literal and register/table-driven); none do. The actual mechanism is the LEVEL loader's
+own generic per-"thing" allocator, which reads class/type/tribe straight out of each level file's own thing
+record - so a "statue to AoD" set-piece is simply something a specific level file places directly, the same way
+it places every person/building/scenery/effect, not something any native code or PopScript opcode decides to
+spawn. No level file is available to say which campaign mission uses it. Not relevant to our own implementation
+without a specific level needing it.
+
 **The angel-vs-angel fight (`0x4E0830`) is a pure stat exchange, not a choreographed fight**: read in full this
 session (under 0x200 bytes, no movement or pose code at all). Each call compares both angels' current health; the
 healthier one's own health (scaled down) is subtracted from the WEAKER one's - a genuine mutual exchange where
