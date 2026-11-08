@@ -789,17 +789,20 @@ A second, rarer path (0x41C140/0x41C520) rebuilds all 8 pillars in one uninterru
 all, gated by two flags not observed set on any ordinary level load - plausibly a scripted mid-level
 reset/relocation path distinct from the first build.
 
-**The shot's own visual while in flight** [exe, live-measured]: not a straight glowing bolt. Each turn it
-hasn't yet arrived, the shot samples up to 20 small LCG-jittered points scattered along its own path (toward
-its destination, re-aimed fresh each sub-step rather than along one fixed line) and spawns a **class 7 / type
-4 "lightning elem" effect** at each one - the identical falling-bolt-segment component Lightning's own bolt
-is built from: a chain of individually-falling physics pieces, each spawning the next once its own short
-lifetime expires. So the player-visible effect is
-a rapid, crackling burst of brief falling lightning-segments snapping from the shaman toward the target slot,
-not a smooth beam - and, being made of up to 20 independent jittered points rather than one straight line, it
-reads as scattered/branching rather than a single tether. The shot's own position (what the pillar-placement
+**The shot's own visual while in flight** [exe, live-measured; corrected after an earlier pass in this same
+section got the look wrong - see below]: not a beam, not a bolt, not any kind of connected line at all. Each
+turn it hasn't yet arrived, the shot samples up to 20 small LCG-jittered points scattered near its own current
+position (re-aimed toward its destination fresh each sub-step rather than along one fixed line) and spawns a
+small decorative point-light/sparkle at each one - a tiny object that just falls briefly under its own gravity
+and fades. **Live-confirmed by screenshot** (an earlier pass here had guessed this component's look from its
+internal name alone, without ever checking what it draws - wrong: it assumed a dramatic lightning-bolt shape,
+but on screen it is a tiny, tribe-coloured, four-point twinkle, visually indistinguishable in style from the
+small sparkles the Reincarnation Centre's own ground-levelling ring already shows nearby, just a different
+tint). So the real player-visible effect is a sparse scatter of a few small twinkles drifting near the shot as
+it crosses from the shaman to the target slot, not a connecting beam of any kind - a much subtler effect than
+"crackling lightning," closer to dust motes or fireflies. The shot's own position (what the pillar-placement
 math actually cares about) is nudged a fixed step toward the destination once per sub-step too (not just the
-segment spawning), giving the flight itself a slightly wobbly, non-arrow-straight path - confirmed live over a
+sparkle spawning), giving the flight itself a slightly wobbly, non-arrow-straight path - confirmed live over a
 real level load (a shot's own tracked position measurably advances turn to turn, not a single jump to the
 target). **Confirmed harmless**: neither the per-turn flight code nor the generic shot-arrival handler it uses
 (already noted above: "a generic 'on arrival, spawn this' payload instead of a spell's usual damage payload")
