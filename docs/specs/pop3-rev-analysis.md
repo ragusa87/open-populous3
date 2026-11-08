@@ -789,6 +789,25 @@ A second, rarer path (0x41C140/0x41C520) rebuilds all 8 pillars in one uninterru
 all, gated by two flags not observed set on any ordinary level load - plausibly a scripted mid-level
 reset/relocation path distinct from the first build.
 
+**The shot's own visual while in flight** [exe, live-measured]: not a straight glowing bolt. Each turn it
+hasn't yet arrived, the shot samples up to 20 small LCG-jittered points scattered along its own path (toward
+its destination, re-aimed fresh each sub-step rather than along one fixed line) and spawns a **class 7 / type
+4 "lightning elem" effect** at each one - the identical falling-bolt-segment component Lightning's own bolt
+is built from: a chain of individually-falling physics pieces, each spawning the next once its own short
+lifetime expires. So the player-visible effect is
+a rapid, crackling burst of brief falling lightning-segments snapping from the shaman toward the target slot,
+not a smooth beam - and, being made of up to 20 independent jittered points rather than one straight line, it
+reads as scattered/branching rather than a single tether. The shot's own position (what the pillar-placement
+math actually cares about) is nudged a fixed step toward the destination once per sub-step too (not just the
+segment spawning), giving the flight itself a slightly wobbly, non-arrow-straight path - confirmed live over a
+real level load (a shot's own tracked position measurably advances turn to turn, not a single jump to the
+target). **Confirmed harmless**: neither the per-turn flight code nor the generic shot-arrival handler it uses
+(already noted above: "a generic 'on arrival, spawn this' payload instead of a spell's usual damage payload")
+contains any damage, push or life-field write anywhere - unlike every other shot type in the game (the
+fireball shots `spells.md` "From cast to effect" describes do carry real damage payloads), this one is
+harmless to anything it passes near or lands on; the only things it affects are its own pillar-slot's stone
+and the general-purpose lightning-elem decoration objects it spawns along the way.
+
 Precondition: a tribe only has a Reincarnation Centre at all while it's enabled for that tribe - the per-tribe
 `SET_REINCARNATION ON`/`OFF` switch ai-scripts.md documents (tribe+0x93D bit 0x10000, 0x48DC26), which a
 level's own AI script can and does turn off before this would otherwise run: level 1's red
