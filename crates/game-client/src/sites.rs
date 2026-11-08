@@ -28,8 +28,12 @@ const STONE_HALF: f32 = 0.24;
 const DEFAULT_THEME: u8 = 0;
 /// How far a pillar starts below its resting height when it rises (`rise_site_pillars`): our own guess
 /// (pop3-rev-analysis.md doesn't give the stone's own rise distance, only its appearance timing) - deep
-/// enough to clear the stone's own height so it reads as fully buried before it appears.
-const RISE_DEPTH: f32 = STONE.y;
+/// enough to clear the stone's own height so it reads as fully buried before it appears. Not just the
+/// generated block's own height (`STONE.y`, 0.6): the original `REINCARNATION_STONE` mesh measures taller
+/// (0 to 400 world units, 0.78 cells, origin at its own base) and shares this same depth (`lift` is 0 for
+/// it), so 0.6 left its own tip visibly poking out of the ground the whole time it should have been
+/// hidden - a flat margin over that measured height covers both without needing either mesh's exact bounds.
+const RISE_DEPTH: f32 = 1.2;
 /// How long one pillar takes to rise once it appears: our own guess, not separately measured
 /// (pop3-rev-analysis.md "Build/rebuild ritual" only times the appearances, not each one's own rise).
 const RISE_SECS: f32 = 1.0;
