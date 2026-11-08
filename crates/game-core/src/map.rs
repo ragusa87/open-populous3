@@ -2421,6 +2421,24 @@ mod tests {
     }
 
     #[test]
+    fn the_shaman_faces_each_slot_as_she_fires_its_shot() {
+        let mut terrain = Heightmap::new(32);
+        terrain.raise((10, 10), 6, 300);
+        let site = ReincarnationSite { animated: true, ..ReincarnationSite::at_cell(TribeId::Blue, (10, 10), 200) };
+        let mut map = GameMap::bare("t", terrain, vec![site]).with_shamans();
+        let shaman = map.units[0].id;
+        for _ in 0..33 {
+            map.tick();
+        }
+        for fired in 0..8u8 {
+            map.tick();
+            let slot = 7 - fired;
+            let (dx, dz) = crate::site::SLOTS[slot as usize];
+            assert_eq!(map.unit(shaman).unwrap().facing, crate::unit::octant(dx, dz), "facing slot {slot}");
+        }
+    }
+
+    #[test]
     fn a_site_build_ritual_aborts_without_pillars_once_its_site_is_disabled() {
         let mut terrain = Heightmap::new(32);
         terrain.raise((10, 10), 6, 300);

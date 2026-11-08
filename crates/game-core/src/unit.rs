@@ -1138,8 +1138,13 @@ impl Unit {
                     }
                     crate::site::SiteBuildState::Firing { fired } => {
                         if (fired as usize) < crate::site::SLOTS.len() {
+                            let slot = 7 - fired;
+                            // Faces the slot she's about to fire at, same as a brave turning to the tree it's
+                            // about to cut (`go_cut`'s own `octant` call).
+                            let (dx, dz) = crate::site::SLOTS[slot as usize];
+                            self.facing = octant(dx, dz);
                             self.action = Action::BuildingSite(crate::site::SiteBuildState::Firing { fired: fired + 1 });
-                            return Some(UnitEvent::FireSitePillar { slot: 7 - fired });
+                            return Some(UnitEvent::FireSitePillar { slot });
                         }
                         self.go_idle();
                     }
