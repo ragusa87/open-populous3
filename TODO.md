@@ -620,19 +620,50 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
      notes already name the likely cause (`animate_views`/`respawn_views` swapping `Mesh3d`/`MeshMaterial3d`
      handles every frame instead of true instancing) - this session's numbers are one more data point for that
      item, not a new one of its own.
-  4. **Fixed, 2026-11-08**: the shot's own look (`site_shot.rs`) was a guess (a straight glowing ball on a
-     straight glowing rope tethered to the shaman the whole flight) against pop3-rev-analysis.md "Build/
-     rebuild ritual"'s now-traced real visual - not a smooth tether: each turn the shot hasn't yet arrived it
-     samples jittered points along its path and drops a lightning-bolt-segment effect at each, reading as a
-     scattered, crackling burst. Reworked to match: `site_shot.rs` no longer builds its own ball/rope look at
-     all, instead reusing `lightning.rs`'s own `zigzag`/`ribbon`/`cross_texture` (made `pub(crate)` for this)
-     to spawn `CRACKLES` (3) short jagged bolt segments, shrunk down (`CRACKLE_SCALE`) and scattered with fresh
-     per-tick jitter (`crackle_point`) along the shaman-to-slot line, each flickering independently
-     (`crackle_flicker`) rather than a single continuous beam - confirmed on a `levl2001.dat` video capture
-     (a small scattered crackle shows near the shaman while a shot is in flight, not a straight line). Left
-     as the original's own further nuance, not pursued: the exact 20-point density and the shot's own slight
-     per-sub-step wobble (subtle at this short range, pop3-rev-analysis.md's own "may not be worth it for the
-     visual alone").
+  4. **Re-opened, 2026-11-08: the 2026-11-08 "fix" below used the wrong look - a fresh trace caught it before
+     it reached the original's own real visual.** pop3-rev-analysis.md "Build/rebuild ritual" has been
+     corrected: the shot's own in-flight decoration is NOT a lightning-bolt shape at all - it is a tiny,
+     tribe-coloured, four-point twinkle, the same generic small-sparkle look the Reincarnation Centre's own
+     ground-levelling ring already shows nearby (just a different tint), not a jagged bolt/crackle of any
+     kind. The previous entry below (now struck through in spirit, kept for the record) reused `lightning.rs`'s
+     zigzag/ribbon bolt - the wrong asset for this: that component is a big jagged ribbon mesh meant to read as
+     a dramatic lightning strike, nothing like the subtle twinkle the original actually shows. **The right
+     asset to build from is `sparkles.rs`** (the small twinkling-star view already used for terrain-reshaping
+     spells - land bridge, flatten, volcano): same general look (a tiny star/point-light that grows, rises and
+     fades on a loop, `Twinkle`/`LOOP`/`SIZE`/`RISE`), but that component is currently wired specifically to
+     `Effect::reshaping` (height points still moving) and uses one fixed warm-gold `COLOUR`, neither of which
+     fits a travelling shot - it needs a generalised/parameterised version (driven by the shot's own jittered
+     sub-step positions instead of reshaping cells, tribe-coloured instead of fixed-gold) rather than being
+     reused as-is. `site_shot.rs` should go back to spawning a handful of small tribe-coloured twinkles
+     scattered near the shot's own current position each tick, not jagged bolt segments - revert the
+     `lightning.rs` reuse (the `pub(crate)` exports added for it can go too, unless something else now depends
+     on them) in favour of a small twinkle view built the same way `sparkles.rs` is. Left as the original's own
+     further nuance, not pursued: the exact 20-point density and the shot's own slight per-sub-step wobble
+     (subtle at this short range, pop3-rev-analysis.md's own "may not be worth it for the visual alone").
+     - **Original (incorrect) entry, kept for context**: "Fixed, 2026-11-08: the shot's own look (`site_shot.rs`)
+       was a guess (a straight glowing ball on a straight glowing rope tethered to the shaman the whole flight)
+       ... reusing `lightning.rs`'s own `zigzag`/`ribbon`/`cross_texture` ... to spawn `CRACKLES` (3) short
+       jagged bolt segments ... confirmed on a `levl2001.dat` video capture (a small scattered crackle shows
+       near the shaman while a shot is in flight, not a straight line)." That video capture only confirmed the
+       code ran as written, not that it matched the original - the trace it was built from had never actually
+       checked what the original draws, only inferred a shape from an internal component name.
+     - **Fixed for real this time, 2026-11-08**: `sparkles.rs` generalised as asked above - `twinkle`'s own pose
+       maths factored into `twinkle_at(key, period, now)` (`pub(crate)`, period no longer hardcoded to this
+       effect's own `LOOP`), `mix` made `pub(crate)` too, `star_texture` was already `pub`. `site_shot.rs`
+       rewritten around these instead of `lightning.rs`: `FIREFLIES` (4) small tribe-coloured twinkles
+       (`tribe_color(s.owner)`), each independently jittered (`firefly_jitter`) within `JITTER` cells of the
+       shot's own current position (not spread along a path to the shaman - matching the corrected spec's "near
+       its own current position", a cluster drifting with the shot rather than a line), on a short `PERIOD`
+       (4 ticks, our own guess sized to fit a whole grow-rise-shrink cycle into the shot's brief 1-2 tick
+       flight) instead of `sparkles.rs`'s own many-tick `LOOP`. The `lightning.rs` reuse from the previous
+       (wrong) attempt was left in place rather than reverted (its `pub(crate)` exports are harmless unused
+       weight, not worth churning back out). **Bug caught before shipping**: the quad mesh was first built
+       pre-scaled to `SIZE` and then scaled *again* by the twinkle's own size each frame - double-shrinking it
+       to near-invisible; fixed to build a unit quad (`sparkles.rs`'s own `SparkleAssets.quad` does the same
+       split). Confirmed building and running clean against `levl2001.dat`; a clean, uncluttered look at the
+       very first shot (before the landing burst starts overlapping it) wasn't fully isolated on screen this
+       session - the existing landing-burst flash (`blast_impact.rs`, unrelated to this item) is far brighter
+       and briefly dominates the same spot once a shot lands, same as it already did before this change.
 - [x] Houses breeding and growth implemented (`game_core::hut_growth`, huts-and-training.md rules 5-6, fully
   traced `[exe]` and corrected where this entry's own earlier draft had guessed wrong - the band formula, the
   "stops at 100%" vs "resets to 0" behaviour, and growing's own wood seeding). Capacity 3/4/5, supply 3/5/7

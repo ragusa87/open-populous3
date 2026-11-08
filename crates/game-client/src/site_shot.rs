@@ -1,15 +1,16 @@
 //! The build/rebuild ritual's own shots in flight (`game_core::site::SiteShot`): "the shot's own visual
-//! while in flight" (pop3-rev-analysis.md "Build/rebuild ritual") is, live-measured, not a straight bolt or
-//! tether - each turn it hasn't yet landed it samples several small jittered points along its own path and
-//! drops a "lightning elem" effect at each one, the identical falling-bolt-segment component Lightning's own
-//! bolt is built from, reading as a rapid, crackling, scattered burst rather than a smooth beam. Reused here
-//! rather than inventing a second lightning-ish look: `lightning::zigzag`/`ribbon`/`cross_texture`, shrunk
-//! down and scattered along the shaman-to-slot line instead of falling from the sky to one fixed point.
+//! while in flight" (pop3-rev-analysis.md "Build/rebuild ritual") is, live-confirmed by screenshot, a sparse
+//! scatter of a few small twinkles drifting near the shot as it crosses from the shaman to the target slot -
+//! not a connecting beam or bolt of any kind, visually the same small four-point glint
+//! `sparkles.rs`'s own terrain-reshaping stars use, just tribe-tinted and looping far faster (a whole shot's
+//! flight is only a couple of ticks, not `sparkles.rs`'s own many-tick reshapes). Reused from there
+//! (`twinkle_at`/`star_texture`/`mix`) rather than inventing a second small-sparkle look.
 
 use crate::camera::{CameraRig, CurveParamsRes};
 use crate::grounded::{render_pos, Grounded};
-use crate::lightning::{cross_texture, ribbon, zigzag, COLOUR, SKY};
 use crate::sim_time::{seed, SimNow};
+use crate::sites::tribe_color;
+use crate::sparkles::{mix, star_texture, twinkle_at};
 use crate::terrain_mesh::CurveParams;
 use crate::views::{sync_views, WorldView};
 use crate::world::CurrentMap;
@@ -21,41 +22,30 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use game_core::id::Id;
 use game_core::map::GameMap;
 use game_core::site::SiteShot;
-use game_core::tribes::TribeId;
+use game_core::time::Ticks;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
-/// How many crackles show at once along the shot's own path.
-const CRACKLES: usize = 3;
-/// Shrinks `zigzag`'s own sky-to-ground shape (`SKY`, about 8 cells tall) down to a short crackle.
-const CRACKLE_SCALE: f32 = 0.09;
-/// In `zigzag`'s own pre-shrink units (it spans 0..`SKY`, about 8): scaled down by `CRACKLE_SCALE` along with
-/// the rest of the mesh, so the final on-screen thickness is `CRACKLE_THICKNESS * CRACKLE_SCALE` - sized here
-/// for that to land close to `lightning::THICKNESS`'s own already-tuned 0.12.
-const CRACKLE_THICKNESS: f32 = 1.3;
-/// How far a crackle strays off the straight shaman-to-target line, each axis (cells).
-const JITTER: f32 = 0.3;
-/// Ticks between picking a fresh jittered point and shape for a crackle: one a turn, same rhythm as the shot
-/// itself re-aiming each sub-step (pop3-rev-analysis.md).
-const CRACKLE_TICKS: u32 = 1;
-const TEXTURE: usize = 16;
+/// How many twinkles drift near the shot at once.
+const FIREFLIES: usize = 4;
+/// A whole grow-rise-shrink cycle: our own guess, short enough to play out within a shot's brief flight
+/// (1-2 ticks at the standard shot's own 1400 u/turn over a slot's few cells) rather than `sparkles.rs`'s own
+/// many-tick `LOOP`.
+const PERIOD: Ticks = Ticks::new(4);
+/// How far a twinkle strays from the shot's own current position, each axis (cells).
+const JITTER: f32 = 0.35;
+const TEXTURE: usize = 24;
 
 #[derive(Resource)]
 pub struct SiteShotAssets {
-    cross_texture: Handle<Image>,
+    quad: Handle<Mesh>,
+    texture: Handle<Image>,
 }
 
-/// One crackle: its own entity, the shapes it flickers between and its own material (so each one's
-/// brightness is independent of the others).
-struct Crackle {
-    entity: Entity,
-    shapes: [Handle<Mesh>; CRACKLES],
-    material: Handle<StandardMaterial>,
-}
-
-/// One shot's view: `CRACKLES` short-lived bolt segments scattered along its path.
+/// One shot's view: `FIREFLIES` twinkles drifting near its own current position, each its own entity and
+/// material so they can be tinted and faded independently.
 #[derive(Component)]
 pub struct SiteShotView {
-    crackles: Vec<Crackle>,
+    fireflies: [Entity; FIREFLIES],
 }
 
 /// A shot's own place, in cells.
@@ -70,39 +60,23 @@ fn lift(map: &GameMap, (x, z): (u16, u16), height: i32, height_scale: f32) -> f3
     (height - ground).max(0) as f32 * height_scale
 }
 
-/// The shaman of `owner`'s own render-space position (ground plus her own lift), `None` if she's gone or
-/// outside the drawn disc.
-fn shaman_pos(map: &GameMap, owner: TribeId, rig: &CameraRig, params: &CurveParams) -> Option<Vec3> {
-    let u = map.shaman_of(owner)?;
-    let at = Vec2::new(u.x as f32, u.z as f32) / WORLD_UNITS_PER_CELL as f32;
-    let ground = render_pos(&map.terrain, &Grounded { at, half: 0.0 }, rig.focus, params)?;
-    Some(ground + Vec3::Y * lift(map, (u.x, u.z), map.altitude(u) as i32, params.height_scale))
-}
-
 /// The shot's own render-space position (ground plus its own lift), `None` outside the drawn disc.
 fn shot_pos(map: &GameMap, s: &SiteShot, rig: &CameraRig, params: &CurveParams) -> Option<Vec3> {
     let ground = render_pos(&map.terrain, &Grounded { at: cells_at(s), half: 0.0 }, rig.focus, params)?;
     Some(ground + Vec3::Y * lift(map, s.at, s.height, params.height_scale))
 }
 
-/// One crackle's own jittered point along `a` (the shaman) to `b` (the shot), slot `slot` of `CRACKLES`,
-/// fresh every `CRACKLE_TICKS`: spread evenly along the line, each nudged off it by up to `JITTER` on every
-/// axis, reseeded from the shot's own id, the slot and the tick so every crackle moves independently.
-pub fn crackle_point(a: Vec3, b: Vec3, id: u32, slot: usize, tick: u32) -> Vec3 {
-    let at = (slot as f32 + 0.5) / CRACKLES as f32;
-    let h = |salt: u32| seed(id.wrapping_mul(2654435761).wrapping_add((slot as u32).wrapping_mul(97)).wrapping_add(tick / CRACKLE_TICKS).wrapping_add(salt)) - 0.5;
-    a.lerp(b, at) + Vec3::new(h(1), h(2), h(3)) * JITTER
-}
-
-/// A crackle's own brightness (0..1) at `tick`, each slot flickering out of phase with the others - the
-/// same "every other shape dimmer" rule `lightning::pose` uses for its one bolt.
-pub fn crackle_flicker(slot: usize, tick: u32) -> f32 {
-    if (tick / CRACKLE_TICKS + slot as u32).is_multiple_of(2) { 1.0 } else { 0.5 }
+/// One firefly's own jitter off the shot's current position, slot `slot` of `FIREFLIES`, fresh every tick:
+/// reseeded from the shot's own id, the slot and the tick (`sparkles.rs`'s own `mix`) so each one drifts
+/// independently rather than all sitting on top of each other.
+pub fn firefly_jitter(id: u32, slot: usize, tick: u32) -> Vec3 {
+    let h = |salt: u32| seed(mix(id ^ mix(slot as u32 ^ mix(tick ^ salt)))) - 0.5;
+    Vec3::new(h(1), h(2), h(3)) * JITTER
 }
 
 impl WorldView for SiteShotView {
     type Model = (Id<SiteShot>, SiteShot);
-    type Params = (Res<'static, CurrentMap>, Res<'static, CameraRig>, Res<'static, CurveParamsRes>, Res<'static, SiteShotAssets>, ResMut<'static, Assets<Mesh>>, ResMut<'static, Assets<StandardMaterial>>, Query<'static, 'static, (&'static mut Mesh3d, &'static mut Transform, &'static mut Visibility)>);
+    type Params = (Res<'static, CurrentMap>, Res<'static, CameraRig>, Res<'static, CurveParamsRes>, Res<'static, SiteShotAssets>, ResMut<'static, Assets<StandardMaterial>>, Query<'static, 'static, (&'static mut Transform, &'static mut Visibility)>);
 
     fn models(map: &GameMap) -> impl Iterator<Item = &(Id<SiteShot>, SiteShot)> {
         map.site_shots.entries()
@@ -112,41 +86,31 @@ impl WorldView for SiteShotView {
         id.raw()
     }
 
-    fn spawn((id, _): &(Id<SiteShot>, SiteShot), view: &mut EntityCommands, (.., assets, meshes, mats, _): &mut SystemParamItem<Self::Params>) -> Option<Self> {
-        let blended = StandardMaterial { base_color: COLOUR, base_color_texture: Some(assets.cross_texture.clone()), alpha_mode: AlphaMode::Blend, unlit: true, cull_mode: None, ..default() };
+    fn spawn((_, s): &(Id<SiteShot>, SiteShot), view: &mut EntityCommands, (.., assets, mats, _): &mut SystemParamItem<Self::Params>) -> Option<Self> {
+        let material = StandardMaterial { base_color: tribe_color(s.owner), base_color_texture: Some(assets.texture.clone()), alpha_mode: AlphaMode::Add, unlit: true, cull_mode: None, ..default() };
         view.insert((Transform::default(), Visibility::Visible));
-        let mut crackles = Vec::with_capacity(CRACKLES);
+        let mut fireflies = [Entity::PLACEHOLDER; FIREFLIES];
         view.with_children(|v| {
-            for slot in 0..CRACKLES {
-                let shapes: [Handle<Mesh>; CRACKLES] = std::array::from_fn(|k| meshes.add(ribbon(&zigzag(id.raw().wrapping_add(slot as u32 * 677), k), CRACKLE_THICKNESS)));
-                let material = mats.add(blended.clone());
-                let entity = v.spawn((Mesh3d(shapes[0].clone()), MeshMaterial3d(material.clone()), Transform::from_scale(Vec3::ZERO), Visibility::Hidden, NotShadowCaster, crate::hover::NoOutline)).id();
-                crackles.push(Crackle { entity, shapes, material });
+            for firefly in &mut fireflies {
+                *firefly = v.spawn((Mesh3d(assets.quad.clone()), MeshMaterial3d(mats.add(material.clone())), Transform::from_scale(Vec3::ZERO), Visibility::Hidden, NotShadowCaster, crate::hover::NoOutline)).id();
             }
         });
-        Some(SiteShotView { crackles })
+        Some(SiteShotView { fireflies })
     }
 
-    fn update(&self, (id, s): &(Id<SiteShot>, SiteShot), _now: SimNow, (map, rig, params, _, _, mats, parts): &mut SystemParamItem<Self::Params>) {
-        let (origin, bullet) = (shaman_pos(&map.0, s.owner, rig, &params.0), shot_pos(&map.0, s, rig, &params.0));
-        let facing = Quat::from_rotation_y(rig.yaw);
+    fn update(&self, (id, s): &(Id<SiteShot>, SiteShot), now: SimNow, (map, rig, params, _, _, parts): &mut SystemParamItem<Self::Params>) {
+        let at = shot_pos(&map.0, s, rig, &params.0);
+        let facing = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
         let tick = map.0.now.to_wire();
-        for (slot, crackle) in self.crackles.iter().enumerate() {
-            let Ok((mut mesh, mut t, mut vis)) = parts.get_mut(crackle.entity) else { continue };
-            let Some((a, b)) = origin.zip(bullet) else {
+        for (slot, &entity) in self.fireflies.iter().enumerate() {
+            let Ok((mut t, mut vis)) = parts.get_mut(entity) else { continue };
+            let Some(at) = at else {
                 vis.set_if_neq(Visibility::Hidden);
                 continue;
             };
-            let shape = &crackle.shapes[(tick / CRACKLE_TICKS) as usize % CRACKLES];
-            if mesh.0 != *shape {
-                mesh.0 = shape.clone();
-            }
-            let point = crackle_point(a, b, id.raw(), slot, tick);
-            *t = Transform { translation: point - facing * Vec3::Y * (SKY * CRACKLE_SCALE / 2.0), rotation: facing, scale: Vec3::splat(CRACKLE_SCALE) };
+            let tw = twinkle_at(mix(id.raw() ^ mix(slot as u32)), PERIOD, now);
+            *t = Transform { translation: at + firefly_jitter(id.raw(), slot, tick) + Vec3::Y * tw.rise, rotation: facing, scale: Vec3::splat(tw.size) };
             vis.set_if_neq(Visibility::Inherited);
-            if let Some(mut m) = mats.get_mut(&crackle.material) {
-                m.base_color = COLOUR.with_alpha(crackle_flicker(slot, tick));
-            }
         }
     }
 }
@@ -159,15 +123,17 @@ impl Plugin for SiteShotPlugin {
     }
 }
 
-fn load_assets(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+fn load_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>) {
     let texture = Image::new(
-        Extent3d { width: TEXTURE as u32, height: 1, depth_or_array_layers: 1 },
+        Extent3d { width: TEXTURE as u32, height: TEXTURE as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
-        cross_texture(TEXTURE),
+        star_texture(TEXTURE),
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     );
-    commands.insert_resource(SiteShotAssets { cross_texture: images.add(texture) });
+    // A unit quad: `update`'s own `Transform.scale` (`twinkle_at`'s `size`, up to `SIZE`) sizes it, the same
+    // split `sparkles.rs`'s own `SparkleAssets.quad` uses - building it pre-scaled here would double-shrink it.
+    commands.insert_resource(SiteShotAssets { quad: meshes.add(Rectangle::new(1.0, 1.0)), texture: images.add(texture) });
 }
 
 #[cfg(test)]
@@ -175,19 +141,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn crackles_spread_along_the_line_and_move_with_the_tick() {
-        let (a, b) = (Vec3::ZERO, Vec3::new(3.0, 0.0, 0.0));
-        let p0 = crackle_point(a, b, 7, 0, 0);
-        let p1 = crackle_point(a, b, 7, 0, CRACKLE_TICKS);
-        assert_ne!(p0, p1, "a fresh jitter every tick");
-        let near = |p: Vec3, x: f32| (p.x - x).abs() <= JITTER;
-        assert!(near(crackle_point(a, b, 7, 0, 0), 0.5) && near(crackle_point(a, b, 7, 1, 0), 1.5) && near(crackle_point(a, b, 7, 2, 0), 2.5), "spread evenly along the line");
-    }
-
-    #[test]
-    fn crackles_flicker_out_of_phase_with_each_other() {
-        assert_ne!(crackle_flicker(0, 0), crackle_flicker(1, 0));
-        assert_eq!(crackle_flicker(0, 0), crackle_flicker(0, 2 * CRACKLE_TICKS));
+    fn fireflies_jitter_independently_and_move_with_the_tick() {
+        let j0 = firefly_jitter(7, 0, 0);
+        let j1 = firefly_jitter(7, 0, 1);
+        assert_ne!(j0, j1, "a fresh jitter every tick");
+        assert_ne!(firefly_jitter(7, 0, 0), firefly_jitter(7, 1, 0), "slots drift independently");
+        assert!(j0.x.abs() <= JITTER && j0.y.abs() <= JITTER && j0.z.abs() <= JITTER);
     }
 
     #[test]
