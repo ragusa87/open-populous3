@@ -549,7 +549,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Training huts (huts-and-training.md "Done"): the queue's ripple (2 turns per rank) and those already of the building's kind letting the others pass, five trained together (the exe's count; ours holds one - a [player] note, reaffirmed, says it's always one at a time in play, so this needs a live check before five-at-once is implemented), queued orders carried over, damage cancelling the queue and sending the trainee out.
 - [ ] Training as in the original, what is left (pop3-rev-analysis.md "Training buildings"): the computer players' cost (`CP_` 1000) once tribes have a controller; the trainee's queued orders given to the new unit. The training time is already answered, no live measurement needed: the original has no fixed duration at all, just the mana cost filled at `cost / 32` per 16-turn income tick (same section) - 256-512 turns (21-43 s) at best, scaling with cost like everything else in the mana-income system.
 - [ ] Reincarnation sites from pop3-rev-analysis.md "Reincarnation sites": the ground levelled to the site height over a 5-cell disc in about 21 turns (ours: radius 3, blend 4) with its effects on enemies, wildmen, trees and swamps; pillars rising out of the ground, deleted and moved; the 32 sparkles.
-- [x] The site's build/rebuild is not instant, and is driven by the shaman, not level load directly
+- [ ] The site's build/rebuild is not instant, and is driven by the shaman, not level load directly
   (pop3-rev-analysis.md "Build/rebuild ritual"): she walks to the anchor, settles 12 turns, triggers the ~21-turn
   ground levelling above, then fires one projectile per pillar slot a turn apart (slot order 7..0), each pillar
   appearing 1-3 turns after its own shot lands and rising independently from there (so up to 3 stones can be
@@ -598,6 +598,22 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   position stays fixed as documented, so every reincarnation reruns the ritual in place instead; a replaced
   pillar rises the same way a fresh one does (buried to resting height) rather than the original's own
   "smaller version" of itself.
+  **Bugs found testing on level 1, 2026-11-08**: three things to fix, in order -
+  1. The ground levelling should finish, with the pillars staying fully out of sight the whole time it (and the
+     settle before it) run - right now a sliver of each "buried" pillar still pokes above ground throughout.
+     Root cause found: `sites.rs`'s `RISE_DEPTH` (`STONE.y`, 0.6 cells) is the *generated placeholder's* own
+     height, reused as the bury depth for the original mesh too - but the real `REINCARNATION_STONE` object is
+     taller (measured: points from y=0 to y=400 of 512/cell, i.e. 0.78 cells, origin at its own base) so burying
+     it only 0.6 leaves its own tip about 0.18 cells above ground. Needs its own bury depth (ideally measured
+     off the loaded `Object`'s own point extents, not a second guessed constant) - the generated block may need
+     a deeper bury too once this is fixed, to keep both readable the same way.
+  2. Once pillars are properly hidden until built, re-check the rise animation itself (`pillar_height`,
+     `RISE_SECS`/`RISE_DEPTH`) looks right with the deeper bury depth from issue 1 - timing, easing and the
+     starting depth all need a fresh look together once that's in place.
+  3. Reported laggy/low fps through this whole sequence (settle, levelling, firing) - not yet profiled or
+     root-caused (`just profile` during a level load would be the way in); candidates to check first: the new
+     per-frame `rise_site_pillars` system, and whatever `blast::explosion_effect`'s bursts cost client-side
+     landing 8 times in quick succession.
 - [x] Houses breeding and growth implemented (`game_core::hut_growth`, huts-and-training.md rules 5-6, fully
   traced `[exe]` and corrected where this entry's own earlier draft had guessed wrong - the band formula, the
   "stops at 100%" vs "resets to 0" behaviour, and growing's own wood seeding). Capacity 3/4/5, supply 3/5/7
