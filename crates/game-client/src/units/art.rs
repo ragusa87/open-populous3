@@ -255,6 +255,11 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::Stranded { .. } => Pose::Stranded,
         Action::Worshipping { .. } => Pose::Pray,
         Action::Casting { .. } => Pose::Cast,
+        // The build/rebuild ritual (pop3-rev-analysis.md "Build/rebuild ritual"): settling and the ground
+        // levelling read as prayer, firing the pillars' own shots as a cast - no sprite traced for this
+        // ritual specifically, `[ours]`.
+        Action::BuildingSite(game_core::site::SiteBuildState::Firing { .. }) => Pose::Cast,
+        Action::BuildingSite(_) => Pose::Pray,
         Action::Drowning => Pose::Drown,
         Action::Tumbling if airborne => Pose::Flung,
         Action::Tumbling => Pose::Tumble,

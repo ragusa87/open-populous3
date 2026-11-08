@@ -21,7 +21,10 @@ use game_core::time::Ticks;
 
 /// One twinkle: the star grows, rises and shrinks away.
 const LOOP: Ticks = Ticks::millis(750);
-/// Largest size of a star (cells).
+/// Largest size of a star (cells). `site_shot.rs`'s own, much shorter-lived twinkles (`twinkle_at`) share
+/// this same size/rise, just a different tint and a much shorter loop - the original's own in-flight
+/// decoration is "visually indistinguishable in style" from these (pop3-rev-analysis.md "Build/rebuild
+/// ritual").
 const SIZE: f32 = 0.22;
 /// How high a star rises over a twinkle, from `LIFT` over the ground (render units).
 const RISE: f32 = 0.35;
@@ -57,8 +60,9 @@ pub struct Twinkle {
 const MURMUR3_MIX_1: u32 = 0x85EB_CA6B;
 const MURMUR3_MIX_2: u32 = 0xC2B2_AE35;
 
-/// A well-mixed hash of `x` (MurmurHash3's `fmix32`): nearby inputs give unrelated outputs.
-fn mix(mut x: u32) -> u32 {
+/// A well-mixed hash of `x` (MurmurHash3's `fmix32`): nearby inputs give unrelated outputs. Shared with
+/// `site_shot.rs`'s own key-mixing for `twinkle_at`.
+pub(crate) fn mix(mut x: u32) -> u32 {
     x ^= x >> 16;
     x = x.wrapping_mul(MURMUR3_MIX_1);
     x ^= x >> 13;
@@ -78,7 +82,15 @@ pub fn cells_of(points: &[Cell], size: usize) -> Vec<Cell> {
 /// The star of the effect `id` on cell `cell` at `now`, at its own phase.
 pub fn twinkle(id: u32, cell: Cell, now: SimNow) -> Twinkle {
     let key = mix(id ^ mix(cell.0 as u32 ^ mix(cell.1 as u32)));
-    let period = LOOP.get();
+    twinkle_at(key, LOOP, now)
+}
+
+/// A twinkle's own pose at `now`, already keyed (`mix`'d) and on a loop of `period` instead of this effect's
+/// own fixed `LOOP` - grows then shrinks on a sine arc over the loop, rising at a steady rate throughout.
+/// Generalised out of `twinkle` for `site_shot.rs`'s own much shorter-lived twinkles, whose "a moment" is a
+/// whole shot's flight, not this effect's many-tick reshaping.
+pub(crate) fn twinkle_at(key: u32, period: Ticks, now: SimNow) -> Twinkle {
+    let period = period.get();
     let t = now.tick.to_wire().wrapping_add(key % period);
     let p = ((t % period) as f32 + now.frac) / period as f32;
     let glow = (std::f32::consts::PI * p).sin();

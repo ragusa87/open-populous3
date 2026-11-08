@@ -17,7 +17,7 @@ pub fn sight_now(u: &Unit) -> Option<u8> {
         Action::Idle | Action::Holding { .. } | Action::Hacking { .. } | Action::Preaching => Some(stats.sight),
         Action::Walking { .. } | Action::Stranded { .. } | Action::Attacking { .. } | Action::Guarding { .. } => Some(0),
         Action::Queuing { .. } | Action::Chopping { .. } | Action::PickingUpWood { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Hammering | Action::AroundFire { .. } | Action::Worshipping { .. } | Action::Grazing { .. } => Some(stats.sight_at_work),
-        Action::Challenge { .. } | Action::Melee { .. } | Action::Listening { .. } | Action::Panicking { .. } | Action::OnFire { .. } | Action::Tumbling | Action::Settling { .. } | Action::Casting { .. } | Action::Landing | Action::Drowning | Action::Entering { .. } | Action::Boarding { .. } | Action::Alighting { .. } | Action::Throwing { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } => None,
+        Action::Challenge { .. } | Action::Melee { .. } | Action::Listening { .. } | Action::Panicking { .. } | Action::OnFire { .. } | Action::Tumbling | Action::Settling { .. } | Action::Casting { .. } | Action::Landing | Action::Drowning | Action::Entering { .. } | Action::Boarding { .. } | Action::Alighting { .. } | Action::Throwing { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::BuildingSite(_) | Action::Spirit { .. } => None,
         // An Angel of Death never auto-attacks or is auto-attacked (`kind_stats::ANGEL_OF_DEATH.fights` is
         // false, already keeping it off `sight_now`'s own callers' target lists either way); a grabbed victim
         // doesn't look for anyone either.

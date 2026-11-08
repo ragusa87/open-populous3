@@ -549,7 +549,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Training huts (huts-and-training.md "Done"): the queue's ripple (2 turns per rank) and those already of the building's kind letting the others pass, five trained together (the exe's count; ours holds one - a [player] note, reaffirmed, says it's always one at a time in play, so this needs a live check before five-at-once is implemented), queued orders carried over, damage cancelling the queue and sending the trainee out.
 - [ ] Training as in the original, what is left (pop3-rev-analysis.md "Training buildings"): the computer players' cost (`CP_` 1000) once tribes have a controller; the trainee's queued orders given to the new unit. The training time is already answered, no live measurement needed: the original has no fixed duration at all, just the mana cost filled at `cost / 32` per 16-turn income tick (same section) - 256-512 turns (21-43 s) at best, scaling with cost like everything else in the mana-income system.
 - [ ] Reincarnation sites from pop3-rev-analysis.md "Reincarnation sites": the ground levelled to the site height over a 5-cell disc in about 21 turns (ours: radius 3, blend 4) with its effects on enemies, wildmen, trees and swamps; pillars rising out of the ground, deleted and moved; the 32 sparkles.
-- [ ] The site's build/rebuild is not instant, and is driven by the shaman, not level load directly
+- [x] The site's build/rebuild is not instant, and is driven by the shaman, not level load directly
   (pop3-rev-analysis.md "Build/rebuild ritual"): she walks to the anchor, settles 12 turns, triggers the ~21-turn
   ground levelling above, then fires one projectile per pillar slot a turn apart (slot order 7..0), each pillar
   appearing 1-3 turns after its own shot lands and rising independently from there (so up to 3 stones can be
@@ -580,6 +580,90 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   session - clean room) - if not, something else about how we apply it in one shot instead of growing it over
   21 turns is likely the real difference, in which case the animated-growth half of this same TODO item might
   fix both the "house on water" symptom and this radius question together, rather than a flat radius bump.
+  **Shaman-driven ritual implemented, 2026-11-08**: `ReincarnationSite::animated` (true for a real level,
+  `sites_from_level`; false for every sandbox/generated/dev site, `at_cell`, so none of them lose their
+  instantly-usable shaman) gates a new `Action::BuildingSite`/`SiteBuildState` on the shaman (`site.rs`,
+  `unit.rs`) - settle 12 turns, then the ~21-turn levelling (still instant, not the growing disc: left to
+  the radius/disc-growth question above and its own animated version), then one `SiteShot` (standard shot,
+  1400 u/turn, `site.rs`) per pillar slot a turn apart in order 7..0, each slot's own pillar built
+  (`ReincarnationSite::pillars`) the instant its shot lands, with a burst (`blast::explosion_effect`) first
+  if it's replacing one already standing. Runs at level load and every reincarnation alike, not just once;
+  aborts to Idle with no pillars at all if the site is disabled first (`site.is_none()` check each tick),
+  covering the precondition above. Client (`game-client` `sites.rs`): each pillar mesh rises from buried to
+  its resting height over `pillar_height`'s own guessed `RISE_SECS`/`RISE_DEPTH` (not separately measured);
+  input is locked while the player's own shaman is in `Action::BuildingSite` (`sites::site_build_active`,
+  alongside `armageddon::input_locked`/`flyby::flyby_active` at the same 3 call sites - closed a pre-existing
+  gap there too: `select_and_order`/the spell-casting systems weren't checking `flyby_active` before). **Not
+  done**: site relocation (a new site forming at a dead shaman's last position) - `ReincarnationSite`'s
+  position stays fixed as documented, so every reincarnation reruns the ritual in place instead; a replaced
+  pillar rises the same way a fresh one does (buried to resting height) rather than the original's own
+  "smaller version" of itself.
+  **Bugs found testing on level 1, 2026-11-08, first two fixed same day**:
+  1. **Fixed**: pillars no longer poke above ground while buried - `sites.rs`'s `RISE_DEPTH` was `STONE.y`
+     (0.6 cells), the *generated placeholder's* own height, reused as the bury depth for the original mesh
+     too; the real `REINCARNATION_STONE` object measures taller (points y=0 to y=400 of 512/cell, 0.78 cells,
+     origin at its own base), so 0.6 left its own tip showing. Bumped to a flat 1.2 (margin over the measured
+     0.78) rather than computing either mesh's exact bounds at runtime - covers the generated block's smaller
+     need too, confirmed clean on a `levl2001.dat` video capture through the whole settle/level/fire sequence
+     (no sliver, no premature pop, the pop-in burst and staggered rise all read correctly slot by slot).
+  2. **Fixed by the same change**: the rise animation itself (`pillar_height`, `RISE_SECS`/`RISE_DEPTH`) was
+     never actually visible correctly before - issue 1's shallow bury depth hid it behind a visible sliver the
+     whole time. Confirmed by the same video: each pillar now reads as buried, then rises cleanly over
+     `RISE_SECS`, staggered one slot after another with its own burst.
+  3. **Investigated, not this feature's bug**: reported laggy/low fps through the sequence. Profiled
+     (`just profile`) both `levl2001.dat` (through the ritual) and the `sandbox-walk` sandbox (no ritual at
+     all, every site `!animated`) - both show the same dominant cost, `bevy_render`'s own per-frame
+     `allocate_and_free_meshes`/`prepare_assets<GpuImage>` (~1.5-2 ms/call, every single frame of either run,
+     not just during the ritual), and comparable total `update` time per frame (~10-11 ms) in both. So this
+     isn't the ritual's own systems (`rise_site_pillars` is a handful of transform writes, not mesh/image
+     work): it's the already-tracked "Priority 5 - performance" / "Performance (60 fps)" item below, whose own
+     notes already name the likely cause (`animate_views`/`respawn_views` swapping `Mesh3d`/`MeshMaterial3d`
+     handles every frame instead of true instancing) - this session's numbers are one more data point for that
+     item, not a new one of its own.
+  4. **Re-opened, 2026-11-08: the 2026-11-08 "fix" below used the wrong look - a fresh trace caught it before
+     it reached the original's own real visual.** pop3-rev-analysis.md "Build/rebuild ritual" has been
+     corrected: the shot's own in-flight decoration is NOT a lightning-bolt shape at all - it is a tiny,
+     tribe-coloured, four-point twinkle, the same generic small-sparkle look the Reincarnation Centre's own
+     ground-levelling ring already shows nearby (just a different tint), not a jagged bolt/crackle of any
+     kind. The previous entry below (now struck through in spirit, kept for the record) reused `lightning.rs`'s
+     zigzag/ribbon bolt - the wrong asset for this: that component is a big jagged ribbon mesh meant to read as
+     a dramatic lightning strike, nothing like the subtle twinkle the original actually shows. **The right
+     asset to build from is `sparkles.rs`** (the small twinkling-star view already used for terrain-reshaping
+     spells - land bridge, flatten, volcano): same general look (a tiny star/point-light that grows, rises and
+     fades on a loop, `Twinkle`/`LOOP`/`SIZE`/`RISE`), but that component is currently wired specifically to
+     `Effect::reshaping` (height points still moving) and uses one fixed warm-gold `COLOUR`, neither of which
+     fits a travelling shot - it needs a generalised/parameterised version (driven by the shot's own jittered
+     sub-step positions instead of reshaping cells, tribe-coloured instead of fixed-gold) rather than being
+     reused as-is. `site_shot.rs` should go back to spawning a handful of small tribe-coloured twinkles
+     scattered near the shot's own current position each tick, not jagged bolt segments - revert the
+     `lightning.rs` reuse (the `pub(crate)` exports added for it can go too, unless something else now depends
+     on them) in favour of a small twinkle view built the same way `sparkles.rs` is. Left as the original's own
+     further nuance, not pursued: the exact 20-point density and the shot's own slight per-sub-step wobble
+     (subtle at this short range, pop3-rev-analysis.md's own "may not be worth it for the visual alone").
+     - **Original (incorrect) entry, kept for context**: "Fixed, 2026-11-08: the shot's own look (`site_shot.rs`)
+       was a guess (a straight glowing ball on a straight glowing rope tethered to the shaman the whole flight)
+       ... reusing `lightning.rs`'s own `zigzag`/`ribbon`/`cross_texture` ... to spawn `CRACKLES` (3) short
+       jagged bolt segments ... confirmed on a `levl2001.dat` video capture (a small scattered crackle shows
+       near the shaman while a shot is in flight, not a straight line)." That video capture only confirmed the
+       code ran as written, not that it matched the original - the trace it was built from had never actually
+       checked what the original draws, only inferred a shape from an internal component name.
+     - **Fixed for real this time, 2026-11-08**: `sparkles.rs` generalised as asked above - `twinkle`'s own pose
+       maths factored into `twinkle_at(key, period, now)` (`pub(crate)`, period no longer hardcoded to this
+       effect's own `LOOP`), `mix` made `pub(crate)` too, `star_texture` was already `pub`. `site_shot.rs`
+       rewritten around these instead of `lightning.rs`: `FIREFLIES` (4) small tribe-coloured twinkles
+       (`tribe_color(s.owner)`), each independently jittered (`firefly_jitter`) within `JITTER` cells of the
+       shot's own current position (not spread along a path to the shaman - matching the corrected spec's "near
+       its own current position", a cluster drifting with the shot rather than a line), on a short `PERIOD`
+       (4 ticks, our own guess sized to fit a whole grow-rise-shrink cycle into the shot's brief 1-2 tick
+       flight) instead of `sparkles.rs`'s own many-tick `LOOP`. The `lightning.rs` reuse from the previous
+       (wrong) attempt was left in place rather than reverted (its `pub(crate)` exports are harmless unused
+       weight, not worth churning back out). **Bug caught before shipping**: the quad mesh was first built
+       pre-scaled to `SIZE` and then scaled *again* by the twinkle's own size each frame - double-shrinking it
+       to near-invisible; fixed to build a unit quad (`sparkles.rs`'s own `SparkleAssets.quad` does the same
+       split). Confirmed building and running clean against `levl2001.dat`; a clean, uncluttered look at the
+       very first shot (before the landing burst starts overlapping it) wasn't fully isolated on screen this
+       session - the existing landing-burst flash (`blast_impact.rs`, unrelated to this item) is far brighter
+       and briefly dominates the same spot once a shot lands, same as it already did before this change.
 - [x] Houses breeding and growth implemented (`game_core::hut_growth`, huts-and-training.md rules 5-6, fully
   traced `[exe]` and corrected where this entry's own earlier draft had guessed wrong - the band formula, the
   "stops at 100%" vs "resets to 0" behaviour, and growing's own wood seeding). Capacity 3/4/5, supply 3/5/7

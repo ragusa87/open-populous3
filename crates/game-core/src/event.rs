@@ -97,6 +97,9 @@ pub enum WorldEvent {
     /// A script's `FLYBY_CREATE_NEW..=FLYBY_START` run started (`ai_script::ScriptEnv::on_flyby`):
     /// takes over the camera until it finishes or is cancelled (`GameMap::active_flyby`).
     StartFlyby(pop3_ai_script::interp::ResolvedFlyby),
+    /// The build/rebuild ritual's shot for pillar slot `slot` landed and settled (`site::tend_site_shots`):
+    /// it stands from now on (`ReincarnationSite::pillars`).
+    SitePillarBuilt { owner: TribeId, slot: u8 },
 }
 
 /// What throws a unit, for its immunities.

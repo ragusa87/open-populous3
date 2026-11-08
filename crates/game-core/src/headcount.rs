@@ -120,7 +120,8 @@ pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
     }
     let working = match unit.action {
         Action::Chopping { .. } | Action::PickingUpWood { .. } | Action::Holding { .. } | Action::Flattening { .. } | Action::Building { .. } | Action::Entering { .. } | Action::Hammering | Action::Worshipping { .. } | Action::AroundFire { .. } | Action::Attacking { .. } | Action::Challenge { .. } | Action::Melee { .. } | Action::Hacking { .. } | Action::Throwing { .. } | Action::Preaching | Action::Queuing { .. } | Action::Grazing { .. } => true,
-        Action::Idle | Action::Listening { .. } | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Boarding { .. } | Action::Alighting { .. } | Action::Drowning | Action::Tumbling | Action::Settling { .. } | Action::Panicking { .. } | Action::OnFire { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::Spirit { .. } | Action::Guarding { .. } => false,
+        // `Action::BuildingSite` is the shaman's own: `kind_index` already returned None for her above.
+        Action::Idle | Action::Listening { .. } | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Boarding { .. } | Action::Alighting { .. } | Action::Drowning | Action::Tumbling | Action::Settling { .. } | Action::Panicking { .. } | Action::OnFire { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::BuildingSite(_) | Action::Spirit { .. } | Action::Guarding { .. } => false,
         // Never reached for an Angel of Death itself (`kind_index` already returns None for it above); a grabbed
         // victim isn't working either.
         Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } => false,
