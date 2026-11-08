@@ -549,7 +549,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Training huts (huts-and-training.md "Done"): the queue's ripple (2 turns per rank) and those already of the building's kind letting the others pass, five trained together (the exe's count; ours holds one - a [player] note, reaffirmed, says it's always one at a time in play, so this needs a live check before five-at-once is implemented), queued orders carried over, damage cancelling the queue and sending the trainee out.
 - [ ] Training as in the original, what is left (pop3-rev-analysis.md "Training buildings"): the computer players' cost (`CP_` 1000) once tribes have a controller; the trainee's queued orders given to the new unit. The training time is already answered, no live measurement needed: the original has no fixed duration at all, just the mana cost filled at `cost / 32` per 16-turn income tick (same section) - 256-512 turns (21-43 s) at best, scaling with cost like everything else in the mana-income system.
 - [ ] Reincarnation sites from pop3-rev-analysis.md "Reincarnation sites": the ground levelled to the site height over a 5-cell disc in about 21 turns (ours: radius 3, blend 4) with its effects on enemies, wildmen, trees and swamps; pillars rising out of the ground, deleted and moved; the 32 sparkles.
-- [ ] The site's build/rebuild is not instant, and is driven by the shaman, not level load directly
+- [x] The site's build/rebuild is not instant, and is driven by the shaman, not level load directly
   (pop3-rev-analysis.md "Build/rebuild ritual"): she walks to the anchor, settles 12 turns, triggers the ~21-turn
   ground levelling above, then fires one projectile per pillar slot a turn apart (slot order 7..0), each pillar
   appearing 1-3 turns after its own shot lands and rising independently from there (so up to 3 stones can be
@@ -580,6 +580,24 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   session - clean room) - if not, something else about how we apply it in one shot instead of growing it over
   21 turns is likely the real difference, in which case the animated-growth half of this same TODO item might
   fix both the "house on water" symptom and this radius question together, rather than a flat radius bump.
+  **Shaman-driven ritual implemented, 2026-11-08**: `ReincarnationSite::animated` (true for a real level,
+  `sites_from_level`; false for every sandbox/generated/dev site, `at_cell`, so none of them lose their
+  instantly-usable shaman) gates a new `Action::BuildingSite`/`SiteBuildState` on the shaman (`site.rs`,
+  `unit.rs`) - settle 12 turns, then the ~21-turn levelling (still instant, not the growing disc: left to
+  the radius/disc-growth question above and its own animated version), then one `SiteShot` (standard shot,
+  1400 u/turn, `site.rs`) per pillar slot a turn apart in order 7..0, each slot's own pillar built
+  (`ReincarnationSite::pillars`) the instant its shot lands, with a burst (`blast::explosion_effect`) first
+  if it's replacing one already standing. Runs at level load and every reincarnation alike, not just once;
+  aborts to Idle with no pillars at all if the site is disabled first (`site.is_none()` check each tick),
+  covering the precondition above. Client (`game-client` `sites.rs`): each pillar mesh rises from buried to
+  its resting height over `pillar_height`'s own guessed `RISE_SECS`/`RISE_DEPTH` (not separately measured);
+  input is locked while the player's own shaman is in `Action::BuildingSite` (`sites::site_build_active`,
+  alongside `armageddon::input_locked`/`flyby::flyby_active` at the same 3 call sites - closed a pre-existing
+  gap there too: `select_and_order`/the spell-casting systems weren't checking `flyby_active` before). **Not
+  done**: site relocation (a new site forming at a dead shaman's last position) - `ReincarnationSite`'s
+  position stays fixed as documented, so every reincarnation reruns the ritual in place instead; a replaced
+  pillar rises the same way a fresh one does (buried to resting height) rather than the original's own
+  "smaller version" of itself.
 - [x] Houses breeding and growth implemented (`game_core::hut_growth`, huts-and-training.md rules 5-6, fully
   traced `[exe]` and corrected where this entry's own earlier draft had guessed wrong - the band formula, the
   "stops at 100%" vs "resets to 0" behaviour, and growing's own wood seeding). Capacity 3/4/5, supply 3/5/7
