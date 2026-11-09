@@ -17,7 +17,7 @@ use crate::flame::{self, Flame, FlameFrames};
 use crate::generated_buildings;
 use crate::grounded::{ground_point, Grounded, Tilted};
 use crate::original_models::{atlas_image, object_mesh, solid_part, to_mesh, MeshData, OriginalObjects};
-use crate::sim_time::{seed, ticks_f32, SimNow, TICK_SECS};
+use crate::sim_time::{seed, SimNow};
 use crate::sites::tribe_color;
 use crate::world::{CurrentMap, LevelList};
 use bevy::asset::RenderAssetUsages;
@@ -69,10 +69,6 @@ const SLAB_STONE: Color = Color::srgb(0.42, 0.4, 0.36);
 const MARK_LIFT: f32 = 0.02;
 /// Size (cells) of the flame over a generated building's brazier.
 const BRAZIER_FLAME: f32 = 0.7;
-/// Size (cells) of each flame over a burning building.
-const FIRE_FLAME: f32 = 1.3;
-/// The flames of a burning building at the end of its fire, of their height when it was lit.
-const FIRE_LAST: f32 = 0.15;
 
 /// The original object drawing a building of `owner`, None if not identified (neutral buildings
 /// take the blue version).
@@ -136,10 +132,6 @@ pub fn perch(b: &Building, height: f32) -> Option<(Vec2, f32)> {
 struct SiteMark(usize);
 
 /// The part of a view that shakes (the building with this id is being attacked).
-/// The flames of a building whose fire was lit at this tick: they go down as it burns (`fire_height`).
-#[derive(Component)]
-struct Fire(Tick);
-
 #[derive(Component)]
 struct Shaking(BuildingId);
 
@@ -173,7 +165,7 @@ impl Plugin for BuildingsPlugin {
         app.init_resource::<ModelHeights>()
             .add_systems(Startup, load_ripple_assets)
             .add_systems(Update, (respawn_buildings.in_set(RespawnBuildings), place_labels).chain())
-            .add_systems(Update, (shake_walls, burn_down, sink_and_rock, pulse_ripples))
+            .add_systems(Update, (shake_walls, sink_and_rock, pulse_ripples))
             .add_systems(PostUpdate, draw_site_marks);
     }
 }
@@ -381,13 +373,11 @@ fn respawn_buildings(
                 (look, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, ..default() }), wood.clone(), MeshData::default())
             }
         };
-        let flames = if b.burning.is_some() { flame::crossed_boards_at(&fire_bases(kind, look.top.y), FIRE_FLAME) } else { flames };
-        let flames = ((stage == Stage::Built || b.burning.is_some()) && !flames.indices.is_empty()).then(|| {
+        let flames = (stage == Stage::Built && !flames.indices.is_empty()).then(|| {
             let offset = (b.x as usize + b.z as usize) * 3 % flame::FRAMES;
             let frame = extras.flame_frames.get(&levels, theme, &mut images, &mut mats)[offset].clone();
             (Flame { offset }, Mesh3d(meshes.add(to_mesh(flames))), MeshMaterial3d(frame), NotShadowCaster, crate::hover::NoOutline)
         });
-        let fire = b.lit_at(map.0.now).map(Fire);
         let mut view = commands.spawn((
             BuildingView(i),
             DrawnBuilding(b.id),
@@ -418,13 +408,7 @@ fn respawn_buildings(
         view.with_children(|v| {
             let mut body = v.spawn((Transform::default(), Visibility::Inherited));
             body.with_children(|parts| {
-                let flame = flames.map(|f| {
-                    let mut flame = parts.spawn(f);
-                    if let Some(fire) = fire {
-                        flame.insert(fire);
-                    }
-                    flame.id()
-                });
+                let flame = flames.map(|f| parts.spawn(f).id());
                 if let Some(shown) = look.shown {
                     let mut model = parts.spawn((Mesh3d(shown), MeshMaterial3d(skin)));
                     if vault_model {
@@ -557,18 +541,6 @@ fn pulse_ripples(now: Res<SimNow>, mut ripples: Query<(&Ripple, &mut Transform, 
 }
 
 /// The walls' tilt of building `id` at `now`.
-/// Each burning building's flames as high as its fire has left to burn.
-fn burn_down(now: Res<SimNow>, mut flames: Query<(&Fire, &mut Transform)>) {
-    for (fire, mut tf) in &mut flames {
-        tf.scale.y = fire_height(now.secs_since(fire.0) / (ticks_f32(game_core::fire::BURN_TICKS) * TICK_SECS));
-    }
-}
-
-/// The flames' height (of their height when lit) `p` (0..1) through the fire: down from 1 to `FIRE_LAST`.
-pub fn fire_height(p: f32) -> f32 {
-    1.0 - (1.0 - FIRE_LAST) * p.clamp(0.0, 1.0)
-}
-
 fn shake_at(now: SimNow, id: u32) -> Quat {
     let (rx, rz) = blow_tilt(now.secs_in(Tick::ZERO, BLOWS_LOOP) / BLOW + seed(id));
     Quat::from_rotation_x(rx * SHAKE) * Quat::from_rotation_z(rz * SHAKE)
@@ -606,24 +578,16 @@ fn place_labels(
     }
 }
 
-/// Where the flames of a burning building of `kind` stand (cells, in the model's frame): a grid over its footprint,
-/// the middle one up to half its `top` height.
-pub fn fire_bases(kind: BuildingKind, top: f32) -> Vec<[f32; 3]> {
-    let f = kind.footprint();
-    let half = (f.half.0 as f32 / WORLD_UNITS_PER_CELL as f32 * 0.55, f.half.1 as f32 / WORLD_UNITS_PER_CELL as f32 * 0.55);
-    (-1..=1).flat_map(|i| (-1..=1).map(move |j| [i as f32 * half.0, if i == 0 && j == 0 { top * 0.5 } else { 0.0 }, j as f32 * half.1])).collect()
-}
-
 /// Whether the views of `drawn` still show `now`: a vault's phase does not count (`vault` poses it),
-/// nor the people inside (`chimney` smokes), nor how long a fire has left or a blow shakes it (only whether),
-/// nor its wear and repair delay, nor a training unit's mana, nor a hut's breeding or growing progress
-/// (no view of its own yet).
+/// nor the people inside (`chimney` smokes), nor a blow shaking it (only whether), nor its wear and repair
+/// delay, nor a training unit's mana, nor a hut's breeding or growing progress (no view of its own yet), nor
+/// its fire (`burning_buildings`'s own companion fire view follows that on its own).
 pub fn same_look(drawn: &[Building], now: &[Building]) -> bool {
     let collapse = |c: Collapse| match c {
         Collapse::Shattering => c,
         Collapse::Sinking { left } => Collapse::Sinking { left: Countdown::new(left.total()) },
     };
-    let look = |b: &Building| Building { vault: None, inside: 0, production: None, shaking: (b.shaking > 0) as u16, wear: 0, repair_delay: None, burning: b.burning.map(|c| Countdown::new(c.total())), collapse: b.collapse.map(collapse), breed: 0, grow: 0, ..b.clone() };
+    let look = |b: &Building| Building { vault: None, inside: 0, production: None, shaking: (b.shaking > 0) as u16, wear: 0, repair_delay: None, burning: None, ignited_by: None, collapse: b.collapse.map(collapse), breed: 0, grow: 0, ..b.clone() };
     drawn.len() == now.len() && drawn.iter().zip(now).all(|(a, b)| look(a) == look(b))
 }
 
@@ -632,14 +596,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_fire_burning_on_does_not_rebuild_the_views_lit_or_out_does() {
+    fn a_fire_starting_burning_on_or_going_out_never_rebuilds_the_views() {
         let hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 0, 0, 0);
         let mut burning = hut.clone();
         burning.ignite(TribeId::Blue);
         let mut later = burning.clone();
         later.burn();
-        assert!(same_look(&[burning.clone()], &[later]));
-        assert!(!same_look(&[Building { burning: None, ..burning.clone() }], &[burning]));
+        assert!(same_look(&[burning.clone()], &[later]), "its own companion fire view follows this instead");
+        assert!(same_look(&[hut], &[burning]), "starting to burn does not change the building's own look either");
     }
 
     #[test]
@@ -690,22 +654,6 @@ mod tests {
         }
         let lean = lean_direction(&hut, &m.terrain);
         assert!(lean.x > 0.0, "leans towards +x, its flooded side: {lean:?}");
-    }
-
-    #[test]
-    fn flames_go_down_as_the_fire_burns() {
-        assert_eq!(fire_height(0.0), 1.0);
-        assert!(fire_height(0.5) < 1.0 && fire_height(0.5) > FIRE_LAST);
-        assert!((fire_height(1.0) - FIRE_LAST).abs() < 1e-6 && fire_height(2.0) == fire_height(1.0));
-        assert_eq!(fire_height(-1.0), 1.0, "not lit yet");
-    }
-
-    #[test]
-    fn fire_spreads_over_the_footprint_the_middle_one_up() {
-        let bases = fire_bases(BuildingKind::Hut { size: 1 }, 2.0);
-        assert_eq!(bases.len(), 9);
-        assert_eq!(bases[4], [0.0, 1.0, 0.0]);
-        assert!(bases.iter().all(|b| b[0].abs() < 1.2 && b[2].abs() < 1.2), "within its 3 x 3 cells");
     }
 
     #[test]

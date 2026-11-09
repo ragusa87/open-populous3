@@ -9,6 +9,7 @@ mod blast_impact;
 mod blueprint;
 mod boot;
 mod buildings;
+mod burning_buildings;
 mod campfire;
 mod chimney;
 mod debug_overlay;
@@ -24,6 +25,7 @@ mod dev;
 mod edge_push;
 mod editor;
 mod effects;
+mod fire_flame;
 mod flame;
 mod flyby;
 mod game_end;
@@ -124,7 +126,7 @@ fn main() {
             game_speed::GameSpeedPlugin,
             dev::DevPlugin,
             cursor_debug::CursorDebugPlugin,
-            (camera_debug::CameraDebugPlugin, cell_debug::CellDebugPlugin, debug_overlay::DebugOverlayPlugin),
+            (camera_debug::CameraDebugPlugin, cell_debug::CellDebugPlugin, debug_overlay::DebugOverlayPlugin, fire_flame::FireFlamePlugin, burning_buildings::BurningBuildingsPlugin),
             (object_scale::ObjectScalePlugin, angel_of_death::AngelOfDeathPlugin, angel_meteor::AngelMeteorPlugin),
             (chimney::ChimneyPlugin, fireball_shot::FireballShotPlugin, blast_fireball::BlastFireballPlugin, blast_impact::BlastImpactPlugin, flyby::FlybyPlugin, site_shot::SiteShotPlugin),
             (range_ring::RangeRingPlugin, sparkles::SparklesPlugin, lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, firebolts::FireboltsPlugin, explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin, armageddon::ArmageddonPlugin, swamp::SwampPlugin, swarm::SwarmPlugin, volcano_rocks::VolcanoRocksPlugin, lava::LavaPlugin),

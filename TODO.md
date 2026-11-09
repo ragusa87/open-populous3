@@ -514,15 +514,20 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   turn like people/vehicles), not `panicking_blast` (Firestorm's fireball blast): the trace's "blasts
   (BLAST_DAMAGE_BLDG 40)" cites the constant by the Blast spell's own name, and nothing confirms Firestorm's
   separate blast variant does the same, so left unextended rather than guessed.
-- [ ] Burning building's visual (`buildings.rs` [client]; pop3-rev-analysis.md "Ground fire, ignited trees, and a
-  burning building's flame"): same gap as the tree one above - flames today are several billboards parented to
-  a grid over the building's own footprint (`fire_bases`) instead of one independent companion fire object
-  (class 5 type 0xA) spawned once at the building's own door. That companion object is also the sole source of
-  the original's continuous drifting ground smoke and a final ember before going out, and plays a settling-ash
-  finish before being removed - none of which exist today (the only building smoke now is `smoke::damage`'s
-  one-shot wood-loss puff at turn 48, not a continuous one). Separately open: whether a second, not-yet-traced
-  mechanism (same section, `0x4089AC`) also drives a building-local flame-intensity distinct from this door-point
-  object - not resolved, so not a basis for a fix yet.
+- [x] Burning building's visual (pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's
+  flame"): fixed - the footprint-grid flame billboards parented to the building (`fire_bases`, `Fire`,
+  `burn_down`, all removed from `buildings.rs`) are replaced by one independent companion fire
+  (`fire_flame::CompanionFire`, shared with the tree fix below), its own `burning_buildings.rs` world view
+  spawning it once at the building's own door (`Building::door`), not parented to the building's model. Its own
+  visual life is assumed to share the building's structural fire (`fire::BURN_TICKS`, 127 turns - "assumed",
+  since no separate re-arming call was traced for it): full height throughout (band 1, flat, confirmed for a
+  duration this long), continuous drifting ground smoke the whole time (`fire_flame::FIRE_SMOKE`, a `Puffs`
+  loop), one brighter ember exactly `EMBER_BEFORE_END` (4 turns, confirmed) before it ends, then a settling-ash
+  sink (`fire_flame::height`, `SETTLE_TICKS` - `[ours]`, a guess: the trace only confirms the sink happens, not
+  its own length) before it disappears, all within the building's own already-burning window (no game-core
+  change needed). Tested (`fire_flame.rs`) and checked live (`just shot`, original and `--no-original`). Left
+  open, same as before: whether a second, not-yet-traced mechanism (same section, `0x4089AC`) also drives a
+  building-local flame-intensity distinct from this door-point object - not resolved, so not a basis for a fix.
 - [ ] Ashes (combat.md "Ashes"): the hover text ("damaged ground", our words), the long damage smoke over them, the whirlwind's destruction. Lava and earthquake ground sharing the mark is done (`lava.rs`'s `WorldEvent::Scorch`, both `Mode::Static` and `Mode::Flowing`).
 - [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
 - [ ] Build tab: icons, discoveries unlocking "?".
@@ -725,15 +730,16 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   keeping `empty_building` (evicts everyone) for dismantling starting and `throw_out`'s own destruction/fire/
   collapse cases, which do mean to clear the building out entirely. Tests:
   `work::tests::residents_stay_housed_through_a_repair_only_the_builder_is_released`.
-- [ ] Burning tree's visual (`burning_trees.rs` [client]; pop3-rev-analysis.md "Ground fire, ignited trees, and a
-  burning building's flame"): the original's visible flame is NOT several billboards climbing a tree's own
-  trunk/crown scaled by its size - it is one independent companion scenery object (class 5 type 0xA, a single
-  standing 4-frame flame-lick sprite) spawned once at the tree's own base, with its own fixed 76-turn visual
-  duration (separate from, and shorter than, `Tree::burning`/`BURN_TICKS`'s guessed 127-turn burn-to-size-0
-  length). That companion object alone - not the tree's own view - is what spawns a drifting grey smoke puff
-  almost every tick (none today) and one final ember 4 turns before going out, then sinks/settles into the
-  ground rather than just disappearing. None of this (the independent object, its own shorter duration, the
-  smoke, the ember, the settling finish) exists in `burning_trees.rs` today.
+- [x] Burning tree's visual (pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's flame"):
+  fixed - `burning_trees.rs` no longer climbs several billboards up the trunk/crown scaled by the tree's size;
+  it spawns one independent companion fire (`fire_flame::CompanionFire`) at the tree's own base instead, fixed
+  size, not scaled by the tree. Its own visual duration is the trace's confirmed FIXED 76 turns
+  (`burning_trees::VISUAL_TICKS`), decoupled from `Tree::burning`/`BURN_TICKS`'s own, still-unconfirmed 127-turn
+  burn-to-size-0 length: the tree keeps "burning" (no wood, eventually snaps to size 0) for however long is left
+  after the flame's own 76 turns with nothing shown at all, matching the trace. Continuous ground smoke, a final
+  ember 4 turns before the end, and a settling-ash sink before it disappears all come from the same shared
+  `fire_flame` module as the building fix above. Tested, checked live (`just shot`: a flame at a lit tree's
+  base, gone by turn 76 with the tree still standing unlit until its own much later timer runs out).
 - [ ] Check in the game whether a brave ordered on a tree with no wood to spare goes to another one. The gather-wood state's own code (`0x495D70`, the chop-completion branch at `0x4960CC`) has **no tree-depletion check at all once already chopping**: on countdown expiry it unconditionally calls `transfer_wood(tree, person, WOOD_<PERSON>)`, which on an empty tree just moves 0 and the brave starts the same 20-turn countdown again, forever, with no reroute logic anywhere in this function. Whether a NEW order onto an already-empty tree is refused/redirected at assignment time (a different, not-yet-traced code path, outside this per-turn state) is still open - that's where any "goes to another one" behaviour would have to live, if it exists at all.
 - [x] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible)
   trees: both already done and tested - `placement::blocked_at` refuses a spot with a visible tree
