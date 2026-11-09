@@ -19,8 +19,11 @@ use pop3_format::{Atlas, Theme, WORLD_UNITS_PER_CELL};
 const DEFAULT_THEME: u8 = 0;
 /// Footprint half size (cells): the fire rests on the lowest ground under it.
 const HALF: f32 = 0.15;
-/// The generated fire: its size (cells, like the original object), logs' thickness and colour.
-const SIZE: f32 = 0.31;
+/// The generated fire: its size (cells, like the original object), logs' thickness and colour. Confirmed
+/// against the real `OBJS0` mesh (pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's
+/// flame", "Flame billboard size"): its `FLAME_TILE` faces give a 160x160-unit = 0.3125-cell box; shared by
+/// every other standing flame of the same scenery object (`fire_flame::SIZE`, `ground_fire::SIZE`).
+pub const SIZE: f32 = 0.31;
 const LOG: f32 = 0.05;
 const LOG_COLOUR: Color = Color::srgb(0.28, 0.17, 0.09);
 

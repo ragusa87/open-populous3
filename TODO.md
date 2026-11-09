@@ -740,6 +740,15 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   ember 4 turns before the end, and a settling-ash sink before it disappears all come from the same shared
   `fire_flame` module as the building fix above. Tested, checked live (`just shot`: a flame at a lit tree's
   base, gone by turn 76 with the tree still standing unlit until its own much later timer runs out).
+- [x] `fire_flame::SIZE` (was 0.35)/`ground_fire::SIZE` (was 0.45) (pop3-rev-analysis.md "Ground fire, ignited
+  trees, and a burning building's flame", "Flame billboard size" bullet): fixed - both confirmed WRONG, not just
+  guesses - a live ground-fire object (spawned by a real Blast cast, read via pop3-rev's
+  `scripts/scan_ground_fire.py`) draws via a real 3D `OBJS0` mesh (table `5A6AF8` row 2, model id 5 in bank 2 =
+  bank 0's object 12, a camp-fire sibling), whose own flame-board faces (`FLAME_TILE`) give the exact same
+  160x160-unit = **0.3125-cell** bounding box as the ordinary camp fire. The ground-fire/tree-ignition/burning-
+  building companion flame is THE SAME SIZE as a camp fire, not bigger - both constants now reuse
+  `campfire::SIZE` directly (made `pub`) instead of their own independent, oversized numbers. Full trace:
+  pop3-rev's `docs/functions.tsv` row `0x4a66c0`.
   **Correction, traced further and now wrong - see the new item right below**: `BURN_TICKS` is not merely
   "unconfirmed", it is now known to be the SAME fixed 76 turns as the flame, not 127, and the tree is not meant
   to stand full-size and unlit for 51 turns after the flame goes out.
@@ -755,6 +764,16 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   No change to how "gone" is represented (`size == 0`/`is_visible() == false`, regrows in place) - that part was
   already right. Test: `tree.rs`
   `a_burning_tree_gives_no_wood_and_its_size_drains_before_the_fire_goes_out`.
+- [ ] `fire_flame::FIRE_SMOKE` (pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's
+  flame", "The ground-fire's own smoke puff" bullet): current `Puffs{count:4, life:2.4, emit:Loop,
+  spread:(0,0.35), ...}` models the wrong SHAPE of emission, not just wrong numbers - the original spawns a
+  brand-new, short (~0.58s/7-tick), 2-sprite-frame puff almost every tick for as long as the fire lives, each
+  jittered by a small roughly-constant ~32-unit (~0.06-cell) offset, not a few puffs that individually drift for
+  2.4s. `effects.rs`'s own `Emit::Run{gap, until}` (already used by `SINKING`'s totem smoke) is the right shape:
+  `gap` ~1 tick, `life` ~0.58s, `until` the companion fire's own 76-turn life, `count` enough slots to cover
+  `until/gap`, and a near-flat `spread` (e.g. `(0.06,0.06)`) instead of one that ramps outward. A retune along
+  `SINKING`'s own pattern, not a new emission mode. Full trace: pop3-rev's `docs/functions.tsv` rows `0x50bf60`/
+  `0x50bd70`/`0x50beb0`, `docs/effect_states.csv` row 3.
 - [ ] `cut()`'s own wood-removal (braves chopping a tree) likely shares the same underlying mechanism as burning in
   the original (one function used by both, `pop3-rev-analysis.md`'s own Reference `0x4A79F0`) - worth checking
   whether our own `cut()`'s single discrete step vs. a continuous per-chop drain matters for how a chopped tree

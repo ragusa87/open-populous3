@@ -20,8 +20,10 @@ pub const EMBER_BEFORE_END: Ticks = Ticks::new(4);
 /// How long its settling-ash finish sinks it into the ground before it is gone: `[ours]`, a guess - the trace
 /// only confirms "a visible multi-tick sink", not its length.
 pub const SETTLE_TICKS: Ticks = Ticks::new(6);
-/// Size (cells) of a companion fire's own standing flame: `[ours]`, independent of whatever it burns.
-const SIZE: f32 = 0.6;
+/// Size (cells) of a companion fire's own standing flame: confirmed the SAME size as an ordinary camp fire
+/// (pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's flame", "Flame billboard size")
+/// - this is the same `OBJS0` scenery object, not its own sprite.
+const SIZE: f32 = crate::campfire::SIZE;
 /// How far (cells) its ground smoke drifts from its own position: `[ours]` scale of the trace's own "jittered
 /// about 32 units" (~0.06 cells read too small to see against a cell; stretched so it reads on screen).
 const SMOKE_SPREAD: f32 = 0.35;

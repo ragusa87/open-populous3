@@ -137,6 +137,18 @@ impl ReincarnationSite {
     pub fn flatten_for_spawn(&self, terrain: &mut Heightmap) -> DirtyRect {
         terrain.level_around_to(self.spawn_point(), SPAWN_FLAT_RADIUS, SPAWN_BLEND_RADIUS, self.height.max(MIN_SPAWN_HEIGHT))
     }
+
+    /// The build/rebuild ritual's own ground levelling (`SiteBuildState::Levelling`), `done` ticks into its
+    /// own `total` (`LEVEL_TICKS`): `flatten_for_spawn`'s footprint reached gradually instead of in one shot,
+    /// our own linear stand-in for the original's "grows by 160 world units per turn" (pop3-rev-analysis.md
+    /// "Levelling") - its own final radius (5 cells) isn't reproduced here, only the growth over time;
+    /// `SPAWN_FLAT_RADIUS`'s own doc explains why the footprint itself stays at 3/4 cells.
+    pub fn level_growing(&self, terrain: &mut Heightmap, done: Ticks, total: Ticks) -> DirtyRect {
+        let scale = |r: i32| r * done.get() as i32 / total.get().max(1) as i32;
+        let flat = scale(SPAWN_FLAT_RADIUS);
+        let blend = scale(SPAWN_BLEND_RADIUS).max(flat);
+        terrain.level_around_to(self.spawn_point(), flat, blend, self.height.max(MIN_SPAWN_HEIGHT))
+    }
 }
 
 /// Build/rebuild ritual (pop3-rev-analysis.md "Build/rebuild ritual"): what an `animated`
@@ -147,9 +159,9 @@ impl ReincarnationSite {
 pub enum SiteBuildState {
     /// 12-turn settle before the ground levelling (state 1).
     Settling(Countdown),
-    /// The ground levelling runs - instantly here (`flatten_for_spawn`, TODO.md "Terrain" #302 tracks the
-    /// full animated growing disc separately); this just waits out its own ~21-turn length before the
-    /// pillars fire (state 2).
+    /// The ground levelling runs: `ReincarnationSite::level_growing` widens its footprint a little more
+    /// every tick of this countdown (its own doc: our linear stand-in for the original's growing disc,
+    /// TODO.md "Terrain" #302) until the pillars fire (state 2).
     Levelling(Countdown),
     /// One standard shot per pillar slot, one turn apart, slot order 7..0 (state 3). `fired`: how many
     /// have gone out so far.

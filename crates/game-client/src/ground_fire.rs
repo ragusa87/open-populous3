@@ -16,8 +16,10 @@ use game_core::id::Id;
 use game_core::map::GameMap;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
-/// The flames' size (cells) and where they stand round the fire's point.
-const SIZE: f32 = 0.45;
+/// The flames' size (cells, confirmed the SAME as an ordinary camp fire's - same `OBJS0` scenery object,
+/// pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's flame", "Flame billboard size")
+/// and where they stand round the fire's point.
+const SIZE: f32 = crate::campfire::SIZE;
 const BASES: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [0.18, 0.0, 0.1], [-0.12, 0.0, -0.15]];
 /// Seconds over which the flames sink away at the end: a fraction of their own short `ground_fire::TICKS` life,
 /// so they still stand at full height for a moment before sinking rather than spawning already sunk.

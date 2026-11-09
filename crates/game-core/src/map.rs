@@ -1487,9 +1487,9 @@ impl GameMap {
             let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: unit.inside.map(|i| i.building) };
             match unit.tick(now, &ground, site) {
                 // An animated site's ground isn't levelled on reincarnation itself any more: the build
-                // ritual does it after its own settle (`UnitEvent::SiteLevelled`).
+                // ritual grows it, tick by tick, over its own levelling state (`UnitEvent::SiteLevelling`).
                 Some(UnitEvent::Reincarnated) => dirty.extend(site.filter(|s| !s.animated).map(|s| s.flatten_for_spawn(&mut self.terrain))),
-                Some(UnitEvent::SiteLevelled) => dirty.extend(site.map(|s| s.flatten_for_spawn(&mut self.terrain))),
+                Some(UnitEvent::SiteLevelling { done, total }) => dirty.extend(site.map(|s| s.level_growing(&mut self.terrain, done, total))),
                 Some(UnitEvent::Gone) => gone.push(unit.id),
                 Some(event) => events.push((i, event)),
                 None => {}

@@ -1343,13 +1343,31 @@ ticks <= 0 or ticks >= 38:  flat intensity, no decay (left at whatever created i
 ```
 Concretely, every known trigger in the exe: Firestorm's own bare-ground impact patch, 22 turns (~1.83 s, band
 3); Lightning's own bare-ground strike patch, 24 turns (~2.0 s, band 3); an ignited tree/plant's own companion
-fire, a FIXED 76 turns (~6.33 s, band 1) regardless of which spell lit it - decoupled from the tree's own
-burn-to-size-0 timer, which is not independently armed by any known trigger (it inherits whatever countdown the
-tree object already held, unresolved by this trace); a burning building's own door-point companion fire,
-assumed to share the building's structural 127-turn fire (not separately re-armed by a traced call - the one
-other `0x4A8C60` caller found, `0x4089AC`/band 1/135 turns, writes these same fields directly onto the
-BUILDING object itself, not this companion fire, and was not resolved as render-affecting - see "Burning
-building" above).
+fire, a FIXED 76 turns (~6.33 s, band 1) regardless of which spell lit it; a burning building's own door-point
+companion fire, assumed to share the building's structural 127-turn fire (not separately re-armed by a traced
+call - the one other `0x4A8C60` caller found, `0x4089AC`/band 1/135 turns, writes these same fields directly
+onto the BUILDING object itself, not this companion fire, and was not resolved as render-affecting - see
+"Burning building" above).
+
+**The ignited tree/plant's own visible shrink, now fully traced**: the SAME fixed 76 turns above also governs
+the tree/plant object itself, independently of its companion fire - its own ignite trigger runs through the
+generic class-5 "on state enter" dispatch (`init_unit_class_5`, the same architecture already confirmed for
+class 1/10's own per-state ENTER tables), whose state-5 case sets the object's own burn-length field to 76
+directly (this is what the companion fire's own 76-turn arm, above, happens to match: two independent clocks
+set to the same constant, not one shared field). Every turn of those 76, for ordinary trees/plants (gated by a
+per-type flag): the object's own wood/height stock (0-400 for a full size-4 tree, matching `WOOD_PER_SIZE` ×
+`MAX_SIZE`) drops by 4, and its own rendered height is recomputed as a smooth, continuous interpolation between
+1/6 of its placed height (a "stump" floor) and that full height, proportional to the remaining stock - **this
+is the original's actual "tree gets visibly smaller while it burns" effect**, a continuous shrink, not a
+sudden drop. At -4/turn, a full tree's 400-unit stock crosses the shared helper's own absolute 100-unit
+delete-floor in ~75 turns - matching the 76-turn clock almost exactly, evidently deliberate. The moment it
+crosses that floor, the object deletes itself outright (every spell-ignited case - Lightning, Firestorm, the
+lava/firecloud spreader) rather than visibly reaching a bare trunk or size 0 first: **the tree disappears,
+typically a turn or so before or after its own companion fire (an independent clock) finishes its own settling
+sequence** - exactly the "shrinks, then disappears, while the flame is still burning" sequence reported in
+play. A separate, rarer ignition path (one unidentified order-kind-13 timer, not reachable from any traced
+spell) instead floors the stock at a tiny stub (5 units) and remaps the object into a per-type "burnt
+appearance" state rather than deleting it.
 
 Every turn the fire object lives: an ambient crackle sound; once every 8 ticks it re-faces its sprite to the
 camera; almost every tick (unless a "no more puffs" flag is set) it spawns a short-lived drifting grey smoke
@@ -1365,10 +1383,14 @@ a per-type "burnt appearance" instead of deleted).
 Impact on our specs:
 - `ground_fire::TICKS` (9 turns, "a guess, ... the exact turn count stays a guess") is now exactly known and
   caster-dependent: 24 turns for Lightning's own patch, 22 for Firestorm's - not one shared guessed constant.
-- `tree::BURN_TICKS`/`fire::BURN_TICKS` (127 turns, "a guess, as long as a building") is a DIFFERENT timer from
-  what this trace pins down: the companion fire object's own 76-turn visual duration is fixed and confirmed, but
-  the tree's own separate burn-to-size-0 timer (what `BURN_TICKS` actually models) is still unconfirmed by this
-  trace, not necessarily 127 either.
+- `tree::BURN_TICKS` (127 turns, "a guess, as long as a building") is now known exactly, and is NOT 127: a
+  tree's own burn-to-gone timer is a fixed 76 turns (~6.33 s), independently confirmed both from its own state's
+  ENTER case and from the companion fire's own matching arm. It should also not just flip `size` straight to 0
+  at expiry - see the next bullet, a tree's own stock visibly drains throughout, continuously, not in one jump.
+- `tree::Tree::tick`'s own burning branch keeps `size` constant for the whole fire, dropping straight to 0 only
+  on the final tick - the original instead drains the underlying wood stock by 4 every turn throughout (visible
+  as a continuous height shrink, not our own 0-4 discrete `size` steps at all) and deletes the object outright
+  partway through its own 76-turn clock, once that stock crosses an absolute floor - not at the clock's very end.
 - `burning_trees.rs`/`buildings.rs` [client]: both attach several flame billboards directly onto the structure's
   own mesh (a tree's trunk/crown at `BASES`'s 5 points scaled by its height; a grid of flames over a building's
   footprint, `fire_bases`), fading as a shared `fire_height` curve runs down. The original instead places a
@@ -1377,6 +1399,48 @@ Impact on our specs:
   continuous drifting smoke puffs and the pre-extinguish ember, neither of which exists in either view today (a
   building's only smoke today is `smoke::damage`'s one-shot wood-loss puff at turn 48, not a continuous one);
   neither view plays the settling-ash finish before the flame disappears either.
+- **Flame billboard size, RESOLVED (2026-11-09, live memory + file decode)**: `fire_flame::SIZE` (0.35) and
+  `ground_fire::SIZE` (0.45) are both still "[ours]" guesses in the code, and both are confirmed WRONG - the
+  real original is smaller and simpler than either guess. A live ground-fire object (spawned by a real Blast
+  cast in the Docker headless rig, `docs/cheat.md` "Docker headless rig", read via `scripts/scan_ground_fire.py`
+  - pop3-rev's own tool) gave its true drawable fields directly: `self+0x3A` (draw class, table `0x5A6AF8`) = 2,
+  byte0 of that row = `0x03` ("3D object-bank mesh" renderer - a real 3D prop, NOT an `hfx0-0.dat` billboard
+  sprite, contrary to this doc's own earlier "hfx 90-93 is the ground-fire's own sprite" reading, which was
+  wrong); `self+0x33` (model id) = 5, and that row's own previously-undecoded byte3 (`0x02`) turns out to be an
+  `OBJS0`/`PNTS0`/`FACS0` BANK SELECTOR - model id 5 is an empty slot in bank 0, but bank **2**'s object 5 is
+  real, and is byte-for-byte identical (same points, same faces) to **bank 0's own object 12** - "the camp fire
+  object with tile-136 logs, a third see-through" (`docs/specs/objects.md`'s own banks-2-7-to-bank-0 mapping,
+  `0-5 -> 7-12`). Its 8 alpha/`FLAME_TILE`(92) faces give the exact same flame-board bounding box as the ordinary
+  camp fire (`catalog::CAMP_FIRE`, bank-0 object 0): `x -80..80, y 0..160, z -80..80` world units (512/cell) = a
+  flat **160x160-unit square = 0.3125 cells, exactly matching the existing `campfire::SIZE = 0.31`** (now
+  confirmed correct, not a guess, independently of this finding). **Net: the ground-fire scenery object (class 5
+  type 0xA) - and therefore the tree-ignition and burning-building companion fire too, which spawn this exact
+  same object type, same section above - renders its standing flame at the SAME size as an ordinary camp fire,
+  not bigger.** `fire_flame::SIZE`/`ground_fire::SIZE` should both become the confirmed 0.3125 (or reuse
+  `campfire::SIZE` directly), not their current independent, oversized guesses. Full static+live trace:
+  `pop3-rev`'s `docs/functions.tsv` row `0x4a66c0` (type-0xA follow-up) and `docs/trace-backlog.md` (now
+  resolved, left in place as the record of how this was found).
+- **The ground-fire's own smoke puff (class 7 type 3, "smoke"), traced in full (2026-11-09)**: it is NOT a
+  dedicated mechanism - it reuses the exact same generic "fall + periodic frame-advance" object the falling-spark
+  effect (type 4) and the lightning-strand chain also use (`pop3-rev`'s `docs/functions.tsv` rows `0x50bf60`
+  init/`0x50bd70`/`0x50beb0`, `docs/effect_states.csv` row 3). Concretely: spawns showing `hfx0-0.dat` sprite
+  **314** (an ordinary camera-facing billboard, ~15x16 px) for **4 ticks**, then jumps to sprite **318** (314+4)
+  for **3 more ticks**, then deletes - **one object, two sprite frames, ~7 ticks (~0.58 s) total life, no particle
+  spread of its own.** The ground-fire object (`0x4A7170`'s own row) spawns a FRESH one of these almost every
+  single tick, jittered ~32 world units (~0.06 cells) from its own position - the "continuous drifting cloud"
+  look is many short-lived, tightly-clustered puffs overlapping in time, not a few long-lived ones.
+  **This is a real mismatch with `fire_flame::FIRE_SMOKE`'s current model** (`Puffs{count:4, life:2.4,
+  emit:Loop, spread:(0,0.35), size:(0.1,0.3), opacity:(0.45,0),...}`): `Emit::Loop` spreads a small, fixed count
+  of puffs evenly over one shared 2.4s cycle, each individually drifting/rising/fading the whole time - the
+  original instead starts a brand new ~0.58s puff almost every tick, each jittered independently, for as long as
+  the fire itself lives. `effects.rs`'s own `Emit::Run{gap, until}` (already used by `SINKING`'s totem smoke -
+  "puffs round its base, one every quarter second while it sinks") is the right shape for this, not a new
+  mechanism: `gap` ~1 tick (`TICK_SECS`), `life` ~7 ticks (~0.58s, not 2.4s), `until` the companion fire's own
+  76-turn life, and enough `count` slots to cover `until/gap` so a fresh one starts every tick throughout. The
+  real jitter is also a small, roughly CONSTANT ~32-unit (~0.06-cell) random offset at spawn, not a `spread`
+  that grows from 0 over each puff's own lifetime - `spread` should stay close to flat (e.g. `(0.06, 0.06)`)
+  rather than ramping like `DUST`/`SINKING`'s own outward-moving puffs do. A straightforward retune of the
+  existing `Puffs` config along `SINKING`'s own pattern, not a new emission mode or a dedicated view.
 
 ### Blast's own cast chain [exe]
 Traced this session, since the heading above only ever covered Firestorm's own impact code. The spell's own
@@ -1422,6 +1486,24 @@ effect counter (`+0xA4`) is instead set to a RANDOM value in `[16,31]` (the stan
 tick` (0x4D9200, "Blast push and flight") only shows the bright fireball-coloured trail while this counter is
 above 8, a caster's own people caught in their own Blast get a shorter, randomized version of the bright trail
 rather than the enemy-only fixed 24-turn one - cosmetic only, same as the rest of this mechanic.
+
+**"Burn cell" (class 7 type 5, effect state 6) traced (2026-11-09), resolving what actually lights a tree a
+Blast hits, and where the smoke comes from**: its own init (`0x509CA3`) just enters state 6; the real body,
+`process_burn_cell_obstacle`/`0x50C510` (Ghidra's own name, already cited by address in `docs/scenery_states.csv`
+state 5 as one of several callers of the shared ignite trigger, now connected to its own identity/trigger
+condition) runs every tick: reads its own cell's occupant list and, for every class-5 (scenery) thing there whose
+type is flagged flammable (table `0x5A79C4` bit `0x20`), calls the shared ignite trigger `0x4A7B60` on it -
+self-deleting the instant its own cell has no occupant left. **This effect itself never spawns smoke** - it is
+pure ignition logic. The actual smoke seen after a Blast hits a tree has two different, already-documented
+sources: a one-shot plain grey puff (class 7 type 3) Blast's own effect list creates once at the impact point
+regardless of what's there, and - if the tree actually catches fire via this mechanism - the CONTINUOUS smoke
+of the companion ground-fire object scenery state 5 spawns at the tree's own base (class 5 type 0xA, emitting a
+drifting puff almost every tick for ~76 turns, "Ground fire, ignited trees, and a burning building's flame"
+above) - the same object/visual this doc's "Flame billboard size" finding just pinned an exact size to (0.3125
+cells). `open-populous`'s own `blast::impact_events`/`ground_fire::burn_cell` (TODO.md "Blast push and flight")
+already models "a tree there catches fire, or else a short ground fire" at the mechanism level - this doesn't
+change behaviour, it fills in exactly how the original decides "is there something flammable here" (a per-tick
+occupant scan, not an instant check) and confirms the smoke is two layered effects, not one.
 
 ### Whirlwind mechanics [exe]
 `process_whirlwind` (0x50F490, effect state 21), traced in full this session. Two timers: +0x72 counts down the
@@ -5546,7 +5628,8 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4A8C60 | "arm burn countdown": `fn(thing,ticks)`, 3 visual-decay bands by ticks' size, "Ground fire..." below |
 | 0x4A7170 | ground-fire scenery object per turn (state 3): crackle sound, smoke puff almost every tick, final ember, countdown |
 | 0x4A7B60 | shared "ignite this scenery object" trigger: re-arms an existing fire, or moves a tree/plant into state 5 |
-| 0x4A7BD0 | ignited tree/plant per turn (state 5): on its first tick spawns its own companion fire object, 76-turn fixed |
+| 0x4A7BD0 | ignited tree/plant per turn (state 5): own 76-turn clock (set on state entry, `0x4A6304`), spawns its own companion fire object on its first tick, shrinks its own wood/height every turn via `0x4A79F0` |
+| 0x4A79F0 | "remove wood and rescale": adds a signed delta to a scenery object's wood/height stock, rescales its visible height, deletes it once the stock crosses 100 |
 | 0x4A8950 | ground-fire post-burn finish (states 11/12): re-damage pass, "settling ash" sink, then delete/remap |
 | 0x408840 | class-2 state-4 (burning) ENTRY: spawns the building's own door-point companion fire object |
 | 0x408CB0 | building-ignite entry: fireproof check (same `+0x4A` bit 0x1 flag as the library/prison, read as table 0x5A7272 = per-type base + 0x4A), building state -> 4, attacker's tribe into `+0xAF` |

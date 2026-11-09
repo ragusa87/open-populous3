@@ -36,7 +36,7 @@ const DEFAULT_THEME: u8 = 0;
 const RISE_DEPTH: f32 = 1.2;
 /// How long one pillar takes to rise once it appears: our own guess, not separately measured
 /// (pop3-rev-analysis.md "Build/rebuild ritual" only times the appearances, not each one's own rise).
-const RISE_SECS: f32 = 1.0;
+const RISE_SECS: f32 = 2.0;
 
 #[derive(Component)]
 struct SiteMarker;

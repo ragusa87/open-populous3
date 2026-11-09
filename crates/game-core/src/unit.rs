@@ -460,9 +460,9 @@ pub enum UnitEvent {
     Released { spell: Spell },
     /// Next to the vehicle `vehicle` (id): the caller seats her if she may get on.
     AtVehicle { vehicle: crate::vehicle::VehicleId },
-    /// The build/rebuild ritual's settle just ended: the caller levels the site's ground
-    /// (`ReincarnationSite::flatten_for_spawn`).
-    SiteLevelled,
+    /// The build/rebuild ritual's ground levelling ticks: the caller widens its site's flattened
+    /// footprint a little more (`ReincarnationSite::level_growing`), `done` of `total` (`LEVEL_TICKS`).
+    SiteLevelling { done: Ticks, total: Ticks },
     /// The build/rebuild ritual is firing pillar slot `slot`: the caller sends a standard shot there
     /// (`GameMap::fire_site_pillar`).
     FireSitePillar { slot: u8 },
@@ -1123,18 +1123,22 @@ impl Unit {
                 }
                 match state {
                     crate::site::SiteBuildState::Settling(mut left) => {
-                        if left.tick() {
-                            self.action = Action::BuildingSite(crate::site::SiteBuildState::Levelling(Countdown::new(crate::site::LEVEL_TICKS)));
-                            return Some(UnitEvent::SiteLevelled);
-                        }
-                        self.action = Action::BuildingSite(crate::site::SiteBuildState::Settling(left));
+                        self.action = Action::BuildingSite(if left.tick() {
+                            crate::site::SiteBuildState::Levelling(Countdown::new(crate::site::LEVEL_TICKS))
+                        } else {
+                            crate::site::SiteBuildState::Settling(left)
+                        });
                     }
                     crate::site::SiteBuildState::Levelling(mut left) => {
-                        self.action = Action::BuildingSite(if left.tick() {
+                        let total = left.total();
+                        let finished = left.tick();
+                        let done = left.done();
+                        self.action = Action::BuildingSite(if finished {
                             crate::site::SiteBuildState::Firing { fired: 0 }
                         } else {
                             crate::site::SiteBuildState::Levelling(left)
                         });
+                        return Some(UnitEvent::SiteLevelling { done, total });
                     }
                     crate::site::SiteBuildState::Firing { fired } => {
                         if (fired as usize) < crate::site::SLOTS.len() {
