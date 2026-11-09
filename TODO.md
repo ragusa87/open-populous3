@@ -764,16 +764,24 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   No change to how "gone" is represented (`size == 0`/`is_visible() == false`, regrows in place) - that part was
   already right. Test: `tree.rs`
   `a_burning_tree_gives_no_wood_and_its_size_drains_before_the_fire_goes_out`.
-- [ ] `fire_flame::FIRE_SMOKE` (pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's
-  flame", "The ground-fire's own smoke puff" bullet): current `Puffs{count:4, life:2.4, emit:Loop,
-  spread:(0,0.35), ...}` models the wrong SHAPE of emission, not just wrong numbers - the original spawns a
-  brand-new, short (~0.58s/7-tick), 2-sprite-frame puff almost every tick for as long as the fire lives, each
-  jittered by a small roughly-constant ~32-unit (~0.06-cell) offset, not a few puffs that individually drift for
-  2.4s. `effects.rs`'s own `Emit::Run{gap, until}` (already used by `SINKING`'s totem smoke) is the right shape:
-  `gap` ~1 tick, `life` ~0.58s, `until` the companion fire's own 76-turn life, `count` enough slots to cover
-  `until/gap`, and a near-flat `spread` (e.g. `(0.06,0.06)`) instead of one that ramps outward. A retune along
-  `SINKING`'s own pattern, not a new emission mode. Full trace: pop3-rev's `docs/functions.tsv` rows `0x50bf60`/
-  `0x50bd70`/`0x50beb0`, `docs/effect_states.csv` row 3.
+- [x] `fire_flame::FIRE_SMOKE` (pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's
+  flame", "The ground-fire's own smoke puff" bullet): fixed - the old `Puffs{count:4, life:2.4, emit:Loop,
+  spread:(0,0.35), ...}` modelled the wrong SHAPE of emission, not just wrong numbers (the original spawns a
+  brand-new, short puff almost every tick for as long as the fire lives, not a few puffs that each drift for
+  2.4s). Kept as `FIRE_SMOKE_OURS` (unchanged numbers, `[ours]`, not traced) and used only without the original
+  game's own data loaded; a new `fire_smoke_traced(visual_secs)` models the trace instead whenever
+  `LevelList::original` (the same `!levels.original` idiom as `flame.rs`/`campfire.rs`/`wood.rs`/etc.): `gap` 1
+  tick, `life` ~0.58s/7-tick, `until` the fire's own `visual_secs` (76 turns for a tree, 127 for a building -
+  these differ, so `until`/`count` are sized per call, not one shared constant), a near-flat `spread`
+  `(0.06,0.06)`, and `rise` matching the trace's 20 world-units/turn over the puff's own life - a retune along
+  `SINKING`'s own pattern, not a new emission mode, picked via a new `fire_flame::smoke_pattern(original,
+  visual_secs)` (tested, `fire_flame.rs`: `smoke_pattern_switches_between_our_own_loop_and_the_traced_original_
+  run`, `traced_smoke_sizes_itself_to_a_different_fire_s_own_life`). `CompanionFire::spawn` takes `original`/
+  `visual_secs` now, threaded from `burning_trees.rs`/`burning_buildings.rs`'s own `Res<LevelList>` (already in
+  scope there for `flame::FlameFrames`). Checked live (`just shot`, `--no-original`: a burning hut's own flame
+  and drifting grey smoke at its door, `LIGHTNING=52,70 LIGHTNING_TICKS=10` on `sandbox-buildings`); the traced
+  branch is parameter-tested only, not live-checked, with no original install in this session. Full trace:
+  pop3-rev's `docs/functions.tsv` rows `0x50bf60`/`0x50bd70`/`0x50beb0`, `docs/effect_states.csv` row 3.
 - [ ] `cut()`'s own wood-removal (braves chopping a tree) likely shares the same underlying mechanism as burning in
   the original (one function used by both, `pop3-rev-analysis.md`'s own Reference `0x4A79F0`) - worth checking
   whether our own `cut()`'s single discrete step vs. a continuous per-chop drain matters for how a chopped tree
@@ -1196,8 +1204,62 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   ruled out as a lead: the manual mouse-drag pan/rotate code (`move_pos_angle_length` and friends,
   pop3-rev-analysis.md "Manual camera pan/rotate (mouse drag)") is separate from zoom entirely - don't re-chase
   it for this.
-- [ ] Script side effects outside the AI still open: messages, `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER`,
-  `TRIGGER_LEVEL_WON/LOST`, user input lock (campaign scripts).
+- [ ] **Stale, corrected**: `GIVE_ONE_SHOT`, `GIVE_MANA_TO_PLAYER` and `TRIGGER_LEVEL_WON/LOST` are now
+  implemented (see "Computer players (AI)" above) - this bullet was outdated. Still genuinely open: messages
+  and user input lock (next item).
+- [ ] **Checked against a real level script (levl2007/cpscr021, level 7's red+yellow, ai-scripts.md "read IA
+  script of level 7" session), found more unimplemented `DO`/query commands it actually uses that weren't yet
+  tracked here individually.** All fall through `ScriptEnv::do_call`'s catch-all no-op (`ai_script.rs`); none
+  found affects currently-passing tests, since nothing asserts on them:
+  - No in-game message/tag queue exists at all: `CREATE_MSG_NARRATIVE`/`CREATE_MSG_INFORMATION`/
+    `CREATE_MSG_INFORMATION_ZOOM`/`OPEN_DIALOG`/every `SET_MSG_*`/`CLEAR_ALL_MSG` (ai-scripts.md "Level events",
+    "Messages"). cpscr021 alone queues 3 information messages this way. Needs a client-side queue/tag UI plus a
+    `game-core` side (which message is "current", its delete-on-ok/timeout/auto-open flags) before any of these
+    can do anything.
+  - User input lock: `DISABLE_USER_INPUTS`/`ENABLE_USER_INPUTS` (used by the tutorial and level 1's own opening
+    flyby gate, ai-scripts.md "Worked example"). No such lock exists in `game-core` or `game-client` yet, but the
+    seam it would plug into is already there and already duplicated three times, so this is a refactor-and-add,
+    not a new mechanism:
+    - Three independent `bool`-returning Bevy run conditions already gate every manual-input system today:
+      `armageddon::input_locked` (`crates/game-client/src/armageddon.rs`, true during an Armageddon match or
+      after `AppState::Ended`), `flyby::flyby_active` (`crates/game-client/src/flyby.rs`, true while
+      `GameMap::active_flyby` is `Some` and not yet interrupted), `sites::site_build_active`
+      (`crates/game-client/src/sites.rs`, backed by `player_shaman_building`: true while the player's own shaman
+      is in `Action::BuildingSite(_)`, the reincarnation-site "RC" build/rebuild ritual, pop3-rev-analysis.md
+      "Build/rebuild ritual").
+    - All three are chained identically, copy-pasted verbatim at exactly three call sites: `camera_input`
+      (`camera.rs:199`), `selection::select_and_order` + `look_at_shaman` (`units/mod.rs:287-290`), and the
+      tile-click/cast/aim-and-cast chain (`hud/spells.rs:283-285`) - each as
+      `.run_if(not(crate::armageddon::input_locked)).run_if(not(crate::flyby::flyby_active)).run_if(not(crate::sites::site_build_active))`.
+    - Implementation plan for a future session: add a `GameMap`-backed flag `DISABLE_USER_INPUTS` sets/clears
+      (same shape as `active_flyby`/`player_shaman_building`: a plain field `ai_script.rs`'s `do_call` writes,
+      read by a fourth predicate next to the other three), then - since the three-predicate chain is already
+      duplicated verbatim three times - fold all three (now four) into one combined helper (e.g.
+      `fn input_locked(...) -> bool` composing the existing four, or a single shared system param) referenced
+      once at each of the three call sites, rather than bolting on a fourth `.run_if()` at each. `ENABLE_USER_INPUTS`
+      clears the flag; no on/off argument on either, matching every other no-argument `DO` command.
+  - `SET_BUCKET_USAGE`/`SET_BUCKET_COUNT_FOR_SPELL` (ai-scripts.md "Attacks and spells"): the mana/spell-priority
+    weighting mechanism cpscr021 uses every 90 turns to rescale all 16 non-hidden spells' priority by its own
+    population band. Meaning still unconfirmed against the exe (wiki: "?").
+  - `GIVE_UP_AND_SULK`'s confirmed force-success switch (ai-scripts.md "Other ON/OFF switches" already traces
+    what it does against the exe - a generic per-tribe flag, not a dedicated surrender routine): used by 44/58
+    scripts as a last-resort "losing badly" branch, currently a pure no-op.
+  - `PREACH_AT_MARKER`/`CONVERT_AT_MARKER`/`SEND_ALL_PEOPLE_TO_MARKER` (ai-scripts.md "People, buildings and
+    orders"): the same underlying gap as `PUT_PERSON_IN_DT` above (the native engine never issues the shaman,
+    or a whole tribe, a move/order at all) - not individually called out there before.
+  - `GET_HEAD_TRIGGER_COUNT`/`REMOVE_HEAD_AT_POS` (ai-scripts.md "Level events"): the query a script uses to
+    notice a stone head has fired (cpscr021 gates a message on this) and the command to sink one. Related to,
+    but more specific than, "Level scripting (triggers)"'s general trigger-semantics item above.
+  - Seven `STATE_*` toggles are parsed and stored (`crate::ai::state::bit_for`) but never read by the native
+    engine's own logic, unlike `CONSTRUCT_BUILDING`/`TRAIN_PEOPLE`/`DEFEND`/`DEFEND_BASE`/`AUTO_ATTACK`:
+    `FETCH_WOOD`, `SHAMAN_GET_WILDS`, `HOUSE_A_PERSON`, `BRING_NEW_PEOPLE_BACK`, `POPULATE_DRUM_TOWER`, `PREACH`,
+    `FIREWARRIOR_DEFEND` (ai-scripts.md "States" table now notes this inline). cpscr021 turns on all seven at
+    setup.
+  - `INT_ATTR_PREF_{SPY,RELIGIOUS,WARRIOR,FIREWARRIOR}_TRAINS` (as opposed to the already-consumed
+    `..._PEOPLE` variants): `ai_next_building`'s own building-choice logic picks by population band only and
+    never reads these, so a script's attempt to steer which training building gets built next (cpscr021's main
+    mechanism for choosing between temple/warrior-train/firewarrior-train) has no effect (ai-scripts.md
+    "Attributes" table now notes this inline).
 
 ## Priority 3 — remaining fidelity and content
 Level/world correctness that is mostly stable already (terrain especially: extensive, but most of it recently fixed) rather than blocking anything above.

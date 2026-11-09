@@ -13,6 +13,7 @@ use bevy::ecs::system::EntityCommands;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use game_core::time::Ticks;
+use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// Exactly 4 turns before a companion fire's own life ends, it spawns one last ember (pop3-rev-analysis.md,
 /// confirmed).
@@ -28,10 +29,10 @@ const SIZE: f32 = crate::campfire::SIZE;
 /// about 32 units" (~0.06 cells read too small to see against a cell; stretched so it reads on screen).
 const SMOKE_SPREAD: f32 = 0.35;
 
-/// Continuous drifting ground smoke round a companion fire while it stands: small, close by, forever (cut off
-/// by its own `on` flag once the fire's own life ends) - the ONLY source of ground smoke the trace found round
-/// a burning tree or building.
-pub const FIRE_SMOKE: Puffs = Puffs {
+/// Our own invented ground smoke (not traced, `[ours]`): a few puffs drifting out and fading over 2.4s each,
+/// forever while the fire stands (cut off by its own `on` flag once the fire's own life ends). Used without
+/// the original game's own data loaded (`smoke_pattern`), same spirit as the rest of `--no-original` mode.
+pub const FIRE_SMOKE_OURS: Puffs = Puffs {
     count: 4,
     life: 2.4,
     emit: Emit::Loop,
@@ -44,6 +45,47 @@ pub const FIRE_SMOKE: Puffs = Puffs {
     shrink: 0.0,
     angle: (0.0, 2.4),
 };
+
+/// How long one traced ground-fire puff itself lasts (pop3-rev-analysis.md "Ground fire, ignited trees, and a
+/// burning building's flame", "The ground-fire's own smoke puff": ~0.58s/7-tick, confirmed).
+const FIRE_SMOKE_TRACED_PUFF_TICKS: f32 = 7.0;
+/// How far (cells) a traced puff rises over its own life: 20 world units/turn (pop3-rev-analysis.md "The shot
+/// 8/6", the same effect) over its `FIRE_SMOKE_TRACED_PUFF_TICKS` ticks.
+const FIRE_SMOKE_TRACED_RISE: f32 = 20.0 * FIRE_SMOKE_TRACED_PUFF_TICKS / WORLD_UNITS_PER_CELL as f32;
+
+/// The original's own ground-fire smoke, traced (pop3-rev-analysis.md "Ground fire, ignited trees, and a
+/// burning building's flame", "The ground-fire's own smoke puff" - effect 7/0x03, the same generic trail puff
+/// a firewarrior's bolt and a small volcano fireball trail also use, `pop3-rev`'s `docs/functions.tsv` rows
+/// `0x50bf60`/`0x50bd70`/`0x50beb0`, `docs/effect_states.csv` row 3): a brand-new, short puff almost every
+/// tick for as long as the fire lives, jittered by a small roughly-constant offset rather than a few puffs
+/// that each drift for 2.4s - `Emit::Run` along `SINKING`'s own pattern, `until` the fire's own `visual_secs`
+/// life.
+fn fire_smoke_traced(visual_secs: f32) -> Puffs {
+    Puffs {
+        count: (visual_secs / TICK_SECS).round().max(1.0) as usize,
+        life: FIRE_SMOKE_TRACED_PUFF_TICKS * TICK_SECS,
+        emit: Emit::Run { gap: TICK_SECS, until: visual_secs },
+        spread: (0.06, 0.06),
+        spread_curve: Curve::Linear,
+        rise: (0.0, FIRE_SMOKE_TRACED_RISE),
+        size: (0.08, 0.18),
+        opacity: (0.5, 0.0),
+        curve: Curve::Linear,
+        shrink: 0.0,
+        angle: (0.0, 2.4),
+    }
+}
+
+/// A companion fire's own ground smoke, `visual_secs` into its life: the original's own traced shape
+/// (`fire_smoke_traced`) with the original game's own data loaded (`original`), our own invented
+/// `FIRE_SMOKE_OURS` otherwise.
+pub fn smoke_pattern(original: bool, visual_secs: f32) -> Puffs {
+    if original {
+        fire_smoke_traced(visual_secs)
+    } else {
+        FIRE_SMOKE_OURS
+    }
+}
 
 /// The one last ember a companion fire spawns `EMBER_BEFORE_END` before going out: a brighter, quicker puff.
 pub const FIRE_EMBER: Puffs = Puffs {
@@ -104,13 +146,16 @@ pub struct CompanionFire {
 }
 
 impl CompanionFire {
-    /// Spawns a companion fire's parts as children of `view`, `offset` frames into the flame loop.
-    pub fn spawn(view: &mut EntityCommands, assets: &CompanionFireAssets, flame_frame: Handle<StandardMaterial>, offset: usize) -> Self {
+    /// Spawns a companion fire's parts as children of `view`, `offset` frames into the flame loop, its own
+    /// ground smoke `original` (the original game's own traced shape) or our own invented one, over a life of
+    /// `visual_secs`.
+    pub fn spawn(view: &mut EntityCommands, assets: &CompanionFireAssets, flame_frame: Handle<StandardMaterial>, offset: usize, original: bool, visual_secs: f32) -> Self {
+        let pattern = smoke_pattern(original, visual_secs);
         let (mut flame, mut smoke, mut ember) = (Entity::PLACEHOLDER, Vec::new(), Entity::PLACEHOLDER);
         view.with_children(|v| {
             flame = v.spawn((Flame { offset }, Mesh3d(assets.flame_board.clone()), MeshMaterial3d(flame_frame), NotShadowCaster, crate::hover::NoOutline, Transform::default())).id();
-            for k in 0..FIRE_SMOKE.count {
-                let puff = (Puff::new(FIRE_SMOKE, k, Vec3::ZERO), Mesh3d(assets.puff_ball.clone()), MeshMaterial3d(assets.smoke.clone()), NotShadowCaster, crate::hover::NoOutline);
+            for k in 0..pattern.count {
+                let puff = (Puff::new(pattern, k, Vec3::ZERO), Mesh3d(assets.puff_ball.clone()), MeshMaterial3d(assets.smoke.clone()), NotShadowCaster, crate::hover::NoOutline);
                 smoke.push(v.spawn((puff, Transform::default(), Visibility::Hidden)).id());
             }
             ember = v.spawn((Puff::new(FIRE_EMBER, 0, Vec3::ZERO), Mesh3d(assets.puff_ball.clone()), MeshMaterial3d(assets.ember.clone()), NotShadowCaster, crate::hover::NoOutline, Transform::default(), Visibility::Hidden)).id();
@@ -142,6 +187,28 @@ impl CompanionFire {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn smoke_pattern_switches_between_our_own_loop_and_the_traced_original_run() {
+        let visual_secs = 76.0 * TICK_SECS;
+        let ours = smoke_pattern(false, visual_secs);
+        assert_eq!(ours.emit, Emit::Loop, "our own invented shape, not traced");
+
+        let traced = smoke_pattern(true, visual_secs);
+        let Emit::Run { gap, until } = traced.emit else { panic!("the traced shape is Emit::Run") };
+        assert!((gap - TICK_SECS).abs() < 1e-6, "a brand-new puff about every tick");
+        assert!((until - visual_secs).abs() < 1e-6, "cut off at the fire's own visual life, not a fixed number");
+        assert_eq!(traced.count, 76, "one slot per tick of the fire's own life");
+        assert!((traced.life - 7.0 * TICK_SECS).abs() < 1e-6, "each puff itself short-lived, ~0.58s");
+        assert_eq!(traced.spread, (0.06, 0.06), "near-flat, not ramping outward like our own guess");
+    }
+
+    #[test]
+    fn traced_smoke_sizes_itself_to_a_different_fire_s_own_life() {
+        let (tree, building) = (smoke_pattern(true, 76.0 * TICK_SECS), smoke_pattern(true, 127.0 * TICK_SECS));
+        assert_eq!(tree.count, 76);
+        assert_eq!(building.count, 127);
+    }
 
     #[test]
     fn full_height_until_the_last_settle_window_then_sinks_to_nothing() {

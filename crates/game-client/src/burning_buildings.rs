@@ -54,7 +54,7 @@ impl WorldView for BurningBuildingView {
         let cell = WORLD_UNITS_PER_CELL as f32;
         let turn = Quat::from_rotation_y(seed(id.wrapping_add(1)) * std::f32::consts::TAU);
         view.insert((Grounded { at: Vec2::new(x as f32, z as f32) / cell, half: 0.0 }, Transform::from_rotation(turn), Visibility::Visible));
-        Some(BurningBuildingView(CompanionFire::spawn(view, assets, frame, offset)))
+        Some(BurningBuildingView(CompanionFire::spawn(view, assets, frame, offset, levels.original, ticks_f32(BURN_TICKS) * TICK_SECS)))
     }
 
     fn update(&self, b: &Building, now: SimNow, (map, .., flames, puffs): &mut SystemParamItem<Self::Params>) {
