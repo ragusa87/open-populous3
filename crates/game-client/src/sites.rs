@@ -76,8 +76,7 @@ fn player_shaman_building(map: &GameMap) -> bool {
     map.units.iter().any(|u| u.owner == game_core::tribes::Owner::Tribe(PLAYER) && matches!(u.action, Action::BuildingSite(_)))
 }
 
-/// The run condition `camera_input`, `select_and_order` and the spell-casting systems gate themselves on,
-/// next to `armageddon::input_locked` and `flyby::flyby_active`.
+/// One of the four cases `input_lock::input_locked` composes for every manual-input system.
 pub fn site_build_active(map: Res<CurrentMap>) -> bool {
     player_shaman_building(&map.0)
 }

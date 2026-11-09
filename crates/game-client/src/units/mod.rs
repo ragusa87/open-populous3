@@ -284,10 +284,7 @@ impl Plugin for UnitsPlugin {
             .add_systems(
                 Update,
                 (
-                    (selection::select_and_order.in_set(UnitInput), look_at_shaman)
-                        .run_if(not(crate::armageddon::input_locked))
-                        .run_if(not(crate::flyby::flyby_active))
-                        .run_if(not(crate::sites::site_build_active)),
+                    (selection::select_and_order.in_set(UnitInput), look_at_shaman).run_if(not(crate::input_lock::input_locked)),
                     run_ticks.in_set(SimStep),
                     respawn_views,
                     animate_views.in_set(UnitViews),

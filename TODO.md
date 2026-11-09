@@ -1216,28 +1216,15 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     "Messages"). cpscr021 alone queues 3 information messages this way. Needs a client-side queue/tag UI plus a
     `game-core` side (which message is "current", its delete-on-ok/timeout/auto-open flags) before any of these
     can do anything.
-  - User input lock: `DISABLE_USER_INPUTS`/`ENABLE_USER_INPUTS` (used by the tutorial and level 1's own opening
-    flyby gate, ai-scripts.md "Worked example"). No such lock exists in `game-core` or `game-client` yet, but the
-    seam it would plug into is already there and already duplicated three times, so this is a refactor-and-add,
-    not a new mechanism:
-    - Three independent `bool`-returning Bevy run conditions already gate every manual-input system today:
-      `armageddon::input_locked` (`crates/game-client/src/armageddon.rs`, true during an Armageddon match or
-      after `AppState::Ended`), `flyby::flyby_active` (`crates/game-client/src/flyby.rs`, true while
-      `GameMap::active_flyby` is `Some` and not yet interrupted), `sites::site_build_active`
-      (`crates/game-client/src/sites.rs`, backed by `player_shaman_building`: true while the player's own shaman
-      is in `Action::BuildingSite(_)`, the reincarnation-site "RC" build/rebuild ritual, pop3-rev-analysis.md
-      "Build/rebuild ritual").
-    - All three are chained identically, copy-pasted verbatim at exactly three call sites: `camera_input`
-      (`camera.rs:199`), `selection::select_and_order` + `look_at_shaman` (`units/mod.rs:287-290`), and the
-      tile-click/cast/aim-and-cast chain (`hud/spells.rs:283-285`) - each as
-      `.run_if(not(crate::armageddon::input_locked)).run_if(not(crate::flyby::flyby_active)).run_if(not(crate::sites::site_build_active))`.
-    - Implementation plan for a future session: add a `GameMap`-backed flag `DISABLE_USER_INPUTS` sets/clears
-      (same shape as `active_flyby`/`player_shaman_building`: a plain field `ai_script.rs`'s `do_call` writes,
-      read by a fourth predicate next to the other three), then - since the three-predicate chain is already
-      duplicated verbatim three times - fold all three (now four) into one combined helper (e.g.
-      `fn input_locked(...) -> bool` composing the existing four, or a single shared system param) referenced
-      once at each of the three call sites, rather than bolting on a fourth `.run_if()` at each. `ENABLE_USER_INPUTS`
-      clears the flag; no on/off argument on either, matching every other no-argument `DO` command.
+  - [x] User input lock: `DISABLE_USER_INPUTS`/`ENABLE_USER_INPUTS` (used by the tutorial and level 1's own
+    opening flyby gate, ai-scripts.md "Worked example") - **implemented**. `GameMap::user_inputs_disabled`
+    is a plain field `ai_script.rs`'s `do_call` sets/clears (same shape as `active_flyby`/
+    `player_shaman_building`), and the three call sites' identical, copy-pasted three-condition chain
+    (`camera_input` in `camera.rs`, `selection::select_and_order` + `look_at_shaman` in `units/mod.rs`, the
+    tile-click/cast/aim-and-cast chain in `hud/spells.rs`) are folded into one shared run condition,
+    `input_lock::input_locked` (`crates/game-client/src/input_lock.rs`), composing `armageddon::input_locked`,
+    `flyby::flyby_active`, `sites::site_build_active` (the reincarnation-site "RC" build/rebuild ritual) and
+    the new flag - referenced once per call site instead of a fourth `.run_if()` bolted onto each.
   - `SET_BUCKET_USAGE`/`SET_BUCKET_COUNT_FOR_SPELL` (ai-scripts.md "Attacks and spells"): the mana/spell-priority
     weighting mechanism cpscr021 uses every 90 turns to rescale all 16 non-hidden spells' priority by its own
     population band. Meaning still unconfirmed against the exe (wiki: "?").

@@ -37,6 +37,7 @@ mod ground_shake;
 mod grounded;
 mod hover;
 mod hud;
+mod input_lock;
 mod keymap;
 mod lava;
 mod lightning;

@@ -708,15 +708,14 @@ confirmed as task 24").
     early instead of played out. Not implemented: snapping to a marker (the 4th field).
   - `FLYBY_START` and `FLYBY_STOP`.
 - Tutorial UI:
-  - `DISABLE_USER_INPUTS` and `ENABLE_USER_INPUTS`. **Not implemented**, but the seam it belongs in already
-    exists: both fall through `ScriptEnv::do_call`'s catch-all no-op today (a script's own "player can't act
-    yet" intent - the worked example above: locked from turn 0 until its one-time flyby latch - currently has no
-    effect), while `game-client` already gates every manual-input system (camera, selection/orders,
-    spell-casting) on a chain of run conditions that play exactly this role for two other cases:
-    `flyby::flyby_active` (a flyby playing) and `sites::site_build_active` (the shaman mid reincarnation-site
-    build/rebuild ritual, the "RC" animation). TODO.md "Computer players (AI)" now has the concrete refactor
-    plan: add a fourth, script-driven flag to that same chain (and fold the chain, already duplicated verbatim
-    at three call sites, into one shared helper while doing so).
+  - `DISABLE_USER_INPUTS` and `ENABLE_USER_INPUTS`. **Implemented**: `ai_script.rs`'s `do_call` sets/clears
+    `GameMap::user_inputs_disabled` (a script's own "player can't act yet" intent - the worked example above:
+    locked from turn 0 until its one-time flyby latch), read by `game-client`'s `input_lock::input_locked`
+    (`crates/game-client/src/input_lock.rs`), the one run condition every manual-input system (camera,
+    selection/orders, spell-casting) gates itself on - composing this flag with the two other cases that
+    already played the same role, `flyby::flyby_active` (a flyby playing) and `sites::site_build_active`
+    (the shaman mid reincarnation-site build/rebuild ritual, the "RC" animation), plus Armageddon's own lock
+    (`armageddon::input_locked`), instead of each call site chaining its own `.run_if(not(...))` per case.
   - `TURN_PANEL_ON` 0 followers, 1 spells, 2 buildings.
   - `FLASH_BUTTON idx ON|OFF` highlights a panel button:
     - buildings 0-8: hut, tower, temple, spy, warrior, firewarrior, boat, balloon, guard post

@@ -45,8 +45,8 @@ impl Plugin for FlybyPlugin {
     }
 }
 
-/// `true` while a flyby is playing and hasn't been interrupted — the run condition `camera_input`
-/// gates itself on, next to `armageddon::input_locked`.
+/// `true` while a flyby is playing and hasn't been interrupted — one of the four cases
+/// `input_lock::input_locked` composes.
 pub fn flyby_active(map: Res<CurrentMap>) -> bool {
     map.0.active_flyby.as_ref().is_some_and(|f| f.interrupted_at.is_none())
 }

@@ -36,10 +36,11 @@ pub fn armageddon_active(watch: Res<ArmageddonWatch>) -> bool {
     watch.at.is_some()
 }
 
-/// `true` while the player can't meaningfully act at all: an Armageddon match resolving, or the game already
-/// over (`AppState::Ended`) — the match keeps running past the win/lose dialog (`game_end.rs`, the "victory lap"
-/// epilogue, `docs/specs/outcome.md`), so this is the one condition every manual-input system (camera, selection,
-/// orders, spell-casting) gates itself on instead of leaving `Gameplay` to stop them.
+/// `true` while the player can't meaningfully act at all because of Armageddon specifically: a match
+/// resolving, or the game already over (`AppState::Ended`) — the match keeps running past the win/lose
+/// dialog (`game_end.rs`, the "victory lap" epilogue, `docs/specs/outcome.md`). One of the four cases
+/// `input_lock::input_locked` composes for every manual-input system (camera, selection, orders,
+/// spell-casting) instead of leaving `Gameplay` to stop them.
 pub fn input_locked(watch: Res<ArmageddonWatch>, state: Res<State<AppState>>) -> bool {
     armageddon_active(watch) || *state.get() == AppState::Ended
 }

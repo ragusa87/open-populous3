@@ -5,7 +5,9 @@
 //! (including its own `damage` withdraw threshold, `ai.rs`'s `Sortie`, and its `ATTACK_MARKER` case
 //! through `GameMap::marker_cell`/`marker_pos`), `SET_SPELL_ENTRY`, the level-event
 //! gifts (`GIVE_MANA_TO_PLAYER`/`GIVE_ONE_SHOT`/`GIVE_PLAYER_SPELL`/`REMOVE_PLAYER_THING`),
-//! `TRIGGER_LEVEL_WON/LOST`, the timer trio and a handful of queries
+//! `TRIGGER_LEVEL_WON/LOST`, `DISABLE_USER_INPUTS`/`ENABLE_USER_INPUTS` (`GameMap::user_inputs_disabled`,
+//! read by the client next to `active_flyby` and the reincarnation-site build ritual - `game-core` itself
+//! never gates anything on it), the timer trio and a handful of queries
 //! (`I_HAVE_ONE_SHOT`/`IS_SHAMAN_AVAILABLE_FOR_ATTACK`/`COUNT_ANGELS`/`IS_BUILDING_NEAR`/
 //! `GET_HEIGHT_AT_POS`/`COUNT_PEOPLE_IN_MARKER`/`IS_SHAMAN_IN_AREA`) have real
 //! behaviour; every other `DO` command (guard groups, vehicles, messages/camera/tutorial UI)
@@ -124,6 +126,14 @@ impl Env for ScriptEnv<'_> {
                     let event = if *on { crate::event::WorldEvent::RestoreSite { tribe: self.owner } } else { crate::event::WorldEvent::RemoveSite { tribe: self.owner } };
                     self.map.apply_events(vec![event]);
                 }
+                None
+            }
+            "DISABLE_USER_INPUTS" => {
+                self.map.user_inputs_disabled = true;
+                None
+            }
+            "ENABLE_USER_INPUTS" => {
+                self.map.user_inputs_disabled = false;
                 None
             }
             "SET_NO_BLUE_REINC" => {
@@ -567,6 +577,26 @@ mod tests {
         map.terrain.set(10, 10, crate::terrain::SEA_LEVEL);
         run_once(&mut map, true);
         assert_eq!(map.site_of(TribeId::Blue).unwrap().height, 100);
+    }
+
+    #[test]
+    fn disable_then_enable_user_inputs_round_trips_the_flag() {
+        let mut map = map_with_a_site(100);
+        map.tribe_scripts = vec![TribeScript {
+            owner: TribeId::Red,
+            script: turn_zero_do(Call { id: CommandId::from_name("DISABLE_USER_INPUTS").unwrap(), args: vec![] }),
+            interp: Interpreter::new(),
+        }];
+        assert!(!map.user_inputs_disabled);
+        map.tend_ai_scripts();
+        assert!(map.user_inputs_disabled);
+        map.tribe_scripts = vec![TribeScript {
+            owner: TribeId::Red,
+            script: turn_zero_do(Call { id: CommandId::from_name("ENABLE_USER_INPUTS").unwrap(), args: vec![] }),
+            interp: Interpreter::new(),
+        }];
+        map.tend_ai_scripts();
+        assert!(!map.user_inputs_disabled);
     }
 
     #[test]
