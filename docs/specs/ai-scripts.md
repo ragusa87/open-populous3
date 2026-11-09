@@ -474,6 +474,16 @@ Shared conventions:
 Internal names are Reincarnated's `CP_AT_TYPE_*` [lua]. States marked "-" have no description in the wiki, so
 their meaning only comes from their name.
 
+**Implementation status** (`crate::ai::state::bit_for`, `ai_script.rs`): every token in this table is parsed and
+stored as a per-tribe bit regardless (`NativeAi`'s own bitset, `ai_set_state`), but only `CONSTRUCT_BUILDING`,
+`TRAIN_PEOPLE`, `DEFEND`, `DEFEND_BASE` and `AUTO_ATTACK` are actually read by the current native engine
+(`ai.rs`'s own `ai_state` call sites). `FETCH_WOOD`, `MED_MAN_GET_WILD_PEEPS` (`SHAMAN_GET_WILDS`),
+`HOUSE_A_PERSON`, `BRING_NEW_PEOPLE_BACK`, `POPULATE_DRUM_TOWER`, `PREACH` and `SUPER_DEFEND`
+(`FIREWARRIOR_DEFEND`) are stored but never consumed - e.g. cpscr021 (level 7's red/yellow) turns on all of
+these at setup expecting shaman-gathers-wildmen, drum-tower population, preaching and firewarrior-specific
+defence, none of which currently do anything beyond the bit flip (TODO.md "Computer players (AI)"; the
+generic native-AI scope note at `ai.rs`'s own module doc didn't break these out by name before).
+
 | Token | Internal | Effect when ON |
 |---|---|---|
 | 1028 | 0 `CONSTRUCT_BUILDING` | - (build the base: hut share `INT_ATTR_HOUSE_PERCENTAGE`, at most `MAX_BUILDINGS_ON_GO` at once) |
@@ -520,7 +530,10 @@ Other ON/OFF switches:
   does that, must come from that other function, not from a self-contained "surrender" routine: treat the wiki's
   description as unconfirmed, independent of the now-confirmed force-success switch (pop3-rev-analysis.md
   "Preacher conversion"). Implement the force-success side (useful on its own, e.g. for scripted guaranteed
-  conversions) even before the retreat behaviour is pinned down.
+  conversions) even before the retreat behaviour is pinned down. **Not implemented**: falls through
+  `ScriptEnv::do_call`'s catch-all no-op (`ai_script.rs`) - used by 44/58 scripts (e.g. cpscr021, level 7's red/
+  yellow), always as a last-resort "losing badly" branch, so it has no effect at all today (TODO.md "Computer
+  players (AI)").
 - `FLYBY_ALLOW_INTERRUPT`: the player can skip flybys.
 - No meaning in the wiki: `SET_BUCKET_USAGE`, `SET_AUTO_BUILD`, `SET_AUTO_HOUSE`, `AUTO_MESSAGES`,
   `EXTRA_WOOD_COLLECTION` and `TURN_PUSH`.
@@ -558,7 +571,11 @@ Other ON/OFF switches:
   - She casts when at least `min_people` enemies, shaman included, are in range.
   - `base` 1 means only inside the base, 0 only outside. Lua names it `base_spell`.
   - `frequency` is unknown (?).
-- `SET_BUCKET_COUNT_FOR_SPELL spell n` (1502 uses): unknown (?). Probably weights the mana spent per spell.
+- `SET_BUCKET_COUNT_FOR_SPELL spell n` (1502 uses) and `SET_BUCKET_USAGE ON|OFF`: unknown (?). Probably weights
+  the mana spent per spell. **Not implemented**: both fall through `ScriptEnv::do_call`'s catch-all no-op
+  (`ai_script.rs`) - every script's own mana/spell-priority tuning through this mechanism (e.g. cpscr021, level
+  7's red/yellow, rescales all 16 non-hidden spells' bucket counts by population band every 90 turns) currently
+  has no effect (TODO.md "Computer players (AI)").
 - `IS_SHAMAN_AVAILABLE_FOR_ATTACK $v`: 1 if the shaman can cast.
 - `I_HAVE_ONE_SHOT SPELL_TYPE spell $v`: 1 if she holds a one-shot charge of the spell. The `BUILDING_TYPE` form
   is unknown.
@@ -625,7 +642,9 @@ confirmed as task 24").
 - `PRAY_AT_HEAD n marker`: `n` followers pray at the stone head on the marker until it fires. The level needs a
   head, a trigger linked to the effect, and a marker on the same spot.
 - `PREACH_AT_MARKER m` sends one preacher. `CONVERT_AT_MARKER m` sends the shaman to convert wildmen.
-  `SEND_ALL_PEOPLE_TO_MARKER m` sends everyone, shaman included.
+  `SEND_ALL_PEOPLE_TO_MARKER m` sends everyone, shaman included. **Not implemented**: all three fall through
+  `ScriptEnv::do_call`'s catch-all no-op (TODO.md "Computer players (AI)") - the native engine never issues the
+  shaman a move/order at all yet (same gap `PUT_PERSON_IN_DT` is already tracked under).
 - `SET_DRUM_TOWER_POS x z` sets the main drum tower, which is also the attack gathering point. If the spot is
   unreachable, the nearest reachable one is used. The tower is built automatically unless
   `DELAY_MAIN_DRUM_TOWER` was called (lifted by `BUILD_MAIN_DRUM_TOWER`).
@@ -647,7 +666,11 @@ confirmed as task 24").
   - `REMOVE_PLAYER_THING team spell|building`.
   - Bloodlust, teleport and armageddon are only granted if the level can obtain them some other way.
 - `TRIGGER_THING marker` fires the trigger thing on the marker and everything linked to it (see objects.md).
-  `GET_HEAD_TRIGGER_COUNT x z $v` counts a head's activations, and `REMOVE_HEAD_AT_POS x z` sinks it.
+  `GET_HEAD_TRIGGER_COUNT x z $v` counts a head's activations, and `REMOVE_HEAD_AT_POS x z` sinks it. **Not
+  implemented**: both fall through `ScriptEnv::do_call`'s catch-all no-op - a script can't yet notice a stone
+  head firing (e.g. cpscr021, level 7's red/yellow, gates a one-shot information message on exactly this query)
+  or make one stop firing (TODO.md "Level scripting (triggers)" already tracks trigger semantics generally;
+  these two specific queries aren't broken out there yet).
 - `TRIGGER_LEVEL_WON` and `TRIGGER_LEVEL_LOST` end the level.
 - Timer:
   - `SET_TIMER_GOING seconds` shows a countdown at the top right, starting one second short.
@@ -659,6 +682,11 @@ confirmed as task 24").
   - `OPEN_DIALOG idx` shows a message without queueing it.
   - The `SET_MSG_*` commands change the last message queued: `AUTO_OPEN_DLG` opens it and pauses,
     `DELETE_ON_OK` deletes it when closed, `TIMEOUT turns` sets its expiry. `CLEAR_ALL_MSG` empties the queue.
+  - **Not implemented at all**: no in-game message/tag queue exists yet in `game-client` or `game-core`, so
+    every `CREATE_MSG_*`/`OPEN_DIALOG`/`SET_MSG_*` command falls through `ScriptEnv::do_call`'s catch-all no-op
+    (e.g. cpscr021, level 7's red/yellow, queues 3 information messages this way: a one-shot narrative at setup,
+    one gated on the human casting Erosion, one gated on a stone head firing). Not previously tracked in
+    TODO.md.
 - Camera:
   - `ZOOM_TO x z angle`, `TRACK_TO_MARKER m`, `TRACK_SHAMAN_TO_ANGLE a`.
   - `CAMERA_ROTATION speed` rotates until `STOP_CAMERA_ROTATION`.
@@ -680,7 +708,15 @@ confirmed as task 24").
     early instead of played out. Not implemented: snapping to a marker (the 4th field).
   - `FLYBY_START` and `FLYBY_STOP`.
 - Tutorial UI:
-  - `DISABLE_USER_INPUTS` and `ENABLE_USER_INPUTS`.
+  - `DISABLE_USER_INPUTS` and `ENABLE_USER_INPUTS`. **Not implemented**, but the seam it belongs in already
+    exists: both fall through `ScriptEnv::do_call`'s catch-all no-op today (a script's own "player can't act
+    yet" intent - the worked example above: locked from turn 0 until its one-time flyby latch - currently has no
+    effect), while `game-client` already gates every manual-input system (camera, selection/orders,
+    spell-casting) on a chain of run conditions that play exactly this role for two other cases:
+    `flyby::flyby_active` (a flyby playing) and `sites::site_build_active` (the shaman mid reincarnation-site
+    build/rebuild ritual, the "RC" animation). TODO.md "Computer players (AI)" now has the concrete refactor
+    plan: add a fourth, script-driven flag to that same chain (and fold the chain, already duplicated verbatim
+    at three call sites, into one shared helper while doing so).
   - `TURN_PANEL_ON` 0 followers, 1 spells, 2 buildings.
   - `FLASH_BUTTON idx ON|OFF` highlights a panel button:
     - buildings 0-8: hut, tower, temple, spy, warrior, firewarrior, boat, balloon, guard post
@@ -777,7 +813,7 @@ is a pure runtime switch, independent of whether a shaman/site thing exists).
 | Attribute | Meaning, usual values |
 |---|---|
 | `EXPANSION` | ? |
-| `PREF_{SPY,RELIGIOUS,WARRIOR,FIREWARRIOR}_TRAINS` | number of each training building to have |
+| `PREF_{SPY,RELIGIOUS,WARRIOR,FIREWARRIOR}_TRAINS` | number of each training building to have. **Not consumed**: `ai.rs`'s own building-choice logic (`ai_next_building`) picks the next essential building by population band only, never reads these - a script's attempt to steer which training building gets built next (e.g. cpscr021, level 7's red/yellow, toggles these every 90 turns off existing hut/building counts) currently has no effect. Not previously tracked in TODO.md. |
 | `PREF_{SPY,RELIGIOUS,WARRIOR,FIREWARRIOR}_PEOPLE` | number of each unit to keep, trained and replaced |
 | `MAX_BUILDINGS_ON_GO` | buildings under construction at once |
 | `HOUSE_PERCENTAGE` | how many huts the base gets |
@@ -1195,8 +1231,16 @@ end
     `FLYBY_ALLOW_INTERRUPT` is on — camera only, matching the worked example's own
     `ENABLE_USER_INPUTS` before `FLYBY_CREATE_NEW` (nothing else locks). `FLYBY_SET_EVENT_TOOLTIP` is
     resolved but nothing draws it yet.
-  - Every other `DO` command still reaches `ScriptEnv::do_call` and does nothing, and `int_var` only
-    backs `INT_GAME_TURN` (everything else reads 0).
+  - **Stale note, corrected**: a growing set of other `DO` commands now have real behaviour too (`SET_REINCARNATION`/
+    `SET_NO_BLUE_REINC`, every `STATE_*` toggle, `SET_DRUM_TOWER_POS`/`BUILD_DRUM_TOWER`/
+    `DELAY_MAIN_DRUM_TOWER`/`BUILD_MAIN_DRUM_TOWER`, `TRAIN_PEOPLE_NOW`, `ATTACK`, `SET_SPELL_ENTRY`, the
+    level-event gifts, `TRIGGER_LEVEL_WON/LOST`, the timer trio, and several queries) - see `ai_script.rs`'s own
+    module doc comment and TODO.md "Computer players (AI)" for the current, actively-maintained list rather than
+    this paragraph, which undersold it. Every command NOT in that list still reaches `ScriptEnv::do_call` and
+    does nothing (guard groups, vehicles, messages/camera/tutorial UI, bucket spell weighting,
+    `GIVE_UP_AND_SULK`'s force-success switch, several marker-based people orders - see the implementation-status
+    notes added inline above). `int_var` backs `INT_GAME_TURN`, `INT_MY_NUM_PEOPLE` and every `INT_ATTR_*`;
+    any other internal variable reads back as its own numeric token id, not 0.
 - Keep the AI behaviours (states, attributes, marker and spell entries, attacks) as plain simulation data that
   the script sets. A future native or Lua-like scripting layer can then drive the same data, the way Script4
   wraps the original functions.
