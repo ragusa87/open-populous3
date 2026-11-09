@@ -1,7 +1,8 @@
 //! Trees: the tribes' wood. Each has a size 0-4, the pieces of wood it can still give; a tree at
 //! size 0 stays in place, invisible, and grows back one size at a time. Set on fire (lightning), it
-//! gives no wood for `BURN_TICKS` and is burnt to size 0. Integer state, ticked with the map; placed
-//! deterministically in groves (`scatter`).
+//! gives no wood and its `size` drains continuously towards 0 over `BURN_TICKS`, usually reaching it
+//! before the fire itself goes out. Integer state, ticked with the map; placed deterministically in
+//! groves (`scatter`).
 
 use crate::map::Lcg;
 use crate::path::Mobility;
@@ -20,9 +21,14 @@ pub const GROW_TICKS: Ticks = Ticks::new(WOOD_PER_SIZE as u32 / WOOD_GROW as u32
 /// Tree types: 0-5 are the levels' scenery trees (models 1-6), 6-17 the other original tree objects
 /// (`pop3_format::catalog::tree_object`); the client maps a variant to a model.
 pub const VARIANTS: u8 = pop3_format::catalog::TREE_TYPES;
-/// How long a tree burns (a guess, as long as a building: the original's burning trees, scenery state 5, are not
-/// traced).
-pub const BURN_TICKS: Ticks = Ticks::new(127);
+/// How long a tree burns, traced exactly: the SAME fixed length as its companion flame
+/// (`burning_trees::VISUAL_TICKS` [client]), set directly by its own ignite trigger, not derived from its size
+/// (pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's flame").
+pub const BURN_TICKS: Ticks = Ticks::new(76);
+/// Wood stock drained a turn while it burns (same section): continuously shrinks `size` towards 0 well before
+/// `BURN_TICKS` ends for anything short of a full tree, matching the original's "crosses its own delete-floor
+/// partway through the clock" rather than at its very end.
+const BURN_DRAIN: u16 = 4;
 /// No tree this close (cells) to a reincarnation site: its stones and spawn ground stay clear.
 pub const SITE_CLEARANCE: i32 = 7;
 
@@ -38,13 +44,15 @@ pub struct Tree {
     growth: u16,
     /// Its fire, while it burns.
     pub burning: Option<Countdown>,
+    /// Wood stock left while it burns (`WOOD_PER_SIZE` units), draining by `BURN_DRAIN` a turn; `size` tracks it.
+    burn_stock: u16,
 }
 
 impl Tree {
     pub fn new((cx, cz): (i32, i32), variant: u8, size: u8) -> Self {
         let centre = |c: i32| (c.rem_euclid(128) as u32 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2) as u16;
         let (x, z) = (centre(cx), centre(cz));
-        Tree { x, z, variant: variant % VARIANTS, size: size.min(MAX_SIZE), angle: scattered_angle(x, z), growth: 0, burning: None }
+        Tree { x, z, variant: variant % VARIANTS, size: size.min(MAX_SIZE), angle: scattered_angle(x, z), growth: 0, burning: None, burn_stock: 0 }
     }
 
     pub fn with_angle(self, angle: u16) -> Self {
@@ -70,6 +78,7 @@ impl Tree {
             return false;
         }
         self.burning = Some(Countdown::new(BURN_TICKS));
+        self.burn_stock = self.size as u16 * WOOD_PER_SIZE;
         true
     }
 
@@ -83,8 +92,10 @@ impl Tree {
     /// `[ours]`, reported but not traced; else on the original's growth turns, `grow`.
     pub fn tick(&mut self, now: Tick, submerged: bool) {
         if let Some(fire) = self.burning.as_mut() {
+            self.burn_stock = self.burn_stock.saturating_sub(BURN_DRAIN);
+            self.size = if self.burn_stock <= WOOD_PER_SIZE { 0 } else { (self.burn_stock / WOOD_PER_SIZE) as u8 };
             if fire.tick() {
-                (self.burning, self.size, self.growth) = (None, 0, 0);
+                (self.burning, self.size, self.growth, self.burn_stock) = (None, 0, 0, 0);
             }
         } else if submerged {
             (self.size, self.growth) = (0, 0);
@@ -245,13 +256,20 @@ mod tests {
     }
 
     #[test]
-    fn a_burning_tree_gives_no_wood_then_is_burnt_to_nothing_and_grows_back() {
+    fn a_burning_tree_gives_no_wood_and_its_size_drains_before_the_fire_goes_out() {
         let mut t = Tree::new((5, 5), 0, 3);
         assert!(t.ignite());
         assert!(!t.ignite(), "already burning");
         assert!(!t.cut() && t.wood() == 0);
-        run(&mut t, 1..=BURN_TICKS.get() - 1);
-        assert_eq!((t.size, t.lit_at(Tick::from_wire(500))), (3, Some(Tick::from_wire(500 - (BURN_TICKS.get() - 1)))));
+        run(&mut t, 1..=1);
+        assert_eq!(t.size, 2, "starts shrinking right away");
+        run(&mut t, 2..=49);
+        assert_eq!(t.size, 1, "still shrinking");
+        run(&mut t, 50..=50);
+        assert_eq!((t.size, t.burning.is_some()), (0, true), "gone well before its own fire ends");
+        assert_eq!(t.lit_at(Tick::from_wire(500)), Some(Tick::from_wire(500 - 50)));
+        run(&mut t, 51..=BURN_TICKS.get() - 1);
+        assert_eq!((t.size, t.burning.is_some()), (0, true), "flame still out until the fixed length ends");
         run(&mut t, BURN_TICKS.get()..=BURN_TICKS.get());
         assert_eq!((t.size, t.burning), (0, None), "burnt");
         assert!(!t.ignite(), "nothing left to burn");

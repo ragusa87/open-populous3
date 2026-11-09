@@ -740,6 +740,25 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   ember 4 turns before the end, and a settling-ash sink before it disappears all come from the same shared
   `fire_flame` module as the building fix above. Tested, checked live (`just shot`: a flame at a lit tree's
   base, gone by turn 76 with the tree still standing unlit until its own much later timer runs out).
+  **Correction, traced further and now wrong - see the new item right below**: `BURN_TICKS` is not merely
+  "unconfirmed", it is now known to be the SAME fixed 76 turns as the flame, not 127, and the tree is not meant
+  to stand full-size and unlit for 51 turns after the flame goes out.
+- [x] Burning tree's own size during its fire (`tree::Tree`/`BURN_TICKS`; pop3-rev-analysis.md "Ground fire,
+  ignited trees, and a burning building's flame", "Impact on our specs"): fixed - `BURN_TICKS` is now 76, the
+  SAME fixed length as the companion flame (`burning_trees::VISUAL_TICKS`), set directly by `ignite()` rather than
+  a separate/longer timer. A burning tree now tracks its own wood stock (`burn_stock`, `WOOD_PER_SIZE` units,
+  seeded from `size` at ignite) and drains it by 4 every turn (`BURN_DRAIN`), continuously recomputing the
+  discrete 0-4 `size` from it instead of holding it constant until the last tick - size 0 is reached as soon as
+  the stock crosses `WOOD_PER_SIZE` (the original's own absolute delete-floor), which for anything short of a
+  full tree is well before the 76-turn clock ends, and for a full tree a turn before it (burning itself still
+  runs the full 76 turns regardless - matches the trace's "disappears... while the flame is still burning").
+  No change to how "gone" is represented (`size == 0`/`is_visible() == false`, regrows in place) - that part was
+  already right. Test: `tree.rs`
+  `a_burning_tree_gives_no_wood_and_its_size_drains_before_the_fire_goes_out`.
+- [ ] `cut()`'s own wood-removal (braves chopping a tree) likely shares the same underlying mechanism as burning in
+  the original (one function used by both, `pop3-rev-analysis.md`'s own Reference `0x4A79F0`) - worth checking
+  whether our own `cut()`'s single discrete step vs. a continuous per-chop drain matters for how a chopped tree
+  looks, not just a burning one.
 - [ ] Check in the game whether a brave ordered on a tree with no wood to spare goes to another one. The gather-wood state's own code (`0x495D70`, the chop-completion branch at `0x4960CC`) has **no tree-depletion check at all once already chopping**: on countdown expiry it unconditionally calls `transfer_wood(tree, person, WOOD_<PERSON>)`, which on an empty tree just moves 0 and the brave starts the same 20-turn countdown again, forever, with no reroute logic anywhere in this function. Whether a NEW order onto an already-empty tree is refused/redirected at assignment time (a different, not-yet-traced code path, outside this per-turn state) is still open - that's where any "goes to another one" behaviour would have to live, if it exists at all.
 - [x] A tree does not grow back while a building stands on it; buildings can only be placed over size-0 (invisible)
   trees: both already done and tested - `placement::blocked_at` refuses a spot with a visible tree
