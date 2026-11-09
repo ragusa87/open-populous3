@@ -924,18 +924,25 @@ Shared person and building states:
 - **Burning building** (building state 4, set by 0x408CB0; per turn 0x408AB0): 127 turns (10.6 s), then back to
   state 1. The library and the prison never burn (building-type flag `+0x4A` bit 0x1); a building already burning
   is not lit again (its timer is not reset). The igniter's tribe is kept in `+0xAF`.
-- **The visible flame itself, traced this session**: entering state 4 (the class-2 ENTER dispatch, same
-  per-state-ENTER-table convention already confirmed for class 1/class 10, switch at `0x4030C0` states 1-6,
-  state 4 -> `0x408840`) spawns one class-5/type-0xA "fire" scenery object (the same scenery type Firestorm's
-  and Lightning's own impact code create for their ground-fire patches, `0x511800`/`0x511AE0`) at the building's
-  own door-adjacent point - computed via the same shape/offset table (`0x59DF3C`) already used for a building's
-  door-point and a vehicle hut's spawn point, sampling real ground height there (`0x44E940`) before creating it.
-  Not independently cross-checked against `objects.md`'s own flame-board rendering for buildings-on-fire, and
+- **The visible flame itself**: entering state 4 (the class-2 ENTER dispatch, same per-state-ENTER-table
+  convention already confirmed for class 1/class 10, switch at `0x4030C0` states 1-6, state 4 -> `0x408840`)
+  spawns one class-5/type-0xA "fire" scenery object (the same scenery type Firestorm's and Lightning's own
+  impact code create for their ground-fire patches, `0x511800`/`0x511AE0`) at the building's own door-adjacent
+  point - computed via the same shape/offset table (`0x59DF3C`) already used for a building's door-point and a
+  vehicle hut's spawn point, sampling real ground height there (`0x44E940`) before creating it. That object is
+  not a bare sprite: it runs the SAME full ground-fire lifecycle a tree's own companion fire does (ambient
+  crackle, a drifting smoke puff almost every tick, a final ember, then a settling finish) - see "Ground fire,
+  ignited trees, and a burning building's flame" below for the full mechanism, now fully decoded. Not
+  independently cross-checked against `objects.md`'s own flame-board rendering for buildings-on-fire, and
   whether this same mechanism is what lights guard post/firewarrior/prayer hut torches (TODO.md "Camp fire")
-  was not checked this session - the entry trigger (reaching building state 4) is specific to the burn-damage
-  path above, so a permanent door torch, if it uses this same primitive, would need its own separate caller
-  into `0x408840` (not found this session; only one caller exists in the whole exe, from this exact state-4
-  entry case).
+  was not checked - the entry trigger (reaching building state 4) is specific to the burn-damage path above, so
+  a permanent door torch, if it uses this same primitive, would need its own separate caller into `0x408840`
+  (not found; only one caller exists in the whole exe, from this exact state-4 entry case). Separately, a
+  distinct, not-fully-identified caller (`0x4089AC`, inside a function reached from `0x4031A3`) ALSO arms the
+  BUILDING's own `+0x7c`/`+0x82`/`+0x68` fields - the exact same field layout the companion fire object itself
+  uses - directly on the building, for 135 turns (~11.25s): whether this drives a second, building-local flame
+  intensity distinct from the door-point companion object, or is bookkeeping unrelated to rendering, was not
+  resolved (open question).
 ```text
 on fire:  timer +0xA7 = 127
 per turn: timer -= 1
@@ -1279,7 +1286,8 @@ read the impact cell's terrain-type nibble (map-cell +0xC) and look up table 0x5
   land: push params [1, 0, 32, 0] to the queue, then create_unit(5, 0xA, tribe, pos) - a ground-fire SCENERY
     object (the exact same object Lightning's own strike creates, "Lightning" in Components - the Components
     table's own "7/0x0A" for that case is a typo for "5/0xA", this class/type), then 0x4A8C60(fire, 0x16) to
-    set its own burn-length countdown (fields and exact turns not decoded this session) and sound 0xB6
+    set its own burn-length countdown - **now fully decoded, "Ground fire, ignited trees, and a burning
+    building's flame" below: 22 turns (~1.83s)** - and sound 0xB6
   either way: create_unit(7, 1, tribe, pos) - a "simple blast" effect, its own fields set directly rather than
     through its usual init: radius (+0x6C) = 5 cells (1280 units, matching R in "Blast push and flight") and the
     same push constants 140/98 from that section - this is the "fireball's own simple-blast-that-panics" already
@@ -1312,6 +1320,63 @@ brief burst and leaving a small standing flame behind - never a single persisten
 our specs: if our own view renders firestorm as one static fire effect instead of a stream of individually
 falling, lit, trailed fireball objects, that view (not the already-correct scheduling in `firestorm`/
 `EffectKind::Firestorm`, spells.md) is where the "rain of fire" look is missing.
+
+### Ground fire, ignited trees, and a burning building's flame [exe]
+One shared scenery object (class 5, type 0xA "fire" - `docs/unit_types`; a standing, opaque 4-frame upward
+flame lick, hfx 90-93, confirmed by eye above) is the SOLE visible carrier of flame, ground smoke and embers in
+every fire context in the game - a bare-ground patch (Lightning's or Firestorm's own impact, "Lightning" in
+Components, "Fireball impact" above), a newly-ignited tree/plant, and a burning building alike. It is entered
+three ways: created directly for a bare-ground strike; spawned once, on its very first tick, by a flammable
+scenery object (tree/plant) that has just caught fire (scenery state 5, entered through the shared "ignite"
+trigger - `docs/scenery_states.csv`), at that object's own position; or spawned once by a building entering its
+own burning state (state 4, "Burning building" above), at the building's own door-adjacent point. Neither the
+tree's own mesh nor the building's own mesh changes pose or texture while burning - the whole visible fire is
+this one companion object, placed once and otherwise independent of what it is burning.
+
+Its burn length is armed by one shared helper (`fn(thing, ticks)`, see Reference `0x4A8C60`), which writes the
+raw per-turn countdown and, purely by that value's SIZE, picks one of three visual-decay bands for its own
+flame-intensity field:
+```text
+ticks <= 0 or ticks >= 38:  flat intensity, no decay (left at whatever created it)
+28 <= ticks < 38:           a late-stage-only decay rate, recomputed again once the countdown drops under 28
+1 <= ticks < 28:            decays steadily from the start down to a floor of 1 over its whole remaining life
+```
+Concretely, every known trigger in the exe: Firestorm's own bare-ground impact patch, 22 turns (~1.83 s, band
+3); Lightning's own bare-ground strike patch, 24 turns (~2.0 s, band 3); an ignited tree/plant's own companion
+fire, a FIXED 76 turns (~6.33 s, band 1) regardless of which spell lit it - decoupled from the tree's own
+burn-to-size-0 timer, which is not independently armed by any known trigger (it inherits whatever countdown the
+tree object already held, unresolved by this trace); a burning building's own door-point companion fire,
+assumed to share the building's structural 127-turn fire (not separately re-armed by a traced call - the one
+other `0x4A8C60` caller found, `0x4089AC`/band 1/135 turns, writes these same fields directly onto the
+BUILDING object itself, not this companion fire, and was not resolved as render-affecting - see "Burning
+building" above).
+
+Every turn the fire object lives: an ambient crackle sound; once every 8 ticks it re-faces its sprite to the
+camera; almost every tick (unless a "no more puffs" flag is set) it spawns a short-lived drifting grey smoke
+puff ("smoke", effect 7/3 - `docs/effect_states.csv`) jittered about 32 units from its own position - **this is
+the only source of ground smoke around a lightning-struck tree or building**, there is no separate smoke
+mechanism, and the last such puff is marked specially. Exactly 4 turns before its countdown reaches 0, it also
+spawns one extra "final ember" effect (7/0x4C). Once the countdown reaches 0 it does not simply vanish: it
+hands off into a brief shared "settling ash" finish - a lingering, lower-frequency re-damage tick on whatever
+building still occupies its cell every 32 ticks, and a visible multi-tick sink into the ground - before finally
+being removed (or, only for the one ignition trigger that is not reachable from any traced spell, remapped into
+a per-type "burnt appearance" instead of deleted).
+
+Impact on our specs:
+- `ground_fire::TICKS` (9 turns, "a guess, ... the exact turn count stays a guess") is now exactly known and
+  caster-dependent: 24 turns for Lightning's own patch, 22 for Firestorm's - not one shared guessed constant.
+- `tree::BURN_TICKS`/`fire::BURN_TICKS` (127 turns, "a guess, as long as a building") is a DIFFERENT timer from
+  what this trace pins down: the companion fire object's own 76-turn visual duration is fixed and confirmed, but
+  the tree's own separate burn-to-size-0 timer (what `BURN_TICKS` actually models) is still unconfirmed by this
+  trace, not necessarily 127 either.
+- `burning_trees.rs`/`buildings.rs` [client]: both attach several flame billboards directly onto the structure's
+  own mesh (a tree's trunk/crown at `BASES`'s 5 points scaled by its height; a grid of flames over a building's
+  footprint, `fire_bases`), fading as a shared `fire_height` curve runs down. The original instead places a
+  SINGLE standing flame sprite at one fixed point (the tree's own base; the building's own door) via an
+  independent companion object - and that object alone, not the structure's own view, is what emits the
+  continuous drifting smoke puffs and the pre-extinguish ember, neither of which exists in either view today (a
+  building's only smoke today is `smoke::damage`'s one-shot wood-loss puff at turn 48, not a continuous one);
+  neither view plays the settling-ash finish before the flame disappears either.
 
 ### Blast's own cast chain [exe]
 Traced this session, since the heading above only ever covered Firestorm's own impact code. The spell's own
@@ -5478,7 +5543,13 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4BAF00, 0x4BB440 | standard shot and fireball shot per turn |
 | 0x4BB290 | fireball impact: creates the shot's own caller-configured effect (class/type/queued params from the shot's own +0x7C-0x86), see "Fireball impact" |
 | 0x511800 | Firestorm's own impact effect (type 0x1C) init: land/water branch, ground-fire or splash, a blast, building ignite |
-| 0x4A8C60 | sets a scenery's own burn-length countdown from a band table (exact fields/turns not decoded) |
+| 0x4A8C60 | "arm burn countdown": `fn(thing,ticks)`, 3 visual-decay bands by ticks' size, "Ground fire..." below |
+| 0x4A7170 | ground-fire scenery object per turn (state 3): crackle sound, smoke puff almost every tick, final ember, countdown |
+| 0x4A7B60 | shared "ignite this scenery object" trigger: re-arms an existing fire, or moves a tree/plant into state 5 |
+| 0x4A7BD0 | ignited tree/plant per turn (state 5): on its first tick spawns its own companion fire object, 76-turn fixed |
+| 0x4A8950 | ground-fire post-burn finish (states 11/12): re-damage pass, "settling ash" sink, then delete/remap |
+| 0x408840 | class-2 state-4 (burning) ENTRY: spawns the building's own door-point companion fire object |
+| 0x408CB0 | building-ignite entry: fireproof check (same `+0x4A` bit 0x1 flag as the library/prison, read as table 0x5A7272 = per-type base + 0x4A), building state -> 4, attacker's tribe into `+0xAF` |
 | 0x50A750 | effect per turn: switch on +0x2C (table 0x50AFD4); effect init by type: table 0x50A59C. Both tables are indexed `state−1`/`type−1` (`dec eax` before the bounds check and `jmp [eax*4+table]` in both dispatchers, confirmed by reading them directly, 2026-10-20) - an off-by-one trap when computing a row's address by hand, see "Insect plague" for a worked example |
 | 0x50B630, 0x50B6F0, 0x50B740 | simple blast: default init, init with parameters, per turn |
 | 0x515E30 | nearest-N selector (invisibility, shield, bloodlust, hypnotism) |
