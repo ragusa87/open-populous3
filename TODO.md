@@ -176,6 +176,18 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   to pull any of them past `GUARD_RANGE`.
 
 ### Units ([units.md](docs/specs/units.md))
+- [x] **Fixed, 2026-11-10** (reported live: a unit standing frozen in the walking pose, never losing life,
+  no feedback at all - "stuck"): traced to `Action::Attacking`'s own `approach` having no fallback once
+  `path::route` comes back empty (an enemy walled off by new construction, say) - `self.route` just stays
+  empty and every tick after does nothing, silently, forever. A unit `Walking`, or `Attacking` while in the
+  open, making less than `STUCK_MIN_PROGRESS` headway over `STUCK_WINDOW` is now treated as `Action::Stranded`
+  instead (arms up, losing life), same as a target genuinely found unreachable up front (`Unit::stuck_watch`,
+  units.md's state table, the `Stranded` row). `[ours]`: a safety net over that specific cause
+  and over whatever subtler one might still strand an ordinary walk short of actually failing to plan at all,
+  not a diagnosis of a single root cause - the window and progress-floor numbers are both guesses. Guarding is
+  deliberately left out (a guard settled on its own orbit point legitimately stands still between nudges,
+  `crate::guard::orbit_point` - this was first tried covering it too and promptly starved a guard to death in
+  testing).
 - [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the stranded rate (`STRANDED_DAMAGE`, scaled x20 from our old 100 HP guess, still unconfirmed). `DROWN_DAMAGE` is answered and is **not** a per-tick damage value at all (pop3-rev-analysis.md "Drowning"): the original always takes a fixed 16 turns (1.33 s) to kill once truly submerged, forcing life to exactly 0, independent of current/max health - a flat countdown, not `-60`/tick. Matters most for the shaman: her much larger health pool means ours currently lets her survive drowning far longer than the original allows.
 - [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
