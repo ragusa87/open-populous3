@@ -43,10 +43,64 @@ use pop3_ai_script::token::{Arg, OneShotType, Team, TargetType};
 use pop3_format::header::TRIBES;
 use std::path::Path;
 
-/// `INT_GAME_TURN`, `INT_MY_NUM_PEOPLE`: the only non-attribute internal variables `ScriptEnv` backs
-/// with real state so far (field.rs's `INTERNAL_VAR_NAMES`).
+/// `INT_GAME_TURN`, `INT_MY_NUM_PEOPLE`, the per-colour headcounts and the `INT_*_KILLED_BY_*` family
+/// below: the only non-attribute internal variables `ScriptEnv` backs with real state (field.rs's
+/// `INTERNAL_VAR_NAMES`).
 const INT_GAME_TURN: InternalVar = InternalVar(0);
 const INT_MY_NUM_PEOPLE: InternalVar = InternalVar(1);
+const INT_BLUE_PEOPLE: InternalVar = InternalVar(2);
+const INT_RED_PEOPLE: InternalVar = InternalVar(3);
+const INT_YELLOW_PEOPLE: InternalVar = InternalVar(4);
+const INT_GREEN_PEOPLE: InternalVar = InternalVar(5);
+const INT_MY_NUM_KILLED_BY_HUMAN: InternalVar = InternalVar(6);
+const INT_RED_KILLED_BY_HUMAN: InternalVar = InternalVar(7);
+const INT_YELLOW_KILLED_BY_HUMAN: InternalVar = InternalVar(8);
+const INT_GREEN_KILLED_BY_HUMAN: InternalVar = InternalVar(9);
+const INT_BLUE_KILLED_BY_ME: InternalVar = InternalVar(1176);
+const INT_RED_KILLED_BY_ME: InternalVar = InternalVar(1177);
+const INT_YELLOW_KILLED_BY_ME: InternalVar = InternalVar(1178);
+const INT_GREEN_KILLED_BY_ME: InternalVar = InternalVar(1179);
+const INT_MY_NUM_KILLED_BY_BLUE: InternalVar = InternalVar(1180);
+const INT_MY_NUM_KILLED_BY_RED: InternalVar = InternalVar(1181);
+const INT_MY_NUM_KILLED_BY_YELLOW: InternalVar = InternalVar(1182);
+const INT_MY_NUM_KILLED_BY_GREEN: InternalVar = InternalVar(1183);
+
+/// `INT_BLUE_PEOPLE`..`INT_GREEN_PEOPLE`: a specific colour's headcount, unlike `INT_MY_NUM_PEOPLE`
+/// never relative to the reading script's own `owner`.
+fn color_headcount(map: &GameMap, var: InternalVar) -> Option<i32> {
+    let tribe = match var {
+        INT_BLUE_PEOPLE => TribeId::Blue,
+        INT_RED_PEOPLE => TribeId::Red,
+        INT_YELLOW_PEOPLE => TribeId::Yellow,
+        INT_GREEN_PEOPLE => TribeId::Green,
+        _ => return None,
+    };
+    Some(map.headcount(tribe).total() as i32)
+}
+
+/// The `INT_*_KILLED_BY_*` family (field.rs's `INTERNAL_VAR_NAMES`): `GameMap::kills[killer][victim]`,
+/// resolved against the reading script's own `owner` for whichever side a name leaves implicit ("me").
+/// `_HUMAN` means "by/of blue" (tribes.rs: blue is always the human player) - `RED`/`YELLOW`/`GREEN`
+/// `_KILLED_BY_HUMAN` name their victim outright rather than through `owner`, so unlike
+/// `INT_MY_NUM_KILLED_BY_HUMAN` they read the same number from any script, not just that colour's own.
+fn kill_count(map: &GameMap, owner: TribeId, var: InternalVar) -> Option<i32> {
+    let (killer, victim) = match var {
+        INT_MY_NUM_KILLED_BY_HUMAN => (TribeId::Blue, owner),
+        INT_RED_KILLED_BY_HUMAN => (TribeId::Blue, TribeId::Red),
+        INT_YELLOW_KILLED_BY_HUMAN => (TribeId::Blue, TribeId::Yellow),
+        INT_GREEN_KILLED_BY_HUMAN => (TribeId::Blue, TribeId::Green),
+        INT_BLUE_KILLED_BY_ME => (owner, TribeId::Blue),
+        INT_RED_KILLED_BY_ME => (owner, TribeId::Red),
+        INT_YELLOW_KILLED_BY_ME => (owner, TribeId::Yellow),
+        INT_GREEN_KILLED_BY_ME => (owner, TribeId::Green),
+        INT_MY_NUM_KILLED_BY_BLUE => (TribeId::Blue, owner),
+        INT_MY_NUM_KILLED_BY_RED => (TribeId::Red, owner),
+        INT_MY_NUM_KILLED_BY_YELLOW => (TribeId::Yellow, owner),
+        INT_MY_NUM_KILLED_BY_GREEN => (TribeId::Green, owner),
+        _ => return None,
+    };
+    Some(map.kills[killer.as_usize()][victim.as_usize()] as i32)
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct TribeScript {
@@ -98,6 +152,10 @@ impl Env for ScriptEnv<'_> {
             self.map.now.to_wire() as i32
         } else if var == INT_MY_NUM_PEOPLE {
             self.map.headcount(self.owner).total() as i32
+        } else if let Some(n) = color_headcount(self.map, var) {
+            n
+        } else if let Some(n) = kill_count(self.map, self.owner, var) {
+            n
         } else if var.is_attribute() {
             self.map.ai_attr(self.owner, var)
         } else {
@@ -1194,5 +1252,68 @@ mod tests {
         }
         let attacker = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Red)).unwrap();
         assert!(matches!(attacker.action, crate::unit::Action::Attacking { target: crate::unit::Target::Unit(id), .. } if id == blue), "land-bridged: the raid fires at the marker's own target");
+    }
+
+    /// `IF (<cond>) { DO <call> }`, unconditioned on `INT_GAME_TURN` (unlike `turn_zero_do`) since these
+    /// tests call `GameMap::tend_ai_scripts` directly, not through `map.tick()`.
+    fn do_if(cond: Cond, call: Call) -> Script {
+        Script { version: 12, block: Block(vec![Stmt::If { cond, then_: Block(vec![Stmt::Do(call)]), else_: None }]) }
+    }
+
+    fn gt_zero(var: u16) -> Cond {
+        Cond::Cmp { op: pop3_ai_script::token::CmpOp::Gt, a: Field::Internal(InternalVar(var)), b: Field::Const(0) }
+    }
+
+    #[test]
+    fn int_red_killed_by_me_reflects_the_kill_matrix() {
+        let script = do_if(gt_zero(1177), Call { id: CommandId::from_name("STATE_AUTO_ATTACK").unwrap(), args: vec![Arg::OnOff(true)] }); // INT_RED_KILLED_BY_ME
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (10 * 512, 10 * 512)).id;
+        map.tend_ai_scripts();
+        assert!(!map.ai_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK), "no kill yet");
+        map.apply_events(vec![crate::event::WorldEvent::Damage { unit: victim, amount: u16::MAX, kind: crate::effect::DamageKind::Lightning, from: Some(Owner::Tribe(TribeId::Blue)) }]);
+        map.tend_ai_scripts();
+        assert!(map.ai_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK), "the kill now shows up");
+    }
+
+    #[test]
+    fn int_my_num_killed_by_human_and_by_blue_agree_for_a_non_blue_script() {
+        let script = Script {
+            version: 12,
+            block: Block(vec![
+                Stmt::If { cond: gt_zero(6), then_: Block(vec![Stmt::Do(Call { id: CommandId::from_name("STATE_AUTO_ATTACK").unwrap(), args: vec![Arg::OnOff(true)] })]), else_: None }, // INT_MY_NUM_KILLED_BY_HUMAN
+                Stmt::If { cond: gt_zero(1180), then_: Block(vec![Stmt::Do(Call { id: CommandId::from_name("STATE_DEFEND").unwrap(), args: vec![Arg::OnOff(true)] })]), else_: None }, // INT_MY_NUM_KILLED_BY_BLUE
+            ]),
+        };
+        let mut map = map_with_ai_and_script(TribeId::Red, script);
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (10 * 512, 10 * 512)).id;
+        map.tend_ai_scripts();
+        assert!(!map.ai_state(TribeId::Red, crate::ai::state::AUTO_ATTACK));
+        assert!(!map.ai_state(TribeId::Red, crate::ai::state::DEFEND));
+        map.apply_events(vec![crate::event::WorldEvent::Damage { unit: victim, amount: u16::MAX, kind: crate::effect::DamageKind::Lightning, from: Some(Owner::Tribe(TribeId::Blue)) }]);
+        map.tend_ai_scripts();
+        assert!(map.ai_state(TribeId::Red, crate::ai::state::AUTO_ATTACK), "INT_MY_NUM_KILLED_BY_HUMAN sees blue's kill");
+        assert!(map.ai_state(TribeId::Red, crate::ai::state::DEFEND), "INT_MY_NUM_KILLED_BY_BLUE sees the same kill");
+    }
+
+    #[test]
+    fn an_unrelated_tribes_kill_does_not_flip_int_my_num_killed_by_blue() {
+        let script = do_if(gt_zero(1180), Call { id: CommandId::from_name("STATE_AUTO_ATTACK").unwrap(), args: vec![Arg::OnOff(true)] }); // INT_MY_NUM_KILLED_BY_BLUE
+        let mut map = map_with_ai_and_script(TribeId::Red, script);
+        let victim = map.spawn(TribeId::Yellow, UnitKind::Brave, (10 * 512, 10 * 512)).id;
+        map.apply_events(vec![crate::event::WorldEvent::Damage { unit: victim, amount: u16::MAX, kind: crate::effect::DamageKind::Lightning, from: Some(Owner::Tribe(TribeId::Blue)) }]);
+        map.tend_ai_scripts();
+        assert!(!map.ai_state(TribeId::Red, crate::ai::state::AUTO_ATTACK), "blue killed yellow's unit, not red's");
+    }
+
+    #[test]
+    fn color_headcounts_read_a_specific_tribe_not_the_scripts_own_owner() {
+        let script = do_if(gt_zero(3), Call { id: CommandId::from_name("STATE_AUTO_ATTACK").unwrap(), args: vec![Arg::OnOff(true)] }); // INT_RED_PEOPLE
+        let mut map = map_with_ai_and_script(TribeId::Blue, script);
+        map.tend_ai_scripts();
+        assert!(!map.ai_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK), "no red people yet");
+        map.spawn(TribeId::Red, UnitKind::Brave, (10 * 512, 10 * 512));
+        map.tend_ai_scripts();
+        assert!(map.ai_state(TribeId::Blue, crate::ai::state::AUTO_ATTACK), "blue's own script can read red's headcount");
     }
 }

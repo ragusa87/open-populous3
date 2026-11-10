@@ -113,6 +113,9 @@ pub struct GameMap {
     /// Buildings a fire finished off, by the tribe that lit it ("The tick" [exe] `stats[tribe][7]`,
     /// `WorldEvent::BuildingBurnedDown`, `crate::fire::tend_fires`): fire-specific, not every destruction.
     pub fires_put_out: [u32; TRIBES],
+    /// Units of tribe `victim` killed by tribe `killer`, `kills[killer][victim]` (ai-scripts.md "Internal
+    /// variables", the `INT_*_KILLED_BY_*` family): every kind of kill, not just melee (unlike `melee_deaths`).
+    pub kills: [[u32; TRIBES]; TRIBES],
     /// Ticks run since the map was made (`tick`).
     pub now: Tick,
     /// The next id `new_id` gives: units, buildings and effects share it, an id is never given twice.
@@ -183,7 +186,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -239,6 +242,7 @@ impl GameMap {
             melee_wins: [0; TRIBES],
             melee_deaths: [0; TRIBES],
             fires_put_out: [0; TRIBES],
+            kills: [[0; TRIBES]; TRIBES],
             now: Tick::ZERO,
             next_id: 1,
             rng: Lcg(0),
@@ -1801,8 +1805,12 @@ impl GameMap {
             WorldEvent::Damage { unit, amount, kind, from } => {
                 let owner = self.unit(unit).map(|u| u.owner);
                 let died = self.damage(unit, amount, kind, from);
-                if let Some(attacker) = from.and_then(Owner::tribe) {
+                let attacker = from.and_then(Owner::tribe);
+                if let Some(attacker) = attacker {
                     self.ai_record_sortie_damage(attacker, unit, amount);
+                }
+                if died && let (Some(victim), Some(killer)) = (owner.and_then(Owner::tribe), attacker) {
+                    self.kills[killer.as_usize()][victim.as_usize()] += 1;
                 }
                 if died && kind == DamageKind::Melee && let Some(tribe) = owner.and_then(Owner::tribe) {
                     self.melee_deaths[tribe.as_usize()] += 1;
@@ -4184,5 +4192,25 @@ mod tests {
         assert_eq!(m.units[1].action, Action::Idle);
         m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: mine, order: to(&m.units[0]) });
         assert!(matches!(m.units[0].action, Action::Walking { .. }));
+    }
+
+    /// `kills` backs the AI script's `INT_*_KILLED_BY_*` family (ai_script.rs) - unlike `melee_deaths`,
+    /// it tallies every kind of kill, not just a melee blow.
+    #[test]
+    fn a_kill_through_any_damage_kind_tallies_the_killer_against_the_victims_tribe() {
+        let mut map = GameMap::bare("t", Heightmap::new(32), Vec::new());
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (12 * 512, 10 * 512)).id;
+        map.apply_events(vec![WorldEvent::Damage { unit: victim, amount: u16::MAX, kind: DamageKind::Lightning, from: Some(Owner::Tribe(TribeId::Blue)) }]);
+        assert_eq!(map.kills[TribeId::Blue.as_usize()][TribeId::Red.as_usize()], 1, "a non-melee kill still tallies");
+        assert_eq!(map.melee_deaths[TribeId::Red.as_usize()], 0, "melee_deaths only counts DamageKind::Melee");
+    }
+
+    #[test]
+    fn an_unrelated_tribe_pair_is_not_tallied_by_someone_elses_kill() {
+        let mut map = GameMap::bare("t", Heightmap::new(32), Vec::new());
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (12 * 512, 10 * 512)).id;
+        map.apply_events(vec![WorldEvent::Damage { unit: victim, amount: u16::MAX, kind: DamageKind::Lightning, from: Some(Owner::Tribe(TribeId::Blue)) }]);
+        assert_eq!(map.kills[TribeId::Yellow.as_usize()][TribeId::Red.as_usize()], 0);
+        assert_eq!(map.kills[TribeId::Blue.as_usize()][TribeId::Yellow.as_usize()], 0);
     }
 }
