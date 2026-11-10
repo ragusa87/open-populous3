@@ -56,6 +56,11 @@ Not in the file [exe]: the income per person is `MANA_BUSY_BRAVES` 15 / `MANA_ID
   that fit nowhere stay.
 - Vehicles hold people their own way (`Unit::aboard`, vehicles.md); vehicle huts take braves as a crew that
   fetches wood and builds vehicles (vehicles.md "Vehicle huts").
+- Eject (shortcuts.md "Buildings"): Shift + left click on one of the player's buildings (`selection::eject_click`,
+  independent of the current selection) sends its own lowest-id occupant out by the door, released
+  (`Command::Eject`, `GameMap::eject`, reusing `work::send_out`'s door-walk). `[ours]`: which occupant isn't
+  traced, only that exactly one leaves (shortcuts.md's sibling row for a vehicle, "one follower gets out", is
+  still open - same mechanism, TODO.md).
 - `Building::inside` is counted each tick from the units inside (`GameMap::count_inside`): a built hut or
   drum tower with people inside smokes from the top of its roof. The one in a drum tower stands on its lookout,
   in view (buildings.md "On screen"). The tooltip shows `Braves: people inside/room` (planned: a people row, tooltips.md).
@@ -69,8 +74,12 @@ hut (max size) hides the red bar, it does not show it at 0.
 1. **Entering** (`Order::Enter { building }` through `Command::OrderUnit`): any follower of the owner (not the
    shaman, not wildmen) walks to the door, then in (buildings.md "Doors"), and becomes `Action::Inside`: off the
    map, no standing slot, not drawn. A full hut refuses: the unit stops at the door, idle.
-2. **Leaving**: an order to a unit inside (move, pray...) makes it come out by the door first. `Command::Eject
-   { player, building }` empties a hut. A hut that is dismantled or destroyed puts everyone out by the door.
+2. **Leaving**: an order to a unit inside (move, pray...) makes it come out by the door first. Shift + left
+   click on the building sends its own lowest-id occupant out (`Command::Eject { player, building }`,
+   `GameMap::eject`, shortcuts.md "Buildings": "one follower comes out" - corrected, 2026-11-10: this entry
+   used to say it empties the whole building, which shortcuts.md's own table never actually said, and
+   contradicts its sibling row for a vehicle, "one follower gets out"). A hut that is dismantled or destroyed
+   puts everyone out by the door.
 3. **Auto-housing** (done - `GameMap::tend_auto_housing`, `enter.rs`) [ours]: a brave genuinely idle - nothing
    chained, no patrol, no task (`Unit::busy`) - for `HOUSE_DELAY` (10 s, `Unit::idle_ticks`) walks into the
    nearest of its own tribe's built huts with room, within `HOUSE_SEARCH_RADIUS_CELLS` (8); none close enough

@@ -585,8 +585,19 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] CC0 sheets: a jump pose for flattening (`Pose::Jump` falls back on arms up) and a hammer pose (`Pose::Hammer` falls back on idle).
 - [ ] Find the original hammering anim (the axe swing, anim 11, stands in for `Pose::Hammer`).
 - [x] Huts: auto-housing of idle braves implemented (huts-and-training.md rule 3, `GameMap::tend_auto_housing`,
-  `enter.rs`): still open from this item - breeding (done separately, `hut_growth.rs`), mana from people inside,
-  Eject. No autonomous wood-gathering by an idle person was found this session (pop3-rev-analysis.md "Idle
+  `enter.rs`): still open from this item - breeding (done separately, `hut_growth.rs`), mana from people inside.
+  **Eject implemented, 2026-11-10** (user question: is "selection + Shift + click a building dispatches to a
+  free spot" implemented? Answer: mostly yes already, but via the Build tab icon's own Shift+click
+  (`send_in.rs`/`GameMap::send_into`, ui-and-editor.md "Build tab"), not by Shift-clicking a specific building
+  directly - that gesture did nothing extra until now. shortcuts.md's own "Buildings" table already names what
+  it should do instead: "one follower comes out" - `Command::Eject`/`GameMap::eject` (lowest-id occupant,
+  `[ours]`, not itself traced which one), `selection::eject_click` wires Shift + left click on one of the
+  player's buildings to it, independent of the current selection. This also corrected huts-and-training.md's
+  own older, wrong description of `Command::Eject` as emptying the whole building - never actually
+  implemented, and contradicted by shortcuts.md's sibling row for a vehicle using the same "one ... out"
+  wording). Still open, flagged by the same shortcuts.md row and left out of this pass: "Shift + left click on
+  a vehicle: one follower gets out" - same mechanism, applied to `Vehicle::passengers` instead of a building's
+  occupants. No autonomous wood-gathering by an idle person was found this session (pop3-rev-analysis.md "Idle
   behaviour"): a person with no command group does nothing at all, forever; the one confirmed autonomous,
   non-player assignment (a training building's own per-turn code, 0x405B80) looks like occupant/queue
   positioning, not wood-fetching, pending its unread "doing it" half - don't add an idle-brave-fetches-wood

@@ -203,7 +203,7 @@ impl GameMap {
 
     /// Those inside the building `building` matching `evict` walk out by its `door` to a free spot
     /// around it, released, then stand idle.
-    fn send_out(&mut self, building: BuildingId, door: (u16, u16), evict: impl Fn(&Unit) -> bool) {
+    pub(crate) fn send_out(&mut self, building: BuildingId, door: (u16, u16), evict: impl Fn(&Unit) -> bool) {
         let out: Vec<(UnitId, (u16, u16))> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building) && evict(u)).map(|u| (u.id, (u.x, u.z))).collect();
         let ids: Vec<UnitId> = out.iter().map(|o| o.0).collect();
         let spots = slots::dispatch(&self.ground(), &out, door, &self.taken_spots(&ids));

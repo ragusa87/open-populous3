@@ -1213,6 +1213,10 @@ impl GameMap {
                 self.set_dismantling(player, building, on);
                 None
             }
+            Command::Eject { player, building } => {
+                self.eject(player, building);
+                None
+            }
             Command::MoveVehicle { player, vehicle, to } => {
                 if self.vehicle(vehicle).is_some_and(|v| v.owner == player && !v.passengers.is_empty()) {
                     self.move_vehicle(vehicle, to);

@@ -84,6 +84,17 @@ impl GameMap {
         self.units_inside(building).count()
     }
 
+    /// Shift + left click on one of `player`'s buildings (shortcuts.md "Buildings": "one follower comes
+    /// out", the same gesture as "Shift + left click on a vehicle"): its own lowest-id occupant walks out
+    /// by the door to a free spot around it, released (`GameMap::send_out`) - a no-op without one of
+    /// theirs inside. `[ours]`: which one leaves isn't traced, only that exactly one does.
+    pub fn eject(&mut self, player: TribeId, building: BuildingId) {
+        let Some(b) = self.building_index(building).filter(|&b| self.buildings[b].owner == player) else { return };
+        let door = self.buildings[b].door();
+        let Some(id) = self.units_inside(building).filter(|u| u.owner == player).map(|u| u.id).min() else { return };
+        self.send_out(building, door, |u| u.id == id);
+    }
+
     /// The living units in the building `building`, standing or walking in (not those walking out).
     pub fn units_inside(&self, building: BuildingId) -> impl Iterator<Item = &Unit> {
         self.units.iter().filter(move |u| u.is_alive() && u.inside.is_some_and(|i| i.building == building) && !matches!(u.action, Action::Walking { .. } | Action::Stranded { .. }))
@@ -171,6 +182,40 @@ mod tests {
         map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: resting, order: Order::MoveTo { x: corner(20, 10).0, z: corner(20, 10).1 } });
         map.tick();
         assert_eq!(map.buildings[hut].inside, 2, "leaving");
+    }
+
+    #[test]
+    fn eject_sends_out_the_lowest_id_occupant_and_leaves_the_rest() {
+        let mut map = GameMap::sandbox_buildings();
+        let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside == 0).unwrap();
+        let id = map.buildings[hut].id;
+        let units = braves(&map, 3);
+        for c in map.enter_orders(TribeId::Blue, &units, hut) {
+            map.apply(&c);
+        }
+        run_until(&mut map, 600, |m| m.people_inside(id) == 3).expect("all 3 in");
+        let lowest = *units.iter().min().unwrap();
+        map.apply(&Command::Eject { player: TribeId::Blue, building: id });
+        assert!(matches!(map.unit(lowest).unwrap().action, Action::Walking { .. }), "sent out by the door at once");
+        run_until(&mut map, 600, |m| m.unit(lowest).unwrap().inside.is_none()).expect("out the door");
+        assert_eq!(map.people_inside(id), 2, "walked all the way out");
+        run_until(&mut map, 600, |m| m.unit(lowest).unwrap().action == Action::Idle).expect("settles outside");
+        for &u in &units {
+            if u != lowest {
+                assert_eq!(map.unit(u).unwrap().inside, Some(Inside { building: id, door: map.buildings[hut].door() }), "{u:?} stays");
+            }
+        }
+    }
+
+    #[test]
+    fn eject_is_a_no_op_without_one_of_the_players_own_inside() {
+        let mut map = GameMap::sandbox_buildings();
+        let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && b.inside == 0).unwrap();
+        let id = map.buildings[hut].id;
+        map.apply(&Command::Eject { player: TribeId::Blue, building: id });
+        assert_eq!(map.people_inside(id), 0, "empty: nothing to eject");
+        map.apply(&Command::Eject { player: TribeId::Red, building: id });
+        assert_eq!(map.people_inside(id), 0, "not their building either way");
     }
 
     #[test]
