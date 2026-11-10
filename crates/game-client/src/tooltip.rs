@@ -97,6 +97,14 @@ impl TooltipModel {
     pub fn same_layout(&self, other: &TooltipModel) -> bool {
         self.lines == other.lines && self.rows == other.rows && self.toggle == other.toggle && self.bars.iter().map(|b| (b.kind, b.fine.is_some())).eq(other.bars.iter().map(|b| (b.kind, b.fine.is_some())))
     }
+
+    /// Whether `other` has the same lines, rows and slots (just possibly different icons/text/selection) and
+    /// the same toggle, so it can be redrawn by updating the existing entities in place (`update_content`)
+    /// instead of tearing the whole tooltip down and rebuilding it - the common case while something keeps
+    /// changing (people walking in and out, wood arriving) on an otherwise steady hover.
+    fn same_shape(&self, other: &TooltipModel) -> bool {
+        self.lines.len() == other.lines.len() && self.toggle == other.toggle && self.rows.len() == other.rows.len() && self.rows.iter().zip(&other.rows).all(|(a, b)| a.len() == b.len())
+    }
 }
 
 /// The bars of the tooltip shown, read every frame by its bars' parts.
@@ -538,6 +546,20 @@ struct TooltipBox;
 #[derive(Component)]
 struct SlotUnit(UnitId);
 
+/// A tooltip text line, its index into `TooltipModel::lines` - lets `update_content` set its text in place.
+#[derive(Component)]
+struct TooltipLine(usize);
+
+/// A slot's icon, its `(row, slot)` index into `TooltipModel::rows` - lets `update_content` swap its image
+/// and its `SlotUnit` in place.
+#[derive(Component)]
+struct TooltipIcon(usize, usize);
+
+/// A people slot's arrow cell (its selected marker, always present to keep the row from shifting), its
+/// `(row, slot)` index - lets `update_content` add or remove the arrow image in place.
+#[derive(Component)]
+struct TooltipArrow(usize, usize);
+
 /// What the tooltip shows (`revealed`: clicked, see `building_model`), since when the cursor is on the
 /// thing under it (and whether it was clicked), and since when the shown thing and the tooltip lost the cursor.
 #[derive(Default)]
@@ -573,8 +595,11 @@ fn spawn_tooltip(mut commands: Commands) {
 
 /// The tooltip of the building or tree under the cursor once rested on for `HOVER_SECS`, right-clicked or
 /// left-clicked with nothing selected (which also reveals who is in another tribe's building),
-/// above it, kept while the cursor is on it or on the tooltip (`sticky`), redrawn when its model changes
-/// (hidden that frame, until laid out at its new size).
+/// above it, kept while the cursor is on it or on the tooltip (`sticky`). Its content is kept up to date as its
+/// model changes: a bars-only change updates them in place (`set_bars`); a same-shape change (a different
+/// occupant, a wood pile filling, a selection) redraws the existing lines/icons/arrows in place
+/// (`update_content`), never hidden; only a genuine shape change (a different number of lines/rows/slots, or
+/// its toggle) tears the tooltip down and rebuilds it (hidden that one frame, until laid out at its new size).
 #[allow(clippy::too_many_arguments)]
 fn show_tooltip(
     mut commands: Commands,
@@ -590,7 +615,14 @@ fn show_tooltip(
     totems: Query<(&crate::totems::TotemView, &GlobalTransform)>,
     selection: Res<Selection>,
     mut state: Local<TooltipState>,
-    (mut icons, mut images, mut shown_bars): (ResMut<IconImages>, ResMut<Assets<Image>>, ResMut<ShownBars>),
+    (mut icons, mut images, mut shown_bars, mut lines, mut icon_slots, mut arrows): (
+        ResMut<IconImages>,
+        ResMut<Assets<Image>>,
+        ResMut<ShownBars>,
+        Query<(&TooltipLine, &mut Text)>,
+        Query<(Entity, &TooltipIcon, &mut ImageNode, Option<&SlotUnit>), Without<TooltipArrow>>,
+        Query<(Entity, &TooltipArrow, Option<&ImageNode>)>,
+    ),
     mut tooltip: Query<(Entity, &Interaction, &ComputedNode, &mut Node, &mut Visibility), With<TooltipBox>>,
     (vehicles, curve, swamps): (Query<(&crate::views::ViewOf, &GlobalTransform), With<crate::vehicles::VehicleView>>, Res<crate::camera::CurveParamsRes>, Query<(&crate::swamp::SwampAnchor, &GlobalTransform)>),
 ) {
@@ -666,6 +698,11 @@ fn show_tooltip(
         state.model = Some(model);
         return;
     }
+    if state.model.as_ref().is_some_and(|m| m.same_shape(&model)) {
+        update_content(&mut commands, &model, &mut icons, &mut images, &mut lines, &mut icon_slots, &mut arrows);
+        state.model = Some(model);
+        return;
+    }
     vis.set_if_neq(Visibility::Hidden);
     commands.entity(entity).despawn_children();
     commands.entity(entity).with_children(|t| {
@@ -710,10 +747,12 @@ fn set_bars(bars: Res<ShownBars>, mut widgets: Query<(&TooltipBar, &mut crate::p
     }
 }
 
-/// The tooltip's text lines and slot rows.
+/// The tooltip's text lines and slot rows, each line/slot tagged (`TooltipLine`/`TooltipIcon`/`TooltipArrow`)
+/// so `update_content` can redraw them in place later without despawning anything, as long as the shape
+/// (`TooltipModel::same_shape`) stays the same.
 fn spawn_content(t: &mut ChildSpawnerCommands, model: &TooltipModel, icons: &mut IconImages, images: &mut Assets<Image>) {
     for (k, line) in model.lines.iter().enumerate() {
-        let text = (Text::new(line.clone()), TextFont { font_size: FontSize::Px(if k == 0 { 14.0 } else { 12.0 }), ..default() }, TextColor(Color::WHITE), TextShadow::default(), Pickable::IGNORE);
+        let text = (Text::new(line.clone()), TextFont { font_size: FontSize::Px(if k == 0 { 14.0 } else { 12.0 }), ..default() }, TextColor(Color::WHITE), TextShadow::default(), Pickable::IGNORE, TooltipLine(k));
         match model.toggle.filter(|_| k == 0) {
             Some(toggle) => {
                 t.spawn((Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Start, column_gap: px(8), ..default() }, Pickable::IGNORE)).with_children(|top| {
@@ -726,7 +765,7 @@ fn spawn_content(t: &mut ChildSpawnerCommands, model: &TooltipModel, icons: &mut
             }
         }
     }
-    for row in &model.rows {
+    for (row_index, row) in model.rows.iter().enumerate() {
         t.spawn((Node { height: px(1), margin: UiRect::vertical(px(1)), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)), Pickable::IGNORE));
         let people = row.iter().any(|s| matches!(s.icon, Icon::Unit { .. } | Icon::Placeholder(_)));
         let wood = row.iter().any(|s| matches!(s.icon, Icon::Wood | Icon::NoWood));
@@ -734,17 +773,18 @@ fn spawn_content(t: &mut ChildSpawnerCommands, model: &TooltipModel, icons: &mut
         let mut start = 0;
         for len in line_lengths(row.len(), wood) {
             t.spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(1), ..default() }, Pickable::IGNORE)).with_children(|line| {
-                for slot in &row[start..start + len] {
+                for (offset, slot) in row[start..start + len].iter().enumerate() {
+                    let slot_index = start + offset;
                     line.spawn((Node { flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|cell| {
                         if people {
-                            let arrow = (Node { width: px(SLOT_W as f32), height: px(ARROW_H), ..default() }, Pickable::IGNORE);
+                            let arrow = (Node { width: px(SLOT_W as f32), height: px(ARROW_H), ..default() }, Pickable::IGNORE, TooltipArrow(row_index, slot_index));
                             if slot.selected {
-                                cell.spawn((ImageNode::new(icons.get(Icon::Selected, images)).with_rect(Rect::new(0.0, 12.0, ICON_W as f32, 16.0)), arrow));
+                                cell.spawn((selected_arrow_image(icons, images), arrow));
                             } else {
                                 cell.spawn(arrow);
                             }
                         }
-                        let mut icon = cell.spawn((ImageNode::new(icons.get(slot.icon, images)), Node { width: px(w as f32), height: px(h as f32), ..default() }));
+                        let mut icon = cell.spawn((ImageNode::new(icons.get(slot.icon, images)), Node { width: px(w as f32), height: px(h as f32), ..default() }, TooltipIcon(row_index, slot_index)));
                         if let Some(id) = slot.unit {
                             icon.insert((SlotUnit(id), Interaction::default()));
                         } else {
@@ -754,6 +794,60 @@ fn spawn_content(t: &mut ChildSpawnerCommands, model: &TooltipModel, icons: &mut
                 }
             });
             start += len;
+        }
+    }
+}
+
+/// The arrow image over a selected slot's icon (`spawn_content`'s own literal, kept in one place).
+fn selected_arrow_image(icons: &mut IconImages, images: &mut Assets<Image>) -> ImageNode {
+    ImageNode::new(icons.get(Icon::Selected, images)).with_rect(Rect::new(0.0, 12.0, ICON_W as f32, 16.0))
+}
+
+/// Redraws an already-spawned tooltip whose shape (`TooltipModel::same_shape`) is unchanged from its last
+/// model: sets each line's text, each icon's image/`SlotUnit`, and each arrow's presence, by its own
+/// `(row, slot)`/line index - no despawn, so the box never blinks or needs to be hidden while it catches up.
+#[allow(clippy::too_many_arguments)]
+fn update_content(
+    commands: &mut Commands,
+    model: &TooltipModel,
+    icons: &mut IconImages,
+    images: &mut Assets<Image>,
+    lines: &mut Query<(&TooltipLine, &mut Text)>,
+    icon_slots: &mut Query<(Entity, &TooltipIcon, &mut ImageNode, Option<&SlotUnit>), Without<TooltipArrow>>,
+    arrows: &mut Query<(Entity, &TooltipArrow, Option<&ImageNode>)>,
+) {
+    for (line, mut text) in lines {
+        if let Some(new) = model.lines.get(line.0).filter(|&new| *new != text.0) {
+            text.0 = new.clone();
+        }
+    }
+    for (entity, icon, mut image, unit) in icon_slots {
+        let Some(slot) = model.rows.get(icon.0).and_then(|row| row.get(icon.1)) else { continue };
+        let handle = icons.get(slot.icon, images);
+        if image.image != handle {
+            image.image = handle;
+        }
+        if unit.map(|u| u.0) != slot.unit {
+            match slot.unit {
+                Some(id) => {
+                    commands.entity(entity).insert((SlotUnit(id), Interaction::default())).remove::<Pickable>();
+                }
+                None => {
+                    commands.entity(entity).remove::<(SlotUnit, Interaction)>().insert(Pickable::IGNORE);
+                }
+            }
+        }
+    }
+    for (entity, arrow, image) in arrows {
+        let selected = model.rows.get(arrow.0).and_then(|row| row.get(arrow.1)).is_some_and(|s| s.selected);
+        match (selected, image.is_some()) {
+            (true, false) => {
+                commands.entity(entity).insert(selected_arrow_image(icons, images));
+            }
+            (false, true) => {
+                commands.entity(entity).remove::<ImageNode>();
+            }
+            _ => {}
         }
     }
 }
