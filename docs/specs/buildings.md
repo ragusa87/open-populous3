@@ -275,17 +275,20 @@ On screen (as in the game):
 
 ### Dismantling
 Switched by the tooltip's toggle (tooltips.md, `Command::Dismantle`/`GameMap::set_dismantling`). On a built
-building it stops working and the people inside walk out first. With Dismantle on (on a built building or one
-under construction), a brave still assigned to it (`Order::Build`, same assignment as normal construction) goes
-in and, after a round of `Action::Building` (`GameMap::dismantle_step`, same pose and `BUILD_TICKS` as building —
-no "unbuilding" animation is traced either), one piece of wood is pulled out (`GameMap::dismantle_piece`): dropped
-on the ground near the door as a wood piece (`Building::pile_point`, a real `WoodPiece`, see trees.md, usable by
-any construction) — nothing is fetched or carried in, unlike building up. A building switched on with nothing
-built in yet (`used == 0`, e.g. a freshly flattened plan) sits untouched: there is nothing to take apart. Once all
-its wood is out, the building is removed (`GameMap::remove_building`, releasing every assigned brave) and its
-ground is free again right away, no ashes (a covered tree grows back, unlike a building destroyed by wear or
-fire, `ashes.rs`). Switching back to Build makes braves rebuild it with wood again, from wherever dismantling left
-it.
+building it stops working and the people inside walk out first - its own braves among them (not the shaman or
+any other kind) are picked up as dismantling workers right there, up to `max_braves`, with no separate build
+order needed (`[ours]`: switching the toggle alone used to leave the building sitting in `Stage::Dismantling`
+forever unless the player separately selected braves and clicked it again, same as a fresh plan - a brave
+leaving the building now can be the one that dismantles it). A brave assigned to it (`Order::Build`, same
+assignment as normal construction, or picked up this way) goes in and, after a round of `Action::Building`
+(`GameMap::dismantle_step`, same pose and `BUILD_TICKS` as building — no "unbuilding" animation is traced
+either), one piece of wood is pulled out (`GameMap::dismantle_piece`): dropped on the ground near the door as a
+wood piece (`Building::pile_point`, a real `WoodPiece`, see trees.md, usable by any construction) — nothing is
+fetched or carried in, unlike building up. A building switched on with nothing built in yet (`used == 0`, e.g. a
+freshly flattened plan) sits untouched: there is nothing to take apart. Once all its wood is out, the building is
+removed (`GameMap::remove_building`, releasing every assigned brave) and its ground is free again right away, no
+ashes (a covered tree grows back, unlike a building destroyed by wear or fire, `ashes.rs`). Switching back to
+Build makes braves rebuild it with wood again, from wherever dismantling left it.
 
 ### Explosion (drawn)
 A building that blows up is drawn only, the simulation just removes it (`game-client` `explosion`): a
