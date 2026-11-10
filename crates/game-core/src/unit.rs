@@ -527,6 +527,11 @@ pub struct Unit {
     /// Patrol points to cycle through forever once more than one is set (units.md "Patrol orders"),
     /// independent of `queue`: a point is a shared id (`crate::patrol`), not an owned `Order`.
     patrol: crate::patrol::PatrolQueue,
+    /// Consecutive ticks spent genuinely idle (nothing chained, no task, no patrol): reset to 0 the moment
+    /// any of that changes. Checked at the start of each tick, so it counts whole ticks, not sub-tick
+    /// progress. Drives auto-housing (`GameMap::tend_auto_housing`, huts-and-training.md rule 3); `[ours]`,
+    /// not itself simulated state the original keeps (nothing traced tracks this).
+    idle_ticks: u16,
     /// The building (id) this brave is assigned to, `Order::Build`.
     pub work: Option<BuildingId>,
     /// The building the unit is in: it walks out by its door before going anywhere.
@@ -594,6 +599,7 @@ impl Unit {
             queue: Vec::new(),
             resume_attack: None,
             patrol: crate::patrol::PatrolQueue::default(),
+            idle_ticks: 0,
             work: None,
             inside: None,
             aboard: None,
@@ -610,6 +616,17 @@ impl Unit {
     /// camp fire or a vehicle.
     pub fn busy(&self) -> bool {
         self.work.is_some() || self.carrying > 0 || self.to_tree.is_some() || self.to_wood.is_some() || self.to_house.is_some() || self.to_shrine.is_some() || self.to_fire.is_some() || self.to_vehicle.is_some()
+    }
+
+    /// Genuinely idle, with nothing at all lined up: not just `Action::Idle`, but no task, nothing
+    /// chained and no patrol either - the gate `idle_ticks` counts against.
+    fn truly_idle(&self) -> bool {
+        self.action == Action::Idle && !self.busy() && self.queue.is_empty() && self.patrol.is_empty()
+    }
+
+    /// Consecutive ticks spent genuinely idle (`truly_idle`); 0 the instant that stops being true.
+    pub fn idle_ticks(&self) -> u16 {
+        self.idle_ticks
     }
 
     /// Neither in a building nor aboard a vehicle: out where spells, fire and fighters reach it.
@@ -887,6 +904,7 @@ impl Unit {
 
     /// One simulation step. `site` is where the unit reincarnates.
     pub fn tick(&mut self, now: Tick, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
+        self.idle_ticks = if self.truly_idle() { self.idle_ticks.saturating_add(1) } else { 0 };
         let terrain = ground.terrain();
         // A climbing spirit is airborne too (`motion.height`, for the client's own existing lift-drawing) but
         // never subject to gravity or a touchdown - it has its own, simpler, ungoverned rise in its own branch

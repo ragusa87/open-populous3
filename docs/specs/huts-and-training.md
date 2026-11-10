@@ -71,8 +71,11 @@ hut (max size) hides the red bar, it does not show it at 0.
    map, no standing slot, not drawn. A full hut refuses: the unit stops at the door, idle.
 2. **Leaving**: an order to a unit inside (move, pray...) makes it come out by the door first. `Command::Eject
    { player, building }` empties a hut. A hut that is dismantled or destroyed puts everyone out by the door.
-3. **Auto-housing** [ours]: an idle brave of the tribe with no order for `HOUSE_DELAY` (10 s) walks into the
-   nearest built hut with room within 8 cells. Other kinds only enter when ordered.
+3. **Auto-housing** (done - `GameMap::tend_auto_housing`, `enter.rs`) [ours]: a brave genuinely idle - nothing
+   chained, no patrol, no task (`Unit::busy`) - for `HOUSE_DELAY` (10 s, `Unit::idle_ticks`) walks into the
+   nearest of its own tribe's built huts with room, within `HOUSE_SEARCH_RADIUS_CELLS` (8); none close enough
+   with room, and it just keeps waiting, checked again next tick. Other kinds only enter when ordered
+   (`can_enter`).
 4. **Population**: every living unit of the tribe except the shaman, inside or out. Cap = sum of the supply of
    its built huts (`headcount::Housing::room`), at most 200 - a hut mid-growth (below) counts neither its old
    nor its new size for the brief window it is a construction site rather than `Stage::Built`, `[ours]`,

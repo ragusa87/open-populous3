@@ -566,7 +566,15 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   design note already describes for a related case.
 - [ ] CC0 sheets: a jump pose for flattening (`Pose::Jump` falls back on arms up) and a hammer pose (`Pose::Hammer` falls back on idle).
 - [ ] Find the original hammering anim (the axe swing, anim 11, stands in for `Pose::Hammer`).
-- [ ] Huts: auto-housing of idle braves, breeding, mana from people inside, Eject (huts-and-training.md rules). No autonomous wood-gathering by an idle person was found this session (pop3-rev-analysis.md "Idle behaviour"): a person with no command group does nothing at all, forever; the one confirmed autonomous, non-player assignment (a training building's own per-turn code, 0x405B80) looks like occupant/queue positioning, not wood-fetching, pending its unread "doing it" half - don't add an idle-brave-fetches-wood behaviour without a further live check confirming it.
+- [x] Huts: auto-housing of idle braves implemented (huts-and-training.md rule 3, `GameMap::tend_auto_housing`,
+  `enter.rs`): still open from this item - breeding (done separately, `hut_growth.rs`), mana from people inside,
+  Eject. No autonomous wood-gathering by an idle person was found this session (pop3-rev-analysis.md "Idle
+  behaviour"): a person with no command group does nothing at all, forever; the one confirmed autonomous,
+  non-player assignment (a training building's own per-turn code, 0x405B80) looks like occupant/queue
+  positioning, not wood-fetching, pending its unread "doing it" half - don't add an idle-brave-fetches-wood
+  behaviour without a further live check confirming it. Auto-housing itself is `[ours]`, not traced at all
+  (no corresponding exe behaviour found or looked for this session) - the delay and search radius are both
+  guesses, flagged as such in `enter.rs`.
 - [ ] Wood claimed across sites: two sites' braves can head for the same tree piece; braves of another task may take wood a site counts on. Refine the dispatch rule (nearest brave per piece, gatherers vs builders).
 - [ ] Site visuals: views are redone whenever any building changes; update them per building (stable ids) instead; compare the part order (from the ground up) and the structure with the original; chimney position per hut model; busy look for the other kinds; the pile by the door could be drawn as a stack rather than loose pieces.
 - [ ] Wood pieces lying on the ground (`GameMap::wood`, drawn): picked up by any construction; hovering one could show "Wood". Maybe draw the original's shadow under them (`hfx0-0.dat` 22, unconfirmed).

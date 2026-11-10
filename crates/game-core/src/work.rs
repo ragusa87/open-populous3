@@ -604,7 +604,10 @@ mod tests {
             map.apply(&c);
         }
         run_until(&mut map, 2000, |m| m.buildings[hut].stage() == Stage::Built).expect("repaired");
-        for _ in 0..200 {
+        // Short enough to stay well under `enter::HOUSE_DELAY`: the builder, idle and empty-handed right
+        // outside a hut with room, would otherwise auto-house itself back in (`GameMap::tend_auto_housing`)
+        // before this checks it was ever properly released.
+        for _ in 0..60 {
             map.tick();
         }
         for &r in &residents {

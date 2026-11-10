@@ -208,6 +208,11 @@ mod tests {
     /// A hut of tribe 1 and a warrior of tribe 0 ordered to attack it.
     fn siege(kind: UnitKind) -> (GameMap, BuildingId, UnitId) {
         let mut map = GameMap::sandbox_units().seeded(9);
+        // Only the attacker matters here; `sandbox_units`'s own braves sit close enough to the hut below
+        // (cell-wise) that a long-enough run now auto-houses an idle Red one into it
+        // (`GameMap::tend_auto_housing`), which crosses the attacker's path and derails the siege - not a
+        // bug in that feature, just two unrelated fixtures placed too close together.
+        map.units.clear();
         let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, 70 * 512, 70 * 512, 0));
         let door = map.building(hut).unwrap().door();
         let a = map.spawn(TribeId::Blue, kind, (door.0.wrapping_add(1024), door.1)).id;

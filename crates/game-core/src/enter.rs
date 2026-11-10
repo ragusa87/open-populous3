@@ -3,15 +3,22 @@
 //! walk to its door, in, and stay there (`Unit::inside`) until another order takes them out by the
 //! door. Builders use the same way in (`crate::work`). Vehicles will hold people the same way.
 
-use crate::building::{BuildingId, Stage};
+use crate::building::{BuildingId, BuildingKind, Stage};
 use crate::command::Command;
-use crate::map::GameMap;
+use crate::map::{torus_cells, torus_dist2, GameMap};
+use crate::time::Ticks;
 use crate::tribes::TribeId;
 use crate::unit::{Action, Inside, Order, Unit, UnitId, UnitKind};
 use crate::work::work_point;
 
 /// A click this close (world units) to a built building's footprint is on it.
 pub const ENTER_MARGIN: i32 = 128;
+
+/// How long an idle brave waits with nothing at all to do before heading home on its own
+/// (huts-and-training.md rule 3, "Auto-housing") - `[ours]`, a guess, not itself traced.
+pub const HOUSE_DELAY: Ticks = Ticks::secs(10);
+/// How far it looks for a hut with room (huts-and-training.md rule 3) - `[ours]`.
+pub const HOUSE_SEARCH_RADIUS_CELLS: i32 = 8;
 
 impl GameMap {
     /// The player's built building with room for people (`BuildingKind::capacity`) whose footprint,
@@ -90,6 +97,32 @@ impl GameMap {
         }
     }
 
+    /// Auto-housing (huts-and-training.md rule 3): a brave idle with nothing at all to do for
+    /// `HOUSE_DELAY` walks into the nearest of its own tribe's built huts with room, within
+    /// `HOUSE_SEARCH_RADIUS_CELLS`; none close enough with room, and it just keeps waiting (checked again
+    /// next tick). Other kinds only ever enter when ordered (`can_enter`).
+    pub(crate) fn tend_auto_housing(&mut self) {
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            let ready = u.kind == UnitKind::Brave && u.is_alive() && u.inside.is_none() && u.idle_ticks() as u32 >= HOUSE_DELAY.get();
+            if !ready {
+                continue;
+            }
+            let Some(owner) = u.owner.tribe() else { continue };
+            let at = (u.x, u.z);
+            let home = self
+                .buildings
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| b.owner == owner && matches!(b.kind, BuildingKind::Hut { .. }) && b.stage() == Stage::Built && torus_cells(at, (b.x, b.z)) <= HOUSE_SEARCH_RADIUS_CELLS)
+                .filter(|(_, b)| self.people_inside(b.id) < b.kind.capacity() as usize)
+                .min_by_key(|(_, b)| torus_dist2(at, (b.x, b.z)))
+                .map(|(_, b)| (b.id, b.door()));
+            if let Some((building, door)) = home {
+                self.units[i].go_enter(building, door);
+            }
+        }
+    }
 }
 
 /// Who goes inside buildings: followers, not the shaman nor wildmen.
@@ -138,6 +171,55 @@ mod tests {
         map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: resting, order: Order::MoveTo { x: corner(20, 10).0, z: corner(20, 10).1 } });
         map.tick();
         assert_eq!(map.buildings[hut].inside, 2, "leaving");
+    }
+
+    #[test]
+    fn an_idle_brave_with_nothing_to_do_houses_itself_after_a_delay() {
+        let mut map = GameMap::sandbox_buildings();
+        let hut = map
+            .buildings
+            .iter()
+            .position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && (b.inside as usize) < b.kind.capacity() as usize)
+            .unwrap();
+        let (id, door) = (map.buildings[hut].id, map.buildings[hut].door());
+        let brave = map.spawn(TribeId::Blue, UnitKind::Brave, door).id;
+        for _ in 0..(HOUSE_DELAY.get() - 1) {
+            map.tick();
+        }
+        assert!(map.unit(brave).unwrap().inside.is_none(), "not yet: still waiting out the delay");
+        run_until(&mut map, 600, |m| m.unit(brave).unwrap().inside == Some(Inside { building: id, door })).expect("housed itself, with no order from the player");
+    }
+
+    #[test]
+    fn a_brave_still_assigned_to_a_task_never_auto_houses() {
+        let mut map = GameMap::sandbox_buildings();
+        let hut = map
+            .buildings
+            .iter()
+            .position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built && (b.inside as usize) < b.kind.capacity() as usize)
+            .unwrap();
+        let door = map.buildings[hut].door();
+        let brave = map.spawn(TribeId::Blue, UnitKind::Brave, door).id;
+        let site = map.buildings.iter().find(|b| b.owner == Owner::Tribe(TribeId::Blue) && matches!(b.stage(), Stage::UnderConstruction { .. })).unwrap().id;
+        // Standing idle right now (between two steps of its own task), but still assigned: `busy()` must
+        // still hold off auto-housing, not just the moment-to-moment `Action::Idle` check.
+        let k = map.unit_index(brave).unwrap();
+        map.units[k].work = Some(site);
+        for _ in 0..(HOUSE_DELAY.get() as usize * 4) {
+            map.tick();
+        }
+        assert!(map.unit(brave).unwrap().inside.is_none(), "still assigned to a task: never auto-houses");
+    }
+
+    #[test]
+    fn no_hut_close_enough_or_with_room_just_leaves_it_waiting() {
+        let mut map = GameMap::sandbox_buildings();
+        let far = corner(1000, 1000);
+        let brave = map.spawn(TribeId::Blue, UnitKind::Brave, far).id;
+        for _ in 0..(HOUSE_DELAY.get() as usize * 4) {
+            map.tick();
+        }
+        assert!(map.unit(brave).unwrap().inside.is_none(), "nothing within HOUSE_SEARCH_RADIUS_CELLS: stays put");
     }
 
     #[test]
