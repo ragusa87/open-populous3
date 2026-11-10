@@ -4064,10 +4064,21 @@ moments later), both inside one 83 ms turn.
     fully understood, confirmed-to-exist mechanic either way, not just a hypothesis.
   - **This same per-tribe force-success flag is PopScript's `GIVE_UP_AND_SULK` switch** (`ai-scripts.md`): `ON`
     sets it - not a dedicated "surrender" flag, it also forces other level-script-dictated outcomes to succeed,
-    this preacher-roll cap bypass among them - and calls one more function not opened this session; `OFF` just
-    clears it. Whether that unopened callee implements the wiki's "everyone retreats to guard the shaman" claim
-    is still open - until it is traced, treat that specific behaviour as unconfirmed, independent of the
-    force-success switch itself, which is confirmed.
+    this preacher-roll cap bypass among them - and calls one more function, `0x41CA10`, since traced to
+    completion in a later session; `OFF` just clears it. **The wiki's "everyone retreats to guard the shaman"
+    claim is debunked**: `0x41CA10` contains no order reassignment, movement command, group formation or retreat
+    of any kind. It is instead a one-shot per-tribe cleanup/punishment sweep (full breakdown in `ai-scripts.md`
+    "Other ON/OFF switches"): forced vehicle disembark for non-shaman followers, Angel-of-Death life-crippling,
+    hypnotism-timer re-rolling (the normal countdown - `+0xAC`, seeded from `HYPNO_COUNT_X8`/`0x5AA4F4` at
+    capture time, `0x4D92B0` ticking it down every 8 turns - is replaced wholesale with `8 + rand(0..63)`,
+    uniform in `[8, 71]` steps, regardless of what was left), a ghost sweep, spy-disguise reveal, and "soul
+    convert 2" coordinator teardown.
+    A further session (checking every real `cpscrNNN.dat`, base game plus the Undiscovered Worlds expansion)
+    found all 61 script call sites gated by one of two reused condition templates
+    (`INT_MY_NUM_PEOPLE < 8 AND INT_MY_NUM_KILLED_BY_HUMAN > 10`, or `...BY_BLUE > 5`) and never sharing a
+    conditional block with a `DO ATTACK` call anywhere - so there is no scripted "all-in attack when
+    outnumbered" baked into this command either; where that pattern exists at all (e.g. `cpscr010`/level 1) it's
+    a separate, unrelated piece of level script with its own threshold, not connected to `GIVE_UP_AND_SULK`.
   - the candidate sub-state 4 effect burst above (the "sermon's candidate sub-state" subsection) allocates
     `alloc_unit(class=5, type=0xB, tribe=0xFF, pos)` - class 5 is scenery, and `pop3-rev/docs/unit_types` lists
     scenery type 0xB as "wood pile". **Narrowed, not fully settled, in a later session**: `alloc_unit` (0x4ED8A0)

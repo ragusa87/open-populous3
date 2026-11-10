@@ -1230,10 +1230,37 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     population band. Meaning still unconfirmed against the exe (wiki: "?").
   - [x] `GIVE_UP_AND_SULK`'s confirmed force-success switch (ai-scripts.md "Other ON/OFF switches" already traces
     what it does against the exe - a generic per-tribe flag, not a dedicated surrender routine): used by 44/58
-    scripts as a last-resort "losing badly" branch. **Implemented**: `ai::NativeAi::give_up_and_sulk`, set by
-    `ai_script.rs`'s `do_call`, read by `sermon::tend_sermons` to bypass the `MAX_POPULATION` cap on a successful
-    preacher-conversion roll - the only confirmed effect; the wiki's "everyone retreats to guard the shaman"
-    claim stays unconfirmed and unmodelled.
+    base scripts (61 call sites counting the Undiscovered Worlds expansion) as a last-resort "losing badly"
+    branch. **Implemented**: `ai::NativeAi::give_up_and_sulk`, set by `ai_script.rs`'s `do_call`, read by
+    `sermon::tend_sermons` to bypass the `MAX_POPULATION` cap on a successful preacher-conversion roll.
+  - [ ] `GIVE_UP_AND_SULK`'s OTHER effect, `0x41CA10`'s own cleanup/punishment sweep (ai-scripts.md "Other ON/OFF
+    switches", fully traced): on ON, for the tribe that gave up - force-disembark every non-shaman follower from
+    any vehicle; cripple the tribe's own Angels of Death (life rerolled to a random 32-95 of 10 000); re-time
+    (typically shorten) the hypnotism-revert countdown of units this tribe currently holds hypnotised; delete the
+    tribe's own ghost units; reveal/revert the tribe's own disguised spies; tear down the tribe's own in-progress
+    "soul convert 2" conversion coordinators. **The wiki's "everyone retreats to guard the shaman" claim is
+    debunked** - confirmed absent from this function (no movement/order/retreat code anywhere in it) and also
+    absent from every real script's own `GIVE_UP_AND_SULK` call site (none pair it with a `DO ATTACK`, so there's
+    no scripted all-in-attack-on-giving-up baked in either) - do not implement a retreat or group-up-at-shaman
+    behaviour for this command. **Implemented, 3 of 6 effects**: force-disembark (`GameMap::ai_force_off_vehicles`,
+    vehicle.rs), Angel of Death crippling (`GameMap::ai_cripple_angels_of_death`, angel_of_death.rs), hypnotism
+    re-roll (`GameMap::ai_shorten_hypnotism`, hypnotism.rs - exact formula `8 + rand(0..63)`, uniform in `[8, 71]`
+    steps, confirmed and now in pop3-rev-analysis.md), wired together by `ai_set_give_up_and_sulk`'s own
+    `ai_give_up_sweep` (ai.rs).
+    - [ ] Ghost unit deletion: correct but currently inert - nothing sets `Statuses::ghost` until `GhostArmy`
+      itself is implemented (see this same section's `GhostArmy` gap). Revisit once that spell exists.
+    - [ ] Spy-disguise reveal: no disguise mechanic exists anywhere in `game-core` yet (a status flag, a
+      "displayed vs. real owner" split, a reveal trigger) - a subsystem to design from scratch, not a small gap.
+    - [ ] "Soul convert 2" conversion-coordinator teardown: identified as aborting a tribe's own
+      `Action::Listening` candidates (sermon.rs), the same abort idiom `tend_sermons` already uses elsewhere for
+      a sermon that can no longer continue - held back for now, not yet implemented.
+  - [x] `GIVE_UP_AND_SULK`'s own trigger condition, the `INT_*_KILLED_BY_*` family (ai-scripts.md "Internal
+    variables", "Other ON/OFF switches"): every internal variable `ScriptEnv::int_var` didn't special-case read
+    back as its own fallback numeric id, so `INT_MY_NUM_KILLED_BY_HUMAN > 10` was always false and
+    `INT_MY_NUM_KILLED_BY_BLUE > 5` was always true - a real misfire, not just an inert gap. **Implemented**:
+    `GameMap::kills[killer][victim]`, a per-tribe-pair running total kept current by `apply_event`'s
+    `WorldEvent::Damage` handling, backs the whole 12-variable family (`ScriptEnv::kill_count`) plus the
+    per-colour headcounts `INT_BLUE_PEOPLE`..`INT_GREEN_PEOPLE` (`ScriptEnv::color_headcount`), same unbacked bug.
   - `PREACH_AT_MARKER`/`CONVERT_AT_MARKER`/`SEND_ALL_PEOPLE_TO_MARKER` (ai-scripts.md "People, buildings and
     orders"): the same underlying gap as `PUT_PERSON_IN_DT` above (the native engine never issues the shaman,
     or a whole tribe, a move/order at all) - not individually called out there before.

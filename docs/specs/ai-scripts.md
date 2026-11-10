@@ -523,18 +523,48 @@ PopScript-side contradictions").
 Other ON/OFF switches:
 - `SET_REINCARNATION`: this AI gets a reincarnation site at the start. `SET_NO_BLUE_REINC` is the human
   equivalent, so the shaman's death ends the game.
-- `GIVE_UP_AND_SULK`: not literally "everyone guards the shaman" [exe]. ON sets a generic per-tribe "force
-  success" switch - the same flag the engine checks elsewhere to force a preacher-conversion roll to succeed, and
-  to force level-script-dictated outcomes, not a dedicated surrender flag - and calls one more function; OFF just
-  clears the switch. The actual "retreat/guard the shaman" behaviour the wiki describes, if the original really
-  does that, must come from that other function, not from a self-contained "surrender" routine: treat the wiki's
-  description as unconfirmed, independent of the now-confirmed force-success switch (pop3-rev-analysis.md
-  "Preacher conversion"). Implement the force-success side (useful on its own, e.g. for scripted guaranteed
-  conversions) even before the retreat behaviour is pinned down. **Implemented, force-success side only**:
-  `ai::NativeAi::give_up_and_sulk` (`ai_script.rs`'s `do_call`), read by `sermon::tend_sermons` to bypass the
-  `MAX_POPULATION` cap on a successful conversion roll - the only confirmed effect. The retreat/guard-the-shaman
-  half stays unmodelled (unconfirmed, above); 44/58 scripts (e.g. cpscr021, level 7's red/yellow) turn this on
-  as a last-resort "losing badly" branch.
+- `GIVE_UP_AND_SULK`: not literally "everyone guards the shaman" [exe] - **the wiki's claim is debunked**. ON sets
+  a generic per-tribe "force success" switch - the same flag the engine checks elsewhere to force a
+  preacher-conversion roll to succeed, and to force level-script-dictated outcomes, not a dedicated surrender flag
+  - and calls one more function (`0x41CA10`, `fn(tribe)`), since traced to completion; OFF just clears the switch.
+  `0x41CA10` contains **no order reassignment, movement command, group formation or retreat of any kind** - instead
+  it's a one-shot per-tribe cleanup/punishment sweep: forcibly disembarks every non-shaman follower from any
+  vehicle (boat/balloon) they're riding **(implemented: `GameMap::ai_force_off_vehicles`, `vehicle.rs`)**; rerolls
+  the life of the tribe's own Angels of Death down to a random 32-95 (out of a base 10 000), crippling rather than
+  removing them **(implemented: `GameMap::ai_cripple_angels_of_death`, `angel_of_death.rs`)**; re-times (replaces
+  wholesale with `8 + rand(0..63)`, uniform in `[8, 71]` steps, confirmed - pop3-rev-analysis.md) the
+  hypnotism-revert countdown of any unit this tribe currently holds hypnotised **(implemented:
+  `GameMap::ai_shorten_hypnotism`, `hypnotism.rs`, `status::GIVEUP_HYPNO_BASIS`/`_RANGE_MIN`/`_RANGE_MAX`)**;
+  deletes the tribe's own ghost units outright; reveals/reverts any of the tribe's own currently-disguised spies;
+  and force-tears-down the tribe's own in-progress "soul convert 2" conversion-coordinator instances. **Implemented,
+  three of six effects** (`GameMap::ai_set_give_up_and_sulk`'s own `ai_give_up_sweep`, `ai.rs`), plus the
+  force-success switch itself: `ai::NativeAi::give_up_and_sulk` (`ai_script.rs`'s `do_call`), read by
+  `sermon::tend_sermons` to bypass the `MAX_POPULATION` cap on a successful conversion roll. **Still open**: ghost
+  deletion (currently inert - nothing sets `Statuses::ghost` until `GhostArmy` itself is implemented), spy-disguise
+  reveal (no disguise mechanic exists anywhere yet - a subsystem to build, not a small gap), and the "soul convert
+  2" conversion abort (identified as aborting a tribe's own `Action::Listening` candidates, same idiom
+  `sermon::tend_sermons` already uses elsewhere - held back for now, not yet implemented) (TODO.md).
+  - 44/58 base scripts turn this on as a last-resort "losing badly" branch (58/58 counting the Undiscovered
+    Worlds expansion's own `cpscr` files gives 61 call sites total across all `.dat` files checked). **Every
+    single one of those 61 calls is gated by the same two reused condition templates**
+    (`pop3-rev` session, checked programmatically against the real `cpscrNNN.dat` files via
+    `pop3-ai-script`'s own parser): `INT_MY_NUM_PEOPLE < 8 AND INT_MY_NUM_KILLED_BY_HUMAN > 10` (human-player
+    levels) or `INT_MY_NUM_PEOPLE < 8 AND INT_MY_NUM_KILLED_BY_BLUE > 5` (AI-vs-AI levels), each inside an
+    `EVERY 64 ...`-ish periodic block - i.e. this is boilerplate the level-script authors/compiler reused
+    virtually everywhere, not a bespoke per-level condition. **No script anywhere in that set ever places a `DO
+    ATTACK` in the same conditional block as its `GIVE_UP_AND_SULK` call** - the "desperate last-stand attack
+    when badly outnumbered" pattern seen in `cpscr010` (level 1's `EVERY 256 175` block, see "Worked example"
+    above) is a wholly separate, unrelated piece of script logic (that script doesn't call `GIVE_UP_AND_SULK` at
+    all) using its own independent threshold (`INT_BLUE_PEOPLE > 2 * INT_MY_NUM_PEOPLE`, not `NUM_PEOPLE < 8`).
+    So the two "give up" behaviours players may have observed - a population/kill-count-triggered engine cleanup
+    sweep, and a separate, level-authored all-in suicide charge - are never the same trigger or the same code
+    path, and nothing here produces a retreat-to-shaman order either way. **Implemented**: both condition
+    templates now evaluate correctly - `GameMap::kills[killer][victim]`, a per-tribe-pair running total kept
+    current by `GameMap::apply_event`'s `WorldEvent::Damage` handling (every kill, not just melee), backs the
+    whole `INT_*_KILLED_BY_*` family (`ScriptEnv::kill_count`, `ai_script.rs`) - `INT_MY_NUM_KILLED_BY_HUMAN`
+    reads the same cell as `INT_MY_NUM_KILLED_BY_BLUE` (blue is always human), so the two templates above are
+    confirmed to be the same underlying check either way. The per-colour headcounts (`INT_BLUE_PEOPLE` etc.,
+    used by `cpscr010`'s own threshold below) are backed too (`ScriptEnv::color_headcount`).
 - `FLYBY_ALLOW_INTERRUPT`: the player can skip flybys.
 - No meaning in the wiki: `SET_BUCKET_USAGE`, `SET_AUTO_BUILD`, `SET_AUTO_HOUSE`, `AUTO_MESSAGES`,
   `EXTRA_WOOD_COLLECTION` and `TURN_PUSH`.
