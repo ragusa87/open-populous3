@@ -72,6 +72,20 @@ impl Tree {
         if self.burning.is_some() { 0 } else { self.size }
     }
 
+    /// Its own fraction of `MAX_SIZE` to draw it at right now, in units of `size` but not itself a
+    /// whole number: while it burns, `burn_stock` continuously (so the model shrinks smoothly as it
+    /// drains, `BURN_DRAIN` a turn, rather than jumping once per whole piece the way reading `size`
+    /// itself for this would); otherwise plain `size`, already a whole number (regrowth is gradual too,
+    /// `growth`, but only `size` itself ever changes what is drawn - not reported as a problem, left
+    /// alone). `[ours]`: the original's own drawn size while a tree burns is not traced, only that
+    /// `size` is a gameplay unit (whole pieces of wood), not necessarily how it looks.
+    pub fn visual_size(&self) -> f32 {
+        match self.burning {
+            Some(_) => self.burn_stock as f32 / WOOD_PER_SIZE as f32,
+            None => self.size as f32,
+        }
+    }
+
     /// Sets it on fire; false when there is nothing to burn (size 0) or it already burns.
     pub fn ignite(&mut self) -> bool {
         if self.size == 0 || self.burning.is_some() {
@@ -275,6 +289,21 @@ mod tests {
         assert!(!t.ignite(), "nothing left to burn");
         run(&mut t, 1..=GROW_TICKS.get());
         assert_eq!(t.size, 1, "grows back");
+    }
+
+    #[test]
+    fn visual_size_shrinks_every_tick_while_a_whole_tree_s_size_jumps_at_once_then_holds() {
+        let mut t = Tree::new((5, 5), 0, 3);
+        assert_eq!(t.visual_size(), 3.0, "matches size before it ever catches fire");
+        assert!(t.ignite());
+        let sizes: Vec<f32> = (1..=10u32)
+            .map(|k| {
+                run(&mut t, k..=k);
+                t.visual_size()
+            })
+            .collect();
+        assert!(sizes.windows(2).all(|w| w[1] < w[0]), "strictly shrinks every single tick: {sizes:?}");
+        assert_eq!(t.size, 2, "meanwhile the whole-piece size jumped once (tick 1) then holds for many turns - the bug this fixes, read directly for the draw scale instead");
     }
 
     #[test]

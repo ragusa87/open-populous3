@@ -819,6 +819,14 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   No change to how "gone" is represented (`size == 0`/`is_visible() == false`, regrows in place) - that part was
   already right. Test: `tree.rs`
   `a_burning_tree_gives_no_wood_and_its_size_drains_before_the_fire_goes_out`.
+  **Drawn scale fixed, 2026-11-10** (reported live: the model visibly snapped to a smaller size every 100 units
+  instead of shrinking continuously): the discrete 0-4 `size` above is correctly a whole-piece gameplay unit
+  (how much wood is left to give), but `nature.rs` was reading it directly for the draw scale too, so the model
+  only ever changed size once every `WOOD_PER_SIZE / BURN_DRAIN` (25) turns and jumped a full 20% of its height
+  each time. `Tree::visual_size` now gives a continuous value (`burn_stock` itself while burning, `tree.rs`
+  test `visual_size_shrinks_every_tick_while_a_whole_tree_s_size_jumps_at_once_then_holds`),
+  `nature::size_factor`/`tree_scale` take it instead of `size` directly (every call site in `nature.rs` and
+  `tooltip.rs`), interpolating smoothly between whole sizes.
 - [x] `fire_flame::FIRE_SMOKE` (pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's
   flame", "The ground-fire's own smoke puff" bullet): fixed - the old `Puffs{count:4, life:2.4, emit:Loop,
   spread:(0,0.35), ...}` modelled the wrong SHAPE of emission, not just wrong numbers (the original spawns a

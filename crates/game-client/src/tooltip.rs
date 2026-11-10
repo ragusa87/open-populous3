@@ -631,7 +631,7 @@ fn show_tooltip(
             Target::Tree(i) => {
                 let (_, gt, children) = trees.iter().find(|(v, _, _)| v.0 == i)?;
                 let full = children.iter().find_map(|c| tree_models.get(c).ok())?.full_height;
-                gt.translation() + Vec3::Y * size_factor(map.0.trees[i].size) * full
+                gt.translation() + Vec3::Y * size_factor(map.0.trees[i].visual_size()) * full
             }
             Target::Totem(i) => {
                 let (view, gt) = totems.iter().find(|(v, _)| v.index == i)?;
