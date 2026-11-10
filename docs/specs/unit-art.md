@@ -160,7 +160,13 @@ SitDown, StandUp, SwordSlash, Victory, Walk, Walk_Carry), no props, and hand bon
 | 38 | spirit rising, calm (the ordinary case: not drowning) | followers | Death last frame, sunk | a see-through copy rising, drawn in post (alpha sprite), 4 clip-turns only (not a long rise) |
 | 40 | spirit rising, climbing (dying while drowning - always for a wildman, regardless of cause of death; others only if they died in a drowning-eligible spot) | followers, wild | Death last frame, lifted | a REAL rising copy (not drawn in post): continuous upward motion for the full clip, no alpha fade needed since it already reads as "leaving"; for a wildman only, also spin the copy about its vertical axis every frame (pop3-rev-analysis.md "Death and the spirit rise") |
 | 97 | carbonized by lightning | brave | Death or Idle frame | every material black in post (like the magenta key) |
-| 89, 90/91, 92, 48 | itching, push-ups, juggling, hiding the eyes | brave, warrior, spy | none | new clips authored in Blender |
+| 89, 90, 92, 48 | itching, push-ups, juggling, hiding the eyes | brave, warrior, spy | none | new clips authored in Blender |
+
+The idle-too-long picker itself (89/90/92, TODO.md "Units") is wired for original assets
+(`units::art::idle_flavor`, `Pose::Scratch`/`Pushup`/`Juggle`): only the CC0 clips above are still missing,
+same as the taunts (48-50) - until then `Pose::fallback` holds plain `Idle` for the generated figure. 90/91
+in the original trace reads as two phases of one push-up cycle; only 90 is wired (one phase stands in for
+the whole loop, a simplification like the taunts picking one of 3 - `[ours]`).
 
 Three kinds of work, from easiest: a new `PoseShot` in the baker on an existing clip; a small baker feature (a prop on a
 hand bone, a per-frame model rotation, an all-black tint, a rising ghost copy); new clips, only for the idle
