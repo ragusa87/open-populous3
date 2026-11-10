@@ -556,7 +556,13 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   **Partly addressed 2026-10-30** (reported: a warrior-training site's door facing a neighbouring house, its
   workers stuck idle however they were ordered once the door was sealed): `placement::can_place` now refuses a
   *new* placement that would wall shut a standing building's door, in either direction (`nothing_may_wall_a_door_
-  shut_either_ones`). Still open: a door sealed some other way (a layout already on the map, e.g. an original
+  shut_either_ones`).
+  **Client preview fixed, 2026-11-10** (reported live: a door-blocking spot still showed the ordinary white
+  footprint, with the click then silently doing nothing - `can_place` itself was already right, only the
+  blueprint's own red-or-white preview in `game-client` had never been taught the door rule, predating it):
+  `placement::door_blocked` made `pub`, `blueprint.rs`'s `all_red` now also checks it
+  (`a_plan_that_would_wall_a_neighbours_door_shut_is_refused_and_shows_red`).
+  Still open: a door sealed some other way (a layout already on the map, e.g. an original
   level, or two plans placed before either has a door yet) still traps whoever is inside for good - no order ever
   frees them, since `Unit::tick`'s inside-a-building branch always retries the door and never looks for another
   way out (repro: `work::tests::a_worker_trapped_when_its_only_door_cell_gets_walled_never_gets_out`, `#[ignore]`d

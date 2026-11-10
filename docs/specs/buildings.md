@@ -131,7 +131,12 @@ available, is the camp fire (see "Camp fire").
 - Parts of the footprint that cannot be built on are drawn red: sea, ground too steep (height spread inside the
   footprint over a threshold to tune; smaller unevenness is fine, the braves flatten it), another building or
   construction site, a tree that still has wood (size > 0). Any red part blocks placement. A boat hut is also all
-  red unless its jetty side is over the sea and its door side on land; its blueprint turns itself to fit.
+  red unless its jetty side is over the sea and its door side on land; its blueprint turns itself to fit. All red
+  too, the same as too-steep ground, where it would wall shut a door - its own (an existing building already
+  covers where its door would open) or a standing neighbour's (`placement::door_blocked`, kept in step with
+  `can_place`'s own refusal, "Doors" below - fixed 2026-11-10, having been added to `can_place` after the
+  blueprint's own red-or-white preview was written, so it used to show white right up until a click there
+  silently did nothing).
 - A left click on a valid spot places it (`Command::PlaceBuilding { player, kind, x, z, facing, braves }`): the
   blueprint stays drawn on the ground as a construction site, a `Building` with a `stage` (Blueprint / Under
   construction / Built / Dismantling) and its wood counts. A size-0 tree under it stays invisible and does not grow back while covered.
