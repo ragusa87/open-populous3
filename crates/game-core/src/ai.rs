@@ -277,6 +277,19 @@ impl GameMap {
         if let Some(i) = self.ai_index(owner) {
             self.ai[i].give_up_and_sulk = on;
         }
+        if on {
+            self.ai_give_up_sweep(owner);
+        }
+    }
+
+    /// Part of `GIVE_UP_AND_SULK`'s OTHER effect (`0x41CA10(tribe)`, ai-scripts.md "Other ON/OFF switches",
+    /// "fully traced"): a one-shot per-tribe cleanup/punishment sweep. Three of its six documented effects
+    /// so far; ghost-unit deletion, spy-disguise reveal and aborting in-progress conversions are deferred
+    /// (TODO.md "Computer players (AI)").
+    fn ai_give_up_sweep(&mut self, tribe: TribeId) {
+        self.ai_force_off_vehicles(tribe);
+        self.ai_cripple_angels_of_death(tribe);
+        self.ai_shorten_hypnotism(tribe);
     }
 
     pub(crate) fn ai_attr(&self, owner: TribeId, var: InternalVar) -> i32 {
@@ -733,6 +746,17 @@ mod tests {
         map.ai_set_state(owner, state::AUTO_ATTACK, true);
         map.ai_set_attr(owner, InternalVar(1025), 999); // INT_ATTR_MAX_ATTACKS
         map
+    }
+
+    #[test]
+    fn give_up_and_sulk_runs_its_own_cleanup_sweep() {
+        let mut map = map_with_ai(TribeId::Blue).seeded(1);
+        let angel = map.spawn(TribeId::Blue, UnitKind::AngelOfDeath, (32 * 512, 32 * 512)).id;
+        let full = map.unit(angel).unwrap().health.max();
+        map.ai_set_give_up_and_sulk(TribeId::Blue, true);
+        let crippled = map.unit(angel).unwrap().health.current();
+        assert!((32..=95).contains(&crippled), "the sweep reached the Angel of Death: {crippled} out of range");
+        assert_ne!(crippled, full);
     }
 
     #[test]

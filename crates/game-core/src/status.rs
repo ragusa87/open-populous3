@@ -15,6 +15,12 @@ pub const BLINK_STEPS: u8 = 15;
 pub const INVIS_STEPS: u8 = 180;
 /// `HYPNO_COUNT_X8` (file and exe 55): 440 turns, 36.7 s (docs/specs/spells.md).
 pub const HYPNO_STEPS: u8 = 55;
+/// `GIVE_UP_AND_SULK`'s hypnotism re-roll (`0x41CA10`, pop3-rev-analysis.md "GIVE_UP_AND_SULK"/`0x41CA10`):
+/// the floor every re-rolled countdown starts from, plus a uniform random extra on top in
+/// `GIVEUP_HYPNO_RANGE_MIN..=GIVEUP_HYPNO_RANGE_MAX` steps.
+pub const GIVEUP_HYPNO_BASIS: u8 = 8;
+pub const GIVEUP_HYPNO_RANGE_MIN: u32 = 0;
+pub const GIVEUP_HYPNO_RANGE_MAX: u32 = 63;
 /// How long a lightning survivor stops healing ("Health and healing" [exe]: state 44 "struck by lightning" blocks
 /// the life step like dying does). The original's own duration isn't traced - every lightning hit our code deals
 /// is currently a kill, so nothing alive reaches this path yet (combat.md "Health") - kept short as a guess.

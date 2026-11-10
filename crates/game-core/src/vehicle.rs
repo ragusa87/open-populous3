@@ -828,6 +828,37 @@ impl GameMap {
         }
     }
 
+    /// Passengers in `units` get out where `id` is, same consequence as `put_out` (falling/drowning if
+    /// there's nothing beneath) — unlike `put_out`, everyone else aboard stays seated.
+    fn evict(&mut self, id: VehicleId, units: &[UnitId]) {
+        let Some(v) = self.vehicles.get_mut(id) else { return };
+        v.passengers.retain(|p| !units.contains(p));
+        let (at, altitude, ground) = ((v.x, v.z), v.altitude(&self.terrain) as i32, self.terrain.height_at(v.x as u32, v.z as u32, WORLD_UNITS_PER_CELL));
+        for &unit in units {
+            if let Some(u) = self.unit_mut(unit) {
+                u.aboard = None;
+                (u.x, u.z) = at;
+                if altitude > ground {
+                    u.motion = Motion::flying(Velocity::ZERO, altitude);
+                }
+            }
+        }
+    }
+
+    /// `GIVE_UP_AND_SULK`'s sweep (`0x41CA10`): every non-shaman follower of `tribe`'s own vehicles is
+    /// forced off (ai-scripts.md "Other ON/OFF switches", confirmed) — a shaman aboard stays seated.
+    pub(crate) fn ai_force_off_vehicles(&mut self, tribe: TribeId) {
+        let ids: Vec<VehicleId> = self.vehicles.iter().filter(|(_, v)| v.owner == tribe).map(|(id, _)| id).collect();
+        for id in ids {
+            let non_shaman: Vec<UnitId> = self.vehicles.get(id).map_or(Vec::new(), |v| {
+                v.passengers.iter().copied().filter(|&p| self.unit(p).is_some_and(|u| u.kind != UnitKind::Shaman)).collect()
+            });
+            if !non_shaman.is_empty() {
+                self.evict(id, &non_shaman);
+            }
+        }
+    }
+
     /// Passengers stand where their vehicle is.
     fn carry_passengers(&mut self) {
         for (_, v) in self.vehicles.iter() {
@@ -885,6 +916,26 @@ mod tests {
 
     fn run(map: &mut GameMap, ticks: u32) {
         map.run(Ticks::new(ticks));
+    }
+
+    #[test]
+    fn give_up_and_sulk_forces_off_non_shaman_followers_leaving_the_shaman_aboard() {
+        let mut map = coast();
+        let v = boat(&mut map, (C - 10, C)); // on dry land: no falling/drowning to muddy the assertion
+        let on = { let veh = map.vehicle(v).unwrap(); (veh.x, veh.z) };
+        let shaman = map.spawn(TribeId::Blue, UnitKind::Shaman, on);
+        shaman.aboard = Some(v);
+        let shaman_id = shaman.id;
+        map.vehicles.get_mut(v).unwrap().seat(shaman_id, TribeId::Blue);
+        let brave = map.spawn(TribeId::Blue, UnitKind::Brave, on);
+        brave.aboard = Some(v);
+        let brave_id = brave.id;
+        map.vehicles.get_mut(v).unwrap().seat(brave_id, TribeId::Blue);
+        map.ai_force_off_vehicles(TribeId::Blue);
+        assert_eq!(map.unit(shaman_id).unwrap().aboard, Some(v), "the shaman stays seated");
+        assert_eq!(map.unit(brave_id).unwrap().aboard, None, "forced off");
+        let passengers = &map.vehicle(v).unwrap().passengers;
+        assert!(passengers.contains(&shaman_id) && !passengers.contains(&brave_id));
     }
 
     #[test]

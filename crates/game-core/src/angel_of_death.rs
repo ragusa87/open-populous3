@@ -156,6 +156,21 @@ pub fn apply_shockwave(terrain: &mut Heightmap, at: (i32, i32), turn: u32) -> cr
 }
 
 impl GameMap {
+    /// `GIVE_UP_AND_SULK`'s sweep (`0x41CA10`): every living Angel of Death of `tribe` has its life
+    /// rerolled down to a random 32-95 (out of its full life, `balance.units.life`) — crippling, not
+    /// killing (ai-scripts.md "Other ON/OFF switches", confirmed).
+    pub(crate) fn ai_cripple_angels_of_death(&mut self, tribe: crate::tribes::TribeId) {
+        const MIN: u32 = 32;
+        const MAX: u32 = 95;
+        let ids: Vec<UnitId> = self.units.iter().filter(|u| u.kind == UnitKind::AngelOfDeath && u.is_alive() && u.owner == tribe).map(|u| u.id).collect();
+        for id in ids {
+            let roll = MIN + self.rng.next_u32() % (MAX - MIN + 1);
+            if let Some(u) = self.unit_mut(id) {
+                u.health = crate::health::Health::new(roll as u16, u.health.max());
+            }
+        }
+    }
+
     /// Every living Angel of Death, on its own: hunts (a rival angel first, else the nearest eligible enemy),
     /// closes in, grabs or fights, and panics anyone eligible nearby — all independent of `Command`.
     pub(crate) fn tend_angels_of_death(&mut self) {
@@ -319,6 +334,18 @@ mod tests {
         u.action = Action::Hunting;
         u.flight = Some(Flight { heading: Angle::ZERO, height: 2000 });
         id
+    }
+
+    #[test]
+    fn give_up_and_sulk_cripples_its_own_angels_only() {
+        let mut map = bare().seeded(1);
+        let mine = spawn_angel(&mut map, TribeId::Blue, AT);
+        let theirs = spawn_angel(&mut map, TribeId::Red, (AT.0.wrapping_add(20), AT.1));
+        let full = map.unit(mine).unwrap().health.max();
+        map.ai_cripple_angels_of_death(TribeId::Blue);
+        let crippled = map.unit(mine).unwrap().health.current();
+        assert!((32..=95).contains(&crippled), "{crippled} out of range");
+        assert_eq!(map.unit(theirs).unwrap().health.current(), full, "a different tribe's own angel is untouched");
     }
 
     #[test]

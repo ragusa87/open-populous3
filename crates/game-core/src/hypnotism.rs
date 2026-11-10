@@ -61,6 +61,18 @@ impl GameMap {
         }
     }
 
+    /// `GIVE_UP_AND_SULK`'s sweep (`0x41CA10`): every unit `tribe` currently holds hypnotised has its
+    /// revert countdown replaced wholesale with `GIVEUP_HYPNO_BASIS + rand(GIVEUP_HYPNO_RANGE_MIN..=
+    /// GIVEUP_HYPNO_RANGE_MAX)` steps, regardless of what was left (pop3-rev-analysis.md, confirmed).
+    pub(crate) fn ai_shorten_hypnotism(&mut self, tribe: TribeId) {
+        use crate::status::{Timed, GIVEUP_HYPNO_BASIS, GIVEUP_HYPNO_RANGE_MAX, GIVEUP_HYPNO_RANGE_MIN};
+        let span = GIVEUP_HYPNO_RANGE_MAX - GIVEUP_HYPNO_RANGE_MIN + 1;
+        for u in self.units.iter_mut().filter(|u| u.owner == tribe && u.statuses.hypnotized.is_on()) {
+            let steps = GIVEUP_HYPNO_BASIS + (GIVEUP_HYPNO_RANGE_MIN + self.rng.next_u32() % span) as u8;
+            u.statuses.hypnotized = Timed::steps(steps);
+        }
+    }
+
     /// Every unit whose hypnotism just ran out this turn (`status::Statuses.hypnotized_from` still set, but
     /// `hypnotized` no longer on) reverts to its original tribe, keeping its life and carried wood same as the
     /// capture did, unless that tribe is wiped out by now (`tribe_wiped_out`), in which case the change just stays
@@ -214,6 +226,25 @@ mod tests {
         map.revert_expired_hypnosis();
         let u = map.unit(enemy).unwrap();
         assert_eq!((u.owner, u.health.current(), u.carrying), (Owner::Tribe(TribeId::Red), 1, 7), "reverted, body untouched again");
+    }
+
+    #[test]
+    fn give_up_and_sulk_replaces_the_countdown_wholesale_not_just_shortens_it() {
+        let mut map = bare().seeded(1);
+        let high = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
+        map.hypnotize(high, TribeId::Blue);
+        map.unit_mut(high).unwrap().statuses.hypnotized = Timed::steps(200);
+        let low = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(20), AT.1)).id;
+        map.hypnotize(low, TribeId::Blue);
+        map.unit_mut(low).unwrap().statuses.hypnotized = Timed::steps(1);
+        let untouched = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(40), AT.1)).id;
+        map.hypnotize(untouched, TribeId::Yellow);
+        map.ai_shorten_hypnotism(TribeId::Blue);
+        for &id in &[high, low] {
+            let steps = map.unit(id).unwrap().statuses.hypnotized.steps_left();
+            assert!((8..=71).contains(&steps), "{id:?}: {steps} out of range");
+        }
+        assert_eq!(map.unit(untouched).unwrap().statuses.hypnotized.steps_left(), crate::status::HYPNO_STEPS, "a different tribe's own captive is untouched");
     }
 
     #[test]
