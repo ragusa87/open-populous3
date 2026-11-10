@@ -1228,9 +1228,12 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   - `SET_BUCKET_USAGE`/`SET_BUCKET_COUNT_FOR_SPELL` (ai-scripts.md "Attacks and spells"): the mana/spell-priority
     weighting mechanism cpscr021 uses every 90 turns to rescale all 16 non-hidden spells' priority by its own
     population band. Meaning still unconfirmed against the exe (wiki: "?").
-  - `GIVE_UP_AND_SULK`'s confirmed force-success switch (ai-scripts.md "Other ON/OFF switches" already traces
+  - [x] `GIVE_UP_AND_SULK`'s confirmed force-success switch (ai-scripts.md "Other ON/OFF switches" already traces
     what it does against the exe - a generic per-tribe flag, not a dedicated surrender routine): used by 44/58
-    scripts as a last-resort "losing badly" branch, currently a pure no-op.
+    scripts as a last-resort "losing badly" branch. **Implemented**: `ai::NativeAi::give_up_and_sulk`, set by
+    `ai_script.rs`'s `do_call`, read by `sermon::tend_sermons` to bypass the `MAX_POPULATION` cap on a successful
+    preacher-conversion roll - the only confirmed effect; the wiki's "everyone retreats to guard the shaman"
+    claim stays unconfirmed and unmodelled.
   - `PREACH_AT_MARKER`/`CONVERT_AT_MARKER`/`SEND_ALL_PEOPLE_TO_MARKER` (ai-scripts.md "People, buildings and
     orders"): the same underlying gap as `PUT_PERSON_IN_DT` above (the native engine never issues the shaman,
     or a whole tribe, a move/order at all) - not individually called out there before.

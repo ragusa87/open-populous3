@@ -127,7 +127,9 @@ impl GameMap {
     /// Every listener's turn ("Preacher conversion" [exe]): the preacher gone, dead or no longer enemy frees it; the
     /// preacher thrown or fighting ends its sermon and sends it straight after the preacher (`WorldEvent::StrikeBack`);
     /// no longer preaching (an order took it) frees it quietly; otherwise its clock ticks down to another conversion
-    /// roll, 1 in `CONV_CHANCE` once it reaches zero, gated on `MAX_POPULATION` - a miss reschedules it.
+    /// roll, 1 in `CONV_CHANCE` once it reaches zero, gated on `MAX_POPULATION` unless the preacher's tribe has
+    /// `GIVE_UP_AND_SULK` on (ai-scripts.md, pop3-rev-analysis.md "Preacher conversion": its confirmed force-success
+    /// switch bypasses this same cap) - a miss reschedules it.
     pub(crate) fn tend_sermons(&mut self) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         for i in 0..self.units.len() {
@@ -158,7 +160,7 @@ impl GameMap {
             }
             if let Some(p_owner) = p_owner.tribe()
                 && self.rng.next_u32() % CONV_CHANCE == 1
-                && self.housing(p_owner).population < MAX_POPULATION
+                && (self.housing(p_owner).population < MAX_POPULATION || self.ai_give_up_and_sulk(p_owner))
             {
                 events.push(WorldEvent::ChangeOwner { unit: l, tribe: p_owner });
                 continue;
@@ -238,6 +240,29 @@ mod tests {
         assert!(took >= CONV_FIRST_CHECK - CONV_FIRST_CHECK / 16, "not before the first check");
         let u = map.unit(w).unwrap();
         assert_eq!((u.kind, u.action, u.health.is_full()), (UnitKind::Warrior, Action::Idle, true), "a warrior still, idle, as new");
+    }
+
+    #[test]
+    fn give_up_and_sulk_bypasses_the_population_cap() {
+        let (mut map, _, others) = sermon_scene(&[UnitKind::Warrior]);
+        let w = others[0];
+        // Filled on dry land near the shaman (not drowned at sea, which would shrink the count back
+        // under the cap over the long run below): a 14-wide grid south of the centre, well inside the
+        // sandbox island's own radius.
+        let s = map.shaman_of(TribeId::Blue).unwrap();
+        let (ox, oz) = (s.x, s.z);
+        for n in 0..MAX_POPULATION {
+            let (dx, dz) = (n % 14, n / 14);
+            map.spawn(TribeId::Blue, UnitKind::Brave, (ox.wrapping_add(dx * 512), oz.wrapping_add(dz * 512)));
+        }
+        until(&mut map, 4, |m| listening(m, w)).expect("sat down");
+        assert!(
+            until(&mut map, 20_000, |m| m.unit(w).is_some_and(|u| u.owner == Owner::Tribe(TribeId::Blue))).is_none(),
+            "capped: never converts despite plenty of rolls"
+        );
+        map.ai.push(crate::ai::NativeAi::new(TribeId::Blue));
+        map.ai_set_give_up_and_sulk(TribeId::Blue, true);
+        until(&mut map, 20_000, |m| m.unit(w).is_some_and(|u| u.owner == Owner::Tribe(TribeId::Blue))).expect("GIVE_UP_AND_SULK bypasses the cap");
     }
 
     #[test]

@@ -148,6 +148,12 @@ pub(crate) struct NativeAi {
     /// `SET_TIMER_GOING`/`REMOVE_TIMER`/`HAS_TIMER_REACHED_ZERO` (ai-scripts.md "Level events"): when it
     /// reaches zero, not the client-side countdown display itself (not wired up here, TODO.md).
     timer_end: Option<Tick>,
+    /// `GIVE_UP_AND_SULK`'s confirmed force-success switch (ai-scripts.md "Other ON/OFF switches",
+    /// pop3-rev-analysis.md "Preacher conversion"): while on, this tribe's preacher conversions bypass
+    /// the `MAX_POPULATION` cap (`sermon::tend_sermons`) instead of the roll succeeding but doing
+    /// nothing. The wiki's "everyone retreats to guard the shaman" claim is still unconfirmed and not
+    /// modelled - only the traced force-success half.
+    give_up_and_sulk: bool,
 }
 
 impl NativeAi {
@@ -162,6 +168,7 @@ impl NativeAi {
             spell_entry_last_cast: [None; MAX_SPELL_ENTRIES],
             sorties: Vec::new(),
             timer_end: None,
+            give_up_and_sulk: false,
         }
     }
 
@@ -258,6 +265,17 @@ impl GameMap {
     pub(crate) fn ai_set_state(&mut self, owner: TribeId, bit: u32, on: bool) {
         if let Some(i) = self.ai_index(owner) {
             self.ai[i].set_state(bit, on);
+        }
+    }
+
+    /// `GIVE_UP_AND_SULK`'s force-success flag, read by `sermon::tend_sermons`.
+    pub(crate) fn ai_give_up_and_sulk(&self, owner: TribeId) -> bool {
+        self.ai_index(owner).is_some_and(|i| self.ai[i].give_up_and_sulk)
+    }
+
+    pub(crate) fn ai_set_give_up_and_sulk(&mut self, owner: TribeId, on: bool) {
+        if let Some(i) = self.ai_index(owner) {
+            self.ai[i].give_up_and_sulk = on;
         }
     }
 

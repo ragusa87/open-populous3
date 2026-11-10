@@ -530,10 +530,11 @@ Other ON/OFF switches:
   does that, must come from that other function, not from a self-contained "surrender" routine: treat the wiki's
   description as unconfirmed, independent of the now-confirmed force-success switch (pop3-rev-analysis.md
   "Preacher conversion"). Implement the force-success side (useful on its own, e.g. for scripted guaranteed
-  conversions) even before the retreat behaviour is pinned down. **Not implemented**: falls through
-  `ScriptEnv::do_call`'s catch-all no-op (`ai_script.rs`) - used by 44/58 scripts (e.g. cpscr021, level 7's red/
-  yellow), always as a last-resort "losing badly" branch, so it has no effect at all today (TODO.md "Computer
-  players (AI)").
+  conversions) even before the retreat behaviour is pinned down. **Implemented, force-success side only**:
+  `ai::NativeAi::give_up_and_sulk` (`ai_script.rs`'s `do_call`), read by `sermon::tend_sermons` to bypass the
+  `MAX_POPULATION` cap on a successful conversion roll - the only confirmed effect. The retreat/guard-the-shaman
+  half stays unmodelled (unconfirmed, above); 44/58 scripts (e.g. cpscr021, level 7's red/yellow) turn this on
+  as a last-resort "losing badly" branch.
 - `FLYBY_ALLOW_INTERRUPT`: the player can skip flybys.
 - No meaning in the wiki: `SET_BUCKET_USAGE`, `SET_AUTO_BUILD`, `SET_AUTO_HOUSE`, `AUTO_MESSAGES`,
   `EXTRA_WOOD_COLLECTION` and `TURN_PUSH`.
@@ -1235,10 +1236,11 @@ end
     `DELAY_MAIN_DRUM_TOWER`/`BUILD_MAIN_DRUM_TOWER`, `TRAIN_PEOPLE_NOW`, `ATTACK`, `SET_SPELL_ENTRY`, the
     level-event gifts, `TRIGGER_LEVEL_WON/LOST`, the timer trio, and several queries) - see `ai_script.rs`'s own
     module doc comment and TODO.md "Computer players (AI)" for the current, actively-maintained list rather than
-    this paragraph, which undersold it. Every command NOT in that list still reaches `ScriptEnv::do_call` and
-    does nothing (guard groups, vehicles, messages/camera/tutorial UI, bucket spell weighting,
-    `GIVE_UP_AND_SULK`'s force-success switch, several marker-based people orders - see the implementation-status
-    notes added inline above). `int_var` backs `INT_GAME_TURN`, `INT_MY_NUM_PEOPLE` and every `INT_ATTR_*`;
+    this paragraph, which undersold it (`GIVE_UP_AND_SULK`'s force-success switch now joins that list too -
+    see its own entry above). Every command NOT in that list still reaches `ScriptEnv::do_call` and
+    does nothing (guard groups, vehicles, messages/camera/tutorial UI, bucket spell weighting, several
+    marker-based people orders - see the implementation-status notes added inline above). `int_var` backs
+    `INT_GAME_TURN`, `INT_MY_NUM_PEOPLE` and every `INT_ATTR_*`;
     any other internal variable reads back as its own numeric token id, not 0.
 - Keep the AI behaviours (states, attributes, marker and spell entries, attacks) as plain simulation data that
   the script sets. A future native or Lua-like scripting layer can then drive the same data, the way Script4

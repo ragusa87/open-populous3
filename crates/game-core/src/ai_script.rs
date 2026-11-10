@@ -7,7 +7,10 @@
 //! gifts (`GIVE_MANA_TO_PLAYER`/`GIVE_ONE_SHOT`/`GIVE_PLAYER_SPELL`/`REMOVE_PLAYER_THING`),
 //! `TRIGGER_LEVEL_WON/LOST`, `DISABLE_USER_INPUTS`/`ENABLE_USER_INPUTS` (`GameMap::user_inputs_disabled`,
 //! read by the client next to `active_flyby` and the reincarnation-site build ritual - `game-core` itself
-//! never gates anything on it), the timer trio and a handful of queries
+//! never gates anything on it), `GIVE_UP_AND_SULK`'s confirmed force-success switch
+//! (`ai::NativeAi::give_up_and_sulk`, read by `sermon::tend_sermons` to bypass the preacher-conversion
+//! population cap - the wiki's "everyone retreats to guard the shaman" claim stays unconfirmed and
+//! unmodelled), the timer trio and a handful of queries
 //! (`I_HAVE_ONE_SHOT`/`IS_SHAMAN_AVAILABLE_FOR_ATTACK`/`COUNT_ANGELS`/`IS_BUILDING_NEAR`/
 //! `GET_HEIGHT_AT_POS`/`COUNT_PEOPLE_IN_MARKER`/`IS_SHAMAN_IN_AREA`) have real
 //! behaviour; every other `DO` command (guard groups, vehicles, messages/camera/tutorial UI)
@@ -134,6 +137,12 @@ impl Env for ScriptEnv<'_> {
             }
             "ENABLE_USER_INPUTS" => {
                 self.map.user_inputs_disabled = false;
+                None
+            }
+            "GIVE_UP_AND_SULK" => {
+                if let Some(Arg::OnOff(on)) = call.args.first() {
+                    self.map.ai_set_give_up_and_sulk(self.owner, *on);
+                }
                 None
             }
             "SET_NO_BLUE_REINC" => {
