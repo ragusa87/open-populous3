@@ -2103,6 +2103,22 @@ impl GameMap {
         }
     }
 
+    /// The lowest slot (`crate::guard::orbit_point`) not already held by one of `shaman`'s own living
+    /// guards: assigned once, per unit, and never reshuffled while it keeps guarding (same principle as a
+    /// formation's own fixed member slots, formation.rs) - a slot freed by one guard leaving is reused by
+    /// the next one to join, instead of counting up forever.
+    fn free_guard_slot(&self, shaman: UnitId) -> u16 {
+        let used: std::collections::BTreeSet<u16> = self
+            .units
+            .iter()
+            .filter_map(|u| match u.action {
+                Action::Guarding { shaman: s, slot, .. } if s == shaman && u.is_alive() => Some(slot),
+                _ => None,
+            })
+            .collect();
+        (0..).find(|s| !used.contains(s)).unwrap_or(0)
+    }
+
     /// `i` (any non-shaman follower) starts escorting its tribe's shaman (`G`, pop3-rev-analysis.md "Guard the
     /// shaman"); a no-op without one (she is dead/reincarnating, or `i` is itself the shaman).
     fn go_guard(&mut self, i: usize) {
@@ -2112,26 +2128,35 @@ impl GameMap {
         let Some(owner) = self.units[i].owner.tribe() else { return };
         let Some(shaman) = self.shaman_of(owner).map(|s| s.id) else { return };
         let at = self.unit(shaman).map_or((self.units[i].x, self.units[i].z), |s| (s.x, s.z));
+        let slot = self.free_guard_slot(shaman);
+        let to = crate::guard::orbit_point(at, slot, self.now);
         self.units[i].start(Order::Stop);
         if self.units[i].action.can_take_orders() {
-            self.units[i].action = Action::Guarding { shaman, to: at };
+            self.units[i].action = Action::Guarding { shaman, slot, to };
         }
     }
 
-    /// Every unit escorting its tribe's shaman: stays within `crate::guard::GUARD_RANGE` of her current position
-    /// on both axes, re-aimed every tick (same shape as `tend_attacks`); stops guarding (back to Idle) once she
-    /// is gone, reincarnating or not alive.
+    /// Every unit escorting its tribe's shaman: walks straight back to her current position while beyond
+    /// `crate::guard::GUARD_RANGE` of it (catching up); within range, circles her own fixed point on its
+    /// own slot's ring instead (`crate::guard::orbit_point`, continuously turning, so several guards walk
+    /// around her at their own spot rather than converging on the same one and drawing superposed) -
+    /// re-aimed every tick (same shape as `tend_attacks`); stops guarding (back to Idle) once she is gone,
+    /// reincarnating or not alive.
     pub(crate) fn tend_guards(&mut self) {
+        let now = self.now;
         for i in 0..self.units.len() {
-            let Action::Guarding { shaman, .. } = self.units[i].action else { continue };
+            let Action::Guarding { shaman, slot, .. } = self.units[i].action else { continue };
             let Some((sx, sz)) = self.unit(shaman).filter(|s| s.is_alive()).map(|s| (s.x, s.z)) else {
                 self.units[i].action = Action::Idle;
                 continue;
             };
             let u = &self.units[i];
-            if torus_delta(u.x, sx).abs() > crate::guard::GUARD_RANGE || torus_delta(u.z, sz).abs() > crate::guard::GUARD_RANGE {
-                self.units[i].retarget((sx, sz));
-            }
+            let target = if torus_delta(u.x, sx).abs() > crate::guard::GUARD_RANGE || torus_delta(u.z, sz).abs() > crate::guard::GUARD_RANGE {
+                (sx, sz)
+            } else {
+                crate::guard::orbit_point((sx, sz), slot, now)
+            };
+            self.units[i].retarget(target);
         }
     }
 
@@ -2482,6 +2507,52 @@ mod tests {
         });
         assert!(arrived.is_some(), "walked within range");
         assert!(matches!(map.unit(brave).unwrap().action, Action::Guarding { .. }), "still guarding: never done on its own");
+    }
+
+    #[test]
+    fn several_guards_of_the_same_shaman_get_distinct_slots_and_settle_at_distinct_points() {
+        let mut map = GameMap::sandbox_units();
+        let shaman = map.shaman_of(TribeId::Blue).unwrap().id;
+        let braves: Vec<_> = map.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave).map(|u| u.id).take(4).collect();
+        assert_eq!(braves.len(), 4, "test setup: four braves of the player");
+        for &b in &braves {
+            map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: b, order: Order::Guard });
+        }
+        let slots: std::collections::BTreeSet<u16> = braves
+            .iter()
+            .map(|&b| match map.unit(b).unwrap().action {
+                Action::Guarding { slot, .. } => slot,
+                a => panic!("{a:?}"),
+            })
+            .collect();
+        assert_eq!(slots.len(), braves.len(), "one slot each: {slots:?}");
+        for _ in 0..600 {
+            map.tick();
+        }
+        let positions: std::collections::BTreeSet<(u16, u16)> = braves.iter().map(|&b| { let u = map.unit(b).unwrap(); (u.x, u.z) }).collect();
+        assert_eq!(positions.len(), braves.len(), "settled at distinct points around her, not superposed: {positions:?}");
+        for &b in &braves {
+            let u = map.unit(b).unwrap();
+            assert!(matches!(u.action, Action::Guarding { .. }), "still guarding");
+            let shaman_pos = { let s = map.unit(shaman).unwrap(); (s.x, s.z) };
+            assert!(torus_delta(u.x, shaman_pos.0).abs() <= crate::guard::GUARD_RANGE && torus_delta(u.z, shaman_pos.1).abs() <= crate::guard::GUARD_RANGE, "settled within range, not wandered off");
+        }
+    }
+
+    #[test]
+    fn a_guard_keeps_circling_rather_than_standing_still_once_within_range() {
+        let mut map = GameMap::sandbox_units();
+        let brave = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave).unwrap().id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: brave, order: Order::Guard });
+        for _ in 0..200 {
+            map.tick();
+        }
+        let settled_cell = map.unit(brave).unwrap().cell();
+        let moved = (0..400).find(|_| {
+            map.tick();
+            map.unit(brave).unwrap().cell() != settled_cell
+        });
+        assert!(moved.is_some(), "a lone guard keeps turning around her, not frozen in place once it first arrives");
     }
 
     #[test]

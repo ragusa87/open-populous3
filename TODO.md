@@ -167,6 +167,13 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   instead, since plain `G` there is already the cell grid toggle (`keymap.rs`). The shaman is confirmed NOT protected while guarded
   (joins the same fight ring as her guards); no protection logic needed, already covered by ordinary
   auto-attack/melee-join behaviour.
+  **Fixed, 2026-11-10** (reported live: several guards all walked to her exact position and drew superposed,
+  one on top of another, instead of standing apart): each guard now circles a fixed point of its own on a ring
+  around her instead of her exact position once within range (`crate::guard::orbit_point`, `[ours]`, not
+  traced), `slot` assigned once at `GameMap::go_guard` and never reshuffled while it keeps guarding (same
+  principle as a formation's own fixed member slots) so several guards spread out and keep slowly turning
+  around her, catching up again (straight to her current position, same as before) if she walks far enough
+  to pull any of them past `GUARD_RANGE`.
 
 ### Units ([units.md](docs/specs/units.md))
 - [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the stranded rate (`STRANDED_DAMAGE`, scaled x20 from our old 100 HP guess, still unconfirmed). `DROWN_DAMAGE` is answered and is **not** a per-tick damage value at all (pop3-rev-analysis.md "Drowning"): the original always takes a fixed 16 turns (1.33 s) to kill once truly submerged, forcing life to exactly 0, independent of current/max health - a flat countdown, not `-60`/tick. Matters most for the shaman: her much larger health pool means ours currently lets her survive drowning far longer than the original allows.

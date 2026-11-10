@@ -252,10 +252,13 @@ pub enum Action {
     Worshipping { at: WorshipAt },
     /// On its way to attack `target`, whose place it last aimed at is `to` (`GameMap::tend_attacks` keeps it up to date).
     Attacking { target: Target, to: (u16, u16) },
-    /// Escorting the tribe's shaman (`G` key, pop3-rev-analysis.md "Guard the shaman"): stays within `GUARD_RANGE`
-    /// of her current position on both axes, last aimed at `to` (`GameMap::tend_guards` keeps it up to date, same
-    /// shape as `Attacking`); never reports itself done on its own while she lives.
-    Guarding { shaman: UnitId, to: (u16, u16) },
+    /// Escorting the tribe's shaman (`G` key, pop3-rev-analysis.md "Guard the shaman"): orbits her at
+    /// `crate::guard::ORBIT_RADIUS`, `slot` its own fixed position on the ring (`crate::guard::orbit_point`,
+    /// assigned once at `GameMap::go_guard`, never reshuffled while it keeps guarding - same principle as a
+    /// formation's own member slots, formation.rs); last aimed at `to` (`GameMap::tend_guards` keeps it up to
+    /// date every tick, same shape as `Attacking`, walking her down within `GUARD_RANGE` of her current
+    /// position if she strays, else circling); never reports itself done on its own while she lives.
+    Guarding { shaman: UnitId, slot: u16, to: (u16, u16) },
     /// Its `role` in the challenge `challenge` (challenge.rs).
     Challenge { challenge: crate::challenge::ChallengeId, role: crate::challenge::Role },
     /// A firewarrior throwing fire at `target` (firebolt.rs), `left` turns to go; then back to its attack.
@@ -1570,8 +1573,8 @@ impl Unit {
                 self.action = Action::Attacking { target, to };
                 self.planned_on = None;
             }
-            Action::Guarding { shaman, to: aimed } if moved(aimed) => {
-                self.action = Action::Guarding { shaman, to };
+            Action::Guarding { shaman, slot, to: aimed } if moved(aimed) => {
+                self.action = Action::Guarding { shaman, slot, to };
                 self.planned_on = None;
             }
             _ => {}

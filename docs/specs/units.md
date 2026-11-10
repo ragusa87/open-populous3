@@ -202,13 +202,18 @@ debug overlay (`F4`) draws a patrolling unit's route and points.
 
 ## Guard the shaman (done: `game_core::guard`, `GameMap::go_guard`/`tend_guards`)
 `G` (pop3-rev-analysis.md "Guard the shaman", fully traced): with followers selected, each non-shaman one escorts
-the tribe's shaman continuously (`Order::Guard`, `Action::Guarding { shaman, to }`), then the selection clears
-(auto-deselected, matching the original). Each tick, a guard re-reads her *current* live position and walks
-towards it whenever it is more than `GUARD_RANGE` (824 units [exe]) away on either axis - same shape as
-`Action::Attacking`'s own re-aiming (`GameMap::tend_guards`/`Unit::retarget`), never reporting itself done on its
-own while she is alive; stops (back to Idle) once she is not. `G` with nothing selected, or with only the shaman
-selected, instead stops every one of the player's own units currently guarding (`Command::CancelGuard`, a
-tribe-wide scan rather than a per-unit order, since the original does not name which units are guarding either).
+the tribe's shaman continuously (`Order::Guard`, `Action::Guarding { shaman, slot, to }`), then the selection
+clears (auto-deselected, matching the original). Each tick, a guard re-reads her *current* live position; more
+than `GUARD_RANGE` (824 units [exe]) away on either axis, it walks straight towards it - same shape as
+`Action::Attacking`'s own re-aiming (`GameMap::tend_guards`/`Unit::retarget`); within range, it circles her
+instead, each guard at its own fixed point on a ring around her that keeps slowly turning
+(`crate::guard::orbit_point`, `[ours]`, not traced - several guards drawing superposed at her exact position,
+reported live, is what this replaced), `slot` assigned once at `GameMap::go_guard` and never reshuffled while it
+keeps guarding, so one dropping out or a new one joining never shifts anybody else's spot. A guard never reports
+itself done on its own while she is alive; stops (back to Idle) once she is not. `G` with nothing selected, or
+with only the shaman selected, instead stops every one of the player's own units currently guarding
+(`Command::CancelGuard`, a tribe-wide scan rather than a per-unit order, since the original does not name which
+units are guarding either).
 Any other direct order given to a guarding unit cancels it like any other action (`Unit::can_take_orders`'s own
 default). Bound to `G` in the original keymap; dev mode uses Shift+G instead, since plain `G` there is already
 the cell grid toggle (`keymap.rs`, `shortcuts.md`).
