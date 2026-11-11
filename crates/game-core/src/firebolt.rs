@@ -194,6 +194,11 @@ impl GameMap {
 
     /// What a hitting bolt does where it lands.
     fn bolt_hit(&mut self, b: &Firebolt) -> Vec<WorldEvent> {
+        // A ghost firewarrior's own shots are cosmetic only (docs/plans/ghost.md, pop3-rev-analysis.md: "their
+        // shots do nothing"): the throw animation already played (`throw_fire`), nothing follows on arrival.
+        if self.unit(b.thrower).is_some_and(|t| t.statuses.ghost) {
+            return Vec::new();
+        }
         let cell = ((b.at.0 as u32 / WORLD_UNITS_PER_CELL) as i32, (b.at.1 as u32 / WORLD_UNITS_PER_CELL) as i32);
         let thrower = self.unit(b.thrower).map_or(b.at, |t| (t.x, t.z));
         let boost = if b.bloodlusted { BLOODLUST_DAMAGE } else { 1 };
@@ -314,6 +319,16 @@ mod tests {
         map.run(Ticks::new(60));
         assert_eq!(life(&map, t), full, "a magical ranged attack, stopped like a spell");
         assert!(!map.unit(t).unwrap().motion.airborne(), "its knockback is stopped too");
+    }
+
+    #[test]
+    fn a_ghost_firewarriors_own_bolts_do_nothing_on_arrival() {
+        let (mut map, a, t) = duel(UnitKind::Brave, 3);
+        map.unit_mut(a).unwrap().statuses.ghost = true;
+        let full = life(&map, t);
+        map.run(Ticks::new(60));
+        assert_eq!(life(&map, t), full, "no damage follows a ghost's own throw");
+        assert!(!map.unit(t).unwrap().motion.airborne(), "no knockback either");
     }
 
     #[test]

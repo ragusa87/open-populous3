@@ -102,9 +102,10 @@ impl Housing {
     }
 }
 
-/// What `unit` is doing, None for those not counted: the dead, the shaman, wildmen.
+/// What `unit` is doing, None for those not counted: the dead, the shaman, wildmen, a Ghost Army copy
+/// (docs/plans/ghost.md: never reaches the headcount increment, the population cap or the per-type count).
 pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
-    if !unit.is_alive() || kind_index(unit.kind).is_none() {
+    if !unit.is_alive() || unit.statuses.ghost || kind_index(unit.kind).is_none() {
         return None;
     }
     if let Some(v) = unit.aboard.and_then(|v| map.vehicle(v)) {
@@ -168,9 +169,10 @@ impl GameMap {
         kinds.iter().find_map(|&k| self.units_in(tribe, state, Some(k)).map(|u| u.id).find(|id| !taken.contains(id)))
     }
 
-    /// The tribe's population (living units but the shaman and wildmen) and its built huts per size.
+    /// The tribe's population (living units but the shaman, wildmen and any Ghost Army copy) and its built huts
+    /// per size.
     pub fn housing(&self, tribe: TribeId) -> Housing {
-        let population = self.units.iter().filter(|u| u.owner == tribe && u.is_alive() && kind_index(u.kind).is_some()).count() as u16;
+        let population = self.units.iter().filter(|u| u.owner == tribe && u.is_alive() && !u.statuses.ghost && kind_index(u.kind).is_some()).count() as u16;
         let mut housing = Housing { huts: [0; 3], population };
         for b in self.buildings.iter().filter(|b| b.owner == tribe && b.stage() == Stage::Built) {
             if let BuildingKind::Hut { size } = b.kind {
@@ -183,7 +185,9 @@ impl GameMap {
     /// The tribe's mana income this turn (huts-and-training.md rule 7, pop3-rev-analysis.md "Income"): busy
     /// or idle followers (`mana_rate`) plus the shaman, always at her own flat rate, scaled by
     /// `HUMAN_MANA_ADJUST` (×1.25 default) — every tribe is treated as human until AI tribes exist (training.rs's
-    /// `train_cost` has the same gap: "the computer players' 1000 once tribes have a controller").
+    /// `train_cost` has the same gap: "the computer players' 1000 once tribes have a controller"). A Ghost Army
+    /// copy contributes nothing, a ghost shaman included (docs/plans/ghost.md: strongly implied, not
+    /// independently traced at the income computation itself).
     pub fn mana_income(&self, tribe: TribeId) -> Mana {
         let income = &self.balance.income;
         let sum: u32 = self
@@ -191,6 +195,7 @@ impl GameMap {
             .iter()
             .filter(|u| u.owner == tribe && u.is_alive())
             .map(|u| match u.kind {
+                _ if u.statuses.ghost => 0,
                 UnitKind::Wildman | UnitKind::AngelOfDeath => 0,
                 UnitKind::Shaman => mana_rate(income, UnitKind::Shaman, true),
                 _ => mana_rate(income, u.kind, matches!(state_of(self, u), Some(State::Housed) | Some(State::Working))),
@@ -267,6 +272,18 @@ mod tests {
         assert_eq!(map.housing(TribeId::Blue).population, 0);
         assert_eq!(map.headcount(TribeId::Red).get(State::Idle, UnitKind::Warrior), 1);
         assert_eq!((map.headcount(TribeId::Blue).total(), map.headcount(TribeId::Red).total()), (0, 1));
+    }
+
+    #[test]
+    fn a_ghost_army_copy_is_not_counted_either_headcount_housing_or_mana_income() {
+        let mut map = empty();
+        let ghost_brave = add(&mut map, TribeId::Blue, UnitKind::Brave);
+        map.units[ghost_brave].statuses.ghost = true;
+        let ghost_shaman = add(&mut map, TribeId::Blue, UnitKind::Shaman);
+        map.units[ghost_shaman].statuses.ghost = true;
+        assert_eq!(map.headcount(TribeId::Blue), Headcount::default(), "no ghost in any state/kind row");
+        assert_eq!(map.housing(TribeId::Blue).population, 0);
+        assert_eq!(map.mana_income(TribeId::Blue), Mana(0), "a ghost shaman included: no income at all");
     }
 
     #[test]

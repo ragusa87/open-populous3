@@ -101,10 +101,12 @@ impl GameMap {
         let idle = matches!(u.action, Action::Idle | Action::Holding { .. }) && !throws;
         let size = self.terrain.size() as i32;
         square(u.cell(), sight, size).find_map(|cell| {
+            // A ghost's own auto-target scan is restricted to enemy ghosts and enemy shamans only
+            // (docs/plans/ghost.md, pop3-rev-analysis.md: "the real new combat mechanic").
             let people = grid
                 .at(cell)
                 .filter_map(|id| self.unit(id))
-                .filter(|t| crate::attack::may_attack(u, t) && t.kind != UnitKind::Wildman && !t.locked() && !t.statuses.invisible.is_on() && !self.tribes.allied(u.owner, t.owner));
+                .filter(|t| crate::attack::may_attack(u, t) && t.kind != UnitKind::Wildman && !t.locked() && !t.statuses.invisible.is_on() && !self.tribes.allied(u.owner, t.owner) && (!u.statuses.ghost || t.statuses.ghost || t.kind == UnitKind::Shaman));
             let mut fighting = None;
             for t in people {
                 match self.linked(t) {
@@ -167,6 +169,26 @@ mod tests {
         map.unit_mut(t).unwrap().kind = UnitKind::Wildman;
         map.run(Ticks::new(4));
         assert_eq!(attacking(&map, a), None, "the scan skips it, unlike an explicit order (attack.rs)");
+    }
+
+    #[test]
+    fn a_ghosts_own_scan_only_goes_for_an_enemy_ghost_or_shaman() {
+        let (mut map, a, _) = watch(1);
+        map.unit_mut(a).unwrap().statuses.ghost = true;
+        map.run(Ticks::new(4));
+        assert_eq!(attacking(&map, a), None, "an ordinary enemy brave: not a valid target for a ghost's own scan");
+
+        let (mut map, a, t) = watch(1);
+        map.unit_mut(a).unwrap().statuses.ghost = true;
+        map.unit_mut(t).unwrap().statuses.ghost = true;
+        map.run(Ticks::new(4));
+        assert_eq!(attacking(&map, a), Some(Target::Unit(t)), "an enemy ghost: a valid target");
+
+        let (mut map, a, t) = watch(1);
+        map.unit_mut(a).unwrap().statuses.ghost = true;
+        map.unit_mut(t).unwrap().kind = UnitKind::Shaman;
+        map.run(Ticks::new(4));
+        assert_eq!(attacking(&map, a), Some(Target::Unit(t)), "an enemy shaman: a valid target even un-ghosted");
     }
 
     #[test]
