@@ -251,6 +251,10 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             b.extend(at.0.to_le_bytes());
             b.extend(at.1.to_le_bytes());
         }
+        Command::Eject { player, building } => {
+            b.extend([23, player.as_u8()]);
+            put_id(b, *building);
+        }
     }
 }
 
@@ -408,6 +412,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         20 => Some(Command::CancelFlyby { player }),
         21 => Some(Command::CancelGuard { player }),
         22 => Some(Command::PlaceTree { player, at: (c.u16()?, c.u16()?) }),
+        23 => Some(Command::Eject { player, building: c.id()? }),
         _ => None,
     }
 }
@@ -572,6 +577,7 @@ mod tests {
                 Command::OrderUnit { player: TribeId::Blue, unit: Id::from_raw(1), order: Order::Guard },
                 Command::CancelGuard { player: TribeId::Red },
                 Command::PlaceTree { player: TribeId::Blue, at: (40_000, 7) },
+                Command::Eject { player: TribeId::Green, building: Id::from_raw(u32::MAX) },
             ],
         }
     }

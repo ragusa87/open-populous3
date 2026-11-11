@@ -36,15 +36,16 @@ pub const HOVER_SECS: f32 = 1.5;
 const HIT_HALF_WIDTH: f32 = 0.3;
 
 /// Share of its full size a tree of `size` shows: 0 for none, then from 40% (size 1) to all (size 4).
-pub fn size_factor(size: u8) -> f32 {
-    match size.min(MAX_SIZE) {
-        0 => 0.0,
-        s => 0.4 + 0.6 * (s - 1) as f32 / (MAX_SIZE - 1) as f32,
-    }
+/// `size` is in whole-piece units but need not itself be a whole number (`Tree::visual_size`, continuous
+/// while burning) - interpolated the same way between whichever two whole sizes it falls, so a burning
+/// tree shrinks smoothly turn by turn instead of jumping once per whole piece lost.
+pub fn size_factor(size: f32) -> f32 {
+    let size = size.min(MAX_SIZE as f32);
+    if size <= 0.0 { 0.0 } else { 0.4 + 0.6 * (size - 1.0) / (MAX_SIZE - 1) as f32 }
 }
 
 /// Open-source model scale for a tree's size (a full-size tree stands `FULL_HEIGHT` cells).
-pub fn tree_scale(size: u8) -> f32 {
+pub fn tree_scale(size: f32) -> f32 {
     size_factor(size) * FULL_HEIGHT / MODEL_HEIGHT
 }
 
@@ -192,11 +193,11 @@ fn respawn_trees(
             Some((trees, material)) => {
                 let (mesh, height) = &trees[tree.variant as usize % trees.len()];
                 let model = TreeModel { index: i, full_scale: 1.0, full_height: *height };
-                view.with_child((model, Mesh3d(mesh.clone()), MeshMaterial3d(material.clone()), Transform::from_scale(Vec3::splat(size_factor(tree.size)))));
+                view.with_child((model, Mesh3d(mesh.clone()), MeshMaterial3d(material.clone()), Transform::from_scale(Vec3::splat(size_factor(tree.visual_size())))));
             }
             None => {
                 let model = TreeModel { index: i, full_scale: FULL_HEIGHT / MODEL_HEIGHT, full_height: FULL_HEIGHT };
-                view.with_child((model, WorldAssetRoot(models.0[tree.variant as usize % MODELS.len()].clone()), Transform::from_scale(Vec3::splat(tree_scale(tree.size)))));
+                view.with_child((model, WorldAssetRoot(models.0[tree.variant as usize % MODELS.len()].clone()), Transform::from_scale(Vec3::splat(tree_scale(tree.visual_size())))));
             }
         }
     }
@@ -206,7 +207,7 @@ fn respawn_trees(
 fn grow_trees(map: Res<CurrentMap>, mut models: Query<(&TreeModel, &mut Transform, &mut Visibility)>) {
     for (model, mut t, mut vis) in &mut models {
         let Some(tree) = map.0.trees.get(model.index) else { continue };
-        let scale = size_factor(tree.size) * model.full_scale;
+        let scale = size_factor(tree.visual_size()) * model.full_scale;
         if t.scale.x != scale {
             t.scale = Vec3::splat(scale);
         }
@@ -237,7 +238,7 @@ fn hover_tree(
             .filter(|(v, _, vis, _)| **vis != Visibility::Hidden && map.0.trees.get(v.0).is_some_and(|t| t.is_visible()))
             .filter_map(|(v, gt, _, children)| {
                 let full = children.iter().find_map(|c| models.get(c).ok())?.full_height;
-                let height = size_factor(map.0.trees[v.0].size) * full;
+                let height = size_factor(map.0.trees[v.0].visual_size()) * full;
                 let base = cam.world_to_viewport(cam_t, gt.translation()).ok()?;
                 let top = cam.world_to_viewport(cam_t, gt.translation() + Vec3::Y * height).ok()?;
                 Some(TreeOnScreen { index: v.0, base, top })
@@ -277,11 +278,20 @@ mod tests {
 
     #[test]
     fn bigger_with_size_hidden_at_zero() {
-        assert_eq!((size_factor(0), size_factor(1), size_factor(4)), (0.0, 0.4, 1.0));
-        assert_eq!(tree_scale(0), 0.0);
-        assert!(tree_scale(1) < tree_scale(2) && tree_scale(3) < tree_scale(4));
-        assert!((tree_scale(4) * MODEL_HEIGHT - FULL_HEIGHT).abs() < 1e-5, "full size is {FULL_HEIGHT} cells");
-        assert_eq!(tree_scale(9), tree_scale(4));
+        assert_eq!((size_factor(0.0), size_factor(1.0), size_factor(4.0)), (0.0, 0.4, 1.0));
+        assert_eq!(tree_scale(0.0), 0.0);
+        assert!(tree_scale(1.0) < tree_scale(2.0) && tree_scale(3.0) < tree_scale(4.0));
+        assert!((tree_scale(4.0) * MODEL_HEIGHT - FULL_HEIGHT).abs() < 1e-5, "full size is {FULL_HEIGHT} cells");
+        assert_eq!(tree_scale(9.0), tree_scale(4.0));
+    }
+
+    #[test]
+    fn size_factor_interpolates_smoothly_between_whole_sizes() {
+        // The fix: a burning tree's continuous `visual_size` (between, say, 2 and 3) must land strictly
+        // between `size_factor(2.0)` and `size_factor(3.0)`, not jump straight to one or the other.
+        let (two, mid, three) = (size_factor(2.0), size_factor(2.5), size_factor(3.0));
+        assert!(two < mid && mid < three, "{two} < {mid} < {three}");
+        assert_eq!(mid, (two + three) / 2.0, "linear between them");
     }
 
     #[test]

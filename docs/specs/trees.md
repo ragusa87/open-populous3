@@ -39,6 +39,10 @@ the same way.
 ## On screen (client, `nature.rs`)
 Drawn as 3D models standing on the terrain (`Grounded`, trunk footprint 0.15 cell), turned by a fixed per-tree
 angle (`tree_yaw`), scaled with the size (`size_factor`: 40% at size 1 to full at size 4), hidden at size 0.
+Read from `Tree::visual_size` (continuous, not `size` itself: a whole-number gameplay unit, the pieces of wood
+still to give), so a burning tree shrinks smoothly turn by turn as its wood stock drains (`burn_stock`,
+`BURN_DRAIN` a turn) instead of jumping once per whole 100-unit piece lost - fixed 2026-11-10, reported live as
+the model visibly snapping to a smaller size every 100 units rather than scaling down continuously.
 - With the original files: the original tree objects, picked by the level's object bank
   (`catalog::tree_object_in_bank`, `GameMap::object_bank`, objects.md): bank 0 types 0-5 = scenery models 1-6 =
   objects 13-18; banks 2 and 7 bank 0's 13-15, bank 3/4/5/6 bank 0's 60-62 / 63-65 / 66-68 / 69-71, models 4-6

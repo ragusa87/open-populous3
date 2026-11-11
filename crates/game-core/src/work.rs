@@ -61,8 +61,9 @@ impl GameMap {
     }
 
     /// Switches dismantling of `player`'s building `building` (id), flat and taking wood. On, everyone
-    /// inside walks out and its assigned braves take it apart instead (`dismantle_step`); off, it is built
-    /// again: braves bring its missing wood back.
+    /// inside walks out, its own braves among them assigned to take it apart instead (`dismantle_step`,
+    /// up to `max_braves`: "brave leaving the building can dismantle it" rather than leaving the toggle
+    /// with nobody ever actually doing the work); off, it is built again: braves bring its missing wood back.
     pub fn set_dismantling(&mut self, player: TribeId, building: BuildingId, on: bool) {
         let Some(b) = self.building_index(building).filter(|&b| self.buildings[b].owner == player && self.buildings[b].flat && self.buildings[b].kind.wood_cost() > 0) else { return };
         if self.buildings[b].dismantling == on {
@@ -71,7 +72,14 @@ impl GameMap {
         self.buildings[b].dismantling = on;
         if on {
             let door = self.buildings[b].door();
+            let max = self.buildings[b].kind.max_braves() as usize;
+            let evicted: Vec<UnitId> = self.units.iter().filter(|u| u.is_alive() && u.kind == UnitKind::Brave && u.inside.is_some_and(|i| i.building == building)).map(|u| u.id).collect();
             self.empty_building(building, door);
+            for id in evicted.into_iter().take(max) {
+                if let Some(i) = self.units.iter().position(|u| u.id == id) {
+                    self.units[i].work = Some(building);
+                }
+            }
         }
     }
 
@@ -195,7 +203,7 @@ impl GameMap {
 
     /// Those inside the building `building` matching `evict` walk out by its `door` to a free spot
     /// around it, released, then stand idle.
-    fn send_out(&mut self, building: BuildingId, door: (u16, u16), evict: impl Fn(&Unit) -> bool) {
+    pub(crate) fn send_out(&mut self, building: BuildingId, door: (u16, u16), evict: impl Fn(&Unit) -> bool) {
         let out: Vec<(UnitId, (u16, u16))> = self.units.iter().filter(|u| u.is_alive() && u.inside.is_some_and(|i| i.building == building) && evict(u)).map(|u| (u.id, (u.x, u.z))).collect();
         let ids: Vec<UnitId> = out.iter().map(|o| o.0).collect();
         let spots = slots::dispatch(&self.ground(), &out, door, &self.taken_spots(&ids));
@@ -596,7 +604,10 @@ mod tests {
             map.apply(&c);
         }
         run_until(&mut map, 2000, |m| m.buildings[hut].stage() == Stage::Built).expect("repaired");
-        for _ in 0..200 {
+        // Short enough to stay well under `enter::HOUSE_DELAY`: the builder, idle and empty-handed right
+        // outside a hut with room, would otherwise auto-house itself back in (`GameMap::tend_auto_housing`)
+        // before this checks it was ever properly released.
+        for _ in 0..60 {
             map.tick();
         }
         for &r in &residents {
@@ -650,6 +661,35 @@ mod tests {
         assert_eq!(map.wood.len(), wood_before + 3, "all 3 pieces dropped on the ground, one at a time");
         assert!(map.ashes.buildable(cell), "no ashes once dismantled, unlike a destroyed building");
         assert_eq!(map.units.iter().find(|u| u.id == brave).unwrap().work, None, "released");
+    }
+
+    #[test]
+    fn a_brave_evicted_by_dismantling_is_assigned_to_do_it_without_a_separate_order() {
+        let mut map = sandbox();
+        let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
+        let site = map.buildings[hut].id;
+        let resident = braves(&map, 1)[0];
+        let k = map.units.iter().position(|u| u.id == resident).unwrap();
+        map.units[k].inside = Some(Inside { building: site, door: map.buildings[hut].door() });
+        let wood_before = map.wood.len();
+        map.apply(&Command::Dismantle { player: TribeId::Blue, building: site, on: true });
+        assert_eq!(map.units.iter().find(|u| u.id == resident).unwrap().work, Some(site), "picked up as a worker on its way out, no explicit order needed");
+        run_until(&mut map, 2000, |m| m.building(site).is_none()).expect("dismantled by the evicted resident alone");
+        assert_eq!(map.wood.len(), wood_before + 3, "all 3 pieces dropped on the ground, one at a time");
+    }
+
+    #[test]
+    fn a_non_brave_occupant_leaves_but_is_never_put_to_work_dismantling() {
+        let mut map = sandbox();
+        let hut = map.buildings.iter().position(|b| b.owner == Owner::Tribe(TribeId::Blue) && b.kind == BuildingKind::Hut { size: 1 } && b.stage() == Stage::Built).unwrap();
+        let site = map.buildings[hut].id;
+        let shaman = map.shaman_of(TribeId::Blue).unwrap().id;
+        let k = map.units.iter().position(|u| u.id == shaman).unwrap();
+        map.units[k].inside = Some(Inside { building: site, door: map.buildings[hut].door() });
+        map.apply(&Command::Dismantle { player: TribeId::Blue, building: site, on: true });
+        let s = map.units.iter().find(|u| u.id == shaman).unwrap();
+        assert_eq!(s.work, None, "never a dismantling worker");
+        assert!(matches!(s.action, Action::Walking { .. }), "still evicted like anyone else inside");
     }
 
     #[test]

@@ -167,8 +167,39 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   instead, since plain `G` there is already the cell grid toggle (`keymap.rs`). The shaman is confirmed NOT protected while guarded
   (joins the same fight ring as her guards); no protection logic needed, already covered by ordinary
   auto-attack/melee-join behaviour.
+  **Fixed, 2026-11-10** (reported live: several guards all walked to her exact position and drew superposed,
+  one on top of another, instead of standing apart): each guard now circles a fixed point of its own on a ring
+  around her instead of her exact position once within range (`crate::guard::orbit_point`, `[ours]`, not
+  traced), `slot` assigned once at `GameMap::go_guard` and never reshuffled while it keeps guarding (same
+  principle as a formation's own fixed member slots) so several guards spread out and keep slowly turning
+  around her, catching up again (straight to her current position, same as before) if she walks far enough
+  to pull any of them past `GUARD_RANGE`.
 
 ### Units ([units.md](docs/specs/units.md))
+- [x] **Fixed, 2026-11-10** (reported live: a unit standing frozen in the walking pose, never losing life,
+  no feedback at all - "stuck"): traced to `Action::Attacking`'s own `approach` having no fallback once
+  `path::route` comes back empty (an enemy walled off by new construction, say) - `self.route` just stays
+  empty and every tick after does nothing, silently, forever. A unit `Walking`, or `Attacking` while in the
+  open, making less than `STUCK_MIN_PROGRESS` headway over `STUCK_WINDOW` is now treated as `Action::Stranded`
+  instead (arms up, losing life), same as a target genuinely found unreachable up front (`Unit::stuck_watch`,
+  units.md's state table, the `Stranded` row). `[ours]`: a safety net over that specific cause
+  and over whatever subtler one might still strand an ordinary walk short of actually failing to plan at all,
+  not a diagnosis of a single root cause - the window and progress-floor numbers are both guesses. Guarding is
+  deliberately left out (a guard settled on its own orbit point legitimately stands still between nudges,
+  `crate::guard::orbit_point` - this was first tried covering it too and promptly starved a guard to death in
+  testing).
+  **Checked further, 2026-11-11** (user question: does `approach` retry a fresh path before stranding, or
+  only on a ground change?): it already retried on a ground change AND on every blocked step (resets its
+  cache, which the very next tick's own top-of-function check then rebuilds) - the one real gap found was
+  that `approach` lacked `follow_route`'s own immediate cell-by-cell correction on a blocked step, replanning
+  with the full straightened search again instead, which could in principle repeat the exact same failure.
+  Hardened to match `follow_route` (`Unit::route_to`, shared by both). **Not a confirmed fix for a specific
+  repro**: an extensive search for a `(start, to, wall)` case where `path::leg_is_clear` approves a
+  straightened leg that then actually blocks on unchanged ground found none - it already walks every cell
+  the leg crosses exactly, including the corner-pinch rule, so this gap may not be reachable in the current
+  code at all. Also checked: a pyramid of knowledge (`BuildingKind::Vault`)'s own footprint is an ordinary
+  rectangle, same as any other building, no special corner handling needed or missing found - no evidence of
+  a pyramid-specific pathing bug; needs a more specific repro (level, position) to look at further.
 - [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the stranded rate (`STRANDED_DAMAGE`, scaled x20 from our old 100 HP guess, still unconfirmed). `DROWN_DAMAGE` is answered and is **not** a per-tick damage value at all (pop3-rev-analysis.md "Drowning"): the original always takes a fixed 16 turns (1.33 s) to kill once truly submerged, forcing life to exactly 0, independent of current/max health - a flat countdown, not `-60`/tick. Matters most for the shaman: her much larger health pool means ours currently lets her survive drowning far longer than the original allows.
 - [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
@@ -183,7 +214,18 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] Wildmen: find their death anim (47, falling down a slope, stands in) - confirmed shared with warrior/preacher's death-anim group, not tied to any wildman-specific lifecycle (pop3-rev-analysis.md "Wildmen").
 - [ ] Load open-source unit sheets (`assets/units/<kind>/<pose>.png`, see [unit-art.md](docs/specs/unit-art.md)): 64x64 cells, feet at (32, 58), 5 directions mirrored to 8, magenta key ramp swapped per tribe; fall back to the generated figure per missing sheet.
 - [ ] `just bake-units` is not bit-reproducible: two bakes differ by 1-2 edge pixels in a few frames (GPU rasterisation), so there is no `--check` like the building kit's; render on the CPU or compare with a tolerance.
-- [ ] Original unit animations: who the pointed-helmet attacker of 20-24 is, and anim 13; use the fighting anims (pop3-rev-analysis.md "Combat": 15 move 2 and the opening blow, 13 move 3, 25 move 4, 14 hit, 16 struck before the flight; taunts 48/49/50 while waiting), throw-fire (7), spy fire-setting (17), tornado tilt (16), pedalling (51), running from bees (52) anims once those actions exist; idle for too long: braves scratch (89), warriors do push-ups (90/91) - traced as far as a confirmed, rhythm-gated (16-turn) RNG-weighted picker (pop3-rev-analysis.md "Idle behaviour"), but only confirmed for wildmen (state 8 → 5) this session; whether ordinary followers share it is still open, so scope any implementation to wildmen first and extend if a later check confirms followers too. `Action::Idle` today has no animation-variant state or rhythm counter at all (`unit.rs`).
+- [ ] Original unit animations: who the pointed-helmet attacker of 20-24 is, and anim 13; use the fighting anims (pop3-rev-analysis.md "Combat": 15 move 2 and the opening blow, 13 move 3, 25 move 4, 14 hit, 16 struck before the flight; taunts 48/49/50 while waiting), throw-fire (7), spy fire-setting (17), tornado tilt (16), pedalling (51), running from bees (52) anims once those actions exist.
+- [x] Idle for too long: braves scratch (89), warriors do push-ups (90), spies juggle (92) - implemented
+  client-only (`units::art::idle_flavor`, `Pose::Scratch`/`Pushup`/`Juggle`), since it never changes
+  simulation state (visual flavor only, no lockstep weight): a deterministic function of the unit's id and
+  the drawn tick, not a new per-unit field. **`[ours]`, not itself traced for followers** - the rhythm
+  reused (16 ticks) and the 1-in-6 weight are both guesses, no community-only confirmation that ordinary
+  followers share wildmen's own confirmed idle-variant rhythm (pop3-rev-analysis.md "Idle behaviour",
+  state 8 → 5) at all; a live check against the original would be needed to settle either number, or
+  whether followers do this at all. CC0: no clip authored (`Pose::fallback` to `Idle`, same as Carbonized/
+  the taunts); original assets: anims 89/90/92 (`PersonAnim::Scratch`/`Pushup`/`Juggle`). Preachers,
+  firewarriors, the shaman and wildmen keep plain Idle (wildmen already have their own separate
+  eat/drink idle loop, `wildman.rs`, left untouched).
 - [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
 - [ ] State transitions: `Unit::panic`/`Unit::catch_fire` (`unit.rs`) both call `drop_plans()`, cancelling the route, destination, teleport/spell targets, every pending "go do X" field, the order queue, the patrol list and any work assignment outright. **Confirmed, not just suspected, as a real divergence** (pop3-rev-analysis.md "Resuming a fight cut short by a push", addendum): the original's state-transition mechanism itself has no generic "forget your plans" step anywhere (`0x4ED6F0`, always called on any transition, is a no-op; `0x4ED640` only runs the new state's own entry case), Fight is independently confirmed to never release a participant's command group, and person states 26 (panic) and 31 (on fire) were each read exhaustively, start to finish, this session - neither touches the order/command-group slot (`+0x9B`/`+0x8B`/`+0xA6`) or calls `group_release` anywhere. Fix: `panic`/`catch_fire` should stop calling the full `drop_plans()` and instead just interrupt the current task the way Fight already does (`resume_attack`-style), so it resumes unprompted afterward instead of leaving the person with nothing queued. Also resolve the existing inconsistency this surfaced: the `Drowning` transition (`unit.rs` `tick()`) does a hand-picked partial reset (`teleport_to`/`spell` only) rather than calling `drop_plans()` at all - whichever way `panic`/`catch_fire` are fixed, make `Drowning`'s own reset consistent with it rather than its own third, narrower variant. (Unrelated to the above but found alongside it: on-fire's own entry in the original also forces the SAME random run panic does, for the whole 70-turn burn, gated by a ghost-check rather than panic's blast flag - `catch_fire`'s existing `run_in_panic`-for-the-whole-burn already matches this, no change needed there.)
 - [ ] Spies: the player can disguise one in another tribe's colour; it then walks through that tribe unnoticed, except when hovered (spy indicator) or when it passes by a spy of the tribe it imitates. Its attack on a building: it sets a fire (anim 17), walks away, the building then takes damage; the spy stays unnoticed and can attack again later.
@@ -562,7 +604,13 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   **Partly addressed 2026-10-30** (reported: a warrior-training site's door facing a neighbouring house, its
   workers stuck idle however they were ordered once the door was sealed): `placement::can_place` now refuses a
   *new* placement that would wall shut a standing building's door, in either direction (`nothing_may_wall_a_door_
-  shut_either_ones`). Still open: a door sealed some other way (a layout already on the map, e.g. an original
+  shut_either_ones`).
+  **Client preview fixed, 2026-11-10** (reported live: a door-blocking spot still showed the ordinary white
+  footprint, with the click then silently doing nothing - `can_place` itself was already right, only the
+  blueprint's own red-or-white preview in `game-client` had never been taught the door rule, predating it):
+  `placement::door_blocked` made `pub`, `blueprint.rs`'s `all_red` now also checks it
+  (`a_plan_that_would_wall_a_neighbours_door_shut_is_refused_and_shows_red`).
+  Still open: a door sealed some other way (a layout already on the map, e.g. an original
   level, or two plans placed before either has a door yet) still traps whoever is inside for good - no order ever
   frees them, since `Unit::tick`'s inside-a-building branch always retries the door and never looks for another
   way out (repro: `work::tests::a_worker_trapped_when_its_only_door_cell_gets_walled_never_gets_out`, `#[ignore]`d
@@ -572,7 +620,43 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   design note already describes for a related case.
 - [ ] CC0 sheets: a jump pose for flattening (`Pose::Jump` falls back on arms up) and a hammer pose (`Pose::Hammer` falls back on idle).
 - [ ] Find the original hammering anim (the axe swing, anim 11, stands in for `Pose::Hammer`).
-- [ ] Huts: auto-housing of idle braves, breeding, mana from people inside, Eject (huts-and-training.md rules). No autonomous wood-gathering by an idle person was found this session (pop3-rev-analysis.md "Idle behaviour"): a person with no command group does nothing at all, forever; the one confirmed autonomous, non-player assignment (a training building's own per-turn code, 0x405B80) looks like occupant/queue positioning, not wood-fetching, pending its unread "doing it" half - don't add an idle-brave-fetches-wood behaviour without a further live check confirming it.
+- [x] Huts: auto-housing of idle braves implemented (huts-and-training.md rule 3, `GameMap::tend_auto_housing`,
+  `enter.rs`): still open from this item - breeding (done separately, `hut_growth.rs`), mana from people inside.
+  **Eject implemented, 2026-11-10** (user question: is "selection + Shift + click a building dispatches to a
+  free spot" implemented? Answer: mostly yes already, but via the Build tab icon's own Shift+click
+  (`send_in.rs`/`GameMap::send_into`, ui-and-editor.md "Build tab"), not by Shift-clicking a specific building
+  directly - that gesture did nothing extra until now. shortcuts.md's own "Buildings" table already names what
+  it should do instead: "one follower comes out" - `Command::Eject`/`GameMap::eject` (lowest-id occupant,
+  `[ours]`, not itself traced which one), `selection::eject_click` wires Shift + left click on one of the
+  player's buildings to it, independent of the current selection. This also corrected huts-and-training.md's
+  own older, wrong description of `Command::Eject` as emptying the whole building - never actually
+  implemented, and contradicted by shortcuts.md's sibling row for a vehicle using the same "one ... out"
+  wording). Still open, flagged by the same shortcuts.md row and left out of this pass: "Shift + left click on
+  a vehicle: one follower gets out" - same mechanism, applied to `Vehicle::passengers` instead of a building's
+  occupants. No autonomous wood-gathering by an idle person was found this session (pop3-rev-analysis.md "Idle
+  behaviour"): a person with no command group does nothing at all, forever; the one confirmed autonomous,
+  non-player assignment (a training building's own per-turn code, 0x405B80) looks like occupant/queue
+  positioning, not wood-fetching, pending its unread "doing it" half - don't add an idle-brave-fetches-wood
+  behaviour without a further live check confirming it. Auto-housing itself is `[ours]`, not traced at all
+  (no corresponding exe behaviour found or looked for this session) - the delay and search radius are both
+  guesses, flagged as such in `enter.rs`.
+  **Auto-work implemented, 2026-11-11** (huts-and-training.md "Huts" rule 8, `GameMap::tend_auto_work`,
+  `enter.rs`): the same idle brave also joins a nearby construction or dismantling site on its own
+  (`GameMap::assign`, same as `Order::Build`), within `SITE_SEARCH_RADIUS_CELLS` (3) and up to
+  `MAX_AUTO_WORKERS` (4) per site. Pop3-rev-analysis.md's own closest match for this (`0x4D9B50`) reads as
+  AI-tribe-only - a player's own recollection of this happening for a human-controlled idle brave contradicts
+  that reading; a coding session cannot recheck the gate against the exe itself (clean-room), so this is
+  flagged as an open question for a spec session rather than resolved, and implemented for the player's own
+  tribe regardless, `[ours]`. Specifically still left out, since the recollection was only about construction:
+  autonomous wood-gathering (the caution above stays as is - no new evidence on that one).
+  **Found along the way, not fixed here, worth its own session**: `work_on`'s own per-tick order (`fetch_wood`
+  before `flatten_step` whenever the site still `wanted` more wood) can starve the very last flatten point of a
+  site that is crowded with workers - a brave standing exactly on it, freshly done with its own task, can lose
+  its claim to a wood-fetch errand before `flatten_step` ever re-considers it, while nothing else is actually
+  finishing that point either; `MAX_AUTO_WORKERS` above only lowers how often this is reached in practice, it
+  does not fix the underlying race. Reproduced live at 16 workers sharing 8 flatten points on a training hut
+  (`enter::tend_auto_work`'s own cap exists because of this); 5 workers on the same site never reproduced it in
+  the time spent on it this session, so it's plausibly rare in ordinary play but real.
 - [ ] Wood claimed across sites: two sites' braves can head for the same tree piece; braves of another task may take wood a site counts on. Refine the dispatch rule (nearest brave per piece, gatherers vs builders).
 - [ ] Site visuals: views are redone whenever any building changes; update them per building (stable ids) instead; compare the part order (from the ground up) and the structure with the original; chimney position per hut model; busy look for the other kinds; the pile by the door could be drawn as a stack rather than loose pieces.
 - [ ] Wood pieces lying on the ground (`GameMap::wood`, drawn): picked up by any construction; hovering one could show "Wood". Maybe draw the original's shadow under them (`hfx0-0.dat` 22, unconfirmed).
@@ -788,6 +872,14 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   No change to how "gone" is represented (`size == 0`/`is_visible() == false`, regrows in place) - that part was
   already right. Test: `tree.rs`
   `a_burning_tree_gives_no_wood_and_its_size_drains_before_the_fire_goes_out`.
+  **Drawn scale fixed, 2026-11-10** (reported live: the model visibly snapped to a smaller size every 100 units
+  instead of shrinking continuously): the discrete 0-4 `size` above is correctly a whole-piece gameplay unit
+  (how much wood is left to give), but `nature.rs` was reading it directly for the draw scale too, so the model
+  only ever changed size once every `WOOD_PER_SIZE / BURN_DRAIN` (25) turns and jumped a full 20% of its height
+  each time. `Tree::visual_size` now gives a continuous value (`burn_stock` itself while burning, `tree.rs`
+  test `visual_size_shrinks_every_tick_while_a_whole_tree_s_size_jumps_at_once_then_holds`),
+  `nature::size_factor`/`tree_scale` take it instead of `size` directly (every call site in `nature.rs` and
+  `tooltip.rs`), interpolating smoothly between whole sizes.
 - [x] `fire_flame::FIRE_SMOKE` (pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's
   flame", "The ground-fire's own smoke puff" bullet): fixed - the old `Puffs{count:4, life:2.4, emit:Loop,
   spread:(0,0.35), ...}` modelled the wrong SHAPE of emission, not just wrong numbers (the original spawns a

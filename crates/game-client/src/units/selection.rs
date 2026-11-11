@@ -319,7 +319,9 @@ pub(super) fn select_and_order(
                 None => {
                     let ray = cam.0.viewport_to_world(cam.1, c).ok();
                     let at = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction)).map(world_units);
-                    if add && alt && !selection.units.is_empty() {
+                    if let Some(command) = shift.then(|| eject_click(&map.0, hovered.0)).flatten() {
+                        moves = vec![command];
+                    } else if add && alt && !selection.units.is_empty() {
                         moves = patrol_click(&map.0, &selection.units, patrol_session, hovered.0, at);
                     } else if let Some(people) = crew_click(&map.0, &selection.units, hovered.0) {
                         // One of the player's buildings wins over a tree in front of or behind it; a building or a
@@ -461,6 +463,15 @@ fn guard_press(map: &game_core::map::GameMap, selected: &[UnitId]) -> (Vec<Comma
     } else {
         (followers.into_iter().map(|unit| Command::OrderUnit { player: PLAYER, unit, order: Order::Guard }).collect(), true)
     }
+}
+
+/// The command for Shift + left click on one of the player's buildings (shortcuts.md "Buildings": "one
+/// follower comes out"), independent of the current selection: its own lowest-id occupant is sent out
+/// (`Command::Eject`). None elsewhere, or on another player's building.
+pub fn eject_click(map: &game_core::map::GameMap, hovered: Option<crate::hover::HoverTarget>) -> Option<Command> {
+    let crate::hover::HoverTarget::Building(i) = hovered? else { return None };
+    let b = map.buildings.get(i).filter(|b| b.owner == PLAYER)?;
+    Some(Command::Eject { player: PLAYER, building: b.id })
 }
 
 /// Commands for a left click at `at` (world units) on one of the player's buildings with `selected`
@@ -695,6 +706,19 @@ mod tests {
         assert_eq!(shift_right_click(&map, centre, false), None);
         map.buildings[site].flat = true;
         assert_eq!(shift_right_click(&map, centre, true), None, "flat: no more a plan");
+    }
+
+    #[test]
+    fn eject_click_targets_the_hovered_building_regardless_of_the_selection() {
+        use crate::hover::HoverTarget;
+        let map = game_core::map::GameMap::sandbox_buildings();
+        let hut = map.buildings.iter().position(|b| b.owner == PLAYER && b.kind == game_core::building::BuildingKind::Hut { size: 1 } && b.stage() == game_core::building::Stage::Built).unwrap();
+        let id = map.buildings[hut].id;
+        assert_eq!(eject_click(&map, Some(HoverTarget::Building(hut))), Some(Command::Eject { player: PLAYER, building: id }));
+        assert_eq!(eject_click(&map, None), None, "nothing hovered");
+        assert_eq!(eject_click(&map, Some(HoverTarget::Totem(0))), None, "not a building");
+        let enemy = map.buildings.iter().position(|b| b.owner != PLAYER).unwrap();
+        assert_eq!(eject_click(&map, Some(HoverTarget::Building(enemy))), None, "not the player's own");
     }
 
     #[test]

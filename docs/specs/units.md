@@ -31,7 +31,7 @@
 |---|---|---|
 | Idle | default, arrival, Stop | stands (healing: see "Health" below) |
 | Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 53 units/tick on flat ground (1.24 cells/s) (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
-| Stranded { to } | target unreachable (not the shaman) | does not move, arms up, -`STRANDED_DAMAGE` (20) HP every `STRANDED_HURT_EVERY` (4 turns, at its own phase) until the terrain opens a path (walks again) or it dies - the original instead waits out an untimed grace period, then deals 56 life every 8 turns, pop3-rev-analysis.md "Stranded" (TODO.md) |
+| Stranded { to } | target unreachable (not the shaman); also a walker or an in-the-open attacker making less than `STUCK_MIN_PROGRESS` headway over `STUCK_WINDOW` (`Unit::stuck_watch`, `[ours]`, a safety net - reported live as a unit standing still in the walking pose with no feedback, traced to `Action::Attacking`'s own `approach` having no fallback at all once its route comes back empty) | does not move, arms up, -`STRANDED_DAMAGE` (20) HP every `STRANDED_HURT_EVERY` (4 turns, at its own phase) until the terrain opens a path (walks again) or it dies - the original instead waits out an untimed grace period, then deals 56 life every 8 turns, pop3-rev-analysis.md "Stranded" (TODO.md) |
 | Worshipping | `Order::Worship { site }` (a click on a vault of knowledge with her selected) | prays at the vault's door; see worship.md |
 | Casting { left } | `Order::Cast`, any spell cast | `CAST_TICKS` (10, the original's cast state) jump, then Idle (Teleport: then at the target, Landing); a book spell (Blast, Land Bridge) is held by her (`Unit::cast_spell`) and takes effect `CAST_RELEASE` (6) into the jump (`UnitEvent::Released`), lost if another order comes first (a fight does not cut it short: combat.md "Challenge"); without a shaman to jump it takes effect at once |
 | Landing | arriving from a teleport | appears `LANDING_DROP` (256, one cell) above the target and falls ("Physics"): no orders while in the air, Idle on touchdown, 5 ticks (0.4 s) later; drawn in the idle pose at its height; a puff of dust at touchdown (`units/dust.rs`) |
@@ -202,13 +202,18 @@ debug overlay (`F4`) draws a patrolling unit's route and points.
 
 ## Guard the shaman (done: `game_core::guard`, `GameMap::go_guard`/`tend_guards`)
 `G` (pop3-rev-analysis.md "Guard the shaman", fully traced): with followers selected, each non-shaman one escorts
-the tribe's shaman continuously (`Order::Guard`, `Action::Guarding { shaman, to }`), then the selection clears
-(auto-deselected, matching the original). Each tick, a guard re-reads her *current* live position and walks
-towards it whenever it is more than `GUARD_RANGE` (824 units [exe]) away on either axis - same shape as
-`Action::Attacking`'s own re-aiming (`GameMap::tend_guards`/`Unit::retarget`), never reporting itself done on its
-own while she is alive; stops (back to Idle) once she is not. `G` with nothing selected, or with only the shaman
-selected, instead stops every one of the player's own units currently guarding (`Command::CancelGuard`, a
-tribe-wide scan rather than a per-unit order, since the original does not name which units are guarding either).
+the tribe's shaman continuously (`Order::Guard`, `Action::Guarding { shaman, slot, to }`), then the selection
+clears (auto-deselected, matching the original). Each tick, a guard re-reads her *current* live position; more
+than `GUARD_RANGE` (824 units [exe]) away on either axis, it walks straight towards it - same shape as
+`Action::Attacking`'s own re-aiming (`GameMap::tend_guards`/`Unit::retarget`); within range, it circles her
+instead, each guard at its own fixed point on a ring around her that keeps slowly turning
+(`crate::guard::orbit_point`, `[ours]`, not traced - several guards drawing superposed at her exact position,
+reported live, is what this replaced), `slot` assigned once at `GameMap::go_guard` and never reshuffled while it
+keeps guarding, so one dropping out or a new one joining never shifts anybody else's spot. A guard never reports
+itself done on its own while she is alive; stops (back to Idle) once she is not. `G` with nothing selected, or
+with only the shaman selected, instead stops every one of the player's own units currently guarding
+(`Command::CancelGuard`, a tribe-wide scan rather than a per-unit order, since the original does not name which
+units are guarding either).
 Any other direct order given to a guarding unit cancels it like any other action (`Unit::can_take_orders`'s own
 default). Bound to `G` in the original keymap; dev mode uses Shift+G instead, since plain `G` there is already
 the cell grid toggle (`keymap.rs`, `shortcuts.md`).

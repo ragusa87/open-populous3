@@ -117,8 +117,9 @@ fn door_cell(b: &Building, size: i32) -> (i32, i32) {
 
 /// Whether placing `b` would wall shut a door: another standing building's (`b`'s footprint would cover
 /// that door's cell) or `b`'s own (an existing building already covers where its door would open).
-/// `except`: see `blocked_at`.
-fn door_blocked(map: &GameMap, b: &Building, except: Option<BuildingId>) -> bool {
+/// `except`: see `blocked_at`. Public so the client's blueprint preview can mark this in red too
+/// (`can_place` itself already refuses it either way; this just explains why).
+pub fn door_blocked(map: &GameMap, b: &Building, except: Option<BuildingId>) -> bool {
     let size = map.terrain.size() as i32;
     let own_door = door_cell(b, size);
     let walled = b.walled_cells(size);

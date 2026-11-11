@@ -56,6 +56,11 @@ Not in the file [exe]: the income per person is `MANA_BUSY_BRAVES` 15 / `MANA_ID
   that fit nowhere stay.
 - Vehicles hold people their own way (`Unit::aboard`, vehicles.md); vehicle huts take braves as a crew that
   fetches wood and builds vehicles (vehicles.md "Vehicle huts").
+- Eject (shortcuts.md "Buildings"): Shift + left click on one of the player's buildings (`selection::eject_click`,
+  independent of the current selection) sends its own lowest-id occupant out by the door, released
+  (`Command::Eject`, `GameMap::eject`, reusing `work::send_out`'s door-walk). `[ours]`: which occupant isn't
+  traced, only that exactly one leaves (shortcuts.md's sibling row for a vehicle, "one follower gets out", is
+  still open - same mechanism, TODO.md).
 - `Building::inside` is counted each tick from the units inside (`GameMap::count_inside`): a built hut or
   drum tower with people inside smokes from the top of its roof. The one in a drum tower stands on its lookout,
   in view (buildings.md "On screen"). The tooltip shows `Braves: people inside/room` (planned: a people row, tooltips.md).
@@ -69,10 +74,17 @@ hut (max size) hides the red bar, it does not show it at 0.
 1. **Entering** (`Order::Enter { building }` through `Command::OrderUnit`): any follower of the owner (not the
    shaman, not wildmen) walks to the door, then in (buildings.md "Doors"), and becomes `Action::Inside`: off the
    map, no standing slot, not drawn. A full hut refuses: the unit stops at the door, idle.
-2. **Leaving**: an order to a unit inside (move, pray...) makes it come out by the door first. `Command::Eject
-   { player, building }` empties a hut. A hut that is dismantled or destroyed puts everyone out by the door.
-3. **Auto-housing** [ours]: an idle brave of the tribe with no order for `HOUSE_DELAY` (10 s) walks into the
-   nearest built hut with room within 8 cells. Other kinds only enter when ordered.
+2. **Leaving**: an order to a unit inside (move, pray...) makes it come out by the door first. Shift + left
+   click on the building sends its own lowest-id occupant out (`Command::Eject { player, building }`,
+   `GameMap::eject`, shortcuts.md "Buildings": "one follower comes out" - corrected, 2026-11-10: this entry
+   used to say it empties the whole building, which shortcuts.md's own table never actually said, and
+   contradicts its sibling row for a vehicle, "one follower gets out"). A hut that is dismantled or destroyed
+   puts everyone out by the door.
+3. **Auto-housing** (done - `GameMap::tend_auto_housing`, `enter.rs`) [ours]: a brave genuinely idle - nothing
+   chained, no patrol, no task (`Unit::busy`) - for `HOUSE_DELAY` (10 s, `Unit::idle_ticks`) walks into the
+   nearest of its own tribe's built huts with room, within `HOUSE_SEARCH_RADIUS_CELLS` (8); none close enough
+   with room, and it just keeps waiting, checked again next tick. Other kinds only enter when ordered
+   (`can_enter`).
 4. **Population**: every living unit of the tribe except the shaman, inside or out. Cap = sum of the supply of
    its built huts (`headcount::Housing::room`), at most 200 - a hut mid-growth (below) counts neither its old
    nor its new size for the brief window it is a construction site rather than `Stage::Built`, `[ours]`,
@@ -131,6 +143,23 @@ hut (max size) hides the red bar, it does not show it at 0.
    (`headcount::State::Housed`/`Working`). The income charges the spells first, the rest goes to the tribe's mana,
    capped at `MAX_MANA` (pop3-rev-analysis.md "Mana rules"). Praying at a totem is its own gauge (TODO "Praying"),
    not mana.
+8. **Auto-work** (done - `GameMap::tend_auto_work`, `enter.rs`) [ours]: the same genuinely-idle, `HOUSE_DELAY`
+   brave as rule 3 (Auto-housing), if that one didn't claim it this tick, also looks to help build or
+   dismantle - the nearest of its own tribe's sites not yet `Stage::Built` (a fresh plan, under construction,
+   or being dismantled) within `SITE_SEARCH_RADIUS_CELLS` (3, tighter than rule 3's 8: a site is usually
+   staffed by braves already standing right next to it) that doesn't already have `MAX_AUTO_WORKERS` (4) hands
+   on it, assigned exactly as `Order::Build` would (`GameMap::assign`). **Open question, left for a spec
+   session**: pop3-rev-analysis.md "Idle behaviour" reads the exe's own closest match for this (`0x4D9B50`, "an
+   idle unit periodically relocates to any work site with free capacity") as gated to AI-controlled tribes
+   only (`tribe_struct+0xC1F == 1`), never running for the player's own tribe - a player's own recollection of
+   a human-controlled idle brave autonomously joining a construction site contradicts that reading, and is
+   what this item implements instead (for the player's own tribe); a coding session cannot itself recheck the
+   gate against the exe (clean-room), so this stays flagged rather than resolved. The `MAX_AUTO_WORKERS` cap
+   exists because a crowded site churns through its few height/wood-delivery points fast enough that extra
+   idle bystanders just end up contending over the last one (found live: at 16 workers sharing 8 flatten
+   points, the one standing right on the very last point kept losing it to a wood-fetch errand - `work_on`'s
+   own fetch-before-flatten order - every time it went free for even a tick, a separate, pre-existing bug this
+   surfaced rather than caused, worth its own fix later, TODO.md).
 
 ## Training huts
 | Building | Trains | Cost (human) |

@@ -2,7 +2,8 @@
 //! draped on the ground, snapped to cell corners like the levels' buildings, with an arrow out of
 //! its door side (local -z, the land side of the levels' boat huts); red where it cannot be built
 //! (`game_core::placement`: sea, another building, a site, a tree with wood; all of it when the
-//! ground is too steep or a boat hut is not on the shore). A boat hut turns itself to put its
+//! ground is too steep, a boat hut is not on the shore, or it would wall shut a door - its own or a
+//! standing neighbour's, `door_blocked`). A boat hut turns itself to put its
 //! jetty over the water when it can (`best_facing`). Space turns it a quarter turn, right click
 //! puts it away, left click places it where it can stand (`Command::PlaceBuilding`), sends the
 //! selected braves to build it (`GameMap::build_orders`) and puts it away. Meanwhile clicks do not
@@ -24,7 +25,7 @@ use game_core::building::{Building, BuildingKind};
 use game_core::campfire;
 use game_core::command::Command;
 use game_core::map::GameMap;
-use game_core::placement::{best_facing, blocked_at, can_place, shore_ok, too_steep};
+use game_core::placement::{best_facing, blocked_at, can_place, door_blocked, shore_ok, too_steep};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// Height above the ground (render units), and grid lines per cell: the mark's grid follows the
@@ -314,7 +315,7 @@ fn draw_blueprint(
     let unit = WORLD_UNITS_PER_CELL as f32;
     let (cx, cz) = b.centre();
     let centre = Vec2::new(cx as f32, cz as f32) / unit;
-    let all_red = too_steep(&map.0, &b) || !shore_ok(&map.0, &b);
+    let all_red = too_steep(&map.0, &b) || !shore_ok(&map.0, &b) || door_blocked(&map.0, &b, None);
     // A map position (cells) -> render position and colour.
     let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at), None).is_some() { RED } else { WHITE });
     let mark = mark_mesh(kind, b.facing, centre, vertex);
@@ -430,6 +431,23 @@ mod tests {
         assert_eq!(place_command(&map, hut, 2, free), Some(Command::PlaceBuilding { player: PLAYER, kind: hut, at: (88 * 512, 64 * 512), facing: 2 }));
         assert_eq!(place_command(&map, hut, 0, Vec2::new(64.0, 64.0)), None, "on the site");
         assert_eq!(place_command(&map, hut, 0, Vec2::new(120.0, 64.0)), None, "sea");
+    }
+
+    #[test]
+    fn a_plan_that_would_wall_a_neighbours_door_shut_is_refused_and_shows_red() {
+        // Same ground rule as `game_core::placement::nothing_may_wall_a_door_shut_either_ones`, exercised
+        // through the client's own entry points: the preview must agree with what `place_command` (and so
+        // the real click) actually allows, not just with the older, narrower checks (`too_steep`/`shore_ok`/
+        // `blocked_at`) that predate the door rule and would otherwise leave a door-blocking spot looking
+        // white (buildable) right up until the click silently does nothing.
+        let mut map = GameMap::sandbox_buildings();
+        let hut = BuildingKind::Hut { size: 1 };
+        map.add_building(Building::new(hut, PLAYER, 40 * 512, 40 * 512, 0));
+        // The hut's door opens two cells south of its own corner (facing 0, local -z): a second one placed
+        // right there would wall it shut.
+        let blocking = blueprint_at(hut, 0, Vec2::new(40.0, 37.0));
+        assert!(door_blocked(&map, &blocking, None), "test setup: this spot really does block the door");
+        assert_eq!(place_command(&map, hut, 0, Vec2::new(40.0, 37.0)), None, "refused, not just visually red");
     }
 
     #[test]

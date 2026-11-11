@@ -43,6 +43,9 @@ pub enum Command {
     /// that takes wood): on, the people inside walk out and nobody builds it; off, it is built again
     /// (`GameMap::set_dismantling`).
     Dismantle { player: TribeId, building: BuildingId, on: bool },
+    /// Shift + left click on one of the player's buildings (shortcuts.md "Buildings"): its own lowest-id
+    /// occupant comes out by the door (`GameMap::eject`); a no-op holding nobody of theirs.
+    Eject { player: TribeId, building: BuildingId },
     /// Send the player's manned vehicle `vehicle` to `to` (world units), or as close as it gets
     /// (`GameMap::move_vehicle`).
     MoveVehicle { player: TribeId, vehicle: VehicleId, to: (u16, u16) },

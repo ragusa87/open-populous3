@@ -131,7 +131,12 @@ available, is the camp fire (see "Camp fire").
 - Parts of the footprint that cannot be built on are drawn red: sea, ground too steep (height spread inside the
   footprint over a threshold to tune; smaller unevenness is fine, the braves flatten it), another building or
   construction site, a tree that still has wood (size > 0). Any red part blocks placement. A boat hut is also all
-  red unless its jetty side is over the sea and its door side on land; its blueprint turns itself to fit.
+  red unless its jetty side is over the sea and its door side on land; its blueprint turns itself to fit. All red
+  too, the same as too-steep ground, where it would wall shut a door - its own (an existing building already
+  covers where its door would open) or a standing neighbour's (`placement::door_blocked`, kept in step with
+  `can_place`'s own refusal, "Doors" below - fixed 2026-11-10, having been added to `can_place` after the
+  blueprint's own red-or-white preview was written, so it used to show white right up until a click there
+  silently did nothing).
 - A left click on a valid spot places it (`Command::PlaceBuilding { player, kind, x, z, facing, braves }`): the
   blueprint stays drawn on the ground as a construction site, a `Building` with a `stage` (Blueprint / Under
   construction / Built / Dismantling) and its wood counts. A size-0 tree under it stays invisible and does not grow back while covered.
@@ -275,17 +280,20 @@ On screen (as in the game):
 
 ### Dismantling
 Switched by the tooltip's toggle (tooltips.md, `Command::Dismantle`/`GameMap::set_dismantling`). On a built
-building it stops working and the people inside walk out first. With Dismantle on (on a built building or one
-under construction), a brave still assigned to it (`Order::Build`, same assignment as normal construction) goes
-in and, after a round of `Action::Building` (`GameMap::dismantle_step`, same pose and `BUILD_TICKS` as building —
-no "unbuilding" animation is traced either), one piece of wood is pulled out (`GameMap::dismantle_piece`): dropped
-on the ground near the door as a wood piece (`Building::pile_point`, a real `WoodPiece`, see trees.md, usable by
-any construction) — nothing is fetched or carried in, unlike building up. A building switched on with nothing
-built in yet (`used == 0`, e.g. a freshly flattened plan) sits untouched: there is nothing to take apart. Once all
-its wood is out, the building is removed (`GameMap::remove_building`, releasing every assigned brave) and its
-ground is free again right away, no ashes (a covered tree grows back, unlike a building destroyed by wear or
-fire, `ashes.rs`). Switching back to Build makes braves rebuild it with wood again, from wherever dismantling left
-it.
+building it stops working and the people inside walk out first - its own braves among them (not the shaman or
+any other kind) are picked up as dismantling workers right there, up to `max_braves`, with no separate build
+order needed (`[ours]`: switching the toggle alone used to leave the building sitting in `Stage::Dismantling`
+forever unless the player separately selected braves and clicked it again, same as a fresh plan - a brave
+leaving the building now can be the one that dismantles it). A brave assigned to it (`Order::Build`, same
+assignment as normal construction, or picked up this way) goes in and, after a round of `Action::Building`
+(`GameMap::dismantle_step`, same pose and `BUILD_TICKS` as building — no "unbuilding" animation is traced
+either), one piece of wood is pulled out (`GameMap::dismantle_piece`): dropped on the ground near the door as a
+wood piece (`Building::pile_point`, a real `WoodPiece`, see trees.md, usable by any construction) — nothing is
+fetched or carried in, unlike building up. A building switched on with nothing built in yet (`used == 0`, e.g. a
+freshly flattened plan) sits untouched: there is nothing to take apart. Once all its wood is out, the building is
+removed (`GameMap::remove_building`, releasing every assigned brave) and its ground is free again right away, no
+ashes (a covered tree grows back, unlike a building destroyed by wear or fire, `ashes.rs`). Switching back to
+Build makes braves rebuild it with wood again, from wherever dismantling left it.
 
 ### Explosion (drawn)
 A building that blows up is drawn only, the simulation just removes it (`game-client` `explosion`): a

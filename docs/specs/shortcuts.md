@@ -89,7 +89,7 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | Ctrl + left click (plan held) | place several plans | - |
 | Space (plan held) | rotate the plan | same |
 | Shift + right click on a plan, guard post or swamp | remove it | plan not flat yet, camp fire |
-| Shift + left click on a building | one follower comes out | - |
+| Shift + left click on a building | one follower comes out | same (the player's own building, its lowest-id occupant, regardless of the current selection; `Command::Eject`) |
 | Shift + left click on a building icon (followers selected) | send them to the nearest building of that type | - |
 | Space (tower alarm) | camera to the tower under attack | - |
 | B (double tower alarm) | nearby followers help the tower | editor: land bridge |

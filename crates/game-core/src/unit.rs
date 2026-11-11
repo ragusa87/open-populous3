@@ -36,6 +36,21 @@ pub const DROWN_DAMAGE: u16 = 60;
 pub const STRANDED_DAMAGE: u16 = 20;
 /// Between two `STRANDED_DAMAGE`s, at each unit's own phase (the shaman's health lasts 33 s; a guess).
 pub const STRANDED_HURT_EVERY: Every = Every::new(4);
+
+/// A unit making less than this much real headway (world units, straight-line) over `STUCK_WINDOW` counts as
+/// stuck even while nominally still walking somewhere (`Action::Walking`, or `Attacking` while in the open,
+/// both driving themselves towards a point every tick): treated the same as truly unreachable
+/// (`Action::Stranded`) - arms up, losing life - rather than left standing in the walking pose forever with
+/// no visible feedback and no way out short of a fresh order. Found live: `Action::Attacking`'s own
+/// `approach` has no fallback at all once `path::route` comes back empty (an enemy walled off by new
+/// construction) - `self.route` stays empty and every tick after just does nothing, silently, forever.
+/// `[ours]`: a safety net over that and over whatever subtler case might still strand an ordinary walk short
+/// of actually failing to plan at all, not a diagnosis of a single root cause. Guarding is deliberately left
+/// out (see `stuck_watch`'s own doc).
+pub const STUCK_MIN_PROGRESS: i32 = 96;
+/// How often a walker's progress is checked (ticks) - comfortably more than even the slowest slope-clamped
+/// walker (`SLOPE_FACTOR_RANGE` floor) would need to clear `STUCK_MIN_PROGRESS` if it is moving at all.
+pub const STUCK_WINDOW: Ticks = Ticks::secs(4);
 /// Healing comes on every eighth turn of the game, the same for everyone (pop3-rev-analysis.md "Health and
 /// healing" [exe, measured]); how much is the kind's (`KindStats::heal`).
 pub const HEAL_EVERY: Every = Every::new(8);
@@ -252,10 +267,13 @@ pub enum Action {
     Worshipping { at: WorshipAt },
     /// On its way to attack `target`, whose place it last aimed at is `to` (`GameMap::tend_attacks` keeps it up to date).
     Attacking { target: Target, to: (u16, u16) },
-    /// Escorting the tribe's shaman (`G` key, pop3-rev-analysis.md "Guard the shaman"): stays within `GUARD_RANGE`
-    /// of her current position on both axes, last aimed at `to` (`GameMap::tend_guards` keeps it up to date, same
-    /// shape as `Attacking`); never reports itself done on its own while she lives.
-    Guarding { shaman: UnitId, to: (u16, u16) },
+    /// Escorting the tribe's shaman (`G` key, pop3-rev-analysis.md "Guard the shaman"): orbits her at
+    /// `crate::guard::ORBIT_RADIUS`, `slot` its own fixed position on the ring (`crate::guard::orbit_point`,
+    /// assigned once at `GameMap::go_guard`, never reshuffled while it keeps guarding - same principle as a
+    /// formation's own member slots, formation.rs); last aimed at `to` (`GameMap::tend_guards` keeps it up to
+    /// date every tick, same shape as `Attacking`, walking her down within `GUARD_RANGE` of her current
+    /// position if she strays, else circling); never reports itself done on its own while she lives.
+    Guarding { shaman: UnitId, slot: u16, to: (u16, u16) },
     /// Its `role` in the challenge `challenge` (challenge.rs).
     Challenge { challenge: crate::challenge::ChallengeId, role: crate::challenge::Role },
     /// A firewarrior throwing fire at `target` (firebolt.rs), `left` turns to go; then back to its attack.
@@ -524,6 +542,15 @@ pub struct Unit {
     /// Patrol points to cycle through forever once more than one is set (units.md "Patrol orders"),
     /// independent of `queue`: a point is a shared id (`crate::patrol`), not an owned `Order`.
     patrol: crate::patrol::PatrolQueue,
+    /// Consecutive ticks spent genuinely idle (nothing chained, no task, no patrol): reset to 0 the moment
+    /// any of that changes. Checked at the start of each tick, so it counts whole ticks, not sub-tick
+    /// progress. Drives auto-housing (`GameMap::tend_auto_housing`, huts-and-training.md rule 3); `[ours]`,
+    /// not itself simulated state the original keeps (nothing traced tracks this).
+    idle_ticks: u16,
+    /// The tick and position the current `STUCK_WINDOW` progress check started from; `None` outside
+    /// `Action::Walking`, or `Attacking` while out in the open (also walks towards a point via `approach`)
+    /// - and always for the shaman, who already just stays Idle rather than ever being stranded.
+    stuck_watch: Option<(Tick, (u16, u16))>,
     /// The building (id) this brave is assigned to, `Order::Build`.
     pub work: Option<BuildingId>,
     /// The building the unit is in: it walks out by its door before going anywhere.
@@ -591,6 +618,8 @@ impl Unit {
             queue: Vec::new(),
             resume_attack: None,
             patrol: crate::patrol::PatrolQueue::default(),
+            idle_ticks: 0,
+            stuck_watch: None,
             work: None,
             inside: None,
             aboard: None,
@@ -607,6 +636,17 @@ impl Unit {
     /// camp fire or a vehicle.
     pub fn busy(&self) -> bool {
         self.work.is_some() || self.carrying > 0 || self.to_tree.is_some() || self.to_wood.is_some() || self.to_house.is_some() || self.to_shrine.is_some() || self.to_fire.is_some() || self.to_vehicle.is_some()
+    }
+
+    /// Genuinely idle, with nothing at all lined up: not just `Action::Idle`, but no task, nothing
+    /// chained and no patrol either - the gate `idle_ticks` counts against.
+    fn truly_idle(&self) -> bool {
+        self.action == Action::Idle && !self.busy() && self.queue.is_empty() && self.patrol.is_empty()
+    }
+
+    /// Consecutive ticks spent genuinely idle (`truly_idle`); 0 the instant that stops being true.
+    pub fn idle_ticks(&self) -> u16 {
+        self.idle_ticks
     }
 
     /// Neither in a building nor aboard a vehicle: out where spells, fire and fighters reach it.
@@ -884,6 +924,29 @@ impl Unit {
 
     /// One simulation step. `site` is where the unit reincarnates.
     pub fn tick(&mut self, now: Tick, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
+        self.idle_ticks = if self.truly_idle() { self.idle_ticks.saturating_add(1) } else { 0 };
+        // Walking always counts; Attacking only while actually out in the open trying to walk somewhere
+        // (`approach`) - aboard a vehicle it can legitimately sit still for good (firing from a stationary
+        // boat). Guarding is deliberately NOT covered: a guard settled into its own orbit point
+        // (`crate::guard::orbit_point`) is expected to stand still for a stretch between each slow nudge
+        // around the ring, which this would otherwise mistake for being stuck.
+        let stuck_to = match self.action {
+            Action::Walking { to } if self.kind != UnitKind::Shaman => Some(to),
+            Action::Attacking { to, .. } if self.kind != UnitKind::Shaman && self.in_the_open() => Some(to),
+            _ => None,
+        };
+        match stuck_to {
+            Some(to) => {
+                let (since, mark) = *self.stuck_watch.get_or_insert((now, (self.x, self.z)));
+                if now.since(since) as u32 >= STUCK_WINDOW.get() {
+                    self.stuck_watch = None;
+                    if crate::map::torus_dist2(mark, (self.x, self.z)) < (STUCK_MIN_PROGRESS as i64).pow(2) {
+                        self.action = Action::Stranded { to };
+                    }
+                }
+            }
+            None => self.stuck_watch = None,
+        }
         let terrain = ground.terrain();
         // A climbing spirit is airborne too (`motion.height`, for the client's own existing lift-drawing) but
         // never subject to gravity or a touchdown - it has its own, simpler, ungoverned rise in its own branch
@@ -1570,8 +1633,8 @@ impl Unit {
                 self.action = Action::Attacking { target, to };
                 self.planned_on = None;
             }
-            Action::Guarding { shaman, to: aimed } if moved(aimed) => {
-                self.action = Action::Guarding { shaman, to };
+            Action::Guarding { shaman, slot, to: aimed } if moved(aimed) => {
+                self.action = Action::Guarding { shaman, slot, to };
                 self.planned_on = None;
             }
             _ => {}
@@ -1579,34 +1642,49 @@ impl Unit {
     }
 
     /// One step of the way to `to` while attacking: a path planned again when the ground changes, standing once
-    /// there or when no way leads there.
+    /// there or when no way leads there. A blocked step now also replans cell by cell right away (the same
+    /// correction `follow_route` already had) instead of only invalidating the cache and waiting for the next
+    /// tick's top-of-function check to retry - a consistency fix, not a reproduced failure: an extensive search
+    /// for a case where `path::leg_is_clear` (which already walks every cell a straightened leg crosses,
+    /// including the "both side cells passable" rule at a corner) would approve a leg that then actually
+    /// blocks on unchanged ground found none, so this hardens `approach` to match `follow_route` rather than
+    /// fixing a confirmed gap. `GameMap::tend_attacks`/`tend_guards` decide for themselves when to give up on
+    /// a target that truly never finds a way (re-aiming, standing down); `approach` itself only ever retries.
     fn approach(&mut self, to: (u16, u16), ground: &impl Ground) {
         if self.planned_on != Some(ground.revision()) {
-            let route = path::route(ground, self.mobility(), (self.x, self.z), to, true);
-            self.route = route.map(|r| r.into_iter().rev().collect()).unwrap_or_default();
-            self.planned_on = Some(ground.revision());
+            self.route_to(to, ground, true);
         }
         let Some(&next) = self.route.last() else { return };
         match self.step_towards(next, ground, self.kind.speed()) {
             Step::Moved => {}
             Step::Arrived => _ = self.route.pop(),
-            Step::Blocked => self.planned_on = None,
+            Step::Blocked => _ = self.route_to(to, ground, false),
         }
+    }
+
+    /// Recomputes `self.route` for a straight walk to `to` on the current terrain, `self.planned_on`
+    /// marked current either way; true when a route was found. Shared by `plan` (which also decides
+    /// `self.action` from whether one was found) and `approach` (which keeps its own `Action::Attacking`/
+    /// `Guarding` shape, only ever retrying route-finding here, never itself deciding to give up).
+    fn route_to(&mut self, to: (u16, u16), ground: &impl Ground, straighten: bool) -> bool {
+        let route = path::route(ground, self.mobility(), (self.x, self.z), to, straighten);
+        let found = route.is_some();
+        self.route = route.map(|r| r.into_iter().rev().collect()).unwrap_or_default();
+        self.planned_on = Some(ground.revision());
+        found
     }
 
     /// Path to `to` on the current terrain: walking if there is one, else stranded (the shaman
     /// just stays idle).
     fn plan(&mut self, to: (u16, u16), ground: &impl Ground, straighten: bool) {
-        let route = path::route(ground, self.mobility(), (self.x, self.z), to, straighten);
+        let found = self.route_to(to, ground, straighten);
         let walled = ground.walled((cell_of(to.0), cell_of(to.1)));
-        self.action = match route {
-            Some(_) => Action::Walking { to },
+        self.action = match found {
+            true => Action::Walking { to },
             // Behind walls nobody gets to: no point waiting for the ground to open a way.
-            None if self.kind == UnitKind::Shaman || walled => Action::Idle,
-            None => Action::Stranded { to },
+            false if self.kind == UnitKind::Shaman || walled => Action::Idle,
+            false => Action::Stranded { to },
         };
-        self.route = route.map(|r| r.into_iter().rev().collect()).unwrap_or_default();
-        self.planned_on = Some(ground.revision());
     }
 
     /// One step along the route; idle once at `to`. A step that would end in a cell she cannot
@@ -1761,6 +1839,51 @@ mod tests {
         wildman.change_owner(TribeId::Red);
         assert_eq!((wildman.owner, wildman.kind), (Owner::Tribe(TribeId::Red), UnitKind::Brave), "a wildman has no tribe of its own: becomes a brave");
         assert!(wildman.health.is_full() && wildman.health.max() == UnitKind::Brave.max_health(), "health set from its new kind");
+    }
+
+    /// Bare terrain plus a set of walled cells (a stand-in building footprint), for exercising `approach`
+    /// around an obstacle without needing a real `Building`/`GameMap`.
+    struct WalledGround {
+        terrain: Heightmap,
+        walls: std::collections::BTreeSet<(i32, i32)>,
+    }
+    impl Ground for WalledGround {
+        fn terrain(&self) -> &Heightmap {
+            &self.terrain
+        }
+        fn walled(&self, cell: (i32, i32)) -> bool {
+            self.walls.contains(&cell)
+        }
+    }
+
+    #[test]
+    fn an_attacker_still_reaches_its_target_around_a_wall_in_the_way() {
+        // `approach` (used by Attacking and Guarding) now recovers from a blocked step the same way
+        // `follow_route` (ordinary Walking) already did: replanning cell by cell right away instead of only
+        // invalidating its cache and waiting for the next tick's top-of-function check. This is a
+        // consistency fix, not the reproduction of a specific failure: `path::leg_is_clear`, which decides
+        // whether a straightened leg is safe to merge, turned out to already be exact (it walks every cell
+        // the leg crosses, including the "both side cells must be passable" rule at a corner it passes
+        // exactly through) - an extensive search for a `(start, to, wall)` combination where a straightened
+        // route's own first step is genuinely `Step::Blocked` on unchanged ground found none. This just
+        // checks the ordinary case still works: a wall directly between the two still lets it arrive.
+        let mut walls = std::collections::BTreeSet::new();
+        for dz in 0..5 {
+            walls.insert((15, 10 + dz));
+        }
+        let g = WalledGround { terrain: land(), walls };
+        let (u, site) = shaman_at((10, 10));
+        let to = (20 * 512 + 256, 10 * 512 + 256);
+        let mut u = Unit { kind: UnitKind::Brave, ..u };
+        u.attack(Target::Unit(Id::from_raw(2)), to);
+        for k in 1..400u32 {
+            u.tick(Tick::from_wire(k), &g, Some(&site));
+            assert!(!matches!(u.action, Action::Stranded { .. }), "tick {k}: a wall in the way, not an unreachable target");
+            if (u.x, u.z) == to {
+                return;
+            }
+        }
+        panic!("never reached the target in 400 ticks: {:?}", (u.x, u.z));
     }
 
     fn land() -> Heightmap {
@@ -1992,6 +2115,50 @@ mod tests {
             }
         }
         assert!(walk(&mut u, &t, &site, to, 200).is_some(), "bridge built: walks over");
+    }
+
+    #[test]
+    fn an_attacker_whose_target_is_walled_off_is_stranded_instead_of_stuck_forever() {
+        // `Action::Attacking`'s own `approach` has no fallback at all once `path::route` comes back empty:
+        // `self.route` stays empty and every tick after does nothing, silently - the exact "stuck in the
+        // walking pose, never losing life, nothing to see" bug this guards against (`STUCK_MIN_PROGRESS`'s
+        // own doc).
+        let mut t = land();
+        for z in 0..128 {
+            sea_cell(&mut t, (15, z));
+            sea_cell(&mut t, (5, z));
+        }
+        let (u, site) = shaman_at((10, 10));
+        let mut u = Unit { kind: UnitKind::Brave, ..u };
+        let start = (u.x, u.z);
+        let to = (20 * 512 + 256, u.z);
+        u.attack(Target::Unit(Id::from_raw(2)), to);
+        // `run` always starts counting ticks at 1, so advance `now` by hand here to keep it continuous
+        // across both checks below (unlike the other tests in this module, which only ever check the end
+        // state of one single `run`).
+        for k in 1..STUCK_WINDOW.get() {
+            u.tick(Tick::from_wire(k), &t, Some(&site));
+        }
+        assert_eq!((u.action, u.x, u.z), (Action::Attacking { target: Target::Unit(Id::from_raw(2)), to }, start.0, start.1), "not yet: still within the window");
+        u.tick(Tick::from_wire(STUCK_WINDOW.get()), &t, Some(&site));
+        u.tick(Tick::from_wire(STUCK_WINDOW.get() + 1), &t, Some(&site));
+        assert_eq!((u.action, u.x, u.z), (Action::Stranded { to }, start.0, start.1), "stuck the whole window: arms up instead of frozen forever");
+        for k in 0..STRANDED_HURT_EVERY.period() {
+            u.tick(Tick::from_wire(STUCK_WINDOW.get() + 2 + k), &t, Some(&site));
+        }
+        assert!(u.health.current() < SHAMAN_MAX_HEALTH, "loses life too, same as any other stranded unit");
+    }
+
+    #[test]
+    fn a_genuinely_moving_attacker_is_never_mistaken_for_stuck() {
+        let t = land();
+        let (u, site) = shaman_at((10, 10));
+        let mut u = Unit { kind: UnitKind::Brave, ..u };
+        let to = (40 * 512 + 256, u.z);
+        u.attack(Target::Unit(Id::from_raw(2)), to);
+        run(&mut u, &t, &site, STUCK_WINDOW.get() as usize * 3);
+        assert!(matches!(u.action, Action::Attacking { .. }), "clear open ground the whole way: never flagged stuck");
+        assert_ne!((u.x, u.z), (10 * 512 + 256, u.z), "and it actually did walk");
     }
 
     #[test]

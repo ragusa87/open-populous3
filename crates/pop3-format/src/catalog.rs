@@ -264,6 +264,13 @@ pub enum PersonAnim {
     /// A challenge's waiting target crouching then punching, not a fight move (7 frames): one of 3
     /// taunts, brave only.
     TauntPunch,
+    /// Idle too long: a brave scratches (TODO.md "Units"; `[ours]`, no rhythm traced for followers -
+    /// only wildmen's own idle loop is confirmed to have one, pop3-rev-analysis.md "Idle behaviour").
+    Scratch,
+    /// Idle too long: a warrior does push-ups (TODO.md "Units"; same caveat as `Scratch`).
+    Pushup,
+    /// Idle too long: a spy juggles (TODO.md "Units"; same caveat as `Scratch`).
+    Juggle,
 }
 
 /// The frame of `PersonAnim::ArmsUp` standing with both arms up.
@@ -297,6 +304,9 @@ impl PersonAnim {
             PersonAnim::TauntHide => 48,
             PersonAnim::TauntWave => 49,
             PersonAnim::TauntPunch => 50,
+            PersonAnim::Scratch => 89,
+            PersonAnim::Pushup => 90,
+            PersonAnim::Juggle => 92,
         }
     }
 }
