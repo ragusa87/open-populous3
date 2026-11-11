@@ -236,11 +236,14 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   hovered or passed by a spy of the tribe it imitates". Its building attack (anim 17) is a confirmed separate
   order (kind 15: approach, aim, throw a firebrand, the building catches fire, then a discovery-roll withdrawal
   during which it can be outed) - but every issuer found in the exe is the native AI tasking its own spies
-  against a worklist of buildings, never a player command; the player-facing trigger for both disguising and
-  setting a fire (a `ui_cmd` case, most likely a right-click on a tribe's HUD icon for disguise) was not located,
-  so a real implementation still needs that traced (or a deliberate guess at the command shape) before it can be
-  wired to player input. The exact transition duration in seconds is also unconfirmed (the countdown's own
-  decrementer was not found, only its 63-tick starting value).
+  against a worklist of buildings, never a player command. The player-facing DISGUISE trigger is now
+  live-confirmed (pop3-rev-analysis.md "Spy disguise and infiltration", the confirmed path block): clicking
+  the per-tribe HUD square with spies selected queues an ordinary per-tribe command that becomes one shared
+  order (kind 16, target tribe in the order) on every selected unit - so our implementation should model it as
+  a queued unit order (one sim-turn latency, applies per selected spy, re-clicking re-arms the full transition),
+  not an instant HUD effect. The player-facing ARSON trigger is still unlocated. The transition is 63 turns
+  (~5.25 s at the original's 12 turns/s; our 10 ticks/s equivalent is ~52-53 ticks), decremented -1/turn by the
+  per-person turn step.
 - [x] Death: the single guessed `SPIRIT_TICKS` is replaced with the two confirmed variants (`Action::Spirit`'s
   own new `climbing: bool`, `Unit::new_spirit`, units.md "Chained orders" area): `SPIRIT_CALM_TICKS` (4 turns,
   stationary) or, unconditionally for a wildman and for anyone else only if it died in a drowning-eligible spot

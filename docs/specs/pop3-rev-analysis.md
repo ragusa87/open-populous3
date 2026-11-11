@@ -66,7 +66,10 @@ so a live measurement may run on it with the addresses translated.
   (armed to `SPY_DISGUISE_DELAY`, exe 63) gates both the spy's rendered colour (blinking while it runs) and every
   combat/targeting check in the game (showing the real tribe while it runs, the disguise tribe once it hits 0).
   Arson is a separate, AI-only order (a firebrand thrown at a building's door, then it catches fire) - not a
-  player ability in any code path found. See "Spy disguise and infiltration".
+  player ability in any code path found. The PLAYER's own disguise command is live-confirmed (2026-11-11): the
+  HUD tribe-square click queues an ordinary per-tribe command that becomes order kind 16 on every selected
+  unit (one turn of latency, one shared group over a multi-unit selection), which applies the disguise and
+  re-arms the full transition each time. See "Spy disguise and infiltration".
 - **Preaching rerolls a 1-in-`PREACHEE_CONV_CHANCE` (5) chance every `PREACHEE_CONV_FREQ` (500 turns, 41.7 s)**
   [exe]: on success the preachee is destroyed and a person of its own type, in the preacher's tribe, takes its
   place (capped by the preacher's tribe population); instant for a wildman or other "no breeding" tribe. The
@@ -861,6 +864,28 @@ arrival:    if record +0x2F (burn, blast, lightning, whirlwind, insects) and the
 interpolated linearly to the next band; `ALT_BAND_0..7_SPELL_INCR` is 80, 90, ..., 150 % (file; exe all 100 %).
 A shaman in a finished drum tower gets +1/3. The range is checked by the UI and the shaman's walk-to-cast state,
 not again when the command is executed.
+
+### Selecting a spell, then casting it with a second click (HUD) [exe]
+A left-click on a spellbook icon arms that spell: a single global byte (one per local player, not per tribe)
+holds "the spell id awaiting a target click," `0xFF` meaning none armed. Arming just stores the clicked spell's
+id into this byte (plus a minor per-player notification/sound trigger) after a gate rejects the click if the
+game is in a specific UI/game mode or a secondary per-spell validity check fails (what that check actually
+guards - e.g. a charge/unlock precondition - is not pinned down). A *second*, independent click handler on the
+very same icon handles an entirely different action: toggling the spell's own charge/pause bookkeeping (see
+"Charges and mana" above for that mechanism's own, separately-documented pair of commands) - the two are
+unrelated despite sharing one icon, and which physical input (which mouse button, most plausibly, rather than a
+keyboard modifier) selects one handler over the other was not pinned down.
+
+Once armed, the player's next map/target click reads this same byte directly inside the game's central input
+dispatcher to attempt the cast, comparing a validity check's result against a specific "ready" value and playing
+a denial sound instead of casting if it fails (the precise failure condition - e.g. insufficient charge/mana,
+out of range - was not pinned down; "Range" above already covers the separate range check). What clears the
+armed-spell byte back to "none" after a successful cast (or a cancel) was not traced.
+
+**Implementation note**: this is the mechanism `SelectedSpell` (`crates/game-client/src/hud/spells.rs`) already
+implements by design, independently arrived at - this section is confirmation from the original's own code that
+a single "armed spell, consumed by the next target click" global is the right shape, not a prescription to
+change anything already working.
 
 ### Charges and mana
 - Per player (0x96070A + player × 0x38): a learned-spell bitmask, a blocked bitmask, and per spell a byte whose
@@ -3155,7 +3180,7 @@ trampoline that calls out to a separate handler; "inline" means the trampoline I
 | 13 | 0x439A00 | not traced |
 | 14 | inline | unconditionally "done" |
 | 15 | 0x439D30 | door/throw point - the spy arson/firebrand sequence, AI-only every issuer found - "Spy disguise and infiltration" |
-| 16 | inline | reads a byte from the group's own target, passes it to 0x4DE760 (the disguise-application primitive, a strong candidate for the player's own disguise command - "Spy disguise and infiltration"); if the unit's own +0x9F resolves to another live unit, calls 0x4DE740 and writes its result into THAT unit's own tribe field (+0x2F) - a strong, not independently confirmed lead for Convert/Hypnotism's actual "switch tribe" application |
+| 16 | inline | reads a byte from the group's own target, passes it to 0x4DE760 (the disguise-application primitive) - LIVE-CONFIRMED as the player's own disguise command, issued by the HUD tribe-square click through the pointer-action command family into the unit's secondary order slot ("Spy disguise and infiltration"); if the unit's own +0x9F resolves to another live unit, calls 0x4DE740 and writes its result into THAT unit's own tribe field (+0x2F) - a strong, not independently confirmed lead for Convert/Hypnotism's actual "switch tribe" application |
 | 17 | 0x43A4D0 | cell-rounded approach, shared with 31/32 below; issuer traced a later session - a preacher-specific branch of `0x4CE2C0`, an AI-only per-tribe tasking sweep (`maybe_ai_func_1`), see "Preacher conversion"'s open questions |
 | 18 | 0x433A10 | not traced |
 | 19 attack (generic) | 0x51A2A0 | "Starting a melee" |
@@ -4327,11 +4352,15 @@ one of these 36 call sites - the "short vulnerable transition" from real play** 
 is a spy-only command, select the spy and right-click a tribe's HUD icon; a short vulnerable transition, then
 the unit counts as that tribe - no auto-attack on it - until spotted by another spy or explicitly attacked].
 Only once the countdown reaches 0 does it actually start fooling these checks as the disguise tribe. **What
-decrements the countdown each tick was not found** - no writer of just `+0xB2`'s bottom 6 bits turned up anywhere
-in the exe this session, only `0x4DE760`'s own initial arm and `0x4DE7F0`'s own full clear; so the real
-63-to-0 timeline (ticks? turns? gated by some rhythm check?) is unconfirmed - a live watch of a disguised spy's
-own `+0xB2` byte over several turns would settle it. One promising lead was chased and ruled out: `0x4D42A0`,
-a per-tick `+0xB2` decrementer called from every person's own per-turn tail, is gated on a per-type table
+decrements the countdown each tick - resolved in a later pop3-rev session.** It is a plain `-1` per turn, floored
+at 0 (never wraps negative), leaving the top 2 bits (apparent tribe) untouched - found inside
+`unit_processing_class_1_person`, the engine's own per-person per-turn entry point, gated on `type==5` a few
+hundred bytes before the big per-state dispatch table. That function runs exactly once per living person per
+turn, so the `SPY_DISGUISE_DELAY`=63 transition is exactly **63 turns** - at the ~12 turns/second rate this
+exe's own turn counter runs while simulating, that's **~5.25 real seconds** of vulnerability after disguising
+(the turn-rate equivalence itself wasn't independently re-confirmed live this session, so treat the seconds
+figure as a good estimate, the 63-turn count as solid). One earlier lead was chased and ruled out: `0x4D42A0`,
+a per-tick `+0xB2` decrementer also called from every person's own per-turn tail, is gated on a per-type table
 (`0x5A7090` bit 0x40) that is set only for firewarrior (type 6), clear for spy - it decrements a firewarrior's
 own, unrelated reload countdown (the same `0x4D42A4` already documented in "Firewarrior fire"'s reload rule,
 cross-confirming both readings), never a spy's disguise byte. A second, differently-framed accessor, `0x4DE720`
@@ -4347,14 +4376,31 @@ tribe looking at it) uses the second accessor (`0x4DE720`) instead, with no blin
 real and apparent once the transition ends, consistent with the vulnerable window being real to everyone, not
 just a cosmetic preview for the owner.
 
-Who issues the disguise command itself was NOT located. `order_execute`'s inline kind-16 handler (see "Order
-kinds and player commands" above) already calls `0x4DE760(order's own packed target, self)` - using the order's
-own target word as the chosen tribe id - a strong candidate for the real disguise command (right-click a
-tribe's HUD icon with a spy selected -> queue a kind-16 order whose target encodes that tribe's id), but which
-`ui_cmd` case would queue such an order was not traced. If confirmed, kind 16 is reused for two unrelated
-player-visible effects (disguise here; Convert/Hypnotism's own "copy my apparent tribe onto a linked unit"
-effect, same handler, a different branch) distinguished only by which argument path the issuer takes - plausible
-given how heavily this exe reuses order kinds by data shape, not confirmed.
+**The player-facing disguise command path - LIVE-CONFIRMED end to end (a 2026-11-11 session: the user drove
+the real game over VNC while hardware breakpoints/watchpoints captured each stage; full methodology and raw
+captures in pop3-rev `docs/cheat.md` "Spy disguise player path")**:
+```text
+1. the player clicks the per-tribe HUD square (the small coloured stack above the spy's population icon, one
+   square per other tribe; its hover tooltip names the tribe) with spy/spies selected
+2. the click commits as a generic "armed pointer-action" player command (ui_cmd 0x7e): a small queue function
+   (0x4AA8B0) reads a per-tribe armed-action byte plus the cached click position and queues a per-tribe
+   command whose opcode encodes the action (the 0x5c-0x5e trio of a larger 0x37-0x3e pointer-action family)
+3. the per-tribe command drain dispatches it to a second-level pointer-action dispatcher (0x444F60), which
+   builds ONE command group - order kind 16, the chosen tribe id in the group's own packed target - and
+   assigns that one group to EVERY currently selected unit's secondary order slot (+0x8B[0], NOT the primary
+   +0x9B; ordering 4 spies at once produced one shared group id in all four, live-read)
+4. next sim turn, order_execute's kind-16 handler runs per unit and calls 0x4DE760(spy, tribe) - captured
+   live twice, once frozen mid-write of +0xB2 (read back mid-transition, then tribe<<6 | 63, then settling
+   to tribe<<6 once the 63-turn countdown elapsed, all as specified above)
+```
+So kind 16 IS the disguise order, confirmed (its other, +0x9F-gated branch - the Convert/Hypnotism lead -
+remains separate and unconfirmed). Notable for our implementation: the disguise is an ordinary QUEUED order
+on the unit (one turn of latency, groupable over a multi-unit selection, carried in the secondary order slot),
+not an instant HUD effect; and re-clicking an already-disguised spy's square simply re-issues the order,
+re-arming the full 63-turn vulnerable transition. Still open on this path: the ARM half (what the square click
+itself runs to set the armed-action byte before `ui_cmd 0x7e` commits it), the exact armed-action-index ->
+kind-16 mapping step, which of the three opcodes encodes which tribe/action, and the meaning of the family's
+two opcode bases (a flagged variant pair) - pop3-rev `docs/trace-backlog.md` carries these as concrete leads.
 
 #### Arson: a separate order, kind 15, found only issued by the AI
 Order kind 15 ("door/throw point", handler `0x439D30`) is a full approach/aim/throw/ignite/withdraw sequence -
@@ -4414,10 +4460,11 @@ and systematically works through it with its idle spies, redisguising each as ne
 already on fire**, until the worklist is exhausted or no eligible spy remains.
 
 #### Open questions
-- What decrements the disguise countdown each tick (the single biggest gap - without it, the real transition
-  length in seconds is unknown even though the exe default of 63 is confirmed).
-- The player-facing command path for both disguise (kind 16, a strong but unconfirmed candidate) and arson
-  (kind 15, no candidate found at all - every confirmed issuer is the AI).
+- ~~The player-facing command path for disguise~~ RESOLVED live 2026-11-11 (see the confirmed path above);
+  still open within it: the square click's own ARM step, the armed-index -> kind-16 mapping, which of the
+  three command opcodes encodes which tribe/action, and the family's two opcode bases.
+- The player-facing command path for arson (kind 15, no candidate found at all - every confirmed issuer is
+  the AI).
 - Whether a player-controlled spy can reach kind 15 (arson) through any path; if not, the in-play report of the
   human player personally setting fires with a disguised spy would need a different, still-unlocated mechanism.
 - The real numbers behind the windup delay (two tables, one of them a runtime-populated pointer) and the
