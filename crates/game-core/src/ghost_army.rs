@@ -155,6 +155,22 @@ mod tests {
     }
 
     #[test]
+    fn casting_it_through_the_spell_book_spawns_ghosts_after_cast_release() {
+        use crate::command::Command;
+        use crate::spell::Spell;
+        use crate::spell_book::{Availability, SpellKind};
+
+        let mut map = GameMap::sandbox_walk();
+        map.spell_books[0].set(SpellKind::GhostArmy, Availability::Unlimited);
+        let at = (map.units[0].x, map.units[0].z);
+        map.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::GhostArmy { at } });
+        map.run(crate::unit::CAST_RELEASE);
+        assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, EffectKind::GhostArmy(_))), "the controller effect was added");
+        map.run(CAST_TICKS);
+        assert!(map.units.iter().any(|u| u.statuses.ghost), "and it resolved into ghosts");
+    }
+
+    #[test]
     fn spawns_land_jittered_within_scatter_of_the_cast_point() {
         let mut map = empty();
         map.spawn(TribeId::Blue, UnitKind::Brave, AT);
