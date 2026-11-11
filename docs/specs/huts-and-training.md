@@ -97,7 +97,9 @@ hut (max size) hides the red bar, it does not show it at 0.
    tribe's cap** as this entry's own earlier draft guessed [exe, confirmed]; `SPROG%` 30 at band 0 to 200 at
    band 19 [files] - only those two ends are individually confirmed this session, the 18 between are `[ours]`,
    linearly interpolated, not the real (close but not exactly linear) stairstep) a brave is born at the front
-   door, idle, and `breed` restarts at 0. Without room (population + 1 at or past the cap) breeding does not
+   door and walks off to the nearest free standing spot (`game_core::slots::free_spots_near`, same as a trainee
+   leaving its building - "Training" below), so two braves bred close together end up visibly apart rather than
+   stacked on the door; `breed` restarts at 0. Without room (population + 1 at or past the cap) breeding does not
    even accumulate: `breed` resets to 0 every such turn instead of holding at its target [exe, confirmed - not
    "stops at 100 %" as this entry's own earlier draft guessed]. A freshly completed hut (construction finishing,
    `work::work_event`'s own `UnitEvent::Built`) starts with a head start, not a cold 0 nor an instantly full bar:

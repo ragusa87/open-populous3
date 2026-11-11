@@ -29,7 +29,8 @@
 use crate::balance::Huts;
 use crate::building::{Building, BuildingKind};
 use crate::map::GameMap;
-use crate::unit::UnitKind;
+use crate::slots;
+use crate::unit::{Order, UnitKind};
 
 /// `SPROG%` for population band `band` (0..=19, already clamped): linear between the two confirmed ends.
 fn sprog_pct(huts: &Huts, band: u32) -> u32 {
@@ -90,7 +91,13 @@ impl GameMap {
         if b.breed >= breed_target(&huts, size, band(&huts, housing.population)) {
             b.breed = 0;
             let door = b.door();
-            self.spawn(owner, UnitKind::Brave, door);
+            let taken = self.taken_spots(&[]);
+            let spot = slots::free_spots_near(&self.ground(), slots::spot_of(door), &taken, 1).first().copied();
+            let born = self.spawn(owner, UnitKind::Brave, door);
+            if let Some(spot) = spot {
+                let (x, z) = slots::spot_centre(spot);
+                born.start(Order::MoveTo { x, z });
+            }
         }
     }
 
@@ -254,6 +261,27 @@ mod tests {
         map.run(Ticks::new(turns as u32));
         assert!(map.units.len() > before, "a brave was born");
         assert_eq!(map.building(hut).unwrap().breed, 0, "restarted");
+    }
+
+    #[test]
+    fn two_braves_bred_in_a_row_are_sent_to_different_spots_not_stacked_on_the_door() {
+        let mut map = bare();
+        let huts = huts();
+        let hut = built_hut(&mut map, 1, (20 * 512, 20 * 512));
+        let target = breed_target(&huts, 1, 0);
+        map.buildings.iter_mut().find(|b| b.id == hut).unwrap().breed = target - 1;
+        map.run(Ticks::new(huts.breed_every.period()));
+        assert_eq!(map.units.len(), 1, "first brave born");
+        map.buildings.iter_mut().find(|b| b.id == hut).unwrap().breed = target - 1;
+        map.run(Ticks::new(huts.breed_every.period()));
+        assert_eq!(map.units.len(), 2, "second brave born");
+        // Let both braves finish walking to their assigned spot before checking where they ended up.
+        map.run(Ticks::new(30));
+        assert_ne!(
+            (map.units[0].x, map.units[0].z),
+            (map.units[1].x, map.units[1].z),
+            "the two braves must end up on different spots, not piled on the door"
+        );
     }
 
     #[test]
