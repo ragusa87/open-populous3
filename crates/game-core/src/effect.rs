@@ -62,6 +62,9 @@ pub enum EffectKind {
     /// The Angel of Death's own ground shockwave (`angel_of_death::Shockwave`): a pure terrain ripple, no
     /// drawable of its own.
     AngelOfDeathShockwave(crate::angel_of_death::Shockwave),
+    /// Ghost Army's own one-shot cast sequence (`ghost_army::Cast`): a short delay, then the priority scan, spawn
+    /// and cap-cull all at once (`WorldEvent::SpawnGhosts`/`DestroyGhost`).
+    GhostArmy(crate::ghost_army::Cast),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -134,6 +137,7 @@ impl Effect {
             EffectKind::Swarm(ref mut swarm) => swarm.turn((self.x, self.z), self.owner, world, rng),
             EffectKind::AngelOfDeath(ref mut cast) => cast.turn((self.x, self.z), self.owner),
             EffectKind::AngelOfDeathShockwave(ref mut wave) => wave.turn((self.x, self.z)),
+            EffectKind::GhostArmy(ref mut cast) => cast.turn((self.x, self.z), self.owner, world),
             EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Explosion | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
@@ -167,7 +171,8 @@ impl Effect {
             | EffectKind::Earthquake(_)
             | EffectKind::Swarm(_)
             | EffectKind::AngelOfDeath(_)
-            | EffectKind::AngelOfDeathShockwave(_) => Vec::new(),
+            | EffectKind::AngelOfDeathShockwave(_)
+            | EffectKind::GhostArmy(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }
@@ -196,8 +201,10 @@ pub struct GroundShake {
 /// Whether `kind` damage from tribe `from` hurts `u`: never the dead; a shielded unit only by a blow, a swamp or
 /// lava (those still drown/burn: TODO.md "Mana"), a firewarrior's bolt stopped like any other magical attack
 /// (pop3-rev-analysis.md "Per spell", Shield; reported, not traced); a blast and a swarm spare the caster's own
-/// tribe (no alliances yet), lightning and lava only the caster's own shaman, a swarm every shaman of any tribe,
-/// a swamp spares no one, not even its own caster.
+/// tribe (no alliances yet), lightning and lava only the caster's own shaman, a swarm every shaman of any tribe —
+/// a *ghost* shaman is never exempt from either (confirmed, docs/plans/ghost.md: "no lava will kill the ghost" was
+/// about a ghost's own death looking different, not about being spared — she "has no real body", so the usual
+/// reason to spare the real shaman doesn't carry over); a swamp spares no one, not even its own caster.
 pub fn hurts(u: &Unit, kind: DamageKind, from: Option<Owner>) -> bool {
     if !u.is_alive() || (u.statuses.shield.is_on() && !matches!(kind, DamageKind::Melee | DamageKind::Swamp | DamageKind::Lava)) {
         return false;
@@ -205,8 +212,8 @@ pub fn hurts(u: &Unit, kind: DamageKind, from: Option<Owner>) -> bool {
     match kind {
         DamageKind::Melee | DamageKind::Fire | DamageKind::Swamp | DamageKind::AngelOfDeath => true,
         DamageKind::Blast => from != Some(u.owner),
-        DamageKind::Lightning | DamageKind::Lava => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman),
-        DamageKind::Swarm => from != Some(u.owner) && !matches!(u.kind, crate::unit::UnitKind::Shaman | crate::unit::UnitKind::AngelOfDeath),
+        DamageKind::Lightning | DamageKind::Lava => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman && !u.statuses.ghost),
+        DamageKind::Swarm => from != Some(u.owner) && u.kind != crate::unit::UnitKind::AngelOfDeath && !(u.kind == crate::unit::UnitKind::Shaman && !u.statuses.ghost),
     }
 }
 

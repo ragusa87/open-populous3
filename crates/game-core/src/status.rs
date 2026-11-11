@@ -35,6 +35,10 @@ pub const HYPNO_NUM_PEOPLE: u32 = 6;
 /// (combat.md "Fight numbers"); the attacker's own ×3 (`combat::BLOODLUST_STRENGTH`, `firebolt::BLOODLUST_DAMAGE`)
 /// and this apply independently when both sides are bloodlusted (confirmed, docs/plans/spells.md).
 pub const BLOODLUST_HEALTH_SHIFT: u16 = 3;
+/// `GHOST_ARMY_MAX` (file and exe 60): a tribe's living ghosts, all kinds together; a cast past this culls one
+/// existing ghost of the same count-tier (brave/shaman/specialist, `kind_stats::GhostCast`) instead of refusing
+/// (`ghost_army.rs`).
+pub const GHOST_ARMY_MAX: u32 = 60;
 
 /// A status that runs out: the steps left, none when off.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

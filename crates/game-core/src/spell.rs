@@ -50,6 +50,8 @@ pub enum Spell {
     Swarm { at: (u16, u16) },
     /// An Angel of Death at `at` (world units): `angel_of_death::cast`.
     AngelOfDeath { at: (u16, u16) },
+    /// A Ghost Army at `at` (world units): `ghost_army::cast`.
+    GhostArmy { at: (u16, u16) },
 }
 
 impl Spell {
@@ -74,7 +76,8 @@ impl Spell {
             SpellKind::Bloodlust => Some(Spell::Bloodlust { at }),
             SpellKind::Invisibility => Some(Spell::Invisibility { at }),
             SpellKind::AngelOfDeath => Some(Spell::AngelOfDeath { at }),
-            SpellKind::LandBridge | SpellKind::Flatten | SpellKind::Erosion | SpellKind::Whirlwind | SpellKind::GhostArmy => None,
+            SpellKind::GhostArmy => Some(Spell::GhostArmy { at }),
+            SpellKind::LandBridge | SpellKind::Flatten | SpellKind::Erosion | SpellKind::Whirlwind => None,
         }
     }
 
@@ -99,6 +102,7 @@ impl Spell {
             Spell::Erode { .. } => Some(SpellKind::Erosion),
             Spell::Swarm { .. } => Some(SpellKind::Swarm),
             Spell::AngelOfDeath { .. } => Some(SpellKind::AngelOfDeath),
+            Spell::GhostArmy { .. } => Some(SpellKind::GhostArmy),
             Spell::Raise { .. } => None,
         }
     }
@@ -124,7 +128,8 @@ impl Spell {
             | Spell::Firestorm { .. }
             | Spell::Earthquake { .. }
             | Spell::Swarm { .. }
-            | Spell::AngelOfDeath { .. } => return None,
+            | Spell::AngelOfDeath { .. }
+            | Spell::GhostArmy { .. } => return None,
         })
     }
 }
@@ -146,5 +151,10 @@ mod tests {
     fn angel_of_death_needs_only_a_point_like_blast_or_volcano() {
         assert_eq!(Spell::at_point(SpellKind::AngelOfDeath, (5, 6)), Some(Spell::AngelOfDeath { at: (5, 6) }), "a copy-paste bug once lumped it in with the spells needing special targeting (land bridge/flatten/erosion), silently eating every cast");
         assert_eq!(Spell::at_point(SpellKind::LandBridge, (5, 6)), None, "still needs its own second point, not a plain `at`");
+    }
+
+    #[test]
+    fn ghost_army_also_needs_only_a_point() {
+        assert_eq!(Spell::at_point(SpellKind::GhostArmy, (5, 6)), Some(Spell::GhostArmy { at: (5, 6) }), "the same copy-paste bug class as AngelOfDeath's own regression above");
     }
 }

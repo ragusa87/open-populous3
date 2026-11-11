@@ -788,8 +788,10 @@ impl GameMap {
         self.sites[i].enabled = true;
     }
 
+    /// The tribe's real shaman — never a Ghost Army copy (docs/plans/ghost.md: a ghost shaman is never cached as
+    /// "the tribe's shaman" in the original either).
     pub fn shaman_of(&self, owner: TribeId) -> Option<&Unit> {
-        self.units.iter().find(|u| u.owner == owner && u.kind == UnitKind::Shaman)
+        self.units.iter().find(|u| u.owner == owner && u.kind == UnitKind::Shaman && !u.statuses.ghost)
     }
 
     /// Resolves an AI script's marker field to its cell (`markers`, the level header's own table):
@@ -807,7 +809,7 @@ impl GameMap {
     }
 
     fn shaman_mut(&mut self, owner: TribeId) -> Option<&mut Unit> {
-        self.units.iter_mut().find(|u| u.owner == owner && u.kind == UnitKind::Shaman)
+        self.units.iter_mut().find(|u| u.owner == owner && u.kind == UnitKind::Shaman && !u.statuses.ghost)
     }
 
     /// Uses one cast of `kind` from the player's book; false when there is none. No kind: nothing to use.
@@ -928,6 +930,7 @@ impl GameMap {
             | Spell::Earthquake { at }
             | Spell::Swarm { at }
             | Spell::AngelOfDeath { at }
+            | Spell::GhostArmy { at }
             | Spell::MagicalShield { at }
             | Spell::Bloodlust { at }
             | Spell::Invisibility { at } => Some(at),
@@ -1040,6 +1043,10 @@ impl GameMap {
             }
             Spell::AngelOfDeath { at } => {
                 self.add_effect(crate::angel_of_death::cast(player, at));
+                None
+            }
+            Spell::GhostArmy { at } => {
+                self.add_effect(crate::ghost_army::cast(player, at));
                 None
             }
             Spell::MagicalShield { at } => {
@@ -1431,7 +1438,9 @@ impl GameMap {
         // Caught at the end of this turn, whatever killed her this turn (melee, a spell, drowning, stranded,
         // lava...): `Unit::die` sets `Action::Dying` synchronously wherever damage is dealt, not through a
         // tick-returned event, so there is no single call site to hook a "just died" check into instead.
-        let shamans_alive: Vec<bool> = self.units.iter().map(|u| u.kind == UnitKind::Shaman && u.is_alive()).collect();
+        // A ghost shaman's own death never drives reincarnation (docs/plans/ghost.md: never cached as "the
+        // tribe's shaman" either).
+        let shamans_alive: Vec<bool> = self.units.iter().map(|u| u.kind == UnitKind::Shaman && !u.statuses.ghost && u.is_alive()).collect();
         self.update_walls();
         let (buildings, now, terrain) = (&self.buildings, self.now, &self.terrain);
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now, crate::unit::is_sea(terrain, t.cell())));
@@ -1906,6 +1915,18 @@ impl GameMap {
                 u.flight = Some(crate::angel_of_death::Flight { heading: crate::angle::Angle::ZERO, height: ground + crate::angel_of_death::CRUISE_HEIGHT });
                 None
             }
+            WorldEvent::SpawnGhosts { owner, kind, count, at } => {
+                for _ in 0..count {
+                    let jitter = |rng: &mut Lcg| (rng.next_u32() % (2 * crate::ghost_army::SCATTER as u32 + 1)) as i32 - crate::ghost_army::SCATTER;
+                    let pos = (at.0.wrapping_add(jitter(&mut self.rng) as u16), at.1.wrapping_add(jitter(&mut self.rng) as u16));
+                    self.spawn(owner, kind, pos).statuses.ghost = true;
+                }
+                None
+            }
+            WorldEvent::DestroyGhost { unit } => {
+                self.destroy_ghost(unit);
+                None
+            }
             WorldEvent::Terrain(TerrainChange::Raise { at, radius, by }) => Some(self.terrain.raise(at, radius, by)),
             WorldEvent::Terrain(TerrainChange::Flatten { at, height, turn }) => Some(crate::flatten::apply(&mut self.terrain, at, height, turn)),
             WorldEvent::Terrain(TerrainChange::Bridge { from, to, heights, turn }) => Some(crate::land_bridge::apply(&mut self.terrain, from, to, heights, turn)),
@@ -2007,14 +2028,31 @@ impl GameMap {
     /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`); a
     /// bloodlusted target takes a blow or a bolt `>> BLOODLUST_HEALTH_SHIFT` (independently of the attacker's own
     /// bloodlust, already folded into `amount` by `combat::strength`/`firebolt`). True when this kills it.
-    /// `Unit::take_hit` remembers `from` and, if it kills, `kind` (`hurt.rs`).
+    /// `Unit::take_hit` remembers `from` and, if it kills, `kind` (`hurt.rs`). A ghost is destroyed outright
+    /// instead (docs/plans/ghost.md): never wounded, never counted as a normal kill (`apply_event`'s own tally
+    /// only fires on `true`).
     pub(crate) fn damage(&mut self, unit: UnitId, amount: u16, kind: DamageKind, from: Option<Owner>) -> bool {
         match self.unit_index(unit).filter(|&i| crate::effect::hurts(&self.units[i], kind, from)) {
+            Some(i) if self.units[i].statuses.ghost => {
+                self.destroy_ghost(unit);
+                false
+            }
             Some(i) => {
                 let lessened = matches!(kind, DamageKind::Melee | DamageKind::Fire) && self.units[i].statuses.bloodlust.is_on();
                 self.units[i].take_hit(if lessened { amount >> crate::status::BLOODLUST_HEALTH_SHIFT } else { amount }, kind, from)
             }
             None => false,
+        }
+    }
+
+    /// A ghost's own death (docs/plans/ghost.md): removed outright this same tick, not through the normal
+    /// `Dying`/`Spirit`/`UnitEvent::Gone` pipeline (no corpse, no spirit rise, no reincarnation hook — "a ghost has
+    /// no real body to hand off") — the same direct-removal shape `tend_training` already uses for its own
+    /// trainee replacement. The original plays a sound cue and a short generic flash here; deferred (no sound
+    /// system, no reusable flash primitive exist in this codebase yet).
+    pub(crate) fn destroy_ghost(&mut self, unit: UnitId) {
+        if let Some(i) = self.unit_index(unit) {
+            self.units.remove(i);
         }
     }
 

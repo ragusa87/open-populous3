@@ -33,22 +33,35 @@ pub struct KindStats {
     pub sight_at_work: u8,
     /// Its rhythm of looking ("Auto-attack" [exe]).
     pub look_every: Every,
+    /// Ghost Army (docs/plans/ghost.md): `None` for a kind that can never be copied (Wildman, AngelOfDeath — never
+    /// one of a tribe's own followers/shaman anyway). For the rest: `priority` picks among several kinds present at
+    /// once (lower wins — shaman > firewarrior > preacher > spy > warrior > brave, traced,
+    /// pop3-rev-analysis.md "Per spell" 9); `count` is how many ghosts are made when this kind wins.
+    pub ghost_cast: Option<GhostCast>,
 }
 
-const SHAMAN: KindStats = KindStats { life: 2000, heal: Some(32), fight_damage: 60, rank: 2, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 10, sight: 3, sight_at_work: 1, look_every: Every::new(4) };
-const BRAVE: KindStats = KindStats { life: 1000, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 5, sight_at_work: 1, look_every: Every::new(4) };
-const WARRIOR: KindStats = KindStats { life: 1800, heal: Some(6), fight_damage: 360, rank: 2, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 12, sight: 5, sight_at_work: 1, look_every: Every::new(4) };
-const PREACHER: KindStats = KindStats { life: 1100, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 3, sight_at_work: 1, look_every: Every::new(2) };
-const SPY: KindStats = KindStats { life: 600, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
-const FIREWARRIOR: KindStats = KindStats { life: 700, heal: Some(6), fight_damage: 60, rank: 3, pace: 2, fights: true, joins_melees: false, throws: true, sabotage: 16, sight: 11, sight_at_work: 5, look_every: Every::new(4) };
-const WILDMAN: KindStats = KindStats { life: 1000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, throws: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
+/// `KindStats::ghost_cast` (docs/plans/ghost.md): `priority` (lower wins a tie among several kinds present near a
+/// Ghost Army cast), `count` (how many ghosts that kind's own cast makes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GhostCast {
+    pub priority: u8,
+    pub count: u8,
+}
+
+const SHAMAN: KindStats = KindStats { life: 2000, heal: Some(32), fight_damage: 60, rank: 2, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 10, sight: 3, sight_at_work: 1, look_every: Every::new(4), ghost_cast: Some(GhostCast { priority: 0, count: 1 }) };
+const BRAVE: KindStats = KindStats { life: 1000, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 5, sight_at_work: 1, look_every: Every::new(4), ghost_cast: Some(GhostCast { priority: 2, count: 6 }) };
+const WARRIOR: KindStats = KindStats { life: 1800, heal: Some(6), fight_damage: 360, rank: 2, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 12, sight: 5, sight_at_work: 1, look_every: Every::new(4), ghost_cast: Some(GhostCast { priority: 1, count: 3 }) };
+const PREACHER: KindStats = KindStats { life: 1100, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 3, sight_at_work: 1, look_every: Every::new(2), ghost_cast: Some(GhostCast { priority: 1, count: 3 }) };
+const SPY: KindStats = KindStats { life: 600, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 0, sight_at_work: 0, look_every: Every::new(4), ghost_cast: Some(GhostCast { priority: 1, count: 3 }) };
+const FIREWARRIOR: KindStats = KindStats { life: 700, heal: Some(6), fight_damage: 60, rank: 3, pace: 2, fights: true, joins_melees: false, throws: true, sabotage: 16, sight: 11, sight_at_work: 5, look_every: Every::new(4), ghost_cast: Some(GhostCast { priority: 1, count: 3 }) };
+const WILDMAN: KindStats = KindStats { life: 1000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, throws: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4), ghost_cast: None };
 /// `LIFE_AOD` (10 000, exe-confirmed). Never heals (TODO.md "Health"), never fights the ordinary way (its own
 /// grab/carry/release and angel-vs-angel exchange run entirely through `GameMap::tend_angels_of_death`, bypassing
 /// `attack`/`melee` — `fights: false` here, together with it never being `UnitKind::Wildman`, is what already
 /// keeps it out of `attack::may_attack`'s target list and spotting's own auto-attack scan, with no extra
 /// exclusion needed there) — not traced either way, a deliberate simplification over threading a new exception
 /// through the ordinary combat path for one kind.
-const ANGEL_OF_DEATH: KindStats = KindStats { life: 10_000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, throws: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4) };
+const ANGEL_OF_DEATH: KindStats = KindStats { life: 10_000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, throws: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4), ghost_cast: None };
 
 impl UnitKind {
     pub const fn stats(self) -> &'static KindStats {
@@ -83,6 +96,23 @@ mod tests {
     #[test]
     fn how_far_each_looks() {
         assert_eq!(UnitKind::ALL.map(|k| (k.stats().sight, k.stats().sight_at_work, k.stats().look_every.period())), [(3, 1, 4), (5, 1, 4), (5, 1, 4), (3, 1, 2), (0, 0, 4), (11, 5, 4), (0, 0, 4)]);
+    }
+
+    #[test]
+    fn ghost_army_priority_and_count_per_kind() {
+        let rows: Vec<_> = UnitKind::ALL.iter().map(|k| k.stats().ghost_cast).collect();
+        assert_eq!(
+            rows,
+            [
+                Some(GhostCast { priority: 0, count: 1 }), // Shaman
+                Some(GhostCast { priority: 2, count: 6 }), // Brave
+                Some(GhostCast { priority: 1, count: 3 }), // Warrior
+                Some(GhostCast { priority: 1, count: 3 }), // Preacher
+                Some(GhostCast { priority: 1, count: 3 }), // Spy
+                Some(GhostCast { priority: 1, count: 3 }), // Firewarrior
+                None,                                      // Wildman
+            ]
+        );
     }
 
     #[test]

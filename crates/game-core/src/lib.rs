@@ -34,6 +34,7 @@ pub mod firestorm;
 pub mod formation;
 pub mod foundation;
 pub mod gauge;
+pub mod ghost_army;
 pub mod ground_fire;
 pub mod guard;
 pub mod headcount;

@@ -6,7 +6,7 @@ use crate::effect::{DamageKind, Effect, TerrainChange};
 use crate::motion::Velocity;
 use crate::tribes::{Owner, TribeId};
 use crate::time::Tick;
-use crate::unit::UnitId;
+use crate::unit::{UnitId, UnitKind};
 use crate::vehicle::VehicleId;
 use std::collections::VecDeque;
 
@@ -54,6 +54,14 @@ pub enum WorldEvent {
     /// The Angel of Death's own cast sequence (`angel_of_death::Cast`) reaches its last turn: the real creature
     /// appears at `at`, owned by `owner` (`GameMap::tend_angels_of_death`).
     SpawnAngelOfDeath { owner: Owner, at: (u16, u16) },
+    /// Ghost Army's own cast sequence (`ghost_army::Cast`) reaches its last turn: `count` ghosts of `kind`, owned
+    /// by `owner`, each independently jittered around `at` (`GameMap::apply_event`, `ghost_army::SCATTER`).
+    SpawnGhosts { owner: Owner, kind: UnitKind, count: u8, at: (u16, u16) },
+    /// A ghost is destroyed outright, not through the normal death pipeline (`GameMap::destroy_ghost`): Ghost
+    /// Army's own cap-cull culling an existing ghost to make room for a new batch past `GHOST_ARMY_MAX`. Every
+    /// other ghost destruction (damage, conversion, hypnotism) instead branches to the same `destroy_ghost` from
+    /// inside its own ordinary handler, since those already carry their own `WorldEvent`.
+    DestroyGhost { unit: UnitId },
     Terrain(TerrainChange),
     /// A coordinator tells one of its units where to go (a charge's target, a melee's place).
     Placed { unit: UnitId, at: (u16, u16) },
