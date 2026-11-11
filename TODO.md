@@ -223,7 +223,9 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   `revert_expired_hypnosis` (soul-convert and the Convert spell keep the ordinary full-reset `change_owner`,
   unaffected: this was specific to Hypnotism's own capture/revert, checked at every `change_owner` caller first).
   The timer of a ghost's
-  status (not traced: no expiry found for Ghost Army), other options to define; read by combat, selection and
+  status: **resolved, there is no timer** - pop3-rev-analysis.md "Ghost Army mechanics" traced the spawn code
+  directly and confirmed no duration field is ever written; implement `Statuses::ghost` as permanent until killed
+  (or culled by the 60-per-tribe cap). Other options to define; read by combat, selection and
   drawing. Invisibility's own early end (attacking does, walking does not) is a guess (pop3-rev-analysis.md "Per
   spell" 6: "some actions end it early", not traced), implemented in `attack::go_attack`. Drawing: the markers are
   done (`units/markers.rs`). Own invisible and ghost people are now drawn translucent (`units::ghost_material`/
@@ -350,6 +352,28 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   small and 6 big fireballs (simple blasts)") were not re-checked against their own code this session, nor was
   Blast's own direct spell-cast blast (row 2) - worth confirming whether they set the same `+0x7A` trigger
   Firestorm does before relying on their "panics" wording.
+- [ ] Ghost Army: neither the spell nor the ghost status exist yet (`Statuses::ghost` is already wired for display/
+  translucency per the sprites.md item above, but nothing ever sets it). Full exe trace now in
+  pop3-rev-analysis.md "Ghost Army mechanics" (pop3-rev `docs/functions.tsv` row `0x50d1a0`, live-verified this
+  session via gdb function-injection, not just statically read). Key numbers for the implementation: the cast
+  itself takes 0.4 s (a one-shot 5-tick controller: cosmetic mist, 3 no-op ticks, then resolve+spawn+self-delete),
+  it copies the caster's own best-priority nearby unit type (shaman > firewarrior/preacher/spy/warrior > brave,
+  defaulting to brave if nothing/nothing-higher is found) into 6 brave ghosts, 3 specialist ghosts or 1 shaman
+  ghost scattered up to ±2 cells from the cast point, under a 60-per-tribe cap enforced by culling an existing
+  ghost (ordinary death, not silent removal) rather than refusing the cast. **No duration/expiry exists at all** -
+  a ghost is removed only by being killed (the engine-wide "a ghost is destroyed outright, not damaged/converted"
+  rule already covers Blast/Hypnotism/Insect Plague/preacher-conversion) or by the 60-cap cull above, matching
+  `Statuses`'s own open "timer (not traced: no expiry found for Ghost Army)" note - there is nothing to trace,
+  implement it as genuinely permanent. Also traced this session: ghosts are excluded from population headcount,
+  per-type counts and the mana-income-relevant tallies (the per-tribe recount that rebuilds those skips straight
+  past a ghost to its own separate ghost-counter), and a ghost shaman is never cached as "the tribe's shaman" -
+  so Lightning/lava's own "spare the caster's shaman" exemption almost certainly does not extend to a ghost
+  shaman (matches a live-play report that lava kills a ghost). A ghost's death also looks different: it skips the
+  normal spirit-rise animation entirely, playing a short generic flash+sound instead - relevant to
+  `Statuses::ghost`'s own death-rendering, not just its lifetime. Still open (queued in pop3-rev's own
+  `docs/trace-backlog.md`): the exact `CAST_RELEASE` delay for this spell, and whether auto-attack *target
+  selection* scores a ghost any differently from an ordinary target (distinct from what a ghost itself may
+  attack, already traced: only enemy ghosts/shamans).
 - [ ] Spell cursors: confirm 40 = Armageddon and 43 = Ghost Army in the game (`virtual_cursor::spell_sprite`); check the gold arrow's frame order and speed against the game; the pause menu releases the mouse, so it shows the system cursor, not the gold arrow.
 - [ ] Burn (1), bloodlust (20) and the original teleport (21), now traced (pop3-rev-analysis.md "Per spell"): burn sets the target cell's trees alight and is not castable; bloodlust (hidden) gives the 6 nearest own followers ×3 damage, /8 damage taken and faster firewarrior reloads for 120 s; teleport (hidden) moves the caster's own shaman. Decide which ones we expose.
 - [ ] Flatten: trace the original's per-turn curve (ours divides the gap by the turns left) and whether the disc is centred on a point or a cell. The land bridge raises a smoke puff on every bridge cell every turn while it builds (a `WorldView` of the effect); balloons rise with it; its steps do not re-level or collapse buildings yet.

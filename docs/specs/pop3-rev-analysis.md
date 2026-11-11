@@ -1076,7 +1076,7 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 | 6 | Invisibility (50 000, 4096, 4) | The `INVIS_NUM_PEOPLE` (file 6) nearest own followers (not the shaman), for `INVISIBLE_COUNT_X8` × 8 turns (120 s). Enemy auto-targeting skips them; some actions end it early. |
 | 7 | Hypnotism (85 000, 4096, 3) | The `HYPNO_NUM_PEOPLE` (file 6) nearest persons of other tribes (not wildmen, shamans, angels) are recreated in the caster's tribe for `HYPNO_COUNT_X8` × 8 turns (file 440, 36.7 s), then return. If their tribe is gone, they stay. Ghosts are destroyed. Exe code found and traced this session (previously derived from file/constant analysis only): `process_hypnotism` (0x50EA60) fires the scan 5 ticks after cast via the shared nearest-N selector (0x515E30) with predicate 0x50EAB0 (the exclusion list) and action 0x50EB00 (the actual kill-and-recreate-under-new-tribe primitive, preserving type/life/max-life/carried wood); the "then return"/"tribe is gone" half is 0x4D92B0 (a per-person-per-tick hook, countdown `+0xAC`, cancelled via a per-tribe wipeout table at 0x89DB11 keyed by the stored original tribe `+0xAD`). This is also, independently, the mechanism behind 7 live-captured GONE/NEW conversion pairs that an earlier session mistook for "Preacher conversion" - see that section's own resolved contradiction. |
 | 8 | Firestorm (400 000, 4096, 2) | `FIRESTORM_DURATION` (file 220 turns, 18.3 s); one fireball every 4 turns (about 55) falling on a random point of a 6 × 6-cell square around the target. Each, on a land cell: a 5-cell simple blast that panics plus a ground-fire scenery object (same as Lightning's); on water: an unnamed splash effect instead, no fire; either way, a building there is set alight (0x408CB0, same as Lightning). No terrain height or blend change ("Fireball impact"). |
-| 9 | Ghost army (18 000, 4096, 4) | Copies the best own unit type near the target (shaman > firewarrior > preacher > spy > warrior > brave): 6 brave ghosts, 3 specialists or 1 shaman; at most 60 per tribe. No expiry found. They attack only enemy ghosts and shamans, their shots do nothing; melee untested. Blast and insects destroy them. |
+| 9 | Ghost army (18 000, 4096, 4) | Copies the best own unit type near the target (shaman > firewarrior > preacher > spy > warrior > brave, ties/nothing found default to brave): 6 brave ghosts, 3 specialists or 1 shaman, scattered up to ±2 cells from the target; at most 60 per tribe (overflow culls an existing ghost per type-bucket through the ordinary death pipeline, not a refusal). Confirmed no expiry exists in the spawn code itself, not just absent by search - genuinely permanent until killed. They attack only enemy ghosts and shamans, their shots do nothing; melee untested. Blast and insects destroy them outright (the engine-wide "ghosts are destroyed, not damaged" rule), and dying this way skips the normal spirit-rise for a short flash+sound instead. Not counted toward headcount/population/mana-income tallies; a ghost shaman is never cached as "the tribe's shaman", so Lightning/lava's own spare-the-caster's-shaman exemption very likely does not extend to it. Full trace, including how the cast resolves tick by tick: "Ghost Army mechanics" below. |
 | 10 | Erosion (210 000, 4096, 2) | 63 hydraulic-erosion passes, one per turn (5.25 s), on an 8 × 8-cell window jittered around the target: ground washed downhill. No direct effect on units. |
 | 11 | Swamp (100 000, 4096, 3) | No terrain change. Lasts 32 000 turns (44 min). Every 4 turns it kills outright every person on its 3 × 3 cells, any tribe, until `SWAMP_NUM_PEOPLE` (exe 10) are dead. At most 30 per tribe (the oldest goes). Removed when most of its cells are unsuitable. |
 | 12 | Land bridge (70 000, 5120, 4) | From the caster to the target, 4 cells wide (−1, 0, +1, +2 across the line), heights on a straight slope between both ends (at least 90): each turn `h += clamp(T − h, ±LAND_BRIDGE_MAX_CHANGE) / (64 − turn)` (`LAND_BRIDGE_MAX_CHANGE` 256, 64 being `LAND_BRIDGE_DURATION`), so every cell reaches its height after 62 turns (5.2 s) when the gap is small: the cap makes large gaps fall short (gap 256: 251 reached, 500: 488, 800: 759, 1000: 900); sea cells raised too; a smoke puff on every bridge cell every turn. Buildings left on ground uneven by more than 200 collapse ("Terrain changes: what reacts"). |
@@ -1795,6 +1795,59 @@ What the flooding destroy reason above (sub-state 2) actually spawns: a class-10
 - **Rocks**: every turn, a damped oscillator (amplitude up to 56 units, reflecting - flipping sign - whenever it crosses zero) is added straight into the stand-in's own facing/yaw angle, wrapped to a full circle. This is a genuine orientation change, not a position wobble: **the building's own angle oscillates and decays, like a structure physically tipping back and forth as it founders** - confirming the original does tilt the building while it drowns, not just sink it straight down. The oscillator's target lean is picked from an 8-direction compass histogram of nearby land cells (closest shore wins), recomputed each turn until the rocking settles (both axes of a secondary shake displacement under ~56 units), at which point a short spiral/settle flourish plays (the object nudges itself along a small interpolated path, with something spawned at each point along it - plausibly a splash/bubble, not independently confirmed) before the 80-turn timer runs out and it's removed, same as the blast reason, with no ashes either way.
 
 Not traced further this session: the exact oscillator math (a handful of small trig/angle helpers, 0x586074/0x4E9BA0/0x4E9B70/0x4E6C80 - their role is clear enough from how the result is used above, just not their internal formulas) and the object spawned during the final spiral (0x4EE580, plausibly a splash/bubble particle).
+
+### Ghost Army mechanics [exe]
+Cast: no dedicated cast dispatch - the generic per-spell effect table spawns the spell's sole component directly,
+a class-7 type `0xc` ("ghost army") controller (effect state 13, `process_ghost_army`). The controller runs for
+exactly 5 ticks (0.4 s) then unconditionally self-deletes - it is never an ongoing presence. Tick 1 scatters 81
+cosmetic smoke puffs around the cast point (a materialising-mist burst, unrelated to the actual spawn). Ticks 2-4
+are no-ops. Tick 5 does the real work:
+
+- **Which unit type gets copied**: scans a fixed 3x3-cell grid centred on the cast point for the caster's own
+  living units and keeps whichever has the highest priority - shaman > firewarrior > preacher > spy > warrior >
+  brave (ties, and no candidate found at all, both fall back to brave). **An existing ghost is just as eligible a
+  candidate as a live unit** - Ghost Army can "copy" an already-ghosted unit, nothing excludes it.
+- **How many**: brave (or no candidate found) -> 6; warrior/preacher/spy/firewarrior -> 3; shaman -> 1 - exactly
+  matching this doc's own "Per spell" row 9.
+- **Where**: each new ghost lands independently jittered up to ±256 world units (~±2 cells) on x and z from the
+  cast point - a loose scatter, not a tight formation or cluster.
+- **The 60-per-tribe cap**: enforced live, not at spawn/despawn time - the tribe's current ghost count is
+  recomputed every turn by the same per-tribe recount pass that rebuilds population bookkeeping (below). If the
+  new batch would push the tribe over 60, the cast still spawns the full batch, but first force-kills one
+  existing ghost per affected type-bucket (brave/shaman/specialist) through the ordinary death pipeline (not a
+  silent removal) to make room.
+- **No duration of any kind**: confirmed from the spawn code itself, not just by absence of a timer - the newly
+  created unit gets the ghost status bit and (if it belongs to the locally-viewed tribe) the translucency draw
+  bit, and nothing else. Combined with the engine-wide rule that a ghost is always destroyed outright rather than
+  damaged/converted normally (independently confirmed in Hypnotism, Insect Plague, the preacher-conversion roll,
+  and generic death handling), a Ghost Army unit has no expiry at all: it lasts until something kills it, or until
+  the cap above retires it.
+- **Dying looks different**: when a ghost is removed through the ordinary death teardown, it skips the normal
+  spirit-rise animation (no calm rising ghost, no wildman sky-tumble) - instead it plays a sound cue and a short
+  (0.67 s) generic flash/puff effect at its position (the same reusable timed-sprite effect also used for
+  lightning's own bolt-flash), gated purely on the ghost status bit regardless of tribe or cause of death.
+
+**Population/mana/targeting side effects, traced this session (resolving open questions from the implementation
+side):**
+- **Not counted toward headcount or per-type population, confirmed from the per-tribe recount pass** that rebuilds
+  these tallies every turn: it checks the ghost status bit immediately after relinking each person into the
+  tribe's own unit list, and a ghost contributes to a dedicated running ghost-count ONLY (the same counter the
+  60-cap above reads) - it never reaches the headcount increment, the 200-population-cap check, the per-type
+  count, or the "this tribe's shaman" pointer cache that follows. This also means ghosts ARE relinked into the
+  tribe's ordinary unit list by this periodic pass (just excluded from the bookkeeping that follows), even though
+  Ghost Army's own spawn code never does that linking itself.
+- **A ghost shaman is never installed as "the tribe's shaman"**, confirmed by the same recount pass (the
+  shaman-pointer cache is skipped for a ghost the same way the headcount is) - whatever damage code spares "the
+  caster's own shaman" (Lightning, lava) almost certainly checks against that exact cached pointer, so a ghost
+  shaman is very likely NOT exempt and dies like an ordinary victim to those effects (matches a live-play report:
+  lightning/lava kill a ghost shaman; neither Lightning's own strike code nor the lava/volcano damage code test the
+  ghost bit anywhere in the disassembly, which is consistent with no special-casing either way).
+- **A ghost shaman almost certainly contributes no mana income**: not independently confirmed at the income
+  computation itself, but strongly implied - the per-type/headcount counters a ghost is excluded from (above) are
+  the same population tallies the mana-income mechanic is built on.
+- Still open, not traced this session: the exact `CAST_RELEASE` (cast-to-effect delay) for this spell specifically,
+  and whether anything scores/prioritises ghosts specially as an auto-attack *target* (distinct from what a ghost
+  itself may attack, already documented) - queued in `pop3-rev`'s own `docs/trace-backlog.md`.
 
 ### Angel of Death mechanics [exe]
 Cast: no AoD-specific cast dispatch - it follows the generic cast-to-effect pipeline (shot, then the spell's own
