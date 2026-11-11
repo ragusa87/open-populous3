@@ -63,7 +63,10 @@ shaman included — strongly implied by the same exclusion, not independently tr
 itself). A ghost shaman is never the tribe's real one either: `GameMap::shaman_of`/`shaman_mut`, the reincarnation
 snapshot, Armageddon's own "the losing tribe's shaman" strike, the AI's `AttackGoal::Shaman`, the AI script's
 `IS_SHAMAN_IN_AREA` and worship's shaman-only totem/vault gating all exclude `statuses.ghost` from "the tribe's
-shaman". Own invisible and ghost people are already drawn translucent (units.md "Status markers"), an enemy's
+shaman" — left deliberately unchanged, not traced either way: `send_in.rs`/`enter.rs`/`vehicle.rs`'s existing
+"not a shaman" exclusions, which already keep out every `UnitKind::Shaman` regardless of `statuses.ghost`
+(a ghost shaman shouldn't enter a building or board a vehicle either, as good a guess as the opposite). Own
+invisible and ghost people are already drawn translucent (units.md "Status markers"), an enemy's
 ghosts look like ordinary units to that enemy. Still open, not traced: the exact `CAST_RELEASE` delay for this
 spell specifically (this codebase applies one shared constant to every spell's cast-to-release flow already, so
 there is nothing to special-case without new evidence) and whether a ghost is *scored* any differently as an
