@@ -5,7 +5,9 @@
   (`game_core::health::Health`: integer current and max points), `motion` (`game_core::motion::Motion`: `velocity`, x and z
   in world units, y in height units, per tick, and `height`, absolute, above the sea, in terrain height units,
   while off the ground, None on it),
-  `statuses` (`game_core::status::Statuses`: invisible, shielded, bloodlust, hypnotized, ghost; shield and bloodlust are `Timed`; none set by a spell yet, the units sandbox sets them), action.
+  `statuses` (`game_core::status::Statuses`: invisible, shielded, bloodlust, hypnotized, ghost; shield and bloodlust
+  are `Timed`; each set by its own spell — Invisibility, Magical Shield, Bloodlust, Hypnotism, Ghost Army
+  (spells.md) — the units sandbox also sets them directly for display), action.
 - Ids: `GameMap::spawn` (or `new_id`) gives each unit an id never given before on the map (shared with buildings
   and effects), so `units` stays sorted by id and `GameMap::unit(id)` is a binary search. A unit leaves the list
   when its spirit has risen; anything holding its id then finds None, which means it has ended.
@@ -340,8 +342,11 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
   before the units) and their markers blink in the last 15 steps (10 s): 2 turns on, 2 off, phased by the unit's id
   (as in the original). Own invisible and ghost people are drawn translucent (`units::ghost_material`: a cached
   alpha-blended clone of the unit's own kind+tribe+alpha-mode material at alpha 0.34, `pop3_format::ghost`'s 66%
-  mix table decoded for the record but not replayed per pixel - docs/specs/sprites.md "Ghost"). Not yet: the
-  low-health sound, invisible flickering faster near expiry, invisible enemies hidden. Sandbox Units has each
+  mix table decoded for the record but not replayed per pixel - docs/specs/sprites.md "Ghost"). `Statuses::ghost`
+  is set by the Ghost Army spell (spells.md "Ghost Army", `game_core::ghost_army`), never expiring on its own. Not
+  yet: the low-health sound, invisible flickering faster near expiry, invisible enemies hidden, and (spells.md
+  "Ghost Army") a ghost's own death cue (a sound and a short generic flash in the original, instead of the normal
+  spirit-rise) and Ghost Army's own tick-1 cosmetic mist burst. Sandbox Units has each
   follower kind with each marker, then all at once.
 - Dust (`units/dust.rs`, cosmetic, simulation time: shown once the unit is drawn landed): when a unit stops landing, 10 soft generated motes spread 0.4 cell
   around its feet, rise 0.1, grow and fade over 0.8 s, facing the camera and pulled towards it like the sprites.

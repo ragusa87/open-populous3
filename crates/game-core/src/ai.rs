@@ -283,13 +283,24 @@ impl GameMap {
     }
 
     /// Part of `GIVE_UP_AND_SULK`'s OTHER effect (`0x41CA10(tribe)`, ai-scripts.md "Other ON/OFF switches",
-    /// "fully traced"): a one-shot per-tribe cleanup/punishment sweep. Three of its six documented effects
-    /// so far; ghost-unit deletion, spy-disguise reveal and aborting in-progress conversions are deferred
+    /// "fully traced"): a one-shot per-tribe cleanup/punishment sweep. Four of its six documented effects
+    /// so far; spy-disguise reveal and aborting in-progress conversions are deferred
     /// (TODO.md "Computer players (AI)").
     fn ai_give_up_sweep(&mut self, tribe: TribeId) {
         self.ai_force_off_vehicles(tribe);
         self.ai_cripple_angels_of_death(tribe);
         self.ai_shorten_hypnotism(tribe);
+        self.ai_delete_ghosts(tribe);
+    }
+
+    /// `GIVE_UP_AND_SULK`'s own ghost-unit deletion (docs/plans/ghost.md): tears down every one of the tribe's
+    /// own Ghost Army copies, the same `destroy_ghost` any other ghost destruction goes through (no corpse, no
+    /// spirit rise).
+    fn ai_delete_ghosts(&mut self, tribe: TribeId) {
+        let ghosts: Vec<UnitId> = self.units.iter().filter(|u| u.owner == tribe && u.is_alive() && u.statuses.ghost).map(|u| u.id).collect();
+        for id in ghosts {
+            self.destroy_ghost(id);
+        }
     }
 
     pub(crate) fn ai_attr(&self, owner: TribeId, var: InternalVar) -> i32 {
@@ -754,10 +765,13 @@ mod tests {
         let mut map = map_with_ai(TribeId::Blue).seeded(1);
         let angel = map.spawn(TribeId::Blue, UnitKind::AngelOfDeath, (32 * 512, 32 * 512)).id;
         let full = map.unit(angel).unwrap().health.max();
+        let ghost = map.spawn(TribeId::Blue, UnitKind::Brave, (32 * 512, 32 * 512)).id;
+        map.unit_mut(ghost).unwrap().statuses.ghost = true;
         map.ai_set_give_up_and_sulk(TribeId::Blue, true);
         let crippled = map.unit(angel).unwrap().health.current();
         assert!((32..=95).contains(&crippled), "the sweep reached the Angel of Death: {crippled} out of range");
         assert_ne!(crippled, full);
+        assert!(map.unit(ghost).is_none(), "the sweep also tears down the tribe's own ghosts (docs/plans/ghost.md)");
     }
 
     #[test]

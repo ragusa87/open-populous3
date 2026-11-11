@@ -226,6 +226,9 @@ followed each turn (`GameMap::spot_enemies`).
   down. It then attacks it (`Order::Attack`'s path) [ours: the original gives itself an "attack around this cell"
   order].
 - `UnitGrid`: the living people outside by cell, sorted, built only on a look turn.
+- A ghost's own scan is narrower (spells.md "Ghost Army", the real new combat mechanic): restricted to an enemy
+  ghost or an enemy shaman, instead of the normal "any enemy" rule. Whether a ghost target is *scored* any
+  differently by an ordinary (non-ghost) looker's own target selection is still open, not traced.
 
 ## Firebolts
 `crate::firebolt` ("Firewarrior fire" [exe, measured]). Firewarriors (`KindStats::throws`) never charge, hack or
@@ -259,8 +262,9 @@ join a melee on their own attack (they still fight when challenged).
   aboard; that this slows the vehicle is ours]. Drawn pedalling aboard while it waits, its
   throw pose while it throws.
 - Not yet: the line of fire (a building in the way), the smoke trail and
-  the ground light, a ghost firewarrior's harmless bolts, the shaman inside a building or vehicle taking half her
-  life, an angel's reaction.
+  the ground light, the shaman inside a building or vehicle taking half her
+  life, an angel's reaction. A ghost firewarrior's own bolt is done (spells.md "Ghost Army"): the throw animation
+  plays, nothing follows on arrival.
 
 ## Sermon
 `crate::sermon`: a preacher sits the enemies it sees down and preaches to them; now and then one joins its tribe

@@ -406,28 +406,15 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   small and 6 big fireballs (simple blasts)") were not re-checked against their own code this session, nor was
   Blast's own direct spell-cast blast (row 2) - worth confirming whether they set the same `+0x7A` trigger
   Firestorm does before relying on their "panics" wording.
-- [ ] Ghost Army: neither the spell nor the ghost status exist yet (`Statuses::ghost` is already wired for display/
-  translucency per the sprites.md item above, but nothing ever sets it). Full exe trace now in
-  pop3-rev-analysis.md "Ghost Army mechanics" (pop3-rev `docs/functions.tsv` row `0x50d1a0`, live-verified this
-  session via gdb function-injection, not just statically read). Key numbers for the implementation: the cast
-  itself takes 0.4 s (a one-shot 5-tick controller: cosmetic mist, 3 no-op ticks, then resolve+spawn+self-delete),
-  it copies the caster's own best-priority nearby unit type (shaman > firewarrior/preacher/spy/warrior > brave,
-  defaulting to brave if nothing/nothing-higher is found) into 6 brave ghosts, 3 specialist ghosts or 1 shaman
-  ghost scattered up to ±2 cells from the cast point, under a 60-per-tribe cap enforced by culling an existing
-  ghost (ordinary death, not silent removal) rather than refusing the cast. **No duration/expiry exists at all** -
-  a ghost is removed only by being killed (the engine-wide "a ghost is destroyed outright, not damaged/converted"
-  rule already covers Blast/Hypnotism/Insect Plague/preacher-conversion) or by the 60-cap cull above, matching
-  `Statuses`'s own open "timer (not traced: no expiry found for Ghost Army)" note - there is nothing to trace,
-  implement it as genuinely permanent. Also traced this session: ghosts are excluded from population headcount,
-  per-type counts and the mana-income-relevant tallies (the per-tribe recount that rebuilds those skips straight
-  past a ghost to its own separate ghost-counter), and a ghost shaman is never cached as "the tribe's shaman" -
-  so Lightning/lava's own "spare the caster's shaman" exemption almost certainly does not extend to a ghost
-  shaman (matches a live-play report that lava kills a ghost). A ghost's death also looks different: it skips the
-  normal spirit-rise animation entirely, playing a short generic flash+sound instead - relevant to
-  `Statuses::ghost`'s own death-rendering, not just its lifetime. Still open (queued in pop3-rev's own
-  `docs/trace-backlog.md`): the exact `CAST_RELEASE` delay for this spell, and whether auto-attack *target
-  selection* scores a ghost any differently from an ordinary target (distinct from what a ghost itself may
-  attack, already traced: only enemy ghosts/shamans).
+- [x] Ghost Army (docs/specs/spells.md "Ghost Army", `game_core::ghost_army`): the spell, the priority scan and
+  scatter spawn, the 60-cap cull, every destroy-outright chokepoint (damage/conversion/hypnotism), the
+  shaman-uniqueness exclusions, headcount/mana exclusion, restricted auto-targeting and cosmetic-only bolts are
+  all done. Left, both deferred as cosmetic-only (docs/specs/units.md "Status markers"): the original's own
+  sound cue + short generic flash where a ghost dies (no sound system, no reusable flash primitive exist in this
+  codebase yet) and the cast's own tick-1 cosmetic mist burst (81 puffs). Still open, not traced (queued in
+  pop3-rev's own `docs/trace-backlog.md`): the exact `CAST_RELEASE` delay for this spell specifically, and whether
+  auto-attack *target selection* scores a ghost any differently from an ordinary target (distinct from what a
+  ghost itself may attack, already implemented: only enemy ghosts/shamans).
 - [ ] Spell cursors: confirm 40 = Armageddon and 43 = Ghost Army in the game (`virtual_cursor::spell_sprite`); check the gold arrow's frame order and speed against the game; the pause menu releases the mouse, so it shows the system cursor, not the gold arrow.
 - [ ] Burn (1), bloodlust (20) and the original teleport (21), now traced (pop3-rev-analysis.md "Per spell"): burn sets the target cell's trees alight and is not castable; bloodlust (hidden) gives the 6 nearest own followers ×3 damage, /8 damage taken and faster firewarrior reloads for 120 s; teleport (hidden) moves the caster's own shaman. Decide which ones we expose.
 - [ ] Flatten: trace the original's per-turn curve (ours divides the gap by the turns left) and whether the disc is centred on a point or a cell. The land bridge raises a smoke puff on every bridge cell every turn while it builds (a `WorldView` of the effect); balloons rise with it; its steps do not re-level or collapse buildings yet.
@@ -1374,9 +1361,9 @@ The single biggest remaining system, and the one that turns this from a sandbox/
     vehicle.rs), Angel of Death crippling (`GameMap::ai_cripple_angels_of_death`, angel_of_death.rs), hypnotism
     re-roll (`GameMap::ai_shorten_hypnotism`, hypnotism.rs - exact formula `8 + rand(0..63)`, uniform in `[8, 71]`
     steps, confirmed and now in pop3-rev-analysis.md), wired together by `ai_set_give_up_and_sulk`'s own
-    `ai_give_up_sweep` (ai.rs).
-    - [ ] Ghost unit deletion: correct but currently inert - nothing sets `Statuses::ghost` until `GhostArmy`
-      itself is implemented (see this same section's `GhostArmy` gap). Revisit once that spell exists.
+    `ai_give_up_sweep` (ai.rs). **4 of 6 now**: ghost-unit deletion (`GameMap::ai_delete_ghosts`) tears down
+    every one of the tribe's own Ghost Army copies through the same `destroy_ghost` any other ghost destruction
+    goes through, now that the spell itself exists (docs/specs/spells.md "Ghost Army").
     - [ ] Spy-disguise reveal: no disguise mechanic exists anywhere in `game-core` yet (a status flag, a
       "displayed vs. real owner" split, a reveal trigger) - a subsystem to design from scratch, not a small gap.
     - [ ] "Soul convert 2" conversion-coordinator teardown: identified as aborting a tribe's own

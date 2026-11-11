@@ -106,38 +106,13 @@ longer-duration version of the falloff pattern already there.
   submerged. `Tree::tick` (`tree.rs`) takes no terrain/water input today — needs the heightmap threaded in,
   likely alongside the building-collapse handling in `GameMap::apply_event`'s `Terrain` case.
 
-### Ghost Army
-Aimed at a target point like Blast (traced: cost 18 000, range 4096/8 cells) — looks at the caster's own units near
-that point and copies the single best kind present, by priority shaman > firewarrior > preacher > spy > warrior >
-brave (traced). The count produced depends on which tier that best kind falls in: 1 ghost if it's the shaman, 3 if
-it's any other specialist (firewarrior/preacher/spy/warrior), 6 if the best kind present is only braves (traced).
-- Cap `GHOST_ARMY_MAX` (60) per tribe, counting all of a tribe's ghosts together, not per cast. Once at the cap, a
-  new cast simply produces no new ghosts (confirmed) — it does not evict or replace older ones, and nothing says
-  the charge itself is refunded or withheld either way.
-- No expiry (traced: "No expiry found") — `status::Statuses.ghost` is already a plain, untimed `bool` for exactly
-  this reason, not a `Timed`. Ghosts persist until destroyed: Blast removes any ghost in its centre cell outright
-  (already traced, matches `effect::hurts`'s existing "not pushed: own shaman, angel of death... ghosts in the
-  centre cell are removed"), and Swarm's own cells destroy ghosts outright too (see above) — neither is normal
-  damage, both are an instant removal.
-- Combat targeting is the real new mechanic: a ghost unit's auto-target selection must be restricted to enemy
-  ghosts and enemy shamans only (traced) — not the normal "nearest enemy" rule every other unit kind uses. Melee
-  behaviour is untraced ("melee untested"); treat it as working normally once a ghost is in melee range of an
-  allowed target, same restricted target list, until shown otherwise.
-- Ranged attacks are cosmetic only (confirmed): a ghost firewarrior/spy still goes through its throwing
-  animation, but no `WorldEvent::Damage` follows — matches the trace's "their shots do nothing" / "a ghost
-  firewarrior's shots are ghosts too: they do nothing".
-- Visual polish, deferred: the player's own ghosts render translucent, an enemy's ghosts look like ordinary units
-  to that enemy (traced, a per-viewer rendering nuance) — client-side only, not blocking the core mechanic above.
-- Training/mana interaction, deferred as an edge case: if a ghost ends up crewing a building, any unit that
-  building then trains also becomes a ghost, and that training draws mana only from current income (never the
-  bank) and never empties the store (traced). Only matters once a ghost can occupy a building at all — not needed
-  for a first pass that just spawns ghosts and lets them fight in the open.
-
 ## Hardest tier
 
 ### Angel of Death
-Not yet reached in the Q&A — session ended before this (Ghost Army, the other half of this original combined
-entry, is now planned above in the Moderate tier). What's already in `pop3-rev-analysis.md` "Per spell" (13) plus
+Implemented (docs/specs/spells.md "Angel of Death"); Ghost Army, the other half of this original combined entry, is
+also implemented now (docs/specs/spells.md "Ghost Army"). The rest of this section is stale Q&A groundwork kept for
+whatever is still unresolved in Angel of Death's own spec entry, not a current plan. What's already in
+`pop3-rev-analysis.md` "Per spell" (13) plus
 "Reference"'s combat tables (sight 7×7 cells, never pushed, never targeted by melee/preacher scans, no healing,
 state 31 burn reaction at 0x4DE570) is the starting point for the next round of questions — nothing from the user
 recorded yet beyond the initial complexity classification (this, plus Volcano and Armageddon, were flagged as the
