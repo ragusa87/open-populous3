@@ -102,7 +102,8 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             | Spell::Bloodlust { at }
             | Spell::Invisibility { at }
             | Spell::Swarm { at }
-            | Spell::AngelOfDeath { at } = spell
+            | Spell::AngelOfDeath { at }
+            | Spell::GhostArmy { at } = spell
             {
                 b.push(match spell {
                     Spell::Teleport { .. } => 4,
@@ -119,6 +120,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                     Spell::Invisibility { .. } => 16,
                     Spell::Swarm { .. } => 17,
                     Spell::AngelOfDeath { .. } => 18,
+                    Spell::GhostArmy { .. } => 19,
                     _ => 6,
                 });
                 b.extend(at.0.to_le_bytes());
@@ -144,7 +146,8 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
                 | Spell::Bloodlust { .. }
                 | Spell::Invisibility { .. }
                 | Spell::Swarm { .. }
-                | Spell::AngelOfDeath { .. } => unreachable!("encoded above"),
+                | Spell::AngelOfDeath { .. }
+                | Spell::GhostArmy { .. } => unreachable!("encoded above"),
             };
             b.push(tag);
             for (x, z) in cells {
@@ -386,6 +389,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
                 16 => Spell::Invisibility { at: (c.u16()?, c.u16()?) },
                 17 => Spell::Swarm { at: (c.u16()?, c.u16()?) },
                 18 => Spell::AngelOfDeath { at: (c.u16()?, c.u16()?) },
+                19 => Spell::GhostArmy { at: (c.u16()?, c.u16()?) },
                 _ => return None,
             };
             Some(Command::Cast { player, spell })
