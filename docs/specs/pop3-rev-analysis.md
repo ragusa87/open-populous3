@@ -61,6 +61,12 @@ so a live measurement may run on it with the addresses translated.
 - **A firewarrior throws two homing fire bolts, one hits** [exe]: 1 cell per turn, 100 to every enemy in the
   impact cell plus `SW_BLAST_DAMAGE` × a per-type % to the target, every 25-28 turns, at 9.2-17.2 cells by altitude.
   See "Firewarrior fire".
+- **A disguised spy counts as its real tribe until its transition settles, only then as the disguise** [exe]: the
+  spy-only "vulnerable transition" the player reported is real and mechanical, not cosmetic - one shared counter
+  (armed to `SPY_DISGUISE_DELAY`, exe 63) gates both the spy's rendered colour (blinking while it runs) and every
+  combat/targeting check in the game (showing the real tribe while it runs, the disguise tribe once it hits 0).
+  Arson is a separate, AI-only order (a firebrand thrown at a building's door, then it catches fire) - not a
+  player ability in any code path found. See "Spy disguise and infiltration".
 - **Preaching rerolls a 1-in-`PREACHEE_CONV_CHANCE` (5) chance every `PREACHEE_CONV_FREQ` (500 turns, 41.7 s)**
   [exe]: on success the preachee is destroyed and a person of its own type, in the preacher's tribe, takes its
   place (capped by the preacher's tribe population); instant for a wildman or other "no breeding" tribe. The
@@ -3148,8 +3154,8 @@ trampoline that calls out to a separate handler; "inline" means the trampoline I
 | 12 | none | jumps straight to the shared tail - a true no-op kind |
 | 13 | 0x439A00 | not traced |
 | 14 | inline | unconditionally "done" |
-| 15 | 0x439D30 | door/throw point |
-| 16 | inline | reads a byte from the group's own target, passes it to 0x4DE760; if the unit's own +0x9F resolves to another live unit, calls 0x4DE740 and writes its result into THAT unit's own tribe field (+0x2F) - a strong, not independently confirmed lead for Convert/Hypnotism's actual "switch tribe" application |
+| 15 | 0x439D30 | door/throw point - the spy arson/firebrand sequence, AI-only every issuer found - "Spy disguise and infiltration" |
+| 16 | inline | reads a byte from the group's own target, passes it to 0x4DE760 (the disguise-application primitive, a strong candidate for the player's own disguise command - "Spy disguise and infiltration"); if the unit's own +0x9F resolves to another live unit, calls 0x4DE740 and writes its result into THAT unit's own tribe field (+0x2F) - a strong, not independently confirmed lead for Convert/Hypnotism's actual "switch tribe" application |
 | 17 | 0x43A4D0 | cell-rounded approach, shared with 31/32 below; issuer traced a later session - a preacher-specific branch of `0x4CE2C0`, an AI-only per-tribe tasking sweep (`maybe_ai_func_1`), see "Preacher conversion"'s open questions |
 | 18 | 0x433A10 | not traced |
 | 19 attack (generic) | 0x51A2A0 | "Starting a melee" |
@@ -3164,7 +3170,7 @@ trampoline that calls out to a separate handler; "inline" means the trampoline I
 | 28 | 0x51FCE0 | see the table above (0x1C) |
 | 29 | inline (0x432961) | **Fully traced a later session, chasing "guard between markers"**: target is a UNIT ID (not a position) - on first entry, computes a destination from that reference unit's CURRENT position ONCE (snapping to its building's door point if it's standing on one), then just waits; every other tick, checks arrival within 56 units and, on success, stops the unit and plays a per-type "arrived" pose (`0x4D4EE0`). Done once the REFERENCE unit's own `+0x7A` becomes nonzero (meaning not traced). Reads as "go to wherever unit X currently is, settle, until X signals something" - a general escort/regroup primitive, NOT a continuous follow (the destination is never re-read after the first tick) and not itself a multi-waypoint patrol. Its own issuer could not be found (checked all 38 literal `order_set` kinds, the multi-unit spell utility, and the one other dynamic-kind call site - none produce kind 29) - still open. See "Guard controller" below for why this doesn't settle guard/patrol either. |
 | 30 "alarm" | 0x43DAA0 | given to a tribe's buildings by 0x443B40; completing one has a worship-adjacent side effect in `group_release` (above) |
-| 31/32 disguise & building-visit | 0x43A4D0 | shared with 17 above |
+| 31/32 building-visit | 0x43A4D0 | shared with 17 above; 31 is NOT the disguise command (an old mistake, corrected - "Spy disguise and infiltration") |
 | 33 preach | 0x43C7A0 | "Preacher conversion" |
 
 A free slot's kind byte is 0 (kinds 0-2 never occur - below the dispatch table's range).
@@ -3805,36 +3811,33 @@ preacher_strike_scan (0x43ABF0), fn(striker, radius_byte, out_angle_ptr) -> bool
   for order kinds 17, 31 AND 32 alike, with no attacker-type branch anywhere in it (re-verified this session)
   kind 32 "preacher building-visit": issued only by preacher_auto_scan (0x51E7B0), which DOES check
     `self.type == 4` explicitly before considering it - this one IS preacher-exclusive
-  kind 31 "disguise": issued by 0x4D6F90, gated by a per-type table (0x5A7091 bit 0x4) read directly from the exe
-    this session - set for brave/warrior/spy, CLEAR for preacher/firewarrior/shaman/angel/wildman. **[game, user-
-    confirmed]: disguise is a spy-only command (select the spy, right-click a tribe's HUD icon; a short
-    vulnerable transition, then the unit counts as that tribe - no auto-attack on it - until another spy spots it
-    or the player explicitly orders an attack on it, which un-disguises it); it never strikes or converts anyone.**
-    `order_building_approach`'s substates 1-4 (walk to a spot, wait, RNG roll) read as that vulnerable transition,
-    and the roll success setting a "disguise" flag (`+0xB2` bit 0) plus an ~840-turn/70 s duration matches "takes a
-    short time" and the disguised period itself. The trailing call to preacher_strike_scan on that same success is
-    real at the code level but is a NO-OP in the overwhelming common case (its own target table, below, only ever
-    matches an enemy preacher or firewarrior standing right there) - incidental plumbing reuse, not a second
-    gameplay effect of disguising. The exact trigger for the PLAYER'S disguise command specifically (as opposed to
-    0x4D6F90's own per-type gate, which may also be reached by a different, non-player trigger for brave/warrior)
-    was not pinned down this session - a related function, 0x4DEFF0, reaches the same kinds 17/31 but gated to
-    `self.type == 4` (preacher), so it is a different thing, not the disguise command either.
-  kind 17: issued by 0x43B790, itself called from an untraced per-tribe/per-candidate dispatcher (0x4CE2C0), AND
-    (as kind 17's own default, see 0x4DEFF0) by a preacher-gated function reached from `init_unit_class_1`
-    (0x4D2740, a per-new-state hook, dispatch key not fully traced) - neither issuer's own trigger condition was
-    pinned down this session
-  → so, at the code level, a disguising brave/warrior/spy (kind 31) and a visiting preacher (kind 32) reach the
-    SAME strike scan - but see the disguise note just above for why this doesn't mean disguise strikes anyone in
-    practice
+  kind 31 is NOT the disguise command - **correction, a later session**: the earlier draft of this row attributed
+    its issuance to 0x4D6F90; that function is unrelated (person state 17's own on-enter handler, never calling
+    `order_set` at all). Disguise itself turns out to be a wholly separate mechanism from this whole kind
+    17/31/32 strike-scan family - see "Spy disguise and infiltration" for the real one (`0x4DE760` and friends).
+    Kind 31 itself still exists and still shares this handler and strike scan with 17/32; what issues kind 31
+    specifically, and under what name/purpose, is open again (not re-derived this session).
+  kind 17: issued by 0x43B790, itself called from an untraced per-tribe/per-candidate dispatcher (0x4CE2C0 - now
+    partly traced, see "Spy disguise and infiltration" for its SPY branch; its preacher branch, which issues kind
+    17 here, is still untraced), AND (as kind 17's own default, see 0x4DEFF0) by a preacher-gated function reached
+    from `init_unit_class_1` (0x4D2740, a per-new-state hook, dispatch key not fully traced) - neither issuer's
+    own trigger condition was pinned down this session
   scans an expanding square of cells around the striker (same per-cell "other object" list "Terrain land
     colour"'s shadow code also walks) for a class-1 (person) candidate passing every one of:
-    a per-type table (0x5A7090 byte+0, stride 50/type, bit 0x20) - read directly from the exe this session:
-      **set ONLY for type 4 (preacher) and type 6 (firewarrior)**, clear for brave/warrior/spy/shaman/angel/
-      wildman - see the open question below, this contradicts observed play
+    a per-type table (0x5A7090 byte+0, stride 50/type, bit 0x20) - **correction, a later session: read three
+      independent ways directly from the exe (a raw file read, `objdump -s`, `od`), all agreeing**: set for
+      brave/warrior/spy/firewarrior, CLEAR for wildman/preacher/shaman/angel - the OPPOSITE of this row's own
+      earlier claim (preacher/firewarrior only), which did not survive a cross-checked re-read. So the scan's
+      real targets are ordinary followers plus firewarrior, never preacher/shaman/angel/wildman - consistent
+      with, not a contradiction of, this conversion model (any ordinary follower, never a preacher/shaman)
     not the striker's own tribe; a per-state table (0x5A6F79, stride 5/state, bit 0x20); a tribe-relations
       bitmask (table 0x9608B6, by striker tribe then candidate tribe) unless either tribe is 0xFF or they match;
-      candidate +0x16 bit 0x8 clear; candidate +0x9F == 0 (not already claimed by another striker); a mutual
-      shield check (0x4DE7B0); candidate +0xE bit 0x10 clear (not already being removed)
+      candidate +0x16 bit 0x8 clear; candidate +0x9F == 0 (not already claimed by another striker); a
+      disguise-aware tribe-match check (0x4DE7B0 - corrects this row's own earlier "mutual shield check" guess:
+      it is the same spy-disguise-aware "does this count as tribe X" test "Spy disguise and infiltration"
+      documents, applied here to exclude a candidate - genuine same-tribe or a settled disguised spy posing as
+      one - that already counts as the striker's own tribe); candidate +0xE bit 0x10 clear (not already being
+      removed)
   first candidate to pass: **struck immediately** - set candidate state to 23 (0x4D83B0), seed candidate +0x89
     with the striker's own id (the "who's affecting me" reference read back below); if the candidate's own tribe
     is 0 (the human player) also raises a camera-alert marker (global flag 0x89DB05 bit 0x80000000, position word
@@ -4051,6 +4054,24 @@ moments later), both inside one 83 ms turn.
   (`0x51DCC0`, "Fight") independently reads the SAME table's bit 0x40 for an unrelated purpose ("can this person
   type join a melee ring at all") - a different bit, a different per-type eligibility rule entirely, on the same
   50-byte-stride record.
+- **Reopened, a later session: the table-0x5A7090-bit-0x20 reading above (preacher/firewarrior only) does NOT
+  survive a more careful re-check, so the whole "two different spells, not one unreliable table" resolution just
+  above rests on a byte read that was itself wrong.** `pop3-rev/docs/functions.tsv`'s own later session re-read
+  the same table bytes three independent ways (a direct file read through the confirmed `.data` VMA/file-offset
+  mapping, `objdump -s -j .data`, and `od -tx1` - all three agreeing, and the identical method independently
+  reproducing this doc's own already-trusted `0x5A7076` building-damage-table values as a sanity check): byte 0 of
+  the 50-byte stride is actually set for brave/warrior/**spy**/firewarrior and CLEAR for wildman/preacher/
+  shaman/angel - the exact opposite of "preacher/firewarrior only" claimed above. The exhaustive single-call-site
+  search for the literal state-23-setting instruction (`0x43AD67`, inside `preacher_strike_scan`, still the only
+  place in the whole exe that writes state 23) is unaffected by this and still holds - state 23 genuinely has no
+  other entry point - but what it actually proves is different: **`preacher_strike_scan` CAN strike an ordinary
+  brave or warrior after all**, so it is a live candidate again for `diag6.txt`'s 7 GONE/NEW brave/warrior pairs,
+  alongside Hypnotism. Whether that specific capture was one spell or the other (or both) is genuinely open again
+  - a fresh live session correlating the capture's exact turns/positions against an actual Hypnotism cast (mana
+  spent, `HYPNO_COUNT_X8` timer) would settle it; not attempted this session (no live access, static exe only).
+  The Hypnotism mechanism itself (`0x50EA60`/`0x50EAB0`/`0x50EB00`, the ghost-bit unification, our own
+  `change_owner` gap) stays correct and useful regardless of which spell produced this one capture - only the
+  "therefore preacher_strike_scan is ruled out, and bit 0x20 needs no further doubt" framing is withdrawn.
 - **Closed this session**: does preacher_strike_scan's candidate selection ever favour "whoever is currently
   attacking the striker", as opposed to pure proximity? No - re-read the whole scan loop (the expanding-square
   cell walk plus every per-candidate gate) specifically for this; nothing in it reads a candidate's own order,
@@ -4082,11 +4103,14 @@ moments later), both inside one 83 ms turn.
     per-building housekeeping pass unrelated to AI task slots, is not human-exclusive - `process_tribe_2` also
     calls it, near its own end, for the AI-tribe case; only the AI task-slot machinery above is gated.) **So
     a human-controlled tribe's preacher can never receive an unprompted kind-17 approach through this path at
-    all** - it structurally only runs for computer-controlled tribes. A human player's preacher is left with kind
-    32 via `preacher_auto_scan` (self-issued auto-attack/building-visit) or kind 31 via the player's own disguise
-    command, exactly as this section already concluded, now confirmed rather than inferred from the chain's
-    "AI-only" look. See `pop3-rev/docs/functions.tsv`'s rows for `0x461662`/`0x4623E0`/`0x4625E0` for the full
-    scheduler trace.
+    all** - it structurally only runs for computer-controlled tribes. A human player's preacher is left with kind 32
+    via `preacher_auto_scan` (self-issued auto-attack/building-visit) only - **correction, a later session: kind
+    31 is NOT the player's disguise command** (that attribution to `0x4D6F90` was wrong, see this section's own
+    correction above and "Spy disguise and infiltration"), so what actually issues kind 31, and whether a human
+    player's preacher ever receives it at all, is open again. `0x4CE2C0`'s own dispatch is itself also the AI's
+    spy-tasking branch for a completely different purpose (arson, "Spy disguise and infiltration") - the same
+    per-tribe-member sweep handles both, one case per person type. See `pop3-rev/docs/functions.tsv`'s rows for
+    `0x461662`/`0x4623E0`/`0x4625E0` for the full scheduler trace.
   - still untraced: 0x5A707E (a per-type byte read on a model-variant branch) and the exact meaning of flag byte
     0x89C668 (many unrelated systems read other bits of the same byte, so it is unlikely to be preach-specific).
   - **Checked this session: the Ghidra project export (`backup/backup.xml`) adds nothing new to any open question
@@ -4258,6 +4282,148 @@ moments later), both inside one 83 ms turn.
     chance to react to since it stops running the moment state 23 ends. Still not looked at: whether listener(s)
     in the OTHER, seemingly-unconnected sermon mechanism (person state 5, set by the player-issued preach order
     `0x43C7A0`) have any equivalent re-engage behaviour.
+
+### Spy disguise and infiltration [exe]
+Traced from a static disassembly only (a cloud session, no `constant.dat`, no Wine, no live memory) - every
+exact number below is the exe's own compiled-in default, not confirmed against a real playthrough, and flagged
+`(exe default, unverified live)` where it matters. **Corrects an old mistake repeated in "Preacher conversion"
+above: disguise is NOT order kind 31, and is NOT issued by `0x4D6F90`** (that function is person state 17's own
+unrelated on-enter handler - a generic "landed/knocked-down, settle or wander" hook, never calling `order_set`
+at all). The real mechanism is a pair of unrelated things that happen to share one packed byte, `+0xB2`, on a
+spy (person type 5) - this offset means something different again on other types (a firewarrior's own reload
+countdown, "Firewarrior fire"; the Angel of Death's own kill counter, "Angel of Death mechanics") - never a
+shared convention, just the same spare byte reused per type.
+
+#### Disguise: a packed byte, not an order
+```text
++0xB2 on a type-5 (spy) person: top 2 bits = the tribe it currently counts as ("apparent tribe"); bottom 6 bits
+  = a transition countdown, armed by disguising to SPY_DISGUISE_DELAY (exe default 63 - a named exe constant,
+  consts.txt: ptr=0x5AA594)
+
+0x4DE760(spy, tribe) - the disguise-APPLICATION primitive: writes `tribe` into the top 2 bits and
+  SPY_DISGUISE_DELAY (clamped 0-63) into the bottom 6, in the same write - i.e. one call both re-tags the spy
+  and re-arms the transition countdown
+0x4DE740(person) -> byte: the "apparent tribe" getter, the top 2 bits, unconditionally (a non-spy's own real
+  tribe, since nothing else ever changes those bits for it)
+0x4DE700(spy) -> bool: "is the transition still running" (bottom 6 bits nonzero)
+0x4DE7F0(person): REVEAL/reset - re-stamps the top 2 bits from the real tribe (+0x2F) and clears the rest,
+  i.e. "stop counting as anyone but yourself". Confirmed callers: the `GIVE_UP_AND_SULK` AI command (above, its
+  own force-success flag discussion) sweeps every one of a tribe's own spies through this; the arson sequence's
+  own early-abort and discovery-roll paths (below) call it on the SPY being disguised, from its own side
+```
+**The gameplay effect - not just the colour - is the transition countdown, read by `0x4DE7B0`, called from 36
+sites across essentially every targeting/eligibility path in the game** (the watchtower sentry scan, the
+preacher's own conversion-strike scan above, the generic melee attacker-eligibility path, the firewarrior/angel
+ranged scan, the kind-28 melee handler, several AI worker-finder helpers):
+```text
+0x4DE7B0(unit, tribe) -> bool "does unit currently count as tribe":
+  unit+0x2B != 5 (not a spy) -> false, always - every other type is simply never matched by this check
+  spy, transition countdown still running (+0xB2 bottom 6 bits nonzero) -> true iff tribe == the spy's REAL
+    tribe (+0x2F)
+  spy, settled (bottom 6 bits == 0) -> true iff tribe == the spy's APPARENT/disguise tribe (+0xB2 top 2 bits)
+```
+So **for the `SPY_DISGUISE_DELAY` window right after disguising, a spy still counts as its real tribe for every
+one of these 36 call sites - the "short vulnerable transition" from real play** [game, user-confirmed: disguise
+is a spy-only command, select the spy and right-click a tribe's HUD icon; a short vulnerable transition, then
+the unit counts as that tribe - no auto-attack on it - until spotted by another spy or explicitly attacked].
+Only once the countdown reaches 0 does it actually start fooling these checks as the disguise tribe. **What
+decrements the countdown each tick was not found** - no writer of just `+0xB2`'s bottom 6 bits turned up anywhere
+in the exe this session, only `0x4DE760`'s own initial arm and `0x4DE7F0`'s own full clear; so the real
+63-to-0 timeline (ticks? turns? gated by some rhythm check?) is unconfirmed - a live watch of a disguised spy's
+own `+0xB2` byte over several turns would settle it. One promising lead was chased and ruled out: `0x4D42A0`,
+a per-tick `+0xB2` decrementer called from every person's own per-turn tail, is gated on a per-type table
+(`0x5A7090` bit 0x40) that is set only for firewarrior (type 6), clear for spy - it decrements a firewarrior's
+own, unrelated reload countdown (the same `0x4D42A4` already documented in "Firewarrior fire"'s reload rule,
+cross-confirming both readings), never a spy's disguise byte. A second, differently-framed accessor, `0x4DE720`
+(if the countdown is 0, returns the REAL tribe; else the apparent one - the opposite split from `0x4DE7B0` above),
+has only 2 confirmed callers, neither fully reconciled with `0x4DE7B0`'s own framing (below) - open.
+
+The same split feeds the spy's own rendered tribe-colour, in both the main 3D view and the strategic globe view:
+while the transition is running, the spy's OWN viewer (the tribe currently looking at it matches its real tribe)
+sees it blink between real and apparent colour every couple of turns (`simulation_turn`, the per-turn counter,
+bit 0x2 - a parity flicker, not a fixed interval); once settled, it shows the apparent tribe steadily - **the
+"blink to the other tribe's colour, then settle" the player described**. An outside observer (a different
+tribe looking at it) uses the second accessor (`0x4DE720`) instead, with no blink - just a hard cut between
+real and apparent once the transition ends, consistent with the vulnerable window being real to everyone, not
+just a cosmetic preview for the owner.
+
+Who issues the disguise command itself was NOT located. `order_execute`'s inline kind-16 handler (see "Order
+kinds and player commands" above) already calls `0x4DE760(order's own packed target, self)` - using the order's
+own target word as the chosen tribe id - a strong candidate for the real disguise command (right-click a
+tribe's HUD icon with a spy selected -> queue a kind-16 order whose target encodes that tribe's id), but which
+`ui_cmd` case would queue such an order was not traced. If confirmed, kind 16 is reused for two unrelated
+player-visible effects (disguise here; Convert/Hypnotism's own "copy my apparent tribe onto a linked unit"
+effect, same handler, a different branch) distinguished only by which argument path the issuer takes - plausible
+given how heavily this exe reuses order kinds by data shape, not confirmed.
+
+#### Arson: a separate order, kind 15, found only issued by the AI
+Order kind 15 ("door/throw point", handler `0x439D30`) is a full approach/aim/throw/ignite/withdraw sequence -
+the likely match for "a disguised spy sneaks up to an enemy building, lights a fire, and it catches fire and
+takes damage":
+```text
+substate 0: walk to the live object standing in the target building's own door cell, within 12 units on both
+  axes of a stored anchor point
+substate 1: settle, then face the door for 10 ticks (exe default, unverified live) - the aim/windup, the "draw
+  with fire" cosmetic flag pair set throughout; every tick from here on, also checks for a genuine member of
+  the tribe the spy is disguised AS standing right at the door (0x439C30) - a hit calls 0x4DE7F0 (reveal) at
+  once, aborting the whole sequence before anything is thrown
+substate 2 (the throw): on entry, attaches a prop (anim/object id 0x65 - plausibly "holding a lit firebrand",
+  a different prop from the conversion-roll's own 0x61/0x62/0x63 trio above) and computes a windup delay from
+  two per-draw-class tables (0x5A6AF8's own byte-offset-3 field, and a table reached through a pointer variable
+  that is zero in the static image, populated at runtime - NEITHER table's real numbers could be read this
+  session, only the formula/shape); once it expires, spawns a real class-7 type-0x1D (29) projectile - the
+  firebrand itself - launched from the spy's own anchor toward the door at speed 80 (world units/turn), stamped
+  with the spy's own REAL tribe (not the disguise), plays a sound, advances
+substate 3: faces away from the door for 8 ticks (exe default, unverified live - the firebrand's own flight
+  time), then back toward it, then **ignites the building** (`0x408CB0`, class-2 state 4 "Burning building" -
+  same mechanism Lightning's own strike-point handler uses, "Terrain changes"), stamped with the spy's REAL
+  tribe as the attacker, advances
+substate 4: settle for 24 ticks (exe default, unverified live) - the withdrawal/cooldown before the order
+  completes. Once, on entry, rolls a "did anyone notice" check: unless a per-tribe byte (0x89DDE7, read but not
+  reconciled live) is already set, rolls the shared LCG against a tribe-relations-keyed percent table (0x960812);
+  on a hit (and outside cheat mode), calls 0x4DE7F0 - **the "the owning tribe notices the arson and your spy
+  gets outed" discovery roll** - neither table's real percentages could be read this session
+```
+Confirmed to set the building on fire with the SAME mechanism Lightning already uses ("Ground fire, ignited
+trees, and a burning building's flame"), not a separate fire system - once ignited, the existing building-wear/
+destruction rules ("Building construction and wear") apply as normal.
+
+**Every confirmed issuer of kind 15 is the native AI, never a player command.** The helper that issues it
+(`0x43B8E0`, "give this unit an order" style, target = the door/throw point) has exactly 4 call sites in the
+whole exe, and all 4 sit inside `0x4CE2C0`'s own SPY branch (the same per-tribe-member sweep "Preacher
+conversion" documents issuing kind 17 for its PREACHER branch) - i.e. **the native AI only ever hands this order
+to its own spies**, even though the handler itself has no type restriction and would run identically for any
+class-1 unit given it. Whether a player's own spy can reach kind 15 at all through some other, unlocated path -
+matching the in-play report that the human player also sets fires with a disguised spy - was not settled.
+
+The AI's own spy branch, read in full:
+```text
+0x4CE2C0's SPY case (entry 0x4CE5F7): gated per-tribe on byte 0 of a 48-byte-stride table (0x960805, keyed by
+  tribe index) - zero skips spy tasking for this tribe entirely this tick
+  the spy's own current person state must not be 25 or 29 (fight/pre-fight) - a spy already fighting is left
+    alone
+  compares the spy's own apparent tribe (0x4DE740) against a target record's own tribe byte: if they already
+    match, does nothing further; if they differ, calls 0x4DE760(spy, target's tribe) - redisguises the spy to
+    match the target, right before tasking it
+  a per-spy sticky flag (+0x10 bit 0x40, "already tasked this round") then gates whether a single pre-picked
+    target building, if not already burning (state 4), gets kind 15 directly; failing that, walks a 10-entry
+    worklist of candidate building ids for the first one not already burning and issues kind 15 on it instead
+```
+**So the AI doesn't send one spy to burn one building - it maintains a worklist of up to 10 target buildings
+and systematically works through it with its idle spies, redisguising each as needed and skipping anything
+already on fire**, until the worklist is exhausted or no eligible spy remains.
+
+#### Open questions
+- What decrements the disguise countdown each tick (the single biggest gap - without it, the real transition
+  length in seconds is unknown even though the exe default of 63 is confirmed).
+- The player-facing command path for both disguise (kind 16, a strong but unconfirmed candidate) and arson
+  (kind 15, no candidate found at all - every confirmed issuer is the AI).
+- Whether a player-controlled spy can reach kind 15 (arson) through any path; if not, the in-play report of the
+  human player personally setting fires with a disguised spy would need a different, still-unlocated mechanism.
+- The real numbers behind the windup delay (two tables, one of them a runtime-populated pointer) and the
+  discovery-roll percentages (`0x960812`, `0x89DDE7`) - formulas and shapes only, no live values.
+- `0x4DE720` vs `0x4DE7B0`'s disagreeing framing of which countdown state means "real" vs "apparent" - only 2
+  confirmed callers of the former, neither conclusively reconciled.
 
 ### Attacking a building [exe]
 An attack order on an enemy building (`+0x89` the building; sub-states in `+0xA8`, 0x51A2A0):
@@ -5322,6 +5488,14 @@ confirms.
 - TODO "Warriors: about 3-4x a brave's combat strength": with `constant.dat` a warrior hits 6 times as hard
   (360 against 60) with 1.8 times the life (1800 against 1000); the exe defaults give 3 times (180).
 - TODO "Firewarriors throw fire": firewarriors never take a melee slot; their attack is a separate ranged path.
+- TODO "spies disguise" (none of this exists in `game-core` yet, nothing to compare against): the confirmed shape
+  is one packed byte on a spy (apparent tribe + a transition countdown), one function to apply it, and one
+  gameplay-side check (reused everywhere a tribe-match decides hostility/targeting) that reads the real tribe
+  while the countdown runs and the apparent tribe once it settles - NOT a separate "disguised" unit state or a
+  cosmetic-only flag. Arson (set a building on fire) is a confirmed separate order, but every issuer found is the
+  native AI - there is no confirmed player command to copy yet, so an implementation would need to either find
+  one by further analysis or treat it as a deliberate guess pending that. See "Spy disguise and infiltration" for
+  the full mechanism and what is still unconfirmed (the countdown's own real duration, the player command path).
 - `slots.rs` (`dispatch`/`free_spots_near`), the group-move spot spreading: the original has no such thing for
   the order itself (every unit in a group gets the identical target). Any spacing is a separate **formation**
   system (class-10 controllers, "Formations") wired to the move order (kind 3) but never the attack order
@@ -5616,9 +5790,16 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x43A4D0 | `order_building_approach`: shared approach-and-RNG-idle machine for order kinds 17/31/32, calls preacher_strike_scan on a roll success - "Preacher conversion" |
 | 0x43ABF0 | `preacher_strike_scan`: the real trigger into person state 23 (the conversion roll), NOT preacher-exclusive despite the name - "Preacher conversion" |
 | 0x43AEC0 | sibling of 0x43ABF0: reverts a nearby stuck state-23 roll after a failed kind-32 visit times out |
-| 0x4D6F90 | issues order kind 31 ("disguise" [game, user-confirmed: spy-only, no striking]); gated by a per-type table to brave/warrior/spy, never preacher; exact player-command trigger not pinned down - "Preacher conversion" |
-| 0x4DEFF0 | issues order kind 17 (default) or 31, gated to `self.type == 4` (preacher) - a different thing from the disguise command above, reached from `init_unit_class_1` (0x4D2740) - "Preacher conversion" |
+| 0x4D6F90 | **corrected, a later session: NOT the disguise command** - person state 17's own on-enter handler (a generic landed/knocked-down settle-or-wander hook); never calls `order_set` - "Spy disguise and infiltration" |
+| 0x4DEFF0 | issues order kind 17 (default) or 31, gated to `self.type == 4` (preacher), reached from `init_unit_class_1` (0x4D2740) - "Preacher conversion" |
 | 0x43B790 | "give this unit an order" helper for kind 17, called from an untraced dispatcher (0x4CE2C0) - "Preacher conversion" |
+| 0x4DE760 | the disguise-application primitive: writes a chosen tribe + `SPY_DISGUISE_DELAY` into a spy's own `+0xB2` - "Spy disguise and infiltration" |
+| 0x4DE740 / 0x4DE700 / 0x4DE720 / 0x4DE7B0 / 0x4DE7F0 | the disguise-byte's own getters/checks/reveal (apparent tribe; still-transitioning; a disagreeing second accessor; the real gameplay tribe-match, 36 callers; reveal) - "Spy disguise and infiltration" |
+| 0x439D30 | order kind 15's handler: the firebrand/building-ignite arson sequence, issued only by the AI - "Spy disguise and infiltration" |
+| 0x439C30 | the arson sequence's own early-abort check (a genuine member of the disguise tribe at the door) - "Spy disguise and infiltration" |
+| 0x43B8E0 | "give this unit an order" helper for kind 15 (arson); all 4 call sites are the AI's own spy branch of 0x4CE2C0 - "Spy disguise and infiltration" |
+| 0x4CE2C0 | per-tribe-member AI sweep (shared with kind 17's preacher branch above); its SPY branch redisguises and tasks spies to burn a worklist of buildings - "Spy disguise and infiltration" |
+| 0x4D42A0 | a firewarrior-only `+0xB2` reload countdown decrementer (type-gated, 0x5A7090 bit 0x40) - ruled out as the spy's own disguise-countdown decrementer, which remains unfound - "Spy disguise and infiltration" |
 | 0x43C7A0 | order kind 33 (preach): approaches the target, ends by setting its state to 5 - "Preacher conversion" (a separate mechanism from the above, not reconciled) |
 | 0x51A2A0 | a person's attack order: reach, then join a fight or start a pre-fight |
 | 0x51C3C0 | attack target eligibility by attacker type; a preacher/non-preacher gate on order kind 0x1C specifically - a dead end for "Preacher conversion", see that section |
@@ -5847,6 +6028,9 @@ exe is mapped at its image base 0x400000, so these addresses can be read as they
   "Preacher conversion"), low health +0x14 bit 0x1000; the timers count down every 8 turns. On fire: +0xC bit 0x8 leads to
   state 31. Life +0x6E, maximum life +0x6C. Drawing: translucent +0x36 bit 0x40, hidden +0x35 bit 0x10,
   selected +0x7A bit 0x80.
+- A spy's own disguise byte, +0xB2 (type 5 only - the same offset means a firewarrior's reload countdown or the
+  Angel of Death's own kill counter on other types, never a shared convention): top 2 bits the apparent/disguise
+  tribe, bottom 6 bits a transition countdown armed to `SPY_DISGUISE_DELAY` - "Spy disguise and infiltration".
 - Movement: profile index +0x30 (into 0x5A7B90), walk speed +0x5F, heading +0x5D, velocity +0x49 (x),
   +0x4B (vertical), +0x4D (z).
 - Per-cell index `unit_land_array` (the original "mapwho"), filled by `insert_unit_into_land_tile`.

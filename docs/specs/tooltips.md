@@ -127,8 +127,12 @@ tower, a training hut and an unspent pyramid). Who counts is decided there, next
 read them already. To do in the client: one `SlotRow { kind: People | Wood, slots, filled }` model, `filled` holding each filled slot's icon (and, for
 people, the unit id its click selects), built from the simulation each frame by pure, tested functions; one Bevy
 UI widget draws every row. Done for buildings, trees and totems: `tooltip::building_model`, `tree_model`, `totem_model` (lines and rows of `Slot { icon, unit }`),
-`line_lengths`, `sticky` (what stays shown), `icon_pixels` (the generated icons); the box is rebuilt only when its
-model changes. Bars and the toggle the same way: a model from the simulation, one widget.
+`line_lengths`, `sticky` (what stays shown), `icon_pixels` (the generated icons); the box is rebuilt (hidden that
+one frame) only when its model's SHAPE changes (a different number of lines, rows, slots or its toggle,
+`TooltipModel::same_shape`) - a same-shape content change (a different occupant, wood filling, a selection)
+redraws the existing lines/icons/arrows in place instead (`update_content`), so a busy building's tooltip does
+not blink/reposition on every tick its occupancy changes. Bars and the toggle the same way: a model from the
+simulation, one widget.
 
 A pyramid's tooltip names its reward (the spell or building it teaches) [player]; once granted, like the icon
 on its top, not any more [ours].
