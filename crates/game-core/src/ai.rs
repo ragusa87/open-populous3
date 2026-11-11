@@ -698,7 +698,8 @@ impl GameMap {
 
     fn ai_attack_target(&self, owner: TribeId, target_team: TribeId, goal: AttackGoal) -> Option<Target> {
         match goal {
-            AttackGoal::Shaman => self.units.iter().find(|u| u.owner == target_team && u.kind == UnitKind::Shaman && u.is_alive()).map(|u| Target::Unit(u.id)),
+            // Never a Ghost Army copy (docs/plans/ghost.md): a scripted "attack the enemy shaman" goal means the real one.
+            AttackGoal::Shaman => self.units.iter().find(|u| u.owner == target_team && u.kind == UnitKind::Shaman && !u.statuses.ghost && u.is_alive()).map(|u| Target::Unit(u.id)),
             AttackGoal::Building(kind) => {
                 let base = self.ai_base(owner).unwrap_or((0, 0));
                 self.buildings

@@ -37,8 +37,10 @@ impl Hypnotism {
     pub fn turn(&mut self, at: (u16, u16), owner: Owner, world: &GameMap) -> Vec<WorldEvent> {
         let Some(tribe) = owner.tribe() else { return Vec::new() };
         let size = world.terrain.size() as i32;
+        // Not a wildman, not the real shaman (a *ghost* shaman stays a normal candidate, docs/plans/ghost.md:
+        // consumes one of the `HYPNO_NUM_PEOPLE` slots like anyone else, only the outcome below is redirected).
         let pred = |u: &Unit| {
-            u.owner != owner && u.kind != UnitKind::Wildman && u.kind != UnitKind::Shaman && u.is_alive() && !u.statuses.shield.is_on() && in_block(at, (u.x, u.z), size)
+            u.owner != owner && u.kind != UnitKind::Wildman && (u.kind != UnitKind::Shaman || u.statuses.ghost) && u.is_alive() && !u.statuses.shield.is_on() && in_block(at, (u.x, u.z), size)
         };
         let fresh = |u: &Unit| !u.statuses.hypnotized.is_on();
         nearest_n_fresh_first(&world.units, at, HYPNO_NUM_PEOPLE as usize, pred, fresh).into_iter().map(|unit| WorldEvent::Hypnotize { unit, tribe }).collect()
@@ -52,6 +54,10 @@ impl GameMap {
     /// unit already hypnotised that gets recast on (by its current captor or anyone else) changes hands and its
     /// timer restarts, but what it reverts to never changes mid-chain.
     pub(crate) fn hypnotize(&mut self, unit: crate::unit::UnitId, tribe: TribeId) {
+        if self.unit(unit).is_some_and(|u| u.is_alive() && u.statuses.ghost) {
+            self.destroy_ghost(unit);
+            return;
+        }
         let Some(u) = self.unit_mut(unit).filter(|u| u.is_alive()) else { return };
         let Some(original) = u.statuses.hypnotized_from.or_else(|| u.owner.tribe()) else { return };
         u.change_owner_keeping_body(tribe);
@@ -226,6 +232,28 @@ mod tests {
         map.revert_expired_hypnosis();
         let u = map.unit(enemy).unwrap();
         assert_eq!((u.owner, u.health.current(), u.carrying), (Owner::Tribe(TribeId::Red), 1, 7), "reverted, body untouched again");
+    }
+
+    #[test]
+    fn a_ghost_consumes_a_slot_then_is_destroyed_instead_of_captured() {
+        let mut map = bare();
+        let ghost = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
+        map.unit_mut(ghost).unwrap().statuses.ghost = true;
+        map.add_effect(effect(TribeId::Blue, AT));
+        map.tick();
+        assert!(map.unit(ghost).is_none(), "destroyed, not captured");
+    }
+
+    #[test]
+    fn a_ghost_shaman_is_a_normal_candidate_unlike_the_real_shaman() {
+        let mut map = bare();
+        let real_shaman = map.spawn(TribeId::Red, UnitKind::Shaman, AT).id;
+        let ghost_shaman = map.spawn(TribeId::Red, UnitKind::Shaman, (AT.0.wrapping_add(10), AT.1)).id;
+        map.unit_mut(ghost_shaman).unwrap().statuses.ghost = true;
+        map.add_effect(effect(TribeId::Blue, AT));
+        map.tick();
+        assert_eq!(map.unit(real_shaman).unwrap().owner, TribeId::Red, "the real shaman is never a candidate");
+        assert!(map.unit(ghost_shaman).is_none(), "the ghost shaman was selected, then destroyed outright");
     }
 
     #[test]

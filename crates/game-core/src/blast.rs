@@ -150,7 +150,8 @@ impl SimpleBlast {
         let mut events = Vec::new();
         let mut allies_pushed = 0u8;
         for u in units.iter().filter(|u| u.is_alive() && u.in_the_open()) {
-            let is_casters_shaman = u.owner == owner && u.kind == UnitKind::Shaman;
+            // A *ghost* shaman is never exempt (docs/plans/ghost.md: "has no real body").
+            let is_casters_shaman = u.owner == owner && u.kind == UnitKind::Shaman && !u.statuses.ghost;
             let is_ally = u.owner == owner && !is_casters_shaman;
             // "Not pushed: own shaman, angel of death" (pop3-rev-analysis.md "Components"): no angel is ever
             // pushed by a blast, not just the caster's own.
@@ -313,6 +314,25 @@ mod tests {
         assert_eq!(pushed(&third), [1, 2, 4, 6], "last turn: the ally (4) is finally pushed too, 3 stays beyond 2.5 cells throughout");
         assert_eq!(hit(&third), [1, 2, 3, 4, 5, 6]);
         assert!(turn().is_empty(), "over");
+    }
+
+    #[test]
+    fn a_ghost_shaman_is_pushed_like_anyone_else_not_exempt() {
+        // Not exempt any more, but still "the caster's own tribe": an ordinary ally, only pushed on the last turn
+        // (`BLAST_FRIEND_AFFECT`) same as any other own-tribe follower caught in the blast.
+        let mut ghost = Unit::new(Id::from_raw(1), TribeId::Blue, UnitKind::Shaman, (5000, 5000));
+        ghost.statuses.ghost = true;
+        let units = [ghost];
+        let vehicles = Registry::default();
+        let buildings: Vec<Building> = Vec::new();
+        let terrain = flat();
+        let mut blast = SimpleBlast::default();
+        let mut turn = || blast.turn((5000, 5000), Owner::Tribe(TribeId::Blue), &units, &vehicles, &buildings, &terrain);
+        turn();
+        turn();
+        let last = turn();
+        let pushed = last.iter().any(|e| matches!(e, WorldEvent::Push { unit, .. } if *unit == Id::from_raw(1)));
+        assert!(pushed, "has no real body: the caster's-own-shaman push exemption doesn't apply (docs/plans/ghost.md)");
     }
 
     #[test]

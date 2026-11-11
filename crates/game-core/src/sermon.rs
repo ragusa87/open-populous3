@@ -171,10 +171,13 @@ impl GameMap {
     }
 
     /// The unit `unit` joins `tribe` (`WorldEvent::ChangeOwner`): as the original's new person in its place, it keeps
-    /// its kind and place and starts afresh (`Unit::change_owner`).
+    /// its kind and place and starts afresh (`Unit::change_owner`). A ghost can't be converted (docs/plans/ghost.md):
+    /// destroyed outright instead.
     pub(crate) fn change_owner(&mut self, unit: UnitId, tribe: TribeId) {
         let balance = self.balance;
-        if let Some(u) = self.unit_mut(unit).filter(|u| u.is_alive()) {
+        if self.unit(unit).is_some_and(|u| u.is_alive() && u.statuses.ghost) {
+            self.destroy_ghost(unit);
+        } else if let Some(u) = self.unit_mut(unit).filter(|u| u.is_alive()) {
             u.change_owner(tribe);
             // `Unit::change_owner`'s own health reset is `KindStats::life`, our compiled-in default -
             // corrected here against the live `balance`, the same as `GameMap::spawn`.
@@ -218,6 +221,15 @@ mod tests {
         map.change_owner(wildman, TribeId::Blue);
         let u = map.unit(wildman).unwrap();
         assert_eq!((u.kind, u.health.max()), (UnitKind::Brave, 42), "not UnitKind::Brave.max_health()'s compiled-in 1000");
+    }
+
+    #[test]
+    fn a_ghost_is_destroyed_outright_instead_of_converted() {
+        let mut map = GameMap::sandbox_units().seeded(11);
+        let ghost = map.spawn(TribeId::Red, UnitKind::Brave, (10 * 512, 10 * 512)).id;
+        map.unit_mut(ghost).unwrap().statuses.ghost = true;
+        map.change_owner(ghost, TribeId::Blue);
+        assert!(map.unit(ghost).is_none(), "gone outright, never changed hands");
     }
 
     #[test]

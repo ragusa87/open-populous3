@@ -90,6 +90,14 @@ mod tests {
     }
 
     #[test]
+    fn does_not_spare_a_ghost_shaman_of_the_casters_own_tribe() {
+        let mut ghost = person(1, Owner::Tribe(TribeId::Blue), UnitKind::Shaman, AT);
+        ghost.statuses.ghost = true;
+        let units = [ghost];
+        assert_eq!(struck(AT, Owner::Tribe(TribeId::Blue), &units), [Id::from_raw(1)], "has no real body: the usual spare-the-caster's-shaman reason doesn't apply (docs/plans/ghost.md)");
+    }
+
+    #[test]
     fn spares_the_people_inside_a_building() {
         let mut inside = person(1, Owner::Tribe(TribeId::Red), UnitKind::Brave, AT);
         inside.inside = Some(crate::unit::Inside { building: Id::from_raw(50), door: AT });

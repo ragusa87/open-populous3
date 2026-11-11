@@ -54,7 +54,8 @@ fn losers(world: &GameMap, winner: TribeId) -> Vec<WorldEvent> {
         .all()
         .filter(|&tribe| !world.tribes.same_team(tribe, winner))
         .flat_map(|tribe| {
-            let shaman = world.units.iter().find(|u| u.owner == tribe && u.kind == UnitKind::Shaman && u.is_alive());
+            // Never a Ghost Army copy (docs/plans/ghost.md): a ghost shaman isn't the tribe's real one to strike down.
+            let shaman = world.units.iter().find(|u| u.owner == tribe && u.kind == UnitKind::Shaman && !u.statuses.ghost && u.is_alive());
             std::iter::once(WorldEvent::RemoveSite { tribe })
                 .chain(shaman.map(|u| WorldEvent::Damage { unit: u.id, amount: u16::MAX, kind: DamageKind::Lightning, from: None }))
         })

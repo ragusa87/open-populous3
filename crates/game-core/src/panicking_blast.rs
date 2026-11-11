@@ -49,7 +49,8 @@ impl PanickingBlast {
         let reach = radius.min(PUSH_RANGE);
         let mut events = Vec::new();
         for u in units.iter().filter(|u| u.is_alive() && u.in_the_open()) {
-            let pushable = !(u.owner == owner && u.kind == UnitKind::Shaman) && !self.pushed.contains(&u.id);
+            // A *ghost* shaman is never exempt (docs/plans/ghost.md: "has no real body").
+            let pushable = !(u.owner == owner && u.kind == UnitKind::Shaman && !u.statuses.ghost) && !self.pushed.contains(&u.id);
             if let Some(vel) = push(at, (u.x, u.z), reach).filter(|_| pushable) {
                 self.pushed.push(u.id);
                 events.push(WorldEvent::Push { unit: u.id, vel, kind: PushKind::Spell });

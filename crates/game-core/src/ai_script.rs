@@ -381,7 +381,8 @@ impl Env for ScriptEnv<'_> {
                     let team = team_owner(*team);
                     let found = self.map.marker_pos(field_i32(*marker)).is_some_and(|at| {
                         let r = (field_i32(*radius).max(0) as i64) * pop3_format::WORLD_UNITS_PER_CELL as i64;
-                        self.map.units.iter().any(|u| u.is_alive() && u.owner == team && u.kind == UnitKind::Shaman && crate::map::torus_dist2(at, (u.x, u.z)) <= r * r)
+                        // Never a Ghost Army copy (docs/plans/ghost.md): never cached as "the tribe's shaman" either.
+                        self.map.units.iter().any(|u| u.is_alive() && u.owner == team && u.kind == UnitKind::Shaman && !u.statuses.ghost && crate::map::torus_dist2(at, (u.x, u.z)) <= r * r)
                     });
                     Some(found as i32)
                 } else {

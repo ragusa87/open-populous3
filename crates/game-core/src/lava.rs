@@ -271,7 +271,8 @@ impl Lava {
         world
             .units
             .iter()
-            .filter(|u| u.is_alive() && u.in_the_open() && !(u.owner == owner && u.kind == UnitKind::Shaman))
+            // A *ghost* shaman is never exempt either (docs/plans/ghost.md: "has no real body").
+            .filter(|u| u.is_alive() && u.in_the_open() && !(u.owner == owner && u.kind == UnitKind::Shaman && !u.statuses.ghost))
             .filter(|u| halo.contains(&u.cell()))
             .map(|u| WorldEvent::Panic { unit: u.id })
             .collect()
@@ -374,6 +375,19 @@ mod tests {
         map.tick();
         assert!(matches!(map.unit(shielded).unwrap().action, Action::Panicking { .. }), "a shield doesn't block it, like lava's own ignite");
         assert!(!matches!(map.unit(shaman).unwrap().action, Action::Panicking { .. }), "the caster's own shaman is spared");
+    }
+
+    #[test]
+    fn a_ghost_shaman_is_not_spared_from_either_the_fire_or_the_panic() {
+        let mut map = bare();
+        map.add_effect(effect(TribeId::Blue, AT, vec![(10, 20)]));
+        let ghost_on_cell = map.spawn(TribeId::Blue, UnitKind::Shaman, AT).id;
+        map.unit_mut(ghost_on_cell).unwrap().statuses.ghost = true;
+        let ghost_in_halo = map.spawn(TribeId::Blue, UnitKind::Shaman, cell_pos((11, 20))).id;
+        map.unit_mut(ghost_in_halo).unwrap().statuses.ghost = true;
+        map.tick();
+        assert!(matches!(map.unit(ghost_on_cell).unwrap().action, Action::OnFire { .. }), "has no real body (docs/plans/ghost.md): caught fire, not spared");
+        assert!(matches!(map.unit(ghost_in_halo).unwrap().action, Action::Panicking { .. }), "not spared from the panic halo either");
     }
 
     #[test]

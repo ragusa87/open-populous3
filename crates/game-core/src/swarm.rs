@@ -107,7 +107,9 @@ impl Swarm {
     fn sting_at(&self, owner: Owner, world: &GameMap) -> Vec<WorldEvent> {
         let cells = crate::swamp::cells((self.x, self.z), world.terrain.size() as i32);
         let mut events = Vec::new();
-        for u in world.units.iter().filter(|u| u.is_alive() && u.in_the_open() && u.owner != owner && !matches!(u.kind, UnitKind::Shaman | UnitKind::AngelOfDeath) && cells.contains(&u.cell())) {
+        // Shamans and angels immune, a *ghost* shaman excepted (docs/plans/ghost.md: "has no real body", same
+        // exemption `effect::hurts`'s own Swarm clause drops for a ghost).
+        for u in world.units.iter().filter(|u| u.is_alive() && u.in_the_open() && u.owner != owner && u.kind != UnitKind::AngelOfDeath && (u.kind != UnitKind::Shaman || u.statuses.ghost) && cells.contains(&u.cell())) {
             events.push(WorldEvent::Damage { unit: u.id, amount: PERSON_DAMAGE, kind: DamageKind::Swarm, from: Some(owner) });
             if !u.statuses.shield.is_on() {
                 events.push(WorldEvent::Panic { unit: u.id });
@@ -204,6 +206,16 @@ mod tests {
         assert_eq!(damaged, [(enemy, DamageKind::Swarm), (shielded, DamageKind::Swarm)], "only the enemy braves, not its own tribe, a shaman, an angel, or one out of reach");
         assert_eq!(panicked, [enemy], "the shielded one panics too, only `GameMap::damage` (not this) gates its actual damage");
         assert!(!damaged.iter().any(|&(u, _)| u == own || u == shaman || u == angel || u == far));
+    }
+
+    #[test]
+    fn a_ghost_shaman_is_stung_like_anyone_else() {
+        let mut map = bare();
+        let ghost_shaman = map.spawn(TribeId::Red, UnitKind::Shaman, HOME).id;
+        map.unit_mut(ghost_shaman).unwrap().statuses.ghost = true;
+        let events = bare_swarm().sting_at(Owner::Tribe(TribeId::Blue), &map);
+        let damaged: Vec<_> = events.iter().filter_map(|e| if let WorldEvent::Damage { unit, .. } = e { Some(*unit) } else { None }).collect();
+        assert_eq!(damaged, [ghost_shaman], "has no real body: the shaman exemption doesn't apply (docs/plans/ghost.md)");
     }
 
     #[test]

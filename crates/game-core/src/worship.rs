@@ -48,8 +48,9 @@ impl GameMap {
     pub fn totem_orders(&self, player: TribeId, units: &[UnitId], totem: usize) -> Vec<Command> {
         let Some(t) = self.totems.get(totem).filter(|t| !t.is_exhausted()) else { return Vec::new() };
         let at = WorshipAt::Totem { id: t.id };
-        let may = |kind: UnitKind| if t.shaman_only { kind == UnitKind::Shaman } else { kind != UnitKind::Wildman };
-        self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id) && may(u.kind)).map(|u| Command::OrderUnit { player, unit: u.id, order: Order::Worship { at } }).collect()
+        // A ghost shaman can't worship a shaman-only totem either (docs/plans/ghost.md): "has no real body".
+        let may = |u: &crate::unit::Unit| if t.shaman_only { u.kind == UnitKind::Shaman && !u.statuses.ghost } else { u.kind != UnitKind::Wildman };
+        self.units.iter().filter(|u| u.owner == player && u.is_alive() && units.contains(&u.id) && may(u)).map(|u| Command::OrderUnit { player, unit: u.id, order: Order::Worship { at } }).collect()
     }
 
     /// Unit `i` takes `Order::Worship`: at a vault the living shaman walks to its door, at a totem a
@@ -59,7 +60,7 @@ impl GameMap {
             WorshipAt::Totem { id } => self.go_pray_at_totem(i, id),
             WorshipAt::Vault { corner } => {
                 let Some(b) = self.building_at_corner(corner).map(|k| &self.buildings[k]) else { return };
-                if self.units[i].kind != UnitKind::Shaman || b.vault.is_none_or(|v| v.is_spent()) {
+                if self.units[i].kind != UnitKind::Shaman || self.units[i].statuses.ghost || b.vault.is_none_or(|v| v.is_spent()) {
                     return;
                 }
                 let door = b.door();
@@ -71,7 +72,7 @@ impl GameMap {
     fn go_pray_at_totem(&mut self, i: usize, totem: TotemId) {
         let Some(t) = self.totems.iter().find(|t| t.id == totem) else { return };
         let u = &self.units[i];
-        let allowed = if t.shaman_only { u.kind == UnitKind::Shaman } else { u.kind != UnitKind::Wildman };
+        let allowed = if t.shaman_only { u.kind == UnitKind::Shaman && !u.statuses.ghost } else { u.kind != UnitKind::Wildman };
         if !allowed || !u.is_alive() || t.is_exhausted() {
             return;
         }
@@ -149,9 +150,10 @@ impl GameMap {
         self.building(inside.building).is_some_and(|b| b.vault.is_some())
     }
 
-    /// `player`'s shaman is `locked`: inside a vault, tumbling or lifted.
+    /// `player`'s shaman is `locked`: inside a vault, tumbling or lifted. Never a Ghost Army copy
+    /// (docs/plans/ghost.md).
     pub fn shaman_locked(&self, player: TribeId) -> bool {
-        self.units.iter().position(|u| u.owner == player && u.kind == UnitKind::Shaman).is_some_and(|i| self.locked(i))
+        self.units.iter().position(|u| u.owner == player && u.kind == UnitKind::Shaman && !u.statuses.ghost).is_some_and(|i| self.locked(i))
     }
 
     /// Each tick, each vault: on `gauge::RHYTHM`'s ticks its gauge rises while its shaman prays at the
