@@ -2412,6 +2412,15 @@ pub fn showcase_states(kind: BuildingKind) -> Vec<Building> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn shaman_of_never_returns_a_ghost_army_copy() {
+        let mut map = GameMap::sandbox_units();
+        let real = map.shaman_of(TribeId::Blue).unwrap().id;
+        let ghost = map.spawn(TribeId::Blue, UnitKind::Shaman, (map.units[0].x, map.units[0].z)).id;
+        map.unit_mut(ghost).unwrap().statuses.ghost = true;
+        assert_eq!(map.shaman_of(TribeId::Blue).map(|u| u.id), Some(real), "the ghost shaman is never mistaken for the real one");
+    }
+
     /// Mana actually banked into a slot so far: its full charges plus the partial one in progress — unlike
     /// `charges` alone, strictly increases as soon as any mana reaches it, even short of a whole new charge.
     fn spell_progress(map: &GameMap, player: TribeId, kind: SpellKind) -> u32 {
