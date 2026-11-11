@@ -61,16 +61,47 @@ combat mechanic); melee itself is untraced ("melee untested"). A ghost's ranged 
 animation plays, no damage follows. Own ghosts render translucent, an enemy's ghosts look like ordinary units to
 that enemy (done, see above).
 
-## Open questions — needs the user's own game knowledge or a trace session before locking in
+## Update: resolved by the same-session gdb trace (pop3-rev-analysis.md "Ghost Army mechanics")
 
-Carried over from the current conversation, still unconfirmed:
+The open questions below were written before this conversation's own live gdb trace (function-injection, not just
+static reading) landed in the same commit. That trace **resolves most of them outright and overturns one of this
+plan's own implementation choices** — read this section first, it supersedes the guesses further down:
+
+- **Cap behaviour is NOT "emit nothing" (step 4 below is wrong as written)**: the 60-per-tribe cap is enforced live
+  by a per-tribe recount, not at spawn/refuse time. If the new batch would push the tribe over the cap, the cast
+  **still spawns the full batch**, but first force-kills one existing ghost from the *same count-tier bucket*
+  (brave/shaman/specialist — i.e. whichever of 6/1/3 the new batch belongs to) through the ordinary
+  "a ghost just died" teardown (flash+sound, no spirit-rise) — not a silent despawn, and not a refusal. Implement
+  the cull-then-spawn version, not the all-or-nothing version step 4 describes.
+- **An existing ghost is a valid candidate to be copied again** (resolves question 6): "Ghost Army can 'copy' an
+  already-ghosted unit, nothing excludes it." Do **not** exclude `statuses.ghost` from the priority scan.
+- **Spawn placement is confirmed, not guessed** (resolves question 5): each new ghost is independently jittered up
+  to ±256 world units (~±2 cells) on x and z from the cast point — a loose scatter, not a cluster or formation.
+- **Population/headcount/mana income, confirmed excluded** (resolves questions 2 and 7): a ghost never reaches the
+  headcount increment, the 200-population cap, the per-type count, or mana income — "almost certainly" for mana
+  income specifically (implied by the same exclusion, not independently traced at the income computation itself).
+  `headcount.rs`'s `state_of`/`housing`/`mana_income` all need a `!u.statuses.ghost` exclusion added (not yet
+  present anywhere in that file).
+- **New fact, not in this plan's original steps at all**: a ghost's death is not just "silently gone" —
+  `destroy_ghost` (step 7) skips the normal spirit-rise but should still play *something*: a sound cue and a short
+  (0.67 s) generic flash/puff (the same reusable effect lightning's own bolt-flash uses in the original). No sound
+  system exists anywhere in this codebase yet (combat.md already scopes "the moves' sounds" out for the same
+  reason), and there's no existing "flash" effect in `game-core`/`game-client` to point at either (lightning's own
+  client-side draw is just the bolt itself, not a separate flash primitive) — **deferred**, the same way Blast's
+  own grey smoke puff and the fight poses are deferred elsewhere in this codebase: `destroy_ghost` just removes the
+  unit for this pass, no visual follow-up, flagged here for a later cosmetic pass rather than guessed at now.
+- **The cast is a 5-tick one-shot controller, not hypnotism's 1-tick model** (changes step 4's own shape): tick 1
+  spawns a cosmetic mist burst (81 smoke puffs in the original), ticks 2-4 are no-ops, tick 5 does the actual scan
+  + spawn + cap-cull. The right template is `angel_of_death::Cast` (a `turn: u32` counter, firing its payload only
+  on the last tick), not `hypnotism::Hypnotism`'s single-turn effect. The 81-puff mist itself is **deferred**, same
+  reasoning as the death flash above (a cosmetic multi-puff burst, not simulation-relevant, matching Blast's own
+  "not yet modelled" grey puff) — a single tick with no cosmetic events for ticks 1-4 is this pass's scope.
+
+Still genuinely open after the trace (unresolved, kept below in their original numbering where still relevant):
 1. **[good trace target]** Whether enemy units *prioritize* attacking a ghost over a real unit — not the same
    question as "what a ghost itself may attack" (already traced): this is about whether the auto-attack
-   target-*scoring* function gives a ghost target extra weight. Find that function and check for a ghost-specific
-   term, the same way the restricted-target rule itself was found.
-2. **[good trace target]** Whether ghosts count toward a tribe's population headcount/quota — plausible they
-   don't, given the separate `GHOST_ARMY_MAX` cap, but not stated anywhere; same "does this tally's predicate test
-   the ghost bit" shape as questions 6-8 below.
+   target-*scoring* function gives a ghost target extra weight. Still open per the trace's own "Still open, not
+   traced this session" note.
 3. **[marginal — only worth tracing if curious]** What "revealed once attacked" means exactly — the enemy only
    learning it was a ghost once it's destroyed (since it looks identical until then), or some distinct reveal
    effect. Fine to guess "no special cue, just normal destruction" for a first pass and revisit only if a trace
@@ -96,27 +127,18 @@ Resolved by the user (confirmed, not traced, but a clear enough design rule to b
   normal candidate for `nearest_n_fresh_first`, and only the *outcome* (destroy vs. capture) is redirected, by
   `GameMap::hypnotize`'s own ghost check (destruction section below).
 
-Newly surfaced while mapping this to the code, still open:
-4. Release timing **[good trace target]**: every other aimed, non-terrain spell (Blast, Lightning, Swamp,
-   Hypnotism, Convert, Magical Shield, Bloodlust, Invisibility...) releases `CAST_RELEASE` (6 turns) into the
-   shaman's cast jump, each traced the same way. Nothing says Ghost Army is different — assume the same unless a
-   trace session checks it the same way.
-5. Exact spawn placement **[good trace target]** for the 1/3/6 ghosts: on the cast point itself, scattered around
-   it like a queue-spot search (`slots::free_spots_near`), or clustered on whichever of the caster's own units
-   supplied the copied kind? Likely visible in the same function already traced for the priority/count rule
-   (pop3-rev-analysis.md "Per spell" 9) — worth a second look at that function's full body rather than a fresh
-   hunt.
-6. Whether a ghost can itself seed another Ghost Army cast **[good trace target]** (i.e. does the priority scan's
-   own candidate predicate test `statuses.ghost`/the exe's ghost bit `+0x10 bit 0x800`, excluding existing ghosts,
-   or does it look at anyone present regardless?) — guess here: real units only, since copying a copy doesn't
-   match "copies the caster's own units near the target" as traced, but not explicit. Same shape as question 2
-   above and the mana-income item below: "does this predicate test the ghost bit."
-
-One more of the same shape, currently only flagged inline in the integration-risk section below — worth tracing
-together with question 2 and 6 above:
-7. **[good trace target]** `headcount.rs`'s mana income (`income.shaman`/`mana_rate`): does a ghost shaman
-   generate mana, or does the original's own income-tally function already exclude the ghost bit the way it
-   excludes shamans/angels from other counts?
+Newly surfaced while mapping this to the code:
+4. Release timing **[good trace target, still open]**: every other aimed, non-terrain spell (Blast, Lightning,
+   Swamp, Hypnotism, Convert, Magical Shield, Bloodlust, Invisibility...) releases `CAST_RELEASE` (6 turns) into
+   the shaman's cast jump, each traced the same way. Nothing says Ghost Army is different — assume the same (this
+   codebase's `CAST_RELEASE` is one shared constant applied uniformly to every spell's cast-to-release flow
+   already, not a per-spell value, so there is nothing to special-case without new evidence) — the trace's own
+   "still open" list confirms this specific number was not resolved.
+5. ~~Exact spawn placement~~ **resolved above**: ±256 world units independently per axis, no clustering.
+6. ~~Whether a ghost can seed another cast~~ **resolved above**: yes, an existing ghost is as eligible a candidate
+   as a live unit.
+7. ~~`headcount.rs`'s mana income~~ **resolved above** (strongly implied, not independently traced at the income
+   computation itself): a ghost shaman contributes none.
 
 **Confirmed by the user, no longer open**: the "spare the shaman" exemptions on `effect::hurts` do **not** apply
 to a ghost shaman — she still "has no real body", so the usual reason to spare a real shaman doesn't carry over:
@@ -185,23 +207,36 @@ shaman standing in for (or shadowing) the real one:
    0, count: 1 })` for `SHAMAN`, `priority: 1, count: 3` for `FIREWARRIOR`/`PREACHER`/`SPY`/`WARRIOR` — tie value is
    fine, only the minimum matters — `priority: 2, count: 6` for `BRAVE`; `None` for `WILDMAN`/`ANGEL_OF_DEATH`).
    Adding/rebalancing a kind later only ever touches its own table row, never `ghost_army.rs`.
-4. New `crates/game-core/src/ghost_army.rs`, shaped like `hypnotism.rs`: a one-turn `EffectKind::GhostArmy`,
-   `effect(owner, at) -> Effect`, and a `turn(&mut self, at, owner, world) -> Vec<WorldEvent>`:
-   - Scan the caster's own living, non-ghost units in `nearest::in_block(at, ..., size)`'s 3 × 3 cells (question 6
-     above: whether to exclude existing ghosts from the scan).
-   - Of the kinds present, pick the one whose `stats().ghost_cast` is `Some` with the lowest `priority`
+4. New `crates/game-core/src/ghost_army.rs`, shaped like `angel_of_death.rs`'s own `Cast` (**not** hypnotism's
+   one-turn model — the trace update above confirmed this is a 5-tick one-shot controller: a `turn: u32` counter
+   firing its payload only once `turn + 1 == CAST_TICKS.get()`, no-ops every tick before that; the cosmetic
+   tick-1 mist burst is deferred, see the trace-update note above), an `EffectKind::GhostArmy`, `cast(owner, at) ->
+   Effect`, and `Cast::turn(&mut self, at, owner, world) -> Vec<WorldEvent>` that on its last tick:
+   - Scans the caster's own living units in `nearest::in_block(at, ..., size)`'s 3 × 3 cells — **including
+     existing ghosts** (confirmed above: an existing ghost is just as eligible a candidate as a live unit, do not
+     exclude `statuses.ghost` here).
+   - Of the kinds present, picks the one whose `stats().ghost_cast` is `Some` with the lowest `priority`
      (`present.iter().filter_map(|k| k.stats().ghost_cast.map(|gc| (gc, k))).min_by_key(|(gc, _)| gc.priority)`) —
-     its `count` is how many ghosts to make. No kind present with a `ghost_cast` at all (shouldn't happen: the
-     caster always has at least her own shaman, but guard it) means nothing to copy.
-   - Cap check: count the tribe's total ghosts across the whole map (`owner == tribe && statuses.ghost`); if
-     adding the new batch would reach/exceed `GHOST_ARMY_MAX`, emit nothing (all-or-nothing, not a partial
-     top-up, per the trace).
-   - Emit a new `WorldEvent` (step 5) rather than spawning directly from the effect — keeps effects as the usual
+     its `count` is how many ghosts to make and which `UnitKind` they copy. Nothing present with a `ghost_cast` at
+     all (no candidate found) falls back to brave/6 (confirmed: "ties, and no candidate found at all, both fall
+     back to brave").
+   - Cap check, **cull-then-spawn, not refusal** (confirmed above, overturning this step's own earlier draft): count
+     the tribe's total living ghosts across the whole map; if adding the new batch's `count` would push the total
+     past `GHOST_ARMY_MAX`, also emit a `WorldEvent::DestroyGhost` for one existing ghost of the **same count-tier
+     bucket** as the new batch (same `ghost_cast.count`, i.e. brave/shaman/specialist are separate buckets),
+     picking the lowest-id one among that bucket for lockstep-safe determinism (`[ours]`: the trace says "per
+     affected type-bucket" without pinning down which specific ghost within a bucket, same spirit as Blast's own
+     "which 5, when more are in range" guess) — the full new batch spawns regardless, cull or not.
+   - Emit new `WorldEvent`s (step 5) rather than spawning directly from the effect — keeps effects as the usual
      "read state, emit events" shape every other effect module follows.
 5. `event.rs`/`map.rs`: add `WorldEvent::SpawnGhosts { owner: Owner, kind: UnitKind, count: u8, at: (u16, u16) }`,
-   applied in `GameMap::apply_event` mirroring the `SpawnAngelOfDeath` arm (`map.rs:1896`): spawn `count` units of
-   `kind` for `owner` (placement per question 6), set `statuses.ghost = true` on each, leave them `Action::Idle`
-   (or `Guarding` near the cast point — also question 6, not traced).
+   applied in `GameMap::apply_event` mirroring the `SpawnAngelOfDeath` arm (`map.rs:1902`): spawn `count` units of
+   `kind` for `owner`, each independently jittered ±256 world units per axis from `at` (confirmed placement, no
+   slot-finding/terrain check — a loose scatter, `[ours]` for not validating the landing spot, matching the
+   trace's "not a tight formation or cluster"), set `statuses.ghost = true` on each, leave them `Action::Idle`.
+   Also add `WorldEvent::DestroyGhost { unit: UnitId }` for the cap-cull case (step 4), applied as a plain
+   `self.destroy_ghost(unit)` call — the one place outside `damage`/`change_owner`/`hypnotize` (step 7) that needs
+   to reach `destroy_ghost` from an effect's own emitted events rather than from inside an existing function.
 6. `map.rs` (and anywhere else the shaman-uniqueness audit above turns up): add `!u.statuses.ghost` to every "the
    tribe's shaman" lookup that needs it, per the integration-risk section.
 7. Destruction paths — "ghosts are destroyed, not killed", centralized at the few real chokepoints instead of
@@ -213,7 +248,12 @@ shaman standing in for (or shadowing) the real one:
      `Dying`/`Spirit`/`UnitEvent::Gone`/`retain` pipeline (`unit.rs`, `map.rs`'s end-of-`tick` sweep), which takes
      several ticks and assumes a corpse worth animating. No corpse, no spirit rise, no reincarnation hook: it's
      just gone this same tick (matches "a ghost has no real body to hand off",
-     `docs/specs/pop3-rev-analysis.md`'s 0x4D4B50/0x4D83B0 entries). `self.units` stays sorted by id either way
+     `docs/specs/pop3-rev-analysis.md`'s 0x4D4B50/0x4D83B0 entries — those two addresses are actually
+     preacher-conversion's own destroy-on-ghost-candidate special case, not Ghost-Army-specific, but one more
+     independent confirmation of the same engine-wide rule). The original plays a sound cue and a short generic
+     flash where a ghost dies this way; deferred here (see the trace-update note above) — no sound system exists
+     anywhere in this codebase yet, and no reusable "flash" primitive exists client-side to point at either, so
+     `destroy_ghost` just removes the unit for this pass, no visual follow-up. `self.units` stays sorted by id either way
      (a `remove`, unlike a swap-remove, preserves order), so `unit_index`'s binary search keeps working for every
      other event in the same batch — events reference units by `UnitId` and re-resolve their index fresh each
      time (`apply_event`'s own pattern throughout), so removing one mid-batch doesn't invalidate another event's
