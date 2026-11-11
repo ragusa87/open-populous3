@@ -188,6 +188,18 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   deliberately left out (a guard settled on its own orbit point legitimately stands still between nudges,
   `crate::guard::orbit_point` - this was first tried covering it too and promptly starved a guard to death in
   testing).
+  **Checked further, 2026-11-11** (user question: does `approach` retry a fresh path before stranding, or
+  only on a ground change?): it already retried on a ground change AND on every blocked step (resets its
+  cache, which the very next tick's own top-of-function check then rebuilds) - the one real gap found was
+  that `approach` lacked `follow_route`'s own immediate cell-by-cell correction on a blocked step, replanning
+  with the full straightened search again instead, which could in principle repeat the exact same failure.
+  Hardened to match `follow_route` (`Unit::route_to`, shared by both). **Not a confirmed fix for a specific
+  repro**: an extensive search for a `(start, to, wall)` case where `path::leg_is_clear` approves a
+  straightened leg that then actually blocks on unchanged ground found none - it already walks every cell
+  the leg crosses exactly, including the corner-pinch rule, so this gap may not be reachable in the current
+  code at all. Also checked: a pyramid of knowledge (`BuildingKind::Vault`)'s own footprint is an ordinary
+  rectangle, same as any other building, no special corner handling needed or missing found - no evidence of
+  a pyramid-specific pathing bug; needs a more specific repro (level, position) to look at further.
 - [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the stranded rate (`STRANDED_DAMAGE`, scaled x20 from our old 100 HP guess, still unconfirmed). `DROWN_DAMAGE` is answered and is **not** a per-tick damage value at all (pop3-rev-analysis.md "Drowning"): the original always takes a fixed 16 turns (1.33 s) to kill once truly submerged, forcing life to exactly 0, independent of current/max health - a flat countdown, not `-60`/tick. Matters most for the shaman: her much larger health pool means ours currently lets her survive drowning far longer than the original allows.
 - [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).

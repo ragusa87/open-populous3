@@ -1642,34 +1642,49 @@ impl Unit {
     }
 
     /// One step of the way to `to` while attacking: a path planned again when the ground changes, standing once
-    /// there or when no way leads there.
+    /// there or when no way leads there. A blocked step now also replans cell by cell right away (the same
+    /// correction `follow_route` already had) instead of only invalidating the cache and waiting for the next
+    /// tick's top-of-function check to retry - a consistency fix, not a reproduced failure: an extensive search
+    /// for a case where `path::leg_is_clear` (which already walks every cell a straightened leg crosses,
+    /// including the "both side cells passable" rule at a corner) would approve a leg that then actually
+    /// blocks on unchanged ground found none, so this hardens `approach` to match `follow_route` rather than
+    /// fixing a confirmed gap. `GameMap::tend_attacks`/`tend_guards` decide for themselves when to give up on
+    /// a target that truly never finds a way (re-aiming, standing down); `approach` itself only ever retries.
     fn approach(&mut self, to: (u16, u16), ground: &impl Ground) {
         if self.planned_on != Some(ground.revision()) {
-            let route = path::route(ground, self.mobility(), (self.x, self.z), to, true);
-            self.route = route.map(|r| r.into_iter().rev().collect()).unwrap_or_default();
-            self.planned_on = Some(ground.revision());
+            self.route_to(to, ground, true);
         }
         let Some(&next) = self.route.last() else { return };
         match self.step_towards(next, ground, self.kind.speed()) {
             Step::Moved => {}
             Step::Arrived => _ = self.route.pop(),
-            Step::Blocked => self.planned_on = None,
+            Step::Blocked => _ = self.route_to(to, ground, false),
         }
+    }
+
+    /// Recomputes `self.route` for a straight walk to `to` on the current terrain, `self.planned_on`
+    /// marked current either way; true when a route was found. Shared by `plan` (which also decides
+    /// `self.action` from whether one was found) and `approach` (which keeps its own `Action::Attacking`/
+    /// `Guarding` shape, only ever retrying route-finding here, never itself deciding to give up).
+    fn route_to(&mut self, to: (u16, u16), ground: &impl Ground, straighten: bool) -> bool {
+        let route = path::route(ground, self.mobility(), (self.x, self.z), to, straighten);
+        let found = route.is_some();
+        self.route = route.map(|r| r.into_iter().rev().collect()).unwrap_or_default();
+        self.planned_on = Some(ground.revision());
+        found
     }
 
     /// Path to `to` on the current terrain: walking if there is one, else stranded (the shaman
     /// just stays idle).
     fn plan(&mut self, to: (u16, u16), ground: &impl Ground, straighten: bool) {
-        let route = path::route(ground, self.mobility(), (self.x, self.z), to, straighten);
+        let found = self.route_to(to, ground, straighten);
         let walled = ground.walled((cell_of(to.0), cell_of(to.1)));
-        self.action = match route {
-            Some(_) => Action::Walking { to },
+        self.action = match found {
+            true => Action::Walking { to },
             // Behind walls nobody gets to: no point waiting for the ground to open a way.
-            None if self.kind == UnitKind::Shaman || walled => Action::Idle,
-            None => Action::Stranded { to },
+            false if self.kind == UnitKind::Shaman || walled => Action::Idle,
+            false => Action::Stranded { to },
         };
-        self.route = route.map(|r| r.into_iter().rev().collect()).unwrap_or_default();
-        self.planned_on = Some(ground.revision());
     }
 
     /// One step along the route; idle once at `to`. A step that would end in a cell she cannot
@@ -1824,6 +1839,51 @@ mod tests {
         wildman.change_owner(TribeId::Red);
         assert_eq!((wildman.owner, wildman.kind), (Owner::Tribe(TribeId::Red), UnitKind::Brave), "a wildman has no tribe of its own: becomes a brave");
         assert!(wildman.health.is_full() && wildman.health.max() == UnitKind::Brave.max_health(), "health set from its new kind");
+    }
+
+    /// Bare terrain plus a set of walled cells (a stand-in building footprint), for exercising `approach`
+    /// around an obstacle without needing a real `Building`/`GameMap`.
+    struct WalledGround {
+        terrain: Heightmap,
+        walls: std::collections::BTreeSet<(i32, i32)>,
+    }
+    impl Ground for WalledGround {
+        fn terrain(&self) -> &Heightmap {
+            &self.terrain
+        }
+        fn walled(&self, cell: (i32, i32)) -> bool {
+            self.walls.contains(&cell)
+        }
+    }
+
+    #[test]
+    fn an_attacker_still_reaches_its_target_around_a_wall_in_the_way() {
+        // `approach` (used by Attacking and Guarding) now recovers from a blocked step the same way
+        // `follow_route` (ordinary Walking) already did: replanning cell by cell right away instead of only
+        // invalidating its cache and waiting for the next tick's top-of-function check. This is a
+        // consistency fix, not the reproduction of a specific failure: `path::leg_is_clear`, which decides
+        // whether a straightened leg is safe to merge, turned out to already be exact (it walks every cell
+        // the leg crosses, including the "both side cells must be passable" rule at a corner it passes
+        // exactly through) - an extensive search for a `(start, to, wall)` combination where a straightened
+        // route's own first step is genuinely `Step::Blocked` on unchanged ground found none. This just
+        // checks the ordinary case still works: a wall directly between the two still lets it arrive.
+        let mut walls = std::collections::BTreeSet::new();
+        for dz in 0..5 {
+            walls.insert((15, 10 + dz));
+        }
+        let g = WalledGround { terrain: land(), walls };
+        let (u, site) = shaman_at((10, 10));
+        let to = (20 * 512 + 256, 10 * 512 + 256);
+        let mut u = Unit { kind: UnitKind::Brave, ..u };
+        u.attack(Target::Unit(Id::from_raw(2)), to);
+        for k in 1..400u32 {
+            u.tick(Tick::from_wire(k), &g, Some(&site));
+            assert!(!matches!(u.action, Action::Stranded { .. }), "tick {k}: a wall in the way, not an unreachable target");
+            if (u.x, u.z) == to {
+                return;
+            }
+        }
+        panic!("never reached the target in 400 ticks: {:?}", (u.x, u.z));
     }
 
     fn land() -> Heightmap {
