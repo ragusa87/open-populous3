@@ -1453,6 +1453,7 @@ impl GameMap {
             self.tend_vehicle_huts();
             self.tend_huts();
             self.tend_auto_housing();
+            self.tend_auto_work();
         }
         // Coordinators, before the units, so that one ending this turn is gone when its units tick (coordinators.md):
         // a. scans that start coordinators or add units to them; b. each one's turn, kind after kind; c. the finished

@@ -19,6 +19,18 @@ pub const ENTER_MARGIN: i32 = 128;
 pub const HOUSE_DELAY: Ticks = Ticks::secs(10);
 /// How far it looks for a hut with room (huts-and-training.md rule 3) - `[ours]`.
 pub const HOUSE_SEARCH_RADIUS_CELLS: i32 = 8;
+/// How far an idle brave looks for a site to help build or dismantle (`tend_auto_work`) - `[ours]`,
+/// kept tighter than `HOUSE_SEARCH_RADIUS_CELLS`: a site is usually staffed by braves already standing
+/// right next to it, not drifting in from across the map.
+pub const SITE_SEARCH_RADIUS_CELLS: i32 = 3;
+/// A site this crowded already has enough hands (`tend_auto_work`), whatever its own `max_braves` -
+/// `[ours]`: a handful of passers-by is a plausible volunteer crew, a dozen is not, and a site this
+/// busy churns through its few height/wood-delivery points fast enough that extra idle bystanders just
+/// end up contending over which one of them gets credit for the last one (reported live: at 16 workers
+/// sharing 8 flatten points, the worker standing right on the very last one kept losing it to a
+/// wood-fetch errand - `work_on`'s own fetch-before-flatten order - every time it went free for even one
+/// tick, because something else was still (wrongly) "claiming" the point in the meantime).
+const MAX_AUTO_WORKERS: usize = 4;
 
 impl GameMap {
     /// The player's built building with room for people (`BuildingKind::capacity`) whose footprint,
@@ -134,6 +146,42 @@ impl GameMap {
             }
         }
     }
+
+    /// A genuinely idle brave also looks to help out, the same `HOUSE_DELAY`/`HOUSE_SEARCH_RADIUS_CELLS`
+    /// as auto-housing: the nearest of its own tribe's sites still to build (any stage short of
+    /// `Stage::Built` - a fresh plan, under construction, or being dismantled) with room for another
+    /// worker, assigned exactly as `Order::Build` would (`GameMap::assign`). Run after
+    /// `tend_auto_housing` in the same tick, so a brave it just housed is `busy` (`to_house`) and not
+    /// immediately pulled back out to a site here instead.
+    ///
+    /// **Open question, not settled by this session**: pop3-rev-analysis.md "Idle behaviour" reads the
+    /// exe's own closest match (`0x4D9B50`, "an idle unit periodically relocates to any work site with
+    /// free capacity") as gated to AI-controlled tribes only (`tribe_struct+0xC1F == 1`), never running
+    /// for the player's own tribe - a player's own recollection of a human-controlled idle brave
+    /// autonomously joining a construction site contradicts that reading. A coding session cannot
+    /// itself re-check the gate against the exe (clean-room: that needs a dedicated spec session);
+    /// implemented here regardless, for the player's own tribe, `[ours]`, pending that recheck.
+    pub(crate) fn tend_auto_work(&mut self) {
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            let ready = u.kind == UnitKind::Brave && u.is_alive() && !u.busy() && u.idle_ticks() as u32 >= HOUSE_DELAY.get();
+            if !ready {
+                continue;
+            }
+            let Some(owner) = u.owner.tribe() else { continue };
+            let at = (u.x, u.z);
+            let site = self
+                .buildings
+                .iter()
+                .filter(|b| b.owner == owner && b.stage() != Stage::Built && torus_cells(at, (b.x, b.z)) <= SITE_SEARCH_RADIUS_CELLS)
+                .filter(|b| self.workers(b.id).count() < (b.kind.max_braves() as usize).min(MAX_AUTO_WORKERS))
+                .min_by_key(|b| torus_dist2(at, (b.x, b.z)))
+                .map(|b| (b.x, b.z));
+            if let Some(corner) = site {
+                self.assign(i, corner);
+            }
+        }
+    }
 }
 
 /// Who goes inside buildings: followers, not the shaman nor wildmen.
@@ -145,10 +193,23 @@ fn can_enter(kind: UnitKind) -> bool {
 mod tests {
     use super::*;
     use crate::tribes::Owner;
-    use crate::building::BuildingKind;
+    use crate::building::{Building, BuildingKind};
 
     fn corner(dx: i32, dz: i32) -> (u16, u16) {
         (((64 + dx) * 512) as u16, ((64 + dz) * 512) as u16)
+    }
+
+    /// A small, flat, self-contained map (no shaman, no sandbox fixtures) for `tend_auto_work`: it only
+    /// needs one building and one brave, placed exactly where the test wants them, free of any
+    /// incidental interaction with a shared sandbox's own showcase sites or free braves.
+    fn bare() -> GameMap {
+        let mut terrain = crate::terrain::Heightmap::new(64);
+        for z in 0..64 {
+            for x in 0..64 {
+                terrain.set(x, z, 64);
+            }
+        }
+        GameMap::bare("auto-work-test", terrain, Vec::new())
     }
 
     fn braves(map: &GameMap, n: usize) -> Vec<UnitId> {
@@ -265,6 +326,47 @@ mod tests {
             map.tick();
         }
         assert!(map.unit(brave).unwrap().inside.is_none(), "nothing within HOUSE_SEARCH_RADIUS_CELLS: stays put");
+    }
+
+    #[test]
+    fn an_idle_brave_near_a_fresh_plan_joins_it_and_flattens_it() {
+        let mut map = bare();
+        let site = Building::site(BuildingKind::Hut { size: 1 }, TribeId::Blue, 20 * 512, 20 * 512, 0);
+        let id = map.add_building(site);
+        let brave = map.spawn(TribeId::Blue, UnitKind::Brave, (22 * 512, 20 * 512)).id;
+        for _ in 0..(HOUSE_DELAY.get() - 1) {
+            map.tick();
+        }
+        assert_eq!(map.unit(brave).unwrap().work, None, "not yet: still waiting out the delay");
+        run_until(&mut map, 600, |m| m.unit(brave).unwrap().work == Some(id)).expect("joined the site on its own");
+        run_until(&mut map, 3000, |m| m.buildings.iter().find(|b| b.id == id).is_some_and(|b| b.flat)).expect("flattened it");
+    }
+
+    #[test]
+    fn an_idle_brave_near_a_building_being_dismantled_joins_that_work() {
+        let mut map = bare();
+        let mut dismantling = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 20 * 512, 20 * 512, 0);
+        dismantling.dismantling = true;
+        let id = map.add_building(dismantling);
+        let brave = map.spawn(TribeId::Blue, UnitKind::Brave, (22 * 512, 20 * 512)).id;
+        run_until(&mut map, HOUSE_DELAY.get() as usize + 600, |m| m.unit(brave).unwrap().work == Some(id)).expect("joined the dismantling work on its own");
+        run_until(&mut map, 3000, |m| m.building(id).is_none()).expect("took it apart, piece by piece");
+    }
+
+    #[test]
+    fn tend_auto_work_never_crowds_more_than_max_auto_workers_onto_one_site() {
+        let mut map = bare();
+        let site = Building::site(BuildingKind::Hut { size: 3 }, TribeId::Blue, 20 * 512, 20 * 512, 0);
+        let id = map.add_building(site);
+        // Several idle braves, all within SITE_SEARCH_RADIUS_CELLS, more than MAX_AUTO_WORKERS.
+        for k in 0..8 {
+            map.spawn(TribeId::Blue, UnitKind::Brave, ((21 + k) * 512, 20 * 512));
+        }
+        run_until(&mut map, HOUSE_DELAY.get() as usize + 200, |m| m.workers(id).count() > 0).expect("some joined");
+        for _ in 0..200 {
+            map.tick();
+            assert!(map.workers(id).count() <= MAX_AUTO_WORKERS, "never more than MAX_AUTO_WORKERS at once: {}", map.workers(id).count());
+        }
     }
 
     #[test]

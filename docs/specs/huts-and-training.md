@@ -143,6 +143,23 @@ hut (max size) hides the red bar, it does not show it at 0.
    (`headcount::State::Housed`/`Working`). The income charges the spells first, the rest goes to the tribe's mana,
    capped at `MAX_MANA` (pop3-rev-analysis.md "Mana rules"). Praying at a totem is its own gauge (TODO "Praying"),
    not mana.
+8. **Auto-work** (done - `GameMap::tend_auto_work`, `enter.rs`) [ours]: the same genuinely-idle, `HOUSE_DELAY`
+   brave as rule 3 (Auto-housing), if that one didn't claim it this tick, also looks to help build or
+   dismantle - the nearest of its own tribe's sites not yet `Stage::Built` (a fresh plan, under construction,
+   or being dismantled) within `SITE_SEARCH_RADIUS_CELLS` (3, tighter than rule 3's 8: a site is usually
+   staffed by braves already standing right next to it) that doesn't already have `MAX_AUTO_WORKERS` (4) hands
+   on it, assigned exactly as `Order::Build` would (`GameMap::assign`). **Open question, left for a spec
+   session**: pop3-rev-analysis.md "Idle behaviour" reads the exe's own closest match for this (`0x4D9B50`, "an
+   idle unit periodically relocates to any work site with free capacity") as gated to AI-controlled tribes
+   only (`tribe_struct+0xC1F == 1`), never running for the player's own tribe - a player's own recollection of
+   a human-controlled idle brave autonomously joining a construction site contradicts that reading, and is
+   what this item implements instead (for the player's own tribe); a coding session cannot itself recheck the
+   gate against the exe (clean-room), so this stays flagged rather than resolved. The `MAX_AUTO_WORKERS` cap
+   exists because a crowded site churns through its few height/wood-delivery points fast enough that extra
+   idle bystanders just end up contending over the last one (found live: at 16 workers sharing 8 flatten
+   points, the one standing right on the very last point kept losing it to a wood-fetch errand - `work_on`'s
+   own fetch-before-flatten order - every time it went free for even a tick, a separate, pre-existing bug this
+   surfaced rather than caused, worth its own fix later, TODO.md).
 
 ## Training huts
 | Building | Trains | Cost (human) |

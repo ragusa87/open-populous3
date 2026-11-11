@@ -604,6 +604,23 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   behaviour without a further live check confirming it. Auto-housing itself is `[ours]`, not traced at all
   (no corresponding exe behaviour found or looked for this session) - the delay and search radius are both
   guesses, flagged as such in `enter.rs`.
+  **Auto-work implemented, 2026-11-11** (huts-and-training.md "Huts" rule 8, `GameMap::tend_auto_work`,
+  `enter.rs`): the same idle brave also joins a nearby construction or dismantling site on its own
+  (`GameMap::assign`, same as `Order::Build`), within `SITE_SEARCH_RADIUS_CELLS` (3) and up to
+  `MAX_AUTO_WORKERS` (4) per site. Pop3-rev-analysis.md's own closest match for this (`0x4D9B50`) reads as
+  AI-tribe-only - a player's own recollection of this happening for a human-controlled idle brave contradicts
+  that reading; a coding session cannot recheck the gate against the exe itself (clean-room), so this is
+  flagged as an open question for a spec session rather than resolved, and implemented for the player's own
+  tribe regardless, `[ours]`. Specifically still left out, since the recollection was only about construction:
+  autonomous wood-gathering (the caution above stays as is - no new evidence on that one).
+  **Found along the way, not fixed here, worth its own session**: `work_on`'s own per-tick order (`fetch_wood`
+  before `flatten_step` whenever the site still `wanted` more wood) can starve the very last flatten point of a
+  site that is crowded with workers - a brave standing exactly on it, freshly done with its own task, can lose
+  its claim to a wood-fetch errand before `flatten_step` ever re-considers it, while nothing else is actually
+  finishing that point either; `MAX_AUTO_WORKERS` above only lowers how often this is reached in practice, it
+  does not fix the underlying race. Reproduced live at 16 workers sharing 8 flatten points on a training hut
+  (`enter::tend_auto_work`'s own cap exists because of this); 5 workers on the same site never reproduced it in
+  the time spent on it this session, so it's plausibly rare in ordinary play but real.
 - [ ] Wood claimed across sites: two sites' braves can head for the same tree piece; braves of another task may take wood a site counts on. Refine the dispatch rule (nearest brave per piece, gatherers vs builders).
 - [ ] Site visuals: views are redone whenever any building changes; update them per building (stable ids) instead; compare the part order (from the ground up) and the structure with the original; chimney position per hut model; busy look for the other kinds; the pile by the door could be drawn as a stack rather than loose pieces.
 - [ ] Wood pieces lying on the ground (`GameMap::wood`, drawn): picked up by any construction; hovering one could show "Wood". Maybe draw the original's shadow under them (`hfx0-0.dat` 22, unconfirmed).
