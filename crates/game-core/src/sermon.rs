@@ -258,6 +258,13 @@ mod tests {
     fn give_up_and_sulk_bypasses_the_population_cap() {
         let (mut map, _, others) = sermon_scene(&[UnitKind::Warrior]);
         let w = others[0];
+        // `sandbox_units()`'s own Red followers (one per kind, posed near the shaman for the marker tests) are
+        // otherwise close enough to the filler grid below to trade blows with it over the 20_000-tick runs here,
+        // steadily eroding Blue's population back under the cap well before either run ends and silently
+        // falsifying this test (found chasing a failure: `w` converted at tick 4282 despite the cap, traced to
+        // `w`'s own tribe losing dozens of the filler braves to melee/fire first) - removed, keeping only `w`
+        // itself, the one Red unit this test is actually about.
+        map.units.retain(|u| u.owner != Owner::Tribe(TribeId::Red) || u.id == w);
         // Filled on dry land near the shaman (not drowned at sea, which would shrink the count back
         // under the cap over the long run below): a 14-wide grid south of the centre, well inside the
         // sandbox island's own radius.
