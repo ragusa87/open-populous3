@@ -89,7 +89,7 @@ impl GameMap {
                 continue;
             }
             let cells: Vec<(i32, i32)> = crate::spotting::square(p.cell(), p.kind.stats().sight, size).collect();
-            let listeners: Vec<usize> = (0..self.units.len()).filter(|&j| cells.contains(&self.units[j].cell()) && may_preach(p, &self.units[j])).collect();
+            let listeners: Vec<usize> = (0..self.units.len()).filter(|&j| cells.contains(&self.units[j].cell()) && may_preach(p, &self.units[j]) && !self.units[j].fools(p.owner)).collect();
             if listeners.is_empty() {
                 continue;
             }

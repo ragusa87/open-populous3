@@ -38,6 +38,13 @@ impl Unit {
         self.kind == UnitKind::Spy && self.statuses.disguise.is_some_and(|d| d.settled() && d.apparent == tribe && Owner::Tribe(tribe) != self.owner)
     }
 
+    /// Whether it passes as one of `viewer`'s own people: every automatic look for an enemy (spotting, a preacher's
+    /// sermon, an angel's hunt, the computer's defence) skips it. An order aimed at it still finds it (and reveals
+    /// it).
+    pub fn fools(&self, viewer: impl Into<Owner>) -> bool {
+        viewer.into().tribe().is_some_and(|t| self.counts_as(t))
+    }
+
     /// Whether it is a spy whose disguise has settled (`counts_as` some other tribe).
     pub fn disguised(&self) -> bool {
         self.statuses.disguise.is_some_and(|d| d.settled() && Owner::Tribe(d.apparent) != self.owner)
@@ -215,6 +222,36 @@ mod tests {
                 }
             }
             panic!("never disguised once there");
+        }
+    
+        fn spy_disguised(map: &mut GameMap, as_tribe: TribeId, settled: bool) -> UnitId {
+            let spy = add(map, TribeId::Blue, UnitKind::Spy, (33024, 34048));
+            let delay = if settled { crate::time::Ticks::ZERO } else { super::DISGUISE_DELAY };
+            map.unit_mut(spy).unwrap().disguise_as(as_tribe, delay);
+            spy
+        }
+
+        fn left_alone_by(kind: UnitKind, as_tribe: TribeId, settled: bool) -> bool {
+            let mut map = bare();
+            let spy = spy_disguised(&mut map, as_tribe, settled);
+            add(&mut map, TribeId::Red, kind, (33024 + 300, 34048));
+            map.run(crate::time::Ticks::new(40));
+            let u = map.unit(spy).unwrap();
+            u.health.is_full() && matches!(u.action, Action::Idle)
+        }
+
+        #[test]
+        fn a_settled_spy_is_left_alone_by_the_tribe_it_passes_as() {
+            assert!(left_alone_by(UnitKind::Warrior, TribeId::Red, true));
+            assert!(!left_alone_by(UnitKind::Warrior, TribeId::Red, false), "still settling: an enemy");
+            assert!(!left_alone_by(UnitKind::Warrior, TribeId::Green, true), "passing as another tribe");
+        }
+
+        #[test]
+        fn a_preacher_converts_a_spy_unless_it_has_settled_as_the_preachers_tribe() {
+            assert!(left_alone_by(UnitKind::Preacher, TribeId::Red, true));
+            assert!(!left_alone_by(UnitKind::Preacher, TribeId::Red, false));
+            assert!(!left_alone_by(UnitKind::Preacher, TribeId::Green, true));
         }
     }
 }

@@ -106,7 +106,7 @@ impl GameMap {
             let people = grid
                 .at(cell)
                 .filter_map(|id| self.unit(id))
-                .filter(|t| crate::attack::may_attack(u, t) && t.kind != UnitKind::Wildman && !t.locked() && !t.statuses.invisible.is_on() && !self.tribes.allied(u.owner, t.owner) && (!u.statuses.ghost || t.statuses.ghost || t.kind == UnitKind::Shaman));
+                .filter(|t| crate::attack::may_attack(u, t) && t.kind != UnitKind::Wildman && !t.locked() && !t.statuses.invisible.is_on() && !t.fools(u.owner) && !self.tribes.allied(u.owner, t.owner) && (!u.statuses.ghost || t.statuses.ghost || t.kind == UnitKind::Shaman));
             let mut fighting = None;
             for t in people {
                 match self.linked(t) {

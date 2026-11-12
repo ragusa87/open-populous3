@@ -302,7 +302,7 @@ impl GameMap {
 /// Whether `t` is a valid Angel of Death target (rival or victim) for `owner`: alive, not its own tribe nor an
 /// ally, and — unless it is itself a rival angel — not already grabbed by someone else.
 fn angel_target_eligible(owner: Owner, t: &Unit) -> bool {
-    t.is_alive() && t.owner != owner && (t.kind == UnitKind::AngelOfDeath || !matches!(t.action, Action::Grabbed { .. }))
+    t.is_alive() && t.owner != owner && !t.fools(owner) && (t.kind == UnitKind::AngelOfDeath || !matches!(t.action, Action::Grabbed { .. }))
 }
 
 #[cfg(test)]

@@ -445,7 +445,7 @@ impl GameMap {
                 continue;
             }
             let Some(range) = self.cast_range(owner, e.spell) else { continue };
-            let enemies: Vec<(u16, u16)> = self.units.iter().filter(|u| u.is_alive() && !self.tribes.same_team(u.owner, owner) && crate::cast_range::within(shaman_pos, (u.x, u.z), range)).map(|u| (u.x, u.z)).collect();
+            let enemies: Vec<(u16, u16)> = self.units.iter().filter(|u| u.is_alive() && !self.tribes.same_team(u.owner, owner) && !u.fools(owner) && crate::cast_range::within(shaman_pos, (u.x, u.z), range)).map(|u| (u.x, u.z)).collect();
             if (enemies.len() as i32) < e.min_people.max(1) {
                 continue;
             }
@@ -488,7 +488,7 @@ impl GameMap {
         let Some(intruder) = self
             .units
             .iter()
-            .filter(|u| u.is_alive() && !self.tribes.same_team(u.owner, owner) && torus_dist2(base, (u.x, u.z)) <= (AI_BASE_RADIUS_GUESS as i64).pow(2))
+            .filter(|u| u.is_alive() && !self.tribes.same_team(u.owner, owner) && !u.fools(owner) && torus_dist2(base, (u.x, u.z)) <= (AI_BASE_RADIUS_GUESS as i64).pow(2))
             .min_by_key(|u| torus_dist2(base, (u.x, u.z)))
             .map(|u| u.id)
         else {
@@ -722,7 +722,7 @@ impl GameMap {
             }
             AttackGoal::Marker(index) => {
                 let at = self.marker_pos(index as i32)?;
-                self.units.iter().filter(|u| u.owner == target_team && u.is_alive()).min_by_key(|u| torus_dist2(at, (u.x, u.z))).map(|u| Target::Unit(u.id))
+                self.units.iter().filter(|u| u.owner == target_team && u.is_alive() && !u.fools(owner)).min_by_key(|u| torus_dist2(at, (u.x, u.z))).map(|u| Target::Unit(u.id))
             }
         }
     }
