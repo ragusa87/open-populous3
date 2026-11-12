@@ -268,7 +268,7 @@ Names are the editor's script spellings. Uses = total occurrences / files, over 
 | 1038 | `STATE_SPELL_DEFENCE` | field, field, on_off | 47 / 40 |
 | 1039 | `STATE_PREACH` | on_off | 47 / 45 |
 | 1040 | `STATE_BUILD_WALLS` | on_off | 0 / 0 |
-| 1041 | `STATE_SABOTAGE` | on_off | 1 / 1 |
+| 1041 | `STATE_SABOTAGE` | on_off | 1 / 1 (ours: sends idle spies to burn enemy buildings, units.md "Spies") |
 | 1042 | `STATE_SPELL_OFFENSIVE` | on_off | 0 / 0 |
 | 1043 | `STATE_FIREWARRIOR_DEFEND` | on_off | 40 / 38 |
 | 1044 | `STATE_BUILD_VEHICLE` | on_off | 35 / 35 |
@@ -537,11 +537,10 @@ Other ON/OFF switches:
   `GameMap::ai_shorten_hypnotism`, `hypnotism.rs`, `status::GIVEUP_HYPNO_BASIS`/`_RANGE_MIN`/`_RANGE_MAX`)**;
   deletes the tribe's own ghost units outright; reveals/reverts any of the tribe's own currently-disguised spies;
   and force-tears-down the tribe's own in-progress "soul convert 2" conversion-coordinator instances. **Implemented,
-  three of six effects** (`GameMap::ai_set_give_up_and_sulk`'s own `ai_give_up_sweep`, `ai.rs`), plus the
+  five of six effects** (`GameMap::ai_set_give_up_and_sulk`'s own `ai_give_up_sweep`, `ai.rs`; the spies'
+  disguises dropped: units.md "Spies"), plus the
   force-success switch itself: `ai::NativeAi::give_up_and_sulk` (`ai_script.rs`'s `do_call`), read by
-  `sermon::tend_sermons` to bypass the `MAX_POPULATION` cap on a successful conversion roll. **Still open**: ghost
-  deletion (currently inert - nothing sets `Statuses::ghost` until `GhostArmy` itself is implemented), spy-disguise
-  reveal (no disguise mechanic exists anywhere yet - a subsystem to build, not a small gap), and the "soul convert
+  `sermon::tend_sermons` to bypass the `MAX_POPULATION` cap on a successful conversion roll. **Still open**: the "soul convert
   2" conversion abort (identified as aborting a tribe's own `Action::Listening` candidates, same idiom
   `sermon::tend_sermons` already uses elsewhere - held back for now, not yet implemented) (TODO.md).
   - 44/58 base scripts turn this on as a last-resort "losing badly" branch (58/58 counting the Undiscovered
@@ -857,7 +856,7 @@ is a pure runtime switch, independent of whether a shaman/site thing exists).
 | `SHAMEN_BLAST` | the shaman's blast damage: 0, 32, 64, 128 seen; at 0 a shaman dies in 6-8 blasts, at 256 in 2-3 |
 | `USE_PREACHER_FOR_DEFENCE` | != 0 needed by `STATE_DEFEND_BASE` |
 | `DONT_GROUP_AT_DT` | > 0: no gathering before an attack |
-| `ENEMY_SPY_MAX_STAND`, `SPY_CHECK_FREQUENCY`, `SPY_DISCOVER_CHANCE`, `MAX_SPY_ATTACKS` | spy handling (128 or 255 for the first) |
+| `ENEMY_SPY_MAX_STAND`, `SPY_CHECK_FREQUENCY`, `SPY_DISCOVER_CHANCE`, `MAX_SPY_ATTACKS` | spy handling (128 or 255 for the first). Read by `ai_spy.rs` (units.md "Spies"): idle turns before a spy passing as the tribe is caught for sure, catch percent per check, spies out setting fires at once (`[guess]` readings); `SPY_CHECK_FREQUENCY` not read |
 | `FIGHT_STOP_DISTANCE`, `GROUP_OPTION`, `COUNT_PREACH_DAMAGE`, `MAX_TRAIN_AT_ONCE` | ? (0/24/26, 0/2/3, 0/1, ?) |
 | `SPELL_DELAY`, `DONT_DELETE_USELESS_BOAT_HOUSE`, `BOAT_HOUSE_BROKEN`, `DONT_AUTO_TRAIN_PREACHERS`, `SPARE` | unused or rare |
 

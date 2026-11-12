@@ -116,7 +116,7 @@ pressed, it sends `Command::Unload`. Without the original files, an "Unload" tex
 | Another tribe's building | its name only; a drum tower clicked (left with nothing selected, or right), its people row too: who is in, not selectable [player] | | | |
 | Camp fire | who is round it [ours: to define] | | | |
 | Unit | no box: its health bar is its tooltip (units.md) | | | |
-| Spy | a spy indicator instead of its disguise (units.md) | | | |
+| Spy | another tribe's spy passing as the player's own: the reveal cursor, a click unmasks it (units.md "Spies") | | | |
 | Reincarnation site | none | | | |
 
 ## Model [ours]

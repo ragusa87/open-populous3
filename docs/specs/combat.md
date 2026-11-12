@@ -207,6 +207,7 @@ followed each turn (`GameMap::spot_enemies`).
   `attack::may_attack`, and defends itself like anyone when attacked), and firewarriors once reloaded, as far as they throw (`GameMap::looking`; any enemy person, in a melee or
   not: their own look is not traced); the preacher's sermon is its own look ("Sermon"); the shaman's look during some orders is TODO; spies and wildmen never look. On its kind's `look_every` (4 turns; preacher 2),
   phase 0.
+- Never at a spy settled in the looker's own tribe's disguise (`Unit::fools`, units.md "Spies"), nor in a sermon.
 - The preacher's own look (pop3-rev-analysis.md "Preacher conversion") only fights another preacher or a shaman;
   anyone else it finds gets preached to instead, a separate state machine on the target
   (`PREACHEE_CONV_FREQ`/`_CHANCE`, a 1 in 5 roll every 41.7 s) that destroys the target and recreates it, same

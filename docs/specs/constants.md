@@ -62,7 +62,7 @@ Units:
 | Wood | `TREE1..6_WOOD_VALUE` and `_GROW` (added every 16 frames), `WOOD_<P>` (carried), `WOOD_<BUILDING>`, `WOOD_VEHICLE_*` | tree 400, grow 2, hut 300, temple 800 |
 | Huts | `HUT1..3_SPROG_TIME`, `SPROG%_POP_BAND_*` (breeding speed by population %, 30..200), `MAX_POP_VALUE__HUT_1..3`, `NEAR_BLDG_CELLS` | 4000 / 3000 / 2000, 3 / 5 / 7 |
 | Terrain | `WALK_ALT_DIFF2`, `BUILD_ALT_DIFF2` (max height step to walk on or build) | 384, 160 |
-| Misc | `MULTIPLE_SELECT_NUM`, `DME_RESTORE_TIME`, `TRIGGER_REACTIVATE_TIME`, `SPY_DISGUISE_DELAY`, `HUMAN_REINC_START_DELAY`, `VEHICLE_LIFE_*` | |
+| Misc | `MULTIPLE_SELECT_NUM`, `DME_RESTORE_TIME`, `TRIGGER_REACTIVATE_TIME`, `SPY_DISGUISE_DELAY` (read: `Balance::spies`, 63 by default), `HUMAN_REINC_START_DELAY`, `VEHICLE_LIFE_*` | |
 
 ## Community findings (not from the files)
 - The "extended" or "forbidden" constants are about 100 more values (builders per building, the tree models...).

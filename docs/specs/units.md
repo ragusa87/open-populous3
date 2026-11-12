@@ -225,6 +225,54 @@ fight ring as her guards once a fight starts nearby, through the ordinary auto-a
 covering everyone nearby, not a dedicated protection mechanic. No code needed for this; it already falls out of
 existing combat behaviour.
 
+## Spies (done: `game_core::disguise`, `arson`, `ai_spy`; client `units/spy.rs`, `hud/disguise.rs`)
+pop3-rev-analysis.md "Spy disguise and infiltration", "What un-disguises a spy", "Arson".
+
+**Disguise** (`Statuses::disguise`): the tribe a spy passes as and a settling countdown, `SPY_DISGUISE_DELAY` (63
+turns [exe], `Balance::spies`, read from `constant.dat` when installed; clamped to 63, a 6-bit field). While it
+settles the spy still counts as its real tribe everywhere; once settled it counts as the disguise tribe
+(`Unit::counts_as`) and every automatic look for an enemy skips it (`Unit::fools`): spotting (also towers and
+firewarriors), a preacher's sermon (so a settled spy disguised as the preacher's tribe cannot be converted; one still
+settling, or passing as a third tribe, can), the Angel of Death's hunt, the computer's defence, spell and attack
+targets. Explicit orders still go by the real tribe: a player can always attack a disguised spy by hand.
+- `Order::Disguise { tribe }`: a queued unit order like any other (one per selected spy), ignored by anyone but a
+  spy, never interrupting what it does. Ordering another disguise, even switching from a settled one, undisguises it
+  at once and restarts the full countdown; disguising as its own tribe drops it.
+- The player clicks one of the other tribes' squares under the mana strip, shown while a spy is selected (theirs
+  skipped, in tribe order: shortcuts.md).
+- Colours (`Unit::shown_owner`): its owner sees it blink between its real and disguise colour every 2 turns while
+  it settles, then the disguise; every other tribe sees its real colour until it settles, then the disguise.
+
+**Reveal** (`Unit::reveal`), and nothing else ends a disguise:
+- an attack order aimed at it, the turn the attack starts (`GameMap::go_attack`, spotting's own too);
+- a blow, a firewarrior's bolt or a swarm's sting (`GameMap::damage`); a spell's blast or lightning does not;
+- hypnotism, both ways (a change of tribe clears every status);
+- another tribe's spy on its cell, every 4 turns, both unmasked (no alliance check);
+- a computer tribe catching spies passing as its own (below), `GIVE_UP_AND_SULK` (its own spies), arson's own
+  checks (below);
+- the player's select click on an enemy spy passing as one of their own (`Command::RevealSpy`), with or without a
+  selection; with fighters selected the click is an attack, which reveals it too. Hovering one shows the reveal
+  cursor (`CursorLook::RevealSpy`, our own punch badge). Never while it settles: it is an ordinary enemy then.
+
+**Arson** (`Order::Arson { building }`, `Action::Arson`, arson.rs): only the computer gives it, the original never
+lets a player arm it. The spy walks to a spot beside the building's wall nearest to it (`GameMap::arson_spot`: the
+original stands on a flagged wall cell of the footprint, ours just outside it, `[ours]`; the door as a fallback),
+then aims 10 turns, winds up 24 with the firebrand (`Pose::SetFire`, anim 17), throws it (a cosmetic
+`EffectKind::Firebrand` flying 80 units a turn, 64 turns of life), and 8 turns later the building catches fire
+lit by the spy's real tribe (`GameMap::set_fire`, as lightning), then it lingers 24. A genuine member of the tribe
+it passes as standing at the door while it aims or winds up unmasks it and ends the order; once it burns, a roll
+(`NOTICED_PERCENT`, 25 `[guess]`: the original's table was never read) may unmask it. A fight only interrupts
+it: back on its feet, it starts over, until the building burns or is gone, it dies, or gets another order.
+The original's wood-pile arson (kind 13) is never issued there: not implemented.
+
+**Computer tribes** (ai_spy.rs): with `STATE_SABOTAGE` on, every 64 turns, idle spies up to `MAX_SPY_ATTACKS` out
+at once (`[guess]` reading of the attribute) are each redisguised as a target's tribe and sent to burn the first
+not-burning building of a worklist: the 10 enemy buildings nearest the tribe's base (`[ours]`, the original's
+filling is not traced). Every 32 turns (`[guess]`; `SPY_CHECK_FREQUENCY` not read, its unit unknown) each computer
+tribe looks for spies passing as its own anywhere: caught by a `SPY_DISCOVER_CHANCE` percent roll (45 by default,
+the live value) or for standing idle longer than `ENEMY_SPY_MAX_STAND` turns (255), unmasking every spy passing as
+it within 3 cells (`[guess]`). A human tribe never runs this check.
+
 ## Wood (done: braves only)
 - A brave carries at most one piece of wood (`Unit::carrying`, 0 or 1).
 - `Order::CutTree { tree }` (left click on a tree with braves selected, `GameMap::cut_orders`; other kinds
