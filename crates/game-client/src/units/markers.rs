@@ -262,7 +262,7 @@ fn animate_markers(
             let Ok((mut slot, mut mesh, mut material, mut vis)) = slots.get_mut(child) else { continue };
             let m = SLOTS[slot.slot];
             let (i, above) = pose(m, n, u.id.raw());
-            let frame = (seen && shown(m, u, super::PLAYER, selection.contains(u.id), art.original, now.tick)).then(|| art.frame(m, i, u.owner)).flatten();
+            let frame = (seen && shown(m, u, super::PLAYER, selection.contains(u.id), art.original, now.tick)).then(|| art.frame(m, i, u.shown_owner(super::PLAYER, now.tick))).flatten();
             let Some((m_mesh, m_material)) = frame else {
                 vis.set_if_neq(Visibility::Hidden);
                 continue;

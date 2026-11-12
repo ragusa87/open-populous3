@@ -332,6 +332,8 @@ pub(super) fn select_and_order(
                         moves = orders;
                     } else if let Some(orders) = attack_click(&map.0, &selection.units, hovered.0) {
                         moves = orders;
+                    } else if let Some(reveal) = super::spy::reveal_click(&map.0, hovered.0, PLAYER) {
+                        moves = vec![reveal];
                     } else if let Some(orders) = hovered_site(&map.0, hovered.0).or(at).and_then(|at| building_click(&map.0, &selection.units, at)) {
                         moves = orders;
                     } else if let Some(i) = tree.tree {

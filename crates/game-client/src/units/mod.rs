@@ -14,6 +14,7 @@ mod procedural;
 mod shadow;
 pub mod sheets;
 pub mod selection;
+pub mod spy;
 pub mod worship;
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
@@ -231,8 +232,8 @@ impl UnitSprites {
             };
         }
         let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
-        // Wildmen have no tribe (`Owner::Wild`): one look for all.
-        let tribe = unit.owner.tribe().map_or(0, TribeId::as_usize);
+        // Wildmen have no tribe (`Owner::Wild`): one look for all. A disguised spy wears the colour the player sees.
+        let tribe = unit.shown_owner(PLAYER, now.tick).tribe().map_or(0, TribeId::as_usize);
         let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(sprite_dir(facing, yaw))?;
         let frame = if pose == Pose::Pedal && still { 0 } else { frame_index(pose, frames.len(), &unit.action, now, clock.alpha()) };
         frames.get(frame)
@@ -279,7 +280,7 @@ impl Plugin for UnitsPlugin {
             .init_resource::<GameSchedule>()
             .init_resource::<UnitSprites>()
             .init_resource::<GhostMaterials>()
-            .add_plugins((selection::SelectionPlugin, dust::DustPlugin, shadow::ShadowPlugin, markers::MarkersPlugin))
+            .add_plugins((selection::SelectionPlugin, spy::SpyPlugin, dust::DustPlugin, shadow::ShadowPlugin, markers::MarkersPlugin))
             .add_plugins(crate::boot::BootJobPlugin::<UnitSpritesJob>::default())
             .add_systems(
                 Update,

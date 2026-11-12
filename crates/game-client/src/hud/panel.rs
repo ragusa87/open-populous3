@@ -1,5 +1,5 @@
 //! Left panel frame: shaman preview box (filled by `shaman.rs`), the population strip (`population.rs`), the mana
-//! strip (`mana.rs`), tab buttons, one content node per tab.
+//! strip (`mana.rs`), the disguise squares (`disguise.rs`), tab buttons, one content node per tab.
 
 use bevy::prelude::*;
 
@@ -27,6 +27,10 @@ pub struct PopulationStrip;
 /// The strip under the population strip showing the tribe's mana (filled by `mana.rs`).
 #[derive(Component)]
 pub struct ManaStrip;
+
+/// The other tribes' squares under the mana strip, while a spy is selected (filled by `disguise.rs`).
+#[derive(Component)]
+pub struct DisguiseStrip;
 
 /// Content root of tab `n`; other plugins spawn their widgets inside it.
 #[derive(Component)]
@@ -70,6 +74,7 @@ fn spawn_panel(mut commands: Commands) {
             ));
             panel.spawn((PopulationStrip, Node { column_gap: px(6), align_items: AlignItems::Center, height: px(18), ..default() }));
             panel.spawn((ManaStrip, Node { column_gap: px(6), align_items: AlignItems::Center, height: px(18), ..default() }));
+            panel.spawn((DisguiseStrip, Node { column_gap: px(6), align_items: AlignItems::Center, height: px(18), display: Display::None, ..default() }));
             panel.spawn(Node { column_gap: px(4), ..default() }).with_children(|row| {
                 for (i, label) in TABS.iter().enumerate() {
                     row.spawn((

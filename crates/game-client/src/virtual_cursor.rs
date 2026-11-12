@@ -61,6 +61,8 @@ pub enum CursorLook {
     Spell { kind: SpellKind, valid: bool },
     /// Placing `plan` (a building or a camp fire); `valid` when it can stand under the cursor.
     Building { plan: Plan, valid: bool },
+    /// Over another tribe's spy whose disguise has settled: a click reveals it (`spy.rs`).
+    RevealSpy,
 }
 
 /// Whether the mouse is captured by the game (Esc toggles outside the game), and the in-game cursor position.
@@ -137,6 +139,35 @@ pub fn fallback_pointer() -> PointerImage {
         })
         .collect();
     PointerImage { width, height: ARROW.len(), rgba, tip: (0, 0) }
+}
+
+/// Our own punch badge for the spy reveal cursor (the original's own sprite is not identified): `#` outline, `.`
+/// skin.
+const FIST: [&str; 9] = [
+    " ######  ",
+    "#..#..## ",
+    "#..#..#.#",
+    "#..#..#.#",
+    "#.......#",
+    "##......#",
+    " #.....# ",
+    " #.....# ",
+    "  #####  ",
+];
+
+/// The generated punch badge.
+pub fn fist() -> PointerImage {
+    let width = FIST[0].len();
+    let rgba = FIST
+        .iter()
+        .flat_map(|row| row.bytes())
+        .flat_map(|c| match c {
+            b'#' => [40, 20, 5, 255],
+            b'.' => [240, 190, 140, 255],
+            _ => [0, 0, 0, 0],
+        })
+        .collect();
+    PointerImage { width, height: FIST.len(), rgba, tip: (width / 2, FIST.len() / 2) }
 }
 
 /// Generated spell cursor (no original data): a gold ring with a dark outline around a cross,
@@ -289,6 +320,7 @@ impl PointerSource {
             CursorLook::Menu => self.gold(frame),
             CursorLook::Spell { kind, valid } => with_badge(&self.gold(frame), &self.icon(Some(spell_sprite(kind)), valid)),
             CursorLook::Building { plan, valid } => with_badge(&arrow(), &self.icon(plan_sprite(plan), valid)),
+            CursorLook::RevealSpy => with_badge(&arrow(), &fist()),
         }
     }
 }
@@ -297,7 +329,7 @@ impl PointerSource {
 pub fn look_frames(look: CursorLook) -> usize {
     match look {
         CursorLook::Menu | CursorLook::Spell { .. } => POINTER_GOLD_ARROW.len(),
-        CursorLook::Arrow | CursorLook::Building { .. } => 1,
+        CursorLook::Arrow | CursorLook::Building { .. } | CursorLook::RevealSpy => 1,
     }
 }
 
