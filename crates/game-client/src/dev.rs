@@ -13,6 +13,8 @@
 //! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
 //! `EXPLODE=building:N` blows up building N (its index), as if `EXPLODE_TICKS` ticks ago (0 by default; with
 //! `GAME_SPEED=0` the shot holds it there): the explosion is drawn, then the building removed the next frame.
+//! `SPY=disguise:<tribe>[:ticks]` puts a disguised spy of the player and another tribe's spy disguised as the player
+//! next to the shaman; `ARSON=building:N` has a disguised spy set building N on fire, `ARSON_TICKS` ticks run.
 //! `TRAIN=stored/cost[:short]` puts a brave of the player in each of their training units, making something with
 //! that much mana stored (`:short`: short of mana).
 //! `CREW=building:N` sends every brave of the player on foot into building N (its index), then runs `CREW_TICKS` ticks.
@@ -205,6 +207,42 @@ pub fn invisibility_demo(map: &mut game_core::map::GameMap) -> bool {
     map.spell_books[PLAYER as usize].set(game_core::spell_book::SpellKind::Invisibility, game_core::spell_book::Availability::Unlimited);
     map.apply(&Command::Cast { player: PLAYER, spell: game_core::spell::Spell::Invisibility { at } });
     map.run(game_core::time::Ticks::new(20));
+    true
+}
+
+/// A tribe by its colour's name, any case.
+pub fn tribe_by_name(name: &str) -> Option<game_core::tribes::TribeId> {
+    game_core::tribes::TribeId::ALL.into_iter().find(|t| format!("{t:?}").eq_ignore_ascii_case(name.trim()))
+}
+
+/// `SPY=disguise:<tribe>[:ticks]`: a spy of the player next to their shaman disguised as that tribe, and another
+/// tribe's spy beside it disguised as the player, then `ticks` run (0 by default: both still settling, the
+/// player's own blinking; 63 or more: settled). False without a shaman or a known tribe.
+pub fn spy_demo(map: &mut game_core::map::GameMap, how: &str) -> bool {
+    let mut parts = how.strip_prefix("disguise:").unwrap_or_default().split(':');
+    let Some(tribe) = parts.next().and_then(tribe_by_name).filter(|&t| t != PLAYER) else { return false };
+    let ticks = parts.next().and_then(|t| t.parse().ok()).unwrap_or(0);
+    let Some(at) = map.shaman_of(PLAYER).map(|u| (u.x, u.z)) else { return false };
+    let delay = game_core::disguise::DISGUISE_DELAY;
+    let (delay, ticks) = if ticks >= delay.get() { (game_core::time::Ticks::ZERO, ticks - delay.get()) } else { (delay, ticks) };
+    map.spawn(PLAYER, game_core::unit::UnitKind::Spy, (at.0.wrapping_add(400), at.1)).disguise_as(tribe, delay);
+    map.spawn(tribe, game_core::unit::UnitKind::Spy, (at.0.wrapping_add(1400), at.1)).disguise_as(PLAYER, delay);
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
+/// `ARSON=building:N`: another tribe's spy, disguised as building N's owner, sets it on fire (`Order::Arson`), then
+/// `ticks` run. False when it does not parse or the building has no owner.
+pub fn arson_demo(map: &mut game_core::map::GameMap, what: &str, ticks: u32) -> bool {
+    let Some(b) = what.strip_prefix("building:").and_then(|n| n.trim().parse::<usize>().ok()).and_then(|i| map.buildings.get(i)) else { return false };
+    let (id, door) = (b.id, b.door());
+    let Some(owner) = b.owner.tribe() else { return false };
+    let arsonist = if owner == PLAYER { PLAYER.next() } else { PLAYER };
+    let spy = map.spawn(arsonist, game_core::unit::UnitKind::Spy, (door.0.wrapping_add(1024), door.1));
+    spy.disguise_as(owner, game_core::time::Ticks::ZERO);
+    let unit = spy.id;
+    map.apply(&Command::OrderUnit { player: arsonist, unit, order: game_core::unit::Order::Arson { building: id } });
+    map.run(game_core::time::Ticks::new(ticks));
     true
 }
 
@@ -616,6 +654,13 @@ fn screenshot(
         if std::env::var("INVISIBLE").is_ok_and(|v| v == "1") {
             invisibility_demo(&mut map.0);
         }
+        if let Ok(how) = std::env::var("SPY") {
+            spy_demo(&mut map.0, &how);
+        }
+        if let Ok(what) = std::env::var("ARSON") {
+            let ticks = std::env::var("ARSON_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            arson_demo(&mut map.0, &what, ticks);
+        }
         if let Ok(at) = std::env::var("VOLCANO") {
             let ticks = std::env::var("VOLCANO_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             volcano_demo(&mut map.0, &at, ticks);
@@ -785,6 +830,24 @@ mod tests {
         assert_eq!(parse_vault("granted:3"), Some(VaultPhase::Granted { ticks: 3 }));
         assert_eq!(parse_vault("spent"), Some(VaultPhase::Spent));
         assert_eq!((parse_vault("granted"), parse_vault("open")), (None, None));
+    }
+
+    #[test]
+    fn spy_demo_disguises_both_ways_and_settles_on_request() {
+        let mut map = game_core::map::GameMap::sandbox_units();
+        assert!(!spy_demo(&mut map, "disguise:blue"), "never as the player's own tribe");
+        assert!(spy_demo(&mut map, "disguise:red:63"));
+        assert_eq!(map.units.iter().filter(|u| u.kind == game_core::unit::UnitKind::Spy && u.disguised()).count(), 2);
+    }
+
+    #[test]
+    fn arson_demo_sets_an_enemy_building_on_fire() {
+        let mut map = game_core::map::GameMap::sandbox_units();
+        let at = map.shaman_of(PLAYER).map(|u| (u.x.wrapping_add(2048) & !511, u.z & !511)).unwrap();
+        map.add_building(game_core::building::Building::new(game_core::building::BuildingKind::Hut { size: 1 }, game_core::tribes::TribeId::Red, at.0, at.1, 0));
+        let n = map.buildings.iter().position(|b| b.owner == game_core::tribes::TribeId::Red && !b.kind.fireproof()).unwrap();
+        assert!(arson_demo(&mut map, &format!("building:{n}"), 600));
+        assert!(map.buildings[n].burning.is_some() || map.buildings[n].ignited_by.is_some());
     }
 
     #[test]
