@@ -22,6 +22,7 @@ pub mod combat;
 pub mod command;
 pub mod convert;
 pub mod coordinator;
+pub mod disguise;
 pub mod earthquake;
 pub mod effect;
 pub mod erode;

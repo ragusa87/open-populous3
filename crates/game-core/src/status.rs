@@ -84,6 +84,8 @@ pub struct Statuses {
     pub hypnotized_from: Option<crate::tribes::TribeId>,
     /// A Ghost Army copy: no real unit.
     pub ghost: bool,
+    /// A spy's disguise (`disguise.rs`): lost with the rest on a change of tribe, so hypnotism both ways.
+    pub disguise: Option<crate::disguise::Disguise>,
 }
 
 impl Statuses {
@@ -91,7 +93,8 @@ impl Statuses {
         self == Statuses::default()
     }
 
-    /// One turn at `now` for a person at `phase`: on its `STEP`, each running timer loses a step.
+    /// One turn at `now` for a person at `phase`: on its `STEP`, each running timer loses a step; a disguise settles
+    /// a turn every turn.
     pub fn tick(&mut self, now: Tick, phase: u32) {
         if STEP.fires(now, phase) {
             self.shield.step();
@@ -99,6 +102,9 @@ impl Statuses {
             self.invisible.step();
             self.hypnotized.step();
             self.struck_by_lightning.step();
+        }
+        if let Some(d) = self.disguise.as_mut() {
+            d.tick();
         }
     }
 }

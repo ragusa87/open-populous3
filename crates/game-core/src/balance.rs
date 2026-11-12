@@ -113,6 +113,13 @@ impl Units {
     }
 }
 
+/// Spies (docs/specs/units.md "Spies").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Spies {
+    /// `SPY_DISGUISE_DELAY`: turns a fresh disguise takes to settle (`disguise.rs`).
+    pub disguise_delay: Turns,
+}
+
 /// Every game-balance number, grouped by topic (huts-and-training.md "Balance and game turns").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Balance {
@@ -120,6 +127,7 @@ pub struct Balance {
     pub training: Training,
     pub income: Income,
     pub units: Units,
+    pub spies: Spies,
 }
 
 impl Balance {
@@ -160,6 +168,7 @@ impl Balance {
                 shaman: 30,
             },
             units: Units { shaman: 2000, brave: 1000, warrior: 1800, preacher: 1100, spy: 600, firewarrior: 700 },
+            spies: Spies { disguise_delay: Turns::new(crate::disguise::DISGUISE_DELAY.get()) },
         }
     }
 
@@ -169,7 +178,7 @@ impl Balance {
     }
 
     /// Corrects each group `constant.dat` actually backs, one at a time (TODO.md "Computer players (AI)"):
-    /// only `units.life` (`LIFE_<P>`) so far, the way `SpellBook::apply_constants` already does for spells.
+    /// only `units.life` (`LIFE_<P>`) and `spies` so far, the way `SpellBook::apply_constants` already does for spells.
     /// A missing or unreadable key leaves that kind's own default untouched, same lenient spirit.
     /// **`LIFE_<P>`'s own per-kind suffixes are `[ours]`, a guess**: constants.md only confirms the group
     /// exists and gives two example values (brave, warrior), not every kind's exact spelling - worth
@@ -195,6 +204,9 @@ impl Balance {
         }
         if let Some(v) = raw.get("LIFE_FIREWARRIOR") {
             u.firewarrior = v as u16;
+        }
+        if let Some(v) = raw.get("SPY_DISGUISE_DELAY") {
+            self.spies.disguise_delay = Turns::new(v);
         }
     }
 }
