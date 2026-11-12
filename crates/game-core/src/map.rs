@@ -1488,6 +1488,7 @@ impl GameMap {
             self.tend_ai_spellcasting();
             self.tend_ai_defense();
             self.tend_ai_sorties();
+            self.tend_ai_spies();
             self.tend_spy_meetings();
             self.spot_enemies();
             self.tend_attacks();

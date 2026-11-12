@@ -214,6 +214,9 @@ fn default_attrs() -> [i32; ATTR_COUNT] {
     attrs[6] = 10; // PREF_RELIGIOUS_PEOPLE
     attrs[5] = 5; // PREF_SPY_PEOPLE
     attrs[15] = 2; // MAX_DEFENSIVE_ACTIONS (our reuse: posted-defender quota)
+    attrs[23] = 2; // MAX_SPY_ATTACKS (ai_spy.rs's reading: spies out setting fires at once)
+    attrs[24] = 255; // ENEMY_SPY_MAX_STAND (live 255, pop3-rev-analysis.md "What un-disguises a spy")
+    attrs[40] = 45; // SPY_DISCOVER_CHANCE (live 45, same)
     attrs
 }
 
@@ -389,7 +392,7 @@ impl GameMap {
     /// tower spot if one was set, else its reincarnation site, else any building it already owns.
     /// `None` only for a computer tribe with nothing placed at all yet (just spawned, no script setup
     /// ran) — `construct_building`/`post_defender` simply do nothing that sweep.
-    fn ai_base(&self, owner: TribeId) -> Option<(u16, u16)> {
+    pub(crate) fn ai_base(&self, owner: TribeId) -> Option<(u16, u16)> {
         let drum_tower = self.ai_index(owner).and_then(|i| self.ai[i].drum_tower_pos);
         drum_tower.or_else(|| self.site_of(owner).map(|s| (s.x, s.z))).or_else(|| self.buildings.iter().find(|b| b.owner == owner).map(|b| (b.x, b.z)))
     }
