@@ -1,8 +1,8 @@
 //! A spy setting a building on fire (docs/specs/units.md "Spies", pop3-rev-analysis.md "Arson: a separate order,
-//! kind 15"): it walks up to the building's wall, aims, winds up with a lit firebrand, throws it, and the building
-//! catches fire as if struck by lightning (`GameMap::set_fire`, lit by its real tribe), then it lingers. Only the
-//! computer gives this order (`ai.rs`); the original never lets a player arm it. Knocked out of it by a fight, it
-//! starts over, until the building burns, is gone, or the spy dies.
+//! kind 15"): it walks up to the middle of the building's wall, crouches, lights a firebrand and leaves it burning
+//! on the wall, and the building catches fire as if struck by lightning (`GameMap::set_fire`, lit by its real
+//! tribe), then it lingers. The computer's own order (`ai_spy.rs`), and a spy's attack on a building. Knocked out
+//! of it by a fight, it starts over, until the building burns, is gone, or the spy dies.
 
 use crate::building::BuildingId;
 use crate::effect::{Effect, EffectKind};
