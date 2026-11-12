@@ -84,6 +84,9 @@ pub enum Command {
     /// straight at it. Carries the whole group for the same reason `SetPatrol` does: the formation is one new
     /// shared object, minted inside one deterministic `apply` call.
     Formation { player: TribeId, units: Vec<UnitId>, to: (u16, u16) },
+    /// A click on a spy (shortcuts.md, units.md "Spies"), with or without a selection: another tribe's spy whose
+    /// disguise has settled, or one of the player's own, loses its disguise (`GameMap::reveal_spy`).
+    RevealSpy { player: TribeId, unit: UnitId },
     /// Space: skips the current flyby, if one is playing and interruptible (`GameMap::cancel_flyby`,
     /// ai-scripts.md `FLYBY_ALLOW_INTERRUPT`). There is one shared camera/cutscene, so `player` is not
     /// checked against anything.

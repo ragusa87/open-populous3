@@ -259,6 +259,10 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             b.extend([23, player.as_u8()]);
             put_id(b, *building);
         }
+        Command::RevealSpy { player, unit } => {
+            b.extend([24, player.as_u8()]);
+            put_id(b, *unit);
+        }
     }
 }
 
@@ -419,6 +423,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         21 => Some(Command::CancelGuard { player }),
         22 => Some(Command::PlaceTree { player, at: (c.u16()?, c.u16()?) }),
         23 => Some(Command::Eject { player, building: c.id()? }),
+        24 => Some(Command::RevealSpy { player, unit: c.id()? }),
         _ => None,
     }
 }
@@ -586,6 +591,7 @@ mod tests {
                 Command::CancelGuard { player: TribeId::Red },
                 Command::PlaceTree { player: TribeId::Blue, at: (40_000, 7) },
                 Command::Eject { player: TribeId::Green, building: Id::from_raw(u32::MAX) },
+                Command::RevealSpy { player: TribeId::Yellow, unit: Id::from_raw(7) },
             ],
         }
     }

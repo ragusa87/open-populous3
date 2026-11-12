@@ -1,9 +1,10 @@
 //! A spy's disguise (docs/specs/units.md "Spies", pop3-rev-analysis.md "Spy disguise and infiltration"): the
 //! tribe it passes as, and a settling countdown during which it still counts as its real tribe everywhere.
 
-use crate::time::{Countdown, Tick, Ticks};
+use crate::map::GameMap;
+use crate::time::{Countdown, Every, Tick, Ticks};
 use crate::tribes::{Owner, TribeId};
-use crate::unit::{Unit, UnitKind};
+use crate::unit::{Target, Unit, UnitId, UnitKind};
 
 /// `SPY_DISGUISE_DELAY` (exe default 63 turns, constants.md "Misc"): a timing, so the real number is our default.
 pub const DISGUISE_DELAY: Ticks = Ticks::new(63);
@@ -75,6 +76,45 @@ impl Unit {
     /// Back to its own look at once. Whether it had a disguise to lose.
     pub fn reveal(&mut self) -> bool {
         self.statuses.disguise.take().is_some()
+    }
+}
+
+/// Spies meeting check their cell on this rhythm ("What un-disguises a spy" [exe]).
+pub const MEETING_EVERY: Every = Every::new(4);
+
+/// Spies (id, real owner, cell) unmasked by meeting: every one sharing its cell with a spy of another real tribe,
+/// allies or not.
+pub fn unmasked_by_meeting(spies: &[(UnitId, Owner, (i32, i32))]) -> Vec<UnitId> {
+    spies.iter().filter(|&&(_, owner, cell)| spies.iter().any(|&(_, o, c)| c == cell && o != owner)).map(|&(id, _, _)| id).collect()
+}
+
+impl GameMap {
+    /// Every 4 turns, spies standing on a cell with another tribe's spy lose their disguise.
+    pub(crate) fn tend_spy_meetings(&mut self) {
+        if !MEETING_EVERY.fires(self.now, 0) {
+            return;
+        }
+        let spies: Vec<_> = self.units.iter().filter(|u| u.kind == UnitKind::Spy && u.is_alive() && u.in_the_open()).map(|u| (u.id, u.owner, u.cell())).collect();
+        for id in unmasked_by_meeting(&spies) {
+            if let Some(u) = self.unit_mut(id) {
+                u.reveal();
+            }
+        }
+    }
+
+    /// Every unit aimed at by an order loses its disguise, whoever gives it (an attack spotted on its own too).
+    pub(crate) fn reveal_targeted(&mut self, target: Target) {
+        if let Target::Unit(id) = target && let Some(u) = self.unit_mut(id) {
+            u.reveal();
+        }
+    }
+
+    /// `Command::RevealSpy`: `unit` loses its disguise if it is one of `player`'s own spies, or another tribe's
+    /// with a settled disguise (one still settling is not hidden yet).
+    pub(crate) fn reveal_spy(&mut self, player: TribeId, unit: UnitId) {
+        if let Some(u) = self.unit_mut(unit).filter(|u| u.owner == Owner::Tribe(player) || u.disguised()) {
+            u.reveal();
+        }
     }
 }
 
@@ -169,7 +209,8 @@ mod tests {
         use crate::command::Command;
         use crate::map::GameMap;
         use crate::tribes::TribeId;
-        use crate::unit::{Action, Order, UnitId, UnitKind};
+        use crate::effect::DamageKind;
+        use crate::unit::{Action, Order, Target, UnitId, UnitKind};
 
         pub(crate) fn bare() -> GameMap {
             let mut map = GameMap::sandbox_units();
@@ -252,6 +293,85 @@ mod tests {
             assert!(left_alone_by(UnitKind::Preacher, TribeId::Red, true));
             assert!(!left_alone_by(UnitKind::Preacher, TribeId::Red, false));
             assert!(!left_alone_by(UnitKind::Preacher, TribeId::Green, true));
+        }
+    
+        fn settled_spy(map: &mut GameMap) -> UnitId {
+            spy_disguised(map, TribeId::Red, true)
+        }
+
+        #[test]
+        fn an_order_aimed_at_a_spy_reveals_it_even_one_of_its_own() {
+            let mut map = bare();
+            let spy = settled_spy(&mut map);
+            let warrior = add(&mut map, TribeId::Red, UnitKind::Warrior, (33024 + 2000, 34048));
+            map.step(&[Command::OrderUnit { player: TribeId::Red, unit: warrior, order: Order::Attack { target: Target::Unit(spy) } }]);
+            assert!(!map.unit(spy).unwrap().disguised());
+            let mut map = bare();
+            let spy = settled_spy(&mut map);
+            let brave = add(&mut map, TribeId::Blue, UnitKind::Warrior, (33024 + 2000, 34048));
+            map.step(&[Command::OrderUnit { player: TribeId::Blue, unit: brave, order: Order::Attack { target: Target::Unit(spy) } }]);
+            assert!(!map.unit(spy).unwrap().disguised(), "the voluntary undisguise");
+        }
+
+        #[test]
+        fn a_blow_reveals_a_spell_does_not() {
+            let mut map = bare();
+            let spy = settled_spy(&mut map);
+            map.damage(spy, 1, DamageKind::Blast, Some(TribeId::Green.into()));
+            assert!(map.unit(spy).unwrap().disguised(), "a blast");
+            map.damage(spy, 1, DamageKind::Melee, Some(TribeId::Green.into()));
+            assert!(!map.unit(spy).unwrap().disguised());
+        }
+
+        #[test]
+        fn spies_of_two_tribes_on_one_cell_unmask_each_other() {
+            let (a, b, c) = (UnitId::from_raw(1), UnitId::from_raw(2), UnitId::from_raw(3));
+            let (blue, red) = (TribeId::Blue.into(), TribeId::Red.into());
+            assert_eq!(super::super::unmasked_by_meeting(&[(a, blue, (1, 1)), (b, red, (1, 1)), (c, red, (2, 1))]), [a, b]);
+            assert!(super::super::unmasked_by_meeting(&[(a, blue, (1, 1)), (b, blue, (1, 1))]).is_empty(), "same tribe");
+            let mut map = bare();
+            let spy = settled_spy(&mut map);
+            add(&mut map, TribeId::Green, UnitKind::Spy, (33024 + 10, 34048));
+            map.run(crate::time::Ticks::new(4));
+            assert!(!map.unit(spy).unwrap().disguised());
+        }
+
+        #[test]
+        fn a_click_reveals_a_settled_enemy_spy_or_ones_own_never_a_settling_one() {
+            let mut map = bare();
+            let spy = settled_spy(&mut map);
+            map.step(&[Command::RevealSpy { player: TribeId::Red, unit: spy }]);
+            assert!(!map.unit(spy).unwrap().disguised());
+            map.unit_mut(spy).unwrap().disguise_as(TribeId::Red, super::super::DISGUISE_DELAY);
+            map.step(&[Command::RevealSpy { player: TribeId::Red, unit: spy }]);
+            assert!(map.unit(spy).unwrap().statuses.disguise.is_some(), "still settling: nothing to reveal");
+            map.step(&[Command::RevealSpy { player: TribeId::Blue, unit: spy }]);
+            assert!(map.unit(spy).unwrap().statuses.disguise.is_none(), "its own owner");
+        }
+
+        #[test]
+        fn giving_up_and_sulking_drops_the_tribes_own_disguises() {
+            let mut map = bare();
+            let spy = settled_spy(&mut map);
+            map.ai_set_give_up_and_sulk(TribeId::Blue, true);
+            assert!(!map.unit(spy).unwrap().disguised());
+        }
+
+        #[test]
+        fn hypnotised_it_comes_back_undisguised() {
+            let mut map = bare();
+            let spy = settled_spy(&mut map);
+            map.hypnotize(spy, TribeId::Green);
+            assert_eq!(map.unit(spy).unwrap().statuses.disguise, None);
+        }
+
+        #[test]
+        fn walking_and_time_never_reveal() {
+            let mut map = bare();
+            let spy = settled_spy(&mut map);
+            map.step(&[Command::OrderUnit { player: TribeId::Blue, unit: spy, order: Order::MoveTo { x: 35000, z: 34048 } }]);
+            map.run(crate::time::Ticks::new(300));
+            assert!(map.unit(spy).unwrap().disguised());
         }
     }
 }

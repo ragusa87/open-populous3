@@ -41,10 +41,11 @@ impl GameMap {
         }
     }
 
-    /// Unit `i` sets off to attack `target`, if it may: ends its own invisibility right away (a guess, not traced,
+    /// Unit `i` sets off to attack `target`, if it may (a spy aimed at loses its disguise either way): ends its own invisibility right away (a guess, not traced,
     /// TODO.md: attacking breaks it, walking does not), whether the order came from the player or from spotting an
     /// enemy on its own.
     pub(crate) fn go_attack(&mut self, i: usize, target: Target) {
+        self.reveal_targeted(target);
         if let Some(to) = self.attack_goal(&self.units[i], target) {
             self.units[i].attack(target, to);
             self.units[i].statuses.invisible = crate::status::Timed::default();

@@ -1286,6 +1286,10 @@ impl GameMap {
                 self.cancel_flyby();
                 None
             }
+            Command::RevealSpy { player, unit } => {
+                self.reveal_spy(player, unit);
+                None
+            }
         }
     }
 
@@ -1484,6 +1488,7 @@ impl GameMap {
             self.tend_ai_spellcasting();
             self.tend_ai_defense();
             self.tend_ai_sorties();
+            self.tend_spy_meetings();
             self.spot_enemies();
             self.tend_attacks();
             self.tend_wrecking();
@@ -2031,7 +2036,8 @@ impl GameMap {
 
     /// The one way a unit is hurt: `amount` of `kind` from tribe `from`, unless it is immune (`effect::hurts`); a
     /// bloodlusted target takes a blow or a bolt `>> BLOODLUST_HEALTH_SHIFT` (independently of the attacker's own
-    /// bloodlust, already folded into `amount` by `combat::strength`/`firebolt`). True when this kills it.
+    /// bloodlust, already folded into `amount` by `combat::strength`/`firebolt`). True when this kills it. A blow,
+    /// a bolt or a sting strips a spy's disguise (`disguise.rs`); a spell's blast or lightning does not.
     /// `Unit::take_hit` remembers `from` and, if it kills, `kind` (`hurt.rs`). A ghost is destroyed outright
     /// instead (docs/plans/ghost.md): never wounded, never counted as a normal kill (`apply_event`'s own tally
     /// only fires on `true`).
@@ -2042,6 +2048,9 @@ impl GameMap {
                 false
             }
             Some(i) => {
+                if matches!(kind, DamageKind::Melee | DamageKind::Fire | DamageKind::Swarm) {
+                    self.units[i].reveal();
+                }
                 let lessened = matches!(kind, DamageKind::Melee | DamageKind::Fire) && self.units[i].statuses.bloodlust.is_on();
                 self.units[i].take_hit(if lessened { amount >> crate::status::BLOODLUST_HEALTH_SHIFT } else { amount }, kind, from)
             }

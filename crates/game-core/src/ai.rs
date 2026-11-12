@@ -283,14 +283,17 @@ impl GameMap {
     }
 
     /// Part of `GIVE_UP_AND_SULK`'s OTHER effect (`0x41CA10(tribe)`, ai-scripts.md "Other ON/OFF switches",
-    /// "fully traced"): a one-shot per-tribe cleanup/punishment sweep. Four of its six documented effects
-    /// so far; spy-disguise reveal and aborting in-progress conversions are deferred
+    /// "fully traced"): a one-shot per-tribe cleanup/punishment sweep. Five of its six documented effects
+    /// so far, its own spies' disguises among them; aborting in-progress conversions is deferred
     /// (TODO.md "Computer players (AI)").
     fn ai_give_up_sweep(&mut self, tribe: TribeId) {
         self.ai_force_off_vehicles(tribe);
         self.ai_cripple_angels_of_death(tribe);
         self.ai_shorten_hypnotism(tribe);
         self.ai_delete_ghosts(tribe);
+        self.units.iter_mut().filter(|u| u.owner == tribe).for_each(|u| {
+            u.reveal();
+        });
     }
 
     /// `GIVE_UP_AND_SULK`'s own ghost-unit deletion (docs/plans/ghost.md): tears down every one of the tribe's
