@@ -336,7 +336,7 @@ fn spawn_game_build(start: Start, levels: LevelList) -> Task<GameMap> {
         match start {
             Start::NewGame => levels.load_current(),
             Start::SandboxWalk => new_game(GameMap::sandbox_walk()),
-            Start::SandboxUnits => new_game(GameMap::sandbox_units()),
+            Start::SandboxUnits => new_game(GameMap::sandbox_units_with_spies()),
             Start::SandboxBuildings => new_game(GameMap::sandbox_buildings()),
             Start::SandboxWorship => new_game(GameMap::sandbox_worship()),
             Start::SandboxSpells => new_game(GameMap::sandbox_spells()),

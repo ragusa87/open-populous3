@@ -185,4 +185,15 @@ mod tests {
         assert!(!map.unit(as_red).unwrap().disguised());
         assert!(map.unit(as_green).unwrap().disguised());
     }
+
+    #[test]
+    fn in_the_played_units_sandbox_red_burns_the_blue_hut() {
+        let mut map = GameMap::sandbox_units_with_spies().seeded(1);
+        let hut = map.buildings.iter().find(|b| b.owner == TribeId::Blue).unwrap().id;
+        let burnt = (0..2000).any(|_| {
+            map.tick();
+            map.building(hut).is_some_and(|b| b.burning.is_some())
+        });
+        assert!(burnt);
+    }
 }

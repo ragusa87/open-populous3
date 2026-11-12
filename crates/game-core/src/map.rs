@@ -554,6 +554,40 @@ impl GameMap {
         map
     }
 
+    /// The units sandbox as played (`POP3_START=sandbox-units`, the menu): `sandbox_units`, the tests' fixture, plus
+    /// spies away from the rest in the north: a red hut in the north-east with a spy of the player beside it and a
+    /// grove behind, and a red computer tribe sabotaging, its spy by a blue hut in the north-west.
+    pub fn sandbox_units_with_spies() -> Self {
+        let mut map = GameMap::sandbox_units();
+        map.sandbox_spies(MAP_SIZE as i32 / 2);
+        map
+    }
+
+    /// `sandbox_units_with_spies`' corners, around the island's centre cell `c`: the player's spy (disguise it with the
+    /// red square, walk it up to the hut, watch a red one unmask it) and red's own spy, which red's computer
+    /// tribe (`STATE_SABOTAGE` on, little else) disguises and sends to set the blue hut on fire. Red's catch
+    /// chance is lowered from its 45% default so a disguised spy of the player lasts long enough to try out.
+    fn sandbox_spies(&mut self, c: i32) {
+        let at = |dx: i32, dz: i32| ((c + dx) as u16 * 512 + 256, (c + dz) as u16 * 512 + 256);
+        let corner = |dx: i32, dz: i32| ((c + dx) * 512) as u16;
+        let red_hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, corner(13, 0), corner(-14, 0), 0);
+        let blue_hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, corner(-15, 0), corner(-14, 0), 0);
+        for hut in [red_hut, blue_hut] {
+            self.trees.retain(|t| !hut.covers((t.x, t.z), 1024));
+            self.add_building(hut);
+        }
+        self.spawn(TribeId::Blue, UnitKind::Spy, at(9, -13));
+        self.spawn(TribeId::Red, UnitKind::Spy, at(-10, -13));
+        let grove = [(16, -17), (17, -15), (14, -19), (18, -12), (12, -20), (15, -16)];
+        for (k, &(dx, dz)) in grove.iter().enumerate() {
+            self.trees.retain(|t| t.cell() != (c + dx, c + dz));
+            self.trees.push(crate::tree::Tree::new((c + dx, c + dz), k as u8, crate::tree::MAX_SIZE));
+        }
+        self.ai.push(crate::ai::NativeAi::new(TribeId::Red));
+        self.ai_set_state(TribeId::Red, crate::ai::state::SABOTAGE, true);
+        self.ai_set_attr(TribeId::Red, crate::ai_spy::SPY_DISCOVER_CHANCE, 5);
+    }
+
     /// Test ground for praying: a flat island with the player's site at the centre.
     /// - South: a pyramid of knowledge (neutral, teaching the temple, as in level 3), its door facing
     ///   the site, for the shaman.
@@ -3416,6 +3450,23 @@ mod tests {
         assert!(m.units.iter().any(|u| (1..=crate::status::BLINK_STEPS).contains(&u.statuses.shield.steps_left())), "in their last steps");
         m.run(Ticks::secs(1));
         assert_eq!(marked(&m), 0, "gone after 180 steps of 8 turns");
+    }
+
+    #[test]
+    fn the_played_units_sandbox_has_its_spy_corners_on_land_away_from_the_rest() {
+        let m = GameMap::sandbox_units_with_spies();
+        let base = GameMap::sandbox_units();
+        assert_eq!(m.buildings.len(), base.buildings.len() + 2);
+        assert_eq!(m.units.len(), base.units.len() + 2);
+        for b in &m.buildings[base.buildings.len()..] {
+            assert!(b.walled_cells(m.terrain.size() as i32).iter().all(|&c| !crate::unit::is_sea(&m.terrain, c)), "on land");
+        }
+        for u in m.units.iter().filter(|u| !base.units.iter().any(|b| b.id == u.id)) {
+            assert!(u.kind == UnitKind::Spy && !crate::unit::is_sea(&m.terrain, u.cell()));
+            assert!(u.z < 64 * 512 - 10 * 512, "north of everyone else");
+        }
+        assert!(m.trees.iter().all(|t| !crate::unit::is_sea(&m.terrain, t.cell())));
+        assert!(m.ai_state(TribeId::Red, crate::ai::state::SABOTAGE));
     }
 
     #[test]
