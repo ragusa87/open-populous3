@@ -102,17 +102,18 @@ impl GameMap {
         }
     }
 
-    /// Every unit aimed at by an order loses its disguise, whoever gives it (an attack spotted on its own too).
+    /// A unit an attack is aimed at loses its disguise the turn the attack starts, long before contact (an attack
+    /// spotted on its own too). Other orders aimed at it do not reveal it.
     pub(crate) fn reveal_targeted(&mut self, target: Target) {
         if let Target::Unit(id) = target && let Some(u) = self.unit_mut(id) {
             u.reveal();
         }
     }
 
-    /// `Command::RevealSpy`: `unit` loses its disguise if it is one of `player`'s own spies, or another tribe's
-    /// with a settled disguise (one still settling is not hidden yet).
+    /// `Command::RevealSpy`: `unit` loses its disguise if it passes as one of `player`'s own people (a select click on
+    /// it: one still settling is an ordinary enemy, one passing as a third tribe not a lookalike).
     pub(crate) fn reveal_spy(&mut self, player: TribeId, unit: UnitId) {
-        if let Some(u) = self.unit_mut(unit).filter(|u| u.owner == Owner::Tribe(player) || u.disguised()) {
+        if let Some(u) = self.unit_mut(unit).filter(|u| u.counts_as(player)) {
             u.reveal();
         }
     }
@@ -300,17 +301,17 @@ mod tests {
         }
 
         #[test]
-        fn an_order_aimed_at_a_spy_reveals_it_even_one_of_its_own() {
+        fn an_attack_aimed_at_a_spy_reveals_it_at_once_other_orders_do_not() {
             let mut map = bare();
             let spy = settled_spy(&mut map);
-            let warrior = add(&mut map, TribeId::Red, UnitKind::Warrior, (33024 + 2000, 34048));
+            let warrior = add(&mut map, TribeId::Red, UnitKind::Warrior, (33024 + 4000, 34048));
             map.step(&[Command::OrderUnit { player: TribeId::Red, unit: warrior, order: Order::Attack { target: Target::Unit(spy) } }]);
-            assert!(!map.unit(spy).unwrap().disguised());
+            assert!(!map.unit(spy).unwrap().disguised(), "the turn it starts, far from contact");
             let mut map = bare();
             let spy = settled_spy(&mut map);
-            let brave = add(&mut map, TribeId::Blue, UnitKind::Warrior, (33024 + 2000, 34048));
-            map.step(&[Command::OrderUnit { player: TribeId::Blue, unit: brave, order: Order::Attack { target: Target::Unit(spy) } }]);
-            assert!(!map.unit(spy).unwrap().disguised(), "the voluntary undisguise");
+            let own = add(&mut map, TribeId::Blue, UnitKind::Warrior, (33024 + 4000, 34048));
+            map.step(&[Command::OrderUnit { player: TribeId::Blue, unit: own, order: Order::Attack { target: Target::Unit(spy) } }]);
+            assert!(map.unit(spy).unwrap().disguised(), "its own side cannot attack it");
         }
 
         #[test]
@@ -337,16 +338,18 @@ mod tests {
         }
 
         #[test]
-        fn a_click_reveals_a_settled_enemy_spy_or_ones_own_never_a_settling_one() {
+        fn a_click_reveals_a_spy_passing_as_the_clickers_own_people_only() {
             let mut map = bare();
             let spy = settled_spy(&mut map);
+            map.step(&[Command::RevealSpy { player: TribeId::Green, unit: spy }]);
+            assert!(map.unit(spy).unwrap().disguised(), "passing as red, not green");
+            map.step(&[Command::RevealSpy { player: TribeId::Blue, unit: spy }]);
+            assert!(map.unit(spy).unwrap().disguised(), "not by its own side");
             map.step(&[Command::RevealSpy { player: TribeId::Red, unit: spy }]);
             assert!(!map.unit(spy).unwrap().disguised());
             map.unit_mut(spy).unwrap().disguise_as(TribeId::Red, super::super::DISGUISE_DELAY);
             map.step(&[Command::RevealSpy { player: TribeId::Red, unit: spy }]);
-            assert!(map.unit(spy).unwrap().statuses.disguise.is_some(), "still settling: nothing to reveal");
-            map.step(&[Command::RevealSpy { player: TribeId::Blue, unit: spy }]);
-            assert!(map.unit(spy).unwrap().statuses.disguise.is_none(), "its own owner");
+            assert!(map.unit(spy).unwrap().statuses.disguise.is_some(), "still settling: an ordinary enemy");
         }
 
         #[test]

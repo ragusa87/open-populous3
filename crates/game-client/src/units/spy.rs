@@ -1,5 +1,5 @@
 //! Spies on the player's side (docs/specs/units.md "Spies"): disguising the selected spies as another tribe, and
-//! spotting other tribes' disguised spies - the reveal cursor over one, a click unmasking it.
+//! spotting other tribes' spies passing as the player's own people - the reveal cursor over one, a click unmasking it.
 
 use crate::hover::{HoverTarget, Hovered};
 use crate::virtual_cursor::CursorLook;
@@ -32,10 +32,10 @@ pub fn disguise_orders(map: &GameMap, player: TribeId, selected: &[UnitId], trib
         .collect()
 }
 
-/// The spy under the cursor that a click would unmask: another tribe's, its disguise settled.
+/// The spy under the cursor that a click would unmask: another tribe's, settled in the player's own look.
 pub fn hinted_spy(map: &GameMap, hovered: Option<HoverTarget>, player: TribeId) -> Option<UnitId> {
     let Some(HoverTarget::Unit(i)) = hovered else { return None };
-    map.units.get(i).filter(|u| u.owner != player && u.disguised() && u.is_alive()).map(|u| u.id)
+    map.units.get(i).filter(|u| u.fools(player) && u.is_alive()).map(|u| u.id)
 }
 
 /// A click over a hinted spy that gave no attack order: it is unmasked all the same.
@@ -86,6 +86,8 @@ mod tests {
         let own = map.units.iter().position(|u| u.id == own).unwrap();
         map.units[own].disguise_as(TribeId::Red, Ticks::ZERO);
         assert_eq!(hinted_spy(&map, Some(HoverTarget::Unit(own)), TribeId::Blue), None, "its own");
+        map.units[enemy].disguise_as(TribeId::Yellow, Ticks::ZERO);
+        assert_eq!(hinted_spy(&map, hover, TribeId::Blue), None, "passing as a third tribe");
         let brave = map.units.iter().position(|u| u.owner == TribeId::Red && u.kind == UnitKind::Brave).unwrap();
         assert_eq!(hinted_spy(&map, Some(HoverTarget::Unit(brave)), TribeId::Blue), None);
     }
