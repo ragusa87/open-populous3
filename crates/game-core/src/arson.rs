@@ -20,10 +20,8 @@ pub const WINDUP_TICKS: Ticks = Ticks::new(24);
 pub const FLIGHT_TICKS: Ticks = Ticks::new(8);
 /// Lingering at the scene once it burns (exe default, unverified live).
 pub const WITHDRAW_TICKS: Ticks = Ticks::new(24);
-/// The thrown firebrand's own life, a cosmetic effect [exe].
+/// The firebrand left burning on the wall, a cosmetic effect [exe]: 64 turns.
 pub const FIREBRAND_TICKS: Ticks = Ticks::new(64);
-/// The firebrand's speed, world units a turn [exe].
-pub const FIREBRAND_SPEED: i32 = 80;
 /// Percent chance the owners notice once it burns and the spy is revealed: the original reads a per-tribe table
 /// whose numbers were never read. `[guess]`.
 pub const NOTICED_PERCENT: u32 = 25;
@@ -145,7 +143,8 @@ impl GameMap {
         let next = match stage {
             Stage::Aim => Some((Stage::Windup, WINDUP_TICKS)),
             Stage::Windup => {
-                let firebrand = Effect::new(owner, (u.x, u.z), Countdown::new(FIREBRAND_TICKS), EffectKind::Firebrand { to: centre });
+                let wall = self.building(building).map_or(centre, |b| wall_point(b, (u.x, u.z)));
+                let firebrand = Effect::new(owner, (u.x, u.z), Countdown::new(FIREBRAND_TICKS), EffectKind::Firebrand { to: wall });
                 events.push(WorldEvent::SpawnEffect(firebrand));
                 let away = (u.x.wrapping_sub(centre.0.wrapping_sub(u.x)), u.z.wrapping_sub(centre.1.wrapping_sub(u.z)));
                 self.units[i].face(away);
@@ -184,16 +183,14 @@ impl GameMap {
     }
 }
 
-/// Where a firebrand thrown from `from` towards `to` is after `done` turns: straight at `FIREBRAND_SPEED`, stopping
-/// there.
-pub fn firebrand_at(from: (u16, u16), to: (u16, u16), done: Ticks) -> (u16, u16) {
-    let (dx, dz) = (torus_delta(from.0, to.0), torus_delta(from.1, to.1));
-    let d = crate::unit::isqrt((dx * dx + dz * dz) as u32) as i32;
-    let flown = (done.get() as i32 * FIREBRAND_SPEED).min(d);
-    if d == 0 {
-        return to;
-    }
-    (from.0.wrapping_add((dx * flown / d) as u16), from.1.wrapping_add((dz * flown / d) as u16))
+/// The middle of `b`'s wall facing `from`: where the spy's firebrand burns.
+pub fn wall_point(b: &crate::building::Building, from: (u16, u16)) -> (u16, u16) {
+    let (cx, cz) = b.centre();
+    let f = b.kind.footprint();
+    let (x, z) = crate::terrain::to_local((torus_delta(cx, from.0), torus_delta(cz, from.1)), b.facing / 2);
+    let (x, z) = (x - f.offset.0, z - f.offset.1);
+    let local = if x.abs() * f.half.1 >= z.abs() * f.half.0 { (f.offset.0 + x.signum() * f.half.0, f.offset.1) } else { (f.offset.0, f.offset.1 + z.signum() * f.half.1) };
+    b.local_point(local)
 }
 
 #[cfg(test)]
@@ -311,9 +308,13 @@ mod tests {
     }
 
     #[test]
-    fn the_firebrand_flies_straight_and_stops_at_its_mark() {
-        assert_eq!(firebrand_at((1000, 1000), (1400, 1000), Ticks::new(1)), (1080, 1000));
-        assert_eq!(firebrand_at((1000, 1000), (1400, 1000), Ticks::new(10)), (1400, 1000));
-        assert_eq!(firebrand_at((65500, 0), (100, 0), Ticks::new(1)), (44, 0), "wraps");
+    fn the_firebrand_burns_on_the_middle_of_the_wall_facing_the_spy() {
+        let (map, hut, _) = scene(UnitKind::Spy);
+        let b = map.building(hut).unwrap();
+        let f = b.kind.footprint();
+        let east = b.local_point((f.offset.0 + f.half.0 + 600, f.offset.1));
+        assert_eq!(wall_point(b, east), b.local_point((f.offset.0 + f.half.0, f.offset.1)));
+        let back = b.local_point((f.offset.0, f.offset.1 + f.half.1 + 600));
+        assert_eq!(wall_point(b, back), b.local_point((f.offset.0, f.offset.1 + f.half.1)));
     }
 }

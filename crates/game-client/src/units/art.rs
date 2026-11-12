@@ -291,8 +291,6 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::OnFire { .. } => Pose::Panic,
         Action::Hacking { .. } => Pose::Hack,
         Action::Throwing { .. } => Pose::Throw,
-        // Crouched lighting the fire until the throw lands, then standing while it lingers.
-        Action::Arson { stage: game_core::arson::Stage::Withdraw, .. } => Pose::Idle,
         Action::Arson { .. } => Pose::SetFire,
         Action::Listening { .. } => Pose::Listen,
         Action::Queuing { .. } if carrying => Pose::CarryIdle,
@@ -365,6 +363,22 @@ pub fn sprite_dir(facing: u8, yaw: f32) -> usize {
 /// unit-art.md "Death last frame": the transformation finished during the fall, so the spirit
 /// (calm or climbing) never replays it - it only ever rises or sinks, never animates again);
 /// others loop on the drawn moment `now` (a loop of `frames` seconds holds whole loops at any fps).
+/// Anim 17's crouched frames (holding the flame out), looped once down: 0-4 strike a light standing and bend
+/// down, 11 stands back up (never shown: the spy stays crouched to the end of its order).
+pub const SET_FIRE_CROUCHED: std::ops::Range<usize> = 5..11;
+
+/// The frame of anim 17 at arson `stage`: bending down over the aim (`bending`, its frame of 0-4 by the stage's
+/// progress), then the crouched frames looping.
+pub fn set_fire_frame(stage: game_core::arson::Stage, bending: usize, now: SimNow) -> usize {
+    match stage {
+        game_core::arson::Stage::Aim => bending,
+        _ => {
+            let n = SET_FIRE_CROUCHED.len();
+            SET_FIRE_CROUCHED.start + (now.secs_in(Tick::ZERO, Ticks::secs(n as u32)) * Pose::SetFire.fps()) as usize % n
+        }
+    }
+}
+
 pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alpha: f32) -> usize {
     if frames == 0 {
         return 0;
@@ -372,6 +386,7 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alph
     let lying = frames.saturating_sub(2);
     let done = |n: usize| action.countdown().map_or(0, |c| ((progress(c, alpha) * n as f32) as usize).min(n - 1));
     match action {
+        Action::Arson { stage, .. } if pose == Pose::SetFire && frames > SET_FIRE_CROUCHED.end => set_fire_frame(*stage, done(SET_FIRE_CROUCHED.start), now),
         Action::Casting { .. } | Action::Flattening { .. } | Action::Throwing { .. } | Action::Challenge { .. } | Action::Melee { .. } | Action::Listening { .. } if action.countdown().is_some() => done(frames),
         Action::Dying { .. } => done(lying + 1),
         Action::Spirit { .. } | Action::Dead { .. } => lying,
@@ -593,6 +608,17 @@ mod tests {
     fn at(secs: f32) -> SimNow {
         let ticks = secs * game_core::time::TICKS_PER_SECOND as f32;
         SimNow { tick: Tick::from_wire(ticks as u32), frac: ticks.fract() }
+    }
+
+    #[test]
+    fn setting_fire_bends_down_once_then_stays_crouched_never_standing_up() {
+        use game_core::arson::Stage;
+        let at = |n: u32| SimNow { tick: Tick::from_wire(n), frac: 0.0 };
+        assert_eq!(set_fire_frame(Stage::Aim, 3, at(0)), 3);
+        for stage in [Stage::Windup, Stage::Flight, Stage::Withdraw] {
+            assert!((0..200).all(|n| SET_FIRE_CROUCHED.contains(&set_fire_frame(stage, 0, at(n)))));
+        }
+        assert!(!SET_FIRE_CROUCHED.contains(&11), "the frame standing back up");
     }
 
     #[test]

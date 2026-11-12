@@ -37,7 +37,7 @@ pub enum EffectKind {
     GroundFire,
     /// Only seen (`blast::explosion_effect`): Blast's own impact burst.
     Explosion,
-    /// Only seen (`arson`): a spy's thrown firebrand, flying from where the effect stands to `to`.
+    /// Only seen (`arson`): a spy's firebrand left burning on the wall at `to`, thrown from where the effect stands.
     Firebrand { to: (u16, u16) },
     /// Its own kill tally (`swamp`); the killing itself is `GameMap::tend_swamps`, not its own turn: unlike every
     /// other effect it must see every other swamp at once, to settle whose claim an overlapping cell counts for.

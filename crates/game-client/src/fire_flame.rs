@@ -111,6 +111,13 @@ pub struct CompanionFireAssets {
     ember: Handle<StandardMaterial>,
 }
 
+impl CompanionFireAssets {
+    /// The flame's crossed boards, for another standing flame of the same look (`firebrands`).
+    pub fn flame_board(&self) -> Handle<Mesh> {
+        self.flame_board.clone()
+    }
+}
+
 pub struct FireFlamePlugin;
 
 impl Plugin for FireFlamePlugin {

@@ -1,59 +1,47 @@
-//! A spy's thrown firebrand (`game_core::arson`, `EffectKind::Firebrand`), a world view of each: a small glowing ember
-//! flying in a low arc from the spy to the building's door at the firebrand's own speed, gone once there. Our own
-//! look (the original's sprite is not identified).
+//! A spy's firebrand left burning on the building's wall (`game_core::arson`, `EffectKind::Firebrand`), a world view
+//! of each: a small standing flame, the same look as a fire's own (`fire_flame`), at the middle of the wall beside
+//! the spy, for the firebrand's life, settling away at its end. The building's own fire is `burning_buildings`.
 
+use crate::fire_flame::{height, CompanionFireAssets, SETTLE_TICKS};
+use crate::flame::{self, Flame, FlameFrames};
 use crate::grounded::Grounded;
-use crate::sim_time::SimNow;
+use crate::sim_time::{seed, ticks_f32, SimNow, TICK_SECS};
 use crate::views::{sync_views, WorldView};
-use crate::world::CurrentMap;
+use crate::world::{CurrentMap, LevelList};
 use bevy::ecs::system::SystemParamItem;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use game_core::arson::FIREBRAND_SPEED;
+use game_core::arson::FIREBRAND_TICKS;
 use game_core::effect::{Effect, EffectKind};
 use game_core::id::Id;
 use game_core::map::GameMap;
 use game_core::time::Tick;
-use game_core::unit::torus_delta;
 use pop3_format::WORLD_UNITS_PER_CELL;
 
-const RADIUS: f32 = 0.07;
-const GLOW: Color = Color::srgb(1.0, 0.55, 0.15);
-/// The arc's top over the ground, render units.
-const ARC: f32 = 0.6;
-
-#[derive(Resource)]
-pub struct FirebrandLook {
-    mesh: Handle<Mesh>,
-    material: Handle<StandardMaterial>,
-}
+/// Its size next to a fire's own flame: a small one. `[ours]`
+const SCALE: f32 = 0.4;
+const DEFAULT_THEME: u8 = 0;
 
 #[derive(Component)]
 pub struct FirebrandView {
-    me: Entity,
-    ember: Entity,
+    flame: Entity,
 }
 
-/// Where the ember is `turns` after the throw from `from` to `to` (world units), in cells, and how far along (0 to 1).
-pub fn flight(from: (u16, u16), to: (u16, u16), turns: f32) -> (Vec2, f32) {
-    let d = Vec2::new(torus_delta(from.0, to.0) as f32, torus_delta(from.1, to.1) as f32);
-    let len = d.length();
-    let p = if len == 0.0 { 1.0 } else { (turns.max(0.0) * FIREBRAND_SPEED as f32 / len).min(1.0) };
-    ((Vec2::new(from.0 as f32, from.1 as f32) + d * p) / WORLD_UNITS_PER_CELL as f32, p)
-}
-
-/// Its height over the ground along the way: up and down again.
-pub fn arc(p: f32) -> f32 {
-    4.0 * ARC * p * (1.0 - p)
+/// Its height (scale) `secs` into its life: full, then settling away over its last turns.
+pub fn flame_scale(secs: f32) -> f32 {
+    SCALE * height(secs, ticks_f32(FIREBRAND_TICKS) * TICK_SECS, ticks_f32(SETTLE_TICKS) * TICK_SECS)
 }
 
 impl WorldView for FirebrandView {
     type Model = (Id<Effect>, Effect);
     type Params = (
         Res<'static, CurrentMap>,
-        Res<'static, FirebrandLook>,
-        Query<'static, 'static, &'static mut Grounded>,
-        Query<'static, 'static, (&'static mut Transform, &'static mut Visibility), Without<Grounded>>,
+        Res<'static, LevelList>,
+        ResMut<'static, FlameFrames>,
+        Res<'static, CompanionFireAssets>,
+        ResMut<'static, Assets<Image>>,
+        ResMut<'static, Assets<StandardMaterial>>,
+        Query<'static, 'static, &'static mut Transform, With<Flame>>,
     );
 
     fn models(map: &GameMap) -> impl Iterator<Item = &(Id<Effect>, Effect)> {
@@ -64,27 +52,23 @@ impl WorldView for FirebrandView {
         id.raw()
     }
 
-    fn spawn((_, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (_, look, ..): &mut SystemParamItem<Self::Params>) -> Option<Self> {
-        let me = view.id();
-        view.insert((Grounded { at: Vec2::new(e.x as f32, e.z as f32) / WORLD_UNITS_PER_CELL as f32, half: 0.0 }, Transform::default(), Visibility::Visible));
-        let mut ember = Entity::PLACEHOLDER;
+    fn spawn((id, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (map, levels, frames, assets, images, mats, _): &mut SystemParamItem<Self::Params>) -> Option<Self> {
+        let EffectKind::Firebrand { to } = e.kind else { return None };
+        let offset = (seed(id.raw()) * flame::FRAMES as f32) as usize % flame::FRAMES;
+        let frame = frames.get(levels, map.0.theme.unwrap_or(DEFAULT_THEME), images, mats).get(offset)?.clone();
+        view.insert((Grounded { at: Vec2::new(to.0 as f32, to.1 as f32) / WORLD_UNITS_PER_CELL as f32, half: 0.0 }, Transform::default(), Visibility::Visible));
+        let mut flame = Entity::PLACEHOLDER;
         view.with_children(|v| {
-            ember = v.spawn((Mesh3d(look.mesh.clone()), MeshMaterial3d(look.material.clone()), NotShadowCaster, crate::hover::NoOutline, Transform::default(), Visibility::Inherited)).id();
+            flame = v.spawn((Flame { offset }, Mesh3d(assets.flame_board()), MeshMaterial3d(frame), NotShadowCaster, crate::hover::NoOutline, Transform::from_scale(Vec3::splat(SCALE)))).id();
         });
-        Some(FirebrandView { me, ember })
+        Some(FirebrandView { flame })
     }
 
-    fn update(&self, (_, e): &(Id<Effect>, Effect), now: SimNow, (map, _, grounded, parts): &mut SystemParamItem<Self::Params>) {
-        let EffectKind::Firebrand { to } = e.kind else { return };
+    fn update(&self, (_, e): &(Id<Effect>, Effect), now: SimNow, (map, .., flames): &mut SystemParamItem<Self::Params>) {
         let start = Tick::from_wire(map.0.now.to_wire().wrapping_sub(e.left.done().get()));
-        let turns = now.turns_since(start);
-        let (at, p) = flight((e.x, e.z), to, turns);
-        if let Ok(mut g) = grounded.get_mut(self.me) {
-            g.at = at;
-        }
-        if let Ok((mut t, mut vis)) = parts.get_mut(self.ember) {
-            t.translation.y = arc(p);
-            vis.set_if_neq(if p < 1.0 { Visibility::Inherited } else { Visibility::Hidden });
+        if let Ok(mut t) = flames.get_mut(self.flame) {
+            let s = flame_scale(now.secs_since(start));
+            t.scale = Vec3::new(SCALE, s, SCALE);
         }
     }
 }
@@ -93,13 +77,8 @@ pub struct FirebrandsPlugin;
 
 impl Plugin for FirebrandsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_look).add_systems(Update, sync_views::<FirebrandView>.after(crate::units::run_ticks));
+        app.add_systems(Update, sync_views::<FirebrandView>.after(crate::units::run_ticks));
     }
-}
-
-fn load_look(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
-    let material = mats.add(StandardMaterial { base_color: GLOW, emissive: LinearRgba::from(GLOW) * 4.0, unlit: true, ..default() });
-    commands.insert_resource(FirebrandLook { mesh: meshes.add(Sphere::new(RADIUS)), material });
 }
 
 #[cfg(test)]
@@ -107,13 +86,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_flies_at_its_speed_and_lands_at_the_door() {
-        let (at, p) = flight((1024, 1024), (1024 + 400, 1024), 1.0);
-        assert_eq!(at, Vec2::new((1024.0 + 80.0) / 512.0, 2.0));
-        assert!((p - 0.2).abs() < 1e-6);
-        let (at, p) = flight((1024, 1024), (1024 + 400, 1024), 50.0);
-        assert_eq!((at, p), (Vec2::new(1424.0 / 512.0, 2.0), 1.0));
-        assert_eq!(arc(0.0), 0.0);
-        assert!(arc(0.5) > arc(0.2) && arc(1.0) == 0.0);
+    fn small_and_standing_until_it_settles_away_at_its_end() {
+        let life = ticks_f32(FIREBRAND_TICKS) * TICK_SECS;
+        assert_eq!(flame_scale(0.0), SCALE);
+        assert_eq!(flame_scale(life * 0.5), SCALE);
+        assert!(flame_scale(life - 0.1) < SCALE);
+        assert_eq!(flame_scale(life + 1.0), 0.0);
     }
 }
