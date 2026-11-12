@@ -41,28 +41,43 @@ pub enum Stage {
 }
 
 impl GameMap {
-    /// `Order::Arson`: spy `i` goes to set `building` on fire; anyone else ignores it.
+    /// `Order::Arson`, or a spy's attack on a building (user-confirmed in play: a spy sets an enemy building on
+    /// fire instead of hacking at it): spy `i` goes to set `building` on fire, if it is another tribe's; anyone
+    /// else ignores it.
     pub(crate) fn go_arson(&mut self, i: usize, building: BuildingId) {
-        if self.units[i].kind == UnitKind::Spy && self.building(building).is_some() {
+        let u = &self.units[i];
+        let enemy = self.building(building).is_some_and(|b| b.owner != u.owner && b.owner.tribe().is_some() && !self.tribes.allied(u.owner, b.owner));
+        if u.kind == UnitKind::Spy && enemy {
             self.units[i].start(Order::Stop);
             self.units[i].arson = Some(building);
         }
     }
 
-    /// Where a spy stands to set `building` on fire from `from`: the free cell along its walls nearest to it, else
-    /// its door. The original picks a flagged wall cell of the footprint itself; ours cannot be stood on, so the
-    /// cell just outside it. `[ours]`.
+    /// Where a spy stands to set `building` on fire from `from`: against the middle of one of its walls, never the
+    /// door's (user-confirmed in play: the original stands on a flagged wall cell of the footprint), the one
+    /// nearest to it; just outside the walls, since ours cannot be stood on. Its door when no wall side is free.
     pub fn arson_spot(&self, building: BuildingId, from: (u16, u16)) -> Option<(u16, u16)> {
         let b = self.building(building)?;
-        let size = self.terrain.size() as i32;
-        let walls = b.walled_cells(size);
-        let around = walls.iter().flat_map(|&(x, z)| [(x + 1, z), (x - 1, z), (x, z + 1), (x, z - 1)]).map(|(x, z)| (x.rem_euclid(size), z.rem_euclid(size)));
-        let spot = around
-            .filter(|c| !walls.contains(c))
-            .map(crate::slots::cell_centre)
-            .filter(|&p| !self.behind_walls(p) && !crate::unit::is_sea(&self.terrain, ((p.0 / 512) as i32, (p.1 / 512) as i32)))
+        let f = b.kind.footprint();
+        let (ox, oz) = f.offset;
+        let (hx, hz) = f.half;
+        let out = |(dx, dz): (i32, i32)| {
+            [crate::building::DOOR_GAP, 512, 768].into_iter().map(move |gap| (ox + dx * (hx + gap), oz + dz * (hz + gap)))
+        };
+        let sides = [(1, 0), (-1, 0), (0, 1)];
+        let spot = sides
+            .into_iter()
+            .filter_map(|side| {
+                let (dx, dz) = side;
+                out(side).map(|(x, z)| b.local_point((if dx == 0 { ox } else { x }, if dz == 0 { oz } else { z }))).find(|&p| self.free_ground(p))
+            })
             .min_by_key(|&p| (torus_dist2(from, p), p));
         Some(spot.unwrap_or(b.door()))
+    }
+
+    /// Ground a spy can stand on: not behind any building's walls, not the sea.
+    fn free_ground(&self, p: (u16, u16)) -> bool {
+        !self.behind_walls(p) && !crate::unit::is_sea(&self.terrain, (crate::unit::cell_of(p.0), crate::unit::cell_of(p.1)))
     }
 
     /// Whether `building` can still be set on fire.
@@ -91,8 +106,8 @@ impl GameMap {
                     }
                     let Some(spot) = self.arson_spot(building, (u.x, u.z)) else { continue };
                     if torus_delta(u.x, spot.0).abs() <= ARRIVED && torus_delta(u.z, spot.1).abs() <= ARRIVED {
-                        let door = self.building(building).map(|b| b.door()).unwrap_or(spot);
-                        self.units[i].face(door);
+                        let centre = self.building(building).map(|b| b.centre()).unwrap_or(spot);
+                        self.units[i].face(centre);
                         self.units[i].action = Action::Arson { building, stage: Stage::Aim, left: Countdown::new(AIM_TICKS) };
                     } else {
                         self.units[i].start(Order::MoveTo { x: spot.0, z: spot.1 });
@@ -109,7 +124,7 @@ impl GameMap {
             self.end_arson(i);
             return Vec::new();
         };
-        let (door, owner) = (b.door(), self.units[i].owner);
+        let (door, centre, owner) = (b.door(), b.centre(), self.units[i].owner);
         if matches!(stage, Stage::Aim | Stage::Windup) {
             if !self.arson_target(building) {
                 self.end_arson(i);
@@ -130,14 +145,14 @@ impl GameMap {
         let next = match stage {
             Stage::Aim => Some((Stage::Windup, WINDUP_TICKS)),
             Stage::Windup => {
-                let firebrand = Effect::new(owner, (u.x, u.z), Countdown::new(FIREBRAND_TICKS), EffectKind::Firebrand { to: door });
+                let firebrand = Effect::new(owner, (u.x, u.z), Countdown::new(FIREBRAND_TICKS), EffectKind::Firebrand { to: centre });
                 events.push(WorldEvent::SpawnEffect(firebrand));
-                let away = (u.x.wrapping_sub(door.0.wrapping_sub(u.x)), u.z.wrapping_sub(door.1.wrapping_sub(u.z)));
+                let away = (u.x.wrapping_sub(centre.0.wrapping_sub(u.x)), u.z.wrapping_sub(centre.1.wrapping_sub(u.z)));
                 self.units[i].face(away);
                 Some((Stage::Flight, FLIGHT_TICKS))
             }
             Stage::Flight => {
-                self.units[i].face(door);
+                self.units[i].face(centre);
                 events.push(WorldEvent::SetFire { building, by: owner });
                 if self.rng.next_u32() % 100 < NOTICED_PERCENT {
                     self.units[i].reveal();
@@ -214,13 +229,36 @@ mod tests {
     }
 
     #[test]
-    fn its_spot_is_beside_the_wall_nearest_to_it() {
-        let (map, hut, spy) = scene(UnitKind::Spy);
-        let u = map.unit(spy).unwrap();
-        let spot = map.arson_spot(hut, (u.x, u.z)).unwrap();
+    fn its_spot_is_the_middle_of_the_nearest_wall_never_the_doors() {
+        let (map, hut, _) = scene(UnitKind::Spy);
         let b = map.building(hut).unwrap();
-        assert!(!b.covers(spot, 0) && b.covers(spot, 512), "just outside its footprint: {spot:?}");
-        assert!(torus_dist2((u.x, u.z), spot) < torus_dist2((u.x, u.z), b.door()), "the side facing the spy, not the door");
+        let (cx, cz) = b.centre();
+        let local = |p: (u16, u16)| crate::terrain::to_local((torus_delta(cx, p.0), torus_delta(cz, p.1)), b.facing / 2);
+        let f = b.kind.footprint();
+        for from in [b.local_point((3000, 0)), b.local_point((-3000, 0)), b.local_point((0, 3000)), b.local_point((0, -3000)), b.door()] {
+            let spot = map.arson_spot(hut, from).unwrap();
+            let (x, z) = local(spot);
+            assert!(!map.behind_walls(spot) && b.covers(spot, 1024), "free ground just outside it: {spot:?}");
+            assert!(x == f.offset.0 || z == f.offset.1, "the middle of a wall: {x}, {z}");
+            assert!(z >= f.offset.1, "never the door's side: {x}, {z}");
+        }
+        let (x, _) = local(map.arson_spot(hut, b.local_point((3000, 0))).unwrap());
+        assert!(x > 0, "the wall facing it");
+    }
+
+    #[test]
+    fn a_spy_ordered_to_attack_an_enemy_building_sets_it_on_fire_instead_of_hacking() {
+        let mut map = GameMap::sandbox_units().seeded(9);
+        map.units.clear();
+        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, 70 * 512, 70 * 512, 0));
+        let door = map.building(hut).unwrap().door();
+        let spy = map.spawn(TribeId::Blue, UnitKind::Spy, (door.0.wrapping_add(2048), door.1)).id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: spy, order: Order::Attack { target: crate::unit::Target::Building(hut) } });
+        assert_eq!(map.unit(spy).unwrap().arson, Some(hut));
+        until(&mut map, 800, |m| m.building(hut).unwrap().burning.is_some()).expect("set on fire");
+        let own = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 60 * 512, 70 * 512, 0));
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: spy, order: Order::Arson { building: own } });
+        assert_eq!(map.unit(spy).unwrap().arson, None, "never its own");
     }
 
     #[test]

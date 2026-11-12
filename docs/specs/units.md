@@ -254,12 +254,15 @@ targets. Explicit orders still go by the real tribe: a player can always attack 
   selection; with fighters selected the click is an attack, which reveals it too. Hovering one shows the reveal
   cursor (`CursorLook::RevealSpy`, our own punch badge). Never while it settles: it is an ordinary enemy then.
 
-**Arson** (`Order::Arson { building }`, `Action::Arson`, arson.rs): only the computer gives it, the original never
-lets a player arm it. The spy walks to a spot beside the building's wall nearest to it (`GameMap::arson_spot`: the
-original stands on a flagged wall cell of the footprint, ours just outside it, `[ours]`; the door as a fallback),
-then aims 10 turns, winds up 24 with the firebrand (`Pose::SetFire`, anim 17), throws it (a cosmetic
+**Arson** (`Order::Arson { building }`, `Action::Arson`, arson.rs): the computer's own order, and what a spy's
+attack on an enemy building does (user-confirmed in play: it never hacks at the door like other fighters; this
+contradicts pop3-rev-analysis.md's "not player-reachable", the play observation wins). The spy walks to the middle
+of the building's wall nearest to it, never the door's wall (`GameMap::arson_spot`, user-confirmed: the original
+stands on a flagged wall cell of the footprint, ours just outside it; the door only when no wall side is free),
+crouches facing it, aims 10 turns, winds up 24 with the firebrand (`Pose::SetFire`: anim 17 with the original
+files, our art kneels), throws it at the building (a cosmetic
 `EffectKind::Firebrand` flying 80 units a turn, 64 turns of life), and 8 turns later the building catches fire
-lit by the spy's real tribe (`GameMap::set_fire`, as lightning), then it lingers 24. A genuine member of the tribe
+lit by the spy's real tribe (`GameMap::set_fire`, as lightning), then it lingers 24 standing. A genuine member of the tribe
 it passes as standing at the door while it aims or winds up unmasks it and ends the order; once it burns, a roll
 (`NOTICED_PERCENT`, 25 `[guess]`: the original's table was never read) may unmask it. A fight only interrupts
 it: back on its feet, it starts over, until the building burns or is gone, it dies, or gets another order.

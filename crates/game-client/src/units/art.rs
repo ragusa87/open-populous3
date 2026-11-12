@@ -81,7 +81,7 @@ pub enum Pose {
     Pushup,
     /// Idle too long: a spy juggles.
     Juggle,
-    /// A spy setting a building on fire, firebrand in hand (arson.rs; original anim 17).
+    /// A spy crouched at a wall setting it on fire, firebrand in hand (arson.rs; original anim 17; our art: kneeling).
     SetFire,
 }
 
@@ -134,7 +134,8 @@ impl Pose {
             Pose::Jump => Pose::Stranded,
             Pose::Flung | Pose::Tumble | Pose::Spirit => Pose::Fall,
             Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack => Pose::Idle,
-            Pose::Throw | Pose::SetFire => Pose::Cast,
+            Pose::Throw => Pose::Cast,
+            Pose::SetFire => Pose::Pray,
             Pose::Shoved => Pose::Fall,
             Pose::Pedal | Pose::Listen | Pose::Preach => Pose::Pray,
             Pose::Carbonized => Pose::Fall,
@@ -290,6 +291,8 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         Action::OnFire { .. } => Pose::Panic,
         Action::Hacking { .. } => Pose::Hack,
         Action::Throwing { .. } => Pose::Throw,
+        // Crouched lighting the fire until the throw lands, then standing while it lingers.
+        Action::Arson { stage: game_core::arson::Stage::Withdraw, .. } => Pose::Idle,
         Action::Arson { .. } => Pose::SetFire,
         Action::Listening { .. } => Pose::Listen,
         Action::Queuing { .. } if carrying => Pose::CarryIdle,

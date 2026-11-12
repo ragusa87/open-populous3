@@ -67,7 +67,7 @@ pub fn frame_count(pose: Pose) -> usize {
         Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => frame_count(Pose::Idle),
         Pose::Eat | Pose::Drink => frame_count(Pose::Idle),
         Pose::Scratch | Pose::Pushup | Pose::Juggle => frame_count(Pose::Idle),
-        Pose::SetFire => frame_count(Pose::Throw),
+        Pose::SetFire => frame_count(Pose::Pray),
     }
 }
 
@@ -154,7 +154,8 @@ fn body(pose: Pose, view: View, f: usize) -> Body {
             Body { hands: [(-10.0, 22.0 + k), (10.0, 23.0 - k)], feet: [(-4.0, 0.0), (4.0, 0.0)], lift: 10.0, tilt: FRAC_PI_2 - 0.2 * k, ..base }
         }
         Pose::Tumble => Body { hands: [(-7.0, 18.0), (7.0, 18.0)], lift: 8.0, tilt: phase, ..base },
-        Pose::Strike | Pose::Trade | Pose::Hack | Pose::Throw | Pose::SetFire => {
+        Pose::SetFire => body(Pose::Pray, view, f),
+        Pose::Strike | Pose::Trade | Pose::Hack | Pose::Throw => {
             let swing = [24.0, 20.0, 14.0, 12.0][f % 4];
             Body { hands: if side { [(8.0, swing), (6.0, swing - 2.0)] } else { [(-6.0, swing), (6.0, swing)] }, ..base }
         }

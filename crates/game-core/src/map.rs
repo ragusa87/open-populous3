@@ -569,9 +569,9 @@ impl GameMap {
     /// chance is lowered from its 45% default so a disguised spy of the player lasts long enough to try out.
     fn sandbox_spies(&mut self, c: i32) {
         let at = |dx: i32, dz: i32| ((c + dx) as u16 * 512 + 256, (c + dz) as u16 * 512 + 256);
-        let corner = |dx: i32, dz: i32| ((c + dx) * 512) as u16;
-        let red_hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, corner(13, 0), corner(-14, 0), 0);
-        let blue_hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, corner(-15, 0), corner(-14, 0), 0);
+        let corner = |d: i32| ((c + d) * 512) as u16;
+        let red_hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, corner(13), corner(-14), 0);
+        let blue_hut = Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, corner(-15), corner(-14), 0);
         for hut in [red_hut, blue_hut] {
             self.trees.retain(|t| !hut.covers((t.x, t.z), 1024));
             self.add_building(hut);
@@ -2171,6 +2171,7 @@ impl GameMap {
             Order::CutTree { tree } => self.go_cut(i, tree),
             Order::FetchWood => self.fetch_wood(i),
             Order::PickUp { at } => self.pick_up(i, at),
+            Order::Attack { target: crate::unit::Target::Building(b) } if self.units[i].kind == UnitKind::Spy => self.go_arson(i, b),
             Order::Attack { target } => self.go_attack(i, target),
             Order::Board { vehicle } => self.go_board(i, vehicle),
             Order::Guard => self.go_guard(i),
