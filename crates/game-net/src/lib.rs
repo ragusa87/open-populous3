@@ -83,7 +83,8 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 /// `u16 x, z` (`SetPatrol`/`AddPatrolPoint`) or a target tag `u8` (0 unit, 1 building) + `u32` id
 /// (`SetPatrolTarget`/`AddPatrolTargetPoint`), or nothing more (`ReleasePatrol`); for a formation command, `u8` unit
 /// count then that many `u32` unit ids, then `u16 x, z` (`Formation`); for cancelling a guard, nothing more
-/// (`CancelGuard`); an order tag of `Order::Guard` takes no payload either.
+/// (`CancelGuard`); an order tag of `Order::Guard` takes no payload either, one of
+/// `Order::Disguise` a `u8` tribe.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -362,6 +363,7 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
         }
         Order::GetOff => b.push(14),
         Order::Guard => b.push(15),
+        Order::Disguise { tribe } => b.extend([16, tribe.as_u8()]),
     }
 }
 
@@ -462,6 +464,7 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         13 => Order::Board { vehicle: c.id()? },
         14 => Order::GetOff,
         15 => Order::Guard,
+        16 => Order::Disguise { tribe: TribeId::from_u8(c.u8()?)? },
         _ => return None,
     })
 }
@@ -579,6 +582,7 @@ mod tests {
                 Command::Formation { player: TribeId::Blue, units: vec![Id::from_raw(1), Id::from_raw(2)], to: (65535, 512) },
                 Command::CancelFlyby { player: TribeId::Yellow },
                 Command::OrderUnit { player: TribeId::Blue, unit: Id::from_raw(1), order: Order::Guard },
+                Command::OrderUnit { player: TribeId::Red, unit: Id::from_raw(2), order: Order::Disguise { tribe: TribeId::Green } },
                 Command::CancelGuard { player: TribeId::Red },
                 Command::PlaceTree { player: TribeId::Blue, at: (40_000, 7) },
                 Command::Eject { player: TribeId::Green, building: Id::from_raw(u32::MAX) },

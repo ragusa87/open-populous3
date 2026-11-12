@@ -445,6 +445,8 @@ pub enum Order {
     GetOff,
     /// Followers (not the shaman): escort her continuously (`G`, `GameMap::go_guard`).
     Guard,
+    /// Spies: take on `tribe`'s look (`Unit::disguise_as`), whatever they are doing: it never interrupts them.
+    Disguise { tribe: crate::tribes::TribeId },
 }
 
 /// What an attack is aimed at.
@@ -900,9 +902,10 @@ impl Unit {
         (!self.queue.is_empty()).then(|| self.queue.remove(0))
     }
 
-    /// Starts `order` now, keeping the chained ones. Ignored while drowning, dying or dead.
+    /// Starts `order` now, keeping the chained ones. Ignored while drowning, dying or dead, and for a disguise,
+    /// which never changes what it does (`GameMap::disguise`).
     pub fn start(&mut self, order: Order) {
-        if !self.takes_orders() {
+        if !self.takes_orders() || matches!(order, Order::Disguise { .. }) {
             return;
         }
         (self.route, self.planned_on, self.teleport_to, self.spell, self.to_fire) = (Vec::new(), None, None, None, None);
@@ -914,7 +917,7 @@ impl Unit {
                 Action::Walking { to: campfire::ring_point(fire, point) }
             }
             Order::Cast => Action::Casting { left: Countdown::new(CAST_TICKS) },
-            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } | Order::GetOff | Order::Guard => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } | Order::GetOff | Order::Guard | Order::Disguise { .. } => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
                 Action::Walking { to: tree }

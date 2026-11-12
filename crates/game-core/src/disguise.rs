@@ -157,4 +157,64 @@ mod tests {
         u.change_owner(TribeId::Green);
         assert_eq!(u.statuses.disguise, None);
     }
+
+    mod on_the_map {
+        use crate::command::Command;
+        use crate::map::GameMap;
+        use crate::tribes::TribeId;
+        use crate::unit::{Action, Order, UnitId, UnitKind};
+
+        pub(crate) fn bare() -> GameMap {
+            let mut map = GameMap::sandbox_units();
+            map.units.clear();
+            map.buildings.clear();
+            map.totems.clear();
+            map
+        }
+
+        pub(crate) fn add(map: &mut GameMap, owner: TribeId, kind: UnitKind, at: (u16, u16)) -> UnitId {
+            map.spawn(owner, kind, at).id
+        }
+
+        fn disguise(map: &mut GameMap, unit: UnitId, tribe: TribeId) {
+            map.step(&[Command::OrderUnit { player: TribeId::Blue, unit, order: Order::Disguise { tribe } }]);
+        }
+
+        #[test]
+        fn the_order_disguises_a_spy_without_stopping_it_and_settles_on_the_map() {
+            let mut map = bare();
+            let spy = add(&mut map, TribeId::Blue, UnitKind::Spy, (33024, 34048));
+            map.step(&[Command::OrderUnit { player: TribeId::Blue, unit: spy, order: Order::MoveTo { x: 37000, z: 34048 } }]);
+            disguise(&mut map, spy, TribeId::Red);
+            assert!(matches!(map.unit(spy).unwrap().action, Action::Walking { .. }), "still on its way");
+            map.run(crate::time::Ticks::new(61));
+            assert!(!map.unit(spy).unwrap().counts_as(TribeId::Red));
+            map.run(crate::time::Ticks::new(1));
+            assert!(map.unit(spy).unwrap().counts_as(TribeId::Red));
+        }
+
+        #[test]
+        fn the_order_is_ignored_by_anyone_but_a_spy() {
+            let mut map = bare();
+            let brave = add(&mut map, TribeId::Blue, UnitKind::Brave, (33024, 34048));
+            disguise(&mut map, brave, TribeId::Red);
+            assert_eq!(map.unit(brave).unwrap().statuses.disguise, None);
+        }
+
+        #[test]
+        fn a_queued_disguise_waits_its_turn() {
+            let mut map = bare();
+            let spy = add(&mut map, TribeId::Blue, UnitKind::Spy, (33024, 34048));
+            map.step(&[Command::OrderUnit { player: TribeId::Blue, unit: spy, order: Order::MoveTo { x: 33600, z: 34048 } }]);
+            map.step(&[Command::QueueOrder { player: TribeId::Blue, unit: spy, order: Order::Disguise { tribe: TribeId::Red } }]);
+            assert_eq!(map.unit(spy).unwrap().statuses.disguise, None, "still walking");
+            for _ in 0..400 {
+                map.step(&[]);
+                if map.unit(spy).unwrap().statuses.disguise.is_some() {
+                    return;
+                }
+            }
+            panic!("never disguised once there");
+        }
+    }
 }

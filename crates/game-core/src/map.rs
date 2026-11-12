@@ -1179,6 +1179,10 @@ impl GameMap {
             }
             Command::OrderUnit { player, unit, order } => {
                 if let Some(i) = self.unit_index(unit).filter(|&i| self.units[i].owner == player && !self.locked(i)) {
+                    if let Order::Disguise { tribe } = order {
+                        self.disguise(i, tribe);
+                        return None;
+                    }
                     if self.units[i].aboard.is_some() {
                         self.order_aboard(i, order);
                         return None;
@@ -2109,6 +2113,9 @@ impl GameMap {
     /// Wood and build orders are for braves only (others ignore them) and pick their tree, piece or
     /// building here, where the map is known.
     pub(crate) fn start_order(&mut self, i: usize, order: Order) {
+        if let Order::Disguise { tribe } = order {
+            return self.disguise(i, tribe);
+        }
         self.unassign(i);
         self.leave_formation(self.units[i].id);
         match order {
@@ -2123,6 +2130,12 @@ impl GameMap {
             Order::Guard => self.go_guard(i),
             order => self.units[i].start(order),
         }
+    }
+
+    /// Unit `i` takes on `tribe`'s look if it is a spy, with the game's `SPY_DISGUISE_DELAY`.
+    pub(crate) fn disguise(&mut self, i: usize, tribe: TribeId) {
+        let delay = crate::time::Ticks::new(self.balance.ticks(self.balance.spies.disguise_delay));
+        self.units[i].disguise_as(tribe, delay);
     }
 
     /// Braves that may take wood: living, not carrying any yet.
