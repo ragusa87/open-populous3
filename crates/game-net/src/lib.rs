@@ -84,7 +84,7 @@ pub fn encode(msg: &Message) -> Vec<u8> {
 /// (`SetPatrolTarget`/`AddPatrolTargetPoint`), or nothing more (`ReleasePatrol`); for a formation command, `u8` unit
 /// count then that many `u32` unit ids, then `u16 x, z` (`Formation`); for cancelling a guard, nothing more
 /// (`CancelGuard`); an order tag of `Order::Guard` takes no payload either, one of
-/// `Order::Disguise` a `u8` tribe.
+/// `Order::Disguise` a `u8` tribe, one of `Order::Arson` a `u32` building id.
 fn encode_command(b: &mut Vec<u8>, command: &Command) {
     match command {
         Command::Cast { player, spell } => {
@@ -368,6 +368,10 @@ fn encode_order(b: &mut Vec<u8>, order: &Order) {
         Order::GetOff => b.push(14),
         Order::Guard => b.push(15),
         Order::Disguise { tribe } => b.extend([16, tribe.as_u8()]),
+        Order::Arson { building } => {
+            b.push(17);
+            put_id(b, *building);
+        }
     }
 }
 
@@ -470,6 +474,7 @@ fn decode_order(c: &mut Cursor) -> Option<Order> {
         14 => Order::GetOff,
         15 => Order::Guard,
         16 => Order::Disguise { tribe: TribeId::from_u8(c.u8()?)? },
+        17 => Order::Arson { building: c.id()? },
         _ => return None,
     })
 }
@@ -592,6 +597,7 @@ mod tests {
                 Command::PlaceTree { player: TribeId::Blue, at: (40_000, 7) },
                 Command::Eject { player: TribeId::Green, building: Id::from_raw(u32::MAX) },
                 Command::RevealSpy { player: TribeId::Yellow, unit: Id::from_raw(7) },
+                Command::OrderUnit { player: TribeId::Green, unit: Id::from_raw(8), order: Order::Arson { building: Id::from_raw(9) } },
             ],
         }
     }

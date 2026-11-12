@@ -1492,6 +1492,7 @@ impl GameMap {
             self.spot_enemies();
             self.tend_attacks();
             self.tend_wrecking();
+            self.tend_arson();
             self.tend_wildmen();
             self.tend_angels_of_death();
             self.tend_guards();
@@ -2127,6 +2128,7 @@ impl GameMap {
         }
         self.unassign(i);
         self.leave_formation(self.units[i].id);
+        self.units[i].arson = None;
         match order {
             Order::Build { site } => self.assign(i, site),
             Order::Enter { site } => self.go_in(i, site),
@@ -2137,6 +2139,7 @@ impl GameMap {
             Order::Attack { target } => self.go_attack(i, target),
             Order::Board { vehicle } => self.go_board(i, vehicle),
             Order::Guard => self.go_guard(i),
+            Order::Arson { building } => self.go_arson(i, building),
             order => self.units[i].start(order),
         }
     }

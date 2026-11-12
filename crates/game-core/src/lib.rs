@@ -7,6 +7,7 @@ pub mod ai_script;
 pub mod angel_of_death;
 pub mod angle;
 pub mod armageddon;
+pub mod arson;
 pub mod ashes;
 pub mod attack;
 pub mod balance;

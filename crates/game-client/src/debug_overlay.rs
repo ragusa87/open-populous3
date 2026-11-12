@@ -142,6 +142,7 @@ fn draw(
             | EffectKind::Smoke
             | EffectKind::GroundFire
             | EffectKind::Explosion
+            | EffectKind::Firebrand { .. }
             | EffectKind::AngelOfDeath(_)
             | EffectKind::AngelOfDeathShockwave(_) => {}
         }

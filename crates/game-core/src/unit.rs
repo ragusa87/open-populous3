@@ -278,6 +278,8 @@ pub enum Action {
     Challenge { challenge: crate::challenge::ChallengeId, role: crate::challenge::Role },
     /// A firewarrior throwing fire at `target` (firebolt.rs), `left` turns to go; then back to its attack.
     Throwing { target: Target, left: Countdown },
+    /// A spy at the wall of `building`, setting it on fire (arson.rs): `left` turns of `stage` to go.
+    Arson { building: crate::building::BuildingId, stage: crate::arson::Stage, left: Countdown },
     /// Hacking at the building `building` (wreck.rs), `left` turns to go; first at its door.
     Hacking { building: crate::building::BuildingId, left: Countdown, at_door: bool },
     /// Waiting in the queue of the training unit `building` (training.rs), standing at or walking to its spot `at`.
@@ -344,6 +346,7 @@ impl Action {
             Action::Queuing { .. } => "Queuing",
             Action::Preaching => "Preaching",
             Action::Hacking { .. } | Action::Throwing { .. } => "Attacking",
+            Action::Arson { .. } => "Setting fire",
             Action::Hunting | Action::Closing { .. } | Action::Fighting { .. } => "Hunting",
             Action::Carrying { .. } => "Carrying",
             Action::Grabbed { .. } => "Captured",
@@ -380,6 +383,7 @@ impl Action {
             | Action::Flattening { left, .. }
             | Action::Building { left }
             | Action::Hacking { left, .. }
+            | Action::Arson { left, .. }
             | Action::Throwing { left, .. }
             | Action::Boarding { left, .. }
             | Action::Alighting { left, .. }
@@ -445,6 +449,8 @@ pub enum Order {
     GetOff,
     /// Followers (not the shaman): escort her continuously (`G`, `GameMap::go_guard`).
     Guard,
+    /// Spies: set the building `building` on fire (`GameMap::go_arson`); only the computer gives it.
+    Arson { building: BuildingId },
     /// Spies: take on `tribe`'s look (`Unit::disguise_as`), whatever they are doing: it never interrupts them.
     Disguise { tribe: crate::tribes::TribeId },
 }
@@ -536,6 +542,9 @@ pub struct Unit {
     to_vehicle: Option<crate::vehicle::VehicleId>,
     /// Chained orders, next first: started one by one each time the unit is idle (`GameMap::tick`).
     queue: Vec<Order>,
+    /// The building a spy is out to set on fire (arson.rs): kept through fights, which only interrupt it, until
+    /// it burns, is gone, the spy dies or gets another order.
+    pub(crate) arson: Option<BuildingId>,
     /// The attack order a fight (`Unit::join` into a `Challenge` or `Melee`) put on hold, to pick back up
     /// (`Unit::release`) where it left off once the fight is behind it, even a fight cut short by a blast's push
     /// (pop3-rev-analysis.md "Resuming a fight cut short by a push"): entering or being flung out of a fight
@@ -618,6 +627,7 @@ impl Unit {
             to_shrine: None,
             to_vehicle: None,
             queue: Vec::new(),
+            arson: None,
             resume_attack: None,
             patrol: crate::patrol::PatrolQueue::default(),
             idle_ticks: 0,
@@ -917,7 +927,7 @@ impl Unit {
                 Action::Walking { to: campfire::ring_point(fire, point) }
             }
             Order::Cast => Action::Casting { left: Countdown::new(CAST_TICKS) },
-            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } | Order::GetOff | Order::Guard | Order::Disguise { .. } => Action::Idle,
+            Order::Stop | Order::FetchWood | Order::PickUp { .. } | Order::Build { .. } | Order::Enter { .. } | Order::Worship { .. } | Order::Attack { .. } | Order::Board { .. } | Order::GetOff | Order::Guard | Order::Disguise { .. } | Order::Arson { .. } => Action::Idle,
             Order::CutTree { tree } => {
                 self.to_tree = Some(tree);
                 Action::Walking { to: tree }
@@ -1005,6 +1015,7 @@ impl Unit {
             Action::Attacking { .. } => {}
             Action::Guarding { .. } => {}
             Action::Hacking { .. } => {}
+            Action::Arson { .. } => {}
             // All driven by `GameMap::tend_angels_of_death`, same shape as `Attacking`/`tend_attacks`.
             Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } => {}
             Action::Throwing { target, mut left } => {
@@ -1454,6 +1465,7 @@ impl Unit {
     /// calling this on an existing wildman).
     pub fn change_owner(&mut self, tribe: TribeId) {
         self.drop_plans();
+        self.arson = None;
         self.resume_attack = None;
         self.owner = Owner::Tribe(tribe);
         if self.kind == UnitKind::Wildman {

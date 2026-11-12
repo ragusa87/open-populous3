@@ -37,6 +37,8 @@ pub enum EffectKind {
     GroundFire,
     /// Only seen (`blast::explosion_effect`): Blast's own impact burst.
     Explosion,
+    /// Only seen (`arson`): a spy's thrown firebrand, flying from where the effect stands to `to`.
+    Firebrand { to: (u16, u16) },
     /// Its own kill tally (`swamp`); the killing itself is `GameMap::tend_swamps`, not its own turn: unlike every
     /// other effect it must see every other swamp at once, to settle whose claim an overlapping cell counts for.
     Swamp(crate::swamp::Swamp),
@@ -138,7 +140,7 @@ impl Effect {
             EffectKind::AngelOfDeath(ref mut cast) => cast.turn((self.x, self.z), self.owner),
             EffectKind::AngelOfDeathShockwave(ref mut wave) => wave.turn((self.x, self.z)),
             EffectKind::GhostArmy(ref mut cast) => cast.turn((self.x, self.z), self.owner, world),
-            EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Explosion | EffectKind::Swamp(_) => Vec::new(),
+            EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Explosion | EffectKind::Firebrand { .. } | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
         };
@@ -163,6 +165,7 @@ impl Effect {
             | EffectKind::Smoke
             | EffectKind::GroundFire
             | EffectKind::Explosion
+            | EffectKind::Firebrand { .. }
             | EffectKind::Swamp(_)
             | EffectKind::Convert(_)
             | EffectKind::Hypnotism(_)
