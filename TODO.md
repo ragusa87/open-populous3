@@ -114,6 +114,15 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   stays untouched (cause-agnostic: an explosion or terrain destruction never raises it). Left: the fire sound
   (needs the whole audio system, `pop3_format::sound` below, not written yet) and a stats-tab reading
   `fires_put_out` (nothing surfaces the number yet, same gap as `melee_wins`/`melee_deaths`).
+- [ ] Burning buildings, edge cases left after a live trace confirmed the timeline (pop3-rev-analysis.md "Burning
+  building", `[exe, measured]` 2026-11-12): `fire.rs`'s `BURN_TICKS` 127 / `THROW_OUT_AT` 8 / `HIT_AT` 48 and the
+  single one-piece hit leaving the building "under construction" match the original exactly (its turns counted
+  from the ignition turn as 1). Differences: (1) a kind with no wood cost - the original lazily creates the
+  wood stock at the type's full cost from its own table on the hit turn, so a 0-cost kind goes to -100 and is
+  DESTROYED by its first burn unless the kind is fireproof, where ours keeps it standing ("its wood unknown");
+  check which 0-cost kinds can burn at all, and the gate (500 wood in the original's table, 0 in ours); (2) the
+  visible fire: the original lights 4 flames around a big hut's footprint (ours: one), and smoke puffs plus
+  glowing embers stream up along the building from the throw-out turn on (`smoke::damage` covers the hit only).
 - [x] Shots, Blast's own cast-to-effect fireball (8/4) only: `blast::Fireball`/`GameMap::fireballs`, a typed list ticked before effects like `GameMap::bolts` (`GameMap::tend_fireballs`), integer 3D flight at `FIREBALL_SPEED` 1000 units/turn from the shaman's own position, spawning the simple blast on arrival - the "+6 turns: a shot flies from the shaman" piece of pop3-rev-analysis.md "From cast to effect", previously missing entirely (the blast landed the instant the cast released). This item originally lumped three shot ids together (8/4, 8/7, 8/8), but they turn out to be two different mechanisms: Firestorm's and Volcano's own fireball rain (8/4 shared with Blast for Firestorm's, 8/7+8/8 for Volcano's two sizes) are each a `panicking_blast` scheduled instantly by their own effect every few turns (`firestorm::Firestorm::turn`, `volcano::Volcano`) - confirmed-correct scheduling already, no per-fireball flight ever modelled, by design (pop3-rev-analysis.md: "the already-correct scheduling... is not where the rain-of-fire look is missing", only the client's own visual is). Blast's own single shot, flying once from the shaman to the cast point, was the only piece with no implementation at all - that's what this item covers now. The general shot machinery every OTHER spell (not Blast/Firestorm/Volcano) shares for its own single cast-to-effect shot - homing on a targeted unit, the shielded-enemy deflection - is still open (the item below).
 - [ ] World views (architecture.md "Client: world visuals"): the landing dust (`units::dust`) as a `WorldView` once
   touchdowns are kept in game-core (a unit's landing tick), so a rejoining client draws it too; the sinking totem's
@@ -241,9 +250,12 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   the per-tribe HUD square with spies selected queues an ordinary per-tribe command that becomes one shared
   order (kind 16, target tribe in the order) on every selected unit - so our implementation should model it as
   a queued unit order (one sim-turn latency, applies per selected spy, re-clicking re-arms the full transition),
-  not an instant HUD effect. The player-facing ARSON trigger is still unlocated. The transition is 63 turns
+  not an instant HUD effect, available only while a spy is in the selection (the original gates the option on selected-unit types). ARSON is settled as NOT player-reachable (the arming machinery never offers it, 2026-11-12) - ours need not expose it either; a second, fully orphaned wood-pile arson order also exists in the original and needs no implementation. The transition is 63 turns
   (~5.25 s at the original's 12 turns/s; our 10 ticks/s equivalent is ~52-53 ticks), decremented -1/turn by the
-  per-person turn step.
+  per-person turn step. The complete reveal rules are mapped (pop3-rev-analysis.md, "What un-disguises a spy"):
+  any new order targeting the spy (also the voluntary un-disguise), any combat contact (hit, Swarm), a
+  enemy-AI discovery task (45% per check, certain once the spy has stood more than 255 turns in one state), an enemy spy on the same map cell, being hypnotised (lost both ways), or the explicit reveal command -
+  and nothing else.
 - [x] Death: the single guessed `SPIRIT_TICKS` is replaced with the two confirmed variants (`Action::Spirit`'s
   own new `climbing: bool`, `Unit::new_spirit`, units.md "Chained orders" area): `SPIRIT_CALM_TICKS` (4 turns,
   stationary) or, unconditionally for a wildman and for anyone else only if it died in a drowning-eligible spot

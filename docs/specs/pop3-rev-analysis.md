@@ -65,8 +65,9 @@ so a live measurement may run on it with the addresses translated.
   spy-only "vulnerable transition" the player reported is real and mechanical, not cosmetic - one shared counter
   (armed to `SPY_DISGUISE_DELAY`, exe 63) gates both the spy's rendered colour (blinking while it runs) and every
   combat/targeting check in the game (showing the real tribe while it runs, the disguise tribe once it hits 0).
-  Arson is a separate, AI-only order (a firebrand thrown at a building's door, then it catches fire) - not a
-  player ability in any code path found. The PLAYER's own disguise command is live-confirmed (2026-11-11): the
+  Arson is a separate, AI-only order (a firebrand thrown at a building's door, then it catches fire) - proven
+  NOT player-reachable (the pointer-action arming machinery never offers it, despite spy-only type masks that
+  suggest it was designed to be; a second, wood-pile arson order is fully implemented and fully orphaned). The PLAYER's own disguise command is live-confirmed (2026-11-11): the
   HUD tribe-square click queues an ordinary per-tribe command that becomes order kind 16 on every selected
   unit (one turn of latency, one shared group over a multi-unit selection), which applies the disguise and
   re-arms the full transition each time. See "Spy disguise and infiltration".
@@ -952,12 +953,30 @@ Shared person and building states:
   "Building ashes"), once each, not a direct kill either.
 - **Fall**: landing at vertical speed ≤ −100 raises dust and a sound; ≤ −200 costs `FALL_OUT_OF_WW_DAMAGE` (exe 700,
   not in the file), except on cells whose terrain has flag 2 (probably water). Gravity 32 per turn.
-- **Burning building** (building state 4, set by 0x408CB0; per turn 0x408AB0): 127 turns (10.6 s), then back to
-  state 1. The library and the prison never burn (building-type flag `+0x4A` bit 0x1); a building already burning
-  is not lit again (its timer is not reset). The igniter's tribe is kept in `+0xAF`.
+- **Burning building** (building state 4, set by 0x408CB0; per turn 0x408AB0, fully traced 2026-11-12): 127
+  turns (10.6 s), then back to state 1. The library and the prison never burn (building-type flag `+0x4A` bit
+  0x1); a building already burning is not lit again (its timer is not reset). The igniter's tribe is kept in
+  `+0xAF`. The burn's own timeline `[exe, measured]` (live-traced 2026-11-12 on a big hut set alight by a spy):
+  at ignition, **4 flame objects** appear at points around the footprint (the ground-fire flame below; 4 on a
+  big hut - other sizes not measured); **7 turns in**, all occupants (up to 6 slots, 4 live) are thrown out
+  into the panic/flee person state (26) with a 24-tick panic timer, and smoke puffs plus glowing embers start
+  streaming up along the building; for the first ~47 turns the crackle sound (id 0x53) plays every turn;
+  **exactly once per burn, 47 turns (~3.9 s) after ignition, the single damage event fires: -100 wood off the
+  building's wood stock.** A completed building normally has no stock record, so one is created right then,
+  seeded at the building type's FULL wood cost, and the -100 lands on that - live: a big hut (cost 300) went to
+  stock 200 and its build stage dropped from 4 (complete) to 2 (looks two-thirds built). When a stage drops, a
+  damaged-ground/ashes element is also armed with `DME_RESTORE_TIME` (exe 6000 turns, ~8.3 min) plus 0-255
+  jitter. **If the -100 takes the stock to <= 0 the building is destroyed outright** (killed with an owner
+  notification). Otherwise it burns harmlessly until **126 turns (~10.5 s) after ignition**, then ends in
+  state 1 ("needs wood"): braves must bring wood to rebuild it to complete. Net: one ignition = exactly one
+  -100 hit off the type's full cost, so an unrepaired building dies after cost/100 burns - hut 3, wall 2,
+  gate 5, warrior hut 8, tower/temple 9, spy/fire hut 11; a healthy building always SURVIVES one burn, damaged
+  but standing (matching the in-play "takes damage but is not necessarily destroyed").
 - **The visible flame itself**: entering state 4 (the class-2 ENTER dispatch, same per-state-ENTER-table
   convention already confirmed for class 1/class 10, switch at `0x4030C0` states 1-6, state 4 -> `0x408840`)
-  spawns one class-5/type-0xA "fire" scenery object (the same scenery type Firestorm's and Lightning's own
+  spawns class-5/type-0xA "fire" scenery objects (live 2026-11-12: FOUR on a big hut, at distinct points
+  around the footprint - the static read below found one door-adjacent spawn, so the other three come from a
+  path not re-read; per-size counts unmeasured) (the same scenery type Firestorm's and Lightning's own
   impact code create for their ground-fire patches, `0x511800`/`0x511AE0`) at the building's own door-adjacent
   point - computed via the same shape/offset table (`0x59DF3C`) already used for a building's door-point and a
   vehicle hut's spawn point, sampling real ground height there (`0x44E940`) before creating it. That object is
@@ -4376,39 +4395,91 @@ tribe looking at it) uses the second accessor (`0x4DE720`) instead, with no blin
 real and apparent once the transition ends, consistent with the vulnerable window being real to everyone, not
 just a cosmetic preview for the owner.
 
+**What un-disguises a spy - the complete caller map of the reveal primitive (`0x4DE7F0`, every call site in
+the exe checked, 2026-11-12)**, i.e. the full list of ways a disguise ends:
+```text
+- ordering any unit AT the spy: when a unit's newly-activated order has a unit target that resolves to a
+  type-5 person, that spy is revealed immediately (no tribe check - so targeting your OWN spy with any order
+  is also the voluntary un-disguise; and targeting a suspected enemy reveals it, the "right-click a suspect"
+  move, complementing the hover-driven reveal command already documented)
+- taking a hit: the generic attack-order handler reveals a type-5 victim right after applying damage; two
+  small combat settle/snap helpers do the same; Swarm (insect plague) reveals a type-5 victim as it sends it
+  fleeing - combat contact of any kind strips the disguise
+- being hypnotised: Hypnotism recreates the person in the caster's tribe as a fresh unit, and a fresh spy
+  starts with its apparent tribe = its own real tribe and no countdown, so a hypnotised spy is simply an
+  undisguised member of the caster's tribe; the same happens on the way back when the spell expires, so it
+  returns to its own tribe undisguised as well (the old disguise is lost, not restored)
+- meeting an enemy spy: every 4 turns each spy checks its own map cell, and every spy of another real tribe
+  standing on that same cell has its disguise removed on the spot (countdown cleared too). Mutual, no
+  alliance check, no AI needed - human-controlled spies unmask each other this way; it does not have to be a
+  spy of the imitated tribe, any other tribe's spy will do
+- being discovered: an ENEMY-AI TASK (not a passive engine rule, and no spy of its own needed) walks a target
+  tribe's person roster (or its buildings) looking for units that currently count as the AI's own tribe -
+  i.e. spies disguised as it. For each one found it rolls the shared LCG mod 100 against a per-tribe percent
+  (the same table the arson outing roll uses; live 45 for every AI tribe in a level-25 save) and, failing
+  that, still catches the spy if it has spent more than a per-tribe threshold of ticks in its current state
+  (live 255, ~21 s) - an anti-loitering rule, so a spy standing idle in enemy land is caught for sure; on
+  success it sweeps an area of cells around the spy and un-disguises every enemy person there that currently
+  counts as the sweeping tribe (same-real-tribe and allied-tribe members are skipped via the alliance table).
+  It only ever matches SPIES: the "counts as this tribe" test is false for every non-spy type, so hypnotised
+  people - genuinely recreated in the caster's tribe for the spell's duration, not disguised - are never
+  caught by it
+- the arson sequence's own aborts (a genuine member of the imitated tribe standing at the door; the
+  post-throw discovery roll) - already documented above
+- the GIVE_UP_AND_SULK AI command's sweep over the tribe's own spies - already documented
+- the explicit per-unit reveal command (hover/target a suspected unit) - already documented
+```
+For our implementation: disguise ends on (a) any new order targeting the spy (friend or foe), (b) any combat
+contact, (c) a probabilistic AI discovery check while inside the victim tribe's area, (d) explicit reveal -
+and nothing else: walking around, time passing, or being looked at never ends it on their own.
+
 **The player-facing disguise command path - LIVE-CONFIRMED end to end (a 2026-11-11 session: the user drove
 the real game over VNC while hardware breakpoints/watchpoints captured each stage; full methodology and raw
 captures in pop3-rev `docs/cheat.md` "Spy disguise player path")**:
 ```text
-1. the player clicks the per-tribe HUD square (the small coloured stack above the spy's population icon, one
-   square per other tribe; its hover tooltip names the tribe) with spy/spies selected
-2. the click commits as a generic "armed pointer-action" player command (ui_cmd 0x7e): a small queue function
-   (0x4AA8B0) reads a per-tribe armed-action byte plus the cached click position and queues a per-tribe
-   command whose opcode encodes the action (the 0x5c-0x5e trio of a larger 0x37-0x3e pointer-action family)
-3. the per-tribe command drain dispatches it to a second-level pointer-action dispatcher (0x444F60), which
-   builds ONE command group - order kind 16, the chosen tribe id in the group's own packed target - and
-   assigns that one group to EVERY currently selected unit's secondary order slot (+0x8B[0], NOT the primary
-   +0x9B; ordering 4 spies at once produced one shared group id in all four, live-read)
-4. next sim turn, order_execute's kind-16 handler runs per unit and calls 0x4DE760(spy, tribe) - captured
-   live twice, once frozen mid-write of +0xB2 (read back mid-transition, then tribe<<6 | 63, then settling
-   to tribe<<6 once the 63-turn countdown elapsed, all as specified above)
+1. HOVER/ARM (traced statically the next day, anchored on the captures): the per-tribe HUD squares are
+   ordered by NON-player tribe index (own tribe skipped - square N maps to the Nth other tribe); hovering
+   one stores that tribe id in a "hovered tribe square" global, which a per-frame context rebuild turns
+   into one bit of a what's-under-the-pointer mask. A parallel per-frame pass maintains a bitmask of the
+   SELECTED person types (1 << type for every selected person). An armed-action chooser then walks an
+   ordered list of candidate order kinds, each gated on a context bit and on a per-kind selected-type
+   compatibility mask (order-kind flags table) - the disguise kind (16) requires the tribe-square context
+   bit AND a selected SPY (its compat mask is exactly 1 << 5, type 5 only). The armed kind is validated
+   each frame into a "a click here would act" flag (very likely also what changes the cursor visual)
+2. COMMIT: the click lands as ui_cmd 0x7e, whose handler (0x4AA8B0) queues a per-tribe command carrying
+   the armed ORDER KIND (16) and the hovered tribe id in its argument fields plus the cached click
+   position; the opcode itself only names the tribe's pending-order staging-ring slot (ring cursor
+   tribe+0x8C0, ring records tribe+0x8C1, 10-byte stride - the live captures' 0x5c-0x5e trio = slots 5-7
+   of the 0x57-based family; ui_cmd 0x7f is a modifier-driven variant committing with the 0x37 base,
+   plausibly queue-vs-replace, which-input-is-which unconfirmed)
+3. DISPATCH: the per-tribe command drain hands it to the pointer-action dispatcher (0x444F60), which
+   writes the staging record and builds ONE command group - order kind 16, the chosen tribe id in the
+   group's own packed target - assigning that one group to EVERY currently selected unit's secondary
+   order slot (+0x8B[0], NOT the primary +0x9B; ordering 4 spies at once produced one shared group id in
+   all four, live-read)
+4. EXECUTE: next sim turn, order_execute's kind-16 handler runs per unit and calls 0x4DE760(spy, tribe) -
+   captured live twice, once frozen mid-write of +0xB2 (read back mid-transition, then tribe<<6 | 63,
+   then settling to tribe<<6 once the 63-turn countdown elapsed, all as specified above)
 ```
 So kind 16 IS the disguise order, confirmed (its other, +0x9F-gated branch - the Convert/Hypnotism lead -
 remains separate and unconfirmed). Notable for our implementation: the disguise is an ordinary QUEUED order
 on the unit (one turn of latency, groupable over a multi-unit selection, carried in the secondary order slot),
-not an instant HUD effect; and re-clicking an already-disguised spy's square simply re-issues the order,
-re-arming the full 63-turn vulnerable transition. Still open on this path: the ARM half (what the square click
-itself runs to set the armed-action byte before `ui_cmd 0x7e` commits it), the exact armed-action-index ->
-kind-16 mapping step, which of the three opcodes encodes which tribe/action, and the meaning of the family's
-two opcode bases (a flagged variant pair) - pop3-rev `docs/trace-backlog.md` carries these as concrete leads.
+not an instant HUD effect; the disguise option arms only while the selection contains at least one spy and the
+pointer is over a tribe square (squares ordered by other-tribe index, self skipped); and re-clicking an
+already-disguised spy's square simply re-issues the order, re-arming the full 63-turn vulnerable transition.
+Still open on this path: which real input maps to the 0x7e-vs-0x7f commit variant, and the per-code validation
+cases of the armed-action machinery (a map of every pointer action the HUD can arm) - pop3-rev
+`docs/trace-backlog.md` carries these as concrete leads.
 
 #### Arson: a separate order, kind 15, found only issued by the AI
 Order kind 15 ("door/throw point", handler `0x439D30`) is a full approach/aim/throw/ignite/withdraw sequence -
 the likely match for "a disguised spy sneaks up to an enemy building, lights a fire, and it catches fire and
 takes damage":
 ```text
-substate 0: walk to the live object standing in the target building's own door cell, within 12 units on both
-  axes of a stored anchor point
+substate 0: walk to a point on the target building's own FOOTPRINT - the first footprint cell flagged as a
+  designated wall/perimeter cell (cell flag bit 0x20), snapped to that cell's center (user-observed in play
+  and confirmed in the code 2026-11-12: the spy stands at the middle of a WALL, not the door side; the door
+  point is only a path-blocked fallback), within 12 units on both axes of the anchor
 substate 1: settle, then face the door for 10 ticks (exe default, unverified live) - the aim/windup, the "draw
   with fire" cosmetic flag pair set throughout; every tick from here on, also checks for a genuine member of
   the tribe the spy is disguised AS standing right at the door (0x439C30) - a hit calls 0x4DE7F0 (reveal) at
@@ -4419,7 +4490,10 @@ substate 2 (the throw): on entry, attaches a prop (anim/object id 0x65 - plausib
   that is zero in the static image, populated at runtime - NEITHER table's real numbers could be read this
   session, only the formula/shape); once it expires, spawns a real class-7 type-0x1D (29) projectile - the
   firebrand itself - launched from the spy's own anchor toward the door at speed 80 (world units/turn), stamped
-  with the spy's own REAL tribe (not the disguise), plays a sound, advances
+  with the spy's own REAL tribe (not the disguise), plays the throw sound (id 0x36), advances. The
+  firebrand itself is purely cosmetic: an effect object with its own sprite and a 64-turn lifetime that
+  deletes itself, with no ignition logic (corrects a same-day claim that it reused lightning's strike-point
+  state - that was an off-by-one in the effect tables); the spy's order does the igniting, below
 substate 3: faces away from the door for 8 ticks (exe default, unverified live - the firebrand's own flight
   time), then back toward it, then **ignites the building** (`0x408CB0`, class-2 state 4 "Burning building" -
   same mechanism Lightning's own strike-point handler uses, "Terrain changes"), stamped with the spy's REAL
@@ -4434,6 +4508,30 @@ Confirmed to set the building on fire with the SAME mechanism Lightning already 
 trees, and a burning building's flame"), not a separate fire system - once ignited, the existing building-wear/
 destruction rules ("Building construction and wear") apply as normal.
 
+**Live trace (2026-11-12, `[exe, measured]`)** - a spy disguised as tribe 3, handed this order against a tribe-3
+big hut (the order had to be injected into memory, since the player cannot arm it - see below):
+```text
+turn T0          order starts, spy walks (162 turns for ~7000 world units)
+T0+162           substate 1: arrives on the hut's flagged wall cell (~830 units from its center, the side
+                 facing the spy's approach - NOT the door), settles and aims: 10 turns
+T0+172           substate 2: windup with the firebrand prop in hand: 24 turns
+T0+196           throw: sound 0x36, the firebrand ember flies off at speed 80
+T0+196..204      substate 3: 8 turns (the ember's flight), then the hut is IGNITED by the order itself,
+                 the attacker recorded as the spy's REAL tribe (not the disguise)
+T0+204..228      substate 4: 24-turn withdrawal; order done, the spy idles at the scene
+```
+Arrival to done: 66 turns (5.5 s). **The disguise survived the whole sequence** - the substate-4 outing roll
+is probabilistic and missed this time. Arson itself never reveals the spy. **What does is the imitated
+tribe's computer AI**, caught in the act on a second run (a freezing watchpoint on the disguise byte, the
+call chain read off the frozen stack): that tribe's AI tick runs a spy-discovery task (the random roll plus
+anti-loitering guarantee plus area sweep in "What un-disguises a spy") with no combat, no enemy spy and no order
+involved. The roll can strike at any time while the spy is in that tribe's area: in run 1 it fired ~13 s
+after the fire while the spy idled at the scene; in run 2 it fired during the windup - the unmasked spy was
+then attacked, knocked back to the start of its order, restarted the sequence twice and was killed, and the
+hut never caught fire (the order has no abort-on-reveal; it retries until the spy dies). Since the check is
+part of the computer AI, a human-controlled tribe never runs it (inference) - a human opponent has to find
+spies by targeting/hovering them or by fighting them.
+
 **Every confirmed issuer of kind 15 is the native AI, never a player command.** The helper that issues it
 (`0x43B8E0`, "give this unit an order" style, target = the door/throw point) has exactly 4 call sites in the
 whole exe, and all 4 sit inside `0x4CE2C0`'s own SPY branch (the same per-tribe-member sweep "Preacher
@@ -4441,6 +4539,25 @@ conversion" documents issuing kind 17 for its PREACHER branch) - i.e. **the nati
 to its own spies**, even though the handler itself has no type restriction and would run identically for any
 class-1 unit given it. Whether a player's own spy can reach kind 15 at all through some other, unlocated path -
 matching the in-play report that the human player also sets fires with a disguised spy - was not settled.
+
+**Settled statically a day after the disguise path was confirmed (2026-11-12): the player CANNOT arm arson
+through the pointer-action machinery that arms disguise.** The order-kind flags table carries a per-kind
+"which SELECTED person types may receive this as a pointer order" bitmask (1 << type), and it marks a clean
+spy-only block - kinds 13, 14, 15 (arson) and 16 (disguise) all have mask = spy only - but the armed-action
+chooser's hardcoded candidate list (one candidate kind per cursor-context bit) contains ONLY kind 16 of that
+block: nothing ever offers 13, 14 or 15 as an armable action, no literal order-queue call passes them, and the
+AI path above stays their only issuer. So arson was DESIGNED as a player-armable spy action (the data is all
+there) but never wired into the HUD - the in-play memory of personally setting fires most likely conflates the
+AI's own disguised spies, or a different mechanism entirely. Bonus finding from the same sweep: **kind 13 is a
+previously-unknown second arson variant - "spy, go set a WOOD PILE on fire"** (walk to the order target, find
+the wood-pile scenery object there, approach within 112 units, attach the same lit-firebrand prop and run the
+same windup tables as kind 15's throw, then ignite it through the shared scenery-ignition trigger - the same
+state-5 burning-scenery mechanism ground fire uses). It too has no issuer anywhere - a fully implemented,
+fully orphaned behaviour. Kind 14 (the no-op placeholder) completes the block. The per-kind selected-type
+masks are themselves a useful implementation table: work orders (6, 7, 9, 10) are brave-only, the
+strike-scan/building-visit family (17, 31, 32) preacher-only, the RC rebuild (18) and a few others
+shaman-only, the attack/move family open to all armed types - the full dump is in pop3-rev
+`docs/functions.tsv` (`0x437750`'s row and the kind rows).
 
 The AI's own spy branch, read in full:
 ```text
@@ -4460,13 +4577,14 @@ and systematically works through it with its idle spies, redisguising each as ne
 already on fire**, until the worklist is exhausted or no eligible spy remains.
 
 #### Open questions
-- ~~The player-facing command path for disguise~~ RESOLVED live 2026-11-11 (see the confirmed path above);
-  still open within it: the square click's own ARM step, the armed-index -> kind-16 mapping, which of the
-  three command opcodes encodes which tribe/action, and the family's two opcode bases.
-- The player-facing command path for arson (kind 15, no candidate found at all - every confirmed issuer is
-  the AI).
-- Whether a player-controlled spy can reach kind 15 (arson) through any path; if not, the in-play report of the
-  human player personally setting fires with a disguised spy would need a different, still-unlocated mechanism.
+- ~~The player-facing command path for disguise~~ RESOLVED live 2026-11-11, ARM half traced 2026-11-12 (see
+  the confirmed path above); still open within it: which real input (button/modifier) maps to the two commit
+  variants, and the full per-code map of the armed-pointer-action machinery (the disguise kind is one of a
+  whole ordered candidate list - the same mechanism must arm attack/move/convert/etc. pointer actions).
+- ~~Whether a player-controlled spy can reach kind 15 (arson) through any path~~ SETTLED 2026-11-12: no - the
+  armed-pointer-action candidate list never offers kinds 13/14/15 despite their spy-only type masks (see the
+  "Settled statically" paragraph above); arson and the newly-found wood-pile arson (kind 13) are AI-only /
+  orphaned respectively, and the in-play "I set fires myself" memory needs another explanation.
 - The real numbers behind the windup delay (two tables, one of them a runtime-populated pointer) and the
   discovery-roll percentages (`0x960812`, `0x89DDE7`) - formulas and shapes only, no live values.
 - `0x4DE720` vs `0x4DE7B0`'s disagreeing framing of which countdown state means "real" vs "apparent" - only 2
