@@ -81,10 +81,12 @@ pub enum Pose {
     Pushup,
     /// Idle too long: a spy juggles.
     Juggle,
+    /// A spy setting a building on fire, firebrand in hand (arson.rs; original anim 17).
+    SetFire,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 35] = [
+    pub const ALL: [Pose; 36] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -120,6 +122,7 @@ impl Pose {
         Pose::Scratch,
         Pose::Pushup,
         Pose::Juggle,
+        Pose::SetFire,
     ];
 
     /// The pose drawn instead where a pose has no art of its own (wood poses: braves only; wood and
@@ -131,7 +134,7 @@ impl Pose {
             Pose::Jump => Pose::Stranded,
             Pose::Flung | Pose::Tumble | Pose::Spirit => Pose::Fall,
             Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack => Pose::Idle,
-            Pose::Throw => Pose::Cast,
+            Pose::Throw | Pose::SetFire => Pose::Cast,
             Pose::Shoved => Pose::Fall,
             Pose::Pedal | Pose::Listen | Pose::Preach => Pose::Pray,
             Pose::Carbonized => Pose::Fall,
@@ -172,7 +175,7 @@ impl Pose {
             Pose::Strike | Pose::Trade => ShamanAnim::Strike,
             Pose::Kick => ShamanAnim::Kick,
             Pose::Reel | Pose::Shoved | Pose::Hack => ShamanAnim::Idle,
-            Pose::Throw => ShamanAnim::Cast,
+            Pose::Throw | Pose::SetFire => ShamanAnim::Cast,
             // She has no art of her own for these brave-only anims (unit-art.md): `pose_of` never actually
             // puts her in one, but every pose still needs a loop to build (`Originals::art`'s own check).
             Pose::Carbonized => ShamanAnim::Fall,
@@ -286,7 +289,8 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         // No burning pose traced or drawn yet (unit-art.md): Panic's own stands in, since OnFire reuses its movement.
         Action::OnFire { .. } => Pose::Panic,
         Action::Hacking { .. } => Pose::Hack,
-        Action::Throwing { .. } | Action::Arson { .. } => Pose::Throw,
+        Action::Throwing { .. } => Pose::Throw,
+        Action::Arson { .. } => Pose::SetFire,
         Action::Listening { .. } => Pose::Listen,
         Action::Queuing { .. } if carrying => Pose::CarryIdle,
         Action::Queuing { .. } => Pose::Idle,
@@ -457,7 +461,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Pray | Pose::Pedal | Pose::Listen | Pose::Preach => WildmanAnim::Sit,
                 Pose::Fall | Pose::Tumble | Pose::Spirit | Pose::Carbonized => WildmanAnim::Tumble,
                 Pose::Drown | Pose::Flung | Pose::Shoved => WildmanAnim::Flung,
-                Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack | Pose::Throw => WildmanAnim::Stand,
+                Pose::Strike | Pose::Trade | Pose::Kick | Pose::Reel | Pose::Hack | Pose::Throw | Pose::SetFire => WildmanAnim::Stand,
                 Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => WildmanAnim::Stand,
                 Pose::Eat => WildmanAnim::Eat,
                 Pose::Drink => WildmanAnim::Drink,
@@ -499,6 +503,9 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Shoved => PersonAnim::Shoved,
                 Pose::Hack => PersonAnim::Chop,
                 Pose::Throw => PersonAnim::Throw,
+                // Only the spy's and the firewarrior's outfits have it (animations.md 17).
+                Pose::SetFire if matches!(kind, UnitKind::Spy | UnitKind::Firewarrior) => PersonAnim::SetFire,
+                Pose::SetFire => PersonAnim::Throw,
                 Pose::Pedal => PersonAnim::Pedal,
                 Pose::Listen => PersonAnim::Listen,
                 Pose::Preach => PersonAnim::Preach,

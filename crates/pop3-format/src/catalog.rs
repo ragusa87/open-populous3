@@ -271,6 +271,8 @@ pub enum PersonAnim {
     Pushup,
     /// Idle too long: a spy juggles (TODO.md "Units"; same caveat as `Scratch`).
     Juggle,
+    /// A spy setting a building on fire (animations.md 17; the spy's and the firewarrior's outfits only).
+    SetFire,
 }
 
 /// The frame of `PersonAnim::ArmsUp` standing with both arms up.
@@ -307,6 +309,7 @@ impl PersonAnim {
             PersonAnim::Scratch => 89,
             PersonAnim::Pushup => 90,
             PersonAnim::Juggle => 92,
+            PersonAnim::SetFire => 17,
         }
     }
 }
