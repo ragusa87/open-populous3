@@ -1943,6 +1943,17 @@ PostUpdate about 5 ms), driven by how we hand it the world:
   Other loaders could become boot
   jobs (markers, dust, wood, tooltip icons, cursor: each under 10 ms today), and the map's own work at a game start
   (terrain bake, tree meshes) too.
+- [ ] Unit sprite atlases are ~1.6 GB of uncompressed RGBA with the original art (66-336 MB per kind, measured
+  2026-11-13), all resident on the GPU: `prepare_frame` stores every frame Scale2x'd twice (`UPSCALE_STEPS`, x4 per
+  side, 16x the pixels), then once per tribe. Installed one tribe per frame since that size stalled the render world
+  ~500 ms per kind (Wayland dropped the window when the mouse moved meanwhile); frames still take ~50-180 ms during
+  that phase. Store frames at native resolution (~100 MB, ~25 MB with tribes recoloured in the shader) and either:
+  - upscale on the GPU: a sprite material whose fragment shader applies Scale2x x2 (Scale4x, a 5x5 texel
+    neighbourhood) to the native-res atlas, then filters linearly itself; mind the atlas gutters (`atlas::build_atlas`
+    packs frames edge to edge) and the edge bleed `prepare_frame` does today;
+  - or make it optional: a setting (upscaled vs plain), the plain path drawing native texels (nearest, or linear with
+    the bleed) at no upscale cost, possibly the default if the difference is small at game zoom.
+  Compare both with `just shot` at default and close zoom before picking.
 - [ ] Measure the windowed release build too (`cargo run --release`): the numbers above are the dev build under
   tracing. The simulation only matters with many units: every walker replans A* on any terrain write
   ("Replanning" in Units).
