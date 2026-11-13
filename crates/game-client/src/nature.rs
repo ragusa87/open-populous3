@@ -76,8 +76,18 @@ pub fn tree_at(cursor: Vec2, trees: &[TreeOnScreen]) -> Option<usize> {
         .map(|t| t.index)
 }
 
-#[derive(Resource)]
+/// The open-source models, loaded only when a map needs them (`load_models`, `respawn_trees`).
+#[derive(Resource, Default)]
 struct TreeModels(Vec<Handle<WorldAsset>>);
+
+impl TreeModels {
+    fn load(&mut self, assets: &AssetServer) -> &[Handle<WorldAsset>] {
+        if self.0.is_empty() {
+            self.0 = MODELS.iter().map(|m| assets.load(GltfAssetLabel::Scene(0).from_asset(format!("3d/nature/{m}.gltf")))).collect();
+        }
+        &self.0
+    }
+}
 
 /// A tree's view: its index in `GameMap::trees`.
 #[derive(Component)]
@@ -150,17 +160,21 @@ pub struct NaturePlugin;
 
 impl Plugin for NaturePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_models)
+        app.init_resource::<TreeModels>()
+            .add_systems(Startup, load_models)
             .add_systems(Update, (respawn_trees, grow_trees).chain())
             .init_resource::<HoveredTree>()
             .add_systems(Update, hover_tree.before(crate::units::UnitInput).in_set(crate::menu::Gameplay));
     }
 }
 
-fn load_models(mut commands: Commands, assets: Res<AssetServer>, mut tracked: ResMut<crate::boot::TrackedAssets>) {
-    let scenes: Vec<Handle<WorldAsset>> = MODELS.iter().map(|m| assets.load(GltfAssetLabel::Scene(0).from_asset(format!("3d/nature/{m}.gltf")))).collect();
-    tracked.0.extend(scenes.iter().map(|h| h.clone().untyped()));
-    commands.insert_resource(TreeModels(scenes));
+/// The open-source models at boot, behind the loading screen, unless the original trees will stand in for them
+/// (a theme whose original trees fail to load still gets them later, from `respawn_trees`).
+fn load_models(levels: Res<LevelList>, objects: Res<OriginalObjects>, assets: Res<AssetServer>, mut models: ResMut<TreeModels>, mut tracked: ResMut<crate::boot::TrackedAssets>) {
+    if levels.original && objects.0.is_some() {
+        return;
+    }
+    tracked.0.extend(models.load(&assets).iter().map(|h| h.clone().untyped()));
 }
 
 /// One view per tree of a newly loaded map: the original tree object when allowed, else the
@@ -171,7 +185,8 @@ fn respawn_trees(
     map: Res<CurrentMap>,
     levels: Res<LevelList>,
     objects: Res<OriginalObjects>,
-    models: Res<TreeModels>,
+    assets: Res<AssetServer>,
+    mut models: ResMut<TreeModels>,
     existing: Query<Entity, With<TreeView>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
@@ -197,7 +212,7 @@ fn respawn_trees(
             }
             None => {
                 let model = TreeModel { index: i, full_scale: FULL_HEIGHT / MODEL_HEIGHT, full_height: FULL_HEIGHT };
-                view.with_child((model, WorldAssetRoot(models.0[tree.variant as usize % MODELS.len()].clone()), Transform::from_scale(Vec3::splat(tree_scale(tree.visual_size())))));
+                view.with_child((model, WorldAssetRoot(models.load(&assets)[tree.variant as usize % MODELS.len()].clone()), Transform::from_scale(Vec3::splat(tree_scale(tree.visual_size())))));
             }
         }
     }
