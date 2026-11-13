@@ -33,7 +33,7 @@ pub enum Stage {
     Aim,
     /// The firebrand in hand.
     Windup,
-    /// Thrown, turned away while it flies.
+    /// Thrown, still crouched facing the wall while it catches.
     Flight,
     Withdraw,
 }
@@ -146,12 +146,9 @@ impl GameMap {
                 let wall = self.building(building).map_or(centre, |b| wall_point(b, (u.x, u.z)));
                 let firebrand = Effect::new(owner, (u.x, u.z), Countdown::new(FIREBRAND_TICKS), EffectKind::Firebrand { to: wall });
                 events.push(WorldEvent::SpawnEffect(firebrand));
-                let away = (u.x.wrapping_sub(centre.0.wrapping_sub(u.x)), u.z.wrapping_sub(centre.1.wrapping_sub(u.z)));
-                self.units[i].face(away);
                 Some((Stage::Flight, FLIGHT_TICKS))
             }
             Stage::Flight => {
-                self.units[i].face(centre);
                 events.push(WorldEvent::SetFire { building, by: owner });
                 if self.rng.next_u32() % 100 < NOTICED_PERCENT {
                     self.units[i].reveal();

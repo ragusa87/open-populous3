@@ -259,10 +259,11 @@ attack on an enemy building does (user-confirmed in play: it never hacks at the 
 contradicts pop3-rev-analysis.md's "not player-reachable", the play observation wins). The spy walks to the middle
 of the building's wall nearest to it, never the door's wall (`GameMap::arson_spot`, user-confirmed: the original
 stands on a flagged wall cell of the footprint, ours just outside it; the door only when no wall side is free),
-crouches facing it, aims 10 turns, winds up 24 with the firebrand, then leaves it burning on the middle of that
+crouches facing it the whole time (the original's turn away while the firebrand flies is dropped: user-confirmed),
+aims 10 turns, winds up 24 with the firebrand, then leaves it burning on the middle of that
 wall (`EffectKind::Firebrand`, 64 turns, drawn as a small standing flame: user-confirmed in play; the original's
 own effect flies at 80 units a turn, its sprite not identified), and 8 turns later the building itself catches
-fire lit by the spy's real tribe (`GameMap::set_fire`, as lightning: the fire at its door), then it lingers 24,
+fire lit by the spy's real tribe (`GameMap::set_fire`, as lightning: its flame at the building's centre, user-confirmed), then it lingers 24,
 still crouched. Pose: `Pose::SetFire`, anim 17 with the original files, its frames 0-4 (striking a light, bending
 down) over the aim, then only the crouched 5-10 looping (11 stands back up: never shown, user-confirmed); our art
 kneels. A genuine member of the tribe
