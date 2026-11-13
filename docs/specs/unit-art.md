@@ -164,9 +164,9 @@ SitDown, StandUp, SwordSlash, Victory, Walk, Walk_Carry), no props, and hand bon
 
 The idle-too-long picker itself (89/90/92, TODO.md "Units") is wired for original assets
 (`units::art::idle_flavor`, `Pose::Scratch`/`Pushup`/`Juggle`): only the CC0 clips above are still missing,
-same as the taunts (48-50) - until then `Pose::fallback` holds plain `Idle` for the generated figure. 90/91
-in the original trace reads as two phases of one push-up cycle; only 90 is wired (one phase stands in for
-the whole loop, a simplification like the taunts picking one of 3 - `[ours]`).
+same as the taunts (48-50) - until then `Pose::fallback` holds plain `Idle` for the generated figure. 90 and
+91 are not two phases of one cycle: the original plays 91 (headband) for a warrior and 90 (firewarrior gear) for
+a firewarrior (pop3-rev-analysis.md "Bored poses"); ours wires only 90, for warriors (`[ours]`, TODO.md "Units").
 
 Three kinds of work, from easiest: a new `PoseShot` in the baker on an existing clip; a small baker feature (a prop on a
 hand bone, a per-frame model rotation, an all-black tint, a rising ghost copy); new clips, only for the idle

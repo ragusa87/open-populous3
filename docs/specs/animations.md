@@ -74,7 +74,7 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 52 | 4 | running away (bitten by a swarm of bees; `Pose::Panic`, used: shamans and wildmen walk instead) |
 | 20-24 | 4-18 | preacher giving a sermon: raises a held book (20), holds it across the chest (21), gestures with the free arm while reading (22), both arms up, book held high (23), lowers it again, open arms (24); the monk's pointed helmet drawn in [game: by eye, `HSPR0-0.DAT:6526`-`6574`, corrects an earlier "club attack" guess] |
 | 89 | 12 | scratching itself: a brave idle for too long |
-| 90 | 14 | push-ups (warriors idle for too long), firewarrior gear drawn in; 91 (14) push-ups, warrior headband drawn in |
+| 90 | 14 | push-ups: a firewarrior bored while idle (firewarrior gear drawn in); 91 (14) the same for a warrior (headband) [exe, pop3-rev-analysis.md "Bored poses"] |
 | 92 | 17 | spy idle: juggling |
 | 97 | 4 | brave carbonized (struck by lightning); 98 (4) shaman carbonized (probably unused) |
 

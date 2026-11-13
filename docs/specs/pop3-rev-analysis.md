@@ -87,8 +87,10 @@ so a live measurement may run on it with the addresses translated.
   wired to the move order (kind 3) but not the attack order (kinds 19/21). See "Order kinds and formations".
 - **"Idle" is not one state** [exe]: a person cycles a short state-1 hand-off into state 10 ("carrying out an
   order, or nothing"), which does nothing at all - no wandering, no autonomous wood-gathering was found - when
-  no command group is assigned. Only wildmen are confirmed to cycle idle-fidget animations (state 8 -> 5) on
-  their own; this was not found for ordinary followers. See "Idle behaviour".
+  no command group is assigned. Wildmen cycle their own idle-fidget loop (state 8 -> 5). A follower with
+  nothing to do settles into a standing loop (state 17, then 19) whose bored pose (a brave scratching, a
+  warrior or firewarrior doing push-ups) is a 3/64 roll every 32 turns: no idle-time threshold, ~57 s on
+  average. See "Bored poses".
 - **Lava flow spreads downhill, one cell at a time, for a fixed 16 s** [exe]: a per-cell precomputed downhill
   direction decides where each "mature" lava cell pushes next; it never kills outright, only sets people on
   fire (state 31) every turn a cell is hot; after growth it fades for 16 more turns, then becomes ordinary
@@ -2874,15 +2876,15 @@ worship spot), not a wood-fetch assignment; its own "doing it" handler (kind 4, 
 this is inferred, not proven. No caller of the gather-wood state (0x495D70, "Chopping") was found outside the
 player's own `Order::FetchWood`/`CutTree`-equivalent command path.
 
-**On the idle pose itself (e.g. a warrior's push-ups) [exe]**: `order_execute`'s OTHER fallback - reached only
-when a unit has no group at all, not even a stale one, the generic "settle and go idle" path - calls `0x4E32A0`,
-traced this session: it returns a fixed id `0x29` (41) for one specific condition (the unit's tribe matches a
-global byte at `0x89C6F0`, under a couple of other global flag bits - plausibly "the human player's own tribe,
-under some display/option setting", not confirmed), and otherwise returns a **per-type default idle pose id from
-a newly-identified field in the canonical person-type table, `+5`** (`0x5A7065` = base `0x5A7060` + 5) - a sibling
-of the already-documented `+4` (next-state) and `+7` (fidget-odds) fields in that same 50-byte record. So yes, the
-per-type idle pose (push-ups for a warrior, etc.) is table-driven exactly as it looks in play; what the special
-`0x29` case actually displays, and what the two global flag bytes gating it mean, were not chased further.
+**Where an idle follower goes [exe]**: `order_execute`'s OTHER fallback - reached only when a unit has no group
+at all, not even a stale one, the generic "settle and go idle" path - calls `0x4E32A0`, which returns the
+person's **next state**, not a pose (correcting an earlier draft that read it as an idle pose id): state 41 (0x29,
+"forced eviction") for one specific condition (the unit's tribe matches the player tribe byte `0x89C6F0`, under a
+couple of other global flag bits, not chased), and otherwise the person-type table's `+5` field (`0x5A7065`, a
+sibling of `+4` next-state and `+7` fidget odds in the same 50-byte record): **17 for every type from brave to
+shaman**, 8 for a wildman. State 17 waits until the person is back on its remembered spot (`+0x4F`), then hands
+off to state 19, the standing loop that holds the bored poses ("Bored poses", below). The pose is not a per-type
+table entry here: it is picked by type inside state 19.
 
 ### Idle-fidget animations: confirmed for wildmen, not (yet) for followers
 Wildmen (type 1) alone reach **state 8** (0x4D60D0) from state 1. Every turn it runs its own LCG (seed 0x89BC72,
@@ -2898,7 +2900,45 @@ Whether an ordinary follower (brave, warrior, ...) ever reaches state 5 on its o
 write of state 5 was found inside `order_execute` or its kind-3/kind-6 handlers, only inside the preach-order
 handler (0x43C7A0, setting the *target's* state, already flagged as probably unrelated to conversion) and about
 seven other call sites across the exe that were not read this session. So the fidget-picking mechanism itself is
-real and precisely rhythm-gated, but as traced it is wildman-only; whether followers share it is open.
+real and precisely rhythm-gated, but as traced it is wildman-only. Followers have a separate mechanism of their
+own, below.
+
+### Bored poses: a follower standing idle (person state 19, sub-state 10) [exe]
+State 19's body (`0x4D73E0`, also the landing recovery of "Tumbling and ground recovery") is the generic "stand on
+my spot" loop. Its sub-state 5 is plain standing (Idle, or holding wood when `+0x78` > 0). Rolls use the shared
+generator `0x89D178`; checks run on the unit's own `class_counter` (`+0x2E`), so each unit has its own phase.
+
+```text
+sub-state 5 (standing), every turn:
+    if class_counter & 31 == 0:              # every 32 turns, 2.7 s
+        if rnd() & 31 > 18:  sub = 6         # 13/32: a short shuffle (face a new way, step, 4-31 turns as
+                                             #   sub-state 7), then back to 5
+        if rnd() & 63 > 60:  sub = 10        # 3/64: the bored pose; wins over the shuffle
+sub-state 10 (bored pose), first turn:
+    brave        -> object 0xA1 (anim 89, scratching)
+    warrior      -> object 0xA2 (anim 91, push-ups, headband)   only if (+0x82 & 0xF0) <= 0x10
+    firewarrior  -> object 0xA3 (anim 90, push-ups, firewarrior gear)  same gate
+    other types  -> nothing, back to sub-state 5 next turn
+    timer = (frames of anim 89) x (turns per frame of the object's draw class) + 1
+each turn: timer -= 1; when it reaches 0, or the animation reaches its last frame -> Idle, sub-state 5
+```
+
+| | Value | Seconds |
+|---|---|---|
+| Check rhythm | every 32 turns | 2.7 s |
+| Chance per check | 3/64 (4.7 %) | |
+| Wait before the first pose | geometric: mean ~683 turns, median ~470 | mean ~57 s, median ~39 s |
+| Earliest possible | first check after settling | ~2.7 s |
+| Pose length | one loop of the animation (brave/warrior 1 turn per frame, firewarrior 2) | ~1-2 s |
+
+- No idle-time threshold: the chance does not grow with time spent idle, and a pose can repeat back to back.
+- The timer always reads anim 89's frame count (a single global, `0x5A6ADC`), whatever the type; the animation's
+  own last frame usually ends the pose first.
+- The live trial in "Tumbling and ground recovery" saw sub-states 4→5→10→5→6→7 on a brave that had landed: the
+  same loop, the 10 there being a scratch.
+- Not here: the spy's juggling (anim 92, object 0xA4); no write of that object was found in this loop, its trigger
+  is open. The `+0x82` gate on the warrior/firewarrior pose is not understood (`+0x80..0x82` is the remembered
+  spot plus a facing nibble).
 
 ## Wildmen [exe]
 A wildman (person type 1) cannot be given an order: state 1's per-type next-state table ("Idle behaviour") routes
@@ -3796,8 +3836,10 @@ record push also used by state 3, actually starts at `0x4D7FD0`, well inside tha
   the same bit cheat.md's live drowning trace already found set on entering the water-sink sequence - this looks
   like a general "lying/struggling" pose-variant bit reused by this handler, not a water-exclusive signal, but that
   is not confirmed independently here) - **this is why the live log showed substates wandering non-monotonically
-  (4→5→10→5→6→7…) rather than counting through a fixed sequence**: it is a randomized "still down, shifting around"
-  idle loop, not a linear recovery animation.
+  (4→5→10→5→6→7…) rather than counting through a fixed sequence**. **Corrected later**: these are not "still
+  down" variants at all - sub-state 5 is ordinary standing, 6/7 a short shuffle, and 10 the bored pose
+  (scratching, push-ups); the bit `0x40000000` is the generic "sub-state just changed" marker. State 19 is the
+  standing-idle loop every idle follower ends in, which a landing person simply joins - see "Bored poses".
 - A later sub-state (7, "getting up") rerolls a new facing and a fresh wait timer before looping back into the
   resting sub-states again, so a person can cycle through several more rounds of this before actually standing.
 - **Exit**: two return epilogues at the function's end return a next-state value exactly like state 1's own
@@ -4398,10 +4440,12 @@ just a cosmetic preview for the owner.
 **What un-disguises a spy - the complete caller map of the reveal primitive (`0x4DE7F0`, every call site in
 the exe checked, 2026-11-12)**, i.e. the full list of ways a disguise ends:
 ```text
-- ordering any unit AT the spy: when a unit's newly-activated order has a unit target that resolves to a
-  type-5 person, that spy is revealed immediately (no tribe check - so targeting your OWN spy with any order
-  is also the voluntary un-disguise; and targeting a suspected enemy reveals it, the "right-click a suspect"
-  move, complementing the hover-driven reveal command already documented)
+- ordering an ATTACK on the spy: when a unit's "attack this person" order (one specific order kind) becomes
+  active and its target is a spy, that spy is revealed on the spot - no distance, tribe or line-of-sight
+  check, so the reveal lands one turn after the click, long before the attacker reaches pre-fight range or
+  deals damage. The attack option itself arms from the target's REAL tribe, not its disguise, so a spy
+  disguised as you is still attackable. Other orders aimed at a spy (move to it, etc.) do NOT reveal it
+  (corrects an earlier draft that said any order did)
 - taking a hit: the generic attack-order handler reveals a type-5 victim right after applying damage; two
   small combat settle/snap helpers do the same; Swarm (insect plague) reveals a type-5 victim as it sends it
   fleeing - combat contact of any kind strips the disguise
@@ -4427,10 +4471,14 @@ the exe checked, 2026-11-12)**, i.e. the full list of ways a disguise ends:
 - the arson sequence's own aborts (a genuine member of the imitated tribe standing at the door; the
   post-throw discovery roll) - already documented above
 - the GIVE_UP_AND_SULK AI command's sweep over the tribe's own spies - already documented
-- the explicit per-unit reveal command (hover/target a suspected unit) - already documented
+- the explicit per-unit reveal command, now pinned down (2026-11-12): it is queued by the player's ordinary
+  SELECT click. When you click to select what looks like one of your own people but is an enemy spy whose
+  disguise as YOUR tribe has fully taken effect, it is not selected - the reveal is queued on it instead. No
+  selection is needed (the click is the selection attempt). It cannot fire during the 63-turn transition,
+  because then the spy still counts as its real, enemy tribe and is simply an enemy under the cursor
 ```
-For our implementation: disguise ends on (a) any new order targeting the spy (friend or foe), (b) any combat
-contact, (c) a probabilistic AI discovery check while inside the victim tribe's area, (d) explicit reveal -
+For our implementation: disguise ends on (a) an attack order targeting the spy, as soon as it starts, (b) any
+combat contact, (c) a probabilistic AI discovery check while inside the victim tribe's area, (d) explicit reveal -
 and nothing else: walking around, time passing, or being looked at never ends it on their own.
 
 **The player-facing disguise command path - LIVE-CONFIRMED end to end (a 2026-11-11 session: the user drove
@@ -4587,8 +4635,15 @@ already on fire**, until the worklist is exhausted or no eligible spy remains.
   orphaned respectively, and the in-play "I set fires myself" memory needs another explanation.
 - The real numbers behind the windup delay (two tables, one of them a runtime-populated pointer) and the
   discovery-roll percentages (`0x960812`, `0x89DDE7`) - formulas and shapes only, no live values.
-- `0x4DE720` vs `0x4DE7B0`'s disagreeing framing of which countdown state means "real" vs "apparent" - only 2
-  confirmed callers of the former, neither conclusively reconciled.
+- ~~`0x4DE720` vs `0x4DE7B0`'s disagreeing framing~~ RESOLVED 2026-11-12: a byte-level re-read shows the
+  earlier description of `0x4DE720` had its branches swapped; both apply the same rule (real tribe during the
+  transition, disguise after).
+- ~~Whether the hover pick hides a disguised spy~~ SETTLED 2026-11-12 (user-confirmed from play, matching the
+  code): it does not, by design. The manual attack option is armed from the hovered person's REAL tribe, so
+  a player holding fighters can always attack a disguised spy by hand (which reveals it, see above), while
+  every AUTOMATIC targeting path (auto-attack scans, watchtower sentries, preacher strikes) asks "which tribe
+  does it count as" and so ignores a settled spy - it is never auto-attacked, which is what lets it do its
+  job. Implementation rule: manual targeting uses real tribe, automatic targeting uses the apparent tribe.
 
 ### Attacking a building [exe]
 An attack order on an enemy building (`+0x89` the building; sub-states in `+0xA8`, 0x51A2A0):
@@ -5680,10 +5735,14 @@ confirms.
   per-unit copies cannot express - moot unless a future spec item needs "all N units retarget at once mid-walk".
 - `unit.rs`'s `Action::Idle`: a single, unified rest state with no autonomous behaviour at all, matching what was
   found for ordinary followers in the original (state 10, "Idle behaviour": does nothing when no command group
-  is assigned - no wandering, no autonomous wood-gathering found). What's missing is the confirmed, rhythm-gated
-  idle-fidget-animation picker (state 8 → 5, per-type RNG-weighted, ~16-turn cadence) - confirmed only for
-  wildmen in the original, not (yet) for followers, so this is lower priority than it first appears; `art.rs` /
-  `sheets.rs` have exactly one static idle pose with no variant system to connect it to either way.
+  is assigned - no wandering, no autonomous wood-gathering found). Two idle details are missing: a 13/32 chance
+  every 32 turns of a short in-place shuffle (new facing, a step, 4-31 turns), and the bored-pose rhythm below.
+- `units::art::idle_flavor` (client) rolls 1 in 6 per 16-tick block, so a brave/warrior/spy flavors ~17 % of its
+  idle time; the original rolls 3/64 per 32 turns and plays one loop (~13-25 turns), about 2 % of idle time, a
+  first pose after ~57 s on average ("Bored poses"). Also: warriors use anim 91 (headband), firewarriors do
+  push-ups too (anim 90, ours: plain idle), and the spy's juggling trigger is not traced (ours rolls it like the
+  others). A wood-carrying brave can scratch in the original (the pose is set without the wood check; ours
+  excludes carriers).
 - Wildmen (no AI in our code today; "Wildmen"): the original drives them through a confirmed 1 → 8 → (5 or 6) →
   16 → 8 loop - first search nearby (18 cells) for a tree or plant and idle beside it if found (state 5); only
   if none is near, walk to a nearby shore cell instead (states 6/16, explicitly rejecting inland and open-sea
@@ -5746,6 +5805,8 @@ confirms.
   but has the same instant-kill issue and no decay-then-self-destruct-then-ash behaviour.
 
 ## Open questions
+- Bored poses ("Bored poses"): what the warrior/firewarrior gate `+0x82 & 0xF0 <= 0x10` means, and where the spy's
+  juggling (anim 92, object 0xA4) is triggered.
 - Where `MANA_F_<PERSON>`, `MANA_F_HOUSED/WORKING/TRAINING` and `MANA_F_HUT_LEVEL_1..3` are applied. Only the max
   of the three activity percentages is stored, and its readers are not traced.
 - What "busy" means (unit+0xE bit 7, unit+0xA7), and the preacher's extra check.
@@ -6103,6 +6164,8 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4D3386 | person state 1: counts down +0x70, then next-state by type from table 0x5A7064 byte 0 ("Idle behaviour") |
 | 0x5A7064 | 9×50-byte per-type table: byte 0 state-1's next state, bytes 3+ state-5's fidget-odds (0x5A7067) |
 | 0x4D60D0 | person state 8 (wildmen only): picks a "reference unit", may enter state 5 (fidget) or 6 ("Idle behaviour") |
+| 0x4E32A0 | "settle and go idle": next state for a person with no group - type table +5 (17; 8 for wildmen), or 41 |
+| 0x4D73E0 | person state 19: standing loop (sub-state 5), shuffle (6/7), bored pose (10) every 32 turns ("Bored poses") |
 | 0x4D48E0 | wildman "find a nearby tree/plant" search (18 cells, scenery-type flags table 0x5A79C4) - state 5 |
 | 0x4D4A00 | wildman shore-destination search (12 cells, coastal-shape table 0x5AA328, rejects land/open sea) |
 | 0x4D342A, 0x4D6E40 | wildman states 6 (walk to the shore destination) and 16 (idle/ambient animation there) ("Wildmen") |

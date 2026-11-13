@@ -235,6 +235,14 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   the taunts); original assets: anims 89/90/92 (`PersonAnim::Scratch`/`Pushup`/`Juggle`). Preachers,
   firewarriors, the shaman and wildmen keep plain Idle (wildmen already have their own separate
   eat/drink idle loop, `wildman.rs`, left untouched).
+- [ ] Idle bored poses: match the original's rhythm (pop3-rev-analysis.md "Bored poses", now traced for
+  followers). It rolls 3/64 every 32 turns per unit (each unit on its own phase), no idle-time threshold, and
+  plays one loop of the animation (~13-25 turns): a first pose after ~57 s on average, ~2 % of idle time - ours
+  (`idle_flavor`: 1 in 6 per 16-tick block, ~17 %) is far too frequent. Warriors should use anim 91 (headband)
+  instead of 90; firewarriors do push-ups too (anim 90); a wood-carrying brave can scratch. The spy's juggling
+  (92) is not triggered by this loop and its rule is untraced: keep ours as a guess, marked `[ours]`. Also
+  missing from the same loop: a 13/32 chance every 32 turns of a short in-place shuffle (new facing, a step,
+  4-31 turns).
 - [ ] Their own behaviour: braves build/gather, warriors fight, preachers convert, spies disguise, firewarriors throw fire (today every kind only walks, prays, drowns and dies).
 - [ ] State transitions: `Unit::panic`/`Unit::catch_fire` (`unit.rs`) both call `drop_plans()`, cancelling the route, destination, teleport/spell targets, every pending "go do X" field, the order queue, the patrol list and any work assignment outright. **Confirmed, not just suspected, as a real divergence** (pop3-rev-analysis.md "Resuming a fight cut short by a push", addendum): the original's state-transition mechanism itself has no generic "forget your plans" step anywhere (`0x4ED6F0`, always called on any transition, is a no-op; `0x4ED640` only runs the new state's own entry case), Fight is independently confirmed to never release a participant's command group, and person states 26 (panic) and 31 (on fire) were each read exhaustively, start to finish, this session - neither touches the order/command-group slot (`+0x9B`/`+0x8B`/`+0xA6`) or calls `group_release` anywhere. Fix: `panic`/`catch_fire` should stop calling the full `drop_plans()` and instead just interrupt the current task the way Fight already does (`resume_attack`-style), so it resumes unprompted afterward instead of leaving the person with nothing queued. Also resolve the existing inconsistency this surfaced: the `Drowning` transition (`unit.rs` `tick()`) does a hand-picked partial reset (`teleport_to`/`spell` only) rather than calling `drop_plans()` at all - whichever way `panic`/`catch_fire` are fixed, make `Drowning`'s own reset consistent with it rather than its own third, narrower variant. (Unrelated to the above but found alongside it: on-fire's own entry in the original also forces the SAME random run panic does, for the whole 70-turn burn, gated by a ghost-check rather than panic's blast flag - `catch_fire`'s existing `run_in_panic`-for-the-whole-burn already matches this, no change needed there.)
 - [ ] Spies, left open after the implementation below (units.md "Spies"): the real windup tables and the
@@ -263,9 +271,11 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   not an instant HUD effect, available only while a spy is in the selection (the original gates the option on selected-unit types). ARSON is settled as NOT player-reachable (the arming machinery never offers it, 2026-11-12) - ours need not expose it either; a second, fully orphaned wood-pile arson order also exists in the original and needs no implementation. The transition is 63 turns
   (~5.25 s at the original's 12 turns/s; our 10 ticks/s equivalent is ~52-53 ticks), decremented -1/turn by the
   per-person turn step. The complete reveal rules are mapped (pop3-rev-analysis.md, "What un-disguises a spy"):
-  any new order targeting the spy (also the voluntary un-disguise), any combat contact (hit, Swarm), a
+  an attack order targeting the spy (revealed the turn the order starts, before contact), any combat contact (hit, Swarm), a
   enemy-AI discovery task (45% per check, certain once the spy has stood more than 255 turns in one state), an enemy spy on the same map cell, being hypnotised (lost both ways), or the explicit reveal command -
-  and nothing else.
+  and nothing else. Targeting rule (user-confirmed): manual attack targets by REAL tribe (a player can always attack
+  a disguised spy by hand, revealing it), automatic targeting by APPARENT tribe (a settled spy is never
+  auto-attacked).
 - [x] Death: the single guessed `SPIRIT_TICKS` is replaced with the two confirmed variants (`Action::Spirit`'s
   own new `climbing: bool`, `Unit::new_spirit`, units.md "Chained orders" area): `SPIRIT_CALM_TICKS` (4 turns,
   stationary) or, unconditionally for a wildman and for anyone else only if it died in a drowning-eligible spot
