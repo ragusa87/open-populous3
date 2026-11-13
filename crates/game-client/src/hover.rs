@@ -10,6 +10,7 @@ use crate::grounded::pick_ground;
 use crate::hud::PANEL_WIDTH;
 use crate::nature::{HoveredTree, TreeView};
 use crate::units::selection::{unit_at, OnScreen, UNIT_HEIGHT};
+use crate::units::sprite_material::UnitSpriteMaterial;
 use crate::units::{world_units, UnitInput, UnitSprite, UnitView, PLAYER};
 use crate::wood::{WoodBody, WoodView};
 use crate::world::CurrentMap;
@@ -83,7 +84,7 @@ struct SpriteOutline {
     #[uniform(3)]
     width: Vec4,
     /// `[u_min, v_min, u_max, v_max]` of this frame's own rect in `sprite`: the whole image for a frame with its
-    /// own dedicated texture, a sub-rect when `sprite` is a shared atlas (`upload_tribe_atlases`) - the margin
+    /// own dedicated texture, a sub-rect when `sprite` is a shared atlas (`upload_frames`) - the margin
     /// `sprite_outline_mesh` extrapolates past this rect must still read as "outside the sprite" to the shader,
     /// not just outside the whole atlas image (`hover_outline.wgsl`'s `alpha`).
     #[uniform(4)]
@@ -106,6 +107,8 @@ impl Material for SpriteOutline {
 #[derive(Resource, Default)]
 struct OutlineCache {
     sprites: HashMap<AssetId<Mesh>, (Handle<Mesh>, Handle<SpriteOutline>)>,
+    /// A unit's halo, by its frame's quad and its kind and tribe's material (the quad is shared by every tribe).
+    units: HashMap<(AssetId<Mesh>, AssetId<UnitSpriteMaterial>), (Handle<Mesh>, Handle<UnitSpriteMaterial>)>,
     hulls: HashMap<(AssetId<Mesh>, u32), Option<Handle<Mesh>>>,
     hull_material: Option<Handle<StandardMaterial>>,
 }
@@ -115,6 +118,7 @@ impl OutlineCache {
     /// halo is made again from its new shape.
     fn forget(&mut self, id: AssetId<Mesh>) {
         self.sprites.remove(&id);
+        self.units.retain(|(mesh, _), _| *mesh != id);
         self.hulls.retain(|(mesh, _), _| *mesh != id);
     }
 }
@@ -335,6 +339,13 @@ fn detect(
     hovered.set_if_neq(Hovered(target));
 }
 
+/// A halo's own look: around a sprite with a texture (wood), around a unit, or a 3D model's hull.
+enum Halo {
+    Sprite(Handle<SpriteOutline>),
+    Unit(Handle<UnitSpriteMaterial>),
+    Hull,
+}
+
 /// Keeps one halo on the hovered thing and none elsewhere.
 #[allow(clippy::too_many_arguments)]
 fn draw_halo(
@@ -342,7 +353,7 @@ fn draw_halo(
     hovered: Res<Hovered>,
     mut cache: ResMut<OutlineCache>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut sprite_mats: ResMut<Assets<SpriteOutline>>,
+    (mut sprite_mats, mut unit_mats): (ResMut<Assets<SpriteOutline>>, ResMut<Assets<UnitSpriteMaterial>>),
     mut mats: ResMut<Assets<StandardMaterial>>,
     images: Res<Assets<Image>>,
     unit_sprites: Query<(Entity, &UnitSprite)>,
@@ -352,7 +363,8 @@ fn draw_halo(
     children: Query<&Children>,
     vehicles: Query<(Entity, &crate::views::ViewOf), With<crate::vehicles::VehicleView>>,
     shapes: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>, &GlobalTransform), (Without<OutlinePart>, Without<NoOutline>)>,
-    mut parts: Query<(Entity, &ChildOf, &mut Mesh3d, Option<&mut MeshMaterial3d<SpriteOutline>>), With<OutlinePart>>,
+    unit_shapes: Query<(&Mesh3d, &MeshMaterial3d<UnitSpriteMaterial>), Without<OutlinePart>>,
+    mut parts: Query<(Entity, &ChildOf, &mut Mesh3d, Option<&mut MeshMaterial3d<SpriteOutline>>, Option<&mut MeshMaterial3d<UnitSpriteMaterial>>), With<OutlinePart>>,
 ) {
     let sprite = match hovered.0 {
         Some(HoverTarget::Unit(i)) => unit_sprites.iter().find(|(_, s)| s.0 == i).map(|(e, _)| e),
@@ -366,8 +378,22 @@ fn draw_halo(
         Some(HoverTarget::Vehicle(id)) => vehicles.iter().find(|(_, of)| of.id == id.raw()).map(|(e, _)| e),
         _ => None,
     };
-    let mut wanted: Vec<(Entity, Handle<Mesh>, Option<Handle<SpriteOutline>>)> = Vec::new();
-    if let Some(e) = sprite && let Ok((mesh, mat, _)) = shapes.get(e) {
+    let mut wanted: Vec<(Entity, Handle<Mesh>, Halo)> = Vec::new();
+    if let Some(e) = sprite && let Ok((mesh, mat)) = unit_shapes.get(e) {
+        let key = (mesh.0.id(), mat.0.id());
+        let made = cache.units.get(&key).cloned().or_else(|| {
+            let look = unit_mats.get(&mat.0)?;
+            let atlas_texels = images.get(look.index())?.width() as f32;
+            let (outline, width, frame_rect) = sprite_outline_mesh(meshes.get(&mesh.0)?, atlas_texels)?;
+            let halo = look.outline(HALO, width, frame_rect);
+            let made = (meshes.add(outline), unit_mats.add(halo));
+            cache.units.insert(key, made.clone());
+            Some(made)
+        });
+        if let Some((m, s)) = made {
+            wanted.push((e, m, Halo::Unit(s)));
+        }
+    } else if let Some(e) = sprite && let Ok((mesh, mat, _)) = shapes.get(e) {
         let made = cache.sprites.get(&mesh.0.id()).cloned().or_else(|| {
             let texture = mats.get(&mat.0)?.base_color_texture.clone()?;
             let atlas_texels = images.get(&texture)?.width() as f32;
@@ -377,7 +403,7 @@ fn draw_halo(
             Some(made)
         });
         if let Some((m, s)) = made {
-            wanted.push((e, m, Some(s)));
+            wanted.push((e, m, Halo::Sprite(s)));
         }
     }
     if let Some(root) = model {
@@ -396,37 +422,45 @@ fn draw_halo(
                 }
             };
             if let Some(h) = hull {
-                wanted.push((e, h, None));
+                wanted.push((e, h, Halo::Hull));
             }
         }
     }
     let mut kept = Vec::new();
-    for (part, parent, mut mesh, sprite_mat) in &mut parts {
+    for (part, parent, mut mesh, sprite_mat, unit_mat) in &mut parts {
+        let same_kind = |halo: &Halo| match halo {
+            Halo::Sprite(_) => sprite_mat.is_some(),
+            Halo::Unit(_) => unit_mat.is_some(),
+            Halo::Hull => sprite_mat.is_none() && unit_mat.is_none(),
+        };
         match wanted.iter().find(|(e, ..)| *e == parent.parent()) {
-            Some((e, m, s)) if !kept.contains(e) && s.is_some() == sprite_mat.is_some() => {
+            Some((e, m, halo)) if !kept.contains(e) && same_kind(halo) => {
                 if mesh.0 != *m {
                     mesh.0 = m.clone();
                 }
-                if let (Some(mut mat), Some(s)) = (sprite_mat, s) && mat.0 != *s {
-                    mat.0 = s.clone();
+                match (halo, sprite_mat, unit_mat) {
+                    (Halo::Sprite(s), Some(mut mat), _) if mat.0 != *s => mat.0 = s.clone(),
+                    (Halo::Unit(s), _, Some(mut mat)) if mat.0 != *s => mat.0 = s.clone(),
+                    _ => {}
                 }
                 kept.push(*e);
             }
             _ => commands.entity(part).despawn(),
         }
     }
-    for (e, mesh, sprite_mat) in wanted.into_iter().filter(|(e, ..)| !kept.contains(e)) {
+    for (e, mesh, halo) in wanted.into_iter().filter(|(e, ..)| !kept.contains(e)) {
         let mut part = commands.spawn((OutlinePart, NotShadowCaster, Mesh3d(mesh), Transform::default(), ChildOf(e)));
-        match sprite_mat {
-            Some(s) => part.insert(MeshMaterial3d(s)),
-            None => part.insert(MeshMaterial3d(cache.hull_material.clone().unwrap_or_default())),
+        match halo {
+            Halo::Sprite(s) => part.insert(MeshMaterial3d(s)),
+            Halo::Unit(s) => part.insert(MeshMaterial3d(s)),
+            Halo::Hull => part.insert(MeshMaterial3d(cache.hull_material.clone().unwrap_or_default())),
         };
     }
 }
 
 /// A sprite quad (`units::sprite_quad`/`sprite_quad_uv`) grown by `SPRITE_MARGIN_PX` on every side, its UVs
 /// extrapolated past the frame's own rect (read from its baked `ATTRIBUTE_UV_0`, not assumed to be 0..1: a
-/// shared atlas, `upload_tribe_atlases`, bakes a sub-rect instead) so the frame keeps its place, the outline
+/// shared atlas, `upload_frames`, bakes a sub-rect instead) so the frame keeps its place, the outline
 /// width in texels for a texture `atlas_texels` wide (the frame's own pixel width when it has a dedicated
 /// texture, the whole shared atlas's otherwise - only `(u1 - u0) * atlas_texels`, this frame's own share of it,
 /// sets the texel density right), and that same frame rect (`[u_min, v_min, u_max, v_max]`) for the shader to
@@ -561,7 +595,7 @@ mod tests {
 
     #[test]
     fn a_shared_atlas_frame_keeps_its_own_sub_rect_for_the_margin_and_the_shader() {
-        // A frame packed at [0.25, 0.5]x[0.6, 0.8] of a shared atlas (`upload_tribe_atlases`), not the whole image.
+        // A frame packed at [0.25, 0.5]x[0.6, 0.8] of a shared atlas (`upload_frames`), not the whole image.
         let quad = crate::units::sprite_quad_uv(Vec2::new(20.0, 40.0), Vec2::new(10.0, 36.0), [0.25, 0.6, 0.5, 0.8]);
         let (outline, width, frame_rect) = sprite_outline_mesh(&quad, 80.0).unwrap();
         assert_eq!(frame_rect, Vec4::new(0.25, 0.6, 0.5, 0.8), "read from the quad's own baked uv, not assumed to be 0..1");

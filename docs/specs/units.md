@@ -382,8 +382,12 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
 ## Shaman on screen (client, `units/`)
 - `SimClock` runs `GameMap::tick` at a fixed 10 Hz; positions glide between the last two ticks (moves over a cell in one tick, teleport or reincarnation, are not glided).
 - Each unit is a `Grounded` sprite quad (1 px = 1/88 cell: standing ~0.39 cell, half a site stone; feet at the
-  anchor) turned to face the camera, uploaded Scale2x-upscaled x4 and filtered linearly (no blocky pixels),
-  with a health bar over the head (green -> yellow -> red) shown while the unit is alive and selected, or under the
+  anchor) turned to face the camera, drawn by `units::sprite_material` (`unit_sprite.wgsl`): each kind's frames are
+  one atlas of colour indices shared by all the tribes (`units::palette`: an index stands for a pixel's colours in
+  every tribe, frames aligned on their feet, so the original's tribe layers and other shades come out exact), each
+  tribe's colours in its rows of a colour table; a kind whose tribes don't have the same frames (the original
+  shaman: an animation per tribe) gets an atlas per tribe. The shader filters linearly by hand (no blocky pixels),
+  colours weighted by alpha so edges don't darken, with a health bar over the head (green -> yellow -> red) shown while the unit is alive and selected, or under the
   mouse for the player's own units (`hover::Hoverable::health`).
   Feet on the ground right under the unit (`Grounded` with no footprint), sprite and bar raised to its `motion.height`
   off the ground (terrain height units at the terrain's scale, glided between ticks, `drawn_lift`; the shadow stays

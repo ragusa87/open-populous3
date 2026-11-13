@@ -121,7 +121,8 @@ a worker thread (`AsyncComputeTaskPool`) from an `Input` copied out of the world
 whose `install` puts the `Output` in the world on the main thread (GPU uploads, resources). `BootJobPlugin::<J>`
 registers one: started on entering `AppState::Loading`, its task held in its own typed slot, installed when done;
 `BootStatus` is what the loading screen shows. A job's CPU half takes plain data: for the unit sprites,
-`units::prepare_frame` makes a `PreparedFrame` (the only way to get one) and `units::upload_prepared` uploads it.
+`units::prepare_kind` turns a kind's art into index atlases and colour tables (`PreparedKind`), and
+`units::upload_kind` only registers them as assets.
 Assets Bevy loads itself (glTF scenes) are pushed to `boot::TrackedAssets` and waited for too.
 
 ## Client: world visuals

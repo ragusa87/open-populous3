@@ -5,7 +5,7 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var sprite_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> width: vec4<f32>;
 // This frame's own [u_min, v_min, u_max, v_max] in `sprite`: the whole image for a dedicated texture, a sub-rect
-// when `sprite` is a shared atlas (`upload_tribe_atlases`) - outside it is another frame's pixels, not transparent
+// when `sprite` is a shared atlas (`upload_frames`) - outside it is another frame's pixels, not transparent
 // padding, so it must read as "outside the sprite" the same way outside the whole image used to.
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var<uniform> frame_rect: vec4<f32>;
 
