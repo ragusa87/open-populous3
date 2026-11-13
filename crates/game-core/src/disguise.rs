@@ -64,6 +64,12 @@ impl Unit {
         }
     }
 
+    /// The kind `viewer` sees it as: a settled disguise passes as a brave to everyone but its owner, who still sees
+    /// its spy.
+    pub fn shown_kind(&self, viewer: TribeId) -> UnitKind {
+        if self.disguised() && self.owner != Owner::Tribe(viewer) { UnitKind::Brave } else { self.kind }
+    }
+
     /// Takes on `tribe`'s look: re-arms the full settling countdown, even switching from another disguise.
     /// Ignored for anyone but a spy; disguising as its own tribe just drops any disguise.
     pub fn disguise_as(&mut self, tribe: TribeId, delay: Ticks) {
@@ -182,6 +188,20 @@ mod tests {
         settle(&mut u);
         assert_eq!(seen(&u, TribeId::Blue), [red; 4]);
         assert_eq!(seen(&u, TribeId::Green), [red; 4]);
+    }
+
+    #[test]
+    fn a_settled_disguise_looks_like_a_brave_to_all_but_its_owner() {
+        let mut u = spy();
+        assert_eq!(u.shown_kind(TribeId::Red), UnitKind::Spy, "undisguised");
+        u.disguise_as(TribeId::Red, DISGUISE_DELAY);
+        assert_eq!(u.shown_kind(TribeId::Red), UnitKind::Spy, "still settling");
+        settle(&mut u);
+        assert_eq!(u.shown_kind(TribeId::Blue), UnitKind::Spy);
+        assert_eq!(u.shown_kind(TribeId::Red), UnitKind::Brave);
+        assert_eq!(u.shown_kind(TribeId::Green), UnitKind::Brave);
+        u.reveal();
+        assert_eq!(u.shown_kind(TribeId::Red), UnitKind::Spy);
     }
 
     #[test]

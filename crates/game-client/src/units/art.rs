@@ -224,8 +224,9 @@ const TAUNT_DISPLAY: Ticks = Ticks::new(12);
 
 /// The pose `u` is drawn in: aboard a vehicle and idle or waiting to throw, pedalling it; killed by
 /// lightning, carbonized until its spirit rises; waiting in a challenge and recently taunted, one of 3;
-/// else by its action (`pose_for`). `now`: the drawn moment, for the taunt's own short display window.
-pub fn pose_of(u: &game_core::unit::Unit, now: Tick) -> Pose {
+/// else by its action (`pose_for`). `kind`: the kind it is shown as (`Unit::shown_kind`), for its idle flavor.
+/// `now`: the drawn moment, for the taunt's own short display window.
+pub fn pose_of(u: &game_core::unit::Unit, kind: UnitKind, now: Tick) -> Pose {
     if u.aboard.is_some() && matches!(u.action, Action::Idle | Action::Attacking { .. }) {
         return Pose::Pedal;
     }
@@ -245,7 +246,7 @@ pub fn pose_of(u: &game_core::unit::Unit, now: Tick) -> Pose {
     }
     if u.action == Action::Idle
         && u.carrying == 0
-        && let Some(flavor) = idle_flavor(u.kind, u.id.raw(), now)
+        && let Some(flavor) = idle_flavor(kind, u.id.raw(), now)
     {
         return flavor;
     }
@@ -709,8 +710,8 @@ mod tests {
         // A sweep of ticks so a flavor pose would show at least once if the carrying/walking gate were missing.
         for raw in 0..512u32 {
             let now = Tick::from_wire(raw);
-            assert_ne!(pose_of(&u(Action::Idle, 1), now), Pose::Scratch, "carrying wood: no flavor");
-            assert_ne!(pose_of(&u(Action::Walking { to: (0, 0) }, 0), now), Pose::Scratch, "not idle: no flavor");
+            assert_ne!(pose_of(&u(Action::Idle, 1), UnitKind::Brave, now), Pose::Scratch, "carrying wood: no flavor");
+            assert_ne!(pose_of(&u(Action::Walking { to: (0, 0) }, 0), UnitKind::Brave, now), Pose::Scratch, "not idle: no flavor");
         }
     }
 

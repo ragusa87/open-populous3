@@ -242,6 +242,8 @@ targets. Explicit orders still go by the real tribe: a player can always attack 
   skipped, in tribe order: shortcuts.md).
 - Colours (`Unit::shown_owner`): its owner sees it blink between its real and disguise colour every 2 turns while
   it settles, then the disguise; every other tribe sees its real colour until it settles, then the disguise.
+- Look (`Unit::shown_kind`): once settled every other tribe sees a brave (its art, poses and idle flavor), its
+  owner still a spy; while settling, or undisguised, a spy for all.
 
 **Reveal** (`Unit::reveal`), and nothing else ends a disguise:
 - an attack order aimed at it, the turn the attack starts (`GameMap::go_attack`, spotting's own too);

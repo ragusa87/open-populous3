@@ -221,18 +221,19 @@ impl UnitSprites {
     /// closest thing to "excited" she has) — forced with no `Action::Casting` under it, so `frame_index` loops it
     /// by time instead of a one-shot countdown, same as Stranded already does for everyone else.
     pub fn frame_for(&self, unit: &Unit, worship: Option<u8>, still: bool, yaw: f32, clock: &SimClock, now: SimNow, celebrating: bool) -> Option<&FrameAsset> {
-        let (mut pose, facing) = worship.map_or((art::pose_of(unit, now.tick), unit.facing), |f| (Pose::Pray, f));
+        let shown = unit.shown_kind(PLAYER);
+        let (mut pose, facing) = worship.map_or((art::pose_of(unit, shown, now.tick), unit.facing), |f| (Pose::Pray, f));
         if celebrating && matches!(pose, Pose::Idle | Pose::CarryIdle) {
-            pose = if sheets::plays(unit.kind, Pose::Stranded) {
+            pose = if sheets::plays(shown, Pose::Stranded) {
                 Pose::Stranded
-            } else if sheets::plays(unit.kind, Pose::Cast) {
+            } else if sheets::plays(shown, Pose::Cast) {
                 Pose::Cast
             } else {
                 pose
             };
         }
-        let kind = UnitKind::ALL.iter().position(|&k| k == unit.kind)?;
-        // Wildmen have no tribe (`Owner::Wild`): one look for all. A disguised spy wears the colour the player sees.
+        let kind = UnitKind::ALL.iter().position(|&k| k == shown)?;
+        // Wildmen have no tribe (`Owner::Wild`): one look for all. A disguised spy wears the look the player sees.
         let tribe = unit.shown_owner(PLAYER, now.tick).tribe().map_or(0, TribeId::as_usize);
         let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(sprite_dir(facing, yaw))?;
         let frame = if pose == Pose::Pedal && still { 0 } else { frame_index(pose, frames.len(), &unit.action, now, clock.alpha()) };
