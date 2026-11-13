@@ -49,9 +49,21 @@ pub fn headless() -> bool {
     std::env::var("HEADLESS").is_ok_and(|v| v == "1")
 }
 
-/// Assets (models) come from the repository's `assets/` folder.
+/// Assets (models) come from `$POP3_ASSETS`, else an `assets/` folder next to the executable (a release
+/// archive), else the repository's `assets/` folder.
 pub fn asset_plugin() -> AssetPlugin {
-    AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").into(), ..default() }
+    AssetPlugin { file_path: assets_dir(), ..default() }
+}
+
+fn assets_dir() -> String {
+    let beside_exe = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join("assets")));
+    pick_assets_dir(std::env::var("POP3_ASSETS").ok(), beside_exe.filter(|p| p.is_dir()))
+}
+
+fn pick_assets_dir(env: Option<String>, beside_exe: Option<std::path::PathBuf>) -> String {
+    env.filter(|v| !v.is_empty())
+        .or_else(|| beside_exe.map(|p| p.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").into())
 }
 
 /// DefaultPlugins without winit/window: the camera renders into an offscreen image.
@@ -758,6 +770,14 @@ fn screenshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assets_dir_order() {
+        let exe = Some(std::path::PathBuf::from("/opt/pop3/assets"));
+        assert_eq!(pick_assets_dir(Some("/x".into()), exe.clone()), "/x");
+        assert_eq!(pick_assets_dir(Some(String::new()), exe.clone()), "/opt/pop3/assets");
+        assert!(pick_assets_dir(None, None).ends_with("/../../assets"));
+    }
 
     #[test]
     fn vehicle_setups() {
