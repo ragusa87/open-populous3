@@ -10,6 +10,7 @@ pub mod art;
 pub mod atlas;
 mod dust;
 pub mod markers;
+pub mod palette;
 mod procedural;
 mod shadow;
 pub mod sheets;
@@ -453,7 +454,7 @@ fn pack_tribe_atlases(poses: Vec<Vec<Vec<PreparedFrame>>>) -> TribeAtlases {
             continue;
         }
         let frames: Vec<Frame> = group.iter().map(|(_, _, _, pf)| pf.pixels.clone()).collect();
-        let packed = atlas::build_atlas(&frames);
+        let packed = atlas::build_atlas(&frames, 0);
         for ((pose_i, dir_i, frame_i, pf), rect) in group.into_iter().zip(packed.rects.iter()) {
             lookup[pose_i][dir_i][frame_i] = Some(FrameLookup { atlas: atlas_i, rect: *rect, size: pf.size, origin: pf.origin });
         }
@@ -570,7 +571,7 @@ pub fn upload_frames(frames: &[Frame], images: &mut Assets<Image>, meshes: &mut 
             continue;
         }
         let pixel_frames: Vec<Frame> = group.iter().map(|(_, pf)| pf.pixels.clone()).collect();
-        let packed = atlas::build_atlas(&pixel_frames);
+        let packed = atlas::build_atlas(&pixel_frames, 0);
         let mut image = Image::new(
             Extent3d { width: packed.width as u32, height: packed.height as u32, depth_or_array_layers: 1 },
             TextureDimension::D2,
