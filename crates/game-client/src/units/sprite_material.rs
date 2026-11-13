@@ -8,10 +8,26 @@ use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, Extent3d, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension, TextureFormat};
-use bevy::shader::ShaderRef;
+use bevy::shader::{ShaderDefVal, ShaderRef};
 
 /// Colours per row of the colour table.
 pub const TABLE_WIDTH: usize = 256;
+/// How many times larger pixel-art frames are drawn, rounded by Scale2x (EPX) in the shader before filtering: 1
+/// (plain texels, filtered), 2 (once) or 4 (twice). Chosen at build time: `POP3_SPRITE_UPSCALE=1 cargo build`.
+pub const SPRITE_UPSCALE: u32 = upscale(option_env!("POP3_SPRITE_UPSCALE"));
+
+const fn upscale(value: Option<&str>) -> u32 {
+    match value {
+        None => 4,
+        Some(v) => match v.as_bytes() {
+            b"1" => 1,
+            b"2" => 2,
+            b"4" => 4,
+            _ => panic!("POP3_SPRITE_UPSCALE must be 1, 2 or 4"),
+        },
+    }
+}
+
 /// Empty texels around each frame in a kind's index atlas, so filtering near a frame's edge never reads its
 /// neighbour's pixels.
 pub const ATLAS_PAD: usize = 3;
@@ -25,7 +41,7 @@ pub struct UnitSpriteMaterial {
     #[texture(1)]
     colours: Handle<Image>,
     /// x: this tribe's first row in `colours`, y: alpha multiplier, z: outline width in texels (0: the sprite
-    /// itself), w: unused.
+    /// itself), w: 1 for pixel art (upscaled by `SPRITE_UPSCALE`), 0 for detailed art (drawn as is).
     #[uniform(2)]
     params: Vec4,
     #[uniform(3)]
@@ -38,19 +54,19 @@ pub struct UnitSpriteMaterial {
 
 impl UnitSpriteMaterial {
     /// One tribe's look of a kind: its colours start at row `first_row` of `colours`; `blend` for frames with
-    /// see-through pixels (`AlphaMode::Blend`), else cut out.
-    pub fn sprite(index: Handle<Image>, colours: Handle<Image>, first_row: usize, blend: bool) -> Self {
-        UnitSpriteMaterial { index, colours, params: Vec4::new(first_row as f32, 1.0, 0.0, 0.0), outline_colour: LinearRgba::NONE, frame_rect: Vec4::ZERO, blend }
+    /// see-through pixels (`AlphaMode::Blend`), else cut out; `pixel_art` upscaled by `SPRITE_UPSCALE`.
+    pub fn sprite(index: Handle<Image>, colours: Handle<Image>, first_row: usize, blend: bool, pixel_art: bool) -> Self {
+        UnitSpriteMaterial { index, colours, params: Vec4::new(first_row as f32, 1.0, 0.0, pixel_art as u8 as f32), outline_colour: LinearRgba::NONE, frame_rect: Vec4::ZERO, blend }
     }
 
     /// This look, see-through at `alpha`.
     pub fn ghost(&self, alpha: f32) -> Self {
-        UnitSpriteMaterial { params: Vec4::new(self.params.x, alpha, self.params.z, 0.0), blend: true, ..self.clone() }
+        UnitSpriteMaterial { params: self.params.with_y(alpha), blend: true, ..self.clone() }
     }
 
     /// Only the pixels within `width` texels outside the frame at `frame_rect`, in `colour`.
     pub fn outline(&self, colour: Color, width: f32, frame_rect: Vec4) -> Self {
-        UnitSpriteMaterial { params: Vec4::new(self.params.x, 1.0, width, 0.0), outline_colour: colour.into(), frame_rect, blend: false, ..self.clone() }
+        UnitSpriteMaterial { params: self.params.with_y(1.0).with_z(width), outline_colour: colour.into(), frame_rect, blend: false, ..self.clone() }
     }
 
     pub fn index(&self) -> &Handle<Image> {
@@ -78,6 +94,9 @@ impl Material for UnitSpriteMaterial {
     /// Both sides: some face the camera with their back.
     fn specialize(_: &MaterialPipeline, descriptor: &mut RenderPipelineDescriptor, _: &MeshVertexBufferLayoutRef, _: MaterialPipelineKey<Self>) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.primitive.cull_mode = None;
+        if let Some(fragment) = descriptor.fragment.as_mut() {
+            fragment.shader_defs.push(ShaderDefVal::UInt("UPSCALE".into(), SPRITE_UPSCALE));
+        }
         Ok(())
     }
 }
@@ -138,6 +157,13 @@ mod tests {
         let second = rows * TABLE_WIDTH * 4;
         assert_eq!(&rgba[second..second + 4], &[2, 2, 2, 255]);
         assert_eq!(&rgba[second + 299 * 4..second + 300 * 4], &[2, 2, 2, 255]);
+    }
+
+    #[test]
+    fn the_upscale_is_four_unless_built_with_another() {
+        assert_eq!(upscale(None), 4);
+        assert_eq!([upscale(Some("1")), upscale(Some("2")), upscale(Some("4"))], [1, 2, 4]);
+        assert!([1, 2, 4].contains(&SPRITE_UPSCALE));
     }
 
     #[test]

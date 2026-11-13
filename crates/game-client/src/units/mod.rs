@@ -418,6 +418,8 @@ struct PreparedArt {
     colours: Vec<u8>,
     rows: usize,
     tribes: Vec<usize>,
+    /// Every frame is pixel art (scale 1): upscaled in the shader.
+    pixel_art: bool,
     /// `[pose][dir][frame]`.
     frames: Vec<Vec<Vec<PreparedUnitFrame>>>,
 }
@@ -469,7 +471,8 @@ fn prepare_art(art: palette::IndexedArt) -> PreparedArt {
                 .collect()
         })
         .collect();
-    PreparedArt { atlas, colours, rows, tribes: art.tables.iter().map(|(t, _)| *t).collect(), frames }
+    let pixel_art = art.frames().all(|f| f.scale == 1);
+    PreparedArt { atlas, colours, rows, tribes: art.tables.iter().map(|(t, _)| *t).collect(), pixel_art, frames }
 }
 
 fn prepare_portrait(art: &art::TribeArt) -> PreparedPortrait {
@@ -498,7 +501,7 @@ fn upload_kind(kind: PreparedKind, images: &mut Assets<Image>, meshes: &mut Asse
         let colours = images.add(sprite_material::colour_image(art.colours));
         let quads: Vec<Vec<Vec<Handle<Mesh>>>> = art.frames.iter().map(|dirs| dirs.iter().map(|fs| fs.iter().map(|f| meshes.add(sprite_quad_uv(f.size, f.origin, f.uv))).collect()).collect()).collect();
         for (slot, &tribe) in art.tribes.iter().enumerate() {
-            let looks = [false, true].map(|blend| mats.add(UnitSpriteMaterial::sprite(index.clone(), colours.clone(), slot * art.rows, blend)));
+            let looks = [false, true].map(|blend| mats.add(UnitSpriteMaterial::sprite(index.clone(), colours.clone(), slot * art.rows, blend, art.pixel_art)));
             let portrait = |p: usize, d: usize, i: usize| (tribe == PLAYER.as_usize()).then(|| portraits.as_ref()?.get(p)?.get(d)?.get(i).cloned()).flatten();
             let frames = art
                 .frames

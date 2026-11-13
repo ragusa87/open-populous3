@@ -386,8 +386,9 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
   one atlas of colour indices shared by all the tribes (`units::palette`: an index stands for a pixel's colours in
   every tribe, frames aligned on their feet, so the original's tribe layers and other shades come out exact), each
   tribe's colours in its rows of a colour table; a kind whose tribes don't have the same frames (the original
-  shaman: an animation per tribe) gets an atlas per tribe. The shader filters linearly by hand (no blocky pixels),
-  colours weighted by alpha so edges don't darken, with a health bar over the head (green -> yellow -> red) shown while the unit is alive and selected, or under the
+  shaman: an animation per tribe) gets an atlas per tribe. The shader rounds pixel art with Scale2x (EPX, on the
+  indices) `POP3_SPRITE_UPSCALE` times larger (4 by default, 1 for plain texels) and filters linearly by hand (no
+  blocky pixels), colours weighted by alpha so edges don't darken, with a health bar over the head (green -> yellow -> red) shown while the unit is alive and selected, or under the
   mouse for the player's own units (`hover::Hoverable::health`).
   Feet on the ground right under the unit (`Grounded` with no footprint), sprite and bar raised to its `motion.height`
   off the ground (terrain height units at the terrain's scale, glided between ticks, `drawn_lift`; the shadow stays
