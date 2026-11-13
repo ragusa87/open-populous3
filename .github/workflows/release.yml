@@ -19,6 +19,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_PROFILE_RELEASE_STRIP: true
   BIN: game-client
 
 jobs:
@@ -29,7 +30,7 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - id: v
         name: Read the crate version
         run: |
@@ -52,11 +53,11 @@ jobs:
       matrix:
         include:
           - name: linux-x86_64
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-          # 64-bit Raspberry Pi OS (Pi 3/4/5). Built on 22.04 (glibc 2.35) to run on Bookworm (glibc 2.36).
+          # 64-bit Raspberry Pi OS (Pi 3/4/5), Trixie or later (glibc 2.39+).
           - name: linux-arm64
-            os: ubuntu-22.04-arm
+            os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
           - name: windows-x86_64
             os: windows-latest
@@ -70,11 +71,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
+          sudo rm -f /var/lib/man-db/auto-update  # skip the slow man-db trigger
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config \
             libwayland-dev libasound2-dev libudev-dev libx11-dev libxkbcommon-dev \
@@ -87,6 +89,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+          # Only main saves: a tag's cache could not be restored by any other ref.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         run: cargo build --release --locked -p ${{ env.BIN }} --target ${{ matrix.target }}
@@ -108,7 +112,7 @@ jobs:
           rm -rf "$name"
           ls -la
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           path: dist/*
@@ -122,7 +126,7 @@ jobs:
       TAG: ${{ needs.version.outputs.tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -153,15 +157,18 @@ jobs:
           } > CHANGELOG.md
           cat CHANGELOG.md
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
 
+      - name: Checksums
+        run: cd dist && sha256sum * | tee SHA256SUMS.txt
+
       - name: Remove the previous release of this tag
         run: gh release delete "$TAG" --yes || true
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
           name: Open Populous 3 ${{ env.TAG }}
