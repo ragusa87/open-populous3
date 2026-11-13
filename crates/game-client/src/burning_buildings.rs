@@ -1,7 +1,7 @@
 //! A burning building's own companion fire (`game_core::building::Building::burning`, set by lightning), a
-//! world view (`views::WorldView`) of each: one companion fire (`fire_flame`) standing at the building's own
-//! door - independent of its model, not parented to it (`buildings.rs` draws the building and its own
-//! permanent torches separately) - pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's
+//! world view (`views::WorldView`) of each: one companion fire (`fire_flame`) standing at the building's centre
+//! (user-observed; the traced spawn point is door-adjacent, pop3-rev-analysis.md) - independent of its model,
+//! not parented to it (`buildings.rs` draws the building and its own permanent torches separately) - pop3-rev-analysis.md "Ground fire, ignited trees, and a burning building's
 //! flame". Its own visual life is assumed to share the building's structural fire (`fire::BURN_TICKS`, not
 //! separately re-armed by any traced call).
 
@@ -50,7 +50,7 @@ impl WorldView for BurningBuildingView {
         let id = b.id.raw();
         let offset = (seed(id) * flame::FRAMES as f32) as usize % flame::FRAMES;
         let frame = frames.get(levels, map.0.theme.unwrap_or(DEFAULT_THEME), images, mats).get(offset)?.clone();
-        let (x, z) = b.door();
+        let (x, z) = b.centre();
         let cell = WORLD_UNITS_PER_CELL as f32;
         let turn = Quat::from_rotation_y(seed(id.wrapping_add(1)) * std::f32::consts::TAU);
         view.insert((Grounded { at: Vec2::new(x as f32, z as f32) / cell, half: 0.0 }, Transform::from_rotation(turn), Visibility::Visible));
