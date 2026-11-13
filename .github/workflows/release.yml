@@ -1,0 +1,170 @@
+# Release: builds the game for every platform, then publishes a GitHub release named after the
+# game-client crate version (v<version>), its changelog being the commits since the previous release.
+# - push of a tag v*: the tag must match the crate version.
+# - manual run: tags the chosen commit v<crate version> (moving the tag if it exists) and releases it.
+# An existing release of the same tag is replaced.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN: game-client
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        name: Read the crate version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r --arg bin "$BIN" '.packages[] | select(.name == $bin) | .version')
+          tag="v$version"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the $BIN crate version $version (expected $tag)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          # 64-bit Raspberry Pi OS (Pi 3/4/5). Built on 22.04 (glibc 2.35) to run on Bookworm (glibc 2.36).
+          - name: linux-arm64
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config \
+            libwayland-dev libasound2-dev libudev-dev libx11-dev libxkbcommon-dev \
+            libxcursor-dev libxi-dev libxrandr-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked -p ${{ env.BIN }} --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          name="open-populous3-${{ needs.version.outputs.tag }}-${{ matrix.name }}"
+          mkdir -p "dist/$name"
+          exe="$BIN"; [[ "$RUNNER_OS" == Windows ]] && exe="$BIN.exe"
+          cp "target/${{ matrix.target }}/release/$exe" "dist/$name/"
+          cp -r assets LICENSE README.md "dist/$name/"
+          cd dist
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            tar -czf "$name.tar.gz" "$name"
+          fi
+          rm -rf "$name"
+          ls -la
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Tag the commit (manual run)
+        if: github.ref_type != 'tag'
+        run: |
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
+
+      - name: Changelog since the previous release
+        run: |
+          git fetch --force --tags origin
+          prev=$(git describe --tags --abbrev=0 --match 'v*' --exclude "$TAG" "$TAG" 2>/dev/null || true)
+          {
+            if [[ -n "$prev" ]]; then
+              echo "## Changes since $prev"
+              range="$prev..$TAG"
+            else
+              echo "## Changes"
+              range="$TAG"
+            fi
+            echo
+            git log --no-merges --format='- %s (%h)' "$range"
+            echo
+            if [[ -n "$prev" ]]; then
+              echo "**Full changelog**: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/$prev...$TAG"
+            fi
+          } > CHANGELOG.md
+          cat CHANGELOG.md
+
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Remove the previous release of this tag
+        run: gh release delete "$TAG" --yes || true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Open Populous 3 ${{ env.TAG }}
+          body_path: CHANGELOG.md
+          files: dist/*
+          fail_on_unmatched_files: true
