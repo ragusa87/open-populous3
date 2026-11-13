@@ -331,13 +331,14 @@ impl crate::boot::BootJob for UnitSpritesJob {
     }
 
     fn steps(_: &UnitArtSource) -> u32 {
-        1 + 2 * UnitKind::ALL.len() as u32
+        let kinds = UnitKind::ALL.len() as u32;
+        1 + kinds + kinds * pop3_format::catalog::TRIBES as u32
     }
 
     fn run(source: UnitArtSource, progress: crate::boot::Progress) -> PreparedKinds {
         let originals = source.original.and_then(|dir| art::Originals::load(&dir).map_err(|e| warn!("original unit sprites: {e}")).ok());
         progress.step();
-        UnitKind::ALL
+        let arts = UnitKind::ALL
             .iter()
             .map(|&kind| {
                 let original = originals.as_ref().and_then(|o| o.art(kind).map_err(|e| warn!("original {kind:?} sprites: {e}")).ok());
@@ -346,12 +347,10 @@ impl crate::boot::BootJob for UnitSpritesJob {
                     art::generated_art(kind)
                 });
                 progress.step();
-                let prepared: Vec<Vec<Vec<Vec<PreparedFrame>>>> = tribes.iter().map(|t| t.poses.iter().map(|dirs| dirs.iter().map(|frames| frames.iter().map(prepare_frame).collect()).collect()).collect()).collect();
-                let packed = prepared.into_iter().map(pack_tribe_atlases).collect();
-                progress.step();
-                packed
+                tribes
             })
-            .collect()
+            .collect();
+        prepare_kinds(arts, &progress)
     }
 
     /// One chunk per kind: with the original art's full frame counts, uploading every kind's atlases in one
@@ -377,6 +376,34 @@ impl crate::boot::BootJob for UnitSpritesJob {
         });
         if kinds.is_empty() { crate::boot::InstallProgress::Done } else { crate::boot::InstallProgress::More(kinds) }
     }
+}
+
+/// Upscales and packs every kind's and tribe's frames, each (kind, tribe) on its own thread: they share nothing, and
+/// done one after another they made most of the boot's wait (~45k frames with the original art). A `progress` step
+/// per (kind, tribe) done; the result keeps `arts`' order.
+fn prepare_kinds(arts: Vec<Vec<art::TribeArt>>, progress: &crate::boot::Progress) -> PreparedKinds {
+    std::thread::scope(|s| {
+        let running: Vec<Vec<_>> = arts
+            .into_iter()
+            .map(|tribes| {
+                tribes
+                    .into_iter()
+                    .map(|tribe| {
+                        s.spawn(move || {
+                            let atlases = prepare_tribe(tribe);
+                            progress.step();
+                            atlases
+                        })
+                    })
+                    .collect()
+            })
+            .collect();
+        running.into_iter().map(|tribes| tribes.into_iter().map(|t| t.join().expect("unit sprite preparation panicked")).collect()).collect()
+    })
+}
+
+fn prepare_tribe(tribe: art::TribeArt) -> TribeAtlases {
+    pack_tribe_atlases(tribe.poses.iter().map(|dirs| dirs.iter().map(|frames| frames.iter().map(prepare_frame).collect()).collect()).collect())
 }
 
 /// Where one already-prepared frame landed once its tribe's frames were packed (`pack_tribe_atlases`): which of
@@ -936,6 +963,20 @@ mod tests {
     use super::*;
     use game_core::time::{Tick, Ticks};
     use game_core::unit::Action;
+
+    #[test]
+    fn kinds_prepared_in_parallel_keep_their_order_and_match_one_at_a_time() {
+        let kinds = [UnitKind::Brave, UnitKind::Wildman];
+        let progress = crate::boot::Progress::default();
+        let parallel = prepare_kinds(kinds.iter().map(|&k| art::generated_art(k)).collect(), &progress);
+        assert_eq!(progress.done(), 2 * pop3_format::catalog::TRIBES as u32);
+        for (kind, tribes) in kinds.iter().zip(parallel) {
+            for (one, tribe) in art::generated_art(*kind).into_iter().map(prepare_tribe).zip(tribes) {
+                let pixels = |t: &TribeAtlases| t.atlases.iter().map(|a| a.as_ref().map(|a| (a.width, a.height, a.rgba.clone()))).collect::<Vec<_>>();
+                assert_eq!(pixels(&one), pixels(&tribe));
+            }
+        }
+    }
 
     #[test]
     fn people_aboard_stand_on_the_deck_and_jump_in_from_where_they_stood() {
