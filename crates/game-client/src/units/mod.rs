@@ -353,27 +353,33 @@ impl crate::boot::BootJob for UnitSpritesJob {
         prepare_kinds(arts, &progress)
     }
 
-    /// One chunk per kind: with the original art's full frame counts, uploading every kind's atlases in one
-    /// `install` call measured as a multi-second main-thread stall (TODO.md "Loading screen freezes") - long
-    /// enough to freeze the window (no frames drawn, no input polled) and, on some drivers, crash it outright
-    /// (a stalled swapchain present can trip the GPU driver's own timeout/recovery). One kind per frame keeps
-    /// each stall to a fraction of that.
+    /// One chunk per kind and tribe: a whole kind of the original art is ~300 MB of atlases, and the render world
+    /// uploading that in one frame stalled it ~500 ms (TODO.md "Loading screen freezes") - long enough, with the
+    /// mouse moving, for a Wayland compositor to drop the window as unresponsive.
     fn install_steps(kinds: &PreparedKinds) -> u32 {
-        kinds.len() as u32
+        kinds.iter().map(Vec::len).sum::<usize>() as u32
     }
 
     fn install_step(mut kinds: PreparedKinds, world: &mut World) -> crate::boot::InstallProgress<PreparedKinds> {
-        let Some(tribes) = (!kinds.is_empty()).then(|| kinds.remove(0)) else {
+        kinds.retain(|tribes| !tribes.is_empty());
+        let Some(tribes) = kinds.first_mut() else {
             return crate::boot::InstallProgress::Done;
         };
+        let atlases = tribes.remove(0);
+        let kind = UnitKind::ALL.len() - kinds.len();
         world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
             world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
                 world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {
-                    let kind = tribes.into_iter().map(|ta| upload_tribe_atlases(ta, &mut images, &mut meshes, &mut mats)).collect();
-                    world.resource_mut::<UnitSprites>().kinds.push(kind);
+                    let tribe = upload_tribe_atlases(atlases, &mut images, &mut meshes, &mut mats);
+                    let sprites = &mut world.resource_mut::<UnitSprites>().kinds;
+                    if sprites.len() == kind {
+                        sprites.push(Vec::new());
+                    }
+                    sprites[kind].push(tribe);
                 });
             });
         });
+        kinds.retain(|tribes| !tribes.is_empty());
         if kinds.is_empty() { crate::boot::InstallProgress::Done } else { crate::boot::InstallProgress::More(kinds) }
     }
 }
@@ -468,7 +474,7 @@ fn upload_tribe_atlases(ta: TribeAtlases, images: &mut Assets<Image>, meshes: &m
         .enumerate()
         .map(|(i, maybe_atlas)| {
             maybe_atlas.map(|atlas::Atlas { width, height, rgba, .. }| {
-                let mut image = Image::new(Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 }, TextureDimension::D2, rgba, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
+                let mut image = Image::new(Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 }, TextureDimension::D2, rgba, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
                 image.sampler = ImageSampler::linear();
                 let image = images.add(image);
                 let material = mats.add(StandardMaterial {
