@@ -146,7 +146,8 @@ hut (max size) hides the red bar, it does not show it at 0.
    capped at `MAX_MANA` (pop3-rev-analysis.md "Mana rules"). Praying at a totem is its own gauge (TODO "Praying"),
    not mana.
 8. **Auto-work** (done - `GameMap::tend_auto_work`, `enter.rs`) [ours]: the same genuinely-idle, `HOUSE_DELAY`
-   brave as rule 3 (Auto-housing), if that one didn't claim it this tick, also looks to help build or
+   brave as rule 3 (Auto-housing), if that one didn't claim it this tick and it is out in the open (never one
+   resting in a building or aboard a vehicle), also looks to help build or
    dismantle - the nearest of its own tribe's sites not yet `Stage::Built` (a fresh plan, under construction,
    or being dismantled) within `SITE_SEARCH_RADIUS_CELLS` (3, tighter than rule 3's 8: a site is usually
    staffed by braves already standing right next to it) that doesn't already have `MAX_AUTO_WORKERS` (4) hands

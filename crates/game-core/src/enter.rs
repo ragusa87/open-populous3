@@ -147,7 +147,7 @@ impl GameMap {
         }
     }
 
-    /// A genuinely idle brave also looks to help out, the same `HOUSE_DELAY`/`HOUSE_SEARCH_RADIUS_CELLS`
+    /// A genuinely idle brave out in the open (not resting in a building nor aboard a vehicle) also looks to help out, the same `HOUSE_DELAY`/`HOUSE_SEARCH_RADIUS_CELLS`
     /// as auto-housing: the nearest of its own tribe's sites still to build (any stage short of
     /// `Stage::Built` - a fresh plan, under construction, or being dismantled) with room for another
     /// worker, assigned exactly as `Order::Build` would (`GameMap::assign`). Run after
@@ -164,7 +164,7 @@ impl GameMap {
     pub(crate) fn tend_auto_work(&mut self) {
         for i in 0..self.units.len() {
             let u = &self.units[i];
-            let ready = u.kind == UnitKind::Brave && u.is_alive() && !u.busy() && u.idle_ticks() as u32 >= HOUSE_DELAY.get();
+            let ready = u.kind == UnitKind::Brave && u.is_alive() && u.in_the_open() && !u.busy() && u.idle_ticks() as u32 >= HOUSE_DELAY.get();
             if !ready {
                 continue;
             }
@@ -351,6 +351,23 @@ mod tests {
         let brave = map.spawn(TribeId::Blue, UnitKind::Brave, (22 * 512, 20 * 512)).id;
         run_until(&mut map, HOUSE_DELAY.get() as usize + 600, |m| m.unit(brave).unwrap().work == Some(id)).expect("joined the dismantling work on its own");
         run_until(&mut map, 3000, |m| m.building(id).is_none()).expect("took it apart, piece by piece");
+    }
+
+    #[test]
+    fn a_brave_resting_in_a_hut_never_leaves_it_for_a_nearby_site() {
+        let mut map = bare();
+        let hut = map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Blue, 20 * 512, 20 * 512, 0));
+        let site = map.add_building(Building::site(BuildingKind::Hut { size: 1 }, TribeId::Blue, 23 * 512, 20 * 512, 0));
+        let door = map.building(hut).unwrap().door();
+        let brave = map.spawn(TribeId::Blue, UnitKind::Brave, door).id;
+        let k = map.unit_index(brave).unwrap();
+        map.units[k].go_enter(hut, door);
+        run_until(&mut map, 600, |m| m.people_inside(hut) == 1).expect("went in");
+        for _ in 0..(HOUSE_DELAY.get() as usize * 3) {
+            map.tick();
+        }
+        assert_eq!(map.unit(brave).unwrap().work, None, "resting inside: never joins {site:?}");
+        assert_eq!(map.people_inside(hut), 1);
     }
 
     #[test]
