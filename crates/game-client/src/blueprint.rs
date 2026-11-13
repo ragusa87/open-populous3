@@ -3,7 +3,7 @@
 //! its door side (local -z, the land side of the levels' boat huts); red where it cannot be built
 //! (`game_core::placement`: sea, another building, a site, a tree with wood; all of it when the
 //! ground is too steep, a boat hut is not on the shore, or it would wall shut a door - its own or a
-//! standing neighbour's, `door_blocked`). A boat hut turns itself to put its
+//! standing neighbour's, `door_blocked`, or stand wall to wall with another building, `walls_touch`). A boat hut turns itself to put its
 //! jetty over the water when it can (`best_facing`). Space turns it a quarter turn, right click
 //! puts it away, left click places it where it can stand (`Command::PlaceBuilding`), sends the
 //! selected braves to build it (`GameMap::build_orders`) and puts it away. Meanwhile clicks do not
@@ -25,7 +25,7 @@ use game_core::building::{Building, BuildingKind};
 use game_core::campfire;
 use game_core::command::Command;
 use game_core::map::GameMap;
-use game_core::placement::{best_facing, blocked_at, can_place, door_blocked, shore_ok, too_steep};
+use game_core::placement::{best_facing, blocked_at, can_place, door_blocked, shore_ok, too_steep, walls_touch};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// Height above the ground (render units), and grid lines per cell: the mark's grid follows the
@@ -315,7 +315,7 @@ fn draw_blueprint(
     let unit = WORLD_UNITS_PER_CELL as f32;
     let (cx, cz) = b.centre();
     let centre = Vec2::new(cx as f32, cz as f32) / unit;
-    let all_red = too_steep(&map.0, &b) || !shore_ok(&map.0, &b) || door_blocked(&map.0, &b, None);
+    let all_red = too_steep(&map.0, &b) || !shore_ok(&map.0, &b) || door_blocked(&map.0, &b, None) || walls_touch(&map.0, &b, None);
     // A map position (cells) -> render position and colour.
     let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at), None).is_some() { RED } else { WHITE });
     let mark = mark_mesh(kind, b.facing, centre, vertex);

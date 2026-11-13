@@ -136,7 +136,10 @@ available, is the camp fire (see "Camp fire").
   covers where its door would open) or a standing neighbour's (`placement::door_blocked`, kept in step with
   `can_place`'s own refusal, "Doors" below - fixed 2026-11-10, having been added to `can_place` after the
   blueprint's own red-or-white preview was written, so it used to show white right up until a click there
-  silently did nothing).
+  silently did nothing). All red as well where its walls would share a side with another building's or plan's
+  (`placement::walls_touch`): a free cell always runs between two buildings, so walkers pass between them. In the
+  original levels, no two of the 593 buildings within 3 cells of each other stand wall to wall (284 with exactly
+  one cell between, 4 touching only at a corner, allowed too); the original's own placement rule is not traced.
 - A left click on a valid spot places it (`Command::PlaceBuilding { player, kind, x, z, facing, braves }`): the
   blueprint stays drawn on the ground as a construction site, a `Building` with a `stage` (Blueprint / Under
   construction / Built / Dismantling) and its wood counts. A size-0 tree under it stays invisible and does not grow back while covered.
@@ -156,7 +159,7 @@ Done:
   session over every original level's own layout found none of its 598 standing buildings, over 43 levels, with
   its door already walled by another, consistent with this being how the original avoids the same stuck-worker
   bug, though it was never traced at the exe level; refine or drop if a spec session finds otherwise] (neither the
-  new building nor any standing one may end up with its door cell walled by the other), `can_place`.
+  new building nor any standing one may end up with its door cell walled by the other), `walls_touch`, `can_place`.
 - Boat hut (`shore_ok`): its jetty is local +z, its door local -z (all 11 boat huts of the levels: only sea within
   2.5 cells past +z, land past -z). A cell past the jetty side, the middle and at least one corner must be sea (a
   loaded level's levelling lifts one corner of level 10's hut off the sea); a cell past the door side, no sea.

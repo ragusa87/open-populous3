@@ -5,7 +5,9 @@
 //! (local -z): in the levels, all 11 boat huts have only sea within 2.5 cells past their +z side
 //! and land past their -z side. Nor where it would wall shut another standing building's door cell, nor with its
 //! own door already walled by one: a worker caught inside once the walls go up can only ever leave by the door
-//! (buildings.md "Walking around buildings"), so a sealed one traps whoever is in there for good.
+//! (buildings.md "Walking around buildings"), so a sealed one traps whoever is in there for good. Nor with
+//! a walled cell sharing a side with another building's: a free cell always runs between two buildings, a
+//! path between them (`walls_touch`).
 //! Integers only.
 
 use crate::building::{Building, BuildingId, BuildingKind, Stage};
@@ -126,6 +128,21 @@ pub fn door_blocked(map: &GameMap, b: &Building, except: Option<BuildingId>) -> 
     map.buildings.iter().any(|o| Some(o.id) != except && o.stage() != Stage::Blueprint && (walled.contains(&door_cell(o, size)) || o.walled_cells(size).contains(&own_door)))
 }
 
+/// Whether a walled cell of `b` would be, or share a side with, a walled cell of another building or plan:
+/// buildings never stand wall to wall, a walker always has the free cell between them. In the original
+/// levels no two of 593 buildings within 3 cells of each other do (284 with exactly one cell between, 4
+/// touching only at a corner, allowed here too); the original's own placement rule is not traced.
+/// `except`: see `blocked_at`.
+pub fn walls_touch(map: &GameMap, b: &Building, except: Option<BuildingId>) -> bool {
+    let size = map.terrain.size() as i32;
+    let near = |a: (i32, i32), o: (i32, i32)| {
+        let d = |p: i32, q: i32| (p - q).rem_euclid(size).min((q - p).rem_euclid(size));
+        d(a.0, o.0) + d(a.1, o.1) <= 1
+    };
+    let walled = b.walled_cells(size);
+    map.buildings.iter().filter(|o| Some(o.id) != except).any(|o| o.walled_cells(size).iter().any(|&c| walled.iter().any(|&w| near(w, c))))
+}
+
 /// Whether `b` could be placed: steady ground and every point of its footprint free (sampled every
 /// quarter cell). `except`: see `blocked_at`.
 pub fn can_place(map: &GameMap, b: &Building, except: Option<BuildingId>) -> bool {
@@ -135,7 +152,7 @@ pub fn can_place(map: &GameMap, b: &Building, except: Option<BuildingId>) -> boo
     let span = (f.half.0.abs() + f.offset.0.abs()).max(f.half.1.abs() + f.offset.1.abs());
     let points = (-span..=span).step_by(step as usize).flat_map(|dz| (-span..=span).step_by(step as usize).map(move |dx| (dx, dz)));
     let mut free = points.map(|(dx, dz)| (cx.wrapping_add(dx as u16), cz.wrapping_add(dz as u16))).filter(|&p| b.covers(p, 0)).all(|p| blocked_at(map, p, except).is_none());
-    free &= !too_steep(map, b) && shore_ok(map, b) && !door_blocked(map, b, except);
+    free &= !too_steep(map, b) && shore_ok(map, b) && !door_blocked(map, b, except) && !walls_touch(map, b, except);
     free
 }
 
@@ -203,6 +220,20 @@ mod tests {
         m.buildings.clear();
         m.add_building(hut((40, 37)));
         assert!(!can_place(&m, &hut((40, 40)), None), "its own door would already be walled");
+    }
+
+    #[test]
+    fn a_free_cell_always_runs_between_two_buildings() {
+        let mut m = map();
+        m.add_building(hut((40, 40)));
+        assert!(!can_place(&m, &hut((43, 40)), None), "walls side by side, no way between");
+        assert!(can_place(&m, &hut((44, 40)), None), "one free cell between");
+        assert!(walls_touch(&m, &hut((40, 43)), None) && !walls_touch(&m, &hut((40, 44)), None), "along z too");
+        assert!(!walls_touch(&m, &hut((43, 43)), None), "corner to corner is allowed");
+        m.buildings.clear();
+        let plan = Building::placed(BuildingKind::Hut { size: 1 }, TribeId::Blue, 40 * 512, 40 * 512, 0, &m.terrain);
+        m.add_building(plan);
+        assert!(!can_place(&m, &hut((43, 40)), None), "a plan's future walls count too");
     }
 
     #[test]
