@@ -917,13 +917,20 @@ pub fn unloaded(map: &GameMap, toggle: Toggle) -> Option<Vec<UnitId>> {
     map.vehicle(vehicle).map(|v| v.passengers.clone())
 }
 
-/// A click on a person's slot adds that unit to the selection.
-fn select_from_slot(slots: Query<(&Interaction, &SlotUnit), Changed<Interaction>>, mut selection: ResMut<Selection>) {
+/// A click on a person's slot adds that unit to the selection; with Shift, everyone in the tooltip's slots.
+fn select_from_slot(slots: Query<(&Interaction, &SlotUnit), Changed<Interaction>>, every_slot: Query<&SlotUnit>, keys: crate::keymap::Shortcuts, mut selection: ResMut<Selection>) {
     for (interaction, slot) in &slots {
         if *interaction == Interaction::Pressed {
-            selection.add(slot.0);
+            for id in slot_pick(slot.0, every_slot.iter().map(|s| s.0), keys.mods().shift) {
+                selection.add(id);
+            }
         }
     }
+}
+
+/// Who a click on `clicked`'s slot selects: that unit, or with `all` (Shift) everyone in `slots`.
+fn slot_pick(clicked: UnitId, slots: impl Iterator<Item = UnitId>, all: bool) -> Vec<UnitId> {
+    if all { slots.collect() } else { vec![clicked] }
 }
 
 #[cfg(test)]
@@ -934,6 +941,13 @@ mod tests {
 
     fn icons(row: &[Slot]) -> Vec<Icon> {
         row.iter().map(|s| s.icon).collect()
+    }
+
+    #[test]
+    fn a_slot_click_picks_its_unit_or_with_shift_everyone() {
+        let ids = [3, 5, 8].map(UnitId::from_raw);
+        assert_eq!(slot_pick(ids[1], ids.into_iter(), false), [ids[1]]);
+        assert_eq!(slot_pick(ids[1], ids.into_iter(), true), ids);
     }
 
     #[test]
