@@ -75,11 +75,11 @@ pub enum Pose {
     Eat,
     /// A wildman drinking at the shore.
     Drink,
-    /// Idle too long: a brave scratches (`idle_flavor`; TODO.md "Units").
+    /// Bored while standing: a brave scratches (`bored`).
     Scratch,
-    /// Idle too long: a warrior does push-ups.
+    /// Bored while standing: a warrior or a firewarrior does push-ups.
     Pushup,
-    /// Idle too long: a spy juggles.
+    /// Bored while standing: a spy juggles.
     Juggle,
     /// A spy crouched at a wall setting it on fire, firebrand in hand (arson.rs; original anim 17; our art: kneeling).
     SetFire,
@@ -159,7 +159,7 @@ impl Pose {
             Pose::Panic => 12.0,
             Pose::Drown | Pose::Flung | Pose::Tumble => 8.0,
             Pose::Pray | Pose::Preach | Pose::Stranded => 4.0,
-            Pose::Scratch | Pose::Pushup | Pose::Juggle => 4.0,
+            Pose::Scratch | Pose::Pushup | Pose::Juggle => 12.0,
             _ => 6.0,
         }
     }
@@ -183,7 +183,7 @@ impl Pose {
             Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => ShamanAnim::Idle,
             // Never actually shown for her either (wildman-only, `pose_of`): exhaustiveness only.
             Pose::Eat | Pose::Drink => ShamanAnim::Idle,
-            // Never actually shown for her either (follower-kind-specific, `idle_flavor`): exhaustiveness only.
+            // Never actually shown for her either (follower-kind-specific, `bored`): exhaustiveness only.
             Pose::Scratch | Pose::Pushup | Pose::Juggle => ShamanAnim::Idle,
         }
     }
@@ -224,7 +224,7 @@ const TAUNT_DISPLAY: Ticks = Ticks::new(12);
 
 /// The pose `u` is drawn in: aboard a vehicle and idle or waiting to throw, pedalling it; killed by
 /// lightning, carbonized until its spirit rises; waiting in a challenge and recently taunted, one of 3;
-/// else by its action (`pose_for`). `kind`: the kind it is shown as (`Unit::shown_kind`), for its idle flavor.
+/// else by its action (`pose_for`). `kind`: the kind it is shown as (`Unit::shown_kind`), for its bored pose.
 /// `now`: the drawn moment, for the taunt's own short display window.
 pub fn pose_of(u: &game_core::unit::Unit, kind: UnitKind, now: Tick) -> Pose {
     if u.aboard.is_some() && matches!(u.action, Action::Idle | Action::Attacking { .. }) {
@@ -245,38 +245,61 @@ pub fn pose_of(u: &game_core::unit::Unit, kind: UnitKind, now: Tick) -> Pose {
         return [Pose::TauntHide, Pose::TauntWave, Pose::TauntPunch][variant as usize % 3];
     }
     if u.action == Action::Idle
-        && u.carrying == 0
-        && let Some(flavor) = idle_flavor(kind, u.id.raw(), now)
+        && let Some(b) = bored(kind, u.id.raw(), now)
     {
-        return flavor;
+        return b.pose;
     }
     pose_for(&u.action, u.carrying > 0, u.motion.airborne())
 }
 
-/// How long one roll of an idle flavor pose (scratching, push-ups, juggling) lasts, and how often a
-/// fresh roll is drawn: the same 16-turn rhythm confirmed for wildmen's own idle loop
-/// (`wildman::SEEK_EVERY`, pop3-rev-analysis.md "Idle behaviour") - `[ours]`, not itself traced for
-/// followers (TODO.md "Units": only wildmen are confirmed to share a rhythm at all). Client-only: it
-/// never changes simulation state, so it carries no lockstep weight.
-const IDLE_FLAVOR_BLOCK: u32 = 16;
-/// 1 block in this many plays the flavor instead of plain idle - a guess, no weight traced for followers.
-const IDLE_FLAVOR_CHANCE: f32 = 1.0 / 6.0;
+/// How often a standing follower rolls for a bored pose, each on its own phase (by id here):
+/// pop3-rev-analysis.md "Bored poses". Client-only: it never changes simulation state.
+const BORED_EVERY: u32 = 32;
+/// The odds of each roll: 3/64 ("Bored poses"), a first pose after ~57 s on average.
+const BORED_CHANCE: f32 = 3.0 / 64.0;
 
-/// The idle-too-long flavor pose for `kind` (braves scratch, warriors do push-ups, spies juggle -
-/// unit-art.md "Planned poses"; every other kind has none, `None`): a deterministic function of `id` and
-/// `now` alone, so every client draws the same unit the same way without any shared state - blocks of
-/// `IDLE_FLAVOR_BLOCK` ticks, each unit's own phase (by `id`) so a crowd doesn't all flavor at once, each
-/// independently rolled to play or not (`sim_time::seed`).
-fn idle_flavor(kind: UnitKind, id: u32, now: Tick) -> Option<Pose> {
-    let pose = match kind {
-        UnitKind::Brave => Pose::Scratch,
-        UnitKind::Warrior => Pose::Pushup,
-        UnitKind::Spy => Pose::Juggle,
-        _ => return None,
-    };
-    let since = (now.to_wire() as u64).wrapping_add(id as u64);
-    let block = (since / IDLE_FLAVOR_BLOCK as u64) as u32;
-    (crate::sim_time::seed(id ^ block.wrapping_mul(0x9E37_79B9)) < IDLE_FLAVOR_CHANCE).then_some(pose)
+/// A bored pose under way: which, and how many ticks into it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bored {
+    pub pose: Pose,
+    pub elapsed: u32,
+}
+
+impl Bored {
+    /// The frame it shows: one loop of the animation, not repeated.
+    pub fn frame(self, kind: UnitKind) -> usize {
+        (self.elapsed / bored_turns_per_frame(kind)) as usize
+    }
+}
+
+/// Turns per frame of the bored animation: 2 for a firewarrior, 1 for the others ("Bored poses").
+fn bored_turns_per_frame(kind: UnitKind) -> u32 {
+    if kind == UnitKind::Firewarrior { 2 } else { 1 }
+}
+
+/// The bored pose for `kind` and how long it lasts (ticks): one loop of its animation, cut by the
+/// original's timer of anim 89's 12 frames x turns per frame + 1 ("Bored poses"). A brave scratches (89, 12 frames), a
+/// warrior (91) or a firewarrior (90) does push-ups (14 frames). The spy's juggling (92, 17 frames) is
+/// not triggered by this loop in the original: `[ours]`, same rhythm, one whole loop.
+fn bored_pose(kind: UnitKind) -> Option<(Pose, u32)> {
+    let timer = |frames: u32| (frames * bored_turns_per_frame(kind)).min(12 * bored_turns_per_frame(kind) + 1);
+    match kind {
+        UnitKind::Brave => Some((Pose::Scratch, timer(12))),
+        UnitKind::Warrior | UnitKind::Firewarrior => Some((Pose::Pushup, timer(14))),
+        UnitKind::Spy => Some((Pose::Juggle, 17)),
+        _ => None,
+    }
+}
+
+/// The bored pose a standing `kind` plays at `now`, if any: a deterministic function of `id` and `now`
+/// alone, so every client draws the same unit the same way - a `BORED_CHANCE` roll every `BORED_EVERY`
+/// ticks on the unit's own phase (`sim_time::seed`), no idle-time threshold, the pose played once from
+/// the roll.
+pub fn bored(kind: UnitKind, id: u32, now: Tick) -> Option<Bored> {
+    let (pose, length) = bored_pose(kind)?;
+    let since = now.to_wire().wrapping_add(id);
+    let (block, elapsed) = (since / BORED_EVERY, since % BORED_EVERY);
+    (elapsed < length && crate::sim_time::seed(id ^ block.wrapping_mul(0x9E37_79B9)) < BORED_CHANCE).then_some(Bored { pose, elapsed })
 }
 
 /// The pose for an action; `carrying` wood changes standing and walking, `airborne` (lift above
@@ -484,7 +507,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => WildmanAnim::Stand,
                 Pose::Eat => WildmanAnim::Eat,
                 Pose::Drink => WildmanAnim::Drink,
-                // Never actually shown for a wildman (follower-kind-specific, `idle_flavor`): exhaustiveness only.
+                // Never actually shown for a wildman (follower-kind-specific, `bored`): exhaustiveness only.
                 Pose::Scratch | Pose::Pushup | Pose::Juggle => WildmanAnim::Stand,
             };
             // No spirit anim known: the body lies still (the fall's last frame).
@@ -535,6 +558,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 // Wildman-only (`pose_of`): never actually shown for any other kind.
                 Pose::Eat | Pose::Drink => PersonAnim::Stand,
                 Pose::Scratch => PersonAnim::Scratch,
+                Pose::Pushup if kind == UnitKind::Warrior => PersonAnim::PushupHeadband,
                 Pose::Pushup => PersonAnim::Pushup,
                 Pose::Juggle => PersonAnim::Juggle,
             };
@@ -673,46 +697,53 @@ mod tests {
     }
 
     #[test]
-    fn idle_flavor_is_none_for_kinds_with_no_flavor_pose_of_their_own() {
-        for kind in [UnitKind::Shaman, UnitKind::Preacher, UnitKind::Firewarrior, UnitKind::Wildman] {
-            for raw in 0..64u32 {
-                assert_eq!(idle_flavor(kind, raw, Tick::from_wire(raw * 37)), None, "{kind:?}");
-            }
+    fn bored_is_none_for_kinds_with_no_pose_of_their_own() {
+        for kind in [UnitKind::Shaman, UnitKind::Preacher, UnitKind::Wildman] {
+            assert!((0..4096u32).all(|t| bored(kind, 7, Tick::from_wire(t)).is_none()), "{kind:?}");
         }
     }
 
     #[test]
-    fn idle_flavor_picks_each_kind_s_own_pose() {
-        // Some (id, tick) in the sweep below must hit for each kind - the picker is deterministic,
-        // not a coin flip to retry if unlucky in a test run.
-        let hit = |kind| (0..4096u32).filter_map(|t| idle_flavor(kind, 7, Tick::from_wire(t))).next();
+    fn bored_picks_each_kind_s_own_pose() {
+        let hit = |kind| (0..8192u32).find_map(|t| bored(kind, 7, Tick::from_wire(t))).map(|b| b.pose);
         assert_eq!(hit(UnitKind::Brave), Some(Pose::Scratch));
         assert_eq!(hit(UnitKind::Warrior), Some(Pose::Pushup));
+        assert_eq!(hit(UnitKind::Firewarrior), Some(Pose::Pushup));
         assert_eq!(hit(UnitKind::Spy), Some(Pose::Juggle));
     }
 
     #[test]
-    fn idle_flavor_is_deterministic_and_not_shown_most_of_the_time() {
-        let now = Tick::from_wire(1000);
-        assert_eq!(idle_flavor(UnitKind::Brave, 42, now), idle_flavor(UnitKind::Brave, 42, now), "same inputs, same answer");
-        let shown = (0..512u32).filter(|&raw| idle_flavor(UnitKind::Brave, raw, now).is_some()).count();
-        assert!(shown > 0 && shown < 512 / 2, "flavor only sometimes, not never nor most of the time: {shown}/512");
+    fn bored_plays_one_loop_from_its_first_frame_at_the_traced_odds() {
+        let runs = |kind| {
+            let shown: Vec<Option<Bored>> = (0..BORED_EVERY * 4096).map(|t| bored(kind, 3, Tick::from_wire(t))).collect();
+            let starts: Vec<usize> = (1..shown.len()).filter(|&i| shown[i].is_some() && shown[i - 1].is_none()).collect();
+            (shown, starts)
+        };
+        let (shown, starts) = runs(UnitKind::Brave);
+        for &i in &starts {
+            assert_eq!(shown[i].unwrap().elapsed, 0);
+            assert_eq!((i..i + 12).filter_map(|j| shown[j]).map(|b| b.frame(UnitKind::Brave)).collect::<Vec<_>>(), (0..12).collect::<Vec<_>>());
+            assert!(shown[i + 12].is_none(), "one loop, then standing again");
+        }
+        let rate = starts.len() as f32 / 4096.0;
+        assert!((0.02..0.08).contains(&rate), "about 3/64 rolls win: {rate}");
+        let (shown, starts) = runs(UnitKind::Firewarrior);
+        let i = starts[0];
+        assert_eq!(shown[i + 24].unwrap().frame(UnitKind::Firewarrior), 12, "2 turns a frame, cut by the timer");
+        assert!(shown[i + 25].is_none());
     }
 
     #[test]
-    fn idle_flavor_never_shows_while_carrying_wood_or_doing_something_else() {
+    fn bored_shows_only_while_idle_wood_or_not() {
         let u = |action, carrying| {
             let mut u = game_core::unit::Unit::new(game_core::id::Id::from_raw(1), game_core::tribes::TribeId::Blue, UnitKind::Brave, (0, 0));
             u.action = action;
             u.carrying = carrying;
             u
         };
-        // A sweep of ticks so a flavor pose would show at least once if the carrying/walking gate were missing.
-        for raw in 0..512u32 {
-            let now = Tick::from_wire(raw);
-            assert_ne!(pose_of(&u(Action::Idle, 1), UnitKind::Brave, now), Pose::Scratch, "carrying wood: no flavor");
-            assert_ne!(pose_of(&u(Action::Walking { to: (0, 0) }, 0), UnitKind::Brave, now), Pose::Scratch, "not idle: no flavor");
-        }
+        let scratches = |u: &game_core::unit::Unit| (0..4096u32).any(|raw| pose_of(u, UnitKind::Brave, Tick::from_wire(raw)) == Pose::Scratch);
+        assert!(scratches(&u(Action::Idle, 1)), "a wood-carrying brave scratches too");
+        assert!(!scratches(&u(Action::Walking { to: (0, 0) }, 0)), "not idle");
     }
 
     #[test]

@@ -5735,14 +5735,12 @@ confirms.
   per-unit copies cannot express - moot unless a future spec item needs "all N units retarget at once mid-walk".
 - `unit.rs`'s `Action::Idle`: a single, unified rest state with no autonomous behaviour at all, matching what was
   found for ordinary followers in the original (state 10, "Idle behaviour": does nothing when no command group
-  is assigned - no wandering, no autonomous wood-gathering found). Two idle details are missing: a 13/32 chance
-  every 32 turns of a short in-place shuffle (new facing, a step, 4-31 turns), and the bored-pose rhythm below.
-- `units::art::idle_flavor` (client) rolls 1 in 6 per 16-tick block, so a brave/warrior/spy flavors ~17 % of its
-  idle time; the original rolls 3/64 per 32 turns and plays one loop (~13-25 turns), about 2 % of idle time, a
-  first pose after ~57 s on average ("Bored poses"). Also: warriors use anim 91 (headband), firewarriors do
-  push-ups too (anim 90, ours: plain idle), and the spy's juggling trigger is not traced (ours rolls it like the
-  others). A wood-carrying brave can scratch in the original (the pose is set without the wood check; ours
-  excludes carriers).
+  is assigned - no wandering, no autonomous wood-gathering found). One idle detail is missing: a 13/32 chance
+  every 32 turns of a short in-place shuffle (new facing, a step, 4-31 turns).
+- `units::art::bored` (client) follows "Bored poses" (3/64 every 32 turns, one loop, anims 89/91/90, carriers
+  included) but rolls on a client-side phase (tick + id) instead of the unit's `class_counter`, and ignores the
+  `+0x82` gate on the warrior/firewarrior pose. The spy's juggling trigger is not traced: ours rolls it like the
+  others, one whole loop.
 - Wildmen (no AI in our code today; "Wildmen"): the original drives them through a confirmed 1 → 8 → (5 or 6) →
   16 → 8 loop - first search nearby (18 cells) for a tree or plant and idle beside it if found (state 5); only
   if none is near, walk to a nearby shore cell instead (states 6/16, explicitly rejecting inland and open-sea

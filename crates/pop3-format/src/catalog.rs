@@ -264,12 +264,13 @@ pub enum PersonAnim {
     /// A challenge's waiting target crouching then punching, not a fight move (7 frames): one of 3
     /// taunts, brave only.
     TauntPunch,
-    /// Idle too long: a brave scratches (TODO.md "Units"; `[ours]`, no rhythm traced for followers -
-    /// only wildmen's own idle loop is confirmed to have one, pop3-rev-analysis.md "Idle behaviour").
+    /// Bored while standing: a brave scratches (pop3-rev-analysis.md "Bored poses").
     Scratch,
-    /// Idle too long: a warrior does push-ups (TODO.md "Units"; same caveat as `Scratch`).
+    /// Bored while standing: a firewarrior does push-ups, firewarrior gear drawn in ("Bored poses").
     Pushup,
-    /// Idle too long: a spy juggles (TODO.md "Units"; same caveat as `Scratch`).
+    /// Bored while standing: a warrior does push-ups, headband drawn in ("Bored poses").
+    PushupHeadband,
+    /// A spy juggles (animations.md 92; what triggers it is untraced).
     Juggle,
     /// A spy setting a building on fire (animations.md 17; the spy's and the firewarrior's outfits only).
     SetFire,
@@ -308,6 +309,7 @@ impl PersonAnim {
             PersonAnim::TauntPunch => 50,
             PersonAnim::Scratch => 89,
             PersonAnim::Pushup => 90,
+            PersonAnim::PushupHeadband => 91,
             PersonAnim::Juggle => 92,
             PersonAnim::SetFire => 17,
         }
