@@ -562,6 +562,11 @@ pub struct Unit {
     /// `Action::Walking`, or `Attacking` while out in the open (also walks towards a point via `approach`)
     /// - and always for the shaman, who already just stays Idle rather than ever being stranded.
     stuck_watch: Option<(Tick, (u16, u16))>,
+    /// Where it stands idle (`crate::idle`), kept while it does: a shuffle steps off it, never further. `[ours]`:
+    /// stands in for the original's remembered spot (`+0x4F`).
+    idle_spot: Option<(u16, u16)>,
+    /// A shuffle around `idle_spot` under way (`crate::idle`).
+    shuffle: Option<crate::idle::Shuffle>,
     /// The building (id) this brave is assigned to, `Order::Build`.
     pub work: Option<BuildingId>,
     /// The building the unit is in: it walks out by its door before going anywhere.
@@ -632,6 +637,8 @@ impl Unit {
             patrol: crate::patrol::PatrolQueue::default(),
             idle_ticks: 0,
             stuck_watch: None,
+            idle_spot: None,
+            shuffle: None,
             work: None,
             inside: None,
             aboard: None,
@@ -648,6 +655,32 @@ impl Unit {
     /// camp fire or a vehicle.
     pub fn busy(&self) -> bool {
         self.work.is_some() || self.carrying > 0 || self.to_tree.is_some() || self.to_wood.is_some() || self.to_house.is_some() || self.to_shrine.is_some() || self.to_fire.is_some() || self.to_vehicle.is_some()
+    }
+
+    /// Whether it is stepping in a shuffle (`crate::idle`): the client draws it walking.
+    pub fn shuffling(&self) -> bool {
+        self.shuffle.is_some_and(|s| s.to.is_some())
+    }
+
+    /// A follower standing idle on the ground (pop3-rev-analysis.md "Bored poses"): every `idle::CHECK` it may
+    /// shuffle a step off its spot and back to standing; anything else to do drops the spot and the shuffle.
+    fn stand_idle(&mut self, now: Tick, ground: &impl Ground) {
+        let follower = !matches!(self.kind, UnitKind::Wildman | UnitKind::AngelOfDeath);
+        if !(follower && self.truly_idle() && self.in_the_open() && !self.motion.airborne() && self.is_alive()) {
+            (self.idle_spot, self.shuffle) = (None, None);
+            return;
+        }
+        let spot = *self.idle_spot.get_or_insert((self.x, self.z));
+        if let Some(mut s) = self.shuffle {
+            if let Some(to) = s.to
+                && self.step_towards(to, ground, self.kind.speed()) != Step::Moved
+            {
+                (s.to, self.facing) = (None, s.facing);
+            }
+            self.shuffle = (!s.left.tick()).then_some(s);
+        } else if let Some(crate::idle::Fidget::Shuffle { facing, hold }) = crate::idle::roll(self.id, now) {
+            self.shuffle = Some(crate::idle::Shuffle { to: Some(crate::idle::step_from(spot, facing)), facing, left: Countdown::new(hold) });
+        }
     }
 
     /// Genuinely idle, with nothing at all lined up: not just `Action::Idle`, but no task, nothing
@@ -938,6 +971,9 @@ impl Unit {
     /// One simulation step. `site` is where the unit reincarnates.
     pub fn tick(&mut self, now: Tick, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
         self.idle_ticks = if self.truly_idle() { self.idle_ticks.saturating_add(1) } else { 0 };
+        if self.action != Action::Idle {
+            (self.idle_spot, self.shuffle) = (None, None);
+        }
         // Walking always counts; Attacking only while actually out in the open trying to walk somewhere
         // (`approach`) - aboard a vehicle it can legitimately sit still for good (firing from a stationary
         // boat). Guarding is deliberately NOT covered: a guard settled into its own orbit point
@@ -984,7 +1020,8 @@ impl Unit {
             (self.teleport_to, self.spell) = (None, None);
         }
         match self.action {
-            Action::Idle | Action::Hammering | Action::Worshipping { .. } => {}
+            Action::Idle => self.stand_idle(now, ground),
+            Action::Hammering | Action::Worshipping { .. } => {}
             Action::AroundFire { fire, point } => {
                 let next = (point + 1) % campfire::RING_POINTS;
                 let pace = self.kind.speed() * AROUND_FIRE_PACE.0 / AROUND_FIRE_PACE.1;
@@ -1925,6 +1962,40 @@ mod tests {
             u.tick(Tick::ZERO, t, Some(site));
             done(u)
         }).unwrap()
+    }
+
+    #[test]
+    fn a_follower_standing_idle_shuffles_around_its_spot_and_a_wildman_does_not() {
+        let t = land();
+        let start = crate::slots::cell_centre((10, 10));
+        let walk = |kind| {
+            let mut u = Unit::new(Id::from_raw(7), TribeId::Blue, kind, start);
+            let mut seen = Vec::new();
+            for k in 1..32 * 64 {
+                u.tick(Tick::from_wire(k), &t, None);
+                seen.push(((u.x, u.z), u.shuffling(), u.action));
+            }
+            seen
+        };
+        let brave = walk(UnitKind::Brave);
+        assert!(brave.iter().all(|&(_, _, a)| a == Action::Idle), "still idle all along");
+        assert!(brave.iter().any(|&(_, stepping, _)| stepping));
+        assert!(brave.iter().any(|&(at, _, _)| at != start) && brave.iter().any(|&(at, stepping, _)| at == start && !stepping), "steps off and back");
+        assert!(brave.iter().all(|&(at, _, _)| crate::map::torus_dist2(at, start) <= (crate::idle::SHUFFLE_STEP as i64 * 2).pow(2)), "never drifts");
+        assert!(walk(UnitKind::Wildman).iter().all(|&(at, stepping, _)| at == start && !stepping));
+    }
+
+    #[test]
+    fn walking_off_drops_the_spot() {
+        let t = land();
+        let mut u = Unit::new(Id::from_raw(7), TribeId::Blue, UnitKind::Brave, crate::slots::cell_centre((10, 10)));
+        let k = (1..32 * 64).find(|&k| {
+            u.tick(Tick::from_wire(k), &t, None);
+            u.shuffling()
+        }).unwrap();
+        u.action = Action::Walking { to: crate::slots::cell_centre((14, 10)) };
+        u.tick(Tick::from_wire(k + 1), &t, None);
+        assert_eq!((u.idle_spot, u.shuffle), (None, None));
     }
 
     #[test]

@@ -323,6 +323,11 @@ Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the 
   unit, so lockstep peers get the same orders.
 - Arriving (end of a walk, or landing from a teleport) on a spot taken meanwhile: the unit walks on to the
   nearest free spot (`GameMap::tick`).
+- Standing idle (`game_core::idle`, pop3-rev-analysis.md "Bored poses"): a follower (not a wildman) idle on the
+  ground with nothing lined up remembers where it stands; every 32 turns on its own phase (its id) a roll gives a
+  shuffle at 13/32 (face one of 8 ways, step `SHUFFLE_STEP` off that spot, an eighth of a cell, our guess kept
+  inside its standing spot, then stand; 4-31 turns in all, still `Action::Idle`) or a bored pose at 3/64 (the
+  client's `units::art::bored`, which wins over the shuffle). Anything but Idle forgets the spot.
 
 ## Pathfinding (done: `game_core::path`)
 - Walls: walkers never cross a building's walled cells (`path::Ground`, buildings.md "Walking around buildings").

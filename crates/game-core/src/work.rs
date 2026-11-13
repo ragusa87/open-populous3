@@ -740,7 +740,8 @@ mod tests {
             map.tick();
             assert!(!walled.contains(&map.units[u].cell()), "crossed the temple at {:?}", map.units[u].cell());
         }
-        assert_eq!((map.units[u].x, map.units[u].z), to);
+        let at = (map.units[u].x, map.units[u].z);
+        assert!(crate::map::torus_dist2(at, to) <= (crate::idle::SHUFFLE_STEP as i64).pow(2), "there, give or take a shuffle: {at:?}");
     }
 
     #[test]

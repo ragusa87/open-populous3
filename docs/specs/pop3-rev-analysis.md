@@ -5735,11 +5735,12 @@ confirms.
   per-unit copies cannot express - moot unless a future spec item needs "all N units retarget at once mid-walk".
 - `unit.rs`'s `Action::Idle`: a single, unified rest state with no autonomous behaviour at all, matching what was
   found for ordinary followers in the original (state 10, "Idle behaviour": does nothing when no command group
-  is assigned - no wandering, no autonomous wood-gathering found). One idle detail is missing: a 13/32 chance
-  every 32 turns of a short in-place shuffle (new facing, a step, 4-31 turns).
-- `units::art::bored` (client) follows "Bored poses" (3/64 every 32 turns, one loop, anims 89/91/90, carriers
-  included) but rolls on a client-side phase (tick + id) instead of the unit's `class_counter`, and ignores the
-  `+0x82` gate on the warrior/firewarrior pose. The spy's juggling trigger is not traced: ours rolls it like the
+  is assigned - no wandering, no autonomous wood-gathering found).
+- `game_core::idle` follows "Bored poses" (the 13/32 shuffle, the 3/64 bored pose drawn by `units::art::bored`,
+  one loop, anims 89/91/90, carriers included) but rolls off a per-unit seed on a phase from its id instead of
+  the shared generator and `class_counter`, steps an eighth of a cell (a guess: the step's length is not traced)
+  around the spot it stood on when it went idle (not the remembered `+0x4F`), and ignores the `+0x82` gate on
+  the warrior/firewarrior pose. The spy's juggling trigger is not traced: ours rolls it like the
   others, one whole loop.
 - Wildmen (no AI in our code today; "Wildmen"): the original drives them through a confirmed 1 → 8 → (5 or 6) →
   16 → 8 loop - first search nearby (18 cells) for a tree or plant and idle beside it if found (state 5); only

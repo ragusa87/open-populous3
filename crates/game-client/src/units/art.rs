@@ -5,7 +5,8 @@
 use crate::sim_time::{progress, SimNow};
 use game_core::effect::DamageKind;
 use game_core::time::{Tick, Ticks};
-use game_core::unit::{Action, UnitKind};
+use game_core::idle;
+use game_core::unit::{Action, UnitId, UnitKind};
 use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
 use pop3_format::catalog::{PersonAnim, ARMS_UP_FRAME, ShamanAnim, WildmanAnim, OUTFIT_FIREWARRIOR, OUTFIT_PREACHER, OUTFIT_SPY, OUTFIT_WARRIOR, TRIBES};
 use pop3_format::{LevelError, Picture, SpriteBank, Theme};
@@ -224,7 +225,7 @@ const TAUNT_DISPLAY: Ticks = Ticks::new(12);
 
 /// The pose `u` is drawn in: aboard a vehicle and idle or waiting to throw, pedalling it; killed by
 /// lightning, carbonized until its spirit rises; waiting in a challenge and recently taunted, one of 3;
-/// else by its action (`pose_for`). `kind`: the kind it is shown as (`Unit::shown_kind`), for its bored pose.
+/// stepping in an idle shuffle, walking; else by its action (`pose_for`). `kind`: the kind it is shown as (`Unit::shown_kind`), for its bored pose.
 /// `now`: the drawn moment, for the taunt's own short display window.
 pub fn pose_of(u: &game_core::unit::Unit, kind: UnitKind, now: Tick) -> Pose {
     if u.aboard.is_some() && matches!(u.action, Action::Idle | Action::Attacking { .. }) {
@@ -245,18 +246,15 @@ pub fn pose_of(u: &game_core::unit::Unit, kind: UnitKind, now: Tick) -> Pose {
         return [Pose::TauntHide, Pose::TauntWave, Pose::TauntPunch][variant as usize % 3];
     }
     if u.action == Action::Idle
-        && let Some(b) = bored(kind, u.id.raw(), now)
+        && let Some(b) = bored(kind, u.id, now)
     {
         return b.pose;
     }
+    if u.action == Action::Idle && u.shuffling() {
+        return if u.carrying > 0 { Pose::CarryWalk } else { Pose::Walk };
+    }
     pose_for(&u.action, u.carrying > 0, u.motion.airborne())
 }
-
-/// How often a standing follower rolls for a bored pose, each on its own phase (by id here):
-/// pop3-rev-analysis.md "Bored poses". Client-only: it never changes simulation state.
-const BORED_EVERY: u32 = 32;
-/// The odds of each roll: 3/64 ("Bored poses"), a first pose after ~57 s on average.
-const BORED_CHANCE: f32 = 3.0 / 64.0;
 
 /// A bored pose under way: which, and how many ticks into it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -291,15 +289,13 @@ fn bored_pose(kind: UnitKind) -> Option<(Pose, u32)> {
     }
 }
 
-/// The bored pose a standing `kind` plays at `now`, if any: a deterministic function of `id` and `now`
-/// alone, so every client draws the same unit the same way - a `BORED_CHANCE` roll every `BORED_EVERY`
-/// ticks on the unit's own phase (`sim_time::seed`), no idle-time threshold, the pose played once from
-/// the roll.
-pub fn bored(kind: UnitKind, id: u32, now: Tick) -> Option<Bored> {
+/// The bored pose a standing `kind` plays at `now`, if any: the roll of its last standing check
+/// (`game_core::idle::roll`, the same the simulation's shuffle reads), the pose played once from there.
+pub fn bored(kind: UnitKind, id: UnitId, now: Tick) -> Option<Bored> {
     let (pose, length) = bored_pose(kind)?;
-    let since = now.to_wire().wrapping_add(id);
-    let (block, elapsed) = (since / BORED_EVERY, since % BORED_EVERY);
-    (elapsed < length && crate::sim_time::seed(id ^ block.wrapping_mul(0x9E37_79B9)) < BORED_CHANCE).then_some(Bored { pose, elapsed })
+    let check = idle::last_check(id, now);
+    let elapsed = now.since(check) as u32;
+    (elapsed < length && idle::roll(id, check) == Some(idle::Fidget::Bored)).then_some(Bored { pose, elapsed })
 }
 
 /// The pose for an action; `carrying` wood changes standing and walking, `airborne` (lift above
@@ -699,13 +695,13 @@ mod tests {
     #[test]
     fn bored_is_none_for_kinds_with_no_pose_of_their_own() {
         for kind in [UnitKind::Shaman, UnitKind::Preacher, UnitKind::Wildman] {
-            assert!((0..4096u32).all(|t| bored(kind, 7, Tick::from_wire(t)).is_none()), "{kind:?}");
+            assert!((0..4096u32).all(|t| bored(kind, UnitId::from_raw(7), Tick::from_wire(t)).is_none()), "{kind:?}");
         }
     }
 
     #[test]
     fn bored_picks_each_kind_s_own_pose() {
-        let hit = |kind| (0..8192u32).find_map(|t| bored(kind, 7, Tick::from_wire(t))).map(|b| b.pose);
+        let hit = |kind| (0..8192u32).find_map(|t| bored(kind, UnitId::from_raw(7), Tick::from_wire(t))).map(|b| b.pose);
         assert_eq!(hit(UnitKind::Brave), Some(Pose::Scratch));
         assert_eq!(hit(UnitKind::Warrior), Some(Pose::Pushup));
         assert_eq!(hit(UnitKind::Firewarrior), Some(Pose::Pushup));
@@ -715,7 +711,7 @@ mod tests {
     #[test]
     fn bored_plays_one_loop_from_its_first_frame_at_the_traced_odds() {
         let runs = |kind| {
-            let shown: Vec<Option<Bored>> = (0..BORED_EVERY * 4096).map(|t| bored(kind, 3, Tick::from_wire(t))).collect();
+            let shown: Vec<Option<Bored>> = (0..idle::CHECK.period() * 4096).map(|t| bored(kind, UnitId::from_raw(3), Tick::from_wire(t))).collect();
             let starts: Vec<usize> = (1..shown.len()).filter(|&i| shown[i].is_some() && shown[i - 1].is_none()).collect();
             (shown, starts)
         };
