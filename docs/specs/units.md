@@ -214,7 +214,9 @@ instead, each guard at its own fixed point on a ring around her that keeps slowl
 reported live, is what this replaced). Circling needs no path: each tick the guard re-aims at its point and steps
 straight at it (`Unit::escort`), so it follows the turning ring smoothly instead of walking cell-sized legs; only a
 blocked step (a building's corner, a cliff) plans a path round it, followed to its end [ours]. `slot` assigned once at `GameMap::go_guard` and never reshuffled while it
-keeps guarding, so one dropping out or a new one joining never shifts anybody else's spot. A guard never reports
+keeps guarding, so one dropping out or a new one joining never shifts anybody else's spot. On land only [ours]: a unit
+aboard a vehicle cannot be ordered to guard, nor anyone while she is aboard one, and her guards stand down (Idle)
+the moment she boards; they never follow her by vehicle. A guard never reports
 itself done on its own while she is alive; stops (back to Idle) once she is not. `G` with nothing selected, or
 with only the shaman selected, instead stops every one of the player's own units currently guarding
 (`Command::CancelGuard`, a tribe-wide scan rather than a per-unit order, since the original does not name which

@@ -2234,13 +2234,14 @@ impl GameMap {
     }
 
     /// `i` (any non-shaman follower) starts escorting its tribe's shaman (`G`, pop3-rev-analysis.md "Guard the
-    /// shaman"); a no-op without one (she is dead/reincarnating, or `i` is itself the shaman).
+    /// shaman"); a no-op without one (she is dead/reincarnating, or `i` is itself the shaman), and on land only: not
+    /// for one aboard a vehicle, nor while she is.
     fn go_guard(&mut self, i: usize) {
-        if self.units[i].kind == UnitKind::Shaman {
+        if self.units[i].kind == UnitKind::Shaman || self.units[i].aboard.is_some() {
             return;
         }
         let Some(owner) = self.units[i].owner.tribe() else { return };
-        let Some(shaman) = self.shaman_of(owner).map(|s| s.id) else { return };
+        let Some(shaman) = self.shaman_of(owner).filter(|s| s.aboard.is_none()).map(|s| s.id) else { return };
         let at = self.unit(shaman).map_or((self.units[i].x, self.units[i].z), |s| (s.x, s.z));
         let slot = self.free_guard_slot(shaman);
         let to = crate::guard::orbit_point(at, slot, self.now);
@@ -2255,12 +2256,12 @@ impl GameMap {
     /// own slot's ring instead (`crate::guard::orbit_point`, continuously turning, so several guards walk
     /// around her at their own spot rather than converging on the same one and drawing superposed) -
     /// re-aimed every tick (same shape as `tend_attacks`); stops guarding (back to Idle) once she is gone,
-    /// reincarnating or not alive.
+    /// reincarnating, not alive or aboard a vehicle.
     pub(crate) fn tend_guards(&mut self) {
         let now = self.now;
         for i in 0..self.units.len() {
             let Action::Guarding { shaman, slot, .. } = self.units[i].action else { continue };
-            let Some((sx, sz)) = self.unit(shaman).filter(|s| s.is_alive()).map(|s| (s.x, s.z)) else {
+            let Some((sx, sz)) = self.unit(shaman).filter(|s| s.is_alive() && s.aboard.is_none()).map(|s| (s.x, s.z)) else {
                 self.units[i].action = Action::Idle;
                 continue;
             };
@@ -2676,6 +2677,37 @@ mod tests {
             map.unit(brave).unwrap().cell() != settled_cell
         });
         assert!(moved.is_some(), "a lone guard keeps turning around her, not frozen in place once it first arrives");
+    }
+
+    /// A balloon of the player's on the sandbox, by its shaman, with `who` seated in it.
+    fn aboard_a_balloon(map: &mut GameMap, who: UnitId) {
+        let at = { let s = map.shaman_of(TribeId::Blue).unwrap(); (s.x, s.z) };
+        let balloon = map.add_vehicle(crate::vehicle::Vehicle::new(crate::vehicle::VehicleKind::Balloon, TribeId::Blue, at, crate::angle::Angle::new(0)));
+        map.unit_mut(who).unwrap().aboard = Some(balloon);
+        map.vehicles.get_mut(balloon).unwrap().seat(who, TribeId::Blue);
+    }
+
+    #[test]
+    fn nobody_aboard_a_vehicle_is_ordered_to_guard() {
+        let mut map = GameMap::sandbox_units();
+        let brave = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave).unwrap().id;
+        aboard_a_balloon(&mut map, brave);
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: brave, order: Order::Guard });
+        assert!(!matches!(map.unit(brave).unwrap().action, Action::Guarding { .. }));
+    }
+
+    #[test]
+    fn guards_stand_down_once_the_shaman_is_aboard_and_none_start_while_she_is() {
+        let mut map = GameMap::sandbox_units();
+        let shaman = map.shaman_of(TribeId::Blue).unwrap().id;
+        let braves: Vec<_> = map.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave).map(|u| u.id).take(2).collect();
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: braves[0], order: Order::Guard });
+        map.tick();
+        aboard_a_balloon(&mut map, shaman);
+        map.tick();
+        assert_eq!(map.unit(braves[0]).unwrap().action, Action::Idle, "stood down");
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: braves[1], order: Order::Guard });
+        assert!(!matches!(map.unit(braves[1]).unwrap().action, Action::Guarding { .. }), "no guarding her at sea");
     }
 
     #[test]
