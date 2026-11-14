@@ -146,10 +146,11 @@ impl GameMap {
     }
 
     /// Assigned braves of `building` other than `except` bringing wood: carrying, fetching, cutting, or
-    /// building a piece taken off the pile.
+    /// building a piece taken off the pile; a stranded one is not, so someone else goes instead.
     fn wood_on_the_way(&self, building: BuildingId, except: UnitId) -> usize {
         self.workers(building)
             .filter(|u| u.id != except)
+            .filter(|u| !matches!(u.action, Action::Stranded { .. }))
             .filter(|u| u.carrying > 0 || u.fetching().is_some() || u.cutting().is_some() || matches!(u.action, Action::Building { .. }))
             .count()
     }
@@ -295,8 +296,7 @@ impl GameMap {
             self.units[i].enter(Inside { building: site, door }, work_point(&building, id));
         } else if building.stock > 0 {
             self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
-        } else if wanted {
-            self.fetch_wood(i);
+        } else if wanted && self.went_for_wood(i) {
         } else if inside {
             self.units[i].action = Action::Hammering;
         } else if torus_dist2(me, door) <= DELIVER_RADIUS * DELIVER_RADIUS {
@@ -389,7 +389,10 @@ impl GameMap {
                     }
             })
         };
-        let point = uneven.into_iter().filter(|&p| !claimed(p)).min_by_key(|&p| torus_dist2(me, world(p)))?;
+        let Some(point) = uneven.into_iter().filter(|&p| !claimed(p)).min_by_key(|&p| torus_dist2(me, world(p))) else {
+            self.wait_at_site(i, &building);
+            return None;
+        };
         let at = world(point);
         if torus_dist2(me, at) <= JUMP_RADIUS * JUMP_RADIUS {
             self.units[i].action = Action::Flattening { at: point, left: Countdown::new(JUMP_TICKS) };
@@ -397,6 +400,25 @@ impl GameMap {
             self.units[i].start(Order::MoveTo { x: at.0, z: at.1 });
         }
         None
+    }
+
+    /// Brave `i` sets off for a tree or a piece of wood; false when there is none to fetch.
+    fn went_for_wood(&mut self, i: usize) -> bool {
+        self.fetch_wood(i);
+        !self.units[i].is_free()
+    }
+
+    /// Brave `i`, with nothing to do on `b` for now, hammers where it stands by the site rather than idling, or walks
+    /// back to its door when it is away; free all along, it takes the next task the moment one comes up.
+    fn wait_at_site(&mut self, i: usize, b: &Building) {
+        let me = (self.units[i].x, self.units[i].z);
+        if b.covers(me, AROUND) || torus_dist2(me, b.door()) <= DELIVER_RADIUS * DELIVER_RADIUS {
+            self.units[i].action = Action::Hammering;
+            self.units[i].facing = facing_to(me, b.centre());
+        } else {
+            let door = b.door();
+            self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
+        }
     }
 
     /// Wood lying in `b`'s walls is moved out in front of its door, a little past its pile, where braves
@@ -889,6 +911,61 @@ mod tests {
     }
 
     #[test]
+    fn braves_with_nothing_to_do_on_a_site_hammer_by_it_from_the_start() {
+        let mut map = sandbox();
+        let units = braves(&map, 8);
+        assert_eq!(units.len(), 8);
+        let site = place(&mut map, BuildingKind::Temple, corner(26, 2), &units);
+        let at = map.buildings[site].id;
+        let mut idle = vec![0; units.len()];
+        let mut hammered_outside = false;
+        for _ in 0..20_000 {
+            map.tick();
+            for (k, id) in units.iter().enumerate() {
+                let u = map.unit(*id).unwrap();
+                hammered_outside |= u.action == Action::Hammering && u.inside.is_none();
+                idle[k] = if u.work == Some(at) && u.action == Action::Idle { idle[k] + 1 } else { 0 };
+                assert!(idle[k] <= 2, "brave {} stands idle", id.raw());
+            }
+            if map.buildings[site].stage() == Stage::Built {
+                break;
+            }
+        }
+        assert_eq!(map.buildings[site].stage(), Stage::Built);
+        assert!(hammered_outside, "those waiting for the ground to be flat hammer by the site");
+    }
+
+    #[test]
+    fn a_wood_fetcher_lost_is_replaced_by_one_of_the_hammering_braves() {
+        let mut map = sandbox();
+        map.wood.clear();
+        let units = braves(&map, 5);
+        let site = place(&mut map, BuildingKind::Hut { size: 1 }, corner(24, 0), &units);
+        let at = map.buildings[site].id;
+        let fetching = |m: &GameMap| m.workers(at).filter(|u| u.cutting().is_some() || u.carrying > 0).map(|u| u.id).collect::<Vec<_>>();
+        run_until(&mut map, 3000, |m| m.buildings[site].flat && !fetching(m).is_empty() && m.workers(at).any(|u| u.action == Action::Hammering)).expect("some fetch, the others hammer");
+        let gone = fetching(&map);
+        map.units.retain(|u| !gone.contains(&u.id));
+        map.tick();
+        assert!(!fetching(&map).is_empty(), "another brave went for the wood");
+        run_until(&mut map, 6000, |m| m.buildings[site].stage() == Stage::Built).expect("built");
+    }
+
+    #[test]
+    fn a_stranded_fetcher_is_not_wood_on_the_way() {
+        let mut map = sandbox();
+        let units = braves(&map, 2);
+        let site = place(&mut map, BuildingKind::Hut { size: 1 }, corner(24, 0), &units);
+        let at = map.buildings[site].id;
+        let u = map.unit_mut(units[0]).unwrap();
+        (u.work, u.carrying) = (Some(at), 0);
+        u.go_cut((1, 1), (2, 2));
+        assert_eq!(map.wood_on_the_way(at, units[1]), 1);
+        map.unit_mut(units[0]).unwrap().action = Action::Stranded { to: (2, 2) };
+        assert_eq!(map.wood_on_the_way(at, units[1]), 0);
+    }
+
+    #[test]
     fn braves_taken_off_a_site_for_another_reach_it() {
         let mut map = sandbox();
         for k in 0..2u16 {
@@ -973,3 +1050,4 @@ mod tests {
         }
     }
 }
+

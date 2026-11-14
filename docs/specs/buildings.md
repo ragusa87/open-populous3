@@ -219,7 +219,9 @@ the building shows it at once.
      the cost) and fewer braves bring wood than missing pieces, fetches wood (`Order::FetchWood`'s rule). Else
      walks to the nearest footprint height point not done (each needs one jump at least, `Building::jumped`, and
      must be at the site's level) that no other brave is on or going to, and jumps on it (`Action::Flattening`, `JUMP_TICKS` 8, the jump pose: original anim 12): the point moves `JUMP_STEP` (32)
-     towards the level. With no point left, the plan is flat: the ring around is blended
+     towards the level. A brave with no point free (all taken by others) hammers where it stands by the site
+     (`wait_at_site`: within `AROUND` of the footprint or a cell of the door, else it walks back to the door)
+     rather than idling, free to take the next point or piece that comes up [ours]. With no point left, the plan is flat: the ring around is blended
      (`Building::flatten`) and it is under construction: walled (see "Walking around buildings"). Wood lying in
      its walls is moved out in front of its door (`clear_wood_under`); braves never go for wood or trees
      behind walls (`GameMap::behind_walls`). Walls going up stop anyone walking to a spot behind them (they go
@@ -228,7 +230,7 @@ the building shows it at once.
   3. Under construction: with wood on the pile, walks to the door, in (`Unit::enter`, `Action::Entering`,
      straight to a work point a third of a cell apart per brave around the centre) and builds the piece from
      inside (`Action::Building`, `BUILD_TICKS` 5 s, the hammer pose); with no pile, fetches wood under the
-     dispatch rule below (out by the door first); else walks in by the door and hammers (`Action::Hammering`,
+     dispatch rule below (out by the door first; with nothing to fetch it goes on as below); else walks in by the door and hammers (`Action::Hammering`,
      open-ended, free for the next step) until there is wood or the building is done. No brave stands idle.
   4. Built: the moment the last piece is in, the braves who worked on it (`GameMap::release_builders`: whoever is
      inside AND still assigned, `work == Some(site)`) walk out by the door to a free spot around it
@@ -237,7 +239,8 @@ the building shows it at once.
      (huts-and-training.md "the hut stays usable all along", "Damage and repair" below) - only a fresh building's
      construction workers, the only people who could be inside one not built yet, are there to release.
   Braves bringing wood (`wood_on_the_way`): carrying, fetching or cutting, or building a piece taken off the
-  pile.
+  pile; not one stranded on its way. A hammering brave is free, so the moment a fetcher is lost (killed, ordered
+  elsewhere, stranded) one of those waiting goes for the wood instead.
 - `Command::CancelBuilding { player, at }`: the player's plan (not flat) whose footprint holds `at` is removed,
   its braves stop, the wood brought is lost. Once flat it can only be dismantled.
 - A hut with 3 braves and wood around (Sandbox > Buildings) takes about 20 s.
