@@ -209,9 +209,11 @@ the tribe's shaman continuously (`Order::Guard`, `Action::Guarding { shaman, slo
 clears (auto-deselected, matching the original). Each tick, a guard re-reads her *current* live position; more
 than `GUARD_RANGE` (824 units [exe]) away on either axis, it walks straight towards it - same shape as
 `Action::Attacking`'s own re-aiming (`GameMap::tend_guards`/`Unit::retarget`); within range, it circles her
-instead, each guard at its own fixed point on a ring around her (`ORBIT_RADIUS` 200, the working radius measured
-live; further rings `RING_GAP` 150 out) that keeps turning at `ORBIT_PACE` (40 units a tick along the ground, every
-ring alike), guards running at half again their walk (`guard_speed`: our guess, no speed traced)
+instead, each guard at its own fixed point on a ring around her that keeps turning, one way round (`ORBIT_RADIUS`
+200 and `ORBIT_PACE` 35 units a turn along it, a lap in ~36 turns, about half a walk: measured live, pop3-rev-analysis.md
+"Guard the shaman"; further rings `RING_GAP` 150 out at the same pace, ours). The original has no orbit coded: its
+ring is a side effect of its person steering chasing a point inside the ±824 box (which of two steering rules makes
+it is not settled), measured for one follower only; ours draws the measured ring directly
 (`crate::guard::orbit_point`, `[ours]`, not traced - several guards drawing superposed at her exact position,
 reported live, is what this replaced). Circling needs no path: each tick the guard re-aims at its point and steps
 straight at it (`Unit::escort`), so it follows the turning ring smoothly instead of walking cell-sized legs; only a

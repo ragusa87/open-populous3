@@ -2718,7 +2718,7 @@ mod tests {
         for _ in 0..200 {
             map.tick();
         }
-        let speed = crate::guard::guard_speed(map.unit(brave).unwrap().kind.speed());
+        let speed = map.unit(brave).unwrap().kind.speed();
         let mut at = { let u = map.unit(brave).unwrap(); (u.x, u.z) };
         for t in 0..100 {
             map.tick();

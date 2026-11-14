@@ -25,14 +25,9 @@ pub const ORBIT_RADIUS: i32 = 200;
 pub const RING_SLOTS: u16 = 8;
 /// World units added to the radius per extra ring past the first: a guess.
 pub const RING_GAP: i32 = 150;
-/// World units a point of any ring moves along it per tick while she stands still: a guess, no rhythm traced, kept
-/// under every guard's own `guard_speed` so each keeps its slot.
-pub const ORBIT_PACE: u32 = 40;
-
-/// How fast a unit of walking speed `walk` moves while guarding: at a run, half again its walk (a guess, not traced).
-pub fn guard_speed(walk: i32) -> i32 {
-    walk * 3 / 2
-}
+/// World units a point of any ring moves along it per tick while she stands still: ~35 a turn, one way round, a lap
+/// of the first ring in ~36 turns ("Guard the shaman" [exe, measured]; the same pace on further rings is ours).
+pub const ORBIT_PACE: u32 = 35;
 
 /// Where guard `slot` of a shaman at `centre` stands this tick: a fixed point on its own ring, turning
 /// steadily at `ORBIT_PACE` (so it keeps moving even once it arrives, instead of only turning when nudged) - same ring order regardless of how many other guards currently share it, so one dropping out or
@@ -66,6 +61,12 @@ mod tests {
     }
 
     #[test]
+    fn a_lap_of_the_first_ring_takes_the_measured_36_turns() {
+        let lap = ORBIT_RADIUS as u32 * 710 / 113 / ORBIT_PACE;
+        assert!((35..=37).contains(&lap), "{lap}");
+    }
+
+    #[test]
     fn every_ring_turns_at_the_same_pace_along_the_ground() {
         let centre = (10_000, 10_000);
         for slot in [0, RING_SLOTS, 2 * RING_SLOTS] {
@@ -79,8 +80,8 @@ mod tests {
     }
 
     #[test]
-    fn the_ring_turns_slower_than_any_guard_runs() {
-        let slowest = [crate::unit::UnitKind::Brave, crate::unit::UnitKind::Warrior, crate::unit::UnitKind::Firewarrior, crate::unit::UnitKind::Preacher, crate::unit::UnitKind::Spy].map(|k| guard_speed(k.speed())).into_iter().min().unwrap();
+    fn the_ring_turns_slower_than_any_guard_walks() {
+        let slowest = [crate::unit::UnitKind::Brave, crate::unit::UnitKind::Warrior, crate::unit::UnitKind::Firewarrior, crate::unit::UnitKind::Preacher, crate::unit::UnitKind::Spy].map(|k| k.speed()).into_iter().min().unwrap();
         assert!((ORBIT_PACE as i32) < slowest);
     }
 
