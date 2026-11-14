@@ -1,6 +1,6 @@
-//! Attacking a building (docs/specs/combat.md "Attacking a building"): the attacker hacks at it, pulls its people
-//! out one by one to fight them, and wears it down; the building loses a piece of wood each time its wear reaches its
-//! limit.
+//! Attacking a building (docs/specs/combat.md "Attacking a building"): the attacker hacks at its door, brings its
+//! people out to fight them on the porch, then walks in and wears it down from inside; the building loses a piece of
+//! wood each time its wear reaches its limit.
 
 use crate::angle;
 use crate::building::{Building, BuildingId, BuildingKind};
@@ -17,9 +17,10 @@ use pop3_format::WORLD_UNITS_PER_CELL;
 pub const HACK_AT_DOOR: Ticks = Ticks::new(16);
 /// A round of hacking: the first plus a draw below the second ("Attacking a building" [exe]).
 pub const HACK_TICKS: (u32, u32) = (8, 16);
-/// Between rounds the attacker walks to a point this far from the building's middle ("Attacking a building" [exe]).
+/// Between rounds the attacker walks to a point this far from the building's middle, inside its walls ("Attacking a
+/// building" [exe]).
 pub const WANDER: i32 = 360;
-/// Draws for a spot outside the walls before the attacker goes back to the door.
+/// Draws for a spot clear of other buildings' walls before the attacker settles for the middle.
 const WANDER_TRIES: u32 = 8;
 /// An attacker this close to where it was going has arrived.
 pub const ARRIVED: i32 = 32;
@@ -33,6 +34,11 @@ pub const REPAIR_DELAY: Ticks = Ticks::new(1200);
 /// carries about as far as the original's slowing slide (guess).
 pub const PULL_SPEED: i32 = 100;
 pub const PULL_LIFT: i16 = 24;
+
+/// Whether `u` has come to `to`.
+fn arrived(u: &crate::unit::Unit, to: (u16, u16)) -> bool {
+    torus_delta(u.x, to.0).abs() <= ARRIVED && torus_delta(u.z, to.1).abs() <= ARRIVED
+}
 
 /// The wear a building takes before it loses a piece of wood, None when it never does ("Attacking a building"
 /// [exe]).
@@ -114,13 +120,14 @@ impl GameMap {
     pub(crate) fn tend_wrecking(&mut self) {
         for i in 0..self.units.len() {
             match self.units[i].action {
-                Action::Attacking { target: Target::Building(b), to } if !self.units[i].kind.stats().throws => {
-                    let u = &self.units[i];
-                    if torus_delta(u.x, to.0).abs() <= ARRIVED && torus_delta(u.z, to.1).abs() <= ARRIVED {
-                        let at_door = self.building(b).is_some_and(|b| b.door() == to);
-                        let left = if at_door { HACK_AT_DOOR } else { self.hack_round() };
-                        self.units[i].action = Action::Hacking { building: b, left: Countdown::new(left), at_door };
-                    }
+                Action::Attacking { target: Target::Building(b), to } if !self.units[i].kind.stats().throws && arrived(&self.units[i], to) => {
+                    let at_door = self.building(b).is_some_and(|b| b.door() == to);
+                    let left = if at_door { HACK_AT_DOOR } else { self.hack_round() };
+                    self.units[i].action = Action::Hacking { building: b, left: Countdown::new(left), at_door };
+                }
+                Action::BreakingIn { building, to } if arrived(&self.units[i], to) => {
+                    let left = Countdown::new(self.hack_round());
+                    self.units[i].action = Action::Hacking { building, left, at_door: false };
                 }
                 Action::Hacking { building, left, at_door } => self.hack(i, building, left, at_door),
                 _ => {}
@@ -128,13 +135,23 @@ impl GameMap {
         }
     }
 
-    /// A spot `WANDER` from `centre` in a drawn direction, outside any building's walls; a few draws, then None.
-    fn wander_spot(&mut self, centre: (u16, u16)) -> Option<(u16, u16)> {
-        (0..WANDER_TRIES).find_map(|_| {
-            let (x, z) = angle::rotate((WANDER, 0), self.rng.next_u32() % angle::TURN);
-            let to = (centre.0.wrapping_add(x as u16), centre.1.wrapping_add(z as u16));
-            (!self.behind_walls(to)).then_some(to)
-        })
+    /// A spot `WANDER` from the middle of `building` in a drawn direction, not in another building's walls; a few
+    /// draws, then its middle.
+    fn wander_spot(&mut self, building: BuildingId, centre: (u16, u16)) -> (u16, u16) {
+        let size = self.terrain.size() as i32;
+        (0..WANDER_TRIES)
+            .find_map(|_| {
+                let (x, z) = angle::rotate((WANDER, 0), self.rng.next_u32() % angle::TURN);
+                let to = (centre.0.wrapping_add(x as u16), centre.1.wrapping_add(z as u16));
+                let cell = ((to.0 as u32 / 512) as i32 % size, (to.1 as u32 / 512) as i32 % size);
+                self.walls.at(cell).is_none_or(|b| b == building).then_some(to)
+            })
+            .unwrap_or(centre)
+    }
+
+    /// Whether anyone is inside `building`.
+    fn occupied(&self, building: BuildingId) -> bool {
+        self.units.iter().any(|u| u.is_alive() && u.inside.is_some_and(|inside| inside.building == building))
     }
 
     fn hack_round(&mut self) -> Ticks {
@@ -159,22 +176,23 @@ impl GameMap {
         if at_door && self.pull_out(i, building) {
             return;
         }
-        if at_door {
-            let round = self.hack_round();
-            self.units[i].action = Action::Hacking { building, left: Countdown::new(round), at_door: false };
+        let door = self.buildings[b].door();
+        if !at_door && self.occupied(building) {
+            self.units[i].attack(Target::Building(building), door);
             return;
         }
-        let door = self.buildings[b].door();
-        let to = self.wander_spot(centre).unwrap_or(door);
-        self.units[i].attack(Target::Building(building), to);
+        let to = self.wander_spot(building, centre);
+        self.units[i].action = Action::BreakingIn { building, to };
     }
 
-    /// Unit `i` at the door pulls the first person inside `building` out and challenges it; the attack on the
-    /// building goes on after the fight (a chained order). False when nobody is inside.
+    /// Unit `i` at the door brings everyone inside `building` out onto its porch: the first is pulled out and
+    /// challenged, the others come out at the door and attack it. The attacker goes back to the building once the
+    /// fight is behind it, those who come out back in. False when nobody is inside.
     fn pull_out(&mut self, i: usize, building: BuildingId) -> bool {
         let Some(b) = self.building(building) else { return false };
-        let (door, centre) = (b.door(), b.centre());
-        let Some(j) = self.units.iter().position(|u| u.is_alive() && u.inside.is_some_and(|inside| inside.building == building)) else { return false };
+        let (door, centre, site) = (b.door(), b.centre(), (b.x, b.z));
+        let inside: Vec<usize> = (0..self.units.len()).filter(|&j| self.units[j].is_alive() && self.units[j].inside.is_some_and(|inside| inside.building == building)).collect();
+        let Some((&j, others)) = inside.split_first() else { return false };
         let (dx, dz) = (torus_delta(centre.0, door.0), torus_delta(centre.1, door.1));
         let d = isqrt((dx * dx + dz * dz) as u32).max(1) as i32;
         let vel = Velocity::new((dx * PULL_SPEED / d) as i16, PULL_LIFT, (dz * PULL_SPEED / d) as i16);
@@ -189,10 +207,27 @@ impl GameMap {
         (pulled.x, pulled.z) = door;
         pulled.join(Action::Challenge { challenge: id, role: Role::Shoved });
         pulled.motion = Motion::flying(vel, ground);
+        pulled.return_after_fight(site);
         let a = &mut self.units[i];
         a.join(Action::Challenge { challenge: id, role: Role::Charging { to: door, speed } });
-        a.enqueue(Order::Attack { target: Target::Building(building) });
+        a.resume_after_fight(Target::Building(building));
+        for &k in others {
+            self.come_out_to_fight(k, door, site, attacker);
+        }
         true
+    }
+
+    /// Unit `k` comes out of its building (corner `site`) at its `door` to attack `attacker`, then goes back in.
+    fn come_out_to_fight(&mut self, k: usize, door: (u16, u16), site: (u16, u16), attacker: UnitId) {
+        let u = &mut self.units[k];
+        u.inside = None;
+        (u.x, u.z) = door;
+        self.start_order(k, Order::Attack { target: Target::Unit(attacker) });
+        if matches!(self.units[k].action, Action::Attacking { .. }) {
+            self.units[k].return_after_fight(site);
+        } else {
+            self.start_order(k, Order::Enter { site });
+        }
     }
 }
 
@@ -270,16 +305,50 @@ mod tests {
         assert_eq!(map.unit(a).unwrap().action, Action::Idle, "never resumes hacking");
     }
 
-    #[test]
-    fn people_inside_are_pulled_out_and_challenged() {
-        let (mut map, hut, a) = siege(UnitKind::Brave);
+    /// `n` people of `kind` of tribe 1 inside the hut.
+    fn garrison(map: &mut GameMap, hut: BuildingId, kind: UnitKind, n: usize) -> Vec<UnitId> {
         let door = map.building(hut).unwrap().door();
-        let inside = map.spawn(TribeId::Red, UnitKind::Brave, door).id;
-        map.unit_mut(inside).unwrap().enter(crate::unit::Inside { building: hut, door }, door);
-        until(&mut map, 300, |m| !m.coordinators.challenges.is_empty()).expect("pulled out");
-        let (_, c) = map.coordinators.challenges.iter().next().unwrap();
-        assert_eq!((c.attacker, c.target, c.approach), (a, inside, Approach::PulledOut { building: hut }));
-        assert!(map.unit(inside).unwrap().inside.is_none());
+        (0..n)
+            .map(|_| {
+                let id = map.spawn(TribeId::Red, kind, door).id;
+                map.unit_mut(id).unwrap().enter(crate::unit::Inside { building: hut, door }, door);
+                id
+            })
+            .collect()
+    }
+
+    #[test]
+    fn everyone_inside_comes_out_onto_the_porch_to_fight() {
+        let (mut map, hut, a) = siege(UnitKind::Brave);
+        let inside = garrison(&mut map, hut, UnitKind::Brave, 2);
+        until(&mut map, 300, |m| inside.iter().any(|&id| m.unit(id).unwrap().inside.is_none())).expect("brought out");
+        assert!(inside.iter().all(|&id| map.unit(id).unwrap().inside.is_none()), "nobody left inside");
+        let door = map.building(hut).unwrap().door();
+        for id in std::iter::once(a).chain(inside) {
+            let u = map.unit(id).unwrap();
+            assert!(u.action.link().is_some() || u.action.name() == "Attacking", "{:?} fights", u.action);
+            assert!(torus_delta(u.x, door.0).abs() < 512 && torus_delta(u.z, door.1).abs() < 512, "on the porch");
+        }
+    }
+
+    #[test]
+    fn defenders_who_win_go_back_in() {
+        let (mut map, hut, a) = siege(UnitKind::Brave);
+        let inside = garrison(&mut map, hut, UnitKind::Warrior, 2);
+        until(&mut map, 600, |m| m.unit(a).is_none_or(|u| !u.is_alive())).expect("the attacker loses");
+        until(&mut map, 300, |m| inside.iter().all(|&id| m.unit(id).unwrap().inside.is_some_and(|i| i.building == hut))).expect("both back in");
+    }
+
+    #[test]
+    fn the_winner_walks_in_and_hacks_from_inside() {
+        let (mut map, hut, a) = siege(UnitKind::Warrior);
+        garrison(&mut map, hut, UnitKind::Brave, 1);
+        until(&mut map, 1000, |m| matches!(m.unit(a).unwrap().action, Action::Hacking { at_door: false, .. })).expect("hacking inside");
+        let u = map.unit(a).unwrap();
+        assert!(map.behind_walls((u.x, u.z)), "inside the walls");
+        assert!(u.inside.is_none(), "not one of its people");
+        let worn = until(&mut map, 300, |m| m.building(hut).unwrap().wear > 0);
+        assert!(worn.is_some(), "it wears the hut down from there");
     }
 
     #[test]
@@ -295,3 +364,5 @@ mod tests {
         assert!(hut.repair_delay.is_none());
     }
 }
+
+

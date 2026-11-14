@@ -165,12 +165,22 @@ middle, the others in a ring around it ("Fight" [exe, measured]). Fighters are `
 ## Attacking a building
 `crate::wreck` ("Attacking a building" [exe]); the attacker's own work, no coordinator except the pull-out.
 - `Order::Attack` on an enemy building walks the attacker to its door. Arrived (`ARRIVED` 32 per axis): it hacks
-  (`Action::Hacking`), `HACK_AT_DOOR` (16) turns at the door, the building shaking. Then, if people are inside, the
-  first is pulled out: thrown from the door outwards at `PULL_SPEED` (100) with a small lift `PULL_LIFT` [guess: ours
-  does not slide], and a challenge (`Approach::PulledOut`) starts with it already `Shoved`; the attack on the
-  building is chained after it. Empty: it hacks for 8 + a draw below 16 turns, adding its kind's `sabotage` (brave,
-  preacher, spy 7; warrior 12; shaman 10; firewarrior 16) to the building's `wear` each turn, then walks to a spot
-  `WANDER` (360) from the building's middle (outside the walls, else the door) and hacks again.
+  (`Action::Hacking`), `HACK_AT_DOOR` (16) turns at the door, the building shaking. Then, if people are inside,
+  everyone comes out onto the porch: the first is pulled out, thrown from the door outwards at `PULL_SPEED` (100)
+  with a small lift `PULL_LIFT` [guess: ours does not slide], and a challenge (`Approach::PulledOut`) starts with it
+  already `Shoved`; the others come out at the door and attack the attacker (`come_out_to_fight`; one that cannot
+  attack goes straight back in). The fight over, the winner goes in by the door: the attacker back onto the
+  building (`Unit::resume_after_fight`), those who came out back inside (`Unit::return_after_fight`, an
+  `Order::Enter` chained by `go_idle`). [user observation, 2026-11-14: "all the units go out and fight on the
+  porch", the winner going in; the trace reads "one occupant is pulled out ... again while people are inside",
+  which may be the same thing one per turn - TODO.md "Attacking buildings".] Empty: it walks straight in by the
+  door, through the walls (`Action::BreakingIn`, `Unit::breaking_into`: not one of its people, so it is drawn and
+  shows more as the building loses its pieces), to a spot `WANDER` (360) from the building's middle, inside its
+  footprint (the trace's own point; not in another building's walls, else the middle), and hacks for 8 + a draw
+  below 16 turns, adding its kind's `sabotage` (brave, preacher, spy 7; warrior 12; shaman 10; firewarrior 16) to
+  the building's `wear` each turn; then to another such spot, and again. Someone gone in meanwhile: it goes back to
+  the door first [ours]. A unit standing in a building's walls walks through that building's walls (out by
+  wherever is nearest).
 - The building (`Building::tend_wear`, every turn, `GameMap::tend_building_wear` after the fires): it shakes
   `SHAKE_TICKS` (6) after each blow; its wear fades by one every 4 turns; at its limit (`wear_limit`: 2000; walls
   and gates 16 000; the prison 22 000; a vault never) the wear drops by the limit and it loses a piece of wood

@@ -282,6 +282,9 @@ pub enum Action {
     Arson { building: crate::building::BuildingId, stage: crate::arson::Stage, left: Countdown },
     /// Hacking at the building `building` (wreck.rs), `left` turns to go; first at its door.
     Hacking { building: crate::building::BuildingId, left: Countdown, at_door: bool },
+    /// An attacker walking in by the door of the enemy `building`, or round inside it, straight to the spot `to` it
+    /// hacks at next (wreck.rs): its walls do not stop it, and it is not one of its people.
+    BreakingIn { building: crate::building::BuildingId, to: (u16, u16) },
     /// Waiting in the queue of the training unit `building` (training.rs), standing at or walking to its spot `at`.
     Queuing { building: crate::building::BuildingId, at: (u16, u16) },
     /// Sitting, listening to `preacher` (sermon.rs): `left` to its next conversion chance, `attempts` so far
@@ -345,7 +348,7 @@ impl Action {
             Action::Listening { .. } => "Listening",
             Action::Queuing { .. } => "Queuing",
             Action::Preaching => "Preaching",
-            Action::Hacking { .. } | Action::Throwing { .. } => "Attacking",
+            Action::Hacking { .. } | Action::BreakingIn { .. } | Action::Throwing { .. } => "Attacking",
             Action::Arson { .. } => "Setting fire",
             Action::Hunting | Action::Closing { .. } | Action::Fighting { .. } => "Hunting",
             Action::Carrying { .. } => "Carrying",
@@ -368,6 +371,14 @@ impl Action {
             return Some(crate::coordinator::Link::Gathering(gathering));
         }
         None
+    }
+
+    /// The enemy building it is hacking at or walking into, whose walls it walks through.
+    pub fn breaking_into(&self) -> Option<crate::building::BuildingId> {
+        match *self {
+            Action::Hacking { building, .. } | Action::BreakingIn { building, .. } => Some(building),
+            _ => None,
+        }
     }
 
     /// The countdown of a timed action (for one-shot animations), None for open-ended ones.
@@ -550,6 +561,9 @@ pub struct Unit {
     /// (pop3-rev-analysis.md "Resuming a fight cut short by a push"): entering or being flung out of a fight
     /// never clears it, only dying or changing tribe do.
     resume_attack: Option<Target>,
+    /// The building (its corner) it was pulled out of to fight at the door (wreck.rs): it goes back in once the
+    /// fight is behind it, unless it dies, changes tribe or drops its plans first.
+    return_home: Option<(u16, u16)>,
     /// Patrol points to cycle through forever once more than one is set (units.md "Patrol orders"),
     /// independent of `queue`: a point is a shared id (`crate::patrol`), not an owned `Order`.
     patrol: crate::patrol::PatrolQueue,
@@ -634,6 +648,7 @@ impl Unit {
             queue: Vec::new(),
             arson: None,
             resume_attack: None,
+            return_home: None,
             patrol: crate::patrol::PatrolQueue::default(),
             idle_ticks: 0,
             stuck_watch: None,
@@ -1052,6 +1067,11 @@ impl Unit {
             Action::Attacking { .. } => {}
             Action::Guarding { .. } => {}
             Action::Hacking { .. } => {}
+            Action::BreakingIn { building, to } => {
+                if self.step_towards(to, ground, self.kind.speed()) == Step::Blocked {
+                    self.action = Action::BreakingIn { building, to: (self.x, self.z) };
+                }
+            }
             Action::Arson { .. } => {}
             // All driven by `GameMap::tend_angels_of_death`, same shape as `Attacking`/`tend_attacks`.
             Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } => {}
@@ -1360,11 +1380,24 @@ impl Unit {
     /// it) and `touch_down` (it lands still holding one, e.g. a blast's push knocked it clean out of its fight
     /// first) because the original falls back to its per-type default state the same way regardless of which of
     /// the two emptied `+0x9D` (pop3-rev-analysis.md "Resuming a fight cut short by a push").
-    fn go_idle(&mut self) {
+    pub(crate) fn go_idle(&mut self) {
         self.action = Action::Idle;
         if let Some(target) = self.resume_attack.take() {
             self.queue.insert(0, Order::Attack { target });
         }
+        if let Some(site) = self.return_home.take() {
+            self.queue.push(Order::Enter { site });
+        }
+    }
+
+    /// Joining a fight for the building `target` it attacks: back onto it once the fight is behind it.
+    pub(crate) fn resume_after_fight(&mut self, target: Target) {
+        self.resume_attack = Some(target);
+    }
+
+    /// Pulled out of its building (corner `site`) to fight: back in once the fight is behind it.
+    pub(crate) fn return_after_fight(&mut self, site: (u16, u16)) {
+        self.return_home = Some(site);
     }
 
     /// Loses `amount` health (`GameMap::damage` decides whether it is hurt at all); true when that kills it. Thrown
@@ -1459,6 +1492,7 @@ impl Unit {
         self.queue.clear();
         self.patrol.clear();
         self.work = None;
+        self.return_home = None;
     }
 
     /// Thrown by a spell: `push` adds to its velocity, it leaves the ground (`ground`: the height under it) and

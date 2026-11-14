@@ -1553,7 +1553,8 @@ impl GameMap {
                 continue;
             }
             let site = self.sites.iter().find(|s| s.owner == unit.owner && s.enabled);
-            let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside: unit.inside.map(|i| i.building) };
+            let inside = unit.inside.map(|i| i.building).or(unit.action.breaking_into()).or_else(|| self.walls.at(unit.cell()));
+            let ground = Walled { terrain: &self.terrain, walls: &self.walls, inside };
             match unit.tick(now, &ground, site) {
                 // An animated site's ground isn't levelled on reincarnation itself any more: the build
                 // ritual grows it, tick by tick, over its own levelling state (`UnitEvent::SiteLevelling`).
@@ -2125,7 +2126,7 @@ impl GameMap {
             cells.extend(b.walled_cells(size).into_iter().map(|c| (c, b.id)));
         }
         if self.walls.set(cells) {
-            for u in self.units.iter_mut().filter(|u| u.in_the_open() && u.is_alive()) {
+            for u in self.units.iter_mut().filter(|u| u.in_the_open() && u.is_alive() && u.action.breaking_into().is_none()) {
                 let Some(id) = self.walls.at(u.cell()) else { continue };
                 if let Some(i) = self.buildings.binary_search_by_key(&id, |b| b.id).ok() {
                     u.inside = Some(crate::unit::Inside { building: id, door: self.buildings[i].door() });

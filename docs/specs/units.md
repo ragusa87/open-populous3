@@ -45,7 +45,8 @@
 | Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
 | Drowning | ground under her becomes open sea (on the ground) | -60 HP per tick, no orders; back to Idle if land returns |
 | Attacking { target, to } | `Order::Attack`, spotting | walks to its target (a person, or a building's door), aimed again as it moves; a firewarrior stops in reach and throws (combat.md "Attacking", "Firebolts") |
-| Hacking { building, left, at_door } | an attacker at an enemy building | hacks at it, shaking it and wearing it down (combat.md "Attacking a building") |
+| Hacking { building, left, at_door } | an attacker at an enemy building | hacks at it, shaking it and wearing it down, at its door then from inside (combat.md "Attacking a building") |
+| BreakingIn { building, to } | an attacker done at the door of an empty enemy building, or between rounds | walks straight to `to` inside, through its walls, without being one of its people (combat.md "Attacking a building") |
 | Throwing { target, left } | a firewarrior in reach, reloaded | throws two firebolts, 5 turns, then back to its attack |
 | Challenge { challenge, role } | a challenge (coordinator) | charging, shoving, waiting or shoved (combat.md "Challenge") |
 | Melee { melee, place, stance } | a melee (coordinator) | to its place, on guard, striking, reeling, staggering (combat.md "Melee") |

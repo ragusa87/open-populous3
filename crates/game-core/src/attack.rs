@@ -75,7 +75,7 @@ impl GameMap {
             match (self.attack_goal(&self.units[i], target), target) {
                 (Some(to), Target::Unit(_)) => self.units[i].retarget(to),
                 (Some(_), Target::Building(_)) => {}
-                (None, _) => self.units[i].action = Action::Idle,
+                (None, _) => self.units[i].go_idle(),
             }
         }
     }
