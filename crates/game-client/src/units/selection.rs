@@ -197,7 +197,7 @@ impl Plugin for SelectionPlugin {
     }
 }
 
-fn spawn_overlays(mut commands: Commands) {
+fn spawn_overlays(mut commands: Commands, overlay: Single<Entity, With<crate::camera::OverlayCamera>>) {
     commands.spawn((
         SelectionBox,
         Node { position_type: PositionType::Absolute, border: UiRect::all(px(1)), ..default() },
@@ -215,6 +215,7 @@ fn spawn_overlays(mut commands: Commands) {
         TextShadow::default(),
         Node { position_type: PositionType::Absolute, ..default() },
         GlobalZIndex(i32::MAX),
+        UiTargetCamera(*overlay),
         Pickable::IGNORE,
         Visibility::Hidden,
     ));

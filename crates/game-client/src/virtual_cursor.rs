@@ -389,7 +389,7 @@ fn spawn_sprite(
         CursorSprite { look: CursorLook::Arrow, frame: 0, tip },
         ImageNode::new(image),
         Node { position_type: PositionType::Absolute, width: Val::Px(size.x), height: Val::Px(size.y), ..default() },
-        GlobalZIndex(i32::MAX),
+        GlobalZIndex(i32::MAX - 1),
         UiTargetCamera(*overlay),
         Pickable::IGNORE,
         Visibility::Hidden,
