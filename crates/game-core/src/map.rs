@@ -2679,6 +2679,26 @@ mod tests {
     }
 
     #[test]
+    fn a_circling_guard_moves_a_little_every_tick_never_stopping_at_corners() {
+        let mut map = GameMap::sandbox_units();
+        let brave = map.units.iter().find(|u| u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Brave).unwrap().id;
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: brave, order: Order::Guard });
+        for _ in 0..200 {
+            map.tick();
+        }
+        let speed = map.unit(brave).unwrap().kind.speed();
+        let mut at = { let u = map.unit(brave).unwrap(); (u.x, u.z) };
+        for t in 0..crate::guard::ORBIT_TURN_TICKS {
+            map.tick();
+            let u = map.unit(brave).unwrap();
+            let step = torus_dist2(at, (u.x, u.z));
+            assert!(step > 0, "tick {t}: stood still");
+            assert!(step <= (speed as i64 + 1).pow(2), "tick {t}: jumped");
+            at = (u.x, u.z);
+        }
+    }
+
+    #[test]
     fn the_shaman_herself_cannot_be_ordered_to_guard() {
         let mut map = GameMap::sandbox_units();
         let shaman = map.shaman_of(TribeId::Blue).unwrap().id;

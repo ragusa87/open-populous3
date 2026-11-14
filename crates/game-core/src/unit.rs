@@ -1057,7 +1057,7 @@ impl Unit {
                 }
             }
             Action::Attacking { to, .. } if self.in_the_open() => self.approach(to, ground),
-            Action::Guarding { to, .. } if self.in_the_open() => self.approach(to, ground),
+            Action::Guarding { to, .. } if self.in_the_open() => self.escort(to, ground),
             Action::Queuing { at, .. } => {
                 self.approach(at, ground);
                 if self.route.is_empty() && (self.x, self.z) != at && self.planned_on == Some(ground.revision()) {
@@ -1711,7 +1711,7 @@ impl Unit {
     }
 
     /// The target of its attack moved to `to`: aims there, planning again once it is a cell away from where it
-    /// aimed.
+    /// aimed. A guard always aims at the latest point (`escort` steers straight at it), planning again likewise.
     pub fn retarget(&mut self, to: (u16, u16)) {
         let moved = |aimed: (u16, u16)| torus_delta(aimed.0, to.0).abs() >= WORLD_UNITS_PER_CELL as i32 || torus_delta(aimed.1, to.1).abs() >= WORLD_UNITS_PER_CELL as i32;
         match self.action {
@@ -1719,9 +1719,11 @@ impl Unit {
                 self.action = Action::Attacking { target, to };
                 self.planned_on = None;
             }
-            Action::Guarding { shaman, slot, to: aimed } if moved(aimed) => {
+            Action::Guarding { shaman, slot, to: aimed } => {
+                if moved(aimed) {
+                    self.planned_on = None;
+                }
                 self.action = Action::Guarding { shaman, slot, to };
-                self.planned_on = None;
             }
             _ => {}
         }
@@ -1745,6 +1747,19 @@ impl Unit {
             Step::Moved => {}
             Step::Arrived => _ = self.route.pop(),
             Step::Blocked => _ = self.route_to(to, ground, false),
+        }
+    }
+
+    /// One step of a guard towards `to`: within `guard::GUARD_RANGE` (circling her), straight at it each tick with no
+    /// path, so it follows the turning ring smoothly; a path round what blocks it (a building's corner, a cliff),
+    /// followed to its end, else when it is further away.
+    fn escort(&mut self, to: (u16, u16), ground: &impl Ground) {
+        let near = torus_delta(self.x, to.0).abs() <= crate::guard::GUARD_RANGE && torus_delta(self.z, to.1).abs() <= crate::guard::GUARD_RANGE;
+        if !near || !self.route.is_empty() {
+            return self.approach(to, ground);
+        }
+        if self.step_towards(to, ground, self.kind.speed()) == Step::Blocked {
+            self.route_to(to, ground, true);
         }
     }
 
