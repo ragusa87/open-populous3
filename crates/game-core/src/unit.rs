@@ -1056,10 +1056,10 @@ impl Unit {
                     Step::Blocked => self.action = Action::Idle,
                 }
             }
-            Action::Attacking { to, .. } if self.in_the_open() => self.approach(to, ground),
+            Action::Attacking { to, .. } if self.in_the_open() => self.approach(to, ground, self.kind.speed()),
             Action::Guarding { to, .. } if self.in_the_open() => self.escort(to, ground),
             Action::Queuing { at, .. } => {
-                self.approach(at, ground);
+                self.approach(at, ground, self.kind.speed());
                 if self.route.is_empty() && (self.x, self.z) != at && self.planned_on == Some(ground.revision()) {
                     self.action = Action::Stranded { to: at };
                 }
@@ -1738,27 +1738,28 @@ impl Unit {
     /// blocks on unchanged ground found none, so this hardens `approach` to match `follow_route` rather than
     /// fixing a confirmed gap. `GameMap::tend_attacks`/`tend_guards` decide for themselves when to give up on
     /// a target that truly never finds a way (re-aiming, standing down); `approach` itself only ever retries.
-    fn approach(&mut self, to: (u16, u16), ground: &impl Ground) {
+    fn approach(&mut self, to: (u16, u16), ground: &impl Ground, speed: i32) {
         if self.planned_on != Some(ground.revision()) {
             self.route_to(to, ground, true);
         }
         let Some(&next) = self.route.last() else { return };
-        match self.step_towards(next, ground, self.kind.speed()) {
+        match self.step_towards(next, ground, speed) {
             Step::Moved => {}
             Step::Arrived => _ = self.route.pop(),
             Step::Blocked => _ = self.route_to(to, ground, false),
         }
     }
 
-    /// One step of a guard towards `to`: within `guard::GUARD_RANGE` (circling her), straight at it each tick with no
+    /// One step of a guard, at a run (`guard::guard_speed`), towards `to`: within `guard::GUARD_RANGE` (circling her), straight at it each tick with no
     /// path, so it follows the turning ring smoothly; a path round what blocks it (a building's corner, a cliff),
     /// followed to its end, else when it is further away.
     fn escort(&mut self, to: (u16, u16), ground: &impl Ground) {
         let near = torus_delta(self.x, to.0).abs() <= crate::guard::GUARD_RANGE && torus_delta(self.z, to.1).abs() <= crate::guard::GUARD_RANGE;
+        let speed = crate::guard::guard_speed(self.kind.speed());
         if !near || !self.route.is_empty() {
-            return self.approach(to, ground);
+            return self.approach(to, ground, speed);
         }
-        if self.step_towards(to, ground, self.kind.speed()) == Step::Blocked {
+        if self.step_towards(to, ground, speed) == Step::Blocked {
             self.route_to(to, ground, true);
         }
     }

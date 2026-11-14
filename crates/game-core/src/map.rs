@@ -2671,10 +2671,10 @@ mod tests {
         for _ in 0..200 {
             map.tick();
         }
-        let settled_cell = map.unit(brave).unwrap().cell();
+        let settled = { let u = map.unit(brave).unwrap(); (u.x, u.z) };
         let moved = (0..400).find(|_| {
             map.tick();
-            map.unit(brave).unwrap().cell() != settled_cell
+            torus_dist2(settled, { let u = map.unit(brave).unwrap(); (u.x, u.z) }) > 200 * 200
         });
         assert!(moved.is_some(), "a lone guard keeps turning around her, not frozen in place once it first arrives");
     }
@@ -2718,9 +2718,9 @@ mod tests {
         for _ in 0..200 {
             map.tick();
         }
-        let speed = map.unit(brave).unwrap().kind.speed();
+        let speed = crate::guard::guard_speed(map.unit(brave).unwrap().kind.speed());
         let mut at = { let u = map.unit(brave).unwrap(); (u.x, u.z) };
-        for t in 0..crate::guard::ORBIT_TURN_TICKS {
+        for t in 0..100 {
             map.tick();
             let u = map.unit(brave).unwrap();
             let step = torus_dist2(at, (u.x, u.z));

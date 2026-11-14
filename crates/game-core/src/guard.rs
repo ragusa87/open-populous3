@@ -17,26 +17,32 @@ use crate::time::Tick;
 /// [exe, confirmed].
 pub const GUARD_RANGE: i32 = 824;
 
-/// Distance (world units) a guard keeps from her while circling: closer than `GUARD_RANGE` so it settles into
-/// orbit well before the catch-up threshold would fire again.
-pub const ORBIT_RADIUS: i32 = 400;
+/// Distance (world units) a guard keeps from her while circling: the ~200-unit working radius measured live
+/// ("Guard the shaman" [exe, measured]).
+pub const ORBIT_RADIUS: i32 = 200;
 /// Guards spread evenly around the ring, up to this many before a wider ring starts further out (so a slot
 /// already walking towards its own spot is never shifted by a later guard joining or an earlier one leaving).
 pub const RING_SLOTS: u16 = 8;
-/// World units added to the radius per extra ring past the first.
-pub const RING_GAP: i32 = 250;
-/// Ticks for one full turn around the ring while she stands still: a guess, no rhythm traced.
-pub const ORBIT_TURN_TICKS: u32 = 240;
+/// World units added to the radius per extra ring past the first: a guess.
+pub const RING_GAP: i32 = 150;
+/// World units a point of any ring moves along it per tick while she stands still: a guess, no rhythm traced, kept
+/// under every guard's own `guard_speed` so each keeps its slot.
+pub const ORBIT_PACE: u32 = 40;
+
+/// How fast a unit of walking speed `walk` moves while guarding: at a run, half again its walk (a guess, not traced).
+pub fn guard_speed(walk: i32) -> i32 {
+    walk * 3 / 2
+}
 
 /// Where guard `slot` of a shaman at `centre` stands this tick: a fixed point on its own ring, turning
-/// steadily over `ORBIT_TURN_TICKS` (so it keeps walking even once it arrives, instead of only turning when
-/// nudged) - same ring order regardless of how many other guards currently share it, so one dropping out or
+/// steadily at `ORBIT_PACE` (so it keeps moving even once it arrives, instead of only turning when nudged) - same ring order regardless of how many other guards currently share it, so one dropping out or
 /// joining never reshuffles anyone else's spot.
 pub fn orbit_point(centre: (u16, u16), slot: u16, now: Tick) -> (u16, u16) {
     let ring = (slot / RING_SLOTS) as i32;
     let base = (slot % RING_SLOTS) as u32 * (angle::TURN / RING_SLOTS as u32);
-    let spin = (now.to_wire() % ORBIT_TURN_TICKS) * angle::TURN / ORBIT_TURN_TICKS;
     let radius = ORBIT_RADIUS + ring * RING_GAP;
+    let circumference = radius as u64 * 710 / 113;
+    let spin = (now.to_wire() as u64 * ORBIT_PACE as u64 * angle::TURN as u64 / circumference % angle::TURN as u64) as u32;
     let (dx, dz) = angle::rotate((radius, 0), base.wrapping_add(spin));
     (centre.0.wrapping_add(dx as u16), centre.1.wrapping_add(dz as u16))
 }
@@ -60,17 +66,22 @@ mod tests {
     }
 
     #[test]
-    fn a_slot_keeps_turning_as_ticks_pass_even_though_its_centre_never_moves() {
+    fn every_ring_turns_at_the_same_pace_along_the_ground() {
         let centre = (10_000, 10_000);
-        let a = orbit_point(centre, 0, Tick::from_wire(0));
-        let b = orbit_point(centre, 0, Tick::from_wire(ORBIT_TURN_TICKS / 4));
-        assert_ne!(a, b, "a quarter turn later it stands somewhere else on the ring");
+        for slot in [0, RING_SLOTS, 2 * RING_SLOTS] {
+            for t in [0u32, 7, 100] {
+                let (a, b) = (orbit_point(centre, slot, Tick::from_wire(t)), orbit_point(centre, slot, Tick::from_wire(t + 1)));
+                let (dx, dz) = (b.0 as i32 - a.0 as i32, b.1 as i32 - a.1 as i32);
+                let step = crate::unit::isqrt((dx * dx + dz * dz) as u32) as i32;
+                assert!((step - ORBIT_PACE as i32).abs() <= 3, "slot {slot}, tick {t}: {step} a tick");
+            }
+        }
     }
 
     #[test]
-    fn a_full_turn_returns_to_the_same_point() {
-        let centre = (10_000, 10_000);
-        assert_eq!(orbit_point(centre, 3, Tick::from_wire(17)), orbit_point(centre, 3, Tick::from_wire(17 + ORBIT_TURN_TICKS)));
+    fn the_ring_turns_slower_than_any_guard_runs() {
+        let slowest = [crate::unit::UnitKind::Brave, crate::unit::UnitKind::Warrior, crate::unit::UnitKind::Firewarrior, crate::unit::UnitKind::Preacher, crate::unit::UnitKind::Spy].map(|k| guard_speed(k.speed())).into_iter().min().unwrap();
+        assert!((ORBIT_PACE as i32) < slowest);
     }
 
     #[test]
