@@ -557,7 +557,7 @@ fn draw_overlays(
         match cursor.filter(|_| count > 1) {
             Some(c) => {
                 text.0 = count.to_string();
-                (node.left, node.top) = (px(c.x + 18.0), px(c.y + 20.0));
+                (node.left, node.top) = (px(c.x + 30.0), px(c.y + 20.0));
                 *vis = Visibility::Inherited;
             }
             None => *vis = Visibility::Hidden,
