@@ -325,7 +325,7 @@ impl Plugin for UnitsPlugin {
                     .chain()
                     .in_set(crate::menu::Gameplay),
             )
-            .add_systems(PostUpdate, pull_to_eye.before(TransformSystems::Propagate));
+            .add_systems(PostUpdate, pull_to_eye.after(crate::grounded::place_grounded).before(TransformSystems::Propagate));
     }
 }
 
@@ -740,6 +740,17 @@ fn perched(map: &game_core::map::GameMap, heights: &crate::buildings::ModelHeigh
     crate::buildings::perch(b, *heights.0.get(&b.id)?)
 }
 
+/// `[ours]`: how far under its captor's mouth a grabbed unit's feet hang, cells at the units' scale: held by its middle.
+const HANG: f32 = 0.25;
+
+/// The Angel of Death holding `u`, if any.
+fn held_by(u: &game_core::unit::Unit) -> Option<UnitId> {
+    match u.action {
+        game_core::unit::Action::Grabbed { by } => Some(by),
+        _ => None,
+    }
+}
+
 /// The flight height of the Angel of Death holding `u` (`Action::Grabbed`), terrain height units: the simulation
 /// only copies its `x`/`z` to its captor's each tick, not its height (`game_core::angel_of_death::tend_one_angel`).
 fn held_height(map: &game_core::map::GameMap, u: &game_core::unit::Unit) -> Option<i32> {
@@ -940,7 +951,8 @@ fn pull_to_eye(
     now: Res<SimNow>,
     eye: Query<&Transform, (With<GameCamera>, Without<UnitView>)>,
     views: Query<(&UnitView, &Grounded, &Transform, &Children)>,
-    mut parts: Query<(&mut Transform, Has<HealthBar>, Option<&markers::MarkerSlot>), (Or<(With<UnitSprite>, With<HealthBar>, With<markers::MarkerSlot>)>, Without<UnitView>, Without<GameCamera>)>,
+    mouths: Query<(&crate::angel_of_death::Mouth, &Transform), Without<UnitView>>,
+    mut parts: Query<(&mut Transform, Has<HealthBar>, Option<&markers::MarkerSlot>), (Or<(With<UnitSprite>, With<HealthBar>, With<markers::MarkerSlot>)>, Without<UnitView>, Without<GameCamera>, Without<crate::angel_of_death::Mouth>)>,
     heights: Res<crate::buildings::ModelHeights>,
     sizes: Res<crate::object_scale::ObjectScale>,
 ) {
@@ -954,9 +966,10 @@ fn pull_to_eye(
         // Aboard: at the deck of a hull drawn at the buildings' scale, from a view drawn at the units' (its
         // children's offsets are scaled with it).
         let riding = u.and_then(|u| riding(&map.0, u, clock.cell_pos(unit.0, u), clock.alpha(), params.0.height_scale)).map(|p| Vec3::Y * p.1 * sizes.get(ObjectGroup::Buildings));
-        // Grabbed by an Angel of Death: in its mouth, at its glided flight height, drawn at the scenery scale its
-        // object-bank mesh uses (`angel_of_death::AngelOfDeathView`).
-        let carried = u.and_then(|u| clock.held_lift(unit.0, u, &map.0, params.0.height_scale)).map(|h| Vec3::Y * h * sizes.get(ObjectGroup::Scenery));
+        // Grabbed by an Angel of Death: hanging from its mouth as drawn (`angel_of_death::Mouth`), else at its
+        // glided flight height.
+        let mouth = u.and_then(|u| held_by(u)).and_then(|by| mouths.iter().find(|(m, _)| m.of == by)).map(|(m, root)| root.transform_point(m.at) - Vec3::Y * HANG * sizes.get(ObjectGroup::Units) - feet);
+        let carried = mouth.or_else(|| u.and_then(|u| clock.held_lift(unit.0, u, &map.0, params.0.height_scale)).map(|h| Vec3::Y * h * sizes.get(ObjectGroup::Scenery)));
         let up = perch.or(riding).or(carried);
         // Aboard, not pulled at all: its hull's near side hides it as it should (seen inside, not in front).
         let pull = if perch.is_some() { PERCH_PULL } else if riding.is_some() { 0.0 } else { PULL_TO_EYE };

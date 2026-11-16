@@ -26,7 +26,7 @@ use game_core::angle::{Angle, TURN};
 use game_core::map::GameMap;
 use game_core::time::{Tick, Ticks};
 use game_core::tribes::{Owner, TribeId};
-use game_core::unit::{torus_delta, Action, Unit, UnitKind};
+use game_core::unit::{torus_delta, Action, Unit, UnitId, UnitKind};
 use pop3_format::morph::{morph_points, MorphFrame};
 use pop3_format::{catalog, Atlas, Morph, Morphs, Object, ObjectBank, Theme, WORLD_UNITS_PER_CELL};
 
@@ -299,6 +299,21 @@ pub struct Assets3d<'w> {
     images: ResMut<'w, Assets<Image>>,
 }
 
+/// Where an angel holds its victim, in its view's own space (`Mouth::at`, under the view's scale and turn): the
+/// tip of its head, moved with its glided height, heading and tilt (`units::pull_to_eye` draws the victim there).
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct Mouth {
+    pub of: UnitId,
+    pub at: Vec3,
+}
+
+/// The tip of the head among `positions` (a posed body): the frontmost point (−z) near its centre line, so never a
+/// wing tip swept forward.
+pub fn head_tip(positions: &[[f32; 3]]) -> Vec3 {
+    let span = positions.iter().map(|p| p[0].abs()).fold(0.0, f32::max);
+    positions.iter().filter(|p| p[0].abs() <= span * 0.15).map(|&p| Vec3::from(p)).min_by(|a, b| a.z.total_cmp(&b.z)).unwrap_or(Vec3::ZERO)
+}
+
 /// What its body is drawn with: the original's morphed mesh, or the stand-in's two wing pivots.
 enum Body {
     Original { mesh: Handle<Mesh>, tribe: TribeId },
@@ -333,7 +348,7 @@ impl WorldView for AngelOfDeathView {
         (Res<'static, CurrentMap>, Res<'static, CurveParamsRes>, Res<'static, LevelList>, Res<'static, OriginalObjects>),
         ResMut<'static, AngelLook>,
         Assets3d<'static>,
-        Query<'static, 'static, (&'static mut Grounded, &'static mut Track, &'static mut Wings)>,
+        Query<'static, 'static, (&'static mut Grounded, &'static mut Track, &'static mut Wings, &'static mut Mouth)>,
         Query<'static, 'static, &'static mut Transform, Without<Grounded>>,
     );
 
@@ -352,8 +367,8 @@ impl WorldView for AngelOfDeathView {
         let snap = Snap::of(u);
         let me = view.id();
         let at = Vec2::new(u.x as f32, u.z as f32) / WORLD_UNITS_PER_CELL as f32;
-        view.insert((Grounded { at, half: 0.0 }, Track::new(snap, map.0.now), Wings::new(0.0), crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), crate::hover::Hoverable::default(), Transform::default(), Visibility::Hidden));
         let pose = Transform::from_xyz(0.0, lift(&map.0, at, snap.flight.height, params.0.height_scale), 0.0).with_rotation(body_rotation(snap.flight.heading.signed() as f32, 0, 0));
+        view.insert((Grounded { at, half: 0.0 }, Track::new(snap, map.0.now), Wings::new(0.0), Mouth { of: u.id, at: pose.transform_point(Vec3::new(0.0, 0.0, -LENGTH / 2.0)) }, crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), crate::hover::Hoverable::default(), Transform::default(), Visibility::Hidden));
         let original = first_mesh(objects, look, tribe).map(|m| assets.meshes.add(m));
         let (mut hull, mut wings) = (Entity::PLACEHOLDER, [Entity::PLACEHOLDER; 2]);
         view.with_children(|c| {
@@ -389,7 +404,7 @@ impl WorldView for AngelOfDeathView {
     }
 
     fn update(&self, u: &Unit, now: SimNow, ((map, params, _, objects), look, assets, tracked, transforms): &mut SystemParamItem<Self::Params>) {
-        let Ok((mut g, mut track, mut wings)) = tracked.get_mut(self.me) else { return };
+        let Ok((mut g, mut track, mut wings, mut mouth)) = tracked.get_mut(self.me) else { return };
         let snap = Snap::of(u);
         if far(track.cur.at, snap.at) {
             *track = Track::new(snap, map.0.now);
@@ -399,18 +414,22 @@ impl WorldView for AngelOfDeathView {
         g.at = at;
         let clock = self.clock(now);
         wings.advance(Pose::of(&u.action), clock);
+        let mut tip = Vec3::new(0.0, 0.0, -LENGTH / 2.0);
+        if let Body::Original { mesh, tribe } = &self.body {
+            let frame = look.morph(wings.drawn).and_then(|m| wings.shown(m, clock));
+            if let Some(obj) = objects.0.as_ref().zip(frame).and_then(|(bank, frame)| posed(bank, wings.drawn.base(), frame)) {
+                let data = object_mesh(&solid_part(&obj), *tribe);
+                tip = head_tip(&data.positions);
+                assets.meshes.insert(mesh, to_mesh(data)).ok();
+            }
+        }
         if let Ok(mut t) = transforms.get_mut(self.hull) {
             t.translation.y = lift(&map.0, at, flight.height, params.0.height_scale);
             t.rotation = body_rotation(heading, flight.pitch, flight.bank);
+            mouth.at = t.transform_point(tip);
         }
         match &self.body {
-            Body::Original { mesh, tribe } => {
-                let (Some(bank), Some(morph)) = (objects.0.as_ref(), look.morph(wings.drawn)) else { return };
-                let Some(frame) = wings.shown(morph, clock) else { return };
-                if let Some(obj) = posed(bank, wings.drawn.base(), frame) {
-                    assets.meshes.insert(mesh, to_mesh(object_mesh(&solid_part(&obj), *tribe))).ok();
-                }
-            }
+            Body::Original { .. } => {}
             Body::StandIn { wings: pivots } => {
                 let (flap, sweep) = stand_in_wings(wings.loop_frame(clock, CLOCK_RATE as u32), wings.swept());
                 for (k, side) in [-1.0f32, 1.0].into_iter().enumerate() {
@@ -434,6 +453,13 @@ impl Plugin for AngelOfDeathPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_head_tip_is_the_frontmost_point_on_its_centre_line_not_a_forward_wing_tip() {
+        let points = [[0.0, 0.0, 0.3], [0.05, 0.1, -0.4], [-1.0, 0.0, -0.6], [1.0, 0.2, 0.1], [0.0, -0.1, -0.2]];
+        assert_eq!(head_tip(&points), Vec3::new(0.05, 0.1, -0.4));
+        assert_eq!(head_tip(&[]), Vec3::ZERO);
+    }
     use game_core::time::Countdown;
     use game_core::unit::UnitId;
 
