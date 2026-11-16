@@ -74,6 +74,7 @@ pub mod slots;
 pub mod smoke;
 pub mod spell;
 pub mod spell_book;
+pub mod splash;
 pub mod spotting;
 pub mod status;
 pub mod swamp;

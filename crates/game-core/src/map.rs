@@ -1571,6 +1571,11 @@ impl GameMap {
                 UnitEvent::AtDoor { building } => self.come_in(i, building),
                 UnitEvent::AtVehicle { vehicle } => self.board(i, vehicle),
                 UnitEvent::FireSitePillar { slot } => self.fire_site_pillar(i, slot),
+                UnitEvent::Splashed => {
+                    let u = &self.units[i];
+                    let splash = crate::splash::effect(u.owner, (u.x, u.z));
+                    self.add_effect(splash);
+                }
                 UnitEvent::Released { spell } => {
                     if let Some(owner) = self.units[i].owner.tribe() {
                         dirty.extend(self.release(owner, spell));

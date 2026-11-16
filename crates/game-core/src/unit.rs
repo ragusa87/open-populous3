@@ -480,6 +480,8 @@ pub enum Target {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnitEvent {
     Died,
+    /// Went into the sea, or its spirit rose out of it: the caller spawns a splash where it is (`splash`).
+    Splashed,
     /// Its spirit has risen: the caller removes it from the map.
     Gone,
     /// Back at her site: the caller levels its ground.
@@ -1244,6 +1246,9 @@ impl Unit {
                     return Some(UnitEvent::Died);
                 } else {
                     self.action = Action::Drowning { sunk: sunk + DROWN_SINK };
+                    if sunk == 0 {
+                        return Some(UnitEvent::Splashed);
+                    }
                 }
             }
             Action::Dying { mut left } => {
@@ -1252,6 +1257,9 @@ impl Unit {
                     true if self.kind == UnitKind::Shaman => Action::Dead { left: Countdown::new(RESPAWN_TICKS) },
                     true => self.new_spirit(terrain),
                 };
+                if matches!(self.action, Action::Spirit { climbing: true, .. }) && is_sea(terrain, self.cell()) {
+                    return Some(UnitEvent::Splashed);
+                }
             }
             Action::Spirit { mut left, climbing } => {
                 if climbing {
@@ -2567,7 +2575,7 @@ mod tests {
         while u.motion.airborne() {
             events.extend(u.tick(Tick::ZERO, &t, Some(&site)));
         }
-        assert_eq!((is_sea(&t, u.cell()), events, u.action), (true, vec![], Action::Drowning { sunk: DROWN_SINK }), "the same drowning as walking in");
+        assert_eq!((is_sea(&t, u.cell()), events, u.action), (true, vec![UnitEvent::Splashed], Action::Drowning { sunk: DROWN_SINK }), "the same drowning as walking in, with its splash");
         let events = run(&mut u, &t, &site, (DROWN_DEPTH / DROWN_SINK - 1) as usize);
         assert_eq!(events, vec![UnitEvent::Died], "16 turns later, whatever its health");
     }

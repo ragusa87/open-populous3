@@ -37,6 +37,8 @@ pub enum EffectKind {
     GroundFire,
     /// Only seen (`blast::explosion_effect`): Blast's own impact burst.
     Explosion,
+    /// Only seen (`splash`): where someone went into the sea; gone at once on land.
+    Splash,
     /// Only seen (`arson`): a spy's firebrand left burning on the wall at `to`, thrown from where the effect stands.
     Firebrand { to: (u16, u16) },
     /// Its own kill tally (`swamp`); the killing itself is `GameMap::tend_swamps`, not its own turn: unlike every
@@ -140,6 +142,13 @@ impl Effect {
             EffectKind::AngelOfDeath(ref mut cast) => cast.turn((self.x, self.z), self.owner),
             EffectKind::AngelOfDeathShockwave(ref mut wave) => wave.turn((self.x, self.z)),
             EffectKind::GhostArmy(ref mut cast) => cast.turn((self.x, self.z), self.owner, world),
+            EffectKind::Splash => {
+                if !crate::unit::is_sea(&world.terrain, (crate::unit::cell_of(self.x), crate::unit::cell_of(self.z))) {
+                    self.left = Countdown::new(crate::time::Ticks::ZERO);
+                    return Vec::new();
+                }
+                Vec::new()
+            }
             EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Explosion | EffectKind::Firebrand { .. } | EffectKind::Swamp(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
@@ -165,6 +174,7 @@ impl Effect {
             | EffectKind::Smoke
             | EffectKind::GroundFire
             | EffectKind::Explosion
+            | EffectKind::Splash
             | EffectKind::Firebrand { .. }
             | EffectKind::Swamp(_)
             | EffectKind::Convert(_)
