@@ -148,6 +148,15 @@ impl SimClock {
         self.prev_ids.get(i) == Some(&unit.id)
     }
 
+    /// Drawn height above the ground of `units[i]`, grabbed by an Angel of Death, in render units: its captor's
+    /// flight height glided like the captor's own body (`carried`).
+    pub fn held_lift(&self, i: usize, unit: &Unit, map: &game_core::map::GameMap, height_scale: f32) -> Option<f32> {
+        let now = held_height(map, unit)?;
+        let ground = map.terrain.height_at(unit.x as u32, unit.z as u32, WORLD_UNITS_PER_CELL);
+        let prev = self.prev_heights.get(i).copied().flatten().filter(|_| self.same(i, unit)).unwrap_or(now);
+        Some(drawn_lift(Some(prev), Some(now), ground, self.alpha(), height_scale))
+    }
+
     /// Drawn height above the ground of `units[i]` in cells (see `drawn_lift`).
     pub fn lift(&self, i: usize, unit: &Unit, terrain: &game_core::terrain::Heightmap, height_scale: f32) -> f32 {
         let ground = terrain.height_at(unit.x as u32, unit.z as u32, WORLD_UNITS_PER_CELL);
@@ -625,7 +634,7 @@ pub(crate) fn run_ticks(
         let map = &mut map.bypass_change_detection().0;
         clock.prev_ids = map.units.iter().map(|u| u.id).collect();
         clock.prev = map.units.iter().map(|u| (u.x, u.z)).collect();
-        clock.prev_heights = map.units.iter().map(|u| u.motion.height).collect();
+        clock.prev_heights = map.units.iter().map(|u| u.motion.height.or_else(|| held_height(map, u))).collect();
         glide.prev = Some(map.terrain.clone());
         while ran < due {
             let now = map.now;
@@ -731,16 +740,11 @@ fn perched(map: &game_core::map::GameMap, heights: &crate::buildings::ModelHeigh
     crate::buildings::perch(b, *heights.0.get(&b.id)?)
 }
 
-/// How high a unit grabbed by an Angel of Death (`Action::Grabbed`) is drawn over the ground under it, render
-/// units: its captor's own flight height — the simulation only copies its `x`/`z` to the angel's each tick, not
-/// its height (`game_core::angel_of_death::tend_one_angel`), so left alone it would appear dragged along the
-/// ground while its captor flies off overhead instead of carried with it.
-fn carried(map: &game_core::map::GameMap, u: &game_core::unit::Unit, height_scale: f32) -> Option<(Vec2, f32)> {
-    use game_core::unit::Action;
-    let Action::Grabbed { by } = u.action else { return None };
-    let flight = map.unit(by)?.angel?.flight;
-    let ground = map.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
-    Some((Vec2::ZERO, (flight.height - ground).max(0) as f32 * height_scale))
+/// The flight height of the Angel of Death holding `u` (`Action::Grabbed`), terrain height units: the simulation
+/// only copies its `x`/`z` to its captor's each tick, not its height (`game_core::angel_of_death::tend_one_angel`).
+fn held_height(map: &game_core::map::GameMap, u: &game_core::unit::Unit) -> Option<i32> {
+    let game_core::unit::Action::Grabbed { by } = u.action else { return None };
+    Some(map.unit(by)?.angel?.flight.height)
 }
 
 /// How high a jump into or out of a vehicle goes over the straight line, cells.
@@ -950,16 +954,16 @@ fn pull_to_eye(
         // Aboard: at the deck of a hull drawn at the buildings' scale, from a view drawn at the units' (its
         // children's offsets are scaled with it).
         let riding = u.and_then(|u| riding(&map.0, u, clock.cell_pos(unit.0, u), clock.alpha(), params.0.height_scale)).map(|p| Vec3::Y * p.1 * sizes.get(ObjectGroup::Buildings));
-        // Grabbed by an Angel of Death: at its own flight height, drawn at the scenery scale its object-bank
-        // mesh uses (`angel_of_death::AngelOfDeathView`).
-        let carried = u.and_then(|u| carried(&map.0, u, params.0.height_scale)).map(|p| Vec3::Y * p.1 * sizes.get(ObjectGroup::Scenery));
+        // Grabbed by an Angel of Death: in its mouth, at its glided flight height, drawn at the scenery scale its
+        // object-bank mesh uses (`angel_of_death::AngelOfDeathView`).
+        let carried = u.and_then(|u| clock.held_lift(unit.0, u, &map.0, params.0.height_scale)).map(|h| Vec3::Y * h * sizes.get(ObjectGroup::Scenery));
         let up = perch.or(riding).or(carried);
         // Aboard, not pulled at all: its hull's near side hides it as it should (seen inside, not in front).
         let pull = if perch.is_some() { PERCH_PULL } else if riding.is_some() { 0.0 } else { PULL_TO_EYE };
         let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, pull);
         let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale));
         let bounce = u.map_or(0.0, |u| victory_bounce(*now, bounce_start(&map.0, u.owner), u.id.raw()));
-        let shown = perch.or(riding.map(|r| r / sizes.get(ObjectGroup::Units))).unwrap_or_default();
+        let shown = perch.or(riding.or(carried).map(|r| r / sizes.get(ObjectGroup::Units))).unwrap_or_default();
         let local = view.rotation.inverse() * (offset + shown) + Vec3::Y * (lift + bounce) * scale;
         for &child in children {
             if let Ok((mut t, bar, marker)) = parts.get_mut(child) {
@@ -1037,9 +1041,11 @@ mod tests {
         let duration = map.balance.angels.duration;
         map.unit_mut(angel).unwrap().angel = Some(Angel { flight: Flight { height: ground + 1000, ..Flight::default() }, ..Angel::new(0, duration) });
         let victim = map.spawn(TribeId::Blue, UnitKind::Brave, at).id;
-        assert_eq!(carried(&map, map.unit(victim).unwrap(), 0.5), None, "not grabbed yet");
+        let clock = SimClock::default();
+        let i = map.units.iter().position(|u| u.id == victim).unwrap();
+        assert_eq!(clock.held_lift(i, &map.units[i], &map, 0.5), None, "not grabbed yet");
         map.unit_mut(victim).unwrap().action = Action::Grabbed { by: angel };
-        assert_eq!(carried(&map, map.unit(victim).unwrap(), 0.5), Some((Vec2::ZERO, 500.0)));
+        assert_eq!(clock.held_lift(i, &map.units[i], &map, 0.5), Some(500.0));
     }
 
     #[test]
