@@ -87,19 +87,20 @@ pub struct Cast {
     turn: u32,
 }
 
-/// Cast by tribe `owner` at `at` (world units).
+/// Cast by tribe `owner` at `at` (world units): the fall, then one more turn for the angel to appear.
 pub fn cast(owner: impl Into<Owner>, at: (u16, u16)) -> Effect {
-    Effect::new(owner, at, Countdown::new(FALL_TICKS), EffectKind::AngelOfDeath(Cast::default()))
+    Effect::new(owner, at, Countdown::new(FALL_TICKS + Ticks::new(1)), EffectKind::AngelOfDeath(Cast::default()))
 }
 
 impl Cast {
-    /// One turn of the fall; on the last one, the meteor crosses the ground: its own shockwave and spawn blast
-    /// start, and the real angel appears.
+    /// One turn of the fall. On its last one the meteor crosses the ground and starts the shockwave; the turn after,
+    /// once the meteor is gone, the real angel appears (`create_aod`), bringing its own spawn blast with it
+    /// (`WorldEvent::SpawnAngelOfDeath`'s handler).
     pub fn turn(&mut self, at: (u16, u16), owner: Owner) -> Vec<WorldEvent> {
-        let events = if self.turn + 1 == FALL_TICKS.get() {
-            vec![WorldEvent::SpawnEffect(shockwave(owner, at)), WorldEvent::SpawnEffect(crate::blast::effect(owner, at)), WorldEvent::SpawnAngelOfDeath { owner, at }]
-        } else {
-            Vec::new()
+        let events = match self.turn + 1 {
+            t if t == FALL_TICKS.get() => vec![WorldEvent::SpawnEffect(shockwave(owner, at))],
+            t if t == FALL_TICKS.get() + 1 => vec![WorldEvent::SpawnAngelOfDeath { owner, at }],
+            _ => Vec::new(),
         };
         self.turn += 1;
         events
@@ -395,18 +396,20 @@ mod tests {
     }
 
     #[test]
-    fn the_fall_ripples_the_ground_and_spawns_the_real_angel_and_a_blast() {
+    fn the_fall_ripples_the_ground_then_the_angel_appears_in_its_own_blast() {
         let mut map = bare();
         map.add_effect(cast(TribeId::Blue, AT));
-        map.run(Ticks::new(FALL_TICKS.get() - 1));
-        assert!(!map.units.iter().any(|u| u.kind == UnitKind::AngelOfDeath), "not yet: still falling");
+        map.run(FALL_TICKS);
+        let has = |map: &GameMap, f: fn(&EffectKind) -> bool| map.effects.entries().any(|(_, e)| f(&e.kind));
+        assert!(has(&map, |k| matches!(k, EffectKind::AngelOfDeathShockwave(_))), "the meteor crossed the ground: the ripple");
+        assert!(!map.units.iter().any(|u| u.kind == UnitKind::AngelOfDeath), "not yet: the meteor is still there");
+        assert!(!has(&map, |k| matches!(k, EffectKind::SimpleBlast(_))), "no blast before the angel");
         map.tick();
         let angel = map.units.iter().find(|u| u.kind == UnitKind::AngelOfDeath).expect("the angel appears");
-        assert_eq!(angel.owner, Owner::Tribe(TribeId::Blue));
-        assert_eq!(angel.action, Action::Hunting);
+        assert_eq!((angel.owner, angel.action), (Owner::Tribe(TribeId::Blue), Action::Hunting));
         assert!(angel.flight.is_some(), "already flying, not on the ground");
-        assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, EffectKind::AngelOfDeathShockwave(_))), "the ground ripple");
-        assert!(map.effects.entries().any(|(_, e)| matches!(e.kind, EffectKind::SimpleBlast(_))), "the spawn-moment blast");
+        let blast = map.effects.entries().find(|(_, e)| matches!(e.kind, EffectKind::SimpleBlast(_))).map(|(_, e)| (e.x, e.z));
+        assert_eq!(blast, Some((angel.x, angel.z)), "its own blast, where it appeared");
     }
 
     #[test]

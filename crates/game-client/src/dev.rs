@@ -919,7 +919,7 @@ mod tests {
     #[test]
     fn angel_of_death_demo_falls_ripples_and_spawns_the_creature_once_run() {
         let mut map = game_core::map::GameMap::sandbox_walk();
-        assert!(angel_of_death_demo(&mut map, "10,10", game_core::angel_of_death::FALL_TICKS.get()));
+        assert!(angel_of_death_demo(&mut map, "10,10", game_core::angel_of_death::FALL_TICKS.get() + 1));
         assert!(map.units.iter().any(|u| u.kind == game_core::unit::UnitKind::AngelOfDeath), "the creature appears");
         assert!(!angel_of_death_demo(&mut map, "here", 0));
     }

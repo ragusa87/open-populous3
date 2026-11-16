@@ -1959,6 +1959,8 @@ impl GameMap {
                 let u = self.spawn(owner, UnitKind::AngelOfDeath, at);
                 u.action = Action::Hunting;
                 u.flight = Some(crate::angel_of_death::Flight { heading: crate::angle::Angle::ZERO, height: ground + crate::angel_of_death::CRUISE_HEIGHT });
+                let at = (u.x, u.z);
+                follow_ups.push(WorldEvent::SpawnEffect(crate::blast::effect(owner, at)));
                 None
             }
             WorldEvent::SpawnGhosts { owner, kind, count, at } => {
