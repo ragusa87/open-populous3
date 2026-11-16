@@ -215,7 +215,7 @@ impl WorldView for AngelOfDeathView {
         let tribe = u.owner.tribe().unwrap_or(TribeId::Blue);
         let (dive_mesh, cruise_mesh) = look.meshes(tribe, theme, levels, objects, assets);
         let (dive_material, cruise_material) = (material(look, u.owner, &mut assets.materials), material(look, u.owner, &mut assets.materials));
-        let flight = u.flight.unwrap_or(Flight { heading: Angle::ZERO, height: 0 });
+        let flight = u.angel.map_or(Flight { heading: Angle::ZERO, height: 0 }, |a| a.flight);
         let me = view.id();
         let at = Vec2::new(u.x as f32, u.z as f32) / WORLD_UNITS_PER_CELL as f32;
         view.insert((Grounded { at, half: 0.0 }, Pose::new(flight.height), crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), crate::hover::Hoverable::default(), Transform::default(), Visibility::Hidden));
@@ -234,7 +234,7 @@ impl WorldView for AngelOfDeathView {
     }
 
     fn update(&self, u: &Unit, now: SimNow, ((map, params, ..), _look, assets, grounded, transforms): &mut SystemParamItem<Self::Params>) {
-        let flight = u.flight.unwrap_or(Flight { heading: Angle::ZERO, height: 0 });
+        let flight = u.angel.map_or(Flight { heading: Angle::ZERO, height: 0 }, |a| a.flight);
         let mut weights = (0.0, 1.0);
         if let Ok((mut g, mut pose)) = grounded.get_mut(self.me) {
             g.at = Vec2::new(u.x as f32, u.z as f32) / WORLD_UNITS_PER_CELL as f32;

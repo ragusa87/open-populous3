@@ -738,7 +738,7 @@ fn perched(map: &game_core::map::GameMap, heights: &crate::buildings::ModelHeigh
 fn carried(map: &game_core::map::GameMap, u: &game_core::unit::Unit, height_scale: f32) -> Option<(Vec2, f32)> {
     use game_core::unit::Action;
     let Action::Grabbed { by } = u.action else { return None };
-    let flight = map.unit(by)?.flight?;
+    let flight = map.unit(by)?.angel?.flight;
     let ground = map.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
     Some((Vec2::ZERO, (flight.height - ground).max(0) as f32 * height_scale))
 }
@@ -1029,12 +1029,13 @@ mod tests {
 
     #[test]
     fn a_grabbed_victim_is_drawn_at_its_captors_flight_height_not_on_the_ground() {
-        use game_core::angel_of_death::Flight;
+        use game_core::angel_of_death::{Angel, Flight};
         let mut map = game_core::map::GameMap::sandbox_units();
         let at = (64 * 512, 64 * 512);
         let angel = map.spawn(TribeId::Red, UnitKind::AngelOfDeath, at).id;
         let ground = map.terrain.height_at(at.0 as u32, at.1 as u32, 512);
-        map.unit_mut(angel).unwrap().flight = Some(Flight { heading: game_core::angle::Angle::ZERO, height: ground + 1000 });
+        let duration = map.balance.angels.duration;
+        map.unit_mut(angel).unwrap().angel = Some(Angel { flight: Flight { heading: game_core::angle::Angle::ZERO, height: ground + 1000 }, ..Angel::new(0, duration) });
         let victim = map.spawn(TribeId::Blue, UnitKind::Brave, at).id;
         assert_eq!(carried(&map, map.unit(victim).unwrap(), 0.5), None, "not grabbed yet");
         map.unit_mut(victim).unwrap().action = Action::Grabbed { by: angel };

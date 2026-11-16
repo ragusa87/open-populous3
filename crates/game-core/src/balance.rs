@@ -83,8 +83,8 @@ pub struct Income {
 /// Per-kind life (hit points; `kind_stats.rs`'s own `KindStats::life`, constants.md "Units" `LIFE_<P>"):
 /// our own defaults already are the traced real numbers, so this only matters for a modded install with
 /// different ones. No entry for a wildman, which "has none, a brave's stands in" (`kind_stats.rs`) - it
-/// always mirrors `brave` here too, even after a real file overrides it. Not Angel of Death either: it has
-/// no `constant.dat` entry (exe-only, `kind_stats.rs`) and never changes kind into or out of at runtime.
+/// always mirrors `brave` here too, even after a real file overrides it. The Angel of Death's is `LIFE_AOD`
+/// (spells.md "Original balance"), 10 000 like the exe's own per-type table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Units {
     pub shaman: u16,
@@ -93,13 +93,12 @@ pub struct Units {
     pub preacher: u16,
     pub spy: u16,
     pub firewarrior: u16,
+    pub angel: u16,
 }
 
 impl Units {
     /// `life`'s value for `kind` (`GameMap::spawn`/`with_shamans`/`change_owner`'s own correction over
-    /// `Unit::new`/`Unit::change_owner`'s static `KindStats::life` default). Angel of Death and anything
-    /// else not in `UnitKind::ALL` falls back to its own `KindStats::life` unchanged - not a kind a real
-    /// install's file ever touches.
+    /// `Unit::new`/`Unit::change_owner`'s static `KindStats::life` default).
     pub fn life(&self, kind: UnitKind) -> u16 {
         match kind {
             UnitKind::Shaman => self.shaman,
@@ -108,9 +107,19 @@ impl Units {
             UnitKind::Preacher => self.preacher,
             UnitKind::Spy => self.spy,
             UnitKind::Firewarrior => self.firewarrior,
-            other => other.stats().life,
+            UnitKind::AngelOfDeath => self.angel,
         }
     }
+}
+
+/// The Angel of Death's own end (spells.md "Original balance"): it dies once it has lived `duration` or made
+/// `kill_count` kills, whichever comes first (angel_of_death.rs). Timings and counts, so the real numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Angels {
+    /// `AOD_DURATION`.
+    pub duration: Turns,
+    /// `AOD_KILL_COUNT`.
+    pub kill_count: u8,
 }
 
 /// Spies (docs/specs/units.md "Spies").
@@ -128,6 +137,7 @@ pub struct Balance {
     pub income: Income,
     pub units: Units,
     pub spies: Spies,
+    pub angels: Angels,
 }
 
 impl Balance {
@@ -167,8 +177,9 @@ impl Balance {
                 specialist_idle: 4,
                 shaman: 30,
             },
-            units: Units { shaman: 2000, brave: 1000, warrior: 1800, preacher: 1100, spy: 600, firewarrior: 700 },
+            units: Units { shaman: 2000, brave: 1000, warrior: 1800, preacher: 1100, spy: 600, firewarrior: 700, angel: 10_000 },
             spies: Spies { disguise_delay: Turns::new(crate::disguise::DISGUISE_DELAY.get()) },
+            angels: Angels { duration: Turns::new(2500), kill_count: 40 },
         }
     }
 
@@ -178,7 +189,7 @@ impl Balance {
     }
 
     /// Corrects each group `constant.dat` actually backs, one at a time (TODO.md "Computer players (AI)"):
-    /// only `units.life` (`LIFE_<P>`) and `spies` so far, the way `SpellBook::apply_constants` already does for spells.
+    /// only `units.life` (`LIFE_<P>`), `spies` and `angels` so far, the way `SpellBook::apply_constants` already does for spells.
     /// A missing or unreadable key leaves that kind's own default untouched, same lenient spirit.
     /// **`LIFE_<P>`'s own per-kind suffixes are `[ours]`, a guess**: constants.md only confirms the group
     /// exists and gives two example values (brave, warrior), not every kind's exact spelling - worth
@@ -205,8 +216,17 @@ impl Balance {
         if let Some(v) = raw.get("LIFE_FIREWARRIOR") {
             u.firewarrior = v as u16;
         }
+        if let Some(v) = raw.get("LIFE_AOD") {
+            u.angel = v as u16;
+        }
         if let Some(v) = raw.get("SPY_DISGUISE_DELAY") {
             self.spies.disguise_delay = Turns::new(v);
+        }
+        if let Some(v) = raw.get("AOD_DURATION") {
+            self.angels.duration = Turns::new(v);
+        }
+        if let Some(v) = raw.get("AOD_KILL_COUNT") {
+            self.angels.kill_count = v.min(u8::MAX as u32) as u8;
         }
     }
 }
@@ -233,8 +253,17 @@ mod tests {
     }
 
     #[test]
-    fn units_life_falls_back_to_kind_stats_off_the_table() {
+    fn the_angels_own_life_defaults_to_its_kind_stats() {
         assert_eq!(Balance::ours().units.life(UnitKind::AngelOfDeath), UnitKind::AngelOfDeath.stats().life);
+    }
+
+    #[test]
+    fn apply_constants_reads_the_angels_own_life_lifetime_and_kill_count() {
+        let mut balance = Balance::ours();
+        let raw = pop3_format::Constants::parse(b"P3CONST_LIFE_AOD = 900\nP3CONST_AOD_DURATION = 77\nP3CONST_AOD_KILL_COUNT = 3\n").unwrap();
+        balance.apply_constants(&raw);
+        assert_eq!(balance.units.life(UnitKind::AngelOfDeath), 900);
+        assert_eq!(balance.angels, Angels { duration: Turns::new(77), kill_count: 3 });
     }
 
     #[test]

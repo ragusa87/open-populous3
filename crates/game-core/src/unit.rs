@@ -587,9 +587,9 @@ pub struct Unit {
     pub inside: Option<Inside>,
     /// The vehicle carrying it (`crate::vehicle`): it stands where the vehicle is and goes nowhere on its own.
     pub aboard: Option<crate::vehicle::VehicleId>,
-    /// An Angel of Death's own flight: `None` for everyone else, always `Some` for one
-    /// (`GameMap::tend_angels_of_death`, `angel_of_death.rs`).
-    pub flight: Option<crate::angel_of_death::Flight>,
+    /// An Angel of Death's own state, its flight, kills and remaining life: `None` for everyone else, always
+    /// `Some` for one (`GameMap::tend_angels_of_death`, `angel_of_death.rs`).
+    pub angel: Option<crate::angel_of_death::Angel>,
 }
 
 /// A unit on the ground and not tumbling: only `Unit::pickable` makes one, so whatever takes it can
@@ -657,7 +657,7 @@ impl Unit {
             work: None,
             inside: None,
             aboard: None,
-            flight: None,
+            angel: None,
         }
     }
 
@@ -1030,7 +1030,7 @@ impl Unit {
         }
         // An Angel of Death flies its own way (`flight`, not `motion`): never subject to the ordinary
         // drowning check. Neither is its grabbed victim: carried wherever the angel goes, including over the sea.
-        if self.is_alive() && self.aboard.is_none() && !self.motion.airborne() && self.flight.is_none() && !matches!(self.action, Action::Grabbed { .. }) && is_sea(terrain, self.cell()) {
+        if self.is_alive() && self.aboard.is_none() && !self.motion.airborne() && self.angel.is_none() && !matches!(self.action, Action::Grabbed { .. }) && is_sea(terrain, self.cell()) {
             self.action = Action::Drowning;
             (self.teleport_to, self.spell) = (None, None);
         }

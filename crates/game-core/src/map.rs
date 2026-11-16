@@ -1956,9 +1956,10 @@ impl GameMap {
             }
             WorldEvent::SpawnAngelOfDeath { owner, at } => {
                 let ground = self.terrain.height_at(at.0 as u32, at.1 as u32, WORLD_UNITS_PER_CELL);
+                let duration = self.balance.angels.duration;
                 let u = self.spawn(owner, UnitKind::AngelOfDeath, at);
                 u.action = Action::Hunting;
-                u.flight = Some(crate::angel_of_death::Flight { heading: crate::angle::Angle::ZERO, height: ground + crate::angel_of_death::CRUISE_HEIGHT });
+                u.angel = Some(crate::angel_of_death::Angel::new(ground, duration));
                 let at = (u.x, u.z);
                 follow_ups.push(WorldEvent::SpawnEffect(crate::blast::effect(owner, at)));
                 None

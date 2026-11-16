@@ -72,12 +72,28 @@ pub const FIGHT_STAGGER: Ticks = Ticks::millis(11_500);
 /// `[ours]`: a quarter of the winner's own current health, each exchange.
 pub const FIGHT_DAMAGE_DIVISOR: u16 = 4;
 
-/// An Angel of Death's own flight (`Unit::flight`): never through the generic `Motion`/physics (no gravity, no
-/// touchdown — it never lands).
+/// An Angel of Death's own flight: never through the generic `Motion`/physics (no gravity, no touchdown — it
+/// never lands).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Flight {
     pub heading: Angle,
     pub height: i32,
+}
+
+/// An Angel of Death's own state (`Unit::angel`): its flight, the kills it has made and how long it has left to
+/// live (`balance::Angels`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Angel {
+    pub flight: Flight,
+    pub kills: u8,
+    pub left: Countdown,
+}
+
+impl Angel {
+    /// A fresh angel over ground at `ground`, cruising, to live `duration`.
+    pub fn new(ground: i32, duration: crate::balance::Turns) -> Angel {
+        Angel { flight: Flight { heading: Angle::ZERO, height: ground + CRUISE_HEIGHT }, kills: 0, left: Countdown::new(Ticks::new(duration.0)) }
+    }
 }
 
 /// The spell's own cast sequence: the meteor falling, invisible throughout. A one-shot controller, not a
@@ -191,7 +207,8 @@ impl GameMap {
         let Some(i) = self.unit_index(id) else { return Vec::new() };
         let (owner, pos) = (self.units[i].owner, (self.units[i].x, self.units[i].z));
         let ground = self.terrain.height_at(pos.0 as u32, pos.1 as u32, WORLD_UNITS_PER_CELL);
-        let mut flight = self.units[i].flight.unwrap_or(Flight { heading: Angle::ZERO, height: ground + CRUISE_HEIGHT });
+        let Some(mut angel) = self.units[i].angel else { return Vec::new() };
+        let mut flight = angel.flight;
         flight.height = flight.height.max(ground + MIN_CLEARANCE);
 
         let mut events = self.angel_panic(pos, owner);
@@ -229,7 +246,8 @@ impl GameMap {
             }
             _ => {}
         }
-        self.units[i].flight = Some(flight);
+        angel.flight = flight;
+        self.units[i].angel = Some(angel);
         events
     }
 
@@ -332,7 +350,7 @@ impl GameMap {
         let (my_health, rival_health) = (self.units[i].health.current(), self.units[ri].health.current());
         let (winner, loser) = if my_health >= rival_health { (i, ri) } else { (ri, i) };
         let hit = self.units[winner].health.current() / FIGHT_DAMAGE_DIVISOR;
-        let heading = self.units[winner].flight.map_or(Angle::ZERO, |f| f.heading);
+        let heading = self.units[winner].angel.map_or(Angle::ZERO, |a| a.flight.heading);
         let (kx, kz) = angle::rotate((FIGHT_KNOCKBACK, 0), heading.steps());
         let lp = (self.units[loser].x, self.units[loser].z);
         (self.units[loser].x, self.units[loser].z) = (lp.0.wrapping_add(kx as u16), lp.1.wrapping_add(kz as u16));
@@ -379,7 +397,7 @@ mod tests {
         let u = map.spawn(owner, UnitKind::AngelOfDeath, at);
         let id = u.id;
         u.action = Action::Hunting;
-        u.flight = Some(Flight { heading: Angle::ZERO, height: 2000 });
+        u.angel = Some(Angel { flight: Flight { heading: Angle::ZERO, height: 2000 }, ..Angel::new(0, crate::balance::Balance::ours().angels.duration) });
         id
     }
 
@@ -407,7 +425,7 @@ mod tests {
         map.tick();
         let angel = map.units.iter().find(|u| u.kind == UnitKind::AngelOfDeath).expect("the angel appears");
         assert_eq!((angel.owner, angel.action), (Owner::Tribe(TribeId::Blue), Action::Hunting));
-        assert!(angel.flight.is_some(), "already flying, not on the ground");
+        assert!(angel.angel.is_some(), "already flying, not on the ground");
         let blast = map.effects.entries().find(|(_, e)| matches!(e.kind, EffectKind::SimpleBlast(_))).map(|(_, e)| (e.x, e.z));
         assert_eq!(blast, Some((angel.x, angel.z)), "its own blast, where it appeared");
     }
