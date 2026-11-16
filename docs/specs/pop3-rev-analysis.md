@@ -1206,13 +1206,15 @@ per turn (0x4BC660), while flying:
   every turn, 4 trailing puffs along the path travelled since last turn (interpolated):
     type 7 (small): effect 7/0x03, the plain grey smoke puff (hfx 314-321, 4-turn life - "The shot 8/6",
       the SAME puff the firewarrior's own bolt trails)
-    type 8 (big): effect 7/0x42 (newly traced this session: state 53, 16-turn life, draw class 44, hfx 1224) -
-      a distinct, longer-lived trail, not just a bigger smoke puff; each of the 4 per-turn instances gets an
-      incrementing sprite-frame offset (+4 each) and the "hot" render flag
+    type 8 (big): effect 7/0x42, the "smoke cloud" (hfx 1224-1239, a cream puff growing for 8 frames then
+      fading for 8); the 4 per-turn instances start at frames +0, +4, +8, +12 (1224, 1228, 1232, 1236) and
+      their life is set to 0, so each is removed on its first turn - a trail that looks older further back,
+      redrawn every turn, rather than long-lived puffs; plus the "hot" render flag
 
 on landing, both sizes alike:
   effect 7/0x05 (Burn cell) at the impact cell
-  one more trail puff at the impact point (7/0x03 small, 7/0x42 big, same as the per-turn trail above)
+  one more trail puff at the impact point (7/0x03 small; 7/0x42 big, keeping its default 16-turn life: the
+    whole 1224-1239 puff, 1.33 s)
   a simple blast (0x50B6F0, the same 140/98 magic constants as "Blast push and flight" - size-independent)
   the size-specific burst: 7/0x3E small, 7/0x3F big (16-turn fire blast, alpha hfx 1194-1209, sound 0xB2 -
     "Volcano rocks" above)
@@ -1220,9 +1222,9 @@ on landing, both sizes alike:
 ```
 So **the big fireball is not a scaled-up small one in flight or physics** - same arc, same random launch kick,
 same gravity, same 4-puffs-a-turn cadence - it only renders bigger: a different ball sprite (hfx 1248 vs 1120),
-a distinct 16-turn trail effect (7/0x42, not traced before this session) instead of the shared 4-turn smoke
-puff, and the already-documented bigger impact burst (7/0x3F vs 7/0x3E). Effect 7/0x42's own look (beyond its
-sprite index and duration) was not decoded from `hfx0-0.dat` this session.
+a distinct trail effect (7/0x42, the cream "smoke cloud" frames 1224-1239, shown at four ages per turn)
+instead of the shared 4-turn smoke puff, a full 16-turn smoke cloud where it lands, and the already-documented
+bigger impact burst (7/0x3F vs 7/0x3E). The trail's one-turn life is read from the code, not yet seen live.
 
 ### Volcano lava flow [exe]
 Effect type 34 ("lava flow", state 33, init 0x512A00, per turn 0x512A60) is spawned once when the cone finishes

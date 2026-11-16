@@ -115,8 +115,9 @@ Alpha sprites: 1090..1499 and 1538..1592 are blended (same ranges in PopResource
 `blend::is_alpha_sprite`). Their indices (including 1..127, 633k pixels) are rows of the alpha table, not colours.
 `pop3_format::sprites` returns the raw indices; `blend::AlphaTable::rgba` turns them into RGBA (tint colour,
 opacity strength / 15) for GPU blending (`art::alpha_picture_frame`, uploaded with `AlphaMode::Blend`).
-Identified: 1225-1239 a cream dust cloud growing and fading (the teleport landing puff), 1210-1224 the same in
-grey, 1180-1187 a fire cloud and 1188-1192 its fading, 1193 an explosion, 1194-1209 the rock explosion of a big
+Identified: 1224-1239 a cream dust cloud growing and fading (16 frames: the teleport landing puff, and the
+"smoke cloud" effect of the big volcano fireball's trail [exe], pop3-rev-analysis.md "Volcano fireballs"),
+1210-1223 the same in grey, 1180-1187 a fire cloud and 1188-1192 its fading, 1193 an explosion, 1194-1209 the rock explosion of a big
 volcano fireball's landing [exe] (by eye two explosions, 1193-1197 and 1198-1202), 1160-1179 the rock-debris dust burst [exe], seen in the game as the animation on the winged death's totem, 1304-1319 the water splash [exe, measured] (16 frames, one splash of 16 turns when a person goes under;
 pop3-rev-analysis.md "Drowning splash"), status markers over people [exe] (pop3-rev-analysis.md "Status markers over people"): 1478-1487 bloodlust
 (red bubbles), 1489-1498 low health (white sparkles), 1538-1552 shield (3 rings x 5 sizes), 1553-1563 the hypnotised
