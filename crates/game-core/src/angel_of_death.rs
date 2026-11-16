@@ -1,34 +1,33 @@
 //! The Angel of Death (pop3-rev-analysis.md "Angel of Death mechanics", "Per spell" row 13, model 13). Cast like
-//! any other spell: an invisible meteor falls (`Cast`, `FALL_TICKS`), and the instant it crosses the ground it
-//! triggers a real terrain ripple (`Shockwave`, `apply_shockwave`) and a plain `blast::effect` at the same point
-//! (the same 140/98 push a building's own destruction and Lightning share) — then the real creature
-//! (`unit::UnitKind::AngelOfDeath`, person state 28 in the original) appears and runs entirely on its own from
-//! there (`GameMap::tend_angels_of_death`), never through `Command`: nobody ever selects or orders it
+//! any other spell: an invisible meteor falls (`Cast`, `FALL_TICKS`) and, the instant it crosses the ground, starts
+//! a real terrain ripple (`Shockwave`, `apply_shockwave`); the turn after, the real creature
+//! (`unit::UnitKind::AngelOfDeath`, person state 28 in the original) appears in its own plain `blast::effect` (the
+//! same 140/98 push a building's own destruction and Lightning share) and runs entirely on its own from there
+//! (`GameMap::tend_angels_of_death`), never through `Command`: nobody ever selects or orders it
 //! (`Action::can_take_orders`'s own exclusion list keeps it, and whoever it grabs, out of reach).
 //!
-//! Simplified from the trace, tagged here rather than silently guessed at:
-//! - Hunting is immediate and unconditional: it locks onto the nearest rival angel if any, else the nearest
-//!   eligible enemy anywhere on the map. No "engagement roll"/alert-flag sound cue, no tower-housed-target
-//!   standoff distance — `[ours]`: one `GRAB_RANGE`/`FIGHT_RANGE` regardless of what the target stands in or near.
-//! - Flight is a straight line at a constant `SPEED`: no "self speed x2 closing in", no zigzag while carrying, no
-//!   180-degree wind-up turn before release, no victim-facing throw direction — `[ours]`. The victim is simply
-//!   killed where it hangs once `CARRY_TICKS` run out.
-//! - `tend_closing`'s own "once close enough to grab" check (`GRAB_RANGE`) is `x`/`z` distance alone: `flight.height`
-//!   is never factored into it, nor deliberately lowered towards a grounded victim (only ever clamped to a
-//!   *minimum* clearance above terrain, `MIN_CLEARANCE`) — so it grabs someone on the ground from `CRUISE_HEIGHT`
-//!   without ever visibly diving down to reach them, user-reported playing it. The trace doesn't resolve this
-//!   either way (only the separate "launching/accelerating" climb pose is confirmed, not a literal dive-to-grab
-//!   manoeuvre, pop3-rev-analysis.md "Angel of Death mechanics" "Visuals"), so whether the original actually
-//!   swoops down before a grab is itself an open question for a future trace session — `[ours]` until then.
-//! - The angel-vs-angel exchange (`fight`) is our own reading of "both sides always take damage, scaled by the
-//!   stronger side's own health, so the stronger snowballs": both lose a quarter of the winner's current health
-//!   each clash, the loser reeling `FIGHT_STAGGER` — `[ours]`, no literal formula was traced.
-//! - The firewarrior-bolt ~10% damage factor (confirmed, `SW_BLAST_DAMAGE_AOD`) and the literal kill-count/
-//!   duration expiry (`AOD_KILL_COUNT`/`AOD_DURATION`, never located in the trace) are both left unimplemented:
-//!   `fights: false` (kind_stats.rs) already keeps it out of the ordinary attack/spotting pipeline entirely, the
-//!   simplest reading of "cannot be selected or given orders" extended to "cannot be ordered to attack it
-//!   either" — revisit if a future session resolves either open question.
-//! - Whether it can attack a building at all, or grab someone riding in a vehicle: left undone, same as the trace.
+//! It hunts a rival angel first, else the nearest eligible enemy anywhere on the map; waits `ENGAGE_WAIT` on a
+//! plain victim, flies there (speed and heading ramped), grabs it within `GRAB_RANGE` (`GRAB_RANGE_HOUSED` inside a
+//! building, pulled out at its centre or its tower post, the building worn; a passenger taken off its vehicle) at
+//! double speed, climbs `CARRY_CLIMB` zigzagging, throws it at countdown `RELEASE_AT` along its own facing, to die
+//! once down, and turns about. Every death of someone it grabbed is one of its kills; it ends after `AOD_DURATION`
+//! or `AOD_KILL_COUNT` kills (`balance::Angels`), or killed by a rival angel, and is removed outright. Firewarriors
+//! can shoot it (`attack::may_shoot`) for 25/256 of a bolt.
+//!
+//! Not from the trace, tagged here rather than silently guessed at:
+//! - The rival-angel scan is map-wide (the trace says "nearby", with no radius); no roar (no audio yet).
+//! - The ramps (`ACCEL`, `TURN_RATE`, `CLIMB_RATE`), `CARRY_SPEED`, the zigzag's period, `CRUISE_HEIGHT`, the
+//!   throw's speed, and the slow-down far off course are `[ours]`.
+//! - It grabs someone on the ground from its flight height, never visibly diving to reach them (user-reported):
+//!   the trace confirms only a separate "launching/accelerating" climb pose, so whether the original swoops down is
+//!   an open question for a future trace session.
+//! - The angel-vs-angel exchange (`angel_fight`) is our own reading of "both sides always take damage, scaled by
+//!   the stronger side's own health, so the stronger snowballs": both lose a quarter of the winner's current
+//!   health each clash, the loser reeling `FIGHT_STAGGER` while the winner closes in again.
+//! - Housed victims are reached at the building's centre or the tower post, the building taking
+//!   `GRAB_BUILDING_WEAR` (user-described; the trace found no building path); its area panic reaches only people in
+//!   the open, so they stay inside to be grabbed. A dead angel vanishes (`destroy_ghost`) and drops its victim alive.
+//! - Whether it attacks buildings for their own sake, and the shadow shattering into debris as it appears: undone.
 //! - Still no 2D unit sprite (`UnitKind::AngelOfDeath` is deliberately left out of `UnitKind::ALL`, so nothing in
 //!   the boot job or the generated-figure fallback ever tries to draw one): it is drawn instead as a real 3D
 //!   object-bank mesh, like a vehicle (`game-client`'s own `angel_of_death.rs`, pop3-rev-analysis.md "Angel of

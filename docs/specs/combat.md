@@ -262,6 +262,11 @@ join a melee on their own attack (they still fight when challenged).
   thrower (`fires_back`, `WorldEvent::StrikeBack` after its push) unless it is already attacking or in a fight: whatever
   else it does (walking, working) it drops; thrown, the attack is chained for when it lands [ours: that part of the
   original is not read in detail].
+- An Angel of Death (spells.md row 13): a firewarrior may shoot one (`attack::may_shoot`, by order or on sight) but
+  never charges or challenges it. It flies above the cell, so only a bolt aimed at it reaches it, for its share
+  alone, 25/256 of `TARGET_DAMAGE` (`SW_BLAST_DAMAGE_AOD` [exe], about a tenth), and it is never thrown [ours: the
+  trace gives only the share]. Within its 8-cell panic, a firewarrior on open ground panics before it is in reach;
+  from a drum tower it can shoot.
 - Drawn: our own glowing ball per bolt (`firebolts` view); the throw pose (anim 7).
 - From a drum tower or a vehicle [exe]: the firewarrior looks for enemies and throws without getting out (it is the
   only kind that looks from inside or aboard). Its reach follows its altitude (`GameMap::altitude`: aboard, its
@@ -274,7 +279,7 @@ join a melee on their own attack (they still fight when challenged).
   throw pose while it throws.
 - Not yet: the line of fire (a building in the way), the smoke trail and
   the ground light, the shaman inside a building or vehicle taking half her
-  life, an angel's reaction. A ghost firewarrior's own bolt is done (spells.md "Ghost Army"): the throw animation
+  life, an angel's own reaction to being shot. A ghost firewarrior's own bolt is done (spells.md "Ghost Army"): the throw animation
   plays, nothing follows on arrival.
 
 ## Sermon

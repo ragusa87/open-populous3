@@ -75,7 +75,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   remaining "combat doesn't last" impression some other way.
 - [ ] Firebolts (combat.md "Firebolts"): the line of fire, driving a vehicle towards an out-of-reach target (to trace: whether the original's halved speed of a passenger throwing aboard really slows its vehicle, ours does), the smoke trail (our own) and the ground light, ghost firewarriors' bolts, the shaman inside a building or vehicle losing half her life, the angel's reaction.
 - [ ] Health, hit feedback and death animations for every unit type.
-- [x] Healing (combat.md "Health"): implemented - life can go past full by up to one heal (`Health::heal_past_max`), and a lightning hit that doesn't kill now blocks healing for a while (`Unit::statuses.struck_by_lightning`, a tagged guess for the duration since every lightning hit today is a kill). Still not yet: the angel of death never heals (that unit kind doesn't exist).
+- [x] Healing (combat.md "Health"): implemented - life can go past full by up to one heal (`Health::heal_past_max`), and a lightning hit that doesn't kill now blocks healing for a while (`Unit::statuses.struck_by_lightning`, a tagged guess for the duration since every lightning hit today is a kill). The angel of death never heals (`KindStats::heal` None).
 
 ### The tick ([architecture.md](docs/architecture.md) "The tick")
 - [ ] Find the original's order of work inside a turn (people, buildings, effects, shots, mana; income comes before spell charging): ours is a guess.
@@ -550,35 +550,23 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   "Simplified from the trace" list for exactly which choreography details (`[ours]`) aren't literal. Every tick it
   also forces any eligible enemy within `PANIC_RADIUS_CELLS` (8) to panic, excluding shamans and other angels
   (confirmed, see "Units" below). Never pushed by a Blast (`blast.rs`, confirmed); excluded from Swarm's own sting
-  (confirmed). Left undone, same as the trace itself leaves open: the literal kill-count/duration expiry rule
-  (`AOD_KILL_COUNT`/`AOD_DURATION`), whether it can attack a building, whether it can grab someone riding in a
-  vehicle, and the firewarrior-bolt ~10% damage factor (`fights: false` already keeps it out of the ordinary
-  attack/spotting pipeline entirely, simplest reading of "cannot be ordered" extended to "cannot be ordered to
-  attack it either"). Also still open: totem gifts' own Angel of Death reward, trigger type 5 and level 5's
+  (confirmed). Its end, firewarrior shots, housed victims and the carry choreography are now in too: see the
+  unchecked "Angel of Death against its trace" item below for what is left. Also still open: totem gifts' own Angel of Death reward, trigger type 5 and level 5's
   winged-death totem (`TODO.md` "Totem gifts", "Trigger semantics", "Level 5") don't spawn one yet — nothing
   calls `angel_of_death::cast` but the spell book/panel UI (already wired before this session) and tests.
-- [ ] Angel of Death against its trace (pop3-rev-analysis.md "Angel of Death mechanics"), gaps found comparing it
-  with `game_core::angel_of_death`:
-  - Bugs: an angel-vs-angel fight never re-checks range or moves (`angel_fight` runs every `FIGHT_COOLDOWN` with no
-    distance check), so after the 800 knockback both keep trading damage from afar instead of the winner closing
-    in again, and a rival already `Dying` keeps being hit. A grabbed victim inside a building is not evicted
-    (`angel_target_eligible` ignores `inside`, the trace's state-40 ENTER evicts it), nor a vehicle passenger taken
-    off (`aboard` ignored), leaving occupancy/passenger lists pointing at a unit being carried away.
-  - It never dies: no `AOD_DURATION`/`AOD_KILL_COUNT` expiry, no per-kill hit-point cost (the trace's own
-    candidate mechanism, unconfirmed), no firewarrior damage (~10%, `SW_BLAST_DAMAGE_AOD`): only another angel can
-    kill one. Pick a mechanism (tagged guess) until a spec session locates the check.
-  - Not as traced: the stagger goes to both angels (trace: the loser only); knockback along winner-to-loser
-    (trace: the winner's own facing); the trace's open-target grab standoff is 160 (200 only for a tower-housed
-    target), ours is one `GRAB_RANGE` 200; the rival-angel scan is map-wide (trace: "nearby"); the spawn blast
-    fires the same tick as the ripple at the cast point (trace: a later, separate impact at the angel once it
-    appears, with its shadow shattering into debris); the victim dies at countdown 0 (trace: released around
-    countdown 8/7); flight height only ever rises (clamped up over high ground, never comes back down).
-  - Not modelled: speed x2 closing in, speed/heading ramps, the carry's +800 climb, slow-down, zigzag, 400-unit
-    throw along the victim's facing and 180-degree wind-up; the 1-in-64 roar and 2-tick engagement wait; skipping
-    a target mid preacher-conversion (state 23); the panic's `+0xE` bit 0x10 immunity gate; sounds 0xAC/0xDA
-    (no audio yet, "Sound").
-  - To trace (spec session): the kill-count/duration check (unopened outer sub-states of state 28), the exact
-    angel-vs-angel damage scaling, whether a vehicle passenger can be grabbed, building attacks, dive-to-grab.
+- [ ] Angel of Death against its trace (pop3-rev-analysis.md "Angel of Death mechanics"; spells.md row 13 has what
+  is done: fights that re-close, housed victims and passengers pulled out, the spawn order, the
+  `AOD_DURATION`/`AOD_KILL_COUNT` end, firewarrior shots, the carry choreography). Left:
+  - Our own guesses to confirm or replace: the ramps (`ACCEL`, `TURN_RATE`, `CLIMB_RATE`), `CARRY_SPEED`, the
+    zigzag's period, the throw's speed, the angel-vs-angel damage (a quarter of the winner's health), the wear a
+    building takes when an angel pulls someone out, a dead angel's victim dropped alive, the area panic sparing
+    people inside buildings and vehicles, firewarriors on sight of an angel.
+  - Not done: the rival-angel scan is map-wide (trace: "nearby", no radius); its roar (no audio, "Sound"); its shadow
+    shattering into debris as it appears (client, no shadow companion to shatter); attacking buildings for their
+    own sake; an angel's reaction to being shot.
+  - To trace (spec session): where the kill-count/duration check really lives (unopened outer sub-states of state
+    28) and whether the per-kill hit-point cost exists, the exact angel-vs-angel damage scaling, whether a vehicle
+    passenger can be grabbed, building attacks and exclusions, dive-to-grab, how a dead angel leaves the game.
 - [x] Firestorm's own look (pop3-rev-analysis.md "Firestorm fireballs"): fixed — `fireball_shot.rs` [client] gives `panicking_blast`'s own effect a view of its own (both Firestorm's and Volcano's fireballs, which share it): a bright ball falling from above, shrinking as it nears the ground, a few dimmer embers trailing behind it (not `smoke.rs`'s grey puffs), landing in a flash that grows and fades into a last puff of smoke; `ground_fire.rs`'s standing flame is unchanged. Our own invented flight and look throughout (the original's hfx 1120-1127/90-93/~1180-1210 sprites, confirmed by eye last session, are not traced closely enough to follow pixel for pixel). `panicking_blast::VISUAL_TICKS` keeps the effect (and so this view) alive well past its own 3-turn blast purely so the fall/trail/burst has room to play out — the blast's own damage/push/panic are unaffected (already a no-op past turn 3). Blast's own `SimpleBlast` fireball now has its own, separate pair of views instead of reusing this one (`blast_fireball.rs`, `blast_impact.rs` [client], TODO.md "Blast push and flight"): its flight is a straight line from the shaman rather than a fall from above, and its landing is sized small on purpose rather than matching the blast's own multi-cell damage radius.
 - [x] Firestorm fireballs landing on water no longer start a ground fire (`firestorm::impact`, spells.md): matches
   the original's own coastal-shape check (pop3-rev-analysis.md "Fireball impact") via `unit::is_sea` on the

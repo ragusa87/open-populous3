@@ -6,8 +6,8 @@ community: PopRe wiki page "Constant" and Brandan Lasley's `New_Constants.dat` (
 values all match ours. Parsed by `pop3_format::constants::Constants` (`Constants::parse`/`load`, reusing
 `LevelError`) — read today by `game_core::spell_book`'s `SpellStats::from_constants`/
 `SpellBook::apply_constants` (the whole spell-balance group) and `game_core::balance::Balance::apply_constants`
-(units' own `life` sub-group only, its exact `LIFE_<P>` suffixes `[ours]`, a guess - TODO.md "Computer players
-(AI)"), both from `GameMap::load_original`; every other group below (units' own speed/damage, wood, training,
+(units' own `life` sub-group, its exact `LIFE_<P>` suffixes `[ours]`, a guess - TODO.md "Computer players
+(AI)" - with `LIFE_AOD`, plus `SPY_DISGUISE_DELAY`, `AOD_DURATION` and `AOD_KILL_COUNT`), both from `GameMap::load_original`; every other group below (units' own speed/damage, wood, training,
 huts) is parsed into the same map but nothing reads it yet (TODO.md).
 
 ## Encoding [files]
