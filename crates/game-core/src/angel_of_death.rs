@@ -58,11 +58,34 @@ pub const GRAB_RANGE_HOUSED: i32 = 200;
 pub const FIGHT_RANGE: i32 = 312;
 /// `[ours]`: the wear a building takes when an angel pulls someone out of it (blast's own `BLAST_DAMAGE_BLDG`).
 pub const GRAB_BUILDING_WEAR: u16 = crate::blast::DAMAGE_BLDG;
-/// `[ours]`: its own flight speed (`UnitKind::AngelOfDeath::speed`'s single source), world units/tick.
+/// `[ours]`: its own cruising speed (`UnitKind::AngelOfDeath::speed`'s single source), world units/tick.
 pub const SPEED: i32 = 150;
-/// `[ours]`: how high above the ground it cruises, and the least it ever clears it by, terrain height units.
+/// `[ours]`: how much its speed changes in a tick, and how far its heading turns ("ramp speed/heading", no numbers
+/// traced). Far off course (over a quarter turn) it slows to a quarter of its speed, so it turns tightly enough
+/// never to circle a target it is meant to reach.
+pub const ACCEL: i32 = 15;
+pub const TURN_RATE: i32 = 128;
+/// `[ours]`: how high above the ground it cruises, how fast it eases back there, and the least it ever clears the
+/// ground by (traced: about 100), terrain height units.
 pub const CRUISE_HEIGHT: i32 = 600;
+pub const CLIMB_RATE: i32 = 40;
 pub const MIN_CLEARANCE: i32 = 100;
+/// Ticks between locking onto a plain victim and setting off (the trace's own "wait 2 ticks").
+pub const ENGAGE_WAIT: Ticks = Ticks::new(2);
+/// Its speed is doubled the instant it grabs, then eases down to `CARRY_SPEED` (`[ours]`: "slow down") while it
+/// climbs `CARRY_CLIMB` by the release and zigzags `ZIGZAG` steps a tick, the other way every `ZIGZAG_EVERY` ticks
+/// (`[ours]`: only the ±22 is traced).
+pub const GRAB_SPEED_FACTOR: i32 = 2;
+pub const CARRY_SPEED: i32 = SPEED / 2;
+pub const CARRY_CLIMB: i32 = 800;
+pub const ZIGZAG: i32 = 22;
+pub const ZIGZAG_EVERY: u32 = 4;
+/// The carry countdown it lets go at, and the one it turns about at (180 degrees).
+pub const RELEASE_AT: u32 = 8;
+pub const TURN_ABOUT_AT: u32 = 7;
+/// Its victim is thrown towards a point `THROW_DISTANCE` along its own facing, at `THROW_SPEED` a tick (`[ours]`).
+pub const THROW_DISTANCE: i32 = 400;
+pub const THROW_SPEED: i32 = 40;
 /// Forces panic on any eligible enemy this close, every tick (pop3-rev-analysis.md: "area panic... every tick").
 pub const PANIC_RADIUS_CELLS: i32 = 8;
 /// `[ours]`: knockback distance after an angel-vs-angel exchange, world units.
@@ -78,6 +101,29 @@ pub const FIGHT_DAMAGE_DIVISOR: u16 = 4;
 pub struct Flight {
     pub heading: Angle,
     pub height: i32,
+    /// World units a tick.
+    pub speed: i32,
+}
+
+/// `heading` turned towards `want` by at most `TURN_RATE`.
+pub fn steer(heading: Angle, want: Angle) -> Angle {
+    let off = Angle::new(want.steps().wrapping_sub(heading.steps()) % crate::angle::TURN).signed();
+    heading.turned(off.clamp(-TURN_RATE, TURN_RATE))
+}
+
+/// `value` brought towards `target` by at most `step`.
+pub fn ease(value: i32, target: i32, step: i32) -> i32 {
+    value + (target - value).clamp(-step, step)
+}
+
+/// The angle of a unit's own `facing` octant (0 = +z, 2 = +x).
+pub fn facing_angle(facing: u8) -> Angle {
+    Angle::new((crate::angle::TURN / 4).wrapping_sub(facing as u32 * crate::angle::TURN / 8) % crate::angle::TURN)
+}
+
+/// The zigzag's own turn on the tick `left` ticks before the end of a carry: `ZIGZAG` one way, then the other.
+pub fn zigzag(left: u32) -> i32 {
+    if (left / ZIGZAG_EVERY) % 2 == 0 { ZIGZAG } else { -ZIGZAG }
 }
 
 /// An Angel of Death's own state (`Unit::angel`): its flight, the kills it has made and how long it has left to
@@ -92,7 +138,7 @@ pub struct Angel {
 impl Angel {
     /// A fresh angel over ground at `ground`, cruising, to live `duration`.
     pub fn new(ground: i32, duration: crate::balance::Turns) -> Angel {
-        Angel { flight: Flight { heading: Angle::ZERO, height: ground + CRUISE_HEIGHT }, kills: 0, left: Countdown::new(Ticks::new(duration.0)) }
+        Angel { flight: Flight { heading: Angle::ZERO, height: ground + CRUISE_HEIGHT, speed: 0 }, kills: 0, left: Countdown::new(Ticks::new(duration.0)) }
     }
 }
 
@@ -257,30 +303,51 @@ impl GameMap {
         let ground = self.terrain.height_at(pos.0 as u32, pos.1 as u32, WORLD_UNITS_PER_CELL);
         let Some(mut angel) = self.units[i].angel else { return Vec::new() };
         let mut flight = angel.flight;
-        flight.height = flight.height.max(ground + MIN_CLEARANCE);
+        if !matches!(self.units[i].action, Action::Carrying { .. }) {
+            flight.height = ease(flight.height, ground + CRUISE_HEIGHT, CLIMB_RATE);
+        }
 
         let mut events = self.angel_panic(pos, owner);
 
         match self.units[i].action {
             Action::Hunting => {
                 if let Some(target) = self.angel_target(id, owner) {
-                    self.units[i].action = Action::Closing { target };
+                    let rival = self.unit(target).is_some_and(|t| t.kind == UnitKind::AngelOfDeath);
+                    self.units[i].action = Action::Closing { target, wait: Countdown::new(if rival { Ticks::ZERO } else { ENGAGE_WAIT }) };
                 }
             }
-            Action::Closing { target } => events.extend(self.tend_closing(i, id, owner, &mut flight, target)),
-            Action::Carrying { victim, mut left } => {
-                if let Some(vi) = self.unit_index(victim) {
-                    (self.units[vi].x, self.units[vi].z) = (self.units[i].x, self.units[i].z);
-                }
-                if left.tick() {
-                    if self.unit(victim).is_some_and(|v| v.statuses.ghost) {
-                        angel.kills = angel.kills.saturating_add(1);
-                    }
-                    events.push(WorldEvent::Damage { unit: victim, amount: u16::MAX, kind: DamageKind::AngelOfDeath, from: Some(owner) });
-                    self.units[i].action = Action::Hunting;
+            Action::Closing { target, mut wait } => {
+                if wait.left() == Ticks::ZERO {
+                    events.extend(self.tend_closing(i, id, owner, &mut flight, target));
                 } else {
-                    self.units[i].action = Action::Carrying { victim, left };
+                    wait.tick();
+                    self.units[i].action = Action::Closing { target, wait };
                 }
+            }
+            Action::Carrying { victim, mut left } => {
+                let done = left.tick();
+                let remaining = left.left().get();
+                let held = self.unit(victim).is_some_and(|v| v.action == Action::Grabbed { by: id });
+                if remaining >= RELEASE_AT {
+                    flight.height += CARRY_CLIMB / (CARRY_TICKS.get() - RELEASE_AT) as i32;
+                    flight.heading = flight.heading.turned(zigzag(remaining));
+                }
+                if remaining == TURN_ABOUT_AT {
+                    flight.heading = flight.heading.turned(crate::angle::TURN as i32 / 2);
+                }
+                flight.speed = ease(flight.speed, CARRY_SPEED, ACCEL);
+                self.fly_on(i, &flight);
+                if held && let Some(vi) = self.unit_index(victim) {
+                    (self.units[vi].x, self.units[vi].z) = (self.units[i].x, self.units[i].z);
+                    if remaining == RELEASE_AT {
+                        if self.units[vi].statuses.ghost {
+                            angel.kills = angel.kills.saturating_add(1);
+                        }
+                        self.throw_victim(vi, flight.height);
+                        events.push(WorldEvent::Damage { unit: victim, amount: u16::MAX, kind: DamageKind::AngelOfDeath, from: Some(owner) });
+                    }
+                }
+                self.units[i].action = if done { Action::Hunting } else { Action::Carrying { victim, left } };
             }
             Action::Fighting { rival, mut stagger } => {
                 if !stagger.tick() {
@@ -297,9 +364,19 @@ impl GameMap {
             }
             _ => {}
         }
+        flight.height = flight.height.max(ground + MIN_CLEARANCE);
         angel.flight = flight;
         self.units[i].angel = Some(angel);
         events
+    }
+
+    /// Lets go of victim `vi` from `height`: it tumbles off towards a point `THROW_DISTANCE` along its own facing, its
+    /// lethal hit held off until it lands (`Unit::take_damage`'s own hold-off while thrown).
+    fn throw_victim(&mut self, vi: usize, height: i32) {
+        let (dx, dz) = angle::rotate((THROW_SPEED, 0), facing_angle(self.units[vi].facing).steps());
+        let v = &mut self.units[vi];
+        v.action = Action::Tumbling;
+        v.motion = crate::motion::Motion::flying(crate::motion::Velocity::new(dx as i16, 0, dz as i16), height);
     }
 
     /// Flies towards `target` (its `grab_point`); grabs it (a plain enemy) or starts a fight (a rival angel) once
@@ -325,6 +402,7 @@ impl GameMap {
             return Vec::new();
         }
         self.units[i].action = Action::Carrying { victim: target, left: Countdown::new(CARRY_TICKS) };
+        flight.speed *= GRAB_SPEED_FACTOR;
         self.grab(id, target, aim, housed)
     }
 
@@ -353,12 +431,23 @@ impl GameMap {
         housed.map(|building| WorldEvent::Wear { building, amount: GRAB_BUILDING_WEAR }).into_iter().collect()
     }
 
-    /// One tick of flight of angel `i` straight at `to`.
+    /// One tick of flight of angel `i` towards `to`: turning and speeding up as fast as it can, slowing right down
+    /// while far off course.
     fn fly_towards(&mut self, i: usize, flight: &mut Flight, to: (u16, u16)) {
         let pos = (self.units[i].x, self.units[i].z);
-        flight.heading = angle::atan2(torus_delta(pos.1, to.1), torus_delta(pos.0, to.0));
-        let (mx, mz) = angle::rotate((SPEED, 0), flight.heading.steps());
-        (self.units[i].x, self.units[i].z) = (pos.0.wrapping_add(mx as u16), pos.1.wrapping_add(mz as u16));
+        let want = angle::atan2(torus_delta(pos.1, to.1), torus_delta(pos.0, to.0));
+        flight.heading = steer(flight.heading, want);
+        let off = Angle::new(want.steps().wrapping_sub(flight.heading.steps()) % crate::angle::TURN).signed().abs();
+        let cruise = if off > crate::angle::TURN as i32 / 4 { SPEED / 4 } else { SPEED };
+        flight.speed = ease(flight.speed, cruise, ACCEL);
+        self.fly_on(i, flight);
+    }
+
+    /// Angel `i` moves one tick along its own heading at its own speed.
+    fn fly_on(&mut self, i: usize, flight: &Flight) {
+        let (mx, mz) = angle::rotate((flight.speed, 0), flight.heading.steps());
+        let u = &mut self.units[i];
+        (u.x, u.z) = (u.x.wrapping_add(mx as u16), u.z.wrapping_add(mz as u16));
     }
 
     /// The rival angel nearest `id` if any, else the nearest other eligible enemy anywhere on the map
@@ -416,10 +505,10 @@ impl GameMap {
 }
 
 /// Whether `t` is a valid Angel of Death target (rival or victim) for `owner`: alive, not its own tribe nor an
-/// ally, and — unless it is itself a rival angel — neither already grabbed by someone else nor being preached to
-/// (state 23, skipped by the trace's own scan).
+/// ally, and — unless it is itself a rival angel — neither already grabbed by someone else, nor flying through the
+/// air (a victim just thrown, someone a blast flung), nor being preached to (state 23, skipped by the trace's scan).
 fn angel_target_eligible(owner: Owner, t: &Unit) -> bool {
-    t.is_alive() && t.owner != owner && !t.fools(owner) && (t.kind == UnitKind::AngelOfDeath || !matches!(t.action, Action::Grabbed { .. } | Action::Listening { .. }))
+    t.is_alive() && t.owner != owner && !t.fools(owner) && (t.kind == UnitKind::AngelOfDeath || !(t.thrown() || matches!(t.action, Action::Grabbed { .. } | Action::Listening { .. })))
 }
 
 #[cfg(test)]
@@ -449,7 +538,7 @@ mod tests {
         let u = map.spawn(owner, UnitKind::AngelOfDeath, at);
         let id = u.id;
         u.action = Action::Hunting;
-        u.angel = Some(Angel { flight: Flight { heading: Angle::ZERO, height: 2000 }, ..Angel::new(0, crate::balance::Balance::ours().angels.duration) });
+        u.angel = Some(Angel { flight: Flight { heading: Angle::ZERO, height: 2000, speed: 0 }, ..Angel::new(0, crate::balance::Balance::ours().angels.duration) });
         id
     }
 
@@ -525,9 +614,97 @@ mod tests {
         assert_eq!(map.unit(victim).unwrap().action, Action::Grabbed { by: angel }, "grabbed");
         assert!(matches!(map.unit(angel).unwrap().action, Action::Carrying { victim: v, .. } if v == victim));
         assert!(map.unit(own).unwrap().is_alive(), "its own tribe is never targeted");
-        map.run(CARRY_TICKS);
-        assert!(!map.unit(victim).unwrap().is_alive(), "released, dead");
+        map.run(Ticks::new(CARRY_TICKS.get() - RELEASE_AT - 1));
+        assert_eq!(map.unit(victim).unwrap().action, Action::Grabbed { by: angel }, "still held");
+        map.tick();
+        let v = map.unit(victim).unwrap();
+        assert!(v.motion.airborne() && v.action == Action::Tumbling, "let go at countdown {RELEASE_AT}, thrown");
+        assert!(until_dead(&mut map, victim), "dies once down");
         assert_eq!(map.unit(angel).unwrap().action, Action::Hunting, "goes back to hunting");
+    }
+
+    #[test]
+    fn steering_turns_at_most_its_rate_the_short_way_and_speed_eases() {
+        assert_eq!(steer(Angle::new(0), Angle::new(50)), Angle::new(50), "within its rate: straight there");
+        assert_eq!(steer(Angle::new(0), Angle::new(1000)), Angle::new(TURN_RATE as u32), "at most its rate");
+        assert_eq!(steer(Angle::new(0), Angle::new(2000)), Angle::new(2000), "the short way round");
+        assert_eq!(steer(Angle::new(0), Angle::new(1100)), Angle::new(2048 - TURN_RATE as u32));
+        assert_eq!((ease(0, 150, ACCEL), ease(140, 150, ACCEL), ease(300, 75, ACCEL)), (ACCEL, 150, 300 - ACCEL));
+    }
+
+    #[test]
+    fn facing_octants_map_onto_flight_angles() {
+        let unit = |facing| angle::rotate((100, 0), facing_angle(facing).steps());
+        assert_eq!(unit(0), (0, 100), "0 is +z");
+        assert_eq!(unit(2), (100, 0), "2 is +x");
+        assert_eq!(unit(4), (0, -100), "4 is -z");
+        assert_eq!(unit(6), (-100, 0), "6 is -x");
+    }
+
+    #[test]
+    fn the_zigzag_swings_one_way_then_the_other() {
+        let swings: Vec<i32> = (0..ZIGZAG_EVERY * 2).map(zigzag).collect();
+        assert!(swings[..ZIGZAG_EVERY as usize].iter().all(|&z| z == ZIGZAG));
+        assert!(swings[ZIGZAG_EVERY as usize..].iter().all(|&z| z == -ZIGZAG));
+    }
+
+    #[test]
+    fn it_reaches_a_victim_right_behind_it_without_circling() {
+        let mut map = bare();
+        let angel = spawn_angel(&mut map, TribeId::Blue, AT);
+        map.unit_mut(angel).unwrap().angel.as_mut().unwrap().flight.speed = SPEED;
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_sub(600), AT.1)).id;
+        assert!((0..60).any(|_| {
+            map.tick();
+            matches!(map.unit(victim).unwrap().action, Action::Grabbed { .. })
+        }));
+    }
+
+    #[test]
+    fn it_waits_two_ticks_on_a_victim_before_setting_off() {
+        let mut map = bare();
+        let angel = spawn_angel(&mut map, TribeId::Blue, AT);
+        map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(5000), AT.1));
+        map.tick();
+        assert!(matches!(map.unit(angel).unwrap().action, Action::Closing { .. }), "locked on");
+        map.run(ENGAGE_WAIT);
+        assert_eq!((map.unit(angel).unwrap().x, map.unit(angel).unwrap().z), AT, "still waiting");
+        map.tick();
+        assert_ne!((map.unit(angel).unwrap().x, map.unit(angel).unwrap().z), AT, "off");
+    }
+
+    #[test]
+    fn the_carry_doubles_its_speed_climbs_zigzags_throws_along_the_victims_facing_and_turns_about() {
+        let mut map = bare();
+        let angel = spawn_angel(&mut map, TribeId::Blue, AT);
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(2000), AT.1)).id;
+        assert!(until_grabbed(&mut map, victim));
+        map.unit_mut(victim).unwrap().facing = 2;
+        let at_grab = angel_state(&map, angel).flight;
+        assert!(at_grab.speed > SPEED, "sped up at the grab: {}", at_grab.speed);
+        let mut headings = Vec::new();
+        for _ in 0..CARRY_TICKS.get() - RELEASE_AT - 1 {
+            map.tick();
+            headings.push(angel_state(&map, angel).flight.heading);
+        }
+        let before_release = angel_state(&map, angel).flight;
+        assert!(before_release.height > at_grab.height + CARRY_CLIMB / 2, "climbing");
+        assert!(before_release.speed < at_grab.speed, "slowing down");
+        assert!(headings.windows(2).any(|w| w[0] != w[1]), "zigzagging");
+        map.tick();
+        let v = map.unit(victim).unwrap();
+        assert!(v.motion.velocity.x > 0 && v.motion.velocity.z == 0, "thrown along its own facing (+x)");
+        let before_turn = angel_state(&map, angel).flight.heading;
+        map.tick();
+        assert_eq!(angel_state(&map, angel).flight.heading, before_turn.turned(1024), "turned about at countdown {TURN_ABOUT_AT}");
+    }
+
+    /// Runs until `unit` is dead, at most 500 ticks.
+    fn until_dead(map: &mut GameMap, unit: UnitId) -> bool {
+        (0..500).any(|_| {
+            map.tick();
+            !map.unit(unit).unwrap().is_alive()
+        })
     }
 
     /// Runs until `victim` is grabbed by anyone, at most 2000 ticks.
@@ -631,8 +808,7 @@ mod tests {
         map.unit_mut(angel).unwrap().angel.as_mut().unwrap().kills = last;
         let victim = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(2000), AT.1)).id;
         assert!(until_grabbed(&mut map, victim));
-        map.run(CARRY_TICKS);
-        assert!(!map.unit(victim).unwrap().is_alive(), "its last victim");
+        assert!(until_dead(&mut map, victim), "its last victim");
         map.tick();
         assert!(map.unit(angel).is_none(), "gone after its last kill");
     }

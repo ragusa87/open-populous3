@@ -297,8 +297,8 @@ pub enum Action {
     /// An Angel of Death with no target locked yet (`GameMap::tend_angels_of_death`, angel_of_death.rs).
     Hunting,
     /// An Angel of Death flying towards `target`, a rival angel or a victim to grab, locked until it is close
-    /// enough, dead, or no longer eligible.
-    Closing { target: UnitId },
+    /// enough, dead, or no longer eligible; `wait` ticks before it sets off (angel_of_death::ENGAGE_WAIT).
+    Closing { target: UnitId, wait: Countdown },
     /// An Angel of Death carrying `victim` (`Action::Grabbed`), `left` ticks before it releases it
     /// (`angel_of_death::CARRY_TICKS`).
     Carrying { victim: UnitId, left: Countdown },
