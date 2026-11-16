@@ -941,6 +941,20 @@ pub fn drawn_lift(prev: Option<i32>, now: Option<i32>, ground: i32, alpha: f32, 
     ((from + (now as f32 - from) * alpha - ground as f32) * height_scale).max(0.0)
 }
 
+/// How far under the water a drowning unit is drawn (cells): `sunk` (`Action::Drowning`, terrain height units)
+/// glided `alpha` of the way from the tick before, `DROWN_SINK` less; dying `in_sea`, at the depth it drowned at.
+pub fn drawn_sink(action: &game_core::unit::Action, in_sea: bool, alpha: f32, height_scale: f32) -> f32 {
+    use game_core::unit::{Action, DROWN_DEPTH, DROWN_SINK};
+    match *action {
+        Action::Drowning { sunk } => {
+            let from = sunk.saturating_sub(DROWN_SINK) as f32;
+            (from + (sunk as f32 - from) * alpha) * height_scale
+        }
+        Action::Dying { .. } if in_sea => DROWN_DEPTH as f32 * height_scale,
+        _ => 0.0,
+    }
+}
+
 /// Pulls each unit's sprite, health bar and markers towards the camera (see `toward_eye`), in the view's
 /// own (camera-facing) space, and lifts them off the ground (`drawn_lift`).
 fn pull_to_eye(
@@ -974,7 +988,7 @@ fn pull_to_eye(
         // Aboard, not pulled at all: its hull's near side hides it as it should (seen inside, not in front).
         let pull = if perch.is_some() { PERCH_PULL } else if riding.is_some() { 0.0 } else { PULL_TO_EYE };
         let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, pull);
-        let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale));
+        let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale) - drawn_sink(&u.action, game_core::unit::is_sea(&map.0.terrain, u.cell()), clock.alpha(), params.0.height_scale));
         let bounce = u.map_or(0.0, |u| victory_bounce(*now, bounce_start(&map.0, u.owner), u.id.raw()));
         let shown = perch.or(riding.or(carried).map(|r| r / sizes.get(ObjectGroup::Units))).unwrap_or_default();
         let local = view.rotation.inverse() * (offset + shown) + Vec3::Y * (lift + bounce) * scale;
@@ -1059,6 +1073,18 @@ mod tests {
         assert_eq!(clock.held_lift(i, &map.units[i], &map, 0.5), None, "not grabbed yet");
         map.unit_mut(victim).unwrap().action = Action::Grabbed { by: angel };
         assert_eq!(clock.held_lift(i, &map.units[i], &map, 0.5), Some(500.0));
+    }
+
+    #[test]
+    fn a_drowning_unit_sinks_smoothly_from_the_surface() {
+        let drowning = |sunk| Action::Drowning { sunk };
+        assert_eq!(drawn_sink(&Action::Idle, true, 0.5, 0.01), 0.0);
+        assert_eq!(drawn_sink(&drowning(16), true, 0.0, 0.01), 0.0, "from the surface");
+        assert_eq!(drawn_sink(&drowning(16), true, 0.5, 0.01), 0.08);
+        assert!((drawn_sink(&drowning(240), true, 1.0, 0.01) - 2.4).abs() < 1e-5);
+        let dying = Action::Dying { left: game_core::time::Countdown::new(Ticks::new(5)) };
+        assert!((drawn_sink(&dying, true, 0.0, 0.01) - 2.56).abs() < 1e-5, "dead at the bottom, not back up");
+        assert_eq!(drawn_sink(&dying, false, 0.0, 0.01), 0.0, "on land");
     }
 
     #[test]

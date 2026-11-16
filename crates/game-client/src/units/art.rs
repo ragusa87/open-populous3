@@ -330,7 +330,7 @@ pub fn pose_for(action: &Action, carrying: bool, airborne: bool) -> Pose {
         // no sprite traced for this ritual specifically, `[ours]`.
         Action::BuildingSite(game_core::site::SiteBuildState::Firing { .. }) => Pose::Cast,
         Action::BuildingSite(_) => Pose::Idle,
-        Action::Drowning => Pose::Drown,
+        Action::Drowning { .. } => Pose::Drown,
         Action::Tumbling if airborne => Pose::Flung,
         Action::Tumbling => Pose::Tumble,
         // Ground recovery (units.md "Tumbling"): an ordinary Idle (or holding-wood) pose, not visibly down.

@@ -59,7 +59,7 @@ pub fn shadow_size() -> Vec2 {
 
 /// Whether a unit casts a shadow: not once dead, nor while sinking in the sea.
 pub fn casts_shadow(unit: &Unit) -> bool {
-    !matches!(unit.action, Action::Dead { .. } | Action::Spirit { .. } | Action::Drowning)
+    !matches!(unit.action, Action::Dead { .. } | Action::Spirit { .. } | Action::Drowning { .. })
 }
 
 fn respawn_shadows(
@@ -149,7 +149,7 @@ mod tests {
     fn no_shadow_once_dead_or_drowning() {
         let mut u = Unit::new(game_core::id::Id::from_raw(1), game_core::tribes::TribeId::Blue, UnitKind::Brave, (512, 512));
         assert!(casts_shadow(&u));
-        u.action = Action::Drowning;
+        u.action = Action::Drowning { sunk: 0 };
         assert!(!casts_shadow(&u));
     }
 }

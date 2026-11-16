@@ -43,7 +43,7 @@
 | Building { left } | inside a site with wood on its pile | `BUILD_TICKS` building one piece in (hammer pose: the axe swing, anim 11, until the original hammering anim is found) |
 | Hammering | inside a site under construction with nothing to build yet, or by a plan with no height point free | until wood comes, a point frees up or it is built; counts as free (`Unit::is_free`) |
 | Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
-| Drowning | ground under her becomes open sea (on the ground) | -60 HP per tick, no orders; back to Idle if land returns |
+| Drowning { sunk } | ground under her becomes open sea (on the ground), or landing there after a fall | sinks `DROWN_SINK` (16) a tick, dead at `DROWN_DEPTH` (256): 16 turns whatever its health or kind (pop3-rev-analysis.md "Drowning"); no orders; back to Idle if land returns. Drawn sinking under the water (`units::drawn_sink`), and dying at the bottom: the spirit then climbs out |
 | Attacking { target, to } | `Order::Attack`, spotting | walks to its target (a person, or a building's door), aimed again as it moves; a firewarrior stops in reach and throws (combat.md "Attacking", "Firebolts") |
 | Hacking { building, left, at_door } | an attacker at an enemy building | hacks at it, shaking it and wearing it down, at its door then from inside (combat.md "Attacking a building") |
 | BreakingIn { building, to } | an attacker done at the door of an empty enemy building, or between rounds | walks straight to `to` inside, through its walls, without being one of its people (combat.md "Attacking a building") |
@@ -379,7 +379,8 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
 - At or below the ground under its new position (`Heightmap::height_at`), it lands: `height` None, velocity zero,
   a `Touchdown` with its vertical speed (for the fall damage to come). Higher ground in its way stops it there too.
 - Where it lands (`Unit::touch_down`, judged by its own mobility, so a boat's ground will be the sea):
-  - in the sea: it dies at once whatever its health (Dying, the dying pose), no drowning;
+  - in the sea: it drowns (`Drowning`, the same 16 turns as walking in, pop3-rev-analysis.md "Drowning"), or dies at
+    once with no health left;
   - on ground it can stand on: Idle, or it dies if no health is left;
   - anywhere else (a cliff, a building): to do, it stands up meanwhile.
 - What throws it: `Unit::fling(push, ground)` adds the push to its velocity, lifts it off the ground and makes it
@@ -446,7 +447,8 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
   (`grounded::pick_ground`), X stops. Units never pray anywhere: only at a totem or a vault of knowledge
   (`Order::Worship`, worship.md). C (cast selected spell) makes the player's shaman jump,
   Space looks at her.
-- Dev: `SHAMAN=walk|cast|drown|teleport|worship [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose.
+- Dev: `SHAMAN=walk|cast|teleport|worship [SHOT_FRAME=n] just shot out.png` orders her at start to check a pose;
+  `DROWN=n` sets `n` of the player's people (its shaman last) down in the sea nearest her.
 
 ## Reincarnation site (done: data + rendering)
 - `game_core::site::ReincarnationSite { owner, x, z }`, stored in `GameMap::sites` (one per tribe, sorted by owner).
