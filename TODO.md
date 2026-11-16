@@ -334,11 +334,13 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
 - [ ] The shaman can cast only some spells from a vehicle: Land Bridge is refused (done); check the others in the game (fire-type probably yes).
 - [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
-- [ ] Drowning splash (`splash.rs`, invented): replace with the original's (pop3-rev-analysis.md "Drowning splash"):
-  one effect spawned once at the point where the unit goes under, independent of the unit afterwards, drawn as
-  the camera-facing sprite animation 1304-1319 (sprites.md), lasting 16 ticks (1.33 s), nothing repeated while
-  sinking; the drowning cry and the splash's own sound on that tick. The same splash on debris landing in water
-  and on a drowned person's climbing spirit rise.
+- [x] Drowning splash (pop3-rev-analysis.md "Drowning splash"): its own 16-tick effect (`game_core::splash`,
+  `EffectKind::Splash`) spawned once where someone goes under and where a drowned spirit rises, gone at once on
+  land; drawn (`splash.rs` [client]) as the original's animation 1304-1319 with the original files (16 frames over
+  its life, anchored on its first frame's impact: both ours), our foam, droplets and rings without; a drowning
+  unit faces the camera. Left: the splash on building debris landing in water (debris is client-only,
+  `explosion.rs`), the landing routine that picks dust or splash, the drowning cry (0x11) and splash sound (0x2C):
+  no audio yet.
 - [ ] Use the shaman's wand gesture (81-84), the conversion sit (18), the spy's juggling idle (92); check the tribe layer flag `0x10` mapping. The carbonized brave (97) for lightning is done (`Pose::Carbonized`, "Spells" below).
 
 - [ ] The shaman's reincarnation is not instant: ours waits a fixed `RESPAWN_TICKS` (3 s). Find in the original how long she waits and what it depends on (her tribe's mana, its population, or both), then compute it from that.
