@@ -1035,7 +1035,7 @@ mod tests {
         let angel = map.spawn(TribeId::Red, UnitKind::AngelOfDeath, at).id;
         let ground = map.terrain.height_at(at.0 as u32, at.1 as u32, 512);
         let duration = map.balance.angels.duration;
-        map.unit_mut(angel).unwrap().angel = Some(Angel { flight: Flight { heading: game_core::angle::Angle::ZERO, height: ground + 1000, speed: 0 }, ..Angel::new(0, duration) });
+        map.unit_mut(angel).unwrap().angel = Some(Angel { flight: Flight { height: ground + 1000, ..Flight::default() }, ..Angel::new(0, duration) });
         let victim = map.spawn(TribeId::Blue, UnitKind::Brave, at).id;
         assert_eq!(carried(&map, map.unit(victim).unwrap(), 0.5), None, "not grabbed yet");
         map.unit_mut(victim).unwrap().action = Action::Grabbed { by: angel };

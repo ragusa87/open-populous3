@@ -215,7 +215,7 @@ impl WorldView for AngelOfDeathView {
         let tribe = u.owner.tribe().unwrap_or(TribeId::Blue);
         let (dive_mesh, cruise_mesh) = look.meshes(tribe, theme, levels, objects, assets);
         let (dive_material, cruise_material) = (material(look, u.owner, &mut assets.materials), material(look, u.owner, &mut assets.materials));
-        let flight = u.angel.map_or(Flight { heading: Angle::ZERO, height: 0, speed: 0 }, |a| a.flight);
+        let flight = u.angel.map_or(Flight::default(), |a| a.flight);
         let me = view.id();
         let at = Vec2::new(u.x as f32, u.z as f32) / WORLD_UNITS_PER_CELL as f32;
         view.insert((Grounded { at, half: 0.0 }, Pose::new(flight.height), crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), crate::hover::Hoverable::default(), Transform::default(), Visibility::Hidden));
@@ -234,7 +234,7 @@ impl WorldView for AngelOfDeathView {
     }
 
     fn update(&self, u: &Unit, now: SimNow, ((map, params, ..), _look, assets, grounded, transforms): &mut SystemParamItem<Self::Params>) {
-        let flight = u.angel.map_or(Flight { heading: Angle::ZERO, height: 0, speed: 0 }, |a| a.flight);
+        let flight = u.angel.map_or(Flight::default(), |a| a.flight);
         let mut weights = (0.0, 1.0);
         if let Ok((mut g, mut pose)) = grounded.get_mut(self.me) {
             g.at = Vec2::new(u.x as f32, u.z as f32) / WORLD_UNITS_PER_CELL as f32;
@@ -303,13 +303,13 @@ mod tests {
         let map = GameMap::sandbox_units();
         let u = Unit::new(Id::from_raw(1), TribeId::Blue, UnitKind::AngelOfDeath, (1024, 1024));
         let ground = map.terrain.height_at(1024, 1024, WORLD_UNITS_PER_CELL);
-        assert_eq!(lift(&map, &u, &Flight { heading: Angle::ZERO, height: ground + 600, speed: 0 }, 0.5), 300.0);
-        assert_eq!(lift(&map, &u, &Flight { heading: Angle::ZERO, height: ground - 600, speed: 0 }, 0.5), 0.0);
+        assert_eq!(lift(&map, &u, &Flight { height: ground + 600, ..Flight::default() }, 0.5), 300.0);
+        assert_eq!(lift(&map, &u, &Flight { height: ground - 600, ..Flight::default() }, 0.5), 0.0);
     }
 
     #[test]
     fn the_body_turns_with_its_heading_not_the_unit_kinds_walking_yaw() {
-        let nose = |steps| body_rotation(&Flight { heading: Angle::new(steps), height: 0, speed: 0 }) * Vec3::NEG_Z;
+        let nose = |steps| body_rotation(&Flight { heading: Angle::new(steps), ..Flight::default() }) * Vec3::NEG_Z;
         let game = |r: Vec3| Vec2::new(r.x, -r.z);
         assert!((game(nose(0)) - Vec2::X).length() < 1e-5, "heading 0 is +x");
         assert!((game(nose(512)) - Vec2::Y).length() < 1e-5, "a quarter turn is +z");

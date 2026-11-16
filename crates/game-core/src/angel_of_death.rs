@@ -18,6 +18,8 @@
 //! - The rival-angel scan is map-wide (the trace says "nearby", with no radius); no roar (no audio yet).
 //! - The ramps (`ACCEL`, `TURN_RATE`, `CLIMB_RATE`), `CARRY_SPEED`, the zigzag's period, `CRUISE_HEIGHT`, the
 //!   throw's speed, and the slow-down far off course are `[ours]`.
+//! - Its tilt (`Flight::pitch`/`bank`, drawn only) follows the trace's targets; reading its easing numbers as
+//!   divisors of the gap (`ease_by`) is ours. The scripted approach's own pitch and flight mode 4's turn don't exist here.
 //! - The dive aims at the ground under the victim (its `+0x1C` offset is not traced), floored `MIN_CLEARANCE` over
 //!   the bare terrain at all times (the original floors over building and tree tops when not diving or carrying).
 //! - The angel-vs-angel exchange (`angel_fight`) is our own reading of "both sides always take damage, scaled by
@@ -99,18 +101,63 @@ pub const FIGHT_DAMAGE_DIVISOR: u16 = 4;
 
 /// An Angel of Death's own flight: never through the generic `Motion`/physics (no gravity, no touchdown — it
 /// never lands).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Flight {
     pub heading: Angle,
     pub height: i32,
     /// World units a tick.
     pub speed: i32,
+    /// Its body's tilt, drawn only (2048 a turn): nose up, and leaning into the turn (towards a growing heading).
+    pub pitch: i32,
+    pub bank: i32,
 }
 
 /// `heading` turned towards `want` by at most `rate`.
 pub fn steer(heading: Angle, want: Angle, rate: i32) -> Angle {
     let off = Angle::new(want.steps().wrapping_sub(heading.steps()) % crate::angle::TURN).signed();
     heading.turned(off.clamp(-rate, rate))
+}
+
+/// Its tilt (pop3-rev-analysis.md "Angel of Death flight pose, wing beat and dive" "Tilt"): nose up by up to
+/// `PITCH_MAX` with its speed deficit, leaning into turns sharper than `BANK_FROM` by up to `BANK_MAX`, each eased
+/// by its own easing number; level (`LEVEL_EASING`) while closing in, and while carrying for the pitch.
+pub const PITCH_MAX: i32 = 455;
+pub const PITCH_EASING: i32 = 45;
+pub const BANK_FROM: i32 = 0x200;
+pub const BANK_MAX: i32 = 0x155;
+pub const BANK_EASING: i32 = 0x38;
+pub const LEVEL_EASING: i32 = 1;
+
+/// `value` eased towards `target` by `1 / easing` of the gap, at least one step (`[ours]`: the original's easing
+/// helper is read by shape only; as a divisor its 1 levels at once and its 45 and 0x38 ease gently).
+pub fn ease_by(value: i32, target: i32, easing: i32) -> i32 {
+    let gap = target - value;
+    let step = gap / easing.max(1);
+    value + if step == 0 { gap.signum() } else { step }
+}
+
+/// How far nose up it wants to be at `speed` short of `target_speed`: the full deficit (100) at a third of it or less.
+pub fn pitch_target(speed: i32, target_speed: i32) -> i32 {
+    if speed >= target_speed {
+        return 0;
+    }
+    let deficit = if speed <= target_speed / 3 { 100 } else { (target_speed - speed).clamp(0, 100) };
+    deficit * PITCH_MAX / 100
+}
+
+/// How far it leans with its heading `error` (signed) from where it wants to go.
+pub fn bank_target(error: i32) -> i32 {
+    if error.abs() > BANK_FROM { error.signum() * BANK_MAX.min(error.abs() / 3) } else { 0 }
+}
+
+/// One tick of its tilt in `action`, `turn_error` off the heading it wants.
+fn tilt(flight: &mut Flight, action: Action, turn_error: i32) {
+    let closing = matches!(action, Action::Closing { .. });
+    flight.pitch = match action {
+        Action::Closing { .. } | Action::Carrying { .. } => ease_by(flight.pitch, 0, LEVEL_EASING),
+        _ => ease_by(flight.pitch, pitch_target(flight.speed, SPEED), PITCH_EASING),
+    };
+    flight.bank = if closing { ease_by(flight.bank, 0, LEVEL_EASING) } else { ease_by(flight.bank, bank_target(turn_error), BANK_EASING) };
 }
 
 /// One tick of its dive from `height` towards `target`, `dist` away at `speed` (pop3-rev-analysis.md "Angel of Death
@@ -157,7 +204,7 @@ pub struct Angel {
 impl Angel {
     /// A fresh angel over ground at `ground`, cruising, to live `duration`.
     pub fn new(ground: i32, duration: crate::balance::Turns) -> Angel {
-        Angel { flight: Flight { heading: Angle::ZERO, height: ground + CRUISE_HEIGHT, speed: 0 }, kills: 0, left: Countdown::new(Ticks::new(duration.0)), carry_top: ground + CRUISE_HEIGHT }
+        Angel { flight: Flight { height: ground + CRUISE_HEIGHT, ..Flight::default() }, kills: 0, left: Countdown::new(Ticks::new(duration.0)), carry_top: ground + CRUISE_HEIGHT }
     }
 }
 
@@ -337,6 +384,7 @@ impl GameMap {
 
         let mut events = self.angel_panic(pos, owner);
         let mut grabbed = false;
+        let mut turn_error = 0;
 
         match self.units[i].action {
             Action::Hunting => {
@@ -385,7 +433,7 @@ impl GameMap {
                     if torus_dist2(pos, r) <= (FIGHT_RANGE as i64).pow(2) {
                         events.extend(self.angel_fight(i, rival));
                     } else {
-                        self.fly_towards(i, &mut flight, r, TURN_RATE);
+                        turn_error = self.fly_towards(i, &mut flight, r, TURN_RATE);
                     }
                 } else {
                     self.units[i].action = Action::Hunting;
@@ -394,6 +442,7 @@ impl GameMap {
             _ => {}
         }
         flight.height = flight.height.max(ground + MIN_CLEARANCE);
+        tilt(&mut flight, self.units[i].action, turn_error);
         if grabbed {
             angel.carry_top = flight.height + CARRY_CLIMB;
         }
@@ -427,7 +476,7 @@ impl GameMap {
             (false, None) => within_reach(pos, aim),
         };
         if !near {
-            self.fly_towards(i, flight, aim, if rival_angel { TURN_RATE } else { TURN_RATE * CLOSING_TURN_FACTOR });
+            let _ = self.fly_towards(i, flight, aim, if rival_angel { TURN_RATE } else { TURN_RATE * CLOSING_TURN_FACTOR });
             return Vec::new();
         }
         if rival_angel {
@@ -466,14 +515,17 @@ impl GameMap {
 
     /// One tick of flight of angel `i` towards `to`: turning and speeding up as fast as it can, slowing right down
     /// while far off course.
-    fn fly_towards(&mut self, i: usize, flight: &mut Flight, to: (u16, u16), turn_rate: i32) {
+    /// Returns its heading error (signed, before turning).
+    fn fly_towards(&mut self, i: usize, flight: &mut Flight, to: (u16, u16), turn_rate: i32) -> i32 {
         let pos = (self.units[i].x, self.units[i].z);
         let want = angle::atan2(torus_delta(pos.1, to.1), torus_delta(pos.0, to.0));
+        let error = Angle::new(want.steps().wrapping_sub(flight.heading.steps()) % crate::angle::TURN).signed();
         flight.heading = steer(flight.heading, want, turn_rate);
         let off = Angle::new(want.steps().wrapping_sub(flight.heading.steps()) % crate::angle::TURN).signed().abs();
         let cruise = if off > crate::angle::TURN as i32 / 4 { SPEED / 4 } else { SPEED };
         flight.speed = ease(flight.speed, cruise, ACCEL);
         self.fly_on(i, flight);
+        error
     }
 
     /// Angel `i` moves one tick along its own heading at its own speed.
@@ -571,7 +623,7 @@ mod tests {
         let u = map.spawn(owner, UnitKind::AngelOfDeath, at);
         let id = u.id;
         u.action = Action::Hunting;
-        u.angel = Some(Angel { flight: Flight { heading: Angle::ZERO, height: 2000, speed: 0 }, ..Angel::new(0, crate::balance::Balance::ours().angels.duration) });
+        u.angel = Some(Angel { flight: Flight { height: 2000, ..Flight::default() }, ..Angel::new(0, crate::balance::Balance::ours().angels.duration) });
         id
     }
 
@@ -674,6 +726,38 @@ mod tests {
         assert_eq!(dive_step(1000, 100, 300, 150), 1000 - 450 / 2, "within twice: halved");
         assert_eq!(dive_step(101, 100, 0, 150), 100, "never overshoots");
         assert_eq!(dive_step(100, 100, 3000, 150), 100);
+    }
+
+    #[test]
+    fn easing_moves_a_share_of_the_gap_at_least_a_step_and_one_snaps() {
+        assert_eq!(ease_by(0, 450, 45), 10);
+        assert_eq!(ease_by(0, 20, 45), 1, "at least a step");
+        assert_eq!(ease_by(300, 0, 1), 0, "1: at once");
+        assert_eq!(ease_by(-300, 0, 0x38), -300 + 300 / 0x38);
+        assert_eq!(ease_by(5, 5, 45), 5);
+    }
+
+    #[test]
+    fn nose_up_with_the_speed_deficit_and_lean_only_into_sharp_turns() {
+        assert_eq!(pitch_target(SPEED, SPEED), 0);
+        assert_eq!(pitch_target(SPEED / 3, SPEED), PITCH_MAX, "a third or less: the full deficit");
+        assert_eq!(pitch_target(SPEED - 30, SPEED), 30 * PITCH_MAX / 100);
+        assert_eq!(bank_target(BANK_FROM), 0, "90 degrees: still level");
+        assert_eq!(bank_target(600), 200);
+        assert_eq!(bank_target(-1023), -BANK_MAX, "capped, the other way");
+    }
+
+    #[test]
+    fn level_while_closing_in_tilted_otherwise() {
+        let mut f = Flight { pitch: 300, bank: 300, ..Flight::default() };
+        tilt(&mut f, Action::Closing { target: UnitId::from_raw(1), wait: Countdown::new(Ticks::ZERO) }, 1000);
+        assert_eq!((f.pitch, f.bank), (0, 0), "closing in: level at once");
+        tilt(&mut f, Action::Hunting, 1000);
+        assert!(f.pitch > 0 && f.bank > 0, "slow and turning hard: nose up, leaning in");
+        let mut f = Flight { pitch: 300, ..Flight::default() };
+        tilt(&mut f, Action::Carrying { victim: UnitId::from_raw(1), left: Countdown::new(CARRY_TICKS) }, 1000);
+        assert_eq!(f.pitch, 0, "carrying: pitch level");
+        assert!(f.bank > 0, "but banking");
     }
 
     #[test]
