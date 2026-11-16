@@ -9,19 +9,20 @@
 //! It hunts a rival angel first, else the nearest eligible enemy anywhere on the map; waits `ENGAGE_WAIT` on a
 //! plain victim, swoops down onto it (`dive_step`, turning twice as fast), grabs it within `GRAB_REACH`
 //! (`GRAB_RANGE_HOUSED` inside a building, pulled out at its centre or its tower post, the building worn; a passenger
-//! taken off its vehicle) at double speed, climbs `CARRY_CLIMB` zigzagging, throws it at countdown `RELEASE_AT` along its own facing, to die
+//! taken off its vehicle) at double speed, climbs `CARRY_CLIMB` curving to one side (or hanging still, its way ahead blocked), throws it at countdown `RELEASE_AT` along its own facing, to die
 //! once down, and turns about. Every death of someone it grabbed is one of its kills; it ends after `AOD_DURATION`
 //! or `AOD_KILL_COUNT` kills (`balance::Angels`), or killed by a rival angel, and is removed outright. Firewarriors
 //! can shoot it (`attack::may_shoot`) for 25/256 of a bolt.
 //!
 //! Not from the trace, tagged here rather than silently guessed at:
 //! - The rival-angel scan is map-wide (the trace says "nearby", with no radius); no roar (no audio yet).
-//! - The ramps (`ACCEL`, `TURN_RATE`, `CLIMB_RATE`), `CARRY_SPEED`, the zigzag's period, `CRUISE_HEIGHT`, the
+//! - The ramps (`ACCEL`, `TURN_RATE`, `CLIMB_RATE`), `CARRY_SPEED`, `CRUISE_HEIGHT`, the
 //!   throw's speed, and the slow-down far off course are `[ours]`.
-//! - Its tilt (`Flight::pitch`/`bank`, drawn only) follows the trace's targets; reading its easing numbers as
-//!   divisors of the gap (`ease_by`) is ours. The scripted approach's own pitch and flight mode 4's turn don't exist here.
-//! - The dive aims at the victim's own height (its `+0x1C` offset is not traced); the building and tree tops it
-//!   clears when not swooping are `BUILDING_TOP`/`TREE_TOP` over the ground, ours.
+//! - Its tilt (`Flight::pitch`/`bank`, drawn only) is traced but for the bank's rate back to level. The scripted
+//!   approach (which needs the local player's camera) doesn't exist here.
+//! - The dive aims at the victim's own standing height; a drum tower's platform (`TOWER_PLATFORM`) and the building
+//!   and tree tops it clears when not swooping (`BUILDING_TOP`/`TREE_TOP`) are ours. The carry's look-ahead skips
+//!   the original's untraced per-cell bitmap.
 //! - The angel-vs-angel exchange (`angel_fight`) is our own reading of "both sides always take damage, scaled by
 //!   the stronger side's own health, so the stronger snowballs": both lose a quarter of the winner's current
 //!   health each clash, the loser reeling `FIGHT_STAGGER` while the winner closes in again.
@@ -80,15 +81,23 @@ pub const BUILDING_TOP: i32 = 400;
 pub const TREE_TOP: i32 = 300;
 /// Ticks between locking onto a plain victim and setting off (the trace's own "wait 2 ticks").
 pub const ENGAGE_WAIT: Ticks = Ticks::new(2);
-/// Its speed is doubled the instant it grabs, then eases down to `CARRY_SPEED` (`[ours]`: "slow down") while it
-/// climbs to `CARRY_CLIMB` over its height at the grab, `CARRY_CLIMB_RATE` a tick, and zigzags `ZIGZAG` steps a
-/// tick, the other way every `ZIGZAG_EVERY` ticks (`[ours]`: only the ±22 is traced).
+/// Its speed is doubled the instant it grabs, then eases down to `CARRY_SPEED` (half its own) while it climbs to
+/// `CARRY_CLIMB` over its height at the grab, `CARRY_CLIMB_RATE` a tick (pop3-rev-analysis.md "Angel of Death
+/// flight pose, wing beat and dive" "Carry turn"). With `LOOK_AHEAD_CELLS` ahead clear it curves `CARRY_TURN` a
+/// tick to the side its victim's id parity picks, banked `CARRY_BANK`, whenever the way along the new heading is
+/// clear too; blocked at the grab, it slows to a standstill instead, level, until it turns about.
 pub const GRAB_SPEED_FACTOR: i32 = 2;
 pub const CARRY_SPEED: i32 = SPEED / 2;
 pub const CARRY_CLIMB: i32 = 800;
 pub const CARRY_CLIMB_RATE: i32 = 48;
-pub const ZIGZAG: i32 = 22;
-pub const ZIGZAG_EVERY: u32 = 4;
+pub const CARRY_TURN: i32 = 22;
+pub const CARRY_BANK: i32 = 170;
+pub const LOOK_AHEAD_CELLS: i32 = 5;
+/// `[ours]`: how high a guard stands on a drum tower's platform, terrain height units (traced: the slot's height
+/// from the tower's shape, which the simulation does not keep); a boat hut's and an airship hut's are traced.
+pub const TOWER_PLATFORM: i32 = 250;
+pub const BOAT_HUT_STANDING: i32 = 70;
+pub const AIRSHIP_HUT_STANDING: i32 = 116;
 /// The carry countdown it lets go at, and the one it turns about at (180 degrees).
 pub const RELEASE_AT: u32 = 8;
 pub const TURN_ABOUT_AT: u32 = 7;
@@ -123,22 +132,22 @@ pub fn steer(heading: Angle, want: Angle, rate: i32) -> Angle {
     heading.turned(off.clamp(-rate, rate))
 }
 
-/// Its tilt (pop3-rev-analysis.md "Angel of Death flight pose, wing beat and dive" "Tilt"): nose up by up to
-/// `PITCH_MAX` with its speed deficit, leaning into turns sharper than `BANK_FROM` by up to `BANK_MAX`, each eased
-/// by its own easing number; level (`LEVEL_EASING`) while closing in, and while carrying for the pitch.
+/// Its tilt (pop3-rev-analysis.md "Angel of Death flight pose, wing beat and dive" "Tilt"), each moved a constant
+/// rate a tick: nose up by up to `PITCH_MAX` with its speed deficit at `PITCH_RATE`, back to level at `LEVEL_RATE`
+/// (closing in, carrying, at full speed); leaning into turns sharper than `BANK_FROM` by up to `BANK_MAX` at
+/// `BANK_RATE`, level where the pitch is but for the carry's own turn. Going back level at `BANK_RATE` is ours.
 pub const PITCH_MAX: i32 = 455;
-pub const PITCH_EASING: i32 = 45;
+pub const PITCH_RATE: i32 = 45;
+pub const LEVEL_RATE: i32 = 1;
 pub const BANK_FROM: i32 = 0x200;
 pub const BANK_MAX: i32 = 0x155;
-pub const BANK_EASING: i32 = 0x38;
-pub const LEVEL_EASING: i32 = 1;
+pub const BANK_RATE: i32 = 0x38;
 
-/// `value` eased towards `target` by `1 / easing` of the gap, at least one step (`[ours]`: the original's easing
-/// helper is read by shape only; as a divisor its 1 levels at once and its 45 and 0x38 ease gently).
-pub fn ease_by(value: i32, target: i32, easing: i32) -> i32 {
-    let gap = target - value;
-    let step = gap / easing.max(1);
-    value + if step == 0 { gap.signum() } else { step }
+/// `angle` moved `rate` towards `target` the short way round (2048 a turn), snapping onto it within `rate`.
+pub fn step_angle(angle: i32, target: i32, rate: i32) -> i32 {
+    let gap = Angle::new((target - angle).rem_euclid(crate::angle::TURN as i32) as u32).signed();
+    let moved = if gap.abs() > rate { angle + gap.signum() * rate } else { target };
+    Angle::new(moved.rem_euclid(crate::angle::TURN as i32) as u32).signed()
 }
 
 /// How far nose up it wants to be at `speed` short of `target_speed`: the full deficit (100) at a third of it or less.
@@ -155,14 +164,12 @@ pub fn bank_target(error: i32) -> i32 {
     if error.abs() > BANK_FROM { error.signum() * BANK_MAX.min(error.abs() / 3) } else { 0 }
 }
 
-/// One tick of its tilt in `action`, `turn_error` off the heading it wants.
-fn tilt(flight: &mut Flight, action: Action, turn_error: i32) {
-    let closing = matches!(action, Action::Closing { .. });
-    flight.pitch = match action {
-        Action::Closing { .. } | Action::Carrying { .. } => ease_by(flight.pitch, 0, LEVEL_EASING),
-        _ => ease_by(flight.pitch, pitch_target(flight.speed, SPEED), PITCH_EASING),
-    };
-    flight.bank = if closing { ease_by(flight.bank, 0, LEVEL_EASING) } else { ease_by(flight.bank, bank_target(turn_error), BANK_EASING) };
+/// One tick of its tilt in `action`, `turn_error` off the heading it wants, its carry having turned `carry_turn`.
+fn tilt(flight: &mut Flight, action: Action, turn_error: i32, carry_turn: i32) {
+    let level = matches!(action, Action::Closing { .. } | Action::Carrying { .. }) || flight.speed >= SPEED;
+    flight.pitch = if level { step_angle(flight.pitch, 0, LEVEL_RATE) } else { step_angle(flight.pitch, pitch_target(flight.speed, SPEED), PITCH_RATE) };
+    let bank = if carry_turn != 0 { carry_turn.signum() * CARRY_BANK } else if level { 0 } else { bank_target(turn_error) };
+    flight.bank = step_angle(flight.bank, bank, BANK_RATE);
 }
 
 /// One tick of its dive from `height` towards `target`, `dist` away at `speed` (pop3-rev-analysis.md "Angel of Death
@@ -190,9 +197,9 @@ pub fn within_reach(at: (u16, u16), aim: (u16, u16)) -> bool {
     torus_delta(at.0, aim.0).abs() < GRAB_REACH && torus_delta(at.1, aim.1).abs() < GRAB_REACH
 }
 
-/// The zigzag's own turn on the tick `left` ticks before the end of a carry: `ZIGZAG` one way, then the other.
-pub fn zigzag(left: u32) -> i32 {
-    if (left / ZIGZAG_EVERY) % 2 == 0 { ZIGZAG } else { -ZIGZAG }
+/// The side a carry curves to: one way for a victim with an odd id, the other for an even one.
+pub fn carry_turn(victim: UnitId) -> i32 {
+    if victim.raw() % 2 == 1 { CARRY_TURN } else { -CARRY_TURN }
 }
 
 /// An Angel of Death's own state (`Unit::angel`): its flight, the kills it has made and how long it has left to
@@ -204,12 +211,14 @@ pub struct Angel {
     pub left: Countdown,
     /// The height it climbs to while carrying: `CARRY_CLIMB` over where it grabbed.
     pub carry_top: i32,
+    /// Its way ahead was blocked when it grabbed: it stands still in the air until it turns about.
+    pub carry_blocked: bool,
 }
 
 impl Angel {
     /// A fresh angel over ground at `ground`, cruising, to live `duration`.
     pub fn new(ground: i32, duration: crate::balance::Turns) -> Angel {
-        Angel { flight: Flight { height: ground + CRUISE_HEIGHT, ..Flight::default() }, kills: 0, left: Countdown::new(Ticks::new(duration.0)), carry_top: ground + CRUISE_HEIGHT }
+        Angel { flight: Flight { height: ground + CRUISE_HEIGHT, ..Flight::default() }, kills: 0, left: Countdown::new(Ticks::new(duration.0)), carry_top: ground + CRUISE_HEIGHT, carry_blocked: false }
     }
 }
 
@@ -378,7 +387,7 @@ impl GameMap {
             Action::Closing { target, .. } => {
                 if let Some(t) = self.unit(target) {
                     let (aim, _) = self.grab_point(t);
-                    let below = t.motion.height.unwrap_or_else(|| self.terrain.height_at(aim.0 as u32, aim.1 as u32, WORLD_UNITS_PER_CELL));
+                    let below = t.motion.height.unwrap_or_else(|| self.terrain.height_at(aim.0 as u32, aim.1 as u32, WORLD_UNITS_PER_CELL) + self.standing_offset(t));
                     let dist = crate::unit::isqrt(torus_dist2(pos, aim) as _) as i32;
                     flight.height = dive_step(flight.height, below, dist, flight.speed);
                 }
@@ -390,6 +399,7 @@ impl GameMap {
         let mut events = self.angel_panic(pos, owner);
         let mut grabbed = false;
         let mut turn_error = 0;
+        let mut turned = 0;
 
         match self.units[i].action {
             Action::Hunting => {
@@ -411,13 +421,18 @@ impl GameMap {
                 let done = left.tick();
                 let remaining = left.left().get();
                 let held = self.unit(victim).is_some_and(|v| v.action == Action::Grabbed { by: id });
-                if remaining >= RELEASE_AT {
-                    flight.heading = flight.heading.turned(zigzag(remaining));
+                if remaining > TURN_ABOUT_AT && !angel.carry_blocked {
+                    let next = flight.heading.turned(carry_turn(victim));
+                    if self.way_clear(pos, next) {
+                        flight.heading = next;
+                        turned = carry_turn(victim);
+                    }
                 }
                 if remaining == TURN_ABOUT_AT {
                     flight.heading = flight.heading.turned(crate::angle::TURN as i32 / 2);
+                    angel.carry_blocked = false;
                 }
-                flight.speed = ease(flight.speed, CARRY_SPEED, ACCEL);
+                flight.speed = ease(flight.speed, if angel.carry_blocked { 0 } else { CARRY_SPEED }, ACCEL);
                 self.fly_on(i, &flight);
                 if held && let Some(vi) = self.unit_index(victim) {
                     (self.units[vi].x, self.units[vi].z) = (self.units[i].x, self.units[i].z);
@@ -448,9 +463,10 @@ impl GameMap {
         }
         let swooping = matches!(self.units[i].action, Action::Closing { .. } | Action::Carrying { .. });
         flight.height = flight.height.max(if swooping { ground } else { self.top_under(pos, ground) } + MIN_CLEARANCE);
-        tilt(&mut flight, self.units[i].action, turn_error);
+        tilt(&mut flight, self.units[i].action, turn_error, turned);
         if grabbed {
             angel.carry_top = flight.height + CARRY_CLIMB;
+            angel.carry_blocked = !self.way_clear((self.units[i].x, self.units[i].z), flight.heading);
         }
         angel.flight = flight;
         self.units[i].angel = Some(angel);
@@ -464,6 +480,29 @@ impl GameMap {
         let cell = crate::tree::cell_at(pos);
         let tree = self.trees.iter().any(|t| t.is_visible() && t.cell() == cell);
         ground + if building { BUILDING_TOP } else if tree { TREE_TOP } else { 0 }
+    }
+
+    /// How high `t` stands over the ground on the building it is in: a drum tower's platform, a boat or airship
+    /// hut's own height, 0 anywhere else (the original's `+0x1C`, pop3-rev-analysis.md "Dive to grab").
+    fn standing_offset(&self, t: &Unit) -> i32 {
+        use crate::building::BuildingKind;
+        match t.inside.and_then(|inside| self.building(inside.building)).map(|b| b.kind) {
+            Some(BuildingKind::DrumTower) => TOWER_PLATFORM,
+            Some(BuildingKind::BoatHut) => BOAT_HUT_STANDING,
+            Some(BuildingKind::AirshipHut) => AIRSHIP_HUT_STANDING,
+            _ => 0,
+        }
+    }
+
+    /// Whether the `LOOK_AHEAD_CELLS` cells ahead of `from` along `heading` hold no building and no vehicle (the
+    /// original also checks a per-cell map bitmap whose meaning is not traced).
+    fn way_clear(&self, from: (u16, u16), heading: Angle) -> bool {
+        (1..=LOOK_AHEAD_CELLS).all(|k| {
+            let (dx, dz) = angle::rotate((k * WORLD_UNITS_PER_CELL as i32, 0), heading.steps());
+            let p = (from.0.wrapping_add(dx as u16), from.1.wrapping_add(dz as u16));
+            let cell = ((p.0 as u32 / WORLD_UNITS_PER_CELL) as i32, (p.1 as u32 / WORLD_UNITS_PER_CELL) as i32);
+            !self.buildings.iter().any(|b| b.covers(p, 0)) && !self.vehicles.iter().any(|(_, v)| v.cell() == cell)
+        })
     }
 
     /// Lets go of victim `vi` from `height`: it tumbles off towards a point `THROW_DISTANCE` along its own facing, its
@@ -744,12 +783,13 @@ mod tests {
     }
 
     #[test]
-    fn easing_moves_a_share_of_the_gap_at_least_a_step_and_one_snaps() {
-        assert_eq!(ease_by(0, 450, 45), 10);
-        assert_eq!(ease_by(0, 20, 45), 1, "at least a step");
-        assert_eq!(ease_by(300, 0, 1), 0, "1: at once");
-        assert_eq!(ease_by(-300, 0, 0x38), -300 + 300 / 0x38);
-        assert_eq!(ease_by(5, 5, 45), 5);
+    fn tilt_moves_a_constant_rate_the_short_way_and_snaps_the_last_part() {
+        assert_eq!(step_angle(0, 455, PITCH_RATE), PITCH_RATE);
+        assert_eq!(step_angle(440, 455, PITCH_RATE), 455, "within its rate: snaps");
+        assert_eq!(step_angle(300, 0, LEVEL_RATE), 299);
+        assert_eq!(step_angle(-980, 1000, BANK_RATE), 2048 - 980 - BANK_RATE, "the short way, across the half turn");
+        assert_eq!(step_angle(-1000, 1000, BANK_RATE), 1000, "snapping across it");
+        assert_eq!(step_angle(5, 5, 45), 5);
     }
 
     #[test]
@@ -763,16 +803,71 @@ mod tests {
     }
 
     #[test]
-    fn level_while_closing_in_tilted_otherwise() {
+    fn closing_in_it_keeps_its_pitch_levelling_a_step_a_tick_and_banks_only_into_the_carry_turn() {
+        let closing = Action::Closing { target: UnitId::from_raw(1), wait: Countdown::new(Ticks::ZERO) };
+        let carrying = Action::Carrying { victim: UnitId::from_raw(1), left: Countdown::new(CARRY_TICKS) };
         let mut f = Flight { pitch: 300, bank: 300, ..Flight::default() };
-        tilt(&mut f, Action::Closing { target: UnitId::from_raw(1), wait: Countdown::new(Ticks::ZERO) }, 1000);
-        assert_eq!((f.pitch, f.bank), (0, 0), "closing in: level at once");
-        tilt(&mut f, Action::Hunting, 1000);
-        assert!(f.pitch > 0 && f.bank > 0, "slow and turning hard: nose up, leaning in");
-        let mut f = Flight { pitch: 300, ..Flight::default() };
-        tilt(&mut f, Action::Carrying { victim: UnitId::from_raw(1), left: Countdown::new(CARRY_TICKS) }, 1000);
-        assert_eq!(f.pitch, 0, "carrying: pitch level");
-        assert!(f.bank > 0, "but banking");
+        tilt(&mut f, closing, 1000, 0);
+        assert_eq!((f.pitch, f.bank), (300 - LEVEL_RATE, 300 - BANK_RATE), "closing in: back to level, the pitch hardly");
+        let mut f = Flight::default();
+        tilt(&mut f, Action::Hunting, 1000, 0);
+        assert_eq!((f.pitch, f.bank), (PITCH_RATE, BANK_RATE), "slow and turning hard: nose up, leaning in");
+        let mut f = Flight { speed: SPEED, ..Flight::default() };
+        tilt(&mut f, Action::Hunting, 1000, 0);
+        assert_eq!((f.pitch, f.bank), (0, 0), "at full speed: level");
+        let mut f = Flight::default();
+        tilt(&mut f, carrying, 0, -CARRY_TURN);
+        assert_eq!(f.bank, -BANK_RATE, "into the carry's own turn");
+        (0..10).for_each(|_| tilt(&mut f, carrying, 0, -CARRY_TURN));
+        assert_eq!(f.bank, -CARRY_BANK);
+        tilt(&mut f, carrying, 0, 0);
+        assert_eq!(f.bank, -CARRY_BANK + BANK_RATE, "back towards level on a tick it kept its heading");
+    }
+
+    #[test]
+    fn a_guard_on_a_tower_or_at_a_boat_or_airship_hut_stands_above_the_ground() {
+        use crate::building::BuildingKind;
+        for (kind, offset) in [(BuildingKind::DrumTower, TOWER_PLATFORM), (BuildingKind::BoatHut, BOAT_HUT_STANDING), (BuildingKind::AirshipHut, AIRSHIP_HUT_STANDING), (BuildingKind::Hut { size: 1 }, 0)] {
+            let (map, victim, _) = housed_in(kind);
+            assert_eq!(map.standing_offset(map.unit(victim).unwrap()), offset, "{kind:?}");
+        }
+        let mut map = bare();
+        let open = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
+        assert_eq!(map.standing_offset(map.unit(open).unwrap()), 0);
+    }
+
+    #[test]
+    fn the_way_ahead_is_blocked_by_a_building_or_a_vehicle_within_five_cells() {
+        use crate::building::{Building, BuildingKind};
+        let mut map = bare();
+        assert!(map.way_clear(AT, Angle::ZERO));
+        let ahead = AT.0.wrapping_add(4 * WORLD_UNITS_PER_CELL as u16);
+        let shift = BuildingKind::DrumTower.centre_shift();
+        map.buildings.push(Building::new(BuildingKind::DrumTower, TribeId::Red, ahead.wrapping_sub(shift), AT.1.wrapping_sub(shift), 0));
+        assert!(!map.way_clear(AT, Angle::ZERO), "a building 4 cells along +x");
+        assert!(map.way_clear(AT, Angle::new(1024)), "the other way is clear");
+        let far = AT.0.wrapping_add(7 * WORLD_UNITS_PER_CELL as u16);
+        map.buildings.clear();
+        map.buildings.push(Building::new(BuildingKind::DrumTower, TribeId::Red, far.wrapping_sub(shift), AT.1.wrapping_sub(shift), 0));
+        assert!(map.way_clear(AT, Angle::ZERO), "beyond 5 cells");
+    }
+
+    #[test]
+    fn blocked_at_the_grab_it_hangs_still_and_level_until_it_turns_about() {
+        let mut map = bare();
+        let angel = spawn_angel(&mut map, TribeId::Blue, AT);
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(2000), AT.1)).id;
+        assert!(until_grabbed(&mut map, victim));
+        map.unit_mut(angel).unwrap().angel.as_mut().unwrap().carry_blocked = true;
+        let heading = angel_state(&map, angel).flight.heading;
+        map.run(Ticks::new(CARRY_TICKS.get() - RELEASE_AT - 1));
+        let f = angel_state(&map, angel).flight;
+        assert_eq!((f.heading, f.bank), (heading, 0), "no curve, no lean");
+        assert!(f.speed < SPEED / 4, "slowing to a standstill: {}", f.speed);
+        map.run(Ticks::new(2));
+        let a = angel_state(&map, angel);
+        assert_eq!(a.flight.heading, heading.turned(1024), "turned about");
+        assert!(!a.carry_blocked && a.flight.speed > 0, "and off again");
     }
 
     #[test]
@@ -829,10 +924,9 @@ mod tests {
     }
 
     #[test]
-    fn the_zigzag_swings_one_way_then_the_other() {
-        let swings: Vec<i32> = (0..ZIGZAG_EVERY * 2).map(zigzag).collect();
-        assert!(swings[..ZIGZAG_EVERY as usize].iter().all(|&z| z == ZIGZAG));
-        assert!(swings[ZIGZAG_EVERY as usize..].iter().all(|&z| z == -ZIGZAG));
+    fn the_carry_curves_to_the_side_its_victims_id_parity_picks() {
+        assert_eq!(carry_turn(UnitId::from_raw(7)), CARRY_TURN);
+        assert_eq!(carry_turn(UnitId::from_raw(8)), -CARRY_TURN);
     }
 
     #[test]
@@ -861,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn the_carry_doubles_its_speed_climbs_zigzags_throws_along_the_victims_facing_and_turns_about() {
+    fn the_carry_doubles_its_speed_climbs_curves_throws_along_the_victims_facing_and_turns_about() {
         let mut map = bare();
         let angel = spawn_angel(&mut map, TribeId::Blue, AT);
         let victim = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(2000), AT.1)).id;
@@ -877,7 +971,7 @@ mod tests {
         let before_release = angel_state(&map, angel).flight;
         assert!(before_release.height > at_grab.height + CARRY_CLIMB / 2, "climbing");
         assert!(before_release.speed < at_grab.speed, "slowing down");
-        assert!(headings.windows(2).any(|w| w[0] != w[1]), "zigzagging");
+        assert!(headings.windows(2).all(|w| w[1] == w[0].turned(carry_turn(victim))), "a steady curve to one side");
         map.tick();
         let v = map.unit(victim).unwrap();
         assert!(v.motion.velocity.x > 0 && v.motion.velocity.z == 0, "thrown along its own facing (+x)");

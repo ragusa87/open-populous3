@@ -554,11 +554,30 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   unchecked "Angel of Death against its trace" item below for what is left. Also still open: totem gifts' own Angel of Death reward, trigger type 5 and level 5's
   winged-death totem (`TODO.md` "Totem gifts", "Trigger semantics", "Level 5") don't spawn one yet — nothing
   calls `angel_of_death::cast` but the spell book/panel UI (already wired before this session) and tests.
+- [ ] Angel of Death visuals against the trace (pop3-rev-analysis.md "Angel of Death flight pose, wing beat and
+  dive"): done — one morphed mesh (`morph0-N.dat`, `pop3_format::morph`), beating while closing in and carrying,
+  gliding otherwise, the 6-turn transition through 114-116, the dive to grab, the 48-a-turn carry climb, the
+  504 grab square, the doubled turn rate while closing in, pitch and bank at their traced rates, the carry's
+  one-sided curve or standstill, a guard's standing height (spells.md row 13). Left:
+  - Guesses: the building and tree tops it clears when not swooping (`BUILDING_TOP` 400, `TREE_TOP` 300) and a
+    drum tower's platform a guard stands on (`TOWER_PLATFORM` 250): the simulation keeps no object heights; the
+    bank's rate back to level (56, the trace gives only the rate into a turn).
+  - The carry look-ahead skips the original's per-cell map bitmap (meaning not traced, pop3-rev-analysis.md "Angel
+    of Death flight pose, wing beat and dive" "Not traced").
+  - The climb-out freeze on key frame 112 (same section, "Climb-out freeze"): only the "statue to AoD"
+    set-piece's own angel ever enters it; a cast angel never does. Nothing to do until that set-piece exists.
+  - The scripted approach (same section, "Scripted approach"): before its first target scan the original angel
+    flies to a point 6656 units off the local player's camera at height 2816, slows facing the camera for 32
+    turns (roaring, pitched -45° at 34 a turn), then turns away and descends to 768 before hunting; skipped
+    in cheat mode, after 120 turns, beyond 12288 units or if the camera moves. Not in ours: the camera is not
+    simulation state, so it would need the caster's camera carried in the cast `Command` (a design choice).
+  - The loop's and the transition's rate: 12 a second of game time, `[ours]` until the original's draw rate is
+    measured; whether it interpolates positions between turns (ours glides).
 - [ ] Angel of Death against its trace (pop3-rev-analysis.md "Angel of Death mechanics"; spells.md row 13 has what
   is done: fights that re-close, housed victims and passengers pulled out, the spawn order, the
   `AOD_DURATION`/`AOD_KILL_COUNT` end, firewarrior shots, the carry choreography). Left:
   - Our own guesses to confirm or replace: the ramps (`ACCEL`, `TURN_RATE`, `CLIMB_RATE`), `CARRY_SPEED`, the
-    zigzag's period, the throw's speed, the angel-vs-angel damage (a quarter of the winner's health), the wear a
+    throw's speed, the angel-vs-angel damage (a quarter of the winner's health), the wear a
     building takes when an angel pulls someone out, a dead angel's victim dropped alive, the area panic sparing
     people inside buildings and vehicles, firewarriors on sight of an angel.
   - Not done: the rival-angel scan is map-wide (trace: "nearby", no radius); its roar (no audio, "Sound"); its shadow
@@ -566,7 +585,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
     own sake; an angel's reaction to being shot.
   - To trace (spec session): where the kill-count/duration check really lives (unopened outer sub-states of state
     28) and whether the per-kill hit-point cost exists, the exact angel-vs-angel damage scaling, whether a vehicle
-    passenger can be grabbed, building attacks and exclusions, dive-to-grab, how a dead angel leaves the game.
+    passenger can be grabbed, building attacks and exclusions, how a dead angel leaves the game.
 - [x] Firestorm's own look (pop3-rev-analysis.md "Firestorm fireballs"): fixed — `fireball_shot.rs` [client] gives `panicking_blast`'s own effect a view of its own (both Firestorm's and Volcano's fireballs, which share it): a bright ball falling from above, shrinking as it nears the ground, a few dimmer embers trailing behind it (not `smoke.rs`'s grey puffs), landing in a flash that grows and fades into a last puff of smoke; `ground_fire.rs`'s standing flame is unchanged. Our own invented flight and look throughout (the original's hfx 1120-1127/90-93/~1180-1210 sprites, confirmed by eye last session, are not traced closely enough to follow pixel for pixel). `panicking_blast::VISUAL_TICKS` keeps the effect (and so this view) alive well past its own 3-turn blast purely so the fall/trail/burst has room to play out — the blast's own damage/push/panic are unaffected (already a no-op past turn 3). Blast's own `SimpleBlast` fireball now has its own, separate pair of views instead of reusing this one (`blast_fireball.rs`, `blast_impact.rs` [client], TODO.md "Blast push and flight"): its flight is a straight line from the shaman rather than a fall from above, and its landing is sized small on purpose rather than matching the blast's own multi-cell damage radius.
 - [x] Firestorm fireballs landing on water no longer start a ground fire (`firestorm::impact`, spells.md): matches
   the original's own coastal-shape check (pop3-rev-analysis.md "Fireball impact") via `unit::is_sea` on the
