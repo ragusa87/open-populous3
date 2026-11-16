@@ -22,7 +22,7 @@ pub mod worship;
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::{render_pos, Grounded};
 use crate::world::{CurrentMap, LevelList, TerrainGlide, TerrainPatches};
-use art::{frame_index, sprite_dir, Frame, Pose};
+use art::{frame_index, Frame, Pose};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -260,7 +260,7 @@ impl UnitSprites {
         let kind = UnitKind::ALL.iter().position(|&k| k == shown)?;
         // Wildmen have no tribe (`Owner::Wild`): one look for all. A disguised spy wears the look the player sees.
         let tribe = unit.shown_owner(PLAYER, now.tick).tribe().map_or(0, TribeId::as_usize);
-        let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(sprite_dir(facing, yaw))?;
+        let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(art::shown_dir(&unit.action, facing, yaw))?;
         let bored = matches!(pose, Pose::Scratch | Pose::Pushup | Pose::Juggle).then(|| art::bored(shown, unit.id, now.tick)).flatten();
         let frame = match bored {
             Some(b) => b.frame(shown).min(frames.len().saturating_sub(1)),

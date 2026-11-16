@@ -378,6 +378,15 @@ pub fn sprite_dir(facing: u8, yaw: f32) -> usize {
     ((a / FRAC_PI_4).round() as i32).rem_euclid(DIRS as i32) as usize
 }
 
+/// The drawn direction of a unit doing `action` (`sprite_dir`), but for a drowning one, always facing the camera
+/// (pop3-rev-analysis.md "Drowning splash": turned every turn to face its tribe's camera, here the player's own).
+pub fn shown_dir(action: &Action, facing: u8, yaw: f32) -> usize {
+    if matches!(action, Action::Drowning { .. }) { FRONT } else { sprite_dir(facing, yaw) }
+}
+
+/// The drawn direction facing the camera (`sprite_dir`).
+pub const FRONT: usize = 0;
+
 /// Frame to show: timed actions play once in step with the simulation (`alpha` = fraction of
 /// the current tick), the fall and the spirit after it hold the lying frame (second to last,
 /// unit-art.md "Death last frame": the transformation finished during the fall, so the spirit
@@ -662,6 +671,9 @@ mod tests {
         assert_eq!(sprite_dir(2, 0.0), 2, "+x is screen right at yaw 0");
         assert_eq!(sprite_dir(2, PI / 2.0), 0, "camera moved to +x: she faces it");
         assert_eq!(sprite_dir(4, PI / 4.0), 7);
+        let drowning = Action::Drowning { sunk: 32 };
+        assert_eq!(shown_dir(&drowning, 2, 1.0), FRONT, "drowning: always to the camera");
+        assert_eq!(shown_dir(&Action::Idle, 2, 0.0), sprite_dir(2, 0.0));
     }
 
     #[test]
