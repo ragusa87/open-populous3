@@ -51,7 +51,7 @@ const BAR_HEIGHT: f32 = 0.5;
 const BAR_SIZE: Vec2 = Vec2::new(0.36, 0.045);
 /// How far (cells) sprites are pulled towards the camera: ground rising less than this in front
 /// of the feet does not cut them.
-const PULL_TO_EYE: f32 = 0.6;
+pub(crate) const PULL_TO_EYE: f32 = 0.6;
 /// How far (cells) a unit up a lookout is pulled towards the camera, out of the tower's middle.
 pub const PERCH_PULL: f32 = 0.7;
 

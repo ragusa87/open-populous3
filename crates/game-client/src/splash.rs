@@ -1,21 +1,59 @@
-//! The splash of someone falling or walking into the sea (`Action::Drowning`, units.md): a patch of white foam where
-//! it went in, droplets thrown up and falling back around it, and rings spreading on the water every `RING_EVERY`
-//! while it sinks — sized to read at the usual camera distance. Our own look
-//! (`[ours]`): the original's drowning splash is not traced (sprites.md: hfx 1304-1319 "a water splash
-//! (drowning?)"). Timed from the tick it went in, read back from how deep it has sunk; on the sea's surface as drawn
-//! (`ground_material::drawn_water_lift`).
+//! The splash where someone goes into the sea, or a drowned spirit rises out of it (`EffectKind::Splash`,
+//! pop3-rev-analysis.md "Drowning splash"): standing on the sea's surface as drawn
+//! (`ground_material::drawn_water_lift`) for the effect's 16 turns. With the original files, the original's
+//! camera-facing animation (`hfx0-0.dat`, `catalog::SPLASH_SPRITES`, 16 frames over its life: the rate is ours, the
+//! original steps it on its untraced draw clock). Without them (`--no-original`), our own look (`[ours]`): a patch
+//! of white foam, droplets thrown up and falling back, and rings spreading on the water.
 
-use crate::grounded::Grounded;
-use crate::sim_time::{seed, SimNow};
+use crate::camera::CameraRig;
+use crate::grounded::{render_pos, Grounded};
+use crate::sim_time::{seed, SimNow, TICK_SECS};
+use crate::units::art::{picture_frame, Frame};
+use crate::units::{toward_eye, upload_frames, FrameAsset, PULL_TO_EYE};
 use crate::views::{sync_views, WorldView};
-use crate::world::CurrentMap;
+use crate::world::{CurrentMap, LevelList};
 use bevy::ecs::system::SystemParamItem;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use game_core::effect::{Effect, EffectKind};
+use game_core::id::Id;
 use game_core::map::GameMap;
 use game_core::time::Tick;
-use game_core::unit::{Action, Unit, DROWN_SINK};
-use pop3_format::WORLD_UNITS_PER_CELL;
+use pop3_format::catalog::{EFFECT_SPRITE_FILE, SPLASH_SPRITES};
+use pop3_format::{Picture, SpriteBank, Theme, WORLD_UNITS_PER_CELL};
+use std::path::Path;
+
+/// The effect's life, seconds (`game_core::splash::TICKS`).
+const LIFE_SECS: f32 = game_core::splash::TICKS.get() as f32 * TICK_SECS;
+
+/// Which of `frames` original frames shows `secs` into the splash: evenly over its life, the last held.
+pub fn splash_frame(secs: f32, frames: usize) -> usize {
+    (((secs / LIFE_SECS).clamp(0.0, 1.0) * frames as f32) as usize).min(frames.saturating_sub(1))
+}
+
+/// The row `sprite`'s drawn pixels are centred on, if any.
+pub fn middle_row(sprite: &pop3_format::Sprite) -> Option<usize> {
+    let rows: Vec<usize> = (0..sprite.height).filter(|&y| (0..sprite.width).any(|x| sprite.pixels[y * sprite.width + x].is_some())).collect();
+    Some((rows.first()? + rows.last()?) / 2)
+}
+
+/// The original's frames, all anchored on the water where the first one's impact is drawn (`middle_row`: `[ours]`,
+/// the original's anchor is not traced; later frames spread from there, up as streaks and down as the ripple
+/// coming towards the viewer).
+fn original_frames(data_dir: &Path) -> Result<Vec<Frame>, String> {
+    let err = |e: pop3_format::LevelError| e.to_string();
+    let bank = SpriteBank::load(data_dir, EFFECT_SPRITE_FILE).map_err(err)?;
+    let palette = Theme::load(data_dir, 0).map_err(err)?.palette;
+    let sprite = |i: usize| bank.sprites.get(i).ok_or(format!("no sprite {i} in {EFFECT_SPRITE_FILE}"));
+    let first = sprite(*SPLASH_SPRITES.start())?;
+    let impact = middle_row(first).unwrap_or(first.height / 2);
+    SPLASH_SPRITES
+        .map(|i| {
+            let sprite = sprite(i)?;
+            Ok(picture_frame(&Picture { sprite: sprite.clone(), origin: (sprite.width / 2, impact) }, &palette))
+        })
+        .collect()
+}
 
 const WATER: Color = Color::srgb(0.85, 0.93, 1.0);
 const DROPLETS: usize = 20;
@@ -28,7 +66,7 @@ const DROP_SIZE: f32 = 0.035;
 const RING_SECS: f32 = 0.9;
 const RING_EVERY: f32 = 0.4;
 const RING_REACH: f32 = 0.8;
-const RINGS: usize = 4;
+const RINGS: usize = 3;
 const RING_ALPHA: f32 = 0.75;
 /// The foam where it went in spreads to `FOAM_REACH` cells over `FOAM_SECS`, fading.
 const FOAM_SECS: f32 = 0.8;
@@ -61,47 +99,56 @@ pub fn ring(k: usize, secs: f32) -> Option<(f32, f32)> {
     (0.0..1.0).contains(&t).then(|| (RING_REACH * t.sqrt(), (1.0 - t) * RING_ALPHA))
 }
 
-/// The tick a drowning unit went in, from how deep it has sunk by `now` (one `DROWN_SINK` the tick it went in).
-fn went_in(now: Tick, sunk: u16) -> Tick {
-    Tick::from_wire(now.to_wire().wrapping_sub((sunk / DROWN_SINK).saturating_sub(1) as u32))
-}
-
 #[derive(Resource)]
 pub struct SplashAssets {
+    /// The original's frames; empty without the original files, then ours is drawn.
+    original: Vec<FrameAsset>,
     drop: Handle<Mesh>,
     ring: Handle<Mesh>,
     foam: Handle<Mesh>,
 }
 
-/// One splash: its droplets and rings, each with its own material to fade.
+/// What one splash is drawn with.
+enum Look {
+    Original { sprite: Entity },
+    Ours { drops: Vec<(Entity, Handle<StandardMaterial>)>, rings: Vec<(Entity, Handle<StandardMaterial>)>, foam: (Entity, Handle<StandardMaterial>) },
+}
+
+/// One splash.
 #[derive(Component)]
 pub struct SplashView {
-    drops: Vec<(Entity, Handle<StandardMaterial>)>,
-    rings: Vec<(Entity, Handle<StandardMaterial>)>,
-    foam: (Entity, Handle<StandardMaterial>),
+    look: Look,
 }
 
 impl WorldView for SplashView {
-    type Model = Unit;
+    type Model = (Id<Effect>, Effect);
     type Params = (
         Res<'static, CurrentMap>,
         Res<'static, SplashAssets>,
         ResMut<'static, Assets<StandardMaterial>>,
-        Query<'static, 'static, (&'static mut Transform, &'static mut Visibility)>,
-        (Res<'static, crate::world::TerrainMaterial>, Res<'static, Assets<crate::ground_material::GroundMaterial>>, Res<'static, Assets<Image>>, Res<'static, crate::camera::CurveParamsRes>),
+        Query<'static, 'static, (&'static mut Transform, &'static mut Visibility, Option<&'static mut Mesh3d>, Option<&'static mut MeshMaterial3d<StandardMaterial>>), Without<crate::camera::GameCamera>>,
+        (Res<'static, crate::world::TerrainMaterial>, Res<'static, Assets<crate::ground_material::GroundMaterial>>, Res<'static, Assets<Image>>, Res<'static, crate::camera::CurveParamsRes>, Res<'static, CameraRig>),
+        Query<'static, 'static, &'static Transform, With<crate::camera::GameCamera>>,
     );
 
-    fn models(map: &GameMap) -> impl Iterator<Item = &Unit> {
-        map.units.iter().filter(|u| matches!(u.action, Action::Drowning { .. }))
+    fn models(map: &GameMap) -> impl Iterator<Item = &(Id<Effect>, Effect)> {
+        map.effects.entries().filter(|(_, e)| e.kind == EffectKind::Splash)
     }
 
-    fn id(u: &Unit) -> u32 {
-        u.id.raw()
+    fn id((id, _): &(Id<Effect>, Effect)) -> u32 {
+        id.raw()
     }
 
-    fn spawn(u: &Unit, view: &mut EntityCommands, (_, assets, mats, ..): &mut SystemParamItem<Self::Params>) -> Option<Self> {
+    fn spawn((_, e): &(Id<Effect>, Effect), view: &mut EntityCommands, (_, assets, mats, ..): &mut SystemParamItem<Self::Params>) -> Option<Self> {
         let cell = WORLD_UNITS_PER_CELL as f32;
-        view.insert((Grounded { at: Vec2::new(u.x as f32, u.z as f32) / cell, half: 0.0 }, Transform::default(), Visibility::Visible));
+        view.insert((Grounded { at: Vec2::new(e.x as f32, e.z as f32) / cell, half: 0.0 }, Transform::default(), Visibility::Visible));
+        if let Some(first) = assets.original.first() {
+            let mut sprite = Entity::PLACEHOLDER;
+            view.with_children(|v| {
+                sprite = v.spawn((Mesh3d(first.mesh.clone()), MeshMaterial3d(first.material.clone()), NotShadowCaster, crate::hover::NoOutline, Transform::default(), Visibility::Hidden)).id();
+            });
+            return Some(SplashView { look: Look::Original { sprite } });
+        }
         let mut part = |v: &mut ChildSpawnerCommands, mesh: &Handle<Mesh>| {
             let m = mats.add(StandardMaterial { base_color: WATER, alpha_mode: AlphaMode::Blend, unlit: true, ..default() });
             (v.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(m.clone()), NotShadowCaster, crate::hover::NoOutline, Transform::default(), Visibility::Hidden)).id(), m)
@@ -112,16 +159,32 @@ impl WorldView for SplashView {
             rings = (0..RINGS).map(|_| part(v, &assets.ring)).collect();
             foam = Some(part(v, &assets.foam));
         });
-        Some(SplashView { drops, rings, foam: foam? })
+        Some(SplashView { look: Look::Ours { drops, rings, foam: foam? } })
     }
 
-    fn update(&self, u: &Unit, now: SimNow, (map, _, mats, parts, (ground, grounds, images, curve)): &mut SystemParamItem<Self::Params>) {
-        let Action::Drowning { sunk } = u.action else { return };
-        let secs = now.secs_since(went_in(map.0.now, sunk)).max(0.0);
-        let at = Vec2::new(u.x as f32, u.z as f32) / WORLD_UNITS_PER_CELL as f32;
+    fn update(&self, (id, e): &(Id<Effect>, Effect), now: SimNow, (map, assets, mats, parts, (ground, grounds, images, curve, rig), eye): &mut SystemParamItem<Self::Params>) {
+        let start = Tick::from_wire(map.0.now.to_wire().wrapping_sub(e.left.done().get()));
+        let secs = now.secs_since(start).max(0.0);
+        let at = Vec2::new(e.x as f32, e.z as f32) / WORLD_UNITS_PER_CELL as f32;
         let surface = Vec3::Y * crate::ground_material::drawn_water_lift(grounds, images, &ground.0, &map.0.terrain, at) * curve.0.height_scale;
+        let (drops, rings, foam_part) = match &self.look {
+            Look::Original { sprite } => {
+                // Pulled towards the eye like the units it splashes around (`units::toward_eye`).
+                let feet = render_pos(&map.0.terrain, &Grounded { at, half: 0.0 }, rig.focus, &curve.0).map(|f| f + surface);
+                let (pull, scale) = feet.zip(eye.single().ok()).map_or((Vec3::ZERO, 1.0), |(f, eye)| toward_eye(f, eye.translation, PULL_TO_EYE));
+                if let Ok((mut t, mut vis, mesh, material)) = parts.get_mut(*sprite) {
+                    let f = &assets.original[splash_frame(secs, assets.original.len())];
+                    (t.translation, t.rotation, t.scale, *vis) = (surface + pull, Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch), Vec3::splat(scale), Visibility::Inherited);
+                    if let (Some(mut mesh), Some(mut material)) = (mesh, material) {
+                        (mesh.0, material.0) = (f.mesh.clone(), f.material.clone());
+                    }
+                }
+                return;
+            }
+            Look::Ours { drops, rings, foam } => (drops, rings, foam),
+        };
         let mut show = |(e, m): &(Entity, Handle<StandardMaterial>), pose: Option<(Transform, f32)>| {
-            if let Ok((mut t, mut vis)) = parts.get_mut(*e) {
+            if let Ok((mut t, mut vis, ..)) = parts.get_mut(*e) {
                 match pose {
                     Some((pose, alpha)) => {
                         (*t, *vis) = (pose, Visibility::Inherited);
@@ -133,13 +196,13 @@ impl WorldView for SplashView {
                 }
             }
         };
-        for (k, part) in self.drops.iter().enumerate() {
-            show(part, droplet(u.id.raw(), k, secs).map(|(at, a)| (Transform::from_translation(surface + at).with_scale(Vec3::splat(DROP_SIZE)), a)));
+        for (k, part) in drops.iter().enumerate() {
+            show(part, droplet(id.raw(), k, secs).map(|(at, a)| (Transform::from_translation(surface + at).with_scale(Vec3::splat(DROP_SIZE)), a)));
         }
-        for (k, part) in self.rings.iter().enumerate() {
+        for (k, part) in rings.iter().enumerate() {
             show(part, ring(k, secs).map(|(r, a)| (Transform::from_translation(surface + Vec3::Y * 0.01).with_scale(Vec3::new(r, 0.15, r)), a)));
         }
-        show(&self.foam, foam(secs).map(|(r, a)| (Transform::from_translation(surface + Vec3::Y * 0.005).with_scale(Vec3::new(r, 1.0, r)), a)));
+        show(foam_part, foam(secs).map(|(r, a)| (Transform::from_translation(surface + Vec3::Y * 0.005).with_scale(Vec3::new(r, 1.0, r)), a)));
     }
 }
 
@@ -151,8 +214,10 @@ impl Plugin for SplashPlugin {
     }
 }
 
-fn load_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
-    commands.insert_resource(SplashAssets { drop: meshes.add(Sphere::new(1.0).mesh().ico(1).unwrap()), ring: meshes.add(Torus::new(0.88, 1.0)), foam: meshes.add(Cylinder::new(1.0, 0.01)) });
+fn load_assets(levels: Res<LevelList>, mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, mut mats: ResMut<Assets<StandardMaterial>>) {
+    let frames = levels.original.then(|| original_frames(&levels.data_dir).map_err(|e| warn!("original splash: {e}")).ok()).flatten().unwrap_or_default();
+    let original = upload_frames(&frames, &mut images, &mut meshes, &mut mats);
+    commands.insert_resource(SplashAssets { original, drop: meshes.add(Sphere::new(1.0).mesh().ico(1).unwrap()), ring: meshes.add(Torus::new(0.88, 1.0)), foam: meshes.add(Cylinder::new(1.0, 0.01)) });
 }
 
 #[cfg(test)]
@@ -187,9 +252,21 @@ mod tests {
     }
 
     #[test]
-    fn it_went_in_the_tick_it_first_sank() {
-        let now = Tick::from_wire(100);
-        assert_eq!(went_in(now, DROWN_SINK), now);
-        assert_eq!(went_in(now, 5 * DROWN_SINK), Tick::from_wire(96));
+    fn a_frame_is_anchored_on_the_middle_of_what_it_draws() {
+        let mut pixels = vec![None; 4 * 10];
+        pixels[4 * 5 + 1] = Some(3);
+        pixels[4 * 7 + 2] = Some(3);
+        let sprite = pop3_format::Sprite { width: 4, height: 10, pixels };
+        assert_eq!(middle_row(&sprite), Some(6));
+        assert_eq!(middle_row(&pop3_format::Sprite { width: 2, height: 2, pixels: vec![None; 4] }), None);
+    }
+
+    #[test]
+    fn the_original_frames_play_once_over_its_life() {
+        assert_eq!(splash_frame(0.0, 16), 0);
+        assert_eq!(splash_frame(LIFE_SECS / 2.0, 16), 8);
+        assert_eq!(splash_frame(LIFE_SECS - 0.001, 16), 15);
+        assert_eq!(splash_frame(LIFE_SECS * 2.0, 16), 15, "the last held");
+        assert_eq!(splash_frame(0.5, 0), 0, "none loaded");
     }
 }

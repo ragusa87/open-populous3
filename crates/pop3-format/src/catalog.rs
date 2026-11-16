@@ -24,6 +24,9 @@ pub const SELECTED_ARROW_SPRITE: usize = 53;
 /// Volcano's decorative rolling rocks (pop3-rev-analysis.md "Volcano rocks"): 4 opaque frames in
 /// `EFFECT_SPRITE_FILE`, picked by position (`346 + ((x >> 6) + (z >> 6)) & 3`) so it seems to roll.
 pub const VOLCANO_ROCK_SPRITES: std::ops::RangeInclusive<usize> = 346..=349;
+/// The splash where someone goes into the sea, 16 frames over its 16-turn life (pop3-rev-analysis.md "Drowning
+/// splash").
+pub const SPLASH_SPRITES: std::ops::RangeInclusive<usize> = 1304..=1319;
 /// Teal unit figures (16 x 23) in `EFFECT_SPRITE_FILE`, in unit model order: brave, warrior, preacher,
 /// spy, firewarrior, shaman. Identified by eye.
 pub const UNIT_FIGURES: std::ops::RangeInclusive<usize> = 75..=80;
