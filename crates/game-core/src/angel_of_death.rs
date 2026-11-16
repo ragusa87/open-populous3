@@ -7,9 +7,9 @@
 //! (`Action::can_take_orders`'s own exclusion list keeps it, and whoever it grabs, out of reach).
 //!
 //! It hunts a rival angel first, else the nearest eligible enemy anywhere on the map; waits `ENGAGE_WAIT` on a
-//! plain victim, flies there (speed and heading ramped), grabs it within `GRAB_RANGE` (`GRAB_RANGE_HOUSED` inside a
-//! building, pulled out at its centre or its tower post, the building worn; a passenger taken off its vehicle) at
-//! double speed, climbs `CARRY_CLIMB` zigzagging, throws it at countdown `RELEASE_AT` along its own facing, to die
+//! plain victim, swoops down onto it (`dive_step`, turning twice as fast), grabs it within `GRAB_REACH`
+//! (`GRAB_RANGE_HOUSED` inside a building, pulled out at its centre or its tower post, the building worn; a passenger
+//! taken off its vehicle) at double speed, climbs `CARRY_CLIMB` zigzagging, throws it at countdown `RELEASE_AT` along its own facing, to die
 //! once down, and turns about. Every death of someone it grabbed is one of its kills; it ends after `AOD_DURATION`
 //! or `AOD_KILL_COUNT` kills (`balance::Angels`), or killed by a rival angel, and is removed outright. Firewarriors
 //! can shoot it (`attack::may_shoot`) for 25/256 of a bolt.
@@ -18,9 +18,8 @@
 //! - The rival-angel scan is map-wide (the trace says "nearby", with no radius); no roar (no audio yet).
 //! - The ramps (`ACCEL`, `TURN_RATE`, `CLIMB_RATE`), `CARRY_SPEED`, the zigzag's period, `CRUISE_HEIGHT`, the
 //!   throw's speed, and the slow-down far off course are `[ours]`.
-//! - It grabs someone on the ground from its flight height, never visibly diving to reach them (user-reported):
-//!   the trace confirms only a separate "launching/accelerating" climb pose, so whether the original swoops down is
-//!   an open question for a future trace session.
+//! - The dive aims at the ground under the victim (its `+0x1C` offset is not traced), floored `MIN_CLEARANCE` over
+//!   the bare terrain at all times (the original floors over building and tree tops when not diving or carrying).
 //! - The angel-vs-angel exchange (`angel_fight`) is our own reading of "both sides always take damage, scaled by
 //!   the stronger side's own health, so the stronger snowballs": both lose a quarter of the winner's current
 //!   health each clash, the loser reeling `FIGHT_STAGGER` while the winner closes in again.
@@ -50,9 +49,10 @@ pub const RIPPLE_TICKS: usize = 9;
 pub const RIPPLE_AMPLITUDES: [i32; RIPPLE_TICKS] = [64, 56, 48, 40, 32, 24, 16, 8, 0];
 /// How long it carries a grabbed victim (28 turns, 2.3 s, exe-confirmed).
 pub const CARRY_TICKS: Ticks = Ticks::new(28);
-/// How close it gets before grabbing a victim in the open, or one inside a building (measured to its
-/// `grab_point`), and before engaging a rival angel, world units (pop3-rev-analysis.md "Angel of Death mechanics").
-pub const GRAB_RANGE: i32 = 160;
+/// It grabs a victim in the open once both `|dx|` and `|dz|` are under `GRAB_REACH` (pop3-rev-analysis.md "Angel of
+/// Death flight pose, wing beat and dive"); one inside a building within `GRAB_RANGE_HOUSED` of its `grab_point`
+/// (`[ours]`: the trace's wider tower standoff); a rival angel within `FIGHT_RANGE`, world units.
+pub const GRAB_REACH: i32 = 504;
 pub const GRAB_RANGE_HOUSED: i32 = 200;
 pub const FIGHT_RANGE: i32 = 312;
 /// `[ours]`: the wear a building takes when an angel pulls someone out of it (blast's own `BLAST_DAMAGE_BLDG`).
@@ -64,6 +64,8 @@ pub const SPEED: i32 = 150;
 /// never to circle a target it is meant to reach.
 pub const ACCEL: i32 = 15;
 pub const TURN_RATE: i32 = 128;
+/// Its turn rate is doubled while it closes in on a victim (traced).
+pub const CLOSING_TURN_FACTOR: i32 = 2;
 /// `[ours]`: how high above the ground it cruises, how fast it eases back there, and the least it ever clears the
 /// ground by (traced: about 100), terrain height units.
 pub const CRUISE_HEIGHT: i32 = 600;
@@ -72,11 +74,12 @@ pub const MIN_CLEARANCE: i32 = 100;
 /// Ticks between locking onto a plain victim and setting off (the trace's own "wait 2 ticks").
 pub const ENGAGE_WAIT: Ticks = Ticks::new(2);
 /// Its speed is doubled the instant it grabs, then eases down to `CARRY_SPEED` (`[ours]`: "slow down") while it
-/// climbs `CARRY_CLIMB` by the release and zigzags `ZIGZAG` steps a tick, the other way every `ZIGZAG_EVERY` ticks
-/// (`[ours]`: only the ±22 is traced).
+/// climbs to `CARRY_CLIMB` over its height at the grab, `CARRY_CLIMB_RATE` a tick, and zigzags `ZIGZAG` steps a
+/// tick, the other way every `ZIGZAG_EVERY` ticks (`[ours]`: only the ±22 is traced).
 pub const GRAB_SPEED_FACTOR: i32 = 2;
 pub const CARRY_SPEED: i32 = SPEED / 2;
 pub const CARRY_CLIMB: i32 = 800;
+pub const CARRY_CLIMB_RATE: i32 = 48;
 pub const ZIGZAG: i32 = 22;
 pub const ZIGZAG_EVERY: u32 = 4;
 /// The carry countdown it lets go at, and the one it turns about at (180 degrees).
@@ -104,10 +107,20 @@ pub struct Flight {
     pub speed: i32,
 }
 
-/// `heading` turned towards `want` by at most `TURN_RATE`.
-pub fn steer(heading: Angle, want: Angle) -> Angle {
+/// `heading` turned towards `want` by at most `rate`.
+pub fn steer(heading: Angle, want: Angle, rate: i32) -> Angle {
     let off = Angle::new(want.steps().wrapping_sub(heading.steps()) % crate::angle::TURN).signed();
-    heading.turned(off.clamp(-TURN_RATE, TURN_RATE))
+    heading.turned(off.clamp(-rate, rate))
+}
+
+/// One tick of its dive from `height` towards `target`, `dist` away at `speed` (pop3-rev-analysis.md "Angel of Death
+/// flight pose, wing beat and dive"): a vertical speed timed to arrive with it, halved within twice that speed of
+/// the target height and halved again within once.
+pub fn dive_step(height: i32, target: i32, dist: i32, speed: i32) -> i32 {
+    let dh = target - height;
+    let v = dh.abs() / (dist / speed.max(1)).max(1);
+    let v = if dh.abs() <= v { v / 4 } else if dh.abs() <= 2 * v { v / 2 } else { v };
+    height + dh.signum() * v.max(1).min(dh.abs())
 }
 
 /// `value` brought towards `target` by at most `step`.
@@ -118,6 +131,11 @@ pub fn ease(value: i32, target: i32, step: i32) -> i32 {
 /// The angle of a unit's own `facing` octant (0 = +z, 2 = +x).
 pub fn facing_angle(facing: u8) -> Angle {
     Angle::new((crate::angle::TURN / 4).wrapping_sub(facing as u32 * crate::angle::TURN / 8) % crate::angle::TURN)
+}
+
+/// Whether `at` is within its grab reach of `aim`: both `|dx|` and `|dz|` under `GRAB_REACH`.
+pub fn within_reach(at: (u16, u16), aim: (u16, u16)) -> bool {
+    torus_delta(at.0, aim.0).abs() < GRAB_REACH && torus_delta(at.1, aim.1).abs() < GRAB_REACH
 }
 
 /// The zigzag's own turn on the tick `left` ticks before the end of a carry: `ZIGZAG` one way, then the other.
@@ -132,12 +150,14 @@ pub struct Angel {
     pub flight: Flight,
     pub kills: u8,
     pub left: Countdown,
+    /// The height it climbs to while carrying: `CARRY_CLIMB` over where it grabbed.
+    pub carry_top: i32,
 }
 
 impl Angel {
     /// A fresh angel over ground at `ground`, cruising, to live `duration`.
     pub fn new(ground: i32, duration: crate::balance::Turns) -> Angel {
-        Angel { flight: Flight { heading: Angle::ZERO, height: ground + CRUISE_HEIGHT, speed: 0 }, kills: 0, left: Countdown::new(Ticks::new(duration.0)) }
+        Angel { flight: Flight { heading: Angle::ZERO, height: ground + CRUISE_HEIGHT, speed: 0 }, kills: 0, left: Countdown::new(Ticks::new(duration.0)), carry_top: ground + CRUISE_HEIGHT }
     }
 }
 
@@ -302,11 +322,21 @@ impl GameMap {
         let ground = self.terrain.height_at(pos.0 as u32, pos.1 as u32, WORLD_UNITS_PER_CELL);
         let Some(mut angel) = self.units[i].angel else { return Vec::new() };
         let mut flight = angel.flight;
-        if !matches!(self.units[i].action, Action::Carrying { .. }) {
-            flight.height = ease(flight.height, ground + CRUISE_HEIGHT, CLIMB_RATE);
+        match self.units[i].action {
+            Action::Closing { target, .. } => {
+                if let Some(t) = self.unit(target) {
+                    let (aim, _) = self.grab_point(t);
+                    let below = self.terrain.height_at(aim.0 as u32, aim.1 as u32, WORLD_UNITS_PER_CELL);
+                    let dist = crate::unit::isqrt(torus_dist2(pos, aim) as _) as i32;
+                    flight.height = dive_step(flight.height, below, dist, flight.speed);
+                }
+            }
+            Action::Carrying { .. } => flight.height = ease(flight.height, angel.carry_top, CARRY_CLIMB_RATE),
+            _ => flight.height = ease(flight.height, ground + CRUISE_HEIGHT, CLIMB_RATE),
         }
 
         let mut events = self.angel_panic(pos, owner);
+        let mut grabbed = false;
 
         match self.units[i].action {
             Action::Hunting => {
@@ -318,6 +348,7 @@ impl GameMap {
             Action::Closing { target, mut wait } => {
                 if wait.left() == Ticks::ZERO {
                     events.extend(self.tend_closing(i, id, owner, &mut flight, target));
+                    grabbed = matches!(self.units[i].action, Action::Carrying { .. });
                 } else {
                     wait.tick();
                     self.units[i].action = Action::Closing { target, wait };
@@ -328,7 +359,6 @@ impl GameMap {
                 let remaining = left.left().get();
                 let held = self.unit(victim).is_some_and(|v| v.action == Action::Grabbed { by: id });
                 if remaining >= RELEASE_AT {
-                    flight.height += CARRY_CLIMB / (CARRY_TICKS.get() - RELEASE_AT) as i32;
                     flight.heading = flight.heading.turned(zigzag(remaining));
                 }
                 if remaining == TURN_ABOUT_AT {
@@ -355,7 +385,7 @@ impl GameMap {
                     if torus_dist2(pos, r) <= (FIGHT_RANGE as i64).pow(2) {
                         events.extend(self.angel_fight(i, rival));
                     } else {
-                        self.fly_towards(i, &mut flight, r);
+                        self.fly_towards(i, &mut flight, r, TURN_RATE);
                     }
                 } else {
                     self.units[i].action = Action::Hunting;
@@ -364,6 +394,9 @@ impl GameMap {
             _ => {}
         }
         flight.height = flight.height.max(ground + MIN_CLEARANCE);
+        if grabbed {
+            angel.carry_top = flight.height + CARRY_CLIMB;
+        }
         angel.flight = flight;
         self.units[i].angel = Some(angel);
         events
@@ -387,13 +420,14 @@ impl GameMap {
         };
         let (aim, housed) = self.grab_point(t);
         let rival_angel = t.kind == UnitKind::AngelOfDeath;
-        let range = match (rival_angel, housed) {
-            (true, _) => FIGHT_RANGE,
-            (false, Some(_)) => GRAB_RANGE_HOUSED,
-            (false, None) => GRAB_RANGE,
+        let pos = (self.units[i].x, self.units[i].z);
+        let near = match (rival_angel, housed) {
+            (true, _) => torus_dist2(pos, aim) <= (FIGHT_RANGE as i64).pow(2),
+            (false, Some(_)) => torus_dist2(pos, aim) <= (GRAB_RANGE_HOUSED as i64).pow(2),
+            (false, None) => within_reach(pos, aim),
         };
-        if torus_dist2((self.units[i].x, self.units[i].z), aim) > (range as i64).pow(2) {
-            self.fly_towards(i, flight, aim);
+        if !near {
+            self.fly_towards(i, flight, aim, if rival_angel { TURN_RATE } else { TURN_RATE * CLOSING_TURN_FACTOR });
             return Vec::new();
         }
         if rival_angel {
@@ -432,10 +466,10 @@ impl GameMap {
 
     /// One tick of flight of angel `i` towards `to`: turning and speeding up as fast as it can, slowing right down
     /// while far off course.
-    fn fly_towards(&mut self, i: usize, flight: &mut Flight, to: (u16, u16)) {
+    fn fly_towards(&mut self, i: usize, flight: &mut Flight, to: (u16, u16), turn_rate: i32) {
         let pos = (self.units[i].x, self.units[i].z);
         let want = angle::atan2(torus_delta(pos.1, to.1), torus_delta(pos.0, to.0));
-        flight.heading = steer(flight.heading, want);
+        flight.heading = steer(flight.heading, want, turn_rate);
         let off = Angle::new(want.steps().wrapping_sub(flight.heading.steps()) % crate::angle::TURN).signed().abs();
         let cruise = if off > crate::angle::TURN as i32 / 4 { SPEED / 4 } else { SPEED };
         flight.speed = ease(flight.speed, cruise, ACCEL);
@@ -619,16 +653,52 @@ mod tests {
         let v = map.unit(victim).unwrap();
         assert!(v.motion.airborne() && v.action == Action::Tumbling, "let go at countdown {RELEASE_AT}, thrown");
         assert!(until_dead(&mut map, victim), "dies once down");
-        assert_eq!(map.unit(angel).unwrap().action, Action::Hunting, "goes back to hunting");
+        map.run(Ticks::new(RELEASE_AT));
+        assert!(!matches!(map.unit(angel).unwrap().action, Action::Carrying { .. }), "the carry ends, back to hunting");
     }
 
     #[test]
     fn steering_turns_at_most_its_rate_the_short_way_and_speed_eases() {
-        assert_eq!(steer(Angle::new(0), Angle::new(50)), Angle::new(50), "within its rate: straight there");
-        assert_eq!(steer(Angle::new(0), Angle::new(1000)), Angle::new(TURN_RATE as u32), "at most its rate");
-        assert_eq!(steer(Angle::new(0), Angle::new(2000)), Angle::new(2000), "the short way round");
-        assert_eq!(steer(Angle::new(0), Angle::new(1100)), Angle::new(2048 - TURN_RATE as u32));
+        assert_eq!(steer(Angle::new(0), Angle::new(50), TURN_RATE), Angle::new(50), "within its rate: straight there");
+        assert_eq!(steer(Angle::new(0), Angle::new(1000), TURN_RATE), Angle::new(TURN_RATE as u32), "at most its rate");
+        assert_eq!(steer(Angle::new(0), Angle::new(2000), TURN_RATE), Angle::new(2000), "the short way round");
+        assert_eq!(steer(Angle::new(0), Angle::new(1100), TURN_RATE), Angle::new(2048 - TURN_RATE as u32));
         assert_eq!((ease(0, 150, ACCEL), ease(140, 150, ACCEL), ease(300, 75, ACCEL)), (ACCEL, 150, 300 - ACCEL));
+    }
+
+    #[test]
+    fn the_dive_is_timed_to_arrive_with_the_victim_and_eases_in() {
+        assert_eq!(dive_step(1000, 100, 3000, 150), 1000 - 900 / 20, "900 to lose over 20 ticks");
+        assert_eq!(dive_step(100, 1000, 3000, 150), 100 + 900 / 20, "climbs the same way");
+        assert_eq!(dive_step(1000, 100, 150, 150), 1000 - 900 / 4, "within once its own speed: a quarter");
+        assert_eq!(dive_step(1000, 100, 300, 150), 1000 - 450 / 2, "within twice: halved");
+        assert_eq!(dive_step(101, 100, 0, 150), 100, "never overshoots");
+        assert_eq!(dive_step(100, 100, 3000, 150), 100);
+    }
+
+    #[test]
+    fn it_grabs_within_a_square_reach() {
+        let at = (10_000, 10_000);
+        assert!(within_reach(at, (10_503, 9_497)));
+        assert!(!within_reach(at, (10_504, 10_000)));
+        assert!(within_reach((10, 10), (65_530, 65_530)), "across the seam");
+    }
+
+    #[test]
+    fn it_dives_onto_its_victim_then_climbs_with_it() {
+        let mut map = bare();
+        let angel = spawn_angel(&mut map, TribeId::Blue, AT);
+        map.unit_mut(angel).unwrap().angel.as_mut().unwrap().flight.height = map.terrain.height_at(AT.0 as u32, AT.1 as u32, WORLD_UNITS_PER_CELL) + CRUISE_HEIGHT;
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(4000), AT.1)).id;
+        assert!(until_grabbed(&mut map, victim));
+        let v = map.unit(victim).unwrap();
+        let ground = map.terrain.height_at(v.x as u32, v.z as u32, WORLD_UNITS_PER_CELL);
+        let at_grab = angel_state(&map, angel).flight.height;
+        assert!(at_grab - ground < CRUISE_HEIGHT / 2, "swooped down: {} over the ground", at_grab - ground);
+        map.tick();
+        assert_eq!(angel_state(&map, angel).flight.height, at_grab + CARRY_CLIMB_RATE, "climbs {CARRY_CLIMB_RATE} a tick");
+        map.run(Ticks::new(CARRY_TICKS.get() - RELEASE_AT - 2));
+        assert_eq!(angel_state(&map, angel).flight.height, at_grab + CARRY_CLIMB, "up to {CARRY_CLIMB} over the grab");
     }
 
     #[test]
