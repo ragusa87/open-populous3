@@ -302,9 +302,9 @@ pub enum Action {
     /// An Angel of Death carrying `victim` (`Action::Grabbed`), `left` ticks before it releases it
     /// (`angel_of_death::CARRY_TICKS`).
     Carrying { victim: UnitId, left: Countdown },
-    /// An Angel of Death trading blows with the rival angel `rival` by health alone, `cooldown` ticks until the
-    /// next exchange (angel_of_death.rs).
-    Fighting { rival: UnitId, cooldown: Countdown },
+    /// An Angel of Death trading blows with the rival angel `rival` by health alone (angel_of_death.rs): closes in
+    /// and clashes once in range, unless still reeling from losing the last clash (`stagger`).
+    Fighting { rival: UnitId, stagger: Countdown },
     /// Grabbed by the Angel of Death `by`: no orders, no movement of its own, until released to die.
     Grabbed { by: UnitId },
     /// Held by the test-only coordinator `gathering` (coordinator.rs).

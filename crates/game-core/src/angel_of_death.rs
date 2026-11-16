@@ -22,7 +22,7 @@
 //!   swoops down before a grab is itself an open question for a future trace session — `[ours]` until then.
 //! - The angel-vs-angel exchange (`fight`) is our own reading of "both sides always take damage, scaled by the
 //!   stronger side's own health, so the stronger snowballs": both lose a quarter of the winner's current health
-//!   each clash, `FIGHT_COOLDOWN` apart — `[ours]`, no literal formula was traced.
+//!   each clash, the loser reeling `FIGHT_STAGGER` — `[ours]`, no literal formula was traced.
 //! - The firewarrior-bolt ~10% damage factor (confirmed, `SW_BLAST_DAMAGE_AOD`) and the literal kill-count/
 //!   duration expiry (`AOD_KILL_COUNT`/`AOD_DURATION`, never located in the trace) are both left unimplemented:
 //!   `fights: false` (kind_stats.rs) already keeps it out of the ordinary attack/spotting pipeline entirely, the
@@ -63,8 +63,8 @@ pub const MIN_CLEARANCE: i32 = 100;
 pub const PANIC_RADIUS_CELLS: i32 = 8;
 /// `[ours]`: knockback distance after an angel-vs-angel exchange, world units.
 pub const FIGHT_KNOCKBACK: i32 = 800;
-/// `[ours]`: how long between exchanges (the trace's own "~11.5 s" stagger/reel).
-pub const FIGHT_COOLDOWN: Ticks = Ticks::millis(11_500);
+/// How long the loser of a clash reels, neither moving nor striking (the trace's own "~11.5 s" stagger).
+pub const FIGHT_STAGGER: Ticks = Ticks::millis(11_500);
 /// `[ours]`: a quarter of the winner's own current health, each exchange.
 pub const FIGHT_DAMAGE_DIVISOR: u16 = 4;
 
@@ -209,11 +209,17 @@ impl GameMap {
                     self.units[i].action = Action::Carrying { victim, left };
                 }
             }
-            Action::Fighting { rival, mut cooldown } => {
-                if cooldown.tick() {
-                    events.extend(self.angel_fight(i, rival));
+            Action::Fighting { rival, mut stagger } => {
+                if !stagger.tick() {
+                    self.units[i].action = Action::Fighting { rival, stagger };
+                } else if let Some(r) = self.unit(rival).filter(|r| r.is_alive()).map(|r| (r.x, r.z)) {
+                    if torus_dist2(pos, r) <= (FIGHT_RANGE as i64).pow(2) {
+                        events.extend(self.angel_fight(i, rival));
+                    } else {
+                        self.fly_towards(i, &mut flight, r);
+                    }
                 } else {
-                    self.units[i].action = Action::Fighting { rival, cooldown };
+                    self.units[i].action = Action::Hunting;
                 }
             }
             _ => {}
@@ -235,14 +241,20 @@ impl GameMap {
         let range = if rival_angel { FIGHT_RANGE } else { GRAB_RANGE };
         if (dx * dx + dz * dz) as i64 <= (range as i64) * (range as i64) {
             if rival_angel {
-                self.units[i].action = Action::Fighting { rival: target, cooldown: Countdown::new(Ticks::ZERO) };
+                self.units[i].action = Action::Fighting { rival: target, stagger: Countdown::new(Ticks::ZERO) };
             } else if let Some(vi) = self.unit_index(target) {
                 self.units[vi].action = Action::Grabbed { by: id };
                 self.units[i].action = Action::Carrying { victim: target, left: Countdown::new(CARRY_TICKS) };
             }
             return;
         }
-        flight.heading = angle::atan2(dz, dx);
+        self.fly_towards(i, flight, (tx, tz));
+    }
+
+    /// One tick of flight of angel `i` straight at `to`.
+    fn fly_towards(&mut self, i: usize, flight: &mut Flight, to: (u16, u16)) {
+        let pos = (self.units[i].x, self.units[i].z);
+        flight.heading = angle::atan2(torus_delta(pos.1, to.1), torus_delta(pos.0, to.0));
         let (mx, mz) = angle::rotate((SPEED, 0), flight.heading.steps());
         (self.units[i].x, self.units[i].z) = (pos.0.wrapping_add(mx as u16), pos.1.wrapping_add(mz as u16));
     }
@@ -273,10 +285,10 @@ impl GameMap {
             .collect()
     }
 
-    /// One exchange between angel `i` and its rival `rival`: both take a quarter of the stronger one's own
-    /// current health, the weaker knocked back `FIGHT_KNOCKBACK` along the stronger's facing; both re-armed with
-    /// a fresh `FIGHT_COOLDOWN` (resolved from whichever side processes first this tick: see `fight`'s own
-    /// comment for why this never double-applies).
+    /// One exchange between angel `i` and its rival `rival`, both in range: both take a quarter of the stronger
+    /// one's own current health; the weaker is knocked back `FIGHT_KNOCKBACK` along the stronger's own heading and
+    /// reels for `FIGHT_STAGGER`, while the stronger is free to close in again at once. Whichever side processes
+    /// first this tick resolves it: the knockback leaves the other out of range, so it never double-applies.
     fn angel_fight(&mut self, i: usize, rival: UnitId) -> Vec<WorldEvent> {
         let Some(ri) = self.unit_index(rival) else {
             self.units[i].action = Action::Hunting;
@@ -286,12 +298,12 @@ impl GameMap {
         let (my_health, rival_health) = (self.units[i].health.current(), self.units[ri].health.current());
         let (winner, loser) = if my_health >= rival_health { (i, ri) } else { (ri, i) };
         let hit = self.units[winner].health.current() / FIGHT_DAMAGE_DIVISOR;
-        let (wp, lp) = ((self.units[winner].x, self.units[winner].z), (self.units[loser].x, self.units[loser].z));
-        let heading = angle::atan2(torus_delta(wp.1, lp.1), torus_delta(wp.0, lp.0));
+        let heading = self.units[winner].flight.map_or(Angle::ZERO, |f| f.heading);
         let (kx, kz) = angle::rotate((FIGHT_KNOCKBACK, 0), heading.steps());
+        let lp = (self.units[loser].x, self.units[loser].z);
         (self.units[loser].x, self.units[loser].z) = (lp.0.wrapping_add(kx as u16), lp.1.wrapping_add(kz as u16));
-        (self.units[i].action, self.units[ri].action) =
-            (Action::Fighting { rival, cooldown: Countdown::new(FIGHT_COOLDOWN) }, Action::Fighting { rival: id, cooldown: Countdown::new(FIGHT_COOLDOWN) });
+        let stagger = |side: usize| Countdown::new(if side == loser { FIGHT_STAGGER } else { Ticks::ZERO });
+        (self.units[i].action, self.units[ri].action) = (Action::Fighting { rival, stagger: stagger(i) }, Action::Fighting { rival: id, stagger: stagger(ri) });
         vec![
             WorldEvent::Damage { unit: self.units[i].id, amount: hit, kind: DamageKind::AngelOfDeath, from: Some(self.units[ri].owner) },
             WorldEvent::Damage { unit: self.units[ri].id, amount: hit, kind: DamageKind::AngelOfDeath, from: Some(self.units[i].owner) },
@@ -411,24 +423,77 @@ mod tests {
         assert_eq!(map.unit(angel).unwrap().action, Action::Hunting, "goes back to hunting");
     }
 
-    #[test]
-    fn two_rival_angels_fight_by_health_each_taking_damage_and_being_knocked_apart() {
+    fn health(map: &GameMap, id: UnitId) -> u16 {
+        map.unit(id).unwrap().health.current()
+    }
+
+    fn staggered(map: &GameMap, id: UnitId) -> bool {
+        matches!(map.unit(id).unwrap().action, Action::Fighting { stagger, .. } if stagger.left() > Ticks::ZERO)
+    }
+
+    /// Two rival angels a little apart, `a` the stronger, run until their first clash.
+    fn first_clash() -> (GameMap, UnitId, UnitId) {
         let mut map = bare();
         let a = spawn_angel(&mut map, TribeId::Blue, AT);
-        let near = (AT.0.wrapping_add(FIGHT_RANGE as u16 / 2), AT.1);
-        let b = spawn_angel(&mut map, TribeId::Red, near);
-        let (full_a, full_b) = (map.unit(a).unwrap().health.current(), map.unit(b).unwrap().health.current());
-        for _ in 0..200 {
+        let b = spawn_angel(&mut map, TribeId::Red, (AT.0.wrapping_add(FIGHT_RANGE as u16 / 2), AT.1));
+        map.unit_mut(b).unwrap().health = crate::health::Health::new(5_000, 10_000);
+        for _ in 0..10 {
             map.tick();
-            if matches!(map.unit(a).unwrap().action, Action::Fighting { .. }) {
+            if health(&map, a) < 10_000 {
+                return (map, a, b);
+            }
+        }
+        panic!("never clashed");
+    }
+
+    #[test]
+    fn two_rival_angels_clash_by_health_both_hurt_the_weaker_knocked_away_and_reeling() {
+        let (map, a, b) = first_clash();
+        let hit = 10_000 / FIGHT_DAMAGE_DIVISOR;
+        assert_eq!((health(&map, a), health(&map, b)), (10_000 - hit, 5_000 - hit), "both lose a quarter of the stronger's health");
+        assert!(staggered(&map, b), "the loser reels");
+        assert!(!staggered(&map, a), "the winner doesn't");
+        let (pa, pb) = ((map.unit(a).unwrap().x, map.unit(a).unwrap().z), (map.unit(b).unwrap().x, map.unit(b).unwrap().z));
+        assert!(torus_dist2(pa, pb) > (FIGHT_RANGE as i64).pow(2), "knocked out of range");
+    }
+
+    #[test]
+    fn the_winner_closes_in_again_and_strikes_the_reeling_loser_who_never_moves() {
+        let (mut map, _, b) = first_clash();
+        let at = (map.unit(b).unwrap().x, map.unit(b).unwrap().z);
+        let before = health(&map, b);
+        map.tick();
+        assert_eq!(health(&map, b), before, "no clash from out of range");
+        for _ in 0..20 {
+            assert_eq!((map.unit(b).unwrap().x, map.unit(b).unwrap().z), at, "the reeling loser never moves");
+            map.tick();
+            if health(&map, b) < before {
                 break;
             }
         }
-        assert!(matches!(map.unit(a).unwrap().action, Action::Fighting { .. }), "locked onto each other, not grabbing");
-        map.run(Ticks::millis(11_500) + Ticks::new(1));
-        assert!(map.unit(a).unwrap().health.current() < full_a, "the exchange hurt both");
-        assert!(map.unit(b).unwrap().health.current() < full_b);
-        assert_ne!((map.unit(a).unwrap().x, map.unit(a).unwrap().z), (map.unit(b).unwrap().x, map.unit(b).unwrap().z), "knocked apart");
+        assert!(health(&map, b) < before, "struck again once the winner closed in");
+        assert!(FIGHT_STAGGER.get() > 20, "test setup: still reeling throughout");
+    }
+
+    #[test]
+    fn a_rival_that_dies_ends_the_fight() {
+        let (mut map, a, b) = first_clash();
+        map.apply_events(vec![WorldEvent::Damage { unit: b, amount: u16::MAX, kind: DamageKind::Blast, from: None }]);
+        map.tick();
+        assert_eq!(map.unit(a).unwrap().action, Action::Hunting);
+    }
+
+    #[test]
+    fn rival_angels_fight_to_the_death_the_weaker_dying() {
+        let (mut map, a, b) = first_clash();
+        for _ in 0..2000 {
+            map.tick();
+            if !map.unit(b).is_some_and(|u| u.is_alive()) {
+                break;
+            }
+        }
+        assert!(!map.unit(b).is_some_and(|u| u.is_alive()), "the weaker died");
+        assert!(map.unit(a).unwrap().is_alive(), "the stronger survived");
     }
 
     #[test]
