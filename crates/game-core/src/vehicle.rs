@@ -830,7 +830,7 @@ impl GameMap {
 
     /// Passengers in `units` get out where `id` is, same consequence as `put_out` (falling/drowning if
     /// there's nothing beneath) — unlike `put_out`, everyone else aboard stays seated.
-    fn evict(&mut self, id: VehicleId, units: &[UnitId]) {
+    pub(crate) fn evict(&mut self, id: VehicleId, units: &[UnitId]) {
         let Some(v) = self.vehicles.get_mut(id) else { return };
         v.passengers.retain(|p| !units.contains(p));
         let (at, altitude, ground) = ((v.x, v.z), v.altitude(&self.terrain) as i32, self.terrain.height_at(v.x as u32, v.z as u32, WORLD_UNITS_PER_CELL));

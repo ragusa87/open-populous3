@@ -51,9 +51,13 @@ pub const RIPPLE_TICKS: usize = 9;
 pub const RIPPLE_AMPLITUDES: [i32; RIPPLE_TICKS] = [64, 56, 48, 40, 32, 24, 16, 8, 0];
 /// How long it carries a grabbed victim (28 turns, 2.3 s, exe-confirmed).
 pub const CARRY_TICKS: Ticks = Ticks::new(28);
-/// `[ours]`: how close it gets before grabbing a victim, or engaging a rival angel, world units.
-pub const GRAB_RANGE: i32 = 200;
+/// How close it gets before grabbing a victim in the open, or one inside a building (measured to its
+/// `grab_point`), and before engaging a rival angel, world units (pop3-rev-analysis.md "Angel of Death mechanics").
+pub const GRAB_RANGE: i32 = 160;
+pub const GRAB_RANGE_HOUSED: i32 = 200;
 pub const FIGHT_RANGE: i32 = 312;
+/// `[ours]`: the wear a building takes when an angel pulls someone out of it (blast's own `BLAST_DAMAGE_BLDG`).
+pub const GRAB_BUILDING_WEAR: u16 = crate::blast::DAMAGE_BLDG;
 /// `[ours]`: its own flight speed (`UnitKind::AngelOfDeath::speed`'s single source), world units/tick.
 pub const SPEED: i32 = 150;
 /// `[ours]`: how high above the ground it cruises, and the least it ever clears it by, terrain height units.
@@ -197,7 +201,7 @@ impl GameMap {
                     self.units[i].action = Action::Closing { target };
                 }
             }
-            Action::Closing { target } => self.tend_closing(i, id, owner, &mut flight, target),
+            Action::Closing { target } => events.extend(self.tend_closing(i, id, owner, &mut flight, target)),
             Action::Carrying { victim, mut left } => {
                 if let Some(vi) = self.unit_index(victim) {
                     (self.units[vi].x, self.units[vi].z) = (self.units[i].x, self.units[i].z);
@@ -228,27 +232,54 @@ impl GameMap {
         events
     }
 
-    /// Flies towards `target`; grabs it (a plain enemy) or starts a fight (a rival angel) once in range; gives up
-    /// if it is no longer eligible.
-    fn tend_closing(&mut self, i: usize, id: UnitId, owner: Owner, flight: &mut Flight, target: UnitId) {
+    /// Flies towards `target` (its `grab_point`); grabs it (a plain enemy) or starts a fight (a rival angel) once
+    /// in range; gives up if it is no longer eligible.
+    fn tend_closing(&mut self, i: usize, id: UnitId, owner: Owner, flight: &mut Flight, target: UnitId) -> Vec<WorldEvent> {
         let Some(t) = self.unit(target).filter(|t| angel_target_eligible(owner, t)) else {
             self.units[i].action = Action::Hunting;
-            return;
+            return Vec::new();
         };
-        let (tx, tz, rival_angel) = (t.x, t.z, t.kind == UnitKind::AngelOfDeath);
-        let pos = (self.units[i].x, self.units[i].z);
-        let (dx, dz) = (torus_delta(pos.0, tx), torus_delta(pos.1, tz));
-        let range = if rival_angel { FIGHT_RANGE } else { GRAB_RANGE };
-        if (dx * dx + dz * dz) as i64 <= (range as i64) * (range as i64) {
-            if rival_angel {
-                self.units[i].action = Action::Fighting { rival: target, stagger: Countdown::new(Ticks::ZERO) };
-            } else if let Some(vi) = self.unit_index(target) {
-                self.units[vi].action = Action::Grabbed { by: id };
-                self.units[i].action = Action::Carrying { victim: target, left: Countdown::new(CARRY_TICKS) };
-            }
-            return;
+        let (aim, housed) = self.grab_point(t);
+        let rival_angel = t.kind == UnitKind::AngelOfDeath;
+        let range = match (rival_angel, housed) {
+            (true, _) => FIGHT_RANGE,
+            (false, Some(_)) => GRAB_RANGE_HOUSED,
+            (false, None) => GRAB_RANGE,
+        };
+        if torus_dist2((self.units[i].x, self.units[i].z), aim) > (range as i64).pow(2) {
+            self.fly_towards(i, flight, aim);
+            return Vec::new();
         }
-        self.fly_towards(i, flight, (tx, tz));
+        if rival_angel {
+            self.units[i].action = Action::Fighting { rival: target, stagger: Countdown::new(Ticks::ZERO) };
+            return Vec::new();
+        }
+        self.units[i].action = Action::Carrying { victim: target, left: Countdown::new(CARRY_TICKS) };
+        self.grab(id, target, aim, housed)
+    }
+
+    /// Where an angel grabs `t`, and the building it is pulled out of, if any: a unit in a drum tower where it
+    /// stands at its post, one in any other building at the building's centre — never by the door (user-described,
+    /// `[ours]`: the trace found no building path) — anyone else where it is.
+    fn grab_point(&self, t: &Unit) -> ((u16, u16), Option<crate::building::BuildingId>) {
+        match t.inside.and_then(|inside| self.building(inside.building)) {
+            Some(b) if b.kind == crate::building::BuildingKind::DrumTower => ((t.x, t.z), Some(b.id)),
+            Some(b) => (b.centre(), Some(b.id)),
+            None => ((t.x, t.z), None),
+        }
+    }
+
+    /// Angel `by` takes `victim` at `at`: out of its building there (which takes `GRAB_BUILDING_WEAR`) or out of
+    /// its vehicle, held from now on (pop3-rev-analysis.md: state 40's ENTER case evicts a housed victim).
+    fn grab(&mut self, by: UnitId, victim: UnitId, at: (u16, u16), housed: Option<crate::building::BuildingId>) -> Vec<WorldEvent> {
+        if let Some(vehicle) = self.unit(victim).and_then(|v| v.aboard) {
+            self.evict(vehicle, &[victim]);
+        }
+        let Some(v) = self.unit_mut(victim) else { return Vec::new() };
+        v.inside = None;
+        (v.x, v.z) = at;
+        v.action = Action::Grabbed { by };
+        housed.map(|building| WorldEvent::Wear { building, amount: GRAB_BUILDING_WEAR }).into_iter().collect()
     }
 
     /// One tick of flight of angel `i` straight at `to`.
@@ -275,12 +306,14 @@ impl GameMap {
 
     /// Any eligible enemy within `PANIC_RADIUS_CELLS` of `pos` panics, independent of whatever it is targeting
     /// (pop3-rev-analysis.md: "every tick, regardless of... area panic"); same exclusions Insect Plague's own
-    /// sting uses (shamans and angels, TODO.md "Units").
+    /// sting uses (shamans and angels, TODO.md "Units"). Only people in the open: someone inside a building or
+    /// aboard a vehicle stays put, to be pulled out by the grab itself (`grab_point`) — `[ours]`, the trace doesn't
+    /// say whether the original's panic reaches them.
     fn angel_panic(&self, pos: (u16, u16), owner: Owner) -> Vec<WorldEvent> {
         let r2 = (PANIC_RADIUS_CELLS as i64 * WORLD_UNITS_PER_CELL as i64).pow(2);
         self.units
             .iter()
-            .filter(|u| u.is_alive() && !matches!(u.kind, UnitKind::Shaman | UnitKind::AngelOfDeath) && u.owner != owner && !self.tribes.allied(owner, u.owner) && torus_dist2(pos, (u.x, u.z)) <= r2)
+            .filter(|u| u.is_alive() && u.in_the_open() && !matches!(u.kind, UnitKind::Shaman | UnitKind::AngelOfDeath) && u.owner != owner && !self.tribes.allied(owner, u.owner) && torus_dist2(pos, (u.x, u.z)) <= r2)
             .map(|u| WorldEvent::Panic { unit: u.id })
             .collect()
     }
@@ -312,9 +345,10 @@ impl GameMap {
 }
 
 /// Whether `t` is a valid Angel of Death target (rival or victim) for `owner`: alive, not its own tribe nor an
-/// ally, and — unless it is itself a rival angel — not already grabbed by someone else.
+/// ally, and — unless it is itself a rival angel — neither already grabbed by someone else nor being preached to
+/// (state 23, skipped by the trace's own scan).
 fn angel_target_eligible(owner: Owner, t: &Unit) -> bool {
-    t.is_alive() && t.owner != owner && !t.fools(owner) && (t.kind == UnitKind::AngelOfDeath || !matches!(t.action, Action::Grabbed { .. }))
+    t.is_alive() && t.owner != owner && !t.fools(owner) && (t.kind == UnitKind::AngelOfDeath || !matches!(t.action, Action::Grabbed { .. } | Action::Listening { .. }))
 }
 
 #[cfg(test)]
@@ -421,6 +455,73 @@ mod tests {
         map.run(CARRY_TICKS);
         assert!(!map.unit(victim).unwrap().is_alive(), "released, dead");
         assert_eq!(map.unit(angel).unwrap().action, Action::Hunting, "goes back to hunting");
+    }
+
+    /// Runs until `victim` is grabbed by anyone, at most 2000 ticks.
+    fn until_grabbed(map: &mut GameMap, victim: UnitId) -> bool {
+        (0..2000).any(|_| {
+            map.tick();
+            matches!(map.unit(victim).unwrap().action, Action::Grabbed { .. })
+        })
+    }
+
+    fn housed_in(kind: crate::building::BuildingKind) -> (GameMap, UnitId, crate::building::BuildingId) {
+        use crate::building::Building;
+        let mut map = bare();
+        spawn_angel(&mut map, TribeId::Blue, AT);
+        let corner = (AT.0.wrapping_add(20 * WORLD_UNITS_PER_CELL as u16), AT.1);
+        let building = map.add_building(Building::new(kind, TribeId::Red, corner.0, corner.1, 0));
+        let b = map.building(building).unwrap().clone();
+        let post = crate::work::work_point(&b, crate::id::Id::from_raw(7));
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, post).id;
+        map.unit_mut(victim).unwrap().enter(crate::unit::Inside { building, door: b.door() }, post);
+        (map, victim, building)
+    }
+
+    #[test]
+    fn a_housed_victim_is_pulled_out_at_the_buildings_centre_which_takes_wear() {
+        let (mut map, victim, building) = housed_in(crate::building::BuildingKind::Hut { size: 1 });
+        let centre = map.building(building).unwrap().centre();
+        assert!(until_grabbed(&mut map, victim));
+        let v = map.unit(victim).unwrap();
+        assert_eq!((v.inside, (v.x, v.z)), (None, centre), "out, at the centre, never by the door");
+        assert!(map.building(building).unwrap().wear > 0, "the building took wear");
+    }
+
+    #[test]
+    fn a_drum_tower_guard_is_grabbed_where_it_stands_at_its_post() {
+        let (mut map, victim, _) = housed_in(crate::building::BuildingKind::DrumTower);
+        let post = (map.unit(victim).unwrap().x, map.unit(victim).unwrap().z);
+        assert!(until_grabbed(&mut map, victim));
+        let v = map.unit(victim).unwrap();
+        assert_eq!(v.inside, None);
+        let angel = map.units.iter().find(|u| u.kind == UnitKind::AngelOfDeath).unwrap();
+        assert!(torus_dist2(post, (angel.x, angel.z)) <= (GRAB_RANGE_HOUSED as i64).pow(2), "taken at its post");
+    }
+
+    #[test]
+    fn a_passenger_is_taken_off_its_vehicle() {
+        let mut map = bare();
+        spawn_angel(&mut map, TribeId::Blue, AT);
+        let at = (AT.0.wrapping_add(20 * WORLD_UNITS_PER_CELL as u16), AT.1);
+        let vehicle = map.add_vehicle(crate::vehicle::Vehicle::new(crate::vehicle::VehicleKind::Balloon, TribeId::Red, at, Angle::ZERO));
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, at).id;
+        map.unit_mut(victim).unwrap().aboard = Some(vehicle);
+        map.vehicles.get_mut(vehicle).unwrap().passengers.push(victim);
+        assert!(until_grabbed(&mut map, victim));
+        assert_eq!(map.unit(victim).unwrap().aboard, None);
+        assert!(!map.vehicles.get(vehicle).unwrap().passengers.contains(&victim));
+    }
+
+    #[test]
+    fn someone_being_preached_to_is_never_a_target() {
+        let mut map = bare();
+        let id = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
+        let preacher = map.spawn(TribeId::Green, UnitKind::Preacher, AT).id;
+        let owner = Owner::Tribe(TribeId::Blue);
+        assert!(angel_target_eligible(owner, map.unit(id).unwrap()));
+        map.unit_mut(id).unwrap().action = Action::Listening { preacher, sitting: Countdown::new(Ticks::new(5)), left: Countdown::new(Ticks::new(5)), attempts: 0 };
+        assert!(!angel_target_eligible(owner, map.unit(id).unwrap()));
     }
 
     fn health(map: &GameMap, id: UnitId) -> u16 {
