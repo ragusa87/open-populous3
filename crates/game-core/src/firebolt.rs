@@ -93,10 +93,13 @@ pub fn reload_step(left: u8, now: Tick) -> u8 {
     }
 }
 
-/// A target's share of `TARGET_DAMAGE`, out of 256 (constant.dat values; the warrior's 5 % kept as 12/256).
+/// A target's share of `TARGET_DAMAGE`, out of 256 (constant.dat values; the warrior's 5 % kept as 12/256; the
+/// Angel of Death's 25/256, `SW_BLAST_DAMAGE_AOD`, the exe's own per-type table, pop3-rev-analysis.md "Angel of
+/// Death mechanics").
 pub fn bolt_share(kind: UnitKind) -> u16 {
     match kind {
         UnitKind::Warrior => 12,
+        UnitKind::AngelOfDeath => 25,
         _ => 256,
     }
 }
@@ -207,6 +210,15 @@ impl GameMap {
         events.extend(vehicles.map(|(vehicle, _)| WorldEvent::DamageVehicle { vehicle, amount: CELL_DAMAGE, from: b.owner }));
         let hit: Vec<&Unit> = self.units.iter().filter(|u| u.is_alive() && u.in_the_open() && u.owner != b.owner && u.cell() == cell).collect();
         for u in hit {
+            // An Angel of Death flies above the cell: only a bolt aimed at it reaches it, for its share alone, and it
+            // is never thrown (`[ours]`: the trace gives only the share, "about a tenth" of a bolt's damage).
+            if u.kind == UnitKind::AngelOfDeath {
+                if b.target == Target::Unit(u.id) {
+                    let amount = (TARGET_DAMAGE as u32 * bolt_share(u.kind) as u32 / 256) as u16;
+                    events.push(WorldEvent::Damage { unit: u.id, amount, kind: DamageKind::Fire, from: Some(b.owner) });
+                }
+                continue;
+            }
             let mut amount = CELL_DAMAGE.saturating_mul(boost);
             if b.target == Target::Unit(u.id) {
                 let full = if b.from_tower { TARGET_DAMAGE_FROM_TOWER } else { TARGET_DAMAGE };

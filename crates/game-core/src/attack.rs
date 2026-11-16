@@ -18,6 +18,13 @@ pub fn may_attack(attacker: &Unit, target: &Unit) -> bool {
     fights(attacker.kind) && preacher_may && target_fights && attacker.owner != target.owner && target.is_alive()
 }
 
+/// Whether `attacker` may shoot at `target` from afar without ever coming to blows: a firewarrior at another tribe's
+/// Angel of Death, out of reach of any melee or challenge (`may_attack` keeps those to people who fight). `[ours]`:
+/// the trace confirms only that its bolts hurt an angel (`firebolt::bolt_share`), not who aims at one.
+pub fn may_shoot(attacker: &Unit, target: &Unit) -> bool {
+    attacker.kind.stats().throws && target.kind == UnitKind::AngelOfDeath && attacker.owner != target.owner && target.is_alive()
+}
+
 /// Whether `attacker` may go for the building `b`: another tribe's, one that wears down. Never a neutral building
 /// (a vault of knowledge): those are prayed at.
 pub fn may_attack_building(attacker: &Unit, b: &Building) -> bool {
@@ -35,7 +42,7 @@ impl GameMap {
         match target {
             Target::Unit(id) => self
                 .unit(id)
-                .filter(|t| (may_attack(attacker, t) || crate::sermon::may_preach(attacker, t)) && !self.tribes.allied(attacker.owner, t.owner))
+                .filter(|t| (may_attack(attacker, t) || may_shoot(attacker, t) || crate::sermon::may_preach(attacker, t)) && !self.tribes.allied(attacker.owner, t.owner))
                 .map(|t| (t.x, t.z)),
             Target::Building(id) => self.building(id).filter(|b| may_attack_building(attacker, b) && !self.tribes.allied(attacker.owner, b.owner)).map(Building::door),
         }

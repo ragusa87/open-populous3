@@ -650,6 +650,49 @@ mod tests {
         assert!(v.is_alive() && v.motion.airborne(), "dropped, falling, alive");
     }
 
+    /// An angel held still (reeling) and an enemy firewarrior posted in a drum tower 6 cells off, alone on the map:
+    /// out on the ground
+    /// it would panic within `PANIC_RADIUS_CELLS`, past its own reach; in a tower it holds and reaches further.
+    fn angel_and_firewarrior() -> (GameMap, UnitId, UnitId) {
+        use crate::building::{Building, BuildingKind};
+        let mut map = bare();
+        let at = AT;
+        let angel = spawn_angel(&mut map, TribeId::Red, at);
+        map.unit_mut(angel).unwrap().action = Action::Fighting { rival: angel, stagger: Countdown::new(Ticks::new(5000)) };
+        let post = (at.0.wrapping_sub(6 * WORLD_UNITS_PER_CELL as u16), at.1);
+        let tower = map.add_building(Building::new(BuildingKind::DrumTower, TribeId::Blue, post.0.wrapping_sub(256), post.1.wrapping_sub(256), 0));
+        let door = map.building(tower).unwrap().door();
+        let fw = map.spawn(TribeId::Blue, UnitKind::Firewarrior, post).id;
+        map.unit_mut(fw).unwrap().inside = Some(crate::unit::Inside { building: tower, door });
+        (map, angel, fw)
+    }
+
+    #[test]
+    fn an_ordered_firewarrior_shoots_an_angel_for_about_a_tenth_of_a_bolt_never_throwing_it_nor_coming_to_blows() {
+        let (mut map, angel, fw) = angel_and_firewarrior();
+        map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: fw, order: crate::unit::Order::Attack { target: crate::unit::Target::Unit(angel) } });
+        let full = health(&map, angel);
+        for _ in 0..300 {
+            map.tick();
+            assert!(!matches!(map.unit(fw).unwrap().action, Action::Challenge { .. } | Action::Melee { .. }), "never comes to blows");
+            assert!(!map.unit(angel).unwrap().motion.airborne(), "never thrown");
+            if health(&map, angel) < full {
+                break;
+            }
+        }
+        let share = crate::firebolt::TARGET_DAMAGE * 25 / 256;
+        assert_eq!(health(&map, angel), full - share, "one bolt: about a tenth of its damage");
+    }
+
+    #[test]
+    fn an_idle_firewarrior_spots_an_angel_on_its_own() {
+        let (mut map, angel, fw) = angel_and_firewarrior();
+        let full = health(&map, angel);
+        map.run(Ticks::new(300));
+        assert!(health(&map, angel) < full, "shot at: {:?}", map.unit(fw).unwrap().action);
+        assert!(map.unit(fw).unwrap().inside.is_some(), "from its tower");
+    }
+
     fn health(map: &GameMap, id: UnitId) -> u16 {
         map.unit(id).unwrap().health.current()
     }
