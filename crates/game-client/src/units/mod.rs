@@ -955,6 +955,16 @@ pub fn drawn_sink(action: &game_core::unit::Action, in_sea: bool, alpha: f32, he
     }
 }
 
+/// How deep (cells, in its view) a sinking unit's figure is wholly under: `[ours]`, by eye, the drawn figure being
+/// shorter than `selection::UNIT_HEIGHT`, the height its picking box allows for.
+const UNDER_AT: f32 = selection::UNIT_HEIGHT * 0.8;
+
+/// Whether a unit doing `action` is wholly under the water: `sink` (`drawn_sink`, in its view) `UNDER_AT` or more,
+/// or dying `in_sea`, where it drowned.
+pub fn submerged(action: &game_core::unit::Action, in_sea: bool, sink: f32) -> bool {
+    sink >= UNDER_AT || (in_sea && matches!(action, game_core::unit::Action::Dying { .. }))
+}
+
 /// Pulls each unit's sprite, health bar and markers towards the camera (see `toward_eye`), in the view's
 /// own (camera-facing) space, and lifts them off the ground (`drawn_lift`).
 fn pull_to_eye(
@@ -966,6 +976,7 @@ fn pull_to_eye(
     eye: Query<&Transform, (With<GameCamera>, Without<UnitView>)>,
     views: Query<(&UnitView, &Grounded, &Transform, &Children)>,
     mouths: Query<(&crate::angel_of_death::Mouth, &Transform), Without<UnitView>>,
+    water: (Res<crate::world::TerrainMaterial>, Res<Assets<crate::ground_material::GroundMaterial>>, Res<Assets<Image>>),
     mut parts: Query<(&mut Transform, Has<HealthBar>, Option<&markers::MarkerSlot>), (Or<(With<UnitSprite>, With<HealthBar>, With<markers::MarkerSlot>)>, Without<UnitView>, Without<GameCamera>, Without<crate::angel_of_death::Mouth>)>,
     heights: Res<crate::buildings::ModelHeights>,
     sizes: Res<crate::object_scale::ObjectScale>,
@@ -988,7 +999,19 @@ fn pull_to_eye(
         // Aboard, not pulled at all: its hull's near side hides it as it should (seen inside, not in front).
         let pull = if perch.is_some() { PERCH_PULL } else if riding.is_some() { 0.0 } else { PULL_TO_EYE };
         let (offset, scale) = toward_eye(feet + up.unwrap_or_default(), eye.translation, pull);
-        let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale) - drawn_sink(&u.action, game_core::unit::is_sea(&map.0.terrain, u.cell()), clock.alpha(), params.0.height_scale));
+        // Drowning, and its spirit rising after: from the sea's surface as drawn, not from the seabed under it.
+        let surface = |u: &game_core::unit::Unit| match u.action {
+            game_core::unit::Action::Drowning { .. } | game_core::unit::Action::Spirit { climbing: true, .. } if game_core::unit::is_sea(&map.0.terrain, u.cell()) => {
+                crate::ground_material::drawn_water_lift(&water.1, &water.2, &water.0.0, &map.0.terrain, ground.at) * params.0.height_scale
+            }
+            _ => 0.0,
+        };
+        // The surface and the sink are world heights: under the view's own units scale, like `riding`.
+        let in_view = 1.0 / sizes.get(ObjectGroup::Units);
+        let in_sea = u.is_some_and(|u| game_core::unit::is_sea(&map.0.terrain, u.cell()));
+        let sink = u.map_or(0.0, |u| drawn_sink(&u.action, in_sea, clock.alpha(), params.0.height_scale)) * in_view;
+        let under = u.is_some_and(|u| submerged(&u.action, in_sea, sink));
+        let lift = u.map_or(0.0, |u| clock.lift(unit.0, u, &map.0.terrain, params.0.height_scale) + surface(u) * in_view) - sink;
         let bounce = u.map_or(0.0, |u| victory_bounce(*now, bounce_start(&map.0, u.owner), u.id.raw()));
         let shown = perch.or(riding.or(carried).map(|r| r / sizes.get(ObjectGroup::Units))).unwrap_or_default();
         let local = view.rotation.inverse() * (offset + shown) + Vec3::Y * (lift + bounce) * scale;
@@ -996,7 +1019,8 @@ fn pull_to_eye(
             if let Ok((mut t, bar, marker)) = parts.get_mut(child) {
                 let above = if bar { BAR_HEIGHT } else { marker.map_or(0.0, |m| m.above) };
                 let translation = local + Vec3::Y * above * scale;
-                let scale = Vec3::splat(scale);
+                // Gone under: hidden, since a sprite pulled towards the eye is never hidden by the water itself.
+                let scale = if under { Vec3::ZERO } else { Vec3::splat(scale) };
                 if t.translation != translation {
                     t.translation = translation;
                 }
@@ -1085,6 +1109,8 @@ mod tests {
         let dying = Action::Dying { left: game_core::time::Countdown::new(Ticks::new(5)) };
         assert!((drawn_sink(&dying, true, 0.0, 0.01) - 2.56).abs() < 1e-5, "dead at the bottom, not back up");
         assert_eq!(drawn_sink(&dying, false, 0.0, 0.01), 0.0, "on land");
+        assert!(!submerged(&drowning(16), true, 0.08) && submerged(&drowning(240), true, 2.56), "hidden once wholly under");
+        assert!(submerged(&dying, true, 0.0) && !submerged(&dying, false, 0.0), "dying where it drowned");
     }
 
     #[test]

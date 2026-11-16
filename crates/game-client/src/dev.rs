@@ -286,6 +286,7 @@ pub fn drown_demo(map: &mut game_core::map::GameMap, n: usize) -> bool {
     let Some(s) = map.shaman_of(PLAYER) else { return false };
     let home = s.cell();
     let Some(cell) = (1..20).flat_map(|r| (-r..=r).flat_map(move |dz| (-r..=r).map(move |dx| (home.0 + dx, home.1 + dz)))).find(|&c| is_sea(&map.terrain, c)) else { return false };
+    info!("DROWN: in the sea at cell {},{}", cell.0, cell.1);
     let mut people: Vec<usize> = (0..map.units.len()).filter(|&i| map.units[i].owner == PLAYER && map.units[i].is_alive()).collect();
     people.sort_by_key(|&i| map.units[i].kind == game_core::unit::UnitKind::Shaman);
     for (k, &i) in people.iter().take(n).enumerate() {
