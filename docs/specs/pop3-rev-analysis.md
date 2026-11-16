@@ -5365,6 +5365,26 @@ the shaman" - the "turn to face her" half (facing/orientation) wasn't separately
 with ordinary walk-facing toward a moving destination. The player also confirmed live that G with no selection
 cancels an active guard, matching the second branch above exactly.
 
+**The circling, measured** (`watch_guard4.txt`, one follower around a standing shaman; one trace line taken as one
+game turn, which the approach phase confirms: ~80 units per line there, a brave's 70-87 walking speed):
+
+| | Value |
+|---|---|
+| radius | 198-202 units, steady (0.39 cell) |
+| angular speed | ~9.8° per turn, 36-37 turns per lap (~3 s at 12 turns/s) |
+| speed along the ring | ~35 units per turn, about half the walking speed |
+| direction | constant, one way round for the whole trace |
+
+The approach overshoots her (closest ~47 units), then settles straight onto the ring within 3 turns.
+The ring is **not coded as an orbit**: the escort order has no angle or radius anywhere. Inside its ±824 box it
+just does nothing that turn (no new walk), so the circle is a side effect of the per-turn person steering chasing
+a point it never reaches. Two candidates in the person physics step, not yet told apart: the per-type turn limit
+(the brave's is 256/2048 = 45° per turn, which alone would give a ~90-unit ring, not 200), or the proportional
+turn mode (heading closes `gap / k` of the gap each turn; `k` ≈ 9 gives exactly 10° per turn at 200 units). Why the
+speed halves on the ring is also open. So these numbers hold for one follower (type not logged, its walking speed matches a brave) guarding a standing
+shaman; the radius
+plausibly varies with type and speed, and several guards together were not traced.
+
 Two open items, both low priority given the mechanism itself is now solid: what the shaman's own `+0x24` field
 actually is (read as her target id - plausibly a self-reference, not independently confirmed), and whether the
 unread `0x433490`/`0x4999D0`-sourced `bool_arg` changes anything in either branch.
