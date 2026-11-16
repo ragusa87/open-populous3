@@ -151,6 +151,9 @@ so a live measurement may run on it with the addresses translated.
   its own - settle on the same final camera orientation, confirming our `flyby.rs` design (`cancel_from` eases
   toward `final_pose`) already matches. Only the measured grace-period length (about 3 seconds) differs from
   ours (1 second). See "Flyby cancel" under "Camera flyby state (tribe_struct)".
+- **Drowning splash is one 16-turn sprite** [exe, measured]: going under spawns one stationary billboard
+  splash (sprites 1304-1319, its own sound) that lives exactly as long as the drowning takes, then vanishes; it
+  is not repeated while sinking. See "Drowning splash".
 
 ## Turns and timing [exe]
 ```text
@@ -5128,6 +5131,43 @@ finer grain than the per-cell coastal-shape class used to pick a destination els
 search). A "shore-shaped" cell is, by construction, part land and part sea at this fine grain - standing
 anywhere in one is not inherently safe, it depends on exactly where in the cell.
 
+### Drowning splash [exe, measured]
+Exact provenance (function addresses, jump-table entries, the live log) is in pop3-rev: `docs/functions.tsv`,
+`docs/effect_states.csv` (effect state 52), `docs/sound.tsv` (0x11, 0x2C) and `docs/cheat.md` "Drowning splash,
+live". The splash is its own short-lived effect unit, spawned **once**, when the person goes under:
+```text
+person enters the drowning state (person state 2), on that turn only:
+  play sound 0x11                                   # the drowning cry
+  spawn one effect "splash" (effect type 0x41), owner = the person's tribe, at the person's exact x/z
+splash, on creation:
+  height = the terrain/water surface under it       # 0 on the sea
+  play sound 0x2C                                   # its own splash sound
+  drawable = a camera-facing billboard sprite, frames 1304-1319 (16 frames), no velocity, never moves
+  life = 16 turns
+splash, every turn (effect state 52):
+  if it stands on land: removed at once            # (on its scheduling turn only, see below)
+  else: life -= 1; removed when life reaches 0      # 16 turns = 1.33 s
+```
+- It does not repeat while the person sinks: one splash per drowning, however long the person stays in the
+  state. Both sounds play on the same turn (the person's cry and the splash's own sound).
+- Its lifetime equals the drowning time: a person who stays under dies 16 turns after going in, the same turn
+  the splash disappears (measured: splash created the turn the person entered the drowning state, life 16
+  counting down to 1, gone 16 turns later, the person's life forced to 0 that same turn).
+- The visible splash motion is entirely the sprite animation (frames 1304-1319, which sprites.md listed by eye
+  as "a water splash (drowning?)" - now confirmed). Its frames advance on the shared per-drawn-frame animation
+  clock, not per turn; the exact rate for this draw class was not traced. Seen live from a normal camera
+  distance: orange-lit droplets around the person at impact, then thin vertical streaks on the water.
+- The land check only runs on the splash's own scheduling turn (its per-class counter at 0), so in practice it
+  only matters for a splash spawned over land by one of the other spawners below; a drowning splash is always
+  on water.
+- The same splash is spawned by: the death spirit's "climbing" rise when the person died in a drowning spot
+  ("Death and the spirit rise", at the water surface), flying building debris landing in water, a landing
+  routine that picks a dust puff on land and the splash otherwise, and one more object kind at or below water
+  level (not identified). It is not Firestorm's water impact effect (effect type 0x2B, sprites 1152-, sound
+  0x55, "Fireball impact"), a different effect.
+- While drowning, the person is also turned every turn to face its own tribe's camera (the point 16384 units
+  out from that tribe's camera focus, behind its yaw), so the drowning pose is shown front-on to that player.
+
 ### Stranded [exe, measured]
 Our `Action::Stranded` (units.md) is person state 33 (`pop3-rev/docs/person_states.tsv`, `0x4D9650`, already
 traced and live-cross-checked in an earlier session - full detail there, not re-derived here). Entered when the
@@ -5974,6 +6014,13 @@ confirms.
   turns ≈ 1.3-1.6 of our own 10 Hz ticks). Porting the original rule means replacing the per-tick damage
   subtraction with a fixed countdown (comparable to `Action::Settling`'s own `Countdown` pattern) that forces
   death on expiry independent of health.
+- `splash.rs` ("Drowning splash"): ours is invented (foam, 20 droplets, then a new ring every 0.4 s for as
+  long as the unit is drowning) and is tied to the drowning unit, so it disappears early if the unit resurfaces.
+  The original is one independent effect at the point of entry: a stationary camera-facing sprite animation
+  (frames 1304-1319) that lasts exactly 16 turns (16 of our ticks, 1.33 s) whatever the person does next, with
+  nothing repeated while sinking, plus two sounds on that turn (the person's drowning cry and the splash's own).
+  The same splash also belongs on debris landing in water and on the spirit rise of a drowned person, which ours
+  does not draw.
 - `unit.rs`'s `Action::Spirit`/`SPIRIT_TICKS` (explicitly commented "a guess"; "Death and the spirit rise"):
   confirmed wrong as a single constant/pose. The original has at least two structurally different variants - a
   brief (4-turn) stationary "calm" rise for an ordinary death, and a 32-turn, continuously-ascending (40 world
@@ -6358,6 +6405,8 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4657D0 | "board_vehicle"(vehicle, person): seat, animation, the vehicle takes the person's tribe |
 | 0x464710, 0x4648A0 | stranded boat: entry (put everyone off, 160-287 turns of life), per turn (keel over) |
 | 0x44F980 | "is_land_at"(pos): the cell's coast shape and its 8 × 8 land mask (table 0x5AA328) |
+| 0x513830 | splash (effect type 0x41) init: surface height, effect state 52, sound 0x2C, sprites 1304-, 16-turn life |
+| 0x50ACA7 | effect state 52 per turn (splash): removed at once on land, else the shared 16-turn countdown |
 | 0x4EE700 | set a unit's drawable (`+0x33` index, `+0x3A` draw class from table 0x5A6AF8, 11 bytes per class) |
 | 0x4E93F0 | add a push to a velocity, scaled by the slope along it |
 | 0x4EBC20 | slope vector at a position (ground sliding) |
