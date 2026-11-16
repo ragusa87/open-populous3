@@ -20,8 +20,8 @@
 //!   throw's speed, and the slow-down far off course are `[ours]`.
 //! - Its tilt (`Flight::pitch`/`bank`, drawn only) follows the trace's targets; reading its easing numbers as
 //!   divisors of the gap (`ease_by`) is ours. The scripted approach's own pitch and flight mode 4's turn don't exist here.
-//! - The dive aims at the ground under the victim (its `+0x1C` offset is not traced), floored `MIN_CLEARANCE` over
-//!   the bare terrain at all times (the original floors over building and tree tops when not diving or carrying).
+//! - The dive aims at the victim's own height (its `+0x1C` offset is not traced); the building and tree tops it
+//!   clears when not swooping are `BUILDING_TOP`/`TREE_TOP` over the ground, ours.
 //! - The angel-vs-angel exchange (`angel_fight`) is our own reading of "both sides always take damage, scaled by
 //!   the stronger side's own health, so the stronger snowballs": both lose a quarter of the winner's current
 //!   health each clash, the loser reeling `FIGHT_STAGGER` while the winner closes in again.
@@ -73,6 +73,11 @@ pub const CLOSING_TURN_FACTOR: i32 = 2;
 pub const CRUISE_HEIGHT: i32 = 600;
 pub const CLIMB_RATE: i32 = 40;
 pub const MIN_CLEARANCE: i32 = 100;
+/// `[ours]`: how high a building's and a tree's tops stand over the ground, terrain height units — the floor it
+/// keeps `MIN_CLEARANCE` over when neither closing in nor carrying (traced: "the tallest building/tree top
+/// underneath"; the simulation keeps no object heights of its own).
+pub const BUILDING_TOP: i32 = 400;
+pub const TREE_TOP: i32 = 300;
 /// Ticks between locking onto a plain victim and setting off (the trace's own "wait 2 ticks").
 pub const ENGAGE_WAIT: Ticks = Ticks::new(2);
 /// Its speed is doubled the instant it grabs, then eases down to `CARRY_SPEED` (`[ours]`: "slow down") while it
@@ -373,7 +378,7 @@ impl GameMap {
             Action::Closing { target, .. } => {
                 if let Some(t) = self.unit(target) {
                     let (aim, _) = self.grab_point(t);
-                    let below = self.terrain.height_at(aim.0 as u32, aim.1 as u32, WORLD_UNITS_PER_CELL);
+                    let below = t.motion.height.unwrap_or_else(|| self.terrain.height_at(aim.0 as u32, aim.1 as u32, WORLD_UNITS_PER_CELL));
                     let dist = crate::unit::isqrt(torus_dist2(pos, aim) as _) as i32;
                     flight.height = dive_step(flight.height, below, dist, flight.speed);
                 }
@@ -441,7 +446,8 @@ impl GameMap {
             }
             _ => {}
         }
-        flight.height = flight.height.max(ground + MIN_CLEARANCE);
+        let swooping = matches!(self.units[i].action, Action::Closing { .. } | Action::Carrying { .. });
+        flight.height = flight.height.max(if swooping { ground } else { self.top_under(pos, ground) } + MIN_CLEARANCE);
         tilt(&mut flight, self.units[i].action, turn_error);
         if grabbed {
             angel.carry_top = flight.height + CARRY_CLIMB;
@@ -449,6 +455,15 @@ impl GameMap {
         angel.flight = flight;
         self.units[i].angel = Some(angel);
         events
+    }
+
+    /// The top of whatever stands at `pos` over `ground`: the tallest building covering it or tree on its cell, else the
+    /// ground itself.
+    fn top_under(&self, pos: (u16, u16), ground: i32) -> i32 {
+        let building = self.buildings.iter().any(|b| b.covers(pos, 0));
+        let cell = crate::tree::cell_at(pos);
+        let tree = self.trees.iter().any(|t| t.is_visible() && t.cell() == cell);
+        ground + if building { BUILDING_TOP } else if tree { TREE_TOP } else { 0 }
     }
 
     /// Lets go of victim `vi` from `height`: it tumbles off towards a point `THROW_DISTANCE` along its own facing, its
@@ -758,6 +773,25 @@ mod tests {
         tilt(&mut f, Action::Carrying { victim: UnitId::from_raw(1), left: Countdown::new(CARRY_TICKS) }, 1000);
         assert_eq!(f.pitch, 0, "carrying: pitch level");
         assert!(f.bank > 0, "but banking");
+    }
+
+    #[test]
+    fn cruising_it_clears_building_and_tree_tops_swooping_only_the_ground() {
+        use crate::building::{Building, BuildingKind};
+        let mut map = bare();
+        let angel = spawn_angel(&mut map, TribeId::Blue, AT);
+        let ground = map.terrain.height_at(AT.0 as u32, AT.1 as u32, WORLD_UNITS_PER_CELL);
+        let corner = (AT.0.wrapping_sub(BuildingKind::DrumTower.centre_shift()), AT.1.wrapping_sub(BuildingKind::DrumTower.centre_shift()));
+        map.buildings.push(Building::new(BuildingKind::DrumTower, TribeId::Red, corner.0, corner.1, 0));
+        assert_eq!(map.top_under(AT, ground), ground + BUILDING_TOP);
+        map.unit_mut(angel).unwrap().angel.as_mut().unwrap().flight.height = ground;
+        map.tick();
+        assert!(angel_state(&map, angel).flight.height >= ground + BUILDING_TOP + MIN_CLEARANCE, "over the tower");
+        map.buildings.clear();
+        map.trees.push(crate::tree::Tree::new(crate::tree::cell_at(AT), 0, 3));
+        assert_eq!(map.top_under(AT, ground), ground + TREE_TOP);
+        map.trees.clear();
+        assert_eq!(map.top_under(AT, ground), ground);
     }
 
     #[test]
