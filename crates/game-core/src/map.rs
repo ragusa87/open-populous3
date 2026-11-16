@@ -2886,8 +2886,9 @@ mod tests {
         let mut map = GameMap::sandbox_walk();
         // sandbox_walk only sites player 0 (one shaman, a deliberately small income): give player 1 a
         // population too, big enough that Swarm (cost 120) clears a charge within the 2s below.
+        let land = map.units.iter().find(|u| u.owner == TribeId::Blue).map(|u| (u.x, u.z)).unwrap();
         for _ in 0..25 {
-            map.spawn(TribeId::Red, UnitKind::Brave, (0, 0));
+            map.spawn(TribeId::Red, UnitKind::Brave, land);
         }
         map.apply(&Command::PauseSpell { player: TribeId::Blue, kind: SpellKind::Swarm, paused: true });
         let swarm = map.spell_books[0].slot(SpellKind::Swarm).unwrap().recharge;

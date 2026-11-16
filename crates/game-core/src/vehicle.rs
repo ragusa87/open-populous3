@@ -974,7 +974,7 @@ mod tests {
         assert!(matches!(map.vehicle(v).unwrap().state, State::Sinking { .. }), "manned, but out of health");
         assert!(map.vehicle(v).unwrap().passengers.is_empty());
         run(&mut map, 1);
-        assert!(people.iter().all(|&p| map.unit(p).unwrap().aboard.is_none() && map.unit(p).unwrap().action == Action::Drowning));
+        assert!(people.iter().all(|&p| map.unit(p).unwrap().aboard.is_none() && matches!(map.unit(p).unwrap().action, Action::Drowning { .. })));
     }
 
     #[test]

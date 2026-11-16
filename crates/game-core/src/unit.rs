@@ -30,8 +30,10 @@ pub const SLOPE_SLOWDOWN_UP: i32 = 192;
 pub const SLOPE_SPEEDUP_DOWN: i32 = 128;
 /// Walking speed factor bounds in 1/256 (steep climbs crawl, steep descents are capped).
 pub const SLOPE_FACTOR_RANGE: (i32, i32) = (32, 384);
-/// Health lost per tick while in the sea.
-pub const DROWN_DAMAGE: u16 = 60;
+/// How fast someone in the sea sinks, and how deep it is dead whatever its health: 16 turns (pop3-rev-analysis.md
+/// "Drowning": the same for every kind).
+pub const DROWN_SINK: u16 = 16;
+pub const DROWN_DEPTH: u16 = 256;
 /// Health lost at a time while stranded (a guess).
 pub const STRANDED_DAMAGE: u16 = 20;
 /// Between two `STRANDED_DAMAGE`s, at each unit's own phase (the shaman's health lasts 33 s; a guess).
@@ -201,8 +203,9 @@ pub enum Action {
     Casting { left: Countdown },
     /// Just teleported: falling onto the ground (`Unit::motion`), Idle on touchdown.
     Landing,
-    /// The ground under her is sea: loses health until dead or the land comes back.
-    Drowning,
+    /// The ground under her is sea: sinking `DROWN_SINK` a tick, `sunk` so far, dead at `DROWN_DEPTH` unless the
+    /// land comes back.
+    Drowning { sunk: u16 },
     /// Flung through the air or rolling on the ground by a spell, moved by `Unit::velocity` at
     /// `Unit::lift`: no orders until still on the ground again.
     Tumbling,
@@ -321,7 +324,7 @@ impl Action {
             Action::Worshipping { .. } => "Worshipping",
             Action::Casting { .. } => "Casting",
             Action::Landing => "Landing",
-            Action::Drowning => "Drowning",
+            Action::Drowning { .. } => "Drowning",
             Action::Tumbling => "Tumbling",
             Action::Settling { .. } => "Settling",
             Action::Panicking { .. } => "Panicking",
@@ -408,7 +411,7 @@ impl Action {
     pub(crate) fn can_take_orders(&self) -> bool {
         !matches!(
             self,
-            Action::Drowning
+            Action::Drowning { .. }
                 | Action::Tumbling
                 | Action::Settling { .. }
                 | Action::Panicking { .. }
@@ -1040,8 +1043,8 @@ impl Unit {
         }
         // An Angel of Death flies its own way (`flight`, not `motion`): never subject to the ordinary
         // drowning check. Neither is its grabbed victim: carried wherever the angel goes, including over the sea.
-        if self.is_alive() && self.aboard.is_none() && !self.motion.airborne() && self.angel.is_none() && !matches!(self.action, Action::Grabbed { .. }) && is_sea(terrain, self.cell()) {
-            self.action = Action::Drowning;
+        if self.is_alive() && self.aboard.is_none() && !self.motion.airborne() && self.angel.is_none() && !matches!(self.action, Action::Grabbed { .. } | Action::Drowning { .. }) && is_sea(terrain, self.cell()) {
+            self.action = Action::Drowning { sunk: 0 };
             (self.teleport_to, self.spell) = (None, None);
         }
         match self.action {
@@ -1232,13 +1235,15 @@ impl Unit {
                     self.action = Action::Settling { left };
                 }
             }
-            Action::Drowning => {
-                if self.health.damage(DROWN_DAMAGE) {
-                    self.die();
-                    return Some(UnitEvent::Died);
-                }
+            Action::Drowning { sunk } => {
                 if !is_sea(terrain, self.cell()) {
                     self.action = Action::Idle;
+                } else if sunk + DROWN_SINK >= DROWN_DEPTH {
+                    self.health.damage(u16::MAX);
+                    self.die();
+                    return Some(UnitEvent::Died);
+                } else {
+                    self.action = Action::Drowning { sunk: sunk + DROWN_SINK };
                 }
             }
             Action::Dying { mut left } => {
@@ -1327,7 +1332,7 @@ impl Unit {
         self.kind.stats().heal.is_some()
             && self.is_alive()
             && !self.motion.airborne()
-            && !matches!(self.action, Action::Drowning | Action::Stranded { .. } | Action::OnFire { .. } | Action::Grabbed { .. })
+            && !matches!(self.action, Action::Drowning { .. } | Action::Stranded { .. } | Action::OnFire { .. } | Action::Grabbed { .. })
             && !self.statuses.struck_by_lightning.is_on()
     }
 
@@ -1370,7 +1375,7 @@ impl Unit {
     /// (it is "set on fire... every turn it stays on a hot cell"), so it is gated on `is_alive` and not already
     /// falling/dead rather than on `takes_orders` (which `OnFire` itself is excluded from).
     pub fn catch_fire(&mut self, away: (i16, i16)) {
-        if !self.is_alive() || matches!(self.action, Action::Tumbling | Action::Drowning) || self.motion.airborne() {
+        if !self.is_alive() || matches!(self.action, Action::Tumbling | Action::Drowning { .. }) || self.motion.airborne() {
             return;
         }
         self.drop_plans();
@@ -1473,9 +1478,14 @@ impl Unit {
             return None;
         }
         let cell = self.cell();
-        if self.health.is_zero() || is_sea(ground.terrain(), cell) {
+        if self.health.is_zero() {
             self.die();
             return Some(UnitEvent::Died);
+        }
+        if is_sea(ground.terrain(), cell) {
+            self.drop_plans();
+            self.action = Action::Drowning { sunk: 0 };
+            return None;
         }
         // A tumble settles (`Action::Settling`, the `Action::Tumbling` tick arm below, reached the same tick: by
         // now `self.motion` is already `Motion::STILL`) rather than going idle at once.
@@ -2404,10 +2414,12 @@ mod tests {
             t.set(cx + dx, cz + dz, 0);
         }
         u.tick(Tick::ZERO, &t, Some(&site));
-        assert_eq!((u.action, u.health.current()), (Action::Drowning, SHAMAN_MAX_HEALTH - DROWN_DAMAGE));
+        assert_eq!((u.action, u.health.current()), (Action::Drowning { sunk: DROWN_SINK }, SHAMAN_MAX_HEALTH), "sinking, its health untouched");
         u.order(Order::MoveTo { x: 0, z: 0 });
-        assert_eq!(u.action, Action::Drowning, "no orders while drowning");
-        let events = run(&mut u, &t, &site, (SHAMAN_MAX_HEALTH / DROWN_DAMAGE) as usize);
+        assert!(matches!(u.action, Action::Drowning { .. }), "no orders while drowning");
+        let events = run(&mut u, &t, &site, (DROWN_DEPTH / DROWN_SINK - 2) as usize);
+        assert_eq!((events, u.action), (vec![], Action::Drowning { sunk: DROWN_DEPTH - DROWN_SINK }), "full health or not");
+        let events = run(&mut u, &t, &site, 1);
         assert_eq!((events, u.health.current(), u.is_alive()), (vec![UnitEvent::Died], 0, false));
         let events = run(&mut u, &t, &site, (DYING_TICKS + RESPAWN_TICKS).get() as usize);
         assert_eq!(events, vec![UnitEvent::Reincarnated]);
@@ -2542,7 +2554,7 @@ mod tests {
     }
 
     #[test]
-    fn landing_in_the_sea_kills_whatever_the_health() {
+    fn landing_in_the_sea_drowns_whatever_the_health() {
         let mut t = land();
         let (mut u, site) = shaman_at((10, 10));
         for z in -1..=1 {
@@ -2555,8 +2567,9 @@ mod tests {
         while u.motion.airborne() {
             events.extend(u.tick(Tick::ZERO, &t, Some(&site)));
         }
-        assert_eq!((is_sea(&t, u.cell()), events), (true, vec![UnitEvent::Died]));
-        assert!(matches!(u.action, Action::Dying { .. }) && u.health.is_full(), "dies at once, the dying pose");
+        assert_eq!((is_sea(&t, u.cell()), events, u.action), (true, vec![], Action::Drowning { sunk: DROWN_SINK }), "the same drowning as walking in");
+        let events = run(&mut u, &t, &site, (DROWN_DEPTH / DROWN_SINK - 1) as usize);
+        assert_eq!(events, vec![UnitEvent::Died], "16 turns later, whatever its health");
     }
 
     #[test]
@@ -2601,7 +2614,7 @@ mod tests {
         assert_eq!((u.action, u.health.is_full()), (Action::Tumbling, true));
         u.motion = Motion::STILL;
         run(&mut u, &t, &site, 1);
-        assert_eq!(u.action, Action::Drowning);
+        assert!(matches!(u.action, Action::Drowning { .. }));
     }
 
     #[test]
@@ -2660,7 +2673,7 @@ mod tests {
         let (s, _) = shaman_at((10, 10));
         let hurt = Unit { health: Health::new(100, SHAMAN_MAX_HEALTH), ..s };
         let flung = Unit { motion: Motion::flying(Velocity::ZERO, 50), action: Action::Tumbling, ..hurt.clone() };
-        let drowning = Unit { action: Action::Drowning, ..hurt.clone() };
+        let drowning = Unit { action: Action::Drowning { sunk: 0 }, ..hurt.clone() };
         let stranded = Unit { action: Action::Stranded { to: (0, 0) }, ..hurt.clone() };
         let dying = Unit { action: Action::Dying { left: Countdown::new(DYING_TICKS) }, ..hurt.clone() };
         let burning = Unit { action: Action::OnFire { away: (0, 0), left: Countdown::new(BURN_TICKS) }, ..hurt.clone() };
