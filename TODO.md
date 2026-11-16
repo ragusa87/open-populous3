@@ -334,6 +334,9 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] The shaman's health is lowered while she is in a vehicle and goes back to normal when she leaves it.
 - [ ] The shaman can cast only some spells from a vehicle: Land Bridge is refused (done); check the others in the game (fire-type probably yes).
 - [ ] Drowning animation: the original drowning pose is not identified (tumbling is used).
+- [ ] Drowning splash (spec session): ours (`splash.rs`, droplets and rings) is invented. Does the original show one when
+  someone falls or walks into the sea, and is it hfx 1304-1319 (sprites.md "a water splash (drowning?)") or the
+  Firestorm water impact's effect 7/0x2B (hfx 1152)? Its life, size and when it plays.
 - [ ] Use the shaman's wand gesture (81-84), the conversion sit (18), the spy's juggling idle (92); check the tribe layer flag `0x10` mapping. The carbonized brave (97) for lightning is done (`Pose::Carbonized`, "Spells" below).
 
 - [ ] The shaman's reincarnation is not instant: ours waits a fixed `RESPAWN_TICKS` (3 s). Find in the original how long she waits and what it depends on (her tribe's mana, its population, or both), then compute it from that.
