@@ -50,11 +50,13 @@ pub const FLAME_TILE: u16 = 92;
 /// Totem (textured; 2 and 4 are untextured copies, 3 the rock-rotation animation frame).
 pub const TOTEM: usize = 1;
 pub const TOTEM_ANIMATED: usize = 3;
-/// French "mort ailée" (winged death, probably the Angel of Death): 7 front, 100 back,
-/// 107 wings oriented differently. 8-11, 101-106 and 108-116 are untextured copies.
+/// French "mort ailée" (winged death, the Angel of Death): 7 front (unused in flight); the flying angel's textured
+/// poses, 100 beating its wings (morph keys 101-106) and 107 gliding, wings swept back (keys 108-113); 114-116 the
+/// three transition frames between them (pop3-rev-analysis.md "Angel of Death flight pose, wing beat and dive").
 pub const WINGED_DEATH: usize = 7;
-pub const WINGED_DEATH_BACK: usize = 100;
-pub const WINGED_DEATH_ALT: usize = 107;
+pub const WINGED_DEATH_BEATING: usize = 100;
+pub const WINGED_DEATH_GLIDING: usize = 107;
+pub const WINGED_DEATH_TRANSITION: [usize; 3] = [114, 115, 116];
 /// Totem of the winged death, and the bird perched on top of it.
 pub const WINGED_DEATH_TOTEM: usize = 19;
 pub const WINGED_DEATH_PERCHED: usize = 21;

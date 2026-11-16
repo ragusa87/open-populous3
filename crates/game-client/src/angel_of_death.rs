@@ -1,6 +1,6 @@
 //! The Angel of Death itself (`game_core::unit::UnitKind::AngelOfDeath`, `game_core::angel_of_death::Flight`):
-//! a world view of each living one, the original "winged death" object-bank mesh (`catalog::WINGED_DEATH_BACK`/
-//! `WINGED_DEATH_ALT`, the same model family as the totem's own static monument, `totems.rs`) rather than a 2D
+//! a world view of each living one, the original "winged death" object-bank mesh (`catalog::WINGED_DEATH_BEATING`/
+//! `WINGED_DEATH_GLIDING`, the same model family as the totem's own static monument, `totems.rs`) rather than a 2D
 //! unit sprite — the companion object the original's own flight state actually draws, never the type-8 person
 //! record itself (pop3-rev-analysis.md "Angel of Death mechanics" "Visuals", TODO.md "Angel of Death"). Turned
 //! by its heading and lifted to its flight height like a vehicle (`vehicles.rs`); its ground shadow is the same
@@ -135,7 +135,7 @@ impl AngelLook {
             self.parts.clear();
         }
         let bank = objects.0.as_ref().filter(|_| self.atlas.is_some());
-        let found = bank.and_then(|b| b.get(catalog::WINGED_DEATH_BACK).zip(b.get(catalog::WINGED_DEATH_ALT)));
+        let found = bank.and_then(|b| b.get(catalog::WINGED_DEATH_BEATING).zip(b.get(catalog::WINGED_DEATH_GLIDING)));
         let (dive, cruise) = match found {
             Some((dive, cruise)) => (assets.meshes.add(to_mesh(object_mesh(&solid_part(dive), tribe))), assets.meshes.add(to_mesh(object_mesh(&solid_part(cruise), tribe)))),
             None => stand_in(assets),

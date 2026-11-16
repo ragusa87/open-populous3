@@ -10,6 +10,9 @@ The level header byte 97 (`ObjectsBankNum`, see level-format.md) picks the bank:
 - 7 in 2110;
 - 2 in 2127.
 
+The exe loads bank 2 when this byte is 0 (pop3-rev-analysis.md "Angel of Death flight pose, wing beat and dive"):
+bank 0 is never loaded in a game, so ids the exe hard-codes are bank-2 ids (bank 0 index − 38 for 100-182).
+
 The ALACN world editor offers banks 0 and 2-7, and ties the bank to a tree style. Its previews:
 - 0, 2, 7: cone pine and weeping trees;
 - 3: twisted "bonsai";
@@ -81,16 +84,39 @@ settled trace - the "not verified against the game" caveat above still stands.
 
 | Off | Type | Content |
 |---|---|---|
-| 0 | u16 | flags (unknown) |
+| 0 | u16 | flags (0x80: morph base, set at load from the morph file, below) |
 | 2 | u16 | face count |
 | 4 | u16 | point count |
-| 6..16 | | unknown |
+| 6 | u8 | unknown |
+| 7 | u8 | animation record index (morph record of a morph base, set at load) |
+| 8..16 | | unknown |
 | 16, 20 | i32 | faces `[start, end)`, **1-based** into `facs` |
 | 24, 28 | i32 | points `[start, end)`, **1-based** into `pnts` |
 | 32 | 6 x i16 | bounding box min xyz / max xyz, about 1.25x the points (selection margin?) |
 | 44..54 | | unknown |
 
 `pnts`: 6 bytes, `i16` x, y, z. **y is up**, 0 = ground; units are world units (512 per cell).
+
+Morph animation (`pop3_format::morph`): `objects/morph0-N.dat`, same bank number, 25 records of 368 bytes, little endian (unused
+records: base −1, count 0):
+
+| Off | Type | Content |
+|---|---|---|
+| 0 | i32 | base object (textured; its faces are drawn, its points replaced) |
+| 4 | i32 | key frame count n (at most 20) |
+| 8 | 20 × i32 | key frame objects (untextured, same points in the same order as the base) |
+| 88 | 20 × i32 | step count from key i to key i + 1 (the last loops to key 0) |
+| 168 | 20 × 10 bytes | segments (from, to, steps + 1, first frame, last frame: u16 each); stale in banks 2-7, the exe rebuilds them at load from the two lists |
+
+Shipped records: the winged death (bank 0: base 100 keys 101-106, base 107 keys 108-113, 6 keys of 1 step;
+base 7 keys 8-11, steps 1, 1, 1, 6), the totem rocks (base 1 keys 2-4), and pairs of 8-step back-and-forth
+frames (82-84, 94-96, 97-99, 184-186, 187-189); the pyramid of knowledge (base 190, keys 191-193) has its count
+but empty segments in bank 0. Lists use each bank's own ids. How a morph plays: pop3-rev-analysis.md "Angel of
+Death flight pose, wing beat and dive".
+
+`objects/aniob0-N.dat` (250 bytes, the same in every bank): read by the exe as 25 records of 8 object ids and a
+frame count byte; as shipped it holds two zero-terminated lists (107 107 102 103 104 105 106 100 and 107 107
+108 109 110 111 112 100) that do not line up with those records, so every count reads 0. Not used by the angel.
 
 `facs` record, 60 bytes:
 
@@ -162,7 +188,7 @@ Identified by hand from the mapping page; encoded in `pop3_format::catalog`.
 |---|---|
 | 0 | camp fire: a cross of 4 dark logs (tile 137) and two crossed flame boards (blended, tile 92), 0.3 cell wide and high; 12 is the same with logs of tile 136, a third of it index 0 (see-through), use unknown |
 | 1 | totem; 2, 4 untextured copies; 3 animation frame (rotating rocks): see "Totem rocks" |
-| 7, 100, 107 | "mort ailée" (winged death, probably Angel of Death): front, back, wings rotated; 8-11, 101-106, 108-116 untextured |
+| 7, 100, 107 | "mort ailée" (winged death, the Angel of Death): front; 100 the wing-beating pose, 107 the gliding pose (wings swept back); 8-11, 101-106, 108-116 untextured morph key frames (101-106 of 100, 108-113 of 107, 114-116 the transition between them) |
 | 19, 21 | totem of the winged death, and the bird perched on it |
 | 20 | stone prayer totem |
 | 30 | reincarnation site stone (tribe-coloured) |
