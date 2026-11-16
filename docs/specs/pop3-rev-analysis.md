@@ -1144,7 +1144,7 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 | 13 | Angel of death (510 000, 3072, 1) | A falling meteor, then an angel (person type 8, `LIFE_AOD` 10 000, confirmed in the exe's own per-type table) appears already flying and hunts the nearest enemy on the whole map, shamans included; grabs one victim at a time, carries it a fixed 28 turns (2.3 s), then releases it to die through the ordinary death pipeline - the angel has no dedicated kill move of its own. Two angels fight each other by health instead of grabbing. Never lands (code-level: altitude is clamped above terrain every tick), is immune to a firewarrior's bolt beyond ~10% damage and to Whirlwind's lift (both re-confirmed in code); `AOD_KILL_COUNT`/`AOD_DURATION` are documented constants but their enforcement was not located in the angel's own hunting AI this session. Fully traced this session (spawn sequence, grab/carry/release, area panic, vs-angel combat, flight physics) beyond a prior session's opening-scan-only pass - see "Angel of Death mechanics" below for the complete breakdown, including what is still open (building-type exclusions, vehicle-passenger grabbing, the literal kill-count/duration check, and several outer sub-states of its hunting AI). |
 | 14 | Earthquake (175 000, 4096, 2) | 120 turns (10 s) of shake. At turns 24, 56 and 88 each building in 16 × 16 cells has a 20/128 chance to be shaken (occupants out, partial explosion). At turn 60, a half-disc of radius 8 cells sinks by up to 600 (`600 × (4096 − d) / 4096`), with a lava fissure of short-lived lava squares and possibly two lava flows. |
 | 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point. |
-| 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow, 16 s growth + 1.3 s fade ("Volcano lava flow"); about 22 small and 6 big fireballs (simple blasts) and 26 decorative rocks ("Volcano rocks"). |
+| 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow, 16 s growth + 1.3 s fade ("Volcano lava flow"); a random number of fireballs (about 31 small and 9 big on average) thrown ballistically 3-10 cells out, landing in simple blasts ("Volcano fireballs") and 26 decorative rocks ("Volcano rocks"). |
 | 17 | Convert wild (10 000, 8192, 4) | Every 8 turns the nearest wildman within 2 cells becomes a brave of the caster (if the tribe is under 200); ends 18 turns after the last conversion. |
 | 18 | Armageddon (hidden) | Clears the map, turns every building into one person, gathers every tribe on an arena around the target and makes them fight; the weakest shaman is struck by blast or lightning at intervals; anyone more than 9 cells away dies. |
 | 19 | Shield (60 000, 4096, 4) | The `SHIELD_NUM_PEOPLE` (file 6) nearest own followers (not shaman, wildmen, angels, ghosts) for 120 s: immune to blast and whirlwind, other damage ignored too, except melee; deflects burn, blast, lightning, whirlwind and insect shots. |
@@ -1226,6 +1226,25 @@ a distinct trail effect (7/0x42, the cream "smoke cloud" frames 1224-1239, shown
 instead of the shared 4-turn smoke puff, a full 16-turn smoke cloud where it lands, and the already-documented
 bigger impact burst (7/0x3F vs 7/0x3E). The trail's one-turn life is read from the code, not yet seen live.
 
+Where they come from and how far they go [exe] (the landing point is never chosen - no area, no distance cap):
+```text
+each turn of the fireball window (cast turns 115-150, 36 turns):
+  launch point = the volcano's own position (and height) moved 0-254 units in a random direction
+  roll 0-7:  0-1 (1/4): a burst of 0-7 small fireballs (random count), all from that launch point
+             2-3 (1/4): one big fireball, 100 units higher
+             4-7 (1/2): none
+each fireball, from its own random launch kick (above):
+  every turn: vertical speed -= 32; position += velocity (horizontal speed never changes: no drag)
+  lands the first turn its height is at or below the ground under it - wherever that is
+```
+- Counts are random per cast: about 31 small and 9 big on average (an estimate from the rolls above), not a fixed
+  number; the older "about 22 small and 6 big" figure was never traced.
+- Range (estimate, flat ground at launch height): 15-23 turns in the air, 2.8 to 10 cells from the launch point
+  (1440 units for the slowest, 5129 for the fastest kick), uniformly random direction - a wide ring around the
+  crater, not a filled square. Real terrain changes it: ground higher than the launch point (the rising cone, its
+  rim up to 1024 at 2.5 cells) catches the slower ones early, lower ground (a valley, the sea) lets them fly further.
+  Nothing stops a fireball in the air: it flies until it meets the ground.
+
 ### Volcano lava flow [exe]
 Effect type 34 ("lava flow", state 33, init 0x512A00, per turn 0x512A60) is spawned once when the cone finishes
 rising. It is a downhill-following spread, not a disc interpolated between two radii:
@@ -1295,8 +1314,8 @@ Open: **A magical shield does not block catching fire**, now confirmed on both e
 0x8000) in `notify_area` (0x44F2F0, where the fire flag is set) nor in the person's own life step (0x4D43A0,
 where it is consumed into state 31 - "Components"). Still open: the volcano controller's own rock/fireball spawn
 windows (0x50E34B/0x50E461/0x50E47F, counted against a local per-function turn counter not yet reconciled with
-the absolute cast turn, so the existing "turns 105-130" / "~22 small, 6 big" figures are not yet cross-checked
-against this session's `[35,70]`/`[40,160]` windows); an extra, unnamed effect (type 0x40, state 51) spawned both
+the absolute cast turn, the fireball window and counts are now settled in "Volcano fireballs"; the rock window
+"turns 105-130" is not yet cross-checked against this session's `[40,160]` window); an extra, unnamed effect (type 0x40, state 51) spawned both
 probabilistically by the lava's own spread (~1/128 per hot cell per turn) and deterministically by the volcano
 controller - role not traced.
 
@@ -6043,6 +6062,11 @@ confirms.
 - units.md `Mobility::Sail` ("open sea only, boats") and `path::nearest_reachable` (boats unloading at a shore):
   the original parks a boat on open sea or on a coast cell with the landing flag (four neighbouring points at
   height 0, no building next to it, not a bay corner); only an all-land cell strands it.
+- `volcano.rs` ("Volcano fireballs"): ours lands `FIREBALLS` (28) `panicking_blast`s at random points of the 6x6-cell
+  `DESTROY_AREA_CELLS` square, so they never land more than 3 cells out on either axis. The original never picks a
+  landing point: each fireball is thrown from near the crater with a random speed and direction and falls until it
+  meets the ground, roughly 3 to 10 cells away on flat ground (further over lower ground, shorter onto the cone),
+  in a ring rather than a filled square, with a random count each turn (bursts of 0-7 small, or one big).
 - `lava.rs`/`volcano.rs` ("Volcano lava flow"): `Lava::turn` deals an instant kill every turn to anyone on a lava
   cell; the original only ever sets the fire flag (state 31) and lets the existing fire/evacuation mechanic run
   its course - the module's own doc comment already says this correctly while the code does the opposite.
