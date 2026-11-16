@@ -279,6 +279,22 @@ pub fn angel_of_death_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u
     true
 }
 
+/// `DROWN=n`: `n` of the player's people (its shaman last) set down in the sea cell nearest its shaman, to drown.
+/// False with no shaman or no sea within 20 cells.
+pub fn drown_demo(map: &mut game_core::map::GameMap, n: usize) -> bool {
+    use game_core::unit::is_sea;
+    let Some(s) = map.shaman_of(PLAYER) else { return false };
+    let home = s.cell();
+    let Some(cell) = (1..20).flat_map(|r| (-r..=r).flat_map(move |dz| (-r..=r).map(move |dx| (home.0 + dx, home.1 + dz)))).find(|&c| is_sea(&map.terrain, c)) else { return false };
+    let mut people: Vec<usize> = (0..map.units.len()).filter(|&i| map.units[i].owner == PLAYER && map.units[i].is_alive()).collect();
+    people.sort_by_key(|&i| map.units[i].kind == game_core::unit::UnitKind::Shaman);
+    for (k, &i) in people.iter().take(n).enumerate() {
+        let w = |c: i32, off: i32| (c * 512 + 256 + off).rem_euclid(65536) as u16;
+        (map.units[i].x, map.units[i].z) = (w(cell.0, (k as i32 % 3 - 1) * 120), w(cell.1, (k as i32 / 3 - 1) * 120));
+    }
+    true
+}
+
 /// `FIRESTORM=x,z` (cells): another tribe's Firestorm effect there, then `ticks` run at once (with `GAME_SPEED=0`:
 /// its fireballs landing over the run). False when `at` does not parse.
 pub fn firestorm_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
@@ -643,6 +659,9 @@ fn screenshot(
         if let Ok(how) = std::env::var("TUMBLE") {
             tumble_demo(&how, &mut map.0);
         }
+        if let Some(n) = std::env::var("DROWN").ok().and_then(|v| v.parse().ok()) {
+            drown_demo(&mut map.0, n);
+        }
         if let Ok(at) = std::env::var("BLAST") {
             let ticks = std::env::var("BLAST_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             blast_demo(&mut map.0, &at, ticks);
@@ -922,6 +941,20 @@ mod tests {
         assert!(angel_of_death_demo(&mut map, "10,10", game_core::angel_of_death::FALL_TICKS.get() + 1));
         assert!(map.units.iter().any(|u| u.kind == game_core::unit::UnitKind::AngelOfDeath), "the creature appears");
         assert!(!angel_of_death_demo(&mut map, "here", 0));
+    }
+
+    #[test]
+    fn drown_demo_sets_the_players_people_down_in_the_sea_shaman_last() {
+        let mut map = game_core::map::GameMap::sandbox_units();
+        assert!(drown_demo(&mut map, 3));
+        let mut drowning = 0;
+        map.tick();
+        for u in map.units.iter().filter(|u| u.owner == PLAYER) {
+            let sinking = matches!(u.action, game_core::unit::Action::Drowning { .. });
+            drowning += sinking as usize;
+            assert!(!(sinking && u.kind == game_core::unit::UnitKind::Shaman), "the shaman last");
+        }
+        assert_eq!(drowning, 3);
     }
 
     #[test]
