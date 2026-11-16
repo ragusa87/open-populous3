@@ -1,5 +1,6 @@
-//! The splash of someone falling or walking into the sea (`Action::Drowning`, units.md): droplets thrown up and
-//! falling back around it, and rings spreading on the water every `RING_EVERY` while it sinks. Our own look
+//! The splash of someone falling or walking into the sea (`Action::Drowning`, units.md): a patch of white foam where
+//! it went in, droplets thrown up and falling back around it, and rings spreading on the water every `RING_EVERY`
+//! while it sinks — sized to read at the usual camera distance. Our own look
 //! (`[ours]`): the original's drowning splash is not traced (sprites.md: hfx 1304-1319 "a water splash
 //! (drowning?)"). Timed from the tick it went in, read back from how deep it has sunk; on the sea's surface as drawn
 //! (`ground_material::drawn_water_lift`).
@@ -17,18 +18,27 @@ use game_core::unit::{Action, Unit, DROWN_SINK};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
 const WATER: Color = Color::srgb(0.85, 0.93, 1.0);
-const DROPLETS: usize = 14;
+const DROPLETS: usize = 20;
 /// How long a droplet flies (seconds), how high it goes and how far out it lands (cells).
-const DROP_SECS: f32 = 0.55;
-const DROP_HEIGHT: f32 = 0.35;
-const DROP_REACH: (f32, f32) = (0.12, 0.3);
-const DROP_SIZE: f32 = 0.012;
+const DROP_SECS: f32 = 0.7;
+const DROP_HEIGHT: f32 = 0.8;
+const DROP_REACH: (f32, f32) = (0.2, 0.6);
+const DROP_SIZE: f32 = 0.035;
 /// A ring spreads to `RING_REACH` cells over `RING_SECS`, a new one every `RING_EVERY` seconds.
-const RING_SECS: f32 = 0.8;
+const RING_SECS: f32 = 0.9;
 const RING_EVERY: f32 = 0.4;
-const RING_REACH: f32 = 0.35;
+const RING_REACH: f32 = 0.8;
 const RINGS: usize = 4;
-const RING_ALPHA: f32 = 0.45;
+const RING_ALPHA: f32 = 0.75;
+/// The foam where it went in spreads to `FOAM_REACH` cells over `FOAM_SECS`, fading.
+const FOAM_SECS: f32 = 0.8;
+const FOAM_REACH: f32 = 0.35;
+
+/// The foam's radius (cells) and opacity `secs` after it went in; None once gone.
+pub fn foam(secs: f32) -> Option<(f32, f32)> {
+    let t = secs / FOAM_SECS;
+    (0.0..1.0).contains(&t).then(|| (FOAM_REACH * (0.3 + 0.7 * t.sqrt()), 0.9 * (1.0 - t)))
+}
 
 /// Where droplet `k` of a splash seeded `id` is, `secs` after it went in (cells, from its centre on the water), and
 /// how opaque; None once it has fallen back.
@@ -60,6 +70,7 @@ fn went_in(now: Tick, sunk: u16) -> Tick {
 pub struct SplashAssets {
     drop: Handle<Mesh>,
     ring: Handle<Mesh>,
+    foam: Handle<Mesh>,
 }
 
 /// One splash: its droplets and rings, each with its own material to fade.
@@ -67,6 +78,7 @@ pub struct SplashAssets {
 pub struct SplashView {
     drops: Vec<(Entity, Handle<StandardMaterial>)>,
     rings: Vec<(Entity, Handle<StandardMaterial>)>,
+    foam: (Entity, Handle<StandardMaterial>),
 }
 
 impl WorldView for SplashView {
@@ -94,12 +106,13 @@ impl WorldView for SplashView {
             let m = mats.add(StandardMaterial { base_color: WATER, alpha_mode: AlphaMode::Blend, unlit: true, ..default() });
             (v.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(m.clone()), NotShadowCaster, crate::hover::NoOutline, Transform::default(), Visibility::Hidden)).id(), m)
         };
-        let (mut drops, mut rings) = (Vec::new(), Vec::new());
+        let (mut drops, mut rings, mut foam) = (Vec::new(), Vec::new(), None);
         view.with_children(|v| {
             drops = (0..DROPLETS).map(|_| part(v, &assets.drop)).collect();
             rings = (0..RINGS).map(|_| part(v, &assets.ring)).collect();
+            foam = Some(part(v, &assets.foam));
         });
-        Some(SplashView { drops, rings })
+        Some(SplashView { drops, rings, foam: foam? })
     }
 
     fn update(&self, u: &Unit, now: SimNow, (map, _, mats, parts, (ground, grounds, images, curve)): &mut SystemParamItem<Self::Params>) {
@@ -124,8 +137,9 @@ impl WorldView for SplashView {
             show(part, droplet(u.id.raw(), k, secs).map(|(at, a)| (Transform::from_translation(surface + at).with_scale(Vec3::splat(DROP_SIZE)), a)));
         }
         for (k, part) in self.rings.iter().enumerate() {
-            show(part, ring(k, secs).map(|(r, a)| (Transform::from_translation(surface + Vec3::Y * 0.01).with_scale(Vec3::new(r, 0.1, r)), a)));
+            show(part, ring(k, secs).map(|(r, a)| (Transform::from_translation(surface + Vec3::Y * 0.01).with_scale(Vec3::new(r, 0.15, r)), a)));
         }
+        show(&self.foam, foam(secs).map(|(r, a)| (Transform::from_translation(surface + Vec3::Y * 0.005).with_scale(Vec3::new(r, 1.0, r)), a)));
     }
 }
 
@@ -138,7 +152,7 @@ impl Plugin for SplashPlugin {
 }
 
 fn load_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
-    commands.insert_resource(SplashAssets { drop: meshes.add(Sphere::new(1.0).mesh().ico(1).unwrap()), ring: meshes.add(Torus::new(0.94, 1.0)) });
+    commands.insert_resource(SplashAssets { drop: meshes.add(Sphere::new(1.0).mesh().ico(1).unwrap()), ring: meshes.add(Torus::new(0.88, 1.0)), foam: meshes.add(Cylinder::new(1.0, 0.01)) });
 }
 
 #[cfg(test)]
@@ -162,6 +176,14 @@ mod tests {
         let (r, a) = ring(1, RING_EVERY + RING_SECS / 2.0).unwrap();
         assert!(r > 0.0 && r < RING_REACH && a < RING_ALPHA);
         assert!(ring(0, RING_SECS).is_none(), "faded");
+    }
+
+    #[test]
+    fn the_foam_spreads_and_fades_where_it_went_in() {
+        let (r0, a0) = foam(0.0).unwrap();
+        let (r1, a1) = foam(FOAM_SECS / 2.0).unwrap();
+        assert!(r1 > r0 && a1 < a0 && r1 < FOAM_REACH);
+        assert!(foam(FOAM_SECS).is_none());
     }
 
     #[test]
