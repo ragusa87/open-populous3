@@ -723,6 +723,16 @@ impl Unit {
         self.hurt.attacker()
     }
 
+    /// Grabbed by the Angel of Death `angel` (angel_of_death.rs): its death, however it comes, is that angel's kill.
+    pub(crate) fn seized_by(&mut self, angel: UnitId) {
+        self.hurt.seized_by(angel);
+    }
+
+    /// The angel that seized it, if any, forgotten once asked.
+    pub(crate) fn take_seizer(&mut self) -> Option<UnitId> {
+        self.hurt.take_seizer()
+    }
+
     /// What killed it, once it has (`GameMap::damage`'s own `kind`).
     pub fn death_cause(&self) -> Option<DamageKind> {
         self.hurt.cause()

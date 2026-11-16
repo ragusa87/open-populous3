@@ -6,11 +6,14 @@
 
 use crate::effect::DamageKind;
 use crate::tribes::Owner;
+use crate::unit::UnitId;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Hurt {
     attacker: Option<Owner>,
     cause: Option<DamageKind>,
+    /// The Angel of Death that grabbed it: whatever it later dies of counts as that angel's kill.
+    angel: Option<UnitId>,
 }
 
 impl Hurt {
@@ -38,6 +41,16 @@ impl Hurt {
     pub(crate) fn died_from(&mut self, kind: DamageKind) {
         self.cause = Some(kind);
     }
+
+    /// Grabbed by the Angel of Death `angel`.
+    pub(crate) fn seized_by(&mut self, angel: UnitId) {
+        self.angel = Some(angel);
+    }
+
+    /// The angel that grabbed it, forgotten once asked: each death is credited once.
+    pub(crate) fn take_seizer(&mut self) -> Option<UnitId> {
+        self.angel.take()
+    }
 }
 
 #[cfg(test)]
@@ -54,6 +67,15 @@ mod tests {
         assert_eq!(hurt.attacker(), Some(Owner::Tribe(crate::tribes::TribeId::Blue)), "the latest attacker, not the first");
         hurt.healed();
         assert_eq!(hurt.attacker(), None);
+    }
+
+    #[test]
+    fn the_angel_that_seized_it_is_handed_over_once() {
+        let mut hurt = Hurt::default();
+        let angel = crate::id::Id::from_raw(9);
+        hurt.seized_by(angel);
+        assert_eq!(hurt.take_seizer(), Some(angel));
+        assert_eq!(hurt.take_seizer(), None, "credited once");
     }
 
     #[test]

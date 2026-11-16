@@ -192,15 +192,63 @@ impl GameMap {
         }
     }
 
-    /// Every living Angel of Death, on its own: hunts (a rival angel first, else the nearest eligible enemy),
-    /// closes in, grabs or fights, and panics anyone eligible nearby — all independent of `Command`.
+    /// Every Angel of Death, on its own: first its kills are counted and it ends if its time or kill count is up
+    /// (or it died); then, alive, it hunts (a rival angel first, else the nearest eligible enemy), closes in, grabs
+    /// or fights, and panics anyone eligible nearby — all independent of `Command`.
     pub(crate) fn tend_angels_of_death(&mut self) {
+        self.credit_angel_kills();
+        self.end_angels();
+        self.drop_orphaned_victims();
         let ids: Vec<UnitId> = self.units.iter().filter(|u| u.kind == UnitKind::AngelOfDeath && u.is_alive()).map(|u| u.id).collect();
         let mut events = Vec::new();
         for id in ids {
             events.extend(self.tend_one_angel(id));
         }
         self.apply_events(events);
+    }
+
+    /// Every dead unit an angel once grabbed counts as one kill of that angel, whatever it died of.
+    fn credit_angel_kills(&mut self) {
+        let mut credited = Vec::new();
+        for u in self.units.iter_mut().filter(|u| !u.is_alive()) {
+            credited.extend(u.take_seizer());
+        }
+        for angel in credited {
+            if let Some(a) = self.unit_mut(angel).and_then(|u| u.angel.as_mut()) {
+                a.kills = a.kills.saturating_add(1);
+            }
+        }
+    }
+
+    /// Ends every angel whose `AOD_DURATION` has run out, that has made its `AOD_KILL_COUNT` kills, or that died
+    /// (a lost fight): removed outright, like a ghost — no corpse, no spirit, it has no body on the ground (`[ours]`:
+    /// how the original's own "death-path effect" plays is not traced).
+    fn end_angels(&mut self) {
+        let kill_count = self.balance.angels.kill_count;
+        let mut ended = Vec::new();
+        for u in self.units.iter_mut().filter(|u| u.kind == UnitKind::AngelOfDeath) {
+            let alive = u.is_alive();
+            let Some(a) = u.angel.as_mut() else { continue };
+            if a.left.tick() || a.kills >= kill_count || !alive {
+                ended.push(u.id);
+            }
+        }
+        for id in ended {
+            self.destroy_ghost(id);
+        }
+    }
+
+    /// A victim whose captor is gone, or no longer carrying it, is dropped from where it was held: it falls, alive
+    /// (`[ours]`: the trace never has an angel die mid-carry).
+    fn drop_orphaned_victims(&mut self) {
+        let carrying = |by: UnitId, victim: UnitId| self.unit(by).is_some_and(|a| matches!(a.action, Action::Carrying { victim: v, .. } if v == victim));
+        let orphans: Vec<usize> =
+            (0..self.units.len()).filter(|&k| matches!(self.units[k].action, Action::Grabbed { by } if !carrying(by, self.units[k].id))).collect();
+        for k in orphans {
+            let height = self.terrain.height_at(self.units[k].x as u32, self.units[k].z as u32, WORLD_UNITS_PER_CELL) + CRUISE_HEIGHT;
+            self.units[k].action = Action::Tumbling;
+            self.units[k].motion = crate::motion::Motion::flying(crate::motion::Velocity::ZERO, height);
+        }
     }
 
     fn tend_one_angel(&mut self, id: UnitId) -> Vec<WorldEvent> {
@@ -225,6 +273,9 @@ impl GameMap {
                     (self.units[vi].x, self.units[vi].z) = (self.units[i].x, self.units[i].z);
                 }
                 if left.tick() {
+                    if self.unit(victim).is_some_and(|v| v.statuses.ghost) {
+                        angel.kills = angel.kills.saturating_add(1);
+                    }
                     events.push(WorldEvent::Damage { unit: victim, amount: u16::MAX, kind: DamageKind::AngelOfDeath, from: Some(owner) });
                     self.units[i].action = Action::Hunting;
                 } else {
@@ -298,6 +349,7 @@ impl GameMap {
         v.inside = None;
         (v.x, v.z) = at;
         v.action = Action::Grabbed { by };
+        v.seized_by(by);
         housed.map(|building| WorldEvent::Wear { building, amount: GRAB_BUILDING_WEAR }).into_iter().collect()
     }
 
@@ -543,6 +595,59 @@ mod tests {
         assert!(angel_target_eligible(owner, map.unit(id).unwrap()));
         map.unit_mut(id).unwrap().action = Action::Listening { preacher, sitting: Countdown::new(Ticks::new(5)), left: Countdown::new(Ticks::new(5)), attempts: 0 };
         assert!(!angel_target_eligible(owner, map.unit(id).unwrap()));
+    }
+
+    fn angel_state(map: &GameMap, id: UnitId) -> Angel {
+        map.unit(id).unwrap().angel.unwrap()
+    }
+
+    #[test]
+    fn it_ends_once_its_time_is_up() {
+        let mut map = bare();
+        let angel = spawn_angel(&mut map, TribeId::Blue, AT);
+        map.unit_mut(angel).unwrap().angel.as_mut().unwrap().left = Countdown::new(Ticks::new(3));
+        map.run(Ticks::new(2));
+        assert!(map.unit(angel).is_some(), "still there");
+        map.tick();
+        assert!(map.unit(angel).is_none(), "gone, removed outright");
+    }
+
+    #[test]
+    fn every_death_of_someone_it_grabbed_counts_as_its_kill_whatever_the_cause_once() {
+        let mut map = bare();
+        let angel = spawn_angel(&mut map, TribeId::Blue, AT);
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(30000), AT.1)).id;
+        map.unit_mut(victim).unwrap().seized_by(angel);
+        map.apply_events(vec![WorldEvent::Damage { unit: victim, amount: u16::MAX, kind: DamageKind::Swamp, from: None }]);
+        map.run(Ticks::new(3));
+        assert_eq!(angel_state(&map, angel).kills, 1, "drowned after being dropped: still its kill, counted once");
+    }
+
+    #[test]
+    fn it_ends_at_its_last_allowed_kill() {
+        let mut map = bare();
+        let angel = spawn_angel(&mut map, TribeId::Blue, AT);
+        let last = map.balance.angels.kill_count - 1;
+        map.unit_mut(angel).unwrap().angel.as_mut().unwrap().kills = last;
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(2000), AT.1)).id;
+        assert!(until_grabbed(&mut map, victim));
+        map.run(CARRY_TICKS);
+        assert!(!map.unit(victim).unwrap().is_alive(), "its last victim");
+        map.tick();
+        assert!(map.unit(angel).is_none(), "gone after its last kill");
+    }
+
+    #[test]
+    fn an_angel_killed_in_a_fight_is_removed_and_its_victim_dropped_alive() {
+        let mut map = bare();
+        let angel = spawn_angel(&mut map, TribeId::Blue, AT);
+        let victim = map.spawn(TribeId::Red, UnitKind::Brave, (AT.0.wrapping_add(2000), AT.1)).id;
+        assert!(until_grabbed(&mut map, victim));
+        map.apply_events(vec![WorldEvent::Damage { unit: angel, amount: u16::MAX, kind: DamageKind::AngelOfDeath, from: None }]);
+        map.tick();
+        assert!(map.unit(angel).is_none(), "removed, no corpse");
+        let v = map.unit(victim).unwrap();
+        assert!(v.is_alive() && v.motion.airborne(), "dropped, falling, alive");
     }
 
     fn health(map: &GameMap, id: UnitId) -> u16 {
