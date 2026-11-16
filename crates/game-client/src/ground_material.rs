@@ -21,6 +21,52 @@ pub fn params(size: usize, grid: bool) -> Vec4 {
     Vec4::new(size as f32, if grid { 1.0 } else { 0.0 }, crate::terrain_texture::PX_PER_CELL as f32, 0.0)
 }
 
+/// `ground.wgsl`'s own `WATER_FREQUENCY` and `WATER_OPENNESS_RADIUS`: the ripple's texels per cell pixel, and how
+/// far from land (cells) it reaches full height.
+const WATER_FREQUENCY: i32 = 24;
+const WATER_OPENNESS_RADIUS: i32 = 3;
+
+/// How far over the ground the sea is drawn at its corner `(x, z)` at `turn`, height units: `ground.wgsl`'s
+/// `vertex` (pop3-rev-analysis.md "Water rendering (watdisp.dat)": two counter-scrolling `water` reads, summed, / 8)
+/// times its open-water factor, 0 within a cell of land (`walkable`) rising to 1 at `WATER_OPENNESS_RADIUS`.
+pub fn water_lift_at_corner(water: &[u8], turn: u32, (x, z): (i32, i32), walkable: &impl Fn(i32, i32) -> bool) -> f32 {
+    if water.len() < DISP_SIZE * DISP_SIZE {
+        return 0.0;
+    }
+    let (shift, step, n) = ((turn % 256) as i32, crate::terrain_texture::PX_PER_CELL as i32 * WATER_FREQUENCY, DISP_SIZE as i32);
+    let texel = |d: i32| water[((z * step + d).rem_euclid(n) * n + (x * step + d).rem_euclid(n)) as usize] as f32;
+    let r = WATER_OPENNESS_RADIUS;
+    let mut d2 = ((r + 1) * (r + 1)) as f32;
+    for dz in -r..=r {
+        for dx in -r..=r {
+            let here = (dx * dx + dz * dz) as f32;
+            if here < d2 && walkable(x + dx, z + dz) {
+                d2 = here;
+            }
+        }
+    }
+    let t = ((d2.sqrt() - (r - 1) as f32) / 1.0).clamp(0.0, 1.0);
+    (texel(-shift) + texel(shift)) / 8.0 * t * t * (3.0 - 2.0 * t)
+}
+
+/// How far over the ground the sea is drawn at `at` (cells, fractional), height units: its four corners'
+/// `water_lift_at_corner`, blended across the cell.
+pub fn water_lift(water: &[u8], turn: u32, at: Vec2, walkable: &impl Fn(i32, i32) -> bool) -> f32 {
+    let (c, f) = (at.floor(), at - at.floor());
+    let corner = |dx: i32, dz: i32| water_lift_at_corner(water, turn, (c.x as i32 + dx, c.y as i32 + dz), walkable);
+    let near = corner(0, 0) + (corner(1, 0) - corner(0, 0)) * f.x;
+    let far = corner(0, 1) + (corner(1, 1) - corner(0, 1)) * f.x;
+    near + (far - near) * f.y
+}
+
+/// `water_lift` against the live terrain material (its `water` texture and scroll turn) and `map`'s coast, height
+/// units; 0 before the material is filled.
+pub fn drawn_water_lift(mats: &Assets<GroundMaterial>, images: &Assets<Image>, material: &Handle<GroundMaterial>, map: &game_core::terrain::Heightmap, at: Vec2) -> f32 {
+    let Some(m) = mats.get(material) else { return 0.0 };
+    let Some(water) = images.get(&m.water).and_then(|i| i.data.as_deref()) else { return 0.0 };
+    water_lift(water, m.params.w as u32, at, &|x, z| !crate::terrain_texture::looks_like_sea(map, (x, z)))
+}
+
 /// `params.w` (pop3-rev-analysis.md "Water rendering (watdisp.dat)", confirmed by peterderivaz/populous, README
 /// "References"): `turn % 256`, the sea's own diagonal scroll phase (two counter-scrolling samples, so there is
 /// no net drift in any direction - only local swirls). Set every frame (`world.rs::animate_water`), independently
@@ -223,6 +269,20 @@ impl Plugin for GroundMaterialPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sea_is_drawn_raised_by_its_ripple_in_open_water_only() {
+        let mut water = vec![0u8; DISP_SIZE * DISP_SIZE];
+        let step = crate::terrain_texture::PX_PER_CELL * WATER_FREQUENCY as usize;
+        water[(10 * step % DISP_SIZE) * DISP_SIZE + 10 * step % DISP_SIZE] = 200;
+        let open = |_: i32, _: i32| false;
+        assert_eq!(water_lift_at_corner(&water, 0, (10, 10), &open), 400.0 / 8.0, "both reads on the same texel at turn 0");
+        assert_eq!(water_lift_at_corner(&water, 1, (10, 10), &open), 0.0, "scrolled off it");
+        let coast = |x: i32, _: i32| x >= 12;
+        assert_eq!(water_lift_at_corner(&water, 0, (10, 10), &coast), 0.0, "two cells from land: still flat");
+        assert_eq!(water_lift(&water, 0, Vec2::new(10.5, 10.0), &open), 25.0, "half way to a flat corner");
+        assert_eq!(water_lift(&[], 0, Vec2::ZERO, &open), 0.0, "no texture yet");
+    }
 
     #[test]
     fn params_packs_size_grid_flag_and_px_per_cell() {

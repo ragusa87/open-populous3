@@ -1,7 +1,8 @@
 //! The splash of someone falling or walking into the sea (`Action::Drowning`, units.md): droplets thrown up and
 //! falling back around it, and rings spreading on the water every `RING_EVERY` while it sinks. Our own look
 //! (`[ours]`): the original's drowning splash is not traced (sprites.md: hfx 1304-1319 "a water splash
-//! (drowning?)"). Timed from the tick it went in, read back from how deep it has sunk.
+//! (drowning?)"). Timed from the tick it went in, read back from how deep it has sunk; on the sea's surface as drawn
+//! (`ground_material::drawn_water_lift`).
 
 use crate::grounded::Grounded;
 use crate::sim_time::{seed, SimNow};
@@ -75,6 +76,7 @@ impl WorldView for SplashView {
         Res<'static, SplashAssets>,
         ResMut<'static, Assets<StandardMaterial>>,
         Query<'static, 'static, (&'static mut Transform, &'static mut Visibility)>,
+        (Res<'static, crate::world::TerrainMaterial>, Res<'static, Assets<crate::ground_material::GroundMaterial>>, Res<'static, Assets<Image>>, Res<'static, crate::camera::CurveParamsRes>),
     );
 
     fn models(map: &GameMap) -> impl Iterator<Item = &Unit> {
@@ -85,7 +87,7 @@ impl WorldView for SplashView {
         u.id.raw()
     }
 
-    fn spawn(u: &Unit, view: &mut EntityCommands, (_, assets, mats, _): &mut SystemParamItem<Self::Params>) -> Option<Self> {
+    fn spawn(u: &Unit, view: &mut EntityCommands, (_, assets, mats, ..): &mut SystemParamItem<Self::Params>) -> Option<Self> {
         let cell = WORLD_UNITS_PER_CELL as f32;
         view.insert((Grounded { at: Vec2::new(u.x as f32, u.z as f32) / cell, half: 0.0 }, Transform::default(), Visibility::Visible));
         let mut part = |v: &mut ChildSpawnerCommands, mesh: &Handle<Mesh>| {
@@ -100,9 +102,11 @@ impl WorldView for SplashView {
         Some(SplashView { drops, rings })
     }
 
-    fn update(&self, u: &Unit, now: SimNow, (map, _, mats, parts): &mut SystemParamItem<Self::Params>) {
+    fn update(&self, u: &Unit, now: SimNow, (map, _, mats, parts, (ground, grounds, images, curve)): &mut SystemParamItem<Self::Params>) {
         let Action::Drowning { sunk } = u.action else { return };
         let secs = now.secs_since(went_in(map.0.now, sunk)).max(0.0);
+        let at = Vec2::new(u.x as f32, u.z as f32) / WORLD_UNITS_PER_CELL as f32;
+        let surface = Vec3::Y * crate::ground_material::drawn_water_lift(grounds, images, &ground.0, &map.0.terrain, at) * curve.0.height_scale;
         let mut show = |(e, m): &(Entity, Handle<StandardMaterial>), pose: Option<(Transform, f32)>| {
             if let Ok((mut t, mut vis)) = parts.get_mut(*e) {
                 match pose {
@@ -117,10 +121,10 @@ impl WorldView for SplashView {
             }
         };
         for (k, part) in self.drops.iter().enumerate() {
-            show(part, droplet(u.id.raw(), k, secs).map(|(at, a)| (Transform::from_translation(at).with_scale(Vec3::splat(DROP_SIZE)), a)));
+            show(part, droplet(u.id.raw(), k, secs).map(|(at, a)| (Transform::from_translation(surface + at).with_scale(Vec3::splat(DROP_SIZE)), a)));
         }
         for (k, part) in self.rings.iter().enumerate() {
-            show(part, ring(k, secs).map(|(r, a)| (Transform::from_xyz(0.0, 0.01, 0.0).with_scale(Vec3::new(r, 0.1, r)), a)));
+            show(part, ring(k, secs).map(|(r, a)| (Transform::from_translation(surface + Vec3::Y * 0.01).with_scale(Vec3::new(r, 0.1, r)), a)));
         }
     }
 }

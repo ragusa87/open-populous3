@@ -44,7 +44,7 @@ const VISUAL_SEA_HEIGHT: u16 = 4;
 
 /// Mirrors `game_core::unit::is_sea`'s own corner test, but against `VISUAL_SEA_HEIGHT` instead of exactly
 /// `SEA_LEVEL` - see `VISUAL_SEA_HEIGHT`'s own doc comment for why this is a separate, render-only predicate.
-fn looks_like_sea(map: &Heightmap, (x, z): (i32, i32)) -> bool {
+pub(crate) fn looks_like_sea(map: &Heightmap, (x, z): (i32, i32)) -> bool {
     [(0, 0), (1, 0), (0, 1), (1, 1)].iter().all(|&(dx, dz)| map.get(x + dx, z + dz) <= VISUAL_SEA_HEIGHT)
 }
 
