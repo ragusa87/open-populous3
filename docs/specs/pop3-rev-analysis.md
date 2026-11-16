@@ -51,6 +51,12 @@ so a live measurement may run on it with the addresses translated.
   creature that autonomously hunts the nearest enemy (a rival angel first, shamans included), grabs and carries
   one victim 28 turns before releasing it to die normally, and panics bystanders just by being near them - all
   through one state machine, with no player order path into it at all. See "Angel of Death mechanics".
+- **The Angel of Death's wings beat by vertex morphing, and it really dives to grab** [exe]: each of its two
+  textured poses (bank-0 objects 100 and 107) is drawn with its points overwritten every frame by a 12-step cycle
+  through six untextured key frames (101-106, 108-113, half-way points in between), as listed in
+  `objects/morph0-N.dat`; a pose change steps through key frames 114-116 over about 6 turns. 100 is the beating
+  pose used while swooping in and carrying, 107 the default glide. While closing in it descends to the victim's
+  height at a rate timed to arrive with it. See "Angel of Death flight pose, wing beat and dive".
 - **The planet bend is a parabola of 0.011 × d² cells** [exe, measured], applied in camera space; heights are
   256 units per cell (1024 = 4 cells) and the camera looks down at a fixed 20°. See "Landscape projection".
 - **Walking speed is per type, in world units per turn** [exe]: `<TYPE>_SPEED` plus up to 25 % at random per
@@ -1957,7 +1963,8 @@ against a non-angel locked target (+0xA8):
   1: close in and GRAB: victim.+0x72 = self.id ("who holds me", unless already
      claimed); victim -> person state 40 (held captive, below); self speed x2
   2: carry for a fixed 28 turns (self+0x70 = 0x1C, "about one kill per 28 turns/2.3s"):
-     climb +800 height, slow down, zigzag heading +-22/2048 rad/tick
+     climb +800 height, slow down, curve 22/2048 a turn to one side (fixed by the
+     victim's id parity) whenever 5 cells ahead are clear - "Carry turn" below
        at countdown 8: throw destination = 400 units along the VICTIM's OWN facing;
                        arm victim.+0x2D = 1 (release); charge self a hit-point cost
                        (gated, unresolved - "Open questions")
@@ -1977,7 +1984,9 @@ every tick, regardless of +0xA8:
     same per-type exclusion table (0x5A7091) and +0xE bit 0x10 immunity gate
     Insect Plague's own sting uses (shamans and angels excluded)
   flight physics (0x4DDB30): ramp speed/heading, clamp planned altitude to at
-    least ~100 units above the real terrain underneath - no landing branch exists
+    least 100 units above the tallest building/tree top underneath (bare terrain
+    while closing in or carrying: it dives, see "Angel of Death flight pose, wing
+    beat and dive") - no landing branch exists
     anywhere in this function; also re-syncs the angel's own ground-shadow
     companion object (class 6 type 8, held in self+0x89 - NOT a hunting-target
     reference, an earlier session's misreading) to position/heading/bank
@@ -1994,35 +2003,12 @@ ordinary death pipeline (state 31), using a SHAMAN-SPECIFIC death pose/sound tab
 the victim is a shaman - direct code confirmation that a shaman is a valid Angel of Death kill, not just an
 ordinary follower.
 
-**Visuals, confirmed from the sprite/draw-class tables (separate session)**: every drawable-setting call found in
-state 28 (`0x4DB980`) targets either the angel's own ground-shadow **companion object** (class 6 type 8, held in
-`self+0x89`) or a freshly-spawned effect - never the type-8 PERSON record itself. This strongly suggests **the
-companion object is the actual visible flying body**, with the person record driving it as logic-only (not
-exhaustively proven - a very large function, sampled rather than read byte-for-byte). The companion has at least
-three distinct pose code paths, not just the documented cruise/dive toggle: a dedicated "launching/accelerating"
-pose fires in one of the outer sub-states (a climb sequence - altitude +600, a distinct internal flag set, and its
-own direct sprite-variant call), separate from the altitude-based cruise/dive toggle - i.e. the angel does
-visibly change its flight pose when committing to a fast manoeuvre, though the exact moment this fires relative to
-"closing in on a grab target" specifically was not pinned down.
-
-**Resolved, separate session - the companion is a real 3D mesh, not a 2D sprite, and its two flight-pose models are
-identified**: the "model ids" 0x3E/0x45 passed to the companion's pose-setter (`0x4DE440`) are not sprite/hfx ids
-at all - they are literal indices into the exe's global 3D OBJECT-BANK table (`objs0_mem`, a pointer to 54-byte
-`objs0_struct` records), the SAME mesh asset class buildings and vehicles use, confirmed by the exact 54-byte
-stride the lookup computes. Via the game's existing object-bank numbering (raw ids 62-144 map to bank-0 object
-index + 38), 0x3E (62) and 0x45 (69) resolve to bank-0 objects 100 and 107 - the exe's "winged death" model family
-(bank-0 7 is a third, front-facing variant of the same model, never referenced by this code path). So **"diving"
-is the back-view winged-death mesh, "cruising" is an alternate-pose winged-death mesh** - confirming the angel's
-flying body is modelled as a genuine 3D creature mesh (like a vehicle), not the 2D sprite-chain ordinary persons
-use. The companion never snaps instantly between the two: its 0-5 "ramp" counter holds the current mesh steady
-while cycling through 3 intermediate sub-variants (a small, separate per-shape table, not pinned down further)
-for a soft blend, only committing the actual mesh swap once the ramp fully bottoms or tops out - at which point it
-also copies that mesh's own built-in `morph_index` byte (read straight off the 3D object record) onto itself,
-i.e. each pose-mesh carries its own blend-shape index rather than the code computing one. A second, independent
-confirmation that the PERSON record itself is never drawn: its own per-type default-object table entry is the
-literal sentinel "no object" for type 8, versus a real small object id for every other person type. The literal
-hfx sprite-frame numbers some earlier notes expected do not apply - there is no 2D sprite sheet here to count
-frames in.
+**Visuals**: every drawable-setting call in state 28 targets either the angel's own **companion object**
+(class 6 type 8, held in `self+0x89`) or a freshly spawned effect, never the type-8 person record, whose own
+per-type default object is the "no object" sentinel: the companion is the visible flying body, a 3D object-bank
+mesh like a vehicle. Its poses, wing beat and dive are in "Angel of Death flight pose, wing beat and dive" below
+(this replaces earlier notes here that called object 100 "diving", 107 "cruising", the toggle altitude-based,
+the 3 blend steps "sub-variants" of an unknown table, and the climb-out pose a separate mesh: all four were wrong).
 
 **No dedicated fire-breath effect was found** anywhere in state 28 or its known callees - the full set of effects
 it can spawn (the shadow companion; two ground-impact puffs; a death-path effect; the spawn-moment blast already
@@ -2071,6 +2057,191 @@ sub-state (13, above), not the universal state-1 idle hand-off every other fresh
 camera, wings moving, before hunting" is not a bespoke intro animation, but most likely just how the spawn
 sub-state's own impact-and-settle sequence (debris shatter, blast, then falling through to its first ordinary
 flight pose) reads in play before it locks onto a target and starts actively hunting.
+
+### Angel of Death flight pose, wing beat and dive [exe]
+Answers the user report "wings not moving, no animation, no dive, transitions not working". Everything below is
+code-level; the frame rate of the draw loop (and so the wing beat in seconds) is not measured.
+
+**Object numbering.** In a game the exe never loads object bank 0: a level's bank 0 is loaded as bank 2
+(`load_objs_1`), and banks 2-7 number the winged death 38 lower than bank 0 (objects.md "Banks 2-7 index"). The
+exe's literal ids are bank-2 ids; bank-0 equivalents (what our client loads) in brackets:
+
+| Bank-2 id | Bank 0 | Role |
+|---|---|---|
+| 62 (0x3E) | 100 | textured "beating" pose: faces drawn, points replaced by the morph (morph record 4) |
+| 63-68 | 101-106 | its key frames, wings spread sideways, never drawn with their own faces |
+| 69 (0x45) | 107 | textured "gliding" pose (morph record 5) |
+| 70-75 | 108-113 | its key frames, wings swept back |
+| 74 (0x4A) | 112 | the climb-out freeze frame (one of the glide key frames) |
+| 76, 77, 78 | 114, 115, 116 | the three transition frames between the two poses |
+
+All of 100-116 have the same 87 points in the same order; only 100 and 107 carry textured faces. Object 7 (bank-0
+"front") is not used by the flying angel.
+
+**Morph records** (`objects/morph0-N.dat`, loaded with the bank, 25 records of 368 bytes): a base object, a key
+frame count `n`, a list of `n` key frame objects and `n` step counts. At load the exe rebuilds each record's
+segment table from those lists (the segment table stored in the file is ignored, and is stale in banks 2-7) and
+marks the base object as morphing (object flag 0x80, object byte 7 = record index):
+```text
+segment i: from = key[i], to = key[(i + 1) mod n], spans frames start_i .. start_i + steps[i]
+           start_0 = 0, start_i = end_(i-1) + 1;  cycle length L = end_(n-1) + 1
+```
+Records 4 and 5 (the angel): 6 key frames, every step count 1, so L = 12 frames:
+`101, ½(101+102), 102, ½(102+103), ..., 106, ½(106+101)` for the beating pose, the same over 108-113 for the glide.
+
+**Drawing a morphing object** (each frame it is drawn):
+```text
+base = morph[rec].base                       -- faces, textures: always the base object's own
+if no one-shot morph is active:              -- the looping cycle
+  f = (anim_clock / 4) mod L
+  segment s with start_s <= f <= end_s
+  for each point p: base.p = key_from.p + (key_to.p - key_from.p) * (f - start_s) / (steps_s + 1)
+  remember key_from as "current frame"
+else:                                        -- one-shot morph (pose transition, freeze)
+  t = min(oneshot_clock / 4, oneshot_steps)
+  for each point p: base.p = from.p + (to.p - from.p) * t / oneshot_steps
+```
+Integer arithmetic, truncating toward zero, on the object's own 16-bit point values. The base object's point
+buffer is overwritten in place right before that drawable is transformed (from the per-thing draw dispatcher), so
+each angel shows its own frame from its own clock; the original keeps no per-angel copy of the points.
+
+**The animation clock** advances once per drawn frame (`draw_main`, not the game turn; skipped while the game is
+paused), for every drawable: the angel's draw class (4) adds 4 to `anim_clock`, i.e. one cycle frame per drawn
+frame, and wraps at `4 × L`; a one-shot morph's own clock also gains 4 per frame and stops (holds `to`) once it
+reaches `4 × oneshot_steps`. So a full wing beat is 12 drawn frames (1 s at 12 frames per second, faster if the
+original draws more often than it simulates: unverified). Setting a new pose restarts the cycle at frame 0 and
+cancels any one-shot morph.
+
+**Which pose** (every turn, from the angel's flight step):
+```text
+beating (62 / bank-0 100) if the angel is not in its death sequence (outer sub-states 7, 8) and
+                          (flight mode == "closing in" (3)  or  (hunting and carrying a victim))
+gliding (69 / bank-0 107) otherwise (cruise, approach, standoff, climb-out, scripted approach, dying)
+```
+Gliding is the default: the angel glides while hunting and only beats its wings from the moment it commits to
+the grab until it releases its victim.
+
+**Pose transition** (same per-turn call, a 0..5 transition counter on the companion):
+```text
+request differs from the drawn pose:
+  toward beating: counter += 1 up to 5;  toward gliding: counter -= 1 down to 0
+  counter not yet at its end before this step:
+      one-shot morph from the current cycle frame ("current frame" above) to object 76 + counter / 2
+      (bank-0 114, 115, 116), 2 steps (so it lands in 2 drawn frames and holds until the next turn)
+  counter already at its end: switch the pose (new base object, new morph record, cycle from frame 0)
+```
+Toward beating the counter goes 1..5 (frames 114, 115, 115, 116, 116), then the switch on the 6th turn; toward
+gliding 4..0 (116, 115, 115, 114, 114), then the switch: 6 turns, 0.5 s, each way. A request reversed half-way
+just walks the counter back. Every one-shot step starts again from the same frozen cycle frame, so a transition
+reads as the wings snapping through three set positions, not a smooth blend. The angel starts gliding, set at
+once with no transition (counter 0).
+
+**Climb-out freeze** (outer sub-state 11, the climb-out: snap to the ground height, then climb 600): sets the
+glide pose at once, then a one-shot morph from object 74 to itself (bank-0 112), 1 step: the glide pose frozen on
+that key frame, wings still, until the next pose change. It is not a third mesh.
+
+What enters it: only the "statue to AoD" set-piece. Sub-state 11 is reached solely through sub-state 10 (the
+state step promotes 10 to 11 on the next turn), and the only code that puts an angel in sub-state 10 is that
+set-piece's per-turn effect (class 7 type `0x5b`): it claims a stone head (scenery type 9) and spawns its own
+angel directly, without `create_aod`. A cast angel never reaches sub-state 10 or 11: `create_aod` starts it in
+sub-state 13, and no hunting, carrying, fighting or ending path writes 10 or 11. So the freeze belongs to the
+statue's angel rising out of the head, not to anything a cast angel does; with no statue set-piece in our game
+there is nothing to attach it to. (How the set-piece itself is spawned is still open, "Angel of Death mechanics".)
+
+**Tilt.** Pitch and bank are applied when the companion is drawn (see "Angel of Death mechanics"); both move
+every turn through the same angle stepper, which is not an easing but a constant rate:
+```text
+step(angle, target, rate):                       -- angles in 2048 per turn, wrapping
+  gap = target - angle, taken the short way round (-1024..1024)
+  if |gap| > rate: angle = (angle + sign(gap) × rate) mod 2048
+  else:            angle = target                 -- snaps the last part
+```
+So the three numbers are degrees per turn, not divisors: 1 (0.18° a turn), 45 (7.9°), 56 (9.8°), plus 34 (6°).
+```text
+pitch target = 0, rate 1          -- closing in, carrying, flight modes 0, 1, 5, 7 (unit flag 0x20), or 0x8000,
+                                     or speed already at its target
+  otherwise (speed < target speed):
+    deficit = 100 if speed <= target speed / 3 else target speed - speed, clamped 0..100
+    pitch target = deficit × 455 / 100 (up to 455 = 80°), rate 45
+  scripted approach (outer sub-state 9, step 1): pitch target -256 (2048 - 256, -45°, the opposite way to the
+    455 above), rate 34: reached in 8 turns
+bank target = 0 unless the heading error exceeds 512 (90°):
+    then direction × min(341, heading error / 3), rate 56
+  0 in the cases where pitch is level, except carrying
+  flight mode 4 (carry turn, below), on a turn where its heading changed: direction × 170 (30°), rate 56
+direction = +1 if (current heading - wanted heading), the short way round, is >= 0, else -1
+heading error = |current heading - wanted heading|, the short way round (0..1024)
+```
+Consequence of rate 1: pitch comes back to level very slowly. An angel pitched 455 when it starts closing in
+(slow, then committing) levels out at 1 a turn - 455 turns, 38 s - so it effectively keeps its slow-flight
+pitch through the whole dive and carry. In steady cruise the pitch has already shrunk with the speed deficit
+(4 at a deficit of 1) before rate 1 takes over.
+
+**Carry turn (flight mode 4).** When the carry starts, the angel looks 5 cells (2560 units) ahead along its
+current heading, cell by cell. The way is clear unless one of those cells holds a building or door (map flags
+`0x206`), is off a per-cell map bitmap the ground route search also reads (meaning not traced), or has a
+vehicle on it:
+```text
+clear  -> flight mode 4: keep flying along that heading, target speed halved
+blocked -> flight mode 0: target speed 0, no steering, pitch and bank level, the wanted heading turned 180°
+           (flag 0x8000, cleared at countdown 7 or when the carry ends)
+every carry turn while not blocked: try heading + 22 (victim's id odd) or - 22 (even); if 5 cells ahead along
+  it are clear, take it
+```
+So the carry is a steady curve to one side, about 3.9° a turn (105° over the 28 turns at most), not a zigzag,
+with the companion banked 30° into it (rate 56) on every turn the heading moved, and swinging back toward level
+on a turn it did not. At countdown 7 it stops, gets a 256-unit kick backward and the wind-up turn starts.
+
+**Scripted approach (outer sub-state 9).** The angel's first live turn goes here instead of straight to the
+target scan when neither cheat mode nor a second global flag (meaning not traced) is set:
+```text
+step 0 (up to 120 turns): fly toward a point 6656 units from the local player's camera focus (along the
+  camera's own angle + 180°), at height 2816, target speed 160 (flight mode 6)
+  -> step 1 once within 568 on both axes; -> step 2 if 120 turns pass, it is over 12288 away, or the camera moves
+step 1 (32 turns, then until within 32 of its target height): drift slowly facing the player's camera (flight
+  mode 5, whose own speed rule gives 8, or 48 over a certain vehicle), height about 2816 (+0..31, rerolled every
+  8-23 turns); roars on turns 14-22; pitch to -256 at 34 a turn
+step 2 (32 turns): turn round (+180°, then ±341 alternating by angel), height 768, speed 32 to 160
+  -> sub-state 4 (target scan)
+```
+It shows itself to the player before it hunts. Flight mode 5 also sets flag 0x20, which is why its pitch target
+would otherwise be level; the step-1 rule above overrides it.
+
+**Dive to grab.** When the angel commits to a grab (flight mode 3, "closing in"), every turn:
+```text
+target position = victim's position
+target height   = victim's ground height + victim's standing offset (unit record +0x1C, below)
+vertical speed  = |target height − height| / max(1, distance to target / speed)
+                  -- so it reaches the victim's height when it reaches the victim
+height moves toward the target height by vertical speed, halved when within 2 × that speed of it and halved
+  again within 1 × (an ease-in)
+floor: height >= bare terrain under the angel + 100 (while closing in or carrying), instead of
+       >= top of any building or tree under it + 100 (the rest of the time)
+turn rate doubled (0x70 instead of 0x38 per turn)
+grab when both |dx| and |dz| < 504 (open target): speed doubled, carry starts
+carry: target height = own height + 800, climb at 48 per turn
+```
+So the original swoops: it beats its wings, descends to about 100 above the victim's ground and grabs there, then
+climbs 800 while still beating. The standoff before it (2 turns, flight mode 2) uses the same vertical-speed
+formula toward the then-current target height.
+
+The victim's `+0x1C` is how high above the ground it stands, on top of a building; its own `+0x41` height stays
+the ground's. It is 0 for a person in the open. A person put into a guard tower stands on the tower's platform:
+`+0x1C` = that slot's height from the tower's shape (the same field a firewarrior adds to throw from a tower,
+"Firewarrior fire"). A person at a boat hut or balloon hut reads 70 or 116 from the building type table (0 for
+every other building type). Grabbing zeroes it (state 40's entry), and walking off clears it. So the angel dives
+to the tower top for a guard on a tower and to the ground for anyone else; the floor of 100 above the bare
+ground still applies, and the approach before it already flies higher and farther for a tower-housed target
+("Angel of Death mechanics").
+
+**Not traced**: whether the renderer interpolates positions between turns (our report: the angel jumps once per
+tick); the actual frame rate of the draw loop under the original's own frame pacing; `objects/aniob0-N.dat`, a
+second, frame-list animation format (10-byte records: 8 object ids and a frame count, read by draw classes of
+animation kind 3) - its shipped records hold zero-terminated 9-byte lists of the angel's ids, which the exe's
+10-byte reading turns into frame count 0; it is not the angel's path (draw class 4 uses the morph) and is
+otherwise left alone. Also: which way the positive pitch tips the mesh (nose up is assumed; -256 in the scripted
+approach is the other way), the second global flag that skips the scripted approach, and the per-cell map bitmap
+the carry look-ahead requires (the ground route search reads the same one).
 
 ## Landscape projection [exe, measured]
 (Exact exe addresses for every function/field named below: pop3-rev `docs/functions.tsv` and `docs/camera.md` -
@@ -5671,6 +5842,23 @@ confirms.
     implement (see "Per spell");
   - Teleport moves the caster's own shaman, as our sandbox teleport does; its range is effectively unlimited.
 
+- TODO.md "Angel of Death visuals against the trace" (`game-client` `angel_of_death.rs`, `game_core::angel_of_death`,
+  objects.md): ours draws 100 and 107 as two static meshes cross-faded with alpha, labels 100 "diving" and 107
+  "cruising", and never descends to grab (it grabs from `CRUISE_HEIGHT` 600). The original draws ONE textured
+  base mesh (100 while closing in and carrying, 107 otherwise) whose points are replaced every drawn frame by the
+  12-frame key frame cycle of its morph record (101-106 / 108-113 with half-way frames); a pose change walks the
+  points through 114-116 over 6 turns (0.5 s), never two meshes at once; and while closing in it descends to the
+  victim's height, floor 100 above the bare ground, at a vertical speed timed to arrive with it. Ours ticks 10 per
+  second against 12: 6 turns are 5 of our ticks. See "Angel of Death flight pose, wing beat and dive".
+- Same item, follow-up: the tilt numbers are constant steps per turn toward the target, not divisors of the gap
+  (pitch 1 or 45, scripted 34, bank 56 a turn, snapping the last part; at our 10 ticks multiply by 1.2); the
+  victim's `+0x1C` is its standing height on a guard tower's platform (or 70 / 116 at a boat / balloon hut),
+  0 in the open, so ours using 0 is right for every victim we have outside towers; the climb-out freeze belongs
+  only to the statue set-piece's angel, never a cast one; the carry is a steady 22-a-turn curve to one side with
+  a 30° bank (flight mode 4), not a zigzag, and stops dead instead when 5 cells ahead are blocked; the scripted
+  approach (fly to 6656 units off the player's camera, show itself, turn away) runs before the first target
+  scan unless cheat mode is on.
+
 - spells.md Blast's own "Not yet: angels of death and ghosts (neither modelled at all yet)" and TODO: the Angel
   of Death is now spec'd in full (see "Angel of Death mechanics" above) - a meteor then a flying, never-landing
   person (type 8, 10 000 life) that hunts the nearest enemy anywhere on the map (a rival angel first, shamans
@@ -5912,10 +6100,12 @@ confirms.
   (prison/pyramid/totem reported immune); whether it can pull a person out of a vehicle the way it grabs one in
   the open; the selection/order-eligibility check that makes it unselectable and unorderable; and whether a
   grabbed victim's carried position is parented to a fixed mouth/claw offset on the angel (confirmed NOT a
-  separate pose, but the position-sharing mechanism itself wasn't traced). Resolved, separate session: the
-  visible flying body IS the shadow-companion object, a real 3D "winged death" mesh (not a 2D sprite, so there
-  are no hfx sprite frames to count), with two confirmed poses (back-view "diving", an alternate-pose
-  "cruising") blended through 3 intermediate sub-variants - see "Angel of Death mechanics" above. The class-7
+  separate pose, but the position-sharing mechanism itself wasn't traced). Resolved: the visible flying body
+  is the companion object, a 3D "winged death" mesh whose wings beat by vertex morphing, with a beating and a
+  gliding pose and a 3-frame transition - see "Angel of Death flight pose, wing beat and dive", whose own "Not
+  traced" lists what is left there (position interpolation between turns, the draw frame rate). The victim's
+  `+0x1C` grab-height offset, the climb-out's trigger (the statue set-piece only), the tilt stepper and the
+  scripted approach are now traced there. The class-7
   type `0x5b` ("statue to AoD") effect is confirmed NOT part of the cast/spawn sequence (the real "ground
   transforms first" visual is the meteor's own ground-shockwave sub-effect, fully traced as a real terrain
   ripple) and is gated off entirely under cheat mode, but what it looks like and when it is ever spawned (no
@@ -6220,13 +6410,24 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4DB980 | person state 28, the angel's entire hunting/combat/grab AI (huge, outer `+0x2D` dispatch mostly unopened) - "Angel of Death mechanics" |
 | 0x4DB5E0 | `aod_area_panic`: the angel's own nearby-bystander panic (8-cell radius, person state 26), independent of its locked target |
 | 0x4DDB30 | `aod_flight_physics`: speed/heading ramp, altitude clamped >= ~100 above terrain (never lands), syncs the shadow-companion object |
-| 0x4DE440 | companion flight-pose blender: ramps its own 0-5 counter, picks a 3D "winged death" mesh (back/diving vs alt/cruising) via the object bank |
-| 0x40CC30 | queues an intermediate flight-pose sub-variant mid-ramp (called only from 0x4DE440 this session) |
+| 0x4DE440 | companion pose setter: snap, or step a 0-5 counter per turn through transition frames 76-78 (bank-0 114-116) before switching between the beating (0x3E) and gliding (0x45) poses - "Angel of Death flight pose, wing beat and dive" |
+| 0x4E6C80 | angle stepper `(angle, target, rate)`: moves `rate` per turn the short way round, snaps when within it; the angel's pitch/bank (and other rocking animations) - "Angel of Death flight pose, wing beat and dive" "Tilt" |
+| 0x4E9B70, 0x4E9BA0 | absolute heading difference (0..1024), turn direction (+1/-1 from a - b the short way round) |
+| 0x4DB420 | angel look-ahead `(self, heading) -> bool`: the 5 cells (2560 units) ahead are free of buildings/doors, on the route bitmap, without vehicles - picks the carry curve or the blocked stop ("Carry turn") |
+| 0x4D80E0 | person into/out of a building; for a guard tower places it on the tower's platform slot and stores the slot height in person `+0x1C` |
+| person `+0x1C` | standing height above the ground on a building (tower platform, 70/116 at boat/balloon huts), 0 in the open; added to the height a firewarrior throws from and the angel dives to |
+| 0x40CC30 | starts a one-shot morph on a drawable: from object, to object, step count; clock reset |
+| 0x40C9F0 | `animate_3d_morph`: per drawn frame, overwrites a morphing base object's points with the interpolation of its current cycle segment, or of the active one-shot morph |
+| 0x40CC60 | point interpolation `base.p = from.p + (to.p - from.p) × t / n` over the base object's points, integer |
+| 0x40CE30 | `process_morph0`: after loading `morph0-N.dat`, rebuilds every record's segment table from its key frame list and step counts, marks the base object (flag 0x80, byte 7 = record) |
+| 0x40CB90, 0x40CBB0, 0x40CBD0, 0x40CBF0, 0x40CC10 | morph control bits on a drawable: hold at a frame, play to a frame, end a one-shot (hold its target), release a hold, "is held" |
+| 0x4EE770, 0x4EE7B0 | per drawn frame (from `draw_main`), every drawable's animation clock: sprite frames, `aniob` frame lists, or the morph cycle/one-shot clock (+4 per frame) |
+| 0x40C670, 0x40C790 | `load_objs_1` (a level's bank 0 is loaded as bank 2) and the loader reading `aniob0-N.dat`/`morph0-N.dat` with the bank |
+| 0x44E860 | terrain height plus the top of the building or tree on that cell: the angel's normal flight floor |
 | 0x479840 | class-7 type 0x5b ("statue to AoD") init: self-deletes if cheat mode is on, else hands off to an unopened state 0x4C |
 | 0x4E0760, 0x4E05E0 | person state 40, "grabbed by an Angel of Death" (per turn, ENTER case): hold loop until release, then delete (ghost) or generic death (state 31, shaman-specific pose table); ENTER case evicts a housed victim but sets no carried pose - "Angel of Death mechanics" |
 | 0x4E0830 | `aod_vs_aod_damage`: pure health-proportional mutual damage + 800-unit knockback when the angel's locked target is itself an angel, no movement/pose code - "Angel of Death mechanics" |
 | 0x4E0A30 | `aod_release_throw`: sets the throw destination (400 units along the VICTIM's own facing), arms release, charges the angel a self-damage cost |
-| 0x4DE440 | sets a thing's drawable variant; also the angel's shadow-companion flight-pose toggle (model 0x45 cruise / 0x3E dive) |
 | 0x4E94F0 | computes a point at a given distance/heading - used by the angel's flight physics and the vs-angel knockback |
 
 Timing globals: turn counter 0x89D188 (u32), `turns_per_sec` 0x89D161 (u8, copied from the option at 0x98F712),
