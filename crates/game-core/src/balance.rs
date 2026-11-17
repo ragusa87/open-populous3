@@ -34,13 +34,18 @@ pub struct Huts {
     pub grow_target: u16,
     /// `HUT1..3_SPROG_TIME` by level (1-3) [files].
     pub sprog_time: [u16; 3],
-    /// `SPROG%_POP_BAND_00_04%` (band 0) and `_95_99%` (band 19) [files]; the 18 between are `[ours]`, see
-    /// `hut_growth`'s own module docs.
-    pub sprog_pct_first: u32,
-    pub sprog_pct_last: u32,
-    pub sprog_bands: u32,
+    /// `SPROG%_POP_BAND_<lo>_<hi>%` by population band (`00_04` .. `95_99`) [files].
+    pub sprog_pct: [u32; SPROG_BANDS],
     /// A freshly completed hut's own breed head start: not quite full, "the first brave comes quickly" [exe].
     pub fresh_breed_head_start: u16,
+}
+
+/// Population bands of breeding's `SPROG%` table.
+pub const SPROG_BANDS: usize = 20;
+
+/// The `constant.dat` name of `SPROG%` band `band`: a 5 % share of 200 people each, `00_04` for band 0.
+pub fn sprog_key(band: usize) -> String {
+    format!("SPROG%_POP_BAND_{:02}_{:02}%", band * 5, band * 5 + 4)
 }
 
 /// Training huts (huts-and-training.md "Training huts", pop3-rev-analysis.md "Training buildings").
@@ -56,10 +61,12 @@ pub struct Training {
     /// (`TRAIN_MANA_BAND_*`); above the last, `top_band`.
     pub bands: [(usize, u32); 5],
     pub top_band: u32,
-    /// Mana to train one (`HUMAN_TRAIN_MANA_*`; the computer players' 1000 once tribes have a controller,
-    /// `headcount::mana_income`'s own gap).
-    pub warrior_preacher_mana: u32,
-    pub spy_firewarrior_mana: u32,
+    /// Mana to train one (`HUMAN_TRAIN_MANA_WARR`/`_PREACH`/`_SPY`/`_SWARR`; the computer players' 1000 once
+    /// tribes have a controller, `headcount::mana_income`'s own gap).
+    pub warrior_mana: u32,
+    pub preacher_mana: u32,
+    pub spy_mana: u32,
+    pub firewarrior_mana: u32,
 }
 
 /// Mana income (huts-and-training.md "Huts" rule 7, pop3-rev-analysis.md "Income").
@@ -67,7 +74,7 @@ pub struct Training {
 pub struct Income {
     /// `MANA_UPDATE_FREQ` + 1: the income's own rhythm [exe].
     pub update_every: Every,
-    /// `HUMAN_MANA_ADJUST` (a fraction, ×1.25 default): always used today, no AI/controller type exists yet
+    /// `HUMAN_MANA_ADJUST` (a fraction, ×1.25 default; the file's percent over 100): always used today, no AI/controller type exists yet
     /// to pick `COMPUTER_MANA_ADJUST` instead.
     pub human_adjust_num: u32,
     pub human_adjust_den: u32,
@@ -153,9 +160,7 @@ impl Balance {
                 grow_step: 8,
                 grow_target: 2400,
                 sprog_time: [4000, 3000, 2000],
-                sprog_pct_first: 30,
-                sprog_pct_last: 200,
-                sprog_bands: 20,
+                sprog_pct: [30, 35, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 195, 200],
                 fresh_breed_head_start: 54,
             },
             training: Training {
@@ -164,8 +169,10 @@ impl Balance {
                 left_gap: Turns::new(12),
                 bands: [(3, 100), (7, 125), (11, 150), (15, 175), (20, 200)],
                 top_band: 250,
-                warrior_preacher_mana: 3500,
-                spy_firewarrior_mana: 4000,
+                warrior_mana: 3500,
+                preacher_mana: 3500,
+                spy_mana: 4000,
+                firewarrior_mana: 4000,
             },
             income: Income {
                 update_every: Every::new(16),
@@ -189,7 +196,8 @@ impl Balance {
     }
 
     /// Corrects each group `constant.dat` actually backs, one at a time (TODO.md "Computer players (AI)"):
-    /// only `units.life` (`LIFE_<P>`), `spies` and `angels` so far, the way `SpellBook::apply_constants` already does for spells.
+    /// `units.life` (`LIFE_<P>`), `spies`, `angels`, the huts' breeding times and bands, the training costs and
+    /// top band, and the income's rhythm, human adjustment and shaman rate so far, the way `SpellBook::apply_constants` already does for spells.
     /// A missing or unreadable key leaves that kind's own default untouched, same lenient spirit.
     /// **`LIFE_<P>`'s own per-kind suffixes are `[ours]`, a guess**: constants.md only confirms the group
     /// exists and gives two example values (brave, warrior), not every kind's exact spelling - worth
@@ -227,6 +235,40 @@ impl Balance {
         }
         if let Some(v) = raw.get("AOD_KILL_COUNT") {
             self.angels.kill_count = v.min(u8::MAX as u32) as u8;
+        }
+        self.apply_economy(raw);
+    }
+
+    /// The huts, training and income keys of `apply_constants`.
+    fn apply_economy(&mut self, raw: &pop3_format::Constants) {
+        for (level, time) in self.huts.sprog_time.iter_mut().enumerate() {
+            if let Some(v) = raw.get(&format!("HUT{}_SPROG_TIME", level + 1)) {
+                *time = v.min(u16::MAX as u32) as u16;
+            }
+        }
+        for (band, pct) in self.huts.sprog_pct.iter_mut().enumerate() {
+            if let Some(v) = raw.get(&sprog_key(band)) {
+                *pct = v;
+            }
+        }
+        let t = &mut self.training;
+        for (key, mana) in [("WARR", &mut t.warrior_mana), ("PREACH", &mut t.preacher_mana), ("SPY", &mut t.spy_mana), ("SWARR", &mut t.firewarrior_mana)] {
+            if let Some(v) = raw.get(&format!("HUMAN_TRAIN_MANA_{key}")) {
+                *mana = v;
+            }
+        }
+        if let Some(v) = raw.get("TRAIN_MANA_BAND_21+") {
+            t.top_band = v;
+        }
+        let i = &mut self.income;
+        if let Some(period) = raw.get("MANA_UPDATE_FREQ").map(|v| v.saturating_add(1)).filter(|p| p.is_power_of_two()) {
+            i.update_every = Every::new(period);
+        }
+        if let Some(v) = raw.get("HUMAN_MANA_ADJUST") {
+            (i.human_adjust_num, i.human_adjust_den) = (v, 100);
+        }
+        if let Some(v) = raw.get("MANA_F_SHAMEN") {
+            i.shaman = v;
         }
     }
 }
@@ -274,5 +316,35 @@ mod tests {
         assert_eq!(balance.units.brave, 4242, "overridden by the file");
         assert_eq!(balance.units.warrior, Balance::ours().units.warrior, "no LIFE_WARRIOR key: default kept");
         assert_eq!(balance.units.life(UnitKind::Wildman), 4242, "mirrors the now-overridden brave");
+    }
+
+    #[test]
+    fn the_sprog_keys_name_each_five_percent_share() {
+        assert_eq!(sprog_key(0), "SPROG%_POP_BAND_00_04%");
+        assert_eq!(sprog_key(SPROG_BANDS - 1), "SPROG%_POP_BAND_95_99%");
+    }
+
+    #[test]
+    fn apply_constants_reads_the_huts_training_and_income_groups() {
+        let mut balance = Balance::ours();
+        let raw = pop3_format::Constants::parse(
+            b"P3CONST_HUT2_SPROG_TIME = 2500\nP3CONST_SPROG%_POP_BAND_10_14% = 44\nP3CONST_HUMAN_TRAIN_MANA_SWARR = 4100\nP3CONST_HUMAN_TRAIN_MANA_PREACH = 3300\nP3CONST_TRAIN_MANA_BAND_21+ = 260\nP3CONST_MANA_UPDATE_FREQ = 31\nP3CONST_HUMAN_MANA_ADJUST = 150\nP3CONST_MANA_F_SHAMEN = 33\n",
+        )
+        .unwrap();
+        balance.apply_constants(&raw);
+        let ours = Balance::ours();
+        assert_eq!(balance.huts.sprog_time, [4000, 2500, 2000]);
+        assert_eq!((balance.huts.sprog_pct[2], balance.huts.sprog_pct[3]), (44, ours.huts.sprog_pct[3]));
+        let t = balance.training;
+        assert_eq!((t.warrior_mana, t.preacher_mana, t.spy_mana, t.firewarrior_mana, t.top_band), (3500, 3300, 4000, 4100, 260));
+        let i = balance.income;
+        assert_eq!((i.update_every, i.human_adjust_num, i.human_adjust_den, i.shaman), (Every::new(32), 150, 100, 33));
+    }
+
+    #[test]
+    fn a_mana_update_freq_that_is_not_a_mask_is_ignored() {
+        let mut balance = Balance::ours();
+        balance.apply_constants(&pop3_format::Constants::parse(b"P3CONST_MANA_UPDATE_FREQ = 20\n").unwrap());
+        assert_eq!(balance.income.update_every, Balance::ours().income.update_every);
     }
 }

@@ -102,11 +102,13 @@ pub fn trains(kind: BuildingKind) -> Option<UnitKind> {
     }
 }
 
-/// Mana to train one `kind` (`HUMAN_TRAIN_MANA_*`; the computer players' 1000 once tribes have a controller).
+/// Mana to train one `kind` (`HUMAN_TRAIN_MANA_WARR`/`_PREACH`/`_SPY`/`_SWARR`; the computer players' 1000 once tribes have a controller).
 pub fn train_mana(training: &Training, kind: UnitKind) -> u32 {
     match kind {
-        UnitKind::Warrior | UnitKind::Preacher => training.warrior_preacher_mana,
-        UnitKind::Spy | UnitKind::Firewarrior => training.spy_firewarrior_mana,
+        UnitKind::Warrior => training.warrior_mana,
+        UnitKind::Preacher => training.preacher_mana,
+        UnitKind::Spy => training.spy_mana,
+        UnitKind::Firewarrior => training.firewarrior_mana,
         _ => 0,
     }
 }

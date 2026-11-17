@@ -862,8 +862,8 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   (cap min(supply, 200)) were already done (`BuildingKind::capacity`, `headcount::{SUPPLY,Housing}`). Mana from
   people inside was already done too (rule 7, `GameMap::mana_income`). Left for the client: the tooltip's green
   (`breed`) and red (`grow`) bars, and a star animation where a bred brave appears. `SPROG%`'s full 20-band table
-  is now confirmed from `constant.dat` directly (pop3-rev-analysis.md "Huts: breeding and growth"), replacing the
-  earlier `[ours]` linear-interpolation guess - check `hut_growth.rs`'s own table against it.
+  is now confirmed from `constant.dat` directly (pop3-rev-analysis.md "Huts: breeding and growth"), and now used
+  (`Huts::sprog_pct`), replacing the earlier `[ours]` linear interpolation.
 - [ ] A hut that already exists when the map loads (an original level's starting village, not one built during
   play) starts its breeding bar cold: `buildings_from_level` goes through the plain `Building::new` (`used:
   kind.wood_cost(), breed: 0, ...`, `building.rs`), never `hut_growth::on_completed`'s own small head start for a
@@ -1230,8 +1230,11 @@ The single biggest remaining system, and the one that turns this from a sandbox/
   install with different ones. **`LIFE_<P>`'s own per-kind suffixes are `[ours]`, a guess** (constants.md
   only confirms the group and two example values, not every kind's exact spelling) - worth checking
   against a real decoded file or the community's own dump; a wrong guess is harmless (that kind's default
-  just stays, same lenient fallback as every other group here). `speed`/`damage` next would follow the
-  same shape, but need their own per-kind suffixes confirmed too.
+  just stays, same lenient fallback as every other group here). **Also done**: `HUT1..3_SPROG_TIME`, all 20
+  `SPROG%_POP_BAND_*`, `HUMAN_TRAIN_MANA_WARR/PREACH/SPY/SWARR` (now one cost per kind), `TRAIN_MANA_BAND_21+`,
+  `MANA_UPDATE_FREQ`, `HUMAN_MANA_ADJUST`, `MANA_F_SHAMEN` (`Balance::apply_economy`). Left, each needing its
+  exact key names confirmed first: the other `TRAIN_MANA_BAND_*` bounds, unit `speed`/`FIGHT_DAMAGE_<P>`, wood
+  (`WOOD_<P>`, `WOOD_<BUILDING>`, `TREE*_WOOD_*`).
 - [x] Lockstep: two peers resolving different `SpellStats` would silently diverge mid-match - a hashing
   mechanism now exists (`SpellBook::constants_hash`, every spell's resolved `cost`/`max_charges`, the two
   fields that actually feed simulation state; `advisor_seconds`/`range` left out, neither can desync anything)

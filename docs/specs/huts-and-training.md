@@ -94,9 +94,8 @@ hut (max size) hides the red bar, it does not show it at 0.
    `BREED_STEP` (2) x (occupants + 1) to `breed` [exe, confirmed - not the half-steps this entry's own earlier
    draft guessed]. At its target (`HUT<n>_SPROG_TIME` x `SPROG%[band]` / 100 - `SPROG_TIME` 4000/3000/2000 by
    level [files]; `band` is `(population + 1) / 10` clamped to 0-19, **flat bands of 10 people, not a % of the
-   tribe's cap** as this entry's own earlier draft guessed [exe, confirmed]; `SPROG%` 30 at band 0 to 200 at
-   band 19 [files] - only those two ends are individually confirmed this session, the 18 between are `[ours]`,
-   linearly interpolated, not the real (close but not exactly linear) stairstep) a brave is born at the front
+   tribe's cap** as this entry's own earlier draft guessed [exe, confirmed]; `SPROG%` one value per band, 30 at band 0
+   to 200 at band 19 [files], `Huts::sprog_pct`) a brave is born at the front
    door and walks off to the nearest free standing spot (`game_core::slots::free_spots_near`, same as a trainee
    leaving its building - "Training" below), so two braves bred close together end up visibly apart rather than
    stacked on the door; `breed` restarts at 0. Without room (population + 1 at or past the cap) breeding does not

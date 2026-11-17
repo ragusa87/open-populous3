@@ -72,7 +72,7 @@ Units:
 
 ## Use here
 - Read it from the original install when one is present, and never ship it. Generated mode needs its own
-  defaults, written by us, not copied. Done for the spell group and units' own `life`: `GameMap::load_original`
+  defaults, written by us, not copied. Done for the spell group, units' own `life`, the huts' breeding times and bands, the training costs and top band, and the income's rhythm, human adjustment and shaman rate (`Balance::apply_constants`): `GameMap::load_original`
   loads the sibling `constant.dat` next to the level's own `.dat` (`Constants::load`, silently falling back to
   our own defaults on any failure, same as the `.hdr`'s own `.ok()` right beside it) and resolves a `Balance`
   from it (`Balance::apply_constants`) *before* calling `from_level` — every person it places

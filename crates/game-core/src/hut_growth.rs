@@ -19,12 +19,7 @@
 //! retries every future growth tick - simpler than the trace's own "retried every 128 turns" detail, `[ours]`,
 //! since nothing is lost by checking more often.
 //!
-//! `SPROG_PCT`'s band table: band 0 (30) is the only individually-confirmed value (`constants.md`); band 19
-//! (200) is confirmed by the trace's own prose ("30 % for band 0 up to 200 % for band 19") but the file's other
-//! 18 values were not individually dumped this session - linearly interpolated between those two confirmed
-//! ends, **`[ours]`, not the real stairstep** (the trace's own worked example, "30, 35, 40, 50, 60, ... 190,
-//! 195, 200", does not read as perfectly linear - close, not exact). A later session with the full file dump
-//! should replace this table outright, not just retune it.
+//! `SPROG%`'s band table (`Huts::sprog_pct`): the file's 20 values, one per band of 10 people.
 
 use crate::balance::Huts;
 use crate::building::{Building, BuildingKind};
@@ -32,15 +27,15 @@ use crate::map::GameMap;
 use crate::slots;
 use crate::unit::{Order, UnitKind};
 
-/// `SPROG%` for population band `band` (0..=19, already clamped): linear between the two confirmed ends.
+/// `SPROG%` for population band `band` (0..=19, already clamped).
 fn sprog_pct(huts: &Huts, band: u32) -> u32 {
-    huts.sprog_pct_first + (huts.sprog_pct_last - huts.sprog_pct_first) * band.min(huts.sprog_bands - 1) / (huts.sprog_bands - 1)
+    huts.sprog_pct[(band as usize).min(huts.sprog_pct.len() - 1)]
 }
 
 /// The population band (0..=19, 10 people each) a tribe of `population` falls in [exe, confirmed]: not a % of
 /// its cap, flat bands of 10 regardless of how many huts it has.
 fn band(huts: &Huts, population: u16) -> u32 {
-    (((population as u32) + 1) / 10).min(huts.sprog_bands - 1)
+    (((population as u32) + 1) / 10).min(huts.sprog_pct.len() as u32 - 1)
 }
 
 /// How much `breed` must reach for a hut of `level` (1-3) at this population `band` to produce a brave.
@@ -200,9 +195,8 @@ mod tests {
     }
 
     #[test]
-    fn sprog_pct_matches_the_two_confirmed_ends() {
-        assert_eq!(sprog_pct(&huts(), 0), 30);
-        assert_eq!(sprog_pct(&huts(), 19), 200);
+    fn sprog_pct_is_the_files_stairstep_not_a_line() {
+        assert_eq!((sprog_pct(&huts(), 0), sprog_pct(&huts(), 3), sprog_pct(&huts(), 18), sprog_pct(&huts(), 19)), (30, 50, 195, 200));
     }
 
     #[test]
