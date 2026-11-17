@@ -88,7 +88,7 @@ runs, just with some original-only art/audio left.
 
 | Area | Status | Notes |
 |---|---|---|
-| Sound | Todo | Format reverse-engineered but not yet parsed/loaded; no playback and no CC0 sound assets sourced at all. See [sound.md](specs/sound.md). |
+| Sound | Partial | Banks parsed; playback skeleton (mixer channels, positional falloff, Audio page, saved settings) in, but no clips loaded and no CC0 sound assets sourced yet. See [sound.md](specs/sound.md). |
 | Non-original (CC0) assets | Partial, de-prioritized | Generated building kit, textures, and CC0 trees/unit sheets ship. Still original-only: building icons, ritual scenery (reincarnation stones), vehicles, worker action clips. See [assets.md](specs/assets.md). |
 | Original sprites / blending | Partial | Alpha sprite table decoded and blended on GPU; per-effect frame mapping and the ghost (see-through) table still open. See [sprites.md](specs/sprites.md). |
 

@@ -111,6 +111,24 @@ Entry header with a shorter name:
 - Check for `idea11`: 3224868 bytes x 8 / 112000 = 230.3 s, and 20321278 / (22050 x 4) = 230.4 s.
 - Lengths: `idea11` 230 s, `idea13` 321 s, `idea16` 284 s, `idea17` 307 s, `idea19` 361 s.
 
+## Playback in the client
+docs/architecture.md "Client: audio" for the code. The rules here are our own unless cited:
+- Channels: Music and Fx under a Master volume, plus Mute all (saved). UI sounds go on Fx, flat.
+- A `SoundCue` stands for one of the original's sound ids: a family of variants. `Pick::Any` is the
+  original's random pick; `Pick::Variant(n)` plays exactly variant `n` (`chop4`), never another one in its place.
+- Heard from the camera focus on the ground, the distance taken the short way round the map: full volume up to
+  6 cells, a smoothstep down to silence at 28 cells, both times 0.5 to 3 with the camera's height over the
+  default view's. The original attenuates and culls by distance to the camera too, but with numbers not traced:
+  these are a guess (question for a spec session: the original's falloff curve and cut-off).
+- Balance: the sound's offset along the screen's right over its distance, eased to the middle within 2 cells.
+- Fx hold while the game is paused or behind a menu, music goes on (the original lets flagged UI sounds through
+  while paused: not done).
+- Music: a Menu track behind the menus, a Game track in a game ("Music and drums": `idea11` in the frontend, one
+  of tracks 2-5 in a level).
+- Not done yet: loading clips (`Soundd2` PCM as WAV, CC0 sounds for `--no-original`, MP2 music), the per-id
+  volume, pitch spread and priority, loops with an explicit stop, one sound at a time per unit, ambience layers,
+  drums, game events turned into cues.
+
 ## PopSoundEditor discrepancies
 The editor works on its own exports but misreads parts of the format. Do not copy these:
 - It reads byte 27 as the channel count. It assumes 2 for SFX and halves the sample rate (exports 11025 Hz

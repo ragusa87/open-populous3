@@ -1,9 +1,14 @@
-//! Populous-like sandbox. Usage: `game-client [--no-original] [levlXXXX.dat | levels_dir]`.
+//! Populous-like sandbox. Usage: `game-client [--no-original] [--mute[=on|off]] [--debug-audio] [levlXXXX.dat | levels_dir]`.
 //! `--no-original` (or `POP3_NO_ORIGINAL=1`) never reads the original game files.
+//! `--mute` (`=on`) does not open the audio device for this run (not saved, unlike the Audio page's "Mute all");
+//! `--debug-audio` logs every sound and music request: channel, position, clip, or why it was skipped.
 
 mod angel_meteor;
 mod angel_of_death;
 mod armageddon;
+mod audio;
+mod audio_mix;
+mod audio_space;
 mod blast_fireball;
 mod blast_impact;
 mod blueprint;
@@ -65,6 +70,7 @@ mod terrain_texture;
 mod tooltip;
 mod totems;
 mod units;
+mod user_settings;
 mod video;
 mod vault;
 mod vehicles;
@@ -79,12 +85,15 @@ use bevy::window::{MonitorSelection, WindowMode};
 
 fn main() {
     let opts = Options::parse(std::env::args().skip(1), std::env::var("POP3_NO_ORIGINAL").is_ok_and(|v| v == "1"));
+    for flag in &opts.unknown {
+        eprintln!("unknown option {flag}, ignored");
+    }
     let fullscreen = std::env::var("FULLSCREEN").is_ok_and(|v| v == "1");
     let mut app = App::new();
     if dev::headless() {
         app.add_plugins(dev::headless_plugins());
     } else {
-        app.add_plugins(DefaultPlugins.set(dev::asset_plugin()).set(WindowPlugin {
+        let plugins = DefaultPlugins.set(dev::asset_plugin()).set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Open Populous".into(),
                 resolution: (1280, 720).into(),
@@ -97,11 +106,15 @@ fn main() {
                 ..default()
             }),
             ..default()
-        })
-        // No sound yet (TODO.md "Sound"): without it no audio device is opened.
-        .disable::<bevy::audio::AudioPlugin>());
+        });
+        if opts.mute {
+            app.add_plugins(plugins.disable::<bevy::audio::AudioPlugin>());
+        } else {
+            app.add_plugins(plugins);
+        }
     }
     app
+        .add_plugins((user_settings::UserSettingsPlugin, audio::SoundPlugin { debug: opts.debug_audio, device_muted: opts.mute }))
         .add_plugins((
             ((world::WorldPlugin { level_arg: opts.level_arg, use_original: opts.use_original },
             ground_material::GroundMaterialPlugin),
@@ -151,19 +164,30 @@ fn toggle_fullscreen(keys: Res<ButtonInput<KeyCode>>, mut windows: Query<&mut Wi
 }
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 struct Options {
     level_arg: Option<String>,
     use_original: bool,
+    /// `--mute[=on]`: no audio device this run.
+    mute: bool,
+    debug_audio: bool,
+    unknown: Vec<String>,
 }
 
 impl Options {
     fn parse(args: impl IntoIterator<Item = String>, env_no_original: bool) -> Self {
         let (flags, rest): (Vec<String>, Vec<String>) = args.into_iter().partition(|a| a.starts_with("--"));
-        Options {
-            level_arg: rest.into_iter().next(),
-            use_original: !env_no_original && !flags.iter().any(|f| f == "--no-original"),
+        let mut o = Options { level_arg: rest.into_iter().next(), use_original: !env_no_original, ..Options::default() };
+        for flag in flags {
+            match flag.as_str() {
+                "--no-original" => o.use_original = false,
+                "--mute" | "--mute=on" => o.mute = true,
+                "--mute=off" => o.mute = false,
+                "--debug-audio" => o.debug_audio = true,
+                _ => o.unknown.push(flag),
+            }
         }
+        o
     }
 }
 
@@ -178,8 +202,19 @@ mod tests {
     #[test]
     fn parses_flag_anywhere() {
         let o = Options::parse(args(&["x.dat", "--no-original"]), false);
-        assert_eq!(o, Options { level_arg: Some("x.dat".into()), use_original: false });
+        assert_eq!(o, Options { level_arg: Some("x.dat".into()), use_original: false, ..Options::default() });
         assert!(Options::parse(args(&[]), false).use_original);
         assert!(!Options::parse(args(&[]), true).use_original, "env var disables too");
+    }
+
+    #[test]
+    fn audio_flags() {
+        assert!(!Options::parse(args(&[]), false).mute, "the device opens by default");
+        assert!(Options::parse(args(&["--mute"]), false).mute);
+        assert!(Options::parse(args(&["--mute=on"]), false).mute);
+        assert!(!Options::parse(args(&["--mute", "--mute=off"]), false).mute, "the last one wins");
+        let o = Options::parse(args(&["--debug-audio", "--mute=maybe", "l.dat"]), false);
+        assert!(o.debug_audio && !o.mute);
+        assert_eq!((o.unknown, o.level_arg), (vec!["--mute=maybe".to_string()], Some("l.dat".into())));
     }
 }

@@ -100,6 +100,10 @@ never committed — it carries no history and is not shared by cloning the repo.
 - `POP3_DEV=0`: start with dev mode off (original keymap, no info line or camera readout); on by default.
 - `just run-generated` / `--no-original`: no original files read at all (use for anything shippable).
 - `just level-info file.dat`: dump parsed level.
+- `--mute` (`=on`): no audio device opened for the run (not saved; the Audio page's Mute all is the saved
+  setting). `--debug-audio`: one log line per sound/music request (channel, cue/variant, clip, position, gain or
+  why skipped). Settings are JSON in the platform config dir (`~/.config/open-populous/settings.json` on Linux);
+  `POP3_CONFIG_DIR=dir` reads `dir/settings.json` instead. `MENU=audio` opens the Audio page for `just shot`.
 - Original files: `$POP3_INSTALL`, else auto-detected (Wine prefixes, `C:\Program Files*\Bullfrog\*`) by `pop3_format::install`; `--no-original` skips it. Read-only, never modify or ship them.
 
 ## Rules

@@ -8,9 +8,14 @@
 //! Esc in the game pauses: the mouse is released and the pause menu (Resume, Main menu with a
 //! confirmation) shows over the frozen game; Esc on it resumes. Its Dev mode entry switches `keymap::DevMode`; its
 //! Shortcuts page lists the keys and mouse of the keymap in use (`keymap::shortcut_lines`).
+//! The Audio page (from the main menu and the pause menu) sets the `audio_mix::Mixer` volumes (Enter steps up and
+//! wraps, Left/Right step down/up) and its Mute all box; leaving it saves them (`user_settings`).
 //! `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship|sandbox-spells|sandbox-vehicles|sandbox-bridge` picks where to start (screenshots start in the game).
 
+use crate::audio::{AudioOut, DeviceMuted, PlaySound, SoundCue};
+use crate::audio_mix::{Channel, Level, Mixer, Slot};
 use crate::camera::{GameCamera, OverlayCamera};
+use crate::user_settings::SaveSettings;
 use crate::game_speed::GameSpeed;
 use crate::hud::spells::SelectedSpell;
 use crate::units::selection::Selection;
@@ -52,6 +57,7 @@ pub enum Page {
     Paused,
     /// The shortcuts of the keymap in use (`keymap::shortcut_lines`).
     Shortcuts,
+    Audio,
     ConfirmLeave,
 }
 
@@ -76,6 +82,8 @@ pub enum Action {
     Resume,
     ToggleDev,
     CycleSpeed,
+    Volume(Slot),
+    ToggleMuteAll,
     Leave,
     Quit,
 }
@@ -87,6 +95,10 @@ pub enum Outcome {
     Resume,
     ToggleDev,
     CycleSpeed,
+    CycleVolume(Slot),
+    /// A volume up or down by this many percent.
+    StepVolume(Slot, i32),
+    ToggleMuteAll,
     /// Leave the game for the main menu.
     Leave,
     Quit,
@@ -98,26 +110,53 @@ pub fn title(page: Page) -> &'static str {
         Page::Sandbox => "Sandbox",
         Page::Paused => "Paused",
         Page::Shortcuts => "Shortcuts",
+        Page::Audio => "Audio",
         Page::ConfirmLeave => "Leave this game?",
     }
 }
 
 pub fn items(page: Page) -> &'static [(&'static str, Action)] {
     match page {
-        Page::Main => &[("New game", Action::Start(Start::NewGame)), ("Sandbox", Action::Open(Page::Sandbox)), ("Quit", Action::Quit)],
+        Page::Main => &[("New game", Action::Start(Start::NewGame)), ("Sandbox", Action::Open(Page::Sandbox)), ("Audio", Action::Open(Page::Audio)), ("Quit", Action::Quit)],
         Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Units", Action::Start(Start::SandboxUnits)), ("Buildings", Action::Start(Start::SandboxBuildings)), ("Worship", Action::Start(Start::SandboxWorship)), ("Spells", Action::Start(Start::SandboxSpells)), ("Vehicles", Action::Start(Start::SandboxVehicles)), ("Bridge", Action::Start(Start::SandboxBridge)), ("Back", Action::Back)],
-        Page::Paused => &[("Resume", Action::Resume), ("Game speed", Action::CycleSpeed), ("Dev mode", Action::ToggleDev), ("Shortcuts", Action::Open(Page::Shortcuts)), ("Main menu", Action::Open(Page::ConfirmLeave))],
+        Page::Paused => &[("Resume", Action::Resume), ("Game speed", Action::CycleSpeed), ("Audio", Action::Open(Page::Audio)), ("Dev mode", Action::ToggleDev), ("Shortcuts", Action::Open(Page::Shortcuts)), ("Main menu", Action::Open(Page::ConfirmLeave))],
         Page::Shortcuts => &[("Back", Action::Back)],
+        Page::Audio => &[
+            ("Master", Action::Volume(Slot::Master)),
+            ("Music", Action::Volume(Slot::Channel(Channel::Music))),
+            ("Fx", Action::Volume(Slot::Channel(Channel::Fx))),
+            ("Mute all", Action::ToggleMuteAll),
+            ("Back", Action::Back),
+        ],
         Page::ConfirmLeave => &[("No, keep playing", Action::Back), ("Yes, back to the main menu", Action::Leave)],
     }
 }
 
+/// The settings the entries show.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shown {
+    pub dev: bool,
+    pub speed: GameSpeed,
+    pub mixer: Mixer,
+}
+
 /// An entry's text; a setting shows its value.
-pub fn label(entry: (&str, Action), dev: bool, speed: GameSpeed) -> String {
+pub fn label(entry: (&str, Action), shown: &Shown) -> String {
     match entry {
-        (name, Action::ToggleDev) => format!("{name}: {}", if dev { "on" } else { "off" }),
-        (name, Action::CycleSpeed) => format!("{name}: x{}", speed.times),
+        (name, Action::ToggleDev) => format!("{name}: {}", if shown.dev { "on" } else { "off" }),
+        (name, Action::CycleSpeed) => format!("{name}: x{}", shown.speed.times),
+        (name, Action::Volume(slot)) => format!("{name}: {}%", shown.mixer.level(slot).percent()),
+        (name, Action::ToggleMuteAll) => format!("[{}] {name}", if shown.mixer.mute_all { "x" } else { " " }),
         (name, _) => name.to_string(),
+    }
+}
+
+/// The Audio page's note when nothing can be heard whatever the settings.
+pub fn device_note(device: bool, muted_by_flag: bool) -> Option<&'static str> {
+    match (device, muted_by_flag) {
+        (true, _) => None,
+        (false, true) => Some("Audio device off (--mute)"),
+        (false, false) => Some("Audio device off"),
     }
 }
 
@@ -167,6 +206,8 @@ impl MenuNav {
             Action::Resume => Some(Outcome::Resume),
             Action::ToggleDev => Some(Outcome::ToggleDev),
             Action::CycleSpeed => Some(Outcome::CycleSpeed),
+            Action::Volume(slot) => Some(Outcome::CycleVolume(slot)),
+            Action::ToggleMuteAll => Some(Outcome::ToggleMuteAll),
             Action::Leave => Some(Outcome::Leave),
             Action::Quit => Some(Outcome::Quit),
             Action::Open(p) => {
@@ -177,6 +218,14 @@ impl MenuNav {
                 self.back();
                 None
             }
+        }
+    }
+
+    /// Left/Right on the highlighted entry: a volume steps down/up.
+    pub fn nudge(&self, direction: i32) -> Option<Outcome> {
+        match items(self.page())[self.cursor()].1 {
+            Action::Volume(slot) => Some(Outcome::StepVolume(slot, direction.signum() * Level::STEP)),
+            _ => None,
         }
     }
 
@@ -237,6 +286,7 @@ impl Plugin for MenuPlugin {
                     .chain()
                     .run_if(in_state(AppState::Menu).or_else(in_state(AppState::Paused))),
             )
+            .add_systems(Update, save_on_leaving_audio)
             .add_systems(Update, show_state.run_if(state_changed::<AppState>));
     }
 }
@@ -305,7 +355,7 @@ fn spawn_menu(mut commands: Commands, overlay: Single<Entity, With<OverlayCamera
             root.spawn((MenuTitle, Text::new(""), TextFont { font_size: FontSize::Px(40.0), ..default() }, TextColor(TEXT)));
             root.spawn((MenuList, Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(8), margin: UiRect::top(px(12)), ..default() }));
             root.spawn((
-                Text::new("Up/Down: move   Enter: select   Esc: back"),
+                Text::new("Up/Down: move   Enter: select   Left/Right: change   Esc: back"),
                 TextFont { font_size: FontSize::Px(13.0), ..default() },
                 TextColor(TEXT.with_alpha(0.6)),
                 Node { margin: UiRect::top(px(20)), ..default() },
@@ -375,6 +425,7 @@ pub(crate) struct GameSetup<'w> {
     schedule: ResMut<'w, crate::units::GameSchedule>,
     clock: ResMut<'w, crate::units::SimClock>,
     target: ResMut<'w, crate::boot::LoadTarget>,
+    mixer: ResMut<'w, Mixer>,
 }
 
 /// Leaves the current game for the main menu (the pause menu's "Main menu", and `game_end.rs`'s dismiss): resets
@@ -415,13 +466,26 @@ pub(crate) fn pause_on_escape(
     }
 }
 
-/// Dev: `MENU=shortcuts` pauses the game on the Shortcuts page once it runs, for shots.
+/// Dev: `MENU=shortcuts|audio` pauses the game on that page once it runs, for shots.
 fn menu_from_env(mut done: Local<bool>, mut nav: ResMut<MenuNav>, mut state: ResMut<NextState<AppState>>) {
-    if std::mem::replace(&mut *done, true) || std::env::var("MENU").ok().as_deref() != Some("shortcuts") {
+    if std::mem::replace(&mut *done, true) {
         return;
     }
-    *nav = MenuNav { stack: vec![(Page::Paused, 3), (Page::Shortcuts, 0)] };
+    let page = match std::env::var("MENU").ok().as_deref() {
+        Some("shortcuts") => (Page::Shortcuts, 4),
+        Some("audio") => (Page::Audio, 2),
+        _ => return,
+    };
+    *nav = MenuNav { stack: vec![(Page::Paused, page.1), (page.0, 0)] };
     state.set(AppState::Paused);
+}
+
+/// Leaving the Audio page (whichever way) keeps its settings.
+fn save_on_leaving_audio(nav: Res<MenuNav>, mut was_open: Local<bool>, mut save: MessageWriter<SaveSettings>) {
+    let open = nav.page() == Page::Audio;
+    if std::mem::replace(&mut *was_open, open) && !open {
+        save.write(SaveSettings);
+    }
 }
 
 fn apply(outcome: Option<Outcome>, game: &mut GameSetup, nav: &mut MenuNav, state: &mut NextState<AppState>, exit: &mut MessageWriter<AppExit>) {
@@ -439,6 +503,17 @@ fn apply(outcome: Option<Outcome>, game: &mut GameSetup, nav: &mut MenuNav, stat
         }
         Some(Outcome::CycleSpeed) => {
             game.speed.cycle();
+        }
+        Some(Outcome::CycleVolume(slot)) => {
+            let level = game.mixer.level_mut(slot);
+            *level = level.cycle_up();
+        }
+        Some(Outcome::StepVolume(slot, delta)) => {
+            let level = game.mixer.level_mut(slot);
+            *level = level.step(delta);
+        }
+        Some(Outcome::ToggleMuteAll) => {
+            game.mixer.mute_all = !game.mixer.mute_all;
         }
         Some(Outcome::Leave) => leave_to_menu(game, nav, state),
         Some(Outcome::Quit) => {
@@ -459,6 +534,7 @@ fn menu_keys(
     mut game: GameSetup,
     mut state: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
+    mut sounds: MessageWriter<PlaySound>,
 ) {
     if keys.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) {
         nav.step(-1);
@@ -475,10 +551,21 @@ fn menu_keys(
         }
         apply(outcome, &mut game, &mut nav, &mut state, &mut exit);
     }
+    for (keys_pressed, direction) in [([KeyCode::ArrowLeft, KeyCode::KeyA], -1), ([KeyCode::ArrowRight, KeyCode::KeyD], 1)] {
+        if keys.any_just_pressed(keys_pressed) {
+            let outcome = nav.nudge(direction);
+            apply(outcome, &mut game, &mut nav, &mut state, &mut exit);
+        }
+    }
     if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space]) {
+        click(&mut sounds);
         let outcome = nav.activate();
         apply(outcome, &mut game, &mut nav, &mut state, &mut exit);
     }
+}
+
+fn click(sounds: &mut MessageWriter<PlaySound>) {
+    sounds.write(PlaySound { sound: SoundCue::Click.into(), at: None });
 }
 
 fn menu_mouse(
@@ -487,11 +574,13 @@ fn menu_mouse(
     mut game: GameSetup,
     mut state: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
+    mut sounds: MessageWriter<PlaySound>,
 ) {
     for (interaction, item) in &q {
         match interaction {
             Interaction::Hovered => nav.set_cursor(item.0),
             Interaction::Pressed => {
+                click(&mut sounds);
                 nav.set_cursor(item.0);
                 let outcome = nav.activate();
                 apply(outcome, &mut game, &mut nav, &mut state, &mut exit);
@@ -508,15 +597,19 @@ fn rebuild_items(
     nav: Res<MenuNav>,
     dev: Res<crate::keymap::DevMode>,
     speed: Res<GameSpeed>,
-    mut shown: Local<Option<(Page, bool, GameSpeed)>>,
+    mixer: Res<Mixer>,
+    device: Option<Res<AudioOut>>,
+    muted_by_flag: Res<DeviceMuted>,
+    mut last: Local<Option<(Page, Shown)>>,
     lists: Query<Entity, With<MenuList>>,
     mut titles: Query<&mut Text, With<MenuTitle>>,
 ) {
     let page = nav.page();
-    if *shown == Some((page, dev.0, *speed)) {
+    let shown = Shown { dev: dev.0, speed: *speed, mixer: *mixer };
+    if *last == Some((page, shown)) {
         return;
     }
-    *shown = Some((page, dev.0, *speed));
+    *last = Some((page, shown));
     for mut t in &mut titles {
         t.0 = match page {
             Page::Shortcuts => format!("{} ({})", title(page), if dev.0 { "dev mode" } else { "original keys" }),
@@ -528,6 +621,9 @@ fn rebuild_items(
             if page == Page::Shortcuts {
                 spawn_shortcuts(l, dev.0);
             }
+            if let Some(note) = device_note(device.is_some(), muted_by_flag.0).filter(|_| page == Page::Audio) {
+                l.spawn((Text::new(note), TextFont { font_size: FontSize::Px(14.0), ..default() }, TextColor(TEXT.with_alpha(0.6))));
+            }
             for (i, &entry) in items(page).iter().enumerate() {
                 l.spawn((
                     MenuItem(i),
@@ -536,7 +632,7 @@ fn rebuild_items(
                     BackgroundColor(ITEM),
                     BorderColor::all(Color::NONE),
                 ))
-                .with_child((Text::new(label(entry, dev.0, *speed)), TextFont { font_size: FontSize::Px(20.0), ..default() }, TextColor(TEXT)));
+                .with_child((Text::new(label(entry, &shown)), TextFont { font_size: FontSize::Px(20.0), ..default() }, TextColor(TEXT)));
             }
         });
     }
@@ -581,7 +677,7 @@ mod tests {
     fn moves_wrap_and_sub_pages_go_back() {
         let mut nav = MenuNav::default();
         nav.step(-1);
-        assert_eq!(nav.cursor(), 2, "up from the first entry wraps to Quit");
+        assert_eq!(nav.cursor(), 3, "up from the first entry wraps to Quit");
         nav.step(1);
         nav.step(1);
         assert_eq!(items(nav.page())[nav.cursor()].0, "Sandbox");
@@ -604,7 +700,7 @@ mod tests {
         nav.set_cursor(99);
         assert_eq!(nav.activate(), None, "Back entry, clamped cursor");
         assert_eq!(nav.page(), Page::Main);
-        nav.set_cursor(2);
+        nav.set_cursor(3);
         assert_eq!(nav.activate(), Some(Outcome::Quit));
     }
 
@@ -619,11 +715,11 @@ mod tests {
     fn leaving_a_paused_game_asks_first() {
         let mut nav = MenuNav::at(Page::Paused);
         assert_eq!(nav.activate(), Some(Outcome::Resume), "Resume is first");
-        nav.step(4);
+        nav.step(5);
         assert_eq!(nav.activate(), None, "Main menu opens the confirmation");
         assert_eq!((nav.page(), nav.cursor()), (Page::ConfirmLeave, 0));
         assert_eq!(nav.activate(), None, "No (highlighted first) goes back");
-        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 4));
+        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 5));
         nav.activate();
         nav.step(1);
         assert_eq!(nav.activate(), Some(Outcome::Leave));
@@ -631,27 +727,61 @@ mod tests {
 
     #[test]
     fn dev_mode_toggles_from_the_pause_menu_and_shows_its_state() {
-        let normal = GameSpeed::default();
+        let on = Shown { dev: true, speed: GameSpeed::default(), mixer: Mixer::default() };
+        let off = Shown { dev: false, ..on };
         let mut nav = MenuNav::at(Page::Paused);
-        nav.step(2);
+        nav.step(3);
         assert_eq!(nav.activate(), Some(Outcome::ToggleDev));
         assert_eq!(nav.page(), Page::Paused, "stays open to see the new state");
-        let entry = items(Page::Paused)[2];
-        assert_eq!((label(entry, true, normal), label(entry, false, normal)), ("Dev mode: on".to_string(), "Dev mode: off".to_string()));
-        assert_eq!(label(items(Page::Paused)[0], true, normal), "Resume");
+        let entry = items(Page::Paused)[3];
+        assert_eq!((label(entry, &on), label(entry, &off)), ("Dev mode: on".to_string(), "Dev mode: off".to_string()));
+        assert_eq!(label(items(Page::Paused)[0], &on), "Resume");
         nav.set_cursor(1);
         assert_eq!(nav.activate(), Some(Outcome::CycleSpeed));
-        assert_eq!(label(items(Page::Paused)[1], true, GameSpeed { paused: false, times: 4 }), "Game speed: x4");
+        assert_eq!(label(items(Page::Paused)[1], &Shown { speed: GameSpeed { paused: false, times: 4 }, ..on }), "Game speed: x4");
+    }
+
+    #[test]
+    fn the_audio_page_opens_from_the_main_and_the_pause_menus() {
+        for (root, at) in [(Page::Main, 2), (Page::Paused, 2)] {
+            let mut nav = MenuNav::at(root);
+            nav.set_cursor(at);
+            assert_eq!(nav.activate(), None);
+            assert_eq!(nav.page(), Page::Audio);
+            nav.set_cursor(4);
+            assert_eq!(nav.activate(), None, "Back");
+            assert_eq!((nav.page(), nav.cursor()), (root, at));
+        }
+    }
+
+    #[test]
+    fn audio_entries_change_and_show_the_mixer() {
+        let mut nav = MenuNav::at(Page::Audio);
+        let music = Slot::Channel(Channel::Music);
+        nav.set_cursor(1);
+        assert_eq!(nav.activate(), Some(Outcome::CycleVolume(music)));
+        assert_eq!(nav.nudge(-1), Some(Outcome::StepVolume(music, -10)));
+        assert_eq!(nav.nudge(1), Some(Outcome::StepVolume(music, 10)));
+        nav.set_cursor(3);
+        assert_eq!(nav.activate(), Some(Outcome::ToggleMuteAll));
+        assert_eq!(nav.nudge(1), None, "only volumes move sideways");
+        let mixer = Mixer { music: Level::new(60), mute_all: true, ..Mixer::default() };
+        let shown = Shown { dev: false, speed: GameSpeed::default(), mixer };
+        assert_eq!(label(items(Page::Audio)[1], &shown), "Music: 60%");
+        assert_eq!(label(items(Page::Audio)[3], &shown), "[x] Mute all");
+        assert_eq!(label(items(Page::Audio)[3], &Shown { mixer: Mixer::default(), ..shown }), "[ ] Mute all");
+        assert_eq!(device_note(true, false), None);
+        assert_eq!(device_note(false, true), Some("Audio device off (--mute)"));
     }
 
     #[test]
     fn the_pause_menu_opens_the_shortcuts_page_and_back() {
         let mut nav = MenuNav::at(Page::Paused);
-        nav.step(3);
+        nav.step(4);
         assert_eq!(nav.activate(), None);
         assert_eq!(nav.page(), Page::Shortcuts);
         assert_eq!(nav.activate(), None, "Back");
-        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 3));
+        assert_eq!((nav.page(), nav.cursor()), (Page::Paused, 4));
     }
 
     #[test]

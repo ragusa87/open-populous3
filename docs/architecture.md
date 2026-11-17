@@ -158,6 +158,32 @@ For later, spell effects: each will be a game-core `Effect` with its id, each ki
 the views, never hard-coded in the client: e.g. a future `Effect::volcano_phase()` (rumbling, rising, erupting,
 flowing) that `VolcanoView` reads to start the camera shake and the rock spray.
 
+## Client: audio
+Sound is client-only: the simulation never knows about it, so lockstep is untouched. Four files:
+- `audio_mix.rs`: the `Mixer` resource, a `Level` (0-100 %) for Master, Music and Fx, and Mute all.
+  `Mixer::gain(channel)` = (master x channel)^2, 0 while muted.
+- `audio_space.rs`: how a sound on the map is heard from the camera focus (`Listener`, from `CameraRig`): the
+  distance the short way round the torus, a `Falloff` (full, then smoothstep to silent) widening with the camera's
+  height, and a balance along the screen's right. Pure, in cells.
+- `audio.rs` (`SoundPlugin`): systems write a `PlaySound { sound, at }` (a `SoundCue` family with `Pick::Any` or
+  an exact `Pick::Variant(n)`; `at` a map position, or `None` for flat UI sounds, both on Fx) or a `PlayMusic`.
+  The `SoundLibrary` maps cues and tracks to clips (each with its own variant number and a source reference for
+  logs). `resolve_sound`/`resolve_music` decide what plays or why not (`Skip`); players are spawned only when the
+  device is there. Every frame, `apply_volumes` re-places each playing sound for the camera, applies the mixer and
+  holds Fx while the game is not running (music goes on).
+  Panning goes through Bevy's spatial sink with a *virtual emitter*: one `SpatialListener` at the origin, each
+  sound within half a unit of it, on the side of its balance, so rodio's own `1/d^2` stays at 1 and only our
+  falloff fades with distance (rodio's spatial mode alone has no cut-off and does not wrap).
+- `user_settings.rs`: the volumes and Mute all, as JSON in the platform config dir
+  (`dirs::config_dir()/open-populous/settings.json`, `POP3_CONFIG_DIR` overrides), read at launch, saved on
+  leaving the Audio page (main and pause menus), never by a headless run.
+
+`--mute` (`=on`) leaves Bevy's `AudioPlugin` out for the run: no device opened, no warning where there is none.
+Headless runs always leave it out. Without it, `SoundPlugin` still resolves requests (and logs them), but spawns
+nothing; players Bevy never gives a sink are dropped after a while. `--debug-audio` logs one line per request:
+channel, cue and variant asked and played, clip reference, position, distance, balance, gain, or why it was
+skipped.
+
 ## Handedness
 The original renders with Direct3D (pop3-rev reverses `D3DPopTB.exe`): its world is left-handed, x right, y up,
 z away from the viewer (the game's `XPos`/`ZPos` on the ground, `YPos` height). The files, `game-core` and the

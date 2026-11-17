@@ -2018,7 +2018,7 @@ PostUpdate about 5 ms), driven by how we hand it the world:
     environment to measure the fix's actual effect against the sizes it targets).
 
 ## Priority 6 — `--no-original` asset completeness (copyright safety)
-AGENTS.md's own bar is that everything shippable works with `--no-original`. Sound is a hard zero today (format reverse-engineered, no playback, no CC0 assets sourced at all); several spell VFX, building/spell icons and ritual scenery are still original-only. Largely independent of the other tiers, so it can run in parallel with them rather than waiting its turn.
+AGENTS.md's own bar is that everything shippable works with `--no-original`. Sound has its playback skeleton but no clips loaded yet (no CC0 assets sourced at all); several spell VFX, building/spell icons and ritual scenery are still original-only. Largely independent of the other tiers, so it can run in parallel with them rather than waiting its turn.
 
 ### Sound ([sound.md](docs/specs/sound.md))
 - [x] `pop3_format::sound` (`crates/pop3-format/src/sound.rs`, `docs/plans/14-sound-format-parser.md`): SDT
@@ -2030,7 +2030,16 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   Layer II payload left as an unparsed byte range (`mpeg_data`). `examples/sound_info.rs` dumps either kind.
   Parsing only, as scoped: `soundd2low.SDT`'s `0x10` codec is left undecoded (the spec says to ignore that
   bank and use `Soundd2`), and Layer II decoding/playback is the next bullet, still open.
-- [ ] Play SFX in the client (Bevy audio): spells, chopping, building, follower voices, ambiences; drums and music. Free sounds for `--no-original`.
+- [x] Sound system skeleton (architecture.md "Client: audio", sound.md "Playback in the client"): Music/Fx
+  channels under Master and a saved Mute all, settings JSON in the config dir, Audio page in the main and pause
+  menus, `PlaySound`/`PlayMusic` with exact or random variants, distance falloff and balance on the torus,
+  `--mute`, `--debug-audio`. The library is empty: nothing plays yet.
+- [ ] Fill the `SoundLibrary`: `Soundd2` entries as in-memory WAV (bevy `wav` feature) through the sound id ->
+  entry-range table, CC0 sounds for `--no-original`, `PopDrones22` music (MP2 decoder).
+- [ ] Play SFX from game events: spells, chopping, building, follower voices, ambiences; drums. Looping sounds
+  need a handle to stop them, per-id volume, pitch spread and priority, one sound at a time per unit.
+- [ ] Spec question: the original's distance falloff and cut-off (ours are a guess, sound.md "Playback in the
+  client").
 
 ### Art ([assets.md](docs/specs/assets.md))
 - [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).
