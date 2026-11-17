@@ -1907,7 +1907,6 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 
 ### Camp fire ([buildings.md](docs/specs/buildings.md) "Camp fire")
 - [ ] Guard posts' torches (objects 190-193, blended tile 92): draw them with `flame.rs` once guard posts have an original object (the firewarrior and prayer huts' torches burn). Checked this session: the only exe mechanism found that spawns a class-5/type-0xA fire scenery object on a building (pop3-rev-analysis.md "Burning building", the visible-flame addition) is specific to the burn-damage state and has exactly one caller in the whole exe - ruled out as the permanent-torch mechanism. Torches are driven by something else, not found this session.
-- [ ] Generated firewarrior hut: drop the static ember cone from its braziers (tools/generate_buildings.py) now that an animated flame stands on them.
 - [ ] Check in the game: what a camp fire is for (people gathering? mana?), its burn time when left alone (`ABANDON_TICKS`, 60 s guessed), the ring size, the flatness rule, and when object 12 (other logs) is used.
 - [ ] Hover/selection of a camp fire (tooltip with who is around it), a hover cursor when units are selected over one.
 
