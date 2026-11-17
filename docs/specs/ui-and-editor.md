@@ -202,8 +202,8 @@ Shown before the game over the first map: New game (the level from the command l
 Sandbox > Walk, Units, Buildings, Worship, Spells, Vehicles, Bridge (the ground of every sandbox shows a grid along the cell borders, `world::ShowGrid`,
 `terrain_texture::draw_grid`; levels do not) (`GameMap::sandbox_walk`: small flat island, gentle ramp east, steep hill north, lake west, mesa ringed by cliffs south-east, each a few cells past the spawn; `GameMap::sandbox_worship`: a pyramid of knowledge south of the site, door
 facing the shaman, and north one totem of each look with 8 braves, worship.md; `GameMap::sandbox_spells`: every spell
-unlimited, Teleport too, not Bloodlust or Armageddon (`SpellBook::unlimited`: Bloodlust would hide Ghost Army's
-tile, Armageddon's one-shot match outcome would strand every other spell behind `GameMap::outcome`'s latch), on
+unlimited, Teleport too, not Bloodlust (`SpellBook::unlimited`: it would hide Ghost Army's tile), plus Armageddon
+for the player (casting it ends the game, so the sandbox too, once the match is settled), on
 islands a few cells of sea apart: the player's in the middle with 3 of each follower kind of the player south and of
 tribe 1 north, kind by kind 5 cells apart, a red
 village east with people in its huts, a hill north with a few people of tribe 2, an empty islet south-west within

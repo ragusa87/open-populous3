@@ -422,10 +422,8 @@ impl SpellBook {
     }
 
     /// Every spell, Teleport too, cast at will (Sandbox > Spells); not Bloodlust, which would hide Ghost Army's tile
-    /// (`STAND_INS`, hud/spells.rs) in a loadout meant to show every tile at once, and not Armageddon, which
-    /// `GameMap::declare_outcome`'s one-shot latch (`outcome.rs`) would strand the whole sandbox behind once its v1
-    /// instant resolution calls it (`map.rs`'s `apply_inner` rejects every further command once `outcome` is set) -
-    /// the opposite of "test ground to cast every spell freely".
+    /// (`STAND_INS`, hud/spells.rs) in a loadout meant to show every tile at once, and not Armageddon, which ends the
+    /// game (`outcome.rs`): a sandbox that wants it adds it itself (`GameMap::sandbox_spells`).
     pub fn unlimited() -> Self {
         let mut b = SpellBook::new();
         for k in SpellKind::ALL.into_iter().filter(|&k| !matches!(k, SpellKind::Bloodlust | SpellKind::Armageddon)) {

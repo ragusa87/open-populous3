@@ -706,6 +706,8 @@ impl GameMap {
     ///   warriors around, to strike.
     /// - North: a hill to flatten or erode, with a few people of tribe 2 on its slopes.
     /// - South-west: an empty islet.
+    ///
+    /// The player also has Armageddon, cast at will too: it ends the game, so the sandbox is over once it is settled.
     pub fn sandbox_spells() -> Self {
         const C: i32 = MAP_SIZE as i32 / 2;
         let mut terrain = Heightmap::new(MAP_SIZE);
@@ -719,6 +721,7 @@ impl GameMap {
         terrain.raise((C, C - 31), 6, 420);
         let sites = vec![ReincarnationSite::at_cell(TribeId::Blue, (C, C), terrain.get(C, C))];
         let mut map = GameMap { spell_books: per_player(SpellBook::unlimited()), ..GameMap::bare("Sandbox: spells", terrain, sites) }.with_shamans();
+        map.spell_books[TribeId::Blue.as_usize()].set(SpellKind::Armageddon, crate::spell_book::Availability::Unlimited);
         map.trees = scatter(&map.terrain, 3, &[(C, C)], 40);
         let at = |dx: i32, dz: i32| ((C + dx) as u16 * 512 + 256, (C + dz) as u16 * 512 + 256);
         let corner = |dx: i32, dz: i32| ((C + dx) as u16 * 512, (C + dz) as u16 * 512);
@@ -3769,6 +3772,7 @@ mod tests {
     fn sandbox_spells_has_its_village_on_its_island_and_every_spell() {
         let m = GameMap::sandbox_spells();
         assert!(m.spell_books[0].slot(SpellKind::Teleport).is_some_and(|s| s.can_cast()));
+        assert!(m.can_cast(TribeId::Blue, &crate::spell::Spell::Armageddon { at: (64 * 512, 64 * 512) }), "the player may end it all");
         assert_eq!(m.buildings.len(), 5);
         for b in &m.buildings {
             assert!(b.walled_cells(MAP_SIZE as i32).iter().all(|&(x, z)| !m.terrain.is_water(x, z)), "{:?} on land", b.kind);
