@@ -25,8 +25,9 @@ use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// The arena, square, in cells from its centre (`arena_heights`): the flat floor up to `FLOOR_HALF`, then a slope
 /// `SLOPE_CELLS` deep rising `SLOPE_STEP` a cell, then a rim `RIM_CELLS` wide `RIM_HEIGHT` over the slope's top, a
-/// cliff nobody walks up (`path::MAX_CLIMB`). `[ours]`, but the half-width with its slopes is the trace's 9 cells.
-pub const FLOOR_HALF: i32 = 4;
+/// cliff nobody walks up (`path::MAX_CLIMB`). `[ours]`, but the half-width with its slopes is the trace's 9 cells:
+/// past it, on the rim or beyond (only ever thrown there), one dies (`beyond_the_arena`).
+pub const FLOOR_HALF: i32 = 5;
 pub const SLOPE_CELLS: i32 = 4;
 pub const SLOPE_STEP: u16 = 80;
 pub const RIM_CELLS: i32 = 2;
@@ -43,6 +44,8 @@ pub const STALEMATE: Ticks = Ticks::secs(180);
 pub const SHIELD_STEPS: u8 = 2;
 /// Rows of fighters on a slope, half a cell apart from its foot; the shaman stands behind the last.
 const ROWS: usize = 6;
+/// Where the fighters run first when the fight begins: this fraction of the way to the centre (`[ours]`).
+const RALLY_KEEP: i32 = 4;
 /// The most standing side by side in a row before rows fill up (`[ours]`).
 const ROW: usize = 8;
 const CELL: i32 = WORLD_UNITS_PER_CELL as i32;
@@ -82,10 +85,11 @@ impl Coordinator for ArmageddonMatch {
     fn tick(&mut self, _id: Id<Self>, _members: &[UnitId], _now: Tick, world: &GameMap, _rng: &mut Lcg) -> Step {
         let timed_out = match &mut self.phase {
             Phase::Gathering(left) => {
-                if left.tick() {
-                    self.phase = Phase::Fighting(Countdown::new(STALEMATE));
+                if !left.tick() {
+                    return Step::default();
                 }
-                return Step::default();
+                self.phase = Phase::Fighting(Countdown::new(STALEMATE));
+                return Step { finished: false, events: rally(world, self.at) };
             }
             Phase::Fighting(left) => left.tick(),
         };
@@ -95,6 +99,7 @@ impl Coordinator for ArmageddonMatch {
             return Step { finished: true, events: vec![WorldEvent::Declare { winner: None, reason: Reason::Armageddon }] };
         }
         let mut events: Vec<WorldEvent> = fallen.iter().flat_map(|&t| struck_down(world, t)).collect();
+        events.extend(beyond_the_arena(world, self.at).map(|u| WorldEvent::SpawnEffect(crate::lightning::effect(Owner::Wild, (u.x, u.z)))));
         fallen.iter().for_each(|t| self.in_match[t.as_usize()] = false);
         events.extend(standing.iter().filter_map(|&t| shaman(world, t)).map(|u| WorldEvent::Shield { unit: u.id, steps: SHIELD_STEPS }));
         let one_side = standing.iter().all(|&t| world.tribes.same_team(t, standing[0]));
@@ -124,16 +129,54 @@ fn struck_down(world: &GameMap, tribe: TribeId) -> Vec<WorldEvent> {
     vec![WorldEvent::Shield { unit: her.id, steps: 0 }, WorldEvent::SpawnEffect(crate::lightning::effect(Owner::Wild, (her.x, her.z)))]
 }
 
-/// Every idle fighter sent at the nearest enemy fighter it may attack: sight alone would leave the wedges apart.
-fn charges(world: &GameMap) -> Vec<WorldEvent> {
-    let fighter = |u: &Unit| UnitKind::FOLLOWERS.contains(&u.kind) && u.is_alive();
+/// The fight begins: every fighter runs towards the middle, keeping its place in the ranks
+/// (`RALLY_KEEP`-th of the way out from the centre it was), into the enemies running in from the other slopes.
+fn rally(world: &GameMap, centre: (u16, u16)) -> Vec<WorldEvent> {
     world
         .units
         .iter()
-        .filter(|u| fighter(u) && u.action == Action::Idle)
+        .filter(|u| UnitKind::FOLLOWERS.contains(&u.kind) && u.is_alive())
+        .map(|u| {
+            let (dx, dz) = offset(centre, (u.x, u.z));
+            let to = ((centre.0 as i32 + dx / RALLY_KEEP) as u16, (centre.1 as i32 + dz / RALLY_KEEP) as u16);
+            WorldEvent::Rally { unit: u.id, to }
+        })
+        .collect()
+}
+
+/// `to` off `from` the short way round the torus (world units).
+fn offset(from: (u16, u16), to: (u16, u16)) -> (i32, i32) {
+    (to.0.wrapping_sub(from.0) as i16 as i32, to.1.wrapping_sub(from.1) as i16 as i32)
+}
+
+/// The living people on the ground past `ARENA_HALF_CELLS` from the centre, the trace's "anyone past 9 cells away
+/// dies": thrown onto the rim or out of the arena. A bolt strikes each (drawn, like the shamans').
+fn beyond_the_arena(world: &GameMap, centre: (u16, u16)) -> impl Iterator<Item = &Unit> {
+    world.units.iter().filter(move |u| {
+        let (dx, dz) = offset(centre, (u.x, u.z));
+        u.is_alive() && !u.motion.airborne() && dx.abs().max(dz.abs()) > ARENA_HALF_CELLS * CELL
+    })
+}
+
+/// Every idle fighter, and every one going for an enemy already fighting someone else while a free one is left, sent
+/// at the nearest free enemy fighter it may attack (else the nearest): sight alone would leave them apart, and a
+/// crowd waiting on one full fight would stand there running on the spot.
+fn charges(world: &GameMap) -> Vec<WorldEvent> {
+    let fighter = |u: &Unit| UnitKind::FOLLOWERS.contains(&u.kind) && u.is_alive();
+    let busy = |t: &Unit| world.linked(t).is_some();
+    world
+        .units
+        .iter()
+        .filter(|u| fighter(u))
         .filter_map(|u| {
             let foe = |t: &Unit| fighter(t) && !world.tribes.same_team(u.owner, t.owner) && crate::attack::may_attack(u, t);
-            crate::nearest::nearest_n(&world.units, (u.x, u.z), 1, foe).first().map(|&at| WorldEvent::StrikeBack { unit: u.id, at })
+            let free = crate::nearest::nearest_n(&world.units, (u.x, u.z), 1, |t| foe(t) && !busy(t)).first().copied();
+            let at = match u.action {
+                Action::Idle => free.or_else(|| crate::nearest::nearest_n(&world.units, (u.x, u.z), 1, foe).first().copied())?,
+                Action::Attacking { target: crate::unit::Target::Unit(t), .. } if !u.kind.stats().throws && world.unit(t).is_some_and(busy) => free?,
+                _ => return None,
+            };
+            Some(WorldEvent::StrikeBack { unit: u.id, at })
         })
         .collect()
 }
@@ -401,7 +444,8 @@ mod tests {
         map.tick();
         assert!(map.armageddon_match().is_some_and(ArmageddonMatch::fighting));
         assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| her(&map, t).statuses.shield.is_on()));
-        assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| followers(&map, t).iter().all(|u| matches!(u.action, Action::Attacking { .. } | Action::Challenge { .. } | Action::Melee { .. }))));
+        map.run(Ticks::secs(10));
+        assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| followers(&map, t).iter().all(|u| !u.is_alive() || matches!(u.action, Action::Attacking { .. } | Action::Challenge { .. } | Action::Melee { .. }))), "fighting once in the middle");
     }
 
     #[test]
@@ -540,6 +584,41 @@ mod tests {
         assert!(o.winner.is_some(), "fought to a winner");
         let losers: usize = [TribeId::Blue, TribeId::Red, TribeId::Yellow].iter().filter(|&&t| Some(t) != o.winner).map(|&t| followers(&map, t).iter().filter(|u| u.is_alive()).count()).sum();
         assert_eq!(losers, 0, "the others fought to death");
+    }
+
+    #[test]
+    fn a_whole_match_never_leaves_anyone_stranded() {
+        let mut map = GameMap::sandbox_spells();
+        map.start_armageddon((64 * 512, 64 * 512));
+        while map.outcome.is_none() {
+            map.tick();
+            assert!(map.units.iter().all(|u| !matches!(u.action, Action::Stranded { .. })), "arms up at {:?}", map.now);
+        }
+    }
+
+    #[test]
+    fn the_fight_begins_with_everyone_running_into_the_middle() {
+        let mut map = GameMap::sandbox_spells();
+        let at = arena_centre((64 * 512, 64 * 512));
+        map.start_armageddon(at);
+        map.run(GATHERING);
+        assert!(map.armageddon_match().is_some_and(ArmageddonMatch::fighting));
+        let dist = |u: &Unit| { let (dx, dz) = offset(at, (u.x, u.z)); dx.abs().max(dz.abs()) };
+        let fighters: Vec<&Unit> = map.units.iter().filter(|u| UnitKind::FOLLOWERS.contains(&u.kind)).collect();
+        assert!(fighters.iter().all(|u| matches!(u.action, Action::Walking { to } if dist(&Unit::new(u.id, u.owner, u.kind, to)) < dist(u))), "all running inwards");
+    }
+
+    #[test]
+    fn anyone_thrown_past_nine_cells_is_struck_down() {
+        let mut map = two_tribes();
+        map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0));
+        map.spawn(TribeId::Red, UnitKind::Brave, (0, 0));
+        let at = arena_centre(AT);
+        map.start_armageddon(at);
+        past_gathering(&mut map);
+        let out = map.spawn(TribeId::Red, UnitKind::Warrior, (at.0 + (ARENA_HALF_CELLS * CELL + CELL / 2) as u16, at.1)).id;
+        map.run(Ticks::new(2));
+        assert!(!map.unit(out).is_some_and(Unit::is_alive), "past the slopes' top");
     }
 
     #[test]

@@ -2085,6 +2085,12 @@ impl GameMap {
                 self.restore_reincarnation(tribe);
                 None
             }
+            WorldEvent::Rally { unit, to } => {
+                if let Some(u) = self.unit_mut(unit) {
+                    u.order(crate::unit::Order::MoveTo { x: to.0, z: to.1 });
+                }
+                None
+            }
             WorldEvent::Shield { unit, steps } => {
                 if let Some(u) = self.unit_mut(unit) {
                     u.statuses.shield = crate::status::Timed::steps(steps);

@@ -92,6 +92,8 @@ pub enum WorldEvent {
     /// The unit attacks `at` back: a firewarrior hit by its bolt, a listener whose preacher was attacked. At once on
     /// its feet, else once it has landed.
     StrikeBack { unit: UnitId, at: UnitId },
+    /// Sends `unit` walking to `to` (`Order::MoveTo`): Armageddon's fighters running into the middle.
+    Rally { unit: UnitId, to: (u16, u16) },
     /// Sets `unit`'s Magical Shield to `steps` (0: none), whatever it had: Armageddon's own shield (armageddon.rs).
     Shield { unit: UnitId, steps: u8 },
     /// Declares the match's result (`GameMap::declare_outcome`), the hookable "the match ended" entry point.

@@ -351,7 +351,6 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
       fight, shields, strike-down and stalemate are done. Left:
   - [ ] Client: an `armageddon.rs` plugin beyond the camera lock: cast-confirmed screen flash, arena atmosphere tint,
         per-tribe survivor bars, the continuous camera orbit (it only flies to the target and holds).
-  - [ ] The trace's "anyone past 9 cells away dies" (pop3-rev-analysis.md "Per spell" 18).
   - [ ] Tune the `[ours]` numbers (`GATHERING`, `STALEMATE`, the wedge layout) in play.
 - [ ] Bloodlust (hidden spell, model 20; its cast is implemented, docs/specs/spells.md): which levels give it (header
   bit 20 is among levels 1 and 2's leftover bits, so only discoveries give it today).
