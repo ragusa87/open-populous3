@@ -349,8 +349,8 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 ### Spells ([spells.md](docs/specs/spells.md))
 - [ ] Armageddon (`crates/game-core/src/armageddon.rs`, outcome.md "Armageddon"): the count, wipe, arena, gathering,
       fight, shields, strike-down and stalemate are done. Left:
-  - [ ] Client: an `armageddon.rs` plugin beyond the camera lock: cast-confirmed screen flash, arena atmosphere tint,
-        per-tribe survivor bars, the continuous camera orbit (it only flies to the target and holds).
+  - [ ] Client: a cast-confirmed screen flash, an arena atmosphere tint, per-tribe survivor bars (the lock and the
+        orbiting camera are done).
   - [ ] Tune the `[ours]` numbers (`GATHERING`, `STALEMATE`, the wedge layout) in play.
 - [ ] Bloodlust (hidden spell, model 20; its cast is implemented, docs/specs/spells.md): which levels give it (header
   bit 20 is among levels 1 and 2's leftover bits, so only discoveries give it today).

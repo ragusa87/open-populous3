@@ -1,7 +1,7 @@
-//! Armageddon, client side (`docs/specs/outcome.md` "Armageddon"; `TODO.md` for what's left): v1 only needs to
-//! know whether a match is active and where it's centred (`GameMap::armageddon`, "the Armageddon flag") to take
-//! the camera over and lock the player out — there's no multi-turn fight to render yet. The atmosphere tint,
-//! survivor HUD and cast-confirmed flash from the full design are deliberately not built here (`TODO.md`).
+//! Armageddon, client side (`docs/specs/outcome.md` "Armageddon"; `TODO.md` for what's left): while a match is active
+//! (`GameMap::armageddon`, "the Armageddon flag") the player is locked out and the camera flies to the arena, then
+//! turns around it for the whole match (`orbit_yaw`). The atmosphere tint, survivor HUD and cast-confirmed flash are
+//! not built yet (`TODO.md`).
 
 use crate::camera::CameraRig;
 use crate::menu::AppState;
@@ -52,14 +52,36 @@ fn track_armageddon(map: Res<CurrentMap>, clock: Res<SimClock>, mut watch: ResMu
     watch.at = map.0.armageddon().map(|(x, z)| Vec2::new(x as f32, z as f32) / WORLD_UNITS_PER_CELL as f32);
 }
 
-/// Flies the camera to the match's target and holds there for as long as it's active. v1: a simple fly-to-and-hold,
-/// not the full design's continuous orbit (`TODO.md`) — there's no multi-turn fight yet for an orbit to read as
-/// anything but a jump-cut.
-fn auto_camera_armageddon(watch: Res<ArmageddonWatch>, mut rig: ResMut<CameraRig>, mut at: Local<Option<Vec2>>) {
+/// The camera's turn around the arena, radians a second (`[ours]`): a full turn in about 40 s.
+pub const ORBIT_SPEED: f32 = std::f32::consts::TAU / 40.0;
+/// How far out and how steeply it looks at the arena while turning (`[ours]`): the whole arena in view.
+pub const ORBIT_DISTANCE: f32 = 34.0;
+pub const ORBIT_PITCH: f32 = 0.6;
+
+/// The camera's yaw `dt` seconds of orbiting after `yaw`, kept in `[0, TAU)`.
+pub fn orbit_yaw(yaw: f32, dt: f32) -> f32 {
+    (yaw + ORBIT_SPEED * dt).rem_euclid(std::f32::consts::TAU)
+}
+
+/// Flies the camera to the match's arena, framing it whole, then turns around it for as long as the match lasts.
+fn auto_camera_armageddon(time: Res<Time>, watch: Res<ArmageddonWatch>, mut rig: ResMut<CameraRig>, mut at: Local<Option<Vec2>>) {
     if *at != watch.at {
         *at = watch.at;
         if let Some(to) = watch.at {
             rig.fly_to(to);
+            rig.set_ground_view(ORBIT_PITCH, ORBIT_DISTANCE);
         }
+    }
+    rig.yaw = orbit_yaw(rig.yaw, time.delta_secs());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_orbit_turns_steadily_and_wraps() {
+        assert!((orbit_yaw(0.0, 10.0) - ORBIT_SPEED * 10.0).abs() < 1e-5);
+        assert!(orbit_yaw(std::f32::consts::TAU - 0.01, 1.0) < 1.0, "wrapped");
     }
 }
