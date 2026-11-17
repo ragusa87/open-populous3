@@ -46,11 +46,15 @@ ends at EOF. Always seek to the table offset (see drums).
 ### Flags (byte 27)
 Values seen: `0x02`, `0x03` (PCM), `0x12`, `0x13` (compressed, low bank), `0x25` (music), `0x83`, `0x92`.
 - `0x01`: stereo. Clear = mono. Confirmed on the samples: interleaved channels on `0x03`, one channel on `0x02`.
-- `0x10`: compressed with an unknown codec (only in `soundd2low.SDT`).
+- `0x10`: EA MicroTalk compressed (only in `soundd2low.SDT`, see "Low bank codec").
 - `0x20`: MPEG audio (music).
-- `0x80`: placeholder, do not play. In `soundd2low` its data size is 0. In each drum bank, entry 0 is `0x83`
-  and its data is entry 1's header + data shifted by 40 bytes (its range overlaps entry 1).
-- `0x02` and `0x04` are set on all PCM entries and on music respectively, meaning unknown.
+- `0x80`: in `soundd2low` an empty entry (data size 0): that variant plays nothing in low-quality mode. In each
+  drum bank, entry 0 is `0x83` and its data is entry 1's header + data shifted by 40 bytes (its range overlaps
+  entry 1). The game does play drum entry 0 (it is the calm loop, see "Music and drums"), so it is not a
+  do-not-play placeholder there.
+- `0x04`: the header's offset-32 field holds the decoded length (music). Same meaning in Dungeon Keeper 2's
+  SDT reader, which shares this 40-byte header (ufdada/dk2-tools `sdt_struct.bt`). `0x02` is set on every PCM
+  entry, meaning unknown (DK2 uses type 2 for plain 16-bit PCM). The `0x10` compressed type has no DK2 counterpart.
 
 ### Sample data (flags without `0x10` / `0x20`)
 Raw signed 16-bit little-endian PCM, interleaved L/R when stereo, at the header's sample rate. Wrap it as a
@@ -72,7 +76,8 @@ end once, then repeat `[start, end)` while the sound is active (the game's stop/
 unknown). `0, 0` means no loop.
 
 ## `Soundd2.sdt` and `soundd2low.SDT`
-- The index is the sound id. Names hint at the use: `convert`, `erode`, `fire`, `Shrap01`, `chop1..5`,
+- The index is NOT the game's sound id: the exe maps each of its 229 sound ids to a range of entries
+  (see "How the original plays them" below). Names hint at the use: `convert`, `erode`, `fire`, `Shrap01`, `chop1..5`,
   `eat*`, `drink*`, `build*`, `v_*` (follower voices: `v_land`, `v_die`, `v_bow`, `v_ok`), `Sv_*`
   (spell voices), `En_Sv_*`, `Wm_*`, `amb_*` / `amb*` (ambiences), `spacey01..10`, `bloonrid_*`.
 - `Soundd2`: 443 mono (`0x02`), 52 stereo (`0x03`, all ambiences: `amb_m1*`, `amb_w1*`, `amb2*`,
@@ -148,3 +153,108 @@ The editor works on its own exports but misreads parts of the format. Do not cop
   of the next entry's header (past EOF for the last entry). Decoders resync, so it still plays. Building a
   music bank is not implemented.
 - It cannot read `soundd2low.SDT` (it would dump compressed data as PCM).
+
+## How the original plays them
+From the original exe (pop3-rev-analysis.md would hold the formal spec; the full per-id trigger list lives in the
+pop3-rev catalog). Not implemented yet.
+
+### Sound ids
+- The game plays a **sound id** (0x00-0xE4), never a bank index. A per-id record gives: first entry and variant
+  count in `Soundd2` (one variant picked at random per play), an optional alternative range in
+  `POPfightnew.SDT` used whenever that bank is loaded (the punch/sword/yell/grunt ids of melee and battle cries),
+  priority, a pitch spread in percent (pitch = 100 +/- random(spread)) and a volume 0-127. Entry numbers in that
+  record are 1-based (0 = no sound; 23 ids are silent that way).
+- `soundd2low.SDT` is the same id table read against the low bank, chosen by the "high quality sound" option.
+- Positional sounds are attached to a unit and attenuated by distance to the local camera, culled beyond a
+  cut-off. UI sounds play flat. A unit with a sound attached is not given another ambient sound until it ends,
+  which is how per-tick sounds (crackle, eating, drinking) sound continuous instead of stacking.
+- Looping sounds (fire, wind, swarm, swamp, guard post, boat/balloon ride, burning building) are started with a
+  loop flag and explicitly stopped by the code that owns them.
+- While paused only sounds flagged for it play (info window clicks); over overlay screens only UI sounds play.
+
+### Mixing (positional sounds, effects)
+- Listener: a point 16 cells from the camera's look-at point along its heading. Distances are 2D on the wrapped
+  map (height ignored).
+- Hard cut-off at 48 cells: a farther sound is not started, and a playing one is stopped once out of range.
+- Inside it, `closeness = 127 * (1 - d^2 / 48cells^2)`. The original does not scale volume itself: it hands the
+  sound to a 3D mixer (QSound) at full table volume, as a source at azimuth -90..+90 deg (bearing relative to the
+  camera, front and back folded together) and range `(127 - closeness) * 16`, and the mixer's default distance
+  model does the fading. A reimplementation can approximate the fade as volume x (1 - d^2/D^2) with an equal-power
+  pan from that azimuth.
+- 2D/UI sounds: no position, centred, full volume.
+- Updated every frame while the unit and camera move. At most 10 effect channels: when full, the quietest-ranked
+  one (low priority, far, many copies of the same id) is cut if the new sound outranks it. The same id never
+  restarts within 250 ms.
+- Work sounds (chop, hammer, stomp, eat, drink) wait for the unit's animation to reach a given frame, so they
+  land on the hit.
+- Looping: true loops (same sample) for the battle crowd, shield hum and rumbles; "variety loops" (a fresh random
+  variant each time one ends) for fire, wind, swarm, swamp, guard post, boat/balloon. Stopping a variety loop lets
+  the current variant finish.
+- Effects: reverb only (EAX "Plain" outdoors, a long stone-corridor reverb in the special view); short fades on
+  stop in high-quality mode, longer fades on music; some cinematic swooshes circle the listener. No pitch
+  variation (a per-id pitch spread exists in the data but is never applied), no doppler, no filters.
+
+### Voices
+- Selecting: one unit -> its type's "bow" line (preacher, spy, shaman, generic follower); a group layers up to
+  four lines at once - spies, preachers, the shaman, other followers - each picking a 1/2/3/4+ crowd variant.
+- Ordering a selection: the shaman's "yes", a generic "ok" if braves/warriors/firewarriors are in it, plus spy and
+  preacher "ok" lines by count.
+- Casting: the caster shaman shouts the spell's own `Sv_*` line (local player) or `En_Sv_*` line (any other tribe).
+- Death cry for any person, `Sv_die` / `En_Sv_die` for shamans; screams on being blown up or sucked into a
+  whirlwind, grunts on landing hard.
+
+### Ambience
+- A continuous bed of up to three looping-by-restart layers, re-weighted every frame from what is drawn near the
+  camera: low land, shoreline, high ground (wind), open sea (plus a "space" layer in the special view). The level's
+  theme swaps the layer set (a hell set for theme 30, a different sea layer for theme 16). Only with high quality.
+- Random one-shots: seagulls when only water is in view, wildlife calls when trees are in view (theme-specific),
+  and a magical-shield hum while shielded units are in view.
+- A battle-crowd loop whose volume grows with the number and nearness of melee fights, silent below 7 fights.
+
+### Music and drums
+- `PopDrones22` track 1 (`idea11`) plays in the frontend; in a level one of tracks 2-5 is picked at random. It
+  loops for the whole level at the music volume.
+- Each time music starts, a random drum bank `PopDrum0..922` is loaded and drum loops are chained one after the
+  other, chosen from a per-turn intensity: 0 when the local player is not fighting (entry 0, the calm loop; after
+  a fight entry 1 once first), 1 while a local unit is attacking (entry 1), 2 while a local unit is in a challenge
+  or melee (entry 2, and every 4th loop entry 3 when the bank has one).
+- Alternative CD-audio mode: plays the selected CD track instead, no drums.
+
+### Not played at all
+Sound ids present but never played: a chop variant, `oh001`, the two/three-voice "ok" lines (`v_ok2_*`,
+`v_ok3_*`), `Snapshot`, `selectfe`, several `fire`/`sitespel` duplicates. Entries no id points at: `Wdrop01/02`,
+`En_Sv_grunt01-04`.
+
+### Low bank codec: EA MicroTalk
+`soundd2low.SDT`'s `0x10` entries are **EA MicroTalk** (also UTalk/UTK), a multi-pulse LPC speech codec: 432-sample
+frames of four 108-sample subframes, about 32 kbit/s. Identified from the exe's decoder (pop3-rev-analysis.md
+"Low-quality sound bank codec") and confirmed by decoding every entry: lengths and waveforms match `Soundd2`.
+
+**Reference implementation**: [daddesio/utkencode](https://github.com/daddesio/utkencode) (`utk.h`, public
+domain via the UNLICENSE; docs: [wiki.niotso.org/UTK](http://wiki.niotso.org/UTK)). Its frame decoder is the
+original's, bit for bit: the 64-entry reflection-coefficient table, both excitation codebooks, the pulse command
+table and every constant (header gains, 1/15 pitch gain, the reduced-bandwidth interpolation taps) are identical
+to the copies in the exe. Use it as is for the frames; only the stream around them differs.
+
+Differences from the formats utkencode handles (Maxis `.utk`, Beasts & Bumpkins, FIFA):
+- **No container**: the entry's data (after the 40-byte SDT header) is the raw bit stream. Channels, rate and
+  length come from the SDT header, not from a `UTM0`/WAVEFORMATEX header.
+- **One extra leading bit**: the first bit of the stream (LSB-first, same bit reader) is a "second channel" flag,
+  read before the standard MicroTalk header: 0 = mono (data starts `e2 71`), 1 = stereo (`e3 71`). It is read only
+  when the SDT flags lack `0x04`, which is the case for every low-bank entry. To decode with utkencode as is,
+  drop that bit (shift the stream right by one) and start a normal decode.
+- **Stereo**, absent from standard MicroTalk (mono only): both channels share the one header and the one bit
+  stream and alternate per frame - a full left frame, then a full right frame, and so on. Each channel keeps its
+  own decoder state (reflection coefficients, synthesis history, adaptive codebook); the header-derived values
+  (reduced bandwidth, multipulse threshold, gain table) are shared. With utkencode: two contexts, the second
+  copying the first's parsed header, handing the bit-reader position back and forth after each frame.
+  The 21 stereo entries are ambiences (`amb2*`, `amb_spc*`, `ambhell2*`) and `discoend`, `discosky`.
+- **Sample rate**: played at the SDT header's rate, 11025 Hz for most entries, not MicroTalk's nominal 22050 Hz
+  (the decoder itself does not depend on the rate).
+- **Length**: no sample count is stored; the game decodes whole frames until the data runs out, so the output is
+  padded to a multiple of 432 samples per channel (a few ms more than the `Soundd2` entry).
+- **Output**: float samples clamped to signed 16 bits.
+- Oddity: the six `ambhell2*` entries decode ~1.41x longer than their `Soundd2` counterparts at their header rate
+  and do not match them; either different recordings or a header rate that is not the encoded one (not chased).
+
+Still not needed as long as `Soundd2` is used.

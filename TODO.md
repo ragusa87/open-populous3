@@ -9,7 +9,7 @@ Priorities (2026-10-28): sections below are grouped into seven rough tiers, high
 What a match plays through today: combat, orders/the tick, units, spells, buildings, worship. Bugs and gaps here are the most visible, and other tiers build on top of them (the AI tier drives units through the same orders/coordinators as a human; the content tier dresses up the same spells and buildings).
 
 ### Combat
-- [x] Melee (combat.md "Melee", traced in full - pop3-rev-analysis.md "Fight"): the ground check moving the middle off unsuitable ground (`Melee::relocate`) and the per-tribe winner's count and death tally (`GameMap::melee_wins`/`melee_deaths`) are in. Left: the moves' sounds (scoped out for now). The local-player-involved alert flag (`0x89D167`, pop3-rev-analysis.md "Watchtower sentry scan and alarm" and the paragraph above it) is now fully traced: a continuous "currently in a fight involving you" signal (set every turn by `pre_fight_turn`/`fight_turn`) plus an edge-triggered "a new fight involving you just started" pulse (`attack_order_handler`), copied each turn into `+0x8` of a HUD-widget-shaped struct (`0x895DBB`) - this is also confirmed to be the real mechanism behind the tower alert (manning a tower never plays its own siren; it just starts a fight via order kind 19, and this same flag fires). The reader is found too (pop3-rev `functions.tsv` row `0x489a30`): it turns `+0x8` and 3 sibling counts into 4 segments of a HUD gauge widget, no sound call anywhere in it - visual only, no separate fight-music trigger found (a different consumer of the same underlying state can't be ruled out, but this specific field's reader is settled).
+- [x] Melee (combat.md "Melee", traced in full - pop3-rev-analysis.md "Fight"): the ground check moving the middle off unsuitable ground (`Melee::relocate`) and the per-tribe winner's count and death tally (`GameMap::melee_wins`/`melee_deaths`) are in. Left: the moves' sounds (scoped out for now). The local-player-involved alert flag (`0x89D167`, pop3-rev-analysis.md "Watchtower sentry scan and alarm" and the paragraph above it) is now fully traced: a continuous "currently in a fight involving you" signal (set every turn by `pre_fight_turn`/`fight_turn`) plus an edge-triggered "a new fight involving you just started" pulse (`attack_order_handler`), copied each turn into `+0x8` of a HUD-widget-shaped struct (`0x895DBB`) - this is also confirmed to be the real mechanism behind the tower alert (manning a tower never plays its own siren; it just starts a fight via order kind 19, and this same flag fires). **Corrected (audio session): it IS the fight-music trigger.** `0x895DBB` is the music object, not a HUD widget: its `+0x8` picks the next drum loop (0 calm, 1 local unit attacking, 2 local unit in a challenge/melee - sound.md "Music and drums"); the earlier `0x489a30` reading was wrong (that function weights the ambience bed).
 - [x] Challenge (combat.md "Challenge", traced in full - pop3-rev-analysis.md "Pre-fight"): the target facing the attacker and its taunts (1 in 8 per turn while waiting, confirmed) are in (`WorldEvent::Face`, `challenge::taunts`/`Challenge::taunted` - no pose for the taunt yet, see "Units" below). The earlier "third approach, a target at its building" item is resolved: it is the same `Approach::PulledOut` building pull-out already covered under "Attacking a building", not a separate case. The no-shove option (`0x89D17C` bit `0x40`, a level/script token at `0x48E3D5`, not a cheat - also disables Melee's own knockback) and the lift-vs-ground-slide question (resolved: genuinely airborne via the same BLOWN push physics as Blast, no ground slide - `SHOVE_LIFT` was right) are both now traced - see combat.md/pop3-rev-analysis.md "Pre-fight"/"Fight". Still open: actually wiring the script-level no-shove option into our own level/script handling.
 - [ ] Fight poses in the generated (CC0) unit sheets: strike, trade, kick, reel, shoved, and a challenge's taunt
   (`Pose::fallback` stands in: idle, fall). The taunt's original-asset side is done (combat.md "Challenge",
@@ -2030,6 +2030,14 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   Layer II payload left as an unparsed byte range (`mpeg_data`). `examples/sound_info.rs` dumps either kind.
   Parsing only, as scoped: `soundd2low.SDT`'s `0x10` codec is left undecoded (the spec says to ignore that
   bank and use `Soundd2`), and Layer II decoding/playback is the next bullet, still open.
+  The `0x10` codec is now known (EA MicroTalk, sound.md "Low bank codec: EA MicroTalk", pop3-rev-analysis.md
+  "Low-quality sound bank codec"): only needed if the low bank is ever supported - decode with the public
+  utkencode decoder plus the leading mono/stereo bit and per-frame stereo alternation.
+- [ ] Low bank `ambhell2*` (entries 418-423 of `soundd2low.SDT`): decoded with the EA MicroTalk rules (sound.md
+  "Low bank codec: EA MicroTalk"), they come out ~1.41x longer than the `Soundd2` entries at the same indices and
+  their waveforms do not match them, unlike every other entry. Find out whether they are different recordings or
+  whether their header sample rate is not the one they were encoded at (decode at other rates, compare by ear with
+  `Soundd2`). Only matters if the low bank is ever supported.
 - [x] Sound system skeleton (architecture.md "Client: audio", sound.md "Playback in the client"): Music/Fx
   channels under Master and a saved Mute all, settings JSON in the config dir, Audio page in the main and pause
   menus, `PlaySound`/`PlayLoop`/`StopLoop`/`PlayMusic` with exact or random variants, repeat and variety loops,
@@ -2039,6 +2047,8 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   entry-range table, CC0 sounds for `--no-original`, `PopDrones22` music (MP2 decoder).
 - [ ] Play SFX from game events: spells, chopping, building, follower voices, ambiences; drums. Work sounds on
   their animation frame, one ambient sound at a time per unit, the clips' own loop points, fades, reverb.
+  Triggers are now mapped (sound.md "How the original plays them"): play by sound id through the id -> entry-range
+  table, not by bank index; looping sounds need explicit stops; music = drone track + intensity-driven drum loops.
 
 ### Art ([assets.md](docs/specs/assets.md))
 - [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).

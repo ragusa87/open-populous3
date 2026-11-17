@@ -154,6 +154,9 @@ so a live measurement may run on it with the addresses translated.
 - **Drowning splash is one 16-turn sprite** [exe, measured]: going under spawns one stationary billboard
   splash (sprites 1304-1319, its own sound) that lives exactly as long as the drowning takes, then vanishes; it
   is not repeated while sinking. See "Drowning splash".
+- **The low-quality sound bank is EA MicroTalk** [exe, measured]: `soundd2low.SDT`'s compressed entries are
+  standard MicroTalk frames (the public utkencode decoder applies unchanged) in a raw stream with one leading
+  mono/stereo bit and a per-frame left/right alternation for stereo. See "Low-quality sound bank codec".
 
 ## Turns and timing [exe]
 ```text
@@ -5809,7 +5812,42 @@ equivalent: they call into task 24's own handler, a parallel mechanism, not `0x4
 itself. See `ai-scripts.md`'s "Markers, guards and the base" for the PopScript-level command reference this
 confirms.
 
+## Low-quality sound bank codec [exe, measured]
+`soundd2low.SDT` (loaded instead of `Soundd2.sdt` when the "high quality sound" option, `0x895DA8` bit
+`0x4000000`, is off) stores most entries with SDT flag `0x10`. That is EA MicroTalk; the format and its
+differences from the public reference decoder ([daddesio/utkencode](https://github.com/daddesio/utkencode),
+public domain) are in sound.md "Low bank codec: EA MicroTalk". The exe side:
+
+```text
+bank source factory (0x570590), per entry, on the SDT flags byte (+0x1B):
+  0x80 -> placeholder source        0x20 -> MPEG source (music)
+  0x10 -> MicroTalk source: in memory 0x577960 (vtable 0x5949A0), streamed 0x577C30 (0x2000-byte chunks, 0x578C00)
+  else -> plain PCM, WAVEFORMATEX built from the header (0x571150: channels 1 + bit 0, rate +0x18, bits +0x1A)
+MicroTalk source:
+  open (0x578B10): load the first byte into the LSB-first bit reader;
+                   if SDT flag 0x04 is clear: stereo = read 1 bit          <- Populous extension
+                   standard header (reduced bandwidth, multipulse threshold, gain table)
+                   both channel states get the same header values (0x578AB0)
+  pull (0x577B20): every 432 samples per channel, decode one frame per channel (0x5798E0):
+                   left frame (state +0x14), then right frame (state +0xD48) from the same bit reader
+                   output float -> clamped int16 (0x577AF0), channels interleaved
+  end: when the reader passes the end of the entry data (0x577BF0)
+```
+
+Tables and constants are the reference decoder's, compared byte for byte: reflection coefficients `0x5EB5E8`
+(64 floats), excitation codebooks `0x5EB6E8` (2 x 256 bytes), pulse commands `0x5EB8E8` (29 x 12 bytes), decoder
+constants `0x594D20`-`0x594D3C` (8.0, 0.001, 1.04, 0.25, 1/15, interpolation taps 0.018033 / 0.597386 /
+0.114592). [measured]: all 414 non-empty `0x10` entries decode with the reference decoder plus the two
+differences above; same-recording pairs correlate 0.95-0.99 with `Soundd2` (downsampled), durations match
+(median ratio 1.01, frame padding).
+
+The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F0` stereo), used only by the
+`FMV\*.tgq` movies, not by any sound bank.
+
 ## Impact on our specs
+- sound.md: the `0x10` flag was "unknown codec"; it is EA MicroTalk ("Low-quality sound bank codec"), decodable
+  with the public utkencode decoder plus the leading mono/stereo bit and per-frame stereo alternation.
+  `pop3_format::sound` still leaves those entries undecoded, which stays fine while only `Soundd2` is played.
 - `hud/mana.rs`'s strip (`mana_view`, `pool.bank` against `MAX_MANA`) does not match "The mana bar (HUD)": the
   original's bar is full whenever nothing is charging regardless of `bank`, and otherwise shows `last_income`
   against an advisor pacing estimate for the charging spell, not `bank`'s own share of `MAX_MANA`. It is also a
@@ -6642,3 +6680,20 @@ of 0x89C661.
   file, `LIFE_BRAVE` 1400 and 1000.
 - Not in the table: 0x5AA44C (default 3) is masked with the turn number like `MANA_UPDATE_FREQ` should be, so it is
   probably that constant (unverified). The `MANA_IDLE_*`/`MANA_BUSY_*` values are exe-only too.
+
+### Sound bank decoding [exe]
+| Address | Function |
+|---|---|
+| 0x570590 | bank source factory: picks the source class from the SDT entry flags |
+| 0x571150 | builds a PCM WAVEFORMATEX from an SDT entry header |
+| 0x577960 | MicroTalk source, in memory (vtable 0x5949A0) |
+| 0x577C30 | MicroTalk source, streamed |
+| 0x577B20 | MicroTalk pull: frames to interleaved int16 |
+| 0x577AF0 | float sample to int16 clamp |
+| 0x578B10 | MicroTalk open: leading stereo bit, header, channel states |
+| 0x578C00 | same, streamed (refills 0x2000 bytes) |
+| 0x578AB0 | per-channel state init (gain table, zeroed history) |
+| 0x578900 | excitation decode (multipulse / RELP) |
+| 0x578D00 | one channel's frame decode |
+| 0x5798E0 | one frame for each channel, left then right |
+| 0x57A2D0 | EA-XA ADPCM chunk decode for the FMV movies |
