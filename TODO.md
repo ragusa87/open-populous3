@@ -2032,14 +2032,13 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   bank and use `Soundd2`), and Layer II decoding/playback is the next bullet, still open.
 - [x] Sound system skeleton (architecture.md "Client: audio", sound.md "Playback in the client"): Music/Fx
   channels under Master and a saved Mute all, settings JSON in the config dir, Audio page in the main and pause
-  menus, `PlaySound`/`PlayMusic` with exact or random variants, distance falloff and balance on the torus,
-  `--mute`, `--debug-audio`. The library is empty: nothing plays yet.
+  menus, `PlaySound`/`PlayLoop`/`StopLoop`/`PlayMusic` with exact or random variants, repeat and variety loops,
+  the original's listener, 48-cell cut-off, `1 - d²/D²` falloff and equal-power balance, 10 effects at most,
+  250 ms between repeats, `--mute`, `--debug-audio`. The library is empty: nothing plays yet.
 - [ ] Fill the `SoundLibrary`: `Soundd2` entries as in-memory WAV (bevy `wav` feature) through the sound id ->
   entry-range table, CC0 sounds for `--no-original`, `PopDrones22` music (MP2 decoder).
-- [ ] Play SFX from game events: spells, chopping, building, follower voices, ambiences; drums. Looping sounds
-  need a handle to stop them, per-id volume, pitch spread and priority, one sound at a time per unit.
-- [ ] Spec question: the original's distance falloff and cut-off (ours are a guess, sound.md "Playback in the
-  client").
+- [ ] Play SFX from game events: spells, chopping, building, follower voices, ambiences; drums. Work sounds on
+  their animation frame, one ambient sound at a time per unit, the clips' own loop points, fades, reverb.
 
 ### Art ([assets.md](docs/specs/assets.md))
 - [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).

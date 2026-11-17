@@ -112,22 +112,27 @@ Entry header with a shorter name:
 - Lengths: `idea11` 230 s, `idea13` 321 s, `idea16` 284 s, `idea17` 307 s, `idea19` 361 s.
 
 ## Playback in the client
-docs/architecture.md "Client: audio" for the code. The rules here are our own unless cited:
-- Channels: Music and Fx under a Master volume, plus Mute all (saved). UI sounds go on Fx, flat.
-- A `SoundCue` stands for one of the original's sound ids: a family of variants. `Pick::Any` is the
-  original's random pick; `Pick::Variant(n)` plays exactly variant `n` (`chop4`), never another one in its place.
-- Heard from the camera focus on the ground, the distance taken the short way round the map: full volume up to
-  6 cells, a smoothstep down to silence at 28 cells, both times 0.5 to 3 with the camera's height over the
-  default view's. The original attenuates and culls by distance to the camera too, but with numbers not traced:
-  these are a guess (question for a spec session: the original's falloff curve and cut-off).
-- Balance: the sound's offset along the screen's right over its distance, eased to the middle within 2 cells.
-- Fx hold while the game is paused or behind a menu, music goes on (the original lets flagged UI sounds through
-  while paused: not done).
-- Music: a Menu track behind the menus, a Game track in a game ("Music and drums": `idea11` in the frontend, one
-  of tracks 2-5 in a level).
-- Not done yet: loading clips (`Soundd2` PCM as WAV, CC0 sounds for `--no-original`, MP2 music), the per-id
-  volume, pitch spread and priority, loops with an explicit stop, one sound at a time per unit, ambience layers,
-  drums, game events turned into cues.
+docs/architecture.md "Client: audio" for the code.
+- Channels: Music and Fx under a Master volume, plus Mute all (saved). UI sounds go on Fx, flat: centred, full
+  volume.
+- A `SoundCue` stands for one of the original's sound ids: a family of variants with its own volume (0-127) and
+  priority. `Pick::Any` is the original's random pick; `Pick::Variant(n)` plays exactly variant `n` (`chop4`), never
+  another one in its place.
+- Mixed as the original mixes them: the listener 16 cells from the camera's look-at point along its heading, 2D
+  distances on the wrapped map, a cut-off at 48 cells (not started past it, stopped once out of it), the volume
+  times `1 - d²/48²`, an equal-power balance from the bearing folded into -90..90°. Our own stereo source
+  (`audio_source.rs`) applies the gains, updated every frame.
+- At most 10 effects at once: a full mix cuts its lowest-ranked one for a new one that outranks it (priority, then
+  fewer copies of the same sound, then closeness: that order is our reading). The same sound never restarts
+  within 250 ms (one-shots).
+- Loops: `PlayLoop` under a key (sent again to move it) and `StopLoop`. A repeat loop replays the same clip and
+  stops at once; a variety loop takes a fresh variant each time one ends, and when stopped lets the current one
+  finish. A loop out of reach is stopped and starts again once back in reach.
+- Positional sounds wait while the game is paused or behind a menu; flat sounds and music go on.
+- Music: a Menu track behind the menus, a Game track in a game picked at random among its variants.
+- Not done yet: loading clips (`Soundd2` PCM as WAV, CC0 sounds for `--no-original`, MP2 music), the clips' own
+  loop points (`fire`, `warloop`...), work sounds waiting for an animation frame, one ambient sound per unit,
+  ambience layers, drums, fades, reverb, game events turned into cues.
 
 ## PopSoundEditor discrepancies
 The editor works on its own exports but misreads parts of the format. Do not copy these:

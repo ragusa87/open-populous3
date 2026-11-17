@@ -8,6 +8,7 @@ mod angel_of_death;
 mod armageddon;
 mod audio;
 mod audio_mix;
+mod audio_source;
 mod audio_space;
 mod blast_fireball;
 mod blast_impact;
