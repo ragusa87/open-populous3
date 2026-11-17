@@ -1,17 +1,15 @@
-//! Armageddon (docs/plans/spells.md "Armageddon", the user's own design over the trace's one line, pop3-rev-analysis.md
-//! "Per spell" 18): on cast, every shaman dying, dead or gone who still has a reincarnation site comes back first
-//! (`revive_shamans`), then every site is removed for good; each tribe with people on the map (in the level's roster
-//! or not) has its followers counted by kind; every building, totem, vehicle and every unit but the shamans is
-//! removed, and the trees around the cast point; the arena is carved into the ground there (`arena_heights`: a
-//! square, flat floor above the sea, a walkable slope on each of its 4 sides, a cliff rim behind them); then as
-//! many fresh fighters of each kind are spawned per tribe on a slope of its own (allies' side by side), its shaman
-//! at the top behind them. The match (`ArmageddonMatch`, a coordinator no unit links to) holds combat off for `GATHERING`,
-//! then lets them fight, sending every idle fighter at the nearest enemy one; no shaman is auto-attacked, nor
-//! auto-attacks (`spotting::first_seen`). While a tribe's own fighters live,
-//! its shaman stays shielded (topped up every turn); the turn they are all dead, her shield drops and a bolt (the
-//! Lightning spell's own effect, so it is drawn) strikes her, with no site left to come back to. The last side (alliance) with fighters wins; sides falling together, or no winner
-//! after `STALEMATE`, is a draw. The numbers are `[ours]`, none traced. Not done: the trace's "anyone past 9 cells
-//! away dies" (the rim keeps everyone in instead).
+//! Armageddon (outcome.md "Armageddon": the user's design over the trace's one line, pop3-rev-analysis.md "Per spell"
+//! 18). On cast: every shaman dying, dead or gone who still has a reincarnation site comes back (`revive_shamans`),
+//! then every site goes for good; every building becomes one brave of its owner at its door, then every building,
+//! totem and vehicle goes, their people set down where they were (`wipe_for_armageddon`); the arena is carved into
+//! the ground (`arena_heights`: a square, flat floor, a walkable slope on each side, a cliff rim). Every tribe with
+//! people on the map takes part. Then the match (`ArmageddonMatch`) teleports them in one per turn
+//! (`Phase::Arriving`, the shamans first, to the arena's top corners; then each tribe's people in turn onto its own
+//! slope; anyone standing in the sea at once, before drowning), holds a moment (`Phase::Gathering`), and lets them fight (`Phase::Fighting`): all run into the middle,
+//! then go for the nearest free enemy; nobody goes for a shaman. While a tribe's own fighters live its shaman stays
+//! shielded; the turn they are all dead her shield drops and a bolt (the Lightning spell's own effect, drawn) strikes
+//! her. Anyone past 9 cells, thrown onto the rim or out, is struck too. The last side with fighters wins; sides
+//! falling together, or none after `STALEMATE`, is a draw. The numbers are `[ours]`.
 
 use crate::coordinator::{Coordinator, Step};
 use crate::event::WorldEvent;
@@ -37,8 +35,8 @@ pub const ARENA_HALF_CELLS: i32 = FLOOR_HALF + SLOPE_CELLS;
 pub const OUTER_HALF_CELLS: i32 = ARENA_HALF_CELLS + RIM_CELLS;
 /// The floor's lowest height, well above the sea (`[ours]`).
 pub const FLOOR_MIN: u16 = 64;
-/// Fixed by phase (`[ours]`): the gathering, before anyone fights, and the stalemate, a draw.
-pub const GATHERING: Ticks = Ticks::secs(5);
+/// Fixed by phase (`[ours]`): the hold once everyone has arrived, before anyone fights, and the stalemate, a draw.
+pub const GATHERING: Ticks = Ticks::secs(3);
 pub const STALEMATE: Ticks = Ticks::secs(180);
 /// A fighting shaman's shield, topped up to this many steps every turn: "permanent" (`[ours]`).
 pub const SHIELD_STEPS: u8 = 2;
@@ -52,23 +50,27 @@ const CELL: i32 = WORLD_UNITS_PER_CELL as i32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
+    /// One person teleported in per turn: `next` in `arrivals`.
+    Arriving { next: usize },
     Gathering(Countdown),
     Fighting(Countdown),
 }
 
-/// Armageddon's match: its centre (the client camera's target too), its phase, and which tribes are still in it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Armageddon's match: its centre (the client camera's target too), its phase, who arrives where and in what order,
+/// and which tribes are still in it.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArmageddonMatch {
     pub at: (u16, u16),
     pub phase: Phase,
+    arrivals: Vec<(UnitId, (u16, u16))>,
     in_match: [bool; crate::totem::TRIBES],
 }
 
 impl ArmageddonMatch {
-    fn new(at: (u16, u16), tribes: impl Iterator<Item = TribeId>) -> Self {
+    fn new(at: (u16, u16), tribes: impl Iterator<Item = TribeId>, arrivals: Vec<(UnitId, (u16, u16))>) -> Self {
         let mut in_match = [false; crate::totem::TRIBES];
         tribes.for_each(|t| in_match[t.as_usize()] = true);
-        ArmageddonMatch { at, phase: Phase::Gathering(Countdown::new(GATHERING)), in_match }
+        ArmageddonMatch { at, phase: Phase::Arriving { next: 0 }, arrivals, in_match }
     }
 
     pub fn fighting(&self) -> bool {
@@ -84,6 +86,15 @@ impl Coordinator for ArmageddonMatch {
 
     fn tick(&mut self, _id: Id<Self>, _members: &[UnitId], _now: Tick, world: &GameMap, _rng: &mut Lcg) -> Step {
         let timed_out = match &mut self.phase {
+            Phase::Arriving { next } => {
+                let Some(&(unit, to)) = self.arrivals.get(*next) else {
+                    self.phase = Phase::Gathering(Countdown::new(GATHERING));
+                    return Step::default();
+                };
+                *next += 1;
+                let here = world.unit(unit).is_some_and(Unit::is_alive);
+                return Step { finished: false, events: here.then_some(WorldEvent::Arrive { unit, to }).into_iter().collect() };
+            }
             Phase::Gathering(left) => {
                 if !left.tick() {
                     return Step::default();
@@ -208,9 +219,21 @@ pub fn arena_offset(side: usize, sides: usize, k: usize, count: usize) -> (i32, 
     on_slope(slope_of(side, sides), FLOOR_HALF * CELL + CELL / 2 + row * CELL / 2, along)
 }
 
-/// Where side `side`'s shaman stands: in the middle of its slope, near the top, behind her fighters.
+/// Where side `side`'s shaman stands: at a top corner of the arena, the one at the end of her tribe's slope.
 pub fn shaman_offset(side: usize, sides: usize) -> (i32, i32) {
-    on_slope(slope_of(side, sides), FLOOR_HALF * CELL + CELL / 2 + ROWS as i32 * CELL / 2, 0)
+    let top = ARENA_HALF_CELLS * CELL - CELL / 2;
+    on_slope(slope_of(side, sides), top, top)
+}
+
+/// The order they arrive in: the shamans first, then one of each tribe in turn. `people`: each tribe's (shaman,
+/// followers), in side order.
+pub fn arrival_order<T: Copy>(people: &[(Option<T>, Vec<T>)]) -> Vec<T> {
+    let mut order: Vec<T> = people.iter().filter_map(|(s, _)| *s).collect();
+    let most = people.iter().map(|(_, f)| f.len()).max().unwrap_or(0);
+    for k in 0..most {
+        order.extend(people.iter().filter_map(|(_, f)| f.get(k).copied()));
+    }
+    order
 }
 
 /// The arena carved around `centre` (a height point) on a `size`-point torus, out to `OUTER_HALF_CELLS`: the floor
@@ -243,32 +266,39 @@ impl GameMap {
         self.coordinators.armageddons.iter().next().map(|(_, m)| m)
     }
 
-    /// Armageddon takes effect at `at` (module doc): the count, the wipe, the gathering into the arena, the match.
+    /// Armageddon takes effect at `at` (module doc): the shamans back, the sites gone, the wipe, the arena carved,
+    /// and the match, which then teleports everyone in. The ground it changed.
     pub(crate) fn start_armageddon(&mut self, at: (u16, u16)) -> crate::terrain::DirtyRect {
         let at = arena_centre(at);
         self.revive_shamans();
         let tribes: Vec<TribeId> = self.sites.iter().map(|s| s.owner).collect();
         tribes.into_iter().for_each(|t| self.remove_reincarnation(t));
-        let order = self.armageddon_sides();
-        let tally: Vec<(TribeId, Vec<UnitKind>)> = order
-            .iter()
-            .map(|&t| (t, self.units.iter().filter(|u| u.owner == Owner::Tribe(t) && UnitKind::FOLLOWERS.contains(&u.kind) && !u.statuses.ghost && u.is_alive()).map(|u| u.kind).collect()))
-            .collect();
         self.wipe_for_armageddon(at);
         let dirty = self.carve_arena(at);
+        let order = self.armageddon_sides();
         let size = (self.terrain.size() * WORLD_UNITS_PER_CELL as usize) as i32;
         let place = |(dx, dz): (i32, i32)| (((at.0 as i32 + dx).rem_euclid(size)) as u16, ((at.1 as i32 + dz).rem_euclid(size)) as u16);
-        for (wedge, (tribe, kinds)) in tally.iter().enumerate() {
-            for (k, &kind) in kinds.iter().enumerate() {
-                self.spawn(*tribe, kind, place(arena_offset(wedge, tally.len(), k, kinds.len())));
+        let mut spots = std::collections::BTreeMap::new();
+        let mut people = Vec::new();
+        for (side, &tribe) in order.iter().enumerate() {
+            let own = |u: &&Unit| u.owner == Owner::Tribe(tribe) && !u.statuses.ghost && u.is_alive();
+            let shaman = self.units.iter().filter(own).find(|u| u.kind == UnitKind::Shaman).map(|u| u.id);
+            let followers: Vec<&Unit> = self.units.iter().filter(own).filter(|u| UnitKind::FOLLOWERS.contains(&u.kind)).collect();
+            if let Some(s) = shaman {
+                spots.insert(s, place(shaman_offset(side, order.len())));
             }
-            let spot = place(shaman_offset(wedge, tally.len()));
-            if let Some(u) = self.units.iter_mut().find(|u| u.owner == Owner::Tribe(*tribe) && u.kind == UnitKind::Shaman && !u.statuses.ghost && u.is_alive()) {
-                u.gather_at(spot);
+            for (k, u) in followers.iter().enumerate() {
+                spots.insert(u.id, place(arena_offset(side, order.len(), k, followers.len())));
             }
+            people.push((shaman, followers.iter().map(|u| u.id).collect::<Vec<_>>()));
         }
+        let in_sea: Vec<UnitId> = self.units.iter().filter(|u| spots.contains_key(&u.id) && crate::unit::is_sea(&self.terrain, u.cell())).map(|u| u.id).collect();
+        for &u in &in_sea {
+            self.apply_event(WorldEvent::Arrive { unit: u, to: spots[&u] });
+        }
+        let arrivals = arrival_order(&people).into_iter().filter(|u| !in_sea.contains(u)).map(|u| (u, spots[&u])).collect();
         let id = self.new_id_of();
-        self.coordinators.armageddons.insert(id, ArmageddonMatch::new(at, order.into_iter()));
+        self.coordinators.armageddons.insert(id, ArmageddonMatch::new(at, order.into_iter(), arrivals));
         dirty
     }
 
@@ -311,10 +341,22 @@ impl GameMap {
         }
     }
 
-    /// Everything but the shamans and the ground: buildings, totems, vehicles, every other unit, any fight or
-    /// formation in progress, and the trees on the arena and its rim around `at`.
+    /// The map cleared for the match: every building turned into one brave of its owner at its door (the trace's
+    /// "turns every building into one person"), then every building, totem and vehicle gone, their people set down
+    /// where they were; wildmen, angels and Ghost Army copies gone; every fight and formation over, everyone standing
+    /// idle; the trees on the arena and its rim around `at` gone.
     fn wipe_for_armageddon(&mut self, at: (u16, u16)) {
-        self.units.retain(|u| u.kind == UnitKind::Shaman && !u.statuses.ghost);
+        let doors: Vec<(TribeId, (u16, u16))> = self.buildings.iter().filter_map(|b| Some((b.owner.tribe()?, b.door()))).collect();
+        for (tribe, door) in doors {
+            self.spawn(tribe, UnitKind::Brave, door);
+        }
+        self.units.retain(|u| (u.kind == UnitKind::Shaman || UnitKind::FOLLOWERS.contains(&u.kind)) && !u.statuses.ghost);
+        for u in &mut self.units {
+            let here = u.inside.map_or((u.x, u.z), |i| i.door);
+            if u.is_alive() {
+                u.gather_at(here);
+            }
+        }
         self.buildings.clear();
         self.totems.clear();
         self.vehicles = Default::default();
@@ -362,8 +404,13 @@ mod tests {
     }
 
     fn past_gathering(map: &mut GameMap) {
-        map.run(GATHERING);
-        assert!(map.armageddon_match().is_none_or(ArmageddonMatch::fighting), "test setup: gathering over");
+        for _ in 0..2000 {
+            if map.armageddon_match().is_none_or(ArmageddonMatch::fighting) {
+                return;
+            }
+            map.tick();
+        }
+        panic!("test setup: never got to the fight");
     }
 
     #[test]
@@ -374,14 +421,16 @@ mod tests {
         }
         map.spawn(TribeId::Red, UnitKind::Brave, (60_000, 60_000));
         map.spawn(TribeId::Red, UnitKind::Firewarrior, (60_000, 60_000));
+        let before: Vec<UnitId> = map.units.iter().map(|u| u.id).collect();
         map.start_armageddon(AT);
         assert!(map.buildings.is_empty() && map.totems.is_empty() && map.vehicles.is_empty());
         assert!(map.trees.iter().all(|t| cells_off(&map, &Unit::new(Id::from_raw(0), TribeId::Blue, UnitKind::Brave, (t.x, t.z))) > ARENA_HALF_CELLS - 1));
-        let kinds = |t| { let mut k: Vec<_> = followers(&map, t).iter().map(|u| u.kind).collect(); k.sort_by_key(|k| *k as u8); k };
-        assert_eq!(kinds(TribeId::Blue).len(), 3);
-        assert_eq!(kinds(TribeId::Red), vec![UnitKind::Brave, UnitKind::Firewarrior]);
+        assert!(before.iter().all(|id| map.unit(*id).is_some()), "the same people, not new ones");
+        let kinds = |m: &GameMap, t| { let mut k: Vec<_> = followers(m, t).iter().map(|u| u.kind).collect(); k.sort_by_key(|k| *k as u8); k };
+        assert_eq!(kinds(&map, TribeId::Red), vec![UnitKind::Brave, UnitKind::Firewarrior]);
+        past_gathering(&mut map);
+        assert_eq!(kinds(&map, TribeId::Blue).len(), 3);
         assert!(map.units.iter().all(|u| cells_off(&map, u) <= ARENA_HALF_CELLS), "everyone in the arena, the shamans too");
-        assert!(map.armageddon_match().is_some_and(|m| !m.fighting()));
     }
 
     #[test]
@@ -391,7 +440,9 @@ mod tests {
         map.damage(red, u16::MAX, DamageKind::Lightning, None);
         map.units.retain(|u| !(u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Shaman));
         map.start_armageddon(AT);
-        assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| her(&map, t).is_alive() && cells_off(&map, her(&map, t)) <= ARENA_HALF_CELLS));
+        assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| her(&map, t).is_alive()));
+        map.run(Ticks::new(3));
+        assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| cells_off(&map, her(&map, t)) <= ARENA_HALF_CELLS), "the first to arrive");
         assert_eq!(her(&map, TribeId::Red).id, red, "the same shaman, not a new one");
         assert_eq!(her(&map, TribeId::Red).health.current(), map.balance.units.life(UnitKind::Shaman));
         assert!(map.sites.iter().all(|s| !s.enabled), "no site left, their stones gone with them");
@@ -426,12 +477,14 @@ mod tests {
 
     #[test]
     fn nobody_fights_while_they_gather() {
-        let mut map = two_tribes();
+        let mut map = GameMap::sandbox_spells();
         map.spawn(TribeId::Blue, UnitKind::Warrior, (0, 0));
         map.spawn(TribeId::Red, UnitKind::Warrior, (0, 0));
         map.start_armageddon(AT);
-        map.run(Ticks::new(GATHERING.get() - 1));
-        assert!(map.units.iter().all(|u| u.action == Action::Idle));
+        while map.armageddon_match().is_some_and(|m| !m.fighting()) {
+            assert!(map.units.iter().all(|u| matches!(u.action, Action::Idle | Action::Landing)), "{:?}", map.units.iter().map(|u| u.action.name()).collect::<Vec<_>>());
+            map.tick();
+        }
     }
 
     #[test]
@@ -574,7 +627,10 @@ mod tests {
         let centre = (64 * 512 + 256, 64 * 512 + 256);
         map.start_armageddon(centre);
         for t in [TribeId::Blue, TribeId::Red, TribeId::Yellow] {
-            assert!(!followers(&map, t).is_empty(), "{t:?} gathered");
+            assert!(!followers(&map, t).is_empty(), "{t:?} in it");
+        }
+        while map.armageddon_match().is_some_and(|m| matches!(m.phase, Phase::Arriving { .. })) {
+            map.tick();
         }
         let c = arena_centre(centre);
         let off = |u: &Unit| (u.x as i32 - c.0 as i32).abs().max((u.z as i32 - c.1 as i32).abs());
@@ -584,6 +640,51 @@ mod tests {
         assert!(o.winner.is_some(), "fought to a winner");
         let losers: usize = [TribeId::Blue, TribeId::Red, TribeId::Yellow].iter().filter(|&&t| Some(t) != o.winner).map(|&t| followers(&map, t).iter().filter(|u| u.is_alive()).count()).sum();
         assert_eq!(losers, 0, "the others fought to death");
+    }
+
+    #[test]
+    fn they_arrive_one_per_turn_shamans_first_landing_on_their_spot() {
+        let mut map = GameMap::sandbox_spells();
+        let at = arena_centre((64 * 512, 64 * 512));
+        map.start_armageddon(at);
+        let inside = |m: &GameMap| m.units.iter().filter(|u| { let (dx, dz) = offset(at, (u.x, u.z)); dx.abs().max(dz.abs()) < ARENA_HALF_CELLS * CELL }).count();
+        let mut count = inside(&map);
+        map.tick();
+        let shaman = her(&map, TribeId::Blue);
+        assert!(matches!(shaman.action, Action::Landing), "she arrives first, dropping in: {:?}", shaman.action);
+        let (dx, dz) = offset(at, (shaman.x, shaman.z));
+        assert_eq!(dx.abs(), dz.abs(), "at a corner");
+        while map.armageddon_match().is_some_and(|m| matches!(m.phase, Phase::Arriving { .. })) {
+            let now = inside(&map);
+            assert!(now <= count + 1, "one at a time");
+            count = now;
+            map.tick();
+        }
+        assert_eq!(inside(&map), map.units.len(), "all of them in the end");
+    }
+
+    #[test]
+    fn the_order_is_shamans_then_one_of_each_side_in_turn() {
+        let people = [(Some(1), vec![10, 11, 12]), (None, vec![20]), (Some(3), vec![])];
+        assert_eq!(arrival_order(&people), vec![1, 3, 10, 20, 11, 12]);
+    }
+
+    #[test]
+    fn every_building_becomes_one_brave_of_its_owner() {
+        let mut map = GameMap::sandbox_spells();
+        let huts = map.buildings.iter().filter(|b| b.owner == Owner::Tribe(TribeId::Red)).count();
+        let braves = |m: &GameMap| m.units.iter().filter(|u| u.owner == Owner::Tribe(TribeId::Red) && u.kind == UnitKind::Brave && u.is_alive()).count();
+        let before = braves(&map);
+        map.start_armageddon((64 * 512, 64 * 512));
+        assert!(huts > 0);
+        assert_eq!(braves(&map), before + huts, "inside ones kept, one more per building");
+    }
+
+    #[test]
+    fn the_shamans_stand_at_the_arenas_top_corners() {
+        let corners: Vec<(i32, i32)> = (0..4).map(|s| shaman_offset(s, 4)).collect();
+        assert!(corners.iter().all(|&(x, z)| x.abs() == z.abs() && x.abs() > FLOOR_HALF * CELL && x.abs() < ARENA_HALF_CELLS * CELL));
+        assert!(corners.iter().enumerate().all(|(i, a)| corners[i + 1..].iter().all(|b| a != b)), "one each");
     }
 
     #[test]
@@ -601,8 +702,7 @@ mod tests {
         let mut map = GameMap::sandbox_spells();
         let at = arena_centre((64 * 512, 64 * 512));
         map.start_armageddon(at);
-        map.run(GATHERING);
-        assert!(map.armageddon_match().is_some_and(ArmageddonMatch::fighting));
+        past_gathering(&mut map);
         let dist = |u: &Unit| { let (dx, dz) = offset(at, (u.x, u.z)); dx.abs().max(dz.abs()) };
         let fighters: Vec<&Unit> = map.units.iter().filter(|u| UnitKind::FOLLOWERS.contains(&u.kind)).collect();
         assert!(fighters.iter().all(|u| matches!(u.action, Action::Walking { to } if dist(&Unit::new(u.id, u.owner, u.kind, to)) < dist(u))), "all running inwards");

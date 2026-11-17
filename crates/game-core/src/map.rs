@@ -1829,6 +1829,9 @@ impl GameMap {
 
     /// Scans that start coordinators or add units to them, one per kind in `Coordinators::tick`'s order.
     fn detect_coordinators(&mut self) {
+        if self.armageddon_match().is_some_and(|m| !m.fighting()) {
+            return;
+        }
         self.start_sermons();
         self.start_challenges();
         self.escalate_challenges();
@@ -2083,6 +2086,13 @@ impl GameMap {
             }
             WorldEvent::RestoreSite { tribe } => {
                 self.restore_reincarnation(tribe);
+                None
+            }
+            WorldEvent::Arrive { unit, to } => {
+                let below = self.terrain.height_at(to.0 as u32, to.1 as u32, pop3_format::WORLD_UNITS_PER_CELL);
+                if let Some(u) = self.unit_mut(unit) {
+                    u.arrive_at(to, below);
+                }
                 None
             }
             WorldEvent::Rally { unit, to } => {

@@ -92,6 +92,8 @@ pub enum WorldEvent {
     /// The unit attacks `at` back: a firewarrior hit by its bolt, a listener whose preacher was attacked. At once on
     /// its feet, else once it has landed.
     StrikeBack { unit: UnitId, at: UnitId },
+    /// Teleports `unit` to `to`, landing there like a teleported shaman (`Unit::arrive_at`): Armageddon's arrivals.
+    Arrive { unit: UnitId, to: (u16, u16) },
     /// Sends `unit` walking to `to` (`Order::MoveTo`): Armageddon's fighters running into the middle.
     Rally { unit: UnitId, to: (u16, u16) },
     /// Sets `unit`'s Magical Shield to `steps` (0: none), whatever it had: Armageddon's own shield (armageddon.rs).

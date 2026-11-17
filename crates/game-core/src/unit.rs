@@ -1550,6 +1550,14 @@ impl Unit {
         self.still_ticks = if before == (self.x, self.z) { self.still_ticks.saturating_add(1) } else { 0 };
     }
 
+    /// Teleported to `at` (ground height `below`), out of any building or vehicle and with no plans: it lands there
+    /// like a teleported shaman (`Action::Landing`, dropping `LANDING_DROP`).
+    pub(crate) fn arrive_at(&mut self, at: (u16, u16), below: i32) {
+        self.gather_at(at);
+        self.motion = Motion::flying(Velocity::ZERO, below + LANDING_DROP);
+        self.action = Action::Landing;
+    }
+
     /// Set down at `at`, standing, out of any building or vehicle and with no plans (Armageddon's gathering).
     pub(crate) fn gather_at(&mut self, at: (u16, u16)) {
         self.drop_plans();

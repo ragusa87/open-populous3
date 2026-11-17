@@ -55,37 +55,52 @@ has (Blast sparing allies except on the last turn, spotting during some orders, 
 
 ## Armageddon
 
-Stops the match and settles it, aimed like Blast or Lightning ("gathers every tribe onto an arena around the
-target"): the user's own design over the trace's one line, in `crates/game-core/src/armageddon.rs`. The numbers are `[ours]`.
+Stops the match and settles it, aimed like Blast or Lightning. The trace has one line for it (pop3-rev-analysis.md
+"Per spell" 18: clears the map, turns every building into one person, gathers every tribe on an arena around the
+target, makes them fight, anyone more than 9 cells away dies); the rest is the user's own design, in
+`crates/game-core/src/armageddon.rs`. Every number below is `[ours]` unless it is the trace's.
 
-1. Casting it (`Spell::Armageddon { at }`, `GameMap::start_armageddon`) first brings back, whole and at once, every
-   shaman dying, dead or gone whose tribe still has a reincarnation site (`revive_shamans`), then removes every site
-   (`remove_reincarnation`: nobody comes back from here on, and their stones are no longer drawn). It counts each
-   tribe with people on the map (in the level's roster or not, `armageddon_sides`) has its followers counted by
-   kind. Then every building, totem and vehicle goes, every unit but the shamans (wildmen and angels too), any fight
-   or formation in progress, and the trees around `at`. The arena is carved into the ground there, square, around
-   the height point nearest `at` (`arena_centre`, `arena_heights`): a flat floor `FLOOR_HALF` (5) cells out each
-   way at the centre's height (at least `FLOOR_MIN`, above the sea); on each of its 4 sides a slope `SLOPE_CELLS`
-   (4) deep rising `SLOPE_STEP` (80) a cell, walkable; behind them a rim `RIM_CELLS` (2) wide, `RIM_HEIGHT` (400)
-   higher, a cliff nobody walks up. As many fresh followers of each kind are spawned per tribe on a slope of its
-   own (two tribes face each other; allies on neighbouring slopes), in rows from the slope's foot up
-   (`arena_offset`); its shaman stands at the top behind them (`shaman_offset`).
-2. While a match is active, `GameMap::armageddon()` returns `Some(at)` (the client camera's target), the economy and
-   the AI are suspended, and `GameMap::apply` rejects every `Command`.
-3. `ArmageddonMatch` (a `Coordinator` no unit links to) holds combat off for `GATHERING` (5 s). Then it fights:
-   every follower first runs down into the middle (`WorldEvent::Rally`, a move to a quarter of the way out from the
-   centre it was, keeping its place in the ranks), combat-seeking runs again, and every turn each idle follower, or
-   one going for an enemy already in a fight while a free one is left, is sent at the nearest free enemy follower it
-   may attack (else the nearest; `WorldEvent::StrikeBack`): sight alone would leave them apart, and a crowd waiting
-   on one full fight would stand there. Anyone on the ground past `ARENA_HALF_CELLS` (9) from the centre, the
-   trace's "anyone past 9 cells away dies" (only ever someone thrown onto the rim or out), is struck by a bolt. No shaman is auto-attacked, and no
-   shaman auto-attacks (`spotting::first_seen`): only the fighters settle it.
-4. Every turn of the fight, a tribe still in it whose followers are all dead is out: its shaman's shield drops
-   (`WorldEvent::Shield { steps: 0 }`) and a bolt strikes where she stands: the Lightning spell's own effect
-   (`lightning::effect`, drawn like any cast), cast by nobody so it spares no shaman; with no site left, she does
-   not come back. The tribes still standing keep their shaman shielded (`SHIELD_STEPS`, topped up
-   every turn).
-5. Once the standing tribes are all one side (`Tribes::same_team`), it wins (`WorldEvent::Declare`). If every side
+1. **On cast** (`Spell::Armageddon { at }`, `GameMap::start_armageddon`), at the height point nearest `at`
+   (`arena_centre`):
+   - every shaman dying, dead or gone whose tribe still has a reincarnation site is brought back, whole and at
+     once (`revive_shamans`), then every site is removed (`remove_reincarnation`): nobody comes back from here on,
+     and their stones are no longer drawn;
+   - every building becomes one brave of its owner at its door (the trace's "turns every building into one
+     person"); then every building, totem and vehicle goes, their people set down where they were (at the door,
+     or where the vehicle stood); wildmen, angels and Ghost Army copies go; every fight and formation ends and
+     everyone stands idle (`wipe_for_armageddon`); the trees on the arena and its rim go;
+   - the arena is carved into the ground (`arena_heights`), square: a flat floor `FLOOR_HALF` (5) cells out each
+     way at the centre's height (at least `FLOOR_MIN`, above the sea); on each of its 4 sides a slope
+     `SLOPE_CELLS` (4) deep rising `SLOPE_STEP` (80) a cell, walkable; behind them a rim `RIM_CELLS` (2) wide,
+     `RIM_HEIGHT` (400) higher, a cliff nobody walks up. Floor and slopes together are the trace's 9 cells;
+   - every tribe with a living person on the map takes part, in the level's roster or not (`armageddon_sides`,
+     allies next to each other). Each gets a slope (two tribes face each other; allies on neighbouring slopes):
+     its people in rows from the slope's foot up (`arena_offset`), its shaman at the top corner at the end of its
+     slope (`shaman_offset`).
+2. **Arriving** (`Phase::Arriving`): the match teleports them in one per turn (`WorldEvent::Arrive`,
+   `Unit::arrive_at`: they land like a teleported shaman, dropping in with a puff of dust). The shamans come first,
+   then one person of each tribe in turn (`arrival_order`). Anyone standing in the sea at the cast (set down off a
+   boat) is teleported at once instead, before drowning.
+3. **Gathering** (`Phase::Gathering`): `GATHERING` (3 s) once the last has landed, everyone standing.
+   Until the fight, nothing starts one: no challenge, melee or sermon (`GameMap::detect_coordinators`).
+4. **Fighting** (`Phase::Fighting`): every follower first runs down into the middle (`WorldEvent::Rally`, a move to
+   a quarter of the way out from the centre it was, keeping its place in the ranks); then combat-seeking runs
+   again, and every turn each idle follower, or one going for an enemy already in a fight while a free one is left,
+   is sent at the nearest free enemy follower it may attack (else the nearest; `WorldEvent::StrikeBack`). No shaman
+   is auto-attacked, and no shaman auto-attacks (`spotting::first_seen`): only the fighters settle it. Anyone on
+   the ground past `ARENA_HALF_CELLS` (9) from the centre, only ever someone thrown onto the rim or out, is struck by
+   a bolt (the trace's "anyone more than 9 cells away dies").
+5. Every turn of the fight, a tribe still in it whose followers are all dead is out: its shaman's shield drops
+   (`WorldEvent::Shield { steps: 0 }`) and a bolt strikes where she stands, the Lightning spell's own effect
+   (`lightning::effect`, drawn like any cast) cast by nobody, so it spares no shaman; with no site left, she does not
+   come back. The tribes still standing keep their shaman shielded (`SHIELD_STEPS`, topped up every turn).
+6. Once the standing tribes are all one side (`Tribes::same_team`), it wins (`WorldEvent::Declare`). If every side
    falls the same turn it is a draw and nobody is struck; still undecided `STALEMATE` (180 s) into the fight, a draw.
 
-Not done: the client side beyond the camera (TODO.md "Spells").
+While a match is active (`GameMap::armageddon()`), the economy and the AI are suspended, `GameMap::apply` rejects
+every `Command`, and the client locks every manual input (`armageddon::input_locked`). The camera flies to the
+arena, framing it whole (`ORBIT_DISTANCE`, `ORBIT_PITCH`), and turns around it for the whole match (`orbit_yaw`,
+`ORBIT_SPEED`: a full turn in about 40 s, on UI time).
+
+Not done: the trace's "weakest shaman struck by blast or lightning at intervals" (the design strikes a shaman when
+her fighters are gone instead), and the client's flash, arena tint and survivor bars (TODO.md "Spells").
