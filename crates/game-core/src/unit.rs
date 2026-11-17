@@ -53,6 +53,10 @@ pub const STUCK_MIN_PROGRESS: i32 = 96;
 /// How often a walker's progress is checked (ticks) - comfortably more than even the slowest slope-clamped
 /// walker (`SLOPE_FACTOR_RANGE` floor) would need to clear `STUCK_MIN_PROGRESS` if it is moving at all.
 pub const STUCK_WINDOW: Ticks = Ticks::secs(4);
+/// Turns without moving before `stood_still` (`[ours]`): a step blocked for a turn or two is not standing.
+pub const STILL_TICKS: u8 = 3;
+/// An attacker this close to its target (world units, two cells) is waiting at the fight, never stuck (`[ours]`).
+pub const WAITING_NEAR: i64 = 1024;
 /// Healing comes on every eighth turn of the game, the same for everyone (pop3-rev-analysis.md "Health and
 /// healing" [exe, measured]); how much is the kind's (`KindStats::heal`).
 pub const HEAL_EVERY: Every = Every::new(8);
@@ -581,6 +585,8 @@ pub struct Unit {
     /// `Action::Walking`, or `Attacking` while out in the open (also walks towards a point via `approach`)
     /// - and always for the shaman, who already just stays Idle rather than ever being stranded.
     stuck_watch: Option<(Tick, (u16, u16))>,
+    /// Turns in a row it has not moved (capped): what it is doing may say walk while it waits (`stood_still`).
+    still_ticks: u8,
     /// Where it stands idle (`crate::idle`), kept while it does: a shuffle steps off it, never further. `[ours]`:
     /// stands in for the original's remembered spot (`+0x4F`).
     idle_spot: Option<(u16, u16)>,
@@ -657,6 +663,7 @@ impl Unit {
             patrol: crate::patrol::PatrolQueue::default(),
             idle_ticks: 0,
             stuck_watch: None,
+            still_ticks: 0,
             idle_spot: None,
             shuffle: None,
             work: None,
@@ -1009,9 +1016,10 @@ impl Unit {
         // boat). Guarding is deliberately NOT covered: a guard settled into its own orbit point
         // (`crate::guard::orbit_point`) is expected to stand still for a stretch between each slow nudge
         // around the ring, which this would otherwise mistake for being stuck.
+        // An attacker already near its target is waiting its turn at a busy fight, not stuck.
         let stuck_to = match self.action {
             Action::Walking { to } if self.kind != UnitKind::Shaman => Some(to),
-            Action::Attacking { to, .. } if self.kind != UnitKind::Shaman && self.in_the_open() => Some(to),
+            Action::Attacking { to, .. } if self.kind != UnitKind::Shaman && self.in_the_open() && crate::map::torus_dist2(to, (self.x, self.z)) > WAITING_NEAR.pow(2) => Some(to),
             _ => None,
         };
         match stuck_to {
@@ -1529,6 +1537,17 @@ impl Unit {
     /// Back to life at `site`, whole (`life`), as a fresh reincarnation but at once (Armageddon's gathering).
     pub(crate) fn revive_at(&mut self, site: &ReincarnationSite, life: Health) {
         *self = Unit { facing: self.facing, health: life, ..Unit::shaman(self.id, site) };
+    }
+
+    /// It has not moved for `STILL_TICKS` turns: an attacker waiting at a busy fight, a thrower in reach, a guard on
+    /// its point - drawn standing, not walking on the spot.
+    pub fn stood_still(&self) -> bool {
+        self.still_ticks >= STILL_TICKS
+    }
+
+    /// One turn's movement: from `before` to where it is now.
+    pub(crate) fn note_move(&mut self, before: (u16, u16)) {
+        self.still_ticks = if before == (self.x, self.z) { self.still_ticks.saturating_add(1) } else { 0 };
     }
 
     /// Set down at `at`, standing, out of any building or vehicle and with no plans (Armageddon's gathering).
@@ -2694,6 +2713,19 @@ mod tests {
         let last = 8 * u32::from(crate::status::LIGHTNING_STRUCK_STEPS);
         (0..last).for_each(|n| u.statuses.tick(crate::time::Tick::from_wire(n), 0));
         assert!(u.heals(), "worn off");
+    }
+
+    #[test]
+    fn stood_still_after_a_few_turns_without_moving() {
+        let mut u = Unit::new(Id::from_raw(1), TribeId::Blue, UnitKind::Brave, (100, 100));
+        for _ in 0..STILL_TICKS - 1 {
+            u.note_move((100, 100));
+        }
+        assert!(!u.stood_still(), "a blocked step or two is not standing");
+        u.note_move((100, 100));
+        assert!(u.stood_still());
+        u.note_move((90, 100));
+        assert!(!u.stood_still(), "moved");
     }
 
     #[test]

@@ -236,6 +236,9 @@ pub fn pose_of(u: &game_core::unit::Unit, kind: UnitKind, now: Tick) -> Pose {
     {
         return if u.carrying > 0 { Pose::CarryWalk } else { Pose::Walk };
     }
+    if matches!(u.action, Action::Attacking { .. } | Action::Guarding { .. }) && u.stood_still() {
+        return if u.carrying > 0 { Pose::CarryIdle } else { Pose::Idle };
+    }
     if matches!(u.action, Action::Dying { .. } | Action::Dead { .. }) && u.death_cause() == Some(DamageKind::Lightning) {
         return Pose::Carbonized;
     }
