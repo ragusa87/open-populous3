@@ -1033,14 +1033,20 @@ impl GameMap {
     /// A shaman's own death (pop3-rev-analysis.md "Shaman death"): her tribe loses `SHAMEN_DEAD_MANA_PCT_LOST`
     /// (25 %, exe-confirmed) of `base` from its bank. `base` is the bank itself here - the file's own "needed +
     /// stored building mana" alternative only applies to a controller-type-2 ("human") tribe, and no controller
-    /// type is modelled yet (the same gap `training::train_cost` already has). The killer's own share
-    /// (`SHAMEN_DEAD_MANA_PCT_GAIN`) is exe-confirmed 0 %, not the file's 25 % - always nothing to deliver, so the
-    /// delayed reservoir it would go through (TODO.md "Mana") is left unimplemented rather than built to move 0.
+    /// type is modelled yet (the same gap `training::train_cost` already has). Another tribe that hit her last gets
+    /// `SHAMEN_DEAD_MANA_PCT_GAIN` of `base` through its delayed reservoir (`ManaPool::give_delayed`).
     fn shaman_died(&mut self, i: usize) {
         let Some(owner) = self.units[i].owner.tribe() else { return };
         let Some(pool) = self.mana.get_mut(owner.as_usize()) else { return };
         let base = pool.bank;
-        pool.bank = pool.bank.saturating_sub(crate::mana::Mana(base.0 * crate::mana::SHAMEN_DEAD_MANA_PCT_LOST as u32 / 100));
+        pool.bank = pool.bank.saturating_sub(crate::mana::Mana(base.0 * crate::mana::SHAMEN_DEAD_MANA_PCT_LOST / 100));
+        let gain = crate::mana::Mana(base.0 * crate::mana::SHAMEN_DEAD_MANA_PCT_GAIN / 100);
+        if let Some(killer) = self.units[i].last_attacker().and_then(Owner::tribe).filter(|&k| k != owner)
+            && gain > crate::mana::Mana::ZERO
+            && let Some(pool) = self.mana.get_mut(killer.as_usize())
+        {
+            pool.give_delayed(gain);
+        }
     }
 
     /// `spell` cast by `player` takes effect now: its effect starts (ticking from the next turn), or the terrain
@@ -2816,6 +2822,18 @@ mod tests {
         let i = map.unit_index(map.shaman_of(TribeId::Blue).unwrap().id).unwrap();
         map.shaman_died(i);
         assert_eq!(map.mana[0].bank, before.saturating_sub(crate::mana::Mana(before.0 / 4)), "lost a quarter");
+    }
+
+    #[test]
+    fn her_killer_gets_the_exes_share_through_its_reservoir() {
+        let mut map = GameMap::sandbox_walk();
+        let id = map.shaman_of(TribeId::Blue).unwrap().id;
+        map.damage(id, 1, DamageKind::Lightning, Some(Owner::Tribe(TribeId::Red)));
+        let base = map.mana[0].bank;
+        let i = map.unit_index(id).unwrap();
+        map.shaman_died(i);
+        let expected = crate::mana::Mana(base.0 * crate::mana::SHAMEN_DEAD_MANA_PCT_GAIN / 100);
+        assert_eq!(map.mana[TribeId::Red.as_usize()].reservoir.held, expected, "the exe's 0 %");
     }
 
     #[test]

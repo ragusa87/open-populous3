@@ -488,7 +488,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   `train_cost` already has). Replaces the old fixed `mana::INCOME` placeholder, which made every spell charge in
   a single income tick regardless of population - checked live: a lone shaman now takes Blast (4 charges, cost 40)
   about 11 s, not instantly.
-- [ ] Delayed reservoir (gifts, shaman kills), shaman death losses (pop3-rev-analysis.md "Mana rules").
+- [ ] Delayed reservoir: done (`mana::Reservoir`, spells.md "Mana"), the shaman killer's share goes through it; left: the 50-turn wait under the original's global flag (which flag is not traced) and whether totem/discovery gifts use it (not traced).
 - [x] Shaman-death mana dispatch done for the loss side (`GameMap::shaman_died`, spells.md "Mana"): the tribe
   loses `base * SHAMEN_DEAD_MANA_PCT_LOST` (25 %, file and exe agree; `base` = bank only - the file's own "needed
   + stored building mana" alternative for a human/controller-type-2 tribe is still the same unmodelled-controller
@@ -496,10 +496,9 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   tick (`Unit::die` sets `Action::Dying` synchronously wherever damage lands, not through a tick-returned event,
   so there is no single call site to hook instead) - this catches every cause (melee, a spell, drowning,
   stranded, lava...), not just combat. The killer's own share (`SHAMEN_DEAD_MANA_PCT_GAIN`) is exe-confirmed
-  **0 %, not the file's 25 %** - spells.md corrected to the exe's own 25 %/0 % split. Left deliberately
-  unimplemented: the delayed reservoir (`give_mana_delayed`, 1000 turns/83 s) the killer's share would go
-  through - with the exe's own 0 % it would always move nothing, so building it now would be dead code; revisit
-  if a later session finds the file's 25 % is what actually governs instead.
+  **0 %, not the file's 25 %** - spells.md corrected to the exe's own 25 %/0 % split. It now goes through the
+  delayed reservoir (`ManaPool::give_delayed`), so a later finding that the file's 25 % governs is a one-constant
+  change.
 - [ ] A cast's mana cost: the original also takes the cost from `incoming` when casting; our charges are prepaid. Check whether a cast takes both.
 - [ ] Spell share inside the distribution: the original also splits evenly between the learned, unblocked spells that are not full (pop3-rev-analysis.md "Distribution"); check where it puts the odd mana (ours: the first ones in book order).
 - [x] Spell charges from `SP_1_OFF_MAX_<X>` (constants.md), not a cost-banded guess: already done

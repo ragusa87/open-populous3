@@ -9,7 +9,7 @@
 
 use crate::production::{self, Production};
 use crate::spell_book::{SpellBook, SpellSlot};
-use crate::time::{Every, Tick, Ticks};
+use crate::time::{Countdown, Every, Tick, Ticks};
 
 /// An amount of mana.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -59,11 +59,62 @@ pub struct ManaPool {
     /// The HUD mana bar's own target (pop3-rev-analysis.md "The mana bar (HUD)", `advisor_fraction`):
     /// `Mana::ZERO` when no spell is charging. Recomputed every income turn from the charging candidate.
     pub advisor_eta: Mana,
+    /// Mana given with a delay (`give_delayed`), released into `incoming` turn by turn.
+    pub reservoir: Reservoir,
+}
+
+/// `give_mana_delayed`'s wait (pop3-rev-analysis.md "Reservoir"): 1000 turns before any of it is released.
+pub const RESERVOIR_DELAY: Ticks = Ticks::new(1000);
+
+/// Delayed mana (pop3-rev-analysis.md "Reservoir"): `held` waits `RESERVOIR_DELAY` after the last gift, then
+/// flows out at a `rate` fixed when the release starts (`release_rate`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Reservoir {
+    pub held: Mana,
+    wait: Option<Countdown>,
+    rate: Mana,
+}
+
+impl Reservoir {
+    /// A gift: added to what is held, and the wait starts over.
+    pub fn give(&mut self, amount: Mana) {
+        self.held += amount;
+        self.wait = Some(Countdown::new(RESERVOIR_DELAY));
+        self.rate = Mana::ZERO;
+    }
+
+    /// One turn: nothing while waiting, then `rate` (at most what is left).
+    pub fn release(&mut self) -> Mana {
+        if self.held == Mana::ZERO {
+            return Mana::ZERO;
+        }
+        if let Some(wait) = &mut self.wait {
+            if !wait.tick() {
+                return Mana::ZERO;
+            }
+            self.wait = None;
+        }
+        if self.rate == Mana::ZERO {
+            self.rate = release_rate(self.held);
+        }
+        let out = self.rate.min(self.held);
+        self.held = self.held.saturating_sub(out);
+        out
+    }
+}
+
+/// The release rate per turn for the amount left when it starts ("Reservoir"'s table).
+pub fn release_rate(left: Mana) -> Mana {
+    match left.0 {
+        0..36_000 => Mana((left.0 / 24).max(1)),
+        36_000..=361_500 => Mana(1500),
+        _ => Mana(left.0 / 240),
+    }
 }
 
 impl Default for ManaPool {
     fn default() -> Self {
-        ManaPool { bank: START_MANA, incoming: Mana::ZERO, received: Mana::ZERO, used: Mana::ZERO, advisor_eta: Mana::ZERO }
+        ManaPool { bank: START_MANA, incoming: Mana::ZERO, received: Mana::ZERO, used: Mana::ZERO, advisor_eta: Mana::ZERO, reservoir: Reservoir::default() }
     }
 }
 
@@ -73,8 +124,14 @@ impl ManaPool {
         self.incoming += amount;
     }
 
+    /// `give_mana_delayed`: mana that reaches `incoming` only once the reservoir releases it (`Reservoir`).
+    pub fn give_delayed(&mut self, amount: Mana) {
+        self.reservoir.give(amount);
+    }
+
     /// The turn's update ("Every turn, per tribe"): `income` (`GameMap::mana_income`, huts-and-training.md
-    /// rule 7) on `update_every`'s turns (`balance::Income::update_every`), then `distribute`.
+    /// rule 7) on `update_every`'s turns (`balance::Income::update_every`), the reservoir's release, then
+    /// `distribute`.
     pub fn tick(&mut self, now: Tick, update_every: Every, income: Mana, book: &mut SpellBook, stores: &mut [&mut Production]) {
         if update_every.fires(now, 0) {
             self.received = income;
@@ -82,6 +139,7 @@ impl ManaPool {
             self.incoming += income;
             self.advisor_eta = advisor_eta(book, update_every);
         }
+        self.incoming += self.reservoir.release();
         self.distribute(book, stores);
     }
 
@@ -248,5 +306,50 @@ mod tests {
         let mut pool = ManaPool::default();
         pool.tick(Tick::ZERO, UPDATE_EVERY, TEST_INCOME, &mut b, &mut []);
         assert_eq!(pool.advisor_eta, Mana(1), "blast: cost 40 over 30s / 16 turns = 22 periods");
+    }
+
+    #[test]
+    fn the_release_rate_follows_the_amount_left() {
+        assert_eq!(release_rate(Mana(10)), Mana(1), "at least 1");
+        assert_eq!(release_rate(Mana(24_000)), Mana(1000));
+        assert_eq!(release_rate(Mana(36_000)), Mana(1500));
+        assert_eq!(release_rate(Mana(361_500)), Mana(1500));
+        assert_eq!(release_rate(Mana(480_000)), Mana(2000));
+    }
+
+    #[test]
+    fn delayed_mana_waits_then_flows_at_its_starting_rate() {
+        let mut r = Reservoir::default();
+        r.give(Mana(2400));
+        for _ in 1..RESERVOIR_DELAY.get() {
+            assert_eq!(r.release(), Mana::ZERO);
+        }
+        assert_eq!(r.release(), Mana(100), "the 1000th turn: 2400 / 24");
+        assert_eq!(r.release(), Mana(100), "the rate stays while the amount shrinks");
+        let rest: u32 = (0..30).map(|_| r.release().0).sum();
+        assert_eq!((rest, r.held), (2200, Mana::ZERO));
+    }
+
+    #[test]
+    fn another_gift_restarts_the_wait() {
+        let mut r = Reservoir::default();
+        r.give(Mana(2400));
+        for _ in 0..RESERVOIR_DELAY.get() {
+            r.release();
+        }
+        r.give(Mana(100));
+        assert_eq!((r.release(), r.held), (Mana::ZERO, Mana(2400)), "held again, 100 of the first already out");
+    }
+
+    #[test]
+    fn released_mana_is_distributed_like_any_other() {
+        let mut pool = ManaPool { bank: Mana::ZERO, ..ManaPool::default() };
+        pool.give_delayed(Mana(240));
+        let mut now = Tick::ZERO;
+        for _ in 0..RESERVOIR_DELAY.get() {
+            now = now.next();
+            pool.tick(now, UPDATE_EVERY, Mana::ZERO, &mut SpellBook::new(), &mut []);
+        }
+        assert_eq!(pool.bank, Mana(10), "240 / 24 banked on the last turn of the wait");
     }
 }

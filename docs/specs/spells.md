@@ -112,12 +112,12 @@ rewards go to their tribe's book. The one remaining terrain brush, `Raise` (`Spe
 only), uses no book. The view only reads it (ui-and-editor.md).
 
 ## Mana (`game_core::mana`)
-Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, used, advisor_eta }`, amounts as
+Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, used, advisor_eta, reservoir }`, amounts as
 `Mana`. As in the original [exe] (pop3-rev-analysis.md "Mana rules"), two entry points:
 - `add(amount)`: mana gained during the turn (a reward) only goes to `incoming`;
 - `tick(now, income, book, stores)`, once per turn from `GameMap::tick`: `income` (`GameMap::mana_income`,
   huts-and-training.md "Mana" rule 7) every 16 turns (`MANA_EVERY`), recomputing `advisor_eta` from `book` at the
-  same time (below), then `distribute`: a training building making nothing refunds its store first
+  same time (below), then what the reservoir releases (below), then `distribute`: a training building making nothing refunds its store first
   (`Production::refund`); half of `incoming` offers the training buildings still making something a share each
   (`production::charge`, huts-and-training.md "Mana"); what they do not take, plus the other half, charges the
   spells first (`SpellBook::charge`); with every spell full, a second share tops the stores back up
@@ -126,15 +126,20 @@ Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, us
 
 `received` is the last income, `used` what went into spells since then. Starts at `START_MANA`.
 
+Delayed mana (`give_delayed`, `mana::Reservoir`, pop3-rev-analysis.md "Reservoir"): each gift adds to `held` and
+restarts a `RESERVOIR_DELAY` (1000 turns) wait; once it ends, `held` flows into `incoming` every turn at a rate
+fixed from the amount left when the release starts (`release_rate`: amount / 24, at least 1, below 36 000; 1500 up
+to 361 500; amount / 240 above). The 50-turn wait under a global flag is not modelled. Only the shaman-death share
+uses it so far; which path totem and discovery gifts take is not traced (they go through `add`).
+
 Shaman death (`GameMap::shaman_died`, pop3-rev-analysis.md "Shaman death"): caught at the end of whatever tick
 kills her (melee, a spell, drowning, stranded, lava...) by comparing alive-before/alive-after, since `Unit::die`
 sets `Action::Dying` synchronously wherever damage is dealt rather than through a tick-returned event. Her tribe
 loses `SHAMEN_DEAD_MANA_PCT_LOST` (25 %, file and exe agree) of `base` from its bank - `base` is the bank alone
 here; the file's own "needed + stored building mana" alternative applies only to a controller-type-2 ("human")
 tribe, and no controller type is modelled yet (the same gap `training::train_cost` has). The killer's own share
-(`SHAMEN_DEAD_MANA_PCT_GAIN`) is exe-confirmed **0 %, not the file's 25 %** - matching the exe faithfully means no
-mana ever actually reaches the killer, so the delayed reservoir it would go through (1000 turns) is left
-unimplemented rather than built to move nothing. Not done: a cast's own cost (`incoming -= cost` in the original,
+(`SHAMEN_DEAD_MANA_PCT_GAIN`), given to the other tribe that hit her last through its reservoir, is
+exe-confirmed **0 %, not the file's 25 %**, so today nothing reaches the killer. Not done: a cast's own cost (`incoming -= cost` in the original,
 on top of our prepaid charges?), a negative `incoming` taking mana back from the training stores, and the stores
 counted into the shaman death loss's own `base` for a human tribe.
 
