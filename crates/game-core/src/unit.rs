@@ -1257,7 +1257,8 @@ impl Unit {
                     true if self.kind == UnitKind::Shaman => Action::Dead { left: Countdown::new(RESPAWN_TICKS) },
                     true => self.new_spirit(terrain),
                 };
-                if matches!(self.action, Action::Spirit { climbing: true, .. }) && is_sea(terrain, self.cell()) {
+                // A body that fell dead into the sea already splashed landing (`touch_down`).
+                if !fell && matches!(self.action, Action::Spirit { climbing: true, .. }) && is_sea(terrain, self.cell()) {
                     return Some(UnitEvent::Splashed);
                 }
             }
@@ -1481,7 +1482,8 @@ impl Unit {
 
     /// Back on the ground after flying (`physics::Touchdown`). On ground it can stand on (by its mobility: a boat's
     /// is the sea) it stands up, or dies with no health left; in the sea it dies whatever its health. Anywhere
-    /// else (a cliff, a building) it stands up for now.
+    /// else (a cliff, a building) it stands up for now. Landing dead in the sea splashes there and then, in place
+    /// of `Died` (pop3-rev-analysis.md "Drowning splash": the landing routine's splash on water).
     fn touch_down(&mut self, ground: &impl Ground) -> Option<UnitEvent> {
         if !self.is_alive() {
             return None;
@@ -1489,7 +1491,7 @@ impl Unit {
         let cell = self.cell();
         if self.health.is_zero() {
             self.die(true);
-            return Some(UnitEvent::Died);
+            return Some(if is_sea(ground.terrain(), cell) { UnitEvent::Splashed } else { UnitEvent::Died });
         }
         if is_sea(ground.terrain(), cell) {
             self.drop_plans();
@@ -2579,6 +2581,23 @@ mod tests {
         assert_eq!((is_sea(&t, u.cell()), events, u.action), (true, vec![UnitEvent::Splashed], Action::Drowning { sunk: DROWN_SINK }), "the same drowning as walking in, with its splash");
         let events = run(&mut u, &t, &site, (DROWN_DEPTH / DROWN_SINK - 1) as usize);
         assert_eq!(events, vec![UnitEvent::Died], "16 turns later, whatever its health");
+    }
+
+    #[test]
+    fn landing_dead_in_the_sea_splashes_on_landing_not_when_its_spirit_rises() {
+        let mut t = land();
+        let (_, site) = shaman_at((10, 10));
+        let mut u = Unit::new(Id::from_raw(7), TribeId::Blue, UnitKind::Brave, (10 * 512 + 256, 10 * 512 + 256));
+        sea_cell(&mut t, u.cell());
+        u.health = Health::new(0, u.health.max());
+        u.fling(Velocity::new(0, 40, 0), 100);
+        let mut events = Vec::new();
+        while u.motion.airborne() {
+            events.extend(u.tick(Tick::ZERO, &t, Some(&site)));
+        }
+        assert_eq!((events, matches!(u.action, Action::Dying { fell: true, .. })), (vec![UnitEvent::Splashed], true), "its splash the tick it lands");
+        let events = run(&mut u, &t, &site, DYING_TICKS.get() as usize);
+        assert!(matches!(u.action, Action::Spirit { climbing: true, .. }) && events.is_empty(), "no second splash as its spirit rises: {events:?}");
     }
 
     #[test]
