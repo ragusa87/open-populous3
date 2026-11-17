@@ -25,6 +25,9 @@ pub enum Message {
     /// before it silently desyncs mid-match instead of after (spells.md "Mana"). Not yet sent/checked by any
     /// driver (TODO.md "Network driver"): the codec exists so that plan can send it without inventing a tag.
     Handshake { constants_hash: u64 },
+    /// A peer's `GameMap::checksum` after running `tick`: a different one from another peer for the same tick is
+    /// a desync (multiplayer.md "Schedule").
+    Checksum { tick: Tick, hash: u64 },
 }
 
 /// Whether two peers' `Message::Handshake` hashes agree: `false` is a fatal "cannot join: constants mismatch",
@@ -68,6 +71,11 @@ pub fn encode(msg: &Message) -> Vec<u8> {
         Message::Handshake { constants_hash } => {
             b.push(3);
             b.extend(constants_hash.to_le_bytes());
+        }
+        Message::Checksum { tick, hash } => {
+            b.push(4);
+            b.extend(tick.to_wire().to_le_bytes());
+            b.extend(hash.to_le_bytes());
         }
     }
     b
@@ -494,6 +502,7 @@ pub fn decode(b: &[u8]) -> Option<Message> {
             Some(Message::Tick { tick, commands })
         }
         3 => Some(Message::Handshake { constants_hash: c.u64()? }),
+        4 => Some(Message::Checksum { tick: Tick::from_wire(c.u32()?), hash: c.u64()? }),
         _ => None,
     }
 }
@@ -611,6 +620,8 @@ mod tests {
         assert_eq!(decode(&encode(&start)), Some(start));
         let handshake = Message::Handshake { constants_hash: 0x1234_5678_9ABC_DEF0 };
         assert_eq!(decode(&encode(&handshake)), Some(handshake));
+        let checksum = Message::Checksum { tick: Tick::from_wire(96), hash: 0x0FED_CBA9_8765_4321 };
+        assert_eq!(decode(&encode(&checksum)), Some(checksum));
     }
 
     #[test]

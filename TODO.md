@@ -2071,7 +2071,7 @@ Lowest priority: the lockstep codec already works in tests with no UI or depende
 ### Multiplayer ([multiplayer.md](docs/specs/multiplayer.md))
 - [ ] Network driver: send `Schedule::close_local`'s turn as `Message::Tick` every tick, feed peers' turns to `receive`, 2-3 ticks of delay (the schedule is done, single player only today).
 - [ ] Host/join UI, lobby, reconnect.
-- [ ] Desync checksum of heightmap + units.
+- [ ] Desync checksum: computed (`GameMap::checksum`) with its wire message (`Message::Checksum`); left: the network driver sending and comparing it.
 - [ ] Pause and game speed as `Command`s, so every peer agrees (single player only today, `game_speed.rs`).
 
 ## Tooling

@@ -24,7 +24,9 @@ Input never touches the map: the client issues commands to its `GameSchedule` (`
 - A building plan and the orders sent with it go on the same tick: `GameMap::place_orders` gives the orders the
   plan will get once placed (`build_orders` needs it on the map).
 - Dev shots (`dev.rs`) still apply their set-up commands to the map directly.
-- Periodically exchange a checksum of the heightmap/units to detect desync.
+- Desync check: `GameMap::checksum` (`checksum.rs`), a stable FNV-1a 64 hash of the tick, the random draw, the
+  heightmap and every unit (id, owner, kind, facing, position, health, action), sent as `Message::Checksum` now
+  and then; a different hash for the same tick is a desync. Not yet sent by anything (no network driver).
 
 ## Wire format (game-net)
 Frame: `u32 LE` length + payload. Payload tag byte:
@@ -48,6 +50,7 @@ Frame: `u32 LE` length + payload. Payload tag byte:
   - kind 20 `CancelFlyby`: no extra payload (Space, skips the current flyby if interruptible,
     ai-scripts.md). Kinds 13-19 (`ClearSwamp`/the patrol/formation commands) aren't documented here yet,
     a pre-existing gap.
+- `4 Checksum { tick: u32, hash: u64 }`: a peer's `GameMap::checksum` after running that tick.
 - `3 Handshake { constants_hash: u64 }`: a peer's own `SpellBook::constants_hash()` (spells.md "Mana") - its
   `cost`/`max_charges` for every spell, the two `SpellStats` fields that feed simulation state, resolved from
   either a real install's `constant.dat` or the shared code-level defaults. Meant to be exchanged at game
