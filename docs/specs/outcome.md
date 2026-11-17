@@ -58,7 +58,10 @@ has (Blast sparing allies except on the last turn, spotting during some orders, 
 Stops the match and settles it, aimed like Blast or Lightning ("gathers every tribe onto an arena around the
 target"): the user's own design over the trace's one line, in `crates/game-core/src/armageddon.rs`. The numbers are `[ours]`.
 
-1. Casting it (`Spell::Armageddon { at }`, `GameMap::start_armageddon`) counts each tribe's followers by kind, then
+1. Casting it (`Spell::Armageddon { at }`, `GameMap::start_armageddon`) first brings back, whole and at once, every
+   shaman dying, dead or gone whose tribe still has a reincarnation site (`revive_shamans`), then removes every site
+   (`remove_reincarnation`: nobody comes back from here on, and their stones are no longer drawn). It counts each
+   tribe's followers by kind, then
    removes every building, totem and vehicle, every unit but the shamans (wildmen and angels too), any fight or
    formation in progress, and the trees within `ARENA_RADIUS_CELLS` (9) of `at`. As many fresh followers of each
    kind are spawned per tribe in the arena, one wedge each, allies' wedges side by side (`arena_offset`, rows of 8
@@ -70,8 +73,8 @@ target"): the user's own design over the trace's one line, in `crates/game-core/
    combat-seeking runs again, and every turn each idle follower is sent at the nearest enemy follower it may attack
    (`WorldEvent::StrikeBack`), since sight alone would leave the wedges apart.
 4. Every turn of the fight, a tribe still in it whose followers are all dead is out: its shaman's shield drops
-   (`WorldEvent::Shield { steps: 0 }`), its reincarnation site goes (`WorldEvent::RemoveSite`) and lightning strikes
-   her (`DamageKind::Lightning`). The tribes still standing keep their shaman shielded (`SHIELD_STEPS`, topped up
+   (`WorldEvent::Shield { steps: 0 }`) and lightning strikes her (`DamageKind::Lightning`); with no site left, she
+   does not come back. The tribes still standing keep their shaman shielded (`SHIELD_STEPS`, topped up
    every turn).
 5. Once the standing tribes are all one side (`Tribes::same_team`), it wins (`WorldEvent::Declare`). If every side
    falls the same turn it is a draw and nobody is struck; still undecided `STALEMATE` (180 s) into the fight, a draw.

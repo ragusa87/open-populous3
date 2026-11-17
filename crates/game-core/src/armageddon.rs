@@ -1,11 +1,12 @@
 //! Armageddon (docs/plans/spells.md "Armageddon", the user's own design over the trace's one line, pop3-rev-analysis.md
-//! "Per spell" 18): on cast, each tribe's followers are counted by kind; every building, totem, vehicle and every
-//! unit but the shamans is removed, and the trees within `ARENA_RADIUS_CELLS` of the cast point; then as many fresh
+//! "Per spell" 18): on cast, every shaman dying, dead or gone who still has a reincarnation site comes back first
+//! (`revive_shamans`), then every site is removed for good; each tribe's followers are counted by kind; every
+//! building, totem, vehicle and every unit but the shamans is removed, and the trees within `ARENA_RADIUS_CELLS` of the cast point; then as many fresh
 //! fighters of each kind are spawned per tribe in the arena, a wedge each (allies' wedges side by side), its shaman
 //! just behind them. The match (`ArmageddonMatch`, a coordinator no unit links to) holds combat off for `GATHERING`,
 //! then lets them fight, sending every idle fighter at the nearest enemy one. While a tribe's own fighters live,
-//! its shaman stays shielded (topped up every turn); the turn they are all dead, her shield drops, her reincarnation
-//! goes and lightning strikes her. The last side (alliance) with fighters wins; sides falling together, or no winner
+//! its shaman stays shielded (topped up every turn); the turn they are all dead, her shield drops and lightning
+//! strikes her, with no site left to come back to. The last side (alliance) with fighters wins; sides falling together, or no winner
 //! after `STALEMATE`, is a draw. The numbers are `[ours]`, none traced. Not done: the trace's "anyone past 9 cells
 //! away dies"; whoever's place falls in the sea stands on the nearest free land instead (`land_near`).
 
@@ -105,14 +106,10 @@ fn shaman(world: &GameMap, tribe: TribeId) -> Option<&Unit> {
     world.units.iter().find(|u| u.owner == Owner::Tribe(tribe) && u.kind == UnitKind::Shaman && !u.statuses.ghost && u.is_alive())
 }
 
-/// A tribe whose fighters are all dead: its shaman's shield drops, its reincarnation goes, lightning strikes her.
+/// A tribe whose fighters are all dead: its shaman's shield drops, lightning strikes her (no site to come back to).
 fn struck_down(world: &GameMap, tribe: TribeId) -> Vec<WorldEvent> {
-    let her = shaman(world, tribe).map(|u| u.id);
-    her.map(|unit| WorldEvent::Shield { unit, steps: 0 })
-        .into_iter()
-        .chain(std::iter::once(WorldEvent::RemoveSite { tribe }))
-        .chain(her.map(|unit| WorldEvent::Damage { unit, amount: u16::MAX, kind: DamageKind::Lightning, from: None }))
-        .collect()
+    let Some(unit) = shaman(world, tribe).map(|u| u.id) else { return Vec::new() };
+    vec![WorldEvent::Shield { unit, steps: 0 }, WorldEvent::Damage { unit, amount: u16::MAX, kind: DamageKind::Lightning, from: None }]
 }
 
 /// Every idle fighter sent at the nearest enemy fighter it may attack: sight alone would leave the wedges apart.
@@ -176,6 +173,9 @@ impl GameMap {
 
     /// Armageddon takes effect at `at` (module doc): the count, the wipe, the gathering into the arena, the match.
     pub(crate) fn start_armageddon(&mut self, at: (u16, u16)) {
+        self.revive_shamans();
+        let tribes: Vec<TribeId> = self.sites.iter().map(|s| s.owner).collect();
+        tribes.into_iter().for_each(|t| self.remove_reincarnation(t));
         let order: Vec<TribeId> = self.tribes.teams().into_iter().flatten().collect();
         let tally: Vec<(TribeId, Vec<UnitKind>)> = order
             .iter()
@@ -201,6 +201,22 @@ impl GameMap {
         }
         let id = self.new_id_of();
         self.coordinators.armageddons.insert(id, ArmageddonMatch::new(at, order.into_iter()));
+    }
+
+    /// Every tribe with a reincarnation site gets its shaman back, alive and whole, at the site: whether she is
+    /// dying, dead waiting to come back, or gone from the map.
+    fn revive_shamans(&mut self) {
+        let sites: Vec<_> = self.sites.iter().filter(|s| s.enabled).cloned().collect();
+        for site in sites {
+            let life = crate::health::Health::full(self.balance.units.life(UnitKind::Shaman));
+            match self.units.iter_mut().find(|u| u.owner == Owner::Tribe(site.owner) && u.kind == UnitKind::Shaman && !u.statuses.ghost) {
+                Some(u) if u.is_alive() => {}
+                Some(u) => u.revive_at(&site, life),
+                None => {
+                    self.spawn(site.owner, UnitKind::Shaman, site.spawn_point());
+                }
+            }
+        }
     }
 
     /// Everything but the shamans and the ground: buildings, totems, vehicles, every other unit, any fight or
@@ -245,10 +261,6 @@ mod tests {
         map.units.iter().find(|u| u.owner == Owner::Tribe(tribe) && u.kind == UnitKind::Shaman).unwrap()
     }
 
-    fn site_on(map: &GameMap, tribe: TribeId) -> bool {
-        map.sites.iter().find(|s| s.owner == tribe).unwrap().enabled
-    }
-
     fn cells_off(map: &GameMap, u: &Unit) -> i32 {
         let size = map.terrain.size() as i32;
         let wrap = |d: i32| d.rem_euclid(size).min((-d).rem_euclid(size));
@@ -277,6 +289,29 @@ mod tests {
         assert_eq!(kinds(TribeId::Red), vec![UnitKind::Brave, UnitKind::Firewarrior]);
         assert!(map.units.iter().all(|u| cells_off(&map, u) <= ARENA_RADIUS_CELLS), "everyone in the arena, the shamans too");
         assert!(map.armageddon_match().is_some_and(|m| !m.fighting()));
+    }
+
+    #[test]
+    fn every_shaman_is_brought_back_then_every_site_goes() {
+        let mut map = two_tribes();
+        let red = her(&map, TribeId::Red).id;
+        map.damage(red, u16::MAX, DamageKind::Lightning, None);
+        map.units.retain(|u| !(u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Shaman));
+        map.start_armageddon(AT);
+        assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| her(&map, t).is_alive() && cells_off(&map, her(&map, t)) <= ARENA_RADIUS_CELLS));
+        assert_eq!(her(&map, TribeId::Red).id, red, "the same shaman, not a new one");
+        assert_eq!(her(&map, TribeId::Red).health.current(), map.balance.units.life(UnitKind::Shaman));
+        assert!(map.sites.iter().all(|s| !s.enabled), "no site left, their stones gone with them");
+    }
+
+    #[test]
+    fn a_struck_shaman_stays_dead() {
+        let mut map = two_tribes();
+        map.spawn(TribeId::Blue, UnitKind::Brave, (0, 0));
+        map.start_armageddon(AT);
+        past_gathering(&mut map);
+        map.run(crate::unit::RESPAWN_TICKS + Ticks::secs(10));
+        assert!(map.units.iter().all(|u| u.owner != Owner::Tribe(TribeId::Red) || !u.is_alive()), "never reincarnates");
     }
 
     #[test]
@@ -328,8 +363,7 @@ mod tests {
         map.tick();
         assert_eq!(map.outcome.map(|o| (o.winner, o.reason)), Some((Some(TribeId::Blue), Reason::Armageddon)));
         assert!(matches!(her(&map, TribeId::Red).action, Action::Dying { .. }), "struck down: {:?}", her(&map, TribeId::Red).action);
-        assert!(!site_on(&map, TribeId::Red), "no coming back");
-        assert!(her(&map, TribeId::Blue).is_alive() && site_on(&map, TribeId::Blue), "the winner untouched");
+        assert!(her(&map, TribeId::Blue).is_alive(), "the winner untouched");
         assert!(map.coordinators.armageddons.is_empty());
     }
 
@@ -364,7 +398,6 @@ mod tests {
         past_gathering(&mut map);
         map.tick();
         assert_eq!(map.outcome.unwrap().winner, None);
-        assert!(map.sites.iter().all(|s| s.enabled));
         assert!(map.units.iter().all(Unit::is_alive));
     }
 

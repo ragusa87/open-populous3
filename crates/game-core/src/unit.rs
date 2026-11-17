@@ -1526,6 +1526,11 @@ impl Unit {
         self.return_home = None;
     }
 
+    /// Back to life at `site`, whole (`life`), as a fresh reincarnation but at once (Armageddon's gathering).
+    pub(crate) fn revive_at(&mut self, site: &ReincarnationSite, life: Health) {
+        *self = Unit { facing: self.facing, health: life, ..Unit::shaman(self.id, site) };
+    }
+
     /// Set down at `at`, standing, out of any building or vehicle and with no plans (Armageddon's gathering).
     pub(crate) fn gather_at(&mut self, at: (u16, u16)) {
         self.drop_plans();
