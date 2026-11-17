@@ -1526,6 +1526,14 @@ impl Unit {
         self.return_home = None;
     }
 
+    /// Set down at `at`, standing, out of any building or vehicle and with no plans (Armageddon's gathering).
+    pub(crate) fn gather_at(&mut self, at: (u16, u16)) {
+        self.drop_plans();
+        (self.x, self.z, self.inside, self.aboard) = (at.0, at.1, None, None);
+        self.motion = crate::motion::Motion::STILL;
+        self.action = Action::Idle;
+    }
+
     /// Thrown by a spell: `push` adds to its velocity, it leaves the ground (`ground`: the height under it) and
     /// tumbles, forgetting its plans - except a standing attack order a fight already put on hold
     /// (`resume_attack`): a blast throwing a fighter out of its ring is exactly the push this survives for

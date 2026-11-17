@@ -119,6 +119,10 @@ recorded yet beyond the initial complexity classification (this, plus Volcano an
 hardest to implement).
 
 ### Armageddon
+**Status (2026-11-17)**: steps 1-7 below are implemented (armageddon.rs, outcome.md "Armageddon"), with `[ours]`
+numbers and one addition: places in the sea move to the nearest land (`land_near`). Left: the client plugin, the
+"past 9 cells dies" rule (TODO.md "Spells").
+
 Reached in the session that also built the generic win/lose Outcome model (`game_core::outcome`) — not traced from
 `pop3-rev-analysis.md` beyond its one "Per spell" (18) line (clears the map, turns every building into a person,
 gathers every tribe into an arena, the weakest shaman struck by blast/lightning at intervals, anyone past 9 cells

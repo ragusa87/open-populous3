@@ -326,9 +326,8 @@ pub fn swarm_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bo
     true
 }
 
-/// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there, then `ticks` run at once — v1 settles almost
-/// immediately (`docs/specs/outcome.md` "Armageddon"); with `GAME_SPEED=0`, a shot can catch the brief
-/// camera-takeover/lock window. False when `at` does not parse. Grants itself one shot of Armageddon right before
+/// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there, then `ticks` run at once: the arena gathered, then
+/// (past `armageddon::GATHERING`) the fight, until one side is left (`game_core::armageddon`). False when `at` does not parse. Grants itself one shot of Armageddon right before
 /// casting (`SpellBook::unlimited` deliberately leaves it unavailable, same as Bloodlust - `GameMap::outcome`'s
 /// one-shot latch would otherwise strand every other spell in the Spells sandbox once this demo settles it), so this
 /// works against any map regardless of what its own book allows.
@@ -982,9 +981,11 @@ mod tests {
     #[test]
     fn armageddon_demo_casts_and_settles_within_the_run() {
         let mut map = game_core::map::GameMap::sandbox_spells(); // armageddon_demo grants itself a shot regardless
-        // CAST_RELEASE (6 ticks) for the cast jump to release, then the match's own first-tick resolution.
+        // CAST_RELEASE (6 ticks) for the cast jump to release: then the arena gathers.
         assert!(armageddon_demo(&mut map, "5,5", 10));
-        assert!(map.outcome.is_some(), "v1 settles almost immediately once released");
+        assert!(map.armageddon_match().is_some_and(|m| !m.fighting()), "gathering");
+        map.run(game_core::armageddon::STALEMATE + game_core::armageddon::GATHERING);
+        assert!(map.outcome.is_some(), "settled by the fight or the stalemate");
         assert!(!armageddon_demo(&mut map, "nope", 0));
     }
 

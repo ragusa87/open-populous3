@@ -1483,6 +1483,7 @@ impl GameMap {
         // for the rest of the game: nothing trains, builds, wrecks, fights or reincarnates in the "victory lap".
         let armageddon = self.armageddon().is_some();
         let frozen = armageddon || self.outcome.is_some();
+        let fighting = self.armageddon_match().is_some_and(crate::armageddon::ArmageddonMatch::fighting);
         // Caught at the end of this turn, whatever killed her this turn (melee, a spell, drowning, stranded,
         // lava...): `Unit::die` sets `Action::Dying` synchronously wherever damage is dealt, not through a
         // tick-returned event, so there is no single call site to hook a "just died" check into instead.
@@ -1537,6 +1538,10 @@ impl GameMap {
             self.tend_wildmen();
             self.tend_angels_of_death();
             self.tend_guards();
+        }
+        if fighting {
+            self.spot_enemies();
+            self.tend_attacks();
         }
         self.detect_coordinators();
         dirty.extend(self.tend_coordinators());
@@ -2075,6 +2080,12 @@ impl GameMap {
             }
             WorldEvent::RestoreSite { tribe } => {
                 self.restore_reincarnation(tribe);
+                None
+            }
+            WorldEvent::Shield { unit, steps } => {
+                if let Some(u) = self.unit_mut(unit) {
+                    u.statuses.shield = crate::status::Timed::steps(steps);
+                }
                 None
             }
             WorldEvent::StartFlyby(flyby) => {

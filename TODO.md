@@ -347,35 +347,12 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Training units: followers turned into warriors, preachers, spies and firewarriors in the training huts (see "Buildings": training huts and training lines).
 
 ### Spells ([spells.md](docs/specs/spells.md))
-- [ ] Armageddon (full mechanic, `crates/game-core/src/armageddon.rs`; design in `docs/plans/spells.md`
-      "Armageddon"; v1 only pauses, cancels fights, and settles instantly by combined headcount):
-  - [ ] Clear the map: remove every building/totem/vehicle globally; clear trees within the arena radius only.
-  - [ ] Tally headcount by kind before the wipe; spawn that many fresh fighters per tribe directly in the arena
-        (grouped by team/wedge), not by teleporting each existing unit; relocate (don't respawn) each tribe's
-        shaman.
-  - [ ] Two-phase `ArmageddonMatch`: `Gathering` (camera orbit, combat held off) then `Fighting`.
-  - [ ] Per-tribe permanent shield (`WorldEvent::Shield`, continuously refreshed) while a tribe's own fighters live.
-        **Correction**: `WorldEvent::Shield{steps:0}` named below as an already-existing event does **not** exist -
-        checked, only `Unit::statuses.shield`, a per-unit `Timed` status set directly by `cast_nearest_status`/
-        similar; this needs new plumbing (a `WorldEvent` variant, or a direct per-tick status refresh inside
-        `armageddon.rs`) once it's built, not a quick wire-up like the item below.
-  - [x] Lightning-kill-without-reincarnation when a tribe's own fighters hit zero: **implemented** (`armageddon.rs`
-        `losers`) - wired into v1's existing instant-resolution instead of a real ongoing fight (there isn't one
-        yet, see the two-phase item above): the moment the match resolves, every tribe not on the winning side has
-        its reincarnation disabled (`WorldEvent::RemoveSite`/`GameMap::remove_reincarnation`) and its shaman, if
-        still alive, struck by the ordinary `WorldEvent::Damage`/`DamageKind::Lightning` path (so a shield still
-        blocks it, same as any other lightning strike) - a draw (`best_side` returns `None`) strikes nobody down.
-  - [x] Related fix, done ahead of Armageddon itself: `Unit::tick`'s `Action::Dead` branch no longer gets stuck
-        forever when there's no `ReincarnationSite` for that owner - it falls through to `Action::Spirit`, same as
-        `Dying`'s own non-shaman case (`unit.rs`). Not just a hypothetical Armageddon state: `DO SET_REINCARNATION
-        OFF` is a real PopScript command a tribe's own script runs at turn 0 (level 1's red script, ai-scripts.md
-        "Worked example: level 1's opening flyby"), now wired end to end (see "Computer players (AI)" below).
-  - [ ] Client: an `armageddon.rs` plugin beyond the v1 camera/lock — cast-confirmed screen flash, arena atmosphere
-        tint, per-tribe survivor HUD bars (headcount visible as the decider), the continuous camera orbit (v1 only
-        flies to the target and holds).
-  - [ ] Dev/test hooks: `ARMAGEDDON_TICKS=N` to preview the full sequence headlessly (`just shot`/`just video`).
-  - [ ] Replace `armageddon::best_side`'s placeholder "highest combined headcount wins instantly" decision rule
-        with the real one (last side standing after the fight actually plays out).
+- [ ] Armageddon (`crates/game-core/src/armageddon.rs`, outcome.md "Armageddon"): the count, wipe, arena, gathering,
+      fight, shields, strike-down and stalemate are done. Left:
+  - [ ] Client: an `armageddon.rs` plugin beyond the camera lock: cast-confirmed screen flash, arena atmosphere tint,
+        per-tribe survivor bars, the continuous camera orbit (it only flies to the target and holds).
+  - [ ] The trace's "anyone past 9 cells away dies" (pop3-rev-analysis.md "Per spell" 18).
+  - [ ] Tune the `[ours]` numbers (`GATHERING`, `STALEMATE`, the wedge layout) in play.
 - [ ] Bloodlust (hidden spell, model 20; its cast is implemented, docs/specs/spells.md): which levels give it (header
   bit 20 is among levels 1 and 2's leftover bits, so only discoveries give it today).
 - [ ] Spell icons for `--no-original` (`assets/spell-hud`, `hud::spells::generated_glyph_path`): 14 of 20 drawn and wired in; still missing Convert, Volcano, Armageddon, Magical Shield, Teleport and Bloodlust (their names stand in). Building icons for `--no-original` are still unstarted.

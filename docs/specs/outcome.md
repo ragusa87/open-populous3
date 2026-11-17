@@ -56,16 +56,24 @@ has (Blast sparing allies except on the last turn, spotting during some orders, 
 ## Armageddon
 
 Stops the match and settles it, aimed like Blast or Lightning ("gathers every tribe onto an arena around the
-target"). Today (`crates/game-core/src/armageddon.rs`) is a v1 placeholder, not the full mechanic designed in
-[docs/plans/spells.md "Armageddon"](../plans/spells.md) (see that file and [TODO.md](../../TODO.md) "Spells" for what's
-left):
+target"): the user's own design over the trace's one line, in `crates/game-core/src/armageddon.rs`. The numbers are `[ours]`.
 
-1. Casting it (`Spell::Armageddon { at }`) cancels any fight in progress (every `Attacking`/`Melee`/`Challenge` unit
-   returns to `Idle`) and starts `ArmageddonMatch` (a `Coordinator`, `GameMap::coordinators.armageddons`).
-2. While a match is active, `GameMap::armageddon()` returns `Some(at)` (the "Armageddon flag", doubling as the
-   client camera's target) — the economy (vaults, totems, queues, training, vehicle huts, mana) and combat-seeking
-   (`spot_enemies`/`tend_attacks`) are suspended, and `GameMap::apply` rejects every `Command`: the player cannot
-   select units, give orders, or cast anything until it resolves.
-3. `ArmageddonMatch::tick` resolves on its very first tick: `armageddon::best_side` compares each side's combined
-   headcount (`Tribes::teams`, `GameMap::headcount`) and declares the higher one the winner (an overall tie is a
-   draw) via `WorldEvent::Declare` — the same hookable entry point a future level script will also use.
+1. Casting it (`Spell::Armageddon { at }`, `GameMap::start_armageddon`) counts each tribe's followers by kind, then
+   removes every building, totem and vehicle, every unit but the shamans (wildmen and angels too), any fight or
+   formation in progress, and the trees within `ARENA_RADIUS_CELLS` (9) of `at`. As many fresh followers of each
+   kind are spawned per tribe in the arena, one wedge each, allies' wedges side by side (`arena_offset`, rows of 8
+   from 2 cells out); its shaman, relocated rather than respawned, stands a row behind them (`shaman_offset`).
+   A place in the sea moves to the nearest free land (`land_near`).
+2. While a match is active, `GameMap::armageddon()` returns `Some(at)` (the client camera's target), the economy and
+   the AI are suspended, and `GameMap::apply` rejects every `Command`.
+3. `ArmageddonMatch` (a `Coordinator` no unit links to) holds combat off for `GATHERING` (5 s). Then it fights:
+   combat-seeking runs again, and every turn each idle follower is sent at the nearest enemy follower it may attack
+   (`WorldEvent::StrikeBack`), since sight alone would leave the wedges apart.
+4. Every turn of the fight, a tribe still in it whose followers are all dead is out: its shaman's shield drops
+   (`WorldEvent::Shield { steps: 0 }`), its reincarnation site goes (`WorldEvent::RemoveSite`) and lightning strikes
+   her (`DamageKind::Lightning`). The tribes still standing keep their shaman shielded (`SHIELD_STEPS`, topped up
+   every turn).
+5. Once the standing tribes are all one side (`Tribes::same_team`), it wins (`WorldEvent::Declare`). If every side
+   falls the same turn it is a draw and nobody is struck; still undecided `STALEMATE` (180 s) into the fight, a draw.
+
+Not done: the trace's "anyone past 9 cells away dies", and the client side beyond the camera (TODO.md "Spells").
