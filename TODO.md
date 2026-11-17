@@ -2066,7 +2066,6 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   AGENTS.md). Used for the record rather than replayed per pixel on screen: see the Units "Statuses" entry
   below for the client side (plain GPU alpha blending reads the same as the table's mix, once sprites are
   RGBA rather than live palette indices).
-- [ ] `sprites` parser: test the empty (0 x 0) entries and the `0x7F` trailer seen in the real banks.
 
 ## Priority 7 — multiplayer
 Lowest priority: the lockstep codec already works in tests with no UI or dependents yet, and multiplayer only matters once the single-player game above it is in better shape.

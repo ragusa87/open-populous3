@@ -132,4 +132,22 @@ mod tests {
         assert!(SpriteBank::parse(b"NOPE\0\0\0\0").is_err());
         assert!(SpriteBank::parse(&bank(&[(2, 1, &[2, 1])])).is_err(), "truncated run");
     }
+
+    #[test]
+    fn empty_entries_share_an_offset_and_decode_empty() {
+        let rle = [1, 5, 0, 0x7f];
+        let mut d = bank(&[(1, 1, &rle), (0, 0, &[])]);
+        let first = d[12..16].to_vec();
+        d[20..24].copy_from_slice(&first);
+        let b = SpriteBank::parse(&d).unwrap();
+        assert_eq!(b.sprites[1], Sprite { width: 0, height: 0, pixels: Vec::new() });
+        assert_eq!(b.sprites[1].tip(), None);
+    }
+
+    #[test]
+    fn the_trailing_7f_after_each_sprite_is_never_read() {
+        let (a, b) = ([1, 5, 0, 0x7f], [1, 6, 0, 0x7f]);
+        let bank = SpriteBank::parse(&bank(&[(1, 1, &a), (1, 1, &b)])).unwrap();
+        assert_eq!(bank.sprites.iter().map(|s| s.pixels.clone()).collect::<Vec<_>>(), vec![vec![Some(5)], vec![Some(6)]]);
+    }
 }
