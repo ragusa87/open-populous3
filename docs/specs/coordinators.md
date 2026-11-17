@@ -33,7 +33,7 @@ computer, pop3-rev-analysis.md "Mana rules"), and will name whoever plays an AI 
 |---|---|---|
 | `Id<T>` | `id.rs` | `u32` with the kind in its type: an `Id<Fight>` does not fit where an `Id<Challenge>` is expected. `raw` / `from_raw` for the wire and tests. |
 | `Registry<T>` | `id.rs` | Objects of one kind by id, a `Vec` sorted by id: `insert` (a fresh id only), `get`, `get_mut`, `contains`, `iter` in id order, `retain`. Clone and PartialEq, no HashMap. Effects use it too. |
-| `Coordinator` | `coordinator.rs` | The trait of a kind: `link_of(&Unit)` (its units' link) and `tick(&mut self, id, members, now, &GameMap, &mut Lcg) -> Step`; `members` are found once per kind and turn (`tick_kind`). |
+| `Coordinator` | `coordinator.rs` | The trait of a kind: `link_of(&Unit)` (its units' link) and `tick(&mut self, id, members, now, &GameMap, &mut Lcg) -> Step`; `members` are its living linked units, found once per kind and turn (`tick_kind`/`participants`), so a kind never checks `is_alive` itself. |
 | `Coordinators` | `coordinator.rs` | `GameMap::coordinators`: one `Registry` per kind. `tick` runs the kinds in one written order (`tick_kind` per kind); `exists(Link)`. |
 | `Link` | `coordinator.rs` | What a unit's action points at: one variant per kind, wrapping its `Id`. |
 | `participants` | `coordinator.rs` | The reverse view: the units linked to each coordinator of one kind, built once when needed (who is still in it; AI script counts later). |

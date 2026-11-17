@@ -26,7 +26,7 @@ pub struct Step {
 pub trait Coordinator: Sized {
     /// The coordinator of this kind `u` links to, if any.
     fn link_of(u: &Unit) -> Option<Id<Self>>;
-    /// Its turn; `members`: the units linked to it, in unit order.
+    /// Its turn; `members`: the living units linked to it, in unit order.
     fn tick(&mut self, id: Id<Self>, members: &[UnitId], now: Tick, world: &GameMap, rng: &mut Lcg) -> Step;
 }
 
@@ -89,10 +89,10 @@ pub fn tick_kind<C: Coordinator>(list: &mut Registry<C>, now: Tick, world: &Game
     list.retain(|id, _| !finished.contains(&id));
 }
 
-/// The reverse of the units' links: the units (ids, in unit order) linked to each coordinator of one kind.
+/// The reverse of the units' links: the living units (ids, in unit order) linked to each coordinator of one kind.
 pub fn participants<C>(units: &[Unit], link_of: impl Fn(&Unit) -> Option<Id<C>>) -> BTreeMap<Id<C>, Vec<UnitId>> {
     let mut by = BTreeMap::<Id<C>, Vec<UnitId>>::new();
-    for u in units {
+    for u in units.iter().filter(|u| u.is_alive()) {
         if let Some(id) = link_of(u) {
             by.entry(id).or_default().push(u.id);
         }

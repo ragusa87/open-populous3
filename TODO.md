@@ -145,7 +145,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   flags this as not settled by either pathway found so far - do not "fix" `may_preach` to the type-4/6-only
   reading without a dedicated spec session resolving which one is actually real; `may_preach`'s current
   followers-convert rule matches observed play and is left as is.
-- [ ] Hardening, optional, found while tracing the above: `Melee`/`Sermon` both still manually re-check `is_alive()` on every member inside their own `tick()` rather than relying on `tick_kind`/`participants()` to have already filtered dead members out of `members` - a convention, not something the shared infrastructure enforces today. Teaching `tick_kind` to pre-filter would let every future `Coordinator` impl, this one included, drop its own by-hand check.
+- [x] Hardening: `coordinator::participants` hands a coordinator only its living members, so `Melee` no longer re-checks `is_alive` (a sermon is not a coordinator, sermon.rs: its own checks stay).
 - [x] The hurt path (`GameMap::damage`): the last attacker and the death cause were already tracked
   (`Unit::last_attacker`/`death_cause`, `hurt.rs`) - this item's own wording was stale. Death held off while
   tumbling was also already in place (`take_damage`'s own `!self.thrown()` guard), but a genuine gap was found

@@ -172,7 +172,7 @@ impl Coordinator for Melee {
         let mut events = Vec::new();
         let mut fighters = Vec::new();
         for &m in members {
-            let Some(f) = world.unit(m).filter(|u| u.is_alive()).and_then(fighter) else { continue };
+            let Some(f) = world.unit(m).and_then(fighter) else { continue };
             if distance((f.unit.x, f.unit.z), self.at) > MELEE_LEASH {
                 events.push(WorldEvent::Release { unit: m, from: Link::Melee(id) });
             } else {
