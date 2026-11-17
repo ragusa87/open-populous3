@@ -71,7 +71,8 @@ target"): the user's own design over the trace's one line, in `crates/game-core/
    the AI are suspended, and `GameMap::apply` rejects every `Command`.
 3. `ArmageddonMatch` (a `Coordinator` no unit links to) holds combat off for `GATHERING` (5 s). Then it fights:
    combat-seeking runs again, and every turn each idle follower is sent at the nearest enemy follower it may attack
-   (`WorldEvent::StrikeBack`), since sight alone would leave the wedges apart.
+   (`WorldEvent::StrikeBack`), since sight alone would leave the wedges apart. No shaman is auto-attacked, and no
+   shaman auto-attacks (`spotting::first_seen`): only the fighters settle it.
 4. Every turn of the fight, a tribe still in it whose followers are all dead is out: its shaman's shield drops
    (`WorldEvent::Shield { steps: 0 }`) and lightning strikes her (`DamageKind::Lightning`); with no site left, she
    does not come back. The tribes still standing keep their shaman shielded (`SHIELD_STEPS`, topped up

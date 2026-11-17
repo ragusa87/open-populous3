@@ -4,7 +4,8 @@
 //! building, totem, vehicle and every unit but the shamans is removed, and the trees within `ARENA_RADIUS_CELLS` of the cast point; then as many fresh
 //! fighters of each kind are spawned per tribe in the arena, a wedge each (allies' wedges side by side), its shaman
 //! just behind them. The match (`ArmageddonMatch`, a coordinator no unit links to) holds combat off for `GATHERING`,
-//! then lets them fight, sending every idle fighter at the nearest enemy one. While a tribe's own fighters live,
+//! then lets them fight, sending every idle fighter at the nearest enemy one; no shaman is auto-attacked, nor
+//! auto-attacks (`spotting::first_seen`). While a tribe's own fighters live,
 //! its shaman stays shielded (topped up every turn); the turn they are all dead, her shield drops and lightning
 //! strikes her, with no site left to come back to. The last side (alliance) with fighters wins; sides falling together, or no winner
 //! after `STALEMATE`, is a draw. The numbers are `[ours]`, none traced. Not done: the trace's "anyone past 9 cells
@@ -352,6 +353,32 @@ mod tests {
         assert!(map.armageddon_match().is_some_and(ArmageddonMatch::fighting));
         assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| her(&map, t).statuses.shield.is_on()));
         assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| followers(&map, t).iter().all(|u| matches!(u.action, Action::Attacking { .. } | Action::Challenge { .. } | Action::Melee { .. }))));
+    }
+
+    #[test]
+    fn nobody_goes_for_a_shaman_and_no_shaman_goes_for_anyone() {
+        let mut map = two_tribes();
+        for _ in 0..3 {
+            map.spawn(TribeId::Blue, UnitKind::Warrior, (0, 0));
+            map.spawn(TribeId::Red, UnitKind::Firewarrior, (0, 0));
+        }
+        map.start_armageddon(AT);
+        past_gathering(&mut map);
+        let shamans: Vec<UnitId> = map.units.iter().filter(|u| u.kind == UnitKind::Shaman).map(|u| u.id).collect();
+        let red = her(&map, TribeId::Red).id;
+        let near = (map.unit(red).unwrap().x, map.unit(red).unwrap().z + 200);
+        map.spawn(TribeId::Blue, UnitKind::Warrior, near);
+        for _ in 0..Ticks::secs(20).get() {
+            map.tick();
+            for u in map.units.iter().filter(|u| u.is_alive()) {
+                if let Action::Attacking { target: crate::unit::Target::Unit(t), .. } = u.action {
+                    assert!(!shamans.contains(&t), "{:?} went for a shaman", u.kind);
+                }
+                if u.kind == UnitKind::Shaman {
+                    assert!(matches!(u.action, Action::Idle | Action::Holding { .. }), "a shaman fighting: {:?}", u.action);
+                }
+            }
+        }
     }
 
     #[test]

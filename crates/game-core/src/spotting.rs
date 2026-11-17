@@ -93,9 +93,14 @@ impl GameMap {
     /// auto-targeting only, a player who already has their id can still order an attack on them directly
     /// (`attack::may_attack`, untraced either way). A wildman (0xFF tribeless) is excluded here too, confirmed
     /// (pop3-rev-analysis.md "Wildmen"): `attack::may_attack` itself no longer excludes one, since an explicit
-    /// player order is allowed through, so the scan must filter it out on its own.
+    /// player order is allowed through, so the scan must filter it out on its own. During Armageddon no shaman is
+    /// auto-attacked, nor auto-attacks: the fighters settle it (armageddon.rs).
     fn first_seen(&self, i: usize, grid: &UnitGrid) -> Option<Target> {
         let u = &self.units[i];
+        let arena = self.armageddon().is_some();
+        if arena && u.kind == UnitKind::Shaman {
+            return None;
+        }
         let sight = self.looking(u)?;
         let throws = u.kind.stats().throws;
         let idle = matches!(u.action, Action::Idle | Action::Holding { .. }) && !throws;
@@ -106,7 +111,7 @@ impl GameMap {
             let people = grid
                 .at(cell)
                 .filter_map(|id| self.unit(id))
-                .filter(|t| (crate::attack::may_attack(u, t) || crate::attack::may_shoot(u, t)) && t.kind != UnitKind::Wildman && !t.locked() && !t.statuses.invisible.is_on() && !t.fools(u.owner) && !self.tribes.allied(u.owner, t.owner) && (!u.statuses.ghost || t.statuses.ghost || t.kind == UnitKind::Shaman));
+                .filter(|t| (crate::attack::may_attack(u, t) || crate::attack::may_shoot(u, t)) && t.kind != UnitKind::Wildman && !t.locked() && !t.statuses.invisible.is_on() && !t.fools(u.owner) && !self.tribes.allied(u.owner, t.owner) && !(arena && t.kind == UnitKind::Shaman) && (!u.statuses.ghost || t.statuses.ghost || t.kind == UnitKind::Shaman));
             let mut fighting = None;
             for t in people {
                 match self.linked(t) {
