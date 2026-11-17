@@ -3,17 +3,22 @@ with its name, bank file and index, searchable; the unnamed sprites of the small
 person animation (docs/specs/animations.md, `pop3_format::anim`), composed from `VSTART`/`VFRA`/`VELE` over
 `HSPR0-0.DAT`, one per kind (outfit) that actually looks different from the plain body. The page embeds the user's
 original art: never commit it.
+Also target/audio.html: every sound of the `Sound/` banks (docs/specs/sound.md), extracted next to it into
+target/audio/ (wav, or mp3 with --mp3; the MPEG Layer II music always to mp3, needs ffmpeg). Never commit them either.
 
-uvx --with pillow python tools/sprite_catalog.py [install dir] [out.html]
+uvx --with pillow python tools/sprite_catalog.py [install dir] [out.html] [--audio-out audio.html] [--mp3]
 """
 
+import argparse
 import base64
 import io
 import json
 import os
 import re
 import struct
+import subprocess
 import sys
+import wave
 
 POINT = "POINT0-0.DAT"
 HFX = "hfx0-0.dat"
@@ -453,12 +458,170 @@ def page(entries):
     return PAGE.replace("__DATA__", json.dumps(entries))
 
 
+SOUND_HEADER = 40
+FLAG_STEREO, FLAG_COMPRESSED, FLAG_MPEG, FLAG_PLACEHOLDER = 0x01, 0x10, 0x20, 0x80
+
+
+def parse_sdt(data):
+    """docs/specs/sound.md: u32 count, u32 offset per entry, each a 40-byte header then its data. Music entries
+    (flag 0x20) have an 8-byte name and no loop points."""
+    entries = []
+    for i in range(struct.unpack_from("<I", data, 0)[0]):
+        at = struct.unpack_from("<I", data, 4 + i * 4)[0]
+        size = struct.unpack_from("<I", data, at + 4)[0]
+        rate, bits, flags = struct.unpack_from("<HBB", data, at + 24)
+        loop = struct.unpack_from("<II", data, at + 32)
+        name_len = 8 if flags & FLAG_MPEG else 16
+        name = data[at + 8:at + 8 + name_len].split(b"\0")[0].decode("latin-1")
+        entries.append({"index": i, "name": name, "rate": rate, "bits": bits, "flags": flags,
+                        "loop": None if flags & FLAG_MPEG or loop == (0, 0) else list(loop),
+                        "data": data[at + SOUND_HEADER:at + SOUND_HEADER + size]})
+    return entries
+
+
+def unplayable(entry):
+    """Why an entry cannot be extracted, or None."""
+    if entry["flags"] & FLAG_PLACEHOLDER:
+        return "placeholder"
+    if entry["flags"] & FLAG_COMPRESSED:
+        return "unknown codec"
+    if not entry["data"]:
+        return "empty"
+    return None
+
+
+def wav(entry):
+    """The PCM data wrapped as a WAV with the header's rate, channels and bit depth."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(2 if entry["flags"] & FLAG_STEREO else 1)
+        w.setsampwidth(entry["bits"] // 8)
+        w.setframerate(entry["rate"])
+        w.writeframes(entry["data"])
+    return buf.getvalue()
+
+
+MUSIC_BITRATE = 112000
+
+
+def duration(entry):
+    if entry["flags"] & FLAG_MPEG:
+        return len(entry["data"]) * 8 / MUSIC_BITRATE
+    channels = 2 if entry["flags"] & FLAG_STEREO else 1
+    return len(entry["data"]) / (entry["rate"] * channels * entry["bits"] // 8)
+
+
+def file_stem(entry):
+    return f"{entry['index']:03}_" + re.sub(r"[^A-Za-z0-9_.-]", "_", entry["name"] or "unnamed")
+
+
+def to_mp3(raw, input_format):
+    return subprocess.run(["ffmpeg", "-loglevel", "error", "-f", input_format, "-i", "pipe:0", "-q:a", "4", "-f",
+                           "mp3", "pipe:1"], input=raw, capture_output=True, check=True).stdout
+
+
+def extract(entry, mp3):
+    """(extension, bytes) of a playable entry: music is MPEG Layer II, which browsers do not play, so always mp3
+    (ffmpeg's raw MPEG audio demuxer is named mp3, Layer II included)."""
+    if entry["flags"] & FLAG_MPEG:
+        return "mp3", to_mp3(entry["data"], "mp3")
+    return ("mp3", to_mp3(wav(entry), "wav")) if mp3 else ("wav", wav(entry))
+
+
+AUDIO_PAGE = r"""<!doctype html><meta charset="utf-8"><title>Audio catalog</title>
+<style>
+:root{--bg:#1d1a16;--fg:#eee3cf;--card:#2c2722;--mute:#a59783}
+body{font-family:sans-serif;background:var(--bg);color:var(--fg);margin:16px}
+header{position:sticky;top:0;background:var(--bg);padding:8px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:center;z-index:1}
+input,select{background:var(--card);color:var(--fg);border:1px solid #555;padding:4px}
+table{border-collapse:collapse;font-size:12px;width:100%}
+td,th{padding:3px 8px;text-align:left;border-bottom:1px solid var(--card)}
+th{color:var(--mute);font-weight:normal}
+.mute{color:var(--mute)} audio{height:28px;vertical-align:middle}
+</style>
+<header>
+<input id="q" placeholder="search name, file:index" size="30">
+<select id="file"><option value="">all files</option></select>
+<label><input type="checkbox" id="all"> unplayable too</label>
+<span id="count"></span>
+</header>
+<table><thead><tr><th>file:index</th><th>name</th><th>format</th><th>length</th><th>loop (bytes)</th><th></th></tr></thead>
+<tbody id="rows"></tbody></table>
+<script>
+const SOUNDS = __DATA__;
+const $ = id => document.getElementById(id);
+for (const v of [...new Set(SOUNDS.map(s => s.file))]) $('file').add(new Option(v, v));
+function render() {
+  const q = $('q').value.toLowerCase(), file = $('file').value;
+  const shown = SOUNDS.filter(s => (s.src || $('all').checked) && (!file || s.file === file)
+    && (!q || `${s.name} ${s.file}:${s.index}`.toLowerCase().includes(q)));
+  $('rows').innerHTML = shown.map(s => `<tr><td>${s.file}:${s.index}</td><td>${s.name || '<span class="mute">(unnamed)</span>'}</td>
+    <td class="mute">${s.format}</td><td>${s.length.toFixed(2)} s</td><td class="mute">${s.loop ? s.loop.join('-') : ''}</td>
+    <td>${s.src ? `<audio controls preload="none" src="${s.src}"></audio> <a href="${s.src}" download>file</a>`
+      : `<span class="mute">${s.why}</span>`}</td></tr>`).join('');
+  $('count').textContent = `${shown.length} / ${SOUNDS.length}`;
+}
+for (const id of ['q', 'file', 'all']) $(id).addEventListener('input', render);
+document.addEventListener('play', e => { for (const a of document.querySelectorAll('audio')) if (a !== e.target) a.pause(); }, true);
+render();
+</script>"""
+
+
+def audio_page(rows):
+    return AUDIO_PAGE.replace("__DATA__", json.dumps(rows))
+
+
+def audio_format(entry):
+    if entry["flags"] & FLAG_MPEG:
+        return f"MPEG Layer II, {entry['rate']} Hz"
+    channels = "stereo" if entry["flags"] & FLAG_STEREO else "mono"
+    return f"{entry['bits']}-bit {channels}, {entry['rate']} Hz"
+
+
+def write_audio(install, out, mp3):
+    """`out` and, next to it, an `audio/` folder with every playable sound of the install's `Sound/` banks."""
+    sound_dir = next((os.path.join(install, d) for d in os.listdir(install) if d.lower() == "sound"), None)
+    if sound_dir is None:
+        print(f"no Sound folder in {install}: {out} skipped")
+        return
+    files_dir = os.path.join(os.path.dirname(out) or ".", "audio")
+    rows = []
+    for bank in sorted((f for f in os.listdir(sound_dir) if f.lower().endswith(".sdt")), key=str.lower):
+        with open(os.path.join(sound_dir, bank), "rb") as fh:
+            entries = parse_sdt(fh.read())
+        bank_dir = os.path.join(files_dir, bank)
+        os.makedirs(bank_dir, exist_ok=True)
+        for stale in os.listdir(bank_dir):
+            if stale.endswith((".wav", ".mp3")):
+                os.remove(os.path.join(bank_dir, stale))
+        for entry in entries:
+            why = unplayable(entry)
+            src = None
+            if why is None:
+                ext, raw = extract(entry, mp3)
+                src = f"audio/{bank}/{file_stem(entry)}.{ext}"
+                with open(os.path.join(bank_dir, f"{file_stem(entry)}.{ext}"), "wb") as fh:
+                    fh.write(raw)
+            rows.append({"file": bank, "index": entry["index"], "name": entry["name"], "format": audio_format(entry),
+                         "length": duration(entry), "loop": entry["loop"], "src": src, "why": why})
+    with open(out, "w") as fh:
+        fh.write(audio_page(rows))
+    print(f"{out}: {sum(1 for r in rows if r['src'])} sounds extracted to {files_dir}, {len(rows)} in all")
+
+
 def main():
     from model_mapping import find_install, read
     from spell_icons import sprites
 
-    install = sys.argv[1] if len(sys.argv) > 1 else find_install()
-    out = sys.argv[2] if len(sys.argv) > 2 else "target/sprites.html"
+    parser = argparse.ArgumentParser(description="target/sprites.html and target/audio.html from the original files")
+    parser.add_argument("install", nargs="?")
+    parser.add_argument("out", nargs="?", default="target/sprites.html")
+    parser.add_argument("--audio-out", default="target/audio.html")
+    parser.add_argument("--mp3", action="store_true", help="extract the sounds as mp3 (ffmpeg) instead of wav")
+    args = parser.parse_args()
+    install = args.install or find_install()
+    out = args.out
+    write_audio(install, args.audio_out, args.mp3)
     data_dir = next((os.path.join(install, d) for d in os.listdir(install) if d.lower() == "data"), install)
     raw = read(data_dir, "pal0-0.dat")
     pal = [tuple(raw[i * 4:i * 4 + 3]) for i in range(256)]

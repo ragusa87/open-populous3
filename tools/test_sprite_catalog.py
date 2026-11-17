@@ -1,7 +1,7 @@
 import struct
 import unittest
 
-from sprite_catalog import (CATALOG, FLAG_FLIP, FLAG_SHADOW, HFX, POINT, alpha_colours, animation, anim_name,
+from sprite_catalog import (CATALOG, FLAG_MPEG, audio_page, duration, file_stem, parse_sdt, unplayable, wav, FLAG_FLIP, FLAG_SHADOW, HFX, POINT, alpha_colours, animation, anim_name,
                              compose_frame, element_shown, frame_elements, frame_loop, is_alpha, page, parse_elements,
                              parse_frames, parse_starts)
 
@@ -107,3 +107,44 @@ class CatalogTest(unittest.TestCase):
 
     def test_page_embeds_entries(self):
         self.assertIn('"name": "x"', page([{"name": "x"}]))
+
+
+def sdt(entries):
+    """A bank of (name, rate, flags, loop, data) entries, laid out as docs/specs/sound.md "Container"."""
+    table = 4 + 4 * len(entries)
+    offsets, body = [], b""
+    for name, rate, flags, loop, data in entries:
+        offsets.append(table + len(body))
+        body += struct.pack("<II16sHBBIII", 40, len(data), name, rate, 16, flags, 0, *loop) + data
+    return struct.pack(f"<I{len(entries)}I", len(entries), *offsets) + body
+
+
+class AudioTest(unittest.TestCase):
+    def test_parses_sfx_music_and_loops(self):
+        music_name = b"idea11\0\0" + struct.pack("<II", 4523672, 1)
+        bank = parse_sdt(sdt([(b"fire", 22050, 0x02, (2, 4), b"\1\0\2\0\3\0"),
+                              (music_name, 22050, 0x25, (99, 0), b"\xff\xf5"),
+                              (b"amb", 22050, 0x03, (0, 0), b"\0" * 8)]))
+        self.assertEqual([e["name"] for e in bank], ["fire", "idea11", "amb"])
+        self.assertEqual(bank[0]["loop"], [2, 4])
+        self.assertIsNone(bank[1]["loop"])
+        self.assertTrue(bank[1]["flags"] & FLAG_MPEG)
+        self.assertEqual(bank[0]["data"], b"\1\0\2\0\3\0")
+        self.assertAlmostEqual(duration(bank[2]), 2 / 22050)
+
+    def test_unplayable_entries(self):
+        base = {"flags": 0x02, "data": b"\0\0"}
+        self.assertIsNone(unplayable(base))
+        self.assertEqual(unplayable({**base, "flags": 0x83}), "placeholder")
+        self.assertEqual(unplayable({**base, "flags": 0x12}), "unknown codec")
+        self.assertEqual(unplayable({**base, "data": b""}), "empty")
+
+    def test_wav_keeps_rate_and_channels(self):
+        import io, wave
+        entry = {"rate": 44100, "bits": 16, "flags": 0x03, "data": b"\0" * 8}
+        with wave.open(io.BytesIO(wav(entry))) as w:
+            self.assertEqual((w.getnchannels(), w.getframerate(), w.getnframes()), (2, 44100, 2))
+
+    def test_file_stem_and_page(self):
+        self.assertEqual(file_stem({"index": 7, "name": "a b/c"}), "007_a_b_c")
+        self.assertIn('"name": "fire"', audio_page([{"name": "fire"}]))

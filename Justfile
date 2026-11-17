@@ -66,9 +66,9 @@ model-mapping:
 spell-icons:
     uvx --with pillow python tools/spell_icons.py
 
-# Standalone page of every identified original sprite, by name / file / index (embeds original art: stays in target/)
-sprites:
-    uvx --with pillow python tools/sprite_catalog.py
+# Standalone page of every identified original sprite (target/sprites.html), plus target/audio.html of every sound extracted to target/audio/ (`--mp3`); original art: stays in target/
+sprites *args:
+    uvx --with pillow python tools/sprite_catalog.py {{args}}
 
 # Windowed run logging cursor confinement (focus, enter/leave, edge pushes)
 cursor-debug *args:
