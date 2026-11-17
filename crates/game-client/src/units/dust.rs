@@ -244,7 +244,7 @@ mod tests {
     fn puffs_where_landing_ends() {
         let landing = Action::Landing;
         let was = [true, true, false, true];
-        let now = [Action::Idle, landing, Action::Idle, Action::Dying { left: game_core::time::Countdown::new(game_core::time::Ticks::new(8)) }];
+        let now = [Action::Idle, landing, Action::Idle, Action::Dying { left: game_core::time::Countdown::new(game_core::time::Ticks::new(8)), fell: false }];
         assert_eq!(touchdowns(&was, &now), vec![true, false, false, false]);
         assert_eq!(touchdowns(&[], &[Action::Idle]), vec![false], "new units");
         assert_eq!(touchdowns(&[false, true], &[Action::Idle]), vec![false], "a unit gone: indices moved");

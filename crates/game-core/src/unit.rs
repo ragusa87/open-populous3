@@ -224,8 +224,8 @@ pub enum Action {
     /// `away` while it burns — the trace only says "runs about", no numbers of its own, so this reuses Panic's own
     /// movement as a guess, tagged here rather than traced.
     OnFire { away: (i16, i16), left: Countdown },
-    /// Falling down dead.
-    Dying { left: Countdown },
+    /// Falling down dead; `fell`: it died landing from the air, already down, so it lies there rather than falls.
+    Dying { left: Countdown, fell: bool },
     /// The shaman, lying dead: waiting to reincarnate at her site.
     Dead { left: Countdown },
     /// The shaman carrying out her site's build/rebuild ritual (`site::SiteBuildState`,
@@ -388,7 +388,7 @@ impl Action {
     pub fn countdown(&self) -> Option<Countdown> {
         match *self {
             Action::Casting { left }
-            | Action::Dying { left }
+            | Action::Dying { left, .. }
             | Action::Spirit { left, .. }
             | Action::Dead { left }
             | Action::Chopping { left, .. }
@@ -1204,7 +1204,7 @@ impl Unit {
             }
             Action::OnFire { away, mut left } => {
                 if self.health.damage(self.health.max() / BURN_DIVISOR) {
-                    self.die();
+                    self.die(false);
                     return Some(UnitEvent::Died);
                 }
                 if left.tick() {
@@ -1221,7 +1221,7 @@ impl Unit {
                     // `thrown()` true for the whole of `Action::Tumbling`) rather than lost: catch up on it now
                     // that the hold-off itself is ending, instead of settling back to Idle at zero health.
                     if self.health.is_zero() {
-                        self.die();
+                        self.die(true);
                         return Some(UnitEvent::Died);
                     }
                     return self.settle(now);
@@ -1242,7 +1242,7 @@ impl Unit {
                     self.action = Action::Idle;
                 } else if sunk + DROWN_SINK >= DROWN_DEPTH {
                     self.health.damage(u16::MAX);
-                    self.die();
+                    self.die(false);
                     return Some(UnitEvent::Died);
                 } else {
                     self.action = Action::Drowning { sunk: sunk + DROWN_SINK };
@@ -1251,9 +1251,9 @@ impl Unit {
                     }
                 }
             }
-            Action::Dying { mut left } => {
+            Action::Dying { mut left, fell } => {
                 self.action = match left.tick() {
-                    false => Action::Dying { left },
+                    false => Action::Dying { left, fell },
                     true if self.kind == UnitKind::Shaman => Action::Dead { left: Countdown::new(RESPAWN_TICKS) },
                     true => self.new_spirit(terrain),
                 };
@@ -1363,7 +1363,7 @@ impl Unit {
             self.health.damage(STRANDED_DAMAGE);
         }
         if self.health.is_zero() {
-            self.die();
+            self.die(false);
         }
         self.health.is_zero()
     }
@@ -1432,7 +1432,7 @@ impl Unit {
         }
         let dead = self.health.damage(amount);
         if dead && !self.thrown() {
-            self.die();
+            self.die(false);
         }
         dead
     }
@@ -1472,10 +1472,11 @@ impl Unit {
         Action::Spirit { left, climbing }
     }
 
-    fn die(&mut self) {
+    /// `fell`: the hit that killed it was held off while it flew, and it dies now, landed.
+    fn die(&mut self, fell: bool) {
         self.drop_plans();
         self.resume_attack = None;
-        self.action = Action::Dying { left: Countdown::new(DYING_TICKS) };
+        self.action = Action::Dying { left: Countdown::new(DYING_TICKS), fell };
     }
 
     /// Back on the ground after flying (`physics::Touchdown`). On ground it can stand on (by its mobility: a boat's
@@ -1487,7 +1488,7 @@ impl Unit {
         }
         let cell = self.cell();
         if self.health.is_zero() {
-            self.die();
+            self.die(true);
             return Some(UnitEvent::Died);
         }
         if is_sea(ground.terrain(), cell) {
@@ -2442,7 +2443,7 @@ mod tests {
         assert_eq!(brave.health, Health::full(UnitKind::Brave.max_health()));
         sea_cell(&mut t, brave.cell());
         let ticks = run_until(&mut brave, &t, &site, |u| !u.is_alive());
-        assert!(matches!(brave.action, Action::Dying { .. }));
+        assert!(matches!(brave.action, Action::Dying { fell: false, .. }), "drowned standing: falls down as usual");
         run(&mut brave, &t, &site, DYING_TICKS.get() as usize);
         assert!(matches!(brave.action, Action::Spirit { climbing: true, .. }), "its spirit rises (climbing: died on a sea cell), no reincarnation");
         assert_eq!(run(&mut brave, &t, &site, SPIRIT_CLIMB_TICKS.get() as usize), [UnitEvent::Gone]);
@@ -2465,7 +2466,7 @@ mod tests {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
         u.kind = UnitKind::Wildman;
-        u.die();
+        u.die(false);
         run(&mut u, &t, &site, DYING_TICKS.get() as usize);
         assert!(matches!(u.action, Action::Spirit { climbing: true, .. }), "a wildman always climbs, whatever killed it or where");
     }
@@ -2475,7 +2476,7 @@ mod tests {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
         u.kind = UnitKind::Brave;
-        u.die();
+        u.die(false);
         run(&mut u, &t, &site, DYING_TICKS.get() as usize);
         assert!(matches!(u.action, Action::Spirit { climbing: false, .. }));
     }
@@ -2485,14 +2486,14 @@ mod tests {
         let t = land();
         let (mut u, site) = shaman_at((10, 10));
         u.kind = UnitKind::Wildman;
-        u.die();
+        u.die(false);
         run(&mut u, &t, &site, DYING_TICKS.get() as usize);
         let ground = u.motion.height.expect("already rising, set at its own ground height");
         run(&mut u, &t, &site, 5);
         assert_eq!(u.motion.height, Some(ground + 5 * SPIRIT_CLIMB_RATE), "steady rate, no gravity to slow it");
 
         u.kind = UnitKind::Brave;
-        u.die();
+        u.die(false);
         run(&mut u, &t, &site, DYING_TICKS.get() as usize + 3);
         assert_eq!(u.motion.height, None, "the calm variant never leaves the ground");
     }
@@ -2590,7 +2591,7 @@ mod tests {
         u.health = Health::new(0, SHAMAN_MAX_HEALTH);
         u.fling(Velocity::new(0, 40, 0), 100);
         assert_eq!(run(&mut u, &t, &site, 4), [UnitEvent::Died]);
-        assert!(matches!(u.action, Action::Dying { .. }));
+        assert!(matches!(u.action, Action::Dying { fell: true, .. }), "already down: lies there rather than falls");
         let (mut u, _) = shaman_at((20, 20));
         t.set(u.cell().0 + 1, u.cell().1, 1000);
         u.fling(Velocity::new(0, 40, 0), 100);
@@ -2609,7 +2610,7 @@ mod tests {
         u.health = Health::new(0, SHAMAN_MAX_HEALTH);
         u.fling(Velocity::new(0, 40, 0), 100);
         assert_eq!(run(&mut u, &t, &site, 4), [UnitEvent::Died]);
-        assert!(matches!(u.action, Action::Dying { .. }), "dies on landing, cliff or not");
+        assert!(matches!(u.action, Action::Dying { fell: true, .. }), "dies on landing, cliff or not");
     }
 
     #[test]
@@ -2683,7 +2684,7 @@ mod tests {
         let flung = Unit { motion: Motion::flying(Velocity::ZERO, 50), action: Action::Tumbling, ..hurt.clone() };
         let drowning = Unit { action: Action::Drowning { sunk: 0 }, ..hurt.clone() };
         let stranded = Unit { action: Action::Stranded { to: (0, 0) }, ..hurt.clone() };
-        let dying = Unit { action: Action::Dying { left: Countdown::new(DYING_TICKS) }, ..hurt.clone() };
+        let dying = Unit { action: Action::Dying { left: Countdown::new(DYING_TICKS), fell: false }, ..hurt.clone() };
         let burning = Unit { action: Action::OnFire { away: (0, 0), left: Countdown::new(BURN_TICKS) }, ..hurt.clone() };
         assert!(hurt.heals());
         assert!([flung, drowning, stranded, dying, burning].iter().all(|u| !u.heals()));
@@ -2759,7 +2760,7 @@ mod tests {
         assert!(u.take_damage(SHAMAN_MAX_HEALTH), "a fatal hit, held off while tumbling");
         let events = run(&mut u, &t, &site, 1);
         assert_eq!(events, [UnitEvent::Died], "caught up now that it has actually settled, not silently dropped");
-        assert!(matches!(u.action, Action::Dying { .. }), "not left idle at zero health");
+        assert!(matches!(u.action, Action::Dying { fell: true, .. }), "not left idle at zero health");
     }
 
     #[test]

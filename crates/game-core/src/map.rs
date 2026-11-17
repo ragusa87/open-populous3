@@ -2970,7 +2970,7 @@ mod tests {
         let (x, z) = (map.units[s].x, map.units[s].z);
         let dead = map.spawn(TribeId::Blue, UnitKind::Brave, (x.wrapping_add(512), z)).id;
         let other = map.spawn(TribeId::Blue, UnitKind::Brave, (x.wrapping_add(1024), z)).id;
-        map.unit_mut(dead).unwrap().action = Action::Dying { left: crate::time::Countdown::new(crate::unit::DYING_TICKS) };
+        map.unit_mut(dead).unwrap().action = Action::Dying { left: crate::time::Countdown::new(crate::unit::DYING_TICKS), fell: false };
         map.run(crate::unit::DYING_TICKS);
         assert!(matches!(map.unit(dead).unwrap().action, Action::Spirit { climbing: false, .. }), "on dry land: the calm variant");
         map.run(crate::unit::SPIRIT_CALM_TICKS);

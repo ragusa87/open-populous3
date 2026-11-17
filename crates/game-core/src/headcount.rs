@@ -266,7 +266,7 @@ mod tests {
         add(&mut map, TribeId::Blue, UnitKind::Shaman);
         add(&mut map, TribeId::Blue, UnitKind::Wildman);
         let dead = add(&mut map, TribeId::Blue, UnitKind::Brave);
-        map.units[dead].action = Action::Dying { left: crate::time::Countdown::new(crate::time::Ticks::new(3)) };
+        map.units[dead].action = Action::Dying { left: crate::time::Countdown::new(crate::time::Ticks::new(3)), fell: false };
         add(&mut map, TribeId::Red, UnitKind::Warrior);
         assert_eq!(map.headcount(TribeId::Blue), Headcount::default());
         assert_eq!(map.housing(TribeId::Blue).population, 0);

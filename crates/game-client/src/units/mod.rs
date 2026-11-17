@@ -1106,7 +1106,7 @@ mod tests {
         assert_eq!(drawn_sink(&drowning(16), true, 0.0, 0.01), 0.0, "from the surface");
         assert_eq!(drawn_sink(&drowning(16), true, 0.5, 0.01), 0.08);
         assert!((drawn_sink(&drowning(240), true, 1.0, 0.01) - 2.4).abs() < 1e-5);
-        let dying = Action::Dying { left: game_core::time::Countdown::new(Ticks::new(5)) };
+        let dying = Action::Dying { left: game_core::time::Countdown::new(Ticks::new(5)), fell: false };
         assert!((drawn_sink(&dying, true, 0.0, 0.01) - 2.56).abs() < 1e-5, "dead at the bottom, not back up");
         assert_eq!(drawn_sink(&dying, false, 0.0, 0.01), 0.0, "on land");
         assert!(!submerged(&drowning(16), true, 0.08) && submerged(&drowning(240), true, 2.56), "hidden once wholly under");

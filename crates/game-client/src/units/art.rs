@@ -417,8 +417,8 @@ pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alph
     match action {
         Action::Arson { stage, .. } if pose == Pose::SetFire && frames > SET_FIRE_CROUCHED.end => set_fire_frame(*stage, done(SET_FIRE_CROUCHED.start), now),
         Action::Casting { .. } | Action::Flattening { .. } | Action::Throwing { .. } | Action::Challenge { .. } | Action::Melee { .. } | Action::Listening { .. } if action.countdown().is_some() => done(frames),
-        Action::Dying { .. } => done(lying + 1),
-        Action::Spirit { .. } | Action::Dead { .. } => lying,
+        Action::Dying { fell: false, .. } => done(lying + 1),
+        Action::Dying { fell: true, .. } | Action::Spirit { .. } | Action::Dead { .. } => lying,
         _ => (now.secs_in(Tick::ZERO, Ticks::secs(frames as u32)) * pose.fps()) as usize % frames,
     }
 }
@@ -700,7 +700,8 @@ mod tests {
         assert_eq!(frame_index(Pose::Cast, 12, &cast(CAST_TICKS.get()), at(5.0), 0.0), 0);
         assert_eq!(frame_index(Pose::Cast, 12, &cast(5), at(0.0), 0.0), 6);
         assert_eq!(frame_index(Pose::Cast, 12, &cast(1), at(0.0), 0.99), 11);
-        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dying { left: Countdown::with_left(DYING_TICKS, Ticks::new(1)) }, at(0.0), 0.99), 6);
+        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dying { left: Countdown::with_left(DYING_TICKS, Ticks::new(1)), fell: false }, at(0.0), 0.99), 6);
+        assert_eq!(frame_index(Pose::Fall, 8, &Action::Dying { left: Countdown::new(DYING_TICKS), fell: true }, at(0.0), 0.0), 6, "landed dead: lying at once, no standing up to fall");
         assert_eq!(frame_index(Pose::Fall, 8, &Action::Dead { left: Countdown::new(RESPAWN_TICKS) }, at(0.0), 0.0), 6, "lies still");
     }
 
