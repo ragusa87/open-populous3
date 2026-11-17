@@ -1,15 +1,17 @@
 //! Armageddon (docs/plans/spells.md "Armageddon", the user's own design over the trace's one line, pop3-rev-analysis.md
 //! "Per spell" 18): on cast, every shaman dying, dead or gone who still has a reincarnation site comes back first
-//! (`revive_shamans`), then every site is removed for good; each tribe's followers are counted by kind; every
-//! building, totem, vehicle and every unit but the shamans is removed, and the trees within `ARENA_RADIUS_CELLS` of the cast point; then as many fresh
-//! fighters of each kind are spawned per tribe in the arena, a wedge each (allies' wedges side by side), its shaman
+//! (`revive_shamans`), then every site is removed for good; each tribe with people on the map (in the level's roster
+//! or not) has its followers counted by kind; every building, totem, vehicle and every unit but the shamans is
+//! removed, and the trees around the cast point; the arena is carved into the ground there (`arena_heights`: a flat
+//! floor `ARENA_RADIUS_CELLS` wide above the sea, walled by a cliff rim); then as many fresh fighters of each kind
+//! are spawned per tribe in the arena, a wedge each (allies' wedges side by side), its shaman
 //! just behind them. The match (`ArmageddonMatch`, a coordinator no unit links to) holds combat off for `GATHERING`,
 //! then lets them fight, sending every idle fighter at the nearest enemy one; no shaman is auto-attacked, nor
 //! auto-attacks (`spotting::first_seen`). While a tribe's own fighters live,
 //! its shaman stays shielded (topped up every turn); the turn they are all dead, her shield drops and lightning
 //! strikes her, with no site left to come back to. The last side (alliance) with fighters wins; sides falling together, or no winner
 //! after `STALEMATE`, is a draw. The numbers are `[ours]`, none traced. Not done: the trace's "anyone past 9 cells
-//! away dies"; whoever's place falls in the sea stands on the nearest free land instead (`land_near`).
+//! away dies" (the rim keeps everyone in instead).
 
 use crate::coordinator::{Coordinator, Step};
 use crate::effect::DamageKind;
@@ -20,11 +22,15 @@ use crate::outcome::Reason;
 use crate::time::{Countdown, Tick, Ticks};
 use crate::tribes::{Owner, TribeId};
 use crate::unit::{Action, Unit, UnitId, UnitKind};
-use crate::slots::{spot_cell, spot_centre, spot_of, Spot, PER_CELL};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
-/// The arena's radius around the cast point: trees inside are cleared (the trace's own 9 cells).
+/// The arena floor's radius around the cast point (the trace's own 9 cells).
 pub const ARENA_RADIUS_CELLS: i32 = 9;
+/// The rim's width beyond the floor, and its height over it: a cliff nobody walks up (`[ours]`).
+pub const RIM_CELLS: i32 = 2;
+pub const RIM_HEIGHT: u16 = 400;
+/// The floor's lowest height, well above the sea (`[ours]`).
+pub const FLOOR_MIN: u16 = 64;
 /// Fighters stand idle this long after the gathering, for the camera's reveal (`[ours]`).
 pub const GATHERING: Ticks = Ticks::secs(5);
 /// A match still undecided this long after the fighting began is a draw (`[ours]`).
@@ -34,8 +40,10 @@ pub const SHIELD_STEPS: u8 = 2;
 /// The wedge's first row, from the centre, and the gap between rows and fighters (world units, `[ours]`).
 const FRONT: i32 = 2 * WORLD_UNITS_PER_CELL as i32;
 const SPACING: i32 = WORLD_UNITS_PER_CELL as i32 / 2;
-/// Fighters per row of a wedge (`[ours]`).
+/// Fighters per row of a wedge, at least (`[ours]`); more when the rows would reach the rim.
 const ROW: usize = 8;
+/// Rows that fit between `FRONT` and a cell short of the rim.
+const ROWS: usize = ((ARENA_RADIUS_CELLS - 1) * WORLD_UNITS_PER_CELL as i32 - FRONT) as usize / SPACING as usize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -79,7 +87,7 @@ impl Coordinator for ArmageddonMatch {
             }
             Phase::Fighting(left) => left.tick(),
         };
-        let still: Vec<TribeId> = world.tribes.all().filter(|t| self.in_match[t.as_usize()]).collect();
+        let still: Vec<TribeId> = TribeId::ALL.into_iter().filter(|t| self.in_match[t.as_usize()]).collect();
         let (standing, fallen): (Vec<TribeId>, Vec<TribeId>) = still.into_iter().partition(|&t| fighters(world, t) > 0);
         if standing.is_empty() {
             return Step { finished: true, events: vec![WorldEvent::Declare { winner: None, reason: Reason::Armageddon }] };
@@ -127,34 +135,43 @@ fn charges(world: &GameMap) -> Vec<WorldEvent> {
         .collect()
 }
 
-/// Where the `k`-th fighter of wedge `wedge` (of `wedges`) stands, off the arena's centre in world units: rows of
-/// `ROW` across three quarters of the wedge's arc, the first `FRONT` out, each row `SPACING` behind the last.
-pub fn arena_offset(wedge: usize, wedges: usize, k: usize) -> (i32, i32) {
-    let (row, col) = ((k / ROW) as i32, (k % ROW) as i64);
+/// How many stand in a row of a wedge of `count`: `ROW`, or more so its rows stay inside the arena.
+fn per_row(count: usize) -> usize {
+    ROW.max(count.div_ceil(ROWS))
+}
+
+/// Where the `k`-th of `count` fighters of wedge `wedge` (of `wedges`) stands, off the arena's centre in world
+/// units: rows of `per_row` across three quarters of the wedge's arc, the first `FRONT` out, each row `SPACING`
+/// behind the last.
+pub fn arena_offset(wedge: usize, wedges: usize, k: usize, count: usize) -> (i32, i32) {
+    let cols = per_row(count);
+    let (row, col) = ((k / cols) as i32, (k % cols) as i64);
     let width = crate::angle::TURN as i64 / wedges.max(1) as i64;
     let spread = width * 3 / 4;
-    let angle = (wedge as i64 * width - spread / 2 + spread * (2 * col + 1) / (2 * ROW as i64)).rem_euclid(crate::angle::TURN as i64) as u32;
+    let angle = (wedge as i64 * width - spread / 2 + spread * (2 * col + 1) / (2 * cols as i64)).rem_euclid(crate::angle::TURN as i64) as u32;
     polar(angle, FRONT + row * SPACING)
 }
 
 /// Where wedge `wedge`'s shaman stands: on its middle, a row behind its `count` fighters.
 pub fn shaman_offset(wedge: usize, wedges: usize, count: usize) -> (i32, i32) {
     let width = crate::angle::TURN as usize / wedges.max(1);
-    polar((wedge * width) as u32, FRONT + (count.div_ceil(ROW) as i32 + 1) * SPACING)
+    let rows = count.div_ceil(per_row(count)) as i32;
+    polar((wedge * width) as u32, (FRONT + rows * SPACING).min((ARENA_RADIUS_CELLS - 1) * WORLD_UNITS_PER_CELL as i32))
 }
 
-/// The nearest spot to `at` on land and not in `taken`, ring by ring out to twice the arena (`at` itself if none):
-/// a place in the arena that falls in the sea.
-pub fn land_near(terrain: &crate::terrain::Heightmap, at: (u16, u16), taken: &std::collections::BTreeSet<Spot>) -> Spot {
-    let size = terrain.size() as i32 * PER_CELL;
-    let start = spot_of(at);
-    let wrap = |(x, z): Spot| (x.rem_euclid(size), z.rem_euclid(size));
-    let fits = |s: Spot| !taken.contains(&s) && !crate::unit::is_sea(terrain, spot_cell(s));
-    (0..=2 * ARENA_RADIUS_CELLS * PER_CELL)
-        .flat_map(|r| (-r..=r).flat_map(move |dz| (-r..=r).filter(move |dx| dx.abs() == r || dz.abs() == r).map(move |dx| (start.0 + dx, start.1 + dz))))
-        .map(wrap)
-        .find(|&s| fits(s))
-        .unwrap_or(start)
+/// The arena carved around `centre` (a height point) on a `size`-point torus: every point within
+/// `ARENA_RADIUS_CELLS` at `floor`, every point up to `RIM_CELLS` further at `floor + RIM_HEIGHT`.
+pub fn arena_heights(centre: (i32, i32), floor: u16, size: i32) -> Vec<((i32, i32), u16)> {
+    let (inner, outer) = (ARENA_RADIUS_CELLS * ARENA_RADIUS_CELLS, (ARENA_RADIUS_CELLS + RIM_CELLS).pow(2));
+    let r = ARENA_RADIUS_CELLS + RIM_CELLS;
+    (-r..=r)
+        .flat_map(|dz| (-r..=r).map(move |dx| (dx, dz)))
+        .filter_map(|(dx, dz)| {
+            let d = dx * dx + dz * dz;
+            let at = ((centre.0 + dx).rem_euclid(size), (centre.1 + dz).rem_euclid(size));
+            (d <= outer).then(|| (at, if d <= inner { floor } else { floor.saturating_add(RIM_HEIGHT) }))
+        })
+        .collect()
 }
 
 fn polar(angle: u32, r: i32) -> (i32, i32) {
@@ -173,35 +190,54 @@ impl GameMap {
     }
 
     /// Armageddon takes effect at `at` (module doc): the count, the wipe, the gathering into the arena, the match.
-    pub(crate) fn start_armageddon(&mut self, at: (u16, u16)) {
+    pub(crate) fn start_armageddon(&mut self, at: (u16, u16)) -> crate::terrain::DirtyRect {
         self.revive_shamans();
         let tribes: Vec<TribeId> = self.sites.iter().map(|s| s.owner).collect();
         tribes.into_iter().for_each(|t| self.remove_reincarnation(t));
-        let order: Vec<TribeId> = self.tribes.teams().into_iter().flatten().collect();
+        let order = self.armageddon_sides();
         let tally: Vec<(TribeId, Vec<UnitKind>)> = order
             .iter()
             .map(|&t| (t, self.units.iter().filter(|u| u.owner == Owner::Tribe(t) && UnitKind::FOLLOWERS.contains(&u.kind) && !u.statuses.ghost && u.is_alive()).map(|u| u.kind).collect()))
             .collect();
         self.wipe_for_armageddon(at);
+        let dirty = self.carve_arena(at);
         let size = (self.terrain.size() * WORLD_UNITS_PER_CELL as usize) as i32;
-        let mut taken = std::collections::BTreeSet::new();
-        let mut place = |terrain: &crate::terrain::Heightmap, (dx, dz): (i32, i32)| {
-            let spot = land_near(terrain, (((at.0 as i32 + dx).rem_euclid(size)) as u16, ((at.1 as i32 + dz).rem_euclid(size)) as u16), &taken);
-            taken.insert(spot);
-            spot_centre(spot)
-        };
+        let place = |(dx, dz): (i32, i32)| (((at.0 as i32 + dx).rem_euclid(size)) as u16, ((at.1 as i32 + dz).rem_euclid(size)) as u16);
         for (wedge, (tribe, kinds)) in tally.iter().enumerate() {
             for (k, &kind) in kinds.iter().enumerate() {
-                let spot = place(&self.terrain, arena_offset(wedge, tally.len(), k));
-                self.spawn(*tribe, kind, spot);
+                self.spawn(*tribe, kind, place(arena_offset(wedge, tally.len(), k, kinds.len())));
             }
-            let spot = place(&self.terrain, shaman_offset(wedge, tally.len(), kinds.len()));
+            let spot = place(shaman_offset(wedge, tally.len(), kinds.len()));
             if let Some(u) = self.units.iter_mut().find(|u| u.owner == Owner::Tribe(*tribe) && u.kind == UnitKind::Shaman && !u.statuses.ghost && u.is_alive()) {
                 u.gather_at(spot);
             }
         }
         let id = self.new_id_of();
         self.coordinators.armageddons.insert(id, ArmageddonMatch::new(at, order.into_iter()));
+        dirty
+    }
+
+    /// The tribes in the match: every tribe with a living person on the map, in or out of the level's roster;
+    /// allies next to each other (`Tribes::teams`), then the others by id.
+    fn armageddon_sides(&self) -> Vec<TribeId> {
+        let has_people = |t: TribeId| self.units.iter().any(|u| u.owner == Owner::Tribe(t) && !u.statuses.ghost && u.is_alive());
+        let mut order: Vec<TribeId> = self.tribes.teams().into_iter().flatten().filter(|&t| has_people(t)).collect();
+        let rest: Vec<TribeId> = TribeId::ALL.into_iter().filter(|t| !order.contains(t) && has_people(*t)).collect();
+        order.extend(rest);
+        order
+    }
+
+    /// The arena carved into the ground at `at` (`arena_heights`), its floor at the centre's height but at least
+    /// `FLOOR_MIN`. The ground it changed.
+    fn carve_arena(&mut self, at: (u16, u16)) -> crate::terrain::DirtyRect {
+        let size = self.terrain.size() as i32;
+        let centre = (crate::unit::cell_of(at.0), crate::unit::cell_of(at.1));
+        let floor = self.terrain.get(centre.0, centre.1).max(FLOOR_MIN);
+        let heights = arena_heights(centre, floor, size);
+        for &((x, z), h) in &heights {
+            self.terrain.set(x, z, h);
+        }
+        crate::terrain::DirtyRect::bounding(heights.into_iter().map(|(p, _)| p))
     }
 
     /// Every tribe with a reincarnation site gets its shaman back, alive and whole, at the site: whether she is
@@ -221,7 +257,7 @@ impl GameMap {
     }
 
     /// Everything but the shamans and the ground: buildings, totems, vehicles, every other unit, any fight or
-    /// formation in progress, and the trees within `ARENA_RADIUS_CELLS` of `at`.
+    /// formation in progress, and the trees on the arena and its rim around `at`.
     fn wipe_for_armageddon(&mut self, at: (u16, u16)) {
         self.units.retain(|u| u.kind == UnitKind::Shaman && !u.statuses.ghost);
         self.buildings.clear();
@@ -235,7 +271,7 @@ impl GameMap {
         let near = |(x, z): (i32, i32)| {
             let wrap = |d: i32| d.rem_euclid(size).min((-d).rem_euclid(size));
             let (dx, dz) = (wrap(x - centre.0), wrap(z - centre.1));
-            dx * dx + dz * dz <= ARENA_RADIUS_CELLS * ARENA_RADIUS_CELLS
+            dx * dx + dz * dz <= (ARENA_RADIUS_CELLS + RIM_CELLS).pow(2)
         };
         self.trees.retain(|t| !near(t.cell()));
     }
@@ -459,28 +495,38 @@ mod tests {
     }
 
     #[test]
-    fn a_place_in_the_sea_moves_to_the_nearest_free_land() {
-        let mut terrain = crate::terrain::Heightmap::new(128);
-        for x in 0..128 {
-            for z in 12..128 {
-                terrain.set(x, z, 100);
-            }
+    fn the_arena_is_a_flat_floor_walled_by_a_rim() {
+        let heights = arena_heights((0, 0), 100, 128);
+        let at = |p: (i32, i32)| heights.iter().find(|(q, _)| *q == p).map(|&(_, h)| h);
+        assert_eq!((at((0, 0)), at((ARENA_RADIUS_CELLS, 0)), at((127, 127))), (Some(100), Some(100), Some(100)), "wrapped too");
+        assert_eq!(at((ARENA_RADIUS_CELLS + 1, 0)), Some(100 + RIM_HEIGHT));
+        assert_eq!(at((ARENA_RADIUS_CELLS + RIM_CELLS + 1, 0)), None, "outside left alone");
+    }
+
+    #[test]
+    fn every_tribe_with_people_fights_even_off_the_roster() {
+        let mut map = GameMap::sandbox_spells();
+        assert_eq!(map.tribes.all().collect::<Vec<_>>(), vec![TribeId::Blue], "test setup: a roster of one");
+        let centre = (64 * 512 + 256, 64 * 512 + 256);
+        map.start_armageddon(centre);
+        for t in [TribeId::Blue, TribeId::Red, TribeId::Yellow] {
+            assert!(!followers(&map, t).is_empty(), "{t:?} gathered");
         }
-        let sea = (10 * 512 + 256, 5 * 512 + 256);
-        let first = land_near(&terrain, sea, &Default::default());
-        assert!(!crate::unit::is_sea(&terrain, spot_cell(first)) && spot_cell(first).1 >= 11, "{first:?}");
-        let second = land_near(&terrain, sea, &[first].into());
-        assert_ne!(second, first);
-        let ashore = (10 * 512 + 256, 40 * 512 + 256);
-        assert_eq!(land_near(&terrain, ashore, &Default::default()), spot_of(ashore), "already on land: stays");
+        let off = |u: &Unit| (u.cell().0 - 64).abs().max((u.cell().1 - 64).abs());
+        assert!(map.units.iter().all(|u| !crate::unit::is_sea(&map.terrain, u.cell()) && off(u) < ARENA_RADIUS_CELLS), "all on the floor");
+        map.run(Ticks::secs(120));
+        let o = map.outcome.expect("settled");
+        assert!(o.winner.is_some(), "fought to a winner");
+        let losers: usize = [TribeId::Blue, TribeId::Red, TribeId::Yellow].iter().filter(|&&t| Some(t) != o.winner).map(|&t| followers(&map, t).iter().filter(|u| u.is_alive()).count()).sum();
+        assert_eq!(losers, 0, "the others fought to death");
     }
 
     #[test]
     fn wedges_hold_distinct_spots_and_the_shaman_stands_behind() {
-        let spots: Vec<_> = (0..2).flat_map(|w| (0..20).map(move |k| arena_offset(w, 2, k))).collect();
+        let spots: Vec<_> = (0..2).flat_map(|w| (0..20).map(move |k| arena_offset(w, 2, k, 20))).collect();
         assert!(spots.iter().enumerate().all(|(i, a)| spots[i + 1..].iter().all(|b| a != b)));
         let r = |(x, z): (i32, i32)| ((x as i64 * x as i64 + z as i64 * z as i64) as f64).sqrt() as i32;
-        assert!(r(shaman_offset(0, 2, 20)) > r(arena_offset(0, 2, 19)));
-        assert!(arena_offset(0, 2, 0).1 > 0 && arena_offset(1, 2, 0).1 < 0, "facing each other across the centre");
+        assert!(r(shaman_offset(0, 2, 20)) > r(arena_offset(0, 2, 19, 20)));
+        assert!(arena_offset(0, 2, 0, 20).1 > 0 && arena_offset(1, 2, 0, 20).1 < 0, "facing each other across the centre");
     }
 }

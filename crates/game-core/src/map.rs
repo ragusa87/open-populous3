@@ -1154,10 +1154,7 @@ impl GameMap {
                 self.add_effect(crate::erode::effect(player, at, &self.terrain));
                 None
             }
-            Spell::Armageddon { at } => {
-                self.start_armageddon(at);
-                None
-            }
+            Spell::Armageddon { at } => Some(self.start_armageddon(at)),
             _ => spell.cast(&mut self.terrain),
         }
     }

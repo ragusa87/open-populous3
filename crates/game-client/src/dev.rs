@@ -714,7 +714,7 @@ fn screenshot(
         }
         if let Ok(at) = std::env::var("ARMAGEDDON") {
             let ticks = std::env::var("ARMAGEDDON_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-            armageddon_demo(&mut map.0, &at, ticks);
+            dirty.0 |= armageddon_demo(&mut map.0, &at, ticks);
         }
         if let Ok(to) = std::env::var("BRIDGE") {
             let ticks = std::env::var("BRIDGE_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);

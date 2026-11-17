@@ -120,7 +120,7 @@ hardest to implement).
 
 ### Armageddon
 **Status (2026-11-17)**: steps 1-7 below are implemented (armageddon.rs, outcome.md "Armageddon"), with `[ours]`
-numbers and one addition: places in the sea move to the nearest land (`land_near`). Left: the client plugin, the
+numbers and two additions: every tribe with people takes part (roster or not), and the arena is carved into the ground (flat floor, cliff rim). Left: the client plugin, the
 "past 9 cells dies" rule (TODO.md "Spells").
 
 Reached in the session that also built the generic win/lose Outcome model (`game_core::outcome`) — not traced from

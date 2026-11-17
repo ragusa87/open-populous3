@@ -61,12 +61,13 @@ target"): the user's own design over the trace's one line, in `crates/game-core/
 1. Casting it (`Spell::Armageddon { at }`, `GameMap::start_armageddon`) first brings back, whole and at once, every
    shaman dying, dead or gone whose tribe still has a reincarnation site (`revive_shamans`), then removes every site
    (`remove_reincarnation`: nobody comes back from here on, and their stones are no longer drawn). It counts each
-   tribe's followers by kind, then
-   removes every building, totem and vehicle, every unit but the shamans (wildmen and angels too), any fight or
-   formation in progress, and the trees within `ARENA_RADIUS_CELLS` (9) of `at`. As many fresh followers of each
-   kind are spawned per tribe in the arena, one wedge each, allies' wedges side by side (`arena_offset`, rows of 8
-   from 2 cells out); its shaman, relocated rather than respawned, stands a row behind them (`shaman_offset`).
-   A place in the sea moves to the nearest free land (`land_near`).
+   tribe with people on the map (in the level's roster or not, `armageddon_sides`) has its followers counted by
+   kind. Then every building, totem and vehicle goes, every unit but the shamans (wildmen and angels too), any fight
+   or formation in progress, and the trees around `at`. The arena is carved into the ground there (`arena_heights`):
+   a flat floor `ARENA_RADIUS_CELLS` (9) wide at the centre's height (at least `FLOOR_MIN`, above the sea), walled
+   by a `RIM_CELLS` (2) wide rim `RIM_HEIGHT` (400) higher that nobody walks up. As many fresh followers of each kind
+   are spawned per tribe on the floor, one wedge each, allies' wedges side by side (`arena_offset`, rows of 8 or more
+   from 2 cells out, so they stay inside); its shaman stands a row behind them (`shaman_offset`).
 2. While a match is active, `GameMap::armageddon()` returns `Some(at)` (the client camera's target), the economy and
    the AI are suspended, and `GameMap::apply` rejects every `Command`.
 3. `ArmageddonMatch` (a `Coordinator` no unit links to) holds combat off for `GATHERING` (5 s). Then it fights:
@@ -80,4 +81,4 @@ target"): the user's own design over the trace's one line, in `crates/game-core/
 5. Once the standing tribes are all one side (`Tribes::same_team`), it wins (`WorldEvent::Declare`). If every side
    falls the same turn it is a draw and nobody is struck; still undecided `STALEMATE` (180 s) into the fight, a draw.
 
-Not done: the trace's "anyone past 9 cells away dies", and the client side beyond the camera (TODO.md "Spells").
+Not done: the trace's "anyone past 9 cells away dies" (the rim keeps everyone in instead), and the client side beyond the camera (TODO.md "Spells").
