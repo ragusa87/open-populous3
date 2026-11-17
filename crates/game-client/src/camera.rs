@@ -76,9 +76,13 @@ struct Flight {
 pub fn flight_point(from: Vec2, to: Vec2, t: f32) -> Vec2 {
     let t = t.clamp(0.0, 1.0);
     let eased = t * t * (3.0 - 2.0 * t);
+    (from + torus_delta(from, to) * eased).rem_euclid(Vec2::splat(MAP))
+}
+
+/// The shortest offset from `from` to `to` (cells) on the wrapping map, each axis in `[-MAP/2, MAP/2)`.
+pub fn torus_delta(from: Vec2, to: Vec2) -> Vec2 {
     let wrap = |d: f32| (d + MAP / 2.0).rem_euclid(MAP) - MAP / 2.0;
-    let delta = Vec2::new(wrap(to.x - from.x), wrap(to.y - from.y));
-    (from + delta * eased).rem_euclid(Vec2::splat(MAP))
+    Vec2::new(wrap(to.x - from.x), wrap(to.y - from.y))
 }
 
 impl Default for CameraRig {

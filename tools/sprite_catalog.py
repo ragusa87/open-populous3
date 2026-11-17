@@ -18,6 +18,7 @@ import re
 import struct
 import subprocess
 import sys
+import tempfile
 import wave
 
 POINT = "POINT0-0.DAT"
@@ -516,8 +517,14 @@ def file_stem(entry):
 
 
 def to_mp3(raw, input_format):
-    return subprocess.run(["ffmpeg", "-loglevel", "error", "-f", input_format, "-i", "pipe:0", "-q:a", "4", "-f",
-                           "mp3", "pipe:1"], input=raw, capture_output=True, check=True).stdout
+    """VBR mp3 written to a file, not a pipe: ffmpeg seeks back to write the Xing header, without which players
+    guess the duration from the first frame's bitrate."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "out.mp3")
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-f", input_format, "-i", "pipe:0", "-q:a", "4", path],
+                       input=raw, capture_output=True, check=True)
+        with open(path, "rb") as fh:
+            return fh.read()
 
 
 def extract(entry, mp3):
