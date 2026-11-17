@@ -209,7 +209,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   code at all. Also checked: a pyramid of knowledge (`BuildingKind::Vault`)'s own footprint is an ordinary
   rectangle, same as any other building, no special corner handling needed or missing found - no evidence of
   a pyramid-specific pathing bug; needs a more specific repro (level, position) to look at further.
-- [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the stranded rate (`STRANDED_DAMAGE`, scaled x20 from our old 100 HP guess, still unconfirmed). `DROWN_DAMAGE` is answered and is **not** a per-tick damage value at all (pop3-rev-analysis.md "Drowning"): the original always takes a fixed 16 turns (1.33 s) to kill once truly submerged, forcing life to exactly 0, independent of current/max health - a flat countdown, not `-60`/tick. Matters most for the shaman: her much larger health pool means ours currently lets her survive drowning far longer than the original allows.
+- [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values); find the wildman's life; check in the game the stranded rate (`STRANDED_DAMAGE`, scaled x20 from our old 100 HP guess, still unconfirmed). Drowning already follows the trace (a flat 16 turns whatever the health, `DROWN_SINK`/`DROWN_DEPTH`, pop3-rev-analysis.md "Drowning").
 - [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
 - [ ] Walk animation rate could follow the slope speed (slower steps uphill).
@@ -1799,7 +1799,7 @@ Level/world correctness that is mostly stable already (terrain especially: exten
   `local`), spell casting, camera, and HUD alike. Pre-existing, not introduced by the win/lose work above.
 
 ### Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
-- [ ] Start camera from the header's start position (cell) and angle (2048ths) instead of looking at the shaman.
+- [x] Start camera from the header's start position (cell) and angle (2048ths): `camera::start_view`.
 - [ ] Level flags: fog of war (0x01, levels 9 and 18), shaman omni (0x02, level 25; `GameMap::shaman_omni`: spells start from the view and have no range, the rest of god mode to find), no guest spells (0x10), no reincarnation time (0x20).
 - [x] Default allies per tribe (`.hdr` 92) read into `game_core::tribes::Tribes` and used for: elimination/win-lose
   grouping by side, and the two places that gate whether an attack may start (`attack::attack_goal`,
