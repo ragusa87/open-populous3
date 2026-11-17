@@ -2040,13 +2040,17 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   `Soundd2`). Only matters if the low bank is ever supported.
 - [x] Sound system skeleton (architecture.md "Client: audio", sound.md "Playback in the client"): Music/Fx
   channels under Master and a saved Mute all, settings JSON in the config dir, Audio page in the main and pause
-  menus, `PlaySound`/`PlayLoop`/`StopLoop`/`PlayMusic` with exact or random variants, repeat and variety loops,
-  the original's listener, 48-cell cut-off, `1 - d²/D²` falloff and equal-power balance, 10 effects at most,
-  250 ms between repeats, `--mute`, `--debug-audio`. The library is empty: nothing plays yet.
+  menus, `PlaySound`/`PlayLoop`/`StopLoop`/`PlayMusic`/`SetIntensity` with exact or random variants, repeat and
+  variety loops with a live volume, one sound at a time per owner, drum loops chained under the music by the
+  fight intensity, fade-outs, the pause/menu rules, the original's listener, 48-cell cut-off, `1 - d²/D²`
+  falloff and equal-power balance, 10 effects at most, 250 ms between repeats, `--mute`, `--debug-audio`. The
+  library is empty: nothing plays yet. The low-quality bank is left out on purpose.
 - [ ] Fill the `SoundLibrary`: `Soundd2` entries as in-memory WAV (bevy `wav` feature) through the sound id ->
-  entry-range table, CC0 sounds for `--no-original`, `PopDrones22` music (MP2 decoder).
-- [ ] Play SFX from game events: spells, chopping, building, follower voices, ambiences; drums. Work sounds on
-  their animation frame, one ambient sound at a time per unit, the clips' own loop points, fades, reverb.
+  entry-range table (volume, priority, while-paused flag), the `POPfightnew.SDT` alternative ranges, the drum
+  banks, CC0 sounds for `--no-original`, `PopDrones22` music (MP2 decoder).
+- [ ] Play SFX from game events: spells, chopping, building, follower voices, ambience layers, the battle crowd;
+  the fight flag into `SetIntensity`. Work sounds on their animation frame, the clips' own loop points, reverb,
+  drum loops chained without a frame's gap.
   Triggers are now mapped (sound.md "How the original plays them"): play by sound id through the id -> entry-range
   table, not by bank index; looping sounds need explicit stops; music = drone track + intensity-driven drum loops.
 

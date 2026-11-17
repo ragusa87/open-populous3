@@ -159,7 +159,7 @@ the views, never hard-coded in the client: e.g. a future `Effect::volcano_phase(
 flowing) that `VolcanoView` reads to start the camera shake and the rock spray.
 
 ## Client: audio
-Sound is client-only: the simulation never knows about it, so lockstep is untouched. Five files:
+Sound is client-only: the simulation never knows about it, so lockstep is untouched. Six files:
 - `audio_mix.rs`: the `Mixer` resource, a `Level` (0-100 %) for Master, Music and Fx, and Mute all.
   `Mixer::gain(channel)` = (master x channel)^2, 0 while muted.
 - `audio_space.rs`: how a sound on the map is heard (sound.md "Playback in the client"): the listener ahead of the
@@ -168,13 +168,15 @@ Sound is client-only: the simulation never knows about it, so lockstep is untouc
 - `audio_source.rs`: `PannedSound`, our own Bevy audio source: a clip decoded as usual, played in stereo with
   left/right `Gains` the game sets every frame (atomics read by the audio thread). Bevy's spatial sink is not
   used: its `1/d²` has no cut-off, does not wrap, and its balance never goes fully to one side.
-- `audio.rs` (`SoundPlugin`): systems write `PlaySound { sound, at }` (one-shot), `PlayLoop { key, sound, kind,
-  at }` (sent again to move it) / `StopLoop(key)`, or `PlayMusic`. A `Sound` is a `SoundCue` family with
-  `Pick::Any` or an exact `Pick::Variant(n)`; `at` is a map position, or `None` for flat UI sounds. The
-  `SoundLibrary` maps cues (with their volume and priority) and tracks to clips. `resolve_sound`/`resolve_music`
-  decide what plays or why not (`Skip`), then the 250 ms repeat guard and the 10-effect limit (`make_room`).
-  Each playing sound is a `Voice`; every frame `apply_voices` sets its gains, stops it out of reach (a loop
-  restarts once back in reach), and holds positional sounds while the game is not running.
+- `audio.rs` (`SoundPlugin`): systems write `PlaySound` (one-shot: `flat`, `at`, `owned_by` a unit),
+  `PlayLoop { key, sound, kind, at, volume }` (sent again to move or re-weigh it) / `StopLoop(key)`, `PlayMusic`
+  and `SetIntensity` (drums). A `Sound` is a `SoundCue` family with `Pick::Any` or an exact `Pick::Variant(n)`.
+  The `SoundLibrary` maps cues (with their volume, priority and while-paused flag), tracks and drum banks to
+  clips. `resolve_sound`/`resolve_music` decide what plays or why not (`Skip`), then the pause/menu rules
+  (`moment`, `waits`), the owner, the 250 ms repeat guard and the 10-effect limit (`make_room`). Each playing
+  sound is a `Voice` (an effect, the track or a drum loop); every frame `apply_voices` sets its gains, fades
+  out what was stopped (`Fading`), fades out what left the reach (a loop restarts once back in reach), and
+  holds effects while the game is not running. `audio_drums.rs` picks each next drum loop.
 - `user_settings.rs`: the volumes and Mute all, as JSON in the platform config dir
   (`dirs::config_dir()/open-populous/settings.json`, `POP3_CONFIG_DIR` overrides), read at launch, saved on
   leaving the Audio page (main and pause menus), never by a headless run.

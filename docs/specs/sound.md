@@ -117,27 +117,34 @@ Entry header with a shorter name:
 - Lengths: `idea11` 230 s, `idea13` 321 s, `idea16` 284 s, `idea17` 307 s, `idea19` 361 s.
 
 ## Playback in the client
-docs/architecture.md "Client: audio" for the code.
+docs/architecture.md "Client: audio" for the code. The low-quality bank is left out (always `Soundd2`), and with
+it the quality option: what only low quality changes (no ambience bed, no stop fades) does not apply.
 - Channels: Music and Fx under a Master volume, plus Mute all (saved). UI sounds go on Fx, flat: centred, full
   volume.
-- A `SoundCue` stands for one of the original's sound ids: a family of variants with its own volume (0-127) and
-  priority. `Pick::Any` is the original's random pick; `Pick::Variant(n)` plays exactly variant `n` (`chop4`), never
-  another one in its place.
+- A `SoundCue` stands for one of the original's sound ids: a family of variants with its own volume (0-127),
+  priority and "plays while paused" flag. `Pick::Any` is the original's random pick; `Pick::Variant(n)` plays
+  exactly variant `n` (`chop4`), never another one in its place.
 - Mixed as the original mixes them: the listener 16 cells from the camera's look-at point along its heading, 2D
-  distances on the wrapped map, a cut-off at 48 cells (not started past it, stopped once out of it), the volume
+  distances on the wrapped map, a cut-off at 48 cells (not started past it, faded out once out of it), the volume
   times `1 - d²/48²`, an equal-power balance from the bearing folded into -90..90°. Our own stereo source
   (`audio_source.rs`) applies the gains, updated every frame.
 - At most 10 effects at once: a full mix cuts its lowest-ranked one for a new one that outranks it (priority, then
-  fewer copies of the same sound, then closeness: that order is our reading). The same sound never restarts
-  within 250 ms (one-shots).
-- Loops: `PlayLoop` under a key (sent again to move it) and `StopLoop`. A repeat loop replays the same clip and
-  stops at once; a variety loop takes a fresh variant each time one ends, and when stopped lets the current one
-  finish. A loop out of reach is stopped and starts again once back in reach.
-- Positional sounds wait while the game is paused or behind a menu; flat sounds and music go on.
-- Music: a Menu track behind the menus, a Game track in a game picked at random among its variants.
-- Not done yet: loading clips (`Soundd2` PCM as WAV, CC0 sounds for `--no-original`, MP2 music), the clips' own
-  loop points (`fire`, `warloop`...), work sounds waiting for an animation frame, one ambient sound per unit,
-  ambience layers, drums, fades, reverb, game events turned into cues.
+  fewer copies of the same sound, then closeness: that order is our reading). A loop only cuts on its first
+  start; coming back (next variant, back in reach, after being cut) it waits for a free slot, else loops would
+  keep cutting each other (ours). The same sound never restarts within 250 ms (one-shots).
+- An owner (a unit) gets no new sound while one of its sounds plays.
+- Loops: `PlayLoop` under a key, sent again to move it or change its volume (0..1: the ambience layers' weights,
+  the battle crowd's loudness), and `StopLoop`. A repeat loop replays the same clip; a variety loop takes a fresh
+  variant each time one ends, and when stopped lets the current one finish.
+- While the game is paused only sounds flagged for it start or go on; behind a menu only flat sounds; music always.
+- Stopped sounds fade out: effects in 0.1 s, music in 1.5 s (lengths ours, the original's not traced).
+- Music: a Menu track behind the menus, a Game track in a game picked at random among its variants; each time it
+  starts a random drum bank is drawn and its loops chained by the fight intensity (`SetIntensity`, rules in
+  "Music and drums"; which melee loop counts as every 4th is our reading). A new drum loop starts the frame
+  after one ends: a small gap, not sample-exact.
+- Not done yet: loading clips (`Soundd2` PCM as WAV, CC0 sounds for `--no-original`, MP2 music, the fight bank's
+  alternative ranges), the clips' own loop points (`fire`, `warloop`...), work sounds waiting for an animation
+  frame, ambience layers, reverb, game events turned into cues (the fight flag for the intensity).
 
 ## PopSoundEditor discrepancies
 The editor works on its own exports but misreads parts of the format. Do not copy these:

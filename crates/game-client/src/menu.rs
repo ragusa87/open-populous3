@@ -565,7 +565,7 @@ fn menu_keys(
 }
 
 fn click(sounds: &mut MessageWriter<PlaySound>) {
-    sounds.write(PlaySound { sound: SoundCue::Click.into(), at: None });
+    sounds.write(PlaySound::flat(SoundCue::Click));
 }
 
 fn menu_mouse(
