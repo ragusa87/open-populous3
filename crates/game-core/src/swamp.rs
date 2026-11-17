@@ -7,10 +7,10 @@
 //! the kill itself is not its own turn but `GameMap::tend_swamps`, which sees every swamp at once and settles each
 //! contested cell on the most recently cast one there (ids only grow, so the highest id is the newest). That one's
 //! own tally is the one that grows; once it reaches `SWAMP_NUM_PEOPLE` it ends there and then, short of its full
-//! `LIFETIME`. The 30-per-tribe, oldest-goes bookkeeping the original also keeps (pop3-rev-analysis.md) is not
-//! implemented (TODO.md).
+//! `LIFETIME`. A tribe keeps at most `MAX_PER_TRIBE`: casting one more removes its oldest (`over_cap`).
 
 use crate::effect::{Effect, EffectKind};
+use crate::id::Id;
 use crate::time::{Countdown, Every, Ticks};
 use crate::unit::cell_of;
 use crate::tribes::Owner;
@@ -21,6 +21,8 @@ pub const SWAMP_NUM_PEOPLE: u32 = 10;
 pub const KILL_EVERY: Every = Every::new(4);
 /// 32 000 turns (44 min), its full lifetime absent the kill cap.
 pub const LIFETIME: Ticks = Ticks::new(32_000);
+/// At most 30 swamps per tribe, the oldest going ("Per spell" 11).
+pub const MAX_PER_TRIBE: usize = 30;
 /// Half the side of its 3 × 3 cells.
 pub const HALF: i32 = 1;
 
@@ -39,6 +41,14 @@ pub fn effect(owner: impl Into<Owner>, at: (u16, u16)) -> Effect {
 pub fn cells((x, z): (u16, u16), size: i32) -> Vec<(i32, i32)> {
     let (cx, cz) = (cell_of(x), cell_of(z));
     (-HALF..=HALF).flat_map(|dz| (-HALF..=HALF).map(move |dx| ((cx + dx).rem_euclid(size), (cz + dz).rem_euclid(size)))).collect()
+}
+
+/// The swamps of `owner` among `effects` past `MAX_PER_TRIBE`, oldest first (ids only grow).
+pub fn over_cap<'a>(effects: impl Iterator<Item = (Id<Effect>, &'a Effect)>, owner: Owner) -> Vec<Id<Effect>> {
+    let mut own: Vec<Id<Effect>> = effects.filter(|(_, e)| e.owner == owner && matches!(e.kind, EffectKind::Swamp(_))).map(|(id, _)| id).collect();
+    own.sort();
+    own.truncate(own.len().saturating_sub(MAX_PER_TRIBE));
+    own
 }
 
 #[cfg(test)]
@@ -103,5 +113,15 @@ mod tests {
         }
         map.run(Ticks::new(4));
         assert!(!map.effects.contains(id), "ended early, long before its 32 000-turn lifetime");
+    }
+
+    #[test]
+    fn a_tribes_31st_swamp_removes_its_oldest_only() {
+        let mut map = bare();
+        let foe = map.add_effect(effect(TribeId::Red, AT));
+        let ids: Vec<_> = (0..=MAX_PER_TRIBE).map(|_| map.add_effect(effect(TribeId::Blue, AT))).collect();
+        assert!(!map.effects.contains(ids[0]), "the oldest went");
+        assert!(ids[1..].iter().all(|&id| map.effects.contains(id)), "the 30 newest stay");
+        assert!(map.effects.contains(foe), "another tribe's own count is its own");
     }
 }

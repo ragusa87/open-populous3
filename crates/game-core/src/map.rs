@@ -1748,8 +1748,12 @@ impl GameMap {
 
     /// Adds `e` with a fresh id, last in `effects`; its id.
     pub fn add_effect(&mut self, e: Effect) -> Id<Effect> {
-        let id = self.new_id_of();
+        let (id, owner, swamp) = (self.new_id_of(), e.owner, matches!(e.kind, EffectKind::Swamp(_)));
         self.effects.insert(id, e);
+        if swamp {
+            let gone = crate::swamp::over_cap(self.effects.iter(), owner);
+            self.effects.retain(|id, _| !gone.contains(&id));
+        }
         id
     }
 
