@@ -2,19 +2,18 @@
 //! "Per spell" 18): on cast, every shaman dying, dead or gone who still has a reincarnation site comes back first
 //! (`revive_shamans`), then every site is removed for good; each tribe with people on the map (in the level's roster
 //! or not) has its followers counted by kind; every building, totem, vehicle and every unit but the shamans is
-//! removed, and the trees around the cast point; the arena is carved into the ground there (`arena_heights`: a flat
-//! floor `ARENA_RADIUS_CELLS` wide above the sea, walled by a cliff rim); then as many fresh fighters of each kind
-//! are spawned per tribe in the arena, a wedge each (allies' wedges side by side), its shaman
-//! just behind them. The match (`ArmageddonMatch`, a coordinator no unit links to) holds combat off for `GATHERING`,
+//! removed, and the trees around the cast point; the arena is carved into the ground there (`arena_heights`: a
+//! square, flat floor above the sea, a walkable slope on each of its 4 sides, a cliff rim behind them); then as
+//! many fresh fighters of each kind are spawned per tribe on a slope of its own (allies' side by side), its shaman
+//! at the top behind them. The match (`ArmageddonMatch`, a coordinator no unit links to) holds combat off for `GATHERING`,
 //! then lets them fight, sending every idle fighter at the nearest enemy one; no shaman is auto-attacked, nor
 //! auto-attacks (`spotting::first_seen`). While a tribe's own fighters live,
-//! its shaman stays shielded (topped up every turn); the turn they are all dead, her shield drops and lightning
-//! strikes her, with no site left to come back to. The last side (alliance) with fighters wins; sides falling together, or no winner
+//! its shaman stays shielded (topped up every turn); the turn they are all dead, her shield drops and a bolt (the
+//! Lightning spell's own effect, so it is drawn) strikes her, with no site left to come back to. The last side (alliance) with fighters wins; sides falling together, or no winner
 //! after `STALEMATE`, is a draw. The numbers are `[ours]`, none traced. Not done: the trace's "anyone past 9 cells
 //! away dies" (the rim keeps everyone in instead).
 
 use crate::coordinator::{Coordinator, Step};
-use crate::effect::DamageKind;
 use crate::event::WorldEvent;
 use crate::id::Id;
 use crate::map::{GameMap, Lcg};
@@ -24,26 +23,29 @@ use crate::tribes::{Owner, TribeId};
 use crate::unit::{Action, Unit, UnitId, UnitKind};
 use pop3_format::WORLD_UNITS_PER_CELL;
 
-/// The arena floor's radius around the cast point (the trace's own 9 cells).
-pub const ARENA_RADIUS_CELLS: i32 = 9;
-/// The rim's width beyond the floor, and its height over it: a cliff nobody walks up (`[ours]`).
+/// The arena, square, in cells from its centre (`arena_heights`): the flat floor up to `FLOOR_HALF`, then a slope
+/// `SLOPE_CELLS` deep rising `SLOPE_STEP` a cell, then a rim `RIM_CELLS` wide `RIM_HEIGHT` over the slope's top, a
+/// cliff nobody walks up (`path::MAX_CLIMB`). `[ours]`, but the half-width with its slopes is the trace's 9 cells.
+pub const FLOOR_HALF: i32 = 4;
+pub const SLOPE_CELLS: i32 = 4;
+pub const SLOPE_STEP: u16 = 80;
 pub const RIM_CELLS: i32 = 2;
 pub const RIM_HEIGHT: u16 = 400;
+/// The half-width up to the rim, and with it.
+pub const ARENA_HALF_CELLS: i32 = FLOOR_HALF + SLOPE_CELLS;
+pub const OUTER_HALF_CELLS: i32 = ARENA_HALF_CELLS + RIM_CELLS;
 /// The floor's lowest height, well above the sea (`[ours]`).
 pub const FLOOR_MIN: u16 = 64;
-/// Fighters stand idle this long after the gathering, for the camera's reveal (`[ours]`).
+/// Fixed by phase (`[ours]`): the gathering, before anyone fights, and the stalemate, a draw.
 pub const GATHERING: Ticks = Ticks::secs(5);
-/// A match still undecided this long after the fighting began is a draw (`[ours]`).
 pub const STALEMATE: Ticks = Ticks::secs(180);
 /// A fighting shaman's shield, topped up to this many steps every turn: "permanent" (`[ours]`).
 pub const SHIELD_STEPS: u8 = 2;
-/// The wedge's first row, from the centre, and the gap between rows and fighters (world units, `[ours]`).
-const FRONT: i32 = 2 * WORLD_UNITS_PER_CELL as i32;
-const SPACING: i32 = WORLD_UNITS_PER_CELL as i32 / 2;
-/// Fighters per row of a wedge, at least (`[ours]`); more when the rows would reach the rim.
+/// Rows of fighters on a slope, half a cell apart from its foot; the shaman stands behind the last.
+const ROWS: usize = 6;
+/// The most standing side by side in a row before rows fill up (`[ours]`).
 const ROW: usize = 8;
-/// Rows that fit between `FRONT` and a cell short of the rim.
-const ROWS: usize = ((ARENA_RADIUS_CELLS - 1) * WORLD_UNITS_PER_CELL as i32 - FRONT) as usize / SPACING as usize;
+const CELL: i32 = WORLD_UNITS_PER_CELL as i32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -115,10 +117,11 @@ fn shaman(world: &GameMap, tribe: TribeId) -> Option<&Unit> {
     world.units.iter().find(|u| u.owner == Owner::Tribe(tribe) && u.kind == UnitKind::Shaman && !u.statuses.ghost && u.is_alive())
 }
 
-/// A tribe whose fighters are all dead: its shaman's shield drops, lightning strikes her (no site to come back to).
+/// A tribe whose fighters are all dead: its shaman's shield drops and a bolt of lightning, the spell's own effect
+/// cast by nobody (so it spares no shaman), strikes where she stands (no site to come back to).
 fn struck_down(world: &GameMap, tribe: TribeId) -> Vec<WorldEvent> {
-    let Some(unit) = shaman(world, tribe).map(|u| u.id) else { return Vec::new() };
-    vec![WorldEvent::Shield { unit, steps: 0 }, WorldEvent::Damage { unit, amount: u16::MAX, kind: DamageKind::Lightning, from: None }]
+    let Some(her) = shaman(world, tribe) else { return Vec::new() };
+    vec![WorldEvent::Shield { unit: her.id, steps: 0 }, WorldEvent::SpawnEffect(crate::lightning::effect(Owner::Wild, (her.x, her.z)))]
 }
 
 /// Every idle fighter sent at the nearest enemy fighter it may attack: sight alone would leave the wedges apart.
@@ -135,47 +138,55 @@ fn charges(world: &GameMap) -> Vec<WorldEvent> {
         .collect()
 }
 
-/// How many stand in a row of a wedge of `count`: `ROW`, or more so its rows stay inside the arena.
-fn per_row(count: usize) -> usize {
-    ROW.max(count.div_ceil(ROWS))
+/// The height point nearest `at` (world units): the arena is carved around it and its people placed from it.
+pub fn arena_centre(at: (u16, u16)) -> (u16, u16) {
+    let snap = |v: u16| (((v as u32 + CELL as u32 / 2) / CELL as u32 * CELL as u32) % 65_536) as u16;
+    (snap(at.0), snap(at.1))
 }
 
-/// Where the `k`-th of `count` fighters of wedge `wedge` (of `wedges`) stands, off the arena's centre in world
-/// units: rows of `per_row` across three quarters of the wedge's arc, the first `FRONT` out, each row `SPACING`
-/// behind the last.
-pub fn arena_offset(wedge: usize, wedges: usize, k: usize, count: usize) -> (i32, i32) {
-    let cols = per_row(count);
-    let (row, col) = ((k / cols) as i32, (k % cols) as i64);
-    let width = crate::angle::TURN as i64 / wedges.max(1) as i64;
-    let spread = width * 3 / 4;
-    let angle = (wedge as i64 * width - spread / 2 + spread * (2 * col + 1) / (2 * cols as i64)).rem_euclid(crate::angle::TURN as i64) as u32;
-    polar(angle, FRONT + row * SPACING)
+/// The slope (0-3: south, east, north, west) of side `side` of `sides`: opposite ones for two.
+fn slope_of(side: usize, sides: usize) -> usize {
+    if sides == 2 { side * 2 } else { side % 4 }
 }
 
-/// Where wedge `wedge`'s shaman stands: on its middle, a row behind its `count` fighters.
-pub fn shaman_offset(wedge: usize, wedges: usize, count: usize) -> (i32, i32) {
-    let width = crate::angle::TURN as usize / wedges.max(1);
-    let rows = count.div_ceil(per_row(count)) as i32;
-    polar((wedge * width) as u32, (FRONT + rows * SPACING).min((ARENA_RADIUS_CELLS - 1) * WORLD_UNITS_PER_CELL as i32))
+/// Out of the arena's centre along slope `slope` by `depth`, then `along` across it (world units).
+fn on_slope(slope: usize, depth: i32, along: i32) -> (i32, i32) {
+    let (nx, nz) = [(0, 1), (1, 0), (0, -1), (-1, 0)][slope % 4];
+    (nx * depth - nz * along, nz * depth + nx * along)
 }
 
-/// The arena carved around `centre` (a height point) on a `size`-point torus: every point within
-/// `ARENA_RADIUS_CELLS` at `floor`, every point up to `RIM_CELLS` further at `floor + RIM_HEIGHT`.
+/// Where the `k`-th of `count` fighters of side `side` (of `sides`) stands, off the arena's centre: on its slope,
+/// rows half a cell apart from the slope's foot up, each row spread evenly across the side (off its corners).
+pub fn arena_offset(side: usize, sides: usize, k: usize, count: usize) -> (i32, i32) {
+    let cols = count.div_ceil(ROWS).max(count.min(ROW)).max(1);
+    let (row, col) = ((k / cols) as i32, (k % cols) as i32);
+    let width = (2 * FLOOR_HALF - 1) * CELL;
+    let along = -width / 2 + width * (2 * col + 1) / (2 * cols as i32);
+    on_slope(slope_of(side, sides), FLOOR_HALF * CELL + CELL / 2 + row * CELL / 2, along)
+}
+
+/// Where side `side`'s shaman stands: in the middle of its slope, near the top, behind her fighters.
+pub fn shaman_offset(side: usize, sides: usize) -> (i32, i32) {
+    on_slope(slope_of(side, sides), FLOOR_HALF * CELL + CELL / 2 + ROWS as i32 * CELL / 2, 0)
+}
+
+/// The arena carved around `centre` (a height point) on a `size`-point torus, out to `OUTER_HALF_CELLS`: the floor
+/// at `floor`, the slopes rising from it, the rim above their top (squares: the distance is the larger axis).
 pub fn arena_heights(centre: (i32, i32), floor: u16, size: i32) -> Vec<((i32, i32), u16)> {
-    let (inner, outer) = (ARENA_RADIUS_CELLS * ARENA_RADIUS_CELLS, (ARENA_RADIUS_CELLS + RIM_CELLS).pow(2));
-    let r = ARENA_RADIUS_CELLS + RIM_CELLS;
+    let top = floor + SLOPE_STEP * SLOPE_CELLS as u16;
+    let r = OUTER_HALF_CELLS;
     (-r..=r)
         .flat_map(|dz| (-r..=r).map(move |dx| (dx, dz)))
-        .filter_map(|(dx, dz)| {
-            let d = dx * dx + dz * dz;
-            let at = ((centre.0 + dx).rem_euclid(size), (centre.1 + dz).rem_euclid(size));
-            (d <= outer).then(|| (at, if d <= inner { floor } else { floor.saturating_add(RIM_HEIGHT) }))
+        .map(|(dx, dz)| {
+            let d = dx.abs().max(dz.abs());
+            let h = match d {
+                _ if d <= FLOOR_HALF => floor,
+                _ if d <= ARENA_HALF_CELLS => floor + SLOPE_STEP * (d - FLOOR_HALF) as u16,
+                _ => top + RIM_HEIGHT,
+            };
+            (((centre.0 + dx).rem_euclid(size), (centre.1 + dz).rem_euclid(size)), h)
         })
         .collect()
-}
-
-fn polar(angle: u32, r: i32) -> (i32, i32) {
-    (r * crate::angle::sin(angle) / crate::angle::ONE, r * crate::angle::cos(angle) / crate::angle::ONE)
 }
 
 impl GameMap {
@@ -191,6 +202,7 @@ impl GameMap {
 
     /// Armageddon takes effect at `at` (module doc): the count, the wipe, the gathering into the arena, the match.
     pub(crate) fn start_armageddon(&mut self, at: (u16, u16)) -> crate::terrain::DirtyRect {
+        let at = arena_centre(at);
         self.revive_shamans();
         let tribes: Vec<TribeId> = self.sites.iter().map(|s| s.owner).collect();
         tribes.into_iter().for_each(|t| self.remove_reincarnation(t));
@@ -207,7 +219,7 @@ impl GameMap {
             for (k, &kind) in kinds.iter().enumerate() {
                 self.spawn(*tribe, kind, place(arena_offset(wedge, tally.len(), k, kinds.len())));
             }
-            let spot = place(shaman_offset(wedge, tally.len(), kinds.len()));
+            let spot = place(shaman_offset(wedge, tally.len()));
             if let Some(u) = self.units.iter_mut().find(|u| u.owner == Owner::Tribe(*tribe) && u.kind == UnitKind::Shaman && !u.statuses.ghost && u.is_alive()) {
                 u.gather_at(spot);
             }
@@ -227,11 +239,11 @@ impl GameMap {
         order
     }
 
-    /// The arena carved into the ground at `at` (`arena_heights`), its floor at the centre's height but at least
-    /// `FLOOR_MIN`. The ground it changed.
+    /// The arena carved into the ground at `at`, a height point (`arena_heights`), its floor at the centre's height
+    /// but at least `FLOOR_MIN`. The ground it changed.
     fn carve_arena(&mut self, at: (u16, u16)) -> crate::terrain::DirtyRect {
         let size = self.terrain.size() as i32;
-        let centre = (crate::unit::cell_of(at.0), crate::unit::cell_of(at.1));
+        let centre = ((at.0 as i32 / CELL), (at.1 as i32 / CELL));
         let floor = self.terrain.get(centre.0, centre.1).max(FLOOR_MIN);
         let heights = arena_heights(centre, floor, size);
         for &((x, z), h) in &heights {
@@ -271,7 +283,7 @@ impl GameMap {
         let near = |(x, z): (i32, i32)| {
             let wrap = |d: i32| d.rem_euclid(size).min((-d).rem_euclid(size));
             let (dx, dz) = (wrap(x - centre.0), wrap(z - centre.1));
-            dx * dx + dz * dz <= (ARENA_RADIUS_CELLS + RIM_CELLS).pow(2)
+            dx.max(dz) <= OUTER_HALF_CELLS
         };
         self.trees.retain(|t| !near(t.cell()));
     }
@@ -281,6 +293,7 @@ impl GameMap {
 mod tests {
     use super::*;
     use crate::command::Command;
+    use crate::effect::DamageKind;
     use crate::spell::Spell;
     use crate::tribes::Tribes;
 
@@ -320,11 +333,11 @@ mod tests {
         map.spawn(TribeId::Red, UnitKind::Firewarrior, (60_000, 60_000));
         map.start_armageddon(AT);
         assert!(map.buildings.is_empty() && map.totems.is_empty() && map.vehicles.is_empty());
-        assert!(map.trees.iter().all(|t| cells_off(&map, &Unit::new(Id::from_raw(0), TribeId::Blue, UnitKind::Brave, (t.x, t.z))) > ARENA_RADIUS_CELLS - 1));
+        assert!(map.trees.iter().all(|t| cells_off(&map, &Unit::new(Id::from_raw(0), TribeId::Blue, UnitKind::Brave, (t.x, t.z))) > ARENA_HALF_CELLS - 1));
         let kinds = |t| { let mut k: Vec<_> = followers(&map, t).iter().map(|u| u.kind).collect(); k.sort_by_key(|k| *k as u8); k };
         assert_eq!(kinds(TribeId::Blue).len(), 3);
         assert_eq!(kinds(TribeId::Red), vec![UnitKind::Brave, UnitKind::Firewarrior]);
-        assert!(map.units.iter().all(|u| cells_off(&map, u) <= ARENA_RADIUS_CELLS), "everyone in the arena, the shamans too");
+        assert!(map.units.iter().all(|u| cells_off(&map, u) <= ARENA_HALF_CELLS), "everyone in the arena, the shamans too");
         assert!(map.armageddon_match().is_some_and(|m| !m.fighting()));
     }
 
@@ -335,7 +348,7 @@ mod tests {
         map.damage(red, u16::MAX, DamageKind::Lightning, None);
         map.units.retain(|u| !(u.owner == Owner::Tribe(TribeId::Blue) && u.kind == UnitKind::Shaman));
         map.start_armageddon(AT);
-        assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| her(&map, t).is_alive() && cells_off(&map, her(&map, t)) <= ARENA_RADIUS_CELLS));
+        assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| her(&map, t).is_alive() && cells_off(&map, her(&map, t)) <= ARENA_HALF_CELLS));
         assert_eq!(her(&map, TribeId::Red).id, red, "the same shaman, not a new one");
         assert_eq!(her(&map, TribeId::Red).health.current(), map.balance.units.life(UnitKind::Shaman));
         assert!(map.sites.iter().all(|s| !s.enabled), "no site left, their stones gone with them");
@@ -425,6 +438,8 @@ mod tests {
         past_gathering(&mut map);
         map.tick();
         assert_eq!(map.outcome.map(|o| (o.winner, o.reason)), Some((Some(TribeId::Blue), Reason::Armageddon)));
+        assert!(map.effects.iter().any(|(_, e)| matches!(e.kind, crate::effect::EffectKind::Lightning(_))), "a bolt to draw");
+        map.tick();
         assert!(matches!(her(&map, TribeId::Red).action, Action::Dying { .. }), "struck down: {:?}", her(&map, TribeId::Red).action);
         assert!(her(&map, TribeId::Blue).is_alive(), "the winner untouched");
         assert!(map.coordinators.armageddons.is_empty());
@@ -438,7 +453,7 @@ mod tests {
         past_gathering(&mut map);
         let i = map.units.iter().position(|u| u.owner == Owner::Tribe(TribeId::Red) && u.kind == UnitKind::Shaman).unwrap();
         map.units[i].statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
-        map.tick();
+        map.run(Ticks::new(2));
         assert!(!her(&map, TribeId::Red).is_alive(), "her shield dropped first");
     }
 
@@ -495,12 +510,17 @@ mod tests {
     }
 
     #[test]
-    fn the_arena_is_a_flat_floor_walled_by_a_rim() {
+    fn the_arena_is_a_square_floor_with_a_walkable_slope_each_side_and_a_cliff_rim() {
         let heights = arena_heights((0, 0), 100, 128);
-        let at = |p: (i32, i32)| heights.iter().find(|(q, _)| *q == p).map(|&(_, h)| h);
-        assert_eq!((at((0, 0)), at((ARENA_RADIUS_CELLS, 0)), at((127, 127))), (Some(100), Some(100), Some(100)), "wrapped too");
-        assert_eq!(at((ARENA_RADIUS_CELLS + 1, 0)), Some(100 + RIM_HEIGHT));
-        assert_eq!(at((ARENA_RADIUS_CELLS + RIM_CELLS + 1, 0)), None, "outside left alone");
+        let at = |p: (i32, i32)| heights.iter().find(|(q, _)| *q == p).map(|&(_, h)| h).unwrap_or(0);
+        assert_eq!((at((0, 0)), at((FLOOR_HALF, FLOOR_HALF)), at((128 - FLOOR_HALF, 0))), (100, 100, 100), "flat, wrapped too");
+        for slope in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let up: Vec<u16> = (FLOOR_HALF..=ARENA_HALF_CELLS).map(|d| at(((slope.0 * d).rem_euclid(128), (slope.1 * d).rem_euclid(128)))).collect();
+            assert!(up.windows(2).all(|w| w[1] > w[0] && w[1] - w[0] < crate::path::MAX_CLIMB), "{slope:?}: rising, walkable: {up:?}");
+            let rim = at(((slope.0 * (ARENA_HALF_CELLS + 1)).rem_euclid(128), (slope.1 * (ARENA_HALF_CELLS + 1)).rem_euclid(128)));
+            assert!(rim - up[up.len() - 1] > crate::path::MAX_CLIMB, "a cliff behind it");
+        }
+        assert!(heights.iter().all(|((x, z), _)| { let d = |v: i32| v.min(128 - v); d(*x).max(d(*z)) <= OUTER_HALF_CELLS }), "nothing outside touched");
     }
 
     #[test]
@@ -512,8 +532,9 @@ mod tests {
         for t in [TribeId::Blue, TribeId::Red, TribeId::Yellow] {
             assert!(!followers(&map, t).is_empty(), "{t:?} gathered");
         }
-        let off = |u: &Unit| (u.cell().0 - 64).abs().max((u.cell().1 - 64).abs());
-        assert!(map.units.iter().all(|u| !crate::unit::is_sea(&map.terrain, u.cell()) && off(u) < ARENA_RADIUS_CELLS), "all on the floor");
+        let c = arena_centre(centre);
+        let off = |u: &Unit| (u.x as i32 - c.0 as i32).abs().max((u.z as i32 - c.1 as i32).abs());
+        assert!(map.units.iter().all(|u| !crate::unit::is_sea(&map.terrain, u.cell()) && off(u) > FLOOR_HALF * CELL && off(u) < ARENA_HALF_CELLS * CELL), "all on the slopes");
         map.run(Ticks::secs(120));
         let o = map.outcome.expect("settled");
         assert!(o.winner.is_some(), "fought to a winner");
@@ -522,11 +543,20 @@ mod tests {
     }
 
     #[test]
-    fn wedges_hold_distinct_spots_and_the_shaman_stands_behind() {
-        let spots: Vec<_> = (0..2).flat_map(|w| (0..20).map(move |k| arena_offset(w, 2, k, 20))).collect();
-        assert!(spots.iter().enumerate().all(|(i, a)| spots[i + 1..].iter().all(|b| a != b)));
-        let r = |(x, z): (i32, i32)| ((x as i64 * x as i64 + z as i64 * z as i64) as f64).sqrt() as i32;
-        assert!(r(shaman_offset(0, 2, 20)) > r(arena_offset(0, 2, 19, 20)));
-        assert!(arena_offset(0, 2, 0, 20).1 > 0 && arena_offset(1, 2, 0, 20).1 < 0, "facing each other across the centre");
+    fn the_centre_snaps_to_the_nearest_height_point() {
+        assert_eq!(arena_centre((64 * 512 + 256, 64 * 512 + 255)), (65 * 512, 64 * 512));
+        assert_eq!(arena_centre((65_535, 0)), (0, 0), "wraps");
+    }
+
+    #[test]
+    fn each_side_stands_on_its_own_slope_the_shaman_behind() {
+        let side_of = |(x, z): (i32, i32)| if x.abs() > z.abs() { if x > 0 { 1 } else { 3 } } else if z > 0 { 0 } else { 2 };
+        let spots: Vec<_> = (0..4).flat_map(|w| (0..30).map(move |k| (w, arena_offset(w, 4, k, 30)))).collect();
+        assert!(spots.iter().enumerate().all(|(i, (_, a))| spots[i + 1..].iter().all(|(_, b)| a != b)), "distinct");
+        assert!(spots.iter().all(|&(w, p)| side_of(p) == w), "each on its own side");
+        let depth = |(x, z): (i32, i32)| x.abs().max(z.abs());
+        assert!(spots.iter().all(|&(_, p)| depth(p) > FLOOR_HALF * CELL && depth(p) < ARENA_HALF_CELLS * CELL), "on the slope");
+        assert!(depth(shaman_offset(0, 4)) > spots.iter().map(|&(_, p)| depth(p)).max().unwrap(), "behind them");
+        assert_eq!((side_of(arena_offset(0, 2, 0, 5)), side_of(arena_offset(1, 2, 0, 5))), (0, 2), "two face each other");
     }
 }

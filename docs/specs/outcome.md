@@ -63,11 +63,13 @@ target"): the user's own design over the trace's one line, in `crates/game-core/
    (`remove_reincarnation`: nobody comes back from here on, and their stones are no longer drawn). It counts each
    tribe with people on the map (in the level's roster or not, `armageddon_sides`) has its followers counted by
    kind. Then every building, totem and vehicle goes, every unit but the shamans (wildmen and angels too), any fight
-   or formation in progress, and the trees around `at`. The arena is carved into the ground there (`arena_heights`):
-   a flat floor `ARENA_RADIUS_CELLS` (9) wide at the centre's height (at least `FLOOR_MIN`, above the sea), walled
-   by a `RIM_CELLS` (2) wide rim `RIM_HEIGHT` (400) higher that nobody walks up. As many fresh followers of each kind
-   are spawned per tribe on the floor, one wedge each, allies' wedges side by side (`arena_offset`, rows of 8 or more
-   from 2 cells out, so they stay inside); its shaman stands a row behind them (`shaman_offset`).
+   or formation in progress, and the trees around `at`. The arena is carved into the ground there, square, around
+   the height point nearest `at` (`arena_centre`, `arena_heights`): a flat floor `FLOOR_HALF` (4) cells out each
+   way at the centre's height (at least `FLOOR_MIN`, above the sea); on each of its 4 sides a slope `SLOPE_CELLS`
+   (4) deep rising `SLOPE_STEP` (80) a cell, walkable; behind them a rim `RIM_CELLS` (2) wide, `RIM_HEIGHT` (400)
+   higher, a cliff nobody walks up. As many fresh followers of each kind are spawned per tribe on a slope of its
+   own (two tribes face each other; allies on neighbouring slopes), in rows from the slope's foot up
+   (`arena_offset`); its shaman stands at the top behind them (`shaman_offset`).
 2. While a match is active, `GameMap::armageddon()` returns `Some(at)` (the client camera's target), the economy and
    the AI are suspended, and `GameMap::apply` rejects every `Command`.
 3. `ArmageddonMatch` (a `Coordinator` no unit links to) holds combat off for `GATHERING` (5 s). Then it fights:
@@ -75,8 +77,9 @@ target"): the user's own design over the trace's one line, in `crates/game-core/
    (`WorldEvent::StrikeBack`), since sight alone would leave the wedges apart. No shaman is auto-attacked, and no
    shaman auto-attacks (`spotting::first_seen`): only the fighters settle it.
 4. Every turn of the fight, a tribe still in it whose followers are all dead is out: its shaman's shield drops
-   (`WorldEvent::Shield { steps: 0 }`) and lightning strikes her (`DamageKind::Lightning`); with no site left, she
-   does not come back. The tribes still standing keep their shaman shielded (`SHIELD_STEPS`, topped up
+   (`WorldEvent::Shield { steps: 0 }`) and a bolt strikes where she stands: the Lightning spell's own effect
+   (`lightning::effect`, drawn like any cast), cast by nobody so it spares no shaman; with no site left, she does
+   not come back. The tribes still standing keep their shaman shielded (`SHIELD_STEPS`, topped up
    every turn).
 5. Once the standing tribes are all one side (`Tribes::same_team`), it wins (`WorldEvent::Declare`). If every side
    falls the same turn it is a draw and nobody is struck; still undecided `STALEMATE` (180 s) into the fight, a draw.
