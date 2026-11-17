@@ -40,6 +40,15 @@ fn spawn_info(mut commands: Commands) {
     ));
 }
 
+/// Where the map comes from, for the info line: none for a sandbox (its name says it).
+fn level_label(name: &str, files: usize, index: usize) -> Option<String> {
+    match files {
+        _ if name.starts_with(game_core::map::SANDBOX_PREFIX) => None,
+        0 => Some("generated".to_string()),
+        n => Some(format!("level {}/{n}", index + 1)),
+    }
+}
+
 fn update_info(
     map: Res<CurrentMap>,
     levels: Res<LevelList>,
@@ -48,19 +57,32 @@ fn update_info(
     mut q: Query<(&mut Text, &mut Visibility), With<InfoText>>,
 ) {
     let shown = if dev.0 { Visibility::Inherited } else { Visibility::Hidden };
-    let level = match levels.files.len() {
-        0 => "generated".to_string(),
-        n => format!("level {}/{n}", levels.index + 1),
-    };
+    let level = level_label(&map.0.name, levels.files.len(), levels.index);
     let mode = editor.active.then(|| {
         let brush = if editor.placing_tree { "O: click to plant a tree (right click/Esc cancels)".to_string() } else { format!("R raise  F lower  T flatten  M mark  B bridge  [ ] radius ({})  O tree", editor.brush_radius) };
         format!("EDITOR  {brush}")
     });
-    let s = format!("{} ({level})\n{}", map.0.name, mode.unwrap_or_default());
+    let name = match level {
+        Some(level) => format!("{} ({level})", map.0.name),
+        None => map.0.name.clone(),
+    };
+    let s = format!("{name}\n{}", mode.unwrap_or_default());
     for (mut t, mut v) in &mut q {
         v.set_if_neq(shown);
         if t.0 != s {
             t.0.clone_from(&s);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_sandbox_shows_no_level_number() {
+        assert_eq!(level_label("Sandbox: walk", 25, 0), None);
+        assert_eq!(level_label("Level 3", 25, 2).as_deref(), Some("level 3/25"));
+        assert_eq!(level_label("Generated", 0, 0).as_deref(), Some("generated"));
     }
 }

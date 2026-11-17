@@ -1635,6 +1635,9 @@ impl GameMap {
     }
 }
 
+/// What every sandbox's name starts with.
+pub const SANDBOX_PREFIX: &str = "Sandbox: ";
+
 /// The buildings sandbox's name.
 pub const SANDBOX_BUILDINGS: &str = "Sandbox: buildings";
 
@@ -2816,6 +2819,13 @@ mod tests {
         map.buildings[i].inside = 1;
         assert_eq!(map.apply_event(WorldEvent::Raid { building: hut }), (None, vec![WorldEvent::Panic { unit: inside }]));
         assert!(matches!(map.unit(inside).unwrap().action, Action::Walking { .. }), "sent walking out by the door");
+    }
+
+    #[test]
+    fn every_sandbox_name_starts_with_the_prefix() {
+        for map in [GameMap::sandbox_walk(), GameMap::sandbox_units(), GameMap::sandbox_buildings(), GameMap::sandbox_worship(), GameMap::sandbox_spells(), GameMap::sandbox_vehicles(), GameMap::sandbox_bridge()] {
+            assert!(map.name.starts_with(SANDBOX_PREFIX), "{}", map.name);
+        }
     }
 
     #[test]

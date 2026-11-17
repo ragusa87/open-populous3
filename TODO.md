@@ -1904,7 +1904,6 @@ Additive and mostly independent of the tiers above: chip away at these alongside
 - [ ] Sandbox Buildings: placing and constructing buildings on its free ground (braves, wood and trees are there; every model and every construction stage are shown).
 - [ ] More sandboxes as features come (combat...).
 - [ ] Sandbox Worship: totems are drawn but nothing can be prayed at yet; the generated stand-ins are identical pillars.
-- [ ] Sandbox Walk: the info line still shows "level 1/n" for sandbox maps.
 
 ### Camp fire ([buildings.md](docs/specs/buildings.md) "Camp fire")
 - [ ] Guard posts' torches (objects 190-193, blended tile 92): draw them with `flame.rs` once guard posts have an original object (the firewarrior and prayer huts' torches burn). Checked this session: the only exe mechanism found that spawns a class-5/type-0xA fire scenery object on a building (pop3-rev-analysis.md "Burning building", the visible-flame addition) is specific to the burn-damage state and has exactly one caller in the whole exe - ruled out as the permanent-torch mechanism. Torches are driven by something else, not found this session.
