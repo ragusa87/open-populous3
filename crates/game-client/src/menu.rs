@@ -10,7 +10,7 @@
 //! Shortcuts page lists the keys and mouse of the keymap in use (`keymap::shortcut_lines`).
 //! The Audio page (from the main menu and the pause menu) sets the `audio_mix::Mixer` volumes (Enter steps up and
 //! wraps, Left/Right step down/up) and its Mute all box; leaving it saves them (`user_settings`).
-//! `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship|sandbox-spells|sandbox-vehicles|sandbox-bridge` picks where to start (screenshots start in the game).
+//! `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship|sandbox-spells|sandbox-vehicles|sandbox-bridge|sandbox-whirlwind` picks where to start (screenshots start in the game).
 
 use crate::audio::{AudioOut, DeviceMuted, PlaySound, SoundCue};
 use crate::audio_mix::{Channel, Level, Mixer, Slot};
@@ -55,6 +55,8 @@ pub enum Page {
     Main,
     Sandbox,
     Paused,
+    /// The pause menu in a sandbox: Restart too.
+    SandboxPaused,
     /// The shortcuts of the keymap in use (`keymap::shortcut_lines`).
     Shortcuts,
     Audio,
@@ -72,11 +74,20 @@ pub enum Start {
     SandboxSpells,
     SandboxVehicles,
     SandboxBridge,
+    SandboxWhirlwind,
+}
+
+impl Start {
+    pub fn is_sandbox(self) -> bool {
+        self != Start::NewGame
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Start(Start),
+    /// The current sandbox again, as it started.
+    Restart,
     Open(Page),
     Back,
     Resume,
@@ -92,6 +103,7 @@ pub enum Action {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
     Start(Start),
+    Restart,
     Resume,
     ToggleDev,
     CycleSpeed,
@@ -108,7 +120,7 @@ pub fn title(page: Page) -> &'static str {
     match page {
         Page::Main => "Open Populous",
         Page::Sandbox => "Sandbox",
-        Page::Paused => "Paused",
+        Page::Paused | Page::SandboxPaused => "Paused",
         Page::Shortcuts => "Shortcuts",
         Page::Audio => "Audio",
         Page::ConfirmLeave => "Leave this game?",
@@ -118,8 +130,9 @@ pub fn title(page: Page) -> &'static str {
 pub fn items(page: Page) -> &'static [(&'static str, Action)] {
     match page {
         Page::Main => &[("New game", Action::Start(Start::NewGame)), ("Sandbox", Action::Open(Page::Sandbox)), ("Audio", Action::Open(Page::Audio)), ("Quit", Action::Quit)],
-        Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Units", Action::Start(Start::SandboxUnits)), ("Buildings", Action::Start(Start::SandboxBuildings)), ("Worship", Action::Start(Start::SandboxWorship)), ("Spells", Action::Start(Start::SandboxSpells)), ("Vehicles", Action::Start(Start::SandboxVehicles)), ("Bridge", Action::Start(Start::SandboxBridge)), ("Back", Action::Back)],
+        Page::Sandbox => &[("Walk", Action::Start(Start::SandboxWalk)), ("Units", Action::Start(Start::SandboxUnits)), ("Buildings", Action::Start(Start::SandboxBuildings)), ("Worship", Action::Start(Start::SandboxWorship)), ("Spells", Action::Start(Start::SandboxSpells)), ("Vehicles", Action::Start(Start::SandboxVehicles)), ("Bridge", Action::Start(Start::SandboxBridge)), ("Whirlwind", Action::Start(Start::SandboxWhirlwind)), ("Back", Action::Back)],
         Page::Paused => &[("Resume", Action::Resume), ("Game speed", Action::CycleSpeed), ("Audio", Action::Open(Page::Audio)), ("Dev mode", Action::ToggleDev), ("Shortcuts", Action::Open(Page::Shortcuts)), ("Main menu", Action::Open(Page::ConfirmLeave))],
+        Page::SandboxPaused => &[("Resume", Action::Resume), ("Restart", Action::Restart), ("Game speed", Action::CycleSpeed), ("Audio", Action::Open(Page::Audio)), ("Dev mode", Action::ToggleDev), ("Shortcuts", Action::Open(Page::Shortcuts)), ("Main menu", Action::Open(Page::ConfirmLeave))],
         Page::Shortcuts => &[("Back", Action::Back)],
         Page::Audio => &[
             ("Master", Action::Volume(Slot::Master)),
@@ -203,6 +216,7 @@ impl MenuNav {
     pub fn activate(&mut self) -> Option<Outcome> {
         match items(self.page())[self.cursor()].1 {
             Action::Start(s) => Some(Outcome::Start(s)),
+            Action::Restart => Some(Outcome::Restart),
             Action::Resume => Some(Outcome::Resume),
             Action::ToggleDev => Some(Outcome::ToggleDev),
             Action::CycleSpeed => Some(Outcome::CycleSpeed),
@@ -251,6 +265,7 @@ pub fn start_from_env(start: Option<&str>, screenshot: bool) -> Option<Start> {
         Some("sandbox-spells") => Some(Start::SandboxSpells),
         Some("sandbox-vehicles") => Some(Start::SandboxVehicles),
         Some("sandbox-bridge") => Some(Start::SandboxBridge),
+        Some("sandbox-whirlwind") => Some(Start::SandboxWhirlwind),
         _ if screenshot => Some(Start::NewGame),
         _ => None,
     }
@@ -392,6 +407,7 @@ fn spawn_game_build(start: Start, levels: LevelList) -> Task<GameMap> {
             Start::SandboxSpells => new_game(GameMap::sandbox_spells()),
             Start::SandboxVehicles => new_game(GameMap::sandbox_vehicles()),
             Start::SandboxBridge => new_game(GameMap::sandbox_bridge()),
+            Start::SandboxWhirlwind => new_game(GameMap::sandbox_whirlwind()),
         }
     })
 }
@@ -452,15 +468,24 @@ impl GameSetup<'_> {
     }
 }
 
+/// The pause menu for the game `target` loaded: with Restart in a sandbox.
+pub fn paused_page(target: &LoadTarget) -> Page {
+    match target {
+        LoadTarget::Game { start, .. } if start.is_sandbox() => Page::SandboxPaused,
+        _ => Page::Paused,
+    }
+}
+
 /// Esc in the game (not taken by an open HUD menu): pause and free the mouse.
 pub(crate) fn pause_on_escape(
+    target: Res<LoadTarget>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut nav: ResMut<MenuNav>,
     mut cursor: ResMut<VirtualCursor>,
     mut state: ResMut<NextState<AppState>>,
 ) {
     if keys.clear_just_pressed(KeyCode::Escape) {
-        *nav = MenuNav::at(Page::Paused);
+        *nav = MenuNav::at(paused_page(&target));
         cursor.request = Some(false);
         state.set(AppState::Paused);
     }
@@ -494,6 +519,12 @@ fn apply(outcome: Option<Outcome>, game: &mut GameSetup, nav: &mut MenuNav, stat
             *game.target = crate::boot::LoadTarget::game(s);
             state.set(AppState::Loading);
         }
+        Some(Outcome::Restart) => {
+            if let LoadTarget::Game { start, .. } = *game.target {
+                *game.target = crate::boot::LoadTarget::game(start);
+                state.set(AppState::Loading);
+            }
+        }
         Some(Outcome::Resume) => {
             game.cursor.request = Some(true);
             state.set(AppState::Playing);
@@ -525,7 +556,7 @@ fn apply(outcome: Option<Outcome>, game: &mut GameSetup, nav: &mut MenuNav, stat
 
 /// Esc on the root page: resumes a paused game (the main menu leaves it to free the mouse).
 fn escape_outcome(page: Page) -> Option<Outcome> {
-    (page == Page::Paused).then_some(Outcome::Resume)
+    matches!(page, Page::Paused | Page::SandboxPaused).then_some(Outcome::Resume)
 }
 
 fn menu_keys(
@@ -787,6 +818,7 @@ mod tests {
     #[test]
     fn escape_on_a_root_page() {
         assert_eq!(escape_outcome(Page::Paused), Some(Outcome::Resume));
+        assert_eq!(escape_outcome(Page::SandboxPaused), Some(Outcome::Resume));
         assert_eq!(escape_outcome(Page::Main), None, "left to free the mouse");
     }
 
@@ -802,5 +834,19 @@ mod tests {
         assert_eq!(start_from_env(Some("sandbox-spells"), false), Some(Start::SandboxSpells));
         assert_eq!(start_from_env(Some("sandbox-vehicles"), false), Some(Start::SandboxVehicles));
         assert_eq!(start_from_env(Some("sandbox-bridge"), false), Some(Start::SandboxBridge));
+    }
+
+    #[test]
+    fn a_sandbox_pauses_with_restart_a_game_without() {
+        use crate::boot::{GameStep, LoadTarget};
+        let playing = |start| LoadTarget::Game { start, step: GameStep::Built };
+        assert_eq!(paused_page(&playing(Start::SandboxWhirlwind)), Page::SandboxPaused);
+        assert_eq!(paused_page(&playing(Start::SandboxWalk)), Page::SandboxPaused);
+        assert_eq!(paused_page(&playing(Start::NewGame)), Page::Paused);
+        assert!(!items(Page::Paused).iter().any(|e| e.1 == Action::Restart));
+        let mut nav = MenuNav::at(Page::SandboxPaused);
+        nav.set_cursor(1);
+        assert_eq!(nav.activate(), Some(Outcome::Restart));
+        assert_eq!(start_from_env(Some("sandbox-whirlwind"), false), Some(Start::SandboxWhirlwind));
     }
 }

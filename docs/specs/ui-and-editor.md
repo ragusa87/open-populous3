@@ -199,7 +199,7 @@ and enters a `ready` span: captures (`dev`) and `tools/trace_top.py` count from 
 ## Main menu (`menu.rs`)
 Shown before the game over the first map: New game (the level from the command line, PgUp/PgDn list: the original
 `levlNNNN.dat` files in level-number order, any file name case, `world::sort_levels`),
-Sandbox > Walk, Units, Buildings, Worship, Spells, Vehicles, Bridge (the ground of every sandbox shows a grid along the cell borders, `world::ShowGrid`,
+Sandbox > Walk, Units, Buildings, Worship, Spells, Vehicles, Bridge, Whirlwind (the ground of every sandbox shows a grid along the cell borders, `world::ShowGrid`,
 `terrain_texture::draw_grid`; levels do not) (`GameMap::sandbox_walk`: small flat island, gentle ramp east, steep hill north, lake west, mesa ringed by cliffs south-east, each a few cells past the spawn; `GameMap::sandbox_worship`: a pyramid of knowledge south of the site, door
 facing the shaman, and north one totem of each look with 8 braves, worship.md; `GameMap::sandbox_spells`: every spell
 unlimited, Teleport too, not Bloodlust (`SpellBook::unlimited`: it would hide Ghost Army's tile), plus Armageddon
@@ -213,16 +213,18 @@ boats on the water by the shore (one manned), one adrift at sea, a balloon by th
 over (a tall one west, a lower one east, a mound on the south island), and an empty boat of tribe 1 by an island
 south across a strait, vehicles.md; `GameMap::sandbox_bridge`: two large islands a realistic stretch of open sea
 apart, the player's shaman alone near the home shore, a target cell at the far shore within Land Bridge's cast
-range but with margin, for `BRIDGE=`/`BRIDGE_TICKS` screenshots and videos), Quit.
+range but with margin, for `BRIDGE=`/`BRIDGE_TICKS` screenshots and videos; `GameMap::sandbox_whirlwind`: an island
+with a grove, a red village, braves of two tribes, a wood pile and a red boat at sea, a whirlwind of tribe 2 already
+cast on each of them at the start, once: restart it to watch again), Quit.
 Up/Down (W/S) move, Enter/Space pick, Esc/Backspace go back a page; the mouse hovers and clicks.
 Esc in the game (once an open view-presets menu is closed) pauses: the mouse is released (`VirtualCursor::request`)
-and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Game speed: x1/x2/x4/x8 (cycles), Dev mode: on/off (shortcuts.md), Shortcuts > (the
+and the pause menu shows over the frozen, dimmed game: Resume (or Esc), Game speed: x1/x2/x4/x8 (cycles), Dev mode: on/off (shortcuts.md), in a sandbox Restart (the same sandbox built afresh, `paused_page`), Shortcuts > (the
 keys and mouse of the keymap in use, shortcuts.md; `MENU=shortcuts` opens it for shots), Main menu >
 "Leave this game?" No / Yes.
 Resuming or starting a game captures the mouse again.
 `AppState::Loading | Menu | Playing | Paused`: gameplay systems (input, simulation, HUD actions) are in the `Gameplay` set and only run
 while playing. Behind the menu the game camera is off (no terrain, units or HUD drawn); the menu and the cursor
-are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship|sandbox-spells|sandbox-vehicles|sandbox-bridge` picks the start; screenshots start in the game by default.
+are on an overlay camera (`OverlayCamera`, order 1) that clears the window in the menu and draws over the game otherwise. `POP3_START=menu|game|sandbox-walk|sandbox-units|sandbox-buildings|sandbox-worship|sandbox-spells|sandbox-vehicles|sandbox-bridge|sandbox-whirlwind` picks the start; screenshots start in the game by default.
 
 ## Game speed (`game_speed.rs`)
 P pauses the simulation only: the camera, hovering, selecting and the HUD keep working, units and their
