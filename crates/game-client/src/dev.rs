@@ -326,6 +326,20 @@ pub fn swarm_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bo
     true
 }
 
+/// `WHIRLWIND=x,z` (cells): another tribe's whirlwind there, cast from 8 cells west, then `ticks` run at once (with
+/// `GAME_SPEED=0`: its funnel, dust trail and whoever it lifted by then). False when `at` does not parse.
+pub fn whirlwind_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
+    let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
+    let (at, origin) = (world_units(Vec2::new(x, z)), world_units(Vec2::new(x - 8.0, z)));
+    let ground = map.terrain.height_at(at.0 as u32, at.1 as u32, pop3_format::WORLD_UNITS_PER_CELL);
+    let mut rng = map.rng;
+    let whirlwind = game_core::whirlwind::effect(PLAYER.next(), at, origin, ground, &mut rng);
+    map.rng = rng;
+    map.add_effect(whirlwind);
+    map.run(game_core::time::Ticks::new(ticks));
+    true
+}
+
 /// `ARMAGEDDON=x,z` (cells): the player casts Armageddon there, then `ticks` run at once: the arena gathered, then
 /// (past `armageddon::GATHERING`) the fight, until one side is left (`game_core::armageddon`). False when `at` does not parse. Grants itself one shot of Armageddon right before
 /// casting (`SpellBook::unlimited` deliberately leaves it unavailable, same as Bloodlust - `GameMap::outcome`'s
@@ -711,6 +725,10 @@ fn screenshot(
         if let Ok(at) = std::env::var("SWARM") {
             let ticks = std::env::var("SWARM_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
             swarm_demo(&mut map.0, &at, ticks);
+        }
+        if let Ok(at) = std::env::var("WHIRLWIND") {
+            let ticks = std::env::var("WHIRLWIND_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            whirlwind_demo(&mut map.0, &at, ticks);
         }
         if let Ok(at) = std::env::var("ARMAGEDDON") {
             let ticks = std::env::var("ARMAGEDDON_TICKS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);

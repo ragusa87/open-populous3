@@ -27,6 +27,16 @@ pub const VOLCANO_ROCK_SPRITES: std::ops::RangeInclusive<usize> = 346..=349;
 /// The splash where someone goes into the sea, 16 frames over its 16-turn life (pop3-rev-analysis.md "Drowning
 /// splash").
 pub const SPLASH_SPRITES: std::ops::RangeInclusive<usize> = 1304..=1319;
+/// A whirlwind's funnel segments, one fixed frame each (alpha, tint 2), its dust puffs (8 frames over their 8 turns)
+/// and the branch it tears off a tree (alpha, dark tints), pop3-rev-analysis.md "Whirlwind mechanics".
+pub const WHIRLWIND_FUNNEL_SPRITES: std::ops::RangeInclusive<usize> = 1136..=1151;
+pub const WHIRLWIND_DUST_SPRITES: std::ops::RangeInclusive<usize> = 1152..=1159;
+pub const WHIRLWIND_BRANCH_SPRITES: std::ops::RangeInclusive<usize> = 1584..=1592;
+/// Palette entries `data/alpha.dat` gives a whirlwind's tint 2 (gold) and its colour classes −2 (red-orange) and −1
+/// (orange) in the Direct3D build (pop3-rev-analysis.md "Whirlwind mechanics").
+pub const WHIRLWIND_GOLD: usize = 155;
+pub const WHIRLWIND_RED: usize = 139;
+pub const WHIRLWIND_ORANGE: usize = 153;
 /// Teal unit figures (16 x 23) in `EFFECT_SPRITE_FILE`, in unit model order: brave, warrior, preacher,
 /// spy, firewarrior, shaman. Identified by eye.
 pub const UNIT_FIGURES: std::ops::RangeInclusive<usize> = 75..=80;
