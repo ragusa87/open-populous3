@@ -629,6 +629,13 @@ impl GameMap {
 /// The vehicles sandbox's name.
 pub const SANDBOX_VEHICLES: &str = "Sandbox: vehicles";
 
+/// The whirlwind sandbox's name.
+pub const SANDBOX_WHIRLWIND: &str = "Sandbox: whirlwind";
+
+/// Where the whirlwind sandbox's whirlwinds are cast (cells from the map's middle): the grove, the braves, the wood
+/// pile and the sea by the boat; one more on the village's first hut.
+pub const SANDBOX_WHIRLWIND_TARGETS: [(i32, i32); 4] = [(6, -7), (-2, -6), (-2, 6), (20, 0)];
+
 /// The vehicles sandbox's hills, to fly balloons over: offset from the map's middle (cells), radius (cells), height.
 pub const SANDBOX_VEHICLE_HILLS: [(i32, i32, i32, i32); 3] = [(-13, -6, 4, 500), (13, 0, 3, 250), (0, 21, 2, 200)];
 
@@ -798,6 +805,66 @@ impl GameMap {
         let sites = vec![ReincarnationSite::at_cell(TribeId::Blue, site_cell, terrain.get(site_cell.0, site_cell.1))];
         let mut map = GameMap { theme: Some(Self::BRIDGE_THEME), spell_books: per_player(SpellBook::unlimited()), ..GameMap::bare("Sandbox: bridge", terrain, sites) }.with_shamans();
         map.trees = scatter(&map.terrain, 3, &[site_cell], 20);
+        map.recompute_shading_all();
+        map
+    }
+
+    /// Sandbox showing the Whirlwind (`POP3_START=sandbox-whirlwind`, or Sandbox > Whirlwind in the menu): an island
+    /// in the sea with the player's site and shaman west; a grove north-east, a red village south-east, braves of
+    /// both tribes and a pile of wood in the open, and a red boat out at sea east. Tribe 2 has a whirlwind already
+    /// cast at each of `SANDBOX_WHIRLWIND_TARGETS` when it starts (each from 6 cells west of it, so it drifts east
+    /// once done homing). Nothing repeats: restart it from the pause menu.
+    pub fn sandbox_whirlwind() -> Self {
+        use crate::vehicle::{Vehicle, VehicleKind};
+        const C: i32 = MAP_SIZE as i32 / 2;
+        let mut terrain = Heightmap::new(MAP_SIZE);
+        for z in 0..MAP_SIZE as i32 {
+            for x in 0..MAP_SIZE as i32 {
+                if (x - C).pow(2) + (z - C).pow(2) <= 14 * 14 {
+                    terrain.set(x, z, 64);
+                }
+            }
+        }
+        let site = (C - 8, C);
+        let sites = vec![ReincarnationSite::at_cell(TribeId::Blue, site, terrain.get(site.0, site.1))];
+        let mut map = GameMap::sandbox_bare(SANDBOX_WHIRLWIND, terrain, sites).with_shamans();
+        let at = |dx: i32, dz: i32| crate::slots::cell_centre((C + dx, C + dz));
+        let corner = |dx: i32, dz: i32| (((C + dx) * 512) as u16, ((C + dz) * 512) as u16);
+        for dz in -9..=-5 {
+            for dx in 4..=9 {
+                if (dx + dz) % 2 == 0 {
+                    map.trees.push(Tree::new((C + dx, C + dz), (dx + dz).rem_euclid(6) as u8, crate::tree::MAX_SIZE));
+                }
+            }
+        }
+        for (kind, (dx, dz), people) in [(BuildingKind::Hut { size: 2 }, (3, 5), 3), (BuildingKind::Hut { size: 1 }, (8, 4), 2)] {
+            let (x, z) = corner(dx, dz);
+            let b = Building::new(kind, TribeId::Red, x, z, 4);
+            let (id, door, centre) = (map.add_building(b.clone()), b.door(), b.centre());
+            for _ in 0..people {
+                map.spawn(TribeId::Red, UnitKind::Brave, centre).inside = Some(crate::unit::Inside { building: id, door });
+            }
+        }
+        for n in 0..6 {
+            map.spawn(if n % 2 == 0 { TribeId::Red } else { TribeId::Blue }, UnitKind::Brave, at(-3 + n % 3, -7 + n / 3));
+        }
+        let (px, pz) = at(-3, 5);
+        for k in 0..6u16 {
+            map.wood.push(WoodPiece::new(px + (k % 3) * 120, pz + (k / 3) * 120));
+        }
+        map.add_vehicle(Vehicle::new(VehicleKind::Boat, TribeId::Red, at(20, 1), crate::angle::Angle::new(512)));
+        let targets = SANDBOX_WHIRLWIND_TARGETS.map(|(dx, dz)| at(dx, dz));
+        let village = map.buildings.first().map(|b| b.centre());
+        for to in targets.into_iter().chain(village) {
+            let origin = (to.0.wrapping_sub(6 * 512), to.1);
+            let ground = map.terrain.height_at(to.0 as u32, to.1 as u32, WORLD_UNITS_PER_CELL);
+            let mut rng = map.rng;
+            let whirlwind = crate::whirlwind::effect(TribeId::Yellow, to, origin, ground, &mut rng);
+            map.rng = rng;
+            map.add_effect(whirlwind);
+        }
+        map.update_walls();
+        map.count_inside();
         map.recompute_shading_all();
         map
     }
@@ -2889,7 +2956,7 @@ mod tests {
 
     #[test]
     fn every_sandbox_name_starts_with_the_prefix() {
-        for map in [GameMap::sandbox_walk(), GameMap::sandbox_units(), GameMap::sandbox_buildings(), GameMap::sandbox_worship(), GameMap::sandbox_spells(), GameMap::sandbox_vehicles(), GameMap::sandbox_bridge()] {
+        for map in [GameMap::sandbox_walk(), GameMap::sandbox_units(), GameMap::sandbox_buildings(), GameMap::sandbox_worship(), GameMap::sandbox_spells(), GameMap::sandbox_vehicles(), GameMap::sandbox_bridge(), GameMap::sandbox_whirlwind()] {
             assert!(map.name.starts_with(SANDBOX_PREFIX), "{}", map.name);
         }
     }
@@ -3865,6 +3932,20 @@ mod tests {
         (shaman.x, shaman.z) = (world(home_shore.0), world(home_shore.1));
         let target = (world(islet_shore.0), world(islet_shore.1));
         assert!(m.in_cast_range(TribeId::Blue, SpellKind::LandBridge, target), "Land Bridge reaches the south-west islet from the home island's own shore");
+    }
+
+    #[test]
+    fn the_whirlwind_sandbox_starts_with_a_whirlwind_over_each_target_one_at_sea() {
+        let mut m = GameMap::sandbox_whirlwind();
+        let whirlwinds: Vec<(u16, u16)> = m.effects.iter().filter(|(_, e)| matches!(e.kind, EffectKind::Whirlwind(_))).map(|(_, e)| (e.x, e.z)).collect();
+        assert_eq!(whirlwinds.len(), SANDBOX_WHIRLWIND_TARGETS.len() + 1);
+        assert!(whirlwinds.iter().any(|&(x, z)| crate::unit::is_sea(&m.terrain, (crate::unit::cell_of(x), crate::unit::cell_of(z)))), "one over the sea");
+        let (trees, wood) = (m.trees.iter().map(|t| t.size as u32).sum::<u32>(), m.wood.len());
+        m.run(Ticks::new(150));
+        assert!(m.trees.iter().map(|t| t.size as u32).sum::<u32>() < trees, "the grove torn");
+        assert!(m.units.iter().any(|u| u.thrown()) || m.wood.len() != wood, "people or wood flying");
+        m.run(Ticks::new(100));
+        assert!(!m.effects.iter().any(|(_, e)| matches!(e.kind, EffectKind::Whirlwind(_))), "over, nothing repeats");
     }
 
     #[test]
