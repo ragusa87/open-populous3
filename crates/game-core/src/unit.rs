@@ -107,6 +107,16 @@ pub const HARD_LANDING: i16 = -200;
 /// `FALL_OUT_OF_WW_DAMAGE` [exe, measured]: not in `constant.dat`, so no balance entry.
 pub const FALL_DAMAGE: u16 = 700;
 
+/// What a hard landing at vertical speed `speed` costs: `FALL_DAMAGE` (measured on blown landings); out of a
+/// whirlwind, `FALL_DAMAGE` per `HARD_LANDING` of speed, so a brave thrown from the top of the funnel dies and a
+/// warrior survives (`[ours]`, reported, not traced: the trace has one flat amount, docs/todo whirlwind).
+pub fn fall_damage(speed: i16, out_of_whirlwind: bool) -> u16 {
+    if !out_of_whirlwind {
+        return FALL_DAMAGE;
+    }
+    (FALL_DAMAGE as i32 * speed as i32 / HARD_LANDING as i32).clamp(FALL_DAMAGE as i32, u16::MAX as i32) as u16
+}
+
 /// Ground recovery (`Action::Settling`, pop3-rev-analysis.md "Tumbling and ground recovery"): each wait round is
 /// `4..=31` turns [exe, measured], rolled off the shared LCG there.
 const SETTLE_WAIT_MIN: u32 = 4;
@@ -523,8 +533,8 @@ pub enum UnitEvent {
     /// The build/rebuild ritual is firing pillar slot `slot`: the caller sends a standard shot there
     /// (`GameMap::fire_site_pillar`).
     FireSitePillar { slot: u8 },
-    /// Thrown, it hit the ground hard (`HARD_LANDING`): the caller hurts it `FALL_DAMAGE`.
-    HardLanding,
+    /// Thrown, it hit the ground hard (`HARD_LANDING`): the caller hurts it `damage` (`fall_damage`).
+    HardLanding { damage: u16 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -614,6 +624,8 @@ pub struct Unit {
     /// An Angel of Death's own state, its flight, kills and remaining life: `None` for everyone else, always
     /// `Some` for one (`GameMap::tend_angels_of_death`, `angel_of_death.rs`).
     pub angel: Option<crate::angel_of_death::Angel>,
+    /// Thrown out of a whirlwind and not landed yet: its landing hurts by its speed (`fall_damage`).
+    pub out_of_whirlwind: bool,
 }
 
 /// A unit on the ground and not tumbling: only `Unit::pickable` makes one, so whatever takes it can
@@ -652,6 +664,7 @@ impl Unit {
             facing: 0,
             health: Health::full(kind.max_health()),
             hurt: Hurt::default(),
+            out_of_whirlwind: false,
             taunted: None,
             motion: Motion::STILL,
             statuses: Statuses::default(),
@@ -1512,8 +1525,9 @@ impl Unit {
             return None;
         }
         let cell = self.cell();
+        let whirled = std::mem::take(&mut self.out_of_whirlwind);
         if self.action == Action::Tumbling && touchdown.speed <= HARD_LANDING && !self.health.is_zero() && !is_sea(ground.terrain(), cell) {
-            return Some(UnitEvent::HardLanding);
+            return Some(UnitEvent::HardLanding { damage: fall_damage(touchdown.speed, whirled) });
         }
         if self.health.is_zero() {
             self.die(true);
@@ -1612,6 +1626,7 @@ impl Unit {
     /// Thrown out of a whirlwind's spiral at `velocity`, by tribe `by`'s spell: an ordinary tumble from there.
     pub(crate) fn thrown_by(&mut self, velocity: Velocity, by: Option<Owner>) {
         self.hurt.hit(by);
+        self.out_of_whirlwind = true;
         self.motion = Motion::flying(velocity, self.motion.height.unwrap_or(0));
         self.action = Action::Tumbling;
     }
@@ -2693,12 +2708,19 @@ mod tests {
     }
 
     #[test]
+    fn out_of_a_whirlwind_the_fall_hurts_by_its_speed_killing_a_brave_from_the_top() {
+        assert_eq!(fall_damage(-376, false), FALL_DAMAGE);
+        assert_eq!(fall_damage(-200, true), FALL_DAMAGE);
+        assert!(fall_damage(-376, true) >= 1000 && fall_damage(-376, true) < 1800, "a brave dies, a warrior lives");
+    }
+
+    #[test]
     fn a_hard_landing_off_the_sea_is_reported_once_a_soft_one_is_not() {
         let mut t = land();
         let (mut u, site) = shaman_at((10, 10));
         u.fling(Velocity::new(0, 230, 0), 100);
         let events = run(&mut u, &t, &site, 20);
-        assert_eq!(events, [UnitEvent::HardLanding], "thrown up 230: lands at about -230");
+        assert!(matches!(events[..], [UnitEvent::HardLanding { damage: FALL_DAMAGE }]), "thrown up 230: lands at about -230, flat");
         assert!(matches!(u.action, Action::Settling { .. }), "then settles as usual");
         let (mut u, _) = shaman_at((10, 10));
         u.fling(Velocity::new(0, 120, 0), 100);
@@ -2706,7 +2728,7 @@ mod tests {
         let (mut u, _) = shaman_at((30, 30));
         sea_cell(&mut t, u.cell());
         u.fling(Velocity::new(0, 230, 0), 100);
-        assert!(!run(&mut u, &t, &site, 20).contains(&UnitEvent::HardLanding), "never on the sea");
+        assert!(!run(&mut u, &t, &site, 20).iter().any(|e| matches!(e, UnitEvent::HardLanding { .. })), "never on the sea");
     }
 
     #[test]

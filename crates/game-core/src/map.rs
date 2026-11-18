@@ -1666,9 +1666,9 @@ impl GameMap {
                 UnitEvent::AtDoor { building } => self.come_in(i, building),
                 UnitEvent::AtVehicle { vehicle } => self.board(i, vehicle),
                 UnitEvent::FireSitePillar { slot } => self.fire_site_pillar(i, slot),
-                UnitEvent::HardLanding => {
+                UnitEvent::HardLanding { damage } => {
                     let u = &self.units[i];
-                    let hit = WorldEvent::Damage { unit: u.id, amount: crate::unit::FALL_DAMAGE, kind: DamageKind::Fall, from: u.last_attacker() };
+                    let hit = WorldEvent::Damage { unit: u.id, amount: damage, kind: DamageKind::Fall, from: u.last_attacker() };
                     dirty.extend(self.apply_events(vec![hit]));
                 }
                 UnitEvent::Splashed => {
