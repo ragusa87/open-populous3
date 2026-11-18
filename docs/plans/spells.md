@@ -32,24 +32,6 @@ too) — reuse it as-is, no new effect module needed here.
   `PanickingBlast` — inferred, not explicitly confirmed, consistent with Shield blocking "most offensive spells"
   generally; revisit if a spec session finds otherwise.
 
-### Whirlwind / Tornado
-Motion is a genuine random walk ("implement something random") — no need to chase an exact step/bias model from
-the original, an approximate wander is fine (same spirit as the approximate hydraulic Erosion below). It exerts a
-lifting force on people (makes them fly), damages buildings, and can travel over water (not land-restricted).
-- Water visual (client-side `WorldView`, not simulation logic): passing over water, the water's base turns blue
-  and is drawn being pulled upward the same way the force lifts people (a waterspout look); settles back down the
-  same way in reverse when the funnel leaves.
-- Suggested shape (the user's own steer, not traced): like a fire effect, let the whirlwind's visual/force taper
-  down in size as it nears the end of its life, rather than an abrupt stop (matches the trace's "wanders 100
-  turns, then drifts away").
-- Lift/throw: the fall at release is what deals the damage, not continuous damage while lifted (reported, not
-  certain). Reported belief: lethal to a Brave (1000 hp) but survivable for a Warrior (1800 hp) — in tension with
-  the traced flat `FALL_OUT_OF_WW_DAMAGE` (700) constant, which alone would not kill a 1000 hp Brave; needs
-  reconciling (maybe cumulative/height-scaled, not flat) before implementation — **not resolved**.
-- Vehicles: the already-traced "simple blast" applies (occupants put out, then spin-and-explode — already written
-  up in `TODO.md`); additionally the lift mechanic may *also* catch vehicles directly, not just a blast tick —
-  reported as a hypothesis ("probably"), not confirmed, needs checking.
-
 ### Earthquake
 120 turns of shake; at turns 24/56/88 each building in 16×16 cells has a 20/128 chance to be shaken (occupants
 out, partial explosion — this part is itself an open question already flagged in `pop3-rev-analysis.md` "Open

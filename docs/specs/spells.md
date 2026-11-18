@@ -86,10 +86,19 @@ while the shaman is off the ground.
 After every cast: update normals, walkability and destroy buildings on uneven/flooded ground.
 Spells must only be cast through `Command::Cast` to stay deterministic.
 
-## Whirlwind (to implement)
-Not implemented: `SpellKind::Whirlwind` casts nothing (`Spell::at_point` returns `None`). What the original does,
-traced and measured (pop3-rev-analysis.md "Whirlwind mechanics", which has the derivation). One tick is one turn;
-distances in world units (512 per cell, heights 0..1024 per 4 cells).
+## Whirlwind
+`game_core::whirlwind`, an effect (`EffectKind::Whirlwind`), cast like a blast at once on release (no shot yet,
+TODO.md "Every spell flies from the shaman"); it remembers where the caster's shaman stood. What the original does,
+traced and measured (pop3-rev-analysis.md "Whirlwind mechanics", which has the derivation), and ours follows it
+except where noted. One tick is one turn; distances in world units (512 per cell, heights 0..1024 per 4 cells).
+
+Ours: the funnel's 16 segments (position, height, fixed frame, tint) are simulation state, re-placed every turn;
+people caught are `Action::Whirled` (units.md), moved by `GameMap::tend_whirled` right after the effects, then
+thrown into an ordinary `Tumbling`; branches and wood pieces carried are `GameMap::debris` (`whirlwind::Debris`),
+ticked there too; dust puffs are their own 8-turn effects (`EffectKind::WhirlwindDust`). Our own choices: a
+building is hit when its centre is in the cell; a thrown wood piece landing in the sea is lost; a carried wood piece
+is drawn with the branch's sprites. Not done: a vehicle's spin and explosion (only the simple blast), bees caught,
+plants (not modelled), the sounds and screams. `WHIRLWIND=x,z WHIRLWIND_TICKS=N` in a shot.
 
 ### Rules
 - Cast like a blast: aimed on the ground, range `SP_W_RANGE` 4096, released 6 turns into the cast jump. The effect
@@ -157,7 +166,7 @@ J() = one of −20..−13 or 12..19 at random (never 0)
   same gold), one frame per tick, 8 ticks, does not move; so about 8 puffs trail behind it. Over sea each puff is
   a water splash sound instead of silence.
 - Lifted people: the flung pose (`PersonAnim::Flung` 19, wildmen `WildmanAnim::Flung` 31, the shaman's flying
-  anim 61), drawn at their carried position; branches: sprites 1584-1592 (60 × 40, alpha, dark tints 8-15), one
+  anim 61), drawn at their carried position (`Pose::Flung`); branches: sprites 1584-1592 (60 × 40, alpha, dark tints 8-15), one
   frame per tick.
 - Dissipating: `lift = (left − 8) × 90` where `left` counts 23 down to 0, and the top segment is removed every
   tick: the bottom stays 1350 above the ground while the column shortens from the top, so it leaves the ground

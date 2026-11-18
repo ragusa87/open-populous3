@@ -28,7 +28,7 @@ trace notes.
 |---|---|---|
 | Blast | Partial | Push/damage/tumble physics match the trace. Missing: building damage (buildings have no health model for it yet), the fireball shot flying from the shaman first, angels of death/ghosts. |
 | Lightning | Partial | Kill, building fire and tree burn implemented. Open: whether the strike itself should panic nearby survivors (reported vs. trace mismatch, needs a live check), the carbonized-victim animation, the shaman's own shot. |
-| Whirlwind (tornado) | Todo | Not implemented at all (only specced: puts a vehicle's crew out, spins it, explodes like a destroyed boat). |
+| Whirlwind (tornado) | Partial | Funnel, steering, lifting and throwing people (hard landing), wood torn off buildings and trees, carried debris, its look (original sprites or ours). Missing: a vehicle's spin and explosion, bees caught, its sounds. |
 | Swarm (insect plague) | Partial | Wandering cloud, stinging, raiding and vehicle eviction implemented. Open: the 30-per-tribe/oldest-first cap, an aerial-map icon. |
 | Invisibility | Partial | Targeting exclusion and early-end-on-attack implemented. Missing: any client-side rendering (own units translucent, enemies hidden entirely). |
 | Hypnotism | Partial | Capture, recast priority, revert-on-timeout and the "stays permanent if the original tribe is wiped out" rule are all implemented and fairly settled. |
