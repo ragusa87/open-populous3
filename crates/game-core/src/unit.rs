@@ -101,6 +101,12 @@ pub const BURN_TICKS: Ticks = Ticks::new(70);
 /// On fire: lost a turn is its own max health divided by this, confirmed.
 pub const BURN_DIVISOR: u16 = 32;
 
+/// A thrown unit landing this fast or faster (vertical speed, down negative) is hurt `FALL_DAMAGE`, never on the sea
+/// (pop3-rev-analysis.md "Person physics": "Blown, landing").
+pub const HARD_LANDING: i16 = -200;
+/// `FALL_OUT_OF_WW_DAMAGE` [exe, measured]: not in `constant.dat`, so no balance entry.
+pub const FALL_DAMAGE: u16 = 700;
+
 /// Ground recovery (`Action::Settling`, pop3-rev-analysis.md "Tumbling and ground recovery"): each wait round is
 /// `4..=31` turns [exe, measured], rolled off the shared LCG there.
 const SETTLE_WAIT_MIN: u32 = 4;
@@ -512,6 +518,8 @@ pub enum UnitEvent {
     /// The build/rebuild ritual is firing pillar slot `slot`: the caller sends a standard shot there
     /// (`GameMap::fire_site_pillar`).
     FireSitePillar { slot: u8 },
+    /// Thrown, it hit the ground hard (`HARD_LANDING`): the caller hurts it `FALL_DAMAGE`.
+    HardLanding,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1042,7 +1050,9 @@ impl Unit {
             let below = |(x, z): (u16, u16)| terrain.height_at(x as u32, z as u32, WORLD_UNITS_PER_CELL);
             let touchdown;
             ((self.x, self.z), self.motion, touchdown) = physics::step((self.x, self.z), self.motion, below);
-            if touchdown.is_some() && let Some(event) = self.touch_down(ground) {
+            if let Some(touchdown) = touchdown
+                && let Some(event) = self.touch_down(ground, touchdown)
+            {
                 return Some(event);
             }
         }
@@ -1492,11 +1502,14 @@ impl Unit {
     /// is the sea) it stands up, or dies with no health left; in the sea it dies whatever its health. Anywhere
     /// else (a cliff, a building) it stands up for now. Landing dead in the sea splashes there and then, in place
     /// of `Died` (pop3-rev-analysis.md "Drowning splash": the landing routine's splash on water).
-    fn touch_down(&mut self, ground: &impl Ground) -> Option<UnitEvent> {
+    fn touch_down(&mut self, ground: &impl Ground, touchdown: physics::Touchdown) -> Option<UnitEvent> {
         if !self.is_alive() {
             return None;
         }
         let cell = self.cell();
+        if self.action == Action::Tumbling && touchdown.speed <= HARD_LANDING && !self.health.is_zero() && !is_sea(ground.terrain(), cell) {
+            return Some(UnitEvent::HardLanding);
+        }
         if self.health.is_zero() {
             self.die(true);
             return Some(if is_sea(ground.terrain(), cell) { UnitEvent::Splashed } else { UnitEvent::Died });
@@ -2656,6 +2669,23 @@ mod tests {
         u.fling(Velocity::new(0, 40, 0), 100);
         run(&mut u, &t, &site, 4);
         assert!(matches!(u.action, Action::Settling { .. }), "on a cliff: stands up for now, same as open ground");
+    }
+
+    #[test]
+    fn a_hard_landing_off_the_sea_is_reported_once_a_soft_one_is_not() {
+        let mut t = land();
+        let (mut u, site) = shaman_at((10, 10));
+        u.fling(Velocity::new(0, 230, 0), 100);
+        let events = run(&mut u, &t, &site, 20);
+        assert_eq!(events, [UnitEvent::HardLanding], "thrown up 230: lands at about -230");
+        assert!(matches!(u.action, Action::Settling { .. }), "then settles as usual");
+        let (mut u, _) = shaman_at((10, 10));
+        u.fling(Velocity::new(0, 120, 0), 100);
+        assert!(run(&mut u, &t, &site, 20).is_empty(), "too slow to hurt");
+        let (mut u, _) = shaman_at((30, 30));
+        sea_cell(&mut t, u.cell());
+        u.fling(Velocity::new(0, 230, 0), 100);
+        assert!(!run(&mut u, &t, &site, 20).contains(&UnitEvent::HardLanding), "never on the sea");
     }
 
     #[test]

@@ -100,6 +100,9 @@ pub enum DamageKind {
     /// An Angel of Death releasing a carried victim (`angel_of_death`): outright, any tribe, shield or no shield
     /// — the grab itself already ignored it, same spirit as `Swamp`'s own kill.
     AngelOfDeath,
+    /// A thrown unit's hard landing (`unit::FALL_DAMAGE`): any tribe, shield or no shield (pop3-rev-analysis.md
+    /// "Person physics").
+    Fall,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -219,11 +222,11 @@ pub struct GroundShake {
 /// about a ghost's own death looking different, not about being spared — she "has no real body", so the usual
 /// reason to spare the real shaman doesn't carry over); a swamp spares no one, not even its own caster.
 pub fn hurts(u: &Unit, kind: DamageKind, from: Option<Owner>) -> bool {
-    if !u.is_alive() || (u.statuses.shield.is_on() && !matches!(kind, DamageKind::Melee | DamageKind::Swamp | DamageKind::Lava)) {
+    if !u.is_alive() || (u.statuses.shield.is_on() && !matches!(kind, DamageKind::Melee | DamageKind::Swamp | DamageKind::Lava | DamageKind::Fall)) {
         return false;
     }
     match kind {
-        DamageKind::Melee | DamageKind::Fire | DamageKind::Swamp | DamageKind::AngelOfDeath => true,
+        DamageKind::Melee | DamageKind::Fire | DamageKind::Swamp | DamageKind::AngelOfDeath | DamageKind::Fall => true,
         DamageKind::Blast => from != Some(u.owner),
         DamageKind::Lightning | DamageKind::Lava => !(from == Some(u.owner) && u.kind == crate::unit::UnitKind::Shaman && !u.statuses.ghost),
         DamageKind::Swarm => from != Some(u.owner) && u.kind != crate::unit::UnitKind::AngelOfDeath && !(u.kind == crate::unit::UnitKind::Shaman && !u.statuses.ghost),
@@ -371,6 +374,19 @@ pub(crate) mod tests {
         let max = map.unit(enemy).unwrap().health.max();
         map.damage(enemy, 50, DamageKind::Fire, Some(Owner::Tribe(TribeId::Blue)));
         assert_eq!(map.unit(enemy).unwrap().health.current(), max, "a magical ranged attack, stopped like a spell");
+    }
+
+    #[test]
+    fn a_hard_landing_hurts_through_a_shield_and_counts_for_the_last_attacker() {
+        let (mut map, enemy, _) = with_enemy();
+        let max = map.unit(enemy).unwrap().health.max();
+        map.damage(enemy, 1, DamageKind::Blast, Some(Owner::Tribe(TribeId::Blue)));
+        map.unit_mut(enemy).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
+        map.unit_mut(enemy).unwrap().fling(Velocity::new(0, 230, 0), 0);
+        map.run(Ticks::new(20));
+        let u = map.unit(enemy).unwrap();
+        assert_eq!(u.health.current(), max - 1 - crate::unit::FALL_DAMAGE.min(max - 1));
+        assert_eq!(u.last_attacker(), Some(Owner::Tribe(TribeId::Blue)));
     }
 
     #[test]

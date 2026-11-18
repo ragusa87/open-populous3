@@ -410,8 +410,8 @@ mod tests {
         let b = map.spawn(TribeId::Blue, UnitKind::Firewarrior, at).id;
         map.apply(&Command::OrderUnit { player: TribeId::Blue, unit: b, order: Order::Attack { target: Target::Unit(t) } });
         let full = life(&map, t);
-        (0..20).for_each(|_| _ = map.tick());
-        assert_eq!(full - life(&map, t), 400);
+        let taken = (0..20).map(|_| { map.tick(); full - life(&map, t) }).take_while(|&lost| lost <= 400).last();
+        assert_eq!(taken, Some(400), "both bolts' damage; their stacked knockbacks then land it hard");
     }
 
     #[test]
