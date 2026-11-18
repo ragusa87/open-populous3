@@ -30,6 +30,9 @@ use std::path::Path;
 const GOLD_TINT: usize = 2;
 /// Our own colours without the original files (`[ours]`).
 const OUR_GOLD: [u8; 3] = [226, 178, 70];
+/// Over the sea, the funnel and its dust are drawn in this instead of the gold, original files or not (`[ours]`,
+/// reported: the trace's Direct3D build keeps the gold there).
+const WATER: [u8; 3] = [168, 214, 240];
 const OUR_RED: Color = Color::srgb(1.0, 0.3, 0.1);
 const OUR_ORANGE: Color = Color::srgb(0.9, 0.55, 0.1);
 /// Our own sprites' sizes: a funnel ring and a dust puff like the original's, a twig.
@@ -57,24 +60,39 @@ fn gold_lut(mut rgba: [[u8; 4]; 256], gold: [u8; 3]) -> [[u8; 4]; 256] {
     rgba
 }
 
-/// The original's frames (funnel, dust, branch) and the class tints (red-orange, orange).
-fn original_frames(data_dir: &Path) -> Result<([Vec<Frame>; 3], [Color; 2]), String> {
+/// The frames a whirlwind is drawn with: funnel and dust in gold and over water, the branch, and the class tints
+/// (red-orange, orange) multiplying the gold.
+struct Looks {
+    funnel: [Vec<Frame>; 2],
+    dust: [Vec<Frame>; 2],
+    branch: Vec<Frame>,
+    tints: [Color; 2],
+}
+
+/// The original's frames.
+fn original_frames(data_dir: &Path) -> Result<Looks, String> {
     let err = |e: pop3_format::LevelError| e.to_string();
     let bank = SpriteBank::load(data_dir, EFFECT_SPRITE_FILE).map_err(err)?;
     let palette = Theme::load(data_dir, 0).map_err(err)?.palette;
     let colour = |i: usize| palette.get(i).copied().ok_or(format!("no palette entry {i}"));
-    let lut = gold_lut(AlphaTable::load(data_dir, 0).map_err(err)?.rgba(&palette), colour(WHIRLWIND_GOLD)?);
-    let frames = |range: std::ops::RangeInclusive<usize>, centred: bool| {
+    let rgba = AlphaTable::load(data_dir, 0).map_err(err)?.rgba(&palette);
+    let (gold, water) = (gold_lut(rgba, colour(WHIRLWIND_GOLD)?), gold_lut(rgba, WATER));
+    let frames = |range: std::ops::RangeInclusive<usize>, centred: bool, lut: &[[u8; 4]; 256]| {
         range
             .map(|i| {
                 let sprite = bank.sprites.get(i).ok_or(format!("no sprite {i} in {EFFECT_SPRITE_FILE}"))?;
                 let origin = (sprite.width / 2, if centred { sprite.height / 2 } else { sprite.height.saturating_sub(1) });
-                Ok(alpha_picture_frame(&Picture { sprite: sprite.clone(), origin }, &lut))
+                Ok(alpha_picture_frame(&Picture { sprite: sprite.clone(), origin }, lut))
             })
             .collect::<Result<Vec<_>, String>>()
     };
     let tint = |i: usize| colour(i).map(|[r, g, b]| Color::srgb_u8(r, g, b));
-    Ok(([frames(WHIRLWIND_FUNNEL_SPRITES, false)?, frames(WHIRLWIND_DUST_SPRITES, false)?, frames(WHIRLWIND_BRANCH_SPRITES, true)?], [tint(WHIRLWIND_RED)?, tint(WHIRLWIND_ORANGE)?]))
+    Ok(Looks {
+        funnel: [frames(WHIRLWIND_FUNNEL_SPRITES, false, &gold)?, frames(WHIRLWIND_FUNNEL_SPRITES, false, &water)?],
+        dust: [frames(WHIRLWIND_DUST_SPRITES, false, &gold)?, frames(WHIRLWIND_DUST_SPRITES, false, &water)?],
+        branch: frames(WHIRLWIND_BRANCH_SPRITES, true, &gold)?,
+        tints: [tint(WHIRLWIND_RED)?, tint(WHIRLWIND_ORANGE)?],
+    })
 }
 
 fn frame_of((w, h): (usize, usize), origin: (usize, usize), pixel: impl Fn(f32, f32) -> Option<[u8; 4]>) -> Frame {
@@ -83,7 +101,7 @@ fn frame_of((w, h): (usize, usize), origin: (usize, usize), pixel: impl Fn(f32, 
 }
 
 /// Our funnel ring at `phase` (0..16): a thin swirling ellipse, brighter where the swirl's streaks pass.
-pub fn our_ring(phase: usize) -> Frame {
+pub fn our_ring(phase: usize, colour: [u8; 3]) -> Frame {
     let (w, h) = RING;
     let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
     frame_of(RING, (w / 2, h - 1), |x, y| {
@@ -92,19 +110,19 @@ pub fn our_ring(phase: usize) -> Frame {
         let band = (1.0 - ((r - 0.8) / 0.2).abs()).max(0.0);
         let swirl = 0.5 + 0.5 * (dy.atan2(dx) * 3.0 + phase as f32 / 16.0 * TAU).sin();
         let a = band * (0.25 + 0.75 * swirl);
-        (a > 0.02).then(|| [OUR_GOLD[0], OUR_GOLD[1], OUR_GOLD[2], (a * 200.0) as u8])
+        (a > 0.02).then(|| [colour[0], colour[1], colour[2], (a * 200.0) as u8])
     })
 }
 
 /// Our dust puff `k` of `DUST_FRAMES`: a soft cloud spreading and thinning.
-pub fn our_puff(k: usize) -> Frame {
+pub fn our_puff(k: usize, colour: [u8; 3]) -> Frame {
     let (w, h) = PUFF;
     let t = k as f32 / (DUST_FRAMES - 1) as f32;
     let (cx, cy, r) = (w as f32 / 2.0, h as f32 * 0.7, (0.25 + 0.7 * t) * h as f32 / 2.0);
     frame_of(PUFF, (w / 2, h - 1), |x, y| {
         let d = (((x - cx) / 1.6).powi(2) + (y - cy).powi(2)).sqrt() / r;
         let a = (1.0 - d).max(0.0) * (1.0 - t * 0.8);
-        (a > 0.02).then(|| [OUR_GOLD[0], OUR_GOLD[1], OUR_GOLD[2], (a * 140.0) as u8])
+        (a > 0.02).then(|| [colour[0], colour[1], colour[2], (a * 140.0) as u8])
     })
 }
 
@@ -126,16 +144,19 @@ pub fn our_twig(k: usize) -> Frame {
     })
 }
 
-fn our_frames() -> [Vec<Frame>; 3] {
-    [(0..SEGMENTS).map(our_ring).collect(), (0..DUST_FRAMES).map(our_puff).collect(), (0..BRANCH_FRAMES).map(our_twig).collect()]
+fn our_frames() -> Looks {
+    let ring = |c| (0..SEGMENTS).map(|k| our_ring(k, c)).collect();
+    let puff = |c| (0..DUST_FRAMES).map(|k| our_puff(k, c)).collect();
+    Looks { funnel: [ring(OUR_GOLD), ring(WATER)], dust: [puff(OUR_GOLD), puff(WATER)], branch: (0..BRANCH_FRAMES).map(our_twig).collect(), tints: [OUR_RED, OUR_ORANGE] }
 }
 
 #[derive(Resource)]
 pub struct WhirlwindAssets {
-    funnel: Vec<FrameAsset>,
-    /// The funnel's material per tint (gold, red-orange, orange).
+    /// Gold, then over water.
+    funnel: [Vec<FrameAsset>; 2],
+    /// The gold funnel's material per land tint (gold, red-orange, orange).
     funnel_tints: [Handle<StandardMaterial>; 3],
-    dust: Vec<FrameAsset>,
+    dust: [Vec<FrameAsset>; 2],
     dust_red: Handle<StandardMaterial>,
     branch: Vec<FrameAsset>,
 }
@@ -147,21 +168,25 @@ fn tinted(mats: &mut Assets<StandardMaterial>, base: &Handle<StandardMaterial>, 
 
 fn load_assets(levels: Res<LevelList>, mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     let original = levels.original.then(|| original_frames(&levels.data_dir).map_err(|e| warn!("original whirlwind sprites: {e}")).ok()).flatten();
-    let ([funnel, dust, branch], [red, orange]) = original.unwrap_or_else(|| (our_frames(), [OUR_RED, OUR_ORANGE]));
-    let funnel = upload_frames(&funnel, &mut images, &mut meshes, &mut mats);
-    let dust = upload_frames(&dust, &mut images, &mut meshes, &mut mats);
-    let branch = upload_frames(&branch, &mut images, &mut meshes, &mut mats);
-    let (Some(f), Some(d)) = (funnel.first().map(|f| f.material.clone()), dust.first().map(|d| d.material.clone())) else { return };
+    let looks = original.unwrap_or_else(our_frames);
+    let [red, orange] = looks.tints;
+    let mut upload = |frames: &[Frame]| upload_frames(frames, &mut images, &mut meshes, &mut mats);
+    let funnel = looks.funnel.each_ref().map(|f| upload(f));
+    let dust = looks.dust.each_ref().map(|d| upload(d));
+    let branch = upload(&looks.branch);
+    let (Some(f), Some(d)) = (funnel[0].first().map(|f| f.material.clone()), dust[0].first().map(|d| d.material.clone())) else { return };
     let funnel_tints = [f.clone(), tinted(&mut mats, &f, red), tinted(&mut mats, &f, orange)];
     let dust_red = tinted(&mut mats, &d, red);
     commands.insert_resource(WhirlwindAssets { funnel, funnel_tints, dust, dust_red, branch });
 }
 
-fn tint_index(t: Tint) -> usize {
+/// Which frames (0 gold, 1 water) a tint draws with, and which of the gold funnel's tinted materials, if any.
+pub fn look(t: Tint) -> (usize, Option<usize>) {
     match t {
-        Tint::Gold => 0,
-        Tint::RedOrange => 1,
-        Tint::Orange => 2,
+        Tint::Gold => (0, Some(0)),
+        Tint::RedOrange => (0, Some(1)),
+        Tint::Orange => (0, Some(2)),
+        Tint::Sea => (1, None),
     }
 }
 
@@ -228,7 +253,7 @@ impl WorldView for FunnelView {
 
     fn spawn(_: &(Id<Effect>, Effect), view: &mut EntityCommands, (_, assets, ..): &mut SystemParamItem<Self::Params>) -> Option<Self> {
         let assets = assets.as_ref()?;
-        Some(FunnelView { parts: spawn_parts(view, &assets.funnel, SEGMENTS)? })
+        Some(FunnelView { parts: spawn_parts(view, &assets.funnel[0], SEGMENTS)? })
     }
 
     fn update(&self, (_, e): &(Id<Effect>, Effect), _: SimNow, (map, assets, parts, eye, rig, curve): &mut SystemParamItem<Self::Params>) {
@@ -237,9 +262,11 @@ impl WorldView for FunnelView {
         for (index, &part) in self.parts.iter().enumerate() {
             let segment = w.segments().iter().find(|s| s.index as usize == index);
             let pose = segment.and_then(|s| place(&map.0, (s.x, s.z), s.height as f32 - ground(&map.0, (s.x, s.z)), width_scale(s.index), rig, curve, &eye));
-            let frame = segment.map_or(0, |s| s.frame as usize % assets.funnel.len());
-            let material = &assets.funnel_tints[segment.map_or(0, |s| tint_index(s.tint))];
-            show(parts, part, pose, &assets.funnel[frame], material);
+            let (set, tinted) = look(segment.map_or(Tint::Gold, |s| s.tint));
+            let frames = &assets.funnel[set];
+            let frame = &frames[segment.map_or(0, |s| s.frame as usize % frames.len())];
+            let material = tinted.map_or(&frame.material, |k| &assets.funnel_tints[k]);
+            show(parts, part, pose, frame, material);
         }
     }
 }
@@ -264,7 +291,7 @@ impl WorldView for DustView {
 
     fn spawn(_: &(Id<Effect>, Effect), view: &mut EntityCommands, (_, assets, ..): &mut SystemParamItem<Self::Params>) -> Option<Self> {
         let assets = assets.as_ref()?;
-        Some(DustView { part: spawn_parts(view, &assets.dust, 1)?[0] })
+        Some(DustView { part: spawn_parts(view, &assets.dust[0], 1)?[0] })
     }
 
     fn update(&self, (_, e): &(Id<Effect>, Effect), now: SimNow, (map, assets, parts, eye, rig, curve): &mut SystemParamItem<Self::Params>) {
@@ -272,8 +299,9 @@ impl WorldView for DustView {
         let start = Tick::from_wire(map.0.now.to_wire().wrapping_sub(e.left.done().get()));
         let secs = now.secs_since(start);
         let pose = (secs >= 0.0).then(|| place(&map.0, (e.x, e.z), 0.0, 1.0, rig, curve, eye)).flatten();
-        let frame = &assets.dust[dust_frame(secs, assets.dust.len())];
-        let material = if *tint == Tint::Gold { frame.material.clone() } else { assets.dust_red.clone() };
+        let frames = &assets.dust[look(*tint).0];
+        let frame = &frames[dust_frame(secs, frames.len())];
+        let material = if *tint == Tint::RedOrange { assets.dust_red.clone() } else { frame.material.clone() };
         show(parts, self.part, pose, frame, &material);
     }
 }
@@ -352,11 +380,19 @@ mod tests {
 
     #[test]
     fn our_sprites_have_the_originals_sizes_and_something_drawn() {
-        for f in (0..SEGMENTS).map(our_ring).chain((0..DUST_FRAMES).map(our_puff)).chain((0..BRANCH_FRAMES).map(our_twig)) {
+        let looks = our_frames();
+        for f in looks.funnel.iter().chain(&looks.dust).flatten().chain(&looks.branch) {
             assert!(f.rgba.chunks_exact(4).any(|px| px[3] > 0));
         }
-        let ring = our_ring(0);
+        let ring = our_ring(0, OUR_GOLD);
         assert_eq!((ring.width, ring.height, ring.origin), (80, 50, (40, 49)), "bottom-centred");
-        assert_ne!(our_ring(0).rgba, our_ring(4).rgba, "the phases differ");
+        assert_ne!(our_ring(0, OUR_GOLD).rgba, our_ring(4, OUR_GOLD).rgba, "the phases differ");
+        assert_ne!(our_ring(0, OUR_GOLD).rgba, our_ring(0, WATER).rgba, "water-coloured over the sea");
+    }
+
+    #[test]
+    fn over_the_sea_its_own_water_frames_else_the_gold_tinted() {
+        assert_eq!(look(Tint::Sea), (1, None));
+        assert_eq!(look(Tint::RedOrange), (0, Some(1)));
     }
 }

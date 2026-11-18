@@ -1,6 +1,6 @@
 //! Whirlwind (pop3-rev-analysis.md "Whirlwind mechanics"), an effect (`effect::EffectKind::Whirlwind`): an invisible
 //! mover dragging 16 jittered funnel segments, active `ACTIVE` turns (homing on its target `WANDER` of them, then
-//! drifting away from where the caster stood), then lifting off the ground for `DISSIPATE`. Every active turn it
+//! drifting away from where the caster stood), then shrinking from the top for `DISSIPATE`. Every active turn it
 //! acts on the cell under its bottom segment: people are lifted on a spiral (`Action::Whirled`, `GameMap::tend_whirled`)
 //! then thrown, buildings shed wood, trees lose wood and a branch, wood pieces are carried (`Debris`), vehicles get a
 //! simple blast. It drops a dust puff (`EffectKind::WhirlwindDust`) every turn.
@@ -18,7 +18,8 @@ use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// Turns it acts [exe].
 pub const ACTIVE: u32 = 200;
-/// Turns it lifts off after, acting on nothing [exe].
+/// Turns it shrinks after, acting on nothing [exe]: one segment off its top a turn, its bottom staying on the ground
+/// (reported: the trace's "lifts off" draws it rising into the sky, not what the game shows).
 pub const DISSIPATE: u32 = 24;
 /// The first turns, homing on its target; after, it drifts away from the caster [exe].
 pub const WANDER: u32 = 100;
@@ -52,6 +53,9 @@ pub const THROW_PUSH: i32 = 192;
 pub const THROW_LIFT: i16 = 230;
 /// A dust puff's life [exe].
 pub const DUST_TICKS: Ticks = Ticks::new(8);
+/// Over the sea, a water splash at its bottom every this many turns (`[ours]`: reported; the trace only has the
+/// splash sound on each dust puff there).
+pub const SPLASH_EVERY: u32 = 4;
 /// Ground blend bytes tinting the funnel ("Colour, progressive") [exe].
 const BLEND_RED: u8 = 0x7F;
 const BLEND_GOLD_AGAIN: u8 = 0xC8;
@@ -60,9 +64,11 @@ const BLEND_ORANGE: u8 = 0xD4;
 /// How a funnel segment or a dust puff is tinted over its gold (`data/alpha.dat`'s colour classes, Direct3D build).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tint {
-    /// Classes 3, 4, 5: none (dark land, the sea).
+    /// Classes 3, 4: none (dark land).
     #[default]
     Gold,
+    /// Class 5, the sea: water-coloured (reported: the trace's Direct3D build shows no change there).
+    Sea,
     /// Class −2: ground blend 0x80-0xC8, × #FF2500.
     RedOrange,
     /// Class −1: ground blend above 0xD4, × #DB8707.
@@ -110,7 +116,7 @@ pub fn effect(owner: impl Into<Owner>, at: (u16, u16), origin: (u16, u16), groun
     let phase = (rng.next_u32() & 15) as u8;
     let mut w = Whirlwind { x: at.0, z: at.1, origin, heading, steer, turn: 0, segments: Vec::with_capacity(SEGMENTS), bottom: at };
     w.segments = (0..SEGMENTS as u8).map(|i| Segment { x: at.0, z: at.1, height: 0, frame: phase.wrapping_sub(i) & 15, index: i, tint: Tint::Gold }).collect();
-    w.place(ground, 0, rng);
+    w.place(ground, rng);
     Effect::new(owner, at, Countdown::new(Ticks::new(ACTIVE + DISSIPATE)), EffectKind::Whirlwind(w))
 }
 
@@ -122,7 +128,7 @@ pub fn dust(owner: Owner, at: (u16, u16), tint: Tint) -> Effect {
 /// The bottom segment's tint over ground of blend byte `blend` (sea: `None`).
 pub fn funnel_tint(blend: Option<u8>) -> Tint {
     match blend {
-        None => Tint::Gold,
+        None => Tint::Sea,
         Some(b) if b > BLEND_ORANGE => Tint::Orange,
         Some(b) if b > BLEND_GOLD_AGAIN => Tint::Gold,
         Some(b) if b > BLEND_RED => Tint::RedOrange,
@@ -133,6 +139,7 @@ pub fn funnel_tint(blend: Option<u8>) -> Tint {
 /// A dust puff's tint: the 0xC8/0xD4 thresholds are overwritten in the original, so only red-orange or none [exe].
 pub fn dust_tint(blend: Option<u8>) -> Tint {
     match blend {
+        None => Tint::Sea,
         Some(b) if b > BLEND_RED => Tint::RedOrange,
         _ => Tint::Gold,
     }
@@ -177,8 +184,7 @@ impl Whirlwind {
         let (mx, mz) = angle::rotate((SPEED, 0), self.heading.steps());
         (self.x, self.z) = (self.x.wrapping_add(mx as u16), self.z.wrapping_add(mz as u16));
         let ground = world.terrain.height_at(self.x as u32, self.z as u32, WORLD_UNITS_PER_CELL);
-        let lift = if active { 0 } else { (ACTIVE + DISSIPATE - self.turn) as i32 - 8 } * SEGMENT_STEP;
-        self.place(ground, lift, rng);
+        self.place(ground, rng);
         let blend = blend_under(world, self.bottom);
         for i in 0..self.segments.len() {
             self.segments[i].tint = self.segments.get(i + 1).map_or(funnel_tint(blend), |below| below.tint);
@@ -188,18 +194,21 @@ impl Whirlwind {
             self.segments.remove(0);
         }
         events.push(WorldEvent::SpawnEffect(dust(owner, self.bottom, dust_tint(blend))));
+        if blend.is_none() && self.turn % SPLASH_EVERY == 0 {
+            events.push(WorldEvent::SpawnEffect(crate::splash::effect(owner, self.bottom)));
+        }
         self.steer(home, rng);
         events
     }
 
-    /// Re-places the segments from `TOP + lift` over `ground`, each one a random step from the one above.
-    fn place(&mut self, ground: i32, lift: i32, rng: &mut Lcg) {
-        let (mut x, mut z, mut h) = (self.x, self.z, ground + TOP + lift);
+    /// Re-places the segments still standing over `ground`, each a random step from the one above, at its own
+    /// index's height: `TOP - SEGMENT_STEP × (index + 1)`, so the bottom stays on the ground as the top goes.
+    fn place(&mut self, ground: i32, rng: &mut Lcg) {
+        let (mut x, mut z) = (self.x, self.z);
         for s in &mut self.segments {
             x = x.wrapping_add(jitter(rng) as u16);
             z = z.wrapping_add(jitter(rng) as u16);
-            h -= SEGMENT_STEP;
-            (s.x, s.z, s.height) = (x, z, h);
+            (s.x, s.z, s.height) = (x, z, ground + TOP - SEGMENT_STEP * (s.index as i32 + 1));
         }
         self.bottom = (x, z);
     }
@@ -479,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn lifts_off_shortening_from_the_top_and_ends_after_224_turns() {
+    fn shrinks_from_the_top_on_the_ground_and_ends_after_224_turns() {
         let mut map = land();
         cast(&mut map, AT);
         map.run(Ticks::new(ACTIVE + 1));
@@ -489,7 +498,8 @@ mod tests {
         let bottom = w.segments().last().unwrap();
         assert_eq!(bottom.index, 15);
         let ground = map.terrain.height_at(w.pos().0 as u32, w.pos().1 as u32, WORLD_UNITS_PER_CELL);
-        assert_eq!(bottom.height - ground, 1350, "the bottom leaves the ground at once");
+        assert_eq!(bottom.height - ground, 0, "the bottom stays on the ground");
+        assert_eq!(w.segments()[0].height - ground, 1260, "the top one gone");
         map.run(Ticks::new(15));
         assert!(whirlwind_of(&map).1.segments().is_empty());
         map.run(Ticks::new(DISSIPATE - 16));
@@ -516,7 +526,8 @@ mod tests {
             assert_eq!(red, turn);
             assert_eq!(w.segments.last().unwrap().tint, Tint::RedOrange);
         }
-        assert_eq!(funnel_tint(None), Tint::Gold);
+        assert_eq!(funnel_tint(None), Tint::Sea);
+        assert_eq!(dust_tint(None), Tint::Sea);
         assert_eq!(funnel_tint(Some(0x90)), Tint::RedOrange);
         assert_eq!(funnel_tint(Some(0xD0)), Tint::Gold);
         assert_eq!(funnel_tint(Some(0xE0)), Tint::Orange);
@@ -537,24 +548,26 @@ mod tests {
     }
 
     #[test]
-    fn a_person_caught_circles_up_then_is_thrown_and_lands_hard() {
+    fn a_brave_thrown_from_the_top_dies_landing_a_warrior_lives() {
         let mut map = land();
         let brave = map.spawn(TribeId::Red, UnitKind::Brave, AT).id;
+        let warrior = map.spawn(TribeId::Red, UnitKind::Warrior, AT).id;
         let id = cast(&mut map, AT);
         map.whirl(brave, id, 0);
+        map.whirl(warrior, id, 0);
         assert!(matches!(map.unit(brave).unwrap().action, Action::Whirled { by, .. } if by == id), "caught");
-        let max = map.unit(brave).unwrap().health.max();
-        let (mut highest, mut lowest_life, mut thrown) = (0, max, false);
-        for _ in 0..ACTIVE + DISSIPATE + 40 {
+        let (mut highest, mut brave_died) = (0, false);
+        for _ in 0..ACTIVE + DISSIPATE + 60 {
             map.tick();
-            let u = map.unit(brave).unwrap();
-            highest = highest.max(u.motion.height.unwrap_or(0));
-            lowest_life = lowest_life.min(u.health.current());
-            thrown |= u.action == Action::Tumbling;
+            let b = map.unit(brave);
+            highest = highest.max(b.and_then(|u| u.motion.height).unwrap_or(0));
+            brave_died |= b.is_none_or(|u| !u.is_alive());
         }
-        assert!(thrown && highest > 300 + 1000, "carried high then thrown: {highest}");
-        assert_eq!(lowest_life, max - crate::unit::FALL_DAMAGE, "a hard landing");
-        assert_eq!(map.unit(brave).unwrap().last_attacker(), Some(Owner::Tribe(TribeId::Blue)));
+        assert!(highest > 300 + 1000, "carried high: {highest}");
+        assert!(brave_died, "a brave does not survive the fall");
+        assert_eq!(map.kills[TribeId::Blue.as_usize()][TribeId::Red.as_usize()], 1, "the whirlwind's kill");
+        let w = map.unit(warrior).expect("a warrior survives");
+        assert!(w.is_alive() && w.health.current() < w.health.max());
     }
 
     #[test]
