@@ -251,9 +251,9 @@ impl Whirlwind {
     }
 }
 
-/// Whether a whirlwind lifts `u`: any tribe, not an angel of death, shielded, already lifted or held by an angel.
+/// Whether a whirlwind lifts `u`: any tribe, not one already at 0 life (its death held off), not an angel of death, shielded, already lifted or held by an angel.
 pub fn catchable(u: &crate::unit::Unit) -> bool {
-    u.is_alive() && u.kind != UnitKind::AngelOfDeath && !u.statuses.shield.is_on() && !matches!(u.action, Action::Whirled { .. } | Action::Grabbed { .. })
+    u.is_alive() && !u.health.is_zero() && u.kind != UnitKind::AngelOfDeath && !u.statuses.shield.is_on() && !matches!(u.action, Action::Whirled { .. } | Action::Grabbed { .. })
 }
 
 /// The ground blend byte under `at`, None over the sea.
@@ -571,6 +571,26 @@ mod tests {
     }
 
     #[test]
+    fn no_brave_thrown_from_the_top_survives_whatever_turn_it_lands_on() {
+        for seed in 0..8 {
+            let mut map = GameMap::sandbox_whirlwind().seeded(seed);
+            let mut thrown_high = std::collections::BTreeSet::new();
+            for _ in 0..ACTIVE + DISSIPATE + 60 {
+                map.tick();
+                for u in map.units.iter().filter(|u| u.kind == UnitKind::Brave && u.out_of_whirlwind) {
+                    let ground = map.terrain.height_at(u.x as u32, u.z as u32, WORLD_UNITS_PER_CELL);
+                    if u.motion.height.is_some_and(|h| h - ground > 1300) {
+                        thrown_high.insert(u.id);
+                    }
+                }
+            }
+            assert!(!thrown_high.is_empty());
+            let alive: Vec<_> = thrown_high.iter().filter(|&&id| map.unit(id).is_some_and(|u| u.is_alive())).collect();
+            assert!(alive.is_empty(), "seed {seed}: {alive:?} survived (a heal turn between the landing and its held-off death)");
+        }
+    }
+
+    #[test]
     fn whoever_stands_under_its_bottom_segment_is_caught() {
         let mut map = land();
         let mut rng = Lcg(5);
@@ -662,3 +682,4 @@ mod tests {
         assert_eq!(run(), run());
     }
 }
+

@@ -1376,8 +1376,9 @@ impl Unit {
     pub fn heals(&self) -> bool {
         self.kind.stats().heal.is_some()
             && self.is_alive()
+            && !self.health.is_zero()
             && !self.motion.airborne()
-            && !matches!(self.action, Action::Drowning { .. } | Action::Stranded { .. } | Action::OnFire { .. } | Action::Grabbed { .. })
+            && !matches!(self.action, Action::Drowning { .. } | Action::Stranded { .. } | Action::OnFire { .. } | Action::Grabbed { .. } | Action::Tumbling | Action::Whirled { .. })
             && !self.statuses.struck_by_lightning.is_on()
     }
 
@@ -2705,6 +2706,15 @@ mod tests {
         u.fling(Velocity::new(0, 40, 0), 100);
         run(&mut u, &t, &site, 4);
         assert!(matches!(u.action, Action::Settling { .. }), "on a cliff: stands up for now, same as open ground");
+    }
+
+    #[test]
+    fn a_unit_whose_death_is_held_off_on_landing_does_not_heal_back_to_life() {
+        let mut u = Unit { motion: Motion::STILL, action: Action::Tumbling, ..shaman_at((10, 10)).0 };
+        u.health = Health::new(0, SHAMAN_MAX_HEALTH);
+        assert!(!u.heals(), "no life left: dies at its next turn, whatever the heal turn");
+        u.health = Health::new(10, SHAMAN_MAX_HEALTH);
+        assert!(!u.heals(), "still tumbling");
     }
 
     #[test]
