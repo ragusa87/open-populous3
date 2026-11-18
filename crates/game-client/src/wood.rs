@@ -71,9 +71,14 @@ pub fn bundled_frame() -> Option<Frame> {
     Some(Frame { width, height, origin: (width / 2, height.saturating_sub(1)), rgba, scale: 1 })
 }
 
-fn load_sprite(levels: Res<LevelList>, mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
+/// A piece of wood's picture: the original pile when allowed, else the bundled one.
+pub fn wood_frame(levels: &LevelList) -> Option<Frame> {
     let original = levels.original.then(|| original_frame(&levels.data_dir).map_err(|e| warn!("original wood sprite: {e}")).ok()).flatten();
-    let Some(frame) = original.or_else(bundled_frame) else {
+    original.or_else(bundled_frame)
+}
+
+fn load_sprite(levels: Res<LevelList>, mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
+    let Some(frame) = wood_frame(&levels) else {
         warn!("bundled wood sprite does not decode: no wood drawn");
         return;
     };

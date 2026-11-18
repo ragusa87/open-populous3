@@ -1,7 +1,8 @@
 //! Whirlwind (`game_core::whirlwind`): its 16 funnel segments as the simulation places them every turn
 //! (camera-facing, bottom-centred, width `512 / (index + 1)` 256ths, tinted by their colour class), its dust puffs
 //! (`EffectKind::WhirlwindDust`, 8 frames over their 8 turns) and the debris it carries or throws
-//! (`GameMap::debris`). With the original files: `hfx0-0.dat`'s alpha sprites, tint 2 in the gold `data/alpha.dat`
+//! (`GameMap::debris`: a branch with its own sprites, a piece of wood as it lies on the ground, `wood::wood_frame`).
+//! With the original files: `hfx0-0.dat`'s alpha sprites, tint 2 in the gold `data/alpha.dat`
 //! gives it (pop3-rev-analysis.md "Whirlwind mechanics"). Without them (`--no-original`): our own rings, puffs and
 //! twigs (`[ours]`).
 
@@ -159,6 +160,8 @@ pub struct WhirlwindAssets {
     dust: [Vec<FrameAsset>; 2],
     dust_red: Handle<StandardMaterial>,
     branch: Vec<FrameAsset>,
+    /// A piece of wood as drawn on the ground.
+    wood: Option<FrameAsset>,
 }
 
 fn tinted(mats: &mut Assets<StandardMaterial>, base: &Handle<StandardMaterial>, tint: Color) -> Handle<StandardMaterial> {
@@ -174,10 +177,11 @@ fn load_assets(levels: Res<LevelList>, mut commands: Commands, mut images: ResMu
     let funnel = looks.funnel.each_ref().map(|f| upload(f));
     let dust = looks.dust.each_ref().map(|d| upload(d));
     let branch = upload(&looks.branch);
+    let wood = crate::wood::wood_frame(&levels).and_then(|f| upload(&[f]).pop());
     let (Some(f), Some(d)) = (funnel[0].first().map(|f| f.material.clone()), dust[0].first().map(|d| d.material.clone())) else { return };
     let funnel_tints = [f.clone(), tinted(&mut mats, &f, red), tinted(&mut mats, &f, orange)];
     let dust_red = tinted(&mut mats, &d, red);
-    commands.insert_resource(WhirlwindAssets { funnel, funnel_tints, dust, dust_red, branch });
+    commands.insert_resource(WhirlwindAssets { funnel, funnel_tints, dust, dust_red, branch, wood });
 }
 
 /// Which frames (0 gold, 1 water) a tint draws with, and which of the gold funnel's tinted materials, if any.
@@ -334,7 +338,10 @@ impl WorldView for DebrisView {
         let lift = d.motion.height.map_or(0.0, |h| h as f32 - ground(&map.0, (d.x, d.z)));
         let pose = place(&map.0, (d.x, d.z), lift.max(0.0), 1.0, rig, curve, eye);
         let k = (now.tick.to_wire() as usize + (seed(id.raw()) * 9.0) as usize) % assets.branch.len();
-        let frame = &assets.branch[k];
+        let frame = match (d.kind, &assets.wood) {
+            (game_core::whirlwind::DebrisKind::Wood, Some(wood)) => wood,
+            _ => &assets.branch[k],
+        };
         show(parts, self.part, pose, frame, &frame.material.clone());
     }
 }

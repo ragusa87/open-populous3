@@ -96,8 +96,8 @@ Ours: the funnel's 16 segments (position, height, fixed frame, tint) are simulat
 people caught are `Action::Whirled` (units.md), moved by `GameMap::tend_whirled` right after the effects, then
 thrown into an ordinary `Tumbling`; branches and wood pieces carried are `GameMap::debris` (`whirlwind::Debris`),
 ticked there too; dust puffs are their own 8-turn effects (`EffectKind::WhirlwindDust`). Our own choices: a
-building is hit when its centre is in the cell; a thrown wood piece landing in the sea is lost; a carried wood piece
-is drawn with the branch's sprites. Reported (by someone who played the original), followed here against the trace,
+building is hit when its centre is in the cell; a thrown wood piece landing in the sea is lost. A carried wood piece
+is drawn as it lies on the ground (`wood::wood_frame` [client]), a branch with its own sprites. Reported (by someone who played the original), followed here against the trace,
 `[ours]` until a spec session settles them: over the sea the funnel and its dust turn water-coloured (`Tint::Sea`,
 the same one-segment-a-turn climb; the trace's Direct3D build keeps the gold); it ends by shrinking from the top
 with its bottom staying on the ground (no lift), with a water splash at its bottom every `SPLASH_EVERY` (4) turns
