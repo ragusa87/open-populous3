@@ -381,7 +381,9 @@ A unit off the ground (`Motion::height` set) moves freely, every tick before its
   a `Touchdown` with its vertical speed. Higher ground in its way stops it there too.
 - A thrown unit (`Tumbling`) landing at `HARD_LANDING` (−200) or faster off the sea takes `FALL_DAMAGE`
   (`FALL_OUT_OF_WW_DAMAGE` 700, pop3-rev-analysis.md "Person physics"), shield or no shield, credited to its last
-  attacker (`UnitEvent::HardLanding`, `GameMap::damage` with `DamageKind::Fall`); ordinary falls never hurt.
+  attacker (`UnitEvent::HardLanding`, `GameMap::damage` with `DamageKind::Fall`); ordinary falls never hurt. Thrown
+  out of a whirlwind (`Unit::out_of_whirlwind`), it costs 700 per 200 of landing speed instead (`unit::fall_damage`,
+  reported, not traced: spells.md "Whirlwind").
 - Where it lands (`Unit::touch_down`, judged by its own mobility, so a boat's ground will be the sea):
   - in the sea: it drowns (`Drowning`, the same 16 turns as walking in, pop3-rev-analysis.md "Drowning"), or dies at
     once with no health left;
