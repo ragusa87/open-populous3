@@ -72,6 +72,15 @@ pub enum WorldEvent {
     Shove { attacker: UnitId },
     /// A challenge's waiting target taunts, one of 3 (`combat::challenge::taunts`, combat.md "Challenge").
     Taunted { unit: UnitId, at: Tick, variant: u8 },
+    /// Lifted by the whirlwind `by` (`GameMap::whirl`), its spiral starting at `step`.
+    Whirl { unit: UnitId, by: crate::id::Id<Effect>, step: u8 },
+    /// A whirlwind tears one load of wood off `building` (`GameMap::strip_wood`): dropped as a wood piece, the
+    /// building destroyed with none left.
+    StripWood { building: BuildingId },
+    /// A whirlwind tears one size off a tree of `cell`, and a branch it carries (`GameMap::tear_tree`).
+    TearTree { cell: (i32, i32), by: crate::id::Id<Effect> },
+    /// A whirlwind carries off the wood piece at `at` (`GameMap::lift_wood`).
+    LiftWood { at: (u16, u16), by: crate::id::Id<Effect> },
     /// Earthquake's own building-shake (`earthquake::Earthquake::shake`): one piece of wood lost outright, a large
     /// building's occupants out regardless, a partial explosion only if that was its last piece.
     Shake { building: BuildingId },

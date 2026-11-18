@@ -80,6 +80,7 @@ pub mod spotting;
 pub mod status;
 pub mod swamp;
 pub mod swarm;
+pub mod whirlwind;
 pub mod terrain;
 pub mod time;
 pub mod totem;

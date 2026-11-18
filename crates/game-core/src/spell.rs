@@ -52,6 +52,8 @@ pub enum Spell {
     AngelOfDeath { at: (u16, u16) },
     /// A Ghost Army at `at` (world units): `ghost_army::cast`.
     GhostArmy { at: (u16, u16) },
+    /// A whirlwind at `at` (world units), drifting away from the caster later: `whirlwind::effect`.
+    Whirlwind { at: (u16, u16) },
 }
 
 impl Spell {
@@ -77,7 +79,8 @@ impl Spell {
             SpellKind::Invisibility => Some(Spell::Invisibility { at }),
             SpellKind::AngelOfDeath => Some(Spell::AngelOfDeath { at }),
             SpellKind::GhostArmy => Some(Spell::GhostArmy { at }),
-            SpellKind::LandBridge | SpellKind::Flatten | SpellKind::Erosion | SpellKind::Whirlwind => None,
+            SpellKind::Whirlwind => Some(Spell::Whirlwind { at }),
+            SpellKind::LandBridge | SpellKind::Flatten | SpellKind::Erosion => None,
         }
     }
 
@@ -103,6 +106,7 @@ impl Spell {
             Spell::Swarm { .. } => Some(SpellKind::Swarm),
             Spell::AngelOfDeath { .. } => Some(SpellKind::AngelOfDeath),
             Spell::GhostArmy { .. } => Some(SpellKind::GhostArmy),
+            Spell::Whirlwind { .. } => Some(SpellKind::Whirlwind),
             Spell::Raise { .. } => None,
         }
     }
@@ -129,7 +133,8 @@ impl Spell {
             | Spell::Earthquake { .. }
             | Spell::Swarm { .. }
             | Spell::AngelOfDeath { .. }
-            | Spell::GhostArmy { .. } => return None,
+            | Spell::GhostArmy { .. }
+            | Spell::Whirlwind { .. } => return None,
         })
     }
 }

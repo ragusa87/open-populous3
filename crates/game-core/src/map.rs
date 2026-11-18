@@ -79,6 +79,8 @@ pub struct GameMap {
     pub shaman_omni: bool,
     /// Spell effects going on (`effect::Effect`), in the order they were added.
     pub effects: Registry<Effect>,
+    /// Branches and wood pieces a whirlwind carries or has thrown (`whirlwind::Debris`).
+    pub debris: Registry<crate::whirlwind::Debris>,
     /// Objects coordinating several units, one registry per kind (coordinator.rs).
     pub coordinators: Coordinators,
     /// Groups of units spacing themselves while walking to one shared move order's target (formation.rs); unlike
@@ -186,7 +188,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, effects: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, effects: Registry::default(), debris: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -228,6 +230,7 @@ impl GameMap {
             object_bank: 0,
             shaman_omni: false,
             effects: Registry::default(),
+            debris: Registry::default(),
             coordinators: Coordinators::default(),
             formations: Vec::new(),
             bolts: Registry::default(),
@@ -966,6 +969,7 @@ impl GameMap {
             | Spell::Firestorm { at }
             | Spell::Earthquake { at }
             | Spell::Swarm { at }
+            | Spell::Whirlwind { at }
             | Spell::AngelOfDeath { at }
             | Spell::GhostArmy { at }
             | Spell::MagicalShield { at }
@@ -1082,6 +1086,15 @@ impl GameMap {
             }
             Spell::Swarm { at } => {
                 self.add_effect(crate::swarm::effect(player, at));
+                None
+            }
+            Spell::Whirlwind { at } => {
+                let origin = self.shaman_of(player).map_or(at, |s| (s.x, s.z));
+                let ground = self.terrain.height_at(at.0 as u32, at.1 as u32, WORLD_UNITS_PER_CELL);
+                let mut rng = self.rng;
+                let whirlwind = crate::whirlwind::effect(player, at, origin, ground, &mut rng);
+                self.rng = rng;
+                self.add_effect(whirlwind);
                 None
             }
             Spell::AngelOfDeath { at } => {
@@ -1502,6 +1515,7 @@ impl GameMap {
         dirty.extend(self.apply_events(site_built));
         dirty.extend(self.tend_swamps());
         dirty.extend(self.tend_effects());
+        self.tend_whirled();
         dirty.extend(self.tend_fires());
         dirty.extend(self.tend_building_wear());
         dirty.extend(self.tend_building_foundations());
@@ -1818,7 +1832,7 @@ impl GameMap {
     /// events apply in order (`apply_events`); returns the ground they changed.
     fn tend_effects(&mut self) -> Vec<DirtyRect> {
         let (mut effects, mut rng) = (std::mem::take(&mut self.effects), self.rng);
-        let events: Vec<WorldEvent> = effects.iter_mut().flat_map(|(_, e)| e.tick(self.now, self, &mut rng)).collect();
+        let events: Vec<WorldEvent> = effects.iter_mut().flat_map(|(id, e)| e.tick(id, self.now, self, &mut rng)).collect();
         effects.retain(|_, e| !e.is_over());
         // A lava effect's own blend decays every turn even on a turn it fires no `WorldEvent` (still growing with
         // nothing mature to spread, or quietly fading/cooling): without its own dirty rect here, `shading`'s
@@ -1957,6 +1971,23 @@ impl GameMap {
                 if let Some(u) = self.unit_mut(unit) {
                     u.catch_fire(away);
                 }
+                None
+            }
+            WorldEvent::Whirl { unit, by, step } => {
+                self.whirl(unit, by, step);
+                None
+            }
+            WorldEvent::StripWood { building } => {
+                let (changed, out) = self.strip_wood(building);
+                follow_ups.extend(out);
+                changed
+            }
+            WorldEvent::TearTree { cell, by } => {
+                self.tear_tree(cell, by);
+                None
+            }
+            WorldEvent::LiftWood { at, by } => {
+                self.lift_wood(at, by);
                 None
             }
             WorldEvent::Raid { building } => {

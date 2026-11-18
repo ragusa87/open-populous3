@@ -125,7 +125,7 @@ pub fn state_of(map: &GameMap, unit: &Unit) -> Option<State> {
         Action::Idle | Action::Listening { .. } | Action::Walking { .. } | Action::Stranded { .. } | Action::Casting { .. } | Action::Landing | Action::Boarding { .. } | Action::Alighting { .. } | Action::Drowning { .. } | Action::Tumbling | Action::Settling { .. } | Action::Panicking { .. } | Action::OnFire { .. } | Action::Dying { .. } | Action::Dead { .. } | Action::BuildingSite(_) | Action::Spirit { .. } | Action::Guarding { .. } => false,
         // Never reached for an Angel of Death itself (`kind_index` already returns None for it above); a grabbed
         // victim isn't working either.
-        Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } => false,
+        Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } | Action::Whirled { .. } => false,
         #[cfg(test)]
         Action::Gathered { .. } => true,
     };

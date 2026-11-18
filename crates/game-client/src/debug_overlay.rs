@@ -137,7 +137,13 @@ fn draw(
                 outline(outline_circle(at, SWARM_LEASH_CELLS as f32), SPELL.with_alpha(0.4));
                 outline(outline_square(cells(s.pos()), 1.5), SPELL);
             }
+            EffectKind::Whirlwind(w) => {
+                if let Some(bottom) = w.segments().last() {
+                    outline(outline_square(cells((bottom.x, bottom.z)).floor() + Vec2::splat(0.5), 0.5), SPELL);
+                }
+            }
             EffectKind::LandBridge(_)
+            | EffectKind::WhirlwindDust(_)
             | EffectKind::Lava(_)
             | EffectKind::Smoke
             | EffectKind::GroundFire

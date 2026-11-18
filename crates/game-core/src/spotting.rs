@@ -21,7 +21,7 @@ pub fn sight_now(u: &Unit) -> Option<u8> {
         // An Angel of Death never auto-attacks or is auto-attacked (`kind_stats::ANGEL_OF_DEATH.fights` is
         // false, already keeping it off `sight_now`'s own callers' target lists either way); a grabbed victim
         // doesn't look for anyone either.
-        Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } => None,
+        Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } | Action::Whirled { .. } => None,
         #[cfg(test)]
         Action::Gathered { .. } => None,
     }

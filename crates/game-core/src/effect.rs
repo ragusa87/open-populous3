@@ -69,6 +69,10 @@ pub enum EffectKind {
     /// Ghost Army's own one-shot cast sequence (`ghost_army::Cast`): a short delay, then the priority scan, spawn
     /// and cap-cull all at once (`WorldEvent::SpawnGhosts`/`DestroyGhost`).
     GhostArmy(crate::ghost_army::Cast),
+    /// The funnel (`whirlwind`): wanders, lifts people and debris, tears wood off buildings and trees.
+    Whirlwind(crate::whirlwind::Whirlwind),
+    /// Only seen (`whirlwind::dust`): a whirlwind's dust puff, tinted by the ground it fell on.
+    WhirlwindDust(crate::whirlwind::Tint),
     #[cfg(test)]
     Probe(tests::Probe),
 }
@@ -126,8 +130,8 @@ impl Effect {
         Effect { owner: owner.into(), x, z, left, kind }
     }
 
-    /// One turn at `now`: its work on its own rhythm, then one turn less to go.
-    pub fn tick(&mut self, now: Tick, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
+    /// One turn at `now` of effect `id`: its work on its own rhythm, then one turn less to go.
+    pub fn tick(&mut self, id: crate::id::Id<Effect>, now: Tick, world: &GameMap, rng: &mut Lcg) -> Vec<WorldEvent> {
         let events = match self.kind {
             EffectKind::SimpleBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units, &world.vehicles, &world.buildings, &world.terrain),
             EffectKind::PanickingBlast(ref mut blast) => blast.turn((self.x, self.z), self.owner, &world.units, &world.vehicles),
@@ -145,6 +149,7 @@ impl Effect {
             EffectKind::AngelOfDeath(ref mut cast) => cast.turn((self.x, self.z), self.owner),
             EffectKind::AngelOfDeathShockwave(ref mut wave) => wave.turn((self.x, self.z)),
             EffectKind::GhostArmy(ref mut cast) => cast.turn((self.x, self.z), self.owner, world),
+            EffectKind::Whirlwind(ref mut whirlwind) => whirlwind.turn(id, (self.x, self.z), self.owner, world, rng),
             EffectKind::Splash => {
                 if !crate::unit::is_sea(&world.terrain, (crate::unit::cell_of(self.x), crate::unit::cell_of(self.z))) {
                     self.left = Countdown::new(crate::time::Ticks::ZERO);
@@ -152,7 +157,7 @@ impl Effect {
                 }
                 Vec::new()
             }
-            EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Explosion | EffectKind::Firebrand { .. } | EffectKind::Swamp(_) => Vec::new(),
+            EffectKind::Smoke | EffectKind::GroundFire | EffectKind::Explosion | EffectKind::Firebrand { .. } | EffectKind::Swamp(_) | EffectKind::WhirlwindDust(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(ref mut probe) => probe.turn(now, (self.x, self.z), self.owner, world),
         };
@@ -188,7 +193,9 @@ impl Effect {
             | EffectKind::Swarm(_)
             | EffectKind::AngelOfDeath(_)
             | EffectKind::AngelOfDeathShockwave(_)
-            | EffectKind::GhostArmy(_) => Vec::new(),
+            | EffectKind::GhostArmy(_)
+            | EffectKind::Whirlwind(_)
+            | EffectKind::WhirlwindDust(_) => Vec::new(),
             #[cfg(test)]
             EffectKind::Probe(_) => Vec::new(),
         }
@@ -291,7 +298,7 @@ pub(crate) mod tests {
         let (map, _, at) = with_enemy();
         let mut e = probe(TribeId::Blue, at, 4, 10);
         let mut rng = map.rng;
-        let fired: Vec<u32> = (1..=10).filter(|&n| !e.tick(Tick::from_wire(n), &map, &mut rng).is_empty()).collect();
+        let fired: Vec<u32> = (1..=10).filter(|&n| !e.tick(Id::from_raw(1), Tick::from_wire(n), &map, &mut rng).is_empty()).collect();
         assert_eq!(fired, [4, 8]);
         assert!(e.is_over());
     }

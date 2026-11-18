@@ -320,6 +320,9 @@ pub enum Action {
     Fighting { rival: UnitId, stagger: Countdown },
     /// Grabbed by the Angel of Death `by`: no orders, no movement of its own, until released to die.
     Grabbed { by: UnitId },
+    /// Lifted by the whirlwind `by`, at `step` of its spiral (`whirlwind`, `GameMap::tend_whirled` moves it): no
+    /// orders, until thrown.
+    Whirled { by: crate::id::Id<crate::effect::Effect>, step: u8 },
     /// Held by the test-only coordinator `gathering` (coordinator.rs).
     #[cfg(test)]
     Gathered { gathering: crate::id::Id<crate::coordinator::tests::Gathering> },
@@ -366,6 +369,7 @@ impl Action {
             Action::Hunting | Action::Closing { .. } | Action::Fighting { .. } => "Hunting",
             Action::Carrying { .. } => "Carrying",
             Action::Grabbed { .. } => "Captured",
+            Action::Whirled { .. } => "Whirled",
             #[cfg(test)]
             Action::Gathered { .. } => "Gathered",
         }
@@ -437,6 +441,7 @@ impl Action {
                 | Action::Carrying { .. }
                 | Action::Fighting { .. }
                 | Action::Grabbed { .. }
+                | Action::Whirled { .. }
         )
     }
 }
@@ -760,7 +765,7 @@ impl Unit {
 
     /// Flung (tumbling) or off the ground: it cannot be picked, nor taken on.
     pub fn thrown(&self) -> bool {
-        self.action == Action::Tumbling || self.motion.airborne()
+        matches!(self.action, Action::Tumbling | Action::Whirled { .. }) || self.motion.airborne()
     }
 
     /// Thrown, settling after a tumble, or listening to a preacher: no order reaches it and its player cannot
@@ -1046,7 +1051,7 @@ impl Unit {
         // A climbing spirit is airborne too (`motion.height`, for the client's own existing lift-drawing) but
         // never subject to gravity or a touchdown - it has its own, simpler, ungoverned rise in its own branch
         // below instead of going through the general physics step meant for a thrown or falling person.
-        if self.motion.airborne() && !matches!(self.action, Action::Spirit { .. }) {
+        if self.motion.airborne() && !matches!(self.action, Action::Spirit { .. } | Action::Whirled { .. }) {
             let below = |(x, z): (u16, u16)| terrain.height_at(x as u32, z as u32, WORLD_UNITS_PER_CELL);
             let touchdown;
             ((self.x, self.z), self.motion, touchdown) = physics::step((self.x, self.z), self.motion, below);
@@ -1107,7 +1112,7 @@ impl Unit {
             }
             Action::Arson { .. } => {}
             // All driven by `GameMap::tend_angels_of_death`, same shape as `Attacking`/`tend_attacks`.
-            Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } => {}
+            Action::Hunting | Action::Closing { .. } | Action::Carrying { .. } | Action::Fighting { .. } | Action::Grabbed { .. } | Action::Whirled { .. } => {}
             Action::Throwing { target, mut left } => {
                 self.action = match left.tick() {
                     false => Action::Throwing { target, left },
@@ -1592,6 +1597,22 @@ impl Unit {
         let v = self.motion.velocity;
         let velocity = Velocity::new(v.x.saturating_add(push.x), v.y.saturating_add(push.y), v.z.saturating_add(push.z));
         self.motion = Motion::flying(velocity, self.motion.height.unwrap_or(ground));
+        self.action = Action::Tumbling;
+    }
+
+    /// Caught by the whirlwind `by` at `step` of its spiral: out of any building, its plans dropped, held where it is
+    /// (`ground`: the height under it, when on the ground).
+    pub(crate) fn whirled(&mut self, by: crate::id::Id<crate::effect::Effect>, step: u8, ground: i32) {
+        self.drop_plans();
+        self.inside = None;
+        self.motion = Motion::flying(Velocity::ZERO, self.motion.height.unwrap_or(ground));
+        self.action = Action::Whirled { by, step };
+    }
+
+    /// Thrown out of a whirlwind's spiral at `velocity`, by tribe `by`'s spell: an ordinary tumble from there.
+    pub(crate) fn thrown_by(&mut self, velocity: Velocity, by: Option<Owner>) {
+        self.hurt.hit(by);
+        self.motion = Motion::flying(velocity, self.motion.height.unwrap_or(0));
         self.action = Action::Tumbling;
     }
 
