@@ -86,6 +86,85 @@ while the shaman is off the ground.
 After every cast: update normals, walkability and destroy buildings on uneven/flooded ground.
 Spells must only be cast through `Command::Cast` to stay deterministic.
 
+## Whirlwind (to implement)
+Not implemented: `SpellKind::Whirlwind` casts nothing (`Spell::at_point` returns `None`). What the original does,
+traced and measured (pop3-rev-analysis.md "Whirlwind mechanics", which has the derivation). One tick is one turn;
+distances in world units (512 per cell, heights 0..1024 per 4 cells).
+
+### Rules
+- Cast like a blast: aimed on the ground, range `SP_W_RANGE` 4096, released 6 turns into the cast jump. The effect
+  starts at the target and remembers the shaman's position at cast (`origin`).
+- Lifetime 224 ticks (18.7 s): 200 active, then 24 dissipating. It moves every tick, both phases, 120 units along
+  its heading, over land and sea alike, its height snapped to the ground under it.
+- Steering, a countdown re-aimed when it reaches 0:
+  - first 100 ticks: heading = angle to the target ± up to 227 (2048 per turn, about ±40°), next re-aim in 1-7
+    ticks: it circles within about a cell of the target (measured);
+  - after: heading = angle from `origin` to itself ± up to 426 (±75°), next re-aim in 1-31 ticks: it drifts away
+    from where the caster stood.
+- Every active tick it acts on every unit in the cell under its funnel's bottom segment (below, "Drawing"; the
+  bottom wanders about 1/8 cell around the centre, so it is usually the centre's cell):
+  - person, any tribe including the caster's: lifted (below) unless an angel of death, shielded or already lifted;
+    one inside a building is put out first;
+  - building, except library and prison: 2 chances in 8 to lose one load of wood (100), dropped as an unowned wood
+    pile at the building; losing a stage sends that stage's pieces flying as debris; at no wood left it is
+    destroyed (ashes);
+  - tree: 4 chances in 8 to lose 100 wood (shrinks, gone at 0); while it still had 100 or more, a branch tears off
+    and is carried like a person;
+  - plant: deleted; wood pile: carried like a person;
+  - vehicle: a simple blast at it (radius 5 cells, the Blast/Lightning push); in play a caught vehicle also spins
+    then explodes (TODO.md "Whirlwind spell (to implement), on a vehicle"), from code not found in the whirlwind;
+  - an insect-plague bee: caught (what the swarm then does is not traced).
+- Carrying, the same for people, wood piles and branches: a step counter `n` (people start at a random 0-7, piles
+  and branches at 0) goes up by 1 a tick; while `n < 19`:
+  ```text
+  rise   = 19402 n / 256                 # ≈ 75.8 n
+  height = ground under the whirlwind + rise + random(0..75) − 37, never lower than the carried thing already is
+  radius = 255 rise / 1440               # ≈ 0.18 rise: 241 at n = 18
+  angle  = 323 n                          # 2048 per turn, ≈ 57° more each tick
+  position = whirlwind centre + radius (cos angle, sin angle)
+  ```
+  At `n = 19` (people: also as soon as the whirlwind stops being active; piles and branches: when it is gone) it is
+  thrown: velocity reset, a 192 push at a random angle and 230 upwards, then ordinary flight ("Physics"); a hard
+  landing costs a person `FALL_OUT_OF_WW_DAMAGE` (700), with the whirlwind's tribe as the attacker. A branch
+  disappears on landing, a pile stays where it lands. People are lifted 11-18 ticks per catch. A thrown person
+  still in the bottom segment's cell next tick is caught again, keeping its height (it never goes down while
+  carried): several catches keep it circling higher (measured: 1560, 1860, 2058, 2334 above sea level).
+- Dissipating (last 24 ticks): no more catches, everyone carried is thrown, the column lifts off (below).
+
+### Drawing
+The whirlwind itself has no picture: it is drawn as 16 stacked segments plus a dust trail. Every tick:
+```text
+p = whirlwind position, height + 1440 + lift          # lift 0 while active
+for segment i = 0 (top) .. 15 (bottom):
+    p.x += J(); p.z += J(); p.height −= 90; segment i at p
+    colour[i] = colour[i + 1]                         # last tick's colour of the segment below
+colour[15] = class of the ground under the bottom segment
+J() = one of −20..−13 or 12..19 at random (never 0)
+```
+- Segment `i`: hfx sprite `1136 + (phase − i) % 16`, `phase` picked once at cast (each segment keeps its frame for
+  the whole life: the column does not spin, it only jitters), camera-facing, anchored at its bottom centre, width
+  scale `512 / (i + 1)` / 256 (2×, 1×, 0.67×, ... 0.125× from top to bottom), height 1×. With no jitter the
+  segments sit 1350, 1260, ... 0 above the ground.
+- Sprites 1136-1151 (80 × 50) are alpha sprites (`blend::is_alpha_sprite`): a faint horizontal ring of swirling
+  air, every pixel tint 2 with its own strength, drawn as tint colour at opacity strength / 15. The game shows
+  tint 2 gold, #E7B33F (it colours them through `data/alpha.dat`, not the level's `al0-X`, whose tint 2 is
+  cream).
+- Colour class from the ground: sea, or ground blend 0x7F or less, or 0xC9-0xD4: no change (measured: the same
+  gold over dark land and over sea); blend 0x80-0xC8: the sprite multiplied by #FF2500 (red-orange, ≈ #E71A00);
+  above 0xD4: by #DB8707 (orange, ≈ #C65F02). The bright-ground tints come from the code, not seen live. A change
+  climbs the column one segment per tick (16 ticks bottom to top) and climbs back the same way.
+- Dust: every tick a puff on the ground under the bottom segment: sprites 1152-1159 (80 × 41, alpha, tint 2: the
+  same gold), one frame per tick, 8 ticks, does not move; so about 8 puffs trail behind it. Over sea each puff is
+  a water splash sound instead of silence.
+- Lifted people: the flung pose (`PersonAnim::Flung` 19, wildmen `WildmanAnim::Flung` 31, the shaman's flying
+  anim 61), drawn at their carried position; branches: sprites 1584-1592 (60 × 40, alpha, dark tints 8-15), one
+  frame per tick.
+- Dissipating: `lift = (left − 8) × 90` where `left` counts 23 down to 0, and the top segment is removed every
+  tick: the bottom stays 1350 above the ground while the column shortens from the top, so it leaves the ground
+  and shrinks upward over 16 ticks; the last 7 ticks show only the dust.
+- Sounds (when audio exists): a wind loop restarted every active tick, stopped 12 ticks before the end; a scream
+  when a person is caught (the shaman's own); a wood crack when a building loses a stage; a branch snap.
+
 ## Effects (`game_core::effect`)
 In the original a cast flies a shot to the target, which spawns reusable components there (pop3-rev-analysis.md
 "From cast to effect", "Components"); the components do the work. Ours: `GameMap::effects`, a `Registry<Effect>` (by

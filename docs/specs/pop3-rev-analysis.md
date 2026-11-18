@@ -57,6 +57,11 @@ so a live measurement may run on it with the addresses translated.
   `objects/morph0-N.dat`; a pose change steps through key frames 114-116 over about 6 turns. 100 is the beating
   pose used while swooping in and carrying, 107 the default glide. While closing in it descends to the victim's
   height at a rate timed to arrive with it. See "Angel of Death flight pose, wing beat and dive".
+- **The whirlwind is an invisible mover dragging 16 sprite segments** [exe, measured]: each turn it steps 120
+  units, re-stacks its translucent gold segments 90 units apart with a fresh random wobble, passes the ground
+  colour up the column one segment per turn, and lifts whatever stands under its bottom segment (people, wood
+  piles, torn-off branches) onto a fixed spiral to the funnel's top. It ends by lifting off: the column leaves the
+  ground and shrinks upward. See "Whirlwind mechanics".
 - **The planet bend is a parabola of 0.011 × d² cells** [exe, measured], applied in camera space; heights are
   256 units per cell (1024 = 4 cells) and the camera looks down at a fixed 20°. See "Landscape projection".
 - **Walking speed is per type, in world units per turn** [exe]: `<TYPE>_SPEED` plus up to 25 % at random per
@@ -1135,7 +1140,7 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 | 1 | Burn (exe 12 000; not castable) | Standard shot, burn cell, smoke, explosion. No damage to people. |
 | 2 | Blast (10 000, 3072, 4) | Fireball shot, then simple blast, burn cell, smoke, explosion. No thrown state: people are pushed (see "Blast push and flight"), and only a hard landing hurts them. |
 | 3 | Lightning (80 000, 6144, 4) | Kills outright up to `LIGHTNING_NUM_KILLS` + 1 (file 7) people in the single target cell, any tribe except the caster's shaman, angels of death and shielded units: own followers and enemy shamans die too (0x511F70, walking the cell's unit list). People inside a building are not in that list (leaving a hut puts a person back into it, 0x4D80E0 → `insert_unit_into_land_tile`), so they are not killed (inferred): the building catches fire and throws them out, panicking, 8 turns later. Plus the lightning component. |
-| 4 | Whirlwind (90 000, 4096, 3) | 200 + 24 turns (18.7 s), 120 units per turn. Wanders around the target for 100 turns, then drifts away. Lifts every person in its own cell, any tribe, for 12-19 turns, then throws them: the landing costs 700. Each turn a building in its cell has a 25 % chance to lose 100 wood (a hut survives 3, a temple 8); trees lose 100 wood (50 %); library and prison immune; vehicles get a simple blast. Fully traced this session - mechanism, colour, and exactly what can be lifted: "Whirlwind mechanics" below. |
+| 4 | Whirlwind (90 000, 4096, 3) | 200 + 24 turns (18.7 s), 120 units per turn: homes on the target with ±40° noise for 100 turns, drifts away from the caster's cast position for 100, then lets go of the ground and shrinks upward for 24. Each active turn acts on every unit of the cell under its bottom segment: people (any tribe, not angels or shielded) spiral up around it for 11-18 turns to the funnel's top (1440), then are thrown (push 192, up 230; the landing costs 700); wood piles and branches torn off trees (50 %, while the tree has 100 wood) are carried the same way; a building loses 100 wood with 25 % chance (dropping a wood pile, debris on a stage loss; library and prison immune); trees lose 100 wood (50 %); plants are deleted; vehicles get a simple blast. Drawn as 16 tinted, jittering sprite segments (hfx 1136-1151, widest at the top) and a trail of 8-turn dust puffs: "Whirlwind mechanics" below. |
 | 5 | Insect plague (40 000, 6144, 4) | 60 insects for 200 turns (16.7 s), at most 6 cells from the target. Every 8 turns, enemies in its 3 × 3 cells take `SWARM_PERSON_DAMAGE` (100) and panic; shamans and angels immune; ghosts destroyed. Up to 3 times it raids an enemy building: occupants thrown out, damaged and panicked. |
 | 6 | Invisibility (50 000, 4096, 4) | The `INVIS_NUM_PEOPLE` (file 6) nearest own followers (not the shaman), for `INVISIBLE_COUNT_X8` × 8 turns (120 s). Enemy auto-targeting skips them; some actions end it early. |
 | 7 | Hypnotism (85 000, 4096, 3) | The `HYPNO_NUM_PEOPLE` (file 6) nearest persons of other tribes (not wildmen, shamans, angels) are recreated in the caster's tribe for `HYPNO_COUNT_X8` × 8 turns (file 440, 36.7 s), then return. If their tribe is gone, they stay. Ghosts are destroyed. Exe code found and traced this session (previously derived from file/constant analysis only): `process_hypnotism` (0x50EA60) fires the scan 5 ticks after cast via the shared nearest-N selector (0x515E30) with predicate 0x50EAB0 (the exclusion list) and action 0x50EB00 (the actual kill-and-recreate-under-new-tribe primitive, preserving type/life/max-life/carried wood); the "then return"/"tribe is gone" half is 0x4D92B0 (a per-person-per-tick hook, countdown `+0xAC`, cancelled via a per-tribe wipeout table at 0x89DB11 keyed by the stored original tribe `+0xAD`). This is also, independently, the mechanism behind 7 live-captured GONE/NEW conversion pairs that an earlier session mistook for "Preacher conversion" - see that section's own resolved contradiction. |
@@ -1590,50 +1595,177 @@ already models "a tree there catches fire, or else a short ground fire" at the m
 change behaviour, it fills in exactly how the original decides "is there something flammable here" (a per-tick
 occupant scan, not an instant check) and confirms the smoke is two layered effects, not one.
 
-### Whirlwind mechanics [exe]
-`process_whirlwind` (0x50F490, effect state 21), traced in full this session. Two timers: +0x72 counts down the
-active "scanning and damaging" phase; once it hits 0 the effect switches to a quieter "drifting" phase instead of
-ending outright (ending itself is a separate, not-re-traced branch reached later). Every call, regardless of
-phase, walks and recolours a linked chain of its own effect objects (+0x74, a "next" pointer) - this chain is the
-funnel's own visual.
+### Whirlwind mechanics [exe, measured]
+Re-traced in full: the whirlwind effect (class 7 type 0x14, effect state 21, `process_whirlwind`), its funnel
+segments (7/0x29), dust (7/0x2B), torn-off branch (7/0x39), the shared carry step, the person's lift state (person
+state 24) and the segments' renderer (a scaled-sprite primitive of `draw_polygons`); addresses and field offsets in
+`pop3-rev/docs/functions.tsv` and `effect_states.csv` / `person_states.tsv`. Corrects the previous draft on four
+points: the whole cell is scanned, not one occupant; the scanned cell is the one under the funnel's bottom segment,
+not under its centre; scenery types 7-8 are plants, not wood piles; wood piles (scenery 0xB) are lifted and
+carried, not ignored.
 
-**The water-colour effect, mechanism found**: for each link in the chain, the cell underneath is read (the
-ordinary map-cell blend byte, +0xA of 0x8A03E4 - "Terrain land colour"'s own table) and a colour/intensity byte
-(+0x3C) is picked: **open sea gets its own dedicated colour class**, distinct from three blend-range classes used
-over land/shore. Critically, each link's NEW colour is computed only after first copying the PREVIOUS link's
-colour into it - so a transition cascades one link at a time up the chain rather than recolouring every segment
-on the same tick. That one-tick-per-link lag is exactly the "changes progressively, not instantly" look you
-described, and it runs both ways (reverts the same way coming back over land).
+Measured live (2026-11-18, `D3DPOPTB.EXE` in the Docker rig, save "25bis", four casts, one moved onto the sea by
+memory; `pop3-rev/scripts/watch_whirlwind.py`, write-up in `pop3-rev/docs/cheat.md` "Whirlwind, live"): every
+timing, height, width, frame offset, the steering intervals, the colour lag and the spiral below matched.
 
-**What gets lifted, and what doesn't** - only the active ("scanning") phase does this, by looking at whatever
-single thing occupies the funnel's own current cell:
-- **A person** (any tribe, not an angel, not shielded, not already airborne): pulled out of a building first if
-  it's inside one (the same eviction helper combat uses), then set to **person state 24** - genuinely lifted,
-  up to 19 ticks (matching "12-19 turns" exactly), then thrown: a 192-unit push at a random angle plus a flat
-  230 vertical velocity, which is what the ordinary fall physics then turns into `FALL_OUT_OF_WW_DAMAGE` (700)
-  on a hard landing - the "WW" in that already-known constant name is "whirlwind", now confirmed. State 24 looks
-  generic ("held by/orbiting a reference thing", 0x4D8E40) and the previous draft guessed it was shared with
-  preacher conversion - re-checked this session with an exhaustive exe-wide search for every literal "set state
-  to 24": **Whirlwind is the only thing that ever puts a person there**; preacher conversion's own state-23
-  handler never writes it, and no per-type default-state table entry resolves to it either (0x4D8E40's row).
-- **A building**: never lifted. Same 25%/turn wood-pull already documented, through the same code path attacks
-  and fire use; once a pull removes no wood (it's already at its floor), the building is destroyed outright with
-  the same mesh-shatters-into-debris sequence the "uneven ground" destroy reason uses ("Terrain changes: what
-  reacts") - worn down and eventually shattered, not flung into the air.
-- **A tree**: never lifted either. Same 50%/turn wood loss already documented; while it still has at least 100
-  wood left, this ALSO spawns a small flying effect object at its position (carrying the tornado's own id) -
-  **this is the closest thing to "lifted cut wood" in the whole mechanic**: a loose debris/chip puffed visibly
-  off the tree, not the tree itself going airborne.
-- **Loose scenery of a couple of specific types** (plausibly wood already lying on the ground, not independently
-  confirmed): deleted outright - sucked away with no flying visual at all, unlike a tree's own chip effect.
-- **A vehicle**: never lifted - hit with an ordinary simple blast (same radius/push numbers as Blast, Lightning,
-  and building destruction elsewhere).
+The tornado unit itself is invisible (its init sets no drawable): what is seen is a chain of 16 segment units it
+owns and moves, plus a dust puff it drops every turn.
 
-So to directly answer "can only units and cut wood be lifted": **persons are the only thing that is actually
-lifted** (state 24, carried, thrown). Loose/cut wood is never carried along bodily - a tree sheds a small flying
-debris effect while being worn down, and ground-lying wood piles are simply deleted, which might be what reads
-as "the wood gets lifted away" in play. Buildings, trees and vehicles are all affected in place (wood loss,
-destruction, or a blast) without ever leaving the ground.
+```text
+spawn (spell arrival, at the target T; the spell unit also copies the caster's position C into it):
+    state 21, sub-state 0 (active)
+    active = 200
+    wander = 100                   # turns spent homing on T
+    steer  = rand & 7              # re-aim countdown
+    heading = rand & 0x7FF         # 2048 per turn
+    speed  = 120                   # world units per turn, constant for the whole life
+    home   = T
+    16 segments, i = 0 (top) .. 15 (bottom), a linked list from the top one:
+        p = T + (0, 0, 1440); for each i: p.x += J(); p.z += J(); p.h -= 90; segment i at p
+        width scale  = 512 / (i + 1)             # /256: 512, 256, 170, 128, ... 32: top widest
+        sprite       = 1136 + ((frame_counter - i) & 15)   # hfx0-0.dat 1136-1151, staggered by 1 per segment
+        colour class = 5 if the target cell is sea, else the segment default 4
+    J() = (rand & 0x27) - 20     # one of -20..-13 or 12..19: never 0, mean -0.5
+
+every turn:
+    active -= 1; if wander > 0: wander -= 1
+    if active == 0 and sub-state != 0: end (below)
+    if sub-state == 0: (re)start the wind loop sound 0xA3
+    else if active < 12: stop sound 0xA3
+    move: pos += 120 along heading (no terrain or water test: it crosses sea); pos.h = ground height under it
+    lift = 0 if sub-state == 0 else (active - 8) × 90
+    p = pos + (0, 0, 1440 + lift)
+    for each segment, top to bottom:
+        p.x += J(); p.z += J(); p.h -= 90; put the segment at p
+        segment.colour = colour of the segment below it (one-turn lag per segment)
+    bottom segment's colour from the cell under p (the last p):
+        sea → 5; else by the cell's blend byte: > 0xD4 → -1, > 0xC8 → 3, > 0x7F → -2, else 4
+    if sub-state == 0: act on every unit of the cell under p (below)
+    if sub-state != 0: delete the top segment (one per turn)
+    spawn a dust puff (7/0x2B) at p, tribe = the tornado's
+    steer -= 1; if steer <= 0:
+        if wander > 0: steer = rand & 7;  heading = angle(pos → home)   + rand % 455 - 227   # ±40°
+        else:          steer = rand & 31; heading = angle(C → pos)      + rand % 853 - 426   # away from C, ±75°
+    if active == 0: active = 24; sub-state += 1   # first time: start dissipating; second time: end
+```
+Times: 200 active turns (16.7 s), of which the first 100 home on the target and the last 100 drift away from the
+caster; then 24 dissipating turns (2 s); 224 turns (18.7 s) in all. At 120 units per turn the funnel covers 0.23
+cell per turn; homing with ±40° of noise re-aimed every 1-7 turns, it circles around the target cell rather than
+stopping on it (measured: it stayed within about one cell of its target for the 100 turns, then left in a nearly
+straight line, 2 cells per 16 turns).
+
+**Dissipation, as drawn**: on the first dissipating turn the whole chain is redrawn 1350 higher (lift = (23 − 8) ×
+90), and lift then drops by 90 per turn while the top segment is deleted each turn. The two cancel at the bottom:
+the lowest segment stays 1350 above the ground for the whole phase while the column shortens from the top, so the
+funnel visibly lets go of the ground and shrinks upward into nothing over 16 turns (1.3 s); the last 7 turns have
+no segment left, only the dust (still spawned at the tornado's position) and the dying wind sound. No victim is
+taken during dissipation, and a person already lifted is thrown at once (its holder's sub-state is no longer 0).
+
+**The wobble**: each turn every segment is re-placed from the one above it with a fresh random step of 12-20 units
+per axis, so the column is a random walk recomputed from scratch every turn: the bottom is typically about 65 units
+(1/8 cell) off the tornado's centre, at most 320, and the whole funnel jitters every turn instead of swaying
+smoothly. The heights are fixed: segment i is drawn 1350 − 90 i above the ground (top 1350, bottom 0).
+
+**Colour, progressive**: only the bottom segment samples the ground; each other segment takes the colour the one
+below it had, so a new colour climbs the funnel one segment per turn (16 turns, 1.3 s, bottom to top) and climbs
+back the same way when the tornado leaves the sea (measured: 8 turns after reaching the sea the bottom 8 segments
+were class 5, the top 8 still 4; all 16 after 16 turns). Dust puffs take their colour from their own cell at spawn,
+with a quirk: over land the 0xD4 and 0xC8 thresholds are written and then overwritten, so dust is only ever -2
+(blend > 0x7F) or 4 over land, 5 over sea (and over sea each puff plays the water splash sound 0x2C).
+
+#### What is drawn
+| Piece | Unit | Sprites (`hfx0-0.dat`) | Draw class | Life | How |
+|---|---|---|---|---|---|
+| funnel segment ×16 | 7/0x29, effect state 11 (passive: the tornado moves it) | 1136-1151, one fixed frame per segment | 0x22: renderer kind 0x11 | the tornado's | camera-facing sprite, bottom-centred, scaled by its width scale/256 in width and 1× in height, alpha-blended and tinted by its colour class |
+| dust puff (the same unit Firestorm drops on water, "Fireball impact") | 7/0x2B, effect state 40 | 1152-1159 (class byte 1: 8 frames) | 0x20: renderer kind 1 (billboard) | 8 turns, does not move | on the ground (height snapped), one per turn, so a trail of ~8 puffs behind the funnel |
+| torn-off branch | 7/0x39, effect state 44 | 1584-1592 (9 frames) | 0x26: renderer kind 1 | until it lands | carried, then thrown like a person (below) |
+| lifted person | the person, state 24 | its pose kind 12: anim 19 (followers), 31 (wildman), 61-64 (shaman) | the person's | 11-18 turns per catch | spiral (below), then the ordinary flung/tumbling flight |
+
+Segment renderer (renderer kind 0x11 queues a scaled-sprite primitive): the segment's sprite (no animation: draw
+class 0x22 has 0 frames), width = sprite width × width scale / 256, height = sprite height × height scale / 256,
+drawn bottom-centred on the screen point of the segment. If the colour class is −15..15 the sprite is drawn
+alpha-blended through colour table `c` of `data/alpha.dat` (64 KB, loaded as the base of a run of 4 KB tables, one
+per class); in this Direct3D build a table is reduced to one vertex tint: the palette colour the table gives to row
+0x2F (tint 2 at full strength) over palette colour 0x82, white for none. Read from the shipped files (every
+`pal0-*.dat` gives the same answer): class −2 → palette 139 (#FF2500), −1 → 153 (#DB8707), 3, 4 and 5 → palette 130
+(#FFFFFF, no tint); the live palette gives the same colours [measured]. So in this build the funnel keeps the
+sprite's own gold (measured on screen: average funnel pixel RGB 210/160/65 over dark land (class 4) and 210/160/65
+over sea (class 5): no visible change), and only ground whose blend byte is above 0x7F (classes −2 and −1, not
+crossed in the measurement) tints it red-orange (#FF2500) or orange (#DB8707) - expected from the code, not seen.
+Any "it changes colour over water" therefore belongs to the software renderer, where the table remaps every pixel
+(not measured). Height scale: it reads 256 (1×) on every live segment [measured], although no writer was found
+statically (the spawner writes only the width scale): segments are drawn at the sprite's own height, widths 2×, 1×,
+0.67×, ... 0.125× from top to bottom.
+
+**The sprites and their blending** [exe, measured]: all three pieces are alpha sprites of `hfx0-0.dat` (no mask, no
+shadow: transparent runs of the RLE are simply not drawn, every drawn pixel is `tint << 4 | strength`, sprites.md
+"Alpha"). Funnel frames 1136-1151: 80 × 50 each, a soft horizontal elliptical ring (a slice of swirling air), all
+tint 2 at strengths 1-15 (thin, mostly faint: 18 % of the pixels at strength 1); the 16 frames are the ring at 16
+phases, and a segment keeps the frame it was given at spawn for its whole life (measured: 58 of 61 segments never
+changed), so the column does not spin: its life comes from the staggered phases and the per-turn jitter. Dust
+1152-1159: 80 × 41, tint 2 at strengths 1-6, a puff that spreads and thins into specks over its 8 frames. Branch
+1584-1592: 60 × 40, the darkening tints 8-15 (a dark twig silhouette tumbling over 9 frames). On screen (Direct3D)
+tint 2 comes out gold, #E7B33F (`alpha.dat`, palette 155), not the cream of the level's `al0-X` tables: the funnel
+and the dust are a translucent gold, opacity strength / 15, multiplied by the segment's colour-class tint (white
+for 3/4/5; red-orange for −2, orange for −1). Expected on bright ground (from the code, not seen): gold × #DB8707 ≈
+#C65F02, gold × #FF2500 ≈ #E71A00.
+
+#### What it does to the cell under the bottom segment (active phase only)
+Every unit linked in that cell's unit list, by class:
+- **Person** (any tribe, own shaman included):
+  - skipped: an angel of death (type 8), shielded, already lifted (state 24), or carrying an untraced flag (that
+    one only gets marked: not traced what it is);
+  - inside a building: pulled out first (the eviction combat uses);
+  - then (unless it is in a state transition): old state saved, **state 24**, holder = the tornado; scream: 0x1A
+    (own shaman) / 0x89 (another tribe's shaman) / 0xD2 (anyone else).
+- **Effect 7/0x1B** (an insect-plague bee) with sub-state < 4: sub-state 4-7 (`(rand & 3) + 4`) and held by the
+  tornado - the swarm's bees get caught (the bee's side not traced).
+- **Building**, unless its type is exempt (a per-type flag, the library and prison among them): with a 2/8 chance,
+  one wood pull: a real, unowned wood pile (scenery 0xB) is dropped at the building and 100 wood leaves its stock,
+  the stage drops when the stock crosses a stage; the building is notified (the impact accumulator lightning and
+  firestorm use). If it lost its stage or was destroyed, that stage's pieces fly off as mesh debris (the old
+  stage's) with the wood-crack sound 0x12. A building at 0 wood is destroyed by the same pull (ashes). Buildings
+  never fly; the wood piles they shed do, if the funnel is still over them next turn.
+- **Scenery**:
+  - trees (types 1-6), 4/8 chance: if the tree still holds 100 wood or more, a **torn-off branch** (7/0x39) is
+    spawned at it with the snapping sound 0xD4 and held by the tornado; then the tree loses 100 wood (which shrinks
+    it and removes it at 0);
+  - plants (types 7-8): deleted outright, no effect;
+  - **wood pile** (type 0xB) not already held: held by the tornado and flagged airborne, so its own per-turn
+    carries it;
+  - anything else: nothing.
+- **Vehicle**: a simple blast (7/1) at it with the tornado's tribe, radius 5, push 140 / 98 (the Blast/Lightning
+  values). Its own "spin" state 9 is set elsewhere (not found).
+
+#### The spiral: lifted people, branches and wood piles
+One step shared by all three, `n` being the carried thing's own counter (its sub-state):
+```text
+rise   = 19402 n / 256                       # ≈ 75.8 n
+height = tornado ground height + rise + rand % 19402 / 256 − 37     # ±37 of noise
+radius = 255 × rise / 1440                    # ≈ 0.177 × rise: 13 at n = 1, 241 at n = 18
+angle  = 323 n (2048 per turn)                # ≈ 57° more per turn: about 3.3 turns per revolution
+pos    = tornado centre + radius × (cos angle, sin angle); height never drops below the previous one
+```
+The spiral is around the tornado's centre, not around the wobbling segments. A rise of 1440 (the funnel's top) is
+reached at n = 19, which is exactly where it ends.
+- **Person** (state 24; entering it drops it from any vehicle, stops it, runs an untraced helper and starts n at
+  `rand & 7`): each turn n += 1; while n < 19 and the tornado exists and is still active (sub-state 0), one spiral
+  step. Otherwise it is **thrown**: velocity zeroed, a 192 push at a random angle (the slope-scaled push helper),
+  vertical velocity 230, last attacker = the tornado's tribe, and back to the type's default state: the ordinary
+  flight and landing take over (`FALL_OUT_OF_WW_DAMAGE` 700 on a hard landing). Lifted for 18 − start turns (11-18)
+  when nothing interrupts, from a first height of 75.8 × (start + 1): a person caught with start 7 appears 600
+  units up at once. **Caught again** [measured]: a thrown person still in the cell under the bottom segment next
+  turn is caught again with a new `rand & 7` start, and since the spiral never lowers it, it keeps the height the
+  throw gave it and circles there; repeated catches ratchet it up (one spy: 1560, 1860, 2058, 2334 above sea level
+  over four catches, airborne from turn 0 to turn 107 of the tornado). Measured rises matched the formula (n = 4:
+  341 above the ground for 303 ± 37; n = 18: about 1395 for 1364 ± 37).
+- **Branch** and **wood pile**: the same spiral with n from 0 while the holder exists (the dissipation does not
+  release them); at n = 19, or when the holder is gone (n then restarts at `rand & 7`), the same throw (192, 230);
+  measured on two wood piles: n 0 → 19 in 20 turns. A branch is removed on landing; a wood pile lands as a wood
+  pile (state 2, unless it lands on a water cell: then not traced) wherever the throw takes it.
+
+So, to the question "what can be lifted": people (not angels, not shielded), wood piles (including the ones it
+pulls out of buildings) and branches torn off trees. Trees, plants, buildings and vehicles are hit in place.
 
 ### Erosion passes [exe]
 Per-turn (state 24, per-turn 0x50FF30 - Ghidra's own name `process_erosion` is correct, despite sitting in the
@@ -5845,6 +5977,15 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
 `FMV\*.tgq` movies, not by any sound bank.
 
 ## Impact on our specs
+- spells.md / `game_core::spell`: Whirlwind is not implemented (`SpellKind::Whirlwind` casts nothing); its
+  implementable spec is now spells.md "Whirlwind (to implement)". The original's rules ("Whirlwind mechanics"): 224
+  turns (our ticks are turns), 120 units per turn, the 100-turn homing then drifting steer, the bottom-segment cell
+  scan, the spiral and throw, wood piles and branches carried. Its look: 16 segments of hfx 1136-1151 widest at the
+  top, re-jittered every turn, a colour climbing one segment per turn, dust puffs (hfx 1152-1159, 8 turns), the
+  lift-off at the end. Two values were measured live: segments drawn at the sprite's own height, no visible colour
+  change over sea in this build.
+- sprites.md: "1136-1151 the whirlwind's base" is the whirlwind's whole funnel (16 segments, one frame each);
+  1152-1159 is its dust; 1584-1592 the torn-off branch.
 - sound.md: the `0x10` flag was "unknown codec"; it is EA MicroTalk ("Low-quality sound bank codec"), decodable
   with the public utkencode decoder plus the leading mono/stereo bit and per-frame stereo alternation.
   `pop3_format::sound` still leaves those entries undecoded, which stays fine while only `Soundd2` is played.
@@ -6269,6 +6410,10 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   zoom channel" above.
 - Sites: whether the levelling forces every cell of its disc (which code creates/staggers the pillars at level
   load is now answered - "Build/rebuild ritual" above).
+- Whirlwind ("Whirlwind mechanics"): who writes the segments' `+0x6A` (256 live, no writer found); the look over
+  the two bright land bands (tints −2/−1, not crossed live) and in the software renderer over sea. Also: what a
+  person flagged `+0x11` bit 0x8 is (skipped, only marked), the bee's side of being caught, `0x445750` on entering
+  state 24, a wood pile thrown onto water, where a vehicle's spin state 9 comes from.
 - Spells: burning trees (scenery state 5), the partial building explosion of the earthquake, whether ghosts
   expire, what starts the landscape-shaping mode, what a person does when the ground under it floods, the
   building's second destroy reason (sub-state 2).
@@ -6370,7 +6515,7 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4D3D18 | person per-turn state dispatch table (`unit_processing_class_1_person`, keyed by `+0x2C − 1`) |
 | 0x4D5CF0 | person state 3: universal DEATH, reached from the life-step (0x4D43A0, life <= 0), NOT preach-specific - spawns a 7/0x4D effect and a 10/0xC spirit controller at its own place, corrects this row's previous "a preachee struck" |
 | 0x4D83B0 | person state 23: the conversion roll, entered directly by preacher_strike_scan (0x43ABF0), requires the striker's own order kind to be 17/31/32 - "Preacher conversion" |
-| 0x4D8E40 | person state 24: Whirlwind's own lift state and nothing else (confirmed this session, exhaustive search), NOT linked to conversion - "Whirlwind mechanics" |
+| 0x4D8E40 | person state 24 (Whirlwind's lift, its only user): n += 1, spiral step (0x49BCF0) while n < 19 and the holder is active, else the 192 / 230 throw - "Whirlwind mechanics" |
 | 0x4D4B50 | destroy a unit (called on the preachee once its conversion roll succeeds) |
 | 0x500E20, 0x500EC0 | class 10 controller init and per-turn dispatch (by state `+0x2C`; generic housekeeping) |
 | 0x409140, 0x409200 | building damage: add to its accumulator `+0x9E` (per attacker turn, or an amount) |
@@ -6444,6 +6589,17 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x511640 | firestorm per turn (state 23, Ghidra's `process_firestorm` is correct): gated spawn, see "Firestorm fireballs" |
 | 0x509DC8 | erosion init (class-7 type 0x17 case of `init_unit_type_7`'s dispatch): state -> 24, duration +0x6C -> 64 |
 | 0x50FF30 | erosion per turn (state 24, Ghidra's `process_erosion` is correct, despite living in the shot code area): jitter + one pass via 0x4983A0, 63 passes over 64 ticks, see "Erosion passes" |
+| 0x50F270 | whirlwind effect 7/0x14 init: state 21, timers 200/100, speed 120, home = target, builds the 16-segment chain - "Whirlwind mechanics" |
+| 0x50F490 | `process_whirlwind` (state 21): move, re-stack and recolour the segments, act on the bottom segment's cell, drop dust, steer, dissipate |
+| 0x509FBB | whirlwind segment 7/0x29 init: effect state 11, draw class 0x22 (renderer kind 0x11), hfx 1136 |
+| 0x5136D0 | whirlwind dust 7/0x2B init: on the ground, effect state 40 (8 turns), draw class 0x20, hfx 1152, colour by cell, splash sound over sea |
+| 0x50A0BE, 0x513930 | torn-off branch 7/0x39 init (state 44, draw class 0x26, hfx 1584) and per turn: carried (0x4A8220), then physics, removed on landing |
+| 0x4A8220 | carry step for a held branch or wood pile: spiral while the holder lives and n < 19, then the 192 / 230 throw |
+| 0x49BCF0 | the whirlwind spiral: rise 75.8 n ± 37, radius 0.177 × rise, angle 323 n around the holder's centre |
+| 0x4A73D0 | wood pile (scenery 0xB) airborne per turn: carried by its holder (+0x91), physics, back to state 2 on landing |
+| 0x4D2CF5 | person state 24 entry: off any vehicle, stopped, n = rand & 7 |
+| 0x46F9E0 | queue a renderer-kind-0x11 sprite (primitive 0x12) with the unit's +0x68 / +0x6A scales |
+| 0x46AE97 | `draw_polygons` primitive 0x12: scaled, bottom-centred sprite, alpha + colour-table tint when +0x3C is -15..15 |
 | 0x510020 | insect plague (swarm) effect 7/0x15 init: height/speed/duration/insect-budget/home position/heading, never sets a drawable - "Insect plague" |
 | 0x510120 | `process_insect_plague` (Ghidra's own name is correct), state 0x16 (22) per turn: sound, home-leash steering, bee-dot spawning - "Insect plague" |
 | 0x510D40 | insect plague's bee-dot spawner (its own sub-state 0): `alloc_unit(7, 0x1B, ...)` at a jittered point near the cloud, gated by the insect-budget counter +0x72; also, 1-in-16, tints the new bee-dot with its tribe's own colour (+0x8A, from table 0x5A89CA) - "Insect plague" |

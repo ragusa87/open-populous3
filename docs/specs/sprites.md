@@ -118,12 +118,13 @@ opacity strength / 15) for GPU blending (`art::alpha_picture_frame`, uploaded wi
 Identified: 1224-1239 a cream dust cloud growing and fading (16 frames: the teleport landing puff, and the
 "smoke cloud" effect of the big volcano fireball's trail [exe], pop3-rev-analysis.md "Volcano fireballs"),
 1210-1223 the same in grey, 1180-1187 a fire cloud and 1188-1192 its fading, 1193 an explosion, 1194-1209 the rock explosion of a big
-volcano fireball's landing [exe] (by eye two explosions, 1193-1197 and 1198-1202), 1160-1179 the rock-debris dust burst [exe], seen in the game as the animation on the winged death's totem, 1304-1319 the water splash [exe, measured] (16 frames, one splash of 16 turns when a person goes under;
+volcano fireball's landing [exe] (by eye two explosions, 1193-1197 and 1198-1202), 1136-1151 the whirlwind's funnel segments (80 x 50 elliptical swirl rings, tint 2, one frame per segment), 1152-1159 its dust puffs (80 x 41, tint 2) and 1584-1592 a branch it tears off (60 x 40, dark tints 8-15) [exe, measured]; the game draws tint 2 of these in gold (#E7B33F from `alpha.dat`), not in `al0-X`'s cream
+(pop3-rev-analysis.md "Whirlwind mechanics"), 1160-1179 the rock-debris dust burst [exe], seen in the game as the animation on the winged death's totem, 1304-1319 the water splash [exe, measured] (16 frames, one splash of 16 turns when a person goes under;
 pop3-rev-analysis.md "Drowning splash"), status markers over people [exe] (pop3-rev-analysis.md "Status markers over people"): 1478-1487 bloodlust
 (red bubbles), 1489-1498 low health (white sparkles), 1538-1552 shield (3 rings x 5 sizes), 1553-1563 the hypnotised
 halo (a yellow ring turning over 11 frames), 1240-1247 a flash (the conversion's halo, a guess) and 1265-1279 a
 similar one. By eye, unconfirmed: 1090-1098 a building's fire, 1100-1107 a fireball turning to smoke and up to 1127
-other fireball effects, 1136-1151 the whirlwind's base, 1288-1303 sparks,
+other fireball effects, 1288-1303 sparks,
 1329-1344 and 1345-1360 the smoke of a spy setting a building on fire (two animations), 1369-1384 and 1385-1416 smoke, 1433-1440 and 1443-1448
 sparkles, 1450-1465 parts of a HUD cell border, 1466-1477 wind.
 Opaque again after 1592: the tooltip's people and wood, one sprite per count: 1594-1597 braves (1, 3, 4 and 5),
