@@ -2071,7 +2071,9 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   **Question for a spec session**: the per-id record table itself (sound.md "Sound ids") is not in docs/ - its
   229 rows (first entry, variant count, fight-bank range, priority, volume, while-paused) are needed before any
   SFX can be wired.
-- [ ] Play SFX from game events: spells, chopping, building, follower voices, ambience layers, the battle crowd;
+- [ ] Play SFX from game events: spells, chopping, building, ambience layers, the battle crowd, casting shouts
+  (`Sv_*`/`En_Sv_*`), deaths; selection/order voices, flyby start/cancel and the menu click are wired
+  (`audio_cues.rs`, families by entry name - a guess until the sound id table is documented, see the item above);
   the fight flag into `SetIntensity` (done as a guess: scaled by the player's people engaged, calm silent -
   sound.md "Playback in the client"; replace by the original's flag, or keep the scaling and tune `MELEE_ARMY`,
   once heard in play). Work sounds on their animation frame, the clips' own loop points, reverb,

@@ -26,6 +26,22 @@ use std::time::Duration;
 pub enum SoundCue {
     /// A menu entry picked.
     Click,
+    /// An intro flyby starts.
+    FlybyStart,
+    /// The player cancels a flyby.
+    FlybyCancel,
+    /// Followers (braves, warriors, firewarriors) selected, by crowd size (1, 2, 3 or more).
+    FollowerBow(u8),
+    /// Spies selected, one or several.
+    SpyBow(u8),
+    PreacherBow,
+    ShamanSelect,
+    /// Followers ordered.
+    FollowerOk,
+    /// Spies ordered, one or several.
+    SpyOk(u8),
+    PreacherOk,
+    ShamanYes,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

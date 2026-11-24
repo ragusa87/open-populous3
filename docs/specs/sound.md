@@ -149,8 +149,13 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
 - Loaded from the install at startup (`audio_load.rs`, nothing with `--no-original`): `PopDrones22` entry 0 as
   the Menu track and entries 1-4 as the Game variants, their raw Layer II streams decoded by symphonia; the ten
   drum banks, each entry as a WAV (entry 0 included, played as stored).
-- Not done yet: the SFX (`Soundd2` PCM as WAV through the sound id table, the fight bank's alternative ranges, CC0
-  sounds for `--no-original`), the clips' own loop points (`fire`, `warloop`...), work sounds waiting for an animation
+- `Soundd2` cues, ours until the sound id table is in these docs: each cue plays a family of entries found by name
+  (`audio_load::family_name`: the name, then digits only), at full volume and priority 0. Wired (`audio_cues.rs`):
+  the selection's bow lines and the order answers as in "Voices" (crowd sizes the bank lacks fall back to the
+  largest it has: followers 1/2/3, spies 1/2), the flyby's start (`Zoom_in`) and cancel (`Zoom_out`), the menu
+  click (`confirm`) - those three picked by name alone.
+- Not done yet: the other SFX (casting shouts, deaths, work sounds, spells, ambience), the per-id volume, priority
+  and while-paused flag, the fight bank's alternative ranges, CC0 sounds for `--no-original`, the clips' own loop points (`fire`, `warloop`...), work sounds waiting for an animation
   frame, ambience layers, reverb, game events turned into cues (the fight flag for the intensity).
 
 ## PopSoundEditor discrepancies

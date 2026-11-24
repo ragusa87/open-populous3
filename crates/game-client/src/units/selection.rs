@@ -245,6 +245,7 @@ pub fn on_screen(
 pub(super) struct SelectionInput<'w> {
     selection: ResMut<'w, Selection>,
     patrol: ResMut<'w, PatrolSession>,
+    ordered: MessageWriter<'w, crate::audio_cues::Ordered>,
 }
 
 /// Left/right mouse and P/X: selection changes and orders to the selection.
@@ -305,6 +306,7 @@ pub(super) fn select_and_order(
         None => None,
     };
     let mut orders = Vec::new();
+    let mut ordered = false;
     if let Some(cam) = gesture.and_then(|_| cams.iter().next()) {
         let units = on_screen(&map.0, &views, cam);
         match gesture {
@@ -348,6 +350,7 @@ pub(super) fn select_and_order(
                     if add {
                         moves = chained(moves);
                     }
+                    ordered |= !moves.is_empty() && !selection.units.is_empty();
                 }
             },
             None => {}
@@ -366,6 +369,11 @@ pub(super) fn select_and_order(
             selection.clear();
         }
     }
+    ordered |= !orders.is_empty() && !selection.units.is_empty();
+    if ordered {
+        sel.ordered.write(crate::audio_cues::Ordered);
+    }
+    let selection = &sel.selection;
     let commands = orders.into_iter().flat_map(|order| selection.commands(order));
     let commands: Vec<Command> = if add { chained(commands.collect()) } else { commands.collect() };
     for command in moves.into_iter().chain(commands) {
