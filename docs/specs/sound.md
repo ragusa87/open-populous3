@@ -184,9 +184,15 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
   - The battle crowd (flat repeat loop): the summed closeness (0..1) of the fights after the 6th, in the
     coordinators' order, capped at 1. The shield hum (flat repeat loop) while a shielded person is alive within
     48 cells of the listener (ours for "drawn near the camera").
+- The ambience (`audio_ambience.rs`), every frame: the cells within `NEAR` (12, ours for "drawn near the
+  camera") of the camera's look-at point counted as sea (at sea level), high land (over 0x200) or low land; the
+  layers of the level's theme weighted by share (the shore by twice the lesser of low land and sea, as a share too:
+  ours, the original counts its renderer's cells), the three heaviest non-zero ones playing as flat variety loops
+  at weight/255. Seagulls when every near cell is sea (not in hell) and a wildlife call of the theme while a tree is
+  near, at the original's 1 in 256 and 1 in 128 per frame counted at 30 frames a second (ours: its frame rate is
+  not in the docs). No space layer (no special view here).
 - Not done yet: the fight bank and the melee moves' sounds, CC0 sounds for `--no-original`, the clips' own loop
-  points (`fire`, `warloop`...), work sounds on their sync frame, the ambience bed and its random one-shots
-  (seagulls, wildlife), reverb, the original's fight flag for the drums, and the triggers with no client-side
+  points (`fire`, `warloop`...), work sounds on their sync frame, reverb, the original's fight flag for the drums, and the triggers with no client-side
   state yet (birth, a whirlwind's wood crack and branch snap, a building creaking, the fight alarm, the interface
   clicks of the panel, discoveries, the soul swirls).
 

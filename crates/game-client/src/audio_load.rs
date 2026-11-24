@@ -30,6 +30,9 @@ pub fn cues() -> Vec<SoundCue> {
         cues.extend([FollowerBow(n), SpyBow(n), PreacherBow(n), SpyOk(n), PreacherOk(n)]);
     }
     cues.extend(SpellKind::ALL.iter().flat_map(|&s| [CastShout(s), EnemyCastShout(s)]));
+    cues.extend(crate::audio_ambience::Layer::ALL.map(Bed));
+    cues.extend(crate::audio_ambience::Wilds::ALL.map(Wildlife));
+    cues.push(Gulls);
     cues
 }
 

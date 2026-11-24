@@ -180,6 +180,7 @@ Sound is client-only: the simulation never knows about it, so lockstep is untouc
 - `audio_cues.rs` and `audio_world.rs`: what asks for sounds. The first, interface moments (selection, orders,
   flyby, site stones); the second, the map's events, each system comparing what it sees with last frame's (a
   person's phase, effects and buildings appearing or gone, vehicles under way, fights and shields in reach).
+  `audio_ambience.rs`: the ambience bed and its random calls, from the ground around the camera.
   `audio_load.rs` fills the library, each cue from its sound id's entries (`audio_ids.rs`, the id table).
 - `user_settings.rs`: the volumes and Mute all, as JSON in the platform config dir
   (`dirs::config_dir()/open-populous/settings.json`, `POP3_CONFIG_DIR` overrides), read at launch, saved on

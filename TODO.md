@@ -2085,8 +2085,8 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   - the cast shout as the cast starts, not at the spell's launch;
   - the shield hum within 48 cells of the listener for "drawn near the camera";
   - the lava loop runs to the effect's end (the original stops it once the flow stops growing);
-  - voice stealing still ranks priority, copies, closeness in that order: replace by the original's score
-    (sound.md "Sound id table": priority x 256 halved per 16 steps of remoteness, halved per copy);
+  - the ambience bed's "near the camera" as 12 cells around the look-at point, its shore weight as a share, and
+    the random one-shots' per-frame odds counted at 30 frames a second;
   - **conflict for a spec session**: `0xCF` is a person's low-health loop in pop3-rev-analysis.md "Statuses" but
     `tweets` on a contented building in the id table; nothing plays it until settled.
   Not wired yet (no client-side state for them): a hut's birth (`0x28`, local player), a whirlwind's wood crack and
@@ -2096,8 +2096,7 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   pillars (`0x9E`, `0xC5`), the guard post loop (`0xC0`), the fight alarm (`0x23`), the battle cries and melee
   blows (fight bank), the soul swirls (`0xD0`, `0xD1`), the shaman's return (`0x6B`), discoveries, the panel's
   clicks (placement, rotate, wrong, spell/building buttons, page turn, bookmarks, message icons), `noentry`.
-  Left besides: the ambience bed and its random one-shots (sound.md "Sound id table": five weighted slots by
-  theme, seagulls, wildlife), the fight flag into `SetIntensity` (done as a guess: scaled by the player's people
+  The ambience bed, seagulls and wildlife are in (`audio_ambience.rs`). Left besides: the fight flag into `SetIntensity` (done as a guess: scaled by the player's people
   engaged, calm silent - sound.md "Playback in the client"; replace by the original's flag, or keep the scaling and
   tune `MELEE_ARMY`, once heard in play), the clips' own loop points, reverb, drum loops chained without a frame's
   gap.

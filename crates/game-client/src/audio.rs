@@ -156,6 +156,12 @@ pub enum SoundCue {
     BattleCrowd,
     /// The magical shield's hum.
     ShieldHum,
+    /// One of the ambience bed's layers (`audio_ambience`).
+    Bed(crate::audio_ambience::Layer),
+    /// Seagulls over the open sea.
+    Gulls,
+    /// Wildlife where trees are, by the level's theme.
+    Wildlife(crate::audio_ambience::Wilds),
 }
 
 impl SoundCue {
@@ -242,6 +248,9 @@ impl SoundCue {
             SoundCue::StoneHeadNod => 0xC1,
             SoundCue::BattleCrowd => 0x6C,
             SoundCue::ShieldHum => 0xC3,
+            SoundCue::Bed(layer) => layer.id(),
+            SoundCue::Gulls => 0x50,
+            SoundCue::Wildlife(wilds) => wilds.id(),
         }
     }
 }
