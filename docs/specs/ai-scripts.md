@@ -721,7 +721,8 @@ confirmed as task 24").
   - `ZOOM_TO x z angle`, `TRACK_TO_MARKER m`, `TRACK_SHAMAN_TO_ANGLE a`.
   - `CAMERA_ROTATION speed` rotates until `STOP_CAMERA_ROTATION`.
 - Flybys:
-  - `FLYBY_CREATE_NEW` starts one, then events timed in turns from the start:
+  - `FLYBY_CREATE_NEW` starts one, then events timed in tenths of a second from the start (not turns; pop3-rev-analysis.md
+    "Flyby timing"):
     - `FLYBY_SET_EVENT_POS x z start duration`
     - `FLYBY_SET_EVENT_ANGLE angle start duration` (shortest way)
     - `FLYBY_SET_EVENT_ZOOM z start duration`, with z from -100 (out) to 100 (in)

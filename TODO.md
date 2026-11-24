@@ -287,7 +287,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   itself: the literal VSTART id each state resolves to was already known and is now wired (eat=2, drink=4); a
   wildman's death spirit-rise variant (see the death/spirit item below); whether an explicit attack order is
   honoured (see the wildman-attack item above, now resolved as a guess).
-- [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation. Done at level start without animation (`ReincarnationSite::welcomes`); check the range in the game (the levels only use the ring of 8 cells) and whether it happens on every reincarnation.
+- [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation. Done at level start without animation (`ReincarnationSite::welcomes`). The original (pop3-rev-analysis.md "Levelling", measured on level 7): it is the site's levelling, not the shaman's arrival, that converts them - any wildman inside the growing disc (160 world units a turn, up to 5 cells; each cell tested at its corner) becomes a new brave of the site's tribe the turn the disc reaches it, with a conversion flash; on level 7 the 6 wildmen 1-1.5 cells out convert 3 to 7 turns into the 21-turn levelling. So it happens every time the levelling runs (each build/rebuild), not just at level start.
 - [ ] Selection of buildings (without the people inside), and of units inside them (`selection::selectable`). Vehicles: a click with nothing selected selects the people aboard (vehicles.md).
 - [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
 - [ ] Statuses (`Unit::statuses`: Magical Shield, Bloodlust, Invisibility and Hypnotism now cast for real,
@@ -725,7 +725,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Towers (drum tower): hold one unit (going in is done, `game_core::enter`), which gets a longer range from there: firewarriors throw farther, the shaman casts spells farther, a preacher converts enemies around the tower. No other tower effect.
 - [ ] Training huts (huts-and-training.md "Done"): the queue's ripple (2 turns per rank) and those already of the building's kind letting the others pass, five trained together (the exe's count; ours holds one - a [player] note, reaffirmed, says it's always one at a time in play, so this needs a live check before five-at-once is implemented), queued orders carried over, damage cancelling the queue and sending the trainee out.
 - [ ] Training as in the original, what is left (pop3-rev-analysis.md "Training buildings"): the computer players' cost (`CP_` 1000) once tribes have a controller; the trainee's queued orders given to the new unit. The training time is already answered, no live measurement needed: the original has no fixed duration at all, just the mana cost filled at `cost / 32` per 16-turn income tick (same section) - 256-512 turns (21-43 s) at best, scaling with cost like everything else in the mana-income system.
-- [ ] Reincarnation sites from pop3-rev-analysis.md "Reincarnation sites": the ground levelled to the site height over a 5-cell disc in about 21 turns (ours: radius 3, blend 4) with its effects on enemies, wildmen, trees and swamps; pillars rising out of the ground, deleted and moved; the 32 sparkles.
+- [ ] Reincarnation sites from pop3-rev-analysis.md "Reincarnation sites": the ground levelled to the site height over a 5-cell disc in about 21 turns (ours: radius 3, blend 4) with its effects on enemies, wildmen, trees and swamps; pillars rising out of the ground, deleted and moved; the 32 sparkles - a ring 320 world units out that turns 16° and widens 160 a turn to 4 cells, each sparkle dropping a 6-turn small sparkle every turn, alive for the levelling's 20 turns (pop3-rev-analysis.md "Levelling"). Pillar rise (pop3-rev-analysis.md "Pillars"): from 256 below to exactly ground level, +16 a turn for 16 turns (1.33 s) - ours guesses `RISE_DEPTH` 1.2 cells over `RISE_SECS` 2 s (game-client `sites.rs`). The intro flyby can overlap the build (level 7: flyby from turn 12, orbiting the site; last stone up at turn 68): check our input lock during the build (`sites::site_build_active`) and the flyby don't fight over the camera.
 - [x] The site's build/rebuild is not instant, and is driven by the shaman, not level load directly
   (pop3-rev-analysis.md "Build/rebuild ritual"): she walks to the anchor, settles 12 turns, triggers the ~21-turn
   ground levelling above, then fires one projectile per pillar slot a turn apart (slot order 7..0), each pillar
@@ -1242,8 +1242,13 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 - [x] Script timing: the original runs 12 turns/s, fixed 83 ms step [exe, measured] (pop3-rev-analysis.md
   "Reference" / "Turns and timing", not the wiki's "about 8"), matching our own one-tick-per-turn at
   `TICKS_PER_SECOND = 12` (units.md, `game_core::time`) - no rescaling needed. `EVERY`'s per-tribe phase is
-  confirmed and implemented (see the interpreter item above); message timeouts and flyby times are turns too,
-  only `SET_TIMER_GOING` takes seconds (ai-scripts.md "Turn rate").
+  confirmed and implemented (see the interpreter item above); message timeouts are turns too,
+  only `SET_TIMER_GOING` takes seconds (ai-scripts.md "Turn rate"). **Correction (2026-11-24)**: flyby keyframe times
+  are NOT turns but tenths of a second (pop3-rev-analysis.md "Flyby timing") - see the open flyby-timing item below.
+- [ ] Flyby timing (pop3-rev-analysis.md "Flyby timing"): keyframe `start`/`duration` are tenths of a second
+  (1.2 turns each at 12 turns/s), not turns - `game-client` `flyby.rs` reads them as turns (`now.turns_since`), so
+  every flyby plays 17 % too fast. The original converts them to drawn frames at a measured fps clamped to 8..24;
+  keep only the 0.1 s intent (its speed-up above 24 fps is a frame-rate artefact).
 - [x] Flybys: `FLYBY_CREATE_NEW..=FLYBY_START` drives the camera for real now
   (`game_core::ai_script::ScriptEnv::on_flyby` -> `GameMap::active_flyby`, `crates/game-client/src/flyby.rs`
   reads it to pose `CameraRig` and show the "Flyby"/"Cancelled flyby" banner; Space sends

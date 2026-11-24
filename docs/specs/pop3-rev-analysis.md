@@ -167,6 +167,10 @@ so a live measurement may run on it with the addresses translated.
   black and hide every object on them (an enemy firewarrior there is invisible, its fireball shows once over
   explored land); explored cells show everything live. Gameplay is unchanged except: no building on unexplored
   cells, and the player's tribe ignores unexplored trees. See "Fog of war".
+- **The reincarnation site builds itself during the intro** [exe, measured on level 7]: the levelling disc
+  (turns 14-35) converts the starting wildmen as it reaches them, under a widening spiral of 32 sparkles; the
+  stones rise 16 turns each from 256 below to ground level (last one up at turn 68), and the level's flyby may
+  already be orbiting the site meanwhile. See "Reincarnation sites".
 
 ## Turns and timing [exe]
 ```text
@@ -772,10 +776,16 @@ site. The site (tribe+0x911) is on a cell centre; its height is kept at tribe+0x
 - Model: object 30 (the reincarnation stone, objects.md), from the scenery-12 record (`+0xA` = 30). The pillar
   belongs to its tribe; between tribes only the low byte of its model flags differs (3 for blue, 2 for yellow),
   probably the tribe colour (unverified).
-- A new pillar rises out of the ground: it starts 256 below and climbs 16 per step over 8 steps with rock debris
-  (7/0x33) and a sound (0x4A7EB0). So it ends 128 below the ground (256 − 8 × 16), partly buried. Hint, unverified: a
-  stone at full height would probably reach a balloon floating 200 over the site (vehicle table +0xF, "Vehicles"),
-  so it is sunk to stay under one. "delete rs pillars" (7/0x4D) removes them; "move rs pillar" (7/7,
+- A new pillar rises out of the ground [exe, measured]: on its first tick it is put 256 below its own cell's
+  ground and given a 16-tick counter, and every tick (that first one included) it climbs 16, so it stands with
+  its base exactly at ground level after 16 turns (1.33 s). Its first tick also spawns one rock debris burst
+  (7/0x33) and, for every second pillar (a global counter's odd values), sound 0x9F (0x4A7EB0). A second field
+  (`+0x6C`) starts at 256 and drops 32 a turn to 0 over the first 8 turns; what reads it is not traced. Live
+  (level 7): first seen at ground − 240 (the first tick has already climbed), +16 a turn, final height = that
+  cell's ground (128 on flat ground, 127/116/105 for three stones on lower cells). **Correction**: an earlier
+  version of this bullet said "8 steps, ends 128 below the ground, partly buried"; neither the code nor the live
+  heights support that. The sinking reverse (sub-state 2) is 32 turns of −8 with sound 0xC5, then the pillar is
+  deleted. "delete rs pillars" (7/0x4D) removes them; "move rs pillar" (7/7,
   0x50C690) replaces a slot's pillar, with an explosion at the old and the new place - see "Build/rebuild
   ritual" below for what actually fires it on an ordinary level load.
 - Measured on a level (live memory): blue and yellow sites, 8 pillars each at exactly these offsets and angles;
@@ -819,6 +829,16 @@ travel time on top of the one-per-turn firing order (the octagon's 8 slots sit a
 centre, 3 and 2.8 cells, so flight time alternates between two close values) - nothing polls per turn to place
 a pillar; the whole staggered "rebuild" is a side effect of firing 8 ordinary projectiles one turn apart.
 
+Measured again on level 7 (live memory, every turn, 2026-11-24): same pattern one turn later - the levelling runs
+turns 14-35 (the same 21 turns as level 1), the pillars appear at turns 38, 41, 42, 45, 46, 49, 50, 53 (slot 7
+first, gaps 3/1 again), each rises for 16 turns (above), so the last stone (slot 0) stands at turn 68. When the
+last pillar appears (turn 53) the tribe's site flags (`tribe+0x93D`) gain bit 0x2, "site built": the shaman's
+build order sets it when it has fired its last pillar shot (bit 0 is the levelling's busy bit, set 14-35). Its
+only use: a "remove the player's shaman" mode (tribe bit 0x80000, applied to the human tribe only) deletes the
+shaman at once if her site is built, else as soon as her build order ends - so she always finishes the site
+first. What turns that mode on is a level/game option not found (it is never set on a normal campaign level). The other tribe on that level (yellow) runs its own levelling in the same
+turns. Recipe to load a given campaign level live: pop3-rev `docs/cheat.md` "Level 7 RC, live".
+
 A second, rarer path (0x41C140/0x41C520) rebuilds all 8 pillars in one uninterrupted loop with no stagger at
 all, gated by two flags not observed set on any ordinary level load - plausibly a scripted mid-level
 reset/relocation path distinct from the first build.
@@ -859,6 +879,55 @@ Over about 21 turns (1.75 s) a disc grows by 160 world units per turn up to 2560
 set to the site height. Inside it, enemy braves and specialists panic and lose half their `LIFE`, wildmen are
 converted (when the effect's flag 1 is set), trees catch fire and swamps are removed; 32 sparkles orbit the site.
 Spawned by the build/rebuild ritual's own state 2, above.
+
+Per turn, in detail [exe, measured on level 7]:
+
+```text
+first tick:  32 "sparkles" (7/0x3C) at angles 0, 64, ..., 1984 (of 2048) on a circle of radius 320
+             around the site, each tied to the levelling effect (they die with it)
+every tick:  cells = the cells within the levelling radius R (R grows 160 a turn, capped at 2560);
+             a cell is tested at its corner (its half-cell map index rounded down to even), so with the
+             site on a cell centre the cells on the + side are reached a few turns before the − side
+             for each such cell: set its height to the site height, then for each thing on it:
+               wildman (tribe neutral, type 1), if flag 1:  replace it by a brave of the site's tribe
+                                                           + a "conversion flash" (7/0x3A, 8 turns)
+               enemy person (type 2..6, other tribe, not already state 26), if flag 2:
+                                                           person state 26 + half its type's LIFE as damage
+               tree whose scenery flags have 0x20:         a burn cell (7/0x05)
+               effect 7/0x12:                              deleted
+             each sparkle steps 91/2048 of a turn round the site (16°) and 160 outward (ring radius
+             capped at 2048, 4 cells), and drops one "small sparkle" (7/0x3D) where it stands
+after 20 ring steps: clear the busy bit (tribe+0x93D bit 0); the effect and its 32 sparkles go
+```
+
+So the visible effect is a spiral: a ring of 32 sparkles (0.6 cell out at first) that turns slowly and widens by
+160 a turn to 4 cells in 11 turns, then turns in place until the end, each sparkle leaving a trail of small sparkles that
+last 6 turns. Measured on level 7: sparkles alive turns 15-35 (20 turns), 32 small sparkles a turn from 15 to 35
+on circles of radius 0, 320, 480, ..., 1920, then 2048 from turn 27 on (world units, 512 per cell).
+
+Look: both are camera-facing hfx billboards (draw kind 1). Sparkle: animation 0x508, 16 frames (draw class 0x2C);
+small sparkle: animation 0x50E, 6 frames (draw class 0x2E), 6-turn life, started at its parent's height and
+angle. Frames (`hfx0-0.dat`, alpha sprites in gold, tint 2): the sparkle is hfx 1288-1303, a 16-frame twinkle
+(a big four-point flare shrinking to a dot, then growing back); the small sparkle plays only 1294-1299, the dot
+part of the same cycle. Both loop, one frame per drawn frame (not per turn), for their whole life.
+
+**Wildmen into braves** [measured]: the conversion is not instant, and it is this levelling effect, not the
+pillars, that does it. On level 7 the player starts with the shaman alone and 6 wildmen standing 1 to 1.5 cells
+from the site; they turn into braves at turns 17 (2), 20 (3) and 21 (1), 3 to 7 turns into the 21-turn
+levelling, while the sparkle ring is passing them (+x side first, the corner rounding above). Each one is a
+new unit (new id) in person state 10 for one turn, then the standing-idle loop (person state 19); the wildman
+disappears the same turn. Nothing converts during the pillar rise (turns 38-68).
+
+**Flyby overlap** [measured, level 7]: the build does NOT finish before the level's intro flyby. On level 7 the
+flyby is started by the yellow AI script (cpscr021) on its first 8-turn tick, with no turn gate (unlike
+level 1's `INT_GAME_TURN > 70`, see "Camera flyby"); its first keyframe is the site itself (map index 198,228, i.e. cell 99,114, the
+site's own cell). The camera starts moving at turn 12, before the levelling (turn 14). It orbits the site
+(focus fixed, yaw turning from 256 to about 1290) through the whole levelling and pillar rise, and leaves for
+the second keyframe at turn 63, while pillars 0-2 are still rising (they finish at 64, 65 and 68). It returns
+to the site about turn 300. On level 1 the build (pillars done at about 67) does finish before the flyby
+(turn 72). Keyframe times are tenths of a second played in drawn frames (see "Flyby timing"): this run
+calibrated 23 fps (every time ×2.3, read live from the event table) but then drew about 21 frames a second,
+so keyframe time `s` landed at turn ≈ 11 + 1.29 × `s`.
 
 ## Spells [exe]
 Traced from the disassembly for all 21 spell ids. Values: "file" is `constant.dat` (wins at run time), "exe" the
@@ -2672,6 +2741,25 @@ derivation: pop3-rev `docs/camera.md` "D3D axis caveat for YAW - RESOLVED for th
 
 Not yet done, see TODO.md "Camera flyby state": solve the raw-pitch candidate's transform to degrees, and find
 what actually drives the unidentified render parameter.
+
+### Flyby timing [exe, measured]
+A flyby's keyframe `start` and `duration` values are **tenths of a second**, not turns, and the flyby runs on
+drawn frames, not on the simulation:
+
+```text
+FLYBY_START (0x448EE0):   calibration = 6 drawn frames
+each drawn frame (0x449320, from draw_main; skipped while paused):
+  while calibrating:      f = (f + frames drawn in the last second) / 2
+  when it ends:           fps = clamp(f, 8, 24); clock = 0
+                          every keyframe: start = start * fps / 10, duration = duration * fps / 10
+  then:                   clock += 1 per drawn frame; a keyframe starts when clock >= its start
+```
+
+- At 8..24 fps a script unit is 0.1 s whatever the frame rate (1.2 turns). Above 24 fps the scale stays ×2.4
+  while frames come faster, so the original's flybys play faster than written on a fast machine (×2.5 at 60 fps).
+- The script's own gating (`EVERY`, `INT_GAME_TURN > 70`) stays in turns; only the keyframe times are in tenths.
+- Measured (level 7, headless): table read live after calibration: 1→2, 15→34, 40→92, 45→103, 70→161,
+  180→414 (×2.3, 23 fps); the drawn rate then was about 21 fps, so keyframes landed at 1.29 turns per unit.
 
 ### Flyby cancel [exe, measured]
 What the camera does when the player interrupts a flyby (pressing the interrupt key, confirmed live as Space
@@ -6163,8 +6251,21 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
 - Reincarnation site **construction**: ours places all 8 stones at once, instantly, with no rise and no
   stagger. The original's shaman walks to the site, settles 12 turns, flattens the ground (~21 turns), then
   fires the 8 pillars one per turn in slot order 7..0, each landing 1-3 turns after it's fired, every single
-  stone also rising out of the ground over 8 steps on arrival - see "Build/rebuild ritual" above. The same
+  stone also rising out of the ground on arrival, from 256 below to exactly ground level, +16 a turn for 16 turns
+  (1.33 s; ours: `RISE_DEPTH` 1.2 cells, `RISE_SECS` 2 s, guessed) - see "Build/rebuild ritual" above. The same
   sequence runs again on a relocation (new shaman, new last-death anchor), not just a one-time level-load step.
+- Wildmen at the site (`ReincarnationSite::welcomes`, ours: converted at level start, all at once, no
+  animation, any wildman within the ring range): the original converts them during the levelling, as the
+  growing disc reaches their cell, each with a conversion flash - on level 7, 3 to 7 turns into it. Any
+  wildman inside the 5-cell disc qualifies, not just the ring of cells (see "Levelling").
+- The levelling's sparkles: a spiral of 32 sparkles widening 160 a turn to 4 cells, each leaving 6-turn small
+  sparkles (see "Levelling"); ours draws none.
+- The intro flyby can start before the build ends (level 7: flyby from turn 12, last stone up at 68), orbiting
+  the site while it builds; ours locks input during the build (`sites::site_build_active`) and runs the flyby
+  separately - check the two don't fight over the camera.
+- Flyby keyframe times (game-client `flyby.rs`, ours: `start`/`duration` in turns, `now.turns_since`): the
+  original reads them as tenths of a second (1.2 turns each, "Flyby timing"), so ours plays every flyby 17 %
+  too fast. The original's own speed-up above 24 fps is a frame-rate artefact, not worth copying.
 - spells.md, the original spells:
   - every spell flies from the shaman as a shot first (6 turns after the cast starts, 1000 or 1400 units per
     turn) and takes effect on arrival; burn, blast, lightning, whirlwind and insects can be deflected by a
@@ -6371,6 +6472,9 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   player's tribe ignores undiscovered trees; no effect on spotting, targeting or combat.
 
 ## Open questions
+- Reincarnation site ("Build/rebuild ritual", "Levelling"): what reads a rising pillar's `+0x6C` (256 → 0 over 8
+  turns); what turns on the "remove the player's shaman" mode (level option byte 0x89B7A3 bit 0x2, only ever
+  filled by block copies).
 - Fog of war ("Fog of war"): which level is the fog-exempt "level 99" (`0x89A315`); whether the player's own
   people auto-attack enemies standing in unexplored cells (no fog check exists in the code, not tried live);
   whether hidden units can be clicked/selected; whether the D3D sky draws from the dimmed palette entries.
@@ -6741,7 +6845,9 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4E93F0 | add a push to a velocity, scaled by the slope along it |
 | 0x4EBC20 | slope vector at a position (ground sliding) |
 | 0x4503F0 | horizontal distance between two positions (wrapping, square root) |
-| 0x50C780, 0x50C840 | "prepare rs land" (7/8): init (site height at tribe+0x915), levelling per turn |
+| 0x50C780, 0x50C840 | "prepare rs land" (7/8): init (site height at tribe+0x915), levelling per turn (disc, conversions, sparkle spiral, "Levelling") |
+| 0x4A7EB0 | reincarnation pillar rise/sink: 16 turns of +16 from ground − 256 to ground; sink 32 turns of −8 then delete |
+| 0x4D7FD0 | replace a unit by a new one of another tribe/type (used for the levelling's wildman → brave) |
 | 0x41C140, 0x41C520 | rarer, all-8-pillars-at-once site rebuild path (flag-gated, not the ordinary level-load path - see 0x419880/0x433A10 above), pillars from 0x5A9F10 |
 | 0x468E1C-0x4694F2 | in `draw_polygons`: health bar, low health, shield, bloodlust, hypnosis and selection markers |
 | 0x525450 | health bar of a person |
